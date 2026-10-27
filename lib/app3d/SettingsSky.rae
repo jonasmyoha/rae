@@ -29,11 +29,14 @@ func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
-# The sun's illuminance at its highest, in lux. 20,000 lux is the walker
-# scenes' long-standing balance of sun to sky and ambient (their old sun of 1
-# at the reference exposure, LightUnits); a real clear noon is about 100,000
-# lux, with the sky as it is (docs/physical-light-units.md).
-const settingsSunNoonLux: Float = 20000.0
+# The sun's illuminance at its highest, in lux: a real clear noon (chosen
+# 2026-10-28 over the old balance of 20,000 lux and
+# the tree lab's 66,000; looks-development lighting/walkerSun.html). With the
+# sky in real units too, the sunlit ground is about 5 times brighter than
+# the shade, as outdoors; the automatic exposure brings it to the screen,
+# with the walker's -0.5 EV compensation (WalkerApp) so noon's sunlit sand
+# does not wash out (docs/physical-light-units.md).
+const settingsSunNoonLux: Float = 100000.0
 
 # The sun's light now: its colour times its illuminance (lux)
 func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
