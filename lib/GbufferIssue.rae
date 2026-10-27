@@ -1,0 +1,195 @@
+# GbufferIssue — the G-buffer pass's low-level draw issuing (split from
+# Gbuffer for the 1000-line cap): whether a frame's pass is open, the one
+# shared tail every G-buffer draw funnels through (upload DrawU records,
+# bind, one instanced DrawIndexed), the pass's draw counter, and the mesh
+# store's lookups the draws use. Gbuffer owns the GbufferCache type, the
+# pass's begin and end and the app-facing draw calls.
+open FoliagePipeline
+open GbufferRecord
+open ecs/Entity  # #793: World3d render path reads entities/components
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open MeshStore
+open GbufferResources
+open Gbuffer
+
+func gbufferFrameActive(cache: view GbufferCache) ret Bool {
+  unsafe {
+    ret cache.pass is not webgpuNull()
+  }
+}
+
+# Shared tail of every G-buffer draw (#502/#503): upload `count` DrawU records
+# (already at `records`) into the draws storage buffer at slot `base`, bind the
+# given pipeline / bind group / mesh buffers, and issue one instanced
+# DrawIndexed. Every draw — static, skinned, instanced — funnels through here,
+# so the whole encoding lives in Rae over the generated bindings, no C shim.
+func gbIssueInstanced(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  vbuf: copy Ptr
+  ibuf: copy Ptr
+  icount: copy Int
+  base: copy Int
+  count: copy Int
+  records: copy Ptr
+) {
+  unsafe {
+    gbIssueInstancedRange(
+      cache: cache
+      resources: resources
+      pipeline: pipeline
+      bind: bind
+      vbuf: vbuf
+      ibuf: ibuf
+      firstIndex: 0
+      icount: icount
+      base: base
+      count: count
+      records: records
+    )
+  }
+}
+
+# gbIssueInstanced for `icount` indices from `firstIndex` on.
+func gbIssueInstancedRange(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  vbuf: copy Ptr
+  ibuf: copy Ptr
+  firstIndex: copy Int
+  icount: copy Int
+  base: copy Int
+  count: copy Int
+  records: copy Ptr
+) {
+  unsafe {
+    let strideBytes: Int = instanceRecordFloats * 4
+    if not writeBufferFromPtr(
+      resources: resources
+      id: cache.draws
+      offset: base * strideBytes
+      data: records
+      size: count * strideBytes
+    ) {
+      ret
+    }
+    if recordDrawIndexedRangeInPass(
+      resources: resources
+      pass: cache.pass
+      pipeline: pipeline
+      bindGroup: bind
+      vertexBuffer: vbuf
+      indexBuffer: ibuf
+      firstIndex: firstIndex
+      indexCount: icount
+      instanceCount: count
+      firstInstance: base
+    ) {
+      gbAdvanceDraws(cache: cache, count: count)
+    }
+  }
+}
+
+# Instanced G-buffer draw (grass epic #485, ported to Rae #502): one draw for
+# `count` copies of a mesh. `records` is `count` * instanceRecordFloats fully
+# built DrawU entries (model, prevModel, colour, packed params), assembled in
+# Rae by swayModel + packInstanceRecord below. Rae uploads the records straight
+# into the draws storage buffer and issues one instanced DrawIndexed on the
+# static pipeline — no C shim. A skinned draw may have left its pipeline bound,
+# so gbIssueInstanced re-binds the static one.
+func drawRecords(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: copy Int
+  records: copy Ptr
+  count: copy Int
+) pub {
+  unsafe {
+    if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
+      ret
+    }
+    let base: Int = gbDrawCount(cache: cache)
+    let remaining: Int = gbufferMaxDraws - base
+    var n: Int = count
+    if n > remaining {
+      n = remaining
+    }
+    if n <= 0 {
+      ret
+    }
+    gbIssueInstanced(
+      cache: cache
+      resources: resources
+      pipeline: meshDrawPipeline(cache: cache, mesh: mesh)
+      bind: meshDrawBind(cache: cache, mesh: mesh)
+      vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
+      ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
+      icount: gbMeshIcount(cache: cache, mesh: mesh)
+      base: base
+      count: n
+      records: records
+    )
+  }
+}
+
+# The draws-buffer cursor (#906, was C's gb_draw_count): every G-buffer draw
+# — static, skinned, instanced, terrain, sprite, grass, transparent — writes
+# its DrawU records at the cursor and advances it; begin() resets it.
+func gbDrawCount(cache: view GbufferCache) ret Int {
+  ret cache.drawCount
+}
+
+func gbAdvanceDraws(cache: mod GbufferCache, count: copy Int) {
+  if count <= 0 {
+    ret
+  }
+  cache.drawCount = cache.drawCount + count
+  if cache.drawCount > gbufferMaxDraws {
+    cache.drawCount = gbufferMaxDraws
+  }
+}
+
+# #905: mesh lookups go to the cache's MeshStore. "Ready to draw" also needs
+# the geometry pass open (the C rae_gb_mesh_ready folded that in).
+func gbMeshReady(cache: view GbufferCache, resources: view GpuResources, mesh: copy Int) ret Int {
+  if not gbufferFrameActive(cache: cache) {
+    ret 0
+  }
+  if meshStoreReady(store: cache.meshes, resources: resources, mesh: mesh) {
+    ret 1
+  }
+  ret 0
+}
+
+func gbMeshVbuf(
+  cache: view GbufferCache
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    ret meshStoreVbufHandle(store: cache.meshes, resources: resources, mesh: mesh)
+  }
+}
+
+func gbMeshIbuf(
+  cache: view GbufferCache
+  resources: view GpuResources
+  mesh: copy Int
+) unsafe ret Ptr {
+  unsafe {
+    ret meshStoreIbufHandle(store: cache.meshes, resources: resources, mesh: mesh)
+  }
+}
+
+func gbMeshIcount(cache: view GbufferCache, mesh: copy Int) ret Int {
+  ret meshStoreIndexCount(store: cache.meshes, mesh: mesh)
+}
