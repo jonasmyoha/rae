@@ -1,0 +1,145 @@
+# treeGen/LimbJoin — a limb that carries its parent on (starts at the
+# parent's tip, going the parent's way) is not a second tube: it is joined
+# onto the parent, so the two are ONE line of points and one tube. Two
+# tubes there showed a seam: the parent's tip cap, a step in thickness and
+# the bark picture starting again (step 6). A real joint
+# stays only where a limb leaves its parent at an angle. Written new.
+import Math
+import Vec3
+open treeGen/Skeleton
+
+# The joined limbs, and for every limb before the join its index after it
+# (a joined limb's is the limb it became part of)
+type JoinedLimbs {
+  limbs: List(Limb)
+  index: List(Int)
+}
+
+# How far a carrying-on limb may start from its parent's tip (m), at least,
+# and as a part of the tip's radius
+const joinGapMin: Float = 0.05
+
+const joinGapRadii: Float = 1.5
+
+# How far a carrying-on limb may turn from its parent's way (radians)
+const joinTurnMax: Float = 0.45
+
+func endDirection(limb: view Limb) ret Vec3 {
+  let last: Int = limb.points.length - 1
+  ret Vec3.vnorm(
+    a: Vec3.vsub(
+      a: limb.points.copyAtDefault(index: last)
+      b: limb.points.copyAtDefault(index: Math.max(a: 0, b: last - 1))
+    )
+  )
+}
+
+func startDirection(limb: view Limb) ret Vec3 {
+  ret Vec3.vnorm(
+    a: Vec3.vsub(
+      a: limb.points.copyAtDefault(index: Math.min(a: 1, b: limb.points.length - 1))
+      b: limb.points.copyAtDefault(index: 0)
+    )
+  )
+}
+
+# The limb `index` was joined into, following joins of joins
+func joinRoot(owner: view List(Int), index: view Int) ret Int {
+  var root: Int = index
+  loop var guard: Int = 0, guard < owner.length, ++guard {
+    let next: Int = owner.copyAtDefault(index: root)
+    if next is root {
+      ret root
+    }
+    root = next
+  }
+  ret root
+}
+
+# The child of `index` that carries it on, or -1: it starts at the tip and
+# goes the tip's way (the best aligned, if more than one)
+func carryingOn(limbs: view List(Limb), owner: view List(Int), index: view Int) ret Int {
+  let limb: Limb = limbs.copyAtDefault(index: index)
+  let tip: Vec3 = limb.points.copyAtDefault(index: limb.points.length - 1)
+  let gap: Float = Math.max(
+    a: joinGapMin
+    b: joinGapRadii * limb.radii.copyAtDefault(index: limb.radii.length - 1)
+  )
+  let way: Vec3 = endDirection(limb: limb)
+  var best: Int = -1
+  var bestAlign: Float = Math.cos(x: joinTurnMax)
+  loop var j: Int = 0, j < limbs.length, ++j {
+    let child: Limb = limbs.copyAtDefault(index: j)
+    if j is index or owner.copyAtDefault(index: j) is not j or child.parent < 0 {
+      continue
+    }
+    if joinRoot(owner: owner, index: child.parent) is not index or child.points.length < 2 {
+      continue
+    }
+    if Vec3.vlen(a: Vec3.vsub(a: child.points.copyAtDefault(index: 0), b: tip)) > gap {
+      continue
+    }
+    let align: Float = Vec3.vdot(a: way, b: startDirection(limb: child))
+    if align > bestAlign {
+      bestAlign = align
+      best = j
+    }
+  }
+  ret best
+}
+
+# Every limb that carries its parent on, joined onto it
+func joinContinuations(limbs: view List(Limb)) ret JoinedLimbs {
+  var work: List(Limb) = limbs
+  var owner: List(Int) = List.create(Int, cap: limbs.length)
+  loop var i: Int = 0, i < limbs.length, ++i {
+    owner.add(value: i)
+  }
+  loop var i: Int = 0, i < work.length, ++i {
+    if owner.copyAtDefault(index: i) is not i {
+      continue
+    }
+    var next: Int = carryingOn(limbs: work, owner: owner, index: i)
+    loop next >= 0 {
+      var joined: Limb = work.copyAtDefault(index: i)
+      let child: Limb = work.copyAtDefault(index: next)
+      var radius: Float = joined.radii.copyAtDefault(index: joined.radii.length - 1)
+      loop var k: Int = 1, k < child.points.length, ++k {
+        joined.points.add(value: child.points.copyAtDefault(index: k))
+        # never thicker than the parent's tip
+        radius = Math.min(a: radius, b: child.radii.copyAtDefault(index: k))
+        joined.radii.add(value: radius)
+      }
+      work.set(index: i, value: joined)
+      owner.set(index: next, value: i)
+      next = carryingOn(limbs: work, owner: owner, index: i)
+    }
+  }
+  # the kept limbs, renumbered; a joined one's index is its root's
+  var index: List(Int) = List.create(Int, cap: limbs.length)
+  var kept: Int = 0
+  loop var i: Int = 0, i < work.length, ++i {
+    if owner.copyAtDefault(index: i) is i {
+      index.add(value: kept)
+      kept = kept + 1
+    } else {
+      index.add(value: -1)
+    }
+  }
+  loop var i: Int = 0, i < work.length, ++i {
+    if index.copyAtDefault(index: i) < 0 {
+      index.set(index: i, value: index.copyAtDefault(index: joinRoot(owner: owner, index: i)))
+    }
+  }
+  var result: List(Limb) = List.create(Limb, cap: kept)
+  loop var i: Int = 0, i < work.length, ++i {
+    if owner.copyAtDefault(index: i) is i {
+      var limb: Limb = work.copyAtDefault(index: i)
+      if limb.parent >= 0 {
+        limb.parent = index.copyAtDefault(index: limb.parent)
+      }
+      result.add(value: limb)
+    }
+  }
+  ret JoinedLimbs { limbs: own result, index: own index }
+}

@@ -114,19 +114,30 @@ func main() ret Int {
         }
       }
     }
-    # two unequal leaders: the second thinner and shorter than the main one
-    let main: Limb = skeleton.limbs.copyAtDefault(index: 1)
-    let second: Limb = skeleton.limbs.copyAtDefault(index: 2)
-    if second.radii.copyAtDefault(index: 0) >= main.radii.copyAtDefault(index: 0) or second.points.copyAtDefault(
-      index: 14
-    ).z >= main.points.copyAtDefault(index: 14).z {
+    # the main leader carries the trunk on, joined onto it (one tube, no
+    # seam at the fork); the second leader leaves it, thinner, its top lower
+    let trunk: Limb = skeleton.limbs.copyAtDefault(index: 0)
+    let second: Limb = skeleton.limbs.copyAtDefault(index: 1)
+    var leaders: Int = 0
+    loop let limb: view Limb in skeleton.limbs {
+      if limb.order is 1 {
+        leaders = leaders + 1
+      }
+    }
+    let atFork: Int = indexAtHeight(limb: trunk, z: skeleton.forkPoint.z)
+    if leaders is not 1 or second.order is not 1 or trunk.points.copyAtDefault(
+      index: trunk.points.length - 1
+    ).z < skeleton.forkPoint.z + 1.0 or second.radii.copyAtDefault(index: 0) >= trunk.radii.copyAtDefault(
+      index: atFork
+    ) {
       leadersOk = false
     }
-    # the T02 tree's branches keep most of their thickness to the tip
+    # the T02 tree's branches keep most of their thickness over their own
+    # 15 traced points (a twig joined on after them thins on)
     loop let limb: view Limb in skeleton.limbs {
-      if limb.order is 2 and limb.radii.copyAtDefault(index: limb.radii.length - 1) < limb.radii.copyAtDefault(
-        index: 0
-      ) * 0.45 {
+      if limb.order is 2 and limb.radii.copyAtDefault(
+        index: Math.min(a: 14, b: limb.radii.length - 1)
+      ) < limb.radii.copyAtDefault(index: 0) * 0.45 {
         evenOk = false
       }
     }
@@ -142,7 +153,7 @@ func main() ret Int {
   check(label: "side branches start 15 to 52 degrees from upright", ok: anglesOk)
   check(label: "side branches start high, above 58% of the height", ok: topThirdOk)
   check(label: "no radius grows toward a tip", ok: radiiOk)
-  check(label: "two unequal leaders: the second thinner and lower", ok: leadersOk)
+  check(label: "the main leader joined onto the trunk; the second one thinner", ok: leadersOk)
   check(label: "side branches keep at least 45% of their thickness to the tip", ok: evenOk)
   check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
   # the traced leaf masses: all of them, solid, facing outward

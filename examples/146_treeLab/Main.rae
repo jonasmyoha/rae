@@ -22,6 +22,7 @@
 #                   RAE_TREELAB_ROW=1 with another camera)
 #   fork            the first grown tree's fork and branch joints up close
 #                   (6 m, looking up), with the row
+#   tracedFork      the same view of the traced tree
 #
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
@@ -98,6 +99,11 @@ func labCamera(name: view String) ret Camera3d {
     # 11 m apart along x), all in one frame from 32 m
     camera.position = Vec3.create(x: 16.5, y: -32.0, z: 1.6)
     camera.target = Vec3.create(x: 16.5, y: 0.0, z: 6.0)
+    ret camera
+  }
+  if name is "tracedFork" {
+    camera.position = Vec3.create(x: 1.0, y: -5.5, z: 6.5)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 9.5)
     ret camera
   }
   if name is "fork" {
