@@ -1,4 +1,5 @@
 open water/FftSurfaceCache
+open LightUnits
 open WorldBiome
 # WaterSystem — the GPU side of the water package (#830). Owned by the app as a
 # resource (`app.waterSystem: WaterSystem`, the #822 convention), it steps wave
@@ -494,7 +495,18 @@ func uploadWaterUniform(
         zenith = radiance(sky: sky, dir: zenithDirection)
         horizon = radiance(sky: sky, dir: horizonDirection)
       }
+      if sky.kind is SkyKind.stylised {
+        # the painted colours are display colours (relative units)
+        zenith = fromRelativeLight(value: zenith)
+        horizon = fromRelativeLight(value: horizon)
+      }
     }
+    # in real units (the sun in lux, the sky in cd/m2), exposed by the
+    # camera as the lighting pass does (LightUnits)
+    let scale: Float = exposureScale(ev100: light.ev100)
+    sunColor = Vec3.vscale(a: sunColor, s: scale)
+    zenith = Vec3.vscale(a: zenith, s: scale)
+    horizon = Vec3.vscale(a: horizon, s: scale)
     put4(
       uniform: waterSystem.uniform
       base: 0

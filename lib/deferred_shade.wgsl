@@ -284,9 +284,9 @@ fn mistSkyColor(dir: vec3<f32>) -> vec3<f32> {
   let kind = L.skyParams.x;
   let toSun = normalize(-L.sunDir.xyz);
   var c = L.clearColor.rgb;
-  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }
+  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y) * L.camPos.w; }
   if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
-  if (kind > 3.5) { c = skyHosek(dir, toSun); }
+  if (kind > 3.5) { c = skyHosek(dir, toSun) * L.camPos.w; }
   return c * L.skyParams.z;
 }
 // Height mist (RendererMist): its density falls off exponentially with

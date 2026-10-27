@@ -7,6 +7,7 @@
 # IDs are retained in World3dAsset for animation and reload-stable lookup.
 import Json
 open Scene3d
+open LightUnits
 open Vec3
 open ui/Scene
 open ecs/Entity
@@ -436,6 +437,13 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         ambGround: readVec3Field(doc: doc, object: value, key: "ambGround")
         exposure: exposure
         clearColor: readVec3Field(doc: doc, object: value, key: "clearColor")
+        # the camera exposure (LightUnits); the sun in lux, the ambient in cd/m2
+        ev100: readNumberField(
+          doc: doc
+          object: value
+          key: "ev100"
+          fallback: referenceEv100
+        )
       }
     }
     i = i + 1

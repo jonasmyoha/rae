@@ -29,6 +29,7 @@
 import Math
 import Vec3
 open SkyHosek
+open LightUnits
 open Scene3d
 
 enum SkyKind {
@@ -210,15 +211,15 @@ func createSkyHosek(
     # SH9 irradiance lands (#401), so a Hosek sky is currently lit by the same
     # authored ambient as any other while its BACKGROUND is the fitted model.
     # Leaving them zero would light the scene from nothing.
-    ambSky: Vec3.create(x: 0.32, y: 0.45, z: 0.62)
+    ambSky: Vec3.create(x: 6400.0, y: 9000.0, z: 12400.0)
     ambientSaturation: 1.0
-    ambGround: Vec3.create(x: 0.18, y: 0.16, z: 0.13)
+    ambGround: Vec3.create(x: 3600.0, y: 3200.0, z: 2600.0)
     clearColor: Vec3.create(x: 0.32, y: 0.45, z: 0.62)
     turbidity: turbidity
     sunAngularRadius: 0.00465
     sunDiscIntensity: 12.0
     groundAlbedo: groundAlbedo
-    hosek: hosekInSkyUnits(hosek: createHosekSky(
+    hosek: hosekInCd(hosek: createHosekSky(
       data: data
       turbidity: turbidity
       albedo: groundAlbedo
@@ -230,35 +231,26 @@ func createSkyHosek(
     # a pale haze reads as distance instead, and meets the sky's bottom edge
     # without a seam.
     zenithColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    horizonColor: Vec3.create(x: 0.52, y: 0.56, z: 0.60)
+    # in cd/m2, like the fitted sky it fades to
+    horizonColor: Vec3.create(x: 10400.0, y: 11200.0, z: 12000.0)
     bands: 0.0
   }
 }
 
-# The one unit conversion between real sky luminance and this renderer's
-# light units (which are set so an exposure of 1 looks right): our units per
-# kcd/m2 (thousand candela per square metre). Both sky models go through it,
-# so they agree because they share units, not because one copies the other.
-# It is the Preetham sky's long-standing 0.05; sky_hosek.wgsl's skyPreetham
-# carries the same number (keep them equal). The renderer's move to real light
-# units and an exposure stage (QUEUE) replaces it with a camera exposure.
-const skyUnitsPerKcd: Float = 0.05
-
 # The Hosek-Wilkie RGB dataset gives radiance in W/(m2 sr) per channel; at
-# 683 lm/W that is 0.683 kcd/m2 per unit. Measured against the Preetham sky
-# (turbidity 3, sun 14 to 79 degrees) its mean luminance comes out within
-# 15-20% of Preetham's at every sun height, so the two do share units.
-const hosekKcdPerUnit: Float = 0.683
+# 683 lm/W that is 683 cd/m2 per unit (LightUnits: the sky in cd/m2). Measured
+# against the Preetham sky (turbidity 3, sun 14 to 79 degrees) its mean
+# luminance comes out within 15-20% of Preetham's at every sun height, so the
+# two models do agree in these units. Left in its own units it was 15 to 60
+# times brighter than the Preetham sky (example 143 came out white).
+const hosekCdPerUnit: Float = 683.0
 
-# A Hosek-Wilkie sky in this renderer's units (skyUnitsPerKcd). Left in its
-# own units it was 15 to 60 times brighter than the Preetham sky: the sky came
-# out white, and so did the mist that takes its colour from it (example 143).
-func hosekInSkyUnits(hosek: view HosekSky) ret HosekSky {
-  let scale: Float = hosekKcdPerUnit * skyUnitsPerKcd
+# A Hosek-Wilkie sky in cd/m2
+func hosekInCd(hosek: view HosekSky) ret HosekSky {
   var scaled: HosekSky = hosek
-  scaled.r.radiance = hosek.r.radiance * scale
-  scaled.g.radiance = hosek.g.radiance * scale
-  scaled.b.radiance = hosek.b.radiance * scale
+  scaled.r.radiance = hosek.r.radiance * hosekCdPerUnit
+  scaled.g.radiance = hosek.g.radiance * hosekCdPerUnit
+  scaled.b.radiance = hosek.b.radiance * hosekCdPerUnit
   ret scaled
 }
 
@@ -309,9 +301,9 @@ func createSkyProcedural(
     # Unused by this kind, but a Sky is one type: leaving them at zero
     # would make a mis-dispatch render black rather than merely wrong,
     # and black is harder to trace than "the old ambient".
-    ambSky: Vec3.create(x: 0.25, y: 0.30, z: 0.40)
+    ambSky: Vec3.create(x: 5000.0, y: 6000.0, z: 8000.0)
     ambientSaturation: 1.0
-    ambGround: Vec3.create(x: 0.12, y: 0.10, z: 0.09)
+    ambGround: Vec3.create(x: 2400.0, y: 2000.0, z: 1800.0)
     clearColor: Vec3.create(x: 0.02, y: 0.02, z: 0.03)
     turbidity: turbidity
     # The real sun subtends about 0.53 degrees; this is its radius.
@@ -377,7 +369,9 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
       ambGround: sky.horizonColor
       normal: normal
     )
-    ret Vec3.vscale(a: blended, s: sky.exposure)
+    # the painted colours are display colours (relative units): as light, in
+    # cd/m2
+    ret Vec3.vscale(a: fromRelativeLight(value: blended), s: sky.exposure)
   }
   var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, normal: normal)
   if sky.kind is SkyKind.none {
@@ -392,7 +386,9 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
   ret Vec3.vscale(a: c, s: sky.exposure)
 }
 
-# What the camera sees looking along `dir`.
+# What the camera sees looking along `dir`: for the physical models in
+# cd/m2 (LightUnits), for the painted and clear-colour skies their display
+# colours, as the background shows them.
 #
 # For `none` this is the clear colour — which is what the lighting pass
 # already returns at far depth, so the background is unchanged too.
@@ -597,8 +593,8 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) 
 
   # cd/m^2 down to something a renderer's exposure expects. Purely a unit
   # choice; the shape of the sky is above.
-  # Preetham's zenith luminance is in kcd/m2
-  ret xyYToLinearRgb(x: zenithX * fx, y: zenithYc * fz, bigY: zenithY * fy * skyUnitsPerKcd)
+  # Preetham's zenith luminance is in kcd/m2: the result is in cd/m2
+  ret xyYToLinearRgb(x: zenithX * fx, y: zenithYc * fz, bigY: zenithY * fy * 1000.0)
 }
 
 # ----- time of day ----------------------------------------------------

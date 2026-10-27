@@ -16,6 +16,7 @@ open Gbuffer
 open Scene3d
 open Vec3
 open Sky
+open LightUnits
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/GpuResources
@@ -385,14 +386,25 @@ func uploadSceneLight(
 ) ret Bool {
   let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  # The light arrives in real units (LightUnits: the sun in lux, the ambient
+  # in cd/m2) and is exposed here, where it is summed: the camera's scale
+  # brings it into the range the lighting pass and the 16-bit HDR targets
+  # hold. The sky models are exposed in the shader with the same scale.
+  let scale: Float = exposureScale(ev100: light.ev100)
   # The night sky's moonlit ambient adds to the sky's own, which fades with the sun
-  let skyC: Vec3 = Vec3.vadd(
-    a: desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
-    b: sky.nightAmbient
+  let skyC: Vec3 = Vec3.vscale(
+    a: Vec3.vadd(
+      a: desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
+      b: sky.nightAmbient
+    )
+    s: scale
   )
-  let gndC: Vec3 = Vec3.vadd(
-    a: desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
-    b: Vec3.vscale(a: sky.nightAmbient, s: 0.5)
+  let gndC: Vec3 = Vec3.vscale(
+    a: Vec3.vadd(
+      a: desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
+      b: Vec3.vscale(a: sky.nightAmbient, s: 0.5)
+    )
+    s: scale
   )
   setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
   setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
@@ -402,9 +414,9 @@ func uploadSceneLight(
     resources: resources
     gbuffer: gbuffer
     camera: camera
-    exposure: light.exposure
+    exposureScale: scale
     sunDir: light.sunDir
-    sunColor: light.sunColor
+    sunColor: Vec3.vscale(a: light.sunColor, s: scale)
     skyAmbient: skyC
     groundAmbient: gndC
     skyKind: kindCode(sky: sky)
