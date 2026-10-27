@@ -9,6 +9,7 @@ import Vec3
 open treeGen/TreeParams
 open treeGen/TracedLimb
 open treeGen/LimbJoin
+open treeGen/BranchDetail
 
 # One limb: the points of its centre line from base to tip, and its radius
 # at each. `parent` is the limb it grows from (-1 for the trunk); `order` is
@@ -377,8 +378,20 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     }
     clumps.add(value: clump)
   }
-  # a hidden twig from each mass's branch to the mass's centre (order 3),
-  # so every mass hangs on wood; the leaves hide it. Twigs are straight and
+  # the wood made to work as a branch does (BranchDetail): parents thinner
+  # after their children, leaders and branches thinning to fine tips, side
+  # branches along them ending in the leaf masses
+  thinAfterChildren(limbs: limbs)
+  taperToTips(limbs: limbs, forkZ: forkPoint.z)
+  capChildren(limbs: limbs)
+  addSideBranches(
+    limbs: limbs
+    clumps: clumps
+    forkZ: forkPoint.z
+    random: random
+  )
+  # a mass that no limb's tip reaches yet gets a twig from its branch
+  # (order 3), so every mass hangs on wood; the leaves hide it. Twigs are straight and
   # start at or below their mass, so they grow up. A twig from a limb's tip
   # going on nearly the limb's way carries the limb on, so it is joined
   # onto the limb (one tube, no seam), once per limb; any other leaves the
@@ -389,7 +402,7 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     extended.add(value: false)
   }
   loop let clump: view TracedClump in clumps {
-    if clump.parent < 0 or clump.parent >= woodCount {
+    if clump.parent < 0 or clump.parent >= woodCount or clumpHasTip(limbs: limbs, clump: clump) {
       continue
     }
     # a mass below its whole limb hangs on the trunk instead, so no twig
@@ -434,12 +447,15 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
       limbs.set(index: parentIndex, value: parent)
       extended.set(index: parentIndex, value: true)
     } else {
+      # from the side, never from the last stretch of the limb, so the wood
+      # does not turn at a point
+      let side: Int = Math.min(a: nearest, b: (0.85 * last.toFloat()).toInt())
       limbs.add(value: twigTo(
         parent: parent
         parentIndex: parentIndex
         target: clump.centre
-        nearest: nearest
-        baseRadius: Math.min(a: parentRadius * 0.6, b: 0.06)
+        nearest: side
+        baseRadius: Math.min(a: parent.radii.copyAtDefault(index: side) * 0.5, b: 0.04)
       ))
     }
   }
@@ -464,7 +480,7 @@ func nearestPointIndex(limb: view Limb, target: view Vec3) ret Int {
 }
 
 # A thin straight twig from point `nearest` of `parent` to `target`,
-# `baseRadius` thick there, thinning to 1.2 cm
+# `baseRadius` thick there, thinning to 8 mm
 func twigTo(
   parent: view Limb
   parentIndex: view Int
@@ -477,7 +493,7 @@ func twigTo(
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
   # never thicker at its end than at its start (a thin parent's twig)
-  let tipRadius: Float = Math.min(a: 0.012, b: baseRadius)
+  let tipRadius: Float = Math.min(a: 0.008, b: baseRadius)
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
     points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))

@@ -1,0 +1,356 @@
+# treeGen/BranchDetail — the wood made to work as a branch does
+# (docs/reference-tree-plan.md step 6: "branches don't work
+# like that, if you think of the idea of a branch"). A branch is the tree
+# again, smaller: it thins all the way to a fine tip, and it splits again
+# into thinner branches along it. At every split the child is clearly
+# thinner than its parent there, the parent goes on past it thinner (it
+# shared its wood), and the child leaves from the side at an angle,
+# outward and up. Here, for a traced or grown skeleton: the parents are
+# thinned after their children, the leaders and branches tapered to fine
+# tips, and two to four straight side branches grown along each, ending
+# inside the leaf masses (one that would end in the open is shortened or
+# left out). Written new.
+import Math
+import Vec3
+open treeGen/TreeParams
+open treeGen/TracedLimb
+open treeGen/Skeleton
+
+# A side branch's radius at its tip (m)
+const sideBranchTip: Float = 0.008
+
+# How thick a child may start, as a part of its parent's radius there
+const childRadiusMax: Float = 0.75
+
+# Each point's distance along the limb as a part of its whole length
+func limbFractions(limb: view Limb) ret List(Float) {
+  var lengths: List(Float) = List.create(Float, cap: limb.points.length)
+  var total: Float = 0.0
+  lengths.add(value: 0.0)
+  loop var i: Int = 1, i < limb.points.length, ++i {
+    total = total + Vec3.vlen(
+      a: Vec3.vsub(
+        a: limb.points.copyAtDefault(index: i)
+        b: limb.points.copyAtDefault(index: i - 1)
+      )
+    )
+    lengths.add(value: total)
+  }
+  var fractions: List(Float) = List.create(Float, cap: limb.points.length)
+  loop let length: view Float in lengths {
+    fractions.add(value: length / Math.max(a: total, b: 0.0001))
+  }
+  ret fractions
+}
+
+func limbLengthOf(limb: view Limb) ret Float {
+  var total: Float = 0.0
+  loop var i: Int = 1, i < limb.points.length, ++i {
+    total = total + Vec3.vlen(
+      a: Vec3.vsub(
+        a: limb.points.copyAtDefault(index: i)
+        b: limb.points.copyAtDefault(index: i - 1)
+      )
+    )
+  }
+  ret total
+}
+
+# The index of the point of `limb` nearest to `point`
+func closestIndex(limb: view Limb, point: view Vec3) ret Int {
+  var best: Int = 0
+  var bestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < limb.points.length, ++i {
+    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: limb.points.copyAtDefault(index: i), b: point))
+    if distance < bestDistance {
+      bestDistance = distance
+      best = i
+    }
+  }
+  ret best
+}
+
+# The first point of the trunk at or above the fork (0 for another limb)
+func portionStart(limb: view Limb, forkZ: view Float) ret Int {
+  if limb.order is not 0 {
+    ret 0
+  }
+  loop var i: Int = 0, i < limb.points.length, ++i {
+    if limb.points.copyAtDefault(index: i).z >= forkZ {
+      ret i
+    }
+  }
+  ret limb.points.length - 1
+}
+
+# Whether `point` is inside leaf mass `clump` shrunk to `scale`
+func insideClump(clump: view TracedClump, point: view Vec3, scale: view Float) ret Bool {
+  let offset: Vec3 = Vec3.vsub(a: point, b: clump.centre)
+  # undo the mass's turn in the picture (ClumpMesh.turnInPicture by -turn)
+  let cosine: Float = Math.cos(x: clump.turn)
+  let sine: Float = Math.sin(x: clump.turn)
+  let local: Vec3 = Vec3.create(
+    x: offset.x * cosine - offset.z * sine
+    y: offset.y
+    z: offset.x * sine + offset.z * cosine
+  )
+  var up: Float = clump.radii.z
+  if local.z < 0.0 {
+    up = clump.radii.z * clump.underside
+  }
+  let x: Float = local.x / (clump.radii.x * scale)
+  let y: Float = local.y / (clump.radii.y * scale)
+  let z: Float = local.z / (up * scale)
+  ret x * x + y * y + z * z <= 1.0
+}
+
+func insideAnyClump(clumps: view List(TracedClump), point: view Vec3, scale: view Float) ret Bool {
+  loop let clump: view TracedClump in clumps {
+    if insideClump(clump: clump, point: point, scale: scale) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Every child starts clearly thinner than its parent there, and the parent
+# goes on past it thinner: the wood after a split is about the wood before
+# it (a child of radius c takes a share of the parent's r squared)
+func thinAfterChildren(limbs: mod List(Limb)) {
+  loop var i: Int = 0, i < limbs.length, ++i {
+    var child: Limb = limbs.copyAtDefault(index: i)
+    if child.parent < 0 or child.parent >= limbs.length {
+      continue
+    }
+    var parent: Limb = limbs.copyAtDefault(index: child.parent)
+    let at: Int = closestIndex(limb: parent, point: child.points.copyAtDefault(index: 0))
+    let parentRadius: Float = parent.radii.copyAtDefault(index: at)
+    let parentIndex: Int = child.parent
+    var childRadius: Float = child.radii.copyAtDefault(index: 0)
+    if childRadius > parentRadius * childRadiusMax {
+      let shrink: Float = parentRadius * childRadiusMax / childRadius
+      loop var k: Int = 0, k < child.radii.length, ++k {
+        child.radii.set(index: k, value: child.radii.copyAtDefault(index: k) * shrink)
+      }
+      childRadius = parentRadius * childRadiusMax
+      limbs.set(index: i, value: child)
+    }
+    let share: Float = Math.min(a: childRadius, b: parentRadius) / parentRadius
+    let after: Float = Math.sqrt(x: Math.max(a: 0.6, b: 1.0 - 0.6 * share * share))
+    loop var k: Int = at + 1, k < parent.radii.length, ++k {
+      parent.radii.set(index: k, value: parent.radii.copyAtDefault(index: k) * after)
+    }
+    limbs.set(index: parentIndex, value: parent)
+  }
+}
+
+# The leaders and the branches thin all the way to a fine tip (a seventh of
+# their base, at least 1 cm); the trunk does from the fork up, where it
+# carries the main leader on
+func taperToTips(limbs: mod List(Limb), forkZ: view Float) {
+  loop var i: Int = 0, i < limbs.length, ++i {
+    var limb: Limb = limbs.copyAtDefault(index: i)
+    if limb.order > 2 {
+      continue
+    }
+    let start: Int = portionStart(limb: limb, forkZ: forkZ)
+    let last: Int = limb.points.length - 1
+    if last - start < 2 {
+      continue
+    }
+    let base: Float = limb.radii.copyAtDefault(index: start)
+    let tip: Float = limb.radii.copyAtDefault(index: last)
+    let target: Float = Math.max(a: 0.01, b: base / 7.0)
+    if tip <= target {
+      continue
+    }
+    var portionLength: Float = 0.0
+    loop var k: Int = start + 1, k <= last, ++k {
+      portionLength = portionLength + Vec3.vlen(
+        a: Vec3.vsub(
+          a: limb.points.copyAtDefault(index: k)
+          b: limb.points.copyAtDefault(index: k - 1)
+        )
+      )
+    }
+    var along: Float = 0.0
+    loop var k: Int = start + 1, k <= last, ++k {
+      along = along + Vec3.vlen(
+        a: Vec3.vsub(
+          a: limb.points.copyAtDefault(index: k)
+          b: limb.points.copyAtDefault(index: k - 1)
+        )
+      )
+      let t: Float = along / Math.max(a: portionLength, b: 0.0001)
+      let scale: Float = 1.0 + (target / tip - 1.0) * Math.pow(base: t, exp: 1.5)
+      limb.radii.set(index: k, value: limb.radii.copyAtDefault(index: k) * scale)
+    }
+    limbs.set(index: i, value: limb)
+  }
+}
+
+# A unit vector at right angles to `direction`
+func across(direction: view Vec3) ret Vec3 {
+  var other: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  if Math.abs(value: direction.z) > 0.9 {
+    other = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  }
+  ret Vec3.vnorm(a: Vec3.vcross(a: direction, b: other))
+}
+
+# Two to four straight side branches along every leader and branch (and the
+# trunk above the fork): from 35 to 85% of its length, round it by the
+# golden angle, 35 to 50 degrees out from it and never lower than slightly
+# rising, shorter toward its tip, half its thickness there at most. Each
+# must end inside a leaf mass: one that would end in the open is shortened,
+# and left out when even short it does not reach one.
+func addSideBranches(
+  limbs: mod List(Limb)
+  clumps: view List(TracedClump)
+  forkZ: view Float
+  random: mod TreeRandom
+) {
+  let count: Int = limbs.length
+  loop var i: Int = 0, i < count, ++i {
+    let limb: Limb = limbs.copyAtDefault(index: i)
+    if limb.order > 2 {
+      continue
+    }
+    let start: Int = portionStart(limb: limb, forkZ: forkZ)
+    let last: Int = limb.points.length - 1
+    if last - start < 3 {
+      continue
+    }
+    var portionLength: Float = 0.0
+    loop var k: Int = start + 1, k <= last, ++k {
+      portionLength = portionLength + Vec3.vlen(
+        a: Vec3.vsub(
+          a: limb.points.copyAtDefault(index: k)
+          b: limb.points.copyAtDefault(index: k - 1)
+        )
+      )
+    }
+    if portionLength < 1.2 {
+      continue
+    }
+    let sideCount: Int = 2 + Math.min(a: 2, b: (nextUnit(random: random) * 3.0).toInt())
+    let phase: Float = nextUnit(random: random) * 6.2831853
+    loop var branch: Int = 0, branch < sideCount, ++branch {
+      let t: Float = 0.35 + 0.5 * (branch.toFloat() + 0.5) / sideCount.toFloat() + nextBetween(
+        random: random
+        low: -0.04
+        high: 0.04
+      )
+      # the point at fraction t of the portion
+      var at: Int = start
+      var along: Float = 0.0
+      loop var k: Int = start + 1, k <= last, ++k {
+        along = along + Vec3.vlen(
+          a: Vec3.vsub(
+            a: limb.points.copyAtDefault(index: k)
+            b: limb.points.copyAtDefault(index: k - 1)
+          )
+        )
+        at = k
+        if along >= t * portionLength {
+          break
+        }
+      }
+      at = Math.min(a: at, b: last - 1)
+      let base: Vec3 = limb.points.copyAtDefault(index: at)
+      let way: Vec3 = Vec3.vnorm(
+        a: Vec3.vsub(
+          a: limb.points.copyAtDefault(index: at + 1)
+          b: limb.points.copyAtDefault(index: at)
+        )
+      )
+      let first: Vec3 = across(direction: way)
+      let second: Vec3 = Vec3.vcross(a: way, b: first)
+      let around: Float = phase + branch.toFloat() * 2.3999632
+      let side: Vec3 = Vec3.vadd(
+        a: Vec3.vscale(a: first, s: Math.cos(x: around))
+        b: Vec3.vscale(a: second, s: Math.sin(x: around))
+      )
+      let angle: Float = nextBetween(random: random, low: 0.61, high: 0.87)
+      var direction: Vec3 = Vec3.vnorm(
+        a: Vec3.vadd(
+          a: Vec3.vscale(a: way, s: Math.cos(x: angle))
+          b: Vec3.vscale(a: side, s: Math.sin(x: angle))
+        )
+      )
+      if direction.z < 0.25 {
+        direction.z = 0.25
+        direction = Vec3.vnorm(a: direction)
+      }
+      let length: Float = Math.clamp(
+        val: portionLength * (0.4 - 0.25 * t) * nextBetween(random: random, low: 0.8, high: 1.2)
+        low: 0.4
+        high: 2.5
+      )
+      # the longest of these that ends inside a leaf mass
+      var reach: Float = 0.0
+      loop var tries: Int = 0, tries < 4, ++tries {
+        let part: Float = 1.0 - 0.18 * tries.toFloat()
+        if reach is 0.0 and insideAnyClump(
+          clumps: clumps
+          point: Vec3.vadd(a: base, b: Vec3.vscale(a: direction, s: length * part))
+          scale: 0.95
+        ) {
+          reach = length * part
+        }
+      }
+      if reach is 0.0 {
+        continue
+      }
+      let baseRadius: Float = Math.min(a: 0.5 * limb.radii.copyAtDefault(index: at), b: 0.05)
+      if baseRadius <= sideBranchTip {
+        continue
+      }
+      var points: List(Vec3) = List.create(Vec3, cap: 6)
+      var radii: List(Float) = List.create(Float, cap: 6)
+      loop var k: Int = 0, k <= 5, ++k {
+        let step: Float = k.toFloat() / 5.0
+        points.add(value: Vec3.vadd(a: base, b: Vec3.vscale(a: direction, s: reach * step)))
+        radii.add(value: baseRadius + (sideBranchTip - baseRadius) * step)
+      }
+      limbs.add(value: Limb { points: own points, radii: own radii, parent: i, order: 3 })
+    }
+  }
+}
+
+# Whether some limb's tip is already inside `clump`, so the mass has wood
+func clumpHasTip(limbs: view List(Limb), clump: view TracedClump) ret Bool {
+  loop let limb: view Limb in limbs {
+    if insideClump(
+      clump: clump
+      point: limb.points.copyAtDefault(index: limb.points.length - 1)
+      scale: 0.8
+    ) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# After the thinning and the tapering every child still starts clearly
+# thinner than its parent there (parents before children, so a shrunk
+# child's own children follow it)
+func capChildren(limbs: mod List(Limb)) {
+  loop var i: Int = 0, i < limbs.length, ++i {
+    var child: Limb = limbs.copyAtDefault(index: i)
+    if child.parent < 0 or child.parent >= limbs.length {
+      continue
+    }
+    let parent: Limb = limbs.copyAtDefault(index: child.parent)
+    let at: Int = closestIndex(limb: parent, point: child.points.copyAtDefault(index: 0))
+    let most: Float = parent.radii.copyAtDefault(index: at) * childRadiusMax
+    let childRadius: Float = child.radii.copyAtDefault(index: 0)
+    if childRadius > most {
+      let shrink: Float = most / childRadius
+      loop var k: Int = 0, k < child.radii.length, ++k {
+        child.radii.set(index: k, value: child.radii.copyAtDefault(index: k) * shrink)
+      }
+      limbs.set(index: i, value: child)
+    }
+  }
+}
