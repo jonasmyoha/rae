@@ -32,7 +32,7 @@ const leafPlacementFloats: Int = 8
 type LeafPass {
   cards: LeafCards
   # the leaf stamps: per layer leafImageSize x leafImageSize linear RGBA
-  # pixels
+  # pixels, emptied once they are on the GPU (12 MB of floats per pass)
   pictures: List(List(Float))
   made: Bool
   drawBindMade: Bool
@@ -165,6 +165,7 @@ func ensureLeafGpu(leaves: mod LeafPass, resources: mod GpuResources) {
     log("[leaves] the leaf picture could not be installed")
     ret
   }
+  leaves.pictures = List.create(List(Float), cap: 0)
   if let cardBuffer: BufferId = createBuffer(
     resources: resources
     size: leaves.cards.floats.length * 4
@@ -332,7 +333,8 @@ func drawLeaves(
   }
 }
 
-# Retire the GPU objects (shutdown)
+# Retire the GPU objects (shutdown: the pass cannot be drawn again, its leaf
+# stamps were emptied after their upload)
 func releaseLeafPass(leaves: mod LeafPass, resources: mod GpuResources) {
   retireSurfaceImages(images: leaves.images, resources: resources)
   let unusedBind: Bool = retireBindGroup(resources: resources, id: leaves.drawBind)
