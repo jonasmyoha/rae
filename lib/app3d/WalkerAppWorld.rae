@@ -1,0 +1,161 @@
+# app3d/WalkerAppWorld — the walker app's world, built round the scene's
+# FRESH start every time (app3d/WalkerApp's setup calls it): the walker on
+# land, the forest and its clearing, the T02 stand ahead of the start, the
+# hero and its crowd, the physics, and the start R and the "..." menu's
+# Reset return to (app3d/WalkerReset). Only after that is the hero put
+# where a restored session left it, so a session never moves the world or
+# Reset's start.
+open app3d/ReferenceTree
+open ecs/Entity
+open WorldBiome
+open RendererDeferred
+open Math3d
+open GltfSkin
+open app3d/CameraRig
+open app3d/WalkerReset
+open app3d/CharacterController
+open app3d/WalkerCharacter
+open app3d/Characters
+open app3d/WalkerPhysics
+open app3d/WalkerWorld
+open app3d/WalkerNet
+open app3d/WalkerTerrain
+open app3d/WalkerAppSetup
+
+# What the world's making hands back to the app's setup
+type WalkerWorldStart {
+  heroEntityId: EntityId
+  crowdEntities: List(EntityId)
+  physicsSystem: WalkerPhysics
+  walkerReset: WalkerReset
+  referenceTree: opt ReferenceTree
+}
+
+# The world round the fresh start. `characterController` comes in at the
+# scene's start (not yet on land) and leaves as the hero is: at the restored
+# session's place when `sessionRestored`, else at the fresh start.
+func buildWalkerWorld(
+  settings: view WalkerAppSettings
+  terrainSystem: mod WalkerTerrain
+  walkerWorld: mod WalkerWorld
+  renderer: mod DeferredRenderer
+  characterController: mod ThirdPersonController
+  sessionController: mod ThirdPersonController
+  sessionRestored: view Bool
+  biome: view BiomeConfig
+  groundZ: view Float
+  clipIndex: view Int
+  sk: view Skeleton
+  basePartModel: view Mat4
+  cloneCount: view Int
+  startRig: view CameraRig
+) ret WalkerWorldStart {
+  # Nobody starts in the sea. The origin is not guaranteed land — the island mask
+  # only guarantees land is SOMEWHERE inside the radius.
+  spawnOnLand(controller: characterController, groundZ: groundZ, biome: biome)
+  # the T02 stand's patch, 30 m ahead of the fresh start
+  terrainSystem.referenceStandOn = settings.referenceTree
+  terrainSystem.referenceStandX = characterController.position.x
+  terrainSystem.referenceStandY = characterController.position.y + referenceStandAhead
+  let unusedTreeCount: Int = plantWalkerForest(
+    land: settings.land
+    terrainSystem: terrainSystem
+    world: walkerWorld
+    spawnX: characterController.position.x
+    spawnY: characterController.position.y
+  )
+  bakeWalkerCanopy(terrainSystem: terrainSystem, renderer: renderer)
+  # the stand of hand-made T02 trees the forest planted in its patch
+  var referenceTree: opt ReferenceTree = none
+  if settings.referenceTree {
+    referenceTree = createReferenceStand(renderer: renderer, stand: terrainSystem.referenceStand)
+  }
+
+  # #739: the hero is an entity like any crowd member (app3d/Characters): its
+  # controller, transform, clip, transition and model are components; the
+  # Controlled tag says the player drives it.
+  let heroEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
+  walkerWorldSetController(
+    world: walkerWorld
+    entityId: heroEntityId
+    controller: characterController
+  )
+  walkerWorldSetTransform(
+    world: walkerWorld
+    entityId: heroEntityId
+    transform: controllerTransform3D(controller: characterController)
+  )
+
+  var crowdEntities: List(EntityId) = spawnWalkerCrowd(
+    world: walkerWorld
+    hero: characterController
+    biome: biome
+    groundZ: groundZ
+    count: cloneCount
+  )
+  walkerWorldSetAnim(
+    world: walkerWorld
+    entityId: heroEntityId
+    anim: AnimationState { clipIndex: clipIndex, animTime: 0.0, playbackScale: 1.0 }
+  )
+  addWalkerCharacterComponents(
+    world: walkerWorld
+    entityId: heroEntityId
+    skeleton: sk
+    basePartModel: basePartModel
+  )
+  loop let crowdEntityId: view EntityId in crowdEntities {
+    addWalkerCharacterComponents(
+      world: walkerWorld
+      entityId: crowdEntityId
+      skeleton: sk
+      basePartModel: basePartModel
+    )
+  }
+  setControlledCharacter(controlled: walkerWorld.controlled, entityId: heroEntityId)
+  updateInfiniteTerrain(
+    terrainSystem: terrainSystem
+    renderer: renderer
+    propKinds: walkerWorld.propKinds
+    transforms: walkerWorld.transforms
+    groundFocus: characterController.position
+    propFocus: characterController.position
+  )
+  var physicsSystem: WalkerPhysics = createWalkerAppPhysics(
+    land: settings.land
+    biome: biome
+    groundZ: groundZ
+    world: walkerWorld
+    terrainSystem: terrainSystem
+    hero: characterController
+    heroEntityId: heroEntityId
+    crowdEntities: crowdEntities
+  )
+  # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
+  # generational entities, step a Box3D body. Leaves the world untouched.
+  seamSelfTest(world: walkerWorld, physicsSystem: physicsSystem)
+  # How it all starts, for R and the menu's Reset (app3d/WalkerReset)
+  let walkerReset: WalkerReset = createWalkerReset(
+    world: walkerWorld
+    physicsSystem: physicsSystem
+    startRig: startRig
+    groundZ: groundZ
+  )
+  placeHeroAtSession(
+    physicsSystem: physicsSystem
+    world: walkerWorld
+    heroEntityId: heroEntityId
+    session: sessionController
+    restored: sessionRestored
+    groundZ: groundZ
+    biome: biome
+    hero: characterController
+  )
+  ret WalkerWorldStart {
+    heroEntityId: heroEntityId
+    crowdEntities: own crowdEntities
+    physicsSystem: own physicsSystem
+    walkerReset: own walkerReset
+    referenceTree: own referenceTree
+  }
+}
