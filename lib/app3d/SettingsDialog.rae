@@ -29,6 +29,7 @@ open ui/inputSystem/InputSystem
 open app3d/UiShell
 open app3d/Playback
 open app3d/Slider
+open app3d/SettingsSky
 open Vec3
 open SkyHosek
 open Sky
@@ -53,6 +54,16 @@ enum SettingsSkyModel { preetham, hosek, stylised, solid }
 # High are today's renderer (the device's resolution ceiling and the dynamic
 # scale); they are here so later steps have their places.
 enum SettingsQuality { low, mid, high, ultra }
+
+# RAE_SUN_LUX=<lux> sets the walker sun's noon illuminance; otherwise
+# settingsSunNoonLux
+func settingsSunNoonLuxFromEnv() ret Float {
+  let text: String = Sys.getEnv(name: "RAE_SUN_LUX")
+  if text.length() > 0 and text.toFloat() > 0.0 {
+    ret text.toFloat()
+  }
+  ret settingsSunNoonLux
+}
 
 # The exposure compensation's step and its limit either way (EV)
 const settingsExposureStep: Float = 0.5
@@ -165,6 +176,9 @@ type SettingsState {
   shadows: Bool
   # The renderer's quality step (High: today's renderer)
   quality: SettingsQuality = SettingsQuality.high
+  # The sun's illuminance at its highest, in lux (SettingsSky
+  # settingsSunNoonLux; RAE_SUN_LUX=<lux> tries another, for screenshots)
+  sunNoonLux: Float = settingsSunNoonLuxFromEnv()
   # The automatic exposure's compensation in EV (AutoExposure): + brighter,
   # - darker; steps of settingsExposureStep
   exposureCompensation: Float = 0.0

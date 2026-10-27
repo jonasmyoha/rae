@@ -50,7 +50,7 @@ func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
-  let lux: Float = settingsSunNoonLux * lift
+  let lux: Float = settingsState.sunNoonLux * lift
   ret Vec3.create(x: base.x * lux, y: base.y * lux, z: base.z * lux)
 }
 
