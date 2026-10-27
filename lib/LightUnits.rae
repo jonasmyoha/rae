@@ -1,0 +1,39 @@
+# LightUnits — the renderer's light in real units, and the camera exposure
+# that brings it to the screen (docs/physical-light-units.md step 1).
+#
+# The sun is an illuminance in lux (per colour channel), the sky and the
+# ambient light are luminances in cd/m2. A camera exposure, EV100, scales all
+# of it into the range the lighting pass sums and the 16-bit HDR targets hold
+# (Light3d.ev100, applied where light is summed: GbufferPasses
+# uploadSceneLight and the sky shader). The scale is the one of a camera
+# whose sensor saturates at 1.2 * 2^EV100 cd/m2 (Lagarde and de Rousiers,
+# "Moving Frostbite to PBR", 2014). Daylight is about EV100 14-16, a lit
+# room about 7, moonlight about -2.
+#
+# Before this, every light was in relative units tuned for an exposure of 1:
+# one relative unit is relativeLightUnit cd/m2 (or lux), and the camera at
+# referenceEv100 sees exactly that, so a scene that converts its old numbers
+# and keeps referenceEv100 looks as it did. Still relative (step 1 does not
+# move them): point lights, emissive materials, the stylised and solid-colour
+# skies' painted colours, the clear colour and the fog colour.
+import Math
+import Vec3
+
+# One old relative light unit, in cd/m2 for a luminance and in lux for an
+# illuminance
+const relativeLightUnit: Float = 20000.0
+
+# The exposure at which the old relative units are real light:
+# 1 / (1.2 * 2^EV100) = 1 / relativeLightUnit
+const referenceEv100: Float = 14.024678
+
+# The scale from real light (cd/m2, lux) to what the lighting pass sums, for
+# a camera at `ev100`
+func exposureScale(ev100: view Float) ret Float {
+  ret 1.0 / (1.2 * Math.pow(base: 2.0, exp: ev100))
+}
+
+# A colour given in the old relative units, in real units
+func fromRelativeLight(value: view Vec3) ret Vec3 {
+  ret Vec3.vscale(a: value, s: relativeLightUnit)
+}

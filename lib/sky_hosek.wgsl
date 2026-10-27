@@ -30,8 +30,8 @@ fn skyProcedural(dir: vec3<f32>, toSun: vec3<f32>, t: f32) -> vec3<f32> {
   let zy = (0.00275*ts3 - 0.00610*ts2 + 0.00317*ts) * t * t
          + (-0.04214*ts3 + 0.08970*ts2 - 0.04153*ts + 0.00516) * t
          + (0.15346*ts3 - 0.26756*ts2 + 0.06670*ts + 0.26688);
-  // zY is in kcd/m2; 0.05 is Sky.rae's skyUnitsPerKcd (keep them equal)
-  let xx = zx * fx; let yy = max(zy * fz, 0.0001); let YY = zY * fy * 0.05;
+  // zY is in kcd/m2: the result is in cd/m2 (LightUnits)
+  let xx = zx * fx; let yy = max(zy * fz, 0.0001); let YY = zY * fy * 1000.0;
   let X = xx * YY / yy; let Z = (1.0 - xx - yy) * YY / yy;
   let rgb = vec3<f32>( 3.2406*X - 1.5372*YY - 0.4986*Z,
                       -0.9689*X + 1.8758*YY + 0.0415*Z,
@@ -91,15 +91,20 @@ fn moonDisc(dir: vec3<f32>, toMoon: vec3<f32>, toSun: vec3<f32>, radius: f32) ->
   let mare = 0.82 + 0.18 * sin(q.x * 9.0 + 1.3) * sin(q.y * 7.0 - 0.6);
   return edge * (lit * mare + 0.025);
 }
+// The sky toward `dir`, ready to sum: the physical models (Preetham and
+// Hosek-Wilkie, in cd/m2) and the moon and night sky (cd/m2) times the
+// camera's exposure scale (camPos.w, LightUnits), the painted stylised sky
+// and the clear colour as they are (display colours); the sun's disc rides
+// on the sun's light (sunColor, already exposed)
 fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   let kind = L.skyParams.x;
   // The sky's own sun; a sky uploaded without one falls back to the key light
   var toSun = normalize(-L.sunDir.xyz);
   if (dot(L.skySun.xyz, L.skySun.xyz) > 0.25) { toSun = normalize(L.skySun.xyz); }
   var c = L.clearColor.rgb;
-  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }
+  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y) * L.camPos.w; }
   if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
-  if (kind > 3.5) { c = skyHosek(dir, toSun); }
+  if (kind > 3.5) { c = skyHosek(dir, toSun) * L.camPos.w; }
   if (kind > 1.5) {
     let ca = dot(dir, toSun);
     let cutoff = cos(max(L.skyParams.w, 0.001));
@@ -116,12 +121,14 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
     let night = 1.0 - clamp(L.skyParams.z, 0.0, 1.0);
     let moonlight = L.night.x;
     let height = clamp(dir.z, 0.0, 1.0);
-    let nightSky = mix(vec3<f32>(0.020, 0.028, 0.050), vec3<f32>(0.006, 0.010, 0.026), height)
-      * (0.35 + 2.4 * moonlight);
-    let glow = pow(max(dot(dir, toMoon), 0.0), 48.0) * 0.12 * moonlight;
+    // cd/m2 (the look tuned in the old units at the reference exposure)
+    let nightSky = mix(vec3<f32>(400.0, 560.0, 1000.0), vec3<f32>(120.0, 200.0, 520.0), height)
+      * (0.35 + 2.4 * moonlight) * L.camPos.w;
+    let glow = pow(max(dot(dir, toMoon), 0.0), 48.0) * 2400.0 * moonlight * L.camPos.w;
     c = c + (nightSky + vec3<f32>(0.55, 0.62, 0.80) * glow) * night * above;
     let disc = moonDisc(dir, toMoon, toSun, max(L.skySun.w, 0.001));
-    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * above;
+    // moon.w: the disc's luminance in cd/m2
+    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * L.camPos.w * above;
   }
   return c;
 }

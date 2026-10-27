@@ -4,6 +4,7 @@
 # light (the sun by day, the moon at night) and the shadows' sun.
 # SettingsDialog owns SettingsState, the panel and its controls.
 import Math
+open LightUnits
 open ui/Ecs
 open Vec3
 open SkyHosek
@@ -28,6 +29,13 @@ func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
+# The sun's illuminance at its highest, in lux. 20,000 lux is the walker
+# scenes' long-standing balance of sun to sky and ambient (their old sun of 1
+# at the reference exposure, LightUnits); a real clear noon is about 100,000
+# lux, with the sky as it is (docs/physical-light-units.md).
+const settingsSunNoonLux: Float = 20000.0
+
+# The sun's light now: its colour times its illuminance (lux)
 func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   let base: Vec3 = sunColorForDate(
     hour: settingsState.timeOfDay.hour
@@ -42,7 +50,8 @@ func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
-  ret Vec3.create(x: base.x * lift, y: base.y * lift, z: base.z * lift)
+  let lux: Float = settingsSunNoonLux * lift
+  ret Vec3.create(x: base.x * lux, y: base.y * lux, z: base.z * lux)
 }
 
 # Build the sky the panel is asking for. `data` is only read by the Hosek
@@ -70,12 +79,14 @@ func settingsBuildSky(
   if settingsState.skyModel is SettingsSkyModel.solid {
     let base: Vec3 = Vec3.create(x: 0.10, y: 0.16, z: 0.26)
     let lit: Vec3 = Vec3.create(x: base.x * day, y: base.y * day, z: base.z * day)
+    # the flat colour is a display colour; as the ambient light, in cd/m2
+    let litLight: Vec3 = fromRelativeLight(value: lit)
     var flat: Sky = createSkyNone(
       light: Light3d {
         sunDir: dir
         sunColor: col
-        ambSky: lit
-        ambGround: lit
+        ambSky: litLight
+        ambGround: litLight
         exposure: 1.0
         clearColor: lit
       }
@@ -216,7 +227,10 @@ func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
   }
   let level: Float = settingsMoonLight(settingsState: settingsState)
   let strength: Float = 0.03 + 0.42 * level
-  let moonColor: Vec3 = Vec3.create(x: 0.52 * strength, y: 0.60 * strength, z: 0.82 * strength)
+  # in lux, like the sun it takes over from
+  let moonColor: Vec3 = fromRelativeLight(
+    value: Vec3.create(x: 0.52 * strength, y: 0.60 * strength, z: 0.82 * strength)
+  )
   ret Vec3.create(
     x: sun.x + (moonColor.x - sun.x) * blend
     y: sun.y + (moonColor.y - sun.y) * blend
@@ -236,7 +250,11 @@ func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view 
   let ambient: Float = (0.02 + 0.10 * level) * night
   sky.moonDir = moon.direction
   sky.moonAngularRadius = moonAngularRadius
-  sky.moonDiscIntensity = 2.5
+  # the disc's luminance, cd/m2
+  sky.moonDiscIntensity = 2.5 * relativeLightUnit
   sky.nightLight = level
-  sky.nightAmbient = Vec3.create(x: 0.55 * ambient, y: 0.65 * ambient, z: ambient)
+  # cd/m2
+  sky.nightAmbient = fromRelativeLight(
+    value: Vec3.create(x: 0.55 * ambient, y: 0.65 * ambient, z: ambient)
+  )
 }

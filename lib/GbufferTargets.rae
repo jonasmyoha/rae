@@ -714,7 +714,7 @@ func hosekAt(targets: view DeferredTargets, index: copy Int) ret Float {
 }
 
 # The whole light uniform (LightU): inverse jittered viewProj, camera +
-# exposure, sun, sun colour (+ fog start in .w), sky ambient (+ fog end),
+# exposure scale, sun, sun colour (+ fog start in .w), sky ambient (+ fog end),
 # ground ambient, the fog block (#57: rgb + enabled flag, else the clear
 # colour), the jittered viewProj, the sky params, then the cooked Hosek state.
 func uploadLightUniform(
@@ -722,7 +722,7 @@ func uploadLightUniform(
   resources: mod GpuResources
   gbuffer: view GbufferCache
   camera: view Camera3d
-  exposure: copy Float
+  exposureScale: copy Float
   sunDir: view Vec3
   sunColor: view Vec3
   skyAmbient: view Vec3
@@ -758,7 +758,9 @@ func uploadLightUniform(
     x: camera.position.x
     y: camera.position.y
     z: camera.position.z
-    w: exposure
+    # the camera's exposure scale (LightUnits): the shader exposes the sky
+    # models, the moon and the night sky with it
+    w: exposureScale
   )
   pushVec4F(
     writer: targets.args

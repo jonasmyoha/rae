@@ -27,6 +27,7 @@
 # The result is a value on the WaterSystem (the last decision, for the
 # hysteresis) and is pushed to the renderer with setUnderwater.
 import Vec3
+open LightUnits
 open Scene3d
 open water/Water
 open water/WaterSystem
@@ -171,7 +172,8 @@ func underwaterSelect(
       tintDepth: underwaterTintDepth
       causticsOn: body.caustics > 0
       sunDir: toSun
-      sunColor: light.sunColor
+      # the sun's light, exposed by the camera (LightUnits)
+      sunColor: Vec3.vscale(a: light.sunColor, s: exposureScale(ev100: light.ev100))
       causticStrength: underwaterCausticStrength
       time: waterSystem.time
     }
