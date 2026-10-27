@@ -378,10 +378,11 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     clumps.add(value: clump)
   }
   # a hidden twig from each mass's branch to the mass's centre (order 3),
-  # so every mass hangs on wood; the leaves hide it. A twig from a limb's
-  # tip carries the limb on, so it is joined onto the limb (one tube, no
-  # seam), once per limb; any other leaves the limb at an angle, thinner
-  # than the limb, so it comes out of the bark instead of lying in it.
+  # so every mass hangs on wood; the leaves hide it. Twigs are straight and
+  # start at or below their mass, so they grow up. A twig from a limb's tip
+  # going on nearly the limb's way carries the limb on, so it is joined
+  # onto the limb (one tube, no seam), once per limb; any other leaves the
+  # limb at an angle, thinner than the limb, so it comes out of the bark.
   let woodCount: Int = limbs.length
   var extended: List(Bool) = List.create(Bool, cap: woodCount)
   loop var i: Int = 0, i < woodCount, ++i {
@@ -391,42 +392,54 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     if clump.parent < 0 or clump.parent >= woodCount {
       continue
     }
-    var parent: Limb = limbs.copyAtDefault(index: clump.parent)
-    let nearest: Int = nearestPointIndex(limb: parent, target: clump.centre)
+    # a mass below its whole limb hangs on the trunk instead, so no twig
+    # grows down
+    var parentIndex: Int = clump.parent
+    var nearest: Int = nearestPointIndex(
+      limb: limbs.copyAtDefault(index: parentIndex)
+      target: clump.centre
+    )
+    if nearest < 0 {
+      parentIndex = 0
+      nearest = Math.max(
+        a: 0
+        b: nearestPointIndex(limb: limbs.copyAtDefault(index: 0), target: clump.centre)
+      )
+    }
+    var parent: Limb = limbs.copyAtDefault(index: parentIndex)
     let distance: Float = Vec3.vlen(
       a: Vec3.vsub(a: parent.points.copyAtDefault(index: nearest), b: clump.centre)
     )
     let parentRadius: Float = parent.radii.copyAtDefault(index: nearest)
     let last: Int = parent.points.length - 1
-    # the mass ahead of the tip (within 40 degrees of the limb's way), so
-    # the joined curve bends gently and never hooks back
+    # the mass nearly straight ahead of the tip (within 25 degrees of the
+    # limb's way), so the joined twig carries the limb on with only a slight
+    # turn
     let ahead: Float = Vec3.vdot(
       a: endDirection(limb: parent)
       b: Vec3.vnorm(a: Vec3.vsub(a: clump.centre, b: parent.points.copyAtDefault(index: last)))
     )
-    if nearest is last and not extended.copyAtDefault(index: clump.parent) and ahead > 0.77 and parentRadius <= 0.25 * distance {
+    if nearest is last and not extended.copyAtDefault(index: parentIndex) and ahead > 0.9 {
       let twig: Limb = twigTo(
         parent: parent
-        parentIndex: clump.parent
+        parentIndex: parentIndex
         target: clump.centre
         nearest: nearest
         baseRadius: parentRadius
-        follow: 1.0
       )
       loop var k: Int = 1, k < twig.points.length, ++k {
         parent.points.add(value: twig.points.copyAtDefault(index: k))
         parent.radii.add(value: twig.radii.copyAtDefault(index: k))
       }
-      limbs.set(index: clump.parent, value: parent)
-      extended.set(index: clump.parent, value: true)
+      limbs.set(index: parentIndex, value: parent)
+      extended.set(index: parentIndex, value: true)
     } else {
       limbs.add(value: twigTo(
         parent: parent
-        parentIndex: clump.parent
+        parentIndex: parentIndex
         target: clump.centre
         nearest: nearest
-        baseRadius: Math.min(a: parentRadius * 0.6, b: Math.min(a: 0.06, b: 0.15 * distance))
-        follow: 0.4
+        baseRadius: Math.min(a: parentRadius * 0.6, b: 0.06)
       ))
     }
   }
@@ -435,11 +448,14 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
 
 # The index of the point of `limb` nearest to `target`
 func nearestPointIndex(limb: view Limb, target: view Vec3) ret Int {
-  var nearest: Int = 0
+  # the nearest point at or below the target, so the twig grows up to it;
+  # -1 when the whole limb is above it
+  var nearest: Int = -1
   var nearestDistance: Float = 1000000.0
   loop var i: Int = 0, i < limb.points.length, ++i {
-    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: limb.points.copyAtDefault(index: i), b: target))
-    if distance < nearestDistance {
+    let point: Vec3 = limb.points.copyAtDefault(index: i)
+    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: point, b: target))
+    if point.z <= target.z and distance < nearestDistance {
       nearestDistance = distance
       nearest = i
     }
@@ -447,59 +463,24 @@ func nearestPointIndex(limb: view Limb, target: view Vec3) ret Int {
   ret nearest
 }
 
-# A thin twig from point `nearest` of `parent` to `target`, `baseRadius`
-# thick there, a curve that leaves partly along the parent's own direction
-# (`follow` 1: wholly, so a twig joined on at a tip carries the limb on;
-# less: a real joint, leaving at an angle toward the target) and curves
-# round to the target
+# A thin straight twig from point `nearest` of `parent` to `target`,
+# `baseRadius` thick there, thinning to 1.2 cm
 func twigTo(
   parent: view Limb
   parentIndex: view Int
   target: view Vec3
   nearest: view Int
   baseRadius: view Float
-  follow: view Float
 ) ret Limb {
   let start: Vec3 = parent.points.copyAtDefault(index: nearest)
-  let before: Vec3 = parent.points.copyAtDefault(index: Math.max(a: 0, b: nearest - 1))
-  let after: Vec3 = parent.points.copyAtDefault(
-    index: Math.min(a: parent.points.length - 1, b: nearest + 1)
-  )
-  # along the limb toward the target's side, so the curve never turns back
-  # on itself
-  var along: Vec3 = Vec3.vsub(a: after, b: before)
-  if Vec3.vdot(a: along, b: Vec3.vsub(a: target, b: start)) < 0.0 {
-    along = Vec3.vscale(a: along, s: -1.0)
-  }
-  var control: Vec3 = Vec3.vscale(a: Vec3.vadd(a: start, b: target), s: 0.5)
-  if Vec3.vlen(a: along) > 0.0001 {
-    let toTarget: Vec3 = Vec3.vsub(a: target, b: start)
-    let leaving: Vec3 = Vec3.vnorm(
-      a: Vec3.vadd(
-        a: Vec3.vscale(a: Vec3.vnorm(a: along), s: follow)
-        b: Vec3.vscale(a: Vec3.vnorm(a: toTarget), s: 1.0 - follow)
-      )
-    )
-    # a twig that carries its limb on bends early, so it never hooks at its
-    # end
-    control = Vec3.vadd(
-      a: start
-      b: Vec3.vscale(a: leaving, s: (0.5 - 0.2 * follow) * Vec3.vlen(a: toTarget))
-    )
-  }
-  let steps: Int = 8
+  let steps: Int = 5
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
+  # never thicker at its end than at its start (a thin parent's twig)
+  let tipRadius: Float = Math.min(a: 0.012, b: baseRadius)
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
-    let first: Vec3 = Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: control, b: start), s: t))
-    let second: Vec3 = Vec3.vadd(
-      a: control
-      b: Vec3.vscale(a: Vec3.vsub(a: target, b: control), s: t)
-    )
-    points.add(value: Vec3.vadd(a: first, b: Vec3.vscale(a: Vec3.vsub(a: second, b: first), s: t)))
-    # never thicker at its end than at its start (a thin parent's twig)
-    let tipRadius: Float = Math.min(a: 0.012, b: baseRadius)
+    points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))
     radii.add(value: baseRadius + (tipRadius - baseRadius) * t)
   }
   ret Limb { points: own points, radii: own radii, parent: parentIndex, order: 3 }
