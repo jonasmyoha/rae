@@ -11,6 +11,15 @@ open gpu/GpuRender
 open webgpu/Webgpu
 open webgpu/Context
 
+# The most material images one renderer's array holds. The array is made
+# with exactly as many layers as pictures are loaded, so the cap costs
+# nothing by itself; each loaded layer is about 1.4 MB of GPU memory (512 x
+# 512 RGBA8 with its mip levels). WebGPU guarantees 256 layers per array
+# (maxTextureArrayLayers); the shaders ask the array for its layer count.
+# Was 16 until example 143's forest filled it and the T02 trees' bark
+# picture was refused.
+const surfaceImageMaxLayers: Int = 64
+
 type SurfaceImages {
   paths: List(String) = List.create(String, cap: 0)
   texture: TextureId = noTextureId()
@@ -95,8 +104,8 @@ func setSurfaceImages(
   resources: mod GpuResources
   paths: view List(String)
 ) ret Bool {
-  if paths.length > 16 {
-    log("surface images support at most 16 layers per renderer")
+  if paths.length > surfaceImageMaxLayers {
+    log("surface images support at most {surfaceImageMaxLayers} layers per renderer")
     ret false
   }
   let size: Int = 512
@@ -141,8 +150,8 @@ func setSurfaceImagePixels(
   layers: view List(List(Float))
   size: view Int
 ) ret Bool {
-  if layers.length > 16 {
-    log("surface images support at most 16 layers per renderer")
+  if layers.length > surfaceImageMaxLayers {
+    log("surface images support at most {surfaceImageMaxLayers} layers per renderer")
     ret false
   }
   var decoded: List(List(Float)) = List.create(List(Float), cap: layers.length)
