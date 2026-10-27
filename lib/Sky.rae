@@ -218,11 +218,15 @@ func createSkyHosek(
     sunAngularRadius: 0.00465
     sunDiscIntensity: 12.0
     groundAlbedo: groundAlbedo
-    hosek: createHosekSky(
-      data: data
+    hosek: hosekAtPreethamBrightness(
+      hosek: createHosekSky(
+        data: data
+        turbidity: turbidity
+        albedo: groundAlbedo
+        solarElevationRad: sunElevationRad(sunDir: sunDir)
+      )
+      sunDir: sunDir
       turbidity: turbidity
-      albedo: groundAlbedo
-      solarElevationRad: sunElevationRad(sunDir: sunDir)
     )
     # Below the horizon the fit is undefined, so the shader fades to
     # horizonColor there. A dark ground tone read as a band of mud wherever the
@@ -233,6 +237,55 @@ func createSkyHosek(
     horizonColor: Vec3.create(x: 0.52, y: 0.56, z: 0.60)
     bands: 0.0
   }
+}
+
+# The fitted Hosek-Wilkie model gives physical radiance, 15 to 60 times the
+# Preetham sky's (which carries a hand scale for an exposure of 1): left so,
+# its sky came out white, and the mist, which takes its colour from the sky
+# just over the horizon, turned the whole scene white (example 143). So the
+# fitted sky is scaled to the Preetham sky's brightness for the same sun and
+# haze: the mean luminance of both over the sky (even in height, the sun's
+# own glow left out) sets the scale. It keeps the fit's own shape and colour,
+# and follows the time of day.
+func hosekAtPreethamBrightness(
+  hosek: view HosekSky
+  sunDir: view Vec3
+  turbidity: view Float
+) ret HosekSky {
+  let toSun: Vec3 = Vec3.create(x: -sunDir.x, y: -sunDir.y, z: -sunDir.z)
+  var fitted: Float = 0.0
+  var analytic: Float = 0.0
+  loop var row: Int = 0, row < 6, ++row {
+    let up: Float = 0.04 + 0.9 * row.toFloat() / 5.0
+    let ring: Float = Math.sqrt(x: 1.0 - up * up)
+    loop var column: Int = 0, column < 12, ++column {
+      let around: Float = column.toFloat() / 12.0 * 6.2831853
+      let dir: Vec3 = Vec3.create(
+        x: ring * Math.cos(x: around)
+        y: ring * Math.sin(x: around)
+        z: up
+      )
+      if Vec3.vdot(a: dir, b: toSun) < 0.95 {
+        fitted = fitted + skyLuminance(c: hosekRadiance(sky: hosek, dir: dir, sunDir: toSun))
+        analytic = analytic + skyLuminance(
+          c: preethamRadiance(dir: dir, sunDir: toSun, turbidity: turbidity)
+        )
+      }
+    }
+  }
+  if fitted <= 0.0 or analytic <= 0.0 {
+    ret hosek
+  }
+  let scale: Float = analytic / fitted
+  var scaled: HosekSky = hosek
+  scaled.r.radiance = hosek.r.radiance * scale
+  scaled.g.radiance = hosek.g.radiance * scale
+  scaled.b.radiance = hosek.b.radiance * scale
+  ret scaled
+}
+
+func skyLuminance(c: view Vec3) ret Float {
+  ret 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
 }
 
 # Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
