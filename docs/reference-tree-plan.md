@@ -214,6 +214,17 @@ The lab's `row` camera (or `RAE_TREELAB_ROW=1`) shows the traced tree and
 grown seeds 1-3 beside it; looks-development round
 `2026-10-27-step6-grown-row`.
 
+Accepted: "They are great" (one kind, no copies). Rounds 2-7 the same
+day, every one in looks-development `treeReference/progress.html`: the grown
+trees replace the copies in 143's stand (four varieties,
+`app3d/ReferenceTree`); a limb that carries its parent on is one tube with
+it (`treeGen/LimbJoin`, the main leader is part of the trunk); limbs are
+straight and grow up (a curved start, droop and hooks were rejected); the
+wood works as a branch does (`treeGen/BranchDetail`: parents thinner after
+each child, tapering, two to four side branches per limb ending in the
+masses); and the upper wood stays thick enough to carry its leaves (tips at
+least 1.8-2.5 cm). Rated 8/10 at round 6. Step 6 is done.
+
 ### Step 7 — At a distance
 
 The tree at 40 m and 120 m, then as a billboard. The impostor bake
