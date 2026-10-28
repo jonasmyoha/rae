@@ -1,0 +1,97 @@
+# The low-poly tree set (lowPolyTrees/LowPolyTrees, docs/tree-sets-design.md
+# step 2) builds every species as it did at rae 4d28e11d. The coverage lines
+# are case 1228 as it was at that commit, run on the low-poly set: each
+# species' middle level covers its near level within 3% from each of 8
+# sides, and its CPU billboard keeps its coverage at 4 mip levels. The
+# percentages must stay the ones 1228 printed then; a change means the
+# museum's trees changed. Then each species' triangles at both levels.
+import Math
+open treeSets/TreeSet
+open lowPolyTrees/LowPolyTrees
+open app3d/TreeCoverage
+open app3d/SpriteBake
+
+const pictureMipLevels: Int = 4
+
+# A species' near level from the side, 192 x 128 pixels
+func speciesPicture(species: view Int) ret SpritePicture {
+  ret bakeSpritePicture(
+    parts: speciesLevelMeshes(species: species, patches: nearPatches, leaves: nearLeaves)
+    colors: speciesAlbedos(species: species)
+    width: 192
+    height: 128
+    aspect: 1.5
+  )
+}
+
+func percent(share: view Float) ret Int {
+  ret (share * 100.0 + 0.5).toInt()
+}
+
+func triangles(meshes: view List(MeshData)) ret Int {
+  var count: Int = 0
+  loop let mesh: view MeshData in meshes {
+    count = count + mesh.indices.length / 3
+  }
+  ret count
+}
+
+func main() ret Int {
+  let treeSet: TreeSet = createLowPolyTrees()
+  log("{treeSet.name}: {treeSpeciesCount(treeSet: treeSet)} species")
+  var failures: Int = 0
+  loop var species: Int = 0, species < lowPolySpeciesCount, ++species {
+    let name: String = speciesOf(treeSet: treeSet, species: species).name
+    let shares: List(Float) = levelCoverageShares(
+      near: speciesLevelParts(species: species, patches: nearPatches, leaves: nearLeaves)
+      level: speciesLevelParts(species: species, patches: midPatches, leaves: midLeaves)
+      directions: 8
+      resolution: 256
+    )
+    var low: Float = 10.0
+    var high: Float = 0.0
+    loop let share: view Float in shares {
+      low = Math.min(a: low, b: share)
+      high = Math.max(a: high, b: share)
+    }
+    let fits: Bool = low >= 0.97 and high <= 1.03
+    if fits is false {
+      failures = failures + 1
+    }
+    log(
+      "{name}: middle covers {percent(share: low)}-{percent(share: high)}% of the near crown ={fits}"
+    )
+    let picture: SpritePicture = speciesPicture(species: species)
+    let full: Float = pictureCoverage(picture: picture, cutoff: spriteCutoff)
+    let chain: List(SpritePicture) = spriteMipChain(
+      picture: picture
+      mips: pictureMipLevels
+      cutoff: spriteCutoff
+    )
+    var mipLow: Float = 10.0
+    var mipHigh: Float = 0.0
+    loop let level: view SpritePicture in chain {
+      let share: Float = pictureCoverage(picture: level, cutoff: spriteCutoff) / full
+      mipLow = Math.min(a: mipLow, b: share)
+      mipHigh = Math.max(a: mipHigh, b: share)
+    }
+    let mipsFit: Bool = mipLow >= 0.97 and mipHigh <= 1.03
+    if mipsFit is false {
+      failures = failures + 1
+    }
+    log(
+      "  its billboard's {chain.length} mip levels keep {percent(share: mipLow)}-{percent(
+        share: mipHigh
+      )}% of its coverage ={mipsFit}"
+    )
+    let nearTriangles: Int = triangles(
+      meshes: speciesLevelMeshes(species: species, patches: nearPatches, leaves: nearLeaves)
+    )
+    let midTriangles: Int = triangles(
+      meshes: speciesLevelMeshes(species: species, patches: midPatches, leaves: midLeaves)
+    )
+    log("  triangles: {nearTriangles} near, {midTriangles} middle")
+  }
+  log("every middle level and billboard mip within 3%: {failures is 0}")
+  ret 0
+}

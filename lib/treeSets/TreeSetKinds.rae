@@ -6,7 +6,8 @@ open app3d/PropField
 open app3d/PropInstancer
 open GbufferSprite
 open treeSets/TreeSet
-open treeSets/stylized/StylizedTrees
+open stylizedTrees/StylizedTrees
+open lowPolyTrees/LowPolyTrees
 
 # Every species of `treeSet` as a kind of `field`, at its levels of detail:
 # `midDistance` is where the sparser crowns end (keep it inside the
@@ -28,6 +29,15 @@ func addTreeSetKinds(
       farDistance: farDistance
     )
   }
+  if treeSet.style is TreeSetStyle.lowPoly {
+    addLowPolyForestKinds(
+      field: field
+      renderer: renderer
+      sprites: sprites
+      midDistance: midDistance
+      farDistance: farDistance
+    )
+  }
 }
 
 # The bushes of `treeSet`: one instancer per leaf tone
@@ -36,5 +46,8 @@ func createTreeSetBushParts(
   renderer: mod DeferredRenderer
   capacity: view Int
 ) ret List(PropInstancer) {
+  if treeSet.style is TreeSetStyle.lowPoly {
+    ret createLowPolyBushParts(renderer: renderer, capacity: capacity)
+  }
   ret createStylizedBushParts(renderer: renderer, capacity: capacity)
 }

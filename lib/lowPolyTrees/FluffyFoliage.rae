@@ -1,0 +1,268 @@
+# lowPolyTrees/FluffyFoliage — procgen/FluffyFoliage as it was at rae 4d28e11d, frozen for the
+# low-poly set (lowPolyTrees/LowPolyTrees, docs/tree-sets-design.md).
+# Broad scalloped leaf patches over clustered crown envelopes. Opaque geometry
+# keeps the same silhouette in the G-buffer and shadows, without alpha overdraw.
+# Meshes are local-space, deterministic and independent of any renderer/owner.
+import Math
+open Vec3
+open Noise
+open Mesh3d
+open lowPolyTrees/Foliage
+open lowPolyTrees/Spruce
+
+enum FluffyForm {
+  broadleaf
+  bush
+  cypress
+  umbrella
+  spruce
+}
+
+# One shallow, lobed leaf patch: 13 vertices and 24 double-sided triangles.
+# Lighting normals follow the crown rather than the individual flat patch.
+func fluffyPatch(
+  mesh: mod MeshData
+  center: view Vec3
+  normal: view Vec3
+  size: view Float
+  angle: view Float
+) {
+  let basis: Vec3 = foliageBasis(direction: normal)
+  let tangent: Vec3 = vcross(a: normal, b: basis)
+  let side: Vec3 = vadd(
+    a: vscale(a: basis, s: Math.cos(x: angle))
+    b: vscale(a: tangent, s: Math.sin(x: angle))
+  )
+  let across: Vec3 = vcross(a: normal, b: side)
+  let first: Int = mesh.vertCount
+  foliageVertex(
+    mesh: mesh
+    point: vadd(a: center, b: vscale(a: normal, s: size * 0.18))
+    normal: normal
+  )
+  loop var i: Int = 0, i < 12, ++i {
+    let phase: Float = i.toFloat() * 6.2831853 / 12
+    var radius: Float = size
+    if i % 2 is 1 {
+      radius = radius * 0.90
+    }
+    let offset: Vec3 = vadd(
+      a: vscale(a: side, s: Math.cos(x: phase) * radius)
+      b: vscale(a: across, s: Math.sin(x: phase) * radius * 0.83)
+    )
+    foliageVertex(
+      mesh: mesh
+      point: vadd(a: center, b: offset)
+      normal: vnorm(a: vadd(a: normal, b: vscale(a: offset, s: 0.18 / size)))
+    )
+    let next: Int = first + 1 + (i + 1) % 12
+    mesh.indices.add(value: first)
+    mesh.indices.add(value: first + 1 + i)
+    mesh.indices.add(value: next)
+    mesh.indices.add(value: first)
+    mesh.indices.add(value: next)
+    mesh.indices.add(value: first + 1 + i)
+  }
+  foliagePivot(mesh: mesh, first: first, pivot: center)
+}
+
+# The patch count a crown's outline is drawn at: the full level of detail.
+# A crown of fewer, bigger patches keeps that crown's outline and covered
+# area (docs/tree-lod-design.md §2.1): each bigger patch is pulled inward so
+# it reaches no further than the full crown's patches, and sized so the
+# crown covers as much as the full one.
+const fluffyOutlinePatches: Int = 48
+
+# How far inward (in shares of the extra half size) a bigger patch is pulled:
+# its outer edge back where a full crown's patch reaches
+const fluffyCoarsePull: Float = 1.0
+
+# How much of a bigger patch's extra size a form keeps, so the coarser crown
+# covers the full one's area: tuned with app3d/TreeCoverage within 3% from
+# every side. A flat crown (the umbrella pine) keeps less: a disc at its rim
+# overhangs above and below its thin layer, which no inward pull undoes.
+func fluffyCoarseSize(form: view FluffyForm) ret Float {
+  if form is FluffyForm.umbrella {
+    ret 0.62
+  }
+  ret 0.9
+}
+
+# Count changes only patch density: crown centers and bounds keep their seed.
+# A game can build discrete levels once, cache handles, then select by distance.
+func fluffyCrown(
+  mesh: mod MeshData
+  center: view Vec3
+  radius: view Vec3
+  seed: view Int
+  patchCount: view Int
+  tone: view Int
+  coarseSize: view Float
+) {
+  if patchCount < 4 {
+    ret
+  }
+  let shell: Float = radius.x * radius.y + radius.z * radius.x + radius.y * radius.z
+  let fullSize: Float = Math.sqrt(x: shell / fluffyOutlinePatches.toFloat()) * 1.8
+  var patchSize: Float = Math.sqrt(x: shell / patchCount.toFloat()) * 1.8
+  # A coarser crown: its patches' extra half size, pulled back inside
+  let extra: Float = Math.max(a: patchSize - fullSize, b: 0.0)
+  if extra > 0.0 {
+    patchSize = fullSize + extra * coarseSize
+  }
+  let pull: Float = extra * 0.5 * fluffyCoarsePull
+  loop var i: Int = 0, i < patchCount, ++i {
+    if i % 3 is not tone {
+      continue
+    }
+    let vertical: Float = 1.0 - 2.0 * (i.toFloat() + 0.5) / patchCount.toFloat()
+    let radial: Float = Math.sqrt(x: 1.0 - vertical * vertical)
+    let angle: Float = i.toFloat() * 2.399963 + seed.toFloat() * 0.13
+    let direction: Vec3 = Vec3.create(
+      x: radial * Math.cos(x: angle)
+      y: radial * Math.sin(x: angle)
+      z: vertical
+    )
+    let depth: Float = 0.85 + hash2(x: i, y: 7, seed: seed) * 0.15
+    let onShell: Vec3 = Vec3.create(
+      x: direction.x * radius.x * depth
+      y: direction.y * radius.y * depth
+      z: direction.z * radius.z * depth
+    )
+    let point: Vec3 = vadd(a: center, b: vsub(a: onShell, b: vscale(a: vnorm(a: onShell), s: pull)))
+    fluffyPatch(
+      mesh: mesh
+      center: point
+      normal: vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: direction.z + 0.25))
+      size: patchSize * (0.85 + hash2(x: i, y: 8, seed: seed) * 0.3)
+      angle: angle
+    )
+  }
+}
+
+# Unit-height forms; scale instances uniformly to preserve leaf proportions.
+# broadleaf/umbrella: seven clusters, bush: five, cypress: nine.
+# Spruce uses continuous branch skirts instead of leaf patches.
+func fluffyLeaves(
+  form: view FluffyForm
+  seed: view Int
+  patchCount: view Int
+  tone: view Int
+) ret MeshData {
+  if form is FluffyForm.spruce {
+    ret spruceLeaves(seed: seed, detail: patchCount, tone: tone)
+  }
+  var mesh: MeshData = foliageMesh()
+  var clusters: Int = 7
+  if form is FluffyForm.bush {
+    clusters = 5
+  }
+  if form is FluffyForm.cypress {
+    clusters = 9
+  }
+  loop var i: Int = 0, i < clusters, ++i {
+    let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
+    let spread: Float = 0.12 + hash2(x: i, y: 11, seed: seed) * 0.10
+    var center: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * spread
+      y: Math.sin(x: angle) * spread
+      z: 0.64 + hash2(x: i, y: 12, seed: seed) * 0.18
+    )
+    var radius: Vec3 = Vec3.create(x: 0.24, y: 0.22, z: 0.24)
+    if form is FluffyForm.bush {
+      center.z = 0.23 + hash2(x: i, y: 12, seed: seed) * 0.13
+      radius = Vec3.create(x: 0.25, y: 0.23, z: 0.25)
+    } else if form is FluffyForm.cypress {
+      let fraction: Float = i.toFloat() / 8
+      let width: Float = 0.13 * (1.0 - fraction * 0.78)
+      center = Vec3.create(
+        x: Math.cos(x: angle) * 0.025
+        y: Math.sin(x: angle) * 0.025
+        z: 0.22 + fraction * 0.70
+      )
+      radius = Vec3.create(x: width, y: width, z: 0.17 - fraction * 0.08)
+    } else if form is FluffyForm.umbrella {
+      center.x = center.x * 1.65
+      center.y = center.y * 1.65
+      center.z = 0.76 + hash2(x: i, y: 12, seed: seed) * 0.08
+      radius = Vec3.create(x: 0.28, y: 0.26, z: 0.15)
+    }
+    fluffyCrown(
+      mesh: mesh
+      center: center
+      radius: radius
+      seed: seed + i * 71
+      patchCount: patchCount
+      tone: tone
+      coarseSize: fluffyCoarseSize(form: form)
+    )
+  }
+  ret mesh
+}
+
+func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  if form is FluffyForm.bush {
+    ret mesh
+  }
+  if form is FluffyForm.spruce {
+    foliageLimb(
+      mesh: mesh
+      start: Vec3.create(x: 0, y: 0, z: -0.03)
+      direction: Vec3.create(x: 0, y: 0, z: 1)
+      length: 1.0
+      rise: 0
+      startRadius: 0.025
+      endRadius: 0.003
+      sides: 9
+    )
+    loop var branch: Int = 0, branch < 30, ++branch {
+      let tier: Int = branch / 5
+      let fraction: Float = tier.toFloat() / 6
+      let turn: Float = (branch % 5).toFloat() * 1.256637 + tier.toFloat() * 0.63
+      foliageLimb(
+        mesh: mesh
+        start: Vec3.create(x: 0, y: 0, z: 0.24 + tier.toFloat() * 0.12)
+        direction: Vec3.create(x: Math.cos(x: turn), y: Math.sin(x: turn), z: -0.12)
+        length: 0.16 * (1.0 - fraction * 0.88)
+        rise: 0.20
+        startRadius: 0.009 * (1.0 - fraction * 0.7)
+        endRadius: 0.003
+        sides: 5
+      )
+    }
+    ret mesh
+  }
+  foliageLimb(
+    mesh: mesh
+    start: Vec3.create(x: 0, y: 0, z: -0.02)
+    direction: Vec3.create(x: 0.04, y: 0, z: 1)
+    length: 0.82
+    rise: 0
+    startRadius: 0.035
+    endRadius: 0.008
+    sides: 7
+  )
+  if form is not FluffyForm.cypress {
+    loop var i: Int = 0, i < 7, ++i {
+      let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
+      var spread: Float = 0.24
+      if form is FluffyForm.umbrella {
+        spread = 0.35
+      }
+      foliageLimb(
+        mesh: mesh
+        start: Vec3.create(x: 0.02, y: 0, z: 0.40)
+        direction: vnorm(
+          a: Vec3.create(x: Math.cos(x: angle) * spread, y: Math.sin(x: angle) * spread, z: 0.30)
+        )
+        length: 0.43
+        rise: 0.12
+        startRadius: 0.018
+        endRadius: 0.004
+        sides: 5
+      )
+    }
+  }
+  ret mesh
+}
