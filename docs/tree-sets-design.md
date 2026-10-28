@@ -2,7 +2,8 @@
 
 Status: planned (2026-10-28); queued as six steps (§5); steps 1 and 2
 done (0.2.182 and 0.2.183, §5.1, §5.2); step 3 done: the museum and the
-studies' move to the tree lab (§5.3, §5.4); step 4 done (0.2.184, §5.5).
+studies' move to the tree lab (§5.3, §5.4); step 4 done (0.2.184, §5.5); step 5 done
+(0.2.186, §5.6).
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -251,6 +252,25 @@ stylized set uses (found in step 2).
   (`TreeSet.treeSpeciesAt`) from the camera out to 1.9 km on a flat meadow,
   every level in one picture. The 138 gate renders both. Pictures:
   looks-development `rendering/treeSets.html#lod`.
+
+### 5.6 Step 5, the tree-set setting in the tree lab, done (0.2.186)
+
+- The tree lab's forest scene, `RAE_TREELAB_SCENE=forest`
+  (`examples/146_treeLab/LabForest.rae`): a forest of each set, planted the
+  same way, about 16,600 trees from the camera out to 1.9 km in the lab's
+  light. `RAE_TREE_SET=lowPoly|stylized` picks the set shown first
+  (stylized when unset); the T key switches between them (both are built at
+  the start, so a switch is instant and builds nothing).
+  `RAE_TREELAB_CAMERA=high` looks from 35 m. The lab's T02 scene and its
+  studies are unchanged.
+- The lab has no settings panel (it is driven by environment settings and
+  fixed cameras), so the choice is the setting and the T key; a panel
+  choice would first need the editor panel in the lab.
+- The band planting moved into `app3d/TreeForest`
+  (`plantTreeForestBand`, `TreeForestBand`), used by the lab and by 138's
+  lod scene (unchanged: the same 16,646 trees).
+- The 146 gate renders the forest scene with each set; the 138 gate still
+  passes. Pictures: looks-development `rendering/treeSets.html#labForest`.
 
 ## 6. Decisions
 
