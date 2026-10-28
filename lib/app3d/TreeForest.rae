@@ -1,0 +1,192 @@
+# app3d/TreeForest — a forest of one tree set (treeSets/TreeSet) at every
+# distance, for an app that is not a walker: the trees' near and middle
+# meshes and their billboards (app3d/PropField, kinds built by
+# treeSets/TreeSetKinds), past those far billboards (app3d/FarSprites), and
+# past those the far canopy (app3d/FarCanopy: one cluster impostor a forest
+# cell). The app plants it (addPropPlacement on `field`), finishes it once
+# (finishTreeForest), then each frame gathers it before its shadow and scene
+# passes and draws it in both. The walkers' terrain (app3d/WalkerTerrain)
+# holds the same parts itself.
+import Math
+import RendererDeferred
+import RendererDeferredShadow
+open Scene3d
+open Gbuffer
+open GbufferSprite
+open gpu/GpuResources
+open app3d/PropField
+open app3d/PropFieldFrame
+open app3d/FarSprites
+open app3d/FarCanopy
+open CanopyBake
+open treeSets/TreeSet
+open treeSets/TreeSetKinds
+
+# Where a forest's levels end: the field's square round the origin (m) and
+# its cells (m); the sparser crowns end at midDistance, the field's own
+# billboards at farDistance, the far billboards at canopyFrom (where the far
+# canopy fades in over canopyFadeWidth), and nothing is drawn past
+# farReach
+type TreeForestSettings {
+  extent: Float
+  cellSize: Float
+  midDistance: Float
+  farDistance: Float
+  canopyFrom: Float
+  canopyFadeWidth: Float
+  farReach: Float
+}
+
+type TreeForest {
+  field: PropField
+  sprites: SpriteCache
+  farTrees: FarSprites
+  canopy: FarCanopy
+  toon: Bool
+}
+
+# The walkers' distances (app3d/WideForest, app3d/WalkerTerrain): sparser
+# crowns from 60 m, billboards from 140 m, far billboards to the canopy at
+# 300 m, the canopy to `farReach`
+func defaultTreeForestSettings(extent: view Float, farReach: view Float) ret TreeForestSettings {
+  ret TreeForestSettings {
+    extent: extent
+    cellSize: 40.0
+    midDistance: 60.0
+    farDistance: 140.0
+    canopyFrom: 300.0
+    canopyFadeWidth: 60.0
+    farReach: farReach
+  }
+}
+
+# An empty forest of `treeSet`'s species (its kinds, billboard pictures and
+# impostors are built here), no trees yet
+func createTreeForest(
+  treeSet: view TreeSet
+  renderer: mod DeferredRenderer
+  settings: view TreeForestSettings
+  toon: view Bool
+) ret TreeForest {
+  var sprites: SpriteCache = createSpriteCache()
+  var field: PropField = createPropField(
+    originX: settings.extent * -0.5
+    originY: settings.extent * -0.5
+    size: settings.extent
+    cellSize: settings.cellSize
+  )
+  addTreeSetKinds(
+    treeSet: treeSet
+    field: field
+    renderer: renderer
+    sprites: sprites
+    midDistance: settings.midDistance
+    farDistance: settings.farDistance
+  )
+  # The far billboards from where the field's own end to where the canopy
+  # holds every tree (a tree is measured from its cluster's center, up to
+  # 40 m away)
+  var farSettings: FarSpriteSettings = defaultFarSpriteSettings()
+  farSettings.nearDistance = settings.farDistance
+  farSettings.farDistance = settings.canopyFrom + settings.canopyFadeWidth * 0.5 + 40.0
+  farSettings.thinFrom = farSettings.farDistance
+  farSettings.fadeOutMiddle = settings.canopyFrom
+  farSettings.fadeOutWidth = settings.canopyFadeWidth
+  ret TreeForest {
+    field: own field
+    sprites: own sprites
+    farTrees: own createFarSprites(settings: farSettings)
+    canopy: own createFarCanopy(
+      settings: {
+        fadeMiddle: settings.canopyFrom
+        fadeWidth: settings.canopyFadeWidth
+        farDistance: settings.farDistance + settings.farReach
+      }
+    )
+    toon: toon
+  }
+}
+
+# Once every tree is planted: the field's cells, its trees as far
+# billboards (in 64 m blocks) and the far canopy baked from the trees'
+# impostors. The number of trees.
+func finishTreeForest(forest: mod TreeForest, renderer: mod DeferredRenderer) ret Int {
+  finishPropField(field: forest.field)
+  var trees: List(FarSprite) = farSpritesOf(
+    field: forest.field
+    placements: forest.field.placements
+  )
+  planFarCanopy(canopy: forest.canopy, field: forest.field, trees: trees)
+  let unusedBlocks: Int = addFarSpritesInCells(
+    farSprites: forest.farTrees
+    sprites: trees
+    cellSize: 64.0
+  )
+  RendererDeferred.ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    bakeFarCanopy(
+      canopy: forest.canopy
+      resources: resources
+      treeAtlas: forest.sprites.impostors.binding
+      settings: defaultCanopySettings()
+      cutoff: spriteCutoff
+    )
+  }
+  ret forest.field.placements.length
+}
+
+# This frame's trees (before the shadow and scene passes, which both draw
+# them). The field's view cone is widened by about 34 degrees, so a tree
+# just outside the picture still casts its shadow into it; the far trees
+# and the canopy are the picture only.
+func gatherTreeForest(forest: mod TreeForest, camera: view Camera3d, aspect: view Float) {
+  var propView: PropView = propViewOf(camera: camera, aspect: aspect)
+  propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
+  gatherPropField(field: forest.field, propView: propView, toon: forest.toon)
+  gatherFarSprites(
+    farSprites: forest.farTrees
+    propView: propViewOf(camera: camera, aspect: aspect)
+    toon: forest.toon
+  )
+  gatherFarCanopy(
+    canopy: forest.canopy
+    propView: propViewOf(camera: camera, aspect: aspect)
+    toon: forest.toon
+  )
+}
+
+# This frame's trees (gathered above) into the open scene pass
+func drawTreeForest(cache: mod GbufferCache, resources: mod GpuResources, forest: mod TreeForest) {
+  drawPropField(cache: cache, resources: resources, field: forest.field)
+  drawPropFieldSprites(
+    cache: cache
+    resources: resources
+    field: forest.field
+    sprites: forest.sprites
+  )
+  drawFarSprites(
+    cache: cache
+    resources: resources
+    farSprites: forest.farTrees
+    sprites: forest.sprites
+  )
+  drawFarCanopy(cache: cache, resources: resources, canopy: forest.canopy)
+}
+
+# The trees' shadows, into the open shadow pass: the meshes and the
+# billboards
+func drawTreeForestShadows(renderer: mod DeferredRenderer, forest: view TreeForest) {
+  drawPropFieldShadows(renderer: renderer, field: forest.field)
+  drawPropFieldSpriteShadows(
+    renderer: renderer
+    field: forest.field
+    aspect: spritePictureAspect
+    cutoff: spriteCutoff
+    impostors: forest.sprites.impostors.binding
+  )
+}
+
+func treeForestShutdown(forest: mod TreeForest, resources: mod GpuResources) {
+  spriteShutdown(cache: forest.sprites, resources: resources)
+  farCanopyShutdown(canopy: forest.canopy, resources: resources)
+}

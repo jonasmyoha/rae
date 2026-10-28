@@ -33,10 +33,13 @@ open app3d/SettingsDialog
 open app3d/UiShell
 open ui/WindowGeometry
 open HotReload
+open app3d/TreeForest
+open GroveLod
 
 # The sun's three cascades, fitted to this frame's camera, with every mesh of
 # the world as a caster. Without `castShadows` (the panel's shadow switch) the
-# cascades stay empty, which is a frame without shadows.
+# cascades stay empty, which is a frame without shadows. The caller draws
+# what else casts (the LOD scene's forest) and ends the pass.
 func renderShadows(
   renderer: mod DeferredRenderer
   world: view World3d
@@ -62,7 +65,6 @@ func renderShadows(
   if castShadows {
     renderSceneShadowWorldWith(renderer: renderer, world: world)
   }
-  endShadowPass(renderer: renderer)
 }
 
 # Everything the window keeps between frames, owned in one value that main's
@@ -81,6 +83,9 @@ type ShowcaseState {
   # live in it (the renderer's mesh store lives in the renderer's)
   gpuResources: opt GpuResources
   grass: GrassCompute
+  # The level-of-detail scene's forest (RAE_GROVE_VIEW=lod, GroveLod); none
+  # for the grove, which has no grass in it
+  forest: opt TreeForest
   wind: WindState = createWindState(settings: defaultWindSettings())
   windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   time: Float
@@ -101,7 +106,16 @@ func createShowcase() ret ShowcaseState {
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  let grove: Grove = buildGrove(renderer: renderer)
+  # The level-of-detail scene is a world of its own (GroveLod)
+  let lodScene: Bool = groveLodRequested(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
+  var grove: Grove = { world: create(), obstacles: List.create(GroveObstacle, cap: 0) }
+  var forest: opt TreeForest = none
+  if lodScene {
+    grove.world = buildGroveLodWorld(renderer: renderer)
+    forest = buildGroveLodForest(renderer: renderer)
+  } else {
+    grove = buildGrove(renderer: renderer)
+  }
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
@@ -138,6 +152,13 @@ func createShowcase() ret ShowcaseState {
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   cameraRig.maxDistance = 120
   setGroveView(camera: camera, cameraRig: cameraRig, groveView: initialView)
+  if lodScene {
+    setGroveLodView(
+      camera: camera
+      cameraRig: cameraRig
+      viewName: Sys.getEnv(name: "RAE_GROVE_VIEW")
+    )
+  }
 
   # The state takes the renderer's GPU handles with it: moved, never copied
   unsafe {
@@ -151,6 +172,7 @@ func createShowcase() ret ShowcaseState {
       windowGeometry: own windowGeometry
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createGroveGrass(obstacles: grove.obstacles)
+      forest: own forest
       time: 0.0
       lastTime: Gpu2d.nowSeconds()
     }
@@ -313,6 +335,9 @@ func runShowcaseFrame(state: mod ShowcaseState) {
 
   let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  if let trees: mod TreeForest = state.forest {
+    gatherTreeForest(forest: trees, camera: state.camera, aspect: aspect)
+  }
   gpuPassTimingBegin(renderer: renderer)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
     let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
@@ -326,6 +351,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
         aspect: aspect
         castShadows: state.editorPanel.settings.shadows
       )
+      if let trees: view TreeForest = state.forest {
+        if state.editorPanel.settings.shadows {
+          drawTreeForestShadows(renderer: renderer, forest: trees)
+        }
+      }
+      endShadowPass(renderer: renderer)
     } else if tag is RenderTag.gbuffer {
       renderGroveGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
     } else if tag is RenderTag.uiOverlay {
@@ -349,16 +380,20 @@ func runShowcaseFrame(state: mod ShowcaseState) {
 # compute pass generated just before
 func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime: view Float) {
   let renderer: mod DeferredRenderer = state.renderer
-  if let resources: mod GpuResources = state.gpuResources {
-    generateGroveGrass(
-      grass: state.grass
-      resources: resources
-      camera: state.camera
-      groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
-      deltaTime: deltaTime
-      wind: windVector(state: state.wind, settings: state.windSettings)
-    )
+  # the LOD scene has no grass
+  if state.forest is none {
+    if let resources: mod GpuResources = state.gpuResources {
+      generateGroveGrass(
+        grass: state.grass
+        resources: resources
+        camera: state.camera
+        groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
+        deltaTime: deltaTime
+        wind: windVector(state: state.wind, settings: state.windSettings)
+      )
+    }
   }
+
   ensureRendererResources(renderer: renderer)
   if let rendererResources: mod GpuResources = renderer.gpuResources {
     Gbuffer.beginPass(
@@ -373,14 +408,20 @@ func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime
       resources: rendererResources
       world: state.sceneWorld
     )
-    if let resources: mod GpuResources = state.gpuResources {
-      grassDraw(
-        grass: state.grass
-        resources: resources
-        gbuffer: renderer.passes.gbuffer
-        gbufferResources: rendererResources
-      )
+    if let trees: mod TreeForest = state.forest {
+      drawTreeForest(cache: renderer.passes.gbuffer, resources: rendererResources, forest: trees)
     }
+    if state.forest is none {
+      if let resources: mod GpuResources = state.gpuResources {
+        grassDraw(
+          grass: state.grass
+          resources: resources
+          gbuffer: renderer.passes.gbuffer
+          gbufferResources: rendererResources
+        )
+      }
+    }
+
     Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: rendererResources)
   }
 }
@@ -389,6 +430,11 @@ func endShowcase(state: mod ShowcaseState) {
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
     shutdown(resources: resources)
+  }
+  if let trees: mod TreeForest = state.forest {
+    if let rendererResources: mod GpuResources = state.renderer.gpuResources {
+      treeForestShutdown(forest: trees, resources: rendererResources)
+    }
   }
   shutdownDeferredRenderer(renderer: state.renderer)
   Gbuffer.shutdownAll()

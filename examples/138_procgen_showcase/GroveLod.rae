@@ -1,0 +1,132 @@
+# The museum's level-of-detail scene (RAE_GROVE_VIEW=lod from eye height,
+# lod-high from 35 m over it,
+# docs/tree-sets-design.md §5 step 4): the low-poly tree set as a forest
+# that runs from the camera out to 1.9 km, so every level the walkers use is
+# in one picture: the full meshes near, the sparser crowns from 30 m, the
+# trees' billboards (impostors baked from every side) from 60 m, far
+# billboards from 140 m and past 300 m the far canopy (app3d/TreeForest).
+# It is a world of its own: a flat meadow and the forest, no island.
+import Math
+import Noise
+open Vec3
+open Scene3d
+open Mesh3d
+open FoliageMesh
+open RendererDeferred
+open app3d/CameraRig
+open app3d/PropField
+open app3d/TreeForest
+open treeSets/TreeSet
+open lowPolyTrees/LowPolyTrees
+
+const groveLodViewName: String = "lod"
+
+# The forest: a band `groveLodWidth` meters wide from groveLodNear to
+# groveLodFar ahead of the camera, a tree every groveLodSpacing meters
+# (moved up to half of that), thinned where a noise says meadow
+const groveLodWidth: Float = 640.0
+
+const groveLodNear: Float = 8.0
+
+const groveLodFar: Float = 1900.0
+
+const groveLodSpacing: Float = 7.0
+
+# The meadow under it: a green plane, a little bigger than the forest
+const groveLodGroundSize: Float = 4400.0
+
+func groveLodRequested(viewName: view String) ret Bool {
+  ret viewName is groveLodViewName or viewName is "lod-high"
+}
+
+# The meadow: one big plane at the ground's height
+func buildGroveLodWorld(renderer: mod DeferredRenderer) ret World3d {
+  var world: World3d = create()
+  let ground: MeshData = makePlane(size: groveLodGroundSize, segments: 1)
+  place(
+    world: world
+    renderer: renderer
+    mesh: ground
+    material: paint(red: groveGroundRed, green: groveGroundGreen, blue: groveGroundBlue)
+    position: Vec3.create(x: 0.0, y: groveLodGroundSize * 0.5 - 200.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    rotation: 0.0
+  )
+  ret world
+}
+
+# The low-poly forest, planted and finished: its stands as the walkers plant
+# theirs (TreeSet.treeSpeciesAt), its meadows from a noise
+func buildGroveLodForest(renderer: mod DeferredRenderer) ret TreeForest {
+  let treeSet: TreeSet = createLowPolyTrees()
+  var forest: TreeForest = createTreeForest(
+    treeSet: treeSet
+    renderer: renderer
+    settings: defaultTreeForestSettings(extent: groveLodFar * 2.0 + 400.0, farReach: 1800.0)
+    toon: true
+  )
+  let columns: Int = (groveLodWidth / groveLodSpacing).toInt()
+  let rows: Int = ((groveLodFar - groveLodNear) / groveLodSpacing).toInt()
+  var number: Int = 0
+  loop var row: Int = 0, row < rows, ++row {
+    loop var column: Int = 0, column < columns, ++column {
+      let x: Float = (column.toFloat() + 0.5) * groveLodSpacing - groveLodWidth * 0.5 + (Noise.hash2(
+        x: column
+        y: row
+        seed: 41
+      ) - 0.5) * groveLodSpacing
+      let y: Float = groveLodNear + (row.toFloat() + 0.5) * groveLodSpacing + (Noise.hash2(
+        x: column
+        y: row
+        seed: 43
+      ) - 0.5) * groveLodSpacing
+      # meadows between the woods, and a clear lane in front of the camera
+      let woods: Float = Noise.hash2(
+        x: Math.floor(x: x / 90.0).toInt()
+        y: Math.floor(x: y / 90.0).toInt()
+        seed: 47
+      )
+      if woods < 0.25 or (Math.abs(value: x) < 6.0 and y < 40.0) {
+        continue
+      }
+      let species: Int = treeSpeciesAt(
+        treeSet: treeSet
+        x: x
+        y: y
+        number: number
+      )
+      addPropPlacement(
+        field: forest.field
+        placement: {
+          kind: species
+          position: Vec3.create(x: x, y: y, z: 0.0)
+          yaw: Noise.hash2(x: column, y: row, seed: 53) * 6.2831853
+          scale: treeScaleAt(treeSet: treeSet, species: species, number: number)
+        }
+      )
+      number = number + 1
+    }
+  }
+  let planted: Int = finishTreeForest(forest: forest, renderer: renderer)
+  log("[grove-lod] {planted} low-poly trees, {groveLodNear}-{groveLodFar} m")
+  ret forest
+}
+
+# The camera at eye height looking down the forest's lane, or (lod-high)
+# 35 m over the lane looking down the forest, every level in view
+func setGroveLodView(camera: mod Camera3d, cameraRig: mod CameraRig, viewName: view String) {
+  cameraRig.mode = CameraRigMode.orbit
+  camera.target = Vec3.create(x: 0.0, y: 30.0, z: 2.6)
+  camera.farZ = 2600
+  cameraRig.yaw = 0.0
+  cameraRig.orbitPitch = 0.02
+  cameraRig.distance = 40.0
+  cameraRig.maxDistance = 400.0
+  if viewName is "lod-high" {
+    camera.target = Vec3.create(x: 0.0, y: 150.0, z: 0.0)
+    cameraRig.orbitPitch = 0.22
+    cameraRig.distance = 160.0
+  }
+  snapCameraRigView(rig: cameraRig)
+  applyCameraRig(rig: cameraRig, camera: camera)
+}

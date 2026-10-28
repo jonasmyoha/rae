@@ -6,8 +6,10 @@ first birch), on the frozen low-poly tree set (`lib/lowPolyTrees/`), ported to
 today's Rae (the light in real units, the shared grass and editor panel of
 today). Its look is not to change. The later studies (birch, ginkgo, maples,
 forks, flowers) belong to the stylized tree set and leave this example for
-the tree lab (146). The text below is the example's own description from
-that time.
+the tree lab (146). One scene is new: `RAE_GROVE_VIEW=lod` (and `lod-high`,
+from 35 m) shows the low-poly set as a forest at every distance, from the
+full meshes near to the far canopy at 1.9 km (`GroveLod.rae`). The text below
+is the example's own description from that time.
 
 A procedural prop showcase with about sixty trees (including the six original
 autumn trees and a woodland of the leaf-patch forms over the whole island), rock
