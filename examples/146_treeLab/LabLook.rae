@@ -1,70 +1,23 @@
 # The tree lab's scene look (docs/reference-tree-plan.md step 2), aimed at
-# reference crop T02: a warm sun and cooler shade and sky light, haze that
-# grows with distance (far trees paler and bluer), a tone curve and color
-# grade toward T02's olive greens with teal shadows and warm highlights, and
-# a soft glow. All of it is the renderer's own settings (the sky, the mist,
-# the grade, the bloom); nothing in lib/ changes. RAE_TREELAB_LOOK=plain
-# keeps the renderer's defaults, for a before/after picture.
+# reference crop T02: the shared lib look app3d/SceneLook.labSceneLook (sky
+# haze, cooler sky light, mist, grade, glow) with the lab's own fixed sun and
+# exposure. RAE_TREELAB_LOOK=plain keeps the renderer's defaults, for a
+# before/after picture.
 import Sys
 import Vec3
 open Scene3d
 open Sky
 open RendererDeferred
-open RendererMist
-open GbufferPasses
-open GbufferBloom
+open app3d/SceneLook
 
-type LabLook {
-  # The sun's color and strength (linear): warm, late morning
-  sunColor: Vec3
-  # The whole frame's exposure: T02 is a dark, shaded forest picture
-  exposure: Float
-  # Sky haze (2 very clear .. 10 foggy): a slightly hazy summer day
-  turbidity: Float
-  # How blue the sky light on surfaces is (0 gray .. 1 the sky's own)
-  ambientSaturation: Float
-  mist: MistSettings
-  grade: ColorGrade
-  bloom: BloomSettings
-}
+# The lab's sun (lux: a warm, strong, late-morning sun) and exposure (T02 is
+# a dark, shaded forest picture); the walkers keep their own
+const labSunLux: Vec3 = { x: 66000.0, y: 57000.0, z: 44000.0 }
+
+const labExposure: Float = 0.7
 
 func labLookPlain() ret Bool {
   ret Sys.getEnv(name: "RAE_TREELAB_LOOK") is "plain"
-}
-
-func labLook() ret LabLook {
-  ret LabLook {
-    # lux: a warm, strong sun
-    sunColor: Vec3.create(x: 66000.0, y: 57000.0, z: 44000.0)
-    exposure: 0.7
-    turbidity: 4.5
-    ambientSaturation: 0.35
-    # About a sixth of the light gone at 90 m near the ground, thinning
-    # upward: the forest band behind the tree turns paler and bluer with
-    # depth, the sky above stays clear
-    mist: MistSettings {
-      density: 0.0022
-      falloff: 0.03
-      baseHeight: 0.0
-      tint: Vec3.create(x: 0.92, y: 1.0, z: 1.05)
-      paleness: 0.3
-    }
-    # ACES, then a gentle punch, a little vibrance for the dull greens, teal
-    # added in the shadows and warm in the highlights (small: they are added)
-    grade: ColorGrade {
-      pbrNeutral: false
-      contrast: 1.12
-      vibrance: 0.18
-      saturation: 1.04
-      shadowTint: Vec3.create(x: 0.0, y: 0.035, z: 0.05)
-      shadowTintStrength: 1.0
-      highlightTint: Vec3.create(x: 0.06, y: 0.04, z: 0.0)
-      highlightTintStrength: 1.0
-    }
-    # 30% of the way from the first, too weak glow (0.95, 0.15, 0.12) toward
-    # the renderer's default (0.9, 0.2, 0.25), which is too strong here
-    bloom: BloomSettings { enabled: true, threshold: 0.935, knee: 0.165, intensity: 0.16 }
-  }
 }
 
 # Set the look on the renderer and the sun. With RAE_TREELAB_LOOK=plain only
@@ -77,17 +30,15 @@ func applyLabLook(renderer: mod DeferredRenderer, light: mod Light3d) {
     )
     ret
   }
-  let look: LabLook = labLook()
-  light.sunColor = look.sunColor
-  light.exposure = look.exposure
+  let look: SceneLook = labSceneLook()
+  light.sunColor = labSunLux
+  light.exposure = labExposure
   var sky: Sky = createSkyProcedural(
     sunDir: light.sunDir
     sunColor: light.sunColor
     turbidity: look.turbidity
   )
-  sky.ambientSaturation = look.ambientSaturation
+  applySceneLookSky(sky: sky, look: look)
   setRendererSky(renderer: renderer, sky: sky)
-  setMist(renderer: renderer, mist: look.mist)
-  renderer.grade = look.grade
-  setBloom(renderer: renderer, settings: look.bloom)
+  applySceneLook(renderer: renderer, look: look, mistBase: 0.0)
 }

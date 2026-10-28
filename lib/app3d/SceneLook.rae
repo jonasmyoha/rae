@@ -1,0 +1,148 @@
+# app3d/SceneLook — a scene's look as named values (the reference-tree
+# work's step 9 proposal): the sky's haze, how blue the sky light on
+# surfaces is, a tint on the sun's color, the height mist, the color grade
+# and the bloom. The tree lab's look (labSceneLook, made for reference crop
+# T02) and the walkers' own (walkerSceneLook: a turbidity of 3, the sky's
+# full color in its light, no sun tint, and the renderer's own mist, grade
+# and bloom left as they are). The tree lab (146) uses the lab's; the
+# walkers (136, 137, 143) keep theirs unless RAE_SCENE_LOOK=lab.
+import Sys
+import Vec3
+open Scene3d
+open Sky
+open RendererDeferred
+open RendererMist
+open GbufferPasses
+open GbufferBloom
+open SkyHosek
+open app3d/SettingsDialog
+open app3d/SettingsSky
+
+type SceneLook {
+  name: String
+  # Sky haze (2 very clear .. 10 foggy)
+  turbidity: Float
+  # How blue the sky light on surfaces is (0 gray .. 1 the sky's own)
+  ambientSaturation: Float
+  # Multiplies the sun's color, at about the same brightness (its luminance
+  # about 1): a warm sun is red above 1 and blue below
+  sunTint: Vec3
+  # The mist; its base height is the scene's own (applySceneLook keeps the
+  # caller's)
+  mist: MistSettings
+  grade: ColorGrade
+  bloom: BloomSettings
+  # false: the look leaves the renderer's mist, grade and bloom as the app
+  # set them (applySceneLook does nothing)
+  setsRenderer: Bool = true
+}
+
+# The tree lab's look, aimed at T02: a slightly hazy summer day, a warm sun
+# (the lab's 66,000 / 57,000 / 44,000 lux, as a tint), cooler sky light, a
+# mist that pales the far trees, a tone curve and grade toward T02's olive
+# greens with teal shadows and warm highlights, and a soft glow
+func labSceneLook() ret SceneLook {
+  ret SceneLook {
+    name: "lab"
+    turbidity: 4.5
+    ambientSaturation: 0.35
+    sunTint: Vec3.create(x: 1.138, y: 0.983, z: 0.759)
+    # About a sixth of the light gone at 90 m near the ground, thinning
+    # upward: the forest behind turns paler and bluer with depth, the sky
+    # above stays clear
+    mist: MistSettings {
+      density: 0.0022
+      falloff: 0.03
+      baseHeight: 0.0
+      tint: Vec3.create(x: 0.92, y: 1.0, z: 1.05)
+      paleness: 0.3
+    }
+    # ACES, then a gentle punch, a little vibrance for the dull greens, teal
+    # added in the shadows and warm in the highlights (small: they are added)
+    grade: ColorGrade {
+      pbrNeutral: false
+      contrast: 1.12
+      vibrance: 0.18
+      saturation: 1.04
+      shadowTint: Vec3.create(x: 0.0, y: 0.035, z: 0.05)
+      shadowTintStrength: 1.0
+      highlightTint: Vec3.create(x: 0.06, y: 0.04, z: 0.0)
+      highlightTintStrength: 1.0
+    }
+    # 30% of the way from a too weak glow (0.95, 0.15, 0.12) toward the
+    # renderer's default (0.9, 0.2, 0.25), which is too strong here
+    bloom: BloomSettings { enabled: true, threshold: 0.935, knee: 0.165, intensity: 0.16 }
+  }
+}
+
+# The walkers' own look, as it was before the lab's could be chosen
+func walkerSceneLook() ret SceneLook {
+  ret SceneLook {
+    name: "walker"
+    turbidity: 3.0
+    ambientSaturation: 1.0
+    sunTint: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    mist: defaultMistSettings()
+    grade: neutralGrade()
+    bloom: defaultBloomSettings()
+    setsRenderer: false
+  }
+}
+
+# The walkers' look: the lab's with RAE_SCENE_LOOK=lab, else their own
+func walkerSceneLookFromEnv() ret SceneLook {
+  if Sys.getEnv(name: "RAE_SCENE_LOOK") is "lab" {
+    ret labSceneLook()
+  }
+  ret walkerSceneLook()
+}
+
+# Set the look's mist (at `mistBase`, the scene's own base height), grade
+# and bloom on the renderer
+func applySceneLook(renderer: mod DeferredRenderer, look: view SceneLook, mistBase: view Float) {
+  if not look.setsRenderer {
+    ret
+  }
+  var mist: MistSettings = look.mist
+  mist.baseHeight = mistBase
+  setMist(renderer: renderer, mist: mist)
+  renderer.grade = look.grade
+  setBloom(renderer: renderer, settings: look.bloom)
+}
+
+# The look's sky light on a sky built at the look's turbidity
+func applySceneLookSky(sky: mod Sky, look: view SceneLook) {
+  sky.ambientSaturation = look.ambientSaturation
+}
+
+# The sun's color with the look's tint
+func sceneLookSun(look: view SceneLook, sunColor: view Vec3) ret Vec3 {
+  ret Vec3.create(
+    x: sunColor.x * look.sunTint.x
+    y: sunColor.y * look.sunTint.y
+    z: sunColor.z * look.sunTint.z
+  )
+}
+
+# The walkers' sky from the settings panel, at the look's turbidity and with
+# its sky light (ground albedo 0.3)
+func walkerSky(
+  settingsState: view SettingsState
+  hosek: view HosekDataset
+  look: view SceneLook
+) ret Sky {
+  var sky: Sky = settingsBuildSky(
+    settingsState: settingsState
+    data: hosek
+    turbidity: look.turbidity
+    groundAlbedo: 0.30
+  )
+  applySceneLookSky(sky: sky, look: look)
+  ret sky
+}
+
+# The walkers' key light (the sun, or the moon at night), with the look's
+# tint on the sun
+func walkerSunColor(settingsState: view SettingsState, look: view SceneLook) ret Vec3 {
+  ret sceneLookSun(look: look, sunColor: settingsKeyLightColor(settingsState: settingsState))
+}
