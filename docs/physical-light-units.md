@@ -165,7 +165,14 @@ the settings panel's Exposure row starts there). The editor-panel examples
 balance, so they start at `EditorPanel.editorPanelSunNoonLux` = 20,000 lux
 (0.2.179; 0.2.178 had washed them out). The settings panel's sun slider
 ("Sun 100,000 lux at noon", just above Moon; 5,000 to 150,000 lux, even in
-ratio) changes the sun in every app. The real value means later
+ratio) changes the sun in every app. Since 0.2.180 the panel groups the
+light under "Light", right after the sky: the sun slider, Moon, the
+exposure, an "Automatic exposure" toggle and Darker / Brighter. The toggle
+shows how each app runs (the walker on, the editor-panel examples off) and
+switches it: the editor-panel examples call
+`EditorPanel.editorPanelExposureFrame` every frame for it, within the same
+look range as the walker (`AutoExposure.lookExposureOpenStops` /
+`lookExposureCloseStops`). The real value means later
 light fits without retuning; the half stop keeps noon's sunlit sand from
 washing out. The editor-panel examples keep 0 EV. `RAE_SUN_LUX=<lux>` still
 tries another sun.

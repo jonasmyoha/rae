@@ -424,6 +424,13 @@ func main() ret Int {
       uiState.paused = editorPanel.settings.playing is false
       stateDirty = true
     }
+    # The panel's automatic exposure, when it is switched on
+    let exposureAdapting: Bool = editorPanelExposureFrame(
+      editorPanel: editorPanel
+      renderer: renderer
+      light: light
+      deltaTime: deltaTime
+    )
 
     # The frame is only worth drawing if something it depends on changed.
     # While paused the 3D scene is frozen, so the presented image is still
@@ -440,7 +447,7 @@ func main() ret Int {
     }
     let logChanged: Bool = logOverlay.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or logChanged or timeAnimating or renderedOnce is false
-    if taaSettleFrames > 0 {
+    if taaSettleFrames > 0 or exposureAdapting {
       needsRender = true
     }
     dbgDidWork = needsRender
