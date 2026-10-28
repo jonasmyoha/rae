@@ -15,7 +15,7 @@
 #
 # The pictures are the PropField's (app3d/SpriteBake layers of GbufferSprite's
 # image array): farSpritesOf makes a field's placements into far sprites, its
-# kinds' layers and heights, with the same view centre the field measures its
+# kinds' layers and heights, with the same view center the field measures its
 # levels' distances from, so the two hand over at `nearDistance` with no gap.
 # Set `nearDistance` to where the field's last (billboard) level ends.
 #
@@ -37,7 +37,7 @@ open app3d/PropField
 open app3d/PropFade
 open GbufferRecord
 
-# One far billboard: its foot, how high over it its view centre is (what its
+# One far billboard: its foot, how high over it its view center is (what its
 # distance is measured from), its height in the world and its picture's layer;
 # `keep` (0..1, from its place) decides whether thinning keeps it
 type FarSprite {
@@ -47,9 +47,9 @@ type FarSprite {
   yaw: Float
   layer: Int
   keep: Float
-  # The centre of the far canopy cluster it stands in (app3d/FarCanopy):
+  # The center of the far canopy cluster it stands in (app3d/FarCanopy):
   # its fade out is measured from there, as the cluster's fade in is
-  fadeCentre: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  fadeCenter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 }
 
 type FarSpriteSettings {
@@ -149,7 +149,7 @@ func farSpriteAt(
 
 # The placements of `field`'s kinds that have a picture (setPropKindSprite),
 # as far billboards: the picture's layer and height and the kind's view
-# centre, at each placement's scale
+# center, at each placement's scale
 func farSpritesOf(field: view PropField, placements: view List(PropPlacement)) ret List(FarSprite) {
   var sprites: List(FarSprite) = List.create(FarSprite, cap: placements.length)
   loop let placement: view PropPlacement in placements {
@@ -381,7 +381,7 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
         var fadeShare: Float = 0.0
         if settings.fadeOutWidth > 0.0 {
           fadeShare = propBandShare(
-            distance: Vec3.vlen(a: Vec3.vsub(a: sprite.fadeCentre, b: propView.eye))
+            distance: Vec3.vlen(a: Vec3.vsub(a: sprite.fadeCenter, b: propView.eye))
             middle: settings.fadeOutMiddle
             width: settings.fadeOutWidth
           )
@@ -404,7 +404,7 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
             slot: before
             threshold: fadeShare
             fadingIn: false
-            seed: propFadeSeed(x: sprite.fadeCentre.x, y: sprite.fadeCentre.y)
+            seed: propFadeSeed(x: sprite.fadeCenter.x, y: sprite.fadeCenter.y)
           )
         }
         farSprites.drawn = farSprites.drawn + 1

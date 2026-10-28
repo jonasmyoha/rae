@@ -54,10 +54,10 @@ type Gpu2dUi {
 
 # #764: seed a freshly-created UiWorld's theme resource from the app's owned
 # Gpu2dUi. `active` is a plain value struct (RgbaColor slots, no heap) so the
-# assignment is a safe copy; the scene-deserialiser token subsets are deep-copied
+# assignment is a safe copy; the scene-deserializer token subsets are deep-copied
 # into `theme.resolved` via applyResolvedTokens (idempotent on `.ok`). Call once,
-# right after createUiWorld and BEFORE loadScene/mountUiScene, so token/colour
-# resolution during deserialisation sees the app's theme rather than the default.
+# right after createUiWorld and BEFORE loadScene/mountUiScene, so token/color
+# resolution during deserialization sees the app's theme rather than the default.
 func seedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
   world.theme.active = res.activeTheme
   world.theme.generation = world.theme.generation + 1
@@ -67,7 +67,7 @@ func seedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
 # Seed AGAIN with a different token table (#1008): applyResolvedTokens fills an
 # empty table once, so a world that already carries tokens keeps them — a viewer
 # that reloads a document whose `import`s changed must start from a fresh table
-# before the next page deserialises against it.
+# before the next page deserializes against it.
 func reseedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
   var fresh: ResolvedTheme = createResolvedTheme()
   world.theme.resolved = own fresh
@@ -95,7 +95,7 @@ func paintShapeG(
 ) {
   let sh: view Shape = componentView(this: world.shapes, entityId: entityId)
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
-  # dark/light toggle re-colours without a scene re-parse; empty slot
+  # dark/light toggle re-colors without a scene re-parse; empty slot
   # keeps the literal fill.
   var fillBase: RgbaColor = sh.fill
   if sh.fillSlot.length() > 0 {
@@ -348,7 +348,7 @@ func paintSpriteG(
   var imageH: Float = drawH
   # A MaskShape over the sprite's OWN box (#1000): the scissor the subtree
   # walk pushed is axis-aligned for images, so the rounding comes from the
-  # image quad's own corner radius — a circle is the centred square at half
+  # image quad's own corner radius — a circle is the centered square at half
   # its side. (A mask sourced from another node stays a rect scissor.)
   if componentHas(this: world.maskShapes, entityId: entityId) {
     let mask: view MaskShape = componentView(this: world.maskShapes, entityId: entityId)
@@ -521,9 +521,9 @@ func paintTextG(
   var drawX: Float = wt.position.x
   var drawY: Float = wt.position.y + size
   if resolveTextIsVCentered(theme: res.theme, styleId: t.styleId) {
-    # The style centres the font's capitals in the node's box: the baseline
+    # The style centers the font's capitals in the node's box: the baseline
     # half a cap height (measured off "H") below the middle, so a label reads
-    # centred whatever its letters, with descenders hanging below. Centring a
+    # centered whatever its letters, with descenders hanging below. Centering a
     # line box [top, top + size] with the baseline at its bottom left the
     # capitals about 0.15 of the size low.
     let capital: SdfTextBounds = SdfText.sdfMeasureTextBounds(

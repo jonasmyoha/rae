@@ -7,7 +7,7 @@
 # vegetation, rocks, particles, crowds — so callers never touch DrawU float
 # offsets or the draws buffer directly.
 #
-# Lifecycle (mirrors walker_grass's field, generalised):
+# Lifecycle (mirrors walker_grass's field, generalized):
 #   let batch = createInstanceBatch(mesh: rockMesh, capacity: 64)   # once
 #   resetInstanceBatch(batch: batch)                                # each frame
 #   addInstanceTransform(batch: batch, transform: t, prevTransform: pt, material: m)
@@ -267,7 +267,7 @@ func addInstanceTransform(
 
 # BRICK-tagged instance (#62): identical to addInstance, but flags the non-skinned
 # G-buffer fragment shader to paint PROCEDURAL MASONRY (big staggered bricks +
-# recessed mortar + analytic seam bumps) over the instance's base colour. The flag
+# recessed mortar + analytic seam bumps) over the instance's base color. The flag
 # rides in params.w — the paletteBase slot, which is unused on the non-skinned path
 # (it only matters to the skinned shader). Every non-brick draw passes 0, so bodies,
 # boats, props and all other instanced geometry are byte-identical.
@@ -359,7 +359,7 @@ func addInstanceTransformTile(
 }
 
 # EMBLEM-tagged instance (#131): the non-skinned fragment shader paints a procedural unit
-# BADGE (a white roundel + symbol) from the mesh UV, over the instance's base colour. `code`
+# BADGE (a white roundel + symbol) from the mesh UV, over the instance's base color. `code`
 # rides in params.w (the paletteBase slot, unused on the non-skinned path) and selects the
 # symbol (>=10 triggers the emblem; 10 archer, 11 infantry, 12 cavalry). Non-emblem draws
 # pass 0, so all other geometry is byte-identical.

@@ -7,9 +7,9 @@ fn raeGrassObstacle(p: vec2<f32>) -> f32 {
   let count = min(u32(max(grassObstacles[0], 0.0)), 512u);
   for (var index = 0u; index < count; index = index + 1u) {
     let offset = 1u + index * 4u;
-    let centre = vec2<f32>(grassObstacles[offset], grassObstacles[offset + 1u]);
+    let center = vec2<f32>(grassObstacles[offset], grassObstacles[offset + 1u]);
     let radius = grassObstacles[offset + 2u];
-    let delta = p - centre;
+    let delta = p - center;
     if (dot(delta, delta) < radius * radius) { return 1.0; }
   }
   return 0.0;

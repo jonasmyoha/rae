@@ -7,7 +7,7 @@
 //
 // Edges are found on a tone-mapped, gamma-encoded luma (the FXAA thresholds
 // assume display values, and raw HDR luma is unbounded; without the gamma, dark
-// edges fall under the threshold); the colours blended are the HDR ones, so the
+// edges fall under the threshold); the colors blended are the HDR ones, so the
 // composite's tone map and grade see exactly what they did.
 struct AntialiasU {
   p0: vec4<f32>,  // x: exposure

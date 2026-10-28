@@ -422,7 +422,7 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
       continue;
     }
     if (strcmp(arg, "--check-toolchain") == 0) {
-      /* #931: consumed by toolchain_check (which rescans argv); recognised
+      /* #931: consumed by toolchain_check (which rescans argv); recognized
        * here so the arg parser does not reject it as unknown. */
       i += 1;
       continue;
@@ -579,7 +579,7 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       continue;
     }
     if (strcmp(arg, "--check-toolchain") == 0) {
-      /* #931: consumed by toolchain_check (which rescans argv); recognised
+      /* #931: consumed by toolchain_check (which rescans argv); recognized
        * here so the arg parser does not reject it as unknown. */
       i += 1;
       continue;
@@ -2662,7 +2662,7 @@ static bool build_c_backend_output(const char* entry_file,
   }
   if (g_report_waits) {
     /* The backend's discovery pass instantiates the generics; its output is
-     * thrown away, the report reads the specialisations it found */
+     * thrown away, the report reads the specializations it found */
     bool reported = c_backend_emit_module(&ctx, &merged, "/dev/null") &&
                     may_wait_report(&ctx, &merged, entry_file, g_report_waits_lib, stdout);
     module_graph_free(&graph);

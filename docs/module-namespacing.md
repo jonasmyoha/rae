@@ -51,7 +51,7 @@ A module often declares a type of its own name (`net/Poller` has
 the module: `Poller.createPoller()` calls `net/Poller`'s function, and the
 type does not claim `Poller.` as a receiver. Sema binds such a
 last-name-qualified call itself when a non-generic module function
-resolves. A generic one (`Query.query2(A, B, …)`) is specialised by the
+resolves. A generic one (`Query.query2(A, B, …)`) is specialized by the
 backend from its type arguments (fixture 1060, 0.1.232).
 
 This works the same for a lib module and for a project sibling (`Pal.shade`

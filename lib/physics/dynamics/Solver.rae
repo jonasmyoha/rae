@@ -1,7 +1,7 @@
 # Ported from Box3D: Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md)
 # The constraint solver of a step (b3Solve, b3SolverTask's orchestration,
 # b3FinalizeBodiesTask and b3BulletBodyTask of Box3D's solver.c at 9f998c8):
-# setting up the colours' constraints and the stage list, running the
+# setting up the colors' constraints and the stage list, running the
 # stages (StageDispatcher) for each sub-step, then finalizing the bodies,
 # continuous collision (FinalizeBodies), refitting the trees and island sleep. Box3D's
 # operation order is kept exactly; checked against the oracle in fixture
@@ -83,7 +83,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
   stageIndex = stageIndex + 1
   meshSyncIndex = meshSyncIndex + 1
 
-  # Single-threaded overflow work: these constraints fit no graph colour
+  # Single-threaded overflow work: these constraints fit no graph color
   let overflowBlock: SolverBlock = overflowSolverBlock(world: world)
   prepareJointsOverflow(world: world, context: context)
   if overflowBlock.count > 0 {
@@ -313,7 +313,7 @@ func restitutionOverflow(
   }
 }
 
-# b3Solve: solve the constraints of the awake bodies with graph colouring,
+# b3Solve: solve the constraints of the awake bodies with graph coloring,
 # then finalize them.
 func solve(world: mod PhysicsWorld, context: mod StepContext) {
   # The tree rebuild ran beside collide; finish it here if it did not
@@ -350,7 +350,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   let minContactsPerBlock: Int = 4
   let minJointsPerBlock: Int = 4
 
-  # The active colours, in colour order, with their constraint counts
+  # The active colors, in color order, with their constraint counts
   # The context's working lists, moved out (the calls below take the
   # context too) and back at the end
   var plans: List(ColorPlan) = own context.colorPlans
@@ -410,7 +410,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   }
   let activeColorCount: Int = plans.length
 
-  # Prepare and store run as one flat range over every colour
+  # Prepare and store run as one flat range over every color
   let convexPrepareDim: BlockDim = computeBlockCount(
     itemCount: wideContactCount
     minSize: minContactsPerBlock
@@ -440,7 +440,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     context.manifoldConstraints.add(value: zeroManifoldConstraint())
   }
 
-  # The overflow colour's manifold starts and constraints
+  # The overflow color's manifold starts and constraints
   var overflowCount: Int = 0
   var overflowManifoldCount: Int = 0
   if let overflow: mod GraphColor = world.constraintGraph.colors.modAt(index: overflowIndex) {
@@ -461,7 +461,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     context.overflowManifoldConstraints.add(value: zeroManifoldConstraint())
   }
 
-  # The span table of the flat prepare/store ranges, and each colour's
+  # The span table of the flat prepare/store ranges, and each color's
   # slice of the constraint lists
   context.widePrepareSpans.clear()
   context.contactPrepareSpans.clear()
@@ -521,7 +521,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     world.splitIslandId = -1
   }
 
-  # The blocks: bodies, the flat prepare/store ranges, then each colour's
+  # The blocks: bodies, the flat prepare/store ranges, then each color's
   # joint, wide contact and contact blocks
   context.syncBlocks.clear()
   context.stages.clear()

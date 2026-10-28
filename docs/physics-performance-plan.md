@@ -151,7 +151,7 @@ The convex pile was timed per section with temporary `nowNs()` timers
 | collide's state-change pass | 221 | 248 | serial |
 | contact creation from the sorted keys | 136 | 133 | serial |
 | merging the moved proxies (applyMovedProxies) | 70 | 104 | serial |
-| solve's colour and block setup | 42 | 54 | serial |
+| solve's color and block setup | 42 | 54 | serial |
 | refits | 25 | 28 | serial |
 | pair-key gather and sort | 23 | 24 | serial |
 
@@ -195,7 +195,7 @@ What is left:
 Timing each collide chunk of the convex pile at 8 workers (temporary
 timers, µs per step) showed why its narrow phase scaled only 3.7x. Each
 TaskContext slot took a contiguous run of the contact list's blocks. The
-list holds every colour's touching contacts first and the cheap
+list holds every color's touching contacts first and the cheap
 non-touching ones last, so chunks 0-2 took ~1 850 µs each, chunk 3 668,
 and chunks 4-31 ~170 each. The pool gives each worker a contiguous range of
 4 chunks, so chunks 0-3 all landed on the caller, which also runs the tree
@@ -239,11 +239,11 @@ So the port's solver is already level with Box3D's, in both absolute time
 and scaling. Per-stage timing (temporary: each block's time stored in its
 own TaskContext slot and read after the stage) shows where the 8-worker
 time goes:
-- **The work itself inflates.** A colour stage's blocks sum to ~1.8x their
-  1-worker time, because a body's state is written by one core in colour k
-  and read by another in colour k+1. Body stages (integrate velocities)
+- **The work itself inflates.** A color stage's blocks sum to ~1.8x their
+  1-worker time, because a body's state is written by one core in color k
+  and read by another in color k+1. Body stages (integrate velocities)
   do not inflate: a block costs 5.3 µs at 8 workers, exactly its 1/32 share.
-  This is inherent to the parallel colour sweep, which Box3D uses too.
+  This is inherent to the parallel color sweep, which Box3D uses too.
 - **The split is even.** A stage's blocks cost about the same, and the
   pool keeps each worker on the same blocks every stage.
 - **Stragglers and the barrier.** An occasional block takes 2-4x longer on
@@ -253,8 +253,8 @@ time goes:
   the wall time and work / 8.
 
 No change was made. The one lever left is locality: which worker solves
-which constraints. It does not change results, because a colour's blocks
-are independent. Keeping a body's constraints on one core across colours
+which constraints. It does not change results, because a color's blocks
+are independent. Keeping a body's constraints on one core across colors
 would need a body-ownership-aware assignment that Box3D does not have
 either, and that is a design question, not a fix.
 
@@ -305,11 +305,11 @@ awake contacts), then the solver. The solver prepares the stage list once per
 step and runs it with every worker at once:
 
 `prepare joints → prepare wide contacts → prepare contacts → per substep:
-[integrate velocities → warm start (per colour) → solve (per colour) →
-integrate positions → relax (per colour)] → restitution (per colour) → store
+[integrate velocities → warm start (per color) → solve (per color) →
+integrate positions → relax (per color)] → restitution (per color) → store
 impulses` (`b3SolverStageType`, 11 kinds).
 
-With 4 substeps and typically 12-24 graph colours, **one step runs a few
+With 4 substeps and typically 12-24 graph colors, **one step runs a few
 hundred stage barriers**. Box3D does not re-dispatch work per stage: all
 workers stay inside one task, claim fixed-size blocks of a stage with a
 per-block atomic compare-and-swap on a monotonically growing sync index,
@@ -332,7 +332,7 @@ runs `workerCount` threads.
 | 4-wide floats (`b3FloatW`, NEON / SSE2 / wasm SIMD128) in the contact solver | no vector type | **margin**: `Float4` |
 | a CPU pause/yield in spin loops | none | small runtime intrinsic, with the staged work |
 | per-worker arena allocator | Lists and Buffers | not needed: pre-sized per-worker Lists; the steady step must allocate nothing |
-| graph colouring, islands, sleep | — | plain data algorithms, ported as Rae |
+| graph coloring, islands, sleep | — | plain data algorithms, ported as Rae |
 | thread-safe runtime | `g_mem_*` counters are plain globals; the String temp pool is `__thread` (fine) | **needed**: the TSan audit |
 | thread-safe ECS tables | ComponentTables are not thread-safe | not needed: the step never touches ECS tables (§6) |
 
@@ -369,7 +369,7 @@ code the compiler outlines, as `parallelLoop`'s body is.
 3. **Staged parallel work for the solver** — decided and implemented
    2026-10-03 (`docs/parallel-stages-design.md`): a stage is a
    `parallelLoop`, with no atomics and no team construct; `unsafe` covers the
-   colouring's disjoint body writes, checked at run time by
+   coloring's disjoint body writes, checked at run time by
    `RAE_PARALLEL_CHECK`; the launch path is within ~1.0-1.4x of Box3D's own
    spin barrier. The text below is the original framing. The
    recommended shape, because Rae has no function values and the port should
@@ -431,7 +431,7 @@ frame is GPU-bound.
 **Identical bits for any worker count, and for scalar versus `Float4`.** Box3D
 is built for this, and the port keeps it:
 
-- the graph colouring fixes the order in which constraints are solved,
+- the graph coloring fixes the order in which constraints are solved,
   whatever thread solves them;
 - per-worker results (bitsets, pair keys, events) are merged in worker-index
   order, never in finishing order;
@@ -448,7 +448,7 @@ example a hash of every body transform after N steps that must be identical at
 ## 8. What this asks of the port now
 
 Even single-threaded, P4 ports Box3D's step **structure**, not a simplified
-one: solver sets, the constraint graph and its colours, the wide constraint
+one: solver sets, the constraint graph and its colors, the wide constraint
 arrays, the stage list with its blocks and sync indices, and per-worker task
 contexts (with one worker). The stage dispatcher is one small module whose
 single-threaded version simply runs each stage's blocks in order; the
@@ -517,7 +517,7 @@ What it shows:
 - **The port's step has spikes; Box3D's does not.** In the same runs, the
   port logged 1-30 frames with a single step of 8-28 ms. The spike
   breakdown puts the time in the solver stages: 4-15 ms against ~2 ms
-  normally, with the same ~4 950 bodies and 7 colours awake. Box3D logged
+  normally, with the same ~4 950 bodies and 7 colors awake. Box3D logged
   none. The count swung between runs with the machine's load. Letting the
   pool's workers spin for 20 ms instead of 250 µs between launches made it
   worse (worst step 82 ms): spinning workers then compete with the render
@@ -934,7 +934,7 @@ Two limits apply:
   the G-buffer in 0.62 ms per frame, so at most that much of those spans
   can be waiting.
 - **Work can spill across marks.** A tile GPU overlaps consecutive
-  command buffers, so the time can move between neighbouring spans. The
+  command buffers, so the time can move between neighboring spans. The
   whole-frame total is the solid number.
 
 **The result.** The playground (pyramid, 5 000 boxes, autofire, 2560 x 1600

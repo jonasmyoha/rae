@@ -21,7 +21,7 @@ is measured. `check.sh --websocket` tests every rule below.
 
 Every message is a text frame holding a JSON object with a `type` and a
 `payload`. The payload is any JSON value; the server passes it on unchanged as
-a value (it may re-serialise it, so whitespace and key order inside it may
+a value (it may re-serialize it, so whitespace and key order inside it may
 change).
 
 - `{"type":"echo","payload":X}` → the same message back to the sender:

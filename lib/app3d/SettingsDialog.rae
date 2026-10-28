@@ -7,17 +7,17 @@
 # one panel, and the button hides it.
 #
 # Same split as the other app3d components — this owns the CHROME
-# (`scenes/settingsDialog.raescene`) and the BEHAVIOUR, the app owns where it
+# (`scenes/settingsDialog.raescene`) and the BEHAVIOR, the app owns where it
 # goes and what the values mean. An app mounts it into a host node, forwards
 # actions, and reads the state back.
 #
 # WHY THE STATE LIVES HERE rather than in each app: 110 and 113 had drifted to
 # different controls for the same ideas — 110's animation speed was a toggle,
-# 113's was a percentage with Slower/Faster. One type means one behaviour, and
+# 113's was a percentage with Slower/Faster. One type means one behavior, and
 # a new setting appears in both apps at once instead of being ported.
 #
 # Every control is present in every app, INCLUDING the scene buttons in 113,
-# which has one scene. An app that cannot honour a setting says so by leaving it
+# which has one scene. An app that cannot honor a setting says so by leaving it
 # disabled; hiding it per app is how two dialogs drift back apart.
 
 import Math
@@ -46,7 +46,7 @@ open ui/UiSystems
 # also carries `none` and `hdri`, which are not choices this dialog offers.
 # Mapping to SkyKind is the app's job, because only the app knows what to build
 # a Sky out of.
-enum SettingsSkyModel { preetham, hosek, stylised, solid }
+enum SettingsSkyModel { preetham, hosek, stylized, solid }
 
 # The renderer's quality steps. For now only Ultra differs: it draws the 3D
 # scene at the window's native resolution, pixel for pixel, with no dynamic
@@ -96,7 +96,7 @@ func settingsQualityFromEnv() ret SettingsQuality {
   ret SettingsQuality.high
 }
 
-# RAE_SKY=preetham|hosek|stylised|solid starts on that sky (screenshots);
+# RAE_SKY=preetham|hosek|stylized|solid starts on that sky (screenshots);
 # otherwise `fallback`
 func settingsSkyFromEnv(fallback: view SettingsSkyModel) ret SettingsSkyModel {
   let text: String = Sys.getEnv(name: "RAE_SKY")
@@ -106,8 +106,8 @@ func settingsSkyFromEnv(fallback: view SettingsSkyModel) ret SettingsSkyModel {
   if text is "hosek" {
     ret SettingsSkyModel.hosek
   }
-  if text is "stylised" {
-    ret SettingsSkyModel.stylised
+  if text is "stylized" {
+    ret SettingsSkyModel.stylized
   }
   if text is "solid" {
     ret SettingsSkyModel.solid
@@ -118,8 +118,8 @@ func settingsSkyFromEnv(fallback: view SettingsSkyModel) ret SettingsSkyModel {
 # Preetham: the default sky across the examples — the analytic model, listed
 # first here and first in the panel.
 # Hosek-Wilkie: the fitted physical model.
-# Stylised: a painted, three-band palette with the same time-of-day sun.
-# A flat colour. Not a lesser sky — it is the control case: with no gradient
+# Stylized: a painted, three-band palette with the same time-of-day sun.
+# A flat color. Not a lesser sky — it is the control case: with no gradient
 # and no sun disc, anything still varying across the background is coming from
 # somewhere else, which is how you tell a sky bug from a lighting bug.
 
@@ -200,7 +200,7 @@ type SettingsState {
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
-# and starts on Preetham, 113 is the stylised one and starts on Hosek. The panel
+# and starts on Preetham, 113 is the stylized one and starts on Hosek. The panel
 # switches either.
 func createSettingsState(
   scene: view Int
@@ -241,7 +241,7 @@ func createSettingsState(
 # PLAY/PAUSE IS THE MASTER. Pausing stops the clock too, whatever the Animate
 # time toggle says — pause means the app is not running, and a paused scene with
 # the sun still sweeping across it is not paused in any sense a user would
-# recognise. The toggle keeps its own value rather than being written to false,
+# recognize. The toggle keeps its own value rather than being written to false,
 # so resuming restores exactly what was set; nothing in the UI needs to show
 # this, because the button already says the app is paused.
 #
@@ -446,8 +446,8 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
     settingsState.skyModel = SettingsSkyModel.preetham
     ret true
   }
-  if actionId is "settings.sky.stylised" {
-    settingsState.skyModel = SettingsSkyModel.stylised
+  if actionId is "settings.sky.stylized" {
+    settingsState.skyModel = SettingsSkyModel.stylized
     ret true
   }
   if actionId is "settings.sky.solid" {
@@ -860,8 +860,8 @@ func settingsApplyToWorld(
   )
   setNodeFillSlot(
     world: world
-    nodeId: "SettingsSkyStylised"
-    slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.stylised)
+    nodeId: "SettingsSkyStylized"
+    slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.stylized)
   )
   setNodeFillSlot(
     world: world
@@ -892,7 +892,7 @@ func settingsApplyToWorld(
   # Two drawn parts: the track, and the knob that travels along it. A filled
   # portion made it read as a progress bar, which is a different control.
   let f: Float = (settingsState.timeOfDay.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
-  centreNodeAtFraction(
+  centerNodeAtFraction(
     world: world
     uiSystems: uiSystems
     trackId: "SettingsTimeTrack"
@@ -904,7 +904,7 @@ func settingsApplyToWorld(
   if dateSpan > 0 {
     dateF = (settingsState.timeOfDay.dayOfYear - 1).toFloat() / dateSpan.toFloat()
   }
-  centreNodeAtFraction(
+  centerNodeAtFraction(
     world: world
     uiSystems: uiSystems
     trackId: "SettingsDateTrack"
@@ -912,21 +912,21 @@ func settingsApplyToWorld(
     fraction: dateF
   )
   let latF: Float = (settingsState.latitude - skyLatitudeMin) / (skyLatitudeMax - skyLatitudeMin)
-  centreNodeAtFraction(
+  centerNodeAtFraction(
     world: world
     uiSystems: uiSystems
     trackId: "SettingsLatTrack"
     handleId: "SettingsLatHandle"
     fraction: latF
   )
-  centreNodeAtFraction(
+  centerNodeAtFraction(
     world: world
     uiSystems: uiSystems
     trackId: "SettingsLonTrack"
     handleId: "SettingsLonHandle"
     fraction: (settingsState.longitude + 180.0) / 360.0
   )
-  centreNodeAtFraction(
+  centerNodeAtFraction(
     world: world
     uiSystems: uiSystems
     trackId: "SettingsSunLuxTrack"

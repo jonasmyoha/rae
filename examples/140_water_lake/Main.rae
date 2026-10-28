@@ -1,7 +1,7 @@
 # Water lake — the lib/water toon surface on its own (#853), with a free WASD
 # camera and a scrubbable time of day. Nothing else is in the scene but a deep
 # bed, one brown island and three boxes, so the water is what you look at: the shallow -> deep
-# colour gradient, the shoreline foam around the islands, the posterised
+# color gradient, the shoreline foam around the islands, the posterised
 # ripples, the sky tint and the stepped sun highlight.
 #
 # Controls (printed at start): W/A/S/D move, Q/E down/up, hold shift to boost,
@@ -79,7 +79,7 @@ func buildScene(
     let angle: Float = i.toFloat() * 2.1 + 0.6
     let radius: Float = 26.0 + i.toFloat() * 9.0
     let size: Float = 14.0 + i.toFloat() * 6.0
-    # Centre a little under the surface: the top face pokes out by ~1 m, the
+    # Center a little under the surface: the top face pokes out by ~1 m, the
     # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
     let islandEntityId: EntityId = world3dAddMeshInstance(
       world: sceneWorld
@@ -118,8 +118,8 @@ func buildScene(
   ret sceneWorld
 }
 
-# A stylised sky for the hour of the day: the sun from Sky.sunDirForHour, a
-# warm low sun and a cooler high one, the hemisphere colours following it.
+# A stylized sky for the hour of the day: the sun from Sky.sunDirForHour, a
+# warm low sun and a cooler high one, the hemisphere colors following it.
 func skyForHour(hour: copy Float) ret Sky {
   let sunDir: Vec3 = sunDirForHour(hour: hour)
   let height: Float = sunHeightForHour(hour: hour)
@@ -127,7 +127,7 @@ func skyForHour(hour: copy Float) ret Sky {
   let sunColor: Vec3 = Vec3.create(x: 1.0, y: 0.92 - 0.35 * warm, z: 0.85 - 0.6 * warm)
   let zenith: Vec3 = Vec3.create(x: 0.18 + 0.1 * warm, y: 0.42, z: 0.85 - 0.25 * warm)
   let horizon: Vec3 = Vec3.create(x: 0.75 + 0.2 * warm, y: 0.8, z: 0.9 - 0.3 * warm)
-  ret createSkyStylised(
+  ret createSkyStylized(
     sunDir: sunDir
     # lux: 50,000 at sunrise to 110,000 at noon
     sunColor: Vec3.vscale(a: sunColor, s: 50000.0 + 60000.0 * height)
@@ -186,7 +186,7 @@ func main() ret Int {
   # and close, so finer, sparser ripples and a deeper blue read better.
   var lake: WaterBody = createLakeToon(surfaceZ: 0.0, extent: lakeExtent)
   # The toon look: cel crest lines, a foam band at the islands, saturated
-  # shallow -> deep colour. RAE_WATER_REFRACTION=1 shows the refracting path
+  # shallow -> deep color. RAE_WATER_REFRACTION=1 shows the refracting path
   # (the ocean example's default) on this lake instead.
   lake.refraction = 0
   if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "1" {
@@ -207,7 +207,7 @@ func main() ret Int {
   # A second body on the first island: proves one mesh, many bodies (#847).
   # Greener and calmer than the lake, one wave, sitting just above the island top.
   var pond: WaterBody = createLakeToon(surfaceZ: 1.05, extent: 6.0)
-  pond.centre = Vec3.create(x: Math.cos(x: 0.6) * 26.0, y: Math.sin(x: 0.6) * 26.0, z: 1.05)
+  pond.center = Vec3.create(x: Math.cos(x: 0.6) * 26.0, y: Math.sin(x: 0.6) * 26.0, z: 1.05)
   pond.shallowColor = Vec3.create(x: 0.35, y: 0.75, z: 0.45)
   pond.deepColor = Vec3.create(x: 0.05, y: 0.3, z: 0.2)
   pond.depthMax = 1.5

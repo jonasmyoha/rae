@@ -47,7 +47,7 @@ pattern works; the cover isn't on it — and it should be generic.
 > `generation` field (kept under that name: "changed since generation
 > N", agnostic to insert/remove/reorder/replace/mod). There is
 > deliberately **no** separate `Table(T)` type and no rename: the
-> primitive is evolved in place, not duplicated or relabelled.
+> primitive is evolved in place, not duplicated or relabeled.
 
 ```
 ComponentTable(T)   // the design's conceptual "Table(T)"
@@ -194,12 +194,12 @@ that import both, pending the module-namespacing work #255.) The pipeline + two-
 end-to-end by `compiler/tests/cases/539_frame_phases_lifecycle` (a
 command issued during observation lands the same frame via Apply(B));
 `Queue` itself by `538_queue`. In `examples/106_mobile_ui` the loop is
-already organised into these phases via `frame_pipeline.rae`
+already organized into these phases via `frame_pipeline.rae`
 (`runFrameInputDispatch` → `refreshUiDiffs`/`syncFrameData` (observe) →
 `runFrameLayoutTransform` → `renderGpu2dFrame`); the two **Apply**
 passes are empty there until systems with inboxes are carved out
 (#265+), so the phase map is documented in-loop with the insertion
-points marked — no behaviour change.
+points marked — no behavior change.
 
 ---
 
@@ -249,13 +249,13 @@ O(visible), not O(total).
 ## 6. System lifecycle (where timers, animation, polling, async live)
 
 Observation and commands are not the whole story — a system also has
-**internal behaviour over time**. Give every system an explicit
+**internal behavior over time**. Give every system an explicit
 lifecycle:
 
 ```rae
 initialize(sys)      // allocate tables, register with the SystemRegistry
 processCommands(sys) // phase 3: drain inbox, mutate own tables, bump revisions
-update(sys, dt)      // internal behaviour: advance timers/animations,
+update(sys, dt)      // internal behavior: advance timers/animations,
                      // sample pollers (Spotify), harvest completed async work
 shutdown(sys)        // release resources
 ```
@@ -271,7 +271,7 @@ external commands live:
   to the owning system, which folds it into its tables during `update`.
 
 All of these are the system mutating **its own** state (so they bump its
-own revisions and observers react) — they are internal behaviour, not a
+own revisions and observers react) — they are internal behavior, not a
 cross-system write. `update` runs in the command-application phase (or
 immediately after it) so it, too, is the only-my-own-tables writer.
 
@@ -376,7 +376,7 @@ if current != observe.observedRevision {
 Targets are `(system, table, entityId)` ids, so the mechanism is fully
 generic — playback, media library, filesystem, compiler, undo, AI are
 all observed identically, with **no** per-feature `Resource`/`Field`
-enum. Retiring `DataResourceId`/`DataFieldId` in favour of real
+enum. Retiring `DataResourceId`/`DataFieldId` in favor of real
 system/table/entity ids is what makes this feel like a real ECS rather
 than a bespoke reactive layer.
 
@@ -538,7 +538,7 @@ worked around:
    mutable access never crosses a boundary and borrowing is trivial.
 4. **System lifecycle** (`initialize`/`processCommands`/`update`/
    `shutdown`): timers, animation, polling, and async completion are
-   internal behaviour in `update`, mutating only the system's own tables.
+   internal behavior in `update`, mutating only the system's own tables.
 5. **Three layers** by lifetime: application-state, persistent per-feature
    UI, and a **retained render cache** (dependency-driven, pooled,
    virtualized).

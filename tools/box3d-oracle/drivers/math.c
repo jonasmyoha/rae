@@ -42,7 +42,7 @@ static b3Vec3 next_vec(float range) {
   return v;
 }
 
-/* A non-zero vector (normalisation needs one). */
+/* A non-zero vector (normalization needs one). */
 static b3Vec3 next_nonzero_vec(float range) {
   for (;;) {
     b3Vec3 v = next_vec(range);

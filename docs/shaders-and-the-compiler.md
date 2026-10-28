@@ -44,7 +44,7 @@ let grassComputeShader: Shader = shader(
 )
 ```
 
-`shader(files:)` is a plain function form the compiler recognises (no `@`
+`shader(files:)` is a plain function form the compiler recognizes (no `@`
 sigil — AGENTS.md; `compiler/src/sema.c` `sema_shader_from_call`,
 `compiler/src/shader_compose.c`), and its argument must be a literal list of
 string literals: a shader is a build-time fact, not a run-time computation
@@ -136,7 +136,7 @@ consistency within the module, entry points. It does not cover what only the
 device knows (whether the pipeline's bind group layout matches the buffers the
 app binds, feature limits); those stay run-time errors, but they are a much
 smaller class, and they are the app's own mistakes rather than a lib file
-drifting from its neighbour.
+drifting from its neighbor.
 
 ### A compute kernel's bounds (gpu/GpuCompute, 2026-10-10)
 
@@ -299,7 +299,7 @@ The sibling game projects compose the same lib shaders; they migrate by
 declaring their compositions the same way (their terrain palette through
 `rendererSetTerrainShader`, their grass surface through
 `grassSetComputeShader`), and from then on a lib file that drifts from its
-neighbour fails *their* build instead of their first frame.
+neighbor fails *their* build instead of their first frame.
 
 ## Queue
 

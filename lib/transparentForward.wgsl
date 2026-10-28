@@ -9,7 +9,7 @@
 // (group 0, bindings 0/1), so a record packed for one pass can go to either.
 // On this pass albedoMetallic.w is the instance ALPHA (there is no metallic on
 // an unlit blend). params.x selects an opt-in rounded water-drop impostor.
-// Ordinary transparent geometry keeps its original unlit colour and alpha.
+// Ordinary transparent geometry keeps its original unlit color and alpha.
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
@@ -57,12 +57,12 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let edge = max(fwidth(radius), 0.025);
     let coverage = 1.0 - smoothstep(1.0 - edge, 1.0, radius);
     if (coverage <= 0.0) { discard; }
-    // A clear centre, blue-grey lower rim and a small sky glint. This is an
+    // A clear center, blue-gray lower rim and a small sky glint. This is an
     // inexpensive water impression, not scene refraction or a physical BRDF.
     let rim = smoothstep(0.45, 0.96, radius);
     let glint = exp(-32.0 * dot(q - vec2<f32>(-0.30, 0.38), q - vec2<f32>(-0.30, 0.38)));
     let reflection = smoothstep(-0.35, 0.65, q.y);
-    // The instance colour already includes current environmental illumination.
+    // The instance color already includes current environmental illumination.
     // Light the glint too: a constant white addition made droplets glow at night.
     let color = d.albedoMetallic.rgb * (mix(0.45, 1.0, reflection) + glint * 0.85);
     let alpha = coverage * d.albedoMetallic.w * (0.12 + 0.20 * rim + 0.68 * glint);

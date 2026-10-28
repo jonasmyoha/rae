@@ -28,14 +28,14 @@ does not exist.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | runs; the appended element is visited too — an append inside a `for` over the same list runs away |
 | JavaScript | runs; `for…of` over a growing array never ends |
 | Java | `ConcurrentModificationException` thrown at run time on the next iteration |
 | Go | runs; `range` copied the slice header before the loop, so the append is silently invisible to it |
 | Rust | compile error — `xs` is borrowed immutably by the loop, so it cannot be borrowed mutably |
-| C | undefined behaviour — the loop keeps walking memory that `realloc` may have moved |
+| C | undefined behavior — the loop keeps walking memory that `realloc` may have moved |
 
 ## Expected outcome
 

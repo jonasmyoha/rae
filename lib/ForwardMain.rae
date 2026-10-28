@@ -5,7 +5,7 @@
 # writes the lit radiance the post passes (bloom, the composite's tone map and
 # upscale, present) read as usual.
 #
-# - 4x MSAA, resolved into the lit target when the pass ends. The 4x colour
+# - 4x MSAA, resolved into the lit target when the pass ends. The 4x color
 #   and depth are memoryless (TRANSIENT): on a tile GPU they never leave tile
 #   memory, so the frame keeps 4 bytes a pixel where the G-buffer kept 20.
 #   MSAA is the antialiasing; the frame has no TAA, FXAA or SMAA.
@@ -69,8 +69,8 @@ type ForwardMainCache {
   skyBind: BindGroupId
   bindTargetsGen: Int  # the post targets' and cascades' generations the binds point at
   bindShadowGen: Int
-  colour: TextureId  # 4x, memoryless, resolved into the lit target
-  colourView: TextureViewId
+  color: TextureId  # 4x, memoryless, resolved into the lit target
+  colorView: TextureViewId
   depth: TextureId  # 4x, memoryless, reverse-Z
   depthView: TextureViewId
   width: Int
@@ -88,8 +88,8 @@ func createForwardMainCache() ret ForwardMainCache {
     skyBind: noBindGroupId()
     bindTargetsGen: -1
     bindShadowGen: -1
-    colour: noTextureId()
-    colourView: noTextureViewId()
+    color: noTextureId()
+    colorView: noTextureViewId()
     depth: noTextureId()
     depthView: noTextureViewId()
     width: 0
@@ -255,7 +255,7 @@ func forwardPipelineSpec(
   }
 }
 
-# The 4x colour and depth at the scene size (the G-buffer cache's target
+# The 4x color and depth at the scene size (the G-buffer cache's target
 # size, which the render ceiling and the dynamic scale set). False when they
 # could not be made.
 func ensureForwardTargets(
@@ -265,7 +265,7 @@ func ensureForwardTargets(
   height: view Int
   litFormat: view Int32
 ) ret Bool {
-  let made: Bool = isValidTextureView(resources: resources, id: forward.colourView) and isValidTextureView(
+  let made: Bool = isValidTextureView(resources: resources, id: forward.colorView) and isValidTextureView(
     resources: resources
     id: forward.depthView
   )
@@ -274,7 +274,7 @@ func ensureForwardTargets(
   }
   retireForwardTargets(forward: forward, resources: resources)
   let usage: UInt64 = WGPUTextureUsage_RenderAttachment + transientAttachmentUsage
-  if let colour: TextureId = createTextureSampled(
+  if let color: TextureId = createTextureSampled(
     resources: resources
     width: width
     height: height
@@ -282,9 +282,9 @@ func ensureForwardTargets(
     usage: usage
     samples: forwardSampleCount
   ) {
-    forward.colour = colour
-    if let colourView: TextureViewId = createTextureView(resources: resources, texture: colour) {
-      forward.colourView = colourView
+    forward.color = color
+    if let colorView: TextureViewId = createTextureView(resources: resources, texture: color) {
+      forward.colorView = colorView
     }
   }
   if let depth: TextureId = createTextureSampled(
@@ -302,7 +302,7 @@ func ensureForwardTargets(
   }
   forward.width = width
   forward.height = height
-  ret isValidTextureView(resources: resources, id: forward.colourView) and isValidTextureView(
+  ret isValidTextureView(resources: resources, id: forward.colorView) and isValidTextureView(
     resources: resources
     id: forward.depthView
   )
@@ -447,7 +447,7 @@ func beginForwardMain(
   var passTargets: RenderTargetSet = createRenderTargetSet(clear: true)
   let added: Bool = addResolvedColorTarget(
     targets: passTargets
-    colorView: textureViewRef(id: forward.colourView)
+    colorView: textureViewRef(id: forward.colorView)
     resolveView: textureViewRef(id: targets.litView)
     r: light.clearColor.x
     g: light.clearColor.y
@@ -525,12 +525,12 @@ func reverseZViewProj(camera: view Camera3d, aspect: view Float) ret Mat4 {
 }
 
 func retireForwardTargets(forward: mod ForwardMainCache, resources: mod GpuResources) {
-  let colourViewRetired: Bool = retireTextureView(resources: resources, id: forward.colourView)
-  let colourRetired: Bool = retireTexture(resources: resources, id: forward.colour)
+  let colorViewRetired: Bool = retireTextureView(resources: resources, id: forward.colorView)
+  let colorRetired: Bool = retireTexture(resources: resources, id: forward.color)
   let depthViewRetired: Bool = retireTextureView(resources: resources, id: forward.depthView)
   let depthRetired: Bool = retireTexture(resources: resources, id: forward.depth)
-  forward.colour = noTextureId()
-  forward.colourView = noTextureViewId()
+  forward.color = noTextureId()
+  forward.colorView = noTextureViewId()
   forward.depth = noTextureId()
   forward.depthView = noTextureViewId()
   forward.width = 0

@@ -42,7 +42,7 @@ static bool none_compare_owns_call_result(CFuncContext* ctx, const AstExpr* oper
 /* An expression built only from integer literals, negation and arithmetic —
  * a C constant expression. Such an expression keeps the bare C operator
  * instead of the checked Int helper: a helper call is not a constant
- * expression, so it cannot initialise a module-level `let` (a C static), and
+ * expression, so it cannot initialize a module-level `let` (a C static), and
  * a constant divisor of zero is already a sema error so nothing is lost. */
 static bool expr_is_const_int(const AstExpr* expr) {
     if (!expr) return false;
@@ -646,7 +646,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // is read as a value (not an lvalue and no upstream
         // suppress_deref), emit `(*name)` so the c_struct or user-
         // struct field reads see a `T`, not a `T*`. Matches the
-        // behaviour for List/Buffer pointer IDENTs below.
+        // behavior for List/Buffer pointer IDENTs below.
         bool is_struct_view = false;
         if (tr && (tr->is_view || tr->is_mod) && !is_prim_ref) {
             Str vb = get_base_type_name(tr);
@@ -655,7 +655,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // directly without dereferencing. Only non-primitive views
             // are real `T*` references. When the param is a generic T
             // bound to a concrete primitive (e.g. T=Int in a List(Int)
-            // specialisation), check the substituted base too.
+            // specialization), check the substituted base too.
             Str vb_concrete = vb;
             if (ctx->generic_params && ctx->generic_args) {
                 const AstIdentifierPart* gp = ctx->generic_params;
@@ -1310,7 +1310,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
             const AstTypeRef* eff = sub ? sub : &tmp;
             // #961: a non-generic user struct has a generated default that
-            // honours declared field defaults; everything else is the zero
+            // honors declared field defaults; everything else is the zero
             // value, through the C type printer so builtins (Int, String,
             // List(T)) spell correctly.
             Str effbase = get_base_type_name(eff);
@@ -1815,7 +1815,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // synthesised rae_deep_copy_<MangledFieldType>, and
             // evaluates to the temp. The helpers are synthesised in
             // c_backend.c for every discovered List(E)/StringMap(V)/
-            // IntMap(V) specialisation plus every non-generic user
+            // IntMap(V) specialization plus every non-generic user
             // struct that transitively owns heap.
             //
             // Also extends Stage 1's source-side handling from
@@ -1852,7 +1852,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             //                          view and dropping the struct
             //                          must not free the source.
             //
-            // The previous Stage 8 behaviour of pool_take-only for
+            // The previous Stage 8 behavior of pool_take-only for
             // non-own RHS caused a chain of shallow aliases (the
             // JsonParser{ source: source } pattern) that auto-drop
             // could double-free once String field drops are enabled.
@@ -1872,7 +1872,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // value is an owned heap with no other live reference, so
             // we can MOVE (pool_take) instead of deep-copying. Saves
             // one allocation per struct-literal String field when the
-            // field is initialised from a function return — e.g.
+            // field is initialized from a function return — e.g.
             // `Name { label: optString(...) }` would otherwise leak
             // the optString result.
             bool rhs_is_owning_temp = f->value && (

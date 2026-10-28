@@ -238,7 +238,7 @@ static void point(const b3ManifoldPoint* mp) {
 static void edge(b3ContactEdge e) { i(e.bodyId); i(e.prevKey); i(e.nextKey); }
 
 /* contacts.state: the contact id pool; every contact slot (a free one: its
- * id and generation); the 24 graph colours (body bit set blocks, convex
+ * id and generation); the 24 graph colors (body bit set blocks, convex
  * contact ids, contact specs); every solver set (body ids, contact ids,
  * island ids); every island (bodies, contact links); every body's contact
  * and island fields; the pair set's count. */
@@ -331,7 +331,7 @@ static void moveBody(b3BodyId body, float range) {
 static bool liveBody(b3BodyId id) { return b3Body_IsValid(id); }
 
 /* A wide flat box with the default shape def: one dynamic body touching
- * more bodies than there are dynamic colours, so contacts overflow. */
+ * more bodies than there are dynamic colors, so contacts overflow. */
 static void bigBox(b3BodyId body) {
   b3ShapeDef def = b3DefaultShapeDef();
   def.updateBodyMass = true;
@@ -355,7 +355,7 @@ static void sleepIslands(int count) {
 }
 
 int main(void) {
-  printf("# box3d oracle: contacts, graph colours and contact islands, commit %s, scalar, -ffp-contract=off\n",
+  printf("# box3d oracle: contacts, graph colors and contact islands, commit %s, scalar, -ffp-contract=off\n",
          BOX3D_ORACLE_COMMIT);
 
   b3WorldDef worldDef = b3DefaultWorldDef();

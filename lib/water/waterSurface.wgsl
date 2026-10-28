@@ -1,4 +1,4 @@
-// waterSurface.wgsl — the stylised (toon) water surface (#830), the Roystan
+// waterSurface.wgsl — the stylized (toon) water surface (#830), the Roystan
 // recipe over a Gerstner grid. Composed AFTER lib/noise.wgsl (raeNoiseValue2).
 //
 // Vertex: a unit grid scaled to the body's extent, displaced by 1-2 Gerstner
@@ -7,12 +7,12 @@
 //   * water depth under the pixel = linear(sceneDepth) - linear(surfaceDepth),
 //     from the G-buffer depth bound as a texture (the same texture is the
 //     pass's read-only depth attachment);
-//   * depth-gradient colour shallow -> deep, alpha rising with depth;
+//   * depth-gradient color shallow -> deep, alpha rising with depth;
 //   * shoreline foam + toon ripples: value noise panned in world space, warped
 //     by a second octave, POSTERISED by a cutoff that goes to zero at the shore
 //     (so the bank is all foam) and to `rippleCutoff` in deep water (sparse
 //     ripple flecks);
-//   * sky tint through a Fresnel term: the stylised sky's own hemisphere
+//   * sky tint through a Fresnel term: the stylized sky's own hemisphere
 //     (horizon -> zenith by reflect(v, n).z — what Sky.radiance does on the CPU);
 //   * a STEPPED sun highlight (Blinn-Phong thresholded, not smooth).
 struct Frame {
@@ -21,9 +21,9 @@ struct Frame {
   jitter: vec4<f32>,
 };
 struct Water {
-  centreExtent: vec4<f32>,  // xyz = still-surface centre, w = extent
-  shallow: vec4<f32>,       // rgb = shallow colour, w = depthMax
-  deep: vec4<f32>,          // rgb = deep colour, w = absorb
+  centerExtent: vec4<f32>,  // xyz = still-surface center, w = extent
+  shallow: vec4<f32>,       // rgb = shallow color, w = depthMax
+  deep: vec4<f32>,          // rgb = deep color, w = absorb
   foam: vec4<f32>,          // x = foamDistance, y = rippleScale, z = rippleSpeed, w = rippleCutoff
   camera: vec4<f32>,        // xyz = camera position, w = time
   sun: vec4<f32>,           // xyz = sun direction (FROM the sun), w = highlightStep
@@ -36,11 +36,11 @@ struct Water {
   wave1b: vec4<f32>,
   tuning: vec4<f32>,        // x = distortion, y = waveCount (0..2), z = river mode, w = flow speed (m/s)
   refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
-  absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre, w = daylight (0 night .. 1 day)
+  absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per meter, w = daylight (0 night .. 1 day)
   cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
-  centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
+  center: vec4<f32>,        // xy = camera position snapped to meters (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
   ssr: vec4<f32>,           // x = screen-space reflections on (1) / off (0), y = march steps, z = hit thickness (m), w = max ray distance (m)
-  grid: vec4<f32>,          // x = radial cell per metre (mesh mode 2), y = its first cell (m), z = cascade map size (texels), w = band hand-over bins
+  grid: vec4<f32>,          // x = radial cell per meter (mesh mode 2), y = its first cell (m), z = cascade map size (texels), w = band hand-over bins
   bounds: vec4<f32>,        // world xy the body exists in (mesh mode 2): min x, min y, max x, max y
   mist: vec4<f32>,          // the renderer's height mist: density, falloff, base height, on (1) / off (0)
   mistTint: vec4<f32>,      // rgb = the mist's light from all round (exposed), w unused
@@ -77,15 +77,15 @@ const oceanMacroDetailScale: f32 = 1.0 / 500.0;
 // 2x2 box average of level L-1. Sampling the level whose texel matches the
 // footprint of the sample is the band-limit that keeps the sum of cascades
 // honest at every distance — a vertex sees the average of the waves its grid
-// cell cannot carry (so the pattern no longer re-phases when the centred mesh
+// cell cannot carry (so the pattern no longer re-phases when the centered mesh
 // snaps to the camera), and a far pixel averages texels instead of picking one.
 fn cascadeTile(cascade: i32) -> f32 {
   if (cascade == 1) { return W.cascades.y; }
   if (cascade == 2) { return W.cascades.z; }
   return W.cascades.x;
 }
-// The mip level whose texel is `footprint` world metres wide, for a map of
-// W.grid.z texels across `tile` metres. Level 0 is the full map; the chain
+// The mip level whose texel is `footprint` world meters wide, for a map of
+// W.grid.z texels across `tile` meters. Level 0 is the full map; the chain
 // ends at the 1x1 mean (log2 of the map size).
 fn cascadeLod(cascade: i32, footprint: f32) -> f32 {
   if (W.grid.z <= 0.0 || footprint <= 0.0) { return 0.0; }
@@ -93,11 +93,11 @@ fn cascadeLod(cascade: i32, footprint: f32) -> f32 {
   return clamp(log2(footprint / texel), 0.0, log2(W.grid.z));
 }
 // Sum the cascades' displacement at world xy (each tiles its own size), each
-// at the level a `cell`-metre grid cell can sample.
+// at the level a `cell`-meter grid cell can sample.
 fn cascadeDisplacement(xy: vec2<f32>, cell: f32) -> vec3<f32> {
   var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, cascadeLod(0, cell)).xyz;
-  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, cell)).xyz; }
-  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, cell)).xyz; }
+  if (W.center.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, cell)).xyz; }
+  if (W.center.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, cell)).xyz; }
   return d;
 }
 // Slopes add across cascades (a normal is -slope, 1). Whitecaps come from the
@@ -120,13 +120,13 @@ fn cascadeSlopeFoam(xy: vec2<f32>) -> vec4<f32> {
   slope += -n0.xy / max(n0.z, 0.05);
   hidden += 1.0 - clamp(length(n0), 0.0, 1.0);
   foam += foamFromJacobian(textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, cascadeLod(0, footprint)).w);
-  if (W.centre.z > 1.5) {
+  if (W.center.z > 1.5) {
     let n1 = textureSampleLevel(cascadeNorm1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, footprint)).xyz;
     slope += -n1.xy / max(n1.z, 0.05);
     hidden += 1.0 - clamp(length(n1), 0.0, 1.0);
     foam += foamFromJacobian(textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, cascadeLod(1, footprint)).w);
   }
-  if (W.centre.z > 2.5) {
+  if (W.center.z > 2.5) {
     let n2 = textureSampleLevel(cascadeNorm2, cascadeSampler, xy / W.cascades.z, cascadeLod(2, footprint)).xyz;
     slope += -n2.xy / max(n2.z, 0.05);
     hidden += 1.0 - clamp(length(n2), 0.0, 1.0);
@@ -169,13 +169,13 @@ fn gerstner(w: vec4<f32>, wb: vec4<f32>, xy: vec2<f32>, t: f32,
 }
 
 fn waveGridFactor(wavelength: f32) -> f32 {
-  let cell = W.centre.w;
+  let cell = W.center.w;
   if (cell <= 0.0) { return 1.0; }
   return smoothstep(2.0, 4.0, wavelength / cell);
 }
 
 // A slowly drifting, world-space weather field. Two broad value-noise scales
-// are enough to break the FFT tiles into kilometre-sized calm and rough areas;
+// are enough to break the FFT tiles into kilometer-sized calm and rough areas;
 // evaluating it per vertex keeps the cost independent of screen resolution.
 fn oceanMacroEnergy(xy: vec2<f32>, time: f32) -> f32 {
   let drift = vec2<f32>(time * 0.35, time * 0.12);
@@ -188,17 +188,17 @@ fn oceanMacroEnergy(xy: vec2<f32>, time: f32) -> f32 {
 @vertex
 fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   var o: VsOut;
-  let extent = W.centreExtent.w;
+  let extent = W.centerExtent.w;
   let mode = W.tuning.z;
   let river = mode > 0.5 && mode < 1.5;
-  let centred = mode > 1.5;
+  let centered = mode > 1.5;
   let realistic = W.cascades.w > 0.5;
   // Mesh modes: a lake is the unit grid scaled to the body; a river is its own
-  // baked world-space ribbon (#833); an ocean is a camera-centred metres mesh
+  // baked world-space ribbon (#833); an ocean is a camera-centered meters mesh
   // (#851) placed at the snapped camera position every frame.
-  var base = vec3<f32>(W.centreExtent.x + p.x * extent, W.centreExtent.y + p.y * extent, W.centreExtent.z);
+  var base = vec3<f32>(W.centerExtent.x + p.x * extent, W.centerExtent.y + p.y * extent, W.centerExtent.z);
   if (river) { base = p; }
-  if (centred) { base = vec3<f32>(W.centre.x + p.x, W.centre.y + p.y, W.centreExtent.z); }
+  if (centered) { base = vec3<f32>(W.center.x + p.x, W.center.y + p.y, W.centerExtent.z); }
   let t = W.camera.w;
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
@@ -212,16 +212,16 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   if (!river && !realistic && W.tuning.y > 0.5) { gerstner(wave0, W.wave0b, base.xy, t, &disp, &dn); }
   if (!river && !realistic && W.tuning.y > 1.5) { gerstner(wave1, W.wave1b, base.xy, t, &disp, &dn); }
   // Realistic: the FFT cascades displace the vertex (world-space lookup, so
-  // the waves stay put while the centred mesh moves under them).
-  // The grid cell under this vertex: a lake's fixed cell, or on the centred
-  // radial grid the ring spacing, which grows with the distance from the centre.
-  var cell = W.centre.w;
-  if (centred) { cell = max(W.grid.y, length(p.xy) * W.grid.x); }
+  // the waves stay put while the centered mesh moves under them).
+  // The grid cell under this vertex: a lake's fixed cell, or on the centered
+  // radial grid the ring spacing, which grows with the distance from the center.
+  var cell = W.center.w;
+  if (centered) { cell = max(W.grid.y, length(p.xy) * W.grid.x); }
   if (realistic) {
-    if (centred) { macroEnergy = oceanMacroEnergy(base.xy, t); }
+    if (centered) { macroEnergy = oceanMacroEnergy(base.xy, t); }
     if (W.shore.x > 0.0) {
       let bed = raeTerrainHeight(base.xy, W.shore.y);
-      macroEnergy *= smoothstep(0.0, W.shore.x, W.centreExtent.z - bed);
+      macroEnergy *= smoothstep(0.0, W.shore.x, W.centerExtent.z - bed);
     }
     macroEnergy *= W.shore.z;
     disp = cascadeDisplacement(base.xy, cell) * macroEnergy;
@@ -321,8 +321,8 @@ fn ssrTrace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
   let edge = min(min(hit.x, 1.0 - hit.x), min(hit.y, 1.0 - hit.y));
   let edgeFade = smoothstep(0.0, 0.08, edge);
   let lengthFade = 1.0 - smoothstep(maxDistance * 0.7, maxDistance, hi);
-  let colour = textureSampleLevel(litCopyTex, litSampler, hit.xy, 0.0).rgb;
-  return vec4<f32>(colour, edgeFade * lengthFade);
+  let color = textureSampleLevel(litCopyTex, litSampler, hit.xy, 0.0).rgb;
+  return vec4<f32>(color, edgeFade * lengthFade);
 }
 
 // The renderer's height mist (RendererMist; deferred_shade.wgsl's applyMist,
@@ -335,7 +335,7 @@ fn waterMistPhase(cosAngle: f32) -> f32 {
   let d = max(1.0 + g2 - 2.0 * WATER_MIST_FORWARD * cosAngle, 0.0001);
   return (1.0 - g2) / (12.566371 * d * sqrt(d));
 }
-fn waterMist(colour: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
+fn waterMist(color: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
   let toP = wpos - W.camera.xyz;
   let d = max(length(toP), 0.001);
   let dir = toP / d;
@@ -347,8 +347,8 @@ fn waterMist(colour: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
     depth = atEye * d * (1.0 - exp(-climb)) / climb;
   }
   let amount = 1.0 - exp(-max(depth, 0.0));
-  let mistColour = W.mistTint.rgb + W.sunColor.rgb * waterMistPhase(dot(dir, normalize(-W.sun.xyz)));
-  return mix(colour, mistColour, amount);
+  let mistColor = W.mistTint.rgb + W.sunColor.rgb * waterMistPhase(dot(dir, normalize(-W.sun.xyz)));
+  return mix(color, mistColor, amount);
 }
 
 @fragment
@@ -369,15 +369,15 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   var land = 0.0;
   let ground = W.camera.xyz + (i.world - W.camera.xyz) * (sceneLinear / max(surfaceLinear, 0.0001));
   if (W.cascades.w > 0.5 && W.tuning.z > 1.5 && length(ground.xy - i.world.xy) < oceanLandReach) {
-    land = smoothstep(oceanRunUp * 0.5, oceanRunUp, ground.z - W.centreExtent.z);
+    land = smoothstep(oceanRunUp * 0.5, oceanRunUp, ground.z - W.centerExtent.z);
     if (land > 0.999) {
       discard;
     }
   }
 
-  // Depth-gradient body colour.
+  // Depth-gradient body color.
   let depthT = clamp(waterDepth / max(W.shallow.w, 0.01), 0.0, 1.0);
-  var colour = mix(W.shallow.rgb, W.deep.rgb, depthT);
+  var color = mix(W.shallow.rgb, W.deep.rgb, depthT);
   var alpha = mix(0.7, 0.97, depthT) * W.deep.w;
 
   // Toon ripples + shoreline foam: world-space value noise, panned, warped by a
@@ -402,7 +402,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let shorelineBand = 1.0 - smoothstep(0.1, 0.5, foamT);
   let shoreline = max(shorelineBand * smoothstep(0.2, 0.35, ripple), 1.0 - smoothstep(0.05, 0.18, foamT));
   // Crests thin out with distance: the cutoff rises and the lines fade, so the
-  // far water is a calm colour field instead of a moire strip at the horizon.
+  // far water is a calm color field instead of a moire strip at the horizon.
   let viewDistance = length(W.camera.xyz - i.world);
   let crestFade = 1.0 - smoothstep(20.0, 140.0, viewDistance);
   let crestCutoff = W.foam.w + (1.0 - crestFade) * 0.1;
@@ -431,11 +431,11 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
     foam = max(shoreline, whitecap);
   }
-  colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
+  color = mix(color, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
-  // The body colour and the foam are paint lit by the day: they darken with
+  // The body color and the foam are paint lit by the day: they darken with
   // the sky at sunset (the reflected sky and the sun glint below already do).
-  colour *= W.absorb.w;
+  color *= W.absorb.w;
 
   // Reflection: the two-sample sky approximation along the reflected view ray,
   // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
@@ -465,8 +465,8 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   // normal. DEPTH MASK: if the pixel the offset lands on is ABOVE the water
   // (closer than the surface), it is an object out of the water and must not
   // bleed into it — fall back to the unrefracted pixel (the Boat Attack/Crest
-  // trick). Then Beer-Lambert: light travelling `refrDepth` metres of water is
-  // absorbed per channel, the lost part replaced by scattered deep colour.
+  // trick). Then Beer-Lambert: light traveling `refrDepth` meters of water is
+  // absorbed per channel, the lost part replaced by scattered deep color.
   let litSize = W.refract.zw;
   let screenUv = i.pos.xy / litSize;
   var refrUv = screenUv + n.xy * W.refract.y;
@@ -479,26 +479,26 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     refrSceneLinear = sceneLinear;
   }
   let refrDepth = max(refrSceneLinear - surfaceLinear, 0.0);
-  let sceneColour = textureSample(litCopyTex, litSampler, refrUv).rgb;
+  let sceneColor = textureSample(litCopyTex, litSampler, refrUv).rgb;
   let absorption = exp(-refrDepth * W.absorb.rgb);
-  // The scattered deep colour is paint lit by the day, like the body colour
-  // Coastal water has a shallow scattering colour as well as the deep one.
+  // The scattered deep color is paint lit by the day, like the body color
+  // Coastal water has a shallow scattering color as well as the deep one.
   // Transmission still reveals the actual bed; it vanishes with zero depth.
-  var scatterColour = W.deep.rgb;
+  var scatterColor = W.deep.rgb;
   if (W.shore.x > 0.0) {
-    scatterColour = mix(W.shallow.rgb, W.deep.rgb, clamp(refrDepth / max(W.shallow.w, 0.01), 0.0, 1.0));
+    scatterColor = mix(W.shallow.rgb, W.deep.rgb, clamp(refrDepth / max(W.shallow.w, 0.01), 0.0, 1.0));
   }
-  let underwater = sceneColour * absorption + scatterColour * W.absorb.w * (1.0 - absorption) * 0.7;
+  let underwater = sceneColor * absorption + scatterColor * W.absorb.w * (1.0 - absorption) * 0.7;
   if (W.refract.x > 0.5) {
     // Refracting surface: it composes its own background, so it is opaque.
     let foamMix = foam * 0.85;
-    colour = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0) * W.absorb.w, foamMix);
+    color = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0) * W.absorb.w, foamMix);
     alpha = 1.0;
   } else if (realisticPath) {
-    colour = mix(colour, skyTint, fresnel);
+    color = mix(color, skyTint, fresnel);
   } else {
-    // Toon: the sky is a RIM at grazing angles, never a wash over the body colour.
-    colour = mix(colour, skyTint, fresnel * 0.35);
+    // Toon: the sky is a RIM at grazing angles, never a wash over the body color.
+    color = mix(color, skyTint, fresnel * 0.35);
   }
 
   // Shading. Toon: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
@@ -519,15 +519,15 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let spec = pow(clamp(dot(n, h), 0.0, 1.0), shininess);
   var highlight = smoothstep(W.sun.w - 0.03, W.sun.w + 0.03, spec);
   if (realisticPath) {
-    colour *= 0.85 + 0.15 * ndl;
+    color *= 0.85 + 0.15 * ndl;
     highlight = spec * glintScale;
   } else {
-    colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
+    color *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
     // The stepped glint on the Gerstner normals tiles into a checkerboard at
     // the horizon; let it fade with the crests.
     highlight *= crestFade;
   }
-  colour += W.sunColor.rgb * highlight * 0.7;
+  color += W.sunColor.rgb * highlight * 0.7;
   alpha = max(alpha, highlight * 0.8);
 
   // Open-ocean aerial perspective: the radial grid reaches beyond the far
@@ -541,20 +541,20 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
       W.horizon.w * oceanFogEndFarRatio,
       viewDistance
     );
-    colour = mix(colour, W.horizon.rgb, fog);
+    color = mix(color, W.horizon.rgb, fog);
     alpha = max(alpha, fog);
   }
   if (W.mist.w > 0.5) {
-    colour = waterMist(colour, i.world);
+    color = waterMist(color, i.world);
   }
   // Land above the sea (see oceanRunUp): the water fades to the scene behind it
   if (land > 0.0) {
     if (W.refract.x > 0.5) {
-      colour = mix(colour, textureSampleLevel(litCopyTex, litSampler, screenUv, 0.0).rgb, land);
+      color = mix(color, textureSampleLevel(litCopyTex, litSampler, screenUv, 0.0).rgb, land);
     } else {
       alpha *= 1.0 - land;
     }
   }
 
-  return vec4<f32>(colour, alpha);
+  return vec4<f32>(color, alpha);
 }

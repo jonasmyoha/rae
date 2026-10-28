@@ -1,6 +1,6 @@
 /* Real-mouse sweep for the windowed hover memory test (hover-memory-test-window.sh).
  *
- * Moves the REAL cursor down the centre column of the largest on-screen window
+ * Moves the REAL cursor down the center column of the largest on-screen window
  * owned by <pid>, top to bottom in <sweepSeconds>, then jumps back to the top
  * and repeats for <seconds>. Finally it sends Cmd+Q to the process, so the app
  * quits through its normal path (SDL_EVENT_QUIT) and RAE_MEM_STATS prints.

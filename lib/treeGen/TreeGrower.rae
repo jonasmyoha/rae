@@ -16,7 +16,7 @@ open treeGen/TracedLimb
 open treeGen/TracedT02
 
 # What the traced tree is, in numbers (heights and lengths as parts of the
-# tree's height, angles in radians, radii in metres for a tree of
+# tree's height, angles in radians, radii in meters for a tree of
 # `height`)
 type TreeMeasures {
   height: Float
@@ -47,7 +47,7 @@ type TreeMeasures {
   branchLengthMax: Float
   # a branch's base radius as a part of its parent's there
   branchRadius: Float
-  # the leaf masses: how many, their radius range (m), the crown's centre
+  # the leaf masses: how many, their radius range (m), the crown's center
   # and half spread round the fork (x toward the leaders' side), and the
   # shares wholly behind and wholly in front of the trunk
   massCount: Int
@@ -191,8 +191,8 @@ func measureTracedTree(
     let radius: Float = (clump.radii.x + clump.radii.z) * 0.5
     radiusMin = Math.min(a: radiusMin, b: radius)
     radiusMax = Math.max(a: radiusMax, b: radius)
-    sumX = sumX + (clump.centre.x - fork.x) * side
-    sumZ = sumZ + clump.centre.z - fork.z
+    sumX = sumX + (clump.center.x - fork.x) * side
+    sumZ = sumZ + clump.center.z - fork.z
     if clump.side > 0 {
       behind = behind + 1
     } else if clump.side < 0 {
@@ -205,8 +205,8 @@ func measureTracedTree(
   var halfWidth: Float = 0.0
   var halfHeight: Float = 0.0
   loop let clump: view TracedClump in clumps {
-    halfWidth = Math.max(a: halfWidth, b: Math.abs(value: (clump.centre.x - fork.x) * side - meanX))
-    halfHeight = Math.max(a: halfHeight, b: Math.abs(value: clump.centre.z - fork.z - meanZ))
+    halfWidth = Math.max(a: halfWidth, b: Math.abs(value: (clump.center.x - fork.x) * side - meanX))
+    halfHeight = Math.max(a: halfHeight, b: Math.abs(value: clump.center.z - fork.z - meanZ))
   }
   ret TreeMeasures {
     height: height
@@ -363,12 +363,12 @@ func pointAtHeight(limb: view TracedLimb, z: view Float) ret Vec3 {
   ret limbLast(limb: limb)
 }
 
-# A leaf mass of radius about `radius` at `centre` on limb `parent`, wholly
+# A leaf mass of radius about `radius` at `center` on limb `parent`, wholly
 # behind, at or wholly in front of the trunk by the measured shares
 func grownMass(
   random: mod TreeRandom
   measures: view TreeMeasures
-  centre: view Vec3
+  center: view Vec3
   radius: view Float
   parent: view Int
 ) ret TracedClump {
@@ -386,7 +386,7 @@ func grownMass(
     y = -(depth + 0.35)
   }
   ret TracedClump {
-    centre: Vec3.create(x: centre.x, y: y, z: centre.z)
+    center: Vec3.create(x: center.x, y: y, z: center.z)
     radii: Vec3.create(x: across, y: depth, z: up)
     underside: 1.0
     turn: nextBetween(random: random, low: -0.3, high: 0.3)
@@ -543,7 +543,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
       high: 1.15
     )
     let base: Float = limbRadiusAt(limb: parentLimb, z: z) * measures.branchRadius
-    # straight out at its angle from its parent's centre line (the base
+    # straight out at its angle from its parent's center line (the base
     # sunk in the parent), rising a little toward the light, never down
     let out: Vec3 = Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
     limbs.add(value: grownLimb(
@@ -577,7 +577,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     clumps.add(value: grownMass(
       random: random
       measures: measures
-      centre: tip
+      center: tip
       radius: scale * nextBetween(
         random: random
         low: measures.massRadiusMin
@@ -596,16 +596,16 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     low: 0.85
     high: 1.2
   )
-  let centreX: Float = fork.x + side * measures.crownX * height
-  let centreZ: Float = fork.z + measures.crownZ * height
+  let centerX: Float = fork.x + side * measures.crownX * height
+  let centerZ: Float = fork.z + measures.crownZ * height
   loop var m: Int = clumps.length, m < massCount, ++m {
     # evenly over the crown's ellipse
     let around: Float = nextUnit(random: random) * 6.2831853
     let reach: Float = Math.sqrt(x: nextUnit(random: random))
-    let centre: Vec3 = Vec3.create(
-      x: centreX + Math.cos(x: around) * reach * halfWidth
+    let center: Vec3 = Vec3.create(
+      x: centerX + Math.cos(x: around) * reach * halfWidth
       y: 0.0
-      z: centreZ + Math.sin(x: around) * reach * halfHeight
+      z: centerZ + Math.sin(x: around) * reach * halfHeight
     )
     # its limb: the leader or branch with a point nearest to it
     var nearest: Int = 1
@@ -613,7 +613,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     loop var i: Int = 1, i < limbs.length, ++i {
       let limb: TracedLimb = limbs.copyAtDefault(index: i)
       loop let point: view Vec3 in limb.points {
-        let gap: Float = Vec3.vlen(a: Vec3.vsub(a: point, b: centre))
+        let gap: Float = Vec3.vlen(a: Vec3.vsub(a: point, b: center))
         if gap < nearestGap {
           nearestGap = gap
           nearest = i
@@ -623,7 +623,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     clumps.add(value: grownMass(
       random: random
       measures: measures
-      centre: centre
+      center: center
       radius: scale * nextBetween(
         random: random
         low: measures.massRadiusMin

@@ -7,7 +7,7 @@
 // keeps its own copy in compiler/runtime/runtime_gpu3d_sdf.c. mapScene /
 // sceneAlbedo / sceneNormal are a literal copy — if one changes, both must,
 // and the smooth-union weight `h` that fuses distances is the same weight that
-// mixes colour in both.
+// mixes color in both.
 //
 // REVERSE-Z: both main passes' depth clears to 0 and tests Greater (#367);
 // the emitted frag_depth follows the frame it writes into.

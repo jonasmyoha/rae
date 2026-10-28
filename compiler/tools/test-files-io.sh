@@ -78,7 +78,7 @@ line 3: [ünïcode line] 14
 line 4: [last without newline] 20
 line 5: [] 0
 line 6: [] 0"
-if [ "$SHOWN" = "$EXPECT" ]; then ok behaviour; else bad behaviour "got [$SHOWN]"; fi
+if [ "$SHOWN" = "$EXPECT" ]; then ok behavior; else bad behavior "got [$SHOWN]"; fi
 
 LEAK=$(printf '%s\n' "$OUT" | sed -n 's/^  \[mem:string:TOTAL *\].* outstanding=\([0-9-]*\).*/\1/p' | tail -1)
 if [ "${LEAK:-0}" = "0" ]; then ok no_leak; else bad no_leak "$LEAK Strings outstanding at exit"; fi

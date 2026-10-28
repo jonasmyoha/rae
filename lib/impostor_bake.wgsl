@@ -3,7 +3,7 @@
 // Each part is one instanced draw of views x views instances; the instance
 // is the view, and the vertex is placed in that view's cell of the layer
 // (impostor_octahedral.wgsl). The bounding sphere fills each cell, so no
-// triangle reaches a neighbour's cell. Two targets: the part's unlit albedo
+// triangle reaches a neighbor's cell. Two targets: the part's unlit albedo
 // with alpha 1, and its normal and depth.
 struct BakeU {
   // x = views per side
@@ -13,7 +13,7 @@ struct BakeU {
 // Per part (by instance / views^2): its albedo and the layer it bakes into
 struct Part { albedoLayer: vec4<f32>, surface: vec4<f32> };
 @group(0) @binding(1) var<storage, read> parts: array<Part>;
-// Per layer: the bounding sphere's centre (mesh units) and radius
+// Per layer: the bounding sphere's center (mesh units) and radius
 @group(0) @binding(2) var<storage, read> frames: array<vec4<f32>>;
 
 @group(0) @binding(3) var surfaceImages: texture_2d_array<f32>;
@@ -75,7 +75,7 @@ struct FsOut {
   // The albedo, unlit, and alpha 1 where the prop is
   @location(0) albedo: vec4<f32>,
   // The normal (object space), turned to the eye (leaves are two-sided),
-  // the depth behind it (its mirror about the sphere's centre: about the
+  // the depth behind it (its mirror about the sphere's center: about the
   // crown's depth, nothing at the trunk) and the depth (0.5 + 0.5 * depth:
   // 1 at the sphere's front); impostorPackNormal's layout
   @location(1) normalDepth: vec4<f32>,

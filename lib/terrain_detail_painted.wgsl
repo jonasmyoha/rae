@@ -3,7 +3,7 @@
 // the walkers do. Warm sand with broad painted patches and fine grain, a wet
 // band at the waterline, and NO surf painted on the ground: the realistic
 // water (lib/water) owns all the moving foam. Needs only the five ground
-// colours of the app's terrain_palette.wgsl.
+// colors of the app's terrain_palette.wgsl.
 // Walker ground: broad painted patches and fine, low-contrast sand grain.
 // The water pass owns all moving foam; the ground never paints white surf.
 // These constants are also consumed by the shared terrain texture blend.

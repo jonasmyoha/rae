@@ -20,7 +20,7 @@ const labTrunkRadius: Float = 0.17
 
 const labCrownStart: Float = 6.8
 
-# The ground's colour (the grass takes its base colour from it too)
+# The ground's color (the grass takes its base color from it too)
 const labGroundRed: Float = 0.09
 
 const labGroundGreen: Float = 0.115
@@ -65,7 +65,7 @@ func labMaterial(
   }
 }
 
-# An upright cylinder from `base` up `height` metres (makeCylinder is along
+# An upright cylinder from `base` up `height` meters (makeCylinder is along
 # Y from -1 to 1; a quarter turn about X stands it on Z)
 func addStem(
   world: mod World3d
@@ -88,7 +88,7 @@ func addStem(
 func addBlob(
   world: mod World3d
   meshes: view LabMeshes
-  centre: view Vec3
+  center: view Vec3
   size: view Vec3
   material: view Material3d
 ) {
@@ -96,13 +96,13 @@ func addBlob(
     world: world
     mesh: meshes.sphere
     material: material
-    position: centre
+    position: center
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: size
   )
 }
 
-# The placeholder tree at the origin: a warm trunk and seven grey-green
+# The placeholder tree at the origin: a warm trunk and seven gray-green
 # spheres where T02's clumps are, roughly. Step 3 replaces it.
 func addPlaceholderTree(world: mod World3d, meshes: view LabMeshes) {
   let trunk: Material3d = labMaterial(
@@ -155,7 +155,7 @@ func addPlaceholderTree(world: mod World3d, meshes: view LabMeshes) {
     addBlob(
       world: world
       meshes: meshes
-      centre: Vec3.create(
+      center: Vec3.create(
         x: clumps.copyAtDefault(index: i)
         y: 0.0
         z: clumps.copyAtDefault(index: i + 1)
@@ -223,7 +223,7 @@ func addBackgroundTrees(world: mod World3d, meshes: view LabMeshes) {
     addBlob(
       world: world
       meshes: meshes
-      centre: Vec3.create(x: x, y: depth, z: height * 0.7)
+      center: Vec3.create(x: x, y: depth, z: height * 0.7)
       size: Vec3.create(x: width, y: width, z: height * 0.26)
       material: leaves
     )
@@ -246,7 +246,7 @@ func addBackgroundTrees(world: mod World3d, meshes: view LabMeshes) {
     addBlob(
       world: world
       meshes: meshes
-      centre: Vec3.create(x: x, y: depth, z: radius * 0.5)
+      center: Vec3.create(x: x, y: depth, z: radius * 0.5)
       size: Vec3.create(x: radius * 1.4, y: radius * 1.4, z: radius)
       material: undergrowth
     )
@@ -268,7 +268,7 @@ func addBackgroundTrees(world: mod World3d, meshes: view LabMeshes) {
     addBlob(
       world: world
       meshes: meshes
-      centre: Vec3.create(x: x, y: y, z: radius * 0.35)
+      center: Vec3.create(x: x, y: y, z: radius * 0.35)
       size: Vec3.create(x: radius * 1.2, y: radius * 1.2, z: radius * 0.8)
       material: bush
     )
@@ -300,7 +300,7 @@ func addPlaceholderClouds(world: mod World3d, meshes: view LabMeshes) {
       addBlob(
         world: world
         meshes: meshes
-        centre: Vec3.create(x: x + offset, y: y, z: z + rise)
+        center: Vec3.create(x: x + offset, y: y, z: z + rise)
         size: Vec3.create(x: size, y: size * 0.4, z: size * 0.55)
         material: cloud
       )

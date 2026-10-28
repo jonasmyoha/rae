@@ -16,7 +16,7 @@ struct BakeU {
 // Per tree two vec4: (foot x, y, z, yaw), (height, the tree's subject in the
 // tree atlas, its cluster, 0)
 @group(0) @binding(1) var<storage, read> trees: array<vec4<f32>>;
-// Per cluster three vec4: (centre x, y, z, radius) in the world, its page
+// Per cluster three vec4: (center x, y, z, radius) in the world, its page
 // (layer, origin u, v, size) and its box (half sides over the radius, 1):
 // each view is framed to the box (impostorExtents)
 @group(0) @binding(2) var<storage, read> clusters: array<vec4<f32>>;
@@ -67,13 +67,13 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let treeViews = U.a.y;
   let treeCell = impostorNearestView(impostorUnturn(direction, yaw), treeViews);
   let treeDirection = impostorViewDirection(treeCell, treeViews);
-  // The quad: the tree's picture plane, through its sphere's centre
-  let treeCentre = foot.xyz + impostorTurn(treeFrame.xyz, yaw) * height;
+  // The quad: the tree's picture plane, through its sphere's center
+  let treeCenter = foot.xyz + impostorTurn(treeFrame.xyz, yaw) * height;
   let treeRadius = treeFrame.w * height;
   let c = corner[vi];
   let treeLocal = c * 2.0 - vec2<f32>(1.0);
   let offset = impostorRight(treeDirection) * treeLocal.x + impostorUp(treeDirection) * treeLocal.y;
-  let point = (treeCentre + impostorTurn(offset, yaw) * treeRadius - clusterSphere.xyz) / clusterSphere.w;
+  let point = (treeCenter + impostorTurn(offset, yaw) * treeRadius - clusterSphere.xyz) / clusterSphere.w;
   let extents = impostorExtents(direction, clusterBox);
   let local = vec2<f32>(dot(point, impostorRight(direction)), dot(point, impostorUp(direction))) / extents.xy;
   let uv = impostorPageUv(clusterPage.yzw, impostorAtlasUv(cell, views, local));
@@ -83,8 +83,8 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.treeLayer = i32(treePage.x);
   o.local = local;
   // Depth toward the view's eye, over the box's reach that way
-  let centreDepth = dot(treeCentre - clusterSphere.xyz, direction) / (clusterSphere.w * extents.z);
-  o.depthRadius = vec2<f32>(centreDepth, treeRadius / (clusterSphere.w * extents.z));
+  let centerDepth = dot(treeCenter - clusterSphere.xyz, direction) / (clusterSphere.w * extents.z);
+  o.depthRadius = vec2<f32>(centerDepth, treeRadius / (clusterSphere.w * extents.z));
   o.yaw = yaw;
   return o;
 }

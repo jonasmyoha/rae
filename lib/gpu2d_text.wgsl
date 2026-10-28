@@ -4,15 +4,15 @@
 // output, optional dilated outline composited under the body, and a softness
 // (px) that widens the coverage falloff for soft shadows. Instance = 5 x vec4:
 // rect, uv, color, params(pxRange, outlineWidth, softness, rotation), outline
-// colour. A glyph rotates about its own centre by params.w (#1003; the canvas
-// already moved the centre about the run's pivot). uClip is the rounded clip
+// color. A glyph rotates about its own center by params.w (#1003; the canvas
+// already moved the center about the run's pivot). uClip is the rounded clip
 // the box pass has always had, bound per same-clip run.
 struct Glyph {
   rect: vec4<f32>,
   uv: vec4<f32>,
   color: vec4<f32>,
   params: vec4<f32>,  // x=pxRange, y=outlineWidth(px), z=softness(px), w=rotation
-  outline: vec4<f32>,  // straight outline colour
+  outline: vec4<f32>,  // straight outline color
 };
 @group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;
 @group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;

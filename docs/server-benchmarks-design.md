@@ -24,7 +24,7 @@ physics); does it hold up, and at what cost, for a server?
 | threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` can be asked "done?" without joining (`isDone` / `tryGet`, gap T1, done 2026-10-08) |
 | ECS | `lib/ecs`: `EntityAllocator` (`allocEntity` / `freeEntity`), `ComponentTable(T)` (sparse set, O(1) lookup), query loops over one to three tables, zero-field tag components, `EventQueue(T)`, an ordered `Schedule` | everything the ECS-style servers need already exists; only the server components and systems are new (G8) |
 | bytes | `List(UInt8)`, `Buffer(T)`, `String` is byte-indexed (`byteAt`, `sub`, `indexOf`, `startsWith`, `split`) | an HTTP parser can be written in plain Rae; the reusable read/write byte buffer is `lib/net/ByteBuffer.rae` (G3, landed) |
-| JSON | `lib/Json` (a parsed document + value builders) | enough for `{"message":"Hello, World!"}` and the shootout messages; serialisation speed is part of what phase 1 measures |
+| JSON | `lib/Json` (a parsed document + value builders) | enough for `{"message":"Hello, World!"}` and the shootout messages; serialization speed is part of what phase 1 measures |
 | time | `nowNs()`, `sleep(ms:)`, `lib/Time` (log formatting) | an HTTP `Date` header (IMF-fixdate, plain Rae arithmetic) and a deadline wait for a 30 Hz tick are missing (G4) |
 | hashing | monocypher (argon2, blake2b) in the runtime | SHA-1 and base64 for the WebSocket handshake are plain Rae: `lib/crypto/Sha1.rae`, `lib/text/Base64.rae` (G5, landed) |
 | FFI | `unsafe extern("c_symbol")`, `cheader`, generated bindings (Box3D track B, `lib/webgpu`) | Rae can call C directly, but four things in the socket API cannot be called safely or portably from Rae (§1.2); those go in a thin shim, and nothing else |
@@ -53,7 +53,7 @@ exactly four things force C:
   macOS, `__errno_location()` on Linux) returning a pointer to thread-local
   storage;
 - **`fcntl`** is variadic, and calling a variadic C function through a plain
-  extern is undefined behaviour on Apple Silicon (variadic arguments travel on
+  extern is undefined behavior on Apple Silicon (variadic arguments travel on
   the stack);
 - **address structs** (`sockaddr_in`/`sockaddr_in6`, the `addrinfo` list
   from `getaddrinfo`) have per-OS layouts (BSD has a length byte Linux lacks);
@@ -96,8 +96,8 @@ in Rae; AGENTS.md).
 
 `docs/concurrency-model.md` §1 already decides this: normal calls are
 synchronous and waited, `spawn` is the only marker for concurrent work,
-synchronisation is an explicit `task.get()`, and there is no `await` keyword
-and no function colouring. A server needs nothing more:
+synchronization is an explicit `task.get()`, and there is no `await` keyword
+and no function coloring. A server needs nothing more:
 
 - network I/O never blocks: the poller says which sockets are ready, and the
   loop (or the ECS systems) handles exactly those;
@@ -123,7 +123,7 @@ benchmarks/servers/                      A  committed
   README.md                              A  how to run, what is measured
   spec/Http.md  spec/WebSocket.md  spec/GameRoom.md
                                          A  our own short specs (§3)
-  external.lock                          A  pinned manifest: name, repo URL, commit SHA / version, licence
+  external.lock                          A  pinned manifest: name, repo URL, commit SHA / version, license
   fetch.sh                               A  clones/builds the pinned externals into the cache
   run.sh                                 A  the runner (§8); `make bench-servers` calls it
   check.sh                               A  the correctness checker (§8)
@@ -160,7 +160,7 @@ benchmarks/servers/                      A  committed
 - **C, generated:** `build/` (binaries, generated C), raw per-run results
   (`build/raw/*.json`), charts. Never committed, except the summary in
   `results/` (F6).
-- Nothing external is copied into the repository, so no third-party licence
+- Nothing external is copied into the repository, so no third-party license
   is carried. If that changes, the copied file gets the one-line notice the
   repository's per-file copyright rule requires.
 - Reusable Rae code does not live under `benchmarks/`. The stdlib modules are:
@@ -184,7 +184,7 @@ Each spec is a page in `spec/`; the essentials:
   text/plain`, `Content-Length: 13`, `Server`, `Date`. Must handle
   **pipelining** (16 requests sent back-to-back on one connection before any
   reply; replies in order).
-- `GET /json` → `200`, body `{"message":"Hello, World!"}` serialised **per
+- `GET /json` → `200`, body `{"message":"Hello, World!"}` serialized **per
   request** (no cached bytes), `Content-Type: application/json`,
   `Content-Length`, `Server`, `Date`.
 - Keep-alive on; anything else → `404`. Runs at 256 connections (plaintext
@@ -236,7 +236,7 @@ and commit them with lockfiles:
 | **Node** | built-in `node:http` | `ws` |
 | **Bun** | `Bun.serve` | `Bun.serve` websockets (built-in) |
 
-Each is one file per phase, the same behaviour as the spec, the language's
+Each is one file per phase, the same behavior as the spec, the language's
 normal way, not micro-tuned. Optional later: `uWebSockets.js` as a "how fast
 can JS go" ceiling.
 
@@ -459,7 +459,7 @@ where it touches a few, as `httpParseSystem` does.)
   that a later system completes. Rae has neither callbacks nor `async`, so
   this is the natural way to write it.
 - **Batching.** Every ready socket of one poll goes through each stage
-  together, which is the "parse everything, answer in one write" behaviour
+  together, which is the "parse everything, answer in one write" behavior
   that pipelining rewards.
 - **Ownership fits.** The World owns everything, and systems borrow for one
   call. That is the `view`/`mod`-not-in-structs rule exactly, with no
@@ -512,7 +512,7 @@ where it touches a few, as `httpParseSystem` does.)
     machine (documented as a limit: it competes for cores; a second machine or
     Linux `taskset` is the upgrade path);
   - the two Rae styles run back to back, alternating their order between
-    runs, so slow drift on the machine does not favour one of them;
+    runs, so slow drift on the machine does not favor one of them;
   - 5 s warmup, then 5 runs of 15 s; report the median with min/max;
   - metrics: requests/s, latency p50/p99/p99.9, peak RSS (sampled with `ps`
     every 100 ms), CPU seconds; phase 3 adds tick duration, jitter, missed
@@ -546,7 +546,7 @@ a syscall-shaped shim where the platform forces it.
 | G5 ✅ | **landed** 2026-10-08 (0.1.225): `lib/crypto/Sha1.rae` (`sha1`, `sha1Range`, `sha1Text`, `hexText`), `lib/text/Base64.rae` (`base64Encode` / `appendBase64`, strict `base64Decode` / `appendBase64Decoded`) and `lib/webSocket/Handshake.rae` (`webSocketAccept(key:)`), all Rae, except that `sha1` calls the platform's hardware SHA-1 where there is one (CommonCrypto on Apple, one shim in `runtime_crypto_platform.c`; the Rae code is the fallback and is checked against it). Fixture 1044 has the RFC 3174 vectors (one million `a` included), the RFC 6455 accept example, the RFC 4648 vectors, the block-padding boundaries and strict-decoding rejections. Measured on 16 MB (M1 Max, release): SHA-1 7 ms through CommonCrypto (the SHA instructions), against 100 ms for the Rae fallback and 77 ms for the same algorithm in plain C; base64 encode 19 ms against 9 ms, decode 29 ms (strict) against 19 ms (unchecked). Since 0.1.244 (the byte-loop task, docs/runtime-c-audit.md speed check): the Rae SHA-1 84 ms against 77 ms, base64 encode 0.9 ms per MB against 0.39 ms and decode 0.97 ms against 0.98 ms. A handshake hashes about 60 bytes. Was: SHA-1 and base64 in pure Rae (`lib/crypto/Sha1.rae`, `lib/text/Base64.rae` or similar), RFC test vectors | S | the WebSocket handshake |
 | G6 ✅ | **WebSocket landed** 2026-10-09 (0.1.248): `lib/webSocket/Upgrade.rae` (`webSocketUpgradeCheck` on a parsed `HttpRequest`: `upgrade` / `notWebSocket` / `wrongVersion` → 426 / `badRequest`; `webSocketAppendAccept`, the 101 with `Sec-WebSocket-Accept`), `FrameDecoder.rae` (`webSocketDecodeNext`: incremental across reads, client frames must be masked and are unmasked in place, a fragmented message is moved together in the buffer as its pieces arrive so it is one `ByteRange`, ping / pong / close also between fragments, close code and UTF-8 reason checked; failures answer `failed` with the close code 1002 / 1007 / 1009, the size limit checked before the payload arrives; `webSocketDecodeConsumed`), `FrameEncoder.rae` (unmasked server frames: text, from a range of another buffer for echo and pong, close; masked client frames for the load client and tests) and `Utf8.rae` (strict: overlong, surrogates, > U+10FFFF rejected); no heap per frame. Fixture 1071 has the RFC 6455 §5.7 example frames and §1.3 handshake, byte-at-a-time arrival, a ping between fragments, a consume mid-message and every failure. **HTTP landed** 2026-10-08 (0.1.221): `lib/http/Http.rae` — `httpParseNext` (incremental across reads, pipelining, keep-alive rules, method enum, target / headers / body as `ByteRange`s into the connection's `ByteBuffer`, headers in a reused list: no heap per request), `httpParseConsumed`, `httpPathIs`, `httpHeaderValue`, `httpAppendResponse` / `httpAppendBadRequest` (no allocation after warmup); malformed, oversized, chunked → `badRequest`; fixture 1039. The WebSocket part is still to do. Was: `lib/http` (HTTP/1.1 request parser, response encoder, pipelining, keep-alive) and `lib/webSocket` (upgrade, frame codec, masking) in plain Rae on G1–G5, as functions over bytes with no I/O and no architecture | L | shared by both styles |
 | G8 ✅ | **WebSocket landed** 2026-10-09 (0.1.249): `lib/net/ecs/WebSocketSystems.rae` — dispatch answers an upgrade on the server's `webSocketPath` with 101 (in order after the requests pipelined before it) and swaps the connection's `HttpParse` for a `WebSocketSession`; `frameDecodeSystem` turns frames (from the same read on) into an `EventQueue(WebSocketMessageEvent)`, answering ping and close itself and closing with 1002/1007/1009 on a failure; a wrong version gets 426. `sendText` / `sendFrom` answer one connection, `broadcastText` / `broadcastFrom` encode a frame once into a scratch buffer and copy it to every session; `httpServerFrameBegin` / `httpServerFrameEnd` let the app's message system run between them. Zero allocations per echoed message after warmup; fixture 1072 drives it on injected bytes. **HTTP landed** 2026-10-08 (0.1.222): `lib/net/ecs/HttpServer.rae` (the `HttpServer` World: `Socket`, `ReadBuffer`, `WriteBuffer`, `HttpParse`, `KeepAlive`, `AwaitingResult` components, the `Readable` / `Writable` / `Sending` / `Closing` tags, the `HttpRequestEvent` queue, a `BufferPool` of released connection buffers; `openConnection`, `destroyConnection`, and `respond` / `promote` for route handlers) and `lib/net/ecs/HttpSystems.rae` (the ten systems in §7's order, run by `httpServerFrame`); the app's router is a type `R` with a `route` function that `dispatchSystem` calls; zero allocations per pipelined request after warmup; fixture 1040 runs it with no network on detached connections. Was: `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult` with its `Task` (T1), and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
-| G7 | measure, then fix if needed: `Json` serialisation and `String` building cost per request (no ticket until phase 1 numbers show a problem) | — | listed so the result is read correctly |
+| G7 | measure, then fix if needed: `Json` serialization and `String` building cost per request (no ticket until phase 1 numbers show a problem) | — | listed so the result is read correctly |
 
 **Phasing:**
 

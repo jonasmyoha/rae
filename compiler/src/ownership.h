@@ -8,7 +8,7 @@
  *
  * Functions previously lived in `c_stmt.c` and were declared in
  * `c_backend.h` / `c_backend_internal.h`. The bodies are unchanged;
- * this header is a refactor, not a behaviour change.
+ * this header is a refactor, not a behavior change.
  */
 #ifndef RAE_OWNERSHIP_H
 #define RAE_OWNERSHIP_H

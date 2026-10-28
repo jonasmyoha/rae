@@ -4,10 +4,10 @@
 MODE ?= DEV_FAST
 
 CC = gcc
-# -O2 -flto: the compiler is optimised (O3 measured no faster than O2; LTO
+# -O2 -flto: the compiler is optimized (O3 measured no faster than O2; LTO
 # adds ~5-10% by inlining small cross-file helpers like str_eq). -g keeps
 # symbols for profiling and debuggers; `make clean build COMPILER_OPT=-O0` gives an
-# unoptimised build for stepping through code (objects do not track the
+# unoptimized build for stepping through code (objects do not track the
 # flags, hence the clean).
 COMPILER_OPT ?= -O2 -flto
 COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic $(COMPILER_OPT) -g -ffp-contract=off

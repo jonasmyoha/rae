@@ -17,9 +17,9 @@ if len(sys.argv) not in (2, 3):
 
 gpu3d_ui = len(sys.argv) == 3 and sys.argv[2] == "--gpu3d-ui"
 
-# The default colour floor (32) assumes a SHADED image, where lighting
+# The default color floor (32) assumes a SHADED image, where lighting
 # spreads every surface across many values. A raw G-buffer channel is not
-# shaded: flat albedo over N materials has close to N colours by
+# shaded: flat albedo over N materials has close to N colors by
 # construction, and asserting 32+ on it would be asserting that the
 # renderer is doing something the geometry pass exists not to do. Callers
 # that know the expected variety state it instead — the deferred example

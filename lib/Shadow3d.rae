@@ -7,7 +7,7 @@
 # and pure arithmetic can be tested without a GPU. See
 # docs/shadow-system-design.md §3 Layer A.
 #
-# THREE RULES, EACH FIXING A NAMED ARTEFACT.
+# THREE RULES, EACH FIXING A NAMED ARTIFACT.
 #
 # 1. BOUNDING-SPHERE FIT, not frustum corners. A box fitted to the eight
 #    corners of a frustum slice changes size as the camera rotates, so the
@@ -15,15 +15,15 @@
 #    crawl when you turn. A sphere is rotation-invariant: same camera
 #    position, same fit, whatever direction you look.
 #
-# 2. TEXEL SNAPPING. The fitted centre is quantised to whole shadow-map
+# 2. TEXEL SNAPPING. The fitted center is quantised to whole shadow-map
 #    texels in LIGHT SPACE. Without it, sub-texel camera motion slides the
 #    shadow sampling grid across the geometry and every shadow edge
-#    shimmers. This is the single most-noticed shadow artefact and the one
+#    shimmers. This is the single most-noticed shadow artifact and the one
 #    people describe as "pixelation".
 #
 # 3. PRACTICAL SPLIT SCHEME. Cascade ranges blend logarithmic and uniform
 #    distribution (Zhang et al.). Pure logarithmic wastes the near
-#    cascades on a few centimetres; pure uniform leaves the near field
+#    cascades on a few centimeters; pure uniform leaves the near field
 #    with too few texels, which is where the eye actually looks.
 import Math
 import Vec3
@@ -83,7 +83,7 @@ func cascadeSplit(
 # rest spread from there to `far` with the practical scheme. Without a focus
 # (0, or one outside near..far) it is cascadeSplit from the near plane. A
 # follow camera's player stands about its orbit distance from the camera; the
-# plain scheme puts the first splits a few metres from the near plane, so the
+# plain scheme puts the first splits a few meters from the near plane, so the
 # player stood on a cascade boundary and its shadow changed sharpness there.
 func cascadeSplitAround(
   near: view Float
@@ -221,29 +221,29 @@ func fitShadowCascadesAround(
     )
 
     # Bounding sphere of the frustum slice, in closed form. For a
-    # symmetric frustum the sphere centre lies on the view axis; solving
+    # symmetric frustum the sphere center lies on the view axis; solving
     # for the point equidistant from the near and far corner rings gives
     # the offset below. Falls back to the slice midpoint when the
     # geometry degenerates (very wide angles), which is conservative
     # rather than wrong.
     let k2: Float = tanX * tanX + tanY * tanY
-    var centreDist: Float = (sliceNear + sliceFar) * 0.5
+    var centerDist: Float = (sliceNear + sliceFar) * 0.5
     let denom: Float = 2.0 * (sliceFar - sliceNear)
     if denom > 0.0001 {
       let candidate: Float = (sliceFar - sliceNear) * 0.5 * (1.0 + k2) + sliceNear * k2 + (sliceNear + sliceFar) * 0.5
       if candidate > sliceNear and candidate < sliceFar * 4.0 {
-        centreDist = candidate
+        centerDist = candidate
       }
     }
-    let centre: Vec3 = Vec3.vadd(a: camPos, b: Vec3.vscale(a: forward, s: centreDist))
+    let center: Vec3 = Vec3.vadd(a: camPos, b: Vec3.vscale(a: forward, s: centerDist))
     # Radius is the distance to the far corner ring, which is always the
-    # farthest point of the slice from a centre on the axis.
-    let dz: Float = sliceFar - centreDist
+    # farthest point of the slice from a center on the axis.
+    let dz: Float = sliceFar - centerDist
     let rx: Float = sliceFar * tanX
     let ry: Float = sliceFar * tanY
     var radius: Float = Math.sqrt(x: dz * dz + rx * rx + ry * ry)
     # Also check the near ring; for the first cascade it can dominate.
-    let dzn: Float = centreDist - sliceNear
+    let dzn: Float = centerDist - sliceNear
     let rxn: Float = sliceNear * tanX
     let ryn: Float = sliceNear * tanY
     let rNear: Float = Math.sqrt(x: dzn * dzn + rxn * rxn + ryn * ryn)
@@ -267,8 +267,8 @@ func fitShadowCascadesAround(
 
     # THE LIGHT VIEW IS A PURE ROTATION, anchored at the world origin.
     #
-    # The obvious construction — eye at `centre - light * backDist`,
-    # looking at `centre` — is wrong for snapping, and wrong in a way that
+    # The obvious construction — eye at `center - light * backDist`,
+    # looking at `center` — is wrong for snapping, and wrong in a way that
     # is invisible until you measure it: the view matrix then translates
     # continuously with the camera, so light space itself slides, and
     # quantising a coordinate inside a sliding space locks nothing. Test
@@ -289,11 +289,11 @@ func fitShadowCascadesAround(
       upZ: up.z
     )
 
-    # RULE 2: quantise the centre to whole texels IN LIGHT SPACE.
+    # RULE 2: quantise the center to whole texels IN LIGHT SPACE.
     let texel: Float = 2.0 * radius / resolution.toFloat()
-    let centreLs: Vec3 = mat4TransformPoint(m: lightView, p: centre)
-    let snappedX: Float = Math.floor(x: centreLs.x / texel) * texel
-    let snappedY: Float = Math.floor(x: centreLs.y / texel) * texel
+    let centerLs: Vec3 = mat4TransformPoint(m: lightView, p: center)
+    let snappedX: Float = Math.floor(x: centerLs.x / texel) * texel
+    let snappedY: Float = Math.floor(x: centerLs.y / texel) * texel
 
     # Depth range along the light axis. View space looks down -Z, so a
     # point in front sits at negative z and its distance is -z. The near
@@ -304,16 +304,16 @@ func fitShadowCascadesAround(
     # near and far are ORTHOGRAPHIC clip distances, not perspective ones, so
     # a NEGATIVE near is perfectly valid (mat4Ortho only rejects near==far).
     # The light view is a pure rotation anchored at the world origin, so when
-    # the sun is HIGH the light looks downward and the scene centre lands
-    # BEHIND that origin — centreLs.z > 0, which drives both distances
+    # the sun is HIGH the light looks downward and the scene center lands
+    # BEHIND that origin — centerLs.z > 0, which drives both distances
     # negative. Clamping near to a small positive value (a perspective habit)
     # then leaves near > far, collapsing the ortho to an empty range: that was
     # exactly why shadows vanished while the sun was up and only came back at
     # night (#511). The span far - near = 2*radius + backExtent is positive by
     # construction, so leaving the signs alone keeps the frustum valid all day.
     let backDist: Float = radius + backExtent
-    let zNear: Float = 0.0 - centreLs.z - backDist
-    let zFar: Float = 0.0 - centreLs.z + radius
+    let zNear: Float = 0.0 - centerLs.z - backDist
+    let zFar: Float = 0.0 - centerLs.z + radius
 
     let proj: Mat4 = mat4Ortho(
       left: snappedX - radius

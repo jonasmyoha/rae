@@ -13,13 +13,13 @@ Every material 136 uses has a forward version (`lib/ForwardMaterial.rae`,
 
 | | 137 (forward) | 136 (deferred) |
 |---|---|---|
-| main pass | one 4x MSAA pass; colour and depth memoryless, resolved into the lit image | G-buffer pass, then a fullscreen lighting pass |
+| main pass | one 4x MSAA pass; color and depth memoryless, resolved into the lit image | G-buffer pass, then a fullscreen lighting pass |
 | antialiasing | 4x MSAA on triangle edges; the settings pane's TAA switch does nothing | SMAA by default, TAA from the settings pane |
 | SSAO | from a 1x depth + normal pre-pass (forward-rae-6): the scene is drawn once more into the G-buffer pass, of which only the depth and normals are kept; the deferred SSAO runs over it and the forward pass reads the AO | half-resolution SSAO from the G-buffer |
 | water | none: no lake, river or sea, no water FFT, no underwater fog (the water surface reads the scene depth) | toon lake, meadow river, FFT sea, underwater fog |
 | splash droplets | none (they draw in the transparent pass with the water) | when a character wades |
 | shallow water on the ground | still painted by the terrain, and still a wall when deep (it is the island's biome, not the water renderer) | the same, under the water surface |
-| terrain colours | the walker palette (`lib/terrain_palette_walker.wgsl`) with the lib's painted ground (`lib/terrain_grass_painted.wgsl`, `lib/terrain_detail_painted.wgsl`) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
+| terrain colors | the walker palette (`lib/terrain_palette_walker.wgsl`) with the lib's painted ground (`lib/terrain_grass_painted.wgsl`, `lib/terrain_detail_painted.wgsl`) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
 | everything else | the same: walker, crowd, controls, camera, grass, props, physics, shadows, bloom, UI, hot-reload state (its own app id), dynamic resolution | |
 
 ## One program

@@ -1,6 +1,6 @@
 # app3d/SurfaceMap — what the ground is made of, over a level: a grid of
 # cells over its drawn triangles, each keeping the surface of the highest
-# triangle over its centre (a road over the terrain under it) and that
+# triangle over its center (a road over the terrain under it) and that
 # height. Surfaces are the app's own codes (an enum as Int); which surface a
 # glTF material stands for is the app's rules (MaterialSurface: a material
 # name's prefix and its surface), so this map knows no ground of its own.
@@ -12,7 +12,7 @@ open Mesh3d
 
 # A grid of surface codes: cells `cellSize` m square from (`originX`,
 # `originY`), `columns` x `rows`, each the surface of the highest triangle
-# found over its centre (`heights`), `emptySurface` where none is
+# found over its center (`heights`), `emptySurface` where none is
 type SurfaceMap {
   originX: Float
   originY: Float
@@ -99,7 +99,7 @@ func triangleHeightAt(
   ret wa * a.z + wb * b.z + wc * c.z
 }
 
-# Lay triangle (a, b, c) of `surface` into the map: every cell whose centre
+# Lay triangle (a, b, c) of `surface` into the map: every cell whose center
 # it covers takes its surface if it is the highest there yet
 func layTriangle(
   map: mod SurfaceMap

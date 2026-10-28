@@ -20,7 +20,7 @@
 // check that forbids raw rae_ext_rae_buf_set with cascade-drop element
 // types outside stdlib. NULL = unknown / top-level scope.
 static const char* s_current_decl_origin = NULL;
-// #960: the parameter list of the function whose body is being analysed, so
+// #960: the parameter list of the function whose body is being analyzed, so
 // `typeName(param)` can read the param's WRITTEN type (an enum resolves to
 // Void in TypeInfo, so the type ref is the only place its name survives).
 static const AstParam* s_current_params = NULL;
@@ -31,7 +31,7 @@ static const AstIdentifierPart* s_current_generic_params = NULL;
 // an error in any earlier file would be reported against the wrong path (with
 // the wrong file's source line under the caret). Decls carry their own
 // origin_file (stamped at merge, preserved through specialization) and
-// sema_analyze_decl keeps the decl being analysed in s_current_decl_origin —
+// sema_analyze_decl keeps the decl being analyzed in s_current_decl_origin —
 // prefer that; fall back to the module path only when no decl is current.
 static const char* sema_diag_file(const AstModule* module) {
     if (s_current_decl_origin) return s_current_decl_origin;
@@ -464,7 +464,7 @@ struct Symbol {
      * this binding does NOT own its heap storage, so passing it to an
      * `own T` parameter would hand the callee something it must not free.
      * Set for view/mod params, for globals, and — one hop only, §2.4 — for
-     * a local initialised directly from one of those. It is one bit fixed
+     * a local initialized directly from one of those. It is one bit fixed
      * at declaration, never dataflow. */
     bool is_non_owning;
     /* An `own` or `copy` parameter: the callee's own value (moved in, or
@@ -564,7 +564,7 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 // the name are an error naming both — the same rule bare function calls
 // follow (resolve_function_overload); the project counts as one module.
 // Returns NULL when no visible global by that name exists (the caller keeps
-// its old behaviour). With a NULL module the ambiguity is not reported (const
+// its old behavior). With a NULL module the ambiguity is not reported (const
 // folding; the read itself reports it).
 static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b);
 static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const char* file,
@@ -756,7 +756,7 @@ static void sema_check_lifecycle_decl(CompilerContext* ctx, AstModule* module,
 
 /* Use after an explicit `name.drop()`: a lexical scan of the statements that
  * follow in the same list (nested blocks included). An assignment to the bare
- * name or a shadowing `let` reinitialises it and ends the scan. */
+ * name or a shadowing `let` reinitializes it and ends the scan. */
 static bool sema_expr_mentions_ident(const AstExpr* e, Str name) {
     if (!e) return false;
     switch (e->kind) {
@@ -837,7 +837,7 @@ static bool sema_create_was_attempted(const AstExpr* e);
 
 // ===== #885: the lifecycle post-pass over a function body ===================
 //
-// Runs after the body is analysed. Two jobs, both needing the whole body:
+// Runs after the body is analyzed. Two jobs, both needing the whole body:
 //
 //  1. A `create(...)` that no position bound (it is not in a typed binding,
 //     an argument, a literal field or a `ret`) is reported wherever it sits —
@@ -1038,7 +1038,7 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
             flow_check_expr(flow, s->as.assign_stmt.value, set, s->line, s->column);
             flow_sweep_moves(set, s->as.assign_stmt.value);
             const AstExpr* t = s->as.assign_stmt.target;
-            if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialised */
+            if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialized */
             else flow_check_expr(flow, t, set, s->line, s->column);
             break;
         }
@@ -1523,7 +1523,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
 
         // Re-analyze body with concrete types. #877: the specialized body is
-        // analysed INSIDE the caller's analysis, so it must not inherit the
+        // analyzed INSIDE the caller's analysis, so it must not inherit the
         // caller's diagnostic origin, unsafe depth or loop depth — a generic
         // instantiated from within an `unsafe { }` block would otherwise have
         // its whole body treated as unsafe (obligations erased through
@@ -2446,7 +2446,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
 
 // ===== #877: unsafe-obligation scan of GENERIC TEMPLATE bodies ===============
 //
-// Generic templates are never analysed as such — their specializations are,
+// Generic templates are never analyzed as such — their specializations are,
 // when sema resolves the call — and a call with a positional `T: type`
 // argument is bound by NAME in the backend with no sema specialization at all.
 // A raw operation written inside such a template would therefore escape the
@@ -2610,7 +2610,7 @@ static bool sema_call_returns_reference(const AstModule* module, const AstExpr* 
     return candidates > 0;
 }
 
-// #815: every diagnostic raised while analysing a decl — a function body, a
+// #815: every diagnostic raised while analyzing a decl — a function body, a
 // global let initializer, a type — names THAT decl's file (see sema_diag_file).
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     const char* saved_origin = s_current_decl_origin;
@@ -2726,7 +2726,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                     // value-types (tagged union / int tag) with no
                     // heap ownership of their own, so the four modes
                     // don't carry useful extra information. This
-                    // matches Stage 5's behaviour and keeps enum-only
+                    // matches Stage 5's behavior and keeps enum-only
                     // signatures (e.g. `alignMain: AlignKind`) clean.
                     Str base = (pt->parts) ? pt->parts->text : (Str){0};
                     if (str_eq_cstr(base, "Any")) continue;
@@ -3356,7 +3356,7 @@ static const AstModule* s_mutation_module = NULL;
 /* Does the `index`-th parameter of every function this call could reach
  * take `mod`? The call is matched by name and argument count, as
  * sema_call_returns_reference does, since the scan runs before the borrowed
- * branch is analysed and its calls are linked. */
+ * branch is analyzed and its calls are linked. */
 static bool sema_call_param_is_mod(const AstExpr* call, size_t index) {
     const AstExpr* callee = call->as.call.callee;
     size_t argCount = 0;
@@ -4593,7 +4593,7 @@ static bool sema_pl_is_index(const SemaParallelScope* scope, const AstExpr* e) {
 static void sema_pl_report(SemaParallelScope* scope, const AstExpr* at, size_t line, size_t column, const char* what, Str name) {
     // `unsafe { }` in a parallel body lifts the write rule: the programmer
     // vouches that no two iterations write the same element — a graph
-    // colouring's disjoint body writes (docs/parallel-stages-design.md §3).
+    // coloring's disjoint body writes (docs/parallel-stages-design.md §3).
     // RAE_PARALLEL_CHECK=1 checks it at run time.
     if (scope->unsafe_depth > 0) return;
     if (scope->reported) return;
@@ -4640,7 +4640,7 @@ static Str sema_pl_type_name(TypeInfo* t) {
 // A method call sema left unresolved (the generic List methods are bound by
 // the C backend): the same-named function whose `this` (after any `T: type`
 // parameters) is the receiver's type, or NULL. Its parameter MODES are what
-// the checks need; the specialisation stays the backend's.
+// the checks need; the specialization stays the backend's.
 static const AstDecl* sema_unresolved_method_decl(CompilerContext* ctx, const AstExpr* receiver, Str method) {
     Str type_name = sema_pl_type_name(receiver ? receiver->resolved_type : NULL);
     if (!type_name.len || !ctx) return NULL;
@@ -5014,7 +5014,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             // Spec 2.3.1: a reference binding cannot take an owned result. A
             // fresh value needs an owner, and a view/mod binding refuses
             // ownership by definition — accepting this would mean inventing a
-            // hidden owner (#454/#455, reversing #443's materialisation).
+            // hidden owner (#454/#455, reversing #443's materialization).
             // Optional-reference bindings (is_opt) are excluded: their legal
             // sources are reference-returning calls, checked elsewhere, and
             // the if-let narrowing forms are handled by that construct.
@@ -5074,7 +5074,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             // #661: an anonymous `{ }`/`{ ... }` list literal on an
             // Array/Buffer-typed binding was lowered as a List (createList),
-            // misgenerating C (a `rae_List_<T>` initialising a
+            // misgenerating C (a `rae_List_<T>` initializing a
             // `rae_Array_<T>_<N>`, or an undeclared list-of-struct helper).
             // These containers carry their capacity in their type, so they are
             // constructed with `Array(T, cap: N)` / `Buffer(T, cap: N)` — which
@@ -5111,7 +5111,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              *
              * §2.4 proposed one-hop tracking on the assumption that
              * `let x = <borrow>` aliases. Measuring codegen showed it does
-             * not: ident, field and element initialisers all deep-copy —
+             * not: ident, field and element initializers all deep-copy —
              * `=` copies, which is the language rule. A binding therefore
              * always owns what it holds, and marking it non-owning was a
              * false positive that rejected working code.
@@ -5319,7 +5319,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition, true);
             // #960: a condition that folded to `<literal> is <literal>` (a
             // `typeName(x) is "Int"` guard in a specialization) is decided
-            // here, BEFORE the arms are analysed: only the taken arm is
+            // here, BEFORE the arms are analyzed: only the taken arm is
             // checked and emitted, so per-type code behind such a guard need
             // not type-check for the other types.
             if (!stmt->as.if_stmt.binding) {
@@ -5732,7 +5732,7 @@ static bool sema_is_numeric_kind(TypeKind k) {
 }
 
 // True if the type ref names an enum declaration. Enums have no dedicated
-// TypeKind (they resolve to Void in sema), so they are recognised by the written
+// TypeKind (they resolve to Void in sema), so they are recognized by the written
 // type name resolving to an AST_DECL_ENUM symbol.
 // Does the program declare a plain function of this name? A user definition
 // WINS over an intrinsic of the same spelling (nothing declares `equals`
@@ -5823,7 +5823,7 @@ static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module,
 
     // Become the `if let`. A reference binding keeps the `name is not none`
     // test the parser builds for `if let`; an owned binding leaves the
-    // condition NULL and the backend tests the optional it materialises.
+    // condition NULL and the backend tests the optional it materializes.
     AstStmt* saved_next = stmt->next;
     size_t line = stmt->line, column = stmt->column;
     memset(&stmt->as, 0, sizeof stmt->as);
@@ -5859,7 +5859,7 @@ static bool sema_typeref_is_enum(SymbolTable* symbols, const AstTypeRef* tr) {
 }
 
 /* An unsuffixed literal is not a typed runtime value being converted — the
- * compiler materialises it directly in the destination type, so
+ * compiler materializes it directly in the destination type, so
  * `let x: Float64 = 1.5` needs no cast. Only already-typed values do. */
 static bool sema_is_numeric_literal(const AstExpr* e) {
     if (!e) return false;
@@ -6086,7 +6086,7 @@ AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     return tr;
 }
 
-/* Bind a resolved (possibly specialised) decl to a call the way the ordinary
+/* Bind a resolved (possibly specialized) decl to a call the way the ordinary
  * resolver does: decl_link, result type, argument checks, own-argument rule. */
 static void sema_bind_call_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 AstExpr* expr, AstDecl* decl) {
@@ -6130,7 +6130,7 @@ static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolT
  * (`own T`, `view T`); substitute the call's type arguments so a pending
  * `create(...)` argument is chosen by the real type (`list.add(value:
  * create(id: 4))` on a `List(Slot)`, `pick(Slot, value: create(...))`).
- * `fd` is the template (generic_params set) or a specialisation (params
+ * `fd` is the template (generic_params set) or a specialization (params
  * already substituted, `ga` NULL). Only pending constructors are touched. */
 static void sema_bind_create_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                   const AstFuncDecl* fd, const AstTypeRef* ga,
@@ -6311,7 +6311,7 @@ static TypeInfo* sema_type_qualifier_type(CompilerContext* ctx, AstModule* modul
 static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectField* fields,
                                              size_t litLine, size_t litCol, const char* errFile) {
     if (structType && structType->kind == TYPE_REF) structType = structType->as.ref.base;
-    /* #885: a generic INSTANCE (`Box(Slot)`) is checked through its specialised
+    /* #885: a generic INSTANCE (`Box(Slot)`) is checked through its specialized
      * decl, whose fields already carry the substituted types, so a `create(...)`
      * in `{ value: create(id: 1) }` resolves against `Slot`, not `T`. */
     if (!structType || (structType->kind != TYPE_STRUCT && structType->kind != TYPE_GENERIC_INST)
@@ -6333,7 +6333,7 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
             AstTypeRef* field_type = tf ? tf->type : NULL;
             if (field_type && inst_args)
                 field_type = substitute_type_ref(s_lifecycle_ctx, td->generic_params, inst_args, field_type);
-            /* An integer literal must fit the field it initialises */
+            /* An integer literal must fit the field it initializes */
             if (field_type && f->value && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 sema_check_int_literal_fits(f->value, sema_strip_ref(ft));
@@ -6464,7 +6464,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     /* HARD ERROR on implicit numeric conversion (both widening and
      * narrowing). Silently narrowing a Float64 epoch to f32 destroyed
      * animation timing and FPS in the gpu3d examples; a warning would not
-     * have stopped it. Literals are exempt: they are materialised directly
+     * have stopped it. Literals are exempt: they are materialized directly
      * in the destination type, not converted. */
     TypeInfo* want_num = sema_strip_ref(expected);
     TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
@@ -6555,7 +6555,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         // #898: implicit boxing into Any at a ret / assignment / Any argument
         // erases the value's type, hiding raw Ptr storage exactly as an
         // explicit `box` does. The explicit-box guard runs in sema_analyze_expr,
-        // but this implicit box is minted here and never re-analysed, so guard
+        // but this implicit box is minted here and never re-analyzed, so guard
         // it at the point of insertion (a no-op inside an `unsafe { ... }`).
         if (sema_type_contains_ptr(expr->resolved_type, 0)) {
             char ptr_msg[512];
@@ -6809,7 +6809,7 @@ static void sema_consider_suggestion(Str candidate, Str typed, Str* best, size_t
     bool near = sema_name_near(candidate, typed);
     if (d > threshold && !near) return;
     /* A name that holds the typed one whole (`log` -> `naturalLog`) outranks
-     * a mere spelling neighbour (`log` -> `cos`) */
+     * a mere spelling neighbor (`log` -> `cos`) */
     size_t rank = near ? d : d + 1000;
     if (rank < *best_dist) { *best_dist = rank; *best = candidate; }
 }
@@ -7169,7 +7169,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 // `spawn f()` evaluates to a Task(T) where T is f's return
                 // type. Reading the result is the explicit `task.get()`. A
                 // void-returning callee still yields a Task (Task(void)) so a
-                // bare `spawn f()` statement is recognised and joined on drop.
+                // bare `spawn f()` statement is recognized and joined on drop.
                 TypeInfo* inner = expr->as.unary.operand->resolved_type;
                 if (!inner) inner = type_get_void(ctx->type_registry);
                 expr->resolved_type = type_get_task(ctx->type_registry, inner);
@@ -7407,7 +7407,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             }
             /* `shader(files: [...])` is evaluated HERE, at compile time: the
              * call node becomes the composed `Shader { ... }` literal
-             * (sema_shader_from_call) and is analysed as that. */
+             * (sema_shader_from_call) and is analyzed as that. */
             if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT
                 && str_eq_cstr(expr->as.call.callee->as.ident, "shader")
                 && !symbol_table_lookup(symbols, expr->as.call.callee->as.ident)) {
@@ -7428,7 +7428,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT) {
                 Str name = expr->as.call.callee->as.ident;
                 if (str_eq_cstr(name, "sizeof")) { expr->is_builtin_sizeof = true; expr->resolved_type = type_get_int(ctx->type_registry); }
-                /* `Array(Float, cap: 16)` doubles as a zero-initialising
+                /* `Array(Float, cap: 16)` doubles as a zero-initializing
                  * constructor, so the type application and the value share
                  * one spelling. That is what makes replacing a
                  * `createList(T, cap: N)` line with an Array a one-token
@@ -7520,7 +7520,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         // Forbid raw rae_ext_rae_buf_set with a cascade-drop V
                         // outside of stdlib. Stdlib (lib/core.rae and friends)
                         // pairs each raw set with a rae_ext_rae_buf_drop_at or
-                        // knows the slot is freshly initialised; user code
+                        // knows the slot is freshly initialized; user code
                         // can't be trusted with the slot-drop contract.
                         // The "is in stdlib?" check uses the *enclosing*
                         // function's origin_file, not module->file_path,
@@ -7945,7 +7945,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs, expr->line, expr->column);
                 /* A generic function reached by a file component
                  * (`Query.query2(A, B, ...)`) stays on the backend's path,
-                 * which specialises it from the type arguments */
+                 * which specializes it from the type arguments */
                 if (resolved && via_component && resolved->as.func_decl.generic_params) resolved = NULL;
                 if (resolved) sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, qargs);
                 // #777: only commit to the module-qualified rewrite when a module
@@ -8228,7 +8228,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     // module's nor an import's decl, so the search above leaves
                     // `points.copyAtDefault(index: 0)` untyped. The call stays
                     // unbound (the backend resolves it, as before), but its
-                    // RESULT TYPE is computed from the specialised signature: an
+                    // RESULT TYPE is computed from the specialized signature: an
                     // overloaded call taking it as an argument
                     // (`multiply(matrix: m, vector: <that>)`) otherwise matched
                     // the first overload whose other parameters fit, since a
@@ -8250,7 +8250,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             AstTypeRef* ga = receiver_type
                                 ? infer_generic_args(ctx, fd, fd->params->type, receiver_type) : NULL;
                             if (!ga || !sema_array_receiver_matches(fd->params->type, rec)) continue;
-                            // Nothing is specialised here (the backend still does
+                            // Nothing is specialized here (the backend still does
                             // that): a bare `ret T` takes the inferred argument's
                             // own TypeInfo.
                             const AstTypeRef* returns = fd->returns->type;
@@ -8518,7 +8518,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 bool is_type = lsym && lsym->decl
                     && (lsym->decl->kind == AST_DECL_TYPE || lsym->decl->kind == AST_DECL_ENUM);
                 // A BUILTIN type name (`Ptr`, `Int`, `String`, ...) has no
-                // user decl in the symbol table, so recognise it from the fixed
+                // user decl in the symbol table, so recognize it from the fixed
                 // primitive list — `Ptr.null()` is a type namespace too. (Only a
                 // closed list, NOT a lenient type resolve: resolving an arbitrary
                 // bare name yields a fabricated struct type and would misfire on
@@ -9101,7 +9101,7 @@ static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module
 }
 
 /* Resolve `Array(T, cap: N)` written in EXPRESSION position — the
- * zero-initialising constructor form. The parser sees an ordinary call, so
+ * zero-initializing constructor form. The parser sees an ordinary call, so
  * the element type arrives as an identifier expression rather than a type
  * ref; rebuild the type ref and resolve it through the normal path so the
  * constructor and the type annotation can never disagree.
@@ -9630,7 +9630,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             base = type_get_buffer(ctx->type_registry, arg);
         }
         // `Ptr` is the low-level opaque pointer primitive (general FFI, #497):
-        // an untyped void*, modelled as Buffer(void) so it reuses the void*
+        // an untyped void*, modeled as Buffer(void) so it reuses the void*
         // lowering (emits `void*`, zero value NULL) rather than resolving to a
         // phantom `rae_Ptr` struct. It's what generated C-ABI bindings use for
         // handles, callbacks and raw data pointers.
@@ -9751,10 +9751,10 @@ static void sema_check_enum_package_clash(AstModule* module) {
 // first positional argument) to the internal per-type constructor call
 // `createList(EntityId, cap: N)`. Purely syntactic, run over EVERY function
 // body BEFORE analysis — templates included, since generic templates are not
-// sema-analysed and are cloned verbatim for each specialisation. Routing
+// sema-analyzed and are cloned verbatim for each specialization. Routing
 // through the proven `createList`/`createStringMap`/`createIntMap`/
 // `createComponentTable` machinery keeps the backend's positional-type-arg
-// specialisation (which works inside generic functions, #889-proof).
+// specialization (which works inside generic functions, #889-proof).
 static void desugar_typed_create_expr(CompilerContext* ctx, AstExpr* e);
 static void desugar_typed_create_block(CompilerContext* ctx, AstBlock* b);
 static void desugar_typed_create_stmt(CompilerContext* ctx, AstStmt* s) {
@@ -9867,7 +9867,7 @@ static void desugar_typed_create_module(CompilerContext* ctx, AstModule* module)
 // generated C in the maintained Compiled backend (the field lowers to a
 // `rae_View_T*` that ordinary field code then assigns a value to and hands to
 // string conversion). Reject it in the shared front end, at every type decl
-// including generic templates (which sema does not otherwise analyse). The
+// including generic templates (which sema does not otherwise analyze). The
 // generic-argument escape `field: List(view T)` is already rejected by the
 // parser ("references (view/mod) cannot be used as generic type arguments"),
 // and a nested escape fails at the INNER type's own declaration, so this direct

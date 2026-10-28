@@ -5,7 +5,7 @@
 # SdfPassCache: the pipeline (over the C-kept WGSL source, like every other
 # shader), ONE frame uniform per frame (viewProj, the inverse of the JITTERED
 # viewProj so the ray matches the rasterised pixel grid, prevViewProj, the
-# camera), and per cluster a ball buffer, a colour buffer, a params uniform
+# camera), and per cluster a ball buffer, a color buffer, a params uniform
 # and the bind group over them — up to sdfMaxGroups clusters per frame, the
 # cursor reset by Gbuffer.begin. The frame uniform's inputs are the cache's
 # frameFloats (the C-computed jittered frame data the geometry pass uploaded),
@@ -161,7 +161,7 @@ func sdfPipelineSpec() ret RenderPipelineSpec {
   }
 }
 
-# The bind of cluster slot `gi`: frame @0, balls @1, params @2, colours @3.
+# The bind of cluster slot `gi`: frame @0, balls @1, params @2, colors @3.
 # The buffers are created once, so the bind is too.
 func ensureSdfBind(sdf: mod SdfPassCache, resources: mod GpuResources, gi: copy Int) ret Bool {
   if let existing: BindGroupId = sdf.binds.copyAt(index: gi) {

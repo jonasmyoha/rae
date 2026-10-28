@@ -127,4 +127,4 @@ The seven-table `destroyEntity` leak is **fixed** (`lib/ui/ecs.rae`): all 72
 declared `UiWorld` `ComponentTable` fields are now cleared on destroy. This is a
 real correctness fix and it makes the hand-written sweep a *correct* reference
 for the future synthesized version to match byte-for-byte ("identical in
-behaviour" is only well-defined against a correct baseline).
+behavior" is only well-defined against a correct baseline).

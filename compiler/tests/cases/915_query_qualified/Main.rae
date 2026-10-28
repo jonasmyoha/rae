@@ -6,8 +6,8 @@ import ecs/Query
 # file that `import`s ecs/Query instead of `open`ing it writes `Query.query2(...)`.
 # This is fixture 734's program with every query call qualified, so its output
 # must match 734's line for line. Until #33142260 it did not compile: the C
-# backend's discovery pass did not recognise `Query.fn(...)` as a call to the
-# generic `fn`, so each specialisation was created lazily AFTER its first caller
+# backend's discovery pass did not recognize `Query.fn(...)` as a call to the
+# generic `fn`, so each specialization was created lazily AFTER its first caller
 # and the C compiler rejected the call as undeclared. The single-table loop
 # (lowered onto Query.queryCount / Query.queryEntityAt) and a plain qualified
 # accessor call outside any loop are covered at the end.

@@ -98,7 +98,7 @@ func parseTextFormat(text: view String) ret TextFormat {
 }
 
 # -----------------------------------------------------------------
-# Sub-type deserialisers
+# Sub-type deserializers
 # -----------------------------------------------------------------
 func deserInsets(
   doc: view JsonDoc
@@ -181,7 +181,7 @@ func hexDigitValue(byte: view Int) ret Int {
   ret -1
 }
 
-# `"#rrggbb"` / `"#rrggbbaa"` (#996): the third colour spelling beside a palette
+# `"#rrggbb"` / `"#rrggbbaa"` (#996): the third color spelling beside a palette
 # token and an {r,g,b,a} object, the one the reference scene format uses.
 # Anything else (wrong length, a non-hex digit) is none.
 func parseHexColor(text: view String) ret opt RgbaColor {
@@ -237,7 +237,7 @@ func deserRgba(
         nodeId: nodeId
         kind: SceneDiagnosticKind.unknownToken
         name: asStr
-        message: "no colour token named {asStr}; rendering magenta"
+        message: "no color token named {asStr}; rendering magenta"
       )
     }
     ret uiThemeColor(theme: theme, name: asStr)
@@ -293,7 +293,7 @@ func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
 }
 
 # -----------------------------------------------------------------
-# Component deserialisers — call site is the dispatch in
+# Component deserializers — call site is the dispatch in
 # `applyComponentByName`. Each function takes the JsonValue of the
 # component bag (e.g. `{"x":0,"w":100}`) and produces the typed
 # component.
@@ -317,7 +317,7 @@ func dataFieldIdFromString(name: view String) ret DataFieldId {
 
 # Tier-2 partial style override (#236): the `styleOverride` sub-object of a
 # Text bag. Presence-flagged: only the scalars the author wrote are applied
-# over the resolved style at paint; a colour may be a palette slot.
+# over the resolved style at paint; a color may be a palette slot.
 func deserStyleOverride(
   doc: view JsonDoc
   theme: view UiTheme

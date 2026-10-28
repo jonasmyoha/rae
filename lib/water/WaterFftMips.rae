@@ -1,11 +1,11 @@
 # WaterFftMips — the mip chains of the FFT cascade maps (#1002).
 #
 # The surface shader samples the displacement and normal maps in world space
-# at whatever footprint the geometry gives it: a vertex on the camera-centred
-# radial grid covers a cell of a metre underfoot to tens of metres at the
+# at whatever footprint the geometry gives it: a vertex on the camera-centered
+# radial grid covers a cell of a meter underfoot to tens of meters at the
 # horizon, and a far pixel covers many texels. Point-sampling a single-level
 # map there is aliasing — the short waves fold into wide bands that re-phase
-# every metre the mesh snaps to the camera, which reads as the sea speeding
+# every meter the mesh snaps to the camera, which reads as the sea speeding
 # up whenever the camera moves — and the earlier answer (fading a cascade out
 # past a threshold) traded that for a muddy sea.
 #
@@ -14,7 +14,7 @@
 # level whose texel matches its footprint (the vertex from its cell size, the
 # pixel from its derivatives). A vertex then sees the AVERAGE of the waves its
 # cell cannot carry, continuously, and a far pixel averages instead of
-# picking one texel. The normal map is box-averaged UNnormalised on purpose:
+# picking one texel. The normal map is box-averaged UNnormalized on purpose:
 # the length of an averaged normal is how much wave slope the level hides,
 # which the shader turns into roughness (Toksvig), so distant water goes
 # calm and matte, never glassy.

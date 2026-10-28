@@ -159,7 +159,7 @@ static bool mangler_payload_is_struct_rep(const AstTypeRef* payload) {
     const TypeInfo* ti = payload->resolved_type;
     // #960: a concrete arg INFERRED from a `mod`/`view` alias carries the
     // reference in its TypeInfo; the payload is its base (the mangled name
-    // already strips the mode, so the rep judgement must agree).
+    // already strips the mode, so the rep judgment must agree).
     if (ti && ti->kind == TYPE_REF && ti->as.ref.base) ti = ti->as.ref.base;
     if (ti && ti->kind != TYPE_GENERIC_PARAM) {
         // #901: TYPE_BUFFER (Ptr and any Buffer(T)) is struct-rep too —

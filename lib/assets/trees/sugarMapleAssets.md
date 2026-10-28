@@ -8,7 +8,7 @@ screenshot or botanical photograph supplies production pixels.
   maple edges. The first two versions had too many bright individual marks;
   the selected third version has quiet copper-orange interiors. It is one
   cutout, varied through mirrored UVs, vertical flips, size and placement.
-- `sugarMapleBark.png`: opaque grey-brown long irregular ridges and plates.
+- `sugarMapleBark.png`: opaque gray-brown long irregular ridges and plates.
   Its broad scale is chosen for the existing small game-tree preset.
 
 Both use the existing surface-image owner. Foliage uses the same alpha cutoff,
@@ -29,7 +29,7 @@ Built-in generation, not the CLI fallback:
    yellow/dark checker pattern into broad painted copper-orange regions;
    only faint leaf boundaries, about 10% value variation; no blur, shine,
    background or emission. This is the selected foliage version.
-4. Seamless flat sugar maple bark albedo: warm grey-brown, long irregular
+4. Seamless flat sugar maple bark albedo: warm gray-brown, long irregular
    interlocking ridges, occasional lifted narrow plates, medium-scale painted
    surfaces, sparse creases; no moss, knots, text, perspective or directional
    highlights. This is the selected bark image.

@@ -35,7 +35,7 @@ open water/Water
 open water/WaterSystem
 open water/FftSurfaceCache
 
-const sprayRadius: Float = 28.0  # metres around the camera scanned for crests
+const sprayRadius: Float = 28.0  # meters around the camera scanned for crests
 
 const sprayGridSide: Int = 12  # lattice points per side (144 samples per snapshot)
 
@@ -83,7 +83,7 @@ func createSprayEmitter(renderer: mod DeferredRenderer, body: view WaterBody) re
 
 # Per frame: age the droplets, and when the cache holds a snapshot this
 # emitter has not used, scan the lattice around the camera and burst at the
-# folded points. `camera` is the near-camera centre; the wave clock is the
+# folded points. `camera` is the near-camera center; the wave clock is the
 # system's.
 func sprayUpdate(
   spray: mod SprayEmitter
@@ -151,8 +151,8 @@ func emitCrests(
     forwardX = 0.0
     forwardY = 0.0
   }
-  let centreX: Float = camera.position.x + forwardX * sprayRadius * 0.66
-  let centreY: Float = camera.position.y + forwardY * sprayRadius * 0.66
+  let centerX: Float = camera.position.x + forwardX * sprayRadius * 0.66
+  let centerY: Float = camera.position.y + forwardY * sprayRadius * 0.66
   var bursts: Int = 0
   var crests: Int = 0
   var smallest: Float = 1.0
@@ -161,8 +161,8 @@ func emitCrests(
       let index: Float = (gy * sprayGridSide + gx).toFloat()
       let jitterX: Float = (Math.sin(x: index * 12.9898 + spray.phase) * 0.5) * cell
       let jitterY: Float = (Math.cos(x: index * 78.233 + spray.phase) * 0.5) * cell
-      let x: Float = centreX - sprayRadius + (gx.toFloat() + 0.5) * cell + jitterX
-      let y: Float = centreY - sprayRadius + (gy.toFloat() + 0.5) * cell + jitterY
+      let x: Float = centerX - sprayRadius + (gx.toFloat() + 0.5) * cell + jitterX
+      let y: Float = centerY - sprayRadius + (gy.toFloat() + 0.5) * cell + jitterY
       let energy: Float = oceanMacroEnergy(x: x, y: y, time: waterSystem.time)
       let rawJacobian: Float = fftCacheSumJacobian(cache: waterSystem.surfaceCache, x: x, y: y)
       let jacobian: Float = 1.0 - (1.0 - rawJacobian) * energy * energy
@@ -186,7 +186,7 @@ func emitCrests(
             sys: spray.particles
             x: x + displacement.x
             y: y + displacement.y
-            z: body.centre.z + displacement.z + 0.15
+            z: body.center.z + displacement.z + 0.15
             count: sprayBurstCount
             hVel: 1.2 + 1.5 * fold
             upVel: 2.0 + 2.5 * fold

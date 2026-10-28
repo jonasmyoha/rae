@@ -8,7 +8,7 @@ Rae provides matching procedural-noise families for CPU code and WGSL shaders:
 
 Both paths use the same 32-bit lattice hash constants, gradient sets, interpolation, octave seeding, and domain-warp offsets. Rae `Float` is now f32 (IEEE-754 binary32, see `primitive-types.md`), so the CPU and GPU sides share the same floating-point **representation** — the width mismatch that previously guaranteed divergence is gone.
 
-That alignment does **not** amount to bit-identical determinism, and this document does not claim it. Results can still differ because operation ordering, contraction (fused multiply-add), the precision of transcendental functions, and compiler optimisation choices are not specified to match between a C compiler and a WGSL shader compiler. Treat CPU and GPU noise as statistically equivalent and spatially stable, and expect agreement to the last few ULP rather than exact equality. Do not build a correctness check on bit-for-bit CPU/GPU comparison.
+That alignment does **not** amount to bit-identical determinism, and this document does not claim it. Results can still differ because operation ordering, contraction (fused multiply-add), the precision of transcendental functions, and compiler optimization choices are not specified to match between a C compiler and a WGSL shader compiler. Treat CPU and GPU noise as statistically equivalent and spatially stable, and expect agreement to the last few ULP rather than exact equality. Do not build a correctness check on bit-for-bit CPU/GPU comparison.
 
 ## Choosing CPU or GPU
 

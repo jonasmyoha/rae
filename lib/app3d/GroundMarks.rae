@@ -1,12 +1,12 @@
 # app3d/GroundMarks — marks on the ground: footprints (app3d/Footprints),
-# tyre tracks (app3d/WheelTracks). A mark is a flat piece from one point to
-# another in a colour; a trail of them is a ring of `capacity` pieces, the
+# tire tracks (app3d/WheelTracks). A mark is a flat piece from one point to
+# another in a color; a trail of them is a ring of `capacity` pieces, the
 # oldest reused once it is full. A piece fades by narrowing (no transparency
 # needed) over the last `fadeSeconds` of its `lifetime`, and the last
 # `tailShare` of a full trail narrows toward its end, so its tail never pops
 # as pieces are reused. Every live piece of a trail is drawn as one instance of
 # a unit box (Mesh3d makeBox size 1) in an instance batch, narrowed as it
-# fades, in its own colour: a system fills one batch with all its trails and
+# fades, in its own color: a system fills one batch with all its trails and
 # draws it once.
 import Math
 import Quat
@@ -16,7 +16,7 @@ open ecs/Transform
 open GbufferInstanced
 
 # One piece: from where to where, laid when (the marks' own clock, s), and
-# its colour.
+# its color.
 type MarkPiece {
   from: Vec3
   to: Vec3

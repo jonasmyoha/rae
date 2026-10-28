@@ -3,7 +3,7 @@
 // Tessendorf / Hasselmann et al.; written from the papers, no code copied.
 //
 // spectrum: for every texel of an N x N grid covering one cascade tile of L
-// metres, the wave vector is k = 2pi/L * (x - N/2, y - N/2). The energy at k is
+// meters, the wave vector is k = 2pi/L * (x - N/2, y - N/2). The energy at k is
 // the JONSWAP frequency spectrum S(w) (Hasselmann 1973, fetch-limited, with the
 // TMA finite-depth factor of Bouws 1985) times the Hasselmann 1980 directional
 // spreading D(theta), times the Jacobian (dw/dk)/k that turns an (w, theta)
@@ -77,7 +77,7 @@ fn hasselmann(w: f32, wp: f32, theta: f32, windSpeed: f32, g: f32) -> f32 {
     s = 9.77 * pow(w / wp, -2.33 - 1.45 * (windSpeed * wp / g - 1.17));
   }
   s = clamp(s, 0.05, 40.0);
-  // Normalisation so D integrates to 1 over theta: 2^(2s-1)/pi * G(s+1)^2 / G(2s+1).
+  // Normalization so D integrates to 1 over theta: 2^(2s-1)/pi * G(s+1)^2 / G(2s+1).
   let norm = exp((2.0 * s - 1.0) * log(2.0) + 2.0 * lnGamma(s + 1.0) - lnGamma(2.0 * s + 1.0)) / PI;
   let c = max(cos(0.5 * theta), 0.0);
   return norm * pow(c, 2.0 * s);
@@ -91,7 +91,7 @@ fn h0At(px: u32, py: u32) -> vec2<f32> {
   if (px == 0u || py == 0u) { return vec2<f32>(0.0, 0.0); }
   // Test mode (#850): ONE known wave, h0 = 0.25 at k index +-(3, 0), so that
   // after evolution at t = 0 (h = h0 + conj(h0(-k)) = 0.5 at both) the
-  // unnormalised inverse transform is exactly cos(2 pi 3 x / N) of amplitude 1.
+  // unnormalized inverse transform is exactly cos(2 pi 3 x / N) of amplitude 1.
   if (U.band.w > 0.5) {
     if (py == half && (px == half + 3u || px + 3u == half)) { return vec2<f32>(0.25, 0.0); }
     return vec2<f32>(0.0, 0.0);
@@ -255,7 +255,7 @@ fn fieldOut(@builtin(global_invocation_id) gid: vec3<u32>) {
   textureStore(fieldDst, vec2<i32>(gid.xy), textureLoad(fieldSrc, vec2<i32>(i32(gid.y), i32(gid.x)), 0));
 }
 
-// The cascade maps: undo the centred spectrum's (-1)^(x+y), chop, normal from
+// The cascade maps: undo the centered spectrum's (-1)^(x+y), chop, normal from
 // the slopes, Jacobian of the horizontal displacement (folding = J < 0).
 @group(0) @binding(0) var<uniform> Pu: EvolveU;
 @group(0) @binding(1) var field0: texture_2d<f32>;
@@ -295,7 +295,7 @@ fn post(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // Mip downsample (#1002): level L of a cascade map is the 2x2 box average of
 // level L-1. Displacement, Jacobian and foam average plainly; the normal is
-// averaged UNnormalised so its shortened length records the slope variance
+// averaged UNnormalized so its shortened length records the slope variance
 // the level hides (the surface shader's Toksvig roughness).
 @group(0) @binding(0) var mipSrc: texture_2d<f32>;
 @group(0) @binding(1) var mipDst: texture_storage_2d<rgba16float, write>;

@@ -7,7 +7,7 @@ typedef struct RaeWgpuReadRequest {
     WGPUBuffer buffer;
     size_t offset;
     size_t size;
-    int status; /* 0 pending, 1 success, -1 failed/cancelled */
+    int status; /* 0 pending, 1 success, -1 failed/canceled */
     int references;
 } RaeWgpuReadRequest;
 
@@ -23,7 +23,7 @@ static void raeWgpuReadCompleted(WGPUMapAsyncStatus status, WGPUStringView messa
     (void)userdata2;
     RaeWgpuReadRequest* request = userdata1;
     /* Cancellation may have happened before this callback, including inline
-     * during Unmap. Never publish success again on a cancelled request. */
+     * during Unmap. Never publish success again on a canceled request. */
     if (request->status == 0)
         request->status = status == WGPUMapAsyncStatus_Success ? 1 : -1;
     raeWgpuReadDrop(request);

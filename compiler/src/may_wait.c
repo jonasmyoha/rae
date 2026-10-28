@@ -14,7 +14,7 @@
  * 2. May-wait is a fixed point over the call graph: a function may wait if
  *    it uses a primitive or calls a may-wait function. The call graph is
  *    complete (whole program, no function pointers).
- * 3. Generics are analysed AFTER specialisation: every specialisation the
+ * 3. Generics are analyzed AFTER specialization: every specialization the
  *    backend instantiates (its discovery pass) is its own node, walked with
  *    its type parameters bound, so `process(Slow)` can wait while
  *    `process(Fast)` does not. A call names its target through sema's
@@ -57,7 +57,7 @@ static const char* wait_kind_name(WaitKind kind) {
 
 typedef struct {
   const AstDecl* decl;
-  /* A specialisation: the template's concrete arguments (NULL otherwise),
+  /* A specialization: the template's concrete arguments (NULL otherwise),
    * and their key ("BenchRouter", "List(Int)") */
   const AstTypeRef* concrete_args;
   char* key;
@@ -126,7 +126,7 @@ static DeclSlot* decl_slot(WaitGraph* graph, const AstDecl* decl, bool create) {
   return &graph->table[slot];
 }
 
-/* The node for (decl, key); NULL key = not a specialisation. Added on first
+/* The node for (decl, key); NULL key = not a specialization. Added on first
  * sight when `create`. */
 static int graph_node(WaitGraph* graph, const AstDecl* decl, const char* key, const AstTypeRef* concrete_args,
                       bool create) {
@@ -180,7 +180,7 @@ static WaitKind extern_wait_kind(const AstFuncDecl* func) {
   return WAIT_NONE;
 }
 
-/* ----- type keys under a specialisation's bindings ---------------------- */
+/* ----- type keys under a specialization's bindings ---------------------- */
 
 typedef struct {
   const AstIdentifierPart* params;   /* the template's type parameters */
@@ -267,7 +267,7 @@ typedef struct {
   int node;
   int scope;                 /* 0: the program, 1: lib/ */
   const AstFuncDecl* func;   /* the function being walked (its params) */
-  Bindings bindings;         /* its type parameters, for a specialisation */
+  Bindings bindings;         /* its type parameters, for a specialization */
 } WalkContext;
 
 static void note_wait(WalkContext* walk, WaitKind kind) {
@@ -280,8 +280,8 @@ static void add_edge(WalkContext* walk, int callee) {
   if (callee >= 0) node_add_callee(&walk->graph->nodes[walk->node], callee);
 }
 
-/* Every specialisation of a generic template: the conservative edge */
-static void edge_to_all_specialisations(WalkContext* walk, const AstDecl* template_decl) {
+/* Every specialization of a generic template: the conservative edge */
+static void edge_to_all_specializations(WalkContext* walk, const AstDecl* template_decl) {
   DeclSlot* slot = decl_slot(walk->graph, template_decl, false);
   if (!slot) return;
   for (int index = slot->first; index >= 0; index = walk->graph->nodes[index].next_same_decl) add_edge(walk, index);
@@ -340,7 +340,7 @@ static bool infer_type_argument(WalkContext* walk, const AstFuncDecl* func, Str 
     for (const AstTypeRef* inner = type->generic_args; inner; inner = inner->next, position++) {
       if (!inner->parts || inner->parts->next || inner->generic_args || !str_eq(inner->parts->text, param)) continue;
       /* An enclosing parameter passed on (`grow(this)` in a generic body):
-       * its declared type, with this specialisation's bindings */
+       * its declared type, with this specialization's bindings */
       if (value->kind == AST_EXPR_IDENT && walk->func) {
         for (const AstParam* own = walk->func->params; own; own = own->next) {
           if (!str_eq(own->name, value->as.ident) || !own->type) continue;
@@ -384,9 +384,9 @@ static void edge_to_decl(WalkContext* walk, const AstDecl* target, const AstCall
     return;
   }
   /* A generic extern (the buffer intrinsics) has no body and no
-   * specialisations; one that does not wait cannot change the result */
+   * specializations; one that does not wait cannot change the result */
   if (func->is_extern) return;
-  /* A generic template: find the specialisation from the type arguments */
+  /* A generic template: find the specialization from the type arguments */
   KeyBuffer key = { { 0 }, 0 };
   size_t wanted = 0, found = 0;
   for (const AstIdentifierPart* param = func->generic_params; param; param = param->next) wanted++;
@@ -426,7 +426,7 @@ static void edge_to_decl(WalkContext* walk, const AstDecl* target, const AstCall
   } else {
     walk->graph->approximate_calls[walk->scope]++;
     if (getenv("RAE_REPORT_WAITS_DEBUG")) fprintf(stderr, "approx generic %.*s key=[%s] found=%zu/%zu args0=%.*s\n", (int)func->name.len, func->name.data, key.text, found, wanted, args && args->name.len ? (int)args->name.len : 0, args && args->name.len ? args->name.data : "");
-    edge_to_all_specialisations(walk, target);
+    edge_to_all_specializations(walk, target);
   }
 }
 
@@ -662,7 +662,7 @@ static void graph_walk_all(WaitGraph* graph) {
       walk.bindings.params = func->generic_params;
       walk.bindings.args = graph->nodes[i].concrete_args;
     } else if (func->generic_template && func->specialization_args) {
-      /* sema's own specialisation: a cloned body that still spells T */
+      /* sema's own specialization: a cloned body that still spells T */
       walk.bindings.params = func->generic_template->as.func_decl.generic_params;
       walk.bindings.args = func->specialization_args;
     }
@@ -755,7 +755,7 @@ static void graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule*
   memset(graph, 0, sizeof(*graph));
   graph->ctx = ctx;
   graph->merged = merged;
-  /* Every specialisation first, so a call can find its own */
+  /* Every specialization first, so a call can find its own */
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
     const FunctionSpecialization* spec = &ctx->specialized_funcs[i];
     if (!spec->decl || !spec->decl->generic_params) continue;
@@ -936,13 +936,13 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
   /* Every count is split: [0] the program, [1] lib/. The default report
    * prints the program's (lib/ grows; a report on a program should not move
    * with it) and names the lib/ twins; `with_lib` adds the lib/ side. */
-  size_t functions[2] = { 0, 0 }, specialisations[2] = { 0, 0 }, may_wait[2] = { 0, 0 };
+  size_t functions[2] = { 0, 0 }, specializations[2] = { 0, 0 }, may_wait[2] = { 0, 0 };
   size_t spawned[2] = { 0, 0 }, reachable[2] = { 0, 0 }, twins[2] = { 0, 0 };
   for (size_t i = 0; i < graph.count; i++) {
     const WaitNode* node = &graph.nodes[i];
     int scope = is_stdlib(&graph, node->decl) ? 1 : 0;
     functions[scope]++;
-    if (node->key) specialisations[scope]++;
+    if (node->key) specializations[scope]++;
     if (node->may_wait) may_wait[scope]++;
     if (node->spawned) spawned[scope]++;
     if (node->reachable) reachable[scope]++;
@@ -952,7 +952,7 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
   fprintf(out, "may-wait report: %s\n", file_name(entry));
   for (int scope = 0; scope < scopes; scope++) {
     fprintf(out, "  %s\n", scope == 0 ? "the program:" : "lib/:");
-    fprintf(out, "    functions: %zu (%zu generic specialisations)\n", functions[scope], specialisations[scope]);
+    fprintf(out, "    functions: %zu (%zu generic specializations)\n", functions[scope], specializations[scope]);
     fprintf(out, "    wait primitive sites: Task.get %zu, sleep extern %zu, socket/poller extern %zu, task join %zu, "
                  "blocking extern %zu\n",
             graph.primitive_sites[scope][WAIT_TASK_GET], graph.primitive_sites[scope][WAIT_SLEEP],

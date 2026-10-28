@@ -85,7 +85,7 @@ stickiness — the distance over which balls merge — read from the cluster's
 first primitive, since it describes the group.
 
 Albedo is **per primitive**: the weight that fuses two distances also mixes
-their colours, so a ball's colour bleeds exactly across the region where
+their colors, so a ball's color bleeds exactly across the region where
 its surface merges and a cluster can hold a gradient. Metallic, roughness
 and emission come from the cluster's first primitive, because those shade
 the fused surface as a whole rather than any one ball.

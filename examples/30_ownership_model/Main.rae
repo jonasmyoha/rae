@@ -1,6 +1,6 @@
 # Rae ownership model — runnable showcase.
 #
-# This example walks through the four ownership flavours Rae uses
+# This example walks through the four ownership flavors Rae uses
 # for heap-backed values (Strings, Lists, StringMaps, …) and shows
 # what each one does at scope exit. Run it under `--target compiled`
 # to see cascade drops fire automatically; everything is also live-
@@ -14,7 +14,7 @@
 #                       binding never drops the source.
 #  4. `mod T`         — mutating borrow. Same drop semantics as `view`.
 #
-# Plus the two flavours of struct-literal String field init:
+# Plus the two flavors of struct-literal String field init:
 #
 #  - `{ k: src }`     — Phase 2 deep-copy: source stays alive, struct
 #                       owns an independent copy.
@@ -35,7 +35,7 @@ type Team {
 
 # `own T` parameter — the callee takes ownership of the value.
 # Caller's move tracking will skip the source's auto-drop.
-func summarise(p: own Profile) ret String {
+func summarize(p: own Profile) ret String {
   ret "{p.name} <{p.email}>"
 }
 
@@ -62,11 +62,11 @@ func scenario1BorrowVsTake() {
   # `format` borrows — `p` is still alive after the call.
   log(format(p: p))
   log("after format, p.name = {p.name}")
-  # `summarise` consumes — caller's move-tracking skips p's auto-drop.
+  # `summarize` consumes — caller's move-tracking skips p's auto-drop.
   # We rebind p before consuming so the post-call block can keep going.
   let q: Profile = { name: "Grace", email: "grace@rae" }
-  log(summarise(p: q))
-  # `q` is gone (moved into summarise) — referencing it here would
+  log(summarize(p: q))
+  # `q` is gone (moved into summarize) — referencing it here would
   # be a use-after-move at the Rae level. The example just stops
   # touching q.
   log("scenario 1 done")

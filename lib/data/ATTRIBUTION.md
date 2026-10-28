@@ -3,13 +3,13 @@
 ## hosek_wilkie_rgb.json
 
 The numeric values are reproduced verbatim from the authors' published sample
-implementation; only the container changed (C array initialisers -> JSON).
+implementation; only the container changed (C array initializers -> JSON).
 
-    Source:  https://cgg.mff.cuni.cz/projects/SkylightModelling/
+    Source:  https://cgg.mff.cuni.cz/projects/SkylightModeling/
     Archive: HosekWilkie_SkylightModel_C_Source.1.4a.zip
     File:    ArHosekSkyModelData_RGB.h
     Version: 1.4a, February 22nd 2013
-    Licence: 3-clause BSD
+    License: 3-clause BSD
     Copyright (c) 2012-2013, Lukas Hosek and Alexander Wilkie
     All rights reserved.
 

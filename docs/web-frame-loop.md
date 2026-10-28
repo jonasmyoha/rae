@@ -91,7 +91,7 @@ name is an argument.
 **B. An entry convention.** A program that defines
 `func setup() ret T` and `func frame(state: mod T) ret Bool` in its entry
 module gets a generated loop instead of calling `main`. There is no new
-argument kind, but the behaviour comes from what a function is named, which
+argument kind, but the behavior comes from what a function is named, which
 is less explicit than A (a reader has to know the rule).
 
 **C. Keep Asyncify** (with SIMD, as now). No language change; the ~15% frame
@@ -138,7 +138,7 @@ func main() ret Int {
   alias. Natively main runs `while (body(&state)) {}` and drops the state.
   In a browser the state moves into a heap box and
   `emscripten_set_main_loop_arg` calls a generated trampoline each animation
-  frame; when the body says stop, the loop is cancelled and the box dropped
+  frame; when the body says stop, the loop is canceled and the box dropped
   and freed. main then returns at once, with its other locals dropped as
   usual.
 

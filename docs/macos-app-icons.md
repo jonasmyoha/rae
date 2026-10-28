@@ -55,12 +55,12 @@ get wrong by reusing `uses_sdl3`.
 ## 3. Format: `.icns`, or `.png` — never `.jpg`
 
 **`.jpg` is out.** JPEG has no alpha channel, and the corners outside the squircle
-must be transparent. A JPEG icon is a coloured square with visible corner
+must be transparent. A JPEG icon is a colored square with visible corner
 triangles. "Temporary" does not change that.
 
 Measured, 1024×1024, drawn with CoreGraphics:
 
-| artefact | size | note |
+| artifact | size | note |
 |---|---|---|
 | `.icns`, full 16→1024 ladder | **19 KB** | the actual macOS icon format |
 | `.png`, flat fill | **31 KB** | for the runtime `NSImage` path |
@@ -144,7 +144,7 @@ Default (key absent) = generate for windowed apps only. An env override
 ## 9. Prototype
 
 Verified end to end on macOS: CoreGraphics + CoreText + ImageIO, ~120 lines of C,
-producing the squircle, the gradient, auto-fitted centred text, and both a PNG and
+producing the squircle, the gradient, auto-fitted centered text, and both a PNG and
 a valid multi-size `.icns` (`file` reports `Mac OS X icon, 18997 bytes`). The two
 renders below were checked by eye at 256 px (clean) and 32 px (where the long name
 failed, per §6).

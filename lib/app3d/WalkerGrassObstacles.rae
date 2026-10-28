@@ -46,16 +46,16 @@ func addWalkerGrassObstacle(
 
 func walkerGrassObstacles(
   terrainSystem: view WalkerTerrain
-  centreX: view Float
-  centreY: view Float
+  centerX: view Float
+  centerY: view Float
   reach: view Float
 ) ret List(Float) {
   var values: List(Float) = emptyWalkerGrassObstacles()
   var count: Int = 0
   let nearbyTrees: List(PropNear) = propsNear(
     field: terrainSystem.forest
-    x: centreX
-    y: centreY
+    x: centerX
+    y: centerY
     reach: reach + 2.0
   )
   loop let tree: view PropNear in nearbyTrees {
@@ -73,8 +73,8 @@ func walkerGrassObstacles(
     }
     let x: Float = mat4Get(m: prop.model, i: 12)
     let y: Float = mat4Get(m: prop.model, i: 13)
-    let deltaX: Float = x - centreX
-    let deltaY: Float = y - centreY
+    let deltaX: Float = x - centerX
+    let deltaY: Float = y - centerY
     if deltaX * deltaX + deltaY * deltaY > (reach + 2.0) * (reach + 2.0) {
       continue
     }
@@ -106,14 +106,14 @@ func updateWalkerGrassObstacles(
   grass: mod GrassCompute
   resources: mod GpuResources
   terrainSystem: view WalkerTerrain
-  centreX: view Float
-  centreY: view Float
+  centerX: view Float
+  centerY: view Float
   reach: view Float
 ) {
   let values: List(Float) = walkerGrassObstacles(
     terrainSystem: terrainSystem
-    centreX: centreX
-    centreY: centreY
+    centerX: centerX
+    centerY: centerY
     reach: reach
   )
   grassUpdateSurfaceField(

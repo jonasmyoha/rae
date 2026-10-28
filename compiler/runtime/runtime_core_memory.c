@@ -63,7 +63,7 @@ static void rae_record_main_stack(void) {
 }
 
 /* The faulting thread's stack pointer from the signal context, so a worker
- * thread's overflow (whose stack bounds were never recorded) is recognised by
+ * thread's overflow (whose stack bounds were never recorded) is recognized by
  * the fault landing just below its SP. 0 where the register is not known. */
 static uintptr_t rae_context_sp(void* uctx) {
   if (!uctx) return 0;
@@ -337,7 +337,7 @@ typedef enum {
  * atomics is one cache line every core writes: at 8 workers the physics rain
  * scene spent most of its samples inside rae_ext_rae_buf_alloc/free fighting
  * over it (docs/physics-performance-plan.md §2b). So each thread owns a block
- * (RaeMemCounterBlock, padded off its neighbours' lines) and only that thread
+ * (RaeMemCounterBlock, padded off its neighbors' lines) and only that thread
  * writes it: RAE_STAT_ADD is a relaxed load and a relaxed store, a plain add
  * on the thread's own line. Readers (the exit report, rae_ext_rae_mem_*) sum
  * every live block plus g_mem_retired under g_mem_blocks_lock; the slots are
@@ -457,7 +457,7 @@ static int g_mem_stats_enabled = 0;
 /* Side hash table: ptr → site. Allocated only when mem-stats is on.
  * 4M slots sized for ~2M outstanding allocations (peak observed in
  * the 20K mobile-UI stress is ~1.2M). Two parallel arrays keep the
- * key array dense (better cache behaviour for the probe scan). */
+ * key array dense (better cache behavior for the probe scan). */
 #define RAE_MEM_HASH_BITS 22
 #define RAE_MEM_HASH_N    (1u << RAE_MEM_HASH_BITS)
 #define RAE_MEM_HASH_MASK (RAE_MEM_HASH_N - 1)

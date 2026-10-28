@@ -14,7 +14,7 @@
 #               the picture is never written into this repository.
 # For the near camera it also writes overlay-near.png beside it: T02 with
 # the hand-drawn trace, the render with the trace and the generated tree's
-# centre lines, and the two blended (traceTree.py overlay).
+# center lines, and the two blended (traceTree.py overlay).
 # TREELAB_TRACE the trace (default: treeReference/traces/T02.js)
 # TREELAB_ITERATION  a round's name (YYYY-MM-DD-stepN-short-name): also copy
 #               the picture into treeReference/rounds/<name>/, the history
@@ -94,7 +94,7 @@ if [ "$CAMERA" = near ] && [ -f "$TRACE" ] && [ -f "$TMP/skeleton.txt" ]; then
   python3 examples/146_treeLab/traceTree.py overlay "$TRACE" "$TMP/t02.bmp" "$TMP/render.bmp" \
     "$TMP/skeleton.txt" "$TMP/overlay.bmp" "$TMP/cards.txt" \
     && sips -s format png "$TMP/overlay.bmp" --out "$OVERLAY" > /dev/null \
-    && echo "wrote $OVERLAY (T02 + trace | render + trace + generated centre lines | both blended)"
+    && echo "wrote $OVERLAY (T02 + trace | render + trace + generated center lines | both blended)"
 fi
 if [ -n "${TREELAB_ITERATION:-}" ]; then
   ROUND="$LOOKS/treeReference/rounds/$TREELAB_ITERATION"

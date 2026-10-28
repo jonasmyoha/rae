@@ -69,7 +69,7 @@
  * still runs here. */
 
 /* #923: the frame-derived matrices (viewProj, the jittered one, the previous
- * frame's, the clear colour) live on the Rae GbufferCache; nothing in C
+ * frame's, the clear color) live on the Rae GbufferCache; nothing in C
  * reconstructs positions any more. */
 /* #904: the inspector pipeline / uniform / bind are manager IDs on the Rae
  * side (lib/GbufferInspector.rae); its shader is lib/gbuffer_inspect.wgsl. */
@@ -220,7 +220,7 @@ int64_t rae_gb_terrain_tex_gen(void)       { return gb_terrain_tex_gen; }
 
 /* #14 textured-terrain material ARRAY. One texture_2d_array, one layer per
  * material (grass/sand/road/water); the terrain fragment blends each layer over
- * the procedural colour by its biome weight. Replaces #9's single texture_2d.
+ * the procedural color by its biome weight. Replaces #9's single texture_2d.
  * Create once (init), then write each layer's RGBA — same 64->32 repack as
  * registerImageRgba, since decodePng hands over one packed int per pixel. The
  * 2D-array VIEW is stored in the same slot the bind group reads, and the gen

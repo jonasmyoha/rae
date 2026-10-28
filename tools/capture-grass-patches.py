@@ -65,7 +65,7 @@ def main():
                                 str(frames/'frame%d.bmp'), '-c:v', 'libx264', '-crf', '18', '-pix_fmt',
                                 'yuv420p', str(clip)], check=True, timeout=60)
                 manifest['clips'].append({'file': clip.name, 'camera': camera, 'wind': wind,
-                                          'frames': 180, 'pathMetres': 12, 'eye': 'fixed world height',
+                                          'frames': 180, 'pathMeters': 12, 'eye': 'fixed world height',
                                           'bitmapPixels': list(struct.unpack_from('<ii', (frames/'frame0.bmp').read_bytes(), 18)),
                                           'sha256': hashlib.sha256(clip.read_bytes()).hexdigest()})
             else:

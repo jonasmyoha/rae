@@ -79,7 +79,7 @@
  *
  *   world.joints -> count (joint)*count bodyCount (setIndex islandId)*bodyCount
  *
- * dumps every live joint in id order: id, generation, type, set, colour,
+ * dumps every live joint in id order: id, generation, type, set, color,
  * local index, island, island index, collideConnected, the sim's inverse
  * masses and its accumulated impulses (distance: impulse, lower, upper,
  * motor; revolute: linear(3), perpendicular(2), spring, motor, lower,

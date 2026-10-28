@@ -1,7 +1,7 @@
 // Ported from SMAA: Copyright (c) 2013 Jorge Jimenez et al., MIT License (lib/LICENSE-smaa.md)
 // SMAA 1x, pass 1 (render-perf-9): luma edge detection (SMAALumaEdgeDetectionPS)
 // over the lit HDR image at the scene resolution. SMAA wants gamma-encoded
-// colours, so the luma is taken of the tone-mapped, gamma-encoded value
+// colors, so the luma is taken of the tone-mapped, gamma-encoded value
 // (like the FXAA pass). Output RG: an edge on the left / top of the pixel.
 // A pixel with no edge is discarded and keeps the cleared 0.
 struct EdgesU {

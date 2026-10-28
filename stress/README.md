@@ -13,7 +13,7 @@ Every case declares its shelf in its pack file, and the runner holds it to it:
 | verdict | meaning | the case asserts |
 |---|---|---|
 | `handles` | Rae does the right thing — usually by refusing to compile, sometimes by a defined run-time result | the good outcome |
-| `footgun` | Rae still does the wrong thing | **the current bad behaviour, exactly** |
+| `footgun` | Rae still does the wrong thing | **the current bad behavior, exactly** |
 
 The second row is the ratchet. A `footgun` case passes while the bug is alive.
 When the compiler fixes it, the case FAILS with `FIXED? … move this case to
@@ -81,7 +81,7 @@ stress: {
 - One foot gun per case. If the program shows two things, split it.
 - It must bite in at least three mainstream languages, and the README must say
   which and how. "Rae rejects something nobody else accepts" is not a case.
-- Write `expect` from an actual run, never from what the behaviour *should*
+- Write `expect` from an actual run, never from what the behavior *should*
   be — for a `footgun`, the assertion IS the bug.
 - A fixed foot gun is flipped in the same commit as the fix: verdict to
   `handles`, `expect` to the good outcome, `fixedBy` filled in.

@@ -1,4 +1,4 @@
-// c_discovery.c — Generic specialisation discovery pass for the C backend.
+// c_discovery.c — Generic specialization discovery pass for the C backend.
 //
 // Walks every reachable function body to find generic call sites and registers
 // each (template, concrete-args) pair so the rest of the backend can emit
@@ -37,7 +37,7 @@ static void register_owned_argument_drop(CFuncContext* ctx, const AstExpr* value
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return;
-    // Normalise the new generic-call syntax so the spec-registration
+    // Normalize the new generic-call syntax so the spec-registration
     // logic below sees `generic_args` populated, same as the legacy
     // double-paren form. See c_backend.c::hoist_type_arg_if_present.
     // #960: an enumFromName call needs its `opt E` struct-rep type emitted;
@@ -276,7 +276,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 // qualifier is not a value and not a type, and c_expr.c lowers the
                 // call to a plain `queryViewAt(table: t, denseIndex: i)` with NO
                 // receiver — so discover exactly that. Without this the generic
-                // specialisation was never registered up front: the emitter then
+                // specialization was never registered up front: the emitter then
                 // created it lazily AFTER its first caller, which C rejects as a
                 // call to an undeclared function (#33142260). Same test as the
                 // lowering: no local binding, no inferable type, and a function
@@ -367,7 +367,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
         case AST_EXPR_OWN:
             // Sema wraps args being coerced to/from RaeAny; AST_EXPR_OWN
             // marks a value as ownership-transferred. The inner expression
-            // may contain method calls whose specialisations must still be
+            // may contain method calls whose specializations must still be
             // discovered, so walk through.
             discover_specializations_expr_impl(ctx, expr->as.unary.operand);
             break;
@@ -488,8 +488,8 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                     }
                     // Stage 2 scope-exit dealloc (docs/scope-exit-dealloc.md):
                     // pre-register the `drop()` overload for any heap-owning
-                    // let so the specialised drop function is emitted BEFORE
-                    // the function that will call it (specialised functions
+                    // let so the specialized drop function is emitted BEFORE
+                    // the function that will call it (specialized functions
                     // come first in the output).
                     if (type && is_drop_target_type(type)) {
                         Str loc_base = get_base_type_name(type);

@@ -1,4 +1,4 @@
-# Sky system design — one interface, realistic and stylised behind it
+# Sky system design — one interface, realistic and stylized behind it
 
 Status: design, not built. Companion to `shadow-system-design.md` and
 `deferred-renderer-*`; the same house style — decisions with the reason
@@ -9,13 +9,13 @@ attached, and the rejected options recorded so they are not re-proposed.
 ## 1. What we are solving
 
 The renderer currently has no sky at all. The background is a clear
-colour, and ambient light is a two-colour hemisphere constant fed in by
+color, and ambient light is a two-color hemisphere constant fed in by
 hand (`Light3d.ambSky` / `ambGround`). That is two separate lies:
 
 * The background is not the environment. Nothing in the frame agrees
   with what is behind it.
 * Ambient is authored, not derived. A scene under a sunset gets whatever
-  hemisphere colours somebody typed, so the lighting and the backdrop
+  hemisphere colors somebody typed, so the lighting and the backdrop
   drift apart every time either is edited.
 
 Both examples we care about want the opposite of each other:
@@ -23,7 +23,7 @@ Both examples we care about want the opposite of each other:
 * **109 / 110 / 111 (realistic)** want a real environment — a sky that
   is both visible and the source of indirect light, so a chrome sphere
   reflects the actual clouds above it.
-* **113 (stylised)** wants a *painted* sky. It now has cel shading and
+* **113 (stylized)** wants a *painted* sky. It now has cel shading and
   a grass ground, and dropping a photographic HDRI behind it would
   produce the exact failure this document exists to avoid: **3D models
   pasted onto a photograph**. The mismatch is not subtle, and no amount
@@ -68,7 +68,7 @@ prefiltered for lighting.
 
 **Source: Poly Haven.** CC0, which matters more here than quality: this
 repository has already had to rewrite its history once over an asset
-whose licence could not be established (see
+whose license could not be established (see
 `examples/136_walker_character/assets/ATTRIBUTION.md`). CC0 removes that
 class of problem entirely. Their **"Pure Sky"** variants — sky isolated
 from the ground and surroundings — are the correct pick for a game
@@ -79,7 +79,7 @@ Three products from one image:
 ```
 HDRI ──┬── background     (sample by view direction)
        ├── irradiance     (SH or a small prefiltered cube)
-       └── sun extraction (brightest region -> direction + colour)
+       └── sun extraction (brightest region -> direction + color)
 ```
 
 **Sun extraction earns its place.** Without it the artist sets a sun
@@ -113,7 +113,7 @@ sky" — the case where downloading a 100 MB HDRI is absurd.
 Irradiance comes from integrating the same analytic function into the
 same SH9 form, so Layers A and B are interchangeable downstream.
 
-### Layer C — Stylised sky (the Ghibli direction)
+### Layer C — Stylized sky (the Ghibli direction)
 
 **Not an HDRI.** This is the substantive design point of the document.
 
@@ -122,7 +122,7 @@ but it is still *static*, and it still cannot change with time of day or
 give parallax. The better structure is **layers composited in a shader**:
 
 ```
-                    ☀ sun / moon          crisp disc, artist colour
+                    ☀ sun / moon          crisp disc, artist color
                          │
               ┌──────────┴──────────┐
               │   painted clouds    │     scrolling, parallaxed
@@ -155,15 +155,15 @@ value-noise-with-a-threshold; the threshold version is the one that
 composes with the cel look, because a hard cloud edge is the same
 decision as a hard terminator.
 
-**Stylised irradiance is a lie, deliberately.** Do not integrate the
+**Stylized irradiance is a lie, deliberately.** Do not integrate the
 painted sky. Take the ambient straight from the gradient's two anchor
-colours, because a cel scene wants *chosen* ambient — the whole point of
+colors, because a cel scene wants *chosen* ambient — the whole point of
 §1's "shadows shift toward the sky ambient" in the toon path is that the
 artist controls that hue.
 
 **Assets, if a painted panorama is wanted anyway.** LineKotsi's
 hand-painted equirectangular skies and the free QMS Cartoon Skybox Pack
-are both reasonable, but **both need their licences read before
+are both reasonable, but **both need their licenses read before
 anything is committed** — neither is CC0, and the Poly Haven reasoning
 above applies with more force to a paid asset. Layer C's whole design is
 chosen so that shipping *no* purchased asset is the default path.
@@ -184,7 +184,7 @@ shadow → gbuffer → ssao → depthPyramid → lighting → taa → composite 
 
 **Background is drawn in the lighting pass, not as a separate pass.**
 Lighting already early-outs on `depth <= 0.0` (reverse-Z far) and
-returns the clear colour — that branch becomes `skyRadiance(dir)`. One
+returns the clear color — that branch becomes `skyRadiance(dir)`. One
 touched line, no extra pass, no extra bandwidth, and it cannot desync
 from the depth test that selects it.
 
@@ -202,7 +202,7 @@ else rather than clipping to white first.
 ## 5. Interface sketch
 
 ```rae
-enum SkyKind { none, hdri, procedural, stylised }
+enum SkyKind { none, hdri, procedural, stylized }
 
 type Sky {
   kind: SkyKind
@@ -239,7 +239,7 @@ Each step is independently useful and independently verifiable:
    with one bright spot.
 5. **Sun extraction driving the shadow cascades**, closing the loop
    between visible sun and cast shadow.
-6. **Layer C, stylised**, in example 113 alongside toon shading.
+6. **Layer C, stylized**, in example 113 alongside toon shading.
 7. **Prefiltered specular cube** (deferred, see §7).
 
 Steps 1–3 need no binary asset at all, which is the argument for that
@@ -251,7 +251,7 @@ ordering: the first three land as pure code with real tests.
 
 * **Specular IBL** (prefiltered cube + split-sum BRDF LUT). Diffuse is
   the larger visual win and far cheaper; adding a roughness-mipped cube
-  before diffuse works is optimising the second-order term first.
+  before diffuse works is optimizing the second-order term first.
 * **Aerial perspective / height fog.** Related and wanted, but a scene
   effect, not a sky, and it belongs with the volumetrics work.
 * **Cloud shadows** on the ground. Cheap once Layer C exists (project
@@ -263,10 +263,10 @@ ordering: the first three land as pure code with real tests.
 
 ## 8. Risks
 
-* **The stylised path drifting into "just an HDRI".** It is the easy
+* **The stylized path drifting into "just an HDRI".** It is the easy
   option every time. The mitigation is that §3C's layers are the
   *specification*, and example 113 is the acceptance test.
-* **Licence drift.** Anything not CC0 needs its terms recorded in an
+* **License drift.** Anything not CC0 needs its terms recorded in an
   `ATTRIBUTION.md` next to it, before commit. This repository has
   already paid for getting that wrong once.
 * **Ambient double-counting.** When sky irradiance lands, the authored

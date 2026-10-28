@@ -316,7 +316,7 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
     // #758: resolve a generic param (`view T`) to its concrete type before the
-    // primitive/String tests, so a specialised `view T`(=String) is recognised
+    // primitive/String tests, so a specialized `view T`(=String) is recognized
     // as a wrapper ref (rae_View_String, read `(*x.ptr)`), not misclassified as
     // a raw struct pointer — mirroring the concrete `view String` lowering.
     if (ctx && ctx->generic_params && ctx->generic_args) {
@@ -360,7 +360,7 @@ bool types_match(Str a, Str b) {
 }
 
 const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str name) {
-  // Prefer the generic template over specialisation clones — both share the
+  // Prefer the generic template over specialization clones — both share the
   // same `name`, but a spec clone has already-substituted field types which
   // would mislead substitution at the caller. Pass 1: template/non-generic.
   // Pass 2: anything that matches.
@@ -610,7 +610,7 @@ scan_args:
     bool is_buffer = (type->resolved_type && type->resolved_type->kind == TYPE_BUFFER) || str_eq_cstr(base, "Buffer");
     if (is_buffer || is_list || str_eq_cstr(base, "Box")) return;
     // The declaration whose fields are substituted: the TEMPLATE, never an
-    // already specialised copy. A copy's fields are concrete (Pair(Pair(Int))
+    // already specialized copy. A copy's fields are concrete (Pair(Pair(Int))
     // has `first: Pair(Int)`), so substituting into it for Pair(Int) gave
     // Pair(Int) back, and — an already registered type rescans its fields —
     // recursed until the stack ran out (a nested generic next to a
@@ -851,7 +851,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
           }
       }
       /* Sema types every enum as Int, so a `view <Enum>` ref (spelled by
-       * its enum name, resolved to TYPE_INT — e.g. a specialised `view T`
+       * its enum name, resolved to TYPE_INT — e.g. a specialized `view T`
        * with T = Direction) must NOT take the Int fast path below: that
        * prints the rae_View_Int64 wrapper, while callers pass and the body
        * reads an `int64_t*` for a view enum (the un-resolved path, further
@@ -1089,7 +1089,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         if (str_eq_cstr(base, "Float64")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";
         if (str_eq_cstr(base, "Bool")) return is_ptr ? (is_mod ? "rae_Mod_Bool" : "rae_View_Bool") : "rae_Bool";
         // The same names emit_type_ref_as_c_type gives a binding of the type,
-        // so a `view Char` result initialises a `view Char` local
+        // so a `view Char` result initializes a `view Char` local
         if (str_eq_cstr(base, "Char")) return is_ptr ? (is_mod ? "rae_Mod_Char" : "rae_View_Char") : "uint32_t";
         if (str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
         if (str_eq_cstr(base, "String")) return is_ptr ? (is_mod ? "rae_Mod_String" : "rae_View_String") : "rae_String";
@@ -1282,7 +1282,7 @@ AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr) {
     if (expr->as.call.generic_args) return NULL;
     if (!expr->as.call.args) return NULL;
 
-    // Type-arg slot recognised by shape, not by hard-coded name. The
+    // Type-arg slot recognized by shape, not by hard-coded name. The
     // first argument — positional OR named — whose value parses as a
     // type identifier is hoisted to `generic_args`. This covers all
     // three accepted call spellings:
@@ -2129,7 +2129,7 @@ static void flush_parallel_thunks(CompilerContext* ctx, FILE* out) {
  * returns (an exhaustive `match` whose arms all `ret`, a `loop true`), but C
  * cannot see that and warns (-Wreturn-type); a zero value here is dead code
  * where the body really returns, and a defined answer, not undefined
- * behaviour, if it ever does not. */
+ * behavior, if it ever does not. */
 static void emit_fallthrough_return(FILE* out, const char* rt) {
   if (!rt || strcmp(rt, "void") == 0) return;
   fprintf(out, "  return (%s){0};\n", rt);
@@ -2193,7 +2193,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           tctx.local_count++;
       }
   }
-  // Param auto-drop: tried three flavours, all reverted.
+  // Param auto-drop: tried three flavors, all reverted.
   // - Full auto-drop (any cascade-heap T param): test 413 crashes
   //   when caller passes struct.field (no local to mark moved).
   // - String-only auto-drop: test 430 case2 expects callerSrc to
@@ -3608,7 +3608,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // `drop(T)` from lib/core.rae, which already discovery-registers.
   typedef struct {
     const AstDecl* decl;
-    const AstTypeRef* type_ref;  // non-NULL when this is a generic specialisation
+    const AstTypeRef* type_ref;  // non-NULL when this is a generic specialization
     const char* mangled;
   } StructDropEntry;
   size_t drop_entry_cap = 512;
@@ -3761,7 +3761,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   // Forward declarations — each struct drop AND each container-drop
   // we plan to call from the bodies. The container-drop forward
-  // decls also register the specialisations so the iterative spec-
+  // decls also register the specializations so the iterative spec-
   // emission pass later in this function actually emits the body.
   // Phase 3: we emit TWO drop variants per struct:
   //   rae_drop_struct_<T>       — full cascade (drops String fields too).
@@ -3826,7 +3826,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
   }
   if (drop_entry_count > 0) fprintf(out, "\n");
-  // Re-run discovery so the drop specialisations we just registered
+  // Re-run discovery so the drop specializations we just registered
   // (e.g. `drop(T)(this: mod ComponentTable(T))` for each T) get
   // their bodies walked and their own nested specs (e.g.
   // `drop(List(T))` inside ComponentTable's drop body) registered
@@ -3835,7 +3835,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // C functions because the prototype comes later in the output.
   discovery_progress_window(EMIT_STAGE_REDISCOVER_LO, EMIT_STAGE_REDISCOVER_HI);
   collect_type_refs_module(ctx);
-  /* Every specialisation is known now: the may-wait graph decides which
+  /* Every specialization is known now: the may-wait graph decides which
    * spawns run as tasks on the scheduler (c_spawn_on_pool) */
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = may_wait_build(ctx, module);
@@ -3844,7 +3844,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
   // `rae_drop_struct_<T>_alias` (skip String fields) in a single
-  // walk. `is_alias` flips the String/recursive branch behaviour;
+  // walk. `is_alias` flips the String/recursive branch behavior;
   // List/Map drops are identical in both modes (the container owns
   // its elements regardless of how the enclosing struct was bound).
   for (size_t i = 0; i < drop_entry_count; i++) {
@@ -4382,8 +4382,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   progress_work(EMIT_STAGE_REDISCOVER_HI, EMIT_STAGE_PLAIN_BODIES_LO, 3, 4);
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works
-  // (no need for extern/header). Initialised lets get their initialiser
-  // expression; uninitialised ones get the type's zero value.
+  // (no need for extern/header). Initialized lets get their initializer
+  // expression; uninitialized ones get the type's zero value.
   {
       CFuncContext gctx = {.compiler_ctx = ctx, .module = module};
       for (size_t i = 0; i < ctx->all_decl_count; i++) {
@@ -4395,7 +4395,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           // own `rae_g_<module>_<name>` symbol, so the mirror no longer COLLIDES
           // with the header's identifier — but on a native build (RAE_HAS_WEBGPU)
           // the header must still be the source of truth, the same "defer to the
-          // cheader" rule c_struct binding types follow: initialise the mirror
+          // cheader" rule c_struct binding types follow: initialize the mirror
           // FROM the header constant there, and from the Rae literal otherwise.
           // (Every lib/webgpu const exists in the native header — checked at
           // #816. The Rae fallback is exact too since #817 taught the const
@@ -4423,7 +4423,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           if (d->as.let_decl.value && !global_init_is_deferred(d->as.let_decl.value))
               emit_expr(&gctx, d->as.let_decl.value, out, PREC_LOWEST, false, false);
           else
-              // Deferred (function-call) init OR no init: zero-initialise here;
+              // Deferred (function-call) init OR no init: zero-initialize here;
               // deferred ones are assigned at the top of main().
               emit_auto_init(&gctx, d->as.let_decl.type, out);
           fprintf(out, ";\n");

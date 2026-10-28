@@ -42,7 +42,7 @@ pointed at the old storage — `xs.length` read 3 from a dangling struct.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | no moves; the callee mutates the shared list, the caller sees 4 |
 | JavaScript | no moves; the callee mutates the shared array, the caller sees 4 |

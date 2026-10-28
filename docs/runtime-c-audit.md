@@ -118,7 +118,7 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
 ## How a move is done
 
 1. Write the Rae version in its `lib/` module, with fixtures that run it
-   against the C behaviour on the same inputs (edge cases: empty, UTF-8,
+   against the C behavior on the same inputs (edge cases: empty, UTF-8,
    negative numbers, very long input).
 2. Point the callers at it: the `lib/` externs, or the codegen when the
    generated C called the runtime function directly.

@@ -12,7 +12,7 @@
 #                   lists a GroundTouch at its feet for each stride it
 #                   finished; no ray is cast, the feet are on the ground the
 #                   mover stands on
-#   (the app)       answers each touch (GroundAnswer: colour, mark lift,
+#   (the app)       answers each touch (GroundAnswer: color, mark lift,
 #                   grass or dust)
 #   layFootsteps    lays each touch's print and kicks up its particles
 #   drawFootprints  every live print into the G-buffer, one instanced draw
@@ -55,7 +55,7 @@ type FootprintTuning {
   # Moving further than this between frames is a jump (a restart, being put
   # on a mark): the trail breaks there
   breakDistance: Float
-  # How much of its surface's colour a print keeps
+  # How much of its surface's color a print keeps
   shade: Float
   # A stride (m) at `speed` for a character `tunedHeight` tall: strideBase +
   # stridePerSpeed * speed, within strideMin..strideMax; shorter for a
@@ -94,7 +94,7 @@ func defaultFootprintTuning() ret FootprintTuning {
 # print, where its feet were last frame, and which foot is next
 type FootprintTrail {
   trail: MarkTrail
-  travelled: Float
+  traveled: Float
   lastFeet: Vec3
   hasLastFeet: Bool
   leftFootNext: Bool
@@ -213,7 +213,7 @@ func findFootsteps(
         entityId: characterId
         data: FootprintTrail {
           trail: createMarkTrail(capacity: footprints.tuning.capacity)
-          travelled: 0.0
+          traveled: 0.0
           lastFeet: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
           hasLastFeet: false
           leftFootNext: true
@@ -243,7 +243,7 @@ func findFootsteps(
     if footsteps.hasLastFeet is false {
       footsteps.lastFeet = feet
       footsteps.hasLastFeet = true
-      footsteps.travelled = 0.0
+      footsteps.traveled = 0.0
       continue
     }
     let dx: Float = feet.x - footsteps.lastFeet.x
@@ -251,17 +251,17 @@ func findFootsteps(
     let moved: Float = Math.sqrt(x: dx * dx + dy * dy)
     footsteps.lastFeet = feet
     if moved > breakDistance {
-      footsteps.travelled = 0.0
+      footsteps.traveled = 0.0
       continue
     }
     if moved < 0.0001 {
       continue
     }
-    footsteps.travelled = footsteps.travelled + moved
-    if footsteps.travelled < stride {
+    footsteps.traveled = footsteps.traveled + moved
+    if footsteps.traveled < stride {
       continue
     }
-    footsteps.travelled = 0.0
+    footsteps.traveled = 0.0
     footprints.touches.add(value: GroundTouch {
       entityId: characterId
       point: feet

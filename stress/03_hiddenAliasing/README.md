@@ -22,7 +22,7 @@ to remember, and no `.clone()` to forget.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | `a.items` is also 4 — the assignment binds a second name to the same list |
 | JavaScript | `a.items` is also 4 — objects are references |

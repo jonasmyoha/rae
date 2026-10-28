@@ -6,7 +6,7 @@
 # framebuffer round-trip). The SAME WGSL/API target the browser later
 # (WebGPU-everywhere); this is the native (wgpu-native) side.
 #
-# Tier 0 slice: window + clear-colour present. Pipelines/instanced quads (the
+# Tier 0 slice: window + clear-color present. Pipelines/instanced quads (the
 # Box uber-shader, #110) and text (#111) build on top of this surface.
 #
 # Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3 block of
@@ -420,7 +420,7 @@ func closeWindow() {
 # manager Recording + a pass over the adopted offscreen target, endFrame
 # flushes the batches, submits it tracked and hands the platform present /
 # screenshot tail back to C. C keeps the present-flag reset (g2dFrameReset),
-# owns the persistent offscreen colour target and does the present tail.
+# owns the persistent offscreen color target and does the present tail.
 func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
 
 func g2dFrameReset() {
@@ -456,7 +456,7 @@ func g2dTick() {
 }
 
 # Acquire the offscreen target and begin a render pass that clears it to the
-# given linear RGBA colour (components 0..1). Must be paired with endFrame.
+# given linear RGBA color (components 0..1). Must be paired with endFrame.
 # #915: the frame is a manager Recording on the canvas — its pass stays open
 # for the flushes, endFrame submits it through the manager (tracked).
 func beginFrame(
@@ -548,7 +548,7 @@ func flush(canvas: mod Gpu2dCanvas) {
 # --- 2D primitives (#110, Box uber-shader) -------------------------------
 # Submit primitives between beginFrame and endFrame; they are batched and
 # drawn in one instanced draw at endFrame, in submission order (painter's).
-# Colours are 0xAARRGGBB — alpha in the top byte; use 0xFF...... for opaque.
+# Colors are 0xAARRGGBB — alpha in the top byte; use 0xFF...... for opaque.
 # Coordinates and sizes are in physical pixels (see windowWidth/windowHeight).
 # Rounded corners and borders are antialiased analytically (no MSAA).
 
@@ -731,7 +731,7 @@ func loadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
 
 # Device-free decode probe (#228): runs loadImage's exact decode +
 # error policy (magic-sniff dispatch, one decoder per format) without
-# uploading a texture, so decode behaviour is testable headless and
+# uploading a texture, so decode behavior is testable headless and
 # assets can be validated from tooling. 1 = decodes, 0 = failed
 # (with the standard stderr line). Compiled target only.
 func nativeDecodeImageProbe(path: String) unsafe extern("rae_ext_Gpu2d_decodeImageProbe") ret Int
@@ -928,10 +928,10 @@ func drawImage(
 
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
 # Low-level: submit one MSDF glyph quad on the canvas. Screen rect is
-# (sx0,sy0)-(sx1,sy1) in design units; UV rect is (u0,v0)-(u1,v1) NORMALISED
+# (sx0,sy0)-(sx1,sy1) in design units; UV rect is (u0,v0)-(u1,v1) NORMALIZED
 # into the atlas; `atlas` is the SdfText.loadAtlas handle (1-based); `pxRange`
 # is the screen-space px range (atlas pxRange * onScreenSize / atlasGlyphSize);
-# colour is 0xAARRGGBB. Layout helper: lib/Gpu2dText.rae drawText.
+# color is 0xAARRGGBB. Layout helper: lib/Gpu2dText.rae drawText.
 func drawGlyph(
   canvas: mod Gpu2dCanvas
   sx0: copy Float
@@ -962,7 +962,7 @@ func drawGlyph(
   )
 }
 
-# With an outline (width px + colour) and softness (edge falloff px; 1 = crisp).
+# With an outline (width px + color) and softness (edge falloff px; 1 = crisp).
 func drawGlyphEx(
   canvas: mod Gpu2dCanvas
   sx0: copy Float

@@ -47,7 +47,7 @@ No-op on WASM, where the host reports traps.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | `RecursionError` with a traceback (at about 1,000 frames by default) |
 | JavaScript | `RangeError: Maximum call stack size exceeded` |

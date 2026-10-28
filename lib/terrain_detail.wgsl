@@ -1,7 +1,7 @@
 // Per-fragment terrain material detail (#539 ported to the fragment stage).
 //
 // procgen/texture.rae bakes the five biome materials into images by feeding a
-// low-frequency and a high-frequency fbm value into a per-material colour ramp.
+// low-frequency and a high-frequency fbm value into a per-material color ramp.
 // The ramps are pure functions of those two numbers, so they can be evaluated
 // live per pixel instead — which is what this file does. Same look, no texture
 // memory, no atlas bleeding at tile seams, and no sampler bindings (nothing else
@@ -32,7 +32,7 @@
 // pixels across, with grain riding on top.
 //
 // (The 0.14-0.21 figures elsewhere in that image are trees and their shadows, not
-// ground. Matching those with flat colour would read as noise soup.)
+// ground. Matching those with flat color would read as noise soup.)
 //
 // Cost is two fbm per fragment rather than one. The octave counts are the knob;
 // drop OCT_LO to 1 first on low-end parts, it is the cheaper loss.
@@ -55,12 +55,12 @@ const RAE_GRASS_FRINGE_STRENGTH: f32 = 0.82;
 // only ~0.02-0.04 elevation wide — a near-line, so the beach met the meadow at a hard
 // edge even with the #19 tuft fringe on top. This is the half-width (in elevation) of a
 // WIDE, road-like smooth crossfade that raeTerrainDetailColor applies to the sand<->grass
-// COLOUR split, so the two dissolve into each other over a broad band like the soft-edged
+// COLOR split, so the two dissolve into each other over a broad band like the soft-edged
 // roads. It only redistributes the COMBINED sand+grass weight, so the coastline's edge
 // against water/mud/rock is untouched. Bigger = blurrier.
 const RAE_SANDGRASS_BLUR: f32 = 0.10;
 
-// GROUND PALETTE (the calibrated RAE_TERRAIN_* colours + their variation)
+// GROUND PALETTE (the calibrated RAE_TERRAIN_* colors + their variation)
 // lives in terrain_palette.wgsl now (#13), composed just before this file so
 // these constants are in scope. It is per-app overridable; see that file.
 
@@ -72,7 +72,7 @@ fn raeTerrainVary(base: vec3<f32>, amount: f32, t: f32) -> vec3<f32> {
 //
 // The sea is NOT painted here any more (#857): the terrain under the water
 // level is the seabed (raeTerrainHeight), wet sand that the lib/water surface
-// colours by depth, foams at the shore and ripples. What stays on the ground is
+// colors by depth, foams at the shore and ripples. What stays on the ground is
 // the beach side of the shoreline: the wet-sand band and the swash tongues.
 
 const RAE_WATER_FOAM: vec3<f32>    = vec3<f32>(0.900, 0.950, 0.960);
@@ -117,8 +117,8 @@ fn raeWaterSwash(p: vec2<f32>, elev: f32, wSand: f32, t: f32) -> f32 {
 
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
 // interpolated (elevation, moisture, slope) from the vertex stage; `p` is world
-// XY for the grain. The weights already sum to 1 (raeBiomeClassify normalises
-// them), so this is a straight weighted sum with no renormalise.
+// XY for the grain. The weights already sum to 1 (raeBiomeClassify normalizes
+// them), so this is a straight weighted sum with no renormalize.
 fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let b = raeBiomeClassify(bio.x, bio.y, bio.z);
   let d = clamp(raeNoiseFbm2(p * RAE_TERRAIN_DETAIL_HI_SCALE,
@@ -156,7 +156,7 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
        // Under water the ground is the SEABED (#857): wet sand the lib/water
-       // surface colours by depth. The sea used to be painted here.
+       // surface colors by depth. The sea used to be painted here.
        + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * RAE_WET_SAND_DARKEN * b.wWater;
   // A road lies over normalized biome materials; it is not a sixth biome that
   // steals weight from grass and sand throughout the island.

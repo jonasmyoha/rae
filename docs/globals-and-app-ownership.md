@@ -60,7 +60,7 @@ Concrete failures this repo has already paid for:
 - `lib/ui/theme.rae` holds `var activeTheme` AND a separate token global.
   `lib/app3d/ui_shell.rae:74` documents the result: *"palette slots resolve
   through a different global … nothing was bridging the two"* — a scene's
-  theme colour silently rendered as the built-in mint. Two singletons, an
+  theme color silently rendered as the built-in mint. Two singletons, an
   invisible dependency between them.
 - `lib/ui/RenderSystem/RenderSystem.rae:6`: fonts are *"PASSED IN via Gpu2dUi
   (module-level heap globals miscompile)"* — the compiler itself already pushes
@@ -125,7 +125,7 @@ So:
 
 - **Do not add an `unsafe` keyword.** `extern` is the exception mechanism, and it
   already exists. An `extern` function may touch C-side globals; Rae code may
-  not declare any. There is exactly one door and it is already labelled.
+  not declare any. There is exactly one door and it is already labeled.
 - Runtime-global objects are exposed to Rae as **handles owned by the App**.
   `lib/gpu2d.rae`'s `var gG2dColorAtts` becomes a field of a `Gpu2dContext`
   that `createApp` builds and `app.gpu` owns; `lib/profile.rae`'s `gProf*` lists
@@ -133,8 +133,8 @@ So:
   *wrapper* is not, so its lifetime and init order are explicit.
 - If a handle must exist before any App does (e.g. the allocator), it is created
   inside `createApp` as the FIRST field — ordering is then a struct-literal
-  order, which is visible and deterministic. There is no static-initialisation
-  fiasco because there is no static initialisation.
+  order, which is visible and deterministic. There is no static-initialization
+  fiasco because there is no static initialization.
 
 ## Prerequisites — compiler bugs to fix FIRST
 

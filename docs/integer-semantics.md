@@ -37,7 +37,7 @@ IEEE infinity, as everywhere else.
 
 **Wraps two's-complement, in every build profile**: `Int.max + 1` is
 `-9223372036854775808`. Computed in unsigned arithmetic so the wrap is
-defined behaviour, not undefined behaviour an optimizer may assume away.
+defined behavior, not undefined behavior an optimizer may assume away.
 This is what every language with fixed-size integers does in production
 (Java, Go, C#, Rust in release), and what a hash such as `lib/Noise`'s
 32-bit finalizer relies on.
@@ -45,9 +45,9 @@ This is what every language with fixed-size integers does in production
 A dev-only overflow check (Rust's debug rule) was tried and removed on
 purpose: Rae has no dev/release semantic differences — a program that passed
 its tests must behave identically when shipped — so the two builds differ
-only in optimisation flags. See "One behaviour, every profile" below.
+only in optimization flags. See "One behavior, every profile" below.
 
-## One behaviour, every profile
+## One behavior, every profile
 
 The dev profile (`rae run --profile dev`, `-O0 -g`) and the release profile
 (the default, `-O2 -DNDEBUG`) differ **only** in C compiler flags. Every
@@ -72,7 +72,7 @@ never a value that wraps silently (0.2.18; fixtures 1121-1124). An explicit
 
 - The helpers apply to `Int` (`Int64`). `Int32`, `Int8`, `UInt64` and the
   other widths keep the bare C operator: division by zero there is still
-  undefined behaviour, and overflow wraps in every profile.
+  undefined behavior, and overflow wraps in every profile.
 - `++` / `--` and compound forms that do not go through a binary `+`/`-`
   expression are plain C increments (they wrap as well).
 - Shifts are unchecked.

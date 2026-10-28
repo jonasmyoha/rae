@@ -7,7 +7,7 @@ photograph provides production pixels.
 - `redMapleSpray.png`: one irregular connected RGBA spray, scarlet/vermilion
   three-lobed maple edges and quiet red interiors. Shared cards mirror the
   cutout and flip alternate sprays. Alpha is preserved.
-- `redMapleBark.png`: warm silver-grey albedo. The bottom is older ridged bark;
+- `redMapleBark.png`: warm silver-gray albedo. The bottom is older ridged bark;
   the top is smoother young bark. The mesh samples this gradient once along
   height instead of repeating the rough base on every branch.
 
@@ -27,8 +27,8 @@ Built-in generation mode; no CLI/API fallback:
    version is selected after matched application renders.
 3. Full-bleed opaque red-maple bark albedo, horizontally seamless; bottom
    quarter long shallow uneven vertical ridges/flaky plates, gradual middle
-   transition, top half smooth silver-grey with restrained mottling. Low
-   contrast warm grey/taupe, no deep cracks, directional light, knots, moss,
+   transition, top half smooth silver-gray with restrained mottling. Low
+   contrast warm gray/taupe, no deep cracks, directional light, knots, moss,
    white birch, text or perspective.
 
 The leaf image still has some interior marks. Bark has painted relief rather

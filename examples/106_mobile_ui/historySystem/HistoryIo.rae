@@ -53,7 +53,7 @@ func resetHistoryArtLoader(loader: mod HistoryArtLoader) pub {
   loader.done = false
 }
 
-# Serialise the whole entries list to JSON and overwrite `path`.
+# Serialize the whole entries list to JSON and overwrite `path`.
 # Idempotent — call after every recordPlay. The file lives under
 # the gitignored `temp/` folder so a checkout doesn't bring a
 # stale demo history along.
@@ -317,7 +317,7 @@ func loadCachedHistoryArtChunk(
                 # Corrupt cache entry — most commonly a TRUNCATED download
                 # committed before atomic artwork writes landed (curl wrote
                 # straight to the final path; an app quit mid-fetch left a
-                # half-file that lenient decoders rendered half-grey).
+                # half-file that lenient decoders rendered half-gray).
                 # Evict it and let the next pass re-fetch instead of
                 # pinning a permanent placeholder. A file that arrives
                 # fresh from a VERIFIED fetch and still fails to decode

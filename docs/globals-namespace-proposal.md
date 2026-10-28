@@ -130,7 +130,7 @@ A hand-count from a `git grep` of the current tree:
 | `examples/97_tetris3d/render.rae` | 10 (`gridWidth`/`gridHeight` in `drawWell`, `drawLockedGrid`, `drawGhostPiece`) |
 | `examples/97_tetris3d/particles.rae` | 4 (`maxParticles` × 3, `gridWidth` × 1) |
 | `examples/97_tetris3d/input.rae` | 11 raylib key codes (`keyLeft`, `keyRight`, `keyUp`, ...) — every `isKeyDown(key: keyLeft)` becomes `isKeyDown(key: global.keyLeft)` |
-| `examples/97_tetris3d/hud.rae` | 6 (palette colours + font slot/path/size) |
+| `examples/97_tetris3d/hud.rae` | 6 (palette colors + font slot/path/size) |
 | `tests/cases/392_global_let/Main.rae` | 4 |
 | `tests/cases/396_global_persistence/Main.rae` | 2 |
 
@@ -164,7 +164,7 @@ makes both kinds of "outer scope" use the same machinery.
 The change is small in surface area but touches several layers:
 
 1. **Lexer:** no change. `global` becomes a contextual keyword
-   recognised in the parser, like `mod` and `view`.
+   recognized in the parser, like `mod` and `view`.
 2. **Parser:** in expression context, `global` followed by `.` parses
    as a special node `AST_EXPR_GLOBAL_REF` carrying the trailing field
    name. Standalone `global` (without `.`) is an error.

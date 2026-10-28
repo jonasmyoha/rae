@@ -229,7 +229,7 @@ componentRemove(this: world.layouts, entityId: entityId)
   be a *copy* of a `ComponentTable`, which the current "reference bindings are
   aliases; use `let`" rule already rejects.
 
-## How the compiler recognises it
+## How the compiler recognizes it
 
 - **Parser:** unchanged. `loop let x: T in EXPR` already parses.
 - **Sema:** where it checks "the iterable is a `List(T)`", add "the iterable is
@@ -239,7 +239,7 @@ componentRemove(this: world.layouts, entityId: entityId)
 - **Codegen:** unroll — emit the body per matching field; fold `fieldName(x)` to the
   string literal.
 
-`fields`/`fieldName`/`any` are compiler-recognised (like `sizeof`, or the type
+`fields`/`fieldName`/`any` are compiler-recognized (like `sizeof`, or the type
 argument of `createList`), but they are *general* — they express a capability, not a
 single helper.
 
@@ -549,20 +549,20 @@ as not-needed:
   only brevity.
 - **It is the cheapest boilerplate and written once per world.** One line per field,
   in a single constructor per world type, touched only when the world gains a field
-  (which the compiler then forces you to initialise).
+  (which the compiler then forces you to initialize).
 - **It is the most expensive to implement, for the least gain.** Unlike
   clear/serialize — which ITERATE an existing value and call one side-effecting op per
   field — construction has no value to iterate and no incremental-assembly form in the
   language: a struct is built all-at-once from a literal. A generic
   `createWorld(W: type) ret W` would need (a) type-level `fields(Type)` over a type
   with no value, (b) a NEW struct-assembly construct to accumulate per-field
-  initialisers into a literal (the unsolved "how the loop body assembles the struct"
+  initializers into a literal (the unsolved "how the loop body assembles the struct"
   question), and (c) per-field-kind dispatch, because the worlds are NOT uniform:
   alongside `ComponentTable(T)` fields they carry an `EntityAllocator`, a `StringMap`
   (`UiWorld.nodeIds`), a `HierarchyOrder` (`GameWorld`), and a plain `Int`
   (`GameWorld.splashTick: 0`). The `match field { case ComponentTable(any) {…} case
   EntityAllocator {…} case StringMap(any) {…} … }` needed to emit the right
-  initialiser per kind is plausibly as much code as the three explicit constructors,
+  initializer per kind is plausibly as much code as the three explicit constructors,
   plus a large amount of new compiler machinery.
 - **No real need surfaced** (the gate was "only if #760/#768/#771 show a real need").
   The renderer→ECS migration (#771 / #793–797) added `World3d` and used the explicit

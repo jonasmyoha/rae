@@ -24,7 +24,7 @@
 # "N elements of this type and component type, at this offset into a
 # bufferView"; the bufferView says "this byte range of a buffer, with this
 # stride"; the buffer is the BIN chunk. The indirection exists so several
-# attributes can interleave in one range, so the stride must be honoured
+# attributes can interleave in one range, so the stride must be honored
 # rather than assuming elements are packed.
 #
 # ENDIANNESS. glTF is little-endian everywhere. The readers below are
@@ -296,7 +296,7 @@ type Accessor {
 # Resolve accessor -> bufferView -> BIN chunk into flat byte arithmetic.
 #
 # The three-level indirection exists so several attributes can share one
-# interleaved range, which is why byteStride is honoured rather than
+# interleaved range, which is why byteStride is honored rather than
 # assuming elements are packed end to end. When the bufferView omits it
 # the elements ARE packed and the stride is the element size.
 func accessorAt(glb: view Glb, index: view Int) pub ret Accessor {
@@ -392,7 +392,7 @@ func accessorAt(glb: view Glb, index: view Int) pub ret Accessor {
 }
 
 # Read a float accessor as a flat list, `components` values per element.
-# Integer component types are normalised to [0,1] the way the spec says,
+# Integer component types are normalized to [0,1] the way the spec says,
 # which is what WEIGHTS_0 stored as ubyte needs.
 func readFloats(glb: view Glb, index: view Int) pub ret List(Float) {
   let a: Accessor = accessorAt(glb: glb, index: index)
@@ -582,7 +582,7 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
       var cz: Float = ax * by - ay * bx
       let len: Float = Math.sqrt(x: cx * cx + cy * cy + cz * cz)
       # A degenerate triangle has no normal to give. Leave its corners at
-      # zero rather than dividing by it; a neighbouring face will usually
+      # zero rather than dividing by it; a neighboring face will usually
       # overwrite them, and a zero normal is at least obviously wrong
       # rather than a NaN that propagates through the whole lighting pass.
       if len > 0.0 {
@@ -709,7 +709,7 @@ func loadAllPrimitives(glb: view Glb) pub ret MeshData {
 #
 # Exporters place a model wherever it happened to sit in the authoring
 # scene — this walker sits ~13 units above its own origin — so a caller
-# that assumes models are centred on the origin puts them off-screen. This
+# that assumes models are centered on the origin puts them off-screen. This
 # lets an example FRAME whatever it loaded instead of hard-coding an
 # offset that is right for exactly one file.
 func meshBounds(meshData: view MeshData) pub ret List(Float) {
@@ -767,7 +767,7 @@ func meshBounds(meshData: view MeshData) pub ret List(Float) {
 # `loadAllPrimitives` merges everything into one buffer and therefore
 # cannot keep per-primitive materials. These let a caller walk the
 # primitives itself and give each one its own material, which is what
-# colouring a multi-part character requires.
+# coloring a multi-part character requires.
 func meshCount(glb: view Glb) pub ret Int {
   if glb.ok is false {
     ret 0
@@ -788,7 +788,7 @@ func primitiveCount(glb: view Glb, meshIndex: view Int) pub ret Int {
 }
 
 # The mesh's authored name, which is how a caller tells one part of a
-# character from another. Exporters carry the modelling-tool object names
+# character from another. Exporters carry the modeling-tool object names
 # through — "flicka.006", "Cylinder.001" — so a name is the only handle on
 # WHICH part a primitive belongs to when the materials say nothing.
 func meshName(glb: view Glb, meshIndex: view Int) pub ret String {

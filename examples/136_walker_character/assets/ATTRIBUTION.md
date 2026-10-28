@@ -10,7 +10,7 @@ Converted from the Unity **walker** project
   `eflanir`). Rights held by the project owner.
 * **Skeleton and animation** — **Mixamo**. Every joint carries the
   `mixamorig:` prefix (`mixamorig:Hips`, `mixamorig:Spine`, …) and one
-  material is named `deejay`, a Mixamo character. Adobe's Mixamo licence
+  material is named `deejay`, a Mixamo character. Adobe's Mixamo license
   permits use of the rig and animations in projects; it is less clear
   about redistributing the rigged source files themselves.
 
@@ -24,7 +24,7 @@ only the rig would, not the mesh.
 ## `idle.glb`, `walk.glb`, `run.glb`
 
 Mixamo clips exported for this same rig — animation only, no geometry.
-Same licence position as the skeleton above. "Walk fast" in the example
+Same license position as the skeleton above. "Walk fast" in the example
 is `walk.glb` played at 1.6x, not a fourth file.
 
 ## `environment/*.glb`
@@ -50,6 +50,6 @@ shared, which is this repository's existing convention.
 
 65 joints, 10 meshes / 12 primitives, ~6700 vertices. Every primitive
 carries NORMAL, TEXCOORD_0, JOINTS_0, WEIGHTS_0 and an index buffer; two
-also carry vertex colours. The multi-primitive split is what this example
+also carry vertex colors. The multi-primitive split is what this example
 exercises — the Fox in example 112 is a single primitive, so it never
 exposed that path.

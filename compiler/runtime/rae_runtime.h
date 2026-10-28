@@ -183,7 +183,7 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
  *     SIGFPE are both wrong answers. `Int.min / -1` (the one other
  *     overflowing divide) traps too.
  *   - `+ - *` WRAP two's-complement, computed in unsigned so the wrap is
- *     defined behaviour rather than UB the optimizer may assume away. This is
+ *     defined behavior rather than UB the optimizer may assume away. This is
  *     what every language with fixed-size integers does in production, and
  *     what a hash (lib/Noise) relies on.
  * A constant divisor of zero never reaches here: sema rejects it. */

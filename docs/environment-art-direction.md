@@ -19,7 +19,7 @@ migration.
 The sheet is derived from the checked-in 138 reference frames
 `Grove.png`, `Trees.png`, `Fluffy.png`, `Evergreen.png`, `Spruces.png`,
 `Birches.png`, `Camphor.png` and `Roots.png`. It shows the current output, not
-the quality target. The legacy autumn panel uses 138-local colour numbers; it
+the quality target. The legacy autumn panel uses 138-local color numbers; it
 does not show the shared numeric kinds directly.
 
 ## Stable shared forest kinds
@@ -30,21 +30,21 @@ renames code and all consumers together.
 
 | Kind | Old code name | Chosen common and botanical identity | Current source | Current placed height | Season or preset | Finished silhouette and wood target |
 |---:|---|---|---|---:|---|---|
-| 0 | `speciesBroadleaf` | Small-leaved lime / littleleaf linden (*Tilia cordata*) | `FluffyForm.broadleaf` | 4.8–7.2 m | green summer crown | Broad oval to rounded crown with an uneven loose edge. Use several unequal ascending scaffold limbs. Young bark is grey-brown and lightly furrowed; old bark has dark ridges. This is the main rounded-crown tree. |
-| 1 | `speciesUmbrella` | Stone pine (*Pinus pinea*) | `FluffyForm.umbrella` | 5.6–7.4 m | dark evergreen | Exposed trunk with lower limbs shed and a high, wide parasol crown. Main limbs radiate and divide into irregular needle masses. Mature bark has red-brown and grey scaly plates. |
-| 2 | `speciesCypress` | Mediterranean cypress (*Cupressus sempervirens*) | `FluffyForm.cypress`; wood/foliage route to `procgen/Cypress` | 8.0–11.5 m | blue-dark evergreen | Very narrow fastigiate column, with a thin visible trunk and tightly upright slender stems. Keep the existing successful thin proportions. Bark changes from grey to grey-brown and becomes lightly furrowed. |
-| 3 | `speciesSpruce` | Norway spruce (*Picea abies*) | `FluffyForm.spruce`; foliage routes to `procgen/Spruce` | 5.5–8.5 m | dark evergreen | Conical crown with unequal branch whorls, open gaps and slightly hanging secondary growth. Avoid identical stacked skirts. Bark is grey-brown to purplish and becomes flaky and scaly. |
-| 4 | `speciesOrange` | Sugar maple (*Acer saccharum*), autumn-orange preset | [`procgen/SugarMaple`, joined ascending forks and textured sprays](sugar-maple-refinement.md) | 4.2–6.8 m | copper, orange and restrained red | Dense spreading oval crown on a strong ascending scaffold. Keep broad colour groups and visible forks. Bark is light grey to grey-brown, then long irregular furrows and ridges. |
-| 5 | `speciesRed` | Red maple (*Acer rubrum*), scarlet preset | [`procgen/RedMaple`, lighter joined forks and textured sprays](red-maple-refinement.md) | 4.2–6.8 m | scarlet and red-orange | Rounded crown with ascending branches and a lighter, finer twig rhythm than the sugar maple. Young bark is smooth light grey; old bark develops dark vertical ridges. |
-| 6 | `speciesGold` | Golden Globe ginkgo (*Ginkgo biloba* ‘Golden Globe’) | [`procgen/Ginkgo`, joined branch fans and textured fan leaves](ginkgo-refinement.md) | 4.2–6.8 m | clear autumn gold | Rounded crown, selected as the second rounded-crown candidate. Use visible ascending branch fans and small openings rather than a maple silhouette. The mature trunk should carry grey-brown furrows. Fan-leaf texture and branching must distinguish it from slots 4 and 5. |
-| 7 | `speciesCrimson` | Bloodgood Japanese maple (*Acer palmatum* ‘Bloodgood’) | `procgen/JapaneseMaple` | 3.2–4.8 m shared forest; original 138 specimen stays 4.2 m | burgundy summer to bright crimson autumn | Broad upright round crown with layered spreading branches and a muscular multi-stem option. Keep the crown smaller and more open than the large maples. Smooth grey to dark reddish wood and fine red twigs support the deep foliage. |
+| 0 | `speciesBroadleaf` | Small-leaved lime / littleleaf linden (*Tilia cordata*) | `FluffyForm.broadleaf` | 4.8–7.2 m | green summer crown | Broad oval to rounded crown with an uneven loose edge. Use several unequal ascending scaffold limbs. Young bark is gray-brown and lightly furrowed; old bark has dark ridges. This is the main rounded-crown tree. |
+| 1 | `speciesUmbrella` | Stone pine (*Pinus pinea*) | `FluffyForm.umbrella` | 5.6–7.4 m | dark evergreen | Exposed trunk with lower limbs shed and a high, wide parasol crown. Main limbs radiate and divide into irregular needle masses. Mature bark has red-brown and gray scaly plates. |
+| 2 | `speciesCypress` | Mediterranean cypress (*Cupressus sempervirens*) | `FluffyForm.cypress`; wood/foliage route to `procgen/Cypress` | 8.0–11.5 m | blue-dark evergreen | Very narrow fastigiate column, with a thin visible trunk and tightly upright slender stems. Keep the existing successful thin proportions. Bark changes from gray to gray-brown and becomes lightly furrowed. |
+| 3 | `speciesSpruce` | Norway spruce (*Picea abies*) | `FluffyForm.spruce`; foliage routes to `procgen/Spruce` | 5.5–8.5 m | dark evergreen | Conical crown with unequal branch whorls, open gaps and slightly hanging secondary growth. Avoid identical stacked skirts. Bark is gray-brown to purplish and becomes flaky and scaly. |
+| 4 | `speciesOrange` | Sugar maple (*Acer saccharum*), autumn-orange preset | [`procgen/SugarMaple`, joined ascending forks and textured sprays](sugar-maple-refinement.md) | 4.2–6.8 m | copper, orange and restrained red | Dense spreading oval crown on a strong ascending scaffold. Keep broad color groups and visible forks. Bark is light gray to gray-brown, then long irregular furrows and ridges. |
+| 5 | `speciesRed` | Red maple (*Acer rubrum*), scarlet preset | [`procgen/RedMaple`, lighter joined forks and textured sprays](red-maple-refinement.md) | 4.2–6.8 m | scarlet and red-orange | Rounded crown with ascending branches and a lighter, finer twig rhythm than the sugar maple. Young bark is smooth light gray; old bark develops dark vertical ridges. |
+| 6 | `speciesGold` | Golden Globe ginkgo (*Ginkgo biloba* ‘Golden Globe’) | [`procgen/Ginkgo`, joined branch fans and textured fan leaves](ginkgo-refinement.md) | 4.2–6.8 m | clear autumn gold | Rounded crown, selected as the second rounded-crown candidate. Use visible ascending branch fans and small openings rather than a maple silhouette. The mature trunk should carry gray-brown furrows. Fan-leaf texture and branching must distinguish it from slots 4 and 5. |
+| 7 | `speciesCrimson` | Bloodgood Japanese maple (*Acer palmatum* ‘Bloodgood’) | `procgen/JapaneseMaple` | 3.2–4.8 m shared forest; original 138 specimen stays 4.2 m | burgundy summer to bright crimson autumn | Broad upright round crown with layered spreading branches and a muscular multi-stem option. Keep the crown smaller and more open than the large maples. Smooth gray to dark reddish wood and fine red twigs support the deep foliage. |
 | 8 | `speciesPalm` | Date palm (*Phoenix dactylifera*) | `procgen/Foliage.palmWood` and `palmLeaves` | 5.0–6.5 m | glaucous evergreen | Straight unbranched scarred trunk with one apex crown of stiff pinnate fronds and open sky between fronds. The current branched wood with rounded leaf crowns is a generator mismatch; its later task replaces that form without changing kind 8. |
 | 9 | `speciesBirch` | Silver birch (*Betula pendula*) | `procgen/Birch` | 6.5–8.5 m | fresh green; optional gold later | Slender white stem, dark scars, asymmetrical rising limbs and hanging fine twigs. Preserve visible wood and sparse crown sectors. The shared bark and leaf textures are already the closest current starting point. |
 
 The ten rows above are exhaustive: every value from zero through
 `treeSpeciesCount - 1` appears once. Slots 4, 5 and 6 now use separate sugar-maple, red-maple and ginkgo scaffolds and textures.
 Slot 7 retains the original broadleaf geometry
-until its species work. Colour alone is not botanical evidence.
+until its species work. Color alone is not botanical evidence.
 
 ### Selection and placement
 
@@ -52,7 +52,7 @@ until its species work. Colour alone is not botanical evidence.
 walkers. A 36 m block chooses one main kind and three trees in ten receive a
 mixed kind. Main stands call `speciesForPick(..., palms: false)`: picks at or
 above the gold threshold remain kind 6. Kinds 7 and 8 therefore occur only in
-the mixed population. This is existing placement behaviour and is preserved.
+the mixed population. This is existing placement behavior and is preserved.
 
 - 136 and 137 use `IslandForest.plantIslandForest`: 300 entity-backed trees on
   the island. Each placement stores the kind in both `PropPlacement.kind` and
@@ -80,8 +80,8 @@ consumers because 138 and the walkers deliberately share procedural sources.
 | `FluffyForm.cypress` plus `procgen/Cypress` | kind 2, Mediterranean cypress | `GroveTrees`; 138 `FluffyGrove` six-tree inspection row and woodland | Narrow inner column and upright scale sprays, including three unchanged extra-tall specimens. Thin rigid furrowed wood. See [cypress refinement](cypress-refinement.md). |
 | `FluffyForm.spruce` plus `procgen/Spruce.spruceLeaves` | kind 3, Norway spruce target | `GroveTrees`; 138 `FluffyGrove` six-tree inspection row and woodland | Nine unequal whorls with curved needle cutouts; rigid scaly wood. Preserved six-skirt control. See [spruce refinement](spruce-refinement.md). |
 | `procgen/SugarMaple` | kind 4, autumn-orange | `GroveTrees`; three 138 `GroveScene` specimens | Joined ascending scaffold and connected textured copper sprays. |
-| `procgen/RedMaple` | kind 5, scarlet | `GroveTrees`; one 138 `GroveScene` specimen | Lighter joined scaffold, rounded open crown, grey bark and connected scarlet sprays. |
-| `procgen/Ginkgo` | kind 6, autumn gold | `GroveTrees`; three 138 `GinkgoGrove` inspection trees | Joined spreading branch fans, alternate short shoots, golden fan-leaf cutout and grey-brown bark. |
+| `procgen/RedMaple` | kind 5, scarlet | `GroveTrees`; one 138 `GroveScene` specimen | Lighter joined scaffold, rounded open crown, gray bark and connected scarlet sprays. |
+| `procgen/Ginkgo` | kind 6, autumn gold | `GroveTrees`; three 138 `GinkgoGrove` inspection trees | Joined spreading branch fans, alternate short shoots, golden fan-leaf cutout and gray-brown bark. |
 | `procgen/JapaneseMaple` | kind 7, Bloodgood crimson | `GroveTrees`; original 138 `GroveScene` crimson specimen | Low joined stems, layered connected textured sprays, reddish young wood; explicit single-stem option. |
 | `procgen/Foliage.broadleafTree` and `broadleafLeaves` | explicit controls for 4–7 | 138 comparison views | Original flared trunk/forks and individual generated leaf meshes retained unchanged as visual controls. |
 | `procgen/Foliage.palmWood` and `palmLeaves` | kind 8, date palm target | `GroveTrees`; one 138 `GroveScene` legacy palm | Current segmented stem branches into round leaf crowns. It is a compatibility placeholder, not yet a date-palm silhouette. |
@@ -116,7 +116,7 @@ ginkgo target. The compatibility map is:
 | 3, broadleaf | Bloodgood Japanese maple, crimson preset | 7 |
 
 138 has no legacy gold specimen for shared kind 6. Its existing green value 2
-must not be recoloured to gold because that would also recolour the palm. The
+must not be recolored to gold because that would also recolor the palm. The
 named `ginkgo` view now inspects shared kind 6 through `GinkgoGrove`; the three
 new specimens preserve all existing varieties and the green palm. Later composition work can replace the local
 paint numbers with named presets, but it must not pass them directly as shared
@@ -125,18 +125,18 @@ kind numbers.
 ## Botanical reference contract
 
 The species choices use form, branching, bark and mature habit, not only leaf
-colour. The source pages below provide the factual baseline. The private T01–T10
+color. The source pages below provide the factual baseline. The private T01–T10
 art crops in the Landscape art plan remain style and composition references;
 they do not identify species.
 
-- **Small-leaved lime:** [North Carolina Extension, *Tilia cordata*](https://plants.ces.ncsu.edu/plants/tilia-cordata/common-name/small-leaved-lime/) describes a dense pyramidal-to-oval tree, 50–60 ft tall, with grey-brown bark that develops deep dark ridges.
+- **Small-leaved lime:** [North Carolina Extension, *Tilia cordata*](https://plants.ces.ncsu.edu/plants/tilia-cordata/common-name/small-leaved-lime/) describes a dense pyramidal-to-oval tree, 50–60 ft tall, with gray-brown bark that develops deep dark ridges.
 - **Stone pine:** [North Carolina Extension, *Pinus pinea*](https://plants.ces.ncsu.edu/plants/pinus-pinea/common-name/umbrella-pine/) describes the raised umbrella crown, loss of lower branches, dark glossy needles and irregular red-brown scaly bark.
-- **Mediterranean cypress:** [North Carolina Extension, *Cupressus sempervirens*](https://plants.ces.ncsu.edu/plants/cupressus-sempervirens/common-name/mediterranean-cypress/) records the 40–70 ft by 3–6 ft columnar habit, upright slender stems and grey-brown bark.
+- **Mediterranean cypress:** [North Carolina Extension, *Cupressus sempervirens*](https://plants.ces.ncsu.edu/plants/cupressus-sempervirens/common-name/mediterranean-cypress/) records the 40–70 ft by 3–6 ft columnar habit, upright slender stems and gray-brown bark.
 - **Norway spruce:** [North Carolina Extension, *Picea abies*](https://plants.ces.ncsu.edu/plants/picea-abies/common-name/common-spruce/) records a conical 40–60 ft tree, upright young branches, more pendulous mature growth and flaky scaled bark.
-- **Sugar maple:** [North Carolina Extension, *Acer saccharum*](https://plants.ces.ncsu.edu/plants/acer-saccharum/common-name/northern-sugar-maple/) describes a dense spreading crown, yellow-orange-red autumn colour and long irregular bark ridges.
-- **Red maple:** [North Carolina Extension, *Acer rubrum*](https://plants.ces.ncsu.edu/plants/acer-rubrum/) describes its rounded crown, ascending branches, scarlet autumn range and the change from smooth light-grey bark to dark vertical plates.
-- **Golden Globe ginkgo:** [North Carolina Extension, *Ginkgo biloba*](https://plants.ces.ncsu.edu/plants/ginkgo-biloba/common-name/ginkgo/) identifies ‘Golden Globe’ as a rounded male cultivar with good gold fall colour. The species has fan-shaped leaves and a normally pyramidal habit, which prevents the preset from becoming another maple.
-- **Bloodgood Japanese maple:** [North Carolina Extension, *Acer palmatum* ‘Bloodgood’](https://plants.ces.ncsu.edu/plants/acer-palmatum-bloodgood/) describes a broad upright rounded tree up to 20 ft, dense spreading and layered branches, muscular multi-trunks, burgundy foliage and bright crimson fall colour.
+- **Sugar maple:** [North Carolina Extension, *Acer saccharum*](https://plants.ces.ncsu.edu/plants/acer-saccharum/common-name/northern-sugar-maple/) describes a dense spreading crown, yellow-orange-red autumn color and long irregular bark ridges.
+- **Red maple:** [North Carolina Extension, *Acer rubrum*](https://plants.ces.ncsu.edu/plants/acer-rubrum/) describes its rounded crown, ascending branches, scarlet autumn range and the change from smooth light-gray bark to dark vertical plates.
+- **Golden Globe ginkgo:** [North Carolina Extension, *Ginkgo biloba*](https://plants.ces.ncsu.edu/plants/ginkgo-biloba/common-name/ginkgo/) identifies ‘Golden Globe’ as a rounded male cultivar with good gold fall color. The species has fan-shaped leaves and a normally pyramidal habit, which prevents the preset from becoming another maple.
+- **Bloodgood Japanese maple:** [North Carolina Extension, *Acer palmatum* ‘Bloodgood’](https://plants.ces.ncsu.edu/plants/acer-palmatum-bloodgood/) describes a broad upright rounded tree up to 20 ft, dense spreading and layered branches, muscular multi-trunks, burgundy foliage and bright crimson fall color.
 - **Date palm:** [Kew Plants of the World Online, *Phoenix dactylifera*](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A668912-1/general-information) describes a solitary straight unbranched scarred trunk, a terminal crown and stiff pinnate fronds with many leaflets.
 - **Silver birch:** [North Carolina Extension, *Betula pendula*](https://plants.ces.ncsu.edu/plants/betula-pendula/common-name/european-weeping-birch/) records the changing pyramidal-to-oval form, white bark and drooping branch character.
 - **Camphor tree:** [North Carolina Extension, *Cinnamomum camphora*](https://plants.ces.ncsu.edu/plants/cinnamomum-camphora/common-name/camphortree/) describes a 40–50 ft by 50–70 ft dense spreading evergreen with major branching, surface roots and dark furrowed, ridged bark.
@@ -173,7 +173,7 @@ typical wild head so their silhouette remains readable from the walker camera.
 plants as three meshes: stem/leaves, off-white ray florets and yellow discs.
 Petals use thin close geometry with modeled top, underside and outer edges. This
 was chosen over cutout patches because the first reference species has a sparse,
-recognisable radial silhouette and the close geometry keeps real normals and
+recognizable radial silhouette and the close geometry keeps real normals and
 grazing edges without alpha shimmer. The three materials are rough, lit and
 non-emissive. Every plant shares one root pivot across all three parts, while a
 patch is reused through three instanced batches. There is no entity, material

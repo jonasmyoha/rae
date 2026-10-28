@@ -58,11 +58,11 @@ The root is an input, defaulted from what you opened, never discovered:
 
   The mount resolves `assets/screens/MainMenu.raescene`, its imports and every
   reachable `SceneInstance` / `ListView` scene from that same root. It installs
-  the imported theme before deserialising components, loads declared text and
+  the imported theme before deserializing components, loads declared text and
   icon fonts with `loadSdfFontJson`, resolves mounted sprite/animation textures
   through `assets.textures`, and keeps `gpuUi`'s fonts as fallbacks when the
   package declares none. The app owns `sceneRegistry` so later list
-  materialisation can use the same registered sub-scenes.
+  materialization can use the same registered sub-scenes.
 
 No walking up for a `.raepack`, no magic files. A sub-scene therefore resolves
 from the root, not from its parent scene's folder.

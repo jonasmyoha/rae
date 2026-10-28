@@ -2,14 +2,14 @@
 # along every limb (docs/reference-tree-plan.md step 3). Each tube's rings
 # follow the limb with frames carried along it (no twist), the seam vertex is
 # doubled so the bark image wraps once round, and the image runs up the limb
-# one repeat every `barkRepeat` metres. A branch starts inside its parent, so
+# one repeat every `barkRepeat` meters. A branch starts inside its parent, so
 # the joint shows no gap, and every tip is closed by a low dome. Written new.
 import Math
 import Vec3
 open Mesh3d
 open treeGen/Skeleton
 
-# Metres of limb per repeat of the bark image along it
+# Meters of limb per repeat of the bark image along it
 const barkRepeat: Float = 1.6
 
 # Sides of a tube: the trunk and the leaders get more
@@ -32,7 +32,7 @@ func perpendicular(direction: view Vec3) ret Vec3 {
   ret Vec3.vnorm(a: Vec3.vcross(a: direction, b: other))
 }
 
-# The direction of `limb` at point `i` (the mean of its two neighbours)
+# The direction of `limb` at point `i` (the mean of its two neighbors)
 func limbTangent(limb: view Limb, i: view Int) ret Vec3 {
   let last: Int = limb.points.length - 1
   let before: Vec3 = limb.points.copyAtDefault(index: Math.max(a: 0, b: i - 1))
@@ -41,12 +41,12 @@ func limbTangent(limb: view Limb, i: view Int) ret Vec3 {
 }
 
 # One limb's tube into `mesh`. A branch is pushed back into its parent by
-# `sink` metres at its base.
+# `sink` meters at its base.
 func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
   let sides: Int = limbSides(limb: limb)
   let first: Int = mesh.vertCount
   var normal: Vec3 = perpendicular(direction: limbTangent(limb: limb, i: 0))
-  var travelled: Float = 0.0
+  var traveled: Float = 0.0
   loop var i: Int = 0, i < limb.points.length, ++i {
     let tangent: Vec3 = limbTangent(limb: limb, i: i)
     # carry the frame along: take out of the last normal what now points
@@ -55,12 +55,12 @@ func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
       a: Vec3.vsub(a: normal, b: Vec3.vscale(a: tangent, s: Vec3.vdot(a: normal, b: tangent)))
     )
     let binormal: Vec3 = Vec3.vcross(a: tangent, b: normal)
-    var centre: Vec3 = limb.points.copyAtDefault(index: i)
+    var center: Vec3 = limb.points.copyAtDefault(index: i)
     if i is 0 {
-      centre = Vec3.vsub(a: centre, b: Vec3.vscale(a: tangent, s: sink))
+      center = Vec3.vsub(a: center, b: Vec3.vscale(a: tangent, s: sink))
     } else {
-      travelled = travelled + Vec3.vlen(
-        a: Vec3.vsub(a: centre, b: limb.points.copyAtDefault(index: i - 1))
+      traveled = traveled + Vec3.vlen(
+        a: Vec3.vsub(a: center, b: limb.points.copyAtDefault(index: i - 1))
       )
     }
     let radius: Float = limb.radii.copyAtDefault(index: i)
@@ -70,7 +70,7 @@ func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
         a: Vec3.vscale(a: normal, s: Math.cos(x: theta))
         b: Vec3.vscale(a: binormal, s: Math.sin(x: theta))
       )
-      let position: Vec3 = Vec3.vadd(a: centre, b: Vec3.vscale(a: out, s: radius))
+      let position: Vec3 = Vec3.vadd(a: center, b: Vec3.vscale(a: out, s: radius))
       pushVert(
         verts: mesh.verts
         px: position.x
@@ -80,7 +80,7 @@ func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
         ny: out.y
         nz: out.z
         u: j.toFloat() / sides.toFloat()
-        value: travelled / barkRepeat
+        value: traveled / barkRepeat
       )
       mesh.vertCount = mesh.vertCount + 1
     }
@@ -105,7 +105,7 @@ func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
     ny: tipTangent.y
     nz: tipTangent.z
     u: 0.5
-    value: travelled / barkRepeat
+    value: traveled / barkRepeat
   )
   mesh.vertCount = mesh.vertCount + 1
   let lastRing: Int = first + last * (sides + 1)

@@ -103,7 +103,7 @@ chromeSystem.inspectorParent = std::move(parentLabel); // parentLabel stays vali
 ```
 
 - The type comes first, then the name.
-- Initialisation has at least four spellings: `= x`, `(x)`, `{x}` and
+- Initialization has at least four spellings: `= x`, `(x)`, `{x}` and
   `= {x}`, which differ in subtle ways (narrowing, explicit constructors).
   It is the textbook case of what not to multiply.
 - Ownership lives in the **type**: `T&`, `const T&` (an alias), `T&&`, and
@@ -206,9 +206,9 @@ Chrome_System.Inspector_Parent := Parent_Label;  -- copies: Ada has no move oper
   is the exact shape Rae's design arrived at:
   - `X : constant Integer := 5;`
   - parameters `X : in T`, `X : out T`, `X : in out T`, `X : access T`.
-- `:=` is both initialisation and assignment; `=` is equality.
+- `:=` is both initialization and assignment; `=` is equality.
 - **Aliases get a keyword instead of an operator:**
-  `V : T renames Some.Record.Field;`. A renaming is not an initialisation,
+  `V : T renames Some.Record.Field;`. A renaming is not an initialization,
   so it does not use `:=`. That is the same distinction Rae's retired `=>`
   drew.
 - Named arguments and aggregates use `=>`: `F (World => World)`,
@@ -292,7 +292,7 @@ var anchor: EntityId = inspector_system.selected # Mojo dropped `let`
 var parent_label: String = entity_label_of(world, parent_of(world, ui_systems, anchor))
 if len(parent_label) == 0:
     parent_label = "(none)"
-chrome_system.inspector_parent = parent_label^ # transfer: parent_label is uninitialised after
+chrome_system.inspector_parent = parent_label^ # transfer: parent_label is uninitialized after
 ```
 
 - `var name: T = value`.
@@ -336,7 +336,7 @@ if parent_label.is_empty() { &parent_label = "(none)" }
 - **Carbon:** `var x: T = e;` and `let x: T = e;` (a `let` is a value,
   possibly a reference, not a mutable object).
 - **Pascal / Delphi:** `var X: T;` in a declaration block, `X := e;` in the
-  body. Declaration and initialisation are separate statements. Delphi 10.3
+  body. Declaration and initialization are separate statements. Delphi 10.3
   added the inline `var X: T := e;`. Strings are reference-counted and
   copy-on-write, so `ChromeSystem.InspectorParent := ParentLabel;` shares.
 
@@ -594,7 +594,7 @@ var parentLabel: own String(entityLabelOf(world: world, entityId: anchor))
   - it collides with generics: `own List(ListViewRow)(List.create(…))`.
 - Rejected.
 
-### I. Block initialiser
+### I. Block initializer
 
 ```rae
 let parentLabel: own String {
@@ -606,9 +606,9 @@ let parentLabel: own String {
 }
 ```
 
-- The value is a block whose `ret` initialises the name.
+- The value is a block whose `ret` initializes the name.
 - **For:**
-  - one form for simple and computed initialisation;
+  - one form for simple and computed initialization;
   - it removes this document's own example pattern ("declare `var`, then
     patch it with an `if`"), letting `parentLabel` be a `let`.
 - **Against:**
@@ -870,7 +870,7 @@ Everything else is a copy or a taken new value, readable from the line.
     is a family choice;
   - `{ name = own name, count = 1 }` looks like a block of assignments.
     The parser knows a literal from its expression position, but this
-    closes the door on option I (block initialisers), whose `{ … }` after
+    closes the door on option I (block initializers), whose `{ … }` after
     a declaration would be the same shape;
   - `let listView: view ListView = …` binds an alias with the same `=` that
     copies elsewhere. The mode is on the same line, but a reader skimming
@@ -1132,7 +1132,7 @@ are from well-established language references.
 
 - Rust `let` statements:
   https://doc.rust-lang.org/reference/statements.html#let-statements
-- C++ initialisation forms: https://en.cppreference.com/w/cpp/language/initialization
+- C++ initialization forms: https://en.cppreference.com/w/cpp/language/initialization
 - Odin declarations and constants: https://odin-lang.org/docs/overview/#variable-declarations
 - Jai (no official public docs): *The Way to Jai*,
   https://github.com/Ivo-Balbaert/The_Way_to_Jai

@@ -18,14 +18,14 @@
 # dropped because it puts a file dependency in a library — every example
 # would have to copy `panel-button.raescene` into its own assets to use a
 # shared module, which recreates the duplication this exists to remove.
-# Appearance still comes from one shared place: the THEME. Colours and
+# Appearance still comes from one shared place: the THEME. Colors and
 # the text style are palette slots resolved at paint, so a panel matches
-# whatever theme the app loaded without this module knowing any colours.
+# whatever theme the app loaded without this module knowing any colors.
 #
 # GROUPS ARE RADIO SETS. A button with group 0 is independent (a toggle
 # or an action). A button with a positive group is one of a mutually
 # exclusive set — clip selection, camera mode, scene choice — where
-# selecting one deselects its siblings. Radio behaviour is the single
+# selecting one deselects its siblings. Radio behavior is the single
 # most-repeated piece of UI state code, and it is exactly the part that
 # is easy to leave half-implemented, so it lives here.
 open ui/Ecs
@@ -45,11 +45,11 @@ const panelButtonW: Float = 104.0
 const panelButtonH: Float = 34.0
 
 # Theme palette slots. Named here so a panel picks up an app's theme
-# rather than carrying colours of its own — see the note above.
+# rather than carrying colors of its own — see the note above.
 # These are SLOT NAMES FROM A FIXED VOCABULARY, not free-form keys.
 # lib/ui/theme.rae resolves a closed set (background, surface, surfaceAlt,
 # textPrimary, textMuted, outline, accent, accentText, accentTextMuted,
-# imageTint) and paints anything else magenta. A theme may re-colour these
+# imageTint) and paints anything else magenta. A theme may re-color these
 # two; it may not rename them.
 const panelSlotIdle: String = "surfaceAlt"
 
@@ -152,8 +152,8 @@ func panelIndexOf(panel: view ControlPanel, id: view String) ret opt Int {
 #
 # Two entities per button: the button itself carries the shape and the
 # click, and a child carries the text. They are separate because
-# OpticalAlign centres TEXT within a box, which needs a box to centre
-# inside — collapsing them would centre the button within its parent
+# OpticalAlign centers TEXT within a box, which needs a box to center
+# inside — collapsing them would center the button within its parent
 # instead, which is the layout's job.
 func buildControlPanel(
   panel: mod ControlPanel
@@ -338,7 +338,7 @@ func setPanelButtonOn(
 
 # The id of the button whose action fired this frame, or "" for none.
 # Callers switch on the returned id rather than on action strings, so a
-# panel can be re-labelled or re-ordered without touching its handler.
+# panel can be re-labeled or re-ordered without touching its handler.
 func panelClickedId(panel: view ControlPanel, world: view UiWorld) pub ret String {
   var i: Int = 0
   loop i < panel.ids.length {

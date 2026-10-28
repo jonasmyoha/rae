@@ -35,7 +35,7 @@ float rae_ext_Display_browserPixelRatio(void) {
 
 #else
 
-/* How many touch devices SDL knows (0 before video is initialised) */
+/* How many touch devices SDL knows (0 before video is initialized) */
 int64_t rae_ext_Device_touchDeviceCount(void) {
     int count = 0;
     SDL_TouchID* devices = SDL_GetTouchDevices(&count);
@@ -68,7 +68,7 @@ float rae_ext_Display_windowDisplayScale(void) {
 #if defined(__APPLE__) && TARGET_OS_OSX
 #include <CoreGraphics/CoreGraphics.h>
 
-/* The display under the window's centre (CGGetDisplaysWithPoint), 0 when none */
+/* The display under the window's center (CGGetDisplaysWithPoint), 0 when none */
 int64_t rae_ext_Display_windowPanelDisplay(void) {
     if (!g_sdl_win) return 0;
     int x = 0, y = 0, w = 0, h = 0;

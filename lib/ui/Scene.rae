@@ -33,7 +33,7 @@ import Json
 # Authoritative metadata for one node from the .raescene file.
 #
 # `componentsValueIdx` indexes into the same `JsonDoc` that's kept on
-# `Scene.doc`, so component deserialisers can look up the keys/values
+# `Scene.doc`, so component deserializers can look up the keys/values
 # of this node's component bag without re-walking the source.
 type SceneNode {
   nodeId: String
@@ -191,7 +191,7 @@ func parseScene(source: view String) ret Scene {
     }
     let kids: List(String) = extractChildrenIds(doc: doc, nodeVal: nodeVal)
     # `field` returns the value's pool index, which is exactly what
-    # we want to remember so component deserialisers can look up keys
+    # we want to remember so component deserializers can look up keys
     # on this node later without re-scanning the parent.
     let valueIdx: Int = Json.field(doc: doc, this: nodesVal, key: nodeId)
     let n: SceneNode = { nodeId: nodeId, componentsValueIdx: valueIdx, childrenIds: kids }

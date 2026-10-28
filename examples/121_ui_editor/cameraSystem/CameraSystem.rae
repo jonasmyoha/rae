@@ -8,7 +8,7 @@
 # input systems do the rest. What lives here is only what reads input and
 # writes the component: the wheel zooms about the cursor (0.25x .. 5x), the
 # middle button drags the view, the chrome's zoom pill steps +-10% about the
-# edit area's centre and its "100%" label centres the frame at 1 point per
+# edit area's center and its "100%" label centers the frame at 1 point per
 # design unit, `F` fits the frame into the area, and a load fits it.
 # RAE_UI_EDITOR_ZOOM=<factor> boots zoomed (the headless gate).
 import Gpu2d
@@ -34,7 +34,7 @@ const zoomButtonStep: Float = 0.1
 const fitMargin: Float = 24.0
 
 # The editor's cameraSystem INPUT state: which roots carry the Camera2D, the
-# frame's extent and column (for fit / centre / the document's derived
+# frame's extent and column (for fit / center / the document's derived
 # offset), and the middle-drag pan in progress. Zoom and offset are NOT here
 # — read them from the component (cameraOf).
 type CameraSystem {
@@ -137,7 +137,7 @@ func writeCamera(
   chromeSystem.zoomLabel = "{(next.zoom * 100.0 + 0.5).toInt()}%"
 }
 
-# Centre the frame in the edit area at `zoom`.
+# Center the frame in the edit area at `zoom`.
 func centerCamera(
   cameraSystem: view CameraSystem
   world: mod UiWorld
@@ -159,7 +159,7 @@ func centerCamera(
   )
 }
 
-# Fit the whole frame into the edit area with a margin, centred.
+# Fit the whole frame into the edit area with a margin, centered.
 func fitCamera(
   cameraSystem: view CameraSystem
   world: mod UiWorld
@@ -215,7 +215,7 @@ func zoomCameraAbout(
   )
 }
 
-# RAE_UI_EDITOR_ZOOM=<factor>: boot zoomed about the area's centre (the
+# RAE_UI_EDITOR_ZOOM=<factor>: boot zoomed about the area's center (the
 # headless gate's hook). Call after the fit.
 func bootCameraZoom(
   cameraSystem: view CameraSystem
@@ -298,8 +298,8 @@ func cameraInputSystem(
   } else {
     cameraSystem.panning = false
   }
-  let centreX: Float = area.x + area.w / 2.0
-  let centreY: Float = area.y + area.h / 2.0
+  let centerX: Float = area.x + area.w / 2.0
+  let centerY: Float = area.y + area.h / 2.0
   if uiActionFired(world: world, actionId: "zoom.in") {
     let current: Camera2D = cameraOf(cameraSystem: cameraSystem, world: world)
     zoomCameraAbout(
@@ -307,8 +307,8 @@ func cameraInputSystem(
       world: world
       chromeSystem: chromeSystem
       zoom: current.zoom + zoomButtonStep
-      aboutX: centreX
-      aboutY: centreY
+      aboutX: centerX
+      aboutY: centerY
     )
     moved = true
   }
@@ -319,8 +319,8 @@ func cameraInputSystem(
       world: world
       chromeSystem: chromeSystem
       zoom: current.zoom - zoomButtonStep
-      aboutX: centreX
-      aboutY: centreY
+      aboutX: centerX
+      aboutY: centerY
     )
     moved = true
   }

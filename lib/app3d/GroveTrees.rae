@@ -8,7 +8,7 @@
 # shadows' reach, and beyond that an impostor of the near crowns, baked on
 # the GPU from every side (lib/ImpostorBake). The
 # leaf-patch forms are unit height (their width is built into their meshes,
-# speciesWidth), so a placement's scale is their height in metres; the autumn
+# speciesWidth), so a placement's scale is their height in meters; the autumn
 # trees and the palm are built at autumnReferenceHeight. Bushes are drawn as
 # app3d/PropInstancer parts, one per leaf tone (createBushParts). Used by the
 # walkers (136, 137, 143).
@@ -137,7 +137,7 @@ func treeSpeciesAt(x: view Float, y: view Float, number: view Int) ret Int {
   ret speciesForPick(pick: hash2(x: blockX, y: blockY, seed: 131), palms: false)
 }
 
-# Tree number `number`'s uniform scale: a leaf-patch form's height in metres
+# Tree number `number`'s uniform scale: a leaf-patch form's height in meters
 # (its width is in its meshes, speciesWidth); an autumn tree or the palm is
 # scaled from autumnReferenceHeight.
 func treeScaleAt(species: view Int, number: view Int) ret Float {
@@ -181,7 +181,7 @@ func treeTrunkTop(species: view Int, scale: view Float) ret Float {
   ret treeHeightFor(species: species, scale: scale) * treeTrunkShare
 }
 
-# An autumn tree's or the palm's leaf colour per tone (Autumn Grove's paint)
+# An autumn tree's or the palm's leaf color per tone (Autumn Grove's paint)
 func autumnLeafColor(species: view Int, tone: view Int) ret Vec3 {
   let variation: Float = 0.85 + tone.toFloat() * 0.13
   if species is speciesOrange {
@@ -199,7 +199,7 @@ func autumnLeafColor(species: view Int, tone: view Int) ret Vec3 {
   ret Vec3.create(x: 0.33 * variation, y: 0.035 * variation, z: 0.022)
 }
 
-# The leaves' colour per form and tone (as Autumn Grove paints them)
+# The leaves' color per form and tone (as Autumn Grove paints them)
 func leafColor(form: view FluffyForm, tone: view Int) ret Vec3 {
   let variation: Float = 0.86 + tone.toFloat() * 0.12
   var color: Vec3 = Vec3.create(x: 0.18, y: 0.35, z: 0.055)
@@ -496,7 +496,7 @@ func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
   ret leafColor(form: treeSpeciesForm(species: species), tone: tone)
 }
 
-# The colour of every species' wood
+# The color of every species' wood
 func speciesWoodColor() ret Vec3 {
   ret Vec3.create(x: 0.13, y: 0.075, z: 0.04)
 }

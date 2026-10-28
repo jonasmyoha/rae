@@ -15,9 +15,9 @@ Prompts used (built-in mode, no CLI/API fallback):
 2. Edit that spray, preserving silhouette/alpha/composition: remove nearly all
    baked leaf shadows, veins, highlights and dark twig contrast. Unlit painted
    buttery gold, about 12 percent value variation, broad gentle groups. Keep
-   perimeter fans legible while interiors form calm connected colour. This
+   perimeter fans legible while interiors form calm connected color. This
    revision is selected after actual matched app renders.
-3. Seamless horizontally tileable grey-brown ginkgo bark albedo: narrow uneven
+3. Seamless horizontally tileable gray-brown ginkgo bark albedo: narrow uneven
    shallow vertical furrows and connected ridges. Older ridges at bottom fade
    to smooth pale young wood above. Quiet painted medium-scale relief, even
    light, no deep cracks/highlights/moss/text or prominent repeated marks.
@@ -29,5 +29,5 @@ The first spray, `exec-c75ce08d-9f75-4d08-856c-764fee843b7f.png`, had too much
 individual leaf contrast. Comparison frames remain outside git.
 
 The spray still contains a small amount of painted value separation. Bark
-is colour only, not geometric relief or a normal map. These are stated visual
+is color only, not geometric relief or a normal map. These are stated visual
 limits, not claims of measured physically accurate reflectance.

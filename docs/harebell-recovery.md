@@ -132,7 +132,7 @@ Reproduce a clip with the capture command plus `--view pair --reuse-binary
 --motion --frames 180 --wind 1.5 --tag=-motion`. For the forest, use `--forest
 --view eye`. The shared camera study now accepts `RAE_LANDSCAPE_DISTANCE=0`
 for stationary evidence; its existing default remains a 12 m path. No normal
-input or camera behaviour changes. `--travel` can request a short camera move.
+input or camera behavior changes. `--travel` can request a short camera move.
 
 In paired 900-frame forest runs, post-warm-up whole-frame GPU windows had a
 median of **20.101 ms control / 20.607 ms candidate**. Process CPU time was

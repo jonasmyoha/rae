@@ -30,8 +30,8 @@ fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
 fn labUnderObstacle(p: vec2<f32>) -> bool {
   let count = i32(labObstacles[0]);
   for (var i = 0; i < count; i = i + 1) {
-    let centre = vec2<f32>(labObstacles[1 + i * 3], labObstacles[2 + i * 3]);
-    if (distance(p, centre) < labObstacles[3 + i * 3]) { return true; }
+    let center = vec2<f32>(labObstacles[1 + i * 3], labObstacles[2 + i * 3]);
+    if (distance(p, center) < labObstacles[3 + i * 3]) { return true; }
   }
   return false;
 }

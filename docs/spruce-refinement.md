@@ -45,8 +45,8 @@ not every painted needle. There is no emission or shadow exemption, and no
 global lighting, exposure or renderer change.
 
 The existing surface-image path supplies linear-light, coverage-preserving
-mips and the same 0.5 alpha cutoff for colour, shadow and atlas passes. The
-sprays use the existing two-sided foliage lighting. Original grey-brown bark
+mips and the same 0.5 alpha cutoff for color, shadow and atlas passes. The
+sprays use the existing two-sided foliage lighting. Original gray-brown bark
 albedo wraps the rigid tapered stem and primary boughs, using the existing
 `BirchTwig` curve and `birchTube` helper. Vertical repetition prevents a small
 patch of bark being stretched over the whole stem. Texture provenance is in
@@ -78,7 +78,7 @@ that all temporal aliasing is eliminated.
 | ![Old forest tree](images/spruce-refinement/forest-control-front.png) | ![New forest tree](images/spruce-refinement/forest-candidate-front.png) | ![Forest night](images/spruce-refinement/forest-candidate-night.png) |
 
 143 still contains 31,090 trees. The stand capture uses its existing spruce-rich
-block (-2, 1), without replacing neighbours or increasing instance counts.
+block (-2, 1), without replacing neighbors or increasing instance counts.
 136, 137 and 143 load the same shared kind-3 meshes and texture layers.
 
 | Prototype cost | Selected |
@@ -108,7 +108,7 @@ reuse a compiled capture binary. Static captures use 60 frames at 1/60 s,
 wind zero, exposure 1 and a 1280 × 800 window. The saved PNGs are 1280 × 800
 downsamples of the display's screenshot. Normal views use 10:00, backlight
 17:15 and night 23:00. Existing deferred toon, CSM, SSAO, SMAA and bloom remain
-enabled. Backlight isolates the original first 6 m specimen so neighbouring
+enabled. Backlight isolates the original first 6 m specimen so neighboring
 crowns do not obscure it; this is explicitly not a matched full-scene pair.
 
 [Grove settings and hashes](images/spruce-refinement/manifest.json),

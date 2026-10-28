@@ -380,7 +380,7 @@ mutates the caller's object and nothing at the call site says so. Rust avoids
 the problem at both places: `=` never aliases, borrowing is spelled at the
 binding and at the call site (`&mut x`), and when a type change turns a copy
 into a move, every later use of the moved-from value is a compile error rather
-than a change in behaviour.
+than a change in behavior.
 
 In Rae, `=` gives a binding its value, and whether that value is a copy or an
 alias is written in the binding's type: no mode is a copy, `view T` or `mod T`
@@ -417,7 +417,7 @@ v = other             # ERROR: a view is never written to
 ```
 
 So the `Int` → `Track` refactor cannot silently succeed with a changed
-meaning. Either the behaviour is identical, or the compiler stops on every
+meaning. Either the behavior is identical, or the compiler stops on every
 line whose intent has to be restated. For a human that is a safety property.
 For an AI agent editing hundreds of files, it is the difference between a type
 migration and a bug-injection campaign.

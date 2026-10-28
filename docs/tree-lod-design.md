@@ -57,9 +57,9 @@ The near level is the outline every coarser level is built to: GroveTrees'
 
 1. **The middle crown grows 13-18%** (the leaf-patch species). Fewer patches
    are made bigger to keep the leaf area (`fluffyCrown`: patch size ~ 1/sqrt
-   of the count), but each patch is a flat disc CENTRED on the crown's shell,
+   of the count), but each patch is a flat disc CENTERED on the crown's shell,
    so a bigger one sticks further out: the outline grows at 30 m.
-2. **Billboards are lit differently.** The picture's colour is baked with a
+2. **Billboards are lit differently.** The picture's color is baked with a
    fixed light, and the G-buffer then lights it again with its normal facing
    straight up (`gbufferSurface`). A far tree is brighter and flat, with no
    dark interior, no self-shadow and no ambient occlusion, while a near crown
@@ -78,13 +78,13 @@ What current engines use for dense forests (Fortnite's and Unreal's
 impostors, Unity's AmplifyImpostors, SpeedTree's billboards): a tree's far
 level is a quad showing the tree **baked from many directions**, with
 **normals and depth**, so it is lit like the mesh and looks right from every
-side; neighbouring levels **cross-fade** with a dither the temporal
+side; neighboring levels **cross-fade** with a dither the temporal
 antialiasing resolves, so nothing pops.
 
 ### 2.1 Levels that match by construction
 
 * **The middle crown keeps the near crown's envelope.** Pull a bigger patch's
-  centre inward by the extra radius (the patch's outer edge stays on the
+  center inward by the extra radius (the patch's outer edge stays on the
   shell), and pick its size so its covered area from 8 directions matches the
   near crown within 3%. A Rae test computes the coverage (the bake used for
   the table above) and fails when a level drifts.
@@ -108,7 +108,7 @@ over the whole 0..1 range keeps the AVERAGE alpha, which the scaling
 changes), and TAA is off by default (FXAA) and absent in the forward pass,
 where a hash is left as grain. So the threshold is hashed in a band round
 the cutoff (0.5 wide) only in a deferred frame with TAA on, and a plain cut
-otherwise; the band, centred on the cutoff, stays close to the scaled
+otherwise; the band, centered on the cutoff, stays close to the scaled
 coverage. The shadow pass samples mip 0, whose alpha is 0 or 255, so its
 cut was left as it is. Alpha to coverage on the forward path is not done.
 
@@ -159,7 +159,7 @@ where the eye's ray meets the tree (one parallax step on the baked depth)
 and blends them by weight and alpha. It writes the baked albedo, the baked
 normal turned to the world and the depth of the point it shows into the
 G-buffer, so the sun, the moon, shadows and SSAO light it like the mesh. The
-old double lighting (baked colour, lit again with an up normal) is gone. The
+old double lighting (baked color, lit again with an up normal) is gone. The
 phone setting (`blendViews: false`) reads the nearest view only. The sprite
 shadow pass draws the view nearest the sun, in that view's plane.
 
@@ -177,7 +177,7 @@ over the forest 9.7 ms -> 10.9 ms (run-to-run noise about 0.4 ms).
 * Each level has a fade band (about 10% of its distance, at least 4 m). In
   the band both levels are drawn; each instance gets a fade value (0..1) in
   its instance data, and the fragment discards against a per-pixel dither
-  (blue noise, offset by a per-tree hash, so neighbours do not fade in step),
+  (blue noise, offset by a per-tree hash, so neighbors do not fade in step),
   the near level as `fade`, the far level as `1 - fade`. TAA turns the dither
   into a smooth blend; with no TAA, a fixed pattern still never pops.
 * A little distance hysteresis is not needed: the fade is continuous.
@@ -185,7 +185,7 @@ over the forest 9.7 ms -> 10.9 ms (run-to-run noise about 0.4 ms).
   into the far canopy (2.4) instead of vanishing.
 
 **Step 3 done (2026-10-21).** `app3d/PropFade propLodPickFrom` gives each
-level a band of max(10%, 4 m) centred on the distance it ends at; inside it
+level a band of max(10%, 4 m) centered on the distance it ends at; inside it
 `app3d/PropFieldFrame` draws the prop at both levels with the same threshold
 and a seed hashed from its position (the last level fades out alone, so the
 forest's edge is a fade, not a line). The instance record grew to 44 floats
@@ -221,7 +221,7 @@ layer limit), and each view is framed to the cluster's box, not its sphere
 cluster fills its side views. The sprite pass draws a cluster as it draws a
 tree (three views blended, lit through the G-buffer), with the quad's
 depth. Between 270 and 330 m a cell's trees fade out as its cluster fades
-in, both measured from the cluster's centre with its seed, so the dither
+in, both measured from the cluster's center with its seed, so the dither
 shows each pixel from one of them; the far trees now stop at 370 m and are
 no longer thinned. PC: 3 x 3 views (8 sides and the top), 13 layers of
 3072 x 768, about 330 MB; the phone setting (`RAE_SIMULATE_MOBILE=1` on a
@@ -252,13 +252,13 @@ drawn as a cluster and as its trees with the sprite pass's own shader, at
   march each view along the fragment's own ray through the box
   (`impostorMarch`): the first point within the depth baked behind the
   surface there (the normal is stored octahedral to make room for that
-  thickness; a tree's is its front mirrored about its centre, about a crown,
+  thickness; a tree's is its front mirrored about its center, about a crown,
   nothing at a trunk). The PC canopy has 4 x 4 views of 96 x 24 (same
   memory, twelve sides about 30 degrees apart), the phone 3 x 3 of 48 x 12.
 * Averaging three views' alpha lost what the views disagree on; a fragment
   now marches one view, picked by its weight with a dither.
-* A cluster's quad stood at its centre, so on a slope the ground in front of
-  the centre hid its front trees: the quad now stands at the box's front.
+* A cluster's quad stood at its center, so on a slope the ground in front of
+  the center hid its front trees: the quad now stands at the box's front.
 
 Clusters now keep 88-104% of their trees' pixels on PC (the phone 91-120%).
 The march costs about 1.5 ms in views across the forest (10.3 -> 11.6 ms

@@ -3,10 +3,10 @@
 # b3PushContacts_Mesh, b3SolveContacts_Mesh, b3ApplyRestitution_Mesh and
 # b3StoreImpulses_Mesh of Box3D's contact_solver.c at 9f998c8): one contact
 # at a time, every manifold of it. Box3D uses it for mesh contacts (P5) and
-# for the overflow colour, whose constraints fit no graph colour. Box3D's
+# for the overflow color, whose constraints fit no graph color. Box3D's
 # operation order is kept exactly; checked against the oracle in fixture 958.
 #
-# A colour's constraints are `constraints` from `first`; a constraint's
+# A color's constraints are `constraints` from `first`; a constraint's
 # manifold constraints are `manifolds` from its `manifoldStart`.
 open Vec2
 open Vec3
@@ -54,7 +54,7 @@ func storeVelocities(
 }
 
 # b3PrepareContacts_Mesh: the constraints of flat range `block` (or of the
-# overflow colour) from their contacts. Returns whether any has restitution
+# overflow color) from their contacts. Returns whether any has restitution
 # (the caller records it: blocks of one stage run in parallel).
 func prepareContactsScalar(
   world: mod PhysicsWorld
@@ -101,7 +101,7 @@ func prepareContactsScalar(
       )
       index = index + 1
     }
-    # Advance to the next colour
+    # Advance to the next color
     slot = slot + 1
   }
   ret anyRestitution
@@ -346,7 +346,7 @@ func setManifoldConstraint(
   }
 }
 
-# b3WarmStartContacts_Mesh: constraints `first + block` of a colour.
+# b3WarmStartContacts_Mesh: constraints `first + block` of a color.
 func warmStartContactsScalar(
   states: mod List(BodyState)
   constraints: view List(ContactConstraint)

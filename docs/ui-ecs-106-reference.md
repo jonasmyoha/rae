@@ -138,7 +138,7 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 
 | component | system | where |
 |---|---|---|
-| `ListView` | `listViewSystem` | lib/ui *(materialises rows)* |
+| `ListView` | `listViewSystem` | lib/ui *(materializes rows)* |
 | `ListSource` | `listSourceSystem` *(obs)* | `listSystem/ListSources.rae` |
 | `TextBinding` (`spotify.*`) | `spotifyBindingSystem` | `spotifySystem/SpotifyView.rae` |
 | `TextBinding` (`album.*`) | `albumHeaderSystem` *(obs)* | `screenSystem/AlbumSystems.rae` |

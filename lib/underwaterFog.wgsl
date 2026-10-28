@@ -8,16 +8,16 @@
 // under each pixel, measures the UNDERWATER view distance — the ray from the
 // camera to that point, cut at the still surface plane when the point is
 // above the water (looking up through the surface) — and applies Beer-Lambert
-// attenuation per channel toward the body's deep colour (in-scattering), so
-// far things sink into the water colour and near things keep their own.
+// attenuation per channel toward the body's deep color (in-scattering), so
+// far things sink into the water color and near things keep their own.
 struct Underwater {
   invViewProj: mat4x4<f32>,   // the frame's UNJITTERED clip -> world
   camera: vec4<f32>,          // xyz = camera position, w = surface z at the camera
-  deep: vec4<f32>,            // rgb = body deep colour (the fog's asymptote), w = far distance cap (m)
-  absorb: vec4<f32>,          // rgb = Beer-Lambert absorption per metre, w = density scale
+  deep: vec4<f32>,            // rgb = body deep color (the fog's asymptote), w = far distance cap (m)
+  absorb: vec4<f32>,          // rgb = Beer-Lambert absorption per meter, w = density scale
   params: vec4<f32>,          // x = near-surface tint strength, y = tint depth (m), zw = unused
   sun: vec4<f32>,             // xyz = direction TOWARD the sun (unit), w = caustics on (1) / off (0)
-  caustic: vec4<f32>,         // rgb = sun colour (caustic tint), w = caustic strength
+  caustic: vec4<f32>,         // rgb = sun color (caustic tint), w = caustic strength
 };
 @group(0) @binding(0) var<uniform> U: Underwater;
 @group(0) @binding(1) var sceneTex: texture_2d<f32>;    // litCopy: the composed frame
@@ -69,7 +69,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let px = clamp(vec2<i32>(i32(i.pos.x), i32(i.pos.y)), vec2<i32>(0), dims - vec2<i32>(1));
   let src = textureLoad(sceneTex, px, 0).rgb;
   let ndcDepth = textureLoad(depthTex, px, 0);
-  // Pixel centre -> NDC (y up), through the inverse view-projection. Under
+  // Pixel center -> NDC (y up), through the inverse view-projection. Under
   // reverse-Z a depth of 0 is the far plane, which is exactly where a sky
   // pixel's fog should saturate; no special case is needed.
   let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(dims);
@@ -86,15 +86,15 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     ray = ray * t;
   }
   let pathLength = min(length(ray), U.deep.w);
-  // Beer-Lambert per channel toward the deep colour: red is absorbed first,
+  // Beer-Lambert per channel toward the deep color: red is absorbed first,
   // so the far field goes blue-green before it goes dark.
   let transmit = exp(-U.absorb.rgb * pathLength * U.absorb.w);
-  var colour = src * transmit + U.deep.rgb * (vec3<f32>(1.0) - transmit);
+  var color = src * transmit + U.deep.rgb * (vec3<f32>(1.0) - transmit);
   // A light tint everywhere (the water between the eye and the near plane)
   // that fades with the camera's own depth so a shallow dip reads as water.
   let camDepth = max(surfaceZ - cam.z, 0.0);
   let tint = U.params.x * clamp(camDepth / max(U.params.y, 0.01), 0.0, 1.0);
-  colour = mix(colour, colour * U.deep.rgb * 4.0, tint * 0.25);
+  color = mix(color, color * U.deep.rgb * 4.0, tint * 0.25);
 
   // Sun caustics on SUBMERGED geometry only. Conditions, each of which zeroes
   // the contribution: caustics off; the sun below the horizon (toSun.z <= 0,
@@ -114,7 +114,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let depthAbove = surfaceZ - world.z;
     let depthFade = clamp(1.0 - depthAbove / 12.0, 0.0, 1.0);
     let reach = transmit;  // caustic light is absorbed on the way to the eye too
-    colour += U.caustic.rgb * pattern * U.caustic.w * depthFade * reach;
+    color += U.caustic.rgb * pattern * U.caustic.w * depthFade * reach;
   }
-  return vec4<f32>(colour, 1.0);
+  return vec4<f32>(color, 1.0);
 }

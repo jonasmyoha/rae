@@ -54,7 +54,7 @@ const wanderArriveDistance: Float = 0.5
 # Each this long (s) walking, it must have come this much nearer (m)
 const wanderHeadwaySeconds: Float = 2.0
 
-const wanderHeadwayMetres: Float = 0.5
+const wanderHeadwayMeters: Float = 0.5
 
 func createWandering(seed: view Int) ret Wandering {
   ret Wandering { wanderers: ComponentTable.create(Wanderer), random: createRandom(seed: seed) }
@@ -125,7 +125,7 @@ func stepWanderer(
     }
     wanderer.headwayLeft = wanderer.headwayLeft - deltaTime
     if wanderer.headwayLeft <= 0.0 {
-      if wanderer.headwayDistance - distance < wanderHeadwayMetres {
+      if wanderer.headwayDistance - distance < wanderHeadwayMeters {
         wanderer.stalls = wanderer.stalls + 1
         startPause(wanderer: wanderer, random: random)
         ret false

@@ -213,12 +213,12 @@ After the first try-out (2026-10-05) the controls changed:
 - **Ball pool:** the balls live in `physicsScenes/BallPool`. It is
   backend-neutral, so the track-B twin reuses it. A ball is retired when
   the pool holds more than 400, when it is 20 s old, when it is
-  `3 x cameraDistance + 100` from the scene centre, or when it falls below
+  `3 x cameraDistance + 100` from the scene center, or when it falls below
   z = -20. The adapter's `despawnBall` removes its body, its components and
   its entity.
 - **FPS meter:** ui/DebugOverlay's fps readout, top right, the one the other
   3D examples use.
-- **Colours:** every body gets its own pastel. The hues are a golden-ratio
+- **Colors:** every body gets its own pastel. The hues are a golden-ratio
   turn apart by entity index.
 - `RAE_PLAYGROUND_AUTOFIRE=1` opens with autofire on (for headless checks).
   `RAE_PLAYGROUND_DEBUG=1` also logs the live ball count.
@@ -387,7 +387,7 @@ and its assets path.
   The 124/125 gate branch passes for both, as does 123 after the glue
   change.
 
-### The vehicles featured, and gradient colours (2026-10-05)
+### The vehicles featured, and gradient colors (2026-10-05)
 
 After the try-out:
 
@@ -402,7 +402,7 @@ After the try-out:
   blocks (the static wall is gone) now have density 0.4. Driven into the
   wall at about 40 km/h, the car throws a block 19 m. The ramps stay static,
   because a ramp has to hold still to be jumped from.
-- **Colours are gradients.** `SceneBody` and `RenderShape` carry a hue.
+- **Colors are gradients.** `SceneBody` and `RenderShape` carry a hue.
   `applyGradientHues(bodies, along)` spreads red to violet by position
   along a direction: every playground scene uses +x, so a pyramid or a row
   of dominoes is one smooth left-to-right rainbow. Each group of the
@@ -423,32 +423,32 @@ After the try-out:
   Fixtures 1002 and 1005 print the same new readings.
 - **Featured:** both vehicles have a pack, a README row and one
   screenshot each, taken after all of the above. The playground
-  screenshots were retaken with the new colours.
+  screenshots were retaken with the new colors.
 
 ### The vehicle as an Audi A7 (2026-10-05)
 
-The a asked for a centred chase camera, wheels sized like an Audi
-A7's, and the car to drive as fast as one. The figures are Audi's published
+Requested: a centered chase camera, wheels sized like an Audi A7's, and
+a car that drives as fast as one. The figures are Audi's published
 ones for the A7 Sportback 55 TFSI quattro (C8):
 - body 4,969 x 1,908 x 1,422 mm, wheelbase 2,926 mm, track 1,651 / 1,637 mm;
-- 225/55 R18 tyres (704.7 mm across, 225 mm wide); 1,815 kg;
+- 225/55 R18 tires (704.7 mm across, 225 mm wide); 1,815 kg;
 - 250 kW; 0-100 km/h 5.3 s; 250 km/h governed;
 - Cd 0.27 on 2.29 m^2;
 - 0-200 km/h ~20.1 s (automobile-catalog's estimate).
 
-**Camera.** The camera sits 10 m behind the car's centre and 3.2 m up.
+**Camera.** The camera sits 10 m behind the car's center and 3.2 m up.
 Only its heading is eased; easing the position let it fall behind more the
 faster the car went.
 
 **The car** (`VehicleLibrary.drivingCar`) is still built the Driving
 sample's way, now with the A7's numbers:
-- The wheels are at the real wheelbase and track, with the real tyre
+- The wheels are at the real wheelbase and track, with the real tire
   radius, width and about 40 kg of unsprung mass each.
 - The body box runs from 0.40 m to the roof, and it is as wide as the gap
-  between the tyres, not 1,908 mm. That width covers the wheel arches, and a
+  between the tires, not 1,908 mm. That width covers the wheel arches, and a
   box that wide hid the wheels completely.
 - The total mass is the A7's.
-- Tyre friction is 1.1.
+- Tire friction is 1.1.
 - The suspension is 6 Hz. Box3D's spring frequency is relative to the
   joint's effective mass, which is the 40 kg wheel's, so 6 Hz is a
   ~55 kN/m spring.
@@ -456,7 +456,7 @@ sample's way, now with the A7's numbers:
 **The drive** (`wheelTargets`):
 - **Traction control.** The rim speed is held at most 8% + 1.5 m/s ahead
   of the car. A velocity motor given the launch torque otherwise spins the
-  tyres straight up to its target, and the car slides round.
+  tires straight up to its target, and the car slides round.
 - **Power cap and governor.** The torque is capped by power as speed rises,
   and a governor fades it out at 250 km/h.
 - **Brakes and coasting.** Releasing the throttle coasts; reversing it at
@@ -469,13 +469,13 @@ sample's way, now with the A7's numbers:
 
 **Two Box3D findings, the same on both tracks:**
 - **A fast wheel sinks into the ground.** Box3D computes a contact once per
-  step and carries it through the sub-steps. A tyre at motorway speed turns
+  step and carries it through the sub-steps. A tire at motorway speed turns
   ~3 rad in a 60 Hz step, carries its contact point away, and sinks 8-10 cm,
   so it rolls 18% too small. More sub-steps do not help; a shorter step
   does. The vehicle worlds step at 120 Hz in 4 sub-steps, where it sinks
   ~3 cm. 240 Hz misbehaved.
-- **The drive needs calibrating.** The sphere tyre puts more of the motors'
-  torque on the road than a real tyre and drivetrain. With the nominal
+- **The drive needs calibrating.** The sphere tire puts more of the motors'
+  torque on the road than a real tire and drivetrain. With the nominal
   250 kW the car did 0-100 in 4.3 s and 0-200 in 10.3 s. Two documented
   scale factors (torque 0.82, power 0.46) make the simulated car match the
   published times.
@@ -620,7 +620,7 @@ Built by B1 (2026-10-05).
   gives the same bits.
 - **Threading:** Box3D's own scheduler through `workerCount`, or later
   `enqueueTask` / `finishTask` over Rae's worker pool, whichever the step
-  measurements favour. The task callbacks need Rae functions passed to C, so
+  measurements favor. The task callbacks need Rae functions passed to C, so
   the worker pool is not an option yet.
 
 ## 5. Task order
@@ -693,7 +693,7 @@ comparison. `tools/box3d/build.sh` now also builds Box3D with Emscripten
 lowers to WASM SIMD), and `rae build --target wasm` links it. The .wasm is
 2.15 MB (A) against 2.13 MB (B).
 
-### Behaviour
+### Behavior
 
 - **Determinism:** each of the playground's six scenes stepped 300 fixed
   steps hashes the same at 1 and 7 workers on both tracks.
@@ -746,7 +746,7 @@ contact solver and convex manifold, a tree speed-up):
     callbacks (Rae has no function values), and solver changes of our own.
   - A 45 000-line real program that drives the compiler. The Float4 SIMD
     lowering, `parallelLoop` and its worker pool, the `opt`/`own` move fixes,
-    `unsafe` colouring, the per-pass and allocation tooling were all built or
+    `unsafe` coloring, the per-pass and allocation tooling were all built or
     fixed because the port needed them.
   - Runs wherever Rae runs, with no C library to build per target.
 - **Track B:**
@@ -764,7 +764,7 @@ contact solver and convex manifold, a tree speed-up):
 Use **track B as Rae's physics engine**. It is faster everywhere it was
 measured, it is a tenth of the code to own, and following upstream costs
 half an hour instead of days. The two tracks give identical results today, so
-apps can switch with no behaviour change: the ECS surface is the same.
+apps can switch with no behavior change: the ECS surface is the same.
 
 Keep **track A as a frozen benchmark and compiler test**, pinned at
 9f998c8 and not following upstream. It stays the largest real Rae program and

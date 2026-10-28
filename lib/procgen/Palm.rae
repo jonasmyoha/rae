@@ -9,7 +9,7 @@
 #     fronds that droop at their tips (12-15 m tall)
 #
 #   palmTrunk(form:, seed:, height:)  the trunk (and the fan palm's skirt):
-#     one mesh, drawn in the wood's colour
+#     one mesh, drawn in the wood's color
 #   palmFronds(form:, seed:, height:, tone:, leaflets:)  the fronds of one
 #     tone (0..2, each frond in one of them: draw each in its own shade);
 #     `leaflets` is the leaflet pairs of a feather frond or the wedges of a
@@ -34,7 +34,7 @@ func palmFrondCount(form: view PalmForm) ret Int {
   ret 24
 }
 
-# How far the trunk leans over at its top, per metre of height
+# How far the trunk leans over at its top, per meter of height
 func palmLean(form: view PalmForm) ret Float {
   if form is PalmForm.fan {
     ret 0.035
@@ -77,7 +77,7 @@ func palmTrunk(form: view PalmForm, seed: view Int, height: view Float) ret Mesh
   var mesh: MeshData = foliageMesh()
   var points: List(Vec3) = List.create(Vec3, cap: 40)
   var radii: List(Float) = List.create(Float, cap: 40)
-  # A point every half metre; the date palm's trunk is ringed (its old frond
+  # A point every half meter; the date palm's trunk is ringed (its old frond
   # bases), the fan palm's smooth
   let steps: Int = Math.max(a: 8.0, b: Math.floor(x: height / 0.5)).toInt()
   loop var i: Int = 0, i <= steps, ++i {

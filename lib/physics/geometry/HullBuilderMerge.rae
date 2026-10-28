@@ -138,7 +138,7 @@ func buildHorizon(builder: mod HullBuilder, apex: view Int, seed: view Int) {
 }
 
 # b3HullBuilder_BuildCone: a triangle from the apex over every horizon edge,
-# linked to its neighbours.
+# linked to its neighbors.
 func buildCone(builder: mod HullBuilder, apex: view Int) {
   loop var i: Int = 0, i < builder.horizon.length, ++i {
     let edge: Int = builder.horizon.copyAtDefault(index: i)
@@ -182,8 +182,8 @@ func destroyEdges(builder: mod HullBuilder, begin: view Int, end: view Int) {
 }
 
 # b3HullBuilder_ConnectEdges: join `prev` to `next` around their face. When
-# both border the same neighbour face the vertex between them is redundant:
-# it is dropped, and a neighbour triangle that would be left with two
+# both border the same neighbor face the vertex between them is redundant:
+# it is dropped, and a neighbor triangle that would be left with two
 # vertices is deleted with it.
 func connectEdges(builder: mod HullBuilder, prev: view Int, next: view Int) {
   let prevTwin: Int = edgeTwinOf(builder: builder, edge: prev)
@@ -380,7 +380,7 @@ func mergeCoplanar(builder: mod HullBuilder, face: view Int) ret Bool {
 }
 
 # b3HullBuilder_MergeFaces: fix the cone: flipped faces into their largest
-# neighbour, then concave edges, then coplanar ones.
+# neighbor, then concave edges, then coplanar ones.
 func mergeFaces(builder: mod HullBuilder) {
   loop var i: Int = 0, i < builder.cone.length, ++i {
     let face: Int = builder.cone.copyAtDefault(index: i)

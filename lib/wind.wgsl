@@ -1,6 +1,6 @@
 // The wind on the GPU (lib/Wind.rae makes its vector each frame): `wind` is
 // (direction times strength xy, gustiness, time). The base is global; the
-// gusts are a smooth field over the world, tens of metres across, travelling
+// gusts are a smooth field over the world, tens of meters across, traveling
 // with the wind, so a gust front sweeps across everything that sways. A
 // leaf patch rotates by its flexibility (record [43] times pivot.w);
 // geometry without attachment metadata stays rigid. Composed before
@@ -84,7 +84,7 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
   // Turning leaf patches, not bobbing crowns: in a steady breeze (strength
   // 1) a patch turns about 6 degrees each way, in a gust about 15, and a
   // gust also leans it downwind a little. Smaller angles (under 1 degree
-  // between gusts) moved a leaf a few millimetres and could not be seen.
+  // between gusts) moved a leaf a few millimeters and could not be seen.
   let activity = 0.45 + 0.55 * clamp(wind.z, 0.0, 1.0) * gust;
   let response = sin(wind.w * 2.1 + phase) * 0.5
                + sin(wind.w * 3.7 + phase * 1.43) * 0.3
@@ -97,10 +97,10 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
 }
 
 // Camera-facing cluster geometry, independent of its lighting normal.
-// Rest corners are in local X/Z; the centre and ordinary UVs stay explicit.
-fn leafCardOffset(position: vec3<f32>, centre: vec3<f32>, scale: vec2<f32>,
+// Rest corners are in local X/Z; the center and ordinary UVs stay explicit.
+fn leafCardOffset(position: vec3<f32>, center: vec3<f32>, scale: vec2<f32>,
                   right: vec3<f32>, up: vec3<f32>) -> vec3<f32> {
-  let offset = position - centre;
+  let offset = position - center;
   return right * (offset.x * scale.x) + up * (offset.z * scale.y);
 }
 fn leafCameraRight(viewProj: mat4x4<f32>) -> vec3<f32> {

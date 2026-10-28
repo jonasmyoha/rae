@@ -92,7 +92,7 @@ func editorPanelExposureFrame(
 # The side panel's edge tab (app3d/EdgeTab), on the panel's left edge
 const editorSettingsTabName: String = "settingsTab"
 
-# The sky the settings build: a clear day, a mid-grey ground
+# The sky the settings build: a clear day, a mid-gray ground
 const editorSkyTurbidity: Float = 2.5
 
 const editorSkyGroundAlbedo: Float = 0.25
@@ -108,11 +108,11 @@ type EditorPanel {
   # The "..." menu in the corner
   modeMenu: ModeMenuState
   settings: SettingsState
-  # Where Orbit re-centres on every switch back from the WASD camera, when
-  # `recentresOrbit` (setEditorPanelOrbitHome). Off, the rig's own no-jump
+  # Where Orbit re-centers on every switch back from the WASD camera, when
+  # `recentersOrbit` (setEditorPanelOrbitHome). Off, the rig's own no-jump
   # default holds: the target is wherever the free camera looked.
   orbitHome: Vec3
-  recentresOrbit: Bool
+  recentersOrbit: Bool
   # The fitted Hosek-Wilkie table, read once; a sky is built from it whenever
   # the settings pick that model
   hosekData: HosekDataset
@@ -191,7 +191,7 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
     modeMenu: createModeMenuState()
     settings: own panelSettings
     orbitHome: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    recentresOrbit: false
+    recentersOrbit: false
     hosekData: loadDefaultHosekDataset()
   }
 }
@@ -412,7 +412,7 @@ func updateEditorPanel(
   if handleCameraBar(world: editorPanel.world, rig: cameraRig, camera: camera) {
     layoutChanged = true
   }
-  if editorPanel.recentresOrbit and wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
+  if editorPanel.recentersOrbit and wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
     camera.target = editorPanel.orbitHome
   }
   # The "..." menu: reverse the camera's drag, open or close
@@ -468,12 +468,12 @@ func updateEditorPanel(
   }
 }
 
-# Re-centre Orbit on `target` whenever the camera bar switches back from the
+# Re-center Orbit on `target` whenever the camera bar switches back from the
 # WASD camera, so "Orbit" means "back on the subject" rather than a spin
 # around wherever the free camera looked
 func setEditorPanelOrbitHome(editorPanel: mod EditorPanel, target: view Vec3) {
   editorPanel.orbitHome = target
-  editorPanel.recentresOrbit = true
+  editorPanel.recentersOrbit = true
 }
 
 # Build an app's ControlPanel into the panel: a panel created with

@@ -1,6 +1,6 @@
 # Ocean — the realistic water tier on its own (#851): three FFT cascades
 # (#849 spectrum, #850 evolution + inverse FFT) summed in the surface shader on
-# a camera-centred radial LOD grid (lib/water/ClipMap.rae), whitecaps where the
+# a camera-centered radial LOD grid (lib/water/ClipMap.rae), whitecaps where the
 # Jacobian folds, refraction and Fresnel over a deep bed. Nothing else is in
 # the scene except the same brown island and three boxes as the toon lake.
 #
@@ -81,7 +81,7 @@ func buildScene(
     let angle: Float = i.toFloat() * 2.1 + 0.6
     let radius: Float = 26.0 + i.toFloat() * 9.0
     let size: Float = 14.0 + i.toFloat() * 6.0
-    # Centre a little under the surface: the top face pokes out by ~1 m, the
+    # Center a little under the surface: the top face pokes out by ~1 m, the
     # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
     let islandEntityId: EntityId = world3dAddMeshInstance(
       world: sceneWorld
@@ -182,7 +182,7 @@ func main() ret Int {
     camera.target.z = camera.position.z - 2.0
   }
   # RAE_WATER_CAMERA_X=<x> slides the start along x (the frozen test frame at
-  # two positions a metre apart is the clip-map snapping check).
+  # two positions a meter apart is the clip-map snapping check).
   let cameraXSetting: String = Sys.getEnv(name: "RAE_WATER_CAMERA_X")
   if cameraXSetting.length() > 0 {
     camera.position.x = cameraXSetting.toFloat()
@@ -202,7 +202,7 @@ func main() ret Int {
     ret 1
   }
 
-  # The ocean: a realistic body on the camera-centred radial grid.
+  # The ocean: a realistic body on the camera-centered radial grid.
   let grid: MeshData = createRadialGridMesh(
     rings: 70
     segments: 96
@@ -212,7 +212,7 @@ func main() ret Int {
   let gridMesh: MeshHandle = uploadMeshData(renderer: renderer, meshData: grid)
   var ocean: WaterBody = createOceanRealistic(surfaceZ: 0.0)
   ocean.meshId = gridMesh.id
-  ocean.clipCellPerMetre = radialGridCellPerMetre(segments: 96, growth: 1.09)
+  ocean.clipCellPerMeter = radialGridCellPerMeter(segments: 96, growth: 1.09)
   ocean.clipFirstCell = 1.0
   if Sys.getEnv(name: "RAE_WATER_MOBILE") is "1" {
     useMobileWaterTier(body: ocean)

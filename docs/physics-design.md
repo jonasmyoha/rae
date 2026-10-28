@@ -184,7 +184,7 @@ frame after every consumer.
 type RigidBody {                      # a simulated body; its pose lives in Transform3D
   bodyId: BodyId
   bodyType: BodyType                  # staticBody | kinematicBody | dynamicBody
-  syncedTransformStamp: Int           # the Transform3D stamp physics last synchronised
+  syncedTransformStamp: Int           # the Transform3D stamp physics last synchronized
 }
 
 type Collider {                       # the shapes on the entity's body
@@ -383,7 +383,7 @@ it and depends on nothing unimplemented in it:
 - Rae **inverts** `async`/`await`: normal calls are synchronous; `spawn
   f(args)` is the only marker and returns `Task(T)`; `task.get()` joins
   explicitly; dropping a task joins it (no leaks, no silent detach); there is
-  **no `await`, no `async`, no function colouring** — the call site, not the
+  **no `await`, no `async`, no function coloring** — the call site, not the
   function, decides. Race-freedom is proven at the `spawn`/`parallelLoop`
   boundary from the existing `own`/`copy`/`view`/`mod` modes instead of a
   lock subsystem. `taskScope { }` (structured concurrency) and `parallelLoop`
@@ -414,7 +414,7 @@ computing, is the cost.
 Rae's model is already the right one for a game engine, and unusually so:
 
 1. **`spawn` + `get()` + `taskScope` is fork-join**, the core of every job
-   system, without async colouring.
+   system, without async coloring.
 2. **`parallelLoop` is the data-parallel job** (one iteration per entity range
    over a dense component table), and the `own`/`view`/`mod` modes are exactly
    the "declared read/write set" a job scheduler needs — Rae has it per
@@ -431,7 +431,7 @@ Rae's model is already the right one for a game engine, and unusually so:
    touch physics tables (animation, UI layout, audio) run alongside it. Later,
    when Rae-function-to-C callbacks exist, Box3D's external scheduler can be
    backed by Rae's own pool so the two do not oversubscribe cores — an
-   optimisation, not a requirement.
+   optimization, not a requirement.
 
 Recommended order, therefore: **physics now** (Box3D, `workerCount` for
 parallelism), Rae concurrency continues on its own roadmap (real

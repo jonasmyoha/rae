@@ -1,5 +1,5 @@
 # app3d/TerrainTiles — the ground of a streamed WorldBiome terrain: a square
-# of gridSide x gridSide heightfield tiles, cellSize metres each, round the
+# of gridSide x gridSide heightfield tiles, cellSize meters each, round the
 # cell the camera looks at (drawn only: the physics has its own ground). Each
 # tile owns one mesh, rewritten in place when the tile moves to another cell;
 # its vertices carry the absolute world height of the app's biome field
@@ -15,7 +15,7 @@
 #   drawTerrainTiles(tiles: ground, cache: c, resources: g, time: t)
 #
 # NO SEAMS. Every tile is sampled on one integer lattice (cell * segments +
-# vertex index), so two neighbours compute their shared edge from the same
+# vertex index), so two neighbors compute their shared edge from the same
 # points, and tiles never overlap: overlapping heightfields disagree inside
 # the strip, which showed as depth fighting and dark shadow seams.
 #
@@ -51,9 +51,9 @@ type TerrainTiles {
   segments: Int
   groundZ: Float
   biome: BiomeConfig
-  # The cell the grid is centred on (none yet: a far-off sentinel)
-  centreCellX: Int
-  centreCellY: Int
+  # The cell the grid is centered on (none yet: a far-off sentinel)
+  centerCellX: Int
+  centerCellY: Int
   # Row-major by (cellX mod gridSide, cellY mod gridSide)
   tiles: List(TerrainTile)
   # Reused staging buffer for one tile's vertices
@@ -104,8 +104,8 @@ func createTerrainTiles(
     segments: segments
     groundZ: groundZ
     biome: biome
-    centreCellX: 1000000000
-    centreCellY: 1000000000
+    centerCellX: 1000000000
+    centerCellY: 1000000000
     tiles: own tiles
     scratchVerts: own scratch
   }
@@ -130,7 +130,7 @@ func terrainTileWrap(value: view Int, side: view Int) ret Int {
   ret wrapped
 }
 
-# Centre the grid on cell (`cellX`, `cellY`): every tile whose slot now maps
+# Center the grid on cell (`cellX`, `cellY`): every tile whose slot now maps
 # to another cell is rewritten for it. True when any tile moved.
 func updateTerrainTiles(
   tiles: mod TerrainTiles
@@ -138,11 +138,11 @@ func updateTerrainTiles(
   cellX: view Int
   cellY: view Int
 ) ret Bool {
-  if cellX is tiles.centreCellX and cellY is tiles.centreCellY {
+  if cellX is tiles.centerCellX and cellY is tiles.centerCellY {
     ret false
   }
-  tiles.centreCellX = cellX
-  tiles.centreCellY = cellY
+  tiles.centerCellX = cellX
+  tiles.centerCellY = cellY
   let half: Int = tiles.gridSide / 2
   var moved: Bool = false
   loop var row: Int = 0, row < tiles.gridSide, ++row {
@@ -191,7 +191,7 @@ func updateTerrainTiles(
 
 # Rewrite one tile's mesh for cell (`cellX`, `cellY`): heights from the biome
 # field on the shared lattice, normals from central differences, positions
-# local to the cell's centre (the tile's model matrix is a translation)
+# local to the cell's center (the tile's model matrix is a translation)
 func reshapeTerrainTile(
   tiles: mod TerrainTiles
   renderer: mod DeferredRenderer
@@ -288,9 +288,9 @@ func terrainTileTouches(
   maxY: view Float
 ) ret Bool {
   let half: Float = tiles.cellSize * 0.5
-  let centreX: Float = cellX.toFloat() * tiles.cellSize
-  let centreY: Float = cellY.toFloat() * tiles.cellSize
-  ret minX <= maxX and minY <= maxY and centreX + half > minX and centreX - half < maxX and centreY + half > minY and centreY - half < maxY
+  let centerX: Float = cellX.toFloat() * tiles.cellSize
+  let centerY: Float = cellY.toFloat() * tiles.cellSize
+  ret minX <= maxX and minY <= maxY and centerX + half > minX and centerX - half < maxX and centerY + half > minY and centerY - half < maxY
 }
 
 # Leave out of the tiles every quad wholly inside the world rectangle

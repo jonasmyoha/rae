@@ -4,12 +4,12 @@
 // A prop is baked from `views` x `views` directions over the upper
 // hemisphere (hemi-octahedral: a prop is seen from the side and from above,
 // never from under the ground). Grid point (i, j) is the direction at
-// uv = (i, j) / (views - 1): the square's centre looks straight down, and its
+// uv = (i, j) / (views - 1): the square's center looks straight down, and its
 // whole border is the horizon, so the outer ring of views are side views.
 // A direction here points from the prop TOWARD the eye, z up.
 //
 // The atlas has one cell per view: cell (i, j) is column i, row j, each an
-// orthographic picture of the prop's bounding sphere (centre, radius): the
+// orthographic picture of the prop's bounding sphere (center, radius): the
 // view's right along +u, its up along -v (row 0 is the top), the sphere's
 // rim touching the cell's sides.
 
@@ -152,7 +152,7 @@ fn impostorExtents(viewDirection: vec3<f32>, box: vec4<f32>) -> vec3<f32> {
 // Where on view `viewDirection`'s picture (-1..1 along its right and up) the
 // ray toward the eye's direction `eye` through `point` crosses the view's
 // plane (both in the prop's own frame, `point` relative to the sphere's
-// centre, over its radius), the view framed to `extents`
+// center, over its radius), the view framed to `extents`
 fn impostorViewPoint(point: vec3<f32>, eye: vec3<f32>, viewDirection: vec3<f32>, extents: vec3<f32>) -> vec2<f32> {
   let along = dot(point, viewDirection) / max(dot(eye, viewDirection), 0.2);
   let onPlane = point - eye * along;
@@ -172,7 +172,7 @@ fn impostorParallax(
 }
 
 // The point of view `viewDirection`'s picture at `local`, `depth` above its
-// plane, in the prop's own frame (relative to the centre, over the radius)
+// plane, in the prop's own frame (relative to the center, over the radius)
 fn impostorViewPosition(local: vec2<f32>, depth: f32, viewDirection: vec3<f32>, extents: vec3<f32>) -> vec3<f32> {
   return impostorRight(viewDirection) * (local.x * extents.x) + impostorUp(viewDirection) * (local.y * extents.y)
     + viewDirection * (depth * extents.z);

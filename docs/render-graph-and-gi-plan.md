@@ -12,7 +12,7 @@ findings from that draft are preserved; the central recommendation is not.
 | Committed (architecture) | Not yet committed (parameters) |
 |---|---|
 | A real render graph, from the start | Aliasing, async compute, multi-queue |
-| HDR scene colour; tonemapping as a pass | Exact tonemap curve, exposure model |
+| HDR scene color; tonemapping as a pass | Exact tonemap curve, exposure model |
 | Single-sampled readable depth + normals | Normal encoding, exact formats |
 | **TAA** as the antialiasing strategy (MSAA is dropped) | Jitter sequence length, clamp heuristics |
 | Real-time **dynamic** GI as a first-class capability | Accumulation algorithm details |
@@ -36,7 +36,7 @@ representation, with SDF-based light transport as the leading
 implementation.**
 
 The prior draft argued that three passes did not justify a graph. That is
-the wrong horizon. The graph is not an optimisation applied once a renderer
+the wrong horizon. The graph is not an optimization applied once a renderer
 is large — it is the structure the large renderer is built *on*. Retrofitting
 it after shadows, GI, SSAO, TAA, bloom and post exist means paying the
 migration cost precisely when the renderer is hardest to change.
@@ -67,7 +67,7 @@ Three passes already exist, hardcoded, ordered by invocation convention
 across two C modules rather than by data:
 
 ```
-1. 3D raster pass      runtime_gpu3d.c       MSAA 4x colour + Depth32Float,
+1. 3D raster pass      runtime_gpu3d.c       MSAA 4x color + Depth32Float,
                                              resolves into g_g2d_off_view
 2. SDF metaball pass   runtime_gpu3d_sdf.c   fragment raymarch, writes frag_depth
                                              into the same depth attachment
@@ -114,7 +114,7 @@ wrong and must not propagate.**
 Unavailable is *fixed-function BVH traversal*, not ray-based light
 transport. Rae pays traversal in ALU. For SDF tracing that cost is
 inherently low, because sphere tracing skips empty space — which is a
-genuine argument in SDF's favour on this platform, not a consolation.
+genuine argument in SDF's favor on this platform, not a consolation.
 
 ---
 
@@ -127,7 +127,7 @@ genuine argument in SDF's favour on this platform, not a consolation.
    there is nowhere for GI, bloom or exposure to operate.
 4. **Pass order implicit** across two C modules.
 5. **All resources process-global** — no transients, resize, or device loss.
-6. **Fixed caps with cliff behaviour** (256 meshes / 4096 draws).
+6. **Fixed caps with cliff behavior** (256 meshes / 4096 draws).
 7. **Path tracer architecturally isolated** — own scene encoding, CPU
    readback, cannot contribute to the raster frame.
 8. **No scene change signal** — `lib/scene3d.rae` cannot tell a consumer
@@ -151,7 +151,7 @@ Not a renamed pass list. v1 provides:
 - **resource ownership/lifetime boundaries** that can evolve
 
 Deliberately **not in v1**: memory aliasing, transient pooling
-optimisation, async compute, multi-queue, dead-pass elimination beyond what
+optimization, async compute, multi-queue, dead-pass elimination beyond what
 falls out naturally, engine-wide feature registries, Unreal-style framework
 scaffolding.
 
@@ -173,7 +173,7 @@ type Lifetime {
 }
 
 type Access {
-  AttachmentWrite   # colour/depth attachment
+  AttachmentWrite   # color/depth attachment
   AttachmentRead    # LoadOp_Load
   SampledRead       # texture binding
   StorageRead
@@ -201,9 +201,9 @@ type PassDesc {
 **Three design points worth arguing for explicitly:**
 
 1. **`Lifetime` is in v1 even though pooling is not.** Persistent resources
-   are not an optimisation detail — TAA history and SDF cascades are
+   are not an optimization detail — TAA history and SDF cascades are
    *semantically* cross-frame, and a graph that cannot express that will be
-   wrong rather than merely unoptimised. Getting this into the vocabulary
+   wrong rather than merely unoptimized. Getting this into the vocabulary
    now costs nothing and prevents a later redesign.
 2. **`Access` is recorded precisely from v1**, even though v1 only uses it
    for ordering. Barrier inference later needs intent, and retrofitting
@@ -395,7 +395,7 @@ Foundational, not a later migration step.
 ```
 material / direct lighting
         ↓
-    HDR scene colour   (rgba16f)
+    HDR scene color   (rgba16f)
         ↓
   GI · AO · reflections composited in HDR
         ↓
@@ -419,7 +419,7 @@ the current pipeline would be incorrect regardless of how good the GI
 algorithm is. This is a prerequisite, not a polish item.
 
 UI composites **after** tonemapping, in LDR, which matches the existing
-gpu2d overlay behaviour.
+gpu2d overlay behavior.
 
 ---
 
@@ -435,7 +435,7 @@ in the lit format (rg11b10ufloat):
 - **Back up:** each level's downsample plus a tent-filtered upsample of the
   level below, into separate textures, so no blend state is needed
   (`bloom_up.wgsl`).
-- **Composite:** adds intensity x bloom to the HDR colour before exposure
+- **Composite:** adds intensity x bloom to the HDR color before exposure
   and tone mapping.
 
 Apps control it with `setBloom(renderer:, settings: BloomSettings { enabled,
@@ -445,7 +445,7 @@ default), the pass returns at once, nothing is allocated, and the
 composite skips the sample.
 
 - **Default threshold 1.0, not ~0.3.** With exposure 1.0 the scene units
-  are the exposed units. A threshold of 0.3 is mid-grey after tone mapping,
+  are the exposed units. A threshold of 0.3 is mid-gray after tone mapping,
   so it made the whole 112 frame (floor, sky) glow. At 1.0 only what is
   brighter than white glows. The defaults are knee 0.5 and intensity 0.2.
 - **Per example:**
@@ -482,12 +482,12 @@ TAA requires three things Rae lacks:
 2. **Motion vectors.** Per-pixel screen-space velocity, requiring
    **previous-frame transforms per entity**. `lib/scene3d.rae` must store
    the prior transform — a real, small change to the scene model.
-3. **History buffer + neighbourhood clamping.** Persistent `rgba16f`, with
-   variance/neighbourhood clipping to control ghosting.
+3. **History buffer + neighborhood clamping.** Persistent `rgba16f`, with
+   variance/neighborhood clipping to control ghosting.
 
 Known costs, stated plainly: TAA ghosts on disocclusion and can soften the
 image; it needs care with thin geometry and rapid motion. For a demo with
-controlled camera paths this is a favourable trade, and the shared temporal
+controlled camera paths this is a favorable trade, and the shared temporal
 infrastructure justifies it independently.
 
 **Normals** come from a real target, not depth reconstruction —
@@ -498,8 +498,8 @@ matter most.
 
 **TAA as built (render-perf-10, `lib/deferred_taa.wgsl`).**
 
-- **Resolve:** in YCoCg on Reinhard-compressed colour.
-- **History:** clipped toward the 3x3 neighbourhood mean, inside a box of
+- **Resolve:** in YCoCg on Reinhard-compressed color.
+- **History:** clipped toward the 3x3 neighborhood mean, inside a box of
   one standard deviation (variance clipping). It is fetched with a 5-tap
   Catmull-Rom filter, not the nearest texel.
 - **Current-frame weight:** 0.05 when still, rising to 0.2 at 8 pixels of
@@ -548,7 +548,7 @@ the design. The requirement on the architecture is only that the GI
 representation is a separate, pluggable set of providers — which §7
 guarantees.
 
-Destructible geometry is the opposite case: it *favours* this architecture.
+Destructible geometry is the opposite case: it *favors* this architecture.
 Destruction dirties a bounded region, and grid/clipmap structures support
 local rebuild, whereas BVH refit degrades with topology change. Requirements
 for the update path: no full rebuilds, bounded local updates, amortisable
@@ -653,7 +653,7 @@ Not general enthusiasm — three properties of *this* project:
    **exactly**, with no voxelization, no resolution loss and no update cost.
    Any triangle-oriented acceleration structure must approximate it. If
    implicit geometry is part of Rae's identity, this is decisive.
-2. **Destruction favours grids over trees.** Local re-voxelization of a
+2. **Destruction favors grids over trees.** Local re-voxelization of a
    dirty region is bounded and parallel; BVH refit degrades under topology
    change.
 3. **Sphere tracing suits a platform without hardware BVH.** Empty space is
@@ -695,7 +695,7 @@ Each step independently verifiable; step 2 is the safety mechanism.
    refactor provable and any later regression attributable.
 3. **Single-sampled depth + normal + velocity prepass**; drop MSAA.
    Metaballs move into the prepass (§6).
-4. **HDR scene colour; move tonemapping out of the material shader** into
+4. **HDR scene color; move tonemapping out of the material shader** into
    its own pass.
 5. **TAA** — jitter, motion vectors, history, clamping.
 6. **SSAO** as the first new lighting technique.
@@ -705,7 +705,7 @@ Each step independently verifiable; step 2 is the safety mechanism.
 9. **Validate against the path tracer** (§13).
 10. **Dynamic/destructible update paths**; proxies for dynamic classes as
     those renderer features arrive.
-11. **Only then** graph optimisation — transient pooling, aliasing, barrier
+11. **Only then** graph optimization — transient pooling, aliasing, barrier
     inference — driven by measurement.
 
 Prerequisite outside the renderer: `lib/scene3d.rae` needs a
@@ -761,15 +761,15 @@ Reduced from the prior draft — TAA and the graph are now decided.
    lifetime class (Transient / Persistent / External).
 4. **Raster and compute?** Peer node kinds recording into one encoder.
    Fullscreen-triangle raster stays available where it beats compute.
-5. **HDR pipeline?** rgba16f scene colour; GI/AO/bloom in HDR; exposure and
+5. **HDR pipeline?** rgba16f scene color; GI/AO/bloom in HDR; exposure and
    tonemap as passes; UI composited in LDR after tonemap.
 6. **Depth/normal strategy?** Single-sampled prepass producing depth,
-   normal and velocity; MSAA dropped in favour of TAA; metaballs
+   normal and velocity; MSAA dropped in favor of TAA; metaballs
    participate in the prepass.
 7. **Intended GI architecture?** Real-time dynamic GI over a composite
    scene representation queried via `distance` / `trace` / `radiance`, with
    SDF-based transport leading and a screen-space fallback.
-8. **Why SDF for Rae?** Metaballs are natively SDF; destruction favours
+8. **Why SDF for Rae?** Metaballs are natively SDF; destruction favors
    local grid updates; sphere tracing suits a platform without hardware BVH.
 9. **How do geometry classes coexist?** As providers composited by `min()`
    over distance (§7), each class registering with whichever provider fits.

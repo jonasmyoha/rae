@@ -15,9 +15,9 @@ struct LightU {
   skyZenith: vec4<f32>,
   skyHorizon: vec4<f32>,
   hosek: array<vec4<f32>, 9>,
-  // Mist (RendererMist): x density per metre at the base height, y how fast
-  // it thins per metre up, z the base height (world z), w on (1) / off (0);
-  // mistTint: rgb a tint on the sky's colour, w how much of that colour's
+  // Mist (RendererMist): x density per meter at the base height, y how fast
+  // it thins per meter up, z the base height (world z), w on (1) / off (0);
+  // mistTint: rgb a tint on the sky's color, w how much of that color's
   // saturation the mist loses (mist is paler than the sky)
   mist: vec4<f32>,
   mistTint: vec4<f32>,

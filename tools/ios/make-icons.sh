@@ -2,7 +2,7 @@
 # App icons from a shot of the app (a face, a logo, whatever the app frames):
 # crops a square round a point of it, brightens it toward a measured mean
 # lightness (a gamma on Oklab's L, so the hue keeps as it lightens), refuses
-# it if it lands outside the band, loses its colour or shifts its hue, and
+# it if it lands outside the band, loses its color or shifts its hue, and
 # writes every size the platforms want:
 #
 #   <icons>/ios/AppIcon-1024.png        the iOS icon (Xcode makes the rest;
@@ -17,7 +17,7 @@
 #   tools/ios/make-icons.sh <shot image> <icons dir>
 #
 # Settings (environment; per mille of the shot's width or height):
-#   ICON_CENTRE_X, ICON_CENTRE_Y   the square's middle (504, 520)
+#   ICON_CENTER_X, ICON_CENTER_Y   the square's middle (504, 520)
 #   ICON_TIGHT_HALF                half the tight square, of the height (329):
 #                                  iOS, the Play Store, Android's legacy icons
 #   ICON_WIDE_HALF                 half the wide one (362): Android's adaptive
@@ -26,7 +26,7 @@
 #   ICON_LIGHTNESS_LOW / _HIGH     the band it must land in (0.53 / 0.60)
 #   ICON_SATURATION_LOW            the least HSL saturation left (0.40)
 #   ICON_HUE_PATCH                 "w h x y" as shares of the crop: a patch of
-#                                  one colour whose Oklch hue must not shift
+#                                  one color whose Oklch hue must not shift
 #                                  more than 0.05 ("0.08 0.05 0.46 0.27")
 #   ICON_BACKGROUND                Android's adaptive background (#DCE3EC)
 # Needs ImageMagick (brew install imagemagick).
@@ -35,8 +35,8 @@ command -v magick >/dev/null || { echo "make-icons: needs ImageMagick (brew inst
 [ $# -eq 2 ] || { echo "usage: $0 <shot image> <icons dir>" >&2; exit 2; }
 shot=$1
 icons=$2
-centreXPerMille=${ICON_CENTRE_X:-504}
-centreYPerMille=${ICON_CENTRE_Y:-520}
+centerXPerMille=${ICON_CENTER_X:-504}
+centerYPerMille=${ICON_CENTER_Y:-520}
 tightHalf=${ICON_TIGHT_HALF:-329}
 wideHalf=${ICON_WIDE_HALF:-362}
 hueW=$(echo "${ICON_HUE_PATCH:-0.08 0.05 0.46 0.27}" | cut -d' ' -f1)
@@ -51,11 +51,11 @@ height=$(magick identify -format '%h' "$shot")
 # The middle, and two squares round it: a tight one (iOS, the Play Store,
 # Android's legacy icons) and a wider one (Android's adaptive foreground,
 # whose mask shows only its middle two thirds).
-centreX=$((width * centreXPerMille / 1000))
-centreY=$((height * centreYPerMille / 1000))
+centerX=$((width * centerXPerMille / 1000))
+centerY=$((height * centerYPerMille / 1000))
 crop() { # half-size (per mille of the height) -> out
   half=$((height * $1 / 1000))
-  magick "$shot" -crop "$((half * 2))x$((half * 2))+$((centreX - half))+$((centreY - half))" +repage \
+  magick "$shot" -crop "$((half * 2))x$((half * 2))+$((centerX - half))+$((centerY - half))" +repage \
     -alpha off "$2"
 }
 mkdir -p "$icons/ios" "$icons/android"
@@ -64,7 +64,7 @@ wide=$scratch-wide.png
 crop "$tightHalf" "$tight"
 crop "$wideHalf" "$wide"
 
-# Colour correction: a shot is often dark for an icon (~0.45). Lift
+# Color correction: a shot is often dark for an icon (~0.45). Lift
 # the L channel of Oklab with a gamma curve — the midtones rise,
 # black and white stay, and a/b are untouched; Oklab keeps the hue as it
 # lightens (in CIELab a blue drifts toward violet) — stepping the gamma up

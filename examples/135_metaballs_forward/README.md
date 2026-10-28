@@ -16,7 +16,7 @@ bindings, like 134.
 
 | | 135 (forward) | 134 (deferred) |
 |---|---|---|
-| main pass | a 1x pre-pass for the SSAO, then one 4x MSAA pass; colour and depth memoryless, resolved into the lit image | G-buffer pass (3 targets + depth), then a fullscreen lighting pass |
+| main pass | a 1x pre-pass for the SSAO, then one 4x MSAA pass; color and depth memoryless, resolved into the lit image | G-buffer pass (3 targets + depth), then a fullscreen lighting pass |
 | antialiasing | 4x MSAA on triangle edges | SMAA by default; TAA from the settings pane |
 | metaball silhouettes | not antialiased: the raymarch runs once per pixel and writes one depth for all 4 samples | smoothed by SMAA / TAA |
 | SSAO | half-resolution SSAO over a 1x depth + normal pre-pass (the scene is drawn twice) | half-resolution SSAO over the G-buffer |

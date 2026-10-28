@@ -38,7 +38,7 @@ The reference draws three **dashed** rectangles with a hand-rolled dashed-rect r
 pixels so the corners read as crop marks). No labels. Each has a toolbar toggle and a
 persisted default:
 
-| Guide | Rect | Default | Dash / gap | Width | Colour | Alpha | Corner overshoot |
+| Guide | Rect | Default | Dash / gap | Width | Color | Alpha | Corner overshoot |
 |---|---|---|---|---|---|---|---|
 | Safe area | the `SafeArea` root's computed rect shrunk by padding + the applied insets + extra; fallback = the device's safe insets in design units | **on** | 10 / 6 | 2 | mint `#7fffd4` | 0.8 | 24 |
 | Visible / simulated area | the simulated device viewport in design units | off | 8 / 6 | 4 | warm yellow `#ffd36a` | 0.7 | 30 |
@@ -63,7 +63,7 @@ new **dashed stroke** (`strokeDash` / `strokeGap` on `Shape`, painted by
 `lib/ui/renderSystem/RenderPaintBox.rae` as rect segments along the four edges — pure
 Rae, no C), plus a small `Text` label each. `guideSystem/GuideSystem.rae` writes their
 Rects from the document's frame after every load; `G` toggles them;
-`RAE_UI_EDITOR_GUIDES=0` starts hidden. Colours and rhythm follow the reference (sky
+`RAE_UI_EDITOR_GUIDES=0` starts hidden. Colors and rhythm follow the reference (sky
 blue for the frame, mint for the safe area; the dash lengths are doubled since Rae's
 design units are 3 per point for phone scenes). The safe-area guide shows only when the
 frame has insets. Not ported yet: the corner overshoot (crop-mark corners — would be a
@@ -85,16 +85,16 @@ the editor simulates a device viewport smaller than the design.
 | Entity name labels toggle | white 10px `<id> <name|type>` at each rect's top-left | — |
 
 **Rae — DONE (#12306774):** the hover and selection outlines are authored nodes in
-`Guides.raescene` (`OutlineFor { role }`, the reference's colours), and the "All
+`Guides.raescene` (`OutlineFor { role }`, the reference's colors), and the "All
 outlines" / "Button outlines" toggles are authored outline POOLS (`OutlinePool`,
 one mounted outline scene per matched entity; `N` / `B`). Not ported: the
-runtime-only colour variants, the "Hidden" label, name labels, the marquee.
+runtime-only color variants, the "Hidden" label, name labels, the marquee.
 
 ### 2c. Render preview
 
 With "Render" off, sprites/text/shapes are hidden and replaced by filled placeholder
-rects (α 0.5) coloured by kind with a brightness ramp by draw order (greens for
-sprites, blues for text, purples for shapes, greys for containers), so structure is
+rects (α 0.5) colored by kind with a brightness ramp by draw order (greens for
+sprites, blues for text, purples for shapes, grays for containers), so structure is
 readable without artwork. Works with the editor closed ("preview only").
 **Rae:** a render-system flag on the world (`world.renderPreview`) is enough; the
 paint pass already switches per component kind.
@@ -106,13 +106,13 @@ The reference's panels are screen-space, unscaled, draggable, with per-tab persi
 - **Left sidebar** — tabs ("Editor", "Hierarchy"), a scrollable stack of panels, an
   optional docked "create" toolbar (Create button / image / text, inserted after the
   selection and auto-selected). **Rae — the desktop layout is DONE** (a landscape
-  window in points; left panel with Project / Hierarchy / Diagnostics, a centre
+  window in points; left panel with Project / Hierarchy / Diagnostics, a center
   `EditArea` the camera fits the document into, a right inspector panel, top-bar
-  toggles that minimise either panel — all authored in `Editor.raescene`); the
+  toggles that minimize either panel — all authored in `Editor.raescene`); the
   sections are drafts for the visual-polish task to style.
 - **Hierarchy** — header "Hierarchy (N)"; tree rows 24px with caret collapse, 12px
   indent per depth, label `name · Kind · file · "text preview"`; runtime-only entities
-  prefixed and coloured red; selected row tinted; click selects, Shift/Ctrl/Cmd-click
+  prefixed and colored red; selected row tinted; click selects, Shift/Ctrl/Cmd-click
   adds, Up/Down move the selection when focused; a filter prompt; two modes, "running"
   (the live world) and "raw scene data" (lists every scene file, opens one into a
   separate preview world — nested instances expand with their file name).
@@ -124,7 +124,7 @@ The reference's panels are screen-space, unscaled, draggable, with per-tab persi
   per component: Rect X/Y/W/H (X/Y disabled with a note when a parent layout drives
   position), Padding, Size mode Fixed/Hug/Fill, Constraints, Align, Offset, TransformFx,
   Sprite (texture, mode, size), Text (content, style enum, "edit text styles"), Shape
-  (kind, fill/stroke hex + swatch → colour picker, radius), OnClick action id, SafeArea
+  (kind, fill/stroke hex + swatch → color picker, radius), OnClick action id, SafeArea
   (enabled + per-side on/off + read-only effective insets), Computed rect (read-only);
   a component manager (filter, add/remove with dependency locks, "addable" list,
   click-to-copy a component's JSON); multi-selection shows shared values and "—" for
@@ -135,12 +135,12 @@ The reference's panels are screen-space, unscaled, draggable, with per-tab persi
 - **Toolbar** — a vertical strip docked to the inspector: Pointer / Select / Move /
   Game tools, Outlines / Buttons / Safe / Sim / System / Render / Names / MEM /
   vision-log toggles, Back, Fullscreen, zoom − / 100% / +.
-- **Dialogs** — text styles, colour palettes, colour picker (top-right, own wheel and
+- **Dialogs** — text styles, color palettes, color picker (top-right, own wheel and
   pointer routing).
 - **Device simulator** — "reset to actual window", "safe area on/off", "guides in game
   on/off", then one button per preset: design portrait (no insets), a dozen phones
   (iPhone 15 Pro 393×852 with 59/34 insets … Android small 360×640), all portrait.
-  Simulation centres a `w×h` viewport in the window and substitutes the preset's safe
+  Simulation centers a `w×h` viewport in the window and substitutes the preset's safe
   insets. **Rae:** `lib/ui/DevicePresets` already holds the same presets; the editor
   applies one automatically for phone-authored scenes (`unitScale`) and via
   `RAE_UI_EDITOR_DEVICE`; a panel with one row per preset is straightforward.
@@ -197,12 +197,12 @@ generation-counter idea Rae's component tables already carry.
 ## 7. Camera
 
 - Zoom around the cursor on wheel (step 0.01 per notch; ×2 with Shift/Ctrl/Cmd, ×0.5
-  with Alt), clamped 0.25–5; toolbar ± about the screen centre; "100%" resets.
+  with Alt), clamped 0.25–5; toolbar ± about the screen center; "100%" resets.
 - Pan: middle-drag always; left-drag in the Pointer tool; Alt/Cmd-drag in any tool;
   6px drag threshold; smoothed by a per-frame lerp (0.35).
 - A design-space pointer readout inverts camera + layout transforms.
 **Rae — DONE (#99444501):** the camera is a scale + offset on the document and guides
-roots (`cameraSystem/`); `lib/ui` now honours an inherited world scale in the paint
+roots (`cameraSystem/`); `lib/ui` now honors an inherited world scale in the paint
 box, glyphs, clips, masks and hit tests. Wheel zooms about the cursor (0.25x–5x),
 middle drag pans, the chrome's `−` / `100%` / `+` pill steps and resets. Not ported:
 the modifier-key speed factors and the per-frame lerp smoothing.
@@ -218,7 +218,7 @@ arrows walk the tree, `Esc` clears.
 ## 9. Order of porting (suggested)
 
 1. **Guides** — done (this note).
-2. Authored selection/hover outlines in the same guides scene; hover colour per the
+2. Authored selection/hover outlines in the same guides scene; hover color per the
    reference; "all outlines" and "button outlines" toggles (a system that positions one
    authored outline node per entity of a query — the ListView row-pool pattern).
 3. Click-through cycling, modifiers, multi-select, marquee.

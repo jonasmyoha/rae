@@ -1,24 +1,24 @@
-# Per-vertex colour baked from a palette atlas (#378).
+# Per-vertex color baked from a palette atlas (#378).
 #
 # The claim being tested is narrow and checkable: for a FLAT palette
 # atlas, sampling per vertex is not an approximation of texturing — it
 # reproduces the texture exactly wherever a triangle's corners share a
-# swatch. So the assertions are on actual COLOUR VALUES against an
+# swatch. So the assertions are on actual COLOR VALUES against an
 # independently computed reference, not on "something was written".
 #
 # Three properties, each failing differently:
 #
 #   1. The stride widened to 20 floats. A format change that the loader
 #      and the GPU layout disagree about renders as garbage geometry
-#      rather than as wrong colour, so it is worth pinning separately.
+#      rather than as wrong color, so it is worth pinning separately.
 #   2. Two known vertices carry their real swatch. Vertex 0 of the body
 #      lands on leather; vertex 100 lands on skin. A V-flip bug — the one
 #      this example's history records — sends both into the atlas's blank
 #      region and returns white for each, which property 3 alone would
 #      not catch if the whole primitive went white together.
-#   3. The primitive is not one flat colour. The body was the worst case
+#   3. The primitive is not one flat color. The body was the worst case
 #      for the hand-written table it replaces: 61% skin across 17
-#      swatches. If baking collapsed it back to a single colour, the
+#      swatches. If baking collapsed it back to a single color, the
 #      change bought nothing.
 import Sys
 open Gltf

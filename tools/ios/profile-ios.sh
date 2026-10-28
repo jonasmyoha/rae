@@ -2,7 +2,7 @@
 # Profile an app on a connected iPhone, one run per place: launch it there
 # with Rae's GPU pass and frame timing on (RAE_GPU_PASS_TIMING,
 # RAE_FRAME_TIMING: the [gpu passes], [frame] and app3d/FrameLog [frames]
-# lines), let it run, copy its log off the phone, then summarise every run:
+# lines), let it run, copy its log off the phone, then summarize every run:
 # its frames' median and 95th percentile, the frames over budget, the scales
 # and thermal states, the GPU passes, the CPU time. Install the current build
 # first (tools/ios/run-ios.sh).
@@ -25,7 +25,7 @@
 #                   if it is above 0 closes the app, waits COOL_WAIT and tries
 #                   again (COOL_TRIES times, default 6; past that the place
 #                   runs as it is, and its summary says so)
-#   SUMMARY_ONLY=1  no runs: summarise the logs already in OUT
+#   SUMMARY_ONLY=1  no runs: summarize the logs already in OUT
 # The app is closed after each run, so it does not heat the phone between
 # places.
 set -uo pipefail

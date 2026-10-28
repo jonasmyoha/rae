@@ -7,14 +7,14 @@
 # other radiance. It does nothing unless the renderer's `UnderwaterParams`
 # say the camera is under a body's surface — the water system decides that
 # each frame (water/Underwater.rae: containing body, surface query, crossing)
-# and hands the renderer the body's colours; the renderer knows no water.
+# and hands the renderer the body's colors; the renderer knows no water.
 #
 # The pass snapshots the lit target into litCopy (the #842 copy, free again
 # once the transparents drew) and runs one fullscreen pass back into lit over
 # that snapshot + the G-buffer depth: reconstruct the world position under the
 # pixel through the inverse view-projection, cut the view ray at the still
 # surface plane when the point is above the water, and apply Beer-Lambert
-# attenuation per channel toward the body's deep colour over that underwater
+# attenuation per channel toward the body's deep color over that underwater
 # distance (lib/underwaterFog.wgsl). The objects are typed IDs in the
 # DeferredRenderer-owned manager; the bind follows the targets generation
 # (litCopy is re-created on resize, the depth target is the GbufferCache's).
@@ -43,16 +43,16 @@ open gpu/GpuIds
 type UnderwaterParams {
   active: Bool
   surfaceZ: Float  # the surface height at the camera (world z)
-  deepColor: Vec3  # the fog's asymptote (the body's deep colour)
-  absorbColor: Vec3  # Beer-Lambert absorption per metre, per channel
+  deepColor: Vec3  # the fog's asymptote (the body's deep color)
+  absorbColor: Vec3  # Beer-Lambert absorption per meter, per channel
   density: Float  # scale on the absorption (1 = the body's own)
-  farDistance: Float  # metres past which the fog is fully saturated
+  farDistance: Float  # meters past which the fog is fully saturated
   tintStrength: Float  # near-surface whole-screen tint (0..1)
   tintDepth: Float  # camera depth (m) at which the tint reaches full strength
   # Sun caustics (#860): the rippling light network on submerged surfaces.
   causticsOn: Bool  # the body's quality toggle (off -> no caustic contribution)
   sunDir: Vec3  # direction TOWARD the sun (unit); z <= 0 (below horizon) adds nothing
-  sunColor: Vec3  # the sun colour that tints the caustics (dark sun -> nothing)
+  sunColor: Vec3  # the sun color that tints the caustics (dark sun -> nothing)
   causticStrength: Float  # peak added radiance of the caustic ridges
   time: Float  # the wave clock, so the pattern shimmers deterministically
 }

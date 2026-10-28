@@ -45,7 +45,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let posed = a.position + corner;
   let separated = abs(distance(posed, a.position) - length(vec2<f32>(1.4, 1.2))) < 0.00001;
   results[id.x] = select(0u, 1u, preserved && normals && still && continuous && facing && axes && separated);
-  // A fresh breeze must move a 70 cm spray tip visibly, not just millimetres.
+  // A fresh breeze must move a 70 cm spray tip visibly, not just millimeters.
   let threshold = select(0.00001, 0.05, id.x >= 32u);
   results[64 + id.x] = select(0u, 1u, distance(a.position, first) > threshold);
 }

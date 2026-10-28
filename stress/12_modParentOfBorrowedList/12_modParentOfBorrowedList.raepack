@@ -29,7 +29,7 @@ pack ModParentOfBorrowedList {
       java: "runs; the Integer object is not owned by the list's array"
       go: "runs; the pointer keeps the old backing array alive, so it reads a stale 7"
       rust: "compile error: cannot borrow `shelf` as mutable because `shelf.numbers` is also borrowed as immutable"
-      c: "undefined behaviour: the pointer into the realloc'd array dangles"
+      c: "undefined behavior: the pointer into the realloc'd array dangles"
     }
     fixedBy: "0.2.5: passing or assigning a place that CONTAINS the borrowed List counts as a change to it (sema_place_contains)"
   }

@@ -64,7 +64,7 @@ character mover, six joint types with limits, motors and springs, island
 sleep, cross-platform determinism (also independent of thread count,
 `docs/faq.md`), and recording/replay.
 
-## 2. The optimisations a port would have to reproduce
+## 2. The optimizations a port would have to reproduce
 
 ### SIMD
 
@@ -92,26 +92,26 @@ step runs in parallel:
 
 - broad-phase pair finding (`broad_phase.c`);
 - narrow-phase collision for every contact (`physics_world.c`, "collide");
-- sensors, body finalisation and continuous collision for fast "bullet" bodies;
+- sensors, body finalization and continuous collision for fast "bullet" bodies;
 - every solver stage: prepare, warm start, solve, relax, restitution and store
   impulses.
 
-The solver can run in parallel because of **graph colouring**: constraints are
-split into up to 24 colours, and no two constraints of one colour touch the
+The solver can run in parallel because of **graph coloring**: constraints are
+split into up to 24 colors, and no two constraints of one color touch the
 same dynamic body. Constraints that do not fit go to an overflow set that is
 solved on one thread (`constraint_graph.h`). Workers move between stages
 through atomics and spin-waits.
 
 ### Other design choices
 
-The solver is built for cache behaviour as much as for SIMD: "solver sets"
+The solver is built for cache behavior as much as for SIMD: "solver sets"
 keep awake and sleeping bodies apart, contacts are stored in solver-ready
-arrays per colour, and memory comes from arena and block allocators. This
+arrays per color, and memory comes from arena and block allocators. This
 layout is the performance design. Re-expressing it as ordinary ECS component
 tables would undo much of it. A port should keep Box3D's internal layout, which
 means the internal layout would not be ECS anyway.
 
-## 3. What those optimisations are worth
+## 3. What those optimizations are worth
 
 Box3D ships its own measurements: `benchmark/amd7950x_scalar`,
 `amd7950x_sse2` and `m2air_neon`, total milliseconds for a fixed step count at
@@ -177,7 +177,7 @@ benchmarks until SIMD and threads exist (§3).
 3. **Real threads under `parallelLoop`, plus atomics or stage barriers.**
    `docs/concurrency-model.md` already plans this, but today `parallelLoop`
    runs sequentially and Rae has no atomic type. Box3D's per-stage worker
-   synchronisation needs both.
+   synchronization needs both.
 4. **`-ffp-contract=off` in every build**, for Box3D's cross-platform
    determinism. This is already the port plan's P0.
 
@@ -243,7 +243,7 @@ How option B would look:
   the runtime's other C, with `-ffp-contract=off` and SIMD enabled.
 - Generate low-level bindings from `include/box3d/*.h` with the existing
   C-header binding generator (`compiler/src/bindgen.c`). It currently
-  recognises the WebGPU header style, so it would be extended for Box3D's
+  recognizes the WebGPU header style, so it would be extended for Box3D's
   `B3_API` declarations and plain C structs. This is the same pattern as
   `lib/webgpu`.
 - Write the integration in Rae, in `lib/physics/`:

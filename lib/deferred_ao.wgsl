@@ -31,7 +31,7 @@ const AO_RADIUS: f32 = 1.2;
 const AO_SLICES: i32 = 3;
 const AO_STEPS: i32 = 6;
 const AO_BIAS: f32 = 0.06;
-// A 4x4 Bayer order: neighbouring half pixels get rotations far apart.
+// A 4x4 Bayer order: neighboring half pixels get rotations far apart.
 fn interleaved(halfPx: vec2<i32>) -> f32 {
   var order = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,
                              3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);

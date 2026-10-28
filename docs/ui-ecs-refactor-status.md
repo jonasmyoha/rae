@@ -58,7 +58,7 @@ Ordered by leverage.
    `addDeclaredSystem` (read/write table ids) + a generic, reflection-driven
    `shouldRunDeclared` (read generations + live entity count), and
    `lib/ui/Pipeline.rae` registers every lib/ui system in canonical order with
-   its declared sets; fixture 839 proves the declared judgement equals the
+   its declared sets; fixture 839 proves the declared judgment equals the
    hand-written `LayoutCache`/`TransformCache` frame by frame. The examples'
    adoption is #949 (106) and #954 (104/105).
 2. **Consumers never moved to the query sugar.** `query2/3`: 0 uses in
@@ -141,7 +141,7 @@ frame systems — landed 2026-09-19, see §1.)
    are now `inputSystem/` (3), `screenSystem/` (router + views, 15),
    `historySystem/` (3), `playbackSystem/` (3), `spotifySystem/` (1),
    `debugSystem/` (4, incl. the stress/screenshot runners), `assetSystem/`
-   (8, loaders + the catalogue/library/playlist data layer), with the entry,
+   (8, loaders + the catalog/library/playlist data layer), with the entry,
    `App*`, and the cross-cutting spine (Config, Viewport, WorldHelpers, the
    frame pipeline/refresh/render-cache glue) at the root. No import churn
    was needed: the project namespace is flat and recursive, so only the one
@@ -175,7 +175,7 @@ frame systems — landed 2026-09-19, see §1.)
    transform, visualBounds in `runFrameLayoutTransform`, hoverScale in the
    frame loop, and the layout/transform re-pass inside `handleScreenSwitch`
    and the stress runner. Layout/transform keep their dirty-skip (fixture 839
-   proves the declared judgement equals the caches it replaced), the rest run
+   proves the declared judgment equals the caches it replaced), the rest run
    every frame as before. The app-logic phases (input dispatch, observation
    refresh, hero animation, render decision) stay as app code called in order:
    Rae has no function references, so the app calls the systems and the

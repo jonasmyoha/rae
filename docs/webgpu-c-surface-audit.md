@@ -90,7 +90,7 @@ the TAA / draw-limit settings come from Rae in the frame block —
 `skyHosekPush}`. It is reached through `lib/gpu3d.rae`'s `beginScene`/pass
 wrappers and still drives the forward examples (109 PBR, 111 metaballs-forward).
 This was never in the #502–#504 deferred scope. It is the last real block of
-high-level graphics C. Migrating it (or retiring it in favour of the deferred
+high-level graphics C. Migrating it (or retiring it in favor of the deferred
 path) is its own phase, filed as #514 — not required to start grass.
 
 ## Zero-copy upload path (as required by #505)
@@ -392,7 +392,7 @@ G-buffer targets (A rgb10a2, B/C rgba8, depth32) + their views are manager
 `gbufferFrameFloats = 36`) with the draw cursor `drawCount` in Rae; each frame
 is a manager `Recording` opened with the new multi-attachment
 `gpu/GpuRenderPass.beginRenderPassMulti` over a `RenderTargetSet` (three
-colour views + depth, per-attachment clear colours) and submitted TRACKED by
+color views + depth, per-attachment clear colors) and submitted TRACKED by
 `end(cache:, resources:)` (pipelines + binds recorded as uses; `inFlight`
 polled per frame, drained by `gbufferShutdown`). Every G-buffer draw — static,
 skinned, instanced, terrain, sprite, grass, transparent — writes its records
@@ -402,7 +402,7 @@ buffers by ID (no adoption); grass and water live in the App's manager and
 BORROW the frame uniform / depth view handles across managers (a Rae-owned
 external now, no C accessor). C keeps: the WGSL sources; the frame-derived
 uniform MATH (`rae_gb_frame_data(viewProj, clear, w, h, out)` fills the 36
-floats and remembers the jittered / previous view-projection + clear colour
+floats and remembers the jittered / previous view-projection + clear color
 for the still-C SSAO / lighting / SDF uploads — the `rae_g2d_xform(out)`
 pattern); `rae_gb_set_frame_open` (the metaball prep's "pass open" check);
 and it BORROWS the four views + size (`rae_gb_commit_targets(w, h, a, b, c,
@@ -456,14 +456,14 @@ shader; 3 G-buffer targets + reverse-Z depth, no vertex buffer), ONE frame
 uniform per frame computed in Rae from the cache's frame data (viewProj,
 the inverse of the JITTERED viewProj — the jitter re-applied column-wise and
 inverted with `Math3d.mat4Inverse` — prevViewProj, the camera), and per
-cluster slot (8) a ball buffer, a colour buffer, a params uniform and the
+cluster slot (8) a ball buffer, a color buffer, a params uniform and the
 bind group over them, all manager IDs. `drawMetaballs(cache:, resources:, …)`
 uploads the cluster (`writeBufferFromPtr` / `uploadArgs`) and records a
 fullscreen draw into the open geometry pass (`recordDrawInPass`); the
 cluster cursor resets in `Gbuffer.begin`, `Gbuffer.end` records the SDF
 pipeline + binds as submission uses, `gbufferShutdown` retires them. The
 `RAE_GPU3D_SDF_TEST_LOG` diagnostic line moved with it. Removed from C:
-`gb_sdf_*` (pipeline, frame uniform, ball/colour/param buffers, binds),
+`gb_sdf_*` (pipeline, frame uniform, ball/color/param buffers, binds),
 `gb_sdf_group`, `rae_gb_sdf_prepare / pipeline / bind`,
 `rae_ext_Gbuffer_sdfShutdown` (allowlist −1, gate 10) and — the last C
 coupling to the open geometry pass — `gb_frame_open` / `rae_gb_set_frame_open`.
@@ -486,7 +486,7 @@ lighting / TAA / pyramid pipelines over the C-kept WGSL (`rae_gb_{light,taa,
 pyr_from_depth,pyr_reduce}_wgsl`), all rebuilt per G-buffer generation. The
 frame-derived math is Rae: the GbufferCache keeps viewProj, the JITTERED
 viewProj (Halton(2,3), suppressed with TAA off), the previous frame's and
-the clear colour; `uploadSsaoUniform` / `uploadLightUniform` pack the light
+the clear color; `uploadSsaoUniform` / `uploadLightUniform` pack the light
 uniform (inverse jittered viewProj, camera, sun, ambient, the #57 fog block,
 sky params, the cooked Hosek state — kept on the targets, no C push) with
 `GpuArgs`. Every consumer binds IDs: the composite (source = the TAA slot /
@@ -529,7 +529,7 @@ lighting samples (`createTextureViewArray`), the comparison sampler
 resolution / count changes (`gen` bumps, the lighting bind and the forward
 binds rebuild). The static (32 B) and skinned (80 B, palette-posed) casters
 and the metaball raymarch are DEPTH-ONLY pipelines from the new
-`gpu/GpuRenderDepth.createDepthPipeline` (no colour target; no fragment
+`gpu/GpuRenderDepth.createDepthPipeline` (no color target; no fragment
 stage or a zero-target frag_depth stage; rasteriser depth bias 2 / slope
 2.5; front-face culling) over the C-kept WGSL (`rae_sm_wgsl_{static,skinned,
 sdf}`). The caster queue is Rae (model floats, batch keys, buffer IDs from

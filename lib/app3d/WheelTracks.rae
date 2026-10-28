@@ -12,7 +12,7 @@
 #
 #   findWheelTouches  every wheel that rolled a piece's length casts one ray
 #                     down (only then) and, on the ground, lists a GroundTouch
-#                     where its tyre meets it
+#                     where its tire meets it
 #   (the app)         answers each touch (GroundAnswer)
 #   layWheelTouches   lays each touch's piece and kicks up its particles
 #   drawWheelTracks   every live piece into the G-buffer, one instanced draw
@@ -54,7 +54,7 @@ type WheelTrackTuning {
   groundReach: Float
   # How far down the ray looks for the ground (m)
   rayLength: Float
-  # How much of its surface's colour a piece keeps
+  # How much of its surface's color a piece keeps
   shade: Float
 }
 
@@ -75,7 +75,7 @@ func defaultWheelTrackTuning() ret WheelTrackTuning {
   }
 }
 
-# A wheel's tracks: its trail, and the tyre's size (m)
+# A wheel's tracks: its trail, and the tire's size (m)
 type WheelTrack {
   trail: MarkTrail
   radius: Float
@@ -179,7 +179,7 @@ func findWheelTouches(
         a: entityLinearVelocity(physics: physics, rigidBodies: rigidBodies, entityId: wheelId)
       )
       let wheelTrack: mod WheelTrack = componentMod(this: wheelTracks.tracks, entityId: wheelId)
-      # Where the tyre would touch, if the ground were right under its centre
+      # Where the tire would touch, if the ground were right under its center
       let bottom: Vec3 = Vec3.create(x: center.x, y: center.y, z: center.z - wheelTrack.radius)
       var distance: Float = 0.0
       var rolled: Bool = true
@@ -196,7 +196,7 @@ func findWheelTouches(
       if rolled is false {
         continue
       }
-      # One ray down per piece: is the tyre on the ground, and where is it
+      # One ray down per piece: is the tire on the ground, and where is it
       let hit: PhysicsHit = raycastClosest(
         physics: physics
         origin: center
@@ -260,7 +260,7 @@ func layWheelTouches(
           color: shadeOf(color: touch.answer.color, shade: tuning.shade)
         }
       )
-      # ...and what the tyre kicks up there, flung back from where it rolls
+      # ...and what the tire kicks up there, flung back from where it rolls
       let floor: Float = contact.z - tuning.overFootprints
       kickUpParticles(
         groundParticles: groundParticles
@@ -270,7 +270,7 @@ func layWheelTouches(
         directionX: touch.directionX
         directionY: touch.directionY
         speed: touch.speed
-        count: tyreParticleCount(speed: touch.speed, blades: touch.answer.blades)
+        count: tireParticleCount(speed: touch.speed, blades: touch.answer.blades)
         floor: floor
       )
     }

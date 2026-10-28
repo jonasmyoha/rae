@@ -3,18 +3,18 @@
 **Forest kind 6 / speciesGold remains Ginkgo biloba ‘Golden Globe’.** Its
 prototype seed is still 1125, height 5.5 m and width parameter 2 m. Placement
 probabilities, per-instance scales and the ten species numbers are unchanged
-in 136, 137 and 143. No palm is recoloured.
+in 136, 137 and 143. No palm is recolored.
 
 ## Species and crown
 
 [Clemson Extension](https://hgic.clemson.edu/factsheet/ginkgo-maidenhair-tree-care-growing-guide/)
 describes ‘Golden Globe’ as developing a broad rounded crown with bright yellow
-fall colour. [UConn's plant database](https://plantdatabase.uconn.edu/detail.php?pid=193)
+fall color. [UConn's plant database](https://plantdatabase.uconn.edu/detail.php?pid=193)
 describes fan-shaped notched leaves, alternate arrangement and small groups on
 short spurs. [University of Utah](https://facilities.utah.edu/tree-tour/tree-display.php?tree_name=ginkgo)
-describes grey-brown ridged bark with shallow darker furrows. Those features
+describes gray-brown ridged bark with shallow darker furrows. Those features
 provide the botanical target. The supplied T04/T05/T07 crops guide connected
-colour masses, fine edges and exposed wood, rather than species identification.
+color masses, fine edges and exposed wood, rather than species identification.
 
 The Rae generator uses a curved leader and two unequal joined spreading primary
 limbs. Thirty-three alternate short shoots distribute leaf sprays around those
@@ -40,12 +40,12 @@ spread around each axis make the selected version fuller in depth.
 An original transparent cutout supplies small scalloped fan leaves. A first
 texture had too much individual-leaf contrast. The selected edit reduces its
 baked shading so the existing broad crown normals carry the lighting. Three
-unequal overlapping camera-facing cards form each spray; their centres and
+unequal overlapping camera-facing cards form each spray; their centers and
 normal directions remain attached to the branches. Texture mirroring and
 alternate vertical flips vary the edge. This is the recovered shared treatment,
 with ginkgo-specific geometry and art, not a new rendering path.
 
-Grey-brown bark has shallow vertical furrows, grading to smoother younger wood
+Gray-brown bark has shallow vertical furrows, grading to smoother younger wood
 above. Its height coordinate samples this age gradient once rather than repeating
 the rough base along every twig. Primary wood remains rigid. Each spray's three
 cards share a twig-root wind pivot. Existing alpha cutout, coverage-preserving
@@ -80,7 +80,7 @@ through `RAE_GROVE_VIEW=ginkgo`.
 
 These are the existing 31,090 seeded forest placements, not a replacement scene
 made for the screenshot. The individual comparison targets kind-6 placement
-15961 at (-17.872,-22.143,-0.736705), scale 1.17655. Neighbours occlude parts of
+15961 at (-17.872,-22.143,-0.736705), scale 1.17655. Neighbors occlude parts of
 its crown; the grove isolation views show the full silhouette without moving
 that forest tree.
 

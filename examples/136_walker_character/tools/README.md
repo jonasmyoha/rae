@@ -31,9 +31,9 @@ GLBs with:
 
 Static props use a separate converter because `lib/gltf.rae` currently reads
 primitive buffers without applying glTF node transforms. The converter bakes
-the FBX hierarchy, centres each footprint, places its lowest point at z=0 and
+the FBX hierarchy, centers each footprint, places its lowest point at z=0 and
 exports Rae's Z-up geometry directly. Trees are split into aligned trunk and
-crown files so Rae can preserve their two-colour cel-shaded appearance without
+crown files so Rae can preserve their two-color cel-shaded appearance without
 depending on the source palette texture.
 
 Flowers are no longer imported by this script. The walkers use the shared Rae
@@ -43,7 +43,7 @@ generator in `lib/procgen/Harebell.rae`.
 ## Inspecting water splashes
 
 The walker uses `WaterParticles` for small reflective droplet impostors: one
-instanced quad mesh with an analytic round silhouette, a clear centre and a
+instanced quad mesh with an analytic round silhouette, a clear center and a
 small highlight. Droplets stretch along their projected velocity. No texture
 atlas or additional render pass is needed. This is an inexpensive visual
 approximation, not physical refraction.
@@ -53,7 +53,7 @@ The splash code is `lib/water/WadeSplash` (143 uses the same); the walker's
 Each character owns left/right foot-contact history in an ECS component. The
 rendered toe-bone positions (including animation blending and the physics-driven
 root transform) determine contact and velocity. Entering water emits an impact
-burst; travelling through water emits weaker directed spray. A held pose and
+burst; traveling through water emits weaker directed spray. A held pose and
 feet above the surface emit nothing. Launch direction inherits foot motion,
 and impact speed controls the number and upward speed of droplets.
 
@@ -97,8 +97,8 @@ smoothstep as the vertex shader, including horizontal displacement inversion.
 This is shallow-water damping, not a breaking-wave or shoreline-flow solver.
 
 The local terrain detail shader uses broad painted patches, fine sand grain,
-warm beach/seabed colours and a modest wet-sand darkening. It does not paint
+warm beach/seabed colors and a modest wet-sand darkening. It does not paint
 animated foam on the terrain. The water surface owns the narrow broken foam
 edge. Green/blue transmission, reduced refraction distortion and the lighter
-seabed give the shallows their clear coastal colour. The 49 streamed ground tiles use 24 subdivisions (0.75 m spacing) for a smoother
+seabed give the shallows their clear coastal color. The 49 streamed ground tiles use 24 subdivisions (0.75 m spacing) for a smoother
 waterline. Shared terrain palettes and the open-ocean example keep their settings.

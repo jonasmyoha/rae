@@ -11,9 +11,9 @@ are original; botanical photographs and T04 provide direction only.
   and muted crimson remain in broad groups. No baked directional highlight,
   emission, shadow exemption or custom renderer path is used.
 - `japaneseMapleBark.png`: opaque, horizontally repeating albedo. Smooth muted
-  reddish/grey young bark at the top blends into older grey-brown ridges below.
+  reddish/gray young bark at the top blends into older gray-brown ridges below.
   The generator's height coordinate selects the age region. This is painted
-  colour, not geometric bark relief or a normal map.
+  color, not geometric bark relief or a normal map.
 
 Prompt record (built-in mode, no CLI fallback):
 
@@ -21,11 +21,11 @@ Prompt record (built-in mode, no CLI fallback):
    silhouette, connected tapered lobes, fine five-to-seven-point palmate leaf
    edges, quiet wine-red/burgundy interior, warm tips and cooler plum interior;
    unlit albedo, no black pockets, gloss, backdrop or text.
-2. Edit only interior colour/lighting: preserve alpha and outline, remove fine
+2. Edit only interior color/lighting: preserve alpha and outline, remove fine
    grain, black cracks and separate highlights; broad calm crimson/burgundy,
    roughly ten-percent interior lightness variation and faint reddish twigs.
 3. Original seamless-horizontal maple bark swatch: smooth reddish-brown and
-   mauve-grey young wood above, subdued older grey-brown ridges below, gradual
+   mauve-gray young wood above, subdued older gray-brown ridges below, gradual
    transition, pale lenticels, low contrast, no black cracks or baked shadows.
 
 Selected original outputs: `exec-cb83e6a2-c359-460d-b702-18c20f871912.png`

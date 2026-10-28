@@ -33,11 +33,11 @@ its readback completed. Thus the modulo N=2/N=3 schedule produces different ages
 in a single result. The oldest active cascade determines availability.
 
 Queries use world x/y coordinates with repeat wrapping and bilinear interpolation
-at texel centres, matching the surface sampler convention. Sixteen damped
+at texel centers, matching the surface sampler convention. Sixteen damped
 fixed-point iterations solve `worldXY = gridXY + summedDisplacementXY(gridXY)`.
 Height is the body's surface elevation plus displacement z at that recovered
 coordinate. Folded surfaces may have multiple solutions; `inversionError` reports
-the final absolute x/y residual in metres so a caller can choose its own policy.
+the final absolute x/y residual in meters so a caller can choose its own policy.
 The result still represents the latest completed samples. Queries allocate no
 collections and perform no GPU work or polling.
 
@@ -52,7 +52,7 @@ entry points. Shutdown/rebuild walks capacity, not a newly changed cascade count
 A small compute pass samples the existing rgba16float displacement map into the
 float4 storage buffer. This uses its existing TextureBinding usage, so it needs
 neither texture CopySrc usage nor CPU half-float unpacking. It preserves xyz
-metres and the signed Jacobian in w, rather than the clamped foam channel. This
+meters and the signed Jacobian in w, rather than the clamped foam channel. This
 is a bilinearly resampled low-resolution approximation, not full-resolution FFT
 reconstruction; short waves and tiny folding regions can be missed or aliased.
 Gameplay consumers should choose tolerances appropriate to the grid spacing.

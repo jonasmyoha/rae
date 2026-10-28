@@ -8,8 +8,8 @@
  * The constraints and body states come from the integer generator below, in
  * the same order as rae/Main.rae, so every build starts from the same bits
  * and the checksums must match. One step is 4 sub-steps of warm start, push
- * and relax over every wide constraint (Box3D's per-colour stage work for a
- * single colour, without integration). Prints
+ * and relax over every wide constraint (Box3D's per-color stage work for a
+ * single color, without integration). Prints
  * RESULT,<name>,<nanoseconds>,<checksum>. */
 #include "contact_solver.c"
 
@@ -160,7 +160,7 @@ int main( void )
 		}
 	}
 
-	/* The step context: one colour holding every wide constraint */
+	/* The step context: one color holding every wide constraint */
 	static b3ConstraintGraph graph;
 	graph.colors[0].wideConstraints = constraints;
 	graph.colors[0].wideConstraintCount = wideCount;

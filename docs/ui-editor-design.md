@@ -48,14 +48,14 @@ texture manifest, and a design-resolution + fit rule (now native:
   the default value, never a crash.
 - **Textures:** `Sprite.textureKey` → the scene's (and imports') `assets.textures`
   `map` entry, else `<dir>/<key>.png` over its `dirs`; `$RAE_UI_EDITOR_ASSETS/<key>.png`
-  is a viewer-only override tried first. A miss draws a labelled placeholder
+  is a viewer-only override tried first. A miss draws a labeled placeholder
   (key text on a hatched box), not nothing.
 - **Fonts:** `assets.fonts.text` / `.icons` (a `.mtsdf.json`; the sibling atlas is
   `.png` or `.raw`), else the viewer's fallback Roboto + Material atlases;
   `RAE_UI_EDITOR_FONT` / `RAE_UI_EDITOR_ICON_FONT` override.
 - **Window:** the editor is a DESKTOP app: it opens landscape, `1400x900` logical
   (`RAE_UI_EDITOR_WINDOW=WxH` overrides), resizable, and it works on a phone-sized
-  window too (the panels minimise from the top bar; they always START open). The
+  window too (the panels minimize from the top bar; they always START open). The
   chrome is authored in logical POINTS: the canvas design resolution is the
   window's logical size (physical pixels / DPR), re-applied on every resize, so a
   76pt top bar is 76pt on any display and the chrome never scales with the
@@ -103,7 +103,7 @@ texture manifest, and a design-resolution + fit rule (now native:
   code rather than an `import` (106 today) mounts with the #1008 "add
   `import`" diagnostic — that is the rule doing its job, not the editor's.
 - **Guides:** a dashed outline around the frame (the page column — the design area the
-  document is laid out in) and one around the safe area inside it, each labelled —
+  document is laid out in) and one around the safe area inside it, each labeled —
   the reference editor's overlays (docs/ui-editor-reference-features.md §2a). They
   are an AUTHORED overlay scene, `assets/scenes/chrome/Guides.raescene`, on a
   `guides` layer between the document and the chrome: plain `Shape` nodes with the
@@ -115,11 +115,11 @@ texture manifest, and a design-resolution + fit rule (now native:
 - **Camera** (#99444501, `cameraSystem/`): the wheel zooms the DOCUMENT about the
   cursor (0.25x–5x, 10% per notch), a middle-button drag pans it, and the chrome's
   zoom pill (`−` / `100%` / `+`, authored `OnClick` rows in the top bar) steps ±10%
-  about the canvas centre — its label click resets to 100%. The camera is a scale
+  about the canvas center — its label click resets to 100%. The camera is a scale
   + offset written as a `TransformFx` (scale about the origin) and a
   `RuntimeOffset` on the document page root and the guides root, the same
   transform-pass inputs a scroll uses; the chrome is untouched. `lib/ui` now
-  honours an INHERITED world scale everywhere it reads a rect — paint box (own
+  honors an INHERITED world scale everywhere it reads a rect — paint box (own
   scale grows about the pivot, inherited scale only sizes), glyph size and
   placement, clip and mask rects, hit-testing — so the stock systems do the rest.
   `RAE_UI_EDITOR_ZOOM=<factor>` boots zoomed (the headless gate's hook).
@@ -178,7 +178,7 @@ chrome can be hidden for a pure passive view (`H` key).
   `zoomLabel`, `projectTitle`, `frameLabel`, `safeAreaLabel`,
   `inspector.nodeId|type|components|rect|parents`) and `chromeSystem/`'s
   `editorTextSystem` writes them from the `EditorStatus` resource on `App`; the
-  panels carry `EditorPanel { panel }` and the pills that minimise them
+  panels carry `EditorPanel { panel }` and the pills that minimize them
   `PanelToggle { panel }` (`panelToggleSystem` flips every panel of the kind a
   fired pill names; the key handlers call `setEditorPanelOpen` by kind); the
   space the document is fitted into is tagged `EditArea`; the three lists carry
@@ -186,7 +186,7 @@ chrome can be hidden for a pure passive view (`H` key).
   each fills their `ListViewData`; the guide shapes and labels carry `GuideRect
   { kind }`; the count pill `DiagnosticsBadge`. The components are lib tables
   (`lib/ui/BindingComponents.rae`, the "registry is the world" rule), so the
-  loader deserialises them by reflection like any other; no editor system
+  loader deserializes them by reflection like any other; no editor system
   contains a `chrome/...` string except the page id and the row-scene package
   ids.
 - **Outlines are authored too** (#12306774): the inspector's hover and selection
@@ -215,7 +215,7 @@ the library systems, like 106's `FramePipeline.rae`):
 | folder | system | does |
 |---|---|---|
 | `documentSystem/` | `documentLoadSystem` | parse + register + mount; on failure keep the last good page and show the parse error in the chrome |
-| `documentSystem/DocumentSave.rae` | `saveDocument`, `saveDocumentTo` | Cmd/Ctrl+S writes the document page back to its file through `lib/ui/SceneWriter` (+ `SceneEncode`): a component that still equals a fresh decode of its authored text is written VERBATIM (theme tokens, hex colours, the author's field and node order survive), a changed or added one is encoded in the grammar (the inverse fixups: Rect {x,y,w,h}, Layout `type`, flattened insets, palette slots, Text styleOverride, DataDependency keys, SceneInstance overrides, ListView bindings), the node's pending app components as they were read, the headers from the parsed file; canonical 2-space layout, one node per block. `RAE_UI_EDITOR_TEST_SAVE=<path>` is the headless hook. Fixture 884 round-trips every 121 sample and every 106 scene (load → save → load, every authored table equal in machine form, pending components verbatim) and an edited Rect |
+| `documentSystem/DocumentSave.rae` | `saveDocument`, `saveDocumentTo` | Cmd/Ctrl+S writes the document page back to its file through `lib/ui/SceneWriter` (+ `SceneEncode`): a component that still equals a fresh decode of its authored text is written VERBATIM (theme tokens, hex colors, the author's field and node order survive), a changed or added one is encoded in the grammar (the inverse fixups: Rect {x,y,w,h}, Layout `type`, flattened insets, palette slots, Text styleOverride, DataDependency keys, SceneInstance overrides, ListView bindings), the node's pending app components as they were read, the headers from the parsed file; canonical 2-space layout, one node per block. `RAE_UI_EDITOR_TEST_SAVE=<path>` is the headless hook. Fixture 884 round-trips every 121 sample and every 106 scene (load → save → load, every authored table equal in machine form, pending components verbatim) and an edited Rect |
 | (bundles) | `BundleRefs` on a node | a node expanded from `bundles` (docs/ui-scene-format.md §9) carries the loader-written `BundleRefs { names, inherited, overridden }`; the inspector's components line appends `bundles: … [inherited: …] overrides: …` — the components the node took whole from a bundle versus the ones it authored a field over. The per-field diff on save waits for the save path |
 | `EditorSystems.rae` | `applyEditorComponents`, `sweepEditorEntities` | the editor's aggregate glue (docs/ecs-systems-own-their-tables.md §3.2): the chrome / guides / inspector / outline-pool systems OWN their authored components (`chromeSystem/EditorComponents.rae`, no longer lib tables); after every mount the pending outbox is drained into them, and each frame the dead entities are cleared from them before the world recycles the indices |
 | (lib outbox) | `world.pendingComponents` | an authored component no lib table matches is an APP's own (docs/ecs-systems-own-their-tables.md §4): the editor never reports it — it stays on the node as authored, the inspector lists it under "not a lib component" (the red pill counts only real diagnostics), and the mount/reload log says `N app components kept` |
@@ -238,7 +238,7 @@ from application code and no C renderer code was added.
 - **Sample palette:** background `#0C121B`, surface `#18222C`, raised surface `#24333D`,
   primary text `#EEF4F3`, secondary text `#9DACB5`, accent `#48B498` (72,180,152).
   Surface gradients stay close in value; the accent gradient runs from
-  `#69C7AC` to the base teal. Colour is a hierarchy cue, not a border on every box.
+  `#69C7AC` to the base teal. Color is a hierarchy cue, not a border on every box.
 - **Chrome palette:** deep green background `#021210`, sidebar `#041A18`,
   raised inspector `#0A3838`, primary text `#E6FAFA`, secondary `#9FC1BD`,
   mint `#78E6DC` and amber selected outline `#FFA84C`. The top bar is flat. The open action uses a dark teal fill and a stronger
@@ -250,9 +250,9 @@ from application code and no C renderer code was added.
 - **Sample type scale:** display 128, title 92, h2 42, body 34, secondary 28,
   caption 26, eyebrow 24 design units. Display leading is 1.08; prose is
   1.25–1.30. Compact card and onboarding headings author local overrides.
-  The main-menu action labels use `OpticalAlign` to centre visible glyph bounds
-  on both axes, rather than centring the font line box with its descender space. Chrome uses authored `OpticalAlign`,
-  colour and 17–24pt size overrides, independent of the loaded document's styles.
+  The main-menu action labels use `OpticalAlign` to center visible glyph bounds
+  on both axes, rather than centering the font line box with its descender space. Chrome uses authored `OpticalAlign`,
+  color and 17–24pt size overrides, independent of the loaded document's styles.
 - **Desktop readability:** chrome uses 19pt controls, tree rows and inspector
   details, 22pt file names, 24pt inspector headings and 17pt section/status text.
   These are authored logical sizes, equivalent to roughly 150% text scaling from
@@ -271,7 +271,7 @@ from application code and no C renderer code was added.
   layered edge. The pure-Rae renderer bounds layers to 1–16 and opacity to 0–1;
   existing scenes retain the original three layers and full opacity by default.
   Each layer is a draw, so this is used on selected large surfaces, not every row.
-- **Status:** `DiagnosticsBadge.clearFill` and `errorFill` are authored colours;
+- **Status:** `DiagnosticsBadge.clearFill` and `errorFill` are authored colors;
   the existing ECS system only chooses between them. Defaults preserve previous
   scenes. Coverage authors these fields and the new Shadow fields, while retaining
   its component inventory, animation, list, mask and nested-scene exercises.
@@ -283,28 +283,28 @@ asset examples retain their distinct packaging models.
 
 ### Button roles and theme ownership
 
-`assets/scenes/Theme.raescene` owns editor-prefixed colour roles, appended to
+`assets/scenes/Theme.raescene` owns editor-prefixed color roles, appended to
 its owned theme on startup and every document load. The prefix keeps these roles
 separate from a document's ordinary `accent`/`surface` palette. Custom palette
 names now resolve through the generic component decoder and shape/sprite painter,
 not only the ten standard palette names.
 
 - **Primary:** Open has `Shape` with `editorButtonPrimary` fill, the stronger
-  `editorButtonEdge` stroke and a restrained coloured halo. No bar-wide gradient.
+  `editorButtonEdge` stroke and a restrained colored halo. No bar-wide gradient.
 - **Secondary:** Panels and Inspector use `editorButtonSecondary` and
   `editorButtonQuietEdge`. Their halo appears only while hovered.
 - **Circular control:** Zoom minus/plus have equal 44pt dimensions, a 22pt
-  rounded-box radius, no padding and centred glyphs. They use the same outline
+  rounded-box radius, no padding and centered glyphs. They use the same outline
   vocabulary and hover halo. Geometry belongs to these entities, not the palette.
 - **Selection:** amber remains distinct from mint hover and primary actions.
 
-`Shadow` now accepts `color` with `hasColor: true`, `centered` and `hoverOnly`. A centred coloured
+`Shadow` now accepts `color` with `hasColor: true`, `centered` and `hoverOnly`. A centered colored
 shadow is a glow; `hoverOnly` reads the existing ECS `Interaction.hovered` state.
 The existing defaults remain black, downward-offset and always visible. This is
 bounded translucent geometry in Rae, not a Gaussian CSS blur: at most 16 layers,
 with the editor using 12 only on its few controls. Coverage authors both an
-always-visible colour glow and a hover-only one. It does not add C rendering or
-per-button drawing code. The theme supplies shared colours; authored components
+always-visible color glow and a hover-only one. It does not add C rendering or
+per-button drawing code. The theme supplies shared colors; authored components
 supply the role, border width, radius, glow amount and interaction condition.
 
 CSS inset-shadow and animated filter/scale transitions are not emulated here.
@@ -322,7 +322,7 @@ files) must load as a **per-node diagnostic**, the node still mounts with what i
 has. #996 adds a `ScenePolicy { unknownComponents: fail | report }` on the world
 (the default stays `fail`; the editor sets `report`) and a `SceneDiagnostics`
 resource the registry appends to. The same policy covers runtime-only tables,
-unknown theme tokens and `#rrggbb[aa]` colours (the reference format's colour
+unknown theme tokens and `#rrggbb[aa]` colors (the reference format's color
 spelling — `deserRgba` accepts only tokens and `{r,g,b,a}` today; hex becomes a
 third accepted spelling for everyone, not an editor special case).
 
@@ -340,7 +340,7 @@ by `make -C examples/121_ui_editor references`, compared by
 rendered at another DPR is skipped, not failed).
 
 **Loads** means the component decodes with no diagnostic. **Draws** means the
-renderer honours it on screen today. The samples column names the scene that shows
+renderer honors it on screen today. The samples column names the scene that shows
 it (`Coverage` unless a nicer example exists).
 
 | component | authored fields | loads | draws | shown in |
@@ -441,15 +441,15 @@ call. The original `h=64` form still works as shorthand for focus-type-Enter.
 ## The side panels are the same width
 
 `LeftPanel` and `RightPanel` are both **384** wide. They were 328 and 384,
-which pushed the `EditArea` — and so the document centred inside it — 28pt
-left of the window centre. Measured on a 2800px render: the chrome background
+which pushed the `EditArea` — and so the document centered inside it — 28pt
+left of the window center. Measured on a 2800px render: the chrome background
 ran 654px on the left against 766px on the right; it is 766/766 now.
 
 They were matched to the WIDER of the two rather than the narrower, which also
 relieved the hierarchy rows: `Name - Kind "preview"` was clipping at the old
 panel's ~290pt inner width and fits at ~346pt.
 
-Keep them equal. A fixed-width pair is what makes the canvas centred, so
+Keep them equal. A fixed-width pair is what makes the canvas centered, so
 changing one without the other silently re-introduces the offset — and the
 reference screenshots, which frame the whole window, will shift by exactly
 half the difference.
@@ -600,7 +600,7 @@ re-resolve both ends of a selected row's gradient.
 **TWO token pairs, not one.** `editorRowActiveFrom/To` mark the node the
 inspector describes and the arrow keys walk from;
 `editorRowSelectedFrom/To` mark the rest.
-With many rows selected a single flat colour cannot say which row is which —
+With many rows selected a single flat color cannot say which row is which —
 the question a one-row selection never has to answer, and the reason the task
 asked for this to "look right with MANY rows selected". Both are palette
 entries, so a theme change carries them and nothing is hardcoded.
@@ -611,12 +611,12 @@ no plate to speak for it (#72481430). The marker column remains even when
 empty so the label keeps its indent.
 
 `references/TreeSelection.png` pins this as a screenshot diff of a three-row
-selection — a log line cannot check a colour.
+selection — a log line cannot check a color.
 
 ## Collapsing the hierarchy (#72481430)
 
 A row with children carries an authored vector chevron: two rounded Shape
-strokes form the expanded or collapsed icon, coloured by
+strokes form the expanded or collapsed icon, colored by
 `editorTreeChevron`. A leaf carries neither icon. Each icon is its own hit
 target with `treeToggle:<nodeId>`, handled before the row's `inspect:` action.
 The row also authors six one-level guide cells. Bindings activate the first N
@@ -667,7 +667,7 @@ after the hooks, so re-bound rows are laid out before the first frame.
 
 That blind spot produced a false bug report: a `Shape.fillSlot` ListView row
 binding was "silently inert" on the hierarchy's virtual-mode list. It is not.
-Fixture `902_listview_virtual_shape_binding` pins the lib behaviour headlessly
+Fixture `902_listview_virtual_shape_binding` pins the lib behavior headlessly
 — a virtual list delivers the binding to the row scene's ROOT and to a CHILD,
 on the first bind and on a same-key rebind where only that cell changes — and
 with the harness fixed, the same binding and an existing token turn a
@@ -771,13 +771,13 @@ generated field row now carries where its value came from
 | tag | meaning |
 |---|---|
 | *(none)* | authored, and the live value still equals what the author wrote |
-| `· from <x>` | the authored spelling decodes to this typed value (for example, a theme token or hex colour) |
+| `· from <x>` | the authored spelling decodes to this typed value (for example, a theme token or hex color) |
 | `· changed from <x>` | the live value differs from a fresh decode of what the author wrote |
 | `· computed` | the component is absent from this node's authored bag — nothing in the file put it here |
 
 `Name: label=PlayButton · computed` is the loader's own doing; `gap=16 · from
 spaceS` is a theme token resolved to a number, and a changed gap would read
-`gap=24 · changed from spaceS`. Hex colours use the same rule: an authored
+`gap=24 · changed from spaceS`. Hex colors use the same rule: an authored
 `accent` or `#00000000` string is a resolution when it produces the current
 `RgbaColor`, not an overwrite.
 
@@ -840,7 +840,7 @@ with its driver annotation replaces the generic rows), `hideFields`
 (runtime state such as `ScrollState.y`, rewritten every frame), `unit`
 (`px` on Padding/Margin/Offset), and `step` / `min` / `max` (Opacity:
 `±0.05 [0..1]`). Fields whose TYPE is runtime plumbing — `EntityId`,
-`List(EntityId)`, a ListView's materialised rows — are hidden by type so no
+`List(EntityId)`, a ListView's materialized rows — are hidden by type so no
 override has to list them, and a component with no visible field gets no
 header (Children).
 

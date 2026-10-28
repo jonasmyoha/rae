@@ -58,7 +58,7 @@ func actionCommandSystem(
   }
 }
 
-# Record a local-catalogue play in the history and (Spotify mode) play it.
+# Record a local-catalog play in the history and (Spotify mode) play it.
 func startTrack(
   state: mod AppState
   playbackSystem: mod PlaybackSystem
@@ -107,7 +107,7 @@ func startTrack(
   }
 }
 
-# Replay a history entry: local-catalogue entries also flip the browsed
+# Replay a history entry: local-catalog entries also flip the browsed
 # album / track so the Album page would land on the right row if opened.
 func replayHistoryEntry(
   state: mod AppState
@@ -149,7 +149,7 @@ func replayHistoryEntry(
     playbackSystem.playingTrackIndex = state.currentTrackIndex
     setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
     # Cover follows the replayed entry's own texture key (#268) — the local
-    # stem for catalogue entries, or the spotify-art key otherwise.
+    # stem for catalog entries, or the spotify-art key otherwise.
     setNowPlayingArt(playbackSystem: playbackSystem, artKey: entry.textureKey)
     if spotifyEnabled {
       let query: String = spotifySearchQuery(
@@ -262,7 +262,7 @@ func playbackCommandSystem(
 }
 
 # The bottom sheet and the curated library. `libraryRemove` removes the
-# browsed album from the library (the catalogue keeps the cover + metadata
+# browsed album from the library (the catalog keeps the cover + metadata
 # for history rows), closes the sheet and sends a `pop` so the user lands
 # back where they came from.
 func sheetCommandSystem(commands: mod EventQueue(AppCommand), state: mod AppState) {
@@ -346,9 +346,9 @@ func navigationSystem(commands: view EventQueue(AppCommand), state: mod AppState
   }
 }
 
-# Swap the light and dark themes. Scene colours store slot NAMES and
+# Swap the light and dark themes. Scene colors store slot NAMES and
 # re-resolve against the new active theme on the next paint; code-driven
-# colours still bake into components, so the input phase rebuilds the world
+# colors still bake into components, so the input phase rebuilds the world
 # when the generation moved (queue #259 to migrate those to slots).
 func toggleAppTheme(state: mod AppState) {
   if state.theme.active.mode is ThemeMode.dark {

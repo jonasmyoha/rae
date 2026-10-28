@@ -2,7 +2,7 @@
 #
 # A multi-producer, single-consumer (MPSC) cross-thread channel. Any thread
 # may `channelSend`; only the owning (consumer) thread drains, via
-# `receive` guarded by `pending`. Synchronisation (a mutex)
+# `receive` guarded by `pending`. Synchronization (a mutex)
 # lives entirely inside the runtime — ordinary Rae code never locks a mutex
 # (§3.2: transport hidden behind the same send API as a Queue). There is
 # deliberately NO blocking receive, no select, no wait primitive yet: a
@@ -20,7 +20,7 @@
 # a struct owning Strings/Lists. The runtime ring is `sizeof(T)`-sized slots
 # (a `Buffer(T)` the runtime allocates, `createChannel` tells it the element
 # size) and the typed store/load happens HERE, with the same per-T
-# `rae_ext_rae_buf_set` / `rae_ext_rae_buf_get` specialisation List uses:
+# `rae_ext_rae_buf_set` / `rae_ext_rae_buf_get` specialization List uses:
 #   send    -> the value is MOVED into the slot (`value: own T` — the caller
 #              hands over its copy; spawn already deep-copied it if it came
 #              from another thread's data),
@@ -30,7 +30,7 @@
 #   free    -> whatever was never drained is popped and dropped here, so a
 #              channel freed with messages still buffered leaks nothing.
 # The Int path is the same code with an 8-byte slot — no separate fast path
-# is needed, the specialisation IS the fast path. A full ring (4096
+# is needed, the specialization IS the fast path. A full ring (4096
 # buffered) refuses the send and drops the value; the consumer must drain.
 # `received` is a monotonic, read-only observable of how many messages the
 # consumer has drained.

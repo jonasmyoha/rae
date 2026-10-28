@@ -10,7 +10,7 @@ open WorldBiome
 # pass that LOADS the lit HDR target, alpha-blends the surface into it, and
 # tests the opaque scene depth READ-ONLY. The same depth is bound as a texture
 # so the fragment shader can compute the water depth under every pixel
-# (sceneDepth - surfaceDepth) — the depth-gradient colour and shoreline foam of
+# (sceneDepth - surfaceDepth) — the depth-gradient color and shoreline foam of
 # the Roystan toon recipe (waterSurface.wgsl).
 #
 # Call order at the transparentForward tag: waterDraw FIRST, then the renderer's
@@ -59,8 +59,8 @@ open webgpu/Context
 const waterUniformFloats: Int = 96  # twenty-four vec4 (see waterSurface.wgsl `Water`)
 
 # SSR march tuning (#854): a hit counts when the ray is behind the scene by
-# less than this many metres (grown with distance in the shader), and rays
-# stop after this many metres (the fade starts at 70% of it).
+# less than this many meters (grown with distance in the shader), and rays
+# stop after this many meters (the fade starts at 70% of it).
 const waterSsrThickness: Float = 0.6
 
 const waterSsrMaxDistance: Float = 80.0
@@ -433,7 +433,7 @@ func put4(
 
 func putWave(uniform: mod List(Float), base: view Int, wave: view GerstnerWave) {
   unsafe {
-    # Normalise the direction here so the shader never has to.
+    # Normalize the direction here so the shader never has to.
     var length: Float = Math.sqrt(x: wave.dirX * wave.dirX + wave.dirY * wave.dirY)
     if length < 0.0001 {
       length = 1.0
@@ -482,7 +482,7 @@ func uploadWaterUniform(
       zenith = sky.zenithColor
       horizon = sky.horizonColor
       # the physical models: their own light, which dims at night (a fixed
-      # colour here made the water glow in the dark)
+      # color here made the water glow in the dark)
       if sky.kind is SkyKind.procedural or sky.kind is SkyKind.hosek {
         let zenithDirection: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
         # Sample the horizon away from the sun so its glow does not tint the
@@ -497,8 +497,8 @@ func uploadWaterUniform(
         zenith = radiance(sky: sky, dir: zenithDirection)
         horizon = radiance(sky: sky, dir: horizonDirection)
       }
-      if sky.kind is SkyKind.stylised {
-        # the painted colours are display colours (relative units)
+      if sky.kind is SkyKind.stylized {
+        # the painted colors are display colors (relative units)
         zenith = fromRelativeLight(value: zenith)
         horizon = fromRelativeLight(value: horizon)
       }
@@ -512,9 +512,9 @@ func uploadWaterUniform(
     put4(
       uniform: waterSystem.uniform
       base: 0
-      x: body.centre.x
-      y: body.centre.y
-      z: body.centre.z
+      x: body.center.x
+      y: body.center.y
+      z: body.center.z
       w: body.extent
     )
     put4(
@@ -608,8 +608,8 @@ func uploadWaterUniform(
       z: body.absorbColor.z
       w: daylight
     )
-    # Realistic path (#851): the cascade tiles and the flag; the camera-centred
-    # mesh is snapped to whole metres so its vertices never swim under the camera.
+    # Realistic path (#851): the cascade tiles and the flag; the camera-centered
+    # mesh is snapped to whole meters so its vertices never swim under the camera.
     var realistic: Float = 0.0
     if body.style is WaterStyle.realistic {
       realistic = 1.0
@@ -652,17 +652,17 @@ func uploadWaterUniform(
       w: waterSsrMaxDistance
     )
     # The sampling limits the shader fades the cascades against (#1002): the
-    # centred grid's cell growth + innermost cell for the vertex displacement,
+    # centered grid's cell growth + innermost cell for the vertex displacement,
     # the map size + band hand-over for the per-pixel normals and foam.
     put4(
       uniform: waterSystem.uniform
       base: 76
-      x: body.clipCellPerMetre
+      x: body.clipCellPerMeter
       y: body.clipFirstCell
       z: fftBody.fftSize.toFloat()
       w: cascadeBandBins
     )
-    # Where a camera-centred body exists, and the renderer's height mist
+    # Where a camera-centered body exists, and the renderer's height mist
     # (RendererMist), so the water fades into the sky with the ground round it
     put4(
       uniform: waterSystem.uniform
@@ -901,7 +901,7 @@ func waterDraw(
   if waterSystem.drawCount is 0 {
     let first: WaterBody = primaryBody(waterSystem: waterSystem)
     log(
-      "[water] toon lake: {waterSystem.bodies.length} bodies, extent {first.extent}, {first.gridSegments}x{first.gridSegments} grid, {first.waveCount} gerstner waves, surface z {first.centre.z}"
+      "[water] toon lake: {waterSystem.bodies.length} bodies, extent {first.extent}, {first.gridSegments}x{first.gridSegments} grid, {first.waveCount} gerstner waves, surface z {first.center.z}"
     )
   }
   waterSystem.drawCount = waterSystem.drawCount + 1

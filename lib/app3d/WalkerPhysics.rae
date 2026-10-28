@@ -73,7 +73,7 @@ const walkerPhysicsMaxSteps: Int = 4
 # The ground's lattice: the render tiles' 1.5 m (18 m cells of 12 segments)
 const walkerGroundSpacing: Float = 1.5
 
-# A loose cube: its half edge and colour (its pose is its Transform3D)
+# A loose cube: its half edge and color (its pose is its Transform3D)
 type PhysicsCube {
   halfSize: Float
   color: Vec3
@@ -87,7 +87,7 @@ type WalkerPhysics {
   biome: BiomeConfig
   groundZ: Float
   # The ground field: fieldCount x fieldCount points; with followDistance > 0
-  # it is made again round the walker once it is that far from the centre
+  # it is made again round the walker once it is that far from the center
   fieldCount: Int
   followDistance: Float
   physics: Physics
@@ -109,9 +109,9 @@ type WalkerPhysics {
   moverSteps: ComponentTable(MoverStep)
   cubes: ComponentTable(PhysicsCube)
   # The ground height field now (followGround): its shape, the point it is
-  # centred on, and how many times it has been made
+  # centered on, and how many times it has been made
   groundShape: ShapeId
-  groundCentre: Vec3
+  groundCenter: Vec3
   groundFields: Int
   # The trunk pool (TrunkPool): static trunk bodies moved onto the trees
   # nearest the walker, the point they were placed round, and how many stand
@@ -126,7 +126,7 @@ type WalkerPhysics {
 # The physics of a walker on the terrain of `biome` at `groundZ`, its ground a
 # field of `fieldCount` x `fieldCount` points (231 cover an island of radius
 # 150 m), made again round the walker when it has gone `followDistance` from
-# the field's centre (0: never)
+# the field's center (0: never)
 # The category of the walker's ground and loose cubes: everything collides
 # with them, but they are not walls to the camera; the trees and rocks keep
 # every category, so the camera pulls in front of them
@@ -165,7 +165,7 @@ func createWalkerPhysics(
     moverSteps: ComponentTable.create(MoverStep)
     cubes: ComponentTable.create(PhysicsCube)
     groundShape: nullShapeId()
-    groundCentre: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    groundCenter: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
     groundFields: 0
     trunkPool: emptyPropBodyPool(settings: walkerTrunkPoolSettings())
     climbing: createClimbing(
@@ -188,23 +188,23 @@ func destroyPhysicsSystem(physicsSystem: mod WalkerPhysics) {
 # spacing, as lib/physicsScenes' vehicle course does). Every height is
 # terrainHeightAt itself, so what you walk on is what you see.
 func addIslandGround(physicsSystem: mod WalkerPhysics) ret Bool {
-  ret addGroundAround(physicsSystem: physicsSystem, centre: physicsSystem.groundCentre)
+  ret addGroundAround(physicsSystem: physicsSystem, center: physicsSystem.groundCenter)
 }
 
-# A height field centred on `centre` (snapped to the field's lattice, so
+# A height field centered on `center` (snapped to the field's lattice, so
 # every field samples the same points), replacing the one before. True when
 # Box3D took it.
-func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bool {
+func addGroundAround(physicsSystem: mod WalkerPhysics, center: view Vec3) ret Bool {
   let count: Int = physicsSystem.fieldCount
   let half: Float = walkerGroundSpacing * (((count - 1) / 2) as Float)
-  let centreX: Float = Math.floor(x: centre.x / walkerGroundSpacing) * walkerGroundSpacing
-  let centreY: Float = Math.floor(x: centre.y / walkerGroundSpacing) * walkerGroundSpacing
+  let centerX: Float = Math.floor(x: center.x / walkerGroundSpacing) * walkerGroundSpacing
+  let centerY: Float = Math.floor(x: center.y / walkerGroundSpacing) * walkerGroundSpacing
   var heights: List(Float) = List.create(Float, cap: count * count)
   loop var row: Int = 0, row < count, ++row {
     loop var column: Int = 0, column < count, ++column {
       heights.add(value: worldTerrainHeight(
-        x: centreX - half + (column as Float) * walkerGroundSpacing
-        y: centreY + half - (row as Float) * walkerGroundSpacing
+        x: centerX - half + (column as Float) * walkerGroundSpacing
+        y: centerY + half - (row as Float) * walkerGroundSpacing
         groundZ: physicsSystem.groundZ
         cfg: physicsSystem.biome
       ))
@@ -222,7 +222,7 @@ func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bo
     countZ: count
     scale: Vec3 { x: walkerGroundSpacing, y: 1.0, z: walkerGroundSpacing }
     transform: Transform {
-      position: Vec3 { x: centreX - half, y: centreY + half, z: 0.0 }
+      position: Vec3 { x: centerX - half, y: centerY + half, z: 0.0 }
       rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: Math.pi * 0.5)
     }
     def: groundDef
@@ -234,7 +234,7 @@ func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bo
       )
     }
     physicsSystem.groundShape = shapeId
-    physicsSystem.groundCentre = Vec3 { x: centreX, y: centreY, z: 0.0 }
+    physicsSystem.groundCenter = Vec3 { x: centerX, y: centerY, z: 0.0 }
     physicsSystem.groundFields = physicsSystem.groundFields + 1
     ret true
   }
@@ -242,19 +242,19 @@ func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bo
 }
 
 # Keep the ground under the walker: once `position` is followDistance from
-# the field's centre, make a new field round it (never when followDistance
+# the field's center, make a new field round it (never when followDistance
 # is 0). True when it did.
 func followGround(physicsSystem: mod WalkerPhysics, position: view Vec3) ret Bool {
   if physicsSystem.followDistance <= 0.0 {
     ret false
   }
-  let gapX: Float = position.x - physicsSystem.groundCentre.x
-  let gapY: Float = position.y - physicsSystem.groundCentre.y
+  let gapX: Float = position.x - physicsSystem.groundCenter.x
+  let gapY: Float = position.y - physicsSystem.groundCenter.y
   let reach: Float = physicsSystem.followDistance
   if gapX * gapX + gapY * gapY < reach * reach {
     ret false
   }
-  ret addGroundAround(physicsSystem: physicsSystem, centre: position)
+  ret addGroundAround(physicsSystem: physicsSystem, center: position)
 }
 
 # ----- loose cubes -------------------------------------------------------
@@ -314,7 +314,7 @@ func despawnPhysicsCube(physicsSystem: mod WalkerPhysics, entityId: view EntityI
   componentRemove(this: physicsSystem.cubes, entityId: entityId)
 }
 
-# One stack: `columns` x `columns` cubes per layer, `layers` high, its centre
+# One stack: `columns` x `columns` cubes per layer, `layers` high, its center
 # `offsetX` / `offsetY` from the spawn, resting on the highest ground under it.
 type CubeStack {
   offsetX: Float
@@ -362,9 +362,9 @@ func walkerCubeStacks() ret List(CubeStack) {
   }
 }
 
-# The ground under a square footprint of side `span` centred at x / y: its
+# The ground under a square footprint of side `span` centered at x / y: its
 # highest point (where the stack rests), its lowest, and whether it is all
-# land. Sampled at the corners and the centre.
+# land. Sampled at the corners and the center.
 type Footprint {
   highest: Float
   lowest: Float
@@ -648,7 +648,7 @@ func moveCharacters(
 }
 
 # Off the ground field (the forest's follows the walker; the crowd wanders
-# kilometres past it), no ground under a mover: the terrain's own height
+# kilometers past it), no ground under a mover: the terrain's own height
 # (worldTerrainHeight, which the field is sampled from) holds up any mover
 # whose feet come down to it there, so it walks on as on the field
 const walkerGroundEdge: Float = 3.0
@@ -666,8 +666,8 @@ func holdMoversOnTerrain(physicsSystem: mod WalkerPhysics) {
     )
     let x: Float = character.mover.transform.p.x
     let y: Float = character.mover.transform.p.y
-    if Math.abs(value: x - physicsSystem.groundCentre.x) < half and Math.abs(
-      value: y - physicsSystem.groundCentre.y
+    if Math.abs(value: x - physicsSystem.groundCenter.x) < half and Math.abs(
+      value: y - physicsSystem.groundCenter.y
     ) < half {
       continue
     }
@@ -776,7 +776,7 @@ func addTreeTrunk(
 # For a forest with tens of thousands of trees, only the ones near the walker
 # can be touched, so physics has a FIXED number of static trunk capsules
 # (trunkPoolSize) and moves them onto the trees nearest the walker. When the
-# walker has gone trunkPoolMove metres since the last placing, the trees
+# walker has gone trunkPoolMove meters since the last placing, the trees
 # within trunkPoolReach are looked up in the forest's PropField cells, the
 # nearest trunkPoolSize get a trunk each, and the rest of the pool waits far
 # below the ground. Each trunk is an entity whose Transform3D the placing

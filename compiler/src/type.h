@@ -32,7 +32,7 @@ typedef enum {
     /* A compile-time Int appearing in a generic ARGUMENT position, e.g. the
      * 16 in `Array(Float, cap: 16)`.
      *
-     * Modelled as a TypeInfo on purpose. Generic identity throughout the
+     * Modeled as a TypeInfo on purpose. Generic identity throughout the
      * compiler is interned-POINTER identity — `type_is_same` is `a == b`, and
      * `type_registry_find_specialization` compares a `TypeInfo*[]` element by
      * element. Interning the value here means monomorphization, specialization
@@ -102,7 +102,7 @@ struct TypeInfo {
          * UInt8/16/32/64 carry their real width/signedness so they intern
          * distinctly, mangle to the right C type (int32_t, uint16_t, …) and
          * give a byte-accurate layout for `List(Int32)` etc. (#507). Zero-
-         * initialised memory reads as {0,false} = a malformed 0-bit int, so
+         * initialized memory reads as {0,false} = a malformed 0-bit int, so
          * always construct TYPE_INT through type_get_int/type_get_int_sized. */
         struct {
              int bits;         // 8, 16, 32, 64

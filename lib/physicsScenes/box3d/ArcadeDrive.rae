@@ -44,7 +44,7 @@ type ArcadeControl {
   pedals: Bool
   # Someone sits at the wheel (the assist works)
   hasDriver: Bool
-  # The chassis' centre over the ground under it (m); far up when unknown
+  # The chassis' center over the ground under it (m); far up when unknown
   heightOverGround: Float = 1000.0
 }
 
@@ -126,7 +126,7 @@ func stepArcadeVehicle(
     chassisRotation: pose.rotation
     frameTime: deltaTime
   )
-  # The brakes: every wheel held still by its motor, as hard as the tyres grip
+  # The brakes: every wheel held still by its motor, as hard as the tires grip
   if braking {
     loop let jointId: view JointId in vehicle.wheelJoints {
       setWheelSpinSpeed(physics: physics, jointId: jointId, speed: 0.0)
@@ -150,7 +150,7 @@ func stepArcadeVehicle(
 # The assist: the chassis' yaw rate eased to the one its steered front
 # wheels ask for (the car's own steering angle for this command and speed,
 # so what the wheels show is what it does), and its sliding sideways eased
-# out and carried on as speed; both at its centre of mass, so it turns hard
+# out and carried on as speed; both at its center of mass, so it turns hard
 # without tipping over. In the air it flies as it will.
 func assistArcadeVehicle(
   physics: mod Physics

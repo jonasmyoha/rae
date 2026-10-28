@@ -318,10 +318,10 @@ answer is no.
   cleaner without them, that is strong evidence against.
 
 - **`Sky`** (`lib/sky.rae`) — a "fat struct" with `kind: SkyKind` and a superset of
-  fields, its own comments labelling which belong to which kind ("the `procedural`
+  fields, its own comments labeling which belong to which kind ("the `procedural`
   payload"; "Ignored by every other kind"). Cost: a handful of small unused fields per
   value (a few floats/vec3) and no compiler check that you don't read `turbidity` on a
-  `stylised` sky. In practice the code reads the right fields under `match kind`. Clear
+  `stylized` sky. In practice the code reads the right fields under `match kind`. Clear
   and adequate.
 
 - **`Entity`** (`93_raylib_3d`), UI component `kind`s, render pass tags — same shape

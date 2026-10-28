@@ -65,7 +65,7 @@ func defaultImpostorSettings() ret ImpostorSettings {
 }
 
 # What a draw binds to read an atlas: both arrays (every layer and level),
-# the subjects' frames (per subject three vec4: the bounding sphere's centre
+# the subjects' frames (per subject three vec4: the bounding sphere's center
 # and radius, over the subject's height, so a draw scales them by the height
 # it is drawn at; its page: the layer, the page's origin in the layer's uv
 # and its size; and its framing, a box's half sides over the radius and 1, or
@@ -101,7 +101,7 @@ type ImpostorSubject {
   meshes: List(MeshHandle)
   albedos: List(Vec3)
   imageLayers: List(Int) = List.create(Int, cap: 0)
-  centre: Vec3
+  center: Vec3
   radius: Float
   height: Float
 }
@@ -173,23 +173,23 @@ func impostorPage(settings: view ImpostorSettings, subject: view Int) ret Vec4 {
 }
 
 # A subject's frame for the draws' frames buffer: its bounding sphere
-# (`centre`, `radius`) over `height`, its page, and its framing: each view
+# (`center`, `radius`) over `height`, its page, and its framing: each view
 # fitted to the box of half sides `halfBox` (a canopy cluster), or with all
 # zero to the sphere (a tree)
 func pushImpostorFrame(
   writer: mod ArgWriter
   settings: view ImpostorSettings
   subject: view Int
-  centre: view Vec3
+  center: view Vec3
   radius: view Float
   height: view Float
   halfBox: view Vec3
 ) {
   pushVec4F(
     writer: writer
-    x: centre.x / height
-    y: centre.y / height
-    z: centre.z / height
+    x: center.x / height
+    y: center.y / height
+    z: center.z / height
     w: radius / height
   )
   let page: Vec4 = impostorPage(settings: settings, subject: subject)

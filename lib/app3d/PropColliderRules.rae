@@ -15,10 +15,10 @@ enum PropBodyRole { none, trunk, sphere, soft }
 # What one kind of prop is to physics
 type PropColliderRule {
   role: PropBodyRole
-  # A trunk: its radius per metre of the prop's height, within min..max; or,
+  # A trunk: its radius per meter of the prop's height, within min..max; or,
   # when radiusPerScale is over 0, that radius per unit of the placement's
   # scale however tall it is (a palm's slim trunk)
-  radiusPerMetre: Float = 0.0
+  radiusPerMeter: Float = 0.0
   minRadius: Float = 0.1
   maxRadius: Float = 0.5
   radiusPerScale: Float = 0.0
@@ -60,7 +60,7 @@ func trunkRadiusOf(rule: view PropColliderRule, prop: view PropNear) ret Float {
   }
   ret Math.max(
     a: rule.minRadius
-    b: Math.min(a: rule.maxRadius, b: propHeightOf(prop: prop) * rule.radiusPerMetre)
+    b: Math.min(a: rule.maxRadius, b: propHeightOf(prop: prop) * rule.radiusPerMeter)
   )
 }
 

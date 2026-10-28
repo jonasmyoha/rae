@@ -66,7 +66,7 @@ drives the custom VM doesn't apply** — there is no Compiled C side in the
 same process to integrate with. In that environment a Rae→TS transpiler
 inherits, for free:
 
-- V8's optimisation pipeline.
+- V8's optimization pipeline.
 - Mature HMR (Vite, Bun's hot reload, etc.).
 - Source maps and Chrome DevTools debugging.
 - The existing `rae-devtools-web` Bun + TS stack — Rae code could live

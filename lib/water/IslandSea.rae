@@ -21,7 +21,7 @@ open water/Water
 open water/WaterSchedule
 open water/ClipMap
 
-# The camera-centred grid the sea is drawn on (141's)
+# The camera-centered grid the sea is drawn on (141's)
 const islandSeaGridRings: Int = 70
 
 const islandSeaGridSegments: Int = 96
@@ -42,7 +42,7 @@ func islandSeaSurfaceZ(groundZ: view Float, biome: view BiomeConfig) ret Float {
 }
 
 # The island's sea for the terrain at `groundZ` of `biome`: the FFT ocean at
-# the water plane over a camera-centred grid uploaded into `renderer`
+# the water plane over a camera-centered grid uploaded into `renderer`
 func createIslandSea(
   renderer: mod DeferredRenderer
   groundZ: view Float
@@ -64,7 +64,7 @@ func createIslandSea(
     surfaceZ: islandSeaSurfaceZ(groundZ: groundZ, biome: biome)
   )
   sea.meshId = gridMesh.id
-  sea.clipCellPerMetre = radialGridCellPerMetre(
+  sea.clipCellPerMeter = radialGridCellPerMeter(
     segments: islandSeaGridSegments
     growth: islandSeaGridGrowth
   )
@@ -88,7 +88,7 @@ func createIslandSea(
   }
   normalizeWaterTier(body: sea)
   log(
-    "[sea] FFT ocean at z {sea.centre.z}: {sea.cascadeCount} cascades of {sea.fftSize}, wind {sea.windSpeed} m/s, island radius {biome.islandRadius} m"
+    "[sea] FFT ocean at z {sea.center.z}: {sea.cascadeCount} cascades of {sea.fftSize}, wind {sea.windSpeed} m/s, island radius {biome.islandRadius} m"
   )
   ret sea
 }

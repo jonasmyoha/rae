@@ -88,11 +88,11 @@ func syncDesignResolution() {
 # and container tokens; palette slots resolve through a different global
 # (lib/ui/theme.rae's `activeTheme`), and nothing was bridging the two.
 # The consequence is quiet and confusing: a scene's `"fill": "surfaceAlt"`
-# renders in the BUILT-IN light theme's mint rather than the app's colour,
+# renders in the BUILT-IN light theme's mint rather than the app's color,
 # which reads as "my theme file is being ignored" — and is, for exactly
 # one of its five sections.
 #
-# The vocabulary is closed (see colorByName): a theme may re-colour
+# The vocabulary is closed (see colorByName): a theme may re-color
 # these ten slots, not add an eleventh. Any slot the file omits keeps the
 # built-in value rather than going transparent.
 func overlayPalette(base: view Theme, tokens: view ResolvedTheme) ret Theme {
@@ -262,7 +262,7 @@ func loadMountedSceneTextures(
 # Resolve and mount one scene package entry. `root` includes its trailing slash,
 # and `sceneId` is the package path without `.raescene`. Imports, referenced
 # sub-scenes, theme tokens and declared fonts are all ready before the entry's
-# first deserialisation pass. A missing font declaration leaves the caller's
+# first deserialization pass. A missing font declaration leaves the caller's
 # fallback atlas in place.
 func mountSceneWithImports(
   world: mod UiWorld
@@ -314,7 +314,7 @@ func mountSceneWithImports(
     resources.iconFont = own iconFont
   }
 
-  # Token names are resolved while component bags are deserialised, so the
+  # Token names are resolved while component bags are deserialized, so the
   # world must see the imported theme before loadScene runs — and the
   # imported bundles (ui/SceneBundles), expanded at the same moment.
   reseedWorldTheme(world: world, res: resources)
@@ -376,7 +376,7 @@ func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dU
 # The same three render-prep systems, but driven by a #939 `Schedule`
 # (`createUiPipeline`): each runs only when `uiShouldRun` says its declared read
 # tables changed. layout/transform get the dirty-skip the hand-written
-# LayoutCache/TransformCache used to give (fixture 839 proves the judgement is
+# LayoutCache/TransformCache used to give (fixture 839 proves the judgment is
 # identical); visualBounds is not a cache-gated system, so `uiShouldRun` returns
 # true for it every frame — same as the unconditional `runUiSystems` above. The
 # app builds the schedule once with `createUiPipeline(world)` and calls this per
@@ -465,7 +465,7 @@ func resizeUiToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gp
 # Window geometry is NOT persisted here. It is the runtime's
 # (runtime_gpu2d_platform.c), saved on the window's own move/resize events and
 # restored on every launch, so every app gets it identically and none of them
-# has to serialise it. This module used to offer windowPlacementString /
+# has to serialize it. This module used to offer windowPlacementString /
 # applyWindowPlacement for apps to fold into their own snapshots; that made two
 # owners for one value.
 

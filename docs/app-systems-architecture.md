@@ -119,7 +119,7 @@ type CharacterSystem {
 
 - Each character samples ITS OWN `animTime` -> its own pose -> its own palette ->
   drawn with its own `model`. (Today's "clones share the hero's pose" was a crowd
-  optimisation; the roster makes them independent. A shared-pose crowd can stay as a
+  optimization; the roster makes them independent. A shared-pose crowd can stay as a
   separate cheap path later, but the default is independent characters.)
 - **Switch input to another character:** `characters.controlled = otherId`.
 - Multiple archetypes (different skeleton/mesh) later = a list of CharacterSystem, or

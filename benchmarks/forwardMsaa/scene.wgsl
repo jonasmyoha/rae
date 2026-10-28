@@ -9,7 +9,7 @@ struct Frame {
   sunDir: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var<storage, read> instances: array<vec4<f32>>;  // xyz position, w scale; then rgb colour, roughness
+@group(0) @binding(1) var<storage, read> instances: array<vec4<f32>>;  // xyz position, w scale; then rgb color, roughness
 struct VsOut {
   @invariant @builtin(position) pos: vec4<f32>,
   @location(0) normal: vec3<f32>,
@@ -54,13 +54,13 @@ fn shadeSurface(N: vec3<f32>, world: vec3<f32>, albedo: vec3<f32>, rough: f32) -
 fn toneMap(c: vec3<f32>) -> vec4<f32> {
   return vec4<f32>(c / (vec3<f32>(1.0) + c), 1.0);
 }
-const skyColour: vec4<f32> = vec4<f32>(0.3, 0.4, 0.55, 1.0);
+const skyColor: vec4<f32> = vec4<f32>(0.3, 0.4, 0.55, 1.0);
 // --- forward: shade in the geometry pass --------------------------------------
 @fragment
 fn fsForward(in: VsOut) -> @location(0) vec4<f32> {
   return toneMap(shadeSurface(normalize(in.normal), in.world, in.albedo, in.rough));
 }
-// The depth pre-pass: depth only (the colour write mask is empty)
+// The depth pre-pass: depth only (the color write mask is empty)
 @fragment
 fn fsDepthOnly() -> @location(0) vec4<f32> {
   return vec4<f32>(0.0);

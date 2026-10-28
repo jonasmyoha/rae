@@ -88,7 +88,7 @@ async function presentWebGPU(rgb){
     { bytesPerRow: WIDTH*4, rowsPerImage: HEIGHT }, [WIDTH, HEIGHT]);
   const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
-  // Fullscreen triangle + sample the framebuffer texture by normalised coords.
+  // Fullscreen triangle + sample the framebuffer texture by normalized coords.
   const mod = device.createShaderModule({ code: `
     @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
       var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));

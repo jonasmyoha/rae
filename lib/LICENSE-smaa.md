@@ -1,6 +1,6 @@
-# SMAA licence
+# SMAA license
 
-lib/smaa_*.wgsl and the search-texture generator in lib/GbufferSmaa.rae are ports of SMAA (https://github.com/iryoku/smaa): the shader functions of SMAA.hlsl and the generators Scripts/AreaTex.py and Scripts/SearchTex.py. The licence of the original:
+lib/smaa_*.wgsl and the search-texture generator in lib/GbufferSmaa.rae are ports of SMAA (https://github.com/iryoku/smaa): the shader functions of SMAA.hlsl and the generators Scripts/AreaTex.py and Scripts/SearchTex.py. The license of the original:
 
 ```
 Copyright (C) 2013 Jorge Jimenez (jorge@iryoku.com)

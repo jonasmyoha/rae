@@ -69,7 +69,7 @@ pub priv extern pack default enum loop in
 
 `const` is a value binding, not a special category — it holds a compile-time
 constant (`const maxRetries: Int = 5`). (Contextual keywords used for modules —
-`import`, `open`, `as` — are recognised only in directive position and are
+`import`, `open`, `as` — are recognized only in directive position and are
 ordinary identifiers elsewhere; see `docs/module-namespacing.md`.)
 
 ### 1.4 Literals
@@ -192,7 +192,7 @@ w = { x: 1, y: 2 }          # Legal: copies value into aliased storage
 
 The meaning of `=` and `=>` is **fixed by the operator alone**. It does not vary
 with the type on either side, with the size of that type, or with what the
-compiler is able to optimise.
+compiler is able to optimize.
 
 *   `=` means **copy**. The programmer reads `=` and knows a separate value is
     produced, whether the type is `Int` or a struct holding lists and strings.
@@ -202,7 +202,7 @@ compiler is able to optimise.
 Rae has no type-dependent assignment rule. There is no category of type that is
 silently referenced by `=`, and none that is silently copied by `=>`.
 
-**Optimisation is permitted; reinterpretation is not.** A compiler may implement
+**Optimization is permitted; reinterpretation is not.** A compiler may implement
 a binding however it likes, provided every observable Rae semantic is preserved:
 
 *   `view T` is a **window**, not a snapshot. If the underlying storage changes
@@ -310,7 +310,7 @@ Legal:
 let i: Int = 5
 let v: Pos = { x: 5, y: 12 }
 let v: Pos = {}
-let v: Pos                      # declaration, default-initialised
+let v: Pos                      # declaration, default-initialized
 const maxRetries: Int = 5
 ret Color { r: 255, g: 0, b: 0, a: 255 }
 ```

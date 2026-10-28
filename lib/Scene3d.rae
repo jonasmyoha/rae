@@ -94,7 +94,7 @@ type Material3d {
   # second implementation of the same look.
   toon: Bool
   # The sky's rim light at the surface's silhouette (deferred_shade.wgsl).
-  # false for a surface whose edges should stay its own colour (the
+  # false for a surface whose edges should stay its own color (the
   # reference tree's bark: the rim read as a blue outline). Deferred only.
   rimLight: Bool = true
 }
@@ -112,11 +112,11 @@ type Camera3d {
 # implement, so it is shared rather than duplicated per backend.
 #
 # In real units (LightUnits): sunColor is the sun's illuminance in lux per
-# colour channel, ambSky and ambGround the luminance of the sky above and the
+# color channel, ambSky and ambGround the luminance of the sky above and the
 # ground below in cd/m2. ev100 is the camera exposure that brings them to the
 # screen, applied where light is summed; exposure is a further linear factor
 # after the lighting (an exposure compensation, 1 = none). clearColor is a
-# display colour (the background with no sky, and the old distance fog).
+# display color (the background with no sky, and the old distance fog).
 type Light3d {
   sunDir: Vec3
   sunColor: Vec3
@@ -143,7 +143,7 @@ type MeshRenderer {
 # over which two balls merge — and is read from the cluster's FIRST
 # primitive (it is a property of the group, not of one ball).
 #
-# Albedo IS per-primitive: each ball's material colour bleeds across the
+# Albedo IS per-primitive: each ball's material color bleeds across the
 # region where its surface merges, using the same weight that fuses the
 # distances. Metallic/roughness/emission come from the first primitive,
 # because those shade the fused surface as a whole.
@@ -197,7 +197,7 @@ func defaultLight3d() pub ret Light3d {
 #
 # The component types are the existing Euler `Transform3d` / `Material3d` /
 # `MeshRenderer` / `SdfPrimitive` — NOT lib/ecs's quaternion `Transform3D`
-# (#714), which is a distinct type — so rotation behaviour is unchanged.
+# (#714), which is a distinct type — so rotation behavior is unchanged.
 type World3d {
   allocator: EntityAllocator
   transforms: ComponentTable(Transform3d)

@@ -8,7 +8,7 @@
 # milliseconds where the CPU picture took seconds.
 #
 #   var subjects: List(ImpostorSubject) = ...
-#   subjects.add(value: impostorSubject(parts: meshData, meshes: handles, albedos: colours))
+#   subjects.add(value: impostorSubject(parts: meshData, meshes: handles, albedos: colors))
 #   let atlas: ImpostorAtlas = bakeImpostorAtlas(resources: resources, meshes: store,
 #   subjects: subjects, settings: defaultImpostorSettings(), cutoff: 0.5)
 open SurfaceImages
@@ -33,7 +33,7 @@ open gpu/GpuReadback
 
 # A prop kind to bake: `meshes` (uploaded, in the renderer's mesh store) are
 # `parts` (their mesh data, the same order, for the bounds), each drawn in
-# its albedo. The bounding sphere is centred on the parts' box, a little
+# its albedo. The bounding sphere is centered on the parts' box, a little
 # wider than the farthest vertex, so no edge of the prop touches a cell's
 # side.
 func impostorSubject(
@@ -63,13 +63,13 @@ func impostorSubject(
     low = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     high = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   }
-  let centre: Vec3 = Vec3.vscale(a: Vec3.vadd(a: low, b: high), s: 0.5)
+  let center: Vec3 = Vec3.vscale(a: Vec3.vadd(a: low, b: high), s: 0.5)
   var radius: Float = 0.001
   loop let part: view MeshData in parts {
     loop var vertex: Int = 0, vertex < part.vertCount, ++vertex {
       radius = Math.max(
         a: radius
-        b: Vec3.vlen(a: Vec3.vsub(a: meshBoundsPoint(mesh: part, vertex: vertex), b: centre)) + meshBoundsMargin(
+        b: Vec3.vlen(a: Vec3.vsub(a: meshBoundsPoint(mesh: part, vertex: vertex), b: center)) + meshBoundsMargin(
           mesh: part
           vertex: vertex
         )
@@ -79,7 +79,7 @@ func impostorSubject(
   ret ImpostorSubject {
     meshes: meshes
     albedos: albedos
-    centre: centre
+    center: center
     radius: radius * 1.02
     height: Math.max(a: high.z, b: 0.001)
   }
@@ -133,7 +133,7 @@ func impostorTextureUsage() ret UInt64 {
 
 # The view pass's pipeline: the mesh store's vertices (position, normal
 # first; `vertexStride` bytes each: 32, or 64 for a leaf mesh with its wind
-# pivots, lib/FoliageMesh), two colour targets, a depth test
+# pivots, lib/FoliageMesh), two color targets, a depth test
 func impostorBakePipelineSpec(vertexStride: view Int) ret RenderPipelineSpec {
   var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 2)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
@@ -245,7 +245,7 @@ func bakeTexturedImpostorAtlas(
           writer: frames
           settings: settings
           subject: subject
-          centre: held.centre
+          center: held.center
           radius: held.radius
           height: held.height
           halfBox: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -377,9 +377,9 @@ func recordImpostorViews(
     if let subject: view ImpostorSubject = subjects.viewAt(index: layer) {
       pushVec4F(
         writer: frames
-        x: subject.centre.x
-        y: subject.centre.y
-        z: subject.centre.z
+        x: subject.center.x
+        y: subject.center.y
+        z: subject.center.z
         w: subject.radius
       )
       loop var part: Int = 0, part < subject.meshes.length, ++part {

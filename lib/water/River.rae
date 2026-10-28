@@ -6,8 +6,8 @@
 # shader is just UV animation.
 #
 # What the bake stores, because the water shader ignores a mesh's normal (it
-# builds its own) and reads the uv as metres:
-#   uv      = (arc length along the river, offset across it), both in metres,
+# builds its own) and reads the uv as meters:
+#   uv      = (arc length along the river, offset across it), both in meters,
 #             so the ripple noise keeps the lake's scale and the flow is simply
 #             "u - flowSpeed * t" — no flow-map texture and no phase reset,
 #             the spline parameter IS the flow map.
@@ -57,8 +57,8 @@ func bezierTangent(spline: view RiverSpline, t: copy Float) pub ret Vec3 {
   ret Vec3.create(x: dx / length, y: dy / length, z: 0.0)
 }
 
-# `heights` holds 3 floats per sample: left bank, surface centre, right bank
-# (metres, world z), samples * 3 entries. `across` >= 1 quads across the width.
+# `heights` holds 3 floats per sample: left bank, surface center, right bank
+# (meters, world z), samples * 3 entries. `across` >= 1 quads across the width.
 func bakeRiverMesh(
   spline: view RiverSpline
   width: copy Float
@@ -82,21 +82,21 @@ func bakeRiverMesh(
   var previousTangent: Vec3 = bezierTangent(spline: spline, t: 0.0)
   loop var row: Int = 0, row < rows, ++row {
     let t: Float = row.toFloat() / (rows - 1).toFloat()
-    let centre: Vec3 = bezierPoint(spline: spline, t: t)
+    let center: Vec3 = bezierPoint(spline: spline, t: t)
     let tangent: Vec3 = bezierTangent(spline: spline, t: t)
     if row > 0 {
-      let dx: Float = centre.x - previous.x
-      let dy: Float = centre.y - previous.y
+      let dx: Float = center.x - previous.x
+      let dy: Float = center.y - previous.y
       arc = arc + Math.sqrt(x: dx * dx + dy * dy)
     }
-    # Curvature foam: how far the tangent turned per metre, scaled by the
+    # Curvature foam: how far the tangent turned per meter, scaled by the
     # width (a wide river bending the same angle is rougher), clamped 0..1.
     var foam: Float = 0.0
     if row > 0 {
       let turnX: Float = tangent.x - previousTangent.x
       let turnY: Float = tangent.y - previousTangent.y
-      let dx: Float = centre.x - previous.x
-      let dy: Float = centre.y - previous.y
+      let dx: Float = center.x - previous.x
+      let dy: Float = center.y - previous.y
       let step: Float = Math.sqrt(x: dx * dx + dy * dy)
       if step > 0.000001 {
         foam = Math.sqrt(x: turnX * turnX + turnY * turnY) / step * width * 1.5
@@ -105,9 +105,9 @@ func bakeRiverMesh(
         }
       }
     }
-    var leftBank: Float = centre.z
-    var surface: Float = centre.z
-    var rightBank: Float = centre.z
+    var leftBank: Float = center.z
+    var surface: Float = center.z
+    var rightBank: Float = center.z
     if let hl: Float = heights.copyAt(index: row * 3) {
       leftBank = hl
     }
@@ -136,8 +136,8 @@ func bakeRiverMesh(
       }
       pushVert(
         verts: verts
-        px: centre.x + sideX * v
-        py: centre.y + sideY * v
+        px: center.x + sideX * v
+        py: center.y + sideY * v
         pz: z
         nx: tangent.x
         ny: tangent.y
@@ -146,7 +146,7 @@ func bakeRiverMesh(
         value: v
       )
     }
-    previous = centre
+    previous = center
     previousTangent = tangent
   }
   let stride: Int = cols + 1
@@ -174,12 +174,12 @@ func createRiverToon(mesh: view MeshHandle, flowSpeed: copy Float) pub ret Water
   body.meshMode = 1
   body.flowSpeed = flowSpeed
   body.waveCount = 0
-  # A stream is shallow: reach the deep colour by 0.6 m so it reads, and keep
+  # A stream is shallow: reach the deep color by 0.6 m so it reads, and keep
   # the foam to the banks (the cutoff is 0 only where the depth is ~0).
   body.depthMax = 0.6
   body.foamDistance = 0.25
   body.absorb = 0.95
-  # Metre-scale streaks (#857): the ribbon's uv is metres, and a 4 m stream
+  # Meter-scale streaks (#857): the ribbon's uv is meters, and a 4 m stream
   # wants crest lines narrower than itself, sparse.
   body.rippleScale = 2.0
   body.rippleCutoff = 0.92

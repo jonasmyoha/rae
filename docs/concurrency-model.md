@@ -41,7 +41,7 @@ backwards for a language that values explicitness:
 - **Synchronization is explicit and visible** — `task.get()`, never an implicit
   blocking coercion hidden inside an ordinary assignment or argument.
 
-There is **no `await` keyword and no function colouring.** A function is not
+There is **no `await` keyword and no function coloring.** A function is not
 "async"; only the *call site* decides (via `spawn`) whether it runs concurrently.
 
 Concurrency safety is **not** a new subsystem of locks. It rides on Rae's
@@ -190,7 +190,7 @@ taskScope {
 }
 ```
 
-At scope exit every still-running child is joined (or cancelled, per the
+At scope exit every still-running child is joined (or canceled, per the
 cancellation rules below). Children cannot outlive the scope unless their
 ownership/lifetime model explicitly permits it. `taskScope` is the **preferred
 user-facing form** for a fixed set of concurrent operations.
@@ -357,7 +357,7 @@ caller owns it), `received` (monotonic drained count), `freeChannel` (owner,
 after the producers joined; drains and drops anything still buffered). Any
 value type is a payload: Int, an enum, a POD struct, a struct owning
 Strings/Lists — the runtime only hands out slot indices under its lock, the
-typed store/load is the per-T `rae_ext_rae_buf_set`/`buf_get` specialisation
+typed store/load is the per-T `rae_ext_rae_buf_set`/`buf_get` specialization
 List uses, so `Channel(Int)` is the same code with an 8-byte slot (fixture
 848 is the struct-with-String proof, leak-checked). No blocking receive, no
 select: a consumer polls `pending`, a worker that wants to sleep uses
@@ -528,7 +528,7 @@ can deadlock.
 
 **`unsafe { }` in a parallel body** lifts the write rule for its statements.
 It is for writes that are disjoint by an argument the compiler cannot check —
-a graph colouring keeping a colour's constraints off each other's bodies. The
+a graph coloring keeping a color's constraints off each other's bodies. The
 programmer vouches for it, and the runtime checks it when asked:
 `RAE_PARALLEL_CHECK=1` (or `Parallel.checkWrites(enabled: true)`) stops the
 program when two iterations of one `parallelLoop` write the same List element

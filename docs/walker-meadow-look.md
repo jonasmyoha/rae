@@ -1,6 +1,6 @@
 # Walker meadow material
 
-Example 114 uses a local palette and a local grass-colour shader, selected in
+Example 114 uses a local palette and a local grass-color shader, selected in
 `examples/136_walker_character/App.rae`. The terrain still uses the shared biome
 field, road overlay, shoreline blending and deferred lighting. The split-sum
 ambient BRDF remains in place.
@@ -17,11 +17,11 @@ original scalar grass variation). A grass-style part defines:
 fn terrainGrassColor(position: vec2<f32>, variation: f32) -> vec3<f32>
 ```
 
-`position` is world XY in metres; `variation` is the existing detail value in
+`position` is world XY in meters; `variation` is the existing detail value in
 [0, 1]. Return **linear albedo**, without lighting. Shared noise functions and
 palette constants are available. Call the setter before drawing; changing it
 invalidates the terrain pipeline. Package the custom WGSL beside the palette.
-This hook changes grass colour only, including the grass fringe; it does not
+This hook changes grass color only, including the grass fringe; it does not
 change biome classification, roads, water or textured-material overrides.
 
 The lib ships one such style, `lib/terrain_grass_painted.wgsl` (with its
@@ -56,7 +56,7 @@ extra noise. 114 uses:
 | Tip multiplier | 1.3 | 1.25 |
 | Wind strength | 1.0 | 0.45 |
 
-The root colour in `walkerGroundColor()` matches the palette's base grass
+The root color in `walkerGroundColor()` matches the palette's base grass
 albedo, `(0.080, 0.245, 0.015)`. The procedural ground varies around that base.
 Blades remain simple tapered cards. Trees, rocks and character assets are
 unchanged; this material pass does not replace the placeholder silhouettes.
@@ -76,7 +76,7 @@ These are shaded, mixed-material image samples, not albedo values or an exact
 match to the reference grass `(73, 133, 54)`. In the road blade strip
 (.08, .38, .42, .425), the fraction of green pixels (`G > 1.35R` and
 `G > 1.4B`) fell from 60.85% to 0%. Animation and exposure settling can cause
-small differences between captures. No additional fog or colour grade was added.
+small differences between captures. No additional fog or color grade was added.
 
 Validation: the 111, 112, 114, 115 and 119 example gates pass (five passed,
 zero failed), including 119's tier/cadence/invalidation/shutdown checks. Runs

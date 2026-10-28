@@ -38,7 +38,7 @@ func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
 # does not wash out (docs/physical-light-units.md).
 const settingsSunNoonLux: Float = 100000.0
 
-# The sun's light now: its colour times its illuminance (lux)
+# The sun's light now: its color times its illuminance (lux)
 func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   let base: Vec3 = sunColorForDate(
     hour: settingsState.timeOfDay.hour
@@ -75,14 +75,14 @@ func settingsBuildSky(
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  # SOLID is the control case: a flat colour, no gradient and no sun disc, so
+  # SOLID is the control case: a flat color, no gradient and no sun disc, so
   # anything still varying across the background is provably not the sky. It
   # still tracks the time of day — a flat sky that stayed bright at midnight
   # would be a second thing to explain rather than a simpler one.
   if settingsState.skyModel is SettingsSkyModel.solid {
     let base: Vec3 = Vec3.create(x: 0.10, y: 0.16, z: 0.26)
     let lit: Vec3 = Vec3.create(x: base.x * day, y: base.y * day, z: base.z * day)
-    # the flat colour is a display colour; as the ambient light, in cd/m2
+    # the flat color is a display color; as the ambient light, in cd/m2
     let litLight: Vec3 = fromRelativeLight(value: lit)
     var flat: Sky = createSkyNone(
       light: Light3d {
@@ -105,8 +105,8 @@ func settingsBuildSky(
     settingsAddMoon(settingsState: settingsState, sky: pre, day: day)
     ret pre
   }
-  if settingsState.skyModel is SettingsSkyModel.stylised {
-    var painted: Sky = createSkyStylised(
+  if settingsState.skyModel is SettingsSkyModel.stylized {
+    var painted: Sky = createSkyStylized(
       sunDir: dir
       sunColor: col
       zenith: Vec3.create(x: 0.16, y: 0.34, z: 0.62)
@@ -219,9 +219,9 @@ func settingsShadowLightDir(settingsState: view SettingsState) ret Vec3 {
   )
 }
 
-# Its colour: the sun's, crossing at dusk to the moon's cold light, which a
+# Its color: the sun's, crossing at dusk to the moon's cold light, which a
 # full moon gives far more of than a crescent, and a moonless night almost
-# none of. With the moon off it is the sun's colour (and its dim night floor).
+# none of. With the moon off it is the sun's color (and its dim night floor).
 func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
   let sun: Vec3 = settingsSunColor(settingsState: settingsState)
   let blend: Float = settingsNightBlend(settingsState: settingsState)

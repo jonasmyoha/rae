@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--wind', type=float, default=0)
     parser.add_argument('--frames', type=int, default=60)
     parser.add_argument('--motion', action='store_true', help='record every fixed-step frame as an MP4')
-    parser.add_argument('--travel', type=float, default=0, help='motion camera travel in metres, 0 for stationary wind')
+    parser.add_argument('--travel', type=float, default=0, help='motion camera travel in meters, 0 for stationary wind')
     parser.add_argument('--tag', default='', help='suffix for phase studies')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
@@ -61,7 +61,7 @@ def main():
                'examples/138_procgen_showcase/GroveScene.rae', 'lib/app3d/CameraStudy.rae']
     if args.species == 'harebell':
         sources += ['lib/procgen/Harebell.rae', 'lib/procgen/HarebellGeometry.rae']
-    manifest = {'species': args.species, 'app': app, 'fixedDelta': 1 / 30, 'motion': args.motion, 'travelMetres': args.travel, 'frames': args.frames, 'wind': args.wind,
+    manifest = {'species': args.species, 'app': app, 'fixedDelta': 1 / 30, 'motion': args.motion, 'travelMeters': args.travel, 'frames': args.frames, 'wind': args.wind,
                 'seeds': ({'single': 1307, 'showcasePatch': 1871, 'forestPatch': 584} if args.species == 'daisy' else {'single': 2203, 'showcasePatch': 2371, 'forestPatch': 941}),
                 'control': 'unchanged old generator and materials, same seed/height law and world placement',
                 'effects': 'existing deferred shadows/SSAO/SMAA/bloom; DRS off, scale 1, exposure 1',

@@ -54,7 +54,7 @@ open app3d/GroundParticles
 # How far the camera reaches (the shadow cascades' extent)
 const vehicleReach: Float = 30.0
 
-# The chase camera: how far behind the car's centre and how high (an A7 is
+# The chase camera: how far behind the car's center and how high (an A7 is
 # 5 m long)
 const chaseDistance: Float = 10.0
 
@@ -327,9 +327,9 @@ func centi(value: view Float) ret Float {
   ret Math.round(x: value * 100.0) / 100.0
 }
 
-# The camera centred behind the car and above it, looking at it. Only the
+# The camera centered behind the car and above it, looking at it. Only the
 # HEADING is eased (so bumps and steering do not shake the view); the
-# distance stays fixed, so the car stays centred at any speed - easing the
+# distance stays fixed, so the car stays centered at any speed - easing the
 # position instead let the camera fall further behind the faster the car went.
 # A camera still turning keeps the loop rendering.
 func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
@@ -402,10 +402,10 @@ func updateVehicleHud(
   if app.autopilot {
     pilot = "on"
   }
-  let kilometresPerHour: Int = Math.round(x: Math.abs(value: speed) * 3.6) as Int
+  let kilometersPerHour: Int = Math.round(x: Math.abs(value: speed) * 3.6) as Int
   let lines: List(String) = {
     "{trackName}: vehicle"
-    "speed {kilometresPerHour} km/h"
+    "speed {kilometersPerHour} km/h"
     "physics step {tenths(value: app.stepWindow.shownAverage)} ms avg, {tenths(
       value: app.stepWindow.shownMax
     )} ms max, workers {workerCount}"

@@ -9,7 +9,7 @@
 # authored point size at every window size, and there are no letterbox
 # bars. The UI scene is authored at absolute coordinates, so
 # `anchorUiToExtent` re-places the root-level nodes whenever the extent
-# changes — intent ("centred", "right-aligned", "full-bleed") lives there
+# changes — intent ("centered", "right-aligned", "full-bleed") lives there
 # rather than in resolution-specific constants.
 #
 # STATE SURVIVES HOT RELOAD: selected scene, pause/speed/debug toggles and
@@ -226,7 +226,7 @@ func main() ret Int {
     skyModel: SettingsSkyModel.preetham
   )
   var editorPanel: EditorPanel = createEditorPanel(assetBase: base, settings: settings)
-  # Where "Orbit" re-centres on every switch back from the WASD camera
+  # Where "Orbit" re-centers on every switch back from the WASD camera
   setEditorPanelOrbitHome(
     editorPanel: editorPanel
     target: Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
@@ -285,7 +285,7 @@ func main() ret Int {
   # Frame declared as a render graph with a load-preserving UI overlay.
   # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
   # so the visible sun and the shadows agree. This example is the renderer's
-  # realistic end; 136 is the stylised one, and they deliberately use
+  # realistic end; 136 is the stylized one, and they deliberately use
   # different kinds behind the same interface.
   applyEditorPanelSettings(
     editorPanel: editorPanel
@@ -538,7 +538,7 @@ func main() ret Int {
       # renderDeferredPassWorld; ssao/lighting/taa/composite never read the world,
       # so any live world satisfies the signature — asset1.world is passed.
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
-      # writes the colour target, the UI overlay MODIFIES it (load-preserving),
+      # writes the color target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
       # createRenderer3dWithUi; this loop runs them in dependency order.
       gpuPassTimingBegin(renderer: renderer)

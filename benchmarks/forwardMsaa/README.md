@@ -16,7 +16,7 @@ variants differ only in where the lighting runs and how the samples are stored.
 | forward 4x MSAA, memoryless | one 4x pass, resolved on store | 4 B/pixel |
 | forward 4x MSAA, stored samples | the same with ordinary (not memoryless) 4x targets | 36 B/pixel |
 
-"Memoryless" is wgpu's `TRANSIENT` texture usage: the 4x colour and depth exist
+"Memoryless" is wgpu's `TRANSIENT` texture usage: the 4x color and depth exist
 only in tile memory. wgpu-native 29 passes usage bits to wgpu-core unchanged, so
 the benchmark uses wgpu-core's bit (`1 << 17`); the header's
 `WGPUTextureUsage_TransientAttachment` (0x20) panics in `wgpuDeviceCreateTexture`.

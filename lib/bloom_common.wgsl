@@ -1,6 +1,6 @@
 // Shared by the bloom passes (render-perf-8): the fullscreen triangle and
 // the 13-tap downsample (Jimenez, "Next generation post processing in Call
-// of Duty", 2014): five overlapping 2x2 boxes, the centre one weighted 0.5
+// of Duty", 2014): five overlapping 2x2 boxes, the center one weighted 0.5
 // and the four corner ones 0.125 each, which keeps the result stable when
 // the camera moves by less than a texel.
 @vertex

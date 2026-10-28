@@ -117,7 +117,7 @@ struct-by-list-index corruption".
 
 ## What would change the answer
 
-This is a judgement about today's codebase, not a principle. Revisit if:
+This is a judgment about today's codebase, not a principle. Revisit if:
 
 - **A real bug is traced to an id mix-up.** None found; the hypothesis is
   currently unsupported by evidence.

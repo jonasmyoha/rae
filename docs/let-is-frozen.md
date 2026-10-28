@@ -137,7 +137,7 @@ let as `mod` arguments, mutating method calls) and `1018_frozen_let_edges`
 through, `if let` narrowing, `view` arguments).
 
 A generic function body is checked per instantiation; a template that is
-never instantiated is not analysed, so a write into a `let` there surfaces
+never instantiated is not analyzed, so a write into a `let` there surfaces
 when it is first used.
 
 ## A `view` is read-only the same way (0.1.247)

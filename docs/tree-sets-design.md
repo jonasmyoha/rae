@@ -25,7 +25,7 @@ Everything is in the standard library; nothing is copied per example.
   flowers, harebells, oxeye daisies).
 - **The species set**, `lib/app3d/GroveTrees.rae`: numbers the species
   (`speciesBroadleaf` .. `speciesBirch`), picks them for a place, sizes
-  them, and builds each one's wood, leaves, near/middle levels, colours and
+  them, and builds each one's wood, leaves, near/middle levels, colors and
   billboard pictures. 611 lines at `4d28e11d` (nine species), 955 now (the
   birch and its pictures added). There is one set, shared by the walkers
   (`WalkerTerrain`, `IslandForest`, `WideForest`, `TreeCoverage`) and
@@ -114,7 +114,7 @@ lib/treeSets/
    `rae format` and the compiler's errors list them; nothing is guessed.
 3. Render 138 from the camera of the old picture and compare it with the
    old render (`4d28e11d` built with its own compiler, as done for the
-   picture above): the same trees, the same colours within the light-unit
+   picture above): the same trees, the same colors within the light-unit
    conversion. The pair goes on the looks-development page.
 
 ## 5. Steps (for the queue)
@@ -138,7 +138,7 @@ lib/treeSets/
 
 The set the walkers keep is named **stylized** (2026-10-28:
 "realistic" is not a good name; US spelling, as in code. The older
-`SkyModel.stylised` keeps its spelling until it is next touched).
+`SkyModel.stylized` keeps its spelling until it is next touched).
 
 1. **The later studies stay with the stylized set** (answered): the birch,
    ginkgo, Japanese maple, fork and flower modules move under

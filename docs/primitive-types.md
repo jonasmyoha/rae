@@ -232,7 +232,7 @@ let c: Float   = b     # same type — no cast
 
 ### Literals are not conversions
 
-An unsuffixed literal is materialised directly in the destination type, so
+An unsuffixed literal is materialized directly in the destination type, so
 it never needs a cast:
 
 ```rae
@@ -243,7 +243,7 @@ let i: Int     = 42    # fine
 
 The same holds for the full unsigned 64-bit range. An integer literal above
 `Int`'s maximum, and integer arithmetic that only fits in 64 unsigned bits, is
-materialised in the `UInt64` destination — in a `const` (folded at compile
+materialized in the `UInt64` destination — in a `const` (folded at compile
 time) exactly as in a local (#817):
 
 ```rae

@@ -4,7 +4,7 @@
 image generation tool on 26 October 2026, then reduced to 512 × 512 with `sips`.
 No botanical photograph or private reference screenshot supplies production pixels.
 
-The bark is opaque grey-brown albedo, with broad unequal vertical furrows.
+The bark is opaque gray-brown albedo, with broad unequal vertical furrows.
 The spray is RGBA: small rounded/heart-shaped edge leaves, connected interior,
 and a few sky holes. The second pass reduced its internal contrast. It is one
 cutout, not an atlas of multiple variants. Seeded quarter-turns, mirrors and
@@ -17,7 +17,7 @@ shadow. The same texture layers serve all instances.
 
 Generation prompts, built-in tool:
 
-- Bark: seamless opaque flat albedo of small-leaved lime, warm grey-brown,
+- Bark: seamless opaque flat albedo of small-leaved lime, warm gray-brown,
   approximately twelve unequal vertical ridges, occasionally forked dark
   furrows, soft painterly surface, restrained contrast, no moss, birch marks,
   text, perspective or baked directional highlights.

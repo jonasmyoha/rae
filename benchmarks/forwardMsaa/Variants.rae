@@ -38,8 +38,8 @@ type VariantTargets {
   albedoView: Ptr
   material: Ptr
   materialView: Ptr
-  multisampleColour: Ptr
-  multisampleColourView: Ptr
+  multisampleColor: Ptr
+  multisampleColorView: Ptr
   # Bytes the variant keeps in memory (memoryless attachments count 0)
   bytes: Int
 }
@@ -110,7 +110,7 @@ func variantHasPrepass(variant: view Int) ret Bool {
   ret variant is variantForward1xPrepass or variant is variantForward4xPrepass
 }
 
-# The multisampled colour and depth exist only on the tile (TRANSIENT)
+# The multisampled color and depth exist only on the tile (TRANSIENT)
 func variantMemoryless(variant: view Int) ret Bool {
   ret variant is variantForward4xPrepass or variant is variantForward4x
 }
@@ -170,8 +170,8 @@ func createVariantTargets(size: view BenchmarkSize, variant: view Int) ret Varia
       albedoView: webgpuNull()
       material: webgpuNull()
       materialView: webgpuNull()
-      multisampleColour: webgpuNull()
-      multisampleColourView: webgpuNull()
+      multisampleColor: webgpuNull()
+      multisampleColorView: webgpuNull()
       bytes: pixels * 4
     }
     var attachmentUsage: UInt64 = WGPUTextureUsage_RenderAttachment
@@ -222,14 +222,14 @@ func createVariantTargets(size: view BenchmarkSize, variant: view Int) ret Varia
       targets.bytes = targets.bytes + pixels * 12
     }
     if samples > 1 {
-      targets.multisampleColour = createTarget(
+      targets.multisampleColor = createTarget(
         size: size
         format: WGPUTextureFormat_RGBA8Unorm
         usage: attachmentUsage
         samples: samples
       )
-      targets.multisampleColourView = createView(
-        texture: targets.multisampleColour
+      targets.multisampleColorView = createView(
+        texture: targets.multisampleColor
         format: WGPUTextureFormat_RGBA8Unorm
       )
       if not variantMemoryless(variant: variant) {
@@ -258,18 +258,18 @@ func releaseVariantTargets(targets: view VariantTargets) {
     releaseTexture(texture: targets.normal, textureView: targets.normalView)
     releaseTexture(texture: targets.albedo, textureView: targets.albedoView)
     releaseTexture(texture: targets.material, textureView: targets.materialView)
-    releaseTexture(texture: targets.multisampleColour, textureView: targets.multisampleColourView)
+    releaseTexture(texture: targets.multisampleColor, textureView: targets.multisampleColorView)
   }
 }
 
 # A pipeline over the scene mesh (vertexBuffers true) or a fullscreen
-# triangle, with an automatic layout. `colourFormats` are its targets;
-# `writeMask` 0 makes a depth-only pipeline that still fits a colour pass.
+# triangle, with an automatic layout. `colorFormats` are its targets;
+# `writeMask` 0 makes a depth-only pipeline that still fits a color pass.
 func createPipeline(
   module: copy Ptr
   vertexEntry: view String
   fragmentEntry: view String
-  colourFormats: view List(Int32)
+  colorFormats: view List(Int32)
   writeMask: view UInt64
   depthCompare: view Int32
   depthWrite: view Bool
@@ -295,11 +295,11 @@ func createPipeline(
     }
     var targets: List(WGPUColorTargetState) = List.create(
       WGPUColorTargetState
-      cap: colourFormats.length
+      cap: colorFormats.length
     )
     var i: Int = 0
-    loop i < colourFormats.length {
-      targets.add(value: { format: colourFormats.copyAtDefault(index: i), writeMask: writeMask })
+    loop i < colorFormats.length {
+      targets.add(value: { format: colorFormats.copyAtDefault(index: i), writeMask: writeMask })
       i = i + 1
     }
     let vertexC: Buffer(Any) = vertexEntry.toCStr()
@@ -426,7 +426,7 @@ func createVariantPipelines(
         module: scene.sceneModule
         vertexEntry: "vsScene"
         fragmentEntry: "fsGbuffer"
-        colourFormats: gbuffer
+        colorFormats: gbuffer
         writeMask: WGPUColorWriteMask_All
         depthCompare: WGPUCompareFunction_Less
         depthWrite: true
@@ -437,7 +437,7 @@ func createVariantPipelines(
         module: scene.lightingModule
         vertexEntry: "vsFullscreen"
         fragmentEntry: "fsLighting"
-        colourFormats: output
+        colorFormats: output
         writeMask: WGPUColorWriteMask_All
         depthCompare: WGPUCompareFunction_Always
         depthWrite: false
@@ -473,7 +473,7 @@ func createVariantPipelines(
         module: scene.sceneModule
         vertexEntry: "vsScene"
         fragmentEntry: "fsDepthOnly"
-        colourFormats: output
+        colorFormats: output
         writeMask: WGPUColorWriteMask_None
         depthCompare: WGPUCompareFunction_Less
         depthWrite: true
@@ -491,7 +491,7 @@ func createVariantPipelines(
       module: scene.sceneModule
       vertexEntry: "vsScene"
       fragmentEntry: "fsForward"
-      colourFormats: output
+      colorFormats: output
       writeMask: WGPUColorWriteMask_All
       depthCompare: shadingCompare
       depthWrite: shadingWrites

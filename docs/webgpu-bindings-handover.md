@@ -107,7 +107,7 @@ for the pattern: `main.rae` + `config.cmd` (`run`) + `expected.txt`).
   `wgpuRenderPassEncoderDrawIndexed`. `rae_ext_gbuffer_drawRecords` (real + stub)
   is gone. To decouple the buffer, the single-draw C path (`draw`/`drawSkinned`)
   now uploads its own slice per draw and `end()` no longer bulk-uploads —
-  behaviour-preserving (same bytes before submit). C keeps only context
+  behavior-preserving (same bytes before submit). C keeps only context
   accessors (`rae_gb_*` in runtime_gpu3d_gbuffer.c, stubbed in
   runtime_gbuffer_stubs.c, prototyped in rae_runtime.h). **Needs a visual check
   on example 114** (grass) — builds+links verified; 573 zero-alloc unchanged.

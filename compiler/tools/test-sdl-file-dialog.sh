@@ -35,7 +35,7 @@ func main() {
   if picked.length() > 0 {
     log("picked={picked}")
   } else {
-    log("cancelled")
+    log("canceled")
   }
   # A second poll must NOT redeliver the same path (one-shot).
   let again: String = Sdl3.pollFileDialogResult()
@@ -52,7 +52,7 @@ if [ "$OUT" = "$EXPECT" ]; then ok forced_result_once; else bad forced_result_on
 
 # 2. No window and no override => cancel, not a real dialog.
 OUT=$(run)
-EXPECT=$(printf 'cancelled\nagain-empty=true')
+EXPECT=$(printf 'canceled\nagain-empty=true')
 if [ "$OUT" = "$EXPECT" ]; then ok no_window_cancels; else bad no_window_cancels "got [$OUT]"; fi
 
 # 3. A headless run never opens a real dialog (resolves to cancel).

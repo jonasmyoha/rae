@@ -5,7 +5,7 @@
 # allocation-free.
 #
 # A Vec4 is 16 contiguous bytes, which is the shape a future SIMD lowering
-# wants (#357) and the natural unit for an RGBA colour or a homogeneous
+# wants (#357) and the natural unit for an RGBA color or a homogeneous
 # position.
 #
 #   import vec4
@@ -57,7 +57,7 @@ func vscale(a: view Vec4, s: view Float) ret Vec4 {
   ret Vec4 { x: a.x * s, y: a.y * s, z: a.z * s, w: a.w * s }
 }
 
-# Component-wise multiply (e.g. colour * tint).
+# Component-wise multiply (e.g. color * tint).
 func vmul(a: view Vec4, b: view Vec4) ret Vec4 {
   ret Vec4 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z, w: a.w * b.w }
 }
@@ -83,7 +83,7 @@ func vnorm(a: view Vec4) ret Vec4 {
   ret Vec4 { x: a.x / l, y: a.y / l, z: a.z / l, w: a.w / l }
 }
 
-# Perspective divide: homogeneous clip space -> normalised device coords.
+# Perspective divide: homogeneous clip space -> normalized device coords.
 func perspectiveDivide(a: view Vec4) ret Vec3 {
   ret Vec3 { x: a.x / a.w, y: a.y / a.w, z: a.z / a.w }
 }

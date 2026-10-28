@@ -15,7 +15,7 @@ type ForkEdge {
   faces: Int
 }
 
-type ForkNeighbours {
+type ForkNeighbors {
   sum: Vec3
   count: Int
   boundarySum: Vec3
@@ -72,13 +72,13 @@ func forkTextureMiddle(first: view Float, second: view Float) ret Float {
   ret middle
 }
 
-func addForkNeighbour(
-  neighbours: mod List(ForkNeighbours)
+func addForkNeighbor(
+  neighbors: mod List(ForkNeighbors)
   index: view Int
   point: view Vec3
   boundary: view Bool
 ) {
-  if let entry: mod ForkNeighbours = neighbours.modAt(index: index) {
+  if let entry: mod ForkNeighbors = neighbors.modAt(index: index) {
     entry.sum = vadd(a: entry.sum, b: point)
     entry.count = entry.count + 1
     if boundary {
@@ -105,9 +105,9 @@ func subdivideForkSurface(mesh: view MeshData) ret MeshData {
       ))
     }
   }
-  var neighbours: List(ForkNeighbours) = List.create(ForkNeighbours, cap: mesh.vertCount)
+  var neighbors: List(ForkNeighbors) = List.create(ForkNeighbors, cap: mesh.vertCount)
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
-    neighbours.add(
+    neighbors.add(
       value: {
         sum: Vec3.create(x: 0, y: 0, z: 0)
         count: 0
@@ -117,14 +117,14 @@ func subdivideForkSurface(mesh: view MeshData) ret MeshData {
     )
   }
   loop let edge: view ForkEdge in edges {
-    addForkNeighbour(
-      neighbours: neighbours
+    addForkNeighbor(
+      neighbors: neighbors
       index: edge.first
       point: forkPoint(mesh: mesh, index: edge.second)
       boundary: edge.faces is 1
     )
-    addForkNeighbour(
-      neighbours: neighbours
+    addForkNeighbor(
+      neighbors: neighbors
       index: edge.second
       point: forkPoint(mesh: mesh, index: edge.first)
       boundary: edge.faces is 1
@@ -133,18 +133,18 @@ func subdivideForkSurface(mesh: view MeshData) ret MeshData {
   var result: MeshData = foliageMesh()
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
     let point: Vec3 = forkPoint(mesh: mesh, index: vertex)
-    let neighbour: ForkNeighbours = neighbours.copyAtDefault(index: vertex)
+    let neighbor: ForkNeighbors = neighbors.copyAtDefault(index: vertex)
     var smoothed: Vec3 = point
-    if neighbour.boundaryCount is 2 {
-      smoothed = vadd(a: vscale(a: point, s: 0.75), b: vscale(a: neighbour.boundarySum, s: 0.125))
-    } else if neighbour.count > 2 {
-      var weight: Float = 3.0 / (8.0 * neighbour.count.toFloat())
-      if neighbour.count is 3 {
+    if neighbor.boundaryCount is 2 {
+      smoothed = vadd(a: vscale(a: point, s: 0.75), b: vscale(a: neighbor.boundarySum, s: 0.125))
+    } else if neighbor.count > 2 {
+      var weight: Float = 3.0 / (8.0 * neighbor.count.toFloat())
+      if neighbor.count is 3 {
         weight = 3.0 / 16.0
       }
       smoothed = vadd(
-        a: vscale(a: point, s: 1.0 - neighbour.count.toFloat() * weight)
-        b: vscale(a: neighbour.sum, s: weight)
+        a: vscale(a: point, s: 1.0 - neighbor.count.toFloat() * weight)
+        b: vscale(a: neighbor.sum, s: weight)
       )
     }
     forkVertex(

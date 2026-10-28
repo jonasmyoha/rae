@@ -58,7 +58,7 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   vertex every 10 m, from the same height field, drawn 1 m under the near
   ground, which covers it round the walker.
 - **The trees** stand on a jittered 3.5 m grid, thinned by a forest-density
-  noise (woods and meadows a few hundred metres across) and kept off lakes,
+  noise (woods and meadows a few hundred meters across) and kept off lakes,
   beaches and bare rock. Each 36 m block has one main species, so the forest
   grows in stands; three trees in ten are mixed in from any species. The
   kinds are those of Autumn Grove (138) without the giant camphor.
@@ -77,7 +77,7 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   below the ground. Physics costs the same however big the forest is.
 - **The ground follows the walker.** The physics height field
   (240 m) is made again round the walker when it is 50 m from the field's
-  centre (`followGround`, about 4 ms; the lib's
+  center (`followGround`, about 4 ms; the lib's
   `removeVenueHeightField` frees the old one).
 - **The lakes are the realistic sea.** `lib/water/IslandSea` (the same as
   136's): the FFT ocean on a grid that follows the camera, its waves fading

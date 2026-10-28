@@ -1,7 +1,7 @@
 # #945: the listViewSystem virtualises a bound list — a windowed, recycled set
-# of live row entities — and the scene registry now deserialises a `ListView`
+# of live row entities — and the scene registry now deserializes a `ListView`
 # (the #941 reject became a real arm). Two parts, both headless:
-#   A. a scene carrying a `ListView` component loads and deserialises.
+#   A. a scene carrying a `ListView` component loads and deserializes.
 #   B. a 10k-row ListView keeps only a bounded window of entities live, and
 #      recycles them on scroll (the live count is the same at the top and deep
 #      in the list; it shrinks, never grows, near the end).
@@ -118,7 +118,7 @@ func partAScene() ret String {
 func main() {
   # Bindings-only rows: no item sub-scene, so an empty registry (#964).
   let rowScenes: SceneRegistry = createSceneRegistry()
-  # ----- Part A: ListView deserialises from a scene (#941 arm) -----
+  # ----- Part A: ListView deserializes from a scene (#941 arm) -----
   var scene: Scene = parseScene(source: partAScene())
   scene.sceneId = "lv-demo"
   log("scene ok: {scene.ok}")

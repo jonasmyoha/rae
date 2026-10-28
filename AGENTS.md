@@ -25,6 +25,22 @@ These instructions define **how Codex should work**, communicate progress, and i
   `maxRetries`. Enum cases are `camelCase` too (`roundedRect`, not `ROUNDED_RECT`).
 - Violations MUST produce a compiler diagnostic
 
+### US English spelling, in code and in the UI:
+- Rae uses **US English spelling** everywhere: identifiers, comments, docs,
+  UI text, data keys, file names (2026-10-28: "this is a
+  code naming thing"). `color`, `center`/`centered`, `meter`, `gray`,
+  `behavior`, `neighbor`, `favorite`, `license`, `catalog`, `artifact`,
+  `judgment`, `tire`, `program` (a program; `programmer` is the same in
+  both); `-ize` verbs (`initialize`, `normalize`, `serialize`, `optimize`,
+  `recognize`, `stylized`, `analyze`); one `l` before an ending
+  (`canceled`, `traveled`, `labeled`, `modeled`, `signaled`).
+- NOT `colour`, `centre`, `metre`, `grey`, `behaviour`, `-ise`/`-isation`,
+  `cancelled`, `programme`. The tree was swept on 2026-10-28; a British
+  spelling is now a slip, like a `snake_case` name.
+- Names that come from outside keep their own spelling: the C APIs and
+  their generated bindings (wgpu's `WGPUGLFenceBehaviour`, lodepng's
+  `LCT_GREY`) and vendored code (`third_party/`, `lodepng`, `stb`).
+
 ### File and folder names follow the same rule — no `snake_case` on disk either:
 - A `.rae` file is a MODULE, and its name is spelled in code at every `import`/
   `open` and every qualified call (`GpuTiming.createGpuTiming()`). `snake_case`
@@ -116,19 +132,19 @@ These instructions define **how Codex should work**, communicate progress, and i
   is an abbreviation AND misleading (it reads as filesystem/stream I/O, not an
   input-system state).
 - **The ONE exception: an established initialism that IS the thing's real,
-  universally-recognised name** — where spelling it out would read as wrong or
+  universally-recognized name** — where spelling it out would read as wrong or
   pedantic to any practitioner. `ui`/`Ui` (user interface — `UiSystem`,
   `uiWorld`) is the case that prompted this rule and is explicitly fine. So are
   `id` (identifier — `EntityId`, `nodeId`), the hardware/format/protocol
   initialisms (`gpu`, `cpu`, `api`, `json`, `html`, `css`, `url`, `uri`, `http`,
-  `png`, `wgsl`, `sdf`), the colour initialisms tied to the already-allowed
+  `png`, `wgsl`, `sdf`), the color initialisms tied to the already-allowed
   `r`/`g`/`b`/`a` (`rgb`, `rgba`, `hsl`), and the dimensional tags `2d`/`3d`
   (`World3d`, `Gpu2d`). Plus the maths coordinates already blessed above
   (`x`/`y`/`z`/`w`, `r`/`g`/`b`/`a`) and loop counters `i`/`j`.
   - **Case an initialism as an ordinary word** (the PascalCase/camelCase rule
     still applies): `Ui`, `Id`, `Gpu`, `Json`, `Html`, `Url` — NEVER `UI`, `ID`,
     `GPU`, `JSON`, `HTML`. So `EntityId` and `Gpu2d`, not `EntityID` / `GPU2D`.
-  - This is a **CLOSED set of real names, not a licence for short names.** It
+  - This is a **CLOSED set of real names, not a license for short names.** It
     does NOT reopen ad-hoc contractions: `cam`, `ctx`, `cfg`, `tmp`, `btn`,
     `msg`, `idx`, `elem` are still banned — they abbreviate a WORD, they are not
     the thing's name. Two specific bans worth calling out: `io` (spell the intent
@@ -137,7 +153,7 @@ These instructions define **how Codex should work**, communicate progress, and i
     words "delta time", it is not an initialism-name).
   - **The allowed set and its EXACT spelling** (casing follows the
     PascalCase-type / camelCase-everything-else rule — the initialism is one
-    word, only its first letter capitalises in a type):
+    word, only its first letter capitalizes in a type):
 
     | concept | camelCase (value) | PascalCase (in a type) |
     |---|---|---|
@@ -155,7 +171,7 @@ These instructions define **how Codex should work**, communicate progress, and i
     | SDF | `sdf` | `Sdf` |
     | RGB / RGBA / HSL | `rgb`, `rgba`, `hsl` | `Rgb`, `Rgba`, `Hsl` |
 
-    Maths coordinates `x`/`y`/`z`/`w`, colour channels `r`/`g`/`b`/`a`, and loop
+    Maths coordinates `x`/`y`/`z`/`w`, color channels `r`/`g`/`b`/`a`, and loop
     counters `i`/`j` stay single-letter (those letters ARE the meaning).
 - Same phasing as the single-letter rule: fix it in files you are already
   editing; do not open a mass rename of unrelated code.
@@ -299,7 +315,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   `#[derive]`, etc. They are strongly disliked, and the reasoning is
   worth carrying, not just the rule:
 - **There is no real "logic vs metadata" line that justifies the sigil.** The
-  tempting defence — "`@` is for metadata/annotations, real keywords are for
+  tempting defense — "`@` is for metadata/annotations, real keywords are for
   code that executes" — does not survive contact with actual languages. The SAME
   concept is a sigil in one language and a bare keyword in another: Java
   `@Override` vs Kotlin/Swift `override`. Whether something "is metadata" is not
@@ -311,7 +327,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   but not `public`/`static`/`final`; Rust sigils `#[derive]`/`#[inline]` but not
   `pub`/`const`/`mut`. Same syntactic role (a modifier on a declaration), split
   across two spellings by history and taste, not principle. So the programmer
-  carries TWO vocabularies and must memorise which modifier lives in which set,
+  carries TWO vocabularies and must memorize which modifier lives in which set,
   for no rule and no gain — an "additional layer" bolted on.
 - **The ONE case where a sigil is actually earned is an OPEN, user-extensible
   set** — Python decorators apply any callable; Rust attributes/macros are
@@ -321,7 +337,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   compiler-defined set (Java `@Override`, Swift `@escaping`) has no such excuse —
   it could just be the keyword — and is pure convention.
 - **Rae does not want that open extensibility.** An open macro/decorator system
-  is exactly the "clever, hard-to-analyse" mechanism Rae's goals (few special
+  is exactly the "clever, hard-to-analyze" mechanism Rae's goals (few special
   cases, determinism, machine-analyzability) refuse. So Rae never reaches the one
   case where `@` is justified, and every case it WOULD reach is the arbitrary
   one. Hence: one bare-keyword vocabulary, full stop. If a modifier is worth
@@ -416,7 +432,7 @@ Do not introduce features that increase expressive power at the cost of clarity,
   short plain sentences that name the actual file, function, or thing the user will see,
   with no metaphors, no rhetorical contrasts, and no abstract terms like `idempotent`,
   `converge`, `fail closed`, or `names the cost` unless you replace them with the
-  concrete behaviour.
+  concrete behavior.
 - **File size limit**: Aim to keep all source files under 1,000 lines of code (LOC). If a file exceeds this limit, it should be refactored into smaller, domain-specific modules. This helps maintain clarity and reduces LLM context usage.
 - **Git operations**:
   - **Commit frequently**: Always commit meaningful work before moving on to the next task in the `QUEUE`.
@@ -634,7 +650,7 @@ timestamps, a new pass), reach it **through the bindings** — do NOT add a new
 
 Rae is dogfooded: **code is written in Rae whenever it can be.** The C in
 `compiler/runtime/` is the platform boundary, not a second standard library.
-This generalises the renderer C-surface gate above to the whole runtime.
+This generalizes the renderer C-surface gate above to the whole runtime.
 
 - **New runtime C is allowed only for genuine platform ABI:**
   - a system, OS or C-library call itself (`socket`, `kevent`, `pthread_create`,
@@ -656,7 +672,7 @@ This generalises the renderer C-surface gate above to the whole runtime.
 - **But the fastest implementation wins. Rae is a high-performance language,
   and dogfooding never justifies shipping the slow path.** When a platform or
   an established native library is clearly faster (hardware instructions, an
-  OS-optimised routine, a tuned upstream library), USE IT on that platform,
+  OS-optimized routine, a tuned upstream library), USE IT on that platform,
   through one binding, and keep the Rae version as the fallback everywhere
   else. Measure; do not assume.
   - **SHA-1 (2026-10-08):** the Rae SHA-1 hashes 16 MB in 100 ms, plain C
@@ -712,10 +728,10 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   none of those versions had been tagged.) `1.0.0` is deferred until the
   language stops moving.
 - **Bump discipline: in the SAME commit as the change, not after.** A commit
-  that changes language, `lib/` or CLI behaviour in a way users should be
+  that changes language, `lib/` or CLI behavior in a way users should be
   able to tell apart from the last release bumps `compiler/VERSION`'s PATCH
   component in that same commit and says so in the commit message (routine
-  queue work does not need a bump on every commit — use judgement: bump when
+  queue work does not need a bump on every commit — use judgment: bump when
   the change is release-notes-worthy, not for every diagnostic tweak; a
   breaking change is always release-notes-worthy).
 - **Consequence for `.raepack` requirements:** a bare `rae: { version: "0.1" }`
@@ -777,9 +793,9 @@ file that is Rae's own work, and such files carry NO copyright header. Do not
 add one.
 
 A file that is a **direct port** of someone else's code keeps the original
-author's copyright and licence, stated in ONE line at the top of the file. It is
+author's copyright and license, stated in ONE line at the top of the file. It is
 one line because every line counts against the 1,000-line cap, and the full
-licence text lives once, beside the code:
+license text lives once, beside the code:
 
 - **The Box3D port** is every `lib/physics/**` module except `lib/physics/ecs/`,
   plus `benchmarks/physics/rae/`. Its first line is:
@@ -793,7 +809,7 @@ licence text lives once, beside the code:
   examples and the tests. This holds even when they reuse a sample's numbers.
 - A new file you port line for line from Box3D gets the line. A new file you
   write gets nothing. A port of some other project adds its own one-line notice,
-  naming the holder and the licence, plus a `LICENSE-<project>.md` beside it.
+  naming the holder and the license, plus a `LICENSE-<project>.md` beside it.
 
 ---
 ## Interaction rules
@@ -992,7 +1008,7 @@ needs a lock, an `_Atomic`, or `__thread` — the gate is what notices.
 **Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
 foot-gun programs on two shelves: `handles` (Rae does the right thing) and
 `footgun` (Rae still gets it wrong — the case asserts the CURRENT bad
-behaviour verbatim). `stress/run.sh` (`make stress`, `RAE_STRESS_FILTER` to
+behavior verbatim). `stress/run.sh` (`make stress`, `RAE_STRESS_FILTER` to
 scope) runs as one pre-suite case of every full run right after the
 banned-terms gate; a `footgun` that stops reproducing FAILS as `FIXED?` on
 purpose — flip it to `handles` in the same commit as the compiler fix, with

@@ -254,10 +254,10 @@ for TARGET in "${TARGETS[@]}"; do
     # (Stage 3) or owning-return deep-copy (Stage 4) semantics — these
     # are wired only in the compiled backend. Tests 460-464 (copy T
     # param) and 471/474 (Stage 4 return-from-alias-source) assert
-    # buffer independence that the live VM cannot honour today; gate
+    # buffer independence that the live VM cannot honor today; gate
     # them to the compiled target for now. (470, 472, 473, 475 work
     # in Live too because their semantics happen to match the VM's
-    # implicit deep-copy-on-store behaviour for those shapes.)
+    # implicit deep-copy-on-store behavior for those shapes.)
     #
     # Stage 6: after the lib/ui/layout.rae migration to view Int /
     # view Float for hot-path params, test 414 hangs in the live VM.
@@ -672,7 +672,7 @@ fi
 # render every example in a real SDL/GPU window and take screenshots, and take
 # minutes. They are NOT part of the default `make test` — the default run is
 # the non-visual unit suite only. Opt in with RAE_RUN_EXAMPLES=1 (which is what
-# `make test-examples` does); RAE_SKIP_EXAMPLES=1 is still honoured and wins.
+# `make test-examples` does); RAE_SKIP_EXAMPLES=1 is still honored and wins.
 # A single named test never runs them.
 if [ -z "$TEST_NAME_FILTER" ]; then
   if [ "${RAE_RUN_EXAMPLES:-0}" = "1" ] && [ "${RAE_SKIP_EXAMPLES:-0}" != "1" ]; then

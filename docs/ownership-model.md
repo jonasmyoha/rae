@@ -67,7 +67,7 @@ Compiler regression 907 covers these paths, including generic and method calls.
 
 ## Explicit ownership transfer with `own`
 
-Recognise the `own` keyword in expression positions:
+Recognize the `own` keyword in expression positions:
 
 ```rae
 let ch: Children = { ids: own copy }
@@ -82,7 +82,7 @@ Meaning:
 
 ## Owned parameters
 
-Recognise `own T` as a parameter mode:
+Recognize `own T` as a parameter mode:
 
 ```rae
 func componentSet(T)(this: mod ComponentTable(T), entityId: Int, data: own T)
@@ -116,7 +116,7 @@ Plain `T` is sugar for `val T`.
 
 ## Function-call rule
 
-| Param declared | Behaviour |
+| Param declared | Behavior |
 |---|---|
 | `view T` | borrow, no move, no copy / ownership transfer |
 | `mod T`  | mutable borrow, no move, no copy / ownership transfer |
@@ -295,7 +295,7 @@ move `ch` automatically.
   deep-copy is not implemented.
 - It must not silently move.
 - If current compiler cannot error yet, add an expected-fail test
-  documenting the intended behaviour.
+  documenting the intended behavior.
 
 **C. Move into `own` parameter:**
 
@@ -352,8 +352,8 @@ explicit ownership transfer. Preserve Rae's readability rule:
   - `is_drop_target_type(type)`
   - `find_drop_overload_for(ctx, base)`
   - `emit_implicit_drops_for_body(ctx, out, first_let_index)`
-- Discovery-pass pre-registration of `drop()` specialisations
-  in `compiler/src/c_discovery.c` so the specialised symbol
+- Discovery-pass pre-registration of `drop()` specializations
+  in `compiler/src/c_discovery.c` so the specialized symbol
   lands before its first caller.
 - Block-scope tracking in `emit_if` / `emit_loop`
   (`ctx->local_count` save/restore).

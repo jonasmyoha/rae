@@ -1,8 +1,8 @@
 // Shared rooted response to the app WindVector; compose grass_field first.
 fn grassGustEnvelope(base: vec2<f32>, time: f32, direction: vec2<f32>, strength: f32) -> f32 {
-  let travelled = base - direction * time * (0.8 + strength * 0.35);
-  let broad = perlin2(travelled * 0.18, 1301u);
-  let local = perlin2(travelled * 0.43 + vec2<f32>(11.3, -7.1), 1307u);
+  let traveled = base - direction * time * (0.8 + strength * 0.35);
+  let broad = perlin2(traveled * 0.18, 1301u);
+  let local = perlin2(traveled * 0.43 + vec2<f32>(11.3, -7.1), 1307u);
   return smoothstep(-0.38, 0.43, broad * 0.72 + local * 0.28);
 }
 fn grassWindOffset(base: vec2<f32>, height: f32, time: f32, wind: vec3<f32>) -> vec2<f32> {

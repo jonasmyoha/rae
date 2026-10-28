@@ -338,7 +338,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
     do {
       /* A VALUE generic argument: `cap: 16`. Rae's rule is that type
        * arguments are positional and value arguments are named, so a value
-       * argument is recognised by the `ident :` that a type can never
+       * argument is recognized by the `ident :` that a type can never
        * begin with. The keyword is required — a bare `Array(Float, 16)`
        * falls through to parse_type_ref and reports "expected type", which
        * is the diagnostic we want.  */
@@ -2303,7 +2303,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
         // parse_binding_statement has already rejected `=>` for a non-ref
         // type; sema rejects copying from a PLACE. The condition is left
         // NULL: the payload cannot be tested against none, so the backend
-        // tests the optional value it materialises.
+        // tests the optional value it materializes.
         if (!bind->as.let_stmt.value) {
           parser_error(parser, let_token, is_var ? "'if var' requires an initializer" : "'if let' requires an initializer");
         }
