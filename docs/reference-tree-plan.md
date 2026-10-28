@@ -263,6 +263,16 @@ picture's gaps carry the leaves' color, and for this tree the middle level
 reaches 100 m (`ReferenceTrees.referenceMiddleDistance`) so the 128-pixel
 impostor views are stretched less. Other trees' impostors are unchanged.
 
+Third round (0.2.191: the T02 forest's impostors "blue
+pixels all over"): seen from above, cards on a mass's far side showed
+through its gaps with sideways normals and caught the sky's light (the
+leaf pass darkens deep cards with its per-card occlusion; the impostor has
+none). The bake now turns a card's normal toward the eye until it faces it
+by 0.6, and the sprite pass reads an impostor's normal from the four
+texels round it weighted by their alpha (`impostorNormalAt`), so an empty
+texel's packed normal (straight up) no longer reaches a crown's edge. The
+walkers' forests differ by 0.5% (143, about what the wind alone moves).
+
 ### Step 8 — Cost
 
 Measured in the lab and in a forest of a few thousand copies: triangles per
