@@ -452,12 +452,39 @@ func addSpriteInstance(
   layer: view Int
   toon: view Bool
 ) {
+  addSpriteInstanceWithRim(
+    batch: batch
+    position: position
+    height: height
+    yaw: yaw
+    layer: layer
+    toon: toon
+    rimLight: true
+  )
+}
+
+# The same, with or without the sky's rim light at the picture's edges
+# (Material3d.rimLight of the meshes it stands for; carried as a negative
+# emissive, which sprite_billboard.wgsl reads back)
+func addSpriteInstanceWithRim(
+  batch: mod InstanceBatch
+  position: view Vec3
+  height: view Float
+  yaw: view Float
+  layer: view Int
+  toon: view Bool
+  rimLight: view Bool
+) {
   if batch.count >= batch.capacity {
     ret
   }
   var toonFlag: Int = 0
   if toon {
     toonFlag = 1
+  }
+  var rimEmissive: Float = 0.0
+  if not rimLight {
+    rimEmissive = -1.0
   }
   # The turn and the translation written straight in (no matrix product:
   # a frame adds tens of thousands of these)
@@ -480,7 +507,7 @@ func addSpriteInstance(
     b: 1.0
     metallic: 0.0
     roughness: height
-    emissive: 0.0
+    emissive: rimEmissive
     toon: toonFlag
     paletteBase: layer
   )

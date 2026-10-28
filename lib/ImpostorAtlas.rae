@@ -101,6 +101,11 @@ type ImpostorSubject {
   meshes: List(MeshHandle)
   albedos: List(Vec3)
   imageLayers: List(Int) = List.create(Int, cap: 0)
+  # Turn a leaf card's normal toward the eye where it faces away, as the
+  # leaf pass shades its cards (treeGen/LeafPass, leaf_cards.wgsl): a card's
+  # normal is its leaf mass's, and on a mass's far side it lit the impostor
+  # from behind (grey patches of sky light). Off: the normals as they are.
+  cardNormalsToEye: Bool = false
   center: Vec3
   radius: Float
   height: Float

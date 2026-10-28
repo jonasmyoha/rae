@@ -249,6 +249,20 @@ middle read as the real tree at 15, 40 and 120 m; the impostor is paler,
 bluer and more see-through, so its switch shows in the camera move
 (looks-development `treeReference/distance.html`).
 
+Second round (0.2.190: "the impostor is fully broken, like
+melted, with sky color"): a leaf card's normal is its leaf mass's, and on a
+mass's far side it faces away from the eye; the leaf pass turns it toward
+the eye, the bake kept it, so those cards were lit from behind with sky
+light. The bake now turns them the same way (`ImpostorSubject.cardNormalsToEye`,
+`impostor_bake.wgsl`), bakes the leaves with their filled outline
+(`TreeLevels.leafImpostorImagePixels`: the gaps between single leaves had
+become holes that differ between neighboring views), the impostor gets no
+sky rim when the leaves have none (`PropField.setPropKindSpriteRim`, a
+negative sprite emissive read by `sprite_billboard.wgsl`), the leaf
+picture's gaps carry the leaves' color, and for this tree the middle level
+reaches 100 m (`ReferenceTrees.referenceMiddleDistance`) so the 128-pixel
+impostor views are stretched less. Other trees' impostors are unchanged.
+
 ### Step 8 — Cost
 
 Measured in the lab and in a forest of a few thousand copies: triangles per

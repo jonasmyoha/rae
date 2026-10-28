@@ -20,6 +20,9 @@ open treeGen/LeafImage
 # (RendererImages.rendererAddSurfaceImagePixels, stamp 0 of LeafImage)
 const leafCardImageName: String = "treeGen/leafCard"
 
+# The impostor's leaf picture's name (leafImpostorImagePixels)
+const leafImpostorImageName: String = "treeGen/leafImpostor"
+
 # A level's leaves: one card mesh per tone, darkest first, and each tone's
 # color
 type LeafCardLevel {
@@ -28,8 +31,113 @@ type LeafCardLevel {
 }
 
 # The leaf stamp's pixels (linear RGBA, its gaps see-through)
+# Its see-through gaps take the leaves' own average color: the smaller mip
+# levels average gap and leaf texels together, and LeafImage's light gap
+# tone (right for the leaf pass's own filtering) turned a far crown pale
+# and grey in the impostor bake
 func leafCardImagePixels() ret List(Float) {
-  ret leafLayerPixels(layer: 0)
+  var pixels: List(Float) = leafLayerPixels(layer: 0)
+  let count: Int = pixels.length / 4
+  var red: Float = 0.0
+  var green: Float = 0.0
+  var blue: Float = 0.0
+  var weight: Float = 0.0
+  loop var i: Int = 0, i < count, ++i {
+    let alpha: Float = pixels.copyAtDefault(index: i * 4 + 3)
+    red = red + pixels.copyAtDefault(index: i * 4) * alpha
+    green = green + pixels.copyAtDefault(index: i * 4 + 1) * alpha
+    blue = blue + pixels.copyAtDefault(index: i * 4 + 2) * alpha
+    weight = weight + alpha
+  }
+  if weight <= 0.0 {
+    ret pixels
+  }
+  loop var i: Int = 0, i < count, ++i {
+    if pixels.copyAtDefault(index: i * 4 + 3) < 0.5 {
+      pixels.set(index: i * 4, value: red / weight)
+      pixels.set(index: i * 4 + 1, value: green / weight)
+      pixels.set(index: i * 4 + 2, value: blue / weight)
+    }
+  }
+  ret pixels
+}
+
+# The impostor's leaf picture: the spray's outline, softened and filled,
+# in the leaves' average color. An impostor view is a few pixels a card;
+# baked from the leaf stamp itself, the gaps between single leaves became
+# holes that differ from view to view, and the blend between neighboring
+# views smeared them into the crown as patches of sky. The filled outline
+# keeps the clumps and the gaps between them, not between single leaves.
+func leafImpostorImagePixels() ret List(Float) {
+  let leaves: List(Float) = leafCardImagePixels()
+  let size: Int = leafImageSize
+  var alpha: List(Float) = List.create(Float, cap: size * size)
+  loop var i: Int = 0, i < size * size, ++i {
+    alpha.add(value: leaves.copyAtDefault(index: i * 4 + 3))
+  }
+  # two box blurs of radius 18 px across, then down, each pass a running sum
+  loop var pass: Int = 0, pass < 4, ++pass {
+    var blurred: List(Float) = List.create(Float, cap: size * size)
+    loop var i: Int = 0, i < size * size, ++i {
+      blurred.add(value: 0.0)
+    }
+    let across: Bool = pass % 2 is 0
+    loop var line: Int = 0, line < size, ++line {
+      var sum: Float = 0.0
+      loop var k: Int = -18, k <= 18, ++k {
+        let at: Int = Math.clamp(val: k, low: 0, high: size - 1)
+        if across {
+          sum = sum + alpha.copyAtDefault(index: line * size + at)
+        } else {
+          sum = sum + alpha.copyAtDefault(index: at * size + line)
+        }
+      }
+      loop var step: Int = 0, step < size, ++step {
+        if across {
+          blurred.set(index: line * size + step, value: sum / 37.0)
+        } else {
+          blurred.set(index: step * size + line, value: sum / 37.0)
+        }
+        let leaving: Int = Math.clamp(val: step - 18, low: 0, high: size - 1)
+        let entering: Int = Math.clamp(val: step + 19, low: 0, high: size - 1)
+        if across {
+          sum = sum - alpha.copyAtDefault(index: line * size + leaving) + alpha.copyAtDefault(
+            index: line * size + entering
+          )
+        } else {
+          sum = sum - alpha.copyAtDefault(index: leaving * size + line) + alpha.copyAtDefault(
+            index: entering * size + line
+          )
+        }
+      }
+    }
+    alpha = blurred
+  }
+  var pixels: List(Float) = List.create(Float, cap: size * size * 4)
+  # every texel in the leaves' color (the gaps already carry it)
+  var red: Float = 0.0
+  var green: Float = 0.0
+  var blue: Float = 0.0
+  loop var i: Int = 0, i < size * size, ++i {
+    if leaves.copyAtDefault(index: i * 4 + 3) < 0.5 {
+      red = leaves.copyAtDefault(index: i * 4)
+      green = leaves.copyAtDefault(index: i * 4 + 1)
+      blue = leaves.copyAtDefault(index: i * 4 + 2)
+    }
+  }
+  loop var i: Int = 0, i < size * size, ++i {
+    pixels.add(value: red)
+    pixels.add(value: green)
+    pixels.add(value: blue)
+    # the outline where the softened spray covers more than a quarter
+    let cover: Float = Math.clamp(
+      val: (alpha.copyAtDefault(index: i) - 0.18) / 0.14
+      low: 0.0
+      high: 1.0
+    )
+    pixels.add(value: cover)
+  }
+  ret pixels
 }
 
 # How light card `card` is: its green's brightness times its occlusion

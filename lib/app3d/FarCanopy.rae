@@ -43,6 +43,9 @@ type FarCanopySettings {
 
 type FarCanopy {
   settings: FarCanopySettings
+  # the sky's rim light on the clusters: off when a tree kind's picture has
+  # it off (planFarCanopy, PropField.spriteRims)
+  rimLight: Bool = true
   # The canopy's own sprite pass, over its atlas (the clusters' pages)
   sprites: SpriteCache
   # Per cluster: its sphere's center (where it is drawn) and radius
@@ -174,6 +177,12 @@ func farCanopyClusters(
 # are handed to FarSprites: their fadeCenters are set here), for the bake
 func planFarCanopy(canopy: mod FarCanopy, field: view PropField, trees: mod List(FarSprite)) {
   canopy.plannedTrees = List.create(CanopyTree, cap: trees.length)
+  canopy.rimLight = true
+  loop let rim: view Bool in field.spriteRims {
+    if not rim {
+      canopy.rimLight = false
+    }
+  }
   canopy.plannedClusters = farCanopyClusters(
     field: field
     trees: trees
@@ -268,13 +277,14 @@ func gatherFarCanopy(canopy: mod FarCanopy, propView: view PropView, toon: view 
     let share: Float = canopy.shownShares.copyAtFallback(index: at, fallback: 1.0)
     let center: Vec3 = canopy.centers.copyAtDefault(index: cluster)
     let before: Int = canopy.batch.count
-    addSpriteInstance(
+    addSpriteInstanceWithRim(
       batch: canopy.batch
       position: center
       height: 1.0
       yaw: 0.0
       layer: cluster
       toon: toon
+      rimLight: canopy.rimLight
     )
     if share < 1.0 and canopy.batch.count > before {
       setInstanceFade(

@@ -50,6 +50,8 @@ type FarSprite {
   # The center of the far canopy cluster it stands in (app3d/FarCanopy):
   # its fade out is measured from there, as the cluster's fade in is
   fadeCenter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  # the sky's rim light, as its kind's picture has it (PropField.spriteRims)
+  rimLight: Bool = true
 }
 
 type FarSpriteSettings {
@@ -158,13 +160,15 @@ func farSpritesOf(field: view PropField, placements: view List(PropPlacement)) r
       continue
     }
     if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
-      sprites.add(value: farSpriteAt(
+      var sprite: FarSprite = farSpriteAt(
         position: placement.position
         centerZ: kind.centerHeight * placement.scale
         height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
         yaw: placement.yaw
         layer: layer
-      ))
+      )
+      sprite.rimLight = field.spriteRims.copyAtFallback(index: placement.kind, fallback: true)
+      sprites.add(value: sprite)
     }
   }
   ret sprites
@@ -390,13 +394,14 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
           }
         }
         let before: Int = farSprites.batch.count
-        addSpriteInstance(
+        addSpriteInstanceWithRim(
           batch: farSprites.batch
           position: sprite.position
           height: sprite.height * grow
           yaw: sprite.yaw
           layer: sprite.layer
           toon: toon
+          rimLight: sprite.rimLight
         )
         if fadeShare > 0.0 and farSprites.batch.count > before {
           setInstanceFade(
