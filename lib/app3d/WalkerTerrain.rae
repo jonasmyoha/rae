@@ -43,7 +43,8 @@ open ecs/World
 open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
-open app3d/GroveTrees
+open treeSets/TreeSet
+open treeSets/TreeSetKinds
 open app3d/PropInstancer
 open app3d/PropField
 open app3d/PropFieldFrame
@@ -112,7 +113,7 @@ type DrawnProp {
   model: Mat4
 }
 
-# A tree's species (app3d/GroveTrees), for a tree that is an entity (one
+# A tree's species (its terrain's treeSet), for a tree that is an entity (one
 # Box3D trunk per tree: app3d/IslandForest)
 type TreeVariant {
   species: Int
@@ -120,7 +121,7 @@ type TreeVariant {
 
 # The forest's PropField: the square round the origin it covers (m), its
 # cells (m), the most trees one batch holds (0: PropField's own limit), and
-# where its sparser crowns and its billboards end (GroveTrees.addForestKinds);
+# where its sparser crowns and its billboards end (treeSets/TreeSetKinds);
 # `farReach` how far past that its trees still stand as far billboards
 # (app3d/FarSprites) on a coarse far ground (0: none, the field is all)
 type ForestFieldSettings {
@@ -180,6 +181,8 @@ type WalkerTerrain {
   # Harebells: one shared patch mesh in two instanced material parts.
   harebellParts: List(PropInstancer)
   grassProp: PropInstancer
+  # The set of tree species the forest is planted from (treeSets/TreeSet)
+  treeSet: TreeSet
   # The forest: every tree species as a kind at three levels of detail, its
   # placements in cells; only what is near and in view is drawn, one
   # instanced draw per species, level and part
@@ -274,6 +277,7 @@ func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
 # The empty forest field of `settings`: its kinds, no trees yet (the far
 # level's billboard pictures go into `sprites`' image array)
 func createForestField(
+  treeSet: view TreeSet
   renderer: mod DeferredRenderer
   sprites: mod SpriteCache
   settings: view ForestFieldSettings
@@ -287,7 +291,8 @@ func createForestField(
   if settings.batchLimit > 0 {
     field.batchLimit = settings.batchLimit
   }
-  addForestKinds(
+  addTreeSetKinds(
+    treeSet: treeSet
     field: field
     renderer: renderer
     sprites: sprites
@@ -842,7 +847,8 @@ func spawnProp(
 # The terrain of `biome` at `groundZ`: a window of `gridSide` x `gridSide`
 # cells round the walker (its tiles, and one entity of every small prop kind
 # per cell spawned into the app's tables) and an empty forest field of
-# `forest` (the app plants it once the spawn is known). Nothing is placed
+# `forest` of `treeSet`'s species (the app plants it once the spawn is
+# known). Nothing is placed
 # until the first updateInfiniteTerrain.
 func createWalkerTerrain(
   renderer: mod DeferredRenderer
@@ -854,6 +860,7 @@ func createWalkerTerrain(
   groundZ: view Float
   biome: view BiomeConfig
   forest: view ForestFieldSettings
+  treeSet: view TreeSet
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
   let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
@@ -882,6 +889,7 @@ func createWalkerTerrain(
   }
   var sprites: SpriteCache = createSpriteCache()
   var forestField: PropField = createForestField(
+    treeSet: treeSet
     renderer: renderer
     sprites: sprites
     settings: forest
@@ -943,13 +951,14 @@ func createWalkerTerrain(
       material: grassMaterial
       capacity: cellCount * 2
     )
+    treeSet: treeSet
     forest: own forestField
     sprites: own sprites
     farTrees: own createFarSprites(settings: farSettings)
     canopy: own createFarCanopy(settings: canopySettings)
     farGround: own farGround
     hasFarGround: hasFarGround
-    bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
+    bushParts: own createTreeSetBushParts(treeSet: treeSet, renderer: renderer, capacity: cellCount)
     drawnProps: List.create(DrawnProp, cap: cellCount * 5)
     drawCenterCellX: 1000000000
     drawCenterCellY: 1000000000

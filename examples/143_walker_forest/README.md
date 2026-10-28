@@ -42,7 +42,7 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   lib/app3d/PropField), as the downstream game's nature system does it: every
   tree is a placement, sorted into 40 m cells. Each frame only the cells and
   trees within the draw distance and in view are gathered, each at its level
-  of detail. `lib/app3d/GroveTrees` uses full near meshes to 30 m, reduced
+  of detail. `lib/treeSets/stylized/StylizedTrees` uses full near meshes to 30 m, reduced
   middle meshes to 60 m, and baked impostor sprites to 140 m; the first two
   levels cast shadows. Birch currently reuses its near mesh for the middle
   level. The renderer submits one instanced batch per species, level and part.

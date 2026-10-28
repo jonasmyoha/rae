@@ -1,6 +1,7 @@
 # Tree sets: a low-poly museum set and the stylized set
 
-Status: planned (2026-10-28); queued as six steps (§5).
+Status: planned (2026-10-28); queued as six steps (§5); step 1 done
+(0.2.182, §5.1).
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -134,6 +135,27 @@ lib/treeSets/
    Autumn Grove stays the museum.
 6. Clean-up: `lib/procgen` keeps only non-tree modules; the rejected tree
    modules go as the stylized set stops using them.
+
+### 5.1 Step 1, done (0.2.182)
+
+- `lib/treeSets/TreeSet.rae`: the `TreeSet` type (its species with their
+  heights, the stand and mixed pick tables, the stand size and the mixed
+  share) and the functions that read it (`treeSpeciesAt`, `treeScaleAt`,
+  `treeHeightFor`, `treeTrunkTop`). The physics trunk and the billboard
+  picture settings (`treeTrunkRadius`, `spriteCutoff`, ...) live there too:
+  they are the same for every set.
+- `lib/treeSets/stylized/StylizedTrees.rae` is `app3d/GroveTrees` moved:
+  `createStylizedTrees()` is its data, `addStylizedForestKinds` and
+  `createStylizedBushParts` build its meshes and pictures.
+- `lib/treeSets/TreeSetKinds.rae` builds a set's kinds and bushes by its
+  `style` (a set is data; Rae has no function values), so step 2 adds one
+  branch for the low-poly set.
+- `WalkerTerrain` owns the set (`terrainSystem.treeSet`, given by
+  `WalkerApp`); `IslandForest`, `WideForest`, the trunks and the climb test
+  read it. `app3d/TreeCoverage` no longer knows any set: it compares two
+  levels' parts, and `StylizedTrees.speciesLevelParts` gives them.
+- Case `1253_tree_set`. The look did not change: looks-development
+  `rendering/treeSets.html` (136, 137, 143 before and after).
 
 ## 6. Decisions
 

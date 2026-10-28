@@ -12,7 +12,7 @@ open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
 open app3d/CharacterController
-open app3d/GroveTrees
+open treeSets/TreeSet
 open app3d/WalkerPhysics
 open app3d/WalkerPhysicsChecks
 open app3d/WalkerTerrain
@@ -83,9 +83,10 @@ func bushSpots(
 
 # A static trunk for every tree entity (every row of `treeVariants`), at its
 # tree's current pose, up into its crown (WalkerPhysics.addTreeTrunk,
-# GroveTrees.treeTrunkTop of its species and scale). The number of trunks.
+# treeSets/TreeSet.treeTrunkTop of its species and scale in `treeSet`). The number of trunks.
 func addTreeTrunks(
   physicsSystem: mod WalkerPhysics
+  treeSet: view TreeSet
   treeVariants: view ComponentTable(TreeVariant)
   transforms: mod ComponentTable(Transform3D)
 ) ret Int {
@@ -96,6 +97,7 @@ func addTreeTrunks(
       transforms: transforms
       entityId: entityId
       height: treeTrunkTop(
+        treeSet: treeSet
         species: componentCopyAtDefault(this: treeVariants, i: i).species
         scale: componentView(this: transforms, entityId: entityId).scale.z
       )

@@ -1,5 +1,5 @@
 # app3d/WideForest — the walker's wide forest world (143): a terrain that is
-# not an island, and tens of thousands of trees (app3d/GroveTrees) over a
+# not an island, and tens of thousands of trees (its terrain's treeSet) over a
 # square wideForestExtent meters on a side round the origin, planted ONCE at
 # startup into the WalkerTerrain's PropField. The field sorts them into
 # cells, and each frame only the cells and trees near and in view are
@@ -13,13 +13,13 @@
 # when the forest-density noise says forest there (dense woods, thin woods
 # and open meadows, each a few hundred meters across), it is grassy land
 # (not lake, beach or bare rock) and it is outside the spawn clearing. The
-# species come in stands (treeSpeciesAt).
+# species come in stands (treeSets/TreeSet.treeSpeciesAt).
 import Math
 import Noise
 import Vec3
 open Scene3d
 open WorldBiome
-open app3d/GroveTrees
+open treeSets/TreeSet
 open app3d/PropField
 open app3d/WalkerTerrain
 
@@ -59,7 +59,7 @@ func wideForestBiome() ret BiomeConfig {
 
 # The forest's PropField: the forested square in 40 m cells, at most 1024
 # trees per batch; the sparser crowns from 60 m, billboards from 140 m
-# (app3d/GroveTrees.addForestKinds), and past that far billboards on the far
+# (treeSets/TreeSetKinds.addTreeSetKinds), and past that far billboards on the far
 # ground out to 1,800 m (app3d/FarSprites; the whole forest from its middle)
 func wideForestSettings() ret ForestFieldSettings {
   ret ForestFieldSettings {
@@ -134,7 +134,12 @@ func plantWideForest(
           continue
         }
       }
-      let species: Int = treeSpeciesAt(x: x, y: y, number: planted)
+      let species: Int = treeSpeciesAt(
+        treeSet: terrainSystem.treeSet
+        x: x
+        y: y
+        number: planted
+      )
       addPropPlacement(
         field: terrainSystem.forest
         placement: {
@@ -145,7 +150,7 @@ func plantWideForest(
             z: walkerTerrainHeight(terrainSystem: terrainSystem, x: x, y: y) - 0.05
           )
           yaw: Noise.hash2(x: column, y: row, seed: 814) * 6.2831853
-          scale: treeScaleAt(species: species, number: planted)
+          scale: treeScaleAt(treeSet: terrainSystem.treeSet, species: species, number: planted)
         }
       )
       planted = planted + 1

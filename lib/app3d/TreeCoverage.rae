@@ -8,7 +8,6 @@
 import Math
 import Vec3
 open app3d/SpriteBake
-open app3d/GroveTrees
 
 # A copy of `mesh` turned by `angle` (radians) about +Z
 func turnedMesh(mesh: view MeshData, angle: view Float) ret MeshData {
@@ -55,37 +54,15 @@ func sideArea(parts: view List(MeshData), angle: view Float, resolution: view In
   ret covered.toFloat() * unitsPerPixel * unitsPerPixel
 }
 
-# A species' level: its wood and its leaves in three tones, at `patches`
-# patches (the leaf-patch forms) or `leaves` leaves (the autumn trees, palm)
-func speciesLevelParts(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
-  var parts: List(MeshData) = List.create(MeshData, cap: 4)
-  parts.add(value: speciesWoodMesh(species: species))
-  loop var tone: Int = 0, tone < 3, ++tone {
-    parts.add(value: speciesLeavesMesh(
-      species: species
-      tone: tone
-      patches: patches
-      leaves: leaves
-    ))
-  }
-  ret parts
-}
-
 # A level's covered area over the near level's, from each of `directions`
-# turns: one share per direction (1.0 = the same)
+# turns: one share per direction (1.0 = the same). Each level is its parts
+# (a tree set gives them: StylizedTrees.speciesLevelParts).
 func levelCoverageShares(
-  species: view Int
-  patches: view Int
-  leaves: view Int
+  near: view List(MeshData)
+  level: view List(MeshData)
   directions: view Int
   resolution: view Int
 ) ret List(Float) {
-  let near: List(MeshData) = speciesLevelParts(
-    species: species
-    patches: nearPatches
-    leaves: nearLeaves
-  )
-  let level: List(MeshData) = speciesLevelParts(species: species, patches: patches, leaves: leaves)
   var shares: List(Float) = List.create(Float, cap: directions)
   loop var direction: Int = 0, direction < directions, ++direction {
     let angle: Float = direction.toFloat() * 6.2831853 / directions.toFloat()

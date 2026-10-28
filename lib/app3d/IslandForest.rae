@@ -1,5 +1,5 @@
 # app3d/IslandForest — the forest of the walker examples' island (136, 137):
-# islandForestSize trees (app3d/GroveTrees) planted ONCE over the whole
+# islandForestSize trees (its terrain's treeSet) planted ONCE over the whole
 # island at startup. The island is small (lib/WorldBiome's 60 m radius and its
 # shore) and does not change, so its trees are not streamed with the small
 # props: every tree is one placement in the WalkerTerrain's PropField (drawn
@@ -11,7 +11,7 @@
 # land, outside the spawn clearing, where the forest-density noise says
 # forest, and not closer than islandForestSpacing to a tree already planted.
 # The density noise leaves meadows between woods; the close spacing presses
-# the crowns into each other; and the species come in stands (treeSpeciesAt).
+# the crowns into each other; and the species come in stands (treeSets/TreeSet.treeSpeciesAt).
 import Math
 import Noise
 import Vec3
@@ -20,7 +20,7 @@ open WorldBiome
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
-open app3d/GroveTrees
+open treeSets/TreeSet
 open app3d/PropField
 open app3d/WalkerTerrain
 
@@ -118,8 +118,13 @@ func plantIslandForest(
       z: walkerTerrainHeight(terrainSystem: terrainSystem, x: x, y: y) - 0.05
     )
     planted.add(value: position)
-    let species: Int = treeSpeciesAt(x: x, y: y, number: number)
-    let scale: Float = treeScaleAt(species: species, number: number)
+    let species: Int = treeSpeciesAt(
+      treeSet: terrainSystem.treeSet
+      x: x
+      y: y
+      number: number
+    )
+    let scale: Float = treeScaleAt(treeSet: terrainSystem.treeSet, species: species, number: number)
     let yaw: Float = Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
     addPropPlacement(
       field: terrainSystem.forest

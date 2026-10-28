@@ -33,7 +33,7 @@ open ecs/Transform
 open ecs/Tag
 open app3d/CharacterController
 open app3d/WalkerCharacter
-open app3d/GroveTrees
+open treeSets/TreeSet
 open app3d/PropField
 open box3d/ecs/PhysicsTypes
 open box3d/ecs/Physics
@@ -735,9 +735,9 @@ func stepPhysicsFrame(
 
 # ----- tree trunks -------------------------------------------------------
 # A static body with a trunk capsule for the tree `entityId` at its pose in
-# `transforms`, `height` m tall (GroveTrees.treeTrunkTop: up into its
+# `transforms`, `height` m tall (treeSets/TreeSet.treeTrunkTop: up into its
 # crown, so a climber goes up it), as thick for every tree
-# (GroveTrees.treeTrunkRadius). A tree that moves only needs its body moved,
+# (treeSets/TreeSet.treeTrunkRadius). A tree that moves only needs its body moved,
 # which the push system does when its Transform3D changes.
 func addTreeTrunk(
   physicsSystem: mod WalkerPhysics
@@ -793,7 +793,7 @@ const trunkPoolMove: Float = 2.0
 # Where an unused trunk waits: this far below the ground
 const trunkPoolParked: Float = -1000.0
 
-# The pool's settings: trunks only, each as thick (GroveTrees.treeTrunkRadius)
+# The pool's settings: trunks only, each as thick (treeSets/TreeSet.treeTrunkRadius)
 # and reaching up into its tree's crown (walkerTrunkRules), the default
 # material
 func walkerTrunkPoolSettings() ret PropPoolSettings {

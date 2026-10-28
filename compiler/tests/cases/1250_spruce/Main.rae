@@ -1,6 +1,7 @@
 open procgen/Spruce
 open procgen/SpruceControl
-open app3d/GroveTrees
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
 open procgen/SculpturalFork
 open Mesh3d
 open Vec3
@@ -90,7 +91,11 @@ func main() ret Int {
         }
       }
     }
-    let scale: Float = treeScaleAt(species: speciesSpruce, number: sample)
+    let scale: Float = treeScaleAt(
+      treeSet: createStylizedTrees()
+      species: speciesSpruce
+      number: sample
+    )
     if scale < 5.5 or scale > 8.5 {
       ret 5
     }

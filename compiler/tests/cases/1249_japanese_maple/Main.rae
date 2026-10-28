@@ -1,4 +1,5 @@
-open app3d/GroveTrees
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
 open procgen/JapaneseMaple
 open procgen/SculpturalFork
 open Mesh3d
@@ -176,8 +177,16 @@ func main() ret Int {
     }
   }
   loop var sample: Int = 0, sample < 64, ++sample {
-    let scale: Float = treeScaleAt(species: speciesCrimson, number: sample)
-    let height: Float = treeHeightFor(species: speciesCrimson, scale: scale)
+    let scale: Float = treeScaleAt(
+      treeSet: createStylizedTrees()
+      species: speciesCrimson
+      number: sample
+    )
+    let height: Float = treeHeightFor(
+      treeSet: createStylizedTrees()
+      species: speciesCrimson
+      scale: scale
+    )
     if height < 3.2 or height > 4.8 {
       ret 9
     }
