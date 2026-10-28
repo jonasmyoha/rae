@@ -259,9 +259,9 @@ light. The bake now turns them the same way (`ImpostorSubject.cardNormalsToEye`,
 become holes that differ between neighboring views), the impostor gets no
 sky rim when the leaves have none (`PropField.setPropKindSpriteRim`, a
 negative sprite emissive read by `sprite_billboard.wgsl`), the leaf
-picture's gaps carry the leaves' color, and for this tree the middle level
-reaches 100 m (`ReferenceTrees.referenceMiddleDistance`) so the 128-pixel
-impostor views are stretched less. Other trees' impostors are unchanged.
+picture's gaps carry the leaves' color. It also moved this tree's impostor
+start to 100 m: a workaround for the broken impostor, not a fix, removed
+again in the fourth round. Other trees' impostors are unchanged.
 
 Third round (0.2.191: the T02 forest's impostors "blue
 pixels all over"): seen from above, cards on a mass's far side showed
@@ -272,6 +272,11 @@ by 0.6, and the sprite pass reads an impostor's normal from the four
 texels round it weighted by their alpha (`impostorNormalAt`), so an empty
 texel's packed normal (straight up) no longer reaches a crown's edge. The
 walkers' forests differ by 0.5% (143, about what the wind alone moves).
+
+Fourth round (0.2.192): the 100 m impostor start is undone. With the real
+causes fixed it was no longer needed and only kept the middle level (~3,600
+triangles a tree) out to 100 m; the T02 tree uses the walkers' distances
+again (near to 30 m, middle to 60 m, impostor to 140 m).
 
 ### Step 8 — Cost
 
