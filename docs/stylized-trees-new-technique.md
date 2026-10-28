@@ -9,6 +9,18 @@ first pass without references or review input. This document is
 what changes from the old way, so each tree task carries over the method,
 not the old tree's pieces.
 
+**Each tree is different.** The leaf masses (clumps) are what made the
+T02 tree work, but they are one technique, not a rule. Some trees will
+work well with clumps (the lime, the maples, probably the ginkgo); others
+may need something else: a cypress may read better as one dense column
+than as stacked clumps, a birch's hanging twigs may need cards along
+drooping branches, a palm has fronds, a spruce has tiers. Each tree task
+first looks at what makes that tree read as itself and picks the
+technique that fits it, keeping the rest of the new method (painted
+pictures, the wood rules, PBR without a sky rim, the levels and the
+impostor path). The per-tree table in §4 is a starting guess, not a
+prescription.
+
 ## 1. Old and new, side by side
 
 | | old trees (lib/stylizedTrees: Lime, SugarMaple, RedMaple, Ginkgo, JapaneseMaple, Birch, Cypress, Palm, FluffyFoliage, Foliage, FoliageCards, CrownScaffold) | new technique (lib/treeGen, the T02 tree) |
@@ -28,7 +40,7 @@ not the old tree's pieces.
 ## 2. What carries over and what does not
 
 Carried over from the T02 tree as it is: the skeleton growth, BranchDetail,
-LimbJoin, BarkMesh, LeafCards' filling of masses, the three-tone card
+LimbJoin, BarkMesh, LeafCards' filling of masses (where the tree suits masses), the three-tone card
 meshes and levels (TreeLevels), the impostor path and its fixes, the set
 integration (ReferenceTrees.addReferenceKind, a kind in the set's impostor
 atlas, a share of the stands), PBR leaves with no rim.
