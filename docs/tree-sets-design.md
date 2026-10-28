@@ -1,8 +1,8 @@
 # Tree sets: a low-poly museum set and the stylized set
 
 Status: planned (2026-10-28); queued as six steps (§5); steps 1 and 2
-done (0.2.182 and 0.2.183, §5.1, §5.2); step 3's museum done (§5.3), its
-studies' move to the tree lab queued as its own step.
+done (0.2.182 and 0.2.183, §5.1, §5.2); step 3 done: the museum and the
+studies' move to the tree lab (§5.3, §5.4).
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -205,9 +205,36 @@ stylized set uses (found in step 2).
   reference pictures moved to `examples/146_treeLab/references/`. They
   were built on 138's island (its ground height, paths, obstacles, spots
   and views), so moving them into the tree lab is a step of its own, ported
-  from rae `fc8dbdc3` where they still run. Until then the
-  `tools/capture-*` study scripts that start 138 with a study view do not
-  work.
+  from rae `fc8dbdc3` where they still run (§5.4).
+
+### 5.4 Step 3b, the studies in the tree lab, done
+
+- `RAE_TREELAB_STUDY=<view>` shows a study in the tree lab (146) in place of
+  the T02 scene (`examples/146_treeLab/LabStudies.rae`): `maples`,
+  `japanese-maple`, `ginkgo`, `birches` (and `-side`, `-under`, `-warm`,
+  `-cool`, `-night`), `forks-front` / `-side` / `-grazing`, `flowers`,
+  `bellflowers` (and `-side`, `-backlit`).
+- The study files moved from 138 as they were at `fc8dbdc3` (`BirchGrove`,
+  `BirchStudy`, `ForkStudy`, `GinkgoGrove`, `JapaneseMapleGrove`,
+  `MeadowFlowers`); `StudyTrees.rae` plants the maples and the date palm as
+  138's `GroveScene` did. Each study stands at its old spot on the lab's
+  flat ground, seen from 138's camera for the view (the same orbit through
+  `app3d/CameraRig`) and lit as 138's editor panel lit it at the view's
+  hour (the Preetham sky, the 20,000 lux editor sun). The isolate, control,
+  bare, seed and height switches still work.
+- Around the studies the lab has its flat ground and clouds instead of the
+  grove's island, path, rocks, water and museum trees, so the pictures
+  differ there; the studies are the same (looks-development
+  `rendering/treeSets.html#studies`, all sixteen views).
+- The 146 gate (`run_examples.sh`) renders the T02 scene and all sixteen
+  views. The study capture scripts (`tools/capture-birch-*`,
+  `capture-fork-recovery`, `capture-ginkgo-studies`,
+  `capture-maple-studies`, `capture-red-maple-studies`,
+  `capture-japanese-maple-studies`, `capture-daisy-recovery`) start 146. The
+  grass and landscape-comparison scripts (`capture-grass-*`,
+  `capture-landscape-comparisons.sh`) used 138's `grass` view and its
+  island, which neither 138 nor the lab has now; they are a record of that
+  work and are not ported.
 
 ## 6. Decisions
 

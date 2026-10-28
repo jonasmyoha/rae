@@ -60,10 +60,10 @@ def main():
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'binaryReused': bool(args.binary), 'sourceHashesAtCapture': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in [repo / 'lib/procgen/JapaneseMaple.rae', repo / 'lib/procgen/CrownScaffold.rae',
-                                              repo / 'lib/app3d/GroveTrees.rae',
-                                              repo / 'examples/138_procgen_showcase/GroveScene.rae',
-                                              repo / 'examples/138_procgen_showcase/JapaneseMapleGrove.rae',
-                                              repo / 'examples/138_procgen_showcase/Main.rae']},
+                                              repo / 'lib/stylizedTrees/StylizedTrees.rae',
+                                              repo / 'examples/146_treeLab/StudyTrees.rae',
+                                              repo / 'examples/146_treeLab/JapaneseMapleGrove.rae',
+                                              repo / 'examples/146_treeLab/Main.rae']},
                 'clock': '180 frames, 1/30 second' if args.motion else '60 frames, 1/60 second',
                 'wind': args.wind, 'walkDistance': 2.5 if args.motion else 0, 'imageSize': [1280, 800],
                 'assetHashes': {name: hashlib.sha256((repo / 'lib/assets/trees' / name).read_bytes()).hexdigest()
@@ -77,7 +77,7 @@ def main():
                 continue
             env = dict(os.environ, RAE_UI_HEADLESS='1', RAE_HEADLESS_FRAMES='180' if args.motion else '60',
                        RAE_FIXED_DT='0.033333333' if args.motion else '0.016666667',
-                       RAE_WIND=str(args.wind), RAE_DEBUG_OVERLAY='0', RAE_GROVE_VIEW='japanese-maple', RAE_CAMERA_AT=camera,
+                       RAE_WIND=str(args.wind), RAE_DEBUG_OVERLAY='0', RAE_TREELAB_STUDY='japanese-maple', RAE_CAMERA_AT=camera,
                        RAE_JAPANESE_MAPLE_SINGLE='1' if name.startswith('single') else '0',
                        RAE_JAPANESE_MAPLE_CONTROL=str(int(control)), RAE_JAPANESE_MAPLE_BARE=str(int(bare)),
                        RAE_JAPANESE_MAPLE_ISOLATE=str(int(isolated)), RAE_JAPANESE_MAPLE_SEED=str(seed), RAE_JAPANESE_MAPLE_HEIGHT=str(height),
@@ -90,8 +90,8 @@ def main():
                 frames.mkdir(exist_ok=True)
             command = [str(binary)]
             if buildNeeded:
-                command = [str(repo / 'compiler/bin/rae'), 'run', '--project', 'examples/138_procgen_showcase',
-                           'examples/138_procgen_showcase/Main.rae']
+                command = [str(repo / 'compiler/bin/rae'), 'run', '--project', 'examples/146_treeLab',
+                           'examples/146_treeLab/Main.rae']
                 buildNeeded = False
             with (output / f'{name}.log').open('w') as log:
                 subprocess.run(command, cwd=repo, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=180, check=True)

@@ -1,0 +1,310 @@
+# The tree lab's studies: the maples and the date palm, planted as Autumn
+# Grove planted them before it became the low-poly museum (rae fc8dbdc3,
+# docs/tree-sets-design.md §5.3): the sugar and red maples, the Japanese
+# maple and the date palm at their old grove spots, each a World3d entity
+# per mesh. RAE_MAPLE_CONTROL / RAE_RED_MAPLE_CONTROL /
+# RAE_JAPANESE_MAPLE_CONTROL draw the older broadleaf instead; the _BARE
+# switches leave the leaves off.
+import Math
+import Sys
+open Vec3
+open Mesh3d
+open Scene3d
+open FoliageMesh
+open RendererDeferred
+open RendererImages
+open procgen/Foliage
+open procgen/SugarMaple
+open procgen/RedMaple
+open ecs/Entity
+
+func paint(red: view Float, green: view Float, blue: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: red, y: green, z: blue)
+    metallic: 0
+    roughness: 1
+    emission: Vec3.create(x: 0, y: 0, z: 0)
+    toon: true
+  }
+}
+
+func place(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  mesh: view MeshData
+  material: view Material3d
+  position: view Vec3
+  scale: view Vec3
+  rotation: view Float
+) {
+  let handle: MeshHandle = uploadFoliage(renderer: renderer, mesh: mesh)
+  let entityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: handle
+    material: material
+    position: position
+    rotation: Vec3.create(x: 0, y: 0, z: rotation)
+    scale: scale
+  )
+}
+
+func foliagePaint(species: view Int, tone: view Int) ret Material3d {
+  let variation: Float = 0.85 + tone.toFloat() * 0.13
+  if species is 0 {
+    ret paint(red: 0.86 * variation, green: 0.39 * variation, blue: 0.022)
+  }
+  if species is 1 {
+    ret paint(red: 0.72 * variation, green: 0.13 * variation, blue: 0.025)
+  }
+  if species is 2 {
+    ret paint(red: 0.28 * variation, green: 0.42 * variation, blue: 0.045)
+  }
+  ret paint(red: 0.33 * variation, green: 0.035 * variation, blue: 0.022)
+}
+
+# One tree: the wood, then its leaves in three tones. Maples use their
+# joined species scaffolds; the unchanged broadleaf and palm paths remain
+# for other presets and explicit controls.
+func plantTree(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  position: view Vec3
+  height: view Float
+  width: view Float
+  seed: view Int
+  species: view Int
+  palm: view Bool
+) {
+  let bark: Material3d = paint(red: 0.16, green: 0.073, blue: 0.039)
+  let unit: Vec3 = Vec3.create(x: 1, y: 1, z: 1)
+  if palm {
+    let wood: MeshData = palmWood(seed: seed, height: height, width: width)
+    place(
+      world: world
+      renderer: renderer
+      mesh: wood
+      material: bark
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = palmLeaves(
+        seed: seed
+        height: height
+        width: width
+        tone: tone
+        leafCount: fullLeafCount
+      )
+      place(
+        world: world
+        renderer: renderer
+        mesh: leaves
+        material: foliagePaint(species: species, tone: tone)
+        position: position
+        scale: unit
+        rotation: 0
+      )
+    }
+    ret
+  }
+  if species is 0 and Sys.getEnv(name: "RAE_MAPLE_CONTROL") is not "1" {
+    let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: height, width: width)
+    let barkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: sugarMapleBarkTexture())
+    let leafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: sugarMapleLeafTexture())
+    var woodMaterial: Material3d = bark
+    woodMaterial.baseColor = sugarMapleWoodColor()
+    woodMaterial.colorTextureLayer = barkLayer
+    place(
+      world: world
+      renderer: renderer
+      mesh: tree.wood
+      material: woodMaterial
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    var triangles: Int = tree.wood.indices.length / 3
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = sugarMapleLeaves(tree: tree, seed: seed, tone: tone)
+      triangles = triangles + leaves.indices.length / 3
+      if Sys.getEnv(name: "RAE_MAPLE_BARE") is not "1" {
+        var material: Material3d = foliagePaint(species: species, tone: tone)
+        material.baseColor = sugarMapleLeafColor(tone: tone)
+        material.colorTextureLayer = leafLayer
+        place(
+          world: world
+          renderer: renderer
+          mesh: leaves
+          material: material
+          position: position
+          scale: unit
+          rotation: 0
+        )
+      }
+    }
+    log(
+      "[sugar-maple] seed={seed} wood={tree.wood.vertCount}v sprays={tree.sprays.length} total={triangles}t"
+    )
+    ret
+  }
+  if species is 1 and Sys.getEnv(name: "RAE_RED_MAPLE_CONTROL") is not "1" {
+    let tree: RedMapleTree = redMapleTree(seed: seed, height: height, width: width)
+    let barkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: redMapleBarkTexture())
+    let leafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: redMapleLeafTexture())
+    var woodMaterial: Material3d = bark
+    woodMaterial.baseColor = redMapleWoodColor()
+    woodMaterial.colorTextureLayer = barkLayer
+    place(
+      world: world
+      renderer: renderer
+      mesh: tree.wood
+      material: woodMaterial
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    var triangles: Int = tree.wood.indices.length / 3
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = redMapleLeaves(tree: tree, seed: seed, tone: tone)
+      triangles = triangles + leaves.indices.length / 3
+      if Sys.getEnv(name: "RAE_RED_MAPLE_BARE") is not "1" {
+        var material: Material3d = foliagePaint(species: species, tone: tone)
+        material.baseColor = redMapleLeafColor(tone: tone)
+        material.colorTextureLayer = leafLayer
+        place(
+          world: world
+          renderer: renderer
+          mesh: leaves
+          material: material
+          position: position
+          scale: unit
+          rotation: 0
+        )
+      }
+    }
+    log(
+      "[red-maple] seed={seed} wood={tree.wood.vertCount}v sprays={tree.sprays.length} total={triangles}t"
+    )
+    ret
+  }
+  if species is 3 and Sys.getEnv(name: "RAE_JAPANESE_MAPLE_CONTROL") is not "1" {
+    plantJapaneseMaple(
+      world: world
+      renderer: renderer
+      position: position
+      height: height
+      width: width
+      seed: seed
+    )
+    ret
+  }
+  let tree: BroadleafTree = broadleafTree(seed: seed, height: height, width: width)
+  place(
+    world: world
+    renderer: renderer
+    mesh: tree.wood
+    material: bark
+    position: position
+    scale: unit
+    rotation: 0
+  )
+  if species is 3 and Sys.getEnv(name: "RAE_JAPANESE_MAPLE_BARE") is "1" {
+    ret
+  }
+  if species is 0 and Sys.getEnv(name: "RAE_MAPLE_BARE") is "1" {
+    ret
+  }
+  if species is 1 and Sys.getEnv(name: "RAE_RED_MAPLE_BARE") is "1" {
+    ret
+  }
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let leaves: MeshData = broadleafLeaves(
+      tips: tree.tips
+      seed: seed
+      height: height
+      width: width
+      tone: tone
+      leafCount: fullLeafCount
+    )
+    place(
+      world: world
+      renderer: renderer
+      mesh: leaves
+      material: foliagePaint(species: species, tone: tone)
+      position: position
+      scale: unit
+      rotation: 0
+    )
+  }
+}
+
+# A tree's place and shape
+type StudyTreeSpot {
+  x: Float
+  y: Float
+  height: Float
+  width: Float
+  seed: Int
+  species: Int
+  palm: Bool
+}
+
+func studyTreeSpots() ret List(StudyTreeSpot) {
+  ret List(StudyTreeSpot) {
+    {
+      x: -4.8
+      y: 2
+      height: 4.7
+      width: 2.05
+      seed: 501
+      species: 0
+      palm: false
+    }
+    {
+      x: 4.2
+      y: 4
+      height: 5.8
+      width: 1.8
+      seed: 605
+      species: 1
+      palm: false
+    }
+    {
+      x: -0.9
+      y: 8
+      height: 6.4
+      width: 1.7
+      seed: 710
+      species: 0
+      palm: false
+    }
+    {
+      x: -8.1
+      y: 7.5
+      height: 4.2
+      width: 1.8
+      seed: 301
+      species: 3
+      palm: false
+    }
+    {
+      x: 7.5
+      y: 9
+      height: 5.2
+      width: 2.1
+      seed: 903
+      species: 2
+      palm: true
+    }
+    {
+      x: 5.8
+      y: -1.8
+      height: 2.6
+      width: 1.15
+      seed: 217
+      species: 0
+      palm: false
+    }
+  }
+}

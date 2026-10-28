@@ -1,0 +1,79 @@
+# Two bare joined-fork studies. They stay separate from species generators so
+# later tree tasks can adopt the primitive deliberately instead of changing
+# every tree at once.
+open Vec3
+open Mesh3d
+open Scene3d
+open FoliageMesh
+open RendererDeferred
+open procgen/SculpturalFork
+open procgen/CurvedFork
+import Sys
+open ecs/Entity
+
+func forkStudyMaterial() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.31, y: 0.22, z: 0.14)
+    metallic: 0
+    roughness: 0.92
+    emission: Vec3.create(x: 0, y: 0, z: 0)
+    toon: false
+  }
+}
+
+func placeForkStudy(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  mesh: view MeshData
+  position: view Vec3
+  rotation: view Float
+) {
+  let meshHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: mesh)
+  let entityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: meshHandle
+    material: forkStudyMaterial()
+    position: position
+    rotation: Vec3.create(x: 0, y: 0, z: rotation)
+    scale: Vec3.create(x: 1, y: 1, z: 1)
+  )
+}
+
+func addForkStudy(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  obstacles: mod List(StudyObstacle)
+) {
+  let started: Int = nowNs()
+  let control: Bool = Sys.getEnv(name: "RAE_FORK_CONTROL") is "1"
+  let young: SculpturalFork = forkStudyTree(seed: 206, mature: false, control: control)
+  let mature: SculpturalFork = forkStudyTree(seed: 907, mature: true, control: control)
+  let generated: Int = nowNs()
+  placeForkStudy(
+    world: world
+    renderer: renderer
+    mesh: young.wood
+    position: Vec3.create(x: 5.0, y: -14.0, z: -0.05)
+    rotation: 0.25
+  )
+  placeForkStudy(
+    world: world
+    renderer: renderer
+    mesh: mature.wood
+    position: Vec3.create(x: 14.0, y: -12.0, z: -0.05)
+    rotation: -0.35
+  )
+  obstacles.add(value: { x: 5.0, y: -14.0, radius: 1.3 })
+  obstacles.add(value: { x: 14.0, y: -12.0, radius: 1.8 })
+  let microseconds: Int = (generated - started) / 1000
+  log(
+    "[fork-study] generated 2 meshes in {microseconds} us; young {young.wood.vertCount} vertices/{young.wood.indices.length / 3} triangles; mature {mature.wood.vertCount} vertices/{mature.wood.indices.length / 3} triangles"
+  )
+}
+
+func forkStudyTree(seed: view Int, mature: view Bool, control: view Bool) ret SculpturalFork {
+  if control {
+    ret sculpturalFork(seed: seed, mature: mature)
+  }
+  ret curvedSculpturalFork(seed: seed, mature: mature)
+}
