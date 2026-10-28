@@ -32,6 +32,40 @@ func rendererLoadSurfaceImage(renderer: mod DeferredRenderer, path: view String)
   ret -1
 }
 
+# Add a picture made in memory (512 x 512 linear RGBA floats, alpha 0..1:
+# a picture with see-through parts, which a PNG from Image.savePng cannot
+# carry) to this renderer's material images, beside the loaded ones, as
+# `made:<name>`; once per name. Its layer, or -1.
+func rendererAddSurfaceImagePixels(
+  renderer: mod DeferredRenderer
+  name: view String
+  pixels: view List(Float)
+) ret Int {
+  ensureRendererResources(renderer: renderer)
+  let path: String = "{surfaceMadePrefix}{name}"
+  let images: mod SurfaceImages = renderer.passes.gbuffer.surfaceImages
+  loop var layer: Int = 0, layer < images.paths.length, ++layer {
+    if images.paths.copyAtDefault(index: layer) is path {
+      ret layer
+    }
+  }
+  if pixels.length is not 512 * 512 * 4 {
+    log("a made material image must have 512 x 512 RGBA pixels: {name}")
+    ret -1
+  }
+  images.madeNames.add(value: "{path}")
+  images.madePixels.add(value: pixels)
+  var paths: List(String) = images.paths
+  paths.add(value: path)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    if setSurfaceImages(images: images, resources: resources, paths: paths) {
+      ret paths.length - 1
+    }
+  }
+  log("could not add material image: {name}")
+  ret -1
+}
+
 # Shadow and color sample the same image array and coverage-preserving mips.
 func prepareShadowImages(renderer: mod DeferredRenderer) {
   if let resources: mod GpuResources = renderer.gpuResources {

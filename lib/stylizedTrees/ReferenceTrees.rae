@@ -1,0 +1,307 @@
+# stylizedTrees/ReferenceTrees — the T02 tree (lib/treeGen) as a tree set
+# of its own, for judging it at every distance before it joins the stylized
+# set (docs/reference-tree-plan.md step 7; step 9 adds it to StylizedTrees).
+# Its species: 0 the traced T02 tree (treeGen/TreeParams
+# warmBroadleafParams, the tree lab's T02 scene), 1-4 the grown varieties
+# (treeGen/TreeGrower seeds 1-4, 143's stand).
+# Each becomes a PropField kind (addReferenceForestKinds) at the walkers'
+# distances: near, the bark and every leaf card (treeGen/TreeLevels: the
+# cards in three tones as camera-facing card meshes); middle, the bark and a
+# quarter of the cards at twice the width, so the clump layout and the
+# covered area stay; far, an impostor baked from the near level.
+# RAE_TREE_LEVEL=near|middle|far shows only that level at every distance,
+# for comparing the levels from one camera.
+import Math
+import Sys
+import Vec3
+import RendererDeferred
+open FoliageMesh
+open RendererImages
+open Scene3d
+open Mesh3d
+open app3d/PropField
+open GbufferSprite
+open gpu/GpuResources
+open ImpostorAtlas
+open ImpostorBake
+open treeSets/TreeSet
+open treeGen/TreeParams
+open treeGen/Skeleton
+open treeGen/TreeGrower
+open treeGen/BarkMesh
+open treeGen/Bark
+open treeGen/LeafCards
+open treeGen/TreeLevels
+
+const referenceSpeciesCount: Int = 5
+
+# The grown tree's height (m) at scale 1, about: a placement's scale is its
+# height over this
+const referenceTreeHeight: Float = 13.5
+
+# The bark picture, painted once (as app3d/ReferenceTree paints it)
+const referenceSetBarkPath: String = ".rae/treeGen/warmBark.png"
+
+# Where the near level ends (the walkers': StylizedTrees.nearTreeDistance)
+const referenceNearDistance: Float = 30.0
+
+# The middle level: every referenceMiddleKeep-th card, referenceMiddleGrow
+# times as wide (the area kept: 4 cards' area in one card twice as wide)
+const referenceMiddleKeep: Int = 4
+
+const referenceMiddleGrow: Float = 2.0
+
+# The leaves sway in the wind, the bark (part 0) stays still
+const referenceLeafSway: Float = 1.0
+
+# The T02 set: four varieties, each 11.5 to 14 m tall, in stands as the
+# walkers plant theirs
+func createReferenceTrees() ret TreeSet {
+  ret TreeSet {
+    name: "reference"
+    style: TreeSetStyle.reference
+    species: List(TreeSpecies) {
+      { name: "T02 traced", minHeight: 11.5, heightRange: 2.5, heightUnit: referenceTreeHeight }
+      { name: "T02 1", minHeight: 11.5, heightRange: 2.5, heightUnit: referenceTreeHeight }
+      { name: "T02 2", minHeight: 11.5, heightRange: 2.5, heightUnit: referenceTreeHeight }
+      { name: "T02 3", minHeight: 11.5, heightRange: 2.5, heightUnit: referenceTreeHeight }
+      { name: "T02 4", minHeight: 11.5, heightRange: 2.5, heightUnit: referenceTreeHeight }
+    }
+    standSize: 36.0
+    mixedShare: 0.3
+    standPicks: List(SpeciesPick) {
+      { upTo: 0.2, species: 0 }
+      { upTo: 0.4, species: 1 }
+      { upTo: 0.6, species: 2 }
+      { upTo: 0.8, species: 3 }
+      { upTo: 1.0, species: 4 }
+    }
+    mixedPicks: List(SpeciesPick) {
+      { upTo: 0.2, species: 0 }
+      { upTo: 0.4, species: 1 }
+      { upTo: 0.6, species: 2 }
+      { upTo: 0.8, species: 3 }
+      { upTo: 1.0, species: 4 }
+    }
+  }
+}
+
+func referenceLeafMaterial(color: view Vec3, layer: view Int) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    # as the leaf pass writes them: rough, no sky rim round each card
+    roughness: 0.8
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+    colorTextureLayer: layer
+    rimLight: false
+  }
+}
+
+# A level of uploaded meshes: part 0 the bark, the rest the leaf tones
+func referenceLod(
+  meshes: view List(MeshHandle)
+  bark: view Material3d
+  albedos: view List(Vec3)
+  leafLayer: view Int
+  maxDistance: view Float
+) ret PropLod {
+  var parts: List(PropPart) = List.create(PropPart, cap: meshes.length)
+  loop var part: Int = 0, part < meshes.length, ++part {
+    if part is 0 {
+      parts.add(value: { mesh: meshes.copyAtDefault(index: 0), material: bark, sway: 0.0 })
+    } else {
+      parts.add(
+        value: {
+          mesh: meshes.copyAtDefault(index: part)
+          material: referenceLeafMaterial(
+            color: albedos.copyAtFallback(
+              index: part - 1
+              fallback: Vec3.create(x: 0.2, y: 0.3, z: 0.1)
+            )
+            layer: leafLayer
+          )
+          sway: referenceLeafSway
+        }
+      )
+    }
+  }
+  ret PropLod { parts: own parts, maxDistance: maxDistance, castsShadow: true, facesCamera: false }
+}
+
+# The highest point and the farthest reach from the trunk of `meshes` (at
+# scale 1)
+func referenceBounds(meshes: view List(MeshData)) ret Vec3 {
+  var reach: Float = 0.0
+  var top: Float = 0.0
+  loop let mesh: view MeshData in meshes {
+    loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+      let x: Float = mesh.verts.copyAtDefault(index: vertex * 8)
+      let y: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 1)
+      let z: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 2)
+      reach = Math.max(a: reach, b: Math.sqrt(x: x * x + y * y))
+      top = Math.max(a: top, b: z)
+    }
+  }
+  ret Vec3.create(x: reach, y: reach, z: top)
+}
+
+# Every variety as a PropField kind (kind index = species) at three levels,
+# the far one an impostor of the near level (a layer of the atlas baked
+# here, drawn by the sprite pass)
+func addReferenceForestKinds(
+  field: mod PropField
+  renderer: mod DeferredRenderer
+  sprites: mod SpriteCache
+  midDistance: view Float
+  farDistance: view Float
+) {
+  RendererDeferred.ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    spriteSetParams(
+      cache: sprites
+      resources: resources
+      heightK: 1.0
+      aspect: spritePictureAspect
+      cutoff: spriteCutoff
+      time: 0.0
+      tilt: 0.0
+    )
+  }
+  # RAE_TREE_LEVEL: one level at every distance
+  let only: String = Sys.getEnv(name: "RAE_TREE_LEVEL")
+  var nearEnd: Float = referenceNearDistance
+  var middleEnd: Float = midDistance
+  var farEnd: Float = farDistance
+  if only is "near" {
+    nearEnd = 100000.0
+  } else if only is "middle" {
+    nearEnd = 0.0
+    middleEnd = 100000.0
+  } else if only is "far" {
+    nearEnd = 0.0
+    middleEnd = 0.0
+    farEnd = 100000.0
+  }
+  if not Sys.exists(path: referenceSetBarkPath) {
+    let made: Bool = Sys.makeDir(path: ".rae/treeGen")
+    let written: Bool = writeBarkImage(path: referenceSetBarkPath)
+  }
+  let barkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: referenceSetBarkPath)
+  let leafLayer: Int = rendererAddSurfaceImagePixels(
+    renderer: renderer
+    name: leafCardImageName
+    pixels: leafCardImagePixels()
+  )
+  let bark: Material3d = barkMaterial(layer: barkLayer)
+  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: referenceSpeciesCount)
+  loop var species: Int = 0, species < referenceSpeciesCount, ++species {
+    # species 0 the traced tree, the others grown
+    var seed: Int = species
+    var params: TreeParams = warmBroadleafParams(seed: 1)
+    if species > 0 {
+      params = grownBroadleafParams(seed: seed)
+    } else {
+      seed = 1
+    }
+    let skeleton: TreeSkeleton = growSkeleton(params: params)
+    let barkData: MeshData = barkMesh(skeleton: skeleton)
+    let cards: LeafCards = leafCards(skeleton: skeleton, seed: seed)
+    let nearLeaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: 1, grow: 1.0)
+    let middleLeaves: LeafCardLevel = leafCardLevel(
+      cards: cards
+      keepEvery: referenceMiddleKeep
+      grow: referenceMiddleGrow
+    )
+    let barkHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: barkData)
+    let barkTriangles: Int = barkData.indices.length / 3
+    var nearParts: List(MeshData) = List.create(MeshData, cap: 4)
+    nearParts.add(value: barkData)
+    var nearHandles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
+    nearHandles.add(value: barkHandle)
+    loop let mesh: view MeshData in nearLeaves.meshes {
+      nearParts.add(value: mesh)
+      nearHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
+    }
+    var middleHandles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
+    middleHandles.add(value: barkHandle)
+    loop let mesh: view MeshData in middleLeaves.meshes {
+      middleHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
+    }
+    # the impostor: the near level, the bark and the leaves with their
+    # pictures
+    var albedos: List(Vec3) = List.create(Vec3, cap: 4)
+    albedos.add(value: barkColor())
+    loop let albedo: view Vec3 in nearLeaves.albedos {
+      albedos.add(value: albedo)
+    }
+    var subject: ImpostorSubject = impostorSubject(
+      parts: nearParts
+      meshes: nearHandles
+      albedos: albedos
+    )
+    subject.imageLayers = List(Int) { barkLayer, leafLayer, leafLayer, leafLayer }
+    var lods: List(PropLod) = List.create(PropLod, cap: 3)
+    lods.add(value: referenceLod(
+      meshes: nearHandles
+      bark: bark
+      albedos: nearLeaves.albedos
+      leafLayer: leafLayer
+      maxDistance: nearEnd
+    ))
+    lods.add(value: referenceLod(
+      meshes: middleHandles
+      bark: bark
+      albedos: middleLeaves.albedos
+      leafLayer: leafLayer
+      maxDistance: middleEnd
+    ))
+    lods.add(
+      value: {
+        parts: List.create(PropPart, cap: 0)
+        maxDistance: farEnd
+        castsShadow: true
+        facesCamera: true
+      }
+    )
+    let bounds: Vec3 = referenceBounds(meshes: nearParts)
+    let kind: Int = addPropKind(
+      field: field
+      kind: {
+        lods: own lods
+        radius: Math.sqrt(x: bounds.z * bounds.z * 0.25 + bounds.x * bounds.x) + 0.1
+        centerHeight: bounds.z * 0.5
+      }
+    )
+    setPropKindSprite(
+      field: field
+      kind: kind
+      layer: species
+      height: subject.height
+    )
+    var triangles: Int = barkTriangles
+    var middleTriangles: Int = barkTriangles
+    loop let mesh: view MeshData in nearLeaves.meshes {
+      triangles = triangles + mesh.indices.length / 3
+    }
+    loop let mesh: view MeshData in middleLeaves.meshes {
+      middleTriangles = middleTriangles + mesh.indices.length / 3
+    }
+    log(
+      "[referenceTrees] T02 species {species}: {cards.count} leaf cards; {triangles} triangles near, {middleTriangles} middle; {bounds.z} m tall"
+    )
+    subjects.add(value: subject)
+  }
+  if let resources: mod GpuResources = renderer.gpuResources {
+    let atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
+      resources: resources
+      meshes: renderer.passes.gbuffer.meshes
+      subjects: subjects
+      settings: defaultImpostorSettings()
+      cutoff: spriteCutoff
+      images: renderer.passes.gbuffer.surfaceImages
+    )
+    setSpriteImpostors(cache: sprites, resources: resources, atlas: atlas)
+  }
+}

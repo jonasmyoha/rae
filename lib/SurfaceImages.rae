@@ -20,8 +20,16 @@ open webgpu/Context
 # picture was refused.
 const surfaceImageMaxLayers: Int = 64
 
+# A layer named `made:<name>` in `paths` is a picture made in memory
+# (rendererAddSurfaceImagePixels): its linear RGBA pixels are kept in
+# madePixels, at the same index as its name in madeNames, so the array can
+# be rebuilt with it when another image is added.
+const surfaceMadePrefix: String = "made:"
+
 type SurfaceImages {
   paths: List(String) = List.create(String, cap: 0)
+  madeNames: List(String) = List.create(String, cap: 0)
+  madePixels: List(List(Float)) = List.create(List(Float), cap: 0)
   texture: TextureId = noTextureId()
   textureView: TextureViewId = noTextureViewId()
   sampler: SamplerId = noSamplerId()
@@ -111,6 +119,22 @@ func setSurfaceImages(
   let size: Int = 512
   var decoded: List(List(Float)) = List.create(List(Float), cap: paths.length)
   loop let path: view String in paths {
+    if path.startsWith(prefix: surfaceMadePrefix) {
+      var found: Bool = false
+      loop var made: Int = 0, made < images.madeNames.length, ++made {
+        if images.madeNames.copyAtDefault(index: made) is path {
+          if let pixels: view List(Float) = images.madePixels.viewAt(index: made) {
+            decoded.add(value: pixels)
+            found = true
+          }
+        }
+      }
+      if not found {
+        log("surface image {path} was made in memory but its pixels are gone")
+        ret false
+      }
+      continue
+    }
     var width: Int = 0
     var height: Int = 0
     let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
@@ -192,7 +216,12 @@ func uploadSurfaceImages(
     let white: List(Float) = { 1.0, 1.0, 1.0, 1.0 }
     decoded.add(value: white)
   }
-  var candidate: SurfaceImages = { paths: paths, generation: images.generation + 1 }
+  var candidate: SurfaceImages = {
+    paths: paths
+    madeNames: images.madeNames
+    madePixels: images.madePixels
+    generation: images.generation + 1
+  }
   if let texture: TextureId = createTextureArrayMipped(
     resources: resources
     width: imageSize

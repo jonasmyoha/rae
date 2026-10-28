@@ -2,9 +2,11 @@
 # docs/tree-sets-design.md §5 step 5): a tree set as a forest at every
 # distance, from the camera out to 1.9 km (app3d/TreeForest), so the sets
 # can be compared in the same light: the stylized set (the walkers') and the
-# low-poly set (Autumn Grove's museum). RAE_TREE_SET=lowPoly|stylized picks
-# the one shown first (stylized when unset); the T key switches between
-# them. Both are built at the start, so a switch is instant.
+# low-poly set (Autumn Grove's museum), and the T02 tree alone as a set
+# (stylizedTrees/ReferenceTrees, reference-tree step 7).
+# RAE_TREE_SET=lowPoly|stylized|reference picks the one shown first
+# (stylized when unset); the T key goes to the next. All are built at the
+# start, so a switch is instant.
 # RAE_TREELAB_CAMERA=high looks from 35 m over the forest instead of eye
 # height.
 import Sys
@@ -14,9 +16,11 @@ open Scene3d
 open ecs/Entity
 open RendererDeferred
 open app3d/TreeForest
+open app3d/PropField
 open treeSets/TreeSet
 import stylizedTrees/StylizedTrees
 import lowPolyTrees/LowPolyTrees
+import stylizedTrees/ReferenceTrees
 
 # The band of forest ahead of the camera, and the meadow under it
 const labForestWidth: Float = 640.0
@@ -29,10 +33,12 @@ const labForestSpacing: Float = 7.0
 
 const labForestGroundSize: Float = 4400.0
 
-# The two sets the scene holds, in this order
+# The sets the scene holds, in this order
 const labForestStylized: Int = 0
 
 const labForestLowPoly: Int = 1
+
+const labForestReference: Int = 2
 
 func labForestRequested() ret Bool {
   ret Sys.getEnv(name: "RAE_TREELAB_SCENE") is "forest"
@@ -43,12 +49,18 @@ func labForestFirstSet() ret Int {
   if Sys.getEnv(name: "RAE_TREE_SET") is "lowPoly" {
     ret labForestLowPoly
   }
+  if Sys.getEnv(name: "RAE_TREE_SET") is "reference" {
+    ret labForestReference
+  }
   ret labForestStylized
 }
 
 func labForestSetName(setIndex: view Int) ret String {
   if setIndex is labForestLowPoly {
     ret "lowPoly"
+  }
+  if setIndex is labForestReference {
+    ret "reference"
   }
   ret "stylized"
 }
@@ -96,16 +108,38 @@ func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret
   ret forest
 }
 
-# Both sets' forests, in the order of labForestStylized, labForestLowPoly
+# Every set's forest, in the order of labForestStylized, labForestLowPoly,
+# labForestReference
 func buildLabForests(renderer: mod DeferredRenderer) ret List(TreeForest) {
-  var forests: List(TreeForest) = List.create(TreeForest, cap: 2)
+  var forests: List(TreeForest) = List.create(TreeForest, cap: 3)
   forests.add(
     value: own buildLabForestOf(treeSet: StylizedTrees.createStylizedTrees(), renderer: renderer)
   )
   forests.add(
     value: own buildLabForestOf(treeSet: LowPolyTrees.createLowPolyTrees(), renderer: renderer)
   )
+  forests.add(
+    value: own buildLabForestOf(treeSet: ReferenceTrees.createReferenceTrees(), renderer: renderer)
+  )
   ret forests
+}
+
+# The T02 scene's tree (variety 1, as the lab grows it) as the one tree of a
+# forest of the reference set, at the origin: its levels at the walkers'
+# distances (RAE_TREE_LEVEL pins one)
+func labLevelsForest(renderer: mod DeferredRenderer) ret TreeForest {
+  var forest: TreeForest = createTreeForest(
+    treeSet: ReferenceTrees.createReferenceTrees()
+    renderer: renderer
+    settings: defaultTreeForestSettings(extent: 800.0, farReach: 400.0)
+    toon: false
+  )
+  addPropPlacement(
+    field: forest.field
+    placement: { kind: 0, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0), yaw: 0.0, scale: 1.0 }
+  )
+  let unusedPlanted: Int = finishTreeForest(forest: forest, renderer: renderer)
+  ret forest
 }
 
 # The camera at eye height down the forest's lane, or (high) from 35 m

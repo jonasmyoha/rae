@@ -7,7 +7,9 @@
 # plain meshes.
 #
 # The tree is lib/treeGen's (step 3 on: the bare wood so far), seed
-# RAE_TREELAB_SEED (default 1); RAE_TREELAB_TREE=placeholder shows step 1's
+# RAE_TREELAB_SEED (default 1); RAE_TREELAB_TREE=levels draws it as a forest
+# kind (near, middle and impostor levels, RAE_TREE_LEVEL to pin one:
+# reference-tree step 7); RAE_TREELAB_TREE=placeholder shows step 1's
 # cylinder and spheres instead.
 #
 # Cameras (RAE_TREELAB_CAMERA):
@@ -34,6 +36,11 @@
 # set as a forest at every distance, RAE_TREE_SET=lowPoly|stylized picks
 # which (stylized when unset), the T key switches between the two;
 # RAE_TREELAB_CAMERA=high looks from 35 m.
+#
+# RAE_TREELAB_DOLLY=<folder>: the camera moves from 20 m to 170 m away from
+# the tree over labDollyFrames frames, each saved as a picture in the folder
+# (frame0.bmp ...), then the lab ends: the camera move that shows whether
+# the levels' switches are seen (with RAE_TREELAB_TREE=levels).
 #
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
@@ -81,6 +88,13 @@ const labSunY: Float = 0.55
 
 const labSunZ: Float = -0.62
 
+# The dolly's length in frames, and its nearest and farthest distance (m)
+const labDollyFrames: Int = 240
+
+const labDollyNear: Float = 20.0
+
+const labDollyFar: Float = 170.0
+
 type LabState {
   renderer: DeferredRenderer
   world: World3d
@@ -101,6 +115,9 @@ type LabState {
   # scenes) and the one shown
   forests: List(TreeForest) = List.create(TreeForest, cap: 0)
   forestShown: Int = 0
+  # the dolly (RAE_TREELAB_DOLLY): its folder and the frame it is at
+  dollyFolder: String = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
+  dollyFrame: Int = 0
   # the generated tree's leaves and its crown's shadow caster
   tree: opt LabTree
   windSettings: WindSettings
@@ -257,8 +274,15 @@ func createLab() ret LabState {
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
   var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
+  # RAE_TREELAB_TREE=levels: the same tree drawn as a forest kind (its near,
+  # middle and impostor levels, LabForest's labLevelsForest) in place of
+  # the leaf pass
+  let levels: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "levels"
+  var forests: List(TreeForest) = List.create(TreeForest, cap: 1)
   var tree: opt LabTree = none
-  if not placeholder {
+  if levels {
+    forests.add(value: own labLevelsForest(renderer: renderer))
+  } else if not placeholder {
     tree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
   }
   var light: Light3d = defaultLight3d()
@@ -277,6 +301,7 @@ func createLab() ret LabState {
       grass: createLabGrass(obstacles: labTrunkField())
       cameraRig: createCameraRig(camera: camera)
       birchStudy: createBirchStudy()
+      forests: own forests
       tree: own tree
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
@@ -397,6 +422,18 @@ func runLabFrame(state: mod LabState) {
     state.forestShown = (state.forestShown + 1) % state.forests.length
     log("[treelab] showing the {labForestSetName(setIndex: state.forestShown)} set")
   }
+  if state.dollyFolder.length() > 0 {
+    # a fixed step per frame, so every run films the same move
+    let fraction: Float = state.dollyFrame.toFloat() / (labDollyFrames - 1).toFloat()
+    let distance: Float = labDollyNear + (labDollyFar - labDollyNear) * fraction
+    state.camera.position = Vec3.create(x: 0.0, y: -distance, z: 1.6)
+    state.camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    Sys.setEnv(
+      name: "RAE_GPU2D_SCREENSHOT"
+      value: "{state.dollyFolder}/frame{state.dollyFrame}.bmp"
+    )
+    state.dollyFrame = state.dollyFrame + 1
+  }
   if not Gpu2d.renderGate() {
     ret
   }
@@ -451,7 +488,7 @@ func main() ret Int {
     log("render graph invalid: {statusName(status: graphStatus)}")
     ret 1
   }
-  loop not Gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() and not (state.dollyFolder.length() > 0 and state.dollyFrame > labDollyFrames) {
     runLabFrame(state: state)
   }
   endLab(state: state)

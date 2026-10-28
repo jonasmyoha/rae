@@ -1,0 +1,194 @@
+# treeGen/TreeLevels — a grown tree's leaves as ordinary level meshes
+# (docs/reference-tree-plan.md step 7), so the tree can be one kind of a
+# forest (app3d/PropField: its near and middle levels, and an impostor baked
+# from the near level). The leaf pass (treeGen/LeafPass) draws every card
+# with its own green, occlusion and stamp; a mesh part has one material, so
+# here the cards are split into three tones by how light they are (their
+# green times their occlusion), each tone a mesh of camera-facing cards
+# (MeshData.leafCards, as the deferred renderer and the impostor bake draw
+# them) in that tone's average color, with one leaf stamp as its picture
+# (leafCardImagePixels, a material image made in memory).
+# The middle level keeps the clump layout: every few cards, grown so the
+# crown covers what the near one does. Written new.
+import Math
+open Vec3
+open Mesh3d
+open treeGen/LeafCards
+open treeGen/LeafImage
+
+# The name of the leaf stamp picture among a renderer's material images
+# (RendererImages.rendererAddSurfaceImagePixels, stamp 0 of LeafImage)
+const leafCardImageName: String = "treeGen/leafCard"
+
+# A level's leaves: one card mesh per tone, darkest first, and each tone's
+# color
+type LeafCardLevel {
+  meshes: List(MeshData)
+  albedos: List(Vec3)
+}
+
+# The leaf stamp's pixels (linear RGBA, its gaps see-through)
+func leafCardImagePixels() ret List(Float) {
+  ret leafLayerPixels(layer: 0)
+}
+
+# How light card `card` is: its green's brightness times its occlusion
+func cardLightness(cards: view LeafCards, card: view Int) ret Float {
+  let base: Int = card * leafCardFloats
+  let red: Float = cards.floats.copyAtDefault(index: base + 8)
+  let green: Float = cards.floats.copyAtDefault(index: base + 9)
+  let blue: Float = cards.floats.copyAtDefault(index: base + 10)
+  let occlusion: Float = cards.floats.copyAtDefault(index: base + 7)
+  ret (0.2126 * red + 0.7152 * green + 0.0722 * blue) * occlusion
+}
+
+# The lightness below which a third and two thirds of the cards lie (from
+# a histogram of 64 bins)
+func toneSplits(cards: view LeafCards) ret List(Float) {
+  var lowest: Float = 1000000.0
+  var highest: Float = -1000000.0
+  loop var card: Int = 0, card < cards.count, ++card {
+    let lightness: Float = cardLightness(cards: cards, card: card)
+    lowest = Math.min(a: lowest, b: lightness)
+    highest = Math.max(a: highest, b: lightness)
+  }
+  let span: Float = Math.max(a: highest - lowest, b: 0.000001)
+  var bins: List(Int) = List.create(Int, cap: 64)
+  loop var i: Int = 0, i < 64, ++i {
+    bins.add(value: 0)
+  }
+  loop var card: Int = 0, card < cards.count, ++card {
+    let bin: Int = Math.clamp(
+      val: ((cardLightness(cards: cards, card: card) - lowest) / span * 64.0).toInt()
+      low: 0
+      high: 63
+    )
+    bins.set(index: bin, value: bins.copyAtDefault(index: bin) + 1)
+  }
+  var splits: List(Float) = List.create(Float, cap: 2)
+  var counted: Int = 0
+  loop var bin: Int = 0, bin < 64, ++bin {
+    counted = counted + bins.copyAtDefault(index: bin)
+    let edge: Float = lowest + span * (bin + 1).toFloat() / 64.0
+    if splits.length is 0 and counted * 3 >= cards.count {
+      splits.add(value: edge)
+    }
+    if splits.length is 1 and counted * 3 >= cards.count * 2 {
+      splits.add(value: edge)
+    }
+  }
+  loop var i: Int = splits.length, i < 2, ++i {
+    splits.add(value: highest + 1.0)
+  }
+  ret splits
+}
+
+# One camera-facing card: four corners round `center` in the X/Z plane (the
+# rest pose the renderer turns towards the camera), shaded by `normal`
+func addLeafCard(
+  mesh: mod MeshData
+  center: view Vec3
+  halfSize: view Float
+  normal: view Vec3
+  mirrored: view Bool
+) {
+  let base: Int = mesh.vertCount
+  loop var row: Int = 0, row < 2, ++row {
+    loop var column: Int = 0, column < 2, ++column {
+      var textureColumn: Float = column.toFloat()
+      if mirrored {
+        textureColumn = 1.0 - textureColumn
+      }
+      pushVert(
+        verts: mesh.verts
+        px: center.x + (column.toFloat() * 2.0 - 1.0) * halfSize
+        py: center.y
+        pz: center.z + (row.toFloat() * 2.0 - 1.0) * halfSize
+        nx: normal.x
+        ny: normal.y
+        nz: normal.z
+        u: textureColumn
+        value: 1.0 - row.toFloat()
+      )
+      # the card sways about its own center, a little
+      mesh.windPivots.add(value: center.x)
+      mesh.windPivots.add(value: center.y)
+      mesh.windPivots.add(value: center.z)
+      mesh.windPivots.add(value: -1.0)
+      mesh.leafCards.add(value: center.x)
+      mesh.leafCards.add(value: center.y)
+      mesh.leafCards.add(value: center.z)
+      mesh.leafCards.add(value: 1.0)
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  mesh.indices.add(value: base)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 2)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 3)
+  mesh.indices.add(value: base + 2)
+}
+
+# The cards as a level: every `keepEvery`-th card (1: all), `grow` times as
+# wide, in three tones
+func leafCardLevel(cards: view LeafCards, keepEvery: view Int, grow: view Float) ret LeafCardLevel {
+  let splits: List(Float) = toneSplits(cards: cards)
+  var meshes: List(MeshData) = List.create(MeshData, cap: 3)
+  var sums: List(Vec3) = List.create(Vec3, cap: 3)
+  var counts: List(Int) = List.create(Int, cap: 3)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    var mesh: MeshData = {
+      verts: List.create(Float, cap: 0)
+      indices: List.create(Int, cap: 0)
+      vertCount: 0
+    }
+    meshes.add(value: own mesh)
+    sums.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    counts.add(value: 0)
+  }
+  loop var card: Int = 0, card < cards.count, ++card {
+    if card % keepEvery is not 0 {
+      continue
+    }
+    let base: Int = card * leafCardFloats
+    let lightness: Float = cardLightness(cards: cards, card: card)
+    var tone: Int = 2
+    if lightness < splits.copyAtDefault(index: 0) {
+      tone = 0
+    } else if lightness < splits.copyAtDefault(index: 1) {
+      tone = 1
+    }
+    let occlusion: Float = cards.floats.copyAtDefault(index: base + 7)
+    let color: Vec3 = Vec3.create(
+      x: cards.floats.copyAtDefault(index: base + 8) * occlusion
+      y: cards.floats.copyAtDefault(index: base + 9) * occlusion
+      z: cards.floats.copyAtDefault(index: base + 10) * occlusion
+    )
+    sums.set(index: tone, value: Vec3.vadd(a: sums.copyAtDefault(index: tone), b: color))
+    counts.set(index: tone, value: counts.copyAtDefault(index: tone) + 1)
+    if let mesh: mod MeshData = meshes.modAt(index: tone) {
+      addLeafCard(
+        mesh: mesh
+        center: Vec3.create(
+          x: cards.floats.copyAtDefault(index: base)
+          y: cards.floats.copyAtDefault(index: base + 1)
+          z: cards.floats.copyAtDefault(index: base + 2)
+        )
+        halfSize: cards.floats.copyAtDefault(index: base + 3) * 0.5 * grow
+        normal: Vec3.create(
+          x: cards.floats.copyAtDefault(index: base + 4)
+          y: cards.floats.copyAtDefault(index: base + 5)
+          z: cards.floats.copyAtDefault(index: base + 6)
+        )
+        mirrored: cards.floats.copyAtDefault(index: base + 11) > 3.14159
+      )
+    }
+  }
+  var albedos: List(Vec3) = List.create(Vec3, cap: 3)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let count: Int = Math.max(a: counts.copyAtDefault(index: tone), b: 1)
+    albedos.add(value: Vec3.vscale(a: sums.copyAtDefault(index: tone), s: 1.0 / count.toFloat()))
+  }
+  ret LeafCardLevel { meshes: own meshes, albedos: own albedos }
+}
