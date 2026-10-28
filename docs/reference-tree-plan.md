@@ -353,6 +353,18 @@ Only after steps 1 to 8 are accepted:
 
 Done when: the before and after pictures of each example are accepted.
 
+First round (0.2.194, waiting for each example to be accepted):
+the T02 tree is in the stylized set as the **warm broadleaf**
+(`StylizedTrees.speciesWarmBroadleaf`, kinds 10-14: the traced tree and
+the four grown varieties, built by `ReferenceTrees.addReferenceKind` into
+the set's own impostor atlas), 10 to 13 m tall, at the walkers' distances.
+It takes the lime's (`speciesBroadleaf`) share of the stand and mixed
+picks, split among its five varieties (`warmBroadleafPicks`);
+`RAE_STYLIZED_LIME=1` keeps the lime. The low-poly set and 138 do not
+change. The 136/137 gates' shadow-caster band went from 400-800 to
+400-900 (the taller trees reach into more cascades: 818 casters). Pictures:
+looks-development `treeReference/intoTheSet.html`.
+
 ### Later, not part of this plan
 
 - Wind: only after the still tree is accepted. Earlier versions looked

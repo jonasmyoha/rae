@@ -1209,6 +1209,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # then a ray hits the nearest rock's sphere, and the hero running out
           # of a bush is held to the bush's speed limit while inside it.
           SHOT="$TMP_OUT/walker.bmp"
+          # Shadow casters other than the harebells: 400-900 (900 since the warm
+          # broadleaf, the T02 tree, took the lime's place: taller trees, more of
+          # them reach into the shadow cascades; 818 in all on 2026-10-28).
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
@@ -1223,7 +1226,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && HAREBELL_CASTERS="$(sed -n 's/.*\[harebell-shadow\] batches=2 casters=\([0-9]*\).*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$CASTERS" ] && [ -n "$HAREBELL_CASTERS" ] && [ "$HAREBELL_CASTERS" -gt 0 ] \
-             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 800 ] \
+             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 900 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
@@ -1358,6 +1361,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # the forward pass (GbufferSprite's forward pipeline) and the shot
           # must be a shaded frame.
           SHOT="$TMP_OUT/walker-forward.bmp"
+          # Shadow casters other than the harebells: 400-900 (900 since the warm
+          # broadleaf, the T02 tree, took the lime's place: taller trees, more of
+          # them reach into the shadow cascades; 818 in all on 2026-10-28).
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
@@ -1366,7 +1372,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && HAREBELL_CASTERS="$(sed -n 's/.*\[harebell-shadow\] batches=2 casters=\([0-9]*\).*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$CASTERS" ] && [ -n "$HAREBELL_CASTERS" ] && [ "$HAREBELL_CASTERS" -gt 0 ] \
-             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 800 ] \
+             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 900 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
