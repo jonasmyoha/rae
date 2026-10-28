@@ -137,8 +137,8 @@ lib/treeSets/
 ## 6. Decisions for the is
 
 The set the walkers keep is named **stylized** (2026-10-28:
-"realistic" is not a good name; US spelling, as in code. The older
-`SkyModel.stylized` keeps its spelling until it is next touched).
+"realistic" is not a good name; US spelling, as in code. The whole tree moved to US spelling
+the same day, AGENTS.md).
 
 1. **The later studies stay with the stylized set** (answered): the birch,
    ginkgo, Japanese maple, fork and flower modules move under
