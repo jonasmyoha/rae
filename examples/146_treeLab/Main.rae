@@ -79,6 +79,8 @@ open LabStudies
 open BirchStudy
 open app3d/TreeForest
 open LabForest
+open RendererQuality
+open MeshStore
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -94,6 +96,8 @@ const labDollyFrames: Int = 240
 const labDollyNear: Float = 20.0
 
 const labDollyFar: Float = 170.0
+
+const labStatsFrames: Int = 120
 
 type LabState {
   renderer: DeferredRenderer
@@ -118,6 +122,12 @@ type LabState {
   # the dolly (RAE_TREELAB_DOLLY): its folder and the frame it is at
   dollyFolder: String = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
   dollyFrame: Int = 0
+  # RAE_TREELAB_STATS=1: every labStatsFrames frames a line of what the
+  # shown forest drew and how long the gather and the frames took
+  statsOn: Bool = Sys.getEnv(name: "RAE_TREELAB_STATS") is "1"
+  statsFrames: Int = 0
+  statsGatherSeconds: Float64 = 0.0
+  statsStart: Float64 = 0.0
   # the generated tree's leaves and its crown's shadow caster
   tree: opt LabTree
   windSettings: WindSettings
@@ -185,6 +195,8 @@ func labCamera(name: view String) ret Camera3d {
 # One of the studies (RAE_TREELAB_STUDY): its world, light and camera
 func createStudyLab(studyView: view String) ret LabState {
   var renderer: DeferredRenderer = createDeferredRenderer()
+  # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
+  setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   var obstacles: List(StudyObstacle) = List.create(StudyObstacle, cap: 64)
   var world: World3d = buildStudyWorld(meshes: meshes, renderer: renderer, obstacles: obstacles)
@@ -219,6 +231,8 @@ func createStudyLab(studyView: view String) ret LabState {
 # lab's sun and look
 func createForestLab() ret LabState {
   var renderer: DeferredRenderer = createDeferredRenderer()
+  # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
+  setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   var world: World3d = buildLabForestWorld(meshes: meshes, renderer: renderer)
   var forests: List(TreeForest) = buildLabForests(renderer: renderer)
@@ -271,6 +285,8 @@ func createLab() ret LabState {
     title: "146: Tree lab | camera: RAE_TREELAB_CAMERA=near|mid|far"
   )
   var renderer: DeferredRenderer = createDeferredRenderer()
+  # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
+  setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
   var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
@@ -438,11 +454,15 @@ func runLabFrame(state: mod LabState) {
     ret
   }
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  let gatherStart: Float64 = Gpu2d.nowSeconds()
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
     gatherTreeForest(forest: forest, camera: state.camera, aspect: aspect)
   }
+  state.statsGatherSeconds = state.statsGatherSeconds + (Gpu2d.nowSeconds() - gatherStart)
+  gpuPassTimingBegin(renderer: state.renderer)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: state.renderer), ++passIndex {
     let tag: Int = deferredTagAt(renderer: state.renderer, i: passIndex)
+    gpuPassMark(renderer: state.renderer, tag: tag)
     if tag is RenderTag.shadow {
       renderLabShadows(state: state, aspect: aspect)
     } else if tag is RenderTag.gbuffer {
@@ -458,7 +478,70 @@ func runLabFrame(state: mod LabState) {
       )
     }
   }
+  gpuPassTimingEnd(renderer: state.renderer)
   world3dPrevTransformSystem(world: state.world)
+  logLabStats(state: state)
+}
+
+# The shown forest's levels this frame: trees and triangles per level (the
+# meshes' triangles times their instances), then the impostors, far
+# billboards and canopy clusters (two triangles each)
+func labForestLevels(forest: view TreeForest, store: view MeshStore) ret String {
+  var text: String = ""
+  var levels: Int = 0
+  loop let kind: view PropKind in forest.field.kinds {
+    if kind.lods.length > levels {
+      levels = kind.lods.length
+    }
+  }
+  loop var level: Int = 0, level < levels, ++level {
+    var trees: Int = 0
+    var triangles: Int = 0
+    loop var kindIndex: Int = 0, kindIndex < forest.field.kinds.length, ++kindIndex {
+      if let kind: view PropKind = forest.field.kinds.viewAt(index: kindIndex) {
+        if let lod: view PropLod = kind.lods.viewAt(index: level) {
+          let first: Int = forest.field.lodFirstBatch.copyAtFallback(
+            index: forest.field.kindFirstLod.copyAtFallback(index: kindIndex, fallback: 0) + level
+            fallback: 0
+          )
+          loop var part: Int = 0, part < lod.parts.length, ++part {
+            if let batch: view InstanceBatch = forest.field.batches.viewAt(index: first + part) {
+              if part is 0 {
+                trees = trees + batch.count
+              }
+              let mesh: MeshHandle = forest.field.batchMeshes.copyAtDefault(index: first + part)
+              triangles = triangles + batch.count * meshStoreIndexCount(store: store, mesh: mesh.id) / 3
+            }
+          }
+        }
+      }
+    }
+    text = "{text} level{level} {trees} trees {triangles} tris;"
+  }
+  ret "{text} impostors {forest.field.spriteBatch.count}; far billboards {forest.farTrees.batch.count}; canopy clusters {forest.canopy.batch.count}"
+}
+
+func logLabStats(state: mod LabState) {
+  if not state.statsOn {
+    ret
+  }
+  if state.statsFrames is 0 {
+    state.statsStart = Gpu2d.nowSeconds()
+    state.statsGatherSeconds = 0.0
+  }
+  state.statsFrames = state.statsFrames + 1
+  if state.statsFrames <= labStatsFrames {
+    ret
+  }
+  let frames: Float = labStatsFrames.toFloat()
+  let frameMs: Float = ((Gpu2d.nowSeconds() - state.statsStart) as Float) * 1000.0 / frames
+  let gatherMs: Float = (state.statsGatherSeconds as Float) * 1000.0 / frames
+  var levels: String = ""
+  if let forest: view TreeForest = state.forests.viewAt(index: state.forestShown) {
+    levels = labForestLevels(forest: forest, store: state.renderer.passes.gbuffer.meshes)
+  }
+  log("[treelab stats] frame {frameMs} ms, gather {gatherMs} ms;{levels}")
+  state.statsFrames = 0
 }
 
 func endLab(state: mod LabState) {

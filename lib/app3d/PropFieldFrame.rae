@@ -40,17 +40,39 @@ func gatherPropField(field: mod PropField, propView: view PropView, toon: view B
   let firstRow: Int = first / field.columns
   let lastColumn: Int = last % field.columns
   let lastRow: Int = last / field.columns
-  loop var row: Int = firstRow, row <= lastRow, ++row {
-    loop var column: Int = firstColumn, column <= lastColumn, ++column {
-      gatherPropCell(
-        field: field
-        propView: propView
-        toon: toon
-        group: -1
-        cell: row * field.columns + column
-        column: column
-        row: row
-      )
+  # Near to far: the window's cells in distance bands from the eye,
+  # nearest band first (a cell's band: its center's distance)
+  var bands: Int = 1
+  if field.nearToFar {
+    bands = propNearToFarBands
+  }
+  let bandWidth: Float = (reach * 1.5) / bands.toFloat()
+  loop var band: Int = 0, band < bands, ++band {
+    loop var row: Int = firstRow, row <= lastRow, ++row {
+      loop var column: Int = firstColumn, column <= lastColumn, ++column {
+        if bands > 1 {
+          let centerX: Float = field.originX + (column.toFloat() + 0.5) * field.cellSize
+          let centerY: Float = field.originY + (row.toFloat() + 0.5) * field.cellSize
+          let dx: Float = centerX - propView.eye.x
+          let dy: Float = centerY - propView.eye.y
+          let cellBand: Int = Math.min(
+            a: (Math.sqrt(x: dx * dx + dy * dy) / bandWidth).toInt()
+            b: bands - 1
+          )
+          if cellBand is not band {
+            continue
+          }
+        }
+        gatherPropCell(
+          field: field
+          propView: propView
+          toon: toon
+          group: -1
+          cell: row * field.columns + column
+          column: column
+          row: row
+        )
+      }
     }
   }
   # Each group's cells in reach: its window of the grid, cut to the reach
@@ -319,8 +341,33 @@ func gatherPropLevel(
 
 # This frame's props into the G-buffer: one instanced draw per batch.
 func drawPropField(cache: mod GbufferCache, resources: mod GpuResources, field: view PropField) {
-  loop let batch: view InstanceBatch in field.batches {
-    drawInstances(cache: cache, resources: resources, batch: batch)
+  if field.nearToFar is false {
+    loop let batch: view InstanceBatch in field.batches {
+      drawInstances(cache: cache, resources: resources, batch: batch)
+    }
+    ret
+  }
+  # near to far: every kind's level 0, then every kind's level 1, ...
+  var levels: Int = 0
+  loop let kind: view PropKind in field.kinds {
+    levels = Math.max(a: levels.toFloat(), b: kind.lods.length.toFloat()).toInt()
+  }
+  loop var level: Int = 0, level < levels, ++level {
+    loop var kindIndex: Int = 0, kindIndex < field.kinds.length, ++kindIndex {
+      if let kind: view PropKind = field.kinds.viewAt(index: kindIndex) {
+        if let lod: view PropLod = kind.lods.viewAt(index: level) {
+          let first: Int = field.lodFirstBatch.copyAtFallback(
+            index: field.kindFirstLod.copyAtFallback(index: kindIndex, fallback: 0) + level
+            fallback: 0
+          )
+          loop var part: Int = 0, part < lod.parts.length, ++part {
+            if let batch: view InstanceBatch = field.batches.viewAt(index: first + part) {
+              drawInstances(cache: cache, resources: resources, batch: batch)
+            }
+          }
+        }
+      }
+    }
   }
 }
 

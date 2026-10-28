@@ -114,6 +114,9 @@ type PropView {
   halfAngle: Float
 }
 
+# The distance bands of a near-to-far gather (PropField.nearToFar)
+const propNearToFarBands: Int = 24
+
 type PropField {
   kinds: List(PropKind)
   placements: List(PropPlacement)
@@ -159,6 +162,13 @@ type PropField {
   # megabytes that are never used. Set before finishPropField; props past it
   # in a frame are not drawn.
   batchLimit: Int
+  # Gather and draw near to far (docs/reference-tree-plan.md step 8, as Tiny
+  # Glade draws its trees): the cells in reach are visited in
+  # propNearToFarBands distance bands, nearest first, so each batch's
+  # instances run near to far, and every kind's nearest level is drawn
+  # before any kind's next one. Leaf cards are alpha-tested, so what is
+  # drawn first hides what is behind it from the costly fragment work.
+  nearToFar: Bool = false
   finished: Bool
   # The last gather: props drawn, cells looked into
   visibleCount: Int
