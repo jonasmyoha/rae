@@ -284,6 +284,55 @@ Measured in the lab and in a forest of a few thousand copies: triangles per
 tree at each distance, frame time on this machine and on the phone. Targets
 are set from the walker forest's current budget.
 
+Measured (0.2.193, 2026-10-28, this Mac, Ultra: full resolution 2560 x
+1600; `RAE_QUALITY=ultra RAE_GPU_PASS_TIMING=1 RAE_TREELAB_STATS=1` in the
+tree lab; GPU times are the renderer's per-pass timestamps, averaged over
+60 frames). The phone was not measured: no device tools on this machine.
+
+Triangles per tree:
+
+| level | T02 (traced, grown 1-4) | stylized set (forest average) |
+|---|---|---|
+| near (to 30 m) | 5,429-7,058 (traced 5,844) | about 6,970 |
+| middle (to 60 m) | 3,533-4,246 (traced 3,560) | about 5,750 |
+| impostor (to 140 m), far billboard, canopy | 2 | 2 |
+
+The forest scene (about 16,600 trees to 1.9 km; the lab's forest at eye
+height and from 35 m), GPU microseconds:
+
+| run | trees drawn near / middle | impostors, far billboards, canopy | G-buffer | shadows | antialiasing (SMAA) | GPU total | frame |
+|---|---|---|---|---|---|---|---|
+| T02, eye height | 3 / 39 (165k triangles) | 322, 514, 584 | 498 | 314 | 3,265 | 6,408 | 5.8 ms |
+| stylized, eye height | 4 / 39 (252k triangles) | 315, 505, 584 | 547 | 337 | 1,796 | 4,584 | 4.0 ms |
+| T02, from 35 m | 0 / 32 (120k triangles) | 327, 558, 584 | 563 | 360 | 3,958 | 7,129 | 6.5 ms |
+| stylized, from 35 m | 0 / 32 (191k triangles) | 322, 515, 584 | 503 | 318 | 3,283 | 6,008 | 5.5 ms |
+| T02, eye height, near to far | as above | | 503 | 322 | | 6,354 | 5.8 ms |
+| T02, from 35 m, near to far | as above | | 524 | 391 | | 7,012 | 6.5 ms |
+
+The gather (CPU) takes 0.06-0.15 ms a frame for either set. One tree alone
+in the T02 scene is below the noise of the lab's own scene (about
++-0.5 ms in the G-buffer pass).
+
+The walker forest's budget (143 at its start, Ultra, 31,042 trees, 828
+canopy clusters): 17 ms a frame at its 60 fps cap, GPU 17.3 ms, of it the
+G-buffer pass (forest, terrain, grass, characters) 4.5 ms.
+
+Reading: the T02 tree is within the budget. It has fewer triangles than
+the stylized trees it would replace (about 15% fewer near, 35% fewer in
+the middle) and costs the same in the G-buffer pass. What it does cost is
+antialiasing: its many fine leaf-card edges give SMAA about 1.5 ms more
+work at eye height (0.7 ms from above) than the stylized set in the same
+scene. 143 runs with TAA as its main antialiasing (SMAA 0.6 ms there), so
+this is to watch when T02 trees enter the walkers (step 9), not a blocker.
+
+Near to far (`PropField.nearToFar`, as Tiny Glade draws its trees: the
+cells visited in 24 distance bands nearest first, every kind's nearest
+level drawn first) made no measurable difference here: the G-buffer pass
+is about 0.5 ms either way, and this GPU (Apple, tile-based, hidden
+surface removal) already avoids most of the overdraw. It stays in
+PropField, off by default (`RAE_TREE_NEAR_TO_FAR=1` in the lab), to be
+measured again on the phone and on other GPUs.
+
 Leaf cards cost overdraw, so the trees are drawn near to far, as Tiny Glade
 does: visible tree instances go into about 24 depth buckets in one counting
 pass on the GPU, and are still drawn in one indirect draw (their trees took

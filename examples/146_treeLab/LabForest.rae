@@ -93,6 +93,8 @@ func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret
     settings: defaultTreeForestSettings(extent: labForestFar * 2.0 + 400.0, farReach: 1800.0)
     toon: false
   )
+  # RAE_TREE_NEAR_TO_FAR=1: gather and draw near to far (PropField.nearToFar)
+  forest.field.nearToFar = Sys.getEnv(name: "RAE_TREE_NEAR_TO_FAR") is "1"
   let unusedPlanted: Int = plantTreeForestBand(
     forest: forest
     treeSet: treeSet
