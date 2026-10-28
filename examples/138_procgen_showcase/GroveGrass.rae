@@ -26,24 +26,17 @@ type GroveObstacle {
   x: Float
   y: Float
   radius: Float
-  excludeGrass: Bool = true
 }
 
 # The surface field grove_surface.wgsl reads: the count, then x, y, radius
 func groveObstacleField(obstacles: view List(GroveObstacle)) ret List(Float) {
   var field: List(Float) = List.create(Float, cap: 1 + obstacles.length * 3)
-  field.add(value: 0.0)
-  var count: Int = 0
+  field.add(value: obstacles.length.toFloat())
   loop let obstacle: view GroveObstacle in obstacles {
-    if not obstacle.excludeGrass {
-      continue
-    }
-    count = count + 1
     field.add(value: obstacle.x)
     field.add(value: obstacle.y)
     field.add(value: obstacle.radius)
   }
-  field.set(index: 0, value: count.toFloat())
   ret field
 }
 
@@ -51,13 +44,14 @@ func createGroveGrass(obstacles: view List(GroveObstacle)) ret GrassCompute {
   var grass: GrassCompute = createGrassCompute()
   grassSetComputeShaderWithConstants(
     grass: grass
-    shader: shader(files: [
-      "lib/gpu/computeBounds.wgsl"
-      "assets/grove_path.wgsl"
-      "assets/grove_surface.wgsl"
-      "lib/grass_field.wgsl"
-      "lib/grass_compute.wgsl"
-    ])
+    shader: shader(
+      files: [
+        "lib/gpu/computeBounds.wgsl"
+        "assets/grove_surface.wgsl"
+        "lib/grass_field.wgsl"
+        "lib/grass_compute.wgsl"
+      ]
+    )
     constants: List.create(ShaderConstant, cap: 0)
   )
   grassSetSurfaceField(grass: grass, values: groveObstacleField(obstacles: obstacles))
@@ -67,12 +61,14 @@ func createGroveGrass(obstacles: view List(GroveObstacle)) ret GrassCompute {
 # The walker's tuned look (136): low, broad tufts in clusters over the
 # painted ground, a gentle wind
 func groveGrassSettings(groundColor: view Vec3) ret GrassViewSettings {
-  var settings: GrassViewSettings = GrassConfig.grassMeadowSettings(groundColor: groundColor)
+  var settings: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: groundColor)
   settings.extent = groveGrassExtent
-  settings.patchScale = 8.5
-  settings.patchFeather = 0.11
-  settings.farDensityScale = 0.18
-  settings.farWidthScale = 1.28
+  settings.bladeHeightScale = 0.55
+  settings.bladeWidthScale = 1.8
+  settings.densityScale = 0.55
+  settings.clusterStrength = 0.8
+  settings.tipLighten = 1.25
+  settings.windStrength = 0.45
   ret settings
 }
 

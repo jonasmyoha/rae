@@ -1768,9 +1768,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
-          # Inspect the composed grove and every maintained close-up preset.
+          # The low-poly museum (docs/tree-sets-design.md §3): the composed
+          # grove and its seven close-up views, as at rae 4d28e11d.
           GROVE_OK=1
-          for GROVE_VIEW in grove trees rocks fluffy evergreen spruces camphor roots birches grass flowers bellflowers bellflowers-side bellflowers-backlit ginkgo; do
+          for GROVE_VIEW in grove trees rocks fluffy evergreen spruces camphor roots; do
             SCREENSHOT="$TMP_OUT/procgen-$GROVE_VIEW.bmp"
             if ! (cd .. && RAE_GROVE_VIEW="$GROVE_VIEW" RAE_DEBUG_OVERLAY=0 \
                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -1782,7 +1783,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             fi
           done
           if [ "$GROVE_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (fifteen grove inspection views, including ginkgo and both flower families, grass contacts, birches, camphor and roots)"
+            echo "PASS: $EXAMPLE_NAME (the low-poly museum: eight grove inspection views, including camphor and roots)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (grove inspection views)"

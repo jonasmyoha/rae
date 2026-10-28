@@ -3,13 +3,8 @@
 # The rows by the camphor are the inspection views; the woodland spreads the
 # same species over the rest of the island.
 import Math
-import Sys
-open procgen/Spruce
-open procgen/Cypress
-open procgen/Lime
-open RendererImages
 open Noise
-open procgen/FluffyFoliage
+open lowPolyTrees/FluffyFoliage
 open FoliageMesh
 open RendererDeferred
 open Scene3d
@@ -49,40 +44,7 @@ func uploadFluffySpecies(
   handles: mod List(MeshHandle)
   species: view Int
 ) {
-  var seed: Int = 73
-  let seedText: String = Sys.getEnv(name: "RAE_LIME_SEED")
-  if form is FluffyForm.broadleaf and seedText.length() > 0 {
-    seed = seedText.toInt()
-  }
-  if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_SEED").length() > 0 {
-    seed = Sys.getEnv(name: "RAE_SPRUCE_SEED").toInt()
-  }
-  if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_SEED").length() > 0 {
-    seed = Sys.getEnv(name: "RAE_CYPRESS_SEED").toInt()
-  }
-  let control: Bool = form is FluffyForm.broadleaf and Sys.getEnv(name: "RAE_LIME_CONTROL") is "1"
-  if form is FluffyForm.broadleaf and not control {
-    let tree: LimeTree = limeTree(seed: seed)
-    handles.add(value: uploadFoliage(renderer: renderer, mesh: tree.wood))
-    var triangles: Int = tree.wood.indices.length / 3
-    loop var tone: Int = 0, tone < 3, ++tone {
-      let leaves: MeshData = limeLeaves(sprays: tree.sprays, seed: seed, tone: tone)
-      handles.add(value: uploadFoliage(renderer: renderer, mesh: leaves))
-      triangles = triangles + leaves.indices.length / 3
-    }
-    log(
-      "[lime] seed={seed} wood={tree.wood.vertCount}v sprays={tree.sprays.length} total={triangles}t"
-    )
-    ret
-  }
-  # Preserve the original controls; the live spruce uses the shared bough generator.
-  var wood: MeshData = fluffyWoodControl(form: form, seed: seed)
-  if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
-    wood = spruceWood(seed: seed)
-  }
-  if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
-    wood = cypressWood(seed: seed)
-  }
+  let wood: MeshData = fluffyWood(form: form, seed: 73)
   var woodHandle: MeshHandle = meshHandleNone()
   if wood.vertCount > 0 {
     woodHandle = uploadMesh(
@@ -94,18 +56,12 @@ func uploadFluffySpecies(
   }
   handles.add(value: woodHandle)
   loop var tone: Int = 0, tone < 3, ++tone {
-    var leaves: MeshData = fluffyLeavesControl(
+    let leaves: MeshData = fluffyLeaves(
       form: form
-      seed: seed
+      seed: 73
       patchCount: 48
       tone: tone
     )
-    if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
-      leaves = spruceLeaves(seed: seed, detail: 48, tone: tone)
-    }
-    if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
-      leaves = cypressLeaves(seed: seed, detail: 48, tone: tone)
-    }
     handles.add(value: uploadFoliage(renderer: renderer, mesh: leaves))
     log(
       "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
@@ -123,24 +79,9 @@ func plantFluffy(
   position: view Vec3
   width: view Float
   height: view Float
-  limeBarkLayer: view Int
-  limeLeafLayer: view Int
-  spruceBarkLayer: view Int
-  spruceLeafLayer: view Int
-  cypressBarkLayer: view Int
-  cypressLeafLayer: view Int
   yaw: view Float
 ) {
   loop var part: Int = 0, part < 4, ++part {
-    if form is FluffyForm.broadleaf and part > 0 and Sys.getEnv(name: "RAE_LIME_BARE") is "1" {
-      continue
-    }
-    if form is FluffyForm.spruce and part > 0 and Sys.getEnv(name: "RAE_SPRUCE_BARE") is "1" {
-      continue
-    }
-    if form is FluffyForm.cypress and part > 0 and Sys.getEnv(name: "RAE_CYPRESS_BARE") is "1" {
-      continue
-    }
     if form is FluffyForm.bush and part is 0 {
       continue
     }
@@ -151,33 +92,6 @@ func plantFluffy(
     var material: Material3d = fluffyMaterial(form: form, tone: part - 1)
     if part is 0 {
       material.baseColor = Vec3.create(x: 0.13, y: 0.075, z: 0.04)
-      if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
-        material.baseColor = spruceWoodColor()
-      }
-    }
-    if form is FluffyForm.broadleaf and limeLeafLayer >= 0 {
-      material.baseColor = limeLeafColor(tone: part - 1)
-      material.colorTextureLayer = limeLeafLayer
-      if part is 0 {
-        material.baseColor = limeWoodColor()
-        material.colorTextureLayer = limeBarkLayer
-      }
-    }
-    if form is FluffyForm.spruce and spruceLeafLayer >= 0 {
-      material.baseColor = spruceLeafColor(tone: part - 1)
-      material.colorTextureLayer = spruceLeafLayer
-      if part is 0 {
-        material.baseColor = spruceWoodColor()
-        material.colorTextureLayer = spruceBarkLayer
-      }
-    }
-    if form is FluffyForm.cypress and cypressLeafLayer >= 0 {
-      material.baseColor = cypressLeafColor(tone: part - 1)
-      material.colorTextureLayer = cypressLeafLayer
-      if part is 0 {
-        material.baseColor = cypressWoodColor()
-        material.colorTextureLayer = cypressBarkLayer
-      }
     }
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
@@ -195,42 +109,12 @@ func addFluffyGrove(
   renderer: mod DeferredRenderer
   obstacles: mod List(GroveObstacle)
 ) {
-  var limeBarkLayer: Int = -1
-  var limeLeafLayer: Int = -1
-  if Sys.getEnv(name: "RAE_LIME_CONTROL") is not "1" {
-    limeBarkLayer = rendererLoadSurfaceImage(renderer: renderer, path: limeBarkTexture())
-    limeLeafLayer = rendererLoadSurfaceImage(renderer: renderer, path: limeLeafTexture())
-  }
-  var spruceBarkLayer: Int = -1
-  var spruceLeafLayer: Int = -1
-  if Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
-    spruceBarkLayer = rendererLoadSurfaceImage(renderer: renderer, path: spruceBarkTexture())
-    spruceLeafLayer = rendererLoadSurfaceImage(renderer: renderer, path: spruceLeafTexture())
-  }
-  var cypressBarkLayer: Int = -1
-  var cypressLeafLayer: Int = -1
-  if Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
-    cypressBarkLayer = rendererLoadSurfaceImage(renderer: renderer, path: cypressBarkTexture())
-    cypressLeafLayer = rendererLoadSurfaceImage(renderer: renderer, path: cypressLeafTexture())
-  }
-  var forms: List(FluffyForm) = {
+  let forms: List(FluffyForm) = {
     FluffyForm.broadleaf
     FluffyForm.cypress
     FluffyForm.umbrella
     FluffyForm.bush
     FluffyForm.spruce
-  }
-  let spruceIsolated: Bool = Sys.getEnv(name: "RAE_SPRUCE_ISOLATE") is "1"
-  let cypressIsolated: Bool = Sys.getEnv(name: "RAE_CYPRESS_ISOLATE") is "1"
-  let isolated: Bool = Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" or spruceIsolated or cypressIsolated
-  if isolated {
-    forms = List(FluffyForm) { FluffyForm.broadleaf }
-    if cypressIsolated {
-      forms = List(FluffyForm) { FluffyForm.cypress }
-    }
-    if spruceIsolated {
-      forms = List(FluffyForm) { FluffyForm.spruce }
-    }
   }
   var handles: List(MeshHandle) = List.create(MeshHandle, cap: forms.length * 4)
   loop var species: Int = 0, species < forms.length, ++species {
@@ -251,9 +135,6 @@ func addFluffyGrove(
     if form is FluffyForm.spruce {
       plantCount = 6
     }
-    if isolated {
-      plantCount = 1
-    }
     loop var plant: Int = 0, plant < plantCount, ++plant {
       var position: Vec3 = Vec3.create(
         x: -14.0 + species.toFloat() * 8.5 + plant.toFloat() * 1.1
@@ -263,11 +144,6 @@ func addFluffyGrove(
       var height: Float = 5.0 + plant.toFloat() * 0.65
       if form is FluffyForm.cypress {
         height = 7.5 + plant.toFloat() * 0.7
-        position = Vec3.create(
-          x: -5.5 + plant.toFloat() * 1.1
-          y: 13.0 + plant.toFloat() * 3.8
-          z: 0
-        )
       }
       if form is FluffyForm.umbrella {
         height = 6.0 + plant.toFloat() * 0.5
@@ -276,15 +152,9 @@ func addFluffyGrove(
         position = Vec3.create(x: -12.0 + plant.toFloat() * 3.0, y: -6, z: 0)
         height = 2.2 + plant.toFloat() * 0.2
       }
-      let heightText: String = Sys.getEnv(name: "RAE_LIME_HEIGHT")
-      if isolated and heightText.length() > 0 {
-        height = heightText.toFloat()
-      }
       var widthScale: Float = height
-      if form is FluffyForm.cypress and (plant >= 3 or (cypressIsolated and Sys.getEnv(
-        name: "RAE_CYPRESS_TALL"
-      ) is "1")) {
-        let giantIndex: Int = Math.max(a: plant - 3, b: 0)
+      if form is FluffyForm.cypress and plant >= 3 {
+        let giantIndex: Int = plant - 3
         widthScale = 7.5 + giantIndex.toFloat() * 0.7
         height = widthScale * 3
         position = Vec3.create(
@@ -311,29 +181,14 @@ func addFluffyGrove(
         position: position
         width: widthScale
         height: height
-        limeBarkLayer: limeBarkLayer
-        limeLeafLayer: limeLeafLayer
-        spruceBarkLayer: spruceBarkLayer
-        spruceLeafLayer: spruceLeafLayer
-        cypressBarkLayer: cypressBarkLayer
-        cypressLeafLayer: cypressLeafLayer
         yaw: plant.toFloat() * 1.7
       )
     }
-  }
-  if isolated {
-    ret
   }
   addFluffyWoodland(
     world: world
     handles: handles
     forms: forms
-    limeBarkLayer: limeBarkLayer
-    limeLeafLayer: limeLeafLayer
-    spruceBarkLayer: spruceBarkLayer
-    spruceLeafLayer: spruceLeafLayer
-    cypressBarkLayer: cypressBarkLayer
-    cypressLeafLayer: cypressLeafLayer
     obstacles: obstacles
   )
 }
@@ -439,12 +294,6 @@ func addFluffyWoodland(
   world: mod World3d
   handles: view List(MeshHandle)
   forms: view List(FluffyForm)
-  limeBarkLayer: view Int
-  limeLeafLayer: view Int
-  spruceBarkLayer: view Int
-  spruceLeafLayer: view Int
-  cypressBarkLayer: view Int
-  cypressLeafLayer: view Int
   obstacles: mod List(GroveObstacle)
 ) {
   var planted: List(WoodlandPlant) = List.create(WoodlandPlant, cap: 64)
@@ -507,12 +356,6 @@ func addFluffyWoodland(
       position: Vec3.create(x: x, y: y, z: -0.06)
       width: width
       height: height
-      limeBarkLayer: limeBarkLayer
-      limeLeafLayer: limeLeafLayer
-      spruceBarkLayer: spruceBarkLayer
-      spruceLeafLayer: spruceLeafLayer
-      cypressBarkLayer: cypressBarkLayer
-      cypressLeafLayer: cypressLeafLayer
       yaw: hash2(x: candidate, y: 5, seed: 4177) * 6.2831853
     )
   }
