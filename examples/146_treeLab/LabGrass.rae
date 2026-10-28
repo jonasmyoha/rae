@@ -1,6 +1,7 @@
 # The tree lab's grass: the standard lib GPU grass (lib/GrassCompute.rae), on
 # the lab's flat ground (assets/lab_surface.wgsl). The grid is centered on the
-# tree, so every camera sees grass round it; the trunk is an obstacle circle.
+# tree (or the studies), so every camera sees grass round it; the trunk (or
+# the studies' trunks and rocks) are obstacle circles.
 import GrassConfig
 import Vec3
 open Wind
@@ -12,7 +13,14 @@ open LabScene
 # The grid's span round the tree (m)
 const labGrassExtent: Float = 90.0
 
-func createLabGrass() ret GrassCompute {
+# The grass of the T02 scene: one obstacle, the trunk at the origin
+func labTrunkField() ret List(Float) {
+  ret List(Float) { 1.0, 0.0, 0.0, labTrunkRadius + 0.15 }
+}
+
+# `obstacles` is the surface field: the count, then x, y and radius of each
+# circle the grass leaves free
+func createLabGrass(obstacles: view List(Float)) ret GrassCompute {
   var grass: GrassCompute = createGrassCompute()
   grassSetComputeShaderWithConstants(
     grass: grass
@@ -26,8 +34,7 @@ func createLabGrass() ret GrassCompute {
     )
     constants: List.create(ShaderConstant, cap: 0)
   )
-  # One obstacle: the trunk at the origin
-  grassSetSurfaceField(grass: grass, values: [1.0, 0.0, 0.0, labTrunkRadius + 0.15])
+  grassSetSurfaceField(grass: grass, values: obstacles)
   ret grass
 }
 
@@ -39,10 +46,13 @@ func labGrassSettings() ret GrassViewSettings {
   ret settings
 }
 
-# This frame's blades (the compute pass), before the G-buffer pass draws them
+# This frame's blades (the compute pass), before the G-buffer pass draws them;
+# the grid is centered on (centerX, centerY)
 func generateLabGrass(
   grass: mod GrassCompute
   resources: mod GpuResources
+  centerX: view Float
+  centerY: view Float
   camera: view Camera3d
   deltaTime: view Float
   wind: view WindVector
@@ -50,8 +60,8 @@ func generateLabGrass(
   grassGenerate(
     grass: grass
     resources: resources
-    centerX: 0.0
-    centerY: 0.0
+    centerX: centerX
+    centerY: centerY
     groundZ: 0.0
     deltaTime: deltaTime
     wind: wind

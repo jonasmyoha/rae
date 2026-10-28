@@ -51,10 +51,10 @@ def main():
     geometry.write_text('100 100 1280 800\n')
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'binaryReused': bool(args.binary), 'sourceHashesAtCapture': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                                 for path in [repo / 'lib/procgen/Ginkgo.rae', repo / 'lib/app3d/GroveTrees.rae',
-                                              repo / 'examples/138_procgen_showcase/GroveScene.rae',
-                                              repo / 'examples/138_procgen_showcase/GinkgoGrove.rae',
-                                              repo / 'examples/138_procgen_showcase/Main.rae']},
+                                 for path in [repo / 'lib/procgen/Ginkgo.rae', repo / 'lib/stylizedTrees/StylizedTrees.rae',
+                                              repo / 'examples/146_treeLab/StudyTrees.rae',
+                                              repo / 'examples/146_treeLab/GinkgoGrove.rae',
+                                              repo / 'examples/146_treeLab/Main.rae']},
                 'clock': '180 frames, 1/30 second' if args.motion else '60 frames, 1/60 second',
                 'wind': args.wind, 'walkDistance': 2.5 if args.motion else 0, 'imageSize': [1280, 800],
                 'assetHashes': {name: hashlib.sha256((repo / 'lib/assets/trees' / name).read_bytes()).hexdigest()
@@ -68,7 +68,7 @@ def main():
                 continue
             env = dict(os.environ, RAE_UI_HEADLESS='1', RAE_HEADLESS_FRAMES='180' if args.motion else '60',
                        RAE_FIXED_DT='0.033333333' if args.motion else '0.016666667',
-                       RAE_WIND=str(args.wind), RAE_DEBUG_OVERLAY='0', RAE_GROVE_VIEW='ginkgo', RAE_CAMERA_AT=camera,
+                       RAE_WIND=str(args.wind), RAE_DEBUG_OVERLAY='0', RAE_TREELAB_STUDY='ginkgo', RAE_CAMERA_AT=camera,
                        RAE_GINKGO_CONTROL=str(int(control)), RAE_GINKGO_BARE=str(int(bare)),
                        RAE_GINKGO_ISOLATE=str(int(isolated)), RAE_GINKGO_SEED=str(seed), RAE_GINKGO_HEIGHT=str(height),
                        RAE_WALKER_HOUR=str(hour), RAE_DRS='off', RAE_RENDER_SCALE='1',
@@ -80,8 +80,8 @@ def main():
                 frames.mkdir(exist_ok=True)
             command = [str(binary)]
             if buildNeeded:
-                command = [str(repo / 'compiler/bin/rae'), 'run', '--project', 'examples/138_procgen_showcase',
-                           'examples/138_procgen_showcase/Main.rae']
+                command = [str(repo / 'compiler/bin/rae'), 'run', '--project', 'examples/146_treeLab',
+                           'examples/146_treeLab/Main.rae']
                 buildNeeded = False
             with (output / f'{name}.log').open('w') as log:
                 subprocess.run(command, cwd=repo, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=180, check=True)

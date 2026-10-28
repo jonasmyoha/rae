@@ -31,12 +31,12 @@ printf '%s\n' '100 100 1280 800' > "$geometry"
 capture() {
   view="$1"
   name="$2"
-  env RAE_GROVE_VIEW="$view" RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 \
+  env RAE_TREELAB_STUDY="$view" RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 \
     RAE_HEADLESS_FRAMES="$fixedFrames" RAE_FIXED_DT="$fixedDelta" \
     RAE_GPU2D_SCREENSHOT="$output/$name.bmp" \
     perl -e 'alarm shift; exec @ARGV' 120 "$root/compiler/bin/rae" run \
-      --project "$root/examples/138_procgen_showcase" \
-      "$root/examples/138_procgen_showcase/Main.rae" > "$output/$name.log" 2>&1
+      --project "$root/examples/146_treeLab" \
+      "$root/examples/146_treeLab/Main.rae" > "$output/$name.log" 2>&1
   sips -s format png -z 800 1280 "$output/$name.bmp" --out "$output/$name.png" >/dev/null
 }
 

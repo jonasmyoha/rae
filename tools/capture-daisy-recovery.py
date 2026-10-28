@@ -25,7 +25,7 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    app = '143_walker_forest' if args.forest else '138_procgen_showcase'
+    app = '143_walker_forest' if args.forest else '146_treeLab'
     binary = output / app
     if not args.reuse_binary:
         binary.unlink(missing_ok=True)
@@ -56,9 +56,9 @@ def main():
         assert views, args.view
     sources = ['lib/procgen/MeadowFlower.rae', 'lib/procgen/OxeyeGeometry.rae',
                'lib/app3d/WalkerFlowers.rae', 'lib/app3d/WalkerTerrain.rae',
-               'examples/138_procgen_showcase/MeadowFlowers.rae',
-               'examples/138_procgen_showcase/GroveGrass.rae',
-               'examples/138_procgen_showcase/GroveScene.rae', 'lib/app3d/CameraStudy.rae']
+               'examples/146_treeLab/MeadowFlowers.rae',
+               'examples/146_treeLab/LabGrass.rae',
+               'examples/146_treeLab/StudyTrees.rae', 'lib/app3d/CameraStudy.rae']
     if args.species == 'harebell':
         sources += ['lib/procgen/Harebell.rae', 'lib/procgen/HarebellGeometry.rae']
     manifest = {'species': args.species, 'app': app, 'fixedDelta': 1 / 30, 'motion': args.motion, 'travelMeters': args.travel, 'frames': args.frames, 'wind': args.wind,
@@ -77,7 +77,7 @@ def main():
                 name = f'{app[:3]}-{style}-{label}{args.tag}'
                 bitmap = output/f'{name}.bmp'
                 env = dict(os.environ, RAE_UI_HEADLESS='1', RAE_HEADLESS_FRAMES=str(args.frames),
-                           RAE_FIXED_DT='0.033333333', RAE_WIND=str(args.wind), RAE_GROVE_VIEW='flowers',
+                           RAE_FIXED_DT='0.033333333', RAE_WIND=str(args.wind), RAE_TREELAB_STUDY='flowers',
                            RAE_WALKER_HOUR=str(hour), RAE_CAMERA_AT=camera, RAE_DEBUG_OVERLAY='0',
                            RAE_DRS='off', RAE_RENDER_SCALE='1', RAE_GPU2D_SCREENSHOT=str(bitmap),
                            **{'RAE_DAISY_CONTROL' if args.species == 'daisy' else 'RAE_HAREBELL_CONTROL': '1' if style == 'control' else '0'},

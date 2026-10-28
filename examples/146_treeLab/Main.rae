@@ -24,6 +24,12 @@
 #                   (6 m, looking up), with the row
 #   tracedFork      the same view of the traced tree
 #
+# The studies (LabStudies.rae): RAE_TREELAB_STUDY=<view> shows one of the
+# stylized set's study scenes that Autumn Grove (138) held before it became
+# the low-poly museum (maples, japanese-maple, ginkgo, birches and its five
+# other views, forks-front/side/grazing, flowers, bellflowers and its two
+# other views) in place of the T02 scene.
+#
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
 # The scene look (LabLook: haze, warm sun and cool shade, grade, glow) is on;
@@ -53,6 +59,10 @@ open LabGrass
 open LabLook
 open LabTree
 open treeGen/LeafPass
+open RendererWind
+open app3d/CameraRig
+open LabStudies
+open BirchStudy
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -70,6 +80,14 @@ type LabState {
   # The app's GPU manager: the grass's compute pass lives in it
   gpuResources: opt GpuResources
   grass: GrassCompute
+  # where the grass grid is centered: the tree, or the studies
+  grassCenterX: Float = 0.0
+  grassCenterY: Float = 0.0
+  # the study shown (RAE_TREELAB_STUDY), empty for the T02 scene; its
+  # camera rig and the birch motion study
+  studyView: String = ""
+  cameraRig: CameraRig
+  birchStudy: BirchStudy
   # the generated tree's leaves and its crown's shadow caster
   tree: opt LabTree
   windSettings: WindSettings
@@ -134,7 +152,45 @@ func labCamera(name: view String) ret Camera3d {
   ret camera
 }
 
+# One of the studies (RAE_TREELAB_STUDY): its world, light and camera
+func createStudyLab(studyView: view String) ret LabState {
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let meshes: LabMeshes = createLabMeshes(renderer: renderer)
+  var obstacles: List(StudyObstacle) = List.create(StudyObstacle, cap: 64)
+  var world: World3d = buildStudyWorld(meshes: meshes, renderer: renderer, obstacles: obstacles)
+  var light: Light3d = defaultLight3d()
+  applyStudyLight(renderer: renderer, light: light, studyView: studyView)
+  var camera: Camera3d = studyCamera()
+  let rig: CameraRig = studyCameraRig(camera: camera, studyView: studyView)
+  var idIssuer: IdIssuer = IdIssuer.create()
+  let windSettings: WindSettings = defaultWindSettings()
+  unsafe {
+    ret LabState {
+      renderer: own renderer
+      world: own world
+      light: light
+      camera: camera
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
+      grass: createLabGrass(obstacles: studyObstacleField(obstacles: obstacles))
+      grassCenterX: studyGrassCenterX
+      grassCenterY: studyGrassCenterY
+      studyView: studyView
+      cameraRig: rig
+      birchStudy: createBirchStudy()
+      tree: none
+      windSettings: windSettings
+      wind: createWindState(settings: windSettings)
+      lastTime: Gpu2d.nowSeconds()
+    }
+  }
+}
+
 func createLab() ret LabState {
+  let studyView: String = labStudyName()
+  if studyView.length() > 0 {
+    Gpu2d.initWindow(width: 1280, height: 800, title: "146: Tree lab | study: {studyView}")
+    ret createStudyLab(studyView: studyView)
+  }
   Gpu2d.initWindow(
     width: 1280
     height: 800
@@ -153,14 +209,17 @@ func createLab() ret LabState {
   applyLabLook(renderer: renderer, light: light)
   var idIssuer: IdIssuer = IdIssuer.create()
   let windSettings: WindSettings = defaultWindSettings()
+  let camera: Camera3d = labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
   unsafe {
     ret LabState {
       renderer: own renderer
       world: own world
       light: light
-      camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+      camera: camera
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
-      grass: createLabGrass()
+      grass: createLabGrass(obstacles: labTrunkField())
+      cameraRig: createCameraRig(camera: camera)
+      birchStudy: createBirchStudy()
       tree: own tree
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
@@ -208,6 +267,8 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
     generateLabGrass(
       grass: state.grass
       resources: resources
+      centerX: state.grassCenterX
+      centerY: state.grassCenterY
       camera: state.camera
       deltaTime: deltaTime
       wind: windVector(state: state.wind, settings: state.windSettings)
@@ -256,6 +317,15 @@ func runLabFrame(state: mod LabState) {
   let deltaTime: Float = Math.min(a: (now - state.lastTime) as Float, b: 0.1)
   state.lastTime = now
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
+  if state.studyView.length() > 0 {
+    # the studies' leaves sway in the renderer's wind, and the birch
+    # motion study moves the camera
+    setRendererWind(
+      renderer: state.renderer
+      wind: windVector(state: state.wind, settings: state.windSettings)
+    )
+    stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
+  }
   if not Gpu2d.renderGate() {
     ret
   }

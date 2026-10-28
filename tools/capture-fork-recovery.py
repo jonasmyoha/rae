@@ -29,7 +29,7 @@ def capture():
         "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
         "sourceHashes": {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
                          for path in [*sorted((repo / "lib/procgen").glob("*Fork*.rae")),
-                                      repo / "examples/138_procgen_showcase/ForkStudy.rae"]},
+                                      repo / "examples/146_treeLab/ForkStudy.rae"]},
         "seeds": {"young": 206, "mature": 907},
         "transforms": {"young": {"position": [5, -14, -0.05], "rotationZ": 0.25},
                        "mature": {"position": [14, -12, -0.05], "rotationZ": -0.35}},
@@ -50,14 +50,14 @@ def capture():
                 bitmap = output / f"{stem}.bmp"
                 png = output / f"{stem}.png"
                 env = dict(os.environ, RAE_FORK_CONTROL="1" if variant == "control" else "0",
-                           RAE_GROVE_VIEW=f"forks-{view}", RAE_DEBUG_OVERLAY="0", RAE_UI_HEADLESS="1",
+                           RAE_TREELAB_STUDY=f"forks-{view}", RAE_DEBUG_OVERLAY="0", RAE_UI_HEADLESS="1",
                            RAE_HEADLESS_FRAMES="60", RAE_FIXED_DT="0.016666667", RAE_WIND="0",
                            RAE_CAMERA_AT="", RAE_GPU2D_SCREENSHOT=str(bitmap))
                 log = output / f"{stem}.log"
                 with log.open("w") as stream:
                     subprocess.run(["perl", "-e", "alarm shift; exec @ARGV or die $!", "180",
                                     str(repo / "compiler/bin/rae"), "run", "--project",
-                                    "examples/138_procgen_showcase", "examples/138_procgen_showcase/Main.rae"],
+                                    "examples/146_treeLab", "examples/146_treeLab/Main.rae"],
                                    cwd=repo, env=env, stdout=stream, stderr=subprocess.STDOUT,
                                    check=True, timeout=190)
                 subprocess.run(["sips", "-s", "format", "png", "-z", "800", "1280",

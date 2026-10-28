@@ -22,7 +22,7 @@ def main():
     saved = geometry.read_bytes() if geometry.exists() else None
     geometry.parent.mkdir(parents=True, exist_ok=True)
     geometry.write_text("100 100 1280 800\n")
-    base = dict(os.environ, RAE_BIRCH_STUDY="tree", RAE_BIRCH_ISOLATE="1", RAE_GROVE_VIEW="birches",
+    base = dict(os.environ, RAE_BIRCH_STUDY="tree", RAE_BIRCH_ISOLATE="1", RAE_TREELAB_STUDY="birches",
                 RAE_UI_HEADLESS="1", RAE_HEADLESS_FRAMES="60", RAE_FIXED_DT="0.016666667",
                 RAE_DEBUG_OVERLAY="0", RAE_WIND="0", RAE_BIRCH_MOTION="", RAE_BIRCH_FRAMES="")
     manifest = {"seed": 1437, "height": 7.1, "position": [-16, -10, 0], "rotation": 0,
@@ -34,11 +34,11 @@ def main():
                 "sources": {}, "captures": []}
     for name in ("lib/procgen/Birch.rae", "lib/procgen/FoliageCards.rae",
                  "lib/assets/trees/birchLeaves.png", "lib/assets/trees/birchSpray.png",
-                 "examples/138_procgen_showcase/BirchGrove.rae",
-                 "examples/138_procgen_showcase/BirchStudy.rae",
-                 "examples/138_procgen_showcase/Main.rae",
-                 "examples/138_procgen_showcase/GroveScene.rae",
-                 "lib/app3d/GroveTrees.rae"):
+                 "examples/146_treeLab/BirchGrove.rae",
+                 "examples/146_treeLab/BirchStudy.rae",
+                 "examples/146_treeLab/Main.rae",
+                 "examples/146_treeLab/StudyTrees.rae",
+                 "lib/stylizedTrees/StylizedTrees.rae"):
         manifest["sources"][name] = hashlib.sha256((repo / name).read_bytes()).hexdigest()
 
     def run(name, env, command=None):
@@ -54,7 +54,7 @@ def main():
         preset = "birches" if view in ("front", "side", "branch", "repeat", "birches") else f"birches-{view}"
         env = dict(base, RAE_BIRCH_STYLE=style, RAE_BIRCH_STUDY="" if study == "grove" else study,
                    RAE_BIRCH_ISOLATE="1" if isolate else "0",
-                   RAE_GROVE_VIEW=preset, RAE_CAMERA_AT=camera, RAE_GPU2D_SCREENSHOT=str(bitmap))
+                   RAE_TREELAB_STUDY=preset, RAE_CAMERA_AT=camera, RAE_GPU2D_SCREENSHOT=str(bitmap))
         run(name, env)
         subprocess.run(["sips", "-s", "format", "png", "-z", "800", "1280",
                         str(bitmap), "--out", str(png)], check=True, timeout=20,
@@ -71,7 +71,7 @@ def main():
         if not args.reuse_binary:
             run("build", dict(base, RAE_HEADLESS_FRAMES="1", RAE_RUN_KEEP_BINARY=str(binary)),
                 [str(repo / "compiler/bin/rae"), "run", "--project",
-                 "examples/138_procgen_showcase", "examples/138_procgen_showcase/Main.rae"])
+                 "examples/146_treeLab", "examples/146_treeLab/Main.rae"])
         for style in ("control", "texture", "connected"):
             capture(style, "front", front)
             capture(style, "branch", branch, study="branch")
