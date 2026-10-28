@@ -6,7 +6,7 @@
 # cell). The app plants it (addPropPlacement on `field`), finishes it once
 # (finishTreeForest), then each frame gathers it before its shadow and scene
 # passes and draws it in both. The walkers' terrain (app3d/WalkerTerrain)
-# holds the same parts itself.
+# holds one, and so do example 138's lod scene and the tree lab's forest.
 import Math
 import Noise
 import RendererDeferred
@@ -27,11 +27,13 @@ open treeSets/TreeSetKinds
 # Where a forest's levels end: the field's square round the origin (m) and
 # its cells (m); the sparser crowns end at midDistance, the field's own
 # billboards at farDistance, the far billboards at canopyFrom (where the far
-# canopy fades in over canopyFadeWidth), and nothing is drawn past
-# farReach
+# canopy fades in over canopyFadeWidth), and nothing is drawn farReach past
+# farDistance (0: no far billboards and no canopy, the field is all);
+# batchLimit the most trees one batch holds (0: PropField's own limit)
 type TreeForestSettings {
   extent: Float
   cellSize: Float
+  batchLimit: Int = 0
   midDistance: Float
   farDistance: Float
   canopyFrom: Float
@@ -44,6 +46,8 @@ type TreeForest {
   sprites: SpriteCache
   farTrees: FarSprites
   canopy: FarCanopy
+  # far billboards and a canopy past the field (the settings' farReach)
+  hasFar: Bool
   toon: Bool
 }
 
@@ -92,6 +96,9 @@ func createTreeForest(
     size: settings.extent
     cellSize: settings.cellSize
   )
+  if settings.batchLimit > 0 {
+    field.batchLimit = settings.batchLimit
+  }
   addTreeSetKinds(
     treeSet: treeSet
     field: field
@@ -103,12 +110,17 @@ func createTreeForest(
   # The far billboards from where the field's own end to where the canopy
   # holds every tree (a tree is measured from its cluster's center, up to
   # 40 m away)
+  let hasFar: Bool = settings.farReach > 0.0
   var farSettings: FarSpriteSettings = defaultFarSpriteSettings()
   farSettings.nearDistance = settings.farDistance
-  farSettings.farDistance = settings.canopyFrom + settings.canopyFadeWidth * 0.5 + 40.0
-  farSettings.thinFrom = farSettings.farDistance
-  farSettings.fadeOutMiddle = settings.canopyFrom
-  farSettings.fadeOutWidth = settings.canopyFadeWidth
+  farSettings.farDistance = settings.farDistance + settings.farReach
+  farSettings.thinFrom = 300.0
+  if hasFar {
+    farSettings.farDistance = settings.canopyFrom + settings.canopyFadeWidth * 0.5 + 40.0
+    farSettings.thinFrom = farSettings.farDistance
+    farSettings.fadeOutMiddle = settings.canopyFrom
+    farSettings.fadeOutWidth = settings.canopyFadeWidth
+  }
   ret TreeForest {
     field: own field
     sprites: own sprites
@@ -120,6 +132,7 @@ func createTreeForest(
         farDistance: settings.farDistance + settings.farReach
       }
     )
+    hasFar: hasFar
     toon: toon
   }
 }
@@ -177,21 +190,27 @@ func plantTreeForestBand(
   ret number
 }
 
-# Once every tree is planted: the field's cells, its trees as far
-# billboards (in 64 m blocks) and the far canopy baked from the trees'
-# impostors. The number of trees.
-func finishTreeForest(forest: mod TreeForest, renderer: mod DeferredRenderer) ret Int {
-  finishPropField(field: forest.field)
+# Once the field is finished (finishPropField): its trees as far
+# billboards (in 64 m blocks) and the plan of the far canopy. The number of
+# blocks; nothing without far billboards.
+func addTreeForestFarTrees(forest: mod TreeForest) ret Int {
+  if forest.hasFar is false {
+    ret 0
+  }
   var trees: List(FarSprite) = farSpritesOf(
     field: forest.field
     placements: forest.field.placements
   )
   planFarCanopy(canopy: forest.canopy, field: forest.field, trees: trees)
-  let unusedBlocks: Int = addFarSpritesInCells(
-    farSprites: forest.farTrees
-    sprites: trees
-    cellSize: 64.0
-  )
+  ret addFarSpritesInCells(farSprites: forest.farTrees, sprites: trees, cellSize: 64.0)
+}
+
+# Bake the far canopy planned by addTreeForestFarTrees from the trees'
+# impostors; nothing without far billboards
+func bakeTreeForestCanopy(forest: mod TreeForest, renderer: mod DeferredRenderer) {
+  if forest.hasFar is false {
+    ret
+  }
   RendererDeferred.ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
     bakeFarCanopy(
@@ -202,6 +221,15 @@ func finishTreeForest(forest: mod TreeForest, renderer: mod DeferredRenderer) re
       cutoff: spriteCutoff
     )
   }
+}
+
+# Once every tree is planted: the field's cells, the far billboards and the
+# far canopy (addTreeForestFarTrees, bakeTreeForestCanopy). The number of
+# trees.
+func finishTreeForest(forest: mod TreeForest, renderer: mod DeferredRenderer) ret Int {
+  finishPropField(field: forest.field)
+  let unusedBlocks: Int = addTreeForestFarTrees(forest: forest)
+  bakeTreeForestCanopy(forest: forest, renderer: renderer)
   ret forest.field.placements.length
 }
 
@@ -213,6 +241,9 @@ func gatherTreeForest(forest: mod TreeForest, camera: view Camera3d, aspect: vie
   var propView: PropView = propViewOf(camera: camera, aspect: aspect)
   propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
   gatherPropField(field: forest.field, propView: propView, toon: forest.toon)
+  if forest.hasFar is false {
+    ret
+  }
   gatherFarSprites(
     farSprites: forest.farTrees
     propView: propViewOf(camera: camera, aspect: aspect)
@@ -234,6 +265,9 @@ func drawTreeForest(cache: mod GbufferCache, resources: mod GpuResources, forest
     field: forest.field
     sprites: forest.sprites
   )
+  if forest.hasFar is false {
+    ret
+  }
   drawFarSprites(
     cache: cache
     resources: resources

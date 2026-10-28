@@ -245,8 +245,8 @@ stylized set uses (found in step 2).
   distances (`defaultTreeForestSettings`). The app plants it, calls
   `finishTreeForest` once, and each frame `gatherTreeForest`, then
   `drawTreeForestShadows` in its shadow pass and `drawTreeForest` in its
-  scene pass. The walkers' terrain still holds the same parts itself; moving
-  it onto `TreeForest` is queued.
+  scene pass. The walkers' terrain holds one too since 0.2.188
+  (`WalkerTerrain.forest`), so the forest code exists once.
 - Example 138's scene `RAE_GROVE_VIEW=lod` (from eye height) and `lod-high`
   (from 35 m), `GroveLod.rae`: about 16,600 low-poly trees in stands
   (`TreeSet.treeSpeciesAt`) from the camera out to 1.9 km on a flat meadow,
