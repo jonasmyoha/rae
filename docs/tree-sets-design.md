@@ -2,7 +2,7 @@
 
 Status: planned (2026-10-28); queued as six steps (§5); steps 1 and 2
 done (0.2.182 and 0.2.183, §5.1, §5.2); step 3 done: the museum and the
-studies' move to the tree lab (§5.3, §5.4).
+studies' move to the tree lab (§5.3, §5.4); step 4 done (0.2.184, §5.5).
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -235,6 +235,22 @@ stylized set uses (found in step 2).
   `capture-landscape-comparisons.sh`) used 138's `grass` view and its
   island, which neither 138 nor the lab has now; they are a record of that
   work and are not ported.
+
+### 5.5 Step 4, the low-poly set at every distance, done (0.2.184)
+
+- `lib/app3d/TreeForest.rae`: a forest of one tree set for an app that is
+  not a walker: the `PropField` (near and middle meshes, billboards with
+  impostors), the far billboards and the far canopy, with the walkers'
+  distances (`defaultTreeForestSettings`). The app plants it, calls
+  `finishTreeForest` once, and each frame `gatherTreeForest`, then
+  `drawTreeForestShadows` in its shadow pass and `drawTreeForest` in its
+  scene pass. The walkers' terrain still holds the same parts itself; moving
+  it onto `TreeForest` is queued.
+- Example 138's scene `RAE_GROVE_VIEW=lod` (from eye height) and `lod-high`
+  (from 35 m), `GroveLod.rae`: about 16,600 low-poly trees in stands
+  (`TreeSet.treeSpeciesAt`) from the camera out to 1.9 km on a flat meadow,
+  every level in one picture. The 138 gate renders both. Pictures:
+  looks-development `rendering/treeSets.html#lod`.
 
 ## 6. Decisions
 
