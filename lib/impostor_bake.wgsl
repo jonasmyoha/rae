@@ -99,11 +99,14 @@ fn fs(in: VsOut) -> FsOut {
   if (in.imageCode >= -0.5 && dot(n, in.direction) < 0.0) {
     n = -n;
   }
-  // a leaf card facing away from the eye: the part of its normal that points
-  // away turns back toward the eye, as the leaf pass does (leaf_cards.wgsl)
+  // a leaf card facing away from the eye, or nearly: its normal turns toward
+  // the eye until it faces it by 0.6. The leaf pass turns its cards by 0.15
+  // and darkens the deep ones (leaf_cards.wgsl); the impostor has no
+  // per-card occlusion, and seen from above the cards on a mass's far side
+  // lit it in the sky's color
   if (in.cardToEye > 0.5) {
     let away = dot(n, in.direction);
-    if (away < 0.15) { n = normalize(n + in.direction * (0.15 - away)); }
+    if (away < 0.6) { n = normalize(n + in.direction * (0.6 - away)); }
   }
   var o: FsOut;
   o.albedo = vec4<f32>(albedo, 1.0);

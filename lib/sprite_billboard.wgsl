@@ -284,6 +284,38 @@ fn alphaThreshold(in: VsOut) -> f32 {
 // impostor shows (set by gbufferSurface)
 var<private> surfaceDepth: f32;
 
+// The impostor's normal at `uv`, the four texels round it weighted by their
+// alpha as well as by distance: a plain filtered read mixed an edge texel's
+// normal with an empty one's (packed 0.5, 0.5: straight up), which lit
+// every crown's edge from the sky
+fn impostorNormalAt(uv: vec2<f32>, layer: i32, lod: f32) -> vec3<f32> {
+  let levels = i32(textureNumLevels(impostorNormalDepth));
+  let level = clamp(i32(round(lod)), 0, levels - 1);
+  let size = vec2<i32>(textureDimensions(impostorNormalDepth, level));
+  let p = uv * vec2<f32>(size) - vec2<f32>(0.5);
+  let base = vec2<i32>(floor(p));
+  let f = p - floor(p);
+  var sum = vec3<f32>(0.0);
+  for (var corner = 0; corner < 4; corner = corner + 1) {
+    let offset = vec2<i32>(corner % 2, corner / 2);
+    let texel = clamp(base + offset, vec2<i32>(0), size - vec2<i32>(1));
+    let weight = mix(1.0 - f.x, f.x, f32(offset.x)) * mix(1.0 - f.y, f.y, f32(offset.y));
+    let alpha = textureLoad(spriteTex, texel, layer, level).a;
+    sum = sum + impostorUnpackNormal(textureLoad(impostorNormalDepth, texel, layer, level).xy) * (weight * alpha);
+  }
+  if (length(sum) < 0.0001) {
+    return impostorUnpackNormal(textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod).xy);
+  }
+  return normalize(sum);
+}
+
+// The mip level a read at `uv` takes (as the hardware picks it)
+fn impostorLod(uv: vec2<f32>) -> f32 {
+  let size = vec2<f32>(textureDimensions(impostorNormalDepth, 0));
+  let footprint = max(length(dpdx(uv * size)), length(dpdy(uv * size)));
+  return max(log2(max(footprint, 0.0001)), 0.0);
+}
+
 // One view of an impostor where the eye's ray meets the prop: its albedo
 // (with alpha), normal (in the prop's frame) and that point (in the prop's
 // frame, over the radius)
@@ -310,7 +342,7 @@ fn impostorTap(
   // Off the view's picture (a box framed view is smaller than the quad):
   // nothing there, not the next view's picture
   tap.albedo.a = tap.albedo.a * impostorOnPicture(local);
-  tap.normal = impostorUnpackNormal(normalDepth.xy);
+  tap.normal = impostorNormalAt(uv, layer, impostorLod(uv));
   tap.position = impostorViewPosition(moved, impostorDepthOf(normalDepth, tap.albedo.a), viewDirection, extents);
   return tap;
 }
@@ -449,7 +481,7 @@ fn impostorMarch(
     let local = vec2<f32>(dot(spot, right) / extents.x, dot(spot, up) / extents.y);
     let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
     tap.albedo = vec4<f32>(textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod).rgb, 1.0);
-    tap.normal = impostorUnpackNormal(textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod).xy);
+    tap.normal = impostorNormalAt(uv, layer, lod);
     tap.position = spot;
   }
   return tap;
