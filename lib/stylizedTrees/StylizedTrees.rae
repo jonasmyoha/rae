@@ -15,6 +15,7 @@
 # Bushes are drawn as app3d/PropInstancer parts, one per leaf tone
 # (createStylizedBushParts). Used by the walkers (136, 137, 143).
 import Math
+import Sys
 import Vec3
 import RendererDeferred
 open FoliageMesh
@@ -65,9 +66,43 @@ const speciesBirch: Int = 9
 
 const stylizedSpeciesCount: Int = 10
 
+# The warm broadleaf: the T02 tree from the tree lab (lib/treeGen,
+# stylizedTrees/ReferenceTrees), docs/reference-tree-plan.md step 9: five
+# kinds after the ten above, the traced tree and the four grown varieties.
+# It takes the lime's (speciesBroadleaf) place in the stands;
+# RAE_STYLIZED_LIME=1 keeps the lime there instead, until the is
+# accepts the change.
+const speciesWarmBroadleaf: Int = 10
+
+const stylizedWarmBroadleafVarieties: Int = 5
+
 # The height (m) the autumn trees and the palm are built at; a placement
 # scales them from it
 const autumnReferenceHeight: Float = 5.5
+
+# `picks` with the lime's entry split evenly among the warm broadleaf's
+# varieties (each a stand of its own variety)
+func warmBroadleafPicks(picks: view List(SpeciesPick)) ret List(SpeciesPick) {
+  var result: List(SpeciesPick) = List.create(SpeciesPick, cap: picks.length + 4)
+  var low: Float = 0.0
+  loop let pick: view SpeciesPick in picks {
+    if pick.species is speciesBroadleaf {
+      let share: Float = (pick.upTo - low) / stylizedWarmBroadleafVarieties.toFloat()
+      loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
+        result.add(
+          value: {
+            upTo: low + share * (variety + 1).toFloat()
+            species: speciesWarmBroadleaf + variety
+          }
+        )
+      }
+    } else {
+      result.add(value: pick)
+    }
+    low = pick.upTo
+  }
+  ret result
+}
 
 # The stylized set (treeSets/TreeSet): its ten species, in the order of the
 # species constants above, and its stands: the leaf-patch broadleaf and
@@ -86,8 +121,13 @@ func createStylizedTrees() ret TreeSet {
     { name: "japanese maple", minHeight: 3.2, heightRange: 1.6, heightUnit: autumnReferenceHeight }
     { name: "palm", minHeight: 5.0, heightRange: 1.5, heightUnit: autumnReferenceHeight }
     { name: "birch", minHeight: 6.5, heightRange: 2.0, heightUnit: autumnReferenceHeight }
+    { name: "warm broadleaf (T02)", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
+    { name: "warm broadleaf 1", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
+    { name: "warm broadleaf 2", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
+    { name: "warm broadleaf 3", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
+    { name: "warm broadleaf 4", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
   }
-  let standPicks: List(SpeciesPick) = List(SpeciesPick) {
+  var standPicks: List(SpeciesPick) = List(SpeciesPick) {
     { upTo: 0.12, species: speciesBirch }
     { upTo: 0.26, species: speciesBroadleaf }
     { upTo: 0.40, species: speciesSpruce }
@@ -97,7 +137,7 @@ func createStylizedTrees() ret TreeSet {
     { upTo: 0.78, species: speciesRed }
     { upTo: 1.0, species: speciesGold }
   }
-  let mixedPicks: List(SpeciesPick) = List(SpeciesPick) {
+  var mixedPicks: List(SpeciesPick) = List(SpeciesPick) {
     { upTo: 0.12, species: speciesBirch }
     { upTo: 0.26, species: speciesBroadleaf }
     { upTo: 0.40, species: speciesSpruce }
@@ -108,6 +148,11 @@ func createStylizedTrees() ret TreeSet {
     { upTo: 0.88, species: speciesGold }
     { upTo: 0.96, species: speciesCrimson }
     { upTo: 1.0, species: speciesPalm }
+  }
+  # the warm broadleaf takes the lime's share of the picks (0.12 - 0.26)
+  if Sys.getEnv(name: "RAE_STYLIZED_LIME") is not "1" {
+    standPicks = warmBroadleafPicks(picks: standPicks)
+    mixedPicks = warmBroadleafPicks(picks: mixedPicks)
   }
   ret TreeSet {
     name: "stylized"
@@ -868,6 +913,20 @@ func addStylizedForestKinds(
       height: subject.height
     )
     subjects.add(value: subject)
+  }
+  # the warm broadleaf's varieties (ReferenceTrees), their pictures in the
+  # same atlas after the ten above
+  let warmImages: ReferenceImages = referenceImages(renderer: renderer)
+  let warmEnds: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
+  loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
+    subjects.add(value: addReferenceKind(
+      field: field
+      renderer: renderer
+      variety: variety
+      layer: speciesWarmBroadleaf + variety
+      images: warmImages
+      ends: warmEnds
+    ))
   }
   if let resources: mod GpuResources = renderer.gpuResources {
     let atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
