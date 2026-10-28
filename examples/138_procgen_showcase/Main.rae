@@ -3,7 +3,7 @@
 # (GroveGrass). All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
 # is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
 # the free WASD camera, the menu button for the settings (sky, time of day,
-# shadows, the nine views). Keys 1 through 9 pick the views too.
+# shadows, the eight views). Keys 1 through 8 pick the views too.
 import Gpu2d
 import Vec3
 import Keys
@@ -13,18 +13,14 @@ open Wind
 open RendererWind
 open Scene3d
 open ecs/Entity
-open GbufferTerrain
 open RendererDeferred
-open RendererDeferredShadow
 open Rendergraph
 open Math3d
 open Mesh3d
-open MeshStore
 open Shadow3d
+open RendererDeferredShadow
 open Sky
 open GroveScene
-open app3d/CameraStudy
-open BirchStudy
 open GroveGrass
 open GrassCompute
 open GbufferWorld
@@ -75,7 +71,6 @@ func renderShadows(
 # loop.
 type ShowcaseState {
   renderer: DeferredRenderer
-  groundMesh: MeshHandle
   sceneWorld: World3d
   light: Light3d
   camera: Camera3d
@@ -88,10 +83,8 @@ type ShowcaseState {
   grass: GrassCompute
   wind: WindState = createWindState(settings: defaultWindSettings())
   windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
+  time: Float
   lastTime: Float64
-  statsLogged: Bool
-  cameraStudy: CameraStudy = createCameraStudy()
-  birchStudy: BirchStudy
 }
 
 # The window, the generated grove, the sky and the camera
@@ -109,57 +102,24 @@ func createShowcase() ret ShowcaseState {
   restoreWindowGeometry(windowGeometry: windowGeometry)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let grove: Grove = buildGrove(renderer: renderer)
-  var groundConstants: List(ShaderConstant) = grassPatchConstants(
-    settings: groveGrassSettings(
-      groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
-    )
-  )
-  groundConstants.add(value: { name: "RAE_TERRAIN_TOON", value: 1.0 })
-  rendererSetTerrainShaderWithConstants(
-    renderer: renderer
-    shader: shader(
-      files: [
-        "lib/grass_field.wgsl"
-        "assets/grove_path.wgsl"
-        "assets/grove_ground.wgsl"
-        "lib/terrain_splat.wgsl"
-      ]
-    )
-    constants: own groundConstants
-  )
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
-  # clock runs from the panel), and the panel's scene chooser includes the
-  # three bare-fork inspection views used by the landscape art work.
+  # clock runs from the panel), and the panel's scene chooser is the eight views
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
-  var initialHour: Float = 10.0
-  if initialView is 12 or initialView is 15 or initialView is 22 {
-    initialHour = 17.25
-  } else if initialView is 16 {
-    initialHour = 7.25
-  } else if initialView is 17 {
-    initialHour = 23.0
-  }
-  # Fixed-light comparisons share the same override as the walker family.
-  let hourOverride: String = Sys.getEnv(name: "RAE_WALKER_HOUR")
-  if hourOverride.length() > 0 {
-    initialHour = hourOverride.toFloat()
-  }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 24
+    sceneCount: 8
     speed: 1.0
     toon: true
-    hour: initialHour
+    hour: 10.0
     skyModel: SettingsSkyModel.preetham
   )
   settings.animateTime = false
-  var editorPanel: EditorPanel = createEditorPanel(
+  let editorPanel: EditorPanel = createEditorPanel(
     assetBase: "examples/136_walker_character/assets/"
     settings: settings
   )
-  setGrovePanelView(editorPanel: editorPanel, groveView: initialView)
   var light: Light3d = defaultLight3d()
   applyEditorPanelSettings(
     editorPanel: editorPanel
@@ -178,16 +138,11 @@ func createShowcase() ret ShowcaseState {
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   cameraRig.maxDistance = 120
   setGroveView(camera: camera, cameraRig: cameraRig, groveView: initialView)
-  if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
-    camera.target.z = 4.3
-  }
-  applyCameraStartOverride(rig: cameraRig, camera: camera)
 
   # The state takes the renderer's GPU handles with it: moved, never copied
   unsafe {
     ret ShowcaseState {
       renderer: own renderer
-      groundMesh: grove.groundMesh
       sceneWorld: own grove.world
       light: light
       camera: camera
@@ -196,193 +151,17 @@ func createShowcase() ret ShowcaseState {
       windowGeometry: own windowGeometry
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createGroveGrass(obstacles: grove.obstacles)
+      time: 0.0
       lastTime: Gpu2d.nowSeconds()
-      statsLogged: false
-      birchStudy: createBirchStudy()
     }
   }
-}
-
-# The active inspection's botanical subject in the editor panel. These names
-# match docs/environment-art-direction.md; the camera presets stay numbered so
-# their keyboard shortcuts and reference names do not change.
-func groveViewName(groveView: view Int) ret String {
-  if groveView is 24 {
-    ret "Bloodgood Japanese maple"
-  }
-  if groveView is 23 {
-    ret "Golden Globe ginkgo"
-  }
-  if groveView is 2 {
-    ret "Maples and date palm"
-  }
-  if groveView is 3 {
-    ret "Rock group"
-  }
-  if groveView is 4 {
-    ret "Small-leaved lime"
-  }
-  if groveView is 5 {
-    ret "Cypress and stone pine"
-  }
-  if groveView is 6 {
-    ret "Norway spruce"
-  }
-  if groveView is 7 {
-    ret "Camphor tree"
-  }
-  if groveView is 8 {
-    ret "Camphor roots and wood"
-  }
-  if groveView is 9 {
-    ret "Silver birch"
-  }
-  if groveView is 10 {
-    ret "Joined forks: front"
-  }
-  if groveView is 11 {
-    ret "Joined forks: side"
-  }
-  if groveView is 12 {
-    ret "Joined forks: grazing light"
-  }
-  if groveView is 13 {
-    ret "Silver birch: side"
-  }
-  if groveView is 14 {
-    ret "Silver birch: under crown"
-  }
-  if groveView is 15 {
-    ret "Silver birch: warm light"
-  }
-  if groveView is 16 {
-    ret "Silver birch: cool light"
-  }
-  if groveView is 17 {
-    ret "Silver birch: night"
-  }
-  if groveView is 18 {
-    ret "Meadow grass patches"
-  }
-  if groveView is 19 {
-    ret "Oxeye daisy"
-  }
-  if groveView is 20 {
-    ret "Harebell meadow"
-  }
-  if groveView is 21 {
-    ret "Harebell: side"
-  }
-  if groveView is 22 {
-    ret "Harebell: backlit"
-  }
-  ret "Autumn Grove"
-}
-
-func groveViewReadout(groveView: view Int) ret String {
-  if groveView is 24 {
-    ret "Kind 7 | layered crimson sprays | low joined stems"
-  }
-  if groveView is 23 {
-    ret "Ginkgo biloba Golden Globe | forest kind 6 | three seeds"
-  }
-  if groveView is 2 {
-    ret "Sugar maple, red maple, Japanese maple, date palm"
-  }
-  if groveView is 4 {
-    ret "Rounded crown and foliage close view"
-  }
-  if groveView is 5 {
-    ret "Mediterranean cypress and stone pine"
-  }
-  if groveView is 6 {
-    ret "Six normal-sized layered spruces"
-  }
-  if groveView is 7 {
-    ret "Mature crown and silhouette"
-  }
-  if groveView is 8 {
-    ret "Bare scaffold, buttress roots and underside"
-  }
-  if groveView is 9 {
-    ret "Five textured-bark trees and leaf sprays"
-  }
-  if groveView is 10 {
-    ret "Young and mature bare wood; joined branch openings"
-  }
-  if groveView is 11 {
-    ret "Continuous taper, lean and unequal primary angles"
-  }
-  if groveView is 12 {
-    ret "Neutral rough wood under a low late-day sun"
-  }
-  if groveView is 13 {
-    ret "Five seeds and sizes; profile, hanging sprays and crown gaps"
-  }
-  if groveView is 14 {
-    ret "Visible joined wood, fixed twig roots and foliage underside"
-  }
-  if groveView is 15 {
-    ret "Late-day warm bark and leaf response"
-  }
-  if groveView is 16 {
-    ret "Cool morning bark, shadows and restrained leaf values"
-  }
-  if groveView is 17 {
-    ret "Moonlit bark, twig motion and non-emissive leaves"
-  }
-  if groveView is 18 {
-    ret "Seeded gaps, path edge and trunk contacts"
-  }
-  if groveView is 19 {
-    ret "One lit flower and one bounded meadow patch"
-  }
-  if groveView is 20 {
-    ret "Wiry racemes, nodding bells and varied heights in grass"
-  }
-  if groveView is 21 {
-    ret "Open five-lobed mouths, fused sides and sparse linear leaves"
-  }
-  if groveView is 22 {
-    ret "Thin modeled rims and ordinary rough-material backlighting"
-  }
-  if groveView is 3 {
-    ret "Faceted outcrop beside the path"
-  }
-  ret "All current species and ground cover"
-}
-
-func setGrovePanelView(editorPanel: mod EditorPanel, groveView: view Int) {
-  setEditorPanelAppSection(
-    editorPanel: editorPanel
-    title: groveViewName(groveView: groveView)
-    readout: groveViewReadout(groveView: groveView)
-  )
-}
-
-# Resident indexed geometry uploaded through the renderer's MeshStore. Grass is
-# generated by its own GPU pipeline, so its procedural blade triangles are not
-# part of this resident-mesh number.
-func groveResidentTriangles(renderer: view DeferredRenderer) ret Int {
-  let store: view MeshStore = renderer.passes.gbuffer.meshes
-  var triangles: Int = 0
-  loop var mesh: Int = 1, mesh <= meshStoreCount(store: store), ++mesh {
-    triangles = triangles + meshStoreIndexCount(store: store, mesh: mesh) / 3
-  }
-  ret triangles
 }
 
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW also accepts the joined-fork and silver-birch studies.
+# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces, camphor, roots
 func groveViewNumber(viewName: view String) ret Int {
-  if viewName is "japanese-maple" {
-    ret 24
-  }
-  if viewName is "ginkgo" {
-    ret 23
-  }
   if viewName is "trees" {
     ret 2
   }
@@ -401,50 +180,8 @@ func groveViewNumber(viewName: view String) ret Int {
   if viewName is "camphor" {
     ret 7
   }
-  if viewName is "birches" {
-    ret 9
-  }
   if viewName is "roots" {
     ret 8
-  }
-  if viewName is "forks-front" {
-    ret 10
-  }
-  if viewName is "forks-side" {
-    ret 11
-  }
-  if viewName is "forks-grazing" {
-    ret 12
-  }
-  if viewName is "birches-side" {
-    ret 13
-  }
-  if viewName is "birches-under" {
-    ret 14
-  }
-  if viewName is "birches-warm" {
-    ret 15
-  }
-  if viewName is "birches-cool" {
-    ret 16
-  }
-  if viewName is "birches-night" {
-    ret 17
-  }
-  if viewName is "grass" {
-    ret 18
-  }
-  if viewName is "flowers" {
-    ret 19
-  }
-  if viewName is "bellflowers" {
-    ret 20
-  }
-  if viewName is "bellflowers-side" {
-    ret 21
-  }
-  if viewName is "bellflowers-backlit" {
-    ret 22
   }
   ret 1
 }
@@ -495,91 +232,6 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.orbitPitch = 0.10
     cameraRig.yaw = -0.6
   }
-  if groveView is 9 {
-    camera.target = Vec3.create(x: -19, y: -10, z: 4.3)
-    cameraRig.distance = 22
-    cameraRig.orbitPitch = 0.10
-    cameraRig.yaw = -0.25
-  }
-  if groveView is 10 {
-    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-    cameraRig.distance = 27
-    cameraRig.orbitPitch = 0.08
-    cameraRig.yaw = -0.10
-  } else if groveView is 11 {
-    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-    cameraRig.distance = 27
-    cameraRig.orbitPitch = 0.08
-    cameraRig.yaw = 1.35
-  } else if groveView is 12 {
-    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-    cameraRig.distance = 25
-    cameraRig.orbitPitch = 0.02
-    cameraRig.yaw = -0.55
-  }
-  if groveView is 13 {
-    camera.target = Vec3.create(x: -20, y: -10, z: 4.6)
-    cameraRig.distance = 22
-    cameraRig.orbitPitch = 0.08
-    cameraRig.yaw = 1.10
-  } else if groveView is 14 {
-    camera.target = Vec3.create(x: -19, y: -10, z: 5.4)
-    cameraRig.distance = 15
-    cameraRig.orbitPitch = -0.16
-    cameraRig.yaw = 0.38
-  } else if groveView is 15 {
-    camera.target = Vec3.create(x: -19, y: -10, z: 4.6)
-    cameraRig.distance = 22
-    cameraRig.orbitPitch = 0.06
-    cameraRig.yaw = -0.52
-  } else if groveView is 16 {
-    camera.target = Vec3.create(x: -20, y: -10, z: 4.6)
-    cameraRig.distance = 21
-    cameraRig.orbitPitch = 0.08
-    cameraRig.yaw = 0.82
-  } else if groveView is 17 {
-    camera.target = Vec3.create(x: -19, y: -10, z: 4.3)
-    cameraRig.distance = 20
-    cameraRig.orbitPitch = 0.05
-    cameraRig.yaw = -0.32
-  } else if groveView is 18 {
-    camera.target = Vec3.create(x: -7.0, y: 5.0, z: 0.35)
-    cameraRig.distance = 7.0
-    cameraRig.orbitPitch = 0.16
-    cameraRig.yaw = 0.72
-  } else if groveView is 19 {
-    camera.target = Vec3.create(x: -1.9, y: -14.0, z: 0.34)
-    cameraRig.distance = 4.6
-    cameraRig.orbitPitch = 0.12
-    cameraRig.yaw = 0.46
-  } else if groveView is 20 {
-    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.31)
-    cameraRig.distance = 4.8
-    cameraRig.orbitPitch = 0.10
-    cameraRig.yaw = 0.38
-  } else if groveView is 21 {
-    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.34)
-    cameraRig.distance = 3.8
-    cameraRig.orbitPitch = 0.03
-    cameraRig.yaw = -0.72
-  } else if groveView is 22 {
-    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.38)
-    cameraRig.distance = 4.8
-    cameraRig.orbitPitch = 0.02
-    cameraRig.yaw = 0.38
-  }
-  if groveView is 24 {
-    camera.target = Vec3.create(x: -8.1, y: 7.5, z: 2.1)
-    cameraRig.distance = 13
-    cameraRig.yaw = 0
-    cameraRig.orbitPitch = 0.10
-  }
-  if groveView is 23 {
-    camera.target = Vec3.create(x: 15, y: -4, z: 3)
-    cameraRig.distance = 23
-    cameraRig.orbitPitch = 0.12
-    cameraRig.yaw = 1.35
-  }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)
 }
@@ -590,9 +242,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let now: Float64 = Gpu2d.nowSeconds()
   let deltaTime: Float = (now - state.lastTime) as Float
   state.lastTime = now
+  state.time = state.time + deltaTime
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
-  let frameWind: WindVector = windVector(state: state.wind, settings: state.windSettings)
-  setRendererWind(renderer: state.renderer, wind: frameWind)
+  setRendererWind(
+    renderer: state.renderer
+    wind: windVector(state: state.wind, settings: state.windSettings)
+  )
 
   let resized: Bool = Gpu2d.windowResized()
   updateWindowGeometry(windowGeometry: state.windowGeometry, now: now, resized: resized)
@@ -622,7 +277,6 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     light: state.light
     deltaTime: deltaTime
   )
-
   # The views from the keys, kept in step with the panel's scene chooser
   if Sdl3.isKeyPressed(key: Keys.key1) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 1)
@@ -643,9 +297,6 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   if Sdl3.isKeyPressed(key: Keys.key7) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 7)
   }
-  if Sdl3.isKeyPressed(key: Keys.key9) {
-    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 9)
-  }
   if Sdl3.isKeyPressed(key: Keys.key8) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 8)
   }
@@ -655,14 +306,11 @@ func runShowcaseFrame(state: mod ShowcaseState) {
       cameraRig: state.cameraRig
       groveView: state.editorPanel.settings.scene
     )
-    setGrovePanelView(editorPanel: state.editorPanel, groveView: state.editorPanel.settings.scene)
   }
   if not renderFrame {
     ret
   }
 
-  stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
-  stepCameraStudy(study: state.cameraStudy, rig: state.cameraRig, camera: state.camera)
   let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   gpuPassTimingBegin(renderer: renderer)
@@ -679,12 +327,7 @@ func runShowcaseFrame(state: mod ShowcaseState) {
         castShadows: state.editorPanel.settings.shadows
       )
     } else if tag is RenderTag.gbuffer {
-      renderGroveGeometry(
-        state: state
-        aspect: aspect
-        deltaTime: deltaTime
-        wind: frameWind
-      )
+      renderGroveGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
     } else if tag is RenderTag.uiOverlay {
       drawEditorPanel(editorPanel: state.editorPanel, canvas: renderer.canvas)
     } else {
@@ -699,25 +342,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     }
   }
   gpuPassTimingEnd(renderer: renderer)
-  if state.statsLogged is false and Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0 {
-    log(
-      "[landscape] 138 gbuffer instances {deferredDrawCount(renderer: renderer)}, resident meshes {meshStoreCount(
-        store: renderer.passes.gbuffer.meshes
-      )}, resident triangles {groveResidentTriangles(renderer: renderer)}"
-    )
-    state.statsLogged = true
-  }
   world3dPrevTransformSystem(world: state.sceneWorld)
 }
 
 # The G-buffer pass: the grove's meshes, then the grass, whose blades the
 # compute pass generated just before
-func renderGroveGeometry(
-  state: mod ShowcaseState
-  aspect: view Float
-  deltaTime: view Float
-  wind: view WindVector
-) {
+func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime: view Float) {
   let renderer: mod DeferredRenderer = state.renderer
   if let resources: mod GpuResources = state.gpuResources {
     generateGroveGrass(
@@ -726,7 +356,7 @@ func renderGroveGeometry(
       camera: state.camera
       groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
       deltaTime: deltaTime
-      wind: wind
+      wind: windVector(state: state.wind, settings: state.windSettings)
     )
   }
   ensureRendererResources(renderer: renderer)
@@ -737,15 +367,6 @@ func renderGroveGeometry(
       camera: state.camera
       light: state.light
       aspect: aspect
-    )
-    drawTerrainMesh(
-      cache: renderer.passes.gbuffer
-      resources: rendererResources
-      mesh: state.groundMesh.id
-      model: mat4Identity()
-      prevModel: mat4Identity()
-      roughness: 1.0
-      time: 0.0
     )
     renderSceneWorld(
       cache: renderer.passes.gbuffer

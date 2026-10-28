@@ -24,6 +24,10 @@ struct RaeBiome {
 
 @group(0) @binding(4) var<storage, read> groveObstacles: array<f32>;
 
+fn grovePathCenter(y: f32) -> f32 {
+  return sin(y * 0.27) * 1.8 + 0.8;
+}
+
 fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
   let radius = sqrt((p.x + 15.0) * (p.x + 15.0) / 1849.0 + (p.y - 6.0) * (p.y - 6.0) / 784.0);
   let base = 0.12 * sin(p.x * 0.36) * sin(p.y * 0.3);
@@ -32,6 +36,17 @@ fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
     return groundZ + base * (1.0 - rim) - 0.35 * rim;
   }
   return groundZ + base;
+}
+
+// 1 on the path, fading to 0 just past its edge
+fn raeBiomePath(p: vec2<f32>) -> f32 {
+  if (p.x >= -34.0 && p.x <= 0.0) {
+    let fraction = -p.x / 34.0;
+    let center = -9.5 + 13.5 * fraction - 5.0 * sin(fraction * 3.14159265);
+    if (abs(p.y - center) < 0.8) { return 1.0; }
+  }
+  if (p.y < -10.4 || p.y > 13.6) { return 0.0; }
+  return 1.0 - smoothstep(0.95, 1.15, abs(p.x - grovePathCenter(p.y)));
 }
 
 fn groveUnderObstacle(p: vec2<f32>) -> bool {

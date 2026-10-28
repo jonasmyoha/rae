@@ -1,7 +1,8 @@
 # Tree sets: a low-poly museum set and the stylized set
 
 Status: planned (2026-10-28); queued as six steps (§5); steps 1 and 2
-done (0.2.182 and 0.2.183, §5.1, §5.2).
+done (0.2.182 and 0.2.183, §5.1, §5.2); step 3's museum done (§5.3), its
+studies' move to the tree lab queued as its own step.
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -184,6 +185,29 @@ stylized set uses (found in step 2).
 - A trial run of 143 on the low-poly set (not kept: the setting is step 5)
   drew the whole forest of 31,042 trees; looks-development
   `rendering/treeSets.html`.
+
+### 5.3 Step 3, the museum, done
+
+- Example 138 is its `4d28e11d` files again (`Main`, `GroveScene`,
+  `FluffyGrove`, `CamphorGrove`, `GroveGrass`, `assets/grove_surface.wgsl`,
+  the pack and the README), with the tree generators taken from
+  `lib/lowPolyTrees/` (138 never used `GroveTrees`; it builds its trees from
+  the generators directly). Ported: today's grass API (the shared wind,
+  `lib/grass_field.wgsl`, `raeGrassObstacle` in the surface shader), the
+  shadow calls' module, the ambient in cd/m2 and the panel's automatic
+  exposure, US spellings.
+- Rendered from its start camera beside the `4d28e11d` picture: the same
+  trees in the same places (looks-development `rendering/treeSets.html`).
+  The 138 gate checks the museum's eight views again.
+- The studies' files (`BirchGrove`, `BirchStudy`, `ForkStudy`,
+  `GinkgoGrove`, `JapaneseMapleGrove`, `MeadowFlowers`,
+  `assets/grove_ground.wgsl`, `assets/grove_path.wgsl`) left 138; their
+  reference pictures moved to `examples/146_treeLab/references/`. They
+  were built on 138's island (its ground height, paths, obstacles, spots
+  and views), so moving them into the tree lab is a step of its own, ported
+  from rae `fc8dbdc3` where they still run. Until then the
+  `tools/capture-*` study scripts that start 138 with a study view do not
+  work.
 
 ## 6. Decisions
 
