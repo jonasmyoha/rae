@@ -1,0 +1,214 @@
+# Golden Globe ginkgo. A curved leader and two spreading primary fans carry
+# alternate short shoots, not the opposing shoots of the maple. Z is up.
+import Math
+open Noise
+open Vec3
+open Mesh3d
+open stylizedTrees/Foliage
+open stylizedTrees/FoliageCards
+open stylizedTrees/SculpturalFork
+open stylizedTrees/CurvedFork
+open stylizedTrees/CurvedForkBranch
+open stylizedTrees/ForkSurface
+open stylizedTrees/Birch
+
+# Conservative rotating-card envelope, including normal wind, at width 2 m.
+const ginkgoRadiusScale: Float = 0.96
+
+type GinkgoTree {
+  wood: MeshData
+  sprays: List(BirchTwig)
+  height: Float
+  width: Float
+}
+
+func ginkgoTree(seed: view Int, height: view Float, width: view Float) ret GinkgoTree {
+  let turn: Float = hash2(x: seed, y: 11, seed: 947) * 6.2831853
+  let lean: Vec3 = {
+    x: Math.cos(x: turn) * width * 0.13
+    y: Math.sin(x: turn) * width * 0.13
+    z: 0
+  }
+  let controls: List(Vec3) = {
+    { x: 0, y: 0, z: -height * 0.024 }
+    { x: -lean.x * 0.2, y: -lean.y * 0.2, z: height * 0.15 }
+    { x: lean.x * 0.2, y: lean.y * 0.4, z: height * 0.36 }
+    { x: lean.x * 0.8, y: lean.y * 0.6, z: height * 0.54 }
+    { x: lean.x * 1.9, y: lean.y * 0.8, z: height * 0.71 }
+    { x: lean.x * 2.5, y: lean.y * 1.6, z: height * 0.85 }
+  }
+  let radii: List(Float) = {
+    height * 0.049
+    height * 0.034
+    height * 0.024
+    height * 0.018
+    height * 0.010
+    height * 0.0025
+  }
+  let leader: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: 3)
+  var cage: MeshData = foliageMesh()
+  let side: Int = (seed % 12 + 12) % 12
+  let openings: List(ForkOpening) = forkTrunk(
+    mesh: cage
+    path: leader
+    sides: 12
+    seed: seed
+    firstOpeningRing: 4
+    firstOpeningSide: side
+    secondOpeningRing: 7
+    secondOpeningSide: (side + 4) % 12
+    openingCount: 2
+  )
+  forkCap(
+    mesh: cage
+    ringFirst: 0
+    sides: 12
+    center: controls.copyAtDefault(index: 0)
+    normal: Vec3.create(x: 0, y: 0, z: -1)
+    v: 0
+  )
+  var axes: List(ForkPath) = List.create(ForkPath, cap: 3)
+  axes.add(value: leader)
+  loop var branch: Int = 0, branch < 2, ++branch {
+    let opening: ForkOpening = openings.copyAtDefault(index: branch)
+    let normal: Vec3 = forkOpeningNormal(mesh: cage, opening: opening)
+    let radius: Float = height * (0.023 - branch.toFloat() * 0.006)
+    let path: ForkPath = curvedForkLimb(
+      start: vadd(
+        a: forkOpeningCenter(mesh: cage, opening: opening)
+        b: vscale(a: normal, s: radius * 0.8)
+      )
+      outward: normal
+      length: width * (0.76 + branch.toFloat() * 0.09 + hash2(x: branch, y: 21, seed: seed) * 0.15)
+      rise: height * (0.50 - branch.toFloat() * 0.10)
+      radius: radius
+      sweep: (hash2(x: branch, y: 22, seed: seed) - 0.5) * 0.55
+    )
+    curvedForkJoinedBranch(mesh: cage, opening: opening, path: path)
+    axes.add(value: path)
+  }
+  loop let opening: ForkOpening in openings {
+    relaxForkJunction(
+      mesh: cage
+      center: forkOpeningCenter(mesh: cage, opening: opening)
+      radius: height * 0.055
+    )
+  }
+  var wood: MeshData = subdivideForkSurface(mesh: cage)
+  finishForkSurface(mesh: wood)
+  wood = compactForkSurface(mesh: wood)
+  var sprays: List(BirchTwig) = List.create(BirchTwig, cap: 36)
+  loop var axis: Int = 0, axis < axes.length, ++axis {
+    let path: ForkPath = axes.copyAtDefault(index: axis)
+    # Alternate short spur shoots spread around each primary fan.
+    # Lower shoots reach sideways; upper ones rise inward to close the crown.
+    loop var shoot: Int = 0, shoot < 12, ++shoot {
+      if shoot is 1 + axis {
+        continue
+      }
+      let fraction: Float = shoot.toFloat() / 11
+      var along: Float = 0.23 + fraction * 0.75
+      if axis is 0 {
+        along = 0.53 + fraction * 0.45
+      }
+      let start: Vec3 = birchPathPoint(path: path, amount: along)
+      let angle: Float = turn + axis.toFloat() * 2.35 + shoot.toFloat() * 2.399963
+      let reach: Float = width * (0.40 + Math.sin(x: fraction * 3.14159265) * 0.34) * (0.78 + hash2(
+        x: shoot
+        y: axis
+        seed: seed
+      ) * 0.40)
+      let end: Vec3 = vadd(
+        a: start
+        b: Vec3.create(
+          x: Math.cos(x: angle) * reach
+          y: Math.sin(x: angle) * reach
+          z: height * (0.045 + fraction * 0.055)
+        )
+      )
+      let twig: BirchTwig = {
+        start: start
+        middle: vadd(
+          a: vscale(a: vadd(a: start, b: end), s: 0.5)
+          b: Vec3.create(x: 0, y: 0, z: -height * 0.016)
+        )
+        end: end
+      }
+      birchTube(
+        mesh: wood
+        curve: twig
+        radius: height * 0.0038 * (1 - fraction * 0.45)
+        sides: 6
+        steps: 4
+        seed: seed + shoot * 17 + axis
+      )
+      sprays.add(value: twig)
+    }
+  }
+  # One vertical age gradient: ridges at the older base, calm gray young wood
+  # above it. Avoid repeating the rough base up every slender branch.
+  loop var vertex: Int = 0, vertex < wood.vertCount, ++vertex {
+    let heightFraction: Float = Math.clamp(
+      val: wood.verts.copyAtDefault(index: vertex * 8 + 2) / height
+      low: 0.0
+      high: 1.0
+    )
+    wood.verts.set(index: vertex * 8 + 7, value: 0.97 - heightFraction * 0.94)
+  }
+  ret GinkgoTree { wood: own wood, sprays: own sprays, height: height, width: width }
+}
+
+func ginkgoLeaves(tree: view GinkgoTree, seed: view Int, tone: view Int) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  loop var index: Int = 0, index < tree.sprays.length, ++index {
+    if index % 3 is not tone {
+      continue
+    }
+    let twig: BirchTwig = tree.sprays.copyAtDefault(index: index)
+    let center: Vec3 = birchCurve(twig: twig, amount: 0.78)
+    let variation: Float = 0.88 + hash2(x: index, y: 61, seed: seed) * 0.27
+    let first: Int = mesh.vertCount
+    addConnectedFoliageSpray(
+      mesh: mesh
+      center: center
+      pivot: twig.start
+      branchDirection: vsub(a: twig.end, b: twig.start)
+      extent: Vec3.create(
+        x: tree.width * 0.37 * variation
+        y: tree.width * 0.13
+        z: tree.height * 0.105 * variation
+      )
+      shadeNormal: vnorm(
+        a: Vec3.create(x: center.x / tree.width * 0.35, y: center.y / tree.width * 0.35, z: 0.95)
+      )
+      seed: seed + index * 53
+    )
+    # Turn alternate cutouts upside down without rotating their world lighting.
+    if index % 2 is 1 {
+      loop var vertex: Int = first, vertex < mesh.vertCount, ++vertex {
+        mesh.verts.set(
+          index: vertex * 8 + 7
+          value: 1 - mesh.verts.copyAtDefault(index: vertex * 8 + 7)
+        )
+      }
+    }
+  }
+  ret own mesh
+}
+
+func ginkgoLeafColor(tone: view Int) ret Vec3 {
+  let variation: Float = 0.88 + tone.toFloat() * 0.025
+  ret Vec3.create(x: variation, y: variation, z: variation)
+}
+
+func ginkgoWoodColor() ret Vec3 {
+  ret Vec3.create(x: 0.65, y: 0.62, z: 0.56)
+}
+
+func ginkgoLeafTexture() ret String {
+  ret "lib/assets/trees/ginkgoSpray.png"
+}
+
+func ginkgoBarkTexture() ret String {
+  ret "lib/assets/trees/ginkgoBark.png"
+}

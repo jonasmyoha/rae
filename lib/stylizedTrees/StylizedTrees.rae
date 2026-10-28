@@ -3,7 +3,7 @@
 # (treeSets/TreeSet), the rest builds its meshes and pictures. It began as
 # Autumn Grove's trees and bushes (app3d/GroveTrees) and gains the
 # treeGen-grown species as the reference-tree work reaches them. The foliage
-# forms (procgen/FluffyFoliage: umbrella pine, cypress, spruce, bush), the
+# forms (stylizedTrees/FluffyFoliage: umbrella pine, cypress, spruce, bush), the
 # lime, the maples, the ginkgo, the birch and the palm are generated once.
 # Each tree species becomes an app3d/PropField kind at three levels of
 # detail (addStylizedForestKinds), each level its wood and its leaves in
@@ -19,20 +19,20 @@ import Vec3
 import RendererDeferred
 open FoliageMesh
 open RendererImages
-open procgen/Birch
-open procgen/Lime
-open procgen/SugarMaple
-open procgen/RedMaple
-open procgen/Ginkgo
-open procgen/JapaneseMaple
+open stylizedTrees/Birch
+open stylizedTrees/Lime
+open stylizedTrees/SugarMaple
+open stylizedTrees/RedMaple
+open stylizedTrees/Ginkgo
+open stylizedTrees/JapaneseMaple
 open Noise
 open Scene3d
 open Mesh3d
 open GbufferInstanced
-open procgen/Spruce
-open procgen/Cypress
-open procgen/FluffyFoliage
-open procgen/Foliage
+open stylizedTrees/Spruce
+open stylizedTrees/Cypress
+open stylizedTrees/FluffyFoliage
+open stylizedTrees/Foliage
 open app3d/PropField
 open app3d/PropInstancer
 open GbufferSprite
@@ -208,8 +208,8 @@ func addLeafParts(
 # or leaves per crown and tone (autumn trees and palm), and how far each is
 # drawn. Shadows reach 120 m; every level casts them (the far level's
 # billboards face the sun, cut to the picture's outline).
-# The near level is the crowns' outline (procgen/FluffyFoliage,
-# procgen/Foliage): every coarser level is built to cover what it does
+# The near level is the crowns' outline (stylizedTrees/FluffyFoliage,
+# stylizedTrees/Foliage): every coarser level is built to cover what it does
 # (docs/tree-lod-design.md §2.1, checked by app3d/TreeCoverage)
 const nearPatches: Int = fluffyOutlinePatches
 

@@ -59,7 +59,7 @@ def main():
     geometry.write_text('100 100 1280 800\n')
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'binaryReused': bool(args.binary), 'sourceHashesAtCapture': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                                 for path in [repo / 'lib/procgen/JapaneseMaple.rae', repo / 'lib/procgen/CrownScaffold.rae',
+                                 for path in [repo / 'lib/stylizedTrees/JapaneseMaple.rae', repo / 'lib/stylizedTrees/CrownScaffold.rae',
                                               repo / 'lib/stylizedTrees/StylizedTrees.rae',
                                               repo / 'examples/146_treeLab/StudyTrees.rae',
                                               repo / 'examples/146_treeLab/JapaneseMapleGrove.rae',

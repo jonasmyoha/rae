@@ -49,7 +49,7 @@ def main():
     geometry.write_text('100 100 1280 800\n')
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'sourceHashes': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                                 for path in [repo / 'lib/procgen/SugarMaple.rae', repo / 'lib/stylizedTrees/StylizedTrees.rae',
+                                 for path in [repo / 'lib/stylizedTrees/SugarMaple.rae', repo / 'lib/stylizedTrees/StylizedTrees.rae',
                                               repo / 'examples/146_treeLab/StudyTrees.rae']},
                 'clock': '60 frames, 1/60 second, wind 0', 'imageSize': [1280, 800],
                 'assetHashes': {name: hashlib.sha256((repo / 'lib/assets/trees' / name).read_bytes()).hexdigest()

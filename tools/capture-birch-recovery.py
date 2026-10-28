@@ -32,7 +32,7 @@ def main():
                 "sky": "Preetham", "exposure": 1, "sunStrength": 3.1,
                 "effects": "cascaded shadows, SSAO, SMAA, bloom; ordinary lit materials",
                 "sources": {}, "captures": []}
-    for name in ("lib/procgen/Birch.rae", "lib/procgen/FoliageCards.rae",
+    for name in ("lib/stylizedTrees/Birch.rae", "lib/stylizedTrees/FoliageCards.rae",
                  "lib/assets/trees/birchLeaves.png", "lib/assets/trees/birchSpray.png",
                  "examples/146_treeLab/BirchGrove.rae",
                  "examples/146_treeLab/BirchStudy.rae",

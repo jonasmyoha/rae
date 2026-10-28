@@ -51,7 +51,7 @@ def main():
     geometry.write_text('100 100 1280 800\n')
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'binaryReused': bool(args.binary), 'sourceHashesAtCapture': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                                 for path in [repo / 'lib/procgen/RedMaple.rae', repo / 'lib/stylizedTrees/StylizedTrees.rae',
+                                 for path in [repo / 'lib/stylizedTrees/RedMaple.rae', repo / 'lib/stylizedTrees/StylizedTrees.rae',
                                               repo / 'examples/146_treeLab/StudyTrees.rae']},
                 'clock': '180 frames, 1/30 second' if args.motion else '60 frames, 1/60 second',
                 'wind': args.wind, 'walkDistance': 2.5 if args.motion else 0, 'imageSize': [1280, 800],
