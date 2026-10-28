@@ -1,0 +1,9 @@
+tests/cases/1255_reject_if_let_and_condition/Main.rae:12:6: 'if let' narrows one optional, but its right side here is an `and`/`or` condition (a Bool): the whole condition is what it would narrow. Nest the extra condition: `if let x: view T = place { if cond { ... } }`
+    12 |   if let number: mod Int = holder.value and holder.count is 0 {
+       |      ^~~~
+tests/cases/1255_reject_if_let_and_condition/Main.rae:15:6: 'if let' narrows one optional, but its right side here is an `and`/`or` condition (a Bool): the whole condition is what it would narrow. Nest the extra condition: `if let x: view T = place { if cond { ... } }`
+    15 |   if let number: view Int = holder.value or holder.count > 2 {
+       |      ^~~~
+tests/cases/1255_reject_if_let_and_condition/Main.rae:18:6: 'if let' narrows an optional, but its right side here is a comparison (a Bool); use a plain `if`
+    18 |   if let number: view Int = holder.count > 2 {
+       |      ^~~~
