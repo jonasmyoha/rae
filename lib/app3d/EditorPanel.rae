@@ -20,6 +20,7 @@
 # `editorPanel.settings`; applyEditorPanelSettings puts the sky, the sun and
 # TAA onto the renderer and the light.
 import Gpu2d
+import Sys
 import SdfText
 import Vec3
 open LightUnits
@@ -105,7 +106,17 @@ type EditorPanelFrame {
 
 # Load the fonts and theme from `assetBase` (Roboto-Regular.mtsdf.* and
 # Theme.raescene), mount the chrome and put `settings` on it
+# The sun of the editor-panel examples (134, 135, 138, 142), in lux at noon:
+# their light was tuned at this balance and they have no automatic exposure,
+# so the walker's real-strength sun (SettingsSky.settingsSunNoonLux) washed
+# them out. The panel's sun slider starts here; RAE_SUN_LUX still overrides.
+const editorPanelSunNoonLux: Float = 20000.0
+
 func createEditorPanel(assetBase: view String, settings: view SettingsState) ret EditorPanel {
+  var panelSettings: SettingsState = settings
+  if Sys.getEnv(name: "RAE_SUN_LUX").length() is 0 {
+    panelSettings.sunNoonLux = editorPanelSunNoonLux
+  }
   let gpuUi: Gpu2dUi = loadUiAssets(
     dir: assetBase
     textFontName: "Roboto-Regular"
@@ -123,15 +134,15 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
     res: gpuUi
   )
   mountEditorChrome(world: world, uiSystems: uiSystems, res: gpuUi)
-  settingsApplyToWorld(settingsState: settings, world: world, uiSystems: uiSystems)
-  applyEditorPanelOpen(world: world, open: settings.open)
+  settingsApplyToWorld(settingsState: panelSettings, world: world, uiSystems: uiSystems)
+  applyEditorPanelOpen(world: world, open: panelSettings.open)
   # The app section shows once an app gives it a title
   setNodeActive(world: world, nodeId: "AppPanel", value: false)
   fitEditorPanelToWindow(
     world: world
     uiSystems: uiSystems
     res: gpuUi
-    panelOpen: settings.open
+    panelOpen: panelSettings.open
   )
   # The side panel scrolls when its content outgrows the window: the scene
   # authors a ScrollRoot on SidePanelContent, the lib system seeds its state
@@ -152,7 +163,7 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
       heartbeat: false
     )
     modeMenu: createModeMenuState()
-    settings: settings
+    settings: own panelSettings
     orbitHome: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     recentresOrbit: false
     hosekData: loadDefaultHosekDataset()
@@ -257,6 +268,14 @@ func updateEditorSettings(
     settingsChanged = true
   }
   if settingsUpdateDatePointer(
+    settingsState: settings
+    world: world
+    uiSystems: uiSystems
+    input: input
+  ) {
+    settingsChanged = true
+  }
+  if settingsUpdateSunLuxPointer(
     settingsState: settings
     world: world
     uiSystems: uiSystems

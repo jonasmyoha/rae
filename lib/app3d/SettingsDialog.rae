@@ -179,6 +179,8 @@ type SettingsState {
   # The sun's illuminance at its highest, in lux (SettingsSky
   # settingsSunNoonLux; RAE_SUN_LUX=<lux> tries another, for screenshots)
   sunNoonLux: Float = settingsSunNoonLuxFromEnv()
+  # The sun slider is being dragged
+  luxDragging: Bool = false
   # The automatic exposure's compensation in EV (AutoExposure): + brighter,
   # - darker; steps of settingsExposureStep
   exposureCompensation: Float = 0.0
@@ -571,6 +573,92 @@ func settingsUpdateLatitudePointer(
   ret true
 }
 
+# The sun slider's range (lux at noon): even in ratio, not in steps, so a
+# dim sun and a bright one get as much of the track
+const settingsSunLuxMin: Float = 5000.0
+
+const settingsSunLuxMax: Float = 150000.0
+
+# Where `lux` sits along the sun slider, 0..1, and back
+func sunLuxFraction(lux: view Float) ret Float {
+  let clamped: Float = Math.clamp(val: lux, low: settingsSunLuxMin, high: settingsSunLuxMax)
+  ret Math.naturalLog(x: clamped / settingsSunLuxMin) / Math.naturalLog(
+    x: settingsSunLuxMax / settingsSunLuxMin
+  )
+}
+
+func sunLuxAt(fraction: view Float) ret Float {
+  let lux: Float = settingsSunLuxMin * Math.pow(
+    base: settingsSunLuxMax / settingsSunLuxMin
+    exp: Math.clamp(val: fraction, low: 0.0, high: 1.0)
+  )
+  # to the nearest 1,000 lux
+  ret Math.round(x: lux / 1000.0) * 1000.0
+}
+
+# "100,000"
+func formatLux(lux: view Float) ret String {
+  let whole: Int = Math.round(x: lux).toInt()
+  let thousands: Int = whole / 1000
+  let rest: Int = whole % 1000
+  if thousands is 0 {
+    ret "{rest}"
+  }
+  var restText: String = "{rest}"
+  if rest < 10 {
+    restText = "00{rest}"
+  } else if rest < 100 {
+    restText = "0{rest}"
+  }
+  ret "{thousands},{restText}"
+}
+
+# The sun slider (the sun's illuminance at noon, settingsState.sunNoonLux),
+# the same shape as the latitude one
+func settingsUpdateSunLuxPointer(
+  settingsState: mod SettingsState
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+) ret Bool {
+  if settingsState.open is false {
+    ret false
+  }
+  if settingsState.timeDragging or settingsState.latDragging or settingsState.lonDragging or settingsState.dateDragging {
+    ret false
+  }
+  var pressedInside: Bool = false
+  if input.pointer.pressed {
+    pressedInside = pointInNode(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "SettingsSunLuxTrack"
+      x: input.pointer.x
+      y: input.pointer.y
+    )
+  }
+  settingsState.luxDragging = dragActive(
+    wasDragging: settingsState.luxDragging
+    pressedInside: pressedInside
+    down: input.pointer.down
+    released: input.pointer.released
+  )
+  if settingsState.luxDragging is false {
+    ret false
+  }
+  let next: Float = sunLuxAt(fraction: fractionAcrossNode(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "SettingsSunLuxTrack"
+    x: input.pointer.x
+  ))
+  if next is settingsState.sunNoonLux {
+    ret false
+  }
+  settingsState.sunNoonLux = next
+  ret true
+}
+
 # The longitude slider, the same shape as the latitude one: -180..180 east
 func settingsUpdateLongitudePointer(
   settingsState: mod SettingsState
@@ -698,6 +786,11 @@ func settingsApplyToWorld(
   )
   setNodeText(
     world: world
+    nodeId: "SettingsSunLuxLabel"
+    value: "Sun {formatLux(lux: settingsState.sunNoonLux)} lux at noon"
+  )
+  setNodeText(
+    world: world
     nodeId: "SettingsLonLabel"
     value: "Longitude {formatLongitude(longitudeDeg: settingsState.longitude)}"
   )
@@ -819,6 +912,13 @@ func settingsApplyToWorld(
     trackId: "SettingsLonTrack"
     handleId: "SettingsLonHandle"
     fraction: (settingsState.longitude + 180.0) / 360.0
+  )
+  centreNodeAtFraction(
+    world: world
+    uiSystems: uiSystems
+    trackId: "SettingsSunLuxTrack"
+    handleId: "SettingsSunLuxHandle"
+    fraction: sunLuxFraction(lux: settingsState.sunNoonLux)
   )
 }
 
