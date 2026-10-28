@@ -269,13 +269,14 @@ func gatherPropLevel(
 ) {
   if draw.sprite {
     let before: Int = field.spriteBatch.count
-    addSpriteInstance(
+    addSpriteInstanceWithRim(
       batch: field.spriteBatch
       position: placement.position
       height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
       yaw: placement.yaw
       layer: field.spriteLayers.copyAtFallback(index: placement.kind, fallback: 0)
       toon: toon
+      rimLight: field.spriteRims.copyAtFallback(index: placement.kind, fallback: true)
     )
     if fades and field.spriteBatch.count > before {
       setInstanceFade(

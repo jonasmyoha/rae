@@ -28,6 +28,8 @@ struct VsOut {
   @location(3) depth: f32,
   @location(4) uv: vec2<f32>,
   @location(5) @interpolate(flat) imageCode: f32,
+  // 1: a leaf card whose normal turns toward the eye where it faces away
+  @location(6) @interpolate(flat) cardToEye: f32,
 };
 
 fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32>, card: vec4<f32>) -> VsOut {
@@ -55,6 +57,7 @@ fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32
   o.albedo = part.albedoLayer.xyz;
   o.uv = imageUv;
   o.imageCode = part.surface.x;
+  o.cardToEye = select(0.0, part.surface.y, card.w > 0.0);
   o.direction = direction;
   o.depth = depth;
   return o;
@@ -95,6 +98,12 @@ fn fs(in: VsOut) -> FsOut {
   var n = normalize(in.normal);
   if (in.imageCode >= -0.5 && dot(n, in.direction) < 0.0) {
     n = -n;
+  }
+  // a leaf card facing away from the eye: the part of its normal that points
+  // away turns back toward the eye, as the leaf pass does (leaf_cards.wgsl)
+  if (in.cardToEye > 0.5) {
+    let away = dot(n, in.direction);
+    if (away < 0.15) { n = normalize(n + in.direction * (0.15 - away)); }
   }
   var o: FsOut;
   o.albedo = vec4<f32>(albedo, 1.0);
