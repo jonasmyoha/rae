@@ -1,8 +1,9 @@
-# Tree sets: a low-poly museum set and the realistic set
+# Tree sets: a low-poly museum set and the stylized set
 
-Status: proposed (2026-10-28), waiting for the be answers in §6.
+Status: proposed (2026-10-28); the a answered §6.1 and named the
+sets; §6.2 and §6.3 wait.
 
-Decision: the walker examples keep the "realistic" trees being made
+Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
 earlier low-poly style, with all its LOD and billboard work, kept usable
 for other games. This document says where the trees are today, how the two
@@ -35,7 +36,7 @@ Everything is in the standard library; nothing is copied per example.
   `ImpostorBake` (octahedral impostors on the GPU; +97 lines since, all
   general), `app3d/FarCanopy` + `CanopyBake` (the far canopy). It takes
   meshes and pictures; it does not know the species.
-- **The realistic generator**, `lib/treeGen/`: the T02 tree, traced and
+- **The stylized generator**, `lib/treeGen/`: the T02 tree, traced and
   grown (`TreeGrower`), with its bark, branch detail, leaf cards and leaf
   pass. Used today by the tree lab (146) and 143's T02 stand.
 - **Autumn Grove** (`examples/138_procgen_showcase`): at `4d28e11d` five
@@ -56,8 +57,8 @@ lib/treeSets/
     LowPolyTrees.rae       the set (GroveTrees as of 4d28e11d)
     Tree.rae Foliage.rae FluffyFoliage.rae Camphor.rae
     CamphorGeometry.rae Palm.rae Spruce.rae   (their 4d28e11d versions)
-  realistic/             the walkers' set, growing with lib/treeGen
-    RealisticTrees.rae     today's GroveTrees, species by species
+  stylized/             the walkers' set, growing with lib/treeGen
+    StylizedTrees.rae     today's GroveTrees, species by species
                            replaced by treeGen-grown ones
 ```
 
@@ -65,28 +66,28 @@ lib/treeSets/
   weight, its size range and trunk (for the physics bodies), its level
   meshes and materials (near, middle), its billboard pictures and its
   impostor bake settings; per set its bushes. A set's constructor builds it
-  once (`createLowPolyTrees(renderer)`, `createRealisticTrees(renderer)`).
+  once (`createLowPolyTrees(renderer)`, `createStylizedTrees(renderer)`).
   The forests (`IslandForest`, `WideForest`, `WalkerTerrain`,
   `TreeCoverage`) take a `view TreeSet` in place of calling `GroveTrees`,
   and the LOD machinery stays as it is.
 - **The low-poly set is a museum.** Its look is frozen at `4d28e11d`: it
   owns its own copies of the generators as they were then, so later work on
-  the shared or realistic generators can never change it. Allowed changes:
+  the shared or stylized generators can never change it. Allowed changes:
   language ports, API changes of the machinery around it, and fixes that
   restore the old look. Its acceptance test is the old render: example 138
   at `4d28e11d` rendered with its own compiler (looks-development
   `rendering/beforeAfter.html#groveBeforeBirch`, left) against the port.
-- **The realistic set is the walkers'.** It starts as today's
+- **The stylized set is the walkers'.** It starts as today's
   `GroveTrees`, moved (no look change), and each species is replaced by a
   treeGen-grown one as the reference-tree work reaches it (the T02
   broadleaf first, the varieties already in 143's stand).
 - **`lib/procgen/`** keeps what is not a tree set: rocks, textures, the
   flowers. The later tree modules (Birch, Lime, Ginkgo, the maples, the
   forks, scaffolds, foliage cards, `SpruceControl`) were the rejected
-  landscape attempts; they move under `realistic/` while the realistic set
+  landscape attempts; they move under `stylized/` while the stylized set
   still uses them, and are deleted as treeGen species replace them.
 - **Other games** pick a set: the walker apps get a setting
-  (`WalkerAppSettings.treeSet`, `RAE_TREE_SET=lowPoly|realistic`), so 143
+  (`WalkerAppSettings.treeSet`, `RAE_TREE_SET=lowPoly|stylized`), so 143
   can also be shown in the low-poly style, which is the proof that the set
   is usable outside the museum.
 
@@ -119,7 +120,7 @@ lib/treeSets/
 ## 5. Steps (for the queue)
 
 1. `TreeSet` and the forests on it: the type, `GroveTrees` moved to
-   `treeSets/realistic/RealisticTrees` behind it, the forests and
+   `treeSets/stylized/StylizedTrees` behind it, the forests and
    `TreeCoverage` taking a set. No look change (walker gates, 136/137/143
    screenshots before/after).
 2. The low-poly set: `treeSets/lowPoly/` ported from `4d28e11d` (the set
@@ -131,17 +132,31 @@ lib/treeSets/
 5. The tree-set setting for the walkers (`RAE_TREE_SET`), 143 in both
    styles on the looks-development page.
 6. Clean-up: `lib/procgen` keeps only non-tree modules; the rejected tree
-   modules go as the realistic set stops using them.
+   modules go as the stylized set stops using them.
 
 ## 6. Decisions for the is
 
-1. **The later studies in 138** (birch, ginkgo, Japanese maple, forks,
-   meadow flowers, harebells): move them to their own example ("tree
-   studies"), or delete them (they were rejected; git keeps them)?
-2. **The leaf-patch crowns.** `4d28e11d` already has `FluffyFoliage`'s
-   leaf-patch crowns (an earlier Astra piece, 17 Oct): the big tree in the
-   old picture. Is that the museum's look, or should the museum go further
-   back, before those crowns?
-3. **The walkers' set until treeGen covers it**: today's mixed set
-   (including the birch), or the low-poly set as a stop-gap until each
-   realistic species is ready?
+The set the walkers keep is named **stylized** (2026-10-28:
+"realistic" is not a good name; US spelling, as in code. The older
+`SkyModel.stylised` keeps its spelling until it is next touched).
+
+1. **The later studies stay with the stylized set** (answered): the birch,
+   ginkgo, Japanese maple, fork and flower modules move under
+   `lib/treeSets/stylized/` with it, and will be iterated on heavily from
+   the T02 work. Their scenes leave Autumn Grove (the museum); proposed home:
+   the tree lab (146), which is the stylized set's workshop, as scenes
+   beside the T02 tree.
+2. **The leaf-patch crowns** (open). `FluffyFoliage` makes a crown out of
+   many flat, lobed leaf patches (smooth rounded lumps); it came on
+   17 Oct (rae `d3b72fa6`, by Astra), before the low-poly commit
+   `4d28e11d`, so the museum as proposed has it. Shown in looks-development
+   `rendering/treeStyles.html`: the grove before it, when it came, and at
+   `4d28e11d`, with close-ups. Question: does the museum keep the
+   leaf-patch crowns, or go back to before them (only the shaggy autumn
+   trees)?
+3. **The walkers' trees until the stylized set is complete** (open,
+   reworded). The stylized set will have new trees from the T02 work, but
+   only some kinds at first (the T02 broadleaf now). Until it has every
+   kind, which trees should the walker scenes (136, 137, 143) show for the
+   other kinds: the ones they show today (including the birch), or the old
+   low-poly ones?
