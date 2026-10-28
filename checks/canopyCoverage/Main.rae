@@ -1,6 +1,6 @@
 # Hardware check that a far canopy cluster (app3d/FarCanopy, lib/CanopyBake;
 # docs/tree-lod-design.md §2.4) shows what its trees show. For every tree
-# species of app3d/GroveTrees, a sparse 40 m cell of that species alone is
+# species of treeSets/stylized/StylizedTrees, a sparse 40 m cell of that species alone is
 # baked into a cluster, and the cluster and the same trees as single
 # impostors (as app3d/FarSprites draws them) are each drawn offscreen with
 # the sprite pass's own shader, from the distances and directions a far
@@ -36,7 +36,7 @@ open GrassCompute
 open ImpostorAtlas
 open ImpostorBake
 open CanopyBake
-open app3d/GroveTrees
+open treeSets/stylized/StylizedTrees
 open app3d/PropField
 open app3d/FarSprites
 open app3d/FarCanopy
@@ -419,10 +419,10 @@ func main() ret Int {
   var failures: Int = 0
   var issuer: IdIssuer = IdIssuer.create()
   if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 512) {
-    # The trees' atlas, as GroveTrees bakes it
+    # The trees' atlas, as StylizedTrees bakes it
     var store: MeshStore = createMeshStore()
-    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
-    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
+    loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
       let meshes: List(MeshData) = speciesLevelMeshes(
         species: species
         patches: nearPatches
@@ -458,11 +458,11 @@ func main() ret Int {
     let field: PropField = createPropField(
       originX: 0.0
       originY: 0.0
-      size: cellSize * treeSpeciesCount.toFloat()
+      size: cellSize * stylizedSpeciesCount.toFloat()
       cellSize: cellSize
     )
-    var sprites: List(FarSprite) = List.create(FarSprite, cap: treeSpeciesCount * treesPerCell)
-    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    var sprites: List(FarSprite) = List.create(FarSprite, cap: stylizedSpeciesCount * treesPerCell)
+    loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
       let height: Float = subjects.copyAtDefault(index: species).height
       loop var tree: Int = 0, tree < treesPerCell, ++tree {
         let seedA: Float = species.toFloat() * 31.0 + tree.toFloat()
@@ -498,7 +498,7 @@ func main() ret Int {
       settings: canopySettings
       cutoff: spriteCutoff
     )
-    if trees.subjects is not treeSpeciesCount or canopy.subjects is not treeSpeciesCount {
+    if trees.subjects is not stylizedSpeciesCount or canopy.subjects is not stylizedSpeciesCount {
       log("FAIL: the bakes made {trees.subjects} tree and {canopy.subjects} cluster pages")
       ret 1
     }
@@ -522,7 +522,7 @@ func main() ret Int {
     bearings.add(value: 0.52)
     bearings.add(value: 1.0)
     bearings.add(value: 1.35)
-    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
       let cluster: CanopyCluster = clusters.copyAtDefault(index: species)
       var treeBatch: InstanceBatch = createInstanceBatch(
         mesh: meshHandleNone()

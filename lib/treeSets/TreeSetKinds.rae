@@ -1,0 +1,40 @@
+# treeSets/TreeSetKinds — builds a tree set's meshes and pictures by its
+# style (treeSets/TreeSet): every species as a PropField kind (kind index =
+# species) and its bushes. The forests call these, never a set's own module.
+import RendererDeferred
+open app3d/PropField
+open app3d/PropInstancer
+open GbufferSprite
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
+
+# Every species of `treeSet` as a kind of `field`, at its levels of detail:
+# `midDistance` is where the sparser crowns end (keep it inside the
+# shadows' reach), `farDistance` where the impostors end
+func addTreeSetKinds(
+  treeSet: view TreeSet
+  field: mod PropField
+  renderer: mod DeferredRenderer
+  sprites: mod SpriteCache
+  midDistance: view Float
+  farDistance: view Float
+) {
+  if treeSet.style is TreeSetStyle.stylized {
+    addStylizedForestKinds(
+      field: field
+      renderer: renderer
+      sprites: sprites
+      midDistance: midDistance
+      farDistance: farDistance
+    )
+  }
+}
+
+# The bushes of `treeSet`: one instancer per leaf tone
+func createTreeSetBushParts(
+  treeSet: view TreeSet
+  renderer: mod DeferredRenderer
+  capacity: view Int
+) ret List(PropInstancer) {
+  ret createStylizedBushParts(renderer: renderer, capacity: capacity)
+}

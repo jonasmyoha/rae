@@ -1,6 +1,6 @@
 # Hardware check for the octahedral impostor bake (lib/ImpostorBake, tree
 # LOD step 4, docs/tree-lod-design.md §2.2): every tree species of
-# app3d/GroveTrees baked on the GPU into an atlas of 8 x 8 views (the PC
+# treeSets/stylized/StylizedTrees baked on the GPU into an atlas of 8 x 8 views (the PC
 # settings; RAE_IMPOSTOR_PHONE=1 bakes the phone's 4 x 4), read back level by
 # level. It checks that every species covers part of its layer and that each
 # mip keeps level 0's coverage under the alpha cut within 3%, and writes the
@@ -33,7 +33,7 @@ open ImpostorAtlas
 open SurfaceImages
 open ImpostorBake
 open ImpostorMips
-open app3d/GroveTrees
+open treeSets/stylized/StylizedTrees
 open app3d/PropField
 open app3d/FarSprites
 open app3d/FarCanopy
@@ -80,9 +80,9 @@ func checkFoliageLayout(
   images: view SurfaceImages
   folder: view String
 ) ret Int {
-  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
+  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
   var leafMeshes: Int = 0
-  loop var species: Int = 0, species < treeSpeciesCount, ++species {
+  loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
     let meshes: List(MeshData) = speciesLevelMeshes(
       species: species
       patches: nearPatches
@@ -154,7 +154,7 @@ func checkFoliageLayout(
     settings: settings
   )
   var failures: Int = 0
-  if leafMeshes is 0 or atlas.layers is not treeSpeciesCount {
+  if leafMeshes is 0 or atlas.layers is not stylizedSpeciesCount {
     failures = 1
   }
   loop var species: Int = 0, species < atlas.layers, ++species {
@@ -390,7 +390,7 @@ func checkCanopy(
       if hash < 0.4 {
         continue
       }
-      let species: Int = (hash * 1000.0).toInt() % treeSpeciesCount
+      let species: Int = (hash * 1000.0).toInt() % stylizedSpeciesCount
       sprites.add(value: farSpriteAt(
         position: Vec3.create(
           x: column.toFloat() * 3.6 + 1.0 + hash
@@ -532,8 +532,8 @@ func main() ret Int {
     }
     var store: MeshStore = createMeshStore()
     failures = failures + checkCutout(resources: resources, store: store, images: images)
-    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
-    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
+    loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
       let meshes: List(MeshData) = speciesLevelMeshes(
         species: species
         patches: nearPatches
@@ -596,8 +596,8 @@ func main() ret Int {
       images: images
     )
     let milliseconds: Int = nowMs() - started
-    if atlas.layers is not treeSpeciesCount {
-      log("FAIL: the bake made {atlas.layers} layers, not {treeSpeciesCount}")
+    if atlas.layers is not stylizedSpeciesCount {
+      log("FAIL: the bake made {atlas.layers} layers, not {stylizedSpeciesCount}")
       ret 1
     }
     log(

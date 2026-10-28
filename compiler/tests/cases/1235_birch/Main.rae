@@ -1,5 +1,6 @@
 open procgen/Birch
-open app3d/GroveTrees
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
 open SurfaceImagePixels
 open Png
 open ImpostorBake
@@ -165,7 +166,7 @@ func main() ret Int {
   if patches < 120 or patches > 240 or cameraFacing is not patches {
     ret 8
   }
-  if speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
+  if speciesForPick(picks: createStylizedTrees().standPicks, pick: 0.06) is not speciesBirch {
     ret 16
   }
   # A clear black texel must not darken an opaque green texel in the mip.

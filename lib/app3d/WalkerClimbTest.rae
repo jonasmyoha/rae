@@ -17,7 +17,7 @@ open app3d/WalkerPhysicsChecks
 open app3d/WalkerTerrainBodies
 open app3d/WalkerSelfTest
 open app3d/WalkerWorld
-open app3d/GroveTrees
+open treeSets/TreeSet
 open app3d/WalkerTerrain
 
 # Fixed steps to reach the trunk (8 s), to climb with the stick held up (8 s,
@@ -70,6 +70,7 @@ func climbTestTree(
 func runWalkerClimbTest(
   physicsSystem: mod WalkerPhysics
   world: mod WalkerWorld
+  treeSet: view TreeSet
   pooledTrunks: view Bool
   heroEntityId: view EntityId
 ) ret Bool {
@@ -167,6 +168,7 @@ func runWalkerClimbTest(
     var treeHeight: Float = 0.0
     if let variant: TreeVariant = componentCopy(this: world.treeVariants, entityId: treeEntityId) {
       treeHeight = treeHeightFor(
+        treeSet: treeSet
         species: variant.species
         scale: transformOf(transforms: world.transforms, entityId: treeEntityId).scale.z
       )

@@ -1,0 +1,119 @@
+# treeSets/TreeSet — what a forest needs from a set of tree species
+# (docs/tree-sets-design.md §2). A set is data: its species (numbered from
+# 0, the PropField kind of each), how big each grows, and how they are
+# picked for a place: in stands of one species, with some trees mixed in
+# from any. The forests (app3d/IslandForest, app3d/WideForest,
+# app3d/WalkerTerrain) read a set; they never name a species. Which code
+# builds a set's meshes and pictures is its `style` (treeSets/TreeSetKinds).
+# The sets: treeSets/stylized/StylizedTrees (the walkers').
+import Math
+open Noise
+
+# The trunk the physics gives every tree, whatever its set or species: a
+# capsule from the foot up into the crown, a little wider than the widest
+# trunk. Its top is treeTrunkShare of the tree's height (treeTrunkTop), so a
+# climber goes up the trunk into the crown; treeTrunkHeight is the size a
+# pooled trunk waits at before it is placed on a tree.
+const treeTrunkRadius: Float = 0.3
+
+const treeTrunkHeight: Float = 3.2
+
+const treeTrunkShare: Float = 0.9
+
+# The billboard pictures every set bakes and draws its far trees with: a
+# picture is spritePictureAspect times as tall as wide, and a texel is
+# covered from spriteCutoff of its alpha
+const spritePictureAspect: Float = 1.5
+
+const spriteCutoff: Float = 0.5
+
+# Which code builds a set's kinds and bushes (treeSets/TreeSetKinds)
+enum TreeSetStyle { stylized }
+
+# One species: its name, its heights (m) from minHeight to minHeight +
+# heightRange, and the height its meshes are built at (heightUnit), so a
+# placement's scale is its height over heightUnit (1: the scale is the
+# height)
+type TreeSpecies {
+  name: String
+  minHeight: Float
+  heightRange: Float
+  heightUnit: Float
+}
+
+# A pick in 0..1 below upTo (and not below the entry before) is `species`
+type SpeciesPick {
+  upTo: Float
+  species: Int
+}
+
+# A set of species and how they are placed: each standSize x standSize
+# block (m) has one main species (standPicks); mixedShare of the trees are
+# mixed in from any (mixedPicks)
+type TreeSet {
+  name: String
+  style: TreeSetStyle
+  species: List(TreeSpecies)
+  standSize: Float
+  mixedShare: Float
+  standPicks: List(SpeciesPick)
+  mixedPicks: List(SpeciesPick)
+}
+
+func treeSpeciesCount(treeSet: view TreeSet) ret Int {
+  ret treeSet.species.length
+}
+
+# The species a pick in 0..1 stands for in `picks`; the last entry's when
+# the pick is past them all
+func speciesForPick(picks: view List(SpeciesPick), pick: view Float) ret Int {
+  var species: Int = 0
+  loop let entry: view SpeciesPick in picks {
+    species = entry.species
+    if pick < entry.upTo {
+      ret species
+    }
+  }
+  ret species
+}
+
+# Which species tree number `number`, at (x, y), is: its block's main
+# species, or for mixedShare of the trees one picked from the mixed table
+func treeSpeciesAt(
+  treeSet: view TreeSet
+  x: view Float
+  y: view Float
+  number: view Int
+) ret Int {
+  let blockX: Int = Math.floor(x: x / treeSet.standSize).toInt()
+  let blockY: Int = Math.floor(x: y / treeSet.standSize).toInt()
+  if hash2(x: number, y: 1, seed: 733) < treeSet.mixedShare {
+    ret speciesForPick(picks: treeSet.mixedPicks, pick: hash2(x: number, y: 2, seed: 977))
+  }
+  ret speciesForPick(picks: treeSet.standPicks, pick: hash2(x: blockX, y: blockY, seed: 131))
+}
+
+func speciesOf(treeSet: view TreeSet, species: view Int) ret TreeSpecies {
+  ret treeSet.species.copyAtFallback(
+    index: species
+    fallback: { name: "", minHeight: 1.0, heightRange: 0.0, heightUnit: 1.0 }
+  )
+}
+
+# Tree number `number`'s uniform scale: its height over its species'
+# heightUnit
+func treeScaleAt(treeSet: view TreeSet, species: view Int, number: view Int) ret Float {
+  let kind: TreeSpecies = speciesOf(treeSet: treeSet, species: species)
+  let size: Float = hash2(x: number, y: 3, seed: 109)
+  ret (kind.minHeight + size * kind.heightRange) / kind.heightUnit
+}
+
+# How tall a tree of `species` at `scale` stands (m)
+func treeHeightFor(treeSet: view TreeSet, species: view Int, scale: view Float) ret Float {
+  ret scale * speciesOf(treeSet: treeSet, species: species).heightUnit
+}
+
+# The top of its trunk's capsule (m over its foot): up into the crown
+func treeTrunkTop(treeSet: view TreeSet, species: view Int, scale: view Float) ret Float {
+  ret treeHeightFor(treeSet: treeSet, species: species, scale: scale) * treeTrunkShare
+}

@@ -1,7 +1,8 @@
 open procgen/Cypress
 open procgen/FluffyFoliage
 open procgen/SculpturalFork
-open app3d/GroveTrees
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
 open Mesh3d
 open Vec3
 import Math
@@ -122,7 +123,11 @@ func main() ret Int {
         }
       }
     }
-    let height: Float = treeScaleAt(species: speciesCypress, number: sample)
+    let height: Float = treeScaleAt(
+      treeSet: createStylizedTrees()
+      species: speciesCypress
+      number: sample
+    )
     if height < 8 or height > 11.5 {
       ret 6
     }

@@ -10,7 +10,7 @@
 # drifted to 85-113% at the fourth level. The impostor atlas's mips are
 # checked on the GPU (checks/impostorBake).
 import Math
-open app3d/GroveTrees
+open treeSets/stylized/StylizedTrees
 open app3d/TreeCoverage
 open app3d/SpriteBake
 
@@ -46,9 +46,8 @@ func main() ret Int {
   var failures: Int = 0
   loop var species: Int = 0, species < speciesBirch, ++species {
     let shares: List(Float) = levelCoverageShares(
-      species: species
-      patches: midPatches
-      leaves: midLeaves
+      near: speciesLevelParts(species: species, patches: nearPatches, leaves: nearLeaves)
+      level: speciesLevelParts(species: species, patches: midPatches, leaves: midLeaves)
       directions: 8
       resolution: 256
     )

@@ -1,0 +1,33 @@
+# treeSets/TreeSet: the stylized set as data. Its species, its stand and
+# mixed picks at their edges, and a placement's scale and height.
+open treeSets/TreeSet
+open treeSets/stylized/StylizedTrees
+
+func main() {
+  let treeSet: TreeSet = createStylizedTrees()
+  log("{treeSet.name}: {treeSpeciesCount(treeSet: treeSet)} species")
+  # a stand's main species: a birch low, gold for the rest (never a crimson or a palm)
+  log("stand 0.11: {speciesForPick(picks: treeSet.standPicks, pick: 0.11) is speciesBirch}")
+  log("stand 0.97: {speciesForPick(picks: treeSet.standPicks, pick: 0.97) is speciesGold}")
+  log("mixed 0.90: {speciesForPick(picks: treeSet.mixedPicks, pick: 0.90) is speciesCrimson}")
+  log("mixed 0.97: {speciesForPick(picks: treeSet.mixedPicks, pick: 0.97) is speciesPalm}")
+  # every placement's height lies in its species' range
+  var inRange: Bool = true
+  loop var number: Int = 0, number < 200, ++number {
+    let species: Int = treeSpeciesAt(
+      treeSet: treeSet
+      x: number.toFloat() * 7.0
+      y: number.toFloat() * 3.0
+      number: number
+    )
+    let scale: Float = treeScaleAt(treeSet: treeSet, species: species, number: number)
+    let height: Float = treeHeightFor(treeSet: treeSet, species: species, scale: scale)
+    let kind: TreeSpecies = speciesOf(treeSet: treeSet, species: species)
+    if height < kind.minHeight - 0.001 or height > kind.minHeight + kind.heightRange + 0.001 {
+      inRange = false
+    }
+  }
+  log("heights in range: {inRange}")
+  # a cypress is built at unit height: its scale is its height
+  log("cypress unit: {speciesOf(treeSet: treeSet, species: speciesCypress).heightUnit}")
+}
