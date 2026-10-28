@@ -85,10 +85,9 @@ lib/treeSets/
   forks, scaffolds, foliage cards, `SpruceControl`) were the rejected
   landscape attempts; they move under `stylized/` while the stylized set
   still uses them, and are deleted as treeGen species replace them.
-- **Other games** pick a set: the walker apps get a setting
-  (`WalkerAppSettings.treeSet`, `RAE_TREE_SET=lowPoly|stylized`), so 143
-  can also be shown in the low-poly style, which is the proof that the set
-  is usable outside the museum.
+- **Other games** pick a set. The tree lab (146) gets the setting first
+  (`RAE_TREE_SET=lowPoly|stylized`), which proves a set is usable outside
+  the museum; the walker apps can take the same setting later.
 
 ## 3. The museum: Autumn Grove (example 138)
 
@@ -128,12 +127,15 @@ lib/treeSets/
 3. The museum: 138's old scenes on the low-poly set, rendered against the
    old picture; the later studies moved out (§6).
 4. The low-poly LOD scene in 138 (near to far canopy).
-5. The tree-set setting for the walkers (`RAE_TREE_SET`), 143 in both
-   styles on the looks-development page.
+5. The tree-set setting in the tree lab (146): `RAE_TREE_SET` and a
+   settings-panel choice, with a forest scene that shows the chosen set
+   at every distance. The lab's own scenes for hand-made trees (T02, the
+   studies) stay. The lab is the place to compare the sets (2026-10-28);
+   Autumn Grove stays the museum.
 6. Clean-up: `lib/procgen` keeps only non-tree modules; the rejected tree
    modules go as the stylized set stops using them.
 
-## 6. Decisions for the is
+## 6. Decisions
 
 The set the walkers keep is named **stylized** (2026-10-28:
 "realistic" is not a good name; US spelling, as in code. The whole tree moved to US spelling
