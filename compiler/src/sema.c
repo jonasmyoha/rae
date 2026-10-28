@@ -5204,6 +5204,24 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (bsrc && bsrc->kind == AST_EXPR_UNBOX) bsrc = bsrc->as.unary.operand;
                 bool is_call_src = bsrc && (bsrc->kind == AST_EXPR_CALL
                                             || bsrc->kind == AST_EXPR_METHOD_CALL);
+                /* `if let x: mod T = holder.value and ready`: the right side
+                 * is the whole `and` (a Bool), never the optional, and the C
+                 * backend tried to narrow the Bool. `if let` narrows ONE
+                 * optional; an extra condition is a nested `if`. */
+                bool bool_src = bsrc && bsrc->kind == AST_EXPR_BINARY
+                    && bsrc->as.binary.op >= AST_BIN_LT && bsrc->as.binary.op <= AST_BIN_OR;
+                if (bool_src) {
+                    bool joined = bsrc->as.binary.op == AST_BIN_AND || bsrc->as.binary.op == AST_BIN_OR;
+                    diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
+                               joined
+                                   ? "'if let' narrows one optional, but its right side here is an "
+                                     "`and`/`or` condition (a Bool): the whole condition is what it would "
+                                     "narrow. Nest the extra condition: `if let x: view T = place { if "
+                                     "cond { ... } }`"
+                                   : "'if let' narrows an optional, but its right side here is a "
+                                     "comparison (a Bool); use a plain `if`");
+                    module->had_error = true;
+                }
                 /* `if let x: view/mod T => list.copyAt(...)` (#644): `copyAt`
                  * returns a COPY (opt T by value); a reference binding cannot
                  * alias it. This is the cross-form the old peephole silently
@@ -5221,7 +5239,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                "`copyAt` returns a copy; use `viewAt` or `modAt` to alias storage");
                     module->had_error = true;
                 }
-                if (btr && !(btr->is_view || btr->is_mod)) {
+                if (btr && !(btr->is_view || btr->is_mod) && !bool_src) {
                     // Owned narrowing takes ownership, so its source must be
                     // a PRODUCED optional. From a place it would be a hidden
                     // deep copy of a payload that stays behind — view the

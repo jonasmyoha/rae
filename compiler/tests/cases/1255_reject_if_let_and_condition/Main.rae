@@ -1,0 +1,27 @@
+# `if let` narrows one optional. An `and`/`or` on its right side is the
+# whole Bool condition, not the optional, so it is an error (it reached the
+# C compiler once); the extra condition is a nested `if`. A comparison there
+# is an error too.
+type Holder {
+  value: opt Int
+  count: Int
+}
+
+func main() {
+  var holder: Holder = { value: 3, count: 0 }
+  if let number: mod Int = holder.value and holder.count is 0 {
+    log("{number}")
+  }
+  if let number: view Int = holder.value or holder.count > 2 {
+    log("{number}")
+  }
+  if let number: view Int = holder.count > 2 {
+    log("{number}")
+  }
+  # the right way: narrow, then test
+  if let number: view Int = holder.value {
+    if holder.count is 0 {
+      log("{number}")
+    }
+  }
+}
