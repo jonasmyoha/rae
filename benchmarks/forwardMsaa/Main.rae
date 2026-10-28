@@ -10,7 +10,7 @@
 # - deferred: G-buffer pass (3 targets + depth, stored), then a fullscreen
 #   lighting pass that reads them;
 # - forward 1x: one pass, depth pre-pass draws then shading draws (depth Equal);
-# - forward 4x: the same pass with 4x MSAA, resolved on store, the MSAA colour
+# - forward 4x: the same pass with 4x MSAA, resolved on store, the MSAA color
 #   and depth discarded (with and without TransientAttachment = memoryless);
 # - forward 4x, no pre-pass: shading draws with depth Less only.
 #
@@ -128,7 +128,7 @@ func recordFrame(
   secondWrites: copy Ptr
 ) unsafe ret Int {
   unsafe {
-    var colours: List(WGPURenderPassColorAttachment) = List.create(
+    var colors: List(WGPURenderPassColorAttachment) = List.create(
       WGPURenderPassColorAttachment
       cap: 3
     )
@@ -136,24 +136,24 @@ func recordFrame(
       WGPURenderPassDepthStencilAttachment
       cap: 1
     )
-    let skyColour: WGPUColor = { r: 0.3, g: 0.4, b: 0.55, a: 1.0 }
+    let skyColor: WGPUColor = { r: 0.3, g: 0.4, b: 0.55, a: 1.0 }
     let blank: WGPUColor = { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
     if variant is variantDeferred {
-      colours.add(value: {
+      colors.add(value: {
         view_: targets.normalView
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Clear
         storeOp: WGPUStoreOp_Store
         clearValue: blank
       })
-      colours.add(value: {
+      colors.add(value: {
         view_: targets.albedoView
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Clear
         storeOp: WGPUStoreOp_Store
         clearValue: blank
       })
-      colours.add(value: {
+      colors.add(value: {
         view_: targets.materialView
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Clear
@@ -170,7 +170,7 @@ func recordFrame(
       )
       let geometryDescriptor: WGPURenderPassDescriptor = {
         colorAttachmentCount: 3
-        colorAttachments: colours.data
+        colorAttachments: colors.data
         depthStencilAttachment: depths.data
         timestampWrites: firstWrites
       }
@@ -195,7 +195,7 @@ func recordFrame(
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Clear
         storeOp: WGPUStoreOp_Store
-        clearValue: skyColour
+        clearValue: skyColor
       })
       let lightingDescriptor: WGPURenderPassDescriptor = {
         colorAttachmentCount: 1
@@ -228,21 +228,21 @@ func recordFrame(
     # Forward: one pass; a multisampled one resolves into the output and
     # throws its samples away
     if variantSamples(variant: variant) > 1 {
-      colours.add(value: {
-        view_: targets.multisampleColourView
+      colors.add(value: {
+        view_: targets.multisampleColorView
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         resolveTarget: targets.outputView
         loadOp: WGPULoadOp_Clear
         storeOp: WGPUStoreOp_Discard
-        clearValue: skyColour
+        clearValue: skyColor
       })
     } else {
-      colours.add(value: {
+      colors.add(value: {
         view_: targets.outputView
         depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
         loadOp: WGPULoadOp_Clear
         storeOp: WGPUStoreOp_Store
-        clearValue: skyColour
+        clearValue: skyColor
       })
     }
     depths.add(
@@ -255,7 +255,7 @@ func recordFrame(
     )
     let descriptor: WGPURenderPassDescriptor = {
       colorAttachmentCount: 1
-      colorAttachments: colours.data
+      colorAttachments: colors.data
       depthStencilAttachment: depths.data
       timestampWrites: firstWrites
     }

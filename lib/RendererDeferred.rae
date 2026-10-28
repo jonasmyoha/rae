@@ -93,7 +93,7 @@ enum RenderTag {
 # mip chain of depth, for Hi-Z + SSAO
 # screen-space AO from G-buffer depth+normal (#387)
 # reads the G-buffer, writes radiance
-# radiance -> the frame's colour target
+# radiance -> the frame's color target
 # resolve/present
 # load-preserving 2D UI painted over the composited frame (#389)
 # temporal resolve (#390); HDR in, HDR out
@@ -117,7 +117,7 @@ type DeferredRenderer {
   # equipment in a deferred renderer rather than temporary scaffolding.
   debugView: Int
   # The bound environment (#399). A scene that never sets one keeps the
-  # authored hemisphere and the clear-colour background, so binding a sky
+  # authored hemisphere and the clear-color background, so binding a sky
   # is opt-in rather than a silent change to every existing example.
   sky: Sky
   hasSky: Bool
@@ -157,7 +157,7 @@ type DeferredRenderer {
 # (~160 in all) — and two buffers (vertex + index) for every static and skinned
 # mesh uploaded through the MeshStore / SkinStore, which is what grows with the
 # app: a venue of ~60 static meshes plus a character in ~10 parts, uploaded once
-# per colour variant, already passes 256. A full table makes createBuffer return
+# per color variant, already passes 256. A full table makes createBuffer return
 # none, and the frame then draws nothing with no error, so this is sized for
 # hundreds of meshes; a slot is a few Ints per table.
 const deferredManagerCapacity: Int = 1024
@@ -224,7 +224,7 @@ func uploadMesh(
 }
 
 # #921: a SKINNED mesh (20 Floats per vertex: pos3, nrm3, uv2, four joint
-# indices as Floats, four weights, an RGBA vertex colour) into the renderer's
+# indices as Floats, four weights, an RGBA vertex color) into the renderer's
 # SkinStore; the deferred skin pass and the skinned shadow casters resolve it there.
 func uploadSkinnedMesh(
   renderer: mod DeferredRenderer
@@ -396,7 +396,7 @@ func taaIsEnabled(renderer: view DeferredRenderer) pub ret Bool {
 
 # Distance fog (#57, per-app). Fades geometry to `color` (LINEAR HDR — the same
 # space the lit radiance and sky background live in) over [start,end] world
-# units from the camera, and paints that colour as the background so a far
+# units from the camera, and paints that color as the background so a far
 # ground/sea plane dissolves into the horizon with no far-clip seam. Off by
 # default; every deferred example that never calls this keeps its sky.
 func setFog(

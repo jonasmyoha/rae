@@ -15,7 +15,7 @@ a file only checked once it contained an `unsafe` token — is gone).
    `unsafe` token at all, across files (fixture 799) and modules, and inside
    generic bodies (fixture 800): a generic instantiated from within the
    caller's `unsafe { }` block does **not** inherit that block — its own raw
-   operations still need their own block (the specialization is analysed with
+   operations still need their own block (the specialization is analyzed with
    its own origin, unsafe depth 0 and loop depth 0). Generic functions whose
    bodies the backend binds by name (positional `T: type` parameters) get a
    by-name obligation scan of the template body, using the same rule as #897:
@@ -23,7 +23,7 @@ a file only checked once it contained an `unsafe` token — is gone).
 3. **Raw pointer operations need a block.** Reading, writing, copying,
    forwarding or producing a raw `Ptr`, constructing a value that stores one
    (use a safe factory whose body wraps the literal), and formatting /
-   reflecting / serialising a value with `Ptr` storage.
+   reflecting / serializing a value with `Ptr` storage.
 3b. **Whole-value copy / implicit boxing of a raw-Ptr aggregate** (#898).
    Deep-copying a raw-Ptr aggregate that has no lifecycle — `let ys: List(Ptr)
    = xs`, a plain `struct { p: Ptr }` copied from a place, an `Array(Ptr, cap:

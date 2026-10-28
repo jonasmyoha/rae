@@ -20,7 +20,7 @@
 # The port is frozen at tools/box3d-oracle/pin (docs/physics-two-implementations.md
 # §7); the C-library track moves tools/box3d/pin on its own. Re-porting is its
 # own decision: change this pin, rerun, and let the bit-exact fixtures show
-# every place the behaviour changed.
+# every place the behavior changed.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

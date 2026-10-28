@@ -1,4 +1,4 @@
-# procgen/Foliage — stylised low-poly trees, palms and shrubs made of many small
+# procgen/Foliage — stylized low-poly trees, palms and shrubs made of many small
 # six-sided leaves (no alpha textures) over continuous tube wood. Z-up: a tree
 # grows along +Z from its foot at the origin. Every generator is deterministic
 # from its seed.
@@ -324,7 +324,7 @@ func palmLeaves(
 }
 
 # The direction a path of points runs at point `index`: through its two
-# neighbours, one-sided at the ends
+# neighbors, one-sided at the ends
 func foliageTangentAt(points: view List(Vec3), index: view Int) ret Vec3 {
   let last: Int = points.length - 1
   var before: Int = index - 1
@@ -360,7 +360,7 @@ func foliageTube(
     let tangent: Vec3 = foliageTangentAt(points: points, index: i)
     side = vnorm(a: vsub(a: side, b: vscale(a: tangent, s: vdot(a: side, b: tangent))))
     let across: Vec3 = vcross(a: tangent, b: side)
-    let centre: Vec3 = points.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: 0))
+    let center: Vec3 = points.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: 0))
     let radius: Float = radii.copyAtFallback(index: i, fallback: 0.01)
     loop var k: Int = 0, k < sides, ++k {
       let angle: Float = k.toFloat() * 6.2831853 / sides.toFloat()
@@ -370,7 +370,7 @@ func foliageTube(
       )
       foliageVertex(
         mesh: mesh
-        point: vadd(a: centre, b: vscale(a: radial, s: radius))
+        point: vadd(a: center, b: vscale(a: radial, s: radius))
         normal: radial
       )
     }

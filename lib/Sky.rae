@@ -9,7 +9,7 @@
 #
 # The first is the background and, later, the reflection source. The
 # second is ambient light. Fixing the interface at two functions is what
-# lets a photographic HDRI and a hand-painted stylised sky be swapped
+# lets a photographic HDRI and a hand-painted stylized sky be swapped
 # without the lighting pass changing a line — and it is why this exists
 # before any sky does, rather than being retrofitted around whichever
 # one gets built first.
@@ -20,7 +20,7 @@
 # ambient constants that disagree with what is visibly behind it — which
 # is exactly the state this replaces.
 #
-# M0 (#399) ships ONLY the seam and the existing behaviour behind it.
+# M0 (#399) ships ONLY the seam and the existing behavior behind it.
 # `SkyKind.none` reproduces the authored hemisphere blend the deferred
 # lighting pass already performs, exactly, so landing it changes no
 # pixel. That is the acceptance criterion, and test 583 is what pins it:
@@ -36,11 +36,11 @@ enum SkyKind {
   none
   hdri
   procedural
-  stylised
+  stylized
   hosek
 }
 
-# The authored two-colour hemisphere. Not a placeholder to be deleted:
+# The authored two-color hemisphere. Not a placeholder to be deleted:
 # it stays as the fallback for a scene that binds no sky, and as the
 # reference the other kinds are compared against.
 # Equirectangular HDR photograph (#402).
@@ -51,7 +51,7 @@ enum SkyKind {
 # fallback deliberately, and so the two stay comparable.
 
 # Ordinary vegetated ground. Named rather than repeated as 0.25 in each
-# constructor, because it is the value a reader has to recognise to know that a
+# constructor, because it is the value a reader has to recognize to know that a
 # sky was not authored with snow or asphalt in mind.
 const skyDefaultGroundAlbedo: Float = 0.25
 
@@ -73,11 +73,11 @@ type Sky {
   sunColor: Vec3
   # The `none` payload: the hemisphere anchors and the background.
   ambSky: Vec3
-  # HOW COLOURED THE AMBIENT IS, 0 = grey, 1 = the sky's own colour (default).
+  # HOW COLORED THE AMBIENT IS, 0 = gray, 1 = the sky's own color (default).
   #
   # A physical daylight sky is intensely blue, and lightingPassSky uses its
   # irradiance as THE ambient term -- so every shaded surface is lit blue. That is
-  # correct for a photograph and wrong for stylised art: measured here, a pure
+  # correct for a photograph and wrong for stylized art: measured here, a pure
   # white ground albedo rendered (0.59, 0.71, 0.96), so warm materials could not
   # be made warm at any albedo, because red was starved before it started.
   #
@@ -103,7 +103,7 @@ type Sky {
   # The `hosek` payload: cooked from the fitted table when the sky is built,
   # so the per-frame path is a copy rather than a table walk.
   hosek: HosekSky
-  # The `stylised` payload (#404). A ramp between two authored colours,
+  # The `stylized` payload (#404). A ramp between two authored colors,
   # quantised into `bands` the same way the toon terminator is.
   zenithColor: Vec3
   horizonColor: Vec3
@@ -135,7 +135,7 @@ func kindCode(sky: view Sky) pub ret Float {
   if sky.kind is SkyKind.procedural {
     ret 2.0
   }
-  if sky.kind is SkyKind.stylised {
+  if sky.kind is SkyKind.stylized {
     ret 3.0
   }
   if sky.kind is SkyKind.hosek {
@@ -146,13 +146,13 @@ func kindCode(sky: view Sky) pub ret Float {
 
 # A PAINTED sky, for a cel-shaded scene (#404).
 #
-# NOT an HDRI and not a smooth gradient: banded, from colours the scene
+# NOT an HDRI and not a smooth gradient: banded, from colors the scene
 # authors. A photographic environment behind a cel character reads as a
 # model pasted onto a photograph, and — more subtly — a sky whose palette
 # was chosen independently disagrees with the character's shadow tint,
 # which the toon path takes from the sky ambient. Passing the same
-# colours to both is what keeps them in step.
-func createSkyStylised(
+# colors to both is what keeps them in step.
+func createSkyStylized(
   sunDir: view Vec3
   sunColor: view Vec3
   zenith: view Vec3
@@ -160,7 +160,7 @@ func createSkyStylised(
   bands: view Float
 ) pub ret Sky {
   ret Sky {
-    kind: SkyKind.stylised
+    kind: SkyKind.stylized
     exposure: 1.0
     yawDeg: 0.0
     sunDir: sunDir
@@ -274,7 +274,7 @@ func hosekHorizonColor(hosek: view HosekSky, sunDir: view Vec3) ret Vec3 {
   ret Vec3.vscale(a: sum, s: 1.0 / 12.0)
 }
 
-# Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
+# Pull a color toward its own luminance. sat 1 leaves it alone, 0 makes it gray.
 func desaturate(c: view Vec3, sat: view Float) pub ret Vec3 {
   let l: Float = c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722
   ret Vec3.create(x: l + (c.x - l) * sat, y: l + (c.y - l) * sat, z: l + (c.z - l) * sat)
@@ -379,7 +379,7 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
     let blended: Vec3 = hemisphereIrradiance(ambSky: zc, ambGround: hc, normal: normal)
     ret Vec3.vscale(a: blended, s: sky.exposure)
   }
-  if sky.kind is SkyKind.stylised {
+  if sky.kind is SkyKind.stylized {
     # DELIBERATELY NOT an integral of the painted sky. A cel scene wants
     # CHOSEN ambient — the toon path tints shadows toward this value, so
     # it has to be the palette the artist picked, not whatever averaging
@@ -389,7 +389,7 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
       ambGround: sky.horizonColor
       normal: normal
     )
-    # the painted colours are display colours (relative units): as light, in
+    # the painted colors are display colors (relative units): as light, in
     # cd/m2
     ret Vec3.vscale(a: fromRelativeLight(value: blended), s: sky.exposure)
   }
@@ -407,10 +407,10 @@ func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
 }
 
 # What the camera sees looking along `dir`: for the physical models in
-# cd/m2 (LightUnits), for the painted and clear-colour skies their display
-# colours, as the background shows them.
+# cd/m2 (LightUnits), for the painted and clear-color skies their display
+# colors, as the background shows them.
 #
-# For `none` this is the clear colour — which is what the lighting pass
+# For `none` this is the clear color — which is what the lighting pass
 # already returns at far depth, so the background is unchanged too.
 func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.none {
@@ -419,7 +419,7 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
     }
     ret Vec3.vscale(a: sky.clearColor, s: sky.exposure)
   }
-  if sky.kind is SkyKind.stylised {
+  if sky.kind is SkyKind.stylized {
     let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
     let t: Float = dir.z * 0.5 + 0.5
     let c: Vec3 = hemisphereIrradiance(
@@ -441,7 +441,7 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.hosek {
     let toSun: Vec3 = Vec3.create(x: -sky.sunDir.x, y: -sky.sunDir.y, z: -sky.sunDir.z)
     # the fit is not defined below the horizon: the shader fades to the
-    # horizon colour there, and so does this
+    # horizon color there, and so does this
     if dir.z <= 0.0 {
       ret Vec3.vscale(a: sky.horizonColor, s: sky.exposure)
     }
@@ -449,7 +449,7 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
     ret Vec3.vscale(a: c, s: sky.exposure)
   }
   # No implementation yet for the remaining kinds. Returning the clear
-  # colour rather than a loud magenta is deliberate: an unimplemented sky
+  # color rather than a loud magenta is deliberate: an unimplemented sky
   # should look like no sky, not like a bug in the scene that binds it.
   ret sky.clearColor
 }
@@ -458,7 +458,7 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
 # directions spread evenly in height and round the horizon, the sun's own
 # glow left out (the mist adds the sun's light by its phase function, and
 # counting the glow too would count the sun twice), plus the moonlit night
-# sky's ambient. The painted and clear-colour skies' display colours are
+# sky's ambient. The painted and clear-color skies' display colors are
 # taken as light (fromRelativeLight). What the height mist scatters toward
 # the eye from above (RendererMist).
 func skyLightAbove(sky: view Sky) ret Vec3 {
@@ -482,7 +482,7 @@ func skyLightAbove(sky: view Sky) ret Vec3 {
     }
   }
   var mean: Vec3 = Vec3.vscale(a: sum, s: 1.0 / Math.max(a: count.toFloat(), b: 1.0))
-  if sky.kind is SkyKind.none or sky.kind is SkyKind.stylised {
+  if sky.kind is SkyKind.none or sky.kind is SkyKind.stylized {
     mean = fromRelativeLight(value: mean)
   }
   ret Vec3.vadd(a: mean, b: sky.nightAmbient)
@@ -597,7 +597,7 @@ func xyYToLinearRgb(x: view Float, y: view Float, bigY: view Float) pub ret Vec3
 # The sun DISC is deliberately not drawn here. It is a different
 # magnitude of radiance (about 1e5 times the sky), so folding it into
 # the same expression makes the whole function's dynamic range about the
-# disc; and the disc's size and colour are things a stylised sky wants
+# disc; and the disc's size and color are things a stylized sky wants
 # to control independently. It is added by the caller.
 func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) pub ret Vec3 {
   let cosTheta: Float = dir.z
@@ -620,7 +620,7 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) 
   let cx: PreethamCoeffs = preethamX(t: turbidity)
   let cz: PreethamCoeffs = preethamZ(t: turbidity)
 
-  # NORMALISED BY THE ZENITH. The model gives relative radiance, so each
+  # NORMALIZED BY THE ZENITH. The model gives relative radiance, so each
   # channel is divided by its own value looking straight up with the sun
   # where it is. Without this the sky's absolute brightness swings with
   # turbidity for no physical reason a viewer would accept.
@@ -642,7 +642,7 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) 
 
   # Zenith chromaticity and luminance for this sun elevation, from the
   # same paper. These are what turn a relative distribution into an
-  # actual colour that reddens as the sun sets.
+  # actual color that reddens as the sun sets.
   let t: Float = turbidity
   let ts: Float = thetaSun
   let ts2: Float = ts * ts
@@ -672,7 +672,7 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3, turbidity: view Float) 
 # `hour` is 0..24 wall-clock. The path is a simple arc: due east at 06:00,
 # highest at 12:00, due west at 18:00, below the horizon outside 06-18. That is
 # an equinox at the equator, not an ephemeris — enough to make a time slider
-# feel right, and honest about not modelling latitude or season. Real solar
+# feel right, and honest about not modeling latitude or season. Real solar
 # position wants a date and a latitude, which is a bigger interface than a
 # settings dialog should grow first.
 
@@ -690,7 +690,7 @@ const skyPi: Float = 3.14159265358979
 # control fighting the hour slider for the same value.
 #
 # Helsinki, because that is where this is written and because a high latitude is
-# the interesting default: the sun never climbs far, so the low-sun behaviour the
+# the interesting default: the sun never climbs far, so the low-sun behavior the
 # sky models are most stressed by is what you see without touching anything.
 const skyDefaultLatitudeDeg: Float = 60.17
 

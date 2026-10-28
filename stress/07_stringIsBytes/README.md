@@ -33,7 +33,7 @@ when that is what the code means.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | `len` is 6 (code points); `s[1]` is `é` |
 | JavaScript | `length` is 7 (UTF-16 units — the emoji counts twice); `s[1]` is `é` |

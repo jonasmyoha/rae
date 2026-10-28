@@ -10,7 +10,7 @@ the materials, by rules the app gives.
 
 ## Authoring
 
-- Metres, right-handed, Z up, +X right and +Y forward. Apply transforms before
+- Meters, right-handed, Z up, +X right and +Y forward. Apply transforms before
   exporting, and turn **+Y Up off** (`export_yup=False`) when exporting glTF: the
   loader adds no axis rotation.
 - The file's origin is where the app places the level (`placement`); a level
@@ -19,7 +19,7 @@ the materials, by rules the app gives.
   or its `translation` / `rotation` / `scale`); each primitive's vertices are baked
   into the world once, normals by the inverse transpose, so what is drawn and what
   collides agree, nested or non-uniformly scaled.
-- Opaque base colours: every primitive is drawn in its material's
+- Opaque base colors: every primitive is drawn in its material's
   `baseColorFactor` RGB (white without one). Textures are not read.
 - A mesh node named with the suffix `_collision` is a static triangle-mesh
   collider and is never drawn. Use closed, outward-facing triangles and no zero
@@ -46,10 +46,10 @@ reserved by Rae's mover queries.
 
 ## The surface map
 
-`createCodedSurfaceMap` lays a grid over the level (cells a couple of metres
+`createCodedSurfaceMap` lays a grid over the level (cells a couple of meters
 square); `layMesh` puts each drawn mesh's triangles into it as the surface its
 material stands for (`surfaceOfMaterialName`); every cell keeps the highest
-triangle over its centre (a road over the terrain under it) and that height.
+triangle over its center (a road over the terrain under it) and that height.
 Surfaces are the app's own codes; `surfaceCodeAt` and `surfaceHeightAt` read
 the surface and the height at a point (a footprint lies on the drawn path,
 not on the grass collider under it). `surfaceGrassField` is one value per cell for
@@ -70,7 +70,7 @@ grass field with a sand path up its middle to a wall, two low side walls, a
 stone ramp up to a platform, a stack of crates, every solid piece with its
 `_collision` twin (the path is paint, drawn only), `marker_spawn` and
 `marker_goal`. Example `144_gltf_level` loads it: the meshes drawn in their
-base colours as World3d instances, the colliders, a Box3D mover spawned at
+base colors as World3d instances, the colliders, a Box3D mover spawned at
 `marker_spawn`, and footprints shaded by the surface map. Its
 `RAE_LEVEL_SELFTEST=1` walks the character into the wall and up the ramp
 headless, and the example gate checks it.

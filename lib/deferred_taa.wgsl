@@ -1,10 +1,10 @@
 // The deferred TAA resolve (render-perf-10). Each pixel blends this frame's
-// lit colour with the history reprojected along its motion vector:
-// - in YCoCg on Reinhard-compressed colour, so a few very bright pixels do
+// lit color with the history reprojected along its motion vector:
+// - in YCoCg on Reinhard-compressed color, so a few very bright pixels do
 //   not dominate the blend or the clip box;
-// - the history is clipped toward the 3x3 neighbourhood's mean, inside a
+// - the history is clipped toward the 3x3 neighborhood's mean, inside a
 //   box of one standard deviation (variance clipping), so a value the
-//   neighbourhood no longer contains (a trail behind a moving object) is
+//   neighborhood no longer contains (a trail behind a moving object) is
 //   pulled back instead of kept;
 // - the history is fetched with a 5-tap Catmull-Rom filter, sharp under
 //   motion where a nearest fetch jittered and a bilinear one blurred;
@@ -93,7 +93,7 @@ fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
   if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) {
     return vec4<f32>(cur, 1.0);
   }
-  // The neighbourhood's mean and spread, in compressed YCoCg
+  // The neighborhood's mean and spread, in compressed YCoCg
   var m1 = vec3<f32>(0.0);
   var m2 = vec3<f32>(0.0);
   for (var dy = -1; dy <= 1; dy = dy + 1) {

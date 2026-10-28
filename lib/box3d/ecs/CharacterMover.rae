@@ -93,7 +93,7 @@ type CharacterMover {
   planePoints: List(b3Vec3)
   planeShapeIds: List(b3ShapeId)
   totalIterations: Int
-  # How far over the ground the pogo spring holds the lower sphere's centre
+  # How far over the ground the pogo spring holds the lower sphere's center
   pogoRestLength: Float
   pogoVelocity: Float
   onGround: Bool
@@ -101,9 +101,9 @@ type CharacterMover {
   groundNormal: b3Vec3
 }
 
-# A mover's size: its capsule's radius, how far each sphere's centre is from
+# A mover's size: its capsule's radius, how far each sphere's center is from
 # its middle along the up axis, and how far over the ground the pogo spring
-# holds the lower sphere's centre (`restLength`; the sample's is three radii,
+# holds the lower sphere's center (`restLength`; the sample's is three radii,
 # so the capsule's lowest point floats two radii up). A bigger or smaller
 # character carries its own.
 type MoverSize {
@@ -112,7 +112,7 @@ type MoverSize {
   restLength: Float
 }
 
-# The sample's: radius 0.3, the spheres' centres 0.5 m either side of the
+# The sample's: radius 0.3, the spheres' centers 0.5 m either side of the
 # middle, held 0.9 m up (a character about 2 m tall).
 func sampleMoverSize() ret MoverSize {
   # The rest length is COMPUTED as three radii, as the sample and the Rae port
@@ -124,7 +124,7 @@ func sampleMoverSize() ret MoverSize {
 }
 
 # How high a standing mover's capsule middle rests over the ground: the pogo
-# spring's rest length to the lower sphere's centre, then half the capsule.
+# spring's rest length to the lower sphere's center, then half the capsule.
 # 1.4 m for the sample's.
 func moverRestHeight(size: view MoverSize) ret Float {
   ret size.restLength + size.halfHeight

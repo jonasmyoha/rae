@@ -544,7 +544,7 @@ func main() ret Int {
       var clusterBatch: InstanceBatch = createInstanceBatch(mesh: meshHandleNone(), capacity: 1)
       addSpriteInstance(
         batch: clusterBatch
-        position: cluster.centre
+        position: cluster.center
         height: 1.0
         yaw: 0.0
         layer: species
@@ -556,8 +556,8 @@ func main() ret Int {
         var clusterPixels: Int = 0
         loop let bearing: view Float in bearings {
           let eye: Vec3 = Vec3.create(
-            x: cluster.centre.x + distance * Math.cos(x: bearing)
-            y: cluster.centre.y + distance * Math.sin(x: bearing)
+            x: cluster.center.x + distance * Math.cos(x: bearing)
+            y: cluster.center.y + distance * Math.sin(x: bearing)
             z: 2.0
           )
           treePixels = treePixels + coveredPixels(
@@ -566,7 +566,7 @@ func main() ret Int {
             binding: trees.binding
             batch: treeBatch
             eye: eye
-            target: cluster.centre
+            target: cluster.center
           )
           clusterPixels = clusterPixels + coveredPixels(
             resources: resources
@@ -574,7 +574,7 @@ func main() ret Int {
             binding: canopy.binding
             batch: clusterBatch
             eye: eye
-            target: cluster.centre
+            target: cluster.center
           )
         }
         var share: Float = 0.0
@@ -691,7 +691,7 @@ func benchForest(eye: view Vec3, clusters: view List(CanopyCluster)) ret Instanc
       position: Vec3.create(
         x: (cell % 30).toFloat() * 40.0 + 20.0
         y: (cell / 30).toFloat() * 40.0 + 20.0
-        z: cluster.centre.z
+        z: cluster.center.z
       )
       height: 1.0
       yaw: 0.0

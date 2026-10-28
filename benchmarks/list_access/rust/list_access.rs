@@ -23,7 +23,7 @@ fn run_suite(values: &[i64], particles: &[Particle], passes: i64) {
     let length = values.len() as i64;
     let operations = length * passes;
     // The modulo divisor goes through black_box so `% divisor` is a real
-    // division, as it is in Rae, instead of a mask the optimiser derives from
+    // division, as it is in Rae, instead of a mask the optimizer derives from
     // the constant 65 536 (it did; it made these cases measure constant folding).
     let divisor = std::hint::black_box(length);
     bench!("int_sequential_safe_index", checksum, {

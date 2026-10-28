@@ -126,7 +126,7 @@ func worldIslandMask(x: view Float, y: view Float, cfg: view BiomeConfig) pub re
 # value keeps land past the radius.
 const islandSink: Float = 1.6
 
-# PATHS. Dirt roads radiate from the island centre so they compose routes
+# PATHS. Dirt roads radiate from the island center so they compose routes
 # instead of disconnected noise scars. MUST match raeBiomePath in WGSL.
 const pathSpokes: Int = 3
 
@@ -256,8 +256,8 @@ func classifyWeights(
   # Rock: steep slope or high elevation -- but SLOPE ALONE MUST NOT MAKE A BEACH
   # INTO ROCK. The shore is the steepest ground on the island by construction, so
   # a purely slope-driven term claimed the whole coastal strip: rendering the
-  # materials as marker colours showed the "beach" was mostly ROCK with a thin
-  # sand band at the waterline, which is why it read grey rather than warm and why
+  # materials as marker colors showed the "beach" was mostly ROCK with a thin
+  # sand band at the waterline, which is why it read gray rather than warm and why
   # sand measured 4.4% of the ground against the reference's 40%.
   #
   # MUST MATCH worldBiome.wgsl.
@@ -344,8 +344,8 @@ func sampleWorld(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Wo
 }
 
 # ---------------------------------------------------------------------------
-# Splat palette (#533): the ground colour per material, and the blended colour at
-# a point from the classifier weights. This is the terrain splat colour AND the
+# Splat palette (#533): the ground color per material, and the blended color at
+# a point from the classifier weights. This is the terrain splat color AND the
 # grass gradient bottom, so both track the same biome. WGSL will mirror these
 # constants when the terrain fragment splats per-pixel.
 func grassMatColor() ret Vec3 {
@@ -361,14 +361,14 @@ func mudMatColor() ret Vec3 {
 }
 
 func rockMatColor() ret Vec3 {
-  ret Vec3.create(x: 0.34, y: 0.33, z: 0.32)  # grey stone
+  ret Vec3.create(x: 0.34, y: 0.33, z: 0.32)  # gray stone
 }
 
 func waterMatColor() ret Vec3 {
   ret Vec3.create(x: 0.06, y: 0.17, z: 0.26)  # deep water
 }
 
-# Blend the material palette by the sample's weights into one ground colour.
+# Blend the material palette by the sample's weights into one ground color.
 func splatColor(sample: view WorldSample) pub ret Vec3 {
   let grass: Vec3 = grassMatColor()
   let sand: Vec3 = sandMatColor()
@@ -382,7 +382,7 @@ func splatColor(sample: view WorldSample) pub ret Vec3 {
   )
 }
 
-# The blended ground colour at a world point — for terrain splat + the grass
+# The blended ground color at a world point — for terrain splat + the grass
 # gradient bottom so grass roots match the local ground.
 func biomeGroundColor(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
   ret splatColor(sample: sampleWorld(x: x, y: y, cfg: cfg))
@@ -405,7 +405,7 @@ const worldTerrainAmplitude: Float = 3.2
 # Below the water level the field keeps going DOWN as the seabed (#857): the
 # water surface is its own mesh now (lib/water, drawn at worldWaterZ), so the
 # ground under it slopes from the shore to at most seabedMaxDepth below the
-# plane. That depth is what the surface shader's shallow -> deep colour and its
+# plane. That depth is what the surface shader's shallow -> deep color and its
 # shoreline foam read. (Before lib/water the sea was this terrain clamped flat
 # to the water plane and painted blue; the two then fought for the same plane.)
 # The bumps in the field decide where water IS; worldWaterZ decides how high it
@@ -425,7 +425,7 @@ func worldTerrainHeight(
 
 # How far below the water level the seabed may drop, in elevation units:
 # 1.25 * worldTerrainAmplitude (3.2) = 4 m, the lake body's depthMax, so the
-# open sea reaches the full deep colour without a cliff at the island rim.
+# open sea reaches the full deep color without a cliff at the island rim.
 # MUST match RAE_BIOME_SEABED_DEPTH in world_biome.wgsl.
 const seabedMaxDepth: Float = 1.25
 
@@ -475,7 +475,7 @@ const worldLandSearchStep: Float = 4.0
 
 const worldLandSearchSpokes: Int = 12
 
-# Enough rings to cross the island from its centre, so a search anchored at the
+# Enough rings to cross the island from its center, so a search anchored at the
 # origin cannot miss land that exists.
 const worldLandSearchRings: Int = 48
 
@@ -516,16 +516,16 @@ func worldSpiralLand(cx: view Float, cy: view Float, cfg: view BiomeConfig) ret 
 # query far out at sea — a position restored from a session before walking into
 # the water was blocked, say — can fall outside it. Rather than hand back the
 # query and let the caller stand in the sea, it then re-searches from the island
-# CENTRE, where land is guaranteed to exist by construction.
+# CENTER, where land is guaranteed to exist by construction.
 func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
   let near: LandSpot = worldSpiralLand(cx: x, cy: y, cfg: cfg)
   if near.found {
     ret Vec3.create(x: near.x, y: near.y, z: 0.0)
   }
-  let centre: LandSpot = worldSpiralLand(cx: 0.0, cy: 0.0, cfg: cfg)
-  if centre.found {
-    log("[world] no land within reach of ({x},{y}) — placed at the island centre instead")
-    ret Vec3.create(x: centre.x, y: centre.y, z: 0.0)
+  let center: LandSpot = worldSpiralLand(cx: 0.0, cy: 0.0, cfg: cfg)
+  if center.found {
+    log("[world] no land within reach of ({x},{y}) — placed at the island center instead")
+    ret Vec3.create(x: center.x, y: center.y, z: 0.0)
   }
   log("[world] no land found anywhere; the biome config may have no island")
   ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -573,7 +573,7 @@ func worldPropAllowed(
   minGrass: view Float
   cfg: view BiomeConfig
 ) ret Bool {
-  # The empty corridor is as important to a readable road as its colour.
+  # The empty corridor is as important to a readable road as its color.
   if worldPath(x: x, y: y, cfg: cfg) > pathPropClear {
     ret false
   }

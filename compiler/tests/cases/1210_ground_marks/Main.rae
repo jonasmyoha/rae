@@ -1,6 +1,6 @@
 # app3d/GroundMarks, app3d/GroundTouch, app3d/Footprints, app3d/WheelTracks:
 # mark trails (the ring, the fade, where a piece lies), strides and prints,
-# what a step or a tyre kicks up for the app's answer, and one walk through
+# what a step or a tire kicks up for the app's answer, and one walk through
 # the footprint system's find / answer / lay steps on a component table.
 import Math
 import Vec3
@@ -194,11 +194,11 @@ func main() {
     ) is 4
   )
   check(
-    label: "a tyre: nothing creeping, one a piece rolling or on dust, two fast on grass"
-    ok: tyreParticleCount(speed: 0.5, blades: true) is 0 and tyreParticleCount(
+    label: "a tire: nothing creeping, one a piece rolling or on dust, two fast on grass"
+    ok: tireParticleCount(speed: 0.5, blades: true) is 0 and tireParticleCount(
       speed: 5.0
       blades: true
-    ) is 1 and tyreParticleCount(speed: 15.0, blades: true) is 2 and tyreParticleCount(
+    ) is 1 and tireParticleCount(speed: 15.0, blades: true) is 2 and tireParticleCount(
       speed: 15.0
       blades: false
     ) is 1
@@ -226,7 +226,7 @@ func main() {
     shade: 0.5
   )
   check(
-    label: "green blades on grass, a puff in the answer's dust colour elsewhere, kicked back, a puff gone within 0.75 s"
+    label: "green blades on grass, a puff in the answer's dust color elsewhere, kicked back, a puff gone within 0.75 s"
     ok: bit.shape is GroundParticleShape.blade and bit.color.y > bit.color.x and dust.shape is GroundParticleShape.puff and dust.color.x > dust.color.y and bit.velocity.y < 0.0 and dust.velocity.y < 0.0 and dust.lifetime <= 0.75
   )
   # ----- the footprint system: find, answer, lay -----------------------------
@@ -261,7 +261,7 @@ func main() {
   componentSet(this: controllers, entityId: walker, data: createThirdPersonController())
   var touched: Int = 0
   var onGrass: Int = 0
-  # 3 m up +y at a walk, 2 cm a frame; the first metre on grass, the rest on the track
+  # 3 m up +y at a walk, 2 cm a frame; the first meter on grass, the rest on the track
   loop var frame: Int = 0, frame < 150, ++frame {
     let controller: mod ThirdPersonController = componentMod(this: controllers, entityId: walker)
     controller.position.y = (frame + 1).toFloat() * 0.02
@@ -305,7 +305,7 @@ func main() {
     )
   }
   check(
-    label: "a 3 m walk lays a print a stride: {prints} prints for {touched} touches, left and right in turn, grass then track colours"
+    label: "a 3 m walk lays a print a stride: {prints} prints for {touched} touches, left and right in turn, grass then track colors"
     ok: prints is touched and prints >= 4 and prints <= 6 and onGrass >= 1 and trailOk and colorsOk
   )
   check(

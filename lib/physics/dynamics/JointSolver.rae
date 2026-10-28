@@ -442,7 +442,7 @@ func jointReaction(
   ret JointReaction { force: linearImpulse * invTimeStep, torque: angularImpulse * invTimeStep }
 }
 
-# Prepare joint sim `localIndex` of colour `colorIndex` in place: its
+# Prepare joint sim `localIndex` of color `colorIndex` in place: its
 # bodies are read first, then the sim and its kind's record are prepared
 # where they live (a JointSim copied out and set back cost a copy each way).
 func prepareColorJoint(
@@ -522,7 +522,7 @@ func solveJointsOverflow(world: mod PhysicsWorld, context: view StepContext, use
 }
 
 # b3PrepareJointsTask: joints `block.startIndex` to `+ block.count` of the
-# flat range over the active colours, each found by the span table.
+# flat range over the active colors, each found by the span table.
 func prepareJointsBlock(
   world: mod PhysicsWorld
   context: view StepContext
@@ -530,7 +530,7 @@ func prepareJointsBlock(
 ) {
   var index: Int = block.startIndex
   let endIndex: Int = block.startIndex + block.count
-  # The colour of the start index
+  # The color of the start index
   var spanIndex: Int = 0
   loop context.jointPrepareSpans.copyAtDefault(index: spanIndex + 1).start <= index {
     spanIndex = spanIndex + 1
@@ -555,7 +555,7 @@ func prepareJointsBlock(
   }
 }
 
-# b3WarmStartJointsTask: a block of a colour's joints.
+# b3WarmStartJointsTask: a block of a color's joints.
 func warmStartJointsBlock(world: mod PhysicsWorld, block: view SolverBlock) {
   if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: block.colorIndex) {
@@ -568,7 +568,7 @@ func warmStartJointsBlock(world: mod PhysicsWorld, block: view SolverBlock) {
   }
 }
 
-# b3SolveJointsTask: a block of a colour's joints; with the bias, an awake
+# b3SolveJointsTask: a block of a color's joints; with the bias, an awake
 # joint whose force or torque reaches its threshold is flagged for a joint
 # event (TaskContext slot `slot`'s bits). The threshold check runs after the block is
 # solved, so the reaction can read the world: a joint's impulses do not

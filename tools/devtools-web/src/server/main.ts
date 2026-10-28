@@ -604,7 +604,7 @@ const server = Bun.serve<SocketData>({
 
     if (url.pathname === "/api/examples/stop" && req.method === "POST") {
       // With concurrent runs, Stop is per-run. Omitting runId keeps the old
-      // "stop everything" behaviour, which the Stop-all control relies on.
+      // "stop everything" behavior, which the Stop-all control relies on.
       const payload = await safeJson(req);
       const runId = typeof payload.runId === "string" ? payload.runId : undefined;
       await exampleRunner.stop(runId);
@@ -768,7 +768,7 @@ function createStatusMessage(message: string): ServerEvent {
 // Legacy entries were written as "YYYY-MM-DD HH:MM:SS +ZZZZ" by
 // update_metrics.sh. Safari (and the WHATWG Date spec) reject that
 // format — only ISO 8601 with `T` separator and `+HH:MM` offset is
-// guaranteed to parse cross-browser. Normalise on read so the client
+// guaranteed to parse cross-browser. Normalize on read so the client
 // never has to deal with the legacy shape.
 function normalizeCompilerTimestamp(raw: string): string {
   const trimmed = raw.trim();

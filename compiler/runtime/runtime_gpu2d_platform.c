@@ -20,7 +20,7 @@
  * Needs both SDL3 (window) and wgpu-native (surface); main.c links
  * both when lib/gpu2d.rae is imported. Window globals (g_sdl_win,
  * g_sdl_w/h) are shared with the SDL3 block so sdl3 input works.
- * Tier 0 slice: window + clear-colour present.
+ * Tier 0 slice: window + clear-color present.
  * ============================================================ */
 #ifndef __EMSCRIPTEN__
 static SDL_MetalView g_g2d_metal_view = NULL;
@@ -193,7 +193,7 @@ int rae_g2d_window_visible(void) {
  * earlier version of this file also owned window-geometry PERSISTENCE — it
  * chose the file path, decided when to write, and restored on startup before
  * any Rae code ran. That was the wrong place for it twice over: it is app
- * behaviour written in C, and it was invisible, so every app got it whether or
+ * behavior written in C, and it was invisible, so every app got it whether or
  * not its author asked for anything. Persistence now lives in
  * lib/ui/window_geometry.rae and an app that does not call it does not have it.
  *
@@ -508,9 +508,9 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 }
                 break;
             /* A finger leaves the list however its touch ends: lifted, or
-             * cancelled by the OS (iOS cancels every touch in progress when
+             * canceled by the OS (iOS cancels every touch in progress when
              * the app goes to the background, or a call or the system's
-             * gesture takes it). A cancelled finger that stayed was held by
+             * gesture takes it). A canceled finger that stayed was held by
              * a stick or a camera for good, and took one of the list's
              * places. */
             case SDL_EVENT_FINGER_UP:
@@ -650,7 +650,7 @@ void rae_ext_Gpu2d_waitEvents(float timeoutSec){
  * reacts to the completion instead of noticing it on its next timeout tick.
  * SDL_PushEvent is documented thread-safe; SDL_EVENT_USER needs no
  * registration and the pump's default arm drops it unread. Before SDL is
- * initialised the push simply fails, which is the right no-op for a headless
+ * initialized the push simply fails, which is the right no-op for a headless
  * run. Builds without an SDL3 window get the no-op in rae_runtime.c. */
 void rae_ext_EventLoop_wake(void){
     SDL_Event ev;

@@ -148,7 +148,7 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   let texel = gid.xy;
   let layer = gid.z;
   let blockWidth = blockSize();
-  // The block's colour, normal and depth, each weighted by alpha: a
+  // The block's color, normal and depth, each weighted by alpha: a
   // see-through texel holds none of them
   var albedo = vec3<f32>(0.0);
   var normal = vec3<f32>(0.0);
@@ -158,13 +158,13 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var y = 0u; y < blockWidth; y = y + 1u) {
     for (var x = 0u; x < blockWidth; x = x + 1u) {
       let source = vec2<i32>(texel * blockWidth + vec2<u32>(x, y));
-      let colour = textureLoad(sourceAlbedo, source, i32(layer), 0);
+      let color = textureLoad(sourceAlbedo, source, i32(layer), 0);
       let normalDepth = textureLoad(sourceNormalDepth, source, i32(layer), 0);
-      albedo = albedo + colour.rgb * colour.a;
-      normal = normal + impostorUnpackNormal(normalDepth.xy) * colour.a;
-      behind = behind + normalDepth.z * colour.a;
-      depth = depth + normalDepth.w * colour.a;
-      sum = sum + colour.a;
+      albedo = albedo + color.rgb * color.a;
+      normal = normal + impostorUnpackNormal(normalDepth.xy) * color.a;
+      behind = behind + normalDepth.z * color.a;
+      depth = depth + normalDepth.w * color.a;
+      sum = sum + color.a;
     }
   }
   let destination = vec2<i32>(texel);

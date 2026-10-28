@@ -5,7 +5,7 @@
 > native-per-type, B2 generic walk, B3 bytecode-emitted unroll).
 > Goal: **full observable parity** between Live and compiled
 > backends. Live and compiled Rae should never silently disagree
-> on ownership behaviour.
+> on ownership behavior.
 
 ## How the Live VM works today (the relevant parts)
 
@@ -145,7 +145,7 @@ return site, the compiler emits an `OP_GET_LOCAL <slot>` +
 * Hot-reload: **clean**. Natives outlive chunk patches.
 * Symmetry with C backend: **highest**. Same function naming,
   same FULL/ALIAS split, same trigger conditions. Trivial to
-  diff cleanup behaviour between backends.
+  diff cleanup behavior between backends.
 * Implementation effort: moderate. The per-type-emitter pattern
   is well-trodden. Once one type works, the rest follow.
 * Testability: per-type natives can be invoked directly in unit
@@ -184,7 +184,7 @@ with the type-id as an argument.
   code).
 * Implementation effort: highest. Building out type metadata
   is a separate, substantial project.
-* Testability: hardest. The walker's behaviour is data-driven;
+* Testability: hardest. The walker's behavior is data-driven;
   unit tests need to build mock metadata.
 
 ### B3 — bytecode-emitted unrolled cleanup
@@ -220,7 +220,7 @@ recursion).
 * Hot-reload: clean (bytecode patches normally).
 * Symmetry with C backend: **lowest**. The C backend uses
   per-type helpers; B3 deliberately unrolls. Diffing cleanup
-  behaviour between the two becomes harder.
+  behavior between the two becomes harder.
 * Implementation effort: moderate-to-high. The unrolling logic
   has to handle every nesting case correctly. Recursion has
   to terminate via per-type natives anyway — which is B1.
@@ -262,9 +262,9 @@ ops" is true for the *call sites* but not for the *cleanup
 logic*. The cleanup logic is intrinsically per-type. B3 either
 inlines it (verbose bytecode) or calls back into per-type natives
 (B1 with extra steps). The bytecode-uniformity payoff doesn't
-materialise.
+materialize.
 
-A real point in B3's favour: **no native registry growth.** For a
+A real point in B3's favor: **no native registry growth.** For a
 large codebase with hundreds of cascade-droppable types, B1's
 registration cost is non-trivial. For Rae's actual scale today
 (mobile UI = ~60 types, game proto1's projected size
@@ -309,7 +309,7 @@ visible.
    value system).
 5. **Test 416-style stress probe.** Add a Live-mode case that
    loops over `List(String)` inside an `Outer` struct and asserts
-   stable RSS, matching the C backend's behaviour.
+   stable RSS, matching the C backend's behavior.
 
 Steps 3 and 4 are the bulk of the work. Step 1 is a refactor.
 Step 2 mirrors known code. Step 5 is testing.

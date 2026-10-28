@@ -11,7 +11,7 @@ open treeGen/TracedLimb
 open treeGen/LimbJoin
 open treeGen/BranchDetail
 
-# One limb: the points of its centre line from base to tip, and its radius
+# One limb: the points of its center line from base to tip, and its radius
 # at each. `parent` is the limb it grows from (-1 for the trunk); `order` is
 # 0 for the trunk, 1 for the two leaders, 2 for a side branch.
 type Limb {
@@ -78,7 +78,7 @@ func growTrunk(params: view TreeParams, random: mod TreeRandom) ret Limb {
   ret Limb { points: own points, radii: own radii, parent: -1, order: 0 }
 }
 
-# A limb grown from `start` along `direction` for `length` metres: each
+# A limb grown from `start` along `direction` for `length` meters: each
 # step turns a little toward upright (`rise`) and wanders a little
 # (`wander`); the radius goes from `baseRadius` to `tipRadius`
 func growLimb(
@@ -373,8 +373,8 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     }
     if traced.side is 0 and clump.parent >= 0 {
       let parent: Limb = limbs.copyAtDefault(index: clump.parent)
-      let at: Int = indexAtHeight(limb: parent, z: traced.centre.z)
-      clump.centre.y = traced.centre.y + parent.points.copyAtDefault(index: at).y
+      let at: Int = indexAtHeight(limb: parent, z: traced.center.z)
+      clump.center.y = traced.center.y + parent.points.copyAtDefault(index: at).y
     }
     clumps.add(value: clump)
   }
@@ -410,18 +410,18 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     var parentIndex: Int = clump.parent
     var nearest: Int = nearestPointIndex(
       limb: limbs.copyAtDefault(index: parentIndex)
-      target: clump.centre
+      target: clump.center
     )
     if nearest < 0 {
       parentIndex = 0
       nearest = Math.max(
         a: 0
-        b: nearestPointIndex(limb: limbs.copyAtDefault(index: 0), target: clump.centre)
+        b: nearestPointIndex(limb: limbs.copyAtDefault(index: 0), target: clump.center)
       )
     }
     var parent: Limb = limbs.copyAtDefault(index: parentIndex)
     let distance: Float = Vec3.vlen(
-      a: Vec3.vsub(a: parent.points.copyAtDefault(index: nearest), b: clump.centre)
+      a: Vec3.vsub(a: parent.points.copyAtDefault(index: nearest), b: clump.center)
     )
     let parentRadius: Float = parent.radii.copyAtDefault(index: nearest)
     let last: Int = parent.points.length - 1
@@ -430,13 +430,13 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     # turn
     let ahead: Float = Vec3.vdot(
       a: endDirection(limb: parent)
-      b: Vec3.vnorm(a: Vec3.vsub(a: clump.centre, b: parent.points.copyAtDefault(index: last)))
+      b: Vec3.vnorm(a: Vec3.vsub(a: clump.center, b: parent.points.copyAtDefault(index: last)))
     )
     if nearest is last and not extended.copyAtDefault(index: parentIndex) and ahead > 0.9 {
       let twig: Limb = twigTo(
         parent: parent
         parentIndex: parentIndex
-        target: clump.centre
+        target: clump.center
         nearest: nearest
         baseRadius: parentRadius
       )
@@ -453,7 +453,7 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
       limbs.add(value: twigTo(
         parent: parent
         parentIndex: parentIndex
-        target: clump.centre
+        target: clump.center
         nearest: side
         baseRadius: Math.min(a: parent.radii.copyAtDefault(index: side) * 0.5, b: 0.04)
       ))

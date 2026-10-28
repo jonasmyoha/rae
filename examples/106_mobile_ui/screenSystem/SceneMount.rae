@@ -3,7 +3,7 @@ open ui/Ecs
 # wraps `mountSceneInstance` so a `-1` return (parse failure, missing
 # root, etc.) turns into a bright red rectangle on screen plus a log
 # entry — instead of producing a half-built subtree that renders as
-# the background clear color (the "grey screen of death").
+# the background clear color (the "gray screen of death").
 import ui/Components
 import ui/Registry
 open ui/SceneLoader
@@ -96,8 +96,8 @@ func mountOrError(
 # Host-less sub-scene mount with the visible-failure sentinel (#990): the
 # scene's ROOT is the returned entity (lib `mountSubScene` keeps the root's
 # authored placement), sized w x h through a `Rect` override on the root
-# node — so a list materialiser creates no entity of its own. Only when the
-# scene is not ok does this materialise a red sentinel block at that size,
+# node — so a list materializer creates no entity of its own. Only when the
+# scene is not ok does this materialize a red sentinel block at that size,
 # the same failure signal `mountOrError` paints on a page.
 func mountSubSceneOrError(
   world: mod UiWorld
@@ -215,9 +215,9 @@ func buildSimpleSceneInstance(
   ret mount
 }
 
-# mountPage wrapper with the same visible-failure-sentinel behaviour
+# mountPage wrapper with the same visible-failure-sentinel behavior
 # as `mountOrError`: on a parse / root-missing failure we still
-# materialise a host entity at the requested size, paint it red, and
+# materialize a host entity at the requested size, paint it red, and
 # tag it with PageRoot so the id is discoverable. Returns the page
 # root entity in both the success and the failure case.
 func mountPageOrError(

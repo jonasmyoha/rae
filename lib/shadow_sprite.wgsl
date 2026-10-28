@@ -15,7 +15,7 @@
 // is an octahedral impostor atlas and the layer's frame (binding 5) places
 // the prop's bounding sphere. The sun's direction, turned into the prop's
 // frame by its yaw, picks the baked view nearest it, and the quad is that
-// view's picture plane through the sphere's centre: the sun sees the prop as
+// view's picture plane through the sphere's center: the sun sees the prop as
 // the view saw it.
 struct SU { lightViewProj: mat4x4<f32> };
 // a.x = picture aspect (width over height), a.y = alpha cutoff, a.z = the
@@ -29,7 +29,7 @@ struct SpriteShadowU { a: vec4<f32> };
 @group(0) @binding(2) var<uniform> P: SpriteShadowU;
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
-// Impostor mode: per subject three vec4, the bounding sphere's centre and
+// Impostor mode: per subject three vec4, the bounding sphere's center and
 // radius over the prop's height, its page (texture layer, origin u, v, size)
 // and its framing (impostorExtents) (an unread buffer otherwise)
 @group(0) @binding(5) var<storage, read> impostorFrames: array<vec4<f32>>;
@@ -68,7 +68,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let pageOf = impostorFrames[subject * 3u + 1u];
     let box = impostorFrames[subject * 3u + 2u];
     layer = i32(pageOf.x);
-    let centre = foot.xyz + impostorTurn(frame.xyz, yaw) * height;
+    let center = foot.xyz + impostorTurn(frame.xyz, yaw) * height;
     let radius = frame.w * height;
     // Depth grows away from the sun (row 2 is its world gradient)
     var towardSun = -vec3<f32>(S.lightViewProj[0].z, S.lightViewProj[1].z, S.lightViewProj[2].z);
@@ -81,7 +81,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let local = c * 2.0 - vec2<f32>(1.0);
     let extents = impostorExtents(viewDirection, box);
     let offset = impostorRight(viewDirection) * (local.x * extents.x) + impostorUp(viewDirection) * (local.y * extents.y);
-    world = centre + impostorTurn(offset, yaw) * radius;
+    world = center + impostorTurn(offset, yaw) * radius;
     uv = impostorPageUv(pageOf.yzw, impostorAtlasUv(cell, views, local));
   }
   var o: VsOut;

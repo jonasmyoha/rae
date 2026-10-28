@@ -13,8 +13,8 @@
 # after the fact (many rigs produce the same eye point). Keeping them
 # separate is what lets `applyCameraRig` stay a pure function of the rig.
 #
-# LIMITS ARE FIELDS, NOT CONSTANTS. An example that frames a 2-metre
-# character needs a different distance range from one framing a 36-metre
+# LIMITS ARE FIELDS, NOT CONSTANTS. An example that frames a 2-meter
+# character needs a different distance range from one framing a 36-meter
 # scene. Making them fields is what stops the next example from forking
 # the module to change one number.
 import Math
@@ -129,14 +129,14 @@ type CameraRig {
 }
 
 # Camera drag pointer (#526). By default the rig drags with the mouse pointer.
-# For touch, setCameraTouch tells it the joystick's exclusion zone (centre +
+# For touch, setCameraTouch tells it the joystick's exclusion zone (center +
 # radius, design units) and which finger it owns (excludeId). The grab is decided
 # by REGION — a finger that goes down inside the joystick zone belongs to the
 # joystick, one outside belongs to the camera — and then HELD by id, so a drag
 # never transfers mid-gesture even if it wanders across the boundary. Region-at-
 # grab is what makes the two complementary; id-hold is what makes ownership
 # sticky. rig.camTouchOn stays false until set, so other rigs (110/113) keep the
-# plain-mouse behaviour.
+# plain-mouse behavior.
 func setCameraTouch(
   rig: mod CameraRig
   excludeId: copy Int
@@ -397,7 +397,7 @@ func modeName(rig: view CameraRig) pub ret String {
 # its own pitch because their sign conventions differ (orbit pitch raises
 # the eye, free pitch aims it), and the orbit target is recovered by
 # walking `distance` along the current view direction — otherwise
-# switching back to orbit re-centres on wherever the target happened to
+# switching back to orbit re-centers on wherever the target happened to
 # be left, which reads as the camera teleporting.
 func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
   if rig.mode is CameraRigMode.orbit {
@@ -501,7 +501,7 @@ func updateCameraRig(
   if allowInput and rig.camPointerDown {
     # Only orbit once a drag is ESTABLISHED. On the press frame there is
     # no previous position to difference against, and using the stale one
-    # snaps the view by the distance the pointer travelled while up.
+    # snaps the view by the distance the pointer traveled while up.
     if rig.dragging {
       let turn: DragTurn = dragTurn(rig: rig, dx: px - rig.lastX, dy: py - rig.lastY)
       mouseYaw = turn.yaw

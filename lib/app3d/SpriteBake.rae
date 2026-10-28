@@ -9,7 +9,7 @@
 # picture. The view looks along +y (from -y) with x to the right and z up,
 # orthographic. The picture's bottom row is the prop's foot (z = 0) and its
 # top row the prop's highest point; x = 0 is its middle column, and the
-# picture is `aspect` times as wide as it is tall. A part's colour is lit by
+# picture is `aspect` times as wide as it is tall. A part's color is lit by
 # a fixed light from the upper left and the front, so the crown keeps its
 # volume once the deferred pass lights the sprite (which faces its normal up).
 #
@@ -39,7 +39,7 @@ func spriteBakeLight() ret Vec3 {
   ret Vec3.vnorm(a: Vec3.create(x: -0.45, y: -0.55, z: 0.7))
 }
 
-# Pack a colour (0..1 each) and an alpha (0..255) into one sprite pixel
+# Pack a color (0..1 each) and an alpha (0..255) into one sprite pixel
 func spritePixel(color: view Vec3, alpha: view Int) ret Int {
   let red: Int = Math.min(a: Math.max(a: (color.x * 255.0 + 0.5).toInt(), b: 0), b: 255)
   let green: Int = Math.min(a: Math.max(a: (color.y * 255.0 + 0.5).toInt(), b: 0), b: 255)
@@ -77,7 +77,7 @@ func partsTop(parts: view List(MeshData)) ret Float {
   ret top
 }
 
-# The picture as it is being drawn: colours and the depth of what each pixel
+# The picture as it is being drawn: colors and the depth of what each pixel
 # shows (smaller y is nearer the eye)
 type SpriteCanvas {
   colors: List(Int)
@@ -86,7 +86,7 @@ type SpriteCanvas {
   height: Int
   # Picture pixels per unit, and where x = 0 and z = 0 fall
   pixelsPerUnit: Float
-  centreColumn: Float
+  centerColumn: Float
   footRow: Float
 }
 
@@ -99,11 +99,11 @@ func bakeTriangle(
   color: view Int
 ) {
   # Picture coordinates: column right, row down
-  let ax: Float = canvas.centreColumn + first.x * canvas.pixelsPerUnit
+  let ax: Float = canvas.centerColumn + first.x * canvas.pixelsPerUnit
   let ay: Float = canvas.footRow - first.z * canvas.pixelsPerUnit
-  let bx: Float = canvas.centreColumn + second.x * canvas.pixelsPerUnit
+  let bx: Float = canvas.centerColumn + second.x * canvas.pixelsPerUnit
   let by: Float = canvas.footRow - second.z * canvas.pixelsPerUnit
-  let cx: Float = canvas.centreColumn + third.x * canvas.pixelsPerUnit
+  let cx: Float = canvas.centerColumn + third.x * canvas.pixelsPerUnit
   let cy: Float = canvas.footRow - third.z * canvas.pixelsPerUnit
   let area: Float = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
   if Math.abs(value: area) < 0.000001 {
@@ -145,7 +145,7 @@ func bakeTriangle(
   }
 }
 
-# Bake the picture of `parts`, each in its colour (`colors`, same order),
+# Bake the picture of `parts`, each in its color (`colors`, same order),
 # `width` x `height` pixels, `aspect` (its width over its height in the
 # parts' units) wide.
 func bakeSpritePicture(
@@ -162,7 +162,7 @@ func bakeSpritePicture(
     width: width
     height: height
     pixelsPerUnit: height.toFloat() / top
-    centreColumn: width.toFloat() * 0.5
+    centerColumn: width.toFloat() * 0.5
     footRow: height.toFloat()
   }
   # The picture is `aspect` units wide per unit of height: stretch the columns
@@ -232,8 +232,8 @@ func spriteHalfSize(size: view Int) ret Int {
 
 # The picture at half its size. Each new pixel covers a block of the old
 # ones: its alpha is their average (so the share of pixels the cutout keeps
-# stays the same), and its colour is the average of the COVERED pixels,
-# weighted by their alpha — see-through pixels hold no colour, and counting
+# stays the same), and its color is the average of the COVERED pixels,
+# weighted by their alpha — see-through pixels hold no color, and counting
 # them would darken the outline.
 func halveSpritePicture(picture: view SpritePicture) ret SpritePicture {
   let width: Int = spriteHalfSize(size: picture.width)

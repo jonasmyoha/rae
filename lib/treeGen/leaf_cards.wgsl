@@ -16,7 +16,7 @@ struct Frame {
 struct Card {
   positionSize: vec4<f32>,
   normalOcclusion: vec4<f32>,
-  colourTurn: vec4<f32>,
+  colorTurn: vec4<f32>,
   extra: vec4<f32>,     // x: the leaf stamp (image layer); w: light through from behind (0..1)
 };
 // The camera's right and up (world), where it is, the direction TO the sun,
@@ -84,15 +84,15 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let corner = cornerOf(vi);
   let yaw = tree.positionYaw.w;
   let size = tree.scale.x;
-  let centre = tree.positionYaw.xyz + turnByYaw(card.positionSize.xyz, yaw) * size;
+  let center = tree.positionYaw.xyz + turnByYaw(card.positionSize.xyz, yaw) * size;
   // the square, turned in the camera's plane by the card's own turn
   let local = (corner - vec2<f32>(0.5)) * card.positionSize.w * size;
-  let turn = card.colourTurn.w;
+  let turn = card.colorTurn.w;
   let c = cos(turn);
   let s = sin(turn);
   let across = local.x * c - local.y * s;
   let upward = local.x * s + local.y * c;
-  let world = centre + U.right.xyz * across + U.up.xyz * upward;
+  let world = center + U.right.xyz * across + U.up.xyz * upward;
   var o: VsOut;
   o.pos = F.viewProj * vec4<f32>(world, 1.0);
   o.clipNow = o.pos;
@@ -128,7 +128,7 @@ fn fs(in: VsOut) -> FsOut {
   // on and paints it with a pale sky reflection)
   let away = dot(n, toEye);
   if (away < 0.15) { n = normalize(n + toEye * (0.15 - away)); }
-  var albedo = card.colourTurn.rgb * picture.rgb;
+  var albedo = card.colorTurn.rgb * picture.rgb;
   // light through the leaves: looking toward the sun at a card on the mass's
   // far side (its normal away from the sun) brightens and warms it a little
   let backLit = max(dot(-toEye, U.toSun.xyz), 0.0) * max(-dot(massNormal, U.toSun.xyz), 0.0);

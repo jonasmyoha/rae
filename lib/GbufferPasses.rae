@@ -110,7 +110,7 @@ type PyrPassCache {
   bindGen: Int
 }
 
-# ----- colour grade (#556) --------------------------------------------------
+# ----- color grade (#556) --------------------------------------------------
 #
 # What the composite pass does after tone mapping. Held as data rather than as
 # shader constants so a game can art-direct its look without a runtime rebuild,
@@ -122,7 +122,7 @@ type ColorGrade {
   # false = ACES (film emulation, the historical default)
   # true  = Khronos PBR Neutral (preserves albedo hue and saturation)
   pbrNeutral: Bool
-  # Multiplier around mid-grey. 1.0 is identity; 1.1 is a gentle punch.
+  # Multiplier around mid-gray. 1.0 is identity; 1.1 is a gentle punch.
   contrast: Float
   # Saturation push weighted toward ALREADY-DULL pixels, so vivid ones do not
   # clip and lose hue. 0.0 is identity.
@@ -414,11 +414,11 @@ func uploadSceneLight(
     a: Vec3.vadd(a: Vec3.vscale(a: skyLightAbove(sky: sky), s: scale), b: gndC)
     s: 0.5
   )
-  let grey: Float = around.x * 0.2126 + around.y * 0.7152 + around.z * 0.0722
+  let gray: Float = around.x * 0.2126 + around.y * 0.7152 + around.z * 0.0722
   let pale: Vec3 = Vec3.vadd(
     a: around
     b: Vec3.vscale(
-      a: Vec3.vsub(a: Vec3.create(x: grey, y: grey, z: grey), b: around)
+      a: Vec3.vsub(a: Vec3.create(x: gray, y: gray, z: gray), b: around)
       s: targets.mistPaleness
     )
   )

@@ -1,9 +1,9 @@
 # Hardware check for gpu/GpuRender (#903): a manager-owned render pipeline
-# draws one triangle covering a manager RGBA8 texture, the fragment colour comes
+# draws one triangle covering a manager RGBA8 texture, the fragment color comes
 # from an ADOPTED EXTERNAL uniform buffer (a raw buffer the check owns, as the
 # gbuffer's frame resources are for water), the texture is copied to a buffer
 # and read back through a ReadbackId, and the pixels are compared to the known
-# colour. Then the pipeline retires and the external is released without the
+# color. Then the pipeline retires and the external is released without the
 # manager touching the adopter's buffer. Exit code 0 = every check passed.
 import Sdl3
 open webgpu/Context
@@ -23,7 +23,7 @@ func fail(message: view String) ret Bool {
 }
 
 func shaderSource() ret String {
-  ret "struct Colour \{ value: vec4<f32> \}; @group(0) @binding(0) var<uniform> colour: Colour; @vertex fn vs(@location(0) position: vec2<f32>) -> @builtin(position) vec4<f32> \{ return vec4<f32>(position, 0.0, 1.0); \} @fragment fn fs() -> @location(0) vec4<f32> \{ return colour.value; \}"
+  ret "struct Color \{ value: vec4<f32> \}; @group(0) @binding(0) var<uniform> color: Color; @vertex fn vs(@location(0) position: vec2<f32>) -> @builtin(position) vec4<f32> \{ return vec4<f32>(position, 0.0, 1.0); \} @fragment fn fs() -> @location(0) vec4<f32> \{ return color.value; \}"
 }
 
 func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
@@ -68,20 +68,20 @@ func createAdopter() ret Adopter {
       usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
     }
     let buffer: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
-    var colour: ArgWriter = createArgs(uniform: true)
+    var color: ArgWriter = createArgs(uniform: true)
     pushVec4F(
-      writer: colour
+      writer: color
       x: 0.2
       y: 0.4
       z: 0.6
       w: 1.0
     )
-    finalizeArgs(writer: colour)
+    finalizeArgs(writer: color)
     wgpuQueueWriteBuffer(
       queue: webgpuQueue()
       buffer: buffer
       bufferOffset: 0
-      data: colour.bytes.data
+      data: color.bytes.data
       size: 16
     )
     wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 0, commands: webgpuNull())
@@ -91,7 +91,7 @@ func createAdopter() ret Adopter {
 }
 
 # Hands the adopter's buffer to the manager by adoption (non-owning).
-func adoptColourBuffer(adopter: view Adopter, resources: mod GpuResources) ret opt ExternalId {
+func adoptColorBuffer(adopter: view Adopter, resources: mod GpuResources) ret opt ExternalId {
   unsafe {
     ret adoptExternalBuffer(
       resources: resources
@@ -174,7 +174,7 @@ func main() ret Int {
               let adopter: Adopter = createAdopter()
               var adopted: ExternalId = { managerTag: 0, slot: -1, generation: 0 }
               var adoptedOk: Bool = false
-              if let id: ExternalId = adoptColourBuffer(adopter: adopter, resources: resources) {
+              if let id: ExternalId = adoptColorBuffer(adopter: adopter, resources: resources) {
                 adopted = id
                 adoptedOk = true
               }
@@ -273,7 +273,7 @@ func main() ret Int {
                           ret 1
                         }
                         retireReadback(resources: resources, id: read)
-                        # Every pixel of the 4x4 target is the uniform colour (51,102,153,255).
+                        # Every pixel of the 4x4 target is the uniform color (51,102,153,255).
                         var row: Int = 0
                         loop row < 4 {
                           var column: Int = 0

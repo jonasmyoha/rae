@@ -1,7 +1,7 @@
 // gpu2d_image.wgsl — the 2D image draw (one textured, rounded, tinted quad per
 // draw), a Rae asset since #908 (was the C constant G2D_IMG_WGSL). Output is
 // premultiplied. uImg = rect, tint (straight, premultiplied here),
-// params (radius, rotation about the quad centre in radians, tile flag),
+// params (radius, rotation about the quad center in radians, tile flag),
 // uv (origin + size), clip rect (design units), clip (radius, enabled) —
 // the last two are the rounded clip the box pass has always had (#1003),
 // written per draw from the clip active when the image was queued.
@@ -23,7 +23,7 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
   let c = corners[vi];
   let rect = uImg[0];
   let phys = uXform[0].xy;
-  // Rotate the quad about its centre (#1003); uv and the rounding SDF stay in
+  // Rotate the quad about its center (#1003); uv and the rounding SDF stay in
   // the unrotated local frame.
   let local = c * rect.zw;
   let center = rect.zw * 0.5;

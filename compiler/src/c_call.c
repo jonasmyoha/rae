@@ -21,9 +21,9 @@
 void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* call_concrete, FILE* out) {
     if (!fd->returns || !fd->returns->type || !fd->returns->type->is_opt) return;
 
-    // c_return_type always emits "RaeAny" for opt T (even on specialised clones),
+    // c_return_type always emits "RaeAny" for opt T (even on specialized clones),
     // so unboxing is needed regardless of whether the call resolves to a template
-    // or a sema-generated specialisation.
+    // or a sema-generated specialization.
     if (fd->is_extern) return;
 
     // Only unbox when the call's result is being consumed as a concrete primitive type
@@ -69,7 +69,7 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
 // index accesses and struct-field accesses are; an enum member (`Enum.case`,
 // which lowers to a `#define` constant) and every other expression (literals,
 // calls, arithmetic, casts, object literals) are rvalues. Used to decide
-// whether a borrowed (`view`) argument needs a materialised temporary (#272).
+// whether a borrowed (`view`) argument needs a materialized temporary (#272).
 static bool arg_is_addressable_lvalue(CFuncContext* ctx, const AstExpr* e) {
     if (!e) return false;
     switch (e->kind) {
@@ -83,7 +83,7 @@ static bool arg_is_addressable_lvalue(CFuncContext* ctx, const AstExpr* e) {
             return true;
         case AST_EXPR_UNARY:
             // `view x` / `mod x` form a reference to their operand — they are
-            // reference-producing, never a value that needs a materialised temp;
+            // reference-producing, never a value that needs a materialized temp;
             // defer to whether the operand is addressable.
             if (e->as.unary.op == AST_UNARY_VIEW || e->as.unary.op == AST_UNARY_MOD)
                 return arg_is_addressable_lvalue(ctx, e->as.unary.operand);
@@ -346,7 +346,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
 
     // -- INTRINSICS / SPECIAL CASES --
-    /* `Array(T, cap: N)` in expression position is the zero-initialising
+    /* `Array(T, cap: N)` in expression position is the zero-initializing
      * constructor. A compound literal gives every element a defined value
      * without a memset call. */
     if (str_eq_cstr(name, "Array") && expr->resolved_type && expr->resolved_type->kind == TYPE_ARRAY) {
@@ -693,7 +693,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         //   2. generic with matching `this` base
         //   3. non-generic without `this` (free function)
         //   4. generic without `this`
-        // Specialisation clones are skipped — we want the template so we
+        // Specialization clones are skipped — we want the template so we
         // can re-infer per call.
         const AstFuncDecl* nongeneric_receiver_match = NULL;
         const AstFuncDecl* receiver_match = NULL;
@@ -797,7 +797,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // If sema linked the call to a spec clone but the call site has a clear
         // expected return type, prefer to re-infer from that. This catches cases
         // like `g.grid = createList(initialCap: 200)` where `grid: List(Int)` should
-        // override any earlier `createList<String>` specialisation sema may have
+        // override any earlier `createList<String>` specialization sema may have
         // attached.
         /* An expected `Any` (a `log(...)` argument, an interpolation part)
          * says nothing about T and must not override what sema bound from
@@ -871,7 +871,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             //    bind the type params (`create(cap: 8)`, `createList(cap: 8)`),
             //    the field/binding type is authoritative and may differ from the
             //    enclosing generic `T` — e.g. `items: List(EntityId)` inside
-            //    `makeBox(T)` must specialise from the FIELD's `EntityId`, not the
+            //    `makeBox(T)` must specialize from the FIELD's `EntityId`, not the
             //    enclosing `T` (#889). The name-mapping fallback (#3) reuses the
             //    enclosing `T` for every param and so silently mis-binds such a
             //    field; a structural inference from the expected return type does
@@ -972,7 +972,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         // pass-by-value at the C level — no temp/wrap
                         // needed. Only `mod` and view/mod String need
                         // a stack slot + ref wrapper. Substitute
-                        // generics so view T(=Int) is also recognised.
+                        // generics so view T(=Int) is also recognized.
                         Str pbase_concrete = pbase;
                         if (fd->generic_params && concrete) {
                             const AstIdentifierPart* gp2 = fd->generic_params;
@@ -1548,7 +1548,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     || a->value->kind == AST_EXPR_MEMBER
                     || a->value->kind == AST_EXPR_INDEX)) {
                 // Use the param type as the deep-copy target type so we
-                // honour the user's declared shape even if the arg's
+                // honor the user's declared shape even if the arg's
                 // inferred type is slightly different (e.g. a generic
                 // template substitution).
                 AstTypeRef* p_target = p->type;
@@ -1668,7 +1668,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // `({ T __rae_rvarg = ...; &__rae_rvarg; })` took the address
                 // of a statement-expression local whose lifetime ends the
                 // instant `({ ... })` finishes, *before* the callee
-                // dereferences it: undefined behaviour that read stale stack
+                // dereferences it: undefined behavior that read stale stack
                 // (e.g. a `buildCamera(target: vadd(...))` reading a garbage
                 // look-at point, so the camera ignored yaw/pitch). An array
                 // (not struct) literal is used because `{ EXPR }` initializes
@@ -1774,12 +1774,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                        && !arg_is_addressable_lvalue(ctx, a->value)) {
                 // #272: borrowing (`view`) an rvalue argument (an enum literal,
                 // arithmetic, a call result). `&expr` on an rvalue is invalid C
-                // ("cannot take the address of an rvalue"); materialise a C99
+                // ("cannot take the address of an rvalue"); materialize a C99
                 // compound-literal temporary so `&` has an lvalue to borrow. Safe
                 // for `view` (read-only); `mod` args are lvalue places by sema.
                 AstTypeRef base = *p->type;
                 base.is_view = false; base.is_mod = false; base.is_opt = false; base.next = NULL;
-                // #758: specialise a generic param (`&(T){...}` -> `&(Struct){...}`)
+                // #758: specialize a generic param (`&(T){...}` -> `&(Struct){...}`)
                 // so the compound-literal type is the concrete element type, not
                 // the undeclared template placeholder `rae_T`.
                 const AstTypeRef* base_emit = &base;

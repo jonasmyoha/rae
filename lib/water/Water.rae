@@ -2,12 +2,12 @@
 #
 # One `WaterBody` describes a body of water as DATA (docs/water-rendering-design.md
 # §4): what kind it is, where its still surface sits, how big it is, and the toon
-# look — shallow/deep colours, shoreline foam distance, absorption, ripple
+# look — shallow/deep colors, shoreline foam distance, absorption, ripple
 # parameters — plus a small Gerstner wave set that gives the surface its motion
 # and normal. `WaterSystem` (WaterSystem.rae) owns the GPU side and draws every
 # body through the transparent forward pass; this file is plain values.
 #
-# Style: `toon` is the mobile-first stylised path (the Roystan recipe) and the
+# Style: `toon` is the mobile-first stylized path (the Roystan recipe) and the
 # `realistic` uses FFT cascades. Both are described by the same body data.
 import Math
 import Vec3
@@ -70,10 +70,10 @@ func oceanMacroEnergy(x: view Float, y: view Float, time: view Float) ret Float 
 type WaterBody {
   kind: WaterKind
   style: WaterStyle
-  centre: Vec3  # still-surface centre; centre.z IS the water level
+  center: Vec3  # still-surface center; center.z IS the water level
   extent: Float  # side of the square surface, world units
-  shallowColor: Vec3  # colour where the ground is just under the surface
-  deepColor: Vec3  # colour once the water is `depthMax` deep
+  shallowColor: Vec3  # color where the ground is just under the surface
+  deepColor: Vec3  # color once the water is `depthMax` deep
   depthMax: Float  # water depth (view-depth difference) at which deepColor saturates
   absorb: Float  # 0..1 opacity scale of the deep water
   foamDistance: Float  # water shallower than this gets shoreline foam
@@ -96,22 +96,22 @@ type WaterBody {
   refractStrength: Float  # screen-space offset per unit of normal xy (~0.02)
   absorbColor: Vec3
   # A body with its OWN baked mesh (#833 rivers): meshId is an uploaded mesh in
-  # WORLD space (0 = the shared unit grid scaled to centre/extent), whose uv is
-  # metres along / across the flow and whose normal packs (flow tangent, foam);
+  # WORLD space (0 = the shared unit grid scaled to center/extent), whose uv is
+  # meters along / across the flow and whose normal packs (flow tangent, foam);
   # flowSpeed advects the ripples downstream in m/s.
   meshId: Int
   flowSpeed: Float
   # How the mesh maps to the world: 0 = the shared unit grid scaled to
-  # centre/extent (lakes), 1 = a baked WORLD-space mesh (rivers), 2 = a
-  # camera-CENTRED metres mesh re-snapped to the camera every frame (oceans,
+  # center/extent (lakes), 1 = a baked WORLD-space mesh (rivers), 2 = a
+  # camera-CENTERED meters mesh re-snapped to the camera every frame (oceans,
   # #851 — the radial LOD grid of ClipMap.rae).
   meshMode: Int
   # Sea state for the FFT spectrum (#849): a JONSWAP/TMA sea is defined by the
   # wind speed at 10 m, its direction, the fetch it blew over, and the depth.
   windSpeed: Float  # m/s
   windDirRad: Float  # radians, direction the wind blows TOWARD
-  fetch: Float  # metres of open water the wind acted on (~250 km)
-  waterDepth: Float  # metres; the TMA factor damps long waves in shallow water
+  fetch: Float  # meters of open water the wind acted on (~250 km)
+  waterDepth: Float  # meters; the TMA factor damps long waves in shallow water
   fftAmplitude: Float  # scale displacement and slopes together; 1 preserves the spectrum
   biomeShoreDepth: Float  # opt-in WorldBiome coast: full waves at this depth; 0 disables
   biomeGroundZ: Float  # terrain origin for that coast
@@ -122,14 +122,14 @@ type WaterBody {
   # FFT size and active cascade count; the toon surface skips these samples.
   fftSize: Int  # 128 / 256 / 512 texels per cascade side
   cascadeCount: Int  # 1..3 cascades summed by the surface shader
-  cascadeTile0: Float  # world metres one cascade tile covers (~250 / 60 / 8)
+  cascadeTile0: Float  # world meters one cascade tile covers (~250 / 60 / 8)
   cascadeTile1: Float
   cascadeTile2: Float
-  # Camera-centred radial grid (mesh mode 2, ClipMap): the ring spacing per
-  # metre from the centre and the innermost cell (m). The surface shader fades
+  # Camera-centered radial grid (mesh mode 2, ClipMap): the ring spacing per
+  # meter from the center and the innermost cell (m). The surface shader fades
   # each cascade's vertex displacement out where that cell cannot sample its
   # waves, the FFT twin of waveGridFactor (#1002). 0 = no fade.
-  clipCellPerMetre: Float
+  clipCellPerMeter: Float
   clipFirstCell: Float
   # N frames per cascade update: cascade i runs when frame % N == i % N.
   # 1 updates all every frame; mobile defaults to 2. Initialization/invalidation
@@ -146,7 +146,7 @@ type WaterBody {
   # Sun caustics on submerged surfaces (#860, desktop): 1 = the underwater fog
   # pass adds a rippling light network when the camera is under this body; 0 = none.
   caustics: Int
-  # Where a camera-centred body (mesh mode 2) exists, in world x/y: an ocean
+  # Where a camera-centered body (mesh mode 2) exists, in world x/y: an ocean
   # off one coast, not under the whole world. Outside it nothing is drawn and
   # the camera is never under it. Unbounded (+-waterUnbounded) by default.
   boundsMinX: Float
@@ -163,13 +163,13 @@ func waterBoundsContain(body: view WaterBody, x: view Float, y: view Float) ret 
   ret x >= body.boundsMinX and x <= body.boundsMaxX and y >= body.boundsMinY and y <= body.boundsMaxY
 }
 
-# A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
+# A stylized lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
 # blue body, soft foam at the banks, two small crossing Gerstner waves.
 func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
   ret WaterBody {
     kind: WaterKind.lake
     style: WaterStyle.toon
-    centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ)
+    center: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ)
     extent: extent
     shallowColor: Vec3.create(x: 0.2, y: 0.72, z: 0.75)
     deepColor: Vec3.create(x: 0.02, y: 0.18, z: 0.45)
@@ -222,7 +222,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     cascadeTile0: 250.0
     cascadeTile1: 60.0
     cascadeTile2: 8.0
-    clipCellPerMetre: 0.0
+    clipCellPerMeter: 0.0
     clipFirstCell: 0.0
     updateRate: 1
     ssr: 0
@@ -334,7 +334,7 @@ func wavesDisplacement(
 # wading ask. Exact for the Gerstner surface up to the horizontal displacement:
 # a Gerstner wave moves grid points sideways, so the point that ENDS UP over
 # (x, y) started somewhere else; two fixed-point iterations of p = (x, y) -
-# displacementXY(p) recover it to well under a centimetre for the steepness
+# displacementXY(p) recover it to well under a centimeter for the steepness
 # values these bodies use. (FFT queries use FftSurfaceCache.sampleFftSurface, #858.)
 func waterHeightAt(
   body: view WaterBody
@@ -362,11 +362,11 @@ func waterHeightAt(
     py: py
     t: t
   )
-  ret body.centre.z + d.z
+  ret body.center.z + d.z
 }
 
 # An open ocean on the FFT cascades (#851): realistic style, refraction on,
-# deep-sea colours, a camera-centred mesh (set its meshId to a ClipMap grid).
+# deep-sea colors, a camera-centered mesh (set its meshId to a ClipMap grid).
 func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   var body: WaterBody = createLakeToon(surfaceZ: surfaceZ, extent: 1.0)
   body.kind = WaterKind.ocean
@@ -401,5 +401,5 @@ func biomeShoreEnergy(body: view WaterBody, x: view Float, y: view Float) ret Fl
     groundZ: body.biomeGroundZ
     cfg: body.biome
   )
-  ret WorldBiome.smooth01(edge0: 0.0, edge1: body.biomeShoreDepth, x: body.centre.z - ground)
+  ret WorldBiome.smooth01(edge0: 0.0, edge1: body.biomeShoreDepth, x: body.center.z - ground)
 }

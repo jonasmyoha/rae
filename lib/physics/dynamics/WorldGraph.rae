@@ -1,7 +1,7 @@
 # Ported from Box3D: Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md)
 # Adding contacts to the constraint graph and removing them
 # (b3AddContactToGraph, b3RemoveContactFromGraph of Box3D's
-# constraint_graph.c at 9f998c8), with Box3D's colour assignment order, and
+# constraint_graph.c at 9f998c8), with Box3D's color assignment order, and
 # the same for joints (b3AssignJointColor, b3CreateJointInGraph,
 # b3AddJointToGraph, b3RemoveJointFromGraph). Checked against the oracle in
 # fixtures 957 and 984.
@@ -15,9 +15,9 @@ open physics/dynamics/ConstraintGraph
 open physics/dynamics/SolverSet
 open physics/dynamics/World
 
-# The colour for a constraint between bodies of types `typeA` and `typeB`
-# (the colour's body bits are set): dynamic-dynamic constraints take the
-# first free of the first colours, a constraint with one dynamic body the
+# The color for a constraint between bodies of types `typeA` and `typeB`
+# (the color's body bits are set): dynamic-dynamic constraints take the
+# first free of the first colors, a constraint with one dynamic body the
 # last free from the end (higher priority); else the overflow.
 func assignContactColor(
   world: mod PhysicsWorld
@@ -62,7 +62,7 @@ func assignContactColor(
 }
 
 # b3AddContactToGraph: a contact that started touching (or woke up
-# touching) joins a colour.
+# touching) joins a color.
 func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
   let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
   let bodyIdA: Int = contact.bodyIdA
@@ -101,7 +101,7 @@ func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
   }
 }
 
-# Remove entry `localIndex` of a colour's list by moving the last one into
+# Remove entry `localIndex` of a color's list by moving the last one into
 # it; returns the contact id that moved, or -1.
 func removeSwapColorContact(
   color: mod GraphColor
@@ -159,7 +159,7 @@ func removeContactFromGraph(
   }
 }
 
-# b3CreateJointInGraph / b3AddJointToGraph: joint `jointId` takes a colour
+# b3CreateJointInGraph / b3AddJointToGraph: joint `jointId` takes a color
 # (b3AssignJointColor, the contact order) and `sim` goes to its end.
 func addJointToGraph(world: mod PhysicsWorld, jointId: view Int, sim: view JointSim) {
   let joint: Joint = world.joints.copyAtDefault(index: jointId)

@@ -18,7 +18,7 @@ badge in the devtools:
 | verdict | meaning | the test asserts |
 |---|---|---|
 | `handles` | Rae does the right thing — usually by refusing to compile, sometimes by a defined runtime result | the good outcome (a diagnostic, a specific output) |
-| `footgun` | Rae still does the wrong thing | **the current bad behaviour, exactly** |
+| `footgun` | Rae still does the wrong thing | **the current bad behavior, exactly** |
 
 The second row is the ratchet. A `footgun` case passes while the bug is alive.
 When someone fixes the compiler, that case FAILS with a message saying "this
@@ -43,7 +43,7 @@ All results below were probed against the compiler as of 2026-09-18 — the
 
 | # | case | the foot gun | what Rae does | elsewhere |
 |---|---|---|---|---|
-| 01 | `mutateWhileIterating` | add to a list inside a loop over that list | **compile error** `cannot mutate a List while a collection loop borrows its elements` | Java throws `ConcurrentModificationException` at run time; Python silently skips or repeats elements; JS silently loops forever or skips; C++ is undefined behaviour |
+| 01 | `mutateWhileIterating` | add to a list inside a loop over that list | **compile error** `cannot mutate a List while a collection loop borrows its elements` | Java throws `ConcurrentModificationException` at run time; Python silently skips or repeats elements; JS silently loops forever or skips; C++ is undefined behavior |
 | 02 | `forgottenNoneCheck` | use an optional result as if it were a value | **compile error** `optional not unwrapped — use if let` | Java `NullPointerException`; Go nil-pointer panic; JS `undefined is not a function` at run time; Kotlin only if you write `!!` |
 | 03 | `hiddenAliasing` | `var b: Box = a`, then `b.items.add(…)` | `a` is untouched: value semantics, no shared mutable container behind two names | Python, JS, Java, C# alias — `a` changes too; Go slices share a backing array; Rust refuses the second binding while the first is live; C++ copies |
 | 04 | `temporariesInALoop` (optional 4th) | two million short-lived strings in a hot loop | RSS flat (2.7 → 2.8 MB), no pause, no manual free | Python/JS/Java/Go pay a GC; C leaks unless every `free` is right; Rust and C++ match Rae |
@@ -112,7 +112,7 @@ stress: {
 ```
 
 The `expect` block is the test. For a `footgun`, `expect` describes the bad
-behaviour verbatim — that is what makes the ratchet work.
+behavior verbatim — that is what makes the ratchet work.
 
 ## The runner
 
@@ -175,7 +175,7 @@ Implementation outline (small; everything reuses the examples plumbing):
 - One foot gun per case. If the program shows two things, split it.
 - It must bite in at least three mainstream languages, and the README must say
   which and how. "Rae rejects something nobody else accepts" is not a case.
-- Write the `expect` block from an actual run, never from what the behaviour
+- Write the `expect` block from an actual run, never from what the behavior
   *should* be — for a `footgun`, the assertion is the bug.
 - A fixed foot gun is flipped in the same commit as the fix: verdict to
   `handles`, `expect` to the good outcome, `fixedBy` filled in. The runner's

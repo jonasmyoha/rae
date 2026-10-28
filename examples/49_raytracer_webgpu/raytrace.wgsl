@@ -75,7 +75,7 @@ fn schlick(cosine: f32, refIdx: f32) -> f32 {
   return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
 }
 
-// Iterative path trace: returns the colour for one primary ray.
+// Iterative path trace: returns the color for one primary ray.
 fn rayColor(ro0: vec3<f32>, rd0: vec3<f32>) -> vec3<f32> {
   var ro: vec3<f32> = ro0;
   var rd: vec3<f32> = rd0;

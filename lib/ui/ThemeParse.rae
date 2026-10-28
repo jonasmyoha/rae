@@ -61,7 +61,7 @@ func parseThemeInto(out: mod ResolvedTheme, scene: view Scene) {
 #   "primaryButton": { "background": "accent", "radius": "radiusPill",
 #                      "padding": "cardPadding", "text": "buttonLabel" }
 # All four fields are token/style/slot NAMES resolved later (at scene
-# deserialise for bg/radius/padding, at paint for text) — never baked.
+# deserialize for bg/radius/padding, at paint for text) — never baked.
 # Missing fields default to "" (that facet is left to the node).
 func parseThemeContainer(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
   let idx: Int = Json.field(doc: doc, this: root, key: "container")
@@ -894,13 +894,13 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
 }
 
 # ================================================================
-# Scene-deserialiser token lookups (#233, Theme M3 / #764).
+# Scene-deserializer token lookups (#233, Theme M3 / #764).
 #
 # Radius/padding/container tokens live in the theme (Theme.raescene) and scene
-# deserialisation needs them at parse time. These used to be a set of flattened
+# deserialization needs them at parse time. These used to be a set of flattened
 # module-global lists (`g_active*`) populated once at boot by setActiveThemeTokens
 # — a redundant SECOND copy of the ResolvedTheme they were filled from. #764
-# removes that copy: the deserialiser now resolves directly against the world's
+# removes that copy: the deserializer now resolves directly against the world's
 # `theme.resolved` (a ResolvedTheme), threaded from the dispatcher that already
 # holds the UiWorld. Space and radius tokens reuse themeSpaceValue/themeRadiusValue
 # above; container + padding get the ResolvedTheme-parameterised lookups below.

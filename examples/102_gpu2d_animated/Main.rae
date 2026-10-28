@@ -50,7 +50,7 @@ const cyan: Int = 0xFF26C6DA
 
 const pink: Int = 0xFFEC407A
 
-# Low 24 bits of the accent colours, for re-packing with an animated alpha.
+# Low 24 bits of the accent colors, for re-packing with an animated alpha.
 const cyanRgb: Int = 0x26C6DA
 
 const pinkRgb: Int = 0xEC407A
@@ -89,7 +89,7 @@ func hueColor(hue: view Float, alpha: view Int) ret Int {
   ret (alpha shl 24) bitor (redCh shl 16) bitor (greenCh shl 8) bitor blueCh
 }
 
-# An accent colour's RGB re-packed with a fresh alpha (for fading rings).
+# An accent color's RGB re-packed with a fresh alpha (for fading rings).
 func withAlpha(rgb: view Int, alpha: view Int) ret Int {
   ret (alpha shl 24) bitor rgb
 }
@@ -107,7 +107,7 @@ func clampUnit(value: view Float) ret Float {
 
 # HSV -> 0xAARRGGBB. Same hue geometry as hueColor, then desaturated toward
 # white by (1 - sat) and scaled by val. Lower saturation gives a richer,
-# tinted colour instead of a pure-RGB neon primary — nicer for the visualizer.
+# tinted color instead of a pure-RGB neon primary — nicer for the visualizer.
 func hsv(
   hue: view Float
   sat: view Float
@@ -314,7 +314,7 @@ func panelCorners(
 
 # --- Panel 3: sonar rings ----------------------------------------------------
 
-# Ring outlines expand outward from the centre and fade as they grow — a radar
+# Ring outlines expand outward from the center and fade as they grow — a radar
 # sweep. Drawn as transparent-fill boxes so only the border shows.
 func panelRings(
   canvas: mod Gpu2dCanvas
@@ -355,7 +355,7 @@ func panelRings(
     )
     i = i + 1
   }
-  # A pulsing pip at the centre.
+  # A pulsing pip at the center.
   let pip: Float = 6.0 + 4.0 * wave(phase: t * 4.0)
   Gpu2d.drawRoundedRect(
     canvas: canvas
@@ -423,7 +423,7 @@ func panelBorders(
     borderWidth: bw2
     border: pink
   )
-  # An outline-only ring whose border colour cycles through the spectrum.
+  # An outline-only ring whose border color cycles through the spectrum.
   let ringCol: Int = hueColor(hue: t * 0.15, alpha: 255)
   Gpu2d.drawBox(
     canvas: canvas
@@ -438,7 +438,7 @@ func panelBorders(
   )
 }
 
-# --- Panel 5: spinning starburst + travelling ramp ---------------------------
+# --- Panel 5: spinning starburst + traveling ramp ---------------------------
 func panelLines(
   canvas: mod Gpu2dCanvas
   x: view Float
@@ -477,7 +477,7 @@ func panelLines(
     )
     i = i + 1
   }
-  # A stack of lines whose thickness rolls through as a travelling wave.
+  # A stack of lines whose thickness rolls through as a traveling wave.
   var ty: Float = y + h - 96.0
   var row: Int = 0
   loop row < 5 {
@@ -640,7 +640,7 @@ func panelGlass(
   let cy: Float = y + h * 0.5 + 16.0
   let radius: Float = 74.0
   let orbit: Float = 30.0
-  # Three translucent discs orbiting a common centre, so their overlap shifts.
+  # Three translucent discs orbiting a common center, so their overlap shifts.
   var k: Int = 0
   loop k < 3 {
     let ang: Float = t * 0.8 + k.toFloat() * 2.0944  # 120 degrees apart

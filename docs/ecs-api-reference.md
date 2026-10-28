@@ -282,7 +282,7 @@ func queryEntityAt(table: view ComponentTable(T), denseIndex: view Int) ret Enti
 lowered onto (below); they are `componentCount` / `componentEntityAt` under the
 query spelling.
 
-`tagged(D, T, dataTable, tagTable)` is `query2` specialised to "data table
+`tagged(D, T, dataTable, tagTable)` is `query2` specialized to "data table
 filtered by a zero-field tag" — the **with T** filter. `query` / `queryView`
 iterate one table.
 
@@ -543,7 +543,7 @@ func uiFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems)                   
 func releaseDeadEntities(world: mod UiWorld, uiSystems: mod UiSystems)
 # lib/ecs/World.rae: freeEntity = retireEntity + recycleEntityIndex
 
-# lib/ui/buttonSystem/ — the button behaviour, gathered (one type, three phases)
+# lib/ui/buttonSystem/ — the button behavior, gathered (one type, three phases)
 func buttonInteractionClear / buttonInteractionMark   # from the hit test (stage input)
 func buttonStyleUpdate(world, uiSystems)               # StateStyle swap (stage widgetStyle)
 func buttonHoverScaleUpdate(world, uiSystems, hovered, deltaTime) ret Bool   # stage hoverScale

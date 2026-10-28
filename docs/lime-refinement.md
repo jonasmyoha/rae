@@ -8,7 +8,7 @@ as `fluffyLeavesControl` / `fluffyWoodControl` for exact geometry comparisons.
 ## Visual direction and result
 
 The [botanical description and photographs from North Carolina Extension](https://plants.ces.ncsu.edu/plants/tilia-cordata/)
-support an oval crown, small heart-shaped serrated green leaves and grey-brown
+support an oval crown, small heart-shaped serrated green leaves and gray-brown
 bark that develops dark furrows. The game preset represents a young/small
 specimen at the existing 4.8–7.2 m forest scale, not the species' eventual mature
 height. Supplied T04/T07 guide the connected crown and small perimeter leaves;
@@ -80,9 +80,9 @@ about 34% smaller, but sharing it in the middle range increases middle-range
 geometry. That trade-off is explicit; the reduced middle mesh remains future
 work, not a hidden claim of improved performance at every distance.
 
-The existing kind-0 radius 0.70, centred at local z=0.55, contains the tested
+The existing kind-0 radius 0.70, centered at local z=0.55, contains the tested
 rotating-card envelope plus 0.03 local wind allowance across six seeds. The
-check uses each card centre and half diagonal, not just its unrotated vertices.
+check uses each card center and half diagonal, not just its unrotated vertices.
 
 ## Reproduction
 
@@ -112,7 +112,7 @@ references, not production textures. Asset prompts and provenance are in
 The forest images keep its actual placements, including other species. The
 near lime is kind 0, placement 15573 at approximately (-7.89954, -31.2998,
 -0.712072), height 5.57849 m. The underside camera looks up through the real
-neighbouring canopy. The distant group is an elevated context view; it is not
+neighboring canopy. The distant group is an elevated context view; it is not
 an isolated mesh-to-impostor transition measurement.
 
 ![Lime beneath the forest canopy](images/lime-refinement/forest-under.png)

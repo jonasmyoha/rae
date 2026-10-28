@@ -1,8 +1,8 @@
-// Terrain ground PALETTE — the grade-calibrated colours (#13).
+// Terrain ground PALETTE — the grade-calibrated colors (#13).
 //
 // SPLIT OUT of terrain_detail.wgsl so it can be OWNED PER APP. These RAE_TERRAIN_*
 // constants are measured albedos that encode the game's specific lighting AND its
-// colour grade (Khronos PBR Neutral + the display grade in src/grade.rae) — run
+// color grade (Khronos PBR Neutral + the display grade in src/grade.rae) — run
 // through a different tone map they read wrong. They used to live in the shared
 // lib, so example 114 (neutral ACES) inherited the game's calibration and could
 // not diverge.
@@ -20,7 +20,7 @@
 
 // GROUND PALETTE, measured off the reference plate.
 //
-// These replace the absolute colour ramps ported from procgen/texture.rae. Those
+// These replace the absolute color ramps ported from procgen/texture.rae. Those
 // were authored to look right as standalone texture swatches on a neutral
 // background; run through this scene's sunlight they blew out — sand read as
 // snow and water as pale ice.
@@ -32,7 +32,7 @@
 //   grass (0.533, 0.600, 0.314)   sand  (0.925, 0.784, 0.698)
 //   water (0.024, 0.384, 0.635)   path  (0.698, 0.671, 0.400)
 //
-// Keeping colour identity in a constant and variation in a multiplier means the
+// Keeping color identity in a constant and variation in a multiplier means the
 // ground can be re-graded toward the reference by editing five vectors, without
 // touching the noise.
 // CALIBRATED AGAINST THE RENDER, not chosen to look right in isolation.
@@ -55,7 +55,7 @@ const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.539, 0.632, 0.256);
 // PALER and LESS warm the harder it was pushed. Whatever the albedo is written
 // into, it does not carry values above one.
 //
-// So this holds the reference's sand RATIO (0.906 : 0.749 : 0.647 normalised to
+// So this holds the reference's sand RATIO (0.906 : 0.749 : 0.647 normalized to
 // red) and brightness comes from exposure, which is applied after the G-buffer
 // and is not capped. Grass is re-calibrated down to compensate for the exposure
 // lift -- it has the headroom, sand does not.

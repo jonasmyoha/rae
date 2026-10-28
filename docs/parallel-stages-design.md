@@ -1,6 +1,6 @@
 # Staged parallel work for the physics solver — design
 
-Status: **decided 2026-10-03: Option C, with `unsafe` for the colouring's
+Status: **decided 2026-10-03: Option C, with `unsafe` for the coloring's
 disjoint writes — implemented** (§9 records what landed and the numbers). It answers `docs/physics-performance-plan.md`
 §5 item 3: how Rae runs Box3D's solver — a few hundred dependent stages per
 step — on the worker pool, and with which language surface. The worker pool
@@ -17,18 +17,18 @@ Box3D's `b3SolverTask` (`solver.c`) runs, per step:
 prepare joints · prepare wide contacts · prepare contacts
 per substep (4):
   integrate velocities
-  warm start            — one stage per graph colour
-  solve                 — one stage per graph colour
+  warm start            — one stage per graph color
+  solve                 — one stage per graph color
   integrate positions
-  relax                 — one stage per graph colour
-restitution             — one stage per graph colour
+  relax                 — one stage per graph color
+restitution             — one stage per graph color
 store wide impulses · store impulses
 ```
 
-With 12-24 active colours that is **about 220 stages per step**, each of which
+With 12-24 active colors that is **about 220 stages per step**, each of which
 must finish before the next starts. Within a stage the work is independent:
-a colour's constraints touch disjoint dynamic bodies — that is what the
-colouring is for — and the body stages touch each body once.
+a color's constraints touch disjoint dynamic bodies — that is what the
+coloring is for — and the body stages touch each body once.
 
 Box3D keeps every worker inside one task for the whole step. The calling
 thread is the leader (`b3ExecuteMainStage`). It publishes each stage in one
@@ -72,7 +72,7 @@ For context, Box3D's own C build reaches only **3.4x at 8 workers** on the
 5 050-box pyramid (`docs/physics-performance-plan.md` §2). Its spin barriers
 are not free either.
 
-## 3. The problem every option has: coloured writes
+## 3. The problem every option has: colored writes
 
 A solve stage writes each constraint's two bodies:
 
@@ -82,7 +82,7 @@ states.set(index: constraint.bodyA, value: newA)
 
 The index comes from data, not from the loop variable. The `parallelLoop`
 checker rejects that write, correctly: it cannot know that the graph
-colouring keeps two constraints of one colour off the same body. Nor can the
+coloring keeps two constraints of one color off the same body. Nor can the
 algorithm be restructured to write only own-index elements. Gathering the
 impulses per constraint and scattering them in a later stage turns Box3D's
 Gauss-Seidel order into a Jacobi-like one, so the bits differ from the
@@ -97,7 +97,7 @@ the existing keyword rather than adding one:
   the compiler cannot check" (extern calls). Here it vouches that no two
   iterations of the loop write the same element, and that no iteration reads
   an element another one writes. It is visible, greppable and local: the
-  colouring argument goes in a comment beside it.
+  coloring argument goes in a comment beside it.
 - **A runtime check backs it up.** With `RAE_PARALLEL_CHECK=1`, the runtime
   records which iteration wrote each (buffer, index) through an `unsafe`
   write inside a parallel body, and aborts on a second writer:
@@ -114,20 +114,20 @@ No new construct. The solver's stage loop is an ordinary `loop` whose stages
 are `parallelLoop`s over the constraints (or bodies) of the stage. The pool
 cuts each range into chunks, which is what Box3D's blocks are.
 
-### Worked example: one colour's solve stage
+### Worked example: one color's solve stage
 
 ```rae
-# A graph colour's contact constraints are solved in parallel. The colouring
-# guarantees no two constraints of one colour share a dynamic body, so the
+# A graph color's contact constraints are solved in parallel. The coloring
+# guarantees no two constraints of one color share a dynamic body, so the
 # body writes below are disjoint (RAE_PARALLEL_CHECK=1 verifies it in the
 # fixtures).
-func solveColour(
-  colour: view GraphColour
+func solveColor(
+  color: view GraphColor
   constraints: mod List(ContactConstraint)
   states: mod List(BodyState)
   context: view StepContext
 ) {
-  parallelLoop var k: Int = colour.first, k < colour.end, ++k {
+  parallelLoop var k: Int = color.first, k < color.end, ++k {
     if let constraint: mod ContactConstraint = constraints.modAt(index: k) {
       let a: BodyState = states.copyAtDefault(index: constraint.bodyA)
       let b: BodyState = states.copyAtDefault(index: constraint.bodyB)
@@ -141,23 +141,23 @@ func solveColour(
   }
 }
 
-# The step's stage loop — Box3D's b3SolverTask without any synchronisation code:
+# The step's stage loop — Box3D's b3SolverTask without any synchronization code:
 loop var substep: Int = 0, substep < context.substepCount, ++substep {
   integrateVelocities(states: states, sims: sims, context: context)    # a parallelLoop over bodies
-  loop var colour: Int = 0, colour < graph.activeColourCount, ++colour {
-    warmStartColour(colour: graph.colours.viewAt(index: colour), ...)
+  loop var color: Int = 0, color < graph.activeColorCount, ++color {
+    warmStartColor(color: graph.colors.viewAt(index: color), ...)
   }
-  loop var colour: Int = 0, colour < graph.activeColourCount, ++colour {
-    solveColour(colour: graph.colours.viewAt(index: colour), ...)
+  loop var color: Int = 0, color < graph.activeColorCount, ++color {
+    solveColor(color: graph.colors.viewAt(index: color), ...)
   }
   integratePositions(states: states, context: context)
-  loop var colour: Int = 0, colour < graph.activeColourCount, ++colour {
-    relaxColour(colour: graph.colours.viewAt(index: colour), ...)
+  loop var color: Int = 0, color < graph.activeColorCount, ++color {
+    relaxColor(color: graph.colors.viewAt(index: color), ...)
   }
 }
 ```
 
-(A real port splits each colour into joint and contact ranges and iterates
+(A real port splits each color into joint and contact ranges and iterates
 the wide constraints in groups of four, as Box3D does. The shape is the
 same.)
 
@@ -167,10 +167,10 @@ Identical bits for any worker count, by construction:
 
 - each stage finishes before the next starts (the `parallelLoop` join);
 - within a stage, iterations touch disjoint data (own index, plus the
-  coloured writes vouched for in §3);
+  colored writes vouched for in §3);
 - nothing is counted or claimed by user code.
 
-The one thing not checked at compile time — the colouring — is checked at run
+The one thing not checked at compile time — the coloring — is checked at run
 time in the fixtures (`RAE_PARALLEL_CHECK=1`), and against the oracle at
 `workerCount = 1`.
 
@@ -186,7 +186,7 @@ one thread. There are no spin loops in Rae code, so nothing can deadlock.
     statements (sema; ~30 lines);
   - with `RAE_PARALLEL_CHECK` builds, writes through `set` / `modAt` inside
     such a block call a checked runtime variant;
-  - a fixture with a correct and a deliberately wrong colouring.
+  - a fixture with a correct and a deliberately wrong coloring.
 - **Runtime:**
   - make back-to-back launches cheap at 8 workers, where Box3D's own design
     shows the way:
@@ -235,11 +235,11 @@ helpers spin, claim blocks with compare-and-swap and count completions.
 **Determinism.** Identical bits for any worker count *only if* the program
 keeps three rules the compiler cannot check:
 
-1. blocks within a stage are independent (the colouring);
+1. blocks within a stage are independent (the coloring);
 2. atomics only claim and count work, never accumulate results;
 3. which blocks a worker happens to claim changes nothing it writes.
 
-The `unsafe` coloured writes of §3 are needed here too.
+The `unsafe` colored writes of §3 are needed here too.
 
 **RAE_WORKERS=1, and progress in general.** The team construct cannot promise
 that all its iterations are live at once. With one worker it can't, and a
@@ -298,7 +298,7 @@ if the runtime cannot make back-to-back `parallelLoop` launches cheap enough
 | | C: stage = parallelLoop | A: atomics + team | B: stage construct |
 |---|---|---|---|
 | new surface | `unsafe` meaning in a parallel body | `Atomic(T)`, `cpuRelax`, `parallelTeam` | `parallelStages` + nested ranges |
-| determinism | by construction (+ checked colouring) | by convention (3 rules) | by construction (+ checked colouring) |
+| determinism | by construction (+ checked coloring) | by convention (3 rules) | by construction (+ checked coloring) |
 | RAE_WORKERS=1 | sequential stages | sequential if the progress rule holds | sequential stages |
 | can deadlock | no | yes, on a wrong barrier | no |
 | barrier cost today | 1.4 µs (4 w), 4.7 µs (8 w) | Box3D-level, ~1 µs (not measured in Rae) | Box3D-level, if built |
@@ -329,7 +329,7 @@ become chunk scratch: per-chunk lists and flags merged in chunk order
 
 ## 9. What landed (2026-10-03)
 
-Option C, with `unsafe` for coloured writes. Both
+Option C was chosen, with `unsafe` for colored writes. Both
 follow-ups are in.
 
 - **`unsafe` in a parallel body** (`sema.c`, `c_stmt.c`, `c_expr.c`,
@@ -344,10 +344,10 @@ follow-ups are in.
     writer: `rae: parallelLoop: iterations 3 and 5 both wrote parallel[7]
     inside unsafe …`, exit 70, smaller iteration first, so the message does
     not depend on scheduling. Checking off, the cost is one branch.
-  - Fixture 947: a greedy graph colouring of 200 contacts on 64 bodies,
-    solved one `parallelLoop` per colour with checking on, equals the
+  - Fixture 947: a greedy graph coloring of 200 contacts on 64 bodies,
+    solved one `parallelLoop` per color with checking on, equals the
     sequential solve bit for bit at 1, 2, 3 and 8 workers. Then a wrong
-    colouring is stopped.
+    coloring is stopped.
 - **The launch path** (`runtime_threads.c`):
   - Each worker owns a contiguous range of the job's chunks and its own
     cache-line-padded claim word, draining its range before stealing from

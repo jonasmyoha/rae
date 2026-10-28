@@ -27,7 +27,7 @@ const app = uWS.App().ws("/ws", {
     if (message.type === "echo") {
       socket.send(data, false);
     } else if (message.type === "broadcast") {
-      // The payload is serialised once, for both messages
+      // The payload is serialized once, for both messages
       const payload = JSON.stringify(message.payload);
       app.publish("all", '{"type":"broadcast","payload":' + payload + "}", false);
       const listenCount = app.numSubscribers("all");

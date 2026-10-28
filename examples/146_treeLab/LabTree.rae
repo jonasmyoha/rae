@@ -68,7 +68,7 @@ func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
   ret rendererLoadSurfaceImage(renderer: renderer, path: labBarkImagePath)
 }
 
-# RAE_TREELAB_DUMP=<path>: write the tree's centre lines there, for
+# RAE_TREELAB_DUMP=<path>: write the tree's center lines there, for
 # traceTree.py's overlay (a `limb` line, then `x y z radius` per point)
 func dumpSkeleton(skeleton: view TreeSkeleton) {
   let path: String = Sys.getEnv(name: "RAE_TREELAB_DUMP")
@@ -232,7 +232,7 @@ func addLabTree(
 }
 
 # RAE_TREELAB_LEAF_PREVIEW=<path.png>: the leaf stamps side by side over
-# mid grey, to look at them (a PNG cannot keep their gaps, so the grey
+# mid gray, to look at them (a PNG cannot keep their gaps, so the gray
 # stands in for them)
 func previewLeafStamps(pictures: view List(List(Float))) {
   let path: String = Sys.getEnv(name: "RAE_TREELAB_LEAF_PREVIEW")
@@ -250,7 +250,7 @@ func previewLeafStamps(pictures: view List(List(Float))) {
       loop var column: Int = 0, column < leafImageSize, ++column {
         let base: Int = (row * leafImageSize + column) * 4
         let alpha: Float = layer.copyAtDefault(index: base + 3)
-        # linear tone to a rough sRGB value, over grey 0.5
+        # linear tone to a rough sRGB value, over gray 0.5
         let tone: Float = Math.pow(base: layer.copyAtDefault(index: base + 1), exp: 1.0 / 2.2)
         let value: Int = (255.0 * (tone * alpha + 0.5 * (1.0 - alpha))).toInt()
         pixels.set(
@@ -291,7 +291,7 @@ func dumpLeafCards(cards: view LeafCards) {
 }
 
 # The leaf masses' plain material for the layout step: a flat, matte
-# grey-green, no picture
+# gray-green, no picture
 func clumpLayoutMaterial() ret Material3d {
   ret Material3d {
     colorTextureLayer: -1

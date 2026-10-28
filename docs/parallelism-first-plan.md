@@ -61,7 +61,7 @@ modest — with declared read/write sets in the schedule, the physics step is
 
 Add `Profile` zones around every system in the walker example and the two
 downstream prototypes; capture a few seconds; rank CPU cost per system.
-Everything below is prioritised by that table, not by intuition.
+Everything below is prioritized by that table, not by intuition.
 
 ### Phase 1 — runtime foundation (compiler + runtime)
 
@@ -151,7 +151,7 @@ Rae-function-to-C callbacks exist, so the two never oversubscribe cores.
 - **Efficiency cores** (Apple): size the pool by performance cores, as
   Box3D's docs also advise.
 - **WASM threads** need COOP/COEP headers; keep the single-thread build the
-  default artefact.
+  default artifact.
 
 ## 4. Task sizing (proposed queue items, next free id at time of writing #939)
 

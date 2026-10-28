@@ -5,22 +5,22 @@ Selected outputs were resized to 512 × 512 with `sips`, retaining alpha.
 No botanical photographs or private reference pixels are included in the assets.
 
 - `spruceSpray.png`: one connected needle spray with fine irregular cutout
-  edges, modest holes and a quiet grey-green interior. The second generation
+  edges, modest holes and a quiet gray-green interior. The second generation
   reduces interior contrast; the first was too busy on the actual bough mesh.
-- `spruceBark.png`: repeating grey-brown thin scales. This is painted albedo,
+- `spruceBark.png`: repeating gray-brown thin scales. This is painted albedo,
   not geometric relief. The wood remains rigid.
 
 Prompt record (built-in mode, no CLI fallback):
 
 1. Original transparent Norway spruce bough, fine short needles along a
    discreet vertical twig, a connected broad middle tapering at both ends,
-   quiet sage/grey-green masses, small gaps, flat diffuse lighting, fine
+   quiet sage/gray-green masses, small gaps, flat diffuse lighting, fine
    needle perimeter, no broad leaves, long pine needles, shadows or text.
-2. Edit only interior colour: preserve alpha, silhouette and needle edges;
+2. Edit only interior color: preserve alpha, silhouette and needle edges;
    remove pale central twig and outlined needles; reduce internal contrast
-   about 75 percent, keep the average grey-green and connected painted masses.
-3. Seamless grey-brown spruce bark albedo, small irregular rounded overlapping
-   scales with modest vertical orientation, warm grey/tan and cooler plates,
+   about 75 percent, keep the average gray-green and connected painted masses.
+3. Seamless gray-brown spruce bark albedo, small irregular rounded overlapping
+   scales with modest vertical orientation, warm gray/tan and cooler plates,
    shallow brown fissures, restrained contrast, no moss, black cracks, cast
    shadows, perspective or text.
 
@@ -30,6 +30,6 @@ Selected output identifiers:
 First spray: `exec-c54e9cf4-215c-453b-8682-73bd549b74db.png`.
 
 The existing shared surface-image path owns both images, linear-light mips and
-coverage preservation. Colour, shadows and impostor capture use the same
+coverage preservation. Color, shadows and impostor capture use the same
 alpha cutoff. No emission, normal-map contrast, renderer exposure adjustment
 or species shadow exemption is used.

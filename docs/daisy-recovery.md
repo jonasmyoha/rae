@@ -2,13 +2,13 @@
 
 The daisy now has a continuously curved, narrower stem, rounded cupped rays,
 unequal head angles and small lower leaf groups. The patch groups roots around
-several unequal centres. Three shared material meshes still own the whole patch.
+several unequal centers. Three shared material meshes still own the whole patch.
 The old generator and materials remain available, and an unchanged old plant
 stands 0.60 m to the left of the candidate in Autumn Grove.
 
 This is a visual improvement over the rejected thick stalks and flat heads.
 It is not a claim that the surrounding meadow matches the reference landscapes.
-The botanical centre detail and some close leaf shapes remain simplified.
+The botanical center detail and some close leaf shapes remain simplified.
 
 ## Botanical and composition references
 
@@ -51,7 +51,7 @@ The first toon-material trial still looked like flat white symbols. The chosen
 candidate uses rough physical shading for its three parts, independently of the
 terrain's toon switch. No exposure change, emission or disabled shadows was used.
 The low-sun view reveals the cup and unequal rays; the night view confirms that
-both petals and centres darken with the scene. The fixed old plant is visible
+both petals and centers darken with the scene. The fixed old plant is visible
 behind the candidate in the side view, so its thick straight stalk should not
 be mistaken for an extra candidate stem.
 
@@ -69,7 +69,7 @@ biome, streaming, seven-plant capacity and forest density remain unchanged.
 The same `WalkerFlowers` prototype serves 136, 137 and 143.
 
 The grove's flower reservation now prevents large props but permits grass.
-Rock and trunk grass exclusions retain their previous behaviour. This removes
+Rock and trunk grass exclusions retain their previous behavior. This removes
 an artificial bare circle around the study without raising grass density.
 
 ## Geometry, wind and ownership
@@ -93,7 +93,7 @@ place. The grove's unchanged single control adds three study-only mesh entities.
 The leaves and petals are geometry, so there is no daisy texture/mip/alpha
 threshold to tune. Thin silhouettes still depend on raster coverage and SMAA;
 this does not eliminate distant stem stipple. Material roughness is 0.94;
-linear stem/petal/disc colours are (0.035, 0.125, 0.018), (0.72, 0.74, 0.65),
+linear stem/petal/disc colors are (0.035, 0.125, 0.018), (0.72, 0.74, 0.65),
 and (0.52, 0.26, 0.012).
 
 ## Cost
@@ -164,7 +164,7 @@ previous generator, and capture source/image hashes and report links were checke
 
 ## Remaining art limits
 
-The yellow centres lack the botanical photographs' fine floret structure.
+The yellow centers lack the botanical photographs' fine floret structure.
 The rays are still visibly modeled from very close grazing angles. Basal leaves
 are rounded and restrained but simpler than real oxeye leaves. The forest
 repeats one seven-plant prototype, and existing harebells share its placement.

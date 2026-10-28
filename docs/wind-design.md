@@ -5,7 +5,7 @@ lib/RendererWind.rae; fixture 1232_wind). The walker examples (136, 137, 143)
 use it.
 
 **The trees' and bushes' leaves turn in the wind again (2026-10-23), with
-no travelling gust field: windLeaf uses a steady activity level. Grass now
+no traveling gust field: windLeaf uses a steady activity level. Grass now
 reads the same base WindVector and makes broad rooted gust fronts with a small
 tip flutter (§5). It was off on 2026-10-22
 (`windLeafScale` in lib/wind.wgsl; docs/tree-wind-design.md). The grass
@@ -21,11 +21,11 @@ version.
   but the clock, so two machines with the same time see the same wind.
 - **Material responses.** The base vector carries gustiness and time. Foliage
   rotates branch-supported patches with fixed world phases. Grass builds two
-  broad travelling bands from world position and the shared direction. These
+  broad traveling bands from world position and the shared direction. These
   responses need no streamed wind grid and remain camera independent.
 
 Why not a grid of wind areas: a grid would need state, streaming and matching
-values on every machine. World-space phases give neighbouring plants a shared
+values on every machine. World-space phases give neighboring plants a shared
 response without making the whole field move in step.
 
 The strength is in "sway units": 1 is a fresh breeze, the strength the trees
@@ -60,7 +60,7 @@ The forward main pass and the grass bind the same frame uniform.
 
 **Only leaves sway. A tree's body (its trunk and branches) never moves.**
 The first version bent the whole tree with its height (a lean of up to
-metres at a tall crown in a gust) and it looked like a glitch: trunks
+meters at a tall crown in a gust) and it looked like a glitch: trunks
 rocking, and a jump where a tree changed to its billboard. It was removed
 (2026-10-22).
 
@@ -76,8 +76,8 @@ shadow pass reads the same value.
   (the walker's bushes, which are all leaves).
 - A rock, a building or anything else keeps 0 and does not move.
 
-The motion (`windOffset`) is a few centimetres about where a leaf grows: a
-slow sway in clusters about a metre across (each cluster its own phase), a
+The motion (`windOffset`) is a few centimeters about where a leaf grows: a
+slow sway in clusters about a meter across (each cluster its own phase), a
 small cross-wind part, and a faster flutter per leaf. It grows with the
 push (a gust presses harder) and a little with the height over the foot
 (`h / (h + 2)`). At the default wind a leaf moves about 5 cm, in a strong
@@ -91,11 +91,11 @@ gust about 15 cm: small enough that the leaves stay on their branches.
 - **Billboards (impostors) do not sway.** The sprite pass writes a depth for
   each texel of the baked picture. Bending the quad would move its outline
   without moving that depth, and it would bend the picture's trunk too. Past
-  the middle level's distance (130 m and more) a leaf's few centimetres are
+  the middle level's distance (130 m and more) a leaf's few centimeters are
   under a pixel anyway.
 - **The far canopy** (app3d/FarCanopy) does not sway, for the same reason.
 - At the switch from the middle level to the billboard, the leaves stop
-  moving. They move a few centimetres, so at those distances nothing jumps.
+  moving. They move a few centimeters, so at those distances nothing jumps.
 
 ## 5. Grass
 

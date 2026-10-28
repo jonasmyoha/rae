@@ -25,7 +25,7 @@
  *
  *   world.meshContacts -> count (contact)*count
  *
- * dumps every live mesh contact in contact id order: id, flags, colour and
+ * dumps every live mesh contact in contact id order: id, flags, color and
  * local index, the manifold count and each manifold (normal, impulses, point
  * count, each point's anchors, separation, impulses, base separation,
  * feature id, triangle index and persisted), friction, restitution, rolling

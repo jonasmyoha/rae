@@ -21,14 +21,14 @@ WebGPU-specific hacks. They work for any C library (SDL3, audio, …).
 | `func f(...) extern("c_symbol") ret T` | Binds a Rae extern to an **exact** C symbol. Without it the mangler forces `rae_ext_<module>_<name>`; with it the symbol is emitted verbatim, and — because the symbol is declared by an included header — Rae emits **no prototype** of its own (avoiding a clash with the real declaration). |
 | `cheader "path.h"` | A module directive (contextual keyword, like `open`). Every file's headers are collected and emitted once as `#include "path.h"` at the top of the C output, so `c_struct` types and `extern("symbol")` functions resolve against the real library declarations. |
 | `type X: c_struct { ... }` | Declares a type whose real definition comes from a `cheader`. The compiler emits the **bare C name** (`WGPUBufferDescriptor`, not `rae_WGPUBufferDescriptor`) for variables, fields, params and compound literals, and never redefines it. |
-| `Ptr` | The opaque pointer primitive — an untyped `void*` (modelled as `Buffer(void)`). Used for handles, callbacks and raw data pointers. |
+| `Ptr` | The opaque pointer primitive — an untyped `void*` (modeled as `Buffer(void)`). Used for handles, callbacks and raw data pointers. |
 | `UInt8`/`UInt16`/`Int8`/`Int16` | First-class fixed-width integers, so a generated C-ABI struct matches its C definition byte-for-byte. |
 
 ## The generator (#498)
 
 `rae bindgen` is a subcommand of the compiler (`compiler/src/bindgen.c`): a
 small, dependency-free parser for the regular WebGPU header style. It is **not**
-a general C parser — it recognises the specific constructs these headers use.
+a general C parser — it recognizes the specific constructs these headers use.
 
 Regenerate the WebGPU bindings with:
 

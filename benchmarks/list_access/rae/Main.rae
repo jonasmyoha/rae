@@ -1,6 +1,6 @@
 func rae_ext_benchmarkOpaqueIndex(index: Int) unsafe extern ret Int
 
-# The constant-access scenario's index, laundered through C so the optimiser
+# The constant-access scenario's index, laundered through C so the optimizer
 # cannot see it is 137, fold the bounds check away and measure nothing.
 func opaqueIndex(index: view Int) ret Int {
   unsafe {
@@ -112,7 +112,7 @@ func intConstant(values: view List(Int), operations: view Int) {
 
 func intStrided(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -130,7 +130,7 @@ func intStrided(values: view List(Int), operations: view Int) {
 
 func intRandom(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -147,7 +147,7 @@ func intRandom(values: view List(Int), operations: view Int) {
 
 func intMostlyValid(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -169,7 +169,7 @@ func intMostlyValid(values: view List(Int), operations: view Int) {
 
 func intMixedInvalid(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -250,7 +250,7 @@ func structCollectionView(particles: view List(Particle), passes: view Int) {
 
 func structRandomView(particles: view List(Particle), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: particles.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0

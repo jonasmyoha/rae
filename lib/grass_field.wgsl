@@ -34,7 +34,7 @@ fn perlin2(p: vec2<f32>, seed: u32) -> f32 {
   let b = mix(grad2(hashLattice2(cell + vec2<i32>(0,1), seed), f - vec2<f32>(0.0,1.0)), grad2(hashLattice2(cell + vec2<i32>(1,1), seed), f - vec2<f32>(1.0,1.0)), u.x);
   return mix(a, b, u.y) * 1.41421356;
 }
-// Shared world-space patch shape: used by placement, ground and tuft colour.
+// Shared world-space patch shape: used by placement, ground and tuft color.
 override RAE_GRASS_PATCH_SCALE: f32 = 7.5;
 override RAE_GRASS_PATCH_COVERAGE: f32 = 0.58;
 fn grassPatchValue(position: vec2<f32>, scale: f32) -> f32 {
@@ -58,10 +58,10 @@ fn grassCandidatePosition(cell: vec2<i32>, spacing: f32, clusterStrength: f32) -
   let warp = vec2<f32>(perlin2(position * 1.6, 461u), perlin2(position * 1.6, 463u));
   let scattered = position + jitter * spacing * 0.9 + warp * spacing * 0.65;
   let groupCell = vec2<i32>(floor(scattered / 1.6));
-  let centreJitter = vec2<f32>(hash2u(groupCell, 479u), hash2u(groupCell, 487u));
-  let centre = (vec2<f32>(groupCell) + vec2<f32>(0.18) + centreJitter * 0.64) * 1.6;
+  let centerJitter = vec2<f32>(hash2u(groupCell, 479u), hash2u(groupCell, 487u));
+  let center = (vec2<f32>(groupCell) + vec2<f32>(0.18) + centerJitter * 0.64) * 1.6;
   let gathering = 0.18 + hash2u(groupCell, 491u) * 0.48;
-  let grouped = mix(scattered, centre, gathering);
+  let grouped = mix(scattered, center, gathering);
   if (clusterStrength >= 1.0) { return grouped; }
   return mix(position + jitter * spacing * 0.9, grouped, max(clusterStrength, 0.0));
 }

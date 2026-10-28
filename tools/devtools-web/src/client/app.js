@@ -365,7 +365,7 @@ function scheduleReconnect() {
 // Single dot that covers both transport (WebSocket) and liveness (server
 // heartbeat). The two used to be separate pills, but conveyed nearly the
 // same thing in practice — the rare "WS open but server hung" case is now
-// shown as a yellow "stale" colour on the same dot. Full text lives in
+// shown as a yellow "stale" color on the same dot. Full text lives in
 // the title attribute (native tooltip on hover).
 let lastConnectionState = "connecting";
 function setConnectionState(state, timestamp) {
@@ -1415,7 +1415,7 @@ function startTestTimer(lastDurationMs = null) {
 }
 
 // finalMs: the run's authoritative duration from the completed event. success:
-// true/false to colour the frozen readout; null leaves it neutral (e.g. error).
+// true/false to color the frozen readout; null leaves it neutral (e.g. error).
 function stopTestTimer(finalMs, success) {
   if (!testTimer) return;
   if (testTimerInterval) { clearInterval(testTimerInterval); testTimerInterval = null; }
@@ -3230,7 +3230,7 @@ const RUN_PROFILE_KEY = "rae_example_profile";
 function getGlobalTarget() { return exampleTargetSelect?.value || "live"; }
 function getGlobalProfile() { return exampleProfileSelect?.value || "release"; }
 // Profile (Release/Debug) only changes the Compiled target's gcc -O level;
-// Live and WASM have no debug/release variants, so grey it out for them.
+// Live and WASM have no debug/release variants, so gray it out for them.
 function syncProfileEnabled() {
   if (!exampleProfileSelect) return;
   const t = getGlobalTarget();
@@ -3555,7 +3555,7 @@ function renderBatchReport() {
     table.appendChild(tbody);
     content.appendChild(table);
   }
-  // Stress: one verdict line per case, the shelves' colours, before the
+  // Stress: one verdict line per case, the shelves' colors, before the
   // problem list (a FIXED? is listed there too, as the call to action it is).
   const verdicts = batchResults.filter(r => r.stressVerdict);
   if (verdicts.length > 0) {
@@ -4384,7 +4384,7 @@ function attachChartHover(canvas) {
       : chart.formatValue ? chart.formatValue.point(entry) : String(entry[chart.valueKey]);
     tooltip.innerHTML = `<time>${when}</time><strong>${value}</strong>`;
     tooltip.hidden = false;
-    // In window coordinates (position: fixed): centred over the point and
+    // In window coordinates (position: fixed): centered over the point and
     // kept inside the window, above the point, or below it when the window
     // has no room above
     const width = tooltip.offsetWidth;
@@ -4826,7 +4826,7 @@ async function renderStressPanel(example) {
   if (stressPanelFor !== example.id) return;   // the user moved on meanwhile
   const langs = Object.keys(stress.elsewhere);
   const rows = [
-    `<tr class="is-rae"><th>Rae</th><td>${escapeHtml(expectText)}${stress.verdict === "footgun" ? " — <em>the current behaviour, asserted</em>" : ""}</td></tr>`,
+    `<tr class="is-rae"><th>Rae</th><td>${escapeHtml(expectText)}${stress.verdict === "footgun" ? " — <em>the current behavior, asserted</em>" : ""}</td></tr>`,
     ...langs.map((lang) => `<tr><th>${escapeHtml(lang)}</th><td>${escapeHtml(stress.elsewhere[lang])}</td></tr>`)
   ].join("");
   panel.innerHTML =

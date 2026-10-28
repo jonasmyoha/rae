@@ -5,14 +5,14 @@ forest seed is still 1021. Autumn Grove keeps its original seed 605, height
 5.8 m, width 1.8 m and position (4.2, 4, 0). No kind numbers, other maple
 presets, placement probabilities or forest instance scales change.
 
-## Shape and colour
+## Shape and color
 
 [Oregon State University](https://landscapeplants.oregonstate.edu/plants/acer-rubrum)
 describes an irregular rounded crown, ascending branches and usually three-lobed
 serrated leaves. [North Carolina Extension](https://plants.ces.ncsu.edu/plants/acer-rubrum/)
-describes smooth light-grey young bark and older bark divided into vertical
+describes smooth light-gray young bark and older bark divided into vertical
 plates. Those features guide this small game-tree preset; it does not represent
-the species' maximum mature height. T04/T06/T07 guide connected colour groups,
+the species' maximum mature height. T04/T06/T07 guide connected color groups,
 small leaf edges, visible forks and intentional openings, rather than species
 identification.
 
@@ -43,12 +43,12 @@ normals light the sprays rather than individual polygon leaves.
 
 All isolated studies use width 1.8 m. The actual shared forest prototype uses
 height 5.5 m and width 2 m, then existing per-instance scaling and yaw. No
-showcase specimen was changed to make its comparison more favourable.
+showcase specimen was changed to make its comparison more favorable.
 
 ## Material and motion
 
 The original bark texture has a one-way age gradient: older shallow ridges at
-the base, smoother grey above. Bark V coordinates stay in [0.03, 0.97] according
+the base, smoother gray above. Bark V coordinates stay in [0.03, 0.97] according
 to tree height, so the rough base does not repeat up each young twig. The primary
 forks use shared joined surfaces; secondary shoots remain tapered curved tubes.
 Wood has no wind stream and stays rigid. All three cards within a spray share
@@ -97,7 +97,7 @@ not an isolated GPU timing result or a claim of a proportional speedup.
 
 The tested rotating-card envelope, including half diagonals and a 0.03-height
 wind allowance, reached 4.65946 m at seed 5407 (height 5.5 m). Kind 5 now uses
-radius 0.86 × height, centred at z=0.55 × height, instead of the old 0.65.
+radius 0.86 × height, centered at z=0.55 × height, instead of the old 0.65.
 The permanent check covers six named seeds plus 64 seeded cases. Other species'
 bounds are unchanged.
 
@@ -116,9 +116,9 @@ The forest still contains 31,090 trees and 829 canopy clusters.
 
 The camera looks toward kind-5 placement 16389 at
 (-15.907, -10.7103, -0.0711835), scale 0.902363, height about 4.963 m.
-Neighbouring trees are retained. The private report includes side, underside,
+Neighboring trees are retained. The private report includes side, underside,
 low-sun, night and unchanged old group views. Some side views are occluded by
-near neighbours; they show forest context, not an isolated silhouette test.
+near neighbors; they show forest context, not an isolated silhouette test.
 
 ## Reproduction
 

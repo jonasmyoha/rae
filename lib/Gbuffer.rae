@@ -64,7 +64,7 @@ open GbufferIssue
 # ----- geometry-pass begin (#503, manager-owned since #906) -------------------
 # The frame is the GbufferCache's: manager targets (rebuilt to the offscreen
 # size), a manager frame uniform + draws buffer, and a manager Recording per
-# frame whose multi-attachment pass (3 G-buffer colour views + depth) every
+# frame whose multi-attachment pass (3 G-buffer color views + depth) every
 # draw records into; end() submits it TRACKED (the cache polls its in-flight
 # submissions). Since #923 every consumer (the post passes, the inspector, the
 # transparent / underwater / water passes) binds the target views by ID —
@@ -143,7 +143,7 @@ type GbufferCache {
   skinBind: BindGroupId
   # The pipeline + bind the static draws of THIS frame use: the G-buffer ones,
   # or the forward main pass's (ForwardMain.rae) in a forward frame, which
-  # draws the same meshes and records into a 4x MSAA colour target instead.
+  # draws the same meshes and records into a 4x MSAA color target instead.
   # Every draw kind picks the pipeline of its frame: the static meshes these,
   # the skinned meshes and the terrain their ForwardMaterials ones, the
   # metaballs, the grass and the billboard sprites (GbufferSprite) their own.
@@ -262,7 +262,7 @@ func begin(
     ret
   }
   # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
-  # B: albedo, cleared to the sky/background colour.
+  # B: albedo, cleared to the sky/background color.
   # C: material/motion. Motion clears to the biased zero (no movement).
   # Depth: reverse-Z, so the far plane clears to 0 (#367).
   let motionZero: Float = gbufferMotionZero
@@ -389,7 +389,7 @@ func openGeometryPass(
 # jitter * viewProj: a clip-space xy offset proportional to w is jx*(row 3)
 # added to row 0 and jy*(row 3) to row 1 (column-major: m[c*4+r]); the post
 # passes invert THAT one. The first frame reuses this viewProj as the previous,
-# which yields zero motion — right, and better than an uninitialised matrix.
+# which yields zero motion — right, and better than an uninitialized matrix.
 func uploadFrameUniform(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -659,8 +659,8 @@ func drawInstance(
   }
   let model: Mat4 = modelMatrixOf(t: transform)
   let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
-  # Emissive is ONE scalar, not a colour: an emitter's base colour is the
-  # colour it emits, so the G-buffer stores intensity and lighting tints it
+  # Emissive is ONE scalar, not a color: an emitter's base color is the
+  # color it emits, so the G-buffer stores intensity and lighting tints it
   # by albedo. The brightest component is the intensity — using luminance
   # would dim a saturated single-channel emitter to near nothing.
   var emissive: Float = material.emission.x

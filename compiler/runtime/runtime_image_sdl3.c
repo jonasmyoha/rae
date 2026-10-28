@@ -483,7 +483,7 @@ void rae_ext_Sdl3_openFileDialog(rae_String patterns, rae_String defaultLocation
 }
 
 /* One-shot: the chosen path exactly once, "" while nothing is waiting (not yet
- * chosen, or cancelled). Pumps events so the callback can land even on a frame
+ * chosen, or canceled). Pumps events so the callback can land even on a frame
  * the app's own loop did not pump. */
 rae_String rae_ext_Sdl3_pollFileDialogResult(void) {
     rae_String out = (rae_String){NULL, 0, 0, 0};
@@ -604,7 +604,7 @@ void rae_ext_Sdl3_closeWindow(void) {
  * lib/sdf_text.rae). Rae parses the atlas JSON + lays out glyphs; here we hold
  * the raw RGBA atlas and composite one glyph quad at a time: bilinear-sample
  * the field, median(r,g,b), screenPxRange smoothstep -> coverage, alpha-blend
- * the text colour over the framebuffer. This is the SDL3 (CPU-framebuffer) port
+ * the text color over the framebuffer. This is the SDL3 (CPU-framebuffer) port
  * of the raylib MSDF shader — no GPU shader needed. ---- */
 #define RAE_SDF_MAX_ATLAS 8
 static unsigned char* g_sdf_atlas[RAE_SDF_MAX_ATLAS];
@@ -614,7 +614,7 @@ static int g_sdf_atlas_n = 0;
 
 /* The atlas file is either the raw RGBA8 dump (w*h*4 bytes, the historical
  * `.mtsdf.raw`) or the PNG msdf-atlas-gen writes directly (#1008): a PNG is
- * recognised by its magic bytes, decoded with lodepng, and must match the
+ * recognized by its magic bytes, decoded with lodepng, and must match the
  * JSON sidecar's atlas size. */
 int64_t rae_ext_SdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
     if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
@@ -680,7 +680,7 @@ void rae_ext_SdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t at
             if (px < 0 || px >= fbW) continue;
             double fx = ((double)px + 0.5 - sx0) / sw;
             double fy = ((double)py + 0.5 - sy0) / sh;
-            /* atlas sample point (texel-centre bilinear) */
+            /* atlas sample point (texel-center bilinear) */
             double gx = au0 + fx * (au1 - au0) - 0.5;
             double gy = av0 + fy * (av1 - av0) - 0.5;
             int ix = (int)floor(gx), iy = (int)floor(gy);

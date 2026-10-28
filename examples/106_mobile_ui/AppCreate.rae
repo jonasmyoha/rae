@@ -40,7 +40,7 @@ open ui/Transform
 open ui/animationSystem/AnimationSystem
 open Gpu2dCanvas
 
-# #946: build the app's long-lived state (window, assets, catalogue, app state,
+# #946: build the app's long-lived state (window, assets, catalog, app state,
 # playback, viewport, log overlay, Spotify). Verbatim from the former `main`
 # setup block; returns the `App` the interactive lifecycle runs over.
 func createApp() ret App {
@@ -86,7 +86,7 @@ func createApp() ret App {
   var scenes: AlbumScenes = loadAllScenes()
   var textureRegistry: TextureRegistry = createTextureRegistry()  # owns the app's Gpu2dCanvas (#907/#908)
   ensureAppCacheDirs()
-  # Album catalogue (cheap json parse). Per-cover textures are NOT
+  # Album catalog (cheap json parse). Per-cover textures are NOT
   # loaded here — the interactive loop streams them in via
   # `cascadeAssets` after first paint so the window appears instantly.
   # `appState` is built here so state-dependent blocks below see it.

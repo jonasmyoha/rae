@@ -11,7 +11,7 @@ Reconfiguring every frame was incorrect. Timeout also does not imply a broken
 surface. Both now retry without configuration, report once after three skipped
 frames, and reset the streak after a successful presentation. Actual surface
 errors retain bounded configuration retries (first three, then every 120 skips).
-The 3D path now honours the same SDL visibility guard as 2D. Neither path forces
+The 3D path now honors the same SDL visibility guard as 2D. Neither path forces
 a minimized/background window forward, and normal event polling continues.
 
 This fixes the confirmed recovery-policy bug, not every possible black screen.

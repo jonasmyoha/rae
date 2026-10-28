@@ -14,7 +14,7 @@
 @group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
 override forwardSsao: f32 = 0.0;
 struct ForwardOut {
-  @location(0) colour: vec4<f32>,
+  @location(0) color: vec4<f32>,
   @builtin(frag_depth) depth: f32,
 };
 @fragment
@@ -41,7 +41,7 @@ fn fs(in: VsOut) -> ForwardOut {
     surface.ssao = ssaoAt(vec2<i32>(in.pos.xy), clamp(clip.z / clip.w, 0.0, 1.0));
   }
   var o: ForwardOut;
-  o.colour = vec4<f32>(shadeSurface(surface), 1.0);
+  o.color = vec4<f32>(shadeSurface(surface), 1.0);
   o.depth = clamp(clip.z / clip.w, 0.0, 1.0);
   return o;
 }

@@ -13,14 +13,14 @@ A slim pale stem must remain visible through a light crown. Main branches rise;
 slender outer twigs hang. Leaves are small, pointed diamonds, with irregular
 spacing. Bark needs horizontal dark lenticels and occasional larger scars,
 not evenly spaced black rings. Older bases can be darker and rougher.
-Autumn colours should move from soft green through lime to warm gold.
+Autumn colors should move from soft green through lime to warm gold.
 These identifiers follow [Kew's species account](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A295174-1/general-information)
 and the [Woodland Trust's illustrated silver-birch guide](https://www.woodlandtrust.org.uk/trees-woods-and-wildlife/british-trees/a-z-of-british-trees/silver-birch/).
 
 The current art direction uses camera-facing leafy clusters with broad smooth lighting,
 a slightly crooked leader and bright white bark with sparse, thick black scars.
 The original individual-leaf geometry was rejected after review.
-The three supplied screenshots favour broad foliage masses and leafy outlines.
+The three supplied screenshots favor broad foliage masses and leafy outlines.
 They are visual references; still images do not identify an engine or wind algorithm. A uniformly filled sphere, cone or identical stack of canopy discs would
 lose the species even with a good texture. The tree should look pleasant in
 side light, against the sky and from underneath, not only in its thumbnail.
@@ -51,11 +51,11 @@ copy into an ordinary WebGPU renderer. Rae should start with a bounded mesh
 and count both vertices and shadow draws.
 
 The current choice is a four-vertex camera-facing quad carrying a foliage-cluster
-colour/alpha texture. Four to six offset clusters follow each twig group.
+color/alpha texture. Four to six offset clusters follow each twig group.
 Normals follow the broader crown and rotate with the wind, independently of
 the viewing camera. This replaces the rejected fixed curved cards, which
 looked like hanging sheets when seen from the side. Alpha below 0.5 is
-discarded in colour, shadow and impostor-bake passes. There is no sorted
+discarded in color, shadow and impostor-bake passes. There is no sorted
 transparent blending. See §8 for the complete geometry and shadow contract.
 
 The image uses nearly merged painted leaf shapes with an irregular cluster
@@ -152,12 +152,12 @@ batches provide the appropriate ownership and culling structure.
 - Twenty-six irregularly phased limbs carry five hanging twigs each. Each limb
   has one or two unequal hanging sprays, with seeded omissions on outer twigs.
   Sprays vary in width, depth, length and patch count (four to six). Each spray
-  shares a fixed twig pivot. Three colour meshes keep the existing batching.
+  shares a fixed twig pivot. Three color meshes keep the existing batching.
 - The shared forest registers one prototype. Grove placements vary yaw and
   scale. A future set of two or three seed variants can improve repetition
   without making every tree unique on the GPU.
 - Five parts separate pale bark, dark outer twigs and three leaf tones.
-  Leaves use the optional pivot and card-centre streams; the wood uses the
+  Leaves use the optional pivot and card-center streams; the wood uses the
   ordinary static vertex layout.
 
 ### Bark texture and materials
@@ -165,7 +165,7 @@ batches provide the appropriate ownership and culling structure.
 `lib/assets/trees/birchBark.png` and `birchLeaves.png` are original generated
 512 x 512 PNGs. The bark revision balances medium dark lenticels, occasional
 larger scars and subtle pale papery detail on white. It is a visual midpoint
-between the original fine texture and the overly sparse eight-mark revision. Bark V repeats 0.34 times per metre rather
+between the original fine texture and the overly sparse eight-mark revision. Bark V repeats 0.34 times per meter rather
 than 1.4, making the markings about four times longer vertically. The leaf
 texture has low-contrast painted green masses, irregular margins and gaps.
 
@@ -187,14 +187,14 @@ repo, resized for runtime):
 
 `SurfaceImages` owns a renderer-local RGBA image array, view and repeating
 trilinear sampler. RGB is decoded to linear light before mip generation.
-Mip colour is weighted by alpha to avoid dark borders from clear texels;
+Mip color is weighted by alpha to avoid dark borders from clear texels;
 alpha is rescaled to keep the covered fraction at cutoff 0.5 as closely as
 the lower resolution permits. It cannot preserve an arbitrary fraction in
 a one-pixel mip. RGB is stored as sRGB for hardware decode; alpha stays linear.
 
 `rendererLoadSurfaceImage(renderer, path)` returns the layer;
-`Material3d.colorTextureLayer = -1` keeps plain colour. Forward and deferred
-colour, foliage shadows, and the existing impostor bake use the same alpha
+`Material3d.colorTextureLayer = -1` keeps plain color. Forward and deferred
+color, foliage shadows, and the existing impostor bake use the same alpha
 cut. Images load once and are shared by every instance. Shadow bindings track
 image view/sampler identity when the array is replaced; old objects retire
 through GpuResources. No per-tree textures or per-frame image uploads. Cutout shadows use the
@@ -276,7 +276,7 @@ through `app3d/GroveTrees`; no separate generator copies are kept in examples.
 
 The updated geometry fixture checks seeded stems, valid indices and unit
 normals, UV seams, 312 patches, shared clump pivots and alpha-weighted mip
-colour/coverage. The wind hardware check exercises both patch responses.
+color/coverage. The wind hardware check exercises both patch responses.
 The material-image check loads distinct bark and leaf layers. The impostor
 hardware check compares the same plane with and without the leaf alpha mask,
 and bakes textured birch in both ordinary and foliage vertex layouts.
@@ -299,7 +299,7 @@ key **9** opens the birch stand. Its camera now frames the full crowns.
 
 ## 7. Animation-background refinement
 
-The round clumps and separately coloured leaves were too artificial. Shape,
+The round clumps and separately colored leaves were too artificial. Shape,
 texture and shading need different scales: the silhouette can show leaf tips,
 but large groups should share their light and dark values.
 
@@ -311,7 +311,7 @@ work against our fixed twig attachment and is not used here. This does not
 copy that shader or introduce emission that could glow at night.
 
 [Ascalon’s tree-shader study](https://www.aversionofreality.com/blog/2022/8/7/stylized-tree-shader)
-separates custom normals, world lighting, colour variation and density. Our
+separates custom normals, world lighting, color variation and density. Our
 choice is to derive most normal direction from the broader crown, then add
 only a small local bend. Geometry becomes elongated, offset sprays along
 actual twigs, with uneven dimensions and missing outer sprays. This keeps
@@ -349,9 +349,9 @@ The fixed patches still exposed thin edges and conspicuous hanging planes.
 The replacement is a shared renderer feature, used by the same birch generator
 in the grove and all three walker variants. Existing bark is unchanged.
 
-`MeshData.leafCards` holds centre xyz and an enabled flag per vertex. The rest
+`MeshData.leafCards` holds center xyz and an enabled flag per vertex. The rest
 corner is stored in the mesh's local X/Z plane and UV remains 0..1. The existing
-wind pivot stays separate: wind moves the cluster centre about the twig root,
+wind pivot stays separate: wind moves the cluster center about the twig root,
 then the vertex shader expands its corners along camera right/up. This avoids
 both edge-on cards and stretching a textured leaf shape with spatial noise.
 
@@ -367,7 +367,7 @@ The existing distant atlas bake poses cards toward each atlas view, and subject
 bounds include the card corner radius plus the maximum capped wind travel.
 
 Foliage vertices are now 64 bytes: position/normal/UV (32), wind pivot and
-response (16), card centre/enabled (16). Ordinary meshes remain 32 bytes.
+response (16), card center/enabled (16). Ordinary meshes remain 32 bytes.
 Other foliage has a zero enabled flag and retains its rigid-patch motion,
 but pays the extra 16 bytes per vertex. Birch reduces each patch from nine
 vertices to four, so its vertex storage falls from 432 to 256 bytes per patch.
@@ -377,7 +377,7 @@ is claimed. Dedicated reduced birch geometry is still future work.
 
 The shared GPU wind check also verifies 64 viewing bases: quad dimensions,
 camera-facing orientation and axis recovery under unequal projection scales.
-The generator fixture checks matching centres, pivots and valid UVs per quad.
+The generator fixture checks matching centers, pivots and valid UVs per quad.
 The atlas check preserves the ordinary-species coverage comparison and checks
 that camera-facing birch coverage stays within its bounded range.
 
@@ -399,7 +399,7 @@ performance comparison.
 prior implementation, not the current recommendation. See section 11 and
 [the recovery review](landscape-recovery-review.md).
 
-The current proof keeps the shipped twig pivots, card centres and crown
+The current proof keeps the shipped twig pivots, card centers and crown
 normals. It changes only silver birch. Every spray now follows its source twig
 and mixes two orientations: an interior card remains in the branch plane while
 one or two smaller silhouette cards face the camera. The branch-plane cards
@@ -457,7 +457,7 @@ are omitted to preserve visible wood and clear sky sectors.
 
 The bark albedo was repainted at an intermediate scale. It keeps a clean white
 paper base, fewer near-black lenticels, several thicker scars and restrained
-grey paper curls. The image's opposite borders differ by less than the bounded
+gray paper curls. The image's opposite borders differ by less than the bounded
 low-contrast seam threshold in fixture 1235. Minor limbs duplicate their
 texture seam exactly. Seeded U/V offsets prevent a scar from appearing at the
 same branch position throughout a tree. The joined primary mesh retains the
@@ -470,8 +470,8 @@ one branch-supported group while its root stays fixed. The stem, joined
 primaries and other structural limbs use the ordinary rigid vertex layout.
 
 Autumn Grove now shows five independent seeds (1437, 311, 4201, 827 and 2189)
-at 6.6, 7.1, 7.6, 8.0 and 8.4 metres. The walker forests retain their stable
-kind number and use the same generator, bark, leaf atlas, material colours and
+at 6.6, 7.1, 7.6, 8.0 and 8.4 meters. The walker forests retain their stable
+kind number and use the same generator, bark, leaf atlas, material colors and
 impostor bake. Their current middle level deliberately shares the close mesh;
 this task does not invent an unreviewed reduced silhouette.
 
@@ -482,11 +482,11 @@ the joined scaffold visible. Remaining limits are card crossings at exact
 grazing angles, repeatable painted spray details where several cards overlap,
 and the missing dedicated middle-distance birch mesh.
 
-For seed 1437 at the shared 5.5-metre reference size, the finished close model
+For seed 1437 at the shared 5.5-meter reference size, the finished close model
 contains 3,033 vertices and 3,942 triangles: 1,223/1,984 in rigid structural
 wood, 1,350/1,728 in animated fine twigs, and 460/230 in 115 foliage cards.
 The shared forest instances those five parts; it does not regenerate geometry
-per tree. Fixture 1235 passed for four seeds from 4.8 to 8.6 metres, including
+per tree. Fixture 1235 passed for four seeds from 4.8 to 8.6 meters, including
 finite meshes, joined-junction normals, transported frames, buried roots,
 duplicated fine-branch seams, bark-edge contrast, wind pivots and conservative
 foliage bounds. Hardware checks `surfaceImages`, `leafWind` and
@@ -498,9 +498,9 @@ and repeatability; they do not claim a frame-time improvement.
 
 The 25 October review restores the original `birchLeaves.png` from `e86992db`
 and uses its entire UV rectangle. Four or five unequal overlapping cards per
-twig spray face the camera, with centres distributed along/across the same
+twig spray face the camera, with centers distributed along/across the same
 supporting twig. Crown normals remain independent of the camera. The newer
-scaffold, bark, twig pivots, species colours and five study seeds stay unchanged
+scaffold, bark, twig pivots, species colors and five study seeds stay unchanged
 so this foliage repair is a controlled comparison against the rejected result.
 
 The first recovery restores much of the lost fullness and fine perimeter. It

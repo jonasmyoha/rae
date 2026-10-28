@@ -23,12 +23,12 @@ removal, kept for context.
   features specifically for Live, and do not work *around* VM gaps.
 - **Live is not a compatibility target.** New front-end work (lexer/parser/sema)
   may keep the VM emitter *compiling* as cheap hygiene, but is under no
-  obligation to preserve VM behaviour or pass VM conformance.
+  obligation to preserve VM behavior or pass VM conformance.
 - **Compiled is the universal default** everywhere: CLI, tests, CI, devtools.
 - **Live is absent from normal product surfaces** (devtools UI, example target
   lists) but remains **explicitly invocable** as a legacy backend.
 
-Live is fully hidden in devtools rather than labelled "legacy" on purpose: a
+Live is fully hidden in devtools rather than labeled "legacy" on purpose: a
 visible legacy option invites users to try it, report gaps, and expect fixes.
 Devtools presents the supported *future* of Rae, not its archaeological layers.
 
@@ -68,7 +68,7 @@ conceptually (mechanics tracked in QUEUE):
 
 Rationale: running a large frozen suite with known failures creates an unhealthy
 definition of "green" and pressures future compiler work to preserve accidental
-VM behaviour.
+VM behavior.
 
 ---
 

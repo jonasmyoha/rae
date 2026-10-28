@@ -1,5 +1,5 @@
 # app3d/PropFade — where a prop's levels of detail cross-fade
-# (docs/tree-lod-design.md §2.3). Each level has a fade band centred on the
+# (docs/tree-lod-design.md §2.3). Each level has a fade band centered on the
 # distance it ends at: inside it the level is drawn fading out and the next
 # one fading in, both with the same threshold and the same per-prop seed, so
 # the screen's dither (fade_dither.wgsl) shows each pixel from exactly one of
@@ -8,7 +8,7 @@
 import Math
 
 # A level's fade band is this share of the distance it ends at, and at
-# least propFadeMinWidth metres
+# least propFadeMinWidth meters
 const propFadeShare: Float = 0.1
 
 const propFadeMinWidth: Float = 4.0
@@ -61,7 +61,7 @@ func propBandShare(distance: view Float, middle: view Float, width: view Float) 
   ret Math.min(a: Math.max(a: (distance - (middle - width * 0.5)) / width, b: 0.0), b: 1.0)
 }
 
-# A prop's fade seed (0..1) from where it stands, so neighbouring props do not
+# A prop's fade seed (0..1) from where it stands, so neighboring props do not
 # fade in step
 func propFadeSeed(x: view Float, y: view Float) ret Float {
   let value: Float = Math.sin(x: x * 12.9898 + y * 78.233) * 43758.5453

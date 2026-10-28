@@ -59,7 +59,7 @@ system types and the `UiSystems` aggregate (`createUiSystems`,
 stays); every reader takes `uiSystems: view UiSystems`, every writer `mod`, the
 apps own it next to their world (121 `App.uiSystems`, 106 `App.uiSystems`
 rebuilt with each route's world, 114 `InputSystem.uiSystems`, the UiShell
-examples a local). The schedule keeps its judgement: `uiShouldRun(schedule,
+examples a local). The schedule keeps its judgment: `uiShouldRun(schedule,
 world, uiSystems, index)` adds `uiSystemsReadGeneration` — the system tables
 each stage reads, listed by hand in Pipeline.rae — to the declared world
 generation (`shouldRunDeclaredPlus`); fixture 839 proves the declared schedule
@@ -73,14 +73,14 @@ follow-up if it earns its churn.
 **Step 6b is implemented** (2026-09-22): `Transform2dSystem { localTransforms,
 worldTransforms, worldVisuals, runtimeOffsets }`, `AnimationSystem { animStates,
 smokeStates, carouselStates }`, `HeroTransitionSystem { heroTransitions }`,
-`ButtonSystem { interactions }` on `UiSystems`; the button behaviour is
+`ButtonSystem { interactions }` on `UiSystems`; the button behavior is
 gathered in `lib/ui/buttonSystem/` — `buttonInteractionClear/Mark` (was
 inputSystem), `buttonStyleUpdate` (ButtonStyle.rae, was widgetStyleSystem),
 `buttonHoverScaleUpdate` (ButtonHoverScale.rae, was hoverScaleSystem) — as ONE
 type and module, not one function: the three keep their pipeline stages
 (style before layout, hover scale after transform) because merging them
 would move the hover scale a frame earlier and change what is drawn. Stage
-order and 839's judgement unchanged (transform's declared counts drop to its
+order and 839's judgment unchanged (transform's declared counts drop to its
 own tables). `UiWorld` now holds only authored tables, `childrens`, the
 resources and the allocator.
 
@@ -97,7 +97,7 @@ structure in Rae terms, with the callbacks replaced by explicit data.
 - **Component table** — storage: a sparse set of one component type keyed by
   `EntityId` (`lib/ecs/ComponentTable.rae`). It does not care which struct it
   is a field of; the ids come from the world's allocator either way.
-- **System** — a unit of behaviour *together with the state it owns*: its
+- **System** — a unit of behavior *together with the state it owns*: its
   update function(s) plus the resources and component tables nothing else
   writes. `type PlaybackSystem { likedHearts: ComponentTable(LikedHeart) … }`
   and `func playbackUpdate(playbackSystem: mod PlaybackSystem, world: mod
@@ -203,7 +203,7 @@ move to the system that derives them:
 | `SafeAreaSystem` | safeInsets |
 | `HierarchySystem` | parents (derived from `Children`) |
 | `AnimationSystem` | animStates, smokeStates, carouselStates |
-| `ButtonSystem` | interactions (hovered/pressed) — plus the press/hover behaviour now spread over inputSystem, hoverScaleSystem and widgetStyleSystem (HoverScale application, StateStyle swap) |
+| `ButtonSystem` | interactions (hovered/pressed) — plus the press/hover behavior now spread over inputSystem, hoverScaleSystem and widgetStyleSystem (HoverScale application, StateStyle swap) |
 | `HeroTransitionSystem` | heroTransitions (stays generic: a shared-element transition keyed by `HeroWidget`, driving a plain Sprite + CornerRadius) |
 
 `Transform2dSystem` is spelled with the dimension because a
@@ -269,7 +269,7 @@ the array made explicit. An app with no tables of its own calls
 `releaseDeadEntities` alone (UiShell does it for the 3D examples).
 
 **Snapshot** (`worldToJson`/`worldFromJson`, #768): the same shape — lib
-serialises `UiWorld`, `serializeInto(S: type, …)` per system, listed by hand.
+serializes `UiWorld`, `serializeInto(S: type, …)` per system, listed by hand.
 
 The hand-written lists are three functions of ≤ 7 lines per app. Once the
 shape is proven, `fields()` can be extended to recurse one level into
@@ -348,10 +348,10 @@ inserted together with values.
 Rules:
 
 - **Expansion at load, field-wise.** A bundle is expanded when the node is
-  deserialised: for each component the bundle names, decode the bundle's
+  deserialized: for each component the bundle names, decode the bundle's
   object, then apply the node's own object for that component **over** it
   field by field (node wins). Bundles listed later win over earlier ones.
-  This is the ContainerStyle expansion generalised to any component and any
+  This is the ContainerStyle expansion generalized to any component and any
   values, using the same `decodeComponent` path.
 - **Systems never see bundles.** After expansion the world holds ordinary
   components; no system, and no pipeline stage, knows the word. This keeps

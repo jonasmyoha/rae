@@ -1,12 +1,12 @@
 # A glTF level to walk round: a small level authored as Blender would export
 # it (made without Blender by tools/levels/exportWalkLevel.py; the rules are
 # docs/gltf-levels.md), read by app3d/GltfLevel and made into entities in the
-# file's order. Its meshes are drawn in their base colours (a World3d mesh
+# file's order. Its meshes are drawn in their base colors (a World3d mesh
 # instance each), its `_collision` nodes are static Box3D triangle meshes, its
 # `marker_spawn` is where the character starts, and its drawn triangles go
 # into a surface map (app3d/SurfaceMap) by material name, so every footprint
 # knows what it stands on and is laid in a darker shade of it: sand on the
-# path, green on the grass, grey on the stone ramp and platform.
+# path, green on the grass, gray on the stone ramp and platform.
 #
 # The character is a Box3D mover (app3d/CharacterBodies, CharacterMovers) drawn
 # as a capsule with a visor showing where it faces: it walks on the level's
@@ -117,7 +117,7 @@ func surfaceRules() ret List(MaterialSurface) {
 type FootprintTrail {
   prints: List(EntityId)
   next: Int
-  travelled: Float
+  traveled: Float
   lastX: Float
   lastY: Float
   left: Bool
@@ -144,7 +144,7 @@ type LevelWorld {
   colliders: ComponentTable(Collider)
   physics: Physics
   surfaceMap: SurfaceMap
-  # Each surface's colour as the level paints it (by surface code)
+  # Each surface's color as the level paints it (by surface code)
   surfaceColors: List(Vec3)
   controllers: ComponentTable(ThirdPersonController)
   characters: ComponentTable(CharacterBody)
@@ -211,7 +211,7 @@ func noRotation() ret Vec3 {
 }
 
 # The level's items as entities, in the file's order: a drawn mesh (in its
-# base colour, uploaded to `renderer` when there is one, and laid into the
+# base color, uploaded to `renderer` when there is one, and laid into the
 # surface map), a collider, a marker; each with the LevelNode it came from.
 # The number of colliders Box3D refused.
 func buildLevel(
@@ -360,7 +360,7 @@ func spawnCharacter(world: mod LevelWorld, feet: view Vec3, meshes: view LevelMe
     data: FootprintTrail {
       prints: prints
       next: 0
-      travelled: 0.0
+      traveled: 0.0
       lastX: feet.x
       lastY: feet.y
       left: true
@@ -441,9 +441,9 @@ func stepFootprints(world: mod LevelWorld, trail: mod FootprintTrail) {
   if grounded is false {
     ret
   }
-  trail.travelled = trail.travelled + Math.sqrt(x: dx * dx + dy * dy)
-  if trail.travelled >= strideLength {
-    trail.travelled = trail.travelled - strideLength
+  trail.traveled = trail.traveled + Math.sqrt(x: dx * dx + dy * dy)
+  if trail.traveled >= strideLength {
+    trail.traveled = trail.traveled - strideLength
     let surface: Int = surfaceCodeAt(map: world.surfaceMap, x: feet.x, y: feet.y)
     trail.surfaceSteps.set(
       index: surface

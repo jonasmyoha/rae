@@ -65,7 +65,7 @@ python3 compiler/tools/assert_bmp_diff.py --convert \
   "$TMP/TreeSelection.bmp" "$OUT_DIR/TreeSelection.png"
 
 # The component list scrolls as a moving virtual list inside a fixed clip.
-# Capture a deep offset so a travelling clip or stale row window goes blank.
+# Capture a deep offset so a traveling clip or stale row window goes blank.
 env RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
 RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
 RAE_UI_EDITOR_TEST_SELECT="PlayButton" \

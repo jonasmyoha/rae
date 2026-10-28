@@ -10,7 +10,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module);
 
 // Per-file import/open scope (docs/module-namespacing.md). Call reset once, then
 // register each source file's import directives (from the module graph) before
-// sema, so name resolution can honour per-file aliases and import/open.
+// sema, so name resolution can honor per-file aliases and import/open.
 void sema_reset_file_scopes(void);
 void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports);
 // Register a prelude package (auto-loaded => opened for every file).

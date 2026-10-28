@@ -27,7 +27,7 @@ const server = Bun.serve({
       if (message.type === "echo") {
         socket.send(data);
       } else if (message.type === "broadcast") {
-        // The payload is serialised once, for both messages
+        // The payload is serialized once, for both messages
         const payload = JSON.stringify(message.payload);
         server.publish("all", '{"type":"broadcast","payload":' + payload + "}");
         const listenCount = server.subscriberCount("all");

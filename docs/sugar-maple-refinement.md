@@ -9,7 +9,7 @@ remains available as the comparison control.
 
 [North Carolina Extension](https://plants.ces.ncsu.edu/plants/acer-saccharum/)
 describes a dense spreading crown and five-lobed leaves with variable autumn
-colour. [Oregon State University](https://landscapeplants.oregonstate.edu/plants/acer-saccharum)
+color. [Oregon State University](https://landscapeplants.oregonstate.edu/plants/acer-saccharum)
 shows ascending branches, an upright oval form and bark with irregular long
 plates. This preset uses copper/orange within that range. Its game-scale
 specimens do not represent the species' eventual mature height.
@@ -80,7 +80,7 @@ fragment work, so these geometry reductions are not a measured GPU speedup.
 No isolated CPU/GPU timing claim is made.
 
 Kind 4's culling radius changes from 0.65 to 0.75 times reference height,
-centred at z=0.55 times height. The old bound clipped the rotating-card envelope
+centered at z=0.55 times height. The old bound clipped the rotating-card envelope
 for some seeds. Six tested seeds fit the new envelope, including each card's
 half diagonal and a 0.03-height wind allowance. Other kinds retain their bounds.
 

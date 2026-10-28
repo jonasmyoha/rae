@@ -169,8 +169,8 @@ func textFlushBuffer(
 # ----- text batch (#915: the CPU accumulation, was C's drawGlyphEx) -----------
 
 # Queue one MSDF glyph quad on atlas `atlas` (1-based, SdfText.loadAtlas):
-# screen rect (design units), normalised uv rect, straight 0xAARRGGBB colour
-# (the shader premultiplies), pxRange, an optional outline (width px + colour)
+# screen rect (design units), normalized uv rect, straight 0xAARRGGBB color
+# (the shader premultiplies), pxRange, an optional outline (width px + color)
 # and softness (edge falloff px; 1 = crisp). Tagged with the clip active now.
 func canvasDrawGlyphEx(
   canvas: mod Gpu2dCanvas
@@ -201,14 +201,14 @@ func canvasDrawGlyphEx(
   # glyph — O(n^2) per frame and the dominant idle malloc/free churn (114:
   # ~2.8M Buffer allocs / 20 s). A `mod` window grows the List's own storage.
   let clip: Int = canvas.currentClip
-  # The canvas rotation (#1003): the glyph's centre turns about the pivot; the
-  # shader turns the quad about that centre by the same angle (params.w).
+  # The canvas rotation (#1003): the glyph's center turns about the pivot; the
+  # shader turns the quad about that center by the same angle (params.w).
   var glyphX: Float = sx0
   var glyphY: Float = sy0
   if canvas.spinAngle is not 0.0 {
-    let centre: SpinPoint = spinPoint(canvas: canvas, x: (sx0 + sx1) / 2.0, y: (sy0 + sy1) / 2.0)
-    glyphX = centre.x - (sx1 - sx0) / 2.0
-    glyphY = centre.y - (sy1 - sy0) / 2.0
+    let center: SpinPoint = spinPoint(canvas: canvas, x: (sx0 + sx1) / 2.0, y: (sy0 + sy1) / 2.0)
+    glyphX = center.x - (sx1 - sx0) / 2.0
+    glyphY = center.y - (sy1 - sy0) / 2.0
   }
   if let entry: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     entry.glyphs.add(value: glyphX)

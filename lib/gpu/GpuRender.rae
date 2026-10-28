@@ -402,7 +402,7 @@ type VertexAttributeSpec {
 # What a render pipeline needs beyond its shader: one interleaved vertex buffer
 # layout (NO vertex buffer when `attributes` is empty and the vertex shader
 # builds geometry from vertex_index, as grass and sprites do), one or more
-# colour targets (all alpha-blended when `alphaBlend`, as water's surface is;
+# color targets (all alpha-blended when `alphaBlend`, as water's surface is;
 # the G-buffer's three targets are unblended), and an optional depth test
 # (format 0 = none; water uses read-only reverse-Z: Depth32Float, no write,
 # Greater; the geometry pass writes depth).
@@ -411,7 +411,7 @@ type RenderPipelineSpec {
   attributes: List(VertexAttributeSpec)
   colorFormats: List(Int32)
   alphaBlend: Bool
-  # With alphaBlend: true, the source colour is already premultiplied by its
+  # With alphaBlend: true, the source color is already premultiplied by its
   # alpha (One / OneMinusSrcAlpha — the 2D box pass) instead of straight
   # (SrcAlpha / OneMinusSrcAlpha — water, transparents).
   premultiplied: Bool
@@ -419,7 +419,7 @@ type RenderPipelineSpec {
   depthWrite: Bool
   depthCompare: Int32
   cullMode: Int32
-  # Samples per pixel of the colour and depth targets: 1, or 4 for an MSAA
+  # Samples per pixel of the color and depth targets: 1, or 4 for an MSAA
   # pass (the forward main pass, ForwardMain.rae)
   sampleCount: Int
 }

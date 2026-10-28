@@ -32,20 +32,20 @@ Exit code 70 from the program (`rae run` reports 1). The rules
   `x % (1 - 1)` and `x / zeroConst` are all rejected by sema, which is why
   this program computes its zero.
 - `+ - *` overflow **wraps two's-complement** — the first line above —
-  defined behaviour (computed unsigned), the same in every build profile.
+  defined behavior (computed unsigned), the same in every build profile.
   Rae has no dev/release semantic differences; a dev-only overflow check was
   tried and dropped for that reason.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | no overflow — arbitrary precision; `ZeroDivisionError` on `7 / 0` |
 | JavaScript | no integer type — `2**63` loses precision as a double; `7 / 0` is `Infinity` |
 | Java | wraps to `Long.MIN_VALUE`; `ArithmeticException` on `7 / 0` |
 | Go | wraps; run-time panic on `7 / 0` (a constant `7 / 0` is a compile error) |
 | Rust | panics in debug, wraps in release; always panics on `7 / 0` (constant: compile error) |
-| C | signed overflow is undefined behaviour; `7 / 0` is undefined behaviour (usually `SIGFPE`) |
+| C | signed overflow is undefined behavior; `7 / 0` is undefined behavior (usually `SIGFPE`) |
 
 Rae's rules are Java's and Go's for overflow (wrap), Python's and Go's for a zero divisor (stop), with Go's compile-time check for a constant divisor.
 

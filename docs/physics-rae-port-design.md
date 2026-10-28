@@ -225,10 +225,10 @@ Known risks, each addressed when measured, not before:
   after the other fixes, the choice is between Rae vector types (a language
   design question) and **one** C kernel on the allowlist — decided then, with
   numbers.
-- **Threads.** Box3D parallelizes inside the step (graph-coloured constraint
+- **Threads.** Box3D parallelizes inside the step (graph-colored constraint
   batches). The port is single-threaded first; parallelism comes through
   `parallelLoop` once it runs on real threads (`docs/concurrency-model.md`),
-  with results unchanged because the colouring, not the scheduling, fixes the
+  with results unchanged because the coloring, not the scheduling, fixes the
   order. What the engine still lacks for that, measured against Box3D at 1-8
   workers, is `docs/physics-performance-plan.md`: threads are needed (no
   single-threaded build, C included, meets the featured example's 4 ms on a
@@ -292,10 +292,10 @@ Where the rest goes, profiled against the C app:
   collide 334 against 242 ms and 329 against 221 ms (1.38x / 1.49x), solve
   and finalize 2 040 against 2 025 and 1 999 against 1 965 (1.01x / 1.02x).
   Collide is ~14% of a pyramid step, so storing the solver-facing contact
-  data contiguously per colour, as Box3D does, would recover at most ~0.4 ms
+  data contiguously per color, as Box3D does, would recover at most ~0.4 ms
   a step; with both pyramids inside the 1.2x target it was not done. The
   earlier analysis, for the record: Rae's SIMD solve and push were already
-  faster than C scalar's; collide and prepare were ~2.5x C's. Box3D iterates the colour's
+  faster than C scalar's; collide and prepare were ~2.5x C's. Box3D iterates the color's
   contiguous `b3ContactSim` array; the port reaches each contact through its
   id in `world.contacts` (432-byte `Contact`, its manifold in a separate heap
   list) and copies both `BodySim`s (224 bytes each) per contact in collide.
@@ -306,7 +306,7 @@ Where the rest goes, profiled against the C app:
   kind with a free-slot stack, and a `JointSim` (208 bytes) holds its
   record's `dataIndex` (so does the `Joint`, which frees the slot on
   destroy). The record stays put while the sim moves between sets and
-  colours; the kind's prepare, warm start and solve take it as a `mod` /
+  colors; the kind's prepare, warm start and solve take it as a `mod` /
   `view` parameter, as Box3D passes `&base->sphericalJoint`, instead of
   copying it in and back. Joint grid 30.1 → 15.5 ms (2.58x → 1.33x),
   fixture 984 and the checksums unchanged. The rest of the gap is not
@@ -524,13 +524,13 @@ C added.
   transformed hull; proxies in the broad phase) and the broad phase's proxy
   layer (`lib/physics/dynamics/`, `broadPhase/BroadPhase`, golden `world`,
   fixture 954). Split for the rest: **P4b** contacts (pair finding is done,
-  P3b), the constraint graph and its colours, contact
+  P3b), the constraint graph and its colors, contact
   islands; **P4c** the scalar wide solver and contact solver, the stage
   list and dispatcher, and the 600-step scenes; **P4d** sleep and island
   splitting, sensors, contact and sensor events.
   **P4b landed 2026-10-04, bit-exact:** contacts (create, destroy, the
   convex manifold update with impulse carry-over, contact recycling), the
-  constraint graph with Box3D's colour assignment and overflow, contact
+  constraint graph with Box3D's color assignment and overflow, contact
   islands (link, unlink, merge), the contact moves of waking and of
   b3TrySleepIsland, and the narrow phase of the step with its state-change
   processing (`lib/physics/dynamics/Contact`, `ConstraintGraph`,
@@ -540,7 +540,7 @@ C added.
   with its stage list, blocks and sync indices, a single-threaded stage
   dispatcher module (`StageDispatcher`), the wide contact solver on the
   scalar path (a wide float is a struct of four Floats) and the scalar one
-  for the overflow colour, integration, body finalization and continuous
+  for the overflow color, integration, body finalization and continuous
   collision (`lib/physics/dynamics/WorldStep`, `Solver`, `FinalizeBodies`,
   `StageDispatcher`, `StepContext`, `FloatWide`, `ContactConstraints`,
   `ContactSolver`, `ContactSolverWide`, `ContactSolverWideSolve`,
@@ -616,7 +616,7 @@ C added.
   a moving crowd, some refusing by filter (fixture 956).
 - **P6 — joints**, one module per kind, each scene bit-exact.
   **P6a landed 2026-10-04, bit-exact:** the joint core (creation and
-  destruction, graph colouring and overflow joints, joint islands with
+  destruction, graph coloring and overflow joints, joint islands with
   link/unlink, split and the merge of two sleeping sets, the joint moves of
   wake, sleep, b3Body_SetType, disable/enable and body destruction, the
   joint walk of b3ShouldBodiesCollide, the solver's joint stages and joint
@@ -710,7 +710,7 @@ Not planned: recording/replay/snapshots, the external task scheduler hook.
 Box3D is young and moves fast. The port pins one commit. Moving it is a task
 of its own: diff upstream between the two commits, port the diff module by
 module, regenerate the goldens with the oracle, and let the bit-exact fixtures
-show every place the behaviour changed.
+show every place the behavior changed.
 
 ## 9. Open questions
 

@@ -32,12 +32,12 @@ coastal, rocky highland, (desert/tundra later) — so "greater biomes with diffe
 vegetation" is a lookup, not bespoke code.
 
 **Consumers** all read the same field/classifier:
-- **Terrain mesh**: height from elevation; per-fragment colour/texture from the
+- **Terrain mesh**: height from elevation; per-fragment color/texture from the
   material weights (splat) — the top-down base coverage.
 - **Water**: a surface at `waterLevel` wherever the field is below it; the sand
   beach falls out of the classifier; gameplay marks water non-walkable.
 - **Grass/vegetation**: per-blade biome/material → density, height, species,
-  colour; suppressed on water/sand/rock; lush in grassland, reeds in swamp.
+  color; suppressed on water/sand/rock; lush in grassland, reeds in swamp.
 - **Gameplay**: walkability, spawn rules — same classifier, on the CPU.
 
 ## Procedural base + authored regions (hybrid)
@@ -48,11 +48,11 @@ a top-down mobile game). But specific features want placement, so the field is a
 
 - **Procedural base** — the noise field + classifier above.
 - **Authored regions** — `BiomeRegion` ECS entities with a shape (circle
-  centre+radius first; polygons later) that **override** the base inside them:
+  center+radius first; polygons later) that **override** the base inside them:
   force a biome, stamp a lake, raise a rocky hill, drop a beach. Regions are
   collected each frame into a small GPU storage buffer the classifier consults
   (contained/nearest region wins), and are equally queryable on the CPU for
-  gameplay. This is the generalised form of #492's "biome regions via ECS".
+  gameplay. This is the generalized form of #492's "biome regions via ECS".
 
 Regions never hold a per-blade or per-texel entity — only region shapes + params,
 exactly as #492 requires.
@@ -65,7 +65,7 @@ exactly as #492 requires.
   (no stair-stepped coastlines) and TAA/deferred normals stay stable.
 - **Elevation drives both height and biome**, so coastlines, beaches and rocky
   peaks line up with the terrain shape for free.
-- **Splat colours first, textures later** — a flat classified colour already
+- **Splat colors first, textures later** — a flat classified color already
   reads correctly top-down (`docs/top-down-vegetation.md` §a); textures are a
   drop-in richness pass over the same weights.
 
@@ -76,13 +76,13 @@ exactly as #492 requires.
    + biome bucket + a `BiomeConfig`. Deterministic, unit-tested. No rendering —
    the data model every other phase consumes.
 2. **#533 — Terrain material splat.** Terrain fragment samples the classifier →
-   blended material colour (grass/sand/mud/rock). Replaces the flat green ground;
+   blended material color (grass/sand/mud/rock). Replaces the flat green ground;
    the grass gradient bottom tracks the LOCAL ground material.
 3. **#534 — Water bodies.** A water surface at `waterLevel` where the field is
    below it; beach shoreline from the classifier; basic water material
-   (colour/fresnel; transparency/reflection later); terrain basins; non-walkable.
+   (color/fresnel; transparency/reflection later); terrain basins; non-walkable.
 4. **#535 — Grass biome integration.** Per-blade biome/material drives
-   density/height/species/colour and suppresses grass off grassland; extends #492
+   density/height/species/color and suppresses grass off grassland; extends #492
    `GrassViewSettings` into per-biome vegetation params.
 5. **#536 — Authored biome REGIONS (ECS).** `BiomeRegion` component + region GPU
    buffer + CPU query; hand-place lakes/beaches/rocky hills over the procedural

@@ -161,7 +161,7 @@ Measure with `RAE_GPU_PASS_TIMING=1` (112, 114, 118 and 119 log a
 `[gpu passes]` line every 60 frames). A span is the time between two
 timestamp marks that are submitted between the passes. On Apple GPUs work
 from separate submissions overlaps, so a pass's time can show up in a
-neighbouring span. Compare the total and `RAE_FRAME_TIMING=1`, not single
+neighboring span. Compare the total and `RAE_FRAME_TIMING=1`, not single
 spans.
 
 ---
@@ -188,11 +188,11 @@ before the composite's upscale (`lib/GbufferSmaa.rae`). It has three
 passes, all recorded into the post recording:
 
 - `smaa_edges.wgsl`: luma edges, using the luma of the tone-mapped,
-  gamma-encoded colour;
+  gamma-encoded color;
 - `smaa_weights.wgsl`: blending weights with diagonal and corner
   detection, the "high" preset (16 search steps, 8 diagonal, corner
   rounding 25);
-- `smaa_blend.wgsl`: neighbourhood blending in HDR, into the anti-aliased
+- `smaa_blend.wgsl`: neighborhood blending in HDR, into the anti-aliased
   target the composite reads.
 
 The lookup tables are generated, not bundled. The area texture is made
@@ -202,7 +202,7 @@ in Rae (`lib/SmaaSearchTexture.rae`). Both match the reference
 `Textures/AreaTex.h` / `SearchTex.h` exactly: every texel of the band (the
 area mapping checked against the reference script's functions) and every
 search byte. These files are ports of SMAA (MIT): they carry the one-line
-notice, and the licence is in `lib/LICENSE-smaa.md`.
+notice, and the license is in `lib/LICENSE-smaa.md`.
 
 - **Selecting the mode:** FXAA stays selectable with
   `setAntialiasMode(renderer:, mode: AntialiasMode.fxaa)`, and TAA
@@ -223,7 +223,7 @@ shader-f16 when the adapter has it (`lib/gpu/DeviceFeatures.rae`). Shaders
 written for it compose a precision prelude FIRST: `lib/precision_f16.wgsl`
 (`enable f16;`, `alias half = f16`) or `lib/precision_f32.wgsl` (`half` =
 f32), chosen at pipeline creation with `deviceHasShaderF16()`, so one WGSL
-file serves both. The lighting pass (`deferred_light.wgsl`) does its colour
+file serves both. The lighting pass (`deferred_light.wgsl`) does its color
 and shading arithmetic in `half`. Depth, the world-position reconstruction,
 shadows, the AO upsample, the sky and the GGX specular lobe stay f32, because
 GGX reaches about 7.8e4 on a smooth surface, above f16's 65504.

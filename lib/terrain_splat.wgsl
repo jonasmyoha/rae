@@ -117,7 +117,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var albedo = raeTerrainDetailColor(in.worldXY, in.bio, d.params.w);
   // TEXTURED TERRAIN (#9 grass, #14 the rest). Stamp each plate-harvested tile
-  // over the procedural colour, weighted by that material's biome weight so only
+  // over the procedural color, weighted by that material's biome weight so only
   // the dominant material takes its own texture. Each tile is DIVIDED by its own
   // mean and multiplied by the calibrated RAE_TERRAIN_* albedo, so it adds the
   // plate's spatial texture WITHOUT re-lighting already-lit pixels or moving the
@@ -125,12 +125,12 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   // drawTerrainMesh from a module global that defaults to 0 -- so an app that
   // never uploads tiles (example 114) blends nothing and this is exact identity.
   // Sampled unconditionally so the array binding is never dead-stripped from the
-  // pipeline's auto-derived layout. Rock keeps its procedural colour: the plate
+  // pipeline's auto-derived layout. Rock keeps its procedural color: the plate
   // has no rocky-ground/stone tile to harvest (its low-saturation regions are
   // shadowed greens), so there is no honest rock texture to stamp.
   let texBlend = d.albedoMetallic.x;
   let b = raeBiomeClassify(in.bio.x, in.bio.y, in.bio.z);
-  // BLURRED sand/grass texture-stamp weights (#83). The procedural colour already
+  // BLURRED sand/grass texture-stamp weights (#83). The procedural color already
   // crossfades sand<->grass over a wide band (raeTerrainDetailColor), but the tile
   // TEXTURES below are stamped by the classify's near-line weights, which re-sharpens
   // the edge. Re-split the combined sand+grass weight across the same wide elevation
@@ -149,7 +149,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   albedo = mix(albedo, grassT, clamp(texBlend * wGrass83, 0.0, 1.0));
   albedo = mix(albedo, sandT,  clamp(texBlend * wSand83,  0.0, 1.0));
   // Under water the ground is the seabed (#857): the wet sand tile, so the
-  // lib/water surface has a bed to colour by depth instead of a painted sea.
+  // lib/water surface has a bed to color by depth instead of a painted sea.
   albedo = mix(albedo, sandT * RAE_WET_SAND_DARKEN, clamp(texBlend * b.wWater, 0.0, 1.0));
   // Road is an overlay (raeBiomePath), not a biome weight; stamp it over land
   // under the same gate, below water so a shore crossing still reads wet.

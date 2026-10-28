@@ -10,7 +10,7 @@ change what is measured. `check.sh` tests every rule below.
   - Headers: `Content-Type: text/plain`, `Content-Length: 13`, `Server`, `Date`.
 - `GET /json` → `200`, body a JSON object equal to
   `{"message":"Hello, World!"}`.
-  - The object is serialised **for each request**, with no cached bytes.
+  - The object is serialized **for each request**, with no cached bytes.
     Whitespace between the tokens is allowed, so the check parses the body.
   - Headers: `Content-Type: application/json`, `Content-Length` (the body's
     length), `Server`, `Date`.

@@ -7,17 +7,17 @@ an app.
 
 ## What you see
 
-With **Cascades** on (the top bar), each cascade has its own colour: red,
+With **Cascades** on (the top bar), each cascade has its own color: red,
 green, blue, yellow from the camera out.
 
-- The ground and objects a cascade shadows are tinted in its colour.
-- A line in its colour is drawn where the cascade ends. Over the last 12% of
+- The ground and objects a cascade shadows are tinted in its color.
+- A line in its color is drawn where the cascade ends. Over the last 12% of
   each cascade's range the shader mixes its shadow with the next cascade's,
-  and the tint blends into the next colour the same way, so the change in
+  and the tint blends into the next color the same way, so the change in
   shadow sharpness is a gradient ending at the line, not a step. The last
   cascade fades out to no shadow across its band; past its line nothing is
   tinted and nothing casts.
-- Each shadow map's square is outlined in its colour. Shadows outside the
+- Each shadow map's square is outlined in its color. Shadows outside the
   square are cut off even before the split line.
 
 The orange marker is a 1.8 m character at the camera target. The camera
@@ -29,7 +29,7 @@ the marker and the ground around it are in one cascade (red), the rest
 spread from there to 120 m. Turn the focus off to see the plain split scheme
 from the near plane, where a follow camera's player stands on a split.
 `RAE_SHADOW_FAR=24 RAE_SHADOW_COUNT=3 RAE_SHADOW_FOCUS=0` is the walkers'
-fit before the focus (shadows ended at 24 m). Posts stand every metre in rings out to 16 m, every 10 m along the
+fit before the focus (shadows ended at 24 m). Posts stand every meter in rings out to 16 m, every 10 m along the
 avenue out to 400 m (a tall red mast every 50 m), and cubes on a 20 m grid.
 
 ## Controls
@@ -38,7 +38,7 @@ The standard editor panel (`lib/app3d/EditorPanel.rae`):
 
 - drag to orbit, wheel to zoom, the camera bar's **Orbit** button for the free
   WASD camera;
-- **Cascades** in the top bar: the debug colours on and off;
+- **Cascades** in the top bar: the debug colors on and off;
 - the side panel's **Focus on the target** switch: the focus on and off;
 - the menu button opens the side panel. Its first section is the fit: each
   button steps one setting (shadow distance 24 / 50 / 100 / 120 / 150 / 200 /
@@ -68,10 +68,10 @@ RAE_SHADOW_FAR=200 RAE_SHADOW_COUNT=4 RAE_SHADOW_LAMBDA=0.9 RAE_SHADOW_VIEW=high
 | `RAE_SHADOW_FOCUS` | `0`: no focus (splits from the near plane) | on |
 | `RAE_SHADOW_RES` | shadow map size (px) | 2048 |
 | `RAE_SHADOW_BACK` | how far behind the view the light's box reaches (m) | 12 |
-| `RAE_SHADOW_DEBUG` | `0` turns the debug colours off | on |
+| `RAE_SHADOW_DEBUG` | `0` turns the debug colors off | on |
 | `RAE_SHADOW_HOUR` | the sun's hour | 15.5 |
 | `RAE_SHADOW_VIEW` | `follow` (game camera), `high` (down the avenue), `low` (eye height) | follow |
 | `RAE_SHADOW_PANEL` | `1` opens the side panel | closed |
 
-Any app can show the same colours: `setShadowCascadeDebug(renderer:, on: true)`
+Any app can show the same colors: `setShadowCascadeDebug(renderer:, on: true)`
 (`lib/RendererDeferred.rae`), on the deferred and the forward path.

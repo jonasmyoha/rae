@@ -5,12 +5,12 @@ The original thin trunk, narrow column and placement mapping are preserved.
 Forest width multiplier remains 0.85 and height remains 8–11.5 m. The six
 fixed 138 specimens retain their original transforms: 7.5, 8.2 and 8.9 m,
 plus 22.5, 24.6 and 26.7 m tall variants whose widths remain those of the
-shorter trees. No tree count or neighbouring species was changed.
+shorter trees. No tree count or neighboring species was changed.
 
 [Oregon State](https://landscapeplants.oregonstate.edu/plants/cupressus-sempervirens)
 describes the cultivated ascending column and dark scale foliage.
 [North Carolina Extension](https://plants.ces.ncsu.edu/plants/cupressus-sempervirens/)
-describes slender upright stems and grey to grey-brown furrowed bark.
+describes slender upright stems and gray to gray-brown furrowed bark.
 [Florida Extension](https://ask.ifas.ufl.edu/publication/ST225) describes the
 fine-textured scale leaves and upright branching. These guide the species;
 the private T04/T05/T07 crops guide quiet connected foliage masses, not its
@@ -50,7 +50,7 @@ sprays arranged in 16 staggered tiers. Each spray has two crossed, curved
 four-ring strips. These stay fixed to their branch; they do not rotate towards
 the camera. Their radial normals describe broad foliage volume. The original
 512 × 512 alpha texture supplies fine scale-shoot edges with restrained
-internal contrast. Three close colour tones avoid individual bright leaves.
+internal contrast. Three close color tones avoid individual bright leaves.
 
 The 17-ring inner surface is only 74% of the spray envelope. It uses a constant
 UV sampling an opaque quiet part of the same image, making a continuous dark
@@ -60,7 +60,7 @@ retained volume and cutout sprays, not the broadleaf camera-facing technique.
 
 The rigid stem retains its original 0.035 unit radius, mild lean and buried
 base. Twelve tightly ascending secondary stems reuse the existing curved tube
-helper. An original grey-brown albedo adds shallow interrupted vertical bark
+helper. An original gray-brown albedo adds shallow interrupted vertical bark
 ridges. It is painted relief, not displaced geometry. The wood carries no
 wind data. Each 16-vertex spray shares a fixed attachment pivot and 0.12
 flexibility; the inner column stays rigid.
@@ -74,7 +74,7 @@ flexibility; the inner column stays rigid.
 | ![Wood](images/cypress-refinement/bare.png) | ![Backlight](images/cypress-refinement/backlit.png) | ![Night](images/cypress-refinement/night.png) |
 
 The shared surface-image path supplies coverage-preserving mips and the same
-0.5 cutoff for colour, shadow and atlas. Existing two-sided foliage lighting
+0.5 cutoff for color, shadow and atlas. Existing two-sided foliage lighting
 remains in use. No emission, global exposure change or shadow exemption was
 added. [Texture provenance](../lib/assets/trees/cypressAssets.md) records the
 original images. A six-second fixed forward walk with wind 1 is in the private
@@ -96,7 +96,7 @@ presentation; sampled frames retain attached foliage and a stable trunk.
 
 143 still has 31,090 trees. The target is the existing kind-2 instance at
 (-44.0972, 48.8294, 0.6033), height 10.0013 m; the group view retains its
-spruce, maple and ginkgo neighbours. 136, 137 and 143 use the same generator,
+spruce, maple and ginkgo neighbors. 136, 137 and 143 use the same generator,
 four shared mesh parts, image layers and atlas subject through `GroveTrees`.
 
 | Prototype cost | Selected |

@@ -2,7 +2,7 @@
 # The context of one time step (b3StepContext, b3SolverStage, b3SyncBlock,
 # b3SolverBlock and b3MakeSoft of Box3D's solver.h at 9f998c8). The solver's
 # work is split into stages, each a range of blocks in `syncBlocks`; stages
-# that iterate (warm start, solve, relax, restitution) share their colour's
+# that iterate (warm start, solve, relax, restitution) share their color's
 # blocks, whose sync index grows each time a stage claims them. The sync
 # indices and completion counts are plain Ints read and written only by the
 # StageDispatcher's functions, which is the one place threading changes.
@@ -42,7 +42,7 @@ type SolverBlock {
   startIndex: Int
   count: Int
   blockType: SolverBlockType
-  # The graph colour, 255 for none
+  # The graph color, 255 for none
   colorIndex: Int
 }
 
@@ -61,8 +61,8 @@ type SolverStage {
   completionCount: Int
 }
 
-# A slice of the flat prepare/store range belonging to one colour
-# (b3WidePrepareSpan, b3ContactPrepareSpan): its contacts are the colour's.
+# A slice of the flat prepare/store range belonging to one color
+# (b3WidePrepareSpan, b3ContactPrepareSpan): its contacts are the color's.
 type PrepareSpan {
   start: Int
   count: Int
@@ -75,7 +75,7 @@ type BlockDim {
   count: Int
 }
 
-# Each active colour's constraint counts and block dimensions.
+# Each active color's constraint counts and block dimensions.
 type ColorPlan {
   colorIndex: Int
   wideContactCount: Int
@@ -99,7 +99,7 @@ type StepContext {
   # The awake sims of fast bullet bodies, for continuous collision
   bulletBodies: List(Int)
   anyRestitution: Bool
-  # Convex contacts, four per wide constraint, colour by colour
+  # Convex contacts, four per wide constraint, color by color
   wideConstraints: List(ContactConstraintWide)
   widePrepareSpans: List(PrepareSpan)
   wideContactCount: Int
@@ -108,11 +108,11 @@ type StepContext {
   manifoldConstraints: List(ManifoldConstraint)
   contactPrepareSpans: List(PrepareSpan)
   overflowSpans: List(PrepareSpan)
-  # The flat joint prepare range over the active colours (b3JointPrepareSpan)
+  # The flat joint prepare range over the active colors (b3JointPrepareSpan)
   jointPrepareSpans: List(PrepareSpan)
   overflowContactConstraints: List(ContactConstraint)
   overflowManifoldConstraints: List(ManifoldConstraint)
-  # Where each graph colour's slice starts (Box3D's per-colour pointers)
+  # Where each graph color's slice starts (Box3D's per-color pointers)
   colorWideStarts: List(Int)
   colorContactStarts: List(Int)
   activeColorCount: Int
@@ -121,7 +121,7 @@ type StepContext {
   syncBlocks: List(SyncBlock)
   # sync index (16 bits) | stage index (16 bits)
   syncBits: Int
-  # solve's working lists: the active colours and their block ranges
+  # solve's working lists: the active colors and their block ranges
   colorPlans: List(ColorPlan)
   colorBlockStarts: List(Int)
   colorBlockCounts: List(Int)

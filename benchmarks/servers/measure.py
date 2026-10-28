@@ -304,7 +304,7 @@ def measure(server, case):
 # ----- summary -------------------------------------------------------------------
 
 
-def summarise(runs):
+def summarize(runs):
     numbers = {}
     for key in ["requestsPerSecond", "p50Ms", "p99Ms", "p999Ms", "peakRssMb", "cpuSeconds", "allocationsPerRequest"]:
         values = [run[key] for run in runs if run.get(key) is not None]
@@ -407,7 +407,7 @@ def measure_http(summary):
                 for run in range(RUNS):
                     order = list(servers)
                     if run % 2 == 1 and "rae-eventLoop" in order and "rae-ecs" in order:
-                        # Alternate the Rae styles so drift favours neither
+                        # Alternate the Rae styles so drift favors neither
                         first, second = order.index("rae-eventLoop"), order.index("rae-ecs")
                         order[first], order[second] = order[second], order[first]
                     for impl in order:
@@ -430,7 +430,7 @@ def measure_http(summary):
                 for impl, impl_runs in runs.items():
                     with open(os.path.join(RAW, "%s-%s.json" % (impl, key)), "w") as raw:
                         json.dump(impl_runs, raw, indent=2)
-                    summary["results"][key][impl] = summarise(impl_runs)
+                    summary["results"][key][impl] = summarize(impl_runs)
                 if "rae-ecs" in runs and "rae-eventLoop" in runs:
                     ecs = summary["results"][key]["rae-ecs"]
                     event_loop = summary["results"][key]["rae-eventLoop"]
@@ -500,7 +500,7 @@ def spread(values):
     return {"median": statistics.median(values), "min": min(values), "max": max(values)}
 
 
-def summarise_ramps(ramps):
+def summarize_ramps(ramps):
     by_clients = {}
     for ramp in ramps:
         for step in ramp["steps"]:
@@ -569,7 +569,7 @@ def measure_websocket(summary):
         for impl, impl_ramps in ramps.items():
             with open(os.path.join(RAW, "%s-webSocket.json" % impl), "w") as raw:
                 json.dump(impl_ramps, raw, indent=2)
-            section["results"][impl] = summarise_ramps(impl_ramps)
+            section["results"][impl] = summarize_ramps(impl_ramps)
         if "rae-ecs" in ramps and "rae-eventLoop" in ramps:
             ecs = section["results"]["rae-ecs"]["steps"]
             event_loop = section["results"]["rae-eventLoop"]["steps"]
@@ -634,7 +634,7 @@ def measure_room(server, clients):
     return result
 
 
-def summarise_rooms(runs):
+def summarize_rooms(runs):
     def percentiles(key):
         found = [run.get(key) for run in runs if run.get(key)]
         return {name: spread([value[name] for value in found]) for name in ["p50", "p99", "max"]} if found else None
@@ -707,7 +707,7 @@ def measure_game_room(summary):
             for impl, impl_runs in runs.items():
                 with open(os.path.join(RAW, "%s-gameRoom-%s.json" % (impl, key)), "w") as raw:
                     json.dump(impl_runs, raw, indent=2)
-                section["results"][key][impl] = summarise_rooms(impl_runs)
+                section["results"][key][impl] = summarize_rooms(impl_runs)
             if "rae-ecs" in runs and "rae-eventLoop" in runs:
                 ecs = section["results"][key]["rae-ecs"]
                 event_loop = section["results"][key]["rae-eventLoop"]

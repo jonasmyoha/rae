@@ -71,10 +71,10 @@ app's own declaration), and `RAE_IOS_VERSION` / `RAE_IOS_BUILD` set
 
 One run per place with GPU pass and frame timing on (the app's
 app3d/FrameLog `[frames]` lines among them), cooling between runs if asked,
-each log copied off the phone and summarised (median and 95th percentile
+each log copied off the phone and summarized (median and 95th percentile
 frame time, frames over budget, scales, thermal states, GPU passes, CPU
 time; SUMMARY_FIRST / SUMMARY_MIDDLE add lines of the app's own).
-`SUMMARY_ONLY=1` summarises logs already copied. The script's head lists
+`SUMMARY_ONLY=1` summarizes logs already copied. The script's head lists
 every setting.
 
 ## App icons from a shot

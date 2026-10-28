@@ -17,7 +17,7 @@ type MeshData {
   vertCount: Int
   # Optional per-vertex local leaf pivot xyz and flexibility; ordinary meshes keep this empty.
   windPivots: List(Float) = List.create(Float, cap: 0)
-  # Optional camera-facing card centre xyz and enabled flag, one vec4 per vertex.
+  # Optional camera-facing card center xyz and enabled flag, one vec4 per vertex.
   # Position holds the rest corner in the local X/Z plane; UV stays ordinary.
   leafCards: List(Float) = List.create(Float, cap: 0)
 }
@@ -99,7 +99,7 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
       # Winding is (a, b, a+1) / (b, b+1, a+1) — the same convention
       # makeTorus uses, and the REVERSE of makePlane's.
       #
-      # It has to differ from the plane's: the sphere's parametrisation
+      # It has to differ from the plane's: the sphere's parametrization
       # advances `ri` from the +Z pole DOWNWARD while `si` advances
       # counter-clockwise seen from +Z, and those two together flip the
       # handedness of the (ri, si) patch relative to the outward normal.
@@ -173,13 +173,13 @@ func makeCylinder(segments: view Int) ret MeshData {
     indices.add(value: top0)
     indices.add(value: top1)
   }
-  # The caps: a centre and a ring each, normals along the axis
+  # The caps: a center and a ring each, normals along the axis
   loop var cap: Int = 0, cap < 2, ++cap {
     var y: Float = -1.0
     if cap is 1 {
       y = 1.0
     }
-    let centre: Int = verts.length / 8
+    let center: Int = verts.length / 8
     pushVert(
       verts: verts
       px: 0.0
@@ -208,8 +208,8 @@ func makeCylinder(segments: view Int) ret MeshData {
       )
     }
     loop var s: Int = 0, s < segments, ++s {
-      let ring0: Int = centre + 1 + s
-      indices.add(value: centre)
+      let ring0: Int = center + 1 + s
+      indices.add(value: center)
       if cap is 1 {
         indices.add(value: ring0 + 1)
         indices.add(value: ring0)
@@ -376,7 +376,7 @@ func makeFbmTerrain(
 }
 
 # Torus with its ring in the XY plane: `majorR` ring radius, `minorR` tube radius.
-# A unit-ish axis-aligned box centred on the origin, `size` across.
+# A unit-ish axis-aligned box centered on the origin, `size` across.
 #
 # FLAT SHADED, which is why it has 24 vertices rather than 8: a cube's
 # corner belongs to three faces with three different normals, and a shared
@@ -829,7 +829,7 @@ func smoothMeshNormals(meshData: view MeshData, angleDeg: view Float) pub ret Me
       j = j + 1
     }
     let len: Float = Math.sqrt(x: ax * ax + ay * ay + az * az)
-    # A degenerate sum — opposed normals cancelling — keeps the original
+    # A degenerate sum — opposed normals canceling — keeps the original
     # rather than producing a zero vector that would shade as black.
     if len > 0.00001 {
       verts.set(index: i * 8 + 3, value: ax / len)

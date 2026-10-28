@@ -450,7 +450,7 @@ The horizontal operations go in lane order, `((((((x0 + x1) + x2) + x3) + x4) + 
 
 - **AVX2** on an x86-64 build that targets it: one 256-bit register.
   `_mm256_cmp_ps` with the ordered predicates gives `<` / `<=` / `==`'s
-  NaN behaviour, select is and / andnot / or (not `blendv`, which reads
+  NaN behavior, select is and / andnot / or (not `blendv`, which reads
   only the sign bit), and min / max / abs are compare-and-select.
 - **Everywhere else** Float8 is two Float4 operations on the halves:
   Float4's own NEON / SSE2 / wasm / scalar functions. Their bits are
@@ -509,7 +509,7 @@ Horner polynomial over 1 048 576 Floats, best of 20 rounds.
 - **Rae has no generics over a number** (a `FloatN(N)`). fearless_simd's
   width-generic code rests on Rust traits and monomorphisation over SIMD
   levels, machinery Rae deliberately does not have (AGENTS.md: few special
-  cases, analysable).
+  cases, analyzable).
 - **What a generic width would buy is one spelling for "the native width"**
   in kernels where results may depend on it. If a measured kernel needs
   that, the cheap form is a `when`-selected type alias (`FloatNative` =

@@ -132,8 +132,8 @@ func emptyTextAtlas() ret Gpu2dTextAtlas {
   }
 }
 
-# One text glyph = 5 x vec4: rect, uv, colour, params(pxRange, outline width,
-# softness), outline colour.
+# One text glyph = 5 x vec4: rect, uv, color, params(pxRange, outline width,
+# softness), outline color.
 const textGlyphFloats: Int = 20
 
 # One uploaded image: its manager texture + default view and the size the
@@ -288,7 +288,7 @@ func ensureBoxResources(canvas: mod Gpu2dCanvas) {
   )
 }
 
-# The box pipeline: a procedural quad (no vertex buffer), one colour target in
+# The box pipeline: a procedural quad (no vertex buffer), one color target in
 # the gpu2d presentable format, premultiplied alpha blending, no depth, no cull.
 func boxPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
   var colorFormats: List(Int32) = List.create(Int32, cap: 1)
@@ -568,7 +568,7 @@ func pushPremultiplied(canvas: mod Gpu2dCanvas, color: copy Int) {
 
 # Queue one primitive: rect, four corner radii (top-left, top-right,
 # bottom-right, bottom-left), fill, border, params (border width, rotation in
-# radians, gradient flag, gradient angle) and the gradient end colour — the
+# radians, gradient flag, gradient angle) and the gradient end color — the
 # same 24-float record the C batch packed. Tagged with the clip active now.
 func pushBox(
   canvas: mod Gpu2dCanvas
@@ -588,15 +588,15 @@ func pushBox(
   gradientAngle: copy Float
   gradientTo: copy Int
 ) {
-  # The canvas rotation (#1003): the box's centre turns about the pivot and
+  # The canvas rotation (#1003): the box's center turns about the pivot and
   # the quad itself turns by the same angle in the shader.
   var boxX: Float = x
   var boxY: Float = y
   var boxAngle: Float = angle
   if canvas.spinAngle is not 0.0 {
-    let centre: SpinPoint = spinPoint(canvas: canvas, x: x + w / 2.0, y: y + h / 2.0)
-    boxX = centre.x - w / 2.0
-    boxY = centre.y - h / 2.0
+    let center: SpinPoint = spinPoint(canvas: canvas, x: x + w / 2.0, y: y + h / 2.0)
+    boxX = center.x - w / 2.0
+    boxY = center.y - h / 2.0
     boxAngle = angle + canvas.spinAngle
   }
   canvas.prims.add(value: boxX)

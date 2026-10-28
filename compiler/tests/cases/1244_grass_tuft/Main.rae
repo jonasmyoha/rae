@@ -49,7 +49,7 @@ func main() ret Int {
     if Math.abs(value: surfaceCoverage(pixels: pixels, scale: 1.0) - coverage) > 0.015 {
       ret 3
     }
-    # Clear neighbours must not blacken the linear-colour mip edges.
+    # Clear neighbors must not blacken the linear-color mip edges.
     loop var pixel: Int = 0, pixel < pixels.length / 4, ++pixel {
       if pixels.copyAtDefault(index: pixel * 4 + 3) > 0.01 and Math.abs(
         value: pixels.copyAtDefault(index: pixel * 4 + 1) - 0.50
@@ -58,6 +58,6 @@ func main() ret Int {
       }
     }
   }
-  log("tuft: transparent perimeter, dense root, alpha coverage through 16px, clean mip colour")
+  log("tuft: transparent perimeter, dense root, alpha coverage through 16px, clean mip color")
   ret 0
 }

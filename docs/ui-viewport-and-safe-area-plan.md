@@ -22,7 +22,7 @@
 - Give the Rae UI library a clean separation between **design coordinates**, **viewport coordinates**, and the **OS window**, so a `.raescene` written for "an iPhone-sized canvas" can render on a desktop window of arbitrary size.
 - Make **safe areas authorable** as components on a scene node (one entity per safe region), rather than baked into hand-tuned padding constants per app.
 - Allow the desktop preview to **simulate a specific phone** — `iPhone 15 Pro`, `Pixel 7`, etc. — with the correct viewport size and notch/home-bar insets, switched by a single config or env var.
-- Lay groundwork for a future **editor view**: a portrait phone window centred inside a larger desktop window, with debug UI in the surrounding margin and a 2D camera (zoom/pan) over the phone for tooling.
+- Lay groundwork for a future **editor view**: a portrait phone window centered inside a larger desktop window, with debug UI in the surrounding margin and a 2D camera (zoom/pan) over the phone for tooling.
 
 This is the structured port of the patterns observed in
 `game-proto1 pixi checkout`, applied to Rae's existing
@@ -65,7 +65,7 @@ Adopt game proto1 vocabulary, made explicit in a new `lib/ui/viewport.rae`:
 
 In the no-simulation case, `viewport == screen` and `design == viewport` — single coordinate system, layout works as today.
 
-In the simulation case, `viewport` is the simulated device's logical resolution, the `design` is rendered to a `viewport`-sized render texture, and that texture is centred inside the actual `screen`.
+In the simulation case, `viewport` is the simulated device's logical resolution, the `design` is rendered to a `viewport`-sized render texture, and that texture is centered inside the actual `screen`.
 
 ```rae
 type Viewport {
@@ -76,9 +76,9 @@ type Viewport {
   screenWidth: Float       # actual OS window framebuffer
   screenHeight: Float
   scale: Float             # design → viewport (cover-fit)
-  pillarboxOffsetX: Float  # design centring inside viewport
+  pillarboxOffsetX: Float  # design centering inside viewport
   pillarboxOffsetY: Float
-  simOffsetX: Float        # viewport centring inside screen
+  simOffsetX: Float        # viewport centering inside screen
   simOffsetY: Float
   safeTop: Float           # in design units
   safeBottom: Float
@@ -197,7 +197,7 @@ When `viewport.simulated == true`:
 
 Adds maybe 40 lines to `examples/98_mobile_ui/main.rae` and is independent of every other layout change. Raylib's `LoadRenderTexture` / `BeginTextureMode` already exist; bindings need a one-time pass.
 
-A simple device frame around the phone — rounded rect, dark grey, maybe a faked status bar — is purely a draw call on the screen layer, optional polish.
+A simple device frame around the phone — rounded rect, dark gray, maybe a faked status bar — is purely a draw call on the screen layer, optional polish.
 
 ### 5. Editor Camera (zoom/pan) — Future Phase
 
@@ -225,9 +225,9 @@ Phase 1 deliverable: the example renders at iPhone-15-Pro aspect, with safe-area
 
 8. Add raylib bindings for `LoadRenderTexture`, `BeginTextureMode`, `EndTextureMode`, `UnloadRenderTexture` if missing.
 9. Switch `main.rae`'s draw loop to render-into-texture when `viewport.simulated`.
-10. Centre the texture on the screen; optional device frame around it.
+10. Center the texture on the screen; optional device frame around it.
 
-Phase 2 deliverable: the desktop window can be any size; the simulated phone stays its preset's size and sits centred inside, with margin around it for future debug UI.
+Phase 2 deliverable: the desktop window can be any size; the simulated phone stays its preset's size and sits centered inside, with margin around it for future debug UI.
 
 ### Phase 3 — Editor camera
 

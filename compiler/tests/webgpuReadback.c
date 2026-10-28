@@ -97,7 +97,7 @@ int main(void) {
     g_destAllocated = 8;
     assert(!rae_wgpu_read_copy(firstRead, destination, 16));
     assert(!rae_wgpu_read_copy(firstRead, destination, 1024));
-    /* A destination the allocator does not recognise (size 0) is refused. */
+    /* A destination the allocator does not recognize (size 0) is refused. */
     g_destAllocated = 0;
     assert(!rae_wgpu_read_copy(firstRead, destination, 16));
     /* Real allocation large enough: the copy succeeds and lands correctly. */

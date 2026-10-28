@@ -65,4 +65,4 @@ parameter.
 `UiWorld` (`lib/ui/ecs.rae`) already uses this pattern: `layoutW` / `layoutH`
 (the design-unit root extent) and `msdfState` (the MSDF font slot) are plain
 fields — resources, not component tables. They are now documented as such; the
-behaviour is unchanged.
+behavior is unchanged.

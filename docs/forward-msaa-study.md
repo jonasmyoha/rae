@@ -87,7 +87,7 @@ What the numbers say:
   geometry it nearly doubles the frame. The GPU already removes hidden pixels
   before shading (hidden surface removal), so drawing every object twice only
   adds vertex work. A pre-pass is useful only for what reads its depth (SSAO).
-- **The images match** (compared at full size): the same colours everywhere; the
+- **The images match** (compared at full size): the same colors everywhere; the
   deferred and 1x edges are stair-stepped, the 4x edges are smooth.
 
 ### 111 (C forward) vs 112 (deferred)
@@ -114,7 +114,7 @@ within the noise of a 33 ms frame.
 - **SSAO.** Rae's SSAO reads depth (and the depth pyramid). WebGPU has no depth
   resolve, so a 4x pass cannot hand its depth on. Options: a stored 1x depth
   pre-pass (measured above: +6-89% time, and the 1x depth does not match
-  the 4x edges), writing linear depth to a second colour target and resolving it
+  the 4x edges), writing linear depth to a second color target and resolving it
   (averages depth at edges: halos), or storing the 4x depth and resolving it in a
   compute pass (gives up the memoryless saving). The deferred G-buffer has the
   depth and normals for free.
@@ -149,7 +149,7 @@ The forward renderer is mostly C: `runtime_gpu3d.c` 748 lines, `_shaders` 341,
 `_sdf` 324, `_sky` 206, `_skin` 364, `_ssao` 568, `_shadow` 51, `_stubs` 99:
 **about 2,700 lines of C**, plus the Rae wrappers `lib/Gpu3d.rae` (886),
 `lib/Gpu3dNative.rae` (385) and `lib/Renderer3d.rae` (858). It is not a lean
-forward pass: since #333 it is single-sampled and writes colour, normals and
+forward pass: since #333 it is single-sampled and writes color, normals and
 motion vectors with a stored depth, a thin G-buffer for its SSAO and TAA.
 
 Its one remaining user is 111 (96, 97 and 109 already draw through the
@@ -177,7 +177,7 @@ forward-only part of the wrappers without adding a second main pass to maintain.
    in a frame where the main pass is around 6% of the GPU time. Its cost is a
    second version of SSAO input, decals, motion vectors, refraction and every
    material pipeline, and a wgpu-native workaround.
-2. **Retire the C forward path through its last user, 111**: drop it in favour
+2. **Retire the C forward path through its last user, 111**: drop it in favor
    of its deferred twin 112, or port it to the deferred renderer, rather than
    write a new forward renderer (this also settles runtime C audit row 18). This
    removes about 2,700 lines of C and needs no new renderer design. It is
@@ -205,7 +205,7 @@ deferred apps, and no example uses it yet.
   dynamic scale, direct present). Its graph is `shadow -> forward -> bloom ->
   composite -> [ui] -> present`.
 - **The pass:** `lib/ForwardMain.rae`. It runs one render pass at 4x MSAA with
-  memoryless (TRANSIENT) 4x colour and depth, and resolves into the lit image
+  memoryless (TRANSIENT) 4x color and depth, and resolves into the lit image
   when the pass ends. There is no depth pre-pass. The sky is drawn last with
   depth Equal at the far plane, so only uncovered samples evaluate it.
   `RenderPipelineSpec.sampleCount`, `createTextureSampled`,

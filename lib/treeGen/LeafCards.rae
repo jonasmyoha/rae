@@ -52,7 +52,7 @@ func randomDirection(random: mod TreeRandom) ret Vec3 {
 }
 
 # The three greens of one mass: T02's crown is an olive yellow-green, not a
-# lime one; its masses differ a little from each other (linear colour)
+# lime one; its masses differ a little from each other (linear color)
 func massGreen(pick: view Int) ret Vec3 {
   var base: Vec3 = Vec3.create(x: 0.19, y: 0.23, z: 0.06)
   if pick is 1 {
@@ -83,8 +83,8 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
   var lowest: Float = 1000000.0
   var highest: Float = -1000000.0
   loop let clump: view TracedClump in skeleton.clumps {
-    lowest = Math.min(a: lowest, b: clump.centre.z - clump.radii.z)
-    highest = Math.max(a: highest, b: clump.centre.z + clump.radii.z)
+    lowest = Math.min(a: lowest, b: clump.center.z - clump.radii.z)
+    highest = Math.max(a: highest, b: clump.center.z + clump.radii.z)
   }
   var floats: List(Float) = List.create(Float, cap: 0)
   var count: Int = 0
@@ -103,7 +103,7 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
       let depth: Float = 0.75 + 0.25 * Math.sqrt(x: nextUnit(random: random))
       let local: Vec3 = Vec3.vscale(a: clumpSurface(clump: clump, direction: direction), s: depth)
       let position: Vec3 = Vec3.vadd(
-        a: clump.centre
+        a: clump.center
         b: turnInPicture(value: local, turn: clump.turn)
       )
       let normal: Vec3 = turnInPicture(

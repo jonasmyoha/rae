@@ -6,7 +6,7 @@ revision kept ImageIO on macOS because stb appeared to reject valid
 Spotify JPEGs with "can't merge dc and ac". That was a misdiagnosis:
 stb was correctly rejecting TRUNCATED cache downloads (interrupted
 curl, sizes at clean 4 KiB multiples) that ImageIO decoded
-half-image/half-grey with no error. With the truncation guard + atomic
+half-image/half-gray with no error. With the truncation guard + atomic
 artwork fetch (below), stb decodes every valid file — measured
 ok=102/102 on the cached Spotify artwork set, byte-for-byte no stb
 errors. ImageIO's leniency was hiding corrupt files, not saving good
@@ -55,17 +55,17 @@ Inputs in practice:
    seam so decoders can be swapped (long-term direction is pure-Rae
    codecs — the #110 PNG codec is the proof of shape).
 4. Decode cost is not hot: ~24 covers once at boot plus occasional
-   CDN fetches. Correctness, size, and licence outrank throughput.
+   CDN fetches. Correctness, size, and license outrank throughput.
 
 ## 3. Candidates evaluated
 
-| Option | Formats | Licence | Integration | Verdict |
+| Option | Formats | License | Integration | Verdict |
 |---|---|---|---|---|
 | **stb_image.h** (v2.30) | JPEG (baseline+progressive), PNG, BMP, GIF, … each `STBI_ONLY_*`-selectable | public-domain / MIT dual | one vendored header compiled into rae_runtime.c | **CHOSEN — the default JPEG decoder on every platform.** Smallest possible integration; deterministic everywhere; verified ok=102/102 on the cached Spotify artwork set with zero errors once truncated files are guarded out. Known CVE history on malformed inputs → mitigate with the existing dimension cap, `STBI_ONLY_JPEG` (shrinks attack surface to one parser), and no-stdio (we hand it bytes we read ourselves). |
 | libjpeg-turbo | JPEG | BSD-3 + IJG + zlib mix | CMake + SIMD asm; system package or submodule | Rejected: 2–6× faster decode we don't need, at the cost of a real build dependency on three platforms. Revisit only if decode ever becomes hot (e.g. hundreds of covers per second). |
 | libwebp | WebP | BSD-3 (Google) | CMake/autotools; sizeable | Deferred with WebP itself (§5). |
 | Wuffs | PNG, JPEG, GIF, … | Apache-2.0 | single-file C amalgamation; memory-safe by construction | Strong safety story and a plausible future swap-in behind the same seam, but larger, less battle-tested in this exact stack, and its transpiled style is harder to patch. Not now; noted as the fallback if stb's CVE cadence becomes a problem. |
-| Platform APIs (ImageIO / Windows WIC / gdk-pixbuf, NDK) | varies | OS-provided | per-platform glue ×3+ | Rejected and removed: three different codebases, three different pixel outputs (kills requirement 2), no universal Linux one — AND ImageIO was shown to be less correct than stb (silently renders truncated JPEGs half-grey instead of failing). The macOS ImageIO path is deleted entirely. |
+| Platform APIs (ImageIO / Windows WIC / gdk-pixbuf, NDK) | varies | OS-provided | per-platform glue ×3+ | Rejected and removed: three different codebases, three different pixel outputs (kills requirement 2), no universal Linux one — AND ImageIO was shown to be less correct than stb (silently renders truncated JPEGs half-gray instead of failing). The macOS ImageIO path is deleted entirely. |
 | Pure-Rae decoders | PNG done (#110); JPEG feasible | ours | none | The end state the language wants, but a Rae JPEG decoder is a multi-week project (DCT, Huffman, chroma upsampling) and #110's codec is compiled-target-only today. The seam keeps this open; not the answer for "run 106 on Linux next month". |
 
 ## 4. Decision
@@ -120,8 +120,8 @@ alternative if we want its safety properties.
   A/B path kept "just in case" is not the shape we want in git).
   Screenshot baselines are stb output (drift vs the old ImageIO was
   max channel delta 3 — sub-visible chroma rounding).
-- Colour/alpha semantics: RGBA8, straight (non-premultiplied) alpha,
-  no colour management (ICC profiles ignored) — which is what both
+- Color/alpha semantics: RGBA8, straight (non-premultiplied) alpha,
+  no color management (ICC profiles ignored) — which is what both
   lodepng and stb produce natively, and what the JPEG path
   effectively produced before (premultiplication is identity without
   alpha). Documented as the contract of `gpu2d.loadImage`.

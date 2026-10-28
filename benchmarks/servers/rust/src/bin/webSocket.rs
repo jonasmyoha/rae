@@ -3,7 +3,7 @@
 // (one worker, as the spec asks). PORT (default 8080). A broadcast encodes its
 // frame once and queues it on every client in accept order (the Hub writes
 // them after the batch); the payload is passed through as raw JSON, never
-// re-serialised.
+// re-serialized.
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

@@ -200,7 +200,7 @@ func grassSetComputeShaderWithConstants(
 # Give the app's compute shader its own data: `values` go to the GPU once, as a
 # read-only storage buffer at @binding(4), which the surface part declares as
 # `var<storage, read> ...: array<f32>` and reads — the lib's grass pass never
-# does. For a surface no formula describes: a modelled venue's ground heights
+# does. For a surface no formula describes: a modeled venue's ground heights
 # and where grass grows, baked on the CPU. Rebuilds the pipeline.
 func grassSetSurfaceField(grass: mod GrassCompute, values: own List(Float)) {
   grass.surfaceField = values
@@ -275,7 +275,7 @@ func resetGrassPipeline(grass: mod GrassCompute) {
   grass.drawBindMade = false
 }
 
-# The G-buffer's procedural-geometry pipeline spec: the same 3 colour targets +
+# The G-buffer's procedural-geometry pipeline spec: the same 3 color targets +
 # reverse-Z depth WRITE as the static pipeline, NO vertex buffers (the geometry
 # is generated in the vertex shader from vertex_index) and no back-face cull,
 # since a thin blade (or a billboard) is seen from both sides. Shared with the
@@ -637,8 +637,8 @@ const grassNearKeep: Float = 5.0
 
 const grassConeCos: Float = 0.36
 
-# Dispatch the grass generation + CULLING compute for this frame. Centres the
-# candidate grid on (centreX, centreY), what the camera looks at (its target,
+# Dispatch the grass generation + CULLING compute for this frame. Centers the
+# candidate grid on (centerX, centerY), what the camera looks at (its target,
 # not a character: an editor camera away from the player sees grass too); each survivor
 # (on-terrain, unfaded, inside
 # the view cone from the camera) is appended to a compacted list and bumps the
@@ -646,8 +646,8 @@ const grassConeCos: Float = 0.36
 func grassGenerate(
   grass: mod GrassCompute
   resources: mod GpuResources
-  centreX: copy Float
-  centreY: copy Float
+  centerX: copy Float
+  centerY: copy Float
   groundZ: copy Float
   deltaTime: copy Float
   wind: view WindVector
@@ -676,8 +676,8 @@ func grassGenerate(
   resetArgs(writer: grass.uniformArgs)
   pushVec4F(
     writer: grass.uniformArgs
-    x: centreX
-    y: centreY
+    x: centerX
+    y: centerY
     z: groundZ
     w: wind.time
   )

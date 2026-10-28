@@ -13,9 +13,9 @@ blades connect into a full base. This is an albedo/alpha asset for actual engine
 lighting, not a painted dramatic lighting pass.
 
 The shader uses the image's luminance as a restrained multiplier of the app's
-existing grass colour; it does not replace the app palette. Three fixed crossing
+existing grass color; it does not replace the app palette. Three fixed crossing
 planes share this image and bend around their grounded base. A 0.5 alpha cutoff
 and the existing SurfaceImages coverage-preserving mips keep thin edges from
 turning into rectangular opaque sheets. There is no emission or alpha blending.
-The single tuft motif remains recognisable close up; more artwork variants and
+The single tuft motif remains recognizable close up; more artwork variants and
 broader ground blending are separate work.

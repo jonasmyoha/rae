@@ -9,7 +9,7 @@
 #
 # Persistence: `examples/106_mobile_ui/app_cache/metadata/library.json`.
 # First-launch default: every catalog stem is in the library (preserves the
-# pre-curation behaviour). The old temp/library.json is read as a migration
+# pre-curation behavior). The old temp/library.json is read as a migration
 # fallback only.
 import Json
 import Files
@@ -34,7 +34,7 @@ func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
 
 # True when `stem` is present in the library. Linear scan; the
 # library is small (a few dozen entries at most for a phone-sized
-# music catalogue) so a hash map would be premature.
+# music catalog) so a hash map would be premature.
 func isInLibrary(library: view List(String), stem: view String) pub ret Bool {
   loop let entry: view String in library {
     if entry is stem {
@@ -152,7 +152,7 @@ func parseLibraryFromJson(
 
 # Restore library stems from `path`. When the file is missing the
 # default is "every catalog stem" so an unseeded app launches with
-# the full catalogue visible. Stems that are no longer in the
+# the full catalog visible. Stems that are no longer in the
 # catalog (the user deleted the source folder, etc.) are dropped
 # silently — they'd render as a missing-cover placeholder otherwise.
 func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret List(String) {

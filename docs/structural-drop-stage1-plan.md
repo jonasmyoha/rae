@@ -50,7 +50,7 @@ sites in `c_stmt.c` / `c_call.c` / `sema.c`) already:
 3. **Classifies locals as owning vs. aliasing** via
    `local_struct_owns_heap` in `c_stmt.c`. Auto-init, struct
    literal, and most call returns are flagged owning. A call
-   whose body ends in a `buf_get`-flavoured return chain is flagged
+   whose body ends in a `buf_get`-flavored return chain is flagged
    aliasing. The classifier recurses through `ret-of-call` patterns
    with cycle protection.
 4. **Routes drop variant selection from the binding site.** The
@@ -81,7 +81,7 @@ What does **not** yet exist in tree:
   mode for this reason.
 * **A canonical, user-facing test surface.** Tests 443-449,
   460-464, 482-483 cover individual phases of cascade-drop, but
-  they're labelled by phase number rather than as "Stage 1
+  they're labeled by phase number rather than as "Stage 1
   structural drop." The specific examples the Stage 1 spec calls
   out (Inner/Outer, several nesting levels, repeated UI-world
   cycles) may or may not be covered exactly.
@@ -89,14 +89,14 @@ What does **not** yet exist in tree:
   struct with only `Int` / `Float` fields gets no
   `rae_drop_struct_<T>` emitted because
   `type_needs_cascade_drop` returns false. That's correct
-  behaviour, but there's no test that asserts the helper is
+  behavior, but there's no test that asserts the helper is
   *absent* from the C output for trivial structs.
 
 ## What "shipping Stage 1" actually means from here
 
 Three categories of work:
 
-### A. Audit and catalogue what's in the C backend
+### A. Audit and catalog what's in the C backend
 *(no code changes, just documenting the load-bearing reality)*
 
 Goal: a short reference in the docs that names each piece of the
@@ -112,7 +112,7 @@ Cost estimate: half a day.
 ### B. Live VM parity
 *(the actual implementation work)*
 
-Goal: Live-mode programs get the same per-struct cleanup behaviour
+Goal: Live-mode programs get the same per-struct cleanup behavior
 as compiled programs.
 
 Approach (to be confirmed once the VM emitter is read in detail):
@@ -180,7 +180,7 @@ type Outer {
 | 1 | `let o: Outer = createOuter()`, normal scope exit | structural drop fires on nested struct + list |
 | 2 | 3-level nesting (`Outer{ middle: Middle{ inner: Inner } }`) | recursion past depth 2 |
 | 3 | `let xs: List(Outer) = …` | List drop iterates and recurses |
-| 4 | `let p: Pair(String, List(String)) = …` | generic struct specialisation |
+| 4 | `let p: Pair(String, List(String)) = …` | generic struct specialization |
 | 5 | Struct with two containers (`List(String) + Map(String, Inner)`) | multiple owning fields in one struct |
 | 6 | `if cond { ret }` early-return mid-function | early-return path runs drops |
 | 7 | `let o: Outer = a` then `o = b` | reassignment: previous owned value gets cleaned up |
@@ -204,7 +204,7 @@ harness if needed.
    `vm.c` and the existing OP_* set. Pick between Option B1 / B2 /
    B3 with a one-paragraph justification. Don't skip this step —
    the choice has knock-on effects on the rest of B.
-2. **A. Catalogue the C-side state.** Worth doing before any
+2. **A. Catalog the C-side state.** Worth doing before any
    Live-side work so the parity target is concrete.
 3. **C cases 1–9 (compiled mode only).** These should already
    pass against today's compiler. If any of them fail, those are

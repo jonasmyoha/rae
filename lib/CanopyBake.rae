@@ -38,10 +38,10 @@ type CanopyTree {
 
 # A cluster: its trees (`firstTree`, `treeCount` of the bake's tree list,
 # which holds each cluster's trees together, in cluster order), its box in
-# the world (centre and half sides; each view is framed to it) and the
+# the world (center and half sides; each view is framed to it) and the
 # box's bounding sphere
 type CanopyCluster {
-  centre: Vec3
+  center: Vec3
   halfSize: Vec3
   radius: Float
   firstTree: Int
@@ -141,8 +141,8 @@ func bakeCanopyAtlas(
   }
   retireGpuScratch(scratch: scratch, resources: resources)
   if baked {
-    # A cluster is drawn at its sphere's centre, at height 1: its frame is
-    # its sphere in metres round that point
+    # A cluster is drawn at its sphere's center, at height 1: its frame is
+    # its sphere in meters round that point
     var frames: ArgWriter = createArgs(uniform: false)
     loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
       if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
@@ -150,7 +150,7 @@ func bakeCanopyAtlas(
           writer: frames
           settings: settings
           subject: cluster
-          centre: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          center: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
           radius: held.radius
           height: 1.0
           halfBox: held.halfSize
@@ -166,7 +166,7 @@ func bakeCanopyAtlas(
   ret atlas
 }
 
-# The view pass's pipeline: no vertex buffer (a quad a tree), two colour
+# The view pass's pipeline: no vertex buffer (a quad a tree), two color
 # targets, a depth test on the depth the fragment writes
 func canopyBakePipelineSpec() ret RenderPipelineSpec {
   var colorFormats: List(Int32) = List.create(Int32, cap: 2)
@@ -227,9 +227,9 @@ func canopyClusterArgs(
     if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
       pushVec4F(
         writer: writer
-        x: held.centre.x
-        y: held.centre.y
-        z: held.centre.z
+        x: held.center.x
+        y: held.center.y
+        z: held.center.z
         w: held.radius
       )
       let page: Vec4 = impostorPage(settings: settings, subject: cluster)
@@ -450,7 +450,7 @@ func recordCanopyViews(
 
 func noCanopyCluster() ret CanopyCluster {
   ret CanopyCluster {
-    centre: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    center: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     halfSize: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     radius: 1.0
     firstTree: 0

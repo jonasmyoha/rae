@@ -80,11 +80,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let gy = i / side;
   let extent = G.b.y;
   let spacing = extent / f32(side);
-  // The grid's centre: what the camera looks at (G.a.xy)
-  let centreCellX = i32(floor(G.a.x / spacing));
-  let centreCellY = i32(floor(G.a.y / spacing));
-  let worldCellX = centreCellX + i32(gx) - i32(side) / 2;
-  let worldCellY = centreCellY + i32(gy) - i32(side) / 2;
+  // The grid's center: what the camera looks at (G.a.xy)
+  let centerCellX = i32(floor(G.a.x / spacing));
+  let centerCellY = i32(floor(G.a.y / spacing));
+  let worldCellX = centerCellX + i32(gx) - i32(side) / 2;
+  let worldCellY = centerCellY + i32(gy) - i32(side) / 2;
   let cellI = vec2<i32>(worldCellX, worldCellY);
   let hp = hash2u(cellI, 29u);
   let clusterStrength = clamp(G.e.w, 0.0, 1.0);
@@ -113,9 +113,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let variation = clamp(G.h.w, 0.0, 1.5);
   let baseHeight = mix(0.50, 0.28 + hHeight * 0.44, variation) * G.g.x;
   let width = mix(0.079, 0.052 + hWidth * 0.054, variation) * G.g.y;
-  let distToCentre = distance(vec2<f32>(bx, by), G.a.xy);
+  let distToCenter = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
-  let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
+  let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCenter);
   let patchBody = smoothstep(0.36, 0.61, grassPatchValue(bladePosition, G.h.x));
   var patchHeight = mix(0.62, 1.08, patchBody);
   if (clusterStrength < 1.0) { patchHeight = mix(1.0, patchHeight, clusterStrength); }
@@ -140,10 +140,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;
   outBuf[slot].prevModel = m;
-  let colourVariation = mix(1.0, 0.86 + hash2u(cellI, 103u) * 0.20, variation);
+  let colorVariation = mix(1.0, 0.86 + hash2u(cellI, 103u) * 0.20, variation);
   var patchColor = grassGroundColor(G.e.rgb, bladePosition, G.h.x, G.h.y);
   if (clusterStrength < 1.0) { patchColor = mix(G.e.rgb, patchColor, clusterStrength); }
-  outBuf[slot].albedoMetallic = vec4<f32>(patchColor * colourVariation, 0.0);
+  outBuf[slot].albedoMetallic = vec4<f32>(patchColor * colorVariation, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);

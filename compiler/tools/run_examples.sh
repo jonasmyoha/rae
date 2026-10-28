@@ -43,7 +43,7 @@ EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -path "$EXAMPLES_DIR/legacy" -prune -o \( -
 for EXAMPLE_FILE in $EXAMPLE_FILES; do
   EXAMPLE_NAME=$(basename "$(dirname "$EXAMPLE_FILE")")
   # Exact directory names, space-separated: narrow GPU gates without running
-  # every example. An unset filter preserves the full-suite behaviour.
+  # every example. An unset filter preserves the full-suite behavior.
   if [ -n "${RAE_EXAMPLE_FILTER:-}" ]; then
     case " $RAE_EXAMPLE_FILTER " in
       *" $EXAMPLE_NAME "*) ;;
@@ -630,7 +630,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # that it "look right with MANY rows selected". Three rows selected
           # must match the checked-in TreeSelection.png, in which the ACTIVE
           # row (LogoRing) is a brighter token than the two other selected
-          # rows — one flat colour could not say which row the inspector
+          # rows — one flat color could not say which row the inspector
           # describes or which one the arrows walk from.
           SCREENSHOT="$TMP_OUT/ui-editor-treeplate.bmp"
           if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
@@ -982,7 +982,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-small.log" "$TMP_OUT/screenshot-small.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           # The camera (cameraSystem): RAE_UI_EDITOR_ZOOM=2 boots the document at
-          # 200% centred in the edit area; the log names the zoom and the
+          # 200% centered in the edit area; the log names the zoom and the
           # frame is the whole window (only the document scaled) — and it must
           # DIFFER from the fitted reference by more than 20% of its pixels, so
           # a zoom that is logged but not rendered (a spurious first-frame
@@ -1181,7 +1181,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "136_walker_character" ]; then
-          # The multi-primitive gate, plus the skinning and colour chain.
+          # The multi-primitive gate, plus the skinning and color chain.
           # 6717 verts / 3465 triangles is every primitive of all 10 meshes
           # merged; loading only the first would report a fraction of that
           # and still render something plausible, which is exactly why the
@@ -1189,7 +1189,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # skeleton, clip and atlas lines each cover a stage that fails
           # silently on its own: 65 joints (skin parsed), 195 channels
           # retargeted onto it (animation), 512x512 (the pure-Rae PNG
-          # decode that feeds per-vertex colour). The region check proves the
+          # decode that feeds per-vertex color). The region check proves the
           # UI is DRAWN, not only created: the corner menu button is a dark
           # square in the top-left. The "panel buttons" log line kept passing
           # while the frame loop rendered an empty UiSystems and no UI showed.
@@ -1286,7 +1286,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
         elif [ "$EXAMPLE_NAME" = "144_gltf_level" ]; then
           # A glTF level (tools/levels/exportWalkLevel.py) read by
           # app3d/GltfLevel: a shaded frame of its meshes in their base
-          # colours with the character walking its route, then the headless
+          # colors with the character walking its route, then the headless
           # self-test: 9 colliders and 2 markers read, the character at
           # marker_spawn on the ground, stopped by the wall, up the ramp onto
           # the platform, and footprints on path, grass and stone from the
@@ -1347,7 +1347,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # The forward twin of 136 (forward-rae-5): the same walker, crowd,
           # terrain (lib/app3d/WalkerTerrain: the island forest, procedural
           # rocks, leaf bushes), grass and cubes in one 4x MSAA pass, no
-          # water. A shaded frame (thousands of colours), all 12 skinned parts
+          # water. A shaded frame (thousands of colors), all 12 skinned parts
           # loaded, the forward path taken, the 300 island trees planted and
           # 400 to 800 existing casters plus the two harebell batches, as in
           # 136. A caster count is an instance count, not a draw count. The
@@ -1395,8 +1395,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # correct albedo. One composite screenshot would hide either.
           #
           # Albedo and material are UNSHADED, so they legitimately contain
-          # about as many colours as the scene has materials (25 spheres +
-          # ground + clear = 27) — the default 32-colour floor assumes a lit
+          # about as many colors as the scene has materials (25 spheres +
+          # ground + clear = 27) — the default 32-color floor assumes a lit
           # image and would fail them for being correct. --min-colors=20
           # states the real expectation. Normals and linearised depth are
           # continuous and pass the standard check.
@@ -1466,7 +1466,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "134_metaballs_deferred" ]; then
           # The free-camera shot must also be a SHADED SCENE (thousands of
-          # colours): a black viewport under an intact UI passed the UI-only
+          # colors): a black viewport under an intact UI passed the UI-only
           # check for the #920..#921 slices (the UI drew on a canvas the scene
           # was never composited into).
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
@@ -1629,7 +1629,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           #    both tracks; 125 is also linked against the scalar library and
           #    must print the same hash.
           # 2. A headless frame (the car on the course, the HUD) not blank;
-          #    on 125 its tyre tracks and dust laid by then ([tracks]).
+          #    on 125 its tire tracks and dust laid by then ([tracks]).
           # 3. Memory flat WHILE running: RAE_VEHICLE_CYCLE_SECONDS=4 respawns
           #    the car (five bodies, five joints) and its nine crates every 4 s
           #    under the autopilot; the [mem:live] peak of a later 24 s window
@@ -1682,12 +1682,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  screenshot check failed:"
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | grep -v '^\[present\]' | tail -8 | sed 's/^/    /'
           fi
-          # 125 lays tyre tracks on the course (app3d/WheelTracks) and kicks up
+          # 125 lays tire tracks on the course (app3d/WheelTracks) and kicks up
           # dust: by 2 s of the autopilot's drive both are there
           if [ "$EXAMPLE_NAME" = "125_vehicle_c" ] \
              && ! grep -qE '^\[tracks\] after [0-9.]+ s: [1-9][0-9]* pieces, the longest trail [0-9.]+ m, [1-9][0-9]* dust puffs' "$TMP_OUT/render.log"; then
             VEHICLE_OK=0
-            echo "  tyre track check failed (no [tracks] line with pieces and dust):"
+            echo "  tire track check failed (no [tracks] line with pieces and dust):"
             grep -a '^\[tracks\]' "$TMP_OUT/render.log" | sed 's/^/    /'
           fi
           if (cd .. && RAE_VEHICLE_CYCLE_SECONDS=4 RAE_VEHICLE_AUTOPILOT=1 \

@@ -1,4 +1,4 @@
-// Billboard SPRITE pass (#15). Generalises the grass render pass — a procedural
+// Billboard SPRITE pass (#15). Generalizes the grass render pass — a procedural
 // quad, no vertex buffer, instanced from the shared DrawU records — into a
 // TEXTURED, alpha-tested, CYLINDRICAL billboard for standing props (trees, ...).
 //
@@ -11,7 +11,7 @@
 //
 // ALPHA-TESTED, not blended: the deferred G-buffer has no transparency path, so a
 // cutout is a `discard` on low alpha (like the SDF/shadow miss shaders) — it
-// writes no colour AND no depth there, giving a clean edge with correct occlusion.
+// writes no color AND no depth there, giving a clean edge with correct occlusion.
 //
 // Layer (which prop image) rides in DrawU slot 39 = params.w, the field the
 // skinned path calls paletteBase. A billboard is NEVER skinned, so the slot is
@@ -59,7 +59,7 @@ struct SpriteU {
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
 // Impostor mode: the atlas's normal and depth, and per subject (the
-// instance's "layer") three vec4: the bounding sphere's centre and radius
+// instance's "layer") three vec4: the bounding sphere's center and radius
 // over the prop's height, its page (texture layer, origin u, v, size) and
 // its framing (impostorExtents: a box's half sides over the radius and 1, or
 // 0 for a sphere) (the plain mode binds the sprite array and an unread
@@ -92,13 +92,13 @@ struct VsOut {
   // Impostor mode (unused otherwise): where the fragment falls on the
   // pictures of the three views (-1..1 along each view's right and up),
   // their grid cells and weights, the eye's direction in the prop's frame
-  // with the prop's yaw, and the sphere's centre and radius
+  // with the prop's yaw, and the sphere's center and radius
   @location(8) localAB: vec4<f32>,
   @location(9) localC: vec2<f32>,
   @location(10) @interpolate(flat) cellsAB: vec4<f32>,
   @location(11) @interpolate(flat) cellCWeights: vec4<f32>,
   @location(12) @interpolate(flat) eyeYaw: vec4<f32>,
-  @location(13) @interpolate(flat) centreRadius: vec4<f32>,
+  @location(13) @interpolate(flat) centerRadius: vec4<f32>,
   // The subject's page in its texture layer (origin u, v, size) and the
   // subject (its framing is read from the frames)
   @location(14) @interpolate(flat) page: vec4<f32>,
@@ -162,7 +162,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.cellsAB = vec4<f32>(0.0);
   o.cellCWeights = vec4<f32>(0.0);
   o.eyeYaw = vec4<f32>(0.0);
-  o.centreRadius = vec4<f32>(0.0);
+  o.centerRadius = vec4<f32>(0.0);
   o.page = vec4<f32>(0.0, 0.0, 1.0, 0.0);
   o.layer = i32(max(d.params.w, 0.0));
   let views = S.b.z;
@@ -175,9 +175,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let box = impostorFrames[subject * 3u + 2u];
     o.layer = i32(pageOf.x);
     o.page = vec4<f32>(pageOf.yzw, f32(subject));
-    let centre = base + impostorTurn(frame.xyz, yaw) * height;
+    let center = base + impostorTurn(frame.xyz, yaw) * height;
     let radius = frame.w * height;
-    var toEye = cameraPosition() - centre;
+    var toEye = cameraPosition() - center;
     if (length(toEye) < 0.0001) {
       toEye = vec3<f32>(1.0, 0.0, 0.0);
     }
@@ -199,7 +199,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
         dot(abs(impostorUnturn(quadRight, yaw)), box.xyz), dot(abs(impostorUnturn(quadUp, yaw)), box.xyz));
     }
     let offset = quadRight * (local.x * reach.x) + quadUp * (local.y * reach.y) + eyeWorld * forward;
-    world = centre + offset * radius;
+    world = center + offset * radius;
     // The views, in the prop's own frame
     let eye = impostorUnturn(eyeWorld, yaw);
     let point = impostorUnturn(offset, yaw);
@@ -226,7 +226,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     o.cellsAB = vec4<f32>(picks.a, picks.b);
     o.cellCWeights = vec4<f32>(picks.c, picks.weights.y, picks.weights.z);
     o.eyeYaw = vec4<f32>(eye, yaw);
-    o.centreRadius = vec4<f32>(centre, radius);
+    o.centerRadius = vec4<f32>(center, radius);
     // The first view's atlas point: what the hashed alpha test measures
     o.uv = impostorPageUv(o.page.xyz, impostorAtlasUv(picks.a, views, localA));
   } else {
@@ -261,7 +261,7 @@ struct FsOut {
 // mip level being sampled and per prop, so the pattern stays on the picture
 // as the camera moves; TAA's jitter samples it at moving points and resolves
 // it into soft leaf edges. The mips keep their coverage under a plain cut
-// (app3d/SpriteBake spriteMipChain), and a band centred on the cutoff keeps
+// (app3d/SpriteBake spriteMipChain), and a band centered on the cutoff keeps
 // close to that coverage.
 fn spriteHash(p: vec3<f32>) -> f32 {
   var q = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
@@ -460,10 +460,10 @@ fn impostorMarchSurface(in: VsOut) -> FsOut {
   let yaw = in.eyeYaw.w;
   let point = in.localAB.xyz;
   let box = impostorFrames[u32(in.page.w) * 3u + 2u];
-  let radius = in.centreRadius.w;
+  let radius = in.centerRadius.w;
   // This fragment's own ray from the eye (the quad stands at the box's
-  // front, so the one direction of the quad's centre is off at its edges)
-  let pointWorld = in.centreRadius.xyz + impostorTurn(point, yaw) * radius;
+  // front, so the one direction of the quad's center is off at its edges)
+  let pointWorld = in.centerRadius.xyz + impostorTurn(point, yaw) * radius;
   let eye = impostorUnturn(normalize(cameraPosition() - pointWorld), yaw);
   // The picture's mip level, from how fast the first view's picture moves
   // across the screen (the march reads at one level)
@@ -493,7 +493,7 @@ fn impostorMarchSurface(in: VsOut) -> FsOut {
   let normal = tap.normal;
   let position = tap.position;
   let worldNormal = impostorTurn(normal / max(length(normal), 0.0001), yaw);
-  let world = in.centreRadius.xyz + impostorTurn(position, yaw) * radius;
+  let world = in.centerRadius.xyz + impostorTurn(position, yaw) * radius;
   let clip = F.viewProj * vec4<f32>(world, 1.0);
   surfaceDepth = clamp(clip.z / clip.w, 0.0, 1.0);
   let oct = octEncode(worldNormal);
@@ -538,7 +538,7 @@ fn impostorSurface(in: VsOut) -> FsOut {
     third = impostorTap(in.cellCWeights.xy, in.localC, alphaC, eye, in.layer, in.page);
   }
   let alpha = dot(weights, vec3<f32>(first.albedo.a, second.albedo.a, third.albedo.a));
-  // alpha cutout — no colour, no depth; and a level fading in or out
+  // alpha cutout — no color, no depth; and a level fading in or out
   if (alpha < alphaThreshold(in) || !fadeKeeps(in.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
     discard;
   }
@@ -549,7 +549,7 @@ fn impostorSurface(in: VsOut) -> FsOut {
   let normal = first.normal * share.x + second.normal * share.y + third.normal * share.z;
   let position = (first.position * share.x + second.position * share.y + third.position * share.z) / total;
   let worldNormal = impostorTurn(normal / max(length(normal), 0.0001), yaw);
-  let world = in.centreRadius.xyz + impostorTurn(position, yaw) * in.centreRadius.w;
+  let world = in.centerRadius.xyz + impostorTurn(position, yaw) * in.centerRadius.w;
   let clip = F.viewProj * vec4<f32>(world, 1.0);
   surfaceDepth = clamp(clip.z / clip.w, 0.0, 1.0);
   let oct = octEncode(worldNormal);
@@ -578,7 +578,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   }
   let texel = textureSample(spriteTex, spriteSamp, in.uv, in.layer);
   let threshold = alphaThreshold(in);
-  // alpha cutout — no colour, no depth; and a level fading in or out
+  // alpha cutout — no color, no depth; and a level fading in or out
   if (texel.a < threshold || !fadeKeeps(in.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
     discard;
   }

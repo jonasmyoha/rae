@@ -30,7 +30,7 @@ static void run_suite(const int64_t* values, const Particle* particles,
                       int64_t length, int64_t passes) {
   const int64_t operations = length * passes;
   /* The modulo divisor is read through a volatile so `% divisor` is a real
-   * division, as it is in Rae, instead of a mask the optimiser derives from the
+   * division, as it is in Rae, instead of a mask the optimizer derives from the
    * constant 65 536 (it did; it made these cases measure constant folding). */
   volatile int64_t divisor_slot = length;
   const int64_t divisor = divisor_slot;

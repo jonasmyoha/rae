@@ -3,7 +3,7 @@
 Status: **design** (no implementation yet). Goal: a repeatable way to run Rae's
 featured examples (and later self-contained Rae app directories) on a real
 iPhone, so we can profile performance on device — no Rae program has ever run on
-iOS. Perf is now the motivating concern, so the design centres a **native**
+iOS. Perf is now the motivating concern, so the design centers a **native**
 device path, with a lighter WASM launcher for breadth and quick iteration.
 
 > **Scope — supported build targets.** Rae has exactly **two** real build
@@ -208,7 +208,7 @@ works for any example *or* a future self-contained app repo:
    wgpu Metal surface + one WGSL shader on real hardware, and shakes out §6/§7.
 3. **The generator.** `tools/ios/gen.sh` + CMakeLists producing `RaeExamples.xcodeproj`
    with a target per featured example. Scheme dropdown = the launcher.
-4. **Asset bundling shim** (§6) generalised across all examples.
+4. **Asset bundling shim** (§6) generalized across all examples.
 5. **Track B WebLauncher** — WKWebView + featured WASM gallery.
 6. **Profiling pass** — Instruments on `114` (grass/deferred) at various densities;
    feed results back into the perf work that motivated this.

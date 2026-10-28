@@ -1,8 +1,8 @@
 # Ported from Box3D: Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md)
 # The constraint graph (b3ConstraintGraph and b3GraphColor of Box3D's
 # constraint_graph.h at 9f998c8): touching awake contacts are spread over
-# colours so that no two constraints of one colour share a dynamic body,
-# which lets a colour be solved in parallel. The last colour is the
+# colors so that no two constraints of one color share a dynamic body,
+# which lets a color be solved in parallel. The last color is the
 # overflow, for constraints that fit nowhere. Adding and removing contacts
 # is in WorldGraph.
 open physics/Constants
@@ -13,11 +13,11 @@ open physics/dynamics/Joint
 # B3_OVERFLOW_INDEX
 const overflowIndex: Int = graphColorCount - 1
 
-# B3_DYNAMIC_COLOR_COUNT: dynamic-dynamic constraints leave the last colours
+# B3_DYNAMIC_COLOR_COUNT: dynamic-dynamic constraints leave the last colors
 # to dynamic-static ones, which then get solved later (less push through).
 const dynamicColorCount: Int = graphColorCount - 4
 
-# A contact of a mesh or overflow colour (b3ContactSpec)
+# A contact of a mesh or overflow color (b3ContactSpec)
 type ContactSpec {
   contactId: Int
   manifoldStart: Int
@@ -25,18 +25,18 @@ type ContactSpec {
 }
 
 type GraphColor {
-  # The bodies in the colour, by body id (empty on the overflow colour)
+  # The bodies in the color, by body id (empty on the overflow color)
   bodySet: Bitset
   # Convex contacts, solved wide
   convexContacts: List(Int)
   # Mesh and overflow contacts, solved one by one
   contacts: List(ContactSpec)
-  # The joints of the colour
+  # The joints of the color
   jointSims: List(JointSim)
 }
 
 type ConstraintGraph {
-  # graphColorCount colours, the overflow last
+  # graphColorCount colors, the overflow last
   colors: List(GraphColor)
 }
 
@@ -46,7 +46,7 @@ func createGraph(bodyCapacity: view Int) ret ConstraintGraph {
   var colors: List(GraphColor) = List.create(GraphColor, cap: graphColorCount)
   loop var i: Int = 0, i < graphColorCount, ++i {
     var bodySet: Bitset = createBitset(bitCapacity: 0)
-    # No bit set for the overflow colour
+    # No bit set for the overflow color
     if i < overflowIndex {
       bodySet = createBitset(bitCapacity: capacity)
       setBitCountAndClear(bitset: bodySet, bitCount: capacity)

@@ -70,7 +70,7 @@ a feature that is not already listed here.
 - **N-arity joins — DECIDED: a small fixed ladder, NOT variadic generics.** Joins are
   hand-written per arity (`query2`/`query3`); the answer to "more than N types" is to
   add `query4`/`query5` in the same explicit style, not variadic / type-list generic
-  parameters. Variadic generics are metaprogramming — clever, hard to analyse, and
+  parameters. Variadic generics are metaprogramming — clever, hard to analyze, and
   declined; nobody joins eight tables in a hot loop. Every join stays O(smallest
   table): drive off the smallest `ComponentTable`, O(1) sparse membership on the rest.
   That is exactly what a performance engineer hand-writes; #807 only removes the
@@ -121,7 +121,7 @@ a feature that is not already listed here.
     and bare `override` in another, and `const`/`public` could just as well be
     `@const`/`@public`, so the category is fake. The split is arbitrary even within one
     language (Java sigils `@Override` but not `public`; Rust `#[derive]` but not `pub`),
-    making the programmer memorise a second, parallel vocabulary for no rule. The ONE
+    making the programmer memorize a second, parallel vocabulary for no rule. The ONE
     place a sigil is earned is an OPEN, user-extensible set (Python decorators, Rust
     macros) as a namespace escape hatch — and Rae deliberately does NOT want that
     open-macro extensibility (it fights determinism/analyzability), so it never reaches
@@ -136,7 +136,7 @@ a feature that is not already listed here.
   declares its own serialize/replicate/editor flags at definition, not in a separate
   table.
 
-## Data modelling
+## Data modeling
 
 - **Lightweight tuples / multiple return.** Repeatedly hit "can't return `(cellX,
   cellY)` / `(transform, active)`" — had to thread a struct or split into two funcs.
@@ -156,7 +156,7 @@ a feature that is not already listed here.
     exactly the array-of-structs "bag of mixed things" layout data-oriented design
     exists to get away from. The ECS answer already gives the right layout for free:
     each component type is its own packed dense `ComponentTable`, so "all circles" IS
-    a contiguous array of only circles. A sum type optimises the programmer's
+    a contiguous array of only circles. A sum type optimizes the programmer's
     convenience of "one value, many shapes" at the direct cost of the layout a
     performance engineer actually needs.
   - **The ECS *is* the variant mechanism, so a sum type is a competing second way.**
@@ -198,7 +198,7 @@ a feature that is not already listed here.
   rather than forcing a symmetric `World2d`/`Scene2d` rename: namespacing, not renaming,
   is the right fix for name collisions.
   - **Status: PARKED (low priority).** Through the data-oriented / minimalism lens
-    this is the weakest open item: a purely naming/organisation concern with zero
+    this is the weakest open item: a purely naming/organization concern with zero
     runtime relevance, and a real language feature (type resolution, generics,
     ambiguity diagnostics) bought to fix an aesthetic — while the workaround, distinct
     prefixed names (`UiWorld`/`World3d`/`Scene`), works and costs only mild asymmetry.
@@ -212,7 +212,7 @@ a feature that is not already listed here.
   auto-scans *every* `.rae` file under the project root into ONE compile + visibility
   unit, so moving a system into a `FooSystem/` folder does NOT create an import wall —
   every project file still sees every other, no `import` needed. Folders are namespaces
-  for *organisation*, not encapsulation. That is why the App/system coupling was a
+  for *organization*, not encapsulation. That is why the App/system coupling was a
   PARAMETER-level problem (systems taking the God-object `App`), fixable by passing narrow
   state — the module system neither caused nor cured it. To make a system's dependencies
   *enforced* (it can name only what it imports), Rae would need opt-in module
@@ -280,7 +280,7 @@ a feature that is not already listed here.
   hand: every cross-cutting singleton (Profiler, GrassCompute, the DeferredRenderer pass
   caches, the UI `UiTheme`) became a field on an owner (App / world / renderer resource)
   and was spelled at every hop from the owner down to the leaf — the theme alone touched
-  the whole paint + scene-deserialiser chain across lib/ui and three example apps. A
+  the whole paint + scene-deserializer chain across lib/ui and three example apps. A
   language-level ambient context (a `context`-style scoped binding threaded implicitly by
   the compiler, one keyword, no `@`-sigil) would collapse that mechanical mega-diff into
   an edit. **Against:** Rae's promise is that what a function needs is in its signature;

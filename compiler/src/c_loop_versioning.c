@@ -359,7 +359,7 @@ static void lv_walk_expr(LvWalk* w, const AstExpr* e) {
     case AST_EXPR_CHAR: case AST_EXPR_BOOL: case AST_EXPR_NONE:
       break;
     default:
-      /* object/collection literals, match, box…: not analysed, so not allowed */
+      /* object/collection literals, match, box…: not analyzed, so not allowed */
       w->plan->ok = false;
       break;
   }
@@ -419,7 +419,7 @@ static void lv_walk_stmt(LvWalk* w, const AstStmt* s) {
     case AST_STMT_BREAK:
       break;
     default:
-      /* nested loops, continue, match, defer, destructuring: not analysed */
+      /* nested loops, continue, match, defer, destructuring: not analyzed */
       w->plan->ok = false;
       break;
   }

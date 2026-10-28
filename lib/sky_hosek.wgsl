@@ -38,7 +38,7 @@ fn skyProcedural(dir: vec3<f32>, toSun: vec3<f32>, t: f32) -> vec3<f32> {
                        0.0557*X - 0.2040*YY + 1.0570*Z);
   return max(rgb, vec3<f32>(0.0));
 }
-fn skyStylised(dir: vec3<f32>, toSun: vec3<f32>) -> vec3<f32> {
+fn skyStylized(dir: vec3<f32>, toSun: vec3<f32>) -> vec3<f32> {
   let h = clamp(dir.z * 0.5 + 0.5, 0.0, 1.0);
   let bands = max(L.skyZenith.w, 1.0);
   let s = h * bands;
@@ -93,8 +93,8 @@ fn moonDisc(dir: vec3<f32>, toMoon: vec3<f32>, toSun: vec3<f32>, radius: f32) ->
 }
 // The sky toward `dir`, ready to sum: the physical models (Preetham and
 // Hosek-Wilkie, in cd/m2) and the moon and night sky (cd/m2) times the
-// camera's exposure scale (camPos.w, LightUnits), the painted stylised sky
-// and the clear colour as they are (display colours); the sun's disc rides
+// camera's exposure scale (camPos.w, LightUnits), the painted stylized sky
+// and the clear color as they are (display colors); the sun's disc rides
 // on the sun's light (sunColor, already exposed)
 fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   let kind = L.skyParams.x;
@@ -103,7 +103,7 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   if (dot(L.skySun.xyz, L.skySun.xyz) > 0.25) { toSun = normalize(L.skySun.xyz); }
   var c = L.clearColor.rgb;
   if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y) * L.camPos.w; }
-  if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
+  if (kind > 2.5 && kind < 3.5) { c = skyStylized(dir, toSun); }
   if (kind > 3.5) { c = skyHosek(dir, toSun) * L.camPos.w; }
   if (kind > 1.5) {
     let ca = dot(dir, toSun);

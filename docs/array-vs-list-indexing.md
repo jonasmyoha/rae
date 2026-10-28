@@ -17,7 +17,7 @@ That abort was the one place in Rae where an index could stop the program —
 and it could not be softened: `arr[i]` returns a bare `T`, and there is no
 "zero object" for an arbitrary `T` to hand back instead. So the subscript was
 removed (queue, 2026-09-19) and Array was given List's API and List's
-behaviour, one behaviour in every build profile:
+behavior, one behavior in every build profile:
 
 | | `List(T)` | `Array(T, cap: N)` |
 |---|---|---|
@@ -38,10 +38,10 @@ specialized and emitted like `lib/core/List.rae`'s. The bodies index the raw
 slot with `this[index]` inside `unsafe`; that subscript is rejected by sema
 everywhere else, the way List's buffer intrinsics are unsafe-only.
 
-## Why not keep `[]` on Array with a checked-and-continue behaviour
+## Why not keep `[]` on Array with a checked-and-continue behavior
 
 A subscript that continues past the end must yield *some* `T`, and inventing
 one is the "compiler-invented value" #642 rejected. Making it yield `opt T`
 would be `copyAt` with a worse spelling, and would still be a different
 operator from what `List` uses. One API for both collections is simpler to
-read, to generate, and to analyse — the language's goals.
+read, to generate, and to analyze — the language's goals.

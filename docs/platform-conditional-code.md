@@ -40,7 +40,7 @@ Rae needs one construct for "this code exists only for this target", in Rae.
 |---|---|---|
 | C / C++ | `#if defined(__APPLE__)` | the preprocessor: textual, untyped, the dead branch is never parsed |
 | D | `version (OSX) { } else version (linux) { }`, plus `static if` | a keyword, statement and declaration level; the dead branch is parsed but not checked, so it rots unless CI builds every target |
-| Zig | `if (builtin.os.tag == .macos)` on a comptime value | an ordinary `if` on a compile-time constant; the dead branch is not analysed |
+| Zig | `if (builtin.os.tag == .macos)` on a comptime value | an ordinary `if` on a compile-time constant; the dead branch is not analyzed |
 | Nim | `when defined(macosx):` | a keyword `when`, statement and declaration level |
 | Swift | `#if os(macOS)` | a sigil |
 | Rust | `#[cfg(target_os = "macos")]` | an attribute: the `@`/`#[...]` sigil Rae refuses (AGENTS.md) |
@@ -194,7 +194,7 @@ Three rules for UI code:
      1080p screen get the same layout at the same window size.
    - An iPad in Split View gets the compact layout because its window IS
      compact, which `isTablet()` would get wrong.
-   - Physical size (millimetres, from the display's DPI) is for the rare
+   - Physical size (millimeters, from the display's DPI) is for the rare
      thing that must be physically sized: a ruler, a print preview. It is
      never for layout.
 2. **Hit targets and hover from the pointer, per interaction.**

@@ -29,7 +29,7 @@ Both halves of that trade are imperfect:
 The standard solution in native UI toolkits (GTK, Qt, AppKit) is to block on
 the OS event queue until something arrives. GLFW exposes this directly:
 
-| Function | Behaviour |
+| Function | Behavior |
 |---|---|
 | `glfwPollEvents()` | non-blocking; the current model |
 | `glfwWaitEvents()` | **blocks** until any event arrives; CPU ≈ 0 % |
@@ -39,7 +39,7 @@ the OS event queue until something arrives. GLFW exposes this directly:
 This document plans how to land that model on top of Rae + raylib without
 breaking the existing examples.
 
-## 2. End-to-end behaviour
+## 2. End-to-end behavior
 
 ### Idle (no animation, no input)
 ```
@@ -116,8 +116,8 @@ table, with the same single-call body.
 - They're all one-liners; binding all three now is free.
 
 **Constraint:** the natives must be called *after* `initWindow()` — that's
-what initialises GLFW. If called before, the underlying GLFW call is a no-op
-on most platforms but undefined behaviour on others. Document this.
+what initializes GLFW. If called before, the underlying GLFW call is a no-op
+on most platforms but undefined behavior on others. Document this.
 
 ### 3b. Rae stdlib — bindings + a small policy helper (Layer B)
 
@@ -360,7 +360,7 @@ Each phase is one commit, with a separate submodule + outer-repo bump pair.
   `waitEventsTimeout(seconds: 0.01)`, closes window, exits 0. Runs on
   both targets. Smoke test that the bindings work.
 
-**Risk:** very low. New natives, no behaviour change anywhere else.
+**Risk:** very low. New natives, no behavior change anywhere else.
 
 ### Phase 2 — Add stdlib helper
 - `lib/ui/loop.rae` (new file): the timeout constants and
@@ -374,7 +374,7 @@ Each phase is one commit, with a separate submodule + outer-repo bump pair.
 - `examples/98_mobile_ui/main.rae`: replace the `setTargetFPS` / always-render
   block with `waitEventsTimeout` + conditional render.
 - Drop the `lastTargetFps` state.
-- Honour `RAE_AUTO_EXIT_SEC` via timeout clamping.
+- Honor `RAE_AUTO_EXIT_SEC` via timeout clamping.
 - Verify visually that:
   - Interactive clicks register correctly.
   - Playback / hero animations are smooth.
@@ -454,7 +454,7 @@ gating correctly). Tune `nextWaitTimeoutSec`, not the underlying mechanism.
 1. Are GLFW headers already on the include path for both the Compiled
    runtime and Live VM? If not, where do they live? (raylib bundles a
    GLFW build; check the existing include line.)
-2. Are there any tests currently relying on `setTargetFPS` behaviour
+2. Are there any tests currently relying on `setTargetFPS` behavior
    (timing-sensitive frame counts) that would break with wait-events? The
    stress test doesn't, the snapshot script doesn't — but worth a grep.
 3. Does the Live VM's raylib native registration need any special

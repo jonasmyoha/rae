@@ -1,6 +1,6 @@
 # Grass patches and motion recovery
 
-The ground and tuft bases now use the same seeded colour field. Existing roots
+The ground and tuft bases now use the same seeded color field. Existing roots
 are gathered into unequal small groups, with shorter tufts in sparse sectors.
 The grove's dirt paths are painted on its ground using the same mask that
 excludes grass. This removes the separate elevated path meshes and aligns the
@@ -40,13 +40,13 @@ identical visible count. The forest clearing has 1,363 before and 1,421 after.
 ## Shared implementation
 
 - `grass_field.wgsl` owns the world-cell hashing, fine grouping, broad patch
-  field and ground colour. `grass_compute.wgsl` uses its positions and then
+  field and ground color. `grass_compute.wgsl` uses its positions and then
   applies the existing biome, water/beach, road and obstacle tests. No root is
   moved after those tests. Width, density, patch coverage and the 65,536-record
   limit are unchanged. A zero `clusterStrength` retains uniform placement, height
-  and colour; the examples use 1. Grouping is independent of the camera and tile origin.
-- Ground colour darkens gently under fuller patches and becomes warmer in
-  open areas. The tuft material uses that same base colour and eases the dark
+  and color; the examples use 1. Grouping is independent of the camera and tile origin.
+- Ground color darkens gently under fuller patches and becomes warmer in
+  open areas. The tuft material uses that same base color and eases the dark
   texture into the ground at its root. No extra emission or postprocess blur
   was added. The existing alpha cutoff, coverage-preserving mips, lighting and
   forward/deferred paths remain in use.
@@ -82,7 +82,7 @@ its existing distance-thinning bands; screenshots do not hide distant grass.
 
 The GPU check executes the production field and motion helpers at 64 cells and
 times. It checks exact calm, unchanged roots, forward wind response, bounded
-movement, continuity in space/time, positive finite colour and the same world
+movement, continuity in space/time, positive finite color and the same world
 cell reconstructed from a shifted streaming grid. It does not establish visual
 quality or test every possible obstacle layout. The contact views and recorded
 walks provide the visual evidence alongside it.

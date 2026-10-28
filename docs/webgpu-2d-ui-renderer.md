@@ -311,7 +311,7 @@ workaround), and a QUEUE id.
 **Resolved while building the renderer:**
 - **Hex integer literals** (`0xAARRGGBB`) — were unsupported (lexed as `0` +
   identifier). *Fixed* in the lexer (commit "feat(lexer): hexadecimal integer
-  literals"); colours/bitmasks now author cleanly instead of via bitwise packing.
+  literals"); colors/bitmasks now author cleanly instead of via bitwise packing.
 - **Mangler hijacked defined functions to raylib symbols** — a Rae function with
   a body whose name matched a raylib builtin (e.g. `lib/gpu2d_text.rae`'s
   `drawText`) was mangled to `rae_ext_drawText`, colliding with raylib's binding

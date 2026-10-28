@@ -37,8 +37,8 @@ fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
 fn groveUnderObstacle(p: vec2<f32>) -> bool {
   let count = i32(groveObstacles[0]);
   for (var i = 0; i < count; i = i + 1) {
-    let centre = vec2<f32>(groveObstacles[1 + i * 3], groveObstacles[2 + i * 3]);
-    if (distance(p, centre) < groveObstacles[3 + i * 3]) { return true; }
+    let center = vec2<f32>(groveObstacles[1 + i * 3], groveObstacles[2 + i * 3]);
+    if (distance(p, center) < groveObstacles[3 + i * 3]) { return true; }
   }
   return false;
 }

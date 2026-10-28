@@ -100,7 +100,7 @@ export class StatsStore {
   }
 
   /** Per-example build timing from the compiler's @@RAE_BUILD_TIME@@ line: the
-   * full build (emit + cc) and the size-normalised ms per 1,000 processed
+   * full build (emit + cc) and the size-normalized ms per 1,000 processed
    * lines. One entry is appended per example per build. */
   recordExampleBuild(data: ExampleBuildStats) {
     const metadata = {

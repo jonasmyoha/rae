@@ -31,10 +31,10 @@ the test for every decision below:
   are gone. (A `LEGACY` hardcoded table block still sits at the bottom of that
   file with no callers — dead code from the raylib path, deletable.)
 - **Shadows (#232), radius + padding tokens (#233), spacing sweep (#234)** —
-  tokens are resolved at deserialise time into token-carrying fields; the 106
+  tokens are resolved at deserialize time into token-carrying fields; the 106
   scenes reference `spaceM`/`radiusCard`-style tokens (a handful of raw gaps
   and radii remain where §8 says raw numbers are correct).
-- **Live theme switching (#235).** Colours are stored as palette-slot names
+- **Live theme switching (#235).** Colors are stored as palette-slot names
   (`fillSlot`/`strokeSlot`/`tintSlot`/`colorSlot` on the components) and
   resolved at paint through the world's theme; a theme switch is a repaint +
   generation bump, not a scene re-parse.
@@ -121,7 +121,7 @@ the commit — `"styleId": "miniTitle"` and nothing else. The
 `TextShadow` component may survive as the override escape hatch (§6),
 but it must stop being the authoring path.
 
-The lesson generalises: **any visual property that would be authored
+The lesson generalizes: **any visual property that would be authored
 with the same values on more than a couple of entities is a style
 property, not a component property.** Real apps have 8–20 text
 styles, a handful of radii, five spacing steps. The system should make
@@ -155,7 +155,7 @@ Three moves, in order of importance:
    if-chains. The theme file is the single place a designer edits.
 2. **Scenes reference tokens; the reference is kept, not baked.**
    Resolution happens when a concrete value is needed (style lookup
-   at paint/derive time, token lookup at component-deserialise time
+   at paint/derive time, token lookup at component-deserialize time
    *into a token-carrying field* — see §5 for the two-tier rule).
 3. **One resolver.** text_style.rae becomes the only styleId →
    concrete mapping; render_gpu2d's duplicate tables and render.rae's
@@ -175,7 +175,7 @@ A `TextStyle` is a named bundle:
 | `color` | **palette slot name** | stored as the slot (`"accentText"`), resolved against the active palette at use — this is what makes theme switching not require scene re-parse |
 | `shadow` | shadow token name or inline (none default) | see §5 shadows |
 | `align` | enum start/center/end | replaces `textStyleIsCentered` / `IsRightAligned` |
-| `vAlign` | enum top/center | vertical placement in the node's box: `top` (default) puts the baseline at top + size; `center` centres the capitals (the font's cap height, measured off "H"; descenders hang below), so a `button` style centres its label once for every button (#81444309). Per-node ink centring stays `OpticalAlign`. |
+| `vAlign` | enum top/center | vertical placement in the node's box: `top` (default) puts the baseline at top + size; `center` centers the capitals (the font's cap height, measured off "H"; descenders hang below), so a `button` style centers its label once for every button (#81444309). Per-node ink centering stays `OpticalAlign`. |
 | future | any | new fields default; old theme files stay valid |
 
 **Extensibility rule:** every field has a defined default, and a style
@@ -336,7 +336,7 @@ which table was searched.
 Two tiers, chosen by what kind of value it is:
 
 **Tier 1 — geometry consumed by layout (space, radius, padding):**
-resolve at scene-deserialise time into the existing concrete
+resolve at scene-deserialize time into the existing concrete
 components (`Layout.gap: Float`, `Padding.insets`, …), exactly as
 `optFloatOrToken` does today. Rationale: layout runs from plain
 floats in a hot pass; these values don't change on theme *mode*
@@ -361,7 +361,7 @@ a `ResolvedTheme` rides in UiWorld like `MsdfState` does).
 Why an accessor and NOT per-entity computed/render components (the
 alternative the question raises): a `ComputedTextStyle` component per
 text entity would copy ~10 fields onto hundreds of entities that all
-share 8–20 styles — the exact denormalisation this design is removing
+share 8–20 styles — the exact denormalization this design is removing
 from scenes, reintroduced at the ECS layer. Per-entity derived
 components are the right tool when the derived value is genuinely
 per-entity (`VisualBounds` from #219: depends on the entity's own
@@ -491,7 +491,7 @@ byte-identical (or intentionally-identical) 106 screenshots:
 - **M1 — Single text resolver** (landed #231). text_style.rae reads ResolvedTheme
   (falling back to its current if-chains when no theme is loaded, so
   lib/ui stays usable standalone); render_gpu2d's duplicated
-  `g2dTextStyle*` tables are deleted in favour of it.
+  `g2dTextStyle*` tables are deleted in favor of it.
   Screenshot-verified no-change.
 - **M2 — Shadows into styles** (landed #232). Add the shadow token table; give
   `miniTitle` / `miniMuted` their shadows in the theme file; delete
@@ -526,7 +526,7 @@ byte-identical (or intentionally-identical) 106 screenshots:
     (`primaryButton`, `card`) naming a `background` palette slot, a
     `radius` token, a `padding` token, and a `text` style. Scenes use
     `"ContainerStyle": "<name>"`, which `ui/container_style.rae`
-    expands at deserialise into the concrete rounded `Shape`
+    expands at deserialize into the concrete rounded `Shape`
     (background stored as `fillSlot` so it still theme-tracks) +
     `Padding`. It collapses the "five visual components on a node" into
     one reference.
@@ -555,7 +555,7 @@ example 98 rather than to maintain it.
    capped, with a resolved-dump debug tool — prototypes as an
    authoring convenience, never a runtime structure.
 3. Scenes keep referencing ids/tokens (`styleId`, `"spaceM"`,
-   `"radiusCard"`); geometry tokens resolve at deserialise time,
+   `"radiusCard"`); geometry tokens resolve at deserialize time,
    appearance styles resolve through one accessor at paint time,
    invalidated by a theme generation counter → live theme switching.
 4. Overrides exist but are graded: derived style ≫ explicit partial
@@ -569,17 +569,17 @@ example 98 rather than to maintain it.
 
 End of design.
 
-### Outlined controls and coloured halos
+### Outlined controls and colored halos
 
 Application-defined palette names can be used by authored shapes, sprites, text,
-container styles and widget-state colours, alongside the standard palette slots.
-Keep shared role colours in the theme (for example `buttonPrimary`,
+container styles and widget-state colors, alongside the standard palette slots.
+Keep shared role colors in the theme (for example `buttonPrimary`,
 `buttonSecondary`, `buttonEdge`, `buttonGlow`). Put geometry and effects on the
 button entity: a `Shape` defines its fill, stroke and radius; equal width/height
 with radius half the height makes a circular icon control. Its label/icon remains
-an ordinary centred child or text component.
+an ordinary centered child or text component.
 
-For a hover halo, author the existing shadow component with colour enabled:
+For a hover halo, author the existing shadow component with color enabled:
 
 ```json
 "Shadow": {
@@ -591,6 +591,6 @@ For a hover halo, author the existing shadow component with colour enabled:
 
 `hoverOnly` reads the entity's `Interaction.hovered` component maintained by the
 input system; the entity must be a hit target. Without these optional fields,
-shadows retain their black, downward-offset appearance. Coloured halos use the
+shadows retain their black, downward-offset appearance. Colored halos use the
 same bounded layered approximation as ordinary shadows (1–16 draws), not a blur
 texture or a C-side effect. Use them sparingly on interaction, not on every panel.

@@ -67,8 +67,8 @@ fn bladeLocal(vi: u32, curve: f32) -> vec3<f32> {
   let right = (corner == 1u) || (corner == 3u);
   let z = (f32(segment) + select(0.0, 1.0, top)) / f32(bladeSegments);
   let halfWidth = 0.025 + 0.475 * pow(max(1.0 - z, 0.0), 0.72);
-  let centreX = curve * z * z;
-  let x = centreX + select(-halfWidth, halfWidth, right);
+  let centerX = curve * z * z;
+  let x = centerX + select(-halfWidth, halfWidth, right);
   // A shallow bow makes highlights flow across a tuft instead of lighting the
   // entire old flat sheet as one polygon.
   let bow = (0.055 + abs(curve) * 0.045) * sin(z * 3.14159265);

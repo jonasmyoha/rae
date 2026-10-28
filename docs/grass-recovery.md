@@ -10,7 +10,7 @@ bases and quieter internal shading. Density was not raised to make it win.
 
 All current alternatives use the same shared compute output: 2,781 instances
 in the close grove view and 1,363 in the forest view. Position, yaw, base height,
-width, patch membership, culling, ground colour, wind phase, light and camera
+width, patch membership, culling, ground color, wind phase, light and camera
 are identical within each app. Both new candidates use the same height envelope
 and comparable tuft footprint. Their visible pixel coverage differs,
 as it should when judging silhouettes; equal instance counts do not mean equal
@@ -57,13 +57,13 @@ selectable with its original geometry and shading.
 The original [meadowTuft.png](../lib/assets/grass/meadowTuft.png) has connected
 lower foliage, unequal curved upper blades and narrow transparent gaps.
 [Asset notes](../lib/assets/grass/meadowTuft.md) record its generation prompt and
-source. Its restrained luminance modulates the app's grass colour; broad
+source. Its restrained luminance modulates the app's grass color; broad
 upward normals avoid lighting every narrow leaf as a separate hard surface.
 The existing toon/physical material choice, roughness and sun lighting remain.
 There is no emission, light boost, global shadow change or blur.
 
 One owner-held 512 × 512 RGBA sRGB image has ten mip levels, about 1.33 MiB
-before driver overhead. SurfaceImages filters in linear light, weights colour
+before driver overhead. SurfaceImages filters in linear light, weights color
 by alpha and preserves coverage at the 0.5 cutoff. Both forward and deferred
 paths use the same mask. It is alpha cutout with depth writes, not blended
 transparency or alpha-to-coverage. The image/mips/sampler retire with the grass
@@ -144,7 +144,7 @@ readback.
 
 The tuft motif still repeats. Very close views can reveal crossed planes, and
 thin distant tips can shimmer despite coverage-preserving mips. The grove's
-large flat-colour gaps and the forest's strong green saturation are unchanged.
+large flat-color gaps and the forest's strong green saturation are unchanged.
 The supplied references have richer patch and ground relationships. Those are
 still needed; this is a selected near-grass treatment, not a finished meadow.
 
@@ -152,7 +152,7 @@ still needed; this is a selected near-grass treatment, not a finished meadow.
 
 Cases 759 and 1244 passed. The new case checks a transparent image perimeter,
 an opaque connected root, coverage-preserving mips down to 16px, and no black
-colour contamination from transparent neighbours. GPU checks `surfaceImages`
+color contamination from transparent neighbors. GPU checks `surfaceImages`
 and `canopyCoverage` passed; the image check now uploads and retires the grass
 asset alongside the existing tree images.
 

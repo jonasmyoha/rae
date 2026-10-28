@@ -129,10 +129,10 @@ shadow reads as real.
 **A3. Denoise, in two stages that must not be conflated.** 1-2
 taps/pixel/frame is noisy. Two distinct mechanisms can absorb it:
 
-* **Colour TAA (#335), for free.** The noisy mask multiplies the direct
+* **Color TAA (#335), for free.** The noisy mask multiplies the direct
   term, so shadow noise becomes shading noise, and the existing TAA
   eats it like any other shading noise. Zero new machinery — this is
-  what step 1 ships with. Its limit: the colour-space clamp cannot tell
+  what step 1 ships with. Its limit: the color-space clamp cannot tell
   shadow noise from detail, so convergence in a penumbra is slower and
   a fast-moving penumbra can shimmer.
 * **A dedicated mask history (step 3).** Accumulate the mask itself,
@@ -140,7 +140,7 @@ taps/pixel/frame is noisy. Two distinct mechanisms can absorb it:
   penumbrae and faster convergence, at the cost of one r8 history
   buffer (~2 MB) and a real reprojection pass. This is NOT "machinery
   we already own" — it is new, and it is deferred until measurement
-  shows colour TAA is not enough.
+  shows color TAA is not enough.
 * **A depth-aware spatial blur** — #372 already calls for a dedicated
   depth-aware SSAO blur. The shadow mask wants the *same* filter with a
   different radius. Build it once, parameterised.
@@ -149,12 +149,12 @@ This combination is what makes R1 and R2 affordable at the same time: the
 softness comes from the sample *distribution* (resolution-independent, no
 texel grid visible) rather than from a blur applied after the fact.
 
-**Cascade construction rules** (each of these is a specific artefact
+**Cascade construction rules** (each of these is a specific artifact
 fixed):
 
-| Rule | Artefact if omitted |
+| Rule | Artifact if omitted |
 |---|---|
-| Snap each cascade's ortho centre to whole shadow-map texels in world space | Shadows crawl and shimmer as the camera moves — the single most-noticed shadow artefact, and exactly the "pixelation" complaint |
+| Snap each cascade's ortho center to whole shadow-map texels in world space | Shadows crawl and shimmer as the camera moves — the single most-noticed shadow artifact, and exactly the "pixelation" complaint |
 | Fit cascades to the frustum slice bounding sphere, not the frustum corners | Shadow map resolution changes with camera yaw, so shimmer returns on rotation |
 | Overlap cascades and dither the transition using the same blue noise | A hard cascade boundary is visible as a line where blur width changes |
 | A receiver-plane bias (each PCF tap compared against the receiving surface's plane), plus a small depth bias. In the deferred renderer this REPLACED the normal-offset bias (render-perf-7); the forward renderer still offsets along the normal | A large depth bias, front-face culling or a normal offset each push the shadow away from the contact, so feet float over their shadow (peter-panning) |
@@ -210,7 +210,7 @@ shadow = min over march of  clamp(k * d(p) / t, 0, 1)
 ```
 
 where `d` is the SDF distance at the marched point, `t` the distance
-travelled, and `k` the cone tightness derived from the sun's angular
+traveled, and `k` the cone tightness derived from the sun's angular
 diameter — the *same* 0.53° that drives A2, so the two layers agree about
 how soft a shadow should be.
 
@@ -335,7 +335,7 @@ The desktop tier keeps 32-bit because the far cascade's range is large.
 1-4), low is the honest degraded version of Layer A: one 1024² cascade,
 one sample, spatial denoise, half-res mask. Once #339 lands, low
 switches to Layer C alone: SDF cone tracing, which is soft and stable —
-no shimmer, no texel grid, no bias artefacts — at the cost of missing
+no shimmer, no texel grid, no bias artifacts — at the cost of missing
 small-scale contact detail.
 
 **And the cost claim there needs honesty.** SDF tracing is not cheaper
@@ -357,7 +357,7 @@ representation is being built for GI anyway.
 * **r8unorm is not a writable storage format in WebGPU**, so a compute
   `shadowMask` pass cannot write it directly. Options: write `r32float`
   storage and blit down (wastes bandwidth), or produce the mask in a
-  fragment pass with an r8unorm colour attachment (fine — the pass is
+  fragment pass with an r8unorm color attachment (fine — the pass is
   full-screen either way). Decide in step 1; the graph does not care.
 * **Every vertex format needs a depth-only pipeline.** The cascade pass
   re-rasterises the scene, so the static (32-byte) and skinned (80-byte,
@@ -377,7 +377,7 @@ representation is being built for GI anyway.
 
 | Risk | Detection |
 |---|---|
-| TAA ghosting on moving shadows — the mask is temporally accumulated, so a moving occluder smears | Compare a moving-blocker frame against a converged still frame; needs a shadow-specific history rejection on mask delta, not just the colour clamp |
+| TAA ghosting on moving shadows — the mask is temporally accumulated, so a moving occluder smears | Compare a moving-blocker frame against a converged still frame; needs a shadow-specific history rejection on mask delta, not just the color clamp |
 | Blue-noise sampling reads as *grain* rather than as *soft* if the denoiser is too weak | A/B still-frame stdev in the penumbra, the same measurement discipline #373 used for SSAO banding |
 | Cascade transitions visible despite dithering | Fly a camera along the transition and diff consecutive frames; a seam shows as a stationary band |
 | Peter-panning returns under normal-offset bias at grazing angles | The example-110 sphere-on-plane case is the standing reference; assert the contact shadow touches |

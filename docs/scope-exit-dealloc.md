@@ -30,7 +30,7 @@ without any other changes.
 
 ## Non-goals (explicitly out of scope)
 
-- **Arena allocators**: a downstream optimisation. The primitive
+- **Arena allocators**: a downstream optimization. The primitive
   this doc designs is per-binding scope-exit dealloc; arenas can
   ride on top later if the per-binding free overhead becomes a
   measurable cost in a real profile.
@@ -113,14 +113,14 @@ safely emit drops.
 
 - `c_stmt.c::emit_implicit_drops_for_body(ctx, out, first_let_index)` —
   the per-scope drop emitter. LIFO walk, skips params, skips
-  `view`/`mod` borrows, registers and emits the specialised drop
+  `view`/`mod` borrows, registers and emits the specialized drop
   symbol for each heap-owning local. Compiles fine; not currently
   called from anywhere.
 - `c_stmt.c::is_drop_target_type(type)` and `find_drop_overload_for(...)` —
   shared helpers used by both the emit pass and the discovery pass.
-- `c_discovery.c` registers the `drop()` specialisation alongside
-  each heap-owning `let` so the specialised drop function lands in
-  the output BEFORE any caller (specialised functions are emitted
+- `c_discovery.c` registers the `drop()` specialization alongside
+  each heap-owning `let` so the specialized drop function lands in
+  the output BEFORE any caller (specialized functions are emitted
   first; without pre-registration, the auto-drop call would forward-
   reference an as-yet-undeclared symbol).
 - `c_stmt.c::emit_if` / `emit_loop` save/restore `ctx->local_count`
@@ -248,7 +248,7 @@ nested heap-owning field.
      independently owned; `componentView` remains the no-copy read path.
    - **Mangler interaction.** Calling `rae_mangle_specialized_function`
      for `drop(T)` on every container-typed field of every struct
-     reachable in the program forced the mangler to specialise types
+     reachable in the program forced the mangler to specialize types
      (JsonValue, AnimState, …) that no other call site had touched.
      The substitution path through `mod List(T)` crashed inside
      `mangle_type_recursive_specialized` for at least one such type.

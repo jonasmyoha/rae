@@ -67,7 +67,7 @@ green tree keeps the older palm-style stem as its own species.
 Each crown is made of small, two-sided six-sided leaves. Leaf normals follow
 the crown envelope so light describes its volume without treating every leaf
 as an unrelated flat surface. Three material batches give each crown a
-restrained colour variation.
+restrained color variation.
 
 The rocks are the lib's faceted rocks (`lib/procgen/Rock.rae`), stretched,
 turned and sunk a little into the ground: an outcrop by the path, nine smaller
@@ -129,7 +129,7 @@ shared birch bark and leaf textures.
 
 Keys **4** and **5** (or `RAE_GROVE_VIEW=fluffy` / `evergreen`) inspect the
 new rounded broadleaf and Mediterranean evergreen groups. This group first expanded the island to
-44 by 40 metres from 27.6 by 25, with twelve additional plants: three
+44 by 40 meters from 27.6 by 25, with twelve additional plants: three
 rounded broadleaves, three slender cypresses, three umbrella pines and three
 low lime-green bushes. The original autumn trees remain for comparison.
 
@@ -143,7 +143,7 @@ The remaining forms in `lib/procgen/FluffyFoliage.rae` use fewer, larger, shallo
 with softened lobed edges. Their normals follow each crown envelope, giving
 rounded lighting instead of separate flat-card lighting. Seven overlapping
 crowns make the old broadleaf control or umbrella, nine tapered crowns make the cypress control, and
-five make a bush. Dark evergreen colours belong to the example materials.
+five make a bush. Dark evergreen colors belong to the example materials.
 All geometry is generated in Rae. The opaque forms need no bitmap assets;
 lime and the refined evergreen species use original cutouts/albedos. No new shaders or runtime C.
 
@@ -200,12 +200,12 @@ stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 
 ## Layered spruces and slender cypresses
 
-Six normal-sized spruces (6, 6.7 and 7.4 metres, two of each) stand on the
+Six normal-sized spruces (6, 6.7 and 7.4 meters, two of each) stand on the
 right side. `procgen/Spruce` now breaks the former closed skirts into nine
 unequal whorls, curved primary boughs and hanging secondary needle sprays.
 Three intersecting curved cutout strips per spray keep volume from the side;
 lighting normals describe the bough, rather than each needle. Original quiet
-needle and scaly grey-brown bark textures use the shared material/shadow path.
+needle and scaly gray-brown bark textures use the shared material/shadow path.
 Trunk and primary wood remain rigid. Secondary foliage motion is restrained.
 
 Each shared prototype has 12,407 vertices and 13,008 triangles including wood.
@@ -214,9 +214,9 @@ from its textured silhouette. This costs more geometry than the old 2,454-triang
 opaque tree. The six specimens still reuse four uploaded part meshes.
 Key 6 or `RAE_GROVE_VIEW=spruces` frames this group.
 
-The three tall cypresses remain 22.5, 24.6 and 26.7 metres tall. Only their
+The three tall cypresses remain 22.5, 24.6 and 26.7 meters tall. Only their
 vertical scale is tripled: foliage width and trunk thickness now match the
-original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes. `procgen/Cypress` now combines a narrow inner
+original 7.5, 8.2 and 8.9 meter cypresses. All six reuse the same meshes. `procgen/Cypress` now combines a narrow inner
 column with 128 ascending textured scale sprays and a rigid thin, lightly
 furrowed trunk. It keeps the original width scales, shared kind 2 and walker
 height range. Normals follow the broad column; attached sprays move slightly
@@ -236,14 +236,14 @@ mesh/material; `RAE_SPRUCE_SEED` changes the prototype seed, and
 ## Old camphor clearing
 
 One giant evergreen stands in a new western clearing. The island is now
-86 by 56 metres, centred at (-15, 6), and a narrow curved path joins the old
+86 by 56 meters, centered at (-15, 6), and a narrow curved path joins the old
 path to its roots. CPU ground geometry and the grass surface shader use the
 same ellipse. Existing tree meshes, placements, materials and lighting remain
-unchanged. The grass grid spans 112 metres to cover the expanded island.
+unchanged. The grass grid spans 112 meters to cover the expanded island.
 
-The measured camphor crown reaches **27.93 metres** after its 1.025 vertical
-instance scale. The tallest existing cypress reaches 26.92 metres including
-its leaf patches, so the difference is about one metre.
+The measured camphor crown reaches **27.93 meters** after its 1.025 vertical
+instance scale. The tallest existing cypress reaches 26.92 meters including
+its leaf patches, so the difference is about one meter.
 
 `procgen/Camphor` is an original seeded Rae generator. Its heavy flared trunk,
 nine spreading roots and seven scaffold limbs support 26 overlapping crown
@@ -320,7 +320,7 @@ that module and its consumers unchanged.
 ## Silver birch
 
 Five birches use deterministic seeds 1437, 311, 4201, 827 and 2189 at 6.6 to
-8.4 metres. The shared walker forests use the same generator and its selected
+8.4 meters. The shared walker forests use the same generator and its selected
 seed as their instanced silver-birch kind. Key **9** or
 `RAE_GROVE_VIEW=birches` frames the daylight stand. The named studies
 `birches-side`, `birches-under`, `birches-warm`, `birches-cool` and
@@ -337,7 +337,7 @@ seams and the low-contrast texture edges keep the wrap quiet.
 The current crown candidate uses `birchSpray.png`: a connected asymmetric
 cutout with small pointed edge leaves and restrained interior variation.
 Three unequal camera-facing layers follow each supporting twig. Broad crown
-normals vary smoothly across the cards; centres and wind anchors stay attached
+normals vary smoothly across the cards; centers and wind anchors stay attached
 to the unchanged scaffold. The original texture and four/five-card helper
 remain available as `RAE_BIRCH_STYLE=control`. `texture` changes only the image;
 `connected` selects the current geometry as well. The existing toon material,
@@ -383,7 +383,7 @@ fixed before/after views, calm/breezy walks, cost and remaining limits.
 ## Autumn-orange sugar maple
 
 The three existing orange-slot trees now use `procgen/SugarMaple`: joined
-ascending forks, wider paired lateral sprays, original grey-brown bark and a
+ascending forks, wider paired lateral sprays, original gray-brown bark and a
 quiet copper-orange cutout. The red, gold, crimson and palm forms are unchanged.
 The same generator supplies forest kind 4 in 136/137/143; no placement or numeric
 kind has moved. The grove keeps its seeds 501/710/217, heights and positions.
@@ -397,9 +397,9 @@ that isolated study only. The camera remains the existing free-camera override.
 
 ## Scarlet red maple
 
-The original red slot (local colour 1, seed 605 at 4.2,4) now uses the shared
+The original red slot (local color 1, seed 605 at 4.2,4) now uses the shared
 `procgen/RedMaple` generator, with lighter joined branches, a more open rounded
-crown and original scarlet/grey-bark textures. The walkers use this same source
+crown and original scarlet/gray-bark textures. The walkers use this same source
 as kind 5. Other maple slots retain their identities and placements.
 
 [The red-maple comparison](../../docs/red-maple-refinement.md) contains matched
@@ -437,7 +437,7 @@ Every child has a timeout; images and recordings stay at the chosen output.
 names it “Bloodgood Japanese maple”. No old camera number or tree placement is
 reassigned. It now uses layered textured sprays and low joined stems.
 
-`RAE_JAPANESE_MAPLE_ISOLATE=1` removes occluding neighbours for matched studies.
+`RAE_JAPANESE_MAPLE_ISOLATE=1` removes occluding neighbors for matched studies.
 Add `RAE_JAPANESE_MAPLE_CONTROL=1` for the unchanged old geometry/material,
 `RAE_JAPANESE_MAPLE_BARE=1` for wood, or `RAE_JAPANESE_MAPLE_SINGLE=1` for raised
 single-stem forks. `RAE_JAPANESE_MAPLE_SEED` and `RAE_JAPANESE_MAPLE_HEIGHT` change

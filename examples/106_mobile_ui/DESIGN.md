@@ -6,11 +6,11 @@ what changed and why). It is a music-player mockup — Home, Search, Library,
 Profile, Album, Now Playing, History, a bottom sheet, a settings dialog (the
 dark theme switch, opened from the Profile page's top bar) and the standard
 debug widget (lib/ui/DebugOverlay, its button in the top bar's leading slot) —
-driven by the local Spotify desktop app on macOS and a local album catalogue
+driven by the local Spotify desktop app on macOS and a local album catalog
 everywhere else.
 
 What this document is: the shape of the *app* — how a Rae program is
-organised around `lib/ecs` + `lib/ui`, what the frame does, who owns what.
+organized around `lib/ecs` + `lib/ui`, what the frame does, who owns what.
 What it is not: a restatement of the library. Every `lib/ui` mechanism the
 app uses has its own document; this one links them. The earlier version of
 this file was the 98-era *plan* for building `lib/ui` on raylib; that plan
@@ -29,7 +29,7 @@ examples/106_mobile_ui/            the app: ~53 files, one folder per system
   inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
   debugSystem/ (the screenshot and stress runners) assetSystem/
   assets/scenes/*.raescene         22 authored scenes + Theme.raescene
-  assets/                          MSDF fonts, icons, album art, catalogue
+  assets/                          MSDF fonts, icons, album art, catalog
   app_cache/                       runtime state (gitignored): history,
                                    library, playlists, downloaded artwork
 
@@ -67,7 +67,7 @@ tap does, what Spotify's state means for the play button, what is persisted
 │    retained gpu2d canvas: boxes, MSDF text,   │  lib/Gpu2dCanvas + lib/webgpu
 │    images, layers; presented through SDL3     │
 ├──────────────────────────────────────────────┤
-│ 5. Behaviours                                 │  lib/ui/inputSystem, animation-
+│ 5. Behaviors                                 │  lib/ui/inputSystem, animation-
 │    input/hit-test/actions, animation, scroll, │  System, ScrollPhysics/Root,
 │    widget style, list view, overlays          │  widgetStyleSystem, listView-
 │                                               │  System, LogOverlay/DebugOverlay
@@ -90,7 +90,7 @@ Two things changed since the plan and are worth knowing before reading code:
 ## 3. The app object
 
 `type App` (AppTypes.rae) is the program's long-lived state, built once by
-`createApp()` (AppCreate.rae: window, fonts, scenes, catalogue, persisted
+`createApp()` (AppCreate.rae: window, fonts, scenes, catalog, persisted
 state, Spotify) and run by `runApp(app: mod App)` (App.rae: the interactive
 loop and teardown). Its fields are the setup-time singletons — `gpuUi`,
 `scenes`, `texReg`, `appState`, `playback`, `viewport`, `logView`,
@@ -112,7 +112,7 @@ selects), its label and whether it is re-mounted afresh on entry; ONE
 `mountScreenPage` (screenSystem/ScreenPageMount.rae) mounts every row — a
 single `mountPageOrError`, nothing per page — the page root is tagged
 `PageRoot{id}`, and switching screens toggles `Active` on the pages
-(`buildAppWorldFor(visible)`). The safe-area reserve and the centred extent
+(`buildAppWorldFor(visible)`). The safe-area reserve and the centered extent
 are the scene root's authored `SafeArea` / `ExtentAnchor`; every value from
 app state is a binding component its system writes in the observation step
 before the first paint (the lists, the profile stats, the album header, the
@@ -188,7 +188,7 @@ body. Two design points:
   `createUiPipeline(world)` registers every lib/ui system with its declared
   read/write tables (`lib/ui/Pipeline.rae`), and each call site asks
   `uiShouldRun(schedule, index)` first. Layout and transform skip when their
-  inputs are unchanged; fixture 839 proves that judgement equals the hand
+  inputs are unchanged; fixture 839 proves that judgment equals the hand
   caches it replaced (#949).
 - **Observation is by revision, not by diffing.** Resource-shaped state
   (`PlayHistory.revision`, `PlaybackState` revision, the sheet epoch, the
@@ -241,9 +241,9 @@ carries named components (`Rect`, `Layout`, `Text`, `Sprite`, `OnClick`,
 `ScrollRoot`, `ListView`, …), with `SceneInstance` for reuse (the nav tabs,
 the mini-player, a track row) and per-instance overrides. `lib/ui/Scene*`
 parse and mount; `lib/ui/Registry*` map a component name to its
-deserialiser; an unknown or unsupported component is a fatal diagnostic
+deserializer; an unknown or unsupported component is a fatal diagnostic
 naming the scene and node (#941), never a silent no-op. `Theme.raescene`
-declares the tokens (colours, spacing, text styles) that the loader
+declares the tokens (colors, spacing, text styles) that the loader
 resolves through the world's theme resource (`docs/ui-theme-system.md`);
 `RAE_UI_THEME` picks a variant at boot. The registry is still one arm per
 component; #959–#961 collapse it via reflection.

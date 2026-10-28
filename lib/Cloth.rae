@@ -5,7 +5,7 @@
 # allocation in the hot path: the particle + constraint arrays live on the Cloth, and
 # writeMesh fills a caller-owned vertex buffer that pairs with updateMeshVerts.
 #
-# Coordinate model: the cloth hangs from an ANCHOR (a top crossbar centre) in WORLD
+# Coordinate model: the cloth hangs from an ANCHOR (a top crossbar center) in WORLD
 # space. `right` is the crossbar's horizontal unit axis (the sheet's width runs along
 # it); the sheet drops in world -Z and billows along its normal under `wind`. The TOP
 # row is pinned to the crossbar each frame (pinRow); everything else swings free.
@@ -142,7 +142,7 @@ func createCloth(
 }
 
 # World position of particle (col,row) for a FLAT sheet hanging from `anchor` along
-# `right` (crossbar axis, unit) — width centred on the anchor, dropping in -Z.
+# `right` (crossbar axis, unit) — width centered on the anchor, dropping in -Z.
 func flatPos(
   c: view Cloth
   col: copy Int
@@ -361,7 +361,7 @@ func step(
       var cc: Int = 0
       loop cc < c.cols {
         let a: Int = r * c.cols + cc
-        # structural: right + down neighbour
+        # structural: right + down neighbor
         if cc + 1 < c.cols {
           constrain(
             c: c
@@ -415,7 +415,7 @@ func writeMesh(c: view Cloth, out: mod List(Float)) {
     var cc: Int = 0
     loop cc < cols {
       let i: Int = r * cols + cc
-      # tangents from neighbours (one-sided at edges)
+      # tangents from neighbors (one-sided at edges)
       var ac: Int = cc + 1
       if ac >= cols {
         ac = cc
@@ -442,7 +442,7 @@ func writeMesh(c: view Cloth, out: mod List(Float)) {
       let vx: Float = c.px.copyAtDefault(index: ja) - c.px.copyAtDefault(index: jb)
       let vy: Float = c.py.copyAtDefault(index: ja) - c.py.copyAtDefault(index: jb)
       let vz: Float = c.pz.copyAtDefault(index: ja) - c.pz.copyAtDefault(index: jb)
-      # normal = u x v, normalised (fallback +Y)
+      # normal = u x v, normalized (fallback +Y)
       var nx: Float = uy * vz - uz * vy
       var ny: Float = uz * vx - ux * vz
       var nz: Float = ux * vy - uy * vx

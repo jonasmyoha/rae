@@ -1,6 +1,6 @@
 # app3d/TileStreaming — an open world in square tiles, only those near a
-# point in memory. The world is tiles `tileSize` a side, tile (0, 0) centred
-# on the origin. A tile loads once its centre is within `loadDistance` of the
+# point in memory. The world is tiles `tileSize` a side, tile (0, 0) centered
+# on the origin. A tile loads once its center is within `loadDistance` of the
 # point and is let go once it is past `unloadDistance` (apart, so a tile at
 # the edge does not load and unload by turns), at most `slotCount` at a time
 # and one a frame, the nearest first. The slots are what an app keeps per
@@ -29,7 +29,7 @@ open ecs/Event
 type TileGridSettings {
   # A tile's side (m)
   tileSize: Float
-  # Load a tile whose centre is within this of the point (m); let it go past
+  # Load a tile whose center is within this of the point (m); let it go past
   # unloadDistance
   loadDistance: Float
   unloadDistance: Float
@@ -156,11 +156,11 @@ func sameTile(a: view GridTile, b: view GridTile) ret Bool {
 # Every tile wanted round (x, y), row by row from the south-west
 func tilesToLoad(settings: view TileGridSettings, x: view Float, y: view Float) ret List(GridTile) {
   var tiles: List(GridTile) = List.create(GridTile, cap: settings.slotCount)
-  let centre: GridTile = tileOfPoint(settings: settings, x: x, y: y)
+  let center: GridTile = tileOfPoint(settings: settings, x: x, y: y)
   let reach: Int = (settings.loadDistance / settings.tileSize).toInt() + 1
   loop var dy: Int = 0 - reach, dy <= reach, ++dy {
     loop var dx: Int = 0 - reach, dx <= reach, ++dx {
-      let tile: GridTile = { x: centre.x + dx, y: centre.y + dy }
+      let tile: GridTile = { x: center.x + dx, y: center.y + dy }
       if tileWanted(
         settings: settings
         tile: tile

@@ -178,7 +178,7 @@ struct { TypeInfo* base; size_t count; } array;
 Every one of `ownership.c`'s four classification helpers
 (`is_drop_target_type`, `type_owns_heap_storage`, `type_needs_cascade_drop`,
 `type_needs_deep_copy`) must answer "is this by value?" **structurally**. A
-distinct kind lets all four stay simple — and is why this is not modelled as
+distinct kind lets all four stay simple — and is why this is not modeled as
 a `Buffer` carrying a length.
 
 `Array` is spelled like a user generic but is a **builtin type constructor**,
@@ -216,7 +216,7 @@ contiguous 16-byte value, which is the precondition for the SIMD lowering in
   behave as for any value type. An array of primitives never *needs* `own`,
   since copying is total.
 
-### 1.7 Access and bounds policy: List's API, List's behaviour
+### 1.7 Access and bounds policy: List's API, List's behavior
 
 An `Array` is accessed exactly like a `List` — there is **no `[]`** on an
 Array in user code. The compiler synthesizes, per cap the program uses, the
@@ -232,7 +232,7 @@ array_methods.c`), so the two collections read the same at every call site:
 | `arr.length()` | `Int` | always the cap |
 | `loop let x: view T in arr` / `mod T` / `T` | — | iterates the cap, in place |
 
-One behaviour in every build profile (docs/integer-semantics.md): there is
+One behavior in every build profile (docs/integer-semantics.md): there is
 no "checked in debug, bare in release", and no build in which an out-of-range
 index stops the program. This replaced the earlier `arr[i]` subscript, which
 returned a bare `T` and therefore had to abort on a dynamic out-of-range index
@@ -319,7 +319,7 @@ It catches **all three** known hazards, which is the bar that matters:
 2. **#222** (already an open queue item asking for exactly this diagnostic)
    — `let x: String = someGlobal` then passing `x` to an `own String`
    parameter frees the global's buffer and dangles it. Rejected: the
-   initialiser is a global, so `x` is an alias, not an owner. Note this
+   initializer is a global, so `x` is an alias, not an owner. Note this
    case needs a small amount of local reasoning — see §2.4.
 3. **`List(Struct)` deep-copy gap** — see §2.5; the rule plus §2.5 together
    close it.
@@ -338,7 +338,7 @@ sema, where source locations exist. No new IR, no analysis pass.
 the call site `x` is a plain local, which §2.2's rule would accept.
 
 The minimum addition that catches it, without flow analysis: when a `let`
-binding is initialised **directly** from a non-owning expression (a global,
+binding is initialized **directly** from a non-owning expression (a global,
 a `view`/`mod` parameter, or a member read through one), record that on the
 binding's symbol. The rule then treats such a binding as non-owning.
 
@@ -426,7 +426,7 @@ Grouped by what each proves. Every test is a compiler test case under
      diagnostic naming `const`.
 23. Dynamic out-of-range index aborts in debug with a useful location.
 24. `Array` of primitives triggers no drop code. Verified the way 416/417
-    verify drops — allocator/RSS behaviour at runtime, not by reading
+    verify drops — allocator/RSS behavior at runtime, not by reading
     emitted C.
 
 ### F. Regression guards
@@ -445,9 +445,9 @@ Grouped by what each proves. Every test is a compiler test case under
    deliberate performance choice. Approve, or require always-checked?
    **Answered 2026-09: always-checked, and then (2026-09-19) the subscript
    itself was removed:** Array has List's API and List's out-of-range
-   behaviour (`none` on reads, ignored + warned on writes). Rae has no
+   behavior (`none` on reads, ignored + warned on writes). Rae has no
    dev/release semantic differences (docs/integer-semantics.md "One
-   behaviour, every profile") and no indexing that stops the program.
+   behavior, every profile") and no indexing that stops the program.
 2. **`copy` as the sanctioned fix** — this makes `copy` appear in ordinary
    container code (`list.add(value: copy name)`). Acceptable ergonomics, or
    should `add` take `copy T` and copy implicitly?
@@ -461,6 +461,6 @@ Grouped by what each proves. Every test is a compiler test case under
 5. **Does `Array(T, cap: N)` also spell construction?** `let m: Mat4 = ...`
    needs a right-hand side, and the `List` line it replaces had one
    (`createList(...)`). Proposal: the type application doubles as a
-   zero-initialising constructor expression, so `Array(Float, cap: 16)` is
+   zero-initializing constructor expression, so `Array(Float, cap: 16)` is
    both the type and a valid value — which is what actually makes the swap a
    one-line edit. Needs confirmation before #352.

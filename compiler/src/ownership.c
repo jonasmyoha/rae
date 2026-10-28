@@ -1,5 +1,5 @@
 /* Backend-neutral ownership classifiers. See ownership.h for the
- * intent. Bodies are lifted verbatim from c_stmt.c — no behaviour
+ * intent. Bodies are lifted verbatim from c_stmt.c — no behavior
  * change. */
 #include "ownership.h"
 

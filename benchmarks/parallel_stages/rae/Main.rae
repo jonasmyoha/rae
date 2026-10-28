@@ -2,7 +2,7 @@
 # stage is its own parallelLoop (docs/parallel-stages-design.md §4).
 #
 # A Box3D step on the 5 050-box pyramid runs ~220 stages (warm start, solve and
-# relax per graph colour, per substep), ~36 us of single-threaded work each.
+# relax per graph color, per substep), ~36 us of single-threaded work each.
 # Here: 220 stages of 32 blocks, each block a fixed amount of arithmetic
 # writing its own element. "staged" runs them as 220 back-to-back
 # parallelLoops (a barrier after each); "flat" runs the same 7 040 blocks as

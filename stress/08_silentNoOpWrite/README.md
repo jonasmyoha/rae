@@ -36,7 +36,7 @@ it built a Huffman table — harmless only because that entry was never read.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | `IndexError: list assignment index out of range` — the program stops |
 | JavaScript | the array grows to 11 with holes — a different foot gun |

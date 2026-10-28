@@ -80,7 +80,7 @@ const kindGrassB: Int = 6
 # The grass a small prop wants under it (rocks want none)
 const propGrassMin: Float = 0.45
 
-# The single source of truth for the ground colour: the terrain ground
+# The single source of truth for the ground color: the terrain ground
 # material AND the GPU grass gradient's bottom both read this, so the grass
 # roots match the ground.
 func walkerGroundColor() ret Vec3 {
@@ -133,7 +133,7 @@ type ForestFieldSettings {
 }
 
 # The far ground: walkerFarGroundSide x walkerFarGroundSide tiles of
-# walkerFarGroundCell metres round the camera's focus, a vertex every 10 m,
+# walkerFarGroundCell meters round the camera's focus, a vertex every 10 m,
 # drawn 1 m under the near ground. Under the near ground it has a hole
 # (updateFarGroundHole), so it is not a second terrain below the first
 const walkerFarGroundSide: Int = 5
@@ -155,7 +155,7 @@ const walkerFarTreeBlock: Float = 64.0
 # Past this distance (m) the far canopy (app3d/FarCanopy: one cluster
 # impostor a forest cell) takes over from the far trees, across a band this
 # wide; the trees are drawn to the band's end plus a cluster's reach (a tree
-# is measured from its cluster's centre), unthinned
+# is measured from its cluster's center), unthinned
 const walkerCanopyFrom: Float = 300.0
 
 const walkerCanopyFadeWidth: Float = 60.0
@@ -168,8 +168,8 @@ type WalkerTerrain {
   cellSize: Float
   groundZ: Float
   biome: BiomeConfig
-  centreCellX: Int
-  centreCellY: Int
+  centerCellX: Int
+  centerCellY: Int
   toon: Bool
   # The ground: the streamed heightfield tiles (app3d/TerrainTiles)
   ground: TerrainTiles
@@ -197,15 +197,15 @@ type WalkerTerrain {
   # The bush's three leaf tones
   bushParts: List(PropInstancer)
   # The small props drawn: every placement of the window round the cell
-  # (drawCentreCellX, drawCentreCellY) the camera looks at (updateDrawnProps)
+  # (drawCenterCellX, drawCenterCellY) the camera looks at (updateDrawnProps)
   drawnProps: List(DrawnProp)
-  drawCentreCellX: Int
-  drawCentreCellY: Int
+  drawCenterCellX: Int
+  drawCenterCellY: Int
   # The stand of hand-made T02 trees (app3d/ReferenceTree), when the app asks
   # for one (WalkerAppSettings.referenceTree): the wide forest leaves its
   # patch to them, and plants them there, five floats each: x y z yaw scale
   referenceStandOn: Bool = false
-  # the stand's centre: ahead of where, and the way, this run starts
+  # the stand's center: ahead of where, and the way, this run starts
   referenceStandX: Float = 0.0
   referenceStandY: Float = 0.0
   referenceStand: List(Float) = List.create(Float, cap: 0)
@@ -425,8 +425,8 @@ func kindMinGrass(kind: view Int) ret Float {
 # `column` always holds the window cell whose index is `column` modulo the
 # grid side, so when the walker crosses a cell border only the one column (or
 # row) of slots that fell out of the window moves to the new edge.
-func wrappedCell(gridSide: view Int, centreCell: view Int, column: view Int) ret Int {
-  let first: Int = centreCell - gridSide / 2
+func wrappedCell(gridSide: view Int, centerCell: view Int, column: view Int) ret Int {
+  let first: Int = centerCell - gridSide / 2
   ret first + ((column - first) % gridSide + gridSide) % gridSide
 }
 
@@ -468,11 +468,11 @@ func updateInfiniteTerrain(
   let drawnMoved: Bool = updateDrawnProps(terrainSystem: terrainSystem, focus: groundFocus)
   let cellX: Int = Math.floor(x: propFocus.x / terrainSystem.cellSize).toInt()
   let cellY: Int = Math.floor(x: propFocus.y / terrainSystem.cellSize).toInt()
-  if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
+  if cellX is terrainSystem.centerCellX and cellY is terrainSystem.centerCellY {
     ret groundMoved or nearMoved or drawnMoved
   }
-  terrainSystem.centreCellX = cellX
-  terrainSystem.centreCellY = cellY
+  terrainSystem.centerCellX = cellX
+  terrainSystem.centerCellY = cellY
   let gridSide: Int = terrainSystem.gridSide
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
@@ -483,12 +483,12 @@ func updateInfiniteTerrain(
     }
     let propCellX: Int = wrappedCell(
       gridSide: gridSide
-      centreCell: cellX
+      centerCell: cellX
       column: prop.slot % gridSide
     )
     let propCellY: Int = wrappedCell(
       gridSide: gridSide
-      centreCell: cellY
+      centerCell: cellY
       column: prop.slot / gridSide
     )
     if prop.placed and propCellX is prop.cellX and propCellY is prop.cellY {
@@ -524,8 +524,8 @@ func updateFarGroundHole(terrainSystem: mod WalkerTerrain, renderer: mod Deferre
   let near: view TerrainTiles = terrainSystem.ground
   let half: Int = near.gridSide / 2
   let margin: Float = walkerFarGroundCell / walkerFarGroundSegments.toFloat()
-  let firstX: Int = near.centreCellX - half
-  let firstY: Int = near.centreCellY - half
+  let firstX: Int = near.centerCellX - half
+  let firstY: Int = near.centerCellY - half
   let lastX: Int = firstX + near.gridSide - 1
   let lastY: Int = firstY + near.gridSide - 1
   let minX: Float = (firstX.toFloat() - 0.5) * near.cellSize + margin
@@ -547,19 +547,19 @@ func updateFarGroundHole(terrainSystem: mod WalkerTerrain, renderer: mod Deferre
 # placed there. Rebuilt only when `focus` crosses a cell border. True when
 # it was rebuilt.
 func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bool {
-  let centreX: Int = Math.floor(x: focus.x / terrainSystem.cellSize).toInt()
-  let centreY: Int = Math.floor(x: focus.y / terrainSystem.cellSize).toInt()
-  if centreX is terrainSystem.drawCentreCellX and centreY is terrainSystem.drawCentreCellY {
+  let centerX: Int = Math.floor(x: focus.x / terrainSystem.cellSize).toInt()
+  let centerY: Int = Math.floor(x: focus.y / terrainSystem.cellSize).toInt()
+  if centerX is terrainSystem.drawCenterCellX and centerY is terrainSystem.drawCenterCellY {
     ret false
   }
-  terrainSystem.drawCentreCellX = centreX
-  terrainSystem.drawCentreCellY = centreY
+  terrainSystem.drawCenterCellX = centerX
+  terrainSystem.drawCenterCellY = centerY
   terrainSystem.drawnProps.clear()
   let gridSide: Int = terrainSystem.gridSide
   loop var row: Int = 0, row < gridSide, ++row {
     loop var column: Int = 0, column < gridSide, ++column {
-      let cellX: Int = centreX - gridSide / 2 + column
-      let cellY: Int = centreY - gridSide / 2 + row
+      let cellX: Int = centerX - gridSide / 2 + column
+      let cellY: Int = centerY - gridSide / 2 + row
       # The streamed kinds (kindRock .. kindGrassB, as createWalkerTerrain
       # spawns them)
       loop var kind: Int = kindRock, kind <= kindGrassB, ++kind {
@@ -924,8 +924,8 @@ func createWalkerTerrain(
     cellSize: walkerCellSize
     groundZ: groundZ
     biome: biome
-    centreCellX: 1000000000
-    centreCellY: 1000000000
+    centerCellX: 1000000000
+    centerCellY: 1000000000
     toon: true
     ground: own createTerrainTiles(
       renderer: renderer
@@ -951,7 +951,7 @@ func createWalkerTerrain(
     hasFarGround: hasFarGround
     bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
     drawnProps: List.create(DrawnProp, cap: cellCount * 5)
-    drawCentreCellX: 1000000000
-    drawCentreCellY: 1000000000
+    drawCenterCellX: 1000000000
+    drawCenterCellY: 1000000000
   }
 }

@@ -1,10 +1,10 @@
 """Write a tiny Z-up glTF level, without Blender or third-party packages.
 
-The authoring rules of app3d/GltfLevel (docs/gltf-levels.md): metres, Z up,
+The authoring rules of app3d/GltfLevel (docs/gltf-levels.md): meters, Z up,
 transforms applied. A 10 m grass plate (material "Grass") with its
 `ground_collision`, a 2 m stone cube (material "Stone", bottom at zero) under
-a parent lifted 1 m, its `cube_collision`, and `marker_test` three metres
-above the cube's centre, authored as a matrix. Usage:
+a parent lifted 1 m, its `cube_collision`, and `marker_test` three meters
+above the cube's center, authored as a matrix. Usage:
 
     python3 tools/levels/exportTestLevel.py <out.glb>
 """
@@ -14,10 +14,10 @@ import sys
 from pathlib import Path
 
 
-def box(half, centre):
+def box(half, center):
     positions, normals, indices = [], [], []
     hx, hy, hz = half
-    cx, cy, cz = centre
+    cx, cy, cz = center
     faces = [
         ((1, 0, 0), [(1, -1, -1), (1, 1, -1), (1, 1, 1), (1, -1, 1)]),
         ((-1, 0, 0), [(-1, 1, -1), (-1, -1, -1), (-1, -1, 1), (-1, 1, 1)]),
@@ -37,7 +37,7 @@ def box(half, centre):
 
 def writeLevelGlb(destination, meshes, materials, nodes, rootNodes, generator):
     """Write a .glb: `meshes` are (positions, normals, indices, material index)
-    in world metres, `materials` (name, rgb), `nodes` glTF node dicts, the
+    in world meters, `materials` (name, rgb), `nodes` glTF node dicts, the
     scene's roots `rootNodes`."""
     binary = b''
     views, accessors, gltfMeshes = [], [], []
@@ -99,7 +99,7 @@ def exportLevel(destination):
                                               0, 0, 1, 0, 0, 0, 3, 1]},
         ],
         rootNodes=[0, 1, 2],
-        generator='exportTestLevel.py (Z-up metres)')
+        generator='exportTestLevel.py (Z-up meters)')
 
 
 if __name__ == '__main__':

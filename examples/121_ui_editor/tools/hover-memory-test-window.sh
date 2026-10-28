@@ -3,7 +3,7 @@
 # (does hovering leak?), but in a VISIBLE window driven by the REAL mouse, so
 # the run goes through real SDL motion events and you can watch it. Builds the
 # editor and mouse-sweep.c, opens MainMenu, and sweeps the cursor down the
-# window's centre column every SWEEP seconds (default 4) for SECONDS (default
+# window's center column every SWEEP seconds (default 4) for SECONDS (default
 # 300), then quits the app with Cmd+Q.
 #
 #   bash examples/121_ui_editor/tools/hover-memory-test-window.sh [SECONDS] [SWEEP]

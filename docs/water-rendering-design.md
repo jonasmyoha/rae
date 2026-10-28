@@ -6,12 +6,12 @@ for the agreed updateRate cadence, mobile N=2 preset, lifecycle checks and GPU m
 `transparentForward` graph node and `litCopy` target are implemented (#842),
 and the pass now DRAWS: alpha-blended instanced geometry into the lit HDR
 target against a read-only scene depth (#843, `lib/TransparentForward.rae` +
-`lib/transparentForward.wgsl`). The stylised toon water package `lib/water/` is implemented (#830): `Water.rae`
+`lib/transparentForward.wgsl`). The stylized toon water package `lib/water/` is implemented (#830): `Water.rae`
 (`WaterBody`, `WaterWaves`), `WaterSystem.rae` (resource: pipeline/uniform/bind in the
 grass-style C handle slots, one draw of a unit grid through the transparent pass)
 and `waterSurface.wgsl` (Gerstner vertex waves; Roystan toon fragment: depth-gradient
-colour from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
-tint from the stylised hemisphere, stepped sun highlight). Landed as the lake at the
+color from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
+tint from the stylized hemisphere, stepped sun highlight). Landed as the lake at the
 biome water plane in example 114 and on its own in 140_water_lake. #847 added the
 toon tier knobs (`WaterBody.gridSegments`, `waveCount`), vertex-shader-panned noise
 coordinates (the Roystan mobile trick), and many bodies per `WaterSystem` sharing
@@ -22,7 +22,7 @@ between the sky reflection and a REFRACTION that reads the #842 opaque snapshot
 (`litCopy`) offset by the normal, depth-MASKED (a refracted pixel that lies above
 the surface falls back to the unrefracted one, so objects out of the water do not
 bleed in) and absorbed per channel by Beer-Lambert `exp(-depth * absorbColor)`
-with the lost light replaced by scattered deep colour; a refracting body composes
+with the lost light replaced by scattered deep color; a refracting body composes
 its own background and is drawn opaque, the mobile tier keeps the alpha path
 (`WaterBody.refraction`). The snapshot now precedes the water
 (`transparentSnapshot`). Gameplay: `waterHeightAt(body, x, y, t)` is the CPU
@@ -31,7 +31,7 @@ iterations, and `lib/water/Buoyancy.rae` is the `Buoyant` component + a `query2`
 system over Transform3d — never a callback; both pinned by unit cases 752/753.
 SSR is #854. The shared FFT displacement/Jacobian cache and optional gameplay query are #858 (see water-readback.md). Rivers (#833) are in:
 `lib/water/River.rae` bakes a bezier `RiverSpline` ONCE into a ribbon mesh whose uv
-is metres along/across the flow and whose normal packs (flow tangent, curvature
+is meters along/across the flow and whose normal packs (flow tangent, curvature
 foam); bank rows take caller-sampled terrain heights and tuck under a bank that
 is below the surface. A river is a `WaterBody` with `meshId` (its own world-space
 mesh) and `flowSpeed`: the surface shader draws the ribbon as-is, skips Gerstner,
@@ -42,8 +42,8 @@ between transparentForward and taa (`lib/GbufferUnderwater.rae`, `lib/underwater
 that re-snapshots the composed lit frame into litCopy and fogs it in place — world
 position reconstructed from depth through the CPU-inverted view-projection, the view
 ray cut at the still surface plane when the point is above water, Beer-Lambert
-attenuation per channel over that underwater distance toward the body's deep colour
-(the body's `absorbColor` per metre), plus a depth-fading near-surface tint. The
+attenuation per channel over that underwater distance toward the body's deep color
+(the body's `absorbColor` per meter), plus a depth-fading near-surface tint. The
 renderer only holds `UnderwaterParams`; `lib/water/Underwater.rae` decides each frame
 (`waterUnderwaterUpdate`): containment = the square extent for a lake (meshMode 0),
 unbounded for an ocean (meshMode 2), never for a baked river ribbon (no bounds API);
@@ -51,7 +51,7 @@ the surface under the camera = `waterHeightAt` (Gerstner) for toon water, the #8
 readback cache (`sampleFftSurface`, 0.5 s max age) for FFT water falling back to the
 STILL level when the sample is unavailable or stale (first frames, a tier change that
 invalidated the cache, a non-primary FFT body); overlap = the body the camera is
-deepest under; crossing = a 3 cm hysteresis band. Sun caustics are in (#860): the underwater fog pass (lib/underwaterFog.wgsl) adds a rippling light network on the SUBMERGED reconstructed surfaces — a two-octave ridged value noise (self-contained in the shader) sampled at each submerged world point projected UP the sun ray onto the surface plane (so the pattern sits in world space and every point one refracted shaft lights shares a coordinate), panned by the wave clock, faded by the depth of water above the point and by the Beer-Lambert transmittance to the eye, tinted by the sun colour. It adds nothing where the sun is below the horizon (toSun.z <= 0), on a sky pixel, or on a surface at/above the water line, and is gated by WaterBody.caustics (createOceanRealistic on, useMobileWaterTier and toon lakes off; 118 defaults the lake on and takes RAE_WATER_CAUSTICS=0/1 + RAE_WATER_HOUR). No new pass or resource — a branch in the existing fog fullscreen pass; measured worst case ~2 ms/frame at 2560x1600 with the whole screen submerged. Desktop SSR is in
+deepest under; crossing = a 3 cm hysteresis band. Sun caustics are in (#860): the underwater fog pass (lib/underwaterFog.wgsl) adds a rippling light network on the SUBMERGED reconstructed surfaces — a two-octave ridged value noise (self-contained in the shader) sampled at each submerged world point projected UP the sun ray onto the surface plane (so the pattern sits in world space and every point one refracted shaft lights shares a coordinate), panned by the wave clock, faded by the depth of water above the point and by the Beer-Lambert transmittance to the eye, tinted by the sun color. It adds nothing where the sun is below the horizon (toSun.z <= 0), on a sky pixel, or on a surface at/above the water line, and is gated by WaterBody.caustics (createOceanRealistic on, useMobileWaterTier and toon lakes off; 118 defaults the lake on and takes RAE_WATER_CAUSTICS=0/1 + RAE_WATER_HOUR). No new pass or resource — a branch in the existing fog fullscreen pass; measured worst case ~2 ms/frame at 2560x1600 with the whole screen submerged. Desktop SSR is in
 (#854): `waterSurface.wgsl` `ssrTrace` marches the reflected view ray (from a normal
 flattened 60% toward up, so the mirror is not shattered by the FFT facets) in world space
 with quadratically growing steps, projects each step through the frame's view-projection
@@ -59,7 +59,7 @@ and compares its view depth with the G-buffer depth; the first step behind the s
 bisected (6 halvings) and accepted when the refined point is within the thickness
 (`waterSsrThickness` 0.6 m, growing with distance) — so a thick object like the island is
 a hit even when a step landed inside it; the opaque lit snapshot (litCopy, the frame
-before the water) is sampled there and blended over the stylised sky by an edge + ray-
+before the water) is sampled there and blended over the stylized sky by an edge + ray-
 length fade; misses, rays leaving the screen or going down keep the sky. Composition is
 unchanged (the reflection term still goes through Fresnel over the refracted body). The
 switch is `WaterBody.ssr` / `ssrSteps` (on, 24 steps, for `createOceanRealistic`; off on
@@ -92,7 +92,7 @@ peak at the JONSWAP k_p, butterfly stage 0). #850 (slice 3) is in: `evolve` (h0 
 complex fields each packing two real ones — h+iDx, Dy+i dh/dx, dh/dy+i dDx/dx,
 dDy/dy+i dDx/dy — since every field is Hermitian), the `stockham` row pass over the
 #849 butterfly ping-ponging two rgba32float textures, a `transpose`, the same row
-pass for the columns, `fieldOut`, and `post` (the centred-spectrum (-1)^(x+y), chop,
+pass for the columns, `fieldOut`, and `post` (the centered-spectrum (-1)^(x+y), chop,
 normal from the slopes, the Jacobian and its folding foam) into the cascade maps —
 one compute pass, one submit per frame, for `realistic` bodies. Verified by the
 only honest FFT test: a known single wave (h0 = 0.25 at k index +-3) inverse-
@@ -102,7 +102,7 @@ the vertex shader (world-space lookup, `textureSampleLevel`) and their slopes +
 Jacobian foam in the fragment — whitecaps where a cascade folds, the shoreline depth
 foam kept, smooth shading and a sharp sun glint instead of the toon steps — bound as
 six more textures on the surface bind group; `lib/water/ClipMap.rae` is the
-camera-centred radial LOD grid (ring spacing grows geometrically, re-snapped to the
+camera-centered radial LOD grid (ring spacing grows geometrically, re-snapped to the
 camera each frame, one draw) and `WaterBody.meshMode` 2 places it; example
 141_ocean_fft is the gated showcase. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
@@ -170,9 +170,9 @@ Facts from the current tree, not aspirations:
 
 | Fact | Where | Why it matters for water |
 |---|---|---|
-| Deferred G-buffer: albedo, oct-normal, roughness/metal, depth; **no alpha blending in the G-buffer pass** | `lib/Gbuffer.rae`, `lib/Particles.rae` ("fade == shrink") | Water is a **transparent, refractive** surface. It cannot be a G-buffer material. It needs a pass that runs *after* lighting and reads scene colour + depth. |
+| Deferred G-buffer: albedo, oct-normal, roughness/metal, depth; **no alpha blending in the G-buffer pass** | `lib/Gbuffer.rae`, `lib/Particles.rae` ("fade == shrink") | Water is a **transparent, refractive** surface. It cannot be a G-buffer material. It needs a pass that runs *after* lighting and reads scene color + depth. |
 | Pass order today: shadow → gbuffer → depthPyramid → ssao → lighting → taa → composite → present | `RenderTag.*` in `lib/Rendergraph.rae` / `RendererDeferred.rae` | There is **no forward / transparent pass**. The render-graph plan (`docs/render-graph-and-gi-plan.md` §6) draws a `forwardLighting → hdrColor` node, but it is a plan, not code. |
-| Scene depth is readable by later passes (`gbViewDepth`, used by SSAO / depth pyramid) | `lib/Gbuffer.rae` | Depth is the one input every water technique needs: shoreline foam, depth-tinted colour, refraction offset masking, intersection fade. Already available. |
+| Scene depth is readable by later passes (`gbViewDepth`, used by SSAO / depth pyramid) | `lib/Gbuffer.rae` | Depth is the one input every water technique needs: shoreline foam, depth-tinted color, refraction offset masking, intersection fade. Already available. |
 | TAA exists | `RenderTag.taa` | Realistic water shimmers without temporal filtering; toon water does not need it. |
 | The sky is designed as *background now, reflection source later* — `radiance(dir)` / `irradiance(n)` | `lib/Sky.rae` header | Cheapest possible water reflection is `sky.radiance(reflect(view, normal))`. The interface is already the right shape; no planar reflection or cubemap machinery needed for a first version. |
 | Compute-shader pattern exists: grass is generated and drawn by a WGSL compute pipeline built from a string asset | `lib/GrassCompute.rae` + `lib/grass_compute.wgsl` | An FFT ocean is a compute job. The plumbing (module from WGSL string, pipeline, bind groups, dispatch inside a pass) is proven. |
@@ -181,7 +181,7 @@ Facts from the current tree, not aspirations:
 | Targets: wgpu-native on macOS, an iOS xcframework build (`tools/ios/`), quality tiers "mobile / web / desktop" are a stated design goal | `docs/webgpu-3d-renderer.md` | One water system with a **tier switch**, not two systems. |
 
 **The single hard prerequisite is a transparent forward pass** (read depth +
-lit scene colour, write to the HDR colour target, run after `lighting` and
+lit scene color, write to the HDR color target, run after `lighting` and
 before `taa`). Everything else is shader work on top of it. This pass also
 unblocks alpha-blended particles and glass, so it is not water-specific cost.
 
@@ -198,8 +198,8 @@ data model, not the files.
 
 | Project | Technique | License | Mobile | Fit for Rae |
 |---|---|---|---|---|
-| **Roystan / IronWarrior `ToonWaterShader`** — [repo](https://github.com/IronWarrior/ToonWaterShader), [tutorial](https://roystan.net/articles/toon-water/) | The canonical toon water: two-colour depth gradient from the depth buffer, shoreline foam band = depth difference + panned noise, "toon ripples" = a noise texture animated and *posterised* with a threshold, surface distortion via a panned normal/distortion map. One pass, one quad, no compute. | Tutorial source (permissive; check the repo file before copying any line — the *recipe* is what we want, not the ShaderLab) | **Yes** — this is the mobile-proven stylized recipe | **Highest.** Every ingredient maps to inputs Rae already has (depth, time, a noise texture). This is Phase 1. |
-| **Unity `boat-attack-water`** (URP demo water) — [repo](https://github.com/Unity-Technologies/boat-attack-water) | Gerstner waves (vertex), depth-based colour + foam, screen-space refraction, planar reflection *or* SSR, caustics, simple buoyancy. Built to ship the Boat Attack demo on phones and consoles. | **Unity Companion License — usable only in Unity projects.** Design reference only; do not copy. | Yes (it targeted mobile) | High as a *design*: it is the best public example of a mid-tier, one-system-with-quality-toggles water. |
+| **Roystan / IronWarrior `ToonWaterShader`** — [repo](https://github.com/IronWarrior/ToonWaterShader), [tutorial](https://roystan.net/articles/toon-water/) | The canonical toon water: two-color depth gradient from the depth buffer, shoreline foam band = depth difference + panned noise, "toon ripples" = a noise texture animated and *posterised* with a threshold, surface distortion via a panned normal/distortion map. One pass, one quad, no compute. | Tutorial source (permissive; check the repo file before copying any line — the *recipe* is what we want, not the ShaderLab) | **Yes** — this is the mobile-proven stylized recipe | **Highest.** Every ingredient maps to inputs Rae already has (depth, time, a noise texture). This is Phase 1. |
+| **Unity `boat-attack-water`** (URP demo water) — [repo](https://github.com/Unity-Technologies/boat-attack-water) | Gerstner waves (vertex), depth-based color + foam, screen-space refraction, planar reflection *or* SSR, caustics, simple buoyancy. Built to ship the Boat Attack demo on phones and consoles. | **Unity Companion License — usable only in Unity projects.** Design reference only; do not copy. | Yes (it targeted mobile) | High as a *design*: it is the best public example of a mid-tier, one-system-with-quality-toggles water. |
 | **Crest** — [repo](https://github.com/wave-harmonic/crest), [docs](https://crest.readthedocs.io/) | Class-leading: FFT (and Gerstner) wave spectra, **multi-resolution LOD cascades** ("clip-map" style, cheaper far from camera), dynamic wave simulation (ripples from objects), foam sim, shoreline/depth cache, underwater, buoyancy queries. Heavy on GPU LOD strategy. | **MIT** on GitHub (a paid URP build exists on the Asset Store) | Desktop/console first; works on high-end mobile only with everything turned down | High for Phase 2 *architecture*: the LOD-cascade idea and the "query water height from gameplay" API are the two things worth copying. Too big to port wholesale. |
 
 ### 2.2 Godot
@@ -249,14 +249,14 @@ fragment shader over a flat grid; the whole thing is one draw call.
 
 | Ingredient | How | Cost |
 |---|---|---|
-| Colour by depth | `waterDepth = sceneDepth − surfaceDepth` (from the G-buffer depth), `mix(shallowColour, deepColour, saturate(waterDepth / depthMaxDistance))` | 1 depth read |
+| Color by depth | `waterDepth = sceneDepth − surfaceDepth` (from the G-buffer depth), `mix(shallowColor, deepColor, saturate(waterDepth / depthMaxDistance))` | 1 depth read |
 | Shoreline / intersection foam | `foam = step(noise + waterDepth * k, foamCutoff)` with the noise **panned in the vertex shader** (UV scroll is free there) | 1 noise read |
 | Toon ripples | the same noise, **posterised**: `step(threshold, noise)` gives the flat Wind-Waker-style highlight blobs; optionally 2 thresholds for 2 bands | 0 extra reads |
 | Surface distortion | offset the noise UV by a panned distortion map (or a second octave of `noise.wgsl`) | 1 read |
 | Waves | 1–2 **Gerstner** waves in the vertex shader (displaces vertices, gives a normal) — deterministic, no state | vertex-only |
 | Reflection | **none** (Wind Waker) or `sky.radiance(reflect(v, n))` tinted — no planar/SSR | 0–1 sky eval |
 | Specular | stepped toon highlight: `step(cutoff, pow(max(dot(n, h), 0), gloss))` | arithmetic |
-| Refraction | **off on mobile**; desktop tier: cheap normal-offset read of the lit scene colour | 0 / 1 read |
+| Refraction | **off on mobile**; desktop tier: cheap normal-offset read of the lit scene color | 0 / 1 read |
 | Shadows | receive from the existing shadow map if wanted; usually skipped for toon | optional |
 
 Budget target: **≤ 1 ms GPU on a mid phone at native resolution**, one draw,
@@ -269,10 +269,10 @@ shader above.
 | Ingredient | How | Reference |
 |---|---|---|
 | Surface | **FFT ocean** in compute: TMA/JONSWAP-style spectrum with directional spreading → Stockham iFFT → displacement (x,y,z) + normal + Jacobian-foam maps; **3 cascades** (e.g. 250 m / 60 m / 8 m tiles) sampled and summed in the vertex/fragment shader | GodotOceanWaves, inkwell-webgpu-water, Tessendorf |
-| Mesh | a camera-centred **clip-map / projected grid** so vertex density follows the camera (Crest's LOD idea) | Crest |
+| Mesh | a camera-centered **clip-map / projected grid** so vertex density follows the camera (Crest's LOD idea) | Crest |
 | Shading | PBR microfacet + **Fresnel** (Schlick) between reflection and refraction | any |
 | Reflection | `sky.radiance(reflect)` always + **SSR** from depth/normal on desktop; planar reflection is *not* recommended (a second scene render is the one thing mobile/tiled GPUs cannot afford, and SSR + sky covers 90% of shots) | Boat Attack chose the same split |
-| Refraction + absorption | read lit scene colour offset by the normal; **Beer–Lambert** absorption by water depth (`exp(−depth · absorbColour)`); mask the offset with depth so objects above the surface do not bleed | Boat Attack, Crest |
+| Refraction + absorption | read lit scene color offset by the normal; **Beer–Lambert** absorption by water depth (`exp(−depth · absorbColor)`); mask the offset with depth so objects above the surface do not bleed | Boat Attack, Crest |
 | Foam | Jacobian-based whitecaps from the FFT + shoreline foam from depth | GodotOceanWaves |
 | Spray | existing `lib/Particles.rae` spawned where Jacobian < 0 | GodotOceanWaves |
 | Buoyancy / gameplay | a `waterHeightAt(x, y, t)` query. Two options: CPU-side Gerstner mirror (exact for Gerstner, approximate for FFT) or read back the displacement map at low resolution once per N frames | UE5 plugin, godot4-oceanfft |
@@ -298,7 +298,7 @@ lib/water/waterFft.wgsl        # Phase 2: spectrum + Stockham FFT compute
 ```
 
 - **`WaterBody` component** on an entity with a `Transform3D`: `kind`
-  (ocean / lake / river), extent, `style` (toon / realistic), colours,
+  (ocean / lake / river), extent, `style` (toon / realistic), colors,
   `waves: WaterWaves` (Gerstner set, or FFT spectrum params + cascades),
   foam/absorption parameters. This is UE5's "water body" and bevy_water's
   material, as a plain Rae struct — no `@attributes`, no inheritance.
@@ -357,7 +357,7 @@ cubes 0.1 -> 0.9 and one half-sunk into the ground, gated in run_examples
 **Phase 1 — stylized toon water: DONE (#830, see status above).** Original plan:
 **Phase 1 — stylized toon water (mobile-first). Do this first; it is the
 biggest visible win for the least code.** Port the Roystan recipe to WGSL:
-one grid mesh, depth-gradient colour, depth-based shoreline foam, posterised
+one grid mesh, depth-gradient color, depth-based shoreline foam, posterised
 noise ripples, vertex-panned UVs, 1–2 Gerstner waves, sky-radiance tint and a
 stepped sun highlight. No compute, no refraction on mobile. Land it as a lake
 at the walker's `groundZ` in example 114 (the terrain and sky are already
@@ -411,7 +411,7 @@ What made the first toon water read badly, and what changed:
   because the surface shader read a depth of zero. Now the terrain under the
   water level is a **seabed** (`worldTerrainHeight` / `raeTerrainHeight` follow
   the field down to `seabedMaxDepth` = 4 m) painted as wet sand, and the water
-  surface alone draws the water: shallow -> deep colour, the shoreline foam band
+  surface alone draws the water: shallow -> deep color, the shoreline foam band
   and the crest lines all come from real depth. The beach keeps its wet-sand band
   and swash tongues.
 - **Gerstner waves shorter than the grid aliased into wide slow bands.** A 6 m
@@ -423,7 +423,7 @@ What made the first toon water read badly, and what changed:
   cutoff rises and the lines fade past ~20-140 m, and the toon normal flattens
   with the same fade, or the two Gerstner normals tile a checkerboard through the
   Fresnel rim along the horizon. The sky is a Fresnel rim (x0.35), never a wash.
-- **Rivers use metre-scale noise** (`rippleScale` 2, cutoff 0.92) so a 4 m stream
+- **Rivers use meter-scale noise** (`rippleScale` 2, cutoff 0.92) so a 4 m stream
   carries streaks, not patches wider than itself, and 114's stream now starts at
   the shore instead of riding out over the sea on the seabed.
 

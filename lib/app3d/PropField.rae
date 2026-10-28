@@ -66,7 +66,7 @@ type PropLod {
 }
 
 # One shape, at its levels of detail (nearest first). `radius` and
-# `centerHeight` are a sphere round the shape at scale 1, its centre that
+# `centerHeight` are a sphere round the shape at scale 1, its center that
 # high over the foot: what the view test sees.
 type PropKind {
   lods: List(PropLod)
@@ -165,8 +165,8 @@ type PropField {
   groups: List(PropGroup)
 }
 
-# An empty field over the square from (`originX`, `originY`) `size` metres on a
-# side, in cells of `cellSize` metres. Placements outside it go to its edge
+# An empty field over the square from (`originX`, `originY`) `size` meters on a
+# side, in cells of `cellSize` meters. Placements outside it go to its edge
 # cells.
 func createPropField(
   originX: view Float
@@ -266,7 +266,7 @@ func propCellOf(field: view PropField, x: view Float, y: view Float) ret Int {
   ret row * field.columns + column
 }
 
-# The sphere round a placement of `kind`: its centre and its radius
+# The sphere round a placement of `kind`: its center and its radius
 func propCenter(kind: view PropKind, placement: view PropPlacement) ret Vec3 {
   ret Vec3.create(
     x: placement.position.x
@@ -653,7 +653,7 @@ func propSphereInView(propView: view PropView, center: view Vec3, radius: view F
   ret Math.acos(x: cosine) <= propView.halfAngle + Math.asin(x: radius / distance)
 }
 
-# The level of detail a prop `distance` metres from the eye is drawn at;
+# The level of detail a prop `distance` meters from the eye is drawn at;
 # none past the last level's distance.
 func propLodAt(kind: view PropKind, distance: view Float) ret opt Int {
   loop var l: Int = 0, l < kind.lods.length, ++l {

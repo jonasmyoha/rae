@@ -6,7 +6,7 @@
 # flat dab of one tone, no gradient, no midrib and no stem:
 # a twig of paired leaflets was rejected as reading like a fern.
 #
-# Three stamps (layers), so neighbouring cards differ. Painted once as
+# Three stamps (layers), so neighboring cards differ. Painted once as
 # 512 x 512 linear RGBA pixels with see-through gaps (installed with
 # SurfaceImages.setSurfaceImagePixels: a PNG from Image.savePng is RGB only
 # and would lose the gaps). Nearly white: each card's green (LeafCards)
@@ -32,19 +32,19 @@ type StampLeaf {
 }
 
 # The leaves of stamp `layer`: 14 to 18 scattered over a disc round the
-# centre, like a scatter brush's dab (not on a ring, which reads as a
+# center, like a scatter brush's dab (not on a ring, which reads as a
 # flower), each pointing outward with a wide angle jitter
 func stampLeaves(layer: view Int) ret List(StampLeaf) {
   var random: TreeRandom = createTreeRandom(seed: 9100 + layer * 37)
   let count: Int = 14 + (nextUnit(random: random) * 5.0).toInt()
   var result: List(StampLeaf) = List.create(StampLeaf, cap: count)
-  let centre: Float = leafImageSize.toFloat() * 0.5
+  let center: Float = leafImageSize.toFloat() * 0.5
   loop var i: Int = 0, i < count, ++i {
     # the leaf's middle anywhere in the disc (evenly over its area)
     let around: Float = nextUnit(random: random) * 6.2831853
     let reach: Float = 150.0 * Math.sqrt(x: nextUnit(random: random))
-    let middleX: Float = centre + reach * Math.cos(x: around)
-    let middleY: Float = centre + reach * Math.sin(x: around)
+    let middleX: Float = center + reach * Math.cos(x: around)
+    let middleY: Float = center + reach * Math.sin(x: around)
     let angle: Float = around + nextBetween(random: random, low: -1.0, high: 1.0)
     let length: Float = nextBetween(random: random, low: 85.0, high: 135.0)
     result.add(value: StampLeaf {

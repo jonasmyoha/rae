@@ -26,14 +26,14 @@ so the missing case is always written out.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | runs; `None` reaches the caller and blows up later with `TypeError` / `AttributeError` |
 | JavaScript | runs; `undefined` leaks and fails later as `undefined is not a function`, or becomes `NaN` |
 | Java | runs; `NullPointerException` at the first use, far from the lookup |
 | Go | runs; the zero value (`0`) or a nil-dereference panic, depending on the return type |
 | Rust | compile error unless you write `.unwrap()`, which panics at run time on `None` |
-| C | runs; a `NULL` or sentinel value is used as data — undefined behaviour |
+| C | runs; a `NULL` or sentinel value is used as data — undefined behavior |
 
 ## Expected outcome
 

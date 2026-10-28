@@ -6,7 +6,7 @@
 // GRASS_FIELD_NONE_BELOW where it does not: a base field (a level's surface map,
 // app3d/SurfaceMap surfaceGrassField) and after it a block per tile of a grid
 // (a streamed tile's cells, given by the app as the tile loads). A blade grows
-// only where all four nearest cell centres are grass, so none stands on a road
+// only where all four nearest cell centers are grass, so none stands on a road
 // or rock edge, at the height between them.
 override RAE_SURFACE_FIELD_ORIGIN_X: f32 = 0.0;
 override RAE_SURFACE_FIELD_ORIGIN_Y: f32 = 0.0;
@@ -27,7 +27,7 @@ override RAE_BLOCK_FIELD_TILE_ROWS: f32 = 0.0;
 // A field value at or below this is "no grass" (app3d/SurfaceMap grassFieldNone)
 const GRASS_FIELD_NONE_BELOW: f32 = -1000.0;
 
-// The base field at `p`, between the four nearest cell centres: x is 1 where
+// The base field at `p`, between the four nearest cell centers: x is 1 where
 // all four are grass, y the ground's height there
 fn surfaceFieldAt(p: vec2<f32>) -> vec2<f32> {
   let g = (p - vec2<f32>(RAE_SURFACE_FIELD_ORIGIN_X, RAE_SURFACE_FIELD_ORIGIN_Y)) / RAE_SURFACE_FIELD_CELL - vec2<f32>(0.5, 0.5);

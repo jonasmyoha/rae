@@ -1,6 +1,6 @@
 # GltfSkinMesh — the skinned-primitive LOADING helpers of GltfSkin (#918 split
 # for the 1000-line cap): the flat and smoothed vertex builders, the sRGB atlas
-# colour decode and the index copy. The public entry (loadSkinnedPrimitive)
+# color decode and the index copy. The public entry (loadSkinnedPrimitive)
 # and the SkinnedMeshData type stay in GltfSkin; this module is its
 # implementation half.
 import Math
@@ -68,7 +68,7 @@ func loadSkinnedPrimitiveSmoothed(
     fallback: -1
   )
   # readInts, not readFloats: joint indices are INDICES, and readFloats
-  # normalises unsigned integer types to [0,1], which would turn joint 37
+  # normalizes unsigned integer types to [0,1], which would turn joint 37
   # into 0.145 and silently bind every vertex to joint 0.
   let joints: List(Int) = readInts(glb: glb, index: jointAcc)
   let weights: List(Float) = readFloats(glb: glb, index: weightAcc)
@@ -87,8 +87,8 @@ func loadSkinnedPrimitiveSmoothed(
         verts.add(value: intAt(list: joints, index: i * 4 + k, fallback: 0).toFloat())
         k = k + 1
       }
-      # Renormalise: glTF requires the four weights to sum to 1, but
-      # quantised exports drift, and an un-normalised set scales the whole
+      # Renormalize: glTF requires the four weights to sum to 1, but
+      # quantised exports drift, and an un-normalized set scales the whole
       # vertex toward or away from the origin instead of merely posing it.
       var sum: Float = 0.0
       var w: Int = 0
@@ -117,7 +117,7 @@ func loadSkinnedPrimitiveSmoothed(
       verts.add(value: 0.0)
       verts.add(value: 0.0)
     }
-    # Vertex colour: white, i.e. the material's base colour unmodified.
+    # Vertex color: white, i.e. the material's base color unmodified.
     # `withAtlasColors` overwrites this when the model has a palette.
     verts.add(value: 1.0)
     verts.add(value: 1.0)
@@ -133,7 +133,7 @@ func loadSkinnedPrimitiveSmoothed(
   ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
 }
 
-# ----- palette-atlas colour baking (#378) ------------------------------
+# ----- palette-atlas color baking (#378) ------------------------------
 
 # sRGB transfer function, inverted. Texture bytes are sRGB-encoded and the
 # renderer works in linear radiance, so skipping this makes every mid-tone

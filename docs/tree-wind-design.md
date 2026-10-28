@@ -16,15 +16,15 @@ The structural/branch hierarchy below remains a later refinement.
 
 - Six-sided leaves and broad scalloped patches preserve a local pivot for every
   vertex. MeshData keeps optional pivot data separately from positions, normals
-  and UVs. Foliage uploads interleave wind and optional card-centre vec4s (32 bytes per vertex);
+  and UVs. Foliage uploads interleave wind and optional card-center vec4s (32 bytes per vertex);
   ordinary meshes retain their 32-byte layout. No extra per-leaf draws or
   per-frame mesh uploads are introduced.
 - The shader rotates each patch intact, with its shading normal, about its
-  centre. In a steady breeze (strength 1) a patch turns about 6 degrees each
+  center. In a steady breeze (strength 1) a patch turns about 6 degrees each
   way, in a passing gust about 15 degrees and leans a little downwind; the
   angle is bounded to 0.35 radians. It has no crown translation. (The first
   version turned under 1 degree between gusts and was bounded to 0.14
-  radians: a leaf moved a few millimetres and the wind could not be seen,
+  radians: a leaf moved a few millimeters and the wind could not be seen,
   2026-10-22.)
 - Every mesh baked into an impostor or drawn by another pipeline must be read
   with its own vertex size: the impostor bake (lib/ImpostorBake.rae) has a
@@ -34,8 +34,8 @@ The structural/branch hierarchy below remains a later refinement.
 - Forest cypress and umbrella foliage have lower flexibility. Spruce skirts,
   wood and other meshes without leaf metadata stay rigid. This deliberately
   removes the old spatial wobble from those shapes; it is not branch simulation.
-- Forest instance motion smoothly fades from full at 25 metres to zero at
-  90 metres. Geometry and shadows share that instance factor. The grove's
+- Forest instance motion smoothly fades from full at 25 meters to zero at
+  90 meters. Geometry and shadows share that instance factor. The grove's
   individually placed inspection trees keep full detail. Far impostors remain
   unchanged and still. A later version can expose the detail range in settings.
 - Dedicated optional foliage pipelines serve deferred, forward, and shadow
@@ -51,7 +51,7 @@ twig geometry and attached cards carry the same fixed root and response, so
 they rotate together; the trunk and primary white wood have no wind metadata
 and stay rigid. The camera supplies only the camera-facing cards' corner axes.
 The crown lighting normal still rotates with wind independently of the camera.
-Colour, shadow and atlas-bake passes share the pose. See
+Color, shadow and atlas-bake passes share the pose. See
 tree-rendering-2026.md §8-10 for the vertex layout and finished species.
 
 There is no C runtime change. The full branch hierarchy and projected-size
@@ -80,7 +80,7 @@ The resulting forest can look restless even in an ordinary breeze.
 
 `app3d/GroveTrees.rae` assigns the same `groveLeafSway = 1.0` to leafy parts at
 mesh LODs and zero to wood. Species do not have separate wind responses.
-`procgen/FluffyFoliage.rae::fluffyPatch` knows each patch's centre while building
+`procgen/FluffyFoliage.rae::fluffyPatch` knows each patch's center while building
 it, but `foliageVertex` uploads only position, normal and zero UVs. Attachment
 points and patch identity are lost before the shader sees the mesh.
 
@@ -125,7 +125,7 @@ whole far-canopy impostor cells: each contains several trees and baked depth.
 
 ## Shared implementation
 
-1. Keep `WindState` and the existing travelling gust field as the shared wind
+1. Keep `WindState` and the existing traveling gust field as the shared wind
    input. Replace continuously strong detail motion with a low resting response
    plus gust-driven activity. Derive persistent variation from placement identity
    and generator IDs, never draw order, visible instance slot or vertex position.
@@ -188,5 +188,5 @@ with per-leaf stiffness and phase data. See NVIDIA's
 [vegetation animation chapter](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis).
 For shallow joint hierarchies, procedural angular motion and animation detail
 levels, see its [tree wind chapter](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-6-gpu-generated-procedural-wind-animations-trees).
-The intact-patch pilot above adapts those ideas to Rae's broad stylised meshes;
+The intact-patch pilot above adapts those ideas to Rae's broad stylized meshes;
 it is not a proposal to copy their code or introduce a physics solver.

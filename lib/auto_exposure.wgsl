@@ -21,9 +21,9 @@ fn measure(
     for (var i = 0u; i < 4u; i = i + 1u) {
       let cell = (vec2<f32>(f32(local.x * 4u + i), f32(local.y * 4u + j)) + 0.5) / 64.0;
       let texel = vec2<i32>(cell * size);
-      let colour = textureLoad(lit, texel, 0).rgb;
+      let color = textureLoad(lit, texel, 0).rgb;
       // a floor so black pixels (and NaN-free empty targets) stay finite
-      let luminance = max(dot(colour, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0001);
+      let luminance = max(dot(color, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0001);
       sum = sum + log2(luminance);
     }
   }

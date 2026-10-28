@@ -23,7 +23,7 @@ via the streaming texture.
 rae run --target compiled Main.rae   # recommended — real threads
 ```
 
-The scene is the classic four-sphere setup: a diffuse ground, a diffuse centre
+The scene is the classic four-sphere setup: a diffuse ground, a diffuse center
 sphere, a glass sphere on the left, and a fuzzed metal sphere on the right.
 
 See `../40_raytracer_1_basic/README.md` for the full step roadmap (step 4 adds

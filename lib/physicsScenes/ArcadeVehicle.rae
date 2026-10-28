@@ -1,9 +1,9 @@
 # physicsScenes/ArcadeVehicle — arcade handling for a car on Box3D wheels
-# (physicsScenes/box3d/ArcadeDrive drives it): a tall car's tyres alone
+# (physicsScenes/box3d/ArcadeDrive drives it): a tall car's tires alone
 # corner it in a wide circle, slowly built, so an assist eases the chassis'
 # yaw rate to the one its steered front wheels ask for (the bicycle model)
 # and its sideways sliding out, carrying the slide on as speed, both at its
-# centre of mass so it does not roll; none at a crawl or in the air. The
+# center of mass so it does not roll; none at a crawl or in the air. The
 # stick is one axis for two pedals and a gear lever: down past a threshold
 # while rolling forward it brakes; only once the car has stood still a moment
 # with it still down does it go into reverse. The tuning's defaults are a
@@ -22,7 +22,7 @@ type ArcadeTuning {
   # No assist below this speed, all of it from this one (m/s, either way)
   assistFromSpeed: Float = 1.0
   assistFullSpeed: Float = 3.0
-  # The chassis' centre this far over the ground under it (m): in the air
+  # The chassis' center this far over the ground under it (m): in the air
   airborneHeight: Float = 1.7
   # The stick pushed past this against the gear brakes (0..1)
   brakeStickThreshold: Float = 0.35
@@ -72,7 +72,7 @@ func gripVelocity(along: view Float, across: view Float, keptAcross: view Float)
 }
 
 # How much of the assist works at `speed` (m/s, either way): none at a crawl
-# (the tyres turn it well enough, and a car pushing into a pile slows into
+# (the tires turn it well enough, and a car pushing into a pile slows into
 # its own physics again, which wobbles it free), all at speed
 func arcadeAssistShare(speed: view Float, tuning: view ArcadeTuning) ret Float {
   ret Math.max(
@@ -84,7 +84,7 @@ func arcadeAssistShare(speed: view Float, tuning: view ArcadeTuning) ret Float {
   )
 }
 
-# Is the car in the air, its centre `heightOverGround` m over the ground
+# Is the car in the air, its center `heightOverGround` m over the ground
 # under it? (Then the assist lets it fly.)
 func arcadeAirborne(heightOverGround: view Float, tuning: view ArcadeTuning) ret Bool {
   ret heightOverGround > tuning.airborneHeight

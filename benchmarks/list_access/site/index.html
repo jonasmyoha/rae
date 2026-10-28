@@ -106,7 +106,7 @@ RAE_UNUSED static void rae_benchmarks_list_access_rae_Main_intCollection_rae_Lis
   (__extension__ ({ rae_St</pre>
 <h2>Complete compared source</h2><p>The exact Rae, handwritten C, Rust, JavaScript, and Python programs used for every number are embedded below.</p><details><summary>Rae source</summary><pre>func rae_ext_benchmarkOpaqueIndex(index: Int) unsafe extern ret Int
 
-# The constant-access scenario&#x27;s index, laundered through C so the optimiser
+# The constant-access scenario&#x27;s index, laundered through C so the optimizer
 # cannot see it is 137, fold the bounds check away and measure nothing.
 func opaqueIndex(index: view Int) ret Int {
   unsafe {
@@ -218,7 +218,7 @@ func intConstant(values: view List(Int), operations: view Int) {
 
 func intStrided(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -236,7 +236,7 @@ func intStrided(values: view List(Int), operations: view Int) {
 
 func intRandom(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -253,7 +253,7 @@ func intRandom(values: view List(Int), operations: view Int) {
 
 func intMostlyValid(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -275,7 +275,7 @@ func intMostlyValid(values: view List(Int), operations: view Int) {
 
 func intMixedInvalid(values: view List(Int), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: values.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -356,7 +356,7 @@ func structCollectionView(particles: view List(Particle), passes: view Int) {
 
 func structRandomView(particles: view List(Particle), operations: view Int) {
   # The divisor goes through opaqueIndex so `% length` is a real division in
-  # every language, not a mask the C optimiser derives from the constant 65 536.
+  # every language, not a mask the C optimizer derives from the constant 65 536.
   let divisor: Int = opaqueIndex(index: particles.length)
   let startNs: Int = nowNs()
   var checksum: Int = 0
@@ -735,7 +735,7 @@ static void run_suite(const int64_t* values, const Particle* particles,
                       int64_t length, int64_t passes) {
   const int64_t operations = length * passes;
   /* The modulo divisor is read through a volatile so `% divisor` is a real
-   * division, as it is in Rae, instead of a mask the optimiser derives from the
+   * division, as it is in Rae, instead of a mask the optimizer derives from the
    * constant 65 536 (it did; it made these cases measure constant folding). */
   volatile int64_t divisor_slot = length;
   const int64_t divisor = divisor_slot;
@@ -909,7 +909,7 @@ fn run_suite(values: &amp;[i64], particles: &amp;[Particle], passes: i64) {
     let length = values.len() as i64;
     let operations = length * passes;
     // The modulo divisor goes through black_box so `% divisor` is a real
-    // division, as it is in Rae, instead of a mask the optimiser derives from
+    // division, as it is in Rae, instead of a mask the optimizer derives from
     // the constant 65 536 (it did; it made these cases measure constant folding).
     let divisor = std::hint::black_box(length);
     bench!(&quot;int_sequential_safe_index&quot;, checksum, {

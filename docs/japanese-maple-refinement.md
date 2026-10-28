@@ -27,7 +27,7 @@ The old tree hides its wood behind large separately lit leaf meshes. The new
 form has three unequal axes, low rounded branch junctions, arched opposing
 shoots and shallow spreading foliage layers. Missing shoots leave deliberate
 openings around the wood. Its crown is broader and lower than the red maple;
-it is not the same tree recoloured.
+it is not the same tree recolored.
 
 `procgen/CrownScaffold` assembles the existing curve, tube, joined-opening,
 relaxation and surface helpers. It owns no species policy. `JapaneseMaple`
@@ -56,7 +56,7 @@ contrast; a second edit quieted the interior while preserving its alpha edge.
 The private presentation retains the first actual render beside the selected
 one. Fine palmate edges and broad interiors are the chosen treatment.
 
-The bark's vertical coordinate moves from older grey-brown base texture to
+The bark's vertical coordinate moves from older gray-brown base texture to
 smooth reddish upper wood. The two 512-square images retain the existing mip
 chains, alpha cutoff, two-sided foliage, shadow and atlas paths. There is no
 emission, exposure change or shadow exemption.
@@ -70,9 +70,9 @@ The shaded and backlit crown retains burgundy layers and wood openings. At
 is not an independently bright tree. Close underside views deliberately show
 the remaining card overlap and repeated leaf marks.
 
-## Shared consumers and group colour
+## Shared consumers and group color
 
-![Existing grove neighbours](images/japanese-maple-refinement/group.png)
+![Existing grove neighbors](images/japanese-maple-refinement/group.png)
 
 136, 137 and 143 all obtain kind 7 from `GroveTrees`. No placement list is copied,
 no per-leaf entity is created, and no sibling gets a separate generator. The
@@ -88,7 +88,7 @@ height**: the new small-tree height range is intentional. The control binary is
 from the preceding commit. The target is placement 15708 at
 (-3.56293, -26.8207, -0.678052), new scale 0.654613, about 3.60 m high. Its
 prototype seed remains 1229. The full forest still contains 31,090 trees.
-Neighbouring crowns and trunks remain in the comparison.
+Neighboring crowns and trunks remain in the comparison.
 
 ![Crimson below taller gold, orange and green crowns](images/japanese-maple-refinement/forest-candidate-group.png)
 
@@ -101,9 +101,9 @@ alpha overdraw remains a separate cost. Four shared material/mesh parts remain
 per species: wood and three foliage tones. Both images with their mip chains
 represent about 2.67 MiB of image data before allocation overhead.
 
-Near and middle levels share handles, textures and colours. **The middle mesh
+Near and middle levels share handles, textures and colors. **The middle mesh
 is not reduced.** The far atlas is baked from the actual textured, posed crown;
-its muted burgundy colour stays distinct from the orange/scarlet species.
+its muted burgundy color stays distinct from the orange/scarlet species.
 The hardware check covers every posed view cell and mip rather than comparing
 only an average against unposed cards.
 

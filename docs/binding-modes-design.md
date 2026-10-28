@@ -182,7 +182,7 @@ Rules the table does not show:
   parameter receives an alias or a field. It never depends on the type, and
   never on code below the line.
 
-This is today's normative behaviour (`docs/ownership-model.md`: "Do NOT
+This is today's normative behavior (`docs/ownership-model.md`: "Do NOT
 silently move in ordinary assignments or struct field init", "`own T` …
 move / consume", "Returning an owned local … moves it out") written as one
 table. §4 lists the cells today's compiler does not yet enforce.
@@ -268,7 +268,7 @@ none should be swept for its own sake:
   them up only in files already being edited, the same phasing as the naming
   rules in AGENTS.md.
 - **Moving at last use** (`chromeSystem.inspectorType = own typeLine`) saves a
-  copy where the name dies anyway. It is an optimisation to make when it
+  copy where the name dies anyway. It is an optimization to make when it
   matters, not a rule.
 - **A call-site `copy x`**, to pass a copy into an `own` parameter and keep
   the name, is not in use anywhere and is not added.

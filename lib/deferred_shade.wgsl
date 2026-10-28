@@ -121,18 +121,18 @@ fn cascadeSplitAt(c: i32) -> f32 {
   if (c == 3) { return SH.splitFar.w; }
   return SH.splitFar.x;
 }
-// Each cascade's area tinted in its colour, a line in that colour where the
+// Each cascade's area tinted in its color, a line in that color where the
 // cascade ends (the cascade switch; the last line is where shadows stop) and
-// each shadow map's square outlined in its colour, 3 of its texels wide
+// each shadow map's square outlined in its color, 3 of its texels wide
 fn shadowCascadeDebug(radiance: vec3<f32>, wpos: vec3<f32>, viewDepth: f32) -> vec3<f32> {
   let count = i32(SH.shadowCfg.x);
   if (count <= 0) { return radiance; }
   var color = radiance;
   let c = shadowCascadeIndex(viewDepth, count);
-  // A colour filter, so the shading and the shadows still read under it
+  // A color filter, so the shading and the shadows still read under it
   if (c < count) {
     // Across the hand-over band the tint blends into the next cascade's
-    // colour (into none after the last), as the shadow lookup does
+    // color (into none after the last), as the shadow lookup does
     var tint = cascadeDebugColor(c);
     var nextTint = vec3<f32>(1.0);
     if (c + 1 < count) { nextTint = cascadeDebugColor(c + 1); }
@@ -155,7 +155,7 @@ fn shadowCascadeDebug(radiance: vec3<f32>, wpos: vec3<f32>, viewDepth: f32) -> v
   }
   return color;
 }
-// render-perf-12: colour and shading arithmetic is `half` (the precision
+// render-perf-12: color and shading arithmetic is `half` (the precision
 // prelude composed in front: f16 with shader-f16, else f32). Depth, the
 // world-position reconstruction, shadows, the AO upsample weights, the sky and
 // the GGX specular term stay f32: GGX reaches ~7.8e4 for a smooth surface,

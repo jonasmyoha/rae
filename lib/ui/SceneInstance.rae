@@ -22,7 +22,7 @@
 # `mountSubScene` is the same primitive for a scene whose ROOT should
 # be its own entity: it allocates the root, keeps the root's authored
 # placement (its `Rect` / `Size` ARE its size) and returns it, so a
-# list materialiser never creates a sizing host in code. A computed
+# list materializer never creates a sizing host in code. A computed
 # size (a grid tile side, a row height) travels as a `Rect` override on
 # the root node, through the same channel as `Text.text`.
 #
@@ -49,7 +49,7 @@ open ui/UiSystems
 # -----------------------------------------------------------------
 
 # Per-field override. `valueString` is the only value type for now;
-# numeric/colour overrides should encode their value as a string and
+# numeric/color overrides should encode their value as a string and
 # parse it inside `applyOverride`.
 type SceneOverride {
   nodeId: String
@@ -183,7 +183,7 @@ func addActiveOverride(list: mod List(SceneOverride), nodeId: own String, value:
 }
 
 # Root/any-node size override: `Rect.w` + `Rect.h` as Float text. This is how
-# a materialiser hands a COMPUTED size (a grid tile side, a row height) to a
+# a materializer hands a COMPUTED size (a grid tile side, a row height) to a
 # host-less sub-scene root — the scene still owns the Rect, the code only
 # parameterises it, exactly as it parameterises `Text.text`.
 func addRectSizeOverride(
@@ -213,7 +213,7 @@ func addRectSizeOverride(
   )
 }
 
-# Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
+# Sprite tint override. Encodes the color as `"r,g,b,a"` because the
 # override value channel is currently a plain String — applyOverride
 # parses the four numeric components back out.
 func addSpriteTintOverride(
@@ -285,7 +285,7 @@ func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
 # Mount `scene` under `mountEntityId`. Returns `mountEntityId` on success,
 # or noEntity() if the scene wasn't ok.
 #
-# Behaviour:
+# Behavior:
 # - The scene's root node's components (excluding placement) are
 #   applied directly onto `mountEntityId`. Existing components on the
 #   mount entity are replaced — caller is expected to set placement
@@ -540,7 +540,7 @@ func mountSceneInstanceImpl(
 # overrides for unsupported fields. Extending this is a per-field
 # addition; the dispatch is just a name match.
 # Parse `"r,g,b,a"` into an RgbaColor. The override channel is a plain
-# String so colours encode as comma-separated ints. Missing components
+# String so colors encode as comma-separated ints. Missing components
 # default to 255 (alpha) / 0 (rgb). Each component is a local String, read with `toInt()`.
 func parseRgbaString(text: view String) ret RgbaColor {
   unsafe {

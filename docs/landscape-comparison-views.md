@@ -142,14 +142,14 @@ The close-view grass now uses one shared four-segment curved ribbon in 138 and
 the three walker renderers. The previous control was a single six-vertex flat
 trapezoid. A textured crossed-clump candidate would have softened its outline,
 but it added transparent coverage, cutout mip tuning and crossing sheets while
-keeping the same stiff centre line. The ribbon was selected because its curve,
+keeping the same stiff center line. The ribbon was selected because its curve,
 taper and shallow transverse bow change the real silhouette and the lighting
 without an alpha texture. Alpha cutoff, mip generation and texture-edge shadow
 matching therefore do not apply to this path.
 
-Each blade now varies in height, width, lateral curve and a restrained colour
+Each blade now varies in height, width, lateral curve and a restrained color
 range. Its base darkens over the lower 32 percent, its tip follows the existing
-per-app colour scale, and its normal blends the bowed surface normal toward the
+per-app color scale, and its normal blends the bowed surface normal toward the
 sky. This retains broad day and night response without emission or disabled
 shadows. Candidate count, density, biome tests, draw count and storage size are
 unchanged. The maximum procedural vertex work rises from 393,216 vertices
@@ -165,11 +165,11 @@ increasing density or blur is not an accepted fix.
 
 ## Grass patches and contacts
 
-Patch membership now comes from two seeded Perlin bands in world metres. The
+Patch membership now comes from two seeded Perlin bands in world meters. The
 8.5 m Autumn Grove and 7.5 m walker scales make connected tufts and empty ground
 rather than a per-blade checker. `patchCoverage` controls the broad occupied
 share; `densityScale` still thins candidates inside it; `bladeVariation` only
-changes width, height, lean and colour. Camera movement changes neither the
+changes width, height, lean and color. Camera movement changes neither the
 lattice seed nor the patch coordinates.
 
 The app surface remains authoritative. Autumn Grove uses its authored island,
@@ -182,9 +182,9 @@ The list is rebuilt from spatially queried nearby props, stored in one reused
 fixed in world space when the terrain window moves.
 
 This treatment follows G01 by leaving paths and visible ground between dark
-patches, G02 by keeping within-patch scale and colour variation restrained, and
+patches, G02 by keeping within-patch scale and color variation restrained, and
 G03 by retaining the existing distance thinning instead of extending close
-detail into the far forest. The terrain ground colour and each grass root read
+detail into the far forest. The terrain ground color and each grass root read
 the same per-app value. Review the 138 grass view and `143-ground-cover` at the
 forest edge, then orbit to a path, shore, rock group and trunk base. A future
 ground-flower task owns the larger warm/cool accents; this pass does not add
@@ -203,7 +203,7 @@ no accumulating upload objects.
 ## Grass wind and forest density
 
 Grass now reads the same `WindVector` as tree foliage. Its broad fronts are two
-world-space bands travelling along the wind direction. A front bends adjacent
+world-space bands traveling along the wind direction. A front bends adjacent
 tufts together; a smaller cross-wind phase affects only the blade tip. Both
 offsets are multiplied by rooted height terms, so the lower vertices do not
 move. `RAE_WIND=0` is fully still, while `RAE_WIND=1.25` is the fixed breezy
@@ -214,7 +214,7 @@ The candidate grid remains fixed at 65,536 records. Inside each existing patch,
 distance thinning begins at 32 percent of the visible radius and reaches 22
 percent at the walker edge (18 percent in the wider 138 field). Surviving far
 ribbons widen by 1.25–1.28 rather than extending the near density. Patch shape,
-terrain colour, roads and obstacle circles are unchanged. This keeps G03's
+terrain color, roads and obstacle circles are unchanged. This keeps G03's
 quiet distant ground while retaining G01/G02 detail near the walker.
 
 Run `tools/capture-landscape-comparisons.sh grass` for paired calm/breezy 138

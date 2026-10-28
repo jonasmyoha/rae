@@ -32,7 +32,7 @@ The host keeps its own placement components (`Rect` / `Size` / `Align` /
 
 ## The theme contract
 
-Shared components never name a colour. They paint through palette SLOTS
+Shared components never name a color. They paint through palette SLOTS
 and text STYLE IDs that the app's theme must define:
 
 * palette slots — `surface`, `surfaceAlt`, `accent`
@@ -41,13 +41,13 @@ and text STYLE IDs that the app's theme must define:
 The palette vocabulary is CLOSED. `lib/ui/theme.rae` resolves ten fixed
 names (`background`, `surface`, `surfaceAlt`, `textPrimary`, `textMuted`,
 `outline`, `accent`, `accentText`, `accentTextMuted`, `imageTint`) and
-paints anything else magenta. A theme may re-colour a slot; it may not
+paints anything else magenta. A theme may re-color a slot; it may not
 invent one.
 
 Load the theme through `loadUiAssets`, which activates BOTH the token
 tables and the palette. `setActiveThemeTokens` alone covers space, radius,
 padding and container tokens only — a theme loaded without the palette
-bridge is honoured for four of its five sections and silently renders in
+bridge is honored for four of its five sections and silently renders in
 the built-in light palette.
 
 ## Asset paths

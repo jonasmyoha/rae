@@ -1,6 +1,6 @@
 // Ported from SMAA: Copyright (c) 2013 Jorge Jimenez et al., MIT License (lib/LICENSE-smaa.md)
-// SMAA 1x, pass 3 (render-perf-9): neighbourhood blending
-// (SMAANeighborhoodBlendingPS). Each pixel mixes with the neighbour its
+// SMAA 1x, pass 3 (render-perf-9): neighborhood blending
+// (SMAANeighborhoodBlendingPS). Each pixel mixes with the neighbor its
 // blending weights point at, through one bilinear fetch, in HDR; the result
 // is the anti-aliased scene the composite upscales.
 @group(0) @binding(0) var litTex: texture_2d<f32>;

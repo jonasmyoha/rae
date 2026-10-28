@@ -1,6 +1,6 @@
 """Write a small Z-up glTF level to walk round, without Blender.
 
-The authoring rules of app3d/GltfLevel (docs/gltf-levels.md): metres, Z up,
+The authoring rules of app3d/GltfLevel (docs/gltf-levels.md): meters, Z up,
 transforms applied, the origin on the floor. A 40 m grass field with a sand
 path up its middle to a wall across it, two low side walls, a stone ramp up
 to a stone platform, a stack of wooden crates; every solid piece has its
@@ -35,8 +35,8 @@ def solid(corners):
         if length < 1e-6:
             continue
         normal = [component / length for component in normal]
-        centre = [sum(point[axis] for point in points) / 4 for axis in range(3)]
-        if sum(normal[axis] * (centre[axis] - middle[axis]) for axis in range(3)) < 0:
+        center = [sum(point[axis] for point in points) / 4 for axis in range(3)]
+        if sum(normal[axis] * (center[axis] - middle[axis]) for axis in range(3)) < 0:
             points.reverse()
             normal = [-component for component in normal]
         base = len(positions) // 3
@@ -99,7 +99,7 @@ def exportWalkLevel(destination):
     for name, point in MARKERS:
         nodes.append({'name': name, 'translation': list(point)})
     writeLevelGlb(destination, meshes=meshes, materials=MATERIALS, nodes=nodes,
-                  rootNodes=list(range(len(nodes))), generator='exportWalkLevel.py (Z-up metres)')
+                  rootNodes=list(range(len(nodes))), generator='exportWalkLevel.py (Z-up meters)')
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 #
 # 110 and 113 had drifted to different controls for the same ideas — 110's
 # animation speed was a toggle, 113's a percentage with Slower/Faster. One state
-# type means one behaviour and a new setting lands in both apps at once, so what
+# type means one behavior and a new setting lands in both apps at once, so what
 # is worth pinning is the STATE TRANSITIONS: which action changes what, what is
 # refused, and what reports "nothing changed" so a caller can skip work.
 #
@@ -135,7 +135,7 @@ func main() {
   check(label: "a day spans 0..24", ok: settingsHourMin is 0.0 and settingsHourMax is 24.0)
 
   # Each app picks its own starting model: 110 is the realistic scene and opens
-  # on Preetham, 113 the stylised one and opens on Hosek.
+  # on Preetham, 113 the stylized one and opens on Hosek.
   check(
     label: "sky default is per app"
     ok: settingsState.skyModel is SettingsSkyModel.hosek and one.skyModel is SettingsSkyModel.preetham
@@ -181,7 +181,7 @@ func main() {
   clock.timeDragging = false
   # PLAY/PAUSE IS THE MASTER. Pausing stops the clock whatever the Animate time
   # toggle says — a paused scene with the sun still sweeping across it is not
-  # paused in any sense a user would recognise.
+  # paused in any sense a user would recognize.
   check(label: "animate time is on for the master test", ok: clock.animateTime)
   clock.playing = false
   let pausedAt: Float = clock.timeOfDay.hour

@@ -1,24 +1,24 @@
-# ClipMap — a camera-centred LOD grid for open water (#851, Crest's idea in one
+# ClipMap — a camera-centered LOD grid for open water (#851, Crest's idea in one
 # draw). Concentric rings of vertices whose spacing grows geometrically with
 # distance, so the cell size follows the camera: fine underfoot, coarse at the
 # horizon, one mesh, no clip-map ring management. The vertex shader adds the
-# camera position (snapped to whole metres) to every vertex each frame, so the
+# camera position (snapped to whole meters) to every vertex each frame, so the
 # grid rides with the camera; because the FFT cascades are sampled in WORLD
 # space (world.xy / tile), the waves stay put while the mesh moves under them.
 #
-# Vertices carry only a position (metres from the centre); the surface shader
+# Vertices carry only a position (meters from the center); the surface shader
 # ignores the normal (it builds its own) and the uv.
 import Math
 open Mesh3d
 
-# rings * segments + 1 vertices; the first ring at `firstCell` metres, each ring
+# rings * segments + 1 vertices; the first ring at `firstCell` meters, each ring
 # `growth` times farther than the previous step. rings=64, segments=96,
 # firstCell=1, growth=1.09 reaches ~2.5 km with ~6k vertices.
-# The ring spacing of createRadialGridMesh per metre from the centre: radially
+# The ring spacing of createRadialGridMesh per meter from the center: radially
 # a ring is `growth - 1` of its radius farther than the last, tangentially a
 # segment spans 2pi / segments of it; the coarser of the two is the cell the
-# surface shader must be able to sample (WaterBody.clipCellPerMetre, #1002).
-func radialGridCellPerMetre(segments: copy Int, growth: copy Float) pub ret Float {
+# surface shader must be able to sample (WaterBody.clipCellPerMeter, #1002).
+func radialGridCellPerMeter(segments: copy Int, growth: copy Float) pub ret Float {
   var segmentCount: Int = segments
   if segmentCount < 3 {
     segmentCount = 3
@@ -78,7 +78,7 @@ func createRadialGridMesh(
       )
     }
   }
-  # Centre fan.
+  # Center fan.
   loop var s0: Int = 0, s0 < segmentCount, ++s0 {
     let a: Int = 1 + s0
     let b: Int = 1 + (s0 + 1) % segmentCount

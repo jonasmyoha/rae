@@ -280,14 +280,14 @@ The check: fixture 957 replays `goldens/contacts.golden` (233 operations:
 zero-time-step collides of a world of touching bodies, small moves that
 recycle contacts, large moves that end them, wakes, islands put to sleep,
 re-massing, shape and body destroys; every contact with its manifold, the
-24 graph colours including overflow, the solver sets, the islands and the
+24 graph colors including overflow, the solver sets, the islands and the
 bodies' contact fields dumped at checkpoints).
 
 ## P4c — the solver, the stage dispatcher, stepping (`dynamics/`)
 
 `stepWorld` is `b3World_Step`: new pairs, the narrow phase, then the solver.
 The solver keeps Box3D's structure even single-threaded: constraints are
-spread over the graph colours, the work is a list of stages (prepare,
+spread over the graph colors, the work is a list of stages (prepare,
 integrate velocities, warm start, solve, integrate positions, relax,
 restitution, store) whose blocks share a pool, and the stage dispatcher
 (`dynamics/StageDispatcher`) is the one module that runs them: each stage
@@ -295,7 +295,7 @@ is one `parallelLoop` over its blocks (docs/parallel-stages-design.md,
 Option C), whose join is the stage barrier, so Box3D's block claims and
 completion counts are not needed. The solver tasks are Box3D's. Convex contacts are solved
 four at a time on the wide path, where a wide float is a struct of four
-Floats (`dynamics/FloatWide`, Box3D's scalar `b3FloatW`); the overflow colour
+Floats (`dynamics/FloatWide`, Box3D's scalar `b3FloatW`); the overflow color
 (and later mesh contacts) use the scalar path.
 
 | Box3D | Rae |
@@ -382,7 +382,7 @@ body and every mesh contact's manifolds, are bit-exact.
 A height field is a grid of quantized heights over x (columns) and z (rows),
 two triangles per cell with a fixed diagonal; a cell of material
 `heightFieldHole` has none. Creation quantizes the heights to 16 bits and
-flags each triangle edge concave or inverse-concave against its neighbour
+flags each triangle edge concave or inverse-concave against its neighbor
 (the flat ones are both), so the mesh contact's ghost-collision reduction
 works on height fields too. A height shape sits on a static body only; its
 contacts are mesh contacts reading the field's triangles.
@@ -466,8 +466,8 @@ and every 20 steps the bodies and mesh contacts are bit-exact.
 ## P6a — joints: the core, distance, revolute and filter (`dynamics/Joint`, `WorldJoints`, `WorldJointSets`, `JointSolver`)
 
 A joint lives in the solver sets like a contact: its sim sits in a graph
-colour while awake (coloured like a contact, the overflow colour when no
-colour is free), in a sleeping, static or disabled set otherwise. It links
+color while awake (colored like a contact, the overflow color when no
+color is free), in a sleeping, static or disabled set otherwise. It links
 its bodies' islands, merging them; destroying it makes its island a split
 candidate. A joint created between two sleeping sets merges them so they
 keep sleeping. Body type changes, disable/enable and destroying a body move
@@ -493,7 +493,7 @@ motor and spring, distance springs, limits, motor and a rope, a chain bridge
 with event thresholds, a sleeping chain split by destroying a joint, and
 jointed bodies destroyed, disabled, enabled, retyped and merged across two
 sleeping sets. Every step's body hash and joint events, and every 20 steps
-the bodies and every joint's set, colour, island and impulses, are
+the bodies and every joint's set, color, island and impulses, are
 bit-exact.
 
 ## P6b — prismatic and wheel joints (`dynamics/PrismaticJoint`, `dynamics/WheelJoint`)

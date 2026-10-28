@@ -4,8 +4,8 @@
 # THIS module makes the water decisions each frame:
 #
 #   * CONTAINMENT. A lake / pond (meshMode 0) contains the camera when its
-#     xy is inside the body's square extent around the centre; an ocean
-#     (meshMode 2, camera-centred) contains every camera inside its bounds
+#     xy is inside the body's square extent around the center; an ocean
+#     (meshMode 2, camera-centered) contains every camera inside its bounds
 #     (unbounded unless the app set them: Water.waterBoundsContain); a
 #     baked river ribbon (meshMode 1) has no bounds API — its mesh is world-
 #     space geometry the body knows only by id — so it never selects (rivers
@@ -15,7 +15,7 @@
 #     #858 readback cache (sampleFftSurface, bounded age) for FFT water, and
 #     when that sample is unavailable or stale — before the first readback,
 #     during a tier change that invalidated the cache, a non-primary body
-#     without cascades — the STILL level (centre.z), so the effect degrades
+#     without cascades — the STILL level (center.z), so the effect degrades
 #     to a flat crossing rather than flickering or vanishing.
 #   * OVERLAP. Several containing bodies (a pond on an island in a sea): the
 #     one the camera is DEEPEST under wins; a body the camera is above does
@@ -35,14 +35,14 @@ open water/FftSurfaceCache
 open GbufferUnderwater
 open RendererDeferred
 
-const underwaterCrossingMargin: Float = 0.03  # metres of hysteresis at the surface
+const underwaterCrossingMargin: Float = 0.03  # meters of hysteresis at the surface
 
 const underwaterFftMaxAge: Float = 0.5  # seconds a cached FFT sample may lag the wave clock
 
 const underwaterCausticStrength: Float = 0.5  # peak added radiance of the caustic ridges
 
 # Fog tuning shared by every body: the body's own absorption drives the
-# colour; these shape how fast it saturates and the near-surface tint.
+# color; these shape how fast it saturates and the near-surface tint.
 const underwaterDensity: Float = 0.25
 
 const underwaterFarDistance: Float = 200.0
@@ -60,10 +60,10 @@ func waterBodyContains(body: view WaterBody, x: copy Float, y: copy Float) ret B
     ret false
   }
   let half: Float = body.extent * 0.5
-  if x < body.centre.x - half or x > body.centre.x + half {
+  if x < body.center.x - half or x > body.center.x + half {
     ret false
   }
-  if y < body.centre.y - half or y > body.centre.y + half {
+  if y < body.center.y - half or y > body.center.y + half {
     ret false
   }
   ret true
@@ -94,7 +94,7 @@ func waterSurfaceAtCamera(
       }
     }
     usedStillLevel = true
-    ret body.centre.z
+    ret body.center.z
   }
   ret waterHeightAt(
     body: body
@@ -154,8 +154,8 @@ func underwaterSelect(
   if let body: WaterBody = waterSystem.bodies.copyAt(index: best) {
     # Caustics: the body's toggle, lit by the frame's sun. sunDir is the
     # direction TOWARD the sun (the shader zeroes the effect when it is below
-    # the horizon or the sun colour is black), so negate Light3d.sunDir (which
-    # points the way the light travels) and normalise.
+    # the horizon or the sun color is black), so negate Light3d.sunDir (which
+    # points the way the light travels) and normalize.
     var toSun: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     let sunLength: Float = Vec3.vlen(a: light.sunDir)
     if sunLength > 0.0001 {

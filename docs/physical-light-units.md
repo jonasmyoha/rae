@@ -6,12 +6,12 @@ order: units + camera exposure, automatic exposure, lit mist.
 ## Why
 
 The renderer works in relative light units: every light is scaled so that
-an exposure of 1 looks right. The sun colour is about 1, the ambient is
+an exposure of 1 looks right. The sun color is about 1, the ambient is
 authored, the Preetham sky carries a hand scale, and the exposure is a
 fixed number. That works while every light shares the same hand scale, and
 it broke the first time a light did not: the Hosek-Wilkie sky gives
 physical radiance, 15 to 60 times the Preetham sky's, so example 143 came
-out white (the sky and the mist that takes its colour from the sky).
+out white (the sky and the mist that takes its color from the sky).
 
 The stopgap (0.2.173) was one unit conversion, `Sky.skyUnitsPerKcd`, our
 units per kcd/m2, used by both sky models (the Hosek-Wilkie RGB radiance is
@@ -43,13 +43,13 @@ PBR", 2014; Unreal and Unity HDRP work the same way).
   `deferred_shade.wgsl`) adds the light it scatters toward the eye: the sky's
   light (its irradiance from above, or the sky in the view direction) plus
   the sun's, with a phase function so it glows toward the sun. Today it
-  copies the sky colour just over the horizon, which is only right while
+  copies the sky color just over the horizon, which is only right while
   the sky is in relative units and has no very bright horizon.
 
 ## What it touches
 
 - `lib/Sky.rae`, `lib/SkyHosek.rae`, `lib/sky_hosek.wgsl`: sky luminance in
-  cd/m2, sun illuminance in lux (`sunColorForHeight` becomes a colour times
+  cd/m2, sun illuminance in lux (`sunColorForHeight` becomes a color times
   an illuminance).
 - The light uniform and the light pass: exposure where light is summed, the
   sun disc and the moon in the same units.
@@ -85,10 +85,10 @@ before.
   mistSkyColor). The water and the underwater caustics expose their sun and
   sky light the same way. So the 16-bit HDR targets hold the same range as
   before.
-- Still in relative units (display colours): the stylised and solid-colour
-  skies' painted colours on screen, the clear colour, the old distance fog,
-  point lights and emissive materials. Where a painted colour lights the
-  scene (a stylised sky's ambient, the solid sky's ambient) it is converted
+- Still in relative units (display colors): the stylized and solid-color
+  skies' painted colors on screen, the clear color, the old distance fog,
+  point lights and emissive materials. Where a painted color lights the
+  scene (a stylized sky's ambient, the solid sky's ambient) it is converted
   with `fromRelativeLight`.
 - (Superseded 2026-10-28, see "The walker sun" below.) The walker scenes' sun
   was `SettingsSky.settingsSunNoonLux` = 20,000 lux at
@@ -134,7 +134,7 @@ highestEv100)` once per frame before it renders (the walker apps do, in
 ## Step 3, done (0.2.176)
 
 The height mist adds the light it scatters toward the eye instead of
-copying the sky's colour just over the horizon (`mistSkyColor` is gone):
+copying the sky's color just over the horizon (`mistSkyColor` is gone):
 
 - From all round: half the sky's own light from above
   (`Sky.skyLightAbove`: each model's radiance over 48 directions, the sun's
@@ -184,6 +184,6 @@ tries another sun.
    screenshots at noon, evening and night with both skies).
 2. Automatic exposure: the reduction, the slow adaptation, compensation in
    the settings dialog, `RAE_EXPOSURE` for a fixed value.
-3. Lit mist: in-scattered sky and sun light in place of the horizon colour;
+3. Lit mist: in-scattered sky and sun light in place of the horizon color;
    the same amount of mist with every sky (143 with Preetham and
    Hosek-Wilkie at noon and evening).

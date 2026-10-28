@@ -46,10 +46,10 @@ static unsigned char* rae_g2d_read_whole_file(const char* path, size_t* out_len)
  *   FF D8 FF     -> vendored stb_image (JPEG, every platform)
  *   89 50 4E 47  -> lodepng (PNG)
  *   anything else -> unsupported
- * Output is straight-alpha RGBA8, no colour management.
+ * Output is straight-alpha RGBA8, no color management.
  *
  * stb is the sole JPEG decoder. macOS previously used ImageIO, but
- * ImageIO silently rendered truncated downloads half-grey (no error);
+ * ImageIO silently rendered truncated downloads half-gray (no error);
  * stb correctly rejects them, and decodes every valid file (verified
  * ok=102/102 on the cached Spotify artwork set). The truncation guard
  * below turns a partial download into a loud failure the caller can
@@ -138,7 +138,7 @@ int64_t rae_ext_Gpu2d_setWindowIcon(rae_String path) {
 
 /* Device-free decode probe (#228): run the exact decode + error
  * policy of gpu2d.loadImage without needing a WebGPU device, so the
- * corrupt-file behaviour is testable in the headless suite. Returns
+ * corrupt-file behavior is testable in the headless suite. Returns
  * 1 when the file decodes, 0 (plus the standard stderr line) when it
  * doesn't. Also handy as a CLI-side asset validator. */
 int64_t rae_ext_Gpu2d_decodeImageProbe(rae_String path) {

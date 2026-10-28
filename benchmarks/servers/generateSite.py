@@ -5,7 +5,7 @@ results/summary.json and results/metadata.json. Run it after run.sh:
     python3 benchmarks/servers/generateSite.py
 
 Charts use the emphasis form: the two Rae servers in the accent blue, the
-references in gray, every bar labelled with its value."""
+references in gray, every bar labeled with its value."""
 import html
 import json
 import math
@@ -260,7 +260,7 @@ def http_page():
             "ms", 2, "Lower is better",
         ),
         "<h2>Every case</h2>",
-        '<p class="small">Requests per second (p99 ms in brackets). <b>json</b> serialises '
+        '<p class="small">Requests per second (p99 ms in brackets). <b>json</b> serializes '
         "<code>{\"message\":\"Hello, World!\"}</code> on every request; <b>pipelined</b> sends 16 requests "
         "per write. With 8 workers every server but Bun meets the same ceiling: the load generator, "
         "which shares the machine.</p>",

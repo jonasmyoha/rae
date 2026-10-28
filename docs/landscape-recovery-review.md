@@ -54,7 +54,7 @@ previous comparisons.
 
 Recovered the original fine-edge `birchLeaves.png` from `e86992db`. Each spray
 now uses four or five unequal overlapping camera-facing cards with full-image
-UVs. The centres remain attached to the same twigs; crown normals and fixed wind
+UVs. The centers remain attached to the same twigs; crown normals and fixed wind
 pivots remain independent of camera orientation. No emission, global exposure,
 shadow disable or new renderer path was added. The newer wood and bark are left
 unchanged so the foliage repair can be judged separately.
@@ -79,10 +79,10 @@ branch-supported depth. They are art references, not botanical evidence that
 those trees are silver birch. Match their visual organization without changing
 the birch into another species. G02 establishes ground-cover grouping and a
 soft relationship between small plants and the ground, not isolated angular
-blades scattered over one flat colour.
+blades scattered over one flat color.
 
 The presentation also includes the previously committed flower and fork study
-frames, clearly labelled as historical evidence. Their upright thin stalks,
+frames, clearly labeled as historical evidence. Their upright thin stalks,
 small geometric heads, angular grass and long pointed wood explain why passing
 geometry and nonblank-image checks did not meet the task.
 
@@ -192,9 +192,9 @@ their IDs and receive the relevant recovery prerequisites.
 | #87183597 Buttercup family | Unstarted | Hold behind flower recovery | Do not extend the rejected daisy/bellflower appearance to a third species. Start only after a reviewed plant-and-patch comparison. |
 | #46350604 Flower meadows and species patches | Unstarted | Hold behind grass and flower recovery | Patch composition depends on the recovered assets. Require one small mixed patch first; do not populate the entire forest to judge it. |
 | #80837875 Small-leaved lime refinement | Unstarted | Keep scope; replace prerequisite | Use a reviewed crown treatment and sculptural wood recovery, not the rejected birch recipe. Compare coherent oval silhouette and fine perimeter to T04/T07. |
-| #48605089 Sugar maple autumn-orange refinement | Unstarted | Keep scope; replace prerequisite | Do one orange specimen before rollout; require broad crown colour groups and fine edges against T04/T05, not a recoloured birch. |
+| #48605089 Sugar maple autumn-orange refinement | Unstarted | Keep scope; replace prerequisite | Do one orange specimen before rollout; require broad crown color groups and fine edges against T04/T05, not a recolored birch. |
 | #28246202 Red maple scarlet refinement | Unstarted | Keep after orange maple | Retain distinct scaffold and rounded crown. Compare the two maple species together at identical scale/light so differences are visible. |
-| #21954987 Golden Globe ginkgo autumn-gold refinement | Unstarted | Keep distinct kind 6 | Keep the explicit showcase/forest mismatch correction. Add the named existing kind without deleting or recolouring the palm; use reviewed foliage. |
+| #21954987 Golden Globe ginkgo autumn-gold refinement | Unstarted | Keep distinct kind 6 | Keep the explicit showcase/forest mismatch correction. Add the named existing kind without deleting or recoloring the palm; use reviewed foliage. |
 | #56427211 Bloodgood Japanese maple crimson refinement | Unstarted | Keep after maple recovery | Require readable burgundy masses in shade and backlight, not dark balls. Keep a distinct smaller spreading silhouette. |
 | #55057148 Norway spruce layered foliage refinement | Unstarted | Keep species-specific prototype | A spruce does not inherit birch cards automatically. Compare layered branch-supported needle sprays to current skirts before changing six specimens. |
 | #30757695 Mediterranean cypress refinement | Unstarted | Preserve successful slender control | This is a refinement, not permission to replace the narrow silhouette. Keep the pre-queue specimen in every comparison and reject thicker or lumpy results. |
@@ -206,7 +206,7 @@ their IDs and receive the relevant recovery prerequisites.
 | #17691144 Forest foliage wind coherence | Unstarted | Keep final integration; require earlier local motion | Each species must already pass its own orbit/motion check. This task tunes spatial coherence across a stand; it must not defer basic wind quality until the end. |
 | #53338503 Rock shape and material foundation | Unstarted | Keep independent prototype | One directional wedge, plain and mossed, with the actual R01/R02 crop beside it. Do not replace all rocks before seeing the first. |
 | #81194269 Mossy wedge outcrops | Unstarted | Keep after rock review | Approve broad faces and a quiet upper moss cap before multiplying seeds; no uniformly outlined green stones. |
-| #54599145 Layered grey rock shelves | Unstarted | Keep distinct shelves | Require recognizable long unequal strata and recesses from R03; do not count stretched wedges as another family. |
+| #54599145 Layered gray rock shelves | Unstarted | Keep distinct shelves | Require recognizable long unequal strata and recesses from R03; do not count stretched wedges as another family. |
 | #84622055 Fractured blocks and rubble | Unstarted | Keep distinct fracture family | Require a few readable major breaks and believable rubble scale; do not add noisy triangles as detail. |
 | #22082117 Rock groups across streamed terrain | Unstarted | Keep after rock and ground review | Stream only the reviewed families; retain collision, grass exclusions and deterministic placement. |
 | #58576313 Shared cloud layer foundation | Unstarted | Keep independent layer prototype | Compare one lit group against C01-C03 before general presets. No ray-marching expansion or global exposure workaround. |
@@ -225,7 +225,7 @@ their IDs and receive the relevant recovery prerequisites.
 3. **Near-grass visual recovery:** actually render both textured tufts and curved
    ribbons under matched conditions before choosing the shared treatment.
 4. **Grass patch and motion recovery:** integrate the selected near grass with
-   ground colour, retained exclusions and continuous calm/breeze walking captures.
+   ground color, retained exclusions and continuous calm/breeze walking captures.
 5. **Oxeye daisy visual recovery:** rebuild one plant and small patch before the
    shared flower framework is considered an art reference.
 6. **Harebell visual recovery:** keep its different growth/head shape and batching;
@@ -313,9 +313,9 @@ their different scaffolds prevent treating them as controlled geometry trials.
 ![Isolated connected candidate branch](images/birch-crown-recovery/connected-branch-branch.png)
 
 The original card helper remains unchanged. The candidate uses a new bounded
-helper in `procgen/FoliageCards`: three card centres follow the supporting twig,
+helper in `procgen/FoliageCards`: three card centers follow the supporting twig,
 with unequal size and lateral offset. Their normals describe the larger crown
-and vary smoothly across each card. The quads face the camera; their centres,
+and vary smoothly across each card. The quads face the camera; their centers,
 lighting normals and wind attachments stay with the tree. The existing rigid
 rotation around the twig pivot remains; primary wood has no wind metadata.
 
@@ -323,7 +323,7 @@ The texture uses an asymmetric connected silhouette, small pointed edge leaves,
 and restrained interior variation. Two earlier texture attempts were rejected:
 one made repetitive feather-like chains, and an almost flat version looked
 like a solid cutout. A physical-material trial was also rejected for its pale
-colour shift. The selected version keeps the same toon material as the control,
+color shift. The selected version keeps the same toon material as the control,
 including emission zero, ordinary sun/ambient light and cascaded shadows.
 
 ### Lighting and movement
@@ -370,7 +370,7 @@ The candidate reduces the round puff repetition, but does not eliminate all
 clumps. Individual cards remain identifiable close to an isolated spray, and
 one mirrored texture still repeats. There are still dark interior pockets and
 occasional exposed white branch fragments. T04/T05 have more deliberate large
-colour masses and richer fine silhouettes; T07 has a more readable woody
+color masses and richer fine silhouettes; T07 has a more readable woody
 scaffold. The crown comparison does not establish finished bark, improved forks
 on this species, or a new lower-detail mesh. Those were deliberately held fixed.
 The far atlas uses the new mesh and image through the existing baker; it is
@@ -431,7 +431,7 @@ the rendering gates does not mean the meadow now matches the references.
 ## Ground-cover and motion recovery
 
 [Grass patch recovery](grass-patch-recovery.md) records paired forest-edge,
-clearing and path-contact captures, with shared ground/tuft colour and uneven
+clearing and path-contact captures, with shared ground/tuft color and uneven
 root groups. The private presentation includes calm/breezy continuous walks in
 both apps. It records matching density settings, surviving counts, cost and
 remaining limits; this is not a claim that the wider meadow art is complete.
@@ -472,7 +472,7 @@ pass; these checks do not establish a complete match to the reference art.
 
 [The maple comparison](sugar-maple-refinement.md) records the unchanged opaque
 control and the new kind-4 ascending scaffold, original copper foliage cutout
-and grey-brown bark. It includes three seed/height studies, bare/side/underside,
+and gray-brown bark. It includes three seed/height studies, bare/side/underside,
 backlit/night and matched forest captures beside T04–T07 in the private report.
 Existing maple slots and placements remain distinct.
 
@@ -498,7 +498,7 @@ relief and a shared near/middle mesh. Kind numbers and placements are unchanged.
 ## Golden Globe ginkgo refinement
 
 Shared kind 6 now has a spreading joined branch fan, alternate short shoots,
-original golden fan-leaf cutout and grey-brown bark. The new named 138 inspection
+original golden fan-leaf cutout and gray-brown bark. The new named 138 inspection
 preserves the green date palm and all older fixed specimens. The original gold
 control, first candidate, selected front/side/underside, multiple seeds, night,
 actual forest group and posed atlas appear in the private recovery presentation
@@ -522,7 +522,7 @@ middle geometry are stated explicitly rather than hidden by the test results.
 
 [The spruce comparison](spruce-refinement.md) preserves the old skirt control
 and shows the selected unequal whorls, curved fixed needle sprays and scaly
-grey-brown trunk. Six normal-sized showcase trees retain their placements and
+gray-brown trunk. Six normal-sized showcase trees retain their placements and
 sizes; shared forest kind 3 retains its mapping. Original textures, broad
 bough normals and restrained pivot motion use the existing renderer paths.
 

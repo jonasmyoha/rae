@@ -114,10 +114,10 @@ Everything else falls back to zero-config defaults.
 
 ```rae
 // SYNTAX PROVISIONAL
-pack ClearColour {
+pack ClearColor {
   meta: {
-    name: "2D Renderer — Step 1: Clear colour"
-    description: "Opens a GPU window and presents a clear colour."
+    name: "2D Renderer — Step 1: Clear color"
+    description: "Opens a GPU window and presents a clear color."
     category: "2D Renderer"
   }
 }

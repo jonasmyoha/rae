@@ -73,7 +73,7 @@ Phase 2, WebSocket (one worker each, see the spec):
 Both Rae servers use `lib/webSocket` (upgrade, frame decoder and encoder) and
 the same few lines for the shootout's JSON: the `type` and the `payload` are
 found in place (`jsonScanMember`), and the broadcast frame is built once from
-the payload's bytes in the read buffer, not by re-serialising.
+the payload's bytes in the read buffer, not by re-serializing.
 
 Phase 3, game room (one worker, one room; see the spec):
 
@@ -97,7 +97,7 @@ performance cores. For each configuration, each implementation:
 2. then, per case (`plaintext`, `json`, `pipelined`), gets a 5 s warmup and
    5 timed runs of 15 s;
 3. has its runs interleaved with the other implementations'. The two Rae
-   styles swap order every run, so drift on the machine favours neither.
+   styles swap order every run, so drift on the machine favors neither.
 
 Reported, as the median with min and max:
 
@@ -195,7 +195,7 @@ implementations in these languages", not "Rae is faster than Rust".
       native addon) in place of `node:http` and `ws`, the fastest way to
       serve from Node.
     - **Bun:** already on uWebSockets; HTTP routes go through Bun's
-      native `routes` table, and the broadcast payload is serialised once.
+      native `routes` table, and the broadcast payload is serialized once.
 
     Still written by us, in the Rae repository: the gap in effort is
     smaller, the author is the same.
@@ -203,7 +203,7 @@ implementations in these languages", not "Rae is faster than Rust".
   incentives that implies.
 - **The same in reverse elsewhere:** the same would hold for a benchmark
   written in a Bun or Rust repository. A project's own benchmarks tend to
-  favour it, through effort and familiarity rather than through a rigged
+  favor it, through effort and familiarity rather than through a rigged
   measurement.
 
 **How much of each server is our code:**

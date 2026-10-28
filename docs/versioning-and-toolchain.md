@@ -53,7 +53,7 @@ for a language whose toolchain is a sibling git checkout, not a download.
   `compiler/VERSION`; nothing else. No branches, no artifacts yet: the toolchain
   is a source checkout, so a tag IS the release.
 - **Bump discipline** goes into `AGENTS.md`: a commit that changes language,
-  `lib/` or CLI behaviour in a release-notes-worthy way bumps PATCH in the
+  `lib/` or CLI behavior in a release-notes-worthy way bumps PATCH in the
   same commit and says so in the message; MINOR is never bumped by an agent.
   The first tag is cut once the current in-flight renderer slices land.
 

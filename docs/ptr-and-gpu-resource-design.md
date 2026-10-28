@@ -114,7 +114,7 @@ bug: the type mangler passed a resolved integer TypeInfo's C spelling
 (`uint8_t`, from `rae_int_c_name`) through the `rae_`-prefix fallback, producing
 an undeclared `rae_uint8_t` and a second, clashing `List` monomorphization. Only
 `int64_t` was whitelisted, so `List(Int)` worked by luck while the narrower
-widths would have miscompiled. The mangler now recognises every C scalar
+widths would have miscompiled. The mangler now recognizes every C scalar
 spelling and passes it through verbatim.
 
 ## What the shipped readback pilot proves

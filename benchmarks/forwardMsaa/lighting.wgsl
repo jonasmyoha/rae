@@ -13,7 +13,7 @@ fn vsFullscreen(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> 
 fn fsLighting(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let px = vec2<i32>(pos.xy);
   let depth = textureLoad(depthTex, px, 0);
-  if (depth >= 1.0) { return skyColour; }
+  if (depth >= 1.0) { return skyColor; }
   let dims = vec2<f32>(textureDimensions(depthTex));
   let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / dims;
   let ndc = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);

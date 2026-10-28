@@ -31,7 +31,7 @@ figure — the OS decides the page numbers.
 
 ## Elsewhere
 
-| language | behaviour |
+| language | behavior |
 |---|---|
 | Python | fine, via reference counting — but every iteration pays an allocation and a refcount dance |
 | JavaScript | fine, after garbage-collection pauses; the heap grows between collections |

@@ -28,7 +28,7 @@
 >    after the statement. A chained `s.concat(a).concat(b)` used to leak every
 >    intermediate — one JSON save of the play history leaked 2 GB. And a
 >    String local reassigned from a fresh value owns it from then on, whatever
->    it was initialised from (`var s: String = ""` is a static literal).
+>    it was initialized from (`var s: String = ""` is a static literal).
 >
 > Fixture `847_leak_reassign_move_temps` guards all three under
 > `RAE_MEM_STATS=1`.
@@ -168,7 +168,7 @@ That applies even without files, fonts, sockets, or GPU objects.
   same selection, the same FULL/ALIAS variant rules across Live
   and Compiled. Valid Rae source has backend-equivalent cleanup
   semantics; switching `--target` cannot change observable
-  ownership behaviour.
+  ownership behavior.
 
 **Likely**
 
@@ -645,7 +645,7 @@ func drop(this: mod Font) {
 fields.** The user only writes the part that the compiler cannot
 infer. Ergonomic — no manual recursion over fields. Risk: the
 custom body might invalidate fields that structural drop then
-tries to use, causing double-free or undefined behaviour.
+tries to use, causing double-free or undefined behavior.
 
 **Option B: custom drop replaces the structural pass entirely.**
 The user is responsible for releasing every owned field too. More
@@ -811,7 +811,7 @@ sysDropOwned(texture)  // plain stdlib function
 A keyword form mirrors `ret` / `let` and signals "the compiler
 treats this specially." A method form is cheaper to parse but
 overloads the method-call slot. A function form keeps the surface
-syntax small but loses the move-out signalling that the compiler
+syntax small but loses the move-out signaling that the compiler
 needs to enforce "you cannot use `texture` after this."
 
 Whichever syntax wins, after explicit drop, the compiler must mark

@@ -426,7 +426,7 @@ surface. It exists so a render surface such as water's can be manager-owned
 - **`RenderPipelineId`** from `createRenderPipeline(resources, wgsl,
   vertexEntry, fragmentEntry, spec)`: one interleaved vertex buffer layout
   (`RenderPipelineSpec.vertexStride` + ordered `VertexAttributeSpec`s), one
-  colour target with optional straight alpha blend (water's blend), and an
+  color target with optional straight alpha blend (water's blend), and an
   optional depth state (`depthFormat` 0 = none; water's reverse-Z read-only
   test is `Depth32Float`, no write, `Greater`). The shader module is released
   right after pipeline creation, as for compute.
@@ -449,7 +449,7 @@ surface. It exists so a render surface such as water's can be manager-owned
   for its lifetime.
 - **`recordDrawIndexed(recording, resources, target, pipeline, bindGroup,
   vertexBuffer, indexBuffer, indexCount)`** records one render pass with one
-  indexed draw over #870's `Recording`: `RenderTarget` is a colour view (clear or
+  indexed draw over #870's `Recording`: `RenderTarget` is a color view (clear or
   load) and an optional depth view (read-only or read-write); u32 indices; the
   index buffer must hold `indexCount` indices; manager buffers must carry
   Vertex / Index usage. Every referenced resource (including the bind group's
@@ -458,9 +458,9 @@ surface. It exists so a render surface such as water's can be manager-owned
   into a buffer (row pitch a multiple of 256) for readbacks and screenshots.
 - **Verified on hardware** by `checks/gpuRender`: a manager render
   pipeline draws a clip-space triangle over a 4x4 RGBA8 manager texture, the
-  fragment colour comes from an ADOPTED uniform buffer the check owns, the
+  fragment color comes from an ADOPTED uniform buffer the check owns, the
   texture is copied to a buffer and read through a `ReadbackId`, every pixel
-  equals the packed colour; then the pipeline retires, the external is released
+  equals the packed color; then the pipeline retires, the external is released
   while the adopter still owns and releases its buffer, and a released
   external, a retired pipeline and a misaligned row pitch are refused.
 - No new C: generated bindings only; the C-surface gate is unchanged.

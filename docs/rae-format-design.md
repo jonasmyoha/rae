@@ -86,7 +86,7 @@ excluded), 928 files:
   after the call to before it on the second run (three occurrences).
 - 58 test fixtures are expected-diagnostic cases whose input must not parse;
   the formatter rightly refuses them — they are excluded from the check by
-  the format-fixture rule above generalised to "fixtures that expect a parse
+  the format-fixture rule above generalized to "fixtures that expect a parse
   error".
 
 ### #916 result (2026-09-12)

@@ -16,7 +16,7 @@ read those for the full rules. The changes, and the queue items that landed them
 | Module model (#779/#786/#787) | project auto-visibility, folder = package, file = module namespace, `import`/`open`, `export` merge, `Package.Module.func()` qualifiers | `docs/module-namespacing.md` |
 | Dropped redundant prefixes (#780) | `gpuTimingEnabled(t)` → `GpuTiming.enabled(t)` | — |
 
-Suggested order (do them in this order to minimise re-work): **naming → module
+Suggested order (do them in this order to minimize re-work): **naming → module
 model → no-globals → no-inference → field-name fallout**. Renaming files/folders
 first means every later grep/codemod runs against the final paths.
 

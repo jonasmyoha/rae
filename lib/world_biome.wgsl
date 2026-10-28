@@ -61,7 +61,7 @@ fn raeBiomeElevation(p: vec2<f32>) -> f32 {
   return e - (1.0 - mask) * RAE_BIOME_ISLAND_SINK;
 }
 
-// Radial dirt roads meander away from the island centre. A perpendicular
+// Radial dirt roads meander away from the island center. A perpendicular
 // distance to each ray avoids atan2 and guarantees every road connects inward.
 // MUST match worldPath in world_biome.rae.
 const RAE_BIOME_PATH_SPOKES: i32 = 3;
@@ -117,9 +117,9 @@ fn raeBiomeClassify(elev: f32, moist: f32, slope: f32) -> RaeBiome {
   //
   // The shore is the steepest ground on the island by construction -- it is
   // where the land falls to the water -- so a purely slope-driven rock term
-  // claimed the entire coastal strip. Rendering the materials as marker colours
+  // claimed the entire coastal strip. Rendering the materials as marker colors
   // showed the "beach" was mostly ROCK with a thin band of sand at the waterline,
-  // which is why it read grey instead of warm and why sand measured 4.4% of the
+  // which is why it read gray instead of warm and why sand measured 4.4% of the
   // ground against the reference's 40%.
   //
   // Rock now means cliff or highland: the slope term is suppressed just above the
@@ -165,7 +165,7 @@ fn raeBiomeSample(p: vec2<f32>) -> RaeBiome {
 }
 
 // Splat palette — MUST match world_biome.rae grassMatColor()/etc. Blends the
-// material weights into one ground colour (terrain splat + grass gradient bottom).
+// material weights into one ground color (terrain splat + grass gradient bottom).
 fn raeBiomeSplatColor(b: RaeBiome) -> vec3<f32> {
   let grass = vec3<f32>(0.105, 0.245, 0.055);
   let sand  = vec3<f32>(0.74, 0.66, 0.44);

@@ -1,5 +1,5 @@
 /* The reference for benchmarks/parallel_stages: the same 220-stage step run
- * with Box3D's own synchronisation (solver.c b3SolverTask / b3ExecuteStage):
+ * with Box3D's own synchronization (solver.c b3SolverTask / b3ExecuteStage):
  * the leader publishes each stage in one atomic word and works too; helpers
  * spin on it, claim blocks with a compare-and-swap on each block's sync index
  * starting from their own offset, and add what they did to the stage's

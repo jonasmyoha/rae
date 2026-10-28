@@ -30,7 +30,7 @@ if len(mesh_objects) > 1:
 prop = bpy.context.view_layer.objects.active
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-# Place the model on z=0 and centre its footprint. The terrain pool can then
+# Place the model on z=0 and center its footprint. The terrain pool can then
 # position and scale every variant with one ordinary Rae Transform3d.
 minimum = Vector((float("inf"), float("inf"), float("inf")))
 maximum = Vector((float("-inf"), float("-inf"), float("-inf")))

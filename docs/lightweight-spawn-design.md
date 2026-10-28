@@ -12,7 +12,7 @@ fork here is changed.
   and fairness) sit after the server phase 3 task.
 
 **In one paragraph.** Rae keeps its "reversed await" syntax: concurrency is
-marked at the call site with `spawn`, functions are never coloured, and
+marked at the call site with `spawn`, functions are never colored, and
 waiting is an explicit `task.get()`. What changes is the machinery
 underneath. Today every `spawn` is an OS thread and every wait blocks a
 thread. This design makes a `spawn` a lightweight task: a compiler-generated,
@@ -47,7 +47,7 @@ cheap enough to use freely.
 
 ## 2. How other languages do it
 
-| language | marked where | colouring | a task is | executor | wait blocks the thread? |
+| language | marked where | coloring | a task is | executor | wait blocks the thread? |
 |---|---|---|---|---|---|
 | **Go** | call site, `go f()` | none | stackful goroutine (~2 KB, growable stack) | M:N over all cores, work-stealing, network poller, preemption | no |
 | **Java 21** | `Thread.ofVirtual().start(...)` | none | stackful virtual thread | M:N on a ForkJoinPool | no (most calls) |
@@ -61,7 +61,7 @@ cheap enough to use freely.
 
 Two lessons:
 
-- **Go** shows that call-site marking with no colouring works at the largest
+- **Go** shows that call-site marking with no coloring works at the largest
   scale.
 - **Zig** shows that the compiler can infer which functions must be resumable,
   so nobody writes `async`. It also shows where that gets hard: function
@@ -186,8 +186,8 @@ cheap.
    blocks).
 
 Most code is never transformed: a parser, a solver or a renderer does not
-wait. Generic functions are specialised first, then analysed per
-specialisation, the same order the backend already uses.
+wait. Generic functions are specialized first, then analyzed per
+specialization, the same order the backend already uses.
 
 ### 4.2 What a resumable function compiles to
 
@@ -201,7 +201,7 @@ The C backend emits, for each resumable function, a **frame struct** and a
   "suspended" (or "done" with the result).
 
 This is how Rust and C# compile `async`, and it is plain C: no assembly, no
-stack switching, and it runs unchanged in wasm. The C compiler optimises the
+stack switching, and it runs unchanged in wasm. The C compiler optimizes the
 straight-line parts as usual.
 
 Frames are **heap-allocated once per call and never move**. A borrow (`view`
@@ -320,7 +320,7 @@ another's computation, so there are no yield checks.
   suspended must drop those frames' live locals (the frames are known
   structs, so this is generated code, like the cascade drops Rae already
   emits).
-- **Two behaviours of one wait** (suspend inside a task, block outside) are
+- **Two behaviors of one wait** (suspend inside a task, block outside) are
   what Go, Java and Zig do as well, but they must be documented where waits
   are documented.
 
@@ -332,7 +332,7 @@ another's computation, so there are no yield checks.
   Asyncify/JSPI. Rae compiles to C and targets the browser, so the stackless
   route fits better.
 - **`async`/`await` keywords.** Rejected by docs/concurrency-model.md:
-  colouring spreads through the code and adds a second vocabulary for calls.
+  coloring spreads through the code and adds a second vocabulary for calls.
 - **Keep OS threads.** That is the status quo. It is fine while spawns are
   few (the server design uses the poller for I/O). It stays the baseline the
   benchmark compares against.
@@ -532,7 +532,7 @@ three calls deep), 1042 (a generic that waits only for some T) and 1043
     goes out of scope. These are waits too, and they are easy to miss: the
     recursive fork-join `parallelSum` waits through its `left` Task.
   - The `blocking` externs (F2) join the list when that keyword exists.
-- **Generics after specialisation:** each instantiation the backend's
+- **Generics after specialization:** each instantiation the backend's
   discovery pass makes is its own node, walked with its type parameters
   bound. So `process(Slow)` gets a twin and `process(Fast)` does not
   (fixture 1042).

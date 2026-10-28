@@ -152,13 +152,13 @@ void rae_task_drop(RaeTask* t) {
 /* ----- Channel(T) runtime: MPSC ring of T-sized slots (#271, #969) ------ */
 /* Backs lib/Channel.rae's `Channel(T)`, Rae's first message-passing
  * primitive. Multi-producer, single-consumer: any thread may send; only the
- * owning consumer thread drains. A pthread mutex serialises every access and
+ * owning consumer thread drains. A pthread mutex serializes every access and
  * is hidden entirely inside the runtime — ordinary Rae code never locks.
  *
  * #969: the ring is a byte array of `cap * elem_size`, so ANY Rae value type
  * is a payload — the element size comes from `sizeof(T)` on the Rae side, and
  * the Rae side does the typed store/load (`rae_ext_rae_buf_set/get`, the same
- * per-T specialisation List uses) while this kernel only hands out slot
+ * per-T specialization List uses) while this kernel only hands out slot
  * INDICES under the lock:
  *   reserve -> (Rae stores into slot) -> commit      one producer step
  *   take    -> (Rae copies out of slot) -> release   the consumer step
@@ -324,7 +324,7 @@ static inline void rae_cpu_relax(void) {
  *
  * `unsafe { }` in a parallelLoop body lifts the compile-time write rule: the
  * programmer vouches that no two iterations write the same element (a graph
- * colouring's disjoint body writes, docs/parallel-stages-design.md §3). Every
+ * coloring's disjoint body writes, docs/parallel-stages-design.md §3). Every
  * List set/modAt in such a block first calls rae_parallel_check_write. With
  * checking on — RAE_PARALLEL_CHECK=1, or Parallel.checkWrites(enabled: true) —
  * the runtime records which iteration of the current top-level parallelLoop

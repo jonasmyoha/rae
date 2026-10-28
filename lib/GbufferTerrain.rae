@@ -1,7 +1,7 @@
 # Terrain splat pipeline (#533) — split out of gbuffer.rae.
 #
 # The ground tiles use their own pipeline and bind group: the shader ignores the
-# per-draw colour and samples a biome field per vertex, so one mesh shows
+# per-draw color and samples a biome field per vertex, so one mesh shows
 # grass / sand / mud / rock / water. That is a terrain concern, not a G-buffer
 # primitive, and gbuffer.rae is at the compiler's hard 1000-line cap.
 open Gbuffer
@@ -394,7 +394,7 @@ func ensureTerrainForward(cache: mod GbufferCache, resources: mod GpuResources) 
 }
 
 # Draw one ground-tile mesh with the biome-splat pipeline (#533): its shader
-# ignores the per-draw colour and samples the biome field per vertex, so the
+# ignores the per-draw color and samples the biome field per vertex, so the
 # ground shows grass/sand/mud/rock/water. Restores the static pipeline after so a
 # following static draw is unaffected. Same DrawU/vertex layout as the static path.
 # `time` rides in the DrawU record's LAST slot, the one the skinned path calls
@@ -448,7 +448,7 @@ func drawTerrainMesh(
     # paletteBase is an Int in the record API; the clock needs sub-second
     # resolution, so it is written straight into the float slot instead.
     cache.drawScratch.set(index: 39, value: time)
-    # #9: slot 32 (albedoMetallic.x, which the terrain shader ignores for colour)
+    # #9: slot 32 (albedoMetallic.x, which the terrain shader ignores for color)
     # carries the global texture-blend amount. 0 until an app uploads a tile, so
     # the shader's textured-grass term is identity for every other terrain user.
     cache.drawScratch.set(index: 32, value: cache.terrainBlend)

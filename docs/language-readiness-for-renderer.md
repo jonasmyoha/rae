@@ -53,7 +53,7 @@ Verified against the compiler and stdlib, not assumed.
 | Struct value types | `type` declarations | `Vec3` is a real value type, not boxed |
 | Contiguous element storage | `List(T)`'s `data` buffer | Element arrays are already cache-friendly |
 | Real OS threads (compiled) | `spawn` → pthread thunks | Live VM runs `spawn` inline, but Live is frozen |
-| Generic containers | `List(T)`, `StringMap(V)` | Specialised, not boxed |
+| Generic containers | `List(T)`, `StringMap(V)` | Specialized, not boxed |
 | GPU compute seam | `lib/gpu.rae` | Arbitrary WGSL + storage buffers |
 
 ### Missing or inadequate
@@ -150,7 +150,7 @@ cost of getting transfer semantics wrong scales with the renderer.
 What "designed" should mean here, concretely:
 
 - A decision on whether passing a non-owned value to an `own` parameter is a
-  **compile error** rather than undefined behaviour. This is the single
+  **compile error** rather than undefined behavior. This is the single
   highest-value fix and it is a checkable property.
 - Defined, tested semantics for `List(T)` where `T` is a struct containing
   heap fields — currently unreliable.
@@ -208,7 +208,7 @@ settled and then drives C, D and E; C is free to happen at any time.
 - Interaction with ownership modes (`view`/`mod`/`own`/`copy`) — a value
   array should be trivially copyable and never need cascade-drop when `T`
   is primitive
-- Indexing bounds behaviour (checked in debug, unchecked in release?)
+- Indexing bounds behavior (checked in debug, unchecked in release?)
 - Whether it is a distinct kind or sugar over an internal `Buffer` with a
   compile-time length
 
@@ -330,7 +330,7 @@ renderer's* data path — G-buffer, depth pyramid, lighting, transforms and a
 skinning palette through the render graph — is expressible and
 allocation-free. It is explicitly **not** done when `Mat4` compiles, nor
 when `math3d.rae` merely gets faster. Making the existing forward
-prototype's maths faster would be optimising the thing we have already
+prototype's maths faster would be optimizing the thing we have already
 decided to replace.
 
 ---

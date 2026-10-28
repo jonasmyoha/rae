@@ -8,22 +8,22 @@
 # light units and exposed, so the same mist looks the same under every sky,
 # and the far ground meets the sky with no seam. Off by default; an
 # app turns it on with setMist (defaultMistSettings is a good start: a light
-# morning-ish haze, a few percent at 100 m, about a third at a kilometre near
+# morning-ish haze, a few percent at 100 m, about a third at a kilometer near
 # the base height). Distance fog (setFog) is the older, flat kind.
 import Vec3
 open RendererDeferred
 
 type MistSettings {
-  # The mist's density per metre at the base height (1 / metres of clear
-  # view there: 0.0005 is about a third gone at a kilometre)
+  # The mist's density per meter at the base height (1 / meters of clear
+  # view there: 0.0005 is about a third gone at a kilometer)
   density: Float
-  # How fast it thins going up, per metre (0.008: halving every ~87 m)
+  # How fast it thins going up, per meter (0.008: halving every ~87 m)
   falloff: Float
   # The height (world z) the density is given at: the lowest ground, say
   baseHeight: Float
   # A tint on the light it scatters from all round, and how much of that
-  # light's colour it loses (0: the sky's and the ground's own colour, 1:
-  # grey of the same light); the sun's light it scatters is not tinted
+  # light's color it loses (0: the sky's and the ground's own color, 1:
+  # gray of the same light); the sun's light it scatters is not tinted
   tint: Vec3
   paleness: Float
 }

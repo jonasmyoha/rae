@@ -53,7 +53,7 @@ void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 //   buffer and freed it twice;
 // - anything else (a call, a literal, an interpolation) is a fresh value
 //   and moves in; a String is detached from the statement's string pool.
-// A heap-owning place no helper can copy keeps the old behaviour: it moves,
+// A heap-owning place no helper can copy keeps the old behavior: it moves,
 // and a local is marked moved so its scope does not drop it too.
 void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* elem_type,
                              bool elem_is_string, bool elem_is_any, FILE* out) {
@@ -233,7 +233,7 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
 // Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
 // type_needs_cascade_drop, type_needs_deep_copy) moved to
 // `ownership.{c,h}` so the Live VM emitter can share them with the C
-// backend. Behaviour preserved exactly — see Stage 1 plan.
+// backend. Behavior preserved exactly — see Stage 1 plan.
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
 
 // Locate the `drop` generic-function overload whose receiver type's
@@ -616,7 +616,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 }
 
 // Classifies a function as alias-returning by walking its body for
-// any return path that yields a buf_get-flavoured alias. Used at
+// any return path that yields a buf_get-flavored alias. Used at
 // let-stmt time so `let v = call()` knows whether to mark v as
 // owning (full cascade drop) or aliasing (skip String drops).
 //
@@ -1099,7 +1099,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
   }
   if (type->generic_args) {
     // A generic struct instance (Pair(String)): released through the
-    // specialised rae_drop_struct_<instance> Pass A' synthesises for every
+    // specialized rae_drop_struct_<instance> Pass A' synthesises for every
     // registered instance. Anything else generic has no helper to call.
     AstTypeRef concrete = *type;
     if (ctx->generic_params && ctx->generic_args) {
@@ -1525,7 +1525,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     bool has_binding = stmt->as.if_stmt.binding != NULL;
     const AstStmt* bind = stmt->as.if_stmt.binding;
     // OWNED narrowing (spec 4.2): `if let track: Track = getTrack()`. The
-    // optional VALUE is materialised for the statement, tested, and on the
+    // optional VALUE is materialized for the statement, tested, and on the
     // present path its payload MOVES into the binding — memcpy out of the
     // box, free the box's shell without running its drop (the heap now
     // belongs to the binding, which the branch's normal drop pass releases).
@@ -1667,7 +1667,7 @@ Str sema_parallel_loop_index(const AstStmt* loop);   // sema.c
 // [first, end), and the loop becomes one rae_parallel_for call that hands the
 // worker pool that function and the ADDRESSES of every enclosing local the
 // body names. Inside the function each captured local is re-declared under
-// its own C name and C type, initialised from its address, so the body's C is
+// its own C name and C type, initialized from its address, so the body's C is
 // emitted exactly as it would be inline. Sharing is safe because sema
 // (sema_check_parallel_loop) only lets an iteration write its own locals and
 // the element of its own index; a List header copied this way still points at
@@ -2112,7 +2112,7 @@ static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
 }
 
 // Does this expression already yield a reference (a call whose declared return
-// type is `view T` / `mod T`)? Such a value needs no materialising -- it is
+// type is `view T` / `mod T`)? Such a value needs no materializing -- it is
 // already a pointer to storage someone else owns.
 static bool ref_bind_value_returns_ref(CFuncContext* ctx, const AstExpr* val) {
     if (!val) return false;
@@ -2182,7 +2182,7 @@ static bool ref_bind_value_returns_opt_ref(CFuncContext* ctx, const AstExpr* val
 /* The backend twin of sema's spec-4.2 check, for the UFCS calls sema cannot
  * resolve: does this call (by name) return an OWNED optional? A view/mod
  * narrowing of one is rejected — before this, `if let t: view Track =>
- * tracks.get(index: 0)` materialised the box, read garbage, and aborted. */
+ * tracks.get(index: 0)` materialized the box, read garbage, and aborted. */
 static bool bind_value_returns_owned_opt(CFuncContext* ctx, const AstExpr* val) {
     if (!val || !ctx || !ctx->compiler_ctx) return false;
     Str mname = (Str){0};
@@ -2266,7 +2266,7 @@ static int returned_local_index(const CFuncContext* ctx, const AstStmt* stmt) {
 // re-registers its result for the caller. Both are expressions whose value is
 // a String, so a statement needs the pool's mark/flush only when it contains a
 // call, interpolation or operator yielding one. Everything the checker does
-// not recognise, and every type it cannot infer, counts as "may", so the
+// not recognize, and every type it cannot infer, counts as "may", so the
 // answer errs toward the old unconditional pair. Emitting the pair everywhere
 // cost ~2 billion mark/flush calls per 20 s in the 3D examples (~40-80% of
 // the main thread, most of it the TLS lookup of the thread-local pool).
@@ -2664,7 +2664,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool let_did_deep_copy = false;
             bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
                                (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
-            /* A reference binding in a generic specialisation is written
+            /* A reference binding in a generic specialization is written
              * `view T` / `opt view T`: declare and register it as the
              * substituted type, so a T = Int binding is the `rae_View_Int64`
              * reference its narrowing and its readers expect, not the
@@ -2679,20 +2679,20 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             //
             //   - A NON-OPT reference binding to a produced owned value is an
             //     ERROR: a fresh value needs an owner and a view/mod binding
-            //     refuses ownership. This used to be materialised into a
+            //     refuses ownership. This used to be materialized into a
             //     hidden temporary (#443); that rule was withdrawn (#454/#455).
             //     sema rejects the shapes it can resolve; this is the
             //     catch-all for method calls it cannot.
             //
             //   - An OPT binding (an `if let` narrowing, or an optional-
-            //     reference local) still materialises: the optional VALUE the
+            //     reference local) still materializes: the optional VALUE the
             //     construct consumes needs statement storage regardless of
             //     what the binding form is. Its ownership story is #457.
             //
             // The temporary is a plain local emitted just before, so its
             // lifetime is the enclosing scope. `__auto_type` avoids having to
             // reconstruct the expression's C type here.
-            int materialised_id = -1;
+            int materialized_id = -1;
             if (is_ref_bind && stmt->as.let_stmt.value
                 && !is_primitive_type(get_base_type_name(stmt->as.let_stmt.type))
                 && !ref_bind_value_returns_ref(ctx, stmt->as.let_stmt.value)) {
@@ -2719,7 +2719,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (vk == AST_EXPR_INDEX) {
                     // #654: an Array/Buffer element `grid[i]` is an ADDRESSABLE
                     // lvalue (`grid.v[i]`), so alias its storage DIRECTLY. The
-                    // materialise-temp path below (`__auto_type t = grid.v[i];
+                    // materialize-temp path below (`__auto_type t = grid.v[i];
                     // &t`) aliased a COPY, so a write through a `mod` binding
                     // never reached the array (unlike List.modAt). Emit
                     // `<T*> name = &(grid.v[i]);`.
@@ -2743,8 +2743,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 } else
                 if (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
                     || vk == AST_EXPR_OBJECT) {
-                    materialised_id = ctx->temp_counter++;
-                    fprintf(out, "  __auto_type __rae_bind%d = ", materialised_id);
+                    materialized_id = ctx->temp_counter++;
+                    fprintf(out, "  __auto_type __rae_bind%d = ", materialized_id);
                     emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
                     fprintf(out, ";\n");
                 }
@@ -2753,8 +2753,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "  ");
             emit_type_ref_as_c_type(ctx, is_ref_bind ? ref_decl_type : stmt->as.let_stmt.type, out, false);
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
-            if (materialised_id >= 0) {
-                fprintf(out, "&__rae_bind%d;\n", materialised_id);
+            if (materialized_id >= 0) {
+                fprintf(out, "&__rae_bind%d;\n", materialized_id);
                 if (ctx->local_count < 256) {
                     size_t local_index = ctx->local_count;
                     ctx->locals[local_index] = stmt->as.let_stmt.name;
@@ -2768,7 +2768,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 break;
             }
             if (is_ref_bind) {
-                /* In a generic specialisation the written type is still `view
+                /* In a generic specialization the written type is still `view
                  * T`: decide the lowering on the substituted type, or a T =
                  * Int / String binding takes the struct path below. */
                 const AstTypeRef* bind_type = stmt->as.let_stmt.type;
@@ -2856,7 +2856,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                 } else {
                     /* One implementation of "does this call already hand
-                     * back a pointer?", shared with the materialisation
+                     * back a pointer?", shared with the materialization
                      * decision above — they must agree, or the binding
                      * either double-addresses or dangles. */
                     bool value_returns_ref =
@@ -2917,7 +2917,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     } else {
                         /* A stored STRUCT-REP optional narrowed by reference
                          * (`if let x: view T => maybe` where sema left no
-                         * UNBOX, as in a generic specialisation): point at
+                         * UNBOX, as in a generic specialization): point at
                          * the payload when present, NULL when not — never at
                          * the `{ has, value }` box itself. */
                         const AstExpr* opt_src = stmt->as.let_stmt.value;
@@ -3102,7 +3102,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // rae_deep_copy_<T>, evaluate to the temp.
                 bool deep_copy_ident = false;
                 bool deep_copy_string_ident = false;
-                /* `=` COPIES. Any initialiser that READS AN EXISTING
+                /* `=` COPIES. Any initializer that READS AN EXISTING
                  * LOCATION — a bare ident, a field, an element — binds a
                  * fresh owned value, never an alias of the source.
                  *
@@ -3113,7 +3113,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                  * pointed at. Nothing in `=` suggests a transfer; that is
                  * what `own` is for.
                  *
-                 * Fresh-value initialisers (a call result, an interpolation)
+                 * Fresh-value initializers (a call result, an interpolation)
                  * are deliberately NOT here: they produce a new string that
                  * genuinely needs detaching from the temp pool, which is
                  * what pool_take does. */
@@ -3273,12 +3273,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                       owns = false;
                     } else {
                       // Inspect the callee's body to see whether it
-                      // returns an alias (a local initialised from
+                      // returns an alias (a local initialized from
                       // buf_get / list.get / similar) or an owned
                       // value (struct literal / new call / pool_take).
                       // Default to owning — only flip to alias when
                       // we find a clear `ret <local>` whose local was
-                      // initialised from a known aliasing source.
+                      // initialized from a known aliasing source.
                       // For method calls, we look up by method name —
                       // List.get / StringMap.get / IntMap.get all share
                       // the name "get" but all return alias (buf_get
@@ -3296,7 +3296,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 ctx->local_struct_owns_heap[ctx->local_count] = owns;
                 // Alias-clearing for String locals from aliasing inits:
-                // a buf_get-flavoured RHS hands back a String value
+                // a buf_get-flavored RHS hands back a String value
                 // whose is_owned bit was inherited from the container
                 // (since list elements are owned by the buffer). The
                 // local doesn't actually own that heap — clear the
@@ -3680,7 +3680,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, "%.*s = rae_string_pool_take(__asg%d); }",
                             (int)tname.len, tname.data, tmpn);
                     // #965: the local now holds a heap it OWNS, whatever it
-                    // was initialised from (`var s: String = ""` is a static
+                    // was initialized from (`var s: String = ""` is a static
                     // literal the scope-exit pass classified as non-owning),
                     // so its scope exit must release it. rae_string_drop is
                     // guarded by is_owned, so a literal stays a no-op.

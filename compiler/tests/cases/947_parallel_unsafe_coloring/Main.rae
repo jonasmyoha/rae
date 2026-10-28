@@ -1,10 +1,10 @@
-# A graph colour's constraints solved in parallel (docs/parallel-stages-
+# A graph color's constraints solved in parallel (docs/parallel-stages-
 # design.md §3-§4): each constraint writes its two bodies, at indices that
-# come from data. The colouring keeps two constraints of one colour off the
+# come from data. The coloring keeps two constraints of one color off the
 # same body, which the compiler cannot see, so the body writes sit in
 # `unsafe { }` — and Parallel.checkWrites verifies at run time that they are
 # disjoint. The result must equal the sequential solve, bit for bit. The last
-# loop is a deliberately wrong colouring, which the check stops.
+# loop is a deliberately wrong coloring, which the check stops.
 import Parallel
 
 const bodyCount: Int = 64
@@ -45,41 +45,41 @@ func makeVelocities() ret List(Float) {
   ret velocities
 }
 
-# Greedy colouring: each contact takes the first colour neither of its bodies
-# is in yet. `order` lists the contacts colour by colour; `colourStart[c]` is
-# where colour c begins in it (and the last entry is the end).
-func colour(contacts: view List(Contact), order: mod List(Int), colourStart: mod List(Int)) {
-  let maxColours: Int = 64
-  var used: List(Bool) = List.create(Bool, cap: maxColours * bodyCount)
-  loop var i: Int = 0, i < maxColours * bodyCount, ++i {
+# Greedy coloring: each contact takes the first color neither of its bodies
+# is in yet. `order` lists the contacts color by color; `colorStart[c]` is
+# where color c begins in it (and the last entry is the end).
+func color(contacts: view List(Contact), order: mod List(Int), colorStart: mod List(Int)) {
+  let maxColors: Int = 64
+  var used: List(Bool) = List.create(Bool, cap: maxColors * bodyCount)
+  loop var i: Int = 0, i < maxColors * bodyCount, ++i {
     used.add(value: false)
   }
-  var colourOf: List(Int) = List.create(Int, cap: constraintCount)
-  var colourCount: Int = 0
+  var colorOf: List(Int) = List.create(Int, cap: constraintCount)
+  var colorCount: Int = 0
   loop var i: Int = 0, i < contacts.length, ++i {
     let contact: Contact = contacts.copyAtDefault(index: i)
     var c: Int = 0
-    loop c < maxColours and (used.copyAtDefault(index: c * bodyCount + contact.bodyA) or used.copyAtDefault(
+    loop c < maxColors and (used.copyAtDefault(index: c * bodyCount + contact.bodyA) or used.copyAtDefault(
       index: c * bodyCount + contact.bodyB
     )) {
       c = c + 1
     }
     used.set(index: c * bodyCount + contact.bodyA, value: true)
     used.set(index: c * bodyCount + contact.bodyB, value: true)
-    colourOf.add(value: c)
-    if c + 1 > colourCount {
-      colourCount = c + 1
+    colorOf.add(value: c)
+    if c + 1 > colorCount {
+      colorCount = c + 1
     }
   }
-  loop var c: Int = 0, c < colourCount, ++c {
-    colourStart.add(value: order.length)
+  loop var c: Int = 0, c < colorCount, ++c {
+    colorStart.add(value: order.length)
     loop var i: Int = 0, i < contacts.length, ++i {
-      if colourOf.copyAtDefault(index: i) is c {
+      if colorOf.copyAtDefault(index: i) is c {
         order.add(value: i)
       }
     }
   }
-  colourStart.add(value: order.length)
+  colorStart.add(value: order.length)
 }
 
 func relax(a: view Float, b: view Float) ret Float {
@@ -90,12 +90,10 @@ func solveSequential(
   contacts: mod List(Contact)
   velocities: mod List(Float)
   order: view List(Int)
-  colourStart: view List(Int)
+  colorStart: view List(Int)
 ) {
-  loop var c: Int = 0, c + 1 < colourStart.length, ++c {
-    loop var k: Int = colourStart.copyAtDefault(index: c), k < colourStart.copyAtDefault(
-      index: c + 1
-    ), ++k {
+  loop var c: Int = 0, c + 1 < colorStart.length, ++c {
+    loop var k: Int = colorStart.copyAtDefault(index: c), k < colorStart.copyAtDefault(index: c + 1), ++k {
       let index: Int = order.copyAtDefault(index: k)
       if let contact: mod Contact = contacts.modAt(index: index) {
         let a: Float = velocities.copyAtDefault(index: contact.bodyA)
@@ -109,7 +107,7 @@ func solveSequential(
   }
 }
 
-# The same, one parallelLoop per colour. A contact is reached through `order`
+# The same, one parallelLoop per color. A contact is reached through `order`
 # here, so its writes go through `unsafe` too; impulses land in a List
 # indexed like `order` — the element of the iteration's own index.
 func solveParallel(
@@ -117,10 +115,10 @@ func solveParallel(
   velocities: mod List(Float)
   impulses: mod List(Float)
   order: view List(Int)
-  colourStart: view List(Int)
+  colorStart: view List(Int)
 ) {
-  loop var c: Int = 0, c + 1 < colourStart.length, ++c {
-    parallelLoop var k: Int = colourStart.copyAtDefault(index: c), k < colourStart.copyAtDefault(
+  loop var c: Int = 0, c + 1 < colorStart.length, ++c {
+    parallelLoop var k: Int = colorStart.copyAtDefault(index: c), k < colorStart.copyAtDefault(
       index: c + 1
     ), ++k {
       let contact: Contact = contacts.copyAtDefault(index: order.copyAtDefault(index: k))
@@ -128,7 +126,7 @@ func solveParallel(
       let b: Float = velocities.copyAtDefault(index: contact.bodyB)
       let delta: Float = relax(a: a, b: b)
       impulses.set(index: k, value: impulses.copyAtDefault(index: k) + delta)
-      # The colouring keeps every other contact of colour c off bodyA and bodyB.
+      # The coloring keeps every other contact of color c off bodyA and bodyB.
       unsafe {
         velocities.set(index: contact.bodyA, value: a + delta)
         velocities.set(index: contact.bodyB, value: b - delta)
@@ -141,9 +139,9 @@ func main() {
   Parallel.checkWrites(enabled: true)
   let contacts: List(Contact) = makeContacts()
   var order: List(Int) = List.create(Int, cap: constraintCount)
-  var colourStart: List(Int) = List.create(Int, cap: 64)
-  colour(contacts: contacts, order: order, colourStart: colourStart)
-  log("{contacts.length} contacts in {colourStart.length - 1} colours")
+  var colorStart: List(Int) = List.create(Int, cap: 64)
+  color(contacts: contacts, order: order, colorStart: colorStart)
+  log("{contacts.length} contacts in {colorStart.length - 1} colors")
 
   var sequential: List(Float) = makeVelocities()
   var sequentialContacts: List(Contact) = makeContacts()
@@ -157,14 +155,14 @@ func main() {
       contacts: sequentialContacts
       velocities: sequential
       order: order
-      colourStart: colourStart
+      colorStart: colorStart
     )
     solveParallel(
       contacts: contacts
       velocities: parallel
       impulses: impulses
       order: order
-      colourStart: colourStart
+      colorStart: colorStart
     )
   }
   var identical: Bool = true
@@ -182,8 +180,8 @@ func main() {
   }
   log("parallel solve equals the sequential one, bit for bit: {identical}")
 
-  # A wrong colouring: iterations 3 and 5 both write element 7.
-  log("now a colouring that is wrong:")
+  # A wrong coloring: iterations 3 and 5 both write element 7.
+  log("now a coloring that is wrong:")
   let targets: List(Int) = {
     0
     1

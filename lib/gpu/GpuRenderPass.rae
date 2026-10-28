@@ -1,5 +1,5 @@
 # GpuRenderPass — render passes over a manager Recording (#918 split of
-# GpuRender for the 1000-line cap): the RenderTarget (colour + optional depth
+# GpuRender for the 1000-line cap): the RenderTarget (color + optional depth
 # over ResourceRefs), the multi-attachment RenderTargetSet (#906),
 # beginRenderPass / beginRenderPassMulti / endRenderPass holding a raw pass
 # encoder for the `record*InPass` family (draw, indexed, indirect, external
@@ -14,7 +14,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 
-# A pass target: one colour view (cleared or loaded) and an optional depth view.
+# A pass target: one color view (cleared or loaded) and an optional depth view.
 type RenderTarget {
   colorView: ResourceRef
   clear: Bool
@@ -447,21 +447,21 @@ func beginRenderPass(
   }
 }
 
-# A multi-attachment pass target (#906): up to four colour views, each with
-# its own clear colour, plus an optional depth view (cleared or loaded, or
-# read-only). The deferred geometry pass opens over three colour targets +
+# A multi-attachment pass target (#906): up to four color views, each with
+# its own clear color, plus an optional depth view (cleared or loaded, or
+# read-only). The deferred geometry pass opens over three color targets +
 # depth; a single-target pass uses RenderTarget above.
 type RenderTargetSet {
   colorViews: List(ResourceRef)
-  # Per colour view: the 1x view a multisampled one resolves into at the end
+  # Per color view: the 1x view a multisampled one resolves into at the end
   # of the pass (noRef = no resolve). A resolved view's samples are discarded,
   # not stored, so a TRANSIENT (memoryless) MSAA target never leaves the tile.
   resolveViews: List(ResourceRef)
-  # Per colour view: its contents are thrown away when the pass ends (a target
+  # Per color view: its contents are thrown away when the pass ends (a target
   # this pass writes but nobody reads afterwards)
   discards: List(Bool)
-  clearValues: List(Float)  # 4 per colour view (r g b a)
-  clear: Bool  # Clear every colour view (else Load)
+  clearValues: List(Float)  # 4 per color view (r g b a)
+  clear: Bool  # Clear every color view (else Load)
   hasDepth: Bool
   depthView: ResourceRef
   depthClear: Bool  # Clear the depth view (else Load); ignored when read-only
@@ -488,7 +488,7 @@ func createRenderTargetSet(clear: copy Bool) ret RenderTargetSet {
   }
 }
 
-# Appends one colour attachment with its clear colour; false past the limit.
+# Appends one color attachment with its clear color; false past the limit.
 func addColorTarget(
   targets: mod RenderTargetSet
   colorView: view ResourceRef
@@ -510,7 +510,7 @@ func addColorTarget(
   ret true
 }
 
-# A multisampled colour attachment resolved into `resolveView` (1x) at the end
+# A multisampled color attachment resolved into `resolveView` (1x) at the end
 # of the pass; its samples are discarded. False past the limit.
 func addResolvedColorTarget(
   targets: mod RenderTargetSet
@@ -535,7 +535,7 @@ func addResolvedColorTarget(
   ret true
 }
 
-# Throw colour view `index`'s contents away at the end of the pass
+# Throw color view `index`'s contents away at the end of the pass
 func discardColorTarget(targets: mod RenderTargetSet, index: view Int) {
   if index >= 0 and index < targets.discards.length {
     targets.discards.set(index: index, value: true)
@@ -564,7 +564,7 @@ func clearValueAt(targets: view RenderTargetSet, index: copy Int) ret Float64 {
 }
 
 # beginRenderPass over a RenderTargetSet: every view validated and recorded as
-# a use (the submission pins them), one colour attachment per view in order
+# a use (the submission pins them), one color attachment per view in order
 # (location 0..n-1), the depth attachment last. Raw pass handle out, hence
 # unsafe; endRenderPass closes it.
 func beginRenderPassMulti(

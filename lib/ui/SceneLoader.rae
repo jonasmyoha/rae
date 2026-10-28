@@ -1,4 +1,4 @@
-# Materialise a parsed `Scene` into ECS state on a `UiWorld`.
+# Materialize a parsed `Scene` into ECS state on a `UiWorld`.
 #
 # Three passes:
 # 1. allocate one entity per SceneNode and register `nodeId → entityId`
@@ -75,7 +75,7 @@ func loadSceneIntoPage(
     # `Children` references. Orphan nodes (authored in the file but
     # never referenced) get skipped in subsequent passes — otherwise
     # they'd allocate parentless entities that render at their absolute
-    # canvas coords. The pixi editor sometimes serialises a flattened
+    # canvas coords. The pixi editor sometimes serializes a flattened
     # copy of a SceneInstance's children alongside the SceneInstance
     # itself; without this filter we mount both copies (once via the
     # SceneInstance resolver, once as orphans here).
@@ -309,7 +309,7 @@ func sceneInstanceOverrides(inst: view SceneInstance) ret List(SceneOverride) {
 
 # Phase 1f scene-instance resolver.
 #
-# After `loadScene` materialises the top-level scene, any node that
+# After `loadScene` materializes the top-level scene, any node that
 # carried a `SceneInstance` component now sits in the world with the
 # referenced child scene NOT yet mounted. This pass walks the
 # `sceneInstances` component table, looks each sceneId up in the

@@ -70,7 +70,7 @@ of pointers, and with no per-`Vec3`/`Vec4` allocation.
 | `ParticleFlat` (12 flat floats) | **48 B** | **byte-identical** to `Particle` |
 | `Particle4` | 44 B | 12+12+16+4 |
 
-Measured behaviour of a 1000-element `List(Particle)`:
+Measured behavior of a 1000-element `List(Particle)`:
 
 - **Construction** emits a pure C compound literal
   `(rae_Particle){ .position = rae_vec3_create(1,2,3), … }`; `vec3.create` returns a
@@ -131,14 +131,14 @@ storage the same way — but `viewAt`/`modAt` are the accessors that actually *r
 `modAt` write persists and is seen by a subsequent value/`view` read.
 
 **The boxing hazard, and how it is avoided.** The *out-of-line* generic `get`/`at`
-realises `opt T` for a value struct by **heap-boxing**
+realizes `opt T` for a value struct by **heap-boxing**
 (`malloc(sizeof(T))` + copy + `rae_any_owned_ptr`). The `if let` peephole above
 bypasses that entirely (direct index; no box, no malloc); scalar
 `let n: Int = list.copyAt(index:)` auto-unwraps trivially.
 
 **Compiler rough edge found:** `let particle: Particle = particles.copyAt(index: j)` —
 assigning `opt Struct` **directly** to a non-optional struct binding — is *not*
-peephole-optimised and currently emits **non-compiling C**
+peephole-optimized and currently emits **non-compiling C**
 (`rae_Particle particle = <RaeAny>`; a type mismatch). The scalar form compiles; the
 struct form does not. This should be a clean sema error ("unwrap the optional — use
 `if let`") or a valid unwrap. See §8.

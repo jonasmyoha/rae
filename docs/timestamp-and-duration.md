@@ -41,7 +41,7 @@ intervals. An f32 at epoch magnitude has a **128-second ulp**, so every stored
 timestamp snapped to a multiple of 128 and each "has enough time passed?" test
 collapsed into a constant — the app either polled every frame or never polled,
 depending on where the clock sat inside the current 128 s bucket. Same binary,
-different behaviour by time of day (#407).
+different behavior by time of day (#407).
 
 Widening those fields to `Float64` removed the symptom. It did not remove the
 confusion that produced it: the code still typed a reading and an interval
@@ -124,7 +124,7 @@ a `Float64` parameter is equally unchecked. Tracked as **#410**.
 
 Example 106's Spotify poll — the field the bug lived in — is migrated:
 `SpotifyState.lastPoll` is a `Timestamp`, the interval is a `Duration`, and the
-throttle is `lastPoll.hasElapsed(now:, interval:)`. Idle behaviour measured
+throttle is `lastPoll.hasElapsed(now:, interval:)`. Idle behavior measured
 headless with Spotify on, 10 seconds: **213 loop iterations, 26 repaints**, from
 ~750 iterations with every frame repainting before the #407 fixes.
 
@@ -133,7 +133,7 @@ Deliberately NOT done yet, and queued as **#413** rather than rushed:
 - The remaining 106 time fields (`PlaybackState.prevTime`, `HeroAnim.startTime`,
   `FrameRenderResult.lastRenderTime`, `PlayHistoryEntry.playedAt`). Each is
   small, but they thread through the frame pipeline's signatures.
-  `playedAt` also serialises to JSON, so it wants a deliberate format decision.
+  `playedAt` also serializes to JSON, so it wants a deliberate format decision.
 - Flipping `uiNowSeconds()` / `gpu2d.nowSeconds()` to return `Timestamp`: 34 call
   sites across 13 files, every one of which does arithmetic that would become
   `time.*` calls. Worth doing as its own reviewable sweep, not alongside the
