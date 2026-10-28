@@ -52,6 +52,14 @@ const autoExposureMinEv100: Float = -4.0
 
 const autoExposureMaxEv100: Float = 18.0
 
+# How far an app's camera may open up (darker scenes) and close down
+# (brighter ones) from the look its lights were tuned at, in stops: a stop
+# open for the shade and the forest, two closed for a bright scene, and so
+# a night tuned bright for its look stays dark (autoExposureFrame's range)
+const lookExposureOpenStops: Float = 1.0
+
+const lookExposureCloseStops: Float = 2.0
+
 # Bytes of the result buffer (4 floats; [0] the mean log2 luminance)
 const autoExposureResultBytes: Int = 16
 
@@ -331,6 +339,15 @@ func autoExposureFrame(
   }
   light.ev100 = autoExposure.ev100
   renderer.autoExposure = own autoExposure
+}
+
+# The camera is still on its way to the measured exposure (an app that
+# draws only when something changed keeps drawing until it is there)
+func autoExposureAdapting(renderer: view DeferredRenderer) ret Bool {
+  let autoExposure: view AutoExposure = renderer.autoExposure
+  ret autoExposure.adaptive and autoExposure.hasTarget and Math.abs(
+    value: autoExposure.targetEv100 - autoExposure.ev100
+  ) > 0.01
 }
 
 # The GPU objects (renderer shutdown)

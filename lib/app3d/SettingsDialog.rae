@@ -184,6 +184,10 @@ type SettingsState {
   # The automatic exposure's compensation in EV (AutoExposure): + brighter,
   # - darker; steps of settingsExposureStep
   exposureCompensation: Float = 0.0
+  # The camera follows the scene's brightness (AutoExposure), or stays at the
+  # look the lights were tuned at. Each app starts it as it runs: the walker
+  # on, the editor-panel examples off.
+  autoExposure: Bool = false
   dateDragging: Bool
   # Where on Earth, in degrees east. It does not move the sun (the clock is
   # local solar time), but it turns that time into universal time, which is
@@ -398,6 +402,10 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.anim.faster" {
     settingsState.speed = nextSpeed(current: settingsState.speed, up: true)
+    ret true
+  }
+  if actionId is "settings.exposure.auto" {
+    settingsState.autoExposure = settingsState.autoExposure is false
     ret true
   }
   if actionId is "settings.exposure.darker" {
@@ -814,6 +822,11 @@ func settingsApplyToWorld(
     world: world
     nodeId: "SettingsAnimTimeButton"
     slot: settingsSlotFor(on: settingsState.animateTime)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsAutoExposureButton"
+    slot: settingsSlotFor(on: settingsState.autoExposure)
   )
   setNodeFillSlot(
     world: world

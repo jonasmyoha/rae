@@ -24,6 +24,7 @@ import Sys
 import SdfText
 import Vec3
 open LightUnits
+open AutoExposure
 open Scene3d
 open Sky
 open RendererQuality
@@ -62,6 +63,31 @@ const editorSidePanelWidth: Float = 320.0
 # Room kept free beside the camera bar for the padding, the edge tab and the
 # debug readout left of the "..." button
 const editorTopRowReserve: Float = 260.0
+
+# Once per frame for an app with the panel: with "Automatic exposure" on,
+# the camera follows the scene (AutoExposure, within the look's range); off,
+# applyEditorPanelSettings keeps it at the tuned look. True while the camera
+# is still adapting, so an app that draws only when something changed keeps
+# drawing.
+func editorPanelExposureFrame(
+  editorPanel: view EditorPanel
+  renderer: mod DeferredRenderer
+  light: mod Light3d
+  deltaTime: view Float
+) ret Bool {
+  if editorPanel.settings.autoExposure is false {
+    ret false
+  }
+  autoExposureFrame(
+    renderer: renderer
+    light: light
+    deltaTime: deltaTime
+    compensation: editorPanel.settings.exposureCompensation
+    lowestEv100: referenceEv100 - lookExposureOpenStops
+    highestEv100: referenceEv100 + lookExposureCloseStops
+  )
+  ret autoExposureAdapting(renderer: renderer)
+}
 
 # The side panel's edge tab (app3d/EdgeTab), on the panel's left edge
 const editorSettingsTabName: String = "settingsTab"

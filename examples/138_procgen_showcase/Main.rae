@@ -615,6 +615,14 @@ func runShowcaseFrame(state: mod ShowcaseState) {
       sunStrength: groveSunStrength
     )
   }
+  # The panel's automatic exposure, when it is switched on (drawn every frame)
+  let unusedAdapting: Bool = editorPanelExposureFrame(
+    editorPanel: state.editorPanel
+    renderer: state.renderer
+    light: state.light
+    deltaTime: deltaTime
+  )
+
   # The views from the keys, kept in step with the panel's scene chooser
   if Sdl3.isKeyPressed(key: Keys.key1) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 1)

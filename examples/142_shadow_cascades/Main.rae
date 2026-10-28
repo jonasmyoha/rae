@@ -453,6 +453,14 @@ func runShadowFrame(state: mod ShadowState) {
       sunStrength: sunStrength
     )
   }
+  # The panel's automatic exposure, when it is switched on (drawn every frame)
+  let unusedAdapting: Bool = editorPanelExposureFrame(
+    editorPanel: state.editorPanel
+    renderer: state.renderer
+    light: state.light
+    deltaTime: deltaTime
+  )
+
   let fitClicked: String = panelClickedId(panel: state.fitPanel, world: state.editorPanel.world)
   if fitClicked.length() > 0 {
     handleFitClick(state: state, clicked: fitClicked)
