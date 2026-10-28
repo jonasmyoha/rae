@@ -30,6 +30,11 @@
 # other views, forks-front/side/grazing, flowers, bellflowers and its two
 # other views) in place of the T02 scene.
 #
+# The forest scene (LabForest.rae): RAE_TREELAB_SCENE=forest shows a tree
+# set as a forest at every distance, RAE_TREE_SET=lowPoly|stylized picks
+# which (stylized when unset), the T key switches between the two;
+# RAE_TREELAB_CAMERA=high looks from 35 m.
+#
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
 # The scene look (LabLook: haze, warm sun and cool shade, grade, glow) is on;
@@ -38,6 +43,8 @@
 #   RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT=/tmp/lab.bmp \
 #     rae run examples/146_treeLab/Main.rae
 import Gpu2d
+import Keys
+import Sdl3
 import Sys
 import Vec3
 import Math
@@ -63,6 +70,8 @@ open RendererWind
 open app3d/CameraRig
 open LabStudies
 open BirchStudy
+open app3d/TreeForest
+open LabForest
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -88,6 +97,10 @@ type LabState {
   studyView: String = ""
   cameraRig: CameraRig
   birchStudy: BirchStudy
+  # the forest scene's two forests (stylized, low-poly; empty in the other
+  # scenes) and the one shown
+  forests: List(TreeForest) = List.create(TreeForest, cap: 0)
+  forestShown: Int = 0
   # the generated tree's leaves and its crown's shadow caster
   tree: opt LabTree
   windSettings: WindSettings
@@ -185,7 +198,51 @@ func createStudyLab(studyView: view String) ret LabState {
   }
 }
 
+# The forest scene (RAE_TREELAB_SCENE=forest): both sets' forests, the
+# lab's sun and look
+func createForestLab() ret LabState {
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let meshes: LabMeshes = createLabMeshes(renderer: renderer)
+  var world: World3d = buildLabForestWorld(meshes: meshes, renderer: renderer)
+  var forests: List(TreeForest) = buildLabForests(renderer: renderer)
+  var light: Light3d = defaultLight3d()
+  light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
+  applyLabLook(renderer: renderer, light: light)
+  let camera: Camera3d = labForestCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+  var idIssuer: IdIssuer = IdIssuer.create()
+  let windSettings: WindSettings = defaultWindSettings()
+  unsafe {
+    ret LabState {
+      renderer: own renderer
+      world: own world
+      light: light
+      camera: camera
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
+      # grass round the camera, no obstacles
+      grass: createLabGrass(obstacles: List(Float) { 0.0 })
+      grassCenterX: 0.0
+      grassCenterY: 30.0
+      cameraRig: createCameraRig(camera: camera)
+      birchStudy: createBirchStudy()
+      forests: own forests
+      forestShown: labForestFirstSet()
+      tree: none
+      windSettings: windSettings
+      wind: createWindState(settings: windSettings)
+      lastTime: Gpu2d.nowSeconds()
+    }
+  }
+}
+
 func createLab() ret LabState {
+  if labForestRequested() {
+    Gpu2d.initWindow(
+      width: 1280
+      height: 800
+      title: "146: Tree lab | forest: RAE_TREE_SET=lowPoly|stylized, T switches"
+    )
+    ret createForestLab()
+  }
   let studyView: String = labStudyName()
   if studyView.length() > 0 {
     Gpu2d.initWindow(width: 1280, height: 800, title: "146: Tree lab | study: {studyView}")
@@ -245,6 +302,9 @@ func renderLabShadows(state: mod LabState, aspect: view Float) {
   )
   beginShadowPass(renderer: state.renderer, c: cascades)
   renderSceneShadowWorldWith(renderer: state.renderer, world: state.world)
+  if let forest: view TreeForest = state.forests.viewAt(index: state.forestShown) {
+    drawTreeForestShadows(renderer: state.renderer, forest: forest)
+  }
   # the crown's shadow: its solid leaf masses, drawn only into the shadow maps
   if let tree: view LabTree = state.tree {
     if tree.castsMassShadow {
@@ -288,6 +348,13 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       resources: rendererResources
       world: state.world
     )
+    if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
+      drawTreeForest(
+        cache: state.renderer.passes.gbuffer
+        resources: rendererResources
+        forest: forest
+      )
+    }
     if let resources: mod GpuResources = state.gpuResources {
       grassDraw(
         grass: state.grass
@@ -326,10 +393,17 @@ func runLabFrame(state: mod LabState) {
     )
     stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
   }
+  if state.forests.length > 0 and Sdl3.isKeyPressed(key: Keys.keyT) {
+    state.forestShown = (state.forestShown + 1) % state.forests.length
+    log("[treelab] showing the {labForestSetName(setIndex: state.forestShown)} set")
+  }
   if not Gpu2d.renderGate() {
     ret
   }
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
+    gatherTreeForest(forest: forest, camera: state.camera, aspect: aspect)
+  }
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: state.renderer), ++passIndex {
     let tag: Int = deferredTagAt(renderer: state.renderer, i: passIndex)
     if tag is RenderTag.shadow {
@@ -359,6 +433,11 @@ func endLab(state: mod LabState) {
       }
     }
     shutdown(resources: resources)
+  }
+  if let rendererResources: mod GpuResources = state.renderer.gpuResources {
+    loop let forest: mod TreeForest in state.forests {
+      treeForestShutdown(forest: forest, resources: rendererResources)
+    }
   }
   shutdownDeferredRenderer(renderer: state.renderer)
   Gbuffer.shutdownAll()

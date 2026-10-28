@@ -8,8 +8,10 @@
 # passes and draws it in both. The walkers' terrain (app3d/WalkerTerrain)
 # holds the same parts itself.
 import Math
+import Noise
 import RendererDeferred
 import RendererDeferredShadow
+open Vec3
 open Scene3d
 open Gbuffer
 open GbufferSprite
@@ -60,6 +62,21 @@ func defaultTreeForestSettings(extent: view Float, farReach: view Float) ret Tre
   }
 }
 
+# A band of forest in front of a camera at the origin looking along +Y:
+# `width` meters wide from `near` to `far` ahead, a tree every `spacing`
+# meters (moved up to half of that), no trees in the `meadowShare` of the
+# 90 m squares a noise picks as meadows, and a clear lane `laneHalfWidth`
+# to each side up to `laneLength` ahead
+type TreeForestBand {
+  width: Float
+  near: Float
+  far: Float
+  spacing: Float
+  meadowShare: Float = 0.25
+  laneHalfWidth: Float = 6.0
+  laneLength: Float = 40.0
+}
+
 # An empty forest of `treeSet`'s species (its kinds, billboard pictures and
 # impostors are built here), no trees yet
 func createTreeForest(
@@ -105,6 +122,59 @@ func createTreeForest(
     )
     toon: toon
   }
+}
+
+# Plant `band` with `treeSet`'s species in stands, as the walkers plant
+# theirs (TreeSet.treeSpeciesAt, treeScaleAt), on flat ground at z 0. The
+# number of trees planted; finishTreeForest still follows.
+func plantTreeForestBand(
+  forest: mod TreeForest
+  treeSet: view TreeSet
+  band: view TreeForestBand
+) ret Int {
+  let columns: Int = (band.width / band.spacing).toInt()
+  let rows: Int = ((band.far - band.near) / band.spacing).toInt()
+  var number: Int = 0
+  loop var row: Int = 0, row < rows, ++row {
+    loop var column: Int = 0, column < columns, ++column {
+      let x: Float = (column.toFloat() + 0.5) * band.spacing - band.width * 0.5 + (Noise.hash2(
+        x: column
+        y: row
+        seed: 41
+      ) - 0.5) * band.spacing
+      let y: Float = band.near + (row.toFloat() + 0.5) * band.spacing + (Noise.hash2(
+        x: column
+        y: row
+        seed: 43
+      ) - 0.5) * band.spacing
+      # meadows between the woods, and a clear lane in front of the camera
+      let woods: Float = Noise.hash2(
+        x: Math.floor(x: x / 90.0).toInt()
+        y: Math.floor(x: y / 90.0).toInt()
+        seed: 47
+      )
+      if woods < band.meadowShare or (Math.abs(value: x) < band.laneHalfWidth and y < band.laneLength) {
+        continue
+      }
+      let species: Int = treeSpeciesAt(
+        treeSet: treeSet
+        x: x
+        y: y
+        number: number
+      )
+      addPropPlacement(
+        field: forest.field
+        placement: {
+          kind: species
+          position: Vec3.create(x: x, y: y, z: 0.0)
+          yaw: Noise.hash2(x: column, y: row, seed: 53) * 6.2831853
+          scale: treeScaleAt(treeSet: treeSet, species: species, number: number)
+        }
+      )
+      number = number + 1
+    }
+  }
+  ret number
 }
 
 # Once every tree is planted: the field's cells, its trees as far

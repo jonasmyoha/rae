@@ -6,8 +6,6 @@
 # trees' billboards (impostors baked from every side) from 60 m, far
 # billboards from 140 m and past 300 m the far canopy (app3d/TreeForest).
 # It is a world of its own: a flat meadow and the forest, no island.
-import Math
-import Noise
 open Vec3
 open Scene3d
 open Mesh3d
@@ -23,7 +21,7 @@ const groveLodViewName: String = "lod"
 
 # The forest: a band `groveLodWidth` meters wide from groveLodNear to
 # groveLodFar ahead of the camera, a tree every groveLodSpacing meters
-# (moved up to half of that), thinned where a noise says meadow
+# (TreeForest.plantTreeForestBand)
 const groveLodWidth: Float = 640.0
 
 const groveLodNear: Float = 8.0
@@ -65,48 +63,11 @@ func buildGroveLodForest(renderer: mod DeferredRenderer) ret TreeForest {
     settings: defaultTreeForestSettings(extent: groveLodFar * 2.0 + 400.0, farReach: 1800.0)
     toon: true
   )
-  let columns: Int = (groveLodWidth / groveLodSpacing).toInt()
-  let rows: Int = ((groveLodFar - groveLodNear) / groveLodSpacing).toInt()
-  var number: Int = 0
-  loop var row: Int = 0, row < rows, ++row {
-    loop var column: Int = 0, column < columns, ++column {
-      let x: Float = (column.toFloat() + 0.5) * groveLodSpacing - groveLodWidth * 0.5 + (Noise.hash2(
-        x: column
-        y: row
-        seed: 41
-      ) - 0.5) * groveLodSpacing
-      let y: Float = groveLodNear + (row.toFloat() + 0.5) * groveLodSpacing + (Noise.hash2(
-        x: column
-        y: row
-        seed: 43
-      ) - 0.5) * groveLodSpacing
-      # meadows between the woods, and a clear lane in front of the camera
-      let woods: Float = Noise.hash2(
-        x: Math.floor(x: x / 90.0).toInt()
-        y: Math.floor(x: y / 90.0).toInt()
-        seed: 47
-      )
-      if woods < 0.25 or (Math.abs(value: x) < 6.0 and y < 40.0) {
-        continue
-      }
-      let species: Int = treeSpeciesAt(
-        treeSet: treeSet
-        x: x
-        y: y
-        number: number
-      )
-      addPropPlacement(
-        field: forest.field
-        placement: {
-          kind: species
-          position: Vec3.create(x: x, y: y, z: 0.0)
-          yaw: Noise.hash2(x: column, y: row, seed: 53) * 6.2831853
-          scale: treeScaleAt(treeSet: treeSet, species: species, number: number)
-        }
-      )
-      number = number + 1
-    }
-  }
+  let unusedPlanted: Int = plantTreeForestBand(
+    forest: forest
+    treeSet: treeSet
+    band: { width: groveLodWidth, near: groveLodNear, far: groveLodFar, spacing: groveLodSpacing }
+  )
   let planted: Int = finishTreeForest(forest: forest, renderer: renderer)
   log("[grove-lod] {planted} low-poly trees, {groveLodNear}-{groveLodFar} m")
   ret forest

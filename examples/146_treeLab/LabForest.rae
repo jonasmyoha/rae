@@ -1,0 +1,125 @@
+# The tree lab's forest scene (RAE_TREELAB_SCENE=forest,
+# docs/tree-sets-design.md §5 step 5): a tree set as a forest at every
+# distance, from the camera out to 1.9 km (app3d/TreeForest), so the sets
+# can be compared in the same light: the stylized set (the walkers') and the
+# low-poly set (Autumn Grove's museum). RAE_TREE_SET=lowPoly|stylized picks
+# the one shown first (stylized when unset); the T key switches between
+# them. Both are built at the start, so a switch is instant.
+# RAE_TREELAB_CAMERA=high looks from 35 m over the forest instead of eye
+# height.
+import Sys
+open Vec3
+open Mesh3d
+open Scene3d
+open ecs/Entity
+open RendererDeferred
+open app3d/TreeForest
+open treeSets/TreeSet
+import stylizedTrees/StylizedTrees
+import lowPolyTrees/LowPolyTrees
+
+# The band of forest ahead of the camera, and the meadow under it
+const labForestWidth: Float = 640.0
+
+const labForestNear: Float = 8.0
+
+const labForestFar: Float = 1900.0
+
+const labForestSpacing: Float = 7.0
+
+const labForestGroundSize: Float = 4400.0
+
+# The two sets the scene holds, in this order
+const labForestStylized: Int = 0
+
+const labForestLowPoly: Int = 1
+
+func labForestRequested() ret Bool {
+  ret Sys.getEnv(name: "RAE_TREELAB_SCENE") is "forest"
+}
+
+# The set RAE_TREE_SET names (stylized when unset or unknown)
+func labForestFirstSet() ret Int {
+  if Sys.getEnv(name: "RAE_TREE_SET") is "lowPoly" {
+    ret labForestLowPoly
+  }
+  ret labForestStylized
+}
+
+func labForestSetName(setIndex: view Int) ret String {
+  if setIndex is labForestLowPoly {
+    ret "lowPoly"
+  }
+  ret "stylized"
+}
+
+# The lab's ground and clouds, and a meadow under the whole forest
+func buildLabForestWorld(meshes: view LabMeshes, renderer: mod DeferredRenderer) ret World3d {
+  var world: World3d = buildLabGround(meshes: meshes)
+  let meadow: MeshData = makePlane(size: labForestGroundSize, segments: 1)
+  let unusedEntityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: uploadLabMesh(renderer: renderer, meshData: meadow)
+    material: labMaterial(
+      red: labGroundRed
+      green: labGroundGreen
+      blue: labGroundBlue
+      roughness: 1.0
+    )
+    position: Vec3.create(x: 0.0, y: labForestGroundSize * 0.5 - 200.0, z: -0.01)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  ret world
+}
+
+# One set's forest, planted in the band and finished
+func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret TreeForest {
+  var forest: TreeForest = createTreeForest(
+    treeSet: treeSet
+    renderer: renderer
+    settings: defaultTreeForestSettings(extent: labForestFar * 2.0 + 400.0, farReach: 1800.0)
+    toon: false
+  )
+  let unusedPlanted: Int = plantTreeForestBand(
+    forest: forest
+    treeSet: treeSet
+    band: {
+      width: labForestWidth
+      near: labForestNear
+      far: labForestFar
+      spacing: labForestSpacing
+    }
+  )
+  let planted: Int = finishTreeForest(forest: forest, renderer: renderer)
+  log("[treelab] forest of the {treeSet.name} set: {planted} trees, to {labForestFar} m")
+  ret forest
+}
+
+# Both sets' forests, in the order of labForestStylized, labForestLowPoly
+func buildLabForests(renderer: mod DeferredRenderer) ret List(TreeForest) {
+  var forests: List(TreeForest) = List.create(TreeForest, cap: 2)
+  forests.add(
+    value: own buildLabForestOf(treeSet: StylizedTrees.createStylizedTrees(), renderer: renderer)
+  )
+  forests.add(
+    value: own buildLabForestOf(treeSet: LowPolyTrees.createLowPolyTrees(), renderer: renderer)
+  )
+  ret forests
+}
+
+# The camera at eye height down the forest's lane, or (high) from 35 m
+func labForestCamera(name: view String) ret Camera3d {
+  var camera: Camera3d = defaultCamera3d()
+  camera.fovYDeg = 50
+  camera.nearZ = 0.1
+  camera.farZ = 2600
+  if name is "high" {
+    camera.position = Vec3.create(x: 0.0, y: -6.0, z: 34.0)
+    camera.target = Vec3.create(x: 0.0, y: 150.0, z: 0.0)
+    ret camera
+  }
+  camera.position = Vec3.create(x: 0.0, y: -10.0, z: 1.7)
+  camera.target = Vec3.create(x: 0.0, y: 30.0, z: 2.6)
+  ret camera
+}

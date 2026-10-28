@@ -1787,8 +1787,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
               cat "$TMP_OUT/render-$LAB_NAME.log" "$TMP_OUT/screenshot-$LAB_NAME.log" 2>/dev/null | tail -8 | sed 's/^/  /'
             fi
           done
+          # the forest scene with each tree set (LabForest.rae)
+          for LAB_SET in stylized lowPoly; do
+            SCREENSHOT="$TMP_OUT/treelab-forest-$LAB_SET.bmp"
+            if ! (cd .. && RAE_TREELAB_SCENE=forest RAE_TREE_SET="$LAB_SET" \
+               RAE_SDL_HEADLESS_MS=8000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV or die $!' 90 "$TMP_OUT/app") > "$TMP_OUT/render-forest-$LAB_SET.log" 2>&1 \
+               || ! grep -q "forest of the $LAB_SET set" "$TMP_OUT/render-forest-$LAB_SET.log" \
+               || ! python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 \
+                  > "$TMP_OUT/screenshot-forest-$LAB_SET.log" 2>&1; then
+              LAB_OK=0
+              echo "  forest $LAB_SET:"
+              cat "$TMP_OUT/render-forest-$LAB_SET.log" "$TMP_OUT/screenshot-forest-$LAB_SET.log" 2>/dev/null | tail -8 | sed 's/^/  /'
+            fi
+          done
           if [ "$LAB_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (the T02 scene and the sixteen stylized-set study views)"
+            echo "PASS: $EXAMPLE_NAME (the T02 scene, the sixteen stylized-set study views and the forest scene with each tree set)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (tree lab views)"
