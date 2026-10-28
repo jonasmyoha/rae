@@ -1,7 +1,6 @@
 # Tree sets: a low-poly museum set and the stylized set
 
-Status: proposed (2026-10-28); the a answered §6.1 and named the
-sets; §6.2 and §6.3 wait.
+Status: planned (2026-10-28); queued as six steps (§5).
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -146,17 +145,8 @@ the same day, AGENTS.md).
    the T02 work. Their scenes leave Autumn Grove (the museum); proposed home:
    the tree lab (146), which is the stylized set's workshop, as scenes
    beside the T02 tree.
-2. **The leaf-patch crowns** (open). `FluffyFoliage` makes a crown out of
-   many flat, lobed leaf patches (smooth rounded lumps); it came on
-   17 Oct (rae `d3b72fa6`, by Astra), before the low-poly commit
-   `4d28e11d`, so the museum as proposed has it. Shown in looks-development
-   `rendering/treeStyles.html`: the grove before it, when it came, and at
-   `4d28e11d`, with close-ups. Question: does the museum keep the
-   leaf-patch crowns, or go back to before them (only the shaggy autumn
-   trees)?
-3. **The walkers' trees until the stylized set is complete** (open,
-   reworded). The stylized set will have new trees from the T02 work, but
-   only some kinds at first (the T02 broadleaf now). Until it has every
-   kind, which trees should the walker scenes (136, 137, 143) show for the
-   other kinds: the ones they show today (including the birch), or the old
-   low-poly ones?
+2. **The museum keeps everything it had at `4d28e11d`**, the leaf-patch
+   crowns (`FluffyFoliage`) included: the museum is that commit's look,
+   nothing added and nothing taken away.
+3. **The walkers keep today's trees** (the birch included) until a
+   stylized species replaces one; nothing goes back to the low-poly look.
