@@ -85,6 +85,7 @@ open Calendar
 open app3d/NetSeam
 open app3d/CameraKnockdownFollow
 open app3d/CameraFov
+open app3d/SceneLook
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -558,14 +559,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     addStandardHudOverlays(world: uiWorld)
     settingsApplyToWorld(settingsState: settingsState, world: uiWorld, uiSystems: uiSystems)
     applyEditorPanelOpen(world: uiWorld, open: settingsState.open)
+    # The scene look: the walker's own, or one RAE_SCENE_LOOK names
+    # (app3d/SceneLook: the tree lab's)
+    let sceneLook: SceneLook = walkerSceneLookFromEnv()
     setRendererSky(
       renderer: renderer
-      sky: settingsBuildSky(
-        settingsState: settingsState
-        data: hosekData
-        turbidity: 3.0
-        groundAlbedo: 0.30
-      )
+      sky: walkerSky(settingsState: settingsState, hosek: hosekData, look: sceneLook)
     )
     # A light height mist (RendererMist's defaults), its base the sea: the
     # shore and the far island haze over, the hills stand out of it, and the
@@ -573,8 +572,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     var mist: MistSettings = defaultMistSettings()
     mist.baseHeight = islandSeaSurfaceZ(groundZ: groundZ, biome: biome)
     setMist(renderer: renderer, mist: mist)
+    applySceneLook(renderer: renderer, look: sceneLook, mistBase: mist.baseHeight)
     light.sunDir = settingsKeyLightDir(settingsState: settingsState)
-    light.sunColor = settingsKeyLightColor(settingsState: settingsState)
+    light.sunColor = walkerSunColor(settingsState: settingsState, look: sceneLook)
     log(
       "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
     )

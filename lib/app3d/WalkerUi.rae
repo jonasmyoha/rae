@@ -59,6 +59,7 @@ open RendererForward
 open app3d/WalkerTerrain
 open app3d/PlayerRoster
 open app3d/TimeOfDay
+open app3d/SceneLook
 open Moon
 
 # The "..." menu's "Skip 6 hours": a quarter of a day, enough to step from a
@@ -308,14 +309,17 @@ func uiUpdate(
       renderer: renderer
       on: inputSystem.settings.quality is SettingsQuality.ultra
     )
-    renderer.sky = settingsBuildSky(
+    let sceneLook: SceneLook = walkerSceneLookFromEnv()
+    renderer.sky = walkerSky(
       settingsState: inputSystem.settings
-      data: cameraSystem.hosek
-      turbidity: 3.0
-      groundAlbedo: 0.30
+      hosek: cameraSystem.hosek
+      look: sceneLook
     )
     cameraSystem.light.sunDir = settingsKeyLightDir(settingsState: inputSystem.settings)
-    cameraSystem.light.sunColor = settingsKeyLightColor(settingsState: inputSystem.settings)
+    cameraSystem.light.sunColor = walkerSunColor(
+      settingsState: inputSystem.settings
+      look: sceneLook
+    )
     characterSystem.speed = inputSystem.settings.speed
     characterSystem.playing = inputSystem.settings.playing
     if characterSystem.toon is not inputSystem.settings.toon {
