@@ -5,8 +5,7 @@
 # warmBroadleafParams, the tree lab's T02 scene), 1-4 the grown varieties
 # (treeGen/TreeGrower seeds 1-4, 143's stand).
 # Each becomes a PropField kind (addReferenceForestKinds) at the walkers'
-# distances (its middle level to 100 m: referenceMiddleDistance): near, the bark and every leaf
-# card (treeGen/TreeLevels: the
+# distances: near, the bark and every leaf card (treeGen/TreeLevels: the
 # cards in three tones as camera-facing card meshes); middle, the bark and a
 # quarter of the cards at twice the width, so the clump layout and the
 # covered area stay; far, an impostor baked from the near level.
@@ -45,11 +44,6 @@ const referenceSetBarkPath: String = ".rae/treeGen/warmBark.png"
 
 # Where the near level ends (the walkers': StylizedTrees.nearTreeDistance)
 const referenceNearDistance: Float = 30.0
-
-# Where the middle level ends at the least: the tree is about twice as tall
-# as the walkers' trees, so its impostor (128 pixels a view) starts later
-# than their 60 m, where it is not stretched as much
-const referenceMiddleDistance: Float = 100.0
 
 # The middle level: every referenceMiddleKeep-th card, referenceMiddleGrow
 # times as wide (the area kept: 4 cards' area in one card twice as wide)
@@ -178,7 +172,7 @@ func addReferenceForestKinds(
   # RAE_TREE_LEVEL: one level at every distance
   let only: String = Sys.getEnv(name: "RAE_TREE_LEVEL")
   var nearEnd: Float = referenceNearDistance
-  var middleEnd: Float = Math.max(a: midDistance, b: referenceMiddleDistance)
+  var middleEnd: Float = midDistance
   var farEnd: Float = farDistance
   if only is "near" {
     nearEnd = 100000.0
