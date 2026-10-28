@@ -1210,7 +1210,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # of a bush is held to the bush's speed limit while inside it.
           SHOT="$TMP_OUT/walker.bmp"
           # Shadow casters other than the harebells: 400-900 (900 since the warm
-          # broadleaf, the T02 tree, took the lime's place: taller trees, more of
+          # broadleaf, the T02 tree, joined the stylized set: taller trees, more of
           # them reach into the shadow cascades; 818 in all on 2026-10-28).
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1362,7 +1362,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # must be a shaded frame.
           SHOT="$TMP_OUT/walker-forward.bmp"
           # Shadow casters other than the harebells: 400-900 (900 since the warm
-          # broadleaf, the T02 tree, took the lime's place: taller trees, more of
+          # broadleaf, the T02 tree, joined the stylized set: taller trees, more of
           # them reach into the shadow cascades; 818 in all on 2026-10-28).
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \

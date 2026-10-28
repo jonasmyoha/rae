@@ -69,9 +69,9 @@ const stylizedSpeciesCount: Int = 10
 # The warm broadleaf: the T02 tree from the tree lab (lib/treeGen,
 # stylizedTrees/ReferenceTrees), docs/reference-tree-plan.md step 9: five
 # kinds after the ten above, the traced tree and the four grown varieties.
-# It takes the lime's (speciesBroadleaf) place in the stands;
-# RAE_STYLIZED_LIME=1 keeps the lime there instead, until the is
-# accepts the change.
+# It takes the umbrella pine's (speciesUmbrella) place in the stands
+# (2026-10-28: not the lime's); RAE_STYLIZED_UMBRELLA=1 keeps
+# the umbrella pine there instead, until the change is accepted.
 const speciesWarmBroadleaf: Int = 10
 
 const stylizedWarmBroadleafVarieties: Int = 5
@@ -80,13 +80,13 @@ const stylizedWarmBroadleafVarieties: Int = 5
 # scales them from it
 const autumnReferenceHeight: Float = 5.5
 
-# `picks` with the lime's entry split evenly among the warm broadleaf's
-# varieties (each a stand of its own variety)
+# `picks` with the umbrella pine's entry split evenly among the warm
+# broadleaf's varieties (each a stand of its own variety)
 func warmBroadleafPicks(picks: view List(SpeciesPick)) ret List(SpeciesPick) {
   var result: List(SpeciesPick) = List.create(SpeciesPick, cap: picks.length + 4)
   var low: Float = 0.0
   loop let pick: view SpeciesPick in picks {
-    if pick.species is speciesBroadleaf {
+    if pick.species is speciesUmbrella {
       let share: Float = (pick.upTo - low) / stylizedWarmBroadleafVarieties.toFloat()
       loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
         result.add(
@@ -149,8 +149,9 @@ func createStylizedTrees() ret TreeSet {
     { upTo: 0.96, species: speciesCrimson }
     { upTo: 1.0, species: speciesPalm }
   }
-  # the warm broadleaf takes the lime's share of the picks (0.12 - 0.26)
-  if Sys.getEnv(name: "RAE_STYLIZED_LIME") is not "1" {
+  # the warm broadleaf takes the umbrella pine's share of the picks
+  # (0.40 - 0.46)
+  if Sys.getEnv(name: "RAE_STYLIZED_UMBRELLA") is not "1" {
     standPicks = warmBroadleafPicks(picks: standPicks)
     mixedPicks = warmBroadleafPicks(picks: mixedPicks)
   }
