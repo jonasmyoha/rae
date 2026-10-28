@@ -3,7 +3,7 @@
 Status: planned (2026-10-28); queued as six steps (§5); steps 1 and 2
 done (0.2.182 and 0.2.183, §5.1, §5.2); step 3 done: the museum and the
 studies' move to the tree lab (§5.3, §5.4); step 4 done (0.2.184, §5.5); step 5 done
-(0.2.186, §5.6).
+(0.2.186, §5.6); step 6 done (0.2.187, §5.7). All six steps are done.
 
 Decision: the walker examples keep the stylized trees being made
 now (lib/treeGen, the T02 work), while Autumn Grove becomes a museum of the
@@ -271,6 +271,22 @@ stylized set uses (found in step 2).
   lod scene (unchanged: the same 16,646 trees).
 - The 146 gate renders the forest scene with each set; the 138 gate still
   passes. Pictures: looks-development `rendering/treeSets.html#labForest`.
+
+### 5.7 Step 6, the clean-up, done (0.2.187)
+
+- `lib/procgen/` keeps only what is not a tree: `Rock`, `Texture`,
+  `MeadowFlower`, `OxeyeGeometry`, `Harebell`, `HarebellGeometry`.
+- The 21 tree modules moved to `lib/stylizedTrees/` beside
+  `StylizedTrees.rae` (one package, as `lib/procgen/` was): `Birch`,
+  `Camphor`, `CamphorGeometry`, `CrownScaffold`, `CurvedFork`,
+  `CurvedForkBranch`, `Cypress`, `FluffyFoliage`, `Foliage`,
+  `FoliageCards`, `ForkSurface`, `Ginkgo`, `JapaneseMaple`, `Lime`,
+  `Palm`, `RedMaple`, `SculpturalFork`, `Spruce`, `SpruceControl`,
+  `SugarMaple`, `Tree`. Every import and script path in code was updated
+  (`procgen/Birch` -> `stylizedTrees/Birch`); older docs keep the paths of
+  their time. `lib/lowPolyTrees/` keeps its own frozen copies.
+- None is deleted yet: each goes when a treeGen-grown species replaces it
+  in the stylized set (the reference-tree work).
 
 ## 6. Decisions
 

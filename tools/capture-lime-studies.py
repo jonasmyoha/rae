@@ -48,7 +48,7 @@ def main():
     geometry.write_text('100 100 1280 800\n')
     manifest = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(),
                 'sourceHashes': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                                 for path in [repo / 'lib/procgen/Lime.rae', repo / 'lib/procgen/FluffyFoliage.rae',
+                                 for path in [repo / 'lib/stylizedTrees/Lime.rae', repo / 'lib/stylizedTrees/FluffyFoliage.rae',
                                               repo / 'examples/138_procgen_showcase/FluffyGrove.rae']},
                 'clock': '60 frames, 1/60 second, wind 0', 'imageSize': [1280, 800],
                 'effects': 'Preetham, exposure 1, deferred toon, CSM, SSAO, SMAA, bloom',

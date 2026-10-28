@@ -65,7 +65,7 @@ def main():
                 'effects': 'Preetham, exposure 1, deferred toon, CSM, SSAO, SMAA, bloom',
                 'trees': 'Unchanged six specimens: 6, 6.7, 7.4, 6, 6.7, 7.4 m' if args.species == 'spruce' else 'Unchanged six cypresses: 7.5, 8.2, 8.9, 22.5, 24.6, 26.7 m; tall widths unchanged',
                 'hashes': {str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-                           for p in [repo / f'lib/procgen/{args.species.capitalize()}.rae', repo / 'lib/procgen/FluffyFoliage.rae', repo / 'lib/procgen/SpruceControl.rae',
+                           for p in [repo / f'lib/procgen/{args.species.capitalize()}.rae', repo / 'lib/stylizedTrees/FluffyFoliage.rae', repo / 'lib/stylizedTrees/SpruceControl.rae',
                                      repo / f'lib/assets/trees/{args.species}Spray.png', repo / f'lib/assets/trees/{args.species}Bark.png']},
                 'captures': []}
     build = not args.binary
