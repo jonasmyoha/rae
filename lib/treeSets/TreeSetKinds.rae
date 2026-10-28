@@ -8,6 +8,7 @@ open GbufferSprite
 open treeSets/TreeSet
 open stylizedTrees/StylizedTrees
 open lowPolyTrees/LowPolyTrees
+open stylizedTrees/ReferenceTrees
 
 # Every species of `treeSet` as a kind of `field`, at its levels of detail:
 # `midDistance` is where the sparser crowns end (keep it inside the
@@ -22,6 +23,15 @@ func addTreeSetKinds(
 ) {
   if treeSet.style is TreeSetStyle.stylized {
     addStylizedForestKinds(
+      field: field
+      renderer: renderer
+      sprites: sprites
+      midDistance: midDistance
+      farDistance: farDistance
+    )
+  }
+  if treeSet.style is TreeSetStyle.reference {
+    addReferenceForestKinds(
       field: field
       renderer: renderer
       sprites: sprites

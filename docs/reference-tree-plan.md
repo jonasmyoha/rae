@@ -235,6 +235,20 @@ Done when: at each distance the tree keeps its silhouette, its gaps and its
 light-to-dark range, and the change between versions is not noticeable in a
 short camera move.
 
+First round (0.2.189, waiting for review): the tree is
+one kind of the forest machinery (`lib/app3d/TreeForest`), the T02 set
+`lib/stylizedTrees/ReferenceTrees.rae` (species 0 the traced tree, 1-4 the
+grown varieties). Its leaf cards become ordinary camera-facing card meshes
+in three tones by lightness, with the leaf stamp as a material image made in
+memory (`lib/treeGen/TreeLevels.rae`, `RendererImages.rendererAddSurfaceImagePixels`).
+Near (to 30 m): every card, ~5,800 triangles; middle (to 60 m): every 4th
+card at twice the width, ~3,600; impostor (to 140 m, then far billboards)
+baked from the near level. In the lab: `RAE_TREELAB_TREE=levels`,
+`RAE_TREE_LEVEL=near|middle|far`, `RAE_TREELAB_DOLLY=<folder>`. Near and
+middle read as the real tree at 15, 40 and 120 m; the impostor is paler,
+bluer and more see-through, so its switch shows in the camera move
+(looks-development `treeReference/distance.html`).
+
 ### Step 8 — Cost
 
 Measured in the lab and in a forest of a few thousand copies: triangles per
