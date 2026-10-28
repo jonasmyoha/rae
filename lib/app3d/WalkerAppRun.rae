@@ -108,7 +108,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     exitCode = runWalkerSelfTest(
       physicsSystem: app.physicsSystem
       world: app.world
-      forest: app.terrainSystem.forest
+      forest: app.terrainSystem.forest.field
       pooledTrunks: app.settings.land is WalkerLand.forest
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     )
@@ -216,8 +216,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     if let waterSystem: mod WaterSystem = app.waterSystem {
       waterShutdown(waterSystem: waterSystem, resources: resources)
     }
-    spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
-    farCanopyShutdown(canopy: app.terrainSystem.canopy, resources: resources)
+    treeForestShutdown(forest: app.terrainSystem.forest, resources: resources)
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown

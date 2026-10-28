@@ -48,9 +48,7 @@ open treeSets/TreeSetKinds
 open app3d/PropInstancer
 open app3d/PropField
 open app3d/PropFieldFrame
-open app3d/FarSprites
-open app3d/FarCanopy
-open CanopyBake
+open app3d/TreeForest
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 open app3d/WalkerFlowers
@@ -145,23 +143,13 @@ const walkerFarGroundSegments: Int = 40
 
 const walkerFarGroundDrop: Float = 1.0
 
-# The far trees: at most this many billboards a frame, thinned past this
-# distance (m), in blocks of this size (m)
-const walkerFarTreeLimit: Int = 8192
-
-const walkerFarTreeThinFrom: Float = 300.0
-
-const walkerFarTreeBlock: Float = 64.0
-
 # Past this distance (m) the far canopy (app3d/FarCanopy: one cluster
 # impostor a forest cell) takes over from the far trees, across a band this
-# wide; the trees are drawn to the band's end plus a cluster's reach (a tree
-# is measured from its cluster's center), unthinned
+# wide (app3d/TreeForest draws the far trees to the band's end plus a
+# cluster's reach, unthinned, in 64 m blocks)
 const walkerCanopyFrom: Float = 300.0
 
 const walkerCanopyFadeWidth: Float = 60.0
-
-const walkerCanopyClusterReach: Float = 40.0
 
 type WalkerTerrain {
   # The streamed window: gridSide x gridSide cells round the walker
@@ -183,18 +171,11 @@ type WalkerTerrain {
   grassProp: PropInstancer
   # The set of tree species the forest is planted from (treeSets/TreeSet)
   treeSet: TreeSet
-  # The forest: every tree species as a kind at three levels of detail, its
-  # placements in cells; only what is near and in view is drawn, one
-  # instanced draw per species, level and part
-  forest: PropField
-  # The sprite pass the forest's far level (its billboards) is drawn with
-  sprites: SpriteCache
-  # Past the forest's own billboards, its trees' far billboards, standing on
-  # the far ground (when the forest has a farReach)
-  farTrees: FarSprites
-  # Past the far trees, the forest's cells as cluster impostors (baked once
-  # the forest is planted: bakeWalkerCanopy)
-  canopy: FarCanopy
+  # The forest (app3d/TreeForest): every tree species as a kind at three
+  # levels of detail, its placements in cells (forest.field); past its own
+  # billboards, far billboards standing on the far ground and past those
+  # the far canopy (when the forest has a farReach)
+  forest: TreeForest
   farGround: TerrainTiles
   hasFarGround: Bool
   # The bush's three leaf tones
@@ -272,34 +253,6 @@ func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
     )
   }
   ret parts
-}
-
-# The empty forest field of `settings`: its kinds, no trees yet (the far
-# level's billboard pictures go into `sprites`' image array)
-func createForestField(
-  treeSet: view TreeSet
-  renderer: mod DeferredRenderer
-  sprites: mod SpriteCache
-  settings: view ForestFieldSettings
-) ret PropField {
-  var field: PropField = createPropField(
-    originX: settings.extent * -0.5
-    originY: settings.extent * -0.5
-    size: settings.extent
-    cellSize: settings.cellSize
-  )
-  if settings.batchLimit > 0 {
-    field.batchLimit = settings.batchLimit
-  }
-  addTreeSetKinds(
-    treeSet: treeSet
-    field: field
-    renderer: renderer
-    sprites: sprites
-    midDistance: settings.midDistance
-    farDistance: settings.farDistance
-  )
-  ret field
 }
 
 func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
@@ -638,25 +591,9 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
 }
 
 # Fill the forest's batches for this frame (before the shadow and scene
-# passes, which both draw them). The view cone is widened by about 34
-# degrees, so a tree just outside the picture still casts its shadow into it.
+# passes, which both draw them): app3d/TreeForest
 func gatherForest(terrainSystem: mod WalkerTerrain, camera: view Camera3d, aspect: view Float) {
-  var propView: PropView = propViewOf(camera: camera, aspect: aspect)
-  propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
-  gatherPropField(field: terrainSystem.forest, propView: propView, toon: terrainSystem.toon)
-  # The far trees: the picture only (no shadows), so the plain view
-  if terrainSystem.hasFarGround {
-    gatherFarSprites(
-      farSprites: terrainSystem.farTrees
-      propView: propViewOf(camera: camera, aspect: aspect)
-      toon: terrainSystem.toon
-    )
-    gatherFarCanopy(
-      canopy: terrainSystem.canopy
-      propView: propViewOf(camera: camera, aspect: aspect)
-      toon: terrainSystem.toon
-    )
-  }
+  gatherTreeForest(forest: terrainSystem.forest, camera: camera, aspect: aspect)
 }
 
 # This frame's props and forest (gathered above) into the open scene pass
@@ -675,22 +612,7 @@ func drawTerrainProps(
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
-  drawPropField(cache: cache, resources: resources, field: terrainSystem.forest)
-  drawPropFieldSprites(
-    cache: cache
-    resources: resources
-    field: terrainSystem.forest
-    sprites: terrainSystem.sprites
-  )
-  if terrainSystem.hasFarGround {
-    drawFarSprites(
-      cache: cache
-      resources: resources
-      farSprites: terrainSystem.farTrees
-      sprites: terrainSystem.sprites
-    )
-    drawFarCanopy(cache: cache, resources: resources, canopy: terrainSystem.canopy)
-  }
+  drawTreeForest(cache: cache, resources: resources, forest: terrainSystem.forest)
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
@@ -702,36 +624,16 @@ func fillFarTrees(terrainSystem: mod WalkerTerrain) {
   if terrainSystem.hasFarGround is false {
     ret
   }
-  var trees: List(FarSprite) = farSpritesOf(
-    field: terrainSystem.forest
-    placements: terrainSystem.forest.placements
-  )
-  planFarCanopy(canopy: terrainSystem.canopy, field: terrainSystem.forest, trees: trees)
-  let added: Int = addFarSpritesInCells(
-    farSprites: terrainSystem.farTrees
-    sprites: trees
-    cellSize: walkerFarTreeBlock
-  )
+  let added: Int = addTreeForestFarTrees(forest: terrainSystem.forest)
   log(
-    "[terrain] far trees: {terrainSystem.forest.placements.length} trees in {added} blocks, to {terrainSystem.farTrees.settings.farDistance} m"
+    "[terrain] far trees: {terrainSystem.forest.field.placements.length} trees in {added} blocks, to {terrainSystem.forest.farTrees.settings.farDistance} m"
   )
 }
 
 # Bake the far canopy planned when the forest was planted (fillFarTrees),
 # from the forest's tree impostors; nothing without a far ground
 func bakeWalkerCanopy(terrainSystem: mod WalkerTerrain, renderer: mod DeferredRenderer) {
-  if terrainSystem.hasFarGround is false {
-    ret
-  }
-  if let resources: mod GpuResources = renderer.gpuResources {
-    bakeFarCanopy(
-      canopy: terrainSystem.canopy
-      resources: resources
-      treeAtlas: terrainSystem.sprites.impostors.binding
-      settings: defaultCanopySettings()
-      cutoff: spriteCutoff
-    )
-  }
+  bakeTreeForestCanopy(forest: terrainSystem.forest, renderer: renderer)
 }
 
 func drawTerrainGround(
@@ -786,14 +688,7 @@ func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view 
       batch: part.batch
     )
   }
-  drawPropFieldShadows(renderer: renderer, field: terrainSystem.forest)
-  drawPropFieldSpriteShadows(
-    renderer: renderer
-    field: terrainSystem.forest
-    aspect: spritePictureAspect
-    cutoff: spriteCutoff
-    impostors: terrainSystem.sprites.impostors.binding
-  )
+  drawTreeForestShadows(renderer: renderer, forest: terrainSystem.forest)
 }
 
 func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
@@ -801,6 +696,7 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
     ret
   }
   terrainSystem.toon = toon
+  terrainSystem.forest.toon = toon
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     setPropInstancerToon(prop: part, toon: toon)
   }
@@ -887,33 +783,25 @@ func createWalkerTerrain(
       )
     }
   }
-  var sprites: SpriteCache = createSpriteCache()
-  var forestField: PropField = createForestField(
+  # The forest; past its own billboards (when it has a farReach) far trees
+  # and the far canopy, over a far ground (one tile when there is none,
+  # never drawn)
+  let hasFarGround: Bool = forest.farReach > 0.0
+  var treeForest: TreeForest = createTreeForest(
     treeSet: treeSet
     renderer: renderer
-    sprites: sprites
-    settings: forest
+    settings: {
+      extent: forest.extent
+      cellSize: forest.cellSize
+      batchLimit: forest.batchLimit
+      midDistance: forest.midDistance
+      farDistance: forest.farDistance
+      canopyFrom: walkerCanopyFrom
+      canopyFadeWidth: walkerCanopyFadeWidth
+      farReach: forest.farReach
+    }
+    toon: true
   )
-  # Far trees from where the forest's own billboards end; a far ground under
-  # them (one tile when there is none, never drawn)
-  var farSettings: FarSpriteSettings = defaultFarSpriteSettings()
-  farSettings.nearDistance = forest.farDistance
-  farSettings.farDistance = forest.farDistance + forest.farReach
-  farSettings.limit = walkerFarTreeLimit
-  farSettings.thinFrom = walkerFarTreeThinFrom
-  let hasFarGround: Bool = forest.farReach > 0.0
-  let canopySettings: FarCanopySettings = {
-    fadeMiddle: walkerCanopyFrom
-    fadeWidth: walkerCanopyFadeWidth
-    farDistance: forest.farDistance + forest.farReach
-  }
-  if hasFarGround {
-    # The canopy holds every tree past its band: the far trees stop there
-    farSettings.farDistance = walkerCanopyFrom + walkerCanopyFadeWidth * 0.5 + walkerCanopyClusterReach
-    farSettings.thinFrom = farSettings.farDistance
-    farSettings.fadeOutMiddle = walkerCanopyFrom
-    farSettings.fadeOutWidth = walkerCanopyFadeWidth
-  }
   var farSide: Int = 1
   if hasFarGround {
     farSide = walkerFarGroundSide
@@ -952,10 +840,7 @@ func createWalkerTerrain(
       capacity: cellCount * 2
     )
     treeSet: treeSet
-    forest: own forestField
-    sprites: own sprites
-    farTrees: own createFarSprites(settings: farSettings)
-    canopy: own createFarCanopy(settings: canopySettings)
+    forest: own treeForest
     farGround: own farGround
     hasFarGround: hasFarGround
     bushParts: own createTreeSetBushParts(treeSet: treeSet, renderer: renderer, capacity: cellCount)
