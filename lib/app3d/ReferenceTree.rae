@@ -31,6 +31,7 @@ open treeGen/LeafCards
 open treeGen/LeafImage
 open treeGen/LeafPass
 open treeGen/TreeGrower
+open treeGen/TreeKind
 
 # The bark picture, painted once
 const referenceBarkImagePath: String = ".rae/treeGen/warmBark.png"
@@ -63,7 +64,7 @@ type ReferenceTree {
 func referenceBarkLayer(renderer: mod DeferredRenderer) ret Int {
   if not Sys.exists(path: referenceBarkImagePath) {
     let made: Bool = Sys.makeDir(path: ".rae/treeGen")
-    if not writeBarkImage(path: referenceBarkImagePath) {
+    if not writeBarkImage(barkKind: warmBroadleafKind().bark, path: referenceBarkImagePath) {
       log("[referenceTree] could not write the bark picture {referenceBarkImagePath}")
       ret -1
     }
@@ -145,7 +146,7 @@ func createReferenceVariety(
   }
   let ownPictures: List(List(Float)) = pictures
   var leaves: LeafPass = createLeafPass(
-    cards: leafCards(skeleton: skeleton, seed: seed)
+    cards: leafCards(skeleton: skeleton, treeKind: warmBroadleafKind(), seed: seed)
     pictures: own ownPictures
   )
   setLeafPlacements(leaves: leaves, placements: own placements)
@@ -174,9 +175,12 @@ func createReferenceStand(
   if count is 0 {
     ret ReferenceTree { varieties: own varieties, count: 0 }
   }
-  let material: Material3d = barkMaterial(layer: referenceBarkLayer(renderer: renderer))
+  let material: Material3d = barkMaterial(
+    barkKind: warmBroadleafKind().bark
+    layer: referenceBarkLayer(renderer: renderer)
+  )
   # the leaf stamps are painted once; each variety's pass gets a copy
-  let pictures: List(List(Float)) = leafImageLayerPixels()
+  let pictures: List(List(Float)) = leafImageLayerPixels(leafKind: warmBroadleafKind().leaf)
   loop var variety: Int = 0, variety < Math.min(a: referenceVarietyCount, b: count), ++variety {
     varieties.add(value: createReferenceVariety(
       renderer: renderer

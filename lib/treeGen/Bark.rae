@@ -4,18 +4,15 @@
 # 512 x 512 image painted here, near white, that multiplies it. It tiles both
 # ways (the tube wraps it once round and repeats it up the limb). The broad
 # light-to-dark change across the trunk comes from the sun on the round tube.
-# Written new.
+# The color and the streaks' depth come from the tree's kind
+# (TreeKind.BarkKind). Written new.
 import Image
 import Math
 import Vec3
 open Scene3d
+open treeGen/TreeKind
 
 const barkImageSize: Int = 512
-
-# The warm orange-brown of T02's trunk (linear)
-func barkColor() ret Vec3 {
-  ret Vec3.create(x: 0.34, y: 0.125, z: 0.055)
-}
 
 # A hash of a lattice point to 0..1
 func barkHash(x: view Int, y: view Int, seed: view Int) ret Float {
@@ -90,16 +87,17 @@ func barkStreak(u: view Float, v: view Float) ret Float {
 }
 
 # The bark image as packed 0xAARRGGBB pixels, row by row from the top: near
-# white, the streaks a faint darker and slightly cooler
-func barkPixels() ret List(Int) {
+# white, the streaks darker by up to the kind's streak depth and slightly
+# cooler
+func barkPixels(barkKind: view BarkKind) ret List(Int) {
   var pixels: List(Int) = List.create(Int, cap: barkImageSize * barkImageSize)
   loop var y: Int = 0, y < barkImageSize, ++y {
     let v: Float = y.toFloat() / barkImageSize.toFloat()
     loop var x: Int = 0, x < barkImageSize, ++x {
       let u: Float = x.toFloat() / barkImageSize.toFloat()
       let streak: Float = barkStreak(u: u, v: v)
-      # 0.74 in the darkest streak, 1.0 in the lightest
-      let light: Float = 0.74 + 0.26 * streak
+      # 1 - depth in the darkest streak (T02: 0.74), 1.0 in the lightest
+      let light: Float = 1.0 - barkKind.streakDepth + barkKind.streakDepth * streak
       let red: Int = Math.min(a: 255, b: (255.0 * light).toInt())
       let green: Int = Math.min(a: 255, b: (255.0 * light * (0.97 + 0.03 * streak)).toInt())
       let blue: Int = Math.min(a: 255, b: (255.0 * light * (0.95 + 0.05 * streak)).toInt())
@@ -111,8 +109,8 @@ func barkPixels() ret List(Int) {
 
 # Paint the bark image and save it as a PNG at `path`, for the renderer's
 # material images (rendererLoadSurfaceImage)
-func writeBarkImage(path: view String) ret Bool {
-  let pixels: List(Int) = barkPixels()
+func writeBarkImage(barkKind: view BarkKind, path: view String) ret Bool {
+  let pixels: List(Int) = barkPixels(barkKind: barkKind)
   ret Image.savePng(
     path: path
     pixels: pixels.data
@@ -121,12 +119,12 @@ func writeBarkImage(path: view String) ret Bool {
   )
 }
 
-# The wood's material: the warm color, the bark image on top (`layer`, the
+# The wood's material: the kind's color, the bark image on top (`layer`, the
 # image's place in the renderer's material images; -1 for none)
-func barkMaterial(layer: view Int) ret Material3d {
+func barkMaterial(barkKind: view BarkKind, layer: view Int) ret Material3d {
   ret Material3d {
     colorTextureLayer: layer
-    baseColor: barkColor()
+    baseColor: barkKind.color
     metallic: 0.0
     roughness: 0.85
     emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)

@@ -18,15 +18,10 @@ open treeGen/TracedLimb
 open treeGen/Skeleton
 open treeGen/ClumpMesh
 open treeGen/LeafImage
+open treeGen/TreeKind
 
 # Floats per card in the GPU buffer: 4 vec4s (see leaf_cards.wgsl's Card)
 const leafCardFloats: Int = 16
-
-# A card's width (m): T02's leaves are small, a card a spray of them
-const leafCardSize: Float = 0.6
-
-# How many cards cover each point of a mass's surface, on average
-const leafCardLayers: Float = 4.5
 
 # The cards of a tree, ready for the GPU: leafCardFloats floats each
 type LeafCards {
@@ -51,18 +46,6 @@ func randomDirection(random: mod TreeRandom) ret Vec3 {
   ret Vec3.create(x: ring * Math.cos(x: around), y: ring * Math.sin(x: around), z: z)
 }
 
-# The three greens of one mass: T02's crown is an olive yellow-green, not a
-# lime one; its masses differ a little from each other (linear color)
-func massGreen(pick: view Int) ret Vec3 {
-  var base: Vec3 = Vec3.create(x: 0.19, y: 0.23, z: 0.06)
-  if pick is 1 {
-    base = Vec3.create(x: 0.24, y: 0.27, z: 0.07)
-  } else if pick is 2 {
-    base = Vec3.create(x: 0.14, y: 0.18, z: 0.06)
-  }
-  ret base
-}
-
 func pushVec4(
   floats: mod List(Float)
   a: view Float
@@ -76,8 +59,9 @@ func pushVec4(
   floats.add(value: d)
 }
 
-# Every leaf mass of `skeleton` filled with cards
-func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
+# Every leaf mass of `skeleton` filled with cards of `treeKind` (its card size,
+# layers and greens)
+func leafCards(skeleton: view TreeSkeleton, treeKind: view TreeKind, seed: view Int) ret LeafCards {
   var random: TreeRandom = createTreeRandom(seed: seed + 4242)
   # the crown's height span, for "lower in the tree is darker"
   var lowest: Float = 1000000.0
@@ -89,7 +73,7 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
   var floats: List(Float) = List.create(Float, cap: 0)
   var count: Int = 0
   loop let clump: view TracedClump in skeleton.clumps {
-    let cards: Int = (leafCardLayers * ellipsoidArea(radii: clump.radii) / (leafCardSize * leafCardSize)).toInt()
+    let cards: Int = (treeKind.cardLayers * ellipsoidArea(radii: clump.radii) / (treeKind.cardSize * treeKind.cardSize)).toInt()
     # this mass's own slight shift of all three greens
     let tint: Vec3 = Vec3.create(
       x: nextBetween(random: random, low: 0.92, high: 1.08)
@@ -116,9 +100,12 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
         high: 1.0
       )
       let occlusion: Float = (0.45 + 0.55 * (depth - 0.75) * 4.0) * (0.8 + 0.2 * height)
-      let green: Vec3 = massGreen(pick: (nextUnit(random: random) * 3.0).toInt())
+      let green: Vec3 = treeKind.greens.copyAtFallback(
+        index: (nextUnit(random: random) * treeKind.greens.length.toFloat()).toInt()
+        fallback: treeKind.greens.copyAtDefault(index: 0)
+      )
       let shade: Float = nextBetween(random: random, low: 0.9, high: 1.1)
-      let size: Float = leafCardSize * nextBetween(random: random, low: 0.8, high: 1.2)
+      let size: Float = treeKind.cardSize * nextBetween(random: random, low: 0.8, high: 1.2)
       pushVec4(
         floats: floats
         a: position.x

@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: planned (2026-10-29); the queue's "stylized trees 1/12 .. 12/12".
+Status: task 1/12 done (2026-10-29), 2-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -77,6 +77,24 @@ species generators' growth curves, the crown envelopes, the toon material.
   mass's center (or its branch tip) as the pivot, so a mass sways as one,
   as the old sprays did, instead of every card fluttering alone.
 - T02 must not change: its lab renders before and after are the check.
+
+Done (task 1/12, 2026-10-29): `lib/treeGen/TreeKind.rae`. A `TreeKind` is
+a name, the `TreeMeasures` the tree grows from (TreeGrower; the masses'
+shape ranges `massAcrossMin/Max`, `massUpMin/Max`, `massDepth` are new
+measures that default to T02's round masses), whether variety 0 is traced,
+a `LeafKind` (the leaf's `LeafOutline`, count, size, width, angle spread
+and seed of the stamp LeafImage paints), the card size and layers, the
+three greens and a `BarkKind` (color and streak depth). `warmBroadleafKind`
+holds T02's numbers; `kindParams` / `kindCardSeed` give a variety's params
+and card seed. LeafImage, LeafCards, Bark, TreeLevels (the picture names
+are per kind) and ReferenceTrees.referenceImages / addReferenceKind take
+the kind. A grown kind still takes its other settings (depth turn, limb
+end thickness) from warmBroadleafParams; a kind that needs others adds them
+here. Not done: wind at mass level, and a foliage other than masses: the
+tree that needs them adds them. T02 is unchanged: the lab's T02 scene and
+the levels at near/middle/far from two cameras differ from before by less
+than the same build differs from run to run, the leaf card counts are the
+same and the painted bark picture is byte-identical.
 
 ## 4. Per tree (tasks 2-9)
 

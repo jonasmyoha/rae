@@ -59,6 +59,14 @@ type TreeMeasures {
   crownHalfHeight: Float
   shareBehind: Float
   shareFront: Float
+  # a grown mass's shape: its width and height as parts of its radius (a
+  # random part in each range) and its depth as a part of their mean (the
+  # traced tree's round masses unless a kind says otherwise)
+  massAcrossMin: Float = 0.9
+  massAcrossMax: Float = 1.15
+  massUpMin: Float = 0.85
+  massUpMax: Float = 1.1
+  massDepth: Float = 0.9
 }
 
 # A grown tree, in the traced tree's form
@@ -372,9 +380,17 @@ func grownMass(
   radius: view Float
   parent: view Int
 ) ret TracedClump {
-  let across: Float = radius * nextBetween(random: random, low: 0.9, high: 1.15)
-  let up: Float = radius * nextBetween(random: random, low: 0.85, high: 1.1)
-  let depth: Float = 0.9 * (across + up) * 0.5
+  let across: Float = radius * nextBetween(
+    random: random
+    low: measures.massAcrossMin
+    high: measures.massAcrossMax
+  )
+  let up: Float = radius * nextBetween(
+    random: random
+    low: measures.massUpMin
+    high: measures.massUpMax
+  )
+  let depth: Float = measures.massDepth * (across + up) * 0.5
   let pick: Float = nextUnit(random: random)
   var side: Int = 0
   var y: Float = nextBetween(random: random, low: -0.3, high: 0.3) * depth
@@ -640,8 +656,14 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
 # kind. Everything else (the depth turn of the limbs, the bark, the leaves)
 # is the traced tree's.
 func grownBroadleafParams(seed: view Int) ret TreeParams {
+  ret grownParams(measures: tracedT02Measures(), seed: seed)
+}
+
+# A tree grown from `measures` with `seed`, its other settings the T02
+# tree's (TreeKind: a kind's variety)
+func grownParams(measures: view TreeMeasures, seed: view Int) ret TreeParams {
   var params: TreeParams = warmBroadleafParams(seed: seed)
-  var grown: GrownTree = growFromMeasures(measures: tracedT02Measures(), seed: seed)
+  var grown: GrownTree = growFromMeasures(measures: measures, seed: seed)
   params.height = grown.height
   params.tracedLimbs = own grown.limbs
   params.tracedClumps = own grown.clumps

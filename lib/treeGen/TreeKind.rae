@@ -1,0 +1,110 @@
+# treeGen/TreeKind — one kind of tree as a description the treeGen machinery
+# builds from (docs/stylized-trees-new-technique.md §3): the crown, branching
+# and trunk as TreeMeasures (heights and lengths as parts of the height), the
+# leaf masses' shape, the leaf stamp LeafImage paints (the leaf's outline,
+# size and how many per stamp), the cards over the masses and their three
+# greens (LeafCards), and the bark's color and streaks (Bark). The T02 tree
+# is the first kind, warmBroadleafKind; each stylized tree becomes one more.
+# Masses are one technique, not a rule: a kind that needs another foliage
+# (a column, fronds, tiers) adds it here when its task comes. Written new.
+import Vec3
+open treeGen/TreeParams
+open treeGen/TreeGrower
+
+# The outline of a single leaf on the stamp. almond (T02): widest a little
+# below the middle, rounded at the base, pointed at the tip
+enum LeafOutline { almond }
+
+# The leaves of one stamp (LeafImage, pixels of its 512 x 512 picture):
+# `countMin` plus up to `countSpread` - 1 more, scattered over a disc of
+# radius `reach`, each `lengthMin` to `lengthMax` long and its half width a
+# part `widthMin` to `widthMax` of its length, pointing outward within
+# `angleJitter` radians. `seed` starts each stamp's random numbers.
+type LeafKind {
+  outline: LeafOutline
+  countMin: Int
+  countSpread: Int
+  reach: Float
+  lengthMin: Float
+  lengthMax: Float
+  widthMin: Float
+  widthMax: Float
+  angleJitter: Float
+  seed: Int
+}
+
+# The bark (Bark): the material's color (linear), and how dark the streaks
+# of the painted picture get (0 none .. 1 black)
+type BarkKind {
+  color: Vec3
+  streakDepth: Float
+}
+
+type TreeKind {
+  # Names the kind's pictures among a renderer's images and on disk
+  name: String
+  # The crown, branching and trunk; the masses' count, size, spread and
+  # shape (TreeGrower grows a tree from these)
+  measures: TreeMeasures
+  # Whether variety 0 is a traced tree (T02: TracedT02) instead of a grown
+  # one
+  traced: Bool
+  leaf: LeafKind
+  # A leaf card's width (m) and how many cards cover each point of a mass's
+  # skin, on average
+  cardSize: Float
+  cardLayers: Float
+  # The three greens of a mass (linear), one picked per card
+  greens: List(Vec3)
+  bark: BarkKind
+}
+
+# The T02 tree: warm orange-brown bark, an olive yellow-green crown of round
+# masses, small almond leaves
+func warmBroadleafKind() ret TreeKind {
+  ret TreeKind {
+    name: "warmBroadleaf"
+    measures: tracedT02Measures()
+    traced: true
+    leaf: {
+      outline: LeafOutline.almond
+      countMin: 14
+      countSpread: 5
+      reach: 150.0
+      lengthMin: 85.0
+      lengthMax: 135.0
+      widthMin: 0.24
+      widthMax: 0.33
+      angleJitter: 1.0
+      seed: 9100
+    }
+    cardSize: 0.6
+    cardLayers: 4.5
+    # T02's crown is an olive yellow-green, not a lime one; its masses
+    # differ a little from each other
+    greens: List(Vec3) {
+      Vec3.create(x: 0.19, y: 0.23, z: 0.06)
+      Vec3.create(x: 0.24, y: 0.27, z: 0.07)
+      Vec3.create(x: 0.14, y: 0.18, z: 0.06)
+    }
+    bark: { color: Vec3.create(x: 0.34, y: 0.125, z: 0.055), streakDepth: 0.26 }
+  }
+}
+
+# The params of `treeKind`'s variety `variety`: 0 the traced tree when the kind
+# has one, else a tree grown from the kind's measures with that seed
+func kindParams(treeKind: view TreeKind, variety: view Int) ret TreeParams {
+  if variety is 0 and treeKind.traced {
+    ret warmBroadleafParams(seed: 1)
+  }
+  ret grownParams(measures: treeKind.measures, seed: variety)
+}
+
+# The leaf card seed of variety `variety` (the traced tree's is 1, as its
+# params' seed)
+func kindCardSeed(treeKind: view TreeKind, variety: view Int) ret Int {
+  if variety is 0 and treeKind.traced {
+    ret 1
+  }
+  ret variety
+}
