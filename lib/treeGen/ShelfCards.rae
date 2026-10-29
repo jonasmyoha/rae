@@ -2,14 +2,15 @@
 # branches (docs/spruce-new-technique-design.md §3), in place of LeafCards'
 # masses: along each branch and branchlet, from a quarter of its length to
 # its tip, a SHELF card lying along it and tilted down outward (the spray
-# seen from above) and a CURTAIN card hanging from it along its length,
+# seen from above, tilted steeply enough to show from the side) and a
+# CURTAIN card hanging from it along its length,
 # its hang turned round the branch so some face every way (the spray seen
 # from the side). The cards do not turn
 # to the camera: their MeshData.leafCards flag is 0, so every pass draws
 # them as plain quads. One shading normal a card, the cone's at it, so the
 # tree lights as a cone; darker toward the trunk and lower in the tree;
-# three greens a branch. A card sways with its whole bough (its wind pivot
-# the branch's base). Written new.
+# three greens a branch. No wind for now (the pivot is the bough's base,
+# the flexibility 0). Written new.
 import Math
 import Vec3
 open Mesh3d
@@ -118,7 +119,7 @@ func shelfCards(
         low: 0.85
         high: 1.15
       )
-      let tall: Float = width * 1.6
+      let tall: Float = width * 1.1
       let normal: Vec3 = coneNormal(point: point)
       let radial: Float = Math.sqrt(x: point.x * point.x + point.y * point.y)
       let depth: Float = Math.clamp(val: radial / reach, low: 0.0, high: 1.0)
@@ -127,7 +128,9 @@ func shelfCards(
       let shade: Float = nextBetween(random: random, low: 0.9, high: 1.1) * occlusion
       let color: Vec3 = Vec3.vscale(a: green, s: shade)
       # the shelf: across the branch, its length along it tilted down
-      let tilt: Float = nextBetween(random: random, low: 0.26, high: 0.52)
+      # 35 - 55 degrees down: flatter shelves read as thin streaks from eye
+      # height (edge-on)
+      let tilt: Float = nextBetween(random: random, low: 0.6, high: 0.95)
       let shelfDown: Vec3 = Vec3.vnorm(
         a: Vec3.vadd(a: tangent, b: Vec3.create(x: 0.0, y: 0.0, z: -Math.tan(x: tilt)))
       )
@@ -161,6 +164,34 @@ func shelfCards(
   }
   let count: Int = cards.length
   ret ShelfCards { cards: own cards, count: count }
+}
+
+# The wood a whorled tree shows: only its trunk, from the ground to a
+# little inside its lowest tier (`overlap` m above the lowest branch's
+# base); no branches and no trunk inside the foliage, where it is hidden
+# (a spruce shows only the trunk under its skirt)
+func lowerTrunkSkeleton(skeleton: view TreeSkeleton, overlap: view Float) ret TreeSkeleton {
+  var lowest: Float = 1000000.0
+  loop let limb: view Limb in skeleton.limbs {
+    if limb.order >= 2 and limb.points.length > 0 {
+      lowest = Math.min(a: lowest, b: limb.points.copyAtDefault(index: 0).z)
+    }
+  }
+  let trunk: Limb = skeleton.limbs.copyAtDefault(index: 0)
+  let cut: Float = lowest + overlap
+  var points: List(Vec3) = List.create(Vec3, cap: trunk.points.length)
+  var radii: List(Float) = List.create(Float, cap: trunk.radii.length)
+  loop var k: Int = 0, k < trunk.points.length, ++k {
+    let point: Vec3 = trunk.points.copyAtDefault(index: k)
+    if point.z > cut and points.length >= 2 {
+      break
+    }
+    points.add(value: point)
+    radii.add(value: trunk.radii.copyAtDefault(index: k))
+  }
+  var limbs: List(Limb) = List.create(Limb, cap: 1)
+  limbs.add(value: Limb { points: own points, radii: own radii, parent: -1, order: 0 })
+  ret TreeSkeleton { limbs: own limbs, forkPoint: skeleton.forkPoint }
 }
 
 # The point `distance` along `limb` (meters from its first point)
@@ -317,11 +348,12 @@ func addShelfCard(
         u: column.toFloat()
         value: row.toFloat()
       )
-      # the whole bough sways about its base, slowly and together
+      # no wind for now (the spruce's bough sway disturbed
+      # the look; a wind task is queued): the bough's pivot, flexibility 0
       mesh.windPivots.add(value: pivot.x)
       mesh.windPivots.add(value: pivot.y)
       mesh.windPivots.add(value: pivot.z)
-      mesh.windPivots.add(value: -0.6)
+      mesh.windPivots.add(value: 0.0)
       # a fixed card: flag 0
       mesh.leafCards.add(value: 0.0)
       mesh.leafCards.add(value: 0.0)

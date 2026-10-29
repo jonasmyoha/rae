@@ -98,6 +98,9 @@ func leafCover(
   if outline is LeafOutline.needleSpray {
     ret needleSprayCover(leaf: leaf, along: along, across: across)
   }
+  if outline is LeafOutline.tuft {
+    ret tuftCover(leaf: leaf, along: along, across: across)
+  }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
 
@@ -329,6 +332,29 @@ func needleSprayCover(leaf: view StampLeaf, along: view Float, across: view Floa
     }
   }
   ret cover
+}
+
+# A fluffy tuft (the stylized conifers' foliage clump): an oval as long as
+# the leaf and half as wide each side, its edge scalloped by soft round
+# bumps (seven to the half turn, a sixth of the radius deep), its outer end
+# a little fuller than its inner one. Use a half width of half the length.
+func tuftCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  let x: Float = along - leaf.length * 0.5
+  let angle: Float = Math.atan2(y: across, x: x)
+  # the oval's radius toward this pixel, fuller toward the tip (angle 0)
+  let a: Float = leaf.length * 0.5
+  let b: Float = Math.min(a: leaf.halfWidth, b: leaf.length * 0.5) * (0.85 + 0.15 * Math.cos(
+    x: angle
+  ))
+  let cosine: Float = Math.cos(x: angle)
+  let sine: Float = Math.sin(x: angle)
+  let oval: Float = a * b / Math.sqrt(x: b * b * cosine * cosine + a * a * sine * sine)
+  let bumps: Float = 1.0 - 0.16 * Math.pow(
+    base: Math.abs(value: Math.sin(x: 7.0 * angle))
+    exp: 0.6
+  )
+  let distance: Float = Math.sqrt(x: x * x + across * across)
+  ret Math.clamp(val: (oval * bumps - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
 }
 
 # A ginkgo leaf: a thin stalk over the first quarter of the length, then a
