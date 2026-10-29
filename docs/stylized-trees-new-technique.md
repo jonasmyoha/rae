@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-7/12 done (2026-10-29), 8-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-8/12 done (2026-10-29), 9-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -187,6 +187,21 @@ times its height unit, while the other old trees top out near 1.0, so
 placed old birches stood 22% taller than 6.5-8.5 m. The new birch grows to
 9 m, and `stylizedOldTopRatio` keeps the old size. Crown: 0.82 of the unit
 wide from 0.26 (the old one: 0.82 from 0.24).
+
+Done for the cypress (task 8/12, 2026-10-29): `cypressKind`, one dense
+column made of masses. Many small, tall masses spread through a narrow
+crown read as a lumpy, see-through column from 35 m, so the kept version
+uses wide masses centered on the straight stem, stacked until they merge,
+with short, steep, hidden branches, dense cards (3.5 layers) and stamps of
+many tiny scale leaves. A new grower measure, `crownTaper`, draws the
+crown to a point: every mass (the tip and the filling ones) sits closer to
+the stem and is smaller higher up, by 1 - 0.7 x (height share)^1.5. The
+crown is 0.28 of the height wide from 0.09 (the old one: 0.27 from 0.10),
+9.75 m. The blue-green is 1.7 times the old picture's average: the old
+cypress renders dark, and a dense column is darkened less by occlusion.
+It is lumpier than the old smooth cone. Cases 1251 and 1253 assumed the
+cypress is built at unit height (its scale is its height); they now check
+the placed height through the height unit, and the umbrella pine's unit.
 
 ## 5. Bushes (task 10)
 

@@ -4,7 +4,8 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch). Written new.
+# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch, cypress).
+# Written new.
 import Sys
 import Vec3
 import RendererDeferred
@@ -51,6 +52,11 @@ const ginkgoVariety: Int = 1
 const birchHeight: Float = 9.0
 
 const birchVariety: Int = 1
+
+# The cypress's grown height (m): the middle of the old tree's 8 - 11.5 m
+const cypressHeight: Float = 9.75
+
+const cypressVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -518,6 +524,88 @@ func birchKind() ret TreeKind {
   }
 }
 
+# The Mediterranean cypress, as the old tree looks: a tall, narrow flame
+# (the old one's: about 0.27 of its height wide, from 0.10 to 1.0 of it),
+# widest low and drawn to a point; a straight central stem, its branches
+# short and steep and hidden; dark blue-green foliage of tiny scale leaves
+# (the old spray picture's average times its tint: linear 0.045, 0.115,
+# 0.054); brown bark (the old bark's 0.11, 0.08, 0.05). It reads as one
+# smooth, dense column, so its masses are wide ones centered on the stem
+# and stacked until they merge into one flame with only small bumps on the
+# outline, the cards dense (3.5 layers, stamps with few gaps); the crown
+# narrows to a point (crownTaper).
+func cypressKind() ret TreeKind {
+  ret TreeKind {
+    name: "cypress"
+    measures: {
+      height: cypressHeight
+      forkHeight: 0.2
+      baseRadius: 0.15
+      forkRadius: 0.11
+      bow: 0.004
+      bowAt: 0.5
+      mainLean: 0.0
+      mainLength: 0.8
+      mainRadius: 0.9
+      secondLean: 0.3
+      secondLength: 0.2
+      secondRadius: 0.5
+      branchCount: 14
+      branchLowest: 0.06
+      branchHighest: 0.88
+      branchAngleMin: 0.25
+      branchAngleMax: 0.45
+      branchLengthMin: 0.05
+      branchLengthMax: 0.1
+      branchRadius: 0.4
+      massCount: 34
+      massRadiusMin: 0.6
+      massRadiusMax: 0.8
+      crownX: 0.0
+      crownZ: 0.33
+      crownHalfWidth: 0.035
+      crownHalfHeight: 0.39
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 0.95
+      massAcrossMax: 1.05
+      massUpMin: 1.1
+      massUpMax: 1.35
+      massDepth: 1.0
+      roundCrown: true
+      crownTaper: 0.7
+    }
+    traced: false
+    # tiny scale leaves: small, narrow and many, in sprays
+    leaf: {
+      outline: LeafOutline.almond
+      countMin: 36
+      countSpread: 10
+      reach: 185.0
+      lengthMin: 35.0
+      lengthMax: 55.0
+      widthMin: 0.18
+      widthMax: 0.24
+      angleJitter: 0.6
+      seed: 10500
+    }
+    cardSize: 0.42
+    cardLayers: 3.5
+    # the old blue-green's hue, about 1.7 times its picture's average:
+    # the old cypress rendered dark, and a dense column is darkened less
+    # by occlusion than a loose crown
+    greens: List(Vec3) {
+      Vec3.create(x: 0.075, y: 0.2, z: 0.1)
+      Vec3.create(x: 0.09, y: 0.23, z: 0.115)
+      Vec3.create(x: 0.062, y: 0.17, z: 0.085)
+    }
+    bark: { color: Vec3.create(x: 0.12, y: 0.085, z: 0.06), streakDepth: 0.35 }
+    # tall, narrow masses: every 3rd card at 1.6 times the width
+    middleKeep: 3
+    middleGrow: 1.6
+  }
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -549,6 +637,9 @@ func stylizedNewKind(species: view Int) ret Bool {
   if species is speciesBirch {
     ret not stylizedOldRequested(name: "birch")
   }
+  if species is speciesCypress {
+    ret not stylizedOldRequested(name: "cypress")
+  }
   ret false
 }
 
@@ -569,6 +660,9 @@ func stylizedTreeKind(species: view Int) ret TreeKind {
   if species is speciesBirch {
     ret birchKind()
   }
+  if species is speciesCypress {
+    ret cypressKind()
+  }
   ret limeKind()
 }
 
@@ -588,6 +682,9 @@ func stylizedKindVariety(species: view Int) ret Int {
   }
   if species is speciesBirch {
     ret birchVariety
+  }
+  if species is speciesCypress {
+    ret cypressVariety
   }
   ret limeVariety
 }
