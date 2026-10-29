@@ -32,6 +32,7 @@ open treeGen/BarkMesh
 open treeGen/Bark
 open treeGen/LeafCards
 open treeGen/TreeLevels
+open treeGen/TreeKind
 
 const referenceSpeciesCount: Int = 5
 
@@ -39,8 +40,10 @@ const referenceSpeciesCount: Int = 5
 # height over this
 const referenceTreeHeight: Float = 13.5
 
-# The bark picture, painted once (as app3d/ReferenceTree paints it)
-const referenceSetBarkPath: String = ".rae/treeGen/warmBark.png"
+# A kind's bark picture, painted once
+func referenceBarkPath(treeKind: view TreeKind) ret String {
+  ret ".rae/treeGen/{treeKind.name}Bark.png"
+}
 
 # Where the near level ends (the walkers': StylizedTrees.nearTreeDistance)
 const referenceNearDistance: Float = 30.0
@@ -147,30 +150,32 @@ func referenceBounds(meshes: view List(MeshData)) ret Vec3 {
   ret Vec3.create(x: reach, y: reach, z: top)
 }
 
-# The material images a T02 kind uses: the bark picture, the leaf stamp and
-# the impostor's filled leaf outline (TreeLevels), added once per renderer
+# The material images a tree kind uses: the bark picture, the leaf stamp
+# and the impostor's filled leaf outline (TreeLevels), added once per
+# renderer and kind
 type ReferenceImages {
   barkLayer: Int
   leafLayer: Int
   impostorLeafLayer: Int
 }
 
-func referenceImages(renderer: mod DeferredRenderer) ret ReferenceImages {
-  if not Sys.exists(path: referenceSetBarkPath) {
+func referenceImages(renderer: mod DeferredRenderer, treeKind: view TreeKind) ret ReferenceImages {
+  let barkPath: String = referenceBarkPath(treeKind: treeKind)
+  if not Sys.exists(path: barkPath) {
     let made: Bool = Sys.makeDir(path: ".rae/treeGen")
-    let written: Bool = writeBarkImage(path: referenceSetBarkPath)
+    let written: Bool = writeBarkImage(barkKind: treeKind.bark, path: barkPath)
   }
   ret ReferenceImages {
-    barkLayer: rendererLoadSurfaceImage(renderer: renderer, path: referenceSetBarkPath)
+    barkLayer: rendererLoadSurfaceImage(renderer: renderer, path: barkPath)
     leafLayer: rendererAddSurfaceImagePixels(
       renderer: renderer
-      name: leafCardImageName
-      pixels: leafCardImagePixels()
+      name: leafCardImageName(treeKind: treeKind)
+      pixels: leafCardImagePixels(leafKind: treeKind.leaf)
     )
     impostorLeafLayer: rendererAddSurfaceImagePixels(
       renderer: renderer
-      name: leafImpostorImageName
-      pixels: leafImpostorImagePixels()
+      name: leafImpostorImageName(treeKind: treeKind)
+      pixels: leafImpostorImagePixels(leafKind: treeKind.leaf)
     )
   }
 }
@@ -191,34 +196,34 @@ func referenceLevelEnds(midDistance: view Float, farDistance: view Float) ret Ve
   ret Vec3.create(x: referenceNearDistance, y: midDistance, z: farDistance)
 }
 
-# One T02 variety (0 the traced tree, 1-4 the grown ones) as a kind of
-# `field`, its picture layer `layer` of the impostor atlas the caller bakes
-# from the returned subject (the stylized set bakes it with its own species)
+# One variety of tree kind `treeKind` (T02: 0 the traced tree, 1-4 the grown
+# ones) as a kind of `field`, its picture layer `layer` of the impostor
+# atlas the caller bakes from the returned subject (the stylized set bakes
+# it with its own species); `images` the kind's (referenceImages)
 func addReferenceKind(
   field: mod PropField
   renderer: mod DeferredRenderer
+  treeKind: view TreeKind
   variety: view Int
   layer: view Int
   images: view ReferenceImages
   ends: view Vec3
 ) ret ImpostorSubject {
-  var seed: Int = variety
-  var params: TreeParams = warmBroadleafParams(seed: 1)
-  if variety > 0 {
-    params = grownBroadleafParams(seed: seed)
-  } else {
-    seed = 1
-  }
+  let params: TreeParams = kindParams(treeKind: treeKind, variety: variety)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let barkData: MeshData = barkMesh(skeleton: skeleton)
-  let cards: LeafCards = leafCards(skeleton: skeleton, seed: seed)
+  let cards: LeafCards = leafCards(
+    skeleton: skeleton
+    treeKind: treeKind
+    seed: kindCardSeed(treeKind: treeKind, variety: variety)
+  )
   let nearLeaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: 1, grow: 1.0)
   let middleLeaves: LeafCardLevel = leafCardLevel(
     cards: cards
     keepEvery: referenceMiddleKeep
     grow: referenceMiddleGrow
   )
-  let bark: Material3d = barkMaterial(layer: images.barkLayer)
+  let bark: Material3d = barkMaterial(barkKind: treeKind.bark, layer: images.barkLayer)
   let barkHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: barkData)
   let barkTriangles: Int = barkData.indices.length / 3
   var nearParts: List(MeshData) = List.create(MeshData, cap: 4)
@@ -237,7 +242,7 @@ func addReferenceKind(
   # the impostor: the near level, the bark and the leaves with their
   # pictures
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
-  albedos.add(value: barkColor())
+  albedos.add(value: treeKind.bark.color)
   loop let albedo: view Vec3 in nearLeaves.albedos {
     albedos.add(value: albedo)
   }
@@ -303,7 +308,7 @@ func addReferenceKind(
     middleTriangles = middleTriangles + mesh.indices.length / 3
   }
   log(
-    "[referenceTrees] T02 variety {variety}: {cards.count} leaf cards; {triangles} triangles near, {middleTriangles} middle; {bounds.z} m tall"
+    "[referenceTrees] {treeKind.name} variety {variety}: {cards.count} leaf cards; {triangles} triangles near, {middleTriangles} middle; {bounds.z} m tall"
   )
   ret subject
 }
@@ -330,13 +335,15 @@ func addReferenceForestKinds(
       tilt: 0.0
     )
   }
-  let images: ReferenceImages = referenceImages(renderer: renderer)
+  let treeKind: TreeKind = warmBroadleafKind()
+  let images: ReferenceImages = referenceImages(renderer: renderer, treeKind: treeKind)
   let ends: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: referenceSpeciesCount)
   loop var species: Int = 0, species < referenceSpeciesCount, ++species {
     subjects.add(value: addReferenceKind(
       field: field
       renderer: renderer
+      treeKind: treeKind
       variety: species
       layer: species
       images: images

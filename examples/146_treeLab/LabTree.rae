@@ -20,6 +20,7 @@ open treeGen/LeafImage
 open treeGen/LeafCards
 open treeGen/LeafPass
 open treeGen/TreeGrower
+open treeGen/TreeKind
 open Math3d
 
 const labBarkImagePath: String = ".rae/treeLab/warmBark.png"
@@ -60,7 +61,7 @@ func labTreeSeed() ret Int {
 func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
   if not Sys.exists(path: labBarkImagePath) {
     let made: Bool = Sys.makeDir(path: ".rae/treeLab")
-    if not writeBarkImage(path: labBarkImagePath) {
+    if not writeBarkImage(barkKind: warmBroadleafKind().bark, path: labBarkImagePath) {
       log("[treeLab] could not write the bark image {labBarkImagePath}")
       ret -1
     }
@@ -112,7 +113,7 @@ func addGeneratedTree(
   # the leaf stamps, painted once for every tree
   var pictures: List(List(Float)) = List.create(List(Float), cap: 0)
   if leaves {
-    pictures = leafImageLayerPixels()
+    pictures = leafImageLayerPixels(leafKind: warmBroadleafKind().leaf)
     previewLeafStamps(pictures: pictures)
   }
   let barkLayer: Int = labBarkLayer(renderer: renderer)
@@ -170,7 +171,7 @@ func addLabTree(
   let unusedEntityId: EntityId = world3dAddMeshInstance(
     world: world
     mesh: handle
-    material: barkMaterial(layer: barkLayer)
+    material: barkMaterial(barkKind: warmBroadleafKind().bark, layer: barkLayer)
     position: Vec3.create(x: x, y: 0.0, z: 0.0)
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -203,7 +204,11 @@ func addLabTree(
       indices: shadowMasses.indices
     ))
     tree.shadowModels.add(value: mat4Translate(x: x, y: 0.0, z: 0.0))
-    var cards: LeafCards = leafCards(skeleton: skeleton, seed: params.seed)
+    var cards: LeafCards = leafCards(
+      skeleton: skeleton
+      treeKind: warmBroadleafKind()
+      seed: params.seed
+    )
     cardCount = cards.count
     if traced {
       dumpLeafCards(cards: cards)

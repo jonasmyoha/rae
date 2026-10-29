@@ -15,13 +15,18 @@ open Vec3
 open Mesh3d
 open treeGen/LeafCards
 open treeGen/LeafImage
+open treeGen/TreeKind
 
-# The name of the leaf stamp picture among a renderer's material images
+# The name of a kind's leaf stamp picture among a renderer's material images
 # (RendererImages.rendererAddSurfaceImagePixels, stamp 0 of LeafImage)
-const leafCardImageName: String = "treeGen/leafCard"
+func leafCardImageName(treeKind: view TreeKind) ret String {
+  ret "treeGen/{treeKind.name}/leafCard"
+}
 
-# The impostor's leaf picture's name (leafImpostorImagePixels)
-const leafImpostorImageName: String = "treeGen/leafImpostor"
+# The kind's impostor leaf picture's name (leafImpostorImagePixels)
+func leafImpostorImageName(treeKind: view TreeKind) ret String {
+  ret "treeGen/{treeKind.name}/leafImpostor"
+}
 
 # A level's leaves: one card mesh per tone, darkest first, and each tone's
 # color
@@ -35,8 +40,8 @@ type LeafCardLevel {
 # levels average gap and leaf texels together, and LeafImage's light gap
 # tone (right for the leaf pass's own filtering) turned a far crown pale
 # and grey in the impostor bake
-func leafCardImagePixels() ret List(Float) {
-  var pixels: List(Float) = leafLayerPixels(layer: 0)
+func leafCardImagePixels(leafKind: view LeafKind) ret List(Float) {
+  var pixels: List(Float) = leafLayerPixels(leafKind: leafKind, layer: 0)
   let count: Int = pixels.length / 4
   var red: Float = 0.0
   var green: Float = 0.0
@@ -68,8 +73,8 @@ func leafCardImagePixels() ret List(Float) {
 # holes that differ from view to view, and the blend between neighboring
 # views smeared them into the crown as patches of sky. The filled outline
 # keeps the clumps and the gaps between them, not between single leaves.
-func leafImpostorImagePixels() ret List(Float) {
-  let leaves: List(Float) = leafCardImagePixels()
+func leafImpostorImagePixels(leafKind: view LeafKind) ret List(Float) {
+  let leaves: List(Float) = leafCardImagePixels(leafKind: leafKind)
   let size: Int = leafImageSize
   var alpha: List(Float) = List.create(Float, cap: size * size)
   loop var i: Int = 0, i < size * size, ++i {

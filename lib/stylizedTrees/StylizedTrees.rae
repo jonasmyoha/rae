@@ -41,6 +41,7 @@ open gpu/GpuResources
 open ImpostorAtlas
 open ImpostorBake
 open treeSets/TreeSet
+open treeGen/TreeKind
 
 # Stable legacy kind: small-leaved lime (Tilia cordata), never renumbered.
 const speciesBroadleaf: Int = 0
@@ -917,12 +918,14 @@ func addStylizedForestKinds(
   }
   # the warm broadleaf's varieties (ReferenceTrees), their pictures in the
   # same atlas after the ten above
-  let warmImages: ReferenceImages = referenceImages(renderer: renderer)
+  let warmKind: TreeKind = warmBroadleafKind()
+  let warmImages: ReferenceImages = referenceImages(renderer: renderer, treeKind: warmKind)
   let warmEnds: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
   loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
     subjects.add(value: addReferenceKind(
       field: field
       renderer: renderer
+      treeKind: warmKind
       variety: variety
       layer: speciesWarmBroadleaf + variety
       images: warmImages
