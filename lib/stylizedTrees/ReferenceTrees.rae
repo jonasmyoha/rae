@@ -7,7 +7,7 @@
 # Each becomes a PropField kind (addReferenceForestKinds) at the walkers'
 # distances: near, the bark and every leaf card (treeGen/TreeLevels: the
 # cards in three tones as camera-facing card meshes); middle, the bark and a
-# quarter of the cards at twice the width, so the clump layout and the
+# part of the cards (the kind's middleKeep) wider (middleGrow), so the clump layout and the
 # covered area stay; far, an impostor baked from the near level.
 # RAE_TREE_LEVEL=near|middle|far shows only that level at every distance,
 # for comparing the levels from one camera.
@@ -47,12 +47,6 @@ func referenceBarkPath(treeKind: view TreeKind) ret String {
 
 # Where the near level ends (the walkers': StylizedTrees.nearTreeDistance)
 const referenceNearDistance: Float = 30.0
-
-# The middle level: every referenceMiddleKeep-th card, referenceMiddleGrow
-# times as wide (the area kept: 4 cards' area in one card twice as wide)
-const referenceMiddleKeep: Int = 4
-
-const referenceMiddleGrow: Float = 2.0
 
 # The leaves sway in the wind, the bark (part 0) stays still
 const referenceLeafSway: Float = 1.0
@@ -246,8 +240,8 @@ func addReferenceKind(
   let nearLeaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: 1, grow: 1.0)
   let middleLeaves: LeafCardLevel = leafCardLevel(
     cards: cards
-    keepEvery: referenceMiddleKeep
-    grow: referenceMiddleGrow
+    keepEvery: treeKind.middleKeep
+    grow: treeKind.middleGrow
   )
   let bark: Material3d = barkMaterial(barkKind: treeKind.bark, layer: images.barkLayer)
   let barkHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: barkData)
