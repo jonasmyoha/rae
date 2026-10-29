@@ -98,8 +98,8 @@ func leafCover(
   if outline is LeafOutline.needleSpray {
     ret needleSprayCover(leaf: leaf, along: along, across: across)
   }
-  if outline is LeafOutline.tuft {
-    ret tuftCover(leaf: leaf, along: along, across: across)
+  if outline is LeafOutline.sprig {
+    ret sprigCover(leaf: leaf, along: along, across: across)
   }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
@@ -334,27 +334,70 @@ func needleSprayCover(leaf: view StampLeaf, along: view Float, across: view Floa
   ret cover
 }
 
-# A fluffy tuft (the stylized conifers' foliage clump): an oval as long as
-# the leaf and half as wide each side, its edge scalloped by soft round
-# bumps (seven to the half turn, a sixth of the radius deep), its outer end
-# a little fuller than its inner one. Use a half width of half the length.
-func tuftCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
-  let x: Float = along - leaf.length * 0.5
-  let angle: Float = Math.atan2(y: across, x: x)
-  # the oval's radius toward this pixel, fuller toward the tip (angle 0)
-  let a: Float = leaf.length * 0.5
-  let b: Float = Math.min(a: leaf.halfWidth, b: leaf.length * 0.5) * (0.85 + 0.15 * Math.cos(
-    x: angle
-  ))
-  let cosine: Float = Math.cos(x: angle)
-  let sine: Float = Math.sin(x: angle)
-  let oval: Float = a * b / Math.sqrt(x: b * b * cosine * cosine + a * a * sine * sine)
-  let bumps: Float = 1.0 - 0.16 * Math.pow(
-    base: Math.abs(value: Math.sin(x: 7.0 * angle))
-    exp: 0.6
+# One needle sprig, `length` long and `halfWidth` wide each side, along x
+# from its foot: a flat spray pointed at its tip, widest a fifth of the way
+# along, its two edges a fringe of needle tips (14 teeth along it,
+# slanting forward, cut a third of the half width deep), a twig down its
+# middle
+func sprigShape(
+  length: view Float
+  halfWidth: view Float
+  along: view Float
+  across: view Float
+) ret Float {
+  if along <= 0.0 or along >= length {
+    ret 0.0
+  }
+  let share: Float = along / length
+  # rounded at the foot, straight in to the point at the tip
+  let body: Float = Math.min(a: share * 5.0, b: 1.0) * Math.pow(base: (1.0 - share) / 0.8, exp: 0.9)
+  let half: Float = halfWidth * Math.min(a: body, b: 1.0)
+  let off: Float = Math.abs(value: across)
+  # further out on the edge is further forward: the needle tips slant
+  # toward the sprig's tip
+  let period: Float = length / 14.0
+  let phase: Float = (along - off * 0.9) / period
+  let tooth: Float = 0.67 + 0.33 * (1.0 - (phase - Math.floor(x: phase)))
+  let edge: Float = Math.clamp(val: (half * tooth - off) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  let twig: Float = Math.clamp(val: (1.6 - off) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  ret Math.max(a: edge, b: twig)
+}
+
+# A spruce frond, as stylized conifers are painted (a branch's end, seen
+# from above): a main sprig the leaf's length, and three pairs of side
+# sprigs along it, 50 degrees forward to either side, shorter toward the
+# tip (from 0.2, 0.42 and 0.62 of the way, 0.45, 0.36 and 0.25 of its
+# length), so it reads as a branch, not as a lobed leaf. Use a half width of
+# about a sixth of the length.
+func sprigCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  var cover: Float = sprigShape(
+    length: leaf.length
+    halfWidth: leaf.halfWidth
+    along: along
+    across: across
   )
-  let distance: Float = Math.sqrt(x: x * x + across * across)
-  ret Math.clamp(val: (oval * bumps - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  let feet: List(Float) = List(Float) { 0.2, 0.42, 0.62 }
+  let lengths: List(Float) = List(Float) { 0.45, 0.36, 0.25 }
+  let cosine: Float = 0.643
+  let sine: Float = 0.766
+  loop var pair: Int = 0, pair < 3, ++pair {
+    let foot: Float = leaf.length * feet.copyAtDefault(index: pair)
+    let length: Float = leaf.length * lengths.copyAtDefault(index: pair)
+    loop var side: Int = 0, side < 2, ++side {
+      let x: Float = along - foot
+      let y: Float = across * (side.toFloat() * 2.0 - 1.0)
+      cover = Math.max(
+        a: cover
+        b: sprigShape(
+          length: length
+          halfWidth: leaf.halfWidth * 0.6
+          along: x * cosine + y * sine
+          across: y * cosine - x * sine
+        )
+      )
+    }
+  }
+  ret cover
 }
 
 # A ginkgo leaf: a thin stalk over the first quarter of the length, then a

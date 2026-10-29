@@ -279,4 +279,10 @@ and add what the other new trees have:
 - **Levels:** middle every 3rd card at 1.35 times (101 - 103% of the near
   outline; 1.5 covered 105 - 108%). Near 1,305 cards, 2,792 triangles.
 - The shelves mode and `treeGen/ShelfCards` are removed.
+- **The picture (2026-10-30):** the round, scalloped tuft stamp read as
+  cookie-cutter blobs. `LeafOutline.sprig` replaces it: one or two fronds
+  a card, each a main sprig with three pairs of side sprigs 50 degrees
+  forward, shorter toward the tip, every sprig pointed with a forward-
+  slanting fringe of needle tips. A frond leaves more of its card open, so
+  `cardLayers` is 8 and cards 0.5 m (1,695 cards near).
 
