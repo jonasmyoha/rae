@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-5/12 done (2026-10-29), 6-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-6/12 done (2026-10-29), 7-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -161,6 +161,19 @@ leaf is `LeafOutline.deepLobed` (seven narrow lobes). A flat mass's rim is
 thin, so a twice-as-wide middle card sticks out past it (110-113%).
 `TreeKind.middleKeep` / `middleGrow` (default 4 and 2.0) are now per kind,
 and this tree uses 3 and 1.6, which gives 99-102%.
+
+Done for the ginkgo (task 6/12, 2026-10-29): `ginkgoKind`, with masses
+on two fans. The old tree is a curved leader forking into two spreading
+fans of rising branches under a rounded crown, so it uses `twoStems`
+(forking at 0.38, the trunk bowed) and masses a little taller than wide.
+The crown is 1.09 of the height wide from 0.30 (the old one: about 1.15
+from 0.31). The leaf is `LeafOutline.fan` (a stalk, a wedge, a notched
+edge). The gold was the hard part: a dark yellow reads as olive, and the
+blue sky light in the shade turns yellow toward green. The hue stays the
+picture's (green 0.62 of red), as bright as red allows, and a new
+per-kind `TreeKind.occlusionFloor` (default 0.45, T02's) lets the deep
+cards darken less (0.8 here). It still renders about half as bright as
+the old flat-lit crown.
 
 ## 5. Bushes (task 10)
 

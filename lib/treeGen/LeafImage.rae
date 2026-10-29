@@ -93,6 +93,9 @@ func leafCover(
   if outline is LeafOutline.deepLobed {
     ret deepLobedCover(leaf: leaf, along: along, across: across)
   }
+  if outline is LeafOutline.fan {
+    ret fanCover(leaf: leaf, along: along, across: across)
+  }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
 
@@ -164,6 +167,32 @@ func deepLobedCover(leaf: view StampLeaf, along: view Float, across: view Float)
   }
   let reach: Float = leaf.halfWidth * (0.25 + 0.75 * lobe)
   ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+}
+
+# A ginkgo leaf: a thin stalk over the first quarter of the length, then a
+# wedge from there opening 46 degrees either side to a curved edge at the
+# full length, notched in its middle. Use a half width of about 0.55 of
+# the length.
+func fanCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  if along <= 0.0 or along >= leaf.length {
+    ret 0.0
+  }
+  let apex: Float = leaf.length * 0.25
+  let stalk: Float = Math.clamp(
+    val: (1.6 - Math.abs(value: across)) / 1.5 + 0.5
+    low: 0.0
+    high: 1.0
+  ) * Math.clamp(val: (apex + 6.0 - along) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  let x: Float = along - apex
+  let distance: Float = Math.sqrt(x: x * x + across * across)
+  let angle: Float = Math.atan2(y: across, x: x)
+  let notch: Float = 1.0 - 0.22 * Math.exp(x: -(angle / 0.1) * (angle / 0.1))
+  let edge: Float = (leaf.length - apex) * notch
+  let inside: Float = Math.min(
+    a: (edge - distance) / 1.5 + 0.5
+    b: (0.8 - Math.abs(value: angle)) * distance / 1.5 + 0.5
+  )
+  ret Math.max(a: stalk, b: Math.clamp(val: inside, low: 0.0, high: 1.0))
 }
 
 # An almond: widest a little below the middle, rounded at the base, pointed

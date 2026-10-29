@@ -99,7 +99,7 @@ func leafCards(skeleton: view TreeSkeleton, treeKind: view TreeKind, seed: view 
         low: 0.0
         high: 1.0
       )
-      let occlusion: Float = (0.45 + 0.55 * (depth - 0.75) * 4.0) * (0.8 + 0.2 * height)
+      let occlusion: Float = (treeKind.occlusionFloor + (1.0 - treeKind.occlusionFloor) * (depth - 0.75) * 4.0) * (0.8 + 0.2 * height)
       let green: Vec3 = treeKind.greens.copyAtFallback(
         index: (nextUnit(random: random) * treeKind.greens.length.toFloat()).toInt()
         fallback: treeKind.greens.copyAtDefault(index: 0)

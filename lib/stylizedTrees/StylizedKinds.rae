@@ -4,7 +4,7 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple, japaneseMaple). Written new.
+# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo). Written new.
 import Sys
 import Vec3
 import RendererDeferred
@@ -38,6 +38,12 @@ const redMapleVariety: Int = 1
 const japaneseMapleHeight: Float = 4.0
 
 const japaneseMapleVariety: Int = 1
+
+# The ginkgo's grown height (m): the old tree's reference height, the
+# middle of its 4.2 - 6.8 m
+const ginkgoHeight: Float = 5.5
+
+const ginkgoVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -343,6 +349,83 @@ func japaneseMapleKind() ret TreeKind {
   }
 }
 
+# The Golden Globe ginkgo in autumn gold, as the old tree looks: a curved
+# leader forking into two fans of rising branches, a rounded crown (the old
+# one's: about 1.15 of the height wide, from 0.31 to 1.02 of it) of masses
+# a little taller than wide; fan-shaped leaves on long stalks (the old
+# spray picture's average times its tint: linear 0.78, 0.48, 0.04);
+# gray-brown furrowed bark (the old bark's 0.25, 0.20, 0.15). Masses fit:
+# the crown reads as a globe of upright clusters.
+func ginkgoKind() ret TreeKind {
+  ret TreeKind {
+    name: "ginkgo"
+    measures: {
+      height: ginkgoHeight
+      forkHeight: 0.38
+      baseRadius: 0.19
+      forkRadius: 0.12
+      bow: 0.03
+      bowAt: 0.6
+      mainLean: 0.18
+      mainLength: 0.6
+      mainRadius: 0.85
+      secondLean: 0.55
+      secondLength: 0.45
+      secondRadius: 0.75
+      branchCount: 9
+      branchLowest: 0.45
+      branchHighest: 0.88
+      branchAngleMin: 0.7
+      branchAngleMax: 1.05
+      branchLengthMin: 0.22
+      branchLengthMax: 0.36
+      branchRadius: 0.5
+      massCount: 28
+      massRadiusMin: 0.55
+      massRadiusMax: 0.8
+      crownX: 0.0
+      crownZ: 0.31
+      crownHalfWidth: 0.4
+      crownHalfHeight: 0.2
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 0.85
+      massAcrossMax: 1.05
+      massUpMin: 1.0
+      massUpMax: 1.2
+      massDepth: 0.95
+      roundCrown: true
+      twoStems: true
+    }
+    traced: false
+    leaf: {
+      outline: LeafOutline.fan
+      countMin: 12
+      countSpread: 6
+      reach: 145.0
+      lengthMin: 75.0
+      lengthMax: 105.0
+      widthMin: 0.56
+      widthMax: 0.56
+      angleJitter: 1.0
+      seed: 10100
+    }
+    cardSize: 0.5
+    cardLayers: 3.0
+    # the old gold's hue (green 0.62 of red: the sky light in the shade
+    # adds green, so the crown renders near the old one's 0.79), as bright
+    # as red allows
+    greens: List(Vec3) {
+      Vec3.create(x: 0.97, y: 0.6, z: 0.05)
+      Vec3.create(x: 1.0, y: 0.64, z: 0.055)
+      Vec3.create(x: 0.9, y: 0.55, z: 0.045)
+    }
+    bark: { color: Vec3.create(x: 0.28, y: 0.23, z: 0.17), streakDepth: 0.4 }
+    # deep cards darkened less, so the shaded gold stays gold, not olive
+    occlusionFloor: 0.8
+  }
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -368,6 +451,9 @@ func stylizedNewKind(species: view Int) ret Bool {
   if species is speciesCrimson {
     ret not stylizedOldRequested(name: "japaneseMaple")
   }
+  if species is speciesGold {
+    ret not stylizedOldRequested(name: "ginkgo")
+  }
   ret false
 }
 
@@ -382,6 +468,9 @@ func stylizedTreeKind(species: view Int) ret TreeKind {
   if species is speciesCrimson {
     ret japaneseMapleKind()
   }
+  if species is speciesGold {
+    ret ginkgoKind()
+  }
   ret limeKind()
 }
 
@@ -395,6 +484,9 @@ func stylizedKindVariety(species: view Int) ret Int {
   }
   if species is speciesCrimson {
     ret japaneseMapleVariety
+  }
+  if species is speciesGold {
+    ret ginkgoVariety
   }
   ret limeVariety
 }

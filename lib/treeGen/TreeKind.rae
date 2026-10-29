@@ -18,13 +18,15 @@ open treeGen/TreeGrower
 # its middle, a notch where the stalk joins. threeLobed (the red maple): three
 # pointed lobes forward, at 0 and +-60 degrees, the stalk end rounded.
 # deepLobed (the Japanese maple): seven narrow lobes cut deep, nearly to
-# the middle
+# the middle. fan (the ginkgo): a long stalk, then a wedge opening to a
+# broad curved edge with a notch in its middle
 enum LeafOutline {
   almond
   heart
   lobed
   threeLobed
   deepLobed
+  fan
 }
 
 # The leaves of one stamp (LeafImage, pixels of its 512 x 512 picture):
@@ -74,6 +76,9 @@ type TreeKind {
   # cards, as a wider card sticks out past a flat mass's rim)
   middleKeep: Int = 4
   middleGrow: Float = 2.0
+  # The occlusion of a card deepest in its mass (1 at the skin): a light
+  # crown (the ginkgo's yellow) turns olive when darkened as much as T02's
+  occlusionFloor: Float = 0.45
 }
 
 # The T02 tree: warm orange-brown bark, an olive yellow-green crown of round
