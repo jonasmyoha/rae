@@ -252,6 +252,13 @@ checks for at least 300.
 
 ## 6. The spruce (task 11, design only)
 
+Designed (task 11/12, 2026-10-29), waiting for the is:
+docs/spruce-new-technique-design.md. It uses whorl growth in TreeGrower and
+fixed shelf and curtain cards of painted needle sprays along the branches
+(treeGen/ShelfCards, `TreeKind.foliage`) in place of masses. The levels, the
+impostor and the painted pictures carry over. Below is the starting point it
+grew from.
+
 The masses-and-cards method does not fit a conifer's tiers. Starting point
 for the design: a straight trunk to the tip; rings of branches every
 0.4-0.6 m, shorter toward the top (the cone); each branch drooping a
