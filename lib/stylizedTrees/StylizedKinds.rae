@@ -508,7 +508,7 @@ func addStylizedBushKind(
 # Whorl growth (treeGen/WhorlGrower), each whorl one of the low-poly
 # spruce's solid scalloped skirts, its rim drooping to the bough tips,
 # filled with camera-facing cards (treeGen/SkirtCards, §11 of the design)
-# painted with fluffy tufts (LeafOutline.tuft) and lit by the skirt's broad
+# painted with needle sprigs (LeafOutline.sprig) and lit by the skirt's broad
 # normal. Only the trunk under the lowest tier is drawn (no branches), and
 # no wind for now.
 func spruceKind() ret TreeKind {
@@ -517,21 +517,22 @@ func spruceKind() ret TreeKind {
     measures: whorlTreeMeasures(height: spruceHeight, baseRadius: 0.17)
     traced: false
     leaf: {
-      outline: LeafOutline.tuft
-      countMin: 4
-      countSpread: 3
-      reach: 140.0
-      lengthMin: 200.0
-      lengthMax: 270.0
-      widthMin: 0.68
-      widthMax: 0.68
-      angleJitter: 0.6
+      # one or two fronds across the card (a branch's end)
+      outline: LeafOutline.sprig
+      countMin: 1
+      countSpread: 2
+      reach: 40.0
+      lengthMin: 380.0
+      lengthMax: 440.0
+      widthMin: 0.14
+      widthMax: 0.17
+      angleJitter: 0.5
       seed: 11100
     }
     # a card's width on the widest tier (smaller on the upper ones), and the
     # cards over each point of a skirt's skin
-    cardSize: 0.45
-    cardLayers: 5.0
+    cardSize: 0.5
+    cardLayers: 8.0
     # a dark conifer green, less saturated than the old one (as the
     # cypress's)
     greens: List(Vec3) {
