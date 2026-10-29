@@ -86,9 +86,10 @@ const propGrassMin: Float = 0.45
 
 # The single source of truth for the ground color: the terrain ground
 # material AND the GPU grass gradient's bottom both read this, so the grass
-# roots match the ground.
+# roots match the ground. RAE_TERRAIN_GRASS in lib/terrain_palette_walker.wgsl
+# repeats it for the painted ground; change both together.
 func walkerGroundColor() ret Vec3 {
-  ret Vec3.create(x: 0.080, y: 0.245, z: 0.015)
+  ret Vec3.create(x: 0.088, y: 0.14, z: 0.026)
 }
 
 # ----- ECS components ------------------------------------------------
@@ -793,7 +794,7 @@ func createWalkerTerrain(
     mesh: grassTuftMesh(seed: 71)
   )
   let grassMaterial: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.18, y: 0.42, z: 0.055)
+    color: Vec3.create(x: 0.11, y: 0.155, z: 0.038)
     roughness: 0.94
   )
   # One entity per pool slot per small prop kind, placed by updateInfiniteTerrain
