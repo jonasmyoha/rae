@@ -267,6 +267,32 @@ static bool g_sdl_mouse_captured = false;
 /* isKeyDown/isKeyPressed take a raw SDL_Scancode (see lib/keys.rae). No translation — the
  * value indexes the SDL keyboard-state array directly. */
 
+/* The window's icon from packed 0xAARRGGBB pixels (lib/Sdl3.rae
+ * setSdl3ProgramIcon decodes the PNG in Rae): SDL_SetWindowIcon, which on
+ * macOS sets the Dock's and the app switcher's icon for a bare executable.
+ * 1 when it was set. */
+int64_t rae_ext_Sdl3_setWindowIconPixels(const int64_t* pixels, int64_t w, int64_t h) {
+    if (!g_sdl_win || !pixels || w <= 0 || h <= 0) return 0;
+    size_t count = (size_t)w * (size_t)h;
+    unsigned char* rgba = (unsigned char*)malloc(count * 4);
+    if (!rgba) return 0;
+    for (size_t i = 0; i < count; ++i) {
+        uint32_t p = (uint32_t)pixels[i];
+        rgba[i * 4 + 0] = (unsigned char)((p >> 16) & 0xFF);
+        rgba[i * 4 + 1] = (unsigned char)((p >> 8) & 0xFF);
+        rgba[i * 4 + 2] = (unsigned char)(p & 0xFF);
+        rgba[i * 4 + 3] = (unsigned char)((p >> 24) & 0xFF);
+    }
+    SDL_Surface* surface = SDL_CreateSurfaceFrom((int)w, (int)h, SDL_PIXELFORMAT_RGBA32, rgba, (int)w * 4);
+    int set = 0;
+    if (surface) {
+        set = SDL_SetWindowIcon(g_sdl_win, surface) ? 1 : 0;
+        SDL_DestroySurface(surface);
+    }
+    free(rgba);
+    return set;
+}
+
 void rae_ext_Sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[sdl] init failed: %s\n", SDL_GetError());

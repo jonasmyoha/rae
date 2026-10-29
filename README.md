@@ -594,7 +594,7 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 | **Functions and interpolation** | one step past hello world, no graphics |
 
 ![Tetris 2D — a complete little game](docs/screenshots/94_tetris2d.png)
-![Pong — another little game, in the examples list](docs/screenshots/91_pong_implicit.png)
+![Pong — another little game, in the examples list](docs/screenshots/91_pong.png)
 
 The two UI examples are worth opening next: `104_ui_hello` is a value and three
 buttons — the smallest thing that is still an application — and `105_ui_counter`

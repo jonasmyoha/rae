@@ -10,6 +10,9 @@
 # libSDL3 when an example imports this module. Compiled-target only — the Live VM has no
 # SDL bindings.
 
+import Image
+open Gpu2dWindowIcon
+
 # Create the window + renderer at this pixel size. The framebuffer texture is
 # created lazily by sdlUpdatePixels (which may differ from the window size and
 # is stretched to fill it).
@@ -22,6 +25,33 @@ func nativeInitWindow(
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
   unsafe {
     nativeInitWindow(width: width, height: height, title: title)
+  }
+  setSdl3ProgramIcon()
+}
+
+# The window's icon from packed 0xAARRGGBB pixels (Image.loadPng's): on
+# macOS the Dock's and the app switcher's. True when it was set.
+func nativeSetWindowIconPixels(
+  pixels: view Buffer(Int)
+  width: Int
+  height: Int
+) unsafe extern("rae_ext_Sdl3_setWindowIconPixels") ret Int
+
+# The program's icon (Gpu2dWindowIcon.programIconPath) on this window
+func setSdl3ProgramIcon() {
+  let path: String = programIconPath()
+  if path.length() is 0 {
+    ret
+  }
+  var width: Int = 0
+  var height: Int = 0
+  let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
+  if width > 0 and height > 0 {
+    var set: Int = 0
+    unsafe {
+      set = nativeSetWindowIconPixels(pixels: pixels, width: width, height: height)
+    }
+    log("[sdl] app icon {path}: set={set is 1}")
   }
 }
 

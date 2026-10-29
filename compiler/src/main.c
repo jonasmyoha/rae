@@ -3873,6 +3873,15 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   sigaction(SIGHUP, &sa, NULL);
 
   // ---- Spawn first child + arm health window ----
+  /* Name the program for the child, as run_compiled_file does: the crash
+   * handler's report and the app icon (lib/Gpu2dWindowIcon programIconPath,
+   * appIcon.png beside the entry) read RAE_PROGRAM. Absolute, because the
+   * child chdir()s to lib_root first; every restart inherits it. */
+  {
+    char entry_abs[PATH_MAX];
+    if (realpath(entry, entry_abs)) setenv("RAE_PROGRAM", entry_abs, 1);
+    else setenv("RAE_PROGRAM", entry, 1);
+  }
   pid_t child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
   if (child < 0) {
     watch_state_free(&ws);

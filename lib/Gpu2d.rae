@@ -6,8 +6,7 @@
 # framebuffer round-trip). The SAME WGSL/API target the browser later
 # (WebGPU-everywhere); this is the native (wgpu-native) side.
 #
-# Tier 0 slice: window + clear-color present. Pipelines/instanced quads (the
-# Box uber-shader, #110) and text (#111) build on top of this surface.
+# Pipelines/instanced quads (#110) and text (#111) build on this surface.
 #
 # Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3 block of
 # compiler/runtime/rae_runtime.c. Compiled-target only; needs wgpu-native + SDL3.
@@ -22,12 +21,12 @@ open webgpu/Webgpu
 open webgpu/Context
 open gpu/FramePacer
 open gpu/DeviceFeatures
+open Gpu2dWindowIcon
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
-# configure its swapchain. Replaces sdl3.initWindow for the GPU render path —
-# do not also call sdl3.initWindow (that one attaches an SDL_Renderer that
-# fights wgpu for the drawable).
+# configure its swapchain, with the program's icon (Gpu2dWindowIcon). Do not
+# also call sdl3.initWindow (its SDL_Renderer fights wgpu for the drawable).
 func nativeInitWindow(
   width: Int
   height: Int
@@ -39,6 +38,7 @@ func initWindow(width: copy Int, height: copy Int, title: copy String) {
   unsafe {
     nativeInitWindow(width: width, height: height, title: title)
   }
+  setProgramIcon()
 }
 
 # Pump the OS event queue; returns true once the user has asked to close the

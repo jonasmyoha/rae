@@ -87,7 +87,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
          $BOX3D_FLAGS -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
-        if [ "$EXAMPLE_NAME" = "91_pong_implicit" ]; then
+        if [ "$EXAMPLE_NAME" = "91_pong" ]; then
           SCREENSHOT="$TMP_OUT/pong.bmp"
           if (cd .. && RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
