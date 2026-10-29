@@ -26,6 +26,7 @@
 #                   (6 m, looking up), with the row
 #   tracedFork      the same view of the traced tree
 #   small           a 6 m tree (RAE_TREELAB_SPECIES) from 13 m at eye height
+#   bush            the bush (RAE_TREELAB_SPECIES=15, scale 1) from 3 m
 #
 # The studies (LabStudies.rae): RAE_TREELAB_STUDY=<view> shows one of the
 # stylized set's study scenes that Autumn Grove (138) held before it became
@@ -176,6 +177,11 @@ func labCamera(name: view String) ret Camera3d {
     # the trunk up close, at eye height, for its color and streaks
     camera.position = Vec3.create(x: 0.6, y: -4.0, z: 1.7)
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.6)
+    ret camera
+  }
+  if name is "bush" {
+    camera.position = Vec3.create(x: 0.0, y: -3.0, z: 0.9)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.3)
     ret camera
   }
   if name is "small" {

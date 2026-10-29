@@ -59,6 +59,12 @@ func walkerGrassObstacles(
     reach: reach + 2.0
   )
   loop let tree: view PropNear in nearbyTrees {
+    # a bush in the field (no trunk) keeps no grass off
+    if let propKind: view PropKind = terrainSystem.forest.field.kinds.viewAt(index: tree.kind) {
+      if not propKind.hasTrunk {
+        continue
+      }
+    }
     addWalkerGrassObstacle(
       values: values
       count: count

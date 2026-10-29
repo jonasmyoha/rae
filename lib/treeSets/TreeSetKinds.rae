@@ -9,6 +9,7 @@ open treeSets/TreeSet
 open stylizedTrees/StylizedTrees
 open lowPolyTrees/LowPolyTrees
 open stylizedTrees/ReferenceTrees
+open stylizedTrees/StylizedKinds
 
 # Every species of `treeSet` as a kind of `field`, at its levels of detail:
 # `midDistance` is where the sparser crowns end (keep it inside the
@@ -50,7 +51,18 @@ func addTreeSetKinds(
   }
 }
 
-# The bushes of `treeSet`: one instancer per leaf tone
+# The forest kind `treeSet` draws its bushes as (with levels, in the forest's
+# field: the walkers put their bushes there), or -1 when its bushes are
+# instancer parts (createTreeSetBushParts)
+func treeSetBushKind(treeSet: view TreeSet) ret Int {
+  if treeSet.style is TreeSetStyle.stylized and stylizedNewBush() {
+    ret stylizedBushKind
+  }
+  ret -1
+}
+
+# The bushes of `treeSet`: one instancer per leaf tone (none when they are a
+# forest kind, treeSetBushKind)
 func createTreeSetBushParts(
   treeSet: view TreeSet
   renderer: mod DeferredRenderer

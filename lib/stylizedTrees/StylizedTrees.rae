@@ -922,6 +922,10 @@ func addStylizedForestKinds(
       ends: warmEnds
     ))
   }
+  # the bush (StylizedKinds), a kind after the trees'
+  if stylizedNewBush() {
+    subjects.add(value: addStylizedBushKind(field: field, renderer: renderer, ends: warmEnds))
+  }
   # the rebuilt kinds' pictures were queued (referenceImages): build once
   rendererFlushSurfaceImages(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
@@ -947,6 +951,10 @@ func createStylizedBushParts(
   capacity: view Int
 ) ret List(PropInstancer) {
   var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
+  # the treeGen bush is a forest kind (stylizedBushKind), drawn with the trees
+  if stylizedNewBush() {
+    ret parts
+  }
   addLeafParts(
     parts: parts
     renderer: renderer
