@@ -1,0 +1,102 @@
+# app3d/GrassTuft — a clump of grass made in code: the walkers' grass
+# tufts (app3d/WalkerTerrain kindGrassA/B), in place of a third-party
+# Unity asset (the FlatKit "GrassBunch" clump the walker examples once
+# loaded). About 30 blades rise from a narrow oval root, each a curved
+# strip that tapers to a point and leans outward, the inner ones taller.
+# Its size is the old clump's: 1.2 m by 0.8 m and about 1.4 m tall at scale
+# 1 (the walkers place it at 0.38 - 0.82). One normal a blade vertex, up and
+# a little outward, so the clump shades as one soft shape, not blade by
+# blade. Both faces are written, so it draws from every side. Written new.
+import Math
+import Vec3
+open Mesh3d
+open Noise
+
+const grassTuftBlades: Int = 30
+
+const grassTuftSegments: Int = 4
+
+# One blade's strip from `root` leaning toward `out` (unit, level), `height`
+# tall and `width` wide at its root
+func addGrassBlade(
+  mesh: mod MeshData
+  root: view Vec3
+  out: view Vec3
+  height: view Float
+  width: view Float
+  lean: view Float
+) {
+  let side: Vec3 = Vec3.create(x: -out.y, y: out.x, z: 0.0)
+  let normal: Vec3 = Vec3.vnorm(a: Vec3.create(x: out.x * 0.45, y: out.y * 0.45, z: 1.0))
+  let first: Int = mesh.vertCount
+  loop var k: Int = 0, k <= grassTuftSegments, ++k {
+    let t: Float = k.toFloat() / grassTuftSegments.toFloat()
+    # the blade bends outward more toward its tip
+    let reach: Float = lean * height * t * t
+    let center: Vec3 = Vec3.vadd(
+      a: root
+      b: Vec3.create(x: out.x * reach, y: out.y * reach, z: height * t * (1.0 - 0.15 * t * lean))
+    )
+    let half: Float = width * 0.5 * (1.0 - t)
+    loop var edge: Int = 0, edge < 2, ++edge {
+      let s: Float = edge.toFloat() * 2.0 - 1.0
+      pushVert(
+        verts: mesh.verts
+        px: center.x + side.x * half * s
+        py: center.y + side.y * half * s
+        pz: center.z
+        nx: normal.x
+        ny: normal.y
+        nz: normal.z
+        u: edge.toFloat()
+        value: 1.0 - t
+      )
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  loop var k: Int = 0, k < grassTuftSegments, ++k {
+    let a: Int = first + k * 2
+    # front and back faces
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 1)
+    mesh.indices.add(value: a + 2)
+    mesh.indices.add(value: a + 1)
+    mesh.indices.add(value: a + 3)
+    mesh.indices.add(value: a + 2)
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 2)
+    mesh.indices.add(value: a + 1)
+    mesh.indices.add(value: a + 1)
+    mesh.indices.add(value: a + 2)
+    mesh.indices.add(value: a + 3)
+  }
+}
+
+# The tuft made from `seed`, its foot at the origin, Z up
+func grassTuftMesh(seed: view Int) ret MeshData {
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: grassTuftBlades * (grassTuftSegments + 1) * 16)
+    indices: List.create(Int, cap: grassTuftBlades * grassTuftSegments * 12)
+    vertCount: 0
+  }
+  loop var blade: Int = 0, blade < grassTuftBlades, ++blade {
+    let around: Float = blade.toFloat() * 2.3999632 + hash2(x: blade, y: 1, seed: seed) * 0.6
+    # the root: in an oval 0.24 by 0.16 m, the later blades nearer the rim
+    let rim: Float = Math.sqrt(x: (blade.toFloat() + 0.5) / grassTuftBlades.toFloat())
+    let out: Vec3 = Vec3.create(x: Math.cos(x: around), y: Math.sin(x: around), z: 0.0)
+    let root: Vec3 = Vec3.create(x: out.x * 0.24 * rim, y: out.y * 0.16 * rim, z: -0.03)
+    # inner blades tall and upright, outer ones shorter and leaning further
+    let height: Float = (1.39 - 0.6 * rim) * (0.85 + 0.15 * hash2(x: blade, y: 2, seed: seed))
+    let lean: Float = 0.12 + 0.38 * rim + 0.1 * hash2(x: blade, y: 3, seed: seed)
+    let stretch: Vec3 = Vec3.create(x: out.x * 1.0, y: out.y * 0.67, z: 0.0)
+    addGrassBlade(
+      mesh: mesh
+      root: root
+      out: Vec3.vnorm(a: stretch)
+      height: height
+      width: 0.07 + 0.03 * hash2(x: blade, y: 4, seed: seed)
+      lean: lean
+    )
+  }
+  ret own mesh
+}

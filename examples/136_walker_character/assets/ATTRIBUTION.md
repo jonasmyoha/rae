@@ -27,18 +27,13 @@ Mixamo clips exported for this same rig — animation only, no geometry.
 Same license position as the skeleton above. "Walk fast" in the example
 is `walk.glb` played at 1.6x, not a fourth file.
 
-## `environment/*.glb`
+## Environment props
 
-Converted from environment FBX files already used by the original Unity
-**walker** project. The two trees, rock and flower come from its
-`free_lowpoly_forest_nature_pack`; the bush and grass clump come from the
-FlatKit demo assets bundled with that project. They are committed as
-transform-baked geometry only: Rae supplies its own cel-shaded materials.
-
-The exact source-relative paths and reproducible Blender conversion are in
-`../tools/convert_environment.sh`. These remain third-party Unity Asset Store
-assets; this attribution records their provenance rather than claiming Rae
-authorship.
+None. The walkers' rocks (`lib/app3d/TerrainRocks`), grass tufts
+(`lib/app3d/GrassTuft`), flowers, bushes and trees are all generated in
+Rae. The Unity walker project's environment meshes (a low-poly rock, a
+grass clump, a bush and two trees, from Asset Store packs) were committed
+here once and are removed (2026-10-29).
 
 ## `Roboto-Regular.mtsdf.*`
 

@@ -52,6 +52,7 @@ open app3d/TreeForest
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 open app3d/WalkerFlowers
+open app3d/GrassTuft
 
 # The side of a terrain cell (m): one tile and one prop of each kind
 const walkerCellSize: Float = 18.0
@@ -779,7 +780,6 @@ func createWalkerTerrain(
   allocator: mod EntityAllocator
   transforms: mod ComponentTable(Transform3D)
   propKinds: mod ComponentTable(TerrainProp)
-  assets: view String
   gridSide: view Int
   groundZ: view Float
   biome: view BiomeConfig
@@ -787,7 +787,11 @@ func createWalkerTerrain(
   treeSet: view TreeSet
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
-  let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
+  # the grass tufts are made in code (app3d/GrassTuft), not a Unity asset
+  let grassMesh: MeshHandle = uploadMeshDataForTerrain(
+    renderer: renderer
+    mesh: grassTuftMesh(seed: 71)
+  )
   let grassMaterial: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.18, y: 0.42, z: 0.055)
     roughness: 0.94

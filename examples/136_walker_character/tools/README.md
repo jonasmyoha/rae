@@ -21,24 +21,13 @@ The remaining FBX files in that folder are animation clips (Idle, Walking
 1-3, Running). They convert the same way and land here when the animation
 increment needs them.
 
-## Regenerating the environment props
+## Environment props
 
-The infinite meadow uses a curated subset of environment meshes that were
-already present in the Unity walker project. Regenerate all committed static
-GLBs with:
-
-    ./convert_environment.sh /path/to/walker/Assets
-
-Static props use a separate converter because `lib/gltf.rae` currently reads
-primitive buffers without applying glTF node transforms. The converter bakes
-the FBX hierarchy, centers each footprint, places its lowest point at z=0 and
-exports Rae's Z-up geometry directly. Trees are split into aligned trunk and
-crown files so Rae can preserve their two-color cel-shaded appearance without
-depending on the source palette texture.
-
-Flowers are no longer imported by this script. The walkers use the shared Rae
-oxeye-daisy generator in `lib/procgen/MeadowFlower.rae` and the harebell
-generator in `lib/procgen/Harebell.rae`.
+There are none to regenerate: the walkers' rocks, grass tufts, flowers,
+bushes and trees are generated in Rae (`lib/app3d/TerrainRocks`,
+`lib/app3d/GrassTuft`, `lib/procgen/MeadowFlower`, the tree sets). The
+Unity project's environment meshes and their converter were removed on
+2026-10-29.
 
 ## Inspecting water splashes
 
