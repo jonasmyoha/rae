@@ -34,6 +34,10 @@ type SurfaceImages {
   textureView: TextureViewId = noTextureViewId()
   sampler: SamplerId = noSamplerId()
   generation: Int = 0
+  # true: `paths` holds images queued since the array was last built
+  # (RendererImages.rendererQueueSurfaceImage); the array is rebuilt once
+  # before it is next used
+  stale: Bool = false
 }
 
 func retireSurfaceImages(images: mod SurfaceImages, resources: mod GpuResources) {
@@ -284,11 +288,26 @@ func uploadSurfaceImages(
   ret true
 }
 
+# Build the array with the images queued since it was last built, once
+func flushSurfaceImages(images: mod SurfaceImages, resources: mod GpuResources) {
+  if not images.stale {
+    ret
+  }
+  let paths: List(String) = images.paths
+  if not setSurfaceImages(images: images, resources: resources, paths: paths) {
+    log("could not build the queued material images ({paths.length} layers)")
+  }
+  images.stale = false
+}
+
 func surfaceImageEntries(
   images: mod SurfaceImages
   resources: mod GpuResources
   entries: mod List(ResourceRef)
 ) {
+  if images.stale {
+    flushSurfaceImages(images: images, resources: resources)
+  }
   if not isValidTextureView(resources: resources, id: images.textureView) {
     setSurfaceImages(images: images, resources: resources, paths: List.create(String, cap: 0))
   }

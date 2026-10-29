@@ -111,6 +111,15 @@ func birchMark(u: view Float, v: view Float) ret Float {
   ret Math.max(a: Math.max(a: dashMark, b: patchMark), b: faint)
 }
 
+# The palm's rings at height v (0..1 up the picture), 0 none .. 1 full:
+# three narrow dark bands round the stem a picture, each a soft line where
+# one old leaf base sat on the next
+func ringMark(v: view Float) ret Float {
+  let phase: Float = v * 3.0 - Math.floor(x: v * 3.0)
+  let distance: Float = Math.abs(value: phase - 0.5) * 2.0
+  ret Math.clamp(val: (distance - 0.82) / 0.12, low: 0.0, high: 1.0)
+}
+
 # The bark image as packed 0xAARRGGBB pixels, row by row from the top: near
 # white, the streaks darker by up to the kind's streak depth and slightly
 # cooler
@@ -126,6 +135,9 @@ func barkPixels(barkKind: view BarkKind) ret List(Int) {
       if barkKind.marks is BarkMarks.birch {
         streak = 1.0
         light = 1.0 - barkKind.streakDepth * birchMark(u: u, v: v)
+      }
+      if barkKind.marks is BarkMarks.rings {
+        light = 1.0 - barkKind.streakDepth * Math.max(a: ringMark(v: v), b: 0.3 * (1.0 - streak))
       }
       let red: Int = Math.min(a: 255, b: (255.0 * light).toInt())
       let green: Int = Math.min(a: 255, b: (255.0 * light * (0.97 + 0.03 * streak)).toInt())

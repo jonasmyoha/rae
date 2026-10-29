@@ -153,6 +153,9 @@ type ReferenceImages {
   impostorLeafLayer: Int
 }
 
+# The kind's pictures, queued (RendererImages.rendererQueueSurfaceImage):
+# the caller builds them with rendererFlushSurfaceImages once all kinds are
+# added, before baking or drawing with them
 func referenceImages(renderer: mod DeferredRenderer, treeKind: view TreeKind) ret ReferenceImages {
   let barkPath: String = referenceBarkPath(treeKind: treeKind)
   if not Sys.exists(path: barkPath) {
@@ -160,13 +163,13 @@ func referenceImages(renderer: mod DeferredRenderer, treeKind: view TreeKind) re
     let written: Bool = writeBarkImage(barkKind: treeKind.bark, path: barkPath)
   }
   ret ReferenceImages {
-    barkLayer: rendererLoadSurfaceImage(renderer: renderer, path: barkPath)
-    leafLayer: rendererAddSurfaceImagePixels(
+    barkLayer: rendererQueueSurfaceImage(renderer: renderer, path: barkPath)
+    leafLayer: rendererQueueSurfaceImagePixels(
       renderer: renderer
       name: leafCardImageName(treeKind: treeKind)
       pixels: leafCardImagePixels(leafKind: treeKind.leaf)
     )
-    impostorLeafLayer: rendererAddSurfaceImagePixels(
+    impostorLeafLayer: rendererQueueSurfaceImagePixels(
       renderer: renderer
       name: leafImpostorImageName(treeKind: treeKind)
       pixels: leafImpostorImagePixels(leafKind: treeKind.leaf)
@@ -370,6 +373,8 @@ func addReferenceForestKinds(
       ends: ends
     ))
   }
+  # the kinds' pictures were queued (referenceImages): build them once
+  rendererFlushSurfaceImages(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
     let atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
       resources: resources

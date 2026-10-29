@@ -32,6 +32,65 @@ func rendererLoadSurfaceImage(renderer: mod DeferredRenderer, path: view String)
   ret -1
 }
 
+# Queue a material image file for the next rendererFlushSurfaceImages and
+# give its layer, without building the array now. Each
+# rendererLoadSurfaceImage rebuilds the whole array (every earlier file read
+# again and every layer uploaded again), so adding many images one by one
+# took time growing with their number squared: 8 rebuilt stylized trees'
+# pictures added about 8 s to the walkers' start. Queue them, then flush
+# once before drawing or baking with them (the bind group flushes too).
+func rendererQueueSurfaceImage(renderer: mod DeferredRenderer, path: view String) ret Int {
+  ensureRendererResources(renderer: renderer)
+  var resolved: String = path
+  if not Sys.exists(path: resolved) and path.startsWith(prefix: "lib/") {
+    let stdlib: String = Sys.getEnv(name: "RAE_STDLIB")
+    let relative: String = path.sub(start: 4, len: path.length() - 4)
+    resolved = "{stdlib}/{relative}"
+  }
+  let images: mod SurfaceImages = renderer.passes.gbuffer.surfaceImages
+  loop var layer: Int = 0, layer < images.paths.length, ++layer {
+    if images.paths.copyAtDefault(index: layer) is resolved {
+      ret layer
+    }
+  }
+  images.paths.add(value: resolved)
+  images.stale = true
+  ret images.paths.length - 1
+}
+
+# Queue a picture made in memory (as rendererAddSurfaceImagePixels takes
+# it) for the next rendererFlushSurfaceImages; its layer, or -1
+func rendererQueueSurfaceImagePixels(
+  renderer: mod DeferredRenderer
+  name: view String
+  pixels: view List(Float)
+) ret Int {
+  ensureRendererResources(renderer: renderer)
+  let path: String = "{surfaceMadePrefix}{name}"
+  let images: mod SurfaceImages = renderer.passes.gbuffer.surfaceImages
+  loop var layer: Int = 0, layer < images.paths.length, ++layer {
+    if images.paths.copyAtDefault(index: layer) is path {
+      ret layer
+    }
+  }
+  if pixels.length is not 512 * 512 * 4 {
+    log("a made material image must have 512 x 512 RGBA pixels: {name}")
+    ret -1
+  }
+  images.madeNames.add(value: "{path}")
+  images.madePixels.add(value: pixels)
+  images.paths.add(value: path)
+  images.stale = true
+  ret images.paths.length - 1
+}
+
+# Build the material image array with every queued image, once
+func rendererFlushSurfaceImages(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources = renderer.gpuResources {
+    flushSurfaceImages(images: renderer.passes.gbuffer.surfaceImages, resources: resources)
+  }
+}
+
 # Add a picture made in memory (512 x 512 linear RGBA floats, alpha 0..1:
 # a picture with see-through parts, which a PNG from Image.savePng cannot
 # carry) to this renderer's material images, beside the loaded ones, as

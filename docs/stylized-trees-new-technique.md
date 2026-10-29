@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-8/12 done (2026-10-29), 9-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-9/12 done (2026-10-29), 10-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -202,6 +202,27 @@ cypress renders dark, and a dense column is darkened less by occlusion.
 It is lumpier than the old smooth cone. Cases 1251 and 1253 assumed the
 cypress is built at unit height (its scale is its height); they now check
 the placed height through the height unit, and the umbrella pine's unit.
+
+Done for the "palm" (task 9/12, 2026-10-29): `palmKind`. The set's
+`speciesPalm` is not a palm with fronds. Its old code (stylizedTrees/Foliage
+palmWood, palmLeaves) is a "palm-style wood": a bending, ringed stem with a
+whorl of eleven rising branches from 0.42 to 0.88 of the height, each ending
+in a big leafy cluster, and one on top, of broad paddle leaves. (A real
+fan or date palm, stylizedTrees/Palm, is used by no tree set, only by case
+1147.) To keep the old look, it is grown with masses: big clusters at the
+branch tips. The bark uses a new rule, `BarkMarks.rings` (dark bands round
+the stem). The crown is 1.00 of the height wide from 0.40 (the old one: 1.07
+from 0.38). The §4 row's frond plan would be a new tree, not a rebuild; it
+is asked on the page.
+
+Startup fix found here: every picture a kind added rebuilt the renderer's
+whole material image array, reading every file again, so the walkers'
+start grew with the square of the number of pictures. With eight rebuilt
+trees, 136 and 137 took about 14 s to start and failed their gates.
+`RendererImages.rendererQueueSurfaceImage` / `rendererQueueSurfaceImagePixels`
+queue a picture and `rendererFlushSurfaceImages` builds the array once.
+`referenceImages` queues, and the sets flush before baking. 136 now starts
+in about 3.7 s (the old trees: 5.6 s).
 
 ## 5. Bushes (task 10)
 
