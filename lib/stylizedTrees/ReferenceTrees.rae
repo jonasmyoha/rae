@@ -33,7 +33,7 @@ open treeGen/Bark
 open treeGen/LeafCards
 open treeGen/TreeLevels
 open treeGen/TreeKind
-open treeGen/ShelfCards
+open treeGen/SkirtCards
 
 const referenceSpeciesCount: Int = 5
 
@@ -221,10 +221,10 @@ func referenceLevelParts(
   ret parts
 }
 
-# The wood a kind shows: the whole skeleton, or a whorled tree's lower
-# trunk only (ShelfCards.lowerTrunkSkeleton)
+# The wood a kind shows: the whole skeleton, or (TreeKind.innerWood false)
+# only the trunk under its foliage (SkirtCards.lowerTrunkSkeleton)
 func kindBarkMesh(skeleton: view TreeSkeleton, treeKind: view TreeKind) ret MeshData {
-  if treeKind.foliage is TreeFoliage.shelves or not treeKind.innerWood {
+  if not treeKind.innerWood {
     ret barkMesh(skeleton: lowerTrunkSkeleton(skeleton: skeleton, overlap: 0.4))
   }
   ret barkMesh(skeleton: skeleton)
@@ -238,8 +238,19 @@ type KindLeafLevels {
   count: Int
 }
 
+# No wind on `level`'s cards: every pivot's flexibility 0 (a conifer's
+# skirts, for now: their sway disturbed the look)
+func stillLeaves(level: mod LeafCardLevel) {
+  loop let mesh: mod MeshData in level.meshes {
+    loop var pivot: Int = 0, pivot < mesh.windPivots.length / 4, ++pivot {
+      mesh.windPivots.set(index: pivot * 4 + 3, value: 0.0)
+    }
+  }
+}
+
 # The leaf levels of `treeKind`'s variety on `skeleton`: masses filled with
-# camera-facing cards (LeafCards), or a conifer's shelves (ShelfCards)
+# camera-facing cards (LeafCards), or a conifer's skirts filled with
+# camera-facing cards (SkirtCards)
 func kindLeafLevels(
   skeleton: view TreeSkeleton
   treeKind: view TreeKind
@@ -248,13 +259,13 @@ func kindLeafLevels(
   grow: view Float
 ) ret KindLeafLevels {
   let seed: Int = kindCardSeed(treeKind: treeKind, variety: variety)
-  if treeKind.foliage is TreeFoliage.shelves {
-    let shelves: ShelfCards = shelfCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
-    ret KindLeafLevels {
-      near: shelfCardLevel(shelves: shelves, keepEvery: 1, grow: 1.0)
-      middle: shelfCardLevel(shelves: shelves, keepEvery: keepEvery, grow: grow)
-      count: shelves.count
-    }
+  if treeKind.foliage is TreeFoliage.skirts {
+    let skirts: LeafCards = skirtCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
+    var near: LeafCardLevel = leafCardLevel(cards: skirts, keepEvery: 1, grow: 1.0)
+    var middle: LeafCardLevel = leafCardLevel(cards: skirts, keepEvery: keepEvery, grow: grow)
+    stillLeaves(level: near)
+    stillLeaves(level: middle)
+    ret KindLeafLevels { near: own near, middle: own middle, count: skirts.count }
   }
   let cards: LeafCards = leafCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
   ret KindLeafLevels {

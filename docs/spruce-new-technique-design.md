@@ -1,8 +1,9 @@
 # The spruce in the new technique (design)
 
-Status: accepted and built (2026-10-29):
-`treeGen/WhorlGrower`, `treeGen/ShelfCards`, `LeafOutline.needleSpray`,
-`StylizedKinds.spruceKind`. §9 lists where the build differs from the plan.
+Status: accepted and built (2026-10-29), rebuilt in round 3 (2026-10-30):
+`treeGen/WhorlGrower`, `treeGen/SkirtCards`, `StylizedKinds.spruceKind`.
+§9 lists where the first build differed from the plan; §11 - §12 replace
+its shelf and curtain cards (`treeGen/ShelfCards`, removed) with skirts.
 
 The other stylized trees were rebuilt with leaf masses: ellipsoid clumps
 whose skins are filled with camera-facing stamp cards
@@ -225,7 +226,7 @@ than the low-poly one")
   The near level stays a few percent darker at the top: its tiers shadow
   each other, which one plane cannot.
 
-## 11. Proposal: the low-poly spruce's skirts as the shape
+## 11. Round 3 (proposal): the low-poly spruce's skirts as the shape
 
 After round 2 the spruce still read badly: its fixed cards do not turn
 toward the camera, so from most angles they show as flat slabs or thin
@@ -250,4 +251,32 @@ and add what the other new trees have:
   as for the other rebuilt trees. A camera-facing card mass is what the
   impostor bake and case 1256 already handle.
 - **Kept:** the dark spruce green, no wind for now, only the lower trunk.
+
+## 12. Round 3 as built (2026-10-30)
+
+- **`TreeFoliage.skirts`** (`treeGen/SkirtCards`): the whorl grower's tree;
+  each whorl a tier, at most 8 (more whorls share a tier, so each tier is
+  tall enough for its step to show). A tier's rim reaches 0.82 of its
+  branches' mean reach between them and out to each branch's tip along
+  it, and hangs down to the tip's droop there (the bough tips). Its top
+  rises 1.7 times the step to the next tier at the trunk (the low-poly
+  tier's proportion; no cap at the reach, or the trunk showed between the
+  small upper tiers), the top tier to the tree's tip; its underside is
+  nearly flat under the rim.
+- **Cards:** `cardLayers` (5) cards over each point of the top skin, a
+  quarter as many on the underside toward the rim; 0.45 m on the widest
+  tier, smaller on the upper ones. A top card takes the low-poly tier's
+  broad normal (up and out, more out at the rim); an underside card faces
+  out and down (straight down it lit nearly black). The occlusion is
+  darkest in toward the trunk, under the tier above: the band that makes
+  the tiers read. The cards are the masses' own (`LeafCards` layout), so
+  the leaf pass turns them to the camera and the levels, the impostor and
+  case 1256's coverage check need nothing new.
+- **Wood:** only the trunk under the lowest skirt (`innerWood` false;
+  `lowerTrunkSkeleton` moved into SkirtCards). **No wind** (every card's
+  flexibility 0). The lowest whorl at 0.12 of the height (the crown from
+  10%, within the old tree's 12%).
+- **Levels:** middle every 3rd card at 1.35 times (101 - 103% of the near
+  outline; 1.5 covered 105 - 108%). Near 1,305 cards, 2,792 triangles.
+- The shelves mode and `treeGen/ShelfCards` are removed.
 

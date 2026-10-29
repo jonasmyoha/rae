@@ -505,11 +505,12 @@ func addStylizedBushKind(
 # whorls of unequal, drooping boughs; dark green needles (the old spray
 # picture's average times its tint: linear 0.08, 0.15, 0.06); gray-brown
 # bark (the old bark's average times its 0.65 gray: 0.175, 0.117, 0.084).
-# Not masses: whorl growth (treeGen/WhorlGrower) and big shelf and
-# curtain cards along every branch (treeGen/ShelfCards), painted with
-# fluffy tufts (LeafOutline.tuft: the stylized conifers' clump cards; thin
-# needles read tiny), shaded by the cone's normals. Only the
-# trunk under the lowest tier is drawn (no branches), and no wind for now.
+# Whorl growth (treeGen/WhorlGrower), each whorl one of the low-poly
+# spruce's solid scalloped skirts, its rim drooping to the bough tips,
+# filled with camera-facing cards (treeGen/SkirtCards, §11 of the design)
+# painted with fluffy tufts (LeafOutline.tuft) and lit by the skirt's broad
+# normal. Only the trunk under the lowest tier is drawn (no branches), and
+# no wind for now.
 func spruceKind() ret TreeKind {
   ret TreeKind {
     name: "spruce"
@@ -527,11 +528,10 @@ func spruceKind() ret TreeKind {
       angleJitter: 0.6
       seed: 11100
     }
-    # a shelf card's width next to the trunk (half of it at a branch's tip);
-    # no branchlet tubes (most of the bark's triangles, hidden under the
-    # needles): the wide shelf cards make the shelf wider than its branch
-    cardSize: 1.0
-    cardLayers: 1.0
+    # a card's width on the widest tier (smaller on the upper ones), and the
+    # cards over each point of a skirt's skin
+    cardSize: 0.45
+    cardLayers: 5.0
     # a dark conifer green, less saturated than the old one (as the
     # cypress's)
     greens: List(Vec3) {
@@ -540,16 +540,15 @@ func spruceKind() ret TreeKind {
       Vec3.create(x: 0.066, y: 0.128, z: 0.072)
     }
     bark: { color: Vec3.create(x: 0.2, y: 0.135, z: 0.097), streakDepth: 0.45 }
-    # every 2nd pair of cards (a shelf and its curtain) at 1.15 times its
-    # size: grown more, the curtains reach past their branch tips (1.4, the
-    # same area, covered 110%)
-    middleKeep: 2
-    middleGrow: 1.15
-    foliage: TreeFoliage.shelves
-    # the lowest whorl at 0.16 of the height: the trunk shows under the
-    # skirt of curtains
+    # every 3rd card at 1.35 times its size
+    middleKeep: 3
+    middleGrow: 1.35
+    foliage: TreeFoliage.skirts
+    innerWood: false
+    # the lowest whorl at 0.12 of the height: the trunk shows under the
+    # lowest skirt, whose rim hangs to about 0.1
     whorls: {
-      crownStart: 0.16
+      crownStart: 0.12
       spacingMin: 0.4
       spacingMax: 0.6
       branchesMin: 4
