@@ -277,6 +277,7 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       kinkRandom: kinkRandom
     )
   }
+  floorBranchRadii(limbs: limbs, height: params.height)
   ret TreeSkeleton { limbs: own limbs, forkPoint: forkPoint }
 }
 
@@ -324,6 +325,28 @@ func addSideBranch(
 # points only along the depth (y), in proportion to how far each is to the
 # side of the limb's base, so from the trace's camera the tree still covers
 # the trace; a limb's children move with the point they grow from.
+# The thinnest any limb of a tree `height` tall may be (m): 0.45% of the
+# height, from 1.2 cm to 4 cm. Thinner twigs (the tapered tips, the side
+# branches into the masses) read as hair-thin lines, the birch's white ones
+# most (no thin branches on any tree).
+func minimumBranchRadius(height: view Float) ret Float {
+  ret Math.clamp(val: 0.0045 * height, low: 0.012, high: 0.04)
+}
+
+# Every limb's radius raised to at least minimumBranchRadius
+func floorBranchRadii(limbs: mod List(Limb), height: view Float) {
+  let minimum: Float = minimumBranchRadius(height: height)
+  loop var i: Int = 0, i < limbs.length, ++i {
+    if let limb: mod Limb = limbs.modAt(index: i) {
+      loop var k: Int = 0, k < limb.radii.length, ++k {
+        if limb.radii.copyAtDefault(index: k) < minimum {
+          limb.radii.set(index: k, value: minimum)
+        }
+      }
+    }
+  }
+}
+
 func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
   var random: TreeRandom = createTreeRandom(seed: params.seed)
   var limbs: List(Limb) = List.create(Limb, cap: params.tracedLimbs.length)
@@ -459,6 +482,7 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
       ))
     }
   }
+  floorBranchRadii(limbs: limbs, height: params.height)
   ret TreeSkeleton { limbs: own limbs, forkPoint: forkPoint, clumps: own clumps }
 }
 

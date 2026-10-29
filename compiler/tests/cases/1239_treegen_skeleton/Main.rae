@@ -134,21 +134,32 @@ func main() ret Int {
       leadersOk = false
     }
     # as a branch works: every leader and branch thins to a fine tip, and
-    # every child starts clearly thinner than its parent there
+    # every child starts clearly thinner than its parent there (or both are
+    # at the tree's thinnest radius)
+    let thinnest: Float = minimumBranchRadius(height: params.height)
     loop let limb: view Limb in skeleton.limbs {
       if limb.order is 1 or limb.order is 2 {
-        # thin at the tip, but still able to carry its leaves: at most a
-        # third of its base, or 2.5 cm on a slender one, and never under
-        # 1.8 cm where it joins its twig
+        # thin at the tip, but never hair-thin: at most a third of its base,
+        # or the tree's thinnest radius on a slender one
+        # (Skeleton.minimumBranchRadius: no thin branches),
+        # and never under that
         let tip: Float = limb.radii.copyAtDefault(index: limb.radii.length - 1)
-        if tip > Math.max(a: limb.radii.copyAtDefault(index: 0) * 0.34, b: 0.0251) or tip < 0.0179 {
+        let tipMost: Float = Math.max(
+          a: limb.radii.copyAtDefault(index: 0) * 0.34
+          b: thinnest + 0.0001
+        )
+        if tip > tipMost or tip < thinnest - 0.0001 {
           evenOk = false
         }
       }
       if limb.parent >= 0 {
         let parent: Limb = skeleton.limbs.copyAtDefault(index: limb.parent)
         let at: Int = closestIndex(limb: parent, point: limb.points.copyAtDefault(index: 0))
-        if limb.radii.copyAtDefault(index: 0) > parent.radii.copyAtDefault(index: at) * 0.76 {
+        let childMost: Float = Math.max(
+          a: parent.radii.copyAtDefault(index: at) * 0.76
+          b: thinnest + 0.0001
+        )
+        if limb.radii.copyAtDefault(index: 0) > childMost {
           evenOk = false
         }
       }
@@ -167,7 +178,7 @@ func main() ret Int {
   check(label: "no radius grows toward a tip", ok: radiiOk)
   check(label: "the main leader joined onto the trunk; the second one thinner", ok: leadersOk)
   check(
-    label: "branches thin to tips that carry their leaves; every child thinner than its parent"
+    label: "branches thin to tips, never hair-thin; every child thinner than its parent"
     ok: evenOk
   )
   check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
