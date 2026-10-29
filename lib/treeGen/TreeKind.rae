@@ -52,7 +52,13 @@ type LeafKind {
 type BarkKind {
   color: Vec3
   streakDepth: Float
+  # What Bark paints: broken vertical streaks (T02 and most trees), or a
+  # birch's white with dark horizontal marks (then streakDepth is how dark
+  # the marks get)
+  marks: BarkMarks = BarkMarks.streaks
 }
+
+enum BarkMarks { streaks, birch }
 
 type TreeKind {
   # Names the kind's pictures among a renderer's images and on disk

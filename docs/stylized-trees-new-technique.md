@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-6/12 done (2026-10-29), 7-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-7/12 done (2026-10-29), 8-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -174,6 +174,19 @@ picture's (green 0.62 of red), as bright as red allows, and a new
 per-kind `TreeKind.occlusionFloor` (default 0.45, T02's) lets the deep
 cards darken less (0.8 here). It still renders about half as bright as
 the old flat-lit crown.
+
+Done for the birch (task 7/12, 2026-10-29): `birchKind`, with masses
+hanging from drooping branches. A birch reads as curtains of small leaves
+off thin, drooping twigs around a slender white trunk, so it uses two new
+grower measures: `branchDroop` (side branches bend toward the ground) and
+`massHang` (a branch tip's mass hangs below the tip). Its masses are long
+and narrow, with smaller middle cards (every 3rd at 1.7 times the width).
+The bark uses a new rule, `BarkMarks.birch`: short dark horizontal dashes
+and a few dark patches on near-white. The old birch's leaves rose to 1.22
+times its height unit, while the other old trees top out near 1.0, so
+placed old birches stood 22% taller than 6.5-8.5 m. The new birch grows to
+9 m, and `stylizedOldTopRatio` keeps the old size. Crown: 0.82 of the unit
+wide from 0.26 (the old one: 0.82 from 0.24).
 
 ## 5. Bushes (task 10)
 

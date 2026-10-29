@@ -4,7 +4,7 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo). Written new.
+# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch). Written new.
 import Sys
 import Vec3
 import RendererDeferred
@@ -44,6 +44,13 @@ const japaneseMapleVariety: Int = 1
 const ginkgoHeight: Float = 5.5
 
 const ginkgoVariety: Int = 1
+
+# The birch's grown height (m): the old tree's leaves rose to 1.22 times
+# its placed 6.5 - 8.5 m (stylizedOldTopRatio), so its top was at 7.9 -
+# 10.4 m
+const birchHeight: Float = 9.0
+
+const birchVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -426,6 +433,91 @@ func ginkgoKind() ret TreeKind {
   }
 }
 
+# The silver birch, as the old tree looks: one slender white trunk running
+# up through a narrow, tall crown (the old one's: about 0.82 of its height
+# unit wide, from 0.24 of it, its leaves rising to 1.22 of it), branches that rise and then droop,
+# and the leaves
+# hanging below their tips in small, long masses; small oval leaves in a
+# fresh green (the old spray picture's average times its tint: linear
+# 0.15, 0.29, 0.04); white bark with dark horizontal marks (the old bark
+# picture, 0.79 on average with its marks). Masses fit, hanging: a birch
+# reads as curtains of leaves off drooping twigs, not round clusters.
+func birchKind() ret TreeKind {
+  ret TreeKind {
+    name: "birch"
+    measures: {
+      height: birchHeight
+      forkHeight: 0.55
+      baseRadius: 0.15
+      forkRadius: 0.09
+      bow: 0.02
+      bowAt: 0.5
+      mainLean: 0.04
+      mainLength: 0.5
+      mainRadius: 0.9
+      secondLean: 0.45
+      secondLength: 0.3
+      secondRadius: 0.55
+      branchCount: 11
+      branchLowest: 0.18
+      branchHighest: 0.85
+      branchAngleMin: 0.75
+      branchAngleMax: 1.0
+      branchLengthMin: 0.15
+      branchLengthMax: 0.25
+      branchRadius: 0.45
+      massCount: 30
+      massRadiusMin: 0.45
+      massRadiusMax: 0.7
+      crownX: 0.0
+      crownZ: 0.08
+      crownHalfWidth: 0.23
+      crownHalfHeight: 0.36
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 0.7
+      massAcrossMax: 0.9
+      massUpMin: 1.1
+      massUpMax: 1.4
+      massDepth: 0.85
+      roundCrown: true
+      branchDroop: 0.5
+      massHang: 0.6
+    }
+    traced: false
+    leaf: {
+      outline: LeafOutline.almond
+      countMin: 18
+      countSpread: 7
+      reach: 160.0
+      lengthMin: 50.0
+      lengthMax: 75.0
+      widthMin: 0.36
+      widthMax: 0.44
+      angleJitter: 1.0
+      seed: 10300
+    }
+    cardSize: 0.45
+    cardLayers: 3.0
+    # the old green's hue, about 2.4 times its picture's average as the
+    # lime's (the cards' mass shading and occlusion)
+    greens: List(Vec3) {
+      Vec3.create(x: 0.36, y: 0.68, z: 0.09)
+      Vec3.create(x: 0.42, y: 0.76, z: 0.11)
+      Vec3.create(x: 0.3, y: 0.58, z: 0.08)
+    }
+    bark: {
+      color: Vec3.create(x: 0.88, y: 0.87, z: 0.85)
+      streakDepth: 0.85
+      marks: BarkMarks.birch
+    }
+    # long, narrow masses: every 3rd card at 1.7 times the width, so the
+    # middle crown does not swell past their thin sides
+    middleKeep: 3
+    middleGrow: 1.7
+  }
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -454,6 +546,9 @@ func stylizedNewKind(species: view Int) ret Bool {
   if species is speciesGold {
     ret not stylizedOldRequested(name: "ginkgo")
   }
+  if species is speciesBirch {
+    ret not stylizedOldRequested(name: "birch")
+  }
   ret false
 }
 
@@ -470,6 +565,9 @@ func stylizedTreeKind(species: view Int) ret TreeKind {
   }
   if species is speciesGold {
     ret ginkgoKind()
+  }
+  if species is speciesBirch {
+    ret birchKind()
   }
   ret limeKind()
 }
@@ -488,11 +586,14 @@ func stylizedKindVariety(species: view Int) ret Int {
   if species is speciesGold {
     ret ginkgoVariety
   }
+  if species is speciesBirch {
+    ret birchVariety
+  }
   ret limeVariety
 }
 
-# A species' height at scale 1: a rebuilt one's grown height, else
-# `oldUnit` (the old tree's)
+# A species' height at scale 1: a rebuilt one's grown height (over the old
+# tree's top ratio), else `oldUnit` (the old tree's)
 func stylizedHeightUnit(species: view Int, oldUnit: view Float) ret Float {
   if not stylizedNewKind(species: species) {
     ret oldUnit
@@ -502,7 +603,30 @@ func stylizedHeightUnit(species: view Int, oldUnit: view Float) ret Float {
     treeKind: treeKind
     variety: stylizedKindVariety(species: species)
   )
-  ret params.height
+  ret params.height / stylizedOldTopRatio(species: species)
+}
+
+# How far above its placed height the old tree reached (its leaves' top
+# over its height unit): about 1 for every old tree but the birch, whose
+# leaves rose to 1.22 times it, so a placed birch stood 22% taller than its
+# 6.5 - 8.5 m; a rebuilt tree keeps the old one's size
+func stylizedOldTopRatio(species: view Int) ret Float {
+  if species is speciesBirch {
+    ret 1.22
+  }
+  ret 1.0
+}
+
+# Every rebuilt species' height at scale 1 in `species` (the set's species
+# list, in the species constants' order) set to its grown height
+func setStylizedHeightUnits(species: mod List(TreeSpecies)) {
+  loop var index: Int = 0, index < stylizedSpeciesCount, ++index {
+    if stylizedNewKind(species: index) {
+      if let entry: mod TreeSpecies = species.modAt(index: index) {
+        entry.heightUnit = stylizedHeightUnit(species: index, oldUnit: entry.heightUnit)
+      }
+    }
+  }
 }
 
 # A rebuilt species as `field`'s kind `species`, its impostor picture layer

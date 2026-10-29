@@ -75,6 +75,12 @@ type TreeMeasures {
   # low joined stems), the side branches taking turns between them; false:
   # both lean to the crown's side and the main one carries the branches
   twoStems: Bool = false
+  # how far the side branches bend toward the ground over their length
+  # (radians, added to the slight rise every branch has), and how far a
+  # branch tip's mass hangs below the tip (a part of its radius): a
+  # birch's hanging twigs
+  branchDroop: Float = 0.0
+  massHang: Float = 0.0
 }
 
 # A grown tree, in the traced tree's form
@@ -613,7 +619,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
         direction: out
         length: length
         ease: 0.0
-        bend: -0.08
+        bend: -0.08 + measures.branchDroop
         wander: 0.02
         baseRadius: base
         tipRadius: base * 0.5
@@ -633,15 +639,16 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
   )
   loop var i: Int = 1, i < limbs.length, ++i {
     let tip: Vec3 = limbLast(limb: limbs.copyAtDefault(index: i))
+    let tipRadius: Float = scale * nextBetween(
+      random: random
+      low: measures.massRadiusMin
+      high: measures.massRadiusMax
+    )
     clumps.add(value: grownMass(
       random: random
       measures: measures
-      center: tip
-      radius: scale * nextBetween(
-        random: random
-        low: measures.massRadiusMin
-        high: measures.massRadiusMax
-      )
+      center: Vec3.create(x: tip.x, y: tip.y, z: tip.z - measures.massHang * tipRadius)
+      radius: tipRadius
       parent: i
     ))
   }

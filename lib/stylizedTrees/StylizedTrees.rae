@@ -88,40 +88,15 @@ const autumnReferenceHeight: Float = 5.5
 # the mixed-in trees now and then a palm (a crimson maple or a palm is never
 # a stand's main species)
 func createStylizedTrees() ret TreeSet {
-  let species: List(TreeSpecies) = List(TreeSpecies) {
-    {
-      name: "lime"
-      minHeight: 4.8
-      heightRange: 2.4
-      heightUnit: stylizedHeightUnit(species: speciesBroadleaf, oldUnit: 1.0)
-    }
+  var species: List(TreeSpecies) = List(TreeSpecies) {
+    { name: "lime", minHeight: 4.8, heightRange: 2.4, heightUnit: 1.0 }
     { name: "umbrella pine", minHeight: 5.6, heightRange: 1.8, heightUnit: 1.0 }
     { name: "cypress", minHeight: 8.0, heightRange: 3.5, heightUnit: 1.0 }
     { name: "spruce", minHeight: 5.5, heightRange: 3.0, heightUnit: 1.0 }
-    {
-      name: "sugar maple"
-      minHeight: 4.2
-      heightRange: 2.6
-      heightUnit: stylizedHeightUnit(species: speciesOrange, oldUnit: autumnReferenceHeight)
-    }
-    {
-      name: "red maple"
-      minHeight: 4.2
-      heightRange: 2.6
-      heightUnit: stylizedHeightUnit(species: speciesRed, oldUnit: autumnReferenceHeight)
-    }
-    {
-      name: "ginkgo"
-      minHeight: 4.2
-      heightRange: 2.6
-      heightUnit: stylizedHeightUnit(species: speciesGold, oldUnit: autumnReferenceHeight)
-    }
-    {
-      name: "japanese maple"
-      minHeight: 3.2
-      heightRange: 1.6
-      heightUnit: stylizedHeightUnit(species: speciesCrimson, oldUnit: autumnReferenceHeight)
-    }
+    { name: "sugar maple", minHeight: 4.2, heightRange: 2.6, heightUnit: autumnReferenceHeight }
+    { name: "red maple", minHeight: 4.2, heightRange: 2.6, heightUnit: autumnReferenceHeight }
+    { name: "ginkgo", minHeight: 4.2, heightRange: 2.6, heightUnit: autumnReferenceHeight }
+    { name: "japanese maple", minHeight: 3.2, heightRange: 1.6, heightUnit: autumnReferenceHeight }
     { name: "palm", minHeight: 5.0, heightRange: 1.5, heightUnit: autumnReferenceHeight }
     { name: "birch", minHeight: 6.5, heightRange: 2.0, heightUnit: autumnReferenceHeight }
     { name: "warm broadleaf (T02)", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
@@ -130,6 +105,9 @@ func createStylizedTrees() ret TreeSet {
     { name: "warm broadleaf 3", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
     { name: "warm broadleaf 4", minHeight: 10.0, heightRange: 3.0, heightUnit: referenceTreeHeight }
   }
+  # a rebuilt tree's height at scale 1 is its grown height (StylizedKinds)
+  setStylizedHeightUnits(species: species)
+
   var standPicks: List(SpeciesPick) = List(SpeciesPick) {
     { upTo: 0.12, species: speciesBirch }
     { upTo: 0.26, species: speciesBroadleaf }
