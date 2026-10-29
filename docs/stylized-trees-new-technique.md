@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-3/12 done (2026-10-29), 4-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-4/12 done (2026-10-29), 5-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -139,6 +139,16 @@ lime's green was, because red is already near 1. So the oranges are as
 bright as red allows, with the three tones close, and the shaded side reads
 deeper than the old pale orange. Case 1256 (now `1256_stylized_kind_levels`)
 checks every rebuilt species against its old tree's numbers.
+
+Done for the red maple (task 4/12, 2026-10-29): `redMapleKind`, with
+masses and the round crown, looser than the sugar maple's: about 22 smaller
+masses with sky between them, on branches that rise more steeply from a
+fork at 0.55 of the height. The crown is 1.08 of the height wide from 0.46
+(the old one: about 1.1 from 0.48). The leaf is `LeafOutline.threeLobed`.
+The scarlet is about 2.4 times the old picture's average, as for the lime.
+The bark is smooth gray with faint streaks. A loose crown's middle level
+fills some of the gaps (106% at 2.6 card layers); 3.0 layers bring it to
+100-103%.
 
 ## 5. Bushes (task 10)
 
