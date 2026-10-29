@@ -1,0 +1,126 @@
+# The stylized set's trees rebuilt as treeGen kinds (stylizedTrees/
+# StylizedKinds, docs/stylized-trees-new-technique.md tasks 2-9): each
+# one's middle level (every 4th leaf card at twice the width) covers what
+# its near level does within 5% from each of 8 sides, the cards facing the
+# view as they are drawn (as case 1228 checks the old trees' levels); and
+# its grown crown keeps the old tree's silhouette (its width and where it
+# starts, as parts of the height, measured on the old meshes) and height.
+import Math
+open Mesh3d
+open stylizedTrees/StylizedTrees
+open stylizedTrees/StylizedKinds
+open stylizedTrees/ReferenceTrees
+open treeGen/TreeKind
+open app3d/TreeCoverage
+
+# One rebuilt species and the old tree's numbers it must keep
+type KindCheck {
+  species: Int
+  name: String
+  widthLow: Float
+  widthHigh: Float
+  startLow: Float
+  startHigh: Float
+  heightLow: Float
+  heightHigh: Float
+}
+
+func percent(share: view Float) ret Int {
+  ret (share * 100.0 + 0.5).toInt()
+}
+
+# The checks of one species; true when they all hold
+func checkKind(check: view KindCheck) ret Bool {
+  let treeKind: TreeKind = stylizedTreeKind(species: check.species)
+  let variety: Int = stylizedKindVariety(species: check.species)
+  let near: List(MeshData) = referenceLevelParts(
+    treeKind: treeKind
+    variety: variety
+    keepEvery: 1
+    grow: 1.0
+  )
+  let middle: List(MeshData) = referenceLevelParts(
+    treeKind: treeKind
+    variety: variety
+    keepEvery: referenceMiddleKeep
+    grow: referenceMiddleGrow
+  )
+  let shares: List(Float) = levelCoverageShares(
+    near: near
+    level: middle
+    directions: 8
+    resolution: 256
+    cardsFacing: true
+  )
+  var low: Float = 10.0
+  var high: Float = 0.0
+  loop let share: view Float in shares {
+    low = Math.min(a: low, b: share)
+    high = Math.max(a: high, b: share)
+  }
+  let fits: Bool = low >= 0.95 and high <= 1.05
+  log(
+    "{check.name}: middle covers {percent(share: low)}-{percent(share: high)}% of the near crown ={fits}"
+  )
+  # the silhouette: the leaves' reach and lowest point over the height the
+  # set places it by
+  let height: Float = stylizedHeightUnit(species: check.species, oldUnit: 1.0)
+  var reach: Float = 0.0
+  var bottom: Float = 1000.0
+  loop var part: Int = 1, part < near.length, ++part {
+    let mesh: MeshData = near.copyAtDefault(index: part)
+    loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+      let x: Float = mesh.verts.copyAtDefault(index: vertex * 8)
+      let y: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 1)
+      reach = Math.max(a: reach, b: Math.sqrt(x: x * x + y * y))
+      bottom = Math.min(a: bottom, b: mesh.verts.copyAtDefault(index: vertex * 8 + 2))
+    }
+  }
+  let width: Float = 2.0 * reach / height
+  let start: Float = bottom / height
+  let wide: Bool = width >= check.widthLow and width <= check.widthHigh
+  let starts: Bool = start >= check.startLow and start <= check.startHigh
+  log(
+    "{check.name}: crown {percent(share: width)}% of the height wide ={wide}, from {percent(
+      share: start
+    )}% of it ={starts}"
+  )
+  let tall: Bool = height >= check.heightLow and height <= check.heightHigh
+  log("{check.name}: grown {percent(share: height / check.heightHigh)}% of the old tallest ={tall}")
+  ret fits and wide and starts and tall
+}
+
+func main() ret Int {
+  # the old crowns: the lime 0.91 wide from 0.32, 4.8 - 7.2 m; the sugar
+  # maple 1.07 wide from 0.41, 4.2 - 6.8 m
+  let checks: List(KindCheck) = List(KindCheck) {
+    {
+      species: speciesBroadleaf
+      name: "lime"
+      widthLow: 0.7
+      widthHigh: 1.0
+      startLow: 0.22
+      startHigh: 0.42
+      heightLow: 4.8
+      heightHigh: 7.2
+    }
+    {
+      species: speciesOrange
+      name: "sugar maple"
+      widthLow: 0.9
+      widthHigh: 1.25
+      startLow: 0.3
+      startHigh: 0.5
+      heightLow: 4.2
+      heightHigh: 6.8
+    }
+  }
+  var failures: Int = 0
+  loop let check: view KindCheck in checks {
+    if not checkKind(check: check) {
+      failures = failures + 1
+    }
+  }
+  log("every rebuilt tree within its checks: {failures is 0}")
+  ret failures
+}

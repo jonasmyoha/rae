@@ -84,6 +84,9 @@ func leafCover(
   if outline is LeafOutline.heart {
     ret heartCover(leaf: leaf, along: along, across: across)
   }
+  if outline is LeafOutline.lobed {
+    ret lobedCover(leaf: leaf, along: along, across: across)
+  }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
 
@@ -111,6 +114,19 @@ func heartCover(leaf: view StampLeaf, along: view Float, across: view Float) ret
   let side: Float = (width - Math.abs(value: across)) / 1.5 + 0.5
   let base: Float = (along - notch) / 1.5 + 0.5
   ret Math.clamp(val: Math.min(a: side, b: base), low: 0.0, high: 1.0)
+}
+
+# A maple leaf: round its middle (half way along), five pointed lobes at 0
+# and +-72 and +-144 degrees from the tip's direction, reaching the half
+# width; between them the edge comes in to about half of it, and toward
+# the stalk (180 degrees) it is cut in. Use a half width of half the length.
+func lobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  let x: Float = along - leaf.length * 0.5
+  let distance: Float = Math.sqrt(x: x * x + across * across)
+  let angle: Float = Math.atan2(y: across, x: x)
+  let lobe: Float = Math.pow(base: Math.abs(value: Math.cos(x: 2.5 * angle)), exp: 2.0)
+  let reach: Float = leaf.halfWidth * (0.52 + 0.48 * lobe)
+  ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
 }
 
 # An almond: widest a little below the middle, rounded at the base, pointed

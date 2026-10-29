@@ -4,7 +4,7 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, ...). Written new.
+# (lime, sugarMaple). Written new.
 import Sys
 import Vec3
 import RendererDeferred
@@ -20,6 +20,12 @@ const limeHeight: Float = 6.0
 
 # The grown variety (seed) the stylized set uses for the lime
 const limeVariety: Int = 1
+
+# The sugar maple's grown height (m): the old tree's reference height, the
+# middle of its 4.2 - 6.8 m
+const sugarMapleHeight: Float = 5.5
+
+const sugarMapleVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -97,6 +103,81 @@ func limeKind() ret TreeKind {
   }
 }
 
+# The sugar maple (Acer saccharum) in autumn orange, as the old tree looks:
+# a leaning leader forking low, long rising branches spreading into a broad
+# oval crown wider than it is tall (the old one's: about 1.07 of the height
+# wide, from 0.41 to 1.05 of it), in rounded clusters; five-lobed leaves
+# (the old spray picture's average times its tint: linear 0.60, 0.11,
+# 0.03); gray-brown bark (the old bark's 0.18, 0.12, 0.09) with long plates.
+# Masses fit: the crown reads as rounded clusters, flatter than the lime's.
+func sugarMapleKind() ret TreeKind {
+  ret TreeKind {
+    name: "sugarMaple"
+    measures: {
+      height: sugarMapleHeight
+      forkHeight: 0.5
+      baseRadius: 0.22
+      forkRadius: 0.13
+      bow: 0.015
+      bowAt: 0.5
+      mainLean: 0.15
+      mainLength: 0.46
+      mainRadius: 0.85
+      secondLean: 0.75
+      secondLength: 0.38
+      secondRadius: 0.7
+      branchCount: 8
+      branchLowest: 0.53
+      branchHighest: 0.82
+      branchAngleMin: 0.95
+      branchAngleMax: 1.25
+      branchLengthMin: 0.22
+      branchLengthMax: 0.36
+      branchRadius: 0.5
+      massCount: 30
+      massRadiusMin: 0.6
+      massRadiusMax: 0.9
+      crownX: 0.0
+      crownZ: 0.27
+      crownHalfWidth: 0.35
+      crownHalfHeight: 0.14
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 1.0
+      massAcrossMax: 1.25
+      massUpMin: 0.75
+      massUpMax: 0.95
+      massDepth: 1.0
+      roundCrown: true
+    }
+    traced: false
+    leaf: {
+      outline: LeafOutline.lobed
+      countMin: 9
+      countSpread: 5
+      reach: 140.0
+      lengthMin: 90.0
+      lengthMax: 130.0
+      widthMin: 0.5
+      widthMax: 0.5
+      angleJitter: 1.0
+      seed: 9500
+    }
+    cardSize: 0.55
+    cardLayers: 3.0
+    # the old orange's hue as it renders (green about 0.22 of red), as
+    # bright as red can go and the three tones close: the cards' mass
+    # shading and occlusion darken it as they do the lime's greens, and red
+    # cannot be raised 2.4 times
+    greens: List(Vec3) {
+      Vec3.create(x: 0.95, y: 0.21, z: 0.04)
+      Vec3.create(x: 1.0, y: 0.235, z: 0.045)
+      Vec3.create(x: 0.88, y: 0.19, z: 0.036)
+    }
+    bark: { color: Vec3.create(x: 0.2, y: 0.14, z: 0.1), streakDepth: 0.4 }
+  }
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -113,16 +194,25 @@ func stylizedNewKind(species: view Int) ret Bool {
   if species is speciesBroadleaf {
     ret not stylizedOldRequested(name: "lime")
   }
+  if species is speciesOrange {
+    ret not stylizedOldRequested(name: "sugarMaple")
+  }
   ret false
 }
 
 # The treeGen kind of a rebuilt species
 func stylizedTreeKind(species: view Int) ret TreeKind {
+  if species is speciesOrange {
+    ret sugarMapleKind()
+  }
   ret limeKind()
 }
 
 # The grown variety of a rebuilt species
 func stylizedKindVariety(species: view Int) ret Int {
+  if species is speciesOrange {
+    ret sugarMapleVariety
+  }
   ret limeVariety
 }
 
