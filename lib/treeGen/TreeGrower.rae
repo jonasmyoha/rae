@@ -67,6 +67,10 @@ type TreeMeasures {
   massUpMin: Float = 0.85
   massUpMax: Float = 1.1
   massDepth: Float = 0.9
+  # false: the tree is grown in one plane, as the trace (T02, seen from the
+  # front); true: a crown that is round from every side, its side branches
+  # turning round the trunk and its masses filling the crown in depth too
+  roundCrown: Bool = false
 }
 
 # A grown tree, in the traced tree's form
@@ -394,6 +398,9 @@ func grownMass(
   let pick: Float = nextUnit(random: random)
   var side: Int = 0
   var y: Float = nextBetween(random: random, low: -0.3, high: 0.3) * depth
+  if measures.roundCrown {
+    y = center.y + y
+  }
   if pick < measures.shareBehind {
     side = 1
     y = depth + 0.35
@@ -409,6 +416,15 @@ func grownMass(
     parent: parent
     side: side
   }
+}
+
+# The most side branches a grown tree has: 5 in the trace's plane, the
+# measured count and two more round a round crown
+func branchCap(measures: view TreeMeasures) ret Int {
+  if measures.roundCrown {
+    ret measures.branchCount + 2
+  }
+  ret 5
 }
 
 # A tree of the traced tree's kind grown from `seed`: its own height, fork,
@@ -528,11 +544,19 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
   # from the main leader above it
   let branchCount: Int = Math.max(
     a: 3
-    b: Math.min(a: 5, b: measures.branchCount - 1 + (nextUnit(random: random) * 3.0).toInt())
+    b: Math.min(
+      a: branchCap(measures: measures)
+      b: measures.branchCount - 1 + (nextUnit(random: random) * 3.0).toInt()
+    )
   )
   var branchSide: Float = 1.0
   if nextUnit(random: random) < 0.5 {
     branchSide = -1.0
+  }
+  # a round crown's branches turn round the trunk by the golden angle
+  var azimuth: Float = 0.0
+  if measures.roundCrown {
+    azimuth = nextUnit(random: random) * 6.2831853
   }
   loop var b: Int = 0, b < branchCount, ++b {
     let along: Float = (b.toFloat() + 0.5) / branchCount.toFloat()
@@ -561,7 +585,15 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     let base: Float = limbRadiusAt(limb: parentLimb, z: z) * measures.branchRadius
     # straight out at its angle from its parent's center line (the base
     # sunk in the parent), rising a little toward the light, never down
-    let out: Vec3 = Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
+    var out: Vec3 = Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
+    if measures.roundCrown {
+      azimuth = azimuth + 2.3999632 + nextBetween(random: random, low: -0.3, high: 0.3)
+      out = Vec3.create(
+        x: Math.cos(x: azimuth) * Math.sin(x: angle)
+        y: Math.sin(x: azimuth) * Math.sin(x: angle)
+        z: Math.cos(x: angle)
+      )
+    }
     limbs.add(value: grownLimb(
       random: random
       start: start
@@ -618,11 +650,23 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     # evenly over the crown's ellipse
     let around: Float = nextUnit(random: random) * 6.2831853
     let reach: Float = Math.sqrt(x: nextUnit(random: random))
-    let center: Vec3 = Vec3.create(
+    var center: Vec3 = Vec3.create(
       x: centerX + Math.cos(x: around) * reach * halfWidth
       y: 0.0
       z: centerZ + Math.sin(x: around) * reach * halfHeight
     )
+    if measures.roundCrown {
+      # in the crown's ellipsoid, mostly toward its skin (deep ones are
+      # hidden): a direction over the sphere, the reach 0.45 to 1
+      let up: Float = nextBetween(random: random, low: -1.0, high: 1.0)
+      let ring: Float = Math.sqrt(x: Math.max(a: 0.0, b: 1.0 - up * up))
+      let deep: Float = 0.45 + 0.55 * reach
+      center = Vec3.create(
+        x: centerX + Math.cos(x: around) * ring * deep * halfWidth
+        y: Math.sin(x: around) * ring * deep * halfWidth
+        z: centerZ + up * deep * halfHeight
+      )
+    }
     # its limb: the leader or branch with a point nearest to it
     var nearest: Int = 1
     var nearestGap: Float = 1000000.0
@@ -667,5 +711,6 @@ func grownParams(measures: view TreeMeasures, seed: view Int) ret TreeParams {
   params.height = grown.height
   params.tracedLimbs = own grown.limbs
   params.tracedClumps = own grown.clumps
+  params.roundCrown = measures.roundCrown
   ret params
 }

@@ -9,11 +9,27 @@ import Math
 import Vec3
 open app3d/SpriteBake
 
-# A copy of `mesh` turned by `angle` (radians) about +Z
-func turnedMesh(mesh: view MeshData, angle: view Float) ret MeshData {
+# A copy of `mesh` turned by `angle` (radians) about +Z. `cardsFacing`: a
+# camera-facing card (MeshData.leafCards, its center per vertex) turns only
+# its center and keeps facing the side view, as the renderer draws it.
+func turnedMesh(mesh: view MeshData, angle: view Float, cardsFacing: view Bool) ret MeshData {
   var turned: MeshData = mesh
   let cosine: Float = Math.cos(x: angle)
   let sine: Float = Math.sin(x: angle)
+  if cardsFacing and mesh.leafCards.length >= mesh.vertCount * 4 {
+    loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
+      let centerX: Float = mesh.leafCards.copyAtDefault(index: vertex * 4)
+      let centerY: Float = mesh.leafCards.copyAtDefault(index: vertex * 4 + 1)
+      let x: Float = turned.verts.copyAtDefault(index: vertex * 8)
+      let y: Float = turned.verts.copyAtDefault(index: vertex * 8 + 1)
+      turned.verts.set(index: vertex * 8, value: x - centerX + centerX * cosine - centerY * sine)
+      turned.verts.set(
+        index: vertex * 8 + 1
+        value: y - centerY + centerX * sine + centerY * cosine
+      )
+    }
+    ret turned
+  }
   loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
     # its position (floats 0, 1) and its normal (3, 4)
     loop var pair: Int = 0, pair < 2, ++pair {
@@ -29,11 +45,16 @@ func turnedMesh(mesh: view MeshData, angle: view Float) ret MeshData {
 
 # The area (square units) the parts cover from the side after a turn of
 # `angle`, baked `resolution` pixels tall
-func sideArea(parts: view List(MeshData), angle: view Float, resolution: view Int) ret Float {
+func sideArea(
+  parts: view List(MeshData)
+  angle: view Float
+  resolution: view Int
+  cardsFacing: view Bool
+) ret Float {
   var turned: List(MeshData) = List.create(MeshData, cap: parts.length)
   var colors: List(Vec3) = List.create(Vec3, cap: parts.length)
   loop let part: view MeshData in parts {
-    turned.add(value: turnedMesh(mesh: part, angle: angle))
+    turned.add(value: turnedMesh(mesh: part, angle: angle, cardsFacing: cardsFacing))
     colors.add(value: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
   }
   # Twice as wide as tall: room for the widest crown at any turn
@@ -56,18 +77,31 @@ func sideArea(parts: view List(MeshData), angle: view Float, resolution: view In
 
 # A level's covered area over the near level's, from each of `directions`
 # turns: one share per direction (1.0 = the same). Each level is its parts
-# (a tree set gives them: StylizedTrees.speciesLevelParts).
+# (a tree set gives them: StylizedTrees.speciesLevelParts). `cardsFacing`:
+# camera-facing cards keep facing the view (treeGen's card levels); false
+# turns them with the mesh, as the old card trees were checked (case 1228).
 func levelCoverageShares(
   near: view List(MeshData)
   level: view List(MeshData)
   directions: view Int
   resolution: view Int
+  cardsFacing: view Bool
 ) ret List(Float) {
   var shares: List(Float) = List.create(Float, cap: directions)
   loop var direction: Int = 0, direction < directions, ++direction {
     let angle: Float = direction.toFloat() * 6.2831853 / directions.toFloat()
-    let nearArea: Float = sideArea(parts: near, angle: angle, resolution: resolution)
-    let levelArea: Float = sideArea(parts: level, angle: angle, resolution: resolution)
+    let nearArea: Float = sideArea(
+      parts: near
+      angle: angle
+      resolution: resolution
+      cardsFacing: cardsFacing
+    )
+    let levelArea: Float = sideArea(
+      parts: level
+      angle: angle
+      resolution: resolution
+      cardsFacing: cardsFacing
+    )
     var share: Float = 1.0
     if nearArea > 0.0 {
       share = levelArea / nearArea

@@ -42,6 +42,7 @@ open ImpostorAtlas
 open ImpostorBake
 open treeSets/TreeSet
 open treeGen/TreeKind
+open stylizedTrees/StylizedKinds
 
 # Stable legacy kind: small-leaved lime (Tilia cordata), never renumbered.
 const speciesBroadleaf: Int = 0
@@ -81,30 +82,6 @@ const stylizedWarmBroadleafVarieties: Int = 5
 # scales them from it
 const autumnReferenceHeight: Float = 5.5
 
-# `picks` with the umbrella pine's entry split evenly among the warm
-# broadleaf's varieties (each a stand of its own variety)
-func warmBroadleafPicks(picks: view List(SpeciesPick)) ret List(SpeciesPick) {
-  var result: List(SpeciesPick) = List.create(SpeciesPick, cap: picks.length + 4)
-  var low: Float = 0.0
-  loop let pick: view SpeciesPick in picks {
-    if pick.species is speciesUmbrella {
-      let share: Float = (pick.upTo - low) / stylizedWarmBroadleafVarieties.toFloat()
-      loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
-        result.add(
-          value: {
-            upTo: low + share * (variety + 1).toFloat()
-            species: speciesWarmBroadleaf + variety
-          }
-        )
-      }
-    } else {
-      result.add(value: pick)
-    }
-    low = pick.upTo
-  }
-  ret result
-}
-
 # The stylized set (treeSets/TreeSet): its ten species, in the order of the
 # species constants above, and its stands: the leaf-patch broadleaf and
 # spruce most, then the autumn trees, the umbrella pine and cypress; among
@@ -112,7 +89,12 @@ func warmBroadleafPicks(picks: view List(SpeciesPick)) ret List(SpeciesPick) {
 # a stand's main species)
 func createStylizedTrees() ret TreeSet {
   let species: List(TreeSpecies) = List(TreeSpecies) {
-    { name: "lime", minHeight: 4.8, heightRange: 2.4, heightUnit: 1.0 }
+    {
+      name: "lime"
+      minHeight: 4.8
+      heightRange: 2.4
+      heightUnit: stylizedHeightUnit(species: speciesBroadleaf, oldUnit: 1.0)
+    }
     { name: "umbrella pine", minHeight: 5.6, heightRange: 1.8, heightUnit: 1.0 }
     { name: "cypress", minHeight: 8.0, heightRange: 3.5, heightUnit: 1.0 }
     { name: "spruce", minHeight: 5.5, heightRange: 3.0, heightUnit: 1.0 }
@@ -743,7 +725,18 @@ func addStylizedForestKinds(
     path: cypressLeafTexture()
   )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
+  let warmEnds: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
   loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
+    # a tree rebuilt in treeGen's technique (StylizedKinds)
+    if stylizedNewKind(species: species) {
+      subjects.add(value: addStylizedNewKind(
+        field: field
+        renderer: renderer
+        species: species
+        ends: warmEnds
+      ))
+      continue
+    }
     # The near level's meshes, made once: drawn near, and baked into the
     # impostor (their bounds frame it)
     let nearMeshes: List(MeshData) = speciesLevelMeshes(
@@ -920,7 +913,6 @@ func addStylizedForestKinds(
   # same atlas after the ten above
   let warmKind: TreeKind = warmBroadleafKind()
   let warmImages: ReferenceImages = referenceImages(renderer: renderer, treeKind: warmKind)
-  let warmEnds: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
   loop var variety: Int = 0, variety < stylizedWarmBroadleafVarieties, ++variety {
     subjects.add(value: addReferenceKind(
       field: field

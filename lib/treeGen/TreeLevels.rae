@@ -280,20 +280,26 @@ func leafCardLevel(cards: view LeafCards, keepEvery: view Int, grow: view Float)
     )
     sums.set(index: tone, value: Vec3.vadd(a: sums.copyAtDefault(index: tone), b: color))
     counts.set(index: tone, value: counts.copyAtDefault(index: tone) + 1)
+    let normal: Vec3 = Vec3.create(
+      x: cards.floats.copyAtDefault(index: base + 4)
+      y: cards.floats.copyAtDefault(index: base + 5)
+      z: cards.floats.copyAtDefault(index: base + 6)
+    )
+    let halfSize: Float = cards.floats.copyAtDefault(index: base + 3) * 0.5
+    # a grown card moves in along its mass's normal by what it grew, so its
+    # outer edge stays where the small card's was: centered on the same
+    # point, the crown swelled by about a fifth where the levels switch
+    let inward: Float = halfSize * (grow - 1.0)
     if let mesh: mod MeshData = meshes.modAt(index: tone) {
       addLeafCard(
         mesh: mesh
         center: Vec3.create(
-          x: cards.floats.copyAtDefault(index: base)
-          y: cards.floats.copyAtDefault(index: base + 1)
-          z: cards.floats.copyAtDefault(index: base + 2)
+          x: cards.floats.copyAtDefault(index: base) - normal.x * inward
+          y: cards.floats.copyAtDefault(index: base + 1) - normal.y * inward
+          z: cards.floats.copyAtDefault(index: base + 2) - normal.z * inward
         )
-        halfSize: cards.floats.copyAtDefault(index: base + 3) * 0.5 * grow
-        normal: Vec3.create(
-          x: cards.floats.copyAtDefault(index: base + 4)
-          y: cards.floats.copyAtDefault(index: base + 5)
-          z: cards.floats.copyAtDefault(index: base + 6)
-        )
+        halfSize: halfSize * grow
+        normal: normal
         mirrored: cards.floats.copyAtDefault(index: base + 11) > 3.14159
       )
     }
