@@ -33,6 +33,7 @@ open treeGen/Bark
 open treeGen/LeafCards
 open treeGen/TreeLevels
 open treeGen/TreeKind
+open treeGen/ShelfCards
 
 const referenceSpeciesCount: Int = 5
 
@@ -205,18 +206,53 @@ func referenceLevelParts(
   let skeleton: TreeSkeleton = growSkeleton(
     params: kindParams(treeKind: treeKind, variety: variety)
   )
-  let cards: LeafCards = leafCards(
+  let leaves: KindLeafLevels = kindLeafLevels(
     skeleton: skeleton
     treeKind: treeKind
-    seed: kindCardSeed(treeKind: treeKind, variety: variety)
+    variety: variety
+    keepEvery: keepEvery
+    grow: grow
   )
-  let leaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: keepEvery, grow: grow)
   var parts: List(MeshData) = List.create(MeshData, cap: 4)
   parts.add(value: barkMesh(skeleton: skeleton))
-  loop let mesh: view MeshData in leaves.meshes {
+  loop let mesh: view MeshData in leaves.middle.meshes {
     parts.add(value: mesh)
   }
   ret parts
+}
+
+# A kind's leaves at two levels: `near` (every card) and `middle` (every
+# `keepEvery`-th, `grow` times as big), and how many cards there are
+type KindLeafLevels {
+  near: LeafCardLevel
+  middle: LeafCardLevel
+  count: Int
+}
+
+# The leaf levels of `treeKind`'s variety on `skeleton`: masses filled with
+# camera-facing cards (LeafCards), or a conifer's shelves (ShelfCards)
+func kindLeafLevels(
+  skeleton: view TreeSkeleton
+  treeKind: view TreeKind
+  variety: view Int
+  keepEvery: view Int
+  grow: view Float
+) ret KindLeafLevels {
+  let seed: Int = kindCardSeed(treeKind: treeKind, variety: variety)
+  if treeKind.foliage is TreeFoliage.shelves {
+    let shelves: ShelfCards = shelfCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
+    ret KindLeafLevels {
+      near: shelfCardLevel(shelves: shelves, keepEvery: 1, grow: 1.0)
+      middle: shelfCardLevel(shelves: shelves, keepEvery: keepEvery, grow: grow)
+      count: shelves.count
+    }
+  }
+  let cards: LeafCards = leafCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
+  ret KindLeafLevels {
+    near: leafCardLevel(cards: cards, keepEvery: 1, grow: 1.0)
+    middle: leafCardLevel(cards: cards, keepEvery: keepEvery, grow: grow)
+    count: cards.count
+  }
 }
 
 # One variety of tree kind `treeKind` (T02: 0 the traced tree, 1-4 the grown
@@ -235,17 +271,15 @@ func addReferenceKind(
   let params: TreeParams = kindParams(treeKind: treeKind, variety: variety)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let barkData: MeshData = barkMesh(skeleton: skeleton)
-  let cards: LeafCards = leafCards(
+  let leaves: KindLeafLevels = kindLeafLevels(
     skeleton: skeleton
     treeKind: treeKind
-    seed: kindCardSeed(treeKind: treeKind, variety: variety)
-  )
-  let nearLeaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: 1, grow: 1.0)
-  let middleLeaves: LeafCardLevel = leafCardLevel(
-    cards: cards
+    variety: variety
     keepEvery: treeKind.middleKeep
     grow: treeKind.middleGrow
   )
+  let nearLeaves: LeafCardLevel = leaves.near
+  let middleLeaves: LeafCardLevel = leaves.middle
   let bark: Material3d = barkMaterial(barkKind: treeKind.bark, layer: images.barkLayer)
   let barkHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: barkData)
   let barkTriangles: Int = barkData.indices.length / 3
@@ -275,6 +309,10 @@ func addReferenceKind(
     albedos: albedos
   )
   subject.cardNormalsToEye = true
+  # fixed shelf cards turn too (their part flag): the leaf parts 1-3
+  if treeKind.foliage is TreeFoliage.shelves {
+    subject.turnPartsToEye = List(Bool) { false, true, true, true }
+  }
   subject.imageLayers = List(Int) {
     images.barkLayer
     images.impostorLeafLayer
@@ -331,7 +369,7 @@ func addReferenceKind(
     middleTriangles = middleTriangles + mesh.indices.length / 3
   }
   log(
-    "[referenceTrees] {treeKind.name} variety {variety}: {cards.count} leaf cards; {triangles} triangles near, {middleTriangles} middle; {bounds.z} m tall"
+    "[referenceTrees] {treeKind.name} variety {variety}: {leaves.count} leaf cards; {triangles} triangles near, {middleTriangles} middle; {bounds.z} m tall"
   )
   ret subject
 }

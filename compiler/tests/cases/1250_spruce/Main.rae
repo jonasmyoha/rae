@@ -91,12 +91,15 @@ func main() ret Int {
         }
       }
     }
-    let scale: Float = treeScaleAt(
-      treeSet: createStylizedTrees()
+    # the placed height: the scale times the species' height unit (1 for
+    # the old unit-height spruce, its grown height for the rebuilt one)
+    let treeSet: TreeSet = createStylizedTrees()
+    let height: Float = treeHeightFor(
+      treeSet: treeSet
       species: speciesSpruce
-      number: sample
+      scale: treeScaleAt(treeSet: treeSet, species: speciesSpruce, number: sample)
     )
-    if scale < 5.5 or scale > 8.5 {
+    if height < 5.5 or height > 8.5 {
       ret 5
     }
   }

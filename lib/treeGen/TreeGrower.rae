@@ -289,6 +289,8 @@ type LimbShape {
   baseRadius: Float
   tipRadius: Float
   collar: Float
+  # the steps the limb is made of (its points less one)
+  steps: Int = 16
 }
 
 # A smooth 0..1 step over 0..1
@@ -305,7 +307,7 @@ func grownLimb(
   parent: view Int
   order: view Int
 ) ret TracedLimb {
-  let steps: Int = 16
+  let steps: Int = shape.steps
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
   let leaving: Vec3 = Vec3.vnorm(a: shape.leaving)

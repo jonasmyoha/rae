@@ -1,0 +1,269 @@
+# treeGen/WhorlGrower — a conifer grown in whorls (docs/spruce-new-technique-
+# design.md §2): a straight trunk to the tip, rings of branches round it
+# every few decimeters, each branch leaving almost level and drooping more
+# toward its tip, its length the cone's radius at its height, and flat
+# branchlets along it that widen the shelf. Grown in the traced tree's form
+# (TracedLimb lines, no masses), so Skeleton, BarkMesh and the levels make it
+# as they make every grown tree. Written new.
+import Math
+import Vec3
+open treeGen/TreeParams
+open treeGen/TracedLimb
+open treeGen/TreeGrower
+
+# What a whorled tree is, in numbers (lengths as parts of the height)
+type WhorlMeasures {
+  # where the lowest whorl is, as a part of the height
+  crownStart: Float
+  # the step from one whorl to the next (m)
+  spacingMin: Float
+  spacingMax: Float
+  # branches a whorl
+  branchesMin: Int
+  branchesMax: Int
+  # the share of branches left out ("broken whorls")
+  broken: Float
+  # the cone's radius at the lowest whorl, as a part of the height, and its
+  # shape (1 a straight cone, below 1 a fuller middle)
+  baseReach: Float
+  taper: Float
+  # a branch's angle from upright where it leaves the trunk (radians)
+  angleMin: Float
+  angleMax: Float
+  # how far a branch bends toward the ground over its length (radians):
+  # at the top of the crown and at its bottom
+  droopTop: Float
+  droopBottom: Float
+  # a branch's base radius as a part of the trunk's there
+  branchRadius: Float
+  # flat branchlets a branch, and their length as a part of the branch's
+  branchletsMin: Int
+  branchletsMax: Int
+  branchletShare: Float
+}
+
+# No whorls (a kind that is not whorled carries these, unread)
+func noWhorls() ret WhorlMeasures {
+  ret WhorlMeasures {
+    crownStart: 0.0
+    spacingMin: 0.5
+    spacingMax: 0.5
+    branchesMin: 0
+    branchesMax: 0
+    broken: 0.0
+    baseReach: 0.0
+    taper: 1.0
+    angleMin: 0.0
+    angleMax: 0.0
+    droopTop: 0.0
+    droopBottom: 0.0
+    branchRadius: 0.0
+    branchletsMin: 0
+    branchletsMax: 0
+    branchletShare: 0.0
+  }
+}
+
+# The measures of a whorled tree's kind: only its height and trunk radius
+# are read (WhorlMeasures holds the rest); TreeKind needs one
+func whorlTreeMeasures(height: view Float, baseRadius: view Float) ret TreeMeasures {
+  ret TreeMeasures {
+    height: height
+    forkHeight: 1.0
+    baseRadius: baseRadius
+    forkRadius: baseRadius * 0.1
+    bow: 0.0
+    bowAt: 0.5
+    mainLean: 0.0
+    mainLength: 0.0
+    mainRadius: 1.0
+    secondLean: 0.0
+    secondLength: 0.0
+    secondRadius: 1.0
+    branchCount: 0
+    branchLowest: 0.0
+    branchHighest: 0.0
+    branchAngleMin: 0.0
+    branchAngleMax: 0.0
+    branchLengthMin: 0.0
+    branchLengthMax: 0.0
+    branchRadius: 0.0
+    massCount: 0
+    massRadiusMin: 0.0
+    massRadiusMax: 0.0
+    crownX: 0.0
+    crownZ: 0.0
+    crownHalfWidth: 0.0
+    crownHalfHeight: 0.0
+    shareBehind: 0.0
+    shareFront: 0.0
+    roundCrown: true
+  }
+}
+
+# The point of `limb` a part `share` of the way along it (by points)
+func limbPointAt(limb: view TracedLimb, share: view Float) ret Vec3 {
+  let last: Int = limb.points.length - 1
+  let index: Int = Math.clamp(val: (share * last.toFloat() + 0.5).toInt(), low: 0, high: last)
+  ret limb.points.copyAtDefault(index: index)
+}
+
+func limbRadiusShare(limb: view TracedLimb, share: view Float) ret Float {
+  let last: Int = limb.radii.length - 1
+  let index: Int = Math.clamp(val: (share * last.toFloat() + 0.5).toInt(), low: 0, high: last)
+  ret limb.radii.copyAtDefault(index: index)
+}
+
+# A whorled tree grown from `seed`: the trunk (limb 0), its whorls of
+# branches (order 2) and their branchlets (order 3), no masses
+func growWhorls(
+  measures: view TreeMeasures
+  whorl: view WhorlMeasures
+  seed: view Int
+) ret GrownTree {
+  var random: TreeRandom = createTreeRandom(seed: seed * 7 + 3301)
+  let height: Float = measures.height * nextBetween(random: random, low: 0.92, high: 1.08)
+  let scale: Float = height / measures.height
+  let baseRadius: Float = measures.baseRadius * scale
+  let lean: Float = nextBetween(random: random, low: -0.01, high: 0.01)
+  var limbs: List(TracedLimb) = List.create(TracedLimb, cap: 96)
+  # the trunk: straight to the tip, tapering, with a root flare
+  let trunkSteps: Int = 24
+  var trunkPoints: List(Vec3) = List.create(Vec3, cap: trunkSteps + 1)
+  var trunkRadii: List(Float) = List.create(Float, cap: trunkSteps + 1)
+  loop var i: Int = 0, i <= trunkSteps, ++i {
+    let t: Float = i.toFloat() / trunkSteps.toFloat()
+    let z: Float = -0.25 + (height + 0.25) * t
+    trunkPoints.add(value: Vec3.create(x: lean * Math.max(a: z, b: 0.0), y: 0.0, z: z))
+    let flare: Float = 1.0 + 0.3 * Math.exp(x: -Math.max(a: z, b: 0.0) / 0.4)
+    trunkRadii.add(value: baseRadius * (1.0 - 0.92 * t) * flare)
+  }
+  limbs.add(
+    value: TracedLimb { points: own trunkPoints, radii: own trunkRadii, parent: -1, order: 0 }
+  )
+  let trunk: TracedLimb = limbs.copyAtDefault(index: 0)
+  let crownBottom: Float = whorl.crownStart * height
+  var z: Float = crownBottom + nextBetween(random: random, low: 0.0, high: whorl.spacingMax)
+  var turn: Float = nextUnit(random: random) * 6.2831853
+  loop z < height - 0.4 {
+    let share: Float = z / height
+    # the cone's radius here: baseReach at the bottom, nothing at the tip
+    let above: Float = Math.clamp(
+      val: (height - z) / Math.max(a: height - crownBottom, b: 0.01)
+      low: 0.0
+      high: 1.0
+    )
+    let cone: Float = whorl.baseReach * height * Math.pow(base: above, exp: whorl.taper)
+    let count: Int = whorl.branchesMin + (nextUnit(random: random) * (whorl.branchesMax - whorl.branchesMin + 1).toFloat()).toInt()
+    turn = turn + nextUnit(random: random) * 6.2831853
+    let start: Vec3 = pointAtHeight(limb: trunk, z: z)
+    let trunkRadius: Float = limbRadiusAt(limb: trunk, z: z)
+    let droop: Float = whorl.droopTop + (whorl.droopBottom - whorl.droopTop) * (1.0 - share)
+    loop var b: Int = 0, b < count, ++b {
+      let skip: Float = nextUnit(random: random)
+      let azimuth: Float = turn + b.toFloat() * 6.2831853 / count.toFloat() + nextBetween(
+        random: random
+        low: -0.26
+        high: 0.26
+      )
+      let angle: Float = nextBetween(random: random, low: whorl.angleMin, high: whorl.angleMax)
+      let length: Float = cone / Math.max(a: Math.sin(x: angle), b: 0.3) * nextBetween(
+        random: random
+        low: 0.85
+        high: 1.15
+      )
+      if skip < whorl.broken or length < 0.15 {
+        continue
+      }
+      let out: Vec3 = Vec3.create(
+        x: Math.cos(x: azimuth) * Math.sin(x: angle)
+        y: Math.sin(x: azimuth) * Math.sin(x: angle)
+        z: Math.cos(x: angle)
+      )
+      let branchBase: Float = trunkRadius * whorl.branchRadius
+      let branch: TracedLimb = grownLimb(
+        random: random
+        start: start
+        shape: LimbShape {
+          leaving: out
+          direction: out
+          length: length
+          ease: 0.0
+          bend: droop
+          wander: 0.03
+          baseRadius: branchBase
+          tipRadius: branchBase * 0.35
+          collar: 0.15
+          # a short bough is near straight: 6 steps, not 16 (its tube was
+          # most of the tree's triangles)
+          steps: 6
+        }
+        parent: 0
+        order: 2
+      )
+      let branchIndex: Int = limbs.length
+      var twigs: List(TracedLimb) = List.create(TracedLimb, cap: 4)
+      # the flat branchlets, alternating sides, in the branch's own level
+      # plane
+      let along: Vec3 = Vec3.vnorm(a: Vec3.create(x: out.x, y: out.y, z: 0.0))
+      let across: Vec3 = Vec3.create(x: -along.y, y: along.x, z: 0.0)
+      let branchlets: Int = whorl.branchletsMin + (nextUnit(random: random) * (whorl.branchletsMax - whorl.branchletsMin + 1).toFloat()).toInt()
+      var side: Float = 1.0
+      loop var k: Int = 0, k < branchlets, ++k {
+        let at: Float = 0.3 + 0.5 * (k.toFloat() + 0.5) / branchlets.toFloat()
+        let from: Vec3 = limbPointAt(limb: branch, share: at)
+        let direction: Vec3 = Vec3.vnorm(
+          a: Vec3.vadd(
+            a: Vec3.vscale(a: along, s: 0.55)
+            b: Vec3.vadd(
+              a: Vec3.vscale(a: across, s: side)
+              b: Vec3.create(x: 0.0, y: 0.0, z: -0.1)
+            )
+          )
+        )
+        let twigBase: Float = limbRadiusShare(limb: branch, share: at) * 0.6
+        twigs.add(value: grownLimb(
+          random: random
+          start: from
+          shape: LimbShape {
+            leaving: direction
+            direction: direction
+            length: length * whorl.branchletShare * (1.0 - 0.5 * at)
+            ease: 0.0
+            bend: droop * 0.5
+            wander: 0.03
+            baseRadius: twigBase
+            tipRadius: twigBase * 0.5
+            collar: 0.1
+          }
+          parent: branchIndex
+          order: 3
+        ))
+        side = -side
+      }
+      limbs.add(value: own branch)
+      loop let twig: view TracedLimb in twigs {
+        limbs.add(value: twig)
+      }
+    }
+    z = z + nextBetween(random: random, low: whorl.spacingMin, high: whorl.spacingMax)
+  }
+  ret GrownTree { limbs: own limbs, clumps: List.create(TracedClump, cap: 0), height: height }
+}
+
+# The params of a whorled tree grown from `seed`, its other settings the
+# T02 tree's, its limbs kept as grown (roundCrown), no depth turn
+func whorlParams(
+  measures: view TreeMeasures
+  whorl: view WhorlMeasures
+  seed: view Int
+) ret TreeParams {
+  var params: TreeParams = warmBroadleafParams(seed: seed)
+  var grown: GrownTree = growWhorls(measures: measures, whorl: whorl, seed: seed)
+  params.height = grown.height
+  params.tracedLimbs = own grown.limbs
+  params.tracedClumps = own grown.clumps
+  params.tracedDepthTurn = 0.0
+  params.roundCrown = true
+  ret params
+}

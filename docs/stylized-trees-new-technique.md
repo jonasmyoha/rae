@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-10/12 done (2026-10-29), 11-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-11/12 done (2026-10-29), 12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -252,7 +252,7 @@ checks for at least 300.
 
 ## 6. The spruce (task 11, design only)
 
-Designed (task 11/12, 2026-10-29), waiting for the is:
+Designed (task 11/12, 2026-10-29), accepted and built:
 docs/spruce-new-technique-design.md. It uses whorl growth in TreeGrower and
 fixed shelf and curtain cards of painted needle sprays along the branches
 (treeGen/ShelfCards, `TreeKind.foliage`) in place of masses. The levels, the
