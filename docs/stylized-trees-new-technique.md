@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-2/12 done (2026-10-29), 3-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-3/12 done (2026-10-29), 4-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -127,6 +127,18 @@ treeGen tree covering 121-125% of its near level. TreeLevels.leafCardLevel
 now moves a grown card inward by what it grew, which gives 100-103%. The
 next trees reuse StylizedKinds: add the kind, and name the species in
 stylizedNewKind, stylizedTreeKind and stylizedKindVariety.
+
+Done for the sugar maple (task 3/12, 2026-10-29): `sugarMapleKind`, with
+masses and the round crown as the lime has, but with a leaning leader
+forking at half the height, long branches that rise only a little, and
+masses wider than they are tall (`massAcross` 1.0-1.25, `massUp`
+0.75-0.95). This gives a spreading crown, 1.05 of the height wide from 0.40
+(the old one: 1.07 from 0.41). The leaf is `LeafOutline.lobed` (five lobes).
+Orange cannot be raised 2.4 times to make up for the mass shading, as the
+lime's green was, because red is already near 1. So the oranges are as
+bright as red allows, with the three tones close, and the shaded side reads
+deeper than the old pale orange. Case 1256 (now `1256_stylized_kind_levels`)
+checks every rebuilt species against its old tree's numbers.
 
 ## 5. Bushes (task 10)
 
