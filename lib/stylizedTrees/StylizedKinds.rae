@@ -505,29 +505,32 @@ func addStylizedBushKind(
 # whorls of unequal, drooping boughs; dark green needles (the old spray
 # picture's average times its tint: linear 0.08, 0.15, 0.06); gray-brown
 # bark (the old bark's average times its 0.65 gray: 0.175, 0.117, 0.084).
-# Not masses: whorl growth (treeGen/WhorlGrower) and needle-spray shelf
-# and curtain cards along every branch (treeGen/ShelfCards).
+# Not masses: whorl growth (treeGen/WhorlGrower) and big shelf and
+# curtain cards along every branch (treeGen/ShelfCards), painted with
+# fluffy tufts (LeafOutline.tuft: the stylized conifers' clump cards; thin
+# needles read tiny), shaded by the cone's normals. Only the
+# trunk under the lowest tier is drawn (no branches), and no wind for now.
 func spruceKind() ret TreeKind {
   ret TreeKind {
     name: "spruce"
     measures: whorlTreeMeasures(height: spruceHeight, baseRadius: 0.17)
     traced: false
     leaf: {
-      outline: LeafOutline.needleSpray
-      countMin: 9
-      countSpread: 4
-      reach: 190.0
-      lengthMin: 150.0
-      lengthMax: 220.0
-      widthMin: 0.35
-      widthMax: 0.35
-      angleJitter: 0.8
+      outline: LeafOutline.tuft
+      countMin: 4
+      countSpread: 3
+      reach: 140.0
+      lengthMin: 200.0
+      lengthMax: 270.0
+      widthMin: 0.68
+      widthMax: 0.68
+      angleJitter: 0.6
       seed: 11100
     }
     # a shelf card's width next to the trunk (half of it at a branch's tip);
     # no branchlet tubes (most of the bark's triangles, hidden under the
     # needles): the wide shelf cards make the shelf wider than its branch
-    cardSize: 0.7
+    cardSize: 1.0
     cardLayers: 1.0
     # the old dark green's hue, about 1.7 times its picture's average (as
     # the cypress's: a dark conifer)
@@ -543,10 +546,10 @@ func spruceKind() ret TreeKind {
     middleKeep: 2
     middleGrow: 1.15
     foliage: TreeFoliage.shelves
-    # the lowest whorl at 0.08 of the height: its curtains hang to near the
-    # ground, as the old cone's foliage started at 0.03
+    # the lowest whorl at 0.16 of the height: the trunk shows under the
+    # skirt of curtains
     whorls: {
-      crownStart: 0.08
+      crownStart: 0.16
       spacingMin: 0.4
       spacingMax: 0.6
       branchesMin: 4

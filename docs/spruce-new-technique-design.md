@@ -190,3 +190,23 @@ are, not over a mass's whole skin.
   camera-facing cards by their center, per vertex). Case 1250, the old
   spruce's case, now checks the placed height through the height unit.
 
+## 10. Round 2 (2026-10-29: "better than earlier, worse
+than the low-poly one")
+
+- **No wind** on the spruce for now: its bough sway disturbed the look
+  (ShelfCards' flexibility is 0; a wind task is queued).
+- **No branches and no hidden trunk:** only the trunk from the ground to
+  0.4 m into the lowest tier is drawn (ShelfCards.lowerTrunkSkeleton,
+  ReferenceTrees.kindBarkMesh). The lowest whorl is at 0.16 of the height,
+  so the trunk shows under the skirt. The near level went from 12,400 to
+  about 1,200 triangles.
+- **Fluffy, big foliage in place of thin needles:** stylized conifers are
+  made of big foliage-clump cards shaded as one volume (Polycount and
+  stylized-tree tutorials: cards that each stand for a whole branch
+  system, normals taken from a blob or the cone). The stamp is
+  `LeafOutline.tuft`, 4 - 6 big rounded tufts with a scalloped edge, on
+  1.0 m cards next to the trunk, curtains 1.1 times as tall as wide, and
+  shelves tilted 35 - 55 degrees so they do not read as edge-on streaks.
+- **Known:** the far impostor's upper half renders lighter than the near
+  level (queued as a bug).
+

@@ -214,11 +214,20 @@ func referenceLevelParts(
     grow: grow
   )
   var parts: List(MeshData) = List.create(MeshData, cap: 4)
-  parts.add(value: barkMesh(skeleton: skeleton))
+  parts.add(value: kindBarkMesh(skeleton: skeleton, treeKind: treeKind))
   loop let mesh: view MeshData in leaves.middle.meshes {
     parts.add(value: mesh)
   }
   ret parts
+}
+
+# The wood a kind shows: the whole skeleton, or a whorled tree's lower
+# trunk only (ShelfCards.lowerTrunkSkeleton)
+func kindBarkMesh(skeleton: view TreeSkeleton, treeKind: view TreeKind) ret MeshData {
+  if treeKind.foliage is TreeFoliage.shelves {
+    ret barkMesh(skeleton: lowerTrunkSkeleton(skeleton: skeleton, overlap: 0.4))
+  }
+  ret barkMesh(skeleton: skeleton)
 }
 
 # A kind's leaves at two levels: `near` (every card) and `middle` (every
@@ -270,7 +279,7 @@ func addReferenceKind(
 ) ret ImpostorSubject {
   let params: TreeParams = kindParams(treeKind: treeKind, variety: variety)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
-  let barkData: MeshData = barkMesh(skeleton: skeleton)
+  let barkData: MeshData = kindBarkMesh(skeleton: skeleton, treeKind: treeKind)
   let leaves: KindLeafLevels = kindLeafLevels(
     skeleton: skeleton
     treeKind: treeKind
