@@ -81,6 +81,10 @@ type TreeMeasures {
   # birch's hanging twigs
   branchDroop: Float = 0.0
   massHang: Float = 0.0
+  # how much a round crown narrows toward its top (0 an ellipsoid, 1 a
+  # point at the top: a cypress's flame): the masses there sit closer to
+  # the stem and are smaller, by 1 - taper * (their height share)^1.5
+  crownTaper: Float = 0.0
 }
 
 # A grown tree, in the traced tree's form
@@ -428,6 +432,16 @@ func grownMass(
   }
 }
 
+# How much a mass at `share` of the way up (0..1) is narrowed by the
+# crown's taper (1: not at all)
+func taperAt(measures: view TreeMeasures, share: view Float) ret Float {
+  if measures.crownTaper <= 0.0 {
+    ret 1.0
+  }
+  let clamped: Float = Math.clamp(val: share, low: 0.0, high: 1.0)
+  ret 1.0 - measures.crownTaper * Math.pow(base: clamped, exp: 1.5)
+}
+
 # The most side branches a grown tree has: 5 in the trace's plane, the
 # measured count and two more round a round crown
 func branchCap(measures: view TreeMeasures) ret Int {
@@ -639,7 +653,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
   )
   loop var i: Int = 1, i < limbs.length, ++i {
     let tip: Vec3 = limbLast(limb: limbs.copyAtDefault(index: i))
-    let tipRadius: Float = scale * nextBetween(
+    let tipRadius: Float = taperAt(measures: measures, share: tip.z / height) * scale * nextBetween(
       random: random
       low: measures.massRadiusMin
       high: measures.massRadiusMax
@@ -673,15 +687,18 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
       y: 0.0
       z: centerZ + Math.sin(x: around) * reach * halfHeight
     )
+    var fillScale: Float = 1.0
     if measures.roundCrown {
       # in the crown's ellipsoid, mostly toward its skin (deep ones are
       # hidden): a direction over the sphere, the reach 0.45 to 1
       let up: Float = nextBetween(random: random, low: -1.0, high: 1.0)
       let ring: Float = Math.sqrt(x: Math.max(a: 0.0, b: 1.0 - up * up))
       let deep: Float = 0.45 + 0.55 * reach
+      let narrow: Float = taperAt(measures: measures, share: (up + 1.0) * 0.5)
+      fillScale = narrow
       center = Vec3.create(
-        x: centerX + Math.cos(x: around) * ring * deep * halfWidth
-        y: Math.sin(x: around) * ring * deep * halfWidth
+        x: centerX + Math.cos(x: around) * ring * deep * halfWidth * narrow
+        y: Math.sin(x: around) * ring * deep * halfWidth * narrow
         z: centerZ + up * deep * halfHeight
       )
     }
@@ -702,7 +719,7 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
       random: random
       measures: measures
       center: center
-      radius: scale * nextBetween(
+      radius: fillScale * scale * nextBetween(
         random: random
         low: measures.massRadiusMin
         high: measures.massRadiusMax
