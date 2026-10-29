@@ -1,6 +1,7 @@
 # Gpu2dWindowIcon — the app's icon for the Gpu2d window. Split from
 # Gpu2d.rae, which is at the 1,000-line cap; the extern is in
 # runtime_gpu2d_image.c, next to the image decoder it uses.
+import Sys
 
 # The app's icon from a PNG or JPEG file, after Gpu2d.initWindow: on macOS the
 # Dock's and the app switcher's, also for an executable started from a
@@ -11,5 +12,30 @@ func nativeSetWindowIcon(path: String) unsafe extern("rae_ext_Gpu2d_setWindowIco
 func setWindowIcon(path: copy String) ret Bool {
   unsafe {
     ret nativeSetWindowIcon(path: path) is 1
+  }
+}
+
+# The program's own icon: `appIcon.png` beside its entry file (RAE_PROGRAM,
+# which `rae run` sets), or "" when there is none. A program gets a Dock icon
+# by having that file; no code (Gpu2d.initWindow and Sdl3.initWindow set it).
+func programIconPath() ret String {
+  let program: String = Sys.getEnv(name: "RAE_PROGRAM")
+  var folder: String = "."
+  if let slash: Int = program.lastIndexOf(sub: "/") {
+    folder = program.sub(start: 0, len: slash)
+  }
+  let path: String = "{folder}/appIcon.png"
+  if program.length() > 0 and Sys.exists(path: path) {
+    ret path
+  }
+  ret ""
+}
+
+# Set the program's icon (programIconPath) on the Gpu2d window, if it has one
+func setProgramIcon() {
+  let path: String = programIconPath()
+  if path.length() > 0 {
+    let set: Bool = setWindowIcon(path: path)
+    log("[gpu2d] app icon {path}: set={set}")
   }
 }
