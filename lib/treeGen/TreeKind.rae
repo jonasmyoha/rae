@@ -16,8 +16,16 @@ open treeGen/TreeGrower
 # lime): broad, two round lobes either side of a notch at the stalk, a
 # short pointed tip. lobed (the maples): a palm of five pointed lobes round
 # its middle, a notch where the stalk joins. threeLobed (the red maple): three
-# pointed lobes forward, at 0 and +-60 degrees, the stalk end rounded
-enum LeafOutline { almond, heart, lobed, threeLobed }
+# pointed lobes forward, at 0 and +-60 degrees, the stalk end rounded.
+# deepLobed (the Japanese maple): seven narrow lobes cut deep, nearly to
+# the middle
+enum LeafOutline {
+  almond
+  heart
+  lobed
+  threeLobed
+  deepLobed
+}
 
 # The leaves of one stamp (LeafImage, pixels of its 512 x 512 picture):
 # `countMin` plus up to `countSpread` - 1 more, scattered over a disc of
@@ -61,6 +69,11 @@ type TreeKind {
   # The three greens of a mass (linear), one picked per card
   greens: List(Vec3)
   bark: BarkKind
+  # The middle level: every `middleKeep`-th card, `middleGrow` times as
+  # wide (4 and 2.0 keep the area; a tree of flat masses needs smaller
+  # cards, as a wider card sticks out past a flat mass's rim)
+  middleKeep: Int = 4
+  middleGrow: Float = 2.0
 }
 
 # The T02 tree: warm orange-brown bark, an olive yellow-green crown of round

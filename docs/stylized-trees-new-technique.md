@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-4/12 done (2026-10-29), 5-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-5/12 done (2026-10-29), 6-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -149,6 +149,18 @@ The scarlet is about 2.4 times the old picture's average, as for the lime.
 The bark is smooth gray with faint streaks. A loose crown's middle level
 fills some of the gaps (106% at 2.6 card layers); 3.0 layers bring it to
 100-103%.
+
+Done for the Japanese maple (task 5/12, 2026-10-29): `japaneseMapleKind`.
+Its look comes from layered plates held out on low, unequal stems, so it
+uses flat masses in layers (`massUp` 0.5-0.65 of the radius against
+`massAcross` 1.1-1.35). A new grower option, `TreeMeasures.twoStems`, makes
+the two leaders two stems: they fork at 0.12 of the height and lean apart,
+and the side branches take turns between them. The crown is 1.29 of the
+height wide from 0.29 (the old one: about 1.2-1.3 from 0.35), 4 m tall. The
+leaf is `LeafOutline.deepLobed` (seven narrow lobes). A flat mass's rim is
+thin, so a twice-as-wide middle card sticks out past it (110-113%).
+`TreeKind.middleKeep` / `middleGrow` (default 4 and 2.0) are now per kind,
+and this tree uses 3 and 1.6, which gives 99-102%.
 
 ## 5. Bushes (task 10)
 

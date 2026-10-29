@@ -1,6 +1,6 @@
 # The stylized set's trees rebuilt as treeGen kinds (stylizedTrees/
 # StylizedKinds, docs/stylized-trees-new-technique.md tasks 2-9): each
-# one's middle level (every 4th leaf card at twice the width) covers what
+# one's middle level (its kind's middleKeep / middleGrow) covers what
 # its near level does within 5% from each of 8 sides, the cards facing the
 # view as they are drawn (as case 1228 checks the old trees' levels); and
 # its grown crown keeps the old tree's silhouette (its width and where it
@@ -42,8 +42,8 @@ func checkKind(check: view KindCheck) ret Bool {
   let middle: List(MeshData) = referenceLevelParts(
     treeKind: treeKind
     variety: variety
-    keepEvery: referenceMiddleKeep
-    grow: referenceMiddleGrow
+    keepEvery: treeKind.middleKeep
+    grow: treeKind.middleGrow
   )
   let shares: List(Float) = levelCoverageShares(
     near: near
@@ -93,7 +93,8 @@ func checkKind(check: view KindCheck) ret Bool {
 func main() ret Int {
   # the old crowns: the lime 0.91 wide from 0.32, 4.8 - 7.2 m; the sugar
   # maple 1.07 wide from 0.41, 4.2 - 6.8 m; the red maple about 1.1 wide
-  # from 0.48, 4.2 - 6.8 m
+  # from 0.48, 4.2 - 6.8 m; the Japanese maple about 1.2 wide from 0.35,
+  # 3.2 - 4.8 m
   let checks: List(KindCheck) = List(KindCheck) {
     {
       species: speciesBroadleaf
@@ -124,6 +125,16 @@ func main() ret Int {
       startHigh: 0.58
       heightLow: 4.2
       heightHigh: 6.8
+    }
+    {
+      species: speciesCrimson
+      name: "japanese maple"
+      widthLow: 1.0
+      widthHigh: 1.4
+      startLow: 0.25
+      startHigh: 0.45
+      heightLow: 3.2
+      heightHigh: 4.8
     }
   }
   var failures: Int = 0

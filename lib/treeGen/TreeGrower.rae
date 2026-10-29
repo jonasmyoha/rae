@@ -71,6 +71,10 @@ type TreeMeasures {
   # front); true: a crown that is round from every side, its side branches
   # turning round the trunk and its masses filling the crown in depth too
   roundCrown: Bool = false
+  # true: the two leaders are two stems leaning apart (the Japanese maple's
+  # low joined stems), the side branches taking turns between them; false:
+  # both lean to the crown's side and the main one carries the branches
+  twoStems: Bool = false
 }
 
 # A grown tree, in the traced tree's form
@@ -517,8 +521,12 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
   let secondBase: Float = forkRadius * measures.secondRadius
   # the second leader leaves straight at its own lean, so the two never run
   # side by side as a doubled trunk
+  var secondSide: Float = side
+  if measures.twoStems {
+    secondSide = -side
+  }
   let secondDirection: Vec3 = Vec3.create(
-    x: side * Math.sin(x: secondLean)
+    x: secondSide * Math.sin(x: secondLean)
     y: 0.0
     z: Math.cos(x: secondLean)
   )
@@ -569,6 +577,9 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
     var parent: Int = 0
     if z > forkZ - 0.3 {
       parent = 1
+      if measures.twoStems and b % 2 is 1 {
+        parent = 2
+      }
     }
     let parentLimb: TracedLimb = limbs.copyAtDefault(index: parent)
     let start: Vec3 = pointAtHeight(limb: parentLimb, z: z)

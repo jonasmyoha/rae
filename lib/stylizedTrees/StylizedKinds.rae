@@ -4,7 +4,7 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple). Written new.
+# (lime, sugarMaple, redMaple, japaneseMaple). Written new.
 import Sys
 import Vec3
 import RendererDeferred
@@ -32,6 +32,12 @@ const sugarMapleVariety: Int = 1
 const redMapleHeight: Float = 5.5
 
 const redMapleVariety: Int = 1
+
+# The Japanese maple's grown height (m): the middle of the old tree's
+# 3.2 - 4.8 m
+const japaneseMapleHeight: Float = 4.0
+
+const japaneseMapleVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -258,6 +264,85 @@ func redMapleKind() ret TreeKind {
   }
 }
 
+# The Bloodgood Japanese maple in crimson, as the old tree looks: two
+# unequal stems joined low and leaning apart, spreading branches carrying
+# flat, wide masses in layers, a low crown wider than it is tall (the old
+# one's: about 1.2 of the height wide, from 0.35 to 0.97 of it); small,
+# deeply cut seven-lobed leaves (the old spray picture's average times its
+# tint: linear 0.24, 0.03, 0.06); smooth reddish-brown bark (the old bark's
+# 0.16, 0.09, 0.07). Masses fit, flattened: the crown reads as layered
+# plates, not round clusters.
+func japaneseMapleKind() ret TreeKind {
+  ret TreeKind {
+    name: "japaneseMaple"
+    measures: {
+      height: japaneseMapleHeight
+      forkHeight: 0.12
+      baseRadius: 0.1
+      forkRadius: 0.09
+      bow: 0.01
+      bowAt: 0.5
+      mainLean: 0.2
+      mainLength: 0.8
+      mainRadius: 0.85
+      secondLean: 0.38
+      secondLength: 0.7
+      secondRadius: 0.8
+      branchCount: 9
+      branchLowest: 0.3
+      branchHighest: 0.85
+      branchAngleMin: 1.0
+      branchAngleMax: 1.35
+      branchLengthMin: 0.24
+      branchLengthMax: 0.38
+      branchRadius: 0.5
+      massCount: 26
+      massRadiusMin: 0.4
+      massRadiusMax: 0.6
+      crownX: 0.0
+      crownZ: 0.54
+      crownHalfWidth: 0.36
+      crownHalfHeight: 0.23
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 1.1
+      massAcrossMax: 1.35
+      massUpMin: 0.5
+      massUpMax: 0.65
+      massDepth: 1.0
+      roundCrown: true
+      twoStems: true
+    }
+    traced: false
+    leaf: {
+      outline: LeafOutline.deepLobed
+      countMin: 14
+      countSpread: 7
+      reach: 150.0
+      lengthMin: 55.0
+      lengthMax: 80.0
+      widthMin: 0.5
+      widthMax: 0.5
+      angleJitter: 1.2
+      seed: 9900
+    }
+    cardSize: 0.38
+    cardLayers: 3.5
+    # the old crimson's hue, about 2.4 times its picture's average as the
+    # lime's greens are (the cards' mass shading and occlusion)
+    greens: List(Vec3) {
+      Vec3.create(x: 0.58, y: 0.075, z: 0.13)
+      Vec3.create(x: 0.66, y: 0.09, z: 0.15)
+      Vec3.create(x: 0.5, y: 0.06, z: 0.11)
+    }
+    bark: { color: Vec3.create(x: 0.19, y: 0.1, z: 0.078), streakDepth: 0.25 }
+    # flat masses: every 3rd card at 1.6 times the width, so the middle
+    # crown does not swell past the masses' thin rims
+    middleKeep: 3
+    middleGrow: 1.6
+  }
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -280,6 +365,9 @@ func stylizedNewKind(species: view Int) ret Bool {
   if species is speciesRed {
     ret not stylizedOldRequested(name: "redMaple")
   }
+  if species is speciesCrimson {
+    ret not stylizedOldRequested(name: "japaneseMaple")
+  }
   ret false
 }
 
@@ -291,6 +379,9 @@ func stylizedTreeKind(species: view Int) ret TreeKind {
   if species is speciesRed {
     ret redMapleKind()
   }
+  if species is speciesCrimson {
+    ret japaneseMapleKind()
+  }
   ret limeKind()
 }
 
@@ -301,6 +392,9 @@ func stylizedKindVariety(species: view Int) ret Int {
   }
   if species is speciesRed {
     ret redMapleVariety
+  }
+  if species is speciesCrimson {
+    ret japaneseMapleVariety
   }
   ret limeVariety
 }
