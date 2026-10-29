@@ -4,7 +4,8 @@
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
 # levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch, cypress, palm).
+# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch, cypress, palm,
+# bush).
 # Written new.
 import Sys
 import Vec3
@@ -64,6 +65,18 @@ const cypressVariety: Int = 1
 const palmHeight: Float = 5.5
 
 const palmVariety: Int = 1
+
+# The bush: a forest kind after the trees' (the ten species and the warm
+# broadleaf's varieties), its impostor the atlas layer of the same number.
+# It has no species: the walkers place bushes themselves (app3d/WalkerTerrain).
+const stylizedBushKind: Int = 15
+
+# The bush's grown height at scale 1 (m): the old bush form's (unit
+# geometry, 1 m wide and 0.58 m tall), so the walkers' bush scales (1.5 -
+# 2.4) keep the old sizes
+const bushHeight: Float = 0.6
+
+const bushVariety: Int = 1
 
 # The small-leaved lime (Tilia cordata), as the old tree looks: one straight
 # trunk with a central leader, branches all round it from under a third of
@@ -695,6 +708,110 @@ func palmKind() ret TreeKind {
   }
 }
 
+# The walkers' bush, as the old one looks (stylizedTrees/FluffyFoliage's bush
+# form): a low mound 1 m wide and 0.58 m tall at scale 1 of flat-colored
+# leaf patches (0.28, 0.39, 0.075, untextured). Grown as a short tree kind
+# with two stems leaning apart from the ground and no trunk, short side
+# branches all round, and a dense, rounded pack of low masses (a sparse one
+# read smaller than the old solid mound); small leaves; brown stems.
+func bushKind() ret TreeKind {
+  ret TreeKind {
+    name: "bush"
+    measures: {
+      height: bushHeight
+      forkHeight: 0.05
+      baseRadius: 0.03
+      forkRadius: 0.025
+      bow: 0.02
+      bowAt: 0.5
+      mainLean: 0.35
+      mainLength: 0.55
+      mainRadius: 0.9
+      secondLean: 0.55
+      secondLength: 0.48
+      secondRadius: 0.85
+      branchCount: 7
+      branchLowest: 0.15
+      branchHighest: 0.6
+      branchAngleMin: 0.9
+      branchAngleMax: 1.3
+      branchLengthMin: 0.22
+      branchLengthMax: 0.34
+      branchRadius: 0.6
+      massCount: 16
+      massRadiusMin: 0.19
+      massRadiusMax: 0.25
+      crownX: 0.0
+      crownZ: 0.32
+      crownHalfWidth: 0.24
+      crownHalfHeight: 0.12
+      shareBehind: 0.0
+      shareFront: 0.0
+      massAcrossMin: 1.0
+      massAcrossMax: 1.2
+      massUpMin: 0.9
+      massUpMax: 1.05
+      massDepth: 1.0
+      roundCrown: true
+      twoStems: true
+    }
+    traced: false
+    leaf: {
+      outline: LeafOutline.almond
+      countMin: 16
+      countSpread: 6
+      reach: 160.0
+      lengthMin: 60.0
+      lengthMax: 90.0
+      widthMin: 0.3
+      widthMax: 0.38
+      angleJitter: 1.0
+      seed: 10900
+    }
+    cardSize: 0.16
+    cardLayers: 3.5
+    # the old flat green's hue, about 1.7 times it (the old patches were lit
+    # flat; the cards' mass shading and occlusion take about that much away)
+    greens: List(Vec3) {
+      Vec3.create(x: 0.48, y: 0.66, z: 0.13)
+      Vec3.create(x: 0.53, y: 0.73, z: 0.14)
+      Vec3.create(x: 0.42, y: 0.58, z: 0.11)
+    }
+    bark: { color: Vec3.create(x: 0.15, y: 0.1, z: 0.06), streakDepth: 0.3 }
+  }
+}
+
+# Whether the stylized set draws its bushes as the treeGen bush kind
+# (RAE_STYLIZED_OLD=bush keeps the old instanced bush form)
+func stylizedNewBush() ret Bool {
+  ret not stylizedOldRequested(name: "bush")
+}
+
+# The bush as `field`'s kind stylizedBushKind (added right after the trees'
+# kinds), its impostor picture that layer of the atlas
+func addStylizedBushKind(
+  field: mod PropField
+  renderer: mod DeferredRenderer
+  ends: view Vec3
+) ret ImpostorSubject {
+  let treeKind: TreeKind = bushKind()
+  let images: ReferenceImages = referenceImages(renderer: renderer, treeKind: treeKind)
+  let subject: ImpostorSubject = addReferenceKind(
+    field: field
+    renderer: renderer
+    treeKind: treeKind
+    variety: bushVariety
+    layer: stylizedBushKind
+    images: images
+    ends: ends
+  )
+  # no trunk body and no grass kept off it: the walkers slow in a bush
+  if let propKind: mod PropKind = field.kinds.modAt(index: stylizedBushKind) {
+    propKind.hasTrunk = false
+  }
+  ret subject
+}
+
 # Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
 func stylizedOldRequested(name: view String) ret Bool {
   let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
@@ -735,8 +852,11 @@ func stylizedNewKind(species: view Int) ret Bool {
   ret false
 }
 
-# The treeGen kind of a rebuilt species
+# The treeGen kind of a rebuilt species (or of the bush, stylizedBushKind)
 func stylizedTreeKind(species: view Int) ret TreeKind {
+  if species is stylizedBushKind {
+    ret bushKind()
+  }
   if species is speciesOrange {
     ret sugarMapleKind()
   }
@@ -761,8 +881,11 @@ func stylizedTreeKind(species: view Int) ret TreeKind {
   ret limeKind()
 }
 
-# The grown variety of a rebuilt species
+# The grown variety of a rebuilt species (or of the bush)
 func stylizedKindVariety(species: view Int) ret Int {
+  if species is stylizedBushKind {
+    ret bushVariety
+  }
   if species is speciesOrange {
     ret sugarMapleVariety
   }

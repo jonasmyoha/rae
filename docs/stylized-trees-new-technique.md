@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: tasks 1-9/12 done (2026-10-29), 10-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-10/12 done (2026-10-29), 11-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -231,6 +231,24 @@ as app3d/PropInstancer parts, with no levels. New: a short tree kind with
 several stems from the ground and no trunk, a few low masses, a painted
 leaf stamp, drawn as forest kinds with levels; the walker's bush physics
 (slowing) stays.
+
+Done (task 10/12, 2026-10-29): `StylizedKinds.bushKind`, a short tree kind
+with two stems from the ground (`twoStems`, a fork at 0.05 of the height),
+no trunk, short side branches and a dense, rounded pack of low masses (a
+sparse first try read smaller than the old solid mound). It is built at the
+old bush form's unit size (1.09 wide and 0.64 tall at scale 1, against 0.99
+and 0.58), so the walkers' bush scales (1.5-2.4) stay. It is the stylized
+field's kind 15 (`stylizedBushKind`), with an impostor in the trees' atlas.
+`TreeSetKinds.treeSetBushKind` tells the walkers, and
+`WalkerTerrain.updateDrawnProps` puts the bushes drawn round the camera
+into the forest field's placement group 0 (`setPropGroup`) in place of
+the instanced bush parts. The bush entities and their slowing are as
+before. The walkers had taken every field prop for a tree (a trunk body,
+grass kept off), which gave each bush an invisible trunk. `PropKind.hasTrunk`
+(false for the bush) is now respected by `walkerTrunkRules` and the grass
+obstacles. `RAE_STYLIZED_OLD=bush` keeps the old bushes. 137's far view
+counts the bushes' impostors among its billboards (310), and its gate now
+checks for at least 300.
 
 ## 6. The spruce (task 11, design only)
 

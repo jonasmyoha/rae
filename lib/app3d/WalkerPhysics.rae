@@ -818,6 +818,15 @@ func walkerTrunkPoolSettings() ret PropPoolSettings {
 func walkerTrunkRules(forest: view PropField) ret List(PropColliderRule) {
   var rules: List(PropColliderRule) = List.create(PropColliderRule, cap: forest.kinds.length)
   loop var kind: Int = 0, kind < forest.kinds.length, ++kind {
+    # a kind without a trunk (a bush) has no body here
+    var hasTrunk: Bool = true
+    if let propKind: view PropKind = forest.kinds.viewAt(index: kind) {
+      hasTrunk = propKind.hasTrunk
+    }
+    if not hasTrunk {
+      rules.add(value: noPropCollider())
+      continue
+    }
     rules.add(value: PropColliderRule {
       role: PropBodyRole.trunk
       minRadius: treeTrunkRadius

@@ -70,6 +70,10 @@ const kindRock: Int = 2
 
 const kindBush: Int = 3
 
+# The forest field's placement group the bushes drawn round the camera go
+# in, when the tree set draws them as a forest kind (bushKind)
+const walkerBushGroup: Int = 0
+
 const kindFlower: Int = 4
 
 const kindGrassA: Int = 5
@@ -180,6 +184,10 @@ type WalkerTerrain {
   hasFarGround: Bool
   # The bush's three leaf tones
   bushParts: List(PropInstancer)
+  # The forest kind the bushes are drawn as (treeSets/TreeSetKinds
+  # treeSetBushKind: with levels, in the forest's field, group
+  # walkerBushGroup), or -1 to draw them as bushParts
+  bushKind: Int = -1
   # The small props drawn: every placement of the window round the cell
   # (drawCenterCellX, drawCenterCellY) the camera looks at (updateDrawnProps)
   drawnProps: List(DrawnProp)
@@ -513,6 +521,7 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
   terrainSystem.drawCenterCellX = centerX
   terrainSystem.drawCenterCellY = centerY
   terrainSystem.drawnProps.clear()
+  var bushPlacements: List(PropPlacement) = List.create(PropPlacement, cap: 0)
   let gridSide: Int = terrainSystem.gridSide
   loop var row: Int = 0, row < gridSide, ++row {
     loop var column: Int = 0, column < gridSide, ++column {
@@ -537,12 +546,31 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
           if kind is kindRock {
             variant = rockShapeAt(cellX: cellX, cellY: cellY)
           }
-          terrainSystem.drawnProps.add(
-            value: { kind: kind, variant: variant, model: transform3dToMatrix(t: transform) }
-          )
+          if kind is kindBush and terrainSystem.bushKind >= 0 {
+            # a bush turns about +Z only (propTransform3D)
+            bushPlacements.add(
+              value: {
+                kind: terrainSystem.bushKind
+                position: transform.position
+                yaw: 2.0 * Math.atan2(y: transform.rotation.z, x: transform.rotation.w)
+                scale: transform.scale.x
+              }
+            )
+          } else {
+            terrainSystem.drawnProps.add(
+              value: { kind: kind, variant: variant, model: transform3dToMatrix(t: transform) }
+            )
+          }
         }
       }
     }
+  }
+  if terrainSystem.bushKind >= 0 {
+    setPropGroup(
+      field: terrainSystem.forest.field
+      group: walkerBushGroup
+      placements: bushPlacements
+    )
   }
   ret true
 }
@@ -844,6 +872,7 @@ func createWalkerTerrain(
     farGround: own farGround
     hasFarGround: hasFarGround
     bushParts: own createTreeSetBushParts(treeSet: treeSet, renderer: renderer, capacity: cellCount)
+    bushKind: treeSetBushKind(treeSet: treeSet)
     drawnProps: List.create(DrawnProp, cap: cellCount * 5)
     drawCenterCellX: 1000000000
     drawCenterCellY: 1000000000

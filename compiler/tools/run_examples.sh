@@ -1359,7 +1359,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # the island (RAE_WALKER_CAMERA) sees every tree past the middle
           # distance, so the forest is all billboards: they must be drawn in
           # the forward pass (GbufferSprite's forward pipeline) and the shot
-          # must be a shaded frame.
+          # must be a shaded frame. At least 300: the island's trees, and the
+          # bushes past their middle distance (the stylized set's bush is a
+          # forest kind with an impostor since stylized trees 10/12: 310).
           SHOT="$TMP_OUT/walker-forward.bmp"
           # Shadow casters other than the harebells: 400-900 (900 since the warm
           # broadleaf, the T02 tree, joined the stylized set: taller trees, more of
@@ -1386,7 +1388,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                 RAE_GPU2D_SCREENSHOT="$TMP_OUT/walker-billboards.bmp" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/billboards.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/walker-billboards.bmp" --min-colors=500 >> "$TMP_OUT/shot.log" 2>&1 \
-             && [ "$(grep -c "\[sprite\] billboards drawn in the forward pass: 300" "$TMP_OUT/billboards.log")" -eq 1 ]; then
+             && BILLBOARDS="$(sed -n 's/.*\[sprite\] billboards drawn in the forward pass: \([0-9]*\).*/\1/p' "$TMP_OUT/billboards.log" | head -1)" \
+             && [ -n "$BILLBOARDS" ] && [ "$BILLBOARDS" -ge 300 ]; then
             echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, the island forest batched, trunks, rocks and bushes hold, billboards in the forward pass)"
             ((PASSED++))
           else
