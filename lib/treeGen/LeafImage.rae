@@ -84,14 +84,13 @@ func leafCover(
   if outline is LeafOutline.heart {
     ret heartCover(leaf: leaf, along: along, across: across)
   }
-  if outline is LeafOutline.lobed {
-    ret lobedCover(leaf: leaf, along: along, across: across)
-  }
-  if outline is LeafOutline.threeLobed {
-    ret threeLobedCover(leaf: leaf, along: along, across: across)
-  }
-  if outline is LeafOutline.deepLobed {
-    ret deepLobedCover(leaf: leaf, along: along, across: across)
+  if outline is LeafOutline.lobed or outline is LeafOutline.threeLobed or outline is LeafOutline.deepLobed {
+    ret palmateCover(
+      outline: outline
+      leaf: leaf
+      along: along
+      across: across
+    )
   }
   if outline is LeafOutline.fan {
     ret fanCover(leaf: leaf, along: along, across: across)
@@ -125,48 +124,170 @@ func heartCover(leaf: view StampLeaf, along: view Float, across: view Float) ret
   ret Math.clamp(val: Math.min(a: side, b: base), low: 0.0, high: 1.0)
 }
 
-# A maple leaf: round its middle (half way along), five pointed lobes at 0
-# and +-72 and +-144 degrees from the tip's direction, reaching the half
-# width; between them the edge comes in to about half of it, and toward
-# the stalk (180 degrees) it is cut in. Use a half width of half the length.
-func lobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
-  let x: Float = along - leaf.length * 0.5
-  let distance: Float = Math.sqrt(x: x * x + across * across)
-  let angle: Float = Math.atan2(y: across, x: x)
-  let lobe: Float = Math.pow(base: Math.abs(value: Math.cos(x: 2.5 * angle)), exp: 2.0)
-  let reach: Float = leaf.halfWidth * (0.52 + 0.48 * lobe)
-  ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+# The palmate leaves (the maples): not one round edge that rises and falls
+# evenly round the middle, which drew regular stars, but separate pointed
+# lobes, each an almond of its own, spreading from where the stalk joins:
+# the middle lobe longest, each pair out to the side shorter, the lowest
+# ones short, with rounded gaps between them, a solid palm where they meet
+# and a short stalk. Use a half width of about 0.65 of the length (the side
+# lobes reach out that far).
+#
+# lobed (sugar maple): five broad lobes, the side pairs at 50 and 100
+# degrees, 0.82 and 0.45 of the middle one. threeLobed (red maple): three
+# lobes, the pair at 45 degrees 0.72 of the middle, two small basal ones at
+# 95 degrees. deepLobed (Japanese maple): seven narrow lobes 40 degrees
+# apart, cut nearly to the palm.
+func palmateLobes(outline: view LeafOutline) ret Int {
+  if outline is LeafOutline.deepLobed {
+    ret 7
+  }
+  ret 5
 }
 
-# A red maple leaf: round its middle, three pointed lobes at 0 and +-60
-# degrees from the tip's direction reaching the half width, the rest of the
-# edge (toward the stalk) at about half of it. Use a half width of half the
-# length.
-func threeLobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
-  let x: Float = along - leaf.length * 0.5
-  let distance: Float = Math.sqrt(x: x * x + across * across)
-  let angle: Float = Math.atan2(y: across, x: x)
-  var lobe: Float = 0.0
-  if Math.abs(value: angle) < 1.3 {
-    lobe = Math.pow(base: Math.abs(value: Math.cos(x: 3.0 * angle)), exp: 2.0)
+# Lobe `index` (0 the middle one, then a pair left and right per level):
+# its direction from the tip's (radians)
+func palmateLobeAngle(outline: view LeafOutline, index: view Int) ret Float {
+  let level: Int = (index + 1) / 2
+  var side: Float = 1.0
+  if index % 2 is 0 {
+    side = -1.0
   }
-  let reach: Float = leaf.halfWidth * (0.5 + 0.5 * lobe)
-  ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  var step: Float = 0.87
+  if outline is LeafOutline.threeLobed {
+    step = 0.82
+  } else if outline is LeafOutline.deepLobed {
+    step = 0.7
+  }
+  ret side * level.toFloat() * step
 }
 
-# A Japanese maple leaf: round its middle, seven narrow pointed lobes about
-# 51 degrees apart (the one toward the stalk left out), cut in to a quarter
-# of the half width between them. Use a half width of half the length.
-func deepLobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
-  let x: Float = along - leaf.length * 0.5
-  let distance: Float = Math.sqrt(x: x * x + across * across)
-  let angle: Float = Math.atan2(y: across, x: x)
-  var lobe: Float = 0.0
-  if Math.abs(value: angle) < 2.75 {
-    lobe = Math.pow(base: Math.abs(value: Math.cos(x: 3.5 * angle)), exp: 4.0)
+# Lobe `index`'s length as a part of the middle lobe's
+func palmateLobeLength(outline: view LeafOutline, index: view Int) ret Float {
+  let level: Int = (index + 1) / 2
+  if outline is LeafOutline.threeLobed {
+    if level is 1 {
+      ret 0.72
+    }
+    if level is 2 {
+      ret 0.3
+    }
+    ret 1.0
   }
-  let reach: Float = leaf.halfWidth * (0.25 + 0.75 * lobe)
-  ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  if outline is LeafOutline.deepLobed {
+    if level is 1 {
+      ret 0.95
+    }
+    if level is 2 {
+      ret 0.78
+    }
+    if level is 3 {
+      ret 0.5
+    }
+    ret 1.0
+  }
+  if level is 1 {
+    ret 0.82
+  }
+  if level is 2 {
+    ret 0.45
+  }
+  ret 1.0
+}
+
+# How much of the pixel one lobe covers: an almond from (`fromX`, `fromY`)
+# (leaf coordinates: along, across) in direction `angle`, `length` long and
+# `width` of its length wide at its widest, which is `widest` of the way out
+# (low: a broad base that merges with the lobes beside it; near 0.5: a
+# lance), pointed at the tip
+func lobeCover(along: view Float, across: view Float, lobe: view LeafLobe) ret Float {
+  let x: Float = along - lobe.fromX
+  let y: Float = across - lobe.fromY
+  let cosine: Float = Math.cos(x: lobe.angle)
+  let sine: Float = Math.sin(x: lobe.angle)
+  let lobeAlong: Float = x * cosine + y * sine
+  if lobeAlong <= 0.0 or lobeAlong >= lobe.length {
+    ret 0.0
+  }
+  let lobeAcross: Float = -x * sine + y * cosine
+  let t: Float = lobeAlong / lobe.length
+  # sin(pi * t^k) peaks where t^k = 0.5
+  let k: Float = Math.naturalLog(x: 0.5) / Math.naturalLog(x: lobe.widest)
+  let half: Float = lobe.length * lobe.width * 0.5 * Math.pow(
+    base: Math.sin(x: 3.1415927 * Math.pow(base: t, exp: k))
+    exp: 0.8
+  )
+  ret Math.clamp(val: (half - Math.abs(value: lobeAcross)) / 1.5 + 0.5, low: 0.0, high: 1.0)
+}
+
+# One lobe or tooth of a palmate leaf (lobeCover)
+type LeafLobe {
+  fromX: Float
+  fromY: Float
+  angle: Float
+  length: Float
+  width: Float
+  widest: Float
+}
+
+# How much of the pixel a palmate leaf covers: its lobes from the joint
+# above the stalk, the sugar and red maples' larger lobes with a pair of
+# big teeth each, and the stalk
+func palmateCover(
+  outline: view LeafOutline
+  leaf: view StampLeaf
+  along: view Float
+  across: view Float
+) ret Float {
+  let joint: Float = leaf.length * 0.14
+  let reach: Float = leaf.length - joint
+  var lobeWidth: Float = 0.62
+  var widest: Float = 0.22
+  var teeth: Bool = true
+  if outline is LeafOutline.deepLobed {
+    lobeWidth = 0.32
+    widest = 0.45
+    teeth = false
+  }
+  var cover: Float = 0.0
+  # the stalk
+  if along > 0.0 and along < joint + 2.0 {
+    cover = Math.clamp(val: (1.4 - Math.abs(value: across)) / 1.5 + 0.5, low: 0.0, high: 1.0)
+  }
+  loop var index: Int = 0, index < palmateLobes(outline: outline), ++index {
+    let angle: Float = palmateLobeAngle(outline: outline, index: index)
+    let length: Float = reach * palmateLobeLength(outline: outline, index: index)
+    let lobe: LeafLobe = {
+      fromX: joint
+      fromY: 0.0
+      angle: angle
+      length: length
+      width: lobeWidth
+      widest: widest
+    }
+    cover = Math.max(a: cover, b: lobeCover(along: along, across: across, lobe: lobe))
+    # the big teeth: a pair half way out on the longer lobes, turned 40
+    # degrees off it, a third of its length
+    if teeth and palmateLobeLength(outline: outline, index: index) > 0.6 {
+      let atX: Float = joint + Math.cos(x: angle) * length * 0.5
+      let atY: Float = Math.sin(x: angle) * length * 0.5
+      loop var side: Int = 0, side < 2, ++side {
+        var turn: Float = 0.7
+        if side is 1 {
+          turn = -0.7
+        }
+        let tooth: LeafLobe = {
+          fromX: atX
+          fromY: atY
+          angle: angle + turn
+          length: length * 0.34
+          width: 0.55
+          widest: 0.25
+        }
+        cover = Math.max(a: cover, b: lobeCover(along: along, across: across, lobe: tooth))
+      }
+    }
+  }
+  ret cover
 }
 
 # A ginkgo leaf: a thin stalk over the first quarter of the length, then a

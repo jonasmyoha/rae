@@ -16,36 +16,13 @@ open treeGen/TreeKind
 open treeGen/TreeGrower
 open treeGen/TreeParams
 open treeSets/TreeSet
+open stylizedTrees/AutumnKinds
 
 # The lime's grown height (m): the middle of the old lime's 4.8 - 7.2 m
 const limeHeight: Float = 6.0
 
 # The grown variety (seed) the stylized set uses for the lime
 const limeVariety: Int = 1
-
-# The sugar maple's grown height (m): the old tree's reference height, the
-# middle of its 4.2 - 6.8 m
-const sugarMapleHeight: Float = 5.5
-
-const sugarMapleVariety: Int = 1
-
-# The red maple's grown height (m): the old tree's reference height, the
-# middle of its 4.2 - 6.8 m
-const redMapleHeight: Float = 5.5
-
-const redMapleVariety: Int = 1
-
-# The Japanese maple's grown height (m): the middle of the old tree's
-# 3.2 - 4.8 m
-const japaneseMapleHeight: Float = 4.0
-
-const japaneseMapleVariety: Int = 1
-
-# The ginkgo's grown height (m): the old tree's reference height, the
-# middle of its 4.2 - 6.8 m
-const ginkgoHeight: Float = 5.5
-
-const ginkgoVariety: Int = 1
 
 # The birch's grown height (m): the old tree's leaves rose to 1.22 times
 # its placed 6.5 - 8.5 m (stylizedOldTopRatio), so its top was at 7.9 -
@@ -108,14 +85,14 @@ func limeKind() ret TreeKind {
       branchAngleMin: 1.0
       branchAngleMax: 1.3
       branchLengthMin: 0.18
-      branchLengthMax: 0.33
+      branchLengthMax: 0.3
       branchRadius: 0.5
       massCount: 34
       massRadiusMin: 0.65
       massRadiusMax: 0.95
       crownX: 0.0
       crownZ: 0.235
-      crownHalfWidth: 0.31
+      crownHalfWidth: 0.3
       crownHalfHeight: 0.245
       shareBehind: 0.0
       shareFront: 0.0
@@ -129,17 +106,17 @@ func limeKind() ret TreeKind {
     traced: false
     leaf: {
       outline: LeafOutline.heart
-      countMin: 16
-      countSpread: 6
+      countMin: 12
+      countSpread: 5
       reach: 160.0
-      lengthMin: 62.0
-      lengthMax: 88.0
+      lengthMin: 70.0
+      lengthMax: 100.0
       widthMin: 0.4
       widthMax: 0.48
       angleJitter: 1.2
       seed: 9300
     }
-    cardSize: 0.5
+    cardSize: 0.7
     cardLayers: 3.0
     # the old lime's hue; about 2.4 times its picture's average, because
     # the old toon crown was lit flat and here each mass's shading and the
@@ -151,311 +128,10 @@ func limeKind() ret TreeKind {
       Vec3.create(x: 0.29, y: 0.57, z: 0.12)
     }
     bark: { color: Vec3.create(x: 0.17, y: 0.123, z: 0.084), streakDepth: 0.35 }
-  }
-}
-
-# The sugar maple (Acer saccharum) in autumn orange, as the old tree looks:
-# a leaning leader forking low, long rising branches spreading into a broad
-# oval crown wider than it is tall (the old one's: about 1.07 of the height
-# wide, from 0.41 to 1.05 of it), in rounded clusters; five-lobed leaves
-# (the old spray picture's average times its tint: linear 0.60, 0.11,
-# 0.03); gray-brown bark (the old bark's 0.18, 0.12, 0.09) with long plates.
-# Masses fit: the crown reads as rounded clusters, flatter than the lime's.
-func sugarMapleKind() ret TreeKind {
-  ret TreeKind {
-    name: "sugarMaple"
-    measures: {
-      height: sugarMapleHeight
-      forkHeight: 0.5
-      baseRadius: 0.22
-      forkRadius: 0.13
-      bow: 0.015
-      bowAt: 0.5
-      mainLean: 0.15
-      mainLength: 0.46
-      mainRadius: 0.85
-      secondLean: 0.75
-      secondLength: 0.38
-      secondRadius: 0.7
-      branchCount: 8
-      branchLowest: 0.53
-      branchHighest: 0.82
-      branchAngleMin: 0.95
-      branchAngleMax: 1.25
-      branchLengthMin: 0.22
-      branchLengthMax: 0.36
-      branchRadius: 0.5
-      massCount: 30
-      massRadiusMin: 0.6
-      massRadiusMax: 0.9
-      crownX: 0.0
-      crownZ: 0.27
-      crownHalfWidth: 0.35
-      crownHalfHeight: 0.14
-      shareBehind: 0.0
-      shareFront: 0.0
-      massAcrossMin: 1.0
-      massAcrossMax: 1.25
-      massUpMin: 0.75
-      massUpMax: 0.95
-      massDepth: 1.0
-      roundCrown: true
-    }
-    traced: false
-    leaf: {
-      outline: LeafOutline.lobed
-      countMin: 9
-      countSpread: 5
-      reach: 140.0
-      lengthMin: 90.0
-      lengthMax: 130.0
-      widthMin: 0.5
-      widthMax: 0.5
-      angleJitter: 1.0
-      seed: 9500
-    }
-    cardSize: 0.55
-    cardLayers: 3.0
-    # the old orange's hue as it renders (green about 0.22 of red), as
-    # bright as red can go and the three tones close: the cards' mass
-    # shading and occlusion darken it as they do the lime's greens, and red
-    # cannot be raised 2.4 times
-    greens: List(Vec3) {
-      Vec3.create(x: 0.95, y: 0.21, z: 0.04)
-      Vec3.create(x: 1.0, y: 0.235, z: 0.045)
-      Vec3.create(x: 0.88, y: 0.19, z: 0.036)
-    }
-    bark: { color: Vec3.create(x: 0.2, y: 0.14, z: 0.1), streakDepth: 0.4 }
-  }
-}
-
-# The red maple (Acer rubrum) in scarlet, as the old tree looks: light
-# rising branches off a fork high on the trunk carrying a loose rounded
-# crown that starts high (the old one's: about 1.1 of the height wide, from
-# 0.48 to 1.09 of it), its masses smaller and fewer than the sugar maple's
-# with sky between them; three-lobed leaves (the old spray picture's
-# average times its tint: linear 0.38, 0.07, 0.05); smooth gray bark (the
-# old bark's 0.26, 0.24, 0.22) with faint streaks. Masses fit: the crown
-# reads as loose clusters.
-func redMapleKind() ret TreeKind {
-  ret TreeKind {
-    name: "redMaple"
-    measures: {
-      height: redMapleHeight
-      forkHeight: 0.55
-      baseRadius: 0.17
-      forkRadius: 0.1
-      bow: 0.012
-      bowAt: 0.5
-      mainLean: 0.08
-      mainLength: 0.45
-      mainRadius: 0.85
-      secondLean: 0.6
-      secondLength: 0.4
-      secondRadius: 0.7
-      branchCount: 8
-      branchLowest: 0.56
-      branchHighest: 0.85
-      branchAngleMin: 0.8
-      branchAngleMax: 1.1
-      branchLengthMin: 0.25
-      branchLengthMax: 0.4
-      branchRadius: 0.5
-      massCount: 22
-      massRadiusMin: 0.55
-      massRadiusMax: 0.8
-      crownX: 0.0
-      crownZ: 0.25
-      crownHalfWidth: 0.38
-      crownHalfHeight: 0.14
-      shareBehind: 0.0
-      shareFront: 0.0
-      massAcrossMin: 0.95
-      massAcrossMax: 1.2
-      massUpMin: 0.85
-      massUpMax: 1.05
-      massDepth: 1.0
-      roundCrown: true
-    }
-    traced: false
-    leaf: {
-      outline: LeafOutline.threeLobed
-      countMin: 10
-      countSpread: 5
-      reach: 140.0
-      lengthMin: 80.0
-      lengthMax: 115.0
-      widthMin: 0.5
-      widthMax: 0.5
-      angleJitter: 1.0
-      seed: 9700
-    }
-    cardSize: 0.55
-    cardLayers: 3.0
-    # the old scarlet's hue, about 2.4 times its picture's average as the
-    # lime's greens are (the cards' mass shading and occlusion)
-    greens: List(Vec3) {
-      Vec3.create(x: 0.9, y: 0.175, z: 0.125)
-      Vec3.create(x: 0.98, y: 0.2, z: 0.14)
-      Vec3.create(x: 0.8, y: 0.15, z: 0.11)
-    }
-    bark: { color: Vec3.create(x: 0.29, y: 0.27, z: 0.25), streakDepth: 0.25 }
-  }
-}
-
-# The Bloodgood Japanese maple in crimson, as the old tree looks: two
-# unequal stems joined low and leaning apart, spreading branches carrying
-# flat, wide masses in layers, a low crown wider than it is tall (the old
-# one's: about 1.2 of the height wide, from 0.35 to 0.97 of it); small,
-# deeply cut seven-lobed leaves (the old spray picture's average times its
-# tint: linear 0.24, 0.03, 0.06); smooth reddish-brown bark (the old bark's
-# 0.16, 0.09, 0.07). Masses fit, flattened: the crown reads as layered
-# plates, not round clusters.
-func japaneseMapleKind() ret TreeKind {
-  ret TreeKind {
-    name: "japaneseMaple"
-    measures: {
-      height: japaneseMapleHeight
-      forkHeight: 0.12
-      baseRadius: 0.1
-      forkRadius: 0.09
-      bow: 0.01
-      bowAt: 0.5
-      mainLean: 0.2
-      mainLength: 0.8
-      mainRadius: 0.85
-      secondLean: 0.38
-      secondLength: 0.7
-      secondRadius: 0.8
-      branchCount: 9
-      branchLowest: 0.3
-      branchHighest: 0.85
-      branchAngleMin: 1.0
-      branchAngleMax: 1.35
-      branchLengthMin: 0.24
-      branchLengthMax: 0.38
-      branchRadius: 0.5
-      massCount: 26
-      massRadiusMin: 0.4
-      massRadiusMax: 0.6
-      crownX: 0.0
-      crownZ: 0.54
-      crownHalfWidth: 0.36
-      crownHalfHeight: 0.23
-      shareBehind: 0.0
-      shareFront: 0.0
-      massAcrossMin: 1.1
-      massAcrossMax: 1.35
-      massUpMin: 0.5
-      massUpMax: 0.65
-      massDepth: 1.0
-      roundCrown: true
-      twoStems: true
-    }
-    traced: false
-    leaf: {
-      outline: LeafOutline.deepLobed
-      countMin: 14
-      countSpread: 7
-      reach: 150.0
-      lengthMin: 55.0
-      lengthMax: 80.0
-      widthMin: 0.5
-      widthMax: 0.5
-      angleJitter: 1.2
-      seed: 9900
-    }
-    cardSize: 0.38
-    cardLayers: 3.5
-    # the old crimson's hue, about 2.4 times its picture's average as the
-    # lime's greens are (the cards' mass shading and occlusion)
-    greens: List(Vec3) {
-      Vec3.create(x: 0.58, y: 0.075, z: 0.13)
-      Vec3.create(x: 0.66, y: 0.09, z: 0.15)
-      Vec3.create(x: 0.5, y: 0.06, z: 0.11)
-    }
-    bark: { color: Vec3.create(x: 0.19, y: 0.1, z: 0.078), streakDepth: 0.25 }
-    # flat masses: every 3rd card at 1.6 times the width, so the middle
-    # crown does not swell past the masses' thin rims
+    # bigger leaf cards stick out further at the middle level: fewer, less
+    # grown ones keep its outline within 5% of the near level's
     middleKeep: 3
-    middleGrow: 1.6
-  }
-}
-
-# The Golden Globe ginkgo in autumn gold, as the old tree looks: a curved
-# leader forking into two fans of rising branches, a rounded crown (the old
-# one's: about 1.15 of the height wide, from 0.31 to 1.02 of it) of masses
-# a little taller than wide; fan-shaped leaves on long stalks (the old
-# spray picture's average times its tint: linear 0.78, 0.48, 0.04);
-# gray-brown furrowed bark (the old bark's 0.25, 0.20, 0.15). Masses fit:
-# the crown reads as a globe of upright clusters.
-func ginkgoKind() ret TreeKind {
-  ret TreeKind {
-    name: "ginkgo"
-    measures: {
-      height: ginkgoHeight
-      forkHeight: 0.38
-      baseRadius: 0.19
-      forkRadius: 0.12
-      bow: 0.03
-      bowAt: 0.6
-      mainLean: 0.18
-      mainLength: 0.6
-      mainRadius: 0.85
-      secondLean: 0.55
-      secondLength: 0.45
-      secondRadius: 0.75
-      branchCount: 9
-      branchLowest: 0.45
-      branchHighest: 0.88
-      branchAngleMin: 0.7
-      branchAngleMax: 1.05
-      branchLengthMin: 0.22
-      branchLengthMax: 0.36
-      branchRadius: 0.5
-      massCount: 28
-      massRadiusMin: 0.55
-      massRadiusMax: 0.8
-      crownX: 0.0
-      crownZ: 0.31
-      crownHalfWidth: 0.4
-      crownHalfHeight: 0.2
-      shareBehind: 0.0
-      shareFront: 0.0
-      massAcrossMin: 0.85
-      massAcrossMax: 1.05
-      massUpMin: 1.0
-      massUpMax: 1.2
-      massDepth: 0.95
-      roundCrown: true
-      twoStems: true
-    }
-    traced: false
-    leaf: {
-      outline: LeafOutline.fan
-      countMin: 12
-      countSpread: 6
-      reach: 145.0
-      lengthMin: 75.0
-      lengthMax: 105.0
-      widthMin: 0.56
-      widthMax: 0.56
-      angleJitter: 1.0
-      seed: 10100
-    }
-    cardSize: 0.5
-    cardLayers: 3.0
-    # the old gold's hue (green 0.62 of red: the sky light in the shade
-    # adds green, so the crown renders near the old one's 0.79), as bright
-    # as red allows
-    greens: List(Vec3) {
-      Vec3.create(x: 0.97, y: 0.6, z: 0.05)
-      Vec3.create(x: 1.0, y: 0.64, z: 0.055)
-      Vec3.create(x: 0.9, y: 0.55, z: 0.045)
-    }
-    bark: { color: Vec3.create(x: 0.28, y: 0.23, z: 0.17), streakDepth: 0.4 }
-    # deep cards darkened less, so the shaded gold stays gold, not olive
-    occlusionFloor: 0.8
+    middleGrow: 1.7
   }
 }
 
@@ -513,17 +189,17 @@ func birchKind() ret TreeKind {
     traced: false
     leaf: {
       outline: LeafOutline.almond
-      countMin: 18
-      countSpread: 7
+      countMin: 12
+      countSpread: 5
       reach: 160.0
-      lengthMin: 50.0
-      lengthMax: 75.0
+      lengthMin: 60.0
+      lengthMax: 90.0
       widthMin: 0.36
       widthMax: 0.44
       angleJitter: 1.0
       seed: 10300
     }
-    cardSize: 0.45
+    cardSize: 0.75
     cardLayers: 3.0
     # the old green's hue, about 2.4 times its picture's average as the
     # lime's (the cards' mass shading and occlusion)
@@ -540,7 +216,7 @@ func birchKind() ret TreeKind {
     # long, narrow masses: every 3rd card at 1.7 times the width, so the
     # middle crown does not swell past their thin sides
     middleKeep: 3
-    middleGrow: 1.7
+    middleGrow: 1.5
   }
 }
 
@@ -599,17 +275,17 @@ func cypressKind() ret TreeKind {
     # tiny scale leaves: small, narrow and many, in sprays
     leaf: {
       outline: LeafOutline.almond
-      countMin: 36
-      countSpread: 10
+      countMin: 16
+      countSpread: 6
       reach: 185.0
-      lengthMin: 35.0
-      lengthMax: 55.0
+      lengthMin: 55.0
+      lengthMax: 80.0
       widthMin: 0.18
       widthMax: 0.24
       angleJitter: 0.6
       seed: 10500
     }
-    cardSize: 0.42
+    cardSize: 0.75
     cardLayers: 3.5
     # the old blue-green's hue, about 1.7 times its picture's average:
     # the old cypress rendered dark, and a dense column is darkened less
@@ -758,17 +434,17 @@ func bushKind() ret TreeKind {
     traced: false
     leaf: {
       outline: LeafOutline.almond
-      countMin: 16
-      countSpread: 6
+      countMin: 8
+      countSpread: 3
       reach: 160.0
-      lengthMin: 60.0
-      lengthMax: 90.0
+      lengthMin: 90.0
+      lengthMax: 130.0
       widthMin: 0.3
       widthMax: 0.38
       angleJitter: 1.0
       seed: 10900
     }
-    cardSize: 0.16
+    cardSize: 0.24
     cardLayers: 3.5
     # the old flat green's hue, about 1.7 times it (the old patches were lit
     # flat; the cards' mass shading and occlusion take about that much away)
@@ -778,6 +454,10 @@ func bushKind() ret TreeKind {
       Vec3.create(x: 0.42, y: 0.58, z: 0.11)
     }
     bark: { color: Vec3.create(x: 0.15, y: 0.1, z: 0.06), streakDepth: 0.3 }
+    # bigger leaf cards stick out further at the middle level: fewer, less
+    # grown ones keep its outline within 5% of the near level's
+    middleKeep: 3
+    middleGrow: 1.45
   }
 }
 
