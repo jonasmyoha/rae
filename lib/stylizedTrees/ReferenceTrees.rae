@@ -196,6 +196,32 @@ func referenceLevelEnds(midDistance: view Float, farDistance: view Float) ret Ve
   ret Vec3.create(x: referenceNearDistance, y: midDistance, z: farDistance)
 }
 
+# The parts of one level of `treeKind`'s variety `variety` (no renderer):
+# the bark, then the leaf tones of every `keepEvery`-th card grown `grow`
+# times (1, 1.0: the near level), for checks such as level coverage
+func referenceLevelParts(
+  treeKind: view TreeKind
+  variety: view Int
+  keepEvery: view Int
+  grow: view Float
+) ret List(MeshData) {
+  let skeleton: TreeSkeleton = growSkeleton(
+    params: kindParams(treeKind: treeKind, variety: variety)
+  )
+  let cards: LeafCards = leafCards(
+    skeleton: skeleton
+    treeKind: treeKind
+    seed: kindCardSeed(treeKind: treeKind, variety: variety)
+  )
+  let leaves: LeafCardLevel = leafCardLevel(cards: cards, keepEvery: keepEvery, grow: grow)
+  var parts: List(MeshData) = List.create(MeshData, cap: 4)
+  parts.add(value: barkMesh(skeleton: skeleton))
+  loop let mesh: view MeshData in leaves.meshes {
+    parts.add(value: mesh)
+  }
+  ret parts
+}
+
 # One variety of tree kind `treeKind` (T02: 0 the traced tree, 1-4 the grown
 # ones) as a kind of `field`, its picture layer `layer` of the impostor
 # atlas the caller bakes from the returned subject (the stylized set bakes

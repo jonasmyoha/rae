@@ -340,7 +340,7 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     }
     loop let point: view Vec3 in traced.points {
       var turned: Vec3 = point
-      if traced.order > 0 {
+      if traced.order > 0 and not params.roundCrown {
         turned.y = shift + (point.x - start.x) * Math.tan(x: turn)
       }
       points.add(value: turned)
@@ -371,7 +371,7 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     } else {
       clump.parent = -1
     }
-    if traced.side is 0 and clump.parent >= 0 {
+    if traced.side is 0 and clump.parent >= 0 and not params.roundCrown {
       let parent: Limb = limbs.copyAtDefault(index: clump.parent)
       let at: Int = indexAtHeight(limb: parent, z: traced.center.z)
       clump.center.y = traced.center.y + parent.points.copyAtDefault(index: at).y

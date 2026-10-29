@@ -128,17 +128,25 @@ func buildLabForests(renderer: mod DeferredRenderer) ret List(TreeForest) {
 
 # The T02 scene's tree (variety 1, as the lab grows it) as the one tree of a
 # forest of the reference set, at the origin: its levels at the walkers'
-# distances (RAE_TREE_LEVEL pins one)
+# distances (RAE_TREE_LEVEL pins one). RAE_TREELAB_SPECIES=<n> plants the
+# stylized set's species n there instead, at its own height (scale 1).
 func labLevelsForest(renderer: mod DeferredRenderer) ret TreeForest {
+  let speciesName: String = Sys.getEnv(name: "RAE_TREELAB_SPECIES")
+  var treeSet: TreeSet = ReferenceTrees.createReferenceTrees()
+  var kind: Int = 0
+  if speciesName.length() > 0 {
+    treeSet = StylizedTrees.createStylizedTrees()
+    kind = speciesName.toInt()
+  }
   var forest: TreeForest = createTreeForest(
-    treeSet: ReferenceTrees.createReferenceTrees()
+    treeSet: treeSet
     renderer: renderer
     settings: defaultTreeForestSettings(extent: 800.0, farReach: 400.0)
     toon: false
   )
   addPropPlacement(
     field: forest.field
-    placement: { kind: 0, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0), yaw: 0.0, scale: 1.0 }
+    placement: { kind: kind, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0), yaw: 0.0, scale: 1.0 }
   )
   let unusedPlanted: Int = finishTreeForest(forest: forest, renderer: renderer)
   ret forest

@@ -1,6 +1,6 @@
 # The stylized trees in the new technique
 
-Status: task 1/12 done (2026-10-29), 2-12 queued; the queue's "stylized trees 1/12 .. 12/12".
+Status: tasks 1-2/12 done (2026-10-29), 3-12 queued; the queue's "stylized trees 1/12 .. 12/12".
 
 The T02 tree (lib/treeGen, docs/reference-tree-plan.md) is the first tree
 made the new way. The same technique is to be carried over to
@@ -108,6 +108,25 @@ same and the painted bark picture is byte-identical.
 | birch (speciesBirch) | small masses hanging below thin drooping branch ends | small oval leaves; its old greens | white (the old albedo 0.94, 0.95, 0.97) with dark horizontal marks | the bark painter needs a new rule; masses hang |
 | cypress (speciesCypress) | tall narrow masses stacked into one flame-shaped column | tiny scale leaves; its old greens | cypressWoodColor | branches short and steep, almost hidden |
 | palm (speciesPalm) | none: a crown of fronds | frond leaflets; its old greens | speciesWoodColor, a ringed trunk | may not fit masses: fronds as long cards along drooping curves, or a design first |
+
+Done for the lime (task 2/12, 2026-10-29): `stylizedTrees/StylizedKinds.limeKind`,
+with masses, because the crown reads as packed round clusters. It is grown
+with `TreeMeasures.roundCrown`: T02 is grown in one plane, like its trace;
+a round crown turns its branches round the trunk by the golden angle and
+fills its masses through the crown's depth (TreeParams.roundCrown keeps the
+skeleton from turning them back into the trace's plane). The numbers come
+from the old meshes: crown about 0.85 of the height wide, from 0.32 to 1.05
+of it; 6 m grown, placed at 4.8-7.2 m. The leaf is LeafOutline.heart. Its
+greens are about 2.4 times the old picture's average, in the same hue: the
+old toon crown was lit flat, and the mass shading and occlusion of the cards
+take that much away (measured in 143). Cost: 2543 cards, 9308 triangles
+near (T02: 5844). RAE_STYLIZED_OLD=lime keeps the old lime. Case 1256
+checks the middle level's coverage (TreeCoverage with cards facing the
+view) and the silhouette. That check found the middle level of every
+treeGen tree covering 121-125% of its near level. TreeLevels.leafCardLevel
+now moves a grown card inward by what it grew, which gives 100-103%. The
+next trees reuse StylizedKinds: add the kind, and name the species in
+stylizedNewKind, stylizedTreeKind and stylizedKindVariety.
 
 ## 5. Bushes (task 10)
 
