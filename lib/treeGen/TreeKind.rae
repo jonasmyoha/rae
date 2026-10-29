@@ -35,10 +35,10 @@ enum LeafOutline {
 }
 
 # How a kind's leaves are laid out: masses (ellipsoid clumps filled with
-# camera-facing stamp cards, LeafCards) or shelves (a conifer's whorls,
-# fixed needle-spray cards along each branch, ShelfCards;
-# docs/spruce-new-technique-design.md)
-enum TreeFoliage { masses, shelves }
+# camera-facing stamp cards, LeafCards) or skirts (a conifer's whorls as
+# the low-poly spruce's solid tiers, filled with camera-facing cards,
+# SkirtCards; docs/spruce-new-technique-design.md)
+enum TreeFoliage { masses, skirts }
 
 # The leaves of one stamp (LeafImage, pixels of its 512 x 512 picture):
 # `countMin` plus up to `countSpread` - 1 more, scattered over a disc of
@@ -96,11 +96,11 @@ type TreeKind {
   # The occlusion of a card deepest in its mass (1 at the skin): a light
   # crown (the ginkgo's yellow) turns olive when darkened as much as T02's
   occlusionFloor: Float = 0.45
-  # The leaves' layout, and (shelves) the whorls the tree grows in
+  # The leaves' layout, and (skirts) the whorls the tree grows in
   foliage: TreeFoliage = TreeFoliage.masses
   whorls: WhorlMeasures = noWhorls()
   # The wood inside the foliage is drawn (false: only the trunk below it, as
-  # a dense crown hides the rest; a conifer's shelves never draw it)
+  # a dense crown or a conifer's skirts hide the rest)
   innerWood: Bool = true
 }
 
@@ -142,7 +142,7 @@ func kindParams(treeKind: view TreeKind, variety: view Int) ret TreeParams {
   if variety is 0 and treeKind.traced {
     ret warmBroadleafParams(seed: 1)
   }
-  if treeKind.foliage is TreeFoliage.shelves {
+  if treeKind.foliage is TreeFoliage.skirts {
     ret whorlParams(measures: treeKind.measures, whorl: treeKind.whorls, seed: variety)
   }
   ret grownParams(measures: treeKind.measures, seed: variety)
