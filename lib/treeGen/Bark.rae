@@ -86,6 +86,31 @@ func barkStreak(u: view Float, v: view Float) ret Float {
   ret fine * 0.45 + medium * 0.35 + broad * 0.2
 }
 
+# A birch's dark marks at (u, v), 0 none .. 1 full: short thin horizontal
+# dashes (the lenticels) all over, and a few wider dark patches; the white
+# between them faintly gray-streaked
+func birchMark(u: view Float, v: view Float) ret Float {
+  # thin dashes: few cells across, many along, so each is wide and short
+  let dash: Float = wrappedNoise(
+    u: u
+    v: v
+    cellsX: 5
+    cellsY: 40
+    seed: 41
+  )
+  let patch: Float = wrappedNoise(
+    u: u
+    v: v
+    cellsX: 3
+    cellsY: 9
+    seed: 43
+  )
+  let dashMark: Float = Math.clamp(val: (dash - 0.7) / 0.08, low: 0.0, high: 1.0)
+  let patchMark: Float = Math.clamp(val: (patch - 0.76) / 0.06, low: 0.0, high: 1.0)
+  let faint: Float = 0.08 * (1.0 - barkStreak(u: u, v: v))
+  ret Math.max(a: Math.max(a: dashMark, b: patchMark), b: faint)
+}
+
 # The bark image as packed 0xAARRGGBB pixels, row by row from the top: near
 # white, the streaks darker by up to the kind's streak depth and slightly
 # cooler
@@ -95,9 +120,13 @@ func barkPixels(barkKind: view BarkKind) ret List(Int) {
     let v: Float = y.toFloat() / barkImageSize.toFloat()
     loop var x: Int = 0, x < barkImageSize, ++x {
       let u: Float = x.toFloat() / barkImageSize.toFloat()
-      let streak: Float = barkStreak(u: u, v: v)
+      var streak: Float = barkStreak(u: u, v: v)
       # 1 - depth in the darkest streak (T02: 0.74), 1.0 in the lightest
-      let light: Float = 1.0 - barkKind.streakDepth + barkKind.streakDepth * streak
+      var light: Float = 1.0 - barkKind.streakDepth + barkKind.streakDepth * streak
+      if barkKind.marks is BarkMarks.birch {
+        streak = 1.0
+        light = 1.0 - barkKind.streakDepth * birchMark(u: u, v: v)
+      }
       let red: Int = Math.min(a: 255, b: (255.0 * light).toInt())
       let green: Int = Math.min(a: 255, b: (255.0 * light * (0.97 + 0.03 * streak)).toInt())
       let blue: Int = Math.min(a: 255, b: (255.0 * light * (0.95 + 0.05 * streak)).toInt())
