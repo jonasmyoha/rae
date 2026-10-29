@@ -87,6 +87,9 @@ func leafCover(
   if outline is LeafOutline.lobed {
     ret lobedCover(leaf: leaf, along: along, across: across)
   }
+  if outline is LeafOutline.threeLobed {
+    ret threeLobedCover(leaf: leaf, along: along, across: across)
+  }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
 
@@ -126,6 +129,22 @@ func lobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret
   let angle: Float = Math.atan2(y: across, x: x)
   let lobe: Float = Math.pow(base: Math.abs(value: Math.cos(x: 2.5 * angle)), exp: 2.0)
   let reach: Float = leaf.halfWidth * (0.52 + 0.48 * lobe)
+  ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
+}
+
+# A red maple leaf: round its middle, three pointed lobes at 0 and +-60
+# degrees from the tip's direction reaching the half width, the rest of the
+# edge (toward the stalk) at about half of it. Use a half width of half the
+# length.
+func threeLobedCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  let x: Float = along - leaf.length * 0.5
+  let distance: Float = Math.sqrt(x: x * x + across * across)
+  let angle: Float = Math.atan2(y: across, x: x)
+  var lobe: Float = 0.0
+  if Math.abs(value: angle) < 1.3 {
+    lobe = Math.pow(base: Math.abs(value: Math.cos(x: 3.0 * angle)), exp: 2.0)
+  }
+  let reach: Float = leaf.halfWidth * (0.5 + 0.5 * lobe)
   ret Math.clamp(val: (reach - distance) / 1.5 + 0.5, low: 0.0, high: 1.0)
 }
 
