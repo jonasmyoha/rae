@@ -57,7 +57,9 @@ fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32
   o.albedo = part.albedoLayer.xyz;
   o.uv = imageUv;
   o.imageCode = part.surface.x;
-  o.cardToEye = select(0.0, part.surface.y, card.w > 0.0);
+  // a camera-facing card's (surface.y), or any vertex of a part whose fixed
+  // cards turn too (surface.z, a conifer's shelves)
+  o.cardToEye = max(select(0.0, part.surface.y, card.w > 0.0), part.surface.z);
   o.direction = direction;
   o.depth = depth;
   return o;

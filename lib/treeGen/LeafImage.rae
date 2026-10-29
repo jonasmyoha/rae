@@ -95,6 +95,9 @@ func leafCover(
   if outline is LeafOutline.fan {
     ret fanCover(leaf: leaf, along: along, across: across)
   }
+  if outline is LeafOutline.needleSpray {
+    ret needleSprayCover(leaf: leaf, along: along, across: across)
+  }
   ret almondCover(leaf: leaf, along: along, across: across)
 }
 
@@ -285,6 +288,44 @@ func palmateCover(
         }
         cover = Math.max(a: cover, b: lobeCover(along: along, across: across, lobe: tooth))
       }
+    }
+  }
+  ret cover
+}
+
+# A spruce twig with its needles: the twig along the whole length, and
+# needles every 5 pixels on both sides, each starting on the twig and
+# pointing 60 degrees forward, 0.3 of the length long at the base and
+# shorter toward the tip, 1.3 pixels thick. Use a half width of about a
+# quarter of the length.
+func needleSprayCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  if along <= 0.0 or along >= leaf.length {
+    ret 0.0
+  }
+  let twig: Float = Math.clamp(
+    val: (1.6 * (1.0 - 0.5 * along / leaf.length) - Math.abs(value: across)) / 1.5 + 0.5
+    low: 0.0
+    high: 1.0
+  )
+  let step: Float = 5.0
+  let cosine: Float = 0.5
+  let sine: Float = 0.8660254
+  let off: Float = Math.abs(value: across)
+  # the needle through this pixel starts on the twig where along is this
+  let foot: Float = along - off * cosine / sine
+  var cover: Float = twig
+  loop var nearby: Int = 0, nearby < 2, ++nearby {
+    let base: Float = (Math.floor(x: foot / step) + nearby.toFloat()) * step
+    if base < 0.0 or base > leaf.length * 0.92 {
+      continue
+    }
+    let needle: Float = leaf.length * 0.3 * (1.0 - 0.5 * base / leaf.length)
+    let dx: Float = along - base
+    # along the needle and off it
+    let s: Float = dx * cosine + off * sine
+    let d: Float = Math.abs(value: dx * sine - off * cosine)
+    if s > 0.0 and s < needle {
+      cover = Math.max(a: cover, b: Math.clamp(val: (1.3 - d) / 1.2 + 0.5, low: 0.0, high: 1.0))
     }
   }
   ret cover

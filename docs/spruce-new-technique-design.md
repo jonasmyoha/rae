@@ -1,7 +1,8 @@
 # The spruce in the new technique (design)
 
-Status: proposed (2026-10-29), stylized trees 11/12; waiting for the
-trade-off to accept it. Design only: nothing here is built yet.
+Status: accepted and built (2026-10-29):
+`treeGen/WhorlGrower`, `treeGen/ShelfCards`, `LeafOutline.needleSpray`,
+`StylizedKinds.spruceKind`. §9 lists where the build differs from the plan.
 
 The other stylized trees were rebuilt with leaf masses: ellipsoid clumps
 whose skins are filled with camera-facing stamp cards
@@ -158,3 +159,34 @@ are, not over a mass's whole skin.
   test shows thin lines, the fallback is to make the curtain cards turn
   about their branch toward the camera (a new card mode in the shaders).
   Is that fallback acceptable if needed?
+
+## 9. As built (2026-10-29)
+
+- **No branchlet tubes.** The flat branchlets (§2) made about 180 extra bark
+  tubes, most of the tree's 44,000 triangles, under the needles. The kind
+  has `branchletsMin`/`Max` 0, and its wide shelf cards (0.7 m next to the
+  trunk) make the shelf wider than the branch. The grower still supports
+  branchlets.
+- **Boughs of 6 steps.** `LimbShape.steps` (default 16) is 6 for whorl
+  branches. The near level is 12,400 triangles, still mostly bark.
+- **Curtains hang along their branch.** They span the branch's direction and
+  the hanging direction, the hang turned -30 to +30 degrees round the branch
+  (a first build laid them across the branch, edge-on from its side).
+  Cards come every 0.15 - 0.2 m from a fifth of a branch's length, a
+  curtain 1.6 times as tall as it is wide.
+- **The lowest whorl is at 0.08 of the height** (not 0.03): the curtains
+  hang to near the ground, where the old cone's foliage started.
+- **Middle level:** every 2nd shelf-and-curtain *pair* (every 2nd card kept
+  only the shelves) at 1.15 times their size, 100 - 101% of the near
+  outline. Grown more, the curtains reached past their branch tips (1.4,
+  the same area, covered 110%).
+- **Impostor:** the bake turned normals toward the eye only for
+  camera-facing cards, so the cone's far-side shelf cards lit the impostor
+  pale blue-gray (the T02 tree's old fault).
+  `ImpostorSubject.turnPartsToEye`, a per-part flag carried in the bake's
+  `surface.z`, now turns the spruce's three leaf parts too.
+- **Thinned per pair, not per card**, and checked in case 1256 (with
+  `TreeCoverage` turning fixed cards as geometry, flag 0, and
+  camera-facing cards by their center, per vertex). Case 1250, the old
+  spruce's case, now checks the placed height through the height unit.
+

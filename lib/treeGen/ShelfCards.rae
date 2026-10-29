@@ -1,0 +1,339 @@
+# treeGen/ShelfCards — a conifer's needles as fixed cards along its whorl
+# branches (docs/spruce-new-technique-design.md §3), in place of LeafCards'
+# masses: along each branch and branchlet, from a quarter of its length to
+# its tip, a SHELF card lying along it and tilted down outward (the spray
+# seen from above) and a CURTAIN card hanging from it along its length,
+# its hang turned round the branch so some face every way (the spray seen
+# from the side). The cards do not turn
+# to the camera: their MeshData.leafCards flag is 0, so every pass draws
+# them as plain quads. One shading normal a card, the cone's at it, so the
+# tree lights as a cone; darker toward the trunk and lower in the tree;
+# three greens a branch. A card sways with its whole bough (its wind pivot
+# the branch's base). Written new.
+import Math
+import Vec3
+open Mesh3d
+open treeGen/TreeParams
+open treeGen/Skeleton
+open treeGen/TreeKind
+open treeGen/TreeLevels
+
+# One fixed card: its middle, its half extents across and down the picture
+# (the picture's top edge is middle - down), its shading normal and color
+type ShelfCard {
+  center: Vec3
+  across: Vec3
+  down: Vec3
+  normal: Vec3
+  color: Vec3
+  pivot: Vec3
+}
+
+type ShelfCards {
+  cards: List(ShelfCard)
+  count: Int
+}
+
+# `value` turned by `angle` round the unit axis `axis` (Rodrigues)
+func turnAbout(value: view Vec3, axis: view Vec3, angle: view Float) ret Vec3 {
+  let cosine: Float = Math.cos(x: angle)
+  let sine: Float = Math.sin(x: angle)
+  let cross: Vec3 = Vec3.vcross(a: axis, b: value)
+  let dot: Float = Vec3.vdot(a: axis, b: value)
+  ret Vec3.vadd(
+    a: Vec3.vadd(a: Vec3.vscale(a: value, s: cosine), b: Vec3.vscale(a: cross, s: sine))
+    b: Vec3.vscale(a: axis, s: dot * (1.0 - cosine))
+  )
+}
+
+# The cone's shading normal at `point` of a tree `height` tall: outward from
+# the trunk, tilted up by the cone's slope
+func coneNormal(point: view Vec3) ret Vec3 {
+  let radial: Float = Math.sqrt(x: point.x * point.x + point.y * point.y)
+  var outX: Float = 1.0
+  var outY: Float = 0.0
+  if radial > 0.001 {
+    outX = point.x / radial
+    outY = point.y / radial
+  }
+  ret Vec3.vnorm(a: Vec3.create(x: outX * 0.85, y: outY * 0.85, z: 0.5))
+}
+
+# The cards of every branch (order 2) and branchlet (order 3) of `skeleton`
+func shelfCards(
+  skeleton: view TreeSkeleton
+  treeKind: view TreeKind
+  seed: view Int
+) ret ShelfCards {
+  var random: TreeRandom = createTreeRandom(seed: seed + 5151)
+  var top: Float = 0.01
+  var reach: Float = 0.01
+  loop let limb: view Limb in skeleton.limbs {
+    loop let point: view Vec3 in limb.points {
+      top = Math.max(a: top, b: point.z)
+      reach = Math.max(a: reach, b: Math.sqrt(x: point.x * point.x + point.y * point.y))
+    }
+  }
+  var cards: List(ShelfCard) = List.create(ShelfCard, cap: 1024)
+  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  loop var index: Int = 0, index < skeleton.limbs.length, ++index {
+    let limb: Limb = skeleton.limbs.copyAtDefault(index: index)
+    if limb.order < 2 or limb.points.length < 2 {
+      continue
+    }
+    # the bough this limb belongs to: its own base, or its branch's
+    var pivot: Vec3 = limb.points.copyAtDefault(index: 0)
+    if limb.order is 3 and limb.parent >= 0 and limb.parent < skeleton.limbs.length {
+      pivot = skeleton.limbs.copyAtDefault(index: limb.parent).points.copyAtDefault(index: 0)
+    }
+    let green: Vec3 = treeKind.greens.copyAtFallback(
+      index: (nextUnit(random: random) * treeKind.greens.length.toFloat()).toInt()
+      fallback: treeKind.greens.copyAtDefault(index: 0)
+    )
+    # the limb's length, then cards every 0.15 - 0.2 m from a fifth of it
+    var length: Float = 0.0
+    loop var k: Int = 1, k < limb.points.length, ++k {
+      length = length + Vec3.vlen(
+        a: Vec3.vsub(
+          a: limb.points.copyAtDefault(index: k)
+          b: limb.points.copyAtDefault(index: k - 1)
+        )
+      )
+    }
+    var at: Float = length * 0.2
+    loop at < length {
+      let share: Float = at / Math.max(a: length, b: 0.01)
+      let point: Vec3 = limbPointAtLength(limb: limb, distance: at)
+      let ahead: Vec3 = limbPointAtLength(limb: limb, distance: Math.min(a: at + 0.1, b: length))
+      let behind: Vec3 = limbPointAtLength(limb: limb, distance: Math.max(a: at - 0.1, b: 0.0))
+      let tangent: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: ahead, b: behind))
+      var side: Vec3 = Vec3.vcross(a: up, b: tangent)
+      if Vec3.vlen(a: side) < 0.01 {
+        side = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+      }
+      side = Vec3.vnorm(a: side)
+      # wide near the trunk, half as wide at the tip
+      let width: Float = treeKind.cardSize * (1.0 - 0.5 * share) * nextBetween(
+        random: random
+        low: 0.85
+        high: 1.15
+      )
+      let tall: Float = width * 1.6
+      let normal: Vec3 = coneNormal(point: point)
+      let radial: Float = Math.sqrt(x: point.x * point.x + point.y * point.y)
+      let depth: Float = Math.clamp(val: radial / reach, low: 0.0, high: 1.0)
+      let heightShare: Float = Math.clamp(val: point.z / top, low: 0.0, high: 1.0)
+      let occlusion: Float = (treeKind.occlusionFloor + (1.0 - treeKind.occlusionFloor) * depth) * (0.8 + 0.2 * heightShare)
+      let shade: Float = nextBetween(random: random, low: 0.9, high: 1.1) * occlusion
+      let color: Vec3 = Vec3.vscale(a: green, s: shade)
+      # the shelf: across the branch, its length along it tilted down
+      let tilt: Float = nextBetween(random: random, low: 0.26, high: 0.52)
+      let shelfDown: Vec3 = Vec3.vnorm(
+        a: Vec3.vadd(a: tangent, b: Vec3.create(x: 0.0, y: 0.0, z: -Math.tan(x: tilt)))
+      )
+      cards.add(value: {
+        center: point
+        across: Vec3.vscale(a: side, s: width * 0.5)
+        down: Vec3.vscale(a: shelfDown, s: tall * 0.5)
+        normal: Vec3.vnorm(a: Vec3.vadd(a: normal, b: Vec3.vscale(a: up, s: 0.6)))
+        color: color
+        pivot: pivot
+      })
+      # the curtain: a fringe hanging from the branch along it, its picture's
+      # width along the branch and its height hanging down, the hang turned
+      # -30 to +30 degrees round the branch so curtains face every way
+      let roll: Float = nextBetween(random: random, low: -0.52, high: 0.52)
+      var hangDown: Vec3 = Vec3.vcross(a: side, b: tangent)
+      if hangDown.z > 0.0 {
+        hangDown = Vec3.vscale(a: hangDown, s: -1.0)
+      }
+      let curtainDown: Vec3 = Vec3.vnorm(a: turnAbout(value: hangDown, axis: tangent, angle: roll))
+      cards.add(value: {
+        center: Vec3.vadd(a: point, b: Vec3.vscale(a: curtainDown, s: tall * 0.5))
+        across: Vec3.vscale(a: tangent, s: width * 0.5)
+        down: Vec3.vscale(a: curtainDown, s: tall * 0.5)
+        normal: normal
+        color: color
+        pivot: pivot
+      })
+      at = at + nextBetween(random: random, low: 0.15, high: 0.2)
+    }
+  }
+  let count: Int = cards.length
+  ret ShelfCards { cards: own cards, count: count }
+}
+
+# The point `distance` along `limb` (meters from its first point)
+func limbPointAtLength(limb: view Limb, distance: view Float) ret Vec3 {
+  var walked: Float = 0.0
+  loop var k: Int = 1, k < limb.points.length, ++k {
+    let from: Vec3 = limb.points.copyAtDefault(index: k - 1)
+    let to: Vec3 = limb.points.copyAtDefault(index: k)
+    let step: Float = Vec3.vlen(a: Vec3.vsub(a: to, b: from))
+    if walked + step >= distance and step > 0.0 {
+      ret Vec3.vadd(
+        a: from
+        b: Vec3.vscale(a: Vec3.vsub(a: to, b: from), s: (distance - walked) / step)
+      )
+    }
+    walked = walked + step
+  }
+  ret limb.points.copyAtDefault(index: limb.points.length - 1)
+}
+
+func shelfLightness(card: view ShelfCard) ret Float {
+  ret card.color.x * 0.3 + card.color.y * 0.59 + card.color.z * 0.11
+}
+
+# The lightness a third and two thirds of the cards are darker than (a
+# histogram of 64 bins over their range, as TreeLevels.toneSplits)
+func shelfToneSplits(shelves: view ShelfCards) ret List(Float) {
+  var lowest: Float = 1000000.0
+  var highest: Float = -1000000.0
+  loop let card: view ShelfCard in shelves.cards {
+    lowest = Math.min(a: lowest, b: shelfLightness(card: card))
+    highest = Math.max(a: highest, b: shelfLightness(card: card))
+  }
+  let span: Float = Math.max(a: highest - lowest, b: 0.000001)
+  var bins: List(Int) = List.create(Int, cap: 64)
+  loop var i: Int = 0, i < 64, ++i {
+    bins.add(value: 0)
+  }
+  loop let card: view ShelfCard in shelves.cards {
+    let bin: Int = Math.clamp(
+      val: ((shelfLightness(card: card) - lowest) / span * 64.0).toInt()
+      low: 0
+      high: 63
+    )
+    bins.set(index: bin, value: bins.copyAtDefault(index: bin) + 1)
+  }
+  var splits: List(Float) = List.create(Float, cap: 2)
+  var seen: Int = 0
+  var wanted: Int = 1
+  loop var i: Int = 0, i < 64, ++i {
+    seen = seen + bins.copyAtDefault(index: i)
+    loop wanted < 3 and seen * 3 >= shelves.count * wanted {
+      splits.add(value: lowest + span * (i + 1).toFloat() / 64.0)
+      wanted = wanted + 1
+    }
+  }
+  loop splits.length < 2 {
+    splits.add(value: highest)
+  }
+  ret splits
+}
+
+# A level of the shelf cards: every `keepEvery`-th pair of cards, `grow` times as
+# wide and long (pushed down along itself so its top edge stays on the
+# branch), in three tone meshes darkest first, as TreeLevels' card levels
+func shelfCardLevel(
+  shelves: view ShelfCards
+  keepEvery: view Int
+  grow: view Float
+) ret LeafCardLevel {
+  let splits: List(Float) = shelfToneSplits(shelves: shelves)
+  let low: Float = splits.copyAtDefault(index: 0)
+  let high: Float = splits.copyAtDefault(index: 1)
+  var meshes: List(MeshData) = List.create(MeshData, cap: 3)
+  var sums: List(Vec3) = List.create(Vec3, cap: 3)
+  var counts: List(Int) = List.create(Int, cap: 3)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    var mesh: MeshData = {
+      verts: List.create(Float, cap: 0)
+      indices: List.create(Int, cap: 0)
+      vertCount: 0
+    }
+    meshes.add(value: own mesh)
+    sums.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    counts.add(value: 0)
+  }
+  loop var index: Int = 0, index < shelves.count, ++index {
+    # the cards come in pairs (a shelf, its curtain): keep or drop a pair
+    # together, or keeping every 2nd card would keep only the shelves
+    if (index / 2) % keepEvery is not 0 {
+      continue
+    }
+    let card: ShelfCard = shelves.cards.copyAtDefault(index: index)
+    let light: Float = shelfLightness(card: card)
+    var tone: Int = 2
+    if light < low {
+      tone = 0
+    } else if light < high {
+      tone = 1
+    }
+    sums.set(index: tone, value: Vec3.vadd(a: sums.copyAtDefault(index: tone), b: card.color))
+    counts.set(index: tone, value: counts.copyAtDefault(index: tone) + 1)
+    let across: Vec3 = Vec3.vscale(a: card.across, s: grow)
+    let down: Vec3 = Vec3.vscale(a: card.down, s: grow)
+    let top: Vec3 = Vec3.vsub(a: card.center, b: card.down)
+    let center: Vec3 = Vec3.vadd(a: top, b: down)
+    if let mesh: mod MeshData = meshes.modAt(index: tone) {
+      addShelfCard(
+        mesh: mesh
+        center: center
+        across: across
+        down: down
+        normal: card.normal
+        pivot: card.pivot
+      )
+    }
+  }
+  var albedos: List(Vec3) = List.create(Vec3, cap: 3)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let count: Int = Math.max(a: counts.copyAtDefault(index: tone), b: 1)
+    albedos.add(value: Vec3.vscale(a: sums.copyAtDefault(index: tone), s: 1.0 / count.toFloat()))
+  }
+  ret LeafCardLevel { meshes: own meshes, albedos: own albedos }
+}
+
+# One fixed quad: corners center -+ across -+ down, the picture's top (v 0)
+# at center - down; its bough's pivot for the wind (a group's sway)
+func addShelfCard(
+  mesh: mod MeshData
+  center: view Vec3
+  across: view Vec3
+  down: view Vec3
+  normal: view Vec3
+  pivot: view Vec3
+) {
+  let base: Int = mesh.vertCount
+  loop var row: Int = 0, row < 2, ++row {
+    loop var column: Int = 0, column < 2, ++column {
+      let corner: Vec3 = Vec3.vadd(
+        a: center
+        b: Vec3.vadd(
+          a: Vec3.vscale(a: across, s: column.toFloat() * 2.0 - 1.0)
+          b: Vec3.vscale(a: down, s: row.toFloat() * 2.0 - 1.0)
+        )
+      )
+      pushVert(
+        verts: mesh.verts
+        px: corner.x
+        py: corner.y
+        pz: corner.z
+        nx: normal.x
+        ny: normal.y
+        nz: normal.z
+        u: column.toFloat()
+        value: row.toFloat()
+      )
+      # the whole bough sways about its base, slowly and together
+      mesh.windPivots.add(value: pivot.x)
+      mesh.windPivots.add(value: pivot.y)
+      mesh.windPivots.add(value: pivot.z)
+      mesh.windPivots.add(value: -0.6)
+      # a fixed card: flag 0
+      mesh.leafCards.add(value: 0.0)
+      mesh.leafCards.add(value: 0.0)
+      mesh.leafCards.add(value: 0.0)
+      mesh.leafCards.add(value: 0.0)
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  mesh.indices.add(value: base)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 2)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 3)
+  mesh.indices.add(value: base + 2)
+}

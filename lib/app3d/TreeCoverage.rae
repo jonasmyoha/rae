@@ -16,21 +16,24 @@ func turnedMesh(mesh: view MeshData, angle: view Float, cardsFacing: view Bool) 
   var turned: MeshData = mesh
   let cosine: Float = Math.cos(x: angle)
   let sine: Float = Math.sin(x: angle)
-  if cardsFacing and mesh.leafCards.length >= mesh.vertCount * 4 {
-    loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
+  loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
+    # a camera-facing card's vertex (its flag above 0): only its center
+    # turns; a fixed card (flag 0, a conifer's shelf) turns as geometry
+    if cardsFacing and mesh.leafCards.copyAtFallback(index: vertex * 4 + 3, fallback: 0.0) > 0.0 {
       let centerX: Float = mesh.leafCards.copyAtDefault(index: vertex * 4)
       let centerY: Float = mesh.leafCards.copyAtDefault(index: vertex * 4 + 1)
-      let x: Float = turned.verts.copyAtDefault(index: vertex * 8)
-      let y: Float = turned.verts.copyAtDefault(index: vertex * 8 + 1)
-      turned.verts.set(index: vertex * 8, value: x - centerX + centerX * cosine - centerY * sine)
+      let cardX: Float = turned.verts.copyAtDefault(index: vertex * 8)
+      let cardY: Float = turned.verts.copyAtDefault(index: vertex * 8 + 1)
+      turned.verts.set(
+        index: vertex * 8
+        value: cardX - centerX + centerX * cosine - centerY * sine
+      )
       turned.verts.set(
         index: vertex * 8 + 1
-        value: y - centerY + centerX * sine + centerY * cosine
+        value: cardY - centerY + centerX * sine + centerY * cosine
       )
+      continue
     }
-    ret turned
-  }
-  loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
     # its position (floats 0, 1) and its normal (3, 4)
     loop var pair: Int = 0, pair < 2, ++pair {
       let at: Int = vertex * 8 + pair * 3

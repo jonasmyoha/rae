@@ -10,6 +10,7 @@
 import Vec3
 open treeGen/TreeParams
 open treeGen/TreeGrower
+open treeGen/WhorlGrower
 
 # The outline of a single leaf on the stamp. almond (T02): widest a little
 # below the middle, rounded at the base, pointed at the tip. heart (the
@@ -18,7 +19,8 @@ open treeGen/TreeGrower
 # Japanese maples): palmate, separate pointed lobes of different lengths
 # spreading from the stalk (LeafImage.palmateCover). fan (the ginkgo): a
 # long stalk, then a wedge opening to a broad curved edge with a notch in
-# its middle
+# its middle. needleSpray (the spruce): a twig with short straight needles
+# on both sides, pointing forward
 enum LeafOutline {
   almond
   heart
@@ -26,7 +28,14 @@ enum LeafOutline {
   threeLobed
   deepLobed
   fan
+  needleSpray
 }
+
+# How a kind's leaves are laid out: masses (ellipsoid clumps filled with
+# camera-facing stamp cards, LeafCards) or shelves (a conifer's whorls,
+# fixed needle-spray cards along each branch, ShelfCards;
+# docs/spruce-new-technique-design.md)
+enum TreeFoliage { masses, shelves }
 
 # The leaves of one stamp (LeafImage, pixels of its 512 x 512 picture):
 # `countMin` plus up to `countSpread` - 1 more, scattered over a disc of
@@ -84,6 +93,9 @@ type TreeKind {
   # The occlusion of a card deepest in its mass (1 at the skin): a light
   # crown (the ginkgo's yellow) turns olive when darkened as much as T02's
   occlusionFloor: Float = 0.45
+  # The leaves' layout, and (shelves) the whorls the tree grows in
+  foliage: TreeFoliage = TreeFoliage.masses
+  whorls: WhorlMeasures = noWhorls()
 }
 
 # The T02 tree: warm orange-brown bark, an olive yellow-green crown of round
@@ -123,6 +135,9 @@ func warmBroadleafKind() ret TreeKind {
 func kindParams(treeKind: view TreeKind, variety: view Int) ret TreeParams {
   if variety is 0 and treeKind.traced {
     ret warmBroadleafParams(seed: 1)
+  }
+  if treeKind.foliage is TreeFoliage.shelves {
+    ret whorlParams(measures: treeKind.measures, whorl: treeKind.whorls, seed: variety)
   }
   ret grownParams(measures: treeKind.measures, seed: variety)
 }
