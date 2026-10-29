@@ -224,7 +224,7 @@ func referenceLevelParts(
 # The wood a kind shows: the whole skeleton, or a whorled tree's lower
 # trunk only (ShelfCards.lowerTrunkSkeleton)
 func kindBarkMesh(skeleton: view TreeSkeleton, treeKind: view TreeKind) ret MeshData {
-  if treeKind.foliage is TreeFoliage.shelves {
+  if treeKind.foliage is TreeFoliage.shelves or not treeKind.innerWood {
     ret barkMesh(skeleton: lowerTrunkSkeleton(skeleton: skeleton, overlap: 0.4))
   }
   ret barkMesh(skeleton: skeleton)
