@@ -81,7 +81,12 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let local = c * 2.0 - vec2<f32>(1.0);
     let extents = impostorExtents(viewDirection, box);
     let offset = impostorRight(viewDirection) * (local.x * extents.x) + impostorUp(viewDirection) * (local.y * extents.y);
-    world = center + impostorTurn(offset, yaw) * radius;
+    // The plane stands at the sphere's back, away from the sun, not through
+    // its center: through the center, the front half of the surface the
+    // impostor shows lay behind its own caster and was shadowed by it, a
+    // hard line across the prop. Moved along the sun's rays, the plane
+    // throws the same shadow on everything outside the sphere.
+    world = center + impostorTurn(offset, yaw) * radius - normalize(towardSun) * radius;
     uv = impostorPageUv(pageOf.yzw, impostorAtlasUv(cell, views, local));
   }
   var o: VsOut;

@@ -180,11 +180,11 @@ are, not over a mass's whole skin.
   only the shelves) at 1.15 times their size, 100 - 101% of the near
   outline. Grown more, the curtains reached past their branch tips (1.4,
   the same area, covered 110%).
-- **Impostor:** the bake turned normals toward the eye only for
-  camera-facing cards, so the cone's far-side shelf cards lit the impostor
-  pale blue-gray (the T02 tree's old fault).
-  `ImpostorSubject.turnPartsToEye`, a per-part flag carried in the bake's
-  `surface.z`, now turns the spruce's three leaf parts too.
+- **Impostor:** the far side's shelf cards lit the impostor pale
+  blue-gray. A first fix turned the fixed cards' normals toward the bake's
+  eye (`ImpostorSubject.turnPartsToEye`); the real cause was the sky rim
+  (§10, the impostor fix), and the flag is gone: the bake keeps the cards'
+  own normals, as the near pass draws them.
 - **Thinned per pair, not per card**, and checked in case 1256 (with
   `TreeCoverage` turning fixed cards as geometry, flag 0, and
   camera-facing cards by their center, per vertex). Case 1250, the old
@@ -207,6 +207,47 @@ than the low-poly one")
   `LeafOutline.tuft`, 4 - 6 big rounded tufts with a scalloped edge, on
   1.0 m cards next to the trunk, curtains 1.1 times as tall as wide, and
   shelves tilted 35 - 55 degrees so they do not read as edge-on streaks.
-- **Known:** the far impostor's upper half renders lighter than the near
-  level (queued as a bug).
+- **The impostor fix (2026-10-29):** from 40 m the far impostor's upper
+  half was lighter than the near level and its lower half dark teal, with a
+  hard line between them. Two causes, both in every impostor, not only the
+  spruce's:
+  - *The sky rim was never off.* A no-rim impostor is marked with a
+    negative sprite emissive (`addSpriteInstanceWithRim`), but
+    `packInstanceRecord` stores every non-emitter as 1.0, so the sign was
+    lost and the rim lit every normal turned from the eye in the sky's
+    color. The mark is now written after packing, and the sprite pass
+    writes its size (1.0, unoccluded) as the occlusion.
+  - *The impostor shadowed itself.* Its shadow caster is one picture plane
+    facing the sun, through the bounding sphere's center, so the front half
+    of the surface it shows lay behind its own caster. The plane now stands
+    at the sphere's back (shadow_sprite.wgsl); moved along the sun's rays,
+    it throws the same shadow on everything outside the sphere.
+  The near level stays a few percent darker at the top: its tiers shadow
+  each other, which one plane cannot.
+
+## 11. Proposal: the low-poly spruce's skirts as the shape
+
+After round 2 the spruce still read badly: its fixed cards do not turn
+toward the camera, so from most angles they show as flat slabs or thin
+edges, and the low-poly spruce (`lowPolyTrees/Spruce`) still reads best.
+What makes that one work is its shape, not detail: six stacked, solid,
+scalloped cone skirts, each with a smooth lit top and a closed underside,
+lit through broad normals. A semi-realistic spruce can keep exactly that
+and add what the other new trees have:
+
+- **Shape:** the low-poly tiers as the leaf masses, 8 - 12 of them on a
+  straight trunk (the whorl grower's heights and widths), each a scalloped
+  skirt with a few longer, drooping bough tips breaking its rim, so the
+  silhouette is ragged where the low-poly one is a clean polygon.
+- **Foliage:** the skirts filled with camera-facing tuft cards, as the
+  masses of the broadleaf trees are (LeafCards over a mass's skin), so the
+  foliage turns toward the camera. Each card takes its skirt's normal (the
+  low-poly tier's broad normal), so a tier lights as one smooth shape and
+  the cards only fray its edge. The fixed shelf and curtain cards go.
+- **Depth:** the skirt's underside darker (the occlusion floor), a gap of
+  shadow between tiers, as the low-poly tree's closed undersides give it.
+- **Levels:** near every card; middle fewer, bigger ones; far the impostor,
+  as for the other rebuilt trees. A camera-facing card mass is what the
+  impostor bake and case 1256 already handle.
+- **Kept:** the dark spruce green, no wind for now, only the lower trunk.
 

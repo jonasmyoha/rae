@@ -239,8 +239,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.pos = F.viewProj * vec4<f32>(world, 1.0);
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * vec4<f32>(world, 1.0);   // static prop: same world
-  // emissive; a negative one marks a prop without the sky's rim light
-  // (its gba.z below 0.25, as gbuffer_static.wgsl marks a mesh's)
+  // emissive-or-occlusion (1.0: unoccluded); a negative one marks a prop
+  // without the sky's rim light (its gba.z below 0.25, as
+  // gbuffer_static.wgsl marks a mesh's), its size the occlusion
   o.emissive = d.params.y;
   // The shading mode (lit / emissive / toon) as the mesh instances carry it,
   // so a billboard standing in for a toon mesh is shaded toon too
@@ -538,7 +539,7 @@ fn impostorMarchSurface(in: VsOut) -> FsOut {
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, select(0.5, 0.1, in.emissive < 0.0), in.mode);
   o.gbb = vec4<f32>(albedo, 1.0);
-  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, max(in.emissive, 0.0));
+  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, abs(in.emissive));
   return o;
 }
 
@@ -595,7 +596,7 @@ fn impostorSurface(in: VsOut) -> FsOut {
   o.gba = vec4<f32>(oct.x, oct.y, select(0.5, 0.1, in.emissive < 0.0), in.mode);
   // The foliage the impostors stand for is fully rough (GroveTrees)
   o.gbb = vec4<f32>(albedo, 1.0);
-  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, max(in.emissive, 0.0));
+  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, abs(in.emissive));
   return o;
 }
 
@@ -628,7 +629,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, select(0.5, 0.1, in.emissive < 0.0), in.mode);      // the instance's mode (0 = lit)
   o.gbb = vec4<f32>(texel.rgb, 0.9);                  // albedo, high roughness
-  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, max(in.emissive, 0.0));
+  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, abs(in.emissive));
   return o;
 }
 

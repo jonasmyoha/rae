@@ -511,6 +511,11 @@ func addSpriteInstanceWithRim(
     toon: toonFlag
     paletteBase: layer
   )
+  # packInstanceRecord writes a non-emitter's slot as 1.0 (unoccluded) and
+  # would drop the sign: the no-rim mark is written after it
+  if not rimLight {
+    batch.records.set(index: batch.count * spriteRecordFloats + 37, value: -1.0)
+  }
   batch.count = batch.count + 1
 }
 

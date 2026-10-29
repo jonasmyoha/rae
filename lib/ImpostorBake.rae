@@ -399,15 +399,11 @@ func recordImpostorViews(
         if subject.cardNormalsToEye {
           cardNormalsToEye = 1.0
         }
-        var partToEye: Float = 0.0
-        if subject.turnPartsToEye.copyAtFallback(index: part, fallback: false) {
-          partToEye = 1.0
-        }
         pushVec4F(
           writer: parts
           x: -(imageLayer + 1).toFloat()
           y: cardNormalsToEye
-          z: partToEye
+          z: 0.0
           w: 0.0
         )
       }
