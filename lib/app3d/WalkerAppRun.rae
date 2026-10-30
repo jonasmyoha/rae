@@ -17,6 +17,7 @@ open GrassCompute
 open Scene3d
 open RendererDeferred
 open Gbuffer
+open app3d/WalkerSpawnHere
 open app3d/WalkerResetTest
 open ui/Registry
 open ui/EventLoop
@@ -165,6 +166,18 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       characterSystem: app.characterSystem
       rig: app.cameraSystem.rig
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
+    # Then V: the character in front of the WASD camera, and back
+    if runWalkerSpawnHereTest(
+      rig: app.cameraSystem.rig
+      camera: app.cameraSystem.camera
+      physicsSystem: app.physicsSystem
+      world: app.world
+      entityId: rosterEntityAt(roster: app.players, index: 0)
+      groundZ: app.characterSystem.groundZ
+      biome: app.biome
     ) is false {
       exitCode = 1
     }
