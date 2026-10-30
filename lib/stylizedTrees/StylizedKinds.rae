@@ -3,11 +3,9 @@
 # one a treeGen TreeKind with the old tree's own numbers (height, crown,
 # leaf and bark colors, leaf outline), drawn as stylizedTrees/ReferenceTrees
 # draws T02 (bark mesh, leaf cards in three tones, near / middle / impostor
-# levels). RAE_STYLIZED_OLD=<name>[,<name>...] keeps the old tree instead
-# (lime, sugarMaple, redMaple, japaneseMaple, ginkgo, birch, cypress, palm,
-# spruce, bush).
+# levels). The umbrella pine is the one species not rebuilt
+# (stylizedTrees/StylizedTrees draws it as before).
 # Written new.
-import Sys
 import Vec3
 import RendererDeferred
 open ImpostorBake
@@ -312,7 +310,8 @@ func cypressKind() ret TreeKind {
 }
 
 # The set's "palm" (speciesPalm), as the old tree looks. It is not a palm
-# with fronds: its old code (stylizedTrees/Foliage palmWood, palmLeaves)
+# with fronds: its old code (stylizedTrees/Foliage palmWood, palmLeaves,
+# since removed)
 # is a "palm-style wood", a bending, ringed stem with a whorl of rising
 # branches from 0.42 to 0.88 of its height, each ending in a big leafy
 # cluster, and one more cluster on top; a rounded crown (the old one's:
@@ -468,12 +467,6 @@ func bushKind() ret TreeKind {
   }
 }
 
-# Whether the stylized set draws its bushes as the treeGen bush kind
-# (RAE_STYLIZED_OLD=bush keeps the old instanced bush form)
-func stylizedNewBush() ret Bool {
-  ret not stylizedOldRequested(name: "bush")
-}
-
 # The bush as `field`'s kind stylizedBushKind (added right after the trees'
 # kinds), its impostor picture that layer of the atlas
 func addStylizedBushKind(
@@ -500,7 +493,7 @@ func addStylizedBushKind(
 }
 
 # The Norway spruce (docs/spruce-new-technique-design.md), as the old tree
-# looks (stylizedTrees/Spruce): a cone from nearly the ground (0.03 of the
+# looked (the old stylizedTrees/Spruce, since removed): a cone from nearly the ground (0.03 of the
 # height) to the tip, about 0.72 of the height wide at its base, broken
 # whorls of unequal, drooping boughs; dark green needles (the old spray
 # picture's average times its tint: linear 0.08, 0.15, 0.06); gray-brown
@@ -567,47 +560,11 @@ func spruceKind() ret TreeKind {
   }
 }
 
-# Whether RAE_STYLIZED_OLD names `name` (a comma-separated list)
-func stylizedOldRequested(name: view String) ret Bool {
-  let names: List(String) = Sys.getEnv(name: "RAE_STYLIZED_OLD").split(sep: ",")
-  loop let requested: view String in names {
-    if requested is name {
-      ret true
-    }
-  }
-  ret false
-}
-
-# Whether `species` is drawn as a treeGen kind (rebuilt, and not kept old)
+# Whether `species`, one of the set's ten species, is drawn as a treeGen
+# kind: every one but the umbrella pine (the bush, not a species, is a kind
+# of its own: stylizedBushKind)
 func stylizedNewKind(species: view Int) ret Bool {
-  if species is speciesBroadleaf {
-    ret not stylizedOldRequested(name: "lime")
-  }
-  if species is speciesOrange {
-    ret not stylizedOldRequested(name: "sugarMaple")
-  }
-  if species is speciesRed {
-    ret not stylizedOldRequested(name: "redMaple")
-  }
-  if species is speciesCrimson {
-    ret not stylizedOldRequested(name: "japaneseMaple")
-  }
-  if species is speciesGold {
-    ret not stylizedOldRequested(name: "ginkgo")
-  }
-  if species is speciesBirch {
-    ret not stylizedOldRequested(name: "birch")
-  }
-  if species is speciesCypress {
-    ret not stylizedOldRequested(name: "cypress")
-  }
-  if species is speciesPalm {
-    ret not stylizedOldRequested(name: "palm")
-  }
-  if species is speciesSpruce {
-    ret not stylizedOldRequested(name: "spruce")
-  }
-  ret false
+  ret species >= speciesBroadleaf and species <= speciesBirch and species is not speciesUmbrella
 }
 
 # The treeGen kind of a rebuilt species (or of the bush, stylizedBushKind)

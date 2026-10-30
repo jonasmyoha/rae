@@ -1,39 +1,26 @@
 # stylizedTrees/StylizedTrees — the stylized tree set, the walkers'
 # (docs/tree-sets-design.md): createStylizedTrees is the set's data
-# (treeSets/TreeSet), the rest builds its meshes and pictures. It began as
-# Autumn Grove's trees and bushes (app3d/GroveTrees) and gains the
-# treeGen-grown species as the reference-tree work reaches them. The foliage
-# forms (stylizedTrees/FluffyFoliage: umbrella pine, cypress, spruce, bush), the
-# lime, the maples, the ginkgo, the birch and the palm are generated once.
-# Each tree species becomes an app3d/PropField kind at three levels of
-# detail (addStylizedForestKinds), each level its wood and its leaves in
-# three tones: full crowns near, sparser crowns out to the shadows' reach,
-# and beyond that an impostor of the near crowns, baked on the GPU from
-# every side (lib/ImpostorBake). The leaf-patch forms are unit height (their
-# width is built into their meshes, speciesWidth), so a placement's scale is
-# their height in meters; the others are built at autumnReferenceHeight.
-# Bushes are drawn as app3d/PropInstancer parts, one per leaf tone
-# (createStylizedBushParts). Used by the walkers (136, 137, 143).
+# (treeSets/TreeSet), the rest builds its kinds and pictures. Every species
+# but the umbrella pine is a treeGen kind (stylizedTrees/StylizedKinds,
+# docs/stylized-trees-new-technique.md), as is the bush; the warm
+# broadleaf's varieties are the T02 tree (stylizedTrees/ReferenceTrees).
+# The umbrella pine keeps Autumn Grove's leaf-patch form (stylizedTrees/
+# FluffyFoliage), unit height, its width built into its meshes. Each
+# species becomes an app3d/PropField kind at three levels of detail
+# (addStylizedForestKinds): near, middle, and an impostor of the near level
+# baked on the GPU from every side (lib/ImpostorBake). Used by the walkers
+# (136, 137, 143).
 import Math
 import Sys
 import Vec3
 import RendererDeferred
 open FoliageMesh
 open RendererImages
-open stylizedTrees/Birch
-open stylizedTrees/Lime
-open stylizedTrees/SugarMaple
-open stylizedTrees/RedMaple
-open stylizedTrees/Ginkgo
-open stylizedTrees/JapaneseMaple
 open Noise
 open Scene3d
 open Mesh3d
 open GbufferInstanced
-open stylizedTrees/Spruce
-open stylizedTrees/Cypress
 open stylizedTrees/FluffyFoliage
-open stylizedTrees/Foliage
 open app3d/PropField
 open app3d/PropInstancer
 open GbufferSprite
@@ -147,54 +134,15 @@ func createStylizedTrees() ret TreeSet {
   }
 }
 
+# The umbrella pine's leaf-patch form
 func treeSpeciesForm(species: view Int) ret FluffyForm {
-  if species is speciesUmbrella {
-    ret FluffyForm.umbrella
-  }
-  if species is speciesCypress {
-    ret FluffyForm.cypress
-  }
-  if species is speciesSpruce {
-    ret FluffyForm.spruce
-  }
-  ret FluffyForm.broadleaf
+  ret FluffyForm.umbrella
 }
 
-# An autumn tree's or the palm's leaf color per tone (Autumn Grove's paint)
-func autumnLeafColor(species: view Int, tone: view Int) ret Vec3 {
-  let variation: Float = 0.85 + tone.toFloat() * 0.13
-  if species is speciesOrange {
-    ret Vec3.create(x: 0.86 * variation, y: 0.39 * variation, z: 0.022)
-  }
-  if species is speciesRed {
-    ret Vec3.create(x: 0.72 * variation, y: 0.13 * variation, z: 0.025)
-  }
-  if species is speciesGold {
-    ret Vec3.create(x: 0.88 * variation, y: 0.66 * variation, z: 0.04)
-  }
-  if species is speciesPalm {
-    ret Vec3.create(x: 0.28 * variation, y: 0.42 * variation, z: 0.045)
-  }
-  ret Vec3.create(x: 0.33 * variation, y: 0.035 * variation, z: 0.022)
-}
-
-# The leaves' color per form and tone (as Autumn Grove paints them)
+# The umbrella pine's leaves per tone (as Autumn Grove painted them)
 func leafColor(form: view FluffyForm, tone: view Int) ret Vec3 {
   let variation: Float = 0.86 + tone.toFloat() * 0.12
-  var color: Vec3 = Vec3.create(x: 0.18, y: 0.35, z: 0.055)
-  if form is FluffyForm.cypress {
-    ret cypressLeafColor(tone: tone)
-  }
-  if form is FluffyForm.umbrella {
-    color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
-  }
-  if form is FluffyForm.spruce {
-    ret spruceLeafColor(tone: tone)
-  }
-  if form is FluffyForm.bush {
-    color = Vec3.create(x: 0.28, y: 0.39, z: 0.075)
-  }
-  ret Vec3.vscale(a: color, s: variation)
+  ret Vec3.vscale(a: Vec3.create(x: 0.055, y: 0.19, z: 0.09), s: variation)
 }
 
 func foliageMaterial(color: view Vec3) ret Material3d {
@@ -207,62 +155,20 @@ func foliageMaterial(color: view Vec3) ret Material3d {
   }
 }
 
-# The leaf tones of `form`, one instancer each, added to `parts`
-func addLeafParts(
-  parts: mod List(PropInstancer)
-  renderer: mod DeferredRenderer
-  form: view FluffyForm
-  capacity: view Int
-) {
-  loop var tone: Int = 0, tone < 3, ++tone {
-    let leaves: MeshData = fluffyLeaves(
-      form: form
-      seed: 73
-      patchCount: 48
-      tone: tone
-    )
-    parts.add(
-      value: createPropInstancer(
-        mesh: uploadFoliage(renderer: renderer, mesh: leaves)
-        material: foliageMaterial(color: leafColor(form: form, tone: tone))
-        capacity: capacity
-      )
-    )
-  }
-}
-
-# The forest's levels of detail: patches per crown cluster (leaf-patch forms)
-# or leaves per crown and tone (autumn trees and palm), and how far each is
-# drawn. Shadows reach 120 m; every level casts them (the far level's
-# billboards face the sun, cut to the picture's outline).
-# The near level is the crowns' outline (stylizedTrees/FluffyFoliage,
-# stylizedTrees/Foliage): every coarser level is built to cover what it does
-# (docs/tree-lod-design.md §2.1, checked by app3d/TreeCoverage)
+# The umbrella pine's levels of detail: patches per crown cluster, and how
+# far each is drawn. Shadows reach 120 m; every level casts them. The near
+# level is the crown's outline (stylizedTrees/FluffyFoliage): the coarser
+# one is built to cover what it does (docs/tree-lod-design.md §2.1, checked
+# by app3d/TreeCoverage, case 1228)
 const nearPatches: Int = fluffyOutlinePatches
 
 const midPatches: Int = 14
 
-const nearLeaves: Int = outlineLeafCount
-
-const midLeaves: Int = 110
-
-# The far level is an octahedral impostor of the near level (ImpostorBake,
-# one layer of the atlas per species) drawn on one quad per tree by the
-# sprite pass (its picture settings: treeSets/TreeSet spritePictureAspect,
-# spriteCutoff).
 const nearTreeDistance: Float = 30.0
 
-# How much wider than a unit form a species is (PropField scales uniformly,
-# so the width is built into its meshes)
-func speciesWidth(species: view Int) ret Float {
-  if species is speciesUmbrella {
-    ret 1.1
-  }
-  if species is speciesCypress {
-    ret 0.85
-  }
-  ret 1.0
-}
+# How much wider than a unit form the umbrella pine is (PropField scales
+# uniformly, so the width is built into its meshes)
+const umbrellaWidth: Float = 1.1
 
 # Stretch a mesh across (x and y) by `factor`, its normals the inverse way
 func widenMesh(mesh: mod MeshData, factor: view Float) {
@@ -307,285 +213,50 @@ func widenMesh(mesh: mod MeshData, factor: view Float) {
   }
 }
 
-# A species' wood, uploaded
+# The umbrella pine's wood
 func speciesWoodMesh(species: view Int) ret MeshData {
-  let seed: Int = 501 + species * 104
-  if species is speciesBirch {
-    let tree: BirchTree = birchTree(seed: seed, height: autumnReferenceHeight)
-    ret tree.wood
-  }
-  if species is speciesOrange {
-    let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret tree.wood
-  }
-  if species is speciesRed {
-    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret tree.wood
-  }
-  if species is speciesGold {
-    let tree: GinkgoTree = ginkgoTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret tree.wood
-  }
-  if species is speciesCrimson {
-    let tree: JapaneseMapleTree = japaneseMapleTree(
-      seed: seed
-      height: autumnReferenceHeight
-      width: 2.0
-      multiStem: true
-    )
-    ret tree.wood
-  }
-  if species is speciesPalm {
-    ret palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
-  }
-  if species >= speciesOrange {
-    let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret tree.wood
-  }
-  var wood: MeshData = fluffyWood(form: treeSpeciesForm(species: species), seed: 73)
-  widenMesh(mesh: wood, factor: speciesWidth(species: species))
+  var wood: MeshData = fluffyWood(form: FluffyForm.umbrella, seed: 73)
+  widenMesh(mesh: wood, factor: umbrellaWidth)
   ret wood
 }
 
-func speciesWood(renderer: mod DeferredRenderer, species: view Int) ret MeshHandle {
-  ret uploadFoliage(renderer: renderer, mesh: speciesWoodMesh(species: species))
-}
-
-# A species' leaves in one tone at a level's detail (`patches` for the
-# leaf-patch forms, `leaves` for the autumn trees and the palm)
-func speciesLeavesMesh(
-  species: view Int
-  tone: view Int
-  patches: view Int
-  leaves: view Int
-) ret MeshData {
-  let seed: Int = 501 + species * 104
-  if species is speciesBirch {
-    let tree: BirchTree = birchTree(seed: seed, height: autumnReferenceHeight)
-    ret birchLeaves(twigs: tree.twigs, seed: seed, tone: tone)
-  }
-  if species is speciesOrange {
-    let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret sugarMapleLeaves(tree: tree, seed: seed, tone: tone)
-  }
-  if species is speciesRed {
-    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret redMapleLeaves(tree: tree, seed: seed, tone: tone)
-  }
-  if species is speciesGold {
-    let tree: GinkgoTree = ginkgoTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret ginkgoLeaves(tree: tree, seed: seed, tone: tone)
-  }
-  if species is speciesCrimson {
-    let tree: JapaneseMapleTree = japaneseMapleTree(
-      seed: seed
-      height: autumnReferenceHeight
-      width: 2.0
-      multiStem: true
-    )
-    ret japaneseMapleLeaves(tree: tree, seed: seed, tone: tone)
-  }
-  if species is speciesPalm {
-    ret palmLeaves(
-      seed: seed
-      height: autumnReferenceHeight
-      width: 2.0
-      tone: tone
-      leafCount: leaves
-    )
-  }
-  if species >= speciesOrange {
-    let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret broadleafLeaves(
-      tips: tree.tips
-      seed: seed
-      height: autumnReferenceHeight
-      width: 2.0
-      tone: tone
-      leafCount: leaves
-    )
-  }
+# The umbrella pine's leaves in one tone at `patches` patches a cluster
+func speciesLeavesMesh(species: view Int, tone: view Int, patches: view Int) ret MeshData {
   var crown: MeshData = fluffyLeaves(
-    form: treeSpeciesForm(species: species)
+    form: FluffyForm.umbrella
     seed: 73
     patchCount: patches
     tone: tone
   )
-  widenMesh(mesh: crown, factor: speciesWidth(species: species))
-  var flexibility: Float = 1.0
-  if species is speciesCypress {
-    flexibility = 0.35
-  } else if species is speciesUmbrella {
-    flexibility = 0.55
-  }
+  widenMesh(mesh: crown, factor: umbrellaWidth)
   loop var vertex: Int = 0, vertex < crown.windPivots.length / 4, ++vertex {
-    if species is speciesSpruce or species is speciesCypress {
-      continue
-    }
-    crown.windPivots.set(index: vertex * 4 + 3, value: flexibility)
+    crown.windPivots.set(index: vertex * 4 + 3, value: 0.55)
   }
   ret crown
 }
 
-func speciesLeaves(
-  renderer: mod DeferredRenderer
-  species: view Int
-  tone: view Int
-  patches: view Int
-  leaves: view Int
-) ret MeshHandle {
-  ret uploadFoliage(
-    renderer: renderer
-    mesh: speciesLeavesMesh(
-      species: species
-      tone: tone
-      patches: patches
-      leaves: leaves
-    )
-  )
-}
-
-func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
-  if species is speciesOrange {
-    ret sugarMapleLeafColor(tone: tone)
-  }
-  if species is speciesRed {
-    ret redMapleLeafColor(tone: tone)
-  }
-  if species is speciesGold {
-    ret ginkgoLeafColor(tone: tone)
-  }
-  if species is speciesCrimson {
-    ret japaneseMapleLeafColor(tone: tone)
-  }
-  if species is speciesBroadleaf {
-    ret limeLeafColor(tone: tone)
-  }
-  if species is speciesBirch {
-    ret birchLeafColor(tone: tone)
-  }
-  if species >= speciesOrange {
-    ret autumnLeafColor(species: species, tone: tone)
-  }
-  ret leafColor(form: treeSpeciesForm(species: species), tone: tone)
-}
-
-# The color of every species' wood
+# The color of the umbrella pine's wood
 func speciesWoodColor() ret Vec3 {
   ret Vec3.create(x: 0.13, y: 0.075, z: 0.04)
 }
 
-# A level of a species as mesh data: its wood, then its leaves in three tones
-func speciesLevelMeshes(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
+# A level of the umbrella pine as mesh data (also app3d/TreeCoverage's
+# parts): its wood, then its leaves in three tones, at `patches` patches
+func speciesLevelMeshes(species: view Int, patches: view Int) ret List(MeshData) {
   var meshes: List(MeshData) = List.create(MeshData, cap: 4)
-  if species is speciesBroadleaf {
-    let tree: LimeTree = limeTree(seed: 73)
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: limeLeaves(sprays: tree.sprays, seed: 73, tone: tone))
-    }
-    ret own meshes
-  }
-  if species is speciesOrange {
-    let seed: Int = 501 + species * 104
-    let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: sugarMapleLeaves(tree: tree, seed: seed, tone: tone))
-    }
-    ret own meshes
-  }
-  if species is speciesRed {
-    let seed: Int = 501 + species * 104
-    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: redMapleLeaves(tree: tree, seed: seed, tone: tone))
-    }
-    ret own meshes
-  }
-  if species is speciesGold {
-    let seed: Int = 501 + species * 104
-    let tree: GinkgoTree = ginkgoTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: ginkgoLeaves(tree: tree, seed: seed, tone: tone))
-    }
-    ret own meshes
-  }
-  if species is speciesCrimson {
-    let seed: Int = 501 + species * 104
-    let tree: JapaneseMapleTree = japaneseMapleTree(
-      seed: seed
-      height: autumnReferenceHeight
-      width: 2.0
-      multiStem: true
-    )
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: japaneseMapleLeaves(tree: tree, seed: seed, tone: tone))
-    }
-    ret own meshes
-  }
   meshes.add(value: speciesWoodMesh(species: species))
   loop var tone: Int = 0, tone < 3, ++tone {
-    meshes.add(value: speciesLeavesMesh(
-      species: species
-      tone: tone
-      patches: patches
-      leaves: leaves
-    ))
-  }
-  if species is speciesBirch {
-    let tree: BirchTree = birchTree(seed: 501 + species * 104, height: autumnReferenceHeight)
-    meshes.add(value: tree.twigWood)
+    meshes.add(value: speciesLeavesMesh(species: species, tone: tone, patches: patches))
   }
   ret meshes
-}
-
-# A species' level for app3d/TreeCoverage: its wood and its leaves in three tones, at `patches`
-# patches (the leaf-patch forms) or `leaves` leaves (the autumn trees, palm)
-func speciesLevelParts(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
-  var parts: List(MeshData) = List.create(MeshData, cap: 4)
-  parts.add(value: speciesWoodMesh(species: species))
-  loop var tone: Int = 0, tone < 3, ++tone {
-    parts.add(value: speciesLeavesMesh(
-      species: species
-      tone: tone
-      patches: patches
-      leaves: leaves
-    ))
-  }
-  ret parts
 }
 
 # The albedos of a level's meshes, in speciesLevelMeshes' order
 func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
-  if species is speciesBirch {
-    albedos.add(value: Vec3.create(x: 0.94, y: 0.95, z: 0.97))
-  } else if species is speciesCypress {
-    albedos.add(value: cypressWoodColor())
-  } else if species is speciesSpruce {
-    albedos.add(value: spruceWoodColor())
-  } else if species is speciesRed {
-    albedos.add(value: redMapleWoodColor())
-  } else if species is speciesCrimson {
-    albedos.add(value: japaneseMapleWoodColor())
-  } else if species is speciesGold {
-    albedos.add(value: ginkgoWoodColor())
-  } else if species is speciesOrange {
-    albedos.add(value: sugarMapleWoodColor())
-  } else if species is speciesBroadleaf {
-    albedos.add(value: limeWoodColor())
-  } else {
-    albedos.add(value: speciesWoodColor())
-  }
+  albedos.add(value: speciesWoodColor())
   loop var tone: Int = 0, tone < 3, ++tone {
-    albedos.add(value: speciesLeafColor(species: species, tone: tone))
-  }
-  if species is speciesBirch {
-    albedos.add(value: Vec3.create(x: 0.13, y: 0.085, z: 0.055))
+    albedos.add(value: leafColor(form: FluffyForm.umbrella, tone: tone))
   }
   ret albedos
 }
@@ -622,41 +293,81 @@ func speciesLodOf(
   }
 }
 
-# One level of a species: its wood and its leaves in three tones
-func speciesLod(
+# The umbrella pine as a PropField kind: near and middle crowns and its
+# impostor (`layer` of the atlas); returns its impostor subject
+func addUmbrellaKind(
+  field: mod PropField
   renderer: mod DeferredRenderer
-  species: view Int
-  wood: view MeshHandle
-  patches: view Int
-  leaves: view Int
-  maxDistance: view Float
-  castsShadow: view Bool
-) ret PropLod {
-  var meshes: List(MeshHandle) = List.create(MeshHandle, cap: 4)
-  meshes.add(value: wood)
-  loop var tone: Int = 0, tone < 3, ++tone {
-    meshes.add(value: speciesLeaves(
-      renderer: renderer
-      species: species
-      tone: tone
-      patches: patches
-      leaves: leaves
-    ))
-  }
-  ret speciesLodOf(
-    meshes: meshes
-    albedos: speciesAlbedos(species: species)
-    maxDistance: maxDistance
-    castsShadow: castsShadow
+  layer: view Int
+  midDistance: view Float
+  farDistance: view Float
+) ret ImpostorSubject {
+  # the near level's meshes, made once: drawn near, and baked into the
+  # impostor (their bounds frame it)
+  let nearMeshes: List(MeshData) = speciesLevelMeshes(
+    species: speciesUmbrella
+    patches: nearPatches
   )
+  let albedos: List(Vec3) = speciesAlbedos(species: speciesUmbrella)
+  var nearHandles: List(MeshHandle) = List.create(MeshHandle, cap: nearMeshes.length)
+  loop let mesh: view MeshData in nearMeshes {
+    nearHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
+  }
+  var middleHandles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
+  middleHandles.add(value: nearHandles.copyAtDefault(index: 0))
+  loop var tone: Int = 0, tone < 3, ++tone {
+    middleHandles.add(
+      value: uploadFoliage(
+        renderer: renderer
+        mesh: speciesLeavesMesh(species: speciesUmbrella, tone: tone, patches: midPatches)
+      )
+    )
+  }
+  let subject: ImpostorSubject = impostorSubject(
+    parts: nearMeshes
+    meshes: nearHandles
+    albedos: albedos
+  )
+  var lods: List(PropLod) = List.create(PropLod, cap: 3)
+  lods.add(value: speciesLodOf(
+    meshes: nearHandles
+    albedos: albedos
+    maxDistance: nearTreeDistance
+    castsShadow: true
+  ))
+  lods.add(value: speciesLodOf(
+    meshes: middleHandles
+    albedos: albedos
+    maxDistance: midDistance
+    castsShadow: true
+  ))
+  lods.add(
+    value: {
+      parts: List.create(PropPart, cap: 0)
+      maxDistance: farDistance
+      castsShadow: true
+      facesCamera: true
+    }
+  )
+  # the sphere round the unit-height tree at scale 1
+  let kind: Int = addPropKind(
+    field: field
+    kind: { lods: own lods, radius: 0.6 * umbrellaWidth + 0.1, centerHeight: 0.55 }
+  )
+  setPropKindSprite(
+    field: field
+    kind: kind
+    layer: layer
+    height: subject.height
+  )
+  ret subject
 }
 
 # Every tree species as a PropField kind (kind index = species) at three
-# levels of detail: full crowns near, sparser crowns of bigger patches or
-# leaves out to the shadows' reach, and beyond that an impostor of the full
-# crowns (a layer of the atlas baked here, drawn by the sprite pass).
-# `midDistance` is where the sparser crowns end (keep it inside the shadows'
-# reach), `farDistance` where the impostors end.
+# levels of detail, then the warm broadleaf's varieties and the bush, and
+# their impostors baked into one atlas (a layer each, drawn by the sprite
+# pass). `midDistance` is where the middle levels end (keep it inside the
+# shadows' reach), `farDistance` where the impostors end.
 func addStylizedForestKinds(
   field: mod PropField
   renderer: mod DeferredRenderer
@@ -676,52 +387,6 @@ func addStylizedForestKinds(
       tilt: 0.0
     )
   }
-  let birchLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: "lib/assets/trees/birchBark.png"
-  )
-  let birchLeafLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: birchLeafTexture(style: birchCrownStyle)
-  )
-  let limeLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: limeBarkTexture())
-  let limeLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: limeLeafTexture())
-  let mapleBarkLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: sugarMapleBarkTexture()
-  )
-  let mapleLeafLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: sugarMapleLeafTexture()
-  )
-  let redMapleBarkLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: redMapleBarkTexture()
-  )
-  let redMapleLeafLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: redMapleLeafTexture()
-  )
-  let ginkgoBarkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: ginkgoBarkTexture())
-  let ginkgoLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: ginkgoLeafTexture())
-  let japaneseMapleBarkLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: japaneseMapleBarkTexture()
-  )
-  let japaneseMapleLeafLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: japaneseMapleLeafTexture()
-  )
-  let spruceBarkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceBarkTexture())
-  let spruceLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceLeafTexture())
-  let cypressBarkLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: cypressBarkTexture()
-  )
-  let cypressLeafLayer: Int = rendererLoadSurfaceImage(
-    renderer: renderer
-    path: cypressLeafTexture()
-  )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
   let warmEnds: Vec3 = referenceLevelEnds(midDistance: midDistance, farDistance: farDistance)
   loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
@@ -733,179 +398,15 @@ func addStylizedForestKinds(
         species: species
         ends: warmEnds
       ))
-      continue
-    }
-    # The near level's meshes, made once: drawn near, and baked into the
-    # impostor (their bounds frame it)
-    let nearMeshes: List(MeshData) = speciesLevelMeshes(
-      species: species
-      patches: nearPatches
-      leaves: nearLeaves
-    )
-    let albedos: List(Vec3) = speciesAlbedos(species: species)
-    var nearHandles: List(MeshHandle) = List.create(MeshHandle, cap: nearMeshes.length)
-    loop let mesh: view MeshData in nearMeshes {
-      nearHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
-    }
-    var subject: ImpostorSubject = impostorSubject(
-      parts: nearMeshes
-      meshes: nearHandles
-      albedos: albedos
-    )
-    if species is speciesBirch {
-      subject.imageLayers = List(Int) {
-        birchLayer
-        birchLeafLayer
-        birchLeafLayer
-        birchLeafLayer
-        -1
-      }
-    }
-    if species is speciesBroadleaf {
-      subject.imageLayers = List(Int) { limeLayer, limeLeafLayer, limeLeafLayer, limeLeafLayer }
-    }
-    if species is speciesOrange {
-      subject.imageLayers = List(Int) {
-        mapleBarkLayer
-        mapleLeafLayer
-        mapleLeafLayer
-        mapleLeafLayer
-      }
-    }
-    if species is speciesRed {
-      subject.imageLayers = List(Int) {
-        redMapleBarkLayer
-        redMapleLeafLayer
-        redMapleLeafLayer
-        redMapleLeafLayer
-      }
-    }
-    if species is speciesGold {
-      subject.imageLayers = List(Int) {
-        ginkgoBarkLayer
-        ginkgoLeafLayer
-        ginkgoLeafLayer
-        ginkgoLeafLayer
-      }
-    }
-    if species is speciesCrimson {
-      subject.imageLayers = List(Int) {
-        japaneseMapleBarkLayer
-        japaneseMapleLeafLayer
-        japaneseMapleLeafLayer
-        japaneseMapleLeafLayer
-      }
-    }
-    if species is speciesSpruce {
-      subject.imageLayers = List(Int) {
-        spruceBarkLayer
-        spruceLeafLayer
-        spruceLeafLayer
-        spruceLeafLayer
-      }
-    }
-    if species is speciesCypress {
-      subject.imageLayers = List(Int) {
-        cypressBarkLayer
-        cypressLeafLayer
-        cypressLeafLayer
-        cypressLeafLayer
-      }
-    }
-    var lods: List(PropLod) = List.create(PropLod, cap: 3)
-    lods.add(value: speciesLodOf(
-      meshes: nearHandles
-      albedos: albedos
-      maxDistance: nearTreeDistance
-      castsShadow: true
-    ))
-    if species is speciesCypress or species is speciesSpruce or species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
-      # The textured crowns share handles through the middle range; their
-      # existing far level is baked from these same textured meshes.
-      lods.add(value: speciesLodOf(
-        meshes: nearHandles
-        albedos: albedos
-        maxDistance: midDistance
-        castsShadow: true
-      ))
     } else {
-      lods.add(value: speciesLod(
+      subjects.add(value: addUmbrellaKind(
+        field: field
         renderer: renderer
-        species: species
-        wood: nearHandles.copyAtDefault(index: 0)
-        patches: midPatches
-        leaves: midLeaves
-        maxDistance: midDistance
-        castsShadow: true
+        layer: species
+        midDistance: midDistance
+        farDistance: farDistance
       ))
     }
-    lods.add(
-      value: {
-        parts: List.create(PropPart, cap: 0)
-        maxDistance: farDistance
-        castsShadow: true
-        facesCamera: true
-      }
-    )
-    if species is speciesBirch {
-      treeLodImages(lods: lods, barkLayer: birchLayer, leafLayer: birchLeafLayer)
-    }
-    if species is speciesBroadleaf {
-      treeLodImages(lods: lods, barkLayer: limeLayer, leafLayer: limeLeafLayer)
-    }
-    if species is speciesOrange {
-      treeLodImages(lods: lods, barkLayer: mapleBarkLayer, leafLayer: mapleLeafLayer)
-    }
-    if species is speciesRed {
-      treeLodImages(lods: lods, barkLayer: redMapleBarkLayer, leafLayer: redMapleLeafLayer)
-    }
-    if species is speciesGold {
-      treeLodImages(lods: lods, barkLayer: ginkgoBarkLayer, leafLayer: ginkgoLeafLayer)
-    }
-    if species is speciesCrimson {
-      treeLodImages(
-        lods: lods
-        barkLayer: japaneseMapleBarkLayer
-        leafLayer: japaneseMapleLeafLayer
-      )
-    }
-    if species is speciesSpruce {
-      treeLodImages(lods: lods, barkLayer: spruceBarkLayer, leafLayer: spruceLeafLayer)
-    }
-    if species is speciesCypress {
-      treeLodImages(lods: lods, barkLayer: cypressBarkLayer, leafLayer: cypressLeafLayer)
-    }
-    # The sphere round the tree at scale 1: the leaf-patch forms are unit
-    # height, the others autumnReferenceHeight
-    var radius: Float = 0.6 * speciesWidth(species: species) + 0.1
-    var centerHeight: Float = 0.55
-    if species >= speciesOrange {
-      radius = autumnReferenceHeight * 0.65
-      centerHeight = autumnReferenceHeight * 0.55
-    }
-    if species is speciesOrange {
-      radius = autumnReferenceHeight * sugarMapleRadiusScale
-    }
-    if species is speciesRed {
-      radius = autumnReferenceHeight * redMapleRadiusScale
-    }
-    if species is speciesGold {
-      radius = autumnReferenceHeight * ginkgoRadiusScale
-    }
-    if species is speciesCrimson {
-      radius = japaneseMapleBoundsRadius(height: autumnReferenceHeight, width: 2)
-    }
-    let kind: Int = addPropKind(
-      field: field
-      kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
-    )
-    setPropKindSprite(
-      field: field
-      kind: kind
-      layer: species
-      height: subject.height
-    )
-    subjects.add(value: subject)
   }
   # the warm broadleaf's varieties (ReferenceTrees), their pictures in the
   # same atlas after the ten above
@@ -923,9 +424,7 @@ func addStylizedForestKinds(
     ))
   }
   # the bush (StylizedKinds), a kind after the trees'
-  if stylizedNewBush() {
-    subjects.add(value: addStylizedBushKind(field: field, renderer: renderer, ends: warmEnds))
-  }
+  subjects.add(value: addStylizedBushKind(field: field, renderer: renderer, ends: warmEnds))
   # the rebuilt kinds' pictures were queued (referenceImages): build once
   rendererFlushSurfaceImages(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
@@ -941,44 +440,6 @@ func addStylizedForestKinds(
   }
 }
 
-# How much the grove's leaves move in the wind (lib/wind.wgsl). Only the
-# leaves sway: a tree's wood (part 0 of each level) stays still.
+# How much the umbrella pine's leaves move in the wind (lib/wind.wgsl).
+# Only the leaves sway: its wood (part 0 of each level) stays still.
 const groveLeafSway: Float = 1.0
-
-# The bush's three leaf tones
-func createStylizedBushParts(
-  renderer: mod DeferredRenderer
-  capacity: view Int
-) ret List(PropInstancer) {
-  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
-  # the treeGen bush is a forest kind (stylizedBushKind), drawn with the trees
-  if stylizedNewBush() {
-    ret parts
-  }
-  addLeafParts(
-    parts: parts
-    renderer: renderer
-    form: FluffyForm.bush
-    capacity: capacity
-  )
-  loop var i: Int = 0, i < parts.length, ++i {
-    if let part: mod PropInstancer = parts.modAt(index: i) {
-      part.sway = groveLeafSway
-    }
-  }
-  ret parts
-}
-
-# One material assignment for every textured species and both mesh levels.
-func treeLodImages(lods: mod List(PropLod), barkLayer: view Int, leafLayer: view Int) {
-  loop let level: mod PropLod in lods {
-    if let wood: mod PropPart = level.parts.modAt(index: 0) {
-      wood.material.colorTextureLayer = barkLayer
-    }
-    loop var part: Int = 1, part < 4, ++part {
-      if let leaves: mod PropPart = level.parts.modAt(index: part) {
-        leaves.material.colorTextureLayer = leafLayer
-      }
-    }
-  }
-}

@@ -1,23 +1,14 @@
-# The tree lab's studies (docs/tree-sets-design.md §5.3): the stylized set's
+# The tree lab's studies (docs/tree-sets-design.md §5.3): the meadow flower
 # study scenes that Autumn Grove (138) held before it became the low-poly
-# museum, ported from rae fc8dbdc3. RAE_TREELAB_STUDY=<view> shows one in
-# place of the T02 scene: the lab's flat ground, the studies at the spots
-# they had on the grove's island, the grove's camera for that view and its
-# light at its hour. The views:
-#   maples          the sugar and red maples, Japanese maple, date palm
-#   japanese-maple  the Bloodgood Japanese maple
-#   ginkgo          the Golden Globe ginkgos
-#   birches         the silver birches; birches-side, birches-under,
-#                   birches-warm (17:15), birches-cool (7:15),
-#                   birches-night (23:00)
-#   forks-front     the joined bare forks; forks-side, forks-grazing (17:15)
+# museum, ported from rae fc8dbdc3. (Its tree studies, of the stylized
+# set's old trees, went with those trees: the rebuilt trees are treeGen
+# kinds, seen with RAE_TREELAB_TREE=levels.) RAE_TREELAB_STUDY=<view> shows
+# one in place of the T02 scene: the lab's flat ground, the studies at the
+# spots they had on the grove's island, the grove's camera for that view
+# and its light at its hour. The views:
 #   flowers         the oxeye daisies
 #   bellflowers     the harebells; bellflowers-side, bellflowers-backlit
 #                   (17:15)
-# The studies' own switches still work: RAE_BIRCH_ISOLATE,
-# RAE_GINKGO_ISOLATE, RAE_MAPLE_ISOLATE, RAE_RED_MAPLE_ISOLATE and
-# RAE_JAPANESE_MAPLE_ISOLATE plant only that study (with its _SEED and
-# _HEIGHT); the _CONTROL and _BARE switches are the study files' own.
 # RAE_WALKER_HOUR sets another hour.
 import Math
 import Sys
@@ -54,21 +45,15 @@ func labStudyName() ret String {
   ret Sys.getEnv(name: "RAE_TREELAB_STUDY")
 }
 
-# The hour a view is lit at: the warm, cool and night birch views and the
-# grazing and backlit views have their own; RAE_WALKER_HOUR overrides
+# The hour a view is lit at: the backlit view has its own; RAE_WALKER_HOUR
+# overrides
 func studyHour(studyView: view String) ret Float {
   let hourOverride: String = Sys.getEnv(name: "RAE_WALKER_HOUR")
   if hourOverride.length() > 0 {
     ret hourOverride.toFloat()
   }
-  if studyView is "forks-grazing" or studyView is "birches-warm" or studyView is "bellflowers-backlit" {
+  if studyView is "bellflowers-backlit" {
     ret 17.25
-  }
-  if studyView is "birches-cool" {
-    ret 7.25
-  }
-  if studyView is "birches-night" {
-    ret 23.0
   }
   ret 10.0
 }
@@ -132,106 +117,7 @@ func setStudyOrbit(
 # Point the camera at a view, as 138's setGroveView did
 func setStudyView(camera: mod Camera3d, rig: mod CameraRig, studyView: view String) {
   rig.mode = CameraRigMode.orbit
-  if studyView is "japanese-maple" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -8.1, y: 7.5, z: 2.1)
-      yaw: 0.0
-      pitch: 0.10
-      distance: 13.0
-    )
-  } else if studyView is "ginkgo" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: 15.0, y: -4.0, z: 3.0)
-      yaw: 1.35
-      pitch: 0.12
-      distance: 23.0
-    )
-  } else if studyView is "birches" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -19.0, y: -10.0, z: 4.3)
-      yaw: -0.25
-      pitch: 0.10
-      distance: 22.0
-    )
-  } else if studyView is "forks-front" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-      yaw: -0.10
-      pitch: 0.08
-      distance: 27.0
-    )
-  } else if studyView is "forks-side" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-      yaw: 1.35
-      pitch: 0.08
-      distance: 27.0
-    )
-  } else if studyView is "forks-grazing" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: 9.5, y: -13.0, z: 6.2)
-      yaw: -0.55
-      pitch: 0.02
-      distance: 25.0
-    )
-  } else if studyView is "birches-side" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -20.0, y: -10.0, z: 4.6)
-      yaw: 1.10
-      pitch: 0.08
-      distance: 22.0
-    )
-  } else if studyView is "birches-under" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -19.0, y: -10.0, z: 5.4)
-      yaw: 0.38
-      pitch: -0.16
-      distance: 15.0
-    )
-  } else if studyView is "birches-warm" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -19.0, y: -10.0, z: 4.6)
-      yaw: -0.52
-      pitch: 0.06
-      distance: 22.0
-    )
-  } else if studyView is "birches-cool" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -20.0, y: -10.0, z: 4.6)
-      yaw: 0.82
-      pitch: 0.08
-      distance: 21.0
-    )
-  } else if studyView is "birches-night" {
-    setStudyOrbit(
-      rig: rig
-      camera: camera
-      target: Vec3.create(x: -19.0, y: -10.0, z: 4.3)
-      yaw: -0.32
-      pitch: 0.05
-      distance: 20.0
-    )
-  } else if studyView is "flowers" {
+  if studyView is "flowers" {
     setStudyOrbit(
       rig: rig
       camera: camera
@@ -268,25 +154,22 @@ func setStudyView(camera: mod Camera3d, rig: mod CameraRig, studyView: view Stri
       distance: 4.8
     )
   } else {
-    # maples: the sugar and red maples, the Japanese maple, the date palm
+    # any other view: the daisies
     setStudyOrbit(
       rig: rig
       camera: camera
-      target: Vec3.create(x: -4.8, y: 2.0, z: 3.4)
-      yaw: -0.5
-      pitch: 0.15
-      distance: 13.0
+      target: Vec3.create(x: -1.9, y: -14.0, z: 0.34)
+      yaw: 0.46
+      pitch: 0.12
+      distance: 4.6
     )
-  }
-  if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
-    camera.target.z = 4.3
   }
   snapCameraRigView(rig: rig)
   applyCameraRig(rig: rig, camera: camera)
 }
 
-# The camera of a view (138's field of view), and its rig for the birch
-# motion study and RAE_CAMERA_AT
+# The camera of a view (138's field of view), and its rig for
+# RAE_CAMERA_AT
 func studyCamera() ret Camera3d {
   var camera: Camera3d = defaultCamera3d()
   camera.target = Vec3.create(x: 0.0, y: 3.0, z: 1.7)
@@ -303,105 +186,14 @@ func studyCameraRig(camera: mod Camera3d, studyView: view String) ret CameraRig 
   ret rig
 }
 
-# An isolated maple (RAE_*_MAPLE_ISOLATE): that tree alone, at its spot,
-# with its _SEED and _HEIGHT
-func plantIsolatedMaple(
-  world: mod World3d
-  renderer: mod DeferredRenderer
-  obstacles: mod List(StudyObstacle)
-  prefix: view String
-  spot: view StudyTreeSpot
-) {
-  var seed: Int = spot.seed
-  var height: Float = spot.height
-  if Sys.getEnv(name: "{prefix}_SEED").length() > 0 {
-    seed = Sys.getEnv(name: "{prefix}_SEED").toInt()
-  }
-  if Sys.getEnv(name: "{prefix}_HEIGHT").length() > 0 {
-    height = Sys.getEnv(name: "{prefix}_HEIGHT").toFloat()
-  }
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: spot.x, y: spot.y, z: 0.0)
-    height: height
-    width: spot.width
-    seed: seed
-    species: spot.species
-    palm: false
-  )
-  obstacles.add(value: { x: spot.x, y: spot.y, radius: 0.45 })
-}
-
-# The spot of the first maple of `species` (0 sugar, 1 red, 3 Japanese)
-func firstSpotOf(species: view Int) ret StudyTreeSpot {
-  loop let spot: view StudyTreeSpot in studyTreeSpots() {
-    if spot.species is species and spot.palm is false {
-      ret spot
-    }
-  }
-  ret studyTreeSpots().copyAtDefault(index: 0)
-}
-
-# The studies on the lab's ground (plus its clouds), as 138's grove held
-# them; or one study alone with its RAE_*_ISOLATE switch
+# The flower studies on the lab's ground (plus its clouds), as 138's grove
+# held them
 func buildStudyWorld(
   meshes: view LabMeshes
   renderer: mod DeferredRenderer
   obstacles: mod List(StudyObstacle)
 ) ret World3d {
   var world: World3d = buildLabGround(meshes: meshes)
-  if Sys.getEnv(name: "RAE_GINKGO_ISOLATE") is "1" {
-    addGinkgoGrove(world: world, renderer: renderer, obstacles: obstacles)
-    ret world
-  }
-  if Sys.getEnv(name: "RAE_JAPANESE_MAPLE_ISOLATE") is "1" {
-    plantIsolatedMaple(
-      world: world
-      renderer: renderer
-      obstacles: obstacles
-      prefix: "RAE_JAPANESE_MAPLE"
-      spot: firstSpotOf(species: 3)
-    )
-    ret world
-  }
-  if Sys.getEnv(name: "RAE_MAPLE_ISOLATE") is "1" {
-    plantIsolatedMaple(
-      world: world
-      renderer: renderer
-      obstacles: obstacles
-      prefix: "RAE_MAPLE"
-      spot: firstSpotOf(species: 0)
-    )
-    ret world
-  }
-  if Sys.getEnv(name: "RAE_RED_MAPLE_ISOLATE") is "1" {
-    plantIsolatedMaple(
-      world: world
-      renderer: renderer
-      obstacles: obstacles
-      prefix: "RAE_RED_MAPLE"
-      spot: firstSpotOf(species: 1)
-    )
-    ret world
-  }
-  if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
-    addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
-    ret world
-  }
-  loop let spot: view StudyTreeSpot in studyTreeSpots() {
-    plantTree(
-      world: world
-      renderer: renderer
-      position: Vec3.create(x: spot.x, y: spot.y, z: 0.0)
-      height: spot.height
-      width: spot.width
-      seed: spot.seed
-      species: spot.species
-      palm: spot.palm
-    )
-    obstacles.add(value: { x: spot.x, y: spot.y, radius: 0.45 })
-  }
   addOxeyeDaisyStudy(
     world: world
     renderer: renderer
@@ -414,9 +206,6 @@ func buildStudyWorld(
     singlePosition: Vec3.create(x: -5.2, y: -14.0, z: 0.015)
     patchPosition: Vec3.create(x: -7.2, y: -14.0, z: 0.015)
   )
-  addGinkgoGrove(world: world, renderer: renderer, obstacles: obstacles)
-  addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
-  addForkStudy(world: world, renderer: renderer, obstacles: obstacles)
   ret world
 }
 

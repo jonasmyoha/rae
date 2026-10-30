@@ -29,10 +29,9 @@
 #   bush            the bush (RAE_TREELAB_SPECIES=15, scale 1) from 3 m
 #
 # The studies (LabStudies.rae): RAE_TREELAB_STUDY=<view> shows one of the
-# stylized set's study scenes that Autumn Grove (138) held before it became
-# the low-poly museum (maples, japanese-maple, ginkgo, birches and its five
-# other views, forks-front/side/grazing, flowers, bellflowers and its two
-# other views) in place of the T02 scene.
+# meadow flower study scenes that Autumn Grove (138) held before it became
+# the low-poly museum (flowers, bellflowers and its two other views) in
+# place of the T02 scene.
 #
 # The forest scene (LabForest.rae): RAE_TREELAB_SCENE=forest shows a tree
 # set as a forest at every distance, RAE_TREE_SET=lowPoly|stylized picks
@@ -78,7 +77,6 @@ open treeGen/LeafPass
 open RendererWind
 open app3d/CameraRig
 open LabStudies
-open BirchStudy
 open app3d/TreeForest
 open LabForest
 open RendererQuality
@@ -112,11 +110,10 @@ type LabState {
   # where the grass grid is centered: the tree, or the studies
   grassCenterX: Float = 0.0
   grassCenterY: Float = 0.0
-  # the study shown (RAE_TREELAB_STUDY), empty for the T02 scene; its
-  # camera rig and the birch motion study
+  # the study shown (RAE_TREELAB_STUDY), empty for the T02 scene, and its
+  # camera rig
   studyView: String = ""
   cameraRig: CameraRig
-  birchStudy: BirchStudy
   # the forest scene's two forests (stylized, low-poly; empty in the other
   # scenes) and the one shown
   forests: List(TreeForest) = List.create(TreeForest, cap: 0)
@@ -230,7 +227,6 @@ func createStudyLab(studyView: view String) ret LabState {
       grassCenterY: studyGrassCenterY
       studyView: studyView
       cameraRig: rig
-      birchStudy: createBirchStudy()
       tree: none
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
@@ -266,7 +262,6 @@ func createForestLab() ret LabState {
       grassCenterX: 0.0
       grassCenterY: 30.0
       cameraRig: createCameraRig(camera: camera)
-      birchStudy: createBirchStudy()
       forests: own forests
       forestShown: labForestFirstSet()
       tree: none
@@ -328,7 +323,6 @@ func createLab() ret LabState {
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createLabGrass(obstacles: labTrunkField())
       cameraRig: createCameraRig(camera: camera)
-      birchStudy: createBirchStudy()
       forests: own forests
       tree: own tree
       windSettings: windSettings
@@ -438,13 +432,11 @@ func runLabFrame(state: mod LabState) {
   state.lastTime = now
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
   if state.studyView.length() > 0 {
-    # the studies' leaves sway in the renderer's wind, and the birch
-    # motion study moves the camera
+    # the studies' flowers sway in the renderer's wind
     setRendererWind(
       renderer: state.renderer
       wind: windVector(state: state.wind, settings: state.windSettings)
     )
-    stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
   }
   if state.forests.length > 0 and Sdl3.isKeyPressed(key: Keys.keyT) {
     state.forestShown = (state.forestShown + 1) % state.forests.length

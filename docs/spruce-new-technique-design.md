@@ -130,7 +130,7 @@ already notes. LeafCards keeps filling masses. A new module,
   tiers throw tiered shadows, which the masses' camera-facing cards cannot.
 - **Set integration:** as the others: `StylizedKinds.spruceKind`,
   `stylizedNewKind` / `stylizedTreeKind` / `stylizedKindVariety` for
-  `speciesSpruce`, `RAE_STYLIZED_OLD=spruce`, pictures queued
+  `speciesSpruce`, `RAE_STYLIZED_OLD=spruce` (removed with the old trees), pictures queued
   (`referenceImages`) and built once.
 
 ## 6. Size and cost

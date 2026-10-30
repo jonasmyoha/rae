@@ -1,24 +1,15 @@
-# Shared foliage forms. Lime uses joined wood and textured connected sprays;
-# spruce and cypress use curved evergreen sprays. Other forms retain opaque
-# patches. Controls preserve original meshes for matched visual comparisons.
-# Meshes are local-space, deterministic and independent of any renderer/owner.
+# Autumn Grove's leaf-patch foliage forms: crowns of shallow, lobed, opaque
+# leaf patches whose lighting normals follow the crown. The stylized set
+# still draws its umbrella pine this way (the other species are treeGen
+# kinds). Meshes are local-space, deterministic and independent of any
+# renderer/owner.
 import Math
 open Vec3
 open Noise
 open Mesh3d
 open stylizedTrees/Foliage
-open stylizedTrees/Spruce
-open stylizedTrees/Cypress
-open stylizedTrees/SpruceControl
-open stylizedTrees/Lime
 
-enum FluffyForm {
-  broadleaf
-  bush
-  cypress
-  umbrella
-  spruce
-}
+enum FluffyForm { broadleaf, bush, umbrella }
 
 # One shallow, lobed leaf patch: 13 vertices and 24 double-sided triangles.
 # Lighting normals follow the crown rather than the individual flat patch.
@@ -143,24 +134,17 @@ func fluffyCrown(
 }
 
 # Unit-height forms; scale instances uniformly to preserve leaf proportions.
-# broadleaf/umbrella: seven clusters, bush: five, cypress: nine.
-# The control spruce uses continuous skirts; the live form has curved sprays.
-func fluffyLeavesControl(
+# broadleaf/umbrella: seven clusters, bush: five.
+func fluffyLeaves(
   form: view FluffyForm
   seed: view Int
   patchCount: view Int
   tone: view Int
 ) ret MeshData {
-  if form is FluffyForm.spruce {
-    ret spruceLeavesControl(seed: seed, detail: patchCount, tone: tone)
-  }
   var mesh: MeshData = foliageMesh()
   var clusters: Int = 7
   if form is FluffyForm.bush {
     clusters = 5
-  }
-  if form is FluffyForm.cypress {
-    clusters = 9
   }
   loop var i: Int = 0, i < clusters, ++i {
     let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
@@ -174,15 +158,6 @@ func fluffyLeavesControl(
     if form is FluffyForm.bush {
       center.z = 0.23 + hash2(x: i, y: 12, seed: seed) * 0.13
       radius = Vec3.create(x: 0.25, y: 0.23, z: 0.25)
-    } else if form is FluffyForm.cypress {
-      let fraction: Float = i.toFloat() / 8
-      let width: Float = 0.13 * (1.0 - fraction * 0.78)
-      center = Vec3.create(
-        x: Math.cos(x: angle) * 0.025
-        y: Math.sin(x: angle) * 0.025
-        z: 0.22 + fraction * 0.70
-      )
-      radius = Vec3.create(x: width, y: width, z: 0.17 - fraction * 0.08)
     } else if form is FluffyForm.umbrella {
       center.x = center.x * 1.65
       center.y = center.y * 1.65
@@ -202,37 +177,9 @@ func fluffyLeavesControl(
   ret mesh
 }
 
-func fluffyWoodControl(form: view FluffyForm, seed: view Int) ret MeshData {
+func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
   var mesh: MeshData = foliageMesh()
   if form is FluffyForm.bush {
-    ret mesh
-  }
-  if form is FluffyForm.spruce {
-    foliageLimb(
-      mesh: mesh
-      start: Vec3.create(x: 0, y: 0, z: -0.03)
-      direction: Vec3.create(x: 0, y: 0, z: 1)
-      length: 1.0
-      rise: 0
-      startRadius: 0.025
-      endRadius: 0.003
-      sides: 9
-    )
-    loop var branch: Int = 0, branch < 30, ++branch {
-      let tier: Int = branch / 5
-      let fraction: Float = tier.toFloat() / 6
-      let turn: Float = (branch % 5).toFloat() * 1.256637 + tier.toFloat() * 0.63
-      foliageLimb(
-        mesh: mesh
-        start: Vec3.create(x: 0, y: 0, z: 0.24 + tier.toFloat() * 0.12)
-        direction: Vec3.create(x: Math.cos(x: turn), y: Math.sin(x: turn), z: -0.12)
-        length: 0.16 * (1.0 - fraction * 0.88)
-        rise: 0.20
-        startRadius: 0.009 * (1.0 - fraction * 0.7)
-        endRadius: 0.003
-        sides: 5
-      )
-    }
     ret mesh
   }
   foliageLimb(
@@ -245,65 +192,24 @@ func fluffyWoodControl(form: view FluffyForm, seed: view Int) ret MeshData {
     endRadius: 0.008
     sides: 7
   )
-  if form is not FluffyForm.cypress {
-    loop var i: Int = 0, i < 7, ++i {
-      let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
-      var spread: Float = 0.24
-      if form is FluffyForm.umbrella {
-        spread = 0.35
-      }
-      foliageLimb(
-        mesh: mesh
-        start: Vec3.create(x: 0.02, y: 0, z: 0.40)
-        direction: vnorm(
-          a: Vec3.create(x: Math.cos(x: angle) * spread, y: Math.sin(x: angle) * spread, z: 0.30)
-        )
-        length: 0.43
-        rise: 0.12
-        startRadius: 0.018
-        endRadius: 0.004
-        sides: 5
-      )
+  loop var i: Int = 0, i < 7, ++i {
+    let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
+    var spread: Float = 0.24
+    if form is FluffyForm.umbrella {
+      spread = 0.35
     }
+    foliageLimb(
+      mesh: mesh
+      start: Vec3.create(x: 0.02, y: 0, z: 0.40)
+      direction: vnorm(
+        a: Vec3.create(x: Math.cos(x: angle) * spread, y: Math.sin(x: angle) * spread, z: 0.30)
+      )
+      length: 0.43
+      rise: 0.12
+      startRadius: 0.018
+      endRadius: 0.004
+      sides: 5
+    )
   }
   ret mesh
-}
-
-# Named lime and spruce use their shared textured foliage generators.
-func fluffyLeaves(
-  form: view FluffyForm
-  seed: view Int
-  patchCount: view Int
-  tone: view Int
-) ret MeshData {
-  if form is FluffyForm.cypress {
-    ret cypressLeaves(seed: seed, detail: patchCount, tone: tone)
-  }
-  if form is FluffyForm.spruce {
-    ret spruceLeaves(seed: seed, detail: patchCount, tone: tone)
-  }
-  if form is FluffyForm.broadleaf {
-    let tree: LimeTree = limeTree(seed: seed)
-    ret limeLeaves(sprays: tree.sprays, seed: seed, tone: tone)
-  }
-  ret fluffyLeavesControl(
-    form: form
-    seed: seed
-    patchCount: patchCount
-    tone: tone
-  )
-}
-
-func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
-  if form is FluffyForm.cypress {
-    ret cypressWood(seed: seed)
-  }
-  if form is FluffyForm.spruce {
-    ret spruceWood(seed: seed)
-  }
-  if form is FluffyForm.broadleaf {
-    let tree: LimeTree = limeTree(seed: seed)
-    ret tree.wood
-  }
-  ret fluffyWoodControl(form: form, seed: seed)
 }

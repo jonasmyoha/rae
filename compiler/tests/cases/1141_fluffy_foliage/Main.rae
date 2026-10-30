@@ -1,83 +1,61 @@
-# Preserved opaque controls; the new textured lime is checked in 1245.
+# Autumn Grove's leaf-patch forms (stylizedTrees/FluffyFoliage; the stylized
+# set's umbrella pine is one): deterministic meshes with valid indices,
+# whole patches sharing one wind pivot, at three patch budgets.
 open stylizedTrees/FluffyFoliage
 open Mesh3d
 
 func main() ret Int {
-  let forms: List(FluffyForm) = {
-    FluffyForm.broadleaf
-    FluffyForm.bush
-    FluffyForm.cypress
-    FluffyForm.spruce
-    FluffyForm.umbrella
-  }
+  let forms: List(FluffyForm) = { FluffyForm.broadleaf, FluffyForm.bush, FluffyForm.umbrella }
   let counts: List(Int) = { 48, 24, 12 }
   loop let form: FluffyForm in forms {
-    let wood: MeshData = fluffyWoodControl(form: form, seed: 73)
+    let wood: MeshData = fluffyWood(form: form, seed: 73)
     loop let index: Int in wood.indices {
       if index < 0 or index >= wood.vertCount {
         ret 7
-      }
-    }
-    if form is FluffyForm.spruce {
-      if wood.vertCount is not 954 or wood.indices.length is not 4770 {
-        ret 8
       }
     }
     var clusters: Int = 7
     if form is FluffyForm.bush {
       clusters = 5
     }
-    if form is FluffyForm.cypress {
-      clusters = 9
-    }
     loop let count: Int in counts {
       var total: Int = 0
       loop var tone: Int = 0, tone < 3, ++tone {
-        let mesh: MeshData = fluffyLeavesControl(
+        let mesh: MeshData = fluffyLeaves(
           form: form
           seed: 73
           patchCount: count
           tone: tone
         )
-        let repeat: MeshData = fluffyLeavesControl(
+        let repeat: MeshData = fluffyLeaves(
           form: form
           seed: 73
           patchCount: count
           tone: tone
         )
-        if form is FluffyForm.spruce {
-          if mesh.windPivots.length is not 0 {
-            ret 9
-          }
-        } else {
-          if mesh.windPivots.length is not mesh.vertCount * 4 {
-            ret 10
-          }
-          loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
-            let first: Int = (vertex / 13) * 13
-            loop var field: Int = 0, field < 4, ++field {
-              let value: Float = mesh.windPivots.copyAtFallback(
-                index: vertex * 4 + field
-                fallback: -1
-              )
-              if value is not mesh.windPivots.copyAtFallback(index: first * 4 + field, fallback: -2) {
-                ret 11
-              }
-              if value is not repeat.windPivots.copyAtFallback(
-                index: vertex * 4 + field
-                fallback: -3
-              ) {
-                ret 12
-              }
+        if mesh.windPivots.length is not mesh.vertCount * 4 {
+          ret 10
+        }
+        loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+          let first: Int = (vertex / 13) * 13
+          loop var field: Int = 0, field < 4, ++field {
+            let value: Float = mesh.windPivots.copyAtFallback(
+              index: vertex * 4 + field
+              fallback: -1
+            )
+            if value is not mesh.windPivots.copyAtFallback(index: first * 4 + field, fallback: -2) {
+              ret 11
+            }
+            if value is not repeat.windPivots.copyAtFallback(
+              index: vertex * 4 + field
+              fallback: -3
+            ) {
+              ret 12
             }
           }
         }
         var expectedVertices: Int = clusters * count / 3 * 13
         var expectedIndices: Int = clusters * count / 3 * 72
-        if form is FluffyForm.spruce {
-          expectedVertices = 2 * (3 * (count / 2) + 2)
-          expectedIndices = 2 * 6 * (count / 2) * 3
-        }
         if mesh.vertCount is not expectedVertices {
           ret 1
         }
@@ -101,14 +79,11 @@ func main() ret Int {
         total = total + mesh.indices.length / 3
       }
       var expectedTriangles: Int = clusters * count * 24
-      if form is FluffyForm.spruce {
-        expectedTriangles = 6 * 6 * (count / 2)
-      }
       if total is not expectedTriangles {
         ret 6
       }
     }
   }
-  log("five foliage forms: deterministic, valid indices, three patch budgets")
+  log("three leaf-patch forms: deterministic, valid indices, three patch budgets")
   ret 0
 }

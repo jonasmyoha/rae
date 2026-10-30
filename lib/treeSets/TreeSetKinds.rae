@@ -55,7 +55,7 @@ func addTreeSetKinds(
 # field: the walkers put their bushes there), or -1 when its bushes are
 # instancer parts (createTreeSetBushParts)
 func treeSetBushKind(treeSet: view TreeSet) ret Int {
-  if treeSet.style is TreeSetStyle.stylized and stylizedNewBush() {
+  if treeSet.style is TreeSetStyle.stylized {
     ret stylizedBushKind
   }
   ret -1
@@ -71,5 +71,6 @@ func createTreeSetBushParts(
   if treeSet.style is TreeSetStyle.lowPoly {
     ret createLowPolyBushParts(renderer: renderer, capacity: capacity)
   }
-  ret createStylizedBushParts(renderer: renderer, capacity: capacity)
+  # the stylized set's bush is a forest kind (stylizedBushKind)
+  ret List.create(PropInstancer, cap: 0)
 }

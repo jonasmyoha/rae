@@ -1777,15 +1777,13 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "146_treeLab" ]; then
-          # The T02 scene, then every stylized-set study the lab took over from
+          # The T02 scene, then the meadow flower studies the lab took over from
           # Autumn Grove (LabStudies.rae, docs/tree-sets-design.md §5.3)
           LAB_OK=1
-          for LAB_STUDY in "" maples japanese-maple ginkgo birches birches-side birches-under birches-warm birches-cool birches-night forks-front forks-side forks-grazing flowers bellflowers bellflowers-side bellflowers-backlit; do
+          for LAB_STUDY in "" flowers bellflowers bellflowers-side bellflowers-backlit; do
             LAB_NAME="${LAB_STUDY:-t02}"
             SCREENSHOT="$TMP_OUT/treelab-$LAB_NAME.bmp"
-            # the night view is dark by design; it still has its sky and bark
             LAB_COLORS=2000
-            [ "$LAB_STUDY" = "birches-night" ] && LAB_COLORS=200
             if ! (cd .. && RAE_TREELAB_STUDY="$LAB_STUDY" \
                RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render-$LAB_NAME.log" 2>&1 \
@@ -1811,7 +1809,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             fi
           done
           if [ "$LAB_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (the T02 scene, the sixteen stylized-set study views and the forest scene with each tree set)"
+            echo "PASS: $EXAMPLE_NAME (the T02 scene, the four meadow flower study views and the forest scene with each tree set)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (tree lab views)"
