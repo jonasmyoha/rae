@@ -342,3 +342,31 @@ ordering: the first three land as pure code with real tests.
   the local solar time of the greatest eclipse and the place; "Animate
   time" stays as it was, so a running clock carries on through the
   eclipse; `RAE_ECLIPSE=<n>` starts at one.
+
+## 10. Dusk, twilight and night (2026-10-30)
+
+The scene has one directional key light, so the day and the night share
+it. The rules (lib/app3d/SettingsSky, lib/Sky daylightFactorForElevation):
+
+- **The sun's direct light fades as it sets.** Its noon-scaled strength
+  (`0.15 + 0.85 * height`) is faded over its last 4 degrees and reaches 0
+  just under the horizon (`settingsSunSetUp`, -0.57 degrees). Before, it
+  kept 15% of noon (15,000 lux) down to the horizon.
+- **The key light turns where it is 0.** Under settingsSunSetUp it is the
+  moon while it is on and up, else the starlight from overhead; never the
+  sun under the horizon, which would light the scene from below (the trees
+  lit up at night with the moon off). Turning at its full sunset strength
+  made the light swing across the sky in one frame.
+- **The night grows through the twilight**, to 12 degrees under the
+  horizon (`settingsTwilightEndUp`, nautical twilight): the moon's or the
+  starlight's strength and the sky's daylight fade both run over it. So the
+  latitude shapes the evening as it does outdoors: near the equator the sun
+  drops steeply and the night comes within the hour; at 60N in June the sun
+  never gets that far down and the summer night stays light.
+- **The moon off is a moonless night**, not no night: the starlight key
+  light, the night ambient and the sky shader's faint night blue, which no
+  longer needs a moon.
+
+Case 1261 steps the key light (direction times strength) through whole
+June days at 37.9N, 60.2N and the equator, moon on and off: no minute may
+move it by more than 3% of the noon sun.

@@ -881,16 +881,23 @@ func daylightFactorForDate(
 # The curve itself, taking a SIGNED elevation. Pulled out so the date-aware and
 # equinox entry points share one implementation — two copies of a fade curve is
 # how they end up disagreeing.
+#
+# The fade runs through the twilight, down to 12 degrees under the horizon
+# (nautical twilight, up -0.2079), easing out: most of the light goes in the
+# first degrees after sunset, a glow lasts to the twilight's end. So a sun
+# that stays just under the horizon all night (60N in June) keeps a light
+# summer night, and near the equator, where the sun drops steeply, the
+# night comes within the hour. Never quite zero: the night sky (the sky
+# shader's starlight blue, the moon) is drawn over it.
 func daylightFactorForElevation(up: view Float) pub ret Float {
   if up >= 0.08 {
     ret 1.0
   }
-  # Never quite zero: a scene lit by nothing reads as broken rather than as
-  # night, and there is no night sky model here yet.
-  if up <= 0.0 - 0.12 {
+  if up <= -0.2079 {
     ret 0.02
   }
-  ret 0.02 + 0.98 * (up + 0.12) / 0.20
+  let t: Float = (up + 0.2079) / 0.2879
+  ret 0.02 + 0.98 * t * t
 }
 
 func daylightFactorForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Float {
