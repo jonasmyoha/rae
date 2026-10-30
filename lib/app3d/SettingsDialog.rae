@@ -474,20 +474,12 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
     settingsJumpToEclipse(settingsState: settingsState, index: before)
     ret true
   }
-  # Scene selection is clamped to what the app actually has, so the buttons can
-  # exist in an app with one scene without being able to select a second.
-  if actionId is "settings.scene.1" {
-    ret settingsSelectScene(settingsState: settingsState, scene: 1)
-  }
-  if actionId is "settings.scene.2" {
-    ret settingsSelectScene(settingsState: settingsState, scene: 2)
-  }
-  if actionId is "settings.scene.3" {
-    ret settingsSelectScene(settingsState: settingsState, scene: 3)
-  }
   ret false
 }
 
+# Pick scene `scene` (1..sceneCount): an app with scenes to pick adds its
+# own chooser (app3d/EditorPanel createEditorSceneChooser). False when it
+# was already shown or the app has no such scene.
 func settingsSelectScene(settingsState: mod SettingsState, scene: view Int) ret Bool {
   if scene > settingsState.sceneCount {
     ret false
@@ -907,21 +899,6 @@ func settingsApplyToWorld(
     world: world
     nodeId: "SettingsShadowsButton"
     slot: settingsSlotFor(on: settingsState.shadows)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsScene1"
-    slot: settingsSlotFor(on: settingsState.scene is 1)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsScene2"
-    slot: settingsSlotFor(on: settingsState.scene is 2)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsScene3"
-    slot: settingsSlotFor(on: settingsState.scene is 3)
   )
 
   # Two drawn parts: the track, and the knob that travels along it. A filled

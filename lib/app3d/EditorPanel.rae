@@ -505,7 +505,7 @@ func buildEditorPanelControls(editorPanel: mod EditorPanel, panel: mod ControlPa
 }
 
 # The app's section of the side panel: a title and a one-line readout. An
-# empty title hides the section.
+# empty title hides the section, an empty readout its line.
 func setEditorPanelAppSection(
   editorPanel: mod EditorPanel
   title: view String
@@ -514,6 +514,7 @@ func setEditorPanelAppSection(
   setNodeActive(world: editorPanel.world, nodeId: "AppPanel", value: title.length() > 0)
   setNodeText(world: editorPanel.world, nodeId: "AppPanelTitle", value: title)
   setNodeText(world: editorPanel.world, nodeId: "AppPanelReadout", value: readout)
+  setNodeActive(world: editorPanel.world, nodeId: "AppPanelReadout", value: readout.length() > 0)
   fitEditorPanelToWindow(
     world: editorPanel.world
     uiSystems: editorPanel.uiSystems
@@ -538,6 +539,63 @@ func selectEditorPanelScene(editorPanel: mod EditorPanel, scene: view Int) {
       panelOpen: editorPanel.settings.open
     )
   }
+}
+
+# An app's scene chooser: one button per scene in the side panel's app
+# section, under `title`, the settings' scene selected. Only an app that
+# has scenes to pick adds one; the shared settings have no scene buttons.
+type EditorSceneChooser {
+  panel: ControlPanel
+  # The scene the selection shows (the settings' scene when it was last set)
+  shownScene: Int
+}
+
+# A chooser of `labels` (scene 1 first), built into the panel
+func createEditorSceneChooser(
+  editorPanel: mod EditorPanel
+  title: view String
+  labels: view List(String)
+) ret EditorSceneChooser {
+  var panel: ControlPanel = createControlPanel(hostNodeId: editorAppPanelNodeId)
+  loop var i: Int = 0, i < labels.length, ++i {
+    addPanelButton(
+      panel: panel
+      id: "{i + 1}"
+      label: labels.copyAtDefault(index: i)
+      actionId: "editor.scene.{i + 1}"
+      group: 1
+    )
+  }
+  let built: Bool = buildEditorPanelControls(editorPanel: editorPanel, panel: panel)
+  setEditorPanelAppSection(editorPanel: editorPanel, title: title, readout: "")
+  var chooser: EditorSceneChooser = { panel: own panel, shownScene: 0 }
+  updateEditorSceneChooser(editorPanel: editorPanel, chooser: chooser)
+  ret chooser
+}
+
+# A click picks that scene (selectEditorPanelScene); the selection follows
+# the settings' scene, also when the app picks one from keys. Call after
+# updateEditorPanel. True when a click changed the scene.
+func updateEditorSceneChooser(
+  editorPanel: mod EditorPanel
+  chooser: mod EditorSceneChooser
+) ret Bool {
+  let hit: String = panelClickedId(panel: chooser.panel, world: editorPanel.world)
+  var changed: Bool = false
+  if hit.length() > 0 and hit.toInt() is not editorPanel.settings.scene {
+    selectEditorPanelScene(editorPanel: editorPanel, scene: hit.toInt())
+    changed = true
+  }
+  if chooser.shownScene is not editorPanel.settings.scene {
+    setPanelSelection(
+      panel: chooser.panel
+      world: editorPanel.world
+      group: 1
+      id: "{editorPanel.settings.scene}"
+    )
+    chooser.shownScene = editorPanel.settings.scene
+  }
+  ret changed
 }
 
 # The settings onto the frame: the sky they pick, the same sun on the light

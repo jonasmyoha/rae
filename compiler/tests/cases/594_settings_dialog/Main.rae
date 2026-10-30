@@ -92,19 +92,19 @@ func main() {
 
   check(
     label: "scene 2 selects"
-    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.2") and settingsState.scene is 2
+    ok: settingsSelectScene(settingsState: settingsState, scene: 2) and settingsState.scene is 2
   )
   check(
     label: "re-selecting reports no change"
-    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.2") is false
+    ok: settingsSelectScene(settingsState: settingsState, scene: 2) is false
   )
   check(
     label: "scene 3 selects"
-    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.3") and settingsState.scene is 3
+    ok: settingsSelectScene(settingsState: settingsState, scene: 3) and settingsState.scene is 3
   )
 
-  # One scene, as 113 has. The buttons still EXIST — hiding controls per app is
-  # how two dialogs drift apart — but they cannot select what is not there.
+  # One scene, as 113 has: no app chooser adds buttons for it, and picking a
+  # scene it does not have is refused.
   var one: SettingsState = createSettingsState(
     scene: 1
     sceneCount: 1
@@ -115,7 +115,7 @@ func main() {
   )
   check(
     label: "single-scene app refuses scene 2"
-    ok: settingsHandleAction(settingsState: one, actionId: "settings.scene.2") is false and one.scene is 1
+    ok: settingsSelectScene(settingsState: one, scene: 2) is false and one.scene is 1
   )
   check(
     label: "single-scene app keeps its other settings"

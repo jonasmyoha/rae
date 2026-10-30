@@ -339,5 +339,6 @@ ordering: the first three land as pure code with real tests.
   alone) to 4 (`RAE_MOONS=<n>` to start with n).
 - **The eclipse list in the settings:** "Previous eclipse" / "Next
   eclipse" step through lib/Eclipses (wrapping round), setting the date,
-  the local solar time of the greatest eclipse and the place, and holding
-  the clock there; `RAE_ECLIPSE=<n>` starts at one.
+  the local solar time of the greatest eclipse and the place; "Animate
+  time" stays as it was, so a running clock carries on through the
+  eclipse; `RAE_ECLIPSE=<n>` starts at one.
