@@ -1,0 +1,101 @@
+# app3d/SettingsPersist: the settings panel's values and the GAME / EDITOR
+# mode survive a hot reload. Every value changed from the defaults is saved
+# as one line and restored into fresh settings; a line from an older build
+# with missing or unknown words restores what it has; an empty line restores
+# nothing.
+open app3d/SettingsDialog
+open app3d/SettingsPersist
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func freshSettings() ret SettingsState {
+  ret createSettingsState(
+    scene: 1
+    sceneCount: 3
+    speed: 1.0
+    toon: false
+    hour: 12.0
+    skyModel: SettingsSkyModel.preetham
+  )
+}
+
+func main() ret Int {
+  var changed: SettingsState = freshSettings()
+  changed.open = true
+  changed.playing = false
+  changed.scene = 3
+  changed.toon = true
+  changed.shadows = false
+  changed.antialias = SettingsAntialias.fxaa
+  changed.quality = SettingsQuality.ultra
+  changed.skyModel = SettingsSkyModel.hosek
+  changed.sunNoonLux = 80000.0
+  changed.exposureCompensation = -1.5
+  changed.autoExposure = true
+  changed.moon = false
+  changed.moonCount = 3
+  changed.eclipse = 17
+  changed.timeOfDay.hour = 19.25
+  changed.timeOfDay.dayOfYear = 60
+  changed.timeOfDay.year = 2024
+  changed.animateTime = false
+  changed.latitude = -33.5
+  changed.longitude = 151.25
+  let line: String = serializeSettingsState(settingsState: changed, editor: true)
+  log(line)
+  var restored: SettingsState = freshSettings()
+  var editor: Bool = false
+  check(
+    label: "a saved line restores"
+    ok: restoreSettingsState(raw: line, settingsState: restored, editor: editor)
+  )
+  check(label: "the mode", ok: editor)
+  check(
+    label: "the panel, play and scene"
+    ok: restored.open and restored.playing is false and restored.scene is 3
+  )
+  check(
+    label: "rendering, antialiasing and quality"
+    ok: restored.toon and restored.shadows is false and restored.antialias is SettingsAntialias.fxaa and restored.quality is SettingsQuality.ultra
+  )
+  check(
+    label: "the sky, the sun and the exposure"
+    ok: restored.skyModel is SettingsSkyModel.hosek and restored.sunNoonLux is 80000.0 and restored.exposureCompensation is -1.5 and restored.autoExposure
+  )
+  check(
+    label: "the moons and the eclipse"
+    ok: restored.moon is false and restored.moonCount is 3 and restored.eclipse is 17
+  )
+  check(
+    label: "the clock, the date and the place"
+    ok: restored.timeOfDay.hour is 19.25 and restored.timeOfDay.dayOfYear is 60 and restored.timeOfDay.year is 2024 and restored.animateTime is false and restored.latitude is -33.5 and restored.longitude is 151.25
+  )
+  check(
+    label: "the same line again"
+    ok: serializeSettingsState(settingsState: restored, editor: editor) is line
+  )
+  var partial: SettingsState = freshSettings()
+  var partialEditor: Bool = false
+  let restoredPartial: Bool = restoreSettingsState(
+    raw: "quality=low futureSetting=5 broken hour=6.5"
+    settingsState: partial
+    editor: partialEditor
+  )
+  check(
+    label: "an older line: what it has, the rest as started"
+    ok: restoredPartial and partial.quality is SettingsQuality.low and partial.timeOfDay.hour is 6.5 and partial.skyModel is SettingsSkyModel.preetham and partialEditor is false
+  )
+  var empty: SettingsState = freshSettings()
+  var emptyEditor: Bool = false
+  check(
+    label: "no line: nothing restored"
+    ok: restoreSettingsState(raw: "", settingsState: empty, editor: emptyEditor) is false
+  )
+  ret 0
+}

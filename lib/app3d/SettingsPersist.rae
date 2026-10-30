@@ -1,0 +1,167 @@
+# app3d/SettingsPersist — the settings panel's values kept across a hot
+# reload: every value the panel shows (play/pause, the rendering,
+# antialiasing and quality switches, the sky, the sun, the moons and the
+# eclipse, the exposure, the clock, the date and the place, the panel open
+# or closed) and whether the app is in EDITOR mode. They are `name=value`
+# words on one line in their own HotReload slot (settingsStateSlot), beside
+# the app's own state. A name the line lacks keeps the value the app
+# started with, so a line from an older build restores what it has.
+#
+# An environment variable that sets a value (RAE_QUALITY, RAE_SKY,
+# RAE_ECLIPSE, ... for screenshots) wins over the saved one.
+import Math
+import String
+import Sys
+open Calendar
+open app3d/SettingsDialog
+open app3d/SettingsSky
+
+# The HotReload slot of an app's settings
+func settingsStateSlot(appId: view String) ret String {
+  ret "{appId}Settings"
+}
+
+# The sky model named `name` (its case name), else `fallback`
+func settingsSkyNamed(name: view String, fallback: view SettingsSkyModel) ret SettingsSkyModel {
+  loop var i: Int = 0, i < 4, ++i {
+    if (i as SettingsSkyModel).toString() is name {
+      ret i as SettingsSkyModel
+    }
+  }
+  ret fallback
+}
+
+# The quality step named `name`, else `fallback`
+func settingsQualityNamed(name: view String, fallback: view SettingsQuality) ret SettingsQuality {
+  loop var i: Int = 0, i < 4, ++i {
+    if (i as SettingsQuality).toString() is name {
+      ret i as SettingsQuality
+    }
+  }
+  ret fallback
+}
+
+# The antialiasing named `name`, else `fallback`
+func settingsAntialiasNamed(
+  name: view String
+  fallback: view SettingsAntialias
+) ret SettingsAntialias {
+  loop var i: Int = 0, i < 3, ++i {
+    if (i as SettingsAntialias).toString() is name {
+      ret i as SettingsAntialias
+    }
+  }
+  ret fallback
+}
+
+func settingsFlag(value: view Bool) ret String {
+  if value {
+    ret "1"
+  }
+  ret "0"
+}
+
+# The line: the panel's values and the mode (`editor`)
+func serializeSettingsState(settingsState: view SettingsState, editor: view Bool) ret String {
+  let clock: String = "hour={settingsState.timeOfDay.hour} day={settingsState.timeOfDay.dayOfYear} year={settingsState.timeOfDay.year} animateTime={settingsFlag(
+    value: settingsState.animateTime
+  )} latitude={settingsState.latitude} longitude={settingsState.longitude}"
+  let rendering: String = "toon={settingsFlag(value: settingsState.toon)} shadows={settingsFlag(
+    value: settingsState.shadows
+  )} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
+  let light: String = "sky={settingsState.skyModel.toString()} sunLux={settingsState.sunNoonLux} exposure={settingsState.exposureCompensation} autoExposure={settingsFlag(
+    value: settingsState.autoExposure
+  )} moon={settingsFlag(value: settingsState.moon)} moons={settingsState.moonCount} eclipse={settingsState.eclipse}"
+  let panel: String = "editor={settingsFlag(value: editor)} open={settingsFlag(
+    value: settingsState.open
+  )} playing={settingsFlag(value: settingsState.playing)} scene={settingsState.scene}"
+  ret "{panel} {rendering} {light} {clock}"
+}
+
+# Is the value `name` set by an environment variable for this run
+func settingsEnvSets(name: view String) ret Bool {
+  ret Sys.getEnv(name: name).length() > 0
+}
+
+# Put a saved line back into `settingsState` and `editor`. False when there
+# is no line.
+func restoreSettingsState(
+  raw: view String
+  settingsState: mod SettingsState
+  editor: mod Bool
+) ret Bool {
+  let line: String = raw.trim()
+  if line.length() is 0 {
+    ret false
+  }
+  # a jump to an eclipse sets the clock, the date and the place
+  let eclipseSet: Bool = settingsEnvSets(name: "RAE_ECLIPSE")
+  loop let word: String in line.split(sep: " ") {
+    let parts: List(String) = word.split(sep: "=")
+    if parts.length is not 2 {
+      continue
+    }
+    let name: String = parts.copyAtDefault(index: 0)
+    let value: String = parts.copyAtDefault(index: 1)
+    let flag: Bool = value is "1"
+    if name is "editor" and not settingsEnvSets(name: "RAE_UI_MODE") {
+      editor = flag
+    } else if name is "open" and not settingsEnvSets(name: "RAE_SETTINGS_OPEN") {
+      settingsState.open = flag
+    } else if name is "playing" {
+      settingsState.playing = flag
+    } else if name is "scene" {
+      settingsState.scene = Math.clamp(val: value.toInt(), low: 1, high: settingsState.sceneCount)
+    } else if name is "toon" {
+      settingsState.toon = flag
+    } else if name is "shadows" {
+      settingsState.shadows = flag
+    } else if name is "antialias" {
+      settingsState.antialias = settingsAntialiasNamed(
+        name: value
+        fallback: settingsState.antialias
+      )
+    } else if name is "quality" and not settingsEnvSets(name: "RAE_QUALITY") {
+      settingsState.quality = settingsQualityNamed(name: value, fallback: settingsState.quality)
+    } else if name is "sky" and not settingsEnvSets(name: "RAE_SKY") {
+      settingsState.skyModel = settingsSkyNamed(name: value, fallback: settingsState.skyModel)
+    } else if name is "sunLux" and not settingsEnvSets(name: "RAE_SUN_LUX") {
+      settingsState.sunNoonLux = value.toFloat()
+    } else if name is "exposure" {
+      settingsState.exposureCompensation = value.toFloat()
+    } else if name is "autoExposure" {
+      settingsState.autoExposure = flag
+    } else if name is "moon" {
+      settingsState.moon = flag
+    } else if name is "moons" and not settingsEnvSets(name: "RAE_MOONS") {
+      settingsState.moonCount = Math.clamp(val: value.toInt(), low: 1, high: settingsMoonsMax)
+    } else if eclipseSet is false {
+      restoreSettingsClock(settingsState: settingsState, name: name, value: value)
+    }
+  }
+  # the date read with its year (a 29 February)
+  settingsState.timeOfDay.dayOfYear = clampDayOfYear(
+    year: settingsState.timeOfDay.year
+    dayOfYear: settingsState.timeOfDay.dayOfYear
+  )
+  ret true
+}
+
+# The clock, the date, the place and the eclipse: one saved word
+func restoreSettingsClock(settingsState: mod SettingsState, name: view String, value: view String) {
+  if name is "eclipse" {
+    settingsState.eclipse = Math.max(a: value.toInt(), b: -1)
+  } else if name is "hour" {
+    settingsState.timeOfDay.hour = Math.clamp(val: value.toFloat(), low: 0.0, high: 23.999)
+  } else if name is "day" {
+    settingsState.timeOfDay.dayOfYear = value.toInt()
+  } else if name is "year" {
+    settingsState.timeOfDay.year = value.toInt()
+  } else if name is "animateTime" {
+    settingsState.animateTime = value is "1"
+  } else if name is "latitude" {
+    settingsState.latitude = Math.clamp(val: value.toFloat(), low: -90.0, high: 90.0)
+  } else if name is "longitude" {
+    settingsState.longitude = Math.clamp(val: value.toFloat(), low: -180.0, high: 180.0)
+  }
+}

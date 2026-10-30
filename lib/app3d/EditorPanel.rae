@@ -576,7 +576,7 @@ func applyEditorPanelSettings(
   # panel's exposure compensation (+ brighter); an app with automatic
   # exposure (AutoExposure) sets ev100 again every frame
   light.ev100 = referenceEv100 - editorPanel.settings.exposureCompensation
-  setTaaEnabled(renderer: renderer, on: editorPanel.settings.taa)
+  settingsApplyAntialias(renderer: renderer, settingsState: editorPanel.settings)
   setRendererFullResolution(
     renderer: renderer
     on: editorPanel.settings.quality is SettingsQuality.ultra

@@ -26,10 +26,11 @@
       "Children": [
         "SettingsPlayButton",
         "SettingsSceneRow",
-        "SettingsSpeedRow",
-        "SettingsSpeedButtons",
+        "SettingsRenderTitle",
         "SettingsToonButton",
-        "SettingsTaaButton",
+        "SettingsShadowsButton",
+        "SettingsAntialiasTitle",
+        "SettingsAntialiasRow",
         "SettingsQualityTitle",
         "SettingsQualityRow",
         "SettingsSkyTitle",
@@ -54,9 +55,7 @@
         "SettingsLatTrack",
         "SettingsLonLabel",
         "SettingsLonTrack",
-        "SettingsAnimTimeButton",
-        "SettingsRenderTitle",
-        "SettingsShadowsButton"
+        "SettingsAnimTimeButton"
       ]
     },
     "SettingsSceneRow": {
@@ -184,112 +183,6 @@
         "centerY": true
       }
     },
-    "SettingsSpeedRow": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 288,
-        "h": 26
-      },
-      "Text": {
-        "text": "Animation speed 100%",
-        "styleId": "muted"
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        }
-      }
-    },
-    "SettingsSpeedButtons": {
-      "Layout": {
-        "type": "Vertical",
-        "gap": "spaceS",
-        "alignCross": "Stretch"
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Hug"
-        }
-      },
-      "Children": [
-        "SettingsSlower",
-        "SettingsFaster"
-      ]
-    },
-    "SettingsSlower": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 34
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "radius": "radiusPill"
-      },
-      "OnClick": {
-        "actionId": "settings.anim.slower"
-      },
-      "Children": [
-        "SettingsSlowerLabel"
-      ]
-    },
-    "SettingsSlowerLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 34
-      },
-      "Text": {
-        "text": "Slower",
-        "styleId": "panelButton"
-      },
-      "OpticalAlign": {
-        "centerX": true,
-        "centerY": true
-      }
-    },
-    "SettingsFaster": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 34
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "radius": "radiusPill"
-      },
-      "OnClick": {
-        "actionId": "settings.anim.faster"
-      },
-      "Children": [
-        "SettingsFasterLabel"
-      ]
-    },
-    "SettingsFasterLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 34
-      },
-      "Text": {
-        "text": "Faster",
-        "styleId": "panelButton"
-      },
-      "OpticalAlign": {
-        "centerX": true,
-        "centerY": true
-      }
-    },
     "SettingsAnimTimeButton": {
       "Rect": {
         "x": 0,
@@ -368,51 +261,6 @@
       },
       "Text": {
         "text": "Toon shading",
-        "styleId": "panelButton"
-      },
-      "OpticalAlign": {
-        "centerX": true,
-        "centerY": true
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        }
-      }
-    },
-    "SettingsTaaButton": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 288,
-        "h": 34
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surfaceAlt",
-        "radius": "radiusPill"
-      },
-      "OnClick": {
-        "actionId": "settings.taa"
-      },
-      "Children": [
-        "SettingsTaaLabel"
-      ],
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        }
-      }
-    },
-    "SettingsTaaLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 288,
-        "h": 34
-      },
-      "Text": {
-        "text": "TAA (off = SMAA)",
         "styleId": "panelButton"
       },
       "OpticalAlign": {
@@ -555,6 +403,148 @@
         "h": {
           "mode": "Fixed"
         }
+      }
+    },
+    "SettingsAntialiasTitle": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 288,
+        "h": 22
+      },
+      "Text": {
+        "text": "Antialiasing",
+        "styleId": "muted"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        }
+      }
+    },
+    "SettingsAntialiasRow": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": "spaceS",
+        "alignCross": "Stretch"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Children": [
+        "SettingsAntialiasTaa",
+        "SettingsAntialiasFxaa",
+        "SettingsAntialiasSmaa"
+      ]
+    },
+    "SettingsAntialiasTaa": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "settings.antialias.taa"
+      },
+      "Children": [
+        "SettingsAntialiasTaaLabel"
+      ]
+    },
+    "SettingsAntialiasTaaLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Text": {
+        "text": "TAA",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      }
+    },
+    "SettingsAntialiasFxaa": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "settings.antialias.fxaa"
+      },
+      "Children": [
+        "SettingsAntialiasFxaaLabel"
+      ]
+    },
+    "SettingsAntialiasFxaaLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Text": {
+        "text": "FXAA",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      }
+    },
+    "SettingsAntialiasSmaa": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "settings.antialias.smaa"
+      },
+      "Children": [
+        "SettingsAntialiasSmaaLabel"
+      ]
+    },
+    "SettingsAntialiasSmaaLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 34
+      },
+      "Text": {
+        "text": "SMAA",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
       }
     },
     "SettingsQualityTitle": {
@@ -727,7 +717,7 @@
         "h": 34
       },
       "Text": {
-        "text": "Ultra (native resolution)",
+        "text": "Ultra",
         "styleId": "panelButton"
       },
       "OpticalAlign": {
