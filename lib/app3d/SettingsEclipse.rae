@@ -1,0 +1,49 @@
+# app3d/SettingsEclipse — the settings' eclipse list (lib/Eclipses): jump the
+# clock and the place to an eclipse, and the caption the panel shows. Split
+# from app3d/SettingsDialog for its size.
+open Eclipses
+open app3d/SettingsDialog
+
+# The eclipse caption's two lines: which one it is and its kind ("Eclipse
+# 11/17: total"; before any, how many there are), and its date, time and
+# place ("2024-04-08 18:17 UT, 25.3N 104.1W"; empty before any)
+func settingsEclipseTitle(settingsState: view SettingsState) ret String {
+  let list: List(Eclipse) = eclipses()
+  if settingsState.eclipse < 0 or settingsState.eclipse >= list.length {
+    ret "Eclipses: {list.length} to visit"
+  }
+  let eclipse: Eclipse = list.copyAtDefault(index: settingsState.eclipse)
+  ret "Eclipse {settingsState.eclipse + 1}/{list.length}: {eclipseKindName(kind: eclipse.kind)}"
+}
+
+func settingsEclipseDetail(settingsState: view SettingsState) ret String {
+  let list: List(Eclipse) = eclipses()
+  if settingsState.eclipse < 0 or settingsState.eclipse >= list.length {
+    ret ""
+  }
+  ret eclipseWhenWhere(eclipse: list.copyAtDefault(index: settingsState.eclipse))
+}
+
+# Jump the clock and the place to eclipse `index` of lib/Eclipses (wrapped
+# into the list): its date, the local solar time of its greatest eclipse and
+# its place, the moon on and the clock held there (its running off)
+func settingsJumpToEclipse(settingsState: mod SettingsState, index: view Int) {
+  let list: List(Eclipse) = eclipses()
+  if list.length is 0 {
+    ret
+  }
+  var wrapped: Int = index % list.length
+  if wrapped < 0 {
+    wrapped = wrapped + list.length
+  }
+  let eclipse: Eclipse = list.copyAtDefault(index: wrapped)
+  let clock: EclipseClock = eclipseClock(eclipse: eclipse)
+  settingsState.eclipse = wrapped
+  settingsState.timeOfDay.year = clock.year
+  settingsState.timeOfDay.dayOfYear = clock.dayOfYear
+  settingsState.timeOfDay.hour = clock.hour
+  settingsState.latitude = eclipse.latitude
+  settingsState.longitude = eclipse.longitude
+  settingsState.moon = true
+  settingsState.animateTime = false
+}

@@ -275,3 +275,34 @@ ordering: the first three land as pure code with real tests.
 * **Sky in the G-buffer.** It must not write geometry. It is a lighting
   read at far depth; a sky that ends up in the depth buffer breaks SSAO
   and TAA at the horizon.
+
+## 9. Moons and eclipses (2026-10-30)
+
+- **The earth's moon** (lib/Moon) follows an ephemeris: the mean elements
+  of its orbit with the main perturbations of its longitude, latitude and
+  distance (Paul Schlyter's series), the sun's longitude and distance from
+  the same source, terrestrial time 69 s ahead of universal time, and the
+  moon seen from the observer's place (the sidereal time and its parallax,
+  up to a degree). Against 17 real solar eclipses from 2015 to 2028
+  (lib/Eclipses, NASA's canon) it stands within about 1 - 2 arc minutes
+  of the sun at their moments and places (case 1258).
+- **Placed relative to the sky's sun**, whose own model is simpler (local
+  solar time and a fitted declination): each moon's hour angle and
+  declination are the sky's sun's plus the ephemeris' differences, so an
+  eclipse covers the sun the sky shows.
+- **Drawn at its real size near the sun**, its game size (2.5 times) away
+  from it. The moon's disc hides the sun's disc (the sky shader's
+  `moonsCover`); the light and the sky dim by the covered share
+  (`SettingsSky.settingsEclipseLight`), the moon's disc goes dark and,
+  past 97% covered, the corona shows round it. What is left of the sun
+  keeps its surface brightness.
+- **More moons:** `MoonBody` describes a moon; `inventedMoons` gives two
+  unlike the earth's (Ember, small and rust-red, an 11.7-day orbit tilted
+  9°; Tide, big and pale blue-green, 61 days, 14°). `Sky.moons` holds up to
+  three extra moons, drawn by the sky shader in their own size and color
+  and lit by the same sun; the settings' "More moons" button (`RAE_MOONS=3`)
+  adds them.
+- **The eclipse list in the settings:** "Previous eclipse" / "Next
+  eclipse" step through lib/Eclipses (wrapping round), setting the date,
+  the local solar time of the greatest eclipse and the place, and holding
+  the clock there; `RAE_ECLIPSE=<n>` starts at one.

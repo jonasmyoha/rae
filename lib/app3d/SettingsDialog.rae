@@ -36,6 +36,7 @@ open Sky
 open Calendar
 open app3d/TimeOfDay
 open Moon
+open app3d/SettingsEclipse
 open app3d/CameraBar
 open ecs/Entity
 open ui/SceneFile
@@ -197,6 +198,12 @@ type SettingsState {
   # The moon (lib/Moon): its disc and night sky, and its light at night. Off,
   # the night is what it was before the moon: the sun's dim floor light.
   moon: Bool
+  # Two invented moons beside the earth's (lib/Moon inventedMoons; the
+  # "More moons" button, RAE_MOONS=3 to start with them)
+  moreMoons: Bool = Sys.getEnv(name: "RAE_MOONS") is "3"
+  # The eclipse last jumped to (lib/Eclipses; -1 none): the eclipse buttons
+  # step through the list, wrapping round
+  eclipse: Int = -1
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
@@ -210,7 +217,7 @@ func createSettingsState(
   hour: view Float
   skyModel: SettingsSkyModel
 ) ret SettingsState {
-  ret SettingsState {
+  var settingsState: SettingsState = {
     playing: true
     # the panel starts closed; its edge tab opens it (RAE_SETTINGS_OPEN=1
     # starts it open, for screenshots)
@@ -233,6 +240,12 @@ func createSettingsState(
     lonDragging: false
     moon: true
   }
+  # RAE_ECLIPSE=<n>: start at eclipse n (1-based) of lib/Eclipses
+  let eclipseName: String = Sys.getEnv(name: "RAE_ECLIPSE")
+  if eclipseName.length() > 0 {
+    settingsJumpToEclipse(settingsState: settingsState, index: eclipseName.toInt() - 1)
+  }
+  ret settingsState
 }
 
 # Advance the clock. Returns true when the hour actually moved, so the caller
@@ -460,6 +473,24 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.moon" {
     settingsState.moon = settingsState.moon is false
+    ret true
+  }
+  if actionId is "settings.moons.more" {
+    settingsState.moreMoons = settingsState.moreMoons is false
+    ret true
+  }
+  # the eclipse list: the next one (the first from none), the one before;
+  # both wrap round
+  if actionId is "settings.eclipse.next" {
+    settingsJumpToEclipse(settingsState: settingsState, index: settingsState.eclipse + 1)
+    ret true
+  }
+  if actionId is "settings.eclipse.previous" {
+    var before: Int = settingsState.eclipse - 1
+    if settingsState.eclipse < 0 {
+      before = -1
+    }
+    settingsJumpToEclipse(settingsState: settingsState, index: before)
     ret true
   }
   # Scene selection is clamped to what the app actually has, so the buttons can
@@ -802,10 +833,25 @@ func settingsApplyToWorld(
     nodeId: "SettingsLonLabel"
     value: "Longitude {formatLongitude(longitudeDeg: settingsState.longitude)}"
   )
+  setNodeText(
+    world: world
+    nodeId: "SettingsEclipseLabel"
+    value: settingsEclipseTitle(settingsState: settingsState)
+  )
+  setNodeText(
+    world: world
+    nodeId: "SettingsEclipseDetail"
+    value: settingsEclipseDetail(settingsState: settingsState)
+  )
   setNodeFillSlot(
     world: world
     nodeId: "SettingsMoonButton"
     slot: settingsSlotFor(on: settingsState.moon)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsMoreMoonsButton"
+    slot: settingsSlotFor(on: settingsState.moreMoons)
   )
 
   setNodeFillSlot(

@@ -91,6 +91,22 @@ fn moonDisc(dir: vec3<f32>, toMoon: vec3<f32>, toSun: vec3<f32>, radius: f32) ->
   let mare = 0.82 + 0.18 * sin(q.x * 9.0 + 1.3) * sin(q.y * 7.0 - 0.6);
   return edge * (lit * mare + 0.025);
 }
+// How much of `dir` a disc of angular `radius` toward `toward` hides, 0..1
+// with a soft edge (a moon in front of the sun: an eclipse)
+fn discCover(dir: vec3<f32>, toward: vec3<f32>, radius: f32) -> f32 {
+  if (radius <= 0.0) { return 0.0; }
+  let cutoff = cos(radius);
+  return smoothstep(cutoff, mix(cutoff, 1.0, 0.04), dot(dir, normalize(toward)));
+}
+// How much of `dir` every moon hides
+fn moonsCover(dir: vec3<f32>) -> f32 {
+  var cover = 0.0;
+  if (L.moon.w > 0.0) { cover = discCover(dir, L.moon.xyz, max(L.skySun.w, 0.001)); }
+  for (var i = 0; i < 3; i = i + 1) {
+    cover = max(cover, discCover(dir, L.moons[i * 2].xyz, L.moons[i * 2].w));
+  }
+  return cover;
+}
 // The sky toward `dir`, ready to sum: the physical models (Preetham and
 // Hosek-Wilkie, in cd/m2) and the moon and night sky (cd/m2) times the
 // camera's exposure scale (camPos.w, LightUnits), the painted stylized sky
@@ -108,8 +124,12 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   if (kind > 1.5) {
     let ca = dot(dir, toSun);
     let cutoff = cos(max(L.skyParams.w, 0.001));
-    let disc = smoothstep(cutoff, mix(cutoff, 1.0, 0.35), ca);
-    c = c + L.sunColor.rgb * disc * L.skyHorizon.w;
+    // a moon in front of the sun hides its disc (a solar eclipse)
+    let disc = smoothstep(cutoff, mix(cutoff, 1.0, 0.35), ca) * (1.0 - moonsCover(dir));
+    // what is left of the sun keeps its full surface brightness: the
+    // light (sunColor) fell by the covered share, the crescent did not
+    let lightLeft = max(1.0 - 0.995 * clamp(L.moons[1].w, 0.0, 1.0), 0.005);
+    c = c + L.sunColor.rgb * disc * L.skyHorizon.w / lightLeft;
   }
   c = c * L.skyParams.z;
   // The moon and the night sky come after the daylight fade, so they show at
@@ -127,8 +147,26 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
     let glow = pow(max(dot(dir, toMoon), 0.0), 48.0) * 2400.0 * moonlight * L.camPos.w;
     c = c + (nightSky + vec3<f32>(0.55, 0.62, 0.80) * glow) * night * above;
     let disc = moonDisc(dir, toMoon, toSun, max(L.skySun.w, 0.001));
+    // In an eclipse the disc's near side faces away from the sun: dark
+    // against the sky, and round it the corona, brighter as the sun goes
+    let eclipse = clamp(L.moons[1].w, 0.0, 1.0);
     // moon.w: the disc's luminance in cd/m2
-    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * L.camPos.w * above;
+    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * L.camPos.w * above * (1.0 - eclipse);
+    c = c * (1.0 - discCover(dir, toMoon, max(L.skySun.w, 0.001)) * eclipse * 0.85);
+    if (eclipse > 0.97) {
+      let fromSun = acos(clamp(dot(dir, toSun), -1.0, 1.0));
+      let rim = max(fromSun - L.skySun.w, 0.0) / max(L.skySun.w, 0.0005);
+      let corona = smoothstep(0.97, 1.0, eclipse) * exp(-rim * 2.5) * step(L.skySun.w, fromSun);
+      c = c + vec3<f32>(0.95, 0.97, 1.0) * corona * L.moon.w * 1.2 * L.camPos.w * above;
+    }
+    // the extra moons, each in its own size and color, lit by the same sun
+    for (var i = 0; i < 3; i = i + 1) {
+      let other = L.moons[i * 2];
+      if (other.w > 0.0) {
+        let otherDisc = moonDisc(dir, normalize(other.xyz), toSun, other.w);
+        c = c + L.moons[i * 2 + 1].rgb * otherDisc * L.camPos.w * above;
+      }
+    }
   }
   return c;
 }

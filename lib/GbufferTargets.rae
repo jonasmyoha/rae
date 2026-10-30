@@ -35,7 +35,7 @@ open GbufferFullscreen
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 124  # 496 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 148  # 592 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -743,6 +743,8 @@ func uploadLightUniform(
   moonRadius: copy Float
   moonIntensity: copy Float
   nightLight: copy Float
+  moons: view List(SkyMoon)
+  sunCovered: copy Float
 ) ret Bool {
   var fogStart: Float = 0.0
   var fogEnd: Float = 0.0
@@ -874,6 +876,37 @@ func uploadLightUniform(
     z: targets.mistLight.y
     w: targets.mistLight.z
   )
+  # the extra moons (Sky.moons, skyMoonsMax of them): each the way TOWARD
+  # it and its radius, then its color times its luminance (0: none); the
+  # first's color w carries how much of the sun the earth's moon covers
+  loop var slot: Int = 0, slot < skyMoonsMax, ++slot {
+    var toward: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var radius: Float = 0.0
+    var light: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    if let moon: view SkyMoon = moons.viewAt(index: slot) {
+      toward = Vec3.create(x: -moon.direction.x, y: -moon.direction.y, z: -moon.direction.z)
+      radius = moon.radius
+      light = Vec3.vscale(a: moon.color, s: moon.intensity)
+    }
+    pushVec4F(
+      writer: targets.args
+      x: toward.x
+      y: toward.y
+      z: toward.z
+      w: radius
+    )
+    var spare: Float = 0.0
+    if slot is 0 {
+      spare = sunCovered
+    }
+    pushVec4F(
+      writer: targets.args
+      x: light.x
+      y: light.y
+      z: light.z
+      w: spare
+    )
+  }
   ret uploadArgs(
     writer: targets.args
     resources: resources
