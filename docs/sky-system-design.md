@@ -281,11 +281,17 @@ ordering: the first three land as pure code with real tests.
 - **The earth's moon** (lib/Moon) follows an ephemeris: the mean elements
   of its orbit with the main perturbations of its longitude, latitude and
   distance (Paul Schlyter's series), the sun's longitude and distance from
-  the same source, terrestrial time 69 s ahead of universal time, and the
+  the same source, terrestrial time ahead of universal time by delta T
+  (Espenak and Meeus' fits by year: 50 s in 1980, 203 s in 2100), and the
   moon seen from the observer's place (the sidereal time and its parallax,
-  up to a degree). Against 17 real solar eclipses from 2015 to 2028
-  (lib/Eclipses, NASA's canon) it stands within about 1 - 2 arc minutes
-  of the sun at their moments and places (case 1258).
+  up to a degree). Against the published eclipses from 2015 to 2028 it
+  stood within about 1 - 2 arc minutes of the sun at their moments and
+  places of greatest eclipse.
+- lib/Eclipses holds 20 real solar eclipses from 1980 to 2099 (the dates
+  and kinds published in NASA's canon). Their moments and places were
+  refined with the model, along each central path near the published
+  greatest eclipse, so the sky shows each at its deepest: every total one
+  fully covered, with the corona (case 1258).
 - **Placed relative to the sky's sun**, whose own model is simpler (local
   solar time and a fitted declination): each moon's hour angle and
   declination are the sky's sun's plus the ephemeris' differences, so an
