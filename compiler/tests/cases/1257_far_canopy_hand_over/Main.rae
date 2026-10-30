@@ -1,0 +1,72 @@
+# The far canopy's hand-over (app3d/FarCanopy stepFarCanopyHandOver) without
+# a GPU: one cluster 300 m ahead, its band 60 m wide round 300 m. A cell
+# switches from its single trees to its cluster a quarter band past the
+# middle and then fades over propFadeSeconds (0.6 s) and finishes, though
+# the eye stops in the band; a cluster unseen in the frame before takes its
+# side at once.
+import Vec3
+open app3d/PropField
+open app3d/PropFade
+open app3d/FarCanopy
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# Looking north from `y` meters south of the origin
+func viewFrom(y: view Float) ret PropView {
+  ret PropView {
+    eye: Vec3.create(x: 0.0, y: y, z: 0.0)
+    forward: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    halfAngle: 0.6
+  }
+}
+
+func share(canopy: view FarCanopy) ret Float {
+  ret canopy.handOver.copyAtFallback(index: 0, fallback: -1.0)
+}
+
+func main() ret Int {
+  var canopy: FarCanopy = createFarCanopy(
+    settings: { fadeMiddle: 300.0, fadeWidth: 60.0, farDistance: 2000.0 }
+  )
+  canopy.centers.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  canopy.radii.add(value: 30.0)
+  canopy.handOver.add(value: 0.0)
+  canopy.handOverStates = createPropLodStates(count: 1)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -250.0), deltaTime: 0.0)
+  check(label: "first seen 250 m away: all single trees", ok: share(canopy: canopy) is 0.0)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -310.0), deltaTime: 0.1)
+  check(
+    label: "310 m, within a quarter band past the 300 m middle: still the trees"
+    ok: share(canopy: canopy) is 0.0
+  )
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -320.0), deltaTime: 0.1)
+  check(label: "320 m: the hand-over starts", ok: share(canopy: canopy) is 0.0)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -320.0), deltaTime: 0.3)
+  let half: Float = share(canopy: canopy)
+  check(label: "the eye stopped, 0.3 s later: halfway", ok: half > 0.49 and half < 0.51)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -320.0), deltaTime: 0.3)
+  check(
+    label: "0.6 s in: all cluster, finished though the eye stopped in the band"
+    ok: share(canopy: canopy) is 1.0
+  )
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -280.0), deltaTime: 0.1)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -280.0), deltaTime: 0.3)
+  let back: Float = share(canopy: canopy)
+  check(label: "back at 280 m: handing back, halfway", ok: back > 0.49 and back < 0.51)
+  # looking away for a frame: unseen
+  var away: PropView = viewFrom(y: -400.0)
+  away.forward = Vec3.create(x: 0.0, y: -1.0, z: 0.0)
+  stepFarCanopyHandOver(canopy: canopy, propView: away, deltaTime: 0.1)
+  stepFarCanopyHandOver(canopy: canopy, propView: viewFrom(y: -400.0), deltaTime: 0.1)
+  check(
+    label: "seen again at 400 m after a frame unseen: all cluster at once"
+    ok: share(canopy: canopy) is 1.0
+  )
+  ret 0
+}

@@ -34,6 +34,8 @@ func lookingNorth() ret PropView {
 }
 
 func main() ret Int {
+  # no far canopy here: no hand-over
+  let noHandOver: List(Float) = List.create(Float, cap: 0)
   var settings: FarSpriteSettings = defaultFarSpriteSettings()
   settings.nearDistance = 100.0
   settings.farDistance = 1000.0
@@ -49,7 +51,12 @@ func main() ret Int {
   var behind: List(FarSprite) = List.create(FarSprite, cap: 1)
   behind.add(value: sprite(x: 0.0, y: -500.0))
   setFarSpriteBlock(farSprites: farSprites, block: 3, sprites: behind)
-  gatherFarSprites(farSprites: farSprites, propView: lookingNorth(), toon: false)
+  gatherFarSprites(
+    farSprites: farSprites
+    propView: lookingNorth()
+    toon: false
+    handOver: noHandOver
+  )
   check(
     label: "only those past the near distance, within the far one and in view: {farSprites.drawn} of 11"
     ok: farSprites.drawn is 9 and farSprites.batch.count is 9
@@ -73,13 +80,23 @@ func main() ret Int {
   }
   setFarSpriteBlock(farSprites: capped, block: 0, sprites: farRow)
   setFarSpriteBlock(farSprites: capped, block: 1, sprites: nearRow)
-  gatherFarSprites(farSprites: capped, propView: lookingNorth(), toon: false)
+  gatherFarSprites(
+    farSprites: capped
+    propView: lookingNorth()
+    toon: false
+    handOver: noHandOver
+  )
   check(
     label: "capped at 3, the nearest: the farthest drawn {capped.farthestDrawn} m"
     ok: capped.drawn is 3 and capped.farthestDrawn < 260.0
   )
   clearFarSpriteBlock(farSprites: capped, block: 1)
-  gatherFarSprites(farSprites: capped, propView: lookingNorth(), toon: false)
+  gatherFarSprites(
+    farSprites: capped
+    propView: lookingNorth()
+    toon: false
+    handOver: noHandOver
+  )
   check(
     label: "the near block cleared: the far one's {capped.drawn}"
     ok: capped.drawn is 3 and capped.farthestDrawn > 690.0
@@ -93,7 +110,12 @@ func main() ret Int {
     ring.add(value: sprite(x: -100.0 + 0.1 * i.toFloat(), y: 900.0))
   }
   setFarSpriteBlock(farSprites: thinned, block: 0, sprites: ring)
-  gatherFarSprites(farSprites: thinned, propView: lookingNorth(), toon: false)
+  gatherFarSprites(
+    farSprites: thinned
+    propView: lookingNorth()
+    toon: false
+    handOver: noHandOver
+  )
   check(
     label: "2000 at 900 m thinned from 300 m: {thinned.drawn} kept (about 222)"
     ok: thinned.drawn > 150 and thinned.drawn < 300

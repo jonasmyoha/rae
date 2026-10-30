@@ -255,10 +255,18 @@ func gatherTreeForest(
   if forest.hasFar is false {
     ret
   }
+  # the far canopy's hand-over first: the far trees and their clusters
+  # both fade by it
+  stepFarCanopyHandOver(
+    canopy: forest.canopy
+    propView: propViewOf(camera: camera, aspect: aspect)
+    deltaTime: deltaTime
+  )
   gatherFarSprites(
     farSprites: forest.farTrees
     propView: propViewOf(camera: camera, aspect: aspect)
     toon: forest.toon
+    handOver: forest.canopy.handOver
   )
   gatherFarCanopy(
     canopy: forest.canopy
