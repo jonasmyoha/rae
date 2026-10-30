@@ -1,0 +1,124 @@
+# app3d/Minimap's header buttons: an app's labelled buttons stand at the
+# header's right end, left of the corner it keeps free for its own menu, in
+# their order from left to right; a tap on one sends a MinimapButtonTapped
+# with its id (and nothing for the world under the header); a tap beside
+# them does not.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open ui/Ecs
+open app3d/Minimap
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let settings: MinimapSettings = {
+    worldMinX: -950.0
+    worldMaxX: 1750.0
+    worldMinY: -950.0
+    worldMaxY: 950.0
+  }
+  let mapView: MinimapView = minimapViewFor(
+    settings: settings
+    x: 0.0
+    y: 0.0
+    w: 1280.0
+    h: 800.0
+  )
+  let first: MinimapPoint = minimapButtonCorner(
+    settings: settings
+    mapView: mapView
+    index: 0
+    count: 2
+  )
+  let second: MinimapPoint = minimapButtonCorner(
+    settings: settings
+    mapView: mapView
+    index: 1
+    count: 2
+  )
+  check(
+    label: "two buttons in the header's right end, in order, left of the free corner"
+    ok: first.x < second.x and second.x + settings.buttonWidth <= 1280.0 - settings.cornerReserve + 0.01 and first.x > 640.0 and first.y >= 0.0 and first.y + settings.closeSize <= settings.headerHeight + 0.01
+  )
+  check(
+    label: "the button under a point, or none"
+    ok: minimapButtonUnder(
+      settings: settings
+      mapView: mapView
+      count: 2
+      x: second.x + 5.0
+      y: second.y + 5.0
+    ) is 1 and minimapButtonUnder(
+      settings: settings
+      mapView: mapView
+      count: 2
+      x: 640.0
+      y: 400.0
+    ) is -1 and minimapButtonUnder(
+      settings: settings
+      mapView: mapView
+      count: 2
+      x: 1280.0 - 10.0
+      y: second.y + 5.0
+    ) is -1
+  )
+  # An open map with one button, "Car"
+  var world: UiWorld = create()
+  var minimaps: Minimaps = createMinimaps()
+  var allocator: EntityAllocator = createEntityAllocator()
+  let mapId: EntityId = allocEntity(this: allocator)
+  var buttons: List(MinimapButton) = List.create(MinimapButton, cap: 1)
+  buttons.add(value: { id: "car", label: "Car" })
+  componentSet(
+    this: minimaps.maps
+    entityId: mapId
+    data: Minimap {
+      settings: settings
+      layerNodeId: "MapLayer"
+      tapActionId: "map.tap"
+      open: false
+      buttons: own buttons
+    }
+  )
+  let opened: Bool = setMinimapOpen(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    open: true
+  )
+  let only: MinimapPoint = minimapButtonCorner(
+    settings: settings
+    mapView: mapView
+    index: 0
+    count: 1
+  )
+  let closed: Bool = minimapTap(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    mapView: mapView
+    x: only.x + 10.0
+    y: only.y + 10.0
+  )
+  var pressedCar: Bool = eventCount(MinimapButtonTapped, this: minimaps.pressed) is 1
+  if pressedCar {
+    let pressed: MinimapButtonTapped = eventAt(MinimapButtonTapped, this: minimaps.pressed, i: 0)
+    pressedCar = pressed.buttonId is "car" and pressed.entityId is mapId
+  }
+  check(
+    label: "a tap on the button sends its id, no world point, and leaves the map open"
+    ok: opened and closed is false and pressedCar and eventCount(
+      MinimapTapped
+      this: minimaps.tapped
+    ) is 0 and componentView(this: minimaps.maps, entityId: mapId).open
+  )
+}
