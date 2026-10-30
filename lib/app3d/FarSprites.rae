@@ -47,8 +47,11 @@ type FarSprite {
   yaw: Float
   layer: Int
   keep: Float
-  # The center of the far canopy cluster it stands in (app3d/FarCanopy):
-  # its fade out is measured from there, as the cluster's fade in is
+  # The far canopy cluster it stands in (app3d/FarCanopy; -1 none): it fades
+  # out by that cluster's hand-over, as the cluster fades in; and the
+  # cluster's center (its fade's seed, and its distance when the canopy
+  # gives no hand-over)
+  cluster: Int = -1
   fadeCenter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   # the sky's rim light, as its kind's picture has it (PropField.spriteRims)
   rimLight: Bool = true
@@ -301,7 +304,15 @@ func farSpriteBlockDistance(held: view FarSpriteBlock, eye: view Vec3) ret Float
 # The billboards of this frame: the blocks in reach and in view, nearest
 # first, and in them each one in reach and view (thinned past thinFrom),
 # until `limit` are drawn
-func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon: view Bool) {
+# `handOver`: the far canopy's hand-over per cluster
+# (FarCanopy.stepFarCanopyHandOver; empty: none, each sprite fades by its
+# cluster's distance)
+func gatherFarSprites(
+  farSprites: mod FarSprites
+  propView: view PropView
+  toon: view Bool
+  handOver: view List(Float)
+) {
   resetInstanceBatch(batch: farSprites.batch)
   farSprites.drawn = 0
   farSprites.blocksVisited = 0
@@ -383,7 +394,12 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
           continue
         }
         var fadeShare: Float = 0.0
-        if settings.fadeOutWidth > 0.0 {
+        if sprite.cluster >= 0 and sprite.cluster < handOver.length {
+          fadeShare = handOver.copyAtFallback(index: sprite.cluster, fallback: 0.0)
+          if fadeShare >= 1.0 {
+            continue
+          }
+        } else if settings.fadeOutWidth > 0.0 {
           fadeShare = propBandShare(
             distance: Vec3.vlen(a: Vec3.vsub(a: sprite.fadeCenter, b: propView.eye))
             middle: settings.fadeOutMiddle

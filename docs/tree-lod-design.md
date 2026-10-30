@@ -216,8 +216,20 @@ in the same way. A tree the gather did not draw in the frame before (out of
 view, out of reach, the first frame) takes its level at once.
 `gatherPropField` and `gatherTreeForest` take the frame's `deltaTime`.
 Case 1136 checks the hold, the start, the halfway point with the eye
-stopped, the finish, the fade out and the jump after a frame unseen. The
-far canopy's hand-over (2.4) still follows the distance (queued).
+stopped, the finish, the fade out and the jump after a frame unseen.
+
+**The far canopy's hand-over, timed too (2026-10-30).** A cell's single far
+trees and its cluster faded across the band round 300 m by distance, so an
+eye stopped there left the cell half trees, half cluster. Now each cluster
+keeps a timed state (`FarCanopy.handOverStates`, PropFade's
+`PropLodStates`): `stepFarCanopyHandOver`, before the far gathers, switches
+a cell to its cluster a quarter of the band (15 m) past the middle and back
+a quarter band before it, fades over `propFadeSeconds` and finishes; a
+cluster not in reach and view in the frame before takes its side at once.
+Its share (0 trees, 1 cluster) is `FarCanopy.handOver`: the cluster fades
+in by it and each far tree fades out by its cluster's (`FarSprite.cluster`,
+set where the clusters are planned), so both keep one threshold. Case 1257
+checks it.
 
 ### 2.4 Past 140 m: the far canopy
 
