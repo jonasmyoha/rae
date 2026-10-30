@@ -431,13 +431,12 @@ func runLabFrame(state: mod LabState) {
   let deltaTime: Float = Math.min(a: (now - state.lastTime) as Float, b: 0.1)
   state.lastTime = now
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
-  if state.studyView.length() > 0 {
-    # the studies' flowers sway in the renderer's wind
-    setRendererWind(
-      renderer: state.renderer
-      wind: windVector(state: state.wind, settings: state.windSettings)
-    )
-  }
+  # the renderer's wind: the studies' flowers and the forests' and levels'
+  # leaves sway in it (the T02 scene's own leaf pass takes it below)
+  setRendererWind(
+    renderer: state.renderer
+    wind: windVector(state: state.wind, settings: state.windSettings)
+  )
   if state.forests.length > 0 and Sdl3.isKeyPressed(key: Keys.keyT) {
     state.forestShown = (state.forestShown + 1) % state.forests.length
     log("[treelab] showing the {labForestSetName(setIndex: state.forestShown)} set")

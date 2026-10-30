@@ -184,9 +184,18 @@ func treeSkirts(skeleton: view TreeSkeleton) ret List(Skirt) {
   ret skirts
 }
 
-# One vertex of a tier: no wind (pivot flexibility 0), a fixed surface
-# (card flag 0)
-func addTierVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
+# The wind's flexibility of a tier: below 0, the slow broad mode (lib/
+# wind.wgsl), half a leaf mass's: a whole tier swings gently on its whorl
+const tierFlexibility: Float = -0.5
+
+# One vertex of a tier: it sways about `pivot` (its whorl's point on the
+# trunk) with tierFlexibility; a fixed surface (card flag 0)
+func addTierVertex(
+  mesh: mod MeshData
+  point: view Vec3
+  normal: view Vec3
+  pivot: view Vec3
+) {
   pushVert(
     verts: mesh.verts
     px: point.x
@@ -198,10 +207,10 @@ func addTierVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
     u: 0.5
     value: 0.5
   )
-  mesh.windPivots.add(value: point.x)
-  mesh.windPivots.add(value: point.y)
-  mesh.windPivots.add(value: point.z)
-  mesh.windPivots.add(value: 0.0)
+  mesh.windPivots.add(value: pivot.x)
+  mesh.windPivots.add(value: pivot.y)
+  mesh.windPivots.add(value: pivot.z)
+  mesh.windPivots.add(value: tierFlexibility)
   loop var k: Int = 0, k < 4, ++k {
     mesh.leafCards.add(value: 0.0)
   }
@@ -283,6 +292,7 @@ func addTierBand(
         jag: 0.0
       )
       normal: tierTopNormal(azimuth: azimuth, share: inner)
+      pivot: skirt.base
     )
     addTierVertex(
       mesh: mesh
@@ -293,6 +303,7 @@ func addTierBand(
         jag: jag
       )
       normal: tierTopNormal(azimuth: azimuth, share: outer)
+      pivot: skirt.base
     )
   }
   loop var i: Int = 0, i < segments, ++i {
@@ -327,7 +338,12 @@ func addTierUnderside(
       share: 1.0
       jag: jag
     )
-    addTierVertex(mesh: mesh, point: rim, normal: normal)
+    addTierVertex(
+      mesh: mesh
+      point: rim
+      normal: normal
+      pivot: skirt.base
+    )
     let reach: Float = skirtReach(skirt: skirt, azimuth: azimuth)
     let drop: Float = skirtDrop(skirt: skirt, azimuth: azimuth)
     addTierVertex(
@@ -338,6 +354,7 @@ func addTierUnderside(
         z: skirt.base.z - drop * 0.1 + tierTilt(skirt: skirt, azimuth: azimuth, out: reach * 0.15)
       )
       normal: normal
+      pivot: skirt.base
     )
   }
   loop var i: Int = 0, i < segments, ++i {

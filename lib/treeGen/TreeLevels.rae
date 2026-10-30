@@ -196,14 +196,39 @@ func toneSplits(cards: view LeafCards) ret List(Float) {
   ret splits
 }
 
+# Card `card`'s rest center
+func cardCenter(cards: view LeafCards, card: view Int) ret Vec3 {
+  let base: Int = card * leafCardFloats
+  ret Vec3.create(
+    x: cards.floats.copyAtDefault(index: base)
+    y: cards.floats.copyAtDefault(index: base + 1)
+    z: cards.floats.copyAtDefault(index: base + 2)
+  )
+}
+
+# Card `card`'s wind anchor (its leaf mass's, LeafCards.anchors), or its
+# `center` when the cards carry none
+func cardAnchor(cards: view LeafCards, card: view Int, center: view Vec3) ret Vec3 {
+  if cards.anchors.length < (card + 1) * 3 {
+    ret center
+  }
+  ret Vec3.create(
+    x: cards.anchors.copyAtDefault(index: card * 3)
+    y: cards.anchors.copyAtDefault(index: card * 3 + 1)
+    z: cards.anchors.copyAtDefault(index: card * 3 + 2)
+  )
+}
+
 # One camera-facing card: four corners round `center` in the X/Z plane (the
-# rest pose the renderer turns towards the camera), shaded by `normal`
+# rest pose the renderer turns towards the camera), shaded by `normal`; it
+# sways in the wind about `pivot` (its leaf mass's anchor on its branch)
 func addLeafCard(
   mesh: mod MeshData
   center: view Vec3
   halfSize: view Float
   normal: view Vec3
   mirrored: view Bool
+  pivot: view Vec3
 ) {
   let base: Int = mesh.vertCount
   loop var row: Int = 0, row < 2, ++row {
@@ -223,10 +248,13 @@ func addLeafCard(
         u: textureColumn
         value: 1.0 - row.toFloat()
       )
-      # the card sways about its own center, a little
-      mesh.windPivots.add(value: center.x)
-      mesh.windPivots.add(value: center.y)
-      mesh.windPivots.add(value: center.z)
+      # the card swings with its leaf mass about the mass's anchor, slowly
+      # and together (the wind's broad mode, flexibility below 0; a pivot at
+      # the card's own center left it still: the shader turns the card's
+      # center about the pivot)
+      mesh.windPivots.add(value: pivot.x)
+      mesh.windPivots.add(value: pivot.y)
+      mesh.windPivots.add(value: pivot.z)
       mesh.windPivots.add(value: -1.0)
       mesh.leafCards.add(value: center.x)
       mesh.leafCards.add(value: center.y)
@@ -301,6 +329,7 @@ func leafCardLevel(cards: view LeafCards, keepEvery: view Int, grow: view Float)
         halfSize: halfSize * grow
         normal: normal
         mirrored: cards.floats.copyAtDefault(index: base + 11) > 3.14159
+        pivot: cardAnchor(cards: cards, card: card, center: cardCenter(cards: cards, card: card))
       )
     }
   }

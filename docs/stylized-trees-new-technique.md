@@ -34,7 +34,7 @@ prescription.
 | leaf shading | normals from the crown envelope (FoliageCards, FluffyFoliage) | one normal per card: its **mass's** ellipsoid normal (lit top, dark underside, per mass); an occlusion darker deep in the mass and low in the tree; three close greens per mass with a per-mass tint |
 | material | toon on (foliageMaterial), the sky rim on | PBR (toon off), roughness 0.8, no sky rim on leaves or bark |
 | levels | near: full meshes; middle: fewer, bigger patches or leaves tuned to cover the same (TreeCoverage) or the same textured meshes; far: impostor of the near level | near: every card; middle: every 4th card at twice the width (same covered area, clump layout kept); far: impostor baked from the near level with the cards' normals turned to the eye (ImpostorSubject.cardNormalsToEye), the leaves baked as their filled outline (TreeLevels.leafImpostorImagePixels) and no sky rim (PropField.setPropKindSpriteRim) |
-| wind | per spray: a pivot at its branch and a flexibility (FoliageMesh windPivots), so sprays swing on their twigs | per card: a pivot at the card's own center (TreeLevels), so cards only flutter in place; no branch or mass motion yet |
+| wind | per spray: a pivot at its branch and a flexibility (FoliageMesh windPivots), so sprays swing on their twigs | per leaf mass: every card's pivot is its mass's anchor on its branch (LeafCards.anchors, §8), so a mass sways as one piece; the bark stays still |
 | scale | geometry at unit height or 5.5 m, the species' size in TreeSpecies heights | meters; TreeSpecies.heightUnit is the grown tree's height |
 
 ## 2. What carries over and what does not
@@ -304,4 +304,23 @@ With every tree rebuilt (tasks 2 - 11), the old ones are gone:
   without culling and cast by the foliage shadow pass; only the bark and
   the spruce's solid tiers would fit the standard mesh path, and the
   umbrella pine and the meadow flowers use the foliage path too.
+
+## 8. Wind (2026-10-30)
+
+The rebuilt trees stood still in the wind: each card's pivot was its own
+center, and the renderer turns a card's center about its pivot
+(lib/wind.wgsl `windLeaf`), so nothing moved. Now:
+
+- **Leaf masses sway as pieces:** `LeafCards.anchors` holds each card's
+  anchor, the point of its mass's branch (its parent limb) nearest the
+  mass's center, or a little under the center when there is no branch.
+  `TreeLevels.addLeafCard` takes it as the card's pivot, with the broad
+  mode's flexibility -1: a slow swell shared by the whole tree (phased by
+  its foot) plus each branch's own phase, at most 0.42 rad. Near and middle
+  levels share the anchors, so the switch does not jump.
+- **The spruce's tiers** (SkirtTiers) swing about their whorl's point on
+  the trunk, at half that (flexibility -0.5).
+- The bark does not move, and the far impostor is still. The tree lab now
+  feeds the renderer's wind in every scene (it did only in its studies),
+  so the forest and the single-tree views show it.
 
