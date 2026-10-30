@@ -23,10 +23,35 @@ open treeGen/TreeKind
 # Floats per card in the GPU buffer: 4 vec4s (see leaf_cards.wgsl's Card)
 const leafCardFloats: Int = 16
 
-# The cards of a tree, ready for the GPU: leafCardFloats floats each
+# The cards of a tree, ready for the GPU: leafCardFloats floats each; and
+# each card's wind anchor (x, y, z a card): where its leaf mass hangs on its
+# branch, so the mass sways there as one piece
 type LeafCards {
   floats: List(Float)
   count: Int
+  anchors: List(Float) = List.create(Float, cap: 0)
+}
+
+# Where `clump` hangs: the point of its branch (its parent limb) nearest its
+# center, or (no branch) a little under its center
+func clumpAnchor(skeleton: view TreeSkeleton, clump: view TracedClump) ret Vec3 {
+  if clump.parent >= 0 and clump.parent < skeleton.limbs.length {
+    if let limb: view Limb = skeleton.limbs.viewAt(index: clump.parent) {
+      var best: Vec3 = clump.center
+      var bestDistance: Float = 1000000.0
+      loop let point: view Vec3 in limb.points {
+        let distance: Float = Vec3.vlen(a: Vec3.vsub(a: point, b: clump.center))
+        if distance < bestDistance {
+          bestDistance = distance
+          best = point
+        }
+      }
+      if bestDistance < 1000000.0 {
+        ret best
+      }
+    }
+  }
+  ret Vec3.create(x: clump.center.x, y: clump.center.y, z: clump.center.z - clump.radii.z * 0.6)
 }
 
 # An ellipsoid's surface area (Knud Thomsen's formula, within about 1%)
@@ -71,8 +96,10 @@ func leafCards(skeleton: view TreeSkeleton, treeKind: view TreeKind, seed: view 
     highest = Math.max(a: highest, b: clump.center.z + clump.radii.z)
   }
   var floats: List(Float) = List.create(Float, cap: 0)
+  var anchors: List(Float) = List.create(Float, cap: 0)
   var count: Int = 0
   loop let clump: view TracedClump in skeleton.clumps {
+    let anchor: Vec3 = clumpAnchor(skeleton: skeleton, clump: clump)
     let cards: Int = (treeKind.cardLayers * ellipsoidArea(radii: clump.radii) / (treeKind.cardSize * treeKind.cardSize)).toInt()
     # this mass's own slight shift of all three greens
     let tint: Vec3 = Vec3.create(
@@ -141,8 +168,11 @@ func leafCards(skeleton: view TreeSkeleton, treeKind: view TreeKind, seed: view 
         c: 0.0
         d: Math.pow(base: (depth - 0.75) * 4.0, exp: 2.0)
       )
+      anchors.add(value: anchor.x)
+      anchors.add(value: anchor.y)
+      anchors.add(value: anchor.z)
       count = count + 1
     }
   }
-  ret LeafCards { floats: own floats, count: count }
+  ret LeafCards { floats: own floats, count: count, anchors: own anchors }
 }

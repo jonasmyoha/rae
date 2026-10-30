@@ -339,3 +339,7 @@ tier), grayish and light, and goofy: stacked lampshades.
   was cos^8) whose tips hang half again lower than their branches end. A
   narrower cone (`baseReach` 0.29, was 0.32): 67% of the height wide.
 
+- **Wind (2026-10-30):** each tier swings gently about its whorl's point on
+  the trunk (flexibility -0.5, the broad mode; docs/stylized-trees-new-
+  technique.md §8).
+
