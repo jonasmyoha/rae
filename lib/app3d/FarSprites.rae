@@ -16,8 +16,11 @@
 # The pictures are the PropField's (app3d/SpriteBake layers of GbufferSprite's
 # image array): farSpritesOf makes a field's placements into far sprites, its
 # kinds' layers and heights, with the same view center the field measures its
-# levels' distances from, so the two hand over at `nearDistance` with no gap.
-# Set `nearDistance` to where the field's last (billboard) level ends.
+# levels' distances from, so the two hand over with no gap. Set
+# `nearDistance` a fade band (PropFade propFadeWidth) before where the
+# field's last (billboard) level ends: the field takes a tree's billboard
+# back only inside its end and fades it in, so the far billboard has to
+# stand there until it has (app3d/TreeForest).
 #
 #   var far: FarSprites = createFarSprites(settings: { nearDistance: 320, ... })
 #   setFarSpriteBlock(farSprites: far, block: tile, sprites: farSpritesOf(field:, placements:))
