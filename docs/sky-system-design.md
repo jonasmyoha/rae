@@ -292,6 +292,27 @@ ordering: the first three land as pure code with real tests.
   refined with the model, along each central path near the published
   greatest eclipse, so the sky shows each at its deepest: every total one
   fully covered, with the corona (case 1258).
+- **Lunar eclipses:** the list also holds 13 lunar eclipses from 1982 to
+  2094, 9 total and 4 partial, merged in date order with the solar ones
+  (`lunar: true`; the captions say "total solar" / "partial lunar").
+  `lunarShadow` gives the earth's shadow at the moon at a universal time:
+  the umbra and penumbra radii (the moon's and the sun's parallax and the
+  sun's radius, plus the usual 2% for the atmosphere) and the moon's
+  distance from the shadow's center. A scan of every full moon from 1980
+  to 2100 with it finds 177 umbral eclipses, within minutes and a few
+  hundredths of magnitude of the published ones (2018-07-27: 20:24 UT,
+  magnitude 1.63; published 20:22, 1.61). Each listed one is visited from
+  a place where the moon stands about 28° up at its greatest eclipse (62°
+  north of the point under the moon, at most 66° north).
+- **The shadow drawn:** `moonForBody` places the shadow's center like the
+  moon (opposite the sun, moved by the moon's parallax, since it falls on
+  the moon) and scales it with the disc round the moon's center, so the
+  game-size moon shows the true geometry. The sky shader's `earthShadow`
+  dims the disc in the penumbra and turns it a dull red in the umbra,
+  darkest at the center; a partial eclipse keeps a bright edge. The
+  moonlight (`moonLightLevel`, the night sky's glow and the key light at
+  night) falls by `MoonState.shadowed`: half in the penumbra, nearly all
+  in the umbra.
 - **Placed relative to the sky's sun**, whose own model is simpler (local
   solar time and a fitted declination): each moon's hour angle and
   declination are the sky's sun's plus the ephemeris' differences, so an
