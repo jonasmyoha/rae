@@ -12,6 +12,11 @@
 # (grassTuftForm): the tuft, a low wide spread and tall upright reeds, each
 # also with one segment a blade for the distance (the same blades, straight:
 # a quarter of the triangles, the same outline).
+#
+# Each vertex carries its blade's root as its wind pivot and a flexibility
+# that grows to the tip (lib/FoliageMesh), so a tuft uploaded with
+# uploadFoliage and drawn with a sway (GbufferRecord setInstanceSway) bends
+# in the wind, each blade on its own phase.
 import Math
 import Vec3
 open Mesh3d
@@ -20,6 +25,12 @@ open Noise
 const grassTuftBlades: Int = 30
 
 const grassTuftSegments: Int = 4
+
+# How far a blade's tip bends in the wind (lib/wind.wgsl windLeaf's
+# flexibility): every vertex turns about its blade's root, by this times
+# the square of how far up the blade it is, so the root stays put and the
+# blade curves, the tip most
+const grassTuftTipFlex: Float = 2.0
 
 # One blade's strip from `root` leaning toward `out` (unit, level), `height`
 # tall and `width` wide at its root, in `segments` pieces
@@ -58,6 +69,12 @@ func addGrassBlade(
         value: 1.0 - t
       )
       mesh.vertCount = mesh.vertCount + 1
+      # its wind pivot (the blade's root) and flexibility
+      # (lib/FoliageMesh: upload with uploadFoliage)
+      mesh.windPivots.add(value: root.x)
+      mesh.windPivots.add(value: root.y)
+      mesh.windPivots.add(value: root.z)
+      mesh.windPivots.add(value: grassTuftTipFlex * t * t)
     }
   }
   loop var k: Int = 0, k < segments, ++k {

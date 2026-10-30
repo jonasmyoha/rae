@@ -19,7 +19,7 @@
 # meadowRadius into their batches, behind the camera left out, thinned
 # toward the edge by each tuft's own stable draw (no ring), and those past
 # meadowNearRadius drawn with one segment a blade. The tufts cast no
-# shadows and stand still in the wind (the tuft mesh has no sway data).
+# shadows; they bend in the wind, each blade about its root.
 import Math
 import Vec3
 import Quat
@@ -35,6 +35,8 @@ open gpu/GpuResources
 open ecs/Transform
 open app3d/PropInstancer
 open app3d/GrassTuft
+open FoliageMesh
+open GbufferRecord
 
 const meadowTuftsPerCell: Int = 160
 
@@ -114,12 +116,8 @@ func createWalkerMeadow(
         segments: segments
         widthScale: widthScale
       )
-      meshes.add(value: RendererDeferred.uploadMesh(
-        renderer: renderer
-        verts: data.verts
-        vertCount: data.vertCount
-        indices: data.indices
-      ))
+      # with its blades' wind pivots, so the tufts bend in the wind
+      meshes.add(value: uploadFoliage(renderer: renderer, mesh: data))
     }
     loop var level: Int = 0, level < 2, ++level {
       parts.add(
@@ -354,12 +352,16 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
         var material: Material3d = instancer.material
         material.baseColor = meadow.colors.copyAtFallback(index: place, fallback: meadowGreen)
         let model: Mat4 = meadow.models.copyAtDefault(index: place)
+        let before: Int = instancer.batch.count
         addInstance(
           batch: instancer.batch
           model: model
           prevModel: model
           material: material
         )
+        if instancer.batch.count > before {
+          setInstanceSway(records: instancer.batch.records, slot: before, sway: 1.0)
+        }
         drawn = drawn + 1
       }
     }
