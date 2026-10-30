@@ -1,10 +1,15 @@
-# app3d/PropFade — where a prop's levels of detail cross-fade
-# (docs/tree-lod-design.md §2.3). Each level has a fade band centered on the
-# distance it ends at: inside it the level is drawn fading out and the next
-# one fading in, both with the same threshold and the same per-prop seed, so
-# the screen's dither (fade_dither.wgsl) shows each pixel from exactly one of
-# them; the last level fades out over its band instead of ending. Nothing
-# pops, and only the props inside a band are drawn twice.
+# app3d/PropFade — how a prop's levels of detail cross-fade
+# (docs/tree-lod-design.md §2.3). A prop switches level when its distance
+# passes the end of the level it shows (by a quarter of the fade band, so it
+# does not flip back and forth there), and then fades over propFadeSeconds,
+# however the eye moves after: the old level fading out and the new one
+# fading in, both with the same threshold and the same per-prop seed, so the
+# screen's dither (fade_dither.wgsl) shows each pixel from exactly one of
+# them. A fade always finishes; it never rests half done because the eye
+# stopped inside a band. The last level fades out the same way, and a prop
+# coming back fades in. Nothing pops, and only the props in a fade are drawn
+# twice. A prop the gather did not draw in the frame before (out of view,
+# out of reach, the first frame) takes its level at once.
 import Math
 
 # A level's fade band is this share of the distance it ends at, and at
@@ -18,34 +23,146 @@ func propFadeWidth(maxDistance: view Float) ret Float {
   ret Math.max(a: maxDistance * propFadeShare, b: propFadeMinWidth)
 }
 
+# How long a switch between two levels takes (seconds)
+const propFadeSeconds: Float = 0.6
+
+# A prop's level state: the level it shows (-1 none, past the last level;
+# -2 not seen yet), the level it fades from while `progress` is under 1, and
+# the gather frame it was last drawn in. One entry per placement, in the
+# placements' order.
+type PropLodStates {
+  shown: List(Int)
+  from: List(Int)
+  progress: List(Float)
+  seen: List(Int)
+}
+
+func createPropLodStates(count: view Int) ret PropLodStates {
+  var shown: List(Int) = List.create(Int, cap: count)
+  var from: List(Int) = List.create(Int, cap: count)
+  var progress: List(Float) = List.create(Float, cap: count)
+  var seen: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    shown.add(value: -2)
+    from.add(value: -1)
+    progress.add(value: 1.0)
+    seen.add(value: -2)
+  }
+  ret PropLodStates { shown: own shown, from: own from, progress: own progress, seen: own seen }
+}
+
+# The level `distance` falls in for levels ending at `maxDistances`
+# (nearest first): the first that ends beyond it, -1 past the last
+func propLodLevelAt(maxDistances: view List(Float), distance: view Float) ret Int {
+  loop var level: Int = 0, level < maxDistances.length, ++level {
+    if distance < maxDistances.copyAtFallback(index: level, fallback: 0.0) {
+      ret level
+    }
+  }
+  ret -1
+}
+
+# The level a prop showing `shown` should show at `distance`: the level the
+# distance falls in, but only once the distance is a quarter of the fade
+# band past the boundary it crosses (so a prop at a boundary keeps its level)
+func propLodTarget(maxDistances: view List(Float), distance: view Float, shown: view Int) ret Int {
+  let level: Int = propLodLevelAt(maxDistances: maxDistances, distance: distance)
+  if shown < -1 or level is shown {
+    ret level
+  }
+  # levels by nearness: -1 (none) is past the last
+  var rankLevel: Int = level
+  if level < 0 {
+    rankLevel = maxDistances.length
+  }
+  var rankShown: Int = shown
+  if shown < 0 {
+    rankShown = maxDistances.length
+  }
+  if rankLevel > rankShown {
+    # farther: past the end of the level before the new one
+    let boundary: Float = maxDistances.copyAtFallback(index: rankLevel - 1, fallback: 0.0)
+    if distance > boundary + propFadeWidth(maxDistance: boundary) * 0.25 {
+      ret level
+    }
+    ret shown
+  }
+  # nearer: before the end of the new level
+  let boundary: Float = maxDistances.copyAtFallback(index: rankLevel, fallback: 0.0)
+  if distance < boundary - propFadeWidth(maxDistance: boundary) * 0.25 {
+    ret level
+  }
+  ret shown
+}
+
+# A prop's next level state and this frame's levels (nextPropLod)
+type PropLodStep {
+  shown: Int
+  from: Int
+  progress: Float
+  pick: PropLodPick
+}
+
+# Prop `index`'s next state and levels this frame (gather frame `frame`,
+# `deltaTime` seconds after the last), at `distance` from the eye: the
+# pick's `near` is the level it shows or fades out of (-1 none), `far` the
+# level it fades into (-1 none), `threshold` how far the fade is. A prop not
+# drawn in the frame before takes its level at once. Reads only: the caller
+# stores the step (storePropLod).
+func nextPropLod(
+  states: view PropLodStates
+  index: view Int
+  maxDistances: view List(Float)
+  distance: view Float
+  frame: view Int
+  deltaTime: view Float
+) ret PropLodStep {
+  var shown: Int = states.shown.copyAtFallback(index: index, fallback: -2)
+  var from: Int = states.from.copyAtFallback(index: index, fallback: -1)
+  var progress: Float = states.progress.copyAtFallback(index: index, fallback: 1.0)
+  if states.seen.copyAtFallback(index: index, fallback: -2) is not frame - 1 {
+    shown = propLodLevelAt(maxDistances: maxDistances, distance: distance)
+    from = -1
+    progress = 1.0
+  } else if progress >= 1.0 {
+    let target: Int = propLodTarget(maxDistances: maxDistances, distance: distance, shown: shown)
+    if target is not shown {
+      from = shown
+      shown = target
+      progress = 0.0
+    }
+  } else {
+    progress = Math.min(a: progress + deltaTime / propFadeSeconds, b: 1.0)
+  }
+  var pick: PropLodPick = { near: shown, far: -1, threshold: 0.0 }
+  if progress < 1.0 {
+    # fading: `from` out, `shown` in (either may be none)
+    pick = { near: from, far: shown, threshold: Math.max(a: progress, b: 0.0001) }
+  }
+  ret PropLodStep { shown: shown, from: from, progress: progress, pick: pick }
+}
+
+# Store `step` as prop `index`'s state, drawn in gather frame `frame`
+func storePropLod(
+  states: mod PropLodStates
+  index: view Int
+  step: view PropLodStep
+  frame: view Int
+) {
+  states.shown.set(index: index, value: step.shown)
+  states.from.set(index: index, value: step.from)
+  states.progress.set(index: index, value: step.progress)
+  states.seen.set(index: index, value: frame)
+}
+
 # The levels a prop is drawn at this frame: `near` whole (`threshold` 0), or
-# inside its band `near` fading out and `far` fading in with `threshold`
-# (0..1, how far into the band); `far` -1 past the last level (it fades out
-# alone); `near` -1 when it is not drawn at all
+# in a fade `near` fading out and `far` fading in with `threshold` (0..1,
+# how far the fade is); either -1 when that side has no level (a prop
+# fading out past its last level, or fading back in)
 type PropLodPick {
   near: Int
   far: Int
   threshold: Float
-}
-
-# The pick at `distance` for a kind whose levels end at `maxDistances`
-# (nearest first), kept in the caller's own list so a frame allocates nothing
-func propLodPickFrom(maxDistances: view List(Float), distance: view Float) ret PropLodPick {
-  loop var level: Int = 0, level < maxDistances.length, ++level {
-    let end: Float = maxDistances.copyAtFallback(index: level, fallback: 0.0)
-    let width: Float = propFadeWidth(maxDistance: end)
-    if distance < end - width * 0.5 {
-      ret PropLodPick { near: level, far: -1, threshold: 0.0 }
-    }
-    if distance < end + width * 0.5 {
-      var far: Int = level + 1
-      if far >= maxDistances.length {
-        far = -1
-      }
-      ret PropLodPick { near: level, far: far, threshold: (distance - (end - width * 0.5)) / width }
-    }
-  }
-  ret PropLodPick { near: -1, far: -1, threshold: 0.0 }
 }
 
 # How far (0..1) `distance` is through a fade band `width` wide round

@@ -236,11 +236,22 @@ func finishTreeForest(forest: mod TreeForest, renderer: mod DeferredRenderer) re
 # This frame's trees (before the shadow and scene passes, which both draw
 # them). The field's view cone is widened by about 34 degrees, so a tree
 # just outside the picture still casts its shadow into it; the far trees
-# and the canopy are the picture only.
-func gatherTreeForest(forest: mod TreeForest, camera: view Camera3d, aspect: view Float) {
+# and the canopy are the picture only. `deltaTime`: the seconds since the
+# last gather, for the trees' level fades (app3d/PropFade).
+func gatherTreeForest(
+  forest: mod TreeForest
+  camera: view Camera3d
+  aspect: view Float
+  deltaTime: view Float
+) {
   var propView: PropView = propViewOf(camera: camera, aspect: aspect)
   propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
-  gatherPropField(field: forest.field, propView: propView, toon: forest.toon)
+  gatherPropField(
+    field: forest.field
+    propView: propView
+    toon: forest.toon
+    deltaTime: deltaTime
+  )
   if forest.hasFar is false {
     ret
   }

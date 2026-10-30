@@ -622,8 +622,18 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
 
 # Fill the forest's batches for this frame (before the shadow and scene
 # passes, which both draw them): app3d/TreeForest
-func gatherForest(terrainSystem: mod WalkerTerrain, camera: view Camera3d, aspect: view Float) {
-  gatherTreeForest(forest: terrainSystem.forest, camera: camera, aspect: aspect)
+func gatherForest(
+  terrainSystem: mod WalkerTerrain
+  camera: view Camera3d
+  aspect: view Float
+  deltaTime: view Float
+) {
+  gatherTreeForest(
+    forest: terrainSystem.forest
+    camera: camera
+    aspect: aspect
+    deltaTime: deltaTime
+  )
 }
 
 # This frame's props and forest (gathered above) into the open scene pass

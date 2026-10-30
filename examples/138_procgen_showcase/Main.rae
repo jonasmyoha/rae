@@ -336,7 +336,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   if let trees: mod TreeForest = state.forest {
-    gatherTreeForest(forest: trees, camera: state.camera, aspect: aspect)
+    gatherTreeForest(
+      forest: trees
+      camera: state.camera
+      aspect: aspect
+      deltaTime: deltaTime
+    )
   }
   gpuPassTimingBegin(renderer: renderer)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
