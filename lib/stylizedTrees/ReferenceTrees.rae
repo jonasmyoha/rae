@@ -41,9 +41,10 @@ const referenceSpeciesCount: Int = 5
 # height over this
 const referenceTreeHeight: Float = 13.5
 
-# A kind's bark picture, painted once
-func referenceBarkPath(treeKind: view TreeKind) ret String {
-  ret ".rae/treeGen/{treeKind.name}Bark.png"
+# A kind's bark picture's name among the material images (painted in
+# memory at start, as its leaves are)
+func referenceBarkImageName(treeKind: view TreeKind) ret String {
+  ret "treeGen/{treeKind.name}/bark"
 }
 
 # Where the near level ends (the walkers': StylizedTrees.nearTreeDistance)
@@ -158,13 +159,12 @@ type ReferenceImages {
 # the caller builds them with rendererFlushSurfaceImages once all kinds are
 # added, before baking or drawing with them
 func referenceImages(renderer: mod DeferredRenderer, treeKind: view TreeKind) ret ReferenceImages {
-  let barkPath: String = referenceBarkPath(treeKind: treeKind)
-  if not Sys.exists(path: barkPath) {
-    let made: Bool = Sys.makeDir(path: ".rae/treeGen")
-    let written: Bool = writeBarkImage(barkKind: treeKind.bark, path: barkPath)
-  }
   ret ReferenceImages {
-    barkLayer: rendererQueueSurfaceImage(renderer: renderer, path: barkPath)
+    barkLayer: rendererQueueSurfaceImagePixels(
+      renderer: renderer
+      name: referenceBarkImageName(treeKind: treeKind)
+      pixels: barkImageLinearPixels(barkKind: treeKind.bark)
+    )
     leafLayer: rendererQueueSurfaceImagePixels(
       renderer: renderer
       name: leafCardImageName(treeKind: treeKind)
