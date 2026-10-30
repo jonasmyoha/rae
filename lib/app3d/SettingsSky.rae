@@ -225,11 +225,9 @@ func settingsMoonLight(settingsState: view SettingsState) ret Float {
 }
 
 # How far into the night it is for the key light, 0..1: 0 while the sun is up,
-# 1 once it is 3.5 degrees under the horizon. Always 0 with the moon off.
+# 1 once it is 3.5 degrees under the horizon. The night comes with the moon
+# off too: then it is a moonless night.
 func settingsNightBlend(settingsState: view SettingsState) ret Float {
-  if settingsState.moon is false {
-    ret 0.0
-  }
   let sunUp: Float = sunHeightSignedForDate(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
@@ -239,9 +237,10 @@ func settingsNightBlend(settingsState: view SettingsState) ret Float {
   ret t * t * (3.0 - 2.0 * t)
 }
 
-# The scene's one directional light: the sun by day; at night, with the moon
-# on, the moon while it is up. The shadows follow it, so a moonlit night has
-# moon shadows.
+# The scene's one directional light: the sun by day; at night the moon
+# while it is on and up, else the faint starlight from overhead (never the
+# sun under the horizon, which would light the scene from below). The
+# shadows follow it, so a moonlit night has moon shadows.
 func settingsKeyLightDir(settingsState: view SettingsState) ret Vec3 {
   ret settingsKeyLightDirAt(settingsState: settingsState, hour: settingsState.timeOfDay.hour)
 }
@@ -249,13 +248,13 @@ func settingsKeyLightDir(settingsState: view SettingsState) ret Vec3 {
 # ...at `hour` of the clock's day (the night blend is above 0 exactly while
 # the sun is under the horizon)
 func settingsKeyLightDirAt(settingsState: view SettingsState, hour: view Float) ret Vec3 {
-  if settingsState.moon {
-    let sunUp: Float = sunHeightSignedForDate(
-      hour: hour
-      dayOfYear: settingsState.timeOfDay.dayOfYear
-      latitudeDeg: settingsState.latitude
-    )
-    if sunUp < 0.0 {
+  let sunUp: Float = sunHeightSignedForDate(
+    hour: hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
+    latitudeDeg: settingsState.latitude
+  )
+  if sunUp < 0.0 {
+    if settingsState.moon {
       let moon: MoonState = moonForDate(
         year: settingsState.timeOfDay.year
         dayOfYear: settingsState.timeOfDay.dayOfYear
@@ -267,6 +266,8 @@ func settingsKeyLightDirAt(settingsState: view SettingsState, hour: view Float) 
         ret moon.direction
       }
     }
+    # starlight: straight down, a little off so its shadows are not points
+    ret Vec3.vnorm(a: Vec3.create(x: 0.15, y: 0.1, z: -1.0))
   }
   ret sunDirForDate(
     hour: hour
@@ -291,8 +292,8 @@ func settingsShadowLightDir(settingsState: view SettingsState) ret Vec3 {
 }
 
 # Its color: the sun's, crossing at dusk to the moon's cold light, which a
-# full moon gives far more of than a crescent, and a moonless night almost
-# none of. With the moon off it is the sun's color (and its dim night floor).
+# full moon gives far more of than a crescent, and a moonless night (or the
+# moon off) almost none of.
 func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
   let sun: Vec3 = settingsSunColor(settingsState: settingsState)
   let blend: Float = settingsNightBlend(settingsState: settingsState)
@@ -316,6 +317,14 @@ func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
 # which fade in as the day (`day`, the daylight factor) fades out
 func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view Float) {
   if settingsState.moon is false {
+    # a moonless night: no disc and no moonlight, the night sky's faint
+    # ambient light only
+    let starlight: Float = 0.02 * (1.0 - Math.clamp(val: day, low: 0.0, high: 1.0))
+    sky.nightLight = 0.0
+    sky.nightAmbient = fromRelativeLight(
+      value: Vec3.create(x: 0.55 * starlight, y: 0.65 * starlight, z: starlight)
+    )
+    sky.moons.clear()
     ret
   }
   let moon: MoonState = settingsMoon(settingsState: settingsState)
