@@ -4,6 +4,7 @@
 # light (the sun by day, the moon at night) and the shadows' sun.
 # SettingsDialog owns SettingsState, the panel and its controls.
 import Math
+import Sys
 open LightUnits
 open ui/Ecs
 open Vec3
@@ -12,6 +13,49 @@ open Sky
 open app3d/TimeOfDay
 open Moon
 open app3d/SettingsDialog
+
+# The most moons in the sky, the earth's one and the invented ones the sky
+# draws beside it
+const settingsMoonsMax: Int = 1 + skyMoonsMax
+
+# The moon count to start with: RAE_MOONS=<n> (1 .. settingsMoonsMax), else
+# the earth's moon alone
+func settingsMoonCountFromEnv() ret Int {
+  let text: String = Sys.getEnv(name: "RAE_MOONS")
+  if text.length() is 0 {
+    ret 1
+  }
+  ret Math.clamp(val: text.toInt(), low: 1, high: settingsMoonsMax)
+}
+
+# The moon count's buttons: "settings.moons.fewer" / "settings.moons.more"
+# change it by one within 1 .. settingsMoonsMax and switch the moon on. True
+# when `actionId` was one of them.
+func settingsMoonsAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  var change: Int = 0
+  if actionId is "settings.moons.fewer" {
+    change = -1
+  } else if actionId is "settings.moons.more" {
+    change = 1
+  } else {
+    ret false
+  }
+  settingsState.moonCount = Math.clamp(
+    val: settingsState.moonCount + change
+    low: 1
+    high: settingsMoonsMax
+  )
+  settingsState.moon = true
+  ret true
+}
+
+# "Moons: 3", or "Moons: off" with the moon switched off
+func settingsMoonsTitle(settingsState: view SettingsState) ret String {
+  if settingsState.moon is false {
+    ret "Moons: off"
+  }
+  ret "Moons: {settingsState.moonCount}"
+}
 
 # The panel holds values; these turn them into the things a renderer takes. They
 # live here so 110 and 113 cannot disagree about what "10:00, Hosek" means.
@@ -280,11 +324,12 @@ func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view 
   sky.nightAmbient = fromRelativeLight(
     value: Vec3.create(x: 0.55 * ambient, y: 0.65 * ambient, z: ambient)
   )
-  # the invented moons, each in its own size and color
+  # the invented moons, each in its own size and color, as many as the
+  # count asks beside the earth's
   sky.moons.clear()
-  if settingsState.moreMoons {
+  if settingsState.moonCount > 1 {
     loop let body: view MoonBody in inventedMoons() {
-      if sky.moons.length >= skyMoonsMax {
+      if sky.moons.length >= Math.min(a: skyMoonsMax, b: settingsState.moonCount - 1) {
         break
       }
       let other: MoonState = moonForBody(

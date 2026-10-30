@@ -1,20 +1,25 @@
 # Eclipses — a selection of real eclipses from 1980 to 2099 to visit, solar
 # and lunar, in time order.
 #
+# Each is visited where it shows low in the sky, about 22 degrees up, so
+# it is in view when looking toward the horizon, not overhead.
+#
 # A solar eclipse (the moon in front of the sun) has a moment (universal
-# time) and a place where it is central (total or annular) or, for the one
-# partial eclipse, its deepest point. The dates and kinds are the published
-# ones (NASA's Five Millennium Canon); the moments and places were refined
-# with lib/Moon itself, along each eclipse's central path near the
-# published greatest eclipse, so the sky shows each one at its deepest.
-# They differ from the published greatest eclipse by minutes and up to a
-# few hundred kilometers along the path.
+# time) and a place on its central path (total or annular) where the sun
+# stands about 22 degrees up; the eclipse is as total there as at its
+# greatest point, only shorter. The dates and kinds are the published ones
+# (NASA's Five Millennium Canon); the moments and places were found with
+# lib/Moon itself, walking along each central path from the published
+# greatest eclipse. The 2061 path runs only in the far north, where the sun
+# stays near 11 degrees. The one partial eclipse is seen from 51N 53E, the
+# sun 18 degrees up and 70% covered.
 #
 # A lunar eclipse (the moon in the earth's shadow, `lunar`) is seen from
 # the whole night side of the earth at once. Its moment is its greatest
 # eclipse as lib/Moon's lunarShadow finds it, within minutes of the
-# published one, and its place one where the moon stands about 28 degrees
-# up then: 62 degrees north of the point under the moon (at most 66 north).
+# published one, and its place one where the moon stands about 22 degrees
+# up then, north of the point under the moon where that is at most 60
+# degrees north, else turned to the west or east.
 #
 # Case 1258 checks that lib/Moon puts the moon over the sun at each solar
 # one, and in the earth's umbra at each lunar one.
@@ -37,8 +42,8 @@ type Eclipse {
   # the moon in the earth's shadow (a lunar eclipse), or the sun behind
   # the moon (a solar one)
   lunar: Bool = false
-  # where to see it (degrees north, east): a solar one's deepest point, a
-  # lunar one's place with the moon well up
+  # where to see it (degrees north, east): the sun or the moon about 22
+  # degrees up
   latitude: Float
   longitude: Float
 }
@@ -50,10 +55,10 @@ func eclipses() ret List(Eclipse) {
       year: 1980
       month: 2
       day: 16
-      utHours: 9.23
+      utHours: 10.43
       kind: EclipseKind.total
-      latitude: 2.4
-      longitude: 52.9
+      latitude: 19.1
+      longitude: 85.6
     }
     {
       year: 1982
@@ -62,26 +67,26 @@ func eclipses() ret List(Eclipse) {
       utHours: 7.55
       kind: EclipseKind.total
       lunar: true
-      latitude: 39.2
+      latitude: 44.7
       longitude: -112.1
     }
     {
       year: 1983
       month: 6
       day: 11
-      utHours: 5.13
+      utHours: 3.38
       kind: EclipseKind.total
-      latitude: -4.4
-      longitude: 120.0
+      latitude: -24.8
+      longitude: 80.1
     }
     {
       year: 1987
       month: 9
       day: 23
-      utHours: 3.08
+      utHours: 1.48
       kind: EclipseKind.annular
-      latitude: 15.3
-      longitude: 137.3
+      latitude: 41.9
+      longitude: 97.0
     }
     {
       year: 1989
@@ -90,35 +95,35 @@ func eclipses() ret List(Eclipse) {
       utHours: 3.2
       kind: EclipseKind.total
       lunar: true
-      latitude: 48.4
+      latitude: 53.4
       longitude: -46.9
     }
     {
       year: 1991
       month: 7
       day: 11
-      utHours: 19.15
+      utHours: 17.5
       kind: EclipseKind.total
-      latitude: 21.8
-      longitude: -104.5
+      latitude: 19.8
+      longitude: -155.8
     }
     {
       year: 1994
       month: 5
       day: 10
-      utHours: 16.74
+      utHours: 18.89
       kind: EclipseKind.annular
-      latitude: 36.8
-      longitude: -94.2
+      latitude: 38.0
+      longitude: -27.9
     }
     {
       year: 1999
       month: 8
       day: 11
-      utHours: 10.39
+      utHours: 9.64
       kind: EclipseKind.total
-      latitude: 48.9
-      longitude: 2.6
+      latitude: 46.7
+      longitude: -38.5
     }
     {
       year: 2000
@@ -127,17 +132,17 @@ func eclipses() ret List(Eclipse) {
       utHours: 13.97
       kind: EclipseKind.total
       lunar: true
-      latitude: 40.8
+      latitude: 45.8
       longitude: 152.0
     }
     {
       year: 2006
       month: 3
       day: 29
-      utHours: 10.82
+      utHours: 11.57
       kind: EclipseKind.total
-      latitude: 37.0
-      longitude: 28.3
+      latitude: 51.6
+      longitude: 62.5
     }
     {
       year: 2008
@@ -146,35 +151,35 @@ func eclipses() ret List(Eclipse) {
       utHours: 21.2
       kind: EclipseKind.partial
       lunar: true
-      latitude: 49.1
+      latitude: 54.1
       longitude: 42.8
     }
     {
       year: 2009
       month: 7
       day: 22
-      utHours: 3.31
+      utHours: 4.16
       kind: EclipseKind.total
-      latitude: 15.5
-      longitude: 157.6
+      latitude: -2.7
+      longitude: -178.1
     }
     {
       year: 2012
       month: 5
       day: 21
-      utHours: 0.54
+      utHours: 1.49
       kind: EclipseKind.annular
-      latitude: 49.1
-      longitude: -164.6
+      latitude: 40.4
+      longitude: -124.8
     }
     {
       year: 2017
       month: 8
       day: 21
-      utHours: 19.3
+      utHours: 19.9
       kind: EclipseKind.total
-      latitude: 26.3
-      longitude: -69.0
+      latitude: 16.4
+      longitude: -48.5
     }
     {
       year: 2018
@@ -183,7 +188,7 @@ func eclipses() ret List(Eclipse) {
       utHours: 20.4
       kind: EclipseKind.total
       lunar: true
-      latitude: 43.0
+      latitude: 48.0
       longitude: 55.6
     }
     {
@@ -193,26 +198,26 @@ func eclipses() ret List(Eclipse) {
       utHours: 9.1
       kind: EclipseKind.partial
       lunar: true
-      latitude: 66.0
-      longitude: -140.0
+      latitude: 33.8
+      longitude: -61.7
     }
     {
       year: 2022
       month: 10
       day: 25
-      utHours: 11.0222
+      utHours: 11.04
       kind: EclipseKind.partial
-      latitude: 61.6
-      longitude: 77.4
+      latitude: 51.0
+      longitude: 53.0
     }
     {
       year: 2024
       month: 4
       day: 8
-      utHours: 18.36
+      utHours: 19.71
       kind: EclipseKind.total
-      latitude: 28.8
-      longitude: -103.4
+      latitude: 50.6
+      longitude: -53.4
     }
     {
       year: 2025
@@ -221,26 +226,26 @@ func eclipses() ret List(Eclipse) {
       utHours: 18.23
       kind: EclipseKind.total
       lunar: true
-      latitude: 56.0
-      longitude: 86.1
+      latitude: 48.7
+      longitude: 130.4
     }
     {
       year: 2026
       month: 8
       day: 12
-      utHours: 17.75
+      utHours: 18.1
       kind: EclipseKind.total
-      latitude: 65.7
-      longitude: -24.8
+      latitude: 55.4
+      longitude: -19.1
     }
     {
       year: 2027
       month: 8
       day: 2
-      utHours: 9.15
+      utHours: 8.55
       kind: EclipseKind.total
-      latitude: 35.5
-      longitude: 8.8
+      latitude: 34.5
+      longitude: -22.3
     }
     {
       year: 2029
@@ -249,17 +254,17 @@ func eclipses() ret List(Eclipse) {
       utHours: 3.37
       kind: EclipseKind.total
       lunar: true
-      latitude: 38.7
+      latitude: 44.2
       longitude: -49.8
     }
     {
       year: 2035
       month: 9
       day: 2
-      utHours: 2.44
+      utHours: 3.44
       kind: EclipseKind.total
-      latitude: 22.9
-      longitude: 167.4
+      latitude: 9.3
+      longitude: -164.1
     }
     {
       year: 2037
@@ -268,17 +273,17 @@ func eclipses() ret List(Eclipse) {
       utHours: 4.17
       kind: EclipseKind.partial
       lunar: true
-      latitude: 42.4
+      latitude: 47.9
       longitude: -60.8
     }
     {
       year: 2045
       month: 8
       day: 12
-      utHours: 16.89
+      utHours: 19.24
       kind: EclipseKind.total
-      latitude: 37.4
-      longitude: -97.6
+      latitude: -2.8
+      longitude: -42.5
     }
     {
       year: 2047
@@ -287,26 +292,26 @@ func eclipses() ret List(Eclipse) {
       utHours: 10.55
       kind: EclipseKind.total
       lunar: true
-      latitude: 39.4
+      latitude: 44.9
       longitude: -157.0
     }
     {
       year: 2052
       month: 3
       day: 30
-      utHours: 18.11
+      utHours: 20.01
       kind: EclipseKind.total
-      latitude: 17.2
-      longitude: -109.5
+      latitude: 35.6
+      longitude: -55.5
     }
     {
       year: 2061
       month: 4
       day: 20
-      utHours: 2.84
+      utHours: 2.94
       kind: EclipseKind.total
-      latitude: 62.0
-      longitude: 50.4
+      latitude: 65.3
+      longitude: 49.1
     }
     {
       year: 2065
@@ -315,17 +320,17 @@ func eclipses() ret List(Eclipse) {
       utHours: 17.77
       kind: EclipseKind.total
       lunar: true
-      latitude: 40.9
+      latitude: 46.4
       longitude: 95.1
     }
     {
       year: 2081
       month: 9
       day: 3
-      utHours: 9.18
+      utHours: 10.58
       kind: EclipseKind.total
-      latitude: 24.6
-      longitude: 55.4
+      latitude: -2.0
+      longitude: 89.2
     }
     {
       year: 2086
@@ -334,8 +339,8 @@ func eclipses() ret List(Eclipse) {
       utHours: 20.32
       kind: EclipseKind.partial
       lunar: true
-      latitude: 66.0
-      longitude: 51.6
+      latitude: 34.0
+      longitude: 130.7
     }
     {
       year: 2094
@@ -344,17 +349,17 @@ func eclipses() ret List(Eclipse) {
       utHours: 10.02
       kind: EclipseKind.total
       lunar: true
-      latitude: 38.8
-      longitude: -149.3
+      latitude: 44.3
+      longitude: -149.4
     }
     {
       year: 2099
       month: 9
       day: 14
-      utHours: 17.87
+      utHours: 18.37
       kind: EclipseKind.total
-      latitude: 8.7
-      longitude: -46.3
+      latitude: -0.6
+      longitude: -28.7
     }
   }
 }
