@@ -53,6 +53,8 @@ open app3d/TerrainTiles
 open app3d/TerrainRocks
 open app3d/WalkerFlowers
 open app3d/GrassTuft
+open app3d/WalkerMeadow
+open app3d/WalkerBushes
 
 # The side of a terrain cell (m): one tile and one prop of each kind
 const walkerCellSize: Float = 18.0
@@ -175,6 +177,9 @@ type WalkerTerrain {
   # Harebells: one shared patch mesh in two instanced material parts.
   harebellParts: List(PropInstancer)
   grassProp: PropInstancer
+  # The meadow: grass tufts thick over the ground round the camera's focus
+  # (app3d/WalkerMeadow)
+  meadow: WalkerMeadow
   # The set of tree species the forest is planted from (treeSets/TreeSet)
   treeSet: TreeSet
   # The forest (app3d/TreeForest): every tree species as a kind at three
@@ -328,8 +333,9 @@ func kindTransform(
     )
   }
   if kind is kindBush {
-    # A bush stands 5 cm into the ground
-    ret propTransform3D(
+    # A bush stands 5 cm into the ground; from small to big, and about one
+    # in 16 huge (2.6 times)
+    var bush: Transform3D = propTransform3D(
       terrainSystem: terrainSystem
       cellX: cellX
       cellY: cellY
@@ -337,9 +343,13 @@ func kindTransform(
       seedY: 53
       seedScale: 59
       lift: -0.05
-      minScale: 1.5
-      scaleSpread: 0.9
+      minScale: 1.0
+      scaleSpread: 1.6
     )
+    if terrainHash(cellX: cellX, cellY: cellY, seed: 613) < 0.06 {
+      bush.scale = Vec3.vscale(a: bush.scale, s: 2.6)
+    }
+    ret bush
   }
   if kind is kindFlower {
     ret propTransform3D(
@@ -434,10 +444,16 @@ func updateInfiniteTerrain(
     updateFarGroundHole(terrainSystem: terrainSystem, renderer: renderer)
   }
   let drawnMoved: Bool = updateDrawnProps(terrainSystem: terrainSystem, focus: groundFocus)
+  let meadowMoved: Bool = updateWalkerMeadow(
+    meadow: terrainSystem.meadow
+    focus: groundFocus
+    groundZ: terrainSystem.groundZ
+    biome: terrainSystem.biome
+  )
   let cellX: Int = Math.floor(x: propFocus.x / terrainSystem.cellSize).toInt()
   let cellY: Int = Math.floor(x: propFocus.y / terrainSystem.cellSize).toInt()
   if cellX is terrainSystem.centerCellX and cellY is terrainSystem.centerCellY {
-    ret groundMoved or nearMoved or drawnMoved
+    ret groundMoved or nearMoved or drawnMoved or meadowMoved
   }
   terrainSystem.centerCellX = cellX
   terrainSystem.centerCellY = cellY
@@ -548,21 +564,28 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
           if kind is kindRock {
             variant = rockShapeAt(cellX: cellX, cellY: cellY)
           }
-          if kind is kindBush and terrainSystem.bushKind >= 0 {
-            # a bush turns about +Z only (propTransform3D)
-            bushPlacements.add(
-              value: {
-                kind: terrainSystem.bushKind
-                position: transform.position
-                yaw: 2.0 * Math.atan2(y: transform.rotation.z, x: transform.rotation.w)
-                scale: transform.scale.x
-              }
+          if kind is kindBush {
+            addWalkerBush(
+              terrainSystem: terrainSystem
+              transform: transform
+              placements: bushPlacements
             )
           } else {
             terrainSystem.drawnProps.add(
               value: { kind: kind, variant: variant, model: transform3dToMatrix(t: transform) }
             )
           }
+        }
+        # round the cell's bush (where it stands or not) a thicket where
+        # bushes grow thick; each of them on ground of its own
+        if kind is kindBush {
+          addBushThicket(
+            terrainSystem: terrainSystem
+            cellX: cellX
+            cellY: cellY
+            center: transform.position
+            placements: bushPlacements
+          )
         }
       }
     }
@@ -580,8 +603,14 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
 # ----- draw ----------------------------------------------------------
 # Fill the small props' batches for this frame (before the shadow and scene
 # passes, which both draw them), from the props drawn round the camera's
-# focus (drawnProps), not the walker's entities
-func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
+# focus (drawnProps), not the walker's entities, and the meadow's tufts
+# round `camera`
+func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d) {
+  let unusedTufts: Int = meadowGather(
+    meadow: terrainSystem.meadow
+    eye: camera.position
+    forward: Vec3.vsub(a: camera.target, b: camera.position)
+  )
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     resetInstanceBatch(batch: part.batch)
   }
@@ -652,6 +681,7 @@ func drawTerrainProps(
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
+  drawWalkerMeadow(cache: cache, resources: resources, meadow: terrainSystem.meadow)
   drawTreeForest(cache: cache, resources: resources, forest: terrainSystem.forest)
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
@@ -748,6 +778,7 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
     setPropInstancerToon(prop: part, toon: toon and Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1")
   }
   setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
+  setWalkerMeadowToon(meadow: terrainSystem.meadow, toon: toon)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     setPropInstancerToon(prop: part, toon: toon)
   }
@@ -882,6 +913,7 @@ func createWalkerTerrain(
       material: grassMaterial
       capacity: cellCount * 2
     )
+    meadow: own createWalkerMeadow(renderer: renderer, gridSide: gridSide, cellSize: walkerCellSize)
     treeSet: treeSet
     forest: own treeForest
     farGround: own farGround

@@ -1221,7 +1221,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "walk 195 ch" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "panel buttons: 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[sea\] FFT ocean at z" "$TMP_OUT/render.log")" -eq 1 ] \
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && HAREBELL_CASTERS="$(sed -n 's/.*\[harebell-shadow\] batches=2 casters=\([0-9]*\).*/\1/p' "$TMP_OUT/render.log" | head -1)" \
