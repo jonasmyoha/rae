@@ -6,9 +6,11 @@
 # open, its full-screen layer node takes every click (so nothing under it
 # moves), and a tap on it either closes the map (on the close button) or
 # sends a MinimapTapped event with the world point the app answers (to take
-# a player there, say). What the map shows is the app's, drawn between
-# drawMinimapPanel and drawMinimapHeader with the view's maths; when it opens
-# and what a tap does are the app's too.
+# a player there, say). An app may give it labelled header buttons (its
+# `buttons`, at the header's right end, drawMinimapButtons): a tap on one
+# sends a MinimapButtonTapped with the button's id. What the map shows is the
+# app's, drawn between drawMinimapPanel and drawMinimapHeader with the view's
+# maths; when it opens and what a tap or a button does are the app's too.
 import Math
 import Gpu2d
 import Gpu2dText
@@ -33,6 +35,11 @@ type MinimapSettings {
   headerHeight: Float = 52.0
   margin: Float = 12.0
   closeSize: Float = 44.0
+  # The header buttons' width and the gap between them (they are closeSize
+  # tall), and the header's right end kept free for an app's corner menu
+  buttonWidth: Float = 96.0
+  buttonGap: Float = 8.0
+  cornerReserve: Float = 56.0
 }
 
 # A point on the map screen (pt) or in the world (m)
@@ -132,6 +139,44 @@ func minimapCloseButton(
   }
 }
 
+# Header button `index` of `count`: its top left, the buttons in their order
+# from left to right, ending left of the corner kept free
+func minimapButtonCorner(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  index: view Int
+  count: view Int
+) ret MinimapPoint {
+  let step: Float = settings.buttonWidth + settings.buttonGap
+  let right: Float = mapView.panelX + mapView.panelW - settings.cornerReserve
+  ret MinimapPoint {
+    x: right - (count - index).toFloat() * step + settings.buttonGap
+    y: mapView.panelY + (settings.headerHeight - settings.closeSize) * 0.5
+  }
+}
+
+# Which of `count` header buttons is under screen point (x, y), or -1
+func minimapButtonUnder(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  count: view Int
+  x: view Float
+  y: view Float
+) ret Int {
+  loop var i: Int = 0, i < count, ++i {
+    let corner: MinimapPoint = minimapButtonCorner(
+      settings: settings
+      mapView: mapView
+      index: i
+      count: count
+    )
+    if x >= corner.x and x <= corner.x + settings.buttonWidth and y >= corner.y and y <= corner.y + settings.closeSize {
+      ret i
+    }
+  }
+  ret -1
+}
+
 func onMinimapClose(
   settings: view MinimapSettings
   mapView: view MinimapView
@@ -150,6 +195,20 @@ type Minimap {
   layerNodeId: String
   tapActionId: String
   open: Bool
+  # Its header buttons, left to right (none by default)
+  buttons: List(MinimapButton) = List.create(MinimapButton, cap: 0)
+}
+
+# A header button: the id its MinimapButtonTapped carries, and its label
+type MinimapButton {
+  id: String
+  label: String
+}
+
+# A tap on an open map's header button: which map, which button
+type MinimapButtonTapped {
+  entityId: EntityId
+  buttonId: String
 }
 
 # A tap on an open map's world: which map, and the world point
@@ -162,10 +221,15 @@ type MinimapTapped {
 type Minimaps {
   maps: ComponentTable(Minimap)
   tapped: EventQueue(MinimapTapped)
+  pressed: EventQueue(MinimapButtonTapped)
 }
 
 func createMinimaps() ret Minimaps {
-  ret Minimaps { maps: ComponentTable.create(Minimap), tapped: createEventQueue(MinimapTapped) }
+  ret Minimaps {
+    maps: ComponentTable.create(Minimap)
+    tapped: createEventQueue(MinimapTapped)
+    pressed: createEventQueue(MinimapButtonTapped)
+  }
 }
 
 # The map `entityId`'s view: in its layer node's laid-out box
@@ -224,7 +288,26 @@ func minimapTap(
   x: view Float
   y: view Float
 ) ret Bool {
-  let settings: MinimapSettings = componentView(this: minimaps.maps, entityId: entityId).settings
+  let minimap: view Minimap = componentView(this: minimaps.maps, entityId: entityId)
+  let settings: MinimapSettings = minimap.settings
+  let button: Int = minimapButtonUnder(
+    settings: settings
+    mapView: mapView
+    count: minimap.buttons.length
+    x: x
+    y: y
+  )
+  if button >= 0 {
+    eventSend(
+      MinimapButtonTapped
+      this: minimaps.pressed
+      value: MinimapButtonTapped {
+        entityId: entityId
+        buttonId: minimap.buttons.copyAtDefault(index: button).id
+      }
+    )
+    ret false
+  }
   if onMinimapClose(
     settings: settings
     mapView: mapView
@@ -264,6 +347,7 @@ func minimapTap(
 # closed (the app lays the UI out again).
 func stepMinimaps(minimaps: mod Minimaps, world: mod UiWorld, uiSystems: view UiSystems) ret Bool {
   eventClear(MinimapTapped, this: minimaps.tapped)
+  eventClear(MinimapButtonTapped, this: minimaps.pressed)
   var closed: Bool = false
   loop var i: Int = 0, i < componentCount(this: minimaps.maps), ++i {
     let entityId: EntityId = componentEntityAt(this: minimaps.maps, i: i)
@@ -366,6 +450,45 @@ func drawMinimapHeader(
     thickness: 3.0
     color: 4294967295
   )
+}
+
+# The header buttons of `buttons`, each a card with its label centered
+func drawMinimapButtons(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  buttons: view List(MinimapButton)
+) {
+  let labelSize: Float = settings.closeSize * 0.4
+  loop var i: Int = 0, i < buttons.length, ++i {
+    let corner: MinimapPoint = minimapButtonCorner(
+      settings: settings
+      mapView: mapView
+      index: i
+      count: buttons.length
+    )
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: corner.x
+      y: corner.y
+      w: settings.buttonWidth
+      h: settings.closeSize
+      radius: settings.closeSize * 0.25
+      color: 4280955974
+    )
+    let label: String = buttons.copyAtDefault(index: i).label
+    let width: Float = Gpu2dText.measureText(font: font, text: label, sizePx: labelSize)
+    let unusedAdvance: Float = Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: label
+      x: corner.x + (settings.buttonWidth - width) * 0.5
+      y: corner.y + settings.closeSize * 0.5 + labelSize * 0.35
+      sizePx: labelSize
+      color: 4294967295
+    )
+  }
 }
 
 # A world rectangle filled on the map
