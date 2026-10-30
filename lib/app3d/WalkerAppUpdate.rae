@@ -39,6 +39,7 @@ open app3d/WalkerReset
 open app3d/ModeMenu
 open app3d/CharacterController
 open app3d/SettingsDialog
+open app3d/SettingsPersist
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
@@ -368,18 +369,6 @@ func updateWalkerApp(app: mod WalkerApp) {
       knockedDown: app.physicsSystem.knockedDown
       knocks: app.physicsSystem.knocks
     )
-    let changedTo: Int = componentView(
-      this: app.world.locomotionClips
-      entityId: controlledEntityId
-    ).changedTo
-    if changedTo >= 0 {
-      setPanelSelection(
-        panel: app.inputSystem.clipPanel
-        world: app.inputSystem.world
-        group: 1
-        id: (changedTo as ClipKind).toString()
-      )
-    }
     let focusPos: Vec3 = controlledPosition(
       controllers: app.world.controllers
       controlled: app.world.controlled
@@ -470,6 +459,22 @@ func updateWalkerApp(app: mod WalkerApp) {
       app.persist.stateDirty = false
     }
   }
+  # The settings panel's values and the mode, in their own slot, when they
+  # changed (the running clock: twice a second at most)
+  if not app.frame.headless and (now - app.persist.lastSettingsSave) as Float >= 0.5 {
+    let settingsLine: String = serializeSettingsState(
+      settingsState: app.inputSystem.settings
+      editor: app.inputSystem.uiModes.editor
+    )
+    if settingsLine is not app.persist.settingsLine {
+      writeHotReloadStateFor(
+        appId: settingsStateSlot(appId: app.settings.appId)
+        state: settingsLine
+      )
+      app.persist.settingsLine = settingsLine
+    }
+    app.persist.lastSettingsSave = now
+  }
 
   let hadUiEvents: Bool = uiActionCount(world: app.inputSystem.world) > 0 or app.inputSystem.ui.pointer.down or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
   let logChanged: Bool = app.inputSystem.logOverlay.revision is not app.inputSystem.lastLogRevision
@@ -490,7 +495,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   }
   app.frame.dbgDidWork = needsRender
   if needsRender {
-    if app.inputSystem.settings.taa is false or app.settings.forward {
+    if app.inputSystem.settings.antialias is not SettingsAntialias.taa or app.settings.forward {
       # FXAA has no history to converge, and a forward frame (4x MSAA) is
       # final the moment it is drawn
       app.frame.taaSettleFrames = 0

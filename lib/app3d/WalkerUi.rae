@@ -164,46 +164,6 @@ func uiUpdate(
   ) {
     suppressUiPress(input: inputSystem.ui, world: inputSystem.world)
   }
-  let clipHit: String = panelClickedId(panel: inputSystem.clipPanel, world: inputSystem.world)
-  if clipHit.length() > 0 and cameraSystem.rig.mode is not CameraRigMode.character {
-    # The panel plays a clip on the character the player drives
-    let shown: EntityId = controlledCharacter(controlled: world.controlled)
-    var currentClipIndex: Int = 0
-    if componentHas(this: world.animStates, entityId: shown) {
-      currentClipIndex = componentView(this: world.animStates, entityId: shown).clipIndex
-    }
-    var nextClipIndex: Int = currentClipIndex
-    if clipHit is "idle" {
-      nextClipIndex = 0
-    }
-    if clipHit is "walk" {
-      nextClipIndex = 1
-    }
-    if clipHit is "walkFast" {
-      nextClipIndex = 2
-    }
-    if clipHit is "run" {
-      nextClipIndex = 3
-    }
-    if nextClipIndex is not currentClipIndex {
-      animationBeginTransition(
-        animStates: world.animStates
-        animTransitions: world.animTransitions
-        characterSystem: characterSystem
-        entityId: shown
-        clipIndex: nextClipIndex
-        duration: clipTransitionDuration
-        holdClipFirstFrame: false
-      )
-      persist.stateDirty = true
-    }
-    setPanelSelection(
-      panel: inputSystem.clipPanel
-      world: inputSystem.world
-      group: 1
-      id: clipHit
-    )
-  }
   let transportHit: String = panelClickedId(panel: inputSystem.transport, world: inputSystem.world)
   if transportHit is "play" {
     characterSystem.playing = not characterSystem.playing
@@ -303,7 +263,7 @@ func uiUpdate(
   if settingsChanged {
     # TAA opt-in, SMAA when off; a forward frame has 4x MSAA and no TAA
     if not isForwardRenderer(renderer: renderer) {
-      setTaaEnabled(renderer: renderer, on: inputSystem.settings.taa)
+      settingsApplyAntialias(renderer: renderer, settingsState: inputSystem.settings)
     }
     setRendererFullResolution(
       renderer: renderer
@@ -335,7 +295,7 @@ func uiUpdate(
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
     persist.stateDirty = true
   }
-  if clipHit.length() > 0 or transportHit.length() > 0 {
+  if transportHit.length() > 0 {
     inputSystem.settings.speed = characterSystem.speed
     inputSystem.settings.toon = characterSystem.toon
     settingsApplyToWorld(

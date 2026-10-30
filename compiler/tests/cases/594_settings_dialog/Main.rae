@@ -68,15 +68,16 @@ func main() {
     ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.toon") and settingsState.toon is false
   )
 
-  # Speed is the shared step ladder, not a toggle.
-  let base: Float = settingsState.speed
-  settingsHandleAction(settingsState: settingsState, actionId: "settings.anim.faster")
-  check(label: "faster raises speed", ok: settingsState.speed > base)
-  settingsHandleAction(settingsState: settingsState, actionId: "settings.anim.slower")
+  # Antialiasing is a radio: SMAA by default, TAA and FXAA picked by their
+  # own buttons.
   check(
-    label: "slower returns"
-    ok: settingsState.speed <= base + 0.0001 and settingsState.speed >= base - 0.0001
+    label: "antialiasing defaults to SMAA"
+    ok: settingsState.antialias is SettingsAntialias.smaa
   )
+  settingsHandleAction(settingsState: settingsState, actionId: "settings.antialias.taa")
+  check(label: "the TAA button picks TAA", ok: settingsState.antialias is SettingsAntialias.taa)
+  settingsHandleAction(settingsState: settingsState, actionId: "settings.antialias.fxaa")
+  check(label: "the FXAA button picks FXAA", ok: settingsState.antialias is SettingsAntialias.fxaa)
 
   # Sky model is a radio, so re-picking the current one reports no change.
   check(label: "defaults to hosek", ok: settingsState.skyModel is SettingsSkyModel.hosek)

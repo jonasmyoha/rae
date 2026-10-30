@@ -51,6 +51,7 @@ open app3d/CameraWalkFollow
 open app3d/CharacterController
 open app3d/SettingsDialog
 open app3d/SettingsSky
+open app3d/SettingsPersist
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
@@ -393,11 +394,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     var speed: Float = 1.0
     var toonShading: Bool = true
 
-    var clipPanel: ControlPanel = createClipPanel(
-      world: uiWorld
-      uiSystems: uiSystems
-      gpuUi: gpuUi
-    )
     var transport: ControlPanel = createTransportPanel(
       world: uiWorld
       uiSystems: uiSystems
@@ -462,12 +458,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       )
     }
 
-    setPanelSelection(
-      panel: clipPanel
-      world: uiWorld
-      group: 1
-      id: (clipIndex as ClipKind).toString()
-    )
     setPanelButtonOn(
       panel: transport
       world: uiWorld
@@ -522,6 +512,30 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     settingsState.exposureCompensation = walkerExposureCompensation
     # the walker's camera follows the scene (the panel's toggle starts on)
     settingsState.autoExposure = true
+    # The settings panel's values and GAME / EDITOR as the last run left
+    # them (a hot reload; app3d/SettingsPersist), like the session above
+    if not headless and not walkerSelfTestRequested() {
+      var editor: Bool = uiModes.editor
+      if restoreSettingsState(
+        raw: readHotReloadStateFor(appId: settingsStateSlot(appId: settings.appId))
+        settingsState: settingsState
+        editor: editor
+      ) {
+        toonShading = settingsState.toon
+        playing = settingsState.playing
+        if hourSetting.length() > 0 {
+          settingsState.timeOfDay.hour = startHour
+        }
+        if editor is not uiModes.editor {
+          setUiModeEditor(
+            world: uiWorld
+            uiSystems: uiSystems
+            uiModes: uiModes
+            editor: editor
+          )
+        }
+      }
+    }
     # RAE_WALKER_DAY overrides the start day of the year (1..366; 193 in 1995
     # is a full moon), so a headless frame can look at any phase
     let daySetting: String = Sys.getEnv(name: "RAE_WALKER_DAY")
@@ -540,7 +554,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # Default SMAA, the settings pane toggles TAA; a forward frame has 4x MSAA
     # and no TAA
     if not settings.forward {
-      setTaaEnabled(renderer: renderer, on: settingsState.taa)
+      settingsApplyAntialias(renderer: renderer, settingsState: settingsState)
     }
     setRendererFullResolution(
       renderer: renderer
@@ -575,7 +589,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     light.sunDir = settingsKeyLightDir(settingsState: settingsState)
     light.sunColor = walkerSunColor(settingsState: settingsState, look: sceneLook)
     log(
-      "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
+      "[ui] panel buttons: {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
     )
 
     let startT: Float64 = Gpu2d.nowSeconds()
@@ -640,7 +654,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         world: own uiWorld
         uiSystems: own uiSystems
         gpuUi: gpuUi
-        clipPanel: own clipPanel
         transport: own transport
         charPanel: own charPanel
         settings: own settingsState

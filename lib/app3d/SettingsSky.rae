@@ -5,6 +5,8 @@
 # SettingsDialog owns SettingsState, the panel and its controls.
 import Math
 import Sys
+open GbufferSmaa
+open RendererDeferred
 open LightUnits
 open ui/Ecs
 open Vec3
@@ -55,6 +57,17 @@ func settingsMoonsTitle(settingsState: view SettingsState) ret String {
     ret "Moons: off"
   }
   ret "Moons: {settingsState.moonCount}"
+}
+
+# The panel's antialiasing on a deferred renderer: TAA on or off, and SMAA
+# or FXAA on the finished frame when it is off
+func settingsApplyAntialias(renderer: mod DeferredRenderer, settingsState: view SettingsState) {
+  setTaaEnabled(renderer: renderer, on: settingsState.antialias is SettingsAntialias.taa)
+  var mode: AntialiasMode = AntialiasMode.smaa
+  if settingsState.antialias is SettingsAntialias.fxaa {
+    mode = AntialiasMode.fxaa
+  }
+  setAntialiasMode(renderer: renderer, mode: mode)
 }
 
 # The panel holds values; these turn them into the things a renderer takes. They
