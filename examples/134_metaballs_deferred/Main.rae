@@ -278,6 +278,12 @@ func main() ret Int {
     toggleCameraRigMode(rig: cameraRig, camera: camera)
   }
   selectEditorPanelScene(editorPanel: editorPanel, scene: uiState.activeScene)
+  # The three scenes' chooser, this app's own part of the panel
+  var sceneChooser: EditorSceneChooser = createEditorSceneChooser(
+    editorPanel: editorPanel
+    title: "Scenes"
+    labels: List(String) { "Scene 1", "Scene 2", "Scene 3" }
+  )
   var light: Light3d = light1
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
@@ -382,6 +388,10 @@ func main() ret Int {
     let settingsChanged: Bool = panelFrame.settingsChanged
     let uiLayoutDirty: Bool = panelFrame.layoutChanged
     let hadUiEvents: Bool = uiActionCount(world: editorPanel.world) > 0
+    let unusedSceneClicked: Bool = updateEditorSceneChooser(
+      editorPanel: editorPanel
+      chooser: sceneChooser
+    )
     dispatchUiActions(
       world: editorPanel.world
       state: uiState

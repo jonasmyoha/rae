@@ -78,6 +78,8 @@ type ShowcaseState {
   camera: Camera3d
   cameraRig: CameraRig
   editorPanel: EditorPanel
+  # The views' buttons in the panel (keys 1 through 8 pick them too)
+  sceneChooser: EditorSceneChooser
   windowGeometry: WindowGeometry
   # The app's GPU manager: the grass's compute pass, buffers and pipelines
   # live in it (the renderer's mesh store lives in the renderer's)
@@ -130,9 +132,24 @@ func createShowcase() ret ShowcaseState {
     skyModel: SettingsSkyModel.preetham
   )
   settings.animateTime = false
-  let editorPanel: EditorPanel = createEditorPanel(
+  var editorPanel: EditorPanel = createEditorPanel(
     assetBase: "examples/136_walker_character/assets/"
     settings: settings
+  )
+  # The eight views' chooser, this app's own part of the panel
+  var sceneChooser: EditorSceneChooser = createEditorSceneChooser(
+    editorPanel: editorPanel
+    title: "Views"
+    labels: List(String) {
+      "Grove"
+      "Trees"
+      "Rocks"
+      "Fluffy"
+      "Evergreen"
+      "Spruces"
+      "Camphor"
+      "Roots"
+    }
   )
   var light: Light3d = defaultLight3d()
   applyEditorPanelSettings(
@@ -169,6 +186,7 @@ func createShowcase() ret ShowcaseState {
       camera: camera
       cameraRig: cameraRig
       editorPanel: own editorPanel
+      sceneChooser: own sceneChooser
       windowGeometry: own windowGeometry
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createGroveGrass(obstacles: grove.obstacles)
@@ -265,7 +283,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let deltaTime: Float = (now - state.lastTime) as Float
   state.lastTime = now
   state.time = state.time + deltaTime
-  stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
+  # the wind stands still while the settings' Pause holds the scene
+  var windDeltaTime: Float = 0.0
+  if state.editorPanel.settings.playing {
+    windDeltaTime = deltaTime
+  }
+  stepWind(state: state.wind, settings: state.windSettings, deltaTime: windDeltaTime)
   setRendererWind(
     renderer: state.renderer
     wind: windVector(state: state.wind, settings: state.windSettings)
@@ -298,6 +321,10 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     renderer: state.renderer
     light: state.light
     deltaTime: deltaTime
+  )
+  let unusedViewClicked: Bool = updateEditorSceneChooser(
+    editorPanel: state.editorPanel
+    chooser: state.sceneChooser
   )
   # The views from the keys, kept in step with the panel's scene chooser
   if Sdl3.isKeyPressed(key: Keys.key1) {

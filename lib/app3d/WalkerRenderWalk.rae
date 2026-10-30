@@ -147,8 +147,13 @@ func renderWalkerApp(
   inputSystem.lastLogRevision = inputSystem.logOverlay.revision
   let deltaTime: Float = frame.deltaTime
   let now: Float64 = frame.now
-  # The wind the trees, bushes and grass sway in, on this frame's time
-  stepWind(state: renderSystem.wind, settings: renderSystem.windSettings, deltaTime: deltaTime)
+  # The wind the trees, bushes and grass sway in, on this frame's time;
+  # still while the settings' Pause holds the scene
+  var windDeltaTime: Float = 0.0
+  if characterSystem.playing {
+    windDeltaTime = deltaTime
+  }
+  stepWind(state: renderSystem.wind, settings: renderSystem.windSettings, deltaTime: windDeltaTime)
   let frameWind: WindVector = windVector(
     state: renderSystem.wind
     settings: renderSystem.windSettings
