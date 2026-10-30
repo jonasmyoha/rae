@@ -120,7 +120,8 @@ of it; 6 m grown, placed at 4.8-7.2 m. The leaf is LeafOutline.heart. Its
 greens are about 2.4 times the old picture's average, in the same hue: the
 old toon crown was lit flat, and the mass shading and occlusion of the cards
 take that much away (measured in 143). Cost: 2543 cards, 9308 triangles
-near (T02: 5844). RAE_STYLIZED_OLD=lime keeps the old lime. Case 1256
+near (T02: 5844). RAE_STYLIZED_OLD=lime kept the old lime (removed in
+task 12). Case 1256
 checks the middle level's coverage (TreeCoverage with cards facing the
 view) and the silhouette. That check found the middle level of every
 treeGen tree covering 121-125% of its near level. TreeLevels.leafCardLevel
@@ -246,7 +247,8 @@ the instanced bush parts. The bush entities and their slowing are as
 before. The walkers had taken every field prop for a tree (a trunk body,
 grass kept off), which gave each bush an invisible trunk. `PropKind.hasTrunk`
 (false for the bush) is now respected by `walkerTrunkRules` and the grass
-obstacles. `RAE_STYLIZED_OLD=bush` keeps the old bushes. 137's far view
+obstacles. `RAE_STYLIZED_OLD=bush` kept the old bushes (removed in task
+12). 137's far view
 counts the bushes' impostors among its billboards (310), and its gate now
 checks for at least 300.
 
@@ -267,3 +269,39 @@ for the design: a straight trunk to the tip; rings of branches every
 little, more toward its tip; needles as flat, downward-hanging spray cards
 along each branch (shelves), not round masses; the same levels and
 impostor.
+
+## 7. Clean-up (task 12/12, 2026-10-30)
+
+With every tree rebuilt (tasks 2 - 11), the old ones are gone:
+
+- **Modules removed** from lib/stylizedTrees: Lime, SugarMaple, RedMaple,
+  JapaneseMaple, Ginkgo, Birch, Cypress, Spruce, SpruceControl, Palm,
+  FoliageCards, the forks and scaffolds (CurvedFork, CurvedForkBranch,
+  ForkSurface, CrownScaffold, SculpturalFork), Camphor and CamphorGeometry
+  (only a case used them), and Tree (used by nothing). Foliage keeps its
+  mesh, vertex, face, basis and tube helpers (the umbrella pine and the
+  meadow flowers use them), not its palm and broadleaf builders;
+  FluffyFoliage keeps the leaf-patch forms (broadleaf, bush, umbrella), not
+  the lime, cypress and spruce dispatch.
+- **The umbrella pine** is the one species not rebuilt (it is only planted
+  with RAE_STYLIZED_UMBRELLA=1; the warm broadleaf takes its share), so
+  StylizedTrees keeps its leaf-patch path (addUmbrellaKind) and nothing
+  else of the old trees: every other species and the bush are always
+  treeGen kinds. `RAE_STYLIZED_OLD` is removed.
+- **Cases:** 1235, 1242, 1243, 1245 - 1251, 1142 and 1147 tested only the
+  removed trees and are removed; 1141 checks the three leaf-patch forms;
+  1228 checks the umbrella pine's levels (the low-poly set's are 1254, the
+  rebuilt kinds' 1256). The GPU checks impostorBake and canopyCoverage bake
+  the low-poly set's species (the same kind of meshes); the birch's bark
+  and spray pictures stay as their test textures, the other old tree
+  pictures are removed.
+- **The tree lab** lost its tree studies, their files, reference pictures
+  and capture scripts (docs/tree-sets-design.md §5.4); its meadow flower
+  studies stay.
+- **FoliageMesh, FoliagePipeline and FoliageShadow stay:** the new trees'
+  leaf cards are foliage meshes (64-byte vertices carrying a wind pivot and
+  the card's corner, lib/FoliageMesh), drawn by the foliage pipeline
+  without culling and cast by the foliage shadow pass; only the bark and
+  the spruce's solid tiers would fit the standard mesh path, and the
+  umbrella pine and the meadow flowers use the foliage path too.
+

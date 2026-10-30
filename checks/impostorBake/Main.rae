@@ -1,6 +1,7 @@
 # Hardware check for the octahedral impostor bake (lib/ImpostorBake, tree
 # LOD step 4, docs/tree-lod-design.md §2.2): every tree species of
-# stylizedTrees/StylizedTrees baked on the GPU into an atlas of 8 x 8 views (the PC
+# lowPolyTrees/LowPolyTrees (Autumn Grove's meshes; the stylized set's trees
+# are treeGen kinds, baked by the walkers) baked on the GPU into an atlas of 8 x 8 views (the PC
 # settings; RAE_IMPOSTOR_PHONE=1 bakes the phone's 4 x 4), read back level by
 # level. It checks that every species covers part of its layer and that each
 # mip keeps level 0's coverage under the alpha cut within 3%, and writes the
@@ -11,9 +12,8 @@
 # impostors: the same coverage check over its mips, and its first layer
 # (the cells' pages) as PNGs. Last, every species baked again with its leaf
 # meshes in the 64-byte leaf layout (lib/FoliageMesh, as the walker uploads
-# them) must cover its layer as the 32-byte bake does, except camera-facing
-# birch cards, whose posed coverage is checked separately. A wrong vertex
-# size bakes garbage squares.
+# them) must cover its layer as the 32-byte bake does. A wrong vertex size
+# bakes garbage squares.
 # Exit code 0 = every check passed.
 import Math
 import Sys
@@ -33,13 +33,13 @@ open ImpostorAtlas
 open SurfaceImages
 open ImpostorBake
 open ImpostorMips
-open stylizedTrees/StylizedTrees
+open lowPolyTrees/LowPolyTrees
 open app3d/PropField
 open app3d/FarSprites
 open app3d/FarCanopy
 open CanopyBake
 
-const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm birch"
+const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm"
 
 func speciesName(species: view Int) ret String {
   let names: List(String) = speciesNames.split(sep: " ")
@@ -69,9 +69,8 @@ func levelZeroCoverage(
 }
 
 # Every species baked with its leaf meshes in the 64-byte leaf layout covers
-# its layer within 1% of `plain`, the 32-byte bake's coverage. Birch cards
-# instead face each baked view, and must retain a bounded canopy coverage.
-# Returns the number of species that fail.
+# its layer within 1% of `plain`, the 32-byte bake's coverage. Returns the
+# number of species that fail.
 func checkFoliageLayout(
   resources: mod GpuResources
   store: mod MeshStore
@@ -80,9 +79,9 @@ func checkFoliageLayout(
   images: view SurfaceImages
   folder: view String
 ) ret Int {
-  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
+  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: lowPolySpeciesCount)
   var leafMeshes: Int = 0
-  loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
+  loop var species: Int = 0, species < lowPolySpeciesCount, ++species {
     let meshes: List(MeshData) = speciesLevelMeshes(
       species: species
       patches: nearPatches
@@ -108,36 +107,6 @@ func checkFoliageLayout(
       meshes: handles
       albedos: speciesAlbedos(species: species)
     )
-    if species is speciesBirch {
-      subject.imageLayers = List(Int) {
-        0
-        1
-        1
-        1
-        -1
-      }
-    }
-    if species is speciesBroadleaf {
-      subject.imageLayers = List(Int) { 2, 3, 3, 3 }
-    }
-    if species is speciesOrange {
-      subject.imageLayers = List(Int) { 4, 5, 5, 5 }
-    }
-    if species is speciesRed {
-      subject.imageLayers = List(Int) { 6, 7, 7, 7 }
-    }
-    if species is speciesGold {
-      subject.imageLayers = List(Int) { 8, 9, 9, 9 }
-    }
-    if species is speciesCrimson {
-      subject.imageLayers = List(Int) { 10, 11, 11, 11 }
-    }
-    if species is speciesSpruce {
-      subject.imageLayers = List(Int) { 12, 13, 13, 13 }
-    }
-    if species is speciesCypress {
-      subject.imageLayers = List(Int) { 14, 15, 15, 15 }
-    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -154,17 +123,13 @@ func checkFoliageLayout(
     settings: settings
   )
   var failures: Int = 0
-  if leafMeshes is 0 or atlas.layers is not stylizedSpeciesCount {
+  if leafMeshes is 0 or atlas.layers is not lowPolySpeciesCount {
     failures = 1
   }
   loop var species: Int = 0, species < atlas.layers, ++species {
     let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
     let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
-    var same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
-    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
-      # Facing cards intentionally differ from the unposed ordinary layout.
-      same = leaf > 0.05 and leaf < 0.70
-    }
+    let same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
     if not same {
       failures = failures + 1
     }
@@ -173,78 +138,6 @@ func checkFoliageLayout(
     )
   }
   log("leaf layout: {leafMeshes} leaf meshes baked with their 64-byte vertices")
-  let posedSpecies: List(Int) = {
-    speciesBroadleaf
-    speciesOrange
-    speciesRed
-    speciesGold
-    speciesCrimson
-    speciesBirch
-  }
-  loop let species: Int in posedSpecies {
-    # Export the actual camera-facing textured crowns, not only the deliberately unposed
-    # 32-byte control above. A healthy layer average can hide empty view cells.
-    let size: Int = impostorLevelSize(settings: settings, level: 0)
-    let tall: Int = impostorLevelHeight(settings: settings, level: 0)
-    let posed: List(UInt8) = readLevel(
-      resources: resources
-      texture: atlas.albedoTexture
-      mip: 0
-      layer: species
-      size: size
-      tall: tall
-    )
-    let cellSize: Int = size / settings.viewsPerSide
-    loop var cell: Int = 0, cell < settings.viewsPerSide * settings.viewsPerSide, ++cell {
-      var covered: Int = 0
-      loop var y: Int = 0, y < cellSize, ++y {
-        loop var x: Int = 0, x < cellSize, ++x {
-          let column: Int = (cell % settings.viewsPerSide) * cellSize + x
-          let row: Int = (cell / settings.viewsPerSide) * cellSize + y
-          if posed.copyAtDefault(index: (row * size + column) * 4 + 3) >= 128 {
-            covered = covered + 1
-          }
-        }
-      }
-      if covered < cellSize * cellSize / 30 {
-        log(
-          "FAIL: posed {speciesName(species: species)} view {cell} loses its crown: {covered} pixels"
-        )
-        failures = failures + 1
-      }
-    }
-    var full: Float = 0
-    loop var mip: Int = 0, mip < settings.mips, ++mip {
-      let mipSize: Int = impostorLevelSize(settings: settings, level: mip)
-      let mipHeight: Int = impostorLevelHeight(settings: settings, level: mip)
-      let pixels: List(UInt8) = readLevel(
-        resources: resources
-        texture: atlas.albedoTexture
-        mip: mip
-        layer: species
-        size: mipSize
-        tall: mipHeight
-      )
-      let share: Float = coverage(pixels: pixels, cutoff: spriteCutoff)
-      if mip is 0 {
-        full = share
-      }
-      if share < full * 0.97 or share > full * 1.03 {
-        failures = failures + 1
-        log("FAIL: posed {speciesName(species: species)} mip {mip} changes coverage")
-      }
-      let wrote: Bool = savePicture(
-        path: "{folder}/{speciesName(species: species)}-posed-mip{mip}.png"
-        pixels: pixels
-        size: mipSize
-        tall: mipHeight
-        picture: PngPicture.albedo
-      )
-      if not wrote {
-        failures = failures + 1
-      }
-    }
-  }
   retireImpostorAtlas(atlas: atlas, resources: resources)
   ret failures
 }
@@ -390,7 +283,7 @@ func checkCanopy(
       if hash < 0.4 {
         continue
       }
-      let species: Int = (hash * 1000.0).toInt() % stylizedSpeciesCount
+      let species: Int = (hash * 1000.0).toInt() % lowPolySpeciesCount
       sprites.add(value: farSpriteAt(
         position: Vec3.create(
           x: column.toFloat() * 3.6 + 1.0 + hash
@@ -508,32 +401,19 @@ func main() ret Int {
   var failures: Int = 0
   var issuer: IdIssuer = IdIssuer.create()
   if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 256) {
+    # the cut-out test's picture (layer 1: a leaf spray with an alpha cut)
     var images: SurfaceImages = {}
     let paths: List(String) = {
       "lib/assets/trees/birchBark.png"
       "lib/assets/trees/birchSpray.png"
-      "lib/assets/trees/limeBark.png"
-      "lib/assets/trees/limeSpray.png"
-      "lib/assets/trees/sugarMapleBark.png"
-      "lib/assets/trees/sugarMapleSpray.png"
-      "lib/assets/trees/redMapleBark.png"
-      "lib/assets/trees/redMapleSpray.png"
-      "lib/assets/trees/ginkgoBark.png"
-      "lib/assets/trees/ginkgoSpray.png"
-      "lib/assets/trees/japaneseMapleBark.png"
-      "lib/assets/trees/japaneseMapleSpray.png"
-      "lib/assets/trees/spruceBark.png"
-      "lib/assets/trees/spruceSpray.png"
-      "lib/assets/trees/cypressBark.png"
-      "lib/assets/trees/cypressSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
     }
     var store: MeshStore = createMeshStore()
     failures = failures + checkCutout(resources: resources, store: store, images: images)
-    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: stylizedSpeciesCount)
-    loop var species: Int = 0, species < stylizedSpeciesCount, ++species {
+    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: lowPolySpeciesCount)
+    loop var species: Int = 0, species < lowPolySpeciesCount, ++species {
       let meshes: List(MeshData) = speciesLevelMeshes(
         species: species
         patches: nearPatches
@@ -554,36 +434,6 @@ func main() ret Int {
         meshes: handles
         albedos: speciesAlbedos(species: species)
       )
-      if species is speciesBirch {
-        subject.imageLayers = List(Int) {
-          0
-          1
-          1
-          1
-          -1
-        }
-      }
-      if species is speciesBroadleaf {
-        subject.imageLayers = List(Int) { 2, 3, 3, 3 }
-      }
-      if species is speciesOrange {
-        subject.imageLayers = List(Int) { 4, 5, 5, 5 }
-      }
-      if species is speciesRed {
-        subject.imageLayers = List(Int) { 6, 7, 7, 7 }
-      }
-      if species is speciesGold {
-        subject.imageLayers = List(Int) { 8, 9, 9, 9 }
-      }
-      if species is speciesCrimson {
-        subject.imageLayers = List(Int) { 10, 11, 11, 11 }
-      }
-      if species is speciesSpruce {
-        subject.imageLayers = List(Int) { 12, 13, 13, 13 }
-      }
-      if species is speciesCypress {
-        subject.imageLayers = List(Int) { 14, 15, 15, 15 }
-      }
       subjects.add(value: subject)
     }
     let started: Int = nowMs()
@@ -596,8 +446,8 @@ func main() ret Int {
       images: images
     )
     let milliseconds: Int = nowMs() - started
-    if atlas.layers is not stylizedSpeciesCount {
-      log("FAIL: the bake made {atlas.layers} layers, not {stylizedSpeciesCount}")
+    if atlas.layers is not lowPolySpeciesCount {
+      log("FAIL: the bake made {atlas.layers} layers, not {lowPolySpeciesCount}")
       ret 1
     }
     log(

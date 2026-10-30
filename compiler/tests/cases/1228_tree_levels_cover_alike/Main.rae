@@ -1,14 +1,12 @@
-# The nine completed tree LOD sets (birch LOD0 is checked separately).
-# Every original tree species' middle level of detail covers what its near level
-# does, within 3%, from each of 8 sides (docs/tree-lod-design.md §2.1): a
-# coarser crown is not bigger or smaller than the full one, so it does not
-# swell or shrink where the levels switch. The middle crowns of broadleaf,
-# umbrella and cypress once covered 18-28% more, the spruce's 6% less.
-# And a CPU billboard picture of it (app3d/SpriteBake, the far level before
-# the GPU impostors) keeps the full picture's coverage within 3% at each of
-# 4 mip levels (spriteMipChain): averaged mips under a plain alpha cut once
-# drifted to 85-113% at the fourth level. The impostor atlas's mips are
-# checked on the GPU (checks/impostorBake).
+# The umbrella pine, the one species of the stylized set still built from
+# Autumn Grove's leaf patches (the others are treeGen kinds, checked in case
+# 1256; the low-poly set's are case 1254): its middle level of detail
+# covers what its near level does, within 3%, from each of 8 sides
+# (docs/tree-lod-design.md §2.1), so it does not swell or shrink where the
+# levels switch. And a CPU billboard picture of it (app3d/SpriteBake, the
+# far level before the GPU impostors) keeps the full picture's coverage
+# within 3% at each of 4 mip levels (spriteMipChain). The impostor atlas's
+# mips are checked on the GPU (checks/impostorBake).
 import Math
 open stylizedTrees/StylizedTrees
 open app3d/TreeCoverage
@@ -19,7 +17,7 @@ const pictureMipLevels: Int = 4
 # A species' near level from the side, 192 x 128 pixels
 func speciesPicture(species: view Int) ret SpritePicture {
   ret bakeSpritePicture(
-    parts: speciesLevelMeshes(species: species, patches: nearPatches, leaves: nearLeaves)
+    parts: speciesLevelMeshes(species: species, patches: nearPatches)
     colors: speciesAlbedos(species: species)
     width: 192
     height: 128
@@ -32,22 +30,11 @@ func percent(share: view Float) ret Int {
 }
 
 func main() ret Int {
-  let names: List(String) = {
-    "broadleaf"
-    "umbrella"
-    "cypress"
-    "spruce"
-    "orange"
-    "red"
-    "gold"
-    "crimson"
-    "palm"
-  }
   var failures: Int = 0
-  loop var species: Int = 0, species < speciesBirch, ++species {
+  loop var species: Int = speciesUmbrella, species <= speciesUmbrella, ++species {
     let shares: List(Float) = levelCoverageShares(
-      near: speciesLevelParts(species: species, patches: nearPatches, leaves: nearLeaves)
-      level: speciesLevelParts(species: species, patches: midPatches, leaves: midLeaves)
+      near: speciesLevelMeshes(species: species, patches: nearPatches)
+      level: speciesLevelMeshes(species: species, patches: midPatches)
       directions: 8
       resolution: 256
       cardsFacing: false
@@ -63,9 +50,7 @@ func main() ret Int {
       failures = failures + 1
     }
     log(
-      "{names.copyAtFallback(index: species, fallback: "?")}: middle covers {percent(share: low)}-{percent(
-        share: high
-      )}% of the near crown ={fits}"
+      "umbrella: middle covers {percent(share: low)}-{percent(share: high)}% of the near crown ={fits}"
     )
     let picture: SpritePicture = speciesPicture(species: species)
     let full: Float = pictureCoverage(picture: picture, cutoff: spriteCutoff)

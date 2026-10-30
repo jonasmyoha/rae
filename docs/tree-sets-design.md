@@ -237,6 +237,16 @@ stylized set uses (found in step 2).
   island, which neither 138 nor the lab has now; they are a record of that
   work and are not ported.
 
+- **The tree studies went with the old trees (2026-10-30, stylized trees
+  12/12):** the stylized set's trees are treeGen kinds now
+  (docs/stylized-trees-new-technique.md), so the studies of the old ones
+  (`maples`, `japanese-maple`, `ginkgo`, `birches*`, `forks*`), their files
+  (`BirchGrove`, `BirchStudy`, `ForkStudy`, `GinkgoGrove`,
+  `JapaneseMapleGrove`, `StudyTrees`), their reference pictures, their
+  isolate/control switches and capture scripts are removed. The meadow
+  flower studies stay (`flowers`, `bellflowers` and its two other views);
+  the 146 gate renders the T02 scene and those four views.
+
 ### 5.5 Step 4, the low-poly set at every distance, done (0.2.184)
 
 - `lib/app3d/TreeForest.rae`: a forest of one tree set for an app that is
