@@ -54,6 +54,7 @@ open app3d/TerrainRocks
 open app3d/WalkerFlowers
 open app3d/GrassTuft
 open app3d/WalkerMeadow
+open FoliageMesh
 open app3d/WalkerBushes
 
 # The side of a terrain cell (m): one tile and one prop of each kind
@@ -830,14 +831,18 @@ func createWalkerTerrain(
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
   # the grass tufts are made in code (app3d/GrassTuft), not a Unity asset
-  let grassMesh: MeshHandle = uploadMeshDataForTerrain(
-    renderer: renderer
-    mesh: grassTuftMesh(seed: 71)
-  )
+  # with its blades' wind pivots, so the tufts bend in the wind
+  let grassMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: grassTuftMesh(seed: 71))
   let grassMaterial: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.11, y: 0.155, z: 0.038)
     roughness: 0.94
   )
+  var grassProp: PropInstancer = createPropInstancer(
+    mesh: grassMesh
+    material: grassMaterial
+    capacity: cellCount * 2
+  )
+  grassProp.sway = 1.0
   # One entity per pool slot per small prop kind, placed by updateInfiniteTerrain
   let streamedKinds: List(Int) = [
     kindRock
@@ -908,11 +913,7 @@ func createWalkerTerrain(
     rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
     flowerParts: own createWalkerDaisyParts(renderer: renderer, capacity: cellCount)
     harebellParts: own createWalkerHarebellParts(renderer: renderer, capacity: cellCount)
-    grassProp: own createPropInstancer(
-      mesh: grassMesh
-      material: grassMaterial
-      capacity: cellCount * 2
-    )
+    grassProp: own grassProp
     meadow: own createWalkerMeadow(renderer: renderer, gridSide: gridSide, cellSize: walkerCellSize)
     treeSet: treeSet
     forest: own treeForest
