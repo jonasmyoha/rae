@@ -1,0 +1,94 @@
+# app3d/WalkerBushes — the walkers' bushes round a cell's one: the cell's
+# bush drawn (into the forest field's bush group, or among the drawn props)
+# and, where they grow thick, a thicket of more bushes round it of many
+# sizes. Split from app3d/WalkerTerrain for its size.
+import Math
+import Noise
+import Vec3
+import Quat
+open WorldBiome
+open ecs/Transform
+open app3d/PropField
+open app3d/WalkerTerrain
+
+# One bush drawn at `transform`: into the forest field's bush group
+# (`placements`) when the tree set draws bushes as a forest kind, else
+# among the drawn props
+func addWalkerBush(
+  terrainSystem: mod WalkerTerrain
+  transform: view Transform3D
+  placements: mod List(PropPlacement)
+) {
+  if terrainSystem.bushKind >= 0 {
+    # a bush turns about +Z only (propTransform3D)
+    placements.add(
+      value: {
+        kind: terrainSystem.bushKind
+        position: transform.position
+        yaw: 2.0 * Math.atan2(y: transform.rotation.z, x: transform.rotation.w)
+        scale: transform.scale.x
+      }
+    )
+    ret
+  }
+  terrainSystem.drawnProps.add(
+    value: { kind: kindBush, variant: 0, model: transform3dToMatrix(t: transform) }
+  )
+}
+
+# The thicket round a cell's bush at `center`: where a thicket noise (about
+# 55 m across) is high, 2 - 9 more bushes crowd round it within 1.5 - 7 m,
+# from small to twice the cell's bush, now and then one huge (4 - 6 times).
+# They stand on drier ground than the cell's bush (grass 0.25), so the
+# thickets reach out of the woods into the meadow. They are drawn only:
+# the cell's bush is the one with a body that slows the walker.
+func addBushThicket(
+  terrainSystem: mod WalkerTerrain
+  cellX: view Int
+  cellY: view Int
+  center: view Vec3
+  placements: mod List(PropPlacement)
+) {
+  let thicket: Float = Noise.value2(x: center.x / 55.0, y: center.y / 55.0, seed: 611)
+  if thicket < 0.55 {
+    ret
+  }
+  let extra: Int = 2 + ((thicket - 0.55) / 0.45 * 7.0 + terrainHash(
+    cellX: cellX
+    cellY: cellY
+    seed: 615
+  )).toInt()
+  let start: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 617) * terrainTau
+  loop var i: Int = 0, i < extra, ++i {
+    let angle: Float = start + i.toFloat() * 2.3999632
+    let reach: Float = 1.5 + 5.5 * terrainHash(cellX: cellX * 31 + i, cellY: cellY, seed: 619)
+    let x: Float = center.x + Math.cos(x: angle) * reach
+    let y: Float = center.y + Math.sin(x: angle) * reach
+    if worldPropAllowed(
+      x: x
+      y: y
+      minGrass: 0.25
+      cfg: terrainSystem.biome
+    ) is false {
+      continue
+    }
+    let sizeDraw: Float = terrainHash(cellX: cellX, cellY: cellY * 37 + i, seed: 621)
+    var scale: Float = 0.7 + 2.3 * sizeDraw * sizeDraw
+    if terrainHash(cellX: cellX * 41 + i, cellY: cellY * 43, seed: 623) < 0.07 {
+      scale = 4.0 + 2.0 * sizeDraw
+    }
+    addWalkerBush(
+      terrainSystem: terrainSystem
+      transform: Transform3D {
+        position: Vec3.create(
+          x: x
+          y: y
+          z: walkerTerrainHeight(terrainSystem: terrainSystem, x: x, y: y) - 0.05
+        )
+        rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: angle * 3.7)
+        scale: Vec3.create(x: scale, y: scale, z: scale)
+      }
+      placements: placements
+    )
+  }
+}
