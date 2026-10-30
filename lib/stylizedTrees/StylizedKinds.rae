@@ -506,9 +506,9 @@ func addStylizedBushKind(
 # picture's average times its tint: linear 0.08, 0.15, 0.06); gray-brown
 # bark (the old bark's average times its 0.65 gray: 0.175, 0.117, 0.084).
 # Whorl growth (treeGen/WhorlGrower), each whorl one solid tier (treeGen/
-# SkirtTiers, §13 of the design): the low-poly spruce's skirt with a jagged
-# rim drooping to the bough tips, three bands of tone from the trunk to the
-# rim and a dark underside, lit by smooth broad normals. Only the trunk
+# SkirtTiers, §13 - §14 of the design): deeply overlapping tiers whose
+# ragged rims droop in lobes to the bough tips, one green a tier's top and
+# a darker underside, lit by smooth broad normals. Only the trunk
 # under the lowest tier is drawn (no branches), and no wind for now.
 func spruceKind() ret TreeKind {
   ret TreeKind {
@@ -531,13 +531,13 @@ func spruceKind() ret TreeKind {
     }
     cardSize: 0.5
     cardLayers: 8.0
-    # a dark conifer green, less saturated than the old one (as the
-    # cypress's); a tier's trunk band and underside are darker, its middle
-    # band this green darkened, its rim the lighter one (SkirtTiers)
+    # a deep spruce green, little red and blue in it so it does not turn
+    # gray: two close greens for the tiers' tops, alternating, and a darker
+    # one for their undersides (SkirtTiers)
     greens: List(Vec3) {
-      Vec3.create(x: 0.08, y: 0.15, z: 0.085)
-      Vec3.create(x: 0.095, y: 0.172, z: 0.098)
-      Vec3.create(x: 0.066, y: 0.128, z: 0.072)
+      Vec3.create(x: 0.03, y: 0.085, z: 0.038)
+      Vec3.create(x: 0.034, y: 0.093, z: 0.04)
+      Vec3.create(x: 0.019, y: 0.055, z: 0.026)
     }
     bark: { color: Vec3.create(x: 0.2, y: 0.135, z: 0.097), streakDepth: 0.45 }
     middleKeep: 3
@@ -553,7 +553,7 @@ func spruceKind() ret TreeKind {
       branchesMin: 4
       branchesMax: 6
       broken: 0.2
-      baseReach: 0.32
+      baseReach: 0.29
       taper: 0.75
       angleMin: 1.3
       angleMax: 1.45

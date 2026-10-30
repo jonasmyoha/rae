@@ -3,7 +3,8 @@
 Status: accepted and built (2026-10-29), rebuilt in rounds 3 and 4
 (2026-10-30): `treeGen/WhorlGrower`, `treeGen/SkirtTiers`,
 `StylizedKinds.spruceKind`. Cards never read as a spruce (rounds 1 - 3);
-§13, round 4, builds it from solid tiers, the low-poly spruce made better.
+§13 - §14, rounds 4 and 5, build it from solid tiers, the low-poly spruce
+made better.
 
 The other stylized trees were rebuilt with leaf masses: ellipsoid clumps
 whose skins are filled with camera-facing stamp cards
@@ -317,4 +318,24 @@ is the low-poly one's approach, made better:
   segments round each tier (about 2,500 triangles), middle 18 (100% of
   the near outline). No leaf picture (the kind's stamp, card size, layers
   and middle thinning are unread), no wind, only the lower trunk.
+
+## 14. Round 5: no bands, a deeper green, a less cartoony shape (2026-10-30)
+
+Round 4 read as banded (its three bands of tone showed as stripes on every
+tier), grayish and light, and goofy: stacked lampshades.
+
+- **No bands:** a tier's top is one green. Neighboring tiers alternate
+  between the kind's first two greens, which are close; the undersides
+  take its third, darker one.
+- **Green:** 0.03, 0.085, 0.038 and 0.034, 0.093, 0.04 for the tops,
+  0.019, 0.055, 0.026 underneath: a deep spruce green with little red and
+  blue in it (the old 0.08, 0.15, 0.085 rendered gray).
+- **Shape:** every whorl its own tier (`mostSkirts` 14, was 8), each
+  rising 2.2 times the step to the next (was 1.7), so the tiers overlap
+  deeply and read as layered boughs. Each tier is tilted a few degrees its
+  own way (5 - 9% a meter), so the tiers draw no level lines. The rims
+  are ragged: 0.72 of the mean bough reach between the boughs (was 0.82),
+  three waves of unevenness, and broader bough lobes (the pull as cos^6,
+  was cos^8) whose tips hang half again lower than their branches end. A
+  narrower cone (`baseReach` 0.29, was 0.32): 67% of the height wide.
 

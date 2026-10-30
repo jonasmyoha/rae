@@ -6,9 +6,9 @@
 # the tree (treeGen/WhorlGrower) is one tier: a solid skirt whose top falls
 # from the trunk to an uneven rim, pushed out and down along each branch
 # to the branch's tip (the drooping bough tips); its underside closes it.
-# A tier is three bands of tone, dark at the trunk and light at the rim,
-# and its underside dark, so the tiers read the way the low-poly tree's
-# do, with more life in their edges.
+# A tier's top is one green (bands of tone read as stripes), its underside
+# darker; the tiers overlap deeply and their rims are ragged lobes, one a
+# bough, so they read as layered boughs rather than stacked discs.
 import Math
 import Vec3
 open treeGen/TreeParams
@@ -33,12 +33,15 @@ type Skirt {
   tips: List(SkirtTip)
   reach: Float
   rise: Float
+  # the tier's tilt: how far it rises per meter out toward `tiltAzimuth`
+  tilt: Float
+  tiltAzimuth: Float
 }
 
 # The fewest and most tiers a tree has: whorls past the most share a tier
 const fewestSkirts: Int = 8
 
-const mostSkirts: Int = 8
+const mostSkirts: Int = 14
 
 # How much a bough tip at `tip` pulls the rim at `azimuth` (1 on it, 0 a
 # quarter turn away)
@@ -47,13 +50,17 @@ func tipPull(tip: view SkirtTip, azimuth: view Float) ret Float {
   if along <= 0.0 {
     ret 0.0
   }
-  ret Math.pow(base: along, exp: 8.0)
+  ret Math.pow(base: along, exp: 6.0)
 }
 
-# The rim's reach at `azimuth`: the skirt's own between the tips, out to a
-# tip's along it
+# The rim's reach at `azimuth`: the skirt's own between the tips (ragged:
+# three waves of unevenness), out to a tip's along it, so each bough is a
+# lobe of the rim
 func skirtReach(skirt: view Skirt, azimuth: view Float) ret Float {
-  var reach: Float = skirt.reach * (0.94 + 0.06 * Math.sin(x: azimuth * 5.0))
+  let ragged: Float = 0.06 * Math.sin(x: azimuth * 5.0) + 0.05 * Math.sin(x: azimuth * 11.0 + 1.3) + 0.04 * Math.sin(
+    x: azimuth * 19.0 + 2.1
+  )
+  var reach: Float = skirt.reach * (0.9 + ragged)
   loop let tip: view SkirtTip in skirt.tips {
     reach = Math.max(
       a: reach
@@ -64,18 +71,19 @@ func skirtReach(skirt: view Skirt, azimuth: view Float) ret Float {
 }
 
 # How far the rim hangs below the whorl at `azimuth` (the tips' drop, and a
-# third of their mean between them)
+# little under half their mean between them; the tips hang half again
+# lower than their branches end, as bough tips droop)
 func skirtDrop(skirt: view Skirt, azimuth: view Float) ret Float {
   var mean: Float = 0.0
   loop let tip: view SkirtTip in skirt.tips {
     mean = mean + tip.drop
   }
   mean = mean / Math.max(a: skirt.tips.length.toFloat(), b: 1.0)
-  var drop: Float = mean * 0.35
+  var drop: Float = mean * 0.45
   loop let tip: view SkirtTip in skirt.tips {
     drop = Math.max(
       a: drop
-      b: mean * 0.35 + (tip.drop - mean * 0.35) * tipPull(tip: tip, azimuth: azimuth)
+      b: mean * 0.45 + (tip.drop * 1.5 - mean * 0.45) * tipPull(tip: tip, azimuth: azimuth)
     )
   }
   ret drop
@@ -150,26 +158,28 @@ func treeSkirts(skeleton: view TreeSkeleton) ret List(Skirt) {
         }
       }
     }
-    let reach: Float = 0.82 * sum / Math.max(a: tips.length.toFloat(), b: 1.0)
-    # the top rises like the low-poly tier's: about 1.7 times the step to
-    # the next tier (more than its reach on the small upper tiers, so no
-    # trunk shows between them); the top tier to the tip
+    let reach: Float = 0.72 * sum / Math.max(a: tips.length.toFloat(), b: 1.0)
+    # the top rises about 2.2 times the step to the next tier: the tiers
+    # overlap deeply, so they read as layered boughs, not stacked discs
+    # (and no trunk shows between the small upper ones); the top tier to
+    # the tip
     var next: Float = top
     if tier + 1 < tiers {
       next = heights.copyAtDefault(index: (tier + 1) * heights.length / tiers)
     }
-    var rise: Float = (next - base) * 1.7
+    var rise: Float = (next - base) * 2.2
     if tier + 1 is tiers {
       rise = top - base
     }
-    skirts.add(
-      value: {
-        base: trunkPointAt(trunk: trunk, z: base)
-        tips: own tips
-        reach: Math.max(a: reach, b: 0.2)
-        rise: rise
-      }
-    )
+    skirts.add(value: {
+      base: trunkPointAt(trunk: trunk, z: base)
+      tips: own tips
+      reach: Math.max(a: reach, b: 0.2)
+      rise: rise
+      # a few degrees each its own way: level tiers draw straight lines
+      tilt: 0.05 + 0.04 * Math.sin(x: base * 7.3)
+      tiltAzimuth: base * 2.399963
+    })
   }
   ret skirts
 }
@@ -209,11 +219,22 @@ func tierTopPoint(
 ) ret Vec3 {
   let reach: Float = skirtReach(skirt: skirt, azimuth: azimuth) * (1.0 + 0.07 * jag)
   let drop: Float = skirtDrop(skirt: skirt, azimuth: azimuth) * (1.0 + 0.1 * jag)
+  let out: Float = reach * share
   ret Vec3.create(
-    x: skirt.base.x + Math.cos(x: azimuth) * reach * share
-    y: skirt.base.y + Math.sin(x: azimuth) * reach * share
-    z: skirt.base.z + skirt.rise * Math.pow(base: 1.0 - share, exp: 1.2) - drop * share * share
+    x: skirt.base.x + Math.cos(x: azimuth) * out
+    y: skirt.base.y + Math.sin(x: azimuth) * out
+    z: skirt.base.z + skirt.rise * Math.pow(base: 1.0 - share, exp: 1.2) - drop * share * share + tierTilt(
+      skirt: skirt
+      azimuth: azimuth
+      out: out
+    )
   )
+}
+
+# How much higher a tier is `out` meters from the trunk toward `azimuth`
+# for its tilt
+func tierTilt(skirt: view Skirt, azimuth: view Float, out: view Float) ret Float {
+  ret skirt.tilt * out * Math.cos(x: azimuth - skirt.tiltAzimuth)
 }
 
 # The rim's unevenness at segment `index` of `segments` (-1 to 1), the same
@@ -314,7 +335,7 @@ func addTierUnderside(
       point: Vec3.create(
         x: skirt.base.x + Math.cos(x: azimuth) * reach * 0.15
         y: skirt.base.y + Math.sin(x: azimuth) * reach * 0.15
-        z: skirt.base.z - drop * 0.1
+        z: skirt.base.z - drop * 0.1 + tierTilt(skirt: skirt, azimuth: azimuth, out: reach * 0.15)
       )
       normal: normal
     )
@@ -331,9 +352,8 @@ func addTierUnderside(
 }
 
 # A level of a whorled `skeleton`'s tiers, `segments` round each, as three
-# tone meshes darkest first:
-# the band at the trunk and the undersides darkest, the middle band the
-# kind's main green darkened, the rim band its lighter one
+# tone meshes darkest first (the kind's greens: the undersides its third,
+# the tiers' tops its first and second, alternating)
 func skirtLevel(
   skeleton: view TreeSkeleton
   treeKind: view TreeKind
@@ -351,18 +371,11 @@ func skirtLevel(
     }
     meshes.add(value: own mesh)
   }
+  var tier: Int = 0
   loop let skirt: view Skirt in skirts {
-    # each tier turned its own way, so the rims' points do not line up
+    # each tier turned its own way, so the rims' lobes do not line up
     let turn: Float = nextUnit(random: random) * 6.2831853
     if let mesh: mod MeshData = meshes.modAt(index: 0) {
-      addTierBand(
-        mesh: mesh
-        skirt: skirt
-        turn: turn
-        segments: segments
-        inner: 0.0
-        outer: 0.3
-      )
       addTierUnderside(
         mesh: mesh
         skirt: skirt
@@ -370,35 +383,32 @@ func skirtLevel(
         segments: segments
       )
     }
-    if let mesh: mod MeshData = meshes.modAt(index: 1) {
+    # a tier's top is one green (no bands); neighbors alternate between two
+    # close ones
+    if let mesh: mod MeshData = meshes.modAt(index: 1 + tier % 2) {
       addTierBand(
         mesh: mesh
         skirt: skirt
         turn: turn
         segments: segments
-        inner: 0.3
-        outer: 0.65
+        inner: 0.0
+        outer: 0.5
       )
-    }
-    if let mesh: mod MeshData = meshes.modAt(index: 2) {
       addTierBand(
         mesh: mesh
         skirt: skirt
         turn: turn
         segments: segments
-        inner: 0.65
+        inner: 0.5
         outer: 1.0
       )
     }
+    tier = tier + 1
   }
   let main: Vec3 = treeKind.greens.copyAtDefault(index: 0)
-  let lighter: Vec3 = treeKind.greens.copyAtFallback(index: 1, fallback: main)
-  let darker: Vec3 = treeKind.greens.copyAtFallback(index: 2, fallback: main)
-  let albedos: List(Vec3) = List(Vec3) {
-    Vec3.vscale(a: darker, s: 0.45)
-    Vec3.vscale(a: main, s: 0.66)
-    Vec3.vscale(a: lighter, s: 0.76)
-  }
+  let other: Vec3 = treeKind.greens.copyAtFallback(index: 1, fallback: main)
+  let under: Vec3 = treeKind.greens.copyAtFallback(index: 2, fallback: main)
+  let albedos: List(Vec3) = List(Vec3) { under, main, other }
   ret LeafCardLevel { meshes: own meshes, albedos: albedos }
 }
 
