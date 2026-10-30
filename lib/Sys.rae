@@ -263,6 +263,22 @@ func exists(path: view String) ret Bool {
   }
 }
 
+# Where a stdlib file such as "lib/assets/grass/meadowTuft.png" is: the path
+# as given when it is there (relative to the working directory: a project's
+# own copy, or an app bundle's), else a "lib/..." path in $RAE_STDLIB, the
+# toolchain's lib/ directory `rae run` exports (that directory IS the stdlib
+# `lib`, so the leading "lib/" is dropped); any other path as given
+func stdlibPath(path: view String) ret String {
+  if exists(path: path) or path.startsWith(prefix: "lib/") is false {
+    ret path
+  }
+  let stdlib: String = getEnv(name: "RAE_STDLIB")
+  if stdlib.length() is 0 {
+    ret path
+  }
+  ret "{stdlib}/{path.sub(start: 4, len: path.length() - 4)}"
+}
+
 func lockFile(path: view String) ret Bool {
   unsafe {
     ret rae_sys_lock_file(path: path)

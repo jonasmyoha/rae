@@ -182,6 +182,11 @@ grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort
 (cd "$root" && find lib -name '*.wgsl') | while IFS= read -r wgsl; do
   mkdir -p "$stage/$(dirname "$wgsl")"; cp "$root/$wgsl" "$stage/$wgsl"
 done
+# The stdlib's own pictures (lib/assets: the grass tuft, test textures), read
+# the same way at "lib/assets/..."; without them a device has no grass
+(cd "$root" && find lib/assets -name '*.png') | while IFS= read -r picture; do
+  mkdir -p "$stage/$(dirname "$picture")"; cp "$root/$picture" "$stage/$picture"
+done
 
 # Box3D (the C-library physics track, lib/box3d): on the desktop `rae` links
 # the host's prebuilt libbox3d.a, which is no use on a device, so an app whose
