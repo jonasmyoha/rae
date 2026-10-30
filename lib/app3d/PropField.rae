@@ -108,6 +108,8 @@ type PropGroup {
   cellRadius: List(Float)
   # Its props of each kind
   kindCounts: List(Int)
+  # Each placement's level of detail and fade (app3d/PropFade)
+  lodStates: PropLodStates = createPropLodStates(count: 0)
 }
 
 # What the gather sees from: the eye, the unit direction it looks, and the
@@ -180,6 +182,13 @@ type PropField {
   # The field's own props of each kind (finishPropField), and the groups
   kindCounts: List(Int)
   groups: List(PropGroup)
+  # Each own placement's level of detail and fade (app3d/PropFade), and the
+  # gather's frame count (a prop not drawn in the frame before takes its
+  # level at once)
+  lodStates: PropLodStates = createPropLodStates(count: 0)
+  lodFrame: Int = 0
+  # The seconds since the last gather (gatherPropField)
+  lodDeltaTime: Float = 0.0
 }
 
 # An empty field over the square from (`originX`, `originY`) `size` meters on a
@@ -426,6 +435,7 @@ func sortPropsIntoCells(
     cellCenterZ: own cellCenterZ
     cellRadius: own cellRadius
     kindCounts: own kindCounts
+    lodStates: createPropLodStates(count: placements.length)
   }
 }
 
@@ -456,6 +466,7 @@ func finishPropField(field: mod PropField) {
   field.cellCenterZ = sorted.cellCenterZ
   field.cellRadius = sorted.cellRadius
   field.kindCounts = sorted.kindCounts
+  field.lodStates = createPropLodStates(count: field.placements.length)
   # The batches: per kind, per level, per part, as many as the kind's props
   # (at most batchLimit when it is set)
   field.drawDistance = 0.0

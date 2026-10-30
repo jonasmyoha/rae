@@ -1,5 +1,6 @@
 # The prop field (lib/app3d/PropField.rae) without a GPU: its cells, its view
-# test, which level of detail a distance picks, and what one gather puts in
+# test, which level of detail a distance picks and how a switch fades over
+# time, and what one gather puts in
 # its batches. Drawing needs a window; an app's screenshots cover it.
 import Vec3
 open Scene3d
@@ -131,26 +132,137 @@ func main() ret Int {
   check(label: "15 m away: the near level", ok: propLodAt(kind: treeKind, distance: 15.0) is 0)
   check(label: "45 m away: the far level", ok: propLodAt(kind: treeKind, distance: 45.0) is 1)
   check(label: "past 80 m: not drawn", ok: propLodAt(kind: treeKind, distance: 90.0) is none)
-  # The cross-fades (app3d/PropFade): a band of 10% of a level's end, at least
-  # 4 m, centered on it; inside it the near level fades out and the next in
-  let whole: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 15.0)
-  check(
-    label: "15 m away: the near level whole, no fade"
-    ok: whole.near is 0 and whole.far is -1 and whole.threshold is 0.0
+  # The fades (app3d/PropFade): a prop switches level a quarter of the fade
+  # band (10% of the level's end, at least 4 m) past the boundary, then
+  # fades over propFadeSeconds (0.6 s) whatever the eye does, and finishes
+  var states: PropLodStates = createPropLodStates(count: 1)
+  var frame: Int = 1
+  var step: PropLodStep = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 25.0
+    frame: frame
+    deltaTime: 0.0
   )
-  let crossing: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 30.0)
-  check(
-    label: "30 m away (band 28-32): the near level fading out, the far one in, halfway"
-    ok: crossing.near is 0 and crossing.far is 1 and crossing.threshold is 0.5
-  )
-  let leaving: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 82.0)
-  check(
-    label: "82 m away (band 76-84): the last level fading out alone, three quarters"
-    ok: leaving.near is 1 and leaving.far is -1 and leaving.threshold is 0.75
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
   )
   check(
-    label: "past the last band: not drawn"
-    ok: propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 85.0).near is -1
+    label: "first seen at 25 m: the near level whole, no fade"
+    ok: step.pick.near is 0 and step.pick.far is -1 and step.pick.threshold is 0.0
+  )
+  frame = frame + 1
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 30.5
+    frame: frame
+    deltaTime: 0.1
+  )
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
+  )
+  check(
+    label: "30.5 m, within a quarter band past the 30 m end: still the near level"
+    ok: step.pick.near is 0 and step.pick.far is -1
+  )
+  frame = frame + 1
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 32.0
+    frame: frame
+    deltaTime: 0.1
+  )
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
+  )
+  check(
+    label: "32 m: the fade starts, the near level out, the far one in"
+    ok: step.pick.near is 0 and step.pick.far is 1 and step.pick.threshold < 0.01
+  )
+  frame = frame + 1
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 32.0
+    frame: frame
+    deltaTime: 0.3
+  )
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
+  )
+  check(
+    label: "the eye stopped, 0.3 s later: halfway"
+    ok: step.pick.near is 0 and step.pick.far is 1 and step.pick.threshold > 0.49 and step.pick.threshold < 0.51
+  )
+  frame = frame + 1
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 32.0
+    frame: frame
+    deltaTime: 0.3
+  )
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
+  )
+  check(
+    label: "0.6 s in: the far level whole, the fade finished though the eye stopped"
+    ok: step.pick.near is 1 and step.pick.far is -1 and step.pick.threshold is 0.0
+  )
+  frame = frame + 1
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 83.0
+    frame: frame
+    deltaTime: 0.1
+  )
+  storePropLod(
+    states: states
+    index: 0
+    step: step
+    frame: frame
+  )
+  check(
+    label: "83 m, past the last level's end: it fades out alone"
+    ok: step.pick.near is 1 and step.pick.far is -1 and step.pick.threshold > 0.0
+  )
+  # not drawn for a frame: it takes its level at once
+  frame = frame + 2
+  step = nextPropLod(
+    states: states
+    index: 0
+    maxDistances: treeKind.lodEnds
+    distance: 20.0
+    frame: frame
+    deltaTime: 0.1
+  )
+  check(
+    label: "seen again at 20 m after a frame unseen: the near level at once"
+    ok: step.pick.near is 0 and step.pick.far is -1 and step.pick.threshold is 0.0
   )
   # The eye 5 m behind the origin, 1.7 m up, looking down +y
   let camera: Camera3d = {
@@ -185,7 +297,12 @@ func main() ret Int {
       radius: 1.0
     )
   )
-  gatherPropField(field: field, propView: propView, toon: true)
+  gatherPropField(
+    field: field
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
   check(
     label: "the gather draws the near tree, the far tree and the card ({field.visibleCount})"
     ok: field.visibleCount is 3
@@ -208,7 +325,12 @@ func main() ret Int {
     nearZ: 0.1
     farZ: 500.0
   }
-  gatherPropField(field: field, propView: propViewOf(camera: away, aspect: 1.6), toon: true)
+  gatherPropField(
+    field: field
+    propView: propViewOf(camera: away, aspect: 1.6)
+    toon: true
+    deltaTime: 0.0
+  )
   check(
     label: "from far away nothing is drawn"
     ok: field.visibleCount is 0 and batchCount(field: field, index: 0) is 0
@@ -287,7 +409,12 @@ func main() ret Int {
     placement: { kind: pine, position: Vec3.create(x: 0.0, y: 60.0, z: foot), yaw: 0.0, scale: 2.0 }
   )
   finishPropField(field: billboards)
-  gatherPropField(field: billboards, propView: propView, toon: true)
+  gatherPropField(
+    field: billboards
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
   let records: view List(Float) = billboards.spriteBatch.records
   check(
     label: "a far prop at a sprite level is one billboard, not meshes"

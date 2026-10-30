@@ -123,8 +123,18 @@ func main() ret Int {
     farZ: 500.0
   }
   let propView: PropView = propViewOf(camera: camera, aspect: 1.6)
-  gatherPropField(field: whole, propView: propView, toon: true)
-  gatherPropField(field: grouped, propView: propView, toon: true)
+  gatherPropField(
+    field: whole
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
+  gatherPropField(
+    field: grouped
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
   check(
     label: "groups gather what one field of every prop does ({grouped.visibleCount} and {whole.visibleCount})"
     ok: grouped.visibleCount is whole.visibleCount and grouped.visibleCount is 6 and batchCount(
@@ -147,7 +157,12 @@ func main() ret Int {
   check(label: "...with the same model matrices", ok: sameRecords)
   # A tile let go: its props are gone, the others stay
   clearPropGroup(field: grouped, group: 0)
-  gatherPropField(field: grouped, propView: propView, toon: true)
+  gatherPropField(
+    field: grouped
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
   check(
     label: "a cleared group is not drawn ({grouped.visibleCount})"
     ok: grouped.visibleCount is 3 and propFieldPlacementCount(field: grouped) is 4
@@ -156,7 +171,12 @@ func main() ret Int {
   var moved: List(PropPlacement) = List.create(PropPlacement, cap: 1)
   moved.add(value: bushAt(kind: bush, x: 10.0, y: 15.0))
   setPropGroup(field: grouped, group: 3, placements: moved)
-  gatherPropField(field: grouped, propView: propView, toon: true)
+  gatherPropField(
+    field: grouped
+    propView: propView
+    toon: true
+    deltaTime: 0.0
+  )
   check(
     label: "a group set again replaces its props ({grouped.visibleCount})"
     ok: grouped.visibleCount is 2 and propFieldPlacementCount(field: grouped) is 2

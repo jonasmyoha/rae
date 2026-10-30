@@ -181,6 +181,8 @@ over the forest 9.7 ms -> 10.9 ms (run-to-run noise about 0.4 ms).
   the near level as `fade`, the far level as `1 - fade`. TAA turns the dither
   into a smooth blend; with no TAA, a fixed pattern still never pops.
 * A little distance hysteresis is not needed: the fade is continuous.
+  (Superseded: fades are timed now, with a quarter-band hysteresis; see
+  the timed fades below.)
 * The same fade at the far end: past the impostors' distance, trees fade out
   into the far canopy (2.4) instead of vanishing.
 
@@ -198,6 +200,24 @@ pipeline (`ShadowMapsRecords`), so the solid ones keep the depth-only path.
 A scripted 8 m camera move through 143 shows trees changing gradually, with
 no pop; the frame time did not grow (19.3 ms before, 18.5 ms after, within
 the run-to-run noise).
+
+**Timed fades (2026-10-30).** A fade that followed the distance stopped
+wherever the eye stopped: a tree inside a band stayed half one level and
+half the next, dithered, for as long as the eye stood there. Now a switch is
+a short animation that always finishes (`app3d/PropFade`): each placement
+keeps the level it shows, the level it fades from, the fade's progress and
+the gather frame it was last drawn in (`PropLodStates`, on the field and on
+each group). When its distance passes the end of the level it shows by a
+quarter of that level's fade band (the hysteresis, so a tree at a boundary
+does not flip), it fades to the new level over `propFadeSeconds` (0.6 s),
+whatever the eye does after, with the same threshold and seed on both
+levels as before. Past the last level it fades out alone, and fades back
+in the same way. A tree the gather did not draw in the frame before (out of
+view, out of reach, the first frame) takes its level at once.
+`gatherPropField` and `gatherTreeForest` take the frame's `deltaTime`.
+Case 1136 checks the hold, the start, the halfway point with the eye
+stopped, the finish, the fade out and the jump after a frame unseen. The
+far canopy's hand-over (2.4) still follows the distance (queued).
 
 ### 2.4 Past 140 m: the far canopy
 

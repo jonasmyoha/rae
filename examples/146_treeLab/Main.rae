@@ -459,7 +459,12 @@ func runLabFrame(state: mod LabState) {
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let gatherStart: Float64 = Gpu2d.nowSeconds()
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
-    gatherTreeForest(forest: forest, camera: state.camera, aspect: aspect)
+    gatherTreeForest(
+      forest: forest
+      camera: state.camera
+      aspect: aspect
+      deltaTime: deltaTime
+    )
   }
   state.statsGatherSeconds = state.statsGatherSeconds + (Gpu2d.nowSeconds() - gatherStart)
   gpuPassTimingBegin(renderer: state.renderer)

@@ -20,8 +20,17 @@ open ImpostorAtlas
 
 # Fill the batches with this frame's props: only cells within the draw
 # distance and in the view, and in them only props in the view, each at the
-# level of detail its distance picks. `toon` is the frame's shading.
-func gatherPropField(field: mod PropField, propView: view PropView, toon: view Bool) {
+# level of detail its distance picks, a switch fading over propFadeSeconds
+# (app3d/PropFade; `deltaTime` the seconds since the last gather). `toon`
+# is the frame's shading.
+func gatherPropField(
+  field: mod PropField
+  propView: view PropView
+  toon: view Bool
+  deltaTime: view Float
+) {
+  field.lodFrame = field.lodFrame + 1
+  field.lodDeltaTime = deltaTime
   loop var b: Int = 0, b < field.batches.length, ++b {
     if let batch: mod InstanceBatch = field.batches.modAt(index: b) {
       resetInstanceBatch(batch: batch)
@@ -197,8 +206,8 @@ func propLevelDraw(
 }
 
 # One prop into its batches, if it is in reach and in the view: at the level
-# its distance picks, or inside a fade band at two levels, the near one
-# fading out and the far one fading in (app3d/PropFade)
+# it shows, or while it switches at two levels, the old one fading out and
+# the new one fading in (app3d/PropFade)
 func gatherProp(
   field: mod PropField
   propView: view PropView
@@ -213,25 +222,37 @@ func gatherProp(
   var pick: PropLodPick = { near: -1, far: -1, threshold: 0.0 }
   var nearDraw: PropDraw = { sprite: false, firstBatch: 0, partCount: 0, model: mat4Identity() }
   var farDraw: PropDraw = nearDraw
+  var step: PropLodStep = { shown: -1, from: -1, progress: 1.0, pick: pick }
+  var stepped: Bool = false
   if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
     let center: Vec3 = propCenter(kind: kind, placement: placement)
     let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
-    pick = propLodPickFrom(maxDistances: kind.lodEnds, distance: distance)
-    if pick.near >= 0 and propSphereInView(
+    if propSphereInView(
       propView: propView
       center: center
       radius: propRadius(kind: kind, placement: placement)
     ) {
-      drawn = true
-      let model: Mat4 = propModelAt(field: field, group: group, index: index)
-      nearDraw = propLevelDraw(
+      step = nextPropFieldLod(
         field: field
-        propView: propView
-        placement: placement
-        model: model
-        kind: kind
-        level: pick.near
+        group: group
+        index: index
+        maxDistances: kind.lodEnds
+        distance: distance
       )
+      stepped = true
+      pick = step.pick
+      drawn = pick.near >= 0 or pick.far >= 0
+      let model: Mat4 = propModelAt(field: field, group: group, index: index)
+      if pick.near >= 0 {
+        nearDraw = propLevelDraw(
+          field: field
+          propView: propView
+          placement: placement
+          model: model
+          kind: kind
+          level: pick.near
+        )
+      }
       if pick.far >= 0 {
         farDraw = propLevelDraw(
           field: field
@@ -244,24 +265,35 @@ func gatherProp(
       }
     }
   }
+  # the prop's level state, written once the kind's view has ended
+  if stepped {
+    storePropFieldLod(
+      field: field
+      group: group
+      index: index
+      step: step
+    )
+  }
   if drawn is false {
     ret
   }
-  let fades: Bool = pick.far >= 0 or pick.threshold > 0.0
+  let fades: Bool = pick.threshold > 0.0
   var seed: Float = 0.0
   if fades {
     seed = propFadeSeed(x: placement.position.x, y: placement.position.y)
   }
-  gatherPropLevel(
-    field: field
-    placement: placement
-    draw: nearDraw
-    toon: toon
-    fades: fades
-    threshold: pick.threshold
-    fadingIn: false
-    seed: seed
-  )
+  if pick.near >= 0 {
+    gatherPropLevel(
+      field: field
+      placement: placement
+      draw: nearDraw
+      toon: toon
+      fades: fades
+      threshold: pick.threshold
+      fadingIn: false
+      seed: seed
+    )
+  }
   if pick.far >= 0 {
     gatherPropLevel(
       field: field
@@ -275,6 +307,64 @@ func gatherProp(
     )
   }
   field.visibleCount = field.visibleCount + 1
+}
+
+# Prop `index` of the field's own (`group` -1) or of a group: its next
+# level state this frame (nextPropLod on its owner's states)
+func nextPropFieldLod(
+  field: view PropField
+  group: view Int
+  index: view Int
+  maxDistances: view List(Float)
+  distance: view Float
+) ret PropLodStep {
+  if group >= 0 {
+    if let held: view PropGroup = field.groups.viewAt(index: group) {
+      ret nextPropLod(
+        states: held.lodStates
+        index: index
+        maxDistances: maxDistances
+        distance: distance
+        frame: field.lodFrame
+        deltaTime: field.lodDeltaTime
+      )
+    }
+  }
+  ret nextPropLod(
+    states: field.lodStates
+    index: index
+    maxDistances: maxDistances
+    distance: distance
+    frame: field.lodFrame
+    deltaTime: field.lodDeltaTime
+  )
+}
+
+# Store prop `index`'s level state (of the field's own or of a group)
+func storePropFieldLod(
+  field: mod PropField
+  group: view Int
+  index: view Int
+  step: view PropLodStep
+) {
+  let frame: Int = field.lodFrame
+  if group >= 0 {
+    if let held: mod PropGroup = field.groups.modAt(index: group) {
+      storePropLod(
+        states: held.lodStates
+        index: index
+        step: step
+        frame: frame
+      )
+    }
+    ret
+  }
+  storePropLod(
+    states: field.lodStates
+    index: index
+    step: step
+    frame: frame
+  )
 }
 
 # A prop at one level into its batches (a billboard or its mesh parts), with
