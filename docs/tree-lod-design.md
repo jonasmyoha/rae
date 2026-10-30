@@ -218,6 +218,18 @@ view, out of reach, the first frame) takes its level at once.
 Case 1136 checks the hold, the start, the halfway point with the eye
 stopped, the finish, the fade out and the jump after a frame unseen.
 
+**The far billboards start a fade band early (2026-10-30).** The field's
+last level fades out alone past its end, and a tree coming nearer takes its
+billboard back only a quarter band inside the end (136.5 m for 140 m) and
+then fades it in. The far billboards (`app3d/FarSprites`) stopped at the
+end itself with no fade, so between 140 m and 136.5 m nobody drew the tree:
+walking toward the forest, trees vanished at once and dithered back about
+2 s later (looks-development rendering/treeLodPop.html). Now
+`app3d/TreeForest` starts them a fade band (`propFadeWidth`, 14 m) before
+the end. In that band both draw the tree, the same picture in the same
+place, so the overlap does not show and the far billboard fills every pixel
+the field's fade leaves out.
+
 **The far canopy's hand-over, timed too (2026-10-30).** A cell's single far
 trees and its cluster faded across the band round 300 m by distance, so an
 eye stopped there left the cell half trees, half cluster. Now each cluster

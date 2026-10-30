@@ -18,6 +18,7 @@ open GbufferSprite
 open gpu/GpuResources
 open app3d/PropField
 open app3d/PropFieldFrame
+open app3d/PropFade
 open app3d/FarSprites
 open app3d/FarCanopy
 open CanopyBake
@@ -107,12 +108,18 @@ func createTreeForest(
     midDistance: settings.midDistance
     farDistance: settings.farDistance
   )
-  # The far billboards from where the field's own end to where the canopy
-  # holds every tree (a tree is measured from its cluster's center, up to
-  # 40 m away)
+  # The far billboards from a fade band before the field's own end to where
+  # the canopy holds every tree (a tree is measured from its cluster's
+  # center, up to 40 m away). They start that band early because a tree
+  # coming nearer takes its billboard back in the field only a quarter band
+  # inside the field's end and then fades it in (app3d/PropFade, 0.6 s):
+  # starting at the end itself left every such tree drawn by neither, gone,
+  # until the field's fade began. In the band both draw the tree, the same
+  # picture in the same place, so the overlap does not show and the far one
+  # fills every pixel the field's fade leaves out.
   let hasFar: Bool = settings.farReach > 0.0
   var farSettings: FarSpriteSettings = defaultFarSpriteSettings()
-  farSettings.nearDistance = settings.farDistance
+  farSettings.nearDistance = settings.farDistance - propFadeWidth(maxDistance: settings.farDistance)
   farSettings.farDistance = settings.farDistance + settings.farReach
   farSettings.thinFrom = 300.0
   if hasFar {
