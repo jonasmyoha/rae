@@ -1,0 +1,104 @@
+# The settings' key light through a whole day, minute by minute, with no
+# sudden change: the sun's light fades out as it sets and the night's (the
+# moon, or the starlight with the moon off) grows through the twilight, and
+# the light turns from one to the other where both are 0. Checked as the
+# light's vector (its direction times its strength) over one day, 0:00 to
+# 24:00: one minute may move it by at most 3% of the noon sun (the sunset's
+# fade takes about 1% a minute; the swing this case guards against was 8%). Three places in June:
+# 37.9N (the light
+# once swung across the sky at its full sunset strength there), 60.2N (a
+# light summer night: the twilight never ends) and the equator.
+import Math
+import Vec3
+open Sky
+open app3d/SettingsDialog
+open app3d/SettingsSky
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func keyLight(settingsState: view SettingsState) ret Vec3 {
+  let color: Vec3 = settingsKeyLightColor(settingsState: settingsState)
+  ret Vec3.vscale(
+    a: settingsKeyLightDir(settingsState: settingsState)
+    s: color.x + color.y + color.z
+  )
+}
+
+# The largest one-minute step of the key light over the day, as a share of
+# the noon sun's light
+func largestStep(latitude: view Float, moon: view Bool) ret Float {
+  var settingsState: SettingsState = createSettingsState(
+    scene: 1
+    sceneCount: 1
+    speed: 1.0
+    toon: false
+    hour: 12.0
+    skyModel: SettingsSkyModel.hosek
+  )
+  settingsState.timeOfDay.year = 2029
+  settingsState.timeOfDay.dayOfYear = 172
+  settingsState.latitude = latitude
+  settingsState.longitude = -23.1
+  settingsState.moon = moon
+  let noonColor: Vec3 = settingsKeyLightColor(settingsState: settingsState)
+  let noon: Float = noonColor.x + noonColor.y + noonColor.z
+  var previous: Vec3 = keyLight(settingsState: settingsState)
+  var largest: Float = 0.0
+  settingsState.timeOfDay.hour = 0.0
+  previous = keyLight(settingsState: settingsState)
+  loop var minute: Int = 1, minute < 24 * 60, ++minute {
+    settingsState.timeOfDay.hour = minute.toFloat() / 60.0
+    let now: Vec3 = keyLight(settingsState: settingsState)
+    largest = Math.max(a: largest, b: Vec3.vlen(a: Vec3.vsub(a: now, b: previous)) / noon)
+    previous = now
+  }
+  ret largest
+}
+
+func main() ret Int {
+  loop var place: Int = 0, place < 3, ++place {
+    var latitude: Float = 37.9
+    if place is 1 {
+      latitude = 60.2
+    } else if place is 2 {
+      latitude = 0.0
+    }
+    check(
+      label: "{latitude}N, moon on: no sudden change"
+      ok: largestStep(latitude: latitude, moon: true) < 0.03
+    )
+    check(
+      label: "{latitude}N, moon off: no sudden change"
+      ok: largestStep(latitude: latitude, moon: false) < 0.03
+    )
+  }
+  # The twilight's length follows the latitude: in June at 60.2N the sun
+  # never reaches 12 degrees under, at the equator it does
+  var north: SettingsState = createSettingsState(
+    scene: 1
+    sceneCount: 1
+    speed: 1.0
+    toon: false
+    hour: 0.0
+    skyModel: SettingsSkyModel.hosek
+  )
+  north.timeOfDay.dayOfYear = 172
+  north.latitude = 60.2
+  var equator: SettingsState = north
+  equator.latitude = 0.0
+  check(
+    label: "a June midnight at 60.2N is still twilight"
+    ok: settingsNightBlend(settingsState: north) < 0.9
+  )
+  check(
+    label: "a June midnight at the equator is full night"
+    ok: settingsNightBlend(settingsState: equator) > 0.99
+  )
+  ret 0
+}

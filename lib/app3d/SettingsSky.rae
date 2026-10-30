@@ -95,21 +95,34 @@ func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
 # does not wash out (docs/physical-light-units.md).
 const settingsSunNoonLux: Float = 100000.0
 
-# The sun's light now: its color times its illuminance (lux)
+# The sun's height (the sine of its elevation) where its direct light ends:
+# just under the horizon, where the last of its disc sets. The key light
+# turns from the sun to the night's light here, where both are 0, so the
+# turn cannot be seen.
+const settingsSunSetUp: Float = -0.01
+
+# The sun's height where the twilight ends and the night is full: 12
+# degrees under the horizon (nautical twilight). A sun that stays above it
+# all night (60N in June) gives a light northern summer night; near the
+# equator the sun passes it within the hour.
+const settingsTwilightEndUp: Float = -0.2079
+
+# The sun's light now: its color times its illuminance (lux). Low over the
+# horizon the air takes most of it: it fades out over the last few degrees
+# and is gone at settingsSunSetUp.
 func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   let base: Vec3 = sunColorForDate(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  var lift: Float = sunHeightForDate(
+  let up: Float = sunHeightSignedForDate(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  # Never fully black: a scene lit by nothing reads as broken rather than as
-  # night, and there is no night sky model here yet.
-  lift = 0.15 + 0.85 * lift
+  let low: Float = Math.clamp(val: (up - settingsSunSetUp) / 0.07, low: 0.0, high: 1.0)
+  let lift: Float = (0.15 + 0.85 * Math.max(a: up, b: 0.0)) * low * low * (3.0 - 2.0 * low)
   let lux: Float = settingsState.sunNoonLux * lift * settingsEclipseLight(
     settingsState: settingsState
   )
@@ -224,16 +237,20 @@ func settingsMoonLight(settingsState: view SettingsState) ret Float {
   ret moonLightLevel(moon: settingsMoon(settingsState: settingsState))
 }
 
-# How far into the night it is for the key light, 0..1: 0 while the sun is up,
-# 1 once it is 3.5 degrees under the horizon. The night comes with the moon
-# off too: then it is a moonless night.
+# How far into the night it is for the key light, 0..1: 0 until the sun has
+# set (settingsSunSetUp), 1 at the twilight's end (settingsTwilightEndUp).
+# The night comes with the moon off too: then it is a moonless night.
 func settingsNightBlend(settingsState: view SettingsState) ret Float {
   let sunUp: Float = sunHeightSignedForDate(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  let t: Float = Math.clamp(val: -sunUp / 0.06, low: 0.0, high: 1.0)
+  let t: Float = Math.clamp(
+    val: (settingsSunSetUp - sunUp) / (settingsSunSetUp - settingsTwilightEndUp)
+    low: 0.0
+    high: 1.0
+  )
   ret t * t * (3.0 - 2.0 * t)
 }
 
@@ -253,7 +270,7 @@ func settingsKeyLightDirAt(settingsState: view SettingsState, hour: view Float) 
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  if sunUp < 0.0 {
+  if sunUp < settingsSunSetUp {
     if settingsState.moon {
       let moon: MoonState = moonForDate(
         year: settingsState.timeOfDay.year
@@ -291,9 +308,10 @@ func settingsShadowLightDir(settingsState: view SettingsState) ret Vec3 {
   )
 }
 
-# Its color: the sun's, crossing at dusk to the moon's cold light, which a
-# full moon gives far more of than a crescent, and a moonless night (or the
-# moon off) almost none of.
+# Its color: the sun's until it sets, then, growing through the twilight,
+# the moon's cold light, which a full moon gives far more of than a
+# crescent, and a moonless night (or the moon off) almost none of. Both are
+# 0 at settingsSunSetUp, where the light turns from one to the other.
 func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
   let sun: Vec3 = settingsSunColor(settingsState: settingsState)
   let blend: Float = settingsNightBlend(settingsState: settingsState)
@@ -306,11 +324,8 @@ func settingsKeyLightColor(settingsState: view SettingsState) ret Vec3 {
   let moonColor: Vec3 = fromRelativeLight(
     value: Vec3.create(x: 0.52 * strength, y: 0.60 * strength, z: 0.82 * strength)
   )
-  ret Vec3.create(
-    x: sun.x + (moonColor.x - sun.x) * blend
-    y: sun.y + (moonColor.y - sun.y) * blend
-    z: sun.z + (moonColor.z - sun.z) * blend
-  )
+  # the sun has set here (blend is 0 above settingsSunSetUp): its light is 0
+  ret Vec3.vscale(a: moonColor, s: blend)
 }
 
 # The moon in a sky: its disc, the moonlit night sky and its ambient light,
