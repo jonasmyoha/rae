@@ -505,19 +505,19 @@ func addStylizedBushKind(
 # whorls of unequal, drooping boughs; dark green needles (the old spray
 # picture's average times its tint: linear 0.08, 0.15, 0.06); gray-brown
 # bark (the old bark's average times its 0.65 gray: 0.175, 0.117, 0.084).
-# Whorl growth (treeGen/WhorlGrower), each whorl one of the low-poly
-# spruce's solid scalloped skirts, its rim drooping to the bough tips,
-# filled with camera-facing cards (treeGen/SkirtCards, §11 of the design)
-# painted with needle sprigs (LeafOutline.sprig) and lit by the skirt's broad
-# normal. Only the trunk under the lowest tier is drawn (no branches), and
-# no wind for now.
+# Whorl growth (treeGen/WhorlGrower), each whorl one solid tier (treeGen/
+# SkirtTiers, §13 of the design): the low-poly spruce's skirt with a jagged
+# rim drooping to the bough tips, three bands of tone from the trunk to the
+# rim and a dark underside, lit by smooth broad normals. Only the trunk
+# under the lowest tier is drawn (no branches), and no wind for now.
 func spruceKind() ret TreeKind {
   ret TreeKind {
     name: "spruce"
     measures: whorlTreeMeasures(height: spruceHeight, baseRadius: 0.17)
     traced: false
+    # solid tiers (TreeFoliage.skirts) have no leaf cards: the leaf stamp,
+    # card size, layers and middle thinning below are unread
     leaf: {
-      # one or two fronds across the card (a branch's end)
       outline: LeafOutline.sprig
       countMin: 1
       countSpread: 2
@@ -529,34 +529,32 @@ func spruceKind() ret TreeKind {
       angleJitter: 0.5
       seed: 11100
     }
-    # a card's width on the widest tier (smaller on the upper ones), and the
-    # cards over each point of a skirt's skin
     cardSize: 0.5
     cardLayers: 8.0
     # a dark conifer green, less saturated than the old one (as the
-    # cypress's)
+    # cypress's); a tier's trunk band and underside are darker, its middle
+    # band this green darkened, its rim the lighter one (SkirtTiers)
     greens: List(Vec3) {
       Vec3.create(x: 0.08, y: 0.15, z: 0.085)
       Vec3.create(x: 0.095, y: 0.172, z: 0.098)
       Vec3.create(x: 0.066, y: 0.128, z: 0.072)
     }
     bark: { color: Vec3.create(x: 0.2, y: 0.135, z: 0.097), streakDepth: 0.45 }
-    # every 3rd card at 1.35 times its size
     middleKeep: 3
     middleGrow: 1.35
     foliage: TreeFoliage.skirts
     innerWood: false
-    # the lowest whorl at 0.12 of the height: the trunk shows under the
-    # lowest skirt, whose rim hangs to about 0.1
+    # the lowest whorl at 0.09 of the height: the trunk shows under the
+    # lowest tier, whose rim hangs a little lower
     whorls: {
-      crownStart: 0.12
+      crownStart: 0.09
       spacingMin: 0.4
       spacingMax: 0.6
       branchesMin: 4
       branchesMax: 6
       broken: 0.2
       baseReach: 0.32
-      taper: 0.95
+      taper: 0.75
       angleMin: 1.3
       angleMax: 1.45
       droopTop: 0.25

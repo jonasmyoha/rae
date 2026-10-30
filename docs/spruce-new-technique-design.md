@@ -1,9 +1,9 @@
 # The spruce in the new technique (design)
 
-Status: accepted and built (2026-10-29), rebuilt in round 3 (2026-10-30):
-`treeGen/WhorlGrower`, `treeGen/SkirtCards`, `StylizedKinds.spruceKind`.
-§9 lists where the first build differed from the plan; §11 - §12 replace
-its shelf and curtain cards (`treeGen/ShelfCards`, removed) with skirts.
+Status: accepted and built (2026-10-29), rebuilt in rounds 3 and 4
+(2026-10-30): `treeGen/WhorlGrower`, `treeGen/SkirtTiers`,
+`StylizedKinds.spruceKind`. Cards never read as a spruce (rounds 1 - 3);
+§13, round 4, builds it from solid tiers, the low-poly spruce made better.
 
 The other stylized trees were rebuilt with leaf masses: ellipsoid clumps
 whose skins are filled with camera-facing stamp cards
@@ -285,4 +285,36 @@ and add what the other new trees have:
   forward, shorter toward the tip, every sprig pointed with a forward-
   slanting fringe of needle tips. A frond leaves more of its card open, so
   `cardLayers` is 8 and cards 0.5 m (1,695 cards near).
+
+## 13. Round 4: solid tiers (2026-10-30)
+
+Round 3's camera-facing cards on skirts did not work either, whatever the
+stamp (round tufts read as cookie-cutter blobs, needle fronds as a ragged
+broadleaf). What other games do: stylized pines are geometry, stacked cone
+tiers shrinking upward, shaded by smooth volume-wide normals and a color
+gradient, not alpha cards. Firewatch's trees were made by hand, and its
+lead artist called pines the hardest trees to make in 3D (80.lv,
+"Creating the world of Firewatch"); procedural stylized pines stack cone
+tiers with per-face colors (Josh Marinacci, "Procedural geometry trees");
+cel-shaded foliage edits normals toward one smooth volume. So the spruce
+is the low-poly one's approach, made better:
+
+- **`treeGen/SkirtTiers`** (in place of SkirtCards): the whorl grower's
+  tree, each whorl one solid tier (at most 8). Its top falls from 1.7
+  times the step to the next tier above the whorl, at the trunk, to an
+  uneven rim (two sine waves, up to 7% in or out) that reaches out and
+  hangs down to each branch's tip (the drooping bough tips); its
+  underside closes it under the rim. Each tier is turned its own way.
+- **Color:** three bands of tone, so a tier is dark at the trunk (and on
+  its underside: the dark line under each tier) and light at the rim: the
+  darker green times 0.45, the main green times 0.66, the lighter times
+  0.76. **Normals:** the low-poly tier's broad ones, up and out, more out
+  at the rim, smooth round the tier.
+- A rim cut into alternating points and notches was tried and dropped: the
+  folds shadowed each other into a pleated lampshade.
+- `taper` 0.75 (a fuller middle; 0.95 left the upper tiers skinny), the
+  lowest whorl at 0.09 of the height (the crown from 10%). Near 36
+  segments round each tier (about 2,500 triangles), middle 18 (100% of
+  the near outline). No leaf picture (the kind's stamp, card size, layers
+  and middle thinning are unread), no wind, only the lower trunk.
 

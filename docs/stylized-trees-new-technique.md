@@ -255,8 +255,9 @@ checks for at least 300.
 Designed (task 11/12, 2026-10-29), accepted and built:
 docs/spruce-new-technique-design.md. It uses whorl growth in TreeGrower;
 its first two rounds put fixed shelf and curtain cards along the branches,
-and round 3 (§11 - §12 there) makes each whorl one of the low-poly spruce's
-skirts filled with camera-facing cards (treeGen/SkirtCards,
+round 3 (§11 - §12 there) made each whorl a skirt filled with
+camera-facing cards, and round 4 (§13) builds each whorl as a solid tier,
+the low-poly spruce's approach made better (treeGen/SkirtTiers,
 `TreeFoliage.skirts`). The levels, the impostor and the painted pictures
 carry over. Below is the starting point it grew from.
 

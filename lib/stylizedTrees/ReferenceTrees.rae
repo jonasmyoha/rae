@@ -33,7 +33,7 @@ open treeGen/Bark
 open treeGen/LeafCards
 open treeGen/TreeLevels
 open treeGen/TreeKind
-open treeGen/SkirtCards
+open treeGen/SkirtTiers
 
 const referenceSpeciesCount: Int = 5
 
@@ -222,7 +222,7 @@ func referenceLevelParts(
 }
 
 # The wood a kind shows: the whole skeleton, or (TreeKind.innerWood false)
-# only the trunk under its foliage (SkirtCards.lowerTrunkSkeleton)
+# only the trunk under its foliage (SkirtTiers.lowerTrunkSkeleton)
 func kindBarkMesh(skeleton: view TreeSkeleton, treeKind: view TreeKind) ret MeshData {
   if not treeKind.innerWood {
     ret barkMesh(skeleton: lowerTrunkSkeleton(skeleton: skeleton, overlap: 0.4))
@@ -238,19 +238,8 @@ type KindLeafLevels {
   count: Int
 }
 
-# No wind on `level`'s cards: every pivot's flexibility 0 (a conifer's
-# skirts, for now: their sway disturbed the look)
-func stillLeaves(level: mod LeafCardLevel) {
-  loop let mesh: mod MeshData in level.meshes {
-    loop var pivot: Int = 0, pivot < mesh.windPivots.length / 4, ++pivot {
-      mesh.windPivots.set(index: pivot * 4 + 3, value: 0.0)
-    }
-  }
-}
-
 # The leaf levels of `treeKind`'s variety on `skeleton`: masses filled with
-# camera-facing cards (LeafCards), or a conifer's skirts filled with
-# camera-facing cards (SkirtCards)
+# camera-facing cards (LeafCards), or a conifer's solid tiers (SkirtTiers)
 func kindLeafLevels(
   skeleton: view TreeSkeleton
   treeKind: view TreeKind
@@ -260,12 +249,23 @@ func kindLeafLevels(
 ) ret KindLeafLevels {
   let seed: Int = kindCardSeed(treeKind: treeKind, variety: variety)
   if treeKind.foliage is TreeFoliage.skirts {
-    let skirts: LeafCards = skirtCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
-    var near: LeafCardLevel = leafCardLevel(cards: skirts, keepEvery: 1, grow: 1.0)
-    var middle: LeafCardLevel = leafCardLevel(cards: skirts, keepEvery: keepEvery, grow: grow)
-    stillLeaves(level: near)
-    stillLeaves(level: middle)
-    ret KindLeafLevels { near: own near, middle: own middle, count: skirts.count }
+    # solid tiers, not cards: the middle level the same tiers at half the
+    # segments round
+    ret KindLeafLevels {
+      near: skirtLevel(
+        skeleton: skeleton
+        treeKind: treeKind
+        seed: seed
+        segments: 36
+      )
+      middle: skirtLevel(
+        skeleton: skeleton
+        treeKind: treeKind
+        seed: seed
+        segments: 18
+      )
+      count: 0
+    }
   }
   let cards: LeafCards = leafCards(skeleton: skeleton, treeKind: treeKind, seed: seed)
   ret KindLeafLevels {
@@ -329,25 +329,32 @@ func addReferenceKind(
     albedos: albedos
   )
   subject.cardNormalsToEye = true
+  # solid tiers have no leaf picture
+  var leafLayer: Int = images.leafLayer
+  var impostorLeafLayer: Int = images.impostorLeafLayer
+  if treeKind.foliage is TreeFoliage.skirts {
+    leafLayer = -1
+    impostorLeafLayer = -1
+  }
   subject.imageLayers = List(Int) {
     images.barkLayer
-    images.impostorLeafLayer
-    images.impostorLeafLayer
-    images.impostorLeafLayer
+    impostorLeafLayer
+    impostorLeafLayer
+    impostorLeafLayer
   }
   var lods: List(PropLod) = List.create(PropLod, cap: 3)
   lods.add(value: referenceLod(
     meshes: nearHandles
     bark: bark
     albedos: nearLeaves.albedos
-    leafLayer: images.leafLayer
+    leafLayer: leafLayer
     maxDistance: ends.x
   ))
   lods.add(value: referenceLod(
     meshes: middleHandles
     bark: bark
     albedos: middleLeaves.albedos
-    leafLayer: images.leafLayer
+    leafLayer: leafLayer
     maxDistance: ends.y
   ))
   lods.add(

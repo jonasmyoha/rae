@@ -1,0 +1,431 @@
+# treeGen/SkirtTiers — a whorled conifer's foliage as solid tiers, the
+# low-poly spruce's skirts made better (docs/spruce-new-technique-design.md
+# §13). Stylized games build pines from geometry: stacked cone tiers shaded
+# by smooth, broad normals and a color gradient, not from alpha cards
+# (camera-facing cards, rounds 2 - 3, never read as a spruce). Each whorl of
+# the tree (treeGen/WhorlGrower) is one tier: a solid skirt whose top falls
+# from the trunk to an uneven rim, pushed out and down along each branch
+# to the branch's tip (the drooping bough tips); its underside closes it.
+# A tier is three bands of tone, dark at the trunk and light at the rim,
+# and its underside dark, so the tiers read the way the low-poly tree's
+# do, with more life in their edges.
+import Math
+import Vec3
+open treeGen/TreeParams
+open treeGen/Skeleton
+open Mesh3d
+open treeGen/TreeLevels
+open treeGen/TreeKind
+
+# One bough tip of a skirt: its direction round the trunk (radians), how far
+# out it reaches and how far below the whorl it hangs (m)
+type SkirtTip {
+  azimuth: Float
+  reach: Float
+  drop: Float
+}
+
+# One tier: the whorl's height on the trunk, the trunk there, its bough tips,
+# the reach of its rim between the tips and how high its top rises at the
+# trunk (m)
+type Skirt {
+  base: Vec3
+  tips: List(SkirtTip)
+  reach: Float
+  rise: Float
+}
+
+# The fewest and most tiers a tree has: whorls past the most share a tier
+const fewestSkirts: Int = 8
+
+const mostSkirts: Int = 8
+
+# How much a bough tip at `tip` pulls the rim at `azimuth` (1 on it, 0 a
+# quarter turn away)
+func tipPull(tip: view SkirtTip, azimuth: view Float) ret Float {
+  let along: Float = Math.cos(x: azimuth - tip.azimuth)
+  if along <= 0.0 {
+    ret 0.0
+  }
+  ret Math.pow(base: along, exp: 8.0)
+}
+
+# The rim's reach at `azimuth`: the skirt's own between the tips, out to a
+# tip's along it
+func skirtReach(skirt: view Skirt, azimuth: view Float) ret Float {
+  var reach: Float = skirt.reach * (0.94 + 0.06 * Math.sin(x: azimuth * 5.0))
+  loop let tip: view SkirtTip in skirt.tips {
+    reach = Math.max(
+      a: reach
+      b: skirt.reach + (tip.reach - skirt.reach) * tipPull(tip: tip, azimuth: azimuth)
+    )
+  }
+  ret reach
+}
+
+# How far the rim hangs below the whorl at `azimuth` (the tips' drop, and a
+# third of their mean between them)
+func skirtDrop(skirt: view Skirt, azimuth: view Float) ret Float {
+  var mean: Float = 0.0
+  loop let tip: view SkirtTip in skirt.tips {
+    mean = mean + tip.drop
+  }
+  mean = mean / Math.max(a: skirt.tips.length.toFloat(), b: 1.0)
+  var drop: Float = mean * 0.35
+  loop let tip: view SkirtTip in skirt.tips {
+    drop = Math.max(
+      a: drop
+      b: mean * 0.35 + (tip.drop - mean * 0.35) * tipPull(tip: tip, azimuth: azimuth)
+    )
+  }
+  ret drop
+}
+
+# The trunk's center line at height `z`
+func trunkPointAt(trunk: view Limb, z: view Float) ret Vec3 {
+  loop var k: Int = 1, k < trunk.points.length, ++k {
+    let below: Vec3 = trunk.points.copyAtDefault(index: k - 1)
+    let above: Vec3 = trunk.points.copyAtDefault(index: k)
+    if above.z >= z {
+      let share: Float = Math.clamp(
+        val: (z - below.z) / Math.max(a: above.z - below.z, b: 0.0001)
+        low: 0.0
+        high: 1.0
+      )
+      ret Vec3.vadd(a: below, b: Vec3.vscale(a: Vec3.vsub(a: above, b: below), s: share))
+    }
+  }
+  ret Vec3.create(x: 0.0, y: 0.0, z: z)
+}
+
+# The tiers of a whorled `skeleton` (its order-2 limbs grouped by the height
+# they leave the trunk at), at most mostSkirts; the top one reaches the tip
+func treeSkirts(skeleton: view TreeSkeleton) ret List(Skirt) {
+  # the whorls: one height a whorl, in the grower's order (upward)
+  var heights: List(Float) = List.create(Float, cap: 24)
+  loop let limb: view Limb in skeleton.limbs {
+    if limb.order is 2 and limb.points.length >= 2 {
+      let z: Float = limb.points.copyAtDefault(index: 0).z
+      if heights.length is 0 or Math.abs(
+        value: heights.copyAtDefault(index: heights.length - 1) - z
+      ) > 0.01 {
+        heights.add(value: z)
+      }
+    }
+  }
+  let trunk: Limb = skeleton.limbs.copyAtDefault(index: 0)
+  let top: Float = trunk.points.copyAtDefault(index: trunk.points.length - 1).z
+  let tiers: Int = Math.min(a: heights.length, b: mostSkirts)
+  var skirts: List(Skirt) = List.create(Skirt, cap: tiers)
+  if tiers is 0 {
+    ret skirts
+  }
+  loop var tier: Int = 0, tier < tiers, ++tier {
+    # the whorls of this tier (one, unless there are more whorls than tiers)
+    let first: Int = tier * heights.length / tiers
+    let base: Float = heights.copyAtDefault(index: first)
+    var tips: List(SkirtTip) = List.create(SkirtTip, cap: 8)
+    var sum: Float = 0.0
+    loop let limb: view Limb in skeleton.limbs {
+      if limb.order is 2 and limb.points.length >= 2 {
+        let start: Vec3 = limb.points.copyAtDefault(index: 0)
+        var whorl: Int = 0
+        loop var k: Int = 0, k < heights.length, ++k {
+          if Math.abs(value: heights.copyAtDefault(index: k) - start.z) <= 0.01 {
+            whorl = k
+          }
+        }
+        if whorl * tiers / heights.length is tier {
+          let end: Vec3 = limb.points.copyAtDefault(index: limb.points.length - 1)
+          let out: Vec3 = Vec3.vsub(a: end, b: start)
+          let reach: Float = Math.sqrt(x: out.x * out.x + out.y * out.y)
+          tips.add(
+            value: {
+              azimuth: Math.atan2(y: out.y, x: out.x)
+              reach: reach
+              drop: Math.max(a: base - end.z, b: 0.0)
+            }
+          )
+          sum = sum + reach
+        }
+      }
+    }
+    let reach: Float = 0.82 * sum / Math.max(a: tips.length.toFloat(), b: 1.0)
+    # the top rises like the low-poly tier's: about 1.7 times the step to
+    # the next tier (more than its reach on the small upper tiers, so no
+    # trunk shows between them); the top tier to the tip
+    var next: Float = top
+    if tier + 1 < tiers {
+      next = heights.copyAtDefault(index: (tier + 1) * heights.length / tiers)
+    }
+    var rise: Float = (next - base) * 1.7
+    if tier + 1 is tiers {
+      rise = top - base
+    }
+    skirts.add(
+      value: {
+        base: trunkPointAt(trunk: trunk, z: base)
+        tips: own tips
+        reach: Math.max(a: reach, b: 0.2)
+        rise: rise
+      }
+    )
+  }
+  ret skirts
+}
+
+# One vertex of a tier: no wind (pivot flexibility 0), a fixed surface
+# (card flag 0)
+func addTierVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
+  pushVert(
+    verts: mesh.verts
+    px: point.x
+    py: point.y
+    pz: point.z
+    nx: normal.x
+    ny: normal.y
+    nz: normal.z
+    u: 0.5
+    value: 0.5
+  )
+  mesh.windPivots.add(value: point.x)
+  mesh.windPivots.add(value: point.y)
+  mesh.windPivots.add(value: point.z)
+  mesh.windPivots.add(value: 0.0)
+  loop var k: Int = 0, k < 4, ++k {
+    mesh.leafCards.add(value: 0.0)
+  }
+  mesh.vertCount = mesh.vertCount + 1
+}
+
+# A tier's top at `share` of the way from the trunk to the rim, toward
+# `azimuth`; `jag` (-1 to 1) moves the rim in or out a little, so a rim is
+# uneven, not a clean circle
+func tierTopPoint(
+  skirt: view Skirt
+  azimuth: view Float
+  share: view Float
+  jag: view Float
+) ret Vec3 {
+  let reach: Float = skirtReach(skirt: skirt, azimuth: azimuth) * (1.0 + 0.07 * jag)
+  let drop: Float = skirtDrop(skirt: skirt, azimuth: azimuth) * (1.0 + 0.1 * jag)
+  ret Vec3.create(
+    x: skirt.base.x + Math.cos(x: azimuth) * reach * share
+    y: skirt.base.y + Math.sin(x: azimuth) * reach * share
+    z: skirt.base.z + skirt.rise * Math.pow(base: 1.0 - share, exp: 1.2) - drop * share * share
+  )
+}
+
+# The rim's unevenness at segment `index` of `segments` (-1 to 1), the same
+# for every level of a tier (it follows the tier's turn and the azimuth)
+func rimJag(turn: view Float, index: view Int, segments: view Int) ret Float {
+  let azimuth: Float = turn + 6.2831853 * index.toFloat() / segments.toFloat()
+  ret Math.sin(x: azimuth * 7.0 + turn * 3.0) * 0.6 + Math.sin(x: azimuth * 13.0 + turn * 5.0) * 0.4
+}
+
+# The broad normal of a tier's top at `share` toward `azimuth`: up and out,
+# more out toward the drooping rim (the low-poly tier's)
+func tierTopNormal(azimuth: view Float, share: view Float) ret Vec3 {
+  let out: Float = 0.5 + 0.3 * share
+  ret Vec3.vnorm(
+    a: Vec3.create(
+      x: Math.cos(x: azimuth) * out
+      y: Math.sin(x: azimuth) * out
+      z: 0.85 - 0.15 * share
+    )
+  )
+}
+
+# One band of a tier's top, from `inner` to `outer` of the way out, into
+# `mesh`: `segments` around; the rim (outer 1) uneven
+func addTierBand(
+  mesh: mod MeshData
+  skirt: view Skirt
+  turn: view Float
+  segments: view Int
+  inner: view Float
+  outer: view Float
+) {
+  let first: Int = mesh.vertCount
+  loop var i: Int = 0, i <= segments, ++i {
+    let azimuth: Float = turn + 6.2831853 * i.toFloat() / segments.toFloat()
+    var jag: Float = 0.0
+    if outer >= 0.999 {
+      jag = rimJag(turn: turn, index: i, segments: segments)
+    }
+    addTierVertex(
+      mesh: mesh
+      point: tierTopPoint(
+        skirt: skirt
+        azimuth: azimuth
+        share: inner
+        jag: 0.0
+      )
+      normal: tierTopNormal(azimuth: azimuth, share: inner)
+    )
+    addTierVertex(
+      mesh: mesh
+      point: tierTopPoint(
+        skirt: skirt
+        azimuth: azimuth
+        share: outer
+        jag: jag
+      )
+      normal: tierTopNormal(azimuth: azimuth, share: outer)
+    )
+  }
+  loop var i: Int = 0, i < segments, ++i {
+    let a: Int = first + i * 2
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 1)
+    mesh.indices.add(value: a + 3)
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 3)
+    mesh.indices.add(value: a + 2)
+  }
+}
+
+# A tier's underside into `mesh`: from its uneven rim in under the skirt to
+# the trunk, facing out and down
+func addTierUnderside(
+  mesh: mod MeshData
+  skirt: view Skirt
+  turn: view Float
+  segments: view Int
+) {
+  let first: Int = mesh.vertCount
+  loop var i: Int = 0, i <= segments, ++i {
+    let azimuth: Float = turn + 6.2831853 * i.toFloat() / segments.toFloat()
+    let jag: Float = rimJag(turn: turn, index: i, segments: segments)
+    let normal: Vec3 = Vec3.vnorm(
+      a: Vec3.create(x: Math.cos(x: azimuth) * 0.55, y: Math.sin(x: azimuth) * 0.55, z: -0.6)
+    )
+    let rim: Vec3 = tierTopPoint(
+      skirt: skirt
+      azimuth: azimuth
+      share: 1.0
+      jag: jag
+    )
+    addTierVertex(mesh: mesh, point: rim, normal: normal)
+    let reach: Float = skirtReach(skirt: skirt, azimuth: azimuth)
+    let drop: Float = skirtDrop(skirt: skirt, azimuth: azimuth)
+    addTierVertex(
+      mesh: mesh
+      point: Vec3.create(
+        x: skirt.base.x + Math.cos(x: azimuth) * reach * 0.15
+        y: skirt.base.y + Math.sin(x: azimuth) * reach * 0.15
+        z: skirt.base.z - drop * 0.1
+      )
+      normal: normal
+    )
+  }
+  loop var i: Int = 0, i < segments, ++i {
+    let a: Int = first + i * 2
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 2)
+    mesh.indices.add(value: a + 3)
+    mesh.indices.add(value: a)
+    mesh.indices.add(value: a + 3)
+    mesh.indices.add(value: a + 1)
+  }
+}
+
+# A level of a whorled `skeleton`'s tiers, `segments` round each, as three
+# tone meshes darkest first:
+# the band at the trunk and the undersides darkest, the middle band the
+# kind's main green darkened, the rim band its lighter one
+func skirtLevel(
+  skeleton: view TreeSkeleton
+  treeKind: view TreeKind
+  seed: view Int
+  segments: view Int
+) ret LeafCardLevel {
+  var random: TreeRandom = createTreeRandom(seed: seed + 6262)
+  let skirts: List(Skirt) = treeSkirts(skeleton: skeleton)
+  var meshes: List(MeshData) = List.create(MeshData, cap: 3)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    var mesh: MeshData = {
+      verts: List.create(Float, cap: 0)
+      indices: List.create(Int, cap: 0)
+      vertCount: 0
+    }
+    meshes.add(value: own mesh)
+  }
+  loop let skirt: view Skirt in skirts {
+    # each tier turned its own way, so the rims' points do not line up
+    let turn: Float = nextUnit(random: random) * 6.2831853
+    if let mesh: mod MeshData = meshes.modAt(index: 0) {
+      addTierBand(
+        mesh: mesh
+        skirt: skirt
+        turn: turn
+        segments: segments
+        inner: 0.0
+        outer: 0.3
+      )
+      addTierUnderside(
+        mesh: mesh
+        skirt: skirt
+        turn: turn
+        segments: segments
+      )
+    }
+    if let mesh: mod MeshData = meshes.modAt(index: 1) {
+      addTierBand(
+        mesh: mesh
+        skirt: skirt
+        turn: turn
+        segments: segments
+        inner: 0.3
+        outer: 0.65
+      )
+    }
+    if let mesh: mod MeshData = meshes.modAt(index: 2) {
+      addTierBand(
+        mesh: mesh
+        skirt: skirt
+        turn: turn
+        segments: segments
+        inner: 0.65
+        outer: 1.0
+      )
+    }
+  }
+  let main: Vec3 = treeKind.greens.copyAtDefault(index: 0)
+  let lighter: Vec3 = treeKind.greens.copyAtFallback(index: 1, fallback: main)
+  let darker: Vec3 = treeKind.greens.copyAtFallback(index: 2, fallback: main)
+  let albedos: List(Vec3) = List(Vec3) {
+    Vec3.vscale(a: darker, s: 0.45)
+    Vec3.vscale(a: main, s: 0.66)
+    Vec3.vscale(a: lighter, s: 0.76)
+  }
+  ret LeafCardLevel { meshes: own meshes, albedos: albedos }
+}
+
+# The wood a whorled tree shows: only its trunk, from the ground to a
+# little inside its lowest tier (`overlap` m above the lowest branch's
+# base); no branches and no trunk inside the foliage, where it is hidden
+# (a spruce shows only the trunk under its lowest skirt)
+func lowerTrunkSkeleton(skeleton: view TreeSkeleton, overlap: view Float) ret TreeSkeleton {
+  var lowest: Float = 1000000.0
+  loop let limb: view Limb in skeleton.limbs {
+    if limb.order >= 2 and limb.points.length > 0 {
+      lowest = Math.min(a: lowest, b: limb.points.copyAtDefault(index: 0).z)
+    }
+  }
+  let trunk: Limb = skeleton.limbs.copyAtDefault(index: 0)
+  let cut: Float = lowest + overlap
+  var points: List(Vec3) = List.create(Vec3, cap: trunk.points.length)
+  var radii: List(Float) = List.create(Float, cap: trunk.radii.length)
+  loop var k: Int = 0, k < trunk.points.length, ++k {
+    let point: Vec3 = trunk.points.copyAtDefault(index: k)
+    if point.z > cut and points.length >= 2 {
+      break
+    }
+    points.add(value: point)
+    radii.add(value: trunk.radii.copyAtDefault(index: k))
+  }
+  var limbs: List(Limb) = List.create(Limb, cap: 1)
+  limbs.add(value: Limb { points: own points, radii: own radii, parent: -1, order: 0 })
+  ret TreeSkeleton { limbs: own limbs, forkPoint: skeleton.forkPoint }
+}
