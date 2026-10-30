@@ -198,9 +198,9 @@ type SettingsState {
   # The moon (lib/Moon): its disc and night sky, and its light at night. Off,
   # the night is what it was before the moon: the sun's dim floor light.
   moon: Bool
-  # Two invented moons beside the earth's (lib/Moon inventedMoons; the
-  # "More moons" button, RAE_MOONS=3 to start with them)
-  moreMoons: Bool = Sys.getEnv(name: "RAE_MOONS") is "3"
+  # How many moons are in the sky: the earth's and up to three invented
+  # ones beside it (lib/Moon inventedMoons; the -/+ buttons, RAE_MOONS=<n>)
+  moonCount: Int = settingsMoonCountFromEnv()
   # The eclipse last jumped to (lib/Eclipses; -1 none): the eclipse buttons
   # step through the list, wrapping round
   eclipse: Int = -1
@@ -475,8 +475,7 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
     settingsState.moon = settingsState.moon is false
     ret true
   }
-  if actionId is "settings.moons.more" {
-    settingsState.moreMoons = settingsState.moreMoons is false
+  if settingsMoonsAction(settingsState: settingsState, actionId: actionId) {
     ret true
   }
   # the eclipse list: the next one (the first from none), the one before;
@@ -848,10 +847,10 @@ func settingsApplyToWorld(
     nodeId: "SettingsMoonButton"
     slot: settingsSlotFor(on: settingsState.moon)
   )
-  setNodeFillSlot(
+  setNodeText(
     world: world
-    nodeId: "SettingsMoreMoonsButton"
-    slot: settingsSlotFor(on: settingsState.moreMoons)
+    nodeId: "SettingsMoonsLabel"
+    value: settingsMoonsTitle(settingsState: settingsState)
   )
 
   setNodeFillSlot(

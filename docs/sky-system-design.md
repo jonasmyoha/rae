@@ -289,9 +289,14 @@ ordering: the first three land as pure code with real tests.
   places of greatest eclipse.
 - lib/Eclipses holds 20 real solar eclipses from 1980 to 2099 (the dates
   and kinds published in NASA's canon). Their moments and places were
-  refined with the model, along each central path near the published
-  greatest eclipse, so the sky shows each at its deepest: every total one
-  fully covered, with the corona (case 1258).
+  found with the model by walking each central path from the published
+  greatest eclipse to where the sun stands about 22° up, so each shows
+  low in the sky, in view when looking toward the horizon, and every
+  total one is fully covered there, with the corona (case 1258). The
+  greatest eclipse itself is usually where the sun is highest, often
+  nearly overhead. The 2061 path stays in the far north (sun near 11°);
+  the partial one of 2022 is seen from 51°N 53°E (sun 18° up, 70%
+  covered).
 - **Lunar eclipses:** the list also holds 13 lunar eclipses from 1982 to
   2094, 9 total and 4 partial, merged in date order with the solar ones
   (`lunar: true`; the captions say "total solar" / "partial lunar").
@@ -302,8 +307,9 @@ ordering: the first three land as pure code with real tests.
   to 2100 with it finds 177 umbral eclipses, within minutes and a few
   hundredths of magnitude of the published ones (2018-07-27: 20:24 UT,
   magnitude 1.63; published 20:22, 1.61). Each listed one is visited from
-  a place where the moon stands about 28° up at its greatest eclipse (62°
-  north of the point under the moon, at most 66° north).
+  a place where the moon stands about 22° up at its greatest eclipse:
+  north of the point under the moon, or turned west or east where that
+  would be beyond 60° north.
 - **The shadow drawn:** `moonForBody` places the shadow's center like the
   moon (opposite the sun, moved by the moon's parallax, since it falls on
   the moon) and scales it with the disc round the moon's center, so the
@@ -327,8 +333,10 @@ ordering: the first three land as pure code with real tests.
   unlike the earth's (Ember, small and rust-red, an 11.7-day orbit tilted
   9°; Tide, big and pale blue-green, 61 days, 14°). `Sky.moons` holds up to
   three extra moons, drawn by the sky shader in their own size and color
-  and lit by the same sun; the settings' "More moons" button (`RAE_MOONS=3`)
-  adds them.
+  and lit by the same sun. A third, Pearl (pale violet, a 4.3-day orbit),
+  fills the room the light uniform has. The settings' "Moons: N" line and
+  its - / + buttons set how many moons are in the sky, 1 (the earth's
+  alone) to 4 (`RAE_MOONS=<n>` to start with n).
 - **The eclipse list in the settings:** "Previous eclipse" / "Next
   eclipse" step through lib/Eclipses (wrapping round), setting the date,
   the local solar time of the greatest eclipse and the place, and holding

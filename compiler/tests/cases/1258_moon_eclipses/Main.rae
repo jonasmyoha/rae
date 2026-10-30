@@ -1,15 +1,17 @@
 # lib/Moon's ephemeris against real eclipses 1980 - 2099 (lib/Eclipses).
-# At each solar eclipse's moment and place, seen from there, the moon is
+# At each solar eclipse's moment and place, seen from there, the sun is low
+# (about 22 degrees up) and the moon is
 # within 3 arc minutes of the sun at a total, annular or hybrid one, bigger
 # than the sun at a total one and smaller at an annular one, and covers
 # most of the sun at a partial one's deepest point. At each lunar eclipse
 # the moon is all inside the earth's umbra at a total one and partly at a
-# partial one, stands well up at the place given, and the shadow takes most
+# partial one, stands low (about 22 degrees up) at the place given, and the shadow takes most
 # of its light. And a phase: the full moon of 23 April 2024 (23:49 UT) is
 # full, out of the shadow. The invented moons (inventedMoons) stand
 # elsewhere, with their own size and color.
 import Vec3
 open Calendar
+open Sky
 open Moon
 open Eclipses
 
@@ -46,13 +48,19 @@ func main() ret Int {
       }
       check(
         label: eclipseCaption(eclipse: eclipse)
-        ok: inside and moon.up > 0.4 and moon.shadowed > 0.5
+        ok: inside and moon.up > 0.3 and moon.up < 0.45 and moon.shadowed > 0.5
       )
       continue
     }
     let arcMinutes: Float = moon.sunSeparation * 180.0 / 3.14159265 * 60.0
     let ratio: Float = moon.realRadius / moon.sunRealRadius
-    var ok: Bool = arcMinutes < 3.0
+    # low in the sky: the sun between about 9 and 27 degrees up
+    let sunUp: Float = -sunDirForDate(
+      hour: clock.hour
+      dayOfYear: clock.dayOfYear
+      latitudeDeg: eclipse.latitude
+    ).z
+    var ok: Bool = arcMinutes < 3.0 and sunUp > 0.15 and sunUp < 0.45
     if eclipse.kind is EclipseKind.total {
       ok = ok and ratio > 1.0
     }
@@ -60,7 +68,7 @@ func main() ret Int {
       ok = ok and ratio < 1.0
     }
     if eclipse.kind is EclipseKind.partial {
-      ok = moon.sunCovered > 0.6
+      ok = moon.sunCovered > 0.6 and sunUp > 0.15 and sunUp < 0.45
     }
     check(label: eclipseCaption(eclipse: eclipse), ok: ok)
   }
