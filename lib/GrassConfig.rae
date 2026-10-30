@@ -15,7 +15,10 @@
 import Vec3
 import Sys
 
-enum GrassShape { preQueue, rejected, ribbons, textured }
+# The blade shapes: preQueue a flat tapered quad, lowPoly a curved
+# four-segment blade (the stylized low-poly look the meadow uses), ribbons a
+# tuft of curved ribbons, textured crossed cut-out tuft pictures
+enum GrassShape { preQueue, lowPoly, ribbons, textured }
 
 # One shared capture override; placement and app tuning remain unchanged.
 func grassShapeOverride() ret Int {
@@ -23,7 +26,7 @@ func grassShapeOverride() ret Int {
   if name is "control" {
     ret 0
   }
-  if name is "rejected" {
+  if name is "lowPoly" {
     ret 1
   }
   if name is "ribbons" {
@@ -119,15 +122,19 @@ func grassTopDownSettings(groundColor: copy Vec3) ret GrassViewSettings {
 # Shared meadow tuning; apps may change extent and patch scale explicitly.
 func grassMeadowSettings(groundColor: copy Vec3) ret GrassViewSettings {
   var settings: GrassViewSettings = grassThirdPersonSettings(groundColor: groundColor)
+  # Stylized low-poly blades over the whole grassy ground (not patches):
+  # every candidate kept, evenly spread, the tips lighter than the
+  # terrain-colored roots
+  settings.shape = GrassShape.lowPoly
   settings.bladeHeightScale = 0.55
   settings.bladeWidthScale = 1.8
-  settings.densityScale = 0.55
-  settings.clusterStrength = 1.0
+  settings.densityScale = 1.0
+  settings.clusterStrength = 0.0
   settings.patchScale = 7.5
   settings.patchCoverage = 0.58
   settings.patchFeather = 0.10
   settings.bladeVariation = 1.0
-  settings.tipLighten = 1.18
+  settings.tipLighten = 1.6
   settings.windStrength = 0.48
   settings.windGust = 0.85
   settings.distanceStart = 0.32

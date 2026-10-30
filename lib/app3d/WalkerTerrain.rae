@@ -30,6 +30,7 @@ import Noise
 import Vec3
 import Quat
 import Gbuffer
+import GrassConfig
 open WorldBiome
 open GbufferTerrain
 open gpu/GpuResources
@@ -177,7 +178,6 @@ type WalkerTerrain {
   flowerParts: List(PropInstancer)
   # Harebells: one shared patch mesh in two instanced material parts.
   harebellParts: List(PropInstancer)
-  grassProp: PropInstancer
   # The meadow: grass tufts thick over the ground round the camera's focus
   # (app3d/WalkerMeadow)
   meadow: WalkerMeadow
@@ -335,7 +335,7 @@ func kindTransform(
   }
   if kind is kindBush {
     # A bush stands 5 cm into the ground; from small to big, and about one
-    # in 16 huge (2.6 times)
+    # in 33 huge (2.6 times)
     var bush: Transform3D = propTransform3D(
       terrainSystem: terrainSystem
       cellX: cellX
@@ -347,7 +347,7 @@ func kindTransform(
       minScale: 1.0
       scaleSpread: 1.6
     )
-    if terrainHash(cellX: cellX, cellY: cellY, seed: 613) < 0.06 {
+    if terrainHash(cellX: cellX, cellY: cellY, seed: 613) < 0.03 {
       bush.scale = Vec3.vscale(a: bush.scale, s: 2.6)
     }
     ret bush
@@ -546,9 +546,9 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
     loop var column: Int = 0, column < gridSide, ++column {
       let cellX: Int = centerX - gridSide / 2 + column
       let cellY: Int = centerY - gridSide / 2 + row
-      # The streamed kinds (kindRock .. kindGrassB, as createWalkerTerrain
-      # spawns them)
-      loop var kind: Int = kindRock, kind <= kindGrassB, ++kind {
+      # The drawn kinds (kindRock .. kindFlower); the grass is the meadow's
+      # (app3d/WalkerMeadow), the cells' own tufts are not drawn
+      loop var kind: Int = kindRock, kind <= kindFlower, ++kind {
         let transform: Transform3D = kindTransform(
           terrainSystem: terrainSystem
           kind: kind
@@ -621,7 +621,6 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d)
   loop let part: mod PropInstancer in terrainSystem.harebellParts {
     resetInstanceBatch(batch: part.batch)
   }
-  resetInstanceBatch(batch: terrainSystem.grassProp.batch)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     resetInstanceBatch(batch: part.batch)
   }
@@ -643,9 +642,6 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d)
       loop let part: mod PropInstancer in terrainSystem.harebellParts {
         addPropInstance(prop: part, model: prop.model)
       }
-    }
-    if prop.kind is kindGrassA or prop.kind is kindGrassB {
-      addPropInstance(prop: terrainSystem.grassProp, model: prop.model)
     }
   }
 }
@@ -681,7 +677,6 @@ func drawTerrainProps(
   loop let part: view PropInstancer in terrainSystem.harebellParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
   drawWalkerMeadow(cache: cache, resources: resources, meadow: terrainSystem.meadow)
   drawTreeForest(cache: cache, resources: resources, forest: terrainSystem.forest)
   loop let part: view PropInstancer in terrainSystem.bushParts {
@@ -778,7 +773,6 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
   loop let part: mod PropInstancer in terrainSystem.harebellParts {
     setPropInstancerToon(prop: part, toon: toon and Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1")
   }
-  setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
   setWalkerMeadowToon(meadow: terrainSystem.meadow, toon: toon)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     setPropInstancerToon(prop: part, toon: toon)
@@ -830,19 +824,6 @@ func createWalkerTerrain(
   treeSet: view TreeSet
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
-  # the grass tufts are made in code (app3d/GrassTuft), not a Unity asset
-  # with its blades' wind pivots, so the tufts bend in the wind
-  let grassMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: grassTuftMesh(seed: 71))
-  let grassMaterial: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.11, y: 0.155, z: 0.038)
-    roughness: 0.94
-  )
-  var grassProp: PropInstancer = createPropInstancer(
-    mesh: grassMesh
-    material: grassMaterial
-    capacity: cellCount * 2
-  )
-  grassProp.sway = 1.0
   # One entity per pool slot per small prop kind, placed by updateInfiniteTerrain
   let streamedKinds: List(Int) = [
     kindRock
@@ -913,8 +894,13 @@ func createWalkerTerrain(
     rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
     flowerParts: own createWalkerDaisyParts(renderer: renderer, capacity: cellCount)
     harebellParts: own createWalkerHarebellParts(renderer: renderer, capacity: cellCount)
-    grassProp: own grassProp
-    meadow: own createWalkerMeadow(renderer: renderer, gridSide: gridSide, cellSize: walkerCellSize)
+    meadow: own createWalkerMeadow(
+      renderer: renderer
+      gridSide: gridSide
+      cellSize: walkerCellSize
+      rootColor: walkerGroundColor()
+      tipLighten: GrassConfig.grassMeadowSettings(groundColor: walkerGroundColor()).tipLighten
+    )
     treeSet: treeSet
     forest: own treeForest
     farGround: own farGround
