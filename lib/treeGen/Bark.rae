@@ -11,6 +11,7 @@ import Math
 import Vec3
 open Scene3d
 open treeGen/TreeKind
+open SurfaceImages
 
 const barkImageSize: Int = 512
 
@@ -150,6 +151,23 @@ func barkPixels(barkKind: view BarkKind) ret List(Int) {
 
 # Paint the bark image and save it as a PNG at `path`, for the renderer's
 # material images (rendererLoadSurfaceImage)
+# The bark picture as the renderer's material images take one made in
+# memory (RendererImages.rendererQueueSurfaceImagePixels): linear RGBA, the
+# same 8-bit colors a PNG of it holds (writeBarkImage) decoded as a file's
+# would be (SurfaceImages.setSurfaceImages). Nothing is written, so it works
+# where the app cannot write a file (an iPhone app's folder).
+func barkImageLinearPixels(barkKind: view BarkKind) ret List(Float) {
+  let packed: List(Int) = barkPixels(barkKind: barkKind)
+  var linear: List(Float) = List.create(Float, cap: packed.length * 4)
+  loop let value: view Int in packed {
+    linear.add(value: surfaceLinear(value: ((value / 65536) % 256).toFloat() / 255.0))
+    linear.add(value: surfaceLinear(value: ((value / 256) % 256).toFloat() / 255.0))
+    linear.add(value: surfaceLinear(value: (value % 256).toFloat() / 255.0))
+    linear.add(value: ((value / 16777216) % 256).toFloat() / 255.0)
+  }
+  ret linear
+}
+
 func writeBarkImage(barkKind: view BarkKind, path: view String) ret Bool {
   let pixels: List(Int) = barkPixels(barkKind: barkKind)
   ret Image.savePng(
