@@ -71,8 +71,10 @@ func checkImages(resources: mod GpuResources) ret Int {
   if setSurfaceImages(images: images, resources: resources, paths: missing) {
     ret 8
   }
-  var excessive: List(String) = List.create(String, cap: 17)
-  loop var layer: Int = 0, layer < 17, ++layer {
+  # one picture more than the layer cap is refused before any is loaded (the
+  # cap follows the constant: it was 16 and is 64 since 143's T02 bark)
+  var excessive: List(String) = List.create(String, cap: surfaceImageMaxLayers + 1)
+  loop var layer: Int = 0, layer <= surfaceImageMaxLayers, ++layer {
     excessive.add(value: "lib/assets/trees/birchBark.png")
   }
   if setSurfaceImages(images: images, resources: resources, paths: excessive) {
@@ -111,7 +113,12 @@ func main() ret Int {
   }
   var issuer: IdIssuer = IdIssuer.create()
   if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 16) {
-    ret checkImages(resources: resources)
+    let failed: Int = checkImages(resources: resources)
+    if failed is not 0 {
+      # `rae run` reports any failure as exit code 1: say which step failed
+      log("FAIL: surface images, step {failed}")
+    }
+    ret failed
   }
   ret 13
 }
