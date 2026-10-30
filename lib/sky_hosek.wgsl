@@ -151,17 +151,23 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   // The moon and the night sky come after the daylight fade, so they show at
   // night: a dark blue night that brightens and glows round the moon with its
   // light, and the disc, faint by day against the bright sky
-  if (L.moon.w > 0.0 && kind > 1.5) {
-    let toMoon = normalize(L.moon.xyz);
-    let above = smoothstep(-0.01, 0.03, dir.z);
+  // A moonless night keeps the night sky's own faint blue (starlight and
+  // airglow); the moon brightens it and glows round itself
+  let above = smoothstep(-0.01, 0.03, dir.z);
+  if (kind > 1.5) {
     let night = 1.0 - clamp(L.skyParams.z, 0.0, 1.0);
-    let moonlight = L.night.x;
     let height = clamp(dir.z, 0.0, 1.0);
     // cd/m2 (the look tuned in the old units at the reference exposure)
     let nightSky = mix(vec3<f32>(400.0, 560.0, 1000.0), vec3<f32>(120.0, 200.0, 520.0), height)
-      * (0.35 + 2.4 * moonlight) * L.camPos.w;
+      * (0.35 + 2.4 * L.night.x) * L.camPos.w;
+    c = c + nightSky * night * above;
+  }
+  if (L.moon.w > 0.0 && kind > 1.5) {
+    let toMoon = normalize(L.moon.xyz);
+    let night = 1.0 - clamp(L.skyParams.z, 0.0, 1.0);
+    let moonlight = L.night.x;
     let glow = pow(max(dot(dir, toMoon), 0.0), 48.0) * 2400.0 * moonlight * L.camPos.w;
-    c = c + (nightSky + vec3<f32>(0.55, 0.62, 0.80) * glow) * night * above;
+    c = c + vec3<f32>(0.55, 0.62, 0.80) * glow * night * above;
     let disc = moonDisc(dir, toMoon, toSun, max(L.skySun.w, 0.001));
     // In an eclipse the disc's near side faces away from the sun: dark
     // against the sky, and round it the corona, brighter as the sun goes

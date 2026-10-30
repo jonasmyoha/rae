@@ -220,7 +220,8 @@ func createSettingsState(
     dateDragging: false
     longitude: moonDefaultLongitudeDeg
     lonDragging: false
-    moon: true
+    # RAE_MOON=off starts with the moon off (screenshots of a moonless night)
+    moon: Sys.getEnv(name: "RAE_MOON") is not "off"
   }
   # RAE_ECLIPSE=<n>: start at eclipse n (1-based) of lib/Eclipses
   let eclipseName: String = Sys.getEnv(name: "RAE_ECLIPSE")
