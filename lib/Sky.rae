@@ -123,7 +123,25 @@ type Sky {
   # Ambient light the night sky adds to the sky's own (which fades out with
   # the sun): the moonlit sky lighting the scene
   nightAmbient: Vec3
+  # More moons than the earth's (lib/Moon inventedMoons), at most
+  # skyMoonsMax, drawn like it, each in its own color
+  moons: List(SkyMoon) = List.create(SkyMoon, cap: 0)
+  # How much of the sun the earth's moon covers (lib/Moon sunCovered, 0..1):
+  # its disc goes dark against the sun and the corona shows round it
+  sunCovered: Float = 0.0
 }
+
+# One more moon of a sky: the way its light travels (as moonDir), its
+# disc's angular radius (rad), color and luminance (cd/m2)
+type SkyMoon {
+  direction: Vec3
+  radius: Float
+  color: Vec3
+  intensity: Float
+}
+
+# The most extra moons a sky draws (the light uniform's room)
+const skyMoonsMax: Int = 3
 
 # The kind, as the number the shader switches on. One place that mapping
 # exists, so adding a kind cannot leave the GPU and CPU disagreeing about

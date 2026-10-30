@@ -28,6 +28,10 @@ struct LightU {
   skySun: vec4<f32>,
   moon: vec4<f32>,
   night: vec4<f32>,
+  // The extra moons (Sky.moons, 3): per moon xyz toward it and w its disc's
+  // angular radius (0: none), then rgb its color times its luminance (cd/m2);
+  // moons[1].w: how much of the sun the earth's moon covers (an eclipse)
+  moons: array<vec4<f32>, 6>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,

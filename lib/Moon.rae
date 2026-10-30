@@ -1,28 +1,41 @@
-# Moon — where the moon is in the sky and how much of it is lit, for a date, a
-# local solar time, a latitude and a longitude; and how much light it gives.
+# Moon — the moons in the sky: where each is, how much of it is lit and how
+# big it is drawn, for a date, a local solar time, a latitude and a
+# longitude; how much light the earth's moon gives; and how much of the sun
+# it covers (a solar eclipse).
 #
-# The sun's place comes from lib/Sky (the hour angle of local solar time and
-# the declination of the date). The moon is placed RELATIVE to that sun: its
-# hour angle is the sun's plus the difference of their right ascensions. So
-# the two always agree about each other, which is what the moon's phase is:
-# the lit side of the disc faces the sun the sky shows.
+# The earth's moon follows an ephemeris: its orbit's mean elements with the
+# main perturbations of its longitude, latitude and distance (the series of
+# Paul Schlyter's "How to compute planetary positions"), good to a couple of
+# arc minutes, and the sun's longitude and distance from the same source.
+# It is seen from the observer's place, not the earth's center: the
+# sidereal time and the moon's parallax (up to a degree) move it, which is
+# what makes an eclipse total in one place and partial 500 km away.
 #
-# The ephemeris is the low-precision one of the Astronomical Almanac (the
-# moon's mean longitude, anomaly, elongation and argument of latitude, with
-# its five largest terms): good to a few tenths of a degree, far inside what a
-# sky needs. The year, the day of the year, the hour and the longitude set the
-# time (the longitude turns local solar time into universal time); the moon
-# moves about 13 degrees a day against the stars, so it rises some 50 minutes
-# later each day and runs through its phases in 29.5 days.
+# The sky's sun comes from lib/Sky (local solar time and a fitted
+# declination). Each moon is placed RELATIVE to that sun: its hour angle
+# and declination are the sun's plus their differences in the ephemeris. So
+# the moon's phase faces the sun the sky shows, and an eclipse covers that
+# sun exactly when the ephemeris says it does. The longitude turns local
+# solar time into universal time.
+#
+# Away from the sun the moon is drawn 2.5 times its real size, as games do,
+# so its phase reads on a screen; near the sun it shrinks to its real size,
+# so an eclipse is total, annular or partial as it really is.
+#
+# More moons: a MoonBody describes each. The earth's moon is earthMoon();
+# invented ones circle on a tilted orbit of their own period, size and
+# color (inventedMoons), placed and lit the same way.
 #
 #   let moon: MoonState = moonForDate(year: 2026, dayOfYear: 290, hour: 22.0,
 #     latitudeDeg: 60.17, longitudeDeg: 24.94)
 #   moon.direction      the way its light travels (Light3d.sunDir's convention)
 #   moon.illumination   0 at new moon .. 1 at full
+#   moon.sunCovered     0 .. 1: how much of the sun's disc it hides
 #   moonLightLevel(moon: moon)   0 .. 1: the phase, dimmed near the horizon
 import Math
 import Vec3
 open Calendar
+open Sky
 
 const moonPi: Float = 3.14159265358979
 
@@ -30,10 +43,20 @@ const moonPi: Float = 3.14159265358979
 # lib/Sky's default latitude
 const moonDefaultLongitudeDeg: Float = 24.94
 
-# The disc's angular radius in the sky (rad). The real moon's is 0.0045, the
-# size of the sun's; it is drawn 2.5 times bigger, as games do, so its phase
-# reads on a screen.
+# The disc's angular radius in the sky (rad) away from the sun: the real
+# moon's is about 0.0045, the size of the sun's; it is drawn 2.5 times
+# bigger, as games do, so its phase reads on a screen
 const moonAngularRadius: Float = 0.0115
+
+# Within this angle of the sun (rad, about 4 degrees) a moon is drawn at its
+# real size, and from twice it at its game size
+const moonRealSizeWithin: Float = 0.07
+
+# The moon's radius in earth radii, and the sun's angular radius at one
+# astronomical unit (rad)
+const moonRadiusEarthRadii: Float = 0.2725
+
+const sunAngularRadiusAtOneAu: Float = 0.0046524
 
 type MoonState {
   # The way the moonlight travels: from the moon toward the scene
@@ -44,10 +67,81 @@ type MoonState {
   illumination: Float
   # Growing toward full (true) or shrinking toward new
   waxing: Bool
+  # The disc's radius as drawn (rad), its color and its brightness (1 the
+  # earth's moon)
+  drawRadius: Float = 0.0115
+  color: Vec3 = Vec3.create(x: 0.92, y: 0.94, z: 1.0)
+  brightness: Float = 1.0
+  # Seen from here: the angle between it and the sun (rad), the real
+  # angular radii of the two, and how much of the sun's disc it covers
+  # (0 .. 1; above 0 is a solar eclipse)
+  sunSeparation: Float = 3.14159
+  realRadius: Float = 0.0045
+  sunRealRadius: Float = 0.00465
+  sunCovered: Float = 0.0
+}
+
+# A moon of the sky: the earth's (its ephemeris), or an invented one on a
+# circular orbit tilted to the ecliptic
+type MoonBody {
+  name: String
+  earth: Bool = false
+  # Its disc as drawn (rad), color and brightness
+  angularRadius: Float
+  color: Vec3
+  brightness: Float = 1.0
+  # An invented orbit: the days of one turn against the stars, its ecliptic
+  # longitude at J2000 (degrees), its tilt (degrees) and its ascending
+  # node's longitude (degrees)
+  periodDays: Float = 27.32
+  longitudeAtEpoch: Float = 0.0
+  inclination: Float = 0.0
+  nodeLongitude: Float = 0.0
+}
+
+# The earth's moon
+func earthMoon() ret MoonBody {
+  ret MoonBody {
+    name: "Moon"
+    earth: true
+    angularRadius: moonAngularRadius
+    color: Vec3.create(x: 0.92, y: 0.94, z: 1.0)
+  }
+}
+
+# Two invented moons, unlike the earth's: a small, quick, rust-red one and
+# a big, slow, pale blue-green one, on tilted orbits of their own
+func inventedMoons() ret List(MoonBody) {
+  ret List(MoonBody) {
+    {
+      name: "Ember"
+      angularRadius: 0.0065
+      color: Vec3.create(x: 1.0, y: 0.42, z: 0.24)
+      brightness: 0.3
+      periodDays: 11.7
+      longitudeAtEpoch: 40.0
+      inclination: 9.0
+      nodeLongitude: 70.0
+    }
+    {
+      name: "Tide"
+      angularRadius: 0.021
+      color: Vec3.create(x: 0.5, y: 0.85, z: 0.95)
+      brightness: 0.35
+      periodDays: 61.0
+      longitudeAtEpoch: 200.0
+      inclination: 14.0
+      nodeLongitude: 300.0
+    }
+  }
 }
 
 func moonRadians(degrees: view Float) ret Float {
   ret degrees * moonPi / 180.0
+}
+
+func moonDegrees(radians: view Float) ret Float {
+  ret radians * 180.0 / moonPi
 }
 
 # An angle in degrees, wrapped to 0..360 before it loses precision in a Float
@@ -76,8 +170,7 @@ func daysSinceJ2000(year: view Int, dayOfYear: view Int, utHours: view Float) re
   ret days + (dayOfYear - 1) as Float64 + (utHours as Float64) / 24.0 - 0.5
 }
 
-# Right ascension and declination (rad) of ecliptic longitude / latitude
-# (degrees) with the obliquity `obliquityDeg`
+# Right ascension and declination (rad)
 type MoonEquatorial {
   rightAscension: Float
   declination: Float
@@ -125,8 +218,146 @@ func towardHourAngle(
   )
 }
 
-# The moon at `hour` (local solar time, 0..24) on day `dayOfYear` of `year`,
-# seen from `latitudeDeg` north, `longitudeDeg` east
+# The sun from the ephemeris at `days` after J2000: its ecliptic longitude
+# (degrees), mean anomaly (degrees) and distance (astronomical units)
+type SunEphemeris {
+  longitude: Float
+  anomaly: Float
+  distance: Float
+}
+
+func sunEphemeris(days: view Float64) ret SunEphemeris {
+  # Schlyter's day count starts 1.5 days before J2000.0
+  let d: Float64 = days + 1.5
+  let perihelion: Float = moonWrapDegrees(degrees: d * 0.0000470935 + 282.9404)
+  let eccentricity: Float = 0.016709 - (d * 0.000000001151) as Float
+  let anomaly: Float = moonWrapDegrees(degrees: d * 0.9856002585 + 356.047)
+  let m: Float = moonRadians(degrees: anomaly)
+  let e: Float = m + eccentricity * Math.sin(x: m) * (1.0 + eccentricity * Math.cos(x: m))
+  let xv: Float = Math.cos(x: e) - eccentricity
+  let yv: Float = Math.sqrt(x: 1.0 - eccentricity * eccentricity) * Math.sin(x: e)
+  ret SunEphemeris {
+    longitude: moonWrapDegrees(
+      degrees: (moonDegrees(radians: Math.atan2(y: yv, x: xv)) + perihelion) as Float64
+    )
+    anomaly: anomaly
+    distance: Math.sqrt(x: xv * xv + yv * yv)
+  }
+}
+
+# The moon from the ephemeris at `days` after J2000: its geocentric ecliptic
+# longitude and latitude (degrees) and distance (earth radii), with the
+# main perturbations
+type MoonEphemeris {
+  longitude: Float
+  latitude: Float
+  distance: Float
+}
+
+func moonEphemeris(days: view Float64, sun: view SunEphemeris) ret MoonEphemeris {
+  let d: Float64 = days + 1.5
+  let node: Float = moonWrapDegrees(degrees: d * -0.0529538083 + 125.1228)
+  let inclination: Float = moonRadians(degrees: 5.1454)
+  let perigee: Float = moonWrapDegrees(degrees: d * 0.1643573223 + 318.0634)
+  let eccentricity: Float = 0.0549
+  let anomaly: Float = moonWrapDegrees(degrees: d * 13.0649929509 + 115.3654)
+  let m: Float = moonRadians(degrees: anomaly)
+  # Kepler's equation, a few rounds
+  var e: Float = m + eccentricity * Math.sin(x: m) * (1.0 + eccentricity * Math.cos(x: m))
+  loop var round: Int = 0, round < 4, ++round {
+    e = e - (e - eccentricity * Math.sin(x: e) - m) / (1.0 - eccentricity * Math.cos(x: e))
+  }
+  let xv: Float = 60.2666 * (Math.cos(x: e) - eccentricity)
+  let yv: Float = 60.2666 * Math.sqrt(x: 1.0 - eccentricity * eccentricity) * Math.sin(x: e)
+  let v: Float = Math.atan2(y: yv, x: xv)
+  let r: Float = Math.sqrt(x: xv * xv + yv * yv)
+  let n: Float = moonRadians(degrees: node)
+  let vw: Float = v + moonRadians(degrees: perigee)
+  let xh: Float = r * (Math.cos(x: n) * Math.cos(x: vw) - Math.sin(x: n) * Math.sin(x: vw) * Math.cos(
+    x: inclination
+  ))
+  let yh: Float = r * (Math.sin(x: n) * Math.cos(x: vw) + Math.cos(x: n) * Math.sin(x: vw) * Math.cos(
+    x: inclination
+  ))
+  let zh: Float = r * Math.sin(x: vw) * Math.sin(x: inclination)
+  var longitude: Float = moonDegrees(radians: Math.atan2(y: yh, x: xh))
+  var latitude: Float = moonDegrees(radians: Math.atan2(y: zh, x: Math.sqrt(x: xh * xh + yh * yh)))
+  var distance: Float = r
+  # The perturbations: the sun's and the moon's mean anomalies, the moon's
+  # mean elongation and its argument of latitude
+  let ms: Float = moonRadians(degrees: sun.anomaly)
+  let mm: Float = m
+  let sunMeanLongitude: Float = sun.anomaly + moonWrapDegrees(degrees: d * 0.0000470935 + 282.9404)
+  let moonMeanLongitude: Float = anomaly + perigee + node
+  let dd: Float = moonRadians(degrees: moonMeanLongitude - sunMeanLongitude)
+  let f: Float = moonRadians(degrees: moonMeanLongitude - node)
+  longitude = longitude - 1.274 * Math.sin(x: mm - 2.0 * dd) + 0.658 * Math.sin(x: 2.0 * dd) - 0.186 * Math.sin(
+    x: ms
+  ) - 0.059 * Math.sin(x: 2.0 * mm - 2.0 * dd) - 0.057 * Math.sin(x: mm - 2.0 * dd + ms) + 0.053 * Math.sin(
+    x: mm + 2.0 * dd
+  ) + 0.046 * Math.sin(x: 2.0 * dd - ms) + 0.041 * Math.sin(x: mm - ms) - 0.035 * Math.sin(x: dd) - 0.031 * Math.sin(
+    x: mm + ms
+  ) - 0.015 * Math.sin(x: 2.0 * f - 2.0 * dd) + 0.011 * Math.sin(x: mm - 4.0 * dd)
+  latitude = latitude - 0.173 * Math.sin(x: f - 2.0 * dd) - 0.055 * Math.sin(x: mm - f - 2.0 * dd) - 0.046 * Math.sin(
+    x: mm + f - 2.0 * dd
+  ) + 0.033 * Math.sin(x: f + 2.0 * dd) + 0.017 * Math.sin(x: 2.0 * mm + f)
+  distance = distance - 0.58 * Math.cos(x: mm - 2.0 * dd) - 0.46 * Math.cos(x: 2.0 * dd)
+  ret MoonEphemeris { longitude: longitude, latitude: latitude, distance: distance }
+}
+
+# The obliquity of the ecliptic (degrees) `days` after J2000
+func moonObliquity(days: view Float64) ret Float {
+  ret 23.4393 - (days * 0.0000003563) as Float
+}
+
+# Greenwich mean sidereal time (rad) `days` after J2000
+func greenwichSiderealTime(days: view Float64) ret Float {
+  ret moonRadians(degrees: moonWrapDegrees(degrees: days * 360.98564736629 + 280.46061837))
+}
+
+# The fraction of a disc of radius `sunRadius` hidden by one of radius
+# `moonRadius` whose center is `separation` away (rad; all small angles)
+func discCovered(sunRadius: view Float, moonRadius: view Float, separation: view Float) ret Float {
+  if sunRadius <= 0.0 {
+    ret 0.0
+  }
+  if separation >= sunRadius + moonRadius {
+    ret 0.0
+  }
+  if separation <= moonRadius - sunRadius {
+    ret 1.0
+  }
+  let sunArea: Float = moonPi * sunRadius * sunRadius
+  if separation <= sunRadius - moonRadius {
+    ret moonPi * moonRadius * moonRadius / sunArea
+  }
+  # the lens where the two circles overlap
+  let r1: Float = sunRadius
+  let r2: Float = moonRadius
+  let s: Float = separation
+  let a1: Float = Math.acos(
+    x: Math.clamp(val: (s * s + r1 * r1 - r2 * r2) / (2.0 * s * r1), low: -1.0, high: 1.0)
+  )
+  let a2: Float = Math.acos(
+    x: Math.clamp(val: (s * s + r2 * r2 - r1 * r1) / (2.0 * s * r2), low: -1.0, high: 1.0)
+  )
+  let k: Float = (-s + r1 + r2) * (s + r1 - r2) * (s - r1 + r2) * (s + r1 + r2)
+  let lens: Float = r1 * r1 * a1 + r2 * r2 * a2 - 0.5 * Math.sqrt(x: Math.max(a: k, b: 0.0))
+  ret Math.clamp(val: lens / sunArea, low: 0.0, high: 1.0)
+}
+
+# The angle (rad) between two directions given as right ascension and
+# declination (the haversine form: exact for the small angles of an
+# eclipse, where a cosine near 1 loses them in a Float)
+func angleBetween(a: view MoonEquatorial, b: view MoonEquatorial) ret Float {
+  let halfDec: Float = Math.sin(x: (a.declination - b.declination) * 0.5)
+  let halfRa: Float = Math.sin(x: (a.rightAscension - b.rightAscension) * 0.5)
+  let h: Float = halfDec * halfDec + Math.cos(x: a.declination) * Math.cos(x: b.declination) * halfRa * halfRa
+  ret 2.0 * Math.asin(x: Math.sqrt(x: Math.clamp(val: h, low: 0.0, high: 1.0)))
+}
+
+# The earth's moon at `hour` (local solar time, 0..24) on day `dayOfYear` of
+# `year`, seen from `latitudeDeg` north, `longitudeDeg` east
 func moonForDate(
   year: view Int
   dayOfYear: view Int
@@ -134,55 +365,149 @@ func moonForDate(
   latitudeDeg: view Float
   longitudeDeg: view Float
 ) ret MoonState {
-  let d: Float64 = daysSinceJ2000(
+  ret moonForBody(
+    body: earthMoon()
+    year: year
+    dayOfYear: dayOfYear
+    hour: hour
+    latitudeDeg: latitudeDeg
+    longitudeDeg: longitudeDeg
+  )
+}
+
+# Moon `body` at `hour` (local solar time) on day `dayOfYear` of `year`,
+# seen from `latitudeDeg` north, `longitudeDeg` east
+func moonForBody(
+  body: view MoonBody
+  year: view Int
+  dayOfYear: view Int
+  hour: view Float
+  latitudeDeg: view Float
+  longitudeDeg: view Float
+) ret MoonState {
+  let days: Float64 = daysSinceJ2000(
     year: year
     dayOfYear: dayOfYear
     utHours: hour - longitudeDeg / 15.0
   )
-  # The sun's ecliptic longitude
-  let sunAnomaly: Float = moonWrapDegrees(degrees: d * 0.98560028 + 357.529)
-  let sunMean: Float = moonWrapDegrees(degrees: d * 0.98564736 + 280.459)
-  let sunLongitude: Float = sunMean + 1.915 * Math.sin(x: moonRadians(degrees: sunAnomaly)) + 0.020 * Math.sin(
-    x: moonRadians(degrees: 2.0 * sunAnomaly)
-  )
-  # The moon's: its mean longitude, anomaly, elongation, argument of latitude
-  let meanLongitude: Float = moonWrapDegrees(degrees: d * 13.176396 + 218.316)
-  let anomaly: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 13.064993 + 134.963))
-  let elongation: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 12.190749 + 297.850))
-  let argument: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 13.229350 + 93.272))
-  let moonLongitude: Float = meanLongitude + 6.289 * Math.sin(x: anomaly) + 1.274 * Math.sin(
-    x: 2.0 * elongation - anomaly
-  ) + 0.658 * Math.sin(x: 2.0 * elongation) + 0.214 * Math.sin(x: 2.0 * anomaly) - 0.186 * Math.sin(
-    x: moonRadians(degrees: sunAnomaly)
-  )
-  let moonLatitude: Float = 5.128 * Math.sin(x: argument)
-  let obliquity: Float = 23.439
+  # The ephemeris runs on terrestrial time, about 69 s ahead of universal
+  # time in these decades (delta T); the sidereal time on universal time
+  let ephemerisDays: Float64 = days + 69.0 / 86400.0
+  let sunNow: SunEphemeris = sunEphemeris(days: ephemerisDays)
+  let obliquity: Float = moonObliquity(days: days)
   let sun: MoonEquatorial = eclipticToEquatorial(
-    longitudeDeg: sunLongitude
+    longitudeDeg: sunNow.longitude
     latitudeDeg: 0.0
     obliquityDeg: obliquity
   )
-  let moon: MoonEquatorial = eclipticToEquatorial(
-    longitudeDeg: moonLongitude
-    latitudeDeg: moonLatitude
-    obliquityDeg: obliquity
-  )
-  # The sun's hour angle is local solar time's; the moon's is that plus the
-  # difference of their right ascensions
+  var moonLongitude: Float = 0.0
+  var moonLatitude: Float = 0.0
+  var moon: MoonEquatorial = sun
+  var realRadius: Float = body.angularRadius
+  if body.earth {
+    let ephemeris: MoonEphemeris = moonEphemeris(days: ephemerisDays, sun: sunNow)
+    moonLongitude = ephemeris.longitude
+    moonLatitude = ephemeris.latitude
+    let geocentric: MoonEquatorial = eclipticToEquatorial(
+      longitudeDeg: moonLongitude
+      latitudeDeg: moonLatitude
+      obliquityDeg: obliquity
+    )
+    # seen from the observer, not the earth's center: the parallax (the
+    # geocentric latitude, the earth being a little flattened)
+    let phi: Float = moonRadians(degrees: latitudeDeg)
+    let geocentricPhi: Float = Math.atan(x: 0.99664719 * Math.tan(x: phi))
+    let sinParallax: Float = 1.0 / Math.max(a: ephemeris.distance, b: 1.0)
+    let localSidereal: Float = greenwichSiderealTime(days: days) + moonRadians(
+      degrees: longitudeDeg
+    )
+    let h: Float = localSidereal - geocentric.rightAscension
+    let cosDec: Float = Math.cos(x: geocentric.declination)
+    let den: Float = cosDec - Math.cos(x: geocentricPhi) * sinParallax * Math.cos(x: h)
+    let shift: Float = Math.atan2(
+      y: -Math.cos(x: geocentricPhi) * sinParallax * Math.sin(x: h)
+      x: den
+    )
+    moon = MoonEquatorial {
+      rightAscension: geocentric.rightAscension + shift
+      declination: Math.atan2(
+        y: (Math.sin(x: geocentric.declination) - Math.sin(x: geocentricPhi) * sinParallax) * Math.cos(
+          x: shift
+        )
+        x: den
+      )
+    }
+    # its real size from here: nearer by about the sine of its height
+    let height: Float = Math.sin(x: phi) * Math.sin(x: moon.declination) + Math.cos(x: phi) * Math.cos(
+      x: moon.declination
+    ) * Math.cos(x: h - shift)
+    realRadius = Math.asin(
+      x: Math.clamp(
+        val: moonRadiusEarthRadii / Math.max(a: ephemeris.distance - height, b: 1.0)
+        low: 0.0
+        high: 1.0
+      )
+    )
+  } else {
+    # an invented moon: a circular orbit tilted to the ecliptic
+    let turns: Float64 = (days / (body.periodDays as Float64)) * 360.0
+    let alongOrbit: Float = moonWrapDegrees(
+      degrees: turns + (body.longitudeAtEpoch - body.nodeLongitude) as Float64
+    )
+    let a: Float = moonRadians(degrees: alongOrbit)
+    let tilt: Float = moonRadians(degrees: body.inclination)
+    moonLongitude = moonWrapDegrees(
+      degrees: (moonDegrees(
+        radians: Math.atan2(y: Math.sin(x: a) * Math.cos(x: tilt), x: Math.cos(x: a))
+      ) + body.nodeLongitude) as Float64
+    )
+    moonLatitude = moonDegrees(radians: Math.asin(x: Math.sin(x: a) * Math.sin(x: tilt)))
+    moon = eclipticToEquatorial(
+      longitudeDeg: moonLongitude
+      latitudeDeg: moonLatitude
+      obliquityDeg: obliquity
+    )
+  }
+  let separation: Float = angleBetween(a: moon, b: sun)
+  let sunRealRadius: Float = sunAngularRadiusAtOneAu / Math.max(a: sunNow.distance, b: 0.5)
+  # Placed relative to the sky's sun: its hour angle (local solar time) and
+  # declination (lib/Sky's fit), plus the ephemeris' differences
   let sunHourAngle: Float = (hour - 12.0) * moonPi / 12.0
   let toMoon: Vec3 = towardHourAngle(
     hourAngle: sunHourAngle + sun.rightAscension - moon.rightAscension
-    declination: moon.declination
+    declination: solarDeclinationRad(dayOfYear: dayOfYear) + moon.declination - sun.declination
     latitudeDeg: latitudeDeg
   )
-  # The phase: the angle between the moon and the sun seen from the earth
-  let apart: Float = moonRadians(degrees: moonLongitude - sunLongitude)
-  let cosElongation: Float = Math.cos(x: moonRadians(degrees: moonLatitude)) * Math.cos(x: apart)
+  # The phase: the angle between the moon and the sun
+  let cosElongation: Float = Math.cos(x: separation)
+  let apart: Float = moonRadians(degrees: moonLongitude - sunNow.longitude)
+  # Drawn at its real size near the sun (an eclipse as it is), its game
+  # size away from it
+  let away: Float = Math.clamp(
+    val: (separation - moonRealSizeWithin) / moonRealSizeWithin
+    low: 0.0
+    high: 1.0
+  )
+  var drawRadius: Float = body.angularRadius
+  if body.earth {
+    drawRadius = realRadius + (body.angularRadius - realRadius) * away * away * (3.0 - 2.0 * away)
+  }
   ret MoonState {
     direction: Vec3.create(x: -toMoon.x, y: -toMoon.y, z: -toMoon.z)
     up: toMoon.z
     illumination: (1.0 - cosElongation) * 0.5
     waxing: Math.sin(x: apart) > 0.0
+    drawRadius: drawRadius
+    color: body.color
+    brightness: body.brightness
+    sunSeparation: separation
+    realRadius: realRadius
+    sunRealRadius: sunRealRadius
+    sunCovered: discCovered(
+      sunRadius: sunRealRadius
+      moonRadius: drawRadius
+      separation: separation
+    )
   }
 }
 

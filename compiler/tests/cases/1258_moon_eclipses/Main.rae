@@ -1,0 +1,66 @@
+# lib/Moon's ephemeris against real solar eclipses (lib/Eclipses): at each
+# eclipse's moment and place, seen from there, the moon is within 3 arc
+# minutes of the sun at a total, annular or hybrid one, bigger than the sun
+# at a total one and smaller at an annular one, and covers most of the sun
+# at a partial one's deepest point. And a phase: the full moon of 23 April
+# 2024 (23:49 UT) is full. The invented moons (inventedMoons) stand
+# elsewhere, with their own size and color.
+import Vec3
+open Moon
+open Eclipses
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  loop let eclipse: view Eclipse in eclipses() {
+    let clock: EclipseClock = eclipseClock(eclipse: eclipse)
+    let moon: MoonState = moonForDate(
+      year: clock.year
+      dayOfYear: clock.dayOfYear
+      hour: clock.hour
+      latitudeDeg: eclipse.latitude
+      longitudeDeg: eclipse.longitude
+    )
+    let arcMinutes: Float = moon.sunSeparation * 180.0 / 3.14159265 * 60.0
+    let ratio: Float = moon.realRadius / moon.sunRealRadius
+    var ok: Bool = arcMinutes < 3.0
+    if eclipse.kind is EclipseKind.total {
+      ok = ok and ratio > 1.0
+    }
+    if eclipse.kind is EclipseKind.annular {
+      ok = ok and ratio < 1.0
+    }
+    if eclipse.kind is EclipseKind.partial {
+      ok = moon.sunCovered > 0.6
+    }
+    check(label: eclipseCaption(eclipse: eclipse), ok: ok)
+  }
+  # the full moon of 23 April 2024, 23:49 UT, from Greenwich
+  let full: MoonState = moonForDate(
+    year: 2024
+    dayOfYear: 114
+    hour: 23.8
+    latitudeDeg: 51.5
+    longitudeDeg: 0.0
+  )
+  check(label: "23 April 2024 23:49 UT: a full moon", ok: full.illumination > 0.99)
+  let ember: MoonState = moonForBody(
+    body: inventedMoons().copyAtDefault(index: 0)
+    year: 2024
+    dayOfYear: 114
+    hour: 23.8
+    latitudeDeg: 51.5
+    longitudeDeg: 0.0
+  )
+  check(
+    label: "an invented moon: elsewhere, its own size and color"
+    ok: Vec3.vdot(a: ember.direction, b: full.direction) < 0.999 and ember.drawRadius is not full.drawRadius and ember.color.y is not full.color.y
+  )
+  ret 0
+}

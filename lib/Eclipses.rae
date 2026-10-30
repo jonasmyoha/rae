@@ -1,0 +1,266 @@
+# Eclipses — a list of real solar eclipses to visit: for each, the moment
+# of greatest eclipse (universal time) and the place on Earth where it was
+# deepest, from the published eclipse tables (NASA's Five Millennium
+# Canon). lib/Moon puts the moon over the sun at these moments and places;
+# case 1258 checks that it does.
+#
+# The settings jump to one with eclipseClock: it turns the universal time
+# into the local solar time the clock runs on (the longitude's hours), so
+# the sky shows the eclipse from that place.
+import Math
+open Calendar
+
+enum EclipseKind { total, annular, hybrid, partial }
+
+type Eclipse {
+  year: Int
+  month: Int
+  day: Int
+  # the moment of greatest eclipse, hours of universal time
+  utHours: Float
+  kind: EclipseKind
+  # where it was deepest (degrees north, east)
+  latitude: Float
+  longitude: Float
+}
+
+# The eclipses, in time order
+func eclipses() ret List(Eclipse) {
+  ret List(Eclipse) {
+    {
+      year: 2015
+      month: 3
+      day: 20
+      utHours: 9.7797
+      kind: EclipseKind.total
+      latitude: 64.4
+      longitude: -6.6
+    }
+    {
+      year: 2017
+      month: 8
+      day: 21
+      utHours: 18.4256
+      kind: EclipseKind.total
+      latitude: 37.0
+      longitude: -87.7
+    }
+    {
+      year: 2019
+      month: 7
+      day: 2
+      utHours: 19.4022
+      kind: EclipseKind.total
+      latitude: -17.4
+      longitude: -109.0
+    }
+    {
+      year: 2019
+      month: 12
+      day: 26
+      utHours: 5.3083
+      kind: EclipseKind.annular
+      latitude: 1.0
+      longitude: 102.3
+    }
+    {
+      year: 2020
+      month: 6
+      day: 21
+      utHours: 6.6697
+      kind: EclipseKind.annular
+      latitude: 30.5
+      longitude: 79.7
+    }
+    {
+      year: 2020
+      month: 12
+      day: 14
+      utHours: 16.2442
+      kind: EclipseKind.total
+      latitude: -40.3
+      longitude: -67.9
+    }
+    {
+      year: 2021
+      month: 6
+      day: 10
+      utHours: 10.7183
+      kind: EclipseKind.annular
+      latitude: 80.8
+      longitude: -66.8
+    }
+    {
+      year: 2022
+      month: 10
+      day: 25
+      utHours: 11.0222
+      kind: EclipseKind.partial
+      latitude: 61.6
+      longitude: 77.4
+    }
+    {
+      year: 2023
+      month: 4
+      day: 20
+      utHours: 4.2803
+      kind: EclipseKind.hybrid
+      latitude: -9.6
+      longitude: 125.8
+    }
+    {
+      year: 2023
+      month: 10
+      day: 14
+      utHours: 18.0114
+      kind: EclipseKind.annular
+      latitude: 11.4
+      longitude: -83.1
+    }
+    {
+      year: 2024
+      month: 4
+      day: 8
+      utHours: 18.2878
+      kind: EclipseKind.total
+      latitude: 25.3
+      longitude: -104.1
+    }
+    {
+      year: 2024
+      month: 10
+      day: 2
+      utHours: 18.7703
+      kind: EclipseKind.annular
+      latitude: -22.0
+      longitude: -114.5
+    }
+    {
+      year: 2025
+      month: 3
+      day: 29
+      utHours: 10.81
+      kind: EclipseKind.partial
+      latitude: 61.1
+      longitude: -77.1
+    }
+    {
+      year: 2026
+      month: 2
+      day: 17
+      utHours: 12.2183
+      kind: EclipseKind.annular
+      latitude: -64.7
+      longitude: 86.8
+    }
+    {
+      year: 2026
+      month: 8
+      day: 12
+      utHours: 17.785
+      kind: EclipseKind.total
+      latitude: 65.2
+      longitude: -25.2
+    }
+    {
+      year: 2027
+      month: 8
+      day: 2
+      utHours: 10.1306
+      kind: EclipseKind.total
+      latitude: 25.5
+      longitude: 33.2
+    }
+    {
+      year: 2028
+      month: 7
+      day: 22
+      utHours: 2.9444
+      kind: EclipseKind.total
+      latitude: -15.6
+      longitude: 126.7
+    }
+  }
+}
+
+# Its kind as a word
+func eclipseKindName(kind: view EclipseKind) ret String {
+  if kind is EclipseKind.total {
+    ret "total"
+  }
+  if kind is EclipseKind.annular {
+    ret "annular"
+  }
+  if kind is EclipseKind.hybrid {
+    ret "hybrid"
+  }
+  ret "partial"
+}
+
+# The clock at an eclipse: the date and the local solar time (0..24) at its
+# place, which may be the day before or after the universal date
+type EclipseClock {
+  year: Int
+  dayOfYear: Int
+  hour: Float
+}
+
+func eclipseClock(eclipse: view Eclipse) ret EclipseClock {
+  var year: Int = eclipse.year
+  var dayOfYear: Int = dayOfYearFromDate(
+    date: { year: eclipse.year, month: eclipse.month, day: eclipse.day }
+  )
+  var hour: Float = eclipse.utHours + eclipse.longitude / 15.0
+  if hour >= 24.0 {
+    hour = hour - 24.0
+    advanceOneDay(year: year, dayOfYear: dayOfYear)
+  } else if hour < 0.0 {
+    hour = hour + 24.0
+    dayOfYear = dayOfYear - 1
+    if dayOfYear < 1 {
+      year = year - 1
+      dayOfYear = daysInYear(year: year)
+    }
+  }
+  ret EclipseClock { year: year, dayOfYear: dayOfYear, hour: hour }
+}
+
+# A line about it: "2024-04-08 18:17 UT, total, 25.3N 104.1W"
+func eclipseCaption(eclipse: view Eclipse) ret String {
+  ret "{eclipseWhen(eclipse: eclipse)}, {eclipseKindName(kind: eclipse.kind)}, {eclipseWhere(
+    eclipse: eclipse
+  )}"
+}
+
+# Its date and time and its place: "2024-04-08 18:17 UT, 25.3N 104.1W"
+func eclipseWhenWhere(eclipse: view Eclipse) ret String {
+  ret "{eclipseWhen(eclipse: eclipse)}, {eclipseWhere(eclipse: eclipse)}"
+}
+
+# "2024-04-08 18:17 UT"
+func eclipseWhen(eclipse: view Eclipse) ret String {
+  let minutes: Int = (eclipse.utHours * 60.0 + 0.5).toInt()
+  ret "{eclipse.year}-{twoDigits(value: eclipse.month)}-{twoDigits(value: eclipse.day)} {twoDigits(
+    value: minutes / 60
+  )}:{twoDigits(value: minutes % 60)} UT"
+}
+
+# "25.3N 104.1W"
+func eclipseWhere(eclipse: view Eclipse) ret String {
+  var lat: String = "{Math.abs(value: eclipse.latitude)}N"
+  if eclipse.latitude < 0.0 {
+    lat = "{Math.abs(value: eclipse.latitude)}S"
+  }
+  var lon: String = "{Math.abs(value: eclipse.longitude)}E"
+  if eclipse.longitude < 0.0 {
+    lon = "{Math.abs(value: eclipse.longitude)}W"
+  }
+  ret "{lat} {lon}"
+}
+
+func twoDigits(value: view Int) ret String {
+  if value < 10 {
+    ret "0{value}"
+  }
+  ret "{value}"
+}

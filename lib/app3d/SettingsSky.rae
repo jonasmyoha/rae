@@ -53,8 +53,21 @@ func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
-  let lux: Float = settingsState.sunNoonLux * lift
+  let lux: Float = settingsState.sunNoonLux * lift * settingsEclipseLight(
+    settingsState: settingsState
+  )
   ret Vec3.create(x: base.x * lux, y: base.y * lux, z: base.z * lux)
+}
+
+# The share of the sun's light that gets past the moon (1 with no eclipse;
+# at totality nearly none: the sky turns to a dusk and the light falls with
+# it). 1 with the moon off.
+func settingsEclipseLight(settingsState: view SettingsState) ret Float {
+  if settingsState.moon is false {
+    ret 1.0
+  }
+  let covered: Float = settingsMoon(settingsState: settingsState).sunCovered
+  ret 1.0 - 0.995 * Math.clamp(val: covered, low: 0.0, high: 1.0)
 }
 
 # Build the sky the panel is asking for. `data` is only read by the Hosek
@@ -70,11 +83,12 @@ func settingsBuildSky(
   # Both models are fitted only for a sun at or above the horizon, so the night
   # side is a fade rather than a different sky. Applied here, once, so the two
   # models darken together.
+  # an eclipse darkens the sky with the light
   let day: Float = daylightFactorForDate(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
-  )
+  ) * settingsEclipseLight(settingsState: settingsState)
   # SOLID is the control case: a flat color, no gradient and no sun disc, so
   # anything still varying across the background is provably not the sky. It
   # still tracks the time of day — a flat sky that stayed bright at midnight
@@ -252,7 +266,9 @@ func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view 
   let night: Float = 1.0 - Math.clamp(val: day, low: 0.0, high: 1.0)
   let ambient: Float = (0.02 + 0.10 * level) * night
   sky.moonDir = moon.direction
-  sky.moonAngularRadius = moonAngularRadius
+  # its game size, its real size near the sun (an eclipse as it is)
+  sky.moonAngularRadius = moon.drawRadius
+  sky.sunCovered = moon.sunCovered
   # the disc's luminance, cd/m2
   sky.moonDiscIntensity = 2.5 * relativeLightUnit
   sky.nightLight = level
@@ -260,4 +276,29 @@ func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view 
   sky.nightAmbient = fromRelativeLight(
     value: Vec3.create(x: 0.55 * ambient, y: 0.65 * ambient, z: ambient)
   )
+  # the invented moons, each in its own size and color
+  sky.moons.clear()
+  if settingsState.moreMoons {
+    loop let body: view MoonBody in inventedMoons() {
+      if sky.moons.length >= skyMoonsMax {
+        break
+      }
+      let other: MoonState = moonForBody(
+        body: body
+        year: settingsState.timeOfDay.year
+        dayOfYear: settingsState.timeOfDay.dayOfYear
+        hour: settingsState.timeOfDay.hour
+        latitudeDeg: settingsState.latitude
+        longitudeDeg: settingsState.longitude
+      )
+      sky.moons.add(
+        value: {
+          direction: other.direction
+          radius: other.drawRadius
+          color: other.color
+          intensity: sky.moonDiscIntensity * other.brightness
+        }
+      )
+    }
+  }
 }
