@@ -1,11 +1,15 @@
-# lib/Moon's ephemeris against real solar eclipses 1980 - 2099 (lib/Eclipses): at each
-# eclipse's moment and place, seen from there, the moon is within 3 arc
-# minutes of the sun at a total, annular or hybrid one, bigger than the sun
-# at a total one and smaller at an annular one, and covers most of the sun
-# at a partial one's deepest point. And a phase: the full moon of 23 April
-# 2024 (23:49 UT) is full. The invented moons (inventedMoons) stand
+# lib/Moon's ephemeris against real eclipses 1980 - 2099 (lib/Eclipses).
+# At each solar eclipse's moment and place, seen from there, the moon is
+# within 3 arc minutes of the sun at a total, annular or hybrid one, bigger
+# than the sun at a total one and smaller at an annular one, and covers
+# most of the sun at a partial one's deepest point. At each lunar eclipse
+# the moon is all inside the earth's umbra at a total one and partly at a
+# partial one, stands well up at the place given, and the shadow takes most
+# of its light. And a phase: the full moon of 23 April 2024 (23:49 UT) is
+# full, out of the shadow. The invented moons (inventedMoons) stand
 # elsewhere, with their own size and color.
 import Vec3
+open Calendar
 open Moon
 open Eclipses
 
@@ -27,6 +31,25 @@ func main() ret Int {
       latitudeDeg: eclipse.latitude
       longitudeDeg: eclipse.longitude
     )
+    if eclipse.lunar {
+      let shadow: LunarShadow = lunarShadow(
+        year: eclipse.year
+        dayOfYear: dayOfYearFromDate(
+          date: { year: eclipse.year, month: eclipse.month, day: eclipse.day }
+        )
+        utHours: eclipse.utHours
+      )
+      let magnitude: Float = umbralMagnitude(shadow: shadow)
+      var inside: Bool = magnitude > 0.0 and magnitude < 1.0
+      if eclipse.kind is EclipseKind.total {
+        inside = magnitude >= 1.0
+      }
+      check(
+        label: eclipseCaption(eclipse: eclipse)
+        ok: inside and moon.up > 0.4 and moon.shadowed > 0.5
+      )
+      continue
+    }
     let arcMinutes: Float = moon.sunSeparation * 180.0 / 3.14159265 * 60.0
     let ratio: Float = moon.realRadius / moon.sunRealRadius
     var ok: Bool = arcMinutes < 3.0
@@ -49,7 +72,10 @@ func main() ret Int {
     latitudeDeg: 51.5
     longitudeDeg: 0.0
   )
-  check(label: "23 April 2024 23:49 UT: a full moon", ok: full.illumination > 0.99)
+  check(
+    label: "23 April 2024 23:49 UT: a full moon"
+    ok: full.illumination > 0.99 and full.shadowed < 0.01
+  )
   let ember: MoonState = moonForBody(
     body: inventedMoons().copyAtDefault(index: 0)
     year: 2024

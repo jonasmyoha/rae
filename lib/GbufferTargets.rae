@@ -35,7 +35,7 @@ open GbufferFullscreen
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 148  # 592 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 152  # 608 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -745,6 +745,9 @@ func uploadLightUniform(
   nightLight: copy Float
   moons: view List(SkyMoon)
   sunCovered: copy Float
+  moonShadowDir: view Vec3
+  moonUmbra: copy Float
+  moonPenumbra: copy Float
 ) ret Bool {
   var fogStart: Float = 0.0
   var fogEnd: Float = 0.0
@@ -878,7 +881,8 @@ func uploadLightUniform(
   )
   # the extra moons (Sky.moons, skyMoonsMax of them): each the way TOWARD
   # it and its radius, then its color times its luminance (0: none); the
-  # first's color w carries how much of the sun the earth's moon covers
+  # first's color w carries how much of the sun the earth's moon covers,
+  # the second's the earth's shadow's penumbra radius
   loop var slot: Int = 0, slot < skyMoonsMax, ++slot {
     var toward: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
     var radius: Float = 0.0
@@ -898,6 +902,8 @@ func uploadLightUniform(
     var spare: Float = 0.0
     if slot is 0 {
       spare = sunCovered
+    } else if slot is 1 {
+      spare = moonPenumbra
     }
     pushVec4F(
       writer: targets.args
@@ -907,6 +913,15 @@ func uploadLightUniform(
       w: spare
     )
   }
+  # the earth's shadow on the earth's moon: the way TOWARD its center and
+  # its umbra radius
+  pushVec4F(
+    writer: targets.args
+    x: -moonShadowDir.x
+    y: -moonShadowDir.y
+    z: -moonShadowDir.z
+    w: moonUmbra
+  )
   ret uploadArgs(
     writer: targets.args
     resources: resources

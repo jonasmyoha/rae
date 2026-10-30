@@ -32,7 +32,9 @@
 #   moon.direction      the way its light travels (Light3d.sunDir's convention)
 #   moon.illumination   0 at new moon .. 1 at full
 #   moon.sunCovered     0 .. 1: how much of the sun's disc it hides
+#   moon.shadowed       0 .. 1: how much light the earth's shadow takes
 #   moonLightLevel(moon: moon)   0 .. 1: the phase, dimmed near the horizon
+#                                and in the earth's shadow
 import Math
 import Vec3
 open Calendar
@@ -80,6 +82,14 @@ type MoonState {
   realRadius: Float = 0.0045
   sunRealRadius: Float = 0.00465
   sunCovered: Float = 0.0
+  # The earth's shadow on it (a lunar eclipse), as drawn: the way from the
+  # shadow's center toward the scene (as direction), the dark core's
+  # (umbra) and the half shadow's (penumbra) angular radii (0: no shadow),
+  # and how much of its light the shadow takes (0..1)
+  shadowDirection: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  umbraRadius: Float = 0.0
+  penumbraRadius: Float = 0.0
+  shadowed: Float = 0.0
 }
 
 # A moon of the sky: the earth's (its ephemeris), or an invented one on a
@@ -378,6 +388,78 @@ func angleBetween(a: view MoonEquatorial, b: view MoonEquatorial) ret Float {
   ret 2.0 * Math.asin(x: Math.sqrt(x: Math.clamp(val: h, low: 0.0, high: 1.0)))
 }
 
+# The earth's shadow at the moon (a lunar eclipse), seen from the earth's
+# center: how far the moon's center is from the shadow's (rad), the moon's
+# angular radius, the shadow's dark core (umbra) and its half shadow
+# (penumbra) there (rad, with the usual 2% for the atmosphere), and where on
+# the earth the moon stands overhead (degrees north, east)
+type LunarShadow {
+  separation: Float
+  moonRadius: Float
+  umbraRadius: Float
+  penumbraRadius: Float
+  subLunarLatitude: Float
+  subLunarLongitude: Float
+}
+
+# How deep the moon is in the umbra: below 0 outside it, 0..1 a partial
+# eclipse, 1 and more a total one
+func umbralMagnitude(shadow: view LunarShadow) ret Float {
+  ret (shadow.umbraRadius + shadow.moonRadius - shadow.separation) / Math.max(
+    a: 2.0 * shadow.moonRadius
+    b: 0.000001
+  )
+}
+
+# The shadow `utHours` into day `dayOfYear` of `year` (universal time)
+func lunarShadow(year: view Int, dayOfYear: view Int, utHours: view Float) ret LunarShadow {
+  let days: Float64 = daysSinceJ2000(year: year, dayOfYear: dayOfYear, utHours: utHours)
+  let ephemerisDays: Float64 = days + (deltaTSeconds(year: year) as Float64) / 86400.0
+  let sunNow: SunEphemeris = sunEphemeris(days: ephemerisDays)
+  let ephemeris: MoonEphemeris = moonEphemeris(days: ephemerisDays, sun: sunNow)
+  let obliquity: Float = moonObliquity(days: ephemerisDays)
+  let antiSun: MoonEquatorial = eclipticToEquatorial(
+    longitudeDeg: sunNow.longitude + 180.0
+    latitudeDeg: 0.0
+    obliquityDeg: obliquity
+  )
+  let moon: MoonEquatorial = eclipticToEquatorial(
+    longitudeDeg: ephemeris.longitude
+    latitudeDeg: ephemeris.latitude
+    obliquityDeg: obliquity
+  )
+  # overhead: the moon's declination, and its hour angle 0 there
+  let subLongitude: Float = moonDegrees(
+    radians: moon.rightAscension - greenwichSiderealTime(days: days)
+  )
+  let wrappedLongitude: Float = subLongitude - 360.0 * Math.floor(x: (subLongitude + 180.0) / 360.0)
+  ret LunarShadow {
+    separation: angleBetween(a: moon, b: antiSun)
+    moonRadius: Math.asin(
+      x: Math.clamp(
+        val: moonRadiusEarthRadii / Math.max(a: ephemeris.distance, b: 1.0)
+        low: 0.0
+        high: 1.0
+      )
+    )
+    umbraRadius: shadowRadius(moonDistance: ephemeris.distance, sun: sunNow, sunSide: -1.0)
+    penumbraRadius: shadowRadius(moonDistance: ephemeris.distance, sun: sunNow, sunSide: 1.0)
+    subLunarLatitude: moonDegrees(radians: moon.declination)
+    subLunarLongitude: wrappedLongitude
+  }
+}
+
+# The radius of the earth's shadow at the moon `moonDistance` earth radii
+# away (rad): the umbra (`sunSide` -1) or the penumbra (1), the moon's and
+# the sun's parallax and the sun's radius, with the usual 2% for the
+# atmosphere
+func shadowRadius(moonDistance: view Float, sun: view SunEphemeris, sunSide: view Float) ret Float {
+  let moonParallax: Float = Math.asin(x: 1.0 / Math.max(a: moonDistance, b: 1.0))
+  let sunParallax: Float = 0.0000426 / Math.max(a: sun.distance, b: 0.5)
+  let sunRadius: Float = sunAngularRadiusAtOneAu / Math.max(a: sun.distance, b: 0.5)
+  ret 1.02 * (moonParallax + sunParallax + sunSide * sunRadius)
+}
+
 # The earth's moon at `hour` (local solar time, 0..24) on day `dayOfYear` of
 # `year`, seen from `latitudeDeg` north, `longitudeDeg` east
 func moonForDate(
@@ -426,6 +508,11 @@ func moonForBody(
   var moonLatitude: Float = 0.0
   var moon: MoonEquatorial = sun
   var realRadius: Float = body.angularRadius
+  # the earth's shadow: none on an invented moon
+  var shadow: MoonEquatorial = sun
+  var shadowSeparation: Float = moonPi
+  var umbraRadius: Float = 0.0
+  var penumbraRadius: Float = 0.0
   if body.earth {
     let ephemeris: MoonEphemeris = moonEphemeris(days: ephemerisDays, sun: sunNow)
     moonLongitude = ephemeris.longitude
@@ -459,6 +546,20 @@ func moonForBody(
         x: den
       )
     }
+    # the earth's shadow: opposite the sun, moved by the moon's parallax
+    # like the moon, since it falls on the moon
+    let antiSun: MoonEquatorial = eclipticToEquatorial(
+      longitudeDeg: sunNow.longitude + 180.0
+      latitudeDeg: 0.0
+      obliquityDeg: obliquity
+    )
+    shadowSeparation = angleBetween(a: geocentric, b: antiSun)
+    shadow = MoonEquatorial {
+      rightAscension: antiSun.rightAscension + moon.rightAscension - geocentric.rightAscension
+      declination: antiSun.declination + moon.declination - geocentric.declination
+    }
+    umbraRadius = shadowRadius(moonDistance: ephemeris.distance, sun: sunNow, sunSide: -1.0)
+    penumbraRadius = shadowRadius(moonDistance: ephemeris.distance, sun: sunNow, sunSide: 1.0)
     # its real size from here: nearer by about the sine of its height
     let height: Float = Math.sin(x: phi) * Math.sin(x: moon.declination) + Math.cos(x: phi) * Math.cos(
       x: moon.declination
@@ -500,6 +601,11 @@ func moonForBody(
     declination: solarDeclinationRad(dayOfYear: dayOfYear) + moon.declination - sun.declination
     latitudeDeg: latitudeDeg
   )
+  let toShadow: Vec3 = towardHourAngle(
+    hourAngle: sunHourAngle + sun.rightAscension - shadow.rightAscension
+    declination: solarDeclinationRad(dayOfYear: dayOfYear) + shadow.declination - sun.declination
+    latitudeDeg: latitudeDeg
+  )
   # The phase: the angle between the moon and the sun
   let cosElongation: Float = Math.cos(x: separation)
   let apart: Float = moonRadians(degrees: moonLongitude - sunNow.longitude)
@@ -514,6 +620,23 @@ func moonForBody(
   if body.earth {
     drawRadius = realRadius + (body.angularRadius - realRadius) * away * away * (3.0 - 2.0 * away)
   }
+  # The shadow drawn at the disc's scale round its center, and the light
+  # it takes: half in the penumbra, nearly all in the umbra
+  let scale: Float = drawRadius / Math.max(a: realRadius, b: 0.0001)
+  let shadowCenter: Vec3 = Vec3.vnorm(
+    a: Vec3.vadd(a: toMoon, b: Vec3.vscale(a: Vec3.vsub(a: toShadow, b: toMoon), s: scale))
+  )
+  let twiceRadius: Float = Math.max(a: 2.0 * realRadius, b: 0.000001)
+  let inUmbra: Float = Math.clamp(
+    val: (umbraRadius + realRadius - shadowSeparation) / twiceRadius
+    low: 0.0
+    high: 1.0
+  )
+  let inPenumbra: Float = Math.clamp(
+    val: (penumbraRadius + realRadius - shadowSeparation) / twiceRadius
+    low: 0.0
+    high: 1.0
+  )
   ret MoonState {
     direction: Vec3.create(x: -toMoon.x, y: -toMoon.y, z: -toMoon.z)
     up: toMoon.z
@@ -530,6 +653,10 @@ func moonForBody(
       moonRadius: drawRadius
       separation: separation
     )
+    shadowDirection: Vec3.vneg(a: shadowCenter)
+    umbraRadius: umbraRadius * scale
+    penumbraRadius: penumbraRadius * scale
+    shadowed: 1.0 - (1.0 - 0.5 * inPenumbra) * (1.0 - 0.98 * inUmbra)
   }
 }
 
@@ -545,7 +672,7 @@ func moonLightLevel(moon: view MoonState) ret Float {
     base: Math.clamp(val: moon.illumination, low: 0.0, high: 1.0)
     exp: 1.5
   )
-  ret fullness * rise * rise * (3.0 - 2.0 * rise)
+  ret fullness * rise * rise * (3.0 - 2.0 * rise) * (1.0 - moon.shadowed)
 }
 
 # The phase as words: "new moon", "waxing crescent", ..., "waning crescent"

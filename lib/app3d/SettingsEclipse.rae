@@ -5,7 +5,7 @@ open Eclipses
 open app3d/SettingsDialog
 
 # The eclipse caption's two lines: which one it is and its kind ("Eclipse
-# 11/17: total"; before any, how many there are), and its date, time and
+# 11/33: total solar"; before any, how many there are), and its date, time and
 # place ("2024-04-08 18:17 UT, 25.3N 104.1W"; empty before any)
 func settingsEclipseTitle(settingsState: view SettingsState) ret String {
   let list: List(Eclipse) = eclipses()
@@ -13,7 +13,7 @@ func settingsEclipseTitle(settingsState: view SettingsState) ret String {
     ret "Eclipses: {list.length} to visit"
   }
   let eclipse: Eclipse = list.copyAtDefault(index: settingsState.eclipse)
-  ret "Eclipse {settingsState.eclipse + 1}/{list.length}: {eclipseKindName(kind: eclipse.kind)}"
+  ret "Eclipse {settingsState.eclipse + 1}/{list.length}: {eclipseName(eclipse: eclipse)}"
 }
 
 func settingsEclipseDetail(settingsState: view SettingsState) ret String {

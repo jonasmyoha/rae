@@ -107,6 +107,22 @@ fn moonsCover(dir: vec3<f32>) -> f32 {
   }
   return cover;
 }
+// The earth's shadow on the earth's moon at `dir` (a lunar eclipse): the
+// light left, 1 outside it; in the penumbra dimmer toward the umbra, in the
+// umbra a dull red, darkest at its center (the sunlight the earth's
+// atmosphere bends in, its blue scattered away). Distances as chords, which
+// keep their precision at these small angles.
+fn earthShadow(dir: vec3<f32>) -> vec3<f32> {
+  let umbra = L.moonShadow.w;
+  if (umbra <= 0.0) { return vec3<f32>(1.0); }
+  let penumbra = max(L.moons[3].w, umbra * 1.01);
+  let d = length(dir - normalize(L.moonShadow.xyz));
+  let half = mix(0.25, 1.0, pow(clamp((d - umbra) / (penumbra - umbra), 0.0, 1.0), 0.6));
+  let core = clamp(d / umbra, 0.0, 1.0);
+  let red = vec3<f32>(0.9, 0.32, 0.12) * mix(0.035, 0.11, core * core);
+  let inside = 1.0 - smoothstep(umbra * 0.97, umbra * 1.03, d);
+  return mix(vec3<f32>(half), red, inside);
+}
 // The sky toward `dir`, ready to sum: the physical models (Preetham and
 // Hosek-Wilkie, in cd/m2) and the moon and night sky (cd/m2) times the
 // camera's exposure scale (camPos.w, LightUnits), the painted stylized sky
@@ -151,7 +167,8 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
     // against the sky, and round it the corona, brighter as the sun goes
     let eclipse = clamp(L.moons[1].w, 0.0, 1.0);
     // moon.w: the disc's luminance in cd/m2
-    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * L.camPos.w * above * (1.0 - eclipse);
+    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * L.camPos.w * above * (1.0 - eclipse)
+      * earthShadow(dir);
     c = c * (1.0 - discCover(dir, toMoon, max(L.skySun.w, 0.001)) * eclipse * 0.85);
     if (eclipse > 0.97) {
       let fromSun = acos(clamp(dot(dir, toSun), -1.0, 1.0));
