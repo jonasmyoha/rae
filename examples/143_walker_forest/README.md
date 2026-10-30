@@ -4,7 +4,10 @@ The deferred walker of example 136 on a huge generated terrain instead of an
 island: 31,090 trees for the current fixed seeds, in stands over a 1.2 km
 square, with lakes and meadows between the woods. Walk with WASD (Character
 mode), jump on Space or F; the camera bar's buttons switch to the orbit and
-free cameras.
+free cameras. Fly the free (WASD) camera somewhere and press V: the
+character stands 4 m in front of the camera, facing its way, in Character
+mode; V again gives back the WASD camera. R puts everything back as it
+started.
 
 The program is the walker app shell (lib/app3d/WalkerApp); `Main.rae` is
 only its settings (`WalkerLand.forest`, the deferred renderer).

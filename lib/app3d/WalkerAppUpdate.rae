@@ -36,6 +36,7 @@ open SdfText
 open Png
 open app3d/CameraRig
 open app3d/WalkerReset
+open app3d/WalkerSpawnHere
 open app3d/ModeMenu
 open app3d/CharacterController
 open app3d/SettingsDialog
@@ -256,6 +257,20 @@ func updateWalkerApp(app: mod WalkerApp) {
     )
     app.persist.stateDirty = true
     log("[reset] the walker back as it started")
+  }
+  # V: the character in front of the WASD camera, in Character control; or
+  # back to the WASD camera (app3d/WalkerSpawnHere)
+  if walkerSpawnHereKeyPressed() and uiPointerCaptured(input: app.inputSystem.ui) is false {
+    toggleWalkerSpawnHere(
+      rig: app.cameraSystem.rig
+      camera: app.cameraSystem.camera
+      physicsSystem: app.physicsSystem
+      world: app.world
+      entityId: controlledEntityId
+      groundZ: app.characterSystem.groundZ
+      biome: app.biome
+    )
+    app.persist.stateDirty = true
   }
   # The controller's heading and position before the physics steps, to tell
   # whether the character moved this frame

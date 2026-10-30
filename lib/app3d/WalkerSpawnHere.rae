@@ -1,0 +1,170 @@
+# app3d/WalkerSpawnHere — the V key (an editor tool, for now on in every
+# mode): fly the WASD camera somewhere, press V, and the character you
+# control stands on the ground a few meters in front of the camera, facing
+# the way it looks, with the camera behind it in Character control. Press V
+# again and the camera is the WASD camera again, where it is, looking the
+# same way. From the orbit camera V spawns the character the same way.
+import Math
+import Vec3
+open WorldBiome
+open Scene3d
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/WalkerCharacter
+open app3d/WalkerReset
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open ecs/Entity
+open ecs/ComponentTable
+
+# How far in front of the camera (m, along the ground) the character stands
+const spawnHereAhead: Float = 4.0
+
+# V toggles between the WASD camera and the character placed in front of it
+# (see the module comment). `entityId` is the character the player
+# controls. Nothing happens when the rig has no Character mode.
+func toggleWalkerSpawnHere(
+  rig: mod CameraRig
+  camera: mod Camera3d
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  entityId: view EntityId
+  groundZ: view Float
+  biome: view BiomeConfig
+) {
+  if rig.mode is CameraRigMode.character {
+    # back to the WASD camera where it is now, looking the same way
+    rig.mode = CameraRigMode.free
+    rig.freePosition = camera.position
+    rig.freePitch = 0.0 - rig.orbitPitch
+    snapCameraRigView(rig: rig)
+    log("[spawnHere] WASD camera")
+    ret
+  }
+  if rig.characterModeEnabled is false {
+    ret
+  }
+  # the spot in front of the camera along the ground, facing its way
+  let heading: Float = rig.viewYaw
+  var x: Float = camera.position.x - Math.sin(x: heading) * spawnHereAhead
+  var y: Float = camera.position.y + Math.cos(x: heading) * spawnHereAhead
+  if worldIsLand(x: x, y: y, cfg: biome) is false {
+    # not in the water: the nearest land
+    let land: Vec3 = worldFindLand(x: x, y: y, cfg: biome)
+    x = land.x
+    y = land.y
+  }
+  let feet: Vec3 = Vec3.create(
+    x: x
+    y: y
+    z: worldTerrainHeight(
+      x: x
+      y: y
+      groundZ: groundZ
+      cfg: biome
+    )
+  )
+  placeCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    entityId: entityId
+    feet: feet
+    heading: heading
+    groundZ: groundZ
+  )
+  # the Character camera behind it, as entering Character control does
+  # (app3d/WalkerCamera cameraUpdate)
+  rig.mode = CameraRigMode.character
+  rig.yaw = heading
+  rig.orbitPitch = 0.24
+  if componentHas(this: world.controllers, entityId: entityId) {
+    camera.target = thirdPersonCameraTarget(
+      controller: componentView(this: world.controllers, entityId: entityId)
+      focusZ: characterFocusZ
+    )
+  }
+  snapCameraRigView(rig: rig)
+  log("[spawnHere] character at {feet.x} {feet.y} {feet.z}, Character control")
+}
+
+# The V key's check (with RAE_WALKER_PHYSICS_TEST, after the others): the
+# WASD camera 6 m over the land beside `entityId`, looking a known way; V
+# puts the character 4 m in front of it on the ground, facing that way, in
+# Character control; V again gives back the WASD camera where it was. One
+# [spawnheretest] line; true when it passed.
+func runWalkerSpawnHereTest(
+  rig: mod CameraRig
+  camera: mod Camera3d
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  entityId: view EntityId
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret Bool {
+  if componentHas(this: world.controllers, entityId: entityId) is false {
+    log("[spawnheretest] no controller passed=false")
+    ret false
+  }
+  let start: Vec3 = componentView(this: world.controllers, entityId: entityId).position
+  let land: Vec3 = worldFindLand(x: start.x + 12.0, y: start.y + 9.0, cfg: biome)
+  let heading: Float = 0.7
+  rig.mode = CameraRigMode.free
+  rig.yaw = heading
+  rig.viewYaw = heading
+  camera.position = Vec3.create(
+    x: land.x
+    y: land.y
+    z: worldTerrainHeight(
+      x: land.x
+      y: land.y
+      groundZ: groundZ
+      cfg: biome
+    ) + 6.0
+  )
+  toggleWalkerSpawnHere(
+    rig: rig
+    camera: camera
+    physicsSystem: physicsSystem
+    world: world
+    entityId: entityId
+    groundZ: groundZ
+    biome: biome
+  )
+  let placed: view ThirdPersonController = componentView(
+    this: world.controllers
+    entityId: entityId
+  )
+  let dx: Float = placed.position.x - camera.position.x
+  let dy: Float = placed.position.y - camera.position.y
+  let ahead: Float = -dx * Math.sin(x: heading) + dy * Math.cos(x: heading)
+  let ground: Float = worldTerrainHeight(
+    x: placed.position.x
+    y: placed.position.y
+    groundZ: groundZ
+    cfg: biome
+  ) - groundZ
+  let inFront: Bool = Math.abs(value: ahead - spawnHereAhead) < 0.3 and Math.abs(
+    value: Math.sqrt(x: dx * dx + dy * dy) - spawnHereAhead
+  ) < 0.3
+  let onGround: Bool = Math.abs(value: placed.position.z - ground) < 0.05
+  let facing: Bool = Math.abs(value: placed.heading - heading) < 0.001
+  let character: Bool = rig.mode is CameraRigMode.character
+  let cameraBefore: Vec3 = camera.position
+  toggleWalkerSpawnHere(
+    rig: rig
+    camera: camera
+    physicsSystem: physicsSystem
+    world: world
+    entityId: entityId
+    groundZ: groundZ
+    biome: biome
+  )
+  let back: Bool = rig.mode is CameraRigMode.free and Vec3.vlen(
+    a: Vec3.vsub(a: rig.freePosition, b: cameraBefore)
+  ) < 0.001
+  let passed: Bool = inFront and onGround and facing and character and back
+  log(
+    "[spawnheretest] V: {ahead} m in front ={inFront}, on the ground ={onGround}, facing the camera's way ={facing}, Character control ={character}; V again: the WASD camera where it was ={back}; passed={passed}"
+  )
+  ret passed
+}
