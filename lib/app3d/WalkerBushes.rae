@@ -37,7 +37,7 @@ func addWalkerBush(
 }
 
 # The thicket round a cell's bush at `center`: where a thicket noise (about
-# 55 m across) is high, 2 - 9 more bushes crowd round it within 1.5 - 7 m,
+# 55 m across) is high, 1 - 5 more bushes crowd round it within 1.5 - 7 m,
 # from small to twice the cell's bush, now and then one huge (4 - 6 times).
 # They stand on drier ground than the cell's bush (grass 0.25), so the
 # thickets reach out of the woods into the meadow. They are drawn only:
@@ -50,10 +50,10 @@ func addBushThicket(
   placements: mod List(PropPlacement)
 ) {
   let thicket: Float = Noise.value2(x: center.x / 55.0, y: center.y / 55.0, seed: 611)
-  if thicket < 0.55 {
+  if thicket < 0.68 {
     ret
   }
-  let extra: Int = 2 + ((thicket - 0.55) / 0.45 * 7.0 + terrainHash(
+  let extra: Int = 1 + ((thicket - 0.68) / 0.32 * 4.0 + terrainHash(
     cellX: cellX
     cellY: cellY
     seed: 615
@@ -74,7 +74,7 @@ func addBushThicket(
     }
     let sizeDraw: Float = terrainHash(cellX: cellX, cellY: cellY * 37 + i, seed: 621)
     var scale: Float = 0.7 + 2.3 * sizeDraw * sizeDraw
-    if terrainHash(cellX: cellX * 41 + i, cellY: cellY * 43, seed: 623) < 0.07 {
+    if terrainHash(cellX: cellX * 41 + i, cellY: cellY * 43, seed: 623) < 0.04 {
       scale = 4.0 + 2.0 * sizeDraw
     }
     addWalkerBush(

@@ -166,6 +166,15 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     o.albedo *= texel.rgb;
   } else if (d.params.w > 9.5) {
     o.albedo = gbEmblem(in.uv, o.albedo, d.params.w);
+  } else if (d.params.w > 2.5 && d.params.w < 3.5) {
+    // A grass blade (GbufferRecord grassBladePattern): the instance color at
+    // its root (the terrain's grass), lighter to its tip by the factor the
+    // code carries, darker in the last third down, as the GPU grass does
+    // (grass_render.wgsl). The blade's height is 1 - uv.y.
+    let tip = 1.0 + (d.params.w - 3.0) * 10.0;
+    let height = clamp(1.0 - in.uv.y, 0.0, 1.0);
+    let grounded = mix(0.58, 1.0, smoothstep(0.0, 0.32, height));
+    o.albedo = d.albedoMetallic.rgb * mix(1.0, tip, height) * grounded;
   } else if (d.params.w > 1.5) {
     o = gbRoofTiles(in.wpos, n, o.albedo);
   } else if (d.params.w > 0.5) {

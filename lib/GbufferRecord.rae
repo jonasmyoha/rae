@@ -3,6 +3,7 @@
 # Pure value code: model matrices, the packed instance record, the material
 # encodes. No GPU objects, no C — every draw path (static, skinned, instanced,
 # terrain, transparent, grass) packs through here.
+import Math
 open Scene3d
 open Math3d
 
@@ -168,6 +169,19 @@ func setInstanceFade(
   }
   records.set(index: base + 41, value: side)
   records.set(index: base + 42, value: seed)
+}
+
+# The pattern of a static instance (the static shader's params.w: brick,
+# roof tiles, a grass blade, ...), over what its material gave it
+func setInstancePattern(records: mod List(Float), slot: view Int, pattern: view Float) {
+  records.set(index: slot * instanceRecordFloats + 39, value: pattern)
+}
+
+# The pattern of a grass blade whose tip is `tipLighten` times as light as
+# its root (the instance color; gbuffer_static_surface.wgsl): 3 plus a tenth
+# of the lightening, so the code stays in its own range up to 5 times
+func grassBladePattern(tipLighten: view Float) ret Float {
+  ret 3.0 + Math.clamp(val: (tipLighten - 1.0) * 0.1, low: 0.0, high: 0.4)
 }
 
 # How much a static instance bends in the wind (0: not at all; 1 a tree's

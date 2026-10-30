@@ -1,17 +1,22 @@
-# app3d/WalkerMeadow — the walkers' meadow: grass tufts (app3d/GrassTuft)
-# scattered thick over the ground round the camera, far past the GPU grass
-# (lib/GrassCompute, 40 m), so a wide view shows grassland, not bare
-# ground, as the early walkers' low-poly grass clumps did.
+# app3d/WalkerMeadow — the walkers' meadow: the stylized low-poly grass
+# carpet carried over the whole grassy ground round the camera, past the GPU
+# grass (lib/GrassCompute, 40 m), as the early walkers' low-poly grass
+# filled it: a turf patch (app3d/GrassTuft grassTurfMesh, the GPU grass's
+# blades) on every 2 m of grass to 130 m. Over it, as accents, tufts
+# (app3d/GrassTuft): one here and there, small clumps, now and then a patch
+# of tall grass. Turf and tufts are colored
+# as the GPU grass: the terrain's grass color at the root, lighter to the
+# tip (GbufferRecord grassBladePattern, the same tip factor), so where the
+# carpet ends and a tuft stands nothing pops.
 #
 # Every cell of the ground (the terrain's cells, 18 m) has up to
 # meadowTuftsPerCell tufts, a function of the cell alone, so the same cell
-# always has the same tufts. How many stand is a meadow noise (fields of
-# grass, about 60 m across, and thinner ground between) times how grassy
-# the ground is: thickest on green grass, sparser and straw-colored on the
-# dry and sandy ground, none on water, rock or the paths. The tufts take three forms
-# (the tuft, a low wide spread, tall reeds) at many sizes. In tall-grass
-# patches (another noise, about 40 m across, a fifth of the ground) the
-# tufts grow 1 - 2 m tall and the reeds stand among them.
+# always has the same tufts. They grow on grass only: on water, rock, the
+# paths none, and on sand or dry ground only rarely (meadowOffGrassShare).
+# How many clumps stand is a meadow noise (about 60 m across). The tufts
+# take three forms (the tuft, a low wide spread, tall reeds) at many sizes;
+# in tall-grass patches (another noise, about 40 m across, about a tenth of
+# the ground) they grow 1 - 2 m tall and the reeds stand among them.
 #
 # The cells are held in a window of wrapping slots round the camera's
 # focus: when the focus crosses a cell border only the row or column that
@@ -38,10 +43,24 @@ open app3d/GrassTuft
 open FoliageMesh
 open GbufferRecord
 
-const meadowTuftsPerCell: Int = 160
+const meadowTuftsPerCell: Int = 48
+
+# The turf carpet: a patch every meadowTurfStep m of grass, meadowTurfSide
+# of them along a cell's side (the cell is 18 m)
+const meadowTurfSide: Int = 9
+
+# The places a cell holds: its tufts, then its turf patches
+const meadowPlacesPerCell: Int = meadowTuftsPerCell + meadowTurfSide * meadowTurfSide
+
+# The turf's form index, after the tuft forms (app3d/GrassTuft)
+const meadowTurfForm: Int = grassTuftForms
 
 # The tufts grow in clumps of this many round a clump's center
-const meadowClump: Int = 8
+const meadowClump: Int = 4
+
+# The share of the places off grass (sand, dry ground) that still get a
+# tuft: rare
+const meadowOffGrassShare: Float = 0.03
 
 # The most tufts one form at one level draws a frame
 const meadowBatchLimit: Int = 8000
@@ -58,9 +77,9 @@ type WalkerMeadow {
   gridSide: Int
   slotCellX: List(Int)
   slotCellY: List(Int)
-  # Each slot's tufts (meadowTuftsPerCell places a slot): how many, and
-  # per tuft its model, its foot, its form, its color and its draw for the
-  # thinning
+  # Each slot's tufts and turf (meadowPlacesPerCell places a slot): how many, and
+  # per tuft its model, its foot, its form, its root color and its draw for
+  # the thinning
   slotCount: List(Int)
   models: List(Mat4)
   feet: List(Vec3)
@@ -73,13 +92,11 @@ type WalkerMeadow {
   # The cell the window is centered on now
   centerCellX: Int
   centerCellY: Int
+  # The terrain's grass color (a tuft's root) and the blades' pattern (its
+  # tip that much lighter: GbufferRecord grassBladePattern)
+  rootColor: Vec3
+  pattern: Float
 }
-
-# The colors a tuft is mixed from: green grass, and the straw of the dry
-# ground
-const meadowGreen: Vec3 = { x: 0.11, y: 0.155, z: 0.038 }
-
-const meadowStraw: Vec3 = { x: 0.2, y: 0.19, z: 0.06 }
 
 func meadowMaterial(color: view Vec3) ret Material3d {
   ret Material3d {
@@ -92,30 +109,50 @@ func meadowMaterial(color: view Vec3) ret Material3d {
 }
 
 # A meadow of `gridSide` x `gridSide` cells of `cellSize` (m); its tuft
-# meshes uploaded to `renderer`. Nothing is placed until updateWalkerMeadow.
+# meshes uploaded to `renderer`; the tufts `rootColor` at the root (the
+# terrain's grass color) and `tipLighten` times as light at the tip (the GPU
+# grass's GrassViewSettings.tipLighten). Nothing is placed until
+# updateWalkerMeadow.
 func createWalkerMeadow(
   renderer: mod DeferredRenderer
   gridSide: view Int
   cellSize: view Float
+  rootColor: view Vec3
+  tipLighten: view Float
 ) ret WalkerMeadow {
   let slots: Int = gridSide * gridSide
-  let places: Int = slots * meadowTuftsPerCell
-  var parts: List(PropInstancer) = List.create(PropInstancer, cap: grassTuftForms * 2)
-  loop var form: Int = 0, form < grassTuftForms, ++form {
+  let places: Int = slots * meadowPlacesPerCell
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: (grassTuftForms + 1) * 2)
+  loop var form: Int = 0, form <= grassTuftForms, ++form {
     var meshes: List(MeshHandle) = List.create(MeshHandle, cap: 2)
     loop var level: Int = 0, level < 2, ++level {
-      var segments: Int = 4
+      var segments: Int = 2
       var widthScale: Float = 1.0
       if level is 1 {
         segments = 1
         widthScale = 1.7
       }
-      let data: MeshData = grassTuftFormMesh(
+      var data: MeshData = grassTuftFormMesh(
         seed: 71 + form * 13
         form: grassTuftForm(form: form)
         segments: segments
         widthScale: widthScale
       )
+      if form is meadowTurfForm {
+        # the turf: 36 blades in a 2 m patch near, 9 wider ones far
+        var blades: Int = 36
+        if level is 1 {
+          blades = 9
+          widthScale = 2.2
+        }
+        data = grassTurfMesh(
+          seed: 91
+          blades: blades
+          size: 2.0
+          segments: segments
+          widthScale: widthScale
+        )
+      }
       # with its blades' wind pivots, so the tufts bend in the wind
       meshes.add(value: uploadFoliage(renderer: renderer, mesh: data))
     }
@@ -123,7 +160,7 @@ func createWalkerMeadow(
       parts.add(
         value: createPropInstancer(
           mesh: meshes.copyAtDefault(index: level)
-          material: meadowMaterial(color: meadowGreen)
+          material: meadowMaterial(color: rootColor)
           capacity: Math.min(a: places / 2, b: meadowBatchLimit)
         )
       )
@@ -146,7 +183,7 @@ func createWalkerMeadow(
     models.add(value: mat4Identity())
     feet.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
     forms.add(value: 0)
-    colors.add(value: meadowGreen)
+    colors.add(value: rootColor)
     keeps.add(value: 0.0)
   }
   ret WalkerMeadow {
@@ -163,6 +200,8 @@ func createWalkerMeadow(
     parts: own parts
     centerCellX: 1000000000
     centerCellY: 1000000000
+    rootColor: rootColor
+    pattern: grassBladePattern(tipLighten: tipLighten)
   }
 }
 
@@ -241,10 +280,13 @@ func placeMeadowCell(
     if ground.wWater > 0.3 or ground.wRock > 0.5 {
       continue
     }
-    # fields of grass and thinner ground between; thickest on green grass
+    # on grass; on sand or dry ground only rarely
+    if ground.wGrass < 0.45 and hash2(x: cellX * 11 + clump, y: cellY * 17, seed: 725) > meadowOffGrassShare {
+      continue
+    }
+    # more clumps in some fields than in others
     let field: Float = value2(x: x / 60.0, y: y / 60.0, seed: 705)
-    let grassy: Float = Math.clamp(val: (ground.wGrass - 0.1) / 0.5, low: 0.0, high: 1.0)
-    let density: Float = (0.45 + 0.55 * field) * (0.55 + 0.45 * grassy)
+    let density: Float = 0.25 + 0.5 * field
     # a clump stands or not as a whole, and now and then a tuft of it is
     # missing
     let draw: Float = hash2(x: cellX * 67 + clump, y: cellY * 71 + clump, seed: 707)
@@ -253,8 +295,8 @@ func placeMeadowCell(
     }
     let pick: Float = hash2(x: cellX * 73 + k, y: cellY * 79 + k, seed: 709)
     let sizeDraw: Float = hash2(x: cellX * 83 + k, y: cellY * 89 + k, seed: 711)
-    # tall grass: about a fifth of the ground, green or straw
-    let tall: Bool = value2(x: x / 40.0 + 9.3, y: y / 40.0 - 4.1, seed: 713) > 0.6
+    # tall grass: about a tenth of the ground
+    let tall: Bool = value2(x: x / 40.0 + 9.3, y: y / 40.0 - 4.1, seed: 713) > 0.66
     var form: Int = 0
     var scale: Float = 0.28 + 0.34 * sizeDraw
     if tall {
@@ -271,12 +313,8 @@ func placeMeadowCell(
       form = 1
       scale = 0.8 + 0.8 * sizeDraw
     }
-    # green on grass, straw on the dry ground, each tuft a little apart
-    let dry: Float = Math.clamp(
-      val: 1.0 - grassy + (hash2(x: cellX * 97 + k, y: cellY * 101 + k, seed: 715) - 0.5) * 0.5
-      low: 0.0
-      high: 1.0
-    )
+    # the terrain's grass color, each tuft a little lighter or darker
+    let shade: Float = 0.9 + 0.2 * hash2(x: cellX * 97 + k, y: cellY * 101 + k, seed: 715)
     let z: Float = worldTerrainHeight(
       x: x
       y: y
@@ -284,7 +322,7 @@ func placeMeadowCell(
       cfg: biome
     )
     let yaw: Float = pick * 37.0 + sizeDraw * 11.0
-    let place: Int = slot * meadowTuftsPerCell + count
+    let place: Int = slot * meadowPlacesPerCell + count
     let foot: Vec3 = Vec3.create(x: x, y: y, z: z)
     meadow.models.set(
       index: place
@@ -298,14 +336,62 @@ func placeMeadowCell(
     )
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: form)
-    meadow.colors.set(
-      index: place
-      value: Vec3.vadd(
-        a: meadowGreen
-        b: Vec3.vscale(a: Vec3.vsub(a: meadowStraw, b: meadowGreen), s: dry)
+    meadow.colors.set(index: place, value: Vec3.vscale(a: meadow.rootColor, s: shade))
+    meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
+    count = count + 1
+  }
+  # the turf: a patch on every grassy square of the cell's grid
+  let step: Float = size / meadowTurfSide.toFloat()
+  loop var t: Int = 0, t < meadowTurfSide * meadowTurfSide, ++t {
+    let column: Int = t % meadowTurfSide
+    let row: Int = t / meadowTurfSide
+    let x: Float = cellX.toFloat() * size + (column.toFloat() + 0.2 + 0.6 * hash2(
+      x: cellX * 29 + t
+      y: cellY
+      seed: 731
+    )) * step
+    let y: Float = cellY.toFloat() * size + (row.toFloat() + 0.2 + 0.6 * hash2(
+      x: cellX
+      y: cellY * 31 + t
+      seed: 733
+    )) * step
+    if worldPath(x: x, y: y, cfg: biome) > pathPropClear {
+      continue
+    }
+    let ground: WorldSample = sampleWorld(x: x, y: y, cfg: biome)
+    if ground.wWater > 0.3 or ground.wRock > 0.5 or ground.wGrass < 0.5 {
+      continue
+    }
+    let draw: Float = hash2(x: cellX * 37 + t, y: cellY * 41 + t, seed: 735)
+    let foot: Vec3 = Vec3.create(
+      x: x
+      y: y
+      z: worldTerrainHeight(
+        x: x
+        y: y
+        groundZ: groundZ
+        cfg: biome
       )
     )
-    meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
+    let scale: Float = 0.95 + 0.15 * draw
+    let place: Int = slot * meadowPlacesPerCell + count
+    meadow.models.set(
+      index: place
+      value: transform3dToMatrix(
+        t: Transform3D {
+          position: foot
+          rotation: Quat.fromAxisAngle(
+            axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+            angle: draw * 40.0
+          )
+          scale: Vec3.create(x: scale, y: scale, z: scale)
+        }
+      )
+    )
+    meadow.feet.set(index: place, value: foot)
+    meadow.forms.set(index: place, value: meadowTurfForm)
+    meadow.colors.set(index: place, value: Vec3.vscale(a: meadow.rootColor, s: 0.94 + 0.12 * draw))
+    meadow.keeps.set(index: place, value: hash2(x: cellX * 43 + t, y: cellY * 47 + t, seed: 737))
     count = count + 1
   }
   meadow.slotCount.set(index: slot, value: count)
@@ -325,7 +411,7 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
   loop var slot: Int = 0, slot < slots, ++slot {
     let count: Int = meadow.slotCount.copyAtFallback(index: slot, fallback: 0)
     loop var k: Int = 0, k < count, ++k {
-      let place: Int = slot * meadowTuftsPerCell + k
+      let place: Int = slot * meadowPlacesPerCell + k
       let foot: Vec3 = meadow.feet.copyAtDefault(index: place)
       let dx: Float = foot.x - eye.x
       let dy: Float = foot.y - eye.y
@@ -350,7 +436,7 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
       let part: Int = meadow.forms.copyAtFallback(index: place, fallback: 0) * 2 + level
       if let instancer: mod PropInstancer = meadow.parts.modAt(index: part) {
         var material: Material3d = instancer.material
-        material.baseColor = meadow.colors.copyAtFallback(index: place, fallback: meadowGreen)
+        material.baseColor = meadow.colors.copyAtFallback(index: place, fallback: meadow.rootColor)
         let model: Mat4 = meadow.models.copyAtDefault(index: place)
         let before: Int = instancer.batch.count
         addInstance(
@@ -361,6 +447,11 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
         )
         if instancer.batch.count > before {
           setInstanceSway(records: instancer.batch.records, slot: before, sway: 1.0)
+          setInstancePattern(
+            records: instancer.batch.records
+            slot: before
+            pattern: meadow.pattern
+          )
         }
         drawn = drawn + 1
       }

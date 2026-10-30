@@ -1,17 +1,16 @@
-# app3d/GrassTuft — a clump of grass made in code: the walkers' grass
-# tufts (app3d/WalkerTerrain kindGrassA/B), in place of a third-party
-# Unity asset (the FlatKit "GrassBunch" clump the walker examples once
-# loaded). About 30 blades rise from a narrow oval root, each a curved
-# strip that tapers to a point and leans outward, the inner ones taller.
-# Its size is the old clump's: 1.2 m by 0.8 m and about 1.4 m tall at scale
-# 1 (the walkers place it at 0.38 - 0.82). One normal a blade vertex, up and
-# a little outward, so the clump shades as one soft shape, not blade by
-# blade. Both faces are written, so it draws from every side. Written new.
+# app3d/GrassTuft — a clump of grass made in code for the walkers' meadow
+# (app3d/WalkerMeadow), stylized low-poly like the GPU grass: a dozen
+# broad, flat blades rise from a small oval root, each a strip that tapers
+# to a point and leans outward, the inner ones taller. One normal a blade
+# vertex, up and a little outward, so the clump shades as one soft shape,
+# not blade by blade. Both faces are written, so it draws from every side.
+# Written new.
 #
-# The walkers' meadow (app3d/WalkerMeadow) uses three forms of it
-# (grassTuftForm): the tuft, a low wide spread and tall upright reeds, each
-# also with one segment a blade for the distance (the same blades, straight:
-# a quarter of the triangles, the same outline).
+# Three forms (grassTuftForm): the tuft, a low wide spread and tall upright
+# reeds, drawn near with two segments a blade and far with one (the same
+# blades, straight). The meadow colors a tuft as the GPU grass: the
+# terrain's grass color at the root, lighter to the tip (GbufferRecord
+# grassBladePattern; the blade's height is 1 - its v coordinate).
 #
 # Each vertex carries its blade's root as its wind pivot and a flexibility
 # that grows to the tip (lib/FoliageMesh), so a tuft uploaded with
@@ -22,7 +21,7 @@ import Vec3
 open Mesh3d
 open Noise
 
-const grassTuftBlades: Int = 30
+const grassTuftBlades: Int = 12
 
 const grassTuftSegments: Int = 4
 
@@ -109,45 +108,45 @@ type GrassTuftForm {
   width: Float
 }
 
-# The forms: 0 the tuft (1.2 x 0.8 m, 1.4 m tall), 1 a low wide spread
-# (1.3 m across, 0.6 m tall, the blades leaning far out), 2 tall upright
-# reeds (2 m tall, narrow)
+# The forms: 0 the tuft (about 1 m across, 1.2 m tall at scale 1), 1 a low
+# wide spread (1.3 m across, 0.6 m tall, the blades leaning far out), 2 tall
+# upright reeds (1.9 m tall, narrow)
 const grassTuftForms: Int = 3
 
 func grassTuftForm(form: view Int) ret GrassTuftForm {
   if form is 1 {
     ret GrassTuftForm {
-      blades: 26
-      rootX: 0.36
+      blades: 10
+      rootX: 0.34
       rootY: 0.30
       innerHeight: 0.62
-      outerHeight: 0.34
-      innerLean: 0.45
-      rimLean: 0.95
-      width: 0.08
+      outerHeight: 0.36
+      innerLean: 0.5
+      rimLean: 1.0
+      width: 0.2
     }
   }
   if form is 2 {
     ret GrassTuftForm {
-      blades: 24
-      rootX: 0.17
-      rootY: 0.14
-      innerHeight: 2.0
-      outerHeight: 1.35
-      innerLean: 0.05
-      rimLean: 0.22
-      width: 0.05
+      blades: 9
+      rootX: 0.15
+      rootY: 0.13
+      innerHeight: 1.9
+      outerHeight: 1.3
+      innerLean: 0.06
+      rimLean: 0.25
+      width: 0.12
     }
   }
   ret GrassTuftForm {
     blades: grassTuftBlades
-    rootX: 0.24
-    rootY: 0.16
-    innerHeight: 1.39
-    outerHeight: 0.79
-    innerLean: 0.12
-    rimLean: 0.5
-    width: 0.07
+    rootX: 0.22
+    rootY: 0.18
+    innerHeight: 1.2
+    outerHeight: 0.75
+    innerLean: 0.15
+    rimLean: 0.55
+    width: 0.17
   }
 }
 
@@ -200,6 +199,48 @@ func grassTuftFormMesh(
       height: height
       width: (form.width + 0.03 * hash2(x: blade, y: 4, seed: seed)) * widthScale
       lean: lean
+      segments: segments
+    )
+  }
+  ret own mesh
+}
+
+# A patch of turf `size` m square, its center at the origin: `blades` short
+# blades (0.3 - 0.6 m) on a jittered grid, each leaning its own way, in
+# `segments` pieces and `widthScale` times as wide, the stylized low-poly
+# blades of the GPU grass carpet, so the meadow (app3d/WalkerMeadow) carries
+# that carpet out over the whole grassy ground. With wind pivots as the
+# tufts.
+func grassTurfMesh(
+  seed: view Int
+  blades: view Int
+  size: view Float
+  segments: view Int
+  widthScale: view Float
+) ret MeshData {
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: blades * (segments + 1) * 16)
+    indices: List.create(Int, cap: blades * segments * 12)
+    vertCount: 0
+  }
+  let side: Int = Math.max(a: 1, b: Math.sqrt(x: blades.toFloat()).toInt())
+  let step: Float = size / side.toFloat()
+  loop var blade: Int = 0, blade < blades, ++blade {
+    let column: Int = blade % side
+    let row: Int = (blade / side) % side
+    let root: Vec3 = Vec3.create(
+      x: (column.toFloat() + hash2(x: blade, y: 5, seed: seed)) * step - size * 0.5
+      y: (row.toFloat() + hash2(x: blade, y: 6, seed: seed)) * step - size * 0.5
+      z: -0.03
+    )
+    let around: Float = hash2(x: blade, y: 7, seed: seed) * 6.2831853
+    addGrassBlade(
+      mesh: mesh
+      root: root
+      out: Vec3.create(x: Math.cos(x: around), y: Math.sin(x: around), z: 0.0)
+      height: 0.3 + 0.3 * hash2(x: blade, y: 8, seed: seed)
+      width: (0.13 + 0.06 * hash2(x: blade, y: 9, seed: seed)) * widthScale
+      lean: 0.15 + 0.3 * hash2(x: blade, y: 10, seed: seed)
       segments: segments
     )
   }
