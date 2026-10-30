@@ -6,7 +6,8 @@
 # The earth's moon follows an ephemeris: its orbit's mean elements with the
 # main perturbations of its longitude, latitude and distance (the series of
 # Paul Schlyter's "How to compute planetary positions"), good to a couple of
-# arc minutes, and the sun's longitude and distance from the same source.
+# arc minutes, on terrestrial time (delta T by year), and the sun's longitude and distance from the
+# same source.
 # It is seen from the observer's place, not the earth's center: the
 # sidereal time and the moon's parallax (up to a degree) move it, which is
 # what makes an eclipse total in one place and partial 500 km away.
@@ -305,6 +306,27 @@ func moonEphemeris(days: view Float64, sun: view SunEphemeris) ret MoonEphemeris
   ret MoonEphemeris { longitude: longitude, latitude: latitude, distance: distance }
 }
 
+# Delta T (s): how far terrestrial time runs ahead of universal time in
+# `year`, by Espenak and Meeus' polynomial fits (about 50 s in 1980, 64 s
+# in 2000, 93 s in 2050, 203 s in 2100; the later years are a forecast)
+func deltaTSeconds(year: view Int) ret Float {
+  let y: Float = year.toFloat()
+  if y < 1986.0 {
+    let t: Float = y - 1975.0
+    ret 45.45 + 1.067 * t - t * t / 260.0 - t * t * t / 718.0
+  }
+  if y < 2005.0 {
+    let t: Float = y - 2000.0
+    ret 63.86 + 0.3345 * t - 0.060374 * t * t + 0.0017275 * t * t * t + 0.000651814 * t * t * t * t + 0.00002373599 * t * t * t * t * t
+  }
+  if y < 2050.0 {
+    let t: Float = y - 2000.0
+    ret 62.92 + 0.32217 * t + 0.005589 * t * t
+  }
+  let u: Float = (y - 1820.0) / 100.0
+  ret -20.0 + 32.0 * u * u - 0.5628 * (2150.0 - y)
+}
+
 # The obliquity of the ecliptic (degrees) `days` after J2000
 func moonObliquity(days: view Float64) ret Float {
   ret 23.4393 - (days * 0.0000003563) as Float
@@ -390,9 +412,9 @@ func moonForBody(
     dayOfYear: dayOfYear
     utHours: hour - longitudeDeg / 15.0
   )
-  # The ephemeris runs on terrestrial time, about 69 s ahead of universal
-  # time in these decades (delta T); the sidereal time on universal time
-  let ephemerisDays: Float64 = days + 69.0 / 86400.0
+  # The ephemeris runs on terrestrial time, delta T ahead of universal
+  # time; the sidereal time on universal time
+  let ephemerisDays: Float64 = days + (deltaTSeconds(year: year) as Float64) / 86400.0
   let sunNow: SunEphemeris = sunEphemeris(days: ephemerisDays)
   let obliquity: Float = moonObliquity(days: days)
   let sun: MoonEquatorial = eclipticToEquatorial(
