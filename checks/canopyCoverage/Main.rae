@@ -121,7 +121,7 @@ func createPicture(resources: mod GpuResources) ret Picture {
   }
   let storage: UInt64 = WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
   let uniform: UInt64 = WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
-  picture.frame = bufferOf(resources: resources, size: 144, usage: uniform)
+  picture.frame = bufferOf(resources: resources, size: 192, usage: uniform)
   picture.draws = bufferOf(resources: resources, size: 1024 * 176, usage: storage)
   picture.sprite = bufferOf(resources: resources, size: 48, usage: uniform)
   picture.pixels = bufferOf(
@@ -138,7 +138,12 @@ func createPicture(resources: mod GpuResources) ret Picture {
   if let made: RenderPipelineId = createRenderPipeline(
     resources: resources
     shader: shader(
-      files: ["lib/fade_dither.wgsl", "lib/impostor_octahedral.wgsl", "lib/sprite_billboard.wgsl"]
+      files: [
+        "lib/fade_dither.wgsl"
+        "lib/impostor_octahedral.wgsl"
+        "lib/snow.wgsl"
+        "lib/sprite_billboard.wgsl"
+      ]
     )
     vertexEntry: "vs"
     fragmentEntry: "fsQuadDepth"
@@ -220,13 +225,17 @@ func drawPicture(
   var frame: ArgWriter = createArgs(uniform: true)
   let pushedNow: Bool = pushMat4(writer: frame, columns: viewProjection)
   let pushedBefore: Bool = pushMat4(writer: frame, columns: viewProjection)
-  pushVec4F(
-    writer: frame
-    x: 0.0
-    y: 0.0
-    z: 0.0
-    w: 0.0
-  )
+  # the jitter, the wind and the last frame's wind, and the scene (no snow:
+  # lib/snow.wgsl), all none here
+  loop var part: Int = 0, part < 4, ++part {
+    pushVec4F(
+      writer: frame
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 0.0
+    )
+  }
   var sprite: ArgWriter = createArgs(uniform: true)
   pushVec4F(
     writer: sprite

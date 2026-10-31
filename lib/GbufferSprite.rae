@@ -248,7 +248,12 @@ func ensureSpritePipeline(
   if not cache.pipeMade {
     cache.pipeMade = true
     let billboardShader: Shader = shader(
-      files: ["lib/fade_dither.wgsl", "lib/impostor_octahedral.wgsl", "lib/sprite_billboard.wgsl"]
+      files: [
+        "lib/fade_dither.wgsl"
+        "lib/impostor_octahedral.wgsl"
+        "lib/snow.wgsl"
+        "lib/sprite_billboard.wgsl"
+      ]
     )
     if let pipeline: RenderPipelineId = createRenderPipeline(
       resources: resources
@@ -548,6 +553,7 @@ func ensureSpriteForward(
       "lib/ssao_upsample.wgsl"
       "lib/fade_dither.wgsl"
       "lib/impostor_octahedral.wgsl"
+      "lib/snow.wgsl"
       "lib/sprite_billboard.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -560,6 +566,7 @@ func ensureSpriteForward(
         "lib/ssao_upsample.wgsl"
         "lib/fade_dither.wgsl"
         "lib/impostor_octahedral.wgsl"
+        "lib/snow.wgsl"
         "lib/sprite_billboard.wgsl"
         "lib/forward_entry.wgsl"
       ])

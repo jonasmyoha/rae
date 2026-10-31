@@ -251,6 +251,10 @@ func labSeasonClimateText(season: view LabSeason) ret String {
       dayOfYear: season.clock.dayOfYear
     )
   )
+  let snowCentimeters: Int = (climateSnowAt(climate: season.climate, east: 0.0, north: 0.0) * 100.0 + 0.5).toInt()
+  if snowCentimeters >= 1 {
+    ret "{sign}{tenths / 10}.{tenths % 10} °C, {name}, snow {snowCentimeters} cm"
+  }
   ret "{sign}{tenths / 10}.{tenths % 10} °C, {name}"
 }
 

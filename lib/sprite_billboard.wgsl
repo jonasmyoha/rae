@@ -34,6 +34,10 @@ struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
   jitter: vec4<f32>,
+  wind: vec4<f32>,
+  previousWind: vec4<f32>,
+  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
+  scene: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -538,7 +542,8 @@ fn impostorMarchSurface(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, select(0.5, 0.1, in.emissive < 0.0), in.mode);
-  o.gbb = vec4<f32>(albedo, 1.0);
+  // snow on the up-facing parts (lib/snow.wgsl), as on the near trees
+  o.gbb = vec4<f32>(snowOnTop(albedo, worldNormal, F.scene.x), 1.0);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, abs(in.emissive));
   return o;
 }
@@ -594,8 +599,9 @@ fn impostorSurface(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, select(0.5, 0.1, in.emissive < 0.0), in.mode);
-  // The foliage the impostors stand for is fully rough (GroveTrees)
-  o.gbb = vec4<f32>(albedo, 1.0);
+  // The foliage the impostors stand for is fully rough (GroveTrees); snow on
+  // its up-facing parts (lib/snow.wgsl), as on the near trees
+  o.gbb = vec4<f32>(snowOnTop(albedo, worldNormal, F.scene.x), 1.0);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, abs(in.emissive));
   return o;
 }

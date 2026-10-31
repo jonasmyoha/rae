@@ -64,6 +64,7 @@ import Math
 open Wind
 open Scene3d
 open Gbuffer
+open Climate
 open GbufferWorld
 open RendererDeferred
 open RendererDeferredShadow
@@ -473,6 +474,11 @@ func runLabFrame(state: mod LabState) {
   let gatherStart: Float64 = Gpu2d.nowSeconds()
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
     applyLabSeason(season: state.season, field: forest.field)
+    # the snow lying in the lab's place (lib/Climate, lib/snow.wgsl)
+    setGbufferSnow(
+      cache: state.renderer.passes.gbuffer
+      depth: climateSnowAt(climate: state.season.climate, east: 0.0, north: 0.0)
+    )
     let unusedBaked: Bool = updateSeasonImpostors(forest: forest, renderer: state.renderer)
     gatherTreeForest(
       forest: forest

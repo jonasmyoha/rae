@@ -165,6 +165,8 @@ type GbufferCache {
   groundGrass: Vec3 = Vec3.create(x: 0.088, y: 0.14, z: 0.026)
   groundDry: Vec3 = Vec3.create(x: 0.2, y: 0.15, z: 0.045)
   groundDryAmount: Float = 0.0
+  # The scene's snow depth (m) the frame uniform carries (setGbufferSnow)
+  snowDepth: Float = 0.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
@@ -457,6 +459,11 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.previousWind.y)
   cache.frameFloats.add(value: cache.previousWind.z)
   cache.frameFloats.add(value: cache.windPrevTime)
+  # the scene: x the snow depth (m) the shaders lay down (setGbufferSnow)
+  cache.frameFloats.add(value: cache.snowDepth)
+  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: 0.0)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -468,6 +475,15 @@ func uploadFrameUniform(
       size: gbufferFrameFloats * 4
     )
   }
+}
+
+# The scene's snow depth (m; lib/Climate climateSnowAt where the camera
+# looks): the frame uniform's scene.x, which the terrain paints as snow by
+# its slope and a noise, the static meshes lay on their up-facing parts,
+# and the grass and the meadow sink under (docs/seasons-and-weather-design.md
+# §4; lib/snow.wgsl)
+func setGbufferSnow(cache: mod GbufferCache, depth: view Float) {
+  cache.snowDepth = Math.max(a: depth, b: 0.0)
 }
 
 # This frame's wind (lib/Wind windVector): what the swaying props bend in

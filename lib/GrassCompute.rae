@@ -365,6 +365,7 @@ func ensureGrassForward(
       "lib/ssao_upsample.wgsl"
       "lib/grass_field.wgsl"
       "lib/grass_motion.wgsl"
+      "lib/snow.wgsl"
       "lib/grass_render.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -377,6 +378,7 @@ func ensureGrassForward(
         "lib/ssao_upsample.wgsl"
         "lib/grass_field.wgsl"
         "lib/grass_motion.wgsl"
+        "lib/snow.wgsl"
         "lib/grass_render.wgsl"
         "lib/forward_entry.wgsl"
       ])
@@ -545,7 +547,12 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
     }
   }
   let renderShader: Shader = shader(
-    files: ["lib/grass_field.wgsl", "lib/grass_motion.wgsl", "lib/grass_render.wgsl"]
+    files: [
+      "lib/grass_field.wgsl"
+      "lib/grass_motion.wgsl"
+      "lib/snow.wgsl"
+      "lib/grass_render.wgsl"
+    ]
   )
   if let renderPipeline: RenderPipelineId = createRenderPipeline(
     resources: resources

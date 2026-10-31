@@ -40,8 +40,10 @@ const gbufferTargetC: Int = 2  # rgba8unorm: motion.xy, metallic, occlusion-or-e
 
 const gbufferTargetDepth: Int = 3  # depth32float, reverse-Z, sampleable
 
-# The frame uniform: viewProj + prevViewProj + jitter (36 floats, #390/#397).
-const gbufferFrameFloats: Int = 44
+# The frame uniform: viewProj + prevViewProj + jitter (36 floats, #390/#397),
+# the wind and the last frame's (8), and the scene (4: the snow depth,
+# setGbufferSnow).
+const gbufferFrameFloats: Int = 48
 
 # The draws storage buffer holds this many DrawU records per frame (was C's
 # GB_MAX_DRAWS); every draw path clamps to it.
@@ -264,6 +266,7 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     "lib/fade_dither.wgsl"
     "lib/wind.wgsl"
     "lib/grass_field.wgsl"
+    "lib/snow.wgsl"
     "lib/gbuffer_static_surface.wgsl"
     "lib/gbuffer_static.wgsl"
   ])

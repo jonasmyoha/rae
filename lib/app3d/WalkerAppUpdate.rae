@@ -169,6 +169,10 @@ func updateWalkerClimate(app: mod WalkerApp) {
     year: settings.timeOfDay.year
     dayOfYear: settings.timeOfDay.dayOfYear
   )
+  # the snow lying there (lib/Climate): the panel shows it, and every
+  # shader lays it (Gbuffer setGbufferSnow, lib/snow.wgsl)
+  settings.snowDepth = climateSnowAt(climate: app.climate, east: look.x, north: look.y)
+  setGbufferSnow(cache: app.renderSystem.renderer.passes.gbuffer, depth: settings.snowDepth)
   # and the ground's grass (app3d/GroundPalette: the terrain, the GPU grass
   # and the meadow read it)
   app.terrainSystem.groundPalette = groundPaletteAt(
