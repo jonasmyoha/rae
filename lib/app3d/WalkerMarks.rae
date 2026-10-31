@@ -14,6 +14,7 @@ open gpu/GpuResources
 open app3d/GroundTouch
 open app3d/GroundParticles
 open app3d/Footprints
+open app3d/Precipitation
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
 
@@ -25,6 +26,14 @@ type WalkerMarks {
   footprints: Footprints
   groundParticles: GroundParticles
   random: Random
+  # The rain and the falling snow round the camera (app3d/Precipitation),
+  # and this frame's: the weather's rate (mm of water an hour), the air
+  # (°C), the eye and the clock (s), set by the update
+  precipitation: Precipitation
+  precipitationRate: Float = 0.0
+  precipitationAir: Float = 10.0
+  precipitationEye: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  precipitationClock: Float = 0.0
 }
 
 # Room for `characterCount` characters' full trails
@@ -37,6 +46,7 @@ func createWalkerMarks(renderer: mod DeferredRenderer, characterCount: view Int)
     )
     groundParticles: createGroundParticles(renderer: renderer, capacity: 256)
     random: createRandom(seed: 1147)
+    precipitation: createPrecipitation(renderer: renderer)
   }
 }
 
@@ -84,7 +94,7 @@ func walkerMarksUpdate(
   groundParticlesUpdate(groundParticles: walkerMarks.groundParticles, deltaTime: deltaTime)
 }
 
-# The prints and the particles into the open geometry pass
+# The prints, the particles and the rain or snow into the open geometry pass
 func drawWalkerMarks(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -102,6 +112,18 @@ func drawWalkerMarks(
     resources: resources
     groundParticles: walkerMarks.groundParticles
     toon: toon
+  )
+  # the rain or the snow, blown by the frame's wind
+  drawPrecipitation(
+    cache: cache
+    resources: resources
+    precipitation: walkerMarks.precipitation
+    eye: walkerMarks.precipitationEye
+    seconds: walkerMarks.precipitationClock
+    rate: walkerMarks.precipitationRate
+    air: walkerMarks.precipitationAir
+    windX: cache.windX * 2.0
+    windY: cache.windY * 2.0
   )
 }
 

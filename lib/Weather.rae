@@ -163,3 +163,37 @@ func weatherCloudDarkness(weather: view Weather) ret Float {
     b: 1.0
   )
 }
+
+# How wet the ground is (0 dry .. 1 wet) at a place at `hour` of day
+# `dayOfYear` (the place's clock): wet while it rains and drying over the
+# hour after the rain stopped, the weather's last hour sampled in quarters.
+# Snow (`air` below freezing) does not wet it.
+func weatherGroundWet(
+  seed: view Int
+  latitude: view Float
+  longitude: view Float
+  year: view Int
+  dayOfYear: view Int
+  hour: view Float
+  air: view Float
+) ret Float {
+  if air < 0.5 {
+    ret 0.0
+  }
+  var wet: Float = 0.0
+  loop var step: Int = 0, step <= 4, ++step {
+    let ago: Float = step.toFloat() * 0.25
+    let weather: Weather = weatherAt(
+      seed: seed
+      latitude: latitude
+      longitude: longitude
+      year: year
+      dayOfYear: dayOfYear
+      hour: hour - ago
+    )
+    if weather.precipitation > 0.05 {
+      wet = Math.max(a: wet, b: 1.0 - ago)
+    }
+  }
+  ret wet
+}

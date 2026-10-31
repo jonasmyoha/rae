@@ -1,0 +1,184 @@
+# app3d/Precipitation — rain and falling snow round the camera
+# (docs/seasons-and-weather-design.md §5): while the weather precipitates
+# (lib/Weather), drops fall in a box round the camera, as many as the rate
+# asks (at most precipitationMaxDrops), drawn into the open pass as one
+# instanced draw (lit like the scene, no shadow). Rain is thin streaks
+# falling fast; below freezing it is snow, small flakes drifting down and
+# swaying.
+#
+# The drops are a fixed lattice in the world, not round the camera: each
+# drop's place is wrapped into the box round the camera, so they stay put
+# as the camera moves and do not swim with it; each falls through the box
+# on its own phase and comes back at the top.
+import Math
+import Vec3
+open Math3d
+open Mesh3d
+open Scene3d
+open GbufferInstanced
+open Gbuffer
+open RendererDeferred
+open gpu/GpuResources
+
+const precipitationMaxDrops: Int = 3000
+
+# The box round the camera (m): its side and its height
+const precipitationBoxSide: Float = 28.0
+
+const precipitationBoxHeight: Float = 18.0
+
+type Precipitation {
+  rainBatch: InstanceBatch
+  snowBatch: InstanceBatch
+}
+
+func createPrecipitation(renderer: mod DeferredRenderer) ret Precipitation {
+  let box: MeshData = makeBox(size: 1.0)
+  let flake: MeshData = makeSphere(rings: 3, segments: 4)
+  ret Precipitation {
+    rainBatch: createInstanceBatch(
+      mesh: RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: box.verts
+        vertCount: box.vertCount
+        indices: box.indices
+      )
+      capacity: precipitationMaxDrops
+    )
+    snowBatch: createInstanceBatch(
+      mesh: RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: flake.verts
+        vertCount: flake.vertCount
+        indices: flake.indices
+      )
+      capacity: precipitationMaxDrops
+    )
+  }
+}
+
+func precipitationHash(index: view Int, seed: view Int) ret Float {
+  let mixed: Float = Math.sin(x: index.toFloat() * 12.9898 + seed.toFloat() * 78.233) * 43758.5453
+  ret mixed - Math.floor(x: mixed)
+}
+
+func precipitationFract(value: view Float) ret Float {
+  ret value - Math.floor(x: value)
+}
+
+# A lean: a point `z` up moves `x`, `y` times z sideways (the wind's slant
+# on a falling streak)
+func precipitationLean(x: view Float, y: view Float) ret Mat4 {
+  var lean: Mat4 = mat4Identity()
+  # column-major: the z column's x and y
+  lean.m.set(index: 8, value: x)
+  lean.m.set(index: 9, value: y)
+  ret lean
+}
+
+# How many drops fall at `precipitation` mm of water an hour: a drizzle a
+# few hundred, heavy rain (2 mm/h and more) the most
+func precipitationDropCount(precipitation: view Float) ret Int {
+  if precipitation <= 0.05 {
+    ret 0
+  }
+  ret Math.min(
+    a: precipitationMaxDrops
+    b: (300.0 + precipitation / 2.0 * precipitationMaxDrops.toFloat()).toInt()
+  )
+}
+
+# This frame's drops round `eye` at `seconds` (the clock), falling at the
+# weather's `precipitation`, as snow when `air` is below freezing, blown by
+# `windX`, `windY` (m/s), into the open pass
+func drawPrecipitation(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  precipitation: mod Precipitation
+  eye: view Vec3
+  seconds: view Float
+  rate: view Float
+  air: view Float
+  windX: view Float
+  windY: view Float
+) {
+  resetInstanceBatch(batch: precipitation.rainBatch)
+  resetInstanceBatch(batch: precipitation.snowBatch)
+  let snow: Bool = air < 0.5
+  # snow is many more flakes than rain is drops for the same water
+  var count: Int = precipitationDropCount(precipitation: rate)
+  if snow {
+    count = Math.min(a: precipitationMaxDrops, b: (count.toFloat() * 2.5).toInt())
+  }
+  if count is 0 {
+    ret
+  }
+  var speed: Float = 8.0
+  if snow {
+    speed = 1.1
+  }
+  let side: Float = precipitationBoxSide
+  let height: Float = precipitationBoxHeight
+  let material: Material3d = {
+    baseColor: Vec3.create(x: 0.62, y: 0.66, z: 0.72)
+    metallic: 0.0
+    roughness: 0.25
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+  var flakeMaterial: Material3d = material
+  flakeMaterial.baseColor = Vec3.create(x: 0.9, y: 0.92, z: 0.95)
+  flakeMaterial.roughness = 0.9
+  loop var i: Int = 0, i < count, ++i {
+    let phase: Float = precipitationHash(index: i, seed: 3)
+    # how far it has fallen through the box, and its drift on the way
+    let fall: Float = precipitationFract(value: phase + seconds * speed / height)
+    let fallTime: Float = fall * height / speed
+    var driftX: Float = windX * fallTime
+    var driftY: Float = windY * fallTime
+    if snow {
+      driftX = driftX + 0.35 * Math.sin(x: seconds * 1.3 + phase * 40.0)
+      driftY = driftY + 0.35 * Math.cos(x: seconds * 1.1 + phase * 31.0)
+    }
+    # its place in the world lattice, wrapped into the box round the eye
+    let worldX: Float = precipitationHash(index: i, seed: 11) * side + driftX
+    let worldY: Float = precipitationHash(index: i, seed: 17) * side + driftY
+    let x: Float = eye.x + (precipitationFract(value: (worldX - eye.x) / side) - 0.5) * side
+    let y: Float = eye.y + (precipitationFract(value: (worldY - eye.y) / side) - 0.5) * side
+    let z: Float = eye.z + height * 0.6 - fall * height
+    # none right in front of the eye, where a drop is a blot
+    let dx: Float = x - eye.x
+    let dy: Float = y - eye.y
+    let dz: Float = z - eye.z
+    if dx * dx + dy * dy + dz * dz < 2.25 {
+      continue
+    }
+    if snow {
+      let size: Float = 0.04 + 0.03 * precipitationHash(index: i, seed: 23)
+      let model: Mat4 = mat4Mul(a: mat4Translate(x: x, y: y, z: z), b: mat4Scale(s: size))
+      addInstance(
+        batch: precipitation.snowBatch
+        model: model
+        prevModel: model
+        material: flakeMaterial
+      )
+    } else {
+      # a streak, stretched by its speed, leaning with the wind
+      let model: Mat4 = mat4Mul(
+        a: mat4Translate(x: x, y: y, z: z)
+        b: mat4Mul(
+          a: precipitationLean(x: windX / speed, y: windY / speed)
+          b: mat4ScaleXYZ(x: 0.008, y: 0.008, z: 0.42)
+        )
+      )
+      addInstance(
+        batch: precipitation.rainBatch
+        model: model
+        prevModel: model
+        material: material
+      )
+    }
+  }
+  drawInstances(cache: cache, resources: resources, batch: precipitation.rainBatch)
+  drawInstances(cache: cache, resources: resources, batch: precipitation.snowBatch)
+}
