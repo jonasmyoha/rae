@@ -28,8 +28,10 @@ const grassTuftSegments: Int = 4
 # How far a blade's tip bends in the wind (lib/wind.wgsl windLeaf's
 # flexibility): every vertex turns about its blade's root, by this times
 # the square of how far up the blade it is, so the root stays put and the
-# blade curves, the tip most
-const grassTuftTipFlex: Float = 2.0
+# blade curves, the tip most. Negative: windLeaf's slow, broad response
+# (the tuft or patch sways as one, the blades a little apart), a calm sway
+# with no quick per-blade jitter
+const grassTuftTipFlex: Float = -0.6
 
 # One blade's strip from `root` leaning toward `out` (unit, level), `height`
 # tall and `width` wide at its root, in `segments` pieces

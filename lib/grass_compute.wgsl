@@ -140,10 +140,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;
   outBuf[slot].prevModel = m;
-  let colorVariation = mix(1.0, 0.86 + hash2u(cellI, 103u) * 0.20, variation);
-  var patchColor = grassGroundColor(G.e.rgb, bladePosition, G.h.x, G.h.y);
-  if (clusterStrength < 1.0) { patchColor = mix(G.e.rgb, patchColor, clusterStrength); }
-  outBuf[slot].albedoMetallic = vec4<f32>(patchColor * colorVariation, 0.0);
+  // The terrain's own grass color where the blade stands (the painted
+  // ground's field, terrain_grass_painted.wgsl), with no tint of its own:
+  // the blade's root is the ground's color, so the grass grows out of the
+  // ground instead of standing on it (grass_render.wgsl lightens the tip)
+  let groundColor = grassGroundColor(G.e.rgb, bladePosition, G.h.x, G.h.y);
+  outBuf[slot].albedoMetallic = vec4<f32>(groundColor, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
