@@ -308,6 +308,10 @@ func beginWalkerFrame(app: mod WalkerApp) {
     deltaTime = 0.0
   }
   app.frame.deltaTime = deltaTime
+  # the app's running clock (s): what the rain, the snow and the falling
+  # leaves fall by, and the scripted walk's (it was never advanced, so the
+  # drops hung still)
+  app.frame.time = app.frame.time + deltaTime
   if app.renderSystem.frameLogOn {
     frameLogUpdate(
       frameLog: app.renderSystem.frameLog
