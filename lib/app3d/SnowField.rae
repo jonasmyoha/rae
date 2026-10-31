@@ -1,0 +1,610 @@
+# app3d/SnowField — deep snow as geometry round the walker
+# (docs/seasons-and-weather-design.md §4.1): from snowMeshFrom deep the snow
+# is a fine mesh over the terrain (a vertex every snowFieldSpacing, tiles of
+# snowTileQuads quads, a window of snowFieldTiles x snowFieldTiles tiles
+# round the walker, scrolled like the terrain's tiles), raised by the snow
+# depth with soft drifts; past it the terrain's vertex shader raises the
+# ground by the same depth (terrain_splat.wgsl, the frame's scene vec4 says
+# where the mesh ends), so the two meet without a step.
+#
+# Footprints sink: every foot that comes down (app3d/Footprints' touches:
+# the walker's and the crowd's) stamps the tile's trample map, a print the
+# snow is pressed down in (deeper for a run) with a little rim of pushed-up
+# snow round it; new snow fills the prints back (the depth's rise is taken
+# off every print). A character's feet stand on the pressed snow
+# (snowStandLift: the depth less the print, at most knee deep). Deep snow
+# slows the walk (snowSpeedLimit).
+#
+# Each tile keeps the terrain's height on its vertices (the terrain mesh's
+# own triangles over its 0.75 m lattice, so the snow lies exactly over the
+# drawn ground), how much of it is land (no snow on the water: there the
+# mesh drops under the ground) and its trample map; it is rebuilt when it
+# scrolls in, is stamped, or the depth moves, at most snowRebuildsPerFrame
+# tiles a frame.
+import Math
+import Vec3
+import RendererDeferred
+open Noise
+open Math3d
+open Mesh3d
+open Scene3d
+open WorldBiome
+open Gbuffer
+open gpu/GpuResources
+open app3d/GroundTouch
+
+const snowFieldSpacing: Float = 0.125
+
+const snowTileQuads: Int = 72
+
+const snowTileSize: Float = 9.0
+
+const snowFieldTiles: Int = 5
+
+# The terrain's lattice (app3d/WalkerTerrain: 18 m cells of 24 quads)
+const snowTerrainSpacing: Float = 0.75
+
+const snowTerrainQuads: Int = 12
+
+# From this deep (m) the snow is a mesh, below it painted only
+const snowMeshFrom: Float = 0.05
+
+const snowRebuildsPerFrame: Int = 3
+
+# How deep (m) a foot reaches at most: about the knee
+const snowKneeDepth: Float = 0.45
+
+type SnowTile {
+  meshId: Int
+  tileX: Int
+  tileY: Int
+  # per vertex, row by row: the terrain's height, how much is land (0 .. 1)
+  # and the trample (m pressed down; below 0 a rim pushed up)
+  ground: List(Float)
+  land: List(Float)
+  trample: List(Float)
+  # the depth it was built at, and whether it must be built again
+  builtDepth: Float = -1.0
+  dirty: Bool = true
+}
+
+type SnowField {
+  tiles: List(SnowTile)
+  groundZ: Float
+  biome: BiomeConfig
+  # the tile the window is centered on (none yet: far off)
+  centerX: Int = 1000000000
+  centerY: Int = 1000000000
+  # this frame's depth (m) where the walker is, and whether the mesh is on
+  depth: Float = 0.0
+  active: Bool = false
+  scratchVerts: List(Float)
+  # how many prints were stamped (the walk's check)
+  stamped: Int = 0
+}
+
+func snowTileVertices() ret Int {
+  ret (snowTileQuads + 1) * (snowTileQuads + 1)
+}
+
+# The window's tiles; their meshes are uploaded the first time the snow is
+# deep (ensureSnowMeshes), so a summer never holds them, and no tile is
+# placed until then
+func createSnowField(groundZ: view Float, biome: view BiomeConfig) ret SnowField {
+  let count: Int = snowTileVertices()
+  var tiles: List(SnowTile) = List.create(SnowTile, cap: snowFieldTiles * snowFieldTiles)
+  loop var i: Int = 0, i < snowFieldTiles * snowFieldTiles, ++i {
+    var ground: List(Float) = List.create(Float, cap: count)
+    var land: List(Float) = List.create(Float, cap: count)
+    var trample: List(Float) = List.create(Float, cap: count)
+    loop var v: Int = 0, v < count, ++v {
+      ground.add(value: 0.0)
+      land.add(value: 0.0)
+      trample.add(value: 0.0)
+    }
+    tiles.add(value: SnowTile {
+      meshId: 0
+      tileX: 1000000000
+      tileY: 1000000000
+      ground: own ground
+      land: own land
+      trample: own trample
+    })
+  }
+  var scratch: List(Float) = List.create(Float, cap: count * 8)
+  loop var i: Int = 0, i < count * 8, ++i {
+    scratch.add(value: 0.0)
+  }
+  ret SnowField { tiles: own tiles, groundZ: groundZ, biome: biome, scratchVerts: own scratch }
+}
+
+# Each tile's mesh, uploaded once (the first deep snow)
+func ensureSnowMeshes(field: mod SnowField, renderer: mod DeferredRenderer) {
+  var missing: Bool = false
+  loop let tile: view SnowTile in field.tiles {
+    if tile.meshId < 1 {
+      missing = true
+    }
+  }
+  if missing is false {
+    ret
+  }
+  let plane: MeshData = makePlane(size: snowTileSize, segments: snowTileQuads)
+  loop let tile: mod SnowTile in field.tiles {
+    if tile.meshId < 1 {
+      let mesh: MeshHandle = RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: plane.verts
+        vertCount: plane.vertCount
+        indices: plane.indices
+      )
+      tile.meshId = mesh.id
+    }
+  }
+}
+
+func snowWrap(value: view Int, side: view Int) ret Int {
+  let wrapped: Int = value % side
+  if wrapped < 0 {
+    ret wrapped + side
+  }
+  ret wrapped
+}
+
+func snowTileOf(coordinate: view Float) ret Int {
+  ret Math.floor(x: coordinate / snowTileSize).toInt()
+}
+
+# The window's half side (m) and center (the middle tile's center)
+func snowFieldHalf() ret Float {
+  ret snowTileSize * snowFieldTiles.toFloat() * 0.5
+}
+
+func snowFieldCenterX(field: view SnowField) ret Float {
+  ret (field.centerX.toFloat() + 0.5) * snowTileSize
+}
+
+func snowFieldCenterY(field: view SnowField) ret Float {
+  ret (field.centerY.toFloat() + 0.5) * snowTileSize
+}
+
+# The pressed snow left under a print (m) in snow `depth` deep, `running`
+# or not: packed to a quarter (a run to a sixth), and never deeper than the
+# knee
+func snowUnderPrint(depth: view Float, running: view Bool) ret Float {
+  var packed: Float = depth * 0.25
+  if running {
+    packed = depth * 0.16
+  }
+  ret Math.max(a: packed, b: depth - snowKneeDepth)
+}
+
+# How high over the terrain a character's feet stand (m): on the pressed
+# snow of its prints (none while the mesh is off)
+func snowStandLift(field: view SnowField) ret Float {
+  if field.active is false {
+    ret 0.0
+  }
+  ret snowUnderPrint(depth: field.depth, running: false)
+}
+
+# The fastest a character moves (m/s) in the field's snow: from the run's
+# 4.2 m/s down to 2.6 in snow at the knee
+func snowSpeedLimit(field: view SnowField) ret Float {
+  if field.active is false {
+    ret 1000.0
+  }
+  let t: Float = Math.clamp(
+    val: (field.depth - snowMeshFrom) / (snowKneeDepth - snowMeshFrom)
+    low: 0.0
+    high: 1.0
+  )
+  ret 4.6 - 2.0 * t
+}
+
+# The terrain's height and land at lattice point (i, j) (world i * 0.75)
+func snowLatticeHeight(field: view SnowField, i: view Int, j: view Int) ret Float {
+  ret worldTerrainHeight(
+    x: i.toFloat() * snowTerrainSpacing
+    y: j.toFloat() * snowTerrainSpacing
+    groundZ: field.groundZ
+    cfg: field.biome
+  )
+}
+
+func snowLatticeLand(field: view SnowField, i: view Int, j: view Int) ret Float {
+  let sample: WorldSample = sampleWorld(
+    x: i.toFloat() * snowTerrainSpacing
+    y: j.toFloat() * snowTerrainSpacing
+    cfg: field.biome
+  )
+  ret 1.0 - sample.wWater
+}
+
+# A value at (u, v) in a terrain quad with corners a (0,0), b (1,0), c (0,1)
+# and d (1,1), on the quad's two triangles as the terrain mesh splits it
+# (Mesh3d makePlane: a-b-c and c-b-d)
+func snowOnQuad(
+  a: view Float
+  b: view Float
+  c: view Float
+  d: view Float
+  u: view Float
+  v: view Float
+) ret Float {
+  if u + v <= 1.0 {
+    ret a + u * (b - a) + v * (c - a)
+  }
+  ret d + (1.0 - u) * (c - d) + (1.0 - v) * (b - d)
+}
+
+# Place tile `slot` at tile (tileX, tileY): its terrain heights and land
+# from the lattice, its trample cleared
+func placeSnowTile(
+  field: mod SnowField
+  slot: view Int
+  tileX: view Int
+  tileY: view Int
+) {
+  let lattice: Int = snowTerrainQuads + 1
+  var heights: List(Float) = List.create(Float, cap: lattice * lattice)
+  var lands: List(Float) = List.create(Float, cap: lattice * lattice)
+  let baseI: Int = tileX * snowTerrainQuads
+  let baseJ: Int = tileY * snowTerrainQuads
+  loop var j: Int = 0, j < lattice, ++j {
+    loop var i: Int = 0, i < lattice, ++i {
+      heights.add(value: snowLatticeHeight(field: field, i: baseI + i, j: baseJ + j))
+      lands.add(value: snowLatticeLand(field: field, i: baseI + i, j: baseJ + j))
+    }
+  }
+  let side: Int = snowTileQuads + 1
+  let per: Int = snowTileQuads / snowTerrainQuads
+  if let tile: mod SnowTile = field.tiles.modAt(index: slot) {
+    tile.tileX = tileX
+    tile.tileY = tileY
+    tile.dirty = true
+    loop var y: Int = 0, y < side, ++y {
+      let quadJ: Int = Math.min(a: y / per, b: snowTerrainQuads - 1)
+      let v: Float = (y - quadJ * per).toFloat() / per.toFloat()
+      loop var x: Int = 0, x < side, ++x {
+        let quadI: Int = Math.min(a: x / per, b: snowTerrainQuads - 1)
+        let u: Float = (x - quadI * per).toFloat() / per.toFloat()
+        let corner: Int = quadJ * lattice + quadI
+        let index: Int = y * side + x
+        tile.ground.set(
+          index: index
+          value: snowOnQuad(
+            a: heights.copyAtFallback(index: corner, fallback: 0.0)
+            b: heights.copyAtFallback(index: corner + 1, fallback: 0.0)
+            c: heights.copyAtFallback(index: corner + lattice, fallback: 0.0)
+            d: heights.copyAtFallback(index: corner + lattice + 1, fallback: 0.0)
+            u: u
+            v: v
+          )
+        )
+        tile.land.set(
+          index: index
+          value: snowOnQuad(
+            a: lands.copyAtFallback(index: corner, fallback: 0.0)
+            b: lands.copyAtFallback(index: corner + 1, fallback: 0.0)
+            c: lands.copyAtFallback(index: corner + lattice, fallback: 0.0)
+            d: lands.copyAtFallback(index: corner + lattice + 1, fallback: 0.0)
+            u: u
+            v: v
+          )
+        )
+        tile.trample.set(index: index, value: 0.0)
+      }
+    }
+  }
+}
+
+# How deep the drifts make the snow at world (x, y), as a share of the
+# depth: 0.75 - 1.25 by a soft noise about 3 m across, even (1) toward the
+# window's edge, where the raised terrain takes over
+func snowDrift(field: view SnowField, x: view Float, y: view Float) ret Float {
+  let away: Float = Math.max(
+    a: Math.abs(value: x - snowFieldCenterX(field: field))
+    b: Math.abs(value: y - snowFieldCenterY(field: field))
+  )
+  let edge: Float = Math.clamp(val: (snowFieldHalf() - away) / 2.0, low: 0.0, high: 1.0)
+  let noise: Float = value2(x: x / 3.1, y: y / 3.1, seed: 4117) * 0.7 + value2(
+    x: x / 1.3
+    y: y / 1.3
+    seed: 4119
+  ) * 0.3
+  ret 1.0 + (noise - 0.5) * 0.5 * edge
+}
+
+# The snow's surface over vertex `index` of `tile` at world (x, y)
+func snowSurface(
+  field: view SnowField
+  tile: view SnowTile
+  index: view Int
+  x: view Float
+  y: view Float
+) ret Float {
+  let ground: Float = tile.ground.copyAtFallback(index: index, fallback: 0.0)
+  let land: Float = tile.land.copyAtFallback(index: index, fallback: 0.0)
+  if land < 0.02 {
+    # the water: the mesh under the ground, out of sight
+    ret ground - 0.3
+  }
+  let snow: Float = field.depth * snowDrift(field: field, x: x, y: y)
+  let pressed: Float = Math.min(
+    a: tile.trample.copyAtFallback(index: index, fallback: 0.0)
+    b: snow
+  )
+  ret ground + (snow - pressed) * Math.min(a: land * 1.5, b: 1.0)
+}
+
+# Rebuild tile `slot`'s mesh: the surface on every vertex, local to the
+# tile's center, normals from its neighbors
+func buildSnowTile(field: mod SnowField, renderer: mod DeferredRenderer, slot: view Int) {
+  let side: Int = snowTileQuads + 1
+  var meshId: Int = 0
+  if let tile: view SnowTile = field.tiles.viewAt(index: slot) {
+    meshId = tile.meshId
+    let originX: Float = tile.tileX.toFloat() * snowTileSize
+    let originY: Float = tile.tileY.toFloat() * snowTileSize
+    var heights: List(Float) = List.create(Float, cap: side * side)
+    loop var y: Int = 0, y < side, ++y {
+      loop var x: Int = 0, x < side, ++x {
+        heights.add(value: snowSurface(
+          field: field
+          tile: tile
+          index: y * side + x
+          x: originX + x.toFloat() * snowFieldSpacing
+          y: originY + y.toFloat() * snowFieldSpacing
+        ))
+      }
+    }
+    let half: Float = snowTileSize * 0.5
+    loop var y: Int = 0, y < side, ++y {
+      loop var x: Int = 0, x < side, ++x {
+        let left: Float = heights.copyAtFallback(
+          index: y * side + Math.max(a: x - 1, b: 0)
+          fallback: 0.0
+        )
+        let right: Float = heights.copyAtFallback(
+          index: y * side + Math.min(a: x + 1, b: side - 1)
+          fallback: 0.0
+        )
+        let down: Float = heights.copyAtFallback(
+          index: Math.max(a: y - 1, b: 0) * side + x
+          fallback: 0.0
+        )
+        let up: Float = heights.copyAtFallback(
+          index: Math.min(a: y + 1, b: side - 1) * side + x
+          fallback: 0.0
+        )
+        let spanX: Float = (Math.min(a: x + 1, b: side - 1) - Math.max(a: x - 1, b: 0)).toFloat() * snowFieldSpacing
+        let spanY: Float = (Math.min(a: y + 1, b: side - 1) - Math.max(a: y - 1, b: 0)).toFloat() * snowFieldSpacing
+        let slopeX: Float = (right - left) / spanX
+        let slopeY: Float = (up - down) / spanY
+        let inverseLength: Float = 1.0 / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+        let base: Int = (y * side + x) * 8
+        field.scratchVerts.set(index: base, value: x.toFloat() * snowFieldSpacing - half)
+        field.scratchVerts.set(index: base + 1, value: y.toFloat() * snowFieldSpacing - half)
+        field.scratchVerts.set(
+          index: base + 2
+          value: heights.copyAtFallback(index: y * side + x, fallback: 0.0)
+        )
+        field.scratchVerts.set(index: base + 3, value: -slopeX * inverseLength)
+        field.scratchVerts.set(index: base + 4, value: -slopeY * inverseLength)
+        field.scratchVerts.set(index: base + 5, value: inverseLength)
+        field.scratchVerts.set(index: base + 6, value: x.toFloat() / snowTileQuads.toFloat())
+        field.scratchVerts.set(index: base + 7, value: y.toFloat() / snowTileQuads.toFloat())
+      }
+    }
+  }
+  RendererDeferred.updateMeshVerts(
+    renderer: renderer
+    mesh: meshHandle(id: meshId, generation: 0)
+    verts: field.scratchVerts
+    vertCount: side * side
+  )
+  if let tile: mod SnowTile = field.tiles.modAt(index: slot) {
+    tile.dirty = false
+    tile.builtDepth = field.depth
+  }
+}
+
+# One frame: the depth where the walker is (`depth`, m), the window
+# centered on `focus`, new snow taken off the prints, the feet that came
+# down (`touches`) stamped, and the tiles that changed rebuilt (a few a
+# frame)
+func updateSnowField(
+  field: mod SnowField
+  renderer: mod DeferredRenderer
+  depth: view Float
+  focus: view Vec3
+  touches: view List(GroundTouch)
+) {
+  let before: Float = field.depth
+  field.depth = Math.max(a: depth, b: 0.0)
+  field.active = field.depth >= snowMeshFrom
+  if field.active is false {
+    ret
+  }
+  ensureSnowMeshes(field: field, renderer: renderer)
+  # new snow fills the prints back (and melting snow lowers them with it)
+  let fresh: Float = field.depth - before
+  if fresh > 0.0 and before > 0.0 {
+    loop let tile: mod SnowTile in field.tiles {
+      loop var i: Int = 0, i < tile.trample.length, ++i {
+        let trample: Float = tile.trample.copyAtFallback(index: i, fallback: 0.0)
+        if trample > 0.0 {
+          tile.trample.set(index: i, value: Math.max(a: trample - fresh, b: 0.0))
+        } else if trample < 0.0 {
+          tile.trample.set(index: i, value: Math.min(a: trample + fresh, b: 0.0))
+        }
+      }
+    }
+  }
+  let centerX: Int = snowTileOf(coordinate: focus.x)
+  let centerY: Int = snowTileOf(coordinate: focus.y)
+  if centerX is not field.centerX or centerY is not field.centerY {
+    field.centerX = centerX
+    field.centerY = centerY
+    let half: Int = snowFieldTiles / 2
+    loop var row: Int = 0, row < snowFieldTiles, ++row {
+      loop var column: Int = 0, column < snowFieldTiles, ++column {
+        let wantX: Int = centerX - half + column
+        let wantY: Int = centerY - half + row
+        let slot: Int = snowWrap(value: wantY, side: snowFieldTiles) * snowFieldTiles + snowWrap(
+          value: wantX
+          side: snowFieldTiles
+        )
+        var stale: Bool = false
+        if let tile: view SnowTile = field.tiles.viewAt(index: slot) {
+          stale = tile.tileX is not wantX or tile.tileY is not wantY
+        }
+        if stale {
+          placeSnowTile(
+            field: field
+            slot: slot
+            tileX: wantX
+            tileY: wantY
+          )
+        } else if let tile: mod SnowTile = field.tiles.modAt(index: slot) {
+          # its edge drifts follow the window
+          tile.dirty = true
+        }
+      }
+    }
+  }
+  loop let touch: view GroundTouch in touches {
+    stampSnowPrint(field: field, touch: touch)
+  }
+  var built: Int = 0
+  loop var slot: Int = 0, slot < field.tiles.length, ++slot {
+    if built >= snowRebuildsPerFrame {
+      ret
+    }
+    var wanted: Bool = false
+    if let tile: view SnowTile = field.tiles.viewAt(index: slot) {
+      wanted = tile.tileX is not 1000000000 and (tile.dirty or Math.abs(
+        value: tile.builtDepth - field.depth
+      ) >= 0.005)
+    }
+    if wanted {
+      buildSnowTile(field: field, renderer: renderer, slot: slot)
+      built = built + 1
+    }
+  }
+}
+
+# A foot came down at `touch`: a print pressed into the snow (an ellipse
+# along the walk, the foot to its side of the walk's line), a rim round it
+func stampSnowPrint(field: mod SnowField, touch: view GroundTouch) {
+  let running: Bool = touch.speed > 2.4
+  let pressed: Float = field.depth - snowUnderPrint(depth: field.depth, running: running)
+  let rim: Float = Math.min(a: 0.03, b: 0.12 * pressed)
+  let alongX: Float = touch.directionX
+  let alongY: Float = touch.directionY
+  # left and right feet a little to each side of the line walked (by the
+  # stamp count: they alternate)
+  var side: Float = 0.11
+  if field.stamped % 2 is 1 {
+    side = -0.11
+  }
+  let centerX: Float = touch.point.x - alongY * side
+  let centerY: Float = touch.point.y + alongX * side
+  let halfLength: Float = 0.17
+  let halfWidth: Float = 0.07
+  let reach: Float = halfLength * 1.6
+  let side2: Int = snowTileQuads + 1
+  field.stamped = field.stamped + 1
+  loop let tile: mod SnowTile in field.tiles {
+    let originX: Float = tile.tileX.toFloat() * snowTileSize
+    let originY: Float = tile.tileY.toFloat() * snowTileSize
+    if centerX + reach < originX or centerX - reach > originX + snowTileSize or centerY + reach < originY or centerY - reach > originY + snowTileSize {
+      continue
+    }
+    let firstX: Int = Math.max(
+      a: Math.floor(x: (centerX - reach - originX) / snowFieldSpacing).toInt()
+      b: 0
+    )
+    let lastX: Int = Math.min(
+      a: Math.ceil(x: (centerX + reach - originX) / snowFieldSpacing).toInt()
+      b: side2 - 1
+    )
+    let firstY: Int = Math.max(
+      a: Math.floor(x: (centerY - reach - originY) / snowFieldSpacing).toInt()
+      b: 0
+    )
+    let lastY: Int = Math.min(
+      a: Math.ceil(x: (centerY + reach - originY) / snowFieldSpacing).toInt()
+      b: side2 - 1
+    )
+    loop var y: Int = firstY, y <= lastY, ++y {
+      loop var x: Int = firstX, x <= lastX, ++x {
+        let dx: Float = originX + x.toFloat() * snowFieldSpacing - centerX
+        let dy: Float = originY + y.toFloat() * snowFieldSpacing - centerY
+        let along: Float = (dx * alongX + dy * alongY) / halfLength
+        let across: Float = (-dx * alongY + dy * alongX) / halfWidth
+        let r: Float = Math.sqrt(x: along * along + across * across)
+        let index: Int = y * side2 + x
+        let trample: Float = tile.trample.copyAtFallback(index: index, fallback: 0.0)
+        if r < 1.0 {
+          # the print: deepest in the middle, a soft wall
+          let shape: Float = 1.0 - 0.3 * r * r
+          tile.trample.set(index: index, value: Math.max(a: trample, b: pressed * shape))
+        } else if r < 1.6 and trample <= 0.0 {
+          let lift: Float = rim * (1.0 - (r - 1.0) / 0.6)
+          tile.trample.set(index: index, value: Math.min(a: trample, b: -lift))
+        }
+      }
+    }
+    tile.dirty = true
+  }
+}
+
+# The snow's tiles into the open pass (the static pipeline: deferred or
+# forward), in a snow material; nothing while the mesh is off
+func drawSnowField(cache: mod GbufferCache, resources: mod GpuResources, field: view SnowField) {
+  if field.active is false {
+    ret
+  }
+  loop let tile: view SnowTile in field.tiles {
+    if tile.tileX is 1000000000 or tile.builtDepth < 0.0 or tile.meshId < 1 {
+      continue
+    }
+    let model: Mat4 = mat4Translate(
+      x: (tile.tileX.toFloat() + 0.5) * snowTileSize
+      y: (tile.tileY.toFloat() + 0.5) * snowTileSize
+      z: 0.0
+    )
+    draw(
+      cache: cache
+      resources: resources
+      mesh: tile.meshId
+      model: model
+      prevModel: model
+      r: 0.84
+      g: 0.86
+      b: 0.9
+      metallic: 0.0
+      roughness: 0.82
+      emissive: 0.0
+      toon: 0
+      colorTextureLayer: -1
+    )
+  }
+}
+
+# The window the mesh covers, for the terrain's vertex shader (Gbuffer
+# setGbufferSnowMesh): its center and half side, 0 while the mesh is off
+func setSnowFieldFrame(cache: mod GbufferCache, field: view SnowField) {
+  var half: Float = 0.0
+  if field.active and field.centerX is not 1000000000 {
+    half = snowFieldHalf()
+  }
+  setGbufferSnowMesh(
+    cache: cache
+    centerX: snowFieldCenterX(field: field)
+    centerY: snowFieldCenterY(field: field)
+    half: half
+  )
+}

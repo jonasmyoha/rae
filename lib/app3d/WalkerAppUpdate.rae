@@ -20,6 +20,8 @@ open Climate
 open GeoPlace
 open app3d/SeasonImpostors
 open app3d/GroundPalette
+open app3d/SnowField
+open app3d/WalkerAutoWalk
 open water/WaterSystem
 open water/WadeSplash
 open water/WaterFft
@@ -314,6 +316,14 @@ func updateWalkerApp(app: mod WalkerApp) {
       jumpButton: uiActionFired(world: app.inputSystem.world, actionId: jumpActionId)
     )
   }
+  # a scripted walk for a headless film (RAE_WALKER_AUTOWALK, app3d/WalkerAutoWalk)
+  intent = autoWalkIntent(
+    intent: intent
+    seconds: app.frame.time
+    deltaTime: deltaTime
+    rig: app.cameraSystem.rig
+  )
+  app.frame.savedFrame = autoWalkSaveFrame(frame: app.frame.savedFrame, seconds: app.frame.time)
   # R, or the "..." menu's Reset: everything back as it started
   let resetKey: Bool = walkerResetKeyPressed() and uiPointerCaptured(input: app.inputSystem.ui) is false
   if takeModeMenuReset(menu: app.inputSystem.uiModes.modeMenu) or resetKey {
@@ -401,6 +411,25 @@ func updateWalkerApp(app: mod WalkerApp) {
     modelHeight: app.characterSystem.modelHeight
     deltaTime: deltaTime
   )
+  # Deep snow (app3d/SnowField): the mesh round the camera's focus, the feet
+  # that came down pressed into it, every character's feet on the pressed
+  # snow and its walk slowed
+  updateSnowField(
+    field: app.terrainSystem.snowField
+    renderer: app.renderSystem.renderer
+    depth: app.inputSystem.settings.snowDepth
+    focus: app.cameraSystem.camera.target
+    touches: app.walkerMarks.footprints.touches
+  )
+  setSnowFieldFrame(
+    cache: app.renderSystem.renderer.passes.gbuffer
+    field: app.terrainSystem.snowField
+  )
+  app.physicsSystem.snowSpeedLimit = snowSpeedLimit(field: app.terrainSystem.snowField)
+  let standLift: Float = snowStandLift(field: app.terrainSystem.snowField)
+  loop let controller: mod ThirdPersonController in app.world.controllers.denseData {
+    controller.standLift = standLift
+  }
   # Every character's model follows its controller whenever the physics moved
   # it (one can be pushed or fall while the player drives another), and its
   # clip plays slowed in the air

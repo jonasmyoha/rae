@@ -20,7 +20,8 @@ struct Frame {
   jitter: vec4<f32>,
   wind: vec4<f32>,
   previousWind: vec4<f32>,
-  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
+  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow); y, z, w
+  // the deep snow mesh's window (center, half side; 0 none)
   scene: vec4<f32>,
 };
 struct DrawU {
@@ -94,17 +95,24 @@ fn vs(@builtin(instance_index) ii: u32,
       @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   let d = draws[ii];
   var o: VsOut;
-  let world = d.model * vec4<f32>(p, 1.0);
+  var world = d.model * vec4<f32>(p, 1.0);
+  // The expensive part of the biome stays here: elevation/moisture/slope are
+  // ~23 octaves of noise between them, and they are smooth enough to interpolate.
+  // The fragment only classifies them, which is where the sharp shoreline is.
+  let elev = raeBiomeElevation(world.xy);
+  // Deep snow (app3d/SnowField): past the snow mesh's window the ground is
+  // raised by the depth (not under water), so it meets the mesh's edge
+  if (F.scene.w > 0.0) {
+    let away = max(abs(world.x - F.scene.y), abs(world.y - F.scene.z));
+    let onLand = smoothstep(RAE_BIOME_WATER_LEVEL, RAE_BIOME_WATER_LEVEL + 0.04, elev);
+    world.z = world.z + F.scene.x * onLand * smoothstep(F.scene.w - 0.75, F.scene.w, away);
+  }
   o.pos = F.viewProj * world;
   o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
   o.inst = ii;
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));
   o.worldXY = world.xy;
-  // The expensive part of the biome stays here: elevation/moisture/slope are
-  // ~23 octaves of noise between them, and they are smooth enough to interpolate.
-  // The fragment only classifies them, which is where the sharp shoreline is.
-  let elev = raeBiomeElevation(world.xy);
   o.bio = vec3<f32>(elev, raeBiomeMoisture(world.xy), raeBiomeSlope(world.xy));
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;

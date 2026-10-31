@@ -167,6 +167,11 @@ type GbufferCache {
   groundDryAmount: Float = 0.0
   # The scene's snow depth (m) the frame uniform carries (setGbufferSnow)
   snowDepth: Float = 0.0
+  # The deep snow's mesh window (app3d/SnowField): its center and half side
+  # (0: no mesh), where the terrain is not raised by the snow
+  snowMeshCenterX: Float = 0.0
+  snowMeshCenterY: Float = 0.0
+  snowMeshHalf: Float = 0.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
@@ -460,10 +465,11 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.previousWind.z)
   cache.frameFloats.add(value: cache.windPrevTime)
   # the scene: x the snow depth (m) the shaders lay down (setGbufferSnow)
+  # and y, z, w the snow mesh's window (center, half side; setGbufferSnowMesh)
   cache.frameFloats.add(value: cache.snowDepth)
-  cache.frameFloats.add(value: 0.0)
-  cache.frameFloats.add(value: 0.0)
-  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: cache.snowMeshCenterX)
+  cache.frameFloats.add(value: cache.snowMeshCenterY)
+  cache.frameFloats.add(value: cache.snowMeshHalf)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -484,6 +490,20 @@ func uploadFrameUniform(
 # §4; lib/snow.wgsl)
 func setGbufferSnow(cache: mod GbufferCache, depth: view Float) {
   cache.snowDepth = Math.max(a: depth, b: 0.0)
+}
+
+# Where the deep snow is a mesh (app3d/SnowField): the window's center and
+# half side (m; 0: none). Past it the terrain's vertex shader raises the
+# ground by the snow depth (terrain_splat.wgsl), so the two meet.
+func setGbufferSnowMesh(
+  cache: mod GbufferCache
+  centerX: view Float
+  centerY: view Float
+  half: view Float
+) {
+  cache.snowMeshCenterX = centerX
+  cache.snowMeshCenterY = centerY
+  cache.snowMeshHalf = half
 }
 
 # This frame's wind (lib/Wind windVector): what the swaying props bend in
