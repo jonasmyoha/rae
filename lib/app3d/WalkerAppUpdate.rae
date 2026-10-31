@@ -229,7 +229,7 @@ func updateWalkerClimate(app: mod WalkerApp) {
     leafParticles: app.walkerMarks.leafParticles
     field: app.terrainSystem.forest.field
     eye: app.cameraSystem.camera.position
-    reach: walkerLeafReach
+    reach: leafDefaultReach()
     deltaTime: leafDeltaTime
     wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)
     frame: app.walkerMarks.leafFrame
@@ -252,7 +252,7 @@ func updateWalkerClimate(app: mod WalkerApp) {
       resources: rendererResources
       step: {
         eye: app.cameraSystem.camera.position
-        reach: walkerLeafKeep
+        reach: leafDefaultReach() * walkerLeafKeepShare
         windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
         windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
         wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)

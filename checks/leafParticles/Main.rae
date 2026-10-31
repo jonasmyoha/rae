@@ -7,7 +7,12 @@
 # lies 6 s, so the first to land are gone); after 25 s (past a leaf's life)
 # the ring is empty. A leaf past the reach dies at once. A ground lift's
 # leaves rise off the ground.
+#
+# RAE_LEAF_BENCH=1 times the compute instead (docs/leaf-particles-design.md
+# §6): a full ring in a gale, the GPU time of a frame's spawn and fly
+# between two gpu/GpuTiming marks, for 16384 and 4096 leaves.
 import Math
+import Sys
 import Vec3
 open webgpu/Context
 open webgpu/WebgpuEnums
@@ -17,6 +22,9 @@ open gpu/GpuReadback
 open gpu/GpuArgs
 open gpu/GpuIds
 open LeafParticles
+open gpu/GpuTiming
+open gpu/DeviceFeatures
+open Wind
 
 const checkCapacity: Int = 4096
 
@@ -45,7 +53,15 @@ func wordAt(bytes: view List(UInt8), at: view Int) ret Int {
 
 # The ring read back (empty when the read failed)
 func readRing(resources: mod GpuResources, leafParticles: view LeafParticles) ret List(UInt8) {
-  let size: Int = checkCapacity * leafRecordBytes
+  ret readRingOf(resources: resources, leafParticles: leafParticles, capacity: checkCapacity)
+}
+
+func readRingOf(
+  resources: mod GpuResources
+  leafParticles: view LeafParticles
+  capacity: view Int
+) ret List(UInt8) {
+  let size: Int = capacity * leafRecordBytes
   var bytes: List(UInt8) = List.create(UInt8, cap: size)
   if let staging: BufferId = createBuffer(
     resources: resources
@@ -300,14 +316,213 @@ func runCheck(resources: mod GpuResources) ret Int {
   ret 0
 }
 
+# One timed frame of `leafParticles` in a gale at `clock`: the GPU
+# microseconds between a mark before its compute and one after, the three in
+# one submission so nothing else runs between them (-1: no sample)
+func benchFrame(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  timing: mod GpuTiming
+  markPipeline: view PipelineId
+  clock: view Float
+  speed: view Float
+) ret Int {
+  benchEmit(leafParticles: leafParticles, clock: clock)
+  if not prepareLeafStep(
+    leafParticles: leafParticles
+    resources: resources
+    step: benchLeafStep(clock: clock, speed: speed)
+  ) {
+    ret -1
+  }
+  beginTimingFrame(timing: timing)
+  if var recording: Recording = beginRecording(resources: resources) {
+    let markedBefore: Bool = recordTimingMark(
+      timing: timing
+      recording: recording
+      resources: resources
+      pipeline: markPipeline
+      name: "leaves"
+    )
+    let computed: Bool = recordLeafCompute(
+      leafParticles: leafParticles
+      resources: resources
+      recording: recording
+    )
+    let markedAfter: Bool = recordTimingMark(
+      timing: timing
+      recording: recording
+      resources: resources
+      pipeline: markPipeline
+      name: "end"
+    )
+    let resolved: Bool = recordTimingResolve(
+      timing: timing
+      recording: recording
+      resources: resources
+    )
+    if not (markedBefore and computed and markedAfter and resolved) {
+      ret -1
+    }
+    if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+      let unusedWaited: Bool = waitSubmission(resources: resources, id: submission)
+      retireSubmission(resources: resources, id: submission)
+    }
+  }
+  if not startTimingSample(timing: timing, resources: resources) {
+    ret -1
+  }
+  var spans: List(Int) = List.create(Int, cap: 2)
+  loop var attempt: Int = 0, attempt < 1000000, ++attempt {
+    if collectTimingMarks(timing: timing, resources: resources, out: spans) {
+      ret spans.copyAtFallback(index: 0, fallback: -1)
+    }
+  }
+  ret -1
+}
+
+# 40 crowns round the eye let leaves go (as many as the budget allows)
+func benchEmit(leafParticles: mod LeafParticles, clock: view Float) {
+  loop var crown: Int = 0, crown < 40, ++crown {
+    let unusedEmitted: Bool = leafEmit(
+      leafParticles: leafParticles
+      crown: Vec3.create(
+        x: (crown % 8).toFloat() * 8.0 - 28.0
+        y: (crown / 8).toFloat() * 10.0 - 20.0
+        z: 7.0
+      )
+      radius: 2.5
+      color: Vec3.create(x: 0.6, y: 0.4, z: 0.05)
+      size: 0.16
+      count: 60
+      seed: crown * 977 + (clock * 30.0).toInt()
+      shape: crown % 4
+      lift: false
+    )
+  }
+}
+
+# A frame at `clock` in a wind of `speed` m/s (17: a gale with storm gusts), a still eye
+func benchLeafStep(clock: view Float, speed: view Float) ret LeafStep {
+  ret LeafStep {
+    eye: Vec3.create(x: 0.0, y: -20.0, z: 2.0)
+    reach: 110.0
+    windX: speed
+    windY: 0.0
+    wind: {
+      x: speed / 5.0
+      y: 0.0
+      gustiness: 0.95
+      time: clock
+      driftX: clock * speed
+      driftY: 0.0
+    }
+    deltaTime: 0.033333335
+    groundZ: 0.0
+    flatGround: true
+  }
+}
+
+# A gale's frame, untimed
+func benchStep(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  clock: view Float
+  speed: view Float
+) {
+  benchEmit(leafParticles: leafParticles, clock: clock)
+  stepLeafParticles(
+    leafParticles: leafParticles
+    resources: resources
+    step: benchLeafStep(clock: clock, speed: speed)
+  )
+  drainSubmissions(inFlight: leafParticles.inFlight, resources: resources)
+}
+
+# The compute's GPU time for a ring of `capacity` in a wind of `speed`, filled first
+func benchCapacity(resources: mod GpuResources, capacity: view Int, speed: view Float) ret Bool {
+  var leafParticles: LeafParticles = createLeafParticles(
+    capacity: capacity
+    constants: List.create(ShaderConstant, cap: 0)
+  )
+  var clock: Float = 0.0
+  loop var frame: Int = 0, frame < 360, ++frame {
+    clock = clock + 0.033333335
+    benchStep(
+      leafParticles: leafParticles
+      resources: resources
+      clock: clock
+      speed: speed
+    )
+  }
+  var alive: Int = 0
+  let ring: List(UInt8) = readRingOf(
+    resources: resources
+    leafParticles: leafParticles
+    capacity: capacity
+  )
+  loop var i: Int = 0, i < capacity, ++i {
+    if floatAt(bytes: ring, at: i * leafRecordBytes + 12) > 0.0 {
+      alive = alive + 1
+    }
+  }
+  var timing: GpuTiming = createGpuTiming(resources: resources, maxPasses: 4)
+  if not timingAvailable(timing: timing) {
+    log("[leaf bench] GPU timestamps unavailable")
+    ret false
+  }
+  if let markPipeline: PipelineId = createComputePipelineSource(
+    resources: resources
+    wgsl: "@compute @workgroup_size(1) fn mark() \{\}"
+    entryPoint: "mark"
+    constants: noShaderConstants()
+  ) {
+    var total: Int = 0
+    var samples: Int = 0
+    var lowest: Int = 1000000
+    loop var sample: Int = 0, sample < 30, ++sample {
+      clock = clock + 0.033333335
+      let microseconds: Int = benchFrame(
+        leafParticles: leafParticles
+        resources: resources
+        timing: timing
+        markPipeline: markPipeline
+        clock: clock
+        speed: speed
+      )
+      if microseconds >= 0 {
+        total = total + microseconds
+        samples = samples + 1
+        lowest = Math.min(a: lowest, b: microseconds)
+      }
+    }
+    if samples > 0 {
+      log(
+        "[leaf bench] {capacity} leaves ({alive} alive in {speed} m/s): compute {total / samples} us a frame on average, {lowest} us at least ({samples} samples)"
+      )
+    }
+  }
+  shutdownTiming(timing: timing, resources: resources)
+  releaseLeafParticles(leafParticles: leafParticles, resources: resources)
+  ret true
+}
+
 func main() ret Int {
   unsafe {
+    # the timestamp-query feature, for RAE_LEAF_BENCH (gpu/DeviceFeatures)
+    chooseDeviceFeatures()
     if webgpuBootstrap() is not 1 {
       ret 1
     }
   }
   var issuer: IdIssuer = IdIssuer.create()
   if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 64) {
+    if Sys.getEnv(name: "RAE_LEAF_BENCH") is "1" {
+      let unusedGale: Bool = benchCapacity(resources: resources, capacity: 16384, speed: 17.0)
+      let unusedBreeze: Bool = benchCapacity(resources: resources, capacity: 16384, speed: 2.0)
+      let unusedSmall: Bool = benchCapacity(resources: resources, capacity: 4096, speed: 17.0)
+      ret 0
+    }
     ret runCheck(resources: resources)
   }
   ret 1

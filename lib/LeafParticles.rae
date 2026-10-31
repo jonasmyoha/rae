@@ -12,15 +12,21 @@
 #   leaf released this frame) and `fly` (one per ring slot: the fall in the
 #   wind, the landing on the terrain or the water, the death past the reach
 #   or the leaf's life).
-# - drawLeafParticles draws every slot as one instanced indirect draw of a
+# - drawLeafParticles draws the ring's live run (the newest releases over
+#   the release budget's window; `fly` covers the same run) as one instanced
+#   indirect draw of a
 #   midrib-folded card made in the vertex shader (lib/leaf_render.wgsl),
 #   into the open G-buffer pass, or the forward main pass in a forward
 #   frame (forward_entry.wgsl after it).
 #
 # The objects live in the renderer's own GPU manager, beside the frame
 # uniform and the forward lighting inputs the draws bind. Nothing is read
-# back; with no leaf released for a whole leaf's life nothing is dispatched
-# or drawn. app3d/LeafRelease decides which trees let leaves go.
+# back; with no leaf released over the budget's window (22 s) nothing is
+# dispatched or drawn. The releases are budgeted so the ring never
+# overwrites a live leaf (leafFrameCap). The capacity and the reach follow
+# the target (leafDefaultCapacity, leafDefaultReach: 16384 within 40 m on
+# the desktop, 4096 within 25 m on the phone and in the browser);
+# RAE_LEAVES=0 turns the leaves off. app3d/LeafRelease decides which trees let leaves go.
 import Math
 import Sys
 import Vec3
@@ -54,6 +60,32 @@ const leafUniformBytes: Int = 112
 const leafCardVertices: Int = 12
 
 const leafWorkgroupSize: Int = 64
+
+# The window (s, one bucket a second) the release budget counts over: past
+# a leaf's longest life and a second more, so every leaf released before it
+# has been flown to its death
+const leafBudgetSeconds: Int = 22
+
+# The phone and the browser keep fewer leaves, closer (§6)
+const leafSmallTarget: Bool = Target.isMobileOs or Target.isNative is false
+
+# How many leaves the ring holds on this target: 16384 on the desktop, 4096
+# on the phone and in the browser
+func leafDefaultCapacity() ret Int {
+  if leafSmallTarget {
+    ret 4096
+  }
+  ret 16384
+}
+
+# How far from the eye (m) trees let leaves go on this target: 40 on the
+# desktop, 25 on the phone and in the browser
+func leafDefaultReach() ret Float {
+  if leafSmallTarget {
+    ret 25.0
+  }
+  ret 40.0
+}
 
 # One crown letting `count` leaves go this frame
 type LeafEmit {
@@ -101,8 +133,21 @@ type LeafParticles {
   head: Int = 0
   released: Int = 0
   totalReleased: Int = 0
-  quietSeconds: Float = 1000.0
+  # the run of ring slots that may hold a live leaf this frame: its first
+  # slot and its length (every leaf released over the budget window ends
+  # there, so none outside it is alive)
+  liveBase: Int = 0
+  liveCount: Int = 0
   clock: Float = 0.0
+  # RAE_LEAVES=0 turns the leaves off (nothing released, so nothing runs)
+  enabled: Bool = true
+  # RAE_LEAF_DRAW_REPEAT=<n> draws the leaves n times, to measure the draw
+  # above the noise of a pass's timing (docs/leaf-particles-design.md §6)
+  drawRepeat: Int = 1
+  # the leaves released in each of the last leafBudgetSeconds seconds, and
+  # the second the newest bucket is
+  releaseBuckets: List(Int)
+  bucketSecond: Int = 0
   # RAE_LEAF_REPORT=1: a line a second of the releases and the frame cap
   report: Bool = false
   reportReleased: Int = 0
@@ -111,6 +156,7 @@ type LeafParticles {
   made: Bool = false
   uniformArgs: ArgWriter
   emitArgs: ArgWriter
+  drawArgs: ArgWriter
   leaves: BufferId
   uniform: BufferId
   emitBuffer: BufferId
@@ -130,6 +176,14 @@ type LeafParticles {
   inFlight: List(SubmissionId)
 }
 
+func leafEmptyBuckets() ret List(Int) {
+  var buckets: List(Int) = List.create(Int, cap: leafBudgetSeconds)
+  loop var i: Int = 0, i < leafBudgetSeconds, ++i {
+    buckets.add(value: 0)
+  }
+  ret buckets
+}
+
 # An empty system of `capacity` leaves landing on the terrain of
 # `constants` (created on the GPU at the first step)
 func createLeafParticles(
@@ -138,11 +192,15 @@ func createLeafParticles(
 ) ret LeafParticles {
   ret LeafParticles {
     capacity: Math.max(a: capacity, b: 64)
+    enabled: Sys.getEnv(name: "RAE_LEAVES") is not "0"
+    drawRepeat: Math.max(a: 1, b: Sys.getEnv(name: "RAE_LEAF_DRAW_REPEAT").toInt())
+    releaseBuckets: leafEmptyBuckets()
     report: Sys.getEnv(name: "RAE_LEAF_REPORT") is "1"
     constants: constants
     emits: List.create(LeafEmit, cap: leafEmitMax)
     uniformArgs: createArgs(uniform: true)
     emitArgs: createArgs(uniform: false)
+    drawArgs: createArgs(uniform: false)
     leaves: noBufferId()
     uniform: noBufferId()
     emitBuffer: noBufferId()
@@ -174,7 +232,7 @@ func leafEmit(
   shape: view Int
   lift: view Bool
 ) ret Bool {
-  if count <= 0 {
+  if count <= 0 or not leafParticles.enabled {
     ret true
   }
   if leafParticles.emits.length >= leafEmitMax {
@@ -195,7 +253,7 @@ func leafEmit(
 
 # The leaves in the air or lying might still be alive
 func leafParticlesActive(leafParticles: view LeafParticles) ret Bool {
-  ret leafParticles.quietSeconds <= leafLifeSeconds + 1.0
+  ret leafParticles.liveCount > 0
 }
 
 func leafComputeShader() ret Shader {
@@ -336,31 +394,55 @@ func leafEmitFlags(emit: view LeafEmit) ret Int {
   ret emit.shape bitand 3
 }
 
-# The most leaves a frame of `deltaTime` s may release into a ring of
-# `capacity`: four times what the ring holds over a leaf's life at that
-# rate (a storm gust's burst overwrites the oldest, lying leaves first),
-# and an eighth of the ring at most
-func leafFrameCap(capacity: view Int, deltaTime: view Float) ret Int {
-  ret Math.min(
-    a: capacity / 8
-    b: Math.max(a: 1, b: (capacity.toFloat() / leafLifeSeconds * deltaTime * 4.0 + 0.5).toInt())
-  )
+# The most leaves a frame may release into a ring of `capacity` when
+# `recent` were released over the last leafBudgetSeconds: what is left of
+# the ring (a leaf lives at most leafLifeSeconds, so none of those still
+# alive is overwritten: a gale fills the ring and then releases as fast as
+# leaves die), and an eighth of the ring in one frame at most
+func leafFrameCap(capacity: view Int, recent: view Int) ret Int {
+  ret Math.max(a: 0, b: Math.min(a: capacity / 8, b: capacity - recent))
 }
 
-# This frame's leaves: the listed releases spawned and every leaf moved on
-# by `step` (its air, its ground, its reach; LeafStep). Call before the
-# frame's pass.
-func stepLeafParticles(
+# The leaves released over the last leafBudgetSeconds (the one-second
+# buckets), after the clock moved to `clock`
+func leafRecentReleases(leafParticles: mod LeafParticles, clock: view Float) ret Int {
+  let second: Int = Math.floor(x: clock).toInt()
+  var steps: Int = 0
+  loop leafParticles.bucketSecond < second and steps < leafBudgetSeconds {
+    leafParticles.bucketSecond = leafParticles.bucketSecond + 1
+    leafParticles.releaseBuckets.set(
+      index: leafParticles.bucketSecond % leafBudgetSeconds
+      value: 0
+    )
+    steps = steps + 1
+  }
+  leafParticles.bucketSecond = second
+  var recent: Int = 0
+  loop let count: view Int in leafParticles.releaseBuckets {
+    recent = recent + count
+  }
+  ret recent
+}
+
+# The frame's step up to its compute: the releases counted against the
+# budget, the emit list and the uniform uploaded (`step`: its air, its
+# ground, its reach; LeafStep). True when there is compute to record
+# (recordLeafCompute).
+func prepareLeafStep(
   leafParticles: mod LeafParticles
   resources: mod GpuResources
   step: view LeafStep
-) {
+) ret Bool {
   pollSubmissions(inFlight: leafParticles.inFlight, resources: resources)
   # the releases, capped so a gale fills the ring instead of overwriting
   # leaves still in the air
   var released: Int = 0
   let deltaTime: Float = step.deltaTime
-  let frameCap: Int = leafFrameCap(capacity: leafParticles.capacity, deltaTime: deltaTime)
+  let recent: Int = leafRecentReleases(
+    leafParticles: leafParticles
+    clock: leafParticles.clock + deltaTime
+  )
+  let frameCap: Int = leafFrameCap(capacity: leafParticles.capacity, recent: recent)
   var emitCount: Int = 0
   resetArgs(writer: leafParticles.emitArgs)
   loop let emit: view LeafEmit in leafParticles.emits {
@@ -411,18 +493,23 @@ func stepLeafParticles(
   leafParticles.emits.clear()
   leafParticles.released = released
   leafParticles.totalReleased = leafParticles.totalReleased + released
+  let bucket: Int = leafParticles.bucketSecond % leafBudgetSeconds
+  leafParticles.releaseBuckets.set(
+    index: bucket
+    value: leafParticles.releaseBuckets.copyAtFallback(index: bucket, fallback: 0) + released
+  )
   leafParticles.clock = leafParticles.clock + deltaTime
-  if released > 0 {
-    leafParticles.quietSeconds = 0.0
-  } else {
-    leafParticles.quietSeconds = leafParticles.quietSeconds + deltaTime
-  }
+  # the slots that may be alive: the newest releases over the budget window,
+  # ending at this frame's last
+  let live: Int = Math.min(a: recent + released, b: leafParticles.capacity)
+  leafParticles.liveCount = live
+  leafParticles.liveBase = ((leafParticles.head + released - live) % leafParticles.capacity + leafParticles.capacity) % leafParticles.capacity
   if not leafParticlesActive(leafParticles: leafParticles) {
-    ret
+    ret false
   }
   ensureLeafGpu(leafParticles: leafParticles, resources: resources)
   if not isValidBindGroup(resources: resources, id: leafParticles.flyBind) {
-    ret
+    ret false
   }
   var flat: Float = 0.0
   if step.flatGround {
@@ -459,7 +546,7 @@ func stepLeafParticles(
     x: leafParticles.head
     y: leafParticles.capacity
     z: emitCount
-    w: released
+    w: leafParticles.liveBase
   )
   pushVec4F(
     writer: leafParticles.uniformArgs
@@ -482,6 +569,18 @@ func stepLeafParticles(
     z: step.sun.z
     w: 0.0
   )
+  # the draw: the live run's cards only
+  resetArgs(writer: leafParticles.drawArgs)
+  pushU32(writer: leafParticles.drawArgs, value: leafCardVertices)
+  pushU32(writer: leafParticles.drawArgs, value: live)
+  pushU32(writer: leafParticles.drawArgs, value: 0)
+  pushU32(writer: leafParticles.drawArgs, value: 0)
+  let unusedDrawArgs: Bool = uploadArgs(
+    writer: leafParticles.drawArgs
+    resources: resources
+    buffer: leafParticles.indirect
+    offset: 0
+  )
   let unusedUniform: Bool = uploadArgs(
     writer: leafParticles.uniformArgs
     resources: resources
@@ -496,26 +595,55 @@ func stepLeafParticles(
       offset: 0
     )
   }
-  if var recording: Recording = beginRecording(resources: resources) {
-    var recorded: Bool = true
-    if released > 0 {
-      recorded = recordBoundedCompute(
-        recording: recording
-        resources: resources
-        pipeline: leafParticles.spawnPipeline
-        bindGroup: leafParticles.spawnBind
-        bounds: leafParticles.spawnBounds
-        elementCount: released
-      )
-    }
-    if recorded and recordBoundedCompute(
+  ret true
+}
+
+# The frame's compute (prepareLeafStep's releases spawned, every slot
+# flown) recorded into `recording`; false when it could not be
+func recordLeafCompute(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  recording: mod Recording
+) ret Bool {
+  let released: Int = leafParticles.released
+  var recorded: Bool = true
+  if released > 0 {
+    recorded = recordBoundedCompute(
+      recording: recording
+      resources: resources
+      pipeline: leafParticles.spawnPipeline
+      bindGroup: leafParticles.spawnBind
+      bounds: leafParticles.spawnBounds
+      elementCount: released
+    )
+  }
+  if recorded {
+    recorded = recordBoundedCompute(
       recording: recording
       resources: resources
       pipeline: leafParticles.flyPipeline
       bindGroup: leafParticles.flyBind
       bounds: leafParticles.flyBounds
-      elementCount: leafParticles.capacity
-    ) {
+      elementCount: leafParticles.liveCount
+    )
+  }
+  leafParticles.head = (leafParticles.head + released) % leafParticles.capacity
+  ret recorded
+}
+
+# This frame's leaves: the listed releases spawned and every leaf moved on
+# by `step` (its air, its ground, its reach; LeafStep), in one submission.
+# Call before the frame's pass.
+func stepLeafParticles(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  step: view LeafStep
+) {
+  if not prepareLeafStep(leafParticles: leafParticles, resources: resources, step: step) {
+    ret
+  }
+  if var recording: Recording = beginRecording(resources: resources) {
+    if recordLeafCompute(leafParticles: leafParticles, resources: resources, recording: recording) {
       let unusedSubmission: opt SubmissionId = trackSubmission(
         inFlight: leafParticles.inFlight
         resources: resources
@@ -523,7 +651,6 @@ func stepLeafParticles(
       )
     }
   }
-  leafParticles.head = (leafParticles.head + released) % leafParticles.capacity
 }
 
 # The forward main pass's pipeline and bind (a forward frame): the card
@@ -641,13 +768,15 @@ func drawLeafParticles(
     if not gbufferFrameActive(cache: gbuffer) {
       ret
     }
-    let unusedDrawn: Bool = recordDrawIndirectInPass(
-      resources: resources
-      pass: gbuffer.pass
-      pipeline: pipeline
-      bindGroup: bind
-      indirect: bufferRef(id: leafParticles.indirect)
-    )
+    loop var repeat: Int = 0, repeat < leafParticles.drawRepeat, ++repeat {
+      let unusedDrawn: Bool = recordDrawIndirectInPass(
+        resources: resources
+        pass: gbuffer.pass
+        pipeline: pipeline
+        bindGroup: bind
+        indirect: bufferRef(id: leafParticles.indirect)
+      )
+    }
   }
 }
 

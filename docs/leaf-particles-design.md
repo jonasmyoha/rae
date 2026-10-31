@@ -301,17 +301,45 @@ later idea: blowing snow from the same system, with a white flake card).
 
 ## 6. Quality, the phone and the browser
 
-- The capacity, the reach and the release rate scale with the renderer's
-  quality: 16,384 leaves and 40 m on the desktop's high quality, 4,096 and
-  25 m on the phone and in the browser. The release rate is scaled with
-  the capacity so a gale fills the ring instead of overflowing it (the
-  ring overwrites the oldest leaves, so an overflow shows as leaves
-  vanishing in the air: the emit side caps the per-frame total to
-  `capacity / leafLifeSeconds * frameTime * 2`).
-- The work is one compute dispatch and one indirect draw. Both run on
-  WebGPU over Metal on iOS and in the browser, as the grass does.
-- Measured with the GPU timing (lib/GpuTiming) in step 8, and recorded
-  here.
+- The capacity and the reach follow the target (lib/LeafParticles
+  leafDefaultCapacity, leafDefaultReach): 16,384 leaves released within
+  40 m on the desktop, 4,096 within 25 m on the phone and in the browser
+  (Target.isMobileOs, the web). The walkers keep a leaf to 2.75 times the
+  reach (110 m on the desktop) so a gale's cloud stays in view downwind.
+  RAE_LEAVES=0 turns the leaves off.
+- **The release budget:** the leaves released in each of the last 22 one-second
+  buckets are counted; a frame may release what is left of the ring (and an
+  eighth of it at most). A leaf lives at most 20 s, so the ring never
+  overwrites a live leaf: a gale fills the ring and then releases as fast as
+  leaves die.
+- **Only the live run is flown and drawn:** the leaves released over the
+  budget's window sit in one run of the ring ending at the newest; `fly`
+  dispatches and the indirect draw instances cover that run only (its start
+  in the uniform's ring.w), so with no leaf released for 22 s nothing is
+  dispatched or drawn, and a light trickle costs a light trickle.
+- Both are one compute recording and one indirect draw, and run on WebGPU
+  over Metal on iOS and in the browser, as the grass does.
+
+**Measured (2026-10-31, Apple M1 Max, desktop settings):**
+
+- The compute (spawn and fly) between two gpu/GpuTiming marks in the same
+  submission (checks/leafParticles with RAE_LEAF_BENCH=1, 30 frames each):
+  - 16,384 leaves in a gale (17 m/s, 2,672 alive): 85 µs a frame on
+    average, 12 µs at least;
+  - 16,384 leaves in a breeze (2 m/s, 13,192 alive): 91 µs on average,
+    10 µs at least;
+  - 4,096 leaves in a gale (485 alive): 76 µs on average, 12 µs at least.
+  The averages are mostly the GPU's clock ramping between the bench's
+  separate submissions; the minimum is the work.
+- The draw: 143 in an autumn gale at a fixed render scale (RAE_DRS=off,
+  RAE_RENDER_SCALE=0.75; about 100 leaves released a second, a live run of
+  about 2,200 slots), with RAE_LEAF_DRAW_REPEAT drawing the leaves 1 or 101
+  times: the G-buffer pass took 3.77 and 4.01 ms with one draw and 3.85 and
+  3.68 ms with 101, inside its run-to-run noise of about ±0.2 ms, so one
+  draw is well under 0.01 ms. Before the live run (every slot drawn), the
+  G-buffer pass with leaves on was 0.4 - 0.7 ms slower than with
+  RAE_LEAVES=0 in single runs, also inside that noise.
+- The phone is not measured (no device at hand).
 
 ## 7. Who owns what (ECS, no globals)
 
@@ -415,6 +443,6 @@ later idea: blowing snow from the same system, with a white flake card).
    releases a second; RAE_WALKER_AUTOWALK_STILL=1 films a still camera.
    looks-development rendering/epicGust (a video). Original plan: storm-gust bursts, the vortices that travel
    with the front, the ground lifts. Looks-development video.
-8. **Quality and cost** (§6): capacity and reach per quality, the release
+8. **Quality and cost** (§6), done 2026-10-31 (the numbers are in §6): capacity and reach per quality, the release
    cap, the GPU timing on the desktop (and the phone if one is at hand),
    the numbers written into §6.

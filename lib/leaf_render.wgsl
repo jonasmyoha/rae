@@ -1,5 +1,6 @@
 // The leaves in the air drawn (lib/LeafParticles.rae, docs/leaf-particles-
-// design.md §4.4): one instance per ring slot (leaf_particles.wgsl), each a
+// design.md §4.4): one instance per slot of the ring's live run
+// (leaf_particles.wgsl), each a
 // card folded along its midrib (two quads: 12 vertices, no mesh), tumbling
 // as it falls, lying nearly flat once it lands and bobbing on the water.
 // An empty slot collapses outside the clip volume. The G-buffer entry `fs`
@@ -104,9 +105,11 @@ fn leafPose(local: vec3<f32>, seed: u32, landed: bool, tumble: f32) -> vec3<f32>
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
-  let leaf = leafRecords[ii];
+  // the live run of the ring, from its first slot
+  let slot = (D.ring.w + ii) % D.ring.y;
+  let leaf = leafRecords[slot];
   var o: VsOut;
-  o.inst = ii;
+  o.inst = slot;
   o.nrm = vec3<f32>(0.0, 0.0, 1.0);
   o.color = vec3<f32>(0.0);
   o.leafUv = vec2<f32>(0.0);
