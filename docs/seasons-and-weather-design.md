@@ -406,6 +406,24 @@ that adds it.
 9. **Deep snow mesh and footprints:** the fine snow mesh near the walker,
    the raised far terrain, the trample map stamped by every foot, feet
    standing in the snow (§4.1).
+   Done (2026-10-31): app3d/SnowField. From 5 cm the snow is 5 x 5 tiles
+   of 9 m (45 m) round the camera's focus, a vertex every 12.5 cm, laid on
+   the terrain mesh's own triangles of its 0.75 m lattice, raised by the
+   depth times a soft drift (0.75 - 1.25, even at the window's edge), none
+   on water; drawn through the static pipeline (deferred and forward), the
+   meshes uploaded at the first deep snow. Past the window the terrain's
+   vertex shader raises the ground by the depth (the frame uniform's
+   scene.yzw: the window's center and half side). The trample map is per
+   tile vertex (not a separate texture): every touch of app3d/Footprints
+   (the walker's and the crowd's) presses an ellipse to a quarter of the
+   depth (a run to a sixth, never deeper than 45 cm) with a 3 cm rim; the
+   depth's rise is taken off every print. Characters are drawn standing on
+   the pressed snow (ThirdPersonController.standLift; the physics stays on
+   the terrain) and slowed (WalkerPhysics.snowSpeedLimit: 4.6 m/s at 5 cm
+   to 2.6 at the knee). The renderer's resource table grew from 1024 to
+   4096 slots: 143 was at the edge, and a full table draws a black frame
+   with no error. RAE_WALKER_AUTOWALK / RAE_WALKER_FRAMES film a walk
+   (app3d/WalkerAutoWalk). Case 1267.
 10. **Ice:** the freeze per lake and shore, the ice look, walkable ice
     (§4.3).
 11. **Weather model:** cloud cover, precipitation, humidity and fronts;

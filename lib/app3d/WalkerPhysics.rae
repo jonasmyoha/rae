@@ -82,6 +82,9 @@ type PhysicsCube {
 type WalkerPhysics {
   # Frame time not yet stepped
   accumulator: Float
+  # The fastest a character moves in this frame's snow (m/s;
+  # app3d/SnowField snowSpeedLimit), with the bushes' limits
+  snowSpeedLimit: Float = 1000.0
   # The terrain the ground and the wading follow: the app's biome and the
   # height its ground sits at
   biome: BiomeConfig
@@ -583,10 +586,13 @@ func moveCharacters(
       this: physicsSystem.moverLimits
       entityId: entityId
       data: MoverSpeedLimit {
-        limit: bushSpeedLimitAmong(
-          bushes: bushes
-          x: body.mover.transform.p.x
-          y: body.mover.transform.p.y
+        limit: Math.min(
+          a: bushSpeedLimitAmong(
+            bushes: bushes
+            x: body.mover.transform.p.x
+            y: body.mover.transform.p.y
+          )
+          b: physicsSystem.snowSpeedLimit
         )
       }
     )

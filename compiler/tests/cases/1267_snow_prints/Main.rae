@@ -1,0 +1,75 @@
+# app3d/SnowField's rules without a renderer
+# (docs/seasons-and-weather-design.md §4.1): the snow left under a print
+# (a quarter packed, a run deeper, never past the knee), the snow on the
+# terrain mesh's own two triangles of a quad (the split Mesh3d makePlane
+# makes: a-b-c and c-b-d, so the snow lies exactly on the drawn ground),
+# and the window's size.
+open app3d/SnowField
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func centimeters(depth: view Float) ret Int {
+  ret (depth * 100.0 + 0.5).toInt()
+}
+
+func main() ret Int {
+  let walk: Float = snowUnderPrint(depth: 0.3, running: false)
+  let run: Float = snowUnderPrint(depth: 0.3, running: true)
+  let deep: Float = snowUnderPrint(depth: 1.2, running: false)
+  log(
+    "under a print in 30 cm: walking {centimeters(depth: walk)} cm, running {centimeters(depth: run)} cm; in 120 cm: {centimeters(
+      depth: deep
+    )} cm"
+  )
+  check(label: "a walk packs 30 cm to a quarter", ok: centimeters(depth: walk) is 8)
+  check(label: "a run sinks deeper", ok: run < walk)
+  check(label: "never deeper than the knee", ok: centimeters(depth: 1.2 - deep) is 45)
+  # a quad with corners 0 (a), 1 (b), 2 (c), 4 (d): on the a-b-c triangle
+  # and on the c-b-d one
+  let onFirst: Float = snowOnQuad(
+    a: 0.0
+    b: 1.0
+    c: 2.0
+    d: 4.0
+    u: 0.25
+    v: 0.25
+  )
+  let onSecond: Float = snowOnQuad(
+    a: 0.0
+    b: 1.0
+    c: 2.0
+    d: 4.0
+    u: 0.75
+    v: 0.75
+  )
+  let onDiagonal: Float = snowOnQuad(
+    a: 0.0
+    b: 1.0
+    c: 2.0
+    d: 4.0
+    u: 0.5
+    v: 0.5
+  )
+  log("on the quad: {onFirst}, {onSecond}, on the diagonal {onDiagonal}")
+  check(label: "the first triangle is a + u (b - a) + v (c - a)", ok: onFirst is 0.75)
+  check(label: "the second is d's", ok: onSecond is 2.75)
+  check(label: "they meet on the b-c diagonal", ok: onDiagonal is 1.5)
+  log(
+    "the window: {snowFieldTiles} x {snowFieldTiles} tiles of {snowTileSize} m, a vertex every {snowFieldSpacing} m"
+  )
+  check(
+    label: "about 40 m round the walker"
+    ok: snowFieldHalf() * 2.0 >= 40.0 and snowFieldHalf() * 2.0 <= 46.0
+  )
+  check(
+    label: "the snow's tile spans whole terrain quads"
+    ok: snowTileSize is snowTerrainSpacing * snowTerrainQuads.toFloat()
+  )
+  ret 0
+}

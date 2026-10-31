@@ -159,8 +159,12 @@ type DeferredRenderer {
 # app: a venue of ~60 static meshes plus a character in ~10 parts, uploaded once
 # per color variant, already passes 256. A full table makes createBuffer return
 # none, and the frame then draws nothing with no error, so this is sized for
-# hundreds of meshes; a slot is a few Ints per table.
-const deferredManagerCapacity: Int = 1024
+# hundreds of meshes; a slot is a few Ints per table. 1024 was reached by 143
+# (16 tree kinds at two levels, the terrain's and the far ground's tiles,
+# rocks, flowers, the meadow's forms, the bakes' scratch): the deep snow's
+# 25 tiles (app3d/SnowField) made the frame black and the canopy's bake
+# fail, so it is 4096.
+const deferredManagerCapacity: Int = 4096
 
 func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   if let existing: view GpuResources = renderer.gpuResources {

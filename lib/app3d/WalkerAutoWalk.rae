@@ -1,0 +1,64 @@
+# app3d/WalkerAutoWalk — a scripted walk for a headless film of the walker
+# (the deep snow's prints, docs/seasons-and-weather-design.md §4.1): with
+# RAE_WALKER_AUTOWALK=<seconds> the controlled character walks forward in
+# Character control for that long, ahead and to the right (into the open
+# ground of 143's start) on a gentle curve, walking the first half and
+# running the second, then stands while the camera swings round over
+# autoWalkLookBack seconds to look back along the trail; with RAE_WALKER_FRAMES=<folder> every
+# frame is
+# saved there as frame<N>.bmp (with RAE_FIXED_DT a frame is a fixed step).
+# Nothing changes in normal play.
+import Math
+import Sys
+open app3d/CameraRig
+open app3d/CharacterController
+
+# How long the camera takes to swing round after the walk (s)
+const autoWalkLookBack: Float = 2.5
+
+# The scripted walk's intent at `seconds` into the run (`deltaTime` since the
+# last frame), or `intent` as it came (no script, or the script is over);
+# the camera in Character control while it walks, swinging round after
+func autoWalkIntent(
+  intent: view InputIntent
+  seconds: view Float
+  deltaTime: view Float
+  rig: mod CameraRig
+) ret InputIntent {
+  let lengthText: String = Sys.getEnv(name: "RAE_WALKER_AUTOWALK")
+  if lengthText.length() is 0 {
+    ret intent
+  }
+  let length: Float = lengthText.toFloat()
+  if rig.characterModeEnabled is false or seconds > length + autoWalkLookBack {
+    ret intent
+  }
+  rig.mode = CameraRigMode.character
+  if seconds > length {
+    rig.yaw = rig.yaw + 3.14159265 * deltaTime / autoWalkLookBack
+    ret intent
+  }
+  ret InputIntent {
+    moveX: 0.7 + 0.25 * Math.sin(x: seconds * 0.6)
+    moveY: 0.7
+    walking: seconds < length * 0.5
+    jump: false
+    actions: 0
+  }
+}
+
+# The frame's picture saved as frame<`frame`>.bmp in RAE_WALKER_FRAMES while
+# the script runs (`seconds` into it; none set: nothing); the next frame's
+# number
+func autoWalkSaveFrame(frame: view Int, seconds: view Float) ret Int {
+  let folder: String = Sys.getEnv(name: "RAE_WALKER_FRAMES")
+  if folder.length() is 0 {
+    ret frame
+  }
+  if seconds > Sys.getEnv(name: "RAE_WALKER_AUTOWALK").toFloat() + autoWalkLookBack + 0.5 {
+    Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: "")
+    ret frame
+  }
+  Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: "{folder}/frame{frame}.bmp")
+  ret frame + 1
+}

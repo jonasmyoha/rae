@@ -51,6 +51,7 @@ open app3d/PropField
 open app3d/PropFieldFrame
 open app3d/TreeForest
 open app3d/GroundPalette
+open app3d/SnowField
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 open app3d/WalkerFlowers
@@ -168,6 +169,9 @@ type WalkerTerrain {
   # This frame's grass color (app3d/GroundPalette): the terrain, the GPU
   # grass and the meadow all read it, so the roots match the ground
   groundPalette: GroundPalette = summerGroundPalette()
+  # Deep snow as a mesh round the walker, footprints pressed into it
+  # (app3d/SnowField)
+  snowField: SnowField
   # One instancer per rock shape (TerrainProp.variant)
   rockParts: List(PropInstancer)
   # Oxeye daisies: one shared patch mesh in three instanced material parts.
@@ -725,6 +729,7 @@ func drawTerrainGround(
       time: time
     )
   }
+  drawSnowField(cache: cache, resources: resources, field: terrainSystem.snowField)
 }
 
 # Rocks, bushes, flowers and forest use one shadow draw per material batch.
@@ -886,6 +891,7 @@ func createWalkerTerrain(
     centerCellX: 1000000000
     centerCellY: 1000000000
     toon: true
+    snowField: own createSnowField(groundZ: groundZ, biome: biome)
     ground: own createTerrainTiles(
       renderer: renderer
       gridSide: gridSide
