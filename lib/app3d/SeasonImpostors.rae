@@ -1,0 +1,105 @@
+# app3d/SeasonImpostors — the far trees through the year
+# (docs/seasons-and-weather-design.md §3.2, §9.6): a forest's impostor atlas
+# and its far canopy are baked again, in place, when the forest's season
+# moves, so the field's billboards, the far billboards and the far canopy
+# show the leaves the near trees have (app3d/PropSeason): each kind's tint
+# and leaf loss at the field's slow temperature, the bare trees their wood.
+#
+# The design's other choice, three states (summer, autumn, bare) baked at
+# load and blended per tree in the sprite shaders, was measured first and
+# dropped: in 143 the tree atlas is 170 MB (16 kinds, one 1024 x 1024 layer
+# each, both arrays and their mips) and the canopy 307 MB (13 layers of
+# 3072 x 768), so three states would cost about 950 MB more (the phone's
+# smaller set: 42 and 43 MB). Baking again costs no memory; a far tree has
+# its kind's state, not its own few days of shift (the near ones have that).
+#
+# A bake runs when the slow temperature has moved by seasonRebakeStep or
+# its direction turned, at most every seasonRebakeFrames frames (dragging
+# the tree lab's day slider), and waits for the GPU: the tree atlas
+# and the canopy, 100 - 160 ms together in 143 (60 + 40 ms with the
+# phone's settings). The phone bakes its one smaller set the same way.
+import Math
+import Vec3
+open RendererDeferred
+open gpu/GpuResources
+open ImpostorAtlas
+open ImpostorBake
+open GbufferSprite
+open app3d/PropField
+open app3d/PropSeason
+open app3d/FarCanopy
+open app3d/TreeForest
+open treeSets/TreeSet
+
+# How far (°C) the slow temperature moves before the far trees are baked
+# again, and the fewest frames between two bakes
+const seasonRebakeStep: Float = 0.25
+
+const seasonRebakeFrames: Int = 20
+
+# Each frame after the field's season is set (PropField.seasonsOn,
+# seasonSlow, seasonWarming): bake the forest's far pictures again when the
+# season moved. True when it baked.
+func updateSeasonImpostors(forest: mod TreeForest, renderer: mod DeferredRenderer) ret Bool {
+  if forest.seasonBakeWait > 0 {
+    forest.seasonBakeWait = forest.seasonBakeWait - 1
+  }
+  if forest.field.seasonsOn is false or forest.sprites.impostors.bakedSubjects.length is 0 {
+    ret false
+  }
+  let moved: Bool = Math.abs(value: forest.field.seasonSlow - forest.seasonBakedSlow) >= seasonRebakeStep or forest.field.seasonWarming is not forest.seasonBakedWarming
+  if moved is false or forest.seasonBakeWait > 0 {
+    ret false
+  }
+  forest.seasonBakedSlow = forest.field.seasonSlow
+  forest.seasonBakedWarming = forest.field.seasonWarming
+  forest.seasonBakeWait = seasonRebakeFrames
+  setSeasonImpostorSubjects(subjects: forest.sprites.impostors.bakedSubjects, field: forest.field)
+  let started: Int = nowMs()
+  var baked: Bool = false
+  var canopyMs: Int = -1
+  if let resources: mod GpuResources = renderer.gpuResources {
+    baked = rebakeImpostorAtlas(
+      atlas: forest.sprites.impostors
+      resources: resources
+      meshes: renderer.passes.gbuffer.meshes
+      cutoff: spriteCutoff
+      images: renderer.passes.gbuffer.surfaceImages
+    )
+    if baked {
+      canopyMs = rebakeFarCanopy(
+        canopy: forest.canopy
+        resources: resources
+        treeAtlas: forest.sprites.impostors.binding
+      )
+    }
+  }
+  log(
+    "[seasonImpostors] baked at {forest.seasonBakedSlow} °C (warming {forest.seasonBakedWarming}): {forest.sprites.impostors.bakedSubjects.length} kinds in {nowMs() - started} ms, the canopy {canopyMs} ms; ok={baked}"
+  )
+  ret baked
+}
+
+# Each kind's subject (its picture layer) gets its leaves at the field's
+# season: its tint and loss (no tree's own shift: the far ones share it)
+func setSeasonImpostorSubjects(subjects: mod List(ImpostorSubject), field: view PropField) {
+  loop var kind: Int = 0, kind < field.kinds.length, ++kind {
+    let layer: Int = field.spriteLayers.copyAtFallback(index: kind, fallback: -1)
+    if let held: view PropKind = field.kinds.viewAt(index: kind) {
+      if held.season.on and layer >= 0 {
+        if let subject: mod ImpostorSubject = subjects.modAt(index: layer) {
+          subject.leafTint = propSeasonTint(
+            season: held.season
+            slow: field.seasonSlow
+            warming: field.seasonWarming
+          )
+          subject.leafLoss = propSeasonLoss(
+            season: held.season
+            slow: field.seasonSlow
+            warming: field.seasonWarming
+          )
+        }
+      }
+    }
+  }
+}

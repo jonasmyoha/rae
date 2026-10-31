@@ -140,6 +140,7 @@ func impostorBakePipelineSpec(vertexStride: view Int) ret RenderPipelineSpec {
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   if vertexStride is 64 {
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
     attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
   }
   var colorFormats: List(Int32) = List.create(Int32, cap: 2)
@@ -207,6 +208,54 @@ func bakeTexturedImpostorAtlas(
     settings: settings
     subjects: subjects.length
   )
+  var baked: Bool = recordImpostorBake(
+    resources: resources
+    meshes: meshes
+    subjects: subjects
+    atlas: atlas
+    cutoff: cutoff
+    images: images
+  )
+  if baked {
+    var frames: ArgWriter = createArgs(uniform: false)
+    loop var subject: Int = 0, subject < subjects.length, ++subject {
+      if let held: view ImpostorSubject = subjects.viewAt(index: subject) {
+        pushImpostorFrame(
+          writer: frames
+          settings: settings
+          subject: subject
+          center: held.center
+          radius: held.radius
+          height: held.height
+          halfBox: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+        )
+      }
+    }
+    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
+    atlas.bakedSubjects = subjects
+    log(
+      "[impostor] {subjects.length} props, {atlas.layers} layers of {impostorAtlasSize(
+        settings: settings
+      )} px ({impostorAtlasBytes(atlas: atlas) / 1048576} MB)"
+    )
+  }
+  if not baked {
+    log("[impostor] the bake of {subjects.length} props failed")
+    retireImpostorAtlas(atlas: atlas, resources: resources)
+  }
+  ret atlas
+}
+
+# Draw `subjects` into the atlas's textures (every view, then the mips) and
+# wait for the GPU. True when it ran.
+func recordImpostorBake(
+  resources: mod GpuResources
+  meshes: view MeshStore
+  subjects: view List(ImpostorSubject)
+  atlas: view ImpostorAtlas
+  cutoff: view Float
+  images: view SurfaceImages
+) ret Bool {
   var scratch: GpuScratch = createGpuScratch()
   var baked: Bool = false
   if isValidTexture(resources: resources, id: atlas.albedoTexture) and isValidTexture(
@@ -237,28 +286,30 @@ func bakeTexturedImpostorAtlas(
     }
   }
   retireGpuScratch(scratch: scratch, resources: resources)
-  if baked {
-    var frames: ArgWriter = createArgs(uniform: false)
-    loop var subject: Int = 0, subject < subjects.length, ++subject {
-      if let held: view ImpostorSubject = subjects.viewAt(index: subject) {
-        pushImpostorFrame(
-          writer: frames
-          settings: settings
-          subject: subject
-          center: held.center
-          radius: held.radius
-          height: held.height
-          halfBox: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-        )
-      }
-    }
-    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
+  ret baked
+}
+
+# Bake the atlas again in place from its own subjects (their seasons
+# changed: ImpostorSubject.leafTint, leafLoss), into the same textures, so
+# every bind over it stays valid. Waits for the GPU. True when it ran.
+func rebakeImpostorAtlas(
+  atlas: view ImpostorAtlas
+  resources: mod GpuResources
+  meshes: view MeshStore
+  cutoff: view Float
+  images: view SurfaceImages
+) ret Bool {
+  if atlas.bakedSubjects.length < 1 {
+    ret false
   }
-  if not baked {
-    log("[impostor] the bake of {subjects.length} props failed")
-    retireImpostorAtlas(atlas: atlas, resources: resources)
-  }
-  ret atlas
+  ret recordImpostorBake(
+    resources: resources
+    meshes: meshes
+    subjects: atlas.bakedSubjects
+    atlas: atlas
+    cutoff: cutoff
+    images: images
+  )
 }
 
 # The atlas's two texture arrays for `subjects` pages with `settings`
@@ -383,10 +434,15 @@ func recordImpostorViews(
         w: subject.radius
       )
       loop var part: Int = 0, part < subject.meshes.length, ++part {
-        let albedo: Vec3 = subject.albedos.copyAtFallback(
+        var albedo: Vec3 = subject.albedos.copyAtFallback(
           index: part
           fallback: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
         )
+        var leafLoss: Float = 0.0
+        if part >= subject.leafPartsFrom {
+          albedo = Vec3.vmul(a: albedo, b: subject.leafTint)
+          leafLoss = subject.leafLoss
+        }
         pushVec4F(
           writer: parts
           x: albedo.x
@@ -403,7 +459,7 @@ func recordImpostorViews(
           writer: parts
           x: -(imageLayer + 1).toFloat()
           y: cardNormalsToEye
-          z: 0.0
+          z: leafLoss
           w: 0.0
         )
       }
@@ -589,7 +645,9 @@ func recordImpostorViews(
             partPipeline = foliagePipeline
             partBindGroup = foliageBindGroup
           }
-          if indexCount > 0 and vertexBuffer is not webgpuNull() {
+          # a leaf part of a bare tree: none of its cards
+          let bare: Bool = part >= subject.leafPartsFrom and subject.leafLoss >= 1.0
+          if indexCount > 0 and vertexBuffer is not webgpuNull() and not bare {
             let drawn: Bool = recordDrawIndexedInPass(
               resources: resources
               pass: pass

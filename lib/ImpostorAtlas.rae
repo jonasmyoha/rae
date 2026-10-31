@@ -106,6 +106,14 @@ type ImpostorSubject {
   # normal is its leaf mass's, and on a mass's far side it lit the impostor
   # from behind (grey patches of sky light). Off: the normals as they are.
   cardNormalsToEye: Bool = false
+  # Its leaves' season (docs/seasons-and-weather-design.md §3.2): the parts
+  # from `leafPartsFrom` on are leaves (the ones before them its wood),
+  # baked in their albedo times `leafTint` and with `leafLoss` (0 .. 1) of
+  # their cards dropped (lib/wind.wgsl leafCardKept); at 1 not at all, so
+  # the picture is the bare tree
+  leafPartsFrom: Int = 1
+  leafTint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  leafLoss: Float = 0.0
   center: Vec3
   radius: Float
   height: Float
@@ -115,6 +123,9 @@ type ImpostorAtlas {
   settings: ImpostorSettings
   # The subjects, and the layers their pages fill
   subjects: Int = 0
+  # What a prop atlas was baked from, kept to bake it again in place when
+  # the subjects' seasons move (rebakeImpostorAtlas; empty for a canopy)
+  bakedSubjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: 0)
   layers: Int
   albedoTexture: TextureId
   normalDepthTexture: TextureId
@@ -226,6 +237,19 @@ func pushImpostorBox(writer: mod ArgWriter, halfBox: view Vec3, radius: view Flo
 }
 
 # Retire the atlas's GPU objects (they go once no frame still reads them)
+# The atlas's GPU memory (bytes): both arrays, every layer and level
+func impostorAtlasBytes(atlas: view ImpostorAtlas) ret Int {
+  var level: Int = impostorAtlasSize(settings: atlas.settings) * impostorAtlasHeight(
+    settings: atlas.settings
+  ) * 4
+  var bytes: Int = 0
+  loop var mip: Int = 0, mip < atlas.settings.mips, ++mip {
+    bytes = bytes + level
+    level = level / 4
+  }
+  ret bytes * atlas.layers * 2
+}
+
 func retireImpostorAtlas(atlas: mod ImpostorAtlas, resources: mod GpuResources) {
   let albedoView: Bool = retireTextureView(resources: resources, id: atlas.binding.albedo)
   let normalDepthView: Bool = retireTextureView(resources: resources, id: atlas.binding.normalDepth)

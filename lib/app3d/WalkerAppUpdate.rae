@@ -18,6 +18,7 @@ open water/Water
 open water/IslandSea
 open Climate
 open GeoPlace
+open app3d/SeasonImpostors
 open water/WaterSystem
 open water/WadeSplash
 open water/WaterFft
@@ -207,6 +208,11 @@ func updateWalkerApp(app: mod WalkerApp) {
   # the local sim; the matching publish runs after it, below.
   netApplyRemote(netSeam: app.netSeam, netPlayers: app.world.netPlayers)
   updateWalkerClimate(app: app)
+  # the far trees follow the season (baked again when it moved)
+  let unusedBaked: Bool = updateSeasonImpostors(
+    forest: app.terrainSystem.forest
+    renderer: app.renderSystem.renderer
+  )
   let uiTick: UiTick = uiUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
