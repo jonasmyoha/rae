@@ -1,0 +1,94 @@
+# lib/Climate's snow (docs/seasons-and-weather-design.md §4): the seeded
+# depth over Helsinki's year (snow from about New Year to March, none from
+# April to November), none at the equator or in Athens, the far north under
+# snow longer and deeper, the south's snow in July; and the Climate grid,
+# stepped hour by hour through a Helsinki March, melting its seeded snow
+# away by April, with the snow read at a point between its cells.
+open Climate
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func centimeters(depth: view Float) ret Int {
+  ret (depth * 100.0 + 0.5).toInt()
+}
+
+func snowOn(latitude: view Float, dayOfYear: view Int) ret Float {
+  ret climateSnowSeed(
+    latitude: latitude
+    year: 2026
+    dayOfYear: dayOfYear
+    localHour: 12.0
+  )
+}
+
+func main() ret Int {
+  let february: Float = snowOn(latitude: 60.17, dayOfYear: 45)
+  let july: Float = snowOn(latitude: 60.17, dayOfYear: 196)
+  let october: Float = snowOn(latitude: 60.17, dayOfYear: 290)
+  let april: Float = snowOn(latitude: 60.17, dayOfYear: 110)
+  log(
+    "Helsinki: February {centimeters(depth: february)} cm, April {centimeters(depth: april)} cm, July {centimeters(
+      depth: july
+    )} cm, October {centimeters(depth: october)} cm"
+  )
+  check(label: "Helsinki has snow in February", ok: february > 0.15 and february < 0.8)
+  check(
+    label: "and none in April, July or October"
+    ok: april is 0.0 and july is 0.0 and october is 0.0
+  )
+  check(
+    label: "none at the equator or in Athens in January"
+    ok: snowOn(latitude: 0.0, dayOfYear: 20) is 0.0 and snowOn(latitude: 37.9, dayOfYear: 20) is 0.0
+  )
+  let northApril: Float = snowOn(latitude: 68.0, dayOfYear: 100)
+  log("68 N in April: {centimeters(depth: northApril)} cm")
+  check(label: "68 N still has snow in April", ok: northApril > 0.3)
+  let southJuly: Float = snowOn(latitude: -65.0, dayOfYear: 200)
+  let southJanuary: Float = snowOn(latitude: -65.0, dayOfYear: 20)
+  log(
+    "65 S: July {centimeters(depth: southJuly)} cm, January {centimeters(depth: southJanuary)} cm"
+  )
+  check(label: "65 S has its snow in July", ok: southJuly > 0.1 and southJanuary < southJuly)
+  # the grid, seeded on 1 March and stepped an hour at a time for 45 days
+  var climate: Climate = createClimate(reach: 100000.0)
+  let unusedSeeded: Bool = stepClimate(
+    climate: climate
+    sceneLatitude: 60.17
+    sceneLongitude: 24.94
+    year: 2026
+    dayOfYear: 60
+    hour: 0.0
+  )
+  let seeded: Float = climateSnowAt(climate: climate, east: 0.0, north: 0.0)
+  var lowest: Float = seeded
+  loop var hour: Int = 1, hour <= 45 * 24, ++hour {
+    let unusedStepped: Bool = stepClimate(
+      climate: climate
+      sceneLatitude: 60.17
+      sceneLongitude: 24.94
+      year: 2026
+      dayOfYear: 60 + hour / 24
+      hour: (hour % 24).toFloat()
+    )
+    let now: Float = climateSnowAt(climate: climate, east: 0.0, north: 0.0)
+    if now < lowest {
+      lowest = now
+    }
+  }
+  let mid: Float = climateSnowAt(climate: climate, east: 25000.0, north: 25000.0)
+  log(
+    "the grid: 1 March {centimeters(depth: seeded)} cm, mid April {centimeters(depth: lowest)} cm"
+  )
+  check(
+    label: "the grid's seeded March snow melts by mid April"
+    ok: seeded > 0.1 and lowest < 0.01
+  )
+  check(label: "between cells it reads a depth", ok: mid >= 0.0 and mid < 0.01)
+  ret 0
+}

@@ -1,7 +1,11 @@
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
-  jitter: vec4<f32>,    // xy the TAA jitter (z, w: the trees' wind, unused here)
+  jitter: vec4<f32>,    // xy the TAA jitter (z: the trees' wind, unused here)
+  wind: vec4<f32>,
+  previousWind: vec4<f32>,
+  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
+  scene: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -124,6 +128,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   var o: VsOut;
   o.height = lp.z;
   o.uv = uv;
+  // the blade pushed down under the snow (lib/snow.wgsl): its color keeps
+  // its own root-to-tip gradient, its height is what still shows
+  lp.z = snowSunkGrass(lp.z, F.scene.x);
   let base = vec2<f32>(d.model[3].x, d.model[3].y);
   // Grass reads the same base WindVector as foliage. Broad fronts travel in
   // that direction, while a small per-blade phase moves only the tip.

@@ -15,7 +15,7 @@ open app3d/SettingsDialog
 # No slow temperature from an app: the panel computes it
 const settingsNoSlowTemperature: Float = -1000.0
 
-# "Temperature 14.2 °C, summer"
+# "Temperature 14.2 °C, summer" ("..., deep winter, snow 31 cm" with snow)
 func settingsClimateText(settingsState: view SettingsState) ret String {
   let place: GeoPlace = geoPlaceAt(
     sceneLatitude: settingsState.latitude
@@ -50,6 +50,11 @@ func settingsClimateText(settingsState: view SettingsState) ret String {
       dayOfYear: settingsState.timeOfDay.dayOfYear
     )
   )
+  # the snow lying there, from a centimeter (SettingsState.snowDepth)
+  let snowCentimeters: Int = (settingsState.snowDepth * 100.0 + 0.5).toInt()
+  if snowCentimeters >= 1 {
+    ret "Temperature {settingsTenths(value: air)} °C, {season}, snow {snowCentimeters} cm"
+  }
   ret "Temperature {settingsTenths(value: air)} °C, {season}"
 }
 

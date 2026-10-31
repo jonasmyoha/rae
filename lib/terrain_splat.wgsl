@@ -18,6 +18,10 @@ struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
   jitter: vec4<f32>,
+  wind: vec4<f32>,
+  previousWind: vec4<f32>,
+  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
+  scene: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -167,6 +171,13 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   // under the same gate, below water so a shore crossing still reads wet.
   let roadT = RAE_TERRAIN_PATH * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_ROAD).rgb / RAE_TERRAIN_ROAD_TEX_MEAN);
   albedo = mix(albedo, roadT, clamp(texBlend * raeBiomePath(in.worldXY) * (1.0 - b.wWater), 0.0, 1.0));
+  // Snow (lib/snow.wgsl): by the scene's depth, thinner on steep ground and
+  // patchy at its edge; none on water
+  if (F.scene.x > 0.0) {
+    let snowNoise = clamp(0.5 + raeNoiseFbm2(in.worldXY * 0.18, 2u, 2.0, 0.5, 4111u), 0.0, 1.0);
+    let snow = snowGroundCover(F.scene.x, in.bio.z, snowNoise) * (1.0 - b.wWater);
+    albedo = mix(albedo, snowAlbedo, snow);
+  }
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, max(d.params.z, RAE_TERRAIN_TOON));
   o.gbb = vec4<f32>(albedo, rough);

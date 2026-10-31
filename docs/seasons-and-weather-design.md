@@ -387,6 +387,22 @@ that adds it.
 8. **Snow cover:** the snow depth model; terrain snow by slope and noise;
    grass and tufts under snow; snow on trees (bark, branches, the spruce's
    tiers) by the snow amount (§4, §4.2).
+   Done (2026-10-31): lib/Climate keeps a snow depth per 50 km cell,
+   stepped hourly with the slow temperature: a steady precipitation
+   stand-in (0.25 mm of snow an hour, about 6 mm a day) falls as snow
+   below 0.5 °C, 3 mm melts per degree-hour over 0 °C, a jump seeds it by
+   running the last 200 days in 3-hour steps (Helsinki: late December to
+   mid March, about 38 cm at most; 68 N November to April; case 1266).
+   The shaders get one depth a frame, where the camera looks
+   (climateSnowAt), in the frame uniform's new scene vec4 (Gbuffer
+   setGbufferSnow; 48 floats), not a per-cell blend: a view spans a few
+   km of a 50 km cell. lib/snow.wgsl: the terrain whitens by depth, slope
+   (none on steep ground) and a noise edge, never on water; the static
+   meshes and the far billboards lay it on what faces up (branches,
+   trunks, the spruce's tiers, rocks, roofs; the lab's flat ground); the
+   GPU grass and the meadow's blades flatten and sink below the ground,
+   gone under 10 cm. The panel's temperature line and the lab's slider
+   add "snow 35 cm".
 9. **Deep snow mesh and footprints:** the fine snow mesh near the walker,
    the raised far terrain, the trample map stamped by every foot, feet
    standing in the snow (§4.1).

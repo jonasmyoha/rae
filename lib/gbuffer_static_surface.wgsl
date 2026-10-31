@@ -8,6 +8,8 @@ struct Frame {
   jitter: vec4<f32>,    // xy the TAA jitter, z the wind's time last frame
   wind: vec4<f32>,      // the wind (lib/wind.wgsl): direction * strength, gustiness, time
   previousWind: vec4<f32>,
+  // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
+  scene: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -124,7 +126,12 @@ fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<
   let d = draws[ii];
   var o: VsOut;
   let normal = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
-  let rest = select(p, card.xyz, card.w > 0.0);
+  var rest = select(p, card.xyz, card.w > 0.0);
+  // a grass blade (the meadow's turf and tufts, pattern 3) sinks under the
+  // snow (lib/snow.wgsl): its height times what still shows
+  if (d.params.w > 2.5 && d.params.w < 3.5) {
+    rest.z = snowSunkGrass(rest.z, F.scene.x);
+  }
   var current = windLeaf((d.model * vec4<f32>(rest, 1.0)).xyz, normal,
     (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w * windLeafScale, F.wind);
   var previous = windLeaf((d.prevModel * vec4<f32>(rest, 1.0)).xyz, normal,
@@ -190,10 +197,14 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     let ground = grassGroundColor(d.albedoMetallic.rgb, in.wpos.xy, RAE_GRASS_PATCH_SCALE,
       RAE_GRASS_PATCH_COVERAGE);
     o.albedo = ground * mix(1.0, tip, height);
+    return o;
   } else if (d.params.w > 1.5) {
     o = gbRoofTiles(in.wpos, n, o.albedo);
   } else if (d.params.w > 0.5) {
     o = gbBrick(in.wpos, n, o.albedo);
   }
+  // snow on what faces up (lib/snow.wgsl): branches, trunks, the spruce's
+  // tiers, rocks, roofs (a grass blade returned above: it sinks instead)
+  o.albedo = snowOnTop(o.albedo, o.nrm, F.scene.x);
   return o;
 }
