@@ -22,6 +22,7 @@ open GeoPlace
 open app3d/SeasonImpostors
 open app3d/GroundPalette
 open app3d/SnowField
+open app3d/FallingLeaves
 open app3d/WalkerAutoWalk
 open water/WaterSystem
 open water/WadeSplash
@@ -196,6 +197,15 @@ func updateWalkerClimate(app: mod WalkerApp) {
   app.walkerMarks.precipitationAir = air
   app.walkerMarks.precipitationEye = app.cameraSystem.camera.position
   app.walkerMarks.precipitationClock = app.frame.time
+  # leaves falling from the crowns that are losing theirs (app3d/FallingLeaves)
+  gatherFallingLeaves(
+    leaves: app.walkerMarks.fallingLeaves
+    field: app.terrainSystem.forest.field
+    eye: app.cameraSystem.camera.position
+    seconds: app.frame.time
+    windX: app.renderSystem.renderer.passes.gbuffer.windX * 2.0
+    windY: app.renderSystem.renderer.passes.gbuffer.windY * 2.0
+  )
   setGbufferWetness(
     cache: app.renderSystem.renderer.passes.gbuffer
     wet: weatherGroundWet(

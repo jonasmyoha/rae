@@ -1,0 +1,209 @@
+# app3d/FallingLeaves — leaves falling from the crowns in autumn
+# (docs/seasons-and-weather-design.md §3.2): while a deciduous kind loses
+# its leaves (app3d/PropSeason propSeasonLoss rising past the start, the
+# slow temperature falling), each of its trees within fallingLeavesReach of
+# the camera lets a few leaves go, in its autumn color: each starts in the
+# crown, flutters down to the tree's foot, tumbling and drifting with the
+# wind, and starts again on its own phase. At most fallingLeavesMax in one
+# instanced draw (lit like the scene, no shadow). The trees' own leaf loss
+# (lib/wind.wgsl) thins their crowns at the same time.
+import Math
+import Vec3
+import Quat
+open Math3d
+open Mesh3d
+open Scene3d
+open ecs/Transform
+open GbufferInstanced
+open Gbuffer
+open RendererDeferred
+open gpu/GpuResources
+open app3d/PropField
+open app3d/PropSeason
+open app3d/PropFade
+
+const fallingLeavesMax: Int = 2500
+
+const fallingLeavesReach: Float = 32.0
+
+# The leaves a tree lets go at once at the height of its fall
+const fallingLeavesPerTree: Int = 10
+
+# How fast a leaf falls (m/s)
+const fallingLeafSpeed: Float = 0.9
+
+type FallingLeaves {
+  batch: InstanceBatch
+  # how many leaves fell this frame (the check's count)
+  count: Int = 0
+}
+
+# A thin card a few centimeters across
+func createFallingLeaves(renderer: mod DeferredRenderer) ret FallingLeaves {
+  let card: MeshData = makeBox(size: 1.0)
+  ret FallingLeaves { batch: createInstanceBatch(
+    mesh: RendererDeferred.uploadMesh(
+      renderer: renderer
+      verts: card.verts
+      vertCount: card.vertCount
+      indices: card.indices
+    )
+    capacity: fallingLeavesMax
+  ) }
+}
+
+func fallingLeafHash(index: view Int, seed: view Int) ret Float {
+  let mixed: Float = Math.sin(x: index.toFloat() * 12.9898 + seed.toFloat() * 78.233) * 43758.5453
+  ret mixed - Math.floor(x: mixed)
+}
+
+func fallingLeafFract(value: view Float) ret Float {
+  ret value - Math.floor(x: value)
+}
+
+# How many of a tree's leaves fall at once at leaf loss `loss`: most in the
+# middle of the fall, none before it starts or once the tree is bare
+func fallingLeavesOf(loss: view Float) ret Int {
+  if loss <= 0.03 or loss >= 0.99 {
+    ret 0
+  }
+  let middle: Float = 1.0 - Math.abs(value: loss - 0.5) * 2.0
+  ret Math.max(a: 1, b: (fallingLeavesPerTree.toFloat() * (0.35 + 0.65 * middle)).toInt())
+}
+
+# This frame's falling leaves round `eye` at `seconds` (the clock), blown by
+# `windX`, `windY` (m/s), from the trees of `field` (its season set), into
+# the batch (drawn by drawFallingLeaves)
+func gatherFallingLeaves(
+  leaves: mod FallingLeaves
+  field: view PropField
+  eye: view Vec3
+  seconds: view Float
+  windX: view Float
+  windY: view Float
+) {
+  resetInstanceBatch(batch: leaves.batch)
+  leaves.count = 0
+  if field.seasonsOn is false or field.seasonWarming or field.cellStart.length is 0 {
+    ret
+  }
+  let reach: Float = fallingLeavesReach
+  let first: Int = propCellOf(field: field, x: eye.x - reach, y: eye.y - reach)
+  let last: Int = propCellOf(field: field, x: eye.x + reach, y: eye.y + reach)
+  let firstColumn: Int = first % field.columns
+  let firstRow: Int = first / field.columns
+  let lastColumn: Int = last % field.columns
+  let lastRow: Int = last / field.columns
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      let cell: Int = row * field.columns + column
+      let start: Int = field.cellStart.copyAtFallback(index: cell, fallback: 0)
+      let end: Int = field.cellStart.copyAtFallback(index: cell + 1, fallback: start)
+      loop var index: Int = start, index < end, ++index {
+        if leaves.batch.count >= fallingLeavesMax {
+          ret
+        }
+        let placement: PropPlacement = field.placements.copyAtDefault(index: index)
+        let dx: Float = placement.position.x - eye.x
+        let dy: Float = placement.position.y - eye.y
+        if dx * dx + dy * dy > reach * reach {
+          continue
+        }
+        if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+          if kind.season.deciduous {
+            addTreeLeaves(
+              leaves: leaves
+              kind: kind
+              placement: placement
+              index: index
+              slow: field.seasonSlow + propSeasonShift(
+                seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
+              )
+              seconds: seconds
+              windX: windX
+              windY: windY
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+# One tree's falling leaves (`index`: the tree's, for its leaves' phases)
+func addTreeLeaves(
+  leaves: mod FallingLeaves
+  kind: view PropKind
+  placement: view PropPlacement
+  index: view Int
+  slow: view Float
+  seconds: view Float
+  windX: view Float
+  windY: view Float
+) {
+  let loss: Float = propSeasonLoss(season: kind.season, slow: slow, warming: false)
+  let count: Int = fallingLeavesOf(loss: loss)
+  if count is 0 {
+    ret
+  }
+  let crown: Vec3 = propCenter(kind: kind, placement: placement)
+  let radius: Float = propRadius(kind: kind, placement: placement) * 0.6
+  let foot: Float = placement.position.z
+  let drop: Float = Math.max(a: crown.z - foot, b: 1.0)
+  loop var leaf: Int = 0, leaf < count, ++leaf {
+    if leaves.batch.count >= fallingLeavesMax {
+      ret
+    }
+    let id: Int = index * 16 + leaf
+    let phase: Float = fallingLeafHash(index: id, seed: 5)
+    let fall: Float = fallingLeafFract(value: phase + seconds * fallingLeafSpeed / drop)
+    let fallTime: Float = fall * drop / fallingLeafSpeed
+    let angle: Float = fallingLeafHash(index: id, seed: 7) * 6.2831853
+    let out: Float = radius * Math.sqrt(x: fallingLeafHash(index: id, seed: 9))
+    let flutter: Float = 0.35 * Math.sin(x: seconds * 2.1 + phase * 30.0)
+    let x: Float = crown.x + Math.cos(x: angle) * out + windX * fallTime + flutter
+    let y: Float = crown.y + Math.sin(x: angle) * out + windY * fallTime + 0.35 * Math.cos(
+      x: seconds * 1.7 + phase * 23.0
+    )
+    let z: Float = crown.z - fall * drop
+    let shade: Float = 0.8 + 0.4 * fallingLeafHash(index: id, seed: 11)
+    let material: Material3d = {
+      baseColor: Vec3.vscale(a: kind.season.fallColor, s: shade)
+      metallic: 0.0
+      roughness: 0.8
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      toon: false
+    }
+    let pose: Transform3D = {
+      position: Vec3.create(x: x, y: y, z: z)
+      rotation: Quat.qmul(
+        a: Quat.fromAxisAngle(
+          axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+          angle: angle + seconds * 1.3
+        )
+        b: Quat.fromAxisAngle(
+          axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+          angle: seconds * 2.7 + phase * 9.0
+        )
+      )
+      scale: Vec3.create(x: 0.15, y: 0.11, z: 0.006)
+    }
+    let model: Mat4 = transform3dToMatrix(t: pose)
+    addInstance(
+      batch: leaves.batch
+      model: model
+      prevModel: model
+      material: material
+    )
+    leaves.count = leaves.count + 1
+  }
+}
+
+# The frame's falling leaves into the open pass
+func drawFallingLeaves(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  leaves: view FallingLeaves
+) {
+  drawInstances(cache: cache, resources: resources, batch: leaves.batch)
+}
