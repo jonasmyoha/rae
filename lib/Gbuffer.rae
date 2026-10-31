@@ -172,6 +172,9 @@ type GbufferCache {
   snowMeshCenterX: Float = 0.0
   snowMeshCenterY: Float = 0.0
   snowMeshHalf: Float = 0.0
+  # How wet the ground is (0 .. 1; setGbufferWetness): the terrain darker
+  # and glossier while it rains and the hour after
+  groundWet: Float = 0.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
@@ -470,6 +473,11 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.snowMeshCenterX)
   cache.frameFloats.add(value: cache.snowMeshCenterY)
   cache.frameFloats.add(value: cache.snowMeshHalf)
+  # the weather: x how wet the ground is (setGbufferWetness)
+  cache.frameFloats.add(value: cache.groundWet)
+  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: 0.0)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -504,6 +512,13 @@ func setGbufferSnowMesh(
   cache.snowMeshCenterX = centerX
   cache.snowMeshCenterY = centerY
   cache.snowMeshHalf = half
+}
+
+# How wet the ground is (0 dry .. 1; lib/Weather weatherGroundWet): the
+# frame uniform's weather.x, the terrain darker and glossier by it
+# (terrain_splat.wgsl)
+func setGbufferWetness(cache: mod GbufferCache, wet: view Float) {
+  cache.groundWet = Math.clamp(val: wet, low: 0.0, high: 1.0)
 }
 
 # This frame's wind (lib/Wind windVector): what the swaying props bend in

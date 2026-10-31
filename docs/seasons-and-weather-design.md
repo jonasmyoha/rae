@@ -474,6 +474,16 @@ that adds it.
     weatherMistFactor (1 .. 6: humidity, cooling toward 05:00, autumn;
     none by midday).
 13. **Rain and falling snow:** near-camera particles; wet ground.
+    Done (2026-10-31): app3d/Precipitation, carried by app3d/WalkerMarks
+    and drawn with the marks in both frames: a fixed world lattice of
+    drops wrapped into a 28 x 28 x 18 m box round the camera (none within
+    1.5 m of the eye), one instanced draw each for rain (streaks, 8 m/s,
+    leaning with the frame's wind) and snow (flakes 4 - 7 cm, 1.1 m/s,
+    swaying, 2.5 times as many), 300 + 1,500 a mm/h, at most 3,000
+    (~0.3 ms of CPU for 2,000). Wet ground: lib/Weather weatherGroundWet
+    (the last hour sampled in quarters, none under snow) in a new weather
+    vec4 of the frame uniform (52 floats, setGbufferWetness); the terrain
+    darkens to 62% and its roughness falls to 55% by it.
 14. **Falling leaves:** leaf particles from crowns while their leaf loss
     rises, in the kind's autumn tones.
 15. **Settings and lab controls:** season and weather overrides in the

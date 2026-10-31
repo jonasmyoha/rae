@@ -6,6 +6,7 @@
 # warmer, rain cooler still).
 open Weather
 open Climate
+open app3d/Precipitation
 import Math
 
 func check(label: view String, ok: view Bool) {
@@ -182,6 +183,53 @@ func main() ret Int {
   check(
     label: "the clouds white when clear, gray in the rain"
     ok: weatherCloudDarkness(weather: clear) is 0.0 and weatherCloudDarkness(weather: rain) > 0.9
+  )
+  # rain and snow (seasons step 13): the drops by the rate, the ground wet
+  # while it rains and the hour after, not by snow
+  check(
+    label: "no drops when dry, more for more rain, never past the most"
+    ok: precipitationDropCount(precipitation: 0.0) is 0 and precipitationDropCount(
+      precipitation: 0.3
+    ) < precipitationDropCount(precipitation: 1.0) and precipitationDropCount(precipitation: 50.0) is precipitationMaxDrops
+  )
+  var rainHour: Float = -1.0
+  loop var step: Int = 0, step < 24 * 40 and rainHour < 0.0, ++step {
+    let hour: Float = step.toFloat() * 0.25
+    let weather: Weather = weatherAt(
+      seed: 7
+      latitude: 60.17
+      longitude: 24.94
+      year: 2026
+      dayOfYear: 180 + (hour / 24.0).toInt()
+      hour: hour - 24.0 * (hour / 24.0).toInt().toFloat()
+    )
+    if weather.precipitation > 0.2 {
+      rainHour = hour
+    }
+  }
+  let day: Int = 180 + (rainHour / 24.0).toInt()
+  let atHour: Float = rainHour - 24.0 * (rainHour / 24.0).toInt().toFloat()
+  let wetInRain: Float = weatherGroundWet(
+    seed: 7
+    latitude: 60.17
+    longitude: 24.94
+    year: 2026
+    dayOfYear: day
+    hour: atHour
+    air: 12.0
+  )
+  let wetInSnow: Float = weatherGroundWet(
+    seed: 7
+    latitude: 60.17
+    longitude: 24.94
+    year: 2026
+    dayOfYear: day
+    hour: atHour
+    air: -3.0
+  )
+  check(
+    label: "the ground is wet while it rains, not under snow"
+    ok: rainHour >= 0.0 and wetInRain is 1.0 and wetInSnow is 0.0
   )
   ret 0
 }

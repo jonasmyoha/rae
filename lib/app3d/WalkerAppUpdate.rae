@@ -178,6 +178,36 @@ func updateWalkerClimate(app: mod WalkerApp) {
       longitude: place.longitude
     )
   )
+  # rain or snow falling round the camera, and the ground wet while it rains
+  # and the hour after (app3d/Precipitation, lib/Weather)
+  let localHour: Float = climateLocalHour(
+    sceneHour: settings.timeOfDay.hour
+    sceneLongitude: settings.longitude
+    longitude: place.longitude
+  )
+  let air: Float = climateWeatherAir(
+    latitude: place.latitude
+    dayOfYear: settings.timeOfDay.dayOfYear
+    localHour: localHour
+    height: settings.lookHeight
+    weather: settings.weather
+  )
+  app.walkerMarks.precipitationRate = settings.weather.precipitation
+  app.walkerMarks.precipitationAir = air
+  app.walkerMarks.precipitationEye = app.cameraSystem.camera.position
+  app.walkerMarks.precipitationClock = app.frame.time
+  setGbufferWetness(
+    cache: app.renderSystem.renderer.passes.gbuffer
+    wet: weatherGroundWet(
+      seed: app.climate.weatherSeed
+      latitude: place.latitude
+      longitude: place.longitude
+      year: settings.timeOfDay.year
+      dayOfYear: settings.timeOfDay.dayOfYear
+      hour: localHour
+      air: air
+    )
+  )
   let field: mod PropField = app.terrainSystem.forest.field
   # the mist thickens near the dew point (lib/Weather): humid air, early
   # morning, autumn; gone by midday
