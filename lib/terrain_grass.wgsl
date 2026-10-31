@@ -2,6 +2,10 @@
 // part in the terrain composition it hands to rendererSetTerrainShader (in
 // place of this file). Return linear albedo;
 // position is world XY in meters, variation is the shared detail value [0, 1].
+// The grass's base color (the textured grass's mean, terrain_splat.wgsl)
+fn terrainGrassBase() -> vec3<f32> {
+  return RAE_TERRAIN_GRASS;
+}
 fn terrainGrassColor(position: vec2<f32>, variation: f32) -> vec3<f32> {
   return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, variation);
 }

@@ -42,6 +42,17 @@ fn grassPatchValue(position: vec2<f32>, scale: f32) -> f32 {
   return 0.5 + 0.5 * (perlin2(position / span, 173u) * 0.72
     + perlin2(position / (span * 0.43), 227u) * 0.28);
 }
+// The ground palette (app3d/GroundPalette): the grass color at a point,
+// from the frame's grass, its dry grass and how far the driest ground has
+// gone dry, by the soil's moisture there (world_biome.wgsl
+// raeBiomeMoisture). The terrain, the GPU grass and the meadow (the Rae twin,
+// GroundPalette.groundGrassAt) all compute it, so the roots match the ground.
+fn groundDryShare(moisture: f32) -> f32 {
+  return 1.0 - smoothstep(0.3, 0.55, moisture);
+}
+fn groundPaletteGrass(grass: vec3<f32>, dry: vec3<f32>, dryAmount: f32, moisture: f32) -> vec3<f32> {
+  return mix(grass, dry, dryAmount * groundDryShare(moisture));
+}
 fn grassGroundColor(base: vec3<f32>, position: vec2<f32>, scale: f32, coverage: f32) -> vec3<f32> {
   let patchValue = grassPatchValue(position, scale);
   let cover = smoothstep(1.0 - coverage - 0.12, 1.0 - coverage + 0.12, patchValue);

@@ -7,7 +7,8 @@
 # of tall grass. Turf and tufts are colored as the GPU grass: at the root
 # the terrain's own painted grass color where they stand (the static
 # shader's grass pattern computes the ground's field, grass_field.wgsl
-# grassGroundColor round rootColor, the terrain's base grass), lighter to
+# grassGroundColor round the frame's ground palette at the place, as the
+# terrain mixes it by the soil's moisture: app3d/GroundPalette), lighter to
 # the tip (GbufferRecord grassBladePattern, the same tip factor), so they
 # grow out of the ground and nothing pops.
 #
@@ -42,6 +43,7 @@ open gpu/GpuResources
 open ecs/Transform
 open app3d/PropInstancer
 open app3d/GrassTuft
+open app3d/GroundPalette
 open FoliageMesh
 open GbufferRecord
 
@@ -86,7 +88,9 @@ type WalkerMeadow {
   models: List(Mat4)
   feet: List(Vec3)
   forms: List(Int)
-  colors: List(Vec3)
+  # the soil's moisture where each stands (WorldBiome), for the ground
+  # palette's dry grass (GroundPalette.groundGrassAt)
+  moistures: List(Float)
   keeps: List(Float)
   # One instancer per form and level: index form * 2 + level, level 0 near
   # and 1 far; each tuft carries its own color in its instance record
@@ -94,9 +98,10 @@ type WalkerMeadow {
   # The cell the window is centered on now
   centerCellX: Int
   centerCellY: Int
-  # The terrain's grass color (a tuft's root) and the blades' pattern (its
-  # tip that much lighter: GbufferRecord grassBladePattern)
-  rootColor: Vec3
+  # The frame's ground palette (a tuft's root: the terrain's grass where it
+  # stands; the app sets it each frame) and the blades' pattern (its tip
+  # that much lighter: GbufferRecord grassBladePattern)
+  palette: GroundPalette = summerGroundPalette()
   pattern: Float
 }
 
@@ -111,15 +116,14 @@ func meadowMaterial(color: view Vec3) ret Material3d {
 }
 
 # A meadow of `gridSide` x `gridSide` cells of `cellSize` (m); its tuft
-# meshes uploaded to `renderer`; the tufts `rootColor` at the root (the
-# terrain's grass color) and `tipLighten` times as light at the tip (the GPU
+# meshes uploaded to `renderer`; the tufts the terrain's grass at the root
+# (the ground palette, WalkerMeadow.palette) and `tipLighten` times as light at the tip (the GPU
 # grass's GrassViewSettings.tipLighten). Nothing is placed until
 # updateWalkerMeadow.
 func createWalkerMeadow(
   renderer: mod DeferredRenderer
   gridSide: view Int
   cellSize: view Float
-  rootColor: view Vec3
   tipLighten: view Float
 ) ret WalkerMeadow {
   let slots: Int = gridSide * gridSide
@@ -162,7 +166,7 @@ func createWalkerMeadow(
       parts.add(
         value: createPropInstancer(
           mesh: meshes.copyAtDefault(index: level)
-          material: meadowMaterial(color: rootColor)
+          material: meadowMaterial(color: groundSummerGrass())
           capacity: Math.min(a: places / 2, b: meadowBatchLimit)
         )
       )
@@ -179,13 +183,13 @@ func createWalkerMeadow(
   var models: List(Mat4) = List.create(Mat4, cap: places)
   var feet: List(Vec3) = List.create(Vec3, cap: places)
   var forms: List(Int) = List.create(Int, cap: places)
-  var colors: List(Vec3) = List.create(Vec3, cap: places)
+  var moistures: List(Float) = List.create(Float, cap: places)
   var keeps: List(Float) = List.create(Float, cap: places)
   loop var i: Int = 0, i < places, ++i {
     models.add(value: mat4Identity())
     feet.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
     forms.add(value: 0)
-    colors.add(value: rootColor)
+    moistures.add(value: 1.0)
     keeps.add(value: 0.0)
   }
   ret WalkerMeadow {
@@ -197,12 +201,11 @@ func createWalkerMeadow(
     models: own models
     feet: own feet
     forms: own forms
-    colors: own colors
+    moistures: own moistures
     keeps: own keeps
     parts: own parts
     centerCellX: 1000000000
     centerCellY: 1000000000
-    rootColor: rootColor
     pattern: grassBladePattern(tipLighten: tipLighten)
   }
 }
@@ -336,7 +339,7 @@ func placeMeadowCell(
     )
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: form)
-    meadow.colors.set(index: place, value: meadow.rootColor)
+    meadow.moistures.set(index: place, value: ground.moisture)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
     count = count + 1
   }
@@ -390,7 +393,7 @@ func placeMeadowCell(
     )
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: meadowTurfForm)
-    meadow.colors.set(index: place, value: meadow.rootColor)
+    meadow.moistures.set(index: place, value: ground.moisture)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 43 + t, y: cellY * 47 + t, seed: 737))
     count = count + 1
   }
@@ -436,7 +439,10 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
       let part: Int = meadow.forms.copyAtFallback(index: place, fallback: 0) * 2 + level
       if let instancer: mod PropInstancer = meadow.parts.modAt(index: part) {
         var material: Material3d = instancer.material
-        material.baseColor = meadow.colors.copyAtFallback(index: place, fallback: meadow.rootColor)
+        material.baseColor = groundGrassAt(
+          palette: meadow.palette
+          moisture: meadow.moistures.copyAtFallback(index: place, fallback: 1.0)
+        )
         let model: Mat4 = meadow.models.copyAtDefault(index: place)
         let before: Int = instancer.batch.count
         addInstance(

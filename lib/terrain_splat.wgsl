@@ -66,6 +66,15 @@ fn octEncode(n: vec3<f32>) -> vec2<f32> {
   return p * 0.5 + vec2<f32>(0.5);
 }
 
+// The frame's ground palette (app3d/GroundPalette, GbufferTerrain
+// terrainSetGroundPalette), from the draw's record: the grass in
+// albedoMetallic.yzw, the dry grass in fade.xyz and how dry in fade.w (a
+// terrain never fades). Set by gbufferSurface; read by a grass part that
+// follows it (terrain_grass_painted.wgsl).
+var<private> raeGroundGrass: vec3<f32>;
+var<private> raeGroundDry: vec3<f32>;
+var<private> raeGroundDryAmount: f32;
+
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) nrm: vec3<f32>,
@@ -115,6 +124,9 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let prev = in.clipPrev.xy / in.clipPrev.w;
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
+  raeGroundGrass = d.albedoMetallic.yzw;
+  raeGroundDry = d.fade.xyz;
+  raeGroundDryAmount = d.fade.w;
   var albedo = raeTerrainDetailColor(in.worldXY, in.bio, d.params.w);
   // TEXTURED TERRAIN (#9 grass, #14 the rest). Stamp each plate-harvested tile
   // over the procedural color, weighted by that material's biome weight so only
@@ -142,7 +154,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let wGrass83 = sgSum83 * sgMix83;
   let wSand83 = sgSum83 * (1.0 - sgMix83);
   let uv = in.worldXY * RAE_TERRAIN_TEX_SCALE;
-  let grassT = RAE_TERRAIN_GRASS * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_GRASS).rgb / RAE_TERRAIN_GRASS_TEX_MEAN);
+  let grassT = terrainGrassBase() * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_GRASS).rgb / RAE_TERRAIN_GRASS_TEX_MEAN);
   let sandT  = RAE_TERRAIN_SAND  * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_SAND ).rgb / RAE_TERRAIN_SAND_TEX_MEAN);
   // Sequential blend by weight -- at any pixel one weight dominates, so this
   // reads as "the dominant material's texture" while shore blends average.

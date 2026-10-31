@@ -371,6 +371,19 @@ that adds it.
    way.
 7. **Ground palette:** one per-frame grass/ground/tuft palette (replacing
    the hand-kept constant pairs), dry grass by moisture.
+   Done (2026-10-31): app3d/GroundPalette (groundPaletteAt: summer's
+   green; rising, the dead winter grass to fresh green from 1 to 7 °C and
+   on to summer's by 14 °C; falling, back to the dead grass from 5 to
+   -2 °C; straw on dry soil from 15 to 22 °C, at most 0.75). WalkerTerrain
+   holds it, set with the climate each frame. The terrain gets it in its
+   draw record ([33..35], [40..43]; GbufferTerrain
+   terrainSetGroundPalette, terrain_splat.wgsl), the GPU grass in its
+   uniform (GrassViewSettings.dryColor, dryAmount, vec4 j), the meadow per
+   place (each place's moisture kept at planting). All three mix by the
+   soil's moisture with one rule (grass_field.wgsl groundPaletteGrass; the
+   Rae twin GroundPalette.groundGrassAt). walkerGroundColor and the
+   walker's RAE_TERRAIN_GRASS are gone. RAE_WALKER_LATITUDE sets a
+   walker's latitude for a headless frame.
 8. **Snow cover:** the snow depth model; terrain snow by slope and noise;
    grass and tufts under snow; snow on trees (bark, branches, the spruce's
    tiers) by the snow amount (§4, §4.2).

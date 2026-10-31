@@ -546,6 +546,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         dayOfYear: daySetting.toInt()
       )
     }
+    # RAE_WALKER_LATITUDE overrides the place's latitude (degrees north), so
+    # a headless frame can look at another climate (lib/Climate)
+    let latitudeSetting: String = Sys.getEnv(name: "RAE_WALKER_LATITUDE")
+    if latitudeSetting.length() > 0 {
+      settingsState.latitude = Math.clamp(val: latitudeSetting.toFloat(), low: -90.0, high: 90.0)
+    }
     let startMoon: MoonState = settingsMoon(settingsState: settingsState)
     log(
       "[moon] {moonPhaseName(moon: startMoon)}, {(startMoon.illumination * 100.0).toInt()}% lit, up {startMoon.up}, light {settingsMoonLight(

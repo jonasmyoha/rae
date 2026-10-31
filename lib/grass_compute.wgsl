@@ -16,6 +16,8 @@ struct GrassU {
   g: vec4<f32>,
   h: vec4<f32>,
   i: vec4<f32>,
+  // the ground palette's dry grass and how dry (app3d/GroundPalette)
+  j: vec4<f32>,
 };
 struct Indirect {
   vertexCount: u32,
@@ -144,7 +146,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // ground's field, terrain_grass_painted.wgsl), with no tint of its own:
   // the blade's root is the ground's color, so the grass grows out of the
   // ground instead of standing on it (grass_render.wgsl lightens the tip)
-  let groundColor = grassGroundColor(G.e.rgb, bladePosition, G.h.x, G.h.y);
+  // (the frame's ground palette, mixed toward its dry grass where the soil
+  // is dry: grass_field.wgsl groundPaletteGrass, as the terrain does)
+  var groundBase = G.e.rgb;
+  if (G.j.w > 0.0) {
+    groundBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, raeBiomeMoisture(bladePosition));
+  }
+  let groundColor = grassGroundColor(groundBase, bladePosition, G.h.x, G.h.y);
   outBuf[slot].albedoMetallic = vec4<f32>(groundColor, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;

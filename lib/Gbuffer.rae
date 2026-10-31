@@ -159,6 +159,12 @@ type GbufferCache {
   terrainSampler: SamplerId
   terrainAdopted: List(ExternalId)
   terrainBlend: Float
+  # The frame's ground palette the terrain draws carry (app3d/GroundPalette,
+  # GbufferTerrain terrainSetGroundPalette): the grass, the dry grass and
+  # how dry; read by a terrain shader with the painted grass
+  groundGrass: Vec3 = Vec3.create(x: 0.088, y: 0.14, z: 0.026)
+  groundDry: Vec3 = Vec3.create(x: 0.2, y: 0.15, z: 0.045)
+  groundDryAmount: Float = 0.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
