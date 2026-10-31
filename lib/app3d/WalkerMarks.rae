@@ -59,20 +59,15 @@ func createWalkerMarks(
     random: createRandom(seed: 1147)
     precipitation: createPrecipitation(renderer: renderer)
     leafParticles: createLeafParticles(
-      capacity: walkerLeafCapacity
+      capacity: leafDefaultCapacity()
       constants: islandConstantsFor(cfg: biome)
     )
   }
 }
 
-# The most leaves in the air and lying at once
-const walkerLeafCapacity: Int = 8192
-
-# How far from the eye trees let leaves go (m), and how far a leaf may be
-# carried before it is gone (a gale's cloud stays in view downwind)
-const walkerLeafReach: Float = 40.0
-
-const walkerLeafKeep: Float = 110.0
+# How much farther than the release reach a leaf may be carried before it
+# is gone (a gale's cloud stays in view downwind: 110 m on the desktop)
+const walkerLeafKeepShare: Float = 2.75
 
 # How deep the water over the ground may be before a step is in water (m):
 # a wet foot on the shore still kicks up its sand

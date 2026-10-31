@@ -145,10 +145,29 @@ func main() {
   log("6000 frames at 3 a second: {total} leaves")
   check(label: "the hashed counts add up to the rate", ok: total > 270 and total < 330)
   check(
-    label: "the frame cap follows the ring"
-    ok: leafFrameCap(capacity: 8192, deltaTime: 0.016666668) is 27 and leafFrameCap(
+    label: "the frame cap is what is left of the ring, an eighth at most"
+    ok: leafFrameCap(capacity: 8192, recent: 0) is 1024 and leafFrameCap(
       capacity: 8192
-      deltaTime: 0.0
-    ) is 1 and leafFrameCap(capacity: 8192, deltaTime: 10.0) is 1024
+      recent: 8000
+    ) is 192 and leafFrameCap(capacity: 8192, recent: 9000) is 0
+  )
+  # the budget counts the last 22 s: a leaf released at 0.5 s still counts
+  # at 21.5 s and is gone from the count by 22.5 s
+  var leafParticles: LeafParticles = createLeafParticles(
+    capacity: 4096
+    constants: List.create(ShaderConstant, cap: 0)
+  )
+  let unusedStart: Int = leafRecentReleases(leafParticles: leafParticles, clock: 0.5)
+  leafParticles.releaseBuckets.set(index: 0, value: 500)
+  let early: Int = leafRecentReleases(leafParticles: leafParticles, clock: 21.5)
+  let late: Int = leafRecentReleases(leafParticles: leafParticles, clock: 22.5)
+  log("released at 0.5 s: counted {early} at 21.5 s, {late} at 22.5 s")
+  check(
+    label: "the budget forgets a release once its leaves are dead"
+    ok: early is 500 and late is 0
+  )
+  check(
+    label: "the desktop keeps 16384 leaves within 40 m"
+    ok: leafDefaultCapacity() is 16384 and leafDefaultReach() is 40.0
   )
 }

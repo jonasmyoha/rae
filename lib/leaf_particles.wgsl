@@ -9,7 +9,8 @@
 // - `spawn` runs once per leaf released this frame: it finds its emit (the
 //   CPU's list of crowns letting leaves go, with a running first-leaf
 //   index) by a binary search and writes a new leaf into its ring slot;
-// - `fly` runs once per ring slot: a live leaf falls through the air in the
+// - `fly` runs once per slot of the ring's live run (the newest releases
+//   over the release budget's window; no leaf outside it is alive): a live leaf falls through the air in the
 //   air, lands on the ground (on the snow, if any) or floats on the water,
 //   and lies there until its life ends; one past the reach dies.
 //
@@ -62,7 +63,8 @@ struct LeafU {
   // z: the water's surface (the lowest a leaf lands), w: the snow's depth
   ground: vec4<f32>,
   // x: the ring's head (the first slot this frame writes), y: the ring's
-  // size, z: the emits, w: this frame's releases
+  // size, z: the emits, w: the first slot of the run that may be alive
+  // (`fly` and the draw cover that run only)
   ring: vec4<u32>,
   // the renderer's wind vector (lib/Wind: sway xy, gustiness, its clock)
   wind: vec4<f32>,
@@ -180,7 +182,8 @@ fn spawn(@builtin(global_invocation_id) globalId: vec3<u32>) {
 @compute @workgroup_size(computeWorkgroupSize)
 fn fly(@builtin(global_invocation_id) globalId: vec3<u32>) {
   if (!computeElementInRange(globalId)) { return; }
-  let slot = computeElementIndex(globalId);
+  // the live run of the ring: from its first slot (ring.w) on
+  let slot = (U.ring.w + computeElementIndex(globalId)) % U.ring.y;
   var leaf = leaves[slot];
   if (leaf.age <= 0.0) { return; }
   let deltaTime = U.air.z;
