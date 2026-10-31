@@ -22,6 +22,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open gpu/GpuResources
+open gpu/SlotTable
 open gpu/GpuLifetime
 open gpu/PipelineWatch
 open gpu/GpuRenderPass
@@ -240,7 +241,11 @@ func adoptExternal(
   handle: copy Ptr
   subKind: view Int
 ) unsafe ret opt ExternalId {
-  if let slot: Int = findFreeSlot(table: resources.externals, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.externals
+    capacity: resources.capacity
+    kind: "externals"
+  ) {
     unsafe {
       if handle is webgpuNull() {
         ret none
@@ -484,7 +489,11 @@ func createRenderPipelineSource(
   if spec.sampleCount is not 1 and spec.sampleCount is not 4 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.renderPipelines
+    capacity: resources.capacity
+    kind: "renderPipelines"
+  ) {
     unsafe {
       let sourceC: Buffer(Any) = wgsl.toCStr()
       var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
@@ -777,7 +786,11 @@ func createRenderBindGroup(
   if entries.length < 1 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.bindGroups
+    capacity: resources.capacity
+    kind: "bindGroups"
+  ) {
     let start: Int = resources.depKinds.length
     appendDep(
       resources: resources
@@ -824,7 +837,11 @@ func createRenderBindGroupExternal(
   if entries.length < 1 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.bindGroups
+    capacity: resources.capacity
+    kind: "bindGroups"
+  ) {
     let start: Int = resources.depKinds.length
     appendDep(
       resources: resources
@@ -870,7 +887,11 @@ func createComputeBindGroupOrdered(
   if entries.length < 1 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.bindGroups
+    capacity: resources.capacity
+    kind: "bindGroups"
+  ) {
     let start: Int = resources.depKinds.length
     appendDep(
       resources: resources

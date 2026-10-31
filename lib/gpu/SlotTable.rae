@@ -1,0 +1,137 @@
+# gpu/SlotTable — the manager's per-kind slot tables (gpu/GpuResources): a
+# slot's generation, liveness, native handle and lifetime fields, and the
+# searches over them. A table that runs full logs it once (findFreeSlot).
+
+# One table per kind. `generations`/`live` are the authoritative slot record;
+# `handles` holds the native reference this manager owns. The lifetime fields:
+# `useCount` in-flight uses, `retired` retired-but-pinned, `parentSlot`/
+# `parentGeneration` an indirect dependency (a view's texture), `nativeIndex`
+# a submission's wgpu index, `depStart`/`depCount` a slice of the manager's
+# dependency arena (a bind group's bound resources, a submission's uses) and
+# `completed` for submissions.
+type SlotTable {
+  generations: List(Int)
+  live: List(Int)
+  handles: List(Ptr)
+  useCount: List(Int)
+  retired: List(Int)
+  parentSlot: List(Int)
+  parentGeneration: List(Int)
+  nativeIndex: List(Int)
+  depStart: List(Int)
+  depCount: List(Int)
+  completed: List(Int)
+  # Every slot was taken once (findFreeSlot logged it): a table logs being
+  # full once, not on every failed create after it
+  fullLogged: Bool = false
+}
+
+func createIntList(capacity: view Int, value: view Int) ret List(Int) {
+  var list: List(Int) = List.create(Int, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    list.add(value: value)
+    i = i + 1
+  }
+  ret list
+}
+
+func createSlotTable(capacity: view Int, empty: copy Ptr) ret SlotTable {
+  var handles: List(Ptr) = List.create(Ptr, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    unsafe {
+      handles.add(value: empty)
+    }
+    i = i + 1
+  }
+  unsafe {
+    ret SlotTable {
+      generations: createIntList(capacity: capacity, value: 0)
+      live: createIntList(capacity: capacity, value: 0)
+      handles: own handles
+      useCount: createIntList(capacity: capacity, value: 0)
+      retired: createIntList(capacity: capacity, value: 0)
+      parentSlot: createIntList(capacity: capacity, value: -1)
+      parentGeneration: createIntList(capacity: capacity, value: 0)
+      nativeIndex: createIntList(capacity: capacity, value: 0)
+      depStart: createIntList(capacity: capacity, value: 0)
+      depCount: createIntList(capacity: capacity, value: 0)
+      completed: createIntList(capacity: capacity, value: 0)
+    }
+  }
+}
+
+func intAt(list: view List(Int), index: view Int) ret Int {
+  if let value: Int = list.copyAt(index: index) {
+    ret value
+  }
+  ret 0
+}
+
+# First slot that is neither live nor retired-and-pinned, or none (exhaustion).
+# A retired slot still holding a pinned handle is not free. Nothing is marked
+# here: a create marks the slot live only after the native allocation succeeded.
+# The first time a table is found full it says so, naming its `kind` and the
+# capacity: a full table makes every create of that kind return none, and
+# what needed it is then not drawn, with no other error (143 drew black
+# frames when the renderer's 1024 buffer slots ran out).
+func findFreeSlot(table: mod SlotTable, capacity: view Int, kind: view String) ret opt Int {
+  var slot: Int = 0
+  loop slot < capacity {
+    if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 {
+      ret slot
+    }
+    slot = slot + 1
+  }
+  if table.fullLogged is false {
+    table.fullLogged = true
+    log(
+      "[gpu] the {kind} table is full ({capacity} slots): every new one fails and what needs it is not drawn; raise the manager's capacity (the renderer's: RendererDeferred deferredManagerCapacity)"
+    )
+  }
+  ret none
+}
+
+func slotIsLive(
+  table: view SlotTable
+  capacity: view Int
+  slot: view Int
+  generation: view Int
+) ret Bool {
+  if slot < 0 or slot >= capacity {
+    ret false
+  }
+  if intAt(list: table.live, index: slot) is 0 {
+    ret false
+  }
+  ret intAt(list: table.generations, index: slot) is generation
+}
+
+func slotGeneration(table: view SlotTable, slot: view Int) ret Int {
+  ret intAt(list: table.generations, index: slot)
+}
+
+func liveCount(table: view SlotTable, capacity: view Int) ret Int {
+  var count: Int = 0
+  var slot: Int = 0
+  loop slot < capacity {
+    if intAt(list: table.live, index: slot) is 1 {
+      count = count + 1
+    }
+    slot = slot + 1
+  }
+  ret count
+}
+
+func pendingCount(table: view SlotTable, capacity: view Int) ret Int {
+  var count: Int = 0
+  var slot: Int = 0
+  loop slot < capacity {
+    if intAt(list: table.retired, index: slot) is 1 {
+      count = count + 1
+    }
+    slot = slot + 1
+  }
+  ret count
+}

@@ -186,6 +186,10 @@ func checkIdentity(issuer: mod IdIssuer) ret Bool {
             ) {
               ret fail(message: "exhaustion not detected")
             }
+            # the full table said so, once ("[gpu] the buffers table is full")
+            if managerA.buffers.fullLogged is false {
+              ret fail(message: "a full table did not log")
+            }
             if liveBufferCount(resources: managerA) is not 2 {
               ret fail(message: "live count")
             }
