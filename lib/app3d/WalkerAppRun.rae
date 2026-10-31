@@ -40,6 +40,7 @@ open app3d/RagdollRig
 open app3d/WalkerKnockdown
 open app3d/WalkerKnockTest
 open app3d/WalkerApp
+open app3d/WalkerIceTest
 
 func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   var app: WalkerApp = createWalkerApp(settings: settings)
@@ -166,6 +167,17 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       characterSystem: app.characterSystem
       rig: app.cameraSystem.rig
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
+    # Then the ice: frozen water holds the hero at its surface
+    # (app3d/WalkerIceTest, water/WaterIce)
+    if runWalkerIceTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+      groundZ: app.characterSystem.groundZ
+      biome: app.biome
     ) is false {
       exitCode = 1
     }

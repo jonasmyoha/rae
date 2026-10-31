@@ -175,6 +175,18 @@ func updateWalkerClimate(app: mod WalkerApp) {
   # shader lays it (Gbuffer setGbufferSnow, lib/snow.wgsl)
   settings.snowDepth = climateSnowAt(climate: app.climate, east: look.x, north: look.y)
   setGbufferSnow(cache: app.renderSystem.renderer.passes.gbuffer, depth: settings.snowDepth)
+  # and the ice on its water (water/WaterIce): drawn, and walked on
+  let ice: ClimateIce = climateIceAt(climate: app.climate, east: look.x, north: look.y)
+  app.physicsSystem.iceLake = ice.lake
+  app.physicsSystem.iceSea = ice.sea
+  if let waterSystem: mod WaterSystem = app.waterSystem {
+    setWaterIce(
+      waterSystem: waterSystem
+      lake: ice.lake
+      sea: ice.sea
+      snow: settings.snowDepth
+    )
+  }
   # and the ground's grass (app3d/GroundPalette: the terrain, the GPU grass
   # and the meadow read it)
   app.terrainSystem.groundPalette = groundPaletteAt(

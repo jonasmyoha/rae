@@ -58,6 +58,7 @@ open app3d/Climbing
 open app3d/CharacterContact
 open app3d/Wander
 open app3d/Characters
+open water/WaterIce
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -85,6 +86,10 @@ type WalkerPhysics {
   # The fastest a character moves in this frame's snow (m/s;
   # app3d/SnowField snowSpeedLimit), with the bushes' limits
   snowSpeedLimit: Float = 1000.0
+  # How far the lakes and the sea's shore are frozen this frame (lib/Climate
+  # climateIceAt, water/WaterIce): frozen water is ground at its surface
+  iceLake: Float = 0.0
+  iceSea: Float = 0.0
   # The terrain the ground and the wading follow: the app's biome and the
   # height its ground sits at
   biome: BiomeConfig
@@ -620,9 +625,9 @@ func moveCharacters(
     holdMoverWithin(
       character: character
       step: step
-      insideNow: worldWadable(x: center.x, y: center.y, cfg: biome)
-      insideWithOldY: worldWadable(x: center.x, y: step.fromY, cfg: biome)
-      insideWithOldX: worldWadable(x: step.fromX, y: center.y, cfg: biome)
+      insideNow: walkerCanStand(physicsSystem: physicsSystem, x: center.x, y: center.y)
+      insideWithOldY: walkerCanStand(physicsSystem: physicsSystem, x: center.x, y: step.fromY)
+      insideWithOldX: walkerCanStand(physicsSystem: physicsSystem, x: step.fromX, y: center.y)
     )
   }
   holdMoversOnTerrain(physicsSystem: physicsSystem)
@@ -659,6 +664,30 @@ func moveCharacters(
 # whose feet come down to it there, so it walks on as on the field
 const walkerGroundEdge: Float = 3.0
 
+# The ice's share at (x, y) this frame (water/WaterIce)
+func walkerIceAt(physicsSystem: view WalkerPhysics, x: view Float, y: view Float) ret Float {
+  if physicsSystem.iceLake <= 0.02 and physicsSystem.iceSea <= 0.02 {
+    ret 0.0
+  }
+  ret waterIceCover(
+    lake: physicsSystem.iceLake
+    sea: physicsSystem.iceSea
+    x: x
+    y: y
+    groundZ: physicsSystem.groundZ
+    biome: physicsSystem.biome
+  )
+}
+
+# Where a character may stand: ground it can wade to, or ice that holds it
+func walkerCanStand(physicsSystem: view WalkerPhysics, x: view Float, y: view Float) ret Bool {
+  ret worldWadable(x: x, y: y, cfg: physicsSystem.biome) or walkerIceAt(
+    physicsSystem: physicsSystem
+    x: x
+    y: y
+  ) > waterIceWalkable
+}
+
 func holdMoversOnTerrain(physicsSystem: mod WalkerPhysics) {
   let half: Float = walkerGroundSpacing * ((physicsSystem.fieldCount - 1) / 2).toFloat() - walkerGroundEdge
   loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
@@ -672,17 +701,25 @@ func holdMoversOnTerrain(physicsSystem: mod WalkerPhysics) {
     )
     let x: Float = character.mover.transform.p.x
     let y: Float = character.mover.transform.p.y
-    if Math.abs(value: x - physicsSystem.groundCenter.x) < half and Math.abs(
+    # on ice the ground is the water's surface, on the field or off it
+    let onIce: Bool = walkerIceAt(physicsSystem: physicsSystem, x: x, y: y) > waterIceWalkable
+    if onIce is false and Math.abs(value: x - physicsSystem.groundCenter.x) < half and Math.abs(
       value: y - physicsSystem.groundCenter.y
     ) < half {
       continue
     }
-    let ground: Float = worldTerrainHeight(
+    var ground: Float = worldTerrainHeight(
       x: x
       y: y
       groundZ: physicsSystem.groundZ
       cfg: physicsSystem.biome
     )
+    if onIce {
+      ground = Math.max(
+        a: ground
+        b: worldWaterZ(groundZ: physicsSystem.groundZ, cfg: physicsSystem.biome)
+      )
+    }
     let above: Float = moverCenterAboveFeet(character: character)
     if character.mover.transform.p.z - above <= ground + 0.02 {
       character.mover.transform.p.z = ground + above

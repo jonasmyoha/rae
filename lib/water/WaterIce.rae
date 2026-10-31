@@ -1,0 +1,79 @@
+# water/WaterIce — where the water is frozen (docs/seasons-and-weather-design.md
+# §4.3): from the climate's lake and sea freeze at a place (lib/Climate
+# ClimateIce, 0 open .. 1 frozen) and the water's depth there, the share of
+# ice on a point of the biome's water. Ice grows out from the shore: a lake
+# (water inside the island, or anywhere in a world with no island, as 143)
+# freezes out to waterIceLakeReach deep, so a frozen lake is ice all over;
+# the sea only out to waterIceSeaReach, a white fringe along its shore in
+# deep cold. waterSurface.wgsl waterIceCover draws it (opaque white-blue
+# ice, cracks, the scene's snow on top); the walkers stand on it
+# (app3d/WalkerPhysics: frozen water is ground at the water's surface).
+# MUST match waterSurface.wgsl waterIceCover.
+import Math
+open WorldBiome
+
+# How deep (m) the ice reaches at a full freeze: a lake's deepest (4 m) and
+# more, the sea's shallow fringe
+const waterIceLakeReach: Float = 5.0
+
+const waterIceSeaReach: Float = 1.2
+
+# The width (m of depth) of the ice's edge
+const waterIceEdge: Float = 0.3
+
+# More than this share of ice holds a walker
+const waterIceWalkable: Float = 0.5
+
+# A lake: water well inside the island (all of a world with no island)
+func waterIceIsLake(x: view Float, y: view Float, biome: view BiomeConfig) ret Bool {
+  ret worldIslandMask(x: x, y: y, cfg: biome) >= 0.999
+}
+
+# The share of ice (0 .. 1) at (x, y) with the lake freeze `lake` and the
+# sea's `sea`: the water there `depth` m deep
+func waterIceCoverAt(
+  lake: view Float
+  sea: view Float
+  depth: view Float
+  isLake: view Bool
+) ret Float {
+  var reach: Float = sea * waterIceSeaReach
+  var freeze: Float = sea
+  if isLake {
+    reach = lake * waterIceLakeReach
+    freeze = lake
+  }
+  if freeze <= 0.02 or depth <= 0.0 {
+    ret 0.0
+  }
+  let t: Float = Math.clamp(
+    val: (depth - (reach - waterIceEdge)) / waterIceEdge
+    low: 0.0
+    high: 1.0
+  )
+  ret 1.0 - t * t * (3.0 - 2.0 * t)
+}
+
+# The share of ice on the water at world (x, y) of the terrain at `groundZ`
+# of `biome` (0 on land)
+func waterIceCover(
+  lake: view Float
+  sea: view Float
+  x: view Float
+  y: view Float
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret Float {
+  let depth: Float = worldWaterZ(groundZ: groundZ, cfg: biome) - worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: groundZ
+    cfg: biome
+  )
+  ret waterIceCoverAt(
+    lake: lake
+    sea: sea
+    depth: depth
+    isLake: waterIceIsLake(x: x, y: y, biome: biome)
+  )
+}

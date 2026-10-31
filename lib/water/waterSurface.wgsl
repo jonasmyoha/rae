@@ -45,7 +45,43 @@ struct Water {
   mist: vec4<f32>,          // the renderer's height mist: density, falloff, base height, on (1) / off (0)
   mistTint: vec4<f32>,      // rgb = the mist's light from all round (exposed), w unused
   shore: vec4<f32>,         // default biome: full-wave depth (0 disables), terrain ground Z, FFT amplitude
+  ice: vec4<f32>,           // the freeze (water/WaterIce): x = lakes, y = the sea's shore, z = snow depth (m)
 };
+
+// Ice (water/WaterIce, docs/seasons-and-weather-design.md §4.3): the share
+// of ice on the water at `xy`, growing out from the shore by the water's
+// depth: a lake (well inside the island, or any water of a world with no
+// island) out to 5 m deep at a full freeze, the sea only its 1.2 m fringe.
+// MUST match WaterIce.waterIceCoverAt.
+fn waterIceCover(xy: vec2<f32>) -> f32 {
+  if (W.ice.x <= 0.02 && W.ice.y <= 0.02) { return 0.0; }
+  let depth = W.centerExtent.z - raeTerrainHeight(xy, W.shore.y);
+  var reach = W.ice.y * 1.2;
+  var freeze = W.ice.y;
+  if (raeBiomeIslandMask(xy) >= 0.999) {
+    reach = W.ice.x * 5.0;
+    freeze = W.ice.x;
+  }
+  if (freeze <= 0.02 || depth <= 0.0) { return 0.0; }
+  return 1.0 - smoothstep(reach - 0.3, reach, depth);
+}
+
+// The ice's lit color at `xy`: white-blue, with a network of cracks, under
+// the scene's snow (W.ice.z), lit by the sky and the sun from above
+fn waterIceColor(xy: vec2<f32>) -> vec3<f32> {
+  let wide = abs(raeNoiseValue2(xy * 0.45, 7121u) - 0.5);
+  let fine = abs(raeNoiseValue2(xy * 1.6 + vec2<f32>(3.1, 7.7), 7129u) - 0.5);
+  let crack = max(1.0 - smoothstep(0.0, 0.03, wide), 0.7 * (1.0 - smoothstep(0.0, 0.025, fine)));
+  let mottle = raeNoiseValue2(xy * 0.15, 7133u);
+  // dark clear ice with paler frosted patches, the cracks white where they
+  // caught the frost
+  var albedo = mix(vec3<f32>(0.26, 0.38, 0.47), vec3<f32>(0.5, 0.6, 0.67), smoothstep(0.35, 0.75, mottle));
+  albedo = mix(albedo, vec3<f32>(0.72, 0.8, 0.86), crack * 0.85);
+  let snow = smoothstep(0.002, 0.03, W.ice.z) * (0.75 + 0.25 * mottle);
+  albedo = mix(albedo, vec3<f32>(0.84, 0.86, 0.9), snow);
+  let sunUp = max(-W.sun.z, 0.0);
+  return albedo * (W.zenith.rgb * 0.8 + W.horizon.rgb * 0.2 + W.sunColor.rgb * sunUp);
+}
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
 @group(0) @binding(2) var depthTex: texture_depth_2d;
@@ -226,6 +262,8 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
     macroEnergy *= W.shore.z;
     disp = cascadeDisplacement(base.xy, cell) * macroEnergy;
   }
+  // frozen water lies still (water/WaterIce)
+  disp = disp * (1.0 - waterIceCover(base.xy));
   let world = base + disp;
   o.world = world;
   o.gridXy = base.xy;
@@ -556,5 +594,15 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     }
   }
 
+  // Ice over the water (water/WaterIce): opaque where it is frozen
+  let ice = waterIceCover(i.gridXy);
+  if (ice > 0.0) {
+    var iceColor = waterIceColor(i.gridXy);
+    if (W.mist.w > 0.5) {
+      iceColor = waterMist(iceColor, i.world);
+    }
+    color = mix(color, iceColor, ice);
+    alpha = max(alpha, ice);
+  }
   return vec4<f32>(color, alpha);
 }

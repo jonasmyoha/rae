@@ -56,7 +56,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
 
-const waterUniformFloats: Int = 96  # twenty-four vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 100  # twenty-five vec4 (see waterSurface.wgsl `Water`)
 
 # SSR march tuning (#854): a hit counts when the ray is behind the scene by
 # less than this many meters (grown with distance in the shader), and rays
@@ -101,6 +101,11 @@ func cascadeSampleView(
 
 type WaterSystem {
   surfaceCache: FftSurfaceCache
+  # The ice this frame (setWaterIce, water/WaterIce): the lakes' and the sea
+  # shore's freeze (0 .. 1) and the snow depth on it (m)
+  iceLake: Float = 0.0
+  iceSea: Float = 0.0
+  iceSnow: Float = 0.0
   # Every body this system draws (#847): they share ONE unit-grid mesh (sized
   # by the first body's gridSegments) and one pipeline; each is one draw with
   # its own uniform upload. The first body also owns the FFT cascades.
@@ -702,6 +707,16 @@ func uploadWaterUniform(
       z: body.fftAmplitude
       w: 0.0
     )
+    # the freeze (water/WaterIce, setWaterIce): the lakes', the sea shore's,
+    # and the snow on the ice
+    put4(
+      uniform: waterSystem.uniform
+      base: 96
+      x: waterSystem.iceLake
+      y: waterSystem.iceSea
+      z: waterSystem.iceSnow
+      w: 0.0
+    )
     uploadFloats(
       resources: resources
       buffer: waterSystem.surface.uniform
@@ -905,4 +920,17 @@ func waterDraw(
     )
   }
   waterSystem.drawCount = waterSystem.drawCount + 1
+}
+
+# This frame's ice (water/WaterIce): the lakes' and the sea shore's freeze
+# (lib/Climate climateIceAt) and the snow lying on it (m)
+func setWaterIce(
+  waterSystem: mod WaterSystem
+  lake: view Float
+  sea: view Float
+  snow: view Float
+) {
+  waterSystem.iceLake = lake
+  waterSystem.iceSea = sea
+  waterSystem.iceSnow = snow
 }

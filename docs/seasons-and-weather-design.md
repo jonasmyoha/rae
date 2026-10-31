@@ -426,6 +426,20 @@ that adds it.
    (app3d/WalkerAutoWalk). Case 1267.
 10. **Ice:** the freeze per lake and shore, the ice look, walkable ice
     (§4.3).
+    Done (2026-10-31): lib/Climate keeps ClimateIce (lake, sea) per 50 km
+    cell, stepped hourly with the snow and seeded with it
+    (climateWinterSeed): lakes freeze below -3 °C air (a day at -13 °C),
+    the sea's shore below -8 °C at half speed, both thaw slowly above 0 °C
+    (a fifth a day at +5 °C); case 1268. Not one value per lake but per
+    place: a lake is the water well inside the island (all of a world with
+    no island, 143), the rest is sea; the ice grows out from the shore by
+    depth (water/WaterIce: a lake to 5 m at a full freeze, the sea only
+    its 1.2 m fringe; waterSurface.wgsl waterIceCover the twin), so a lake
+    thaws open from its deep middle. Drawn in the water shader: opaque
+    white-blue ice with cracks and frosted patches, the scene's snow on it,
+    no waves. Walkable: WalkerPhysics takes ice over waterIceWalkable (0.5)
+    as a place to stand and holds a mover at the water's surface there
+    (app3d/WalkerIceTest in RAE_WALKER_PHYSICS_TEST).
 11. **Weather model:** cloud cover, precipitation, humidity and fronts;
     its effect on the sun lux, the sky light and the auto exposure.
 12. **Clouds and mist from the weather:** cloud cover and darkness; mist
