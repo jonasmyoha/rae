@@ -18,8 +18,18 @@ the strength (the weather's speed over `windSwayMetersPerSecond`, 5 m/s,
 capped at `windMaxSway`), the direction and the gustiness; the drift and
 swings below stay. `RAE_WIND` fixes the strength (`fixedStrength`).
 `windMetersPerSecond` turns a sway back into m/s for the rain, the snow and
-the falling leaves. The shared gust fronts and the leaves they carry are
-planned in docs/leaf-particles-design.md.
+the falling leaves. The leaves the wind carries are planned in
+docs/leaf-particles-design.md.
+
+**Gust fronts are back (2026-10-31, lib/WindGust.rae and
+lib/wind.wgsl `windGustAt`):** one field, carried by the air's drift (the
+integral of the wind's velocity, `WindState.driftX`, sent in the frame
+uniform's last vec4, the shadow cascades' last vec4 and the grass
+uniform's `k`), so a turning or strengthening wind never jumps it. The
+trees' leaf patches (`windLeaf` takes the gust at the patch's pivot) and
+the grass (the compute pass stores each blade's gust in its record's
+`fade.x`) both read it. checks/windGust holds the WGSL to the Rae (7e-6 at
+256 points); case 1272_wind_gust its behavior.
 
 ## 1. What the wind is
 

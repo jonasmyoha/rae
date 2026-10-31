@@ -1,0 +1,191 @@
+# The gust field (docs/leaf-particles-design.md §2.3) computed by the WGSL
+# of lib/wind.wgsl windGustAt on the GPU is the same as lib/WindGust.rae's
+# windGustAt in Rae: 256 points in a calm, a breeze, a gale and a gale near
+# the drift's wrap, within 0.001 (the GPU's sine and fused multiply-adds
+# round a little differently).
+import Math
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuArgs
+open Wind
+open WindGust
+
+const gustCheckCount: Int = 256
+
+const gustCheckBytes: Int = 1024
+
+# The same point and wind as gust_check.wgsl for result `index`
+func gustCheckValue(index: view Int) ret Float {
+  let point: Int = index % 64
+  let kind: Int = index / 64
+  let x: Float = (point % 8).toFloat() * 29.75 - 120.0
+  let y: Float = (point / 8).toFloat() * 31.5 - 100.0
+  var wind: WindVector = {
+    x: 0.0
+    y: 0.0
+    gustiness: 0.6
+    time: 400.0
+    driftX: 1234.5
+    driftY: -567.25
+  }
+  if kind is 1 {
+    wind.x = 0.75
+    wind.y = 0.5
+  }
+  if kind is 2 {
+    wind.x = 2.5
+    wind.y = 1.75
+    wind.gustiness = 0.8
+    wind.time = 1812.5
+  }
+  if kind is 3 {
+    wind.x = -2.25
+    wind.y = 1.5
+    wind.gustiness = 0.8
+    wind.time = 3599.5
+    wind.driftX = 24575.5
+    wind.driftY = 3.25
+  }
+  ret windGustAt(x: x, y: y, wind: wind)
+}
+
+# The GPU's results, read back (empty when something failed)
+func gpuGusts(resources: mod GpuResources) ret List(Float) {
+  var values: List(Float) = List.create(Float, cap: gustCheckCount)
+  if let storage: BufferId = createBuffer(
+    resources: resources
+    size: gustCheckBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
+  ) {
+    if let staging: BufferId = createBuffer(
+      resources: resources
+      size: gustCheckBytes
+      usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+    ) {
+      if let pipeline: PipelineId = createComputePipeline(
+        resources: resources
+        shader: shader(files: ["lib/wind.wgsl", "gust_check.wgsl"])
+        entryPoint: "main"
+      ) {
+        let buffers: List(BufferId) = { storage }
+        let views: List(TextureViewId) = List.create(TextureViewId, cap: 0)
+        let samplers: List(SamplerId) = List.create(SamplerId, cap: 0)
+        if let bind: BindGroupId = createBindGroup(
+          resources: resources
+          pipeline: pipeline
+          buffers: buffers
+          textureViews: views
+          samplers: samplers
+        ) {
+          if var recording: Recording = beginRecording(resources: resources) {
+            let computed: Bool = recordComputeCommand(
+              recording: recording
+              resources: resources
+              command: computeCommand(
+                pipeline: pipeline
+                bindGroup: bind
+                workgroupsX: 4
+                workgroupsY: 1
+                workgroupsZ: 1
+              )
+            )
+            let copied: Bool = recordCopyBuffer(
+              recording: recording
+              resources: resources
+              source: storage
+              sourceOffset: 0
+              destination: staging
+              destinationOffset: 0
+              size: gustCheckBytes
+            )
+            if computed and copied {
+              if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+                var submitted: Int = 0
+                loop var attempt: Int = 0, attempt < 1000000 and submitted is 0, ++attempt {
+                  submitted = pollSubmission(resources: resources, id: submission)
+                }
+                retireSubmission(resources: resources, id: submission)
+                if submitted is 1 {
+                  if let read: ReadbackId = startReadback(
+                    resources: resources
+                    buffer: staging
+                    offset: 0
+                    size: gustCheckBytes
+                  ) {
+                    var status: Int = 0
+                    loop var attempt: Int = 0, attempt < 1000000 and status is 0, ++attempt {
+                      status = pollReadback(resources: resources, id: read)
+                    }
+                    var bytes: List(UInt8) = List.create(UInt8, cap: gustCheckBytes)
+                    loop var i: Int = 0, i < gustCheckBytes, ++i {
+                      bytes.add(value: 0)
+                    }
+                    if status is 1 and copyReadback(
+                      resources: resources
+                      id: read
+                      destination: bytes
+                    ) {
+                      loop var i: Int = 0, i < gustCheckCount, ++i {
+                        var bits: Int = 0
+                        loop var k: Int = 3, k >= 0, --k {
+                          bits = bits * 256 + bytes.copyAtFallback(index: i * 4 + k, fallback: 0) as Int
+                        }
+                        values.add(value: Math.floatFromBits(bits: bits))
+                      }
+                    }
+                    retireReadback(resources: resources, id: read)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  ret values
+}
+
+func main() ret Int {
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      ret 1
+    }
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 16) {
+    let gpu: List(Float) = gpuGusts(resources: resources)
+    if gpu.length is not gustCheckCount {
+      log("wind gust: the GPU pass did not run")
+      ret 2
+    }
+    var largest: Float = 0.0
+    var gusty: Int = 0
+    var calmMoved: Bool = false
+    loop var i: Int = 0, i < gustCheckCount, ++i {
+      let expected: Float = gustCheckValue(index: i)
+      let got: Float = gpu.copyAtFallback(index: i, fallback: -1.0)
+      largest = Math.max(a: largest, b: Math.abs(value: expected - got))
+      if expected > 0.3 {
+        gusty = gusty + 1
+      }
+      if i < 64 and got is not 0.0 {
+        calmMoved = true
+      }
+    }
+    log(
+      "wind gust: 256 points, the largest difference between the GPU and Rae {largest}, {gusty} gusty"
+    )
+    if largest > 0.001 {
+      ret 3
+    }
+    if gusty < 10 or calmMoved {
+      ret 4
+    }
+    ret 0
+  }
+  ret 1
+}

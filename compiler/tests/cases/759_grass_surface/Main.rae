@@ -1,6 +1,6 @@
 # The grass compute shader is a DECLARED composition (docs/shaders-and-the-
 # compiler.md): the lib default lists the compute bounds + noise + biome +
-# bounded obstacle circles + the grass pass, and an
+# bounded obstacle circles + the wind (its gust field) + the grass pass, and an
 # app supplies its own surface as a composition of its own, set whole. The
 # island size is no longer text in the shader — it is an `override` pair
 # handed to the pipeline (WorldBiome.islandConstants). An app's surface may
@@ -24,14 +24,14 @@ func main() ret Int {
   )
   log(render.text.contains(sub: "fn grassWindOffset"))
   log(render.text.contains(sub: "rooted * rooted"))
-  log(standard.sources.length() is 6)
+  log(standard.sources.length() is 7)
   let constants: List(ShaderConstant) = WorldBiome.islandConstants()
   log(constants.length() is 2)
   var grassCompute: GrassCompute = GrassCompute.createGrassCompute()
   log(not grassCompute.computeShaderSet)
   GrassCompute.grassSetComputeShader(grass: grassCompute, shader: standard)
   log(grassCompute.computeShaderSet)
-  log(grassCompute.computeShader.sources.length() is 6)
+  log(grassCompute.computeShader.sources.length() is 7)
   # An app's own surface data: none by default; set, it is kept for the GPU
   # (bound at @binding(4)) and the pipeline is rebuilt
   log(grassCompute.surfaceField.length() is 0)

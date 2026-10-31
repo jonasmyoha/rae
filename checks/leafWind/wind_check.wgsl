@@ -8,18 +8,20 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let normal = vec3<f32>(0.0, 0.0, 1.0);
   let wind = vec4<f32>(1.0, 0.3, 0.8, time);
   let flexibility = select(1.0, -1.0, id.x >= 32u);
-  let a = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility, wind);
-  let b = windLeaf(second, normal, pivot, vec3<f32>(0.0), flexibility, wind);
-  let attachment = windLeaf(pivot, normal, pivot, vec3<f32>(0.0), flexibility, wind);
-  let calm = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility, vec4<f32>(0.0, 0.0, 1.0, time));
-  let rigid = windLeaf(first, normal, pivot, vec3<f32>(0.0), 0.0, wind);
+  // between gusts, in one and at a storm gust's peak (lib/wind.wgsl windGustAt)
+  let gust = f32(id.x % 4u) * 0.33;
+  let a = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility, wind, gust);
+  let b = windLeaf(second, normal, pivot, vec3<f32>(0.0), flexibility, wind, gust);
+  let attachment = windLeaf(pivot, normal, pivot, vec3<f32>(0.0), flexibility, wind, gust);
+  let calm = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility, vec4<f32>(0.0, 0.0, 1.0, time), gust);
+  let rigid = windLeaf(first, normal, pivot, vec3<f32>(0.0), 0.0, wind, gust);
   let preserved = abs(distance(a.position, b.position) - distance(first, second)) < 0.00001
     && abs(distance(a.position, pivot) - distance(first, pivot)) < 0.00001;
   let normals = abs(length(a.normal) - 1.0) < 0.00001
     && abs(dot(a.position - pivot, a.normal) - dot(first - pivot, normal)) < 0.00001;
   let still = all(attachment.position == pivot) && all(calm.position == first) && all(rigid.position == first);
   let next = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility,
-    vec4<f32>(wind.xyz, time + 0.001));
+    vec4<f32>(wind.xyz, time + 0.001), gust);
   let continuous = distance(next.position, a.position) < 0.002;
   // Rotate the viewing basis around the tree at several elevations. Cards
   // preserve their dimensions and lie in the image plane at every angle.

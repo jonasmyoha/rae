@@ -8,10 +8,11 @@
 // the static shadow pass).
 
 // The tree and bush leaf motion (windLeaf), switched off on 2026-10-22
-// because it looked glitchy and back on 2026-10-23 WITHOUT the gust field:
-// the callers multiply a leaf's flexibility by this; 0.0 stills every leaf.
-// Grass reads the same WindVector but builds a cheaper rooted gust envelope in
-// grass_render.wgsl, since this noise function would run once per grass vertex.
+// because it looked glitchy (a gust field that jumped, see windGustAt) and
+// back on 2026-10-23; since 2026-10-31 it takes the gusts again, from the
+// drift-carried field below. The callers multiply a leaf's flexibility by
+// this; 0.0 stills every leaf. Grass reads the same field once per blade
+// (grass_render.wgsl).
 const windLeafScale: f32 = 1.0;
 
 fn windHash(p: vec2<f32>) -> f32 {
@@ -30,17 +31,54 @@ fn windNoise(p: vec2<f32>) -> f32 {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// How gusty it is at world point `xy`: 0 between gusts, up to 1 in one
-const windGustCell: f32 = 55.0;
-
-fn windGustAt(xy: vec2<f32>, wind: vec4<f32>) -> f32 {
-  let strength = length(wind.xy);
-  let dir = wind.xy / max(strength, 0.0001);
-  // The fronts travel with the wind, faster when it is stronger
-  let travel = dir * wind.w * (2.5 + 3.5 * strength);
-  let p = (xy - travel) / windGustCell;
-  let n = windNoise(p) * 0.65 + windNoise(p * 2.3 + vec2<f32>(7.1, 3.4)) * 0.35;
-  return smoothstep(0.42, 0.85, n);
+// The gust fronts (lib/WindGust.rae, docs/leaf-particles-design.md §2.3):
+// 0 between gusts .. 1 at the peak of a storm gust at world `xy` in `wind`,
+// the field the air carries: sampled at the point minus the wind's drift
+// `drift` (m; lib/Wind WindState.driftX, the integral of its velocity), so
+// it travels downwind and a turning wind never jumps it. An integer hash on
+// cells wrapped to 256 and only multiplies and adds, in the same order as
+// the Rae: MUST match lib/WindGust.rae windGustAt (checks/windGust).
+fn windGustPcg(value: u32) -> u32 {
+  let state = value * 747796405u + 2891336453u;
+  let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+fn windGustHash(column: i32, row: i32, seed: u32) -> f32 {
+  let inner = windGustPcg(u32(row & 255) + seed * 256u);
+  let mixed = windGustPcg(u32(column & 255) + inner);
+  return f32(mixed & 16777215u) * 0.000000059604645;
+}
+fn windGustSmooth(low: f32, scale: f32, value: f32) -> f32 {
+  let t = clamp((value - low) * scale, 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+fn windGustNoise(p: vec2<f32>, seed: u32) -> f32 {
+  let cell = floor(p);
+  let f = p - cell;
+  let u = f * f * (3.0 - 2.0 * f);
+  let column = i32(cell.x);
+  let row = i32(cell.y);
+  let a = windGustHash(column, row, seed);
+  let b = windGustHash(column + 1, row, seed);
+  let c = windGustHash(column, row + 1, seed);
+  let d = windGustHash(column + 1, row + 1, seed);
+  let bottom = a + (b - a) * u.x;
+  let top = c + (d - c) * u.x;
+  return bottom + (top - bottom) * u.y;
+}
+fn windGustAt(xy: vec2<f32>, wind: vec4<f32>, drift: vec2<f32>) -> f32 {
+  let strength = sqrt(wind.x * wind.x + wind.y * wind.y);
+  let air = xy - drift;
+  let blend = 0.5 + 0.5 * sin(wind.w * 0.05235988);
+  let first = windGustNoise(air * 0.020833334, 1u);
+  let second = windGustNoise(air * 0.020833334, 2u);
+  let fine = windGustNoise(air * 0.041666668, 3u);
+  let field = 0.65 * (first + (second - first) * blend) + 0.35 * fine;
+  let ordinary = windGustSmooth(0.42, 2.631579, field) * windGustSmooth(0.15, 2.857143, strength);
+  let threshold = 0.88 - 0.05 * clamp(strength - 1.0, 0.0, 2.0);
+  let storm = windGustSmooth(threshold, 12.5, windGustNoise(air * 0.010416667, 4u))
+            * windGustSmooth(0.8, 1.25, strength);
+  return max(0.65 * ordinary, storm);
 }
 
 // A leaf patch rotates as one rigid shape. The pivot/phase is shared by all
@@ -51,8 +89,10 @@ fn windRotate(value: vec3<f32>, axis: vec3<f32>, angle: f32) -> vec3<f32> {
   return value * cosine + cross(axis, value) * sin(angle)
        + axis * dot(axis, value) * (1.0 - cosine);
 }
+// `gust` is windGustAt at the patch's pivot (the caller computes it once for
+// this frame's and last frame's pose).
 fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f32>,
-            flexibility: f32, wind: vec4<f32>) -> WindLeaf {
+            flexibility: f32, wind: vec4<f32>, gust: f32) -> WindLeaf {
   var result: WindLeaf;
   result.position = world;
   result.normal = normal;
@@ -64,32 +104,32 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
     // world space; changing wind direction cannot jump an advected noise field.
     let treePhase = windHash(foot.xy) * 6.2831853;
     let branchPhase = windHash(pivot.xy + vec2<f32>(pivot.z)) * 6.2831853;
-    let activity = 0.75 + 0.25 * clamp(wind.z, 0.0, 1.0);
+    // a passing gust swings the sprays wider and leans them downwind
+    let activity = (0.6 + 0.25 * clamp(wind.z, 0.0, 1.0)) * (1.0 + 1.2 * gust);
     let swell = 0.14 * sin(wind.w * 0.95 + treePhase)
               + 0.06 * sin(wind.w * 1.47 + treePhase * 1.7);
     let branch = 0.065 * sin(wind.w * 1.8 + branchPhase)
                + 0.025 * sin(wind.w * 3.1 + branchPhase * 1.3);
     let angle = clamp(min(strength, 2.0) * abs(flexibility)
-                    * (0.065 + activity * (swell + branch)), -0.42, 0.42);
+                    * (0.065 + 0.12 * gust + activity * (swell + branch)), -0.42, 0.42);
     let axis = vec3<f32>(-direction.y, direction.x, 0.0);
     result.position = pivot + windRotate(world - pivot, axis, angle);
     result.normal = windRotate(normal, axis, angle);
     return result;
   }
   let phase = windHash(pivot.xy + vec2<f32>(pivot.z * 0.71, pivot.z * 0.37)) * 6.2831853;
-  // A steady gust level, not windGustAt: that field moves by the drifting
-  // direction times the total time and jumps between frames, which made
-  // the leaves (and the grass) twitch (docs/wind-design.md §5)
-  let gust = 0.5;
+  // The gust field (it travels with the air's drift, so it never jumps):
+  // about the old steady 0.5 on average, more as a gust crosses the crown
+  let push = 0.3 + gust;
   // Turning leaf patches, not bobbing crowns: in a steady breeze (strength
   // 1) a patch turns about 6 degrees each way, in a gust about 15, and a
   // gust also leans it downwind a little. Smaller angles (under 1 degree
   // between gusts) moved a leaf a few millimeters and could not be seen.
-  let activity = 0.45 + 0.55 * clamp(wind.z, 0.0, 1.0) * gust;
+  let activity = 0.45 + 0.55 * clamp(wind.z, 0.0, 1.0) * push;
   let response = sin(wind.w * 2.1 + phase) * 0.5
                + sin(wind.w * 3.7 + phase * 1.43) * 0.3
                + sin(wind.w * 6.3 + phase * 2.17) * 0.2;
-  let angle = clamp(flexibility * min(strength, 2.0) * (0.08 * gust + 0.22 * activity * response), -0.35, 0.35);
+  let angle = clamp(flexibility * min(strength, 2.0) * (0.08 * push + 0.22 * activity * response), -0.35, 0.35);
   let axis = normalize(vec3<f32>(-direction.y, direction.x, 0.25 * sin(phase)));
   result.position = pivot + windRotate(world - pivot, axis, angle);
   result.normal = windRotate(normal, axis, angle);

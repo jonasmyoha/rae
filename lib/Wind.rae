@@ -37,20 +37,37 @@ type WindState {
   time: Float64
   angle: Float
   strength: Float
+  # How far the air has moved (m), the integral of the wind's velocity,
+  # wrapped to windDriftPeriod: the gust field (lib/WindGust) travels with
+  # it, so a change of direction or strength never jumps the gusts; and its
+  # value the step before (for the motion vectors)
+  driftX: Float64 = 0.0
+  driftY: Float64 = 0.0
+  previousDriftX: Float64 = 0.0
+  previousDriftY: Float64 = 0.0
 }
 
-# What the shaders read (one vec4): the direction times the strength, the
-# gustiness, the time (s)
+# What the shaders read (two vec4): the direction times the strength, the
+# gustiness, the time (s); and the air's drift (m) now and the step before
 type WindVector {
   x: Float
   y: Float
   gustiness: Float
   time: Float
+  driftX: Float = 0.0
+  driftY: Float = 0.0
+  previousDriftX: Float = 0.0
+  previousDriftY: Float = 0.0
 }
 
 # The shaders' time wraps every hour: a 32-bit float then still holds a
 # quarter of a millisecond (a gust front jumps once an hour)
 const windTimeWrap: Float64 = 3600.0
+
+# The drift wraps at this many meters: a whole number of every gust noise's
+# period (lib/WindGust, 256 cells of 96, 48 and 24 m), so the wrap is
+# invisible, and a 32-bit float still holds a millimeter there
+const windDriftPeriod: Float64 = 24576.0
 
 # The wind speed (m/s) of one sway unit: a fresh breeze of 5 m/s sways the
 # trees as they are tuned (1), a gale of 15 m/s three times as much
@@ -109,6 +126,18 @@ func stepWind(state: mod WindState, settings: view WindSettings, deltaTime: view
   )
   state.angle = settings.angle + settings.angleSwing * turn
   state.strength = Math.max(a: 0.0, b: settings.strength * (1.0 + settings.strengthSwing * swell))
+  # the air moves on at the wind's speed (m/s)
+  let speed: Float = windMetersPerSecond(sway: state.strength) * Math.max(a: 0.0, b: deltaTime)
+  state.previousDriftX = state.driftX
+  state.previousDriftY = state.driftY
+  state.driftX = state.driftX + (Math.cos(x: state.angle) * speed) as Float64
+  state.driftY = state.driftY + (Math.sin(x: state.angle) * speed) as Float64
+  let shiftX: Float64 = Math.floor(x: (state.driftX / windDriftPeriod) as Float) as Float64 * windDriftPeriod
+  let shiftY: Float64 = Math.floor(x: (state.driftY / windDriftPeriod) as Float) as Float64 * windDriftPeriod
+  state.driftX = state.driftX - shiftX
+  state.previousDriftX = state.previousDriftX - shiftX
+  state.driftY = state.driftY - shiftY
+  state.previousDriftY = state.previousDriftY - shiftY
 }
 
 func windVector(state: view WindState, settings: view WindSettings) ret WindVector {
@@ -117,5 +146,9 @@ func windVector(state: view WindState, settings: view WindSettings) ret WindVect
     y: Math.sin(x: state.angle) * state.strength
     gustiness: settings.gustiness
     time: (state.time - Math.floor(x: (state.time / windTimeWrap) as Float) as Float64 * windTimeWrap) as Float
+    driftX: state.driftX as Float
+    driftY: state.driftY as Float
+    previousDriftX: state.previousDriftX as Float
+    previousDriftY: state.previousDriftY as Float
   }
 }

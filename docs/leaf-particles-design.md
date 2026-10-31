@@ -350,7 +350,10 @@ later idea: blowing snow from the same system, with a white flake card).
    front model, `windSettingsFromWeather`, `windMetersPerSecond`; the
    walkers and the tree lab drive lib/Wind from the weather; the rain, the
    snow and the current FallingLeaves use m/s. Case.
-2. **Gust fronts** (§2.3): `windGustAt` in Rae and WGSL; the grass and the
+2. **Gust fronts** (§2.3), done 2026-10-31: patches carried by the air's
+   drift (an integral of the wind, so they never jump), an integer hash so
+   Rae and WGSL agree (checks/windGust), case 1272_wind_gust (a breeze 27%
+   of the land gusty with no storm gusts, a gale 8% in storm gusts): `windGustAt` in Rae and WGSL; the grass and the
    trees' leaves take their gusts from it. Case and hardware check.
 3. **Wind controls** (§2.4): the settings panel's and the tree lab's wind
    override and its env variable; the panel's wind text.
