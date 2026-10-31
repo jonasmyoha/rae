@@ -24,7 +24,8 @@ open GeoPlace
 open app3d/SeasonImpostors
 open app3d/GroundPalette
 open app3d/SnowField
-open app3d/FallingLeaves
+open app3d/LeafRelease
+open LeafParticles
 open app3d/SettingsWeather
 open app3d/SettingsWind
 open app3d/WalkerAutoWalk
@@ -217,15 +218,35 @@ func updateWalkerClimate(app: mod WalkerApp) {
   )
   app.walkerMarks.precipitationEye = app.cameraSystem.camera.position
   app.walkerMarks.precipitationClock = app.frame.time
-  # leaves falling from the crowns that are losing theirs (app3d/FallingLeaves)
-  gatherFallingLeaves(
-    leaves: app.walkerMarks.fallingLeaves
+  # the leaves the crowns let go (app3d/LeafRelease), falling, landing and
+  # lying on the GPU (lib/LeafParticles); still while the scene is paused
+  var leafDeltaTime: Float = 0.0
+  if app.characterSystem.playing {
+    leafDeltaTime = app.frame.deltaTime
+  }
+  app.walkerMarks.leafFrame = app.walkerMarks.leafFrame + 1
+  releaseFieldLeaves(
+    leafParticles: app.walkerMarks.leafParticles
     field: app.terrainSystem.forest.field
     eye: app.cameraSystem.camera.position
-    seconds: app.frame.time
-    windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
-    windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
+    reach: walkerLeafReach
+    deltaTime: leafDeltaTime
+    frame: app.walkerMarks.leafFrame
   )
+  if let rendererResources: mod GpuResources = app.renderSystem.renderer.gpuResources {
+    stepLeafParticles(
+      leafParticles: app.walkerMarks.leafParticles
+      resources: rendererResources
+      eye: app.cameraSystem.camera.position
+      reach: walkerLeafReach * 1.5
+      windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
+      windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
+      deltaTime: leafDeltaTime
+      groundZ: app.characterSystem.groundZ
+      flatGround: false
+      waterZ: islandSeaSurfaceZ(groundZ: app.characterSystem.groundZ, biome: app.biome)
+    )
+  }
   setGbufferWetness(
     cache: app.renderSystem.renderer.passes.gbuffer
     wet: settingsWeatherWet(

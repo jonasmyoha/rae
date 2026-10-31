@@ -1,0 +1,580 @@
+# LeafParticles — leaves in the air on the GPU (docs/leaf-particles-design.md
+# §4): one resource the app owns, no entity and no CPU state per leaf.
+#
+# - The leaves live in a ring of `capacity` 32-byte records in a storage
+#   buffer (lib/leaf_particles.wgsl Leaf). A new leaf takes the next slot;
+#   the oldest is overwritten first, so no free list is needed. A slot whose
+#   age is 0 (as a new buffer is) is empty.
+# - Each frame the app lists the crowns letting leaves go (leafEmit: a
+#   center, a radius, a color, a size and how many; at most leafEmitMax),
+#   then stepLeafParticles uploads the list and the frame's uniform and
+#   records two compute passes in one recording: `spawn` (one invocation per
+#   leaf released this frame) and `fly` (one per ring slot: the fall in the
+#   wind, the landing on the terrain or the water, the death past the reach
+#   or the leaf's life).
+# - drawLeafParticles draws every slot as one instanced indirect draw of a
+#   midrib-folded card made in the vertex shader (lib/leaf_render.wgsl),
+#   into the open G-buffer pass, or the forward main pass in a forward
+#   frame (forward_entry.wgsl after it).
+#
+# The objects live in the renderer's own GPU manager, beside the frame
+# uniform and the forward lighting inputs the draws bind. Nothing is read
+# back; with no leaf released for a whole leaf's life nothing is dispatched
+# or drawn. app3d/LeafRelease decides which trees let leaves go.
+import Math
+import Vec3
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuCompute
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuArgs
+open gpu/GpuIds
+open gpu/DeviceFeatures
+open Gbuffer
+open GbufferIssue
+open ForwardMaterial
+open GrassCompute
+
+# A leaf's longest life (s): MUST match leaf_particles.wgsl leafLifeSeconds
+const leafLifeSeconds: Float = 20.0
+
+const leafEmitMax: Int = 512
+
+const leafRecordBytes: Int = 32
+
+const leafEmitBytes: Int = 48
+
+const leafUniformBytes: Int = 64
+
+# The folded card: two halves of two triangles
+const leafCardVertices: Int = 12
+
+const leafWorkgroupSize: Int = 64
+
+# One crown letting `count` leaves go this frame
+type LeafEmit {
+  crown: Vec3
+  radius: Float
+  color: Vec3
+  size: Float
+  count: Int
+  seed: Int
+}
+
+type LeafParticles {
+  capacity: Int
+  # the `override` constants of the terrain the leaves land on (the app's
+  # island: WorldBiome.islandConstantsFor)
+  constants: List(ShaderConstant)
+  emits: List(LeafEmit)
+  # the ring's next slot, this frame's releases, all released so far, and
+  # the seconds since the last release (past a leaf's life: nothing to do)
+  head: Int = 0
+  released: Int = 0
+  totalReleased: Int = 0
+  quietSeconds: Float = 1000.0
+  clock: Float = 0.0
+  made: Bool = false
+  uniformArgs: ArgWriter
+  emitArgs: ArgWriter
+  leaves: BufferId
+  uniform: BufferId
+  emitBuffer: BufferId
+  indirect: BufferId
+  spawnBounds: ComputeBounds
+  flyBounds: ComputeBounds
+  spawnPipeline: PipelineId
+  flyPipeline: PipelineId
+  spawnBind: BindGroupId
+  flyBind: BindGroupId
+  renderPipeline: RenderPipelineId
+  drawBind: BindGroupId
+  forwardPipeline: RenderPipelineId
+  forwardPipelineFormat: Int32 = 0
+  forwardBind: BindGroupId
+  forwardBindGen: Int = -1
+  inFlight: List(SubmissionId)
+}
+
+# An empty system of `capacity` leaves landing on the terrain of
+# `constants` (created on the GPU at the first step)
+func createLeafParticles(
+  capacity: view Int
+  constants: view List(ShaderConstant)
+) ret LeafParticles {
+  ret LeafParticles {
+    capacity: Math.max(a: capacity, b: 64)
+    constants: constants
+    emits: List.create(LeafEmit, cap: leafEmitMax)
+    uniformArgs: createArgs(uniform: true)
+    emitArgs: createArgs(uniform: false)
+    leaves: noBufferId()
+    uniform: noBufferId()
+    emitBuffer: noBufferId()
+    indirect: noBufferId()
+    spawnBounds: noComputeBounds(workgroupSize: leafWorkgroupSize)
+    flyBounds: noComputeBounds(workgroupSize: leafWorkgroupSize)
+    spawnPipeline: noPipelineId()
+    flyPipeline: noPipelineId()
+    spawnBind: noBindGroupId()
+    flyBind: noBindGroupId()
+    renderPipeline: noRenderPipelineId()
+    drawBind: noBindGroupId()
+    forwardPipeline: noRenderPipelineId()
+    forwardBind: noBindGroupId()
+    inFlight: List.create(SubmissionId, cap: 4)
+  }
+}
+
+# A crown at `crown` (radius `radius`) lets `count` leaves of `color` and
+# `size` (m) go this frame; false once the frame's list is full
+func leafEmit(
+  leafParticles: mod LeafParticles
+  crown: view Vec3
+  radius: view Float
+  color: view Vec3
+  size: view Float
+  count: view Int
+  seed: view Int
+) ret Bool {
+  if count <= 0 {
+    ret true
+  }
+  if leafParticles.emits.length >= leafEmitMax {
+    ret false
+  }
+  leafParticles.emits.add(value: {
+    crown: crown
+    radius: radius
+    color: color
+    size: size
+    count: count
+    seed: seed
+  })
+  ret true
+}
+
+# The leaves in the air or lying might still be alive
+func leafParticlesActive(leafParticles: view LeafParticles) ret Bool {
+  ret leafParticles.quietSeconds <= leafLifeSeconds + 1.0
+}
+
+func leafComputeShader() ret Shader {
+  ret shader(
+    files: [
+      "lib/gpu/computeBounds.wgsl"
+      "lib/noise.wgsl"
+      "lib/world_biome.wgsl"
+      "lib/leaf_particles.wgsl"
+    ]
+  )
+}
+
+# The buffers, the two compute pipelines and the G-buffer pipeline, once
+func ensureLeafGpu(leafParticles: mod LeafParticles, resources: mod GpuResources) {
+  if leafParticles.made {
+    ret
+  }
+  leafParticles.made = true
+  if let leaves: BufferId = createBuffer(
+    resources: resources
+    size: leafParticles.capacity * leafRecordBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst + WGPUBufferUsage_CopySrc
+  ) {
+    leafParticles.leaves = leaves
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: leafUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    leafParticles.uniform = uniform
+  }
+  if let emitBuffer: BufferId = createBuffer(
+    resources: resources
+    size: leafEmitMax * leafEmitBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    leafParticles.emitBuffer = emitBuffer
+  }
+  # every slot drawn as one card: the empty ones collapse in the shader
+  if let indirect: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_CopyDst
+  ) {
+    leafParticles.indirect = indirect
+    var args: ArgWriter = createArgs(uniform: false)
+    pushU32(writer: args, value: leafCardVertices)
+    pushU32(writer: args, value: leafParticles.capacity)
+    pushU32(writer: args, value: 0)
+    pushU32(writer: args, value: 0)
+    let unusedUploaded: Bool = uploadArgs(
+      writer: args
+      resources: resources
+      buffer: indirect
+      offset: 0
+    )
+  }
+  if let spawnBounds: ComputeBounds = createComputeBounds(
+    resources: resources
+    workgroupSize: leafWorkgroupSize
+  ) {
+    leafParticles.spawnBounds = spawnBounds
+  }
+  if let flyBounds: ComputeBounds = createComputeBounds(
+    resources: resources
+    workgroupSize: leafWorkgroupSize
+  ) {
+    leafParticles.flyBounds = flyBounds
+  }
+  if let spawnPipeline: PipelineId = createComputePipelineWithConstants(
+    resources: resources
+    shader: leafComputeShader()
+    entryPoint: "spawn"
+    constants: computeConstantsFor(
+      bounds: leafParticles.spawnBounds
+      constants: leafParticles.constants
+    )
+  ) {
+    leafParticles.spawnPipeline = spawnPipeline
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: leafParticles.spawnBounds.buffer))
+    entries.add(value: bufferRef(id: leafParticles.uniform))
+    entries.add(value: bufferRef(id: leafParticles.leaves))
+    entries.add(value: bufferRef(id: leafParticles.emitBuffer))
+    if let bind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: spawnPipeline
+      entries: entries
+    ) {
+      leafParticles.spawnBind = bind
+    }
+  }
+  if let flyPipeline: PipelineId = createComputePipelineWithConstants(
+    resources: resources
+    shader: leafComputeShader()
+    entryPoint: "fly"
+    constants: computeConstantsFor(
+      bounds: leafParticles.flyBounds
+      constants: leafParticles.constants
+    )
+  ) {
+    leafParticles.flyPipeline = flyPipeline
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: bufferRef(id: leafParticles.flyBounds.buffer))
+    entries.add(value: bufferRef(id: leafParticles.uniform))
+    entries.add(value: bufferRef(id: leafParticles.leaves))
+    if let bind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: flyPipeline
+      entries: entries
+    ) {
+      leafParticles.flyBind = bind
+    }
+  }
+  if let renderPipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: shader(files: ["lib/leaf_render.wgsl"])
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: gbufferProceduralPipelineSpec()
+  ) {
+    leafParticles.renderPipeline = renderPipeline
+  }
+  if not isValidBindGroup(resources: resources, id: leafParticles.flyBind) or not isValidRenderPipeline(
+    resources: resources
+    id: leafParticles.renderPipeline
+  ) {
+    log("[leaves] GPU objects could not be created; no leaves are drawn")
+  }
+}
+
+# This frame's leaves: the listed releases spawned and every leaf moved on
+# `deltaTime` s in the wind (`windX`, `windY` m/s), landing on the terrain
+# at `groundZ` (flat there with `flatGround`) or on the water at `waterZ`;
+# those farther than `reach` from `eye` die. Call before the frame's pass.
+func stepLeafParticles(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  eye: view Vec3
+  reach: view Float
+  windX: view Float
+  windY: view Float
+  deltaTime: view Float
+  groundZ: view Float
+  flatGround: view Bool
+  waterZ: view Float
+) {
+  pollSubmissions(inFlight: leafParticles.inFlight, resources: resources)
+  # the releases, at most an eighth of the ring in a frame, so a burst
+  # never overwrites leaves still in the air
+  var released: Int = 0
+  let frameCap: Int = leafParticles.capacity / 8
+  var emitCount: Int = 0
+  resetArgs(writer: leafParticles.emitArgs)
+  loop let emit: view LeafEmit in leafParticles.emits {
+    let count: Int = Math.min(a: emit.count, b: frameCap - released)
+    if count > 0 {
+      pushVec4F(
+        writer: leafParticles.emitArgs
+        x: emit.crown.x
+        y: emit.crown.y
+        z: emit.crown.z
+        w: emit.radius
+      )
+      pushVec4F(
+        writer: leafParticles.emitArgs
+        x: emit.color.x
+        y: emit.color.y
+        z: emit.color.z
+        w: emit.size
+      )
+      pushVec4U(
+        writer: leafParticles.emitArgs
+        x: count
+        y: released
+        z: emit.seed bitand 16777215
+        w: 0
+      )
+      released = released + count
+      emitCount = emitCount + 1
+    }
+  }
+  leafParticles.emits.clear()
+  leafParticles.released = released
+  leafParticles.totalReleased = leafParticles.totalReleased + released
+  leafParticles.clock = leafParticles.clock + deltaTime
+  if released > 0 {
+    leafParticles.quietSeconds = 0.0
+  } else {
+    leafParticles.quietSeconds = leafParticles.quietSeconds + deltaTime
+  }
+  if not leafParticlesActive(leafParticles: leafParticles) {
+    ret
+  }
+  ensureLeafGpu(leafParticles: leafParticles, resources: resources)
+  if not isValidBindGroup(resources: resources, id: leafParticles.flyBind) {
+    ret
+  }
+  var flat: Float = 0.0
+  if flatGround {
+    flat = 1.0
+  }
+  resetArgs(writer: leafParticles.uniformArgs)
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: eye.x
+    y: eye.y
+    z: eye.z
+    w: reach
+  )
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: windX
+    y: windY
+    z: Math.clamp(val: deltaTime, low: 0.0, high: 0.0333)
+    w: leafParticles.clock
+  )
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: groundZ
+    y: flat
+    z: waterZ
+    w: 0.0
+  )
+  pushVec4U(
+    writer: leafParticles.uniformArgs
+    x: leafParticles.head
+    y: leafParticles.capacity
+    z: emitCount
+    w: released
+  )
+  let unusedUniform: Bool = uploadArgs(
+    writer: leafParticles.uniformArgs
+    resources: resources
+    buffer: leafParticles.uniform
+    offset: 0
+  )
+  if emitCount > 0 {
+    let unusedEmits: Bool = uploadArgs(
+      writer: leafParticles.emitArgs
+      resources: resources
+      buffer: leafParticles.emitBuffer
+      offset: 0
+    )
+  }
+  if var recording: Recording = beginRecording(resources: resources) {
+    var recorded: Bool = true
+    if released > 0 {
+      recorded = recordBoundedCompute(
+        recording: recording
+        resources: resources
+        pipeline: leafParticles.spawnPipeline
+        bindGroup: leafParticles.spawnBind
+        bounds: leafParticles.spawnBounds
+        elementCount: released
+      )
+    }
+    if recorded and recordBoundedCompute(
+      recording: recording
+      resources: resources
+      pipeline: leafParticles.flyPipeline
+      bindGroup: leafParticles.flyBind
+      bounds: leafParticles.flyBounds
+      elementCount: leafParticles.capacity
+    ) {
+      let unusedSubmission: opt SubmissionId = trackSubmission(
+        inFlight: leafParticles.inFlight
+        resources: resources
+        recording: recording
+      )
+    }
+  }
+  leafParticles.head = (leafParticles.head + released) % leafParticles.capacity
+}
+
+# The forward main pass's pipeline and bind (a forward frame): the card
+# after the shading prelude, forward_entry.wgsl last; rebuilt when the
+# lighting inputs are
+func ensureLeafForward(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  let litFormat: Int32 = gbuffer.forward.litFormat
+  if litFormat is (0 as Int32) {
+    ret
+  }
+  if not (leafParticles.forwardPipelineFormat is litFormat) {
+    retireBindGroup(resources: resources, id: leafParticles.forwardBind)
+    retireRenderPipeline(resources: resources, id: leafParticles.forwardPipeline)
+    leafParticles.forwardBind = noBindGroupId()
+    leafParticles.forwardPipeline = noRenderPipelineId()
+    leafParticles.forwardPipelineFormat = litFormat
+    var leafShader: Shader = shader(files: [
+      "lib/precision_f32.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
+      "lib/leaf_render.wgsl"
+      "lib/forward_entry.wgsl"
+    ])
+    if deviceHasShaderF16() {
+      leafShader = shader(files: [
+        "lib/precision_f16.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
+        "lib/leaf_render.wgsl"
+        "lib/forward_entry.wgsl"
+      ])
+    }
+    if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
+      resources: resources
+      shader: leafShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsForward"
+      spec: forwardMaterialSpec(
+        litFormat: litFormat
+        stride: 0
+        attributes: List.create(VertexAttributeSpec, cap: 0)
+        depthWrite: true
+        depthCompare: WGPUCompareFunction_Greater
+        cullMode: WGPUCullMode_None
+      )
+      constants: forwardSsaoConstants(ssao: gbuffer.forward.ssao)
+    ) {
+      leafParticles.forwardPipeline = pipeline
+    }
+  }
+  if leafParticles.forwardBindGen is gbuffer.forward.inputsGen and bindGroupIsUsable(
+    resources: resources
+    id: leafParticles.forwardBind
+  ) {
+    ret
+  }
+  retireBindGroup(resources: resources, id: leafParticles.forwardBind)
+  leafParticles.forwardBind = noBindGroupId()
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 18)
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: leafParticles.leaves))
+  if not addForwardInputs(entries: entries, inputs: gbuffer.forward.inputs) {
+    ret
+  }
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: leafParticles.forwardPipeline
+    entries: entries
+  ) {
+    leafParticles.forwardBind = bind
+    leafParticles.forwardBindGen = gbuffer.forward.inputsGen
+  }
+}
+
+# Every leaf into the open G-buffer (or forward) pass: one indirect draw.
+# `resources` is the renderer's manager (the pass's).
+func drawLeafParticles(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  if not leafParticles.made or not leafParticlesActive(leafParticles: leafParticles) {
+    ret
+  }
+  if not bindGroupIsUsable(resources: resources, id: leafParticles.drawBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+    entries.add(value: bufferRef(id: gbuffer.frameUniform))
+    entries.add(value: bufferRef(id: leafParticles.leaves))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: leafParticles.renderPipeline
+      entries: entries
+    ) {
+      leafParticles.drawBind = bind
+    }
+  }
+  var pipeline: RenderPipelineId = leafParticles.renderPipeline
+  var bind: BindGroupId = leafParticles.drawBind
+  if gbuffer.forwardFrame {
+    ensureLeafForward(leafParticles: leafParticles, resources: resources, gbuffer: gbuffer)
+    pipeline = leafParticles.forwardPipeline
+    bind = leafParticles.forwardBind
+  }
+  unsafe {
+    if not gbufferFrameActive(cache: gbuffer) {
+      ret
+    }
+    let unusedDrawn: Bool = recordDrawIndirectInPass(
+      resources: resources
+      pass: gbuffer.pass
+      pipeline: pipeline
+      bindGroup: bind
+      indirect: bufferRef(id: leafParticles.indirect)
+    )
+  }
+}
+
+# Retire the GPU objects and drain the submissions (the app's shutdown)
+func releaseLeafParticles(leafParticles: mod LeafParticles, resources: mod GpuResources) {
+  drainSubmissions(inFlight: leafParticles.inFlight, resources: resources)
+  retireBindGroup(resources: resources, id: leafParticles.forwardBind)
+  retireBindGroup(resources: resources, id: leafParticles.drawBind)
+  retireBindGroup(resources: resources, id: leafParticles.spawnBind)
+  retireBindGroup(resources: resources, id: leafParticles.flyBind)
+  retireRenderPipeline(resources: resources, id: leafParticles.forwardPipeline)
+  retireRenderPipeline(resources: resources, id: leafParticles.renderPipeline)
+  retirePipeline(resources: resources, id: leafParticles.spawnPipeline)
+  retirePipeline(resources: resources, id: leafParticles.flyPipeline)
+  retireBuffer(resources: resources, id: leafParticles.leaves)
+  retireBuffer(resources: resources, id: leafParticles.uniform)
+  retireBuffer(resources: resources, id: leafParticles.emitBuffer)
+  retireBuffer(resources: resources, id: leafParticles.indirect)
+  retireBuffer(resources: resources, id: leafParticles.spawnBounds.buffer)
+  retireBuffer(resources: resources, id: leafParticles.flyBounds.buffer)
+  leafParticles.made = false
+}

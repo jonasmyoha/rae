@@ -1,0 +1,267 @@
+# lib/LeafParticles on the GPU (docs/leaf-particles-design.md §4): two crowns
+# release 300 leaves into a ring of 4096 over flat ground at z 0, in a wind
+# of 2 m/s toward +x; the ring is read back after 1 s, 12 s and 25 s. The
+# leaves are all there and falling after 1 s, drifting downwind, each in its
+# crown's color; after 12 s every one still there lies on the ground (one
+# lies 6 s, so the first to land are gone); after 25 s (past a leaf's life)
+# the ring is empty. A leaf past the reach dies at once.
+import Math
+import Vec3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuArgs
+open gpu/GpuIds
+open LeafParticles
+
+const checkCapacity: Int = 4096
+
+type RingCount {
+  alive: Int
+  landed: Int
+  meanX: Float
+  meanZ: Float
+  lowest: Float
+  highest: Float
+  reddish: Int
+  yellowish: Int
+}
+
+func floatAt(bytes: view List(UInt8), at: view Int) ret Float {
+  ret Math.floatFromBits(bits: wordAt(bytes: bytes, at: at))
+}
+
+func wordAt(bytes: view List(UInt8), at: view Int) ret Int {
+  var bits: Int = 0
+  loop var k: Int = 3, k >= 0, --k {
+    bits = bits * 256 + bytes.copyAtFallback(index: at + k, fallback: 0) as Int
+  }
+  ret bits
+}
+
+# The ring read back (empty when the read failed)
+func readRing(resources: mod GpuResources, leafParticles: view LeafParticles) ret List(UInt8) {
+  let size: Int = checkCapacity * leafRecordBytes
+  var bytes: List(UInt8) = List.create(UInt8, cap: size)
+  if let staging: BufferId = createBuffer(
+    resources: resources
+    size: size
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if recordCopyBuffer(
+        recording: recording
+        resources: resources
+        source: leafParticles.leaves
+        sourceOffset: 0
+        destination: staging
+        destinationOffset: 0
+        size: size
+      ) {
+        if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+          if waitSubmission(resources: resources, id: submission) {
+            if let read: ReadbackId = startReadback(
+              resources: resources
+              buffer: staging
+              offset: 0
+              size: size
+            ) {
+              if waitReadback(resources: resources, id: read) {
+                loop var i: Int = 0, i < size, ++i {
+                  bytes.add(value: 0)
+                }
+                if not copyReadback(resources: resources, id: read, destination: bytes) {
+                  bytes.clear()
+                }
+              }
+              retireReadback(resources: resources, id: read)
+            }
+          }
+          retireSubmission(resources: resources, id: submission)
+        }
+      }
+    }
+    retireBuffer(resources: resources, id: staging)
+  }
+  ret bytes
+}
+
+func countRing(bytes: view List(UInt8)) ret RingCount {
+  var count: RingCount = {
+    alive: 0
+    landed: 0
+    meanX: 0.0
+    meanZ: 0.0
+    lowest: 1000.0
+    highest: -1000.0
+    reddish: 0
+    yellowish: 0
+  }
+  loop var i: Int = 0, i < checkCapacity, ++i {
+    let at: Int = i * leafRecordBytes
+    if floatAt(bytes: bytes, at: at + 12) > 0.0 {
+      let z: Float = floatAt(bytes: bytes, at: at + 8)
+      count.alive = count.alive + 1
+      count.meanX = count.meanX + floatAt(bytes: bytes, at: at)
+      count.meanZ = count.meanZ + z
+      count.lowest = Math.min(a: count.lowest, b: z)
+      count.highest = Math.max(a: count.highest, b: z)
+      if wordAt(bytes: bytes, at: at + 28) >= 2147483648 {
+        count.landed = count.landed + 1
+      }
+      # the color's square root: red in byte 0, green in byte 1
+      let red: Int = bytes.copyAtFallback(index: at + 24, fallback: 0) as Int
+      let green: Int = bytes.copyAtFallback(index: at + 25, fallback: 0) as Int
+      if red > green * 2 {
+        count.reddish = count.reddish + 1
+      } else {
+        count.yellowish = count.yellowish + 1
+      }
+    }
+  }
+  if count.alive > 0 {
+    count.meanX = count.meanX / count.alive.toFloat()
+    count.meanZ = count.meanZ / count.alive.toFloat()
+  }
+  ret count
+}
+
+func stepFor(
+  leafParticles: mod LeafParticles
+  resources: mod GpuResources
+  seconds: view Float
+  eye: view Vec3
+) {
+  let steps: Int = (seconds * 30.0 + 0.5).toInt()
+  loop var i: Int = 0, i < steps, ++i {
+    stepLeafParticles(
+      leafParticles: leafParticles
+      resources: resources
+      eye: eye
+      reach: 60.0
+      windX: 2.0
+      windY: 0.0
+      deltaTime: 0.033333335
+      groundZ: 0.0
+      flatGround: true
+      waterZ: -1000.0
+    )
+    # no frame loop polls the device here: wait each step out
+    drainSubmissions(inFlight: leafParticles.inFlight, resources: resources)
+  }
+}
+
+func runCheck(resources: mod GpuResources) ret Int {
+  var leafParticles: LeafParticles = createLeafParticles(
+    capacity: checkCapacity
+    constants: List.create(ShaderConstant, cap: 0)
+  )
+  let eye: Vec3 = Vec3.create(x: 0.0, y: -10.0, z: 2.0)
+  let unusedRed: Bool = leafEmit(
+    leafParticles: leafParticles
+    crown: Vec3.create(x: 0.0, y: 0.0, z: 5.0)
+    radius: 1.5
+    color: Vec3.create(x: 0.6, y: 0.1, z: 0.05)
+    size: 0.12
+    count: 200
+    seed: 11
+  )
+  let unusedYellow: Bool = leafEmit(
+    leafParticles: leafParticles
+    crown: Vec3.create(x: 4.0, y: 0.0, z: 6.0)
+    radius: 1.5
+    color: Vec3.create(x: 0.7, y: 0.6, z: 0.05)
+    size: 0.12
+    count: 100
+    seed: 12
+  )
+  stepFor(
+    leafParticles: leafParticles
+    resources: resources
+    seconds: 1.0
+    eye: eye
+  )
+  let early: RingCount = countRing(
+    bytes: readRing(resources: resources, leafParticles: leafParticles)
+  )
+  log(
+    "after 1 s: {early.alive} alive, {early.landed} landed, mean x {early.meanX}, mean z {early.meanZ}, {early.reddish} red, {early.yellowish} yellow"
+  )
+  if early.alive is not 300 or early.landed > 0 or early.reddish is not 200 or early.yellowish is not 100 {
+    ret 2
+  }
+  # they fall (the crowns are at 5 and 6 m, centers at 1.33 m) and drift
+  # downwind (the crowns' center at x 1.33)
+  if early.meanZ > 5.0 or early.meanZ < 3.0 or early.meanX < 1.6 {
+    ret 3
+  }
+  stepFor(
+    leafParticles: leafParticles
+    resources: resources
+    seconds: 11.0
+    eye: eye
+  )
+  let late: RingCount = countRing(
+    bytes: readRing(resources: resources, leafParticles: leafParticles)
+  )
+  log(
+    "after 12 s: {late.alive} alive, {late.landed} landed, lowest {late.lowest}, highest {late.highest}, mean x {late.meanX}"
+  )
+  if late.alive < 50 or late.landed is not late.alive or late.lowest < 0.0 or late.highest > 0.02 {
+    ret 4
+  }
+  stepFor(
+    leafParticles: leafParticles
+    resources: resources
+    seconds: 13.0
+    eye: eye
+  )
+  let gone: RingCount = countRing(
+    bytes: readRing(resources: resources, leafParticles: leafParticles)
+  )
+  log("after 25 s: {gone.alive} alive")
+  if gone.alive is not 0 {
+    ret 5
+  }
+  # a leaf released far past the reach dies on its first step
+  let unusedFar: Bool = leafEmit(
+    leafParticles: leafParticles
+    crown: Vec3.create(x: 500.0, y: 0.0, z: 5.0)
+    radius: 1.0
+    color: Vec3.create(x: 0.5, y: 0.4, z: 0.1)
+    size: 0.1
+    count: 50
+    seed: 13
+  )
+  stepFor(
+    leafParticles: leafParticles
+    resources: resources
+    seconds: 0.1
+    eye: eye
+  )
+  let far: RingCount = countRing(
+    bytes: readRing(resources: resources, leafParticles: leafParticles)
+  )
+  log("past the reach: {far.alive} alive")
+  if far.alive is not 0 {
+    ret 6
+  }
+  log("leaf particles: released, fell downwind, landed, lay and died on the GPU")
+  releaseLeafParticles(leafParticles: leafParticles, resources: resources)
+  ret 0
+}
+
+func main() ret Int {
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      ret 1
+    }
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 64) {
+    ret runCheck(resources: resources)
+  }
+  ret 1
+}
