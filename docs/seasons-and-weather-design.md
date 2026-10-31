@@ -307,7 +307,8 @@ that adds it.
 ## 9. The tasks (queued as "[seasons n/15]")
 
 1. **Nearest city:** the city table and the panel line under the latitude
-   and longitude (§6). Independent of the rest.
+   and longitude (§6). Independent of the rest. Done (2026-10-31): lib/Cities
+   (381 cities, the haversine nearest), the panel's "near ..." line, case 1262.
 2. **Year and place:** `TimeOfDay.yearSpeed`; the latitude at a point
    (143's north offset); the lab's `RAE_DAY_OF_YEAR` / `RAE_LATITUDE` and a
    day slider.
