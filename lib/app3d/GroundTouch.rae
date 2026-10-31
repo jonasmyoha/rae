@@ -24,6 +24,12 @@ type GroundAnswer {
   # Grass: a touch kicks up blades; anything else, dust
   blades: Bool
   dustColor: Vec3
+  # The blades' color: the grass's own where it is touched (the walkers
+  # give their ground palette's, app3d/GroundPalette)
+  bladeColor: Vec3 = Vec3.create(x: 0.08, y: 0.36, z: 0.05)
+  # In water: nothing is kicked up (the water splashes instead,
+  # water/WadeSplash)
+  inWater: Bool = false
 }
 
 func createGroundAnswer() ret GroundAnswer {
@@ -96,7 +102,7 @@ func kickedParticle(
   let across: Float = (side - 0.5) * 1.2
   let start: Vec3 = Vec3.create(x: feet.x, y: feet.y, z: feet.z + 0.04)
   if answer.blades {
-    let greens: Float = 0.7 + 0.6 * shade
+    let greens: Float = 0.8 + 0.4 * shade
     ret GroundParticle {
       position: start
       velocity: Vec3.create(
@@ -108,7 +114,7 @@ func kickedParticle(
       lifetime: 0.55 + 0.35 * lift
       size: 1.0
       growth: 0.0
-      color: Vec3.create(x: 0.08 * greens, y: 0.36 * greens, z: 0.05 * greens)
+      color: Vec3.vscale(a: answer.bladeColor, s: greens)
       shape: GroundParticleShape.blade
       spin: shade * 6.28
       spinRate: (side - 0.5) * 18.0
