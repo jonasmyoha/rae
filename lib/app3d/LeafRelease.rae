@@ -1,16 +1,28 @@
 # app3d/LeafRelease — which trees let leaves go this frame
 # (docs/leaf-particles-design.md §3), into lib/LeafParticles' emit list.
-# Today's rule (the earlier app3d/FallingLeaves', seasons step 14): while a
-# deciduous kind loses its leaves (app3d/PropSeason propSeasonLoss past its
-# start, the slow temperature falling), each of its trees within the reach
-# of the eye keeps up to fallingLeavesPerTree leaves in the air at once, most
-# in the middle of its fall, in its autumn color. A leaf takes about the
-# crown's height over fallingLeafSpeed to come down, so a tree releases
-# that many over that time: a rate, drawn into whole leaves each frame by a
-# hash of the tree and the frame (no state per tree). The wind's part
-# (summer storms, autumn gusts) is [leaves 5/8].
+# A tree's release (leaves a second, leafReleaseRate) has two parts:
+#
+# - the season's: while a deciduous kind loses its leaves (app3d/PropSeason
+#   propSeasonLoss past its start, the slow temperature falling), the tree
+#   keeps up to fallingLeavesPerTree leaves in the air at once, most in the
+#   middle of its fall: about the crown's height over fallingLeafSpeed to
+#   come down, so that many over that time;
+# - the wind's: the gust at the tree (lib/WindGust windGustAt) past
+#   leafGustThreshold pulls leaves off, as the square of the excess, times
+#   how easily its leaves let go (leafReleaseHold: a little in summer and
+#   spring, fully once they turn) and the leaves still on it. So a summer
+#   storm takes a few green leaves, an autumn gust a cloud of them, and a
+#   calm nothing.
+#
+# Evergreens and bare trees let nothing go. The leaves are the color the
+# crown has (leafReleaseColor). Each frame's rate is drawn into whole
+# leaves by a hash of the tree and the frame, so there is no state per
+# tree and the count is right over many frames; LeafParticles caps a
+# frame's total by its ring.
 import Math
 import Vec3
+open Wind
+open WindGust
 open app3d/PropField
 open app3d/PropSeason
 open app3d/PropFade
@@ -36,9 +48,68 @@ func fallingLeavesOf(loss: view Float) ret Int {
   ret Math.max(a: 1, b: (fallingLeavesPerTree.toFloat() * (0.35 + 0.65 * middle)).toInt())
 }
 
+# A random (0 .. 1) for tree `index` on frame `seed`: the integer hash of
+# lib/WindGust, exact however long the app runs
 func leafReleaseHash(index: view Int, seed: view Int) ret Float {
-  let mixed: Float = Math.sin(x: index.toFloat() * 12.9898 + seed.toFloat() * 78.233) * 43758.5453
-  ret mixed - Math.floor(x: mixed)
+  let mixed: Int = windGustPcg(value: (index * 9781 + seed * 6271) bitand windGustMask)
+  ret (mixed bitand 16777215).toFloat() * 0.000000059604645
+}
+
+# The gust (lib/WindGust, 0 .. 1) past which the wind pulls leaves off: the
+# peak of an ordinary gust is 0.65, of a storm gust 1
+const leafGustThreshold: Float = 0.4
+
+# Leaves a second a tree in full leaf, letting go easily, loses for each
+# unit of the gust's squared excess (a storm gust's peak: 0.36 of it)
+const leafGustRate: Float = 100.0
+
+# How easily a tree's leaves let go (0 .. 1): a little while green, fully
+# once they have turned (the slow temperature `slow` falling past the
+# kind's turnFull)
+func leafReleaseHold(season: view PropSeason, slow: view Float, warming: view Bool) ret Float {
+  if season.on is false or season.deciduous is false {
+    ret 0.0
+  }
+  if warming {
+    ret 0.02
+  }
+  ret 0.02 + 0.98 * propSeasonRamp(from: season.turnStart, to: season.turnFull, value: slow)
+}
+
+# How many leaves a second a tree of `season` at slow temperature `slow`
+# (`warming` whether it is rising) lets go in a gust of `gust` (0 .. 1),
+# its crown `drop` m over its foot
+func leafReleaseRate(
+  season: view PropSeason
+  slow: view Float
+  warming: view Bool
+  gust: view Float
+  drop: view Float
+) ret Float {
+  if season.on is false or season.deciduous is false {
+    ret 0.0
+  }
+  var seasonal: Float = 0.0
+  if warming is false {
+    seasonal = fallingLeavesOf(loss: propSeasonLoss(season: season, slow: slow, warming: false)).toFloat() * fallingLeafSpeed / Math.max(
+      a: drop
+      b: 1.0
+    )
+  }
+  let foliage: Float = 1.0 - propSeasonLoss(season: season, slow: slow, warming: warming)
+  let excess: Float = Math.max(a: gust - leafGustThreshold, b: 0.0)
+  ret seasonal + foliage * leafReleaseHold(season: season, slow: slow, warming: warming) * excess * excess * leafGustRate
+}
+
+# The color of the leaves a tree lets go: the crown's, its summer green
+# tinted by the season (fully turned it is the kind's autumn color)
+func leafReleaseColor(season: view PropSeason, slow: view Float, warming: view Bool) ret Vec3 {
+  let tint: Vec3 = propSeasonTint(season: season, slow: slow, warming: warming)
+  ret Vec3.create(
+    x: season.summerColor.x * tint.x
+    y: season.summerColor.y * tint.y
+    z: season.summerColor.z * tint.z
+  )
 }
 
 # The whole leaves of `rate` a second released in `deltaTime` s: the
@@ -49,17 +120,18 @@ func leafReleaseCount(rate: view Float, deltaTime: view Float, chance: view Floa
 }
 
 # This frame's releases from the trees of `field` (its season set) within
-# `reach` of `eye`, over `deltaTime` s; `frame` counts the frames (the
-# draw's seed)
+# `reach` of `eye`, over `deltaTime` s in `wind` (its gusts); `frame`
+# counts the frames (the draw's seed)
 func releaseFieldLeaves(
   leafParticles: mod LeafParticles
   field: view PropField
   eye: view Vec3
   reach: view Float
   deltaTime: view Float
+  wind: view WindVector
   frame: view Int
 ) {
-  if field.seasonsOn is false or field.seasonWarming or field.cellStart.length is 0 {
+  if field.seasonsOn is false or field.cellStart.length is 0 or deltaTime <= 0.0 {
     ret
   }
   let first: Int = propCellOf(field: field, x: eye.x - reach, y: eye.y - reach)
@@ -82,33 +154,32 @@ func releaseFieldLeaves(
         }
         if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
           if kind.season.deciduous {
-            let loss: Float = propSeasonLoss(
-              season: kind.season
-              slow: field.seasonSlow + propSeasonShift(
-                seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
-              )
-              warming: false
+            let slow: Float = field.seasonSlow + propSeasonShift(
+              seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
             )
-            let inAir: Int = fallingLeavesOf(loss: loss)
-            if inAir > 0 {
-              let crown: Vec3 = propCenter(kind: kind, placement: placement)
-              let drop: Float = Math.max(a: crown.z - placement.position.z, b: 1.0)
-              let count: Int = leafReleaseCount(
-                rate: inAir.toFloat() * fallingLeafSpeed / drop
-                deltaTime: deltaTime
-                chance: leafReleaseHash(index: index, seed: frame)
-              )
-              if not leafEmit(
-                leafParticles: leafParticles
-                crown: crown
-                radius: propRadius(kind: kind, placement: placement) * 0.6
-                color: kind.season.fallColor
-                size: fallingLeafSize
-                count: count
-                seed: index * 7919 + frame
-              ) {
-                ret
-              }
+            let crown: Vec3 = propCenter(kind: kind, placement: placement)
+            let rate: Float = leafReleaseRate(
+              season: kind.season
+              slow: slow
+              warming: field.seasonWarming
+              gust: windGustAt(x: placement.position.x, y: placement.position.y, wind: wind)
+              drop: crown.z - placement.position.z
+            )
+            let count: Int = leafReleaseCount(
+              rate: rate
+              deltaTime: deltaTime
+              chance: leafReleaseHash(index: index, seed: frame)
+            )
+            if count > 0 and not leafEmit(
+              leafParticles: leafParticles
+              crown: crown
+              radius: propRadius(kind: kind, placement: placement) * 0.6
+              color: leafReleaseColor(season: kind.season, slow: slow, warming: field.seasonWarming)
+              size: fallingLeafSize
+              count: count
+              seed: index * 7919 + frame
+            ) {
+              ret
             }
           }
         }

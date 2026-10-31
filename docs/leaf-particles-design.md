@@ -373,7 +373,15 @@ later idea: blowing snow from the same system, with a white flake card).
    cull), the instanced indirect draw of a bent card. Replaces
    app3d/FallingLeaves in the walkers and the tree lab with the same
    release as today. Hardware check.
-5. **Release model** (§3): per-kind `hold`, the seasonal and wind terms,
+5. **Release model** (§3), done 2026-10-31 (app3d/LeafRelease
+   leafReleaseRate: the season's trickle plus foliage x hold x
+   max(0, gust - 0.4)^2 x 100 leaves a second; hold 0.02 green, 1 once
+   turned; the color the crown's, PropSeason.summerColor tinted; an integer
+   hash per tree and frame; LeafParticles leafFrameCap; case
+   1274_leaf_release: a summer storm gust 0.7 leaves a second a tree, an
+   autumn one 28.7, the autumn trickle 0.9). The seasonal part stays the
+   old in-air rule rather than the loss's rate of change, so leaves keep
+   falling while the clock stands still: per-kind `hold`, the seasonal and wind terms,
    summer storms, evergreens, the per-frame cap. Case.
 6. **Flight and landing look** (§4.3, §5.1, §5.2, §5.4): glide, tumble,
    curl-noise swirls, updraft, water floating, snow surface, dither fade,

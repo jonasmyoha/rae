@@ -1,0 +1,144 @@
+# app3d/LeafRelease (docs/leaf-particles-design.md §3): how many leaves a
+# second a tree lets go. A calm summer: none; a summer storm gust: a few
+# green ones; a turning tree: the season's trickle, and a cloud in a storm
+# gust; bare trees and evergreens: none. The leaves are the crown's color.
+# The hashed whole counts add up to the rate; LeafParticles' frame cap
+# follows its ring.
+import Math
+import Vec3
+open app3d/PropSeason
+open app3d/LeafRelease
+open LeafParticles
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func tenths(value: view Float) ret String {
+  let scaled: Int = (value * 10.0 + 0.5).toInt()
+  ret "{scaled / 10}.{scaled % 10}"
+}
+
+func main() {
+  let birch: PropSeason = {
+    on: true
+    deciduous: true
+    autumnTint: Vec3.create(x: 4.0, y: 2.0, z: 0.5)
+    fallColor: Vec3.create(x: 0.48, y: 0.52, z: 0.025)
+    summerColor: Vec3.create(x: 0.12, y: 0.26, z: 0.05)
+  }
+  let spruce: PropSeason = { on: true }
+  # a crown 6 m over the foot; summer at 18 °C, a turned tree at 5.5 °C
+  # (losing its first leaves), bare at 0 °C
+  let summerCalm: Float = leafReleaseRate(
+    season: birch
+    slow: 18.0
+    warming: false
+    gust: 0.0
+    drop: 6.0
+  )
+  let summerGust: Float = leafReleaseRate(
+    season: birch
+    slow: 18.0
+    warming: false
+    gust: 0.65
+    drop: 6.0
+  )
+  let summerStorm: Float = leafReleaseRate(
+    season: birch
+    slow: 18.0
+    warming: false
+    gust: 1.0
+    drop: 6.0
+  )
+  let autumnCalm: Float = leafReleaseRate(
+    season: birch
+    slow: 5.5
+    warming: false
+    gust: 0.0
+    drop: 6.0
+  )
+  let autumnStorm: Float = leafReleaseRate(
+    season: birch
+    slow: 5.5
+    warming: false
+    gust: 1.0
+    drop: 6.0
+  )
+  let bareStorm: Float = leafReleaseRate(
+    season: birch
+    slow: 0.0
+    warming: false
+    gust: 1.0
+    drop: 6.0
+  )
+  let springStorm: Float = leafReleaseRate(
+    season: birch
+    slow: 14.0
+    warming: true
+    gust: 1.0
+    drop: 6.0
+  )
+  let spruceStorm: Float = leafReleaseRate(
+    season: spruce
+    slow: 4.0
+    warming: false
+    gust: 1.0
+    drop: 6.0
+  )
+  log(
+    "leaves a second: summer calm {tenths(value: summerCalm)}, gust {tenths(value: summerGust)}, storm {tenths(
+      value: summerStorm
+    )}; autumn calm {tenths(value: autumnCalm)}, storm {tenths(value: autumnStorm)}"
+  )
+  check(label: "a calm summer lets nothing go", ok: summerCalm is 0.0)
+  check(
+    label: "a summer storm gust takes a few green leaves, an ordinary gust fewer"
+    ok: summerStorm > 0.3 and summerStorm < 2.0 and summerGust > 0.0 and summerGust < summerStorm
+  )
+  check(label: "a turning tree trickles in a calm", ok: autumnCalm > 0.5 and autumnCalm < 5.0)
+  check(
+    label: "an autumn storm gust: a cloud of leaves"
+    ok: autumnStorm > 20.0 * summerStorm and autumnStorm > 15.0
+  )
+  check(label: "a bare tree lets nothing go", ok: bareStorm is 0.0)
+  check(label: "an evergreen lets nothing go", ok: spruceStorm is 0.0)
+  check(
+    label: "a spring storm takes a few new leaves"
+    ok: springStorm > 0.0 and springStorm <= summerStorm
+  )
+  # the colors: summer's green, a turned tree's autumn color
+  let green: Vec3 = leafReleaseColor(season: birch, slow: 18.0, warming: false)
+  let turned: Vec3 = leafReleaseColor(season: birch, slow: 5.0, warming: false)
+  check(
+    label: "a summer leaf is the kind's green"
+    ok: Math.abs(value: green.y - 0.26) < 0.001 and green.y > green.x
+  )
+  check(
+    label: "a turned leaf is the kind's autumn color"
+    ok: Math.abs(value: turned.x - 0.48) < 0.001 and Math.abs(value: turned.y - 0.52) < 0.001
+  )
+  # whole leaves: 6000 frames at 3 a second come to about 300 (one
+  # standard deviation is 17)
+  var total: Int = 0
+  loop var frame: Int = 0, frame < 6000, ++frame {
+    total = total + leafReleaseCount(
+      rate: 3.0
+      deltaTime: 0.016666668
+      chance: leafReleaseHash(index: 4321, seed: frame)
+    )
+  }
+  log("6000 frames at 3 a second: {total} leaves")
+  check(label: "the hashed counts add up to the rate", ok: total > 270 and total < 330)
+  check(
+    label: "the frame cap follows the ring"
+    ok: leafFrameCap(capacity: 8192, deltaTime: 0.016666668) is 14 and leafFrameCap(
+      capacity: 8192
+      deltaTime: 0.0
+    ) is 1 and leafFrameCap(capacity: 8192, deltaTime: 10.0) is 1024
+  )
+}

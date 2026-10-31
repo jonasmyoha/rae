@@ -292,6 +292,16 @@ func ensureLeafGpu(leafParticles: mod LeafParticles, resources: mod GpuResources
   }
 }
 
+# The most leaves a frame of `deltaTime` s may release into a ring of
+# `capacity`: twice what the ring holds over a leaf's life at that rate,
+# and an eighth of the ring at most
+func leafFrameCap(capacity: view Int, deltaTime: view Float) ret Int {
+  ret Math.min(
+    a: capacity / 8
+    b: Math.max(a: 1, b: (capacity.toFloat() / leafLifeSeconds * deltaTime * 2.0 + 0.5).toInt())
+  )
+}
+
 # This frame's leaves: the listed releases spawned and every leaf moved on
 # `deltaTime` s in the wind (`windX`, `windY` m/s), landing on the terrain
 # at `groundZ` (flat there with `flatGround`) or on the water at `waterZ`;
@@ -309,10 +319,10 @@ func stepLeafParticles(
   waterZ: view Float
 ) {
   pollSubmissions(inFlight: leafParticles.inFlight, resources: resources)
-  # the releases, at most an eighth of the ring in a frame, so a burst
-  # never overwrites leaves still in the air
+  # the releases, capped so a gale fills the ring instead of overwriting
+  # leaves still in the air
   var released: Int = 0
-  let frameCap: Int = leafParticles.capacity / 8
+  let frameCap: Int = leafFrameCap(capacity: leafParticles.capacity, deltaTime: deltaTime)
   var emitCount: Int = 0
   resetArgs(writer: leafParticles.emitArgs)
   loop let emit: view LeafEmit in leafParticles.emits {
