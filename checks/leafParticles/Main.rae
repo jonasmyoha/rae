@@ -2,7 +2,8 @@
 # release 280 leaves over 20 frames into a ring of 4096 over flat ground at z 0, in a wind
 # of 2 m/s toward +x; the ring is read back after 1 s, 12 s and 25 s. The
 # leaves are all there and falling after 1 s, drifting downwind, each in its
-# crown's color; after 12 s every one still there lies on the ground (one
+# crown's color; after 12 s most still there lie on the ground and none is
+# over the crowns (the swirls and the gusts' updrafts keep some aloft; one
 # lies 6 s, so the first to land are gone); after 25 s (past a leaf's life)
 # the ring is empty. A leaf past the reach dies at once.
 import Math
@@ -139,14 +140,16 @@ func stepFor(
     stepLeafParticles(
       leafParticles: leafParticles
       resources: resources
-      eye: eye
-      reach: 60.0
-      windX: 2.0
-      windY: 0.0
-      deltaTime: 0.033333335
-      groundZ: 0.0
-      flatGround: true
-      waterZ: -1000.0
+      step: {
+        eye: eye
+        reach: 60.0
+        windX: 2.0
+        windY: 0.0
+        wind: { x: 0.4, y: 0.0, gustiness: 0.6, time: 0.0 }
+        deltaTime: 0.033333335
+        groundZ: 0.0
+        flatGround: true
+      }
     )
     # no frame loop polls the device here: wait each step out
     drainSubmissions(inFlight: leafParticles.inFlight, resources: resources)
@@ -170,6 +173,7 @@ func runCheck(resources: mod GpuResources) ret Int {
       size: 0.12
       count: 9
       seed: 11 + frame
+      shape: 1
     )
     let unusedYellow: Bool = leafEmit(
       leafParticles: leafParticles
@@ -179,6 +183,7 @@ func runCheck(resources: mod GpuResources) ret Int {
       size: 0.12
       count: 5
       seed: 101 + frame
+      shape: 3
     )
     stepFor(
       leafParticles: leafParticles
@@ -219,7 +224,7 @@ func runCheck(resources: mod GpuResources) ret Int {
   log(
     "after 12 s: {late.alive} alive, {late.landed} landed, lowest {late.lowest}, highest {late.highest}, mean x {late.meanX}"
   )
-  if late.alive < 50 or late.landed is not late.alive or late.lowest < 0.0 or late.highest > 0.02 {
+  if late.alive < 50 or late.landed * 4 < late.alive * 3 or late.lowest < 0.0 or late.highest > 5.0 {
     ret 4
   }
   stepFor(
@@ -244,6 +249,7 @@ func runCheck(resources: mod GpuResources) ret Int {
     size: 0.1
     count: 50
     seed: 13
+    shape: 0
   )
   stepFor(
     leafParticles: leafParticles

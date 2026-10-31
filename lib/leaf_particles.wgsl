@@ -1,7 +1,8 @@
 // The leaves in the air (lib/LeafParticles.rae, docs/leaf-particles-design.md
 // §4.3): a ring of leaves in a storage buffer, no entity per leaf. Composed
-// after lib/gpu/computeBounds.wgsl (binding 0), lib/noise.wgsl and
-// lib/world_biome.wgsl (raeTerrainHeight, the ground they land on).
+// after lib/gpu/computeBounds.wgsl (binding 0), lib/noise.wgsl,
+// lib/world_biome.wgsl (raeTerrainHeight, the ground they land on) and
+// lib/wind.wgsl (windGustAt and its noise: the gusts and the swirls).
 //
 // Two entry points, recorded one after the other in the frame's one
 // recording:
@@ -9,8 +10,16 @@
 //   CPU's list of crowns letting leaves go, with a running first-leaf
 //   index) by a binary search and writes a new leaf into its ring slot;
 // - `fly` runs once per ring slot: a live leaf falls through the air in the
-//   wind, flutters side to side and tumbles, lands on the ground (or the
-//   water) and lies there until its life ends; one past the reach dies.
+//   air, lands on the ground (on the snow, if any) or floats on the water,
+//   and lies there until its life ends; one past the reach dies.
+//
+// The air a leaf falls through (docs/leaf-particles-design.md §5): the
+// mean wind, stronger in a gust (the gust field the trees and the grass
+// sway in, so a gust carries the leaves it shakes loose); swirls, the curl
+// of a slow noise carried with the air (no divergence, so the leaves do
+// not bunch), stronger in a gust; an updraft at a gust's leading edge (the
+// gust ahead weaker than here), which lifts leaves over the crowns; and its
+// own side-to-side glide. It tumbles faster in a gust.
 
 struct Leaf {
   position: vec3<f32>,
@@ -20,7 +29,8 @@ struct Leaf {
   motion: vec2<u32>,
   // the color's square root in rgb (8 bits each), its size in a
   color: u32,
-  // a random in bits 0..23, bit 31 set once it lies on the ground
+  // a random in bits 0..23, its shape in bits 24..25 (leaf_render.wgsl),
+  // bit 30 set while it floats on the water, bit 31 once it has landed
   seed: u32,
 };
 struct LeafEmit {
@@ -29,20 +39,28 @@ struct LeafEmit {
   // the leaves' color (linear) and size (m)
   color: vec4<f32>,
   // x: how many leaves, y: the first one's index among this frame's
-  // releases, z: a seed
+  // releases, z: a seed, w: the leaves' shape (0 oval, 1 maple, 2 birch,
+  // 3 ginkgo)
   info: vec4<u32>,
 };
+// MUST match leaf_render.wgsl LeafDrawU and lib/LeafParticles.rae
 struct LeafU {
   // the eye and the reach past which a leaf dies
   eye: vec4<f32>,
   // the wind (m/s) xy, the time step (s), the clock (s)
   air: vec4<f32>,
   // x: the ground's base height, y: 1 for flat ground at x (no terrain),
-  // z: the water's surface (the lowest a leaf lands), w: unused
+  // z: the water's surface (the lowest a leaf lands), w: the snow's depth
   ground: vec4<f32>,
   // x: the ring's head (the first slot this frame writes), y: the ring's
   // size, z: the emits, w: this frame's releases
   ring: vec4<u32>,
+  // the renderer's wind vector (lib/Wind: sway xy, gustiness, its clock)
+  wind: vec4<f32>,
+  // xy: the air's drift (m), z: 1 for the toon look (leaf_render.wgsl)
+  drift: vec4<f32>,
+  // xyz: toward the sun (leaf_render.wgsl's backlit glow)
+  sun: vec4<f32>,
 };
 @group(0) @binding(1) var<uniform> U: LeafU;
 @group(0) @binding(2) var<storage, read_write> leaves: array<Leaf>;
@@ -52,6 +70,7 @@ struct LeafU {
 const leafLifeSeconds: f32 = 20.0;
 const leafRestSeconds: f32 = 6.0;
 const leafLanded: u32 = 2147483648u;
+const leafFloating: u32 = 1073741824u;
 
 fn leafHash(value: u32) -> u32 {
   let state = value * 747796405u + 2891336453u;
@@ -62,12 +81,24 @@ fn leafRandom(value: u32) -> f32 {
   return f32(leafHash(value) & 16777215u) * 0.000000059604645;
 }
 
-fn leafGround(p: vec2<f32>) -> f32 {
+// The land under `p`: the terrain (or the lab's flat ground) under the
+// scene's snow
+fn leafLand(p: vec2<f32>) -> f32 {
   var ground = U.ground.x;
   if (U.ground.y < 0.5) {
     ground = raeTerrainHeight(p, U.ground.x);
   }
-  return max(ground, U.ground.z);
+  return ground + U.ground.w;
+}
+
+// The swirls: the curl of a slow noise (cells of 7 m) carried with the air
+fn leafSwirl(p: vec2<f32>) -> vec3<f32> {
+  let q = (p - U.drift.xy) * 0.14285715;
+  let h = 0.1;
+  let dx = windGustNoise(q + vec2<f32>(h, 0.0), 5u) - windGustNoise(q - vec2<f32>(h, 0.0), 5u);
+  let dy = windGustNoise(q + vec2<f32>(0.0, h), 5u) - windGustNoise(q - vec2<f32>(0.0, h), 5u);
+  let up = windGustNoise(q * 1.3 + vec2<f32>(3.7, 1.9), 6u) - 0.5;
+  return vec3<f32>(dy, -dx, 0.0) * (0.5 / h) + vec3<f32>(0.0, 0.0, up);
 }
 
 @group(0) @binding(3) var<storage, read> emits: array<LeafEmit>;
@@ -102,7 +133,7 @@ fn spawn(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let color = sqrt(clamp(emit.color.rgb * shade, vec3<f32>(0.0), vec3<f32>(1.0)));
   let size = emit.color.w * (0.75 + 0.5 * leafRandom(seed + 4u));
   leaf.color = pack4x8unorm(vec4<f32>(color, clamp(size / 0.3, 0.0, 1.0)));
-  leaf.seed = seed & 16777215u;
+  leaf.seed = (seed & 16777215u) | ((emit.info.w & 3u) << 24u);
   leaves[(U.ring.x + release) % U.ring.y] = leaf;
 }
 
@@ -121,6 +152,10 @@ fn fly(@builtin(global_invocation_id) globalId: vec3<u32>) {
     return;
   }
   if ((leaf.seed & leafLanded) != 0u) {
+    // a leaf on the water drifts slowly downwind
+    if ((leaf.seed & leafFloating) != 0u) {
+      leaf.position = vec3<f32>(leaf.position.xy + U.air.xy * 0.06 * deltaTime, leaf.position.z);
+    }
     leaves[slot] = leaf;
     return;
   }
@@ -129,24 +164,39 @@ fn fly(@builtin(global_invocation_id) globalId: vec3<u32>) {
   var velocity = vec3<f32>(planar, fall.x);
   var tumble = fall.y;
   let random = leafRandom(leaf.seed + 7u);
-  // the air it falls through: the wind, and its own side-to-side glide (a
-  // pendulum across its heading) as it falls
+  let speed = length(U.air.xy);
+  let gust = windGustAt(leaf.position.xy, U.wind, U.drift.xy);
+  // the mean wind, stronger in a gust
+  let wind = U.air.xy * (0.7 + 0.9 * gust);
+  // the swirls, and an updraft where a gust arrives (the gust 5 m ahead
+  // downwind weaker than here)
+  let swirl = leafSwirl(leaf.position.xy) * speed * (0.25 + 1.1 * gust);
+  var ahead = leaf.position.xy;
+  if (speed > 0.01) { ahead = ahead + U.air.xy / speed * 5.0; }
+  let front = max(gust - windGustAt(ahead, U.wind, U.drift.xy), 0.0);
+  let updraft = front * speed * 1.4;
+  // its own glide, a pendulum across its heading
   let heading = random * 6.2831853;
   let glide = sin(leaf.age * (1.8 + random * 1.4) + random * 20.0) * (0.5 + 0.4 * random);
-  let air = vec3<f32>(U.air.xy + vec2<f32>(cos(heading), sin(heading)) * glide, 0.0);
+  let air = vec3<f32>(wind + vec2<f32>(cos(heading), sin(heading)) * glide + swirl.xy, swirl.z + updraft);
   // it settles toward the air's motion sideways, and toward its own fall
-  // speed (0.7 - 1.3 m/s) downward
+  // speed (0.7 - 1.3 m/s) through the air downward
   let fallSpeed = 0.7 + 0.6 * leafRandom(leaf.seed + 9u);
   let sideways = min(deltaTime / 0.6, 1.0);
   let downward = min(deltaTime / 0.3, 1.0);
-  velocity = vec3<f32>(mix(velocity.xy, air.xy, sideways), mix(velocity.z, -fallSpeed, downward));
+  velocity = vec3<f32>(mix(velocity.xy, air.xy, sideways), mix(velocity.z, air.z - fallSpeed, downward));
   leaf.position = leaf.position + velocity * deltaTime;
-  tumble = tumble + deltaTime * (2.0 + 3.0 * random);
+  tumble = tumble + deltaTime * (2.0 + 3.0 * random) * (1.0 + 3.0 * gust);
   if (tumble > 6.2831853) { tumble = tumble - 6.2831853; }
-  let ground = leafGround(leaf.position.xy);
-  if (leaf.position.z <= ground + 0.01) {
-    leaf.position.z = ground + 0.01;
+  let land = leafLand(leaf.position.xy);
+  let water = U.ground.z;
+  let lowest = max(land, water);
+  if (leaf.position.z <= lowest + 0.01) {
+    leaf.position.z = lowest + 0.01;
     leaf.seed = leaf.seed | leafLanded;
+    if (water > land) {
+      leaf.seed = leaf.seed | leafFloating;
+    }
     velocity = vec3<f32>(0.0);
     leaf.age = max(leaf.age, leafLifeSeconds - leafRestSeconds);
   }

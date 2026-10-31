@@ -125,7 +125,23 @@ func propSeasonOf(treeKind: view TreeKind) ret PropSeason {
     bareAt: treeKind.season.turnFull - 3.0
     fallColor: autumn
     summerColor: summer
+    leafShape: referenceLeafShape(outline: treeKind.leaf.outline)
   }
+}
+
+# The falling leaf's outline for a kind's leaf outline: the lobed ones a
+# maple, a fan a ginkgo, an almond a toothed birch leaf, the rest an oval
+func referenceLeafShape(outline: view LeafOutline) ret Int {
+  if outline is LeafOutline.lobed or outline is LeafOutline.threeLobed or outline is LeafOutline.deepLobed {
+    ret 1
+  }
+  if outline is LeafOutline.almond {
+    ret 2
+  }
+  if outline is LeafOutline.fan {
+    ret 3
+  }
+  ret 0
 }
 
 # A level of uploaded meshes: part 0 the bark, the rest the leaf tones

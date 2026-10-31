@@ -550,14 +550,18 @@ func runLabFrame(state: mod LabState) {
         stepLeafParticles(
           leafParticles: leafParticles
           resources: rendererResources
-          eye: state.camera.position
-          reach: 48.0
-          windX: windMetersPerSecond(sway: labWind.x)
-          windY: windMetersPerSecond(sway: labWind.y)
-          deltaTime: deltaTime
-          groundZ: 0.0
-          flatGround: true
-          waterZ: -1000.0
+          step: {
+            eye: state.camera.position
+            reach: 48.0
+            windX: windMetersPerSecond(sway: labWind.x)
+            windY: windMetersPerSecond(sway: labWind.y)
+            wind: labWind
+            deltaTime: deltaTime
+            groundZ: 0.0
+            flatGround: true
+            snowDepth: state.renderer.passes.gbuffer.snowDepth
+            sun: Vec3.vscale(a: state.light.sunDir, s: -1.0)
+          }
         )
       }
     }

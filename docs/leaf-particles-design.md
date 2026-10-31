@@ -383,7 +383,20 @@ later idea: blowing snow from the same system, with a white flake card).
    old in-air rule rather than the loss's rate of change, so leaves keep
    falling while the clock stands still: per-kind `hold`, the seasonal and wind terms,
    summer storms, evergreens, the per-frame cap. Case.
-6. **Flight and landing look** (§4.3, §5.1, §5.2, §5.4): glide, tumble,
+6. **Flight and landing look** (§4.3, §5.1, §5.2, §5.4), done 2026-10-31:
+   the compute composes lib/wind.wgsl for the gust field and the swirls
+   (the curl of a 7 m noise carried with the drift); an updraft where the
+   gust 5 m downwind is weaker; the tumble 1 + 3 x gust faster; a leaf on
+   water floats and drifts (bit 30), on snow lands at the terrain plus the
+   scene's snow depth (one depth, not the deep snow mesh's drifts); a 2 s
+   dither fade. Differences from the plan: the outlines are cut out
+   procedurally in the fragment shader (no texture: oval, maple, birch,
+   ginkgo, from the kind's LeafOutline via PropSeason.leafShape), and the
+   translucency is a backlit glow in the albedo (the G-buffer has no
+   translucent mode): the normal turns to the eye, and a leaf with the sun
+   behind it is lighter and warmer. The uniform carries the eye, the sun,
+   the wind vector, the drift, the snow and the toon flag (LeafStep).
+   looks-development rendering/leafFlight. Original plan: glide, tumble,
    curl-noise swirls, updraft, water floating, snow surface, dither fade,
    the leaf-shape textures per kind, two-sided lighting, motion vectors.
    Looks-development round.

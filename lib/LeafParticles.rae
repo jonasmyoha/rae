@@ -23,6 +23,7 @@
 # or drawn. app3d/LeafRelease decides which trees let leaves go.
 import Math
 import Vec3
+open Wind
 open webgpu/WebgpuEnums
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -46,7 +47,7 @@ const leafRecordBytes: Int = 32
 
 const leafEmitBytes: Int = 48
 
-const leafUniformBytes: Int = 64
+const leafUniformBytes: Int = 112
 
 # The folded card: two halves of two triangles
 const leafCardVertices: Int = 12
@@ -61,6 +62,28 @@ type LeafEmit {
   size: Float
   count: Int
   seed: Int
+  # 0 an oval, 1 a maple, 2 a birch, 3 a ginkgo leaf (leaf_render.wgsl)
+  shape: Int = 0
+}
+
+# A frame's step: the eye and the reach past which leaves die; the wind in
+# m/s and the renderer's wind vector (its gusts and swirls); the frame's
+# length; the ground (`groundZ`, flat there with `flatGround`, else the
+# terrain), the water's surface and the snow's depth; the toon look; the
+# direction toward the sun (the backlit glow)
+type LeafStep {
+  eye: Vec3
+  reach: Float
+  windX: Float
+  windY: Float
+  wind: WindVector
+  deltaTime: Float
+  groundZ: Float
+  flatGround: Bool = false
+  waterZ: Float = -1000.0
+  snowDepth: Float = 0.0
+  toon: Bool = false
+  sun: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
 }
 
 type LeafParticles {
@@ -138,6 +161,7 @@ func leafEmit(
   size: view Float
   count: view Int
   seed: view Int
+  shape: view Int
 ) ret Bool {
   if count <= 0 {
     ret true
@@ -162,14 +186,13 @@ func leafParticlesActive(leafParticles: view LeafParticles) ret Bool {
 }
 
 func leafComputeShader() ret Shader {
-  ret shader(
-    files: [
-      "lib/gpu/computeBounds.wgsl"
-      "lib/noise.wgsl"
-      "lib/world_biome.wgsl"
-      "lib/leaf_particles.wgsl"
-    ]
-  )
+  ret shader(files: [
+    "lib/gpu/computeBounds.wgsl"
+    "lib/noise.wgsl"
+    "lib/world_biome.wgsl"
+    "lib/wind.wgsl"
+    "lib/leaf_particles.wgsl"
+  ])
 }
 
 # The buffers, the two compute pipelines and the G-buffer pipeline, once
@@ -303,25 +326,18 @@ func leafFrameCap(capacity: view Int, deltaTime: view Float) ret Int {
 }
 
 # This frame's leaves: the listed releases spawned and every leaf moved on
-# `deltaTime` s in the wind (`windX`, `windY` m/s), landing on the terrain
-# at `groundZ` (flat there with `flatGround`) or on the water at `waterZ`;
-# those farther than `reach` from `eye` die. Call before the frame's pass.
+# by `step` (its air, its ground, its reach; LeafStep). Call before the
+# frame's pass.
 func stepLeafParticles(
   leafParticles: mod LeafParticles
   resources: mod GpuResources
-  eye: view Vec3
-  reach: view Float
-  windX: view Float
-  windY: view Float
-  deltaTime: view Float
-  groundZ: view Float
-  flatGround: view Bool
-  waterZ: view Float
+  step: view LeafStep
 ) {
   pollSubmissions(inFlight: leafParticles.inFlight, resources: resources)
   # the releases, capped so a gale fills the ring instead of overwriting
   # leaves still in the air
   var released: Int = 0
+  let deltaTime: Float = step.deltaTime
   let frameCap: Int = leafFrameCap(capacity: leafParticles.capacity, deltaTime: deltaTime)
   var emitCount: Int = 0
   resetArgs(writer: leafParticles.emitArgs)
@@ -347,7 +363,7 @@ func stepLeafParticles(
         x: count
         y: released
         z: emit.seed bitand 16777215
-        w: 0
+        w: emit.shape
       )
       released = released + count
       emitCount = emitCount + 1
@@ -370,30 +386,34 @@ func stepLeafParticles(
     ret
   }
   var flat: Float = 0.0
-  if flatGround {
+  if step.flatGround {
     flat = 1.0
+  }
+  var toon: Float = 0.0
+  if step.toon {
+    toon = 1.0
   }
   resetArgs(writer: leafParticles.uniformArgs)
   pushVec4F(
     writer: leafParticles.uniformArgs
-    x: eye.x
-    y: eye.y
-    z: eye.z
-    w: reach
+    x: step.eye.x
+    y: step.eye.y
+    z: step.eye.z
+    w: step.reach
   )
   pushVec4F(
     writer: leafParticles.uniformArgs
-    x: windX
-    y: windY
+    x: step.windX
+    y: step.windY
     z: Math.clamp(val: deltaTime, low: 0.0, high: 0.0333)
     w: leafParticles.clock
   )
   pushVec4F(
     writer: leafParticles.uniformArgs
-    x: groundZ
+    x: step.groundZ
     y: flat
-    z: waterZ
-    w: 0.0
+    z: step.waterZ
+    w: step.snowDepth
   )
   pushVec4U(
     writer: leafParticles.uniformArgs
@@ -401,6 +421,27 @@ func stepLeafParticles(
     y: leafParticles.capacity
     z: emitCount
     w: released
+  )
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: step.wind.x
+    y: step.wind.y
+    z: step.wind.gustiness
+    w: step.wind.time
+  )
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: step.wind.driftX
+    y: step.wind.driftY
+    z: toon
+    w: 0.0
+  )
+  pushVec4F(
+    writer: leafParticles.uniformArgs
+    x: step.sun.x
+    y: step.sun.y
+    z: step.sun.z
+    w: 0.0
   )
   let unusedUniform: Bool = uploadArgs(
     writer: leafParticles.uniformArgs
@@ -513,6 +554,7 @@ func ensureLeafForward(
   var entries: List(ResourceRef) = List.create(ResourceRef, cap: 18)
   entries.add(value: bufferRef(id: gbuffer.frameUniform))
   entries.add(value: bufferRef(id: leafParticles.leaves))
+  entries.add(value: bufferRef(id: leafParticles.uniform))
   if not addForwardInputs(entries: entries, inputs: gbuffer.forward.inputs) {
     ret
   }
@@ -537,9 +579,10 @@ func drawLeafParticles(
     ret
   }
   if not bindGroupIsUsable(resources: resources, id: leafParticles.drawBind) {
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: gbuffer.frameUniform))
     entries.add(value: bufferRef(id: leafParticles.leaves))
+    entries.add(value: bufferRef(id: leafParticles.uniform))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: leafParticles.renderPipeline
