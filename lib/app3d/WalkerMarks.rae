@@ -15,6 +15,7 @@ open app3d/GroundTouch
 open app3d/GroundParticles
 open app3d/Footprints
 open app3d/Precipitation
+open app3d/FallingLeaves
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
 
@@ -34,6 +35,9 @@ type WalkerMarks {
   precipitationAir: Float = 10.0
   precipitationEye: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   precipitationClock: Float = 0.0
+  # The leaves falling from the crowns in autumn (app3d/FallingLeaves),
+  # gathered by the update
+  fallingLeaves: FallingLeaves
 }
 
 # Room for `characterCount` characters' full trails
@@ -47,6 +51,7 @@ func createWalkerMarks(renderer: mod DeferredRenderer, characterCount: view Int)
     groundParticles: createGroundParticles(renderer: renderer, capacity: 256)
     random: createRandom(seed: 1147)
     precipitation: createPrecipitation(renderer: renderer)
+    fallingLeaves: createFallingLeaves(renderer: renderer)
   }
 }
 
@@ -113,6 +118,7 @@ func drawWalkerMarks(
     groundParticles: walkerMarks.groundParticles
     toon: toon
   )
+  drawFallingLeaves(cache: cache, resources: resources, leaves: walkerMarks.fallingLeaves)
   # the rain or the snow, blown by the frame's wind
   drawPrecipitation(
     cache: cache

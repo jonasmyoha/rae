@@ -12,6 +12,7 @@ open stylizedTrees/StylizedKinds
 open stylizedTrees/ReferenceTrees
 open treeGen/TreeKind
 open app3d/PropSeason
+open app3d/FallingLeaves
 
 func percent(share: view Float) ret Int {
   ret (share * 100.0 + 0.5).toInt()
@@ -130,5 +131,17 @@ func main() {
     "birch loss: summer {summer}%, falling at 5 °C {turning}%, at 2 °C {bare}%, deep winter {winter}%, spring at 10 °C {spring}%; the spruce at -10 °C {needles}%"
   )
   let year: Bool = summer is 0 and turning > 0 and turning < 100 and bare is 100 and winter is 100 and spring is 0 and needles is 0
-  log("passed={passed and year}")
+  # the leaves falling from a tree (app3d/FallingLeaves): none before the
+  # fall or once bare, the most in its middle; the fall's color is autumn's
+  let falling: Bool = fallingLeavesOf(loss: 0.0) is 0 and fallingLeavesOf(loss: 1.0) is 0 and fallingLeavesOf(
+    loss: 0.5
+  ) is fallingLeavesPerTree and fallingLeavesOf(loss: 0.1) < fallingLeavesOf(loss: 0.5)
+  let fallColor: Vec3 = propSeasonOf(treeKind: birch).fallColor
+  let autumnColor: Bool = Vec3.vlen(a: Vec3.vsub(a: fallColor, b: birch.season.autumn)) < 0.0001
+  log(
+    "falling leaves: at loss 0.1 {fallingLeavesOf(loss: 0.1)}, 0.5 {fallingLeavesOf(loss: 0.5)}, bare {fallingLeavesOf(
+      loss: 1.0
+    )} ={falling}; in the birch's autumn color ={autumnColor}"
+  )
+  log("passed={passed and year and falling and autumnColor}")
 }

@@ -486,6 +486,15 @@ that adds it.
     darkens to 62% and its roughness falls to 55% by it.
 14. **Falling leaves:** leaf particles from crowns while their leaf loss
     rises, in the kind's autumn tones.
+    Done (2026-10-31): app3d/FallingLeaves, gathered in the walker's
+    update from the PropField's cells within 32 m of the camera and drawn
+    with the walker marks (both frames): each deciduous tree whose own
+    leaf loss (its ±1.5 °C shift included) is falling between 0.03 and
+    0.99 drops up to 10 leaves at once (the most at a loss of 0.5),
+    each a 15 x 11 cm card in PropSeason.fallColor (the kind's autumn
+    color) times a shade, from a point in the crown down to the foot at
+    0.9 m/s, tumbling, fluttering and drifting with the frame's wind; at
+    most 2,500, one instanced draw. The tree lab does not draw them yet.
 15. **Settings and lab controls:** season and weather overrides in the
     walkers' settings and the tree lab; looks-development pages for each
     step (every season of every kind, in 136, 143 and the lab).
