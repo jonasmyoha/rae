@@ -83,6 +83,7 @@ open RendererWind
 open app3d/CameraRig
 open LabStudies
 open app3d/TreeForest
+open app3d/SeasonImpostors
 open LabForest
 open RendererQuality
 open MeshStore
@@ -472,6 +473,7 @@ func runLabFrame(state: mod LabState) {
   let gatherStart: Float64 = Gpu2d.nowSeconds()
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
     applyLabSeason(season: state.season, field: forest.field)
+    let unusedBaked: Bool = updateSeasonImpostors(forest: forest, renderer: state.renderer)
     gatherTreeForest(
       forest: forest
       camera: state.camera

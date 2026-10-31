@@ -109,6 +109,52 @@ func bakeCanopyAtlas(
     settings: settings
     subjects: clusters.length
   )
+  var baked: Bool = rebakeCanopyAtlas(
+    atlas: atlas
+    resources: resources
+    trees: trees
+    instances: instances
+    clusters: clusters
+    cutoff: cutoff
+  )
+  if baked {
+    # A cluster is drawn at its sphere's center, at height 1: its frame is
+    # its sphere in meters round that point
+    var frames: ArgWriter = createArgs(uniform: false)
+    loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
+      if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
+        pushImpostorFrame(
+          writer: frames
+          settings: settings
+          subject: cluster
+          center: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          radius: held.radius
+          height: 1.0
+          halfBox: held.halfSize
+        )
+      }
+    }
+    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
+  }
+  if not baked {
+    log("[canopy] the bake of {clusters.length} clusters failed")
+    retireImpostorAtlas(atlas: atlas, resources: resources)
+  }
+  ret atlas
+}
+
+# Draw `clusters` into the atlas's textures (every view, then the mips)
+# from the trees' atlas as it is now, and wait for the GPU: the bake, and
+# again in place when the trees' pictures changed (their season). True
+# when it ran.
+func rebakeCanopyAtlas(
+  atlas: view ImpostorAtlas
+  resources: mod GpuResources
+  trees: view ImpostorBinding
+  instances: view List(CanopyTree)
+  clusters: view List(CanopyCluster)
+  cutoff: view Float
+) ret Bool {
   var scratch: GpuScratch = createGpuScratch()
   var baked: Bool = false
   if isValidTexture(resources: resources, id: atlas.albedoTexture) and isValidTexture(
@@ -140,30 +186,7 @@ func bakeCanopyAtlas(
     }
   }
   retireGpuScratch(scratch: scratch, resources: resources)
-  if baked {
-    # A cluster is drawn at its sphere's center, at height 1: its frame is
-    # its sphere in meters round that point
-    var frames: ArgWriter = createArgs(uniform: false)
-    loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
-      if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
-        pushImpostorFrame(
-          writer: frames
-          settings: settings
-          subject: cluster
-          center: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-          radius: held.radius
-          height: 1.0
-          halfBox: held.halfSize
-        )
-      }
-    }
-    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
-  }
-  if not baked {
-    log("[canopy] the bake of {clusters.length} clusters failed")
-    retireImpostorAtlas(atlas: atlas, resources: resources)
-  }
-  ret atlas
+  ret baked
 }
 
 # The view pass's pipeline: no vertex buffer (a quad a tree), two color

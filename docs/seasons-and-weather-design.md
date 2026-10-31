@@ -356,6 +356,19 @@ that adds it.
    (propLeafCardKey). The impostors stay summer until step 6.
 6. **Seasonal impostors:** three baked atlas sets (summer, autumn, bare)
    and the sprite and canopy blend; the phone's tinted single set.
+   Done (2026-10-31), with the design's option 1, not 2: measured in 143,
+   the tree atlas is 170 MB and the far canopy 307 MB (the phone's: 42 and
+   43 MB), so three sets would have cost about 950 MB more, far past the
+   few tens of MB this design allowed. Instead app3d/SeasonImpostors bakes
+   both again in place when the forest's slow temperature moved by 0.25 °C
+   or its direction turned (at most every 20 frames): each kind's subject
+   gets its leaf tint and leaf loss (ImpostorSubject.leafTint, leafLoss;
+   the bake drops cards by lib/wind.wgsl leafCardKept, a bare kind is
+   baked as its wood), then the canopy is baked again from it (FarCanopy
+   keeps its trees and clusters). 100 - 160 ms a bake in 143, no memory.
+   A far tree shows its kind's state at the forest's temperature, without
+   the near trees' own ±1.5 °C shift. The phone bakes its one set the same
+   way.
 7. **Ground palette:** one per-frame grass/ground/tuft palette (replacing
    the hand-kept constant pairs), dry grass by moisture.
 8. **Snow cover:** the snow depth model; terrain snow by slope and noise;

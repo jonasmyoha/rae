@@ -32,7 +32,8 @@ struct VsOut {
   @location(6) @interpolate(flat) cardToEye: f32,
 };
 
-fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32>, card: vec4<f32>) -> VsOut {
+fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32>, pivot: vec4<f32>,
+              card: vec4<f32>) -> VsOut {
   let views = u32(U.a.x);
   let viewCount = views * views;
   let part = parts[ii / viewCount];
@@ -62,18 +63,25 @@ fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32
   o.cardToEye = select(0.0, part.surface.y, card.w > 0.0);
   o.direction = direction;
   o.depth = depth;
+  // a card the season has dropped (surface.z: the part's leaf loss,
+  // lib/wind.wgsl leafCardKept, as the near trees drop it): all its corners
+  // to one point outside the picture
+  if (card.w > 0.0 && !leafCardKept(card.xyz, pivot.xyz, vec3<f32>(0.0), part.surface.z)) {
+    o.pos = vec4<f32>(0.0, 0.0, -2.0, 1.0);
+  }
   return o;
 }
 
 @vertex
 fn vs(@builtin(instance_index) ii: u32, @location(0) position: vec3<f32>,
       @location(1) normal: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
-  return bakeVertex(ii, position, normal, uv, vec4<f32>(0.0));
+  return bakeVertex(ii, position, normal, uv, vec4<f32>(0.0), vec4<f32>(0.0));
 }
 @vertex
 fn vsFoliage(@builtin(instance_index) ii: u32, @location(0) position: vec3<f32>,
-      @location(1) normal: vec3<f32>, @location(2) uv: vec2<f32>, @location(4) card: vec4<f32>) -> VsOut {
-  return bakeVertex(ii, position, normal, uv, card);
+      @location(1) normal: vec3<f32>, @location(2) uv: vec2<f32>, @location(3) pivot: vec4<f32>,
+      @location(4) card: vec4<f32>) -> VsOut {
+  return bakeVertex(ii, position, normal, uv, pivot, card);
 }
 
 struct FsOut {

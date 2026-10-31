@@ -60,6 +60,11 @@ type FarCanopy {
   # Planned and waiting for the bake (planFarCanopy, bakeFarCanopy)
   plannedTrees: List(CanopyTree)
   plannedClusters: List(CanopyCluster)
+  # What it was baked from, kept to bake it again when the trees' pictures
+  # change (rebakeFarCanopy: their season), and the alpha cut it used
+  bakedTrees: List(CanopyTree) = List.create(CanopyTree, cap: 0)
+  bakedClusters: List(CanopyCluster) = List.create(CanopyCluster, cap: 0)
+  bakedCutoff: Float = 0.5
   # This frame's clusters in reach and view (index and fade share), their
   # distance bands, and the bands' starts: they are drawn nearest first
   shown: List(Int) = List.create(Int, cap: 0)
@@ -251,11 +256,40 @@ func bakeFarCanopy(
     time: 0.0
     tilt: 0.0
   )
-  setSpriteImpostors(cache: canopy.sprites, resources: resources, atlas: atlas)
   let side: Int = impostorAtlasSize(settings: settings)
+  let megabytes: Int = impostorAtlasBytes(atlas: atlas) / 1048576
+  setSpriteImpostors(cache: canopy.sprites, resources: resources, atlas: atlas)
   log(
-    "[canopy] {clusters.length} clusters of {instances.length} trees, {settings.viewsPerSide} x {settings.viewsPerSide} views of {settings.cellSize} px, {atlas.layers} layers of {side} px, baked in {nowMs() - started} ms"
+    "[canopy] {clusters.length} clusters of {instances.length} trees, {settings.viewsPerSide} x {settings.viewsPerSide} views of {settings.cellSize} px, {canopy.sprites.impostors.layers} layers of {side} px ({megabytes} MB), baked in {nowMs() - started} ms"
   )
+  canopy.bakedTrees = own instances
+  canopy.bakedClusters = own clusters
+  canopy.bakedCutoff = cutoff
+}
+
+# Bake the canopy again in place from the trees' atlas as it is now (their
+# season moved: app3d/SeasonImpostors). The milliseconds it took; -1 when
+# there is no canopy or the bake failed.
+func rebakeFarCanopy(
+  canopy: view FarCanopy
+  resources: mod GpuResources
+  treeAtlas: view ImpostorBinding
+) ret Int {
+  if canopy.bakedClusters.length is 0 {
+    ret -1
+  }
+  let started: Int = nowMs()
+  if rebakeCanopyAtlas(
+    atlas: canopy.sprites.impostors
+    resources: resources
+    trees: treeAtlas
+    instances: canopy.bakedTrees
+    clusters: canopy.bakedClusters
+    cutoff: canopy.bakedCutoff
+  ) {
+    ret nowMs() - started
+  }
+  ret -1
 }
 
 # Each cluster's hand-over this frame, `deltaTime` seconds after the last
