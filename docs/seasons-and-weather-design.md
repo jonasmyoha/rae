@@ -48,9 +48,9 @@ One CPU function, `climateAt(place, date, hour, weather)`, gives the air
 temperature in °C. It is a fit, not a simulation:
 
 - **The yearly mean and swing by latitude:** the mean falls from about 27
-  °C at the equator to about -15 °C at the poles (roughly 27 - 0.45 x
-  |latitude| - 0.004 x latitude², which gives Helsinki, 60° N, about 5
-  °C); the swing between summer and winter grows with latitude (about 2 °C
+  °C at the equator to about -22 °C at the poles (27 - 0.0061 x
+  latitude², which gives Helsinki, 60° N, 5 °C; the first draft's
+  27 - 0.45 |latitude| - 0.004 latitude² gave -14 °C there); the swing between summer and winter grows with latitude (about 2 °C
   at the equator, about 22 °C at 60°). The coldest day is about 25 days
   after the winter solstice (late January in the north, late July in the
   south: the hemisphere flips the season).
@@ -320,7 +320,13 @@ that adds it.
    by latitude, the hemisphere, the day, height; longitude through the
    local solar time), the slow temperature grid stepped hourly, a case for
    the fit (Helsinki, the equator, the southern hemisphere); the panel's
-   temperature and season lines (§6).
+   temperature and season lines (§6). Done (2026-10-31): lib/Climate
+   (climateAt, climateSlowMean, climateSeasonName on the thermal seasons:
+   summer from a 10 °C two-week mean, winter at 0 °C, deep winter below
+   -5 °C; the Climate grid of 50 km cells, stepped hourly, reseeded after a
+   jump), the walker app's climate (1,000 km for 143) and the lab's, the
+   panel line "Temperature 14.2 °C, summer" where the camera looks
+   (app3d/SettingsClimate), case 1264.
 4. **Tree season states:** the kind's season block (deciduous, spring /
    autumn / winter tones, phase temperatures); the per-kind color blend and
    the per-tree phase offset; the autumn kinds folded into their species.

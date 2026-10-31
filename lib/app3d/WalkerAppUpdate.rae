@@ -15,6 +15,8 @@ import Sys
 open GbufferInstanced
 open Particles
 open water/Water
+open water/IslandSea
+open Climate
 open water/WaterSystem
 open water/WadeSplash
 open water/WaterFft
@@ -108,6 +110,10 @@ type WalkerApp {
   netSeam: NetSeam  # multiplayer seam (app3d/NetSeam, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: WalkerPersist
+  # The slow temperature over the world (lib/Climate), stepped once per
+  # simulated hour; the settings panel's temperature line reads it where the
+  # camera looks
+  climate: Climate
   # The spray of wading feet (lib/water/WadeSplash) and the FFT sea at the
   # biome water plane (lib/water/IslandSea); none in a forward frame
   wadeSplash: opt WadeSplash
@@ -115,6 +121,35 @@ type WalkerApp {
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
   gpuResources: opt GpuResources  # the app-owned GPU manager the sea and the grass compute live in (#873)
   ok: Bool
+}
+
+# The climate (lib/Climate) at the settings' clock and place, once per
+# simulated hour, and where the camera looks, for the settings panel's
+# temperature line (app3d/SettingsClimate): the look point's meters east and
+# north, its height above the sea and the slow temperature there
+func updateWalkerClimate(app: mod WalkerApp) {
+  let settings: mod SettingsState = app.inputSystem.settings
+  let unusedStepped: Bool = stepClimate(
+    climate: app.climate
+    sceneLatitude: settings.latitude
+    sceneLongitude: settings.longitude
+    year: settings.timeOfDay.year
+    dayOfYear: settings.timeOfDay.dayOfYear
+    hour: settings.timeOfDay.hour
+  )
+  let look: Vec3 = app.cameraSystem.camera.target
+  settings.lookEast = look.x
+  settings.lookNorth = look.y
+  settings.lookHeight = Math.max(
+    a: 0.0
+    b: look.z - islandSeaSurfaceZ(groundZ: app.characterSystem.groundZ, biome: app.biome)
+  )
+  settings.slowTemperature = climateSlowAt(
+    climate: app.climate
+    east: look.x
+    north: look.y
+    height: settings.lookHeight
+  )
 }
 
 # ----- per-frame timing + resize -------------------------------------------
@@ -154,6 +189,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
   netApplyRemote(netSeam: app.netSeam, netPlayers: app.world.netPlayers)
+  updateWalkerClimate(app: app)
   let uiTick: UiTick = uiUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem

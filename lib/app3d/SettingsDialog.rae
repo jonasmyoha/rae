@@ -39,6 +39,7 @@ open Moon
 open app3d/SettingsEclipse
 open app3d/SettingsPersist
 open Cities
+open app3d/SettingsClimate
 open app3d/CameraBar
 open ecs/Entity
 open ui/SceneFile
@@ -188,6 +189,14 @@ type SettingsState {
   # The eclipse last jumped to (lib/Eclipses; -1 none): the eclipse buttons
   # step through the list, wrapping round
   eclipse: Int = -1
+  # Where the camera looks, for the temperature line (app3d/SettingsClimate):
+  # meters east and north of the world's origin and above the sea (an app
+  # with a world sets them; 0: the settings' own place), and the slow
+  # temperature there from the app's climate grid (-1000: none)
+  lookEast: Float = 0.0
+  lookNorth: Float = 0.0
+  lookHeight: Float = 0.0
+  slowTemperature: Float = -1000.0
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
@@ -790,6 +799,11 @@ func settingsApplyToWorld(
     value: "Time of day {formatHour(hour: settingsState.timeOfDay.hour)} {formatCalendarDate(
       date: settingsDate(settingsState: settingsState)
     )}"
+  )
+  setNodeText(
+    world: world
+    nodeId: "SettingsClimateLabel"
+    value: settingsClimateText(settingsState: settingsState)
   )
   setNodeText(
     world: world

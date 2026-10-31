@@ -1,0 +1,297 @@
+# Climate — the air temperature at a place and a time, and the slow
+# (two-week) temperature the seasons follow (docs/seasons-and-weather-
+# design.md §2). A fit, not a simulation; deterministic for its inputs.
+#
+# - The year's mean by latitude: 27 °C at the equator, 5 °C at 60 degrees,
+#   -22 °C at the poles (27 - 0.0061 latitude²).
+# - The year's swing: about 2 °C between summer and winter at the equator,
+#   22 °C at 60 degrees (Helsinki: -6 °C in January, 16 °C in July), more
+#   toward the poles. The coldest day is 25 days after the winter solstice;
+#   the southern hemisphere has its winter in July.
+# - The day: ±5 °C round the day's mean, warmest at 15:00 local solar time,
+#   coldest at 03:00. The longitude enters through the local solar time: a
+#   place east of the scene is later in its day.
+# - Height: -6.5 °C per 1,000 m above the sea.
+# - The weather (clouds, rain, fronts) comes in a later step.
+#
+# The season is the temperature, not the calendar: the slow temperature is
+# the air's mean over the last two weeks. With no weather it is the
+# two-week mean of the days' means, climateSlowMean computes it directly; a
+# Climate resource holds it on a grid of 50 km cells over a world, stepped
+# once per simulated hour as an exponential average (reseeded with the
+# direct mean after a jump in time or place), so a world 500 km long can
+# be in autumn at one end and winter at the other, and the weather can move
+# it later.
+import Math
+open Calendar
+open GeoPlace
+
+const climatePi: Float = 3.14159265
+
+# The year's mean (°C) at `latitude` (degrees), at the sea
+func climateYearMean(latitude: view Float) ret Float {
+  ret 27.0 - 0.0061 * latitude * latitude
+}
+
+# Half the difference between the year's warmest and coldest days (°C)
+func climateYearSwing(latitude: view Float) ret Float {
+  let share: Float = Math.abs(value: latitude) / 60.0
+  ret 0.5 * (2.0 + 20.0 * share * Math.sqrt(x: share))
+}
+
+# The mean of day `dayOfYear` (°C) at `latitude`, `height` m above the sea
+func climateDayMean(latitude: view Float, dayOfYear: view Int, height: view Float) ret Float {
+  # coldest 25 days after the winter solstice: mid January in the north,
+  # mid July in the south
+  var phase: Float = (dayOfYear.toFloat() - 15.0) / 365.25 * 2.0 * climatePi
+  if latitude < 0.0 {
+    phase = phase + climatePi
+  }
+  let season: Float = -Math.cos(x: phase) * climateYearSwing(latitude: latitude)
+  ret climateYearMean(latitude: latitude) + season - 0.0065 * Math.max(a: height, b: 0.0)
+}
+
+# The air temperature (°C) at `latitude`, `height` m above the sea, on day
+# `dayOfYear` at `localHour` (0 .. 24, local solar time)
+func climateAt(
+  latitude: view Float
+  dayOfYear: view Int
+  localHour: view Float
+  height: view Float
+) ret Float {
+  let day: Float = 5.0 * Math.cos(x: (localHour - 15.0) / 24.0 * 2.0 * climatePi)
+  ret climateDayMean(latitude: latitude, dayOfYear: dayOfYear, height: height) + day
+}
+
+# The local solar time (0 .. 24) at `longitude` when it is `sceneHour` at
+# `sceneLongitude` (15 degrees an hour, east later)
+func climateLocalHour(
+  sceneHour: view Float
+  sceneLongitude: view Float
+  longitude: view Float
+) ret Float {
+  let hour: Float = sceneHour + (longitude - sceneLongitude) / 15.0
+  ret hour - 24.0 * Math.floor(x: hour / 24.0)
+}
+
+# The slow temperature (°C): the mean of the two weeks up to day
+# `dayOfYear` of `year` (the days' means, an exponential weighting as the
+# Climate grid's average)
+func climateSlowMean(
+  latitude: view Float
+  year: view Int
+  dayOfYear: view Int
+  height: view Float
+) ret Float {
+  var sum: Float = 0.0
+  var weights: Float = 0.0
+  var stepYear: Int = year
+  var stepDay: Int = dayOfYear
+  loop var back: Int = 0, back < 28, ++back {
+    let weight: Float = Math.exp(x: -back.toFloat() / 14.0)
+    sum = sum + weight * climateDayMean(latitude: latitude, dayOfYear: stepDay, height: height)
+    weights = weights + weight
+    stepDay = stepDay - 1
+    if stepDay < 1 {
+      stepYear = stepYear - 1
+      stepDay = daysInYear(year: stepYear)
+    }
+  }
+  ret sum / weights
+}
+
+# Is the slow temperature rising (toward summer) on day `dayOfYear`?
+func climateWarming(latitude: view Float, year: view Int, dayOfYear: view Int) ret Bool {
+  var weekBefore: Int = dayOfYear - 7
+  var yearBefore: Int = year
+  if weekBefore < 1 {
+    yearBefore = year - 1
+    weekBefore = weekBefore + daysInYear(year: yearBefore)
+  }
+  ret climateSlowMean(
+    latitude: latitude
+    year: year
+    dayOfYear: dayOfYear
+    height: 0.0
+  ) > climateSlowMean(
+    latitude: latitude
+    year: yearBefore
+    dayOfYear: weekBefore
+    height: 0.0
+  )
+}
+
+# The season in words from the slow temperature (°C) and whether it is
+# rising: the thermal seasons (summer from a 10 °C mean, winter at 0 °C and
+# below, spring and autumn between), split finer: "deep winter" below -5,
+# "winter" below 0, "early spring" / "late autumn" below 5, "spring" /
+# "autumn" below 10, "early summer" / "late summer" below 13, "summer"
+func climateSeasonName(slowTemperature: view Float, warming: view Bool) ret String {
+  if slowTemperature < -5.0 {
+    ret "deep winter"
+  }
+  if slowTemperature < 0.0 {
+    ret "winter"
+  }
+  if slowTemperature >= 13.0 {
+    ret "summer"
+  }
+  if slowTemperature < 5.0 {
+    if warming {
+      ret "early spring"
+    }
+    ret "late autumn"
+  }
+  if slowTemperature < 10.0 {
+    if warming {
+      ret "spring"
+    }
+    ret "autumn"
+  }
+  if warming {
+    ret "early summer"
+  }
+  ret "late summer"
+}
+
+# ----- the Climate resource ----------------------------------------------
+# The slow temperature on a grid of climateCellSize cells over a world laid
+# out round the scene's place (GeoPlace: +Y north, +X east), the grid's
+# center at the world's origin
+const climateCellSize: Float = 50000.0
+
+# The exponential average's step: two weeks of hourly steps
+const climateHourWeight: Float = 0.002973  # 1 - exp(-1 / 336)
+
+type Climate {
+  side: Int
+  # each cell's slow temperature (°C), row by row from the south-west
+  slow: List(Float)
+  # the hour last stepped (hours since the year 0, about) and the place the
+  # grid was seeded for; -1: not seeded
+  stamp: Int = -1
+  sceneLatitude: Float = 0.0
+  sceneLongitude: Float = 0.0
+}
+
+# A climate over a world reaching `reach` m from its origin
+func createClimate(reach: view Float) ret Climate {
+  let side: Int = 1 + 2 * Math.ceil(x: reach / climateCellSize).toInt()
+  var slow: List(Float) = List.create(Float, cap: side * side)
+  loop var i: Int = 0, i < side * side, ++i {
+    slow.add(value: 0.0)
+  }
+  ret Climate { side: side, slow: own slow }
+}
+
+# A cell's center, meters east and north of the origin
+func climateCellOffset(climate: view Climate, index: view Int) ret Float {
+  ret (index - climate.side / 2).toFloat() * climateCellSize
+}
+
+# Step the climate to the hour of `year` / `dayOfYear` / `hour` at the
+# scene's place: once per simulated hour each cell's slow temperature moves
+# toward that hour's air temperature; a jump of more than two days or a new
+# place seeds the grid again with the direct two-week mean. True when it
+# stepped.
+func stepClimate(
+  climate: mod Climate
+  sceneLatitude: view Float
+  sceneLongitude: view Float
+  year: view Int
+  dayOfYear: view Int
+  hour: view Float
+) ret Bool {
+  let stamp: Int = (year * 366 + dayOfYear) * 24 + Math.floor(x: hour).toInt()
+  if stamp is climate.stamp {
+    ret false
+  }
+  let moved: Bool = Math.abs(value: sceneLatitude - climate.sceneLatitude) > 0.05 or Math.abs(
+    value: sceneLongitude - climate.sceneLongitude
+  ) > 0.05
+  let side: Int = climate.side
+  if climate.stamp < 0 or moved or stamp < climate.stamp or stamp - climate.stamp > 48 {
+    loop var cell: Int = 0, cell < side * side, ++cell {
+      let place: GeoPlace = geoPlaceAt(
+        sceneLatitude: sceneLatitude
+        sceneLongitude: sceneLongitude
+        east: climateCellOffset(climate: climate, index: cell % side)
+        north: climateCellOffset(climate: climate, index: cell / side)
+      )
+      climate.slow.set(
+        index: cell
+        value: climateSlowMean(
+          latitude: place.latitude
+          year: year
+          dayOfYear: dayOfYear
+          height: 0.0
+        )
+      )
+    }
+  } else {
+    let hours: Int = stamp - climate.stamp
+    loop var cell: Int = 0, cell < side * side, ++cell {
+      let place: GeoPlace = geoPlaceAt(
+        sceneLatitude: sceneLatitude
+        sceneLongitude: sceneLongitude
+        east: climateCellOffset(climate: climate, index: cell % side)
+        north: climateCellOffset(climate: climate, index: cell / side)
+      )
+      var slow: Float = climate.slow.copyAtFallback(index: cell, fallback: 0.0)
+      loop var step: Int = 0, step < hours, ++step {
+        let air: Float = climateAt(
+          latitude: place.latitude
+          dayOfYear: dayOfYear
+          localHour: climateLocalHour(
+            sceneHour: hour - (hours - 1 - step).toFloat()
+            sceneLongitude: sceneLongitude
+            longitude: place.longitude
+          )
+          height: 0.0
+        )
+        slow = slow + (air - slow) * climateHourWeight
+      }
+      climate.slow.set(index: cell, value: slow)
+    }
+  }
+  climate.stamp = stamp
+  climate.sceneLatitude = sceneLatitude
+  climate.sceneLongitude = sceneLongitude
+  ret true
+}
+
+# The slow temperature (°C) at the point `east`, `north` m from the origin
+# (between the cells' centers bilinear; held at the grid's edge), `height`
+# m above the sea
+func climateSlowAt(
+  climate: view Climate
+  east: view Float
+  north: view Float
+  height: view Float
+) ret Float {
+  let side: Int = climate.side
+  let half: Float = (side / 2).toFloat()
+  let gx: Float = Math.clamp(
+    val: east / climateCellSize + half
+    low: 0.0
+    high: (side - 1).toFloat()
+  )
+  let gy: Float = Math.clamp(
+    val: north / climateCellSize + half
+    low: 0.0
+    high: (side - 1).toFloat()
+  )
+  let x0: Int = Math.min(a: Math.floor(x: gx).toInt(), b: side - 1)
+  let y0: Int = Math.min(a: Math.floor(x: gy).toInt(), b: side - 1)
+  let x1: Int = Math.min(a: x0 + 1, b: side - 1)
+  let y1: Int = Math.min(a: y0 + 1, b: side - 1)
+  let fx: Float = gx - x0.toFloat()
+  let fy: Float = gy - y0.toFloat()
+  let a: Float = climate.slow.copyAtFallback(index: y0 * side + x0, fallback: 0.0)
+  let b: Float = climate.slow.copyAtFallback(index: y0 * side + x1, fallback: 0.0)
+  let c: Float = climate.slow.copyAtFallback(index: y1 * side + x0, fallback: 0.0)
+  let d: Float = climate.slow.copyAtFallback(index: y1 * side + x1, fallback: 0.0)
+  let south: Float = a + (b - a) * fx
+  let northRow: Float = c + (d - c) * fx
+  ret south + (northRow - south) * fy - 0.0065 * Math.max(a: height, b: 0.0)
+}
