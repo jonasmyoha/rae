@@ -1,0 +1,135 @@
+# Weather — cloud cover, precipitation and humidity at a place and an hour
+# (docs/seasons-and-weather-design.md §5): a small model, deterministic from
+# a seed and the date, no simulation.
+#
+# - A front: a slow noise in time (three scales: about 60, 20 and 7 hours),
+#   so the weather changes over hours and days, never jumps. Fronts travel
+#   east at weatherFrontSpeed: a place east of another gets its weather
+#   later.
+# - The wet season (weatherWetness, 0 .. 1): the tropics rain in their
+#   summer, the subtropics (the Mediterranean) in their winter, the high
+#   latitudes about evenly, a little more in summer.
+# - Cloud cover (0 .. 1) rises with the front, sooner in a wet season;
+#   precipitation (mm of water an hour) falls under the thickest cover;
+#   humidity (0 .. 1) follows the cloud and the rain.
+#
+# lib/Climate takes the weather's precipitation for its snow and lets
+# clouds and rain cool the day (climateWeatherAir); the walkers dim the
+# sun and the sky by the cover (app3d/SettingsSky).
+import Math
+
+type Weather {
+  cloud: Float = 0.0
+  precipitation: Float = 0.0
+  humidity: Float = 0.5
+  front: Float = 0.5
+}
+
+# The seed every place shares unless an app sets its own
+const weatherDefaultSeed: Int = 7
+
+# How fast fronts travel east (km an hour)
+const weatherFrontSpeed: Float = 40.0
+
+const weatherPi: Float = 3.14159265
+
+# A smooth noise in time: 0 .. 1, a new value every `period` hours, eased
+# between them
+func weatherNoise(seed: view Int, hours: view Float, period: view Float) ret Float {
+  let t: Float = hours / period
+  let whole: Float = Math.floor(x: t)
+  let u: Float = t - whole
+  let ease: Float = u * u * (3.0 - 2.0 * u)
+  let index: Int = whole.toInt()
+  ret weatherHash(seed: seed, index: index) * (1.0 - ease) + weatherHash(
+    seed: seed
+    index: index + 1
+  ) * ease
+}
+
+func weatherHash(seed: view Int, index: view Int) ret Float {
+  let mixed: Float = Math.sin(x: index.toFloat() * 12.9898 + seed.toFloat() * 78.233) * 43758.5453
+  ret mixed - Math.floor(x: mixed)
+}
+
+# The hours since the start of the year 2000 (about): the front's clock
+func weatherHours(year: view Int, dayOfYear: view Int, hour: view Float) ret Float {
+  ret ((year - 2000) * 366 + dayOfYear).toFloat() * 24.0 + hour
+}
+
+# How wet the season is at `latitude` on day `dayOfYear` (0 .. 1)
+func weatherWetness(latitude: view Float, dayOfYear: view Int) ret Float {
+  # +1 at the local midsummer, -1 at midwinter
+  var summer: Float = Math.cos(x: (dayOfYear.toFloat() - 196.0) / 365.25 * 2.0 * weatherPi)
+  if latitude < 0.0 {
+    summer = -summer
+  }
+  let away: Float = Math.abs(value: latitude)
+  let tropical: Float = 0.5 + 0.4 * summer
+  let subtropical: Float = 0.42 - 0.34 * summer
+  let northern: Float = 0.6 + 0.1 * summer
+  let toSubtropics: Float = weatherRamp(from: 18.0, to: 26.0, value: away)
+  let toNorth: Float = weatherRamp(from: 42.0, to: 50.0, value: away)
+  let low: Float = tropical + (subtropical - tropical) * toSubtropics
+  ret low + (northern - low) * toNorth
+}
+
+func weatherRamp(from: view Float, to: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - from) / (to - from), low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# The weather at `latitude`, `longitude` (degrees) on day `dayOfYear` of
+# `year` at `hour` (the scene's clock), from `seed`
+func weatherAt(
+  seed: view Int
+  latitude: view Float
+  longitude: view Float
+  year: view Int
+  dayOfYear: view Int
+  hour: view Float
+) ret Weather {
+  # a front reaches a place east of another later
+  let eastKm: Float = longitude * 111.2 * Math.cos(x: latitude * weatherPi / 180.0)
+  let hours: Float = weatherHours(year: year, dayOfYear: dayOfYear, hour: hour) - eastKm / weatherFrontSpeed
+  let front: Float = 0.55 * weatherNoise(seed: seed, hours: hours, period: 60.0) + 0.3 * weatherNoise(
+    seed: seed + 11
+    hours: hours
+    period: 20.0
+  ) + 0.15 * weatherNoise(seed: seed + 23, hours: hours, period: 7.0)
+  let wet: Float = weatherWetness(latitude: latitude, dayOfYear: dayOfYear)
+  let cloud: Float = weatherRamp(from: 0.54 - 0.3 * wet, to: 0.82 - 0.2 * wet, value: front)
+  var precipitation: Float = 0.0
+  if cloud > 0.8 {
+    precipitation = (cloud - 0.8) / 0.2 * 0.35 * (0.4 + wet)
+  }
+  ret Weather {
+    cloud: cloud
+    precipitation: precipitation
+    humidity: Math.clamp(
+      val: 0.4 + 0.3 * cloud + 0.2 * wet + 0.1 * Math.min(a: precipitation, b: 1.0)
+      low: 0.0
+      high: 1.0
+    )
+    front: front
+  }
+}
+
+# The weather in a word or two, for the settings panel: "clear", "cloudy",
+# "overcast", "rain 1.2 mm/h" (or "snow" when `air` is below freezing)
+func weatherName(weather: view Weather, air: view Float) ret String {
+  if weather.precipitation > 0.05 {
+    let tenths: Int = (weather.precipitation * 10.0 + 0.5).toInt()
+    if air < 0.5 {
+      ret "snow {tenths / 10}.{tenths % 10} mm/h"
+    }
+    ret "rain {tenths / 10}.{tenths % 10} mm/h"
+  }
+  if weather.cloud > 0.75 {
+    ret "overcast"
+  }
+  if weather.cloud > 0.3 {
+    ret "cloudy"
+  }
+  ret "clear"
+}

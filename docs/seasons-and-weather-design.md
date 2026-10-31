@@ -442,6 +442,23 @@ that adds it.
     (app3d/WalkerIceTest in RAE_WALKER_PHYSICS_TEST).
 11. **Weather model:** cloud cover, precipitation, humidity and fronts;
     its effect on the sun lux, the sky light and the auto exposure.
+    Done (2026-10-31): lib/Weather. A front is three time noises (about
+    60, 20 and 7 hours) from a seed, shifted by the place's longitude
+    (fronts travel east at 40 km/h); weatherWetness gives the wet season
+    by latitude (tropics in summer, 18-26 to 42-50 degrees blended into
+    the subtropics' winter rain, the north about even); cloud cover rises
+    with the front, precipitation (mm of water an hour) under cover over
+    0.8, humidity from both. A year: Helsinki 638 mm, Athens 433 (15 in
+    summer), the equator 590 (case 1269). lib/Climate: climateWeatherAir
+    (clouds narrow the day's swing by up to 60%, rain cools up to
+    1.5 °C), and the snow and the ice are stepped and seeded with it; the
+    snow falls from the precipitation (4 mm settled a mm of water) in
+    place of seasons 8's stand-in (Helsinki's February snow 37 -> 29 cm).
+    The walkers set SettingsState.weather where the camera looks each
+    frame; settingsSunColor's lux is times 1 - 0.8 cover, the sky's
+    exposure times 1 - 0.5 cover, the auto exposure follows; the panel's
+    temperature line names the weather. The sky's look (its clouds) stays
+    for step 12.
 12. **Clouds and mist from the weather:** cloud cover and darkness; mist
     from the dew point.
 13. **Rain and falling snow:** near-camera particles; wet ground.

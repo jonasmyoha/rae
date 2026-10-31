@@ -11,11 +11,13 @@ import Math
 open Climate
 open GeoPlace
 open app3d/SettingsDialog
+open Weather
 
 # No slow temperature from an app: the panel computes it
 const settingsNoSlowTemperature: Float = -1000.0
 
-# "Temperature 14.2 °C, summer" ("..., deep winter, snow 31 cm" with snow)
+# "Temperature 14.2 °C, summer, cloudy" ("..., deep winter, snow 0.4 mm/h,
+# snow 31 cm" while it snows on the snow)
 func settingsClimateText(settingsState: view SettingsState) ret String {
   let place: GeoPlace = geoPlaceAt(
     sceneLatitude: settingsState.latitude
@@ -23,7 +25,7 @@ func settingsClimateText(settingsState: view SettingsState) ret String {
     east: settingsState.lookEast
     north: settingsState.lookNorth
   )
-  let air: Float = climateAt(
+  let air: Float = climateWeatherAir(
     latitude: place.latitude
     dayOfYear: settingsState.timeOfDay.dayOfYear
     localHour: climateLocalHour(
@@ -32,6 +34,7 @@ func settingsClimateText(settingsState: view SettingsState) ret String {
       longitude: place.longitude
     )
     height: settingsState.lookHeight
+    weather: settingsState.weather
   )
   var slow: Float = settingsState.slowTemperature
   if slow <= settingsNoSlowTemperature + 1.0 {
@@ -50,12 +53,14 @@ func settingsClimateText(settingsState: view SettingsState) ret String {
       dayOfYear: settingsState.timeOfDay.dayOfYear
     )
   )
-  # the snow lying there, from a centimeter (SettingsState.snowDepth)
+  # the weather (lib/Weather) and the snow lying there, from a centimeter
+  # (SettingsState.snowDepth)
+  let sky: String = weatherName(weather: settingsState.weather, air: air)
   let snowCentimeters: Int = (settingsState.snowDepth * 100.0 + 0.5).toInt()
   if snowCentimeters >= 1 {
-    ret "Temperature {settingsTenths(value: air)} °C, {season}, snow {snowCentimeters} cm"
+    ret "Temperature {settingsTenths(value: air)} °C, {season}, {sky}, snow {snowCentimeters} cm"
   }
-  ret "Temperature {settingsTenths(value: air)} °C, {season}"
+  ret "Temperature {settingsTenths(value: air)} °C, {season}, {sky}"
 }
 
 # A value to a tenth: "-12.4", "0.0", "21.3"

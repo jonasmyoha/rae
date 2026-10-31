@@ -17,6 +17,7 @@ open Particles
 open water/Water
 open water/IslandSea
 open Climate
+open Weather
 open GeoPlace
 open app3d/SeasonImpostors
 open app3d/GroundPalette
@@ -162,6 +163,20 @@ func updateWalkerClimate(app: mod WalkerApp) {
     sceneLongitude: settings.longitude
     east: look.x
     north: look.y
+  )
+  # the weather there (lib/Weather): its clouds dim the sun and the sky
+  # (app3d/SettingsSky), the panel names it
+  settings.weather = weatherAt(
+    seed: app.climate.weatherSeed
+    latitude: place.latitude
+    longitude: place.longitude
+    year: settings.timeOfDay.year
+    dayOfYear: settings.timeOfDay.dayOfYear
+    hour: climateLocalHour(
+      sceneHour: settings.timeOfDay.hour
+      sceneLongitude: settings.longitude
+      longitude: place.longitude
+    )
   )
   let field: mod PropField = app.terrainSystem.forest.field
   field.seasonsOn = true

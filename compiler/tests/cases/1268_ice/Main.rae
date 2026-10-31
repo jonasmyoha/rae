@@ -4,6 +4,7 @@
 # Athens, the far north frozen longer), and water/WaterIce's cover: a
 # frozen lake is ice all over, the sea only its shallow fringe, land none.
 open Climate
+open Weather
 open water/WaterIce
 
 func check(label: view String, ok: view Bool) {
@@ -17,9 +18,11 @@ func check(label: view String, ok: view Bool) {
 func iceOn(latitude: view Float, dayOfYear: view Int) ret ClimateIce {
   ret climateWinterSeed(
     latitude: latitude
+    longitude: 24.94
     year: 2026
     dayOfYear: dayOfYear
     localHour: 12.0
+    seed: weatherDefaultSeed
   ).ice
 }
 

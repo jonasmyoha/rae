@@ -45,6 +45,7 @@ open ecs/Entity
 open ui/SceneFile
 open ui/SceneInstance
 open ui/UiSystems
+open Weather
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
 # also carries `none` and `hdri`, which are not choices this dialog offers.
@@ -199,6 +200,9 @@ type SettingsState {
   slowTemperature: Float = -1000.0
   # The snow depth there (m; lib/Climate climateSnowAt; 0 none or no climate)
   snowDepth: Float = 0.0
+  # The weather there (lib/Weather, set by an app with a climate each
+  # frame): its cloud cover dims the sun and the sky (app3d/SettingsSky)
+  weather: Weather = Weather {}
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
