@@ -18,6 +18,8 @@ struct GrassU {
   i: vec4<f32>,
   // the ground palette's dry grass and how dry (app3d/GroundPalette)
   j: vec4<f32>,
+  // the air's drift (xy) and the unscaled wind (zw): the gusts' (lib/wind.wgsl)
+  k: vec4<f32>,
 };
 struct Indirect {
   vertexCount: u32,
@@ -157,5 +159,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
-  outBuf[slot].fade = vec4<f32>(0.0);
+  // x: the gust at the blade (lib/wind.wgsl windGustAt), once per blade
+  // for grass_render.wgsl's sway (the grass draws no level fade)
+  outBuf[slot].fade = vec4<f32>(windGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), 0.0, 0.0, 0.0);
 }

@@ -114,6 +114,11 @@ type GbufferCache {
   # vectors (previous time also remains in jitter.z)
   windX: Float = 0.0
   windY: Float = 0.0
+  # the air's drift (m) now and last frame (lib/Wind; the gusts')
+  windDriftX: Float = 0.0
+  windDriftY: Float = 0.0
+  windPreviousDriftX: Float = 0.0
+  windPreviousDriftY: Float = 0.0
   windGustiness: Float = 0.0
   windTime: Float = 0.0
   windPrevTime: Float = 0.0
@@ -478,6 +483,11 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: 0.0)
   cache.frameFloats.add(value: 0.0)
   cache.frameFloats.add(value: 0.0)
+  # the air's drift now and last frame (lib/wind.wgsl windGustAt)
+  cache.frameFloats.add(value: cache.windDriftX)
+  cache.frameFloats.add(value: cache.windDriftY)
+  cache.frameFloats.add(value: cache.windPreviousDriftX)
+  cache.frameFloats.add(value: cache.windPreviousDriftY)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -529,7 +539,15 @@ func setGbufferWind(
   y: view Float
   gustiness: view Float
   time: view Float
+  driftX: view Float
+  driftY: view Float
+  previousDriftX: view Float
+  previousDriftY: view Float
 ) {
+  cache.windDriftX = driftX
+  cache.windDriftY = driftY
+  cache.windPreviousDriftX = previousDriftX
+  cache.windPreviousDriftY = previousDriftY
   cache.previousWind = Vec3.create(x: cache.windX, y: cache.windY, z: cache.windGustiness)
   cache.windPrevTime = cache.windTime
   if time < cache.windTime or cache.windTime is 0.0 {

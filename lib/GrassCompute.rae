@@ -55,9 +55,9 @@ const grassWorkgroupSize: Int = 64
 
 const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferRecord)
 
-const grassUniformFloats: Int = 36  # nine vec4 (camera, wind, blade, patch and distance controls)
+const grassUniformFloats: Int = 44  # eleven vec4 (camera, wind, blade, patch and distance controls, palette, drift)
 
-const grassUniformBytes: Int = 160
+const grassUniformBytes: Int = 176
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
@@ -166,6 +166,7 @@ func defaultGrassComputeShader() ret Shader {
     "lib/world_biome.wgsl"
     "lib/grass_obstacles.wgsl"
     "lib/grass_field.wgsl"
+    "lib/wind.wgsl"
     "lib/grass_compute.wgsl"
   ])
 }
@@ -758,6 +759,15 @@ func grassGenerate(
     w: settings.dryAmount
   )
   # j: the ground palette's dry grass and how dry (app3d/GroundPalette)
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: wind.driftX
+    y: wind.driftY
+    z: wind.x
+    w: wind.y
+  )
+  # k: the air's drift and the unscaled wind: the gust field's, the same as
+  # the trees' (lib/wind.wgsl windGustAt)
   uploadArgs(
     writer: grass.uniformArgs
     resources: resources

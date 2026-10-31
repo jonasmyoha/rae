@@ -10,6 +10,10 @@ struct Frame {
   previousWind: vec4<f32>,
   // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow)
   scene: vec4<f32>,
+  weather: vec4<f32>,
+  // the air's drift (m) now (xy) and last frame (zw): the gust field's
+  // (lib/wind.wgsl windGustAt)
+  windDrift: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -132,10 +136,17 @@ fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<
   if (d.params.w > 2.5 && d.params.w < 3.5) {
     rest.z = snowSunkGrass(rest.z, F.scene.x);
   }
+  let flexibility = pivot.w * d.fade.w * windLeafScale;
+  let pivotWorld = (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz;
+  // the gust at the patch, once for both poses (a frame's change is tiny)
+  var gust = 0.0;
+  if (flexibility != 0.0) {
+    gust = windGustAt(pivotWorld.xy, F.wind, F.windDrift.xy);
+  }
   var current = windLeaf((d.model * vec4<f32>(rest, 1.0)).xyz, normal,
-    (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w * windLeafScale, F.wind);
+    pivotWorld, d.model[3].xyz, flexibility, F.wind, gust);
   var previous = windLeaf((d.prevModel * vec4<f32>(rest, 1.0)).xyz, normal,
-    (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, pivot.w * d.fade.w * windLeafScale, F.previousWind);
+    (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, flexibility, F.previousWind, gust);
   if (card.w > 0.0) {
     current.position += leafCardOffset(p, card.xyz, vec2<f32>(length(d.model[0].xyz), length(d.model[2].xyz)),
       leafCameraRight(F.viewProj), leafCameraUp(F.viewProj));

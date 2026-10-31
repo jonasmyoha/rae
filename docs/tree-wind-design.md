@@ -9,6 +9,10 @@ rest of the motion (each patch turning about its pivot on the wind clock)
 is unchanged. The switch is `windLeafScale` in lib/wind.wgsl: 1.0 on, 0.0
 every leaf still.
 
+**2026-10-31:** the gusts are back, from a field that travels with the
+air's drift and cannot jump (lib/WindGust.rae, docs/wind-design.md);
+`windLeaf` takes the gust at the patch's pivot instead of the steady 0.5.
+
 The rigid-leaf implementation is in the shared renderer and generators.
 The structural/branch hierarchy below remains a later refinement.
 

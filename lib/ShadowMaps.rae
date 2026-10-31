@@ -112,6 +112,8 @@ type ShadowCache {
   windY: Float = 0.0
   windGustiness: Float = 0.0
   windTime: Float = 0.0
+  windDriftX: Float = 0.0
+  windDriftY: Float = 0.0
   objectsMade: Bool
   casterBias: ShadowCasterBias
   texture: TextureId
@@ -157,8 +159,9 @@ type ShadowCache {
   scratch: List(Float)
 }
 
-# A cascade's uniform: light view-projection, wind, viewing-camera right/up.
-const shadowCascadeUniformBytes: Int = 112
+# A cascade's uniform: light view-projection, wind, viewing-camera right/up,
+# the air's drift (the gusts', lib/wind.wgsl windGustAt).
+const shadowCascadeUniformBytes: Int = 128
 
 func setShadowWind(
   shadow: mod ShadowCache
@@ -166,11 +169,15 @@ func setShadowWind(
   y: view Float
   gustiness: view Float
   time: view Float
+  driftX: view Float
+  driftY: view Float
 ) {
   shadow.windX = x
   shadow.windY = y
   shadow.windGustiness = gustiness
   shadow.windTime = time
+  shadow.windDriftX = driftX
+  shadow.windDriftY = driftY
 }
 
 func createShadowCache() ret ShadowCache {
@@ -481,6 +488,10 @@ func shadowBegin(
     shadow.scratch.add(value: cascades.cardUp.x)
     shadow.scratch.add(value: cascades.cardUp.y)
     shadow.scratch.add(value: cascades.cardUp.z)
+    shadow.scratch.add(value: 0.0)
+    shadow.scratch.add(value: shadow.windDriftX)
+    shadow.scratch.add(value: shadow.windDriftY)
+    shadow.scratch.add(value: 0.0)
     shadow.scratch.add(value: 0.0)
     unsafe {
       let wroteCascade: Bool = writeBufferFromPtr(

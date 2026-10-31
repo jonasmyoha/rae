@@ -1,0 +1,114 @@
+# WindGust — the gust fronts (docs/leaf-particles-design.md §2.3): one field
+# over the world, 0 between gusts to 1 at the peak of a storm gust, that the
+# trees' leaves (lib/wind.wgsl windLeaf), the grass (grass_motion.wgsl) and
+# the falling leaves read, so one gust is seen crossing the grass and then
+# the crowns.
+#
+# - Gust patches 20 - 60 m across (a value noise of 48 m cells and a finer
+#   one of 24 m), carried by the air: the field is sampled at the world
+#   point minus the wind's drift (lib/Wind WindState.driftX, the integral of
+#   the wind's velocity), so the patches travel downwind at the wind's
+#   speed, and a turning or strengthening wind never makes them jump. (The
+#   first gust field moved by the direction times the total time and jumped
+#   whenever the direction drifted; docs/wind-design.md §5.)
+# - They grow and die as they travel: the coarse noise blends between two
+#   on a 2-minute cycle of the wind's clock (a whole number of cycles an
+#   hour, so the clock's hourly wrap does not show).
+# - None in a calm. Storm gusts: a coarse noise's rare peaks (96 m cells)
+#   reach 1, more often the stronger the wind, never in a light one.
+#
+# The hash is an integer one (PCG) on cells wrapped to 256, exact in both
+# Rae and WGSL, and every step is a multiply or an add in the same order as
+# windGustAt in lib/wind.wgsl, so the two give the same value (the
+# windGust hardware check holds them to it). MUST match lib/wind.wgsl.
+import Math
+open Wind
+
+const windGustMask: Int = 4294967295
+
+# The noises' cells (m) as their inverses: the shaders multiply, never
+# divide (a GPU division is not exactly rounded)
+const windGustInverseCoarse: Float = 0.020833334
+
+const windGustInverseFine: Float = 0.041666668
+
+const windGustInverseStorm: Float = 0.010416667
+
+# The gusts' 2-minute cycle (radians a second): 30 cycles an hour
+const windGustEvolve: Float = 0.05235988
+
+# PCG's output of a 32-bit `value`
+func windGustPcg(value: view Int) ret Int {
+  let state: Int = (value * 747796405 + 2891336453) bitand windGustMask
+  let word: Int = (((state shr ((state shr 28) + 4)) bitxor state) * 277803737) bitand windGustMask
+  ret ((word shr 22) bitxor word) bitand windGustMask
+}
+
+# A cell's random (0 .. 1), the cells wrapped to 256 a side
+func windGustHash(column: view Int, row: view Int, seed: view Int) ret Float {
+  let inner: Int = windGustPcg(value: (row bitand 255) + seed * 256)
+  let mixed: Int = windGustPcg(value: ((column bitand 255) + inner) bitand windGustMask)
+  ret (mixed bitand 16777215).toFloat() * 0.000000059604645
+}
+
+# A smoothstep from `low` over a width whose inverse is `scale`
+func windGustSmooth(low: view Float, scale: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - low) * scale, low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# A smooth value noise (0 .. 1) at (x, y) in cells
+func windGustNoise(x: view Float, y: view Float, seed: view Int) ret Float {
+  let cellX: Float = Math.floor(x: x)
+  let cellY: Float = Math.floor(x: y)
+  let fx: Float = x - cellX
+  let fy: Float = y - cellY
+  let ux: Float = fx * fx * (3.0 - 2.0 * fx)
+  let uy: Float = fy * fy * (3.0 - 2.0 * fy)
+  let column: Int = cellX.toInt()
+  let row: Int = cellY.toInt()
+  let a: Float = windGustHash(column: column, row: row, seed: seed)
+  let b: Float = windGustHash(column: column + 1, row: row, seed: seed)
+  let c: Float = windGustHash(column: column, row: row + 1, seed: seed)
+  let d: Float = windGustHash(column: column + 1, row: row + 1, seed: seed)
+  let bottom: Float = a + (b - a) * ux
+  let top: Float = c + (d - c) * ux
+  ret bottom + (top - bottom) * uy
+}
+
+# How gusty it is at world (x, y) in `wind` (0 none .. 1 the peak of a storm
+# gust): the field the air carries, at the wind's drift and clock
+func windGustAt(x: view Float, y: view Float, wind: view WindVector) ret Float {
+  let strength: Float = Math.sqrt(x: wind.x * wind.x + wind.y * wind.y)
+  let airX: Float = x - wind.driftX
+  let airY: Float = y - wind.driftY
+  let blend: Float = 0.5 + 0.5 * Math.sin(x: wind.time * windGustEvolve)
+  let first: Float = windGustNoise(
+    x: airX * windGustInverseCoarse
+    y: airY * windGustInverseCoarse
+    seed: 1
+  )
+  let second: Float = windGustNoise(
+    x: airX * windGustInverseCoarse
+    y: airY * windGustInverseCoarse
+    seed: 2
+  )
+  let fine: Float = windGustNoise(
+    x: airX * windGustInverseFine
+    y: airY * windGustInverseFine
+    seed: 3
+  )
+  let field: Float = 0.65 * (first + (second - first) * blend) + 0.35 * fine
+  let ordinary: Float = windGustSmooth(low: 0.42, scale: 2.631579, value: field) * windGustSmooth(
+    low: 0.15
+    scale: 2.857143
+    value: strength
+  )
+  let threshold: Float = 0.88 - 0.05 * Math.clamp(val: strength - 1.0, low: 0.0, high: 2.0)
+  let storm: Float = windGustSmooth(
+    low: threshold
+    scale: 12.5
+    value: windGustNoise(x: airX * windGustInverseStorm, y: airY * windGustInverseStorm, seed: 4)
+  ) * windGustSmooth(low: 0.8, scale: 1.25, value: strength)
+  ret Math.max(a: 0.65 * ordinary, b: storm)
+}

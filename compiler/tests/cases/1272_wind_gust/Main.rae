@@ -1,0 +1,143 @@
+# lib/WindGust (docs/leaf-particles-design.md §2.3): no gusts in a calm,
+# patches of gusts in a breeze and more storm gusts in a gale; the field
+# travels with the air's drift (lib/Wind), its wrap does not show, and a
+# frame's step moves it a little even when the wind turns sharply.
+open Wind
+open WindGust
+import Math
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+type GustCount {
+  mean: Float
+  gusty: Float
+  storm: Float
+}
+
+# The field over a 2 km square every 8 m in `wind`
+func gustCount(wind: view WindVector) ret GustCount {
+  var total: Float = 0.0
+  var gusty: Int = 0
+  var storm: Int = 0
+  var count: Int = 0
+  loop var i: Int = 0, i < 250, ++i {
+    loop var j: Int = 0, j < 250, ++j {
+      let gust: Float = windGustAt(
+        x: i.toFloat() * 8.0 - 1000.0
+        y: j.toFloat() * 8.0 - 1000.0
+        wind: wind
+      )
+      total = total + gust
+      if gust > 0.3 {
+        gusty = gusty + 1
+      }
+      if gust > 0.75 {
+        storm = storm + 1
+      }
+      count = count + 1
+    }
+  }
+  ret GustCount {
+    mean: total / count.toFloat()
+    gusty: gusty.toFloat() / count.toFloat()
+    storm: storm.toFloat() / count.toFloat()
+  }
+}
+
+func vectorOf(strength: view Float, driftX: view Float, driftY: view Float) ret WindVector {
+  ret WindVector {
+    x: strength * 0.8
+    y: strength * 0.6
+    gustiness: 0.6
+    time: 400.0
+    driftX: driftX
+    driftY: driftY
+    previousDriftX: driftX
+    previousDriftY: driftY
+  }
+}
+
+func hundredths(value: view Float) ret String {
+  let scaled: Int = (value * 100.0 + 0.5).toInt()
+  ret "{scaled / 100}.{scaled % 100 / 10}{scaled % 10}"
+}
+
+func main() {
+  let calm: GustCount = gustCount(wind: vectorOf(strength: 0.0, driftX: 300.0, driftY: 40.0))
+  check(label: "a calm has no gusts", ok: calm.mean is 0.0)
+  let breeze: GustCount = gustCount(wind: vectorOf(strength: 1.0, driftX: 300.0, driftY: 40.0))
+  let gale: GustCount = gustCount(wind: vectorOf(strength: 3.0, driftX: 300.0, driftY: 40.0))
+  log(
+    "breeze: mean {hundredths(value: breeze.mean)}, gusty {hundredths(value: breeze.gusty)}, storm {hundredths(
+      value: breeze.storm
+    )}"
+  )
+  log(
+    "gale: mean {hundredths(value: gale.mean)}, gusty {hundredths(value: gale.gusty)}, storm {hundredths(
+      value: gale.storm
+    )}"
+  )
+  check(
+    label: "a breeze: gust patches over a part of the land"
+    ok: breeze.gusty > 0.1 and breeze.gusty < 0.6
+  )
+  check(label: "a breeze: storm gusts rare", ok: breeze.storm < 0.01)
+  check(label: "a gale: storm gusts in places", ok: gale.storm > 0.02 and gale.storm < 0.25)
+  # the field moves with the air
+  let here: WindVector = vectorOf(strength: 1.0, driftX: 300.0, driftY: 40.0)
+  let moved: WindVector = vectorOf(strength: 1.0, driftX: 312.0, driftY: 49.0)
+  var carried: Bool = true
+  var wrapped: Bool = true
+  loop var i: Int = 0, i < 40, ++i {
+    let x: Float = i.toFloat() * 13.7 - 200.0
+    let y: Float = i.toFloat() * -7.3 + 90.0
+    let before: Float = windGustAt(x: x, y: y, wind: here)
+    let after: Float = windGustAt(x: x + 12.0, y: y + 9.0, wind: moved)
+    if Math.abs(value: before - after) > 0.0001 {
+      carried = false
+    }
+    let around: WindVector = vectorOf(
+      strength: 1.0
+      driftX: 300.0 + windDriftPeriod as Float
+      driftY: 40.0 - windDriftPeriod as Float
+    )
+    if Math.abs(value: before - windGustAt(x: x, y: y, wind: around)) > 0.0001 {
+      wrapped = false
+    }
+  }
+  check(label: "the gusts travel with the air's drift", ok: carried)
+  check(label: "the drift's wrap does not show", ok: wrapped)
+  # a frame of a strong wind that turns by half a turn at once: the drift
+  # moves on by its step, so the field changes a little, never jumps
+  var settings: WindSettings = defaultWindSettings()
+  settings.strength = 3.0
+  var state: WindState = createWindState(settings: settings)
+  loop var step: Int = 0, step < 600, ++step {
+    stepWind(state: state, settings: settings, deltaTime: 0.016666668)
+  }
+  let first: WindVector = windVector(state: state, settings: settings)
+  settings.angle = settings.angle + 3.1415927
+  stepWind(state: state, settings: settings, deltaTime: 0.016666668)
+  let next: WindVector = windVector(state: state, settings: settings)
+  var largest: Float = 0.0
+  loop var i: Int = 0, i < 400, ++i {
+    let x: Float = (i % 20).toFloat() * 9.1 - 90.0
+    let y: Float = (i / 20).toFloat() * 9.1 - 90.0
+    largest = Math.max(
+      a: largest
+      b: Math.abs(value: windGustAt(x: x, y: y, wind: first) - windGustAt(x: x, y: y, wind: next))
+    )
+  }
+  log("the largest change in a frame of a turning gale: {hundredths(value: largest)}")
+  check(label: "a sharp turn does not jump the gusts", ok: largest < 0.08)
+  check(
+    label: "the motion vectors see the drift's last step"
+    ok: next.previousDriftX is first.driftX and next.previousDriftY is first.driftY
+  )
+}
