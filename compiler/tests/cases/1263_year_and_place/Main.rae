@@ -1,0 +1,84 @@
+# The year and the place (docs/seasons-and-weather-design.md §1).
+# TimeOfDay.yearSpeed: at 1 a simulated day moves the date by one day, as
+# before; at 14 by 14; at 0 the date holds through midnight; at 0.5 two days
+# move it one; the hour's arc is the same at every speed. GeoPlace: a point
+# 500 km north of Helsinki is 4.5 degrees north (and near Oulu), 100 km
+# east at 60 degrees is 1.8 degrees east, and the longitude wraps at 180.
+import Math
+open Cities
+open GeoPlace
+open app3d/TimeOfDay
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# The day of the year after `days` simulated days at `speed`, from noon of
+# day 100, in steps of a twentieth of a day
+func dayAfter(speed: view Float, days: view Int) ret Int {
+  var clock: TimeOfDay = createTimeOfDay(hour: 12.0)
+  clock.dayOfYear = 100
+  clock.yearSpeed = speed
+  loop var step: Int = 0, step < days * 20, ++step {
+    let unusedMoved: Bool = timeOfDayAdvance(timeOfDay: clock, deltaTime: clock.daySeconds / 20.0)
+  }
+  ret clock.dayOfYear
+}
+
+func main() ret Int {
+  check(label: "speed 1: a day moves the date a day", ok: dayAfter(speed: 1.0, days: 1) is 101)
+  check(label: "speed 1: ten days, ten days", ok: dayAfter(speed: 1.0, days: 10) is 110)
+  check(
+    label: "speed 14: a day moves the date two weeks"
+    ok: dayAfter(speed: 14.0, days: 1) is 114
+  )
+  check(label: "speed 0: the date holds through midnight", ok: dayAfter(speed: 0.0, days: 3) is 100)
+  check(label: "speed 0.5: two days move it one", ok: dayAfter(speed: 0.5, days: 2) is 101)
+  var fast: TimeOfDay = createTimeOfDay(hour: 12.0)
+  fast.yearSpeed = 14.0
+  let unusedMoved: Bool = timeOfDayAdvance(timeOfDay: fast, deltaTime: fast.daySeconds / 4.0)
+  check(
+    label: "the hour's arc is the same at any speed"
+    ok: Math.abs(value: fast.hour - 18.0) < 0.001
+  )
+  let north: GeoPlace = geoPlaceAt(
+    sceneLatitude: 60.17
+    sceneLongitude: 24.94
+    east: 0.0
+    north: 500000.0
+  )
+  check(
+    label: "500 km north of Helsinki is 4.5 degrees north"
+    ok: Math.abs(value: north.latitude - 64.67) < 0.02
+  )
+  log(nearCityText(latitude: north.latitude, longitude: north.longitude))
+  let east: GeoPlace = geoPlaceAt(
+    sceneLatitude: 60.0
+    sceneLongitude: 24.0
+    east: 100000.0
+    north: 0.0
+  )
+  check(
+    label: "100 km east at 60 N is 1.8 degrees east"
+    ok: Math.abs(value: east.longitude - 25.8) < 0.01
+  )
+  let wrapped: GeoPlace = geoPlaceAt(
+    sceneLatitude: 0.0
+    sceneLongitude: 179.5
+    east: 111195.0
+    north: 0.0
+  )
+  check(label: "the longitude wraps at 180", ok: Math.abs(value: wrapped.longitude + 179.5) < 0.01)
+  let pole: GeoPlace = geoPlaceAt(
+    sceneLatitude: 89.0
+    sceneLongitude: 0.0
+    east: 0.0
+    north: 500000.0
+  )
+  check(label: "the latitude stops at the pole", ok: pole.latitude <= 90.0)
+  ret 0
+}

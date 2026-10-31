@@ -1,0 +1,213 @@
+# The tree lab's season control (docs/seasons-and-weather-design.md §6):
+# the date and the place the lab's seasons will run on (the trees' season
+# colors and leaves read them in the later seasons steps). RAE_DAY_OF_YEAR
+# (1 .. 366) and RAE_LATITUDE start it; RAE_YEAR_SPEED makes the year run
+# (days per simulated day of a minute: 30 is a month a minute); a day
+# slider along the bottom of the window shows it: drag it, or hold , and .
+# to slide the day back and on (Y shows and hides it). It names the date,
+# the latitude and the nearest well-known city. It is hidden in a headless
+# or screenshot run, so the lab's comparison pictures do not change
+# (RAE_TREELAB_SEASON=1 shows it there).
+import Math
+import Sys
+import Gpu2d
+import Keys
+import Sdl3
+import Gpu2dText
+open Calendar
+open Cities
+open Gpu2dCanvas
+open SdfText
+open Sky
+open Moon
+open app3d/TimeOfDay
+
+type LabSeason {
+  clock: TimeOfDay
+  latitude: Float
+  longitude: Float
+  shown: Bool
+  dragging: Bool
+  # the part of a day the held key has slid the date
+  slide: Float = 0.0
+  font: SdfFont
+}
+
+# How fast holding , or . slides the day (days a second)
+const labSeasonSlideDays: Float = 30.0
+
+func labSeasonEnvFloat(name: view String, fallback: view Float) ret Float {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toFloat()
+}
+
+func createLabSeason() ret LabSeason {
+  var clock: TimeOfDay = createTimeOfDay(hour: 12.0)
+  let dayText: String = Sys.getEnv(name: "RAE_DAY_OF_YEAR")
+  if dayText.length() > 0 {
+    clock.dayOfYear = clampDayOfYear(year: clock.year, dayOfYear: dayText.toInt())
+  }
+  clock.yearSpeed = labSeasonEnvFloat(name: "RAE_YEAR_SPEED", fallback: 0.0)
+  let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0 or Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT").length() > 0 or Sys.getEnv(
+    name: "RAE_TREELAB_DOLLY"
+  ).length() > 0
+  ret LabSeason {
+    clock: clock
+    latitude: Math.clamp(
+      val: labSeasonEnvFloat(name: "RAE_LATITUDE", fallback: skyDefaultLatitudeDeg)
+      low: -90.0
+      high: 90.0
+    )
+    longitude: moonDefaultLongitudeDeg
+    shown: headless is false or Sys.getEnv(name: "RAE_TREELAB_SEASON") is "1"
+    dragging: false
+    font: SdfText.loadSdfFont(
+      jsonPath: "examples/136_walker_character/assets/Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "examples/136_walker_character/assets/Roboto-Regular.mtsdf.raw"
+    )
+  }
+}
+
+# The slider's track in the window: x, y (its center line), width
+type LabSeasonTrack {
+  x: Float
+  y: Float
+  width: Float
+}
+
+func labSeasonTrack() ret LabSeasonTrack {
+  let width: Float = Gpu2d.windowWidth().toFloat()
+  let height: Float = Gpu2d.windowHeight().toFloat()
+  let margin: Float = width * 0.06
+  ret LabSeasonTrack { x: margin, y: height - height * 0.05, width: width - 2.0 * margin }
+}
+
+# A frame of it: the year running, the keys and the slider's drag. True
+# when the date moved.
+func updateLabSeason(season: mod LabSeason, deltaTime: view Float) ret Bool {
+  let dayBefore: Int = season.clock.dayOfYear
+  let unusedMoved: Bool = timeOfDayAdvance(timeOfDay: season.clock, deltaTime: deltaTime)
+  if Sdl3.isKeyPressed(key: Keys.keyY) {
+    season.shown = season.shown is false
+  }
+  let days: Int = daysInYear(year: season.clock.year)
+  var day: Int = season.clock.dayOfYear
+  # a press steps a day, a held key slides on at labSeasonSlideDays
+  if Sdl3.isKeyPressed(key: Keys.keyPeriod) {
+    day = day + 1
+    season.slide = 0.0
+  } else if Sdl3.isKeyDown(key: Keys.keyPeriod) {
+    season.slide = season.slide + labSeasonSlideDays * deltaTime
+  } else if Sdl3.isKeyPressed(key: Keys.keyComma) {
+    day = day - 1
+    season.slide = 0.0
+  } else if Sdl3.isKeyDown(key: Keys.keyComma) {
+    season.slide = season.slide - labSeasonSlideDays * deltaTime
+  } else {
+    season.slide = 0.0
+  }
+  loop season.slide >= 1.0 {
+    day = day + 1
+    season.slide = season.slide - 1.0
+  }
+  loop season.slide <= -1.0 {
+    day = day - 1
+    season.slide = season.slide + 1.0
+  }
+  if season.shown {
+    let track: LabSeasonTrack = labSeasonTrack()
+    let reach: Float = Gpu2d.windowHeight().toFloat() * 0.02
+    if Gpu2d.pointerDown() is false {
+      season.dragging = false
+    } else if season.dragging or Math.abs(value: Gpu2d.pointerY() - track.y) < reach {
+      season.dragging = true
+      let share: Float = Math.clamp(
+        val: (Gpu2d.pointerX() - track.x) / track.width
+        low: 0.0
+        high: 1.0
+      )
+      day = 1 + (share * (days - 1).toFloat() + 0.5).toInt()
+    }
+  }
+  let wrapped: Int = ((day - 1) % days + days) % days + 1
+  season.clock.dayOfYear = wrapped
+  ret wrapped is not dayBefore
+}
+
+# The slider, over the frame (the renderer's UI overlay pass): the year's
+# track with a tick at each month's first day, the day's knob, and above it
+# the date, the latitude and the nearest well-known city
+func drawLabSeason(season: view LabSeason, canvas: mod Gpu2dCanvas) {
+  Gpu2d.beginFrameLoad(canvas: canvas)
+  if season.shown is false {
+    ret
+  }
+  let track: LabSeasonTrack = labSeasonTrack()
+  let unit: Float = Gpu2d.windowHeight().toFloat() * 0.006
+  let days: Int = daysInYear(year: season.clock.year)
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: track.x - unit * 3.0
+    y: track.y - unit * 8.0
+    w: track.width + unit * 6.0
+    h: unit * 11.0
+    color: 0x99101814
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: track.x
+    y: track.y - unit * 0.5
+    w: track.width
+    h: unit
+    color: 0xFF5A6B5F
+  )
+  loop var month: Int = 1, month <= 12, ++month {
+    let first: Int = dayOfYearFromDate(date: { year: season.clock.year, month: month, day: 1 })
+    let x: Float = track.x + track.width * (first - 1).toFloat() / (days - 1).toFloat()
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: x - unit * 0.25
+      y: track.y - unit * 1.5
+      w: unit * 0.5
+      h: unit * 3.0
+      color: 0xFF8FA394
+    )
+  }
+  let knobX: Float = track.x + track.width * (season.clock.dayOfYear - 1).toFloat() / (days - 1).toFloat()
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: knobX - unit * 1.5
+    y: track.y - unit * 1.5
+    w: unit * 3.0
+    h: unit * 3.0
+    color: 0xFF5BC79A
+  )
+  let date: CalendarDate = dateFromDayOfYear(
+    year: season.clock.year
+    dayOfYear: season.clock.dayOfYear
+  )
+  var hemisphere: String = "N"
+  if season.latitude < 0.0 {
+    hemisphere = "S"
+  }
+  let latitudeText: String = "{(Math.abs(value: season.latitude) * 10.0 + 0.5).toInt() / 10}.{(Math.abs(
+    value: season.latitude
+  ) * 10.0 + 0.5).toInt() % 10}{hemisphere}"
+  let unusedEnd: Float = Gpu2dText.drawText(
+    canvas: canvas
+    font: season.font
+    text: "Day {season.clock.dayOfYear}, {formatCalendarDate(date: date)}   {latitudeText}   {nearCityText(
+      latitude: season.latitude
+      longitude: season.longitude
+    )}   drag, or , and . (Y hides)"
+    x: track.x
+    y: track.y - unit * 3.5
+    sizePx: unit * 3.2
+    color: 0xFFE6ECE7
+  )
+}
