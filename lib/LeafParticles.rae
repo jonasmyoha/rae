@@ -22,6 +22,7 @@
 # back; with no leaf released for a whole leaf's life nothing is dispatched
 # or drawn. app3d/LeafRelease decides which trees let leaves go.
 import Math
+import Sys
 import Vec3
 open Wind
 open webgpu/WebgpuEnums
@@ -64,6 +65,9 @@ type LeafEmit {
   seed: Int
   # 0 an oval, 1 a maple, 2 a birch, 3 a ginkgo leaf (leaf_render.wgsl)
   shape: Int = 0
+  # a ground lift: the leaves start on the ground at `crown` and are thrown
+  # up (the fallen leaves a strong gust sweeps up)
+  lift: Bool = false
 }
 
 # A frame's step: the eye and the reach past which leaves die; the wind in
@@ -99,6 +103,11 @@ type LeafParticles {
   totalReleased: Int = 0
   quietSeconds: Float = 1000.0
   clock: Float = 0.0
+  # RAE_LEAF_REPORT=1: a line a second of the releases and the frame cap
+  report: Bool = false
+  reportReleased: Int = 0
+  reportCapped: Int = 0
+  reportSeconds: Float = 0.0
   made: Bool = false
   uniformArgs: ArgWriter
   emitArgs: ArgWriter
@@ -129,6 +138,7 @@ func createLeafParticles(
 ) ret LeafParticles {
   ret LeafParticles {
     capacity: Math.max(a: capacity, b: 64)
+    report: Sys.getEnv(name: "RAE_LEAF_REPORT") is "1"
     constants: constants
     emits: List.create(LeafEmit, cap: leafEmitMax)
     uniformArgs: createArgs(uniform: true)
@@ -162,6 +172,7 @@ func leafEmit(
   count: view Int
   seed: view Int
   shape: view Int
+  lift: view Bool
 ) ret Bool {
   if count <= 0 {
     ret true
@@ -176,6 +187,8 @@ func leafEmit(
     size: size
     count: count
     seed: seed
+    shape: shape
+    lift: lift
   })
   ret true
 }
@@ -315,13 +328,22 @@ func ensureLeafGpu(leafParticles: mod LeafParticles, resources: mod GpuResources
   }
 }
 
+# An emit's shape and lift as leaf_particles.wgsl reads them (info.w)
+func leafEmitFlags(emit: view LeafEmit) ret Int {
+  if emit.lift {
+    ret (emit.shape bitand 3) + 16
+  }
+  ret emit.shape bitand 3
+}
+
 # The most leaves a frame of `deltaTime` s may release into a ring of
-# `capacity`: twice what the ring holds over a leaf's life at that rate,
+# `capacity`: four times what the ring holds over a leaf's life at that
+# rate (a storm gust's burst overwrites the oldest, lying leaves first),
 # and an eighth of the ring at most
 func leafFrameCap(capacity: view Int, deltaTime: view Float) ret Int {
   ret Math.min(
     a: capacity / 8
-    b: Math.max(a: 1, b: (capacity.toFloat() / leafLifeSeconds * deltaTime * 2.0 + 0.5).toInt())
+    b: Math.max(a: 1, b: (capacity.toFloat() / leafLifeSeconds * deltaTime * 4.0 + 0.5).toInt())
   )
 }
 
@@ -363,10 +385,27 @@ func stepLeafParticles(
         x: count
         y: released
         z: emit.seed bitand 16777215
-        w: emit.shape
+        w: leafEmitFlags(emit: emit)
       )
       released = released + count
       emitCount = emitCount + 1
+    }
+  }
+  if leafParticles.report {
+    var asked: Int = 0
+    loop let emit: view LeafEmit in leafParticles.emits {
+      asked = asked + emit.count
+    }
+    leafParticles.reportReleased = leafParticles.reportReleased + released
+    leafParticles.reportCapped = leafParticles.reportCapped + asked - released
+    leafParticles.reportSeconds = leafParticles.reportSeconds + deltaTime
+    if leafParticles.reportSeconds >= 1.0 {
+      log(
+        "[leaves] {leafParticles.reportReleased} released, {leafParticles.reportCapped} over the cap in {leafParticles.reportSeconds} s"
+      )
+      leafParticles.reportReleased = 0
+      leafParticles.reportCapped = 0
+      leafParticles.reportSeconds = 0.0
     }
   }
   leafParticles.emits.clear()

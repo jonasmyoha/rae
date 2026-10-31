@@ -12,7 +12,15 @@
 #   how easily its leaves let go (leafReleaseHold: a little in summer and
 #   spring, fully once they turn) and the leaves still on it. So a summer
 #   storm takes a few green leaves, an autumn gust a cloud of them, and a
-#   calm nothing.
+#   calm nothing;
+# - a storm gust's burst (§5.3): where the gust is a storm gust's (past
+#   0.7, its peak 1), every tree in its band lets go leafStormBurst more a
+#   second, by the same hold and foliage.
+#
+# Ground lifts (releaseGroundLitter): once the deciduous kinds have lost
+# leaves, the ground round the eye has leaf litter; patches of it on a 6 m
+# grid let leaves rise in a strong gust (past leafLitterThreshold), thrown
+# up into the swirl (lib/LeafParticles' ground lifts).
 #
 # Evergreens and bare trees let nothing go. The leaves are the color the
 # crown has (leafReleaseColor). Each frame's rate is drawn into whole
@@ -23,6 +31,7 @@ import Math
 import Vec3
 open Wind
 open WindGust
+open WorldBiome
 open app3d/PropField
 open app3d/PropSeason
 open app3d/PropFade
@@ -35,7 +44,7 @@ const fallingLeavesPerTree: Int = 10
 const fallingLeafSpeed: Float = 0.9
 
 # A leaf's length (m)
-const fallingLeafSize: Float = 0.13
+const fallingLeafSize: Float = 0.16
 
 # How many of a tree's leaves are in the air at once at leaf loss `loss`:
 # most in the middle of the fall, none before it starts or once the tree is
@@ -63,6 +72,21 @@ const leafGustThreshold: Float = 0.4
 # unit of the gust's squared excess (a storm gust's peak: 0.36 of it)
 const leafGustRate: Float = 100.0
 
+# Leaves a second more at a storm gust's peak, from a tree in full leaf
+# letting go easily
+const leafStormBurst: Float = 120.0
+
+# The ground's litter: the gust past which it lifts, the leaves a second a
+# patch then gives for each unit of the squared excess, the grid (m) and
+# the reach (m) of the patches round the eye
+const leafLitterThreshold: Float = 0.5
+
+const leafLitterRate: Float = 40.0
+
+const leafLitterSpacing: Float = 6.0
+
+const leafLitterReach: Float = 24.0
+
 # How easily a tree's leaves let go (0 .. 1): a little while green, fully
 # once they have turned (the slow temperature `slow` falling past the
 # kind's turnFull)
@@ -71,9 +95,9 @@ func leafReleaseHold(season: view PropSeason, slow: view Float, warming: view Bo
     ret 0.0
   }
   if warming {
-    ret 0.02
+    ret 0.01
   }
-  ret 0.02 + 0.98 * propSeasonRamp(from: season.turnStart, to: season.turnFull, value: slow)
+  ret 0.01 + 0.99 * propSeasonRamp(from: season.turnStart, to: season.turnFull, value: slow)
 }
 
 # How many leaves a second a tree of `season` at slow temperature `slow`
@@ -98,7 +122,8 @@ func leafReleaseRate(
   }
   let foliage: Float = 1.0 - propSeasonLoss(season: season, slow: slow, warming: warming)
   let excess: Float = Math.max(a: gust - leafGustThreshold, b: 0.0)
-  ret seasonal + foliage * leafReleaseHold(season: season, slow: slow, warming: warming) * excess * excess * leafGustRate
+  let storm: Float = propSeasonRamp(from: 0.7, to: 0.95, value: gust)
+  ret seasonal + foliage * leafReleaseHold(season: season, slow: slow, warming: warming) * (excess * excess * leafGustRate + storm * leafStormBurst)
 }
 
 # The color of the leaves a tree lets go: the crown's, its summer green
@@ -179,10 +204,121 @@ func releaseFieldLeaves(
               count: count
               seed: index * 7919 + frame
               shape: kind.season.leafShape
+              lift: false
             ) {
               ret
             }
           }
+        }
+      }
+    }
+  }
+}
+
+# How much leaf litter lies on the ground of `field` (0 .. 1: the most any
+# deciduous kind has lost) and the kind that lost it (its index; -1 none)
+type LeafLitter {
+  amount: Float
+  kind: Int
+}
+
+func leafLitterOf(field: view PropField) ret LeafLitter {
+  var litter: LeafLitter = { amount: 0.0, kind: -1 }
+  if field.seasonsOn is false or field.seasonWarming {
+    ret litter
+  }
+  loop var index: Int = 0, index < field.kinds.length, ++index {
+    if let kind: view PropKind = field.kinds.viewAt(index: index) {
+      if kind.season.deciduous {
+        let loss: Float = propSeasonLoss(
+          season: kind.season
+          slow: field.seasonSlow
+          warming: false
+        )
+        if loss > litter.amount {
+          litter.amount = loss
+          litter.kind = index
+        }
+      }
+    }
+  }
+  ret litter
+}
+
+# This frame's ground lifts round `eye`: the litter patches on a 6 m grid
+# within leafLitterReach that a strong gust of `wind` crosses throw leaves
+# up, in the turned color of the kind that lost the most. The ground is
+# flat at `groundZ` with `flatGround`, else `biome`'s terrain; none lift
+# from under water.
+func releaseGroundLitter(
+  leafParticles: mod LeafParticles
+  field: view PropField
+  eye: view Vec3
+  deltaTime: view Float
+  wind: view WindVector
+  frame: view Int
+  biome: view BiomeConfig
+  groundZ: view Float
+  flatGround: view Bool
+) {
+  if deltaTime <= 0.0 {
+    ret
+  }
+  let litter: LeafLitter = leafLitterOf(field: field)
+  if litter.amount < 0.05 {
+    ret
+  }
+  if let kind: view PropKind = field.kinds.viewAt(index: litter.kind) {
+    let color: Vec3 = leafReleaseColor(season: kind.season, slow: field.seasonSlow, warming: false)
+    let steps: Int = (leafLitterReach / leafLitterSpacing).toInt()
+    let firstColumn: Int = Math.floor(x: eye.x / leafLitterSpacing).toInt() - steps
+    let firstRow: Int = Math.floor(x: eye.y / leafLitterSpacing).toInt() - steps
+    loop var row: Int = firstRow, row <= firstRow + 2 * steps, ++row {
+      loop var column: Int = firstColumn, column <= firstColumn + 2 * steps, ++column {
+        let key: Int = (column bitand 4095) * 4099 + (row bitand 4095)
+        let x: Float = (column.toFloat() + leafReleaseHash(index: key, seed: 1)) * leafLitterSpacing
+        let y: Float = (row.toFloat() + leafReleaseHash(index: key, seed: 2)) * leafLitterSpacing
+        let dx: Float = x - eye.x
+        let dy: Float = y - eye.y
+        if dx * dx + dy * dy > leafLitterReach * leafLitterReach {
+          continue
+        }
+        let excess: Float = Math.max(
+          a: windGustAt(x: x, y: y, wind: wind) - leafLitterThreshold
+          b: 0.0
+        )
+        if excess <= 0.0 {
+          continue
+        }
+        var ground: Float = groundZ
+        if not flatGround {
+          ground = worldTerrainHeight(
+            x: x
+            y: y
+            groundZ: groundZ
+            cfg: biome
+          )
+          if worldWaterZ(groundZ: groundZ, cfg: biome) > ground {
+            continue
+          }
+        }
+        let count: Int = leafReleaseCount(
+          rate: litter.amount * excess * excess * leafLitterRate
+          deltaTime: deltaTime
+          chance: leafReleaseHash(index: key, seed: frame)
+        )
+        if count > 0 and not leafEmit(
+          leafParticles: leafParticles
+          crown: Vec3.create(x: x, y: y, z: ground)
+          radius: 2.0
+          color: Vec3.vscale(a: color, s: 0.8)
+          size: fallingLeafSize
+          count: count
+          seed: key * 31 + frame
+          shape: kind.season.leafShape
+          lift: true
+        ) {
+          ret
         }
       }
     }

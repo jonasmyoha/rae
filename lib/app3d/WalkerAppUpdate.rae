@@ -234,13 +234,25 @@ func updateWalkerClimate(app: mod WalkerApp) {
     wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)
     frame: app.walkerMarks.leafFrame
   )
+  # the fallen leaves a strong gust sweeps up round the camera
+  releaseGroundLitter(
+    leafParticles: app.walkerMarks.leafParticles
+    field: app.terrainSystem.forest.field
+    eye: app.cameraSystem.camera.position
+    deltaTime: leafDeltaTime
+    wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)
+    frame: app.walkerMarks.leafFrame
+    biome: app.biome
+    groundZ: app.characterSystem.groundZ
+    flatGround: false
+  )
   if let rendererResources: mod GpuResources = app.renderSystem.renderer.gpuResources {
     stepLeafParticles(
       leafParticles: app.walkerMarks.leafParticles
       resources: rendererResources
       step: {
         eye: app.cameraSystem.camera.position
-        reach: walkerLeafReach * 1.5
+        reach: walkerLeafKeep
         windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
         windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
         wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)

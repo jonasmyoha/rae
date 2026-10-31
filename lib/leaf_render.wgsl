@@ -12,6 +12,7 @@
 // - Both faces are lit: the normal turns toward the eye. A leaf with the sun
 //   behind it glows (the light through it, the way a leaf card in the
 //   trees reads backlit): lighter and warmer.
+// - It grows with its distance from the eye, so a far cloud still reads.
 // - It fades out by a dither over its last two seconds (no blending).
 // - The toon look writes the toon mode, so it takes the same ramp as the
 //   rest of the scene.
@@ -118,7 +119,11 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut
     return o;
   }
   let packed = unpack4x8unorm(leaf.color);
-  let size = packed.a * 0.3;
+  // a leaf grows with its distance from the eye (x1 within 6 m, up to x3.5
+  // at 36 m): a real leaf is under a pixel at 30 m, a stylized one still
+  // reads, so a gust's cloud of leaves is seen across the forest
+  let distance = length(leaf.position - D.eye.xyz);
+  let size = packed.a * 0.3 * (1.0 + clamp((distance - 6.0) / 12.0, 0.0, 2.5));
   let landed = (leaf.seed & leafRenderLanded) != 0u;
   let floating = (leaf.seed & leafRenderFloating) != 0u;
   let shape = (leaf.seed >> 24u) & 3u;

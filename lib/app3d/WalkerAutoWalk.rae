@@ -7,6 +7,8 @@
 # autoWalkLookBack seconds to look back along the trail; with RAE_WALKER_FRAMES=<folder> every
 # frame is
 # saved there as frame<N>.bmp (with RAE_FIXED_DT a frame is a fixed step).
+# RAE_WALKER_AUTOWALK_STILL=1 films the same length with the walker standing
+# and the camera still (the weather and the leaves round the start).
 # Nothing changes in normal play.
 import Math
 import Sys
@@ -34,9 +36,21 @@ func autoWalkIntent(
     ret intent
   }
   rig.mode = CameraRigMode.character
+  let still: Bool = Sys.getEnv(name: "RAE_WALKER_AUTOWALK_STILL") is "1"
   if seconds > length {
-    rig.yaw = rig.yaw + 3.14159265 * deltaTime / autoWalkLookBack
+    if not still {
+      rig.yaw = rig.yaw + 3.14159265 * deltaTime / autoWalkLookBack
+    }
     ret intent
+  }
+  if still {
+    ret InputIntent {
+      moveX: 0.0
+      moveY: 0.0
+      walking: true
+      jump: false
+      actions: 0
+    }
   }
   ret InputIntent {
     moveX: 0.7 + 0.25 * Math.sin(x: seconds * 0.6)

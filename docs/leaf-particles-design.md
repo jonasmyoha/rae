@@ -400,7 +400,20 @@ later idea: blowing snow from the same system, with a white flake card).
    curl-noise swirls, updraft, water floating, snow surface, dither fade,
    the leaf-shape textures per kind, two-sided lighting, motion vectors.
    Looks-development round.
-7. **The epic gust** (§5.3): storm-gust bursts, the vortices that travel
+7. **The epic gust** (§5.3), done 2026-10-31: a storm-gust burst in
+   leafReleaseRate (120 leaves a second more at a storm gust's peak; the
+   green leaves' hold lowered to 0.01 so a summer storm stays a few);
+   vortices on a 30 m lattice carried with the drift, live where the storm
+   gust is at their center, spinning the leaves and lifting them to about
+   16 m; ground lifts (app3d/LeafRelease releaseGroundLitter: litter
+   patches on a 6 m grid within 24 m of the eye, emits marked as lifts and
+   thrown up at 4 - 6 m/s); the frame cap four times the ring over a
+   leaf's life; the walkers release within 40 m and keep leaves to 110 m;
+   leaves grow with their distance from the eye (up to x3.5 at 36 m) so a
+   far cloud reads. Fixed on the way: LeafParticles.leafEmit dropped the
+   shape (every leaf was an oval in step 6). RAE_LEAF_REPORT=1 logs the
+   releases a second; RAE_WALKER_AUTOWALK_STILL=1 films a still camera.
+   looks-development rendering/epicGust (a video). Original plan: storm-gust bursts, the vortices that travel
    with the front, the ground lifts. Looks-development video.
 8. **Quality and cost** (§6): capacity and reach per quality, the release
    cap, the GPU timing on the desktop (and the phone if one is at hand),
