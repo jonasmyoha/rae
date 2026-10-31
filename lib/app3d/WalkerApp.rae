@@ -52,6 +52,7 @@ open app3d/CharacterController
 open app3d/SettingsDialog
 open app3d/SettingsSky
 open app3d/SettingsPersist
+open Climate
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
@@ -713,6 +714,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       netSeam: createNetSeam()
       players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
+      climate: own createClimate(reach: walkerClimateReach(land: settings.land))
       wadeSplash: own wadeSplash
       waterSystem: own waterSystem
       idIssuer: own idIssuer

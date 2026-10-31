@@ -3,7 +3,8 @@
 # colors and leaves read them in the later seasons steps). RAE_DAY_OF_YEAR
 # (1 .. 366) and RAE_LATITUDE start it; RAE_YEAR_SPEED makes the year run
 # (days per simulated day of a minute: 30 is a month a minute); a day
-# slider along the bottom of the window shows it: drag it, or hold , and .
+# slider along the bottom of the window shows it, with the temperature and
+# the season (lib/Climate): drag it, or hold , and .
 # to slide the day back and on (Y shows and hides it). It names the date,
 # the latitude and the nearest well-known city. It is hidden in a headless
 # or screenshot run, so the lab's comparison pictures do not change
@@ -21,6 +22,7 @@ open SdfText
 open Sky
 open Moon
 open app3d/TimeOfDay
+open Climate
 
 type LabSeason {
   clock: TimeOfDay
@@ -30,6 +32,9 @@ type LabSeason {
   dragging: Bool
   # the part of a day the held key has slid the date
   slide: Float = 0.0
+  # the slow temperature the seasons follow (lib/Climate; the lab is one
+  # place, one cell)
+  climate: Climate = createClimate(reach: 0.0)
   font: SdfFont
 }
 
@@ -92,6 +97,14 @@ func labSeasonTrack() ret LabSeasonTrack {
 func updateLabSeason(season: mod LabSeason, deltaTime: view Float) ret Bool {
   let dayBefore: Int = season.clock.dayOfYear
   let unusedMoved: Bool = timeOfDayAdvance(timeOfDay: season.clock, deltaTime: deltaTime)
+  let unusedStepped: Bool = stepClimate(
+    climate: season.climate
+    sceneLatitude: season.latitude
+    sceneLongitude: season.longitude
+    year: season.clock.year
+    dayOfYear: season.clock.dayOfYear
+    hour: season.clock.hour
+  )
   if Sdl3.isKeyPressed(key: Keys.keyY) {
     season.shown = season.shown is false
   }
@@ -201,13 +214,41 @@ func drawLabSeason(season: view LabSeason, canvas: mod Gpu2dCanvas) {
   let unusedEnd: Float = Gpu2dText.drawText(
     canvas: canvas
     font: season.font
-    text: "Day {season.clock.dayOfYear}, {formatCalendarDate(date: date)}   {latitudeText}   {nearCityText(
-      latitude: season.latitude
-      longitude: season.longitude
-    )}   drag, or , and . (Y hides)"
+    text: "Day {season.clock.dayOfYear}, {formatCalendarDate(date: date)}   {labSeasonClimateText(
+      season: season
+    )}   {latitudeText}   {nearCityText(latitude: season.latitude, longitude: season.longitude)}   drag, or , and . (Y hides)"
     x: track.x
     y: track.y - unit * 3.5
     sizePx: unit * 3.2
     color: 0xFFE6ECE7
   )
+}
+
+# "8.4 °C, autumn": the air now and the season from the slow temperature
+func labSeasonClimateText(season: view LabSeason) ret String {
+  let air: Float = climateAt(
+    latitude: season.latitude
+    dayOfYear: season.clock.dayOfYear
+    localHour: season.clock.hour
+    height: 0.0
+  )
+  let tenths: Int = (Math.abs(value: air) * 10.0 + 0.5).toInt()
+  var sign: String = ""
+  if air < 0.0 and tenths > 0 {
+    sign = "-"
+  }
+  let name: String = climateSeasonName(
+    slowTemperature: climateSlowAt(
+      climate: season.climate
+      east: 0.0
+      north: 0.0
+      height: 0.0
+    )
+    warming: climateWarming(
+      latitude: season.latitude
+      year: season.clock.year
+      dayOfYear: season.clock.dayOfYear
+    )
+  )
+  ret "{sign}{tenths / 10}.{tenths % 10} °C, {name}"
 }

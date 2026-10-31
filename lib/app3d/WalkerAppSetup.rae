@@ -91,6 +91,15 @@ func walkerGridSide(land: view WalkerLand) ret Int {
   ret 7
 }
 
+# How far the climate grid reaches (m): the huge forest's 1,000 km world,
+# the island's few kilometers (one 50 km cell and its neighbors)
+func walkerClimateReach(land: view WalkerLand) ret Float {
+  if land is WalkerLand.forest {
+    ret 1000000.0
+  }
+  ret 50000.0
+}
+
 func walkerForestSettings(land: view WalkerLand) ret ForestFieldSettings {
   if land is WalkerLand.forest {
     ret wideForestSettings()

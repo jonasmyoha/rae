@@ -1,0 +1,179 @@
+# lib/Climate (docs/seasons-and-weather-design.md §2): the fit at Helsinki
+# (the year's mean about 5 °C, January about -6 °C, July about 16 °C), the
+# equator (warm all year, a small swing), the southern hemisphere (its
+# winter in July), the height (-6.5 °C a kilometer), the day (warmest at
+# 15:00) and the longitude through the local time; the season words over
+# Helsinki's year; the Climate grid, seeded and stepped hour by hour,
+# staying with the direct two-week mean, and 500 km north colder.
+import Math
+open Climate
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func yearMean(latitude: view Float) ret Float {
+  var sum: Float = 0.0
+  loop var day: Int = 1, day <= 365, ++day {
+    sum = sum + climateDayMean(latitude: latitude, dayOfYear: day, height: 0.0)
+  }
+  ret sum / 365.0
+}
+
+func main() ret Int {
+  let helsinki: Float = yearMean(latitude: 60.17)
+  log(
+    "Helsinki: year {helsinki}, January {climateDayMean(latitude: 60.17, dayOfYear: 15, height: 0.0)}, July {climateDayMean(
+      latitude: 60.17
+      dayOfYear: 197
+      height: 0.0
+    )}"
+  )
+  check(label: "Helsinki's year is about 5 °C", ok: Math.abs(value: helsinki - 5.0) < 1.0)
+  check(
+    label: "Helsinki's January is about -6 °C"
+    ok: Math.abs(value: climateDayMean(latitude: 60.17, dayOfYear: 15, height: 0.0) + 6.0) < 2.0
+  )
+  check(
+    label: "Helsinki's July is about 16 °C"
+    ok: Math.abs(value: climateDayMean(latitude: 60.17, dayOfYear: 197, height: 0.0) - 16.0) < 2.0
+  )
+  let equatorJanuary: Float = climateDayMean(latitude: 0.0, dayOfYear: 15, height: 0.0)
+  let equatorJuly: Float = climateDayMean(latitude: 0.0, dayOfYear: 197, height: 0.0)
+  check(
+    label: "the equator is warm all year with a small swing"
+    ok: equatorJanuary > 25.0 and equatorJuly > 25.0 and Math.abs(
+      value: equatorJanuary - equatorJuly
+    ) < 2.5
+  )
+  check(
+    label: "the south has its winter in July"
+    ok: climateDayMean(latitude: -45.0, dayOfYear: 197, height: 0.0) < climateDayMean(
+      latitude: -45.0
+      dayOfYear: 15
+      height: 0.0
+    )
+  )
+  check(
+    label: "1,000 m up is 6.5 °C colder"
+    ok: Math.abs(
+      value: climateDayMean(latitude: 45.0, dayOfYear: 100, height: 1000.0) - climateDayMean(
+        latitude: 45.0
+        dayOfYear: 100
+        height: 0.0
+      ) + 6.5
+    ) < 0.01
+  )
+  let afternoon: Float = climateAt(
+    latitude: 60.0
+    dayOfYear: 172
+    localHour: 15.0
+    height: 0.0
+  )
+  let night: Float = climateAt(
+    latitude: 60.0
+    dayOfYear: 172
+    localHour: 3.0
+    height: 0.0
+  )
+  check(
+    label: "15:00 is 10 °C warmer than 03:00"
+    ok: Math.abs(value: afternoon - night - 10.0) < 0.01
+  )
+  check(
+    label: "15 degrees east is an hour later"
+    ok: Math.abs(
+      value: climateLocalHour(sceneHour: 12.0, sceneLongitude: 24.0, longitude: 39.0) - 13.0
+    ) < 0.001
+  )
+  log("Helsinki through 1995:")
+  loop var month: Int = 0, month < 12, ++month {
+    let day: Int = 15 + month * 30
+    let slow: Float = climateSlowMean(
+      latitude: 60.17
+      year: 1995
+      dayOfYear: day
+      height: 0.0
+    )
+    log(
+      "  day {day}: {climateSeasonName(
+        slowTemperature: slow
+        warming: climateWarming(latitude: 60.17, year: 1995, dayOfYear: day)
+      )}"
+    )
+  }
+  check(
+    label: "mid January in Helsinki is deep winter"
+    ok: climateSeasonName(
+      slowTemperature: climateSlowMean(
+        latitude: 60.17
+        year: 1995
+        dayOfYear: 20
+        height: 0.0
+      )
+      warming: climateWarming(latitude: 60.17, year: 1995, dayOfYear: 20)
+    ) is "deep winter"
+  )
+  check(
+    label: "late July in Helsinki is summer"
+    ok: climateSeasonName(
+      slowTemperature: climateSlowMean(
+        latitude: 60.17
+        year: 1995
+        dayOfYear: 205
+        height: 0.0
+      )
+      warming: climateWarming(latitude: 60.17, year: 1995, dayOfYear: 205)
+    ) is "summer"
+  )
+  var climate: Climate = createClimate(reach: 600000.0)
+  let unusedSeeded: Bool = stepClimate(
+    climate: climate
+    sceneLatitude: 60.17
+    sceneLongitude: 24.94
+    year: 1995
+    dayOfYear: 280
+    hour: 0.0
+  )
+  loop var hour: Int = 1, hour < 48, ++hour {
+    let unusedStepped: Bool = stepClimate(
+      climate: climate
+      sceneLatitude: 60.17
+      sceneLongitude: 24.94
+      year: 1995
+      dayOfYear: 280 + hour / 24
+      hour: (hour % 24).toFloat()
+    )
+  }
+  let gridHere: Float = climateSlowAt(
+    climate: climate
+    east: 0.0
+    north: 0.0
+    height: 0.0
+  )
+  let direct: Float = climateSlowMean(
+    latitude: 60.17
+    year: 1995
+    dayOfYear: 282
+    height: 0.0
+  )
+  log("the grid at the origin {gridHere}, the direct mean {direct}")
+  check(
+    label: "the grid stays with the direct two-week mean"
+    ok: Math.abs(value: gridHere - direct) < 1.0
+  )
+  check(
+    label: "500 km north is colder"
+    ok: climateSlowAt(
+      climate: climate
+      east: 0.0
+      north: 500000.0
+      height: 0.0
+    ) < gridHere - 2.0
+  )
+  ret 0
+}

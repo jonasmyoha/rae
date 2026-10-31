@@ -1,0 +1,64 @@
+# app3d/SettingsClimate — the settings panel's temperature line (lib/Climate,
+# docs/seasons-and-weather-design.md §6): the air temperature now where the
+# camera looks and the season in words from the slow temperature there. The
+# place is the settings' latitude and longitude moved by the look point
+# (SettingsState.lookEast / lookNorth, set by an app with a world: the
+# walker's 1,000 km forest reaches other latitudes; 0 for the others), at
+# its height above the sea. The slow temperature is the app's climate grid's
+# when it has one (SettingsState.slowTemperature), else the two-week mean
+# computed directly. Split from app3d/SettingsDialog for its size.
+import Math
+open Climate
+open GeoPlace
+open app3d/SettingsDialog
+
+# No slow temperature from an app: the panel computes it
+const settingsNoSlowTemperature: Float = -1000.0
+
+# "Temperature 14.2 °C, summer"
+func settingsClimateText(settingsState: view SettingsState) ret String {
+  let place: GeoPlace = geoPlaceAt(
+    sceneLatitude: settingsState.latitude
+    sceneLongitude: settingsState.longitude
+    east: settingsState.lookEast
+    north: settingsState.lookNorth
+  )
+  let air: Float = climateAt(
+    latitude: place.latitude
+    dayOfYear: settingsState.timeOfDay.dayOfYear
+    localHour: climateLocalHour(
+      sceneHour: settingsState.timeOfDay.hour
+      sceneLongitude: settingsState.longitude
+      longitude: place.longitude
+    )
+    height: settingsState.lookHeight
+  )
+  var slow: Float = settingsState.slowTemperature
+  if slow <= settingsNoSlowTemperature + 1.0 {
+    slow = climateSlowMean(
+      latitude: place.latitude
+      year: settingsState.timeOfDay.year
+      dayOfYear: settingsState.timeOfDay.dayOfYear
+      height: settingsState.lookHeight
+    )
+  }
+  let season: String = climateSeasonName(
+    slowTemperature: slow
+    warming: climateWarming(
+      latitude: place.latitude
+      year: settingsState.timeOfDay.year
+      dayOfYear: settingsState.timeOfDay.dayOfYear
+    )
+  )
+  ret "Temperature {settingsTenths(value: air)} °C, {season}"
+}
+
+# A value to a tenth: "-12.4", "0.0", "21.3"
+func settingsTenths(value: view Float) ret String {
+  let tenths: Int = (Math.abs(value: value) * 10.0 + 0.5).toInt()
+  var sign: String = ""
+  if value < 0.0 and tenths > 0 {
+    sign = "-"
+  }
+  ret "{sign}{tenths / 10}.{tenths % 10}"
+}
