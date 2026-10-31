@@ -57,7 +57,7 @@ const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferReco
 
 const grassUniformFloats: Int = 36  # nine vec4 (camera, wind, blade, patch and distance controls)
 
-const grassUniformBytes: Int = 144
+const grassUniformBytes: Int = 160
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
@@ -172,7 +172,8 @@ func defaultGrassComputeShader() ret Shader {
 
 # Use an app's own compute shader — a declared composition that starts with
 # lib/gpu/computeBounds.wgsl (the bounds check, since 0.1.267), whose next
-# parts define the surface (raeTerrainHeight / raeBiomeSample) and whose last
+# parts define the surface (raeTerrainHeight / raeBiomeSample /
+# raeBiomeMoisture) and whose last
 # part is lib/grass_compute.wgsl. Declared in the app so a surface that drifts from
 # the grass pass fails the app's build, not its first frame.
 func grassSetComputeShader(grass: mod GrassCompute, shader: own Shader) {
@@ -742,6 +743,14 @@ func grassGenerate(
     w: shape.toFloat()
   )
   # i: distance thinning and silhouette compensation
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.dryColor.x
+    y: settings.dryColor.y
+    z: settings.dryColor.z
+    w: settings.dryAmount
+  )
+  # j: the ground palette's dry grass and how dry (app3d/GroundPalette)
   uploadArgs(
     writer: grass.uniformArgs
     resources: resources

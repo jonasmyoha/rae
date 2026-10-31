@@ -56,8 +56,10 @@ extra noise. 114 uses:
 | Tip multiplier | 1.3 | 1.25 |
 | Wind strength | 1.0 | 0.45 |
 
-The root color in `walkerGroundColor()` matches the palette's base grass
-albedo, `(0.080, 0.245, 0.015)`. The procedural ground varies around that base.
+The root color is the frame's ground palette (`app3d/GroundPalette`, since
+seasons step 7: once `walkerGroundColor()` and the WGSL `RAE_TERRAIN_GRASS`,
+kept equal by hand); the terrain, the GPU grass and the meadow read the same
+value. The procedural ground varies around that base.
 Blades remain simple tapered cards. Trees, rocks and character assets are
 unchanged; this material pass does not replace the placeholder silhouettes.
 

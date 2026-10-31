@@ -44,6 +44,11 @@ fn raeBiomePath(p: vec2<f32>) -> f32 {
   return 0.0;
 }
 
+// The soil's moisture (the grass's dry share, grass_field.wgsl
+// groundPaletteGrass): even, as raeBiomeSample says
+fn raeBiomeMoisture(p: vec2<f32>) -> f32 {
+  return 0.5;
+}
 fn raeBiomeSample(p: vec2<f32>) -> RaeBiome {
   var sample: RaeBiome;
   sample.elevation = 1.0;

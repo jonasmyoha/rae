@@ -15,6 +15,7 @@ open ecs/ComponentTable
 open ui/Ecs
 open ui/UiSystems
 open ui/renderSystem/RenderSystem
+open app3d/GroundPalette
 open app3d/ControlPanel
 open app3d/CharacterController
 open app3d/WalkerCharacter
@@ -123,7 +124,7 @@ func setWalkerTerrainShader(
 ) {
   var constants: List(ShaderConstant) = islandConstantsFor(cfg: biome)
   loop let entry: ShaderConstant in grassPatchConstants(
-    settings: GrassConfig.grassMeadowSettings(groundColor: walkerGroundColor())
+    settings: GrassConfig.grassMeadowSettings(groundColor: groundSummerGrass())
   ) {
     constants.add(value: entry)
   }

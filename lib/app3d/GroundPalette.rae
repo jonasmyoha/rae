@@ -1,0 +1,105 @@
+# app3d/GroundPalette — the walkers' grass color through the year
+# (docs/seasons-and-weather-design.md §4): one value a frame, read by the
+# painted terrain (GbufferTerrain terrainSetGroundPalette), the GPU grass
+# (GrassViewSettings.groundColor, dryColor, dryAmount) and the meadow's
+# turf and tufts (app3d/WalkerMeadow), so the grass roots always match the
+# ground. It replaces the two constants that were kept equal by hand (the
+# Rae walkerGroundColor and the WGSL RAE_TERRAIN_GRASS).
+#
+# - The grass: summer's green; in spring, with the slow temperature
+#   (lib/Climate) rising, from the dead winter grass to a fresh light green
+#   and on to summer's; in autumn, falling, from summer's back to the dead
+#   winter grass.
+# - Dry grass: in a hot summer (a slow temperature over 15 °C) the grass
+#   where the soil is dry (WorldBiome's moisture low) turns straw yellow,
+#   the drier the soil the more (groundDryShare; the shaders' twin is
+#   lib/grass_field.wgsl groundPaletteGrass).
+import Math
+import Vec3
+
+type GroundPalette {
+  # the grass on moist ground, the straw of dry ground, and how far (0 .. 1)
+  # the driest ground has gone to straw
+  grass: Vec3
+  dry: Vec3
+  dryAmount: Float
+}
+
+# The grass of summer (the walkers' ground before the seasons)
+func groundSummerGrass() ret Vec3 {
+  ret Vec3.create(x: 0.088, y: 0.14, z: 0.026)
+}
+
+# Spring's new grass: lighter and yellower
+func groundFreshGrass() ret Vec3 {
+  ret Vec3.create(x: 0.104, y: 0.165, z: 0.024)
+}
+
+# Last year's dead grass in winter: a pale tan
+func groundDeadGrass() ret Vec3 {
+  ret Vec3.create(x: 0.15, y: 0.12, z: 0.05)
+}
+
+# Dry summer grass: straw
+func groundDryGrass() ret Vec3 {
+  ret Vec3.create(x: 0.2, y: 0.15, z: 0.045)
+}
+
+# The palette of summer, as the walkers' ground was before the seasons
+func summerGroundPalette() ret GroundPalette {
+  ret GroundPalette { grass: groundSummerGrass(), dry: groundDryGrass(), dryAmount: 0.0 }
+}
+
+func groundRamp(from: view Float, to: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - from) / (to - from), low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+func groundMix(a: view Vec3, b: view Vec3, t: view Float) ret Vec3 {
+  ret Vec3.vadd(a: a, b: Vec3.vscale(a: Vec3.vsub(a: b, b: a), s: t))
+}
+
+# The palette at slow temperature `slow` (°C), `warming` whether it is rising
+func groundPaletteAt(slow: view Float, warming: view Bool) ret GroundPalette {
+  var grass: Vec3 = groundSummerGrass()
+  if warming {
+    let fresh: Vec3 = groundMix(
+      a: groundDeadGrass()
+      b: groundFreshGrass()
+      t: groundRamp(from: 1.0, to: 7.0, value: slow)
+    )
+    grass = groundMix(
+      a: fresh
+      b: groundSummerGrass()
+      t: groundRamp(from: 8.0, to: 14.0, value: slow)
+    )
+  } else {
+    grass = groundMix(
+      a: groundSummerGrass()
+      b: groundDeadGrass()
+      t: groundRamp(from: 5.0, to: -2.0, value: slow)
+    )
+  }
+  ret GroundPalette {
+    grass: grass
+    dry: groundDryGrass()
+    dryAmount: 0.75 * groundRamp(from: 15.0, to: 22.0, value: slow)
+  }
+}
+
+# How dry the soil is for the grass's color, from WorldBiome's moisture
+# (0 .. 1): all below 0.3, none above 0.55. MUST match lib/grass_field.wgsl
+# groundDryShare.
+func groundDryShare(moisture: view Float) ret Float {
+  ret 1.0 - groundRamp(from: 0.3, to: 0.55, value: moisture)
+}
+
+# The grass color of `palette` where the soil has moisture `moisture`, as
+# lib/grass_field.wgsl groundPaletteGrass computes it
+func groundGrassAt(palette: view GroundPalette, moisture: view Float) ret Vec3 {
+  ret groundMix(
+    a: palette.grass
+    b: palette.dry
+    t: palette.dryAmount * groundDryShare(moisture: moisture)
+  )
+}

@@ -20,6 +20,8 @@ struct GrassU {
   g: vec4<f32>,
   h: vec4<f32>,
   i: vec4<f32>,
+  // the ground palette's dry grass and how dry (app3d/GroundPalette)
+  j: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;

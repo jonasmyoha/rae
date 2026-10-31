@@ -288,9 +288,12 @@ func generateWalkerGrass(
   if characterSystem.toon {
     grassToonGen = 1
   }
-  let grassView: GrassViewSettings = GrassConfig.grassMeadowSettings(
-    groundColor: walkerGroundColor()
+  # the grass's roots: the frame's ground palette, as the terrain's
+  var grassView: GrassViewSettings = GrassConfig.grassMeadowSettings(
+    groundColor: terrainSystem.groundPalette.grass
   )
+  grassView.dryColor = terrainSystem.groundPalette.dry
+  grassView.dryAmount = terrainSystem.groundPalette.dryAmount
   updateWalkerGrassObstacles(
     grass: grassCompute
     resources: resources

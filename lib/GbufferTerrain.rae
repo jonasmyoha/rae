@@ -124,6 +124,21 @@ func terrainSetBlend(cache: mod GbufferCache, blend: copy Float) pub {
   cache.terrainBlend = blend
 }
 
+# The frame's ground palette (app3d/GroundPalette): the grass, its dry grass
+# and how far the driest ground has gone dry, carried by every terrain draw
+# after this (drawTerrainMesh) for a shader with the painted grass
+# (terrain_grass_painted.wgsl)
+func terrainSetGroundPalette(
+  cache: mod GbufferCache
+  grass: view Vec3
+  dry: view Vec3
+  dryAmount: view Float
+) {
+  cache.groundGrass = grass
+  cache.groundDry = dry
+  cache.groundDryAmount = dryAmount
+}
+
 # Sampler + a 1x1 white fallback ARRAY, so the terrain bind group always has valid
 # resources at binding(2)/(3) even for an app that never uploads tiles (blend is 0
 # there, so the fallback is sampled but never visible). One white texel per layer.
@@ -452,6 +467,16 @@ func drawTerrainMesh(
     # carries the global texture-blend amount. 0 until an app uploads a tile, so
     # the shader's textured-grass term is identity for every other terrain user.
     cache.drawScratch.set(index: 32, value: cache.terrainBlend)
+    # the ground palette (terrainSetGroundPalette): the grass in [33..35],
+    # the dry grass and how dry in [40..43], which a terrain never uses for a
+    # fade (terrain_splat.wgsl)
+    cache.drawScratch.set(index: 33, value: cache.groundGrass.x)
+    cache.drawScratch.set(index: 34, value: cache.groundGrass.y)
+    cache.drawScratch.set(index: 35, value: cache.groundGrass.z)
+    cache.drawScratch.set(index: 40, value: cache.groundDry.x)
+    cache.drawScratch.set(index: 41, value: cache.groundDry.y)
+    cache.drawScratch.set(index: 42, value: cache.groundDry.z)
+    cache.drawScratch.set(index: 43, value: cache.groundDryAmount)
     gbIssueInstanced(
       cache: cache
       resources: resources

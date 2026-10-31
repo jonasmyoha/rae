@@ -19,6 +19,7 @@ open water/IslandSea
 open Climate
 open GeoPlace
 open app3d/SeasonImpostors
+open app3d/GroundPalette
 open water/WaterSystem
 open water/WadeSplash
 open water/WaterFft
@@ -167,6 +168,12 @@ func updateWalkerClimate(app: mod WalkerApp) {
     latitude: place.latitude
     year: settings.timeOfDay.year
     dayOfYear: settings.timeOfDay.dayOfYear
+  )
+  # and the ground's grass (app3d/GroundPalette: the terrain, the GPU grass
+  # and the meadow read it)
+  app.terrainSystem.groundPalette = groundPaletteAt(
+    slow: settings.slowTemperature
+    warming: field.seasonWarming
   )
 }
 

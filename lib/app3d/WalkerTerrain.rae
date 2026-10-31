@@ -50,6 +50,7 @@ open app3d/PropInstancer
 open app3d/PropField
 open app3d/PropFieldFrame
 open app3d/TreeForest
+open app3d/GroundPalette
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 open app3d/WalkerFlowers
@@ -87,14 +88,6 @@ const kindGrassB: Int = 6
 
 # The grass a small prop wants under it (rocks want none)
 const propGrassMin: Float = 0.45
-
-# The single source of truth for the ground color: the terrain ground
-# material AND the GPU grass gradient's bottom both read this, so the grass
-# roots match the ground. RAE_TERRAIN_GRASS in lib/terrain_palette_walker.wgsl
-# repeats it for the painted ground; change both together.
-func walkerGroundColor() ret Vec3 {
-  ret Vec3.create(x: 0.088, y: 0.14, z: 0.026)
-}
 
 # ----- ECS components ------------------------------------------------
 # A terrain prop entity: which kind it is, which pool slot it occupies, and
@@ -172,6 +165,9 @@ type WalkerTerrain {
   toon: Bool
   # The ground: the streamed heightfield tiles (app3d/TerrainTiles)
   ground: TerrainTiles
+  # This frame's grass color (app3d/GroundPalette): the terrain, the GPU
+  # grass and the meadow all read it, so the roots match the ground
+  groundPalette: GroundPalette = summerGroundPalette()
   # One instancer per rock shape (TerrainProp.variant)
   rockParts: List(PropInstancer)
   # Oxeye daisies: one shared patch mesh in three instanced material parts.
@@ -607,6 +603,7 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
 # focus (drawnProps), not the walker's entities, and the meadow's tufts
 # round `camera`
 func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d) {
+  terrainSystem.meadow.palette = terrainSystem.groundPalette
   let unusedTufts: Int = meadowGather(
     meadow: terrainSystem.meadow
     eye: camera.position
@@ -708,6 +705,12 @@ func drawTerrainGround(
   terrainSystem: view WalkerTerrain
   time: copy Float
 ) {
+  terrainSetGroundPalette(
+    cache: cache
+    grass: terrainSystem.groundPalette.grass
+    dry: terrainSystem.groundPalette.dry
+    dryAmount: terrainSystem.groundPalette.dryAmount
+  )
   drawTerrainTiles(
     tiles: terrainSystem.ground
     cache: cache
@@ -898,8 +901,7 @@ func createWalkerTerrain(
       renderer: renderer
       gridSide: gridSide
       cellSize: walkerCellSize
-      rootColor: walkerGroundColor()
-      tipLighten: GrassConfig.grassMeadowSettings(groundColor: walkerGroundColor()).tipLighten
+      tipLighten: GrassConfig.grassMeadowSettings(groundColor: groundSummerGrass()).tipLighten
     )
     treeSet: treeSet
     forest: own treeForest
