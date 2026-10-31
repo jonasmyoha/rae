@@ -17,7 +17,7 @@ open app3d/GroundParticles
 open app3d/Footprints
 open app3d/GroundPalette
 open app3d/Precipitation
-open app3d/FallingLeaves
+open LeafParticles
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
 
@@ -37,13 +37,18 @@ type WalkerMarks {
   precipitationAir: Float = 10.0
   precipitationEye: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   precipitationClock: Float = 0.0
-  # The leaves falling from the crowns in autumn (app3d/FallingLeaves),
-  # gathered by the update
-  fallingLeaves: FallingLeaves
+  # The leaves in the air and on the ground (lib/LeafParticles, on the
+  # GPU), released by the update (app3d/LeafRelease), and a frame count
+  leafParticles: LeafParticles
+  leafFrame: Int = 0
 }
 
 # Room for `characterCount` characters' full trails
-func createWalkerMarks(renderer: mod DeferredRenderer, characterCount: view Int) ret WalkerMarks {
+func createWalkerMarks(
+  renderer: mod DeferredRenderer
+  characterCount: view Int
+  biome: view BiomeConfig
+) ret WalkerMarks {
   ret WalkerMarks {
     footprints: createFootprints(
       renderer: renderer
@@ -53,9 +58,18 @@ func createWalkerMarks(renderer: mod DeferredRenderer, characterCount: view Int)
     groundParticles: createGroundParticles(renderer: renderer, capacity: 256)
     random: createRandom(seed: 1147)
     precipitation: createPrecipitation(renderer: renderer)
-    fallingLeaves: createFallingLeaves(renderer: renderer)
+    leafParticles: createLeafParticles(
+      capacity: walkerLeafCapacity
+      constants: islandConstantsFor(cfg: biome)
+    )
   }
 }
+
+# The most leaves in the air and lying at once
+const walkerLeafCapacity: Int = 8192
+
+# How far from the eye trees let leaves go, and a leaf lives (m)
+const walkerLeafReach: Float = 32.0
 
 # How deep the water over the ground may be before a step is in water (m):
 # a wet foot on the shore still kicks up its sand
@@ -151,7 +165,7 @@ func drawWalkerMarks(
     groundParticles: walkerMarks.groundParticles
     toon: toon
   )
-  drawFallingLeaves(cache: cache, resources: resources, leaves: walkerMarks.fallingLeaves)
+  drawLeafParticles(leafParticles: walkerMarks.leafParticles, resources: resources, gbuffer: cache)
   # the rain or the snow, blown by the frame's wind
   drawPrecipitation(
     cache: cache

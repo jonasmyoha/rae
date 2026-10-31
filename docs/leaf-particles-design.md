@@ -359,7 +359,16 @@ later idea: blowing snow from the same system, with a white flake card).
    Calm 0.3 m/s, Breeze 5, Strong 10, Gale 17, the model's direction; the
    tree lab's I key; saved with the panel; case 1273_settings_wind): the settings panel's and the tree lab's wind
    override and its env variable; the panel's wind text.
-4. **GPU leaf system core** (§4): `LeafParticles`, the ring buffer, the
+4. **GPU leaf system core** (§4), done 2026-10-31: lib/LeafParticles.rae
+   with lib/leaf_particles.wgsl (two compute passes in the frame's one
+   recording, `spawn` over the frame's releases and `fly` over the ring,
+   each with its own bounds buffer, since a bounds buffer written twice
+   before a submit holds only the last count) and lib/leaf_render.wgsl;
+   the objects live in the renderer's manager beside the frame uniform;
+   app3d/LeafRelease turns the old per-tree count into a release rate;
+   app3d/FallingLeaves is gone; the tree lab's forest scene has leaves too
+   (flat ground). A leaf lies 6 s once it lands. checks/leafParticles.
+   Original plan: `LeafParticles`, the ring buffer, the
    emit list, the compute pass (spawn, a simple fall, terrain landing,
    cull), the instanced indirect draw of a bent card. Replaces
    app3d/FallingLeaves in the walkers and the tree lab with the same

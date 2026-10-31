@@ -1,0 +1,118 @@
+# app3d/LeafRelease — which trees let leaves go this frame
+# (docs/leaf-particles-design.md §3), into lib/LeafParticles' emit list.
+# Today's rule (the earlier app3d/FallingLeaves', seasons step 14): while a
+# deciduous kind loses its leaves (app3d/PropSeason propSeasonLoss past its
+# start, the slow temperature falling), each of its trees within the reach
+# of the eye keeps up to fallingLeavesPerTree leaves in the air at once, most
+# in the middle of its fall, in its autumn color. A leaf takes about the
+# crown's height over fallingLeafSpeed to come down, so a tree releases
+# that many over that time: a rate, drawn into whole leaves each frame by a
+# hash of the tree and the frame (no state per tree). The wind's part
+# (summer storms, autumn gusts) is [leaves 5/8].
+import Math
+import Vec3
+open app3d/PropField
+open app3d/PropSeason
+open app3d/PropFade
+open LeafParticles
+
+# The leaves a tree keeps in the air at once at the height of its fall
+const fallingLeavesPerTree: Int = 10
+
+# How fast a leaf comes down on average (m/s; leaf_particles.wgsl's 0.7 - 1.3)
+const fallingLeafSpeed: Float = 0.9
+
+# A leaf's length (m)
+const fallingLeafSize: Float = 0.13
+
+# How many of a tree's leaves are in the air at once at leaf loss `loss`:
+# most in the middle of the fall, none before it starts or once the tree is
+# bare
+func fallingLeavesOf(loss: view Float) ret Int {
+  if loss <= 0.03 or loss >= 0.99 {
+    ret 0
+  }
+  let middle: Float = 1.0 - Math.abs(value: loss - 0.5) * 2.0
+  ret Math.max(a: 1, b: (fallingLeavesPerTree.toFloat() * (0.35 + 0.65 * middle)).toInt())
+}
+
+func leafReleaseHash(index: view Int, seed: view Int) ret Float {
+  let mixed: Float = Math.sin(x: index.toFloat() * 12.9898 + seed.toFloat() * 78.233) * 43758.5453
+  ret mixed - Math.floor(x: mixed)
+}
+
+# The whole leaves of `rate` a second released in `deltaTime` s: the
+# fraction is drawn by `chance` (0 .. 1), so over many frames the count is
+# right
+func leafReleaseCount(rate: view Float, deltaTime: view Float, chance: view Float) ret Int {
+  ret Math.floor(x: rate * deltaTime + chance).toInt()
+}
+
+# This frame's releases from the trees of `field` (its season set) within
+# `reach` of `eye`, over `deltaTime` s; `frame` counts the frames (the
+# draw's seed)
+func releaseFieldLeaves(
+  leafParticles: mod LeafParticles
+  field: view PropField
+  eye: view Vec3
+  reach: view Float
+  deltaTime: view Float
+  frame: view Int
+) {
+  if field.seasonsOn is false or field.seasonWarming or field.cellStart.length is 0 {
+    ret
+  }
+  let first: Int = propCellOf(field: field, x: eye.x - reach, y: eye.y - reach)
+  let last: Int = propCellOf(field: field, x: eye.x + reach, y: eye.y + reach)
+  let firstColumn: Int = first % field.columns
+  let firstRow: Int = first / field.columns
+  let lastColumn: Int = last % field.columns
+  let lastRow: Int = last / field.columns
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      let cell: Int = row * field.columns + column
+      let start: Int = field.cellStart.copyAtFallback(index: cell, fallback: 0)
+      let end: Int = field.cellStart.copyAtFallback(index: cell + 1, fallback: start)
+      loop var index: Int = start, index < end, ++index {
+        let placement: PropPlacement = field.placements.copyAtDefault(index: index)
+        let dx: Float = placement.position.x - eye.x
+        let dy: Float = placement.position.y - eye.y
+        if dx * dx + dy * dy > reach * reach {
+          continue
+        }
+        if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+          if kind.season.deciduous {
+            let loss: Float = propSeasonLoss(
+              season: kind.season
+              slow: field.seasonSlow + propSeasonShift(
+                seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
+              )
+              warming: false
+            )
+            let inAir: Int = fallingLeavesOf(loss: loss)
+            if inAir > 0 {
+              let crown: Vec3 = propCenter(kind: kind, placement: placement)
+              let drop: Float = Math.max(a: crown.z - placement.position.z, b: 1.0)
+              let count: Int = leafReleaseCount(
+                rate: inAir.toFloat() * fallingLeafSpeed / drop
+                deltaTime: deltaTime
+                chance: leafReleaseHash(index: index, seed: frame)
+              )
+              if not leafEmit(
+                leafParticles: leafParticles
+                crown: crown
+                radius: propRadius(kind: kind, placement: placement) * 0.6
+                color: kind.season.fallColor
+                size: fallingLeafSize
+                count: count
+                seed: index * 7919 + frame
+              ) {
+                ret
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

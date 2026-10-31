@@ -40,6 +40,7 @@ open app3d/RagdollRig
 open app3d/WalkerKnockdown
 open app3d/WalkerKnockTest
 open app3d/WalkerApp
+open LeafParticles
 open app3d/WalkerIceTest
 
 func runWalkerApp(settings: view WalkerAppSettings) ret Int {
@@ -243,6 +244,9 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     }
     treeForestShutdown(forest: app.terrainSystem.forest, resources: resources)
     shutdown(resources: resources)
+  }
+  if let rendererResources: mod GpuResources = app.renderSystem.renderer.gpuResources {
+    releaseLeafParticles(leafParticles: app.walkerMarks.leafParticles, resources: rendererResources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   destroyPhysicsSystem(physicsSystem: app.physicsSystem)

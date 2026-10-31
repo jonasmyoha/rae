@@ -149,7 +149,9 @@ Each `TreeKind` gets a **season** block:
   cards that fall from a kind's crown while its leaf loss rises, using the
   kind's autumn tones. Not part of this design's first steps; the leaf
   loss value it would read is designed here.
-  Planned in docs/leaf-particles-design.md (with the weather's wind).
+  Planned in docs/leaf-particles-design.md (with the weather's wind); since
+  2026-10-31 the leaves fly on the GPU (lib/LeafParticles, app3d/LeafRelease)
+  and app3d/FallingLeaves is gone.
 
 ### 3.3 The colors themselves
 
