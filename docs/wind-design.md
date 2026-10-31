@@ -12,6 +12,10 @@ tip flutter (§5). It was off on 2026-10-22
 keeps its own shape-specific response.** Sections 3 and 4 describe an earlier
 version.
 
+The weather's wind (speed and direction from the season and the fronts),
+the shared gust fronts and the leaves they carry are planned in
+docs/leaf-particles-design.md.
+
 ## 1. What the wind is
 
 - **A global base wind.** One direction and one strength for the whole
