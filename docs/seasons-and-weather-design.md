@@ -342,6 +342,18 @@ that adds it.
 5. **Leaf loss:** the leaf pass's loss threshold (outer cards first), bare
    winter trees (all deciduous leaves gone, spruce and cypress keep theirs);
    case checks of cards kept per loss.
+   Done (2026-10-31): app3d/PropSeason propSeasonLoss (falling: from a
+   degree past fully turned to bareAt; rising: the 4 °C up to a degree
+   past leafOut; the square root of the ramp, since a crown 3 to 6 card
+   layers deep still looks full with half its cards gone), with the tree's
+   own ±1.5 °C shift. The loss is per tree, not per draw: the instance
+   record has no free slot, so a leaf part's loss rides in its metallic
+   slot [35] (a leaf card is never metal; the static vertex stage passes
+   metallic 0 on for cards) and the shadow caster carries it beside the
+   image code. lib/wind.wgsl leafCardKept collapses a lost card in the
+   vertex stage (main pass and shadows); at loss 1 the gather skips the
+   leaf parts. Case 1265 counts the cards kept per loss with the same key
+   (propLeafCardKey). The impostors stay summer until step 6.
 6. **Seasonal impostors:** three baked atlas sets (summer, autumn, bare)
    and the sprite and canopy blend; the phone's tinted single set.
 7. **Ground palette:** one per-frame grass/ground/tuft palette (replacing

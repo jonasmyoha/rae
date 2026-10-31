@@ -5,10 +5,15 @@
 # so each leaf part keeps its own light and dark and only its hue moves.
 #
 # - Deciduous: falling past `turnStart` the leaves turn toward the autumn
-#   tint, fully at `turnFull`, then dry and darken toward `bareAt` (where
-#   seasons step 5 drops them); rising, the new leaves come out lighter and
-#   yellower (the spring tint) from `leafOut` and reach summer's green 6 °C
-#   later.
+#   tint, fully at `turnFull`, then dry and darken toward `bareAt`; rising,
+#   the new leaves come out lighter and yellower (the spring tint) from
+#   `leafOut` and reach summer's green 6 °C later.
+# - Leaf loss (propSeasonLoss, 0 all leaves .. 1 bare): falling, the crown
+#   thins from a degree past fully turned and is bare at `bareAt`; rising,
+#   the leaves come back in the 4 °C up to a degree past `leafOut`. The
+#   static shaders drop each leaf card by it (lib/wind.wgsl leafCardKept,
+#   the outer cards of a leaf mass first; propLeafCardKey here is the same
+#   key), so a deciduous tree in winter is its bark and branches.
 # - Evergreen: darker and browner in the cold (the winter tint from 2 °C
 #   down to -6 °C).
 #
@@ -29,6 +34,12 @@ type PropSeason {
   turnStart: Float = 10.0
   turnFull: Float = 5.0
   bareAt: Float = 2.0
+}
+
+# A tree's leaves this frame: their colors' tint and their loss (0 .. 1)
+type PropLeaves {
+  tint: Vec3
+  loss: Float
 }
 
 func noPropSeason() ret PropSeason {
@@ -76,6 +87,69 @@ func propSeasonTint(season: view PropSeason, slow: view Float, warming: view Boo
   ret Vec3.vscale(
     a: turned
     s: 1.0 - 0.45 * propSeasonRamp(from: season.turnFull, to: season.bareAt, value: slow)
+  )
+}
+
+# How much of `season`'s leaves are gone (0 .. 1) at slow temperature
+# `slow` (°C), `warming` whether it is rising; evergreens keep theirs
+func propSeasonLoss(season: view PropSeason, slow: view Float, warming: view Bool) ret Float {
+  if season.on is false or season.deciduous is false {
+    ret 0.0
+  }
+  # the gone share of the cards; the square root because a crown is several
+  # layers of cards deep, so it reads as thinner only once most are gone
+  if warming {
+    ret Math.sqrt(
+      x: 1.0 - propSeasonRamp(from: season.leafOut - 3.0, to: season.leafOut + 1.0, value: slow)
+    )
+  }
+  ret Math.sqrt(x: propSeasonRamp(from: season.turnFull + 1.0, to: season.bareAt, value: slow))
+}
+
+# How far from its leaf mass's anchor (m, in the tree's own space) a card
+# is fully "outside" for the leaf loss (lib/wind.wgsl leafLossReach)
+const propLeafLossReach: Float = 2.0
+
+# A leaf card's key for the leaf loss, as lib/wind.wgsl leafCardKept
+# computes it: the card stays while its key is at least the loss. A hash of
+# the card's center and the tree's place, biased by how far the card is
+# from its leaf mass's anchor `pivot` (the outside falls first).
+func propLeafCardKey(center: view Vec3, pivot: view Vec3, place: view Vec3) ret Float {
+  let seed: Vec3 = Vec3.vadd(
+    a: center
+    b: Vec3.vscale(a: propSeasonFract3(value: Vec3.vscale(a: place, s: 0.0137)), s: 101.0)
+  )
+  let random: Float = propSeasonFract(
+    value: Math.sin(x: seed.x * 12.9898 + seed.y * 78.233 + seed.z * 37.719) * 43758.5453
+  )
+  let outer: Float = Math.clamp(
+    val: Vec3.vlen(a: Vec3.vsub(a: center, b: pivot)) / propLeafLossReach
+    low: 0.0
+    high: 1.0
+  )
+  ret 0.7 * random + 0.3 * (1.0 - outer)
+}
+
+# Does a card with key `key` stay at leaf loss `loss`? (leafCardKept)
+func propLeafCardKept(key: view Float, loss: view Float) ret Bool {
+  if loss <= 0.0 {
+    ret true
+  }
+  if loss >= 1.0 {
+    ret false
+  }
+  ret key >= loss
+}
+
+func propSeasonFract(value: view Float) ret Float {
+  ret value - Math.floor(x: value)
+}
+
+func propSeasonFract3(value: view Vec3) ret Vec3 {
+  ret Vec3.create(
+    x: propSeasonFract(value: value.x)
+    y: propSeasonFract(value: value.y)
+    z: propSeasonFract(value: value.z)
   )
 }
 

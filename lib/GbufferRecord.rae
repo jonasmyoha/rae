@@ -190,6 +190,15 @@ func setInstanceSway(records: mod List(Float), slot: view Int, sway: view Float)
   records.set(index: slot * instanceRecordFloats + 43, value: sway)
 }
 
+# A leaf part's leaf loss (0 all leaves .. 1 bare; app3d/PropSeason): its
+# leaf cards (MeshData.leafCards) are never metallic, so their record's
+# metallic slot [35] carries it; the static shaders drop the lost cards and
+# shade them with metallic 0 (lib/wind.wgsl leafCardKept). The shadow
+# casters copy it beside the image code.
+func setInstanceLeafLoss(records: mod List(Float), slot: view Int, loss: view Float) {
+  records.set(index: slot * instanceRecordFloats + 35, value: loss)
+}
+
 # Write one mesh instance's surface attributes. Note what is NOT passed:
 # no light, no camera, no emission. A geometry pass that needed any of
 # those would not be a geometry pass.

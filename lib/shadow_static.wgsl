@@ -58,6 +58,10 @@ fn vsFoliageFade(@builtin(instance_index) ii: u32, @location(0) p: vec3<f32>,
   }
   var result: FoliageOut;
   result.pos = S.lightViewProj * vec4<f32>(leaf.position, 1.0);
+  // a card its tree has lost casts no shadow (surface.y: the leaf loss)
+  if (card.w > 0.0 && !leafCardKept(card.xyz, pivot.xyz, caster.model[3].xyz, caster.surface.y)) {
+    result.pos = vec4<f32>(0.0, 0.0, -2.0, 1.0);
+  }
   result.fade = caster.fade;
   result.uv = uv;
   result.imageCode = caster.surface.x;
