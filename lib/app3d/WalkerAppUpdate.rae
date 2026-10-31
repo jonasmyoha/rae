@@ -238,14 +238,19 @@ func updateWalkerClimate(app: mod WalkerApp) {
     stepLeafParticles(
       leafParticles: app.walkerMarks.leafParticles
       resources: rendererResources
-      eye: app.cameraSystem.camera.position
-      reach: walkerLeafReach * 1.5
-      windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
-      windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
-      deltaTime: leafDeltaTime
-      groundZ: app.characterSystem.groundZ
-      flatGround: false
-      waterZ: islandSeaSurfaceZ(groundZ: app.characterSystem.groundZ, biome: app.biome)
+      step: {
+        eye: app.cameraSystem.camera.position
+        reach: walkerLeafReach * 1.5
+        windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
+        windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
+        wind: windVector(state: app.renderSystem.wind, settings: app.renderSystem.windSettings)
+        deltaTime: leafDeltaTime
+        groundZ: app.characterSystem.groundZ
+        waterZ: islandSeaSurfaceZ(groundZ: app.characterSystem.groundZ, biome: app.biome)
+        snowDepth: app.renderSystem.renderer.passes.gbuffer.snowDepth
+        toon: app.characterSystem.toon
+        sun: Vec3.vscale(a: app.cameraSystem.light.sunDir, s: -1.0)
+      }
     )
   }
   setGbufferWetness(

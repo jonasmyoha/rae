@@ -8,7 +8,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | check | tests |
 |---|---|
 | `canopyCoverage` | `CanopyBake` + the sprite pass: a far canopy cluster of each tree species covers as many pixels as its trees drawn as single impostors (from 150, 700 and 1,100 m, four directions; within 13%, the phone settings 25% with `RAE_IMPOSTOR_PHONE=1`); `RAE_CANOPY_BENCH=1` times a whole far forest of clusters on the GPU, marched and not |
-| `leafParticles` | `LeafParticles` (docs/leaf-particles-design.md §4): two crowns release 280 leaves over 20 frames (under the frame cap) into the GPU ring in a wind; read back, they fall and drift downwind in their crowns' colors, land on the ground, lie, and are gone after a leaf's life; a leaf past the reach dies at once |
+| `leafParticles` | `LeafParticles` (docs/leaf-particles-design.md §4): two crowns release 280 leaves over 20 frames (under the frame cap) into the GPU ring in a wind; read back, they fall and drift downwind in their crowns' colors, most land on the ground (the swirls keep some aloft), lie, and are gone after a leaf's life; a leaf past the reach dies at once |
 | `leafWind` | production wind shader: rigid patch distances, fixed pivot, rotated normals, exact calm and actual motion over 64 times |
 | `windGust` | the gust field (docs/leaf-particles-design.md §2.3): lib/wind.wgsl `windGustAt` on the GPU equals lib/WindGust.rae's at 256 points in a calm, a breeze, a gale and near the drift's wrap (within 0.001) |
 | `surfaceImages` | opaque material image owner: sRGB conversion, white fallback, two-layer mip array, failed replacement preserving the previous image, resource retirement |
