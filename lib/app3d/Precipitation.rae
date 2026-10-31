@@ -66,8 +66,9 @@ func precipitationFract(value: view Float) ret Float {
   ret value - Math.floor(x: value)
 }
 
-# A lean: a point `z` up moves `x`, `y` times z sideways (the wind's slant
-# on a falling streak)
+# A lean: a point `z` up moves `x`, `y` times z sideways (the slant of a
+# falling streak: minus the wind over the fall speed, so the streak lies
+# along the drop's path)
 func precipitationLean(x: view Float, y: view Float) ret Mat4 {
   var lean: Mat4 = mat4Identity()
   # column-major: the z column's x and y
@@ -163,11 +164,12 @@ func drawPrecipitation(
         material: flakeMaterial
       )
     } else {
-      # a streak, stretched by its speed, leaning with the wind
+      # a streak, stretched by its speed, along its path: it falls and drifts
+      # downwind, so its upper end trails upwind
       let model: Mat4 = mat4Mul(
         a: mat4Translate(x: x, y: y, z: z)
         b: mat4Mul(
-          a: precipitationLean(x: windX / speed, y: windY / speed)
+          a: precipitationLean(x: -windX / speed, y: -windY / speed)
           b: mat4ScaleXYZ(x: 0.008, y: 0.008, z: 0.42)
         )
       )
