@@ -1,0 +1,95 @@
+# What a walker's step kicks up (app3d/WalkerMarks walkerGroundAnswer): on
+# the island's grass, blades in the grass's own color (the ground palette
+# where it is touched, mid-blade), not a saturated green; in the sea
+# nothing (the water splashes instead, water/WadeSplash); on a shore just
+# wet, still its sand.
+import Math
+import Vec3
+open WorldBiome
+open app3d/GroundTouch
+open app3d/GroundPalette
+open app3d/WalkerMarks
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func depthAt(x: view Float, y: view Float, biome: view BiomeConfig) ret Float {
+  ret worldWaterZ(groundZ: 0.0, cfg: biome) - worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: 0.0
+    cfg: biome
+  )
+}
+
+func main() ret Int {
+  let biome: BiomeConfig = defaultBiomeConfig()
+  let palette: GroundPalette = summerGroundPalette()
+  # a point in the sea, one on dry grass and one just wet on the shore
+  var sea: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  var grass: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  var shore: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  loop var i: Int = 0, i < 4000, ++i {
+    let x: Float = (i % 80).toFloat() * 2.0 - 80.0
+    let y: Float = (i / 80).toFloat() * 2.0 - 50.0
+    let depth: Float = depthAt(x: x, y: y, biome: biome)
+    if depth > 0.3 and sea.z < 0.0 {
+      sea = Vec3.create(x: x, y: y, z: 1.0)
+    }
+    if depth < -0.5 and worldIsGrass(x: x, y: y, cfg: biome) and grass.z < 0.0 {
+      grass = Vec3.create(x: x, y: y, z: 1.0)
+    }
+    if depth > 0.0 and depth < 0.02 and shore.z < 0.0 {
+      shore = Vec3.create(x: x, y: y, z: 1.0)
+    }
+  }
+  check(
+    label: "found a sea, a grass and a shore point"
+    ok: sea.z > 0.0 and grass.z > 0.0 and shore.z > 0.0
+  )
+  let inSea: GroundAnswer = walkerGroundAnswer(
+    x: sea.x
+    y: sea.y
+    biome: biome
+    groundZ: 0.0
+    palette: palette
+  )
+  let onGrass: GroundAnswer = walkerGroundAnswer(
+    x: grass.x
+    y: grass.y
+    biome: biome
+    groundZ: 0.0
+    palette: palette
+  )
+  let onShore: GroundAnswer = walkerGroundAnswer(
+    x: shore.x
+    y: shore.y
+    biome: biome
+    groundZ: 0.0
+    palette: palette
+  )
+  check(label: "a step in the sea kicks up nothing", ok: inSea.inWater)
+  check(label: "a step on grass kicks up blades", ok: onGrass.inWater is false and onGrass.blades)
+  check(label: "a step on the wet shore still kicks up its ground", ok: onShore.inWater is false)
+  let expected: Vec3 = Vec3.vscale(
+    a: groundGrassAt(palette: palette, moisture: worldMoisture(x: grass.x, y: grass.y, cfg: biome))
+    s: 1.3
+  )
+  check(
+    label: "the blades are the grass's own color"
+    ok: Vec3.vlen(a: Vec3.vsub(a: onGrass.bladeColor, b: expected)) < 0.0001
+  )
+  # not the old saturated green (0.08, 0.36, 0.05): its green a third of red
+  # and blue together, the grass's about two thirds
+  let saturation: Float = onGrass.bladeColor.y / (onGrass.bladeColor.x + onGrass.bladeColor.z + 0.0001)
+  log(
+    "blade color {onGrass.bladeColor.x} {onGrass.bladeColor.y} {onGrass.bladeColor.z}, green over red and blue {saturation}"
+  )
+  check(label: "not the old saturated green", ok: saturation < 2.0)
+  ret 0
+}
