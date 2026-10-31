@@ -1,0 +1,172 @@
+# lib/Weather (docs/seasons-and-weather-design.md §5): the same weather for
+# the same seed, place and hour; a year of it about right (Helsinki about
+# 640 mm, Athens wet in winter and dry in summer, the equator wet in its
+# summer); rain only under thick cloud; a front reaches a place east later;
+# and lib/Climate's air under it (a cloudy day cooler, a cloudy night
+# warmer, rain cooler still).
+open Weather
+open Climate
+import Math
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+type Year {
+  total: Float
+  winter: Float
+  summer: Float
+  thinRain: Bool
+}
+
+func yearAt(latitude: view Float) ret Year {
+  var total: Float = 0.0
+  var winter: Float = 0.0
+  var summer: Float = 0.0
+  var thinRain: Bool = false
+  loop var day: Int = 1, day <= 365, ++day {
+    loop var hour: Int = 0, hour < 24, ++hour {
+      let weather: Weather = weatherAt(
+        seed: weatherDefaultSeed
+        latitude: latitude
+        longitude: 24.0
+        year: 2026
+        dayOfYear: day
+        hour: hour.toFloat()
+      )
+      total = total + weather.precipitation
+      if day < 60 or day > 335 {
+        winter = winter + weather.precipitation
+      }
+      if day > 152 and day < 244 {
+        summer = summer + weather.precipitation
+      }
+      if weather.precipitation > 0.0 and weather.cloud < 0.8 {
+        thinRain = true
+      }
+    }
+  }
+  ret Year { total: total, winter: winter, summer: summer, thinRain: thinRain }
+}
+
+func main() ret Int {
+  let once: Weather = weatherAt(
+    seed: 7
+    latitude: 60.17
+    longitude: 24.94
+    year: 2026
+    dayOfYear: 40
+    hour: 9.5
+  )
+  let again: Weather = weatherAt(
+    seed: 7
+    latitude: 60.17
+    longitude: 24.94
+    year: 2026
+    dayOfYear: 40
+    hour: 9.5
+  )
+  check(
+    label: "the same weather for the same seed, place and hour"
+    ok: once.cloud is again.cloud and once.precipitation is again.precipitation
+  )
+  let helsinki: Year = yearAt(latitude: 60.17)
+  let athens: Year = yearAt(latitude: 37.9)
+  let equator: Year = yearAt(latitude: 2.0)
+  log(
+    "a year: Helsinki {helsinki.total.toInt()} mm, Athens {athens.total.toInt()} mm (winter {athens.winter.toInt()}, summer {athens.summer.toInt()}), the equator {equator.total.toInt()} mm (summer {equator.summer.toInt()})"
+  )
+  check(
+    label: "Helsinki about 640 mm a year"
+    ok: helsinki.total > 450.0 and helsinki.total < 850.0
+  )
+  check(label: "Athens wet in winter, dry in summer", ok: athens.winter > athens.summer * 5.0)
+  check(label: "the equator wetter in its summer", ok: equator.summer > equator.winter * 5.0)
+  check(
+    label: "rain only under thick cloud"
+    ok: helsinki.thinRain is false and athens.thinRain is false
+  )
+  # a place 400 km east has the same front 10 hours later
+  let here: Weather = weatherAt(
+    seed: 7
+    latitude: 0.0
+    longitude: 0.0
+    year: 2026
+    dayOfYear: 100
+    hour: 6.0
+  )
+  let east: Weather = weatherAt(
+    seed: 7
+    latitude: 0.0
+    longitude: 400.0 / 111.2
+    year: 2026
+    dayOfYear: 100
+    hour: 16.0
+  )
+  check(
+    label: "a front reaches a place 400 km east 10 hours later"
+    ok: Math.abs(value: here.front - east.front) < 0.001
+  )
+  let clear: Weather = { cloud: 0.0, precipitation: 0.0 }
+  let overcast: Weather = { cloud: 1.0, precipitation: 0.0 }
+  let rain: Weather = { cloud: 1.0, precipitation: 1.0 }
+  let dayClear: Float = climateWeatherAir(
+    latitude: 50.0
+    dayOfYear: 180
+    localHour: 15.0
+    height: 0.0
+    weather: clear
+  )
+  let dayOvercast: Float = climateWeatherAir(
+    latitude: 50.0
+    dayOfYear: 180
+    localHour: 15.0
+    height: 0.0
+    weather: overcast
+  )
+  let dayRain: Float = climateWeatherAir(
+    latitude: 50.0
+    dayOfYear: 180
+    localHour: 15.0
+    height: 0.0
+    weather: rain
+  )
+  let nightClear: Float = climateWeatherAir(
+    latitude: 50.0
+    dayOfYear: 180
+    localHour: 3.0
+    height: 0.0
+    weather: clear
+  )
+  let nightOvercast: Float = climateWeatherAir(
+    latitude: 50.0
+    dayOfYear: 180
+    localHour: 3.0
+    height: 0.0
+    weather: overcast
+  )
+  check(label: "a cloudy afternoon is cooler", ok: dayOvercast < dayClear - 2.5)
+  check(label: "a cloudy night is warmer", ok: nightOvercast > nightClear + 2.5)
+  check(label: "rain cools it further", ok: dayRain < dayOvercast - 1.0)
+  check(
+    label: "the clear sky's air is climateAt's"
+    ok: Math.abs(value: dayClear - climateAt(
+      latitude: 50.0
+      dayOfYear: 180
+      localHour: 15.0
+      height: 0.0
+    )) < 0.0001
+  )
+  check(
+    label: "the words"
+    ok: weatherName(weather: clear, air: 10.0) is "clear" and weatherName(weather: rain, air: 10.0) is "rain 1.0 mm/h" and weatherName(
+      weather: rain
+      air: -2.0
+    ) is "snow 1.0 mm/h"
+  )
+  ret 0
+}

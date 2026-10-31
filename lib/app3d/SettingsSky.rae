@@ -125,8 +125,21 @@ func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
   let lift: Float = (0.15 + 0.85 * Math.max(a: up, b: 0.0)) * low * low * (3.0 - 2.0 * low)
   let lux: Float = settingsState.sunNoonLux * lift * settingsEclipseLight(
     settingsState: settingsState
-  )
+  ) * settingsCloudSunLight(settingsState: settingsState)
   ret Vec3.create(x: base.x * lux, y: base.y * lux, z: base.z * lux)
+}
+
+# The share of the sun's direct light the clouds let through (lib/Weather):
+# all of it under a clear sky, a fifth under full cover
+func settingsCloudSunLight(settingsState: view SettingsState) ret Float {
+  ret 1.0 - 0.8 * Math.clamp(val: settingsState.weather.cloud, low: 0.0, high: 1.0)
+}
+
+# The share of the sky's own light under the clouds: it falls less than the
+# sun's (half under full cover), so it is more of the light on an overcast
+# day; the auto exposure follows both
+func settingsCloudSkyLight(settingsState: view SettingsState) ret Float {
+  ret 1.0 - 0.5 * Math.clamp(val: settingsState.weather.cloud, low: 0.0, high: 1.0)
 }
 
 # The share of the sun's light that gets past the moon (1 with no eclipse;
@@ -158,7 +171,9 @@ func settingsBuildSky(
     hour: settingsState.timeOfDay.hour
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
-  ) * settingsEclipseLight(settingsState: settingsState)
+  ) * settingsEclipseLight(settingsState: settingsState) * settingsCloudSkyLight(
+    settingsState: settingsState
+  )
   # SOLID is the control case: a flat color, no gradient and no sun disc, so
   # anything still varying across the background is provably not the sky. It
   # still tracks the time of day — a flat sky that stayed bright at midnight

@@ -13,13 +13,14 @@
 #   place east of the scene is later in its day.
 # - Height: -6.5 °C per 1,000 m above the sea.
 # - Snow (docs/seasons-and-weather-design.md §4): each cell keeps a snow
-#   depth (m), stepped with the slow temperature. Until the weather exists
-#   it precipitates at a steady stand-in rate (climateSnowfall: about 6 mm
-#   of snow a day), which falls as snow while the air is below
-#   climateSnowAir; above 0 °C the snow melts, climateSnowMelt (3 mm) an
-#   hour per degree. A jump seeds it by running the last
-#   climateSnowSeedDays days in 3-hour steps.
-# - The weather (clouds, rain, fronts) comes in a later step.
+#   depth (m), stepped with the slow temperature. The weather's
+#   precipitation (lib/Weather) falls as snow while the air is below
+#   climateSnowAir, 4 mm of settled snow a millimeter of water; above 0 °C
+#   the snow melts, climateSnowMelt (3 mm) an hour per degree. A jump seeds
+#   it by running the last climateSnowSeedDays days in 3-hour steps.
+# - The weather (lib/Weather: clouds, rain, fronts, from the Climate's
+#   weatherSeed) cools the day under clouds and rain (climateWeatherAir);
+#   climateAt is the clear sky's air.
 #
 # The season is the temperature, not the calendar: the slow temperature is
 # the air's mean over the last two weeks. With no weather it is the
@@ -32,6 +33,7 @@
 import Math
 open Calendar
 open GeoPlace
+open Weather
 
 const climatePi: Float = 3.14159265
 
@@ -56,6 +58,22 @@ func climateDayMean(latitude: view Float, dayOfYear: view Int, height: view Floa
   }
   let season: Float = -Math.cos(x: phase) * climateYearSwing(latitude: latitude)
   ret climateYearMean(latitude: latitude) + season - 0.0065 * Math.max(a: height, b: 0.0)
+}
+
+# The air under `weather` (lib/Weather) at `latitude`, `height` m above the
+# sea, on day `dayOfYear` at `localHour`: clouds narrow the day's swing (a
+# cloudy day is cooler, a cloudy night warmer: 60% less under full cover)
+# and rain cools it by up to 1.5 °C
+func climateWeatherAir(
+  latitude: view Float
+  dayOfYear: view Int
+  localHour: view Float
+  height: view Float
+  weather: view Weather
+) ret Float {
+  let day: Float = 5.0 * Math.cos(x: (localHour - 15.0) / 24.0 * 2.0 * climatePi) * (1.0 - 0.6 * weather.cloud)
+  let rain: Float = 1.5 * Math.min(a: weather.precipitation / 0.5, b: 1.0)
+  ret climateDayMean(latitude: latitude, dayOfYear: dayOfYear, height: height) + day - rain
 }
 
 # The air temperature (°C) at `latitude`, `height` m above the sea, on day
@@ -170,11 +188,11 @@ const climateCellSize: Float = 50000.0
 # The exponential average's step: two weeks of hourly steps
 const climateHourWeight: Float = 0.002973  # 1 - exp(-1 / 336)
 
-# Snow (m): what falls in an hour of precipitation (the weather's stand-in:
-# it always precipitates, lightly), below which air temperature (°C) it
-# falls as snow, what an hour melts per degree over 0 °C, and how many days
-# back a seed runs
-const climateSnowfall: Float = 0.00025
+# Snow (m): what a millimeter of the weather's precipitation (lib/Weather)
+# lies as once it has settled (a centimeter of fresh snow, packed to
+# 4 mm), below which air temperature (°C) it falls as snow, what an hour
+# melts per degree over 0 °C, and how many days back a seed runs
+const climateSnowPerMillimeter: Float = 0.004
 
 const climateSnowAir: Float = 0.5
 
@@ -182,11 +200,17 @@ const climateSnowMelt: Float = 0.003
 
 const climateSnowSeedDays: Int = 200
 
-# The snow depth (m) after an hour of air at `air` (°C) on `depth`
-func climateSnowStep(depth: view Float, air: view Float, hours: view Float) ret Float {
+# The snow depth (m) after `hours` of air at `air` (°C) and `precipitation`
+# (mm of water an hour) on `depth`
+func climateSnowStep(
+  depth: view Float
+  air: view Float
+  precipitation: view Float
+  hours: view Float
+) ret Float {
   var next: Float = depth
   if air < climateSnowAir {
-    next = next + climateSnowfall * hours
+    next = next + precipitation * climateSnowPerMillimeter * hours
   }
   if air > 0.0 {
     next = next - climateSnowMelt * air * hours
@@ -253,30 +277,36 @@ type ClimateWinter {
   ice: ClimateIce = ClimateIce {}
 }
 
-# The snow depth (m) at `latitude` on day `dayOfYear` of `year` at
-# `localHour` (climateWinterSeed's snow)
+# The snow depth (m) at `latitude`, `longitude` on day `dayOfYear` of
+# `year` at `localHour` (climateWinterSeed's snow, the default weather seed)
 func climateSnowSeed(
   latitude: view Float
+  longitude: view Float
   year: view Int
   dayOfYear: view Int
   localHour: view Float
 ) ret Float {
   ret climateWinterSeed(
     latitude: latitude
+    longitude: longitude
     year: year
     dayOfYear: dayOfYear
     localHour: localHour
+    seed: weatherDefaultSeed
   ).snow
 }
 
-# The snow and the ice at `latitude` on day `dayOfYear` of `year` at
-# `localHour`: the last climateSnowSeedDays days run in 3-hour steps from
-# none (the seed, after a jump in time or place)
+# The snow and the ice at `latitude`, `longitude` on day `dayOfYear` of
+# `year` at `localHour`: the last climateSnowSeedDays days run in 3-hour
+# steps from none under the weather of `seed` (the seed, after a jump in
+# time or place)
 func climateWinterSeed(
   latitude: view Float
+  longitude: view Float
   year: view Int
   dayOfYear: view Int
   localHour: view Float
+  seed: view Int
 ) ret ClimateWinter {
   var depth: Float = 0.0
   var ice: ClimateIce = {}
@@ -290,13 +320,27 @@ func climateWinterSeed(
     loop var step: Int = 0, step < 8, ++step {
       let hour: Float = step.toFloat() * 3.0 + 1.5
       if day < climateSnowSeedDays or hour <= localHour {
-        let air: Float = climateAt(
+        let weather: Weather = weatherAt(
+          seed: seed
+          latitude: latitude
+          longitude: longitude
+          year: stepYear
+          dayOfYear: stepDay
+          hour: hour
+        )
+        let air: Float = climateWeatherAir(
           latitude: latitude
           dayOfYear: stepDay
           localHour: hour
           height: 0.0
+          weather: weather
         )
-        depth = climateSnowStep(depth: depth, air: air, hours: 3.0)
+        depth = climateSnowStep(
+          depth: depth
+          air: air
+          precipitation: weather.precipitation
+          hours: 3.0
+        )
         ice = climateIceStep(ice: ice, air: air, hours: 3.0)
       }
     }
@@ -311,6 +355,9 @@ func climateWinterSeed(
 
 type Climate {
   side: Int
+  # the weather's seed (lib/Weather): every cell's rain and snow and the
+  # clouds' cooling come from it
+  weatherSeed: Int = weatherDefaultSeed
   # each cell's slow temperature (°C), row by row from the south-west
   slow: List(Float)
   # each cell's snow depth (m) and ice, the same order
@@ -382,6 +429,7 @@ func stepClimate(
       )
       let winter: ClimateWinter = climateWinterSeed(
         latitude: place.latitude
+        longitude: place.longitude
         year: year
         dayOfYear: dayOfYear
         localHour: climateLocalHour(
@@ -389,6 +437,7 @@ func stepClimate(
           sceneLongitude: sceneLongitude
           longitude: place.longitude
         )
+        seed: climate.weatherSeed
       )
       climate.snow.set(index: cell, value: winter.snow)
       climate.ice.set(index: cell, value: winter.ice)
@@ -406,18 +455,33 @@ func stepClimate(
       var snow: Float = climate.snow.copyAtFallback(index: cell, fallback: 0.0)
       var ice: ClimateIce = climate.ice.copyAtFallback(index: cell, fallback: ClimateIce {})
       loop var step: Int = 0, step < hours, ++step {
-        let air: Float = climateAt(
+        let localHour: Float = climateLocalHour(
+          sceneHour: hour - (hours - 1 - step).toFloat()
+          sceneLongitude: sceneLongitude
+          longitude: place.longitude
+        )
+        let weather: Weather = weatherAt(
+          seed: climate.weatherSeed
+          latitude: place.latitude
+          longitude: place.longitude
+          year: year
+          dayOfYear: dayOfYear
+          hour: localHour
+        )
+        let air: Float = climateWeatherAir(
           latitude: place.latitude
           dayOfYear: dayOfYear
-          localHour: climateLocalHour(
-            sceneHour: hour - (hours - 1 - step).toFloat()
-            sceneLongitude: sceneLongitude
-            longitude: place.longitude
-          )
+          localHour: localHour
           height: 0.0
+          weather: weather
         )
         slow = slow + (air - slow) * climateHourWeight
-        snow = climateSnowStep(depth: snow, air: air, hours: 1.0)
+        snow = climateSnowStep(
+          depth: snow
+          air: air
+          precipitation: weather.precipitation
+          hours: 1.0
+        )
         ice = climateIceStep(ice: ice, air: air, hours: 1.0)
       }
       climate.slow.set(index: cell, value: slow)
