@@ -8,6 +8,16 @@ open webgpu/WebgpuEnums
 open webgpu/ReadRequest
 open gpu/GpuResources
 
+# A GPU wait: tries, each a blocking device poll, not a spin count (see
+# checks/readRequest)
+const checkWaitTries: Int = 1000
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
 func fail(message: view String) ret Bool {
   log("FAIL: {message}")
   ret false
@@ -15,10 +25,13 @@ func fail(message: view String) ret Bool {
 
 func waitForRead(request: view ReadRequest) ret Int {
   var status: Int = 0
-  var spins: Int = 0
-  loop status is 0 and spins < 100000 {
+  var tries: Int = 0
+  loop status is 0 and tries < checkWaitTries {
     status = poll(this: request)
-    spins = spins + 1
+    if status is 0 {
+      checkWaitForGpu()
+    }
+    tries = tries + 1
   }
   ret status
 }

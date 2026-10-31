@@ -11,6 +11,16 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuReadback
 
+# A GPU wait: tries, each a blocking device poll, not a spin count (see
+# checks/readRequest)
+const checkWaitTries: Int = 1000
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
 func fail(message: view String) ret Bool {
   log("FAIL: {message}")
   ret false
@@ -29,10 +39,13 @@ func filled(count: view Int, base: view Int) ret List(UInt8) {
 # Nonblocking spin to a terminal state.
 func await(resources: mod GpuResources, id: view ReadbackId) ret Int {
   var status: Int = 0
-  var spins: Int = 0
-  loop status is 0 and spins < 1000000 {
+  var tries: Int = 0
+  loop status is 0 and tries < checkWaitTries {
     status = pollReadback(resources: resources, id: id)
-    spins = spins + 1
+    if status is 0 {
+      checkWaitForGpu()
+    }
+    tries = tries + 1
   }
   ret status
 }

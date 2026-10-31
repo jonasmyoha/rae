@@ -4,6 +4,19 @@ open webgpu/Context
 open webgpu/Webgpu
 open webgpu/ReadRequest
 
+# A GPU wait is bounded by tries, each one a blocking device poll: the GPU
+# finishes what was submitted (and runs the read's callback) before the
+# next try, so the wait does not depend on how fast a spin loop is. A spin
+# count was too short when the machine was busy: a read that needed 130,000
+# polls failed a 100,000-poll wait (readRequest, about every other run)
+const checkWaitTries: Int = 1000
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
 func createBuffer(usage: copy UInt64) ret Ptr {
   unsafe {
     let descriptor: WGPUBufferDescriptor = { size: 32, usage: usage }
@@ -35,10 +48,13 @@ func createReadPair(firstBuffer: copy Ptr, secondBuffer: copy Ptr) ret opt ReadP
 
 func waitForRead(request: view ReadRequest) ret Int {
   var status: Int = 0
-  var spins: Int = 0
-  loop status is 0 and spins < 100000 {
+  var tries: Int = 0
+  loop status is 0 and tries < checkWaitTries {
     status = poll(this: request)
-    spins = spins + 1
+    if status is 0 {
+      checkWaitForGpu()
+    }
+    tries = tries + 1
   }
   ret status
 }
