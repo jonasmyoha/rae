@@ -13,16 +13,28 @@
 #   precipitation (mm of water an hour) falls under the thickest cover;
 #   humidity (0 .. 1) follows the cloud and the rain.
 #
+# - The wind (lib/WeatherWind, docs/leaf-particles-design.md §2.1): its
+#   speed (m/s), direction and gustiness from the season, the front's
+#   passage, the hour and the latitude's prevailing wind.
+#
 # lib/Climate takes the weather's precipitation for its snow and lets
 # clouds and rain cool the day (climateWeatherAir); the walkers dim the
-# sun and the sky by the cover (app3d/SettingsSky).
+# sun and the sky by the cover (app3d/SettingsSky) and drive lib/Wind from
+# the weather's wind (windSettingsFromWeather).
 import Math
+open WeatherWind
 
 type Weather {
   cloud: Float = 0.0
   precipitation: Float = 0.0
   humidity: Float = 0.5
   front: Float = 0.5
+  # the mean wind at 10 m (m/s), the direction it blows toward (radians,
+  # 0 toward east (+x), counter-clockwise, as lib/Wind) and its gustiness
+  # (0 .. 1)
+  windSpeed: Float = 5.0
+  windAngle: Float = 0.6
+  gustiness: Float = 0.6
 }
 
 # The seed every place shares unless an app sets its own
@@ -92,17 +104,22 @@ func weatherAt(
   # a front reaches a place east of another later
   let eastKm: Float = longitude * 111.2 * Math.cos(x: latitude * weatherPi / 180.0)
   let hours: Float = weatherHours(year: year, dayOfYear: dayOfYear, hour: hour) - eastKm / weatherFrontSpeed
-  let front: Float = 0.55 * weatherNoise(seed: seed, hours: hours, period: 60.0) + 0.3 * weatherNoise(
-    seed: seed + 11
-    hours: hours
-    period: 20.0
-  ) + 0.15 * weatherNoise(seed: seed + 23, hours: hours, period: 7.0)
+  let front: Float = weatherFront(seed: seed, hours: hours)
   let wet: Float = weatherWetness(latitude: latitude, dayOfYear: dayOfYear)
   let cloud: Float = weatherRamp(from: 0.54 - 0.3 * wet, to: 0.82 - 0.2 * wet, value: front)
   var precipitation: Float = 0.0
   if cloud > 0.8 {
     precipitation = (cloud - 0.8) / 0.2 * 0.35 * (0.4 + wet)
   }
+  let wind: WeatherWind = weatherWindAt(
+    seed: seed
+    latitude: latitude
+    dayOfYear: dayOfYear
+    hour: hour
+    hours: hours
+    cloud: cloud
+    precipitation: precipitation
+  )
   ret Weather {
     cloud: cloud
     precipitation: precipitation
@@ -112,7 +129,20 @@ func weatherAt(
       high: 1.0
     )
     front: front
+    windSpeed: wind.speed
+    windAngle: wind.angle
+    gustiness: wind.gustiness
   }
+}
+
+# The front (0 .. 1) at `hours` (weatherHours, shifted by the place's
+# longitude): three slow noises
+func weatherFront(seed: view Int, hours: view Float) ret Float {
+  ret 0.55 * weatherNoise(seed: seed, hours: hours, period: 60.0) + 0.3 * weatherNoise(
+    seed: seed + 11
+    hours: hours
+    period: 20.0
+  ) + 0.15 * weatherNoise(seed: seed + 23, hours: hours, period: 7.0)
 }
 
 # The weather in a word or two, for the settings panel: "clear", "cloudy",

@@ -70,22 +70,34 @@ func settingsYearSpeedPicked(actionId: view String, fallback: view Float) ret Fl
 
 # The weather drawn: the model's (`weather`), or the override's
 func settingsWeatherApplied(override: view SettingsWeather, weather: view Weather) ret Weather {
+  # the override sets the sky; the wind stays the model's, a little
+  # stronger under the rain and snow overrides' fronts
+  var applied: Weather = weather
   if override is SettingsWeather.clear {
-    ret Weather { cloud: 0.0, precipitation: 0.0, humidity: 0.45, front: weather.front }
+    applied.cloud = 0.0
+    applied.precipitation = 0.0
+    applied.humidity = 0.45
+  } else if override is SettingsWeather.cloudy {
+    applied.cloud = 0.7
+    applied.precipitation = 0.0
+    applied.humidity = 0.6
+  } else if override is SettingsWeather.rain {
+    applied.cloud = 1.0
+    applied.precipitation = 1.5
+    applied.humidity = 0.9
+    applied.windSpeed = Math.max(a: weather.windSpeed, b: 7.0)
+  } else if override is SettingsWeather.snow {
+    applied.cloud = 1.0
+    applied.precipitation = 0.8
+    applied.humidity = 0.85
+    applied.windSpeed = Math.max(a: weather.windSpeed, b: 5.0)
+  } else if override is SettingsWeather.mist {
+    applied.cloud = 0.5
+    applied.precipitation = 0.0
+    applied.humidity = 1.0
+    applied.windSpeed = Math.min(a: weather.windSpeed, b: 1.5)
   }
-  if override is SettingsWeather.cloudy {
-    ret Weather { cloud: 0.7, precipitation: 0.0, humidity: 0.6, front: weather.front }
-  }
-  if override is SettingsWeather.rain {
-    ret Weather { cloud: 1.0, precipitation: 1.5, humidity: 0.9, front: weather.front }
-  }
-  if override is SettingsWeather.snow {
-    ret Weather { cloud: 1.0, precipitation: 0.8, humidity: 0.85, front: weather.front }
-  }
-  if override is SettingsWeather.mist {
-    ret Weather { cloud: 0.5, precipitation: 0.0, humidity: 1.0, front: weather.front }
-  }
-  ret weather
+  ret applied
 }
 
 # The air the falling drops feel (°C): an override's snow falls as snow

@@ -18,6 +18,8 @@ open water/Water
 open water/IslandSea
 open Climate
 open Weather
+open WeatherWind
+open Wind
 open GeoPlace
 open app3d/SeasonImpostors
 open app3d/GroundPalette
@@ -184,6 +186,11 @@ func updateWalkerClimate(app: mod WalkerApp) {
       )
     )
   )
+  # the trees, bushes and grass sway in the weather's wind (lib/WeatherWind)
+  app.renderSystem.windSettings = windSettingsFromWeather(
+    weather: settings.weather
+    settings: app.renderSystem.windSettings
+  )
 
   # rain or snow falling round the camera, and the ground wet while it rains
   # and the hour after (app3d/Precipitation, lib/Weather)
@@ -212,8 +219,8 @@ func updateWalkerClimate(app: mod WalkerApp) {
     field: app.terrainSystem.forest.field
     eye: app.cameraSystem.camera.position
     seconds: app.frame.time
-    windX: app.renderSystem.renderer.passes.gbuffer.windX * 2.0
-    windY: app.renderSystem.renderer.passes.gbuffer.windY * 2.0
+    windX: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windX)
+    windY: windMetersPerSecond(sway: app.renderSystem.renderer.passes.gbuffer.windY)
   )
   setGbufferWetness(
     cache: app.renderSystem.renderer.passes.gbuffer

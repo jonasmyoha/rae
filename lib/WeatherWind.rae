@@ -1,0 +1,133 @@
+# WeatherWind — the weather's wind (docs/leaf-particles-design.md §2.1-2.2):
+# the mean speed at 10 m (m/s), the direction it blows toward and its
+# gustiness at a place and an hour, from the same inputs as lib/Weather and
+# with no state of its own.
+#
+# - The season: the middle and high latitudes are windier in autumn and
+#   winter (storm season: at 50° a mean of about 5 m/s in winter against
+#   4 m/s in summer, calm hours about 7% of the year, a gale of 16 m/s at
+#   the year's strongest); the tropics have a steadier trade wind, a little
+#   stronger in their winter.
+# - The front: the wind rises while the front changes (a front arriving or
+#   clearing), with the cloud and the rain, and most at the front's high
+#   end, the storms (a gale of 15 m/s and more).
+# - The hour: stronger in the afternoon, calmer at night and at dawn.
+# - A slow wander of its own (period about 5 hours), so two days with the
+#   same front differ and still hours come.
+# - The direction: the latitude's prevailing wind (the trade winds toward
+#   the west in the tropics, the westerlies toward the east at the middle
+#   latitudes, the polar easterlies), veering slowly with the front.
+#
+# windSettingsFromWeather turns it into lib/Wind's settings (the renderer's
+# sway), and windMetersPerSecond (lib/Wind) turns a sway back into m/s.
+import Math
+open Weather
+open Wind
+
+type WeatherWind {
+  speed: Float
+  angle: Float
+  gustiness: Float
+}
+
+# The gentlest and the strongest mean wind the model gives (m/s)
+const weatherWindMinSpeed: Float = 0.3
+
+const weatherWindMaxSpeed: Float = 24.0
+
+# The mean wind's season and latitude part (m/s); `winter` is +1 at the
+# local midwinter, -1 at midsummer
+func weatherWindBase(away: view Float, winter: view Float) ret Float {
+  let tropical: Float = 4.0 + 0.8 * winter
+  let middle: Float = 4.0 + 1.0 * winter
+  let polar: Float = 5.0 + 1.2 * winter
+  let toMiddle: Float = weatherRamp(from: 22.0, to: 34.0, value: away)
+  let toPolar: Float = weatherRamp(from: 62.0, to: 70.0, value: away)
+  let low: Float = tropical + (middle - tropical) * toMiddle
+  ret low + (polar - low) * toPolar
+}
+
+# The prevailing direction at `latitude` (radians, toward): the trade winds
+# blow toward the west and the equator, the westerlies toward the east and
+# the pole, the polar easterlies toward the west
+func weatherWindPrevailing(latitude: view Float) ret Float {
+  let away: Float = Math.abs(value: latitude)
+  var poleward: Float = 1.0
+  if latitude < 0.0 {
+    poleward = -1.0
+  }
+  # each belt's direction as a unit vector, blended across the belts' edges
+  let tradeX: Float = Math.cos(x: weatherPi + 0.4 * poleward)
+  let tradeY: Float = Math.sin(x: weatherPi + 0.4 * poleward)
+  let westX: Float = Math.cos(x: 0.3 * poleward)
+  let westY: Float = Math.sin(x: 0.3 * poleward)
+  let toWest: Float = weatherRamp(from: 25.0, to: 35.0, value: away)
+  let toPolar: Float = weatherRamp(from: 60.0, to: 68.0, value: away)
+  var x: Float = tradeX + (westX - tradeX) * toWest
+  var y: Float = tradeY + (westY - tradeY) * toWest
+  x = x + (-1.0 - x) * toPolar
+  y = y + (0.0 - y) * toPolar
+  ret Math.atan2(y: y, x: x)
+}
+
+# The wind at `latitude` on day `dayOfYear` at the local `hour`, where the
+# front's clock is `hours` (weatherAt's, shifted by the longitude) and the
+# weather has `cloud` and `precipitation` (mm/h)
+func weatherWindAt(
+  seed: view Int
+  latitude: view Float
+  dayOfYear: view Int
+  hour: view Float
+  hours: view Float
+  cloud: view Float
+  precipitation: view Float
+) ret WeatherWind {
+  var winter: Float = -Math.cos(x: (dayOfYear.toFloat() - 196.0) / 365.25 * 2.0 * weatherPi)
+  if latitude < 0.0 {
+    winter = -winter
+  }
+  let base: Float = weatherWindBase(away: Math.abs(value: latitude), winter: winter)
+  # the front's change over the last hour: a front arriving or clearing
+  # brings wind (a change of 0.03 an hour is a brisk one)
+  let front: Float = weatherFront(seed: seed, hours: hours)
+  let change: Float = Math.abs(value: front - weatherFront(seed: seed, hours: hours - 1.0))
+  let passing: Float = weatherRamp(from: 0.004, to: 0.035, value: change)
+  let storm: Float = weatherRamp(from: 0.8, to: 0.95, value: front)
+  let weatherPart: Float = 4.0 * passing + 2.5 * cloud * cloud + 1.5 * Math.min(
+    a: precipitation
+    b: 1.0
+  ) + 11.0 * storm
+  # stronger in the afternoon (peak about 15:00), calmer at night
+  let day: Float = 0.5 + 0.5 * Math.cos(x: (hour - 15.0) / 24.0 * 2.0 * weatherPi)
+  let daily: Float = 0.6 + 0.5 * day
+  # a slow wander of its own, so two days with the same front differ
+  let wander: Float = 0.45 + 0.9 * weatherNoise(seed: seed + 37, hours: hours, period: 5.0)
+  let speed: Float = Math.clamp(
+    val: (base + weatherPart) * daily * wander
+    low: weatherWindMinSpeed
+    high: weatherWindMaxSpeed
+  )
+  # it veers slowly with the front, and more while one passes
+  let veer: Float = (weatherNoise(seed: seed + 41, hours: hours, period: 30.0) - 0.5) * (1.2 + 1.0 * passing)
+  ret WeatherWind {
+    speed: speed
+    angle: weatherWindPrevailing(latitude: latitude) + veer
+    gustiness: Math.clamp(val: 0.3 + 0.03 * speed + 0.25 * passing, low: 0.2, high: 1.0)
+  }
+}
+
+# lib/Wind's settings from `weather`'s wind: the strength in sway units
+# (windSwayMetersPerSecond m/s is 1, capped at windMaxSway so the leaves
+# stay on their branches), its direction and gustiness; the drift and the
+# swings stay `settings`' own, and a strength fixed by RAE_WIND stays fixed
+func windSettingsFromWeather(weather: view Weather, settings: view WindSettings) ret WindSettings {
+  var driven: WindSettings = settings
+  driven.angle = weather.windAngle
+  driven.gustiness = weather.gustiness
+  if settings.fixedStrength < 0.0 {
+    driven.strength = Math.min(a: weather.windSpeed / windSwayMetersPerSecond, b: windMaxSway)
+  } else {
+    driven.strength = settings.fixedStrength
+  }
+  ret driven
+}

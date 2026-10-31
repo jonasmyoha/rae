@@ -1,0 +1,197 @@
+# lib/WeatherWind (docs/leaf-particles-design.md §2.1-2.2): the same wind for
+# the same seed, place and hour; windier in winter than in summer at the
+# middle latitudes, calmer at night than in the afternoon, windier in the
+# rain, with gales and calms in a year; the prevailing direction by
+# latitude; and lib/Wind's settings from it (sway units, the cap, a strength
+# RAE_WIND fixed).
+open Weather
+open WeatherWind
+open Wind
+import Math
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func windAt(latitude: view Float, day: view Int, hour: view Int) ret Weather {
+  ret weatherAt(
+    seed: weatherDefaultSeed
+    latitude: latitude
+    longitude: 24.0
+    year: 2026
+    dayOfYear: day
+    hour: hour.toFloat()
+  )
+}
+
+type WindYear {
+  winter: Float
+  summer: Float
+  night: Float
+  afternoon: Float
+  rain: Float
+  dry: Float
+  strongest: Float
+  calmHours: Int
+  # the year's mean direction (a unit vector's sum)
+  towardX: Float
+  towardY: Float
+}
+
+func windYear(latitude: view Float) ret WindYear {
+  var year: WindYear = {
+    winter: 0.0
+    summer: 0.0
+    night: 0.0
+    afternoon: 0.0
+    rain: 0.0
+    dry: 0.0
+    strongest: 0.0
+    calmHours: 0
+    towardX: 0.0
+    towardY: 0.0
+  }
+  var winterHours: Int = 0
+  var summerHours: Int = 0
+  var nightHours: Int = 0
+  var afternoonHours: Int = 0
+  var rainHours: Int = 0
+  var dryHours: Int = 0
+  loop var day: Int = 1, day <= 365, ++day {
+    loop var hour: Int = 0, hour < 24, ++hour {
+      let weather: Weather = windAt(latitude: latitude, day: day, hour: hour)
+      let speed: Float = weather.windSpeed
+      # the hemisphere's winter: January in the north
+      var winterDay: Bool = day <= 59 or day > 334
+      var summerDay: Bool = day > 151 and day <= 243
+      if latitude < 0.0 {
+        let swap: Bool = winterDay
+        winterDay = summerDay
+        summerDay = swap
+      }
+      if winterDay {
+        year.winter = year.winter + speed
+        winterHours = winterHours + 1
+      }
+      if summerDay {
+        year.summer = year.summer + speed
+        summerHours = summerHours + 1
+      }
+      if hour <= 4 {
+        year.night = year.night + speed
+        nightHours = nightHours + 1
+      }
+      if hour >= 13 and hour <= 17 {
+        year.afternoon = year.afternoon + speed
+        afternoonHours = afternoonHours + 1
+      }
+      if weather.precipitation > 0.05 {
+        year.rain = year.rain + speed
+        rainHours = rainHours + 1
+      } else {
+        year.dry = year.dry + speed
+        dryHours = dryHours + 1
+      }
+      year.strongest = Math.max(a: year.strongest, b: speed)
+      if speed < 2.0 {
+        year.calmHours = year.calmHours + 1
+      }
+      year.towardX = year.towardX + Math.cos(x: weather.windAngle)
+      year.towardY = year.towardY + Math.sin(x: weather.windAngle)
+    }
+  }
+  year.winter = year.winter / winterHours.toFloat()
+  year.summer = year.summer / summerHours.toFloat()
+  year.night = year.night / nightHours.toFloat()
+  year.afternoon = year.afternoon / afternoonHours.toFloat()
+  year.rain = year.rain / Math.max(a: rainHours, b: 1).toFloat()
+  year.dry = year.dry / Math.max(a: dryHours, b: 1).toFloat()
+  let length: Float = Math.sqrt(x: year.towardX * year.towardX + year.towardY * year.towardY)
+  year.towardX = year.towardX / length
+  year.towardY = year.towardY / length
+  ret year
+}
+
+func tenths(value: view Float) ret String {
+  let scaled: Int = (value * 10.0 + 0.5).toInt()
+  ret "{scaled / 10}.{scaled % 10}"
+}
+
+func main() {
+  let first: Weather = windAt(latitude: 60.2, day: 290, hour: 14)
+  let again: Weather = windAt(latitude: 60.2, day: 290, hour: 14)
+  check(
+    label: "the same seed, place and hour give the same wind"
+    ok: first.windSpeed is again.windSpeed and first.windAngle is again.windAngle and first.gustiness is again.gustiness
+  )
+  let north: WindYear = windYear(latitude: 50.0)
+  log(
+    "50 N: winter {tenths(value: north.winter)} m/s, summer {tenths(value: north.summer)}, night {tenths(
+      value: north.night
+    )}, afternoon {tenths(value: north.afternoon)}, rain {tenths(value: north.rain)}, dry {tenths(
+      value: north.dry
+    )}, strongest {tenths(value: north.strongest)}, calm hours {north.calmHours}"
+  )
+  check(label: "50 N: winter windier than summer", ok: north.winter > north.summer * 1.3)
+  check(
+    label: "50 N: a summer mean of a light breeze, a winter one of a fresh breeze"
+    ok: north.summer > 2.0 and north.summer < 6.0 and north.winter > 4.0 and north.winter < 10.0
+  )
+  check(
+    label: "50 N: calmer at night than in the afternoon"
+    ok: north.night < north.afternoon * 0.85
+  )
+  check(label: "50 N: windier in the rain", ok: north.rain > north.dry * 1.3)
+  check(label: "50 N: a gale some time in the year", ok: north.strongest > 14.0)
+  check(label: "50 N: some calm hours", ok: north.calmHours > 20)
+  check(label: "50 N: the westerlies blow toward the east", ok: north.towardX > 0.6)
+  let south: WindYear = windYear(latitude: -45.0)
+  check(label: "45 S: winter (July) windier than summer", ok: south.winter > south.summer * 1.3)
+  check(label: "45 S: the westerlies blow toward the east", ok: south.towardX > 0.6)
+  let tropics: WindYear = windYear(latitude: 15.0)
+  log("15 N: winter {tenths(value: tropics.winter)} m/s, summer {tenths(value: tropics.summer)}")
+  check(
+    label: "15 N: the trade wind blows toward the west and the equator"
+    ok: tropics.towardX < -0.6 and tropics.towardY < 0.0
+  )
+  check(
+    label: "15 N: steadier through the year than 50 N"
+    ok: Math.abs(value: tropics.winter - tropics.summer) < Math.abs(
+      value: north.winter - north.summer
+    )
+  )
+  # lib/Wind's settings from the weather's wind
+  var gale: Weather = first
+  gale.windSpeed = 15.0
+  gale.windAngle = 1.0
+  gale.gustiness = 0.8
+  let settings: WindSettings = windSettingsFromWeather(
+    weather: gale
+    settings: defaultWindSettings()
+  )
+  check(
+    label: "a 15 m/s gale sways 3, toward its direction, with its gustiness"
+    ok: Math.abs(value: settings.strength - 3.0) < 0.001 and settings.angle is 1.0 and settings.gustiness is 0.8
+  )
+  check(
+    label: "the drift stays the settings' own"
+    ok: settings.driftSeconds is defaultWindSettings().driftSeconds
+  )
+  var storm: Weather = gale
+  storm.windSpeed = 30.0
+  check(
+    label: "a storm's sway is capped"
+    ok: windSettingsFromWeather(weather: storm, settings: defaultWindSettings()).strength is windMaxSway
+  )
+  var fixed: WindSettings = defaultWindSettings()
+  fixed.fixedStrength = 0.0
+  check(
+    label: "a strength RAE_WIND fixed stays fixed"
+    ok: windSettingsFromWeather(weather: gale, settings: fixed).strength is 0.0
+  )
+  check(label: "one sway unit is 5 m/s", ok: windMetersPerSecond(sway: 1.0) is 5.0)
+}

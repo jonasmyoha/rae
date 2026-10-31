@@ -26,6 +26,9 @@ type WindSettings {
   driftSeconds: Float
   # How much the gusts add, 0 (none) to 1 (a gust doubles the push and more)
   gustiness: Float
+  # A strength RAE_WIND fixed (-1: none), which the weather's wind
+  # (lib/WeatherWind windSettingsFromWeather) leaves alone
+  fixedStrength: Float = -1.0
 }
 
 type WindState {
@@ -49,6 +52,18 @@ type WindVector {
 # quarter of a millisecond (a gust front jumps once an hour)
 const windTimeWrap: Float64 = 3600.0
 
+# The wind speed (m/s) of one sway unit: a fresh breeze of 5 m/s sways the
+# trees as they are tuned (1), a gale of 15 m/s three times as much
+const windSwayMetersPerSecond: Float = 5.0
+
+# The most sway the weather may ask for: more and leaves leave their branches
+const windMaxSway: Float = 3.5
+
+# A sway (a WindVector's x or y, or a strength) as a wind speed in m/s
+func windMetersPerSecond(sway: view Float) ret Float {
+  ret sway * windSwayMetersPerSecond
+}
+
 func defaultWindSettings() ret WindSettings {
   ret WindSettings {
     angle: 0.6
@@ -67,6 +82,7 @@ func windSettingsFromEnv(settings: view WindSettings) ret WindSettings {
   let text: String = Sys.getEnv(name: "RAE_WIND").trim()
   if text.length() > 0 {
     settled.strength = Math.max(a: 0.0, b: text.toFloat())
+    settled.fixedStrength = settled.strength
   }
   ret settled
 }
