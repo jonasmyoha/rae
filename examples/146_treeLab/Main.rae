@@ -62,6 +62,8 @@ import Sys
 import Vec3
 import Math
 open Wind
+open Weather
+open WeatherWind
 open Scene3d
 open Gbuffer
 open Climate
@@ -229,7 +231,7 @@ func createStudyLab(studyView: view String) ret LabState {
   var camera: Camera3d = studyCamera()
   let rig: CameraRig = studyCameraRig(camera: camera, studyView: studyView)
   var idIssuer: IdIssuer = IdIssuer.create()
-  let windSettings: WindSettings = defaultWindSettings()
+  let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   unsafe {
     ret LabState {
       renderer: own renderer
@@ -264,7 +266,7 @@ func createForestLab() ret LabState {
   applyLabLook(renderer: renderer, light: light)
   let camera: Camera3d = labForestCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
   var idIssuer: IdIssuer = IdIssuer.create()
-  let windSettings: WindSettings = defaultWindSettings()
+  let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   # made before the renderer moves into the state
   var precipitation: opt Precipitation = createPrecipitation(renderer: renderer)
   unsafe {
@@ -330,7 +332,7 @@ func createLab() ret LabState {
   light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
   applyLabLook(renderer: renderer, light: light)
   var idIssuer: IdIssuer = IdIssuer.create()
-  let windSettings: WindSettings = defaultWindSettings()
+  let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   let camera: Camera3d = labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
   unsafe {
     ret LabState {
@@ -421,6 +423,7 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       )
       if let precipitation: mod Precipitation = state.precipitation {
         let air: Float = labAir(season: state.season)
+        let labWind: WindVector = windVector(state: state.wind, settings: state.windSettings)
         drawPrecipitation(
           cache: state.renderer.passes.gbuffer
           resources: rendererResources
@@ -429,8 +432,8 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
           seconds: state.season.seconds
           rate: labWeather(season: state.season).precipitation
           air: settingsWeatherAir(override: state.season.weather, air: air)
-          windX: 0.6
-          windY: 0.3
+          windX: windMetersPerSecond(sway: labWind.x)
+          windY: windMetersPerSecond(sway: labWind.y)
         )
       }
     }
@@ -462,6 +465,11 @@ func runLabFrame(state: mod LabState) {
   let now: Float64 = Gpu2d.nowSeconds()
   let deltaTime: Float = Math.min(a: (now - state.lastTime) as Float, b: 0.1)
   state.lastTime = now
+  # the weather's wind (lib/WeatherWind) at the lab's place and hour
+  state.windSettings = windSettingsFromWeather(
+    weather: labWeather(season: state.season)
+    settings: state.windSettings
+  )
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
   # the renderer's wind: the studies' flowers and the forests' and levels'
   # leaves sway in it (the T02 scene's own leaf pass takes it below)

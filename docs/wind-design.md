@@ -12,9 +12,14 @@ tip flutter (§5). It was off on 2026-10-22
 keeps its own shape-specific response.** Sections 3 and 4 describe an earlier
 version.
 
-The weather's wind (speed and direction from the season and the fronts),
-the shared gust fronts and the leaves they carry are planned in
-docs/leaf-particles-design.md.
+**The walkers and the tree lab drive these settings from the weather
+(2026-10-31, lib/WeatherWind):** each frame `windSettingsFromWeather` sets
+the strength (the weather's speed over `windSwayMetersPerSecond`, 5 m/s,
+capped at `windMaxSway`), the direction and the gustiness; the drift and
+swings below stay. `RAE_WIND` fixes the strength (`fixedStrength`).
+`windMetersPerSecond` turns a sway back into m/s for the rain, the snow and
+the falling leaves. The shared gust fronts and the leaves they carry are
+planned in docs/leaf-particles-design.md.
 
 ## 1. What the wind is
 

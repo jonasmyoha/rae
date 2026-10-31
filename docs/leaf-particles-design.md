@@ -343,7 +343,10 @@ later idea: blowing snow from the same system, with a white flake card).
 
 ## 9. The steps (queued as "[leaves n/8]")
 
-1. **Weather wind** (§2.1, §2.2): `Weather` wind fields, the seasonal and
+1. **Weather wind** (§2.1, §2.2), done 2026-10-31 (lib/WeatherWind, case
+   1271_weather_wind: at 50° about 4.8 m/s in winter, 3.7 in summer, 3.1 at
+   night, 5.6 in the afternoon, 5.8 in the rain, calm hours 7% of the year,
+   16 m/s at the year's strongest): `Weather` wind fields, the seasonal and
    front model, `windSettingsFromWeather`, `windMetersPerSecond`; the
    walkers and the tree lab drive lib/Wind from the weather; the rain, the
    snow and the current FallingLeaves use m/s. Case.
