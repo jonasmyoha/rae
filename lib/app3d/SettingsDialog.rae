@@ -47,6 +47,7 @@ open ui/SceneInstance
 open ui/UiSystems
 open Weather
 open app3d/SettingsWeather
+open app3d/SettingsWind
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
 # also carries `none` and `hdri`, which are not choices this dialog offers.
@@ -206,6 +207,7 @@ type SettingsState {
   weather: Weather = Weather {}
   # The weather the panel asks for (app3d/SettingsWeather; auto: the model's)
   weatherOverride: SettingsWeather = SettingsWeather.auto
+  windOverride: SettingsWind = SettingsWind.auto
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
@@ -859,11 +861,7 @@ func settingsApplyToWorld(
     value: settingsMoonsTitle(settingsState: settingsState)
   )
 
-  settingsWeatherToWorld(
-    world: world
-    override: settingsState.weatherOverride
-    yearSpeed: settingsState.timeOfDay.yearSpeed
-  )
+  settingsWeatherToWorld(world: world, settingsState: settingsState)
   setNodeFillSlot(
     world: world
     nodeId: "SettingsToonButton"

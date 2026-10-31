@@ -131,3 +131,31 @@ func windSettingsFromWeather(weather: view Weather, settings: view WindSettings)
   }
   ret driven
 }
+
+# The compass point the wind blows from at `angle` (the direction it blows
+# toward, 0 east, counter-clockwise): "north", "southwest", ...
+func weatherWindFrom(angle: view Float) ret String {
+  let names: List(String) = {
+    "east"
+    "northeast"
+    "north"
+    "northwest"
+    "west"
+    "southwest"
+    "south"
+    "southeast"
+  }
+  let from: Float = (angle + weatherPi) / (weatherPi * 0.25)
+  let point: Int = Math.floor(x: from + 0.5).toInt()
+  ret names.copyAtDefault(index: ((point % 8) + 8) % 8)
+}
+
+# The wind in words, for the settings panel and the tree lab: "6 m/s from
+# the southwest", or "calm" under 0.5 m/s
+func weatherWindName(weather: view Weather) ret String {
+  let speed: Int = Math.floor(x: weather.windSpeed + 0.5).toInt()
+  if weather.windSpeed < 0.5 {
+    ret "calm"
+  }
+  ret "{speed} m/s from the {weatherWindFrom(angle: weather.windAngle)}"
+}

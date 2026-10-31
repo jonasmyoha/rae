@@ -10,9 +10,11 @@
 # or screenshot run, so the lab's comparison pictures do not change
 # (RAE_TREELAB_SEASON=1 shows it there). U steps the weather (Auto, the
 # weather model's, then Clear, Cloudy, Rain, Snow, Mist; app3d/
-# SettingsWeather; RAE_TREELAB_WEATHER starts it) and N the year's speed
-# (stopped, 1, 7, 30 days a day): the forest's sky takes the clouds, the
-# mist thickens and the rain or snow falls (app3d/Precipitation).
+# SettingsWeather; RAE_TREELAB_WEATHER starts it), I the wind (Auto, then
+# Calm, Breeze, Strong, Gale; app3d/SettingsWind; RAE_WEATHER_WIND starts
+# it) and N the year's speed (stopped, 1, 7, 30 days a day): the forest's
+# sky takes the clouds, the mist thickens, the rain or snow falls
+# (app3d/Precipitation) and the trees and grass sway in the wind.
 import Math
 import Sys
 import Gpu2d
@@ -29,6 +31,8 @@ open app3d/TimeOfDay
 open Climate
 open app3d/PropField
 open app3d/SettingsWeather
+open app3d/SettingsWind
+open WeatherWind
 open Weather
 open RendererDeferred
 
@@ -47,6 +51,7 @@ type LabSeason {
   # the weather the lab shows (auto: the model's) and its clock (s), and
   # the look's own mist density, which the weather thickens
   weather: SettingsWeather = SettingsWeather.auto
+  wind: SettingsWind = SettingsWind.auto
   seconds: Float = 0.0
   mistBase: Float = 0.0
 }
@@ -87,6 +92,7 @@ func createLabSeason() ret LabSeason {
       name: Sys.getEnv(name: "RAE_TREELAB_WEATHER")
       fallback: SettingsWeather.auto
     )
+    wind: settingsWindNamed(name: Sys.getEnv(name: "RAE_WEATHER_WIND"), fallback: SettingsWind.auto)
     dragging: false
     font: SdfText.loadSdfFont(
       jsonPath: "examples/136_walker_character/assets/Roboto-Regular.mtsdf.json"
@@ -126,9 +132,12 @@ func updateLabSeason(season: mod LabSeason, deltaTime: view Float) ret Bool {
     season.shown = season.shown is false
   }
   season.seconds = season.seconds + deltaTime
-  # U: the next weather; N: the next year speed
+  # U: the next weather; I: the next wind; N: the next year speed
   if Sdl3.isKeyPressed(key: Keys.keyU) {
     season.weather = labNextWeather(weather: season.weather)
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyI) {
+    season.wind = settingsWindNext(override: season.wind)
   }
   if Sdl3.isKeyPressed(key: Keys.keyN) {
     season.clock.yearSpeed = labNextYearSpeed(speed: season.clock.yearSpeed)
@@ -330,15 +339,18 @@ func labNextYearSpeed(speed: view Float) ret Float {
 # The weather the lab shows now: the model's at its place and hour, or the
 # override's
 func labWeather(season: view LabSeason) ret Weather {
-  ret settingsWeatherApplied(
-    override: season.weather
-    weather: weatherAt(
-      seed: weatherDefaultSeed
-      latitude: season.latitude
-      longitude: season.longitude
-      year: season.clock.year
-      dayOfYear: season.clock.dayOfYear
-      hour: season.clock.hour
+  ret settingsWindApplied(
+    override: season.wind
+    weather: settingsWeatherApplied(
+      override: season.weather
+      weather: weatherAt(
+        seed: weatherDefaultSeed
+        latitude: season.latitude
+        longitude: season.longitude
+        year: season.clock.year
+        dayOfYear: season.clock.dayOfYear
+        hour: season.clock.hour
+      )
     )
   )
 }
@@ -371,15 +383,16 @@ func applyLabWeather(season: mod LabSeason, renderer: mod DeferredRenderer) {
   }
 }
 
-# "rain 1.5 mm/h (U)", "a year x7 (N)"
+# "rain 1.5 mm/h (U), 6 m/s from the southwest (I), the year x7 (N)"
 func labWeatherText(season: view LabSeason, air: view Float) ret String {
+  let shown: Weather = labWeather(season: season)
   let weather: String = weatherName(
-    weather: labWeather(season: season)
+    weather: shown
     air: settingsWeatherAir(override: season.weather, air: air)
   )
   var year: String = ""
   if season.clock.yearSpeed > 0.0 {
     year = ", the year x{season.clock.yearSpeed.toInt()}"
   }
-  ret "{weather} (U){year} (N)"
+  ret "{weather} (U), {weatherWindName(weather: shown)} (I){year} (N)"
 }

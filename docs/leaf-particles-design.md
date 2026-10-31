@@ -355,7 +355,9 @@ later idea: blowing snow from the same system, with a white flake card).
    Rae and WGSL agree (checks/windGust), case 1272_wind_gust (a breeze 27%
    of the land gusty with no storm gusts, a gale 8% in storm gusts): `windGustAt` in Rae and WGSL; the grass and the
    trees' leaves take their gusts from it. Case and hardware check.
-3. **Wind controls** (§2.4): the settings panel's and the tree lab's wind
+3. **Wind controls** (§2.4), done 2026-10-31 (app3d/SettingsWind: Auto,
+   Calm 0.3 m/s, Breeze 5, Strong 10, Gale 17, the model's direction; the
+   tree lab's I key; saved with the panel; case 1273_settings_wind): the settings panel's and the tree lab's wind
    override and its env variable; the panel's wind text.
 4. **GPU leaf system core** (§4): `LeafParticles`, the ring buffer, the
    emit list, the compute pass (spawn, a simple fall, terrain landing,

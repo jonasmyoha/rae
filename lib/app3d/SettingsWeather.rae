@@ -11,6 +11,7 @@ open Weather
 open ui/Ecs
 open app3d/UiShell
 open app3d/SettingsDialog
+open app3d/SettingsWind
 
 enum SettingsWeather {
   auto
@@ -134,9 +135,13 @@ func settingsWeatherMist(override: view SettingsWeather, factor: view Float) ret
   ret 1.0
 }
 
-# Apply a weather or year-speed action id to `settingsState`; true when it
+# Apply a weather, wind or year-speed action id to `settingsState`; true when it
 # changed something
 func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  # the wind's buttons (app3d/SettingsWind)
+  if settingsWindHandleAction(settingsState: settingsState, actionId: actionId) {
+    ret true
+  }
   let weatherPick: SettingsWeather = settingsWeatherPicked(
     actionId: actionId
     fallback: settingsState.weatherOverride
@@ -160,12 +165,12 @@ func settingsWeatherSlot(on: view Bool) ret String {
   ret "surfaceAlt"
 }
 
-# The panel's weather and year buttons lit for `override` and `yearSpeed`
-func settingsWeatherToWorld(
-  world: mod UiWorld
-  override: view SettingsWeather
-  yearSpeed: view Float
-) {
+# The panel's weather, wind and year buttons lit for `settingsState`'s
+# overrides and year speed
+func settingsWeatherToWorld(world: mod UiWorld, settingsState: view SettingsState) {
+  let override: SettingsWeather = settingsState.weatherOverride
+  let yearSpeed: Float = settingsState.timeOfDay.yearSpeed
+  settingsWindToWorld(world: world, override: settingsState.windOverride)
   let names: List(String) = {
     "Auto"
     "Clear"

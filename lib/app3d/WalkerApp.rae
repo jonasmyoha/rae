@@ -89,6 +89,7 @@ open app3d/CameraKnockdownFollow
 open app3d/CameraFov
 open app3d/SceneLook
 open app3d/SettingsWeather
+open app3d/SettingsWind
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -554,6 +555,15 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       settingsState.weatherOverride = settingsWeatherNamed(
         name: weatherSetting
         fallback: settingsState.weatherOverride
+      )
+    }
+    # RAE_WEATHER_WIND overrides the wind (auto, calm, breeze, strong,
+    # gale; app3d/SettingsWind), as the panel's buttons do
+    let windSetting: String = Sys.getEnv(name: "RAE_WEATHER_WIND")
+    if windSetting.length() > 0 {
+      settingsState.windOverride = settingsWindNamed(
+        name: windSetting
+        fallback: settingsState.windOverride
       )
     }
     # RAE_WALKER_LATITUDE overrides the place's latitude (degrees north), so

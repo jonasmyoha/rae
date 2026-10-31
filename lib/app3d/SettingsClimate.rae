@@ -12,6 +12,7 @@ open Climate
 open GeoPlace
 open app3d/SettingsDialog
 open Weather
+open WeatherWind
 
 # No slow temperature from an app: the panel computes it
 const settingsNoSlowTemperature: Float = -1000.0
@@ -55,7 +56,10 @@ func settingsClimateText(settingsState: view SettingsState) ret String {
   )
   # the weather (lib/Weather) and the snow lying there, from a centimeter
   # (SettingsState.snowDepth)
-  let sky: String = weatherName(weather: settingsState.weather, air: air)
+  # and the wind (lib/WeatherWind): "rain 1.2 mm/h, 6 m/s from the southwest"
+  let sky: String = "{weatherName(weather: settingsState.weather, air: air)}, {weatherWindName(
+    weather: settingsState.weather
+  )}"
   let snowCentimeters: Int = (settingsState.snowDepth * 100.0 + 0.5).toInt()
   if snowCentimeters >= 1 {
     ret "Temperature {settingsTenths(value: air)} °C, {season}, {sky}, snow {snowCentimeters} cm"
