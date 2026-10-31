@@ -168,5 +168,20 @@ func main() ret Int {
       air: -2.0
     ) is "snow 1.0 mm/h"
   )
+  # the mist near the dew point, the clouds' darkness (seasons step 12)
+  let humid: Weather = { cloud: 0.5, humidity: 0.85 }
+  let dry: Weather = { cloud: 0.1, humidity: 0.5 }
+  let dawn: Float = weatherMistFactor(weather: humid, localHour: 5.0, autumn: true)
+  let noon: Float = weatherMistFactor(weather: humid, localHour: 13.0, autumn: true)
+  let dryDawn: Float = weatherMistFactor(weather: dry, localHour: 5.0, autumn: false)
+  log("the mist: a humid dawn x{dawn}, its noon x{noon}, a dry dawn x{dryDawn}")
+  check(
+    label: "a humid autumn dawn is misty, gone by noon, a dry dawn is not"
+    ok: dawn > 4.0 and noon is 1.0 and dryDawn < 1.1
+  )
+  check(
+    label: "the clouds white when clear, gray in the rain"
+    ok: weatherCloudDarkness(weather: clear) is 0.0 and weatherCloudDarkness(weather: rain) > 0.9
+  )
   ret 0
 }

@@ -179,6 +179,29 @@ func updateWalkerClimate(app: mod WalkerApp) {
     )
   )
   let field: mod PropField = app.terrainSystem.forest.field
+  # the mist thickens near the dew point (lib/Weather): humid air, early
+  # morning, autumn; gone by midday
+  let targets: mod DeferredTargets = app.renderSystem.renderer.passes.targets
+  if targets.mistOn {
+    if app.renderSystem.mistBaseDensity <= 0.0 {
+      app.renderSystem.mistBaseDensity = targets.mistDensity
+    }
+    let warmingHere: Bool = climateWarming(
+      latitude: place.latitude
+      year: settings.timeOfDay.year
+      dayOfYear: settings.timeOfDay.dayOfYear
+    )
+    let autumn: Bool = warmingHere is false and settings.slowTemperature > 2.0 and settings.slowTemperature < 12.0
+    targets.mistDensity = app.renderSystem.mistBaseDensity * weatherMistFactor(
+      weather: settings.weather
+      localHour: climateLocalHour(
+        sceneHour: settings.timeOfDay.hour
+        sceneLongitude: settings.longitude
+        longitude: place.longitude
+      )
+      autumn: autumn
+    )
+  }
   field.seasonsOn = true
   field.seasonSlow = settings.slowTemperature
   field.seasonWarming = climateWarming(
