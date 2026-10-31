@@ -1,0 +1,134 @@
+# Leaf loss (app3d/PropSeason, docs/seasons-and-weather-design.md §3.2,
+# §4.2): the cards of a real tree's near leaves that stay at each loss, by
+# the same key the static shaders use (lib/wind.wgsl leafCardKept): all at
+# 0, none at 1, fewer at each step, the cards far from their leaf mass's
+# anchor gone first. And the loss through the year: none in summer, bare
+# at the kind's bareAt, back in spring, never for the spruce.
+import Math
+import Vec3
+open Mesh3d
+open stylizedTrees/StylizedTrees
+open stylizedTrees/StylizedKinds
+open stylizedTrees/ReferenceTrees
+open treeGen/TreeKind
+open app3d/PropSeason
+
+func percent(share: view Float) ret Int {
+  ret (share * 100.0 + 0.5).toInt()
+}
+
+# A card's center and its anchor, from its first corner's vertex
+func cardCenter(mesh: view MeshData, vertex: view Int) ret Vec3 {
+  ret Vec3.create(
+    x: mesh.leafCards.copyAtDefault(index: vertex * 4)
+    y: mesh.leafCards.copyAtDefault(index: vertex * 4 + 1)
+    z: mesh.leafCards.copyAtDefault(index: vertex * 4 + 2)
+  )
+}
+
+func cardAnchor(mesh: view MeshData, vertex: view Int) ret Vec3 {
+  ret Vec3.create(
+    x: mesh.windPivots.copyAtDefault(index: vertex * 4)
+    y: mesh.windPivots.copyAtDefault(index: vertex * 4 + 1)
+    z: mesh.windPivots.copyAtDefault(index: vertex * 4 + 2)
+  )
+}
+
+# The kept shares of one species' near leaf cards at loss 0, 0.25 .. 1;
+# true when they fall from all to none and the lost ones are the outer ones
+func checkSpecies(species: view Int, name: view String) ret Bool {
+  let treeKind: TreeKind = stylizedTreeKind(species: species)
+  let parts: List(MeshData) = referenceLevelParts(
+    treeKind: treeKind
+    variety: stylizedKindVariety(species: species)
+    keepEvery: 1
+    grow: 1.0
+  )
+  let place: Vec3 = Vec3.create(x: 412.0, y: -97.0, z: 3.5)
+  var kept: List(Int) = List.create(Int, cap: 5)
+  loop var step: Int = 0, step <= 4, ++step {
+    kept.add(value: 0)
+  }
+  var cards: Int = 0
+  var lostReach: Float = 0.0
+  var lostCount: Int = 0
+  var keptReach: Float = 0.0
+  var keptCount: Int = 0
+  loop let mesh: view MeshData in parts {
+    # a card is four corners in a row, each carrying the card's center
+    loop var card: Int = 0, card * 4 + 3 < mesh.vertCount, ++card {
+      let vertex: Int = card * 4
+      if mesh.leafCards.copyAtDefault(index: vertex * 4 + 3) <= 0.0 {
+        continue
+      }
+      let center: Vec3 = cardCenter(mesh: mesh, vertex: vertex)
+      let anchor: Vec3 = cardAnchor(mesh: mesh, vertex: vertex)
+      let key: Float = propLeafCardKey(center: center, pivot: anchor, place: place)
+      cards = cards + 1
+      loop var step: Int = 0, step <= 4, ++step {
+        if propLeafCardKept(key: key, loss: step.toFloat() * 0.25) {
+          kept.set(index: step, value: kept.copyAtFallback(index: step, fallback: 0) + 1)
+        }
+      }
+      let reach: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: anchor))
+      if propLeafCardKept(key: key, loss: 0.5) {
+        keptReach = keptReach + reach
+        keptCount = keptCount + 1
+      } else {
+        lostReach = lostReach + reach
+        lostCount = lostCount + 1
+      }
+    }
+  }
+  var shares: String = ""
+  var falling: Bool = true
+  loop var step: Int = 0, step <= 4, ++step {
+    let share: Float = kept.copyAtFallback(index: step, fallback: 0).toFloat() / Math.max(
+      a: cards.toFloat()
+      b: 1.0
+    )
+    shares = "{shares} {percent(share: share)}%"
+    if step > 0 and kept.copyAtFallback(index: step, fallback: 0) >= kept.copyAtFallback(
+      index: step - 1
+      fallback: 0
+    ) {
+      falling = false
+    }
+  }
+  let all: Bool = kept.copyAtFallback(index: 0, fallback: 0) is cards and cards > 0
+  let noneAtOne: Bool = kept.copyAtFallback(index: 4, fallback: 1) is 0
+  let outerFirst: Bool = lostReach / Math.max(a: lostCount.toFloat(), b: 1.0) > keptReach / Math.max(
+    a: keptCount.toFloat()
+    b: 1.0
+  )
+  let passed: Bool = all and noneAtOne and falling and outerFirst
+  log(
+    "{name}: kept at loss 0, .25, .5, .75, 1:{shares}; all at 0 ={all}, none at 1 ={noneAtOne}, fewer each step ={falling}, the outer ones first ={outerFirst}"
+  )
+  ret passed
+}
+
+# The loss of `treeKind` at `slow` (°C), rising or not, as a percent
+func lossAt(treeKind: view TreeKind, slow: view Float, warming: view Bool) ret Int {
+  ret percent(
+    share: propSeasonLoss(season: propSeasonOf(treeKind: treeKind), slow: slow, warming: warming)
+  )
+}
+
+func main() {
+  var passed: Bool = checkSpecies(species: speciesBroadleaf, name: "lime")
+  passed = checkSpecies(species: speciesBirch, name: "birch") and passed
+  let birch: TreeKind = stylizedTreeKind(species: speciesBirch)
+  let spruce: TreeKind = stylizedTreeKind(species: speciesSpruce)
+  let summer: Int = lossAt(treeKind: birch, slow: 15.0, warming: false)
+  let turning: Int = lossAt(treeKind: birch, slow: 5.0, warming: false)
+  let bare: Int = lossAt(treeKind: birch, slow: 2.0, warming: false)
+  let winter: Int = lossAt(treeKind: birch, slow: -6.0, warming: true)
+  let spring: Int = lossAt(treeKind: birch, slow: 10.0, warming: true)
+  let needles: Int = lossAt(treeKind: spruce, slow: -10.0, warming: false)
+  log(
+    "birch loss: summer {summer}%, falling at 5 °C {turning}%, at 2 °C {bare}%, deep winter {winter}%, spring at 10 °C {spring}%; the spruce at -10 °C {needles}%"
+  )
+  let year: Bool = summer is 0 and turning > 0 and turning < 100 and bare is 100 and winter is 100 and spring is 0 and needles is 0
+  log("passed={passed and year}")
+}

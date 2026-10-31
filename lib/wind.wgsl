@@ -103,6 +103,20 @@ fn leafCardOffset(position: vec3<f32>, center: vec3<f32>, scale: vec2<f32>,
   let offset = position - center;
   return right * (offset.x * scale.x) + up * (offset.z * scale.y);
 }
+// Leaf loss (docs/seasons-and-weather-design.md §3.2): does a leaf card stay
+// on its tree at `loss` (0 all leaves, 1 bare)? Each card gets a key from a
+// hash of its center (model space) and the tree's place, biased so the cards
+// far from their leaf mass's anchor `pivot` (the mass's outside) fall first.
+// app3d/PropSeason propLeafCardKey is the same key in Rae (the cases count it).
+const leafLossReach: f32 = 2.0;
+fn leafCardKept(center: vec3<f32>, pivot: vec3<f32>, place: vec3<f32>, loss: f32) -> bool {
+  if (loss <= 0.0) { return true; }
+  if (loss >= 1.0) { return false; }
+  let seed = center + fract(place * 0.0137) * 101.0;
+  let random = fract(sin(dot(seed, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+  let outer = clamp(length(center - pivot) / leafLossReach, 0.0, 1.0);
+  return 0.7 * random + 0.3 * (1.0 - outer) >= loss;
+}
 fn leafCameraRight(viewProj: mat4x4<f32>) -> vec3<f32> {
   return normalize(vec3<f32>(viewProj[0].x, viewProj[1].x, viewProj[2].x));
 }

@@ -29,6 +29,9 @@ struct VsOut {
   @location(3) clipPrev: vec4<f32>,
   @location(4) wpos: vec3<f32>,
   @location(5) uv: vec2<f32>,
+  // the surface's metallic; 0 on a leaf card, whose record carries its
+  // tree's leaf loss there instead (GbufferRecord setInstanceLeafLoss)
+  @location(6) @interpolate(flat) metallic: f32,
 };
 struct BrickOut { albedo: vec3<f32>, nrm: vec3<f32> };
 fn gbBrick(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {
@@ -140,6 +143,15 @@ fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * vec4<f32>(previous.position, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
+  o.metallic = d.albedoMetallic.a;
+  if (card.w > 0.0) {
+    o.metallic = 0.0;
+    // a card its tree has lost: all its corners to one point outside the
+    // clip volume, so it draws nothing (lib/wind.wgsl leafCardKept)
+    if (!leafCardKept(card.xyz, pivot.xyz, d.model[3].xyz, d.albedoMetallic.a)) {
+      o.pos = vec4<f32>(0.0, 0.0, -2.0, 1.0);
+    }
+  }
   return o;
 }
 @vertex

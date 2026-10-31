@@ -26,7 +26,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   surface.wpos = in.wpos;
   surface.N = material.nrm;
   surface.albedo = material.albedo;
-  surface.metallic = d.albedoMetallic.a;
+  surface.metallic = in.metallic;
   surface.rough = abs(d.params.x);
   surface.mode = d.params.z;
   surface.ao = d.params.y;

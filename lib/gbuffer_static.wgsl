@@ -26,6 +26,6 @@ fn fs(in: VsOut) -> FsOut {
   o.gba = vec4<f32>(octB.x, octB.y, rimZ, d.params.z);
   o.gbb = vec4<f32>(surface.albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y,
-                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);
+                     clamp(in.metallic, 0.0, 1.0), d.params.y);
   return o;
 }
