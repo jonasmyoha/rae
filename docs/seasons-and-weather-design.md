@@ -1,6 +1,8 @@
 # Seasons, temperature and weather (design)
 
-Status: design (2026-10-30). Not built. §9 splits it into tasks.
+Status: design (2026-10-30; winter, ice and the panel readouts added
+2026-10-31). Not built. §9 lists the tasks, queued in QUEUE.md as
+"[seasons n/15]".
 
 The stylized trees, the grass and the terrain change with the seasons: green
 leaves turn to autumn colors and, on the deciduous species, fall; grass and
@@ -180,6 +182,51 @@ them in the scene's light (136, 143 and the tree lab), as the greens were.
   depth per 50 km cell, so the north of a 1,000 km world can be white while
   the south is green. Between cells the shader blends.
 
+### 4.1 Deep winter: snow as a mesh, footprints that sink
+
+When the snow is deep (from about 5 cm, the peak of winter), painting it
+is not enough: it is a **physical layer**.
+
+- **The snow surface is geometry.** Near the walker (a square of about 40
+  m, following it like the grass grid) a fine snow mesh (a vertex every
+  10 - 15 cm) lies over the terrain, raised by the snow depth with a soft
+  noise (drifts against trunks and rocks, less on slopes), in a snow
+  material (white, blue in the shade, a faint sparkle). Further out the
+  terrain itself is raised by the depth in its vertex shader and painted
+  snow, so the two meet without a step.
+- **Footprints sink.** A trample map round the walker (a texture of about
+  64 m at 6 - 12 cm a texel, scrolled as the walker moves) is stamped where
+  a foot comes down (the walker's foot events, app3d/WalkerMarks /
+  GroundMarks already find them), deeper for a run than a walk, a little
+  rim of pushed-up snow round each print; the snow mesh is lowered by it.
+  Prints stay until new snow fills them (the map fills back by the
+  snowfall). The crowd's feet stamp it too.
+- **Feet stand in the snow.** The walker's ground height becomes the
+  terrain plus the snow depth minus the trampled depth under the foot, so
+  the legs sink in up to the snow's depth (capped at the knee); deep snow
+  slows the walk a little.
+- **Grass is gone** under deep snow (the grass compute's density 0), the
+  tufts and turf hidden, the bushes white on top.
+
+### 4.2 Winter trees
+
+At the deep-winter end of the year every deciduous kind has lost all its
+leaves (leaf loss 1, §3.2): the trees are their bark. The spruce (and the
+other evergreens: the cypress) keep their needles. Snow lies on them: the
+up-facing parts of branches, trunks and the spruce's tiers turn white by
+the scene's snow amount (§3.2), heavier after a snowfall, and slides off
+slowly in thaw.
+
+### 4.3 Ice
+
+Water freezes when the slow temperature has stayed below about -3 °C for a
+few days, and thaws above 0 °C: a **freeze** value per water body (lakes)
+and per stretch of shore (the sea), stepped hourly with the climate.
+Lakes freeze over completely, the sea only along the shore in deep cold.
+Frozen water draws as ice (opaque, white-blue, cracks, snow on top while
+it snows) instead of moving water, and is walkable: the walker's water
+test treats frozen water as ground at the water's surface.
+
 ## 5. Weather
 
 A small weather model drives cloud cover, rain and mist, with fronts that
@@ -215,6 +262,15 @@ pass over several hours:
   state. A check renders each kind at summer, autumn, bare and snowy.
 - **143 (huge terrain):** the climate grid over the world, the year speed
   from the walker's settings, snow and weather.
+- **The settings panel (every app with it):** under the time and the date,
+  the **temperature** where the camera looks (the climate's air
+  temperature now, e.g. "-12.4 °C") and the **season** in words, from the
+  slow temperature ("early spring", "summer", "autumn", "deep winter",
+  and "dry summer" with the weather). Under the latitude and longitude, the
+  **nearest well-known city** to that place ("near Helsinki, Finland, 12
+  km"): a table of a few hundred cities in lib (name, country, latitude,
+  longitude) and the great-circle nearest, so a jump to an eclipse or a
+  latitude slide says where on Earth the scene is.
 - **136, 137:** the same through lib/app3d (they share the walker code).
 
 ## 7. Who owns what (ECS, no globals)
@@ -248,34 +304,46 @@ The budget is checked like the levels' fades were: 143's frame time over a
 fixed camera move before and after each step, within 1 ms, in the commit
 that adds it.
 
-## 9. The tasks (to split into the queue)
+## 9. The tasks (queued as "[seasons n/15]")
 
-1. **Year and place:** `TimeOfDay.yearSpeed`; the latitude at a point
+1. **Nearest city:** the city table and the panel line under the latitude
+   and longitude (§6). Independent of the rest.
+2. **Year and place:** `TimeOfDay.yearSpeed`; the latitude at a point
    (143's north offset); the lab's `RAE_DAY_OF_YEAR` / `RAE_LATITUDE` and a
    day slider.
-2. **Climate:** `climateAt` (yearly mean and swing by latitude, the day,
-   height, the hemisphere), the slow temperature grid stepped hourly, a
-   case for the fit (Helsinki, the equator, the southern hemisphere).
-3. **Tree season states:** the kind's season block (deciduous, spring /
+3. **Climate and the panel readout:** `climateAt` (yearly mean and swing
+   by latitude, the hemisphere, the day, height; longitude through the
+   local solar time), the slow temperature grid stepped hourly, a case for
+   the fit (Helsinki, the equator, the southern hemisphere); the panel's
+   temperature and season lines (§6).
+4. **Tree season states:** the kind's season block (deciduous, spring /
    autumn / winter tones, phase temperatures); the per-kind color blend and
    the per-tree phase offset; the autumn kinds folded into their species.
-4. **Leaf loss:** the leaf pass's loss threshold (outer cards first), bare
-   winter trees; case checks of cards kept per loss.
-5. **Seasonal impostors:** three baked atlas sets (summer, autumn, bare)
+5. **Leaf loss:** the leaf pass's loss threshold (outer cards first), bare
+   winter trees (all deciduous leaves gone, spruce and cypress keep theirs);
+   case checks of cards kept per loss.
+6. **Seasonal impostors:** three baked atlas sets (summer, autumn, bare)
    and the sprite and canopy blend; the phone's tinted single set.
-6. **Ground palette:** one per-frame grass/ground/tuft palette (replacing
+7. **Ground palette:** one per-frame grass/ground/tuft palette (replacing
    the hand-kept constant pairs), dry grass by moisture.
-7. **Snow:** the snow depth model; terrain snow by slope and noise; grass
-   and tufts under snow; snow on tree tops and the spruce's tiers.
-8. **Weather model:** cloud cover, precipitation, humidity and fronts;
-   its effect on the sun lux, the sky light and the auto exposure.
-9. **Clouds and mist from the weather:** cloud cover and darkness; mist
-   from the dew point.
-10. **Rain and falling snow:** near-camera particles; wet ground.
-11. **Falling leaves:** leaf particles from crowns while their leaf loss
+8. **Snow cover:** the snow depth model; terrain snow by slope and noise;
+   grass and tufts under snow; snow on trees (bark, branches, the spruce's
+   tiers) by the snow amount (§4, §4.2).
+9. **Deep snow mesh and footprints:** the fine snow mesh near the walker,
+   the raised far terrain, the trample map stamped by every foot, feet
+   standing in the snow (§4.1).
+10. **Ice:** the freeze per lake and shore, the ice look, walkable ice
+    (§4.3).
+11. **Weather model:** cloud cover, precipitation, humidity and fronts;
+    its effect on the sun lux, the sky light and the auto exposure.
+12. **Clouds and mist from the weather:** cloud cover and darkness; mist
+    from the dew point.
+13. **Rain and falling snow:** near-camera particles; wet ground.
+14. **Falling leaves:** leaf particles from crowns while their leaf loss
     rises, in the kind's autumn tones.
-12. **Settings and lab controls:** season and weather overrides in the
+15. **Settings and lab controls:** season and weather overrides in the
     walkers' settings and the tree lab; looks-development pages for each
     step (every season of every kind, in 136, 143 and the lab).
 
-Each step keeps the frame-time check of §8.
+Each step keeps the frame-time check of §8 and adds its own
+looks-development page with before/after pictures.
