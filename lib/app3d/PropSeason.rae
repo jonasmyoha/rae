@@ -1,0 +1,86 @@
+# app3d/PropSeason — how a prop kind's leaves change color through the year
+# (docs/seasons-and-weather-design.md §3): a tint the leaf parts' colors are
+# multiplied by, from the slow temperature (lib/Climate) and whether it is
+# rising. The tints are ratios to the kind's summer greens (1 in summer),
+# so each leaf part keeps its own light and dark and only its hue moves.
+#
+# - Deciduous: falling past `turnStart` the leaves turn toward the autumn
+#   tint, fully at `turnFull`, then dry and darken toward `bareAt` (where
+#   seasons step 5 drops them); rising, the new leaves come out lighter and
+#   yellower (the spring tint) from `leafOut` and reach summer's green 6 °C
+#   later.
+# - Evergreen: darker and browner in the cold (the winter tint from 2 °C
+#   down to -6 °C).
+#
+# Each tree shifts its temperature by up to ±1.5 °C, hashed from where it
+# stands (propSeasonShift), so a stand turns over days, not on one day.
+import Math
+import Vec3
+
+type PropSeason {
+  # false: no season (the low-poly set, the umbrella pine): no tint
+  on: Bool = false
+  deciduous: Bool = false
+  springTint: Vec3 = Vec3.create(x: 1.2, y: 1.3, z: 0.75)
+  autumnTint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  winterTint: Vec3 = Vec3.create(x: 0.85, y: 0.82, z: 0.75)
+  # the slow temperatures (°C) of the phases
+  leafOut: Float = 8.0
+  turnStart: Float = 10.0
+  turnFull: Float = 5.0
+  bareAt: Float = 2.0
+}
+
+func noPropSeason() ret PropSeason {
+  ret PropSeason {}
+}
+
+func propSeasonRamp(from: view Float, to: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - from) / (to - from), low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+func propSeasonMix(a: view Vec3, b: view Vec3, t: view Float) ret Vec3 {
+  ret Vec3.vadd(a: a, b: Vec3.vscale(a: Vec3.vsub(a: b, b: a), s: t))
+}
+
+# The tint of `season`'s leaves at slow temperature `slow` (°C), `warming`
+# whether it is rising
+func propSeasonTint(season: view PropSeason, slow: view Float, warming: view Bool) ret Vec3 {
+  let one: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  if season.on is false {
+    ret one
+  }
+  if season.deciduous is false {
+    ret propSeasonMix(
+      a: one
+      b: season.winterTint
+      t: propSeasonRamp(from: 2.0, to: -6.0, value: slow)
+    )
+  }
+  if warming {
+    # the new leaves: lighter, yellower, reaching summer's green
+    let fresh: Float = 1.0 - propSeasonRamp(
+      from: season.leafOut
+      to: season.leafOut + 6.0
+      value: slow
+    )
+    ret propSeasonMix(a: one, b: season.springTint, t: fresh)
+  }
+  let turned: Vec3 = propSeasonMix(
+    a: one
+    b: season.autumnTint
+    t: propSeasonRamp(from: season.turnStart, to: season.turnFull, value: slow)
+  )
+  # past fully turned: the leaves dry, darker and duller
+  ret Vec3.vscale(
+    a: turned
+    s: 1.0 - 0.45 * propSeasonRamp(from: season.turnFull, to: season.bareAt, value: slow)
+  )
+}
+
+# A tree's own shift of the slow temperature (°C), from its seed (0 .. 1,
+# hashed from where it stands): ±1.5 °C
+func propSeasonShift(seed: view Float) ret Float {
+  ret (seed - 0.5) * 3.0
+}

@@ -23,6 +23,7 @@ open Sky
 open Moon
 open app3d/TimeOfDay
 open Climate
+open app3d/PropField
 
 type LabSeason {
   clock: TimeOfDay
@@ -251,4 +252,21 @@ func labSeasonClimateText(season: view LabSeason) ret String {
     )
   )
   ret "{sign}{tenths / 10}.{tenths % 10} °C, {name}"
+}
+
+# The forest's trees follow the lab's season (app3d/PropSeason): its slow
+# temperature and whether it is rising
+func applyLabSeason(season: view LabSeason, field: mod PropField) {
+  field.seasonsOn = true
+  field.seasonSlow = climateSlowAt(
+    climate: season.climate
+    east: 0.0
+    north: 0.0
+    height: 0.0
+  )
+  field.seasonWarming = climateWarming(
+    latitude: season.latitude
+    year: season.clock.year
+    dayOfYear: season.clock.dayOfYear
+  )
 }

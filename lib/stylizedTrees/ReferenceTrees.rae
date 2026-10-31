@@ -33,6 +33,7 @@ open treeGen/Bark
 open treeGen/LeafCards
 open treeGen/TreeLevels
 open treeGen/TreeKind
+open app3d/PropSeason
 open treeGen/SkirtTiers
 
 const referenceSpeciesCount: Int = 5
@@ -95,6 +96,33 @@ func referenceLeafMaterial(color: view Vec3, layer: view Int) ret Material3d {
     toon: false
     colorTextureLayer: layer
     rimLight: false
+  }
+}
+
+# A tree kind's season as its forest kind's (app3d/PropSeason): the autumn
+# color as a tint against the mean of its summer greens, channel by channel
+func propSeasonOf(treeKind: view TreeKind) ret PropSeason {
+  if treeKind.season.deciduous is false {
+    ret PropSeason { on: true }
+  }
+  var summer: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  loop let green: view Vec3 in treeKind.greens {
+    summer = Vec3.vadd(a: summer, b: green)
+  }
+  summer = Vec3.vscale(a: summer, s: 1.0 / Math.max(a: treeKind.greens.length.toFloat(), b: 1.0))
+  let autumn: Vec3 = treeKind.season.autumn
+  ret PropSeason {
+    on: true
+    deciduous: true
+    autumnTint: Vec3.create(
+      x: autumn.x / Math.max(a: summer.x, b: 0.001)
+      y: autumn.y / Math.max(a: summer.y, b: 0.001)
+      z: autumn.z / Math.max(a: summer.z, b: 0.001)
+    )
+    leafOut: treeKind.season.leafOut
+    turnStart: treeKind.season.turnStart
+    turnFull: treeKind.season.turnFull
+    bareAt: treeKind.season.turnFull - 3.0
   }
 }
 
@@ -372,6 +400,7 @@ func addReferenceKind(
       lods: own lods
       radius: Math.sqrt(x: bounds.z * bounds.z * 0.25 + bounds.x * bounds.x) + 0.1
       centerHeight: bounds.z * 0.5
+      season: propSeasonOf(treeKind: treeKind)
     }
   )
   setPropKindSprite(

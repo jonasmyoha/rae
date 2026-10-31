@@ -37,6 +37,7 @@
 import Math
 import Vec3
 open Scene3d
+open app3d/PropSeason
 open Math3d
 open GbufferRecord
 open GbufferInstanced
@@ -79,6 +80,8 @@ type PropKind {
   # its foot); false for a kind without one, such as a bush, which the
   # walkers slow in instead (its own entities and bodies)
   hasTrunk: Bool = true
+  # How its leaves change through the year (app3d/PropSeason; off: never)
+  season: PropSeason = noPropSeason()
 }
 
 # One prop: its kind (addPropKind's index), its foot, its turn about +Z
@@ -125,6 +128,12 @@ const propNearToFarBands: Int = 24
 
 type PropField {
   kinds: List(PropKind)
+  # The seasons (app3d/PropSeason): when on, the gather tints each leaf part
+  # of a kind with a season by the slow temperature (°C, lib/Climate, set
+  # by the app) and whether it is rising, each tree a little apart
+  seasonsOn: Bool = false
+  seasonSlow: Float = 15.0
+  seasonWarming: Bool = false
   placements: List(PropPlacement)
   # Per placement once finished: its model matrix
   models: List(Mat4)
