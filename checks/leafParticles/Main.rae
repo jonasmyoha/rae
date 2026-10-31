@@ -5,7 +5,8 @@
 # crown's color; after 12 s most still there lie on the ground and none is
 # over the crowns (the swirls and the gusts' updrafts keep some aloft; one
 # lies 6 s, so the first to land are gone); after 25 s (past a leaf's life)
-# the ring is empty. A leaf past the reach dies at once.
+# the ring is empty. A leaf past the reach dies at once. A ground lift's
+# leaves rise off the ground.
 import Math
 import Vec3
 open webgpu/Context
@@ -174,6 +175,7 @@ func runCheck(resources: mod GpuResources) ret Int {
       count: 9
       seed: 11 + frame
       shape: 1
+      lift: false
     )
     let unusedYellow: Bool = leafEmit(
       leafParticles: leafParticles
@@ -184,6 +186,7 @@ func runCheck(resources: mod GpuResources) ret Int {
       count: 5
       seed: 101 + frame
       shape: 3
+      lift: false
     )
     stepFor(
       leafParticles: leafParticles
@@ -250,6 +253,7 @@ func runCheck(resources: mod GpuResources) ret Int {
     count: 50
     seed: 13
     shape: 0
+    lift: false
   )
   stepFor(
     leafParticles: leafParticles
@@ -264,7 +268,34 @@ func runCheck(resources: mod GpuResources) ret Int {
   if far.alive is not 0 {
     ret 6
   }
-  log("leaf particles: released, fell downwind, landed, lay and died on the GPU")
+  # a ground lift: leaves from the ground thrown up into the air
+  let unusedLift: Bool = leafEmit(
+    leafParticles: leafParticles
+    crown: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    radius: 2.0
+    color: Vec3.create(x: 0.5, y: 0.3, z: 0.05)
+    size: 0.12
+    count: 10
+    seed: 14
+    shape: 2
+    lift: true
+  )
+  stepFor(
+    leafParticles: leafParticles
+    resources: resources
+    seconds: 0.3
+    eye: eye
+  )
+  let lifted: RingCount = countRing(
+    bytes: readRing(resources: resources, leafParticles: leafParticles)
+  )
+  log("lifted from the ground: {lifted.alive} alive, the lowest at {lifted.lowest} m")
+  if lifted.alive is not 10 or lifted.landed > 0 or lifted.lowest < 0.3 {
+    ret 7
+  }
+  log(
+    "leaf particles: released, fell downwind, landed, lay, died, and rose from the ground on the GPU"
+  )
   releaseLeafParticles(leafParticles: leafParticles, resources: resources)
   ret 0
 }

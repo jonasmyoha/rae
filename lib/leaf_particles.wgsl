@@ -20,6 +20,15 @@
 // not bunch), stronger in a gust; an updraft at a gust's leading edge (the
 // gust ahead weaker than here), which lifts leaves over the crowns; and its
 // own side-to-side glide. It tumbles faster in a gust.
+//
+// Storm gusts carry vortices (docs/leaf-particles-design.md §5.3): one
+// center in each 30 m cell of a lattice carried with the air, live only
+// where a storm gust is at its center, so one or two travel through the
+// forest with the gust's front. A vortex spins the leaves round it and
+// lifts them at its core, up over the crowns (no higher than about 16 m
+// over the ground). An emit marked as a ground lift (info.w bit 4) starts
+// its leaves on the ground and throws them up: the leaves already lying
+// there, swept up into the swirl.
 
 struct Leaf {
   position: vec3<f32>,
@@ -39,8 +48,8 @@ struct LeafEmit {
   // the leaves' color (linear) and size (m)
   color: vec4<f32>,
   // x: how many leaves, y: the first one's index among this frame's
-  // releases, z: a seed, w: the leaves' shape (0 oval, 1 maple, 2 birch,
-  // 3 ginkgo)
+  // releases, z: a seed, w: the leaves' shape in bits 0..1 (0 oval,
+  // 1 maple, 2 birch, 3 ginkgo), bit 4 a ground lift
   info: vec4<u32>,
 };
 // MUST match leaf_render.wgsl LeafDrawU and lib/LeafParticles.rae
@@ -101,6 +110,31 @@ fn leafSwirl(p: vec2<f32>) -> vec3<f32> {
   return vec3<f32>(dy, -dx, 0.0) * (0.5 / h) + vec3<f32>(0.0, 0.0, up);
 }
 
+// The vortices' flow at `p`, `above` m over the ground, in a wind of
+// `speed` m/s: the 2 x 2 lattice cells round it, each center live by the
+// storm gust there
+fn leafVortices(p: vec3<f32>, above: f32, speed: f32) -> vec3<f32> {
+  let air = (p.xy - U.drift.xy) * 0.033333335;
+  let corner = floor(air - vec2<f32>(0.5));
+  var flow = vec3<f32>(0.0);
+  for (var k = 0u; k < 4u; k = k + 1u) {
+    let cell = corner + vec2<f32>(f32(k & 1u), f32(k >> 1u));
+    let key = leafHash(u32(i32(cell.x) & 1023) * 1031u + u32(i32(cell.y) & 1023) * 7919u + 17u);
+    let center = (cell + vec2<f32>(0.2 + 0.6 * leafRandom(key), 0.2 + 0.6 * leafRandom(key + 1u))) * 30.0 + U.drift.xy;
+    let storm = smoothstep(0.7, 0.95, windGustAt(center, U.wind, U.drift.xy));
+    if (storm <= 0.0) { continue; }
+    let toLeaf = p.xy - center;
+    let radius = 5.0 + 3.0 * leafRandom(key + 2u);
+    let core = exp(-dot(toLeaf, toLeaf) / (radius * radius));
+    let spin = select(-1.0, 1.0, leafRandom(key + 3u) > 0.5);
+    let circling = vec2<f32>(-toLeaf.y, toLeaf.x) / radius * spin * speed * 1.2;
+    let inward = -toLeaf / radius * speed * 0.25;
+    let ceiling = clamp((16.0 - above) / 5.0, 0.0, 1.0);
+    flow = flow + vec3<f32>((circling + inward) * core, (2.5 + 0.35 * speed) * core * ceiling) * storm;
+  }
+  return flow;
+}
+
 @group(0) @binding(3) var<storage, read> emits: array<LeafEmit>;
 
 @compute @workgroup_size(computeWorkgroupSize)
@@ -123,12 +157,18 @@ fn spawn(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let up = leafRandom(seed + 1u) * 2.0 - 1.0;
   let out = emit.crown.w * pow(leafRandom(seed + 2u), 0.4);
   let side = sqrt(max(1.0 - up * up, 0.0));
-  let offset = vec3<f32>(cos(angle) * side, sin(angle) * side, up * 0.6) * out;
+  var offset = vec3<f32>(cos(angle) * side, sin(angle) * side, up * 0.6) * out;
+  // it starts with the air's motion and a little drop; a ground lift's
+  // leaf from the ground, thrown up
+  var rise = -0.2;
+  if ((emit.info.w & 16u) != 0u) {
+    offset = vec3<f32>(offset.xy, 0.05 + 0.25 * abs(up));
+    rise = 4.0 + 2.0 * leafRandom(seed + 5u);
+  }
   var leaf: Leaf;
   leaf.position = emit.crown.xyz + offset;
   leaf.age = 0.001;
-  // it starts with the air's motion and a little drop
-  leaf.motion = vec2<u32>(pack2x16float(U.air.xy * 0.5), pack2x16float(vec2<f32>(-0.2, angle)));
+  leaf.motion = vec2<u32>(pack2x16float(U.air.xy * 0.5), pack2x16float(vec2<f32>(rise, angle)));
   let shade = 0.8 + 0.4 * leafRandom(seed + 3u);
   let color = sqrt(clamp(emit.color.rgb * shade, vec3<f32>(0.0), vec3<f32>(1.0)));
   let size = emit.color.w * (0.75 + 0.5 * leafRandom(seed + 4u));
@@ -178,7 +218,9 @@ fn fly(@builtin(global_invocation_id) globalId: vec3<u32>) {
   // its own glide, a pendulum across its heading
   let heading = random * 6.2831853;
   let glide = sin(leaf.age * (1.8 + random * 1.4) + random * 20.0) * (0.5 + 0.4 * random);
-  let air = vec3<f32>(wind + vec2<f32>(cos(heading), sin(heading)) * glide + swirl.xy, swirl.z + updraft);
+  let vortex = leafVortices(leaf.position, leaf.position.z - leafLand(leaf.position.xy), speed);
+  let air = vec3<f32>(wind + vec2<f32>(cos(heading), sin(heading)) * glide + swirl.xy + vortex.xy,
+    swirl.z + updraft + vortex.z);
   // it settles toward the air's motion sideways, and toward its own fall
   // speed (0.7 - 1.3 m/s) through the air downward
   let fallSpeed = 0.7 + 0.6 * leafRandom(leaf.seed + 9u);

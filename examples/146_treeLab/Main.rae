@@ -66,6 +66,7 @@ open Weather
 open WeatherWind
 open LeafParticles
 open app3d/LeafRelease
+open WorldBiome
 open Scene3d
 open Gbuffer
 open Climate
@@ -544,6 +545,17 @@ func runLabFrame(state: mod LabState) {
         deltaTime: deltaTime
         wind: windVector(state: state.wind, settings: state.windSettings)
         frame: state.leafFrame
+      )
+      releaseGroundLitter(
+        leafParticles: leafParticles
+        field: forest.field
+        eye: state.camera.position
+        deltaTime: deltaTime
+        wind: windVector(state: state.wind, settings: state.windSettings)
+        frame: state.leafFrame
+        biome: defaultBiomeConfig()
+        groundZ: 0.0
+        flatGround: true
       )
       if let rendererResources: mod GpuResources = state.renderer.gpuResources {
         let labWind: WindVector = windVector(state: state.wind, settings: state.windSettings)
