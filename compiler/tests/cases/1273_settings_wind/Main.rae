@@ -1,0 +1,70 @@
+# app3d/SettingsWind (docs/leaf-particles-design.md §2.4): the wind
+# override's buttons and names, the wind it sets (Auto the model's, the
+# direction always the model's), the tree lab's key cycle; and the wind in
+# words (lib/WeatherWind weatherWindName).
+open Weather
+open WeatherWind
+open app3d/SettingsWind
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  check(
+    label: "a button picks its wind, another action keeps it"
+    ok: settingsWindPicked(actionId: "settings.wind.gale", fallback: SettingsWind.auto) is SettingsWind.gale and settingsWindPicked(
+      actionId: "settings.weather.rain"
+      fallback: SettingsWind.calm
+    ) is SettingsWind.calm
+  )
+  check(
+    label: "a name picks its wind (RAE_WEATHER_WIND, the saved line)"
+    ok: settingsWindNamed(name: "breeze", fallback: SettingsWind.auto) is SettingsWind.breeze and settingsWindNamed(
+      name: "hurricane"
+      fallback: SettingsWind.strong
+    ) is SettingsWind.strong
+  )
+  var model: Weather = {}
+  model.windSpeed = 6.2
+  model.windAngle = 0.785398
+  model.gustiness = 0.4
+  let auto: Weather = settingsWindApplied(override: SettingsWind.auto, weather: model)
+  check(label: "Auto keeps the model's wind", ok: auto.windSpeed is 6.2 and auto.gustiness is 0.4)
+  let gale: Weather = settingsWindApplied(override: SettingsWind.gale, weather: model)
+  check(
+    label: "Gale: 17 m/s, gusty, from the model's direction"
+    ok: gale.windSpeed is 17.0 and gale.gustiness > 0.9 and gale.windAngle is model.windAngle
+  )
+  check(
+    label: "Calm is calm"
+    ok: weatherWindName(weather: settingsWindApplied(override: SettingsWind.calm, weather: model)) is "calm"
+  )
+  # the key's cycle comes back round
+  var stepped: SettingsWind = SettingsWind.auto
+  var names: String = ""
+  loop var i: Int = 0, i < 5, ++i {
+    stepped = settingsWindNext(override: stepped)
+    names = "{names} {stepped.toString()}"
+  }
+  log("the cycle:{names}")
+  check(label: "the key steps through all five and back", ok: stepped is SettingsWind.auto)
+  # blowing toward the northeast (45°) is a wind from the southwest
+  log(weatherWindName(weather: model))
+  check(
+    label: "toward the northeast is from the southwest"
+    ok: weatherWindName(weather: model) is "6 m/s from the southwest"
+  )
+  check(
+    label: "the compass points"
+    ok: weatherWindFrom(angle: 0.0) is "west" and weatherWindFrom(angle: 1.5707964) is "south" and weatherWindFrom(
+      angle: 3.1415927
+    ) is "east" and weatherWindFrom(angle: -1.5707964) is "north" and weatherWindFrom(
+      angle: 7.0685835
+    ) is "southwest"
+  )
+}

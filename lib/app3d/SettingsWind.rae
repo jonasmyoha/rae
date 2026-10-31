@@ -1,0 +1,120 @@
+# app3d/SettingsWind — the settings panel's wind override
+# (docs/leaf-particles-design.md §2.4): Auto (the weather model's wind,
+# lib/WeatherWind) or Calm, Breeze, Strong, Gale, so the trees, the grass,
+# the rain and the falling leaves can be judged in a wind without waiting
+# for one. The override sets the wind's speed and gustiness; its direction
+# stays the model's. RAE_WEATHER_WIND=<name> starts it (the walkers and the
+# tree lab).
+open Weather
+open ui/Ecs
+open app3d/UiShell
+open app3d/SettingsDialog
+
+enum SettingsWind {
+  auto
+  calm
+  breeze
+  strong
+  gale
+}
+
+# The override an action id picks ("settings.wind.<name>"), else `fallback`
+func settingsWindPicked(actionId: view String, fallback: view SettingsWind) ret SettingsWind {
+  if actionId is "settings.wind.auto" {
+    ret SettingsWind.auto
+  }
+  if actionId is "settings.wind.calm" {
+    ret SettingsWind.calm
+  }
+  if actionId is "settings.wind.breeze" {
+    ret SettingsWind.breeze
+  }
+  if actionId is "settings.wind.strong" {
+    ret SettingsWind.strong
+  }
+  if actionId is "settings.wind.gale" {
+    ret SettingsWind.gale
+  }
+  ret fallback
+}
+
+# The override named `name` (the persisted line, RAE_WEATHER_WIND), else
+# `fallback`
+func settingsWindNamed(name: view String, fallback: view SettingsWind) ret SettingsWind {
+  ret settingsWindPicked(actionId: "settings.wind.{name}", fallback: fallback)
+}
+
+# The weather with the override's wind: a calm of 0.3 m/s, a fresh breeze
+# of 5, a strong wind of 10, a gale of 17 (Auto: the model's)
+func settingsWindApplied(override: view SettingsWind, weather: view Weather) ret Weather {
+  var applied: Weather = weather
+  if override is SettingsWind.calm {
+    applied.windSpeed = 0.3
+    applied.gustiness = 0.2
+  } else if override is SettingsWind.breeze {
+    applied.windSpeed = 5.0
+    applied.gustiness = 0.5
+  } else if override is SettingsWind.strong {
+    applied.windSpeed = 10.0
+    applied.gustiness = 0.75
+  } else if override is SettingsWind.gale {
+    applied.windSpeed = 17.0
+    applied.gustiness = 0.95
+  }
+  ret applied
+}
+
+# The next override (the tree lab's key steps through them)
+func settingsWindNext(override: view SettingsWind) ret SettingsWind {
+  if override is SettingsWind.auto {
+    ret SettingsWind.calm
+  }
+  if override is SettingsWind.calm {
+    ret SettingsWind.breeze
+  }
+  if override is SettingsWind.breeze {
+    ret SettingsWind.strong
+  }
+  if override is SettingsWind.strong {
+    ret SettingsWind.gale
+  }
+  ret SettingsWind.auto
+}
+
+# Apply a wind action id to `settingsState`; true when it changed it
+func settingsWindHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  let pick: SettingsWind = settingsWindPicked(
+    actionId: actionId
+    fallback: settingsState.windOverride
+  )
+  if pick is settingsState.windOverride {
+    ret false
+  }
+  settingsState.windOverride = pick
+  ret true
+}
+
+# The panel's wind buttons lit for `override`
+func settingsWindToWorld(world: mod UiWorld, override: view SettingsWind) {
+  let names: List(String) = {
+    "Auto"
+    "Calm"
+    "Breeze"
+    "Strong"
+    "Gale"
+  }
+  let picks: List(SettingsWind) = {
+    SettingsWind.auto
+    SettingsWind.calm
+    SettingsWind.breeze
+    SettingsWind.strong
+    SettingsWind.gale
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    var slot: String = "surfaceAlt"
+    if picks.copyAtFallback(index: i, fallback: SettingsWind.auto) is override {
+      slot = "accent"
+    }
+    setNodeFillSlot(world: world, nodeId: "SettingsWind{names.copyAtDefault(index: i)}", slot: slot)
+  }
+}

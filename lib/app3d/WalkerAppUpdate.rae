@@ -26,6 +26,7 @@ open app3d/GroundPalette
 open app3d/SnowField
 open app3d/FallingLeaves
 open app3d/SettingsWeather
+open app3d/SettingsWind
 open app3d/WalkerAutoWalk
 open water/WaterSystem
 open water/WadeSplash
@@ -169,20 +170,23 @@ func updateWalkerClimate(app: mod WalkerApp) {
     north: look.y
   )
   # the weather there (lib/Weather): its clouds dim the sun and the sky
-  # (app3d/SettingsSky), the panel names it
-  # (or the panel's override, app3d/SettingsWeather)
-  settings.weather = settingsWeatherApplied(
-    override: settings.weatherOverride
-    weather: weatherAt(
-      seed: app.climate.weatherSeed
-      latitude: place.latitude
-      longitude: place.longitude
-      year: settings.timeOfDay.year
-      dayOfYear: settings.timeOfDay.dayOfYear
-      hour: climateLocalHour(
-        sceneHour: settings.timeOfDay.hour
-        sceneLongitude: settings.longitude
+  # (app3d/SettingsSky), the panel names it (or the panel's overrides,
+  # app3d/SettingsWeather and SettingsWind)
+  settings.weather = settingsWindApplied(
+    override: settings.windOverride
+    weather: settingsWeatherApplied(
+      override: settings.weatherOverride
+      weather: weatherAt(
+        seed: app.climate.weatherSeed
+        latitude: place.latitude
         longitude: place.longitude
+        year: settings.timeOfDay.year
+        dayOfYear: settings.timeOfDay.dayOfYear
+        hour: climateLocalHour(
+          sceneHour: settings.timeOfDay.hour
+          sceneLongitude: settings.longitude
+          longitude: place.longitude
+        )
       )
     )
   )

@@ -6,6 +6,7 @@
 open app3d/SettingsDialog
 open app3d/SettingsPersist
 open app3d/SettingsWeather
+open app3d/SettingsWind
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -50,6 +51,7 @@ func main() ret Int {
   changed.longitude = 151.25
   changed.timeOfDay.yearSpeed = 7.0
   changed.weatherOverride = SettingsWeather.rain
+  changed.windOverride = SettingsWind.gale
   let line: String = serializeSettingsState(settingsState: changed, editor: true)
   log(line)
   var restored: SettingsState = freshSettings()
@@ -80,8 +82,8 @@ func main() ret Int {
     ok: restored.timeOfDay.hour is 19.25 and restored.timeOfDay.dayOfYear is 60 and restored.timeOfDay.year is 2024 and restored.animateTime is false and restored.latitude is -33.5 and restored.longitude is 151.25
   )
   check(
-    label: "the year's speed and the weather"
-    ok: restored.timeOfDay.yearSpeed is 7.0 and restored.weatherOverride is SettingsWeather.rain
+    label: "the year's speed, the weather and the wind"
+    ok: restored.timeOfDay.yearSpeed is 7.0 and restored.weatherOverride is SettingsWeather.rain and restored.windOverride is SettingsWind.gale
   )
   check(
     label: "the same line again"
