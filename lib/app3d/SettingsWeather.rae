@@ -1,0 +1,197 @@
+# app3d/SettingsWeather — the settings panel's season and weather controls
+# (docs/seasons-and-weather-design.md §5, §6): a weather override (Auto:
+# the weather model's own, lib/Weather; or Clear, Cloudy, Rain, Snow,
+# Mist) and the year's speed (1, 7 or 30 days a day; TimeOfDay.yearSpeed),
+# so a look can be judged without waiting for it. The override changes
+# what is drawn (the sky's clouds, the light, the rain or snow falling, the
+# wet ground, the mist), not the climate: its snow and ice keep following
+# the weather model.
+import Math
+open Weather
+open ui/Ecs
+open app3d/UiShell
+open app3d/SettingsDialog
+
+enum SettingsWeather {
+  auto
+  clear
+  cloudy
+  rain
+  snow
+  mist
+}
+
+# The override an action id picks ("settings.weather.<name>"), else
+# `fallback`
+func settingsWeatherPicked(
+  actionId: view String
+  fallback: view SettingsWeather
+) ret SettingsWeather {
+  if actionId is "settings.weather.auto" {
+    ret SettingsWeather.auto
+  }
+  if actionId is "settings.weather.clear" {
+    ret SettingsWeather.clear
+  }
+  if actionId is "settings.weather.cloudy" {
+    ret SettingsWeather.cloudy
+  }
+  if actionId is "settings.weather.rain" {
+    ret SettingsWeather.rain
+  }
+  if actionId is "settings.weather.snow" {
+    ret SettingsWeather.snow
+  }
+  if actionId is "settings.weather.mist" {
+    ret SettingsWeather.mist
+  }
+  ret fallback
+}
+
+# The override named `name` (the persisted line), else `fallback`
+func settingsWeatherNamed(name: view String, fallback: view SettingsWeather) ret SettingsWeather {
+  ret settingsWeatherPicked(actionId: "settings.weather.{name}", fallback: fallback)
+}
+
+# The year's speed an action id picks ("settings.year.real" / "week" /
+# "month": 1, 7, 30 days a day), else `fallback`
+func settingsYearSpeedPicked(actionId: view String, fallback: view Float) ret Float {
+  if actionId is "settings.year.real" {
+    ret 1.0
+  }
+  if actionId is "settings.year.week" {
+    ret 7.0
+  }
+  if actionId is "settings.year.month" {
+    ret 30.0
+  }
+  ret fallback
+}
+
+# The weather drawn: the model's (`weather`), or the override's
+func settingsWeatherApplied(override: view SettingsWeather, weather: view Weather) ret Weather {
+  if override is SettingsWeather.clear {
+    ret Weather { cloud: 0.0, precipitation: 0.0, humidity: 0.45, front: weather.front }
+  }
+  if override is SettingsWeather.cloudy {
+    ret Weather { cloud: 0.7, precipitation: 0.0, humidity: 0.6, front: weather.front }
+  }
+  if override is SettingsWeather.rain {
+    ret Weather { cloud: 1.0, precipitation: 1.5, humidity: 0.9, front: weather.front }
+  }
+  if override is SettingsWeather.snow {
+    ret Weather { cloud: 1.0, precipitation: 0.8, humidity: 0.85, front: weather.front }
+  }
+  if override is SettingsWeather.mist {
+    ret Weather { cloud: 0.5, precipitation: 0.0, humidity: 1.0, front: weather.front }
+  }
+  ret weather
+}
+
+# The air the falling drops feel (°C): an override's snow falls as snow
+func settingsWeatherAir(override: view SettingsWeather, air: view Float) ret Float {
+  if override is SettingsWeather.snow {
+    ret Math.min(a: air, b: -2.0)
+  }
+  if override is SettingsWeather.rain {
+    ret Math.max(a: air, b: 4.0)
+  }
+  ret air
+}
+
+# How wet the ground is under the override (the model's `wet` for Auto)
+func settingsWeatherWet(override: view SettingsWeather, wet: view Float) ret Float {
+  if override is SettingsWeather.auto {
+    ret wet
+  }
+  if override is SettingsWeather.rain {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+# The mist's factor under the override (the model's `factor` for Auto):
+# Mist the thickest, the rest the scene's own haze
+func settingsWeatherMist(override: view SettingsWeather, factor: view Float) ret Float {
+  if override is SettingsWeather.auto {
+    ret factor
+  }
+  if override is SettingsWeather.mist {
+    ret 6.0
+  }
+  ret 1.0
+}
+
+# Apply a weather or year-speed action id to `settingsState`; true when it
+# changed something
+func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  let weatherPick: SettingsWeather = settingsWeatherPicked(
+    actionId: actionId
+    fallback: settingsState.weatherOverride
+  )
+  let yearPick: Float = settingsYearSpeedPicked(
+    actionId: actionId
+    fallback: settingsState.timeOfDay.yearSpeed
+  )
+  if weatherPick is settingsState.weatherOverride and yearPick is settingsState.timeOfDay.yearSpeed {
+    ret false
+  }
+  settingsState.weatherOverride = weatherPick
+  settingsState.timeOfDay.yearSpeed = yearPick
+  ret true
+}
+
+func settingsWeatherSlot(on: view Bool) ret String {
+  if on {
+    ret "accent"
+  }
+  ret "surfaceAlt"
+}
+
+# The panel's weather and year buttons lit for `override` and `yearSpeed`
+func settingsWeatherToWorld(
+  world: mod UiWorld
+  override: view SettingsWeather
+  yearSpeed: view Float
+) {
+  let names: List(String) = {
+    "Auto"
+    "Clear"
+    "Cloudy"
+    "Rain"
+    "Snow"
+    "Mist"
+  }
+  let picks: List(SettingsWeather) = {
+    SettingsWeather.auto
+    SettingsWeather.clear
+    SettingsWeather.cloudy
+    SettingsWeather.rain
+    SettingsWeather.snow
+    SettingsWeather.mist
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    setNodeFillSlot(
+      world: world
+      nodeId: "SettingsWeather{names.copyAtDefault(index: i)}"
+      slot: settingsWeatherSlot(
+        on: picks.copyAtFallback(index: i, fallback: SettingsWeather.auto) is override
+      )
+    )
+  }
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsYearReal"
+    slot: settingsWeatherSlot(on: yearSpeed is 1.0)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsYearWeek"
+    slot: settingsWeatherSlot(on: yearSpeed is 7.0)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsYearMonth"
+    slot: settingsWeatherSlot(on: yearSpeed is 30.0)
+  )
+}

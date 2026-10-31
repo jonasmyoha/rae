@@ -498,6 +498,20 @@ that adds it.
 15. **Settings and lab controls:** season and weather overrides in the
     walkers' settings and the tree lab; looks-development pages for each
     step (every season of every kind, in 136, 143 and the lab).
+    Done (2026-10-31): app3d/SettingsWeather. The panel (settings_dialog
+    .raescene, under the date and the temperature) has Weather (Auto,
+    Clear, Cloudy, Rain, Snow, Mist) and Year speed (1, 7, 30 days a day)
+    rows; SettingsState.weatherOverride and TimeOfDay.yearSpeed, saved by
+    SettingsPersist (case 1260). The override changes what is drawn only
+    (settingsWeatherApplied for the clouds and the light,
+    settingsWeatherAir for the falling drops, settingsWeatherWet,
+    settingsWeatherMist), not the climate's snow and ice. RAE_WALKER_WEATHER
+    starts a walker with one. The tree lab: U steps the weather, N the year
+    speed (stopped, 1, 7, 30), RAE_TREELAB_WEATHER; its forest takes the
+    clouds, the mist and the rain or snow (app3d/Precipitation). The
+    looks-development page rendering/seasons.html shows 136, 143 and the
+    lab's forest (every kind) in spring, summer, autumn, late autumn and
+    deep winter, the five overrides and the panel.
 
 Each step keeps the frame-time check of §8 and adds its own
 looks-development page with before/after pictures.

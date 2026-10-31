@@ -46,6 +46,7 @@ open ui/SceneFile
 open ui/SceneInstance
 open ui/UiSystems
 open Weather
+open app3d/SettingsWeather
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
 # also carries `none` and `hdri`, which are not choices this dialog offers.
@@ -203,6 +204,8 @@ type SettingsState {
   # The weather there (lib/Weather, set by an app with a climate each
   # frame): its cloud cover dims the sun and the sky (app3d/SettingsSky)
   weather: Weather = Weather {}
+  # The weather the panel asks for (app3d/SettingsWeather; auto: the model's)
+  weatherOverride: SettingsWeather = SettingsWeather.auto
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
@@ -402,6 +405,9 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.toon" {
     settingsState.toon = settingsState.toon is false
+    ret true
+  }
+  if settingsWeatherHandleAction(settingsState: settingsState, actionId: actionId) {
     ret true
   }
   if actionId is "settings.antialias.taa" {
@@ -853,6 +859,11 @@ func settingsApplyToWorld(
     value: settingsMoonsTitle(settingsState: settingsState)
   )
 
+  settingsWeatherToWorld(
+    world: world
+    override: settingsState.weatherOverride
+    yearSpeed: settingsState.timeOfDay.yearSpeed
+  )
   setNodeFillSlot(
     world: world
     nodeId: "SettingsToonButton"

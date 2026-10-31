@@ -15,6 +15,7 @@ import Sys
 open Calendar
 open app3d/SettingsDialog
 open app3d/SettingsSky
+open app3d/SettingsWeather
 
 # The HotReload slot of an app's settings
 func settingsStateSlot(appId: view String) ret String {
@@ -65,7 +66,7 @@ func settingsFlag(value: view Bool) ret String {
 func serializeSettingsState(settingsState: view SettingsState, editor: view Bool) ret String {
   let clock: String = "hour={settingsState.timeOfDay.hour} day={settingsState.timeOfDay.dayOfYear} year={settingsState.timeOfDay.year} animateTime={settingsFlag(
     value: settingsState.animateTime
-  )} latitude={settingsState.latitude} longitude={settingsState.longitude}"
+  )} latitude={settingsState.latitude} longitude={settingsState.longitude} yearSpeed={settingsState.timeOfDay.yearSpeed} weather={settingsState.weatherOverride.toString()}"
   let rendering: String = "toon={settingsFlag(value: settingsState.toon)} shadows={settingsFlag(
     value: settingsState.shadows
   )} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
@@ -127,6 +128,13 @@ func restoreSettingsState(
       settingsState.skyModel = settingsSkyNamed(name: value, fallback: settingsState.skyModel)
     } else if name is "sunLux" and not settingsEnvSets(name: "RAE_SUN_LUX") {
       settingsState.sunNoonLux = value.toFloat()
+    } else if name is "yearSpeed" {
+      settingsState.timeOfDay.yearSpeed = value.toFloat()
+    } else if name is "weather" {
+      settingsState.weatherOverride = settingsWeatherNamed(
+        name: value
+        fallback: settingsState.weatherOverride
+      )
     } else if name is "exposure" {
       settingsState.exposureCompensation = value.toFloat()
     } else if name is "autoExposure" {

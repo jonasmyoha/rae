@@ -23,6 +23,7 @@ open app3d/SeasonImpostors
 open app3d/GroundPalette
 open app3d/SnowField
 open app3d/FallingLeaves
+open app3d/SettingsWeather
 open app3d/WalkerAutoWalk
 open water/WaterSystem
 open water/WadeSplash
@@ -167,18 +168,23 @@ func updateWalkerClimate(app: mod WalkerApp) {
   )
   # the weather there (lib/Weather): its clouds dim the sun and the sky
   # (app3d/SettingsSky), the panel names it
-  settings.weather = weatherAt(
-    seed: app.climate.weatherSeed
-    latitude: place.latitude
-    longitude: place.longitude
-    year: settings.timeOfDay.year
-    dayOfYear: settings.timeOfDay.dayOfYear
-    hour: climateLocalHour(
-      sceneHour: settings.timeOfDay.hour
-      sceneLongitude: settings.longitude
+  # (or the panel's override, app3d/SettingsWeather)
+  settings.weather = settingsWeatherApplied(
+    override: settings.weatherOverride
+    weather: weatherAt(
+      seed: app.climate.weatherSeed
+      latitude: place.latitude
       longitude: place.longitude
+      year: settings.timeOfDay.year
+      dayOfYear: settings.timeOfDay.dayOfYear
+      hour: climateLocalHour(
+        sceneHour: settings.timeOfDay.hour
+        sceneLongitude: settings.longitude
+        longitude: place.longitude
+      )
     )
   )
+
   # rain or snow falling round the camera, and the ground wet while it rains
   # and the hour after (app3d/Precipitation, lib/Weather)
   let localHour: Float = climateLocalHour(
@@ -194,7 +200,10 @@ func updateWalkerClimate(app: mod WalkerApp) {
     weather: settings.weather
   )
   app.walkerMarks.precipitationRate = settings.weather.precipitation
-  app.walkerMarks.precipitationAir = air
+  app.walkerMarks.precipitationAir = settingsWeatherAir(
+    override: settings.weatherOverride
+    air: air
+  )
   app.walkerMarks.precipitationEye = app.cameraSystem.camera.position
   app.walkerMarks.precipitationClock = app.frame.time
   # leaves falling from the crowns that are losing theirs (app3d/FallingLeaves)
@@ -208,14 +217,17 @@ func updateWalkerClimate(app: mod WalkerApp) {
   )
   setGbufferWetness(
     cache: app.renderSystem.renderer.passes.gbuffer
-    wet: weatherGroundWet(
-      seed: app.climate.weatherSeed
-      latitude: place.latitude
-      longitude: place.longitude
-      year: settings.timeOfDay.year
-      dayOfYear: settings.timeOfDay.dayOfYear
-      hour: localHour
-      air: air
+    wet: settingsWeatherWet(
+      override: settings.weatherOverride
+      wet: weatherGroundWet(
+        seed: app.climate.weatherSeed
+        latitude: place.latitude
+        longitude: place.longitude
+        year: settings.timeOfDay.year
+        dayOfYear: settings.timeOfDay.dayOfYear
+        hour: localHour
+        air: air
+      )
     )
   )
   let field: mod PropField = app.terrainSystem.forest.field
@@ -232,14 +244,17 @@ func updateWalkerClimate(app: mod WalkerApp) {
       dayOfYear: settings.timeOfDay.dayOfYear
     )
     let autumn: Bool = warmingHere is false and settings.slowTemperature > 2.0 and settings.slowTemperature < 12.0
-    targets.mistDensity = app.renderSystem.mistBaseDensity * weatherMistFactor(
-      weather: settings.weather
-      localHour: climateLocalHour(
-        sceneHour: settings.timeOfDay.hour
-        sceneLongitude: settings.longitude
-        longitude: place.longitude
+    targets.mistDensity = app.renderSystem.mistBaseDensity * settingsWeatherMist(
+      override: settings.weatherOverride
+      factor: weatherMistFactor(
+        weather: settings.weather
+        localHour: climateLocalHour(
+          sceneHour: settings.timeOfDay.hour
+          sceneLongitude: settings.longitude
+          longitude: place.longitude
+        )
+        autumn: autumn
       )
-      autumn: autumn
     )
   }
   field.seasonsOn = true
