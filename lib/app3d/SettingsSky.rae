@@ -15,6 +15,7 @@ open Sky
 open app3d/TimeOfDay
 open Moon
 open app3d/SettingsDialog
+open Weather
 
 # The most moons in the sky, the earth's one and the invented ones the sky
 # draws beside it
@@ -142,6 +143,15 @@ func settingsCloudSkyLight(settingsState: view SettingsState) ret Float {
   ret 1.0 - 0.5 * Math.clamp(val: settingsState.weather.cloud, low: 0.0, high: 1.0)
 }
 
+# The weather's clouds on a sky (lib/Weather; drawn in sky_hosek.wgsl): its
+# cover, its darkness, and how far they drifted by the clock (a few noise
+# units a day)
+func settingsSetClouds(settingsState: view SettingsState, sky: mod Sky) {
+  sky.cloudCover = settingsState.weather.cloud
+  sky.cloudDarkness = weatherCloudDarkness(weather: settingsState.weather)
+  sky.cloudDrift = (settingsState.timeOfDay.dayOfYear.toFloat() * 24.0 + settingsState.timeOfDay.hour) * 0.15
+}
+
 # The share of the sun's light that gets past the moon (1 with no eclipse;
 # at totality nearly none: the sky turns to a dusk and the light falls with
 # it). 1 with the moon off.
@@ -202,6 +212,7 @@ func settingsBuildSky(
     pre.exposure = day
     pre.sunDiscIntensity = pre.sunDiscIntensity * day
     settingsAddMoon(settingsState: settingsState, sky: pre, day: day)
+    settingsSetClouds(settingsState: settingsState, sky: pre)
     ret pre
   }
   if settingsState.skyModel is SettingsSkyModel.stylized {
@@ -215,6 +226,7 @@ func settingsBuildSky(
     painted.exposure = day
     painted.sunDiscIntensity = painted.sunDiscIntensity * day
     settingsAddMoon(settingsState: settingsState, sky: painted, day: day)
+    settingsSetClouds(settingsState: settingsState, sky: painted)
     ret painted
   }
   var hos: Sky = createSkyHosek(
@@ -227,6 +239,7 @@ func settingsBuildSky(
   hos.exposure = day
   hos.sunDiscIntensity = hos.sunDiscIntensity * day
   settingsAddMoon(settingsState: settingsState, sky: hos, day: day)
+  settingsSetClouds(settingsState: settingsState, sky: hos)
   ret hos
 }
 

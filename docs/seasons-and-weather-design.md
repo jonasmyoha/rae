@@ -461,6 +461,18 @@ that adds it.
     for step 12.
 12. **Clouds and mist from the weather:** cloud cover and darkness; mist
     from the dew point.
+    Done (2026-10-31): the walkers' sky had no clouds; sky_hosek.wgsl
+    skyClouds adds a layer (three octaves of value noise on a plane
+    overhead, drifting with the clock) over every physical sky kind, after
+    the sun, the moon and the night sky, so it hides them. Its share
+    rises with Sky.cloudCover (a full cover is one sheet), its gray with
+    cloudDarkness (lib/Weather weatherCloudDarkness: thick cover and
+    rain); it is lit by the clear sky's own brightness there (whiter than
+    the blue, darker where thick). The cloud values ride in a new last vec4
+    of LightU (Sky -> DeferredTargets.clouds -> the light uniform, 156
+    floats). The walkers' mist density is the scene's own times
+    weatherMistFactor (1 .. 6: humidity, cooling toward 05:00, autumn;
+    none by midday).
 13. **Rain and falling snow:** near-camera particles; wet ground.
 14. **Falling leaves:** leaf particles from crowns while their leaf loss
     rises, in the kind's autumn tones.

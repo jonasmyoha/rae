@@ -36,6 +36,9 @@ struct LightU {
   // The earth's shadow on the earth's moon (a lunar eclipse): xyz toward
   // its center, w its umbra's angular radius as drawn (0: no shadow)
   moonShadow: vec4<f32>,
+  // The clouds (Sky.cloudCover / cloudDarkness / cloudDrift, lib/Weather):
+  // x how much of the sky they cover, y how dark, z how far they drifted
+  clouds: vec4<f32>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,

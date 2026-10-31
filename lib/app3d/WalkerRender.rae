@@ -78,6 +78,10 @@ open app3d/WalkerInput
 # The renderer (deferred or forward) + dynamic-resolution controller (#552)
 type WalkerRender {
   renderer: DeferredRenderer
+  # The scene's own mist density (RendererMist, as set at start), which the
+  # weather thickens near the dew point (lib/Weather weatherMistFactor);
+  # 0 until the first frame reads it
+  mistBaseDensity: Float = 0.0
   drs: RenderScaleController
   shadowLogged: Bool
   # The physics cubes, one instanced draw (the unit box, scaled per cube)

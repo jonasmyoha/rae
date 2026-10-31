@@ -133,3 +133,33 @@ func weatherName(weather: view Weather, air: view Float) ret String {
   }
   ret "clear"
 }
+
+# How near the air is to its dew point, as a factor on a scene's mist
+# density (1: the scene's own light haze, up to 6: a thick morning mist):
+# humid air, cooled toward dawn (coolest about 05:00 local), more in
+# autumn (`autumn`: the slow temperature falling between 2 and 12 °C), and
+# gone by midday as the air warms
+func weatherMistFactor(weather: view Weather, localHour: view Float, autumn: view Bool) ret Float {
+  let cool: Float = 0.5 + 0.5 * Math.cos(x: (localHour - 5.0) / 24.0 * 2.0 * weatherPi)
+  var dew: Float = weather.humidity + 0.18 * cool
+  if autumn {
+    dew = dew + 0.08
+  }
+  let midday: Float = weatherRamp(from: 9.0, to: 12.0, value: localHour) * (1.0 - weatherRamp(
+    from: 17.0
+    to: 21.0
+    value: localHour
+  ))
+  ret 1.0 + 5.0 * weatherRamp(from: 0.74, to: 0.95, value: dew) * (1.0 - midday)
+}
+
+# The clouds' darkness (0 white .. 1 the gray of rain): thick cover and rain
+func weatherCloudDarkness(weather: view Weather) ret Float {
+  ret Math.min(
+    a: 0.6 * weatherRamp(from: 0.6, to: 1.0, value: weather.cloud) + 0.4 * Math.min(
+      a: weather.precipitation / 0.5
+      b: 1.0
+    )
+    b: 1.0
+  )
+}

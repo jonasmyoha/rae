@@ -123,6 +123,43 @@ fn earthShadow(dir: vec3<f32>) -> vec3<f32> {
   let inside = 1.0 - smoothstep(umbra * 0.97, umbra * 1.03, d);
   return mix(vec3<f32>(half), red, inside);
 }
+// The clouds (lib/Weather through Sky.cloudCover, L.clouds): a layer of
+// soft noise on a plane overhead, seen along `dir`, drifting with the clock;
+// the cover sets how much of it is cloud (a full cover is one gray sheet),
+// the darkness how gray it is. Lit as the sky round it: the sky's own
+// brightness, whiter than a blue sky, grayer and darker as it rains; thinner
+// toward the horizon. Returns the cloud's color and its share in w.
+fn skyCloudHash(p: vec2<f32>) -> f32 {
+  return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+fn skyCloudNoise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = skyCloudHash(i);
+  let b = skyCloudHash(i + vec2<f32>(1.0, 0.0));
+  let c = skyCloudHash(i + vec2<f32>(0.0, 1.0));
+  let d = skyCloudHash(i + vec2<f32>(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+fn skyClouds(dir: vec3<f32>, sky: vec3<f32>) -> vec4<f32> {
+  let cover = clamp(L.clouds.x, 0.0, 1.0);
+  if (cover <= 0.001 || dir.z <= 0.0) { return vec4<f32>(0.0); }
+  // where the ray meets a plane overhead, the far ones squeezed
+  let p = dir.xy / (dir.z + 0.12) * 1.4 + vec2<f32>(L.clouds.z, L.clouds.z * 0.35);
+  var n = skyCloudNoise(p) * 0.5 + skyCloudNoise(p * 2.13 + vec2<f32>(5.2, 1.3)) * 0.3
+    + skyCloudNoise(p * 4.71 + vec2<f32>(2.7, 8.1)) * 0.2;
+  // a full cover is all cloud, a light one a few puffs
+  let threshold = mix(0.78, -0.1, cover);
+  let share = smoothstep(threshold, threshold + 0.18, n) * smoothstep(0.0, 0.1, dir.z);
+  // the sky's own brightness, whiter than its blue, darker underneath
+  // where the cloud is thick and as it rains
+  let bright = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let thick = smoothstep(threshold + 0.1, threshold + 0.5, n);
+  let shade = (1.45 - 0.55 * thick) * (1.0 - 0.55 * clamp(L.clouds.y, 0.0, 1.0));
+  return vec4<f32>(vec3<f32>(bright * shade) * vec3<f32>(0.98, 0.99, 1.02), share);
+}
+
 // The sky toward `dir`, ready to sum: the physical models (Preetham and
 // Hosek-Wilkie, in cd/m2) and the moon and night sky (cd/m2) times the
 // camera's exposure scale (camPos.w, LightUnits), the painted stylized sky
@@ -137,6 +174,8 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y) * L.camPos.w; }
   if (kind > 2.5 && kind < 3.5) { c = skyStylized(dir, toSun); }
   if (kind > 3.5) { c = skyHosek(dir, toSun) * L.camPos.w; }
+  // the sky's own light here, without the sun's disc: what lights a cloud
+  let clearSky = c * L.skyParams.z;
   if (kind > 1.5) {
     let ca = dot(dir, toSun);
     let cutoff = cos(max(L.skyParams.w, 0.001));
@@ -190,6 +229,12 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
         c = c + L.moons[i * 2 + 1].rgb * otherDisc * L.camPos.w * above;
       }
     }
+  }
+  // the weather's clouds over all of it: the sun, the moon and the stars
+  // go behind them
+  if (kind > 1.5) {
+    let cloud = skyClouds(dir, clearSky);
+    c = mix(c, cloud.rgb, cloud.w);
   }
   return c;
 }
