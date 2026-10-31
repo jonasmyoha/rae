@@ -1,0 +1,105 @@
+# Ice (docs/seasons-and-weather-design.md §4.3): lib/Climate's freeze over
+# a year (Helsinki's lakes frozen in February and open from May to
+# November, its shore's sea ice only in the coldest weeks, nothing in
+# Athens, the far north frozen longer), and water/WaterIce's cover: a
+# frozen lake is ice all over, the sea only its shallow fringe, land none.
+open Climate
+open water/WaterIce
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func iceOn(latitude: view Float, dayOfYear: view Int) ret ClimateIce {
+  ret climateWinterSeed(
+    latitude: latitude
+    year: 2026
+    dayOfYear: dayOfYear
+    localHour: 12.0
+  ).ice
+}
+
+func percent(value: view Float) ret Int {
+  ret (value * 100.0 + 0.5).toInt()
+}
+
+func main() ret Int {
+  let february: ClimateIce = iceOn(latitude: 60.17, dayOfYear: 45)
+  let may: ClimateIce = iceOn(latitude: 60.17, dayOfYear: 135)
+  let november: ClimateIce = iceOn(latitude: 60.17, dayOfYear: 320)
+  log(
+    "Helsinki lakes: February {percent(value: february.lake)}%, May {percent(value: may.lake)}%, November {percent(
+      value: november.lake
+    )}%; the sea shore in February {percent(value: february.sea)}%"
+  )
+  check(label: "Helsinki's lakes are frozen in February", ok: february.lake > 0.9)
+  check(
+    label: "open in May, a first fringe in November"
+    ok: may.lake is 0.0 and november.lake < 0.2
+  )
+  let december: ClimateIce = iceOn(latitude: 60.17, dayOfYear: 352)
+  log(
+    "Helsinki in mid December: lakes {percent(value: december.lake)}%, the sea shore {percent(
+      value: december.sea
+    )}%"
+  )
+  check(label: "its sea shore freezes later than its lakes", ok: december.sea < december.lake)
+  let athens: ClimateIce = iceOn(latitude: 37.9, dayOfYear: 20)
+  check(label: "no ice in Athens in January", ok: athens.lake is 0.0 and athens.sea is 0.0)
+  let north: ClimateIce = iceOn(latitude: 68.0, dayOfYear: 110)
+  log(
+    "68 N in April: lakes {percent(value: north.lake)}%, the sea shore {percent(value: north.sea)}%"
+  )
+  check(label: "68 N's lakes are still frozen in April", ok: north.lake > 0.9)
+  check(
+    label: "a frozen lake is ice over its deepest (4 m)"
+    ok: waterIceCoverAt(
+      lake: 1.0
+      sea: 0.0
+      depth: 4.0
+      isLake: true
+    ) is 1.0
+  )
+  check(
+    label: "the frozen sea only along its shore"
+    ok: waterIceCoverAt(
+      lake: 0.0
+      sea: 1.0
+      depth: 0.5
+      isLake: false
+    ) is 1.0 and waterIceCoverAt(
+      lake: 0.0
+      sea: 1.0
+      depth: 3.0
+      isLake: false
+    ) is 0.0
+  )
+  check(
+    label: "a half-frozen lake has open water in its middle"
+    ok: waterIceCoverAt(
+      lake: 0.5
+      sea: 0.0
+      depth: 1.0
+      isLake: true
+    ) is 1.0 and waterIceCoverAt(
+      lake: 0.5
+      sea: 0.0
+      depth: 3.5
+      isLake: true
+    ) is 0.0
+  )
+  check(
+    label: "no ice on land"
+    ok: waterIceCoverAt(
+      lake: 1.0
+      sea: 1.0
+      depth: -0.5
+      isLake: true
+    ) is 0.0
+  )
+  ret 0
+}

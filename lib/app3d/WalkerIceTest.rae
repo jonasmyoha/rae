@@ -1,0 +1,104 @@
+# app3d/WalkerIceTest — frozen water holds the walker (RAE_WALKER_PHYSICS_TEST=1,
+# after the physics checks; water/WaterIce): with the lakes and the sea's
+# shore frozen, the nearest water too deep to wade within 300 m of the hero
+# that would be ice is found, the hero is put on it and stands two seconds
+# at the water's surface; the same spot is no place to stand when nothing is
+# frozen. Then the hero goes back where it was and the ice as it was. One
+# [icetest] line; true when it held (or there is no such water to test).
+import Math
+import Vec3
+open WorldBiome
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/CharacterController
+open app3d/Characters
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerReset
+open app3d/WalkerTerrain
+open water/WaterIce
+
+func runWalkerIceTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  heroEntityId: view EntityId
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret Bool {
+  let start: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+  let lakeBefore: Float = physicsSystem.iceLake
+  let seaBefore: Float = physicsSystem.iceSea
+  physicsSystem.iceLake = 1.0
+  physicsSystem.iceSea = 1.0
+  # the nearest frozen water too deep to wade, on rings round the hero
+  var found: Bool = false
+  var spot: Vec3 = start
+  loop var ring: Int = 1, ring <= 150 and found is false, ++ring {
+    let radius: Float = ring.toFloat() * 2.0
+    let count: Int = 8 + ring * 4
+    loop var k: Int = 0, k < count and found is false, ++k {
+      let angle: Float = k.toFloat() / count.toFloat() * 6.2831853
+      let x: Float = start.x + Math.cos(x: angle) * radius
+      let y: Float = start.y + Math.sin(x: angle) * radius
+      if worldWadable(x: x, y: y, cfg: biome) is false and walkerIceAt(
+        physicsSystem: physicsSystem
+        x: x
+        y: y
+      ) > 0.95 {
+        found = true
+        spot = Vec3.create(x: x, y: y, z: 0.0)
+      }
+    }
+  }
+  if found is false {
+    physicsSystem.iceLake = lakeBefore
+    physicsSystem.iceSea = seaBefore
+    log("[icetest] no water too deep to wade within 300 m: nothing to test; passed=true")
+    ret true
+  }
+  let surface: Float = worldWaterZ(groundZ: groundZ, cfg: biome)
+  let bed: Float = worldTerrainHeight(
+    x: spot.x
+    y: spot.y
+    groundZ: groundZ
+    cfg: biome
+  )
+  placeCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    entityId: heroEntityId
+    feet: Vec3.create(x: spot.x, y: spot.y, z: surface)
+    heading: 0.0
+    groundZ: groundZ
+  )
+  loop var i: Int = 0, i < 120, ++i {
+    let unusedSteps: Int = stepPhysicsFrame(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: List.create(BushSpot, cap: 0)
+      frameTime: 1.0 / 60.0
+    )
+  }
+  let feet: Float = controllerOf(controllers: world.controllers, entityId: heroEntityId).position.z + groundZ
+  let stands: Bool = Math.abs(value: feet - surface) < 0.12
+  let canStandIced: Bool = walkerCanStand(physicsSystem: physicsSystem, x: spot.x, y: spot.y)
+  physicsSystem.iceLake = 0.0
+  physicsSystem.iceSea = 0.0
+  let canStandOpen: Bool = walkerCanStand(physicsSystem: physicsSystem, x: spot.x, y: spot.y)
+  physicsSystem.iceLake = lakeBefore
+  physicsSystem.iceSea = seaBefore
+  placeCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    entityId: heroEntityId
+    feet: Vec3.create(x: start.x, y: start.y, z: start.z + groundZ)
+    heading: 0.0
+    groundZ: groundZ
+  )
+  let passed: Bool = stands and canStandIced and canStandOpen is false
+  log(
+    "[icetest] frozen water {surface - bed} m over its bed at {spot.x} {spot.y}: feet at {feet - surface} m from the surface after 2 s ={stands}, a place to stand frozen ={canStandIced}, open ={canStandOpen}; passed={passed}"
+  )
+  ret passed
+}

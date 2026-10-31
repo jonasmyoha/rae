@@ -194,16 +194,92 @@ func climateSnowStep(depth: view Float, air: view Float, hours: view Float) ret 
   ret Math.max(a: next, b: 0.0)
 }
 
+# Ice (§4.3): how far the lakes and the sea's shore have frozen (0 open ..
+# 1 frozen; water/WaterIce draws and walks it). A lake freezes in the hours
+# its air is below climateLakeFreezeAir, the colder the faster (a day at
+# -13 °C, about five at -5 °C); the sea's shore only below climateSeaFreezeAir
+# and at half that speed. Both thaw above 0 °C, slowly (the ice is thick):
+# a day at +5 °C takes a fifth of it.
+const climateLakeFreezeAir: Float = -3.0
+
+const climateSeaFreezeAir: Float = -8.0
+
+type ClimateIce {
+  lake: Float = 0.0
+  sea: Float = 0.0
+}
+
+# A freeze value (0 .. 1) after `hours` of air at `air` (°C), freezing below
+# `freezeAir` at `speed` times a lake's rate
+func climateFreezeStep(
+  freeze: view Float
+  air: view Float
+  hours: view Float
+  freezeAir: view Float
+  speed: view Float
+) ret Float {
+  var next: Float = freeze
+  if air < freezeAir {
+    next = next + Math.min(a: (freezeAir - air) / 10.0, b: 1.0) / 24.0 * speed * hours
+  }
+  if air > 0.0 {
+    next = next - air / 600.0 * hours
+  }
+  ret Math.clamp(val: next, low: 0.0, high: 1.0)
+}
+
+func climateIceStep(ice: view ClimateIce, air: view Float, hours: view Float) ret ClimateIce {
+  ret ClimateIce {
+    lake: climateFreezeStep(
+      freeze: ice.lake
+      air: air
+      hours: hours
+      freezeAir: climateLakeFreezeAir
+      speed: 1.0
+    )
+    sea: climateFreezeStep(
+      freeze: ice.sea
+      air: air
+      hours: hours
+      freezeAir: climateSeaFreezeAir
+      speed: 0.5
+    )
+  }
+}
+
+# The winter at a place: its snow depth (m) and its ice
+type ClimateWinter {
+  snow: Float = 0.0
+  ice: ClimateIce = ClimateIce {}
+}
+
 # The snow depth (m) at `latitude` on day `dayOfYear` of `year` at
-# `localHour`: the last climateSnowSeedDays days run in 3-hour steps from
-# none (the seed, after a jump in time or place)
+# `localHour` (climateWinterSeed's snow)
 func climateSnowSeed(
   latitude: view Float
   year: view Int
   dayOfYear: view Int
   localHour: view Float
 ) ret Float {
+  ret climateWinterSeed(
+    latitude: latitude
+    year: year
+    dayOfYear: dayOfYear
+    localHour: localHour
+  ).snow
+}
+
+# The snow and the ice at `latitude` on day `dayOfYear` of `year` at
+# `localHour`: the last climateSnowSeedDays days run in 3-hour steps from
+# none (the seed, after a jump in time or place)
+func climateWinterSeed(
+  latitude: view Float
+  year: view Int
+  dayOfYear: view Int
+  localHour: view Float
+) ret ClimateWinter {
   var depth: Float = 0.0
+  var ice: ClimateIce = {}
   var stepYear: Int = year
   var stepDay: Int = dayOfYear - climateSnowSeedDays
   loop stepDay < 1 {
@@ -214,16 +290,14 @@ func climateSnowSeed(
     loop var step: Int = 0, step < 8, ++step {
       let hour: Float = step.toFloat() * 3.0 + 1.5
       if day < climateSnowSeedDays or hour <= localHour {
-        depth = climateSnowStep(
-          depth: depth
-          air: climateAt(
-            latitude: latitude
-            dayOfYear: stepDay
-            localHour: hour
-            height: 0.0
-          )
-          hours: 3.0
+        let air: Float = climateAt(
+          latitude: latitude
+          dayOfYear: stepDay
+          localHour: hour
+          height: 0.0
         )
+        depth = climateSnowStep(depth: depth, air: air, hours: 3.0)
+        ice = climateIceStep(ice: ice, air: air, hours: 3.0)
       }
     }
     stepDay = stepDay + 1
@@ -232,15 +306,16 @@ func climateSnowSeed(
       stepDay = 1
     }
   }
-  ret depth
+  ret ClimateWinter { snow: depth, ice: ice }
 }
 
 type Climate {
   side: Int
   # each cell's slow temperature (°C), row by row from the south-west
   slow: List(Float)
-  # each cell's snow depth (m), the same order
+  # each cell's snow depth (m) and ice, the same order
   snow: List(Float) = List.create(Float, cap: 0)
+  ice: List(ClimateIce) = List.create(ClimateIce, cap: 0)
   # the hour last stepped (hours since the year 0, about) and the place the
   # grid was seeded for; -1: not seeded
   stamp: Int = -1
@@ -253,11 +328,13 @@ func createClimate(reach: view Float) ret Climate {
   let side: Int = 1 + 2 * Math.ceil(x: reach / climateCellSize).toInt()
   var slow: List(Float) = List.create(Float, cap: side * side)
   var snow: List(Float) = List.create(Float, cap: side * side)
+  var ice: List(ClimateIce) = List.create(ClimateIce, cap: side * side)
   loop var i: Int = 0, i < side * side, ++i {
     slow.add(value: 0.0)
     snow.add(value: 0.0)
+    ice.add(value: ClimateIce {})
   }
-  ret Climate { side: side, slow: own slow, snow: own snow }
+  ret Climate { side: side, slow: own slow, snow: own snow, ice: own ice }
 }
 
 # A cell's center, meters east and north of the origin
@@ -303,19 +380,18 @@ func stepClimate(
           height: 0.0
         )
       )
-      climate.snow.set(
-        index: cell
-        value: climateSnowSeed(
-          latitude: place.latitude
-          year: year
-          dayOfYear: dayOfYear
-          localHour: climateLocalHour(
-            sceneHour: hour
-            sceneLongitude: sceneLongitude
-            longitude: place.longitude
-          )
+      let winter: ClimateWinter = climateWinterSeed(
+        latitude: place.latitude
+        year: year
+        dayOfYear: dayOfYear
+        localHour: climateLocalHour(
+          sceneHour: hour
+          sceneLongitude: sceneLongitude
+          longitude: place.longitude
         )
       )
+      climate.snow.set(index: cell, value: winter.snow)
+      climate.ice.set(index: cell, value: winter.ice)
     }
   } else {
     let hours: Int = stamp - climate.stamp
@@ -328,6 +404,7 @@ func stepClimate(
       )
       var slow: Float = climate.slow.copyAtFallback(index: cell, fallback: 0.0)
       var snow: Float = climate.snow.copyAtFallback(index: cell, fallback: 0.0)
+      var ice: ClimateIce = climate.ice.copyAtFallback(index: cell, fallback: ClimateIce {})
       loop var step: Int = 0, step < hours, ++step {
         let air: Float = climateAt(
           latitude: place.latitude
@@ -341,9 +418,11 @@ func stepClimate(
         )
         slow = slow + (air - slow) * climateHourWeight
         snow = climateSnowStep(depth: snow, air: air, hours: 1.0)
+        ice = climateIceStep(ice: ice, air: air, hours: 1.0)
       }
       climate.slow.set(index: cell, value: slow)
       climate.snow.set(index: cell, value: snow)
+      climate.ice.set(index: cell, value: ice)
     }
   }
   climate.stamp = stamp
@@ -419,4 +498,25 @@ func climateSnowAt(climate: view Climate, east: view Float, north: view Float) r
   let south: Float = southWest + (southEast - southWest) * fx
   let northRow: Float = northWest + (northEast - northWest) * fx
   ret south + (northRow - south) * fy
+}
+
+# The ice at the point `east`, `north` m from the origin: its nearest cell's
+# (a lake does not freeze by halves between two cells)
+func climateIceAt(climate: view Climate, east: view Float, north: view Float) ret ClimateIce {
+  let side: Int = climate.side
+  if climate.ice.length < side * side or side < 1 {
+    ret ClimateIce {}
+  }
+  let half: Int = side / 2
+  let x: Int = Math.clamp(
+    val: Math.floor(x: east / climateCellSize + 0.5).toInt() + half
+    low: 0
+    high: side - 1
+  )
+  let y: Int = Math.clamp(
+    val: Math.floor(x: north / climateCellSize + 0.5).toInt() + half
+    low: 0
+    high: side - 1
+  )
+  ret climate.ice.copyAtFallback(index: y * side + x, fallback: ClimateIce {})
 }
