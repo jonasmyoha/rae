@@ -16,6 +16,7 @@ open RendererDeferredShadow
 open GbufferSprite
 open app3d/PropFade
 open app3d/PropField
+open app3d/PropSeason
 open ImpostorAtlas
 
 # Fill the batches with this frame's props: only cells within the draw
@@ -224,7 +225,9 @@ func gatherProp(
   var farDraw: PropDraw = nearDraw
   var step: PropLodStep = { shown: -1, from: -1, progress: 1.0, pick: pick }
   var stepped: Bool = false
+  var kindSeason: PropSeason = noPropSeason()
   if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+    kindSeason = kind.season
     let center: Vec3 = propCenter(kind: kind, placement: placement)
     let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
     if propSphereInView(
@@ -282,6 +285,18 @@ func gatherProp(
   if fades {
     seed = propFadeSeed(x: placement.position.x, y: placement.position.y)
   }
+  # its leaves' season (app3d/PropSeason): the field's slow temperature,
+  # shifted by this tree's own few days
+  var tint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  if field.seasonsOn and kindSeason.on {
+    tint = propSeasonTint(
+      season: kindSeason
+      slow: field.seasonSlow + propSeasonShift(
+        seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
+      )
+      warming: field.seasonWarming
+    )
+  }
   if pick.near >= 0 {
     gatherPropLevel(
       field: field
@@ -292,6 +307,7 @@ func gatherProp(
       threshold: pick.threshold
       fadingIn: false
       seed: seed
+      tint: tint
     )
   }
   if pick.far >= 0 {
@@ -304,6 +320,7 @@ func gatherProp(
       threshold: pick.threshold
       fadingIn: true
       seed: seed
+      tint: tint
     )
   }
   field.visibleCount = field.visibleCount + 1
@@ -368,7 +385,8 @@ func storePropFieldLod(
 }
 
 # A prop at one level into its batches (a billboard or its mesh parts), with
-# its fade when it `fades` (GbufferRecord setInstanceFade)
+# its fade when it `fades` (GbufferRecord setInstanceFade) and its leaf
+# parts' colors times `tint` (its season, app3d/PropSeason)
 func gatherPropLevel(
   field: mod PropField
   placement: view PropPlacement
@@ -378,6 +396,7 @@ func gatherPropLevel(
   threshold: view Float
   fadingIn: view Bool
   seed: view Float
+  tint: view Vec3
 ) {
   if draw.sprite {
     let before: Int = field.spriteBatch.count
@@ -404,6 +423,10 @@ func gatherPropLevel(
   loop var p: Int = 0, p < draw.partCount, ++p {
     var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
     material.toon = toon
+    # a leaf part (it sways; the bark does not) takes the season's tint
+    if field.batchSways.copyAtFallback(index: draw.firstBatch + p, fallback: 0.0) > 0.0 {
+      material.baseColor = Vec3.vmul(a: material.baseColor, b: tint)
+    }
     if let batch: mod InstanceBatch = field.batches.modAt(index: draw.firstBatch + p) {
       let before: Int = batch.count
       addInstance(

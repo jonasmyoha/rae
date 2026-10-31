@@ -330,6 +330,15 @@ that adds it.
 4. **Tree season states:** the kind's season block (deciduous, spring /
    autumn / winter tones, phase temperatures); the per-kind color blend and
    the per-tree phase offset; the autumn kinds folded into their species.
+   Done (2026-10-31): `TreeSeason` on the TreeKind (deciduous, the autumn
+   color, leafOut / turnStart / turnFull), app3d/PropSeason's tint (spring
+   fresh green fading over 6 °C, the autumn color between the turn
+   temperatures, then darker; evergreens a little darker in deep cold),
+   multiplied into the leaf parts' materials when the PropField gathers
+   them. The per-tree offset (±1.5 °C) is hashed from the tree's position
+   on the CPU per instance, not in the shader: the instance record has no
+   free slot, and the tint is per material anyway. The four autumn kinds
+   are green in summer. The far impostors stay summer green until step 6.
 5. **Leaf loss:** the leaf pass's loss threshold (outer cards first), bare
    winter trees (all deciduous leaves gone, spruce and cypress keep theirs);
    case checks of cards kept per loss.

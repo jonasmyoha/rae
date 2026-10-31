@@ -471,6 +471,7 @@ func runLabFrame(state: mod LabState) {
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let gatherStart: Float64 = Gpu2d.nowSeconds()
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
+    applyLabSeason(season: state.season, field: forest.field)
     gatherTreeForest(
       forest: forest
       camera: state.camera

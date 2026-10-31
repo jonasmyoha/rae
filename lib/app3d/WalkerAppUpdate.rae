@@ -17,6 +17,7 @@ open Particles
 open water/Water
 open water/IslandSea
 open Climate
+open GeoPlace
 open water/WaterSystem
 open water/WadeSplash
 open water/WaterFft
@@ -149,6 +150,22 @@ func updateWalkerClimate(app: mod WalkerApp) {
     east: look.x
     north: look.y
     height: settings.lookHeight
+  )
+  # the trees' leaves follow it (app3d/PropSeason): the slow temperature
+  # where the camera looks and whether it is rising there
+  let place: GeoPlace = geoPlaceAt(
+    sceneLatitude: settings.latitude
+    sceneLongitude: settings.longitude
+    east: look.x
+    north: look.y
+  )
+  let field: mod PropField = app.terrainSystem.forest.field
+  field.seasonsOn = true
+  field.seasonSlow = settings.slowTemperature
+  field.seasonWarming = climateWarming(
+    latitude: place.latitude
+    year: settings.timeOfDay.year
+    dayOfYear: settings.timeOfDay.dayOfYear
   )
 }
 

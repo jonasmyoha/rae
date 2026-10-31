@@ -71,6 +71,34 @@ type BarkKind {
 
 enum BarkMarks { streaks, birch, rings }
 
+# A kind's season (docs/seasons-and-weather-design.md §3.1): deciduous or
+# evergreen, its autumn color (linear, the leaves fully turned; the
+# greens are the summer state) and the slow temperatures (°C) where its
+# leaves come out, start to turn and are fully turned. A forest draws it
+# through app3d/PropSeason.
+type TreeSeason {
+  deciduous: Bool = false
+  autumn: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  leafOut: Float = 8.0
+  turnStart: Float = 10.0
+  turnFull: Float = 5.0
+}
+
+# The evergreens' (and a kind that says nothing): no autumn
+func evergreenSeason() ret TreeSeason {
+  ret TreeSeason {}
+}
+
+# A deciduous kind turning to `autumn`, starting at `turnStart` °C and
+# fully turned at `turnFull` °C
+func deciduousSeason(
+  autumn: view Vec3
+  turnStart: view Float
+  turnFull: view Float
+) ret TreeSeason {
+  ret TreeSeason { deciduous: true, autumn: autumn, turnStart: turnStart, turnFull: turnFull }
+}
+
 type TreeKind {
   # Names the kind's pictures among a renderer's images and on disk
   name: String
@@ -99,6 +127,10 @@ type TreeKind {
   # The leaves' layout, and (skirts) the whorls the tree grows in
   foliage: TreeFoliage = TreeFoliage.masses
   whorls: WhorlMeasures = noWhorls()
+  # How its leaves go through the year (docs/seasons-and-weather-design.md
+  # §3.1): an evergreen's darken in the cold; a deciduous kind's turn
+  # (TreeSeason; app3d/PropSeason draws it)
+  season: TreeSeason = evergreenSeason()
   # The wood inside the foliage is drawn (false: only the trunk below it, as
   # a dense crown or a conifer's skirts hide the rest)
   innerWood: Bool = true
@@ -132,6 +164,12 @@ func warmBroadleafKind() ret TreeKind {
       Vec3.create(x: 0.24, y: 0.27, z: 0.07)
       Vec3.create(x: 0.14, y: 0.18, z: 0.06)
     }
+    # russet in autumn, late (an oak's way)
+    season: deciduousSeason(
+      autumn: Vec3.create(x: 0.42, y: 0.24, z: 0.06)
+      turnStart: 9.0
+      turnFull: 4.0
+    )
     bark: { color: Vec3.create(x: 0.34, y: 0.125, z: 0.055), streakDepth: 0.26 }
   }
 }
