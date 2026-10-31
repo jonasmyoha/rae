@@ -1,0 +1,63 @@
+# lib/Cities: the nearest well-known city to a place, and the great-circle
+# distance. The default scene place (Helsinki), a few known places and
+# their nearest city, an eclipse's place at sea off Newfoundland, the middle
+# of the Pacific (the nearest city far away), and two distances known from
+# geography (Helsinki - Stockholm about 400 km, London - New York about
+# 5,570 km).
+open Cities
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  log(nearCityText(latitude: 60.17, longitude: 24.94))
+  check(
+    label: "the default place is Helsinki"
+    ok: nearestCity(latitude: 60.17, longitude: 24.94).city.name is "Helsinki"
+  )
+  check(
+    label: "Manhattan is New York"
+    ok: nearestCity(latitude: 40.78, longitude: -73.97).city.name is "New York"
+  )
+  check(
+    label: "Sydney harbor is Sydney"
+    ok: nearestCity(latitude: -33.86, longitude: 151.21).city.name is "Sydney"
+  )
+  check(
+    label: "Shibuya is Tokyo"
+    ok: nearestCity(latitude: 35.66, longitude: 139.70).city.name is "Tokyo"
+  )
+  check(
+    label: "south of the equator, west: Lima"
+    ok: nearestCity(latitude: -12.1, longitude: -77.0).city.name is "Lima"
+  )
+  let sea: NearCity = nearestCity(latitude: 50.6, longitude: -53.4)
+  log(nearCityText(latitude: 50.6, longitude: -53.4))
+  check(
+    label: "the 2024 eclipse's place at sea: St. John's, about 340 km"
+    ok: sea.city.name is "St. John's" and sea.distanceKm > 300.0 and sea.distanceKm < 380.0
+  )
+  let pacific: NearCity = nearestCity(latitude: 0.0, longitude: -150.0)
+  log(nearCityText(latitude: 0.0, longitude: -150.0))
+  check(label: "the middle of the Pacific is far from any city", ok: pacific.distanceKm > 1000.0)
+  let stockholm: Float = cityDistanceKm(
+    fromLatitude: 60.17
+    fromLongitude: 24.94
+    toLatitude: 59.33
+    toLongitude: 18.07
+  )
+  check(label: "Helsinki - Stockholm about 400 km", ok: stockholm > 390.0 and stockholm < 410.0)
+  let atlantic: Float = cityDistanceKm(
+    fromLatitude: 51.51
+    fromLongitude: -0.13
+    toLatitude: 40.71
+    toLongitude: -74.01
+  )
+  check(label: "London - New York about 5,570 km", ok: atlantic > 5540.0 and atlantic < 5600.0)
+  ret 0
+}

@@ -1,0 +1,456 @@
+# Cities — a table of well-known cities (capitals, the largest cities and
+# well-known places on every continent and many islands, 381 in all) and the
+# great-circle nearest to a place: the settings panel names where on Earth
+# the scene's latitude and longitude are ("near Helsinki, Finland, 12 km";
+# docs/seasons-and-weather-design.md §6). The coordinates are the city
+# centers to about a kilometer (two decimals of a degree). Written new.
+import Math
+
+# A city: its name, its country (or territory) and where it is, degrees
+# north and east
+type City {
+  name: String
+  country: String
+  latitude: Float
+  longitude: Float
+}
+
+# The Earth's mean radius (km)
+const cityEarthRadiusKm: Float = 6371.0
+
+# The great-circle distance (km) between two places, degrees north and east
+# (the haversine form: accurate at every distance in 32-bit floats)
+func cityDistanceKm(
+  fromLatitude: view Float
+  fromLongitude: view Float
+  toLatitude: view Float
+  toLongitude: view Float
+) ret Float {
+  let toRadians: Float = 0.017453292519943295
+  let halfLatitude: Float = Math.sin(x: (toLatitude - fromLatitude) * toRadians * 0.5)
+  let halfLongitude: Float = Math.sin(x: (toLongitude - fromLongitude) * toRadians * 0.5)
+  let h: Float = halfLatitude * halfLatitude + Math.cos(x: fromLatitude * toRadians) * Math.cos(
+    x: toLatitude * toRadians
+  ) * halfLongitude * halfLongitude
+  ret 2.0 * cityEarthRadiusKm * Math.asin(x: Math.sqrt(x: Math.clamp(val: h, low: 0.0, high: 1.0)))
+}
+
+# The nearest city to a place and how far it is (km)
+type NearCity {
+  city: City
+  distanceKm: Float
+}
+
+# The city of the table nearest to (`latitude`, `longitude`), degrees north
+# and east
+func nearestCity(latitude: view Float, longitude: view Float) ret NearCity {
+  var best: NearCity = {
+    city: { name: "", country: "", latitude: 0.0, longitude: 0.0 }
+    distanceKm: 100000.0
+  }
+  loop let city: view City in cities() {
+    let distance: Float = cityDistanceKm(
+      fromLatitude: latitude
+      fromLongitude: longitude
+      toLatitude: city.latitude
+      toLongitude: city.longitude
+    )
+    if distance < best.distanceKm {
+      best = { city: city, distanceKm: distance }
+    }
+  }
+  ret best
+}
+
+# "near Helsinki, Finland, 12 km" for a place
+func nearCityText(latitude: view Float, longitude: view Float) ret String {
+  let near: NearCity = nearestCity(latitude: latitude, longitude: longitude)
+  ret "near {near.city.name}, {near.city.country}, {(near.distanceKm + 0.5).toInt()} km"
+}
+
+# The table, north to south within each region
+func cities() ret List(City) {
+  ret List(City) {
+    { name: "Helsinki", country: "Finland", latitude: 60.17, longitude: 24.94 }
+    { name: "Tampere", country: "Finland", latitude: 61.50, longitude: 23.79 }
+    { name: "Oulu", country: "Finland", latitude: 65.01, longitude: 25.47 }
+    { name: "Rovaniemi", country: "Finland", latitude: 66.50, longitude: 25.73 }
+    { name: "Turku", country: "Finland", latitude: 60.45, longitude: 22.27 }
+    { name: "Stockholm", country: "Sweden", latitude: 59.33, longitude: 18.07 }
+    { name: "Gothenburg", country: "Sweden", latitude: 57.71, longitude: 11.97 }
+    { name: "Kiruna", country: "Sweden", latitude: 67.86, longitude: 20.23 }
+    { name: "Oslo", country: "Norway", latitude: 59.91, longitude: 10.75 }
+    { name: "Bergen", country: "Norway", latitude: 60.39, longitude: 5.32 }
+    { name: "Tromso", country: "Norway", latitude: 69.65, longitude: 18.96 }
+    { name: "Copenhagen", country: "Denmark", latitude: 55.68, longitude: 12.57 }
+    { name: "Reykjavik", country: "Iceland", latitude: 64.15, longitude: -21.94 }
+    { name: "Tallinn", country: "Estonia", latitude: 59.44, longitude: 24.75 }
+    { name: "Riga", country: "Latvia", latitude: 56.95, longitude: 24.11 }
+    { name: "Vilnius", country: "Lithuania", latitude: 54.69, longitude: 25.28 }
+    { name: "Saint Petersburg", country: "Russia", latitude: 59.93, longitude: 30.36 }
+    { name: "Moscow", country: "Russia", latitude: 55.76, longitude: 37.62 }
+    { name: "Murmansk", country: "Russia", latitude: 68.97, longitude: 33.08 }
+    { name: "Arkhangelsk", country: "Russia", latitude: 64.54, longitude: 40.54 }
+    { name: "Kazan", country: "Russia", latitude: 55.80, longitude: 49.11 }
+    { name: "Yekaterinburg", country: "Russia", latitude: 56.84, longitude: 60.61 }
+    { name: "Novosibirsk", country: "Russia", latitude: 55.03, longitude: 82.92 }
+    { name: "Omsk", country: "Russia", latitude: 54.99, longitude: 73.37 }
+    { name: "Krasnoyarsk", country: "Russia", latitude: 56.01, longitude: 92.89 }
+    { name: "Irkutsk", country: "Russia", latitude: 52.29, longitude: 104.28 }
+    { name: "Yakutsk", country: "Russia", latitude: 62.03, longitude: 129.73 }
+    { name: "Vladivostok", country: "Russia", latitude: 43.12, longitude: 131.89 }
+    { name: "Norilsk", country: "Russia", latitude: 69.35, longitude: 88.20 }
+    { name: "Magadan", country: "Russia", latitude: 59.56, longitude: 150.80 }
+    { name: "Petropavlovsk-Kamchatsky", country: "Russia", latitude: 53.04, longitude: 158.65 }
+    { name: "Volgograd", country: "Russia", latitude: 48.71, longitude: 44.51 }
+    { name: "Rostov-on-Don", country: "Russia", latitude: 47.24, longitude: 39.71 }
+    { name: "Sochi", country: "Russia", latitude: 43.60, longitude: 39.73 }
+    { name: "Minsk", country: "Belarus", latitude: 53.90, longitude: 27.56 }
+    { name: "Kyiv", country: "Ukraine", latitude: 50.45, longitude: 30.52 }
+    { name: "Kharkiv", country: "Ukraine", latitude: 49.99, longitude: 36.23 }
+    { name: "Odesa", country: "Ukraine", latitude: 46.48, longitude: 30.73 }
+    { name: "Lviv", country: "Ukraine", latitude: 49.84, longitude: 24.03 }
+    { name: "Chisinau", country: "Moldova", latitude: 47.01, longitude: 28.86 }
+    { name: "Warsaw", country: "Poland", latitude: 52.23, longitude: 21.01 }
+    { name: "Krakow", country: "Poland", latitude: 50.06, longitude: 19.94 }
+    { name: "Gdansk", country: "Poland", latitude: 54.35, longitude: 18.65 }
+    { name: "Berlin", country: "Germany", latitude: 52.52, longitude: 13.40 }
+    { name: "Hamburg", country: "Germany", latitude: 53.55, longitude: 9.99 }
+    { name: "Munich", country: "Germany", latitude: 48.14, longitude: 11.58 }
+    { name: "Frankfurt", country: "Germany", latitude: 50.11, longitude: 8.68 }
+    { name: "Cologne", country: "Germany", latitude: 50.94, longitude: 6.96 }
+    { name: "Prague", country: "Czech Republic", latitude: 50.08, longitude: 14.44 }
+    { name: "Vienna", country: "Austria", latitude: 48.21, longitude: 16.37 }
+    { name: "Bratislava", country: "Slovakia", latitude: 48.15, longitude: 17.11 }
+    { name: "Budapest", country: "Hungary", latitude: 47.50, longitude: 19.04 }
+    { name: "Zurich", country: "Switzerland", latitude: 47.38, longitude: 8.54 }
+    { name: "Geneva", country: "Switzerland", latitude: 46.20, longitude: 6.14 }
+    { name: "Amsterdam", country: "Netherlands", latitude: 52.37, longitude: 4.90 }
+    { name: "Brussels", country: "Belgium", latitude: 50.85, longitude: 4.35 }
+    { name: "Luxembourg", country: "Luxembourg", latitude: 49.61, longitude: 6.13 }
+    { name: "Paris", country: "France", latitude: 48.86, longitude: 2.35 }
+    { name: "Lyon", country: "France", latitude: 45.76, longitude: 4.84 }
+    { name: "Marseille", country: "France", latitude: 43.30, longitude: 5.37 }
+    { name: "Bordeaux", country: "France", latitude: 44.84, longitude: -0.58 }
+    { name: "Brest", country: "France", latitude: 48.39, longitude: -4.49 }
+    { name: "Nice", country: "France", latitude: 43.70, longitude: 7.27 }
+    { name: "London", country: "United Kingdom", latitude: 51.51, longitude: -0.13 }
+    { name: "Manchester", country: "United Kingdom", latitude: 53.48, longitude: -2.24 }
+    { name: "Edinburgh", country: "United Kingdom", latitude: 55.95, longitude: -3.19 }
+    { name: "Glasgow", country: "United Kingdom", latitude: 55.86, longitude: -4.25 }
+    { name: "Belfast", country: "United Kingdom", latitude: 54.60, longitude: -5.93 }
+    { name: "Cardiff", country: "United Kingdom", latitude: 51.48, longitude: -3.18 }
+    { name: "Dublin", country: "Ireland", latitude: 53.35, longitude: -6.26 }
+    { name: "Cork", country: "Ireland", latitude: 51.90, longitude: -8.47 }
+    { name: "Lisbon", country: "Portugal", latitude: 38.72, longitude: -9.14 }
+    { name: "Porto", country: "Portugal", latitude: 41.15, longitude: -8.61 }
+    { name: "Madrid", country: "Spain", latitude: 40.42, longitude: -3.70 }
+    { name: "Barcelona", country: "Spain", latitude: 41.39, longitude: 2.17 }
+    { name: "Seville", country: "Spain", latitude: 37.39, longitude: -5.98 }
+    { name: "Valencia", country: "Spain", latitude: 39.47, longitude: -0.38 }
+    { name: "Bilbao", country: "Spain", latitude: 43.26, longitude: -2.93 }
+    { name: "Palma", country: "Spain", latitude: 39.57, longitude: 2.65 }
+    { name: "Rome", country: "Italy", latitude: 41.90, longitude: 12.50 }
+    { name: "Milan", country: "Italy", latitude: 45.46, longitude: 9.19 }
+    { name: "Naples", country: "Italy", latitude: 40.85, longitude: 14.27 }
+    { name: "Venice", country: "Italy", latitude: 45.44, longitude: 12.32 }
+    { name: "Palermo", country: "Italy", latitude: 38.12, longitude: 13.36 }
+    { name: "Florence", country: "Italy", latitude: 43.77, longitude: 11.26 }
+    { name: "Valletta", country: "Malta", latitude: 35.90, longitude: 14.51 }
+    { name: "Ljubljana", country: "Slovenia", latitude: 46.06, longitude: 14.51 }
+    { name: "Zagreb", country: "Croatia", latitude: 45.81, longitude: 15.98 }
+    { name: "Split", country: "Croatia", latitude: 43.51, longitude: 16.44 }
+    { name: "Sarajevo", country: "Bosnia and Herzegovina", latitude: 43.86, longitude: 18.41 }
+    { name: "Belgrade", country: "Serbia", latitude: 44.79, longitude: 20.45 }
+    { name: "Podgorica", country: "Montenegro", latitude: 42.44, longitude: 19.26 }
+    { name: "Tirana", country: "Albania", latitude: 41.33, longitude: 19.82 }
+    { name: "Skopje", country: "North Macedonia", latitude: 42.00, longitude: 21.43 }
+    { name: "Sofia", country: "Bulgaria", latitude: 42.70, longitude: 23.32 }
+    { name: "Bucharest", country: "Romania", latitude: 44.43, longitude: 26.10 }
+    { name: "Cluj-Napoca", country: "Romania", latitude: 46.77, longitude: 23.59 }
+    { name: "Athens", country: "Greece", latitude: 37.98, longitude: 23.73 }
+    { name: "Thessaloniki", country: "Greece", latitude: 40.64, longitude: 22.94 }
+    { name: "Heraklion", country: "Greece", latitude: 35.34, longitude: 25.13 }
+    { name: "Istanbul", country: "Turkey", latitude: 41.01, longitude: 28.98 }
+    { name: "Ankara", country: "Turkey", latitude: 39.93, longitude: 32.86 }
+    { name: "Izmir", country: "Turkey", latitude: 38.42, longitude: 27.13 }
+    { name: "Antalya", country: "Turkey", latitude: 36.90, longitude: 30.70 }
+    { name: "Nicosia", country: "Cyprus", latitude: 35.19, longitude: 33.38 }
+    { name: "Tbilisi", country: "Georgia", latitude: 41.72, longitude: 44.79 }
+    { name: "Yerevan", country: "Armenia", latitude: 40.18, longitude: 44.51 }
+    { name: "Baku", country: "Azerbaijan", latitude: 40.41, longitude: 49.87 }
+    { name: "Tehran", country: "Iran", latitude: 35.69, longitude: 51.39 }
+    { name: "Mashhad", country: "Iran", latitude: 36.30, longitude: 59.61 }
+    { name: "Isfahan", country: "Iran", latitude: 32.65, longitude: 51.67 }
+    { name: "Baghdad", country: "Iraq", latitude: 33.31, longitude: 44.37 }
+    { name: "Damascus", country: "Syria", latitude: 33.51, longitude: 36.29 }
+    { name: "Beirut", country: "Lebanon", latitude: 33.89, longitude: 35.50 }
+    { name: "Jerusalem", country: "Israel", latitude: 31.77, longitude: 35.21 }
+    { name: "Tel Aviv", country: "Israel", latitude: 32.09, longitude: 34.78 }
+    { name: "Amman", country: "Jordan", latitude: 31.95, longitude: 35.93 }
+    { name: "Riyadh", country: "Saudi Arabia", latitude: 24.71, longitude: 46.68 }
+    { name: "Jeddah", country: "Saudi Arabia", latitude: 21.49, longitude: 39.19 }
+    { name: "Mecca", country: "Saudi Arabia", latitude: 21.39, longitude: 39.86 }
+    { name: "Kuwait City", country: "Kuwait", latitude: 29.38, longitude: 47.99 }
+    { name: "Doha", country: "Qatar", latitude: 25.29, longitude: 51.53 }
+    { name: "Dubai", country: "United Arab Emirates", latitude: 25.20, longitude: 55.27 }
+    { name: "Abu Dhabi", country: "United Arab Emirates", latitude: 24.45, longitude: 54.38 }
+    { name: "Muscat", country: "Oman", latitude: 23.59, longitude: 58.41 }
+    { name: "Sanaa", country: "Yemen", latitude: 15.37, longitude: 44.19 }
+    { name: "Kabul", country: "Afghanistan", latitude: 34.56, longitude: 69.21 }
+    { name: "Tashkent", country: "Uzbekistan", latitude: 41.30, longitude: 69.24 }
+    { name: "Samarkand", country: "Uzbekistan", latitude: 39.65, longitude: 66.96 }
+    { name: "Almaty", country: "Kazakhstan", latitude: 43.24, longitude: 76.89 }
+    { name: "Astana", country: "Kazakhstan", latitude: 51.17, longitude: 71.45 }
+    { name: "Bishkek", country: "Kyrgyzstan", latitude: 42.87, longitude: 74.59 }
+    { name: "Dushanbe", country: "Tajikistan", latitude: 38.56, longitude: 68.79 }
+    { name: "Ashgabat", country: "Turkmenistan", latitude: 37.96, longitude: 58.33 }
+    { name: "Ulaanbaatar", country: "Mongolia", latitude: 47.89, longitude: 106.91 }
+    { name: "Islamabad", country: "Pakistan", latitude: 33.68, longitude: 73.05 }
+    { name: "Karachi", country: "Pakistan", latitude: 24.86, longitude: 67.01 }
+    { name: "Lahore", country: "Pakistan", latitude: 31.55, longitude: 74.34 }
+    { name: "New Delhi", country: "India", latitude: 28.61, longitude: 77.21 }
+    { name: "Mumbai", country: "India", latitude: 19.08, longitude: 72.88 }
+    { name: "Kolkata", country: "India", latitude: 22.57, longitude: 88.36 }
+    { name: "Chennai", country: "India", latitude: 13.08, longitude: 80.27 }
+    { name: "Bangalore", country: "India", latitude: 12.97, longitude: 77.59 }
+    { name: "Hyderabad", country: "India", latitude: 17.39, longitude: 78.49 }
+    { name: "Ahmedabad", country: "India", latitude: 23.02, longitude: 72.57 }
+    { name: "Jaipur", country: "India", latitude: 26.91, longitude: 75.79 }
+    { name: "Kathmandu", country: "Nepal", latitude: 27.72, longitude: 85.32 }
+    { name: "Thimphu", country: "Bhutan", latitude: 27.47, longitude: 89.64 }
+    { name: "Dhaka", country: "Bangladesh", latitude: 23.81, longitude: 90.41 }
+    { name: "Colombo", country: "Sri Lanka", latitude: 6.93, longitude: 79.86 }
+    { name: "Male", country: "Maldives", latitude: 4.18, longitude: 73.51 }
+    { name: "Yangon", country: "Myanmar", latitude: 16.84, longitude: 96.17 }
+    { name: "Bangkok", country: "Thailand", latitude: 13.76, longitude: 100.50 }
+    { name: "Chiang Mai", country: "Thailand", latitude: 18.79, longitude: 98.98 }
+    { name: "Phuket", country: "Thailand", latitude: 7.88, longitude: 98.39 }
+    { name: "Vientiane", country: "Laos", latitude: 17.98, longitude: 102.63 }
+    { name: "Phnom Penh", country: "Cambodia", latitude: 11.56, longitude: 104.92 }
+    { name: "Hanoi", country: "Vietnam", latitude: 21.03, longitude: 105.85 }
+    { name: "Ho Chi Minh City", country: "Vietnam", latitude: 10.82, longitude: 106.63 }
+    { name: "Kuala Lumpur", country: "Malaysia", latitude: 3.14, longitude: 101.69 }
+    { name: "Kuching", country: "Malaysia", latitude: 1.55, longitude: 110.36 }
+    { name: "Singapore", country: "Singapore", latitude: 1.35, longitude: 103.82 }
+    { name: "Jakarta", country: "Indonesia", latitude: -6.21, longitude: 106.85 }
+    { name: "Surabaya", country: "Indonesia", latitude: -7.25, longitude: 112.75 }
+    { name: "Denpasar", country: "Indonesia", latitude: -8.65, longitude: 115.22 }
+    { name: "Medan", country: "Indonesia", latitude: 3.60, longitude: 98.67 }
+    { name: "Makassar", country: "Indonesia", latitude: -5.15, longitude: 119.43 }
+    { name: "Jayapura", country: "Indonesia", latitude: -2.53, longitude: 140.72 }
+    { name: "Manila", country: "Philippines", latitude: 14.60, longitude: 120.98 }
+    { name: "Cebu", country: "Philippines", latitude: 10.32, longitude: 123.89 }
+    { name: "Davao", country: "Philippines", latitude: 7.19, longitude: 125.46 }
+    { name: "Bandar Seri Begawan", country: "Brunei", latitude: 4.90, longitude: 114.94 }
+    { name: "Dili", country: "Timor-Leste", latitude: -8.56, longitude: 125.57 }
+    { name: "Beijing", country: "China", latitude: 39.90, longitude: 116.41 }
+    { name: "Shanghai", country: "China", latitude: 31.23, longitude: 121.47 }
+    { name: "Guangzhou", country: "China", latitude: 23.13, longitude: 113.26 }
+    { name: "Shenzhen", country: "China", latitude: 22.54, longitude: 114.06 }
+    { name: "Hong Kong", country: "China", latitude: 22.32, longitude: 114.17 }
+    { name: "Chengdu", country: "China", latitude: 30.57, longitude: 104.07 }
+    { name: "Chongqing", country: "China", latitude: 29.56, longitude: 106.55 }
+    { name: "Wuhan", country: "China", latitude: 30.59, longitude: 114.31 }
+    { name: "Xi'an", country: "China", latitude: 34.34, longitude: 108.94 }
+    { name: "Harbin", country: "China", latitude: 45.80, longitude: 126.53 }
+    { name: "Urumqi", country: "China", latitude: 43.83, longitude: 87.62 }
+    { name: "Lhasa", country: "China", latitude: 29.65, longitude: 91.17 }
+    { name: "Kunming", country: "China", latitude: 25.04, longitude: 102.71 }
+    { name: "Taipei", country: "Taiwan", latitude: 25.03, longitude: 121.57 }
+    { name: "Seoul", country: "South Korea", latitude: 37.57, longitude: 126.98 }
+    { name: "Busan", country: "South Korea", latitude: 35.18, longitude: 129.08 }
+    { name: "Pyongyang", country: "North Korea", latitude: 39.04, longitude: 125.76 }
+    { name: "Tokyo", country: "Japan", latitude: 35.68, longitude: 139.69 }
+    { name: "Osaka", country: "Japan", latitude: 34.69, longitude: 135.50 }
+    { name: "Sapporo", country: "Japan", latitude: 43.06, longitude: 141.35 }
+    { name: "Fukuoka", country: "Japan", latitude: 33.59, longitude: 130.40 }
+    { name: "Naha", country: "Japan", latitude: 26.21, longitude: 127.68 }
+    { name: "Cairo", country: "Egypt", latitude: 30.04, longitude: 31.24 }
+    { name: "Alexandria", country: "Egypt", latitude: 31.20, longitude: 29.92 }
+    { name: "Aswan", country: "Egypt", latitude: 24.09, longitude: 32.90 }
+    { name: "Tripoli", country: "Libya", latitude: 32.89, longitude: 13.19 }
+    { name: "Benghazi", country: "Libya", latitude: 32.12, longitude: 20.09 }
+    { name: "Tunis", country: "Tunisia", latitude: 36.81, longitude: 10.18 }
+    { name: "Algiers", country: "Algeria", latitude: 36.75, longitude: 3.06 }
+    { name: "Tamanrasset", country: "Algeria", latitude: 22.79, longitude: 5.52 }
+    { name: "Rabat", country: "Morocco", latitude: 34.02, longitude: -6.84 }
+    { name: "Casablanca", country: "Morocco", latitude: 33.57, longitude: -7.59 }
+    { name: "Marrakesh", country: "Morocco", latitude: 31.63, longitude: -8.01 }
+    { name: "Laayoune", country: "Western Sahara", latitude: 27.15, longitude: -13.20 }
+    { name: "Nouakchott", country: "Mauritania", latitude: 18.08, longitude: -15.98 }
+    { name: "Dakar", country: "Senegal", latitude: 14.72, longitude: -17.47 }
+    { name: "Bamako", country: "Mali", latitude: 12.64, longitude: -8.00 }
+    { name: "Timbuktu", country: "Mali", latitude: 16.77, longitude: -3.01 }
+    { name: "Niamey", country: "Niger", latitude: 13.51, longitude: 2.11 }
+    { name: "Agadez", country: "Niger", latitude: 16.97, longitude: 7.99 }
+    { name: "N'Djamena", country: "Chad", latitude: 12.13, longitude: 15.06 }
+    { name: "Khartoum", country: "Sudan", latitude: 15.50, longitude: 32.56 }
+    { name: "Addis Ababa", country: "Ethiopia", latitude: 9.03, longitude: 38.74 }
+    { name: "Asmara", country: "Eritrea", latitude: 15.32, longitude: 38.93 }
+    { name: "Djibouti", country: "Djibouti", latitude: 11.59, longitude: 43.15 }
+    { name: "Mogadishu", country: "Somalia", latitude: 2.05, longitude: 45.32 }
+    { name: "Nairobi", country: "Kenya", latitude: -1.29, longitude: 36.82 }
+    { name: "Mombasa", country: "Kenya", latitude: -4.04, longitude: 39.67 }
+    { name: "Kampala", country: "Uganda", latitude: 0.35, longitude: 32.58 }
+    { name: "Kigali", country: "Rwanda", latitude: -1.94, longitude: 30.06 }
+    { name: "Dar es Salaam", country: "Tanzania", latitude: -6.79, longitude: 39.21 }
+    { name: "Zanzibar", country: "Tanzania", latitude: -6.17, longitude: 39.20 }
+    { name: "Lagos", country: "Nigeria", latitude: 6.52, longitude: 3.38 }
+    { name: "Abuja", country: "Nigeria", latitude: 9.08, longitude: 7.40 }
+    { name: "Kano", country: "Nigeria", latitude: 12.00, longitude: 8.52 }
+    { name: "Accra", country: "Ghana", latitude: 5.60, longitude: -0.19 }
+    { name: "Abidjan", country: "Ivory Coast", latitude: 5.36, longitude: -4.01 }
+    { name: "Monrovia", country: "Liberia", latitude: 6.30, longitude: -10.80 }
+    { name: "Freetown", country: "Sierra Leone", latitude: 8.47, longitude: -13.23 }
+    { name: "Conakry", country: "Guinea", latitude: 9.64, longitude: -13.58 }
+    { name: "Ouagadougou", country: "Burkina Faso", latitude: 12.37, longitude: -1.52 }
+    { name: "Lome", country: "Togo", latitude: 6.13, longitude: 1.22 }
+    { name: "Douala", country: "Cameroon", latitude: 4.05, longitude: 9.77 }
+    { name: "Yaounde", country: "Cameroon", latitude: 3.85, longitude: 11.50 }
+    { name: "Libreville", country: "Gabon", latitude: 0.42, longitude: 9.47 }
+    { name: "Kinshasa", country: "DR Congo", latitude: -4.44, longitude: 15.27 }
+    { name: "Lubumbashi", country: "DR Congo", latitude: -11.66, longitude: 27.48 }
+    { name: "Brazzaville", country: "Congo", latitude: -4.27, longitude: 15.28 }
+    { name: "Bangui", country: "Central African Republic", latitude: 4.39, longitude: 18.56 }
+    { name: "Luanda", country: "Angola", latitude: -8.84, longitude: 13.23 }
+    { name: "Lusaka", country: "Zambia", latitude: -15.39, longitude: 28.32 }
+    { name: "Harare", country: "Zimbabwe", latitude: -17.83, longitude: 31.05 }
+    { name: "Lilongwe", country: "Malawi", latitude: -13.96, longitude: 33.79 }
+    { name: "Maputo", country: "Mozambique", latitude: -25.97, longitude: 32.57 }
+    { name: "Windhoek", country: "Namibia", latitude: -22.56, longitude: 17.08 }
+    { name: "Gaborone", country: "Botswana", latitude: -24.65, longitude: 25.91 }
+    { name: "Johannesburg", country: "South Africa", latitude: -26.20, longitude: 28.05 }
+    { name: "Pretoria", country: "South Africa", latitude: -25.75, longitude: 28.19 }
+    { name: "Cape Town", country: "South Africa", latitude: -33.92, longitude: 18.42 }
+    { name: "Durban", country: "South Africa", latitude: -29.86, longitude: 31.02 }
+    { name: "Antananarivo", country: "Madagascar", latitude: -18.88, longitude: 47.51 }
+    { name: "Port Louis", country: "Mauritius", latitude: -20.16, longitude: 57.50 }
+    { name: "New York", country: "United States", latitude: 40.71, longitude: -74.01 }
+    { name: "Boston", country: "United States", latitude: 42.36, longitude: -71.06 }
+    { name: "Washington", country: "United States", latitude: 38.91, longitude: -77.04 }
+    { name: "Philadelphia", country: "United States", latitude: 39.95, longitude: -75.17 }
+    { name: "Miami", country: "United States", latitude: 25.76, longitude: -80.19 }
+    { name: "Atlanta", country: "United States", latitude: 33.75, longitude: -84.39 }
+    { name: "Chicago", country: "United States", latitude: 41.88, longitude: -87.63 }
+    { name: "Detroit", country: "United States", latitude: 42.33, longitude: -83.05 }
+    { name: "Minneapolis", country: "United States", latitude: 44.98, longitude: -93.27 }
+    { name: "New Orleans", country: "United States", latitude: 29.95, longitude: -90.07 }
+    { name: "Houston", country: "United States", latitude: 29.76, longitude: -95.37 }
+    { name: "Dallas", country: "United States", latitude: 32.78, longitude: -96.80 }
+    { name: "Denver", country: "United States", latitude: 39.74, longitude: -104.99 }
+    { name: "Phoenix", country: "United States", latitude: 33.45, longitude: -112.07 }
+    { name: "Salt Lake City", country: "United States", latitude: 40.76, longitude: -111.89 }
+    { name: "Las Vegas", country: "United States", latitude: 36.17, longitude: -115.14 }
+    { name: "Los Angeles", country: "United States", latitude: 34.05, longitude: -118.24 }
+    { name: "San Diego", country: "United States", latitude: 32.72, longitude: -117.16 }
+    { name: "San Francisco", country: "United States", latitude: 37.77, longitude: -122.42 }
+    { name: "Seattle", country: "United States", latitude: 47.61, longitude: -122.33 }
+    { name: "Portland", country: "United States", latitude: 45.52, longitude: -122.68 }
+    { name: "Anchorage", country: "United States", latitude: 61.22, longitude: -149.90 }
+    { name: "Fairbanks", country: "United States", latitude: 64.84, longitude: -147.72 }
+    { name: "Utqiagvik", country: "United States", latitude: 71.29, longitude: -156.79 }
+    { name: "Honolulu", country: "United States", latitude: 21.31, longitude: -157.86 }
+    { name: "Toronto", country: "Canada", latitude: 43.65, longitude: -79.38 }
+    { name: "Montreal", country: "Canada", latitude: 45.50, longitude: -73.57 }
+    { name: "Quebec City", country: "Canada", latitude: 46.81, longitude: -71.21 }
+    { name: "Ottawa", country: "Canada", latitude: 45.42, longitude: -75.70 }
+    { name: "Halifax", country: "Canada", latitude: 44.65, longitude: -63.58 }
+    { name: "St. John's", country: "Canada", latitude: 47.56, longitude: -52.71 }
+    { name: "Winnipeg", country: "Canada", latitude: 49.90, longitude: -97.14 }
+    { name: "Calgary", country: "Canada", latitude: 51.05, longitude: -114.07 }
+    { name: "Edmonton", country: "Canada", latitude: 53.55, longitude: -113.49 }
+    { name: "Vancouver", country: "Canada", latitude: 49.28, longitude: -123.12 }
+    { name: "Whitehorse", country: "Canada", latitude: 60.72, longitude: -135.06 }
+    { name: "Yellowknife", country: "Canada", latitude: 62.45, longitude: -114.37 }
+    { name: "Iqaluit", country: "Canada", latitude: 63.75, longitude: -68.52 }
+    { name: "Nuuk", country: "Greenland", latitude: 64.18, longitude: -51.72 }
+    { name: "Mexico City", country: "Mexico", latitude: 19.43, longitude: -99.13 }
+    { name: "Guadalajara", country: "Mexico", latitude: 20.66, longitude: -103.35 }
+    { name: "Monterrey", country: "Mexico", latitude: 25.69, longitude: -100.32 }
+    { name: "Cancun", country: "Mexico", latitude: 21.16, longitude: -86.85 }
+    { name: "Tijuana", country: "Mexico", latitude: 32.51, longitude: -117.04 }
+    { name: "Guatemala City", country: "Guatemala", latitude: 14.63, longitude: -90.51 }
+    { name: "San Salvador", country: "El Salvador", latitude: 13.69, longitude: -89.22 }
+    { name: "Tegucigalpa", country: "Honduras", latitude: 14.07, longitude: -87.19 }
+    { name: "Managua", country: "Nicaragua", latitude: 12.11, longitude: -86.24 }
+    { name: "San Jose", country: "Costa Rica", latitude: 9.93, longitude: -84.09 }
+    { name: "Panama City", country: "Panama", latitude: 8.98, longitude: -79.52 }
+    { name: "Havana", country: "Cuba", latitude: 23.11, longitude: -82.37 }
+    { name: "Kingston", country: "Jamaica", latitude: 17.97, longitude: -76.79 }
+    { name: "Santo Domingo", country: "Dominican Republic", latitude: 18.49, longitude: -69.93 }
+    { name: "Port-au-Prince", country: "Haiti", latitude: 18.59, longitude: -72.31 }
+    { name: "San Juan", country: "Puerto Rico", latitude: 18.47, longitude: -66.11 }
+    { name: "Bridgetown", country: "Barbados", latitude: 13.10, longitude: -59.61 }
+    { name: "Port of Spain", country: "Trinidad and Tobago", latitude: 10.66, longitude: -61.51 }
+    { name: "Caracas", country: "Venezuela", latitude: 10.48, longitude: -66.90 }
+    { name: "Bogota", country: "Colombia", latitude: 4.71, longitude: -74.07 }
+    { name: "Medellin", country: "Colombia", latitude: 6.24, longitude: -75.58 }
+    { name: "Cartagena", country: "Colombia", latitude: 10.39, longitude: -75.48 }
+    { name: "Quito", country: "Ecuador", latitude: -0.18, longitude: -78.47 }
+    { name: "Guayaquil", country: "Ecuador", latitude: -2.19, longitude: -79.89 }
+    { name: "Lima", country: "Peru", latitude: -12.05, longitude: -77.04 }
+    { name: "Cusco", country: "Peru", latitude: -13.53, longitude: -71.97 }
+    { name: "Iquitos", country: "Peru", latitude: -3.75, longitude: -73.25 }
+    { name: "La Paz", country: "Bolivia", latitude: -16.50, longitude: -68.15 }
+    { name: "Santa Cruz", country: "Bolivia", latitude: -17.78, longitude: -63.18 }
+    { name: "Georgetown", country: "Guyana", latitude: 6.80, longitude: -58.16 }
+    { name: "Paramaribo", country: "Suriname", latitude: 5.85, longitude: -55.20 }
+    { name: "Cayenne", country: "French Guiana", latitude: 4.92, longitude: -52.31 }
+    { name: "Manaus", country: "Brazil", latitude: -3.12, longitude: -60.02 }
+    { name: "Belem", country: "Brazil", latitude: -1.46, longitude: -48.49 }
+    { name: "Fortaleza", country: "Brazil", latitude: -3.73, longitude: -38.52 }
+    { name: "Recife", country: "Brazil", latitude: -8.05, longitude: -34.88 }
+    { name: "Salvador", country: "Brazil", latitude: -12.97, longitude: -38.50 }
+    { name: "Brasilia", country: "Brazil", latitude: -15.79, longitude: -47.88 }
+    { name: "Rio de Janeiro", country: "Brazil", latitude: -22.91, longitude: -43.17 }
+    { name: "Sao Paulo", country: "Brazil", latitude: -23.55, longitude: -46.63 }
+    { name: "Porto Alegre", country: "Brazil", latitude: -30.03, longitude: -51.23 }
+    { name: "Cuiaba", country: "Brazil", latitude: -15.60, longitude: -56.10 }
+    { name: "Asuncion", country: "Paraguay", latitude: -25.26, longitude: -57.58 }
+    { name: "Montevideo", country: "Uruguay", latitude: -34.90, longitude: -56.16 }
+    { name: "Buenos Aires", country: "Argentina", latitude: -34.60, longitude: -58.38 }
+    { name: "Cordoba", country: "Argentina", latitude: -31.42, longitude: -64.18 }
+    { name: "Mendoza", country: "Argentina", latitude: -32.89, longitude: -68.85 }
+    { name: "Bariloche", country: "Argentina", latitude: -41.13, longitude: -71.31 }
+    { name: "Ushuaia", country: "Argentina", latitude: -54.80, longitude: -68.30 }
+    { name: "Santiago", country: "Chile", latitude: -33.45, longitude: -70.67 }
+    { name: "Antofagasta", country: "Chile", latitude: -23.65, longitude: -70.40 }
+    { name: "Punta Arenas", country: "Chile", latitude: -53.16, longitude: -70.91 }
+    { name: "Stanley", country: "Falkland Islands", latitude: -51.70, longitude: -57.85 }
+    { name: "Sydney", country: "Australia", latitude: -33.87, longitude: 151.21 }
+    { name: "Melbourne", country: "Australia", latitude: -37.81, longitude: 144.96 }
+    { name: "Brisbane", country: "Australia", latitude: -27.47, longitude: 153.03 }
+    { name: "Perth", country: "Australia", latitude: -31.95, longitude: 115.86 }
+    { name: "Adelaide", country: "Australia", latitude: -34.93, longitude: 138.60 }
+    { name: "Darwin", country: "Australia", latitude: -12.46, longitude: 130.84 }
+    { name: "Hobart", country: "Australia", latitude: -42.88, longitude: 147.33 }
+    { name: "Alice Springs", country: "Australia", latitude: -23.70, longitude: 133.88 }
+    { name: "Cairns", country: "Australia", latitude: -16.92, longitude: 145.77 }
+    { name: "Canberra", country: "Australia", latitude: -35.28, longitude: 149.13 }
+    { name: "Auckland", country: "New Zealand", latitude: -36.85, longitude: 174.76 }
+    { name: "Wellington", country: "New Zealand", latitude: -41.29, longitude: 174.78 }
+    { name: "Christchurch", country: "New Zealand", latitude: -43.53, longitude: 172.64 }
+    { name: "Port Moresby", country: "Papua New Guinea", latitude: -9.44, longitude: 147.18 }
+    { name: "Suva", country: "Fiji", latitude: -18.14, longitude: 178.44 }
+    { name: "Noumea", country: "New Caledonia", latitude: -22.28, longitude: 166.46 }
+    { name: "Apia", country: "Samoa", latitude: -13.83, longitude: -171.76 }
+    { name: "Nuku'alofa", country: "Tonga", latitude: -21.14, longitude: -175.20 }
+    { name: "Papeete", country: "French Polynesia", latitude: -17.54, longitude: -149.57 }
+    { name: "Port Vila", country: "Vanuatu", latitude: -17.73, longitude: 168.32 }
+    { name: "Honiara", country: "Solomon Islands", latitude: -9.43, longitude: 159.95 }
+    { name: "Tarawa", country: "Kiribati", latitude: 1.33, longitude: 172.98 }
+    { name: "Majuro", country: "Marshall Islands", latitude: 7.09, longitude: 171.38 }
+    { name: "Hagatna", country: "Guam", latitude: 13.48, longitude: 144.75 }
+    { name: "Hanga Roa", country: "Easter Island, Chile", latitude: -27.15, longitude: -109.43 }
+    { name: "Ponta Delgada", country: "Azores, Portugal", latitude: 37.74, longitude: -25.68 }
+    { name: "Funchal", country: "Madeira, Portugal", latitude: 32.65, longitude: -16.91 }
+    { name: "Las Palmas", country: "Canary Islands, Spain", latitude: 28.12, longitude: -15.43 }
+    { name: "Praia", country: "Cape Verde", latitude: 14.93, longitude: -23.51 }
+    { name: "Hamilton", country: "Bermuda", latitude: 32.29, longitude: -64.78 }
+    { name: "Nassau", country: "Bahamas", latitude: 25.05, longitude: -77.36 }
+    { name: "Longyearbyen", country: "Svalbard, Norway", latitude: 78.22, longitude: 15.65 }
+    { name: "Torshavn", country: "Faroe Islands", latitude: 62.01, longitude: -6.77 }
+    { name: "McMurdo Station", country: "Antarctica", latitude: -77.85, longitude: 166.67 }
+  }
+}

@@ -38,6 +38,7 @@ open app3d/TimeOfDay
 open Moon
 open app3d/SettingsEclipse
 open app3d/SettingsPersist
+open Cities
 open app3d/CameraBar
 open ecs/Entity
 open ui/SceneFile
@@ -804,6 +805,12 @@ func settingsApplyToWorld(
     world: world
     nodeId: "SettingsLonLabel"
     value: "Longitude {formatLongitude(longitudeDeg: settingsState.longitude)}"
+  )
+  # where on Earth that is: the nearest well-known city (lib/Cities)
+  setNodeText(
+    world: world
+    nodeId: "SettingsCityLabel"
+    value: nearCityText(latitude: settingsState.latitude, longitude: settingsState.longitude)
   )
   setNodeText(
     world: world
