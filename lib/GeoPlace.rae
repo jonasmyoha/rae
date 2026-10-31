@@ -1,0 +1,39 @@
+# GeoPlace — where on Earth a point of a world is: a world laid out round
+# the scene's place (its latitude and longitude, the settings') with +Y north
+# and +X east, a meter a world unit. A point `north` meters north of the
+# origin is north / 111.2 km degrees further north (the Earth's radius,
+# lib/Cities' 6,371 km), and one `east` meters east is that over the cosine
+# of its latitude further east. 143's world reaches 1,000 km, so far from the
+# origin the latitude changes: 500 km north is 4.5 degrees north
+# (docs/seasons-and-weather-design.md §1). The climate reads it per place.
+import Math
+
+# The meters of one degree of latitude (the Earth's mean radius times pi
+# over 180)
+const geoMetersPerDegree: Float = 111194.9
+
+type GeoPlace {
+  latitude: Float
+  longitude: Float
+}
+
+# The place of the point `east` and `north` meters from the origin of a
+# world laid out round (`sceneLatitude`, `sceneLongitude`), degrees north
+# and east: the latitude held within the poles, the longitude wrapped to
+# -180 .. 180
+func geoPlaceAt(
+  sceneLatitude: view Float
+  sceneLongitude: view Float
+  east: view Float
+  north: view Float
+) ret GeoPlace {
+  let latitude: Float = Math.clamp(
+    val: sceneLatitude + north / geoMetersPerDegree
+    low: -90.0
+    high: 90.0
+  )
+  let across: Float = Math.max(a: Math.cos(x: latitude * 0.017453292519943295), b: 0.01)
+  var longitude: Float = sceneLongitude + east / (geoMetersPerDegree * across)
+  longitude = longitude - 360.0 * Math.floor(x: (longitude + 180.0) / 360.0)
+  ret GeoPlace { latitude: latitude, longitude: longitude }
+}

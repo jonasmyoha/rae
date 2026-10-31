@@ -38,6 +38,11 @@
 # which (stylized when unset), the T key switches between the two;
 # RAE_TREELAB_CAMERA=high looks from 35 m.
 #
+# The seasons' date and place (LabSeason.rae): RAE_DAY_OF_YEAR,
+# RAE_LATITUDE and RAE_YEAR_SPEED set them, and a day slider along the
+# bottom shows the date, the latitude and the nearest city (drag it, or
+# hold , and .; Y hides it; hidden in headless and screenshot runs).
+#
 # RAE_TREELAB_DOLLY=<folder>: the camera moves from 20 m to 170 m away from
 # the tree over labDollyFrames frames, each saved as a picture in the folder
 # (frame0.bmp ...), then the lab ends: the camera move that shows whether
@@ -81,6 +86,7 @@ open app3d/TreeForest
 open LabForest
 open RendererQuality
 open MeshStore
+open LabSeason
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -100,6 +106,9 @@ const labDollyFar: Float = 170.0
 const labStatsFrames: Int = 120
 
 type LabState {
+  # the date and the place the seasons run on, and its day slider
+  # (LabSeason; the renderer's UI overlay draws it)
+  season: LabSeason = createLabSeason()
   renderer: DeferredRenderer
   world: World3d
   light: Light3d
@@ -203,7 +212,7 @@ func labCamera(name: view String) ret Camera3d {
 
 # One of the studies (RAE_TREELAB_STUDY): its world, light and camera
 func createStudyLab(studyView: view String) ret LabState {
-  var renderer: DeferredRenderer = createDeferredRenderer()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
   setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
@@ -238,7 +247,7 @@ func createStudyLab(studyView: view String) ret LabState {
 # The forest scene (RAE_TREELAB_SCENE=forest): both sets' forests, the
 # lab's sun and look
 func createForestLab() ret LabState {
-  var renderer: DeferredRenderer = createDeferredRenderer()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
   setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
@@ -291,7 +300,7 @@ func createLab() ret LabState {
     height: 800
     title: "146: Tree lab | camera: RAE_TREELAB_CAMERA=near|mid|far"
   )
-  var renderer: DeferredRenderer = createDeferredRenderer()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
   setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
@@ -437,6 +446,9 @@ func runLabFrame(state: mod LabState) {
     renderer: state.renderer
     wind: windVector(state: state.wind, settings: state.windSettings)
   )
+  if updateLabSeason(season: state.season, deltaTime: deltaTime) {
+    log("[treelab] day {state.season.clock.dayOfYear} of {state.season.clock.year}")
+  }
   if state.forests.length > 0 and Sdl3.isKeyPressed(key: Keys.keyT) {
     state.forestShown = (state.forestShown + 1) % state.forests.length
     log("[treelab] showing the {labForestSetName(setIndex: state.forestShown)} set")
@@ -475,6 +487,8 @@ func runLabFrame(state: mod LabState) {
       renderLabShadows(state: state, aspect: aspect)
     } else if tag is RenderTag.gbuffer {
       renderLabGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
+    } else if tag is RenderTag.uiOverlay {
+      drawLabSeason(season: state.season, canvas: state.renderer.canvas)
     } else {
       renderDeferredPassWorld(
         renderer: state.renderer

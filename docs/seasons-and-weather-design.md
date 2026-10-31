@@ -311,7 +311,11 @@ that adds it.
    (381 cities, the haversine nearest), the panel's "near ..." line, case 1262.
 2. **Year and place:** `TimeOfDay.yearSpeed`; the latitude at a point
    (143's north offset); the lab's `RAE_DAY_OF_YEAR` / `RAE_LATITUDE` and a
-   day slider.
+   day slider. Done (2026-10-31): `TimeOfDay.yearSpeed` (at 1 midnight rolls
+   the date as before; at any other speed the date moves by the speed
+   alone), lib/GeoPlace `geoPlaceAt` (+Y north, +X east), the lab's
+   LabSeason (`RAE_DAY_OF_YEAR`, `RAE_LATITUDE`, `RAE_YEAR_SPEED`, a day
+   slider over the frame), case 1263.
 3. **Climate and the panel readout:** `climateAt` (yearly mean and swing
    by latitude, the hemisphere, the day, height; longitude through the
    local solar time), the slow temperature grid stepped hourly, a case for

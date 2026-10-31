@@ -31,6 +31,15 @@ type TimeOfDay {
   # that the sun does not strobe. A game sets its own: the walkers' days last
   # 30 minutes (app3d/WalkerAppSetup).
   daySeconds: Float = 60.0
+  # How many days the DATE moves per simulated day (docs/seasons-and-
+  # weather-design.md §1): 1 as on Earth; more to see the seasons pass (14:
+  # a year in about 26 simulated days), 0 to hold the date. The hour's arc
+  # does not change: the sun's day runs as before, only the date moves
+  # faster or slower.
+  yearSpeed: Float = 1.0
+  # At a year's speed other than 1: the share of a day the date has moved,
+  # carried until it makes a whole day
+  dateCarry: Float = 0.0
 }
 
 func createTimeOfDay(hour: view Float) ret TimeOfDay {
@@ -52,9 +61,24 @@ func timeOfDayAdvance(timeOfDay: mod TimeOfDay, deltaTime: view Float) ret Bool 
   var h: Float = timeOfDay.hour + deltaTime * 24.0 / timeOfDay.daySeconds
   var rollYear: Int = timeOfDay.year
   var rollDay: Int = timeOfDay.dayOfYear
+  # At the year's speed of 1 midnight rolls the date, as on Earth. At any
+  # other speed the hour wraps without it and the date moves by the speed
+  # alone, a day at a time as the days add up (within a ten-thousandth of a
+  # day: a sum of fractions in 32-bit floats falls a hair short), so 0
+  # holds it and 14 moves it two weeks a day.
+  let earthYear: Bool = timeOfDay.yearSpeed is 1.0
   loop h >= 24.0 {
     h = h - 24.0
-    advanceOneDay(year: rollYear, dayOfYear: rollDay)
+    if earthYear {
+      advanceOneDay(year: rollYear, dayOfYear: rollDay)
+    }
+  }
+  if earthYear is false {
+    timeOfDay.dateCarry = timeOfDay.dateCarry + Math.max(a: timeOfDay.yearSpeed, b: 0.0) * deltaTime / timeOfDay.daySeconds
+    loop timeOfDay.dateCarry >= 0.9999 {
+      timeOfDay.dateCarry = timeOfDay.dateCarry - 1.0
+      advanceOneDay(year: rollYear, dayOfYear: rollDay)
+    }
   }
   timeOfDay.year = rollYear
   timeOfDay.dayOfYear = rollDay
