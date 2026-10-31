@@ -175,7 +175,9 @@ fn gbufferSurface(in: VsOut) -> FsOut {
     let tone = clamp(dot(tuft.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) / 0.16, 0.62, 1.18);
     albedo = mix(botCol, topCol, height) * mix(0.94, tone, smoothstep(0.0, 0.32, height));
   }
-  if (GW.i.w < 0.5) { albedo = mix(botCol, topCol, height); }
+  // The flat and the low-poly blades: the root exactly the ground's color
+  // (grass_compute.wgsl), no darkening, so they blend into the terrain
+  if (GW.i.w < 1.5) { albedo = mix(botCol, topCol, height); }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);

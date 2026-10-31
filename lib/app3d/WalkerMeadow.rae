@@ -4,10 +4,12 @@
 # filled it: a turf patch (app3d/GrassTuft grassTurfMesh, the GPU grass's
 # blades) on every 2 m of grass to 130 m. Over it, as accents, tufts
 # (app3d/GrassTuft): one here and there, small clumps, now and then a patch
-# of tall grass. Turf and tufts are colored
-# as the GPU grass: the terrain's grass color at the root, lighter to the
-# tip (GbufferRecord grassBladePattern, the same tip factor), so where the
-# carpet ends and a tuft stands nothing pops.
+# of tall grass. Turf and tufts are colored as the GPU grass: at the root
+# the terrain's own painted grass color where they stand (the static
+# shader's grass pattern computes the ground's field, grass_field.wgsl
+# grassGroundColor round rootColor, the terrain's base grass), lighter to
+# the tip (GbufferRecord grassBladePattern, the same tip factor), so they
+# grow out of the ground and nothing pops.
 #
 # Every cell of the ground (the terrain's cells, 18 m) has up to
 # meadowTuftsPerCell tufts, a function of the cell alone, so the same cell
@@ -313,8 +315,6 @@ func placeMeadowCell(
       form = 1
       scale = 0.8 + 0.8 * sizeDraw
     }
-    # the terrain's grass color, each tuft a little lighter or darker
-    let shade: Float = 0.9 + 0.2 * hash2(x: cellX * 97 + k, y: cellY * 101 + k, seed: 715)
     let z: Float = worldTerrainHeight(
       x: x
       y: y
@@ -336,7 +336,7 @@ func placeMeadowCell(
     )
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: form)
-    meadow.colors.set(index: place, value: Vec3.vscale(a: meadow.rootColor, s: shade))
+    meadow.colors.set(index: place, value: meadow.rootColor)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
     count = count + 1
   }
@@ -390,7 +390,7 @@ func placeMeadowCell(
     )
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: meadowTurfForm)
-    meadow.colors.set(index: place, value: Vec3.vscale(a: meadow.rootColor, s: 0.94 + 0.12 * draw))
+    meadow.colors.set(index: place, value: meadow.rootColor)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 43 + t, y: cellY * 47 + t, seed: 737))
     count = count + 1
   }
