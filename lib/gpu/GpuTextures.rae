@@ -12,6 +12,7 @@ open webgpu/Context
 open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open gpu/GpuResources
+open gpu/SlotTable
 
 func createTextureMipped(
   resources: mod GpuResources
@@ -27,7 +28,11 @@ func createTextureMipped(
   if usage is (0 as UInt64) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textures
+    capacity: resources.capacity
+    kind: "textures"
+  ) {
     unsafe {
       let descriptor: WGPUTextureDescriptor = {
         usage: usage
@@ -62,7 +67,11 @@ func createTextureViewMip(
   if isValidTexture(resources: resources, id: texture) is false or mip < 0 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textureViews
+    capacity: resources.capacity
+    kind: "textureViews"
+  ) {
     unsafe {
       let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
       if mip >= (wgpuTextureGetMipLevelCount(texture: textureHandle) as Int) {
@@ -105,7 +114,11 @@ func createTextureViewMips(
   if isValidTexture(resources: resources, id: texture) is false {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textureViews
+    capacity: resources.capacity
+    kind: "textureViews"
+  ) {
     unsafe {
       let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
       let descriptor: WGPUTextureViewDescriptor = {
@@ -139,7 +152,11 @@ func createTextureViewMips(
 # point-sample (the water cascades). `createSamplerWith` stays nearest-mip for
 # the single-level textures everything else reads.
 func createSamplerMipped(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
-  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.samplers
+    capacity: resources.capacity
+    kind: "samplers"
+  ) {
     unsafe {
       let descriptor: WGPUSamplerDescriptor = {
         addressModeU: addressMode
@@ -228,7 +245,11 @@ func createTextureArrayMipped(
   if usage is (0 as UInt64) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textures
+    capacity: resources.capacity
+    kind: "textures"
+  ) {
     unsafe {
       let descriptor: WGPUTextureDescriptor = {
         usage: usage
@@ -299,7 +320,11 @@ func createTextureViewRange(
   if isValidTexture(resources: resources, id: texture) is false or range.baseLayer < 0 or range.layerCount < 1 or range.baseMip < 0 or range.mipCount < 1 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textureViews
+    capacity: resources.capacity
+    kind: "textureViews"
+  ) {
     unsafe {
       let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
       if range.baseLayer + range.layerCount > (wgpuTextureGetDepthOrArrayLayers(
@@ -370,7 +395,11 @@ func createTextureViewArray(
 # the depth test and the bilinear filter together, so one
 # textureSampleCompare is a 2x2 PCF tap. Clamp to edge, no mips.
 func createComparisonSampler(resources: mod GpuResources) ret opt SamplerId {
-  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.samplers
+    capacity: resources.capacity
+    kind: "samplers"
+  ) {
     unsafe {
       let descriptor: WGPUSamplerDescriptor = {
         addressModeU: WGPUAddressMode_ClampToEdge

@@ -26,6 +26,7 @@ open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open webgpu/Readback
 open gpu/GpuResources
+open gpu/SlotTable
 open gpu/GpuDependencies
 open gpu/GpuReadback
 open gpu/PipelineWatch
@@ -161,7 +162,11 @@ func createComputePipelineSource(
   if wgsl.length() is 0 or entryPoint.length() is 0 {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.pipelines, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.pipelines
+    capacity: resources.capacity
+    kind: "pipelines"
+  ) {
     unsafe {
       let sourceC: Buffer(Any) = wgsl.toCStr()
       var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
@@ -240,7 +245,11 @@ func createBindGroup(
   if isValidPipeline(resources: resources, id: pipeline) is false {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.bindGroups
+    capacity: resources.capacity
+    kind: "bindGroups"
+  ) {
     let start: Int = resources.depKinds.length
     appendDep(
       resources: resources
@@ -768,7 +777,11 @@ func submit(resources: mod GpuResources, recording: mod Recording) ret opt Submi
     }
     i = i + 1
   }
-  if let slot: Int = findFreeSlot(table: resources.submissions, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.submissions
+    capacity: resources.capacity
+    kind: "submissions"
+  ) {
     let start: Int = resources.depKinds.length
     i = 0
     loop i < recording.useKinds.length {

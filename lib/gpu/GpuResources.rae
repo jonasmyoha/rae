@@ -35,6 +35,7 @@ open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open webgpu/ReadRequest
 open webgpu/Readback
+open gpu/SlotTable
 
 # ----- identities ------------------------------------------------------
 type IdIssuer {
@@ -98,127 +99,6 @@ const kindRenderPipeline: Int = 8
 # An adopted external handle: referenced (bound, attached, pinned) but NEVER
 # owned or released by the manager — releaseHandle deliberately has no branch.
 const kindExternal: Int = 9
-
-# One table per kind. `generations`/`live` are the authoritative slot record;
-# `handles` holds the native reference this manager owns. The lifetime fields:
-# `useCount` in-flight uses, `retired` retired-but-pinned, `parentSlot`/
-# `parentGeneration` an indirect dependency (a view's texture), `nativeIndex`
-# a submission's wgpu index, `depStart`/`depCount` a slice of the manager's
-# dependency arena (a bind group's bound resources, a submission's uses) and
-# `completed` for submissions.
-type SlotTable {
-  generations: List(Int)
-  live: List(Int)
-  handles: List(Ptr)
-  useCount: List(Int)
-  retired: List(Int)
-  parentSlot: List(Int)
-  parentGeneration: List(Int)
-  nativeIndex: List(Int)
-  depStart: List(Int)
-  depCount: List(Int)
-  completed: List(Int)
-}
-
-func createIntList(capacity: view Int, value: view Int) ret List(Int) {
-  var list: List(Int) = List.create(Int, cap: capacity)
-  var i: Int = 0
-  loop i < capacity {
-    list.add(value: value)
-    i = i + 1
-  }
-  ret list
-}
-
-func createSlotTable(capacity: view Int, empty: copy Ptr) ret SlotTable {
-  var handles: List(Ptr) = List.create(Ptr, cap: capacity)
-  var i: Int = 0
-  loop i < capacity {
-    unsafe {
-      handles.add(value: empty)
-    }
-    i = i + 1
-  }
-  unsafe {
-    ret SlotTable {
-      generations: createIntList(capacity: capacity, value: 0)
-      live: createIntList(capacity: capacity, value: 0)
-      handles: own handles
-      useCount: createIntList(capacity: capacity, value: 0)
-      retired: createIntList(capacity: capacity, value: 0)
-      parentSlot: createIntList(capacity: capacity, value: -1)
-      parentGeneration: createIntList(capacity: capacity, value: 0)
-      nativeIndex: createIntList(capacity: capacity, value: 0)
-      depStart: createIntList(capacity: capacity, value: 0)
-      depCount: createIntList(capacity: capacity, value: 0)
-      completed: createIntList(capacity: capacity, value: 0)
-    }
-  }
-}
-
-func intAt(list: view List(Int), index: view Int) ret Int {
-  if let value: Int = list.copyAt(index: index) {
-    ret value
-  }
-  ret 0
-}
-
-# First slot that is neither live nor retired-and-pinned, or none (exhaustion).
-# A retired slot still holding a pinned handle is not free. Nothing is marked
-# here: a create marks the slot live only after the native allocation succeeded.
-func findFreeSlot(table: view SlotTable, capacity: view Int) ret opt Int {
-  var slot: Int = 0
-  loop slot < capacity {
-    if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 {
-      ret slot
-    }
-    slot = slot + 1
-  }
-  ret none
-}
-
-func slotIsLive(
-  table: view SlotTable
-  capacity: view Int
-  slot: view Int
-  generation: view Int
-) ret Bool {
-  if slot < 0 or slot >= capacity {
-    ret false
-  }
-  if intAt(list: table.live, index: slot) is 0 {
-    ret false
-  }
-  ret intAt(list: table.generations, index: slot) is generation
-}
-
-func slotGeneration(table: view SlotTable, slot: view Int) ret Int {
-  ret intAt(list: table.generations, index: slot)
-}
-
-func liveCount(table: view SlotTable, capacity: view Int) ret Int {
-  var count: Int = 0
-  var slot: Int = 0
-  loop slot < capacity {
-    if intAt(list: table.live, index: slot) is 1 {
-      count = count + 1
-    }
-    slot = slot + 1
-  }
-  ret count
-}
-
-func pendingCount(table: view SlotTable, capacity: view Int) ret Int {
-  var count: Int = 0
-  var slot: Int = 0
-  loop slot < capacity {
-    if intAt(list: table.retired, index: slot) is 1 {
-      count = count + 1
-    }
-    slot = slot + 1
-  }
-  ret count
-}
 
 # Hands out the raw native handle of a slot: an unchecked pointer, so the
 # caller takes the obligation (internal use, always inside unsafe blocks).
@@ -658,7 +538,11 @@ func createBuffer(
   if usage is (0 as UInt64) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.buffers, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.buffers
+    capacity: resources.capacity
+    kind: "buffers"
+  ) {
     unsafe {
       let descriptor: WGPUBufferDescriptor = { size: size as UInt64, usage: usage }
       let handle: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
@@ -838,7 +722,11 @@ func createTextureSampled(
   if usage is (0 as UInt64) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textures
+    capacity: resources.capacity
+    kind: "textures"
+  ) {
     unsafe {
       let descriptor: WGPUTextureDescriptor = {
         usage: usage
@@ -903,7 +791,11 @@ func createTextureView(resources: mod GpuResources, texture: view TextureId) ret
   if isValidTexture(resources: resources, id: texture) is false {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.textureViews
+    capacity: resources.capacity
+    kind: "textureViews"
+  ) {
     unsafe {
       let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
       let descriptor: WGPUTextureViewDescriptor = {
@@ -955,7 +847,11 @@ func createSampler(resources: mod GpuResources) ret opt SamplerId {
 # A linear sampler with one address mode on every axis (Repeat for tiling
 # maps such as water's FFT cascades, ClampToEdge for screen-space reads).
 func createSamplerWith(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
-  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.samplers
+    capacity: resources.capacity
+    kind: "samplers"
+  ) {
     unsafe {
       let descriptor: WGPUSamplerDescriptor = {
         addressModeU: addressMode

@@ -10,6 +10,7 @@ open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open webgpu/Readback
 open gpu/GpuResources
+open gpu/SlotTable
 open gpu/GpuLifetime
 
 func isValidReadback(resources: view GpuResources, id: view ReadbackId) ret Bool {
@@ -78,7 +79,11 @@ func startReadback(
   if bufferIsMapped(resources: resources, bufferSlot: buffer.slot) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.readbacks, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.readbacks
+    capacity: resources.capacity
+    kind: "readbacks"
+  ) {
     # Start the native map and adopt it into the slot in one unsafe region so no
     # raw request pointer escapes; a rejected start is released and reported none.
     var started: Bool = false

@@ -13,6 +13,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open gpu/GpuResources
+open gpu/SlotTable
 open gpu/GpuRender
 open gpu/PipelineWatch
 
@@ -57,7 +58,11 @@ func createDepthPipelineSource(
   if spec.depthFormat is (0 as Int32) {
     ret none
   }
-  if let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity) {
+  if let slot: Int = findFreeSlot(
+    table: resources.renderPipelines
+    capacity: resources.capacity
+    kind: "renderPipelines"
+  ) {
     unsafe {
       let sourceC: Buffer(Any) = wgsl.toCStr()
       var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
