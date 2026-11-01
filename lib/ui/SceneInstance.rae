@@ -44,6 +44,7 @@ open ui/SceneBundles
 open ui/BundleApply
 open ui/UiSystems
 open ui/ClickTargets
+open ui/IconCheck
 
 # -----------------------------------------------------------------
 # Types
@@ -521,6 +522,14 @@ func mountSceneInstanceImpl(
             index: nodeIdx
           )
           applyOverride(world: world, entityId: targetEntityId, override: o)
+          if o.componentName is "Sprite" and o.fieldName is "textureKey" {
+            reportUnknownIcon(
+              world: world
+              textureKey: o.valueString
+              sceneId: scene.sceneId
+              nodeId: o.nodeId
+            )
+          }
         }
         oi = oi + 1
       }

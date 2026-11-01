@@ -39,6 +39,7 @@ open ui/ThemeResolved
 open ecs/ComponentTable
 open ui/UiSystems
 open ui/ClickTargets
+open ui/IconCheck
 
 # The world's tables that are derived or runtime state, never authored. This
 # runtime list serves the vocabulary and the diagnostic; the loader's loop
@@ -511,6 +512,13 @@ func applyAuthoredFixups(
     ret
   }
   if name is "Sprite" {
+    # a `mat:` name the icon font lacks would draw nothing (ui/IconCheck)
+    reportUnknownIcon(
+      world: world
+      textureKey: componentView(this: world.sprites, entityId: entityId).textureKey
+      sceneId: sceneId
+      nodeId: nodeId
+    )
     let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
     sprite.tintSlot = slotNameOf(doc: doc, val: val, key: "tint")
     # Authoring `nineSlice` with any border IS asking for a nine-slice; the

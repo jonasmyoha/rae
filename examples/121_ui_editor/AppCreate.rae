@@ -27,6 +27,7 @@ open ui/DebugOverlay
 open ui/WindowGeometry
 open HotReload
 open ui/UiSystems
+open ui/MaterialIconFont
 
 # The viewer's FALLBACK fonts (the shared Roboto + Material atlases, as 119
 # uses) — what a document that declares no `assets.fonts` renders with. A
@@ -128,10 +129,7 @@ func applyDocumentFonts(gpuUi: mod Gpu2dUi, fonts: mod EditorFonts, document: vi
   }
   let icons: String = wantedIconFont(document: document)
   if icons is not fonts.iconFontPath {
-    var font: SdfFont = SdfText.loadSdfFont(
-      jsonPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.json"
-      rawAtlasPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
-    )
+    var font: SdfFont = loadMaterialIconFont()
     if icons.length() > 0 {
       font = SdfText.loadSdfFontJson(jsonPath: icons)
     }
@@ -147,10 +145,7 @@ func createEditorUi() ret Gpu2dUi {
     jsonPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.json"
     rawAtlasPath: "{fallbackFontDirectory}Roboto-Regular.mtsdf.raw"
   )
-  let iconFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.json"
-    rawAtlasPath: "{fallbackFontDirectory}MaterialIconsRound-Regular.mtsdf.raw"
-  )
+  let iconFont: SdfFont = loadMaterialIconFont()
   var gpuUi: Gpu2dUi = {
     textFont: own textFont
     iconFont: own iconFont

@@ -7,6 +7,7 @@
 open HotReload
 open ui/WindowGeometry
 open ui/Ecs
+open ui/MaterialIconFont
 open ui/EventLoop
 open ui/LogOverlay
 open ui/DebugOverlay
@@ -35,10 +36,7 @@ func loadGpuUi() ret Gpu2dUi {
     jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json"
     rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw"
   )
-  let gpuIconFont: SdfFont = SdfText.loadSdfFont(
-    jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json"
-    rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw"
-  )
+  let gpuIconFont: SdfFont = loadMaterialIconFont()
   let themeScene: Scene = loadSceneFile(path: themePath)
   let uiTheme: ResolvedTheme = parseTheme(scene: themeScene)
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")

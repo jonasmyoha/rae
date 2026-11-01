@@ -190,9 +190,10 @@ grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort
 (cd "$root" && find lib -name '*.wgsl') | while IFS= read -r wgsl; do
   mkdir -p "$stage/$(dirname "$wgsl")"; cp "$root/$wgsl" "$stage/$wgsl"
 done
-# The stdlib's own pictures (lib/assets: the grass tuft, test textures), read
-# the same way at "lib/assets/..."; without them a device has no grass
-(cd "$root" && find lib/assets -name '*.png') | while IFS= read -r picture; do
+# The stdlib's own pictures (lib/assets: the grass tuft, test textures, the
+# Material icon atlas and its .json), read the same way at "lib/assets/...";
+# without them a device has no grass and no icons
+(cd "$root" && find lib/assets \( -name '*.png' -o -name '*.mtsdf.json' \)) | while IFS= read -r picture; do
   mkdir -p "$stage/$(dirname "$picture")"; cp "$root/$picture" "$stage/$picture"
 done
 

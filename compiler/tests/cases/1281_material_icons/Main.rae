@@ -1,0 +1,110 @@
+# Material icons (ui/IconCodepoints, ui/IconCheck, ui/MaterialIconFont): the
+# table generated from the font's codepoints file knows every name in it, the
+# baked atlas has a glyph for every one of them, and a `mat:` Sprite with a
+# name the font lacks is an `unknownIcon` scene diagnostic at load, naming the
+# scene, the node and the key; a known icon and a picture key are not.
+# `\{`/`\}` keep the JSON braces literal.
+import Json
+import String
+import Sys
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/IconCodepoints
+open ui/MaterialIconFont
+open ecs/Entity
+open ui/UiSystems
+
+func iconScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{")
+  s = s.concat(other: "\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":48\},")
+  s = s.concat(other: "\"Children\":[\"Done\",\"Open\",\"Delete\",\"Typo\",\"Photo\"]\},")
+  s = s.concat(other: "\"Done\":\{\"Sprite\":\{\"textureKey\":\"mat:check_circle\"\}\},")
+  s = s.concat(other: "\"Open\":\{\"Sprite\":\{\"textureKey\":\"mat:radio_button_unchecked\"\}\},")
+  s = s.concat(other: "\"Delete\":\{\"Sprite\":\{\"textureKey\":\"mat:delete\"\}\},")
+  s = s.concat(other: "\"Typo\":\{\"Sprite\":\{\"textureKey\":\"mat:check_circel\"\}\},")
+  s = s.concat(other: "\"Photo\":\{\"Sprite\":\{\"textureKey\":\"album_cover\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+# Every line of the codepoints file: the table gives the same codepoint, and
+# the atlas has its glyph
+func checkTableAndAtlas() {
+  let codepointsPath: String = Sys.stdlibPath(
+    path: "lib/assets/fonts/MaterialIconsRound-Regular.codepoints"
+  )
+  let listing: String = Sys.readAsset(path: codepointsPath)
+  let atlasSource: String = Sys.readAsset(path: Sys.stdlibPath(path: materialIconAtlasPath))
+  let doc: JsonDoc = Json.parseJson(source: atlasSource)
+  let glyphsIdx: Int = Json.field(doc: doc, this: Json.root(doc: doc), key: "glyphs")
+  let glyphs: JsonValue = Json.jsonValueAt(doc: doc, idx: glyphsIdx)
+  var baked: List(Bool) = List.create(Bool, cap: 65536)
+  loop var i: Int = 0, i < 65536, ++i {
+    baked.add(value: false)
+  }
+  let glyphCount: Int = Json.arrayLen(this: glyphs)
+  loop var i: Int = 0, i < glyphCount, ++i {
+    let entry: JsonValue = Json.arrayAt(doc: doc, this: glyphs, idx: i)
+    let unicodeIdx: Int = Json.field(doc: doc, this: entry, key: "unicode")
+    let code: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: unicodeIdx), fallback: 0)
+    if code >= 0 and code < 65536 {
+      baked.set(index: code, value: true)
+    }
+  }
+  var names: Int = 0
+  var wrong: Int = 0
+  var unbaked: Int = 0
+  loop let line: view String in listing.split(sep: "\n") {
+    let parts: List(String) = line.split(sep: " ")
+    if parts.length is not 2 {
+      continue
+    }
+    let name: String = parts.copyAtDefault(index: 0)
+    let hex: String = parts.copyAtDefault(index: 1)
+    names = names + 1
+    let code: Int = iconCodepoint(name: name)
+    if "{hexOf(code: code)}" is not hex {
+      wrong = wrong + 1
+      log("  wrong: {name} {hex} -> {code}")
+    }
+    if code < 0 or baked.copyAtDefault(index: code) is false {
+      unbaked = unbaked + 1
+    }
+  }
+  log("codepoints file: {names} names, {wrong} looked up wrong, {unbaked} without a glyph")
+  log("atlas: {glyphCount} glyphs")
+}
+
+# Four lowercase hex digits
+func hexOf(code: view Int) ret String {
+  let digits: String = "0123456789abcdef"
+  var text: String = ""
+  var divisor: Int = 4096
+  loop divisor > 0 {
+    let digit: Int = (code / divisor) % 16
+    text = text.concat(other: digits.sub(start: digit, len: 1))
+    divisor = divisor / 16
+  }
+  ret text
+}
+
+func main() {
+  log("check_circle {iconCodepoint(name: "check_circle")}, delete {iconCodepoint(name: "delete")}")
+  log("not an icon {iconCodepoint(name: "check_circel")}, empty {iconCodepoint(name: "")}")
+  log("iconText(check_circle) is {iconText(name: "check_circle").length()} bytes")
+  checkTableAndAtlas()
+  var scene: Scene = parseScene(source: iconScene())
+  scene.sceneId = "todoRow"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+  log("--- {world.sceneDiagnostics.length} diagnostics ---")
+  loop let entry: view SceneDiagnostic in world.sceneDiagnostics {
+    log(formatSceneDiagnostic(diagnostic: entry))
+  }
+}
