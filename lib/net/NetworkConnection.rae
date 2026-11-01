@@ -1,0 +1,357 @@
+# NetworkConnection — a client connection through the system's own network
+# stack (docs/network-connections.md): on Apple, Network.framework, which
+# brings up the cellular radio and VPN on demand, follows the network from
+# Wi-Fi to cellular, checks TLS against the system trust store and reports
+# the path. A plain TCP connection, a TLS one, or a WebSocket client
+# (ws:// or wss://).
+#
+# Everything arrives as a NetworkEvent, taken with `networkNextEvent`: the
+# connection is ready, a message (bytes; on a WebSocket a whole text or
+# binary message), closed, failed, waiting for a network, a send failed, or
+# the path changed (Wi-Fi, cellular...). Each event also wakes the UI loop
+# (EventLoop.wake), so a UI app takes them in its next frame with a timeout
+# of 0; a spawned worker waits for them with a timeout. One connection is
+# used from one thread.
+#
+# The C side (runtime_network_apple.h) only queues the framework's events
+# and makes one framework call per function; what an event means, the
+# request, the protocol on top, is Rae (lib/net/HttpGet for an HTTP GET).
+# Elsewhere there is no system connection yet: connecting answers a failed
+# event that says so.
+import String
+cheader "runtime_network_apple.h"
+
+const hasNetworkFramework: Bool = Target.isApple
+
+when hasNetworkFramework {
+  func rae_ext_Nw_connect(
+    hostZ: Buffer(UInt8)
+    port: Int
+    urlZ: Buffer(UInt8)
+    mode: Int
+    insecure: Int
+  ) unsafe extern("rae_ext_Nw_connect") ret Int
+
+  func rae_ext_Nw_send(
+    handle: Int
+    bytes: Buffer(UInt8)
+    offset: Int
+    count: Int
+    opcode: Int
+    closeCode: Int
+  ) unsafe extern("rae_ext_Nw_send") ret Int
+
+  # Waits up to `timeoutMs` for an event: blocking, so a worker may call it
+  func rae_ext_Nw_nextEvent(
+    handle: Int
+    timeoutMs: Int
+  ) blocking unsafe extern("rae_ext_Nw_nextEvent") ret Int
+
+  func rae_ext_Nw_eventCode(handle: Int) unsafe extern("rae_ext_Nw_eventCode") ret Int
+
+  func rae_ext_Nw_eventLength(handle: Int) unsafe extern("rae_ext_Nw_eventLength") ret Int
+
+  func rae_ext_Nw_eventCopy(handle: Int, into: Buffer(UInt8)) unsafe extern("rae_ext_Nw_eventCopy")
+
+  func rae_ext_Nw_release(handle: Int) unsafe extern("rae_ext_Nw_release")
+}
+
+enum NetworkMode { tcp, tls, webSocket }
+
+enum NetworkEventKind {
+  none
+  ready
+  message
+  closed
+  failed
+  pathChanged
+  waiting
+  sendFailed
+}
+
+# nothing arrived in the time waited
+# connected (and the TLS and WebSocket handshakes done): send now
+# bytes from the server; on a WebSocket one whole message
+# the server closed (a WebSocket: `code` is its close code)
+# the connection failed and is over: `text` says why
+# the path changed: `code` is its status, `text` the interface ("wifi",
+# "cellular", "wired", "loopback", "other")
+# there is no usable network now; it connects when one comes (`text` why)
+# a send failed (`text` why)
+
+# A path's status (the `code` of a pathChanged event)
+const networkPathSatisfied: Int = 1
+
+const networkPathUnsatisfied: Int = 2
+
+const networkPathSatisfiable: Int = 3
+
+# A WebSocket message's kind (the `code` of its message event)
+const webSocketText: Int = 1
+
+const webSocketBinary: Int = 2
+
+type NetworkEvent {
+  kind: NetworkEventKind
+  code: Int
+  bytes: List(UInt8)
+  # an error's description, a path's interface, a text message's text
+  text: String
+}
+
+type NetworkConnection {
+  handle: Int
+  mode: NetworkMode
+  # until networkClose (or a failed open: then `handle` is 0)
+  open: Bool
+}
+
+func networkBytesZ(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  bytes.add(value: 0)
+  ret bytes
+}
+
+func networkTextBytes(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+func networkModeCode(mode: view NetworkMode) ret Int {
+  if mode is NetworkMode.tls {
+    ret 1
+  }
+  if mode is NetworkMode.webSocket {
+    ret 2
+  }
+  ret 0
+}
+
+func networkOpen(
+  host: view String
+  port: view Int
+  url: view String
+  mode: view NetworkMode
+  insecure: view Bool
+) ret NetworkConnection {
+  var handle: Int = 0
+  when hasNetworkFramework {
+    var hostZ: List(UInt8) = networkBytesZ(text: host)
+    var urlZ: List(UInt8) = networkBytesZ(text: url)
+    var insecureFlag: Int = 0
+    if insecure {
+      insecureFlag = 1
+    }
+    unsafe {
+      handle = rae_ext_Nw_connect(
+        hostZ: hostZ.data
+        port: port
+        urlZ: urlZ.data
+        mode: networkModeCode(mode: mode)
+        insecure: insecureFlag
+      )
+    }
+  }
+  ret NetworkConnection { handle: handle, mode: mode, open: handle is not 0 }
+}
+
+# A TCP connection to `host`:`port` (no TLS: a local server, a test)
+func networkConnectTcp(host: view String, port: view Int) ret NetworkConnection {
+  ret networkOpen(
+    host: host
+    port: port
+    url: ""
+    mode: NetworkMode.tcp
+    insecure: false
+  )
+}
+
+# A TLS connection to `host`:`port`, its certificate checked against the
+# system trust store
+func networkConnectTls(host: view String, port: view Int) ret NetworkConnection {
+  ret networkOpen(
+    host: host
+    port: port
+    url: ""
+    mode: NetworkMode.tls
+    insecure: false
+  )
+}
+
+# A TLS connection that accepts any certificate: only for a test against a
+# self-signed server, never in a product
+func networkConnectTlsInsecure(host: view String, port: view Int) ret NetworkConnection {
+  ret networkOpen(
+    host: host
+    port: port
+    url: ""
+    mode: NetworkMode.tls
+    insecure: true
+  )
+}
+
+# A WebSocket client to a ws:// or wss:// URL (wss: TLS with the system
+# trust store); pings are answered on their own
+func networkConnectWebSocket(url: view String) ret NetworkConnection {
+  ret networkOpen(
+    host: ""
+    port: 0
+    url: url
+    mode: NetworkMode.webSocket
+    insecure: false
+  )
+}
+
+func networkNoEvent(kind: view NetworkEventKind, text: view String) ret NetworkEvent {
+  ret NetworkEvent { kind: kind, code: 0, bytes: List.create(UInt8, cap: 0), text: "{text}" }
+}
+
+# The next event, waiting up to `timeoutMs` for one (0: do not wait; the UI
+# loop's way). `none` when nothing came; a connection that could not be
+# opened answers `failed`.
+func networkNextEvent(connection: view NetworkConnection, timeoutMs: view Int) ret NetworkEvent {
+  if connection.open is false {
+    if connection.handle is 0 {
+      ret networkNoEvent(
+        kind: NetworkEventKind.failed
+        text: "no system network connection on this platform, or it could not be made"
+      )
+    }
+    ret networkNoEvent(kind: NetworkEventKind.failed, text: "the connection is closed")
+  }
+  var kindCode: Int = 0
+  var code: Int = 0
+  var length: Int = 0
+  when hasNetworkFramework {
+    unsafe {
+      kindCode = rae_ext_Nw_nextEvent(handle: connection.handle, timeoutMs: timeoutMs)
+      code = rae_ext_Nw_eventCode(handle: connection.handle)
+      length = rae_ext_Nw_eventLength(handle: connection.handle)
+    }
+  }
+  if kindCode is 0 {
+    ret networkNoEvent(kind: NetworkEventKind.none, text: "")
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: length)
+  loop var i: Int = 0, i < length, ++i {
+    bytes.add(value: 0)
+  }
+  when hasNetworkFramework {
+    if length > 0 {
+      unsafe {
+        rae_ext_Nw_eventCopy(handle: connection.handle, into: bytes.data)
+      }
+    }
+  }
+  let kind: NetworkEventKind = networkEventKindOf(code: kindCode)
+  var text: String = ""
+  let textual: Bool = kind is not NetworkEventKind.message or (connection.mode is NetworkMode.webSocket and code is webSocketText)
+  if textual and length > 0 {
+    text = String.fromBytes(bytes: bytes, start: 0, count: length)
+  }
+  ret NetworkEvent { kind: kind, code: code, bytes: own bytes, text: own text }
+}
+
+func networkEventKindOf(code: view Int) ret NetworkEventKind {
+  if code is 1 {
+    ret NetworkEventKind.ready
+  }
+  if code is 2 {
+    ret NetworkEventKind.message
+  }
+  if code is 3 {
+    ret NetworkEventKind.closed
+  }
+  if code is 4 {
+    ret NetworkEventKind.failed
+  }
+  if code is 5 {
+    ret NetworkEventKind.pathChanged
+  }
+  if code is 6 {
+    ret NetworkEventKind.waiting
+  }
+  if code is 7 {
+    ret NetworkEventKind.sendFailed
+  }
+  ret NetworkEventKind.none
+}
+
+func networkSendWith(
+  connection: view NetworkConnection
+  bytes: view List(UInt8)
+  opcode: view Int
+  closeCode: view Int
+) ret Bool {
+  if connection.open is false {
+    ret false
+  }
+  var answer: Int = -1
+  when hasNetworkFramework {
+    unsafe {
+      answer = rae_ext_Nw_send(
+        handle: connection.handle
+        bytes: bytes.data
+        offset: 0
+        count: bytes.length
+        opcode: opcode
+        closeCode: closeCode
+      )
+    }
+  }
+  ret answer is 0
+}
+
+# Send bytes (a WebSocket: one binary message). False when the connection is
+# closed; a failure later arrives as a sendFailed event.
+func networkSend(connection: view NetworkConnection, bytes: view List(UInt8)) ret Bool {
+  ret networkSendWith(
+    connection: connection
+    bytes: bytes
+    opcode: webSocketBinary
+    closeCode: 0
+  )
+}
+
+# Send text (a WebSocket: one text message; otherwise its UTF-8 bytes)
+func networkSendText(connection: view NetworkConnection, text: view String) ret Bool {
+  ret networkSendWith(
+    connection: connection
+    bytes: networkTextBytes(text: text)
+    opcode: webSocketText
+    closeCode: 0
+  )
+}
+
+# A WebSocket close with `code` (1000: a normal close); the server's close
+# then arrives as a closed event
+func networkSendClose(connection: view NetworkConnection, code: view Int) ret Bool {
+  if connection.mode is not NetworkMode.webSocket {
+    ret false
+  }
+  ret networkSendWith(
+    connection: connection
+    bytes: List.create(UInt8, cap: 0)
+    opcode: 8
+    closeCode: code
+  )
+}
+
+# Close the connection now and let it go; its events stop
+func networkClose(connection: mod NetworkConnection) {
+  if connection.open is false {
+    ret
+  }
+  when hasNetworkFramework {
+    unsafe {
+      rae_ext_Nw_release(handle: connection.handle)
+    }
+  }
+  connection.open = false
+}

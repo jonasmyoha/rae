@@ -2930,6 +2930,13 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
   char sqlite_flags[PATH_MAX * 2 + 64];
   if (!sqlite_link_flags(c_path, sqlite_flags, sizeof(sqlite_flags))) return false;
+  /* lib/net/NetworkConnection: Apple's Network.framework, linked only for a
+   * program whose C includes its shim (runtime_network_apple.h) */
+#if defined(__APPLE__)
+  const char* network_flags = c_output_includes(c_path, "runtime_network_apple.h") ? " -framework Network -framework Security" : "";
+#else
+  const char* network_flags = "";
+#endif
   // Rae builds from source for the machine it runs on, so an x86-64 CPU with
   // AVX2 compiles with it: lib/Float8 is then one 256-bit register
   // (runtime_float8.h, docs/float4-design.md §10). The choice is the
@@ -2957,9 +2964,9 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s%s %s %s -o %s",
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s -o %s",
            opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, out_bin);
+           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, out_bin);
 
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
