@@ -25,7 +25,6 @@ func frameWaitSystem(
   tick: mod FrameTick
 ) {
   let playbackSystem: view PlaybackSystem = app.musicSystems.playbackSystem
-  let scrollFsm: view ScrollFsm = session.scrollFsm
   # Per-frame scroll bounds: the active page's ScrollRoot and its laid-out
   # floor (lib/ui/scrollRootSystem). Wrong floor → spring never settles; a
   # root not yet laid out, or whose content fits, is inert.
@@ -36,27 +35,17 @@ func frameWaitSystem(
   )
   tick.scrollOnThisScreen = range.active
   tick.scrollFloor = range.floor
-  # Treat in-flight scroll momentum / spring as an animation so the event
-  # loop wakes at frame cadence (~16 ms) instead of blocking until the next
-  # OS event. Otherwise the spring-back after release renders chunky because
-  # the physics step only runs once per OS event wake.
-  let scrollOOB: Bool = scrollFsm.scrollY > 0.0 or scrollFsm.scrollY < tick.scrollFloor
-  var velAbs: Float = scrollFsm.velocity
-  if velAbs < 0.0 {
-    velAbs = -velAbs
-  }
-  # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY
-  # per-event with velocity==0, so without it the loop blocks between wheel
-  # events.
-  tick.scrollAnimating = false
-  if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
-    tick.scrollAnimating = true
-  }
+  # In-flight scroll — a drag, momentum, a spring, or a wheel still settling —
+  # counts as an animation so the event loop wakes at frame cadence instead
+  # of blocking until the next OS event: the physics steps once per frame.
+  tick.scrollAnimating = scrollRootSettling(
+    world: world
+    uiSystems: app.uiSystems
+    entityId: frame.scrollTarget
+  )
   # Suppress the playbackSystem-driven 60Hz animation gate while the user is
-  # wheel-scrolling (the per-frame playbackSystem tick competed with scroll).
-  # Progress resumes ~250ms after the last wheel tick.
-  let scrollActiveTimeSec: Float = (uiNowSeconds() - scrollFsm.lastWheelTime) as Float
-  let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
+  # scrolling (the per-frame playbackSystem tick competed with scroll).
+  let recentlyScrolling: Bool = tick.scrollAnimating
   tick.playbackAnimating = false
   if playbackSystem.isPlaying {
     if recentlyScrolling is false {
@@ -101,7 +90,10 @@ func frameWaitSystem(
     app.loopDebugFrame = app.loopDebugFrame + 1
     let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
     log(
-      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={heroInFlight} animP={playbackSystem.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
+      "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollPositionOf(
+        world: world
+        entityId: frame.scrollTarget
+      )} animA={heroInFlight} animP={playbackSystem.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
     )
   }
   # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually

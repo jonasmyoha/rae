@@ -1,36 +1,42 @@
-open ui/Ecs
-open ui/Layer
-import Sdl3
-open Keys
-# Pointer input for the GPU2D/SDL3-only mobile UI example.
+# Pointer input for the GPU2D/SDL3-only mobile UI example: lib/ui's
+# `UiInput` (the pointer, hover, press, the wheel's routing, a scroll root's
+# drag claiming its press) plus what 106 adds on top: the scripted taps,
+# typing and drag of a headless run, this frame's keyboard text and the
+# window's size class.
 #
 # Coordinates are in logical points, matching `WorldTransform2D`.
+open ui/Ecs
+import Sdl3
+open Keys
 open ecs/Entity
-open ecs/ComponentTable
 open ecs/Event
-open ui/Transform
 open ui/UiSystems
 open ui/InputKind
 open ui/SizeClass
-import Device
+open ui/inputSystem/InputSystem
 
-const inputNoEntityId: EntityId = { index: -1, generation: 0 }
-
-type PointerState {
-  x: Float
-  y: Float
-  down: Bool
-  pressed: Bool
-  released: Bool
-  # The device behind it: a finger gets the touch-sized target and no hover
-  kind: InputKind
+# A headless run's scripted finger (`RAE_UI_DRAG=<dy>`): it presses
+# mid-screen on frame `scriptStartFrame`, moves `dy` over
+# `scriptMoveFrames` frames and lifts, through the lib's input path
+# (updateUiInputWith), so the gate drives drag -> fling -> settle without a
+# real pointer. `dy` 0 = off.
+type ScriptedDrag {
+  dy: Float
+  frame: Int
+  # the release and the rest were logged
+  releaseReported: Bool
+  settleReported: Bool
 }
 
-# Action events use lib/ui's shared `UiAction` (#943) drained through the
-# lib/ecs `EventQueue` primitive — 106 no longer defines its own ActionEvent.
+const scriptStartFrame: Int = 10
+
+const scriptMoveFrames: Int = 20
+
+# Action events are lib/ui's `UiAction`s: the lib's input produces them
+# into `world.uiActions`, and each frame they are moved into this queue,
+# which 106's dispatch reads, together with its scripted taps.
 type InputSystem {
-  pointer: PointerState
-  pressedEntityId: EntityId
+  ui: UiInput
   uiActions: EventQueue(UiAction)
   # `RAE_UI_SCREEN_SEQ` scripted taps (#972): the remaining screen names,
   # the frame counter, and the frames between two scripted taps.
@@ -38,35 +44,26 @@ type InputSystem {
   scriptedFrame: Int
   scriptedEvery: Int
   # #976: this frame's keyboard text — the UTF-8 characters typed since the
-  # last poll and the number of Backspace presses. Consumed by the search
+  # last poll and the number of Backspace presses. Consumed by the text
   # field system; empty/0 on frames with no typing.
   typedText: String
   backspaces: Int
   # `RAE_UI_TYPE` scripted keyboard (#976): the text still to be "typed"
   # (pasted as one frame's typedText once the screen sequence is done).
   scriptedType: String
-  # The kind of the last pointer event (a screen can switch density on it)
-  lastInputKind: InputKind
-  # A finger's smallest target side in design units (44 points, converted
-  # through the viewport each frame)
-  touchTargetSize: Float
-  # Device facts (canHover, the display scale), kept current every frame
-  deviceWatch: DeviceWatch
+  scriptedDrag: ScriptedDrag
   # The window's size class in points, recomputed when the window changes
   windowSizeClass: WindowSizeClass
 }
 
 func createInputSystem() ret InputSystem {
+  var dragDy: Float = 0.0
+  let dragEnv: String = getEnv(name: "RAE_UI_DRAG")
+  if dragEnv.length() > 0 {
+    dragDy = dragEnv.toFloat()
+  }
   ret InputSystem {
-    pointer: PointerState {
-      x: 0.0
-      y: 0.0
-      down: false
-      pressed: false
-      released: false
-      kind: InputKind.mouse
-    }
-    pressedEntityId: noEntity()
+    ui: createUiInput()
     uiActions: createEventQueue(UiAction)
     scriptedScreens: scriptedScreenSequence()
     scriptedFrame: 0
@@ -74,9 +71,12 @@ func createInputSystem() ret InputSystem {
     typedText: ""
     backspaces: 0
     scriptedType: getEnv(name: "RAE_UI_TYPE")
-    lastInputKind: InputKind.mouse
-    touchTargetSize: touchTargetPoints
-    deviceWatch: Device.createDeviceWatch()
+    scriptedDrag: ScriptedDrag {
+      dy: dragDy
+      frame: 0
+      releaseReported: false
+      settleReported: false
+    }
     windowSizeClass: createWindowSizeClass(widthPoints: windowWidthPoints())
   }
 }
@@ -118,173 +118,102 @@ func sendScriptedTap(input: mod InputSystem) {
   eventSend(this: input.uiActions, value: UiAction { entityId: noEntity(), actionId: actionId })
 }
 
-func pointInEntity(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entityId: view EntityId
-  x: view Float
-  y: view Float
-  targetSize: view Float
-) ret Bool {
-  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
-    ret false
+# Whether the scripted finger is in use this run
+func scriptedDragOn(input: view InputSystem) ret Bool {
+  ret input.scriptedDrag.dy is not 0.0
+}
+
+# The scripted finger this frame (after `previous`): mid-screen, moving
+# `dy` over `scriptMoveFrames` frames from `scriptStartFrame`, then lifted
+func scriptedDragPointer(
+  drag: mod ScriptedDrag
+  viewport: view Viewport
+  previous: view UiPointerState
+) ret UiPointerState {
+  drag.frame = drag.frame + 1
+  let x: Float = viewport.layoutW * 0.5
+  let startY: Float = viewport.layoutH * 0.5
+  let moved: Int = drag.frame - scriptStartFrame
+  var y: Float = startY
+  var down: Bool = false
+  if moved >= 0 and moved <= scriptMoveFrames {
+    y = startY + drag.dy * moved.toFloat() / scriptMoveFrames.toFloat()
+    down = true
+  } else if moved > scriptMoveFrames {
+    y = startY + drag.dy
   }
-  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
-    ret false
-  }
-  let wt: view WorldTransform2D = componentView(
-    this: uiSystems.transform2d.worldTransforms
-    entityId: entityId
-  )
-  if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
-    ret false
-  }
-  let cr: view ComputedRect = componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
-  ret pointInTarget(
+  ret uiPointerScriptFrame(
+    previous: previous
     x: x
     y: y
-    left: wt.position.x
-    top: wt.position.y
-    width: cr.size.x
-    height: cr.size.y
-    targetSize: targetSize
+    down: down
+    kind: InputKind.touch
   )
 }
 
-func hitTestEntity(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entityId: view EntityId
-  x: view Float
-  y: view Float
-  targetSize: view Float
-) ret EntityId {
-  unsafe {
-    if componentHas(this: world.childrens, entityId: entityId) {
-      let ch: view Children = componentView(this: world.childrens, entityId: entityId)
-      let n: Int = ch.ids.length
-      var i: Int = n - 1
-      loop i >= 0 {
-        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-        let hit: EntityId = hitTestEntity(
-          world: world
-          uiSystems: uiSystems
-          entityId: cid
-          x: x
-          y: y
-          targetSize: targetSize
-        )
-        if isNone(this: hit) is false {
-          ret hit
-        }
-        i = i - 1
-      }
-    }
-
-    if componentHas(this: world.onClicks, entityId: entityId) {
-      if pointInEntity(
-        world: world
-        uiSystems: uiSystems
-        entityId: entityId
-        x: x
-        y: y
-        targetSize: targetSize
-      ) {
-        ret entityId
-      }
-    }
-    ret inputNoEntityId
+# The scripted drag's log lines, for the gate: the lift (position and the
+# fling's velocity), then the first frame at rest (in bounds, no velocity)
+func reportScriptedDrag(
+  input: mod InputSystem
+  scrollY: view Float
+  velocity: view Float
+  floor: view Float
+) {
+  if scriptedDragOn(input: input) is false {
+    ret
   }
-}
-
-func hitTest(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  x: view Float
-  y: view Float
-) ret EntityId {
-  ret hitTestTarget(
-    world: world
-    uiSystems: uiSystems
-    x: x
-    y: y
-    targetSize: 0.0
-  )
-}
-
-# The entity a pointer of `kind` hits: the precise rectangle first, so a
-# finger between two small controls takes the one it is on; then, for a
-# finger only, the touch-sized targets
-func hitTestFor(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  x: view Float
-  y: view Float
-  kind: view InputKind
-  touchTargetSize: view Float
-) ret EntityId {
-  let precise: EntityId = hitTest(
-    world: world
-    uiSystems: uiSystems
-    x: x
-    y: y
-  )
-  if isNone(this: precise) is false or kind is not InputKind.touch {
-    ret precise
+  let drag: mod ScriptedDrag = input.scriptedDrag
+  let lifted: Int = drag.frame - scriptStartFrame - scriptMoveFrames
+  if lifted >= 1 and drag.releaseReported is false {
+    drag.releaseReported = true
+    log("[scroll-drag] released scrollY={scrollY} velocity={velocity} floor={floor}")
   }
-  ret hitTestTarget(
-    world: world
-    uiSystems: uiSystems
-    x: x
-    y: y
-    targetSize: targetSizeFor(kind: kind, touchTargetUnits: touchTargetSize)
-  )
-}
-
-func hitTestTarget(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  x: view Float
-  y: view Float
-  targetSize: view Float
-) ret EntityId {
-  unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
-    let n: Int = roots.length
-    var i: Int = n - 1
-    loop i >= 0 {
-      let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entityId: e) is false {
-        let hit: EntityId = hitTestEntity(
-          world: world
-          uiSystems: uiSystems
-          entityId: e
-          x: x
-          y: y
-          targetSize: targetSize
-        )
-        if isNone(this: hit) is false {
-          ret hit
-        }
-      }
-      i = i - 1
-    }
-    ret inputNoEntityId
+  let inBounds: Bool = scrollY <= 0.0 and scrollY >= floor
+  if lifted > 1 and drag.settleReported is false and inBounds and velocity is 0.0 {
+    drag.settleReported = true
+    log("[scroll-drag] settled scrollY={scrollY} floor={floor}")
   }
 }
 
 func updateInputSystem(
   input: mod InputSystem
-  world: view UiWorld
-  uiSystems: view UiSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
   viewport: view Viewport
 ) {
-  # Recycle last frame's action channel (double-buffered), replacing the old
-  # clearActionEvents: this frame's clicks produce into a clean queue.
+  # Recycle last frame's action channel (double-buffered): this frame's
+  # clicks produce into a clean queue.
   frameAdvance(this: input.uiActions)
+  # A finger's target is 44 points in design units, through the viewport
+  input.ui.touchTargetSize = touchTargetUnits(
+    viewport: viewport
+    displayScale: input.ui.deviceWatch.facts.displayScale
+  )
+  if scriptedDragOn(input: input) {
+    let pointer: UiPointerState = scriptedDragPointer(
+      drag: input.scriptedDrag
+      viewport: viewport
+      previous: input.ui.pointer
+    )
+    updateUiInputWith(
+      input: input.ui
+      world: world
+      uiSystems: uiSystems
+      pointer: pointer
+      wheel: 0.0
+    )
+  } else {
+    updateUiInput(input: input.ui, world: world, uiSystems: uiSystems)
+  }
+  # the lib's clicks (a scroll root's drag has already claimed its press,
+  # so a drag's release is not among them) join 106's queue
+  loop var i: Int = 0, i < eventCount(this: world.uiActions), ++i {
+    let action: UiAction = eventAt(this: world.uiActions, i: i)
+    if isNone(this: action.entityId) is false {
+      log("[input] fire {action.actionId} on entity {action.entityId.index}")
+    }
+    eventSend(this: input.uiActions, value: action)
+  }
   sendScriptedTap(input: input)
   input.typedText = uiTextInput()
   input.backspaces = 0
@@ -300,76 +229,6 @@ func updateInputSystem(
       input.typedText = "{input.scriptedType}"
       input.scriptedType = ""
     }
-  }
-
-  let mx: Float = viewportPointerX(viewport: viewport)
-  let my: Float = viewportPointerY(viewport: viewport)
-  let down: Bool = uiPointerButtonDown(button: mouseButtonLeft)
-  var pressed: Bool = false
-  var released: Bool = false
-  if uiMouseHookActive() {
-    pressed = uiMouseHookDrainPressed()
-    released = uiMouseHookDrainReleased()
-  } else {
-    pressed = uiPointerButtonPressed(button: mouseButtonLeft)
-    released = uiPointerButtonReleased(button: mouseButtonLeft)
-  }
-
-  let kind: InputKind = lastPointerKind()
-  let nextPointer: PointerState = {
-    x: mx
-    y: my
-    down: down
-    pressed: pressed
-    released: released
-    kind: kind
-  }
-  input.pointer = nextPointer
-  input.lastInputKind = kind
-  Device.deviceChanged(watch: input.deviceWatch)
-  input.touchTargetSize = touchTargetUnits(
-    viewport: viewport
-    displayScale: input.deviceWatch.facts.displayScale
-  )
-
-  if pressed {
-    input.pressedEntityId = hitTestFor(
-      world: world
-      uiSystems: uiSystems
-      x: mx
-      y: my
-      kind: kind
-      touchTargetSize: input.touchTargetSize
-    )
-    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntityId.index}")
-  }
-
-  if released {
-    var hit: EntityId = hitTestFor(
-      world: world
-      uiSystems: uiSystems
-      x: mx
-      y: my
-      kind: kind
-      touchTargetSize: input.touchTargetSize
-    )
-    log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntityId.index}")
-    if isNone(this: hit) is false {
-      if hit is input.pressedEntityId {
-        if componentHas(this: world.onClicks, entityId: hit) {
-          let oc: view OnClick = componentView(this: world.onClicks, entityId: hit)
-          log("[input] fire {oc.actionId} on entity {hit.index}")
-          eventSend(this: input.uiActions, value: UiAction { entityId: hit, actionId: oc.actionId })
-        } else {
-          log("[input] release matched press but entity has no OnClick")
-        }
-      } else {
-        log("[input] release hit {hit.index} != pressed {input.pressedEntityId.index} - drop")
-      }
-    } else {
-      log("[input] release hit nothing - drop")
-    }
-    input.pressedEntityId = inputNoEntityId
   }
 }
 

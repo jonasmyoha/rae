@@ -18,6 +18,11 @@
 #     becomes a drag only past 10 points along the axis; the drag then claims
 #     the press (ScrollDrag.active, read by updateUiInput), so a drag over a
 #     button scrolls and its release clicks nothing, while a tap still clicks.
+#     The wheel (a trackpad) moves the content itself, never mid-press, at most
+#     120 points past a bound; the spring and the momentum wait a few frames
+#     after its last event so they do not fight a trackpad's own momentum, and
+#     `scrollRootSettling` tells an event loop to keep rendering until all of
+#     it is at rest. Distances are points, through the input's touch target.
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
@@ -32,6 +37,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Hierarchy
 open ui/UiSystems
+open ui/ScrollDrag
+open ui/InputKind
 
 # Where each page's scroll position is when its root is not mounted: page
 # id -> position along the axis. An app resource (on its session) that outlives
@@ -324,8 +331,24 @@ func scrollRootSystem(world: mod UiWorld, uiSystems: mod UiSystems, memory: mod 
 # ----- the lib physics (former ScrollPanel, #729) ---------------------------
 
 # Wheel notches are small integers; this turns one into a useful jump without
-# making a trackpad flick fly past the whole panel.
-const scrollWheelStep: Float = 48.0
+# making a trackpad flick fly past the whole panel. In points, like the two
+# below: the UI's units per point come from the input's touch target size.
+const scrollWheelStepPoints: Float = 48.0
+
+# How far the wheel may stretch the content past a bound. The rubber band
+# still gives a little at a large overshoot, and a trackpad's momentum can
+# deliver hundreds of events: without a cap they add up to a huge stretch
+# and a long spring back.
+const scrollWheelOvershootPoints: Float = 120.0
+
+# Frames after the last wheel event before the spring and the momentum run
+# (about 50 ms at 60 fps): a trackpad keeps sending its own momentum events
+# after the fingers lift, and the spring must not fight them
+const scrollWheelQuietFrames: Int = 3
+
+# Frames after the last wheel event that still count as settling, so an
+# event loop keeps rendering until the wheel has gone quiet (about 0.25 s)
+const scrollWheelSettleFrames: Int = 15
 
 # Rubber-band spring back to the bound after an overshoot. Per-frame coefficients
 # (~60 fps). tension 0.08 + friction 0.56 is a NEAR-CRITICALLY-DAMPED spring
@@ -502,10 +525,17 @@ func updateScrollRoot(
     drag.active = false
   }
 
-  # ----- wheel (only when updateUiInput routed it here) -----
-  let wheel: Float = uiWheelFor(input: input, entityId: entityId)
+  # ----- wheel (only when updateUiInput routed it here, never mid-press) -----
+  var wheel: Float = uiWheelFor(input: input, entityId: entityId)
+  if input.pointer.down {
+    wheel = 0.0
+  }
+  if drag.wheelIdleFrames < 1000 {
+    drag.wheelIdleFrames = drag.wheelIdleFrames + 1
+  }
   if wheel is not 0.0 {
-    let raw: Float = wheel * scrollWheelStep
+    let unitsPerPoint: Float = input.touchTargetSize / touchTargetPoints
+    let raw: Float = wheel * scrollWheelStepPoints * unitsPerPoint
     state.y = state.y + dampedDelta(
       current: state.y
       delta: raw
@@ -513,6 +543,17 @@ func updateScrollRoot(
       high: 0.0
       dim: dim
     )
+    let overshoot: Float = scrollWheelOvershootPoints * unitsPerPoint
+    if state.y < floor - overshoot {
+      state.y = floor - overshoot
+    }
+    if state.y > overshoot {
+      state.y = overshoot
+    }
+    # the wheel moves the content itself; the spring and the momentum wait
+    # until it is quiet
+    state.velocity = 0.0
+    drag.wheelIdleFrames = 0
   }
 
   if drag.active {
@@ -531,8 +572,8 @@ func updateScrollRoot(
     drag.d2 = drag.d1
     drag.d1 = drag.d0
     drag.d0 = damped
-  } else {
-    # ----- momentum + rubber-band spring (not dragging) -----
+  } else if drag.wheelIdleFrames >= scrollWheelQuietFrames {
+    # ----- momentum + rubber-band spring (not dragging, the wheel quiet) -----
     if state.y > 0.0 or state.y < floor {
       var target: Float = 0.0
       if state.y < floor {
@@ -573,6 +614,41 @@ func updateScrollRoot(
     )
   }
   ret before is not state.y
+}
+
+# The root's scroll position along its axis (0 for none)
+func scrollPositionOf(world: view UiWorld, entityId: view EntityId) ret Float {
+  if isNone(this: entityId) or componentHas(this: world.scrollStates, entityId: entityId) is false {
+    ret 0.0
+  }
+  ret componentView(this: world.scrollStates, entityId: entityId).y
+}
+
+# Whether the root is still moving or may move without new input: a press
+# is tracked, a fling or a spring is running, or the wheel was used in the
+# last few frames. An event loop keeps rendering frames while it is true
+# (the spring waits for the wheel to go quiet, which takes frames).
+func scrollRootSettling(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  if isNone(this: entityId) or componentHas(this: world.scrollStates, entityId: entityId) is false {
+    ret false
+  }
+  let state: view ScrollState = componentView(this: world.scrollStates, entityId: entityId)
+  if state.velocity is not 0.0 or state.y > 0.0 {
+    ret true
+  }
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: entityId)
+  if range.active and state.y < range.floor {
+    ret true
+  }
+  if componentHas(this: world.scrollDrags, entityId: entityId) {
+    let drag: view ScrollDrag = componentView(this: world.scrollDrags, entityId: entityId)
+    ret drag.dragging or drag.wheelIdleFrames < scrollWheelSettleFrames
+  }
+  ret false
 }
 
 # Whether a press on the root is being tracked (a drag, or a press that may

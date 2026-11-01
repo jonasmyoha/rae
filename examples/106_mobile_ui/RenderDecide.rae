@@ -49,7 +49,7 @@ func decideActive(
     }
   }
   if active is false {
-    if input.pressedEntityId is not prevPressed {
+    if input.ui.pressedEntityId is not prevPressed {
       active = true
     }
   }
@@ -64,7 +64,7 @@ func decideActive(
     }
   }
   if active is false {
-    if input.pointer.pressed or input.pointer.released {
+    if input.ui.pointer.pressed or input.ui.pointer.released {
       active = true
     }
   }
@@ -74,18 +74,12 @@ func decideActive(
   # the cursor enters or leaves their rect. The check below only
   # marks dirty on entity TRANSITIONS, so an idle cursor parked over
   # the same rect stays at 0 fps.
-  let mx: Float = viewportPointerX(viewport: viewport)
-  let my: Float = viewportPointerY(viewport: viewport)
   # Hover only for a pointer that hovers: never a finger (it stays where it
-  # lifted), and only where the device has one (Device.canHover)
+  # lifted), and only where the device has one (Device.canHover); the lib's
+  # input already hit-tested this frame's pointer
   var currentHovered: EntityId = noEntity()
-  if showsHover(kind: input.pointer.kind, canHover: input.deviceWatch.facts.canHover) {
-    currentHovered = hitTest(
-      world: world
-      uiSystems: uiSystems
-      x: mx
-      y: my
-    )
+  if showsHover(kind: input.ui.pointer.kind, canHover: input.ui.deviceWatch.facts.canHover) {
+    currentHovered = input.ui.hoveredEntityId
   }
   if active is false {
     if currentHovered is not prevHovered {

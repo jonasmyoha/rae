@@ -1,0 +1,23 @@
+# ScrollDrag — `updateScrollRoot`'s runtime state per ScrollRoot
+# (ui/scrollRootSystem), never authored or serialized:
+#
+# - `dragging`: a press on the root is being tracked; `active` once it has
+#   moved past the activation distance along the axis, so it IS a drag (the
+#   content follows the finger and the press is claimed: its release clicks
+#   nothing, ui/inputSystem); `pressPointer` / `lastPointer`: where the press
+#   was and the pointer last was, along the axis;
+# - `d0`..`d2`: the last three damped drag deltas, from which the lift
+#   velocity is picked;
+# - `wheelIdleFrames`: frames since the last wheel (or trackpad) event. The
+#   spring and the momentum wait while it is small, so they do not fight a
+#   trackpad's own momentum events, which keep arriving after the lift.
+type ScrollDrag {
+  dragging: Bool
+  lastPointer: Float
+  d0: Float
+  d1: Float
+  d2: Float
+  active: Bool = false
+  pressPointer: Float = 0.0
+  wheelIdleFrames: Int = 1000
+}

@@ -133,8 +133,9 @@ length the dock overlay covers (`miniPlayer + navTabs + safe lift + a gap`,
 448.99 for a `Body`; 466.34 for the album root, which also carries the page
 padding). No page carries a height formula; `findScrollRoot(world)` is the
 per-frame target query (the root on the Active page); a root whose content
-fits is inert. The drag / wheel / spring FSM stays the app's
-(`inputSystem/ScrollInput.rae`) and only reads the range.
+fits is inert. The drag / wheel / spring physics is the lib's
+`updateScrollRoot` too: a drag claims its press, so its release clicks
+nothing, and the wheel waits for a trackpad's momentum before the spring.
 
 ## 4. The frame
 
@@ -143,8 +144,8 @@ fits is inert. The drag / wheel / spring FSM stays the app's
 ```
 waitEvents(timeout)          hybrid loop: 0 while animating/interacting,
                              nextWaitTimeoutSec(...) when idle (§5)
-pollClose + gather input     lib/ui inputSystem over the world
-applyWheelScroll             scroll FSM (inputSystem/ScrollInput.rae)
+pollClose + gather input     lib/ui inputSystem over the world (UiInput)
+updateScrollRoot             lib scroll physics on the page's ScrollRoot
 1. runFrameInputDispatch     hit-test; each fired id -> the action table ->
                              a typed AppCommand on App.commands; the command
                              systems (navigation, playback, sheet, canvas)

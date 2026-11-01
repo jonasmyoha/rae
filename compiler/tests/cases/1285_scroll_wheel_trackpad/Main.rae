@@ -1,0 +1,138 @@
+# The wheel on a lib scroll root (ui/scrollRootSystem), as a trackpad drives
+# it: the wheel moves the content itself (no momentum of its own), a long
+# run of events past the end stretches at most 120 points past the floor,
+# the spring back waits until the wheel has been quiet for a few frames (a
+# trackpad keeps sending its momentum after the lift, which the spring
+# must not fight), and then settles exactly on the floor; the wheel does
+# nothing while the pointer is pressed; scrollRootSettling stays true until
+# all of it is at rest. Units are points (the default touch target).
+# `\{`/`\}` keep the JSON braces literal.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/InputKind
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func listScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"list\",\"root\":\"Window\",\"nodes\":\{"
+  )
+  s = s.concat(
+    other: "\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Children\":[\"List\"]\},"
+  )
+  s = s.concat(
+    other: "\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":500\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"ScrollRoot\":\{\"axis\":\"Y\"\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  list: EntityId
+}
+
+func frame(rig: mod Rig, down: view Bool, wheel: view Float) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: 150.0
+    y: 100.0
+    down: down
+    kind: InputKind.mouse
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: wheel
+  )
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+  )
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+}
+
+func position(rig: view Rig) ret Int {
+  let y: Float = componentView(this: rig.world.scrollStates, entityId: rig.list).y
+  if y < 0.0 {
+    ret (y - 0.5).toInt()
+  }
+  ret (y + 0.5).toInt()
+}
+
+func settling(rig: view Rig) ret Bool {
+  ret scrollRootSettling(world: rig.world, uiSystems: rig.uiSystems, entityId: rig.list)
+}
+
+func main() {
+  let scene: Scene = parseScene(source: listScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 200.0
+  let rootEntityId: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+  var list: EntityId = noEntity()
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: "List") {
+    list = nodeEntityId(world: world, index: raw)
+  }
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: list)
+  log("mounted = {rootEntityId.index >= 0}, floor {range.floor.toInt()}")
+  var rig: Rig = { world: own world, uiSystems: own uiSystems, input: createUiInput(), list: list }
+  log("at rest: settling {settling(rig: rig)}")
+  # one notch down: 48 points, at once, with no momentum of its own
+  frame(rig: rig, down: false, wheel: -1.0)
+  log(
+    "one notch: position {position(rig: rig)}, velocity {componentView(
+      this: rig.world.scrollStates
+      entityId: rig.list
+    ).velocity}"
+  )
+  # a trackpad's long run past the end: the stretch stops at 120 past the floor
+  loop var i: Int = 0, i < 200, ++i {
+    frame(rig: rig, down: false, wheel: -1.0)
+  }
+  log("200 more notches: position {position(rig: rig)} (floor - 120 = {range.floor.toInt() - 120})")
+  # two quiet frames: the spring still waits
+  frame(rig: rig, down: false, wheel: 0.0)
+  frame(rig: rig, down: false, wheel: 0.0)
+  log("2 quiet frames: position {position(rig: rig)}, settling {settling(rig: rig)}")
+  var frames: Int = 2
+  loop frames < 600 and settling(rig: rig) {
+    frame(rig: rig, down: false, wheel: 0.0)
+    frames = frames + 1
+  }
+  log(
+    "at rest within 600 frames {frames < 600}: position {position(rig: rig)}, settling {settling(
+      rig: rig
+    )}"
+  )
+  # pressed: the wheel moves nothing
+  frame(rig: rig, down: true, wheel: 0.0)
+  frame(rig: rig, down: true, wheel: 3.0)
+  log("wheel while pressed: position {position(rig: rig)}")
+  frame(rig: rig, down: false, wheel: 0.0)
+}

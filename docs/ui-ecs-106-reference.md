@@ -158,7 +158,7 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `BottomSheet` / `SheetPanel` | `bottomSheetSystem` *(obs)* | `screenSystem/BottomSheet.rae` |
 | `TextField` | lib `textFieldSystem` via `searchFieldSystem` | `screenSystem/SearchSystems.rae` (input phase) |
 | `NavTab` | `navTabsSystem` | `screenSystem/DockSystems.rae` (on switch) |
-| `ScrollRoot` | `scrollRootSystem` + the scroll FSM | lib/ui/scrollRootSystem + `inputSystem/ScrollInput.rae` |
+| `ScrollRoot` | `scrollRootSystem` + `updateScrollRoot` | lib/ui/scrollRootSystem (input: lib `UiInput` in `inputSystem/InputGpu2d.rae`) |
 | `HeroWidget` | `spawnHeroTransition` / `heroTransitionSystem` | lib/ui/animationSystem (key written by the cover binding systems) |
 
 ### Who OWNS which table (ECS split step 4, docs/ecs-systems-own-their-tables.md)

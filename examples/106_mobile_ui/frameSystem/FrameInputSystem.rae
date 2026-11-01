@@ -8,6 +8,7 @@ open ui/Theme
 open ui/DebugOverlay
 open ui/DebugPlacement
 open ui/scrollRootSystem/ScrollRootSystem
+open ui/inputSystem/InputSystem
 
 # Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
 # system, the live-resize probe, the scroll physics, the action dispatch, the
@@ -24,7 +25,6 @@ func frameInputSystem(
 ) {
   let appState: mod AppState = app.appState
   let playbackSystem: mod PlaybackSystem = app.musicSystems.playbackSystem
-  let scrollFsm: mod ScrollFsm = session.scrollFsm
   let input: mod InputSystem = session.input
   # Hot-reload poll. If `rae watch` signaled a fresh build, snapshot
   # route + scroll into .rae/state.json and exit 0. The supervisor sees the
@@ -32,7 +32,10 @@ func frameInputSystem(
   # same screen at the same scroll (restoreStartState).
   let sig: ReloadSignal = pollReloadSignal(w: session.reloadWatcher)
   if sig.verb is ReloadVerb.reload {
-    saveStateAndExit(screen: session.currentScreen, scrollY: scrollFsm.scrollY)
+    saveStateAndExit(
+      screen: session.currentScreen
+      scrollY: scrollPositionOf(world: world, entityId: frame.scrollTarget)
+    )
   }
 
   let themeGenerationBefore: Int = appState.theme.generation
@@ -61,7 +64,7 @@ func frameInputSystem(
   )
   if debugTookPointer {
     eventClear(UiAction, this: input.uiActions)
-    input.pressedEntityId = noEntity()
+    suppressUiPress(input: input.ui, world: world)
     frame.forceRender = true
   }
   # #976: taps and typing go to the text fields (lib/ui textFieldSystem); a
@@ -112,47 +115,36 @@ func frameInputSystem(
     )
     tick.scrollOnThisScreen = range.active
     tick.scrollFloor = range.floor
-    scrollFsm.velocity = 0.0
-    if isNone(this: frame.scrollTarget) {
-      scrollFsm.scrollY = 0.0
-    } else {
-      if componentHas(this: world.scrollStates, entityId: frame.scrollTarget) {
-        let activeScroll: view ScrollState = componentView(
-          this: world.scrollStates
-          entityId: frame.scrollTarget
-        )
-        scrollFsm.scrollY = activeScroll.y
-      } else {
-        scrollFsm.scrollY = 0.0
-      }
-    }
   }
 
-  # Drag + momentum + spring-back physics (inputSystem/ScrollInput). True on
-  # the frame a drag just ended so the dispatch below skips the release-click
-  # on whatever's under the cursor.
-  tick.dragJustReleased = applyDragPhysics(
-    fsm: scrollFsm
-    world: world
-    uiSystems: app.uiSystems
-    viewport: app.viewport
-    scrollTarget: frame.scrollTarget
-    scrollOnThisScreen: tick.scrollOnThisScreen
-    scrollFloor: tick.scrollFloor
-    rubberDim: app.viewport.layoutH
-  )
-  # Mouse-wheel / trackpad scroll must run before layout/transform and
+  # Drag, wheel, momentum and spring-back: the lib's scroll physics on the
+  # page's ScrollRoot (lib/ui/scrollRootSystem). A drag claims its press, so
+  # its release clicks nothing. It must run before layout/transform and
   # render, or the first Home wheel event is invisible until another
   # wake/rebuild path refreshes the frame.
-  applyWheelScroll(
-    fsm: scrollFsm
+  if updateScrollRoot(
     world: world
     uiSystems: app.uiSystems
-    scrollTarget: frame.scrollTarget
-    scrollOnThisScreen: tick.scrollOnThisScreen
-    scrollFloor: tick.scrollFloor
-    rubberDim: app.viewport.layoutH
-  )
+    entityId: frame.scrollTarget
+    input: input.ui
+  ) {
+    frame.forceRender = true
+  }
+  if isNone(this: frame.scrollTarget) is false and componentHas(
+    this: world.scrollStates
+    entityId: frame.scrollTarget
+  ) {
+    let scroll: view ScrollState = componentView(
+      this: world.scrollStates
+      entityId: frame.scrollTarget
+    )
+    reportScriptedDrag(
+      input: input
+      scrollY: scroll.y
+      velocity: scroll.velocity
+      floor: tick.scrollFloor
+    )
+  }
 
   # Input dispatch. Action handlers enqueue commands + mutate AppState /
   # data-source revisions; dependent UI visuals are refreshed by the
@@ -168,7 +160,6 @@ func frameInputSystem(
     actionTable: app.actionTable
     commands: app.commands
     spotifyEnabled: app.spotifySystem.enabled
-    dragJustReleased: tick.dragJustReleased
   )
   tick.nextScreen = inputDispatch.nextScreen
   tick.hadActions = inputDispatch.hadActions
