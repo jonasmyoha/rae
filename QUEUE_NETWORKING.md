@@ -7,8 +7,8 @@ networking is designed in **`docs/server-benchmarks-design.md`** (servers:
 those before adding anything here.
 
 **No GPL library, ever.** The old Step 3 linked Mongoose, which is GPL-2.0 or
-a paid licence; it was dropped. A native library Rae links must carry a
-permissive licence (MIT, BSD, zlib, Apache-2.0, ISC, CC0 or public domain),
+a paid license; it was dropped. A native library Rae links must carry a
+permissive license (MIT, BSD, zlib, Apache-2.0, ISC, CC0 or public domain),
 and Rae itself comes first (AGENTS.md: the runtime C rule;
 `docs/tech-stack-and-dependencies.md` for the order of preference).
 
@@ -35,13 +35,13 @@ and Rae itself comes first (AGENTS.md: the runtime C rule;
 - [x] **WebSocket server:** `lib/webSocket` + `lib/net/ecs/WebSocketSystems`.
 - [x] **Wake the poller from a worker:** `pollerWake` (`lib/net/Poller`).
 - [x] **HTTP client on Apple:** `lib/net/HttpGet` (GET over `lib/net/NetworkConnection`, Network.framework, TLS with the system trust store); WebSocket client too.
-- [ ] **HTTP client off Apple:** the same API over a TLS library (licence above) or the platform's own stack; and POST.
+- [ ] **HTTP client off Apple:** the same API over a TLS library (license above) or the platform's own stack; and POST.
 - [ ] **Web Highscores:** Tetris submits / fetches scores from a Rae server (Step 4).
 
 ## Step 4: The Rae Server
 - [x] **Server API:** `lib/net/ecs` (`httpServerFrame`, a router, `respond`, `promote`); the benchmarks in `benchmarks/servers`.
 - [ ] **Highscore Backend:** a standalone highscore server in Rae over `lib/net/ecs` and `lib/sql`.
-- [ ] **Server TLS:** HTTPS / wss:// served by Rae (a licence-clean TLS library; until then a TLS-terminating proxy in front).
+- [ ] **Server TLS:** HTTPS / wss:// served by Rae (a license-clean TLS library; until then a TLS-terminating proxy in front).
 
 ## Step 5: Real-time Multiplayer
 - [ ] **UDP API:** datagrams in `lib/net` (one-call shims, the policy in Rae, as `lib/net/Tcp`).
