@@ -1,0 +1,122 @@
+cheader "rae_sql.h"
+
+# The bindings to tools/sqlite/rae_sql_glue.c (docs/sql.md): one SQLite call
+# each, no policy. The rules (checks, sizes, the errors as values) are in
+# sql/Sql and sql/SqlStatement. Bytes are a List's `.data` with an offset and
+# a count; a path or SQL that SQLite wants NUL-terminated gets its 0 appended
+# by the caller. Handles are integers (0: none), as lib/net's descriptors
+# are. A program that imports this links SQLite
+# (tools/sqlite/build.sh builds it).
+func rae_sql_threadsafe() unsafe extern("rae_sql_threadsafe") ret Int
+
+func rae_sql_version_number() unsafe extern("rae_sql_version_number") ret Int
+
+func rae_sql_open(pathZ: Buffer(UInt8), flags: Int) unsafe extern("rae_sql_open") ret Int
+
+func rae_sql_close(db: Int) unsafe extern("rae_sql_close") ret Int
+
+func rae_sql_errcode(db: Int) unsafe extern("rae_sql_errcode") ret Int
+
+func rae_sql_extended_errcode(db: Int) unsafe extern("rae_sql_extended_errcode") ret Int
+
+func rae_sql_errmsg_length(db: Int) unsafe extern("rae_sql_errmsg_length") ret Int
+
+func rae_sql_errmsg_copy(db: Int, into: Buffer(UInt8)) unsafe extern("rae_sql_errmsg_copy")
+
+func rae_sql_errstr_length(code: Int) unsafe extern("rae_sql_errstr_length") ret Int
+
+func rae_sql_errstr_copy(code: Int, into: Buffer(UInt8)) unsafe extern("rae_sql_errstr_copy")
+
+func rae_sql_busy_timeout(db: Int, milliseconds: Int) unsafe extern("rae_sql_busy_timeout") ret Int
+
+func rae_sql_exec(db: Int, sqlZ: Buffer(UInt8)) unsafe extern("rae_sql_exec") ret Int
+
+func rae_sql_changes(db: Int) unsafe extern("rae_sql_changes") ret Int
+
+func rae_sql_last_insert_rowid(db: Int) unsafe extern("rae_sql_last_insert_rowid") ret Int
+
+func rae_sql_autocommit(db: Int) unsafe extern("rae_sql_autocommit") ret Int
+
+func rae_sql_prepare(
+  db: Int
+  sql: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_sql_prepare") ret Int
+
+func rae_sql_finalize(stmt: Int) unsafe extern("rae_sql_finalize") ret Int
+
+func rae_sql_reset(stmt: Int) unsafe extern("rae_sql_reset") ret Int
+
+func rae_sql_clear_bindings(stmt: Int) unsafe extern("rae_sql_clear_bindings") ret Int
+
+func rae_sql_step(stmt: Int) unsafe extern("rae_sql_step") ret Int
+
+func rae_sql_bind_parameter_count(stmt: Int) unsafe extern("rae_sql_bind_parameter_count") ret Int
+
+func rae_sql_bind_parameter_index(
+  stmt: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_sql_bind_parameter_index") ret Int
+
+func rae_sql_bind_int(stmt: Int, index: Int, value: Int) unsafe extern("rae_sql_bind_int") ret Int
+
+func rae_sql_bind_double(
+  stmt: Int
+  index: Int
+  value: Float64
+) unsafe extern("rae_sql_bind_double") ret Int
+
+func rae_sql_bind_text(
+  stmt: Int
+  index: Int
+  bytes: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_sql_bind_text") ret Int
+
+func rae_sql_bind_blob(
+  stmt: Int
+  index: Int
+  bytes: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_sql_bind_blob") ret Int
+
+func rae_sql_bind_null(stmt: Int, index: Int) unsafe extern("rae_sql_bind_null") ret Int
+
+func rae_sql_column_count(stmt: Int) unsafe extern("rae_sql_column_count") ret Int
+
+func rae_sql_column_type(stmt: Int, column: Int) unsafe extern("rae_sql_column_type") ret Int
+
+func rae_sql_column_int(stmt: Int, column: Int) unsafe extern("rae_sql_column_int") ret Int
+
+func rae_sql_column_double(
+  stmt: Int
+  column: Int
+) unsafe extern("rae_sql_column_double") ret Float64
+
+func rae_sql_column_bytes(stmt: Int, column: Int) unsafe extern("rae_sql_column_bytes") ret Int
+
+func rae_sql_column_text_copy(
+  stmt: Int
+  column: Int
+  into: Buffer(UInt8)
+) unsafe extern("rae_sql_column_text_copy")
+
+func rae_sql_column_blob_copy(
+  stmt: Int
+  column: Int
+  into: Buffer(UInt8)
+) unsafe extern("rae_sql_column_blob_copy")
+
+func rae_sql_column_name_length(
+  stmt: Int
+  column: Int
+) unsafe extern("rae_sql_column_name_length") ret Int
+
+func rae_sql_column_name_copy(
+  stmt: Int
+  column: Int
+  into: Buffer(UInt8)
+) unsafe extern("rae_sql_column_name_copy")

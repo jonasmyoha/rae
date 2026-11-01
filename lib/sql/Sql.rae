@@ -1,0 +1,274 @@
+# Sql — SQLite databases (docs/sql.md): open, exec, transactions, close,
+# with every failure an SqlError value (never a crash). Statements are
+# sql/SqlStatement.
+#
+# One connection belongs to one thread: open it on the thread that uses it
+# (a spawned SQL worker opens its own). SQLite is built in multi-thread mode
+# for exactly that (tools/sqlite/build.sh). Several connections, in several
+# threads or programs, may share one database file; WAL lets readers go on
+# while one writer writes, and the busy timeout makes a writer wait for
+# another instead of failing at once.
+import String
+open sql/SqlGlue
+
+# What went wrong: SQLite's result code (0 = none), its extended code and
+# the message. `ok` tells whether there is an error at all.
+type SqlError {
+  code: Int
+  extendedCode: Int
+  message: String
+}
+
+func sqlNoError() ret SqlError {
+  ret SqlError { code: 0, extendedCode: 0, message: "" }
+}
+
+func sqlFailed(error: view SqlError) ret Bool {
+  ret error.code is not 0
+}
+
+# An error Rae raises itself (SQLite's SQLITE_MISUSE, 21): a closed handle, a
+# column out of range
+func sqlMisuse(message: view String) ret SqlError {
+  ret SqlError { code: 21, extendedCode: 21, message: "{message}" }
+}
+
+# How a database is opened
+enum SqlOpenMode { readWriteCreate, readWrite, readOnly }
+
+# read and write, created when missing
+# read and write, it must exist
+
+# An open database (or the error that kept it closed). `open` is false once
+# it is closed or when opening failed; every call on a closed database
+# answers with a misuse error.
+type SqlDatabase {
+  handle: Int
+  open: Bool
+  path: String
+  error: SqlError
+}
+
+# SQLite's open flags: READONLY 1, READWRITE 2, CREATE 4, FULLMUTEX 0x10000
+# is not used (multi-thread mode: the connection is the thread's own)
+func sqlOpenFlags(mode: view SqlOpenMode) ret Int {
+  if mode is SqlOpenMode.readOnly {
+    ret 1
+  }
+  if mode is SqlOpenMode.readWrite {
+    ret 2
+  }
+  ret 6
+}
+
+# The bytes of `text` with a 0 after them, as SQLite reads a C string
+func sqlTextZ(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  bytes.add(value: 0)
+  ret bytes
+}
+
+# The bytes of `text`, without a 0
+func sqlTextBytes(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+# `count` zero bytes, for SQLite to copy into
+func sqlZeroBytes(count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: 0)
+  }
+  ret bytes
+}
+
+# The connection's last error (code 0: none)
+func sqlErrorOf(handle: view Int) ret SqlError {
+  var code: Int = 0
+  var extendedCode: Int = 0
+  var length: Int = 0
+  unsafe {
+    code = rae_sql_errcode(db: handle)
+    extendedCode = rae_sql_extended_errcode(db: handle)
+    length = rae_sql_errmsg_length(db: handle)
+  }
+  if code is 0 or code is 100 or code is 101 {
+    ret sqlNoError()
+  }
+  var bytes: List(UInt8) = sqlZeroBytes(count: length)
+  unsafe {
+    rae_sql_errmsg_copy(db: handle, into: bytes.data)
+  }
+  ret SqlError {
+    code: code
+    extendedCode: extendedCode
+    message: String.fromBytes(bytes: bytes, start: 0, count: length)
+  }
+}
+
+# The error of result `code` from a call that returned it, with the
+# connection's message when it has one, else SQLite's text for the code
+func sqlErrorFor(handle: view Int, code: view Int) ret SqlError {
+  if code is 0 or code is 100 or code is 101 {
+    ret sqlNoError()
+  }
+  let connection: SqlError = sqlErrorOf(handle: handle)
+  if connection.code is not 0 {
+    ret connection
+  }
+  var length: Int = 0
+  unsafe {
+    length = rae_sql_errstr_length(code: code)
+  }
+  var bytes: List(UInt8) = sqlZeroBytes(count: length)
+  unsafe {
+    rae_sql_errstr_copy(code: code, into: bytes.data)
+  }
+  ret SqlError {
+    code: code
+    extendedCode: code
+    message: String.fromBytes(bytes: bytes, start: 0, count: length)
+  }
+}
+
+# How long a write waits for another writer before it fails, in ms
+const sqlDefaultBusyTimeoutMs: Int = 5000
+
+# Open the database at `path` (":memory:" for one in memory). With `wal`
+# the file is switched to write-ahead logging (kept by the file: every later
+# connection uses it too). The result carries the error when it failed, and
+# is then closed.
+func sqlOpen(path: view String, mode: view SqlOpenMode, wal: view Bool) ret SqlDatabase {
+  var pathZ: List(UInt8) = sqlTextZ(text: path)
+  var handle: Int = 0
+  unsafe {
+    handle = rae_sql_open(pathZ: pathZ.data, flags: sqlOpenFlags(mode: mode))
+  }
+  if handle is 0 {
+    ret SqlDatabase {
+      handle: handle
+      open: false
+      path: "{path}"
+      error: sqlMisuse(message: "out of memory opening {path}")
+    }
+  }
+  let opened: SqlError = sqlErrorOf(handle: handle)
+  if sqlFailed(error: opened) {
+    unsafe {
+      let closed: Int = rae_sql_close(db: handle)
+    }
+    ret SqlDatabase { handle: handle, open: false, path: "{path}", error: opened }
+  }
+  var database: SqlDatabase = { handle: handle, open: true, path: "{path}", error: sqlNoError() }
+  unsafe {
+    let timeout: Int = rae_sql_busy_timeout(db: handle, milliseconds: sqlDefaultBusyTimeoutMs)
+  }
+  if wal and mode is not SqlOpenMode.readOnly {
+    let walError: SqlError = sqlExec(database: database, sql: "PRAGMA journal_mode=WAL")
+    if sqlFailed(error: walError) {
+      database.error = walError
+    }
+  }
+  ret database
+}
+
+# Close the database. A database with statements not yet finalized stays
+# open and says so (SQLITE_BUSY): finalize them first.
+func sqlClose(database: mod SqlDatabase) ret SqlError {
+  if database.open is false {
+    ret sqlNoError()
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_close(db: database.handle)
+  }
+  if code is not 0 {
+    ret sqlErrorFor(handle: database.handle, code: code)
+  }
+  database.open = false
+  ret sqlNoError()
+}
+
+# Run `sql` (one or more statements, no results read). For a statement run
+# many times or with values, prepare it (sql/SqlStatement): values are never
+# spliced into SQL text.
+func sqlExec(database: view SqlDatabase, sql: view String) ret SqlError {
+  if database.open is false {
+    ret sqlMisuse(message: "the database {database.path} is closed")
+  }
+  var sqlZ: List(UInt8) = sqlTextZ(text: sql)
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_exec(db: database.handle, sqlZ: sqlZ.data)
+  }
+  ret sqlErrorFor(handle: database.handle, code: code)
+}
+
+# A transaction: `sqlBegin` takes the write lock at once (BEGIN IMMEDIATE,
+# so two writers wait for each other at the start instead of failing in the
+# middle), `sqlCommit` keeps the changes, `sqlRollback` drops them
+func sqlBegin(database: view SqlDatabase) ret SqlError {
+  ret sqlExec(database: database, sql: "BEGIN IMMEDIATE")
+}
+
+func sqlCommit(database: view SqlDatabase) ret SqlError {
+  ret sqlExec(database: database, sql: "COMMIT")
+}
+
+func sqlRollback(database: view SqlDatabase) ret SqlError {
+  ret sqlExec(database: database, sql: "ROLLBACK")
+}
+
+# Whether a transaction is open (SQLite is not in autocommit mode)
+func sqlInTransaction(database: view SqlDatabase) ret Bool {
+  if database.open is false {
+    ret false
+  }
+  var autocommit: Int = 1
+  unsafe {
+    autocommit = rae_sql_autocommit(db: database.handle)
+  }
+  ret autocommit is 0
+}
+
+# The rows the last INSERT, UPDATE or DELETE changed
+func sqlChanges(database: view SqlDatabase) ret Int {
+  if database.open is false {
+    ret 0
+  }
+  unsafe {
+    ret rae_sql_changes(db: database.handle)
+  }
+}
+
+# The rowid of the last row inserted on this connection (0: none)
+func sqlLastInsertRowId(database: view SqlDatabase) ret Int {
+  if database.open is false {
+    ret 0
+  }
+  unsafe {
+    ret rae_sql_last_insert_rowid(db: database.handle)
+  }
+}
+
+# The linked SQLite's version, e.g. 3054001 for 3.54.1
+func sqlVersionNumber() ret Int {
+  unsafe {
+    ret rae_sql_version_number()
+  }
+}
+
+# Whether the linked SQLite lets each thread have its own connection (1:
+# serialized, 2: multi-thread; 0 in a single-thread build, the browser's)
+func sqlThreadSafety() ret Int {
+  unsafe {
+    ret rae_sql_threadsafe()
+  }
+}

@@ -1,0 +1,219 @@
+# lib/sql over SQLite, on a temporary database file: open with WAL, every
+# kind of value bound and read back (an Int, a Float, Unicode text, bytes
+# with a 0 in them, null), a named placeholder, reset and run again, a
+# transaction rolled back and one committed, the errors as values (bad SQL,
+# a constraint, a placeholder out of range, a closed database, a finalized
+# statement, a column out of range, a file that cannot be opened), and two
+# spawned workers writing to the same file at once, each through its own
+# connection.
+open Sys
+open sql/Sql
+open sql/SqlStatement
+
+func databasePath() ret String {
+  var directory: String = getEnv(name: "TMPDIR")
+  if directory.length() is 0 {
+    directory = "/tmp"
+  }
+  if directory.endsWith(suffix: "/") is false {
+    directory = "{directory}/"
+  }
+  ret "{directory}rae_case_1288.sqlite"
+}
+
+func removeDatabase(path: view String) {
+  let removed: Bool = delete(path: path)
+  let removedWal: Bool = delete(path: "{path}-wal")
+  let removedShm: Bool = delete(path: "{path}-shm")
+}
+
+func report(label: view String, error: view SqlError) {
+  if sqlFailed(error: error) {
+    log("{label}: error {error.code}/{error.extendedCode} {error.message}")
+  } else {
+    log("{label}: ok")
+  }
+}
+
+func countRows(database: view SqlDatabase, table: view String) ret Int {
+  var count: SqlStatement = sqlPrepare(database: database, sql: "SELECT count(*) FROM {table}")
+  var rows: Int = -1
+  if sqlStep(statement: count) is SqlStep.row {
+    rows = sqlColumnInt(statement: count, column: 0)
+  }
+  sqlFinalize(statement: count)
+  ret rows
+}
+
+# A worker thread: its own connection, `rows` inserts in one transaction
+func writeRows(path: own String, worker: own Int, rows: own Int) ret Int {
+  var database: SqlDatabase = sqlOpen(path: path, mode: SqlOpenMode.readWrite, wal: false)
+  if database.open is false {
+    ret -1
+  }
+  let began: SqlError = sqlBegin(database: database)
+  var insert: SqlStatement = sqlPrepare(
+    database: database
+    sql: "INSERT INTO events (worker, n) VALUES (?, ?)"
+  )
+  var written: Int = 0
+  loop var i: Int = 0, i < rows, ++i {
+    let resetDone: SqlError = sqlReset(statement: insert)
+    let boundWorker: SqlError = sqlBindInt(statement: insert, index: 1, value: worker)
+    let boundN: SqlError = sqlBindInt(statement: insert, index: 2, value: i)
+    if sqlFailed(error: sqlRun(statement: insert)) is false {
+      written = written + 1
+    }
+  }
+  sqlFinalize(statement: insert)
+  let committed: SqlError = sqlCommit(database: database)
+  let closed: SqlError = sqlClose(database: database)
+  if sqlFailed(error: began) or sqlFailed(error: committed) {
+    ret -1
+  }
+  ret written
+}
+
+func main() {
+  let path: String = databasePath()
+  removeDatabase(path: path)
+  var database: SqlDatabase = sqlOpen(path: path, mode: SqlOpenMode.readWriteCreate, wal: true)
+  report(label: "open", error: database.error)
+  var mode: SqlStatement = sqlPrepare(database: database, sql: "PRAGMA journal_mode")
+  if sqlStep(statement: mode) is SqlStep.row {
+    log("journal mode: {sqlColumnText(statement: mode, column: 0)}")
+  }
+  sqlFinalize(statement: mode)
+  report(
+    label: "create"
+    error: sqlExec(
+      database: database
+      sql: "CREATE TABLE things (id INTEGER PRIMARY KEY, count INTEGER, ratio REAL, name TEXT UNIQUE, data BLOB, note TEXT)"
+    )
+  )
+  # every kind of value
+  var insert: SqlStatement = sqlPrepare(
+    database: database
+    sql: "INSERT INTO things (count, ratio, name, data, note) VALUES (?, ?, ?, ?, ?)"
+  )
+  log("placeholders: {sqlParameterCount(statement: insert)}")
+  let data: List(UInt8) = { 1, 0, 255, 7 }
+  report(
+    label: "bind int"
+    error: sqlBindInt(statement: insert, index: 1, value: -9007199254740993)
+  )
+  report(label: "bind float", error: sqlBindFloat(statement: insert, index: 2, value: 0.25))
+  report(label: "bind text", error: sqlBindText(statement: insert, index: 3, value: "Pähkinä 🌰"))
+  report(label: "bind bytes", error: sqlBindBytes(statement: insert, index: 4, value: data))
+  report(label: "bind null", error: sqlBindNull(statement: insert, index: 5))
+  report(label: "insert", error: sqlRun(statement: insert))
+  log("changes {sqlChanges(database: database)}, rowid {sqlLastInsertRowId(database: database)}")
+  # reset and run again with new values; the same name breaks UNIQUE
+  report(label: "reset", error: sqlReset(statement: insert))
+  report(label: "bind text again", error: sqlBindText(statement: insert, index: 3, value: "second"))
+  report(label: "insert again", error: sqlRun(statement: insert))
+  let resetForDuplicate: SqlError = sqlReset(statement: insert)
+  report(label: "insert a duplicate name", error: sqlRun(statement: insert))
+  let resetForRange: SqlError = sqlReset(statement: insert)
+  report(label: "bind out of range", error: sqlBindInt(statement: insert, index: 9, value: 1))
+  sqlFinalize(statement: insert)
+  # read everything back
+  var query: SqlStatement = sqlPrepare(
+    database: database
+    sql: "SELECT id, count, ratio, name, data, note FROM things ORDER BY id"
+  )
+  log(
+    "columns: {sqlColumnCount(statement: query)}, the 4th is {sqlColumnName(
+      statement: query
+      column: 3
+    )}"
+  )
+  loop sqlStep(statement: query) is SqlStep.row {
+    let bytes: List(UInt8) = sqlColumnBytes(statement: query, column: 4)
+    var shown: String = ""
+    loop let byte: view UInt8 in bytes {
+      shown = "{shown}{byte as Int} "
+    }
+    log(
+      "row {sqlColumnInt(statement: query, column: 0)}: {sqlColumnInt(statement: query, column: 1)}, {sqlColumnFloat(
+        statement: query
+        column: 2
+      )}, '{sqlColumnText(statement: query, column: 3)}', bytes [{shown}] ({bytes.length}), note null {sqlColumnIsNull(
+        statement: query
+        column: 5
+      )}, types {sqlColumnType(statement: query, column: 1)} {sqlColumnType(
+        statement: query
+        column: 2
+      )} {sqlColumnType(statement: query, column: 4)}"
+    )
+  }
+  log(
+    "after the end: column 99 is {sqlColumnInt(statement: query, column: 99)} '{sqlColumnText(
+      statement: query
+      column: 99
+    )}'"
+  )
+  sqlFinalize(statement: query)
+  log("a finalized statement steps to: {sqlStep(statement: query)} ({query.error.code})")
+  # a named placeholder
+  var named: SqlStatement = sqlPrepare(
+    database: database
+    sql: "SELECT ratio FROM things WHERE name = :name"
+  )
+  let nameIndex: Int = sqlParameterIndex(statement: named, name: ":name")
+  let boundName: SqlError = sqlBindText(statement: named, index: nameIndex, value: "Pähkinä 🌰")
+  if sqlStep(statement: named) is SqlStep.row {
+    log(
+      ":name is placeholder {nameIndex}; its ratio is {sqlColumnFloat(statement: named, column: 0)}"
+    )
+  }
+  sqlFinalize(statement: named)
+  # transactions
+  report(label: "begin", error: sqlBegin(database: database))
+  log("in a transaction: {sqlInTransaction(database: database)}")
+  let added: SqlError = sqlExec(
+    database: database
+    sql: "INSERT INTO things (name) VALUES ('dropped')"
+  )
+  report(label: "rollback", error: sqlRollback(database: database))
+  log("rows after the rollback: {countRows(database: database, table: "things")}")
+  report(label: "begin", error: sqlBegin(database: database))
+  let kept: SqlError = sqlExec(database: database, sql: "INSERT INTO things (name) VALUES ('kept')")
+  report(label: "commit", error: sqlCommit(database: database))
+  log("rows after the commit: {countRows(database: database, table: "things")}")
+  # errors as values
+  report(label: "bad SQL", error: sqlExec(database: database, sql: "SELEC 1"))
+  var badStatement: SqlStatement = sqlPrepare(
+    database: database
+    sql: "SELECT missingColumn FROM nowhere"
+  )
+  report(label: "prepare on a missing table", error: badStatement.error)
+  report(label: "bind on it", error: sqlBindInt(statement: badStatement, index: 1, value: 1))
+  log("it steps to: {sqlStep(statement: badStatement)}")
+  # two workers writing at once, each through its own connection
+  report(
+    label: "create events"
+    error: sqlExec(database: database, sql: "CREATE TABLE events (worker INTEGER, n INTEGER)")
+  )
+  let first: Task(Int) = spawn writeRows(path: "{path}", worker: 1, rows: 200)
+  let second: Task(Int) = spawn writeRows(path: "{path}", worker: 2, rows: 200)
+  let firstWrote: Int = first.get()
+  let secondWrote: Int = second.get()
+  log(
+    "workers wrote {firstWrote} and {secondWrote}; the table has {countRows(
+      database: database
+      table: "events"
+    )} rows"
+  )
+  report(label: "close", error: sqlClose(database: database))
+  let afterClose: SqlError = sqlExec(database: database, sql: "SELECT 1")
+  log("exec on the closed database: error {afterClose.code}")
+  var missing: SqlDatabase = sqlOpen(
+    path: "/nonexistent-rae-dir/x.sqlite"
+    mode: SqlOpenMode.readWriteCreate
+    wal: false
+  )
+  log("open in a missing folder: open {missing.open}, error {missing.error.code}")
+  removeDatabase(path: path)
+  log("removed: {exists(path: path) is false}")
+}

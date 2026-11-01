@@ -1,0 +1,39 @@
+open: ok
+journal mode: wal
+create: ok
+placeholders: 5
+bind int: ok
+bind float: ok
+bind text: ok
+bind bytes: ok
+bind null: ok
+insert: ok
+changes 1, rowid 1
+reset: ok
+bind text again: ok
+insert again: ok
+insert a duplicate name: error 19/2067 UNIQUE constraint failed: things.name (INSERT INTO things (count, ratio, name, data, note) VALUES (?, ?, ?, ?, ?))
+bind out of range: error 25/25 column index out of range (INSERT INTO things (count, ratio, name, data, note) VALUES (?, ?, ?, ?, ?))
+columns: 6, the 4th is name
+row 1: -9007199254740993, 0.25, 'Pähkinä 🌰', bytes [1 0 255 7 ] (4), note null true, types integer float blob
+row 2: -9007199254740993, 0.25, 'second', bytes [1 0 255 7 ] (4), note null true, types integer float blob
+after the end: column 99 is 0 ''
+a finalized statement steps to: failed (21)
+:name is placeholder 1; its ratio is 0.25
+begin: ok
+in a transaction: true
+rollback: ok
+rows after the rollback: 2
+begin: ok
+commit: ok
+rows after the commit: 3
+bad SQL: error 1/1 near "SELEC": syntax error
+prepare on a missing table: error 1/1 no such table: nowhere
+bind on it: error 1/1 no such table: nowhere
+it steps to: failed
+create events: ok
+workers wrote 200 and 200; the table has 400 rows
+close: ok
+exec on the closed database: error 21
+open in a missing folder: open false, error 14
+removed: true

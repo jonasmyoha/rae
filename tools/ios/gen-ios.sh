@@ -220,6 +220,22 @@ if grep -q 'box3d/box3d.h' "$gen/app.c"; then
   box3d_includes="  \"$box3d_install/include\"\n  \"$box3d_src/src\"\n"
 fi
 
+# SQLite (lib/sql): the same rule. An app whose C includes the lib/sql glue
+# compiles the pinned amalgamation and the glue, which tools/sqlite/build.sh
+# installs under src/, into the iOS target, in multi-thread mode with the
+# same options as the desktop library.
+sqlite_definitions=""
+if grep -q 'rae_sql.h' "$gen/app.c"; then
+  sqlite_install=${RAE_SQLITE:-${RAE_SQLITE_CACHE:-$HOME/.cache/rae/sqlite}/install}
+  if [ ! -f "$sqlite_install/src/sqlite3.c" ] || [ ! -f "$sqlite_install/include/rae_sql.h" ]; then
+    echo "error: this app imports sql; run tools/sqlite/build.sh first (downloads the pinned SQLite)" >&2; exit 1
+  fi
+  echo "gen-ios: compiling SQLite $(cat "$sqlite_install/VERSION") from source into the app"
+  box3d_sources="${box3d_sources}  \"$sqlite_install/src/sqlite3.c\"\n  \"$sqlite_install/src/rae_sql_glue.c\"\n"
+  box3d_includes="${box3d_includes}  \"$sqlite_install/include\"\n"
+  sqlite_definitions="SQLITE_THREADSAFE=2 $(sed 's/-D//g' "$sqlite_install/OPTIONS")"
+fi
+
 asset_lines=""; pkg_lines=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -274,7 +290,7 @@ $(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asse
 
 $(printf "%b" "${pkg_lines:-}")
 
-target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU)
+target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU $sqlite_definitions)
 target_compile_options(\${APP} PRIVATE -w -ffp-contract=off -g)
 target_include_directories(\${APP} PRIVATE
   "$runtime_dir"
