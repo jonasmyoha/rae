@@ -30,16 +30,24 @@ open ui/UiSystems
 # `processCommands` holding `mod` on its own state; `advancePlayback`
 # is its `update()` step. (No rename — the name is fine; adding the inbox
 # makes it the system, same as ComponentTable being the table.)
-# Deferred to #268: the Spotify play/pause path + `pollSpotify` moving
-# fully into `update()`, `like` -> a PlaylistSystem, and the UI consumers
+# Every action-driven change (toggle, set playing, start track) is a
+# command. Deferred to #268: the Spotify poll mirror
+# (`spotifySystem/SpotifyView.rae`) moving into `update()`, `like` -> a PlaylistSystem, and the UI
+# consumers
 # switching from DataDependency to `Observe`.
 
-# A play/pause command. A struct (not a bare enum) so future commands
-# (seek, setTrack, ...) can carry data without changing the inbox type.
-enum PlaybackCommandKind { togglePlay }
+# A playback command. Every change an action makes to playback state is
+# one of these, applied by `processCommands`; no action handler writes
+# PlaybackSystem fields itself. `playing` is read by `setPlaying`;
+# `albumStem`, `trackIndex` and `artKey` by `startTrack`.
+enum PlaybackCommandKind { togglePlay, setPlaying, startTrack }
 
 type PlaybackCommand {
   kind: PlaybackCommandKind
+  playing: Bool
+  albumStem: String
+  trackIndex: Int
+  artKey: String
 }
 
 # The playback system (docs/ecs-systems-own-their-tables.md §3): it OWNS the
@@ -152,7 +160,52 @@ func setNowPlayingArt(playbackSystem: mod PlaybackSystem, artKey: view String) p
 # `dispatchActions` (local playback); the toggle itself is applied later,
 # in Apply(A), by `processCommands`.
 func enqueuePlaybackToggle(this: mod PlaybackSystem) pub {
-  enqueue(this: this.inbox, value: PlaybackCommand { kind: PlaybackCommandKind.togglePlay })
+  enqueue(
+    this: this.inbox
+    value: PlaybackCommand {
+      kind: PlaybackCommandKind.togglePlay
+      playing: false
+      albumStem: ""
+      trackIndex: -1
+      artKey: ""
+    }
+  )
+}
+
+# Input-phase send: set play/pause to `value` (Spotify mode, where Spotify
+# was just told to play or pause).
+func enqueuePlaybackSetPlaying(this: mod PlaybackSystem, value: view Bool) pub {
+  enqueue(
+    this: this.inbox
+    value: PlaybackCommand {
+      kind: PlaybackCommandKind.setPlaying
+      playing: value
+      albumStem: ""
+      trackIndex: -1
+      artKey: ""
+    }
+  )
+}
+
+# Input-phase send: start a track. `albumStem` + `trackIndex` become the
+# playing track (the row the views highlight) and `artKey` the now-playing
+# cover; playback starts.
+func enqueuePlaybackStartTrack(
+  this: mod PlaybackSystem
+  albumStem: view String
+  trackIndex: view Int
+  artKey: view String
+) pub {
+  enqueue(
+    this: this.inbox
+    value: PlaybackCommand {
+      kind: PlaybackCommandKind.startTrack
+      playing: true
+      albumStem: "{albumStem}"
+      trackIndex: trackIndex
+      artKey: "{artKey}"
+    }
+  )
 }
 
 # Apply-phase: drain the inbox and apply each command to OWN state,
@@ -165,6 +218,15 @@ func processCommands(this: mod PlaybackSystem) pub {
     let cmd: PlaybackCommand = queueAt(this: this.inbox, i: i)
     if cmd.kind is PlaybackCommandKind.togglePlay {
       togglePlayback(playbackSystem: this)
+    }
+    if cmd.kind is PlaybackCommandKind.setPlaying {
+      setPlaybackPlaying(playbackSystem: this, value: cmd.playing)
+    }
+    if cmd.kind is PlaybackCommandKind.startTrack {
+      this.playingAlbumStem = "{cmd.albumStem}"
+      this.playingTrackIndex = cmd.trackIndex
+      setPlaybackPlaying(playbackSystem: this, value: true)
+      setNowPlayingArt(playbackSystem: this, artKey: cmd.artKey)
     }
     i = i + 1
   }
