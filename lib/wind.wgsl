@@ -38,6 +38,8 @@ fn windNoise(p: vec2<f32>) -> f32 {
 // it travels downwind and a turning wind never jumps it. An integer hash on
 // cells wrapped to 256 and only multiplies and adds, in the same order as
 // the Rae: MUST match lib/WindGust.rae windGustAt (checks/windGust).
+// --- gust field begin (grass_compute.wgsl carries a grassGust copy; case
+// 1280_grass_gust_copy holds them equal)
 fn windGustPcg(value: u32) -> u32 {
   let state = value * 747796405u + 2891336453u;
   let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -80,6 +82,7 @@ fn windGustAt(xy: vec2<f32>, wind: vec4<f32>, drift: vec2<f32>) -> f32 {
             * windGustSmooth(0.8, 1.25, strength);
   return max(0.65 * ordinary, storm);
 }
+// --- gust field end
 
 // A leaf patch rotates as one rigid shape. The pivot/phase is shared by all
 // its vertices; no position-dependent wave can stretch its surface.

@@ -18,7 +18,7 @@ struct GrassU {
   i: vec4<f32>,
   // the ground palette's dry grass and how dry (app3d/GroundPalette)
   j: vec4<f32>,
-  // the air's drift (xy) and the unscaled wind (zw): the gusts' (lib/wind.wgsl)
+  // the air's drift (xy) and the unscaled wind (zw): the gust field's
   k: vec4<f32>,
 };
 struct Indirect {
@@ -48,8 +48,7 @@ fn terrainHeight(x: f32, y: f32, groundZ: f32) -> f32 {
 // majority of grass, so no blade stands on the sand texture.
 const GRASS_MIN_WEIGHT: f32 = 0.70;
 const GRASS_SANDGRASS_BLUR: f32 = 0.10;
-fn grassDrawnWeight(p: vec2<f32>) -> f32 {
-  let s = raeBiomeSample(p);
+fn grassDrawnWeight(s: RaeBiome) -> f32 {
   let sandHi = RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND;
   let sgMix = smoothstep(sandHi - GRASS_SANDGRASS_BLUR, sandHi + GRASS_SANDGRASS_BLUR, s.elevation);
   return (s.wSand + s.wGrass) * sgMix;
@@ -95,7 +94,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let bladePosition = grassCandidatePosition(cellI, spacing, clusterStrength);
   let bx = bladePosition.x;
   let by = bladePosition.y;
-  if (grassDrawnWeight(vec2<f32>(bx, by)) < GRASS_MIN_WEIGHT) { return; }
+  // one biome sample per blade: its grass weight here, its moisture for the
+  // ground palette's dry grass below (only the surface's raeBiomeSample is
+  // needed, so an app's own surface keeps working)
+  let bladeBiome = raeBiomeSample(vec2<f32>(bx, by));
+  if (grassDrawnWeight(bladeBiome) < GRASS_MIN_WEIGHT) { return; }
   // Roads overlay the grass biome. Reject their painted footprint outright;
   // shrinking blades leaves conspicuous stubble on dirt. Keep only a narrow
   // fringe where the road overlay is below ten percent.
@@ -152,14 +155,62 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // is dry: grass_field.wgsl groundPaletteGrass, as the terrain does)
   var groundBase = G.e.rgb;
   if (G.j.w > 0.0) {
-    groundBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, raeBiomeMoisture(bladePosition));
+    groundBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, bladeBiome.moisture);
   }
   let groundColor = grassGroundColor(groundBase, bladePosition, G.h.x, G.h.y);
   outBuf[slot].albedoMetallic = vec4<f32>(groundColor, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
-  // x: the gust at the blade (lib/wind.wgsl windGustAt), once per blade
-  // for grass_render.wgsl's sway (the grass draws no level fade)
-  outBuf[slot].fade = vec4<f32>(windGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), 0.0, 0.0, 0.0);
+  // x: the gust at the blade (the trees' gust field, lib/wind.wgsl
+  // windGustAt, as this file's grassGustAt copy), once per blade, for
+  // grass_render.wgsl's sway (the grass draws no level fade)
+  outBuf[slot].fade = vec4<f32>(grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), 0.0, 0.0, 0.0);
 }
+
+// --- gust field begin: lib/wind.wgsl's gust field (windGustAt), renamed
+// grassGust*, so an app's own grass composition needs no extra file; case
+// 1280_grass_gust_copy holds the two copies equal
+fn grassGustPcg(value: u32) -> u32 {
+  let state = value * 747796405u + 2891336453u;
+  let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+fn grassGustHash(column: i32, row: i32, seed: u32) -> f32 {
+  let inner = grassGustPcg(u32(row & 255) + seed * 256u);
+  let mixed = grassGustPcg(u32(column & 255) + inner);
+  return f32(mixed & 16777215u) * 0.000000059604645;
+}
+fn grassGustSmooth(low: f32, scale: f32, value: f32) -> f32 {
+  let t = clamp((value - low) * scale, 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+fn grassGustNoise(p: vec2<f32>, seed: u32) -> f32 {
+  let cell = floor(p);
+  let f = p - cell;
+  let u = f * f * (3.0 - 2.0 * f);
+  let column = i32(cell.x);
+  let row = i32(cell.y);
+  let a = grassGustHash(column, row, seed);
+  let b = grassGustHash(column + 1, row, seed);
+  let c = grassGustHash(column, row + 1, seed);
+  let d = grassGustHash(column + 1, row + 1, seed);
+  let bottom = a + (b - a) * u.x;
+  let top = c + (d - c) * u.x;
+  return bottom + (top - bottom) * u.y;
+}
+fn grassGustAt(xy: vec2<f32>, wind: vec4<f32>, drift: vec2<f32>) -> f32 {
+  let strength = sqrt(wind.x * wind.x + wind.y * wind.y);
+  let air = xy - drift;
+  let blend = 0.5 + 0.5 * sin(wind.w * 0.05235988);
+  let first = grassGustNoise(air * 0.020833334, 1u);
+  let second = grassGustNoise(air * 0.020833334, 2u);
+  let fine = grassGustNoise(air * 0.041666668, 3u);
+  let field = 0.65 * (first + (second - first) * blend) + 0.35 * fine;
+  let ordinary = grassGustSmooth(0.42, 2.631579, field) * grassGustSmooth(0.15, 2.857143, strength);
+  let threshold = 0.88 - 0.05 * clamp(strength - 1.0, 0.0, 2.0);
+  let storm = grassGustSmooth(threshold, 12.5, grassGustNoise(air * 0.010416667, 4u))
+            * grassGustSmooth(0.8, 1.25, strength);
+  return max(0.65 * ordinary, storm);
+}
+// --- gust field end

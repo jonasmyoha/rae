@@ -24,13 +24,14 @@ func createLabGrass(obstacles: view List(Float)) ret GrassCompute {
   var grass: GrassCompute = createGrassCompute()
   grassSetComputeShaderWithConstants(
     grass: grass
-    shader: shader(files: [
-      "lib/gpu/computeBounds.wgsl"
-      "assets/lab_surface.wgsl"
-      "lib/grass_field.wgsl"
-      "lib/wind.wgsl"
-      "lib/grass_compute.wgsl"
-    ])
+    shader: shader(
+      files: [
+        "lib/gpu/computeBounds.wgsl"
+        "assets/lab_surface.wgsl"
+        "lib/grass_field.wgsl"
+        "lib/grass_compute.wgsl"
+      ]
+    )
     constants: List.create(ShaderConstant, cap: 0)
   )
   grassSetSurfaceField(grass: grass, values: obstacles)

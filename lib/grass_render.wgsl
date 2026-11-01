@@ -140,7 +140,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let timeNow = GW.f.w;
   let timePrev = GW.f.w - GW.b.w;
   let wNow = d.model * vec4<f32>(lp, 1.0);
-  let offsetNow = grassWindOffset(base, lp.z, timeNow, wind, d.fade.x);
+  // the gust at the blade, from the compute pass (grass_compute.wgsl)
+  let gust = d.fade.x;
+  let offsetNow = grassWindOffset(base, lp.z, timeNow, wind, gust);
   let pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   var localNormal = bladeNormal(lp.z, d.params.w);
@@ -150,7 +152,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.inst = ii;
   o.clipNow = o.pos;
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
-  let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind, d.fade.x);
+  let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind, gust);
   let pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);

@@ -27,8 +27,9 @@ integral of the wind's velocity, `WindState.driftX`, sent in the frame
 uniform's last vec4, the shadow cascades' last vec4 and the grass
 uniform's `k`), so a turning or strengthening wind never jumps it. The
 trees' leaf patches (`windLeaf` takes the gust at the patch's pivot) and
-the grass (the compute pass stores each blade's gust in its record's
-`fade.x`) both read it. checks/windGust holds the WGSL to the Rae (7e-6 at
+the grass (its compute pass evaluates it once per blade with grass_compute.wgsl's
+own `grassGustAt` copy, so an app's own grass composition needs no extra file;
+case 1280_grass_gust_copy holds the copies equal) both read it. checks/windGust holds the WGSL to the Rae (7e-6 at
 256 points); case 1272_wind_gust its behavior.
 
 ## 1. What the wind is
