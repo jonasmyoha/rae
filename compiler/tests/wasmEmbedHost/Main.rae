@@ -1,0 +1,139 @@
+# A Rae host for the module tools/wasm-module-check.sh builds from
+# compiler/tests/wasmModule (docs/wasm-modules.md): it runs it in lib/wasm
+# (docs/wasm-embedding.md) with the minimal WASI granted, and calls `add` and
+# `greet` through the module ABI (a String in through raeModuleAlloc, a
+# String result packed as address << 32 | length). The module's path is
+# $RAE_WASM_MODULE.
+import String
+open Sys
+open wasm/Wasm
+open wasm/WasiMinimal
+open crypto/CryptoBytes
+
+type Host {
+  output: WasiOutput
+}
+
+func wasmHostCall(
+  host: mod Host
+  instance: mod WasmInstance
+  call: view WasmHostCall
+) ret WasmHostAnswer {
+  if let answer: WasmHostAnswer = wasiMinimalAnswer(
+    instance: instance
+    call: call
+    output: host.output
+  ) {
+    ret answer
+  }
+  ret wasmTrap(message: "no host function {call.module}.{call.name}")
+}
+
+func first(result: view WasmCallResult) ret Int {
+  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+}
+
+# greet(name, times) through the module ABI
+func greet(
+  host: mod Host
+  instance: mod WasmInstance
+  name: view String
+  times: view Int
+) ret String {
+  let bytes: List(UInt8) = bytesOfText(text: name)
+  let address: Int = first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "raeModuleAlloc"
+    args: { wasmI32(value: bytes.length) }
+    timeoutMs: 1000
+  ))
+  let written: Bool = wasmMemoryWrite(instance: instance, address: address, bytes: bytes)
+  let packed: Int = first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "greet"
+    args: { wasmI32(value: address), wasmI32(value: bytes.length), wasmI64(value: times) }
+    timeoutMs: 1000
+  ))
+  let freedName: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "raeModuleFree"
+    args: { wasmI32(value: address) }
+    timeoutMs: 1000
+  )
+  let resultAddress: Int = (packed shr 32) bitand 4294967295
+  let resultLength: Int = packed bitand 4294967295
+  var text: String = ""
+  if let answer: List(UInt8) = wasmMemoryRead(
+    instance: instance
+    address: resultAddress
+    count: resultLength
+  ) {
+    text = String.fromBytes(bytes: answer, start: 0, count: resultLength)
+  }
+  if resultAddress is not 0 {
+    let freedAnswer: WasmCallResult = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: resultAddress) }
+      timeoutMs: 1000
+    )
+  }
+  ret text
+}
+
+func main() {
+  let path: String = getEnv(name: "RAE_WASM_MODULE")
+  let raw: List(Int) = readFileBytes(path: path)
+  var bytes: List(UInt8) = List.create(UInt8, cap: raw.length)
+  loop let byte: view Int in raw {
+    bytes.add(value: byte as UInt8)
+  }
+  var module: WasmModule = wasmLoad(bytes: bytes)
+  log("loaded: {module.error.kind}")
+  let without: WasmInstance = wasmInstantiate(
+    module: module
+    granted: {}
+    limits: wasmDefaultLimits()
+  )
+  log("with nothing granted: {without.error.kind}")
+  var instance: WasmInstance = wasmInstantiate(
+    module: module
+    granted: wasiMinimalGrants()
+    limits: wasmDefaultLimits()
+  )
+  log("with the minimal WASI: {instance.error.kind}")
+  var host: Host = { output: createWasiOutput() }
+  let initialized: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "_initialize"
+    args: {}
+    timeoutMs: 1000
+  )
+  log("_initialize: {initialized.error.kind}")
+  log("add(40, 2) = {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "add"
+    args: { wasmI64(value: 40), wasmI64(value: 2) }
+    timeoutMs: 1000
+  ))}")
+  log("greet = {greet(
+    host: host
+    instance: instance
+    name: "Pähkinä"
+    times: 2
+  )}")
+  wasmDestroy(instance: instance)
+  wasmUnload(module: module)
+}

@@ -4,9 +4,12 @@
 # and `greet`) is built with `rae build --target wasm` into a WASI reactor
 # and called by name from tests/wasmModule/host.mjs under Node, whose output
 # must equal expected.txt: only WASI imports, the exports, Int and String
-# calls, an empty String result, and 2000 calls in bounded memory. Then two
-# bad packs must be refused: an export that names no function, and one whose
-# parameter type a module cannot export. SKIP without wasi-sdk ($WASI_SDK,
+# calls, an empty String result, and 2000 calls in bounded memory. The same
+# module then runs in a native Rae program through lib/wasm
+# (tests/wasmEmbedHost and its expected.txt; skipped without
+# tools/wamr/build.sh's library). Then two bad packs must be refused: an
+# export that names no function, and one whose parameter type a module
+# cannot export. SKIP without wasi-sdk ($WASI_SDK,
 # default ~/.local/wasi-sdk) or node. One pre-suite case of every full run;
 # `make wasm-module-check` alone.
 set -u
@@ -33,6 +36,22 @@ if ! diff -q "$TMP/out.txt" "$FIXTURE/expected.txt" > /dev/null; then
   diff "$TMP/out.txt" "$FIXTURE/expected.txt" | head -12 | sed 's/^/    /'; exit 1
 fi
 
+# the same module in a native Rae host, through lib/wasm (WAMR)
+WAMR_LIB="${RAE_WAMR:-$HOME/.cache/rae/wamr/install}/lib/librae_wamr.a"
+EMBEDDED="the Rae host skipped (no $WAMR_LIB)"
+if [ -f "$WAMR_LIB" ]; then
+  if ! RAE_WASM_MODULE="$TMP/module.wasm" perl -e 'alarm shift; exec @ARGV' 300 "$RAE" run tests/wasmEmbedHost/Main.rae \
+      > "$TMP/host.raw" 2>&1; then
+    echo "FAIL: wasm-module-check (the Rae host failed)"; tail -10 "$TMP/host.raw" | sed 's/^/    /'; exit 1
+  fi
+  grep -v '^@@RAE_' "$TMP/host.raw" > "$TMP/host.txt"
+  if ! diff -q "$TMP/host.txt" tests/wasmEmbedHost/expected.txt > /dev/null; then
+    echo "FAIL: wasm-module-check (the Rae host's output differs from tests/wasmEmbedHost/expected.txt)"
+    diff "$TMP/host.txt" tests/wasmEmbedHost/expected.txt | head -12 | sed 's/^/    /'; exit 1
+  fi
+  EMBEDDED="run in a Rae host through lib/wasm"
+fi
+
 # two packs a module build refuses
 bad() {
   local name="$1" exports="$2" source="$3" expect="$4"
@@ -55,4 +74,4 @@ bad listParameter "total" 'func total(values: view List(Int)) ret Int {
   ret values.length
 }' "is not an Int, Float, Float64"
 
-echo "PASS: wasm-module-check (a reactor exporting add and greet, called from Node; bad exports refused)"
+echo "PASS: wasm-module-check (a reactor exporting add and greet, called from Node, $EMBEDDED; bad exports refused)"

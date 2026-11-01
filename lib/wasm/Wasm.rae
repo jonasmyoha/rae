@@ -1,0 +1,882 @@
+# Wasm — run a WASM module inside a native Rae program (docs/wasm-embedding.md):
+# load it from bytes, see its imports and refuse the ones not granted (by
+# name, before anything runs), instantiate it with a memory cap, call an
+# export by name, answer its imports with host functions written in Rae,
+# read and write its memory, and stop a call that runs too long. Every
+# failure is a WasmError value; a trap is one too.
+#
+# The engine today is WAMR's fast interpreter (no JIT, so it runs on iOS);
+# this API is kept small enough that a WASM interpreter written in Rae can
+# take its place behind it.
+#
+# Host functions: `wasmCall(H, host, ...)` answers each import the module
+# calls by calling `wasmHostCall(host: mod H, instance: mod WasmInstance,
+# call: view WasmHostCall) ret WasmHostAnswer`, which the program writes for
+# its own host type H (as lib/net/ecs's frame calls a router's `route`).
+# wasm/WasiMinimal answers the few WASI imports a module built by
+# `rae build --target wasm` makes.
+import String
+cheader "runtime_wasm_embed.h"
+
+const hasWasmEngine: Bool = Target.isApple or Target.isLinuxKernel
+
+when hasWasmEngine {
+  func rae_wasm_init() unsafe extern("rae_wasm_init") ret Int
+
+  func rae_wasm_load(
+    bytes: Buffer(UInt8)
+    offset: Int
+    count: Int
+  ) unsafe extern("rae_wasm_load") ret Int
+
+  func rae_wasm_last_error_length() unsafe extern("rae_wasm_last_error_length") ret Int
+
+  func rae_wasm_last_error_copy(into: Buffer(UInt8)) unsafe extern("rae_wasm_last_error_copy")
+
+  func rae_wasm_unload(module: Int) unsafe extern("rae_wasm_unload")
+
+  func rae_wasm_import_count(module: Int) unsafe extern("rae_wasm_import_count") ret Int
+
+  func rae_wasm_import_kind(module: Int, index: Int) unsafe extern("rae_wasm_import_kind") ret Int
+
+  func rae_wasm_import_module_length(
+    module: Int
+    index: Int
+  ) unsafe extern("rae_wasm_import_module_length") ret Int
+
+  func rae_wasm_import_module_copy(
+    module: Int
+    index: Int
+    into: Buffer(UInt8)
+  ) unsafe extern("rae_wasm_import_module_copy")
+
+  func rae_wasm_import_name_length(
+    module: Int
+    index: Int
+  ) unsafe extern("rae_wasm_import_name_length") ret Int
+
+  func rae_wasm_import_name_copy(
+    module: Int
+    index: Int
+    into: Buffer(UInt8)
+  ) unsafe extern("rae_wasm_import_name_copy")
+
+  func rae_wasm_import_param_count(
+    module: Int
+    index: Int
+  ) unsafe extern("rae_wasm_import_param_count") ret Int
+
+  func rae_wasm_import_param_kind(
+    module: Int
+    index: Int
+    param: Int
+  ) unsafe extern("rae_wasm_import_param_kind") ret Int
+
+  func rae_wasm_import_result_count(
+    module: Int
+    index: Int
+  ) unsafe extern("rae_wasm_import_result_count") ret Int
+
+  func rae_wasm_import_result_kind(
+    module: Int
+    index: Int
+    result: Int
+  ) unsafe extern("rae_wasm_import_result_kind") ret Int
+
+  func rae_wasm_grant(module: Int, index: Int) unsafe extern("rae_wasm_grant") ret Int
+
+  func rae_wasm_link(module: Int) unsafe extern("rae_wasm_link") ret Int
+
+  func rae_wasm_instantiate(
+    module: Int
+    stackBytes: Int
+    heapBytes: Int
+    maxMemoryPages: Int
+  ) unsafe extern("rae_wasm_instantiate") ret Int
+
+  func rae_wasm_destroy(instance: Int) unsafe extern("rae_wasm_destroy")
+
+  func rae_wasm_arg(
+    instance: Int
+    index: Int
+    kind: Int
+    integer: Int
+    real: Float64
+  ) unsafe extern("rae_wasm_arg")
+
+  func rae_wasm_call_start(
+    instance: Int
+    nameZ: Buffer(UInt8)
+    count: Int
+  ) unsafe extern("rae_wasm_call_start") ret Int
+
+  # Waits for the instance's worker: blocking
+  func rae_wasm_call_wait(
+    instance: Int
+    timeoutMs: Int
+  ) blocking unsafe extern("rae_wasm_call_wait") ret Int
+
+  func rae_wasm_result_count(instance: Int) unsafe extern("rae_wasm_result_count") ret Int
+
+  func rae_wasm_result_kind(instance: Int, index: Int) unsafe extern("rae_wasm_result_kind") ret Int
+
+  func rae_wasm_result_int(instance: Int, index: Int) unsafe extern("rae_wasm_result_int") ret Int
+
+  func rae_wasm_result_float(
+    instance: Int
+    index: Int
+  ) unsafe extern("rae_wasm_result_float") ret Float64
+
+  func rae_wasm_error_length(instance: Int) unsafe extern("rae_wasm_error_length") ret Int
+
+  func rae_wasm_error_copy(instance: Int, into: Buffer(UInt8)) unsafe extern("rae_wasm_error_copy")
+
+  func rae_wasm_terminate(instance: Int) unsafe extern("rae_wasm_terminate")
+
+  func rae_wasm_host_import(instance: Int) unsafe extern("rae_wasm_host_import") ret Int
+
+  func rae_wasm_host_arg_int(
+    instance: Int
+    index: Int
+  ) unsafe extern("rae_wasm_host_arg_int") ret Int
+
+  func rae_wasm_host_arg_float(
+    instance: Int
+    index: Int
+  ) unsafe extern("rae_wasm_host_arg_float") ret Float64
+
+  func rae_wasm_host_result(
+    instance: Int
+    index: Int
+    integer: Int
+    real: Float64
+  ) unsafe extern("rae_wasm_host_result")
+
+  func rae_wasm_host_answer(instance: Int) unsafe extern("rae_wasm_host_answer")
+
+  func rae_wasm_host_trap(
+    instance: Int
+    messageZ: Buffer(UInt8)
+  ) unsafe extern("rae_wasm_host_trap")
+
+  func rae_wasm_memory_size(instance: Int) unsafe extern("rae_wasm_memory_size") ret Int
+
+  func rae_wasm_memory_read(
+    instance: Int
+    address: Int
+    count: Int
+    into: Buffer(UInt8)
+  ) unsafe extern("rae_wasm_memory_read") ret Int
+
+  func rae_wasm_memory_write(
+    instance: Int
+    address: Int
+    from: Buffer(UInt8)
+    offset: Int
+    count: Int
+  ) unsafe extern("rae_wasm_memory_write") ret Int
+}
+
+enum WasmValueKind { i32, i64, f32, f64 }
+
+# One WASM value: integers in `integer`, floats in `real`
+type WasmValue {
+  kind: WasmValueKind
+  integer: Int
+  real: Float64
+}
+
+func wasmI32(value: view Int) ret WasmValue {
+  ret WasmValue { kind: WasmValueKind.i32, integer: value, real: 0.0 }
+}
+
+func wasmI64(value: view Int) ret WasmValue {
+  ret WasmValue { kind: WasmValueKind.i64, integer: value, real: 0.0 }
+}
+
+func wasmF32(value: view Float64) ret WasmValue {
+  ret WasmValue { kind: WasmValueKind.f32, integer: 0, real: value }
+}
+
+func wasmF64(value: view Float64) ret WasmValue {
+  ret WasmValue { kind: WasmValueKind.f64, integer: 0, real: value }
+}
+
+enum WasmErrorKind {
+  none
+  load
+  importRefused
+  instantiate
+  noSuchFunction
+  wrongArguments
+  busy
+  trap
+  timedOut
+  memory
+  unsupported
+}
+
+# the bytes are not a module this engine runs
+# imports outside the granted set (`message` names them)
+# a call is running on this instance already
+# the module trapped (or a host function trapped it)
+# the call ran past its time and was stopped
+# an address outside the instance's memory
+# no WASM engine on this platform
+type WasmError {
+  kind: WasmErrorKind
+  message: String
+}
+
+func wasmOk() ret WasmError {
+  ret WasmError { kind: WasmErrorKind.none, message: "" }
+}
+
+func wasmFailed(error: view WasmError) ret Bool {
+  ret error.kind is not WasmErrorKind.none
+}
+
+enum WasmImportKind { function, table, memory, global }
+
+type WasmImport {
+  kind: WasmImportKind
+  module: String
+  name: String
+  params: List(WasmValueKind)
+  results: List(WasmValueKind)
+}
+
+# The import's "module.name", the form a granted set lists
+func wasmImportKey(wasmImport: view WasmImport) ret String {
+  ret "{wasmImport.module}.{wasmImport.name}"
+}
+
+type WasmModule {
+  handle: Int
+  imports: List(WasmImport)
+  error: WasmError
+}
+
+# How much an instance may use: the WASM stack, the host-managed heap (0 for
+# a module that brings its own allocator), and the linear memory's cap in 64
+# KiB pages (0: the module's own maximum)
+type WasmLimits {
+  stackBytes: Int
+  heapBytes: Int
+  maxMemoryPages: Int
+}
+
+func wasmDefaultLimits() ret WasmLimits {
+  ret WasmLimits { stackBytes: 65536, heapBytes: 0, maxMemoryPages: 256 }
+}
+
+type WasmInstance {
+  handle: Int
+  module: Int
+  imports: List(WasmImport)
+  error: WasmError
+}
+
+# An import the module called, for the host to answer
+type WasmHostCall {
+  importIndex: Int
+  module: String
+  name: String
+  args: List(WasmValue)
+}
+
+# The host's answer: the results (as many as the import declares), or a
+# trap that stops the call with `message`
+type WasmHostAnswer {
+  results: List(WasmValue)
+  trap: Bool
+  message: String
+}
+
+func wasmAnswer(results: view List(WasmValue)) ret WasmHostAnswer {
+  ret WasmHostAnswer { results: results, trap: false, message: "" }
+}
+
+func wasmAnswerNothing() ret WasmHostAnswer {
+  ret WasmHostAnswer { results: List.create(WasmValue, cap: 0), trap: false, message: "" }
+}
+
+func wasmTrap(message: view String) ret WasmHostAnswer {
+  ret WasmHostAnswer { results: List.create(WasmValue, cap: 0), trap: true, message: "{message}" }
+}
+
+type WasmCallResult {
+  values: List(WasmValue)
+  error: WasmError
+}
+
+func wasmBytesZ(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  bytes.add(value: 0)
+  ret bytes
+}
+
+func wasmZeroBytes(count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: 0)
+  }
+  ret bytes
+}
+
+func wasmKindOf(code: view Int) ret WasmValueKind {
+  if code is 1 {
+    ret WasmValueKind.i64
+  }
+  if code is 2 {
+    ret WasmValueKind.f32
+  }
+  if code is 3 {
+    ret WasmValueKind.f64
+  }
+  ret WasmValueKind.i32
+}
+
+func wasmKindCode(kind: view WasmValueKind) ret Int {
+  if kind is WasmValueKind.i64 {
+    ret 1
+  }
+  if kind is WasmValueKind.f32 {
+    ret 2
+  }
+  if kind is WasmValueKind.f64 {
+    ret 3
+  }
+  ret 0
+}
+
+func wasmUnsupported() ret WasmError {
+  ret WasmError { kind: WasmErrorKind.unsupported, message: "no WASM engine on this platform" }
+}
+
+func wasmLastError(kind: view WasmErrorKind) ret WasmError {
+  var message: String = ""
+  when hasWasmEngine {
+    var length: Int = 0
+    unsafe {
+      length = rae_wasm_last_error_length()
+    }
+    var bytes: List(UInt8) = wasmZeroBytes(count: length)
+    if length > 0 {
+      unsafe {
+        rae_wasm_last_error_copy(into: bytes.data)
+      }
+      message = String.fromBytes(bytes: bytes, start: 0, count: length)
+    }
+  }
+  ret WasmError { kind: kind, message: message }
+}
+
+# Load a module from its bytes, listing its imports. Nothing of it runs.
+func wasmLoad(bytes: view List(UInt8)) ret WasmModule {
+  when hasWasmEngine {
+    var handle: Int = 0
+    unsafe {
+      handle = rae_wasm_load(bytes: bytes.data, offset: 0, count: bytes.length)
+    }
+    if handle is 0 {
+      ret WasmModule {
+        handle: 0
+        imports: List.create(WasmImport, cap: 0)
+        error: wasmLastError(kind: WasmErrorKind.load)
+      }
+    }
+    ret WasmModule { handle: handle, imports: wasmReadImports(module: handle), error: wasmOk() }
+  }
+  ret WasmModule { handle: 0, imports: List.create(WasmImport, cap: 0), error: wasmUnsupported() }
+}
+
+func wasmReadImports(module: view Int) ret List(WasmImport) {
+  var imports: List(WasmImport) = List.create(WasmImport, cap: 8)
+  when hasWasmEngine {
+    var count: Int = 0
+    unsafe {
+      count = rae_wasm_import_count(module: module)
+    }
+    loop var i: Int = 0, i < count, ++i {
+      var kindCode: Int = 0
+      var moduleLength: Int = 0
+      var nameLength: Int = 0
+      var paramCount: Int = 0
+      var resultCount: Int = 0
+      unsafe {
+        kindCode = rae_wasm_import_kind(module: module, index: i)
+        moduleLength = rae_wasm_import_module_length(module: module, index: i)
+        nameLength = rae_wasm_import_name_length(module: module, index: i)
+        paramCount = rae_wasm_import_param_count(module: module, index: i)
+        resultCount = rae_wasm_import_result_count(module: module, index: i)
+      }
+      var moduleBytes: List(UInt8) = wasmZeroBytes(count: moduleLength)
+      var nameBytes: List(UInt8) = wasmZeroBytes(count: nameLength)
+      var params: List(WasmValueKind) = List.create(WasmValueKind, cap: paramCount)
+      var results: List(WasmValueKind) = List.create(WasmValueKind, cap: resultCount)
+      unsafe {
+        rae_wasm_import_module_copy(module: module, index: i, into: moduleBytes.data)
+        rae_wasm_import_name_copy(module: module, index: i, into: nameBytes.data)
+        loop var p: Int = 0, p < paramCount, ++p {
+          params.add(
+            value: wasmKindOf(code: rae_wasm_import_param_kind(module: module, index: i, param: p))
+          )
+        }
+        loop var r: Int = 0, r < resultCount, ++r {
+          results.add(
+            value: wasmKindOf(
+              code: rae_wasm_import_result_kind(module: module, index: i, result: r)
+            )
+          )
+        }
+      }
+      var kind: WasmImportKind = WasmImportKind.function
+      if kindCode is 1 {
+        kind = WasmImportKind.table
+      } else if kindCode is 2 {
+        kind = WasmImportKind.memory
+      } else if kindCode is 3 {
+        kind = WasmImportKind.global
+      }
+      imports.add(value: WasmImport {
+        kind: kind
+        module: String.fromBytes(bytes: moduleBytes, start: 0, count: moduleLength)
+        name: String.fromBytes(bytes: nameBytes, start: 0, count: nameLength)
+        params: own params
+        results: own results
+      })
+    }
+  }
+  ret imports
+}
+
+# The module's imports `granted` (as "module.name") does not list: what an
+# instance would be refused for
+func wasmRefusedImports(module: view WasmModule, granted: view List(String)) ret List(String) {
+  var refused: List(String) = List.create(String, cap: 4)
+  loop let wasmImport: view WasmImport in module.imports {
+    let key: String = wasmImportKey(wasmImport: wasmImport)
+    if wasmImport.kind is not WasmImportKind.function or granted.contains(value: key) is false {
+      refused.add(value: key)
+    }
+  }
+  ret refused
+}
+
+# An instance of `module`, its imports checked against `granted` first: any
+# other import (and any non-function import) refuses it by name, before
+# anything runs
+func wasmInstantiate(
+  module: view WasmModule
+  granted: view List(String)
+  limits: view WasmLimits
+) ret WasmInstance {
+  if wasmFailed(error: module.error) or module.handle is 0 {
+    ret WasmInstance {
+      handle: 0
+      module: 0
+      imports: List.create(WasmImport, cap: 0)
+      error: WasmError { kind: module.error.kind, message: "{module.error.message}" }
+    }
+  }
+  let refused: List(String) = wasmRefusedImports(module: module, granted: granted)
+  if refused.length > 0 {
+    var names: String = ""
+    loop let name: view String in refused {
+      if names.length() > 0 {
+        names = "{names}, "
+      }
+      names = "{names}{name}"
+    }
+    ret WasmInstance {
+      handle: 0
+      module: module.handle
+      imports: List.create(WasmImport, cap: 0)
+      error: WasmError {
+        kind: WasmErrorKind.importRefused
+        message: "imports not granted: {names}"
+      }
+    }
+  }
+  when hasWasmEngine {
+    var linked: Int = 0
+    var handle: Int = 0
+    unsafe {
+      loop var i: Int = 0, i < module.imports.length, ++i {
+        let granted: Int = rae_wasm_grant(module: module.handle, index: i)
+      }
+      linked = rae_wasm_link(module: module.handle)
+      if linked is 0 {
+        handle = rae_wasm_instantiate(
+          module: module.handle
+          stackBytes: limits.stackBytes
+          heapBytes: limits.heapBytes
+          maxMemoryPages: limits.maxMemoryPages
+        )
+      }
+    }
+    if handle is 0 {
+      ret WasmInstance {
+        handle: 0
+        module: module.handle
+        imports: List.create(WasmImport, cap: 0)
+        error: wasmLastError(kind: WasmErrorKind.instantiate)
+      }
+    }
+    ret WasmInstance {
+      handle: handle
+      module: module.handle
+      imports: module.imports
+      error: wasmOk()
+    }
+  }
+  ret WasmInstance {
+    handle: 0
+    module: 0
+    imports: List.create(WasmImport, cap: 0)
+    error: wasmUnsupported()
+  }
+}
+
+func wasmCallFailed(kind: view WasmErrorKind, message: view String) ret WasmCallResult {
+  ret WasmCallResult {
+    values: List.create(WasmValue, cap: 0)
+    error: WasmError { kind: kind, message: "{message}" }
+  }
+}
+
+# The waiting host call, as a value
+func wasmTakeHostCall(instance: view WasmInstance) ret WasmHostCall {
+  var index: Int = -1
+  when hasWasmEngine {
+    unsafe {
+      index = rae_wasm_host_import(instance: instance.handle)
+    }
+  }
+  var module: String = ""
+  var name: String = ""
+  var args: List(WasmValue) = List.create(WasmValue, cap: 4)
+  if let wasmImport: view WasmImport = instance.imports.viewAt(index: index) {
+    module = "{wasmImport.module}"
+    name = "{wasmImport.name}"
+    loop var p: Int = 0, p < wasmImport.params.length, ++p {
+      let kind: WasmValueKind = wasmImport.params.copyAtFallback(
+        index: p
+        fallback: WasmValueKind.i32
+      )
+      var integer: Int = 0
+      var real: Float64 = 0.0
+      when hasWasmEngine {
+        unsafe {
+          integer = rae_wasm_host_arg_int(instance: instance.handle, index: p)
+          real = rae_wasm_host_arg_float(instance: instance.handle, index: p)
+        }
+      }
+      args.add(value: WasmValue { kind: kind, integer: integer, real: real })
+    }
+  }
+  ret WasmHostCall { importIndex: index, module: module, name: name, args: own args }
+}
+
+func wasmGiveHostAnswer(instance: view WasmInstance, answer: view WasmHostAnswer) {
+  when hasWasmEngine {
+    unsafe {
+      if answer.trap {
+        var messageZ: List(UInt8) = wasmBytesZ(text: answer.message)
+        rae_wasm_host_trap(instance: instance.handle, messageZ: messageZ.data)
+      } else {
+        loop var r: Int = 0, r < answer.results.length, ++r {
+          if let value: view WasmValue = answer.results.viewAt(index: r) {
+            rae_wasm_host_result(
+              instance: instance.handle
+              index: r
+              integer: value.integer
+              real: value.real
+            )
+          }
+        }
+        rae_wasm_host_answer(instance: instance.handle)
+      }
+    }
+  }
+}
+
+# The finished call's results (non-generic: wasmCall only calls it)
+func wasmFinishedResult(instance: view WasmInstance) ret WasmCallResult {
+  var values: List(WasmValue) = List.create(WasmValue, cap: 2)
+  when hasWasmEngine {
+    unsafe {
+      let count: Int = rae_wasm_result_count(instance: instance.handle)
+      loop var r: Int = 0, r < count, ++r {
+        values.add(
+          value: WasmValue {
+            kind: wasmKindOf(code: rae_wasm_result_kind(instance: instance.handle, index: r))
+            integer: rae_wasm_result_int(instance: instance.handle, index: r)
+            real: rae_wasm_result_float(instance: instance.handle, index: r)
+          }
+        )
+      }
+    }
+  }
+  ret WasmCallResult { values: own values, error: wasmOk() }
+}
+
+# The trapped call's error: `timedOut` when the watchdog stopped it
+func wasmTrappedResult(
+  instance: view WasmInstance
+  name: view String
+  stopped: view Bool
+  timeoutMs: view Int
+) ret WasmCallResult {
+  var length: Int = 0
+  when hasWasmEngine {
+    unsafe {
+      length = rae_wasm_error_length(instance: instance.handle)
+    }
+  }
+  var bytes: List(UInt8) = wasmZeroBytes(count: length)
+  when hasWasmEngine {
+    if length > 0 {
+      unsafe {
+        rae_wasm_error_copy(instance: instance.handle, into: bytes.data)
+      }
+    }
+  }
+  let message: String = String.fromBytes(bytes: bytes, start: 0, count: length)
+  if stopped {
+    ret wasmCallFailed(
+      kind: WasmErrorKind.timedOut
+      message: "{name} ran past {timeoutMs} ms and was stopped ({message})"
+    )
+  }
+  ret wasmCallFailed(kind: WasmErrorKind.trap, message: message)
+}
+
+# Call the export `name` with `args`, answering the imports it calls with
+# `wasmHostCall(host:, instance:, call:)`. A call running longer than
+# `timeoutMs` (0: no limit) is stopped and answers `timedOut`.
+func wasmCall(
+  H: type
+  host: mod H
+  instance: mod WasmInstance
+  name: view String
+  args: view List(WasmValue)
+  timeoutMs: view Int
+) ret WasmCallResult {
+  if instance.handle is 0 {
+    ret wasmCallFailed(
+      kind: WasmErrorKind.instantiate
+      message: "the instance was not made: {instance.error.message}"
+    )
+  }
+  when hasWasmEngine {
+    var started: Int = 0
+    var nameZ: List(UInt8) = wasmBytesZ(text: name)
+    unsafe {
+      loop var i: Int = 0, i < args.length, ++i {
+        if let value: view WasmValue = args.viewAt(index: i) {
+          rae_wasm_arg(
+            instance: instance.handle
+            index: i
+            kind: wasmKindCode(kind: value.kind)
+            integer: value.integer
+            real: value.real
+          )
+        }
+      }
+      started = rae_wasm_call_start(
+        instance: instance.handle
+        nameZ: nameZ.data
+        count: args.length
+      )
+    }
+    if started is -1 {
+      ret wasmCallFailed(kind: WasmErrorKind.noSuchFunction, message: "no exported function {name}")
+    }
+    if started is -2 {
+      ret wasmCallFailed(
+        kind: WasmErrorKind.wrongArguments
+        message: "{name} does not take {args.length} argument(s) of these kinds"
+      )
+    }
+    if started is -3 {
+      ret wasmCallFailed(kind: WasmErrorKind.busy, message: "a call is running on this instance")
+    }
+    let deadline: Int = nowMs() + timeoutMs
+    var stopped: Bool = false
+    loop {
+      var waitMs: Int = 50
+      if timeoutMs > 0 {
+        let left: Int = deadline - nowMs()
+        if left <= 0 and stopped is false {
+          stopped = true
+          unsafe {
+            rae_wasm_terminate(instance: instance.handle)
+          }
+        }
+        if left > 0 and left < waitMs {
+          waitMs = left
+        }
+      }
+      var event: Int = 0
+      unsafe {
+        event = rae_wasm_call_wait(instance: instance.handle, timeoutMs: waitMs)
+      }
+      if event is 1 {
+        let call: WasmHostCall = wasmTakeHostCall(instance: instance)
+        let answer: WasmHostAnswer = wasmHostCall(host: host, instance: instance, call: call)
+        wasmGiveHostAnswer(instance: instance, answer: answer)
+      } else if event is 2 {
+        ret wasmFinishedResult(instance: instance)
+      } else if event is 3 {
+        ret wasmTrappedResult(
+          instance: instance
+          name: name
+          stopped: stopped
+          timeoutMs: timeoutMs
+        )
+      }
+    }
+  }
+  ret WasmCallResult { values: List.create(WasmValue, cap: 0), error: wasmUnsupported() }
+}
+
+# Stop the running call of the instance whose handle is `instanceHandle`
+# (`instance.handle`), from any thread: a watchdog's way. The call answers
+# `trap` ("terminated").
+func wasmStop(instanceHandle: view Int) {
+  when hasWasmEngine {
+    if instanceHandle is not 0 {
+      unsafe {
+        rae_wasm_terminate(instance: instanceHandle)
+      }
+    }
+  }
+}
+
+# The instance's linear memory, in bytes
+func wasmMemorySize(instance: view WasmInstance) ret Int {
+  when hasWasmEngine {
+    if instance.handle is not 0 {
+      unsafe {
+        ret rae_wasm_memory_size(instance: instance.handle)
+      }
+    }
+  }
+  ret 0
+}
+
+# `count` bytes of the instance's memory from `address`; none when that is
+# outside it
+func wasmMemoryRead(
+  instance: view WasmInstance
+  address: view Int
+  count: view Int
+) ret opt List(UInt8) {
+  var bytes: List(UInt8) = wasmZeroBytes(count: count)
+  var answer: Int = -1
+  when hasWasmEngine {
+    if instance.handle is not 0 {
+      unsafe {
+        answer = rae_wasm_memory_read(
+          instance: instance.handle
+          address: address
+          count: count
+          into: bytes.data
+        )
+      }
+    }
+  }
+  if answer is not 0 {
+    ret none
+  }
+  ret bytes
+}
+
+# Write `bytes` into the instance's memory at `address`; false when that is
+# outside it
+func wasmMemoryWrite(
+  instance: view WasmInstance
+  address: view Int
+  bytes: view List(UInt8)
+) ret Bool {
+  var answer: Int = -1
+  when hasWasmEngine {
+    if instance.handle is not 0 {
+      unsafe {
+        answer = rae_wasm_memory_write(
+          instance: instance.handle
+          address: address
+          from: bytes.data
+          offset: 0
+          count: bytes.length
+        )
+      }
+    }
+  }
+  ret answer is 0
+}
+
+# A little-endian integer of `count` bytes (4 or 8) at `address`, or none
+func wasmMemoryReadInt(
+  instance: view WasmInstance
+  address: view Int
+  count: view Int
+) ret opt Int {
+  if let bytes: List(UInt8) = wasmMemoryRead(instance: instance, address: address, count: count) {
+    var value: Int = 0
+    var i: Int = count - 1
+    loop i >= 0 {
+      value = (value shl 8) bitor (bytes.copyAtFallback(index: i, fallback: 0) as Int)
+      i = i - 1
+    }
+    if count is 4 and value >= 2147483648 {
+      value = value - 4294967296
+    }
+    ret value
+  }
+  ret none
+}
+
+# Write `value` as `count` little-endian bytes (4 or 8) at `address`
+func wasmMemoryWriteInt(
+  instance: view WasmInstance
+  address: view Int
+  value: view Int
+  count: view Int
+) ret Bool {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  var rest: Int = value
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: (rest bitand 255) as UInt8)
+    rest = rest shr 8
+  }
+  ret wasmMemoryWrite(instance: instance, address: address, bytes: bytes)
+}
+
+# Release the instance (no call may be running) and the module
+func wasmDestroy(instance: mod WasmInstance) {
+  when hasWasmEngine {
+    if instance.handle is not 0 {
+      unsafe {
+        rae_wasm_destroy(instance: instance.handle)
+      }
+    }
+  }
+  instance.handle = 0
+}
+
+func wasmUnload(module: mod WasmModule) {
+  when hasWasmEngine {
+    if module.handle is not 0 {
+      unsafe {
+        rae_wasm_unload(module: module.handle)
+      }
+    }
+  }
+  module.handle = 0
+}

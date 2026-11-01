@@ -2850,6 +2850,35 @@ static bool sqlite_link_flags(const char* c_path, char* flags, size_t cap) {
   return true;
 }
 
+/* WAMR (lib/wasm, docs/wasm-embedding.md): a program whose C includes the
+ * glue header links the fast interpreter tools/wamr/build.sh installed at
+ * $RAE_WAMR (default ~/.cache/rae/wamr/install). */
+static bool wamr_link_flags(const char* c_path, char* flags, size_t cap) {
+  flags[0] = '\0';
+  if (!c_output_includes(c_path, "runtime_wasm_embed.h")) return true;
+  const char* configured = getenv("RAE_WAMR");
+  char root[PATH_MAX];
+  if (configured && *configured) {
+    snprintf(root, sizeof root, "%s", configured);
+  } else {
+    const char* home = getenv("HOME"); if (!home) home = ".";
+    snprintf(root, sizeof root, "%s/.cache/rae/wamr/install", home);
+  }
+  char lib[PATH_MAX + 32];
+  snprintf(lib, sizeof lib, "%s/lib/librae_wamr.a", root);
+  struct stat st;
+  if (stat(lib, &st) != 0) {
+    fprintf(stderr, "error: this program imports wasm, but %s is missing; run tools/wamr/build.sh (or set RAE_WAMR)\n", lib);
+    return false;
+  }
+#if defined(__linux__)
+  snprintf(flags, cap, "%s -lpthread -lm -ldl", lib);
+#else
+  snprintf(flags, cap, "%s", lib);
+#endif
+  return true;
+}
+
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
@@ -2931,6 +2960,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
   char sqlite_flags[PATH_MAX * 2 + 64];
   if (!sqlite_link_flags(c_path, sqlite_flags, sizeof(sqlite_flags))) return false;
+  char wamr_flags[PATH_MAX * 2 + 64];
+  if (!wamr_link_flags(c_path, wamr_flags, sizeof(wamr_flags))) return false;
   /* lib/net/NetworkConnection: Apple's Network.framework, linked only for a
    * program whose C includes its shim (runtime_network_apple.h) */
 #if defined(__APPLE__)
@@ -2969,9 +3000,9 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s -o %s",
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
            opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, out_bin);
+           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, wamr_flags, out_bin);
 
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
