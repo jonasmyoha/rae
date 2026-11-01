@@ -38,6 +38,7 @@ open ui/animationSystem/EffectSystems
 open ui/visualBoundsSystem/VisualBoundsSystem
 open ui/Scene
 open ui/SceneFile
+open ui/SceneRoots
 open ui/SceneImports
 open ui/SceneBundles
 open ui/SceneInstance
@@ -277,12 +278,36 @@ func mountSceneWithImports(
   canvas: mod Gpu2dCanvas
   registry: mod SceneRegistry
 ) ret EntityId {
+  let roots: SceneRoots = createSceneRoots(defaultRoot: root)
+  ret mountSceneWithRoots(
+    world: world
+    uiSystems: uiSystems
+    roots: roots
+    sceneId: sceneId
+    resources: resources
+    canvas: canvas
+    registry: registry
+  )
+}
+
+# mountSceneWithImports for a host with mounted scene roots (ui/SceneRoots): a
+# plugin's scenes under `apps/notes/` read from its folder while they import
+# the host's theme from the default root.
+func mountSceneWithRoots(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  roots: view SceneRoots
+  sceneId: view String
+  resources: mod Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  registry: mod SceneRegistry
+) ret EntityId {
   # The world is sized to the window before anything can fail: a caller that
   # shows its own error screen after a failed mount lays it out in this world,
   # and the default size of a new world is not the window's.
   world.layoutW = windowExtentW()
   world.layoutH = windowExtentH()
-  let path: String = scenePackageFile(root: root, sceneId: sceneId)
+  let path: String = sceneRootsFile(roots: roots, sceneId: sceneId)
   let scene: Scene = loadScenePackageFile(path: path, sceneId: sceneId)
   if scene.ok is false {
     reportSceneDiagnostic(
@@ -299,14 +324,14 @@ func mountSceneWithImports(
   let assets: SceneAssets = resolveSceneAssets(
     entry: scene
     entryPath: path
-    root: root
+    roots: roots
     registry: registry
     diagnostics: world.sceneDiagnostics
     sceneLabel: sceneId
   )
   registerSceneReferencesTransitive(
     scene: scene
-    root: root
+    roots: roots
     registry: registry
     diagnostics: world.sceneDiagnostics
   )

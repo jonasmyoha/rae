@@ -6,7 +6,9 @@
 # Loading is ONE mountPage, exactly like a 106 page; sub-scenes load
 # transitively from `<root>/<package/Path>.raescene` (#1008: a scene reference is a package
 # path, resolved from the root — the opened scene's directory unless
-# `--scene-root` / RAE_UI_EDITOR_ROOT says otherwise) before the page resolves
+# `--scene-root` / RAE_UI_EDITOR_ROOT says otherwise; a package-path prefix
+# mounted with `--scene-mount <prefix>=<folder>` / RAE_UI_EDITOR_MOUNTS reads
+# from its own folder, ui/SceneRoots) before the page resolves
 # any instance. resolveSceneInstances turns whatever is still missing into a
 # red sentinel + diagnostic (the #996 `report` policy). Nothing is inferred from
 # file names: a theme reaches the page only through its `import` list. The app creates NO layout
@@ -30,6 +32,7 @@ open ui/SceneImports
 open ui/SceneBundles
 open ui/SceneLoader
 open ui/ScenePolicy
+open ui/SceneRoots
 open ui/RegistryOpt
 open ecs/Entity
 open ecs/ComponentTable
@@ -84,11 +87,12 @@ type SceneDocument {
 # The file to open — a `.raescene`, or a `.raepack` whose directory becomes the
 # project (projectSystem): the first positional program argument, else
 # RAE_UI_EDITOR_SCENE, else the shipped MainMenu sample. `--scene-root <dir>`
-# and `--scene <package/Path>` may precede or follow it.
+# `--scene <package/Path>` and `--scene-mount <prefix>=<folder>` may precede or
+# follow it.
 func resolveScenePath() ret String {
   loop var i: Int = 0, i < argCount(), ++i {
     let arg: String = argAt(index: i)
-    if arg is "--scene-root" or arg is "--scene" {
+    if arg is "--scene-root" or arg is "--scene" or arg is "--scene-mount" {
       i = i + 1
       continue
     }
@@ -134,6 +138,40 @@ func resolveSceneRoot(scenePath: view String) ret String {
     ret root
   }
   ret "{root}/"
+}
+
+# Mount one `<prefix>=<folder>` entry; an entry without `=` is ignored.
+func mountSceneEntry(roots: mod SceneRoots, entry: view String) {
+  if let equals: Int = entry.indexOf(sub: "=") {
+    let prefix: String = entry.sub(start: 0, len: equals)
+    let folder: String = entry.sub(start: equals + 1, len: entry.length() - equals - 1)
+    if prefix.length() > 0 and folder.length() > 0 {
+      mountSceneRoot(roots: roots, prefix: prefix, folder: folder)
+    }
+  }
+}
+
+# The roots the document's package paths resolve through: its root, plus every
+# package-path prefix mounted from another folder — each `--scene-mount
+# <prefix>=<folder>` and each `;`-separated entry of RAE_UI_EDITOR_MOUNTS
+# (`apps/notes/=downloads/notes/`). A plugin scene opened from its folder then
+# imports the host's theme from the root while its own sub-scenes and row
+# scenes come from the plugin folder (ui/SceneRoots).
+func documentSceneRoots(document: view SceneDocument) ret SceneRoots {
+  var roots: SceneRoots = createSceneRoots(defaultRoot: document.root)
+  let fromEnv: String = getEnv(name: "RAE_UI_EDITOR_MOUNTS")
+  if fromEnv.length() > 0 {
+    let entries: List(String) = fromEnv.split(sep: ";")
+    loop let entry: view String in entries {
+      mountSceneEntry(roots: roots, entry: entry)
+    }
+  }
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is "--scene-mount" {
+      mountSceneEntry(roots: roots, entry: argAt(index: i + 1))
+    }
+  }
+  ret roots
 }
 
 func directoryOf(path: view String) ret String {
@@ -197,11 +235,14 @@ func documentOpenPath(
     log("[ui-editor] project {path}: {document.projectScenes.length} scenes under {document.root}")
     ret
   }
-  if document.projectPack.length() > 0 and path.startsWith(prefix: document.root) {
-    let start: Int = document.root.length()
-    let stop: Int = path.length() - ".raescene".length()
-    if stop > start {
-      setDocumentScene(document: document, packagePath: path.sub(start: start, len: stop - start))
+  if document.projectPack.length() > 0 {
+    # A scene under the project's root or a mounted folder keeps the project.
+    let packagePath: String = sceneRootsPackagePath(
+      roots: documentSceneRoots(document: document)
+      path: path
+    )
+    if packagePath.length() > 0 {
+      setDocumentScene(document: document, packagePath: packagePath)
       ret
     }
   }
@@ -231,7 +272,10 @@ func createSceneDocument(path: view String) ret SceneDocument {
 # Point an open project's document at one of its scenes (a package path,
 # `assets/scenes/Album`); the root does not move. The caller mounts/reloads.
 func setDocumentScene(document: mod SceneDocument, packagePath: view String) {
-  document.path = scenePackageFile(root: document.root, sceneId: packagePath)
+  document.path = sceneRootsFile(
+    roots: documentSceneRoots(document: document)
+    sceneId: packagePath
+  )
   document.directory = directoryOf(path: document.path)
   document.fileName = fileNameOf(path: document.path)
 }
@@ -241,12 +285,7 @@ func documentPackagePath(document: view SceneDocument) ret String {
   if document.projectPack.length() is 0 or document.path.length() is 0 {
     ret ""
   }
-  let start: Int = document.root.length()
-  let stop: Int = document.path.length() - ".raescene".length()
-  if stop <= start {
-    ret ""
-  }
-  ret document.path.sub(start: start, len: stop - start)
+  ret sceneRootsPackagePath(roots: documentSceneRoots(document: document), path: document.path)
 }
 
 func createEmptySceneDocument(path: view String) ret SceneDocument {
@@ -421,9 +460,10 @@ func restoreDocumentScrolls(world: mod UiWorld, snapshot: view ScrollSnapshot) {
 func rebuildWatchedPaths(document: mod SceneDocument) {
   document.watchedPaths.clear()
   document.watchedPaths.add(value: "{document.path}")
+  let roots: SceneRoots = documentSceneRoots(document: document)
   loop var i: Int = 0, i < document.registry.ids.length, ++i {
     if let sceneId: String = document.registry.ids.copyAt(index: i) {
-      let path: String = scenePackageFile(root: document.root, sceneId: sceneId)
+      let path: String = sceneRootsFile(roots: roots, sceneId: sceneId)
       if exists(path: path) {
         document.watchedPaths.add(value: path)
       }
@@ -513,17 +553,18 @@ func documentPrepareSystem(document: mod SceneDocument, world: mod UiWorld) ret 
   clearSceneDiagnostics(diagnostics: world.sceneDiagnostics)
   document.scene = scene
   document.registry = createSceneRegistry()
+  let roots: SceneRoots = documentSceneRoots(document: document)
   document.assets = resolveSceneAssets(
     entry: document.scene
     entryPath: document.path
-    root: document.root
+    roots: roots
     registry: document.registry
     diagnostics: world.sceneDiagnostics
     sceneLabel: document.fileName
   )
   registerSceneReferencesTransitive(
     scene: document.scene
-    root: document.root
+    roots: roots
     registry: document.registry
     diagnostics: world.sceneDiagnostics
   )
@@ -556,6 +597,7 @@ func documentMountSystem(
     scrolls = snapshotDocumentScrolls(world: world)
     unmountPage(world: world, uiSystems: uiSystems, pageId: "document")
   }
+  let roots: SceneRoots = documentSceneRoots(document: document)
   loop let entry: view BuiltinScene in builtinScenes {
     let builtin: Scene = loadScenePackageFile(path: entry.path, sceneId: entry.sceneId)
     if builtin.ok {
@@ -563,7 +605,7 @@ func documentMountSystem(
       registerSceneTransitive(
         sceneId: own sceneId
         scene: own builtin
-        root: document.root
+        roots: roots
         registry: document.registry
         diagnostics: world.sceneDiagnostics
       )

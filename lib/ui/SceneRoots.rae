@@ -1,0 +1,111 @@
+# SceneRoots — where a scene package path lives on disk (docs/ui-scene-format.md
+# "Scene roots").
+#
+# A scene reference is a package path without extension (`Theme`,
+# `cards/HeroCard`). Most programs read every scene from ONE folder, the
+# default root: `<root>/<path>.raescene`. A host that shows a plugin's scenes
+# mounts the plugin's folder under a package-path PREFIX:
+#
+#   var roots: SceneRoots = createSceneRoots(defaultRoot: "assets/scenes/")
+#   mountSceneRoot(roots: roots, prefix: "apps/notes/", folder: "downloads/notes/")
+#
+# Then `apps/notes/Main` is `downloads/notes/Main.raescene` (the prefix is
+# taken off, the way a dependency `x/Foo` is `<depdir>/Foo.rae`), and
+# everything else — the plugin's `"import": ["Theme"]` included — stays
+# `assets/scenes/Theme.raescene`. The longest matching prefix wins. The same
+# mapping serves `import`, `SceneInstance.sceneId` and a ListView's row scenes.
+import String
+
+type SceneRoots {
+  # The folder of every package path no mount claims, with its trailing slash.
+  defaultRoot: String
+  # Mounted prefixes (each ends in `/`) and their folders (each ends in `/`),
+  # index for index.
+  prefixes: List(String)
+  folders: List(String)
+}
+
+func withTrailingSlash(path: view String) ret String {
+  if path.length() is 0 or path.endsWith(suffix: "/") {
+    ret "{path}"
+  }
+  ret "{path}/"
+}
+
+func createSceneRoots(defaultRoot: view String) ret SceneRoots {
+  ret SceneRoots {
+    defaultRoot: withTrailingSlash(path: defaultRoot)
+    prefixes: List.create(String, cap: 2)
+    folders: List.create(String, cap: 2)
+  }
+}
+
+# Serve the package paths under `prefix` (`apps/notes/`; a missing final `/` is
+# added) from `folder`. Mounting the same prefix again moves it to the new
+# folder.
+func mountSceneRoot(roots: mod SceneRoots, prefix: view String, folder: view String) {
+  let normalizedPrefix: String = withTrailingSlash(path: prefix)
+  let normalizedFolder: String = withTrailingSlash(path: folder)
+  loop var i: Int = 0, i < roots.prefixes.length, ++i {
+    if let existing: String = roots.prefixes.copyAt(index: i) {
+      if existing is normalizedPrefix {
+        roots.folders.set(index: i, value: own normalizedFolder)
+        ret
+      }
+    }
+  }
+  roots.prefixes.add(value: own normalizedPrefix)
+  roots.folders.add(value: own normalizedFolder)
+}
+
+# `<folder>/<rest>.raescene` for the longest mounted prefix of `sceneId`, else
+# `<defaultRoot>/<sceneId>.raescene` — the one place a scene reference becomes
+# a file name.
+func sceneRootsFile(roots: view SceneRoots, sceneId: view String) ret String {
+  var best: Int = -1
+  var bestLength: Int = 0
+  loop var i: Int = 0, i < roots.prefixes.length, ++i {
+    if let prefix: String = roots.prefixes.copyAt(index: i) {
+      if prefix.length() > bestLength and sceneId.startsWith(prefix: prefix) {
+        best = i
+        bestLength = prefix.length()
+      }
+    }
+  }
+  if best >= 0 {
+    let folder: String = roots.folders.copyAtFallback(index: best, fallback: "")
+    let rest: String = sceneId.sub(start: bestLength, len: sceneId.length() - bestLength)
+    ret "{folder}{rest}.raescene"
+  }
+  ret "{roots.defaultRoot}{sceneId}.raescene"
+}
+
+# The package path of the scene FILE `path` when a mount or the default root
+# holds it (`downloads/notes/Main.raescene` -> `apps/notes/Main`), else "".
+# A mounted folder is tried before the default root, longest folder first, so
+# a plugin folder inside the host's root still maps to its prefix.
+func sceneRootsPackagePath(roots: view SceneRoots, path: view String) ret String {
+  if not path.endsWith(suffix: ".raescene") {
+    ret ""
+  }
+  let stop: Int = path.length() - ".raescene".length()
+  var best: Int = -1
+  var bestLength: Int = 0
+  loop var i: Int = 0, i < roots.folders.length, ++i {
+    if let folder: String = roots.folders.copyAt(index: i) {
+      if folder.length() > bestLength and path.startsWith(prefix: folder) {
+        best = i
+        bestLength = folder.length()
+      }
+    }
+  }
+  if best >= 0 and stop > bestLength {
+    let prefix: String = roots.prefixes.copyAtFallback(index: best, fallback: "")
+    ret "{prefix}{path.sub(start: bestLength, len: stop - bestLength)}"
+  }
+  let start: Int = roots.defaultRoot.length()
+  if start > 0 and path.startsWith(prefix: roots.defaultRoot) and stop > start {
+    ret path.sub(start: start, len: stop - start)
+  }
+  ret ""
+}

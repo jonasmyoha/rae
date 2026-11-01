@@ -38,6 +38,9 @@ texture manifest, and a design-resolution + fit rule (now native:
   `<root>/<path>.raescene`. The root is the opened scene's directory unless
   `--scene-root <dir>` (or `RAE_UI_EDITOR_ROOT`) says otherwise — the way `rae run`
   takes the entry file's folder as the project unless `--project` is given.
+  `--scene-mount <prefix>=<folder>` (repeatable, or `RAE_UI_EDITOR_MOUNTS`)
+  serves one package-path prefix from another folder (a plugin's scenes that
+  import the host's theme; docs/ui-scene-format.md §2).
   Sub-scenes load lazily into one `SceneRegistry` (recursively). Missing → red
   sentinel block + diagnostic, the page still mounts.
 - **Theme and assets** come ONLY through the scene's `"import": [...]` list (and

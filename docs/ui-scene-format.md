@@ -67,6 +67,38 @@ The root is an input, defaulted from what you opened, never discovered:
 No walking up for a `.raepack`, no magic files. A sub-scene therefore resolves
 from the root, not from its parent scene's folder.
 
+### Mounted roots: one package-path prefix, another folder
+
+A host that shows a plugin's scenes keeps them in the plugin's own folder (a
+download or install folder), while they import the host's theme. A
+`SceneRoots` (`lib/ui/SceneRoots.rae`) maps package-path PREFIXES to folders;
+every path no prefix claims stays in the default root:
+
+    var roots: SceneRoots = createSceneRoots(defaultRoot: "assets/scenes/")
+    mountSceneRoot(roots: roots, prefix: "apps/notes/", folder: "downloads/notes/")
+    let root: EntityId = mountSceneWithRoots(
+      world: world
+      uiSystems: uiSystems
+      roots: roots
+      sceneId: "apps/notes/Main"
+      resources: gpuUi
+      canvas: canvas
+      registry: sceneRegistry
+    )
+
+`apps/notes/Main` is `downloads/notes/Main.raescene`: the prefix is taken off,
+the way a dependency's `import x/Foo` is `<depdir>/Foo.rae`. The plugin's
+`"import": ["Theme"]` is `assets/scenes/Theme.raescene`, and its own
+sub-scenes and ListView rows are written with the prefix
+(`"sceneId": "apps/notes/Card"`). The longest matching prefix wins; a prefix
+is whole folder names (`apps/notesOld/Main` is not under `apps/notes/`).
+`sceneRootsFile` is the lookup that `import`, `SceneInstance` and ListView row
+scenes all go through; `sceneRootsPackagePath` maps a file back to its
+package path. `mountSceneWithImports(root: ...)` is the same with no mounts.
+The 121 viewer takes mounts as `--scene-mount <prefix>=<folder>` (repeatable)
+or `RAE_UI_EDITOR_MOUNTS="apps/notes/=downloads/notes/;..."`. Case 1295 has two
+roots.
+
 ## 3. `import`: configuration into scope, nothing mounted
 
     { "type": "Scene", "version": 2,
@@ -141,7 +173,7 @@ The other samples (`MainMenu`, `Settings`, `CardStrip`, `Coverage`) import
 
 `RAE_UI_EDITOR_ASSETS/<key>.png` (tried first), `RAE_UI_EDITOR_FONT` /
 `RAE_UI_EDITOR_ICON_FONT` (a `.mtsdf.json`), `RAE_UI_EDITOR_ROOT` /
-`--scene-root`. They exist so a viewer can look at someone else's scene with
+`--scene-root`, `RAE_UI_EDITOR_MOUNTS` / `--scene-mount`. They exist so a viewer can look at someone else's scene with
 substitutes; a scene that needs them to render is incomplete.
 
 ## 7. Migration from the `theme.raescene` auto-load

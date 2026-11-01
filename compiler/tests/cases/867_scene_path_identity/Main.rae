@@ -6,6 +6,7 @@ import ui/Registry
 open ui/Scene
 open ui/SceneFile
 open ui/SceneImports
+open ui/SceneRoots
 open ui/SceneInstance
 open ui/SceneLoader
 open ui/ScenePolicy
@@ -17,10 +18,11 @@ func main() {
   let scene: Scene = loadSceneFile(path: path)
   var registry: SceneRegistry = createSceneRegistry()
   var diagnostics: List(SceneDiagnostic) = List.create(SceneDiagnostic, cap: 1)
+  let roots: SceneRoots = createSceneRoots(defaultRoot: "tests/cases/867_scene_path_identity/")
   let assets: SceneAssets = resolveSceneAssets(
     entry: scene
     entryPath: path
-    root: "tests/cases/867_scene_path_identity/"
+    roots: roots
     registry: registry
     diagnostics: diagnostics
     sceneLabel: scene.sceneId

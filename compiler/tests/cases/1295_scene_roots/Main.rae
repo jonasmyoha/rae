@@ -1,0 +1,72 @@
+# Two scene roots (ui/SceneRoots): a plugin's scenes are mounted from their own
+# folder under `apps/notes/`, and they import the host's theme and mount a host
+# sub-scene from the default root. Imports, SceneInstance sub-scenes and
+# ListView row scenes all resolve through the same mapping.
+import String
+open ui/Ecs
+open ui/UiSystems
+open ui/Scene
+open ui/SceneFile
+open ui/SceneImports
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/SceneRoots
+open ecs/Entity
+
+const caseDir: String = "tests/cases/1295_scene_roots/"
+
+func main() {
+  var roots: SceneRoots = createSceneRoots(defaultRoot: "{caseDir}host")
+  mountSceneRoot(roots: roots, prefix: "apps/notes", folder: "{caseDir}plugin")
+  log("Theme -> {sceneRootsFile(roots: roots, sceneId: "Theme")}")
+  log("apps/notes/Main -> {sceneRootsFile(roots: roots, sceneId: "apps/notes/Main")}")
+  log("apps/notesOld/Main -> {sceneRootsFile(roots: roots, sceneId: "apps/notesOld/Main")}")
+  log("back: {sceneRootsPackagePath(roots: roots, path: "{caseDir}plugin/Card.raescene")}")
+  log("back: {sceneRootsPackagePath(roots: roots, path: "{caseDir}host/shared/Badge.raescene")}")
+  log("back outside: [{sceneRootsPackagePath(roots: roots, path: "elsewhere/X.raescene")}]")
+
+  let sceneId: String = "apps/notes/Main"
+  let path: String = sceneRootsFile(roots: roots, sceneId: sceneId)
+  let scene: Scene = loadScenePackageFile(path: path, sceneId: sceneId)
+  var registry: SceneRegistry = createSceneRegistry()
+  var diagnostics: List(SceneDiagnostic) = List.create(SceneDiagnostic, cap: 1)
+  let assets: SceneAssets = resolveSceneAssets(
+    entry: scene
+    entryPath: path
+    roots: roots
+    registry: registry
+    diagnostics: diagnostics
+    sceneLabel: sceneId
+  )
+  registerSceneReferencesTransitive(
+    scene: scene
+    roots: roots
+    registry: registry
+    diagnostics: diagnostics
+  )
+  loop let importedPath: view String in assets.importedPaths {
+    log("imported {importedPath}")
+  }
+  loop let id: view String in registry.ids {
+    log("registered {id}")
+  }
+  log("diagnostics = {diagnostics.length}")
+
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let before: Int = aliveCount(world: world)
+  resolveSceneInstances(
+    world: world
+    uiSystems: uiSystems
+    registry: registry
+    pageId: ""
+  )
+  log(
+    "mounted = {rootEntityId.index >= 0}, nodes the sub-scenes added (Card's Badge) = {aliveCount(
+      world: world
+    ) - before}"
+  )
+  log("world diagnostics = {world.sceneDiagnostics.length}")
+}
