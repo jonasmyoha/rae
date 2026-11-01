@@ -42,6 +42,7 @@
 # the page's scroll root.
 open ui/Ecs
 import ui/Components
+open ui/ClickTargets
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
@@ -133,20 +134,19 @@ func listViewApplyBinding(
   let raw: String = listRowValue(row: row, key: binding.itemField)
   let value: String = "{binding.prefix}{raw}{binding.suffix}"
   let textName: String = "Text"
-  let onClickName: String = "OnClick"
   if binding.componentName is textName {
     let t: Text = { text: value, styleId: "", wrapWidthMode: WrapWidthMode.none }
     componentSet(this: world.texts, entityId: child, data: t)
     ret
   }
-  if binding.componentName is onClickName {
-    let click: OnClick = {
-      actionId: value
-      actionIdDouble: ""
-      actionIdTriple: ""
-      maxDelayMs: 250
-    }
-    componentSet(this: world.onClicks, entityId: child, data: click)
+  if binding.componentName is "OnClick" {
+    setOnClickField(
+      world: world
+      entityId: child
+      fieldName: binding.fieldName
+      value: value
+      create: true
+    )
     ret
   }
 }
@@ -162,7 +162,6 @@ func listViewSceneBindingCurrent(
 ) ret Bool {
   let textName: String = "Text"
   let spriteName: String = "Sprite"
-  let onClickName: String = "OnClick"
   let activeName: String = "Active"
   if binding.componentName is textName {
     if componentHas(this: world.texts, entityId: entityId) is false {
@@ -186,12 +185,12 @@ func listViewSceneBindingCurrent(
     }
     ret false
   }
-  if binding.componentName is onClickName {
+  if binding.componentName is "OnClick" {
     if componentHas(this: world.onClicks, entityId: entityId) is false {
       ret true
     }
     let cur: view OnClick = componentView(this: world.onClicks, entityId: entityId)
-    ret cur.actionId is value
+    ret onClickFieldIs(click: cur, fieldName: binding.fieldName, value: value)
   }
   if binding.componentName is activeName {
     if componentHas(this: world.actives, entityId: entityId) is false {

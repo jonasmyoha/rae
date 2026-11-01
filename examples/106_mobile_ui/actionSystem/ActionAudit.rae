@@ -3,9 +3,11 @@
 # (every mounted page, the dock, the back button, the debug button), every
 # `ListView` binding that writes an `OnClick.actionId` (its prefix is the
 # template a row's payload completes) and every bottom-sheet menu, and logs
-# ONE line — `[action-audit] ids=N unknown=M` plus one line per unknown id —
-# which the 106 example gate asserts on. Runs at every world build; a new
-# authored id without a table row fails the gate, never a user's tap.
+# ONE line — `[action-audit] ids=N unknown=M unlabeled=K` plus one line per
+# unknown id and per unlabeled one — which the 106 example gate asserts on.
+# Runs at every world build; a new authored id without a table row, or an
+# OnClick id without its label (what a voice command and a screen reader
+# say: ui/ClickTargets), fails the gate, never a user's tap or command.
 open ui/Ecs
 open ecs/Entity
 open ecs/ComponentTable
@@ -15,6 +17,20 @@ open ecs/Query
 type ActionAuditResult {
   ids: Int
   unknown: Int
+  unlabeled: Int = 0
+}
+
+# An OnClick id with no label: counted and named
+func auditLabel(
+  actionId: view String
+  label: view String
+  where: view String
+  result: mod ActionAuditResult
+) {
+  if actionId.length() > 0 and label.length() is 0 {
+    result.unlabeled = result.unlabeled + 1
+    log("[action-audit] no label for action id '{actionId}' ({where})")
+  }
 }
 
 func auditId(
@@ -42,6 +58,24 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
         actionTable: actionTable
         actionId: click.actionId
         where: "OnClick"
+        result: result
+      )
+      auditLabel(
+        actionId: click.actionId
+        label: click.label
+        where: "OnClick"
+        result: result
+      )
+      auditLabel(
+        actionId: click.actionIdDouble
+        label: click.labelDouble
+        where: "OnClick double"
+        result: result
+      )
+      auditLabel(
+        actionId: click.actionIdTriple
+        label: click.labelTriple
+        where: "OnClick triple"
         result: result
       )
       if click.actionIdDouble.length() > 0 {
@@ -84,7 +118,8 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
       var b: Int = 0
       loop b < count {
         let binding: ListViewBinding = rae_ext_rae_buf_get(buf: listView.bindings.data, index: b)
-        if binding.componentName is "OnClick" and binding.prefix.length() > 0 {
+        # an action-id template (not a label binding, which writes words)
+        if binding.componentName is "OnClick" and binding.fieldName is "actionId" and binding.prefix.length() > 0 {
           auditId(
             actionTable: actionTable
             actionId: "{binding.prefix}0"
@@ -110,7 +145,7 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
         }
       }
     }
-    log("[action-audit] ids={result.ids} unknown={result.unknown}")
+    log("[action-audit] ids={result.ids} unknown={result.unknown} unlabeled={result.unlabeled}")
     ret result
   }
 }

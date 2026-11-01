@@ -544,10 +544,37 @@ func logInspectorPanel(
 #   RAE_UI_EDITOR_TEST_COMPONENT="filter:tran"       narrow the component list
 #   RAE_UI_EDITOR_TEST_COMPONENT="scroll:-280"       scroll the component viewport
 #
+# Several steps run in order when separated by spaces ("filter:onclick
+# scroll:-200").
+#
 # Add and remove go through the SAME functions the panel's rows call, so what
 # the gate exercises is the real edit, not a shortcut around it. The filter is
 # set directly because the keystroke path has no headless keyboard.
 func runTestComponent(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: mod ChromeSystem
+  pageRoot: view EntityId
+  scene: view Scene
+  script: view String
+) {
+  loop let step: view String in script.split(sep: " ") {
+    if step.trim().length() > 0 {
+      runTestComponentStep(
+        inspectorSystem: inspectorSystem
+        world: world
+        uiSystems: uiSystems
+        chromeSystem: chromeSystem
+        pageRoot: pageRoot
+        scene: scene
+        script: step.trim()
+      )
+    }
+  }
+}
+
+func runTestComponentStep(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
   uiSystems: mod UiSystems

@@ -20,6 +20,7 @@ open inspectorSystem/RectWidget
 open ui/Scene
 open inspectorSystem/ComponentWidget
 open inspectorSystem/RectEdit
+open inspectorSystem/LabelEdit
 open inspectorSystem/ComponentEdit
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
@@ -285,6 +286,22 @@ func syncInspectorPanel(
     )
     if fieldRows.length is 0 {
       continue
+    }
+    # the focused OnClick label shows what is typed (LabelEdit.rae)
+    if tally.name is "OnClick" and inspectorSystem.labelEdit.active {
+      loop let row: mod ListViewRow in fieldRows {
+        let field: String = row.values.copyAtDefault(index: 1)
+        if field is inspectorSystem.labelEdit.field {
+          row.values.set(
+            index: 2
+            value: labelRowText(
+              editing: inspectorSystem.labelEdit
+              field: field
+              value: row.values.copyAtDefault(index: 2)
+            )
+          )
+        }
+      }
     }
     var header: String = "{tally.name}"
     if tally.count < members {

@@ -35,6 +35,7 @@ open ui/scrollRootSystem/ScrollRootSystem
 open inspectorSystem/NodeQuery
 open inspectorSystem/RectWidget
 open inspectorSystem/RectEdit
+open inspectorSystem/LabelEdit
 open inspectorSystem/ComponentEdit
 
 # Tree rows: one design unit of indent per depth level.
@@ -108,6 +109,8 @@ type InspectorSystem {
   rectField: RectField
   rectDraft: String
   rectLocked: Bool
+  # an OnClick label's text input (LabelEdit.rae)
+  labelEdit: LabelEdit = {}
   # Collapsed rows, by NODE ID rather than entity or row index (#72481430).
   # The tree rebuilds constantly and a reload recreates every entity, so an
   # entity handle or an index would lose the state on the next keystroke;
@@ -268,7 +271,7 @@ func placeOutlines(
 # one answer, asked at the START of the frame, so the keystroke that ENDS an
 # edit (Enter, Esc) is still spent on the edit and not also on a command.
 func keyboardCaptured(inspectorSystem: view InspectorSystem) ret Bool {
-  ret inspectorSystem.filterFocused or inspectorSystem.treeFilterFocused or inspectorSystem.rectEditing
+  ret inspectorSystem.filterFocused or inspectorSystem.treeFilterFocused or inspectorSystem.rectEditing or inspectorSystem.labelEdit.active
 }
 
 func inspectorUpdate(
@@ -358,6 +361,39 @@ func inspectorUpdate(
         changed = true
       }
     }
+  }
+  # An OnClick label row: focus it (LabelEdit.rae); a click elsewhere commits
+  var labelAction: Bool = false
+  loop var a: Int = 0, a < rectActionCount, ++a {
+    let actionId: String = uiActionAt(world: world, index: a)
+    if actionId.startsWith(prefix: "labelFocus:") {
+      labelAction = true
+      let field: String = actionId.sub(start: 11, len: actionId.length() - 11)
+      if inspectorSystem.labelEdit.active and inspectorSystem.labelEdit.field is not field {
+        let unusedWritten: Int = labelCommit(
+          editing: inspectorSystem.labelEdit
+          world: world
+          selection: inspectorSystem.selection
+        )
+      }
+      labelFocus(editing: inspectorSystem.labelEdit, field: field)
+      changed = true
+    }
+  }
+  if input.pointer.pressed and inspectorSystem.labelEdit.active and labelAction is false {
+    let unusedWritten: Int = labelCommit(
+      editing: inspectorSystem.labelEdit
+      world: world
+      selection: inspectorSystem.selection
+    )
+    changed = true
+  }
+  if labelAction is false and labelKeys(
+    editing: inspectorSystem.labelEdit
+    world: world
+    selection: inspectorSystem.selection
+  ) {
+    changed = true
   }
   # A press ANYWHERE else is a blur, and a blur commits. It runs before the
   # canvas and tree clicks below, so the draft lands on the selection it was
@@ -856,6 +892,22 @@ func inspectorAfterLoad(
       selection: inspectorSystem.selection
     )
     log("[ui-editor] rect set {setRect} -> {written}: {afterLine}")
+  }
+  # RAE_UI_EDITOR_TEST_LABEL: the label input's keyboard path, scripted
+  let labelScript: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_LABEL")
+  if labelScript.length() > 0 {
+    let written: Int = runLabelScript(
+      editing: inspectorSystem.labelEdit
+      world: world
+      selection: inspectorSystem.selection
+      script: labelScript
+    )
+    log(
+      "[ui-editor] label set {labelScript} -> {written}: {labelWidgetLine(
+        world: world
+        selection: inspectorSystem.selection
+      )}"
+    )
   }
   syncInspectorPanel(
     world: world
