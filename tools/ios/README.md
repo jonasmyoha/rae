@@ -28,6 +28,12 @@ open build/ios/102_gpu2d_animated/proj/RaeApp.xcodeproj
 In Xcode: **Signing & Capabilities → Team** (Automatic), pick your plugged
 device, **Run**. Signing needs your Apple ID/team and can't be scripted.
 
+Each `gen-ios.sh` run stages the project's assets afresh and removes the
+`.app` an earlier build assembled, so a file deleted from the project never
+stays in the next build (Xcode's resource copy into an existing bundle only
+adds and updates). `sh tools/ios/gen-ios-smoke.sh` checks it on a
+throwaway project, with no device or signing (about a minute).
+
 The generator: emits the app C, prepends `<SDL3/SDL_main.h>` (so SDL owns the iOS
 entry), bundles the example's `assets/` preserving relative paths (plus any
 `examples/<other>/assets/...` file the app reads from another example, e.g. 118's
