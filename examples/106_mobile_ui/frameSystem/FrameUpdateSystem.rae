@@ -101,7 +101,7 @@ func frameUpdateSystem(
     session.renderUntil = tick.now + 0.5
   }
   session.lastHoveredEntityId = currentHovered
-  frame.lastPressed = input.pressedEntityId
+  frame.lastPressed = input.ui.pressedEntityId
 
   # Render decision trace: whether we'll paint this frame and why. If
   # `active=false` repeatedly while the UI is visibly frozen, the bug is in
@@ -109,7 +109,7 @@ func frameUpdateSystem(
   # downstream in renderSystem / endDrawing.
   if app.loopDebugEnabled {
     log(
-      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.pressedEntityId.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty} appSystems={frame.observation.ranCount}{frame.observation.ranNames}"
+      "[loop {app.loopDebugFrame}] uiActions={eventCount(this: input.uiActions)} pressed={input.ui.pressedEntityId.index} animating={tick.animating} active={tick.active} decide={activeDecision.active} assets={session.assetsLoading} hover={session.lastHoverAnimDirty} appSystems={frame.observation.ranCount}{frame.observation.ranNames}"
     )
   }
 }

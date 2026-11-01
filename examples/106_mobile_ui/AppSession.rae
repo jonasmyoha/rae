@@ -39,8 +39,6 @@ type AppSession {
   debugOverlay: DebugOverlay
   # The last frame rendered (the widget's frame-rate count)
   renderedLastFrame: Bool
-  # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
-  scrollFsm: ScrollFsm
   # Where every page's scroll is (page id -> position): the lib scrollRootSystem
   # seeds a freshly mounted `ScrollRoot` from it and keeps it current, so a
   # page re-mounted on a data change lands where it was; the hot-reload
@@ -89,7 +87,6 @@ type FrameTick {
   scrollAnimating: Bool
   playbackAnimating: Bool
   busyAnimating: Bool
-  dragJustReleased: Bool
   nextScreen: Screen
   hadActions: Bool
   willSwitch: Bool
@@ -121,7 +118,6 @@ func createAppSession(app: mod App) ret AppSession {
     reloadWatcher: createReloadSignalWatcher()
     debugOverlay: own debugOverlay
     renderedLastFrame: false
-    scrollFsm: createScrollFsm(initialScrollY: restoredScrollY)
     scrollMemory: own scrollMemory
     cachedAlbumStem: ""
     cachedTrackIndex: -1
@@ -146,7 +142,6 @@ func createFrameTick(session: view AppSession) ret FrameTick {
     scrollAnimating: false
     playbackAnimating: false
     busyAnimating: false
-    dragJustReleased: false
     nextScreen: session.currentScreen
     hadActions: false
     willSwitch: false

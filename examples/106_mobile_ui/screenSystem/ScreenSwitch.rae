@@ -50,7 +50,6 @@ func handleScreenSwitch(
   appState: mod AppState
   schedule: mod Schedule
   input: mod InputSystem
-  scrollFsm: mod ScrollFsm
   scrollMemory: mod ScrollMemory
   watcher: mod FileWatcher
   willSwitch: view Bool
@@ -209,28 +208,13 @@ func handleScreenSwitch(
       playbackSystem.durationSec = trackDurSec2
     }
   }
-  # Persistent per-page scroll: read the new page's ScrollState.y.
-  # Entities survive screen changes; a re-mounted page was re-seeded from
-  # the scroll memory above.
+  # Persistent per-page scroll lives on the new page's ScrollRoot (its
+  # ScrollState, seeded from the scroll memory above on a re-mount).
   result.newScrollTarget = findScrollRoot(world: world, uiSystems: uiSystems)
-  if isNone(this: result.newScrollTarget) {
-    scrollFsm.scrollY = 0.0
-  } else {
-    if componentHas(this: world.scrollStates, entityId: result.newScrollTarget) {
-      let s: view ScrollState = componentView(
-        this: world.scrollStates
-        entityId: result.newScrollTarget
-      )
-      scrollFsm.scrollY = s.y
-    } else {
-      scrollFsm.scrollY = 0.0
-    }
-  }
-  scrollFsm.velocity = 0.0
   # Entity ids on the new screen are unrelated to the outgoing one;
   # drop any held-press id so the next screen's release doesn't
   # accidentally match a stale id.
-  input.pressedEntityId = noEntity()
+  input.ui.pressedEntityId = noEntity()
 
   ret result
 }

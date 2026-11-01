@@ -36,30 +36,24 @@ func runFrameInputDispatch(
   actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
   spotifyEnabled: view Bool
-  dragJustReleased: view Bool
 ) pub ret FrameInputDispatchResult {
   var nextScreen: Screen = currentScreen
   let canvasOpenBefore: Bool = appState.canvasOpen
   let settingsOpenBefore: Bool = appState.settingsOpen
   let hadActions: Bool = eventCount(this: input.uiActions) > 0
 
-  if dragJustReleased is false {
-    # The fired ids become typed commands through the action table, and the
-    # command systems (navigation, playbackSystem, sheet, canvas) consume them.
-    nextScreen = runAppCommands(
-      input: input
-      actionTable: actionTable
-      commands: commands
-      state: appState
-      playbackSystem: playbackSystem
-      spotifyEnabled: spotifyEnabled
-    )
-  } else {
-    if hadActions {
-      let dropped: Int = eventCount(this: input.uiActions)
-      log("[dispatch] dragJustReleased=true, dropping {dropped} pending event(s)")
-    }
-  }
+  # The fired ids become typed commands through the action table, and the
+  # command systems (navigation, playbackSystem, sheet, canvas) consume them.
+  # A scroll drag claims its press in the lib's input, so a drag's release
+  # is never among them.
+  nextScreen = runAppCommands(
+    input: input
+    actionTable: actionTable
+    commands: commands
+    state: appState
+    playbackSystem: playbackSystem
+    spotifyEnabled: spotifyEnabled
+  )
 
   let canvasChanged: Bool = appState.canvasOpen is not canvasOpenBefore
   if appState.settingsOpen is not settingsOpenBefore {
@@ -80,9 +74,7 @@ func runFrameInputDispatch(
   }
 
   if hadActions {
-    if dragJustReleased is false {
-      saveAppState(path: stateFilePath, state: appState, playbackSystem: playbackSystem)
-    }
+    saveAppState(path: stateFilePath, state: appState, playbackSystem: playbackSystem)
   }
 
   ret FrameInputDispatchResult {
