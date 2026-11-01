@@ -1,0 +1,76 @@
+# A Circle Shape draws its stroke (lib/ui/renderSystem paintShapeG): the
+# painter queues one box per Shape on a Gpu2dCanvas (no GPU needed to queue),
+# and a stroked Circle's box carries the border width and color the same way
+# a RoundedRect with radius = half its side does. A Circle with no stroke
+# still queues a plain filled disc. Each box is boxPrimFloats floats: x y w h,
+# four radii, fill rgba, border rgba, border width, ... `\{`/`\}` keep the
+# JSON braces literal.
+open Gpu2dCanvas
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/renderSystem/RenderSystem
+open ecs/Entity
+open ecs/Transform
+open ui/Components
+
+func shapeScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{")
+  s = s.concat(other: "\"Row\":\{\"Children\":[\"Ring\",\"Disc\",\"Rounded\"]\},")
+  s = s.concat(
+    other: "\"Ring\":\{\"Shape\":\{\"kind\":\"Circle\",\"fill\":\"#00000000\",\"stroke\":\"#3366FFFF\",\"strokeWidth\":2\}\},"
+  )
+  s = s.concat(other: "\"Disc\":\{\"Shape\":\{\"kind\":\"Circle\",\"fill\":\"#FF0000FF\"\}\},")
+  s = s.concat(
+    other: "\"Rounded\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":12,\"fill\":\"#00000000\",\"stroke\":\"#3366FFFF\",\"strokeWidth\":2\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+# Paint the node `nodeId` as a 24x24 box at the origin and print the box it
+# queued
+func paintNode(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    let wt: WorldTransform2D = {
+      position: { x: 0.0, y: 0.0 }
+      rotation: 0.0
+      scale: { x: 1.0, y: 1.0 }
+    }
+    let cr: ComputedRect = { position: { x: 0.0, y: 0.0 }, size: { x: 24.0, y: 24.0 } }
+    paintShapeG(
+      world: world
+      uiSystems: uiSystems
+      entityId: id(v: raw)
+      wt: wt
+      cr: cr
+      chain255: 255
+      canvas: canvas
+    )
+  }
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  var line: String = "{nodeId}: {boxes} box"
+  if boxes > 0 {
+    let radius: Float = canvas.prims.copyAtDefault(index: 4)
+    let borderAlpha: Float = canvas.prims.copyAtDefault(index: 15)
+    let borderWidth: Float = canvas.prims.copyAtDefault(index: 16)
+    let size: Float = canvas.prims.copyAtDefault(index: 2)
+    line = "{line}, size {size}, radius {radius}, border width {borderWidth}, border alpha {borderAlpha}"
+  }
+  log(line)
+}
+
+func main() {
+  var scene: Scene = parseScene(source: shapeScene())
+  scene.sceneId = "shapes"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Ring")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Disc")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Rounded")
+}
