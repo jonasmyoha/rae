@@ -1,0 +1,308 @@
+# A drag on a scroll root clicks nothing (ui/scrollRootSystem,
+# ui/inputSystem): a scripted finger (updateUiInputWith, the same path the
+# device's pointer takes) drives a list of ten 50-pt buttons in a 200-pt
+# window. A press becomes a drag only past 10 points along the axis; the
+# drag then claims the press (no pressed button, no pressed look) and its
+# release fires no OnClick, though the rows moved with the finger and the
+# release lands on the row it was pressed on. A short tap, with a little
+# tremor, still clicks once; a fling settles inside the bounds. `\{`/`\}`
+# keep the JSON braces literal.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/InputKind
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func listScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"todo\",\"root\":\"Window\",\"nodes\":\{"
+  )
+  s = s.concat(
+    other: "\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Children\":[\"List\"]\},"
+  )
+  s = s.concat(
+    other: "\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":0\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Layout\":\{\"type\":\"Vertical\"\},\"ScrollRoot\":\{\"axis\":\"Y\"\},\"Children\":["
+  )
+  loop var i: Int = 0, i < 10, ++i {
+    if i > 0 {
+      s = s.concat(other: ",")
+    }
+    s = s.concat(other: "\"Row{i}\"")
+  }
+  s = s.concat(other: "]\}")
+  loop var i: Int = 0, i < 10, ++i {
+    s = s.concat(
+      other: ",\"Row{i}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":50\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"OnClick\":\{\"actionId\":\"row.{i}\",\"label\":\"Toggle task {i}\"\}\}"
+    )
+  }
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  list: EntityId
+  clicks: List(String)
+}
+
+func nameOf(rig: view Rig, entityId: view EntityId) ret String {
+  loop var i: Int = 0, i < 10, ++i {
+    if entityOf(world: rig.world, nodeId: "Row{i}") is entityId {
+      ret "Row{i}"
+    }
+  }
+  ret "none"
+}
+
+# One frame: the scripted pointer through the input path, then the scroll
+# root, then the transforms (so the next hit test sees the moved rows)
+func frame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  loop var i: Int = 0, i < eventCount(this: rig.world.uiActions), ++i {
+    let action: UiAction = eventAt(this: rig.world.uiActions, i: i)
+    rig.clicks.add(value: "{action.actionId}")
+  }
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+  )
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+}
+
+# Whether `nodeId` shows its pressed look (ButtonSystem's Interaction)
+func pressedLook(rig: view Rig, nodeId: view String) ret Bool {
+  let entityId: EntityId = entityOf(world: rig.world, nodeId: nodeId)
+  if componentHas(this: rig.uiSystems.button.interactions, entityId: entityId) is false {
+    ret false
+  }
+  ret componentView(this: rig.uiSystems.button.interactions, entityId: entityId).pressed
+}
+
+func position(rig: view Rig) ret Int {
+  ret componentView(this: rig.world.scrollStates, entityId: rig.list).y.toInt()
+}
+
+func report(rig: mod Rig, label: view String) {
+  var clicked: String = "none"
+  if rig.clicks.length > 0 {
+    clicked = ""
+    loop let click: view String in rig.clicks {
+      clicked = "{clicked} {click}"
+    }
+  }
+  log("{label}: position {position(rig: rig)}, clicks:{clicked}")
+  rig.clicks.clear()
+}
+
+func main() {
+  let scene: Scene = parseScene(source: listScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 200.0
+  let rootEntityId: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+  let list: EntityId = entityOf(world: world, nodeId: "List")
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: list)
+  log(
+    "mounted = {rootEntityId.index >= 0}, floor {range.floor.toInt()}, window {range.window.toInt()}"
+  )
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    list: list
+    clicks: List.create(String, cap: 4)
+  }
+  # a tap on Row1 with 4 points of tremor: one click
+  frame(
+    rig: rig
+    x: 150.0
+    y: 75.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 151.0
+    y: 78.0
+    down: true
+  )
+  log("tap held: pressed {nameOf(rig: rig, entityId: rig.input.pressedEntityId)}")
+  frame(
+    rig: rig
+    x: 151.0
+    y: 79.0
+    down: false
+  )
+  report(rig: rig, label: "tap on Row1")
+  # a drag from Row2 up by 120 points over 6 frames, then a lift where the
+  # finger is
+  frame(
+    rig: rig
+    x: 150.0
+    y: 125.0
+    down: true
+  )
+  log(
+    "drag pressed: {nameOf(rig: rig, entityId: rig.input.pressedEntityId)}, pressed look {pressedLook(
+      rig: rig
+      nodeId: "Row2"
+    )}"
+  )
+  loop var i: Int = 1, i <= 6, ++i {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 125.0 - (i * 20).toFloat()
+      down: true
+    )
+  }
+  log(
+    "mid-drag: pressed {nameOf(rig: rig, entityId: rig.input.pressedEntityId)}, Row2 pressed look {pressedLook(
+      rig: rig
+      nodeId: "Row2"
+    )}, claimed {uiPressClaimed(input: rig.input, world: rig.world)}"
+  )
+  # hold still so the lift has no fling; the lift is over Row2 (the content
+  # moved 100 of the finger's 120 points: the first 20 only activated it)
+  frame(
+    rig: rig
+    x: 150.0
+    y: 5.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 150.0
+    y: 5.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 150.0
+    y: 5.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 150.0
+    y: 5.0
+    down: false
+  )
+  log("the lift was over {nameOf(rig: rig, entityId: rig.input.hoveredEntityId)}")
+  report(rig: rig, label: "drag over Row2")
+  # a tap after the scroll: the rows are 100 points higher, so a tap where
+  # Row2 was hits Row4
+  frame(
+    rig: rig
+    x: 150.0
+    y: 125.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 150.0
+    y: 125.0
+    down: false
+  )
+  report(rig: rig, label: "tap after the drag")
+  # a fling: 40 points a frame, then lift and let it run out
+  frame(
+    rig: rig
+    x: 150.0
+    y: 190.0
+    down: true
+  )
+  loop var i: Int = 1, i <= 4, ++i {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 190.0 - (i * 40).toFloat()
+      down: true
+    )
+  }
+  frame(
+    rig: rig
+    x: 150.0
+    y: 30.0
+    down: false
+  )
+  var frames: Int = 0
+  loop frames < 600 and componentView(this: rig.world.scrollStates, entityId: rig.list).velocity is not 0.0 {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 30.0
+      down: false
+    )
+    frames = frames + 1
+  }
+  let settled: Int = position(rig: rig)
+  log(
+    "fling settled within 600 frames: {frames < 600}, in bounds: {settled <= 0 and settled >= range.floor.toInt()}"
+  )
+  report(rig: rig, label: "fling")
+  # a flick whose 20-point move and lift land in one frame, inside Row7: a
+  # drag all the same, so no click
+  frame(
+    rig: rig
+    x: 150.0
+    y: 60.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 150.0
+    y: 80.0
+    down: false
+  )
+  log("the flick's lift was over {nameOf(rig: rig, entityId: rig.input.hoveredEntityId)}")
+  report(rig: rig, label: "one-frame flick")
+}

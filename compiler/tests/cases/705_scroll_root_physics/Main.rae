@@ -12,8 +12,10 @@ open ui/UiSystems
 # A `ScrollRoot` on the content node inside a clipped viewport (the former
 # ScrollPanel shape, #729) with the lib iOS-style scroll physics (drag -> release
 # momentum -> friction decay; rubber-band + spring-back past a bound). This drives
-# updateScrollRoot deterministically and checks the feel: a drag moves the
-# position 1:1 in-bounds, releasing hands the lift velocity to a momentum fling
+# updateScrollRoot deterministically and checks the feel: the first move past
+# the 10-point activation distance starts the drag (it moves nothing itself),
+# then the drag moves the position 1:1 in-bounds, releasing hands the lift velocity to a momentum
+# fling
 # that keeps moving and decays to rest, and a fling that overshoots the bottom
 # springs back to the floor. The floor is the laid-out geometry: content 3000
 # tall in a 100-tall viewport -> -2900. Positions are <= 0 (content slid up).

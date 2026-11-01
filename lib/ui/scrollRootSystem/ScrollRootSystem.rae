@@ -14,7 +14,10 @@
 #     minus the authored `endInset`. Nothing to scroll → inert.
 #   * `updateScrollRoot` is the lib drag / wheel / momentum / spring physics
 #     (iOS feel via ui/ScrollPhysics) for an app that does not carry its own
-#     scroll state machine; it replaces the former ScrollPanel (#729).
+#     scroll state machine; it replaces the former ScrollPanel (#729). A press
+#     becomes a drag only past 10 points along the axis; the drag then claims
+#     the press (ScrollDrag.active, read by updateUiInput), so a drag over a
+#     button scrolls and its release clicks nothing, while a tap still clicks.
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
@@ -467,21 +470,36 @@ func updateScrollRoot(
   )
   let pointer: Float = pointerAlongAxis(root: root, input: input)
 
-  # ----- press / release -----
+  # ----- press / activation / release -----
+  # A press is tracked from the frame it lands; it becomes a drag only once
+  # the pointer has moved `scrollActivationPoints` along the axis (iOS's pan
+  # threshold), so a tap with a little tremor stays a tap and clicks. An
+  # active drag claims the press (`active`, read by updateUiInput), so its
+  # release clicks nothing under the finger.
   if input.pointer.pressed and inside {
     drag.dragging = true
+    drag.active = false
+    drag.pressPointer = pointer
     drag.lastPointer = pointer
     state.velocity = 0.0
     drag.d0 = 0.0
     drag.d1 = 0.0
     drag.d2 = 0.0
   }
+  if drag.dragging and drag.active is false and input.pointer.down {
+    if scrollAbs(value: pointer - drag.pressPointer) > scrollActivationUnits(input: input) {
+      drag.active = true
+      # the content starts to follow from here, without a jump
+      drag.lastPointer = pointer
+    }
+  }
   if input.pointer.released or input.pointer.down is false {
-    if drag.dragging {
+    if drag.active {
       # Hand the finger's lift velocity to the momentum fling.
       state.velocity = pickReleaseVelocity(d0: drag.d0, d1: drag.d1, d2: drag.d2)
     }
     drag.dragging = false
+    drag.active = false
   }
 
   # ----- wheel (only when updateUiInput routed it here) -----
@@ -497,7 +515,7 @@ func updateScrollRoot(
     )
   }
 
-  if drag.dragging {
+  if drag.active {
     # ----- drag: content follows the finger 1:1, rubber-banded near a bound -----
     let rawDelta: Float = pointer - drag.lastPointer
     drag.lastPointer = pointer
@@ -557,8 +575,9 @@ func updateScrollRoot(
   ret before is not state.y
 }
 
-# Whether the root is mid-drag, so a caller can suppress its own pointer
-# handling — a drag that started on the panel should not also orbit the camera.
+# Whether a press on the root is being tracked (a drag, or a press that may
+# still become one), so a caller can suppress its own pointer handling — a
+# drag that started on the panel should not also orbit the camera.
 func scrollRootDragging(world: view UiWorld, entityId: view EntityId) ret Bool {
   if isNone(this: entityId) {
     ret false

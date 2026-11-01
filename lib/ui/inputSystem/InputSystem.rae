@@ -440,7 +440,120 @@ func routeUiWheel(
   }
 }
 
+# One frame of pointer input from the device: the pointer, the wheel and
+# the other fingers. `updateUiInputWith` is the same frame from a scripted
+# pointer.
 func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSystems) pub {
+  # Keeps `canHover` current: a trackpad case attached or removed
+  Device.deviceChanged(watch: input.deviceWatch)
+  let pointer: UiPointerState = {
+    x: Gpu2d.pointerX()
+    y: Gpu2d.pointerY()
+    down: Gpu2d.pointerDown()
+    pressed: Gpu2d.pointerPressed()
+    released: Gpu2d.pointerReleased()
+    kind: lastPointerKind()
+  }
+  stepUiInput(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    pointer: pointer
+    wheel: Gpu2d.wheelMove()
+    deviceFingers: true
+  )
+}
+
+# One frame of pointer input from `pointer` and `wheel` instead of the
+# device: what a headless self-test feeds, so a scripted finger goes through
+# the same hit test, press tracking, drag claim and release click as a real
+# one (uiPointerScriptFrame makes the frames of a script). The device's
+# other fingers are not read.
+func updateUiInputWith(
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  pointer: view UiPointerState
+  wheel: view Float
+) {
+  stepUiInput(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    pointer: pointer
+    wheel: wheel
+    deviceFingers: false
+  )
+}
+
+# A scripted pointer frame: the pointer at (x, y), down or up, of `kind`;
+# pressed and released follow from `previous` (the frame before)
+func uiPointerScriptFrame(
+  previous: view UiPointerState
+  x: view Float
+  y: view Float
+  down: view Bool
+  kind: view InputKind
+) ret UiPointerState {
+  ret UiPointerState {
+    x: x
+    y: y
+    down: down
+    pressed: down and previous.down is false
+    released: down is false and previous.down
+    kind: kind
+  }
+}
+
+# How far a press on a scroll root must move along its axis before it is a
+# drag, in points (iOS's pan gesture threshold)
+const scrollActivationPoints: Float = 10.0
+
+# The activation distance in the UI's layout units: an app whose units are
+# not points says so through the input's touch target size
+# (touchTargetPoints points in its units)
+func scrollActivationUnits(input: view UiInput) ret Float {
+  ret scrollActivationPoints * input.touchTargetSize / touchTargetPoints
+}
+
+# Whether a scroll root's drag has claimed the press (ui/scrollRootSystem):
+# its drag is active, or the pointer has moved past the activation distance
+# along its axis since the press (a flick whose move and lift land in one
+# frame). A claimed press has no pressed entity and its release clicks
+# nothing.
+func uiPressClaimed(input: view UiInput, world: view UiWorld) ret Bool {
+  let count: Int = componentCount(this: world.scrollDrags)
+  loop var i: Int = 0, i < count, ++i {
+    let rootEntityId: EntityId = componentEntityAt(this: world.scrollDrags, i: i)
+    let drag: view ScrollDrag = componentView(this: world.scrollDrags, entityId: rootEntityId)
+    if drag.active {
+      ret true
+    }
+    if drag.dragging and componentHas(this: world.scrollRoots, entityId: rootEntityId) {
+      var along: Float = input.pointer.y
+      if componentView(this: world.scrollRoots, entityId: rootEntityId).axis is ScrollAxis.x {
+        along = input.pointer.x
+      }
+      var moved: Float = along - drag.pressPointer
+      if moved < 0.0 {
+        moved = -moved
+      }
+      if moved > scrollActivationUnits(input: input) {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+func stepUiInput(
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  pointer: view UiPointerState
+  wheel: view Float
+  deviceFingers: view Bool
+) {
   # Recycle last frame's action channel: frameAdvance swaps in the empty spare so
   # this frame's input produces into a clean queue (the old clearUiActions).
   frameAdvance(this: world.uiActions)
@@ -449,22 +562,13 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.hoveredEntityId)
   buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.pressedEntityId)
 
-  let x: Float = Gpu2d.pointerX()
-  let y: Float = Gpu2d.pointerY()
-  let pressed: Bool = Gpu2d.pointerPressed()
-  let released: Bool = Gpu2d.pointerReleased()
-  let kind: InputKind = lastPointerKind()
-  input.pointer = UiPointerState {
-    x: x
-    y: y
-    down: Gpu2d.pointerDown()
-    pressed: pressed
-    released: released
-    kind: kind
-  }
+  let x: Float = pointer.x
+  let y: Float = pointer.y
+  let pressed: Bool = pointer.pressed
+  let released: Bool = pointer.released
+  let kind: InputKind = pointer.kind
+  input.pointer = pointer
   input.lastInputKind = kind
-  # Keeps `canHover` current: a trackpad case attached or removed
-  Device.deviceChanged(watch: input.deviceWatch)
   input.hoveredEntityId = uiHitTestFor(
     world: world
     uiSystems: uiSystems
@@ -477,12 +581,21 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     input: input
     world: world
     uiSystems: uiSystems
-    wheel: Gpu2d.wheelMove()
+    wheel: wheel
   )
   if pressed {
     input.pressedEntityId = input.hoveredEntityId
   }
-  sendFingerPresses(input: input, world: world, uiSystems: uiSystems)
+  # a drag took the press: no pressed look, and no click on its release
+  if pressed is false and isNone(this: input.pressedEntityId) is false and uiPressClaimed(
+    input: input
+    world: world
+  ) {
+    input.pressedEntityId = noEntity()
+  }
+  if deviceFingers {
+    sendFingerPresses(input: input, world: world, uiSystems: uiSystems)
+  }
   if released {
     if isNone(this: input.hoveredEntityId) is false {
       if input.hoveredEntityId is input.pressedEntityId {
