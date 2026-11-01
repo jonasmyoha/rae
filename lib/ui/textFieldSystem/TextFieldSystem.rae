@@ -1,0 +1,279 @@
+# TextFieldSystem — typing into the scene's TextFields (ui/BindingComponents).
+#
+# - A tap on a field (a UiAction this frame whose entity carries a TextField)
+#   gives it focus; a tap anywhere else, or Return, takes focus away. The focus
+#   is the `focused` flag on the field, so at most one field has it.
+# - While a field has focus, OS text input is on (on a phone that shows the
+#   keyboard): the frame's typed characters are added and each Backspace
+#   removes the last character (a whole UTF-8 sequence).
+# - Return sends the field's `actionId` as a UiAction with no entity, the same
+#   action a button with that id sends; `textFieldTextFor` reads the text and
+#   `clearTextFieldsFor` empties the field once the app has used it.
+# - Each field's first Text child shows its text, or its placeholder while it
+#   is empty and has no focus. The caret is not a character in that text: the
+#   renderer draws it after the text (ui/renderSystem/RenderCaret) while
+#   `caretVisible`, which blinks every `caretBlinkSec` from the last edit or
+#   focus change. `textFieldDeadlineSec` is when it next changes, for the
+#   event loop's wait.
+# - `keyboardHeight` is the on-screen keyboard's height in points (0 when none
+#   is shown, always 0 on a desktop), so a layout can keep a field above it.
+import Gpu2dTextInput
+import Sdl3
+open Keys
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/UiSystems
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+# Half a blink: the caret shows for this long, then hides for as long
+const caretBlinkSec: Float64 = 0.53
+
+# What the keyboard and the pointer did this frame
+type TextInputFrame {
+  # the UTF-8 characters typed since the last poll
+  typed: String
+  backspaces: Int
+  enter: Bool
+  # a tap ended this frame, on anything or on nothing
+  tapped: Bool
+}
+
+# This frame's typing from the window (Gpu2dTextInput and the SDL keys);
+# `tapped` is the app's own pointer state
+func readTextInputFrame(tapped: view Bool) ret TextInputFrame {
+  var backspaces: Int = 0
+  if Sdl3.isKeyPressed(key: keyBackspace) {
+    backspaces = 1
+  }
+  ret TextInputFrame {
+    typed: Gpu2dTextInput.textInput()
+    backspaces: backspaces
+    enter: Sdl3.isKeyPressed(key: keyEnter)
+    tapped: tapped
+  }
+}
+
+# Drop the last character (a whole UTF-8 sequence) of `text`
+func withoutLastCharacter(text: view String) ret String {
+  var cut: Int = text.length() - 1
+  # continuation bytes are 10xxxxxx (128..191)
+  loop cut > 0 and text.byteAt(index: cut) >= 128 and text.byteAt(index: cut) < 192 {
+    cut = cut - 1
+  }
+  if cut <= 0 {
+    ret ""
+  }
+  ret text.sub(start: 0, len: cut)
+}
+
+# The field that has focus, or noEntity()
+func focusedTextFieldEntityId(world: view UiWorld) ret EntityId {
+  let count: Int = componentCount(this: world.textFields)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: world.textFields, i: i)
+    if componentView(this: world.textFields, entityId: entityId).focused {
+      ret entityId
+    }
+  }
+  ret noEntity()
+}
+
+# Give `entityId` the focus (noEntity() for none), taking it from every other
+# field. True when it moved.
+func focusTextField(world: mod UiWorld, entityId: view EntityId) ret Bool {
+  var changed: Bool = false
+  let count: Int = componentCount(this: world.textFields)
+  loop var i: Int = 0, i < count, ++i {
+    let fieldEntityId: EntityId = componentEntityAt(this: world.textFields, i: i)
+    let wanted: Bool = fieldEntityId is entityId
+    if componentView(this: world.textFields, entityId: fieldEntityId).focused is not wanted {
+      componentMod(this: world.textFields, entityId: fieldEntityId).focused = wanted
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# Focus from this frame's taps, then typing into the focused field; Return
+# sends its action into `actions`. Then OS text input follows the focus, the
+# Text children show the fields and the caret's blink phase is updated. True
+# when something on screen changed (a field, the focus, the caret's blink).
+func textFieldSystem(
+  world: mod UiWorld
+  textFieldSystem: mod TextFieldSystem
+  actions: mod EventQueue(UiAction)
+  input: view TextInputFrame
+  now: view Float64
+) ret Bool {
+  var changed: Bool = false
+  # the focus: a tap on a field takes it there, a tap elsewhere drops it
+  var tappedField: EntityId = noEntity()
+  var tappedSomething: Bool = input.tapped
+  loop var i: Int = 0, i < eventCount(this: actions), ++i {
+    let action: UiAction = eventAt(this: actions, i: i)
+    if isNone(this: action.entityId) is false {
+      tappedSomething = true
+      if componentHas(this: world.textFields, entityId: action.entityId) {
+        tappedField = action.entityId
+      }
+    }
+  }
+  if tappedSomething and tappedField is not focusedTextFieldEntityId(world: world) {
+    changed = focusTextField(world: world, entityId: tappedField) or changed
+  }
+  # the typing
+  let focused: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: focused) is false {
+    let field: mod TextField = componentMod(this: world.textFields, entityId: focused)
+    loop var i: Int = 0, i < input.backspaces and field.text.length() > 0, ++i {
+      field.text = withoutLastCharacter(text: field.text)
+      changed = true
+    }
+    if input.typed.length() > 0 {
+      field.text = "{field.text}{input.typed}"
+      changed = true
+    }
+    if input.enter {
+      if field.actionId.length() > 0 {
+        eventSend(
+          this: actions
+          value: UiAction { entityId: noEntity(), actionId: "{field.actionId}" }
+        )
+      }
+      field.focused = false
+      changed = true
+    }
+  }
+  let stillFocused: Bool = isNone(this: focusedTextFieldEntityId(world: world)) is false
+  if stillFocused is not textFieldSystem.textInputOn {
+    textFieldSystem.textInputOn = stillFocused
+    Gpu2dTextInput.setTextInput(active: stillFocused)
+  }
+  textFieldSystem.keyboardHeight = Gpu2dTextInput.keyboardHeight()
+  if changed {
+    # an edit or a focus change shows the caret at once
+    textFieldSystem.caretEpoch = now
+  }
+  changed = textFieldViewSystem(world: world, textFieldSystem: textFieldSystem) or changed
+  changed = updateCaretBlink(world: world, textFieldSystem: textFieldSystem, now: now) or changed
+  ret changed
+}
+
+# The field's visible line: its first child that carries a Text
+func textFieldLineEntityId(world: view UiWorld, fieldEntityId: view EntityId) ret EntityId {
+  if componentHas(this: world.childrens, entityId: fieldEntityId) is false {
+    ret noEntity()
+  }
+  let children: view Children = componentView(this: world.childrens, entityId: fieldEntityId)
+  loop let child: view EntityId in children.ids {
+    if componentHas(this: world.texts, entityId: child) {
+      ret child
+    }
+  }
+  ret noEntity()
+}
+
+# Write each field's Text child: its text, or its placeholder while it is
+# empty and has no focus. Remembers the focused field's line for the caret.
+# True when a Text changed.
+func textFieldViewSystem(world: mod UiWorld, textFieldSystem: mod TextFieldSystem) ret Bool {
+  var changed: Bool = false
+  textFieldSystem.caretLineEntityId = noEntity()
+  let count: Int = componentCount(this: world.textFields)
+  loop var i: Int = 0, i < count, ++i {
+    let fieldEntityId: EntityId = componentEntityAt(this: world.textFields, i: i)
+    let line: EntityId = textFieldLineEntityId(world: world, fieldEntityId: fieldEntityId)
+    if isNone(this: line) {
+      continue
+    }
+    let field: view TextField = componentView(this: world.textFields, entityId: fieldEntityId)
+    var shown: String = "{field.text}"
+    var styleId: String = "{field.textStyleId}"
+    if field.text.length() is 0 and field.focused is false {
+      shown = "{field.placeholder}"
+      styleId = "{field.placeholderStyleId}"
+    }
+    if field.focused {
+      textFieldSystem.caretLineEntityId = line
+    }
+    let current: view Text = componentView(this: world.texts, entityId: line)
+    if current.text is not shown or current.styleId is not styleId {
+      let text: mod Text = componentMod(this: world.texts, entityId: line)
+      text.text = shown
+      text.styleId = styleId
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# The caret shows in the first half of each blink from `caretEpoch`. True
+# when it changed.
+func updateCaretBlink(
+  world: view UiWorld
+  textFieldSystem: mod TextFieldSystem
+  now: view Float64
+) ret Bool {
+  var visible: Bool = false
+  if isNone(this: textFieldSystem.caretLineEntityId) is false {
+    let phase: Int = ((now - textFieldSystem.caretEpoch) / caretBlinkSec) as Int
+    visible = phase % 2 is 0
+  }
+  if visible is textFieldSystem.caretVisible {
+    ret false
+  }
+  textFieldSystem.caretVisible = visible
+  ret true
+}
+
+# Seconds until the caret next blinks, 0 when no field has focus (the
+# heartbeat convention of ui/EventLoop.nextWaitTimeoutSec): the longest an
+# event loop may wait while a field has focus
+func textFieldDeadlineSec(textFieldSystem: view TextFieldSystem, now: view Float64) ret Float {
+  if isNone(this: textFieldSystem.caretLineEntityId) {
+    ret 0.0
+  }
+  let elapsed: Float64 = now - textFieldSystem.caretEpoch
+  let phase: Int = (elapsed / caretBlinkSec) as Int
+  let remaining: Float = ((phase + 1) as Float64 * caretBlinkSec - elapsed) as Float
+  if remaining < 0.001 {
+    ret 0.001
+  }
+  ret remaining
+}
+
+# The text of the field whose action is `actionId` ("" when none)
+func textFieldTextFor(world: view UiWorld, actionId: view String) ret String {
+  let count: Int = componentCount(this: world.textFields)
+  loop var i: Int = 0, i < count, ++i {
+    let field: view TextField = componentView(
+      this: world.textFields
+      entityId: componentEntityAt(this: world.textFields, i: i)
+    )
+    if field.actionId is actionId {
+      ret "{field.text}"
+    }
+  }
+  ret ""
+}
+
+# Empty every field whose action is `actionId` (the app has used its text).
+# True when one changed.
+func clearTextFieldsFor(world: mod UiWorld, actionId: view String) ret Bool {
+  var changed: Bool = false
+  let count: Int = componentCount(this: world.textFields)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: world.textFields, i: i)
+    if componentView(this: world.textFields, entityId: entityId).actionId is actionId {
+      let field: mod TextField = componentMod(this: world.textFields, entityId: entityId)
+      if field.text.length() > 0 {
+        field.text = ""
+        changed = true
+      }
+    }
+  }
+  ret changed
+}

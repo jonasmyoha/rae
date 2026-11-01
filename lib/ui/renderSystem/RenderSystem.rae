@@ -37,6 +37,7 @@ open ecs/ComponentTable
 open Gpu2dCanvas
 open ui/UiSystems
 open ui/Transform
+open ui/renderSystem/RenderCaret
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -797,6 +798,17 @@ func paintEntityG(
   if componentHas(this: world.texts, entityId: entityId) {
     paintTextG(
       world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+    # the focused text field's caret, after its text (ui/textFieldSystem)
+    paintCaretG(
+      world: world
+      uiSystems: uiSystems
       entityId: entityId
       wt: wt
       cr: cr

@@ -76,6 +76,18 @@ func nextWaitTimeoutSec(
   ret timeout
 }
 
+# The sooner of two heartbeat deadlines (seconds, 0 = none), for an app with
+# more than one thing that must wake the loop on time
+func earliestDeadlineSec(first: view Float, second: view Float) ret Float {
+  if first <= 0.0 {
+    ret second
+  }
+  if second <= 0.0 or first < second {
+    ret first
+  }
+  ret second
+}
+
 # Thread-safe waker (#950). Posts a user event to the window's queue so a
 # `waitEvents` blocked on the UI thread returns immediately. A `spawn`'d
 # worker calls this right after it posts its result on a Channel: without

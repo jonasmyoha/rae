@@ -3,7 +3,7 @@
 # its input sets — the app resources it reads, as `source*` revision flags
 # (the history / library / playback revisions, the browsed collection, the
 # sheet epoch, the settings, the texture registry), and the world tables it
-# reads (its own binding table, so a fresh mount is seen; `searchFields` for
+# reads (its own binding table, so a fresh mount is seen; `textFields` for
 # the query; `computedRects` for the progress row, which must re-run once the
 # player page is laid out — its generation is stable at idle since the flow
 # ListView reconcile no longer re-borrows Children every frame) — and
@@ -264,7 +264,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: avatarTables
   )
   let listSourceSources: Int = sourceLibrary bitor sourceSettings bitor sourceHistory bitor sourceCollection bitor sourcePlayback bitor sourceSheet
-  let listSourceTables: List(String) = ["listSources", "searchFields"]
+  let listSourceTables: List(String) = ["listSources", "textFields"]
   registerAppObserver(
     observation: observation
     world: world
@@ -321,7 +321,7 @@ func createAppObservation(world: view UiWorld) ret AppObservation {
     tables: albumCoverTables
   )
   let emptyStateSources: Int = sourceHistory
-  let emptyStateTables: List(String) = ["emptyStates", "searchFields"]
+  let emptyStateTables: List(String) = ["emptyStates", "textFields"]
   registerAppObserver(
     observation: observation
     world: world

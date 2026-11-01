@@ -32,7 +32,7 @@ enum ListSourceKind {
 
 # the user's library albums
 # the Liked playlist tile, then the library albums
-# catalog tracks matching the page's SearchField query
+# catalog tracks matching the page's TextField text
 # catalog albums matching the query
 # the songs of the collection the Album page shows
 # the open bottom sheet's actions
@@ -42,18 +42,21 @@ type ListSource {
   builtKey: String
 }
 
-# ----- search page: a text field and its result list (#976) ----------------
+# ----- text field (ui/textFieldSystem) ---------------------------------------
 
-# A single-line text field authored as a container whose first Text child is
-# the visible line. `query` is the live typed text (the field system appends
-# the frame's typed characters and applies backspaces while the field's page
-# is active); the Text child shows `query` in `textStyleId`, or `placeholder`
-# in `placeholderStyleId` while the query is empty. `emptyStateNodeId` names
-# the page node shown while the query is empty (the sibling search-results
-# list host shows the rest of the time).
-type SearchField {
-  query: String
-  placeholder: String
+# A single-line text field, authored as a node whose first Text child is the
+# visible line; the node also carries an OnClick, so a tap reaches it (the
+# tap gives it focus). `text` is what was typed; the Text child shows it in
+# `textStyleId`, or `placeholder` in `placeholderStyleId` while it is empty
+# and the field has no focus. `focused` is the focus, as data: at most one
+# field has it, and the renderer draws the caret after its text. `actionId`
+# is the action the text belongs to: Return in the field sends it, as a tap
+# on a button with that id does ("" sends nothing).
+type TextField {
+  text: String = ""
+  placeholder: String = ""
+  actionId: String = ""
+  focused: Bool = false
   textStyleId: String = "primary"
   placeholderStyleId: String = "muted"
 }
@@ -62,7 +65,7 @@ type SearchField {
 # played yet" block, the Search page's "Recent" stub before a query). Authored
 # on the empty node; `emptyStateSystem` sets its `Active` from `key`:
 #   "history" -> the play history has no entries
-#   "search"  -> the page's SearchField query is blank
+#   "search"  -> the page's TextField text is blank
 enum EmptyStateKind { history, search }
 
 type EmptyState {

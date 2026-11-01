@@ -13,6 +13,7 @@ open ui/BindingComponents
 open ui/InputComponents
 import ecs/Transform
 open ecs/Hierarchy
+open ecs/Entity
 open ecs/ComponentTable
 
 # layoutSystem's output: measured sizes, the font measure of Hug text leaves,
@@ -22,6 +23,19 @@ type LayoutSystem {
   measuredTexts: ComponentTable(MeasuredText)
   computedRects: ComponentTable(ComputedRect)
   layoutScales: ComponentTable(LayoutScale)
+}
+
+# textFieldSystem's state (ui/textFieldSystem): where the caret is drawn and
+# whether it shows in this blink phase, when the phase started, whether OS
+# text input is on, and the height of the on-screen keyboard in points (0
+# when none is shown) so a layout can keep a field above it. The focus itself
+# is data on the TextField.
+type TextFieldSystem {
+  caretLineEntityId: EntityId
+  caretVisible: Bool
+  caretEpoch: Float64
+  textInputOn: Bool
+  keyboardHeight: Float
 }
 
 # safeAreaSystem's output: the resolved insets per SafeArea node.
@@ -133,6 +147,7 @@ type UiSystems {
   animation: AnimationSystem
   heroTransition: HeroTransitionSystem
   button: ButtonSystem
+  textField: TextFieldSystem
 }
 
 func createUiSystems() ret UiSystems {
@@ -161,6 +176,13 @@ func createUiSystems() ret UiSystems {
     button: ButtonSystem {
       interactions: ComponentTable.create(Interaction)
       hoverFades: ComponentTable.create(HoverFade)
+    }
+    textField: TextFieldSystem {
+      caretLineEntityId: noEntity()
+      caretVisible: false
+      caretEpoch: 0.0
+      textInputOn: false
+      keyboardHeight: 0.0
     }
   }
 }

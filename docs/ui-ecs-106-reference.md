@@ -156,7 +156,7 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `EmptyState` | `emptyStateSystem` *(obs)* | `screenSystem/EmptyStateSystem.rae` |
 | `AlbumCover` (+ authored `CornerRadius`) | `albumCoverUpdate` *(obs)* | albumCoverSystem/AlbumCoverSystem — the app's own table (ECS split step 3): the rounding is scene data, the setting removes / restores it |
 | `BottomSheet` / `SheetPanel` | `bottomSheetSystem` *(obs)* | `screenSystem/BottomSheet.rae` |
-| `SearchField` | `searchFieldSystem` | `screenSystem/SearchSystems.rae` (input phase) |
+| `TextField` | lib `textFieldSystem` via `searchFieldSystem` | `screenSystem/SearchSystems.rae` (input phase) |
 | `NavTab` | `navTabsSystem` | `screenSystem/DockSystems.rae` (on switch) |
 | `ScrollRoot` | `scrollRootSystem` + the scroll FSM | lib/ui/scrollRootSystem + `inputSystem/ScrollInput.rae` |
 | `HeroWidget` | `spawnHeroTransition` / `heroTransitionSystem` | lib/ui/animationSystem (key written by the cover binding systems) |

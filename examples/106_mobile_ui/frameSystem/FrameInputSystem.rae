@@ -64,8 +64,16 @@ func frameInputSystem(
     input.pressedEntityId = noEntity()
     frame.forceRender = true
   }
-  # #976: the frame's keyboard text goes to the active page's search field.
-  searchFieldSystem(world: world, uiSystems: app.uiSystems, input: input)
+  # #976: taps and typing go to the text fields (lib/ui textFieldSystem); a
+  # changed field, focus or caret blink repaints the frame
+  if searchFieldSystem(
+    world: world
+    uiSystems: app.uiSystems
+    input: input
+    now: uiNowSeconds()
+  ) {
+    frame.forceRender = true
+  }
   # Live-window resize. Detected by POLLING the live framebuffer-derived
   # extent every frame and comparing to the applied one — robust vs relying
   # on OS resize-event delivery. When the extent changed, record it and

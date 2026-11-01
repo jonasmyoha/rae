@@ -1,0 +1,356 @@
+# The lib text field system (ui/textFieldSystem): a tap on a field gives it
+# focus (data on the TextField), a tap elsewhere or Return takes it away;
+# typing and Backspace (a whole UTF-8 character) edit the focused field;
+# Return sends the field's action; the Text child shows the text or, empty
+# and unfocused, the placeholder; the caret blinks from the last edit and
+# textFieldDeadlineSec says when it next changes; the renderer draws the
+# caret after the text (ui/renderSystem/RenderCaret). `\{`/`\}` keep the
+# JSON braces literal.
+import Gpu2d
+import SdfText
+open Gpu2dCanvas
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/Theme
+open ui/ThemeResolved
+open ui/TextStyle
+open ui/IconCodepoints
+open ui/MaterialIconFont
+open ui/textFieldSystem/TextFieldSystem
+open ui/renderSystem/RenderSystem
+open ui/renderSystem/RenderCaret
+open ecs/Entity
+open ecs/Event
+open ecs/Transform
+open ecs/ComponentTable
+
+func fieldScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{")
+  s = s.concat(other: "\"Row\":\{\"Children\":[\"NewTask\",\"Note\",\"Add\"]\},")
+  s = s.concat(
+    other: "\"NewTask\":\{\"TextField\":\{\"placeholder\":\"New task\",\"actionId\":\"todo.add\"\},"
+  )
+  s = s.concat(other: "\"OnClick\":\{\"label\":\"New task\"\},\"Children\":[\"NewTaskLine\"]\},")
+  s = s.concat(other: "\"NewTaskLine\":\{\"Text\":\{\"text\":\"\"\}\},")
+  s = s.concat(
+    other: "\"Note\":\{\"TextField\":\{\"placeholder\":\"Note\"\},\"Children\":[\"NoteLine\"]\},"
+  )
+  s = s.concat(other: "\"NoteLine\":\{\"Text\":\{\"text\":\"\"\}\},")
+  s = s.concat(other: "\"Add\":\{\"OnClick\":\{\"actionId\":\"todo.add\",\"label\":\"Add\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func lineText(world: view UiWorld, nodeId: view String) ret String {
+  let text: view Text = componentView(
+    this: world.texts
+    entityId: entityOf(world: world, nodeId: nodeId)
+  )
+  ret "'{text.text}' ({text.styleId})"
+}
+
+func noInput() ret TextInputFrame {
+  ret TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+}
+
+# One frame: optionally a tap on `tapNodeId` ("" none), then the system
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  actions: mod EventQueue(UiAction)
+  tapNodeId: view String
+  input: view TextInputFrame
+  now: view Float64
+  label: view String
+) {
+  frameAdvance(this: actions)
+  if tapNodeId.length() > 0 {
+    eventSend(
+      this: actions
+      value: UiAction { entityId: entityOf(world: world, nodeId: tapNodeId), actionId: "" }
+    )
+  }
+  let changed: Bool = textFieldSystem(
+    world: world
+    textFieldSystem: uiSystems.textField
+    actions: actions
+    input: input
+    now: now
+  )
+  var sent: String = ""
+  loop var i: Int = 0, i < eventCount(this: actions), ++i {
+    let action: UiAction = eventAt(this: actions, i: i)
+    if isNone(this: action.entityId) {
+      sent = "{sent} sent {action.actionId}"
+    }
+  }
+  let focusedEntityId: EntityId = focusedTextFieldEntityId(world: world)
+  var focus: String = "none"
+  if focusedEntityId is entityOf(world: world, nodeId: "NewTask") {
+    focus = "NewTask"
+  } else if focusedEntityId is entityOf(world: world, nodeId: "Note") {
+    focus = "Note"
+  }
+  log(
+    "{label}: changed={changed} focus={focus} NewTask={lineText(world: world, nodeId: "NewTaskLine")} Note={lineText(
+      world: world
+      nodeId: "NoteLine"
+    )} caret={uiSystems.textField.caretVisible} deadline={textFieldDeadlineSec(
+      textFieldSystem: uiSystems.textField
+      now: now
+    )}{sent}"
+  )
+}
+
+# Paint the focused line's caret on a canvas (no GPU) and print where it is
+# against the line's left edge, in ems
+func paintCaret(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  label: view String
+) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let line: EntityId = entityOf(world: world, nodeId: "NewTaskLine")
+  let wt: WorldTransform2D = {
+    position: { x: 100.0, y: 20.0 }
+    rotation: 0.0
+    scale: { x: 1.0, y: 1.0 }
+  }
+  let cr: ComputedRect = { position: { x: 100.0, y: 20.0 }, size: { x: 300.0, y: 40.0 } }
+  paintCaretG(
+    world: world
+    uiSystems: uiSystems
+    entityId: line
+    wt: wt
+    cr: cr
+    chain255: 255
+    res: res
+    canvas: canvas
+  )
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  if boxes is 0 {
+    log("{label}: no caret")
+    ret
+  }
+  let size: Float = resolveTextSize(
+    theme: res.theme
+    styleId: componentView(this: world.texts, entityId: line).styleId
+  )
+  let caretX: Float = canvas.prims.copyAtDefault(index: 0) + canvas.prims.copyAtDefault(index: 2) / 2.0
+  log("{label}: {boxes} caret box, {(caretX - 100.0) / size} em from the line's left edge")
+}
+
+func main() {
+  var scene: Scene = parseScene(source: fieldScene())
+  scene.sceneId = "todo"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}, {componentCount(this: world.textFields)} text fields")
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 0.0
+    label: "start"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "NewTask"
+    input: noInput()
+    now: 1.0
+    label: "tap NewTask"
+  )
+  let typing: TextInputFrame = { typed: "héllo", backspaces: 0, enter: false, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: typing
+    now: 1.1
+    label: "type"
+  )
+  let erase: TextInputFrame = { typed: "", backspaces: 2, enter: false, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: erase
+    now: 1.2
+    label: "2 backspaces"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 1.5
+    label: "0.3 s on"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 1.8
+    label: "0.6 s on"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 2.3
+    label: "1.1 s on"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "Note"
+    input: noInput()
+    now: 2.4
+    label: "tap Note"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "Add"
+    input: noInput()
+    now: 2.5
+    label: "tap Add"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "NewTask"
+    input: noInput()
+    now: 2.6
+    label: "tap NewTask"
+  )
+  let enter: TextInputFrame = { typed: "", backspaces: 0, enter: true, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: enter
+    now: 2.7
+    label: "Return"
+  )
+  log("the text for todo.add: '{textFieldTextFor(world: world, actionId: "todo.add")}'")
+  log("cleared: {clearTextFieldsFor(world: world, actionId: "todo.add")}")
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 2.8
+    label: "after clear"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "Note"
+    input: noInput()
+    now: 2.9
+    label: "tap Note"
+  )
+  let tapNothing: TextInputFrame = { typed: "", backspaces: 0, enter: false, tapped: true }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: tapNothing
+    now: 3.0
+    label: "tap nothing"
+  )
+  # the caret on a canvas, measured with the Material atlas (an icon is one em wide)
+  let textFont: SdfFont = loadMaterialIconFont()
+  let iconFont: SdfFont = loadMaterialIconFont()
+  let res: Gpu2dUi = {
+    textFont: own textFont
+    iconFont: own iconFont
+    theme: createResolvedTheme()
+    activeTheme: lightTheme()
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: "NewTask"
+    input: noInput()
+    now: 4.0
+    label: "tap NewTask"
+  )
+  paintCaret(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    label: "empty field"
+  )
+  let icon: TextInputFrame = {
+    typed: iconText(name: "search")
+    backspaces: 0
+    enter: false
+    tapped: false
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: icon
+    now: 4.1
+    label: "type an icon"
+  )
+  paintCaret(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    label: "one icon"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tapNodeId: ""
+    input: noInput()
+    now: 4.7
+    label: "0.6 s on"
+  )
+  paintCaret(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    label: "blinked off"
+  )
+}

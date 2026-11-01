@@ -757,6 +757,45 @@ void rae_ext_Gpu2d_setTextInput(rae_Bool active) {
     g_g2d_text_input_active = want;
     if (want) SDL_StartTextInput(g_sdl_win); else SDL_StopTextInput(g_sdl_win);
 }
+
+/* The on-screen keyboard's height in points, for a layout that keeps a text
+ * field above it (lib/ui/textFieldSystem). SDL3 reports that the keyboard was
+ * shown or hidden but not its size, so on iOS this is UIKit's own
+ * UIKeyboardWillChangeFrameNotification: the part of the screen below the
+ * top of the keyboard's end frame (0 once it has left the screen). Elsewhere
+ * there is no on-screen keyboard and it is 0. The observer is added on the
+ * first read; UIKit posts the notification on the main (UI) thread. */
+#if defined(__APPLE__) && TARGET_OS_IOS && defined(__arm64__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
+typedef struct { double x, y, width, height; } RaeKeyboardRect;
+static _Atomic double g_g2d_keyboard_height = 0.0;
+static void rae_g2d_keyboard_frame(CFNotificationCenterRef center, void* observer, CFNotificationName name,
+                                   const void* object, CFDictionaryRef info) {
+    (void)center; (void)observer; (void)name; (void)object;
+    if (!info) return;
+    const void* end = CFDictionaryGetValue(info, CFSTR("UIKeyboardFrameEndUserInfoKey"));
+    if (!end) return;
+    RaeKeyboardRect frame = ((RaeKeyboardRect (*)(const void*, SEL))objc_msgSend)(end, sel_registerName("CGRectValue"));
+    void* screen = ((void* (*)(void*, SEL))objc_msgSend)((void*)objc_getClass("UIScreen"), sel_registerName("mainScreen"));
+    RaeKeyboardRect bounds = ((RaeKeyboardRect (*)(void*, SEL))objc_msgSend)(screen, sel_registerName("bounds"));
+    double covered = bounds.height - frame.y;
+    g_g2d_keyboard_height = covered > 0.0 ? covered : 0.0;
+}
+float rae_ext_Gpu2d_keyboardHeight(void) {
+    static int observing = 0;
+    if (!observing) {
+        observing = 1;
+        CFNotificationCenterAddObserver(CFNotificationCenterGetLocalCenter(), NULL, rae_g2d_keyboard_frame,
+                                        CFSTR("UIKeyboardWillChangeFrameNotification"), NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+    }
+    return (float)g_g2d_keyboard_height;
+}
+#else
+float rae_ext_Gpu2d_keyboardHeight(void) { return 0.0f; }
+#endif
 float rae_ext_Gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 
 /* Multitouch fingers in design units (#526). touchX/Y clamp to 0 out of range. */
