@@ -10,6 +10,7 @@ open ui/SceneFile
 open ui/SceneLoader
 open ui/SceneInstance
 open ui/SceneImports
+open ui/SceneRoots
 open ui/SceneBundles
 open ui/ScenePolicy
 open ui/SceneWriter
@@ -36,17 +37,18 @@ func loadInto(
 ) ret Scene {
   let scene: Scene = loadScenePackageFile(path: path, sceneId: "roundtrip")
   var registry: SceneRegistry = createSceneRegistry()
+  let roots: SceneRoots = createSceneRoots(defaultRoot: root)
   let assets: SceneAssets = resolveSceneAssets(
     entry: scene
     entryPath: path
-    root: root
+    roots: roots
     registry: registry
     diagnostics: world.sceneDiagnostics
     sceneLabel: "roundtrip"
   )
   registerSceneReferencesTransitive(
     scene: scene
-    root: root
+    roots: roots
     registry: registry
     diagnostics: world.sceneDiagnostics
   )

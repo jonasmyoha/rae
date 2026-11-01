@@ -4,7 +4,8 @@
 # Scenes are modules and folders are packages, exactly the Rae rule: a scene
 # reference is a PACKAGE PATH WITHOUT EXTENSION — `Theme`, `shared/GameAssets`,
 # `cards/HeroCard` — PascalCase scene, camelCase folders, resolved from ONE scene
-# root as `<root>/<path>.raescene`. The same form serves the top-level
+# root as `<root>/<path>.raescene` — or, under a mounted package-path prefix,
+# from that prefix's folder (ui/SceneRoots). The same form serves the top-level
 # `"import": [...]` and `SceneInstance.sceneId`. Nothing is inferred from file
 # names or directories: no `theme.raescene` auto-load, no walking up.
 #
@@ -37,6 +38,7 @@ open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
 open ui/ScenePolicy
+open ui/SceneRoots
 open ui/ThemeParse
 open ui/ThemeResolved
 
@@ -69,8 +71,9 @@ func createSceneAssets() ret SceneAssets {
   }
 }
 
-# `<root>/<package/Path>.raescene` — the one place a scene reference becomes a
-# file name. `root` carries its trailing slash.
+# `<root>/<package/Path>.raescene` for a program with one scene root. `root`
+# carries its trailing slash. A program with mounted roots uses sceneRootsFile
+# (ui/SceneRoots), which every resolver below goes through.
 func scenePackageFile(root: view String, sceneId: view String) ret String {
   ret "{root}{sceneId}.raescene"
 }
@@ -261,14 +264,14 @@ func sceneAssetsVisited(assets: view SceneAssets, sceneId: view String) ret Bool
   ret false
 }
 
-# Follow `scene`'s imports depth-first from `root`, merging each reached scene's
+# Follow `scene`'s imports depth-first through `roots`, merging each reached scene's
 # assets and theme tokens into `assets`. Imported scenes are registered in
 # `registry` under their package path (so a later `SceneInstance` of the same
 # id reuses the parse). `sceneLabel` names the importing scene in diagnostics.
 func followSceneImports(
   assets: mod SceneAssets
   scene: view Scene
-  root: view String
+  roots: view SceneRoots
   registry: mod SceneRegistry
   diagnostics: mod List(SceneDiagnostic)
   sceneLabel: view String
@@ -291,7 +294,7 @@ func followSceneImports(
         )
         continue
       }
-      let path: String = scenePackageFile(root: root, sceneId: importId)
+      let path: String = sceneRootsFile(roots: roots, sceneId: importId)
       if sceneRegistryIndex(reg: registry, key: importId) is none {
         if not exists(path: path) {
           reportSceneDiagnostic(
@@ -340,7 +343,7 @@ func followSceneImports(
         followSceneImports(
           assets: assets
           scene: imported
-          root: root
+          roots: roots
           registry: registry
           diagnostics: diagnostics
           sceneLabel: importId
@@ -446,7 +449,7 @@ func sceneReferences(scene: view Scene) ret List(String) {
 
 func registerSceneReferencesRecursive(
   scene: view Scene
-  root: view String
+  roots: view SceneRoots
   registry: mod SceneRegistry
   diagnostics: mod List(SceneDiagnostic)
   visited: mod List(String)
@@ -458,7 +461,7 @@ func registerSceneReferencesRecursive(
         continue
       }
       visited.add(value: "{sceneId}")
-      let path: String = scenePackageFile(root: root, sceneId: sceneId)
+      let path: String = sceneRootsFile(roots: roots, sceneId: sceneId)
       if not exists(path: path) {
         # The resolver reports a mounted missing SceneInstance. ListView keeps
         # its existing unavailable-scene behavior; do not invent a diagnostic
@@ -485,7 +488,7 @@ func registerSceneReferencesRecursive(
       )
       registerSceneReferencesRecursive(
         scene: referenced
-        root: root
+        roots: roots
         registry: registry
         diagnostics: diagnostics
         visited: visited
@@ -500,17 +503,17 @@ func registerSceneReferencesRecursive(
 
 # Register every scene reachable from `scene` before the first instance resolve
 # pass. `visited` makes shared children and cycles finite. Referenced files are
-# resolved from the entry scene root, exactly like imports.
+# resolved through `roots`, exactly like imports.
 func registerSceneReferencesTransitive(
   scene: view Scene
-  root: view String
+  roots: view SceneRoots
   registry: mod SceneRegistry
   diagnostics: mod List(SceneDiagnostic)
 ) {
   var visited: List(String) = List.create(String, cap: 16)
   registerSceneReferencesRecursive(
     scene: scene
-    root: root
+    roots: roots
     registry: registry
     diagnostics: diagnostics
     visited: visited
@@ -522,13 +525,13 @@ func registerSceneReferencesTransitive(
 func registerSceneTransitive(
   sceneId: own String
   scene: own Scene
-  root: view String
+  roots: view SceneRoots
   registry: mod SceneRegistry
   diagnostics: mod List(SceneDiagnostic)
 ) {
   registerSceneReferencesTransitive(
     scene: scene
-    root: root
+    roots: roots
     registry: registry
     diagnostics: diagnostics
   )
@@ -542,7 +545,7 @@ func registerSceneTransitive(
 func resolveSceneAssets(
   entry: view Scene
   entryPath: view String
-  root: view String
+  roots: view SceneRoots
   registry: mod SceneRegistry
   diagnostics: mod List(SceneDiagnostic)
   sceneLabel: view String
@@ -564,7 +567,7 @@ func resolveSceneAssets(
   followSceneImports(
     assets: assets
     scene: entry
-    root: root
+    roots: roots
     registry: registry
     diagnostics: diagnostics
     sceneLabel: sceneLabel
