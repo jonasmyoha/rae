@@ -2292,6 +2292,28 @@ static const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
   return NULL;
 }
 
+/* Prototype every specialization registered from `*prototyped` on. A body
+ * emitted into a buffer can register new specializations (the first use of a
+ * function inside a generic one); their prototypes must reach the output
+ * BEFORE that body, or C sees an undeclared function and then a static
+ * declaration after a non-static one. */
+static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstModule* module, size_t* prototyped, FILE* out) {
+  while (*prototyped < ctx->specialized_func_count) {
+    const AstFuncDecl* f = ctx->specialized_funcs[*prototyped].decl;
+    const AstTypeRef* args = ctx->specialized_funcs[*prototyped].concrete_args;
+    (*prototyped)++;
+    if (f->is_extern) continue;
+    const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+    const AstIdentifierPart* gp = f->generic_params;
+    if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
+      gp = f->generic_template->as.func_decl.generic_params;
+    CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+    fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
+    emit_param_list(&tctx, f->params, out, false);
+    fprintf(out, ");\n");
+  }
+}
+
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
@@ -4630,53 +4652,66 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       size_t prototyped_count = ctx->specialized_func_count; // already prototyped above
       while (emitted_idx < ctx->specialized_func_count) {
           // Emit prototypes for any newly discovered specializations
-          while (prototyped_count < ctx->specialized_func_count) {
-              const AstFuncDecl* f = ctx->specialized_funcs[prototyped_count].decl;
-              const AstTypeRef* args = ctx->specialized_funcs[prototyped_count].concrete_args;
-              prototyped_count++;
-              if (f->is_extern) continue;
-              const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-              const AstIdentifierPart* gp = f->generic_params;
-              if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
-                  gp = f->generic_template->as.func_decl.generic_params;
-              CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-              fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
-              emit_param_list(&tctx, f->params, out, false);
-              fprintf(out, ");\n");
-          }
+          emit_new_specialization_prototypes(ctx, module, &prototyped_count, out);
           progress_work(EMIT_STAGE_SPEC_BODIES_LO, EMIT_STAGE_SPEC_BODIES_HI, emitted_idx, ctx->specialized_func_count);
-          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, out);
+          // The body goes to a buffer first: what it registers is prototyped
+          // before it (#22812637)
+          char* body = NULL;
+          size_t body_len = 0;
+          FILE* body_out = open_memstream(&body, &body_len);
+          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args,
+                                    body_out ? body_out : out);
+          if (body_out) {
+              fclose(body_out);
+              emit_new_specialization_prototypes(ctx, module, &prototyped_count, out);
+              if (body) fwrite(body, 1, body_len, out);
+              free(body);
+          }
           emitted_idx++;
       }
   }
   progress_work(EMIT_STAGE_SPEC_BODIES_HI, 1.0, 0, 1);
   
-  // Finally emit main
+  // Finally emit main, buffered like a specialization's body: what it
+  // registers is prototyped before it
   size_t pre_main_spec_count = ctx->specialized_func_count;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out);
+          char* body = NULL;
+          size_t body_len = 0;
+          FILE* body_out = open_memstream(&body, &body_len);
+          emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
+          if (body_out) {
+              fclose(body_out);
+              size_t main_prototyped = pre_main_spec_count;
+              emit_new_specialization_prototypes(ctx, module, &main_prototyped, out);
+              if (body) fwrite(body, 1, body_len, out);
+              free(body);
+          }
       }
   }
 
   // Emit any specializations discovered during main (e.g. from collection literals)
   {
       size_t emitted_idx2 = pre_main_spec_count;
+      size_t prototyped2 = pre_main_spec_count;
+      emit_new_specialization_prototypes(ctx, module, &prototyped2, out);
       while (emitted_idx2 < ctx->specialized_func_count) {
           const AstFuncDecl* f = ctx->specialized_funcs[emitted_idx2].decl;
           const AstTypeRef* args = ctx->specialized_funcs[emitted_idx2].concrete_args;
           emitted_idx2++;
           if (f->is_extern) continue;
-          const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-          const AstIdentifierPart* gp = f->generic_params;
-          if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
-              gp = f->generic_template->as.func_decl.generic_params;
-          CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-          fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
-          emit_param_list(&tctx, f->params, out, false);
-          fprintf(out, ");\n");
-          emit_specialized_function(ctx, module, f, args, out);
+          char* body = NULL;
+          size_t body_len = 0;
+          FILE* body_out = open_memstream(&body, &body_len);
+          emit_specialized_function(ctx, module, f, args, body_out ? body_out : out);
+          if (body_out) {
+              fclose(body_out);
+              emit_new_specialization_prototypes(ctx, module, &prototyped2, out);
+              if (body) fwrite(body, 1, body_len, out);
+              free(body);
+          }
       }
   }
 
