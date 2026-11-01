@@ -1,0 +1,17 @@
+# MaterialIconFont — the atlas every `mat:<name>` icon is drawn from: the
+# whole Material Icons (Round) set, baked by tools/gen-material-icons.py from
+# the same codepoints file as ui/IconCodepoints, so every name the table knows
+# has its glyph. It lives in the stdlib (lib/assets/fonts) rather than in each
+# app: an app that names this font gets the stdlib's atlas.
+import SdfText
+import Sys
+
+# The icon font name an app passes to app3d/UiShell.loadUiFonts
+const materialIconFontName: String = "MaterialIconsRound-Regular"
+
+const materialIconAtlasPath: String = "lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.json"
+
+# Load the Material icon atlas (2048x2048, 2149 glyphs)
+func loadMaterialIconFont() ret SdfFont {
+  ret SdfText.loadSdfFontJson(jsonPath: Sys.stdlibPath(path: materialIconAtlasPath))
+}

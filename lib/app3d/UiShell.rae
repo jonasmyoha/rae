@@ -23,6 +23,7 @@
 # conversion lives in one place.
 import Gpu2d
 open SdfText
+open ui/MaterialIconFont
 open ui/Ecs
 open ecs/Event
 open ui/Pipeline
@@ -148,11 +149,14 @@ func loadUiFonts(
     jsonPath: "{directory}{textFontName}.mtsdf.json"
     rawAtlasPath: "{directory}{textFontName}.mtsdf.raw"
   )
-  # An empty icon name reuses the text font. The icon atlas is a megabyte
-  # per example, and an app with no `mat:` glyphs should not have to ship
-  # one just to satisfy a struct field.
+  # An empty icon name reuses the text font: an app with no `mat:` glyphs
+  # should not have to load an atlas just to satisfy a struct field. The
+  # Material icons are the stdlib's own atlas (ui/MaterialIconFont), the one
+  # that holds every name ui/IconCodepoints knows.
   var iconFont: SdfFont = textFont
-  if iconFontName.length() > 0 {
+  if iconFontName is materialIconFontName {
+    iconFont = loadMaterialIconFont()
+  } else if iconFontName.length() > 0 {
     iconFont = SdfText.loadSdfFont(
       jsonPath: "{directory}{iconFontName}.mtsdf.json"
       rawAtlasPath: "{directory}{iconFontName}.mtsdf.raw"

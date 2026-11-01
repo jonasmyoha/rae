@@ -101,14 +101,17 @@ the author, not of the loader.
         "map":  { "menu.playButton": "../art/Play_Button_x1024.png" }
       },
       "fonts": {
-        "text":  "../fonts/ChelaOne-Regular.mtsdf.json",
-        "icons": "../fonts/MaterialIconsRound-Regular.mtsdf.json"
+        "text":  "../fonts/ChelaOne-Regular.mtsdf.json"
       }
     }
 
 - `map` is texture key → file; `dirs` is searched as `<dir>/<key>.png`.
   Lookup is `map`, then `dirs`, in resolution order (§3). Paths are relative
   to the declaring file.
+- `mat:<name>` icons draw from the stdlib's Material Icons atlas
+  (`lib/assets/fonts`, every icon of the font, ui/MaterialIconFont), so a
+  scene declares `icons` only for another icon font. A `mat:` name the font
+  does not have is an `unknownIcon` diagnostic at load (ui/IconCheck).
 - A font names its `.mtsdf.json` sidecar; the atlas is the sibling `.png`
   (what msdf-atlas-gen writes) or `.raw` (the RGBA dump), whichever exists —
   `SdfText.loadSdfFontJson`. Fonts are world-level in v1: the first `fonts`

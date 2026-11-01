@@ -1,0 +1,34 @@
+# IconCheck — a `mat:<name>` Sprite whose name the Material Icons font does
+# not have (ui/IconCodepoints) draws nothing, so the loader reports it as an
+# `unknownIcon` scene diagnostic (scene, node, the key) instead: the UI editor
+# lists it and an app's scene check fails on it. Called for an authored
+# Sprite (ui/Registry) and for a scene-instance override of its key
+# (ui/SceneInstance); a key an app sets at run time is the app's to check
+# (isIconName).
+open ui/Ecs
+open ui/ScenePolicy
+open ui/IconCodepoints
+
+# Report `textureKey` when it is a `mat:` key with a name the font lacks
+func reportUnknownIcon(
+  world: mod UiWorld
+  textureKey: view String
+  sceneId: view String
+  nodeId: view String
+) {
+  if textureKey.startsWith(prefix: "mat:") is false {
+    ret
+  }
+  let name: String = textureKey.sub(start: 4, len: textureKey.length() - 4)
+  if isIconName(name: name) {
+    ret
+  }
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+    kind: SceneDiagnosticKind.unknownIcon
+    name: textureKey
+    message: "Material Icons has no icon \"{name}\" (lib/assets/fonts/MaterialIconsRound-Regular.codepoints lists the names); the Sprite draws nothing"
+  )
+}
