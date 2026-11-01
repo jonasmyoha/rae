@@ -6,9 +6,11 @@
 # and check it: inside the safe area, clear of another box or of the
 # screen's middle third, its text fitting its box as shrinkToFit draws it.
 # Which nodes, which texts and which cases are the app's; the iPhone 15 Pro
-# upright and on its side and a desktop window are phoneAndDesktopCases.
+# upright and on its side (lib/ui/DevicePresets' numbers) and a desktop
+# window are phoneAndDesktopCases.
 import Math
 import SdfText
+import String
 open ecs/Entity
 open ecs/ComponentTable
 open ui/Components
@@ -19,6 +21,7 @@ open ui/TextStyle
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/safeAreaSystem/SafeAreaSystem
+open ui/DevicePresets
 open app3d/UiShell
 
 # Where a node landed after layout, in points; not shown when inactive
@@ -122,26 +125,40 @@ type LayoutCase {
   insets: Insets
 }
 
-# An iPhone 15 Pro upright (390x844 pt, 59 top, 34 bottom) and on its side
-# (844x390, 59 left and right, 21 bottom), and a desktop window (1280x800)
+# A layout case named `name` at a device preset's size and safe-area insets
+func layoutCaseOfPreset(preset: view DevicePreset, name: view String) ret LayoutCase {
+  ret LayoutCase {
+    name: name
+    width: preset.width
+    height: preset.height
+    insets: Insets {
+      l: preset.safeLeft
+      t: preset.safeTop
+      r: preset.safeRight
+      b: preset.safeBottom
+    }
+  }
+}
+
+# The device name of a preset's label: "iPhone 15 Pro (393x852)" is
+# "iPhone 15 Pro"
+func presetDeviceName(preset: view DevicePreset) ret String {
+  if let index: Int = preset.label.indexOf(sub: " (") {
+    ret preset.label.sub(start: 0, len: index)
+  }
+  ret preset.label
+}
+
+# An iPhone 15 Pro upright and on its side, with the size and the safe areas
+# of lib/ui/DevicePresets (393x852 pt, 59 top, 34 bottom; on its side 59
+# left and right, 21 bottom), and a desktop window (1280x800)
 func phoneAndDesktopCases() ret List(LayoutCase) {
   var cases: List(LayoutCase) = List.create(LayoutCase, cap: 3)
-  cases.add(
-    value: LayoutCase {
-      name: "iPhone 15 Pro portrait"
-      width: 390.0
-      height: 844.0
-      insets: Insets { l: 0.0, t: 59.0, r: 0.0, b: 34.0 }
-    }
-  )
-  cases.add(
-    value: LayoutCase {
-      name: "iPhone 15 Pro landscape"
-      width: 844.0
-      height: 390.0
-      insets: Insets { l: 59.0, t: 0.0, r: 59.0, b: 21.0 }
-    }
-  )
+  let phone: DevicePreset = devicePresetById(id: "iphone-15-pro")
+  let deviceName: String = presetDeviceName(preset: phone)
+  cases.add(value: layoutCaseOfPreset(preset: phone, name: "{deviceName} portrait"))
+  let landscape: DevicePreset = devicePresetLandscape(preset: phone)
+  cases.add(value: layoutCaseOfPreset(preset: landscape, name: "{deviceName} landscape"))
   cases.add(
     value: LayoutCase {
       name: "desktop"
