@@ -327,6 +327,18 @@ cmake -S "$gen" -B "$gen/proj" -G Xcode \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" >/dev/null
 
+# The .app an earlier build assembled. The staging folder above starts empty
+# and the project lists exactly its files, but Xcode's copy of the resources
+# into an existing .app only adds and updates: a file deleted from the
+# project's assets since then stayed in every later build. Removing the
+# bundle makes the next build assemble it from the current list (the object
+# files stay, so it only copies, links and signs again). A link left by
+# upload-ios.sh's archive is removed as a link.
+for built_app in "$gen"/proj/*/RaeApp.app; do
+  [ -e "$built_app" ] || [ -L "$built_app" ] || continue
+  rm -rf "$built_app"
+done
+
 # 5. Metadata for run-ios.sh (bundle id, project, signed .app path).
 cat > "$gen/meta.env" <<EOF
 RAE_IOS_NAME="$name"
