@@ -1,0 +1,182 @@
+# WasiMinimal — the few WASI functions a module built by `rae build --target
+# wasm` imports (docs/wasm-embedding.md, docs/wasm-modules.md), answered in
+# Rae with nothing behind them: no files, no environment, no arguments. Text
+# written to stdout or stderr is collected for the host (its log); the clock
+# and random bytes are real; every file call answers EBADF; proc_exit traps.
+# A host grants `wasiMinimalGrants()` and calls `wasiMinimalAnswer` from its
+# `wasmHostCall` for calls to the wasi_snapshot_preview1 module.
+import String
+open wasm/Wasm
+open crypto/CryptoRandom
+
+const wasiModule: String = "wasi_snapshot_preview1"
+
+# WASI errno values
+const wasiSuccess: Int = 0
+
+const wasiBadFile: Int = 8
+
+const wasiNotSupported: Int = 52
+
+# What the module wrote to stdout and stderr
+type WasiOutput {
+  text: String
+}
+
+func createWasiOutput() ret WasiOutput {
+  ret WasiOutput { text: "" }
+}
+
+# Every import WasiMinimal answers, as "module.name"
+func wasiMinimalGrants() ret List(String) {
+  let names: List(String) = {
+    "args_get"
+    "args_sizes_get"
+    "environ_get"
+    "environ_sizes_get"
+    "clock_time_get"
+    "clock_res_get"
+    "fd_close"
+    "fd_fdstat_get"
+    "fd_prestat_get"
+    "fd_prestat_dir_name"
+    "fd_read"
+    "fd_seek"
+    "fd_write"
+    "proc_exit"
+    "random_get"
+    "sched_yield"
+  }
+  var grants: List(String) = List.create(String, cap: names.length)
+  loop let name: view String in names {
+    grants.add(value: "{wasiModule}.{name}")
+  }
+  ret grants
+}
+
+func wasiErrno(code: view Int) ret WasmHostAnswer {
+  let results: List(WasmValue) = { wasmI32(value: code) }
+  ret wasmAnswer(results: results)
+}
+
+func wasiArg(call: view WasmHostCall, index: view Int) ret Int {
+  if let value: view WasmValue = call.args.viewAt(index: index) {
+    ret value.integer
+  }
+  ret 0
+}
+
+# fd_write(fd, iovs, iovsCount, writtenAddress): gather the iovecs' bytes
+func wasiFdWrite(
+  instance: view WasmInstance
+  call: view WasmHostCall
+  output: mod WasiOutput
+) ret WasmHostAnswer {
+  let fd: Int = wasiArg(call: call, index: 0)
+  let iovs: Int = wasiArg(call: call, index: 1)
+  let iovsCount: Int = wasiArg(call: call, index: 2)
+  let writtenAddress: Int = wasiArg(call: call, index: 3)
+  if fd is not 1 and fd is not 2 {
+    ret wasiErrno(code: wasiBadFile)
+  }
+  var total: Int = 0
+  loop var i: Int = 0, i < iovsCount, ++i {
+    var address: Int = 0
+    var length: Int = 0
+    if let found: Int = wasmMemoryReadInt(instance: instance, address: iovs + i * 8, count: 4) {
+      address = found
+    }
+    if let found: Int = wasmMemoryReadInt(instance: instance, address: iovs + i * 8 + 4, count: 4) {
+      length = found
+    }
+    if length > 0 {
+      if let bytes: List(UInt8) = wasmMemoryRead(
+        instance: instance
+        address: address
+        count: length
+      ) {
+        output.text = "{output.text}{String.fromBytes(bytes: bytes, start: 0, count: length)}"
+        total = total + length
+      } else {
+        ret wasmTrap(message: "fd_write: an iovec outside the memory")
+      }
+    }
+  }
+  let written: Bool = wasmMemoryWriteInt(
+    instance: instance
+    address: writtenAddress
+    value: total
+    count: 4
+  )
+  ret wasiErrno(code: wasiSuccess)
+}
+
+# The answer to `call` when it is a WASI import, none for any other
+func wasiMinimalAnswer(
+  instance: view WasmInstance
+  call: view WasmHostCall
+  output: mod WasiOutput
+) ret opt WasmHostAnswer {
+  if call.module is not wasiModule {
+    ret none
+  }
+  let name: String = "{call.name}"
+  if name is "fd_write" {
+    ret wasiFdWrite(instance: instance, call: call, output: output)
+  }
+  if name is "args_sizes_get" or name is "environ_sizes_get" {
+    let count: Bool = wasmMemoryWriteInt(
+      instance: instance
+      address: wasiArg(call: call, index: 0)
+      value: 0
+      count: 4
+    )
+    let size: Bool = wasmMemoryWriteInt(
+      instance: instance
+      address: wasiArg(call: call, index: 1)
+      value: 0
+      count: 4
+    )
+    ret wasiErrno(code: wasiSuccess)
+  }
+  if name is "args_get" or name is "environ_get" or name is "sched_yield" {
+    ret wasiErrno(code: wasiSuccess)
+  }
+  if name is "clock_time_get" {
+    let stored: Bool = wasmMemoryWriteInt(
+      instance: instance
+      address: wasiArg(call: call, index: 2)
+      value: nowNs()
+      count: 8
+    )
+    ret wasiErrno(code: wasiSuccess)
+  }
+  if name is "clock_res_get" {
+    let stored: Bool = wasmMemoryWriteInt(
+      instance: instance
+      address: wasiArg(call: call, index: 1)
+      value: 1000
+      count: 8
+    )
+    ret wasiErrno(code: wasiSuccess)
+  }
+  if name is "random_get" {
+    let address: Int = wasiArg(call: call, index: 0)
+    let length: Int = wasiArg(call: call, index: 1)
+    if wasmMemoryWrite(
+      instance: instance
+      address: address
+      bytes: cryptoRandomBytes(count: length)
+    ) is false {
+      ret wasmTrap(message: "random_get: outside the memory")
+    }
+    ret wasiErrno(code: wasiSuccess)
+  }
+  if name is "proc_exit" {
+    ret wasmTrap(message: "exit {wasiArg(call: call, index: 0)}")
+  }
+  if name.startsWith(prefix: "fd_") {
+    ret wasiErrno(code: wasiBadFile)
+  }
+  ret wasiErrno(code: wasiNotSupported)
+}

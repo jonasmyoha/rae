@@ -1,0 +1,31 @@
+/* The module case 1292 runs in lib/wasm (its bytes are the hex in Main.rae;
+ * this C is a .txt so the case does not compile it into the program).
+ * Rebuild with wasi-sdk:
+ *   clang --target=wasm32 -nostdlib -Oz -Wl,--no-entry -Wl,--strip-all \
+ *     -Wl,--initial-memory=131072 -Wl,--max-memory=4194304 -x c -o module.wasm ModuleSource.txt
+ *   xxd -p module.wasm | tr -d '\n'
+ * Two imports the host answers: host.twice(i32) -> i32, host.note(address,
+ * length) (the host reads the bytes from memory). */
+__attribute__((import_module("host"), import_name("twice"))) int host_twice(int value);
+__attribute__((import_module("host"), import_name("note"))) void host_note(const char* text, int length);
+
+static char buffer[64];
+
+__attribute__((export_name("add"))) long long add(long long a, long long b) { return a + b; }
+__attribute__((export_name("triple"))) int triple(int value) { return host_twice(value) + value; }
+__attribute__((export_name("scale"))) double scale(double value, float factor) { return value * factor; }
+__attribute__((export_name("divide"))) int divide(int a, int b) { return a / b; }
+__attribute__((export_name("spin"))) int spin(int start) {
+  volatile int counter = start;
+  for (;;) counter++;
+  return counter;
+}
+__attribute__((export_name("buffer"))) int buffer_address(void) { return (int)(long)buffer; }
+__attribute__((export_name("shout"))) int shout(int length) {
+  for (int i = 0; i < length && i < 64; i++) {
+    if (buffer[i] >= 'a' && buffer[i] <= 'z') buffer[i] = (char)(buffer[i] - 32);
+  }
+  host_note(buffer, length);
+  return length;
+}
+__attribute__((export_name("grow"))) int grow(int pages) { return __builtin_wasm_memory_grow(0, pages); }

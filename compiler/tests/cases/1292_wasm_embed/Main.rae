@@ -1,0 +1,226 @@
+# lib/wasm (docs/wasm-embedding.md) running a small module (ModuleSource.txt, its
+# bytes below) in WAMR's interpreter: its imports listed and an ungranted one
+# refused by name before anything runs; Int, Float and Float64 values; a host
+# function written in Rae answering an import; text through the instance's
+# memory, read and written (outside it: none / false); a trap as an error
+# value, the instance still usable after it; the memory cap; a call stopped
+# at its time limit, and one stopped by a watchdog on another thread.
+import String
+open wasm/Wasm
+open crypto/CryptoBytes
+
+const moduleHex: String = "0061736d0100000001210660017f017f60027f7f0060027e7e017e60027c7d017c60027f7f017f6000017f021a0204686f7374057477696365000004686f7374046e6f746500010309080200030400050000040501700101010504010102400608017f01418080040b074909066d656d6f7279020003616464000206747269706c650003057363616c650004066469766964650005047370696e00060662756666657200070573686f757400080467726f7700090ad001080700200120007c0b0d00200010808080800020006a0b080020002001bba20b0700200020016d0b2601017f23808080800041106b2201200036020c037f2001200128020c41016a36020c0c000b0b08004180808480000b7001047f4100210120004100200041004a1b220241c000200241c000481b21030240034020032001460d01024020014180808480006a22022d00002204419f7f6a41ff017141194b0d002002200441606a3a00000b200141016a21010c000b0b418080848000200010818080800020000b0600200040000b"
+
+type Host {
+  notes: List(String)
+  twiceCalls: Int
+}
+
+func wasmHostCall(
+  host: mod Host
+  instance: mod WasmInstance
+  call: view WasmHostCall
+) ret WasmHostAnswer {
+  if call.name is "twice" {
+    host.twiceCalls = host.twiceCalls + 1
+    let value: Int = call.args.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+    let results: List(WasmValue) = { wasmI32(value: value * 2) }
+    ret wasmAnswer(results: results)
+  }
+  if call.name is "note" {
+    let address: Int = call.args.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+    let length: Int = call.args.copyAtFallback(index: 1, fallback: wasmI32(value: 0)).integer
+    if let bytes: List(UInt8) = wasmMemoryRead(instance: instance, address: address, count: length) {
+      host.notes.add(value: String.fromBytes(bytes: bytes, start: 0, count: length))
+      ret wasmAnswerNothing()
+    }
+    ret wasmTrap(message: "note: outside the memory")
+  }
+  ret wasmTrap(message: "no host function {call.module}.{call.name}")
+}
+
+func first(result: view WasmCallResult) ret WasmValue {
+  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0))
+}
+
+func stopAfter(handle: own Int, delayMs: own Int) ret Int {
+  sleep(ms: delayMs)
+  wasmStop(instanceHandle: handle)
+  ret 1
+}
+
+func main() {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 0)
+  if let decoded: List(UInt8) = bytesOfHex(hex: moduleHex) {
+    bytes = own decoded
+  }
+  var module: WasmModule = wasmLoad(bytes: bytes)
+  log("loaded: {module.error.kind}, {module.imports.length} imports")
+  loop let wasmImport: view WasmImport in module.imports {
+    log(
+      "  import {wasmImportKey(wasmImport: wasmImport)}: {wasmImport.kind}, {wasmImport.params.length} params, {wasmImport.results.length} results"
+    )
+  }
+  let garbage: WasmModule = wasmLoad(bytes: bytesOfText(text: "not wasm"))
+  log("garbage: {garbage.error.kind}")
+
+  # an import that is not granted refuses the instance, by name
+  let partial: List(String) = { "host.twice" }
+  let refused: WasmInstance = wasmInstantiate(
+    module: module
+    granted: partial
+    limits: wasmDefaultLimits()
+  )
+  log("partial grant: {refused.error.kind}: {refused.error.message}")
+
+  let granted: List(String) = { "host.twice", "host.note" }
+  let limits: WasmLimits = { stackBytes: 65536, heapBytes: 0, maxMemoryPages: 4 }
+  var instance: WasmInstance = wasmInstantiate(module: module, granted: granted, limits: limits)
+  log("instance: {instance.error.kind}, memory {wasmMemorySize(instance: instance)} bytes")
+  var host: Host = { notes: List.create(String, cap: 4), twiceCalls: 0 }
+
+  log("add: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "add"
+    args: { wasmI64(value: 40), wasmI64(value: 2) }
+    timeoutMs: 1000
+  )).integer}")
+  log("triple: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "triple"
+    args: { wasmI32(value: 7) }
+    timeoutMs: 1000
+  )).integer}, host calls {host.twiceCalls}")
+  log("scale: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "scale"
+    args: { wasmF64(value: 1.5), wasmF32(value: 2.0) }
+    timeoutMs: 1000
+  )).real}")
+  let trapped: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "divide"
+    args: { wasmI32(value: 7), wasmI32(value: 0) }
+    timeoutMs: 1000
+  )
+  log("divide by zero: {trapped.error.kind}: {trapped.error.message}")
+  log("divide after it: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "divide"
+    args: { wasmI32(value: 7), wasmI32(value: 2) }
+    timeoutMs: 1000
+  )).integer}")
+
+  # text through memory, and a host function that reads it
+  let buffer: Int = first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "buffer"
+    args: {}
+    timeoutMs: 1000
+  )).integer
+  let text: List(UInt8) = bytesOfText(text: "hello, wasm")
+  log("written: {wasmMemoryWrite(instance: instance, address: buffer, bytes: text)}")
+  let shouted: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "shout"
+    args: { wasmI32(value: text.length) }
+    timeoutMs: 1000
+  )
+  log(
+    "shout: {first(result: shouted).integer}, the host noted '{host.notes.copyAtDefault(index: 0)}'"
+  )
+  if let back: List(UInt8) = wasmMemoryRead(instance: instance, address: buffer, count: text.length) {
+    log("read back: '{String.fromBytes(bytes: back, start: 0, count: back.length)}'")
+  }
+  log(
+    "outside the memory: read {wasmMemoryRead(instance: instance, address: 100000000, count: 4) is none}, write {wasmMemoryWrite(
+      instance: instance
+      address: 100000000
+      bytes: text
+    )}"
+  )
+
+  # the memory cap: 4 pages
+  log("grow by 1: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "grow"
+    args: { wasmI32(value: 1) }
+    timeoutMs: 1000
+  )).integer} (pages before)")
+  log("grow by 10: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "grow"
+    args: { wasmI32(value: 10) }
+    timeoutMs: 1000
+  )).integer}, memory {wasmMemorySize(instance: instance)} bytes")
+
+  # calls that go wrong
+  let missing: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "nothing"
+    args: {}
+    timeoutMs: 1000
+  )
+  log("no such function: {missing.error.kind}")
+  let wrong: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "add"
+    args: { wasmI64(value: 1) }
+    timeoutMs: 1000
+  )
+  log("wrong arguments: {wrong.error.kind}")
+  let endless: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "spin"
+    args: { wasmI32(value: 0) }
+    timeoutMs: 200
+  )
+  log("an endless loop with a 200 ms limit: {endless.error.kind}")
+  let watchdog: Task(Int) = spawn stopAfter(handle: instance.handle, delayMs: 100)
+  let stopped: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "spin"
+    args: { wasmI32(value: 0) }
+    timeoutMs: 0
+  )
+  let joined: Int = watchdog.get()
+  log("stopped by a watchdog thread: {stopped.error.kind}: {stopped.error.message}")
+  log("add after that: {first(result: wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "add"
+    args: { wasmI64(value: 1), wasmI64(value: 1) }
+    timeoutMs: 1000
+  )).integer}")
+
+  wasmDestroy(instance: instance)
+  wasmUnload(module: module)
+  log("released: {instance.handle is 0 and module.handle is 0}")
+}

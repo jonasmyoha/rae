@@ -26,7 +26,8 @@ stop:
 
 # First-time setup: Devtools Web dependencies (when Bun is installed), the
 # compiler, naga, upstream Box3D's C library (lib/box3d links it) and SQLite
-# (lib/sql links it; rebuilt when its pin or Rae's glue moved).
+# (lib/sql links it; rebuilt when its pin or Rae's glue moved), and WAMR
+# (lib/wasm links it; the same rule).
 setup:
 	@if command -v bun >/dev/null 2>&1; then \
 	  echo "Installing Devtools Web dependencies..."; \
@@ -58,6 +59,16 @@ setup:
 	else \
 	  echo "Building SQLite (lib/sql; tools/sqlite/build.sh)..."; \
 	  bash tools/sqlite/build.sh; \
+	fi
+	@wamr="$${RAE_WAMR:-$$HOME/.cache/rae/wamr/install}"; \
+	if [ -f "$$wamr/lib/librae_wamr.a" ] \
+	  && [ "$$(cat "$$wamr/COMMIT" 2>/dev/null)" = "$$(. tools/wamr/pin; echo $$WAMR_COMMIT)" ] \
+	  && [ ! tools/wamr/rae_wasm_glue.c -nt "$$wamr/lib/librae_wamr.a" ] \
+	  && [ ! compiler/runtime/runtime_wasm_embed.h -nt "$$wamr/lib/librae_wamr.a" ]; then \
+	  echo "wamr found: programs importing lib/wasm link WAMR's fast interpreter"; \
+	else \
+	  echo "Building WAMR (lib/wasm; tools/wamr/build.sh)..."; \
+	  bash tools/wamr/build.sh; \
 	fi
 	@echo "Setup complete. Compiler: ./compiler/bin/rae   Devtools Web: make dev"
 

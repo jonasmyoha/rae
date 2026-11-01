@@ -224,6 +224,24 @@ fi
 # compiles the pinned amalgamation and the glue, which tools/sqlite/build.sh
 # installs under src/, into the iOS target, in multi-thread mode with the
 # same options as the desktop library.
+# WAMR (lib/wasm): an app whose C includes the glue header links the iOS
+# builds of the fast interpreter tools/wamr/build.sh installed (interpreter
+# only: iOS allows no JIT), the device's or the simulator's by SDK.
+wamr_install=""
+if grep -q 'runtime_wasm_embed.h' "$gen/app.c"; then
+  wamr_install=${RAE_WAMR:-${RAE_WAMR_CACHE:-$HOME/.cache/rae/wamr}/install}
+  if [ ! -f "$wamr_install/lib/ios/librae_wamr.a" ]; then
+    echo "error: this app imports wasm; run tools/wamr/build.sh first (builds WAMR for iOS)" >&2; exit 1
+  fi
+  echo "gen-ios: linking WAMR $(cat "$wamr_install/COMMIT") (fast interpreter) into the app"
+fi
+wamr_cmake=""
+if [ -n "$wamr_install" ]; then
+  wamr_cmake="set_property(TARGET \${APP} PROPERTY XCODE_ATTRIBUTE_LIBRARY_SEARCH_PATHS[sdk=iphoneos*] \"$wamr_install/lib/ios\")\n"
+  wamr_cmake="${wamr_cmake}set_property(TARGET \${APP} PROPERTY XCODE_ATTRIBUTE_LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*] \"$wamr_install/lib/ios-simulator\")\n"
+  wamr_cmake="${wamr_cmake}target_link_libraries(\${APP} \"-lrae_wamr\")\n"
+fi
+
 sqlite_definitions=""
 if grep -q 'rae_sql.h' "$gen/app.c"; then
   sqlite_install=${RAE_SQLITE:-${RAE_SQLITE_CACHE:-$HOME/.cache/rae/sqlite}/install}
@@ -334,6 +352,7 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
   XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target")
 $(printf "%b" "$icon_properties")
+$(printf "%b" "$wamr_cmake")
 EOF
 
 # 4. Configure the Xcode project.
