@@ -1,0 +1,104 @@
+# Ed25519 signatures (RFC 8032, SHA-512): a key pair from a 32-byte seed, a
+# 64-byte signature of a message, and its check against the 32-byte public
+# key. Standard Ed25519, the one every other implementation verifies
+# (Monocypher's optional monocypher-ed25519, in the runtime).
+open crypto/CryptoBytes
+open crypto/CryptoRandom
+
+func monocypherEd25519KeyPair(
+  secretKey: Buffer(UInt8)
+  publicKey: Buffer(UInt8)
+  seed: Buffer(UInt8)
+) unsafe extern("rae_ext_Crypto_ed25519KeyPair")
+
+func monocypherEd25519Sign(
+  signature: Buffer(UInt8)
+  secretKey: Buffer(UInt8)
+  message: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_ed25519Sign")
+
+func monocypherEd25519Check(
+  signature: Buffer(UInt8)
+  publicKey: Buffer(UInt8)
+  message: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_ed25519Check") ret Int
+
+# A key pair: the 64-byte secret key (the seed, then the public key) and the
+# 32-byte public key. Keep the secret key secret; send the public key.
+type Ed25519KeyPair {
+  secretKey: List(UInt8)
+  publicKey: List(UInt8)
+}
+
+# The key pair of a 32-byte seed (the same seed always gives the same pair;
+# anything but 32 bytes gives empty keys)
+func ed25519KeyPairFromSeed(seed: view List(UInt8)) ret Ed25519KeyPair {
+  if seed.length is not 32 {
+    ret Ed25519KeyPair {
+      secretKey: List.create(UInt8, cap: 0)
+      publicKey: List.create(UInt8, cap: 0)
+    }
+  }
+  var secretKey: List(UInt8) = zeroBytes(count: 64)
+  var publicKey: List(UInt8) = zeroBytes(count: 32)
+  # Monocypher wipes the seed it is given: hand it a copy
+  var seedCopy: List(UInt8) = copyBytes(bytes: seed)
+  unsafe {
+    monocypherEd25519KeyPair(
+      secretKey: secretKey.data
+      publicKey: publicKey.data
+      seed: seedCopy.data
+    )
+  }
+  ret Ed25519KeyPair { secretKey: own secretKey, publicKey: own publicKey }
+}
+
+# A new key pair from the system's secure random source
+func ed25519NewKeyPair() ret Ed25519KeyPair {
+  ret ed25519KeyPairFromSeed(seed: cryptoRandomBytes(count: 32))
+}
+
+# The 64-byte signature of `message` by the 64-byte `secretKey` (a wrong-sized
+# key gives an empty list)
+func ed25519Sign(secretKey: view List(UInt8), message: view List(UInt8)) ret List(UInt8) {
+  if secretKey.length is not 64 {
+    ret List.create(UInt8, cap: 0)
+  }
+  var signature: List(UInt8) = zeroBytes(count: 64)
+  unsafe {
+    monocypherEd25519Sign(
+      signature: signature.data
+      secretKey: secretKey.data
+      message: message.data
+      offset: 0
+      count: message.length
+    )
+  }
+  ret signature
+}
+
+# Whether `signature` is `publicKey`'s signature of `message`
+func ed25519Verify(
+  signature: view List(UInt8)
+  publicKey: view List(UInt8)
+  message: view List(UInt8)
+) ret Bool {
+  if signature.length is not 64 or publicKey.length is not 32 {
+    ret false
+  }
+  var answer: Int = -1
+  unsafe {
+    answer = monocypherEd25519Check(
+      signature: signature.data
+      publicKey: publicKey.data
+      message: message.data
+      offset: 0
+      count: message.length
+    )
+  }
+  ret answer is 0
+}

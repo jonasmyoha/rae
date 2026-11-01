@@ -138,7 +138,6 @@ tsan_app106() {
   fi
   if ! perl -e 'alarm shift; exec @ARGV' 600 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
       -fsanitize=thread -ffp-contract=off -w -o "$work/app" "$work/out.c" "$work/rae_runtime.c" \
-      $([ -f "$work/monocypher.c" ] && echo "$work/monocypher.c") \
       -I"$work" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 -DRAE_HAS_WEBGPU \
       -I"$WGPU/include" -L"$WGPU/lib" -lwgpu_native -Wl,-rpath,"$WGPU/lib" \
       -framework Metal -framework QuartzCore -lSDL3 $FRAMEWORKS > "$work/cc.log" 2>&1; then

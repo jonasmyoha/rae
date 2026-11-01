@@ -1,0 +1,90 @@
+# CryptoBytes — the small byte helpers lib/crypto's modules share: a list of
+# zero bytes to receive a result, a copy, hex text for keys and digests in
+# logs and test vectors, and a comparison that takes the same time whatever
+# the bytes (for a mac or a token an attacker can probe).
+import String
+
+# `count` zero bytes
+func zeroBytes(count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: 0)
+  }
+  ret bytes
+}
+
+# A copy of `bytes`
+func copyBytes(bytes: view List(UInt8)) ret List(UInt8) {
+  var copy: List(UInt8) = List.create(UInt8, cap: bytes.length)
+  loop var i: Int = 0, i < bytes.length, ++i {
+    copy.add(value: bytes.copyAtFallback(index: i, fallback: 0))
+  }
+  ret copy
+}
+
+# The UTF-8 bytes of `text`
+func bytesOfText(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+# Lowercase hex of `bytes`, two digits a byte
+func hexOfBytes(bytes: view List(UInt8)) ret String {
+  let digits: String = "0123456789abcdef"
+  var text: String = ""
+  loop var i: Int = 0, i < bytes.length, ++i {
+    let value: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int
+    text = text.concat(other: digits.sub(start: value / 16, len: 1))
+    text = text.concat(other: digits.sub(start: value % 16, len: 1))
+  }
+  ret text
+}
+
+# The bytes of hex text (an odd length or a non-hex digit gives none)
+func bytesOfHex(hex: view String) ret opt List(UInt8) {
+  if hex.length() % 2 is not 0 {
+    ret none
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: hex.length() / 2)
+  loop var pair: Int = 0, pair < hex.length() / 2, ++pair {
+    let high: Int = hexDigit(value: hex.byteAt(index: pair * 2))
+    let low: Int = hexDigit(value: hex.byteAt(index: pair * 2 + 1))
+    if high < 0 or low < 0 {
+      ret none
+    }
+    bytes.add(value: (high * 16 + low) as UInt8)
+  }
+  ret bytes
+}
+
+func hexDigit(value: view Int) ret Int {
+  if value >= 48 and value <= 57 {
+    ret value - 48
+  }
+  if value >= 97 and value <= 102 {
+    ret value - 87
+  }
+  if value >= 65 and value <= 70 {
+    ret value - 55
+  }
+  ret -1
+}
+
+# Whether `a` and `b` hold the same bytes, in a time that depends only on
+# their length (not on where they first differ)
+func bytesEqual(a: view List(UInt8), b: view List(UInt8)) ret Bool {
+  if a.length is not b.length {
+    ret false
+  }
+  var difference: Int = 0
+  loop var i: Int = 0, i < a.length, ++i {
+    difference = difference bitor ((a.copyAtFallback(index: i, fallback: 0) as Int) bitxor (b.copyAtFallback(
+      index: i
+      fallback: 0
+    ) as Int))
+  }
+  ret difference is 0
+}

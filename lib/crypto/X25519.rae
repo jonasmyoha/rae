@@ -1,0 +1,53 @@
+# X25519 key exchange (RFC 7748): each side has a 32-byte secret key and
+# sends its public key; both compute the same 32-byte shared secret. The raw
+# secret is not a key yet: hash it with both public keys first, e.g.
+# blake2b(shared ++ ourPublic ++ theirPublic). Monocypher's, in the runtime.
+open crypto/CryptoBytes
+open crypto/CryptoRandom
+
+func monocypherX25519PublicKey(
+  publicKey: Buffer(UInt8)
+  secretKey: Buffer(UInt8)
+) unsafe extern("rae_ext_Crypto_x25519PublicKey")
+
+func monocypherX25519(
+  sharedSecret: Buffer(UInt8)
+  secretKey: Buffer(UInt8)
+  theirPublicKey: Buffer(UInt8)
+) unsafe extern("rae_ext_Crypto_x25519")
+
+# A new 32-byte secret key from the system's secure random source
+func x25519NewSecretKey() ret List(UInt8) {
+  ret cryptoRandomBytes(count: 32)
+}
+
+# The public key of a 32-byte secret key (anything else gives an empty list)
+func x25519PublicKey(secretKey: view List(UInt8)) ret List(UInt8) {
+  if secretKey.length is not 32 {
+    ret List.create(UInt8, cap: 0)
+  }
+  var publicKey: List(UInt8) = zeroBytes(count: 32)
+  unsafe {
+    monocypherX25519PublicKey(publicKey: publicKey.data, secretKey: secretKey.data)
+  }
+  ret publicKey
+}
+
+# The raw shared secret of our secret key and their public key
+func x25519SharedSecret(
+  secretKey: view List(UInt8)
+  theirPublicKey: view List(UInt8)
+) ret List(UInt8) {
+  if secretKey.length is not 32 or theirPublicKey.length is not 32 {
+    ret List.create(UInt8, cap: 0)
+  }
+  var shared: List(UInt8) = zeroBytes(count: 32)
+  unsafe {
+    monocypherX25519(
+      sharedSecret: shared.data
+      secretKey: secretKey.data
+      theirPublicKey: theirPublicKey.data
+    )
+  }
+  ret shared
+}

@@ -1,62 +1,76 @@
-import sys
+# lib/crypto in one walk: hash a password with Argon2id, use the hash as a
+# key to lock a message with XChaCha20-Poly1305 (a fresh random nonce), unlock
+# it, and see a changed message refused; then sign with Ed25519 and take a
+# BLAKE2b content hash.
+open crypto/CryptoBytes
+open crypto/CryptoRandom
+open crypto/Argon2
+open crypto/Aead
+open crypto/Ed25519
+open crypto/Blake2b
 
 func main() {
-  unsafe {
-    log("1. Hashing password...")
-    let pwd: String = "password123"
-    let salt: String = "saltsaltsalt"
-    let hash: Buffer(Int) = __buf_alloc(size: 32)
-    # 1 block (1KB), 1 iteration, 32 bytes output
-    Sys.rae_crypto_argon2i(
-      password: pwd
-      salt: salt
-      nb_blocks: 1
-      nb_iterations: 1
-      hash_buf: hash
-      hash_len: 32
-    )
-    log("Hash generated (32 bytes).")
-
-    log("2. Encrypting data...")
-    let key: Buffer(Int) = hash  # Use hash as key
-    let nonce: Buffer(Int) = __buf_alloc(size: 24)  # Zero nonce for demo
-
-    let msgLen: Int = 3
-    let plain: Buffer(Int) = __buf_alloc(size: msgLen)
-    __buf_set(buf: plain, index: 0, value: 65)  # 'A'
-    __buf_set(buf: plain, index: 1, value: 66)  # 'B'
-    __buf_set(buf: plain, index: 2, value: 67)  # 'C'
-
-    let mac: Buffer(Int) = __buf_alloc(size: 16)
-    let cipher: Buffer(Int) = __buf_alloc(size: msgLen)
-
-    Sys.encrypt(
-      key: key
-      nonce: nonce
-      plain: plain
-      len: msgLen
-      mac: mac
-      cipher: cipher
-    )
-    log("Encryption done.")
-
-    log("3. Decrypting data...")
-    let recovered: Buffer(Int) = __buf_alloc(size: msgLen)
-    if Sys.decrypt(
-      key: key
-      nonce: nonce
-      mac: mac
-      cipher: cipher
-      len: msgLen
-      plain: recovered
-    ) {
-      log("Decryption successful!")
-      let v0: Int = __buf_get(buf: recovered, index: 0)
-      let v1: Int = __buf_get(buf: recovered, index: 1)
-      let v2: Int = __buf_get(buf: recovered, index: 2)
-      log("Recovered: {v0}, {v1}, {v2}")
-    } else {
-      log("ERROR: Decryption failed.")
-    }
+  log("1. Hashing a password with Argon2id...")
+  let salt: List(UInt8) = cryptoRandomBytes(count: 16)
+  # a light setting for a demo; argon2DefaultSettings() is 64 MiB
+  let settings: Argon2Settings = {
+    algorithm: Argon2Algorithm.argon2id
+    memoryKiB: 1024
+    passes: 3
+    lanes: 1
   }
+  let key: List(UInt8) = argon2Hash(
+    password: bytesOfText(text: "password123")
+    salt: salt
+    settings: settings
+    hashSize: 32
+    key: List.create(UInt8, cap: 0)
+    associatedData: List.create(UInt8, cap: 0)
+  )
+  log("   key: {key.length} bytes")
+
+  log("2. Locking a message...")
+  let nonce: List(UInt8) = cryptoRandomBytes(count: 24)
+  let message: List(UInt8) = bytesOfText(text: "ABC")
+  let sealed: AeadSealed = aeadLock(
+    key: key
+    nonce: nonce
+    plainText: message
+    associatedData: List.create(UInt8, cap: 0)
+  )
+  log("   cipher text {hexOfBytes(bytes: sealed.cipherText)}, mac {sealed.mac.length} bytes")
+
+  log("3. Unlocking it...")
+  if let opened: List(UInt8) = aeadUnlock(
+    key: key
+    nonce: nonce
+    sealed: sealed
+    associatedData: List.create(UInt8, cap: 0)
+  ) {
+    log("   recovered: {hexOfBytes(bytes: opened)} (the same: {bytesEqual(a: opened, b: message)})")
+  } else {
+    log("   ERROR: it did not unlock")
+  }
+  var changed: AeadSealed = {
+    cipherText: copyBytes(bytes: sealed.cipherText)
+    mac: copyBytes(bytes: sealed.mac)
+  }
+  changed.cipherText.set(index: 0, value: 0)
+  log("   a changed message unlocks: {aeadUnlock(
+    key: key
+    nonce: nonce
+    sealed: changed
+    associatedData: List.create(UInt8, cap: 0)
+  ) is not none}")
+
+  log("4. Signing with Ed25519...")
+  let pair: Ed25519KeyPair = ed25519NewKeyPair()
+  let document: List(UInt8) = bytesOfText(text: "device sign-in")
+  let signature: List(UInt8) = ed25519Sign(secretKey: pair.secretKey, message: document)
+  log(
+    "   verifies: {ed25519Verify(signature: signature, publicKey: pair.publicKey, message: document)}"
+  )
+
+  log("5. A BLAKE2b content hash:")
+  log("   {hexOfBytes(bytes: blake2b(message: document, hashSize: 32))}")
 }

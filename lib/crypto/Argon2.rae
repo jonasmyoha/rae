@@ -1,0 +1,84 @@
+# Argon2 password hashing (RFC 9106): slow and memory-hard on purpose, so a
+# stolen hash is expensive to guess. Argon2id is the recommended variant;
+# store the salt (16 random bytes, cryptoRandomBytes) and the settings with
+# the hash. Monocypher's, in the runtime.
+open crypto/CryptoBytes
+
+func monocypherArgon2(
+  hash: Buffer(UInt8)
+  hashSize: Int
+  workArea: Buffer(UInt8)
+  algorithm: Int
+  blocks: Int
+  passes: Int
+  lanes: Int
+  password: Buffer(UInt8)
+  passwordSize: Int
+  salt: Buffer(UInt8)
+  saltSize: Int
+  key: Buffer(UInt8)
+  keySize: Int
+  associatedData: Buffer(UInt8)
+  associatedDataSize: Int
+) unsafe extern("rae_ext_Crypto_argon2")
+
+enum Argon2Algorithm { argon2d, argon2i, argon2id }
+
+# How much work a hash costs: `memoryKiB` of memory (at least 8 per lane),
+# `passes` over it (at least 1), `lanes` (Monocypher computes them one after
+# the other; they change the result, not the speed). RFC 9106's second
+# recommendation: Argon2id, 64 MiB, 3 passes, 4 lanes.
+type Argon2Settings {
+  algorithm: Argon2Algorithm
+  memoryKiB: Int
+  passes: Int
+  lanes: Int
+}
+
+func argon2DefaultSettings() ret Argon2Settings {
+  ret Argon2Settings { algorithm: Argon2Algorithm.argon2id, memoryKiB: 65536, passes: 3, lanes: 4 }
+}
+
+# The `hashSize`-byte Argon2 hash of `password` with `salt` (at least 8
+# bytes), and an optional secret `key` and `associatedData` (empty lists for
+# none). Settings out of range give an empty list.
+func argon2Hash(
+  password: view List(UInt8)
+  salt: view List(UInt8)
+  settings: view Argon2Settings
+  hashSize: view Int
+  key: view List(UInt8)
+  associatedData: view List(UInt8)
+) ret List(UInt8) {
+  if hashSize < 4 or salt.length < 8 or settings.passes < 1 or settings.lanes < 1 or settings.memoryKiB < 8 * settings.lanes {
+    ret List.create(UInt8, cap: 0)
+  }
+  var algorithm: Int = 2
+  if settings.algorithm is Argon2Algorithm.argon2d {
+    algorithm = 0
+  } else if settings.algorithm is Argon2Algorithm.argon2i {
+    algorithm = 1
+  }
+  var hash: List(UInt8) = zeroBytes(count: hashSize)
+  var workArea: List(UInt8) = zeroBytes(count: settings.memoryKiB * 1024)
+  unsafe {
+    monocypherArgon2(
+      hash: hash.data
+      hashSize: hashSize
+      workArea: workArea.data
+      algorithm: algorithm
+      blocks: settings.memoryKiB
+      passes: settings.passes
+      lanes: settings.lanes
+      password: password.data
+      passwordSize: password.length
+      salt: salt.data
+      saltSize: salt.length
+      key: key.data
+      keySize: key.length
+      associatedData: associatedData.data
+      associatedDataSize: associatedData.length
+    )
+  }
+  ret hash
+}

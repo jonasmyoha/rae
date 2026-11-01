@@ -1,0 +1,49 @@
+# BLAKE2b (RFC 7693): a fast cryptographic hash, plain or keyed (a MAC), of 1
+# to 64 bytes. Content hashes, keyed checksums, key derivation from a shared
+# secret. Monocypher's, in the runtime (runtime_crypto_monocypher.c).
+open crypto/CryptoBytes
+
+# One call: `count` bytes of `message` from `offset`, hashed into `hashSize`
+# bytes of `hash`, keyed by `keySize` bytes of `key` (0: plain)
+func monocypherBlake2b(
+  hash: Buffer(UInt8)
+  hashSize: Int
+  key: Buffer(UInt8)
+  keySize: Int
+  message: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_blake2b")
+
+# The longest digest and key BLAKE2b has
+const blake2bMaxSize: Int = 64
+
+# The `hashSize`-byte (1..64; 64 is BLAKE2b-512) BLAKE2b hash of `message`.
+# An out-of-range size gives an empty list.
+func blake2b(message: view List(UInt8), hashSize: view Int) ret List(UInt8) {
+  ret blake2bKeyed(message: message, key: List.create(UInt8, cap: 0), hashSize: hashSize)
+}
+
+# BLAKE2b keyed by `key` (0..64 bytes): a MAC of `message`, `hashSize` bytes
+func blake2bKeyed(
+  message: view List(UInt8)
+  key: view List(UInt8)
+  hashSize: view Int
+) ret List(UInt8) {
+  if hashSize < 1 or hashSize > blake2bMaxSize or key.length > blake2bMaxSize {
+    ret List.create(UInt8, cap: 0)
+  }
+  var hash: List(UInt8) = zeroBytes(count: hashSize)
+  unsafe {
+    monocypherBlake2b(
+      hash: hash.data
+      hashSize: hashSize
+      key: key.data
+      keySize: key.length
+      message: message.data
+      offset: 0
+      count: message.length
+    )
+  }
+  ret hash
+}
