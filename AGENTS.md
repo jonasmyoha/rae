@@ -775,7 +775,13 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   `dep lib` — the stdlib resolved through the toolchain, so projects need no
   `lib` symlink. Dependency sources are vendored: the format preflight neither
   rewrites nor check-fails them, and the implicit project scan skips every
-  dot-directory so `.rae/deps` is reached only through the resolver.
+  dot-directory and every dependency's folder, so a dependency is reached only
+  through the resolver. **A package sees only its own files, the stdlib and
+  the dependencies its OWN pack declares**: a dependency calling or naming
+  anything of the project above it, or of a sibling it does not declare, is a
+  compile error in the dependency's file; a dependency's own pack (targets
+  optional) has its dependencies resolved too (docs/raepack-v2-and-packages.md
+  §12, cases 1276-1279).
 - **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> [--rev <rev>]`
   edits the project's `.raepack` (creating the `dependencies` block if absent,
   refusing a duplicate name); `rae fetch` resolves dependencies into `.rae/deps`

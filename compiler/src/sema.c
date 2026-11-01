@@ -1,4 +1,5 @@
 #include "sema.h"
+#include "rae_deps.h"
 #include "array_methods.h"
 #include "shader_compose.h"
 #include "type.h"
@@ -317,12 +318,48 @@ static bool sema_file_declares_package(const char* file, const AstDecl* d, bool 
     return false;
 }
 
+// #64888955 package boundaries (docs/raepack-v2-and-packages.md §12): with
+// dependencies, a file sees only its own package's files, the stdlib and the
+// packages its package depends on. A dependency never reaches the project
+// that depends on it, nor a sibling dependency it does not declare itself.
+// The stdlib on either side is not a package boundary.
+static bool sema_package_reaches(const char* file, const AstDecl* d) {
+    if (rae_deps_count() == 0 || !file || !d || !d->origin_file) return true;
+    char from_lib[256], to_lib[256];
+    sema_package_token(file, from_lib, sizeof from_lib);
+    sema_package_token(d->origin_file, to_lib, sizeof to_lib);
+    if (from_lib[0] != '\0' || to_lib[0] != '\0') return true;
+    return rae_deps_package_reaches(rae_deps_owner_of(file), rae_deps_owner_of(d->origin_file));
+}
+
+// The package boundary a call from `file` to `d` would cross, in words, for
+// the diagnostic: "the project that depends on package 'sdk'", ...
+static void sema_package_boundary_words(const char* file, const AstDecl* d, char* out, size_t cap) {
+    int from = rae_deps_owner_of(file);
+    int to = rae_deps_owner_of(d->origin_file);
+    if (to < 0) {
+        snprintf(out, cap, "it is declared in the project that depends on package '%s'; a package never "
+                 "reaches the project that uses it", rae_deps_name(from) ? rae_deps_name(from) : "?");
+    } else if (from < 0) {
+        snprintf(out, cap, "it is declared in package '%s', which this project's pack does not depend on",
+                 rae_deps_name(to));
+    } else {
+        snprintf(out, cap, "it is declared in package '%s', which package '%s' does not depend on (add it "
+                 "to the dependencies in its own pack)", rae_deps_name(to), rae_deps_name(from));
+    }
+}
+
 // Is callee `d` reachable by a BARE call from `file`? (same file | same package |
 // prelude | a package `open`ed here). The open-set. (docs/module-namespacing.md)
 static bool sema_decl_opened(const char* file, const AstDecl* d) {
     if (!d->origin_file) return true;
+    if (!sema_package_reaches(file, d)) return false;
     if (file && strcmp(file, d->origin_file) == 0) return true;       // same file
-    if (sema_same_package(file, d->origin_file)) return true;         // same package
+    // same package — and the same dependency: a dependency's folder inside the
+    // project tree (`vendor/sdk`) is still its own package, reached only by
+    // `import`/`open` (#64888955)
+    if (sema_same_package(file, d->origin_file)
+        && rae_deps_owner_of(file) == rae_deps_owner_of(d->origin_file)) return true;
     if (d->module_name && sema_module_in_prelude(d->module_name)) return true;  // prelude
     return sema_file_declares_package(file, d, /*require_open=*/true);
 }
@@ -330,6 +367,7 @@ static bool sema_decl_opened(const char* file, const AstDecl* d) {
 // Is callee `d` reachable by QUALIFICATION or general UFCS from `file`? The
 // open-set plus `import`ed (not opened) packages (import grants qualified+UFCS).
 static bool sema_decl_visible(const char* file, const AstDecl* d) {
+    if (!sema_package_reaches(file, d)) return false;
     if (sema_decl_opened(file, d)) return true;
     if (d->module_name && sema_module_globally_imported(d->module_name)) return true;
     return sema_file_declares_package(file, d, /*require_open=*/false);
@@ -2093,6 +2131,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     Symbol* best_sym = NULL;
     AstTypeRef* best_inferred = NULL;
     const AstDecl* ineligible = NULL;  // name matched but its package isn't open here
+    const AstDecl* across_boundary = NULL;  // #64888955: name matched in a package this one does not depend on
     bool open_arity_match = false;     // #819: an OPEN same-name candidate matches arity — the real target, even if this resolver's generic inference is incomplete; suppresses the not-open diagnostic below
     // A single name+arity candidate whose ONLY problem is a numeric-type
     // mismatch (e.g. Float passed where Float64 is wanted) is still the callee
@@ -2137,6 +2176,10 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
 
     for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
+        if (!sema_package_reaches(s_current_decl_origin, curr->decl)) {
+            if (!across_boundary) across_boundary = curr->decl;
+            continue;
+        }
         if (!sema_decl_opened(s_current_decl_origin, curr->decl)) { if (!ineligible) ineligible = curr->decl; continue; }
 
         AstFuncDecl* fd = &curr->decl->as.func_decl;
@@ -2320,7 +2363,17 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // loaded elsewhere in the unit) a not-open collections drop; the open one
     // is the real target and is resolved by the downstream fallback, so the
     // not-open collections candidate must not hijack the call with an error.
-    if (arity_cand_count > 0 && !open_arity_match && !open_generic_candidate) {
+    if (across_boundary && !open_arity_match && arity_cand_count == 0 && !ineligible) {
+        // #64888955: the only function by that name is in a package this one
+        // does not depend on (the project above a dependency, a sibling it does
+        // not declare)
+        char why[320];
+        sema_package_boundary_words(s_current_decl_origin, across_boundary, why, sizeof why);
+        char buf[480];
+        snprintf(buf, sizeof(buf), "unknown function '%.*s' here: %s", (int)name.len, name.data, why);
+        diag_error(sema_diag_file(module), (int)line, (int)column, buf);
+        if (module) module->had_error = true;
+    } else if (arity_cand_count > 0 && !open_arity_match && !open_generic_candidate) {
         // #926: the name is open here but no signature takes this many
         // arguments — a missing or extra argument, reported at the call rather
         // than as an undeclared C symbol.
@@ -2384,6 +2437,7 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
     AstDecl* arity_match = NULL;
     const AstDecl* arity_cands[8]; size_t arity_cand_count = 0;  // #926
     bool generic_candidate = false;
+    const AstDecl* across_boundary = NULL;  // #64888955: the name in a package not reachable from here
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->kind != AST_DECL_FUNC) continue;
         // Match either the full module path (`ui/ecs` — the lib/qualified form)
@@ -2408,6 +2462,10 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
         if (!qual_match) continue;
         if (!str_eq(d->as.func_decl.name, name)) continue;
         if (d->as.func_decl.specialization_args) continue;
+        if (!sema_package_reaches(s_current_decl_origin, d)) {
+            if (!across_boundary) across_boundary = d;
+            continue;
+        }
         if (!sema_decl_visible(s_current_decl_origin, d)) continue;  // module must be imported/opened/same-pkg here
         AstFuncDecl* fd = &d->as.func_decl;
         size_t param_count = 0;
@@ -2438,6 +2496,15 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
     }
     if (!arity_match && arity_cand_count > 0 && !generic_candidate)
         sema_report_arity_mismatch(module, name, arg_count, arity_cands, arity_cand_count, line, column);
+    if (!arity_match && across_boundary && arity_cand_count == 0) {
+        char why[320];
+        sema_package_boundary_words(s_current_decl_origin, across_boundary, why, sizeof why);
+        char buf[480];
+        snprintf(buf, sizeof(buf), "unknown function '%.*s.%.*s' here: %s", (int)qualifier.len, qualifier.data,
+                 (int)name.len, name.data, why);
+        diag_error(sema_diag_file(module), (int)line, (int)column, buf);
+        if (module) module->had_error = true;
+    }
     return arity_match;
 }
 
@@ -9666,6 +9733,18 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             base = type_get_task(ctx->type_registry, arg);
         } else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
+            /* #64888955: a type in a package this one does not depend on (the
+             * project above a dependency, a sibling it does not declare) */
+            if (sym && sym->decl && (sym->decl->kind == AST_DECL_TYPE || sym->decl->kind == AST_DECL_ENUM)
+                && !sema_package_reaches(s_current_decl_origin, sym->decl)) {
+                char why[320];
+                sema_package_boundary_words(s_current_decl_origin, sym->decl, why, sizeof why);
+                char tbuf[480];
+                snprintf(tbuf, sizeof tbuf, "unknown type '%.*s' here: %s", (int)name.len, name.data, why);
+                diag_error(sema_diag_file(module), (int)type_ref->line, (int)type_ref->column, tbuf);
+                if (module) module->had_error = true;
+                sym = NULL;
+            }
             if (sym && sym->decl && sym->decl->kind == AST_DECL_ENUM) {
                 /* Enums are int-backed value types with no payloads. Resolve the
                  * enum name to Int so both cast directions (`intVal as Enum` and

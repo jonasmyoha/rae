@@ -50,4 +50,13 @@ void rae_deps_set_update(const char* only_name);
  * first `lib` edge (the stdlib resolved through the toolchain). */
 void rae_deps_print_tree(FILE* out, const char* root_label, const char* stdlib_dir);
 
+/* #64888955 package boundaries: the dep that owns `file_path` (its index), or
+ * -1 for a file of the root project (or the stdlib, which callers check
+ * first). A package reaches itself, and a dep it declares in its own pack (the
+ * root: in the project's pack); never the project that depends on it. */
+int rae_deps_owner_of(const char* file_path);
+bool rae_deps_package_reaches(int from, int to);
+/* The name of dep `index` (NULL for -1) */
+const char* rae_deps_name(int index);
+
 #endif /* RAE_DEPS_H */

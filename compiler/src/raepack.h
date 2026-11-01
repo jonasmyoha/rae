@@ -61,6 +61,9 @@ typedef struct {
 } RaePack;
 
 bool raepack_parse_file(const char* file_path, RaePack* out, bool strict);
+/* A dependency's own pack (#64888955): format and version required, targets
+ * optional (a library is built by the project that depends on it). */
+bool raepack_parse_library_file(const char* file_path, RaePack* out);
 void raepack_pretty_print(const RaePack* pack, FILE* out);
 void raepack_free(RaePack* pack);
 const RaePackTarget* raepack_find_target(const RaePack* pack, Str id);

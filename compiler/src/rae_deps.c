@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 typedef struct {
   char name[128];
@@ -13,11 +14,18 @@ typedef struct {
   char commit[64];
   char tree[64];
   bool is_git;
+  /* the deps THIS package's own pack declares (by name): what its files may
+   * reach besides themselves and the stdlib */
+  char uses[16][128];
+  int use_count;
 } ResolvedDep;
 
 #define RAE_DEPS_MAX 64
 static ResolvedDep s_deps[RAE_DEPS_MAX];
 static int s_dep_count = 0;
+/* the deps the ROOT project's pack declares (by name) */
+static char s_root_uses[RAE_DEPS_MAX][128];
+static int s_root_use_count = 0;
 
 /* #934 `rae update`: NULL name + s_update_all=false => honor the lock (normal
  * builds, `rae fetch`). s_update_all => re-resolve every dep; else only the
@@ -176,27 +184,125 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
   return true;
 }
 
-bool rae_deps_resolve(const RaePack* pack, const char* pack_dir_in, const char* lock_path) {
+static int dep_index_named(const char* name) {
+  for (int i = 0; i < s_dep_count; ++i) {
+    if (strcmp(s_deps[i].name, name) == 0) return i;
+  }
+  return -1;
+}
+
+/* The first `*.raepack` file in `dir` (a dependency's own pack), into `out` */
+static bool find_pack_file(const char* dir, char* out, size_t out_len) {
+  DIR* d = opendir(dir);
+  if (!d) return false;
+  bool found = false;
+  struct dirent* entry;
+  while ((entry = readdir(d)) != NULL) {
+    size_t n = strlen(entry->d_name);
+    if (n > 8 && strcmp(entry->d_name + n - 8, ".raepack") == 0) {
+      snprintf(out, out_len, "%s/%s", dir, entry->d_name);
+      found = true;
+      break;
+    }
+  }
+  closedir(d);
+  return found;
+}
+
+static void record_use(int owner, const char* name) {
+  if (owner < 0) {
+    if (s_root_use_count < RAE_DEPS_MAX) {
+      snprintf(s_root_uses[s_root_use_count], sizeof(s_root_uses[0]), "%s", name);
+      s_root_use_count += 1;
+    }
+    return;
+  }
+  ResolvedDep* dep = &s_deps[owner];
+  if (dep->use_count < 16) {
+    snprintf(dep->uses[dep->use_count], sizeof(dep->uses[0]), "%s", name);
+    dep->use_count += 1;
+  }
+}
+
+/* Resolve the deps `pack` declares (its file in `pack_dir`) for the package
+ * `owner` (-1: the root project), then each new dep's own pack's deps, so a
+ * dependency's dependencies are loaded and every package knows which others
+ * it may reach (#64888955: a package sees only its own files, the stdlib and
+ * its own dependencies). A name already registered is the same dependency. */
+static bool resolve_pack_deps(const RaePack* pack, const char* pack_dir_in, const char* lock_path,
+                              int owner, int depth) {
+  if (depth > 16) {
+    fprintf(stderr, "error: dependencies nest more than 16 deep (a cycle?)\n");
+    return false;
+  }
   /* Absolute dep dirs: the module loader reads a leading `.` in a file path
    * (`./.rae/deps/x/Foo.rae`) as a relative import spec, and the lock should
    * not depend on the cwd the build was started from. */
   char pack_dir[PATH_MAX];
   if (!realpath(pack_dir_in, pack_dir)) snprintf(pack_dir, sizeof(pack_dir), "%s", pack_dir_in);
   for (const RaePackDep* spec = pack ? pack->deps : NULL; spec; spec = spec->next) {
+    char name[128];
+    str_copy(name, sizeof(name), spec->name);
+    record_use(owner, name);
+    if (dep_index_named(name) >= 0) continue;
     if (s_dep_count >= RAE_DEPS_MAX) {
       fprintf(stderr, "error: too many dependencies (max %d)\n", RAE_DEPS_MAX);
       return false;
     }
-    ResolvedDep* dep = &s_deps[s_dep_count];
+    int index = s_dep_count;
+    ResolvedDep* dep = &s_deps[index];
     memset(dep, 0, sizeof(*dep));
-    str_copy(dep->name, sizeof(dep->name), spec->name);
+    snprintf(dep->name, sizeof(dep->name), "%s", name);
     dep->is_git = spec->git.len > 0;
     bool ok = dep->is_git ? resolve_git_dep(dep, spec, pack_dir, lock_path)
                           : resolve_path_dep(dep, spec, pack_dir);
     if (!ok) return false;
     s_dep_count += 1;
+    /* the dependency's own pack, if it has one: its dependencies */
+    char own_pack[PATH_MAX];
+    if (find_pack_file(s_deps[index].dir, own_pack, sizeof(own_pack))) {
+      RaePack nested;
+      memset(&nested, 0, sizeof(nested));
+      if (raepack_parse_library_file(own_pack, &nested)) {
+        bool nested_ok = resolve_pack_deps(&nested, s_deps[index].dir, lock_path, index, depth + 1);
+        raepack_free(&nested);
+        if (!nested_ok) return false;
+      } else {
+        raepack_free(&nested);
+      }
+    }
   }
   return true;
+}
+
+bool rae_deps_resolve(const RaePack* pack, const char* pack_dir_in, const char* lock_path) {
+  return resolve_pack_deps(pack, pack_dir_in, lock_path, -1, 0);
+}
+
+int rae_deps_owner_of(const char* file_path) {
+  if (!file_path || s_dep_count == 0) return -1;
+  for (int i = 0; i < s_dep_count; ++i) {
+    size_t n = strlen(s_deps[i].dir);
+    if (strncmp(file_path, s_deps[i].dir, n) == 0 && file_path[n] == '/') return i;
+  }
+  return -1;
+}
+
+bool rae_deps_package_reaches(int from, int to) {
+  if (from == to) return true;
+  if (to < 0) return false;  /* no dependency reaches the project that depends on it */
+  const char* name = s_deps[to].name;
+  if (from < 0) {
+    for (int i = 0; i < s_root_use_count; ++i) if (strcmp(s_root_uses[i], name) == 0) return true;
+    return false;
+  }
+  for (int i = 0; i < s_deps[from].use_count; ++i) if (strcmp(s_deps[from].uses[i], name) == 0) return true;
+  return false;
+}
+
+const char* rae_deps_name(int index) {
+  if (index < 0 || index >= s_dep_count) return NULL;
+  return s_deps[index].name;
 }
 
 void rae_deps_write_lock(FILE* out, const char* stdlib_dir) {

@@ -433,6 +433,25 @@ App Store approval or general iOS compatibility — that is investigated separat
     dep codec: { git: "https://github.com/acme/rae-codec", rev: "v1.2.0" }
   }
   ```
+- **Package boundaries (2026-11-01).** A package sees only its own files, the
+  standard library and the packages its OWN pack declares. The compiler holds
+  this both ways:
+  - the project reaches a dependency's module only through `import x/Foo`
+    (a dependency's folder inside the project tree, `vendor/x`, is not project
+    source: the project scan skips it);
+  - a dependency never reaches the project that depends on it: a bare call, a
+    qualified call or a type from the project is an error in the dependency's
+    file ("unknown function 'shellSecret' here: it is declared in the project
+    that depends on package 'sdk'");
+  - a dependency reaches another dependency only if its own pack declares it;
+    two siblings the project declares do not see each other.
+  A dependency's own `.raepack` (the first one in its folder) is a library pack:
+  `format` and `version` are required, `targets` are not, and its
+  `dependencies` are resolved like the project's (relative to its folder; a
+  name already resolved is the same dependency). The project reaches such a
+  nested dependency only if its own pack declares it too. Cases
+  1276_pack_dependency_cannot_reach_up, 1277_pack_dependent_needs_import,
+  1278_pack_sibling_needs_its_own_dependency, 1279_pack_dependency_of_a_dependency.
 - **`rae.lock`** — generated lockfile pinning each resolved dependency to an exact
   revision + content hash, for reproducible builds. Resolution feeds the
   compiler's existing module search (the `RAE_STDLIB` / `resolve_stdlib_root` /
