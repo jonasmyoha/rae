@@ -43,6 +43,7 @@
 #include "rae_deps.h"
 #include "../build/version_gen.h"
 #include "c_backend.h"
+#include "c_module_exports.h"
 #include "sema.h"
 #include "runtime_cache.h"
 #include "shader_compose.h"
@@ -2982,6 +2983,64 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   return true;
 }
 
+static bool find_project_pack(const char* entry_path, const char* project_root, char* out);
+
+/* The `exports` of the project pack's wasm target (empty when there is no
+ * pack, no wasm target or no exports: a program, not a module) */
+static void wasm_module_exports_of(const char* entry_path, const char* project_root, char* out, size_t cap) {
+  out[0] = '\0';
+  char pack_path[PATH_MAX];
+  if (!find_project_pack(entry_path, project_root, pack_path)) return;
+  RaePack pack;
+  diag_set_quiet(true);
+  bool parsed = raepack_parse_file(pack_path, &pack, false);
+  diag_set_quiet(false);
+  if (!parsed) return;
+  const RaePackTarget* target = raepack_find_target(&pack, str_from_cstr("wasm"));
+  if (target && target->exports.len > 0) {
+    snprintf(out, cap, "%.*s", (int)target->exports.len, target->exports.data);
+  }
+  raepack_free(&pack);
+}
+
+/* Build a WASM module (docs/wasm-modules.md): the generated C and the Rae
+ * runtime with wasi-sdk's clang, as a WASI reactor (no main, `_initialize`
+ * and the named exports). No --allow-undefined: a symbol the code uses and
+ * nothing defines fails the link instead of becoming a host import. */
+static bool wasi_link_module(const char* c_path, const char* out_path, int profile) {
+  const char* sdk = getenv("WASI_SDK");
+  char sdk_default[PATH_MAX];
+  if (!sdk || !*sdk) {
+    const char* home = getenv("HOME"); if (!home) home = ".";
+    snprintf(sdk_default, sizeof sdk_default, "%s/.local/wasi-sdk", home);
+    sdk = sdk_default;
+  }
+  char clang[PATH_MAX + 16];
+  snprintf(clang, sizeof clang, "%s/bin/clang", sdk);
+  struct stat clang_stat;
+  if (stat(clang, &clang_stat) != 0) {
+    fprintf(stderr, "error: a WASM module is built with wasi-sdk, not found at %s (set WASI_SDK)\n", sdk);
+    return false;
+  }
+  if (!out_path || !*out_path) {
+    fprintf(stderr, "error: a WASM module needs --out <file.wasm>\n");
+    return false;
+  }
+  if (!ensure_parent_directory(out_path)) return false;
+  char cmd[PATH_MAX * 6];
+  snprintf(cmd, sizeof cmd,
+           "\"%s\" --target=wasm32-wasip1 --sysroot=\"%s/share/wasi-sysroot\" -mexec-model=reactor %s "
+           "-ffp-contract=off -w \"%s\" \"%s/rae_runtime.c\" -I\"%s\" -o \"%s\"",
+           clang, sdk, profile == BUILD_PROFILE_DEV ? "-O0 -g" : "-O2", c_path, RAE_RUNTIME_SOURCE_DIR, RAE_RUNTIME_SOURCE_DIR,
+           out_path);
+  int rc = system(cmd);
+  if (rc != 0) {
+    fprintf(stderr, "error: building the WASM module failed\n");
+    return false;
+  }
+  return true;
+}
+
 /* Link generated C into an Emscripten browser bundle. This is deliberately
  * separate from tools/wasm_build.sh, which targets standalone WASI rather
  * than the browser's SDL3 + WebGPU APIs. */
@@ -4577,6 +4636,22 @@ static int run_command(const char* cmd, int argc, char** argv) {
       case BUILD_TARGET_WASM: {
         char temp_c[PATH_MAX];
         snprintf(temp_c, sizeof(temp_c), "/tmp/rae_wasm_%d.c", getpid());
+        /* A wasm target with `exports` in the project's pack builds a WASM
+         * module (a WASI reactor with named exports, docs/wasm-modules.md)
+         * instead of a browser program */
+        char module_exports[1024] = {0};
+        wasm_module_exports_of(build_opts.entry_path, final_root, module_exports, sizeof(module_exports));
+        if (module_exports[0]) {
+          g_wasm_module_exports = module_exports;
+          bool m_sdl3 = false, m_webgpu = false;
+          bool emitted = build_c_backend_output(build_opts.entry_path, final_root, temp_c, build_opts.no_implicit,
+                                                &m_sdl3, &m_webgpu, NULL, PROGRESS_EMIT);
+          progress_end(emitted);
+          if (g_target_check_only || g_print_target || g_report_waits) return emitted ? 0 : 1;
+          bool built = emitted && wasi_link_module(temp_c, build_opts.out_path, build_opts.profile);
+          unlink(temp_c);
+          return built ? 0 : 1;
+        }
         bool b_sdl3 = false, b_webgpu = false;
         bool okc = build_c_backend_output(build_opts.entry_path,
                                           final_root,

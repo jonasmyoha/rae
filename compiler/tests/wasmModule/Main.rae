@@ -1,0 +1,14 @@
+# A WASM module (docs/wasm-modules.md): no main; the .raepack's wasm target
+# exports `add` and `greet` by name, and tools/wasm-module-check.sh builds it
+# with `rae build --target wasm` and calls them from host.mjs.
+func add(a: view Int, b: view Int) ret Int {
+  ret a + b
+}
+
+func greet(name: view String, times: view Int) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < times, ++i {
+    text = "{text}Hello, {name}! "
+  }
+  ret text.trim()
+}

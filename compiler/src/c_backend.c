@@ -1,4 +1,5 @@
 #include "c_backend.h"
+#include "c_module_exports.h"
 #include "c_backend_internal.h"
 #include "ownership.h"
 #include "mangler.h"
@@ -4679,9 +4680,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
+  // A WASM module's named exports (docs/wasm-modules.md), when it is one
+  bool exported = emit_wasm_module_exports(ctx, out);
   fclose(out);
   c_twins_free(ctx);
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
-  return true;
+  return exported;
 }

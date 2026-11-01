@@ -78,6 +78,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_loop_versioning.c \
        $(SRC_DIR)/c_stmt.c \
        $(SRC_DIR)/c_twin.c \
+       $(SRC_DIR)/c_module_exports.c \
        $(SRC_DIR)/c_lend.c \
        $(SRC_DIR)/c_blocking.c \
        $(SRC_DIR)/c_names.c \
@@ -115,7 +116,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: c-warnings-gate all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -227,6 +228,11 @@ float8-lowerings: build
 # pre-suite case too.
 c-warnings-gate: build
 	@bash tools/c-warnings-gate.sh
+
+# A WASM module (docs/wasm-modules.md) built and called from Node
+# (tools/wasm-module-check.sh); `make test` runs it as one pre-suite case.
+wasm-module-check: build
+	@bash tools/wasm-module-check.sh
 
 smoke: build
 	@chmod +x tools/smoke.sh
