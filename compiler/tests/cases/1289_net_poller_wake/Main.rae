@@ -1,0 +1,102 @@
+# Waking lib/net's poller from another thread (PollerWaker: a kqueue user
+# event, an eventfd on Linux). A worker wakes a poller that waits 5 s: the
+# wait ends at once with a `woken` readiness; the next wait sleeps its whole
+# timeout again; several wakes before a wait are reported once. Then the ECS
+# HTTP server: a promoted request whose task wakes the server is answered in
+# the next frame, though each frame may wait 3 s.
+open ecs/Entity
+open ecs/ComponentTable
+open net/Tcp
+open net/Poller
+open http/Http
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open Time
+
+func wakeAfter(waker: own PollerWaker, delayMs: own Int) ret Int {
+  sleep(ms: delayMs)
+  let status: NetStatus = pollerWake(waker: waker)
+  ret 1
+}
+
+func wokenCount(ready: view List(Readiness)) ret Int {
+  var count: Int = 0
+  loop let readiness: view Readiness in ready {
+    if readiness.woken {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+type SlowRouter {
+  routed: Int
+}
+
+func slowWoken(waker: own PollerWaker, delayMs: own Int) ret HttpReply {
+  sleep(ms: delayMs)
+  let status: NetStatus = pollerWake(waker: waker)
+  ret HttpReply { status: 200, contentType: "text/plain", body: "slow, then woken" }
+}
+
+func route(router: mod SlowRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.routed = router.routed + 1
+  promote(server: server, event: event, task: spawn slowWoken(waker: server.waker, delayMs: 50))
+}
+
+func main() ret Int {
+  # the poller
+  var poller: Poller = createPoller()
+  let waker: PollerWaker = pollerAddWaker(poller: poller)
+  log("waker made: {waker.handle >= 0}")
+  var ready: List(Readiness) = List.create(Readiness, cap: 8)
+  let started: Int = nowMs()
+  let task: Task(Int) = spawn wakeAfter(waker: waker, delayMs: 50)
+  let status: NetStatus = pollWait(poller: poller, ready: ready, timeoutMs: 5000)
+  let waited: Int = nowMs() - started
+  let joined: Int = task.get()
+  log(
+    "woken wait: {status}, {ready.length} ready, woken {wokenCount(ready: ready)}, ended early {waited < 2000}"
+  )
+  let quietStart: Int = nowMs()
+  let quiet: NetStatus = pollWait(poller: poller, ready: ready, timeoutMs: 100)
+  log("next wait: {quiet}, {ready.length} ready, slept its timeout {nowMs() - quietStart >= 90}")
+  let first: NetStatus = pollerWake(waker: waker)
+  let second: NetStatus = pollerWake(waker: waker)
+  let third: NetStatus = pollerWake(waker: waker)
+  let many: NetStatus = pollWait(poller: poller, ready: ready, timeoutMs: 1000)
+  log("three wakes, one wait: {ready.length} ready, woken {wokenCount(ready: ready)}")
+  closePoller(poller: poller)
+  log("after close, a wake: {pollerWake(waker: PollerWaker { queue: -1, handle: -1 })}")
+
+  # the ECS server: a promoted request answered in the frame after its wake
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  var router: SlowRouter = { routed: 0 }
+  log("server waker made: {server.waker.handle >= 0}")
+  let connection: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: connection, text: "GET /slow HTTP/1.1\r\n\r\n")
+  let frameStart: Int = nowMs()
+  httpServerFrame(
+    SlowRouter
+    router: router
+    server: server
+    timeoutMs: 0
+  )
+  log("promoted: {componentCount(this: server.awaitingResults)}")
+  var frames: Int = 0
+  loop componentCount(this: server.awaitingResults) > 0 and frames < 50 {
+    httpServerFrame(
+      SlowRouter
+      router: router
+      server: server
+      timeoutMs: 3000
+    )
+    frames = frames + 1
+  }
+  let answeredIn: Int = nowMs() - frameStart
+  let output: String = takeOutput(server: server, entityId: connection)
+  log(
+    "answered: {output.contains(sub: "slow, then woken")}, well before a 3 s poll timeout: {answeredIn < 1500}"
+  )
+  ret 0
+}

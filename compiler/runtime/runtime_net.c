@@ -48,6 +48,7 @@
 #endif
 #ifdef RAE_HAS_EPOLL
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #endif
 
 /* The constants lib/net needs, by the index NetSystem.rae names them with */
@@ -94,6 +95,8 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
     case 29: return EV_DELETE;
     case 30: return EV_EOF;
     case 31: return EV_ERROR;
+    case 41: return EVFILT_USER;
+    case 42: return EV_ADD | EV_CLEAR;
 #endif
     case 32: return RAE_NET_MAX_WAIT_EVENTS;
 #ifdef RAE_HAS_EPOLL
@@ -243,6 +246,15 @@ int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, i
   return kevent((int)queue, &change, 1, NULL, 0, NULL) == 0 ? 0 : -errno;
 }
 
+/* Trigger the user event `ident` a poller watches (EVFILT_USER, added with
+ * EV_CLEAR so it resets once reported): what wakes a pollerWait from another
+ * thread. kevent is thread-safe. */
+int64_t rae_ext_NetSys_pollerTrigger(int64_t queue, int64_t ident) {
+  struct kevent change;
+  EV_SET(&change, (uintptr_t)ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+  return kevent((int)queue, &change, 1, NULL, 0, NULL) == 0 ? 0 : -errno;
+}
+
 /* Wait up to `timeoutMs` (negative: forever) for up to `maxEvents` events and
  * write each as (handle, filter, flags) into `events`: their count, or -errno */
 int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
@@ -278,6 +290,24 @@ int64_t rae_ext_NetSys_epollControl(int64_t queue, int64_t operation, int64_t fd
   event.events = (uint32_t)events;
   event.data.fd = (int)fd;
   return epoll_ctl((int)queue, (int)operation, (int)fd, &event) == 0 ? 0 : -errno;
+}
+
+/* A non-blocking eventfd: what wakes an epoll poller from another thread */
+int64_t rae_ext_NetSys_eventFdCreate(void) {
+  int fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  return fd >= 0 ? fd : -errno;
+}
+
+/* Add 1 to the eventfd's counter, which makes it readable (thread-safe) */
+int64_t rae_ext_NetSys_eventFdSignal(int64_t fd) {
+  uint64_t one = 1;
+  return write((int)fd, &one, sizeof one) == (ssize_t)sizeof one ? 0 : -errno;
+}
+
+/* Read the eventfd's counter back to 0: the count, or -errno (-EAGAIN: 0) */
+int64_t rae_ext_NetSys_eventFdDrain(int64_t fd) {
+  uint64_t count = 0;
+  return read((int)fd, &count, sizeof count) == (ssize_t)sizeof count ? (int64_t)count : -errno;
 }
 
 /* Wait up to `timeoutMs` (negative: forever) for up to `maxEvents` events and
