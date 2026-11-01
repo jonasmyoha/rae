@@ -10,6 +10,18 @@
 # the presets resolution-independent: `safeTop 59 / height 852` is a
 # ~6.9% top reserve regardless of the target grid.
 #
+# The iPhone insets are Apple's published safe areas in points (checked
+# 2026-11-01): upright, the Dynamic Island phones (15 Pro, 15 Pro Max) 59 top,
+# the notch phones 47 (14, 13) or 50 (13 mini), 34 bottom (the home
+# indicator), the SE 20 top and 0 bottom; on their side, the notch or island
+# side and its opposite (59, 47 or 50) and 21 bottom, the SE none. The two
+# Android presets (status bar 24, gesture bar 24) are not checked against a
+# published table; on their side they keep the same bars.
+#
+# devicePresetLandscape turns a preset on its side (its landscape insets),
+# and app3d/LayoutCheck builds its phone cases from these presets, so the
+# repo has one set of phone numbers.
+#
 # Selection is env-driven in Phase 1 (`RAE_UI_DEVICE=pixel-7`) so the
 # snapshot tooling can iterate presets without any in-app UI.
 # See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, items 3/5).
@@ -22,6 +34,11 @@ type DevicePreset {
   safeBottom: Float
   safeLeft: Float
   safeRight: Float
+  # the safe area on its side (landscape; points), devicePresetLandscape
+  landscapeTop: Float = 0.0
+  landscapeBottom: Float = 0.0
+  landscapeLeft: Float = 0.0
+  landscapeRight: Float = 0.0
 }
 
 # The "no simulation" preset: zero size marks it as absent, and
@@ -51,6 +68,10 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 34.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 0.0
+      landscapeBottom: 21.0
+      landscapeLeft: 59.0
+      landscapeRight: 59.0
     }
   }
   if id is "iphone-15-pro-max" {
@@ -63,6 +84,10 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 34.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 0.0
+      landscapeBottom: 21.0
+      landscapeLeft: 59.0
+      landscapeRight: 59.0
     }
   }
   if id is "iphone-14" {
@@ -71,10 +96,14 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       label: "iPhone 14/13 (390x844)"
       width: 390.0
       height: 844.0
-      safeTop: 59.0
+      safeTop: 47.0
       safeBottom: 34.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 0.0
+      landscapeBottom: 21.0
+      landscapeLeft: 47.0
+      landscapeRight: 47.0
     }
   }
   if id is "iphone-13-mini" {
@@ -87,6 +116,10 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 34.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 0.0
+      landscapeBottom: 21.0
+      landscapeLeft: 50.0
+      landscapeRight: 50.0
     }
   }
   if id is "iphone-se-2" {
@@ -99,6 +132,10 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 0.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 0.0
+      landscapeBottom: 0.0
+      landscapeLeft: 0.0
+      landscapeRight: 0.0
     }
   }
   if id is "pixel-7" {
@@ -111,6 +148,10 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 24.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 24.0
+      landscapeBottom: 24.0
+      landscapeLeft: 0.0
+      landscapeRight: 0.0
     }
   }
   if id is "galaxy-s23" {
@@ -123,9 +164,35 @@ func devicePresetById(id: view String) pub ret DevicePreset {
       safeBottom: 24.0
       safeLeft: 0.0
       safeRight: 0.0
+      landscapeTop: 24.0
+      landscapeBottom: 24.0
+      landscapeLeft: 0.0
+      landscapeRight: 0.0
     }
   }
   ret devicePresetNone()
+}
+
+# `preset` on its side: width and height swapped, its landscape safe area
+# (the "none" preset stays none)
+func devicePresetLandscape(preset: view DevicePreset) ret DevicePreset {
+  if preset.width <= 0.0 {
+    ret devicePresetNone()
+  }
+  ret DevicePreset {
+    id: "{preset.id}-landscape"
+    label: "{preset.label} landscape"
+    width: preset.height
+    height: preset.width
+    safeTop: preset.landscapeTop
+    safeBottom: preset.landscapeBottom
+    safeLeft: preset.landscapeLeft
+    safeRight: preset.landscapeRight
+    landscapeTop: preset.safeTop
+    landscapeBottom: preset.safeBottom
+    landscapeLeft: preset.safeLeft
+    landscapeRight: preset.safeRight
+  }
 }
 
 # Convert a preset's point-space safe insets to design units by taking

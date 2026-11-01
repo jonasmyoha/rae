@@ -173,7 +173,7 @@ func devicePresets() ret List(DevicePreset) {
   # Ported verbatim from game proto1 utils/layoutSimulation.ts.
   list.add(value: { id: "iphone-15-pro",     label: "iPhone 15 Pro (393×852)",     width: 393.0, height: 852.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "iphone-15-pro-max", label: "iPhone 15 Pro Max (430×932)", width: 430.0, height: 932.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
-  list.add(value: { id: "iphone-14",         label: "iPhone 14/13 (390×844)",      width: 390.0, height: 844.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
+  list.add(value: { id: "iphone-14",         label: "iPhone 14/13 (390×844)",      width: 390.0, height: 844.0, safeTop: 47.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "iphone-13-mini",    label: "iPhone 13 mini (375×812)",    width: 375.0, height: 812.0, safeTop: 50.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "iphone-se-2",       label: "iPhone SE (375×667)",         width: 375.0, height: 667.0, safeTop: 20.0, safeBottom:  0.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "pixel-7",           label: "Pixel 7 (412×915)",           width: 412.0, height: 915.0, safeTop:  0.0, safeBottom:  0.0, safeLeft: 0.0, safeRight: 0.0 })
