@@ -240,18 +240,4 @@ rae_String rae_json_build(const char* s, int64_t len) {
     return (rae_String){copy, len, len + 1, 1};
 }
 
-/* Crypto stub wrappers for C backend — actual crypto requires monocypher linkage */
-void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher) {
-    (void)key; (void)nonce; (void)plain; (void)plain_len; (void)mac; (void)cipher;
-    /* Requires monocypher linkage for actual implementation */
-}
-
-int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny cipher, int64_t cipher_len, RaeAny plain) {
-    (void)key; (void)nonce; (void)mac; (void)cipher; (void)cipher_len; (void)plain;
-    return -1; /* Requires monocypher linkage */
-}
-
-void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb_blocks, int64_t nb_iterations, RaeAny hash_buf, int64_t hash_len) {
-    (void)password; (void)salt; (void)nb_blocks; (void)nb_iterations; (void)hash_buf; (void)hash_len;
-    /* Requires monocypher linkage; signature matches lib/sys.rae declaration. */
-}
+/* Sys.encrypt / decrypt / argon2i: runtime_crypto_monocypher.c */

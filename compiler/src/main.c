@@ -950,6 +950,16 @@ static bool copy_runtime_assets(const char* out_dir) {
   snprintf(lp_src, sizeof(lp_src), "%s/lodepng.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(lp_dst, sizeof(lp_dst), "%s/lodepng.c", out_dir);
   if (!copy_file_to(lp_src, lp_dst)) return false;
+  // Vendored Monocypher (lib/crypto) — included by rae_runtime.c through
+  // runtime_crypto_monocypher.c the same way as lodepng.
+  static const char* const monocypher_files[] = {
+    "monocypher.c", "monocypher.h", "monocypher-ed25519.c", "monocypher-ed25519.h"
+  };
+  for (size_t mi = 0; mi < sizeof(monocypher_files) / sizeof(monocypher_files[0]); mi++) {
+    snprintf(lp_src, sizeof(lp_src), "%s/%s", RAE_RUNTIME_SOURCE_DIR, monocypher_files[mi]);
+    snprintf(lp_dst, sizeof(lp_dst), "%s/%s", out_dir, monocypher_files[mi]);
+    if (!copy_file_to(lp_src, lp_dst)) return false;
+  }
   // Vendored stb_image (JPEG decode for gpu2d, #228 / design #217) —
   // included by rae_runtime.c the same way as lodepng.
   snprintf(lp_src, sizeof(lp_src), "%s/stb_image.h", RAE_RUNTIME_SOURCE_DIR);

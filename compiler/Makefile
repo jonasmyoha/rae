@@ -88,10 +88,10 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/mangler.c \
        $(SRC_DIR)/progress.c
 
-EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/monocypher.c
+EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
-OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
+OBJS += $(BUILD_DIR)/rae_tinyexpr.o
 
 DEPS = $(OBJS:.o=.d)
 # rae_runtime.o and sys_thread.o are NOT in $(OBJS) (they hang off the bin/rae
@@ -180,10 +180,6 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 $(BUILD_DIR)/rae_tinyexpr.o: ../third_party/tinyexpr/rae_tinyexpr.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -Wno-error -Wno-pedantic -Wno-gnu-zero-variadic-macro-arguments -c -o $@ $<
-
-$(BUILD_DIR)/monocypher.o: ../third_party/monocypher/monocypher.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Wno-error -Wno-pedantic -c -o $@ $<
 
 test: build
 	@chmod +x $(TEST_RUNNER)

@@ -83,7 +83,6 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
         BOX3D_FLAGS="-I$BOX3D_ROOT/include $BOX3D_ROOT/lib/libbox3d.a"
       fi
       if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
-         $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
          $BOX3D_FLAGS -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then

@@ -1,0 +1,46 @@
+# CryptoRandom — secure random bytes from the operating system, for keys,
+# nonces and salts: arc4random_buf on Apple, getrandom on Linux,
+# crypto.getRandomValues in the browser (runtime_crypto_monocypher.c). Never
+# the game Random of lib/Random, which is a seeded, predictable sequence.
+
+# One call into the platform's source: `count` (at most 256) bytes into
+# `bytes` from `offset`; the number written or a negative error
+func cryptoRandomFill(
+  bytes: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_randomFill") ret Int
+
+# The most one call asks for (getentropy's limit; getrandom gives up to 256
+# without being cut short)
+const cryptoRandomChunk: Int = 256
+
+# `count` secure random bytes. A source that fails (it does not on a working
+# system) leaves the result shorter than `count`; check the length where
+# that matters.
+func cryptoRandomBytes(count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: 0)
+  }
+  var filled: Int = 0
+  loop filled < count {
+    var chunk: Int = count - filled
+    if chunk > cryptoRandomChunk {
+      chunk = cryptoRandomChunk
+    }
+    var got: Int = -1
+    unsafe {
+      got = cryptoRandomFill(bytes: bytes.data, offset: filled, count: chunk)
+    }
+    if got <= 0 {
+      log("[crypto] the random source failed ({got})")
+      loop bytes.length > filled {
+        bytes.remove(index: bytes.length - 1)
+      }
+      ret bytes
+    }
+    filled = filled + got
+  }
+  ret bytes
+}

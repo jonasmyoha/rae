@@ -1,0 +1,99 @@
+# XChaCha20-Poly1305 authenticated encryption: lock a message with a 32-byte
+# key and a 24-byte nonce into the cipher text and a 16-byte mac; unlock
+# gives the message back only when neither, nor the associated data, was
+# changed. A random nonce (cryptoRandomBytes(24)) per message is safe: 24
+# bytes do not repeat by chance. Never lock two messages with one key and one
+# nonce. Monocypher's crypto_aead_lock, in the runtime.
+open crypto/CryptoBytes
+
+func monocypherAeadLock(
+  cipher: Buffer(UInt8)
+  mac: Buffer(UInt8)
+  key: Buffer(UInt8)
+  nonce: Buffer(UInt8)
+  associatedData: Buffer(UInt8)
+  associatedDataSize: Int
+  plain: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_aeadLock")
+
+func monocypherAeadUnlock(
+  plain: Buffer(UInt8)
+  mac: Buffer(UInt8)
+  key: Buffer(UInt8)
+  nonce: Buffer(UInt8)
+  associatedData: Buffer(UInt8)
+  associatedDataSize: Int
+  cipher: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Crypto_aeadUnlock") ret Int
+
+# A locked message: the cipher text (as long as the message) and its mac
+type AeadSealed {
+  cipherText: List(UInt8)
+  mac: List(UInt8)
+}
+
+# Lock `plainText` with `key` (32 bytes) and `nonce` (24 bytes), also
+# authenticating `associatedData` (sent in the clear; an empty list for
+# none). A wrong-sized key or nonce gives an empty result.
+func aeadLock(
+  key: view List(UInt8)
+  nonce: view List(UInt8)
+  plainText: view List(UInt8)
+  associatedData: view List(UInt8)
+) ret AeadSealed {
+  if key.length is not 32 or nonce.length is not 24 {
+    ret AeadSealed { cipherText: List.create(UInt8, cap: 0), mac: List.create(UInt8, cap: 0) }
+  }
+  var cipherText: List(UInt8) = zeroBytes(count: plainText.length)
+  var mac: List(UInt8) = zeroBytes(count: 16)
+  unsafe {
+    monocypherAeadLock(
+      cipher: cipherText.data
+      mac: mac.data
+      key: key.data
+      nonce: nonce.data
+      associatedData: associatedData.data
+      associatedDataSize: associatedData.length
+      plain: plainText.data
+      offset: 0
+      count: plainText.length
+    )
+  }
+  ret AeadSealed { cipherText: own cipherText, mac: own mac }
+}
+
+# Unlock `sealed`: the message, or none when the key, the nonce, the cipher
+# text, the mac or the associated data is not the one it was locked with
+func aeadUnlock(
+  key: view List(UInt8)
+  nonce: view List(UInt8)
+  sealed: view AeadSealed
+  associatedData: view List(UInt8)
+) ret opt List(UInt8) {
+  if key.length is not 32 or nonce.length is not 24 or sealed.mac.length is not 16 {
+    ret none
+  }
+  var plainText: List(UInt8) = zeroBytes(count: sealed.cipherText.length)
+  var answer: Int = -1
+  unsafe {
+    answer = monocypherAeadUnlock(
+      plain: plainText.data
+      mac: sealed.mac.data
+      key: key.data
+      nonce: nonce.data
+      associatedData: associatedData.data
+      associatedDataSize: associatedData.length
+      cipher: sealed.cipherText.data
+      offset: 0
+      count: sealed.cipherText.length
+    )
+  }
+  if answer is not 0 {
+    ret none
+  }
+  ret plainText
+}
