@@ -85,8 +85,9 @@ ECS is where those primitives pay off.
   UI node, a metaball, a crowd member, a terrain prop, a network peer, a job.
 - **Component** — **data about one entity**: `Transform3D`, `Material3D`,
   `ScrollState`, `AnimationState`. Vec/math value types, never scalar sprawl.
-- **System** — **behavior over components**, a function in its own PascalCase
-  folder, run by the schedule: `TransformSystem`, `LayoutSystem`, `RenderSystem`.
+- **System** — **behavior over components**, in its own camelCase folder with a
+  PascalCase file, run by the schedule: `transformSystem/TransformSystem.rae`,
+  `layoutSystem/`, `renderSystem/`.
 - **Resource** — **world-global state with exactly one instance**: the frame
   clock, input, the camera, the layout viewport, GPU handles. A plain field on the
   `World`, not an entity pretending to be one.
@@ -234,18 +235,23 @@ ignore generations; games rely on them.
   (`character.rae:135`) with one system, and it iterates a **depth-sorted entity
   order** (built once from the hierarchy) instead of pointer-chasing `Children`.
 
-### 2.5 Systems — one folder each, exact PascalCase name
-Every system is its own folder whose name is the exact system type, with a
-primary file of the same name (this composes with Rae's project-folder namespaces
-— each system folder is already a namespace, so `TransformSystem.update(...)` is
-available with no import):
+### 2.5 Systems — one folder each, camelCase folder, PascalCase file
+Every system is its own folder: the folder is the camelCase form of the system
+type, and its primary file is the PascalCase type name (AGENTS.md naming rules:
+camelCase package folders, PascalCase module files). Folders are namespaces of
+the one project module, so `TransformSystem.update(...)` is available with no
+import:
 ```
-TransformSystem/TransformSystem.rae
-HierarchySystem/HierarchySystem.rae
-RenderSystem/RenderSystem.rae
+transformSystem/TransformSystem.rae
+hierarchySystem/HierarchySystem.rae
+renderSystem/RenderSystem.rae
 ```
-No lowercase, snake_case, plurals, or abbreviations — `TransformSystem`, not
-`transform`/`xform`/`TransformSys`. A system is a function over a `World`. Systems
+(This section said PascalCase folders, `TransformSystem/TransformSystem.rae`,
+until 2026-11-01; the code moved to camelCase folders with Rae's naming
+rules — `lib/ui/renderSystem/`, `lib/ecs/transformSystem/`, the system folders
+of examples 106 and 121.)
+No snake_case, plurals, or abbreviations in the system name —
+`transformSystem/TransformSystem.rae`, not `transform`/`xform`/`TransformSys`. A system is a function over a `World`. Systems
 run from a **`Schedule`**: an ordered list of system entries the app builds once
 and runs every frame. The schedule generalizes today's per-system
 `*IfDirty` wrappers (`layout.rae:931`, `transform.rae:209`) into one
@@ -254,8 +260,7 @@ when none of their `generation` stamps moved. Ordering is explicit data (the
 list), not a dependency solver; the schedule is where a future profiler,
 hot-reload, or parallel runner attaches. The current UI systems
 (`layoutSystem`, `transformSystem`, `renderSystemGpu2d`, …) become
-`LayoutSystem/`, `TransformSystem/`, `RenderSystem/`, etc.; 114's `terrain.rae`/
-`grass.rae`/`render.rae` become `TerrainSystem/`, `GrassSystem/`, `RenderSystem/`.
+`layoutSystem/`, `transformSystem/`, `renderSystem/`, etc.
 
 ### 2.6 Queries — a real multi-component iterator
 Add `lib/ecs` query helpers that iterate the **smallest** matching table and probe
