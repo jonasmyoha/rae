@@ -38,6 +38,7 @@ import ui/Theme
 open ui/ThemeResolved
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/ClickTargets
 
 # The world's tables that are derived or runtime state, never authored. This
 # runtime list serves the vocabulary and the diagnostic; the loader's loop
@@ -363,6 +364,16 @@ func applyAuthoredFixups(
   sceneId: view String
   nodeId: view String
 ) {
+  if name is "OnClick" {
+    # every action id says what it does (ui/ClickTargets)
+    reportMissingClickLabels(
+      world: world
+      entityId: entityId
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
   if name is "Rect" {
     # {x, y, w, h} -> position / size.
     let rect: mod Rect = componentMod(this: world.rects, entityId: entityId)

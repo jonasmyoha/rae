@@ -1,0 +1,242 @@
+# inspectorSystem/LabelEdit — typing an OnClick's labels (docs/ui-scene-format.md
+# "OnClick labels"): `label`, `labelDouble` and `labelTriple`, what a voice
+# command and a screen reader say for the node's actions. The inspector's
+# generated OnClick widget shows them like any field; this makes those three
+# rows a text input, as RectEdit does for the Rect group:
+#
+#   click a label row     focus it, its whole value selected
+#   letters, digits, space , . - / ?   type (Shift for capitals and ?)
+#   Backspace             delete the last character
+#   Enter, or a click     commit the draft to EVERY selected node with an
+#     anywhere else         OnClick (through ui/ClickTargets setOnClickField,
+#                           the setter overrides and list bindings use)
+#   Esc                   drop the draft, nothing is written
+#
+# An empty draft commits nothing. RAE_UI_EDITOR_TEST_LABEL runs the same steps
+# headlessly (runLabelScript): `focus:<field>`, `type:<text>` (`_` types a
+# space), `enter`, `esc`, `backspace`, or `<field>=<text>` for focus, type
+# and enter.
+import Keys
+import Sdl3
+import String
+open ui/Ecs
+open ui/Components
+open ui/ClickTargets
+open ecs/Entity
+open ecs/ComponentTable
+
+func isLabelField(field: view String) ret Bool {
+  ret field is "label" or field is "labelDouble" or field is "labelTriple"
+}
+
+# The row action that focuses an OnClick field's input ("" for a field that
+# is not typed into here)
+func labelFieldAction(component: view String, field: view String) ret String {
+  if component is "OnClick" and isLabelField(field: field) {
+    ret "labelFocus:{field}"
+  }
+  ret ""
+}
+
+# What the focused row shows: `[value]|` while the whole value is selected
+# (the first key replaces it), `draft|` once something is typed
+func labelRowText(editing: view LabelEdit, field: view String, value: view String) ret String {
+  if editing.active is false or editing.field is not field {
+    ret value
+  }
+  if editing.draft.length() is 0 {
+    ret "[{value}]|"
+  }
+  ret "{editing.draft}|"
+}
+
+# The input's state: focused or not, which field, what is typed so far
+type LabelEdit {
+  active: Bool = false
+  field: String = ""
+  draft: String = ""
+}
+
+func labelFocus(editing: mod LabelEdit, field: view String) {
+  editing.active = true
+  editing.field = "{field}"
+  editing.draft = ""
+}
+
+func labelTypeText(editing: mod LabelEdit, text: view String) {
+  editing.draft = "{editing.draft}{text}"
+}
+
+func labelBackspace(editing: mod LabelEdit) {
+  let length: Int = editing.draft.length()
+  if length > 0 {
+    editing.draft = editing.draft.sub(start: 0, len: length - 1)
+  }
+}
+
+# Enter: write the draft to every selected node with an OnClick and stop;
+# how many were written
+func labelCommit(
+  editing: mod LabelEdit
+  world: mod UiWorld
+  selection: view List(EntityId)
+) ret Int {
+  let draft: String = "{editing.draft}"
+  let field: String = "{editing.field}"
+  let wasActive: Bool = editing.active
+  editing.active = false
+  editing.draft = ""
+  if wasActive is false or draft.length() is 0 {
+    ret 0
+  }
+  var written: Int = 0
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) {
+      setOnClickField(
+        world: world
+        entityId: entityId
+        fieldName: field
+        value: draft
+        create: false
+      )
+      written = written + 1
+    }
+  }
+  log("[ui-editor] label commit {field}='{draft}' -> {written}")
+  ret written
+}
+
+func labelEscape(editing: mod LabelEdit) {
+  editing.active = false
+  editing.draft = ""
+}
+
+# This frame's keys while a label is focused; whether anything changed
+func labelKeys(
+  editing: mod LabelEdit
+  world: mod UiWorld
+  selection: view List(EntityId)
+) ret Bool {
+  if editing.active is false {
+    ret false
+  }
+  var changed: Bool = false
+  let shift: Bool = Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift)
+  let lower: String = "abcdefghijklmnopqrstuvwxyz"
+  let upper: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  loop var letter: Int = 0, letter < 26, ++letter {
+    if Sdl3.isKeyPressed(key: Keys.keyA + letter) {
+      var alphabet: String = lower
+      if shift {
+        alphabet = upper
+      }
+      labelTypeText(editing: editing, text: alphabet.sub(start: letter, len: 1))
+      changed = true
+    }
+  }
+  let digits: String = "123456789"
+  loop var d: Int = 0, d < 9, ++d {
+    if Sdl3.isKeyPressed(key: Keys.key1 + d) {
+      labelTypeText(editing: editing, text: digits.sub(start: d, len: 1))
+      changed = true
+    }
+  }
+  let keys: List(Int) = {
+    Keys.key0
+    Keys.keySpace
+    Keys.keyComma
+    Keys.keyPeriod
+    Keys.keyMinus
+  }
+  let texts: List(String) = {
+    "0"
+    " "
+    ","
+    "."
+    "-"
+  }
+  loop var k: Int = 0, k < keys.length, ++k {
+    if Sdl3.isKeyPressed(key: keys.copyAtFallback(index: k, fallback: 0)) {
+      labelTypeText(editing: editing, text: texts.copyAtDefault(index: k))
+      changed = true
+    }
+  }
+  # Shift-slash is a question mark ("Open which album?" reads as a question)
+  if Sdl3.isKeyPressed(key: Keys.keySlash) {
+    var mark: String = "/"
+    if shift {
+      mark = "?"
+    }
+    labelTypeText(editing: editing, text: mark)
+    changed = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyBackspace) {
+    labelBackspace(editing: editing)
+    changed = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyEnter) {
+    let unusedWritten: Int = labelCommit(editing: editing, world: world, selection: selection)
+    changed = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyEscape) {
+    labelEscape(editing: editing)
+    changed = true
+  }
+  ret changed
+}
+
+# A scripted sequence through the same functions the keys call; how many
+# nodes it wrote
+func runLabelScript(
+  editing: mod LabelEdit
+  world: mod UiWorld
+  selection: view List(EntityId)
+  script: view String
+) ret Int {
+  var written: Int = 0
+  loop let step: view String in script.split(sep: " ") {
+    let token: String = step.trim()
+    if token.length() is 0 {
+      continue
+    }
+    if token is "enter" {
+      written = written + labelCommit(editing: editing, world: world, selection: selection)
+    } else if token is "esc" {
+      labelEscape(editing: editing)
+    } else if token is "backspace" {
+      labelBackspace(editing: editing)
+    } else if token.startsWith(prefix: "focus:") {
+      labelFocus(editing: editing, field: token.sub(start: 6, len: token.length() - 6))
+    } else if token.startsWith(prefix: "type:") {
+      labelTypeText(
+        editing: editing
+        text: token.sub(start: 5, len: token.length() - 5).replace(old: "_", new: " ")
+      )
+    } else if let equals: Int = token.indexOf(sub: "=") {
+      labelFocus(editing: editing, field: token.sub(start: 0, len: equals))
+      labelTypeText(
+        editing: editing
+        text: token.sub(start: equals + 1, len: token.length() - equals - 1).replace(
+          old: "_"
+          new: " "
+        )
+      )
+      written = written + labelCommit(editing: editing, world: world, selection: selection)
+    } else {
+      log("[ui-editor] label script: unknown step {token}")
+    }
+  }
+  ret written
+}
+
+# The selected nodes' OnClick labels as one line, for the headless gate
+func labelWidgetLine(world: view UiWorld, selection: view List(EntityId)) ret String {
+  var line: String = ""
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) {
+      let click: view OnClick = componentView(this: world.onClicks, entityId: entityId)
+      line = "{line}[{click.actionId}: '{click.label}']"
+    }
+  }
+  ret line
+}

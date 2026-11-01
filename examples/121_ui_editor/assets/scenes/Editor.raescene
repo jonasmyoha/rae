@@ -44,7 +44,7 @@
     },
     "LeftToggle": {
       "bundles": ["pill"],
-      "OnClick": {"actionId": "panel.left"},
+      "OnClick": {"actionId": "panel.left", "label": "Panels"},
       "Children": ["LeftToggleLabel"],
       "PanelToggle": {"panel": "left"}
     },
@@ -105,7 +105,7 @@
     "ZoomOut": {
       "Rect": {"x": 0, "y": 0, "w": 44, "h": 44},
       "HitArea": {"kind": "Rect"},
-      "OnClick": {"actionId": "zoom.out"},
+      "OnClick": {"actionId": "zoom.out", "label": "Zoom out"},
       "Text": {
         "text": "-",
         "styleId": "muted",
@@ -137,7 +137,7 @@
     "ZoomLabel": {
       "Rect": {"x": 0, "y": 0, "w": 74, "h": 32},
       "HitArea": {"kind": "Rect"},
-      "OnClick": {"actionId": "zoom.reset"},
+      "OnClick": {"actionId": "zoom.reset", "label": "Reset zoom"},
       "Text": {
         "text": "100%",
         "styleId": "muted",
@@ -154,7 +154,7 @@
     "ZoomIn": {
       "Rect": {"x": 0, "y": 0, "w": 44, "h": 44},
       "HitArea": {"kind": "Rect"},
-      "OnClick": {"actionId": "zoom.in"},
+      "OnClick": {"actionId": "zoom.in", "label": "Zoom in"},
       "Text": {
         "text": "+",
         "styleId": "muted",
@@ -187,7 +187,7 @@
       "bundles": ["pill"],
       "Shape": {"fill": "editorButtonPrimary", "stroke": "editorButtonEdge"},
       "Shadow": {"opacity": 0.22, "hoverOnly": false, "hoverOpacity": 0.6},
-      "OnClick": {"actionId": "file.open"},
+      "OnClick": {"actionId": "file.open", "label": "Open a scene"},
       "Children": ["OpenLabel"]
     },
     "OpenLabel": {
@@ -260,7 +260,7 @@
     },
     "RightToggle": {
       "bundles": ["pill"],
-      "OnClick": {"actionId": "panel.right"},
+      "OnClick": {"actionId": "panel.right", "label": "Inspector"},
       "Children": ["RightToggleLabel"],
       "PanelToggle": {"panel": "right"}
     },
@@ -367,6 +367,7 @@
         "overscanRows": 1,
         "bindings": [
           {"nodeId": "ProjectRow", "component": "OnClick", "field": "actionId", "itemField": "action"},
+          {"nodeId": "ProjectRow", "component": "OnClick", "field": "label", "itemField": "label", "prefix": "Open "},
           {"nodeId": "ProjectMarker", "component": "Text", "field": "text", "itemField": "marker"},
           {"nodeId": "ProjectLabel", "component": "Text", "field": "text", "itemField": "label"}
         ]
@@ -426,12 +427,15 @@
         "overscanRows": 1,
         "bindings": [
           {"nodeId": "TreeRow", "component": "OnClick", "field": "actionId", "itemField": "action"},
+          {"nodeId": "TreeRow", "component": "OnClick", "field": "label", "itemField": "label", "prefix": "Select "},
           {"nodeId": "TreeRow", "component": "GradientFill", "field": "fromSlot", "itemField": "gradientFrom"},
           {"nodeId": "TreeRow", "component": "GradientFill", "field": "toSlot", "itemField": "gradientTo"},
           {"nodeId": "TreeChevronDown", "component": "Active", "field": "value", "itemField": "expanded"},
           {"nodeId": "TreeChevronDown", "component": "OnClick", "field": "actionId", "itemField": "chevronAction"},
+          {"nodeId": "TreeChevronDown", "component": "OnClick", "field": "label", "itemField": "label", "prefix": "Expand or collapse "},
           {"nodeId": "TreeChevronRight", "component": "Active", "field": "value", "itemField": "collapsed"},
           {"nodeId": "TreeChevronRight", "component": "OnClick", "field": "actionId", "itemField": "chevronAction"},
+          {"nodeId": "TreeChevronRight", "component": "OnClick", "field": "label", "itemField": "label", "prefix": "Expand or collapse "},
           {"nodeId": "Guide1", "component": "Active", "field": "value", "itemField": "guide1"},
           {"nodeId": "Guide2", "component": "Active", "field": "value", "itemField": "guide2"},
           {"nodeId": "Guide3", "component": "Active", "field": "value", "itemField": "guide3"},

@@ -471,6 +471,23 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  rect text inputs failed:"
             cat "$TMP_OUT/render-recttab.log" "$TMP_OUT/render-rectesc.log" "$TMP_OUT/render-rectlock.log" "$TMP_OUT/render-rectlock2.log" 2>/dev/null | grep -a "rect " | cut -c1-200 | sed 's/^/    /'
           fi
+          # OnClick labels (docs/ui-scene-format.md "OnClick labels"): the
+          # inspector's label input, through the functions its keys call —
+          # typed into both selected buttons; Esc drops a draft; a saved scene
+          # keeps the label.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 RAE_UI_EDITOR_TEST_SELECT=PlayButton,ContinueButton \
+             RAE_UI_EDITOR_TEST_LABEL="focus:label type:Go enter focus:label type:Nope esc" \
+             RAE_UI_EDITOR_TEST_SAVE="$TMP_OUT/labels.raescene" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-labels.log" 2>&1 \
+             && grep -qaF "label set focus:label type:Go enter focus:label type:Nope esc -> 2: [menu.play: 'Go'][menu.continue: 'Go']" "$TMP_OUT/render-labels.log" \
+             && grep -qaF '"label": "Go"' "$TMP_OUT/labels.raescene"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  label input failed:"
+            grep -a "label" "$TMP_OUT/render-labels.log" 2>/dev/null | cut -c1-200 | sed 's/^/    /'
+          fi
           # Canvas selection gestures (#20778145). One run replays a script of
           # real canvas clicks through the live gesture path, so what is gated
           # is the gesture, not a back door into the selection set:
@@ -578,7 +595,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
              && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=128; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · from spaceS" "$TMP_OUT/render-widgets1.log" \
-             && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250; Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250 label=Start a run labelDouble=(no label) labelTriple=(no label); Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
@@ -1083,7 +1100,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1 \
-             && grep -aEq '\[action-audit\] ids=[1-9][0-9]* unknown=0$' "$TMP_OUT/render.log" \
+             && grep -aEq '\[action-audit\] ids=[1-9][0-9]* unknown=0 unlabeled=0$' "$TMP_OUT/render.log" \
              && (cd .. && RAE_UI_SCREEN=home RAE_UI_NO_SPOTIFY=1 RAE_UI_PAUSED=1 RAE_UI_DEBUG_LOOP=1 \
              RAE_AUTO_EXIT_SEC=2 RAE_SDL_HEADLESS_MS=2000 \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/idle.log" 2>&1 \

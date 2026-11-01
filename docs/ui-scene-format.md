@@ -193,7 +193,7 @@ storage term Rae's sparse tables would falsely promise.)
   "bundles": ["pill"],
   "Shape":   {"fill": "editorButtonPrimary"},                 // field-wise over the bundle's Shape
   "Shadow":  {"opacity": 0.22, "hoverOnly": false},
-  "OnClick": {"actionId": "file.open"},
+  "OnClick": {"actionId": "file.open", "label": "Open a scene"},
   "Children": ["OpenLabel"]
 }
 ```
@@ -238,3 +238,65 @@ editor chrome's three pills are one `pill` bundle
 transport buttons are `transportButton` / `transportButtonSmall`
 (`examples/106_mobile_ui/assets/scenes/Bundles.raescene`) — both pixel-identical
 to the hand-written nodes they replaced.
+
+## 10. `OnClick` labels: what a tap does, in words
+
+Every action an `OnClick` fires carries a human label: `label` for
+`actionId`, `labelDouble` for `actionIdDouble`, `labelTriple` for
+`actionIdTriple`. Sentence case, saying what the tap does: `"Play"`,
+`"Open settings"`, `"Next track"`.
+
+```jsonc
+"PlayCircle": {
+  "OnClick": {"actionId": "playback.toggle", "label": "Play or pause"}
+},
+"ShadowBox": {
+  "OnClick": {
+    "actionId": "coverage.shadow", "label": "Shadow",
+    "actionIdDouble": "coverage.shadow2", "labelDouble": "Shadow, double tap"
+  }
+}
+```
+
+- **Who reads it.** A voice command and a screen reader say and match the
+  label. A voice system (SUMU) derives every command from the labels; it
+  never keeps its own phrase table. lib/ui has no voice code: the one query
+  such a layer reads is `ui/ClickTargets.clickTargets(world, uiSystems)`,
+  every action of every clickable node on the active screen (a node under an
+  inactive parent is left out) with its node id, action id, gesture
+  (`single` / `double` / `triple`) and label.
+- **The loader checks it.** An `OnClick` that sets an action id without its
+  label is a `missingLabel` scene diagnostic, naming the node and the id.
+  An empty action id needs no label.
+- **Set at mount and by data, like the id.** A scene-instance override and a
+  `ListView` binding set `label` (or `labelDouble`, `labelTriple`) the way
+  they set `actionId`: `{"nodeId": "Label", "component": "OnClick", "field":
+  "label", "value": "Home"}`, or a row binding `{"nodeId": "TrackRow",
+  "component": "OnClick", "field": "label", "itemField": "title", "prefix":
+  "Play "}`. A row's label says which row it is ("Play Midnight City").
+- **121** shows and edits the label in the inspector's `OnClick` widget,
+  generated from the component's fields like every other one.
+
+**Why the label is on `OnClick`, not on an app's action-table row.** An app
+such as 106 also maps every action id to a row of its action table (what the
+id does). The label still belongs to the scene node, for three reasons:
+
+1. **The voice system needs it from the scene.** The command is derived
+   from what is on the screen, and the scene is the one place every app has;
+   an action table is one app's own design, not something lib/ui or a voice
+   layer can read.
+2. **One id, several buttons, several words.** The same id is fired from
+   different places with different wording: 106's dock tab, its icon and
+   its label all fire `nav.home` (one "Home"); a track list fires each
+   row's id from one row template, and each row is labeled with its own
+   title; the walkers' settings fire `settings.weather.auto` and
+   `settings.wind.auto`, both shown as "Auto", which only the labels tell
+   apart ("Automatic weather", "Automatic wind"). A label per id would be
+   wrong for the rows and ambiguous for the buttons.
+3. **It sits next to what the user sees.** A label is the spoken twin of the
+   button's visible text and changes with it; keeping it on the node keeps
+   the two edited together, in the scene and in 121.
+
+An action table may still describe an action for the app's own purposes
+(logs, menus); 106's action audit checks both that every id has a table row
+and that every `OnClick` id has a label.

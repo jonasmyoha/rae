@@ -43,6 +43,7 @@ open ui/RegistryGeneric
 open ui/SceneBundles
 open ui/BundleApply
 open ui/UiSystems
+open ui/ClickTargets
 
 # -----------------------------------------------------------------
 # Types
@@ -629,13 +630,14 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
   }
 
   if override.componentName is onClickKey {
-    let actionField: String = "actionId"
-    if override.fieldName is actionField {
-      if componentHas(this: world.onClicks, entityId: entityId) {
-        let cur: mod OnClick = componentMod(this: world.onClicks, entityId: entityId)
-        cur.actionId = override.valueString
-      }
-    }
+    # an action id or its label (ui/ClickTargets)
+    setOnClickField(
+      world: world
+      entityId: entityId
+      fieldName: override.fieldName
+      value: override.valueString
+      create: false
+    )
     ret
   }
 

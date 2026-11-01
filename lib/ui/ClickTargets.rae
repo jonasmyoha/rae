@@ -1,0 +1,198 @@
+# ui/ClickTargets — what a tappable node says it does (docs/ui-scene-format.md
+# "OnClick labels"). An `OnClick` carries a human label per action it fires
+# (`label`, and `labelDouble` / `labelTriple` when those ids are set):
+# sentence case, what the button does ("Play", "Open settings"). A voice
+# system or a screen reader reads clickTargets: every action of every
+# clickable node on the active screen, with its node id, action id and
+# label. lib/ui has no voice code; this is the one query such a layer reads.
+#
+# The loader reports an action id with no label as a `missingLabel` scene
+# diagnostic (reportMissingClickLabels), so an unlabeled button is visible
+# where the scene is authored, not when someone tries to say it.
+open ui/Ecs
+open ui/Components
+open ui/ScenePolicy
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Hierarchy
+
+# Which tap an action is fired by
+enum ClickGesture { single, double, triple }
+
+# One action a clickable node fires: the node (its entity and authored id),
+# the action id, the gesture, and its label ("" when the scene has none)
+type ClickTarget {
+  entityId: EntityId
+  nodeId: String
+  actionId: String
+  gesture: ClickGesture
+  label: String
+}
+
+# Whether `entityId` and every ancestor of it is active (a page or a subtree
+# switched off with `Active` is not on the screen)
+func clickTargetShown(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  var current: EntityId = entityId
+  var steps: Int = 0
+  loop isNone(this: current) is false and steps < 256 {
+    if componentHas(this: world.actives, entityId: current) {
+      let active: view Active = componentView(this: world.actives, entityId: current)
+      if active.value is false {
+        ret false
+      }
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret true
+    }
+    let parent: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = parent.parent
+    steps = steps + 1
+  }
+  ret true
+}
+
+func clickTargetNodeId(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+    let node: view NodeId = componentView(this: world.nodeIdComponents, entityId: entityId)
+    ret "{node.id}"
+  }
+  ret ""
+}
+
+# Every action of every clickable node on the active screen, in the
+# OnClick table's order: a node with a double or triple tap gives one entry
+# per gesture. A node with an empty action id gives none.
+func clickTargets(world: view UiWorld, uiSystems: view UiSystems) ret List(ClickTarget) {
+  var targets: List(ClickTarget) = List.create(ClickTarget, cap: 32)
+  let count: Int = componentCount(this: world.onClicks)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = queryEntityAt(table: world.onClicks, denseIndex: i)
+    if not clickTargetShown(world: world, uiSystems: uiSystems, entityId: entityId) {
+      continue
+    }
+    let click: view OnClick = componentView(this: world.onClicks, entityId: entityId)
+    let nodeId: String = clickTargetNodeId(world: world, entityId: entityId)
+    if click.actionId.length() > 0 {
+      targets.add(value: {
+        entityId: entityId
+        nodeId: nodeId
+        actionId: "{click.actionId}"
+        gesture: ClickGesture.single
+        label: "{click.label}"
+      })
+    }
+    if click.actionIdDouble.length() > 0 {
+      targets.add(value: {
+        entityId: entityId
+        nodeId: nodeId
+        actionId: "{click.actionIdDouble}"
+        gesture: ClickGesture.double
+        label: "{click.labelDouble}"
+      })
+    }
+    if click.actionIdTriple.length() > 0 {
+      targets.add(value: {
+        entityId: entityId
+        nodeId: nodeId
+        actionId: "{click.actionIdTriple}"
+        gesture: ClickGesture.triple
+        label: "{click.labelTriple}"
+      })
+    }
+  }
+  ret targets
+}
+
+# The loader's check after an OnClick is decoded: a `missingLabel`
+# diagnostic for each action id it sets with no label
+func reportMissingClickLabels(
+  world: mod UiWorld
+  entityId: view EntityId
+  sceneId: view String
+  nodeId: view String
+) {
+  if componentHas(this: world.onClicks, entityId: entityId) is false {
+    ret
+  }
+  let click: view OnClick = componentView(this: world.onClicks, entityId: entityId)
+  var missing: List(String) = List.create(String, cap: 3)
+  if click.actionId.length() > 0 and click.label.length() is 0 {
+    missing.add(value: "label for {click.actionId}")
+  }
+  if click.actionIdDouble.length() > 0 and click.labelDouble.length() is 0 {
+    missing.add(value: "labelDouble for {click.actionIdDouble}")
+  }
+  if click.actionIdTriple.length() > 0 and click.labelTriple.length() is 0 {
+    missing.add(value: "labelTriple for {click.actionIdTriple}")
+  }
+  loop let what: view String in missing {
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+      kind: SceneDiagnosticKind.missingLabel
+      name: "OnClick"
+      message: "OnClick has no {what}: a voice command and a screen reader need one"
+    )
+  }
+}
+
+# Set one field of the OnClick on `entityId` by its authored name (actionId,
+# actionIdDouble, actionIdTriple, label, labelDouble, labelTriple): what a
+# scene-instance override and a list binding write. With `create` a node
+# without an OnClick gets one; else such a node is left alone.
+func setOnClickField(
+  world: mod UiWorld
+  entityId: view EntityId
+  fieldName: view String
+  value: view String
+  create: view Bool
+) {
+  if componentHas(this: world.onClicks, entityId: entityId) is false {
+    if not create {
+      ret
+    }
+    componentSet(this: world.onClicks, entityId: entityId, data: OnClick.default())
+  }
+  let click: mod OnClick = componentMod(this: world.onClicks, entityId: entityId)
+  if fieldName is "actionIdDouble" {
+    click.actionIdDouble = "{value}"
+  } else if fieldName is "actionIdTriple" {
+    click.actionIdTriple = "{value}"
+  } else if fieldName is "label" {
+    click.label = "{value}"
+  } else if fieldName is "labelDouble" {
+    click.labelDouble = "{value}"
+  } else if fieldName is "labelTriple" {
+    click.labelTriple = "{value}"
+  } else {
+    click.actionId = "{value}"
+  }
+}
+
+# Whether the OnClick field named `fieldName` already holds `value` (a list
+# binding skips a write that changes nothing)
+func onClickFieldIs(click: view OnClick, fieldName: view String, value: view String) ret Bool {
+  if fieldName is "actionIdDouble" {
+    ret click.actionIdDouble is value
+  }
+  if fieldName is "actionIdTriple" {
+    ret click.actionIdTriple is value
+  }
+  if fieldName is "label" {
+    ret click.label is value
+  }
+  if fieldName is "labelDouble" {
+    ret click.labelDouble is value
+  }
+  if fieldName is "labelTriple" {
+    ret click.labelTriple is value
+  }
+  ret click.actionId is value
+}

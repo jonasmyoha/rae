@@ -1,0 +1,104 @@
+# OnClick labels (docs/ui-scene-format.md "OnClick labels", ui/ClickTargets):
+# the loader reads `label` / `labelDouble` / `labelTriple`; an action id with
+# no label is a `missingLabel` scene diagnostic; clickTargets lists every
+# action of every clickable node on the active screen with its node id,
+# action id, gesture and label, and leaves out the nodes under an inactive
+# parent until it is shown. A scene-instance override (and a list binding,
+# which writes through the same setter) sets a label like an action id. `\{`/`\}` keep the JSON
+# braces literal.
+import Json
+import String
+import ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/ClickTargets
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+func labelScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Root\",\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},")
+  s = s.concat(other: "\"Children\":[\"Play\",\"Menu\",\"Bare\",\"Drawer\"]\},")
+  s = s.concat(other: "\"Play\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":80,\"h\":40\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"player.play\",\"label\":\"Play\"\}\},")
+  s = s.concat(other: "\"Menu\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":80,\"h\":40\},")
+  s = s.concat(
+    other: "\"OnClick\":\{\"actionId\":\"menu.open\",\"label\":\"Open menu\",\"actionIdDouble\":\"menu.pin\",\"labelDouble\":\"Pin the menu\"\}\},"
+  )
+  s = s.concat(other: "\"Bare\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":80,\"h\":40\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"bare.tap\"\}\},")
+  s = s.concat(other: "\"Drawer\":\{\"Rect\":\{\"x\":100,\"y\":0,\"w\":100,\"h\":100\},")
+  s = s.concat(other: "\"Active\":\{\"value\":false\},\"Children\":[\"Close\"]\},")
+  s = s.concat(other: "\"Close\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":40,\"h\":40\},")
+  s = s.concat(
+    other: "\"OnClick\":\{\"actionId\":\"drawer.close\",\"label\":\"Close the drawer\"\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func listTargets(world: view UiWorld, uiSystems: view UiSystems) {
+  let targets: List(ClickTarget) = clickTargets(world: world, uiSystems: uiSystems)
+  log("{targets.length} click targets:")
+  loop let target: view ClickTarget in targets {
+    log("  {target.nodeId} {target.gesture} {target.actionId} '{target.label}'")
+  }
+}
+
+func main() {
+  var scene: Scene = parseScene(source: labelScene())
+  scene.sceneId = "labels"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+  # the loader read the labels
+  if let raw: Int = world.nodeIds.get(k: "Menu") {
+    let click: view OnClick = componentView(this: world.onClicks, entityId: id(v: raw))
+    log("Menu: '{click.label}' / '{click.labelDouble}' / '{click.labelTriple}'")
+  }
+  # the unlabeled action is a diagnostic, and only that one
+  log("--- {world.sceneDiagnostics.length} diagnostics ---")
+  loop let entry: view SceneDiagnostic in world.sceneDiagnostics {
+    log(formatSceneDiagnostic(diagnostic: entry))
+  }
+  log(
+    "missingLabel x{sceneDiagnosticCountOfKind(
+      diagnostics: world.sceneDiagnostics
+      kind: SceneDiagnosticKind.missingLabel
+    )}"
+  )
+  # the active screen's targets: the closed drawer's button is not on it
+  listTargets(world: world, uiSystems: uiSystems)
+  if let raw: Int = world.nodeIds.get(k: "Drawer") {
+    let shown: Active = { value: true }
+    componentSet(this: world.actives, entityId: id(v: raw), data: shown)
+  }
+  log("the drawer opened:")
+  listTargets(world: world, uiSystems: uiSystems)
+  # an override labels the bare button, as a host does at mount time
+  if let raw: Int = world.nodeIds.get(k: "Bare") {
+    let override: SceneOverride = {
+      nodeId: "Bare"
+      componentName: "OnClick"
+      fieldName: "label"
+      valueString: "Tap the bare one"
+    }
+    applyOverride(world: world, entityId: id(v: raw), override: override)
+    let click: view OnClick = componentView(this: world.onClicks, entityId: id(v: raw))
+    log(
+      "Bare after the override: '{click.label}', the list compare sees it: {onClickFieldIs(
+        click: click
+        fieldName: "label"
+        value: "Tap the bare one"
+      )}, its action id kept: {click.actionId}"
+    )
+  }
+}
