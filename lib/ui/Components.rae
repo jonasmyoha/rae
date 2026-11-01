@@ -498,16 +498,16 @@ type ScrollState {
   velocity: Float
 }
 
-# Runtime state of the lib drag/wheel physics (`updateScrollRoot`), keyed by the
-# ScrollRoot entity: whether a drag is live, the pointer position it last saw
-# along the axis, and the last three damped drag deltas from which the release
-# velocity is picked ("velocity at lift"). Never authored or serialized.
+# `updateScrollRoot`'s runtime state per ScrollRoot (never authored): a tracked
+# press, `active` once it is a drag (it claims the press), deltas for the lift.
 type ScrollDrag {
   dragging: Bool
   lastPointer: Float
   d0: Float
   d1: Float
   d2: Float
+  active: Bool = false
+  pressPointer: Float = 0.0
 }
 
 # Stable widget metadata for data-oriented UI updates. These components
