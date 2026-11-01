@@ -36,6 +36,7 @@ import ui/TextStyle
 open ecs/ComponentTable
 open Gpu2dCanvas
 open ui/UiSystems
+open ui/Transform
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -82,6 +83,16 @@ func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
   world.theme.active = src.active
   world.theme.generation = src.generation
   applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
+}
+
+# A Shape's stroke color: its palette slot from the ACTIVE theme (#235) or
+# its literal, through the opacity chain
+func shapeStroke(world: view UiWorld, shape: view Shape, chain255: view Int) ret RgbaColor {
+  var strokeBase: RgbaColor = shape.stroke
+  if shape.strokeSlot.length() > 0 {
+    strokeBase = uiThemeColor(theme: world.theme, name: shape.strokeSlot)
+  }
+  ret g2dChain(color: strokeBase, chain255: chain255)
 }
 
 func paintShapeG(
@@ -144,6 +155,22 @@ func paintShapeG(
         canvas: canvas
       )
     }
+    # the stroke as a RoundedRect draws it: a border inset from the edge
+    # (a dash pattern is a rectangle guide's, so a circle's stroke is solid)
+    if sh.strokeWidth > 0.0 {
+      Gpu2d.drawBox(
+        canvas: canvas
+        x: circleBox.x
+        y: circleBox.y
+        w: circleBox.w
+        h: circleBox.h
+        radius: r
+        fill: g2dColor(color: fill)
+        borderWidth: sh.strokeWidth
+        border: g2dColor(color: shapeStroke(world: world, shape: sh, chain255: chain255))
+      )
+      ret
+    }
     Gpu2d.drawRoundedRect(
       canvas: canvas
       x: circleBox.x
@@ -171,11 +198,7 @@ func paintShapeG(
     )
   }
   if sh.strokeWidth > 0.0 {
-    var strokeBase: RgbaColor = sh.stroke
-    if sh.strokeSlot.length() > 0 {
-      strokeBase = uiThemeColor(theme: world.theme, name: sh.strokeSlot)
-    }
-    let stroke: RgbaColor = g2dChain(color: strokeBase, chain255: chain255)
+    let stroke: RgbaColor = shapeStroke(world: world, shape: sh, chain255: chain255)
     if sh.strokeDash > 0.0 {
       # A dashed stroke: the fill as a plain box, then the dashes as
       # rect segments along the four edges (square corners; a guide).
