@@ -772,8 +772,10 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   to the commit the project's `rae.lock` records — the lock wins over the pack's
   `rev`, so delete the lock record to move a dep. The lock's `dep` lines carry
   `source`, `rev`, `commit` and a `git-tree` content hash; its first record is
-  `dep lib` — the stdlib resolved through the toolchain, so projects need no
-  `lib` symlink. Dependency sources are vendored: the format preflight neither
+  `dep lib { source: "toolchain:lib" }` — the stdlib resolved through the
+  toolchain, relative to it (never a machine path, so a committed lock is the
+  same on every machine building one Rae commit), and projects need no `lib`
+  symlink. Dependency sources are vendored: the format preflight neither
   rewrites nor check-fails them, and the implicit project scan skips every
   dot-directory and every dependency's folder, so a dependency is reached only
   through the resolver. **A package sees only its own files, the stdlib and

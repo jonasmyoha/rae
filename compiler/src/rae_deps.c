@@ -305,10 +305,14 @@ const char* rae_deps_name(int index) {
   return s_deps[index].name;
 }
 
-void rae_deps_write_lock(FILE* out, const char* stdlib_dir) {
-  /* The standard library is the first dependency: resolved through the
-   * toolchain the lock's `toolchain` block names, not a project-local copy. */
-  fprintf(out, "dep lib { source: \"toolchain:%s\" }\n", stdlib_dir ? stdlib_dir : "");
+void rae_deps_write_lock(FILE* out) {
+  /* The standard library is the first dependency: the `lib/` of the toolchain
+   * the lock's `toolchain` block names (version + commit), resolved through the
+   * running compiler (its checkout, $RAE_ROOT). Recorded RELATIVE to that
+   * toolchain, never as this machine's path: a committed lock must not change
+   * between two machines building the same Rae commit (#50978905). A local
+   * $RAE_STDLIB override is machine state and is not recorded either. */
+  fprintf(out, "dep lib { source: \"toolchain:lib\" }\n");
   for (int i = 0; i < s_dep_count; ++i) {
     const ResolvedDep* dep = &s_deps[i];
     if (!dep->is_git) {

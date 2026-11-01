@@ -20,8 +20,9 @@
 bool rae_deps_resolve(const RaePack* pack, const char* pack_dir, const char* lock_path);
 
 /* Emit the lock's dependency records (one `dep <name> { ... }` line each,
- * after a first `dep lib` line for the stdlib the toolchain resolved). */
-void rae_deps_write_lock(FILE* out, const char* stdlib_dir);
+ * after a first `dep lib { source: "toolchain:lib" }` line: the stdlib of the
+ * toolchain the lock names, relative to it, so no machine path is recorded). */
+void rae_deps_write_lock(FILE* out);
 
 /* Number of deps registered by rae_deps_resolve. */
 int rae_deps_count(void);
