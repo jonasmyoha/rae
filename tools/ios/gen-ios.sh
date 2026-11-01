@@ -2,7 +2,8 @@
 # Generate an iOS Xcode project for ONE Rae example (#520; seed of the multi-target
 # generator #521). Reuses the compiler's `--emit-c`, links the two iOS xcframeworks
 # (build them first: build-wgpu-ios.sh, build-sdl3-ios.sh), bundles the example's
-# assets preserving relative paths, and produces build/ios/<name>/RaeApp.xcodeproj.
+# assets preserving relative paths, and produces build/ios/<name>/RaeApp.xcodeproj
+# (<name>: RAE_IOS_BUILD_NAME, default the project folder's name).
 #
 #   sh tools/ios/gen-ios.sh <project-dir> [bundle-id] [display-name]
 #   e.g. sh tools/ios/gen-ios.sh examples/102_gpu2d_animated
@@ -11,7 +12,7 @@
 # path too) OR an out-of-tree game repo (entry src/main.rae, assets/ and lib/*
 # read CWD-relative). Both are handled; RAE_IOS_ENTRY overrides the entry file.
 #
-# Then: open build/ios/<name>/RaeApp.xcodeproj, pick your team (Signing &
+# Then: open build/ios/<name>/proj/RaeApp.xcodeproj, pick your team (Signing &
 # Capabilities → Automatic), select the device, and Run. (Signing needs you —
 # it can't be scripted headlessly.)
 set -eu
@@ -27,6 +28,13 @@ else
   echo "error: example dir not found: $ex_arg" >&2; exit 1
 fi
 name=$(basename "$ex_dir")
+# The build folder's name, build/ios/<name> (RAE_IOS_BUILD_NAME, default the
+# project folder's name): two projects whose folders share a generic name
+# (`shell`, `app`) set it so they do not overwrite each other's Xcode project.
+build_name=${RAE_IOS_BUILD_NAME:-$name}
+case "$build_name" in
+  ""|*/*|.|..) echo "error: RAE_IOS_BUILD_NAME must be one folder name, not '$build_name'" >&2; exit 1 ;;
+esac
 # Bundle id / display name: positional args win, else RAE_IOS_BUNDLE_ID /
 # RAE_IOS_NAME (so run-ios.sh, which regenerates with no positionals, can still
 # carry a project's chosen id), else a default derived from the dir name.
@@ -106,7 +114,7 @@ esac
 rae="$root/compiler/bin/rae"
 runtime_dir="$root/compiler/runtime"
 frameworks="$here/frameworks"
-gen="$root/build/ios/$name"
+gen="$root/build/ios/$build_name"
 # Entry: in-repo examples keep main.rae at the dir root; a game project that
 # lives in its own repo (e.g. the game) keeps it at src/main.rae. Accept either,
 # or an explicit RAE_IOS_ENTRY override.
@@ -321,6 +329,7 @@ cmake -S "$gen" -B "$gen/proj" -G Xcode \
 # 5. Metadata for run-ios.sh (bundle id, project, signed .app path).
 cat > "$gen/meta.env" <<EOF
 RAE_IOS_NAME="$name"
+RAE_IOS_BUILD_NAME="$build_name"
 RAE_IOS_BUNDLE_ID="$bundle_id"
 RAE_IOS_PROJ="$gen/proj/RaeApp.xcodeproj"
 RAE_IOS_APP="$gen/proj/Release-iphoneos/RaeApp.app"
@@ -329,5 +338,7 @@ EOF
 
 echo ""
 echo "gen-ios: project at $gen/proj/RaeApp.xcodeproj (meta: $gen/meta.env)"
-echo "  headless run: RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh $name"
+run_env=""
+[ "$build_name" = "$name" ] || run_env="RAE_IOS_BUILD_NAME=$build_name "
+echo "  headless run: ${run_env}RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh $ex_dir"
 echo "  or GUI: open '$gen/proj/RaeApp.xcodeproj'"
