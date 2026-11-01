@@ -45,7 +45,9 @@ func queueIsEmpty(T: type, this: view Queue(T)) pub ret Bool {
 }
 
 # Read the item at FIFO position `i` (0 = oldest). Iterate a drain in
-# order: `loop i < queueCount { apply(queueAt(q, i)); i++ }`.
+# order: `loop i < queueCount { apply(queueAt(q, i)); i++ }`. Like eventAt,
+# the result borrows the queue's slot: read its fields or bind it with
+# `let`, and use it while the queue is unchanged.
 func queueAt(T: type, this: view Queue(T), i: view Int) pub ret T {
   unsafe {
     let v: T = rae_ext_rae_buf_get(buf: this.items.data, index: i)
