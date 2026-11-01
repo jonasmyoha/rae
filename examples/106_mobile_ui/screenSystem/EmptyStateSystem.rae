@@ -9,7 +9,7 @@ open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
 
-# Is the SearchField on `page` blank? "" (no field on the page) counts as
+# Is the TextField on `page` blank? "" (no field on the page) counts as
 # blank, so a search EmptyState with no field just stays shown.
 func searchQueryBlankOnPage(
   world: view UiWorld
@@ -20,7 +20,7 @@ func searchQueryBlankOnPage(
 }
 
 # Every `EmptyState`: its `Active` follows whether its list is empty —
-# `history` on the play history, `search` on the page's SearchField query.
+# `history` on the play history, `search` on the page's TextField text.
 func emptyStateSystem(world: mod UiWorld, uiSystems: view UiSystems, state: view AppState) pub {
   let historyEmpty: Bool = state.playHistory.entries.length is 0
   let n: Int = componentCount(this: world.emptyStates)

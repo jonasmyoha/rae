@@ -28,3 +28,14 @@ func setTextInput(active: view Bool) {
     nativeSetTextInput(active: active)
   }
 }
+
+# The on-screen keyboard's height in points while it is shown, 0 when it is
+# not and on a desktop (iOS: UIKit's keyboard frame; SDL reports only that it
+# was shown). A layout reads it to keep a text field above the keyboard.
+func nativeKeyboardHeight() unsafe extern("rae_ext_Gpu2d_keyboardHeight") ret Float
+
+func keyboardHeight() ret Float {
+  unsafe {
+    ret nativeKeyboardHeight()
+  }
+}

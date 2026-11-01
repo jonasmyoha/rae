@@ -303,3 +303,29 @@ id does). The label still belongs to the scene node, for three reasons:
 An action table may still describe an action for the app's own purposes
 (logs, menus); 106's action audit checks both that every id has a table row
 and that every `OnClick` id has a label.
+
+## 11. `TextField`: a single-line text field
+
+    "NewTask": {
+      "TextField": { "placeholder": "New task", "actionId": "todo.add" },
+      "OnClick": { "label": "New task" },
+      "Children": ["NewTaskLine"]
+    },
+    "NewTaskLine": { "Text": { "text": "" } }
+
+- The field's first Text child is its visible line: the text in
+  `textStyleId` (default `primary`), or the `placeholder` in
+  `placeholderStyleId` (default `muted`) while it is empty and has no focus.
+  The `OnClick` makes the node tappable; it needs no action id.
+- `lib/ui/textFieldSystem` runs it: a tap on the field gives it focus
+  (`focused`, data on the component, at most one field), a tap elsewhere or
+  Return takes it away; typing and Backspace edit the focused field; Return
+  sends `actionId` as a UiAction with no entity, as a button with that id
+  does. `textFieldTextFor` reads the text, `clearTextFieldsFor` empties it.
+- OS text input is on only while a field has focus (on a phone that is what
+  shows the keyboard), and `uiSystems.textField.keyboardHeight` is the
+  keyboard's height in points so a layout can keep the field above it.
+- The caret is drawn by the renderer after the text, not written into it;
+  it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
+  when it next changes, for the event loop's heartbeat
+  (`earliestDeadlineSec` combines it with another deadline).

@@ -1,0 +1,72 @@
+# RenderCaret — the text cursor of the focused TextField (ui/textFieldSystem):
+# a thin bar after the field line's text, in the text's color, while the
+# system's blink phase shows it. The caret is never a character in the
+# text, so a field's measured size does not change as it blinks.
+import Gpu2d
+import SdfText
+open ui/Ecs
+open ui/Components
+open ui/TextStyle
+open ui/UiSystems
+open ui/renderSystem/RenderPaintBox
+open ui/renderSystem/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open Gpu2dCanvas
+
+# Paint the caret when `entityId` is the focused field's line and the caret
+# shows in this blink phase
+func paintCaretG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if uiSystems.textField.caretVisible is false or entityId is not uiSystems.textField.caretLineEntityId {
+    ret
+  }
+  let text: view Text = componentView(this: world.texts, entityId: entityId)
+  let size: Float = resolveTextSize(theme: res.theme, styleId: text.styleId) * wt.scale.x
+  var advance: Float = 0.0
+  if text.text.length() > 0 {
+    advance = SdfText.sdfMeasureTextBounds(font: res.textFont, text: text.text, sizePx: size).advance
+  }
+  let boxW: Float = cr.size.x * wt.scale.x
+  let boxH: Float = cr.size.y * wt.scale.y
+  var x: Float = wt.position.x + advance
+  if resolveTextIsCentered(theme: res.theme, styleId: text.styleId) {
+    x = wt.position.x + boxW / 2.0 + advance / 2.0
+  } else if resolveTextIsRightAligned(theme: res.theme, styleId: text.styleId) {
+    x = wt.position.x + boxW
+  }
+  let height: Float = size * 1.15
+  var width: Float = size * 0.08
+  if width < 1.0 {
+    width = 1.0
+  }
+  # centered in the line's box, or from its top when the box is shorter
+  # than a line
+  var top: Float = wt.position.y + (boxH - height) / 2.0
+  if boxH < height {
+    top = wt.position.y
+  }
+  let color: RgbaColor = resolveTextColor(
+    theme: res.theme
+    styleId: text.styleId
+    active: world.theme.active
+  )
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: x
+    y: top
+    w: width
+    h: height
+    radius: width / 2.0
+    color: g2dColor(color: g2dChain(color: color, chain255: chain255))
+  )
+}

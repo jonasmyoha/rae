@@ -4,6 +4,7 @@ open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
 open FileWatch
 open HotReload
 import Gpu2d
@@ -87,7 +88,10 @@ func frameWaitSystem(
       w: session.reloadWatcher
     )
     frameSec: frameSec
-    heartbeatSec: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: uiNowSeconds())
+    heartbeatSec: earliestDeadlineSec(
+      first: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: uiNowSeconds())
+      second: textFieldDeadlineSec(textFieldSystem: uiSystems.textField, now: uiNowSeconds())
+    )
   )
   # Heartbeat: prints once per frame BEFORE the wait. If this line stops
   # appearing in the log, the loop has stalled inside the frame body (not in
