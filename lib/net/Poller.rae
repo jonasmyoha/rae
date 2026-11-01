@@ -14,6 +14,10 @@
 # then one change on that direction's queue, exactly as with kqueue, and no
 # table of masks has to be kept (closing a socket leaves both queues).
 #
+# A PollerWaker (`pollerAddWaker`) lets another thread end a wait early:
+# `pollerWake` is one thread-safe system call (a kqueue user event, or an
+# eventfd on Linux), and the wait reports it as a Readiness that is `woken`.
+#
 # A wait allocates nothing: the poller owns its raw-event buffer, made once,
 # and `pollWait` refills the caller's `List(Readiness)` (cleared, its capacity
 # kept). A socket watched for both reading and writing can appear twice in one
@@ -29,7 +33,23 @@ type Poller {
   status: NetStatus
   # (handle, filter, flags) per raw event of the last wait
   rawEvents: List(Int)
+  # The waker's handle: the eventfd (epoll) or the user event's ident
+  # (kqueue); -1 while the poller has none
+  wakeHandle: Int = -1
 }
+
+# What wakes a poller from another thread: a copy is handed to each worker,
+# which calls `pollerWake` with it. Only valid while its poller is open.
+type PollerWaker {
+  # kqueue: the poller's queue; -1 on epoll
+  queue: Int
+  # kqueue: the user event's ident; epoll: the eventfd
+  handle: Int
+}
+
+# The ident of a poller's user event (kqueue keeps user events apart from
+# socket events by filter, so any number is free)
+const pollerWakeIdent: Int = 1
 
 # One socket that can make progress now
 type Readiness {
@@ -42,6 +62,8 @@ type Readiness {
   closed: Bool
   # The kernel reported an error for this socket
   failed: Bool
+  # Not a socket: the poller's waker was woken (`socketId` is no socket)
+  woken: Bool = false
 }
 
 func noPoller(status: view NetStatus) ret Poller {
@@ -168,6 +190,97 @@ func changeInterest(
   ret NetStatus.unsupported
 }
 
+# Give the poller a waker (once; a second call answers the same waker).
+# `handle` -1 in the answer means it has none (`poller.status` or the
+# platform says why).
+func pollerAddWaker(poller: mod Poller) ret PollerWaker {
+  if poller.handle < 0 {
+    ret PollerWaker { queue: -1, handle: -1 }
+  }
+  when hasKqueue {
+    if poller.wakeHandle < 0 {
+      unsafe {
+        loop {
+          let code: Int = systemPollerChange(
+            queue: poller.handle
+            handle: pollerWakeIdent
+            filter: netConstant(which: pollFilterUser)
+            flags: netConstant(which: pollChangeAddClear)
+          )
+          if code >= 0 {
+            poller.wakeHandle = pollerWakeIdent
+            break
+          }
+          if not isError(code: code, which: errorInterrupted) {
+            ret PollerWaker { queue: -1, handle: -1 }
+          }
+        }
+      }
+    }
+    ret PollerWaker { queue: poller.handle, handle: poller.wakeHandle }
+  } else when hasEpoll {
+    if poller.wakeHandle < 0 {
+      unsafe {
+        let eventHandle: Int = systemEventFdCreate()
+        if eventHandle < 0 {
+          ret PollerWaker { queue: -1, handle: -1 }
+        }
+        let added: Int = systemEpollControl(
+          queue: poller.handle
+          operation: netConstant(which: epollAdd)
+          handle: eventHandle
+          events: netConstant(which: epollIn)
+        )
+        if added < 0 {
+          let closed: Int = systemClose(handle: eventHandle)
+          ret PollerWaker { queue: -1, handle: -1 }
+        }
+        poller.wakeHandle = eventHandle
+      }
+    }
+    ret PollerWaker { queue: -1, handle: poller.wakeHandle }
+  }
+  ret PollerWaker { queue: -1, handle: -1 }
+}
+
+# End the poller's wait now (or make its next wait return at once), from any
+# thread: one system call. Several wakes before a wait are reported once.
+func pollerWake(waker: view PollerWaker) ret NetStatus {
+  if waker.handle < 0 {
+    ret NetStatus.unsupported
+  }
+  when hasKqueue {
+    unsafe {
+      let code: Int = systemPollerTrigger(queue: waker.queue, ident: waker.handle)
+      if code < 0 {
+        ret netStatusFromCode(code: code)
+      }
+    }
+    ret NetStatus.ok
+  } else when hasEpoll {
+    unsafe {
+      let code: Int = systemEventFdSignal(handle: waker.handle)
+      if code < 0 {
+        ret netStatusFromCode(code: code)
+      }
+    }
+    ret NetStatus.ok
+  }
+  ret NetStatus.unsupported
+}
+
+# A Readiness for the waker
+func wokenReadiness() ret Readiness {
+  ret Readiness {
+    socketId: SocketId { handle: -1 }
+    readable: false
+    writable: false
+    closed: false
+    failed: false
+    woken: true
+  }
+}
+
 # Watch `socketId` for reading, writing or both (a direction not asked for is
 # left as it was)
 func pollerWatch(
@@ -246,10 +359,15 @@ func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view In
     let writeFilter: Int = netConstant(which: pollFilterWrite)
     let endOfFile: Int = netConstant(which: pollFlagEndOfFile)
     let errorFlag: Int = netConstant(which: pollFlagError)
+    let userFilter: Int = netConstant(which: pollFilterUser)
     loop var i: Int = 0, i < count, ++i {
       let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
       let filter: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
       let flags: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 2, fallback: 0)
+      if filter is userFilter {
+        ready.add(value: wokenReadiness())
+        continue
+      }
       ready.add(value: Readiness {
         socketId: SocketId { handle: handle }
         readable: filter is readFilter
@@ -271,6 +389,12 @@ func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view In
       let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
       if handle is poller.writeHandle {
         writesPending = true
+      } else if handle is poller.wakeHandle {
+        # reset the eventfd, so the next wait sleeps again
+        unsafe {
+          let drained: Int = systemEventFdDrain(handle: handle)
+        }
+        ready.add(value: wokenReadiness())
       } else {
         addEpollReadiness(
           ready: ready
@@ -391,5 +515,15 @@ func closePoller(poller: mod Poller) {
     }
     poller.writeHandle = -1
   }
+  # epoll's waker is an eventfd of its own; kqueue's user event goes with
+  # the queue
+  when hasEpoll {
+    if poller.wakeHandle >= 0 {
+      unsafe {
+        let code: Int = systemClose(handle: poller.wakeHandle)
+      }
+    }
+  }
+  poller.wakeHandle = -1
   poller.status = NetStatus.failed
 }

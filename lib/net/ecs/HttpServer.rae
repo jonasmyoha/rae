@@ -8,7 +8,9 @@
 # into the connection's ReadBuffer with byte ranges, so it owns no heap. A
 # request whose answer comes later is PROMOTED to an AwaitingResult component
 # holding the Task of the `spawn`ed slow work; a later frame polls it with
-# `tryGet` (no callbacks, no async).
+# `tryGet` (no callbacks, no async). The work calls `pollerWake(waker:
+# server.waker)` (a copy handed to it) just before it returns, so the server
+# answers in its next frame instead of at its poll timeout.
 #
 # A connection with no socket (`openConnection` with `noSocket()`) is DETACHED:
 # nothing reads into it or writes from it, so a test puts bytes in its
@@ -159,6 +161,10 @@ type HttpServer {
   # which spreads the connections over them.
   acceptsPerFrame: Int
   poller: Poller
+  # Wakes the poller from a promoted request's task (see `promote`)
+  waker: PollerWaker
+  # The monotonic clock when the poller was last woken (0: never)
+  lastWakeNs: Int
   readiness: List(Readiness)
   # Socket handle -> its connection entity
   socketEntities: IntMap(EntityId)
@@ -181,6 +187,8 @@ type HttpServer {
 }
 
 func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
+  var poller: Poller = createPoller()
+  let waker: PollerWaker = pollerAddWaker(poller: poller)
   ret HttpServer {
     entities: createEntityAllocator()
     sockets: create()
@@ -197,7 +205,9 @@ func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
     listenerSocketId: noSocket()
     listenerReady: false
     acceptsPerFrame: 64
-    poller: createPoller()
+    poller: own poller
+    waker: waker
+    lastWakeNs: 0
     readiness: List.create(Readiness, cap: 256)
     socketEntities: createIntMap(EntityId, cap: 256)
     requests: createEventQueue(HttpRequestEvent)
@@ -441,7 +451,10 @@ func markSending(server: mod HttpServer, event: view HttpRequestEvent) {
 }
 
 # Answer `event` later: `task` is the slow work that makes the reply. The
-# connection's requests after this one wait until it is answered.
+# connection's requests after this one wait until it is answered. Hand the
+# work a copy of `server.waker` and have it call `pollerWake` with it just
+# before it returns: the server then answers in its next frame, not at its
+# poll timeout.
 func promote(server: mod HttpServer, event: view HttpRequestEvent, task: own Task(HttpReply)) {
   componentSet(
     this: server.awaitingResults

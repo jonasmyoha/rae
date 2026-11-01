@@ -91,19 +91,41 @@ func httpServerFrameEnd(server: mod HttpServer) {
 
 # ----- 1. poll --------------------------------------------------------------
 
+# How long after a wake the poll stays short while requests still await a
+# task: a task wakes the poller just before it returns, and is done only
+# after the return, so a frame woken in between finds it not done yet
+const wakeSettleNs: Int = 50000000
+
+# The poll's timeout: `timeoutMs`, or at most 1 ms in the short while after a
+# wake when a promoted request is still waiting
+func pollTimeoutMs(server: view HttpServer, timeoutMs: view Int) ret Int {
+  if server.lastWakeNs is 0 or componentCount(this: server.awaitingResults) is 0 {
+    ret timeoutMs
+  }
+  if nowNs() - server.lastWakeNs >= wakeSettleNs {
+    ret timeoutMs
+  }
+  if timeoutMs >= 0 and timeoutMs < 1 {
+    ret timeoutMs
+  }
+  ret 1
+}
+
 # Wait up to `timeoutMs` for readiness and tag what can make progress; read
 # the clocks for the frame
 func pollSystem(server: mod HttpServer, timeoutMs: view Int) {
   let status: NetStatus = pollWait(
     poller: server.poller
     ready: server.readiness
-    timeoutMs: timeoutMs
+    timeoutMs: pollTimeoutMs(server: server, timeoutMs: timeoutMs)
   )
   server.frameNs = nowNs()
   server.secondChanged = updateHttpDate(cache: server.date, epochSeconds: nowMs() / 1000)
   loop var i: Int = 0, i < server.readiness.length, ++i {
     if let readiness: view Readiness = server.readiness.viewAt(index: i) {
-      if readiness.socketId is server.listenerSocketId {
+      if readiness.woken {
+        server.lastWakeNs = server.frameNs
+      } else if readiness.socketId is server.listenerSocketId {
         server.listenerReady = true
       } else if let entityId: EntityId = get(
         this: server.socketEntities
