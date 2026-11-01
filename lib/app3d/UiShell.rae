@@ -277,6 +277,11 @@ func mountSceneWithImports(
   canvas: mod Gpu2dCanvas
   registry: mod SceneRegistry
 ) ret EntityId {
+  # The world is sized to the window before anything can fail: a caller that
+  # shows its own error screen after a failed mount lays it out in this world,
+  # and the default size of a new world is not the window's.
+  world.layoutW = windowExtentW()
+  world.layoutH = windowExtentH()
   let path: String = scenePackageFile(root: root, sceneId: sceneId)
   let scene: Scene = loadScenePackageFile(path: path, sceneId: sceneId)
   if scene.ok is false {
@@ -323,8 +328,6 @@ func mountSceneWithImports(
   # imported bundles (ui/SceneBundles), expanded at the same moment.
   reseedWorldTheme(world: world, res: resources)
   world.bundles = sceneImportedBundles(entry: scene, assets: assets, registry: registry)
-  world.layoutW = windowExtentW()
-  world.layoutH = windowExtentH()
   let mountedRoot: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   if isNone(this: mountedRoot) {
     ret mountedRoot
