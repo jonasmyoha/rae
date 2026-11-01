@@ -70,15 +70,15 @@ func startTrack(
   # now-playing / history all resolve against it.
   state.currentAlbumStem = "{stem}"
   state.currentTrackIndex = trackIndex
-  # Mark this track as actually playing — the views read these two fields
-  # to decide which row to highlight.
-  playbackSystem.playingAlbumStem = "{stem}"
-  playbackSystem.playingTrackIndex = trackIndex
-  setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
-  # Point the nowPlaying cover at this local album's stem-keyed texture and
-  # bump the instance revision (#268) so the Hero + mini-player covers
-  # observe the change and re-point by identity.
-  setNowPlayingArt(playbackSystem: playbackSystem, artKey: stem)
+  # Ask PlaybackSystem to start this track (applied in Apply(A) by
+  # `processCommands`, the same frame): it becomes the highlighted row, and
+  # the nowPlaying cover points at this local album's stem-keyed texture.
+  enqueuePlaybackStartTrack(
+    this: playbackSystem
+    albumStem: stem
+    trackIndex: trackIndex
+    artKey: stem
+  )
   # Record the pick in play history so Home's "Recently played" row + the
   # History sub-page see it.
   let album: Album = activeAlbum(state: state)
@@ -145,12 +145,14 @@ func replayHistoryEntry(
         }
       }
     }
-    playbackSystem.playingAlbumStem = "{entry.albumStem}"
-    playbackSystem.playingTrackIndex = state.currentTrackIndex
-    setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
     # Cover follows the replayed entry's own texture key (#268) — the local
     # stem for catalog entries, or the spotify-art key otherwise.
-    setNowPlayingArt(playbackSystem: playbackSystem, artKey: entry.textureKey)
+    enqueuePlaybackStartTrack(
+      this: playbackSystem
+      albumStem: entry.albumStem
+      trackIndex: state.currentTrackIndex
+      artKey: entry.textureKey
+    )
     if spotifyEnabled {
       let query: String = spotifySearchQuery(
         artist: entry.artistName
@@ -185,11 +187,12 @@ func toggleLiked(state: mod AppState) {
   state.libraryRevision = state.libraryRevision + 1
 }
 
-# Play / pause. In Spotify mode Spotify owns the play-state: flip the state
-# the 1 Hz poll last mirrored into `isPlaying` (no UI-thread osascript; at
-# worst one poll interval stale) and let the next poll mirror it back. Locally it is a
-# PlaybackSystem command (#265), applied in the
-# frame's Apply(A) phase by `processCommands`.
+# Play / pause, always as a PlaybackSystem command (#265) applied in the
+# frame's Apply(A) phase by `processCommands`. In Spotify mode Spotify owns
+# the play-state: tell it to play or pause from the state the 1 Hz poll last
+# mirrored into `isPlaying` (no UI-thread osascript; at worst one poll
+# interval stale), set that state by command, and let the next poll mirror
+# it back.
 func togglePlaybackCommand(playbackSystem: mod PlaybackSystem, spotifyEnabled: view Bool) {
   if spotifyEnabled is false {
     enqueuePlaybackToggle(this: playbackSystem)
@@ -198,10 +201,10 @@ func togglePlaybackCommand(playbackSystem: mod PlaybackSystem, spotifyEnabled: v
   log("[spotify] toggle: playing={playbackSystem.isPlaying}")
   if playbackSystem.isPlaying {
     Spotify.pause()
-    setPlaybackPlaying(playbackSystem: playbackSystem, value: false)
+    enqueuePlaybackSetPlaying(this: playbackSystem, value: false)
   } else {
     Spotify.play()
-    setPlaybackPlaying(playbackSystem: playbackSystem, value: true)
+    enqueuePlaybackSetPlaying(this: playbackSystem, value: true)
   }
 }
 
