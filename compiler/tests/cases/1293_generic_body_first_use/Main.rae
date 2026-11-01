@@ -1,0 +1,39 @@
+# A function first used inside a generic function's specialized body is
+# declared before that body in the C (it used to be prototyped after it:
+# "call to undeclared function", then "static declaration follows
+# non-static"). String.fromBytes is first used here inside `describe`, and
+# again only inside a generic that another generic calls (a specialization
+# discovered while emitting a specialization), and in `main`'s own reach.
+import String
+
+type Box {
+  value: Int
+}
+
+type Crate {
+  label: String
+}
+
+func describe(T: type, item: view T) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 1)
+  bytes.add(value: 65)
+  ret String.fromBytes(bytes: bytes, start: 0, count: 1)
+}
+
+func letters(T: type, item: view T, count: view Int) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: (66 + i) as UInt8)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: count)
+}
+
+func outer(T: type, item: view T) ret String {
+  ret "<{letters(T, item: item, count: 3)}>"
+}
+
+func main() {
+  log(describe(Box, item: Box { value: 1 }))
+  log(outer(Crate, item: Crate { label: "c" }))
+  log(outer(Box, item: Box { value: 2 }))
+}
