@@ -1,0 +1,144 @@
+# Client connections through the system's network stack
+# (lib/net/NetworkConnection; Network.framework on Apple) against a local
+# Rae server on a spawned worker (lib/net/ecs, HTTP and WebSocket on
+# 127.0.0.1): a WebSocket client is ready, sends text, gets it echoed and
+# closes; an HTTP GET (lib/net/HttpGet) fetches a page; a chunked response
+# and URLs are parsed; a refused connection waits for the network instead of
+# failing. TLS against the system trust store needs the internet and is
+# checked by hand (docs/network-connections.md).
+open Channel
+open ecs/Entity
+open ecs/Event
+open net/Tcp
+open http/Http
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/ecs/WebSocketSystems
+open net/NetworkConnection
+open net/HttpGet
+
+type EchoRouter {
+  routed: Int
+}
+
+func route(router: mod EchoRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.routed = router.routed + 1
+  respond(
+    server: server
+    event: event
+    status: 200
+    contentType: "text/plain"
+    body: "Hello, World!"
+  )
+}
+
+# The server worker: HTTP answers and a WebSocket echo, until told to stop
+func serve(listenerHandle: own Int, stop: own Channel(Int)) ret Int {
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  server.webSocketPath = "/ws"
+  let shared: NetStatus = httpServerShareListener(
+    server: server
+    listenerSocketId: SocketId { handle: listenerHandle }
+  )
+  var router: EchoRouter = { routed: 0 }
+  var frames: Int = 0
+  loop pending(this: stop) is 0 and frames < 3000 {
+    httpServerFrameBegin(
+      EchoRouter
+      router: router
+      server: server
+      timeoutMs: 5
+    )
+    loop var i: Int = 0, i < eventCount(this: server.webSocketMessages), ++i {
+      let event: WebSocketMessageEvent = eventAt(this: server.webSocketMessages, i: i)
+      sendFrom(server: server, entityId: event.connectionEntityId, event: event)
+    }
+    httpServerFrameEnd(server: server)
+    frames = frames + 1
+  }
+  ret router.routed
+}
+
+func main() ret Int {
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  var port: Int = 0
+  if let localPort: Int = socketLocalPort(socketId: listening.socketId) {
+    port = localPort
+  }
+  let stop: Channel(Int) = createChannel(Int)
+  let serverTask: Task(Int) = spawn serve(listenerHandle: listening.socketId.handle, stop: stop)
+
+  # a WebSocket client
+  var socket: NetworkConnection = networkConnectWebSocket(url: "ws://127.0.0.1:{port}/ws")
+  log("connecting: {socket.open}")
+  var sawPath: Bool = false
+  var finished: Bool = false
+  loop var i: Int = 0, i < 100 and finished is false, ++i {
+    let event: NetworkEvent = networkNextEvent(connection: socket, timeoutMs: 100)
+    if event.kind is NetworkEventKind.pathChanged {
+      sawPath = event.code is networkPathSatisfied
+    } else if event.kind is NetworkEventKind.ready {
+      log("ready (path satisfied: {sawPath})")
+      let sent: Bool = networkSendText(connection: socket, text: "hello, Pähkinä")
+    } else if event.kind is NetworkEventKind.message {
+      log("echo: text {event.code is webSocketText}, '{event.text}'")
+      let closing: Bool = networkSendClose(connection: socket, code: 1000)
+    } else if event.kind is NetworkEventKind.closed {
+      log("closed by the server, code {event.code}")
+      finished = true
+    } else if event.kind is NetworkEventKind.failed {
+      log("failed: {event.text}")
+      finished = true
+    }
+  }
+  networkClose(connection: socket)
+  log("after close: {networkNextEvent(connection: socket, timeoutMs: 0).kind}")
+
+  # an HTTP GET of a page
+  let page: HttpGetResult = httpGet(url: "http://127.0.0.1:{port}/plaintext", timeoutMs: 5000)
+  log(
+    "GET: ok {page.ok}, status {page.status}, '{String.fromBytes(
+      bytes: page.body
+      start: 0
+      count: page.body.length
+    )}', content-type {headerValue(headers: page.headers, name: "content-type")}"
+  )
+
+  # a refused connection waits for the network (it is retried) instead of failing
+  var refused: NetworkConnection = networkConnectTcp(host: "127.0.0.1", port: 1)
+  var refusedKind: NetworkEventKind = NetworkEventKind.none
+  loop var i: Int = 0, i < 50 and (refusedKind is NetworkEventKind.none or refusedKind is NetworkEventKind.pathChanged), ++i {
+    refusedKind = networkNextEvent(connection: refused, timeoutMs: 100).kind
+  }
+  log("a refused connection: {refusedKind}")
+  networkClose(connection: refused)
+
+  # parsing alone
+  let chunked: String = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nHello\r\n7\r\n, Rae!!\r\n0\r\n\r\n"
+  var chunkedBytes: List(UInt8) = List.create(UInt8, cap: chunked.length())
+  loop var i: Int = 0, i < chunked.length(), ++i {
+    chunkedBytes.add(value: chunked.byteAt(index: i) as UInt8)
+  }
+  let decoded: HttpGetResult = parseHttpResponse(bytes: chunkedBytes)
+  log(
+    "chunked: {decoded.ok} '{String.fromBytes(
+      bytes: decoded.body
+      start: 0
+      count: decoded.body.length
+    )}'"
+  )
+  let cut: HttpGetResult = parseHttpResponse(
+    bytes: networkTextBytes(text: "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nshort")
+  )
+  log("cut short: {cut.ok}, {cut.error}")
+  let url: HttpUrl = parseHttpUrl(url: "https://sync.example.org:8443/files/a.json")
+  log("url: secure {url.secure}, host {url.host}, port {url.port}, path {url.path}")
+  let plain: HttpUrl = parseHttpUrl(url: "http://example.org")
+  log("url: secure {plain.secure}, port {plain.port}, path {plain.path}")
+  log("bad url: {httpGet(url: "ftp://x", timeoutMs: 10).error}")
+
+  channelSend(this: stop, value: 1)
+  log("the server routed {serverTask.get()} request(s)")
+  freeChannel(this: stop)
+  ret 0
+}

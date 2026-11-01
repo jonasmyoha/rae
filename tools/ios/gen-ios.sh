@@ -305,7 +305,7 @@ target_link_libraries(\${APP}
   "$frameworks/wgpu_native.xcframework"
   "-framework UIKit" "-framework Foundation" "-framework CoreFoundation"
   "-framework Metal" "-framework QuartzCore" "-framework CoreGraphics"
-  "-framework ImageIO" "-framework CoreMotion" "-framework GameController"
+  "-framework ImageIO" "-framework CoreMotion" "-framework GameController" "-framework Network"
   "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreHaptics"
   "-framework CoreText" "-framework UniformTypeIdentifiers"
   "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"

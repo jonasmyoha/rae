@@ -1,0 +1,262 @@
+# HttpGet — fetch one URL (http:// or https://) through the system's network
+# stack (net/NetworkConnection: on Apple, Network.framework with TLS against
+# the system trust store), e.g. a file from a server. HTTP/1.1 with
+# `Connection: close`; the body is read whole (Content-Length, chunked, or to
+# the close). It waits for the connection's events, so a UI app runs it in a
+# spawned worker. Every failure is a value (`ok` false and `error`).
+import String
+open net/NetworkConnection
+
+type HttpGetResult {
+  ok: Bool
+  status: Int
+  # the response's header lines, unparsed ("Name: value\r\n" ...)
+  headers: String
+  body: List(UInt8)
+  error: String
+}
+
+# A URL's parts
+type HttpUrl {
+  valid: Bool
+  secure: Bool
+  host: String
+  port: Int
+  path: String
+}
+
+func httpGetFailed(error: view String) ret HttpGetResult {
+  ret HttpGetResult {
+    ok: false
+    status: 0
+    headers: ""
+    body: List.create(UInt8, cap: 0)
+    error: "{error}"
+  }
+}
+
+# Split `url` into scheme, host, port and path
+func parseHttpUrl(url: view String) ret HttpUrl {
+  var secure: Bool = false
+  var rest: String = ""
+  if url.startsWith(prefix: "https://") {
+    secure = true
+    rest = url.sub(start: 8, len: url.length() - 8)
+  } else if url.startsWith(prefix: "http://") {
+    rest = url.sub(start: 7, len: url.length() - 7)
+  } else {
+    ret HttpUrl {
+      valid: false
+      secure: false
+      host: ""
+      port: 0
+      path: ""
+    }
+  }
+  var authority: String = "{rest}"
+  var path: String = "/"
+  if let slash: Int = rest.indexOf(sub: "/") {
+    authority = rest.sub(start: 0, len: slash)
+    path = rest.sub(start: slash, len: rest.length() - slash)
+  }
+  var host: String = "{authority}"
+  var port: Int = 80
+  if secure {
+    port = 443
+  }
+  if let colon: Int = authority.indexOf(sub: ":") {
+    host = authority.sub(start: 0, len: colon)
+    port = authority.sub(start: colon + 1, len: authority.length() - colon - 1).toInt()
+  }
+  ret HttpUrl {
+    valid: host.length() > 0 and port > 0
+    secure: secure
+    host: host
+    port: port
+    path: path
+  }
+}
+
+# Where "\r\n\r\n" starts in `bytes`, or -1
+func headerEnd(bytes: view List(UInt8)) ret Int {
+  loop var i: Int = 0, i + 3 < bytes.length, ++i {
+    if bytes.copyAtFallback(index: i, fallback: 0) as Int is 13 and bytes.copyAtFallback(
+      index: i + 1
+      fallback: 0
+    ) as Int is 10 and bytes.copyAtFallback(index: i + 2, fallback: 0) as Int is 13 and bytes.copyAtFallback(
+      index: i + 3
+      fallback: 0
+    ) as Int is 10 {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# The value of header `name` (lowercase) in `headers`, or ""
+func headerValue(headers: view String, name: view String) ret String {
+  loop let line: view String in headers.split(sep: "\r\n") {
+    if let colon: Int = line.indexOf(sub: ":") {
+      if line.sub(start: 0, len: colon).toLower() is name {
+        ret line.sub(start: colon + 1, len: line.length() - colon - 1).trim()
+      }
+    }
+  }
+  ret ""
+}
+
+# A hex chunk size, or -1
+func hexSize(text: view String) ret Int {
+  var value: Int = 0
+  var digits: Int = 0
+  loop var i: Int = 0, i < text.length(), ++i {
+    let byte: Int = text.byteAt(index: i)
+    var digit: Int = -1
+    if byte >= 48 and byte <= 57 {
+      digit = byte - 48
+    } else if byte >= 97 and byte <= 102 {
+      digit = byte - 87
+    } else if byte >= 65 and byte <= 70 {
+      digit = byte - 55
+    } else {
+      break
+    }
+    value = value * 16 + digit
+    digits = digits + 1
+  }
+  if digits is 0 {
+    ret -1
+  }
+  ret value
+}
+
+# Decode a chunked body (from `start`); none when it is cut short
+func decodeChunked(bytes: view List(UInt8), start: view Int) ret opt List(UInt8) {
+  var body: List(UInt8) = List.create(UInt8, cap: bytes.length)
+  var at: Int = start
+  loop {
+    # the size line
+    var lineEnd: Int = -1
+    loop var i: Int = at, i + 1 < bytes.length, ++i {
+      if bytes.copyAtFallback(index: i, fallback: 0) as Int is 13 and bytes.copyAtFallback(
+        index: i + 1
+        fallback: 0
+      ) as Int is 10 {
+        lineEnd = i
+        break
+      }
+    }
+    if lineEnd < 0 {
+      ret none
+    }
+    let size: Int = hexSize(text: String.fromBytes(bytes: bytes, start: at, count: lineEnd - at))
+    if size < 0 {
+      ret none
+    }
+    at = lineEnd + 2
+    if size is 0 {
+      ret body
+    }
+    if at + size > bytes.length {
+      ret none
+    }
+    loop var i: Int = 0, i < size, ++i {
+      body.add(value: bytes.copyAtFallback(index: at + i, fallback: 0))
+    }
+    at = at + size + 2
+  }
+}
+
+# Parse a whole response
+func parseHttpResponse(bytes: view List(UInt8)) ret HttpGetResult {
+  let end: Int = headerEnd(bytes: bytes)
+  if end < 0 {
+    ret httpGetFailed(error: "the response has no complete header ({bytes.length} bytes)")
+  }
+  let head: String = String.fromBytes(bytes: bytes, start: 0, count: end)
+  var statusLine: String = "{head}"
+  var headers: String = ""
+  if let firstEnd: Int = head.indexOf(sub: "\r\n") {
+    statusLine = head.sub(start: 0, len: firstEnd)
+    headers = head.sub(start: firstEnd + 2, len: head.length() - firstEnd - 2)
+  }
+  let parts: List(String) = statusLine.split(sep: " ")
+  if parts.length < 2 or statusLine.startsWith(prefix: "HTTP/") is false {
+    ret httpGetFailed(error: "not an HTTP response: {statusLine}")
+  }
+  let status: Int = parts.copyAtDefault(index: 1).toInt()
+  let bodyStart: Int = end + 4
+  var body: List(UInt8) = List.create(UInt8, cap: 0)
+  if headerValue(headers: headers, name: "transfer-encoding").toLower().contains(sub: "chunked") {
+    if let decoded: List(UInt8) = decodeChunked(bytes: bytes, start: bodyStart) {
+      body = own decoded
+    } else {
+      ret httpGetFailed(error: "the chunked body is cut short")
+    }
+  } else {
+    var count: Int = bytes.length - bodyStart
+    let declared: String = headerValue(headers: headers, name: "content-length")
+    if declared.length() > 0 {
+      let length: Int = declared.toInt()
+      if length > count {
+        ret httpGetFailed(error: "the body is cut short: {count} of {length} bytes")
+      }
+      count = length
+    }
+    body = List.create(UInt8, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      body.add(value: bytes.copyAtFallback(index: bodyStart + i, fallback: 0))
+    }
+  }
+  ret HttpGetResult {
+    ok: true
+    status: status
+    headers: headers
+    body: own body
+    error: ""
+  }
+}
+
+# GET `url`, waiting up to `timeoutMs` in all. Redirects are not followed
+# (a 3xx comes back as it is, its Location in `headers`).
+func httpGet(url: view String, timeoutMs: view Int) ret HttpGetResult {
+  let parsed: HttpUrl = parseHttpUrl(url: url)
+  if parsed.valid is false {
+    ret httpGetFailed(error: "not an http:// or https:// URL: {url}")
+  }
+  var connection: NetworkConnection = networkConnectTcp(host: parsed.host, port: parsed.port)
+  if parsed.secure {
+    connection = networkConnectTls(host: parsed.host, port: parsed.port)
+  }
+  var received: List(UInt8) = List.create(UInt8, cap: 4096)
+  var error: String = ""
+  var closed: Bool = false
+  let deadline: Int = nowMs() + timeoutMs
+  loop closed is false and error.length() is 0 {
+    let left: Int = deadline - nowMs()
+    if left <= 0 {
+      error = "timed out after {timeoutMs} ms"
+      break
+    }
+    let event: NetworkEvent = networkNextEvent(connection: connection, timeoutMs: left)
+    if event.kind is NetworkEventKind.ready {
+      let request: String = "GET {parsed.path} HTTP/1.1\r\nHost: {parsed.host}\r\nUser-Agent: Rae\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+      let sent: Bool = networkSendText(connection: connection, text: request)
+    } else if event.kind is NetworkEventKind.message {
+      loop let byte: view UInt8 in event.bytes {
+        received.add(value: byte)
+      }
+    } else if event.kind is NetworkEventKind.closed {
+      closed = true
+    } else if event.kind is NetworkEventKind.failed or event.kind is NetworkEventKind.sendFailed {
+      error = "{event.text}"
+    } else if event.kind is NetworkEventKind.waiting and nowMs() >= deadline {
+      error = "no network: {event.text}"
+    }
+  }
+  networkClose(connection: connection)
+  if error.length() > 0 and received.length is 0 {
+    ret httpGetFailed(error: error)
+  }
+  ret parseHttpResponse(bytes: received)
+}
