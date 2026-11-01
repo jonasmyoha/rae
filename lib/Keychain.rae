@@ -1,0 +1,336 @@
+# Keychain — keep a small secret (bytes: a private key, a token) in the
+# system Keychain on iOS and macOS, by service and account name
+# (docs/keychain.md). Every failure is a KeychainError value.
+#
+# A secret stored with `requireUserPresence` can be read only after Face ID,
+# Touch ID or the device passcode, each time; it stays on this device and
+# is readable while the device is unlocked. Without it, the secret is
+# readable after the first unlock since boot (so background work can use
+# it), on this device only (never synced to iCloud).
+#
+# macOS keeps a protected secret in the data-protection keychain, which only
+# a signed app with a keychain-access-groups entitlement may use; a command
+# line program gets `missingEntitlement` there. Off Apple there is no
+# Keychain: every call answers `unsupported`.
+#
+# The C side (runtime_keychain_apple.h) is one SecItem call per function.
+import String
+cheader "runtime_keychain_apple.h"
+
+const hasKeychain: Bool = Target.isApple
+
+when hasKeychain {
+  func rae_ext_Keychain_add(
+    serviceZ: Buffer(UInt8)
+    accountZ: Buffer(UInt8)
+    bytes: Buffer(UInt8)
+    offset: Int
+    count: Int
+    userPresence: Int
+  ) unsafe extern("rae_ext_Keychain_add") ret Int
+
+  func rae_ext_Keychain_delete(
+    serviceZ: Buffer(UInt8)
+    accountZ: Buffer(UInt8)
+    protectedItem: Int
+  ) unsafe extern("rae_ext_Keychain_delete") ret Int
+
+  # Reading a protected secret waits for Face ID / the passcode: blocking
+  func rae_ext_Keychain_read(
+    serviceZ: Buffer(UInt8)
+    accountZ: Buffer(UInt8)
+    protectedItem: Int
+    promptZ: Buffer(UInt8)
+    interactive: Int
+    into: Buffer(UInt8)
+    capacity: Int
+  ) blocking unsafe extern("rae_ext_Keychain_read") ret Int
+
+  func rae_ext_Keychain_errorMessage(
+    status: Int
+    into: Buffer(UInt8)
+    capacity: Int
+  ) unsafe extern("rae_ext_Keychain_errorMessage") ret Int
+}
+
+enum KeychainErrorKind {
+  none
+  notFound
+  duplicate
+  authenticationFailed
+  interactionNotAllowed
+  missingEntitlement
+  locked
+  unsupported
+  other
+}
+
+# no secret under that service and account
+# one is there already (store replaces it, so this is rare)
+# the person cancelled Face ID / the passcode, or it failed
+# a protected secret was read with `interactive` false
+# macOS: the data-protection keychain needs a signed app with an entitlement
+# the device is locked
+# no Keychain on this platform
+
+# What went wrong: the kind, the OSStatus and the system's words for it
+type KeychainError {
+  kind: KeychainErrorKind
+  status: Int
+  message: String
+}
+
+func keychainOk() ret KeychainError {
+  ret KeychainError { kind: KeychainErrorKind.none, status: 0, message: "" }
+}
+
+func keychainFailed(error: view KeychainError) ret Bool {
+  ret error.kind is not KeychainErrorKind.none
+}
+
+# A read's answer: the secret's bytes, or the error
+type KeychainRead {
+  bytes: List(UInt8)
+  error: KeychainError
+}
+
+# How a read may ask the person
+type KeychainReadOptions {
+  # what Face ID / the passcode sheet says (a protected secret)
+  prompt: String
+  # false: fail with `interactionNotAllowed` rather than ask (a background
+  # read of a protected secret)
+  interactive: Bool
+}
+
+func keychainDefaultReadOptions() ret KeychainReadOptions {
+  ret KeychainReadOptions { prompt: "", interactive: true }
+}
+
+func keychainTextZ(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  bytes.add(value: 0)
+  ret bytes
+}
+
+# The error of an OSStatus (Security's codes: errSecItemNotFound -25300,
+# errSecDuplicateItem -25299, errSecAuthFailed -25293, errSecUserCanceled
+# -128, errSecInteractionNotAllowed -25308, errSecMissingEntitlement -34018,
+# errSecNotAvailable -25291)
+func keychainError(status: view Int) ret KeychainError {
+  if status is 0 {
+    ret keychainOk()
+  }
+  var kind: KeychainErrorKind = KeychainErrorKind.other
+  if status is -25300 {
+    kind = KeychainErrorKind.notFound
+  } else if status is -25299 {
+    kind = KeychainErrorKind.duplicate
+  } else if status is -25293 or status is -128 {
+    kind = KeychainErrorKind.authenticationFailed
+  } else if status is -25308 {
+    kind = KeychainErrorKind.interactionNotAllowed
+  } else if status is -34018 {
+    kind = KeychainErrorKind.missingEntitlement
+  } else if status is -25291 or status is -25307 {
+    kind = KeychainErrorKind.locked
+  }
+  var message: String = ""
+  when hasKeychain {
+    var bytes: List(UInt8) = List.create(UInt8, cap: 512)
+    loop var i: Int = 0, i < 512, ++i {
+      bytes.add(value: 0)
+    }
+    var length: Int = 0
+    unsafe {
+      length = rae_ext_Keychain_errorMessage(status: status, into: bytes.data, capacity: 512)
+    }
+    if length > 0 {
+      message = String.fromBytes(bytes: bytes, start: 0, count: length)
+    }
+  }
+  ret KeychainError { kind: kind, status: status, message: message }
+}
+
+func keychainUnsupported() ret KeychainError {
+  ret KeychainError {
+    kind: KeychainErrorKind.unsupported
+    status: 0
+    message: "no Keychain on this platform"
+  }
+}
+
+# Store `secret` under `service` and `account`, replacing what was there
+func keychainStore(
+  service: view String
+  account: view String
+  secret: view List(UInt8)
+  requireUserPresence: view Bool
+) ret KeychainError {
+  when hasKeychain {
+    # replace: remove the one before from both keychains, then add
+    let removedPlain: KeychainError = keychainDeleteFrom(
+      service: service
+      account: account
+      protectedItem: false
+    )
+    let removedProtected: KeychainError = keychainDeleteFrom(
+      service: service
+      account: account
+      protectedItem: true
+    )
+    var serviceZ: List(UInt8) = keychainTextZ(text: service)
+    var accountZ: List(UInt8) = keychainTextZ(text: account)
+    var presence: Int = 0
+    if requireUserPresence {
+      presence = 1
+    }
+    var status: Int = 0
+    unsafe {
+      status = rae_ext_Keychain_add(
+        serviceZ: serviceZ.data
+        accountZ: accountZ.data
+        bytes: secret.data
+        offset: 0
+        count: secret.length
+        userPresence: presence
+      )
+    }
+    ret keychainError(status: status)
+  }
+  ret keychainUnsupported()
+}
+
+func keychainDeleteFrom(
+  service: view String
+  account: view String
+  protectedItem: view Bool
+) ret KeychainError {
+  when hasKeychain {
+    var serviceZ: List(UInt8) = keychainTextZ(text: service)
+    var accountZ: List(UInt8) = keychainTextZ(text: account)
+    var protectedFlag: Int = 0
+    if protectedItem {
+      protectedFlag = 1
+    }
+    var status: Int = 0
+    unsafe {
+      status = rae_ext_Keychain_delete(
+        serviceZ: serviceZ.data
+        accountZ: accountZ.data
+        protectedItem: protectedFlag
+      )
+    }
+    ret keychainError(status: status)
+  }
+  ret keychainUnsupported()
+}
+
+# Delete the secret (`notFound` when there was none)
+func keychainDelete(service: view String, account: view String) ret KeychainError {
+  let plain: KeychainError = keychainDeleteFrom(
+    service: service
+    account: account
+    protectedItem: false
+  )
+  let protected: KeychainError = keychainDeleteFrom(
+    service: service
+    account: account
+    protectedItem: true
+  )
+  if plain.kind is KeychainErrorKind.none or protected.kind is KeychainErrorKind.none {
+    ret keychainOk()
+  }
+  if plain.kind is KeychainErrorKind.notFound and (protected.kind is KeychainErrorKind.notFound or protected.kind is KeychainErrorKind.missingEntitlement) {
+    ret plain
+  }
+  if plain.kind is not KeychainErrorKind.notFound {
+    ret plain
+  }
+  ret protected
+}
+
+# The most a secret is expected to be; a longer one is read again whole
+const keychainReadCapacity: Int = 4096
+
+func keychainReadFrom(
+  service: view String
+  account: view String
+  protectedItem: view Bool
+  options: view KeychainReadOptions
+) ret KeychainRead {
+  when hasKeychain {
+    var serviceZ: List(UInt8) = keychainTextZ(text: service)
+    var accountZ: List(UInt8) = keychainTextZ(text: account)
+    var promptZ: List(UInt8) = keychainTextZ(text: options.prompt)
+    var protectedFlag: Int = 0
+    if protectedItem {
+      protectedFlag = 1
+    }
+    var interactiveFlag: Int = 0
+    if options.interactive {
+      interactiveFlag = 1
+    }
+    var capacity: Int = keychainReadCapacity
+    loop {
+      var bytes: List(UInt8) = List.create(UInt8, cap: capacity)
+      loop var i: Int = 0, i < capacity, ++i {
+        bytes.add(value: 0)
+      }
+      var answer: Int = 0
+      unsafe {
+        answer = rae_ext_Keychain_read(
+          serviceZ: serviceZ.data
+          accountZ: accountZ.data
+          protectedItem: protectedFlag
+          promptZ: promptZ.data
+          interactive: interactiveFlag
+          into: bytes.data
+          capacity: capacity
+        )
+      }
+      if answer < 0 {
+        ret KeychainRead { bytes: List.create(UInt8, cap: 0), error: keychainError(status: answer) }
+      }
+      if answer <= capacity {
+        loop bytes.length > answer {
+          bytes.remove(index: bytes.length - 1)
+        }
+        ret KeychainRead { bytes: own bytes, error: keychainOk() }
+      }
+      capacity = answer
+    }
+  }
+  ret KeychainRead { bytes: List.create(UInt8, cap: 0), error: keychainUnsupported() }
+}
+
+# Read the secret; a protected one asks for Face ID / the passcode first
+# (`options.prompt` says why). `notFound` when there is none.
+func keychainRead(
+  service: view String
+  account: view String
+  options: view KeychainReadOptions
+) ret KeychainRead {
+  let plain: KeychainRead = keychainReadFrom(
+    service: service
+    account: account
+    protectedItem: false
+    options: options
+  )
+  if plain.error.kind is not KeychainErrorKind.notFound {
+    ret plain
+  }
+  let protected: KeychainRead = keychainReadFrom(
+    service: service
+    account: account
+    protectedItem: true
+    options: options
+  )
+  if protected.error.kind is KeychainErrorKind.missingEntitlement {
+    ret plain
+  }
+  ret protected
+}

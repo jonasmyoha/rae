@@ -2933,7 +2933,11 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   /* lib/net/NetworkConnection: Apple's Network.framework, linked only for a
    * program whose C includes its shim (runtime_network_apple.h) */
 #if defined(__APPLE__)
-  const char* network_flags = c_output_includes(c_path, "runtime_network_apple.h") ? " -framework Network -framework Security" : "";
+  /* lib/Keychain: Security.framework, for a program whose C includes its
+   * shim (runtime_keychain_apple.h) */
+  const char* network_flags = c_output_includes(c_path, "runtime_network_apple.h")
+      ? " -framework Network -framework Security"
+      : (c_output_includes(c_path, "runtime_keychain_apple.h") ? " -framework Security" : "");
 #else
   const char* network_flags = "";
 #endif

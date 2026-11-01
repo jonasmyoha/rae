@@ -1,0 +1,67 @@
+# lib/Keychain against the real Keychain (this test runs on macOS): a 64-byte
+# secret stored under a random account, read back equal, replaced, deleted;
+# a read and a second delete after that are `notFound` values; a secret that
+# needs Face ID / the passcode answers `missingEntitlement` from a program
+# that is not a signed app (macOS keeps it in the data-protection keychain).
+# The account is random, so a run never meets an item an earlier run's
+# binary made (macOS would ask before letting another program read it).
+open Keychain
+open crypto/CryptoBytes
+open crypto/CryptoRandom
+
+func main() {
+  let account: String = "test-{hexOfBytes(bytes: cryptoRandomBytes(count: 6))}"
+  let service: String = "org.rae.keychain-test"
+  let secret: List(UInt8) = cryptoRandomBytes(count: 64)
+  let stored: KeychainError = keychainStore(
+    service: service
+    account: account
+    secret: secret
+    requireUserPresence: false
+  )
+  log("store: {stored.kind}")
+  let read: KeychainRead = keychainRead(
+    service: service
+    account: account
+    options: keychainDefaultReadOptions()
+  )
+  log(
+    "read: {read.error.kind} {read.bytes.length} bytes, same {bytesEqual(a: read.bytes, b: secret)}"
+  )
+  let again: KeychainError = keychainStore(
+    service: service
+    account: account
+    secret: bytesOfText(text: "replaced")
+    requireUserPresence: false
+  )
+  let reread: KeychainRead = keychainRead(
+    service: service
+    account: account
+    options: keychainDefaultReadOptions()
+  )
+  log(
+    "replace: {again.kind}, now '{String.fromBytes(
+      bytes: reread.bytes
+      start: 0
+      count: reread.bytes.length
+    )}'"
+  )
+  let deleted: KeychainError = keychainDelete(service: service, account: account)
+  log("delete: {deleted.kind}")
+  let gone: KeychainRead = keychainRead(
+    service: service
+    account: account
+    options: keychainDefaultReadOptions()
+  )
+  log("after delete: {gone.error.kind} {gone.error.status} '{gone.error.message}'")
+  let deletedAgain: KeychainError = keychainDelete(service: service, account: account)
+  log("delete again: {deletedAgain.kind}")
+  let protected: KeychainError = keychainStore(
+    service: service
+    account: account
+    secret: secret
+    requireUserPresence: true
+  )
+  log("protected store: {protected.kind}")
+  let cleanup: KeychainError = keychainDelete(service: service, account: account)
+}
