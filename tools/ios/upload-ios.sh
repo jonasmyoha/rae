@@ -12,7 +12,7 @@
 # Before the first upload: an explicit App ID for the bundle id in the
 # developer account, and an app with that bundle id in App Store Connect.
 # RAE_IOS_BUILD must be higher than every earlier upload of the same version.
-# The gen-ios.sh options (RAE_IOS_NAME, RAE_IOS_ICON, RAE_IOS_ORIENTATIONS,
+# The gen-ios.sh options (RAE_IOS_NAME, RAE_IOS_BUILD_NAME, RAE_IOS_ICON, RAE_IOS_ORIENTATIONS,
 # RAE_IOS_EXEMPT_ENCRYPTION, RAE_IOS_PRIVACY_MANIFEST, ...) apply.
 #
 # Who uploads: the Apple ID signed into Xcode -> Settings -> Accounts, or an
@@ -26,13 +26,20 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
 ex=${1:?usage: RAE_IOS_TEAM=<id> RAE_IOS_BUILD=<n> upload-ios.sh <project-dir>}
 name=$(basename "$ex")
+# The build folder's name, build/ios/<name> (RAE_IOS_BUILD_NAME, default the
+# project folder's name): two projects whose folders share a generic name
+# (`shell`, `app`) set it so they do not overwrite each other's Xcode project.
+build_name=${RAE_IOS_BUILD_NAME:-$name}
+case "$build_name" in
+  ""|*/*|.|..) echo "error: RAE_IOS_BUILD_NAME must be one folder name, not '$build_name'" >&2; exit 1 ;;
+esac
 team=${RAE_IOS_TEAM:?set RAE_IOS_TEAM (the Apple Developer team id)}
 [ -n "${RAE_IOS_BUILD:-}" ] || { echo "error: set RAE_IOS_BUILD (higher than every earlier upload of this version)" >&2; exit 1; }
 
 # 1. Generate the Xcode project with this version and build number.
 sh "$here/gen-ios.sh" "$ex" >/dev/null
-. "$root/build/ios/$name/meta.env"
-gen="$root/build/ios/$name"
+. "$root/build/ios/$build_name/meta.env"
+gen="$root/build/ios/$build_name"
 
 auth=""
 if [ -n "${RAE_IOS_ASC_KEY_PATH:-}" ]; then

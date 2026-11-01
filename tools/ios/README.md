@@ -42,6 +42,18 @@ device is held; `portrait` locks a phone upright), `RAE_IOS_DEPLOYMENT_TARGET` (
 icon, made the AppIcon set of a generated asset catalog (single-size; Xcode
 makes the rest).
 
+**The build folder: `RAE_IOS_BUILD_NAME`.** Everything is generated into
+`build/ios/<name>/` (the Xcode project under `proj/`, `meta.env`, the archive
+and the `.ipa`), where `<name>` is `RAE_IOS_BUILD_NAME`, by default the project
+folder's name. Two projects whose folders share a generic name — SUMU's Rae
+project is the folder `shell/`, another app's may be `app/` — would share
+`build/ios/shell/` and overwrite each other's Xcode project, so each sets its
+own: `RAE_IOS_BUILD_NAME=sumu sh tools/ios/gen-ios.sh ~/personal/sumu/sumu/shell`.
+`gen-ios.sh`, `run-ios.sh` and `upload-ios.sh` all read it, so set the same
+value for all three (a Makefile sets it once with the other `RAE_IOS_*`
+options). It is one folder name: no `/`. It names only the folder: the
+bundle id and the display name stay `RAE_IOS_BUNDLE_ID` / `RAE_IOS_NAME`.
+
 ## Upload to App Store Connect (TestFlight)
 
 ```sh

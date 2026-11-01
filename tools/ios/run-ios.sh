@@ -8,6 +8,8 @@
 #
 # RAE_IOS_TEAM   your Apple Developer team id (required; e.g. from an installed
 #                provisioning profile's TeamIdentifier).
+# RAE_IOS_BUILD_NAME  the build folder, build/ios/<name> (default: the project
+#                folder's name), as for gen-ios.sh; set the same value for both.
 # device / RAE_IOS_DEVICE  a devicectl device identifier or name; default =
 #                the first "available" device.
 # RAE_IOS_PROFILE  seconds to capture a frame profile (#527). When set, the app
@@ -20,6 +22,13 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
 ex=${1:?usage: RAE_IOS_TEAM=<id> run-ios.sh <example> [device]}
 name=$(basename "$ex")
+# The build folder's name, build/ios/<name> (RAE_IOS_BUILD_NAME, default the
+# project folder's name): two projects whose folders share a generic name
+# (`shell`, `app`) set it so they do not overwrite each other's Xcode project.
+build_name=${RAE_IOS_BUILD_NAME:-$name}
+case "$build_name" in
+  ""|*/*|.|..) echo "error: RAE_IOS_BUILD_NAME must be one folder name, not '$build_name'" >&2; exit 1 ;;
+esac
 
 # Team: RAE_IOS_TEAM, else inferred from the first installed provisioning profile
 # (its TeamIdentifier) so the devtools "iOS device" button works with no env.
@@ -36,7 +45,7 @@ fi
 
 # 1. Generate/refresh the Xcode project (idempotent).
 sh "$here/gen-ios.sh" "$ex" >/dev/null
-. "$root/build/ios/$name/meta.env"
+. "$root/build/ios/$build_name/meta.env"
 
 # 2. Pick the device: arg > RAE_IOS_DEVICE > first "available" from devicectl.
 device=${2:-${RAE_IOS_DEVICE:-}}
