@@ -1,0 +1,43 @@
+# The grass compute pass carries its own copy of the gust field
+# (lib/grass_compute.wgsl grassGust*), so an app's own grass composition
+# (game proto1 lists its own files) needs no extra file. It must stay the same
+# field as lib/wind.wgsl's windGust* (the trees' and the leaves'), which
+# checks/windGust holds to the Rae: the block between the "gust field begin"
+# and "gust field end" markers of the two files is the same code, `windGust`
+# renamed `grassGust`.
+import Sys
+import String
+
+# The lines between the markers, comments dropped
+func gustBlock(path: view String) ret String {
+  var block: String = ""
+  if let text: String = Sys.readFile(path: Sys.stdlibPath(path: path)) {
+    var inside: Bool = false
+    loop let line: view String in text.split(sep: "\n") {
+      if line.startsWith(prefix: "// --- gust field begin") {
+        inside = true
+        continue
+      }
+      if line.startsWith(prefix: "// --- gust field end") {
+        inside = false
+        continue
+      }
+      if inside and line.trim().startsWith(prefix: "//") is false {
+        block = "{block}{line}\n"
+      }
+    }
+  }
+  ret block
+}
+
+func main() {
+  let trees: String = gustBlock(path: "lib/wind.wgsl")
+  let grass: String = gustBlock(path: "lib/grass_compute.wgsl")
+  log("the gust field: {trees.split(sep: "\n").length} lines in lib/wind.wgsl")
+  log(
+    "the grass copy is the same code: {trees.length() > 0 and trees.replace(
+      old: "windGust"
+      new: "grassGust"
+    ) is grass}"
+  )
+}

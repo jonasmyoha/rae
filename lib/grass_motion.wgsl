@@ -1,9 +1,9 @@
 // The grass's rooted response to the app WindVector: a steady lean downwind
 // and a slow, smooth sway that rolls across the field with the wind (one
-// long wave), a push as a gust crosses it (`gust`: the blade's
-// lib/wind.wgsl windGustAt, which the grass compute pass evaluates once per
-// blade; the field travels with the air's drift, so it never jumps, unlike
-// the first gust noise that was taken out), plus a small tip flutter.
+// long wave), a push as a gust crosses it (`gust`: the trees' gust field at
+// the blade, from the compute pass's grassGustAt; the field travels with the
+// air's drift, so it never jumps, unlike the first gust noise that was taken
+// out), plus a small tip flutter.
 fn grassWindOffset(base: vec2<f32>, height: f32, time: f32, wind: vec3<f32>, gust: f32) -> vec2<f32> {
   let strength = length(wind.xy);
   if (strength <= 0.0001 || height <= 0.0) { return vec2<f32>(0.0); }
