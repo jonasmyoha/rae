@@ -1805,7 +1805,11 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                         const AstFuncDecl* cfd = &d->as.func_decl;
                         if (!str_eq(cfd->name, fname) || !cfd->generic_params
                             || !cfd->returns || !cfd->returns->type) continue;
-                        if (!type_ref_mentions_params(cfd->returns->type, cfd->generic_params)) break;
+                        // A return that names no type parameter (`ret Answer`) is
+                        // already concrete: a field read off the call
+                        // (`make(Box, item: b).inner.kind`) needs it as it is.
+                        if (!type_ref_mentions_params(cfd->returns->type, cfd->generic_params))
+                            return cfd->returns->type;
                         const AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx,
                             cfd->generic_params, type_args, cfd->returns->type);
                         if (concrete && ctx->generic_params && ctx->generic_args)
