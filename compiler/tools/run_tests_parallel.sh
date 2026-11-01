@@ -147,6 +147,15 @@ if [ -f tools/c-warnings-gate.sh ]; then
   stage_time "tools/c-warnings-gate.sh" "$stage_start"
   echo
 fi
+# A WASM module build, called from a Node host (tools/wasm-module-check.sh,
+# docs/wasm-modules.md); SKIP without wasi-sdk or node.
+MODULE_CHECK=1
+if [ -f tools/wasm-module-check.sh ]; then
+  stage_start=$(date +%s)
+  if bash tools/wasm-module-check.sh; then MODULE_CHECK=0; fi
+  stage_time "tools/wasm-module-check.sh" "$stage_start"
+  echo
+fi
 # Both Rae HTTP benchmark servers against every spec/Http.md rule
 # (benchmarks/servers/check.sh --rae, decision F7): correctness, never speed.
 SERVER_CHECK=1
@@ -199,6 +208,7 @@ if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)
 if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$WARNINGS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$MODULE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then

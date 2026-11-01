@@ -124,6 +124,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/c-warnings-gate.sh" ]; then
   if ! bash tools/c-warnings-gate.sh; then WARNINGS_CHECK_FAILED=1; fi
   echo
 fi
+# A WASM module build, called from a Node host (tools/wasm-module-check.sh).
+MODULE_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm-module-check.sh" ]; then
+  if ! bash tools/wasm-module-check.sh; then MODULE_CHECK_FAILED=1; fi
+  echo
+fi
 # Both Rae HTTP benchmark servers against every spec/Http.md rule
 # (benchmarks/servers/check.sh --rae, decision F7), same place.
 SERVER_CHECK_FAILED=0
@@ -664,6 +670,7 @@ if [ "$BENCH_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$WARNINGS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$MODULE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi

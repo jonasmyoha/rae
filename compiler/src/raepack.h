@@ -24,6 +24,10 @@ typedef struct RaePackTarget {
   Str id;
   Str label;
   Str entry;
+  /* `exports: "add, greet"` on the wasm target: build a WASM module (a WASI
+   * reactor) exporting these functions by name (docs/wasm-modules.md);
+   * empty for a program */
+  Str exports;
   RaePackSource* sources;
   size_t source_count;
   struct RaePackTarget* next;

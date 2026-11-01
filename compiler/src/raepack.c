@@ -539,6 +539,14 @@ static bool parse_target_block(RaePackParser* parser,
       target->entry = field->value.as.string;
       entry_field = field;
       saw_entry = true;
+    } else if (str_eq_cstr(field->key, "exports")) {
+      if (field->value.kind != RAEPACK_VALUE_STRING) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "exports must be a string of function names");
+        parser->had_error = true;
+        return false;
+      }
+      target->exports = field->value.as.string;
     } else if (str_eq_cstr(field->key, "sources")) {
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
         diag_error(parser->file_path, (int)field->line, (int)field->column,
