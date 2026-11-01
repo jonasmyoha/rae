@@ -1,0 +1,29 @@
+# #23748650: an enum field read straight off a generic call prints its case name
+enum Kind { first, second }
+
+type Inner {
+  kind: Kind
+}
+
+type Answer {
+  inner: Inner
+}
+
+type Box {
+  value: Int
+}
+
+func make(T: type, item: view T) ret Answer {
+  ret Answer { inner: Inner { kind: Kind.second } }
+}
+
+func plain() ret Answer {
+  ret Answer { inner: Inner { kind: Kind.second } }
+}
+
+func main() {
+  log("generic temporary: {make(Box, item: Box { value: 1 }).inner.kind}")
+  log("plain temporary: {plain().inner.kind}")
+  let bound: Answer = make(Box, item: Box { value: 1 })
+  log("bound: {bound.inner.kind}")
+}
