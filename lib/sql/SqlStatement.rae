@@ -1,0 +1,397 @@
+# SqlStatement — prepared statements (docs/sql.md): prepare SQL with `?`
+# (or `:name`) placeholders, bind values to them, step through the rows,
+# read each column, reset to run again, finalize when done. Every failure is
+# an SqlError on the statement or a returned value, never a crash: a
+# statement that failed to prepare, or is finalized, answers every call with
+# a misuse error and reads as no rows.
+#
+# Placeholders count from 1 (SQLite's rule, so `?1` is index 1); columns
+# count from 0.
+import String
+open sql/SqlGlue
+open sql/Sql
+
+type SqlStatement {
+  handle: Int
+  # the connection it was prepared on, whose error messages it reports
+  database: Int
+  live: Bool
+  sql: String
+  error: SqlError
+}
+
+# What one step did
+enum SqlStep { row, done, failed }
+
+# a row is ready to read
+# the statement has run to the end
+# it failed; `statement.error` says why
+
+# A column's type in the current row
+enum SqlType {
+  integer
+  float
+  text
+  blob
+  null
+}
+
+# Prepare one statement of `sql` on `database`
+func sqlPrepare(database: view SqlDatabase, sql: view String) ret SqlStatement {
+  if database.open is false {
+    ret SqlStatement {
+      handle: 0
+      database: 0
+      live: false
+      sql: "{sql}"
+      error: sqlMisuse(message: "the database {database.path} is closed")
+    }
+  }
+  var bytes: List(UInt8) = sqlTextBytes(text: sql)
+  var handle: Int = 0
+  unsafe {
+    handle = rae_sql_prepare(
+      db: database.handle
+      sql: bytes.data
+      offset: 0
+      count: bytes.length
+    )
+  }
+  if handle is 0 {
+    var error: SqlError = sqlErrorOf(handle: database.handle)
+    if sqlFailed(error: error) is false {
+      error = sqlMisuse(message: "no statement in: {sql}")
+    }
+    ret SqlStatement {
+      handle: handle
+      database: database.handle
+      live: false
+      sql: "{sql}"
+      error: own error
+    }
+  }
+  ret SqlStatement {
+    handle: handle
+    database: database.handle
+    live: true
+    sql: "{sql}"
+    error: sqlNoError()
+  }
+}
+
+# The error of a call on a statement that is not live
+func sqlNotLive(statement: view SqlStatement) ret SqlError {
+  if sqlFailed(error: statement.error) {
+    ret SqlError {
+      code: statement.error.code
+      extendedCode: statement.error.extendedCode
+      message: "{statement.error.message}"
+    }
+  }
+  ret sqlMisuse(message: "the statement is finalized: {statement.sql}")
+}
+
+# A call's result code as an error, recorded on the statement: the
+# connection's message and extended code (e.g. "UNIQUE constraint failed:
+# things.name", 2067), with the statement's SQL after it
+func sqlStatementResult(statement: mod SqlStatement, code: view Int) ret SqlError {
+  if code is 0 or code is 100 or code is 101 {
+    ret sqlNoError()
+  }
+  let connection: SqlError = sqlErrorFor(handle: statement.database, code: code)
+  let error: SqlError = {
+    code: connection.code
+    extendedCode: connection.extendedCode
+    message: "{connection.message} ({statement.sql})"
+  }
+  statement.error = SqlError {
+    code: error.code
+    extendedCode: error.extendedCode
+    message: "{error.message}"
+  }
+  ret error
+}
+
+# ----- binding (placeholders count from 1) -----
+func sqlBindInt(statement: mod SqlStatement, index: view Int, value: view Int) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_bind_int(stmt: statement.handle, index: index, value: value)
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+func sqlBindFloat(statement: mod SqlStatement, index: view Int, value: view Float64) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_bind_double(stmt: statement.handle, index: index, value: value)
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+func sqlBindText(statement: mod SqlStatement, index: view Int, value: view String) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var bytes: List(UInt8) = sqlTextBytes(text: value)
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_bind_text(
+      stmt: statement.handle
+      index: index
+      bytes: bytes.data
+      offset: 0
+      count: bytes.length
+    )
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+func sqlBindBytes(
+  statement: mod SqlStatement
+  index: view Int
+  value: view List(UInt8)
+) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_bind_blob(
+      stmt: statement.handle
+      index: index
+      bytes: value.data
+      offset: 0
+      count: value.length
+    )
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+func sqlBindNull(statement: mod SqlStatement, index: view Int) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_bind_null(stmt: statement.handle, index: index)
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+# The index of the named placeholder `name` (with its `:`, `@` or `$`), 0
+# when the statement has none of that name
+func sqlParameterIndex(statement: view SqlStatement, name: view String) ret Int {
+  if statement.live is false {
+    ret 0
+  }
+  var nameZ: List(UInt8) = sqlTextZ(text: name)
+  unsafe {
+    ret rae_sql_bind_parameter_index(stmt: statement.handle, nameZ: nameZ.data)
+  }
+}
+
+# How many placeholders the statement has
+func sqlParameterCount(statement: view SqlStatement) ret Int {
+  if statement.live is false {
+    ret 0
+  }
+  unsafe {
+    ret rae_sql_bind_parameter_count(stmt: statement.handle)
+  }
+}
+
+# ----- running -----
+
+# One step: a row to read, the end, or a failure (on `statement.error`)
+func sqlStep(statement: mod SqlStatement) ret SqlStep {
+  if statement.live is false {
+    statement.error = sqlNotLive(statement: statement)
+    ret SqlStep.failed
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_step(stmt: statement.handle)
+  }
+  if code is 100 {
+    ret SqlStep.row
+  }
+  if code is 101 {
+    ret SqlStep.done
+  }
+  let error: SqlError = sqlStatementResult(statement: statement, code: code)
+  ret SqlStep.failed
+}
+
+# Step to the end, for a statement that returns no rows (INSERT, UPDATE...)
+func sqlRun(statement: mod SqlStatement) ret SqlError {
+  loop {
+    let step: SqlStep = sqlStep(statement: statement)
+    if step is SqlStep.failed {
+      ret SqlError {
+        code: statement.error.code
+        extendedCode: statement.error.extendedCode
+        message: "{statement.error.message}"
+      }
+    }
+    if step is SqlStep.done {
+      ret sqlNoError()
+    }
+  }
+}
+
+# Back to before the first step, to run again; the bound values stay
+# (`sqlClearBindings` sets them all to null)
+func sqlReset(statement: mod SqlStatement) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  statement.error = sqlNoError()
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_reset(stmt: statement.handle)
+  }
+  # reset repeats the last step's error; that one was reported already
+  ret sqlNoError()
+}
+
+func sqlClearBindings(statement: mod SqlStatement) ret SqlError {
+  if statement.live is false {
+    ret sqlNotLive(statement: statement)
+  }
+  var code: Int = 0
+  unsafe {
+    code = rae_sql_clear_bindings(stmt: statement.handle)
+  }
+  ret sqlStatementResult(statement: statement, code: code)
+}
+
+# Free the statement. Every prepared statement is finalized before its
+# database closes; finalizing twice does nothing.
+func sqlFinalize(statement: mod SqlStatement) {
+  if statement.live is false {
+    ret
+  }
+  unsafe {
+    let code: Int = rae_sql_finalize(stmt: statement.handle)
+  }
+  statement.live = false
+}
+
+# ----- columns of the current row (count from 0) -----
+func sqlColumnCount(statement: view SqlStatement) ret Int {
+  if statement.live is false {
+    ret 0
+  }
+  unsafe {
+    ret rae_sql_column_count(stmt: statement.handle)
+  }
+}
+
+func sqlColumnInRange(statement: view SqlStatement, column: view Int) ret Bool {
+  ret column >= 0 and column < sqlColumnCount(statement: statement)
+}
+
+func sqlColumnType(statement: view SqlStatement, column: view Int) ret SqlType {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret SqlType.null
+  }
+  var code: Int = 5
+  unsafe {
+    code = rae_sql_column_type(stmt: statement.handle, column: column)
+  }
+  if code is 1 {
+    ret SqlType.integer
+  }
+  if code is 2 {
+    ret SqlType.float
+  }
+  if code is 3 {
+    ret SqlType.text
+  }
+  if code is 4 {
+    ret SqlType.blob
+  }
+  ret SqlType.null
+}
+
+func sqlColumnIsNull(statement: view SqlStatement, column: view Int) ret Bool {
+  ret sqlColumnType(statement: statement, column: column) is SqlType.null
+}
+
+# The column as an integer (SQLite converts other types; null is 0)
+func sqlColumnInt(statement: view SqlStatement, column: view Int) ret Int {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret 0
+  }
+  unsafe {
+    ret rae_sql_column_int(stmt: statement.handle, column: column)
+  }
+}
+
+func sqlColumnFloat(statement: view SqlStatement, column: view Int) ret Float64 {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret 0.0
+  }
+  unsafe {
+    ret rae_sql_column_double(stmt: statement.handle, column: column)
+  }
+}
+
+# The column as text (UTF-8; null is "")
+func sqlColumnText(statement: view SqlStatement, column: view Int) ret String {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret ""
+  }
+  var length: Int = 0
+  unsafe {
+    length = rae_sql_column_bytes(stmt: statement.handle, column: column)
+  }
+  if length <= 0 {
+    ret ""
+  }
+  var bytes: List(UInt8) = sqlZeroBytes(count: length)
+  unsafe {
+    rae_sql_column_text_copy(stmt: statement.handle, column: column, into: bytes.data)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# The column as bytes (a blob; text gives its UTF-8; null is none)
+func sqlColumnBytes(statement: view SqlStatement, column: view Int) ret List(UInt8) {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret List.create(UInt8, cap: 0)
+  }
+  var length: Int = 0
+  unsafe {
+    length = rae_sql_column_bytes(stmt: statement.handle, column: column)
+  }
+  var bytes: List(UInt8) = sqlZeroBytes(count: length)
+  if length > 0 {
+    unsafe {
+      rae_sql_column_blob_copy(stmt: statement.handle, column: column, into: bytes.data)
+    }
+  }
+  ret bytes
+}
+
+func sqlColumnName(statement: view SqlStatement, column: view Int) ret String {
+  if sqlColumnInRange(statement: statement, column: column) is false {
+    ret ""
+  }
+  var length: Int = 0
+  unsafe {
+    length = rae_sql_column_name_length(stmt: statement.handle, column: column)
+  }
+  var bytes: List(UInt8) = sqlZeroBytes(count: length)
+  unsafe {
+    rae_sql_column_name_copy(stmt: statement.handle, column: column, into: bytes.data)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}

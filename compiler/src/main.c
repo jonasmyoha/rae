@@ -2814,6 +2814,41 @@ static bool box3d_link_flags(const char* c_path, char* flags, size_t cap) {
   return true;
 }
 
+/* SQLite (lib/sql, docs/sql.md): a program whose C includes the glue header
+ * links the static library tools/sqlite/build.sh installed at $RAE_SQLITE
+ * (default ~/.cache/rae/sqlite/install): lib/libsqlite3.a natively,
+ * lib/emscripten/libsqlite3.a in the browser. The install root goes into
+ * `root`. */
+static void sqlite_install_root(char* root, size_t cap) {
+  const char* configured = getenv("RAE_SQLITE");
+  if (configured && *configured) {
+    snprintf(root, cap, "%s", configured);
+    return;
+  }
+  const char* home = getenv("HOME"); if (!home) home = ".";
+  snprintf(root, cap, "%s/.cache/rae/sqlite/install", home);
+}
+
+static bool sqlite_link_flags(const char* c_path, char* flags, size_t cap) {
+  flags[0] = '\0';
+  if (!c_output_includes(c_path, "rae_sql.h")) return true;
+  char root[PATH_MAX];
+  sqlite_install_root(root, sizeof(root));
+  char lib[PATH_MAX + 32];
+  snprintf(lib, sizeof(lib), "%s/lib/libsqlite3.a", root);
+  struct stat st;
+  if (stat(lib, &st) != 0) {
+    fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh (or set RAE_SQLITE)\n", lib);
+    return false;
+  }
+#if defined(__linux__)
+  snprintf(flags, cap, "-I%s/include %s -lpthread -lm", root, lib);
+#else
+  snprintf(flags, cap, "-I%s/include %s", root, lib);
+#endif
+  return true;
+}
+
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
@@ -2893,6 +2928,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   if (!extra_cflags) extra_cflags = "";
   char box3d_flags[PATH_MAX * 2 + 64];
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
+  char sqlite_flags[PATH_MAX * 2 + 64];
+  if (!sqlite_link_flags(c_path, sqlite_flags, sizeof(sqlite_flags))) return false;
   // Rae builds from source for the machine it runs on, so an x86-64 CPU with
   // AVX2 compiles with it: lib/Float8 is then one 256-bit register
   // (runtime_float8.h, docs/float4-design.md §10). The choice is the
@@ -2920,9 +2957,9 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s%s %s -o %s",
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s%s %s %s -o %s",
            opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           c_path, runtime_object, extra_c_files, box3d_flags, out_bin);
+           c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, out_bin);
 
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
@@ -3178,6 +3215,23 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     }
     args[n++] = box3d_include;
     args[n++] = box3d_library;
+  }
+  /* SQLite (lib/sql): the Emscripten build of the library tools/sqlite/build.sh
+   * installs, when the program's C includes the glue header */
+  char sqlite_include[PATH_MAX + 4];
+  char sqlite_library[PATH_MAX + 48];
+  if (c_output_includes(c_path, "rae_sql.h")) {
+    char sqlite_root[PATH_MAX];
+    sqlite_install_root(sqlite_root, sizeof(sqlite_root));
+    snprintf(sqlite_include, sizeof(sqlite_include), "-I%s/include", sqlite_root);
+    snprintf(sqlite_library, sizeof(sqlite_library), "%s/lib/emscripten/libsqlite3.a", sqlite_root);
+    struct stat sqlite_stat;
+    if (stat(sqlite_library, &sqlite_stat) != 0) {
+      fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh with emcc installed (or set RAE_SQLITE)\n", sqlite_library);
+      return false;
+    }
+    args[n++] = sqlite_include;
+    args[n++] = sqlite_library;
   }
   args[n++] = c_path;
   args[n++] = runtime_c;
