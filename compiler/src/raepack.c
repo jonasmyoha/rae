@@ -47,6 +47,9 @@ typedef struct {
   const char* file_path;
   Arena* arena;
   bool had_error;
+  /* a dependency's own pack (#64888955): a library needs no build targets,
+   * only its format, version and dependencies */
+  bool library;
 } RaePackParser;
 
 static const Token* parser_peek(const RaePackParser* parser) {
@@ -811,7 +814,9 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
     }
   }
 
-  if (!saw_format || !saw_version || !saw_default || !saw_targets) {
+  if (parser->library && saw_format && saw_version) {
+    /* a library pack: targets are optional */
+  } else if (!saw_format || !saw_version || !saw_default || !saw_targets) {
     diag_error(parser->file_path, 0, 0,
                "raepack requires format, version, defaultTarget, and targets");
     parser->had_error = true;
@@ -830,7 +835,17 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
   return true;
 }
 
+static bool raepack_parse_file_as(const char* file_path, RaePack* out, bool strict, bool library);
+
 bool raepack_parse_file(const char* file_path, RaePack* out, bool strict) {
+  return raepack_parse_file_as(file_path, out, strict, false);
+}
+
+bool raepack_parse_library_file(const char* file_path, RaePack* out) {
+  return raepack_parse_file_as(file_path, out, false, true);
+}
+
+static bool raepack_parse_file_as(const char* file_path, RaePack* out, bool strict, bool library) {
   if (out) memset(out, 0, sizeof(RaePack));
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
@@ -856,7 +871,8 @@ bool raepack_parse_file(const char* file_path, RaePack* out, bool strict) {
     .index = 0,
     .file_path = file_path,
     .arena = arena,
-    .had_error = false
+    .had_error = false,
+    .library = library
   };
   if (!parser.had_error) {
     out->arena = arena;

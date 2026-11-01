@@ -1,0 +1,10 @@
+# Two sibling dependencies: the project declares both, but the sdk's own pack
+# does not declare `words`, so the sdk may not use it (a package sees only its
+# own files, the stdlib and its own dependencies). The project may.
+import sdk/Greeting
+import words/Words
+
+func main() {
+  log(Words.word())
+  log(Greeting.greeting())
+}

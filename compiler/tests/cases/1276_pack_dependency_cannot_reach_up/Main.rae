@@ -1,0 +1,10 @@
+# A dependency never reaches the project that depends on it
+# (docs/raepack-v2-and-packages.md §12): the sdk's Greeting calls the
+# project's function bare and qualified and uses the project's type, and all
+# three are compile errors in the sdk's file. The project itself uses the sdk
+# through its import, as it should.
+import sdk/Greeting
+
+func main() {
+  log(Greeting.greeting())
+}

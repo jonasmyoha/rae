@@ -2015,6 +2015,12 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       if (entry->d_name[0] == '.') {
         continue;
       }
+      // #64888955: a path dependency's folder inside the project tree
+      // (`vendor/sdk`) is its own package, loaded only through its `dep` name
+      // (`import sdk/Greeting`), never as project source under its folder path
+      if (rae_deps_owns_path(child_path)) {
+        continue;
+      }
       if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out, no_implicit)) {
         closedir(dir);
         return false;
