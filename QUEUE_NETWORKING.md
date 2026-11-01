@@ -1,51 +1,53 @@
 # QUEUE: Networking & Persistence
 
-## Step 1: Language Foundation (Pre-requisites)
-- [x] **Defaults:** Enforce zero-initialization for all locals and struct fields in VM and C backend.
-    - [x] Add test case `358_default_init` covering all types (Int, Float, Bool, String, enums, structs).
-    - [x] VM: Ensure `AST_STMT_LET` without value emits `OP_DEFAULT_VALUE` or equivalent zeroing.
-    - [x] VM: Ensure struct allocation (object literals or defaults) zeroes all fields.
-    - [x] C Backend: Ensure `let` declarations without value emit `{0}` initialization.
-    - [x] C Backend: Ensure struct declarations/allocations use `{0}`.
-    - [x] Create example `14_defaults` demonstrating the feature.
-- [x] **The `defer` Keyword:** Implement `defer` in the parser, VM, and C backend for scope-based cleanup.
-    - [x] Parser: Support `defer <stmt>` syntax.
-    - [x] VM Compiler: Implement a "defer stack" during compilation to emit cleanup code at every scope exit point (return, end of block).
-    - [x] VM: Ensure `OP_DEFER` or similar correctly executes the deferred statement.
-    - [x] C Backend: Implement `defer` using a similar cleanup-stack approach or a goto-based cleanup pattern.
-    - [x] Add test case `359_defer_logic` covering multiple defers and early returns.
-    - [x] Create example `15_defer_cleanup` showing file handle management.
-- [x] **Spawn Syntax:** Implement the `spawn` call-site keyword and ensure it triggers background execution for `spawn`-modified functions.
-    - [x] Parser: Add `spawn` as a valid call-site prefix.
-    - [x] VM Compiler: Emit `OP_SPAWN` for calls prefixed with `spawn`.
-    - [x] VM: Implement `OP_SPAWN` using `sys_thread` to run the function in the background.
-    - [x] C Backend: Implement `spawn` call using `pthread` or equivalent.
-    - [x] Add test case `360_spawn_concurrency`.
-- [ ] **JSON Gen:** Implement compiler-generated `toJson()` and `fromJson()` for all `type` definitions.
-- [ ] **Binary Gen:** Implement `toBinary()` and `fromBinary()` for compact packet serialization.
-- [x] **String Utils:** Add `split`, `trim`, `find`, and `replace` to `lib/string.rae`.
+A planning list, not a task queue: the queue is the root `QUEUE.md`. Rae's
+networking is designed in **`docs/server-benchmarks-design.md`** (servers:
+`lib/net`, `lib/http`, `lib/webSocket`, `lib/net/ecs`) and
+**`docs/network-connections.md`** (clients through the system's stack). Read
+those before adding anything here.
+
+**No GPL library, ever.** The old Step 3 linked Mongoose, which is GPL-2.0 or
+a paid licence; it was dropped. A native library Rae links must carry a
+permissive licence (MIT, BSD, zlib, Apache-2.0, ISC, CC0 or public domain),
+and Rae itself comes first (AGENTS.md: the runtime C rule;
+`docs/tech-stack-and-dependencies.md` for the order of preference).
+
+## Step 1: Language Foundation
+- [x] **Defaults:** zero-initialization of locals and struct fields (case 358, example `14_defaults`).
+- [x] **`defer`:** scope-based cleanup (case 359, example `15_defer_cleanup`).
+- [x] **`spawn`:** background execution, joined through `Task(T)` (case 360 and the spawn cases).
+- [x] **JSON Gen:** the compiler derives `toJson()` / `fromJson()` for every `type` (cases 665, 1028, 1029).
+- [ ] **Binary Gen:** `toBinary()` / `fromBinary()` for compact packets (not started).
+- [x] **String Utils:** `split`, `trim`, `indexOf`, `replace` in `lib/String.rae`.
+
+(The VM items of the old list are history: the bytecode VM was removed, #957.)
 
 ## Step 2: Robust Local Persistence
-- [ ] **File Ops:** Add `sys.rename`, `sys.delete`, and `sys.exists` to the stdlib.
-- [ ] **File Locking:** Add `sys.lockFile` and `sys.unlockFile` (POSIX `flock` wrapper).
-- [ ] **Crypto:** Integrate a tiny crypto library (Monocypher) for `sys.encrypt` and `sys.decrypt`.
-- [ ] **Tetris Save:** Implement atomic highscore saving in `examples/94_tetris2d`.
+- [x] **File Ops:** `Sys.rename`, `Sys.delete`, `Sys.exists`.
+- [x] **File Locking:** `Sys.lockFile` / `Sys.unlockFile`.
+- [x] **Crypto:** Monocypher in every compiled program: `lib/crypto` and `Sys.encrypt` / `decrypt` (`docs/crypto.md`).
+- [x] **Database:** SQLite through `lib/sql` (`docs/sql.md`).
+- [x] **Secrets:** the Apple Keychain through `lib/Keychain` (`docs/keychain.md`).
+- [ ] **Tetris Save:** atomic highscore saving in `examples/94_tetris2d` (write a temp file, `Sys.rename` it over).
 
-## Step 3: HTTP & Web (Mongoose)
-- [ ] **Link Mongoose:** Update root Makefile and C runtime to include Mongoose.
-- [ ] **HTTP Client:** Create `lib/http.rae` with `get()` and `post()`.
-- [ ] **Web Highscores:** Update Tetris to submit/fetch scores from a local Vite dev server.
+## Step 3: HTTP & Web (Rae's own, no Mongoose)
+- [x] **HTTP server:** `lib/http` (the codec) and `lib/net/ecs` (the ECS server, keep-alive, pipelining, promoted requests answered by `spawn`ed tasks), over `lib/net`'s sockets and poller.
+- [x] **WebSocket server:** `lib/webSocket` + `lib/net/ecs/WebSocketSystems`.
+- [x] **Wake the poller from a worker:** `pollerWake` (`lib/net/Poller`).
+- [x] **HTTP client on Apple:** `lib/net/HttpGet` (GET over `lib/net/NetworkConnection`, Network.framework, TLS with the system trust store); WebSocket client too.
+- [ ] **HTTP client off Apple:** the same API over a TLS library (licence above) or the platform's own stack; and POST.
+- [ ] **Web Highscores:** Tetris submits / fetches scores from a Rae server (Step 4).
 
 ## Step 4: The Rae Server
-- [ ] **Server API:** Implement `http.serve(port, handler)` in Rae.
-- [ ] **Highscore Backend:** Write a standalone highscore server in Rae that manages a score file.
+- [x] **Server API:** `lib/net/ecs` (`httpServerFrame`, a router, `respond`, `promote`); the benchmarks in `benchmarks/servers`.
+- [ ] **Highscore Backend:** a standalone highscore server in Rae over `lib/net/ecs` and `lib/sql`.
+- [ ] **Server TLS:** HTTPS / wss:// served by Rae (a licence-clean TLS library; until then a TLS-terminating proxy in front).
 
-## Step 5: Real-time Multiplayer (ENet)
-- [ ] **Link ENet:** Add ENet dependency to the compiler and runtime.
-- [ ] **UDP API:** Create `lib/net.rae` for UDP packet sending/receiving.
-- [ ] **P2P Pong:** A proof-of-concept where two local binaries exchange paddle/ball state.
+## Step 5: Real-time Multiplayer
+- [ ] **UDP API:** datagrams in `lib/net` (one-call shims, the policy in Rae, as `lib/net/Tcp`).
+- [ ] **Reliability layer:** decide between Rae's own over UDP and ENet (MIT) behind one binding; write the decision in a doc first.
+- [ ] **P2P Pong:** two local binaries exchange paddle / ball state.
 
 ## Step 6: Platform Verification
-- [ ] **Desktop (Steam):** Verify C-linking and networking on Windows/macOS/Linux.
-- [ ] **iOS (iPhone):** Verify static linkage and socket permissions in a simulated iOS environment.
-- [ ] **TLS Setup:** (Optional) Add mbedTLS to Mongoose for production HTTPS support.
+- [ ] **Desktop:** networking on Windows (no sockets backend yet: `lib/net` answers `unsupported`), macOS, Linux.
+- [ ] **iOS:** `lib/net/NetworkConnection`, `lib/Keychain` and `lib/sql` run on a device (they compile for arm64; not yet run there).
