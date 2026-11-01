@@ -49,7 +49,20 @@ func layoutBoxOf(
   uiSystems: view UiSystems
   nodeId: view String
 ) ret LayoutBox {
-  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  ret layoutBoxOfEntity(
+    world: world
+    uiSystems: uiSystems
+    entityId: nodeEntityFor(world: world, nodeId: nodeId)
+  )
+}
+
+# The box of the entity `entityId` as the last layout placed it, for a node
+# a program made in code (it has no node id)
+func layoutBoxOfEntity(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret LayoutBox {
   if isNone(this: entityId) or uiEntityActive(world: world, entityId: entityId) is false {
     ret hiddenLayoutBox()
   }

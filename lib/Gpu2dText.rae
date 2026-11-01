@@ -122,8 +122,79 @@ func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Floa
   }
 }
 
-# Draw allocation-free word-wrapped text. Wrapping occurs at spaces where
-# possible and falls back to a character boundary for a single long word.
+# One line of word-wrapped text: the bytes [start, end) are drawn, and the
+# next line starts at `next` (past the space or newline the line broke at)
+type WrapLine {
+  end: Int
+  next: Int
+}
+
+# Where the line that starts at byte `start` of `text` ends when it may be
+# `maxWidth` wide. It breaks at a newline, else at the last space that fits,
+# else (a single word wider than the line) at the last character that fits;
+# a line holds at least one character.
+func nextWrapLine(
+  font: view SdfFont
+  text: view String
+  start: view Int
+  sizePx: view Float
+  maxWidth: view Float
+) ret WrapLine {
+  let n: Int = text.length()
+  var lastSpace: Int = -1
+  var width: Float = 0.0
+  var i: Int = start
+  loop i < n {
+    let cp: Int = text.at(index: i).toInt()
+    if cp is 10 {
+      ret WrapLine { end: i, next: i + 1 }
+    }
+    let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
+    if cp is 32 {
+      lastSpace = i
+    }
+    if width + advance > maxWidth and i > start {
+      if lastSpace >= start {
+        ret WrapLine { end: lastSpace, next: lastSpace + 1 }
+      }
+      ret WrapLine { end: i, next: i }
+    }
+    width = width + advance
+    i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
+  }
+  ret WrapLine { end: n, next: n }
+}
+
+# How many lines drawTextWrappedEx draws `text` in, `maxWidth` wide: a
+# layout or a check sizes a wrapped text's box from it (its height is the
+# count times the line height)
+func wrappedLineCount(
+  font: view SdfFont
+  text: view String
+  sizePx: view Float
+  maxWidth: view Float
+) ret Int {
+  if maxWidth <= 0.0 {
+    ret 1
+  }
+  var lines: Int = 0
+  var start: Int = 0
+  loop start < text.length() {
+    let line: WrapLine = nextWrapLine(
+      font: font
+      text: text
+      start: start
+      sizePx: sizePx
+      maxWidth: maxWidth
+    )
+    lines = lines + 1
+    start = line.next
+  }
+  ret lines
+}
+
+# Draw allocation-free word-wrapped text, line by line as nextWrapLine breaks
+# it. Returns the number of lines drawn (wrappedLineCount's number).
 func drawTextWrappedEx(
   canvas: mod Gpu2dCanvas
   font: view SdfFont
@@ -152,81 +223,23 @@ func drawTextWrappedEx(
     )
     ret 1
   }
-  let n: Int = text.length()
-  var lineStart: Int = 0
-  var lastSpace: Int = -1
-  var width: Float = 0.0
   var baseline: Float = y
   var lines: Int = 0
-  var i: Int = 0
-  loop i < n {
-    let cp: Int = text.at(index: i).toInt()
-    if cp is 10 {
-      emitRange(
-        canvas: canvas
-        font: font
-        text: text
-        start: lineStart
-        end: i
-        x: x
-        y: baseline
-        sizePx: sizePx
-        color: color
-        outlineWidth: outlineWidth
-        outlineColor: outlineColor
-        softness: 1.0
-      )
-      lines = lines + 1
-      baseline = baseline + lineHeight
-      i = i + 1
-      lineStart = i
-      lastSpace = -1
-      width = 0.0
-    } else {
-      let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
-      if cp is 32 {
-        lastSpace = i
-      }
-      if width + advance > maxWidth and i > lineStart {
-        var lineEnd: Int = i
-        var nextStart: Int = i
-        if lastSpace >= lineStart {
-          lineEnd = lastSpace
-          nextStart = lastSpace + 1
-        }
-        emitRange(
-          canvas: canvas
-          font: font
-          text: text
-          start: lineStart
-          end: lineEnd
-          x: x
-          y: baseline
-          sizePx: sizePx
-          color: color
-          outlineWidth: outlineWidth
-          outlineColor: outlineColor
-          softness: 1.0
-        )
-        lines = lines + 1
-        baseline = baseline + lineHeight
-        lineStart = nextStart
-        i = nextStart
-        lastSpace = -1
-        width = 0.0
-      } else {
-        width = width + advance
-        i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
-      }
-    }
-  }
-  if lineStart < n {
+  var start: Int = 0
+  loop start < text.length() {
+    let line: WrapLine = nextWrapLine(
+      font: font
+      text: text
+      start: start
+      sizePx: sizePx
+      maxWidth: maxWidth
+    )
     emitRange(
       canvas: canvas
       font: font
       text: text
-      start: lineStart
-      end: n
+      start: start
+      end: line.end
       x: x
       y: baseline
       sizePx: sizePx
@@ -236,6 +249,8 @@ func drawTextWrappedEx(
       softness: 1.0
     )
     lines = lines + 1
+    baseline = baseline + lineHeight
+    start = line.next
   }
   ret lines
 }
