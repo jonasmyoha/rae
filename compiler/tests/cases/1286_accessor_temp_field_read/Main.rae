@@ -1,0 +1,55 @@
+# A field read on the result of an accessor that returns a shallow copy of a
+# container's slot (lib/ecs eventAt, queueAt: `let v: T = buf_get(...); ret
+# v`) borrows the slot, read as a temporary exactly as when bound with
+# `let`: the temporary is not the owner, so dropping it after the read frees
+# nothing the container still holds. Before, the temporary got the owning
+# drop: it freed the queued Strings, and the next read (or the queue's own
+# drop) freed them again ("pointer being freed was not allocated"). A call
+# that returns a value it made still owns its temporary, which is dropped
+# after the read (the run's exit leak check holds it).
+open ecs/Event
+open ecs/Queue
+
+type Label {
+  text: String
+}
+
+type Command {
+  appId: String
+  label: Label
+}
+
+func makeCommand(appId: view String) ret Command {
+  ret Command { appId: "{appId}", label: Label { text: "made {appId}" } }
+}
+
+func main() {
+  var events: EventQueue(Command) = createEventQueue(Command)
+  eventSend(this: events, value: Command { appId: "todo{1}", label: Label { text: "Add {2}" } })
+  # the temporary form, twice, and a nested field
+  if eventAt(this: events, i: 0).appId is "todo1" {
+    log("event read 1: todo1")
+  }
+  if eventAt(this: events, i: 0).appId is "todo1" {
+    log("event read 2: todo1")
+  }
+  log("event label: {eventAt(this: events, i: 0).label.text}")
+  # the bound form after it
+  let bound: Command = eventAt(this: events, i: 0)
+  log("event bound: {bound.appId} / {bound.label.text}")
+  var queue: Queue(Command) = createQueue(Command)
+  enqueue(this: queue, value: Command { appId: "notes{3}", label: Label { text: "Save {4}" } })
+  if queueAt(this: queue, i: 0).appId is "notes3" {
+    log("queue read 1: notes3")
+  }
+  if queueAt(this: queue, i: 0).appId is "notes3" {
+    log("queue read 2: notes3")
+  }
+  log("queue label: {queueAt(this: queue, i: 0).label.text}")
+  let queued: Command = queueAt(this: queue, i: 0)
+  log("queue bound: {queued.appId}")
+  # a call that makes its value: the temporary owns it and drops it
+  log("made: {makeCommand(appId: "x").label.text}, {makeCommand(appId: "y").appId}")
+  # the queues still hold their strings at the end
+  log("still queued: {eventAt(this: events, i: 0).appId}, {queueAt(this: queue, i: 0).appId}")
+}

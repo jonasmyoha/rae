@@ -1484,7 +1484,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 const AstTypeRef* base_concrete = base_tr;
                 if (ctx->generic_params && ctx->generic_args)
                     base_concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, base_tr);
-                int tmp_id = register_stmt_temp(ctx, base_concrete, true);
+                // A call that returns a value it made owns it (the owning
+                // drop), but one that returns a shallow copy of a container's
+                // slot (eventAt, queueAt: `let v: T = buf_get(...); ret v`)
+                // does not: the owning drop freed the Strings the container
+                // still held, and its next read or its own drop freed them
+                // again (#97350696). The same rule a `let` of the call follows.
+                int tmp_id = register_stmt_temp(ctx, base_concrete, c_stmt_temp_value_owns(ctx, base));
                 if (tmp_id >= 0) {
                     emit_member_chain_on_temp(ctx, expr, base, tmp_id, out);
                     break;
