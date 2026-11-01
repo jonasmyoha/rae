@@ -1,13 +1,15 @@
-# App / systems architecture (reference: example 114)
+# App / systems architecture (reference: the walker app shell, `lib/app3d`)
 
-Status: largely implemented in 114 (`examples/136_walker_character`), the first
-adopter. The file-level split has landed — each system (ui, camera, character,
-terrain, grass, render, physics, net) lives in its own sibling file and
-`app.rae` is back well under the 1000-line cap. Still open: the input-intent
-indirection (#545) and turning the single character into a multiplayer-ready
-roster (#546/#547). The shape here is meant to be the template every non-trivial
-windowed example grows from, and the reusable pieces graduate to `lib/app3d`
-over time.
+Status: implemented. The walker began as `examples/136_walker_character`
+(first numbered 114) and its systems now live in Rae's library as the walker
+app shell, `lib/app3d/Walker*.rae`. Examples 136 (the island, deferred), 137
+(the island, forward) and 143 (the wide forest, deferred) are each a short
+`Main.rae` that calls `runWalkerApp(settings:)` (`app3d/WalkerAppRun`) with
+its `WalkerAppSettings` (`app3d/WalkerAppSetup`). The sections below keep the
+design as it was planned; "Files" says where each part lives today. For a
+project outside this repository with one folder per system
+(`xxxSystem/XxxSystem.rae`), see `examples/106_mobile_ui` and
+`docs/ecs-systems-own-their-tables.md`.
 
 ## Why
 
@@ -173,25 +175,24 @@ Offline today. The pieces that make it viable are already in the design:
 intent-based movement + a character roster with `owner` + deterministic fixed-step
 physics (enables prediction/reconciliation).
 
-## Files (`examples/136_walker_character/`)
+## Files (`lib/app3d/`)
 
-Plain, generic filenames (no `walker_`/`sys_` prefix) — matches the tetris3d house
-style, and these files are candidates to graduate to `lib` (#419). Several already
-exist from the initial split and the systems fold into them.
+One file per system, with a `Walker` prefix, in `lib/app3d/`:
 
-- `main.rae` — thin entry: `func main() ret Int { ret runWalkerApp() }`.
-- `app.rae` — `App`, `Frame`, `createApp`, `runWalkerApp`, `updateApp`, `renderApp`, `frameBegin`.
-- `input.rae` — `InputState`, `InputIntent`, `inputUpdate`.
-- `players.rae` — `PlayerRoster`, player->character mapping, input source.
-- `character.rae` (exists) — the character helpers plus `Character`, `CharacterSystem`, `characterUpdate`, `characterAnimate`, `characterRenderGbuffer`, `characterRenderShadow`.
-- `camera.rae` — `CameraState`, `cameraUpdate`, `cameraApply` (rig + follow + bar).
-- `ui.rae` / `hud.rae` (hud exists) — `UiState`, `uiUpdate`, `uiRender` (panels, settings dialog, scroll, overlays, HUD).
-- `terrain.rae` (exists) — `TerrainState`/`InfiniteTerrain`, `terrainUpdate`, `terrainRenderGround/Props/Shadow`.
-- `grass.rae` (exists) — `GrassState`/`GrassField`, `grassUpdate`, `grassRender` (over grass_compute).
-- `render.rae` — `RenderState`, `renderScene` (owns the render-graph walk; calls the other systems' render hooks per pass), DRS.
-- `physics.rae` — `PhysicsState`, `physicsStep`, `JobSystem` + `jobSubmit`/`jobAwaitAll`.
-- `net.rae` — `NetState`, `netPublishIntent`, `netApplyRemote`.
-- `state.rae` (exists) — hot-reload serialize/restore + window-geometry persistence.
+- `WalkerApp.rae` — the `WalkerApp` struct and `createWalkerApp`. Convention
+  (#822): the struct IS the system list (`cameraSystem: WalkerCamera`,
+  `physicsSystem: WalkerPhysics`, `inputSystem: WalkerInput`, …); each system
+  function takes the narrow state it needs, never the whole app.
+- `WalkerAppRun.rae` — `runWalkerApp`, the loop. `WalkerAppSetup.rae` —
+  `WalkerAppSettings` and setup. `WalkerAppWorld.rae` — the world build.
+- `WalkerAppUpdate.rae` — `updateWalkerApp`, a hand-ordered list of system
+  calls; systems return small tick structs (`UiTick`, `CameraTick`).
+- `WalkerRenderWalk.rae` — `renderWalkerApp`, the render-graph walk.
+- Systems: `WalkerInput`, `WalkerCamera`, `WalkerCharacter`, `WalkerTerrain`,
+  `WalkerPhysics`, `WalkerRender`, `WalkerUi`, `WalkerNet`, `WalkerMarks`, …
+- Self-tests run headless inside the real app: `WalkerSelfTest`,
+  `WalkerClimbTest`, `WalkerLayoutTest`, … (env `RAE_WALKER_*_TEST`).
+- 143's wide forest: `app3d/WideForest` and `app3d/PropField`.
 
 ## stdlib vs app
 
@@ -203,7 +204,7 @@ exist from the initial split and the systems fold into them.
   app" template), the job/net seams, and TerrainSystem/GrassSystem (generic infinite
   terrain/grass). Design them so promotion is a move, not a rewrite.
 
-## Migration (incremental, screenshot-verified each step)
+## Migration (done; kept as history)
 
 Headless parity is the guardrail:
 `RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/walker.bmp rae run --target compiled main.rae`
