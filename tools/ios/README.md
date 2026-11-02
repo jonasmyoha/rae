@@ -82,6 +82,32 @@ collected data) — `RAE_IOS_PRIVACY_MANIFEST` replaces it.
 app's own declaration), and `RAE_IOS_VERSION` / `RAE_IOS_BUILD` set
 `CFBundleShortVersionString` / `CFBundleVersion` (default 1.0 / 1).
 
+**Purpose strings** (Info.plist; plain text, no `<`, `>`, `&` or `"`).
+`RAE_IOS_BLUETOOTH_USAGE`, `RAE_IOS_CAMERA_USAGE` and
+`RAE_IOS_MICROPHONE_USAGE` word the Bluetooth, camera and microphone texts.
+They are always written, because SDL3 links those APIs and App Store
+Connect refuses a build without them.
+
+**The local network.** An app that connects to a machine on the local
+network (an address like `192.168.1.20`, a name like `mymac.local`) needs
+`RAE_IOS_LOCAL_NETWORK_USAGE`, the text iOS shows when it asks the person.
+Without it iOS refuses the connection and asks nothing. This covers
+lib/net/NetworkConnection (Network.framework, which App Transport Security
+does not cover). An app that browses or publishes Bonjour services lists their
+types in `RAE_IOS_BONJOUR_SERVICES`, space-separated (`"_sumu._tcp"`, each
+`_name._tcp` or `_name._udp`), which needs the text too. Both keys
+(`NSLocalNetworkUsageDescription`, `NSBonjourServices`) are written only when
+set, so other apps are unchanged:
+
+    RAE_IOS_LOCAL_NETWORK_USAGE="Sync talks to your Mac on this network." \
+      RAE_IOS_BONJOUR_SERVICES="_sumu._tcp" sh tools/ios/gen-ios.sh <project>
+
+`sh tools/ios/gen-ios-smoke.sh` checks both keys (absent by default, present
+when set, the bad combinations refused) along with the staged assets. Like
+gen-ios.sh it needs Xcode's iOS SDK: with only the Command Line Tools
+selected, run it with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
 ## Profile on a device
 
     APP=<bundle id> PLACES="name|x y" AT_ENV=<the app's start-spot variable> \

@@ -12,7 +12,10 @@
 #     project's;
 #   - the generated project lists the deleted asset no more;
 #   - the earlier build's .app is gone, so the next build assembles the
-#     bundle from the current list.
+#     bundle from the current list;
+#   - Info.plist gets NSLocalNetworkUsageDescription and NSBonjourServices
+#     only when RAE_IOS_LOCAL_NETWORK_USAGE / RAE_IOS_BONJOUR_SERVICES ask,
+#     and Bonjour without the text, or a malformed service type, is refused.
 # Needs the compiler and the two iOS xcframeworks, like gen-ios.sh.
 set -eu
 
@@ -67,6 +70,22 @@ check "the project no longer lists the deleted asset" '! grep -q "Deleted.raesce
 check "the earlier build's .app is removed" '[ ! -e "$app" ]'
 check "the staging holds no other project file" \
   '[ "$(find "$gen/bundle/assets" -type f | wc -l | tr -d " ")" = "1" ]'
+check "no local network key unless asked" '! grep -q "NSLocalNetworkUsageDescription" "$gen/CMakeLists.txt"'
+check "no Bonjour key unless asked" '! grep -q "NSBonjourServices" "$gen/CMakeLists.txt"'
+
+# the local network permission, asked for
+export RAE_IOS_LOCAL_NETWORK_USAGE="Sync talks to your Mac on this network."
+export RAE_IOS_BONJOUR_SERVICES="_sumu._tcp _sumu._udp"
+generate
+unset RAE_IOS_LOCAL_NETWORK_USAGE RAE_IOS_BONJOUR_SERVICES
+check "the local network text is in Info.plist" \
+  'grep -q "<key>NSLocalNetworkUsageDescription</key><string>Sync talks to your Mac on this network.</string>" "$gen/CMakeLists.txt"'
+check "the Bonjour services are in Info.plist" \
+  'grep -q "<key>NSBonjourServices</key><array><string>_sumu._tcp</string><string>_sumu._udp</string></array>" "$gen/CMakeLists.txt"'
+check "Bonjour services without the text are refused" \
+  '! RAE_IOS_BUILD_NAME=$build_name RAE_IOS_BONJOUR_SERVICES="_sumu._tcp" sh "$here/gen-ios.sh" "$project" > "$gen.log" 2>&1'
+check "a malformed Bonjour type is refused" \
+  '! RAE_IOS_BUILD_NAME=$build_name RAE_IOS_LOCAL_NETWORK_USAGE="x" RAE_IOS_BONJOUR_SERVICES="sumu" sh "$here/gen-ios.sh" "$project" > "$gen.log" 2>&1'
 rm -f "$gen.log"
 
 if [ "$failures" -gt 0 ]; then

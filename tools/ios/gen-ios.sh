@@ -97,6 +97,39 @@ done
 extra_plist="$extra_plist<key>NSBluetoothAlwaysUsageDescription</key><string>$bluetooth_usage</string>"
 extra_plist="$extra_plist<key>NSCameraUsageDescription</key><string>$camera_usage</string>"
 extra_plist="$extra_plist<key>NSMicrophoneUsageDescription</key><string>$microphone_usage</string>"
+# The local network (an address like 192.168.1.20 or a name like
+# mymac.local): iOS refuses such a connection, without asking the person,
+# unless Info.plist says why the app needs it. Written only when
+# RAE_IOS_LOCAL_NETWORK_USAGE is set, so other apps are unchanged.
+# RAE_IOS_BONJOUR_SERVICES lists the Bonjour service types the app browses or
+# publishes, space-separated ("_sumu._tcp"); browsing asks the same question,
+# so it needs the text too.
+local_network_usage=${RAE_IOS_LOCAL_NETWORK_USAGE:-}
+bonjour_services=${RAE_IOS_BONJOUR_SERVICES:-}
+if [ -n "$local_network_usage" ]; then
+  case "$local_network_usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $local_network_usage" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>NSLocalNetworkUsageDescription</key><string>$local_network_usage</string>"
+fi
+if [ -n "$bonjour_services" ]; then
+  if [ -z "$local_network_usage" ]; then
+    echo "error: RAE_IOS_BONJOUR_SERVICES needs RAE_IOS_LOCAL_NETWORK_USAGE (iOS asks the person with that text)" >&2
+    exit 1
+  fi
+  services=""
+  for service in $bonjour_services; do
+    case "$service" in
+      _*._tcp|_*._udp) ;;
+      *) echo "error: a Bonjour service type is written _name._tcp or _name._udp, not: $service" >&2; exit 1 ;;
+    esac
+    case "$service" in
+      *[!A-Za-z0-9._-]*) echo "error: a Bonjour service type may hold only letters, digits, - and _: $service" >&2; exit 1 ;;
+    esac
+    services="$services<string>$service</string>"
+  done
+  extra_plist="$extra_plist<key>NSBonjourServices</key><array>$services</array>"
+fi
 # The privacy manifest (PrivacyInfo.xcprivacy): Rae's own by default, which
 # declares what the runtime and SDL3 do; RAE_IOS_PRIVACY_MANIFEST replaces it.
 privacy_manifest=${RAE_IOS_PRIVACY_MANIFEST:-$here/PrivacyInfo.xcprivacy}
