@@ -806,6 +806,78 @@ static void rae_g2d_keyboard_frame(CFNotificationCenterRef center, void* observe
     double covered = bounds.height - frame.y;
     g_g2d_keyboard_height = covered > 0.0 ? covered : 0.0;
 }
+/* The system edit menu over a text field (lib/ui/textFieldSystem
+ * textFieldMenuSystem): UIEditMenuInteraction (iOS 16+) on the SDL Metal view,
+ * shown at a point with Paste / Copy / Cut as asked. The item the person
+ * picks is recorded and read once by rae_ext_Gpu2d_editMenuChoice (1 paste,
+ * 2 copy, 3 cut), so nothing calls back into Rae. Made with the Objective-C
+ * runtime, as the keyboard observer above is: a delegate class registered
+ * once, whose editMenuInteraction:menuForConfiguration:suggestedActions:
+ * answers the menu, each UIAction's handler a block that sets the choice.
+ * Platform reason: a UIKit API with no SDL equivalent. */
+typedef struct { double x, y; } RaeEditMenuPoint;
+static _Atomic int g_g2d_edit_menu_choice = 0;
+static int g_g2d_edit_menu_paste = 0, g_g2d_edit_menu_copy = 0;
+static void* g_g2d_edit_menu_interaction = NULL;
+static void* rae_g2d_edit_menu_action(const char* title, int choice) {
+    void (^handler)(void*) = ^(void* action) { (void)action; g_g2d_edit_menu_choice = choice; };
+    CFStringRef text = CFStringCreateWithCString(NULL, title, kCFStringEncodingUTF8);
+    void* made = ((void* (*)(void*, SEL, const void*, void*, void*, void*))objc_msgSend)(
+        (void*)objc_getClass("UIAction"), sel_registerName("actionWithTitle:image:identifier:handler:"),
+        text, NULL, NULL, (void*)handler);
+    CFRelease(text);
+    return made;
+}
+static void* rae_g2d_edit_menu_for(void* self, SEL cmd, void* interaction, void* configuration, void* suggested) {
+    (void)self; (void)cmd; (void)interaction; (void)configuration; (void)suggested;
+    void* items = ((void* (*)(void*, SEL))objc_msgSend)((void*)objc_getClass("NSMutableArray"), sel_registerName("array"));
+    SEL add = sel_registerName("addObject:");
+    if (g_g2d_edit_menu_copy) {
+        ((void (*)(void*, SEL, void*))objc_msgSend)(items, add, rae_g2d_edit_menu_action("Cut", 3));
+        ((void (*)(void*, SEL, void*))objc_msgSend)(items, add, rae_g2d_edit_menu_action("Copy", 2));
+    }
+    if (g_g2d_edit_menu_paste)
+        ((void (*)(void*, SEL, void*))objc_msgSend)(items, add, rae_g2d_edit_menu_action("Paste", 1));
+    return ((void* (*)(void*, SEL, void*))objc_msgSend)((void*)objc_getClass("UIMenu"), sel_registerName("menuWithChildren:"), items);
+}
+void rae_ext_Gpu2d_showEditMenu(float x, float y, rae_Bool canPaste, rae_Bool canCopy) {
+    if (!g_g2d_metal_view || (!canPaste && !canCopy)) return;
+    if (!objc_getClass("UIEditMenuInteraction")) return;  /* before iOS 16 */
+    g_g2d_edit_menu_paste = canPaste ? 1 : 0;
+    g_g2d_edit_menu_copy = canCopy ? 1 : 0;
+    void* view = (void*)g_g2d_metal_view;
+    if (!g_g2d_edit_menu_interaction) {
+        Class delegateClass = objc_getClass("RaeEditMenuDelegate");
+        if (!delegateClass) {
+            delegateClass = objc_allocateClassPair(objc_getClass("NSObject"), "RaeEditMenuDelegate", 0);
+            class_addMethod(delegateClass, sel_registerName("editMenuInteraction:menuForConfiguration:suggestedActions:"),
+                            (IMP)rae_g2d_edit_menu_for, "@@:@@@");
+            Protocol* protocol = objc_getProtocol("UIEditMenuInteractionDelegate");
+            if (protocol) class_addProtocol(delegateClass, protocol);
+            objc_registerClassPair(delegateClass);
+        }
+        void* delegate = ((void* (*)(void*, SEL))objc_msgSend)(
+            ((void* (*)(void*, SEL))objc_msgSend)((void*)delegateClass, sel_registerName("alloc")), sel_registerName("init"));
+        void* made = ((void* (*)(void*, SEL))objc_msgSend)((void*)objc_getClass("UIEditMenuInteraction"), sel_registerName("alloc"));
+        g_g2d_edit_menu_interaction = ((void* (*)(void*, SEL, void*))objc_msgSend)(made, sel_registerName("initWithDelegate:"), delegate);
+        ((void (*)(void*, SEL, void*))objc_msgSend)(view, sel_registerName("addInteraction:"), g_g2d_edit_menu_interaction);
+    }
+    /* design units -> drawable pixels -> the view's points */
+    float xf[8]; rae_g2d_compute_xform(xf);
+    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    double pointsPerPixelX = (g_sdl_w > 0 && lw > 0) ? (double)lw / (double)g_sdl_w : 1.0;
+    double pointsPerPixelY = (g_sdl_h > 0 && lh > 0) ? (double)lh / (double)g_sdl_h : 1.0;
+    RaeEditMenuPoint at = { ((double)x * xf[2] + xf[4]) * pointsPerPixelX, ((double)y * xf[3] + xf[5]) * pointsPerPixelY };
+    void* configuration = ((void* (*)(void*, SEL, void*, RaeEditMenuPoint))objc_msgSend)(
+        (void*)objc_getClass("UIEditMenuConfiguration"), sel_registerName("configurationWithIdentifier:sourcePoint:"), NULL, at);
+    ((void (*)(void*, SEL, void*))objc_msgSend)(g_g2d_edit_menu_interaction,
+                                                 sel_registerName("presentEditMenuWithConfiguration:"), configuration);
+}
+int64_t rae_ext_Gpu2d_editMenuChoice(void) {
+    int choice = g_g2d_edit_menu_choice;
+    g_g2d_edit_menu_choice = 0;
+    return (int64_t)choice;
+}
 float rae_ext_Gpu2d_keyboardHeight(void) {
     static int observing = 0;
     if (!observing) {
@@ -818,6 +890,11 @@ float rae_ext_Gpu2d_keyboardHeight(void) {
 }
 #else
 float rae_ext_Gpu2d_keyboardHeight(void) { return 0.0f; }
+/* No system edit menu off iOS: the keys copy and paste there. */
+void rae_ext_Gpu2d_showEditMenu(float x, float y, rae_Bool canPaste, rae_Bool canCopy) {
+    (void)x; (void)y; (void)canPaste; (void)canCopy;
+}
+int64_t rae_ext_Gpu2d_editMenuChoice(void) { return 0; }
 #endif
 float rae_ext_Gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 

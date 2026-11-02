@@ -60,3 +60,38 @@ func setClipboardText(text: view String) ret Bool {
     ret nativeSetClipboardText(text: text)
   }
 }
+
+# The system edit menu at (x, y) in design units, with Paste and/or Copy and
+# Cut (iOS: UIEditMenuInteraction, as a UITextField's long press shows; a
+# no-op elsewhere, where the keys copy and paste). What the person picks is
+# read once with editMenuChoice: 1 paste, 2 copy, 3 cut, 0 nothing.
+func nativeShowEditMenu(
+  x: Float
+  y: Float
+  canPaste: Bool
+  canCopy: Bool
+) unsafe extern("rae_ext_Gpu2d_showEditMenu")
+
+func showEditMenu(
+  x: view Float
+  y: view Float
+  canPaste: view Bool
+  canCopy: view Bool
+) {
+  unsafe {
+    nativeShowEditMenu(
+      x: x
+      y: y
+      canPaste: canPaste
+      canCopy: canCopy
+    )
+  }
+}
+
+func nativeEditMenuChoice() unsafe extern("rae_ext_Gpu2d_editMenuChoice") ret Int
+
+func editMenuChoice() ret Int {
+  unsafe {
+    ret nativeEditMenuChoice()
+  }
+}

@@ -41,6 +41,15 @@ type TextFieldSystem {
   # self-test fills with setTextFieldClipboard, never touching the system's
   clipboardScripted: Bool = false
   clipboardText: String = ""
+  # A press held on the focused field (textFieldMenuSystem): where and when
+  # it began, and whether its edit menu has been shown; menuShows counts the
+  # menus shown (a test reads it)
+  pressTracking: Bool = false
+  pressStartSec: Float64 = 0.0
+  pressX: Float = 0.0
+  pressY: Float = 0.0
+  pressMenuShown: Bool = false
+  menuShows: Int = 0
 }
 
 # safeAreaSystem's output: the resolved insets per SafeArea node.
