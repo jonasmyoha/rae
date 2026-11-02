@@ -1,0 +1,99 @@
+# The shared debug overlay (lib/ui/DebugOverlay) stays inside the window and
+# measures its readouts with the font. On a 393-point phone window with the
+# button anchored at x 200-228 (right of the middle, but less than the
+# dialog's 260 points from the left edge) the dialog is clamped to the left
+# margin; "mem: 177.5 MB" right-aligned to a corner button ends at the
+# button's right edge, measured with Roboto (the old 0.52-per-letter guess
+# was narrower than the text, so the text ended past the button); and the
+# one-line form puts "60 fps 178 MB" left of the button, level with it.
+import SdfText
+open ui/DebugOverlay
+
+func main() {
+  let font: SdfFont = SdfText.loadSdfFontJson(
+    jsonPath: "../examples/105_ui_counter/assets/Roboto-Regular.mtsdf.json"
+  )
+  var debugOverlay: DebugOverlay = createDebugOverlay(
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
+  debugOverlay.screenW = 393.0
+  debugOverlay.screenH = 852.0
+  debugOverlay.buttonSize = 28.0
+
+  # (1) the dialog of a button near the left stays inside the window
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 228.0, top: 60.0)
+  log(
+    "button at x {debugButtonX(debugOverlay: debugOverlay)}, opens right: {debugOpensRight(
+      debugOverlay: debugOverlay
+    )}"
+  )
+  log(
+    "dialog x {debugDialogX(debugOverlay: debugOverlay)} to {debugDialogX(
+      debugOverlay: debugOverlay
+    ) + debugDialogWidth(debugOverlay: debugOverlay)}"
+  )
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 381.0, top: 12.0)
+  log("corner button: dialog x {debugDialogX(debugOverlay: debugOverlay)}")
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 40.0, top: 12.0)
+  log("left button: dialog x {debugDialogX(debugOverlay: debugOverlay)}")
+
+  # (2) a measured readout, right-aligned to a corner button
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 381.0, top: 12.0)
+  let mem: String = formatDebugMem(kb: 181760)
+  let size: Float = debugReadoutSize(debugOverlay: debugOverlay)
+  let measured: Float = SdfText.sdfMeasureText(font: font, text: mem, sizePx: size)
+  let readoutX: Float = debugReadoutX(
+    debugOverlay: debugOverlay
+    font: font
+    text: mem
+    sizePx: size
+  )
+  log(
+    "'{mem}' measures {(measured * 10.0).toInt()} tenths of a point (guessed {(debugTextWidth(
+      text: mem
+      sizePx: size
+    ) * 10.0).toInt()})"
+  )
+  log("its right edge {((readoutX + measured) * 10.0 + 0.5).toInt()} tenths, the button's 3810")
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 40.0, top: 12.0)
+  let leftX: Float = debugReadoutX(
+    debugOverlay: debugOverlay
+    font: font
+    text: mem
+    sizePx: size
+  )
+  log("left button: readout x {leftX}")
+
+  # (3) the readouts in one line beside the button
+  debugOverlay.lastFps = 59.6
+  debugOverlay.lastRssKb = 181760
+  setDebugOverlayReadoutsBeside(debugOverlay: debugOverlay, beside: true)
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 381.0, top: 12.0)
+  let line: String = formatDebugBeside(debugOverlay: debugOverlay)
+  let lineWidth: Float = SdfText.sdfMeasureText(font: font, text: line, sizePx: size)
+  let besideX: Float = debugBesideX(debugOverlay: debugOverlay, font: font, text: line)
+  log("one line: '{line}'")
+  log(
+    "ends {((debugButtonX(debugOverlay: debugOverlay) - besideX - lineWidth) * 10.0 + 0.5).toInt()} tenths left of the button"
+  )
+  log("baseline {debugBesideBaseline(debugOverlay: debugOverlay)}, the button spans 12 to 40")
+  debugOverlay.wantFps = false
+  setDebugOverlayLine(debugOverlay: debugOverlay, text: "idle")
+  log("memory and the custom line: '{formatDebugBeside(debugOverlay: debugOverlay)}'")
+  debugOverlay.wantMemory = false
+  setDebugOverlayLine(debugOverlay: debugOverlay, text: "")
+  log("nothing on: '{formatDebugBeside(debugOverlay: debugOverlay)}'")
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 40.0, top: 12.0)
+  debugOverlay.wantFps = true
+  let leftLine: String = formatDebugBeside(debugOverlay: debugOverlay)
+  log(
+    "left button: one line at x {debugBesideX(
+      debugOverlay: debugOverlay
+      font: font
+      text: leftLine
+    )}"
+  )
+}
