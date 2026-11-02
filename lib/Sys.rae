@@ -19,6 +19,23 @@ func rae_sys_write_file(path: String, content: String) blocking unsafe extern re
 
 func rae_sys_rename(oldPath: String, newPath: String) unsafe extern ret Bool
 
+func rae_sys_open_private(path: String) blocking unsafe extern ret Int
+
+func rae_sys_write_fd(
+  fd: Int
+  text: String
+  offset: Int
+  count: Int
+) blocking unsafe extern ret Int
+
+func rae_sys_fsync(fd: Int) blocking unsafe extern ret Int
+
+func rae_sys_close_fd(fd: Int) unsafe extern ret Int
+
+func rae_sys_chmod(path: String, mode: Int) unsafe extern ret Int
+
+func rae_sys_file_mode(path: String) unsafe extern ret Int
+
 func rae_sys_delete(path: String) unsafe extern ret Bool
 
 func rae_sys_make_dir(path: String) unsafe extern ret Bool
@@ -223,6 +240,98 @@ func writeFile(path: view String, content: view String) ret Bool {
   unsafe {
     ret rae_sys_write_file(path: path, content: content)
   }
+}
+
+# The permission bits that let only a file's owner read and write it: 0600
+# (Rae has no octal literals; 384 is 0o600). A mode is these bits of a file:
+# owner, group and others, read 4, write 2, execute 1 each.
+const privateFileMode: Int = 384
+
+# errno values the private write retries or steps past (the same on Linux and
+# macOS)
+const sysInterrupted: Int = 4
+
+const sysExists: Int = 17
+
+# Write `content` to `path` so that only its owner can read or write it
+# (mode 0600), as ssh keeps keys. The bytes go into a NEW file beside it,
+# created 0600 from the start (never readable by others, not even for a
+# moment), synced, then renamed over `path`. So `path` ends 0600 even when it
+# was an existing file with a wider mode, and a reader sees the old content
+# or the whole new one, never half. False when any step fails, and then no
+# temporary file is left.
+func writeFilePrivate(path: view String, content: view String) ret Bool {
+  loop var attempt: Int = 0, attempt < 100, ++attempt {
+    let temporary: String = "{path}.private-{attempt}"
+    var fd: Int = -sysInterrupted
+    loop fd is -sysInterrupted {
+      unsafe {
+        fd = rae_sys_open_private(path: temporary)
+      }
+    }
+    if fd is -sysExists {
+      continue
+    }
+    if fd < 0 {
+      ret false
+    }
+    var length: Int = 0
+    unsafe {
+      length = rae_ext_rae_str_len(s: content)
+    }
+    var offset: Int = 0
+    var failed: Bool = false
+    loop offset < length and failed is false {
+      var written: Int = 0
+      unsafe {
+        written = rae_sys_write_fd(
+          fd: fd
+          text: content
+          offset: offset
+          count: length - offset
+        )
+      }
+      if written > 0 {
+        offset = offset + written
+      } else if written is not -sysInterrupted {
+        failed = true
+      }
+    }
+    var synced: Int = 0
+    var closed: Int = 0
+    unsafe {
+      if failed is false {
+        synced = rae_sys_fsync(fd: fd)
+      }
+      closed = rae_sys_close_fd(fd: fd)
+    }
+    if failed or synced < 0 or closed < 0 or rename(oldPath: temporary, newPath: path) is false {
+      let removed: Bool = delete(path: temporary)
+      ret false
+    }
+    ret true
+  }
+  ret false
+}
+
+# Set the permission bits of `path` (privateFileMode for owner-only); false
+# when the file is not there or may not be changed
+func setFileMode(path: view String, mode: view Int) ret Bool {
+  unsafe {
+    ret rae_sys_chmod(path: path, mode: mode) is 0
+  }
+}
+
+# The permission bits of `path` (0600 is 384), or none when it is not there
+func fileMode(path: view String) ret opt Int {
+  var mode: Int = -1
+  unsafe {
+    mode = rae_sys_file_mode(path: path)
+  }
+  if mode < 0 {
+    ret none
+  }
+  ret mode
 }
 
 func rename(oldPath: view String, newPath: view String) ret Bool {
