@@ -1,8 +1,7 @@
 # fromBinary trusts nothing (docs/wasm-interfaces.md §2): every malformed input
 # answers none, without a crash, an overread or a huge allocation, and what a
-# failed read built is freed (the case runs under the leak check). The nesting
-# limit (200 levels) is not tested here: a type that holds a List of itself
-# does not compile yet (queued).
+# failed read built is freed (the case runs under the leak check). Nesting
+# stops at 200 levels: 50 decode, 300 answer none.
 enum Kind { first, second, third }
 
 type Probe {
@@ -11,6 +10,10 @@ type Probe {
   note: opt String
   text: String
   items: List(Int32)
+}
+
+type Node {
+  children: List(Node)
 }
 
 func bytesOf(values: view List(Int)) ret List(UInt8) {
@@ -57,6 +60,32 @@ func patched(bytes: view List(UInt8), index: view Int, value: view Int) ret List
   }
   copy.set(index: index, value: value as UInt8)
   ret copy
+}
+
+# A chain of `depth` nodes, each the only child of the one above.
+func nested(depth: view Int) ret List(UInt8) {
+  var values: List(Int) = List.create(Int, cap: depth * 4 + 4)
+  loop var i: Int = 0, i < depth, ++i {
+    values.add(value: 1)
+    values.add(value: 0)
+    values.add(value: 0)
+    values.add(value: 0)
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    values.add(value: 0)
+  }
+  ret bytesOf(values: values)
+}
+
+func depthOf(node: view Node) ret Int {
+  var depth: Int = 0
+  loop let child: view Node in node.children {
+    let below: Int = depthOf(node: child) + 1
+    if below > depth {
+      depth = below
+    }
+  }
+  ret depth
 }
 
 func main() {
@@ -146,4 +175,15 @@ func main() {
       255
     })
   )
+
+  let shallow: List(UInt8) = nested(depth: 50)
+  if let node: Node = Node.fromBinary(bytes: shallow) {
+    log("50 levels: decoded, depth {depthOf(node: node)}")
+  }
+  let limit: List(UInt8) = nested(depth: 200)
+  log("200 levels: decoded {Node.fromBinary(bytes: limit) is not none}")
+  let past: List(UInt8) = nested(depth: 201)
+  log("201 levels: none {Node.fromBinary(bytes: past) is none}")
+  let deep: List(UInt8) = nested(depth: 300)
+  log("300 levels: none {Node.fromBinary(bytes: deep) is none}")
 }

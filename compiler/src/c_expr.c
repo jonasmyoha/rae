@@ -25,6 +25,11 @@ static bool none_compare_owns_call_result(CFuncContext* ctx, const AstExpr* oper
                                           const AstTypeRef* opt_type) {
   if (!operand || (operand->kind != AST_EXPR_CALL && operand->kind != AST_EXPR_METHOD_CALL))
     return false;
+  /* `T.fromBinary(bytes:)` (c_binary.c) has no declaration but hands back an
+   * owning optional all the same. */
+  bool is_from = false;
+  if (c_binary_call_type(ctx, operand, &is_from) && is_from)
+    return type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, opt_type, 0);
   if (!operand->decl_link || operand->decl_link->kind != AST_DECL_FUNC) return false;
   const AstFuncDecl* fd = &operand->decl_link->as.func_decl;
   if (fd->is_extern || !fd->returns || !fd->returns->type) return false;
@@ -1292,7 +1297,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     const AstTypeRef* bytes_type = bytes ? infer_expr_type_ref(ctx, bytes) : NULL;
                     const char* bytes_c = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL,
                                                                       binary_bytes_type(ctx->compiler_ctx));
-                    if (bytes && bytes_type && (bytes_type->is_view || bytes_type->is_mod)) {
+                    bool bytes_temporary = bytes && (bytes->kind == AST_EXPR_CALL || bytes->kind == AST_EXPR_METHOD_CALL);
+                    if (bytes_temporary) {
+                        // A call's result is a temporary nobody else frees.
+                        fprintf(out, "rae_fromBinaryOwned_%s_(", mangled);
+                        emit_expr(ctx, bytes, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")");
+                    } else if (bytes && bytes_type && (bytes_type->is_view || bytes_type->is_mod)) {
                         fprintf(out, "rae_fromBinary_%s_((const %s*)(", mangled, bytes_c);
                         emit_expr(ctx, bytes, out, PREC_LOWEST, false, true);
                         fprintf(out, "))");
@@ -1304,7 +1315,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     break;
                 }
                 const AstTypeRef* receiver = infer_expr_type_ref(ctx, expr->as.method_call.object);
-                if (receiver && (receiver->is_view || receiver->is_mod)) {
+                const AstExpr* object = expr->as.method_call.object;
+                if ((object->kind == AST_EXPR_CALL || object->kind == AST_EXPR_METHOD_CALL)
+                    && !(receiver && (receiver->is_view || receiver->is_mod))) {
+                    // A temporary receiver: encoded, then freed.
+                    fprintf(out, "rae_toBinaryOwned_%s_(", mangled);
+                    emit_expr(ctx, object, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                } else if (receiver && (receiver->is_view || receiver->is_mod)) {
                     fprintf(out, "rae_toBinary_%s_((const %s*)(", mangled, mangled);
                     emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, true);
                     fprintf(out, "))");

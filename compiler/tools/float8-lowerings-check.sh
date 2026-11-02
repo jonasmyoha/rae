@@ -36,10 +36,25 @@ if ! perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --emit-c --out "$TMP/emi
     > "$TMP/emit.log" 2>&1; then
   echo "FAIL: float8-lowerings-check (emit failed)"; tail -5 "$TMP/emit.log" | sed 's/^/    /'; exit 1
 fi
-# Can this machine run an x86-64 binary at all?
+# Can this machine run an x86-64 binary at all? Bounded: a Rosetta that hangs
+# (2026-11-02: probes stuck in state U for 40 minutes, deaf even to SIGKILL, so
+# a timeout signal never lands) answers "no" instead of stopping the whole
+# suite. The probe runs in the background and is left behind if it never ends.
 printf 'int main(void) { return 0; }\n' > "$TMP/probe.c"
 can_run=0
-if clang $ARCH_FLAGS "$TMP/probe.c" -o "$TMP/probe" >/dev/null 2>&1 && "$TMP/probe" >/dev/null 2>&1; then can_run=1; fi
+if clang $ARCH_FLAGS "$TMP/probe.c" -o "$TMP/probe" >/dev/null 2>&1; then
+  "$TMP/probe" >/dev/null 2>&1 </dev/null &
+  probe_pid=$!
+  for _ in $(seq 1 40); do
+    kill -0 "$probe_pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  if kill -0 "$probe_pid" 2>/dev/null; then
+    echo "note: float8-lowerings-check: an x86-64 probe did not finish in 10 s (Rosetta stuck?); not running x86-64 builds"
+  elif wait "$probe_pid"; then
+    can_run=1
+  fi
+fi
 
 trim() { grep -v '^@@RAE_' "$1" | grep -v '^warning: ' | grep -v '^lowering is scalar' | perl -0pe 's/\n+\z/\n/'; }
 failed=0; notes=""
