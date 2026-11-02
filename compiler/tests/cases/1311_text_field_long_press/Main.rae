@@ -1,0 +1,217 @@
+# The edit menu on a long press in a lib/ui text field (textFieldMenuSystem).
+# A press that starts on the focused field and stays still for half a second
+# shows the menu once; a short press, a press that moves, a press beside the
+# field or on an unfocused field shows none, and a menu with nothing to offer
+# (empty field, empty clipboard) is not shown. The menu itself is the iOS
+# system one (a no-op here); the item picked is the frame's paste / copy / cut,
+# shown with a scripted paste.
+import Gpu2d
+open ui/Ecs
+open ui/Components
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open ui/textFieldSystem/TextFieldSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func fieldScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":852\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Address\"]\},"
+  )
+  s = s.concat(
+    other: "\"Address\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":44\},\"TextField\":\{\"placeholder\":\"Server address\",\"actionId\":\"sync.connect\"\},"
+  )
+  s = s.concat(other: "\"OnClick\":\{\"label\":\"Address\"\},\"Children\":[\"AddressLine\"]\},")
+  s = s.concat(other: "\"AddressLine\":\{\"Text\":\{\"text\":\"\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+# One frame: the text field system, then the menu system, with the pointer
+# held (or not) at x, y at time `now`
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  actions: mod EventQueue(UiAction)
+  tap: view Bool
+  down: view Bool
+  x: view Float
+  y: view Float
+  now: view Float64
+) ret Bool {
+  frameAdvance(this: actions)
+  if tap {
+    eventSend(
+      this: actions
+      value: UiAction { entityId: entityOf(world: world, nodeId: "Address"), actionId: "" }
+    )
+  }
+  let input: TextInputFrame = {
+    typed: ""
+    backspaces: 0
+    enter: false
+    tapped: false
+    pointerDown: down
+    pointerX: x
+    pointerY: y
+  }
+  textFieldSystem(
+    world: world
+    textFieldSystem: uiSystems.textField
+    actions: actions
+    input: input
+    now: now
+  )
+  ret textFieldMenuSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    now: now
+  )
+}
+
+# Hold the pointer at x, y from `start` for `seconds`, in 0.1 s frames, moving
+# `drift` per frame, then let go; how many menus it showed
+func hold(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  actions: mod EventQueue(UiAction)
+  x: view Float
+  y: view Float
+  drift: view Float
+  start: view Float64
+  seconds: view Float64
+) ret Int {
+  var shown: Int = 0
+  var now: Float64 = start
+  var step: Int = 0
+  loop now <= start + seconds {
+    let atX: Float = x + drift * (step as Float)
+    if frame(
+      world: world
+      uiSystems: uiSystems
+      actions: actions
+      tap: false
+      down: true
+      x: atX
+      y: y
+      now: now
+    ) {
+      shown = shown + 1
+    }
+    now = now + 0.1
+    step = step + 1
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    down: false
+    x: x
+    y: y
+    now: now
+  )
+  ret shown
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  world.layoutW = 393.0
+  world.layoutH = 852.0
+  var scene: Scene = parseScene(source: fieldScene())
+  scene.sceneId = "sync"
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("mounted = {rootEntityId.index >= 0}")
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "ws://name.local:48787/sync")
+
+  log("long press, field not focused: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 100.0
+    y: 20.0
+    drift: 0.0
+    start: 0.0
+    seconds: 1.0
+  )} menus")
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: true
+    down: false
+    x: 0.0
+    y: 0.0
+    now: 2.0
+  )
+  log("short press on the focused field: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 100.0
+    y: 20.0
+    drift: 0.0
+    start: 3.0
+    seconds: 0.3
+  )} menus")
+  log("long press on the focused field: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 100.0
+    y: 20.0
+    drift: 0.0
+    start: 4.0
+    seconds: 1.5
+  )} menus")
+  log("long press that drags: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 100.0
+    y: 20.0
+    drift: 5.0
+    start: 6.0
+    seconds: 1.0
+  )} menus")
+  log("long press beside the field: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 350.0
+    y: 20.0
+    drift: 0.0
+    start: 8.0
+    seconds: 1.0
+  )} menus")
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "")
+  log("long press, nothing to paste or copy: {hold(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    x: 100.0
+    y: 20.0
+    drift: 0.0
+    start: 10.0
+    seconds: 1.0
+  )} menus")
+  log("menus shown in all: {uiSystems.textField.menuShows}")
+}
