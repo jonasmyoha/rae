@@ -427,10 +427,15 @@ rows ease back into the old order.
 
 The app runs `listReorderSystem(world, uiSystems, input, nowSec)` each frame
 `listReorderNeedsRun` says so, after `updateUiInput` and before
-`updateScrollRoot`, then the list system and the layout as usual. It returns
-true while a row is held or rows still move, so an event-driven loop keeps
-drawing frames until they are home, and then runs nothing. Rows are moved by
-their `RuntimeOffset` (no relayout). Flow lists (`mode: "Flow"`) are not
+`updateScrollRoot`, and `listReorderPoseSystem(world, uiSystems)` after the
+list system and before the layout. The first steps the gesture and fires the
+drop's action; the second puts the rows' offsets on the rows once the list has
+bound them to this frame's data, so the frame in which the app's new order
+arrives (the app takes the action in its update, the same frame) draws every
+row where it was, with no jump. `listReorderSystem` returns true while a row
+is held or rows still move, so an event-driven loop keeps drawing frames until
+they are home, and then runs nothing. Rows are moved by their `RuntimeOffset`
+(no relayout). Flow lists (`mode: "Flow"`) are not
 reorderable yet.
 
 ## 13. Dialogs are pages: `PageRoot.presentation`

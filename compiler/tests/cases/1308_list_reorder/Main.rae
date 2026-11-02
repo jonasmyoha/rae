@@ -165,6 +165,7 @@ func runUntilIdle(
       nowSec: now
     )
     listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
     frames = frames + 1
     if phaseName(world: world, listEntity: listEntity) is "idle" {
       ret frames
@@ -288,6 +289,7 @@ func main() {
     input: input
     nowSec: 10.0
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log("after the press: {phaseName(world: world, listEntity: listEntity)}")
   setPointer(
     input: input
@@ -302,6 +304,7 @@ func main() {
     input: input
     nowSec: 10.2
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log("held 0.2 s: {phaseName(world: world, listEntity: listEntity)}")
   moving = listReorderSystem(
     world: world
@@ -309,6 +312,7 @@ func main() {
     input: input
     nowSec: 10.4
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log(
     "held 0.4 s: {phaseName(world: world, listEntity: listEntity)}, press claimed: {isNone(
       this: input.pressedEntityId
@@ -332,6 +336,7 @@ func main() {
       input: input
       nowSec: (10.4 + frame.toFloat() / 60.0) as Float64
     )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
   }
   # and holds there a moment, so the rows finish stepping aside
   loop var frame: Int = 1, frame <= 20, ++frame {
@@ -341,6 +346,7 @@ func main() {
       input: input
       nowSec: (10.8 + frame.toFloat() / 60.0) as Float64
     )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
   }
   if let drag: ListReorderDrag = componentCopy(this: world.listReorderDrags, entityId: listEntity) {
     log("over: from {drag.fromIndex} to {drag.toIndex}, lift {drag.lift}")
@@ -378,6 +384,10 @@ func main() {
     down: false
     released: true
   )
+  # One frame as a program runs it: the step sees the release and fires the
+  # move, the app reorders its data in its update (0 1 3 4 5 2 6 7 8 9), the
+  # list binds its rows to the new order, then the pose places them. That
+  # frame draws the new order, so the rows must already be placed for it.
   moving = listReorderSystem(
     world: world
     uiSystems: uiSystems
@@ -389,7 +399,6 @@ func main() {
   )
   frameAdvance(this: world.uiActions)
   frameAdvance(this: world.uiActions)
-  # The app reorders its data: 0 1 3 4 5 2 6 7 8 9
   var reordered: List(Int) = [
     0
     1
@@ -404,6 +413,23 @@ func main() {
   ]
   componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(order: reordered))
   listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  log("new order, same frame: row 5 (the moved one) offset {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 5
+  )} (drawn where it was dropped), row 2 {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 2
+  )}, row 4 {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 4
+  )} (each drawn where it was the frame before)")
   setPointer(
     input: input
     y: rowMiddle(index: 5)
@@ -411,23 +437,6 @@ func main() {
     down: false
     released: false
   )
-  moving = listReorderSystem(
-    world: world
-    uiSystems: uiSystems
-    input: input
-    nowSec: 11.22
-  )
-  log("new order taken: row 5 (the moved one) offset {rowOffset(
-    world: world
-    uiSystems: uiSystems
-    listEntity: listEntity
-    dataIndex: 5
-  )} (it is drawn where it was dropped), row 2 {rowOffset(
-    world: world
-    uiSystems: uiSystems
-    listEntity: listEntity
-    dataIndex: 2
-  )}")
   let settleFrames: Int = runUntilIdle(
     world: world
     uiSystems: uiSystems
@@ -460,6 +469,7 @@ func main() {
     input: input
     nowSec: 20.0
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   setPointer(
     input: input
     y: rowMiddle(index: 4) + 20.0
@@ -473,12 +483,14 @@ func main() {
     input: input
     nowSec: 20.1
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   moving = listReorderSystem(
     world: world
     uiSystems: uiSystems
     input: input
     nowSec: 20.5
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log(
     "moved before the hold: {phaseName(world: world, listEntity: listEntity)}, painted on top: {liftedRows(
       world: world
@@ -497,6 +509,7 @@ func main() {
     input: input
     nowSec: 20.6
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
 
   # ----- D. dropped where it was -----
   setPointer(
@@ -512,6 +525,7 @@ func main() {
     input: input
     nowSec: 30.0
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   setPointer(
     input: input
     y: rowMiddle(index: 7)
@@ -525,6 +539,7 @@ func main() {
     input: input
     nowSec: 30.4
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   setPointer(
     input: input
     y: rowMiddle(index: 7) + 8.0
@@ -538,6 +553,7 @@ func main() {
     input: input
     nowSec: 30.45
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log("dropped in place: actions '{actionsText(world: world)}'")
   let inPlaceFrames: Int = runUntilIdle(
     world: world
@@ -568,6 +584,7 @@ func main() {
     input: input
     nowSec: 40.0
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   setPointer(
     input: input
     y: rowMiddle(index: 1)
@@ -581,6 +598,7 @@ func main() {
     input: input
     nowSec: 40.4
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   loop var frame: Int = 1, frame <= 30, ++frame {
     setPointer(
       input: input
@@ -595,6 +613,7 @@ func main() {
       input: input
       nowSec: (40.4 + frame.toFloat() / 60.0) as Float64
     )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
   }
   setPointer(
     input: input
@@ -609,6 +628,7 @@ func main() {
     input: input
     nowSec: 41.0
   )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
   log("dropped, not taken: actions '{actionsText(world: world)}'")
   frameAdvance(this: world.uiActions)
   frameAdvance(this: world.uiActions)
