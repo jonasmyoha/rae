@@ -23,6 +23,10 @@
 #     after its last event so they do not fight a trackpad's own momentum, and
 #     `scrollRootSettling` tells an event loop to keep rendering until all of
 #     it is at rest. Distances are points, through the input's touch target.
+#   * `ScrollRoot.anchor: end` (ui/ScrollAnchor): content that fits rests at
+#     the window's end (`ScrollRange.rest`, a positive position), and a root
+#     pinned to its end (`ScrollDrag.pinnedToEnd`) follows the floor as the
+#     content grows; the physics are the same as at the start.
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
@@ -76,11 +80,14 @@ func recallScroll(memory: view ScrollMemory, pageId: view String) ret Float {
 # is laid out or when its content fits — a root with nothing to scroll is
 # inert, and an app's physics skips it. `floor` is the most-negative position
 # (<= 0); `window` the visible length along the axis, the rubber-band's
-# reference dimension.
+# reference dimension; `rest` where a root whose content fits sits: 0 (its
+# start) unless it is anchored at its end, then the room left over, so the
+# content's end meets the window's end (less `endInset`).
 type ScrollRange {
   active: Bool
   floor: Float
   window: Float
+  rest: Float = 0.0
 }
 
 func axisLength(root: view ScrollRoot, size: view Vec2) ret Float {
@@ -240,7 +247,11 @@ func scrollRootRange(
   )
   let overflow: Float = extent - (window - root.endInset)
   if overflow <= 0.0 {
-    ret ScrollRange { active: false, floor: 0.0, window: window }
+    var rest: Float = 0.0
+    if root.anchor is ScrollAnchor.end {
+      rest = 0.0 - overflow
+    }
+    ret ScrollRange { active: false, floor: 0.0, window: window, rest: rest }
   }
   ret ScrollRange { active: true, floor: 0.0 - overflow, window: window }
 }
@@ -315,6 +326,19 @@ func scrollRootSystem(world: mod UiWorld, uiSystems: mod UiSystems, memory: mod 
       let seeded: ScrollState = { y: position, velocity: 0.0 }
       componentSet(this: world.scrollStates, entityId: entityId, data: seeded)
       let root: view ScrollRoot = componentView(this: world.scrollRoots, entityId: entityId)
+      # An end-anchored root mounted afresh opens at its end; one with a
+      # remembered position goes back there
+      if root.anchor is ScrollAnchor.end and memory.positions.get(k: pageId) is none {
+        let pinned: ScrollDrag = {
+          dragging: false
+          lastPointer: 0.0
+          d0: 0.0
+          d1: 0.0
+          d2: 0.0
+          pinnedToEnd: true
+        }
+        componentSet(this: world.scrollDrags, entityId: entityId, data: pinned)
+      }
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
@@ -445,6 +469,31 @@ func listReorderHolds(world: view UiWorld, scrollRoot: view EntityId) ret Bool {
   ret false
 }
 
+# An end-anchored root's hold on its end, after this frame's step: a drag or
+# the wheel lets go of it; a root that holds it and is at rest (no drag, no
+# fling, the wheel quiet) moves to the floor, which follows the content as
+# rows are added; one that comes to rest at the floor holds it again.
+func pinToEnd(
+  drag: mod ScrollDrag
+  state: mod ScrollState
+  floor: view Float
+  wheel: view Float
+) {
+  if drag.active or wheel is not 0.0 {
+    drag.pinnedToEnd = false
+    ret
+  }
+  let resting: Bool = drag.dragging is false and state.velocity is 0.0 and drag.wheelIdleFrames >= scrollWheelQuietFrames
+  if resting is false {
+    ret
+  }
+  if drag.pinnedToEnd {
+    state.y = floor
+  } else if scrollAbs(value: state.y - floor) < scrollPosEps {
+    drag.pinnedToEnd = true
+  }
+}
+
 func updateScrollRoot(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -502,21 +551,26 @@ func updateScrollRoot(
 
   if range.active is false {
     # Content fits. Reset rather than leaving a stale position behind: a panel
-    # that shrinks while scrolled would otherwise keep a gap at the top.
+    # that shrinks while scrolled would otherwise keep a gap at the top. It
+    # rests at its start, or at its end when anchored there (and its end is
+    # then in view, so it holds it as the content grows).
     drag.dragging = false
+    if root.anchor is ScrollAnchor.end {
+      drag.pinnedToEnd = true
+    }
     componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
-    if before is not 0.0 {
+    if before is not range.rest {
       applyScrollPosition(
         world: world
         uiSystems: uiSystems
         entityId: entityId
         root: root
-        position: 0.0
+        position: range.rest
       )
       let rest: mod ScrollState = componentMod(this: world.scrollStates, entityId: entityId)
       rest.velocity = 0.0
     }
-    ret before is not 0.0
+    ret before is not range.rest
   }
 
   let floor: Float = range.floor
@@ -639,6 +693,14 @@ func updateScrollRoot(
     }
   }
 
+  if root.anchor is ScrollAnchor.end {
+    pinToEnd(
+      drag: drag
+      state: state
+      floor: floor
+      wheel: wheel
+    )
+  }
   componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
   componentSet(this: world.scrollStates, entityId: entityId, data: state)
   if state.y is not before {
@@ -674,15 +736,24 @@ func scrollRootSettling(
     ret false
   }
   let state: view ScrollState = componentView(this: world.scrollStates, entityId: entityId)
-  if state.velocity is not 0.0 or state.y > 0.0 {
+  if state.velocity is not 0.0 {
     ret true
   }
   let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: entityId)
-  if range.active and state.y < range.floor {
+  if range.active and (state.y > 0.0 or state.y < range.floor) {
+    ret true
+  }
+  # a root whose content fits rests at its start (or its end when anchored there)
+  if range.active is false and state.y is not range.rest {
     ret true
   }
   if componentHas(this: world.scrollDrags, entityId: entityId) {
     let drag: view ScrollDrag = componentView(this: world.scrollDrags, entityId: entityId)
+    # an end-anchored root that holds its end and is not there yet (it was
+    # mounted before its first layout, or rows were added) moves next frame
+    if drag.pinnedToEnd and range.active and state.y is not range.floor {
+      ret true
+    }
     ret drag.dragging or drag.wheelIdleFrames < scrollWheelSettleFrames
   }
   ret false

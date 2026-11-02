@@ -12,6 +12,7 @@ import Vec2
 # WorldTransform2D from lib/ecs (position/rotation/scale Vec2 pair), not a
 # bespoke scalar struct. Import pulls the module into the build graph.
 import ecs/Transform
+import ui/ScrollAnchor
 
 enum SizeMode { fixed, hug, fill }
 
@@ -482,7 +483,8 @@ type PageRoot {
 #
 #     "Body": { "ScrollRoot": { "axis": "y", "floor": "content", "endInset": 390 } }
 #
-# Authored as `"axis": "y"` / `"x"` and `"floor": "content"` / `"fixed"`.
+# Authored as `"axis": "y"` / `"x"` and `"floor": "content"` / `"fixed"`;
+# `"anchor": "end"` holds the content's end in view (ui/ScrollAnchor).
 enum ScrollAxis { y, x }
 
 enum ScrollFloorMode { content, fixed }
@@ -492,6 +494,7 @@ type ScrollRoot {
   floor: ScrollFloorMode
   fixedFloor: Float
   endInset: Float
+  anchor: ScrollAnchor = ScrollAnchor.start
 }
 
 # Per-root scroll position. Lives on the `ScrollRoot` entity, so a

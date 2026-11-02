@@ -513,3 +513,39 @@ banding.
   paints first and the radial one over it.
 - Case 1314 checks what is queued; the 121 Coverage sample has an orb light
   (FadedBox).
+
+## 15. `ScrollRoot.anchor`: a list that fills from the bottom
+
+A UI that puts every control at the bottom of the screen for one-thumb use,
+or a chat, wants its list to start at the bottom too, next to those
+controls. `"anchor": "end"` on the `ScrollRoot` (ui/ScrollAnchor; the
+default is `"start"`, the top):
+
+```json
+"Tasks": {
+  "ListView": { "itemHeight": 56, "visibleItemCount": 10, ... },
+  "ScrollRoot": { "axis": "y", "anchor": "end" }
+}
+```
+
+- Content shorter than the window sits at the window's end: its last row
+  ends where the window ends (less `endInset`). The position is the room
+  left over (`ScrollRange.rest`, positive), applied like any scroll as the
+  root's `RuntimeOffset`, so a virtual `ListView` windows its rows from it
+  as usual.
+- A longer list opens scrolled to its end (a root mounted with no
+  remembered position), with the window on its last rows.
+- While its end is in view the root holds it (`ScrollDrag.pinnedToEnd`): a
+  row added at the end keeps the end where it was, as a chat does. A drag or
+  the wheel lets go of it, so a row added while the list is scrolled back
+  does not move it; coming to rest at the end (a drag or fling that ends
+  there) holds it again.
+- Rubber-banding and flings are the same as at the start. This is
+  `updateScrollRoot`'s physics; an app with its own scroll state machine
+  reads `scrollRootRange(...).rest` for where a short list rests.
+- On the frame a list is mounted it is not laid out yet, so it shows at its
+  start for that one frame; `scrollRootSettling` stays true until it has
+  moved to its end, so an idle event loop renders the next frame.
+
+Case 1315 checks a short, a long and a growing list, scrolling away and
+back, and the start anchor.
