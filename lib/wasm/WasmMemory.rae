@@ -1,0 +1,41 @@
+# WasmMemory — little-endian integers in a WASM instance's memory, over
+# wasm/Wasm's wasmMemoryRead / wasmMemoryWrite (what WASI's pointer arguments
+# need: iovecs, counts, clock values).
+open wasm/Wasm
+
+# A little-endian integer of `count` bytes (4 or 8) at `address`, or none
+func wasmMemoryReadInt(
+  instance: view WasmInstance
+  address: view Int
+  count: view Int
+) ret opt Int {
+  if let bytes: List(UInt8) = wasmMemoryRead(instance: instance, address: address, count: count) {
+    var value: Int = 0
+    var i: Int = count - 1
+    loop i >= 0 {
+      value = (value shl 8) bitor (bytes.copyAtFallback(index: i, fallback: 0) as Int)
+      i = i - 1
+    }
+    if count is 4 and value >= 2147483648 {
+      value = value - 4294967296
+    }
+    ret value
+  }
+  ret none
+}
+
+# Write `value` as `count` little-endian bytes (4 or 8) at `address`
+func wasmMemoryWriteInt(
+  instance: view WasmInstance
+  address: view Int
+  value: view Int
+  count: view Int
+) ret Bool {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  var rest: Int = value
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: (rest bitand 255) as UInt8)
+    rest = rest shr 8
+  }
+  ret wasmMemoryWrite(instance: instance, address: address, bytes: bytes)
+}

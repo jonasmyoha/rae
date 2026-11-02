@@ -3,10 +3,13 @@
 # Rae with nothing behind them: no files, no environment, no arguments. Text
 # written to stdout or stderr is collected for the host (its log); the clock
 # and random bytes are real; every file call answers EBADF; proc_exit traps.
-# A host grants `wasiMinimalGrants()` and calls `wasiMinimalAnswer` from its
-# `wasmHostCall` for calls to the wasi_snapshot_preview1 module.
+# A host exposes `wasiMinimalCapabilities()` (docs/wasm-interfaces.md §4),
+# grants the ones it gives a module (`runtime` always comes with them), and
+# calls `wasiMinimalAnswer` from its `wasmHostCall` for calls to the
+# wasi_snapshot_preview1 module.
 import String
 open wasm/Wasm
+open wasm/WasmMemory
 open crypto/CryptoRandom
 
 const wasiModule: String = "wasi_snapshot_preview1"
@@ -27,31 +30,48 @@ func createWasiOutput() ret WasiOutput {
   ret WasiOutput { text: "" }
 }
 
-# Every import WasiMinimal answers, as "module.name"
-func wasiMinimalGrants() ret List(String) {
-  let names: List(String) = {
-    "args_get"
-    "args_sizes_get"
-    "environ_get"
-    "environ_sizes_get"
-    "clock_time_get"
-    "clock_res_get"
-    "fd_close"
-    "fd_fdstat_get"
-    "fd_prestat_get"
-    "fd_prestat_dir_name"
-    "fd_read"
-    "fd_seek"
-    "fd_write"
-    "proc_exit"
-    "random_get"
-    "sched_yield"
+func wasiCapability(name: view String, imports: view List(String)) ret WasmCapability {
+  var keys: List(String) = List.create(String, cap: imports.length)
+  loop let field: view String in imports {
+    keys.add(value: "{wasiModule}.{field}")
   }
-  var grants: List(String) = List.create(String, cap: names.length)
-  loop let name: view String in names {
-    grants.add(value: "{wasiModule}.{name}")
-  }
-  ret grants
+  ret WasmCapability { name: "{name}", imports: keys }
+}
+
+# The standard capabilities over what WasiMinimal answers (the same table is
+# standard_imports in compiler/src/c_module_exports.c, which a module build
+# checks its imports against; change both):
+#   runtime  what the Rae runtime calls that carries no authority: empty
+#            arguments and environment, sched_yield, EBADF for every file
+#            call, proc_exit a trap. Always granted when exposed.
+#   log      fd_write to stdout and stderr, collected in WasiOutput
+#   clock    clock_time_get, clock_res_get
+#   random   random_get
+func wasiMinimalCapabilities() ret List(WasmCapability) {
+  var capabilities: List(WasmCapability) = List.create(WasmCapability, cap: 4)
+  capabilities.add(value: wasiCapability(
+    name: "runtime"
+    imports: {
+      "args_get"
+      "args_sizes_get"
+      "environ_get"
+      "environ_sizes_get"
+      "sched_yield"
+      "proc_exit"
+      "fd_close"
+      "fd_fdstat_get"
+      "fd_prestat_get"
+      "fd_prestat_dir_name"
+      "fd_read"
+      "fd_seek"
+    }
+  ))
+  capabilities.add(value: wasiCapability(name: "log", imports: { "fd_write" }))
+  capabilities.add(
+    value: wasiCapability(name: "clock", imports: { "clock_time_get", "clock_res_get" })
+  )
+  capabilities.add(value: wasiCapability(name: "random", imports: { "random_get" }))
+  ret capabilities
 }
 
 func wasiErrno(code: view Int) ret WasmHostAnswer {

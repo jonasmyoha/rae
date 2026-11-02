@@ -15,7 +15,8 @@
 # module built from a changed AppFrameIn before calling it (skipped without
 # tools/wamr/build.sh's library). Then three bad packs must be refused: an
 # export that names no function, a `mod` parameter, and a struct holding a
-# Ptr. SKIP without wasi-sdk ($WASI_SDK,
+# Ptr; and a module whose `requests` miss `clock` must fail to build, naming
+# clock_time_get (docs/wasm-interfaces.md §4). SKIP without wasi-sdk ($WASI_SDK,
 # default ~/.local/wasi-sdk) or node. One pre-suite case of every full run;
 # `make wasm-module-check` alone.
 set -u
@@ -104,4 +105,19 @@ func keep(native: view Native) ret Int {
   ret 1
 }' "cannot cross"
 
-echo "PASS: wasm-module-check (a reactor exporting scalars, Strings and encoded values, called from Node with its rae.interface checked, $EMBEDDED; a changed frame type and bad exports refused)"
+# deny by default at build time: requests that do not cover an import
+mkdir -p "$TMP/underRequested"
+cp -R "$FIXTURE" "$TMP/underRequested/wasmModule"
+cp -R tests/wasmFrames "$TMP/underRequested/wasmFrames"
+rm -f "$TMP/underRequested/wasmModule/rae.lock"
+perl -pi -e 's/requests: "log, clock"/requests: "log"/' "$TMP/underRequested/wasmModule/Module.raepack"
+if perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/underRequested/wasmModule" \
+    --out "$TMP/underRequested.wasm" "$TMP/underRequested/wasmModule/Main.rae" > "$TMP/underRequested.log" 2>&1; then
+  echo "FAIL: wasm-module-check (a module whose requests miss clock built)"; exit 1
+fi
+if ! grep -q 'clock_time_get: add `clock` to the requests' "$TMP/underRequested.log" || [ -f "$TMP/underRequested.wasm" ]; then
+  echo "FAIL: wasm-module-check (a module whose requests miss clock failed without naming the import, or left its .wasm)"
+  tail -5 "$TMP/underRequested.log" | sed 's/^/    /'; exit 1
+fi
+
+echo "PASS: wasm-module-check (a reactor exporting scalars, Strings and encoded values, called from Node with its rae.interface checked, $EMBEDDED; a changed frame type, bad exports and an import outside the requests refused)"

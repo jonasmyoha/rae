@@ -17,6 +17,7 @@ pack Module {
       label: "Module"
       entry: "Main.rae"
       exports: "add, greet"
+      requests: "log, clock"
       sources: { source: { path: "." emit: compiled } }
     }
   }
@@ -26,6 +27,16 @@ pack Module {
 ```sh
 rae build --target wasm --project . --out build/module.wasm Main.rae
 ```
+
+`requests` names the capabilities the module asks a host for
+(docs/wasm-interfaces.md §4): `log` (`fd_write`), `clock`, `random`, and
+`runtime`, which is always included. Every module the Rae runtime is in
+imports `fd_write` and `clock_time_get`, so it requests at least
+`log, clock`. After the link the build reads the module's imports, and an
+import no request covers fails the build, naming it and the capability to add
+(`wasi_snapshot_preview1.clock_time_get: add \`clock\` to the requests`). The
+requests are written into the `rae.interface` section. A request grants
+nothing; the host decides.
 
 It is built with wasi-sdk (`$WASI_SDK`, default `~/.local/wasi-sdk`):
 `clang --target=wasm32-wasip1 -mexec-model=reactor`. There is no

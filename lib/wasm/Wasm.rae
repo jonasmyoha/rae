@@ -16,6 +16,7 @@
 # wasm/WasiMinimal answers the few WASI imports a module built by
 # `rae build --target wasm` makes.
 import String
+open wasm/WasmBytes
 cheader "runtime_wasm_embed.h"
 
 const hasWasmEngine: Bool = Target.isApple or Target.isLinuxKernel
@@ -215,6 +216,8 @@ enum WasmErrorKind {
   memory
   unsupported
   interfaceMismatch
+  grantNotRequested
+  requestNotExposed
 }
 
 # the bytes are not a module this engine runs
@@ -226,6 +229,8 @@ enum WasmErrorKind {
 # no WASM engine on this platform
 # an export's types differ from the host's, or the module describes none
 # (wasm/WasmInterface: wasmCheckExport)
+# the host grants a capability the module did not request
+# the module requests a capability this host does not expose
 type WasmError {
   kind: WasmErrorKind
   message: String
@@ -281,6 +286,18 @@ type WasmInstance {
   module: Int
   imports: List(WasmImport)
   error: WasmError
+  # Per import: the capability it belongs to when that one was requested but
+  # not granted ("" when it may be called). wasmCall answers such a call with
+  # a trap itself, before the host's wasmHostCall.
+  denied: List(String)
+}
+
+# A capability (docs/wasm-interfaces.md §4): a named set of imports, each
+# "module.name", that a host defines and may grant. A module requests
+# capabilities (its `rae.interface` section); a request never grants.
+type WasmCapability {
+  name: String
+  imports: List(String)
 }
 
 # An import the module called, for the host to answer
@@ -314,23 +331,6 @@ func wasmTrap(message: view String) ret WasmHostAnswer {
 type WasmCallResult {
   values: List(WasmValue)
   error: WasmError
-}
-
-func wasmBytesZ(text: view String) ret List(UInt8) {
-  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
-  loop var i: Int = 0, i < text.length(), ++i {
-    bytes.add(value: text.byteAt(index: i) as UInt8)
-  }
-  bytes.add(value: 0)
-  ret bytes
-}
-
-func wasmZeroBytes(count: view Int) ret List(UInt8) {
-  var bytes: List(UInt8) = List.create(UInt8, cap: count)
-  loop var i: Int = 0, i < count, ++i {
-    bytes.add(value: 0)
-  }
-  ret bytes
 }
 
 func wasmKindOf(code: view Int) ret WasmValueKind {
@@ -411,66 +411,6 @@ func wasmLoad(bytes: view List(UInt8)) ret WasmModule {
   }
 }
 
-# An unsigned LEB128 number at `position`: its value and the position after
-# it; `ok` false when it runs past the bytes or is longer than 5 bytes
-type WasmLeb {
-  value: Int
-  next: Int
-  ok: Bool
-}
-
-func wasmReadLeb(bytes: view List(UInt8), position: view Int) ret WasmLeb {
-  var value: Int = 0
-  var shift: Int = 0
-  var at: Int = position
-  loop shift < 35 {
-    if at >= bytes.length {
-      ret WasmLeb { value: 0, next: at, ok: false }
-    }
-    let byte: Int = bytes.copyAtFallback(index: at, fallback: 0) as Int
-    at = at + 1
-    value = value bitor ((byte bitand 127) shl shift)
-    if (byte bitand 128) is 0 {
-      ret WasmLeb { value: value, next: at, ok: true }
-    }
-    shift = shift + 7
-  }
-  ret WasmLeb { value: 0, next: at, ok: false }
-}
-
-# The text of the custom section `name` in a module's bytes, "" when there is
-# none. Read here, in Rae, from the bytes: after the 8-byte header every
-# section is an id byte, a LEB128 size and its contents, and a custom section
-# (id 0) starts with its name. (WAMR answers custom sections only when built
-# with them, which this build is not.)
-func wasmCustomSectionText(bytes: view List(UInt8), name: view String) ret String {
-  var position: Int = 8
-  loop position < bytes.length {
-    let id: Int = bytes.copyAtFallback(index: position, fallback: 0) as Int
-    let size: WasmLeb = wasmReadLeb(bytes: bytes, position: position + 1)
-    let end: Int = size.next + size.value
-    if size.ok is false or end > bytes.length {
-      ret ""
-    }
-    if id is 0 {
-      let nameLength: WasmLeb = wasmReadLeb(bytes: bytes, position: size.next)
-      let payload: Int = nameLength.next + nameLength.value
-      if nameLength.ok and payload <= end {
-        let found: String = String.fromBytes(
-          bytes: bytes
-          start: nameLength.next
-          count: nameLength.value
-        )
-        if found is name {
-          ret String.fromBytes(bytes: bytes, start: payload, count: end - payload)
-        }
-      }
-    }
-    position = end
-  }
-  ret ""
-}
-
 func wasmReadImports(module: view Int) ret List(WasmImport) {
   var imports: List(WasmImport) = List.create(WasmImport, cap: 8)
   when hasWasmEngine {
@@ -533,22 +473,55 @@ func wasmReadImports(module: view Int) ret List(WasmImport) {
 
 # The module's imports `granted` (as "module.name") does not list: what an
 # instance would be refused for
-func wasmRefusedImports(module: view WasmModule, granted: view List(String)) ret List(String) {
-  var refused: List(String) = List.create(String, cap: 4)
-  loop let wasmImport: view WasmImport in module.imports {
-    let key: String = wasmImportKey(wasmImport: wasmImport)
-    if wasmImport.kind is not WasmImportKind.function or granted.contains(value: key) is false {
-      refused.add(value: key)
+func wasmJoined(names: view List(String)) ret String {
+  var joined: String = ""
+  loop let name: view String in names {
+    if joined.length() > 0 {
+      joined = "{joined}, "
     }
+    joined = "{joined}{name}"
   }
-  ret refused
+  ret joined
 }
 
-# An instance of `module`, its imports checked against `granted` first: any
-# other import (and any non-function import) refuses it by name, before
-# anything runs
+func wasmCapabilityNamed(exposed: view List(WasmCapability), name: view String) ret opt Int {
+  loop var i: Int = 0, i < exposed.length, ++i {
+    if let capability: view WasmCapability = exposed.viewAt(index: i) {
+      if capability.name is name {
+        ret i
+      }
+    }
+  }
+  ret none
+}
+
+func wasmRefusedInstance(
+  module: view WasmModule
+  kind: view WasmErrorKind
+  message: view String
+) ret WasmInstance {
+  ret WasmInstance {
+    handle: 0
+    module: module.handle
+    imports: List.create(WasmImport, cap: 0)
+    error: WasmError { kind: kind, message: "{message}" }
+    denied: List.create(String, cap: 0)
+  }
+}
+
+# An instance of `module` (docs/wasm-interfaces.md §4). `exposed` is every
+# capability this host can give, `granted` the names it gives this module.
+# Checked before anything runs: what the module requests (its rae.interface
+# `requests`; a module without the section, not built by Rae, requests every
+# exposed capability) must be exposed (requestNotExposed), what is granted
+# must be requested (grantNotRequested), and every import must be a function
+# in a requested capability (importRefused, naming them). `runtime` is
+# granted whenever it is exposed. The imports of a capability that is
+# requested but not granted link, and a call to one traps
+# ("capability <name> is not granted") without reaching the host.
 func wasmInstantiate(
   module: view WasmModule
+  exposed: view List(WasmCapability)
   granted: view List(String)
   limits: view WasmLimits
 ) ret WasmInstance {
@@ -558,26 +531,78 @@ func wasmInstantiate(
       module: 0
       imports: List.create(WasmImport, cap: 0)
       error: WasmError { kind: module.error.kind, message: "{module.error.message}" }
+      denied: List.create(String, cap: 0)
     }
   }
-  let refused: List(String) = wasmRefusedImports(module: module, granted: granted)
+  var requested: List(String) = List.create(String, cap: 4)
+  if let declared: List(String) = wasmInterfaceRequests(interfaceText: module.interfaceText) {
+    requested = declared
+  } else {
+    loop let capability: view WasmCapability in exposed {
+      requested.add(value: "{capability.name}")
+    }
+  }
+  if wasmCapabilityNamed(exposed: exposed, name: "runtime") is not none and not requested.contains(
+    value: "runtime"
+  ) {
+    requested.add(value: "runtime")
+  }
+  var unexposed: List(String) = List.create(String, cap: 2)
+  loop let name: view String in requested {
+    if wasmCapabilityNamed(exposed: exposed, name: name) is none {
+      unexposed.add(value: "{name}")
+    }
+  }
+  if unexposed.length > 0 {
+    ret wasmRefusedInstance(
+      module: module
+      kind: WasmErrorKind.requestNotExposed
+      message: "the module requests what this host does not expose: {wasmJoined(names: unexposed)}"
+    )
+  }
+  var unrequested: List(String) = List.create(String, cap: 2)
+  loop let name: view String in granted {
+    if not requested.contains(value: name) {
+      unrequested.add(value: "{name}")
+    }
+  }
+  if unrequested.length > 0 {
+    ret wasmRefusedInstance(
+      module: module
+      kind: WasmErrorKind.grantNotRequested
+      message: "granted but not requested by the module: {wasmJoined(names: unrequested)}"
+    )
+  }
+  # Each import's capability among the requested ones: "" refuses it.
+  var refused: List(String) = List.create(String, cap: 4)
+  var denied: List(String) = List.create(String, cap: module.imports.length)
+  loop let wasmImport: view WasmImport in module.imports {
+    let key: String = wasmImportKey(wasmImport: wasmImport)
+    var owner: String = ""
+    loop let name: view String in requested {
+      if let index: Int = wasmCapabilityNamed(exposed: exposed, name: name) {
+        if let capability: view WasmCapability = exposed.viewAt(index: index) {
+          if owner.length() is 0 and capability.imports.contains(value: key) {
+            owner = "{name}"
+          }
+        }
+      }
+    }
+    if wasmImport.kind is not WasmImportKind.function or owner.length() is 0 {
+      refused.add(value: key)
+    }
+    if owner is "runtime" or granted.contains(value: owner) {
+      denied.add(value: "")
+    } else {
+      denied.add(value: owner)
+    }
+  }
   if refused.length > 0 {
-    var names: String = ""
-    loop let name: view String in refused {
-      if names.length() > 0 {
-        names = "{names}, "
-      }
-      names = "{names}{name}"
-    }
-    ret WasmInstance {
-      handle: 0
-      module: module.handle
-      imports: List.create(WasmImport, cap: 0)
-      error: WasmError {
-        kind: WasmErrorKind.importRefused
-        message: "imports not granted: {names}"
-      }
-    }
+    ret wasmRefusedInstance(
+      module: module
+      kind: WasmErrorKind.importRefused
+      message: "imports no requested capability covers: {wasmJoined(names: refused)}"
+    )
   }
   when hasWasmEngine {
     var linked: Int = 0
@@ -602,6 +627,7 @@ func wasmInstantiate(
         module: module.handle
         imports: List.create(WasmImport, cap: 0)
         error: wasmLastError(kind: WasmErrorKind.instantiate)
+        denied: List.create(String, cap: 0)
       }
     }
     ret WasmInstance {
@@ -609,6 +635,7 @@ func wasmInstantiate(
       module: module.handle
       imports: module.imports
       error: wasmOk()
+      denied: denied
     }
   }
   ret WasmInstance {
@@ -616,6 +643,7 @@ func wasmInstantiate(
     module: 0
     imports: List.create(WasmImport, cap: 0)
     error: wasmUnsupported()
+    denied: List.create(String, cap: 0)
   }
 }
 
@@ -805,8 +833,20 @@ func wasmCall(
       }
       if event is 1 {
         let call: WasmHostCall = wasmTakeHostCall(instance: instance)
-        let answer: WasmHostAnswer = wasmHostCall(host: host, instance: instance, call: call)
-        wasmGiveHostAnswer(instance: instance, answer: answer)
+        let capability: String = instance.denied.copyAtFallback(
+          index: call.importIndex
+          fallback: ""
+        )
+        if capability.length() > 0 {
+          # requested but not granted: refused here, the host never sees it
+          wasmGiveHostAnswer(
+            instance: instance
+            answer: wasmTrap(message: "capability {capability} is not granted")
+          )
+        } else {
+          let answer: WasmHostAnswer = wasmHostCall(host: host, instance: instance, call: call)
+          wasmGiveHostAnswer(instance: instance, answer: answer)
+        }
       } else if event is 2 {
         ret wasmFinishedResult(instance: instance)
       } else if event is 3 {
@@ -896,43 +936,6 @@ func wasmMemoryWrite(
     }
   }
   ret answer is 0
-}
-
-# A little-endian integer of `count` bytes (4 or 8) at `address`, or none
-func wasmMemoryReadInt(
-  instance: view WasmInstance
-  address: view Int
-  count: view Int
-) ret opt Int {
-  if let bytes: List(UInt8) = wasmMemoryRead(instance: instance, address: address, count: count) {
-    var value: Int = 0
-    var i: Int = count - 1
-    loop i >= 0 {
-      value = (value shl 8) bitor (bytes.copyAtFallback(index: i, fallback: 0) as Int)
-      i = i - 1
-    }
-    if count is 4 and value >= 2147483648 {
-      value = value - 4294967296
-    }
-    ret value
-  }
-  ret none
-}
-
-# Write `value` as `count` little-endian bytes (4 or 8) at `address`
-func wasmMemoryWriteInt(
-  instance: view WasmInstance
-  address: view Int
-  value: view Int
-  count: view Int
-) ret Bool {
-  var bytes: List(UInt8) = List.create(UInt8, cap: count)
-  var rest: Int = value
-  loop var i: Int = 0, i < count, ++i {
-    bytes.add(value: (rest bitand 255) as UInt8)
-    rest = rest shr 8
-  }
-  ret wasmMemoryWrite(instance: instance, address: address, bytes: bytes)
 }
 
 # Release the instance (no call may be running) and the module

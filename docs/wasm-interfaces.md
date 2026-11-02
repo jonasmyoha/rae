@@ -184,6 +184,13 @@ for `lib/wasm`.
   the grant comes only from host code. A module that edits its own
   `rae.interface` to request more gains nothing that the host did not grant.
 
+**Implemented (compiler 0.2.290):** as above, with these details. A module
+without a `rae.interface` section (not built by Rae) requests every exposed
+capability, so only the grant limits it. `runtime` is granted whenever it is
+exposed, and requesting it is optional. A pack with no `requests` requests
+nothing, so its build fails on the runtime's own `fd_write` and
+`clock_time_get`. Fixtures: case 1302, wasm-module-check.
+
 ## 5. One frame, end to end
 
 The module, built with `exports: "sumuUpdate"` and

@@ -39,6 +39,40 @@
 #include "sema.h"
 
 const char* g_wasm_module_exports = NULL;
+const char* g_wasm_module_requests = NULL;
+
+/* The standard capabilities: named sets of the WASI imports a module built
+ * here makes (docs/wasm-interfaces.md §4). The same table is
+ * wasiMinimalCapabilities() in lib/wasm/WasiMinimal.rae; change both.
+ * `runtime` carries no authority (empty arguments and environment, EBADF for
+ * every file, a trap for exit) and is always granted. */
+typedef struct { const char* capability; const char* import; } StandardImport;
+static const StandardImport standard_imports[] = {
+  { "runtime", "args_get" }, { "runtime", "args_sizes_get" },
+  { "runtime", "environ_get" }, { "runtime", "environ_sizes_get" },
+  { "runtime", "sched_yield" }, { "runtime", "proc_exit" },
+  { "runtime", "fd_close" }, { "runtime", "fd_fdstat_get" },
+  { "runtime", "fd_prestat_get" }, { "runtime", "fd_prestat_dir_name" },
+  { "runtime", "fd_read" }, { "runtime", "fd_seek" },
+  { "log", "fd_write" },
+  { "clock", "clock_time_get" }, { "clock", "clock_res_get" },
+  { "random", "random_get" },
+};
+#define WASI_MODULE "wasi_snapshot_preview1"
+
+/* Whether `name` is listed in the comma / space separated `list`. */
+static bool list_has(const char* list, const char* name) {
+  if (!list) return false;
+  size_t n = strlen(name);
+  const char* p = list;
+  while (*p) {
+    while (*p == ',' || *p == ' ' || *p == '\t' || *p == '\n') p++;
+    const char* start = p;
+    while (*p && *p != ',' && *p != ' ' && *p != '\t' && *p != '\n') p++;
+    if ((size_t)(p - start) == n && strncmp(start, name, n) == 0) return true;
+  }
+  return false;
+}
 
 const char* core_function_mangled(CompilerContext* ctx, const char* name);
 
@@ -335,7 +369,19 @@ static void emit_interface_section(CompilerContext* ctx, FILE* out) {
     else fprintf(text, "null");
     fprintf(text, "}");
   }
-  fprintf(text, "],\"requests\":[]}");
+  fprintf(text, "],\"requests\":[");
+  if (g_wasm_module_requests) {
+    char requests[1024];
+    snprintf(requests, sizeof requests, "%s", g_wasm_module_requests);
+    char* request_cursor = NULL;
+    bool first_request = true;
+    for (char* request = strtok_r(requests, " ,\t\n", &request_cursor); request;
+         request = strtok_r(NULL, " ,\t\n", &request_cursor)) {
+      fprintf(text, "%s\"%s\"", first_request ? "" : ",", request);
+      first_request = false;
+    }
+  }
+  fprintf(text, "]}");
   fclose(text);
   /* As a C string literal: the JSON's quotes escaped. */
   char* literal = NULL;
@@ -370,4 +416,96 @@ bool emit_wasm_module_exports(CompilerContext* ctx, FILE* out) {
   }
   if (ok) emit_interface_section(ctx, out);
   return ok;
+}
+
+/* ---- the import check after the link ------------------------------------ */
+
+typedef struct { const uint8_t* data; size_t len; size_t pos; bool ok; } WasmBytes;
+
+static uint32_t read_leb(WasmBytes* b) {
+  uint32_t value = 0;
+  for (int shift = 0; shift < 35; shift += 7) {
+    if (b->pos >= b->len) { b->ok = false; return 0; }
+    uint8_t byte = b->data[b->pos++];
+    value |= (uint32_t)(byte & 0x7f) << shift;
+    if (!(byte & 0x80)) return value;
+  }
+  b->ok = false;
+  return 0;
+}
+
+static void skip_limits(WasmBytes* b) {
+  if (b->pos >= b->len) { b->ok = false; return; }
+  uint8_t flags = b->data[b->pos++];
+  read_leb(b);
+  if (flags & 1) read_leb(b);
+}
+
+/* The capability that covers WASI import `name`, or NULL. */
+static const char* standard_capability(const char* name) {
+  for (size_t i = 0; i < sizeof standard_imports / sizeof standard_imports[0]; i++)
+    if (strcmp(standard_imports[i].import, name) == 0) return standard_imports[i].capability;
+  return NULL;
+}
+
+bool wasm_module_check_imports(const char* wasm_path) {
+  FILE* f = fopen(wasm_path, "rb");
+  if (!f) { fprintf(stderr, "error: cannot read the built module %s\n", wasm_path); return false; }
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  uint8_t* data = size > 0 ? (uint8_t*)malloc((size_t)size) : NULL;
+  if (!data || fread(data, 1, (size_t)size, f) != (size_t)size) {
+    fclose(f); free(data);
+    fprintf(stderr, "error: cannot read the built module %s\n", wasm_path);
+    return false;
+  }
+  fclose(f);
+  WasmBytes b = { data, (size_t)size, 8, true };
+  bool ok = size >= 8 && memcmp(data, "\0asm", 4) == 0;
+  int refused = 0;
+  while (ok && b.ok && b.pos < b.len) {
+    uint8_t id = b.data[b.pos++];
+    uint32_t section_size = read_leb(&b);
+    size_t end = b.pos + section_size;
+    if (!b.ok || end > b.len) { ok = false; break; }
+    if (id == 2) {
+      uint32_t count = read_leb(&b);
+      for (uint32_t i = 0; i < count && b.ok; i++) {
+        uint32_t module_len = read_leb(&b);
+        if (!b.ok || b.pos + module_len > end) { b.ok = false; break; }
+        char module_name[128];
+        snprintf(module_name, sizeof module_name, "%.*s", (int)module_len, (const char*)b.data + b.pos);
+        b.pos += module_len;
+        uint32_t name_len = read_leb(&b);
+        if (!b.ok || b.pos + name_len > end) { b.ok = false; break; }
+        char name[128];
+        snprintf(name, sizeof name, "%.*s", (int)name_len, (const char*)b.data + b.pos);
+        b.pos += name_len;
+        if (b.pos >= end) { b.ok = false; break; }
+        uint8_t kind = b.data[b.pos++];
+        if (kind == 0) read_leb(&b);
+        else if (kind == 1) { b.pos++; skip_limits(&b); }
+        else if (kind == 2) skip_limits(&b);
+        else if (kind == 3) b.pos += 2;
+        else if (kind == 4) { b.pos++; read_leb(&b); }
+        else { b.ok = false; break; }
+        const char* capability = strcmp(module_name, WASI_MODULE) == 0 ? standard_capability(name) : NULL;
+        if (capability && (strcmp(capability, "runtime") == 0 || list_has(g_wasm_module_requests, capability))) continue;
+        if (refused++ == 0)
+          fprintf(stderr, "error: the module imports what its wasm target's `requests` do not cover (docs/wasm-interfaces.md §4):\n");
+        if (capability)
+          fprintf(stderr, "  %s.%s: add `%s` to the requests\n", module_name, name, capability);
+        else
+          fprintf(stderr, "  %s.%s: no capability covers it\n", module_name, name);
+      }
+    }
+    b.pos = end;
+  }
+  free(data);
+  if (!ok || !b.ok) {
+    fprintf(stderr, "error: %s is not a WASM module this check can read\n", wasm_path);
+    return false;
+  }
+  return refused == 0;
 }
