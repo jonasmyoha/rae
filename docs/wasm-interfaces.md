@@ -131,10 +131,14 @@ version 1) into the module, and the host can read it without running anything:
       "requests": ["log", "clock", "random"] }
 
 - **The host checks each export it will call, once, before the first call:**
-  `wasmCheckExport(module, name, params, result)` compares the hashes of the
-  host's own types with the section's. A mismatch is the error
-  `interfaceMismatch`, and its message contains both descriptions, so it is
-  clear which field differs. A frame never pays for the check.
+  `wasmCheckExport(module, name, params, result)` compares the host's own
+  types with the section's. It takes the host's descriptions
+  (`binarySchemaText(T)`), not only their hashes: equal descriptions are
+  equal hashes, and the descriptions are what lets an `interfaceMismatch`
+  message contain both sides, so it is clear which field differs. A frame
+  never pays for the check. (Implemented in `lib/wasm/WasmInterface`; the
+  section is read in Rae from the module's bytes, because the WAMR build
+  answers no custom sections.)
 - **Version 1 is strict: equal or refused.** Tolerant changes (a field added
   at the end, read as its default) are a later extension. SUMU already
   versions its SDK (`sdkVersion`), and a strict check can never misread a
@@ -198,8 +202,8 @@ The host, once per module:
     let check: opt WasmError = wasmCheckExport(
       module: module
       name: "sumuUpdate"
-      params: { binarySchemaHash(AppFrameIn) }
-      result: binarySchemaHash(AppFrameOut)
+      params: { binarySchemaText(AppFrameIn) }
+      result: binarySchemaText(AppFrameOut)
     )
 
 and per frame:

@@ -2,13 +2,19 @@
 # compiler/tests/wasmModule (docs/wasm-modules.md): it runs it in lib/wasm
 # (docs/wasm-embedding.md) with the minimal WASI granted, and calls `add` and
 # `greet` through the module ABI (a String in through raeModuleAlloc, a
-# String result packed as address << 32 | length). The module's path is
-# $RAE_WASM_MODULE.
+# String result packed as address << 32 | length). Then, built from the same
+# frame types as the module (the `frames` package, tests/wasmFrames), it
+# checks the module's rae.interface and runs 1000 AppFrameIn -> AppFrameOut
+# frames through wasm/WasmInterface (docs/wasm-interfaces.md §5); a module
+# built from a changed AppFrameIn is refused before any call. The module's
+# path is $RAE_WASM_MODULE, the changed one's $RAE_WASM_CHANGED_MODULE.
 import String
 open Sys
 open wasm/Wasm
 open wasm/WasiMinimal
+open wasm/WasmInterface
 open crypto/CryptoBytes
+open frames/Frames
 
 type Host {
   output: WasiOutput
@@ -89,14 +95,89 @@ func greet(
   ret text
 }
 
-func main() {
-  let path: String = getEnv(name: "RAE_WASM_MODULE")
+func moduleBytes(path: view String) ret List(UInt8) {
   let raw: List(Int) = readFileBytes(path: path)
   var bytes: List(UInt8) = List.create(UInt8, cap: raw.length)
   loop let byte: view Int in raw {
     bytes.add(value: byte as UInt8)
   }
-  var module: WasmModule = wasmLoad(bytes: bytes)
+  ret bytes
+}
+
+# The host's own view of summarize: its parameter and result types.
+func checkSummarize(module: view WasmModule) ret opt WasmError {
+  ret wasmCheckExport(
+    module: module
+    name: "summarize"
+    params: { binarySchemaText(AppFrameIn) }
+    result: binarySchemaText(AppFrameOut)
+  )
+}
+
+func frameNumber(index: view Int) ret AppFrameIn {
+  var commands: List(Command) = List.create(Command, cap: 2)
+  commands.add(value: Command { name: "tap", count: (index % 5) as Int32 })
+  commands.add(value: Command { name: "scroll", count: 1 })
+  ret AppFrameIn { commands: commands, mood: Mood.calm, note: "frame {index}" }
+}
+
+func runFrames(host: mod Host, instance: mod WasmInstance, module: view WasmModule) {
+  if let described: WasmInterface = wasmModuleInterface(module: module) {
+    log("rae.interface version {described.version}, {described.exports.length} exports")
+  }
+  if let mismatch: WasmError = checkSummarize(module: module) {
+    log("summarize refused: {mismatch.message}")
+    ret
+  }
+  log("summarize matches the host's AppFrameIn -> AppFrameOut")
+  let memoryBefore: Int = wasmMemorySize(instance: instance)
+  var total: Int = 0
+  var decoded: Int = 0
+  var lastNames: String = ""
+  loop var i: Int = 0, i < 1000, ++i {
+    let frame: AppFrameIn = frameNumber(index: i)
+    let input: List(UInt8) = frame.toBinary()
+    let reply: WasmBytesResult = wasmCallEncoded(
+      Host
+      host: host
+      instance: instance
+      name: "summarize"
+      input: input
+      timeoutMs: 1000
+    )
+    if wasmFailed(error: reply.error) {
+      log("frame {i}: {reply.error.kind} {reply.error.message}")
+      ret
+    }
+    if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes) {
+      total = total + out.total
+      decoded = decoded + 1
+      lastNames = "{out.names}"
+    }
+  }
+  log("1000 frames: {decoded} decoded, totals {total}, the last '{lastNames}'")
+  let grown: Int = wasmMemorySize(instance: instance) - memoryBefore
+  log("the module's memory grew by more than 1 MiB: {grown > 1048576}")
+}
+
+# A module built from another AppFrameIn: refused by the check, never called.
+func checkChanged(path: view String) {
+  if path.length() is 0 {
+    ret
+  }
+  var changed: WasmModule = wasmLoad(bytes: moduleBytes(path: path))
+  if let mismatch: WasmError = checkSummarize(module: changed) {
+    log("a module built from a changed AppFrameIn: {mismatch.kind}")
+    log("  {mismatch.message}")
+  } else {
+    log("a module built from a changed AppFrameIn: accepted (wrong)")
+  }
+  wasmUnload(module: changed)
+}
+
+func main() {
+  let path: String = getEnv(name: "RAE_WASM_MODULE")
+  var module: WasmModule = wasmLoad(bytes: moduleBytes(path: path))
   log("loaded: {module.error.kind}")
   let without: WasmInstance = wasmInstantiate(
     module: module
@@ -134,6 +215,8 @@ func main() {
     name: "Pähkinä"
     times: 2
   )}")
+  runFrames(host: host, instance: instance, module: module)
   wasmDestroy(instance: instance)
   wasmUnload(module: module)
+  checkChanged(path: getEnv(name: "RAE_WASM_CHANGED_MODULE"))
 }
