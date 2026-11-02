@@ -701,12 +701,43 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstFuncDecl* generic_fallback = NULL;
         size_t named_count = 0;
         const size_t* named = decl_index_functions(ctx->compiler_ctx, callee_name, &named_count);
+        // A call that carries type arguments (`createList<Int>(cap: 4)`, the
+        // hoisted form of `createList(Int, cap: 4)` and of `List.create(Int,
+        // cap: 4)`) binds to a generic function taking that many type
+        // parameters when there is one: a program's own non-generic
+        // `createList(count:)` must not take over every List.create in the
+        // stdlib. (When there is none, the "type" was a module qualifier
+        // lowered the same way, `String.fromBytes(...)`, and the non-generic
+        // functions stay candidates.) Within each of the four levels below, a
+        // function the calling file sees by a bare name (its own module, the
+        // opened ones, the prelude) wins over one it does not, as sema
+        // resolves the name; the levels keep their order.
+        size_t call_type_args = 0;
+        for (const AstTypeRef* ga = expr->as.call.generic_args; ga; ga = ga->next) call_type_args++;
+        bool generic_takes_type_args = false;
+        for (size_t k = 0; k < named_count && call_type_args > 0 && !generic_takes_type_args; k++) {
+            const AstFuncDecl* candidate = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+            if (!candidate->generic_params || candidate->specialization_args) continue;
+            uint16_t param_count = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) param_count++;
+            size_t type_params = 0;
+            for (const AstIdentifierPart* gp = candidate->generic_params; gp; gp = gp->next) type_params++;
+            generic_takes_type_args = param_count == call_arg_count && type_params == call_type_args;
+        }
+        const char* calling_file = (ctx->func_decl && ctx->func_decl->origin_file) ? ctx->func_decl->origin_file : NULL;
+        bool nongeneric_receiver_seen = false, receiver_seen = false, nongeneric_fallback_seen = false,
+             generic_fallback_seen = false;
         for (size_t k = 0; k < named_count; k++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
             const AstFuncDecl* candidate = &d->as.func_decl;
             uint16_t param_count = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) param_count++;
             if (param_count != call_arg_count) continue;
             if (candidate->specialization_args) continue;
+            if (generic_takes_type_args) {
+                size_t type_params = 0;
+                for (const AstIdentifierPart* gp = candidate->generic_params; gp; gp = gp->next) type_params++;
+                if (type_params != call_type_args) continue;
+            }
+            bool seen_here = !calling_file || sema_decl_bare_visible(calling_file, d);
 
             bool has_this = candidate->params && str_eq_cstr(candidate->params->name, "this");
             bool receiver_matches = false;
@@ -718,12 +749,24 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (receiver_matches && str_eq_cstr(param_base, "Array"))
                     receiver_matches = rae_array_ref_cap(candidate->params->type) == rae_array_ref_cap(recv_tr_for_cap);
             }
+            // The first candidate of a level, replaced once by the first one
+            // the calling file sees when the first was not
             if (!candidate->generic_params) {
-                if (receiver_matches) { if (!nongeneric_receiver_match) nongeneric_receiver_match = candidate; }
-                else if (!nongeneric_fallback) nongeneric_fallback = candidate;
+                if (receiver_matches) {
+                    if (!nongeneric_receiver_match || (seen_here && !nongeneric_receiver_seen)) {
+                        nongeneric_receiver_match = candidate; nongeneric_receiver_seen = seen_here;
+                    }
+                } else if (!nongeneric_fallback || (seen_here && !nongeneric_fallback_seen)) {
+                    nongeneric_fallback = candidate; nongeneric_fallback_seen = seen_here;
+                }
             } else {
-                if (receiver_matches) { if (!receiver_match) receiver_match = candidate; }
-                else if (!generic_fallback) generic_fallback = candidate;
+                if (receiver_matches) {
+                    if (!receiver_match || (seen_here && !receiver_seen)) {
+                        receiver_match = candidate; receiver_seen = seen_here;
+                    }
+                } else if (!generic_fallback || (seen_here && !generic_fallback_seen)) {
+                    generic_fallback = candidate; generic_fallback_seen = seen_here;
+                }
             }
         }
         if (!fd) {
