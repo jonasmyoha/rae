@@ -1,0 +1,64 @@
+# Generics of the `sdk` package that its dependents instantiate with their
+# own types: the type argument comes from the caller, so it resolves where the
+# caller can see it, while this body still sees only the sdk's package.
+import Json
+open ecs/ComponentTable
+open ecs/Entity
+open ui/RegistryGeneric
+open ui/ScenePolicy
+open ui/Theme
+
+# Every component table of a system (field reflection over the caller's type)
+func tableCounts(S: type, system: view S) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(any) in fields(system) {
+    line = "{line}{fieldName(table)}:{componentCount(this: table)} "
+  }
+  ret line.trim()
+}
+
+# Clear one entity from every table of a system
+func clearEntity(S: type, system: mod S, entityId: view EntityId) {
+  loop let table: mod ComponentTable(any) in fields(system) {
+    componentRemove(this: table, entityId: entityId)
+  }
+}
+
+# The last item of a list of the caller's type
+func lastOf(T: type, items: view List(T)) ret opt T {
+  if items.length is 0 {
+    ret none
+  }
+  ret items.copyAt(index: items.length - 1)
+}
+
+# Decode one component's JSON into the system's table of that name, the way
+# SUMU's SDK does: lib/ui's decodeComponent instantiated, inside this
+# package's generic, with the caller's component type.
+func componentInto(
+  S: type
+  system: mod S
+  name: view String
+  entityId: view EntityId
+  json: view String
+) ret Bool {
+  var applied: Bool = false
+  loop let table: mod ComponentTable(any) in fields(system) {
+    if name is typeName(table) {
+      let doc: JsonDoc = Json.parseJson(source: json)
+      var diagnostics: List(SceneDiagnostic) = createSceneDiagnostics()
+      decodeComponent(
+        table: table
+        entityId: entityId
+        doc: doc
+        val: Json.root(doc: doc)
+        theme: createUiTheme()
+        diagnostics: diagnostics
+        sceneId: "scene"
+        nodeId: "node"
+      )
+      applied = true
+    }
+  }
+  ret applied
+}

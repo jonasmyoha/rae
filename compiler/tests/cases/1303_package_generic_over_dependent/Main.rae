@@ -1,0 +1,12 @@
+# A generic function of a dependency package (`sdk`) instantiated with the
+# types of the package that depends on it (`todo`, vendor/todo). Found
+# 2026-11-01: SUMU's sdk generic over its apps' systems was refused, "unknown
+# type 'TodoTitle' here: it is declared in package 'todo', which package 'sdk'
+# does not depend on". The type argument comes from the caller, and so do the
+# field types that `system.titles` and fields() reflection read out of the
+# caller's struct: a struct's field types name what its own file can name.
+open todo/TodoApp
+
+func main() {
+  runTodo()
+}

@@ -4178,6 +4178,17 @@ static void sema_check_template_loop_context(AstModule* module,
 // (#773), so every field loop lowers to identical ordinary AST regardless of how
 // its concrete struct became known.
 static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column);
+/* #37133245: a struct's field types name what the struct's own file can name
+ * (AstTypeRef.resolve_origin), wherever they are read: a dependency's generic
+ * instantiated with its dependent's struct reads `system.titles`, and a
+ * fields() loop copies the field's type into its body, in the dependency's
+ * package. Marked down through the generic arguments; a copy keeps the mark. */
+static void reflect_mark_origin(AstTypeRef* type, const char* origin) {
+    if (!type || !origin) return;
+    if (!type->resolve_origin) type->resolve_origin = origin;
+    for (AstTypeRef* arg = type->generic_args; arg; arg = arg->next) reflect_mark_origin(arg, origin);
+}
+
 static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
                                   AstTypeField* fields, const AstTypeRef* pattern,
                                   bool want_view, bool want_mod, Str bind_name,
@@ -9866,7 +9877,8 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             /* #64888955: a type in a package this one does not depend on (the
              * project above a dependency, a sibling it does not declare) */
             if (sym && sym->decl && (sym->decl->kind == AST_DECL_TYPE || sym->decl->kind == AST_DECL_ENUM)
-                && !sema_package_reaches(s_current_decl_origin, sym->decl)) {
+                && !sema_package_reaches(type_ref->resolve_origin ? type_ref->resolve_origin : s_current_decl_origin,
+                                         sym->decl)) {
                 char why[320];
                 sema_package_boundary_words(s_current_decl_origin, sym->decl, why, sizeof why);
                 char tbuf[480];
@@ -10212,6 +10224,10 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
      * the C backend fills later; register the merged module's declarations now
      * (register_decl dedupes by pointer, so the backend's pass is unaffected). */
     for (const AstDecl* d = module->decls; d; d = d->next) register_decl(ctx, d);
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_TYPE || !d->origin_file) continue;
+        for (AstTypeField* f = d->as.type_decl.fields; f; f = f->next) reflect_mark_origin(f->type, d->origin_file);
+    }
     sema_check_enum_package_clash(module);  // #788 (c2)
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));
