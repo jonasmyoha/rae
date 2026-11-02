@@ -45,6 +45,27 @@ int64_t rae_ext_Time_sleepNs(int64_t ns) {
   return nanosleep(&wait, NULL) == 0 ? 0 : -errno;
 }
 
+/* The local time zone's offset from UTC, in seconds east, at `epochSeconds`
+ * (lib/Time.rae localUtcOffsetSeconds; daylight saving included). Platform
+ * reason: the zone database and the user's zone setting are the OS's.
+ * WASM has no zone: 0 (UTC). */
+int64_t rae_ext_Time_localOffsetSeconds(int64_t epochSeconds) {
+#if defined(__wasm__)
+  (void)epochSeconds;
+  return 0;
+#elif defined(_WIN32)
+  time_t when = (time_t)epochSeconds;
+  struct tm local;
+  struct tm utc;
+  if (localtime_s(&local, &when) != 0 || gmtime_s(&utc, &when) != 0) return 0;
+  return (int64_t)difftime(mktime(&local), mktime(&utc)) + (local.tm_isdst > 0 ? 3600 : 0);
+#else
+  time_t when = (time_t)epochSeconds;
+  struct tm local;
+  if (localtime_r(&when, &local) == NULL) return 0;
+  return (int64_t)local.tm_gmtoff;
+#endif
+}
 
 void rae_spawn(void* (*func)(void*), void* data) {
 #ifdef _WIN32

@@ -984,6 +984,7 @@ int64_t rae_ext_nowMs(void);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
 int64_t rae_ext_Time_sleepNs(int64_t ns);  /* one nanosleep (lib/Time.rae waitUntil) */
+int64_t rae_ext_Time_localOffsetSeconds(int64_t epochSeconds);  /* the local zone's UTC offset (lib/Time.rae) */
 
 /* lib/Math.rae's scalar functions over `Float`, which is f32 (see
  * docs/primitive-types.md): the C side takes and returns `float` and uses the
