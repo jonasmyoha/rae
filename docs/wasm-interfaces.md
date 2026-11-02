@@ -106,6 +106,10 @@ freed after the call.
 
 ## 3. Versioning: a structural hash, checked once at load
 
+(Module exports with these values and the `rae.interface` section are
+implemented, compiler 0.2.288: docs/wasm-modules.md. In the section the
+hash is written as 16 hex digits.)
+
 A host and a downloaded module can be built from different versions of the
 shared types. So each type has a **canonical description** and a 64-bit hash
 of it:

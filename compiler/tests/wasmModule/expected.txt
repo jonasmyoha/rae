@@ -5,3 +5,16 @@ add(-7, 3) = -4n
 greet = Hello, Pähkinä! Hello, Pähkinä!
 greet nobody = ""
 2000 calls grew memory: false
+summarize = {"total":"7","names":"open;päivä ✓;(from Node)","mood":"calm"}
+summarize busy = {"total":"16","names":"a;b;","mood":"busy"}
+summarize nothing = {"total":"0","names":"","mood":"busy"}
+doubled = 10, -12, 2199023255552
+flip calm = busy
+rae.interface: version 1 exports add greet summarize doubled flip
+summarize takes frame FrameIn{commands:List(Command{name:String,count:Int32}),mood:Mood[calm,busy],note:opt String}
+summarize returns FrameOut{total:Int,names:String,mood:Mood[calm,busy]}
+every hash is the FNV-1a of its type: true
+a malformed frame traps: true
+module stderr: wasm module export 'summarize': parameter 'frame' does not decode as FrameIn{commands:List(Command{name:String,count:Int32}),mood:Mood[calm,busy],note:opt String}
+after the trap add(1, 2) = 3n
+1000 value calls grew memory: false

@@ -12,3 +12,55 @@ func greet(name: view String, times: view Int) ret String {
   }
   ret text.trim()
 }
+
+# Values that cross as their binary encoding (docs/wasm-interfaces.md §2).
+enum Mood { calm, busy }
+
+type Command {
+  name: String
+  count: Int32
+}
+
+type FrameIn {
+  commands: List(Command)
+  mood: Mood
+  note: opt String
+}
+
+type FrameOut {
+  total: Int
+  names: String
+  mood: Mood
+}
+
+func summarize(frame: view FrameIn) ret FrameOut {
+  var total: Int = 0
+  var names: String = ""
+  loop let command: view Command in frame.commands {
+    total = total + (command.count as Int)
+    names = "{names}{command.name};"
+  }
+  if let note: view String = frame.note {
+    names = "{names}({note})"
+  }
+  var mood: Mood = frame.mood
+  if total > 10 {
+    mood = Mood.busy
+  }
+  ret FrameOut { total: total, names: names, mood: mood }
+}
+
+func doubled(values: copy List(Int)) ret List(Int) {
+  var out: List(Int) = List.create(Int, cap: values.length + 1)
+  loop let value: view Int in values {
+    out.add(value: value * 2)
+  }
+  ret out
+}
+
+func flip(mood: copy Mood) ret Mood {
+  if mood is Mood.calm {
+    ret Mood.busy
+  }
+  ret Mood.calm
+}
