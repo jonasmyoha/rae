@@ -3514,6 +3514,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   // toBinary / fromBinary for the struct types the program uses them on
   // (c_binary.c, docs/wasm-interfaces.md §2).
+  // A WASM module export's struct / List / opt / enum values are encoded too.
+  wasm_module_exports_register(ctx);
   binary_emit_helpers(ctx, out);
 
   progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 2, 3);

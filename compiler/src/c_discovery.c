@@ -94,7 +94,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
         const AstTypeRef* binary_type = c_binary_call_type(ctx, expr, &is_from);
         if (binary_type) {
             CompilerContext* cc = ctx->compiler_ctx;
-            binary_register_type(cc, binary_type, is_from);
+            binary_register_type(cc, binary_type, is_from ? 2 : 1);
             register_generic_type(cc, binary_bytes_type(cc));
             if (is_from) {
                 const AstTypeRef* ot = binary_opt_type(cc, binary_type);

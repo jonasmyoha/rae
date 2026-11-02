@@ -19,9 +19,16 @@ bool binary_type_crossable(CompilerContext* ctx, const AstTypeRef* type, char* m
 const char* binary_schema_text(CompilerContext* ctx, const AstTypeRef* type);
 int64_t binary_schema_hash(const char* text);
 
-/* Record a struct type a toBinary / fromBinary call uses: its helpers are
- * emitted, with those of every struct it contains. */
-void binary_register_type(CompilerContext* ctx, const AstTypeRef* type, bool is_from);
+/* Record a type whose encoding the program uses: the helpers of every struct
+ * it contains are emitted. `use` 1 adds the toBinary wrapper, 2 the fromBinary
+ * one (a struct type only), 0 neither (a module export's value). */
+void binary_register_type(CompilerContext* ctx, const AstTypeRef* type, unsigned char use);
+
+/* For a value of any crossable type (a module export's parameter or result):
+ * rae_binGetValue_<name>(in, value) -> 0 when malformed or not used up,
+ * rae_binPutValue_<name>(out, value) and rae_binFreeValue_<name>(value).
+ * Emitted after binary_emit_helpers. */
+void binary_emit_value_codec(CompilerContext* ctx, FILE* out, const char* name, const AstTypeRef* type);
 
 /* The struct type of a `value.toBinary()` / `T.fromBinary(bytes:)` call,
  * substituted through the enclosing generic context and without view / mod;

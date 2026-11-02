@@ -333,11 +333,10 @@ const AstTypeRef* c_binary_call_type(CFuncContext* ctx, const AstExpr* expr, boo
   return plain;
 }
 
-void binary_register_type(CompilerContext* ctx, const AstTypeRef* type, bool is_from) {
+void binary_register_type(CompilerContext* ctx, const AstTypeRef* type, unsigned char use) {
   if (!type) return;
   const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, type);
   if (!mangled) return;
-  unsigned char use = is_from ? 2 : 1;
   for (size_t i = 0; i < ctx->binary_type_count; i++) {
     if (strcmp(rae_mangle_type_specialized(ctx, NULL, NULL, ctx->binary_types[i]), mangled) == 0) {
       ctx->binary_type_uses[i] |= use;
@@ -657,7 +656,6 @@ void binary_emit_helpers(CompilerContext* ctx, FILE* out) {
   if (ctx->binary_type_count == 0) return;
   BinStructs all = {0};
   for (size_t i = 0; i < ctx->binary_type_count; i++) bin_collect(ctx, ctx->binary_types[i], &all);
-  if (all.count == 0) return;
   emit_byte_helpers(out);
   for (size_t i = 0; i < all.count; i++) {
     const char* m = all.mangled[i];
@@ -734,4 +732,34 @@ void binary_emit_helpers(CompilerContext* ctx, FILE* out) {
   }
   free((void*)all.types);
   free((void*)all.mangled);
+}
+
+void binary_emit_value_codec(CompilerContext* ctx, FILE* out, const char* name, const AstTypeRef* type) {
+  AstTypeRef* plain = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+  *plain = *type;
+  plain->is_view = false;
+  plain->is_mod = false;
+  plain->next = NULL;
+  /* The C type of the value, as the function's own signature spells it. */
+  char* c_type = NULL;
+  size_t c_type_len = 0;
+  FILE* spelled = open_memstream(&c_type, &c_type_len);
+  if (!spelled) return;
+  CFuncContext tctx = {0};
+  tctx.compiler_ctx = ctx;
+  tctx.module = ctx->current_module;
+  emit_type_ref_as_c_type(&tctx, plain, spelled, false);
+  fclose(spelled);
+  BinGen gen = { ctx, out, 0 };
+  fprintf(out, "RAE_UNUSED static int rae_binGetValue_%s(rae_BinIn* in, %s* value) {\n", name, c_type);
+  fprintf(out, "  int depth = 0; (void)depth;\n");
+  gen_get(&gen, plain, "(*value)", 1);
+  fprintf(out, "  return in->pos == in->len;\n}\n");
+  fprintf(out, "RAE_UNUSED static void rae_binPutValue_%s(rae_BinOut* out, const %s* value) {\n", name, c_type);
+  gen_put(&gen, plain, "(*value)", 1);
+  fprintf(out, "  (void)out; (void)value;\n}\n");
+  fprintf(out, "RAE_UNUSED static void rae_binFreeValue_%s(%s* value) {\n  (void)value;\n", name, c_type);
+  gen_free(&gen, plain, "(*value)", 1);
+  fprintf(out, "}\n");
+  free(c_type);
 }

@@ -46,16 +46,35 @@ around the Rae function, exported under the function's name:
 | `Bool` | `i32` (0 / 1) |
 | `view String` parameter | two `i32`: the address and byte length of UTF-8 the host wrote into the module's memory; read only during the call |
 | `String` result | one `i64`: the address in the high 32 bits, the length in the low 32; the host reads the bytes, then frees the address |
+| struct, `List`, `opt` or enum parameter (`view` or `copy`) | two `i32`: the address and length of its binary encoding (docs/wasm-interfaces.md §2) the host wrote into the module's memory; a value that does not decode traps, and stderr names the export and the parameter |
+| struct, `List`, `opt` or enum result | one `i64` like a `String` result, over the value's encoding |
 | no result | nothing |
 
 Two more exports: `raeModuleAlloc(size) -> address` (memory the host fills
 with a String argument) and `raeModuleFree(address)` (for that memory and for
 every String result). Every call first sets the runtime up once (what `main`
 does for a program) and leaves the String pool as it found it. A String
-parameter must be `view`; other types (structs, lists, `opt`) and `mod`
-parameters are refused at build time, naming the export. Typed interfaces
-generated from the Rae types on both sides are designed in
-docs/wasm-interfaces.md (queued).
+parameter must be `view`. A `view` value is freed after the call; a `copy`
+value belongs to the function, which drops it. A `mod` parameter, and a type
+that cannot cross (a `Ptr` inside, a `Buffer`), are refused at build time,
+naming the export and the field.
+
+## The `rae.interface` section
+
+The module carries a custom section `rae.interface`. It is JSON (version 1),
+and a host reads it without running anything (in Node:
+`WebAssembly.Module.customSections(module, "rae.interface")`):
+
+    {"version":1,"exports":[{"name":"summarize",
+      "params":[{"name":"frame","type":"FrameIn{...}","hash":"f3f860edd7d6da6c"}],
+      "result":{"type":"FrameOut{...}","hash":"1abfc0bf6ffc787e"}}, ...],
+     "requests":[]}
+
+`type` is the value's canonical description and `hash` its FNV-1a hash as 16
+hex digits, the same as `binarySchemaText` / `binarySchemaHash` in Rae
+(docs/wasm-interfaces.md §3). `requests` is empty until capabilities land.
+The section is written with an assembler `.section .custom_section.` directive
+(a C `section` attribute would leave it a data segment).
 
 ## The check
 
