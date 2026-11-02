@@ -1,6 +1,7 @@
 #include "c_backend.h"
 #include "c_module_exports.h"
 #include "c_backend_internal.h"
+#include "c_binary.h"
 #include "ownership.h"
 #include "mangler.h"
 #include "sema.h"
@@ -1896,6 +1897,16 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             break;
         }
         case AST_EXPR_METHOD_CALL: {
+            /* value.toBinary() is a List(UInt8); T.fromBinary(bytes:) an opt T
+             * (c_binary.c). */
+            {
+                bool is_from = false;
+                const AstTypeRef* binary_type = c_binary_call_type(ctx, expr, &is_from);
+                if (binary_type) {
+                    return is_from ? binary_opt_type(ctx->compiler_ctx, binary_type)
+                                   : binary_bytes_type(ctx->compiler_ctx);
+                }
+            }
             /* Task(T).tryGet() is a builtin whose type sema already gave as
              * `opt T`. Surfacing it here is what lets `ret task.tryGet()`
              * pass the optional through instead of wrapping it in a second
@@ -3452,6 +3463,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     c_restore_names_in_literals(json_block_buf, json_block_len, out);
     free(json_block_buf);
   }
+  // toBinary / fromBinary for the struct types the program uses them on
+  // (c_binary.c, docs/wasm-interfaces.md §2).
+  binary_emit_helpers(ctx, out);
 
   progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 2, 3);
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation

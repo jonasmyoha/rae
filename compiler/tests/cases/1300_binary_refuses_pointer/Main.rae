@@ -1,0 +1,25 @@
+# What cannot cross the binary encoding is a compile error naming the field
+# (docs/wasm-interfaces.md §2): a raw Ptr deep inside, a Buffer, a List
+# receiver (toBinary is derived for structs), and the schema of such a type.
+type Native {
+  handle: Ptr
+}
+
+type Holder {
+  name: String
+  natives: List(Native)
+}
+
+type Raw {
+  data: Buffer(Int)
+}
+
+func main() {
+  let holder: Holder = { name: "x", natives: List.create(Native, cap: 1) }
+  let bytes: List(UInt8) = holder.toBinary()
+  let decoded: opt Raw = Raw.fromBinary(bytes: bytes)
+  let numbers: List(Int) = List.create(Int, cap: 1)
+  let listBytes: List(UInt8) = numbers.toBinary()
+  let hash: Int = binarySchemaHash(Holder)
+  log("{bytes.length} {listBytes.length} {hash} {decoded is none}")
+}

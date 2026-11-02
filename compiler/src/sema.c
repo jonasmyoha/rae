@@ -1,4 +1,5 @@
 #include "sema.h"
+#include "c_binary.h"
 #include "rae_deps.h"
 #include "array_methods.h"
 #include "shader_compose.h"
@@ -7082,6 +7083,124 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
     sema_check_void_value(module, expr);
 }
 
+/* ---- the derived binary encoding (c_binary.c, docs/wasm-interfaces.md) ---- */
+
+static void sema_binary_error(AstModule* module, const AstExpr* expr, const char* message) {
+    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
+    if (module) module->had_error = true;
+}
+
+/* A struct type that can cross, or false with the error reported. A generic
+ * parameter passes: its instantiation is checked by the C backend. */
+static bool sema_binary_struct_ok(CompilerContext* ctx, AstModule* module, const AstExpr* expr,
+                                  TypeInfo* type, const char* call) {
+    while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+    if (!type || type->kind == TYPE_GENERIC_PARAM || type->kind == TYPE_UNKNOWN) return true;
+    char message[1024];
+    bool is_struct = (type->kind == TYPE_STRUCT || type->kind == TYPE_GENERIC_INST)
+        && type->as.structure.decl && type->as.structure.decl->kind == AST_DECL_TYPE
+        && !sema_struct_template_is(type, "List");
+    if (!is_struct) {
+        AstTypeRef* written = sema_type_ref_of(ctx, type);
+        const char* spelled = written ? binary_schema_text(ctx, written) : NULL;
+        if (!spelled || !*spelled || strchr(spelled, '?')) spelled = NULL;
+        snprintf(message, sizeof message,
+                 "%s is derived for struct types; %.*s is not one (wrap the value in a type)",
+                 call, spelled ? (int)strlen(spelled) : (int)type->name.len, spelled ? spelled : type->name.data);
+        sema_binary_error(module, expr, message);
+        return false;
+    }
+    AstTypeRef* ref = sema_type_ref_of(ctx, type);
+    if (ref && !binary_type_crossable(ctx, ref, message, sizeof message)) {
+        sema_binary_error(module, expr, message);
+        return false;
+    }
+    return true;
+}
+
+/* `value.toBinary()` -> List(UInt8) and `T.fromBinary(bytes:)` -> opt T. */
+static bool sema_binary_method(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+    Str method = expr->as.method_call.method_name;
+    AstExpr* object = expr->as.method_call.object;
+    if (str_eq_cstr(method, "toBinary") && !expr->as.method_call.args) {
+        if (!object->resolved_type) return false;
+        sema_binary_struct_ok(ctx, module, expr, object->resolved_type, "toBinary");
+        expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, (AstTypeRef*)binary_bytes_type(ctx));
+        return true;
+    }
+    if (str_eq_cstr(method, "fromBinary") && object->kind == AST_EXPR_IDENT) {
+        TypeInfo* built = sema_type_qualifier_type(ctx, module, symbols, object);
+        if (!built) return false;
+        AstCallArg* arg = expr->as.method_call.args;
+        if (!arg || arg->next || !str_eq_cstr(arg->name, "bytes")) {
+            sema_binary_error(module, expr, "fromBinary takes one argument, the encoded bytes: T.fromBinary(bytes: bytes)");
+            expr->resolved_type = type_get_opt(ctx->type_registry, built);
+            return true;
+        }
+        sema_binary_struct_ok(ctx, module, expr, built, "fromBinary");
+        TypeInfo* bytes_type = sema_resolve_type_internal(ctx, module, symbols, (AstTypeRef*)binary_bytes_type(ctx));
+        ensure_type_match(ctx, bytes_type, &arg->value);
+        expr->resolved_type = type_get_opt(ctx->type_registry, built);
+        return true;
+    }
+    return false;
+}
+
+/* binarySchemaHash(T) / binarySchemaText(T) become the literal; false (with
+ * the error reported) when the argument is not one concrete crossable type. */
+static bool sema_fold_binary_schema(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+    bool is_hash = str_eq_cstr(expr->as.call.callee->as.ident, "binarySchemaHash");
+    expr->resolved_type = is_hash ? type_get_int(ctx->type_registry) : type_get_string(ctx->type_registry);
+    AstCallArg* ta = expr->as.call.args;
+    if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) {
+        sema_binary_error(module, expr, is_hash ? "binarySchemaHash takes one type: binarySchemaHash(Frame)"
+                                                : "binarySchemaText takes one type: binarySchemaText(Frame)");
+        return false;
+    }
+    AstTypeRef* named = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(named, 0, sizeof *named);
+    named->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(named->parts, 0, sizeof *named->parts);
+    named->parts->text = ta->value->as.ident;
+    named->line = ta->value->line; named->column = ta->value->column;
+    TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, named);
+    named->resolved_type = type;
+    if (type && type->kind == TYPE_GENERIC_PARAM) {
+        sema_binary_error(module, expr, "binarySchemaHash / binarySchemaText need a concrete type, not a type parameter");
+        return false;
+    }
+    char message[1024];
+    if (!binary_type_crossable(ctx, named, message, sizeof message)) {
+        sema_binary_error(module, expr, message);
+        return false;
+    }
+    const char* text = binary_schema_text(ctx, named);
+    char* literal = arena_alloc(ctx->ast_arena, 32);
+    expr->decl_link = NULL;
+    if (!is_hash) {
+        expr->kind = AST_EXPR_STRING;
+        expr->as.string_lit = str_from_cstr(text);
+        return true;
+    }
+    int64_t hash = binary_schema_hash(text);
+    if (hash >= 0) {
+        snprintf(literal, 32, "%lld", (long long)hash);
+        expr->kind = AST_EXPR_INTEGER;
+        expr->as.integer = str_from_cstr(literal);
+        return true;
+    }
+    /* A negative hash is unary minus on its magnitude, the way `-5` parses. */
+    snprintf(literal, 32, "%llu", (unsigned long long)(-(uint64_t)hash));
+    AstExpr* magnitude = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    memset(magnitude, 0, sizeof *magnitude);
+    magnitude->kind = AST_EXPR_INTEGER;
+    magnitude->as.integer = str_from_cstr(literal);
+    magnitude->line = expr->line; magnitude->column = expr->column;
+    expr->kind = AST_EXPR_UNARY;
+    memset(&expr->as.unary, 0, sizeof expr->as.unary);
+    expr->as.unary.op = AST_UNARY_NEG;
+    expr->as.unary.operand = magnitude;
+    return true;
+}
+
 static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     switch (expr->kind) {
@@ -7370,6 +7489,16 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 sema_analyze_expr(ctx, module, symbols, aa->value, true);
                 sema_analyze_expr(ctx, module, symbols, ba->value, true);
                 expr->resolved_type = type_get_bool(ctx->type_registry);
+                break;
+            }
+            // `binarySchemaHash(T)` -> Int and `binarySchemaText(T)` -> String
+            // (c_binary.c, docs/wasm-interfaces.md §3): folded here, before the
+            // C renames, to the literal of the type's canonical description.
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && (str_eq_cstr(expr->as.call.callee->as.ident, "binarySchemaHash")
+                    || str_eq_cstr(expr->as.call.callee->as.ident, "binarySchemaText"))
+                && !symbol_table_lookup(symbols, expr->as.call.callee->as.ident)) {
+                if (sema_fold_binary_schema(ctx, module, symbols, expr)) sema_analyze_expr(ctx, module, symbols, expr, true);
                 break;
             }
             // `enumMembers(E)` -> List(String) (every member name, declaration
@@ -8177,6 +8306,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             sema_report_bad_receiver(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
             while (marg) { sema_analyze_expr(ctx, module, symbols, marg->value, true); marg = marg->next; }
+            if (sema_binary_method(ctx, module, symbols, expr)) break;
             if (expr->as.method_call.object->resolved_type) {
                 TypeInfo* t = expr->as.method_call.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 // Built-in Task(T).get() : T. Waits for the task and yields

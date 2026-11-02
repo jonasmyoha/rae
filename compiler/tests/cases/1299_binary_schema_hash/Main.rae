@@ -1,0 +1,30 @@
+# binarySchemaHash changes when a field is added, renamed, reordered or given
+# another type, and is equal for the same declaration in another module
+# (docs/wasm-interfaces.md §3). Each shapes/ module declares its own `Frame`.
+enum Kind { tap, swipe }
+
+enum KindMore { tap, swipe, scroll }
+
+type Inner {
+  kinds: List(KindMore)
+  maybe: opt Float64
+}
+
+type Outer {
+  inner: Inner
+  inners: List(Inner)
+}
+
+func compare(label: view String, text: view String, hash: view Int) {
+  log("{label}: {text} differs {hash is not baseHash()}")
+}
+
+func main() {
+  log("base: {baseText()} {baseHash()}")
+  compare(label: "same", text: sameText(), hash: sameHash())
+  compare(label: "added", text: addedText(), hash: addedHash())
+  compare(label: "renamed", text: renamedText(), hash: renamedHash())
+  compare(label: "reordered", text: reorderedText(), hash: reorderedHash())
+  compare(label: "retyped", text: retypedText(), hash: retypedHash())
+  log("nested: {binarySchemaText(Outer)}")
+}

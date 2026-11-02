@@ -6,6 +6,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "c_binary.h"
 #include "mangler.h"
 #include "sema.h"
 #include "str.h"
@@ -84,6 +85,33 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
         }
         if (expr->as.call.args->next) discover_specializations_expr_impl(ctx, expr->as.call.args->next->value);
         return;
+    }
+    // toBinary / fromBinary (c_binary.c): the struct's encoder is emitted, and
+    // the List(UInt8) and `opt T` result types must exist even when no Rae code
+    // spells them. The receiver and arguments are walked as usual below.
+    {
+        bool is_from = false;
+        const AstTypeRef* binary_type = c_binary_call_type(ctx, expr, &is_from);
+        if (binary_type) {
+            CompilerContext* cc = ctx->compiler_ctx;
+            binary_register_type(cc, binary_type, is_from);
+            register_generic_type(cc, binary_bytes_type(cc));
+            if (is_from) {
+                const AstTypeRef* ot = binary_opt_type(cc, binary_type);
+                register_generic_type(cc, ot);
+                bool dup = false;
+                for (size_t i = 0; i < cc->demanded_opt_type_count && !dup; i++)
+                    if (type_refs_equal(cc->demanded_opt_types[i], ot)) dup = true;
+                if (!dup) {
+                    if (cc->demanded_opt_type_count >= cc->demanded_opt_type_cap) {
+                        size_t nc = cc->demanded_opt_type_cap ? cc->demanded_opt_type_cap * 2 : 16;
+                        cc->demanded_opt_types = realloc((void*)cc->demanded_opt_types, nc * sizeof(*cc->demanded_opt_types));
+                        cc->demanded_opt_type_cap = nc;
+                    }
+                    cc->demanded_opt_types[cc->demanded_opt_type_count++] = ot;
+                }
+            }
+        }
     }
     if (expr->kind == AST_EXPR_CALL) {
         AstExpr* hoisted = hoist_type_arg_if_present(ctx, expr);

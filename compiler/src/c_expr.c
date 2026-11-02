@@ -6,6 +6,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "c_binary.h"
 #include "may_wait.h"
 #include "diag.h"
 #include "mangler.h"
@@ -1276,6 +1277,45 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
         if (emit_proven_byte_read(ctx, expr, out)) break;
         if (emit_list_fast_access(ctx, expr, out)) break;
+        // Built-in methods (c_binary.c): value.toBinary() ->
+        // rae_toBinary_TYPE_(pointer), T.fromBinary(bytes: b) ->
+        // rae_fromBinary_TYPE_(b). A value receiver goes through a one-element
+        // compound literal, so a temporary (`make().toBinary()`) works too.
+        {
+            bool is_from = false;
+            const AstTypeRef* binary_type = c_binary_call_type(ctx, expr, &is_from);
+            if (binary_type) {
+                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, binary_type);
+                if (is_from) {
+                    // The bytes by pointer: a `view` argument already is one.
+                    const AstExpr* bytes = expr->as.method_call.args ? expr->as.method_call.args->value : NULL;
+                    const AstTypeRef* bytes_type = bytes ? infer_expr_type_ref(ctx, bytes) : NULL;
+                    const char* bytes_c = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL,
+                                                                      binary_bytes_type(ctx->compiler_ctx));
+                    if (bytes && bytes_type && (bytes_type->is_view || bytes_type->is_mod)) {
+                        fprintf(out, "rae_fromBinary_%s_((const %s*)(", mangled, bytes_c);
+                        emit_expr(ctx, bytes, out, PREC_LOWEST, false, true);
+                        fprintf(out, "))");
+                    } else if (bytes) {
+                        fprintf(out, "rae_fromBinary_%s_((const %s[]){ ", mangled, bytes_c);
+                        emit_expr(ctx, bytes, out, PREC_LOWEST, false, false);
+                        fprintf(out, " })");
+                    }
+                    break;
+                }
+                const AstTypeRef* receiver = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                if (receiver && (receiver->is_view || receiver->is_mod)) {
+                    fprintf(out, "rae_toBinary_%s_((const %s*)(", mangled, mangled);
+                    emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, true);
+                    fprintf(out, "))");
+                } else {
+                    fprintf(out, "rae_toBinary_%s_((const %s[]){ ", mangled, mangled);
+                    emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                    fprintf(out, " })");
+                }
+                break;
+            }
+        }
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);

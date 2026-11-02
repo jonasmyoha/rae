@@ -17,7 +17,7 @@ and Rae itself comes first (AGENTS.md: the runtime C rule;
 - [x] **`defer`:** scope-based cleanup (case 359, example `15_defer_cleanup`).
 - [x] **`spawn`:** background execution, joined through `Task(T)` (case 360 and the spawn cases).
 - [x] **JSON Gen:** the compiler derives `toJson()` / `fromJson()` for every `type` (cases 665, 1028, 1029).
-- [ ] **Binary Gen:** `toBinary()` / `fromBinary()` for compact packets (not started).
+- [x] **Binary Gen:** `value.toBinary()` / `T.fromBinary(bytes:)` and `binarySchemaHash(T)`, derived by the compiler (docs/wasm-interfaces.md §2, cases 1297-1300).
 - [x] **String Utils:** `split`, `trim`, `indexOf`, `replace` in `lib/String.rae`.
 
 (The VM items of the old list are history: the bytecode VM was removed, #957.)

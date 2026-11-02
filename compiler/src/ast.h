@@ -652,6 +652,12 @@ typedef struct CompilerContext {
     const AstTypeRef** demanded_opt_types;
     size_t demanded_opt_type_count;
     size_t demanded_opt_type_cap;
+    // The struct types a toBinary / fromBinary call uses, collected by
+    // discovery; c_binary.c emits their encoders (docs/wasm-interfaces.md §2).
+    const AstTypeRef** binary_types;
+    unsigned char* binary_type_uses;  // 1 = toBinary, 2 = fromBinary
+    size_t binary_type_count;
+    size_t binary_type_cap;
     const AstTypeRef** emitted_generic_types;
     size_t emitted_generic_type_count;
     size_t emitted_generic_type_cap;

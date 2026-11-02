@@ -1,0 +1,12 @@
+tests/cases/1300_binary_refuses_pointer/Main.rae:19:43: `Holder.natives[].handle` is Ptr, which cannot cross: toBinary / fromBinary carry numbers, Bool, String, enums, Lists, opt values and structs of them (docs/wasm-interfaces.md §2)
+    19 |   let bytes: List(UInt8) = holder.toBinary()
+       |                                           ^~~~
+tests/cases/1300_binary_refuses_pointer/Main.rae:20:40: `Raw.data` is Buffer(...), which cannot cross: toBinary / fromBinary carry numbers, Bool, String, enums, Lists, opt values and structs of them (docs/wasm-interfaces.md §2)
+    20 |   let decoded: opt Raw = Raw.fromBinary(bytes: bytes)
+       |                                        ^~~~
+tests/cases/1300_binary_refuses_pointer/Main.rae:22:48: toBinary is derived for struct types; List(Int) is not one (wrap the value in a type)
+    22 |   let listBytes: List(UInt8) = numbers.toBinary()
+       |                                                ^~~~
+tests/cases/1300_binary_refuses_pointer/Main.rae:23:35: `Holder.natives[].handle` is Ptr, which cannot cross: toBinary / fromBinary carry numbers, Bool, String, enums, Lists, opt values and structs of them (docs/wasm-interfaces.md §2)
+    23 |   let hash: Int = binarySchemaHash(Holder)
+       |                                   ^~~~
