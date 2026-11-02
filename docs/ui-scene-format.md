@@ -149,6 +149,12 @@ the author, not of the loader.
   `SdfText.loadSdfFontJson`. Fonts are world-level in v1: the first `fonts`
   declaration wins and a conflicting later one is a diagnostic (per-node fonts
   are a renderer change).
+- Mounting many scenes costs no font memory: a mount whose theme names the
+  font already in use keeps it (`SdfFont.jsonPath`), and the runtime returns
+  the atlas it already holds for a loaded atlas path, so alternating two
+  themes uses two atlases. The atlas table grows; it is never full. A font
+  that does not load is logged with its path and is a `missingFont`
+  diagnostic, and the font in use stays (case 1296).
 - There is no manifest-of-Rae-source: a `.raescene` never parses `.rae`. A
   project whose texture table lives in Rae generates the `map` from it.
 

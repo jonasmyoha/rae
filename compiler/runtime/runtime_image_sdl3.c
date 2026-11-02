@@ -632,18 +632,76 @@ void rae_ext_Sdl3_closeWindow(void) {
  * the field, median(r,g,b), screenPxRange smoothstep -> coverage, alpha-blend
  * the text color over the framebuffer. This is the SDL3 (CPU-framebuffer) port
  * of the raylib MSDF shader — no GPU shader needed. ---- */
-#define RAE_SDF_MAX_ATLAS 8
-static unsigned char* g_sdf_atlas[RAE_SDF_MAX_ATLAS];
-static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
-static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
+/* The atlas table grows (it is never full) and is keyed by path: loading a
+ * path that is already loaded at the same size returns its handle, so a
+ * program that mounts a scene, or alternates two themes, many times keeps a
+ * fixed number of atlases instead of running out (#98525791: an 8-slot table
+ * that silently answered 0 when full made every Text and icon vanish). Handles
+ * are 1-based and stay valid for the life of the program, and an atlas's
+ * pixels are never moved or freed. The lock covers the table itself: a font
+ * may be loaded on a task while the UI thread reads another atlas. */
+static pthread_mutex_t g_sdf_atlas_lock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned char** g_sdf_atlas = NULL;
+static int* g_sdf_atlas_w = NULL;
+static int* g_sdf_atlas_h = NULL;
+static char** g_sdf_atlas_path = NULL;
 static int g_sdf_atlas_n = 0;
+static int g_sdf_atlas_cap = 0;
 
-/* The atlas file is either the raw RGBA8 dump (w*h*4 bytes, the historical
- * `.mtsdf.raw`) or the PNG msdf-atlas-gen writes directly (#1008): a PNG is
- * recognized by its magic bytes, decoded with lodepng, and must match the
- * JSON sidecar's atlas size. */
+static int rae_sdf_atlas_reserve(void) {
+    if (g_sdf_atlas_n < g_sdf_atlas_cap) return 1;
+    int cap = g_sdf_atlas_cap > 0 ? g_sdf_atlas_cap * 2 : 8;
+    unsigned char** px = (unsigned char**)realloc(g_sdf_atlas, (size_t)cap * sizeof *px);
+    if (px) g_sdf_atlas = px;
+    int* ws = (int*)realloc(g_sdf_atlas_w, (size_t)cap * sizeof *ws);
+    if (ws) g_sdf_atlas_w = ws;
+    int* hs = (int*)realloc(g_sdf_atlas_h, (size_t)cap * sizeof *hs);
+    if (hs) g_sdf_atlas_h = hs;
+    char** paths = (char**)realloc(g_sdf_atlas_path, (size_t)cap * sizeof *paths);
+    if (paths) g_sdf_atlas_path = paths;
+    if (!px || !ws || !hs || !paths) return 0;
+    g_sdf_atlas_cap = cap;
+    return 1;
+}
+
+/* The number of atlas handles handed out (handles are 1..count). */
+static int64_t rae_sdf_atlas_count(void) {
+    pthread_mutex_lock(&g_sdf_atlas_lock);
+    int64_t count = (int64_t)g_sdf_atlas_n;
+    pthread_mutex_unlock(&g_sdf_atlas_lock);
+    return count;
+}
+
+/* Atlas `handle`'s pixels and size; 0 (and NULL / 0 / 0) when there is none. */
+static int rae_sdf_atlas_get(int64_t handle, const unsigned char** px, int* w, int* h) {
+    pthread_mutex_lock(&g_sdf_atlas_lock);
+    int ok = handle >= 1 && handle <= g_sdf_atlas_n && g_sdf_atlas[handle - 1] != NULL;
+    *px = ok ? g_sdf_atlas[handle - 1] : NULL;
+    *w = ok ? g_sdf_atlas_w[handle - 1] : 0;
+    *h = ok ? g_sdf_atlas_h[handle - 1] : 0;
+    pthread_mutex_unlock(&g_sdf_atlas_lock);
+    return ok;
+}
+
+/* The handle already loaded from `path` at w x h, or 0. Caller holds the lock. */
+static int64_t rae_sdf_atlas_find_locked(const char* path, int64_t w, int64_t h) {
+    for (int i = 0; i < g_sdf_atlas_n; i++) {
+        if (g_sdf_atlas_w[i] == (int)w && g_sdf_atlas_h[i] == (int)h
+            && strcmp(g_sdf_atlas_path[i], path) == 0) return i + 1;
+    }
+    return 0;
+}
+
 int64_t rae_ext_SdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
-    if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
+    if (!path.data || w <= 0 || h <= 0) {
+        fprintf(stderr, "[sdf] error: atlas %s has no size (%lldx%lld) in its JSON sidecar\n",
+                path.data ? (const char*)path.data : "(none)", (long long)w, (long long)h);
+        return 0;
+    }
+    pthread_mutex_lock(&g_sdf_atlas_lock);
+    int64_t loaded = rae_sdf_atlas_find_locked((const char*)path.data, w, h);
+    pthread_mutex_unlock(&g_sdf_atlas_lock);
+    if (loaded) return loaded;
     FILE* f = fopen((const char*)path.data, "rb");
     if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }
     size_t bytes = (size_t)w * (size_t)h * 4;
@@ -678,8 +736,22 @@ int64_t rae_ext_SdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
         fclose(f);
         if (got != bytes) { free(px); fprintf(stderr, "[sdf] short read on %s\n", (const char*)path.data); return 0; }
     }
+    pthread_mutex_lock(&g_sdf_atlas_lock);
+    /* Another thread may have loaded the same path while this one read it. */
+    loaded = rae_sdf_atlas_find_locked((const char*)path.data, w, h);
+    if (loaded) { pthread_mutex_unlock(&g_sdf_atlas_lock); free(px); return loaded; }
+    char* key = strdup((const char*)path.data);
+    if (!key || !rae_sdf_atlas_reserve()) {
+        pthread_mutex_unlock(&g_sdf_atlas_lock);
+        free(key); free(px);
+        fprintf(stderr, "[sdf] error: out of memory for atlas %s\n", (const char*)path.data);
+        return 0;
+    }
     g_sdf_atlas[g_sdf_atlas_n] = px; g_sdf_atlas_w[g_sdf_atlas_n] = (int)w; g_sdf_atlas_h[g_sdf_atlas_n] = (int)h;
-    return ++g_sdf_atlas_n;  /* 1-based */
+    g_sdf_atlas_path[g_sdf_atlas_n] = key;
+    int64_t handle = ++g_sdf_atlas_n;  /* 1-based */
+    pthread_mutex_unlock(&g_sdf_atlas_lock);
+    return handle;
 }
 
 static float rae_sdf_median(float a, float b, float c) {
@@ -692,9 +764,9 @@ void rae_ext_SdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t at
                           float sx0, float sy0, float sx1, float sy1,
                           float au0, float av0, float au1, float av1,
                           float screenPxRange, int64_t rgb){
-    if (!fb || atlas < 1 || atlas > g_sdf_atlas_n) return;
-    const unsigned char* ap = g_sdf_atlas[atlas - 1];
-    int aw = g_sdf_atlas_w[atlas - 1], ah = g_sdf_atlas_h[atlas - 1];
+    const unsigned char* ap = NULL;
+    int aw = 0, ah = 0;
+    if (!fb || !rae_sdf_atlas_get(atlas, &ap, &aw, &ah)) return;
     float tr = (float)((rgb >> 16) & 0xFF), tg = (float)((rgb >> 8) & 0xFF), tb = (float)(rgb & 0xFF);
     int x0 = (int)floor(sx0), x1 = (int)ceil(sx1);
     int y0 = (int)floor(sy0), y1 = (int)ceil(sy1);
