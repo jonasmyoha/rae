@@ -1,0 +1,648 @@
+# listReorderSystem — drag to reorder the rows of a virtual ListView that
+# carries a `ListReorder` (ui/ListReorder has the gesture and the action it
+# fires). Run it every frame that has a press or a drag in progress
+# (`listReorderNeedsRun`), after the input step (updateUiInput) and before
+# the scroll root's update, then the list system and the layout as usual. It
+# returns true while something moves, so the app keeps drawing frames; once
+# every row is home it returns false and does nothing until the next press.
+#
+# Each frame of a drag it writes, on the list's pooled row entities only: a
+# `RuntimeOffset` (the row's place along the list, a transform-time move,
+# never a relayout), and on the lifted row a `TransformFx` (its lift scale,
+# about its middle) and a `PaintOnTop` (painted over its neighbors). When the
+# rows are home it takes all three away again. A row whose data changes under
+# it (the window recycles rows as the list scrolls) gets the offset of the
+# data row it now shows, so nothing jumps.
+#
+# While a row is lifted the scroll root around the list does not follow the
+# finger (updateScrollRoot asks `listReorderHolds`), the press is claimed
+# (its release clicks nothing), and the list scrolls itself when the finger
+# is near an end of its window.
+import ui/Components
+import Math
+open ui/Ecs
+open ui/UiSystems
+open ui/ListReorder
+open ui/PaintOnTop
+open ui/inputSystem/InputSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/listViewSystem/ListViewSystem
+open ui/listReorderSystem/ListReorderRules
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+
+# How far a press may move before the hold is over (it is a scroll or a tap)
+const reorderSlopPoints: Float = 10.0
+
+# The fastest auto-scroll, points per second, with the finger at the edge
+const reorderScrollMaxSpeed: Float = 900.0
+
+# How fast the rows step aside and ease home, and the row lifts (the rate of
+# reorderEase: about 95% of the way in 3 / rate seconds)
+const reorderShiftRate: Float = 22.0
+
+const reorderLiftRate: Float = 18.0
+
+# How long a drop waits for the app to reorder its data before the rows ease
+# back into their old places
+const reorderDropWaitSec: Float = 0.5
+
+# A press or a drag to look at this frame
+func listReorderNeedsRun(world: view UiWorld, input: view UiInput) ret Bool {
+  if componentCount(this: world.listReorders) is 0 {
+    ret false
+  }
+  if input.pointer.pressed {
+    ret true
+  }
+  loop var i: Int = 0, i < componentCount(this: world.listReorderDrags), ++i {
+    let drag: view ListReorderDrag = queryViewAt(table: world.listReorderDrags, denseIndex: i)
+    if drag.phase is not ListReorderPhase.idle {
+      ret true
+    }
+  }
+  ret false
+}
+
+# One frame for every reorderable list; true while a row is held or rows are
+# still moving
+func listReorderSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  nowSec: view Float64
+) ret Bool {
+  var lists: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: world.listReorders), ++i {
+    lists.add(value: componentEntityAt(this: world.listReorders, i: i))
+  }
+  var moving: Bool = false
+  loop let listEntity: view EntityId in lists {
+    if componentHas(this: world.listViews, entityId: listEntity) {
+      if listReorderStep(
+        world: world
+        uiSystems: uiSystems
+        input: input
+        listEntity: listEntity
+        nowSec: nowSec
+      ) {
+        moving = true
+      }
+    }
+  }
+  ret moving
+}
+
+func idleReorderDrag() ret ListReorderDrag {
+  ret ListReorderDrag {
+    phase: ListReorderPhase.idle
+    fromIndex: 0
+    toIndex: 0
+    pressX: 0.0
+    pressY: 0.0
+    pressSec: 0.0
+    lastSec: 0.0
+    dropSec: 0.0
+    grabY: 0.0
+    rowY: 0.0
+    lift: 0.0
+    shifts: List.create(Float, cap: 0)
+    dataGeneration: 0
+    settled: 0
+    scrollRoot: noEntity()
+  }
+}
+
+# The list's top on screen along its axis (its scroll included): where row 0
+# rests
+func listReorderTop(uiSystems: view UiSystems, listEntity: view EntityId) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: listEntity) {
+    ret componentView(this: uiSystems.transform2d.worldTransforms, entityId: listEntity).position.y
+  }
+  ret 0.0
+}
+
+func listReorderRowCount(world: view UiWorld, listEntity: view EntityId) ret Int {
+  if componentHas(this: world.listViewDatas, entityId: listEntity) {
+    ret componentView(this: world.listViewDatas, entityId: listEntity).rows.length
+  }
+  ret 0
+}
+
+# The scroll root that moves the list: the list itself, else its nearest
+# ancestor with a ScrollRoot (none: noEntity)
+func listReorderScrollRoot(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+) ret EntityId {
+  var current: EntityId = { index: listEntity.index, generation: listEntity.generation }
+  loop true {
+    if componentHas(this: world.scrollRoots, entityId: current) {
+      ret current
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret noEntity()
+    }
+    let link: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = { index: link.parent.index, generation: link.parent.generation }
+  }
+  ret noEntity()
+}
+
+# Is the press on row `index` one that may lift it: anywhere on the row, or
+# with a handle, on that node of the row
+func listReorderPressOnHandle(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  reorder: view ListReorder
+  rowEntity: view EntityId
+  input: view UiInput
+) ret Bool {
+  if reorder.handleNodeId.length() is 0 {
+    ret true
+  }
+  if let found: Int = findNodeInPage(
+    world: world
+    pageId: listViewRowPage(rowRoot: rowEntity)
+    nodeId: reorder.handleNodeId
+  ) {
+    ret uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeEntityId(world: world, index: found)
+      x: input.pointer.x
+      y: input.pointer.y
+    )
+  }
+  ret false
+}
+
+# The pooled row entity showing data row `dataIndex` now, or none
+func listReorderRowEntity(
+  world: view UiWorld
+  listEntity: view EntityId
+  firstRow: view Int
+  dataIndex: view Int
+) ret EntityId {
+  unsafe {
+    if componentHas(this: world.childrens, entityId: listEntity) is false {
+      ret noEntity()
+    }
+    let children: view Children = componentView(this: world.childrens, entityId: listEntity)
+    let slot: Int = dataIndex - firstRow
+    if slot < 0 or slot >= children.ids.length {
+      ret noEntity()
+    }
+    ret rae_ext_rae_buf_get(buf: children.ids.data, index: slot)
+  }
+}
+
+func listReorderFirstRow(
+  world: view UiWorld
+  listEntity: view EntityId
+  listView: view ListView
+  count: view Int
+) ret Int {
+  var scrollY: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: listEntity) {
+    scrollY = componentView(this: world.scrollStates, entityId: listEntity).y
+  }
+  ret listViewFirstRow(lv: listView, scrollY: scrollY, count: count)
+}
+
+# One list's frame. A real copy of its drag state is stepped and written back
+# whole at the end (the tables it touches on the way may move).
+func listReorderStep(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  listEntity: view EntityId
+  nowSec: view Float64
+) ret Bool {
+  var reorder: ListReorder = { actionId: "" }
+  if let authored: ListReorder = componentCopy(this: world.listReorders, entityId: listEntity) {
+    reorder = own authored
+  }
+  var listView: ListView = ListView.default()
+  if let copied: ListView = componentCopy(this: world.listViews, entityId: listEntity) {
+    listView = own copied
+  }
+  var drag: ListReorderDrag = idleReorderDrag()
+  if let stored: ListReorderDrag = componentCopy(this: world.listReorderDrags, entityId: listEntity) {
+    drag = own stored
+  }
+  let count: Int = listReorderRowCount(world: world, listEntity: listEntity)
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  var seconds: Float = (nowSec - drag.lastSec) as Float
+  if seconds < 0.0 or seconds > 0.05 {
+    seconds = 1.0 / 60.0
+  }
+  drag.lastSec = nowSec
+  var top: Float = listReorderTop(uiSystems: uiSystems, listEntity: listEntity)
+  let pointer: view UiPointerState = input.pointer
+  let wasIdle: Bool = drag.phase is ListReorderPhase.idle
+
+  if drag.phase is ListReorderPhase.idle {
+    if pointer.pressed and reorder.enabled and count > 1 and pitch > 0.0 and listView.mode is ListViewMode.virtual {
+      let along: Float = pointer.y - top
+      let index: Int = Math.floor(x: along / pitch).toInt()
+      let onList: Bool = uiPointInEntity(
+        world: world
+        uiSystems: uiSystems
+        entityId: listEntity
+        x: pointer.x
+        y: pointer.y
+      )
+      if onList and index >= 0 and index < count and along - index.toFloat() * pitch <= listView.itemHeight {
+        let firstRow: Int = listReorderFirstRow(
+          world: world
+          listEntity: listEntity
+          listView: listView
+          count: count
+        )
+        let rowEntity: EntityId = listReorderRowEntity(
+          world: world
+          listEntity: listEntity
+          firstRow: firstRow
+          dataIndex: index
+        )
+        if isNone(this: rowEntity) is false and listReorderPressOnHandle(
+          world: world
+          uiSystems: uiSystems
+          reorder: reorder
+          rowEntity: rowEntity
+          input: input
+        ) {
+          drag.phase = ListReorderPhase.pressing
+          drag.fromIndex = index
+          drag.toIndex = index
+          drag.pressX = pointer.x
+          drag.pressY = pointer.y
+          drag.pressSec = nowSec
+          drag.scrollRoot = listReorderScrollRoot(
+            world: world
+            uiSystems: uiSystems
+            listEntity: listEntity
+          )
+        }
+      }
+    }
+  } else if drag.phase is ListReorderPhase.pressing {
+    let movedX: Float = Math.abs(value: pointer.x - drag.pressX)
+    let movedY: Float = Math.abs(value: pointer.y - drag.pressY)
+    let held: Bool = (nowSec - drag.pressSec) as Float * 1000.0 >= reorder.holdMs.toFloat()
+    if pointer.down is false or count <= drag.fromIndex {
+      drag.phase = ListReorderPhase.idle
+    } else if reorder.handleNodeId.length() > 0 or held {
+      # Lift: from here the press is the row's, not a tap and not a scroll
+      drag.phase = ListReorderPhase.lifted
+      drag.grabY = pointer.y - top - drag.fromIndex.toFloat() * pitch
+      drag.rowY = drag.fromIndex.toFloat() * pitch
+      drag.lift = 0.0
+      drag.shifts = List.create(Float, cap: count)
+      loop var i: Int = 0, i < count, ++i {
+        drag.shifts.add(value: 0.0)
+      }
+      input.pressedEntityId = noEntity()
+    } else if movedX > reorderSlopPoints or movedY > reorderSlopPoints {
+      drag.phase = ListReorderPhase.idle
+    }
+  }
+
+  if drag.phase is ListReorderPhase.lifted {
+    # Near an end of the window: the list scrolls by itself
+    if isNone(this: drag.scrollRoot) is false and componentHas(
+      this: world.scrollRoots
+      entityId: drag.scrollRoot
+    ) {
+      let range: ScrollRange = scrollRootRange(
+        world: world
+        uiSystems: uiSystems
+        entityId: drag.scrollRoot
+      )
+      if range.active {
+        let position: Float = scrollPositionOf(world: world, entityId: drag.scrollRoot)
+        let windowStart: Float = listReorderTop(uiSystems: uiSystems, listEntity: drag.scrollRoot) - position
+        let speed: Float = reorderScrollSpeed(
+          pointer: pointer.y
+          windowStart: windowStart
+          windowEnd: windowStart + range.window
+          edge: reorder.edgePoints
+          maxSpeed: reorderScrollMaxSpeed
+        )
+        if speed is not 0.0 {
+          var next: Float = position + speed * seconds
+          if next > 0.0 {
+            next = 0.0
+          }
+          if next < range.floor {
+            next = range.floor
+          }
+          if next is not position {
+            if let root: ScrollRoot = componentCopy(
+              this: world.scrollRoots
+              entityId: drag.scrollRoot
+            ) {
+              applyScrollPosition(
+                world: world
+                uiSystems: uiSystems
+                entityId: drag.scrollRoot
+                root: root
+                position: next
+              )
+              top = top + (next - position)
+            }
+          }
+        }
+      }
+    }
+    var rowY: Float = pointer.y - top - drag.grabY
+    let lastY: Float = (count - 1).toFloat() * pitch
+    if rowY < 0.0 {
+      rowY = 0.0
+    }
+    if rowY > lastY {
+      rowY = lastY
+    }
+    drag.rowY = rowY
+    drag.toIndex = reorderTargetIndex(rowY: rowY, pitch: pitch, count: count)
+    drag.lift = reorderEase(
+      current: drag.lift
+      target: 1.0
+      seconds: seconds
+      rate: reorderLiftRate
+    )
+    loop var i: Int = 0, i < drag.shifts.length, ++i {
+      if let shift: Float = drag.shifts.copyAt(index: i) {
+        let target: Float = reorderShiftTarget(
+          index: i
+          fromIndex: drag.fromIndex
+          toIndex: drag.toIndex
+          pitch: pitch
+        )
+        drag.shifts.set(
+          index: i
+          value: reorderEase(
+            current: shift
+            target: target
+            seconds: seconds
+            rate: reorderShiftRate
+          )
+        )
+      }
+    }
+    if pointer.down is false {
+      # The drop: the move as a UI action, then the rows wait for the app
+      if drag.toIndex is not drag.fromIndex {
+        eventSend(
+          this: world.uiActions
+          value: UiAction {
+            entityId: listEntity
+            actionId: reorderActionId(
+              actionId: reorder.actionId
+              fromIndex: drag.fromIndex
+              toIndex: drag.toIndex
+            )
+          }
+        )
+      }
+      drag.phase = ListReorderPhase.settling
+      drag.dropSec = nowSec
+      drag.dataGeneration = componentTableGeneration(ListViewData, this: world.listViewDatas)
+      drag.settled = 0
+    }
+  } else if drag.phase is ListReorderPhase.settling {
+    listReorderSettle(
+      drag: drag
+      world: world
+      count: count
+      pitch: pitch
+      nowSec: nowSec
+      seconds: seconds
+    )
+  }
+
+  listReorderPose(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    listView: listView
+    reorder: reorder
+    drag: drag
+    count: count
+    pitch: pitch
+  )
+  let moving: Bool = drag.phase is not ListReorderPhase.idle
+  componentSet(this: world.listReorderDrags, entityId: listEntity, data: own drag)
+  ret moving or wasIdle is false
+}
+
+# After the drop: once the app has reordered its data, every row eases from
+# where it was drawn into its new place; with no new data in time (or a row
+# put back where it was), into its old place. Then the drag is over.
+func listReorderSettle(
+  drag: mod ListReorderDrag
+  world: view UiWorld
+  count: view Int
+  pitch: view Float
+  nowSec: view Float64
+  seconds: view Float
+) {
+  if drag.settled is 0 {
+    let moved: Bool = drag.toIndex is not drag.fromIndex
+    let dataChanged: Bool = componentTableGeneration(ListViewData, this: world.listViewDatas) is not drag.dataGeneration
+    if moved and dataChanged and count is drag.shifts.length {
+      # Each row's drawn place, now in the new order
+      var shifts: List(Float) = List.create(Float, cap: count)
+      loop var i: Int = 0, i < count, ++i {
+        shifts.add(value: 0.0)
+      }
+      loop var index: Int = 0, index < count, ++index {
+        var drawn: Float = drag.rowY
+        if index is not drag.fromIndex {
+          var shift: Float = 0.0
+          if let current: Float = drag.shifts.copyAt(index: index) {
+            shift = current
+          }
+          drawn = index.toFloat() * pitch + shift
+        }
+        let newIndex: Int = reorderNewIndex(
+          index: index
+          fromIndex: drag.fromIndex
+          toIndex: drag.toIndex
+        )
+        shifts.set(index: newIndex, value: drawn - newIndex.toFloat() * pitch)
+      }
+      drag.shifts = own shifts
+      drag.settled = 1
+    } else if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or count is not drag.shifts.length {
+      # Back home in the old order: the lifted row from where it was dropped
+      if drag.fromIndex < drag.shifts.length {
+        drag.shifts.set(index: drag.fromIndex, value: drag.rowY - drag.fromIndex.toFloat() * pitch)
+      }
+      drag.settled = 2
+    } else {
+      ret
+    }
+  }
+  var home: Bool = true
+  loop var i: Int = 0, i < drag.shifts.length, ++i {
+    if let shift: Float = drag.shifts.copyAt(index: i) {
+      let eased: Float = reorderEase(
+        current: shift
+        target: 0.0
+        seconds: seconds
+        rate: reorderShiftRate
+      )
+      drag.shifts.set(index: i, value: eased)
+      if eased is not 0.0 {
+        home = false
+      }
+    }
+  }
+  drag.lift = reorderEase(
+    current: drag.lift
+    target: 0.0
+    seconds: seconds
+    rate: reorderLiftRate
+  )
+  if home and drag.lift is 0.0 {
+    drag.phase = ListReorderPhase.idle
+  }
+}
+
+# The lifted row's data index while it is drawn as lifted
+func listReorderLiftedIndex(drag: view ListReorderDrag) ret Int {
+  if drag.phase is ListReorderPhase.settling and drag.settled is 1 {
+    ret drag.toIndex
+  }
+  ret drag.fromIndex
+}
+
+# Every pooled row at its place this frame; with the drag over, back to rest
+func listReorderPose(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  listEntity: view EntityId
+  listView: view ListView
+  reorder: view ListReorder
+  drag: view ListReorderDrag
+  count: view Int
+  pitch: view Float
+) {
+  unsafe {
+    if componentHas(this: world.childrens, entityId: listEntity) is false {
+      ret
+    }
+    var rows: List(EntityId) = List.create(EntityId, cap: 16)
+    let children: view Children = componentView(this: world.childrens, entityId: listEntity)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      rows.add(value: rae_ext_rae_buf_get(buf: children.ids.data, index: i))
+    }
+    let firstRow: Int = listReorderFirstRow(
+      world: world
+      listEntity: listEntity
+      listView: listView
+      count: count
+    )
+    let liftedIndex: Int = listReorderLiftedIndex(drag: drag)
+    let active: Bool = drag.phase is ListReorderPhase.lifted or drag.phase is ListReorderPhase.settling
+    loop var slot: Int = 0, slot < rows.length, ++slot {
+      let rowEntity: EntityId = rae_ext_rae_buf_get(buf: rows.data, index: slot)
+      let dataIndex: Int = firstRow + slot
+      var offset: Float = 0.0
+      var lifted: Bool = false
+      if active and dataIndex < count {
+        lifted = dataIndex is liftedIndex
+        if lifted and (drag.phase is ListReorderPhase.lifted or drag.settled is 0) {
+          offset = drag.rowY - dataIndex.toFloat() * pitch
+        } else if let shift: Float = drag.shifts.copyAt(index: dataIndex) {
+          offset = shift
+        }
+      }
+      listReorderPlaceRow(
+        world: world
+        uiSystems: uiSystems
+        rowEntity: rowEntity
+        offset: offset
+        lifted: lifted
+        scale: 1.0 + (reorder.liftScale - 1.0) * drag.lift
+        rowWidth: listReorderRowWidth(uiSystems: uiSystems, rowEntity: rowEntity)
+        rowHeight: listView.itemHeight
+      )
+    }
+  }
+}
+
+func listReorderRowWidth(uiSystems: view UiSystems, rowEntity: view EntityId) ret Float {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: rowEntity) {
+    ret componentView(this: uiSystems.layout.computedRects, entityId: rowEntity).size.x
+  }
+  ret 0.0
+}
+
+# One row: its offset along the list; lifted, its scale about its middle and
+# painted on top; else neither (written only when it changes)
+func listReorderPlaceRow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  rowEntity: view EntityId
+  offset: view Float
+  lifted: view Bool
+  scale: view Float
+  rowWidth: view Float
+  rowHeight: view Float
+) {
+  var x: Float = 0.0
+  var y: Float = offset
+  if lifted {
+    x = rowWidth * (1.0 - scale) * 0.5
+    y = offset + rowHeight * (1.0 - scale) * 0.5
+  }
+  if x is 0.0 and y is 0.0 {
+    if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: rowEntity) {
+      componentRemove(this: uiSystems.transform2d.runtimeOffsets, entityId: rowEntity)
+    }
+  } else {
+    var same: Bool = false
+    if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: rowEntity) {
+      let current: Vec2 = componentView(
+        this: uiSystems.transform2d.runtimeOffsets
+        entityId: rowEntity
+      ).delta
+      same = current.x is x and current.y is y
+    }
+    if same is false {
+      componentSet(
+        this: uiSystems.transform2d.runtimeOffsets
+        entityId: rowEntity
+        data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
+      )
+    }
+  }
+  if lifted {
+    componentSet(this: world.paintOnTops, entityId: rowEntity, data: PaintOnTop { value: true })
+    componentSet(
+      this: world.transforms
+      entityId: rowEntity
+      data: TransformFx {
+        scaleX: scale
+        scaleY: scale
+        rotation: 0.0
+        alpha: 1.0
+        visible: true
+        pivot: Vec2 { x: 0.0, y: 0.0 }
+        anchor: Vec2 { x: 0.0, y: 0.0 }
+      }
+    )
+  } else if componentHas(this: world.paintOnTops, entityId: rowEntity) {
+    # Only a row this system lifted carries PaintOnTop, and its TransformFx is
+    # this system's too
+    componentRemove(this: world.paintOnTops, entityId: rowEntity)
+    componentRemove(this: world.transforms, entityId: rowEntity)
+  }
+}

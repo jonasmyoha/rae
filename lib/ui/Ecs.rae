@@ -5,6 +5,8 @@ open ui/ScenePolicy
 open ui/SceneBundles
 open ui/UiSystems
 open ui/ScrollDrag
+open ui/ListReorder
+open ui/PaintOnTop
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -107,6 +109,9 @@ type UiWorld {
   scrollRoots: ComponentTable(ScrollRoot)
   scrollStates: ComponentTable(ScrollState)
   scrollDrags: ComponentTable(ScrollDrag)
+  listReorders: ComponentTable(ListReorder)
+  listReorderDrags: ComponentTable(ListReorderDrag)
+  paintOnTops: ComponentTable(PaintOnTop)
   wheelTargets: ComponentTable(WheelTarget)
   widgetIds: ComponentTable(WidgetId)
   widgetStates: ComponentTable(WidgetState)
@@ -289,6 +294,9 @@ func createUiWorld() ret UiWorld {
     scrollRoots: ComponentTable.create(ScrollRoot)
     scrollStates: ComponentTable.create(ScrollState)
     scrollDrags: ComponentTable.create(ScrollDrag)
+    listReorders: ComponentTable.create(ListReorder)
+    listReorderDrags: ComponentTable.create(ListReorderDrag)
+    paintOnTops: ComponentTable.create(PaintOnTop)
     wheelTargets: ComponentTable.create(WheelTarget)
     widgetIds: ComponentTable.create(WidgetId)
     widgetStates: ComponentTable.create(WidgetState)

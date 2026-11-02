@@ -39,6 +39,8 @@ open ecs/Hierarchy
 open ui/UiSystems
 open ui/ScrollDrag
 open ui/InputKind
+open ui/ListReorder
+open ecs/Query
 
 # Where each page's scroll position is when its root is not mounted: page
 # id -> position along the axis. An app resource (on its session) that outlives
@@ -430,6 +432,18 @@ func pointerAlongAxis(root: view ScrollRoot, input: view UiInput) ret Float {
 # spring frame). Inert (false) when the root is not laid out or its content
 # fits. The whole state is read into locals, stepped, and written back — no
 # mod-borrow is held across the read-only geometry queries.
+# Does a lifted row of a reorderable list (ui/ListReorder) hold the press in
+# the scroll root `scrollRoot`?
+func listReorderHolds(world: view UiWorld, scrollRoot: view EntityId) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: world.listReorderDrags), ++i {
+    let drag: view ListReorderDrag = queryViewAt(table: world.listReorderDrags, denseIndex: i)
+    if drag.phase is ListReorderPhase.lifted and drag.scrollRoot.index is scrollRoot.index and drag.scrollRoot.generation is scrollRoot.generation {
+      ret true
+    }
+  }
+  ret false
+}
+
 func updateScrollRoot(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -461,6 +475,20 @@ func updateScrollRoot(
     drag = storedDrag
   }
   let before: Float = state.y
+  # A row lifted out of a list in this root (ui/listReorderSystem) has the
+  # press: the content does not follow the finger, and the press stays
+  # claimed (`active`), so its release clicks nothing
+  if listReorderHolds(world: world, scrollRoot: entityId) {
+    drag.dragging = false
+    drag.active = true
+    state.velocity = 0.0
+    componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
+    if componentHas(this: world.scrollStates, entityId: entityId) {
+      let still: mod ScrollState = componentMod(this: world.scrollStates, entityId: entityId)
+      still.velocity = 0.0
+    }
+    ret false
+  }
   let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: entityId)
 
   if range.active is false {

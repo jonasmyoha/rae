@@ -1,0 +1,58 @@
+# ListReorder — drag to reorder the rows of a virtual ListView (ui/
+# listReorderSystem does it). A scene authors `ListReorder` on the node that
+# carries the `ListView`:
+#
+#     "Tasks": { "ListView": { ... }, "ListReorder": { "actionId": "todo.move", "label": "Move
+#     task" } }
+#
+# The gesture, as on a phone's own lists: press a row and hold it (`holdMs`)
+# without moving; the row lifts (a little bigger, painted over its
+# neighbors), follows the finger, and the other rows slide aside to open a
+# gap where it would land. Near the top or the bottom of the scroll window
+# (`edgePoints`) the list scrolls by itself, faster the closer the finger is
+# to the edge. Lifting the finger drops the row: the list fires the UI action
+# `<actionId>.<from>.<to>` (the row's index and the index it moves to, in the
+# list's data; nothing when it is put back where it was) and the rows ease
+# into their new places once the app has reordered its data, or back into
+# their old places when it does not. A press that moves before the hold is a
+# scroll or a tap as before. With `handleNodeId` (a node of the row scene, a
+# grip) a press on that node lifts the row at once and a press anywhere else
+# never lifts it.
+type ListReorder {
+  actionId: String
+  # What the gesture does in words, sentence case ("Move task"): what a
+  # voice command or a screen reader says, as OnClick's label
+  label: String = ""
+  enabled: Bool = true
+  holdMs: Int = 350
+  handleNodeId: String = ""
+  edgePoints: Float = 64.0
+  # The lifted row's size, as a multiple of its own
+  liftScale: Float = 1.03
+}
+
+enum ListReorderPhase { idle, pressing, lifted, settling }
+
+# The drag's runtime state, on the ListView entity (never authored or
+# serialized). Positions are along the list, in its content: row `i` rests at
+# `i * pitch`. `shifts` holds every row's offset from its resting place while
+# rows make room and while they ease home; `rowY` is where the lifted row's
+# top is. `settled` says which order the rows ease home in once dropped: 0
+# waiting for the app, 1 its new order, 2 the old one.
+type ListReorderDrag {
+  phase: ListReorderPhase
+  fromIndex: Int
+  toIndex: Int
+  pressX: Float
+  pressY: Float
+  pressSec: Float64
+  lastSec: Float64
+  dropSec: Float64
+  grabY: Float
+  rowY: Float
+  lift: Float
+  shifts: List(Float)
+  dataGeneration: Int
+  settled: Int
+  scrollRoot: EntityId
+}

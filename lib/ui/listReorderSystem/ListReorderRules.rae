@@ -1,0 +1,108 @@
+# The arithmetic of reordering a list (ui/listReorderSystem), as plain
+# numbers: where a lifted row would land, how far the other rows step aside,
+# where each row goes once the move is made, the easing, and how fast the
+# list scrolls while the finger is near an end. Positions are along the
+# list's content: row `index` rests at `index * pitch`.
+import Math
+
+# The index a lifted row whose top is at `rowY` would land on
+func reorderTargetIndex(rowY: view Float, pitch: view Float, count: view Int) ret Int {
+  if pitch <= 0.0 or count <= 0 {
+    ret 0
+  }
+  var index: Int = Math.floor(x: rowY / pitch + 0.5).toInt()
+  if index < 0 {
+    index = 0
+  }
+  if index > count - 1 {
+    index = count - 1
+  }
+  ret index
+}
+
+# How far row `index` (not the lifted one) steps aside while the row from
+# `fromIndex` hovers over `toIndex`: the rows between move one pitch toward
+# the place the lifted row left
+func reorderShiftTarget(
+  index: view Int
+  fromIndex: view Int
+  toIndex: view Int
+  pitch: view Float
+) ret Float {
+  if fromIndex < toIndex and index > fromIndex and index <= toIndex {
+    ret 0.0 - pitch
+  }
+  if toIndex < fromIndex and index >= toIndex and index < fromIndex {
+    ret pitch
+  }
+  ret 0.0
+}
+
+# Where row `index` is once the row at `fromIndex` has moved to `toIndex`
+func reorderNewIndex(index: view Int, fromIndex: view Int, toIndex: view Int) ret Int {
+  if index is fromIndex {
+    ret toIndex
+  }
+  if fromIndex < toIndex and index > fromIndex and index <= toIndex {
+    ret index - 1
+  }
+  if toIndex < fromIndex and index >= toIndex and index < fromIndex {
+    ret index + 1
+  }
+  ret index
+}
+
+# `current` eased toward `target` over `seconds` (an exponential ease: about
+# 95% of the way in 3 / rate seconds); exactly `target` once within a hair
+func reorderEase(
+  current: view Float
+  target: view Float
+  seconds: view Float
+  rate: view Float
+) ret Float {
+  let left: Float = target - current
+  if left < 0.25 and left > -0.25 {
+    ret target
+  }
+  ret current + left * (1.0 - Math.exp(x: 0.0 - rate * seconds))
+}
+
+# The auto-scroll speed in points per second while the finger is at
+# `pointer`, inside a window from `windowStart` to `windowEnd` along the
+# list: positive near the start (the content moves toward the end, showing
+# earlier rows), negative near the end, 0 in the middle; `maxSpeed` at the
+# very edge
+func reorderScrollSpeed(
+  pointer: view Float
+  windowStart: view Float
+  windowEnd: view Float
+  edge: view Float
+  maxSpeed: view Float
+) ret Float {
+  if edge <= 0.0 or windowEnd - windowStart < edge * 2.0 {
+    ret 0.0
+  }
+  let fromStart: Float = pointer - windowStart
+  if fromStart < edge {
+    var depth: Float = 1.0 - fromStart / edge
+    if depth > 1.0 {
+      depth = 1.0
+    }
+    ret maxSpeed * depth * depth
+  }
+  let fromEnd: Float = windowEnd - pointer
+  if fromEnd < edge {
+    var depth: Float = 1.0 - fromEnd / edge
+    if depth > 1.0 {
+      depth = 1.0
+    }
+    ret 0.0 - maxSpeed * depth * depth
+  }
+  ret 0.0
+}
+
+# The UI action a drop fires: `<actionId>.<from>.<to>`, a template action's
+# id with the move as its payload
+func reorderActionId(actionId: view String, fromIndex: view Int, toIndex: view Int) ret String {
+  ret "{actionId}.{fromIndex}.{toIndex}"
+}

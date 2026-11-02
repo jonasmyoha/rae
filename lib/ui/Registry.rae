@@ -64,6 +64,8 @@ func isRuntimeTable(name: view String) ret Bool {
     "CarouselState"
     "VisualBounds"
     "ScrollDrag"
+    "ListReorderDrag"
+    "PaintOnTop"
     "Interaction"
     "StateStyle"
     "ListViewData"
@@ -226,11 +228,11 @@ func applyComponentByName(
     # compile time and an excluded table instantiates no decoder at all.
     if typeName(table) is not "Children" and typeName(table) is not "VisualBounds" and typeName(
       table
-    ) is not "ScrollDrag" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
+    ) is not "ScrollDrag" and typeName(table) is not "ListReorderDrag" and typeName(table) is not "PaintOnTop" and typeName(
       table
-    ) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(
+    ) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(
       table
-    ) is not "SceneSource" {
+    ) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(table) is not "SceneSource" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
