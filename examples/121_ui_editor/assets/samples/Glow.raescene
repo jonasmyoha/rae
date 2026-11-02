@@ -1,0 +1,71 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "assets": {
+    "fonts": {"text": "../../../105_ui_counter/assets/Roboto-Regular.mtsdf.json"}
+  },
+  "palette": {
+    "background": {"r": 9, "g": 13, "b": 20, "a": 255},
+    "textPrimary": {"r": 238, "g": 244, "b": 243, "a": 255},
+    "textMuted": {"r": 157, "g": 172, "b": 181, "a": 255},
+    "accent": {"r": 72, "g": 180, "b": 152, "a": 255},
+    "glow": {"r": 64, "g": 196, "b": 168, "a": 140}
+  },
+  "text": {
+    "body": {
+      "font": "body",
+      "size": 34,
+      "color": "textPrimary",
+      "align": "center",
+      "vAlign": "center",
+      "lineHeight": 1.25
+    },
+    "title": {"extends": "body", "size": 72},
+    "muted": {"extends": "body", "size": 28, "color": "textMuted"}
+  },
+  "root": "Screen",
+  "nodes": {
+    "Screen": {
+      "Rect": {"x": 0, "y": 0, "w": 1080, "h": 1920},
+      "Shape": {"kind": "Rect", "fill": "background", "stroke": "#00000000", "strokeWidth": 0},
+      "Layout": {"type": "Vertical", "gap": 24, "alignMain": "Center", "alignCross": "Center"},
+      "Padding": {"l": 64, "t": 100, "r": 64, "b": 72},
+      "Children": ["Aura", "Title", "Note"]
+    },
+    "Aura": {
+      "Rect": {"x": 0, "y": 0, "w": 900, "h": 900},
+      "Shape": {"kind": "Circle", "fill": "#00000000", "stroke": "#00000000", "strokeWidth": 0},
+      "RadialGradientFill": {"from": "glow", "to": "#00000000", "stop": 0.62},
+      "Layout": {"type": "Stack", "gap": 0, "alignMain": "Center", "alignCross": "Center"},
+      "Children": ["Orb"]
+    },
+    "Orb": {
+      "Rect": {"x": 0, "y": 0, "w": 320, "h": 320},
+      "Shape": {"kind": "Circle", "fill": "accent", "stroke": "#FFFFFF14", "strokeWidth": 2},
+      "RadialGradientFill": {
+        "from": "#D8F5EC",
+        "to": "#1F5C50",
+        "centerX": 0.35,
+        "centerY": 0.3,
+        "radius": 0.95,
+        "stop": 1
+      }
+    },
+    "Title": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 100},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "A soft glow", "styleId": "title"}
+    },
+    "Note": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 48},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "RadialGradientFill: an aura and the light on an orb.", "styleId": "muted"}
+    }
+  }
+}

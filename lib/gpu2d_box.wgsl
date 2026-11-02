@@ -7,7 +7,11 @@
 // rect, radius, fill, border, params, grad. params = (border width, angle,
 // mode, gradient angle): mode 1 a gradient, mode 2 a ring arc (Gpu2dCanvasArc:
 // the ring inside the square rect, params.x its thickness, params.w the share
-// of the turn drawn clockwise from the top, round ends).
+// of the turn drawn clockwise from the top, round ends), mode 3 a radial
+// gradient (Gpu2dCanvasRadial: `border` holds its center as a fraction of the
+// box, its radius as a fraction of the distance from the center to the
+// farthest corner, and the share of that radius where the color reaches `grad`;
+// fill at the center, grad from the stop out).
 struct Prim {
   rect: vec4<f32>,
   radius: vec4<f32>,
@@ -95,7 +99,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let rmax = min(halfSize.x, halfSize.y);
   let rad4 = min(p.radius, vec4<f32>(rmax, rmax, rmax, rmax));
   var d = sdRoundBox(center, halfSize, rad4);
-  let arc = p.params.z > 1.5;
+  let arc = p.params.z > 1.5 && p.params.z < 2.5;
+  let radial = p.params.z > 2.5;
   if (arc) {
     d = sdRingArc(center, rmax, p.params.x, p.params.w);
   }
@@ -112,6 +117,20 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   var col = p.fill;
   if (arc) {
     return col * cov;
+  }
+  if (radial) {
+    // Per pixel, so a soft glow has no rings. A dither of half a step of
+    // 8-bit color breaks the bands a slow dark gradient would show.
+    let size = max(p.rect.zw, vec2<f32>(1.0, 1.0));
+    let focus = p.border.xy * size;
+    let far = max(max(length(focus), length(focus - vec2<f32>(size.x, 0.0))),
+                  max(length(focus - vec2<f32>(0.0, size.y)), length(focus - size)));
+    let reach = max(p.border.z * far * max(p.border.w, 0.0001), 0.0001);
+    let t = clamp(length(in.local - focus) / reach, 0.0, 1.0);
+    col = mix(p.fill, p.grad, t);
+    let noise = fract(52.9829189 * fract(dot(in.pos.xy, vec2<f32>(0.06711056, 0.00583715)))) - 0.5;
+    let rgb = clamp(col.rgb + vec3<f32>(noise / 255.0), vec3<f32>(0.0), vec3<f32>(col.a));
+    return vec4<f32>(rgb, col.a) * cov;
   }
   if (p.params.z > 0.5) {
     let uv = in.local / max(p.rect.zw, vec2<f32>(1.0, 1.0));

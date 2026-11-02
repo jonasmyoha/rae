@@ -473,3 +473,43 @@ app has read them, closes a dialog whose own button fired one
 (`DialogOptions.closeOnAction`, on by default: an alert's buttons answer
 it); a page stays until the app closes it. `DialogOptions` is optional and a
 page ignores it.
+
+## 14. `RadialGradientFill`: a round glow
+
+A soft round light (a backdrop's aura, the highlight on an orb) is one
+`RadialGradientFill`, not a centered `Shadow` on a clear circle. A Shadow is
+painted as stacked layers, and at 3x on an iPhone each layer shows as a ring;
+the radial gradient is painted per pixel by the gpu2d box shader (its radial
+mode, `Gpu2dCanvasRadial`), with a dither of half an 8-bit step against
+banding.
+
+```json
+"Aura": {
+  "Shape": {"kind": "Circle", "fill": "#00000000"},
+  "RadialGradientFill": {"from": "glow", "to": "#00000000", "stop": 0.62}
+},
+"Orb": {
+  "Shape": {"kind": "Circle", "fill": "accent"},
+  "RadialGradientFill": {"from": "#FFFFFF", "to": "accent",
+                         "centerX": 0.35, "centerY": 0.3, "radius": 0.9}
+}
+```
+
+- `from` is the color at the center, `to` the color from `stop` outward.
+  Either may be a hex color, an RGBA object or a palette name; `fromSlot` /
+  `toSlot` name a palette color directly, and a name that is no palette
+  color is an `unknownToken` diagnostic (that end paints magenta), as for
+  `GradientFill`.
+- `centerX` / `centerY` (0.5 / 0.5): the center as a fraction of the box.
+- `radius` (1): a fraction of the distance from the center to the box's
+  farthest corner, CSS's `circle farthest-corner`.
+- `stop` (1): the share of the radius where the color reaches `to`. So
+  CSS's `radial-gradient(circle, color 0%, transparent 62%)` is
+  `{"from": color, "to": "#00000000", "stop": 0.62}`.
+- Like `GradientFill` it replaces the node's Shape fill, rounds with the
+  Shape's radius (a Circle: half its smaller side), else a `CornerRadius`,
+  and the Shape's stroke and the node's Shadow are painted with it (shadow,
+  fill, stroke). With a `GradientFill` on the same node the linear gradient
+  paints first and the radial one over it.
+- Case 1314 checks what is queued; the 121 Coverage sample has an orb light
+  (FadedBox).

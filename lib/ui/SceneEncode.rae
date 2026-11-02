@@ -8,6 +8,7 @@ open ui/UiSystems
 open ui/Components
 open ui/BindingComponents
 open ui/InputComponents
+open ui/RadialGradientFill
 open ui/ScenePolicy
 open ui/Registry
 open ui/RegistryOpt
@@ -312,6 +313,15 @@ func encodeGradientFill(gradient: view GradientFill) ret String {
   ret withMembers(base: base, extra: extra)
 }
 
+func encodeRadialGradientFill(radial: view RadialGradientFill) ret String {
+  let base: String = encodeComponent(value: radial, skip: "from,fromSlot,to,toSlot")
+  let extra: List(String) = [
+    "\"from\": {encodeColorOrSlot(color: radial.from, slot: radial.fromSlot)}"
+    "\"to\": {encodeColorOrSlot(color: radial.to, slot: radial.toSlot)}"
+  ]
+  ret withMembers(base: base, extra: extra)
+}
+
 # Text with its namespaced style override (a sparse component of its own).
 func encodeText(world: view UiWorld, entityId: view EntityId, text: view Text) ret String {
   let base: String = encodeComponent(value: text, skip: "")
@@ -526,6 +536,16 @@ func authoredComponentJson(
     if componentHas(this: world.gradientFills, entityId: entityId) {
       let value: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
       ret encodeGradientFill(gradient: value)
+    }
+    ret ""
+  }
+  if name is "RadialGradientFill" {
+    if componentHas(this: world.radialGradientFills, entityId: entityId) {
+      let value: view RadialGradientFill = componentView(
+        this: world.radialGradientFills
+        entityId: entityId
+      )
+      ret encodeRadialGradientFill(radial: value)
     }
     ret ""
   }

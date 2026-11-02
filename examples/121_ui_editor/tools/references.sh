@@ -17,7 +17,7 @@ TMP="$(mktemp -d)"
 # (deterministic); the static samples take a wall-clock budget.
 # split/Page imports by package path from the samples root (#1008), so the root
 # is passed explicitly for every sample (the gate does the same).
-for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page; do
+for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page Glow; do
   NAME="$(basename "$SAMPLE")"
   BUDGET="RAE_SDL_HEADLESS_MS=1500"
   if [ "$SAMPLE" = "Coverage" ]; then BUDGET="RAE_HEADLESS_FRAMES=12 RAE_FIXED_DT=0.05"; fi

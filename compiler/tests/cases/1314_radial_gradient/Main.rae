@@ -1,0 +1,151 @@
+# A RadialGradientFill (lib/ui/RadialGradientFill, painted by
+# renderSystem paintGradientG through Gpu2dCanvasRadial): one box in the box
+# shader's radial mode (3), its center, radius and stop in the box's border
+# slot, rounded with the node's Shape like a GradientFill, with the Shape's
+# stroke over it and a GradientFill on the same node painted first. The ends
+# take palette names (`from` / `to`, fromSlot / toSlot) and an unknown slot is
+# reported; the saved scene writes the component back. Each queued box is
+# boxPrimFloats floats: x y w h, four radii, fill rgba, border rgba (here the
+# gradient's shape), border width, angle, mode, gradient angle, to rgba.
+open Gpu2dCanvas
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneEncode
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/renderSystem/RenderFills
+open ecs/Entity
+open ecs/Transform
+open ui/Components
+
+func radialScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",")
+  s = s.concat(
+    other: "\"palette\":\{\"glow\":\{\"r\":90,\"g\":200,\"b\":170,\"a\":255\}\},\"nodes\":\{"
+  )
+  s = s.concat(other: "\"Row\":\{\"Children\":[\"Aura\",\"Orb\",\"Layered\",\"Unknown\"]\},")
+  # CSS radial-gradient(circle, glow 0%, transparent 62%) on a clear circle
+  s = s.concat(
+    other: "\"Aura\":\{\"Shape\":\{\"kind\":\"Circle\",\"fill\":\"#00000000\"\},\"RadialGradientFill\":\{\"from\":\"glow\",\"to\":\"#00000000\",\"stop\":0.62\}\},"
+  )
+  # the light on an orb: off-center, from white to the orb's color, stroked
+  s = s.concat(
+    other: "\"Orb\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":12,\"fill\":\"#000000FF\",\"stroke\":\"#3366FFFF\",\"strokeWidth\":1.5\},"
+  )
+  s = s.concat(
+    other: "\"RadialGradientFill\":\{\"from\":\"#FFFFFFFF\",\"toSlot\":\"accent\",\"centerX\":0.35,\"centerY\":0.3,\"radius\":0.8\}\},"
+  )
+  s = s.concat(
+    other: "\"Layered\":\{\"CornerRadius\":\{\"radius\":6\},\"GradientFill\":\{\"from\":\"#FF0000FF\",\"to\":\"#0000FFFF\"\},"
+  )
+  s = s.concat(other: "\"RadialGradientFill\":\{\"from\":\"#FFFFFF80\",\"to\":\"#FFFFFF00\"\}\},")
+  s = s.concat(
+    other: "\"Unknown\":\{\"RadialGradientFill\":\{\"fromSlot\":\"noSuchColor\",\"to\":\"#00000000\"\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func prim(canvas: view Gpu2dCanvas, box: view Int, field: view Int) ret Float {
+  ret canvas.prims.copyAtDefault(index: box * boxPrimFloats + field)
+}
+
+func channel(value: view Float) ret Int {
+  ret (value * 255.0 + 0.5) as Int
+}
+
+func rgba(canvas: view Gpu2dCanvas, box: view Int, field: view Int) ret String {
+  ret "{channel(value: prim(canvas: canvas, box: box, field: field))} {channel(
+    value: prim(canvas: canvas, box: box, field: field + 1)
+  )} {channel(value: prim(canvas: canvas, box: box, field: field + 2))} {channel(
+    value: prim(canvas: canvas, box: box, field: field + 3)
+  )}"
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+# Paint the node as a 120x80 box and print what it queued
+func paintNode(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let wt: WorldTransform2D = {
+    position: { x: 0.0, y: 0.0 }
+    rotation: 0.0
+    scale: { x: 1.0, y: 1.0 }
+  }
+  let cr: ComputedRect = { position: { x: 0.0, y: 0.0 }, size: { x: 120.0, y: 80.0 } }
+  paintGradientG(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityOf(world: world, nodeId: nodeId)
+    wt: wt
+    cr: cr
+    chain255: 255
+    canvas: canvas
+  )
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  log("{nodeId}: {boxes} box(es)")
+  loop var i: Int = 0, i < boxes, ++i {
+    let mode: Float = prim(canvas: canvas, box: i, field: 18)
+    var line: String = "  {i}: "
+    if mode > 2.5 {
+      line = "{line}radial, from {rgba(canvas: canvas, box: i, field: 8)} to {rgba(
+        canvas: canvas
+        box: i
+        field: 20
+      )}, center {prim(canvas: canvas, box: i, field: 12)} {prim(canvas: canvas, box: i, field: 13)}, radius {prim(
+        canvas: canvas
+        box: i
+        field: 14
+      )}, stop {prim(canvas: canvas, box: i, field: 15)}"
+    } else if mode > 0.5 {
+      line = "{line}linear, from {rgba(canvas: canvas, box: i, field: 8)}"
+    } else {
+      line = "{line}box, fill alpha {prim(canvas: canvas, box: i, field: 11)}, border width {prim(
+        canvas: canvas
+        box: i
+        field: 16
+      )}"
+    }
+    log("{line}, corners {prim(canvas: canvas, box: i, field: 4)}")
+  }
+}
+
+func main() {
+  var scene: Scene = parseScene(source: radialScene())
+  scene.sceneId = "radials"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var tokens: ResolvedTheme = createResolvedTheme()
+  parseThemeInto(out: tokens, scene: scene)
+  applyResolvedTokens(dst: world.theme.resolved, src: tokens)
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Aura")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Orb")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Layered")
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("diagnostic {diagnostic.kind} {diagnostic.nodeId}: {diagnostic.message}")
+  }
+  log(
+    "saved Aura: {authoredComponentJson(
+      world: world
+      entityId: entityOf(world: world, nodeId: "Aura")
+      name: "RadialGradientFill"
+    )}"
+  )
+  log(
+    "saved Orb: {authoredComponentJson(
+      world: world
+      entityId: entityOf(world: world, nodeId: "Orb")
+      name: "RadialGradientFill"
+    )}"
+  )
+}

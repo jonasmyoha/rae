@@ -1,6 +1,7 @@
 # RenderFills — the gradient and backdrop painters split from RenderSystem
 # (the file cap): GradientFill through the gpu2d box shader's gradient mode,
-# BackdropImage as the tinted, clipped image behind a node.
+# RadialGradientFill through its radial mode, BackdropImage as the tinted,
+# clipped image behind a node.
 open ui/Ecs
 open ui/UiSystems
 open ui/renderSystem/RenderPaintBox
@@ -10,9 +11,28 @@ import ui/Theme
 import ui/ThemeResolved
 open ecs/ComponentTable
 open Gpu2dCanvas
+open Gpu2dCanvasRadial
+open ui/RadialGradientFill
+
+# The color a gradient end paints: its palette slot when it names one, else
+# its literal color, through the node's opacity chain
+func gradientEndColor(
+  world: view UiWorld
+  color: view RgbaColor
+  slot: view String
+  chain255: view Int
+) ret Int {
+  var base: RgbaColor = color
+  if slot.length() > 0 {
+    base = uiThemeColor(theme: world.theme, name: slot)
+  }
+  ret g2dColor(color: g2dChain(color: base, chain255: chain255))
+}
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
-# dialog scrims stay in the same painter-order pipeline as normal shapes.
+# dialog scrims stay in the same painter-order pipeline as normal shapes. A
+# RadialGradientFill paints the same way (over a GradientFill on the same
+# node); either one replaces the Shape fill.
 func paintGradientG(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -22,29 +42,16 @@ func paintGradientG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let gf: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
-  let box: PaintBox = g2dPaintBox(
+  let nodeBox: PaintBox = g2dPaintBox(
     world: world
     entityId: entityId
     wt: wt
     cr: cr
   )
+  # a Circle's centered square, as the Shape painter draws it
+  let box: PaintBox = g2dFillBox(world: world, entityId: entityId, box: nodeBox)
   # the corners of the node's Shape (or its CornerRadius), already scaled
-  let fillRadius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
-  let drawW: Float = box.w
-  let drawH: Float = box.h
-  let drawX: Float = box.x
-  let drawY: Float = box.y
-  var fromBase: RgbaColor = gf.from
-  if gf.fromSlot.length() > 0 {
-    fromBase = uiThemeColor(theme: world.theme, name: gf.fromSlot)
-  }
-  var toBase: RgbaColor = gf.to
-  if gf.toSlot.length() > 0 {
-    toBase = uiThemeColor(theme: world.theme, name: gf.toSlot)
-  }
-  let from: RgbaColor = g2dChain(color: fromBase, chain255: chain255)
-  let to: RgbaColor = g2dChain(color: toBase, chain255: chain255)
+  let fillRadius: Float = g2dFillRadius(world: world, entityId: entityId, box: nodeBox)
   if componentHas(this: world.shadows, entityId: entityId) {
     paintShadowG(
       world: world
@@ -56,17 +63,60 @@ func paintGradientG(
       canvas: canvas
     )
   }
-  Gpu2d.drawGradientRect(
-    canvas: canvas
-    x: drawX
-    y: drawY
-    w: drawW
-    h: drawH
-    radius: fillRadius
-    from: g2dColor(color: from)
-    to: g2dColor(color: to)
-    angleDeg: gf.angle
-  )
+  if componentHas(this: world.gradientFills, entityId: entityId) {
+    let gf: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      radius: fillRadius
+      from: gradientEndColor(
+        world: world
+        color: gf.from
+        slot: gf.fromSlot
+        chain255: chain255
+      )
+      to: gradientEndColor(
+        world: world
+        color: gf.to
+        slot: gf.toSlot
+        chain255: chain255
+      )
+      angleDeg: gf.angle
+    )
+  }
+  if componentHas(this: world.radialGradientFills, entityId: entityId) {
+    let radial: view RadialGradientFill = componentView(
+      this: world.radialGradientFills
+      entityId: entityId
+    )
+    canvasDrawRadialGradientRect(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      radius: fillRadius
+      from: gradientEndColor(
+        world: world
+        color: radial.from
+        slot: radial.fromSlot
+        chain255: chain255
+      )
+      to: gradientEndColor(
+        world: world
+        color: radial.to
+        slot: radial.toSlot
+        chain255: chain255
+      )
+      centerX: radial.centerX
+      centerY: radial.centerY
+      reach: radial.radius
+      stop: radial.stop
+    )
+  }
   # The fill first, then the node's Shape stroke over it: a gradient button
   # keeps its edge.
   paintShapeStrokeG(
