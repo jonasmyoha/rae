@@ -371,17 +371,8 @@ and that every `OnClick` id has a label.
   NSPasteboard and UIPasteboard; never touched under a headless run). A test
   or self-test calls `setTextFieldClipboard(textFieldSystem:, text:)`, which
   makes the clipboard a scripted one holding `text`, then sends a frame with
-  `paste: true` (case 1309).
-- On iOS a press held still (0.5 s, within 10 units) on the focused field
-  shows the system edit menu there, as a UITextField does:
-  `textFieldMenuSystem(world:, uiSystems:, input:, now:)`, run after
-  `textFieldSystem`, detects the press from the frame's `pointerDown` /
-  `pointerX` / `pointerY` and calls `Gpu2dTextInput.showEditMenu` (a
-  UIEditMenuInteraction, iOS 16+) with Paste when the clipboard has text and
-  Copy and Cut when the field has some. The item picked is polled by the next
-  `readTextInputFrame` (`Gpu2dTextInput.editMenuChoice`) and arrives as that
-  frame's `paste` / `copy` / `cut`. Elsewhere the menu is a no-op (case 1311
-  checks when it is shown). A double tap does not open it.
+  `paste: true` (case 1309). On iOS the long-press Paste menu is not there yet
+  (queued).
 - The caret is drawn by the renderer after the text, not written into it;
   it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
   when it next changes, for the event loop's heartbeat
