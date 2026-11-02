@@ -1,0 +1,190 @@
+# Paste, copy and cut in a lib/ui text field (ui/textFieldSystem), through the
+# scripted clipboard a test fills with setTextFieldClipboard, so the person's
+# clipboard is never read or changed. Paste adds the clipboard's text at the
+# caret (the field's end) with its line breaks dropped; copy puts the whole
+# text on the clipboard, cut does and empties the field; with no field
+# focused nothing happens.
+import Gpu2d
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func fieldScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{")
+  s = s.concat(other: "\"Row\":\{\"Children\":[\"Address\"]\},")
+  s = s.concat(
+    other: "\"Address\":\{\"TextField\":\{\"placeholder\":\"Server address\",\"actionId\":\"sync.connect\"\},"
+  )
+  s = s.concat(other: "\"OnClick\":\{\"label\":\"Address\"\},\"Children\":[\"AddressLine\"]\},")
+  s = s.concat(other: "\"AddressLine\":\{\"Text\":\{\"text\":\"\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  actions: mod EventQueue(UiAction)
+  tap: view Bool
+  input: view TextInputFrame
+  label: view String
+) {
+  frameAdvance(this: actions)
+  if tap {
+    eventSend(
+      this: actions
+      value: UiAction { entityId: entityOf(world: world, nodeId: "Address"), actionId: "" }
+    )
+  }
+  let changed: Bool = textFieldSystem(
+    world: world
+    textFieldSystem: uiSystems.textField
+    actions: actions
+    input: input
+    now: 0.0
+  )
+  var sent: String = ""
+  loop var i: Int = 0, i < eventCount(this: actions), ++i {
+    let action: UiAction = eventAt(this: actions, i: i)
+    if isNone(this: action.entityId) {
+      sent = " sent {action.actionId}"
+    }
+  }
+  let field: view TextField = componentView(
+    this: world.textFields
+    entityId: entityOf(world: world, nodeId: "Address")
+  )
+  log(
+    "{label}: changed={changed} text='{field.text}' clipboard='{uiSystems.textField.clipboardText}'{sent}"
+  )
+}
+
+func main() {
+  var scene: Scene = parseScene(source: fieldScene())
+  scene.sceneId = "sync"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+
+  # the scripted step: put the address on the clipboard, then paste
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "ws://name.local:48787/sync\n")
+  let paste: TextInputFrame = {
+    typed: ""
+    backspaces: 0
+    enter: false
+    tapped: false
+    paste: true
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: paste
+    label: "paste, no focus"
+  )
+  let nothing: TextInputFrame = { typed: "", backspaces: 0, enter: false, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: true
+    input: nothing
+    label: "tap the field"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: paste
+    label: "paste"
+  )
+
+  # typed text, then a paste after it
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "?code=\r\n4821")
+  let typed: TextInputFrame = { typed: "", backspaces: 5, enter: false, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: typed
+    label: "backspace x5"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: paste
+    label: "paste two lines"
+  )
+
+  # copy, then cut
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "")
+  let copy: TextInputFrame = {
+    typed: ""
+    backspaces: 0
+    enter: false
+    tapped: false
+    copy: true
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: copy
+    label: "copy"
+  )
+  let cut: TextInputFrame = {
+    typed: ""
+    backspaces: 0
+    enter: false
+    tapped: false
+    cut: true
+  }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: cut
+    label: "cut"
+  )
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: paste
+    label: "paste it back"
+  )
+  let enter: TextInputFrame = { typed: "", backspaces: 0, enter: true, tapped: false }
+  frame(
+    world: world
+    uiSystems: uiSystems
+    actions: actions
+    tap: false
+    input: enter
+    label: "return"
+  )
+}

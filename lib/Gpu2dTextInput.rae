@@ -39,3 +39,24 @@ func keyboardHeight() ret Float {
     ret nativeKeyboardHeight()
   }
 }
+
+# The system clipboard's text (macOS NSPasteboard, iOS UIPasteboard, through
+# SDL3), "" when it holds none. Under a headless run it is never read, and
+# setClipboardText answers false: an automated run must not touch the
+# person's clipboard (a test pastes through ui/textFieldSystem's scripted
+# clipboard instead).
+func nativeClipboardText() unsafe extern("rae_ext_Gpu2d_clipboardText") ret String
+
+func clipboardText() ret String {
+  unsafe {
+    ret nativeClipboardText()
+  }
+}
+
+func nativeSetClipboardText(text: String) unsafe extern("rae_ext_Gpu2d_setClipboardText") ret Bool
+
+func setClipboardText(text: view String) ret Bool {
+  unsafe {
+    ret nativeSetClipboardText(text: text)
+  }
+}

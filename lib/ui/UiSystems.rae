@@ -36,6 +36,11 @@ type TextFieldSystem {
   caretEpoch: Float64
   textInputOn: Bool
   keyboardHeight: Float
+  # The clipboard paste, copy and cut use: the system one, or a scripted one
+  # (`scripted` true, then `clipboardText` is the clipboard) that a test or a
+  # self-test fills with setTextFieldClipboard, never touching the system's
+  clipboardScripted: Bool = false
+  clipboardText: String = ""
 }
 
 # safeAreaSystem's output: the resolved insets per SafeArea node.
@@ -183,6 +188,8 @@ func createUiSystems() ret UiSystems {
       caretEpoch: 0.0
       textInputOn: false
       keyboardHeight: 0.0
+      clipboardScripted: false
+      clipboardText: ""
     }
   }
 }
