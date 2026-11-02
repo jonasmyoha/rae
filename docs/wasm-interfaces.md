@@ -222,7 +222,30 @@ and per frame:
 reads the result and frees both. It uses only one type parameter (the host
 type), because functions with two type parameters do not compile today.
 
-## 6. Later: typed host imports (module to host)
+## 6. Typed host imports (module to host)
+
+**Implemented (compiler 0.2.291).** The pack lists `imports: "game.describe"`
+(capability `game`, Rae function `describe`). The module declares the
+function as an ordinary `unsafe extern("raeHostDescribe")` and calls it inside
+`unsafe { }`, as any extern. The compiler writes that C function:
+- it encodes the arguments as an export's are (a scalar directly, a `view`
+  String or value as an address and length);
+- it calls the WASM import `rae.describe`;
+- it decodes the answer.
+
+A String or value answer comes back in a 1 KiB buffer that the wrapper
+passes as the last two arguments. A longer one is kept by the host, which
+answers minus its length, and the wrapper fetches it with
+`rae.raeTakeAnswer(address)`, which lib/wasm answers itself. So the host
+function runs once per call. The build refuses a `rae` import whose
+capability is not requested. The `rae.interface` section lists each import
+with its capability, parameters and result. On the host side,
+`wasm/WasmInterface` has `wasmCallValue(T, ...)` / `wasmCallText` /
+`wasmCallBytes` to read the arguments and `wasmAnswerValue(T, ...)` /
+`wasmAnswerText` / `wasmAnswerBytes` to answer. An ungranted capability's
+import traps like any other (§4). Non-scalar parameters must be `view`.
+
+The design as it was planned:
 
 SUMU needs no host function of its own: log, clock and random are WASI. When
 a host does need one (a game's `spawnEntity`), the module declares it with

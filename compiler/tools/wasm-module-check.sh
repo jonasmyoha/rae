@@ -74,7 +74,7 @@ if [ -f "$WAMR_LIB" ]; then
     echo "FAIL: wasm-module-check (the Rae host's output differs from tests/wasmEmbedHost/expected.txt)"
     diff "$TMP/host.txt" tests/wasmEmbedHost/expected.txt | head -12 | sed 's/^/    /'; exit 1
   fi
-  EMBEDDED="run in a Rae host through lib/wasm (1000 typed frames)"
+  EMBEDDED="run in a Rae host through lib/wasm (1000 typed frames, a typed host import granted and denied)"
 fi
 
 # two packs a module build refuses

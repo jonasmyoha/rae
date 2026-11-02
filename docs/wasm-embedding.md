@@ -106,6 +106,28 @@ if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes) { ... }
   the module cannot decode traps (docs/wasm-modules.md) and comes back as a
   `trap` error.
 
+### Typed host imports
+
+A module's typed host import (`imports: "game.describe"` in its pack,
+docs/wasm-modules.md) calls the host as `rae.describe`. The host exposes it as
+a capability (`WasmCapability { name: "game", imports: { "rae.describe" } }`)
+and answers it in `wasmHostCall` with typed helpers:
+
+```rae
+if call.module is "rae" and call.name is "describe" {
+  if let command: Command = wasmCallValue(Command, instance: instance, call: call, at: 0) {
+    ret wasmAnswerValue(Command, instance: instance, call: call, value: describeCommand(command: command))
+  }
+  ret wasmTrap(message: "describe: the command does not decode")
+}
+```
+
+An argument's position `at` counts the raw arguments: one per scalar, two
+(the address and length) per String or value. `wasmAnswerValue` writes the
+encoded answer into the module's buffer. When it does not fit, it keeps the
+answer on the instance (`pendingAnswer`), and lib/wasm answers the module's
+`rae.raeTakeAnswer` with it, never the host.
+
 ## How it runs
 
 Rae cannot hand C a function to call, so a host function cannot be a C
@@ -145,7 +167,10 @@ app that does (the device's or the simulator's library by SDK).
   refused on a host that exposes nothing, then `_initialize`, `add` and a Unicode `greet`
   through the module ABI with the minimal WASI. Built from the same frame
   types (`compiler/tests/wasmFrames`), the host checks `summarize` and runs
-  1000 `AppFrameIn -> AppFrameOut` frames in bounded memory. A module built
+  1000 `AppFrameIn -> AppFrameOut` frames in bounded memory. It answers the
+  module's typed import `rae.describe` (a Command in and out, and once with a
+  3000-byte answer that takes the fetch path). With `game` not granted, the
+  call traps and the host's function never runs. A module built
   from an `AppFrameIn` with one field more is refused by `wasmCheckExport`
   before any call.
 - An iPhone build of case 1292's program (gen-ios, xcodebuild for iphoneos
