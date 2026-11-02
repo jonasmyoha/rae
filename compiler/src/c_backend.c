@@ -228,14 +228,36 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
     
     // Find the declaration
     if (str_eq_cstr(base, "List") || str_eq_cstr(base, "Buffer")) {
-        // Built-in List/Buffer — recursively emit element type first
-        if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting);
+        // Built-in List/Buffer. It holds its elements through a pointer, so a
+        // user-struct element needs only a declaration here: declare it, write
+        // the List, then define the element. Emitting the element first broke a
+        // struct that holds a List of itself (`type Node { children: List(Node) }`):
+        // Node's body needs the complete List(Node), whichever is reached first.
+        const AstTypeRef* elem = type->generic_args;
+        const char* elem_struct = NULL;
+        if (elem && !elem->is_opt && !elem->is_view && !elem->is_mod
+            && !(elem->resolved_type && elem->resolved_type->kind == TYPE_ARRAY)) {
+            Str eb = get_base_type_name(elem);
+            const AstDecl* ed = eb.len > 0 && !is_primitive_type(eb) && !str_eq_cstr(eb, "String")
+                && !str_eq_cstr(eb, "List") && !str_eq_cstr(eb, "Buffer")
+                ? find_type_decl(NULL, m, eb) : NULL;
+            if (ed && ed->kind == AST_DECL_TYPE && !has_property(ed->as.type_decl.properties, "c_struct"))
+                elem_struct = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
+        }
+        if (elem_struct) fprintf(out, "typedef struct %s %s;\n", elem_struct, elem_struct);
+        else if (elem) emit_type_recursive(ctx, m, elem, out, emitted, visiting);
         fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
         fprintf(out, "struct %s {\n", mangled);
         CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m;
         fprintf(out, "  ");
         emit_type_ref_as_c_type(&tctx, type->generic_args, out, false);
         fprintf(out, "* data;\n  int64_t length;\n  int64_t cap;\n};\n\n");
+        if (elem_struct) {
+            emitted_list_add(emitted, mangled);
+            visiting->count--;
+            emit_type_recursive(ctx, m, elem, out, emitted, visiting);
+            return true;
+        }
     } else {
         const AstDecl* d = find_type_decl(NULL, m, base);
         // If we found a specialized version, use the generic template instead
@@ -552,7 +574,34 @@ static bool generic_type_is_registered_twin(const AstTypeRef* other, const AstTy
     return true;
 }
 
+/* The types register_generic_type is inside right now. An already registered
+ * type rescans its arguments and fields, so a type that holds itself
+ * (`type Node { children: List(Node) }`: Node -> List(Node) -> Node) went
+ * round until the stack ran out; one that is already being scanned further up
+ * stops the walk. */
+#define REGISTER_GENERIC_ACTIVE_MAX 256
+static _Thread_local const AstTypeRef* g_register_generic_active[REGISTER_GENERIC_ACTIVE_MAX];
+static _Thread_local int g_register_generic_active_count = 0;
+
+static void register_generic_type_scan(CompilerContext* ctx, const AstTypeRef* type);
+
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
+    if (!type || !is_concrete_type(ctx, type)) return;
+    if ((uintptr_t)type < 0x1000) return;
+    if (g_register_generic_active_count >= REGISTER_GENERIC_ACTIVE_MAX) return;
+    bool has_enum_arg = rae_type_ref_has_enum_arg(ctx, ctx->current_module, type);
+    GenericEnumTwin active = { ctx, has_enum_arg,
+                               has_enum_arg ? rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type) : NULL };
+    for (int i = 0; i < g_register_generic_active_count; i++) {
+        const AstTypeRef* other = g_register_generic_active[i];
+        if (other->is_opt == type->is_opt && generic_type_is_registered_twin(other, type, &active)) return;
+    }
+    g_register_generic_active[g_register_generic_active_count++] = type;
+    register_generic_type_scan(ctx, type);
+    g_register_generic_active_count--;
+}
+
+static void register_generic_type_scan(CompilerContext* ctx, const AstTypeRef* type) {
     if (!type || !is_concrete_type(ctx, type)) return;
     if ((uintptr_t)type < 0x1000) return;
     /* A `cap: N` value argument is not a type and has nothing to register. */

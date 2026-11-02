@@ -716,6 +716,9 @@ void binary_emit_helpers(CompilerContext* ctx, FILE* out) {
     fprintf(out, "  %s result; memset(&result, 0, sizeof result);\n", bytes_c);
     fprintf(out, "  if (out.failed) { rae_ext_rae_buf_free(out.data); return result; }\n");
     fprintf(out, "  result.data = out.data; result.length = out.len; result.cap = out.cap; return result;\n}\n");
+    /* A temporary receiver (`make().toBinary()`): encoded, then freed. */
+    fprintf(out, "RAE_UNUSED static %s rae_toBinaryOwned_%s_(%s value) {\n", bytes_c, m, m);
+    fprintf(out, "  %s result = rae_toBinary_%s_(&value); rae_binFree_%s_(&value); return result;\n}\n", bytes_c, m, m);
     }
     if (!(uses & 2)) continue;
     fprintf(out, "RAE_UNUSED static %s rae_fromBinary_%s_(const %s* bytes) {\n", opt_c, m, bytes_c);
@@ -724,6 +727,10 @@ void binary_emit_helpers(CompilerContext* ctx, FILE* out) {
     fprintf(out, "  if (!rae_binGet_%s_(&in, &result.value, 0) || in.pos != in.len) {\n", m);
     fprintf(out, "    rae_binFree_%s_(&result.value); memset(&result, 0, sizeof result); return result;\n  }\n", m);
     fprintf(out, "  result.has = 1; return result;\n}\n");
+    /* Temporary bytes (`T.fromBinary(bytes: value.toBinary())`): freed after. */
+    fprintf(out, "RAE_UNUSED static %s rae_fromBinaryOwned_%s_(%s bytes) {\n", opt_c, m, bytes_c);
+    fprintf(out, "  %s result = rae_fromBinary_%s_(&bytes); rae_ext_rae_buf_free(bytes.data); return result;\n}\n",
+            opt_c, m);
   }
   free((void*)all.types);
   free((void*)all.mangled);

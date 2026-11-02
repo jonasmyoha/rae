@@ -99,8 +99,10 @@ on, and for every struct inside it. The byte reading and writing is generated
 C in each program, like the JSON writer's. A value too big for the format (a
 String or List over 4 GiB) encodes to an empty list. Cases:
 1297 (round trip and the exact bytes), 1298 (every malformed input),
-1299 (the hash), 1300 (the refusals). Not tested yet: the nesting limit,
-because a struct that holds a List of itself does not compile (queued).
+1299 (the hash), 1300 (the refusals); case 1298 also shows the nesting limit
+(200 levels decode, 201 do not). A temporary passed in (`T.fromBinary(bytes:
+value.toBinary())`, `make().toBinary()`, `T.fromBinary(...) is none`) is
+freed after the call.
 
 ## 3. Versioning: a structural hash, checked once at load
 

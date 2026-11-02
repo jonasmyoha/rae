@@ -1,0 +1,59 @@
+# A struct that holds a List of itself compiles and works (found 2026-11-02:
+# `type Node { children: List(Node) }` crashed the compiler with a stack
+# overflow, and its C defined Node before the List(Node) it contains). Two
+# types that hold lists of each other work too. The tree is built, printed,
+# compared, copied, encoded and dropped (the case runs under the leak check).
+type Node {
+  label: String
+  children: List(Node)
+}
+
+type Folder {
+  name: String
+  files: List(File)
+}
+
+type File {
+  name: String
+  attachments: List(Folder)
+}
+
+func leaf(label: view String) ret Node {
+  ret Node { label: "{label}", children: List.create(Node, cap: 1) }
+}
+
+func countNodes(node: view Node) ret Int {
+  var total: Int = 1
+  loop let child: view Node in node.children {
+    total = total + countNodes(node: child)
+  }
+  ret total
+}
+
+func main() {
+  var middle: Node = leaf(label: "middle")
+  middle.children.add(value: leaf(label: "deep"))
+  var root: Node = leaf(label: "root")
+  root.children.add(value: middle)
+  root.children.add(value: leaf(label: "side"))
+  log("nodes {countNodes(node: root)}")
+  log("{root}")
+  let copy: Node = root
+  log("copy equals root: {equals(a: copy, b: root)}")
+  root.children.add(value: leaf(label: "more"))
+  log("after adding to root: copy has {countNodes(node: copy)}, root has {countNodes(node: root)}")
+  # The bytes are a temporary here, and so is the receiver below: both freed.
+  if let decoded: Node = Node.fromBinary(bytes: root.toBinary()) {
+    log("binary round trip: {countNodes(node: decoded)} nodes, equal {equals(a: decoded, b: root)}")
+  }
+  let lone: List(UInt8) = leaf(label: "lone").toBinary()
+  log("a lone leaf is {lone.length} bytes")
+
+  var inner: Folder = { name: "inner", files: List.create(File, cap: 1) }
+  inner.files.add(value: File { name: "note.txt", attachments: List.create(Folder, cap: 1) })
+  var file: File = { name: "mail", attachments: List.create(Folder, cap: 1) }
+  file.attachments.add(value: inner)
+  var top: Folder = { name: "top", files: List.create(File, cap: 1) }
+  top.files.add(value: file)
+  log("{top}")
+}
