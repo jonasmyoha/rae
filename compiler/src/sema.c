@@ -2628,6 +2628,141 @@ static void sema_scan_unsafe_block(AstModule* m, const AstBlock* b, int depth) {
     if (!b) return;
     for (const AstStmt* s = b->first; s; s = s->next) sema_scan_unsafe_stmt(m, s, depth);
 }
+/* #12142833: the package boundary for the names a generic's TEMPLATE writes.
+ * A template body is not analyzed by sema (the C backend lowers each
+ * instantiation), so `let title: TodoTitle` in a dependency's generic was
+ * never checked against the dependency's package. Every type the template
+ * names, as a type or as a value (`TodoTitle.default()`), except its own type
+ * parameters, must be one its package reaches. The type arguments a caller
+ * passes are not names the template writes, so they pass (case 1303). */
+typedef struct {
+    AstModule* module;
+    SymbolTable* symbols;
+    const char* origin;
+    const AstIdentifierPart* generic_params;
+} TemplateNames;
+
+static bool template_names_is_param(const TemplateNames* tn, Str name) {
+    for (const AstIdentifierPart* gp = tn->generic_params; gp; gp = gp->next)
+        if (str_eq(gp->text, name)) return true;
+    return false;
+}
+
+static void template_names_check_name(const TemplateNames* tn, Str name, size_t line, size_t column) {
+    if (name.len == 0 || template_names_is_param(tn, name)) return;
+    Symbol* sym = symbol_table_lookup(tn->symbols, name);
+    if (!sym || !sym->decl || (sym->decl->kind != AST_DECL_TYPE && sym->decl->kind != AST_DECL_ENUM)) return;
+    if (sema_package_reaches(tn->origin, sym->decl)) return;
+    char why[320];
+    sema_package_boundary_words(tn->origin, sym->decl, why, sizeof why);
+    char message[480];
+    snprintf(message, sizeof message, "unknown type '%.*s' here: %s", (int)name.len, name.data, why);
+    diag_error(tn->origin, (int)line, (int)column, message);
+    tn->module->had_error = true;
+}
+
+static void template_names_type(const TemplateNames* tn, const AstTypeRef* type) {
+    for (const AstTypeRef* t = type; t; t = t->next) {
+        if (t->resolve_origin) continue;  /* not written here (a struct's field type) */
+        if (t->parts && t->qualifier.len == 0) template_names_check_name(tn, t->parts->text, t->line, t->column);
+        template_names_type(tn, t->generic_args);
+        if (t == type) break;
+    }
+}
+
+static void template_names_block(const TemplateNames* tn, const AstBlock* b);
+
+static void template_names_expr(const TemplateNames* tn, const AstExpr* e) {
+    if (!e) return;
+    switch (e->kind) {
+        case AST_EXPR_IDENT: template_names_check_name(tn, e->as.ident, e->line, e->column); break;
+        case AST_EXPR_CALL:
+            template_names_expr(tn, e->as.call.callee);
+            for (const AstTypeRef* g = e->as.call.generic_args; g; g = g->next) template_names_type(tn, g);
+            for (const AstCallArg* a = e->as.call.args; a; a = a->next) template_names_expr(tn, a->value);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            template_names_expr(tn, e->as.method_call.object);
+            for (const AstCallArg* a = e->as.method_call.args; a; a = a->next) template_names_expr(tn, a->value);
+            break;
+        case AST_EXPR_BINARY: template_names_expr(tn, e->as.binary.lhs); template_names_expr(tn, e->as.binary.rhs); break;
+        case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX: case AST_EXPR_OWN:
+            template_names_expr(tn, e->as.unary.operand); break;
+        case AST_EXPR_CAST: template_names_expr(tn, e->as.cast.operand); template_names_type(tn, e->as.cast.target); break;
+        case AST_EXPR_MEMBER: template_names_expr(tn, e->as.member.object); break;
+        case AST_EXPR_OBJECT:
+            template_names_type(tn, e->as.object_literal.type);
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) template_names_expr(tn, f->value);
+            break;
+        case AST_EXPR_LIST:
+            for (const AstExprList* l = e->as.list; l; l = l->next) template_names_expr(tn, l->value);
+            break;
+        case AST_EXPR_INDEX: template_names_expr(tn, e->as.index.target); template_names_expr(tn, e->as.index.index); break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            template_names_type(tn, e->as.collection.type);
+            for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next) template_names_expr(tn, el->value);
+            break;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* pp = e->as.interp.parts; pp; pp = pp->next) template_names_expr(tn, pp->value);
+            break;
+        case AST_EXPR_MATCH:
+            template_names_expr(tn, e->as.match_expr.subject);
+            for (const AstMatchArm* a = e->as.match_expr.arms; a; a = a->next) {
+                template_names_expr(tn, a->pattern); template_names_expr(tn, a->value);
+            }
+            break;
+        default: break;
+    }
+}
+
+static void template_names_stmt(const TemplateNames* tn, const AstStmt* st) {
+    if (!st) return;
+    switch (st->kind) {
+        case AST_STMT_LET: template_names_type(tn, st->as.let_stmt.type); template_names_expr(tn, st->as.let_stmt.value); break;
+        case AST_STMT_DESTRUCT: template_names_expr(tn, st->as.destruct_stmt.call); break;
+        case AST_STMT_EXPR: template_names_expr(tn, st->as.expr_stmt); break;
+        case AST_STMT_RET:
+            for (const AstReturnArg* r = st->as.ret_stmt.values; r; r = r->next) template_names_expr(tn, r->value);
+            break;
+        case AST_STMT_IF:
+            template_names_stmt(tn, st->as.if_stmt.binding);
+            template_names_expr(tn, st->as.if_stmt.condition);
+            template_names_block(tn, st->as.if_stmt.then_block);
+            template_names_block(tn, st->as.if_stmt.else_block);
+            break;
+        case AST_STMT_LOOP:
+            template_names_stmt(tn, st->as.loop_stmt.init);
+            template_names_expr(tn, st->as.loop_stmt.condition);
+            template_names_expr(tn, st->as.loop_stmt.increment);
+            template_names_block(tn, st->as.loop_stmt.body);
+            break;
+        case AST_STMT_MATCH:
+            template_names_expr(tn, st->as.match_stmt.subject);
+            for (const AstMatchCase* c = st->as.match_stmt.cases; c; c = c->next) {
+                template_names_expr(tn, c->pattern);
+                for (const AstCasePattern* op = c->or_patterns; op; op = op->next) template_names_expr(tn, op->expr);
+                template_names_block(tn, c->block);
+            }
+            break;
+        case AST_STMT_ASSIGN: template_names_expr(tn, st->as.assign_stmt.target); template_names_expr(tn, st->as.assign_stmt.value); break;
+        case AST_STMT_DEFER: template_names_block(tn, st->as.defer_stmt.block); break;
+        case AST_STMT_UNSAFE: template_names_block(tn, st->as.unsafe_stmt.block); break;
+        default: break;
+    }
+}
+
+static void template_names_block(const TemplateNames* tn, const AstBlock* b) {
+    for (const AstStmt* st = b ? b->first : NULL; st; st = st->next) template_names_stmt(tn, st);
+}
+
+static void sema_check_template_names(AstModule* module, SymbolTable* symbols, const AstDecl* decl) {
+    if (rae_deps_count() == 0 || !decl || decl->kind != AST_DECL_FUNC || !decl->origin_file) return;
+    TemplateNames tn = { module, symbols, decl->origin_file, decl->as.func_decl.generic_params };
+    for (const AstParam* p = decl->as.func_decl.params; p; p = p->next) template_names_type(&tn, p->type);
+    for (const AstReturnItem* r = decl->as.func_decl.returns; r; r = r->next) template_names_type(&tn, r->type);
+    template_names_block(&tn, decl->as.func_decl.body);
+}
+
 static void sema_scan_unsafe_template(AstModule* module, AstDecl* decl) {
     if (!decl || decl->kind != AST_DECL_FUNC || !decl->as.func_decl.body) return;
     const char* saved_origin = s_current_decl_origin;
@@ -10340,6 +10475,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // Templates are marked as processed but not analyzed — except for
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
+                sema_check_template_names(module, &symbols, d);
                 pointer_set_add(processed, d); processed_count++;
             }
             d = d->next;

@@ -1,0 +1,15 @@
+# An `sdk` generic that NAMES a type of the package that depends on it. The
+# caller may instantiate it with its own types (case 1303), but the generic's
+# own words see only the sdk's package, so this is refused.
+func firstTitle(T: type, value: view T) ret String {
+  let title: TodoTitle = { text: "named in the sdk" }
+  ret title.text
+}
+
+# The same names as values, as a type argument, in a list literal and as a
+# parameter type: each is refused.
+func moreNames(T: type, value: view T, other: view TodoTitle) ret Int {
+  let made: TodoTitle = TodoTitle.default()
+  let titles: List(TodoTitle) = List.create(TodoTitle, cap: 1)
+  ret titles.length + List(TodoTitle) { made }.length
+}
