@@ -5,12 +5,18 @@
 # the actions it fires are the same.
 #
 # `DialogOptions`, optional on the page's root, tunes the dialog
-# presentation (a page ignores it): how wide the card may be and how far it
+# presentation (a page ignores it): where the card sits (the middle or the
+# bottom of the screen), how wide it may be and how far it
 # stays from the screen's edges, the action a tap on the scrim fires ("" for
 # none: only the dialog's own buttons close it), and whether any action
 # fired inside the dialog closes it (a button that answers it, as an alert's
 # buttons do).
+enum DialogPlacement { center, bottom }
+
 type DialogOptions {
+  # Where the card sits: the middle of the screen, or its bottom, a margin
+  # above the safe area's bottom (where a thumb reaches)
+  placement: DialogPlacement
   maxWidth: Float = 360.0
   margin: Float = 24.0
   dismissActionId: String = "dialog.dismiss"

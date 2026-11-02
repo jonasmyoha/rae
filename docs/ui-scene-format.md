@@ -371,8 +371,17 @@ and that every `OnClick` id has a label.
   NSPasteboard and UIPasteboard; never touched under a headless run). A test
   or self-test calls `setTextFieldClipboard(textFieldSystem:, text:)`, which
   makes the clipboard a scripted one holding `text`, then sends a frame with
-  `paste: true` (case 1309). On iOS the long-press Paste menu is not there yet
-  (queued).
+  `paste: true` (case 1309).
+- On iOS a press held still (0.5 s, within 10 units) on the focused field
+  shows the system edit menu there, as a UITextField does:
+  `textFieldMenuSystem(world:, uiSystems:, input:, now:)`, run after
+  `textFieldSystem`, detects the press from the frame's `pointerDown` /
+  `pointerX` / `pointerY` and calls `Gpu2dTextInput.showEditMenu` (a
+  UIEditMenuInteraction, iOS 16+) with Paste when the clipboard has text and
+  Copy and Cut when the field has some. The item picked is polled by the next
+  `readTextInputFrame` (`Gpu2dTextInput.editMenuChoice`) and arrives as that
+  frame's `paste` / `copy` / `cut`. Elsewhere the menu is a no-op (case 1311
+  checks when it is shown). A double tap does not open it.
 - The caret is drawn by the renderer after the text, not written into it;
   it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
   when it next changes, for the event loop's heartbeat
@@ -448,9 +457,11 @@ text of a message, the action of a button. It returns the host, the handle
 
 - **dialog**: a scrim dims the whole screen and takes every tap outside the
   card (it fires `DialogOptions.dismissActionId`, `"dialog.dismiss"` by
-  default; `""` for none). The card is the page's root, centered, as wide as
-  `maxWidth` (360) allows less `margin` (24) on each side, and as tall as its
-  content. Its look is the scene's own (a bundle such as a card's Shape).
+  default; `""` for none). The card is the page's root, in the middle of the
+  screen or, with `"placement": "bottom"`, at its bottom (`margin` above the
+  safe area: where a thumb reaches), as wide as `maxWidth` (360) allows less
+  `margin` (24) on each side, and as tall as its content. Its look is the
+  scene's own (a bundle such as a card's Shape).
 - **page**: the page's root fills the screen, over everything, with no scrim.
 
 Either way it is modal: taps reach the topmost layer first, and

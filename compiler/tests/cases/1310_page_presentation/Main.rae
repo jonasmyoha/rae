@@ -29,7 +29,12 @@ func screenScene() ret String {
 }
 
 func removeScene(presentation: view String) ret String {
-  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{\"PageRoot\":\{\"id\":\"removeTask\",\"presentation\":\"{presentation}\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":0\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"Children\":[\"Title\",\"Message\",\"Buttons\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Remove task?\"\}\},\"Message\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":24\},\"Text\":\{\"text\":\"\"\}\},\"Buttons\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":48\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":8\},\"Children\":[\"Cancel\",\"Remove\"]\},\"Cancel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"dialog.cancel\",\"label\":\"Cancel\"\}\},\"Remove\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"remove.unset\",\"label\":\"Remove task\"\}\}\}\}"
+  ret removeSceneWith(presentation: presentation, options: "")
+}
+
+# : a DialogOptions component's JSON plus a comma, or ""
+func removeSceneWith(presentation: view String, options: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{{options}\"PageRoot\":\{\"id\":\"removeTask\",\"presentation\":\"{presentation}\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":0\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"Children\":[\"Title\",\"Message\",\"Buttons\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Remove task?\"\}\},\"Message\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":24\},\"Text\":\{\"text\":\"\"\}\},\"Buttons\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":48\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":8\},\"Children\":[\"Cancel\",\"Remove\"]\},\"Cancel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"dialog.cancel\",\"label\":\"Cancel\"\}\},\"Remove\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"remove.unset\",\"label\":\"Remove task\"\}\}\}\}"
 }
 
 func layOut(world: mod UiWorld, uiSystems: mod UiSystems) {
@@ -226,6 +231,37 @@ func main() {
   )
   frameAdvance(this: world.uiActions)
   frameAdvance(this: world.uiActions)
+
+  # ----- B2. a dialog at the bottom, where a thumb reaches -----
+  let low: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: removeSceneWith(
+        presentation: "dialog"
+        options: "\"DialogOptions\":\{\"placement\":\"bottom\"\},"
+      )
+    )
+    pageId: "removeTask"
+  )
+  let lowHost: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: low
+    pageId: "removeTask"
+    overrides: overridesForTask()
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  log("at the bottom: card {boxText(uiSystems: uiSystems, entityId: low)} (852 less the 24-point margin less its height), a tap above it hits: {actionOf(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 196.0
+      y: 300.0
+    )
+  )}")
+  closePresentedPage(world: world, uiSystems: uiSystems, host: lowHost)
 
   # ----- C. the same scene as a page -----
   let page: EntityId = loadSceneIntoPage(

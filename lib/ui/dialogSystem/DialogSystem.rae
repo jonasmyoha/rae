@@ -6,8 +6,10 @@
 #
 #   * dialog: the host holds a scrim (a full-screen dimming rectangle that
 #     takes every tap outside the card, firing DialogOptions.dismissActionId)
-#     and the page's root, centered, as wide as it may be (maxWidth, less
-#     the margins on a narrow screen) and as tall as its content;
+#     and a slot with the page's root in it, in the middle of the screen or
+#     at its bottom (DialogOptions.placement), as wide as it may be
+#     (maxWidth, less the margins on a narrow screen) and as tall as its
+#     content;
 #   * page: the page's root fills the host.
 #
 # Either way it is modal: taps go to the topmost layer first (uiHitTest), so
@@ -137,6 +139,60 @@ func presentMountedPage(
       child: scrim
       parent: host
     )
+    # The slot the card sits in: the whole screen, its content in the
+    # middle, or at the bottom above the safe area. It is not clickable, so
+    # a tap beside the card still lands on the scrim.
+    let slot: EntityId = createEntity(world: world)
+    componentSet(
+      this: world.rects
+      entityId: slot
+      data: Rect {
+        position: Vec2 { x: 0.0, y: 0.0 }
+        size: Vec2 { x: world.layoutW, y: world.layoutH }
+      }
+    )
+    componentSet(
+      this: world.sizes
+      entityId: slot
+      data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
+    )
+    var along: AlignKind = AlignKind.center
+    if options.placement is DialogPlacement.bottom {
+      along = AlignKind.end
+      componentSet(
+        this: world.paddings
+        entityId: slot
+        data: Padding { insets: Insets { l: 0.0, t: options.margin, r: 0.0, b: options.margin } }
+      )
+      componentSet(
+        this: world.safeAreas
+        entityId: slot
+        data: SafeArea {
+          enabled: true
+          apply: Insets { l: 0.0, t: 1.0, r: 0.0, b: 1.0 }
+          extra: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+        }
+      )
+    }
+    componentSet(
+      this: world.layouts
+      entityId: slot
+      data: Layout {
+        kind: LayoutType.vertical
+        gap: 0.0
+        alignMain: along
+        alignCross: AlignKind.center
+        columns: 0
+        rowGap: 0.0
+        columnGap: 0.0
+      }
+    )
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: slot
+      parent: host
+    )
     # The card: as wide as it may be, as tall as its content
     var width: Float = world.layoutW - options.margin * 2.0
     if width > options.maxWidth {
@@ -156,19 +212,25 @@ func presentMountedPage(
       entityId: pageRoot
       data: Size { w: SizeAxis { mode: SizeMode.fixed }, h: SizeAxis { mode: SizeMode.hug } }
     )
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: pageRoot
+      parent: slot
+    )
   } else {
     componentSet(
       this: world.sizes
       entityId: pageRoot
       data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
     )
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: pageRoot
+      parent: host
+    )
   }
-  setParent(
-    parents: uiSystems.hierarchy.parents
-    childrens: world.childrens
-    child: pageRoot
-    parent: host
-  )
   componentSet(
     this: world.presentedPages
     entityId: host
