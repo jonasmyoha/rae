@@ -272,7 +272,12 @@ func loadSceneIntoPage(
         if pageId.length() > 0 {
           var copiedId: String = ""
           copiedId = copiedId.concat(other: pageId)
-          let pr: PageRoot = { id: own copiedId }
+          # The id is the page's scope; an authored presentation stays
+          var presentation: PagePresentation = PagePresentation.page
+          if componentHas(this: world.pageRoots, entityId: rootEntityId) {
+            presentation = componentView(this: world.pageRoots, entityId: rootEntityId).presentation
+          }
+          let pr: PageRoot = { id: own copiedId, presentation: presentation }
           componentSet(this: world.pageRoots, entityId: rootEntityId, data: own pr)
         }
         ret rootEntityId

@@ -411,3 +411,43 @@ true while a row is held or rows still move, so an event-driven loop keeps
 drawing frames until they are home, and then runs nothing. Rows are moved by
 their `RuntimeOffset` (no relayout). Flow lists (`mode: "Flow"`) are not
 reorderable yet.
+
+## 13. Dialogs are pages: `PageRoot.presentation`
+
+A dialog is a page scene whose root says how it is shown:
+
+```json
+"Card": {
+  "PageRoot": { "id": "removeTask", "presentation": "dialog" },
+  "DialogOptions": { "maxWidth": 340, "dismissActionId": "dialog.dismiss" },
+  "bundles": [ "dialogCard" ],
+  "Layout": { "type": "Vertical", "gap": "spaceL" },
+  "Children": [ "Title", "Message", "Buttons" ]
+}
+```
+
+`presentation` is `"page"` (the default) or `"dialog"`; it is the one field
+that turns a dialog into a page and back. An app shows either the same way:
+`presentPage(world, uiSystems, root, sceneId, resources, canvas, registry,
+overrides)` (lib/app3d/UiShell) mounts the scene into the current world, its
+node ids scoped to the page (`sceneId`, so they never clash with the
+screen's), and presents it on the "dialog" layer (ui/Layer; made when the
+app has none). `overrides` are `SceneOverride`s (as a `SceneInstance`'s): the
+text of a message, the action of a button. It returns the host, the handle
+`closePresentedPage` takes.
+
+- **dialog**: a scrim dims the whole screen and takes every tap outside the
+  card (it fires `DialogOptions.dismissActionId`, `"dialog.dismiss"` by
+  default; `""` for none). The card is the page's root, centered, as wide as
+  `maxWidth` (360) allows less `margin` (24) on each side, and as tall as its
+  content. Its look is the scene's own (a bundle such as a card's Shape).
+- **page**: the page's root fills the screen, over everything, with no scrim.
+
+Either way it is modal: taps reach the topmost layer first, and
+`presentedPageBlocks(world, uiSystems, entity)` tells pointer systems to
+leave what is under it alone (the scroll root and ListReorder already do).
+`dialogSystem(world, uiSystems)`, run on a frame with UI actions after the
+app has read them, closes a dialog whose own button fired one
+(`DialogOptions.closeOnAction`, on by default: an alert's buttons answer
+it); a page stays until the app closes it. `DialogOptions` is optional and a
+page ignores it.

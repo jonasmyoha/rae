@@ -1,0 +1,268 @@
+# Dialogs are pages (lib/ui/Dialog, ui/dialogSystem), headless:
+#   A. a page scene whose root says `"presentation": "dialog"` is presented
+#      over a screen: a host on the dialog layer, a scrim under a card that
+#      is as wide as it may be (less the margins) and centered; the
+#      overrides set its message and its button's action; taps over the
+#      screen's own button land on the scrim (modal); the screen is blocked
+#      for other pointer systems, the card is not.
+#   B. an action fired by the card's button closes it (closeOnAction): its
+#      entities and its node ids go, the screen's stay.
+#   C. the same scene with `"presentation": "page"`: full-screen, no scrim.
+import ui/Components
+open ui/Ecs
+open ui/Dialog
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/dialogSystem/DialogSystem
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/UiSystems
+
+func screenScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":852\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Title\",\"Open\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":40\},\"Text\":\{\"text\":\"Tasks\"\}\},\"Open\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":44\},\"OnClick\":\{\"actionId\":\"open\",\"label\":\"Open\"\}\}\}\}"
+}
+
+func removeScene(presentation: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{\"PageRoot\":\{\"id\":\"removeTask\",\"presentation\":\"{presentation}\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":0\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"Children\":[\"Title\",\"Message\",\"Buttons\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Remove task?\"\}\},\"Message\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":24\},\"Text\":\{\"text\":\"\"\}\},\"Buttons\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":48\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":8\},\"Children\":[\"Cancel\",\"Remove\"]\},\"Cancel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"dialog.cancel\",\"label\":\"Cancel\"\}\},\"Remove\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"remove.unset\",\"label\":\"Remove task\"\}\}\}\}"
+}
+
+func layOut(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func nodeOf(world: view UiWorld, pageId: view String, nodeId: view String) ret EntityId {
+  if pageId.length() is 0 {
+    if let index: Int = world.nodeIds.get(k: nodeId) {
+      ret nodeEntityId(world: world, index: index)
+    }
+    ret noEntity()
+  }
+  if let index: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func boxText(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+    ret "(no box)"
+  }
+  let rect: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  var x: Float = rect.position.x
+  var y: Float = rect.position.y
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
+    let placed: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: entityId
+    )
+    x = placed.position.x
+    y = placed.position.y
+  }
+  ret "{x.toInt()},{y.toInt()} {rect.size.x.toInt()}x{rect.size.y.toInt()}"
+}
+
+func textOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.texts, entityId: entityId) {
+    ret "{componentView(this: world.texts, entityId: entityId).text}"
+  }
+  ret "(no text)"
+}
+
+func actionOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.onClicks, entityId: entityId) {
+    ret "{componentView(this: world.onClicks, entityId: entityId).actionId}"
+  }
+  ret "(none)"
+}
+
+func childCount(world: view UiWorld, entityId: view EntityId) ret Int {
+  if componentHas(this: world.childrens, entityId: entityId) {
+    ret componentView(this: world.childrens, entityId: entityId).ids.length
+  }
+  ret 0
+}
+
+func overridesForTask() ret List(SceneOverride) {
+  var overrides: List(SceneOverride) = List.create(SceneOverride, cap: 2)
+  overrides.add(
+    value: SceneOverride {
+      nodeId: "Message"
+      componentName: "Text"
+      fieldName: "text"
+      valueString: "Buy milk"
+    }
+  )
+  overrides.add(
+    value: SceneOverride {
+      nodeId: "Remove"
+      componentName: "OnClick"
+      fieldName: "actionId"
+      valueString: "todo.delete.7"
+    }
+  )
+  ret overrides
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 393.0
+  world.layoutH = 852.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: screenScene())
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  let openButton: EntityId = nodeOf(world: world, pageId: "", nodeId: "Open")
+  log(
+    "screen button at {boxText(uiSystems: uiSystems, entityId: openButton)}, nothing presented: {presentedPageCount(
+      world: world
+    )}"
+  )
+
+  # ----- A. presented as a dialog -----
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: removeScene(presentation: "dialog"))
+    pageId: "removeTask"
+  )
+  let host: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: "removeTask"
+    overrides: overridesForTask()
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  log(
+    "presented: {presentedPageCount(world: world)}, on the dialog layer: {entityLayerOrder(
+      world: world
+      entityId: host
+    )}, host children (scrim + card): {childCount(world: world, entityId: host)}"
+  )
+  log(
+    "card {boxText(uiSystems: uiSystems, entityId: card)} (345 wide: 393 less two 24-point margins; centered)"
+  )
+  log(
+    "message: '{textOf(
+      world: world
+      entityId: nodeOf(world: world, pageId: "removeTask", nodeId: "Message")
+    )}', remove button fires: {actionOf(
+      world: world
+      entityId: nodeOf(world: world, pageId: "removeTask", nodeId: "Remove")
+    )}"
+  )
+  log(
+    "the screen's own Title is still its own: '{textOf(
+      world: world
+      entityId: nodeOf(world: world, pageId: "", nodeId: "Title")
+    )}', the card's: '{textOf(
+      world: world
+      entityId: nodeOf(world: world, pageId: "removeTask", nodeId: "Title")
+    )}'"
+  )
+  let tapOverButton: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: 100.0
+    y: 60.0
+  )
+  log("a tap over the screen's button hits: {actionOf(world: world, entityId: tapOverButton)}")
+  let removeButton: EntityId = nodeOf(world: world, pageId: "removeTask", nodeId: "Remove")
+  let removeBox: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: removeButton
+  )
+  let removePlaced: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: removeButton
+  )
+  let tapOnRemove: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: removePlaced.position.x + removeBox.size.x / 2.0
+    y: removePlaced.position.y + removeBox.size.y / 2.0
+  )
+  log("a tap on the card's Remove hits: {actionOf(world: world, entityId: tapOnRemove)}")
+  log(
+    "blocked: the screen {presentedPageBlocks(world: world, uiSystems: uiSystems, entityId: screen)}, the card {presentedPageBlocks(
+      world: world
+      uiSystems: uiSystems
+      entityId: removeButton
+    )}"
+  )
+
+  # ----- B. its button answers it -----
+  log("no action, no close: {dialogSystem(world: world, uiSystems: uiSystems)}")
+  eventSend(
+    this: world.uiActions
+    value: UiAction { entityId: removeButton, actionId: "todo.delete.7" }
+  )
+  log(
+    "the button's action closed it: {dialogSystem(world: world, uiSystems: uiSystems)}, presented: {presentedPageCount(
+      world: world
+    )}"
+  )
+  log(
+    "its nodes are gone: {isNone(this: nodeOf(world: world, pageId: "removeTask", nodeId: "Remove"))}, the screen's stay: {isNone(
+      this: nodeOf(world: world, pageId: "", nodeId: "Open")
+    ) is false}, the screen is free: {presentedPageBlocks(
+      world: world
+      uiSystems: uiSystems
+      entityId: screen
+    ) is false}"
+  )
+  frameAdvance(this: world.uiActions)
+  frameAdvance(this: world.uiActions)
+
+  # ----- C. the same scene as a page -----
+  let page: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: removeScene(presentation: "page"))
+    pageId: "removeTask"
+  )
+  let pageHost: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: page
+    pageId: "removeTask"
+    overrides: overridesForTask()
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  log(
+    "as a page: {boxText(uiSystems: uiSystems, entityId: page)}, no scrim: {childCount(
+      world: world
+      entityId: pageHost
+    ) is 1}, message '{textOf(
+      world: world
+      entityId: nodeOf(world: world, pageId: "removeTask", nodeId: "Message")
+    )}'"
+  )
+  eventSend(
+    this: world.uiActions
+    value: UiAction {
+      entityId: nodeOf(world: world, pageId: "removeTask", nodeId: "Remove")
+      actionId: "todo.delete.7"
+    }
+  )
+  log(
+    "a page stays open on its actions: {dialogSystem(world: world, uiSystems: uiSystems) is false}, presented: {presentedPageCount(
+      world: world
+    )}"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: pageHost)
+  log("closed: presented {presentedPageCount(world: world)}")
+}

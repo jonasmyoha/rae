@@ -40,6 +40,7 @@ open ui/UiSystems
 open ui/ScrollDrag
 open ui/InputKind
 open ui/ListReorder
+open ui/dialogSystem/DialogSystem
 open ecs/Query
 
 # Where each page's scroll position is when its root is not mounted: page
@@ -478,6 +479,14 @@ func updateScrollRoot(
   # A row lifted out of a list in this root (ui/listReorderSystem) has the
   # press: the content does not follow the finger, and the press stays
   # claimed (`active`), so its release clicks nothing
+  # Under a presented page (a dialog's scrim, a page over this one): the
+  # finger is not this root's
+  if presentedPageBlocks(world: world, uiSystems: uiSystems, entityId: entityId) {
+    drag.dragging = false
+    drag.active = false
+    componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
+    ret false
+  }
   if listReorderHolds(world: world, scrollRoot: entityId) {
     drag.dragging = false
     drag.active = true

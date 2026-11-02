@@ -1,0 +1,301 @@
+# dialogSystem — presenting a page over the screen, as a dialog or as a page
+# (ui/Dialog has the model). lib/app3d/UiShell's `presentPage` mounts a
+# scene and calls `presentMountedPage`; an app that mounts its own calls it
+# directly. A presented page lives on the "dialog" layer (ui/Layer; made if
+# the app has none), under a host root that fills the screen:
+#
+#   * dialog: the host holds a scrim (a full-screen dimming rectangle that
+#     takes every tap outside the card, firing DialogOptions.dismissActionId)
+#     and the page's root, centered, as wide as it may be (maxWidth, less
+#     the margins on a narrow screen) and as tall as its content;
+#   * page: the page's root fills the host.
+#
+# Either way it is modal: taps go to the topmost layer first (uiHitTest), so
+# nothing under it can be pressed, and `presentedPageBlocks` tells the
+# scroll root (and other pointer systems) to leave content under it alone.
+# `dialogSystem`, each frame with UI actions, closes a dialog whose own
+# button fired one (DialogOptions.closeOnAction), after the app has seen the
+# action. `closePresentedPage` closes one any time.
+import ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/Dialog
+open ui/Layer
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+
+const dialogLayerId: String = "dialog"
+
+const dialogLayerOrder: Int = 300
+
+# The scrim's dimming, black at this opacity (0..255)
+const dialogScrimAlpha: Int = 140
+
+func dialogOptionsOf(world: view UiWorld, pageRoot: view EntityId) ret DialogOptions {
+  if let options: DialogOptions = componentCopy(this: world.dialogOptions, entityId: pageRoot) {
+    ret options
+  }
+  ret DialogOptions { maxWidth: 360.0 }
+}
+
+# Show the mounted page `pageRoot` (its node ids under `pageId`, as
+# loadSceneIntoPage scoped them) over everything else, then set the fields
+# `overrides` name on its nodes (the text of a message, the action of a
+# button: SceneOverride, as a SceneInstance's). Returns the host, the handle
+# to close it with.
+func presentMountedPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  pageRoot: view EntityId
+  pageId: view String
+  overrides: view List(SceneOverride)
+) ret EntityId {
+  var layer: EntityId = findLayerEntity(world: world, id: dialogLayerId)
+  if isNone(this: layer) {
+    layer = createLayerEntity(world: world, id: "{dialogLayerId}", order: dialogLayerOrder)
+  }
+  var presentation: PagePresentation = PagePresentation.page
+  if componentHas(this: world.pageRoots, entityId: pageRoot) {
+    presentation = componentView(this: world.pageRoots, entityId: pageRoot).presentation
+  }
+  let options: DialogOptions = dialogOptionsOf(world: world, pageRoot: pageRoot)
+  var order: Int = 1
+  loop var i: Int = 0, i < componentCount(this: world.presentedPages), ++i {
+    let presented: view PresentedPage = queryViewAt(table: world.presentedPages, denseIndex: i)
+    if presented.order >= order {
+      order = presented.order + 1
+    }
+  }
+
+  let host: EntityId = createEntity(world: world)
+  componentSet(
+    this: world.rects
+    entityId: host
+    data: Rect {
+      position: Vec2 { x: 0.0, y: 0.0 }
+      size: Vec2 { x: world.layoutW, y: world.layoutH }
+    }
+  )
+  componentSet(
+    this: world.sizes
+    entityId: host
+    data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
+  )
+  componentSet(
+    this: world.layouts
+    entityId: host
+    data: Layout {
+      kind: LayoutType.stack
+      gap: 0.0
+      alignMain: AlignKind.center
+      alignCross: AlignKind.center
+      columns: 0
+      rowGap: 0.0
+      columnGap: 0.0
+    }
+  )
+  componentSet(this: world.layerRefs, entityId: host, data: LayerRef { layer: layer })
+
+  if presentation is PagePresentation.dialog {
+    let scrim: EntityId = createEntity(world: world)
+    componentSet(
+      this: world.rects
+      entityId: scrim
+      data: Rect {
+        position: Vec2 { x: 0.0, y: 0.0 }
+        size: Vec2 { x: world.layoutW, y: world.layoutH }
+      }
+    )
+    componentSet(
+      this: world.sizes
+      entityId: scrim
+      data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
+    )
+    var dim: Shape = defaultShape()
+    dim.kind = ShapeKind.rect
+    dim.fill = RgbaColor { r: 0, g: 0, b: 0, a: dialogScrimAlpha }
+    componentSet(this: world.shapes, entityId: scrim, data: own dim)
+    componentSet(
+      this: world.pointerEvents
+      entityId: scrim
+      data: PointerEvents { enabled: true, cursor: "default", blockChildren: false }
+    )
+    if options.dismissActionId.length() > 0 {
+      componentSet(
+        this: world.onClicks
+        entityId: scrim
+        data: OnClick { actionId: "{options.dismissActionId}", label: "{options.dismissLabel}" }
+      )
+    }
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: scrim
+      parent: host
+    )
+    # The card: as wide as it may be, as tall as its content
+    var width: Float = world.layoutW - options.margin * 2.0
+    if width > options.maxWidth {
+      width = options.maxWidth
+    }
+    var height: Float = 0.0
+    if componentHas(this: world.rects, entityId: pageRoot) {
+      height = componentView(this: world.rects, entityId: pageRoot).size.y
+    }
+    componentSet(
+      this: world.rects
+      entityId: pageRoot
+      data: Rect { position: Vec2 { x: 0.0, y: 0.0 }, size: Vec2 { x: width, y: height } }
+    )
+    componentSet(
+      this: world.sizes
+      entityId: pageRoot
+      data: Size { w: SizeAxis { mode: SizeMode.fixed }, h: SizeAxis { mode: SizeMode.hug } }
+    )
+  } else {
+    componentSet(
+      this: world.sizes
+      entityId: pageRoot
+      data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
+    )
+  }
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: pageRoot
+    parent: host
+  )
+  componentSet(
+    this: world.presentedPages
+    entityId: host
+    data: PresentedPage {
+      pageRoot: pageRoot
+      pageId: "{pageId}"
+      presentation: presentation
+      closeOnAction: options.closeOnAction and presentation is PagePresentation.dialog
+      order: order
+    }
+  )
+  loop let override: view SceneOverride in overrides {
+    if let found: Int = findNodeInPage(world: world, pageId: pageId, nodeId: override.nodeId) {
+      applyOverride(
+        world: world
+        entityId: nodeEntityId(world: world, index: found)
+        override: override
+      )
+    } else {
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: pageId
+        nodeId: override.nodeId
+        kind: SceneDiagnosticKind.unknownNode
+        name: override.nodeId
+        message: "presentPage: no node '{override.nodeId}' on page {pageId} to set {override.componentName}.{override.fieldName}"
+      )
+    }
+  }
+  ret host
+}
+
+# The topmost presented page's host, or none
+func topPresentedPage(world: view UiWorld) ret EntityId {
+  var top: EntityId = noEntity()
+  var best: Int = 0
+  loop var i: Int = 0, i < componentCount(this: world.presentedPages), ++i {
+    let presented: view PresentedPage = queryViewAt(table: world.presentedPages, denseIndex: i)
+    if presented.order > best {
+      best = presented.order
+      top = componentEntityAt(this: world.presentedPages, i: i)
+    }
+  }
+  ret top
+}
+
+# Is `entityId` inside the subtree of `ancestor` (or it)?
+func dialogInside(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  ancestor: view EntityId
+) ret Bool {
+  var current: EntityId = { index: entityId.index, generation: entityId.generation }
+  loop true {
+    if current.index is ancestor.index and current.generation is ancestor.generation {
+      ret true
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret false
+    }
+    let link: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = { index: link.parent.index, generation: link.parent.generation }
+  }
+  ret false
+}
+
+# A page is presented and `entityId` is not on it: the pointer must leave
+# it alone (it is under the scrim, or under a full-screen page)
+func presentedPageBlocks(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  let top: EntityId = topPresentedPage(world: world)
+  if isNone(this: top) {
+    ret false
+  }
+  ret dialogInside(uiSystems: uiSystems, entityId: entityId, ancestor: top) is false
+}
+
+# Close the presented page whose host is `host`: its entities go, and its
+# node ids with them
+func closePresentedPage(world: mod UiWorld, uiSystems: mod UiSystems, host: view EntityId) {
+  var pageId: String = ""
+  if let presented: PresentedPage = componentCopy(this: world.presentedPages, entityId: host) {
+    pageId = "{presented.pageId}"
+  }
+  destroyEntitySubtree(world: world, uiSystems: uiSystems, root: host)
+  if pageId.length() > 0 {
+    let prefix: String = pageScopedKey(pageId: pageId, nodeId: "")
+    let keys: List(String) = world.nodeIds.keys()
+    loop let key: view String in keys {
+      if key.startsWith(prefix: prefix) {
+        world.nodeIds.remove(k: key)
+      }
+    }
+  }
+}
+
+# Is anything presented?
+func presentedPageCount(world: view UiWorld) ret Int {
+  ret componentCount(this: world.presentedPages)
+}
+
+# Run on a frame with UI actions, after the app has read them: a dialog
+# whose own control fired one closes (DialogOptions.closeOnAction). True
+# when one closed.
+func dialogSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
+  if componentCount(this: world.presentedPages) is 0 or eventCount(this: world.uiActions) is 0 {
+    ret false
+  }
+  var closing: List(EntityId) = List.create(EntityId, cap: 1)
+  loop var i: Int = 0, i < componentCount(this: world.presentedPages), ++i {
+    let host: EntityId = componentEntityAt(this: world.presentedPages, i: i)
+    let presented: view PresentedPage = queryViewAt(table: world.presentedPages, denseIndex: i)
+    if presented.closeOnAction {
+      loop var a: Int = 0, a < eventCount(this: world.uiActions), ++a {
+        let action: UiAction = eventAt(this: world.uiActions, i: a)
+        if dialogInside(uiSystems: uiSystems, entityId: action.entityId, ancestor: host) {
+          closing.add(value: host)
+          a = eventCount(this: world.uiActions)
+        }
+      }
+    }
+  }
+  loop let host: view EntityId in closing {
+    closePresentedPage(world: world, uiSystems: uiSystems, host: host)
+  }
+  ret closing.length > 0
+}

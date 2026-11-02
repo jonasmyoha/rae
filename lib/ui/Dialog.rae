@@ -1,0 +1,30 @@
+# Dialogs are pages (ui/dialogSystem). A page's root says how it is shown,
+# `PageRoot.presentation`: "page" fills the screen, "dialog" is a card in
+# the middle over a scrim that dims what is under it. The same scene is one
+# or the other by that one field; the code that shows it (presentPage) and
+# the actions it fires are the same.
+#
+# `DialogOptions`, optional on the page's root, tunes the dialog
+# presentation (a page ignores it): how wide the card may be and how far it
+# stays from the screen's edges, the action a tap on the scrim fires ("" for
+# none: only the dialog's own buttons close it), and whether any action
+# fired inside the dialog closes it (a button that answers it, as an alert's
+# buttons do).
+type DialogOptions {
+  maxWidth: Float = 360.0
+  margin: Float = 24.0
+  dismissActionId: String = "dialog.dismiss"
+  dismissLabel: String = "Close"
+  closeOnAction: Bool = true
+}
+
+# Runtime, on the host entity presentPage makes on the dialog layer (never
+# authored): the page it shows, its node-id scope, how it is shown, and its
+# place in the stack of presented pages (the highest is on top).
+type PresentedPage {
+  pageRoot: EntityId
+  pageId: String
+  presentation: PagePresentation
+  closeOnAction: Bool
+  order: Int
+}

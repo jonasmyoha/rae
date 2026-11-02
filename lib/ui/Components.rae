@@ -458,8 +458,13 @@ type DebugAnchor {
 # Descendants belong to the page implicitly via the Parent chain —
 # walk up with `pageOf(uiSystems: uiSystems, world, entityId)` to find which page owns an
 # entity. There should be exactly one PageRoot per page subtree.
+# `presentation`: how presentPage shows it (ui/dialogSystem): full-screen,
+# or a dialog (a card over a scrim). The one field that turns one into the other.
+enum PagePresentation { page, dialog }
+
 type PageRoot {
   id: String
+  presentation: PagePresentation
 }
 
 # The ONE authored scroll component. Put it on the node that MOVES: the
