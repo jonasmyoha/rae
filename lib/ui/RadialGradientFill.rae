@@ -1,0 +1,27 @@
+# RadialGradientFill — a round gradient on a node, painted per pixel by the
+# gpu2d box shader's radial mode (Gpu2dCanvasRadial), so a soft glow (an aura,
+# the light on an orb) is one smooth fill, not rings of stacked shadows.
+# Like GradientFill it replaces the node's Shape fill, rounds with the Shape's
+# radius (a Circle: half its smaller side), else a CornerRadius, and the
+# Shape's stroke is painted over it; with a GradientFill on the same node the
+# radial one paints over the linear one.
+import ui/Components
+
+# `from` at the center, blending to `to` at `stop` of the radius, and `to`
+# beyond it. The center is a fraction of the box (0.5, 0.5 its middle); the
+# radius a fraction of the distance from the center to the box's farthest
+# corner, so CSS's `radial-gradient(circle, color 0%, transparent 62%)` is
+# `{"from": color, "to": "#00000000", "stop": 0.62}`. `from` / `to` may be
+# palette names; fromSlot / toSlot name a palette color directly (an unknown
+# name is a diagnostic and paints magenta).
+type RadialGradientFill {
+  from: RgbaColor
+  to: RgbaColor
+  # Optional live theme slots; empty keeps the literal color.
+  fromSlot: String
+  toSlot: String
+  centerX: Float = 0.5
+  centerY: Float = 0.5
+  radius: Float = 1.0
+  stop: Float = 1.0
+}

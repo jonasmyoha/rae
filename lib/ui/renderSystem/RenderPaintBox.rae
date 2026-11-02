@@ -357,6 +357,33 @@ func shapeStroke(world: view UiWorld, shape: view Shape, chain255: view Int) ret
   ret g2dChain(color: strokeBase, chain255: chain255)
 }
 
+# The box a node's fill paints in: a Circle Shape's centered square (side
+# twice its radius, the smaller side unless set), as the Shape painter draws
+# it, else the node's box. A gradient on a circle is then a circle, not a
+# stadium across a wider box.
+func g2dFillBox(world: view UiWorld, entityId: view EntityId, box: view PaintBox) ret PaintBox {
+  if componentHas(this: world.shapes, entityId: entityId) {
+    let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+    if shape.kind is ShapeKind.circle {
+      let radius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
+      ret PaintBox {
+        x: box.x + box.w / 2.0 - radius
+        y: box.y + box.h / 2.0 - radius
+        w: radius * 2.0
+        h: radius * 2.0
+        scale: box.scale
+      }
+    }
+  }
+  ret PaintBox {
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    scale: box.scale
+  }
+}
+
 # The corner radius a node's fill paints with, in the painted box's units
 # (`box.scale` applied): its Shape's own radius when it has one (a circle's is
 # half its smaller side unless set), else its CornerRadius, else square. A

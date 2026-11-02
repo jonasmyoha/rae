@@ -84,6 +84,13 @@ func widgetOverride(name: view String) ret WidgetSpec {
     spec.min = 0.0
     spec.max = 1.0
   }
+  if name is "RadialGradientFill" {
+    # The center, radius and stop are fractions of the box
+    spec.step = 0.05
+    spec.hasRange = true
+    spec.min = 0.0
+    spec.max = 1.0
+  }
   if name is "ScrollState" or name is "ScrollDrag" or name is "ListViewRowKey" {
     # Runtime state a system writes every frame; showing it invites edits
     # that are overwritten before the next paint.

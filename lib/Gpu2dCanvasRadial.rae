@@ -1,0 +1,61 @@
+# Gpu2dCanvasRadial — a radial gradient on the 2D canvas: one box primitive in
+# the box shader's radial mode (gpu2d_box.wgsl, mode 3), painted per pixel, so
+# a soft round glow is one smooth fill and not stacked rings. Split out of
+# Gpu2dCanvas for the 1000-line cap, like Gpu2dCanvasArc.
+open Gpu2dCanvas
+
+# A rounded rect (all four corners `radius`) filled with a radial gradient:
+# `from` (0xAARRGGBB) at (centerX, centerY), each a fraction of the box (0.5,
+# 0.5 its middle), blending to `to` at `reach` times the distance from that
+# center to the box's farthest corner times `stop`, and `to` beyond. CSS's
+# `radial-gradient(circle, a 0%, b 62%)` is reach 1, stop 0.62.
+func canvasDrawRadialGradientRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  from: copy Int
+  to: copy Int
+  centerX: copy Float
+  centerY: copy Float
+  reach: copy Float
+  stop: copy Float
+) {
+  if w <= 0.0 or h <= 0.0 {
+    ret
+  }
+  # The canvas rotation (#1003): the box's center turns about the pivot and
+  # the quad itself turns by the same angle in the shader, as a box's
+  var boxX: Float = x
+  var boxY: Float = y
+  var angle: Float = 0.0
+  if canvas.spinAngle is not 0.0 {
+    let center: SpinPoint = spinPoint(canvas: canvas, x: x + w / 2.0, y: y + h / 2.0)
+    boxX = center.x - w / 2.0
+    boxY = center.y - h / 2.0
+    angle = canvas.spinAngle
+  }
+  canvas.prims.add(value: boxX)
+  canvas.prims.add(value: boxY)
+  canvas.prims.add(value: w)
+  canvas.prims.add(value: h)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  pushPremultiplied(canvas: canvas, color: from)
+  # The border slot carries the gradient's shape: no border on this box
+  canvas.prims.add(value: centerX)
+  canvas.prims.add(value: centerY)
+  canvas.prims.add(value: reach)
+  canvas.prims.add(value: stop)
+  canvas.prims.add(value: 0.0)
+  canvas.prims.add(value: angle)
+  # Mode 3: a radial gradient
+  canvas.prims.add(value: 3.0)
+  canvas.prims.add(value: 0.0)
+  pushPremultiplied(canvas: canvas, color: to)
+  canvas.primClips.add(value: canvas.currentClip)
+}

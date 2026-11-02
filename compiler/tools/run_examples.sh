@@ -217,7 +217,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # shapes: one file with everything inline, and a page importing
           # `split/Theme` + `split/Assets` by package path from the samples
           # root (the scene root is passed explicitly, as `--scene-root` would).
-          for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page; do
+          for SAMPLE in MainMenu Settings CardStrip Coverage SelfContained split/Page Glow; do
             NAME="$(basename "$SAMPLE")"
             SCREENSHOT="$TMP_OUT/ui-editor-$NAME.bmp"
             # Coverage animates (#1005): an exact frame at a fixed step keeps
@@ -1067,7 +1067,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (7 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, hover leak, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (8 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, hover leak, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"
