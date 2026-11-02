@@ -412,6 +412,7 @@ A virtual `ListView` (the default mode) whose node also carries
 | `edgePoints` | `64` | the band at each end of the scroll window where a held row scrolls the list, faster closer to the edge |
 | `liftScale` | `1.03` | the lifted row's size, as a multiple of its own |
 | `liftShadow` | `true` | a soft drop shadow under the lifted row, growing with the lift (a row root with a `Shadow` of its own keeps it) |
+| `haptics` | `true` | the phone's ticks (lib/Haptics): a light impact when the row lifts and a selection tick each time the gap moves to another index; the generators are warmed at the press, so neither lags. Nothing to feel off iOS; a headless run logs `[haptics] ...` lines instead |
 
 The gesture is the one phones use. A press that stays still for `holdMs`
 lifts the row: it grows to `liftScale`, casts a shadow, is painted over its
