@@ -1,0 +1,112 @@
+# A GradientFill on a shaped node (lib/ui/renderSystem paintGradientG; found
+# 2026-11-02 on SUMU's primaryButton): (1) the gradient rounds by the node's
+# Shape radius, not only a CornerRadius; (2) the fill is painted first and the
+# Shape's stroke over it, so a gradient button keeps its edge; (3) a palette
+# name in fromSlot / toSlot resolves (a built-in one and one of the scene's
+# own theme), and a name that is no color is reported. Each box queued on the
+# canvas is boxPrimFloats floats: x y w h, four radii, fill rgba, border
+# rgba, border width, angle, gradient flag, ...
+open Gpu2dCanvas
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/renderSystem/RenderFills
+open ecs/Entity
+open ecs/Transform
+open ui/Components
+
+func gradientScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",")
+  s = s.concat(
+    other: "\"palette\":\{\"buttonFrom\":\{\"r\":40,\"g\":200,\"b\":160,\"a\":255\}\},\"nodes\":\{"
+  )
+  s = s.concat(other: "\"Row\":\{\"Children\":[\"Button\",\"Squared\",\"Named\",\"Unknown\"]\},")
+  s = s.concat(
+    other: "\"Button\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":12,\"fill\":\"#00000000\",\"stroke\":\"#3366FFFF\",\"strokeWidth\":1.2\},"
+  )
+  s = s.concat(
+    other: "\"GradientFill\":\{\"fromSlot\":\"buttonFrom\",\"toSlot\":\"accent\",\"angle\":0\}\},"
+  )
+  s = s.concat(
+    other: "\"Squared\":\{\"CornerRadius\":\{\"radius\":6\},\"GradientFill\":\{\"from\":\"#FF0000FF\",\"to\":\"#0000FFFF\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Named\":\{\"GradientFill\":\{\"from\":\"buttonFrom\",\"to\":\"surface\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Unknown\":\{\"GradientFill\":\{\"fromSlot\":\"noSuchColor\",\"toSlot\":\"accent\"\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func prim(canvas: view Gpu2dCanvas, box: view Int, field: view Int) ret Float {
+  ret canvas.prims.copyAtDefault(index: box * boxPrimFloats + field)
+}
+
+func channel(value: view Float) ret Int {
+  ret (value * 255.0 + 0.5) as Int
+}
+
+# Paint the node as a 120x40 box and print what it queued
+func paintNode(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    let wt: WorldTransform2D = {
+      position: { x: 0.0, y: 0.0 }
+      rotation: 0.0
+      scale: { x: 1.0, y: 1.0 }
+    }
+    let cr: ComputedRect = { position: { x: 0.0, y: 0.0 }, size: { x: 120.0, y: 40.0 } }
+    paintGradientG(
+      world: world
+      uiSystems: uiSystems
+      entityId: id(v: raw)
+      wt: wt
+      cr: cr
+      chain255: 255
+      canvas: canvas
+    )
+  }
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  log("{nodeId}: {boxes} box(es)")
+  loop var i: Int = 0, i < boxes, ++i {
+    let gradient: Bool = prim(canvas: canvas, box: i, field: 18) > 0.5
+    var line: String = "  {i}: "
+    if gradient {
+      line = "{line}gradient, from rgb {channel(value: prim(canvas: canvas, box: i, field: 8))} {channel(
+        value: prim(canvas: canvas, box: i, field: 9)
+      )} {channel(value: prim(canvas: canvas, box: i, field: 10))}"
+    } else {
+      line = "{line}box, fill alpha {prim(canvas: canvas, box: i, field: 11)}, border width {prim(
+        canvas: canvas
+        box: i
+        field: 16
+      )}"
+    }
+    log("{line}, radius {prim(canvas: canvas, box: i, field: 4)}")
+  }
+}
+
+func main() {
+  var scene: Scene = parseScene(source: gradientScene())
+  scene.sceneId = "gradients"
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var tokens: ResolvedTheme = createResolvedTheme()
+  parseThemeInto(out: tokens, scene: scene)
+  applyResolvedTokens(dst: world.theme.resolved, src: tokens)
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted = {rootEntityId.index >= 0}")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Button")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Squared")
+  paintNode(world: world, uiSystems: uiSystems, nodeId: "Named")
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("diagnostic {diagnostic.kind} {diagnostic.nodeId}: {diagnostic.message}")
+  }
+}

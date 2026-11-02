@@ -10,6 +10,8 @@ open ecs/Entity
 open Gpu2dCanvas
 open ui/UiSystems
 open ui/buttonSystem/ButtonHoverFade
+import ui/Theme
+import ui/ThemeResolved
 
 func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
@@ -343,4 +345,37 @@ func paintDashedEdges(
       color: color
     )
   }
+}
+
+# A Shape's stroke color: its palette slot from the ACTIVE theme (#235) or
+# its literal, through the opacity chain
+func shapeStroke(world: view UiWorld, shape: view Shape, chain255: view Int) ret RgbaColor {
+  var strokeBase: RgbaColor = shape.stroke
+  if shape.strokeSlot.length() > 0 {
+    strokeBase = uiThemeColor(theme: world.theme, name: shape.strokeSlot)
+  }
+  ret g2dChain(color: strokeBase, chain255: chain255)
+}
+
+# The corner radius a node's fill paints with, in the painted box's units
+# (`box.scale` applied): its Shape's own radius when it has one (a circle's is
+# half its smaller side unless set), else its CornerRadius, else square. A
+# GradientFill on a rounded button follows the button's Shape, written once.
+func g2dFillRadius(world: view UiWorld, entityId: view EntityId, box: view PaintBox) ret Float {
+  if componentHas(this: world.shapes, entityId: entityId) {
+    let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+    if shape.kind is ShapeKind.circle {
+      if shape.radius > 0.0 {
+        ret shape.radius * box.scale
+      }
+      if box.h < box.w {
+        ret box.h / 2.0
+      }
+      ret box.w / 2.0
+    }
+    if shape.radius > 0.0 {
+      ret shape.radius * box.scale
+    }
+  }
+  ret g2dRadius(world: world, entityId: entityId, fallback: 0.0) * box.scale
 }

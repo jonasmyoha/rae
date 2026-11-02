@@ -156,6 +156,34 @@ func slotNameOf(doc: view JsonDoc, val: view JsonValue, key: view String) ret St
   ret name
 }
 
+# A palette slot named by a component field: an unknownToken diagnostic when
+# it is not empty and no color of the theme has that name
+func reportUnknownColorSlot(
+  world: mod UiWorld
+  slot: view String
+  field: view String
+  sceneId: view String
+  nodeId: view String
+) {
+  if slot.length() is 0 or slot.startsWith(prefix: "#") {
+    ret
+  }
+  if Theme.colorByNameOpt(theme: world.theme.active, name: slot) is not none {
+    ret
+  }
+  if themePaletteIndex(theme: world.theme.resolved, slot: slot) is not none {
+    ret
+  }
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+    kind: SceneDiagnosticKind.unknownToken
+    name: slot
+    message: "GradientFill.{field}: no palette color named {slot}; that end of the gradient renders magenta"
+  )
+}
+
 func applyComponentByName(
   world: mod UiWorld
   entityId: view EntityId
@@ -535,9 +563,34 @@ func applyAuthoredFixups(
     ret
   }
   if name is "GradientFill" {
+    # A palette name in `from` / `to` becomes the slot (its color was decoded
+    # and checked already). An authored `fromSlot` / `toSlot` is kept, and a
+    # name in it that is no palette color is reported: it paints transparent.
     let gradient: mod GradientFill = componentMod(this: world.gradientFills, entityId: entityId)
-    gradient.fromSlot = slotNameOf(doc: doc, val: val, key: "from")
-    gradient.toSlot = slotNameOf(doc: doc, val: val, key: "to")
+    let fromName: String = slotNameOf(doc: doc, val: val, key: "from")
+    if fromName.length() > 0 {
+      gradient.fromSlot = fromName
+    } else {
+      reportUnknownColorSlot(
+        world: world
+        slot: gradient.fromSlot
+        field: "fromSlot"
+        sceneId: sceneId
+        nodeId: nodeId
+      )
+    }
+    let toName: String = slotNameOf(doc: doc, val: val, key: "to")
+    if toName.length() > 0 {
+      gradient.toSlot = toName
+    } else {
+      reportUnknownColorSlot(
+        world: world
+        slot: gradient.toSlot
+        field: "toSlot"
+        sceneId: sceneId
+        nodeId: nodeId
+      )
+    }
     ret
   }
   if name is "Text" {

@@ -23,14 +23,14 @@ func paintGradientG(
   canvas: mod Gpu2dCanvas
 ) {
   let gf: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
-  let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
   let box: PaintBox = g2dPaintBox(
     world: world
     entityId: entityId
     wt: wt
     cr: cr
   )
-  let hoverMul: Float = box.scale
+  # the corners of the node's Shape (or its CornerRadius), already scaled
+  let fillRadius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
   let drawW: Float = box.w
   let drawH: Float = box.h
   let drawX: Float = box.x
@@ -51,7 +51,7 @@ func paintGradientG(
       uiSystems: uiSystems
       entityId: entityId
       box: box
-      radius: radius * hoverMul
+      radius: fillRadius
       chain255: chain255
       canvas: canvas
     )
@@ -62,10 +62,66 @@ func paintGradientG(
     y: drawY
     w: drawW
     h: drawH
-    radius: radius * hoverMul
+    radius: fillRadius
     from: g2dColor(color: from)
     to: g2dColor(color: to)
     angleDeg: gf.angle
+  )
+  # The fill first, then the node's Shape stroke over it: a gradient button
+  # keeps its edge.
+  paintShapeStrokeG(
+    world: world
+    entityId: entityId
+    box: box
+    radius: fillRadius
+    chain255: chain255
+    canvas: canvas
+  )
+}
+
+# Only the stroke of a node's Shape (no fill), at `radius`: what a GradientFill
+# paints after itself. Nothing when the node has no Shape or no stroke.
+func paintShapeStrokeG(
+  world: view UiWorld
+  entityId: view EntityId
+  box: view PaintBox
+  radius: view Float
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  if not componentHas(this: world.shapes, entityId: entityId) {
+    ret
+  }
+  let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+  if shape.strokeWidth <= 0.0 {
+    ret
+  }
+  let stroke: RgbaColor = shapeStroke(world: world, shape: shape, chain255: chain255)
+  if shape.strokeDash > 0.0 and shape.kind is not ShapeKind.circle {
+    paintDashedEdges(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      width: shape.strokeWidth
+      dash: shape.strokeDash
+      gap: shape.strokeGap
+      color: g2dColor(color: stroke)
+    )
+    ret
+  }
+  # the gradient's own box, so the edge lies on the fill
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    fill: 0
+    borderWidth: shape.strokeWidth
+    border: g2dColor(color: stroke)
   )
 }
 
