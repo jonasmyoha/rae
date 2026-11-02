@@ -20,6 +20,7 @@
 # is near an end of its window.
 import ui/Components
 import Math
+import Haptics
 open ui/Ecs
 open ui/UiSystems
 open ui/ListReorder
@@ -288,6 +289,12 @@ func listReorderStep(
           drag.pressX = pointer.x
           drag.pressY = pointer.y
           drag.pressSec = nowSec
+          if reorder.haptics {
+            # warm the Taptic Engine now, so the lift and the first tick
+            # have no lag
+            let impactReady: Bool = Haptics.hapticPrepareImpact(style: HapticImpact.light)
+            let tickReady: Bool = Haptics.hapticPrepareSelection()
+          }
           drag.scrollRoot = listReorderScrollRoot(
             world: world
             uiSystems: uiSystems
@@ -313,6 +320,9 @@ func listReorderStep(
         drag.shifts.add(value: 0.0)
       }
       input.pressedEntityId = noEntity()
+      if reorder.haptics {
+        let lifted: Bool = Haptics.hapticImpact(style: HapticImpact.light)
+      }
     } else if movedX > reorderSlopPoints or movedY > reorderSlopPoints {
       drag.phase = ListReorderPhase.idle
     }
@@ -374,7 +384,12 @@ func listReorderStep(
       rowY = lastY
     }
     drag.rowY = rowY
+    let gapBefore: Int = drag.toIndex
     drag.toIndex = reorderTargetIndex(rowY: rowY, pitch: pitch, count: count)
+    if reorder.haptics and drag.toIndex is not gapBefore {
+      # the gap moved to another index: a tick, as a picker's step
+      let ticked: Bool = Haptics.hapticSelection()
+    }
     drag.lift = reorderEase(
       current: drag.lift
       target: 1.0

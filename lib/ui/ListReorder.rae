@@ -17,7 +17,9 @@
 # their old places when it does not. A press that moves before the hold is a
 # scroll or a tap as before. With `handleNodeId` (a node of the row scene, a
 # grip) a press on that node lifts the row at once and a press anywhere else
-# never lifts it.
+# never lifts it. With `haptics` (on by default) the phone ticks as its own
+# lists do (lib/Haptics): a light impact when the row lifts, a selection tick
+# each time the gap moves to another index.
 type ListReorder {
   actionId: String
   # What the gesture does in words, sentence case ("Move task"): what a
@@ -32,6 +34,7 @@ type ListReorder {
   # A soft drop shadow under the lifted row (when its root has no Shadow of
   # its own), growing with the lift
   liftShadow: Bool = true
+  haptics: Bool = true
 }
 
 enum ListReorderPhase { idle, pressing, lifted, settling }

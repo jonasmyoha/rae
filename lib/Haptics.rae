@@ -1,0 +1,147 @@
+# Haptics — a tap felt in the hand, as iOS controls give one: an impact (a
+# row lifting, a switch snapping), a selection tick (a picker or a reordered
+# row passing a step) and a notification (success, warning, error).
+#
+#     hapticImpact(style: HapticImpact.light)
+#     hapticSelection()
+#     hapticNotify(kind: HapticNotification.success)
+#
+# On iOS each plays through UIKit's feedback generators and then prepares
+# the generator again, so the next one plays without the Taptic Engine's
+# warm-up lag; `hapticPrepare` warms one ahead (a press that may become a
+# drag). Each answers true when it played. Elsewhere (the Mac, the web) there
+# is nothing to feel: it answers false. In a headless run (RAE_UI_HEADLESS,
+# RAE_SDL_HEADLESS_MS or RAE_HEADLESS_FRAMES set, as for the window) it
+# answers false and logs `[haptics] <what>`, so a test sees each call.
+#
+# The C side (runtime_haptics_apple.h) is one UIKit call per function.
+import Sys
+cheader "runtime_haptics_apple.h"
+
+const hasHaptics: Bool = Target.os is Os.ios
+
+enum HapticImpact { light, medium, heavy }
+
+enum HapticNotification { success, warning, error }
+
+when hasHaptics {
+  func rae_ext_Haptics_prepare(slot: Int) unsafe extern("rae_ext_Haptics_prepare") ret Int
+
+  func rae_ext_Haptics_impact(style: Int) unsafe extern("rae_ext_Haptics_impact") ret Int
+
+  func rae_ext_Haptics_selection() unsafe extern("rae_ext_Haptics_selection") ret Int
+
+  func rae_ext_Haptics_notify(kind: Int) unsafe extern("rae_ext_Haptics_notify") ret Int
+}
+
+# The generator slots of the C side: the three impacts, selection, notification
+const hapticSelectionSlot: Int = 3
+
+const hapticNotificationSlot: Int = 4
+
+# A headless run, by the window's own definition (lib/Gpu2d headlessRequested)
+func hapticsHeadless() ret Bool {
+  ret Sys.getEnv(name: "RAE_UI_HEADLESS").length() > 0 or Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
+}
+
+func hapticImpactSlot(style: view HapticImpact) ret Int {
+  if style is HapticImpact.medium {
+    ret 1
+  }
+  if style is HapticImpact.heavy {
+    ret 2
+  }
+  ret 0
+}
+
+func hapticNotificationKind(kind: view HapticNotification) ret Int {
+  if kind is HapticNotification.warning {
+    ret 1
+  }
+  if kind is HapticNotification.error {
+    ret 2
+  }
+  ret 0
+}
+
+# An impact of `style`; true when it played
+func hapticImpact(style: view HapticImpact) ret Bool {
+  if hapticsHeadless() {
+    log("[haptics] impact {style}")
+    ret false
+  }
+  when hasHaptics {
+    unsafe {
+      let played: Bool = rae_ext_Haptics_impact(style: hapticImpactSlot(style: style)) is 1
+      let ready: Int = rae_ext_Haptics_prepare(slot: hapticImpactSlot(style: style))
+      ret played
+    }
+  } else {
+    ret false
+  }
+}
+
+# The tick of a selection that moved one step; true when it played
+func hapticSelection() ret Bool {
+  if hapticsHeadless() {
+    log("[haptics] selection")
+    ret false
+  }
+  when hasHaptics {
+    unsafe {
+      let played: Bool = rae_ext_Haptics_selection() is 1
+      let ready: Int = rae_ext_Haptics_prepare(slot: hapticSelectionSlot)
+      ret played
+    }
+  } else {
+    ret false
+  }
+}
+
+# A notification of `kind`; true when it played
+func hapticNotify(kind: view HapticNotification) ret Bool {
+  if hapticsHeadless() {
+    log("[haptics] notify {kind}")
+    ret false
+  }
+  when hasHaptics {
+    unsafe {
+      let played: Bool = rae_ext_Haptics_notify(kind: hapticNotificationKind(kind: kind)) is 1
+      let ready: Int = rae_ext_Haptics_prepare(slot: hapticNotificationSlot)
+      ret played
+    }
+  } else {
+    ret false
+  }
+}
+
+# Warm the selection generator ahead of its first tick (a press that may
+# become a drag); true when there is one to warm. Silent in a headless run.
+func hapticPrepareSelection() ret Bool {
+  if hapticsHeadless() {
+    ret false
+  }
+  when hasHaptics {
+    unsafe {
+      ret rae_ext_Haptics_prepare(slot: hapticSelectionSlot) is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# Warm the impact generator of `style` ahead of its first impact
+func hapticPrepareImpact(style: view HapticImpact) ret Bool {
+  if hapticsHeadless() {
+    ret false
+  }
+  when hasHaptics {
+    unsafe {
+      ret rae_ext_Haptics_prepare(slot: hapticImpactSlot(style: style)) is 1
+    }
+  } else {
+    ret false
+  }
+}

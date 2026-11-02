@@ -1,0 +1,196 @@
+# Haptics (lib/Haptics) in a headless run, and the ticks of a drag to reorder
+# (ui/listReorderSystem). Headless (RAE_UI_HEADLESS set, as by a capture) a
+# call answers false and logs `[haptics] <what>`, so the order of the calls is
+# visible: a reorderable list gives a light impact when the row lifts after
+# the hold and a selection tick each time the gap moves to another index (row
+# 2 dragged over rows 3, 4 and 5: three ticks), and nothing at the drop.
+# `haptics: false` on the list gives none.
+import Sys
+import ui/Components
+open Haptics
+open ui/Ecs
+open ui/ListReorder
+open ui/listViewSystem/ListViewSystem
+open ui/listReorderSystem/ListReorderSystem
+open ui/inputSystem/InputSystem
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+const rowCount: Int = 10
+
+const rowHeight: Float = 36.0
+
+const rowGap: Float = 4.0
+
+const listTop: Float = 100.0
+
+func makeRow(label: own String) ret ListViewRow {
+  var keys: List(String) = List.create(String, cap: 1)
+  keys.add(value: "label")
+  var values: List(String) = List.create(String, cap: 1)
+  values.add(value: own label)
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+func makeListView() ret ListView {
+  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 1)
+  bindings.add(value: ListViewBinding {
+    nodeId: "Label"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "label"
+    prefix: ""
+    suffix: ""
+  })
+  ret ListView {
+    itemSceneId: ""
+    itemKeyField: ""
+    itemHeight: rowHeight
+    itemGap: rowGap
+    visibleItemCount: 10
+    overscanRows: 2
+    bindings: own bindings
+    loadingSceneId: ""
+    emptySceneId: ""
+    errorSceneId: ""
+    mode: ListViewMode.virtual
+    rowKindField: ""
+    rowScenes: List.create(ListViewRowScene, cap: 0)
+    itemWidth: 0.0
+    fitToColumns: false
+  }
+}
+
+func rowMiddle(index: view Int) ret Float {
+  ret listTop + index.toFloat() * (rowHeight + rowGap) + rowHeight * 0.5
+}
+
+func setPointer(
+  input: mod UiInput
+  y: view Float
+  pressed: view Bool
+  down: view Bool
+) {
+  input.pointer.x = 50.0
+  input.pointer.y = y
+  input.pointer.pressed = pressed
+  input.pointer.down = down
+  input.pointer.released = pressed is false and down is false
+}
+
+# A list of ten rows; `haptics` as authored
+func makeReorderList(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  haptics: view Bool
+) ret EntityId {
+  let listEntity: EntityId = createEntity(world: world)
+  componentSet(this: world.listViews, entityId: listEntity, data: makeListView())
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: rowCount)
+  loop var i: Int = 0, i < rowCount, ++i {
+    rows.add(value: makeRow(label: "Row {i}"))
+  }
+  componentSet(
+    this: world.listViewDatas
+    entityId: listEntity
+    data: ListViewData { rows: own rows }
+  )
+  componentSet(
+    this: world.listReorders
+    entityId: listEntity
+    data: ListReorder { actionId: "move", label: "Move row", haptics: haptics }
+  )
+  componentSet(
+    this: uiSystems.layout.computedRects
+    entityId: listEntity
+    data: ComputedRect { position: Vec2 { x: 0.0, y: 0.0 }, size: Vec2 { x: 300.0, y: 400.0 } }
+  )
+  componentSet(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: listEntity
+    data: WorldTransform2D {
+      position: Vec2 { x: 0.0, y: listTop }
+      rotation: 0.0
+      scale: Vec2 { x: 1.0, y: 1.0 }
+    }
+  )
+  ret listEntity
+}
+
+# Hold row 2, drag it down three rows, drop it
+func dragRow(label: view String, haptics: view Bool) {
+  log("{label}:")
+  let scenes: SceneRegistry = createSceneRegistry()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let listEntity: EntityId = makeReorderList(world: world, uiSystems: uiSystems, haptics: haptics)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  var input: UiInput = createUiInput()
+  setPointer(
+    input: input
+    y: rowMiddle(index: 2)
+    pressed: true
+    down: true
+  )
+  input.pressedEntityId = listEntity
+  var moving: Bool = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 10.0
+  )
+  setPointer(
+    input: input
+    y: rowMiddle(index: 2)
+    pressed: false
+    down: true
+  )
+  log("  held 0.4 s")
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 10.4
+  )
+  log("  dragged down three rows")
+  loop var frame: Int = 1, frame <= 20, ++frame {
+    setPointer(
+      input: input
+      y: rowMiddle(index: 2) + 120.0 * frame.toFloat() / 20.0
+      pressed: false
+      down: true
+    )
+    moving = listReorderSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      nowSec: (10.4 + frame.toFloat() / 60.0) as Float64
+    )
+  }
+  log("  dropped")
+  setPointer(
+    input: input
+    y: rowMiddle(index: 5)
+    pressed: false
+    down: false
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 10.8
+  )
+}
+
+func main() {
+  log("not headless: impact played {hapticImpact(style: HapticImpact.light)}")
+  let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
+  log("headless: impact played {hapticImpact(style: HapticImpact.heavy)}")
+  log("selection played {hapticSelection()}")
+  log("notify played {hapticNotify(kind: HapticNotification.success)}")
+  log("prepare {hapticPrepareSelection()}")
+  dragRow(label: "a reorderable list", haptics: true)
+  dragRow(label: "with haptics off", haptics: false)
+}
