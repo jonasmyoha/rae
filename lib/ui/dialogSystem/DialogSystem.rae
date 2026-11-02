@@ -102,6 +102,8 @@ func presentMountedPage(
   )
   componentSet(this: world.layerRefs, entityId: host, data: LayerRef { layer: layer })
 
+  # The dialog's slot (none for a page)
+  var slot: EntityId = noEntity()
   if presentation is PagePresentation.dialog {
     let scrim: EntityId = createEntity(world: world)
     componentSet(
@@ -142,7 +144,7 @@ func presentMountedPage(
     # The slot the card sits in: the whole screen, its content in the
     # middle, or at the bottom above the safe area. It is not clickable, so
     # a tap beside the card still lands on the scrim.
-    let slot: EntityId = createEntity(world: world)
+    slot = createEntity(world: world)
     componentSet(
       this: world.rects
       entityId: slot
@@ -157,8 +159,10 @@ func presentMountedPage(
       data: Size { w: SizeAxis { mode: SizeMode.fill }, h: SizeAxis { mode: SizeMode.fill } }
     )
     var along: AlignKind = AlignKind.center
-    if options.placement is DialogPlacement.bottom {
-      along = AlignKind.end
+    if options.placement is not DialogPlacement.center {
+      if options.placement is DialogPlacement.bottom {
+        along = AlignKind.end
+      }
       componentSet(
         this: world.paddings
         entityId: slot
@@ -240,6 +244,10 @@ func presentMountedPage(
       presentation: presentation
       closeOnAction: options.closeOnAction and presentation is PagePresentation.dialog
       order: order
+      placement: options.placement
+      at: options.at
+      margin: options.margin
+      slot: slot
     }
   )
   loop let override: view SceneOverride in overrides {
@@ -360,4 +368,73 @@ func dialogSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
     closePresentedPage(world: world, uiSystems: uiSystems, host: host)
   }
   ret closing.length > 0
+}
+
+# Run after layout: a dialog placed `at` a fraction of the screen's height
+# gets its card's middle there, kept between the margins inside the safe
+# area (its slot's box less its padding and safe insets), by a runtime
+# offset (no relayout). Needs no window: the slot's laid-out box and its
+# safe insets say where the screen is. True when a card moved (run the
+# transform pass again).
+func dialogPlaceSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
+  var moved: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.presentedPages), ++i {
+    let presented: PresentedPage = componentCopyAtDefault(this: world.presentedPages, i: i)
+    if presented.placement is DialogPlacement.at and presented.presentation is PagePresentation.dialog {
+      if dialogPlaceCard(world: world, uiSystems: uiSystems, presented: presented) {
+        moved = true
+      }
+    }
+  }
+  ret moved
+}
+
+func dialogPlaceCard(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  presented: view PresentedPage
+) ret Bool {
+  let slot: EntityId = presented.slot
+  let card: EntityId = presented.pageRoot
+  if componentHas(this: uiSystems.layout.computedRects, entityId: slot) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: card
+  ) is false {
+    ret false
+  }
+  let slotBox: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: slot
+  )
+  let cardHeight: Float = componentView(this: uiSystems.layout.computedRects, entityId: card).size.y
+  var safeTop: Float = 0.0
+  var safeBottom: Float = 0.0
+  if componentHas(this: uiSystems.safeArea.safeInsets, entityId: slot) {
+    let insets: view SafeInsets = componentView(this: uiSystems.safeArea.safeInsets, entityId: slot)
+    safeTop = insets.insets.t
+    safeBottom = insets.insets.b
+  }
+  # The region the card may use, and where centering put it
+  let top: Float = slotBox.position.y + presented.margin + safeTop
+  let bottom: Float = slotBox.position.y + slotBox.size.y - presented.margin - safeBottom
+  let centered: Float = (top + bottom) * 0.5
+  var wanted: Float = slotBox.position.y + slotBox.size.y * presented.at
+  if wanted + cardHeight * 0.5 > bottom {
+    wanted = bottom - cardHeight * 0.5
+  }
+  if wanted - cardHeight * 0.5 < top {
+    wanted = top + cardHeight * 0.5
+  }
+  let offset: Float = wanted - centered
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: card) {
+    if componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: card).delta.y is offset {
+      ret false
+    }
+  }
+  componentSet(
+    this: uiSystems.transform2d.runtimeOffsets
+    entityId: card
+    data: RuntimeOffset { delta: Vec2 { x: 0.0, y: offset } }
+  )
+  ret true
 }

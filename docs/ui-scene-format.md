@@ -460,10 +460,15 @@ text of a message, the action of a button. It returns the host, the handle
 - **dialog**: a scrim dims the whole screen and takes every tap outside the
   card (it fires `DialogOptions.dismissActionId`, `"dialog.dismiss"` by
   default; `""` for none). The card is the page's root, in the middle of the
-  screen or, with `"placement": "bottom"`, at its bottom (`margin` above the
-  safe area: where a thumb reaches), as wide as `maxWidth` (360) allows less
-  `margin` (24) on each side, and as tall as its content. Its look is the
-  scene's own (a bundle such as a card's Shape).
+  screen; with `"placement": "bottom"`, at its bottom (`margin` above the
+  safe area); or with `"placement": "at", "at": 0.67`, its middle at that
+  fraction of the screen's height (two thirds down: where a thumb reaches
+  well, and lower down on a taller phone), kept inside the safe area and the
+  margins. It is as wide as `maxWidth` (360) allows less `margin` (24) on
+  each side, and as tall as its content. Its look is the scene's own (a
+  bundle such as a card's Shape). An `at` card is moved after layout by
+  `dialogPlaceSystem(world, uiSystems)` (presentPage runs it; an app runs it
+  after its own layout pass, so a resized window keeps it in place).
 - **page**: the page's root fills the screen, over everything, with no scrim.
 
 Either way it is modal: taps reach the topmost layer first, and

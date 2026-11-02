@@ -11,12 +11,16 @@
 # none: only the dialog's own buttons close it), and whether any action
 # fired inside the dialog closes it (a button that answers it, as an alert's
 # buttons do).
-enum DialogPlacement { center, bottom }
+enum DialogPlacement { center, bottom, at }
 
 type DialogOptions {
-  # Where the card sits: the middle of the screen, or its bottom, a margin
-  # above the safe area's bottom (where a thumb reaches)
+  # Where the card sits: the middle of the screen; its bottom, a margin
+  # above the safe area's bottom; or `at`: its middle at that fraction of
+  # the screen's height from the top (0.67: two thirds down, where a thumb
+  # reaches well; on a taller phone that is lower down), kept inside the
+  # safe area and the margins (dialogPlaceSystem, after layout)
   placement: DialogPlacement
+  at: Float = 0.5
   maxWidth: Float = 360.0
   margin: Float = 24.0
   dismissActionId: String = "dialog.dismiss"
@@ -29,6 +33,12 @@ type DialogOptions {
 # place in the stack of presented pages (the highest is on top).
 type PresentedPage {
   pageRoot: EntityId
+  # The card's placement (a dialog's): `at` cards are moved by
+  # dialogPlaceSystem
+  placement: DialogPlacement
+  at: Float
+  margin: Float
+  slot: EntityId
   pageId: String
   presentation: PagePresentation
   closeOnAction: Bool
