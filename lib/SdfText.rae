@@ -58,6 +58,8 @@ type SdfGlyph {
 }
 
 type SdfFont {
+  # The runtime atlas handle (1-based); 0 = the atlas did not load, and text in
+  # this font draws nothing (loadSdfFont logs the path when that happens).
   atlas: Int
   atlasWidth: Float
   atlasHeight: Float
@@ -66,6 +68,9 @@ type SdfFont {
   lineHeight: Float
   ascender: Float
   glyphs: List(SdfGlyph)
+  # The JSON sidecar this font was loaded from ("" for none): a scene mount
+  # that names the font already in use keeps it instead of loading it again.
+  jsonPath: String
 }
 
 type SdfTextBounds {
@@ -152,6 +157,20 @@ func loadSdfFontJson(jsonPath: view String) ret SdfFont {
 # atlas.width*atlas.height*4 bytes, or the <name>.mtsdf.png it was dumped from
 # (#1008) — the runtime decodes a PNG by its magic bytes.
 func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
+  if not exists(path: jsonPath) {
+    log("[sdf] error: no font file {jsonPath}; text in this font will not draw")
+    ret SdfFont {
+      atlas: 0
+      atlasWidth: 0.0
+      atlasHeight: 0.0
+      pxRange: 4.0
+      emSize: 1.0
+      lineHeight: 1.2
+      ascender: 0.9
+      glyphs: List.create(SdfGlyph, cap: 1)
+      jsonPath: "{jsonPath}"
+    }
+  }
   unsafe {
     let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
     let doc: JsonDoc = Json.parseJson(source: source)
@@ -258,7 +277,14 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
       i = i + 1
     }
 
+    # The runtime returns the handle it already holds for a loaded path, so
+    # loading the same font again costs no atlas slot.
     let atlas: Int = SdfText.loadAtlas(path: rawAtlasPath, w: atlasW.toInt(), h: atlasH.toInt())
+    if atlas <= 0 {
+      log(
+        "[sdf] error: the atlas {rawAtlasPath} of font {jsonPath} did not load; text in this font will not draw"
+      )
+    }
     ret SdfFont {
       atlas: atlas
       atlasWidth: atlasW
@@ -268,6 +294,7 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
       lineHeight: lineHeight
       ascender: ascender
       glyphs: own glyphs
+      jsonPath: "{jsonPath}"
     }
   }
 }

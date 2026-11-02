@@ -1,0 +1,123 @@
+# Fonts survive many scene mounts (#98525791). A mount whose theme names the
+# fonts in use keeps them; the runtime hands back the atlas it already holds
+# for a loaded path; the atlas table grows past its old 8 slots; and a font
+# that does not load is an error with its path and a scene diagnostic, while
+# the font in use stays.
+import Gpu2d
+import Gpu2dText
+import SdfText
+import String
+open Gpu2dCanvas
+open app3d/UiShell
+open ui/Ecs
+open ui/UiSystems
+open ui/Theme
+open ui/ThemeResolved
+open ui/MaterialIconFont
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/renderSystem/RenderSystem
+open ecs/Entity
+
+const caseDir: String = "tests/cases/1296_font_atlas_remount/"
+
+# How many glyphs `text` queues on its font's atlas.
+func drawnGlyphs(font: view SdfFont, text: view String) ret Int {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let advance: Float = Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: text
+    x: 10.0
+    y: 40.0
+    sizePx: 24.0
+    color: -1
+  )
+  if let atlas: view Gpu2dTextAtlas = canvas.textAtlases.viewAt(index: font.atlas - 1) {
+    ret atlas.glyphs.length / textGlyphFloats
+  }
+  ret 0
+}
+
+func mountPage(resources: mod Gpu2dUi, sceneId: view String) ret Int {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var registry: SceneRegistry = createSceneRegistry()
+  let rootEntityId: EntityId = mountSceneWithImports(
+    world: world
+    uiSystems: uiSystems
+    root: caseDir
+    sceneId: sceneId
+    resources: resources
+    canvas: canvas
+    registry: registry
+  )
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  diagnostic {diagnostic.kind}: {diagnostic.name}")
+  }
+  if isNone(this: rootEntityId) {
+    ret 0
+  }
+  ret 1
+}
+
+func main() {
+  let fallbackText: SdfFont = loadMaterialIconFont()
+  let fallbackIcons: SdfFont = loadMaterialIconFont()
+  var resources: Gpu2dUi = {
+    textFont: own fallbackText
+    iconFont: own fallbackIcons
+    theme: createResolvedTheme()
+    activeTheme: lightTheme()
+  }
+  log("fallback atlases: text {resources.textFont.atlas}, icons {resources.iconFont.atlas}")
+
+  # The same scene mounted 20 times: one atlas per font, every time.
+  var mounted: Int = 0
+  loop var i: Int = 0, i < 20, ++i {
+    mounted = mounted + mountPage(resources: resources, sceneId: "PageA")
+  }
+  let textA: Int = resources.textFont.atlas
+  log("PageA x20: {mounted} mounted, text atlas {textA}, icon atlas {resources.iconFont.atlas}")
+  log("  'Hello' queues {drawnGlyphs(font: resources.textFont, text: "Hello")} glyphs")
+
+  # Two themes with different fonts, alternated: two atlases, reused.
+  var changes: Int = 0
+  var previous: Int = textA
+  loop var i: Int = 0, i < 20, ++i {
+    var sceneId: String = "PageA"
+    if i % 2 is 0 {
+      sceneId = "PageB"
+    }
+    mounted = mountPage(resources: resources, sceneId: sceneId)
+    if resources.textFont.atlas is not previous {
+      changes = changes + 1
+    }
+    previous = resources.textFont.atlas
+  }
+  log("A/B x20: text atlas changed {changes} times, now {resources.textFont.atlas}")
+  log("  'Hello' queues {drawnGlyphs(font: resources.textFont, text: "Hello")} glyphs")
+  log("  atlas handles in use: {g2dTextAtlasMax()}")
+
+  # More distinct atlas files than the old 8 slots (each `./` spelling is its
+  # own path): every one loads and draws.
+  var drawable: Int = 0
+  var dots: String = ""
+  loop var i: Int = 0, i < 12, ++i {
+    dots = "{dots}./"
+    let font: SdfFont = SdfText.loadSdfFontJson(
+      jsonPath: "../examples/105_ui_counter/assets/{dots}Roboto-Regular.mtsdf.json"
+    )
+    if font.atlas > 0 and drawnGlyphs(font: font, text: "Hi") is 2 {
+      drawable = drawable + 1
+    }
+  }
+  log("12 more font paths: {drawable} draw, atlas handles in use: {g2dTextAtlasMax()}")
+
+  # A font that does not load: loud, and the font in use stays.
+  let before: Int = resources.textFont.atlas
+  mounted = mountPage(resources: resources, sceneId: "PageBroken")
+  log("broken theme: mounted {mounted}, text atlas still {resources.textFont.atlas is before}")
+  log("  'Hello' queues {drawnGlyphs(font: resources.textFont, text: "Hello")} glyphs")
+}

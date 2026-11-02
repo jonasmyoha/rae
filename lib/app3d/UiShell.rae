@@ -264,6 +264,25 @@ func loadMountedSceneTextures(
   }
 }
 
+# A declared font whose atlas did not load: said in the log and as a scene
+# diagnostic, and the font in use stays (never a font that draws nothing).
+func reportMissingFont(
+  world: mod UiWorld
+  sceneId: view String
+  role: view String
+  path: view String
+) {
+  log("[ui] error: {sceneId}: the {role} font {path} did not load; keeping the font in use")
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: sceneId
+    nodeId: ""
+    kind: SceneDiagnosticKind.missingFont
+    name: "fonts.{role}"
+    message: "the {role} font {path} did not load; the font in use is kept"
+  )
+}
+
 # Resolve and mount one scene package entry. `root` includes its trailing slash,
 # and `sceneId` is the package path without `.raescene`. Imports, referenced
 # sub-scenes, theme tokens and declared fonts are all ready before the entry's
@@ -339,13 +358,31 @@ func mountSceneWithRoots(
   let theme: ResolvedTheme = sceneImportedTheme(entry: scene, assets: assets, registry: registry)
   resources.activeTheme = overlayPalette(base: lightTheme(), tokens: theme)
   resources.theme = own theme
-  if assets.textFontPath.length() > 0 {
+  if assets.textFontPath.length() > 0 and assets.textFontPath is not resources.textFont.jsonPath {
     let textFont: SdfFont = SdfText.loadSdfFontJson(jsonPath: assets.textFontPath)
-    resources.textFont = own textFont
+    if textFont.atlas > 0 {
+      resources.textFont = own textFont
+    } else {
+      reportMissingFont(
+        world: world
+        sceneId: sceneId
+        role: "text"
+        path: assets.textFontPath
+      )
+    }
   }
-  if assets.iconFontPath.length() > 0 {
+  if assets.iconFontPath.length() > 0 and assets.iconFontPath is not resources.iconFont.jsonPath {
     let iconFont: SdfFont = SdfText.loadSdfFontJson(jsonPath: assets.iconFontPath)
-    resources.iconFont = own iconFont
+    if iconFont.atlas > 0 {
+      resources.iconFont = own iconFont
+    } else {
+      reportMissingFont(
+        world: world
+        sceneId: sceneId
+        role: "icons"
+        path: assets.iconFontPath
+      )
+    }
   }
 
   # Token names are resolved while component bags are deserialized, so the
