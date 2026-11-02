@@ -391,10 +391,11 @@ A virtual `ListView` (the default mode) whose node also carries
 | `handleNodeId` | `""` | a node of the row scene (a grip): a press on it lifts the row at once, a press anywhere else never does |
 | `edgePoints` | `64` | the band at each end of the scroll window where a held row scrolls the list, faster closer to the edge |
 | `liftScale` | `1.03` | the lifted row's size, as a multiple of its own |
+| `liftShadow` | `true` | a soft drop shadow under the lifted row, growing with the lift (a row root with a `Shadow` of its own keeps it) |
 
 The gesture is the one phones use. A press that stays still for `holdMs`
-lifts the row: it grows to `liftScale`, is painted over its neighbors
-(`PaintOnTop`), and follows the finger, while the rows between its old and
+lifts the row: it grows to `liftScale`, casts a shadow, is painted over its
+neighbors (`PaintOnTop`), and follows the finger, while the rows between its old and
 its new place step aside to open a gap. The press is the row's from then on:
 its release clicks nothing and the scroll root does not follow the finger. A
 press that moves before the hold is a scroll or a tap, as without

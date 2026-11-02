@@ -571,6 +571,8 @@ func listReorderPose(
         offset: offset
         lifted: lifted
         scale: 1.0 + (reorder.liftScale - 1.0) * drag.lift
+        shadow: reorder.liftShadow
+        lift: drag.lift
         rowWidth: listReorderRowWidth(uiSystems: uiSystems, rowEntity: rowEntity)
         rowHeight: listView.itemHeight
       )
@@ -594,6 +596,8 @@ func listReorderPlaceRow(
   offset: view Float
   lifted: view Bool
   scale: view Float
+  shadow: view Bool
+  lift: view Float
   rowWidth: view Float
   rowHeight: view Float
 ) {
@@ -625,7 +629,30 @@ func listReorderPlaceRow(
     }
   }
   if lifted {
-    componentSet(this: world.paintOnTops, entityId: rowEntity, data: PaintOnTop { value: true })
+    var addedShadow: Bool = false
+    if componentHas(this: world.paintOnTops, entityId: rowEntity) {
+      addedShadow = componentView(this: world.paintOnTops, entityId: rowEntity).addedShadow
+    } else {
+      addedShadow = shadow and componentHas(this: world.shadows, entityId: rowEntity) is false
+    }
+    if addedShadow {
+      componentSet(
+        this: world.shadows
+        entityId: rowEntity
+        data: Shadow {
+          blur: 18.0
+          layers: 8
+          opacity: 0.55 * lift
+          color: RgbaColor { r: 0, g: 0, b: 0, a: 255 }
+          hasColor: true
+        }
+      )
+    }
+    componentSet(
+      this: world.paintOnTops
+      entityId: rowEntity
+      data: PaintOnTop { value: true, addedShadow: addedShadow }
+    )
     componentSet(
       this: world.transforms
       entityId: rowEntity
@@ -640,8 +667,11 @@ func listReorderPlaceRow(
       }
     )
   } else if componentHas(this: world.paintOnTops, entityId: rowEntity) {
-    # Only a row this system lifted carries PaintOnTop, and its TransformFx is
-    # this system's too
+    # Only a row this system lifted carries PaintOnTop; its TransformFx is
+    # this system's too, and its Shadow when the marker says so
+    if componentView(this: world.paintOnTops, entityId: rowEntity).addedShadow {
+      componentRemove(this: world.shadows, entityId: rowEntity)
+    }
     componentRemove(this: world.paintOnTops, entityId: rowEntity)
     componentRemove(this: world.transforms, entityId: rowEntity)
   }

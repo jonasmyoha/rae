@@ -312,7 +312,9 @@ func main() {
   log(
     "held 0.4 s: {phaseName(world: world, listEntity: listEntity)}, press claimed: {isNone(
       this: input.pressedEntityId
-    )}, painted on top: {liftedRows(world: world)}"
+    )}, painted on top: {liftedRows(world: world)}, shadow added: {componentCount(
+      this: world.shadows
+    )}"
   )
   # The finger moves down three rows over 20 frames
   loop var frame: Int = 1, frame <= 20, ++frame {
@@ -440,7 +442,7 @@ func main() {
       uiSystems: uiSystems
     ) - 1}, painted on top: {liftedRows(world: world)}, transforms left: {componentCount(
       this: world.transforms
-    )}"
+    )}, shadows left: {componentCount(this: world.shadows)}"
   )
   log("needs run at rest: {listReorderNeedsRun(world: world, input: input)}")
 
