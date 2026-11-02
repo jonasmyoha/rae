@@ -7,6 +7,7 @@ open ui/UiSystems
 open ui/ScrollDrag
 open ui/ListReorder
 open ui/PaintOnTop
+open ui/Dialog
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -112,6 +113,8 @@ type UiWorld {
   listReorders: ComponentTable(ListReorder)
   listReorderDrags: ComponentTable(ListReorderDrag)
   paintOnTops: ComponentTable(PaintOnTop)
+  dialogOptions: ComponentTable(DialogOptions)
+  presentedPages: ComponentTable(PresentedPage)
   wheelTargets: ComponentTable(WheelTarget)
   widgetIds: ComponentTable(WidgetId)
   widgetStates: ComponentTable(WidgetState)
@@ -297,6 +300,8 @@ func createUiWorld() ret UiWorld {
     listReorders: ComponentTable.create(ListReorder)
     listReorderDrags: ComponentTable.create(ListReorderDrag)
     paintOnTops: ComponentTable.create(PaintOnTop)
+    dialogOptions: ComponentTable.create(DialogOptions)
+    presentedPages: ComponentTable.create(PresentedPage)
     wheelTargets: ComponentTable.create(WheelTarget)
     widgetIds: ComponentTable.create(WidgetId)
     widgetStates: ComponentTable.create(WidgetState)

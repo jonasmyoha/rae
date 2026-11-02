@@ -42,6 +42,7 @@ open ui/SceneRoots
 open ui/SceneImports
 open ui/SceneBundles
 open ui/SceneInstance
+open ui/dialogSystem/DialogSystem
 open ui/SceneLoader
 open ui/ScenePolicy
 open ui/Theme
@@ -321,6 +322,71 @@ func mountSceneWithRoots(
   canvas: mod Gpu2dCanvas
   registry: mod SceneRegistry
 ) ret EntityId {
+  ret mountSceneOnPage(
+    world: world
+    uiSystems: uiSystems
+    roots: roots
+    sceneId: sceneId
+    resources: resources
+    canvas: canvas
+    registry: registry
+    pageId: ""
+  )
+}
+
+# Present the page scene `sceneId` over the screen in the same world, as a
+# dialog or a full page, as its root's PageRoot.presentation says (lib/ui
+# dialogSystem: the scrim, the dialog layer, modal input), with `overrides`
+# set on its nodes (a message's text, a button's action). Its node ids are
+# scoped to the page (`sceneId`), so they never clash with the screen's.
+# Returns the host to close it with (closePresentedPage), or none when the
+# scene did not mount (its diagnostics say why).
+func presentPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  root: view String
+  sceneId: view String
+  resources: mod Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  registry: mod SceneRegistry
+  overrides: view List(SceneOverride)
+) ret EntityId {
+  let roots: SceneRoots = createSceneRoots(defaultRoot: root)
+  let pageRoot: EntityId = mountSceneOnPage(
+    world: world
+    uiSystems: uiSystems
+    roots: roots
+    sceneId: sceneId
+    resources: resources
+    canvas: canvas
+    registry: registry
+    pageId: sceneId
+  )
+  if isNone(this: pageRoot) {
+    ret pageRoot
+  }
+  let host: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: pageRoot
+    pageId: sceneId
+    overrides: overrides
+  )
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  ret host
+}
+
+# mountSceneWithRoots with the scene's node ids under `pageId` ("" for none)
+func mountSceneOnPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  roots: view SceneRoots
+  sceneId: view String
+  resources: mod Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  registry: mod SceneRegistry
+  pageId: view String
+) ret EntityId {
   # The world is sized to the window before anything can fail: a caller that
   # shows its own error screen after a failed mount lays it out in this world,
   # and the default size of a new world is not the window's.
@@ -390,7 +456,12 @@ func mountSceneWithRoots(
   # imported bundles (ui/SceneBundles), expanded at the same moment.
   reseedWorldTheme(world: world, res: resources)
   world.bundles = sceneImportedBundles(entry: scene, assets: assets, registry: registry)
-  let mountedRoot: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let mountedRoot: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: pageId
+  )
   if isNone(this: mountedRoot) {
     ret mountedRoot
   }
@@ -398,7 +469,7 @@ func mountSceneWithRoots(
     world: world
     uiSystems: uiSystems
     registry: registry
-    pageId: ""
+    pageId: pageId
   )
   loadMountedSceneTextures(
     world: world

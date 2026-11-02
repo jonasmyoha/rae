@@ -28,6 +28,7 @@ open ui/inputSystem/InputSystem
 open ui/scrollRootSystem/ScrollRootSystem
 open ui/listViewSystem/ListViewSystem
 open ui/listReorderSystem/ListReorderRules
+open ui/dialogSystem/DialogSystem
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
@@ -247,7 +248,11 @@ func listReorderStep(
   let wasIdle: Bool = drag.phase is ListReorderPhase.idle
 
   if drag.phase is ListReorderPhase.idle {
-    if pointer.pressed and reorder.enabled and count > 1 and pitch > 0.0 and listView.mode is ListViewMode.virtual {
+    if pointer.pressed and reorder.enabled and count > 1 and pitch > 0.0 and listView.mode is ListViewMode.virtual and presentedPageBlocks(
+      world: world
+      uiSystems: uiSystems
+      entityId: listEntity
+    ) is false {
       let along: Float = pointer.y - top
       let index: Int = Math.floor(x: along / pitch).toInt()
       let onList: Bool = uiPointInEntity(
