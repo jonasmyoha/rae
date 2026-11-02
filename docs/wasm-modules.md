@@ -38,6 +38,16 @@ import no request covers fails the build, naming it and the capability to add
 requests are written into the `rae.interface` section. A request grants
 nothing; the host decides.
 
+`imports: "game.describe"` makes the `extern` function `describe` a typed
+host import: the WASM import `rae.describe`, in the capability `game` (which
+`requests` must name). The compiler writes the extern's C function, which
+encodes the arguments like an export's, calls the import and decodes the
+answer (docs/wasm-interfaces.md §6). A non-scalar parameter must be `view`.
+A String or value answer arrives in a 1 KiB buffer passed as the last two
+arguments (address, capacity). The import answers the length, or minus the
+length when it did not fit; the module then calls
+`rae.raeTakeAnswer(address)` for it.
+
 It is built with wasi-sdk (`$WASI_SDK`, default `~/.local/wasi-sdk`):
 `clang --target=wasm32-wasip1 -mexec-model=reactor`. There is no
 `--allow-undefined`: a symbol the code uses and nothing defines fails the
