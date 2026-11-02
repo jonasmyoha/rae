@@ -53,8 +53,9 @@ with a String argument) and `raeModuleFree(address)` (for that memory and for
 every String result). Every call first sets the runtime up once (what `main`
 does for a program) and leaves the String pool as it found it. A String
 parameter must be `view`; other types (structs, lists, `opt`) and `mod`
-parameters are refused at build time, naming the export: typed interfaces
-generated from the Rae types on both sides are Rae #129.
+parameters are refused at build time, naming the export. Typed interfaces
+generated from the Rae types on both sides are designed in
+docs/wasm-interfaces.md (queued).
 
 ## The check
 

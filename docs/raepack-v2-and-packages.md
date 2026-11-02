@@ -318,7 +318,16 @@ functions its target granted.
 
 ---
 
-## 9. Typed native↔WASM interface (syntax unresolved)
+## 9. Typed native↔WASM interface
+
+> **Decided 2026-11-02 (docs/wasm-interfaces.md):** there is no IDL and no
+> `interface { … }` block. An interface is an ordinary Rae module that the host
+> and the module both import. Its types cross through a binary encoding that
+> the compiler derives for each type (like `toJson`), and a structural hash of
+> each type, written into the module's `rae.interface` section, is the version
+> check. Capabilities are named sets of imports: the module requests them,
+> the host grants them, and the rest is denied (§8). The sketch below is
+> history.
 
 The boundary between a host and a WASM module is a **typed Rae interface** with
 **generated marshalling**. Rae's advantage: one language on both sides, so the
@@ -496,9 +505,11 @@ App Store approval or general iOS compatibility — that is investigated separat
 
 ## 15. Open questions & decisions before implementation
 
-1. **Interface IDL (§9):** dedicated `interface { … }` syntax vs. deriving the
-   boundary from ordinary Rae function signatures + annotations? Versioning
-   scheme? How are handles/shared buffers expressed? *Biggest unknown.*
+1. **Interface IDL (§9):** DECIDED 2026-11-02 (docs/wasm-interfaces.md): no
+   IDL. The interface is a shared Rae module and the pack's `exports:` /
+   `requests:`. The encoding is derived per type, the version check is a
+   strict structural hash, and handles are `Int`s, with large data as
+   `List(UInt8)`.
 2. **WASM runtime choice:** which embeddable WASM engine for the native host
    (interpreter for non-JIT/iOS; optional faster engine elsewhere)? How does it
    relate to the existing Live VM (replace? share infra?)?
