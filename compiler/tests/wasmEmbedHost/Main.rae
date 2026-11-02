@@ -18,6 +18,41 @@ open frames/Frames
 
 type Host {
   output: WasiOutput
+  describeCalls: Int
+}
+
+# The typed host import rae.describe (docs/wasm-interfaces.md §6), answered
+# with the typed helpers: a Command in, a Command out; a factor over 100
+# answers a name longer than the module's buffer.
+func hostDescribe(
+  host: mod Host
+  instance: mod WasmInstance
+  call: view WasmHostCall
+) ret WasmHostAnswer {
+  host.describeCalls = host.describeCalls + 1
+  let factor: Int = call.args.copyAtFallback(index: 2, fallback: wasmI64(value: 0)).integer
+  if let command: Command = wasmCallValue(
+    Command
+    instance: instance
+    call: call
+    at: 0
+  ) {
+    var name: String = "{command.name} x{factor} (from Rae)"
+    if factor > 100 {
+      name = ""
+      loop var i: Int = 0, i < factor, ++i {
+        name = "{name}y"
+      }
+    }
+    let answer: Command = { name: name, count: command.count * (factor as Int32) }
+    ret wasmAnswerValue(
+      Command
+      instance: instance
+      call: call
+      value: answer
+    )
+  }
+  ret wasmTrap(message: "describe: the command does not decode")
 }
 
 func wasmHostCall(
@@ -25,6 +60,9 @@ func wasmHostCall(
   instance: mod WasmInstance
   call: view WasmHostCall
 ) ret WasmHostAnswer {
+  if call.module is "rae" and call.name is "describe" {
+    ret hostDescribe(host: host, instance: instance, call: call)
+  }
   if let answer: WasmHostAnswer = wasiMinimalAnswer(
     instance: instance
     call: call
@@ -160,6 +198,78 @@ func runFrames(host: mod Host, instance: mod WasmInstance, module: view WasmModu
   log("the module's memory grew by more than 1 MiB: {grown > 1048576}")
 }
 
+# useDescribe(command, factor) through the module ABI: the command encoded
+# at (address, length), the factor an i64; the Command answer packed.
+func useDescribe(
+  host: mod Host
+  instance: mod WasmInstance
+  command: view Command
+  factor: view Int
+) ret String {
+  let input: List(UInt8) = command.toBinary()
+  let allocated: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "raeModuleAlloc"
+    args: { wasmI32(value: input.length) }
+    timeoutMs: 1000
+  )
+  let address: Int = first(result: allocated)
+  let written: Bool = wasmMemoryWrite(instance: instance, address: address, bytes: input)
+  let called: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "useDescribe"
+    args: { wasmI32(value: address), wasmI32(value: input.length), wasmI64(value: factor) }
+    timeoutMs: 1000
+  )
+  let freed: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "raeModuleFree"
+    args: { wasmI32(value: address) }
+    timeoutMs: 1000
+  )
+  if wasmFailed(error: called.error) {
+    ret "{called.error.kind}: {called.error.message}"
+  }
+  let packed: Int = first(result: called)
+  let resultAddress: Int = (packed shr 32) bitand 4294967295
+  let resultLength: Int = packed bitand 4294967295
+  var text: String = "no answer"
+  if let bytes: List(UInt8) = wasmMemoryRead(
+    instance: instance
+    address: resultAddress
+    count: resultLength
+  ) {
+    if let answer: Command = Command.fromBinary(bytes: bytes) {
+      if answer.name.length() > 60 {
+        text = "a name of {answer.name.length()} bytes, count {answer.count}"
+      } else {
+        text = "{answer.name}, count {answer.count}"
+      }
+    }
+  }
+  let freedResult: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: "raeModuleFree"
+    args: { wasmI32(value: resultAddress) }
+    timeoutMs: 1000
+  )
+  ret text
+}
+
+func gameCapabilities() ret List(WasmCapability) {
+  var exposed: List(WasmCapability) = wasiMinimalCapabilities()
+  exposed.add(value: WasmCapability { name: "game", imports: { "rae.describe" } })
+  ret exposed
+}
+
 # A module built from another AppFrameIn: refused by the check, never called.
 func checkChanged(path: view String) {
   if path.length() is 0 {
@@ -189,12 +299,12 @@ func main() {
   log("on a host that exposes nothing: {without.error.kind}")
   var instance: WasmInstance = wasmInstantiate(
     module: module
-    exposed: wasiMinimalCapabilities()
-    granted: { "log", "clock" }
+    exposed: gameCapabilities()
+    granted: { "log", "clock", "game" }
     limits: wasmDefaultLimits()
   )
-  log("with log and clock granted: {instance.error.kind}")
-  var host: Host = { output: createWasiOutput() }
+  log("with log, clock and game granted: {instance.error.kind}")
+  var host: Host = { output: createWasiOutput(), describeCalls: 0 }
   let initialized: WasmCallResult = wasmCall(
     Host
     host: host
@@ -219,7 +329,44 @@ func main() {
     times: 2
   )}")
   runFrames(host: host, instance: instance, module: module)
+  let lamp: Command = { name: "lamp", count: 4 }
+  log("useDescribe: {useDescribe(
+    host: host
+    instance: instance
+    command: lamp
+    factor: 3
+  )}")
+  log("useDescribe, a 3000-byte answer: {useDescribe(
+    host: host
+    instance: instance
+    command: lamp
+    factor: 3000
+  )}")
   wasmDestroy(instance: instance)
+  # game requested but not granted: the import traps in lib/wasm
+  var ungranted: WasmInstance = wasmInstantiate(
+    module: module
+    exposed: gameCapabilities()
+    granted: { "log", "clock" }
+    limits: wasmDefaultLimits()
+  )
+  let initializedAgain: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: ungranted
+    name: "_initialize"
+    args: {}
+    timeoutMs: 1000
+  )
+  let callsBefore: Int = host.describeCalls
+  log("game not granted: {useDescribe(
+    host: host
+    instance: ungranted
+    command: lamp
+    factor: 3
+  )}")
+  log("  the host's describe ran: {host.describeCalls is not callsBefore}")
+  wasmDestroy(instance: ungranted)
   wasmUnload(module: module)
   checkChanged(path: getEnv(name: "RAE_WASM_CHANGED_MODULE"))
 }

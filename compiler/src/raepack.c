@@ -555,6 +555,14 @@ static bool parse_target_block(RaePackParser* parser,
         return false;
       }
       target->requests = field->value.as.string;
+    } else if (str_eq_cstr(field->key, "imports")) {
+      if (field->value.kind != RAEPACK_VALUE_STRING) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "imports must be a string of capability.function names (\"game.describe\")");
+        parser->had_error = true;
+        return false;
+      }
+      target->imports = field->value.as.string;
     } else if (str_eq_cstr(field->key, "sources")) {
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
         diag_error(parser->file_path, (int)field->line, (int)field->column,

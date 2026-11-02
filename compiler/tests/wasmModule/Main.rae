@@ -49,3 +49,14 @@ func flip(mood: copy Mood) ret Mood {
   }
   ret Mood.calm
 }
+
+# A typed host import (docs/wasm-interfaces.md §6): the pack lists it under
+# `imports: "game.describe"`, so it is the WASM import `rae.describe` in the
+# capability `game`, its Command argument and result crossing encoded.
+func describe(command: view Command, factor: view Int) unsafe extern("raeHostDescribe") ret Command
+
+func useDescribe(command: view Command, factor: copy Int) ret Command {
+  unsafe {
+    ret describe(command: command, factor: factor)
+  }
+}

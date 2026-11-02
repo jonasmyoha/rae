@@ -278,3 +278,113 @@ func wasmCallEncoded(
   }
   ret WasmBytesResult { bytes: bytes, error: error }
 }
+
+# ---- typed host imports (docs/wasm-interfaces.md §6) ----------------------
+#
+# A module's `extern` that its pack lists under `imports:` ("game.describe")
+# calls the host as the import `rae.describe`, in capability `game`. Its
+# arguments arrive in `call.args` as an export's do: a scalar is one value,
+# a String or a value is two (its address and length in the module's
+# memory), so a parameter's position `at` counts those. A String or value
+# answer goes into the buffer the module passed last; wasmAnswerBytes keeps it
+# for the module to fetch when it does not fit.
+#
+#   if call.module is "rae" and call.name is "describe" {
+#     if let item: Item = wasmCallValue(Item, instance: instance, call: call, at: 0) {
+#       ret wasmAnswerValue(Item, instance: instance, call: call, value: describeItem(item: item))
+#     }
+#     ret wasmTrap(message: "describe: the item does not decode")
+#   }
+
+# The bytes of the String or value whose address is argument `at` and length
+# argument `at + 1`; none when that is outside the module's memory
+func wasmCallBytes(
+  instance: view WasmInstance
+  call: view WasmHostCall
+  at: view Int
+) ret opt List(UInt8) {
+  let address: Int = call.args.copyAtFallback(index: at, fallback: wasmI32(value: 0)).integer
+  let length: Int = call.args.copyAtFallback(index: at + 1, fallback: wasmI32(value: 0)).integer
+  if length < 0 {
+    ret none
+  }
+  if length is 0 {
+    ret List.create(UInt8, cap: 0)
+  }
+  ret wasmMemoryRead(instance: instance, address: address, count: length)
+}
+
+func wasmCallText(
+  instance: view WasmInstance
+  call: view WasmHostCall
+  at: view Int
+) ret opt String {
+  if let bytes: List(UInt8) = wasmCallBytes(instance: instance, call: call, at: at) {
+    ret String.fromBytes(bytes: bytes, start: 0, count: bytes.length)
+  }
+  ret none
+}
+
+# The value of type T at argument `at`, decoded (docs/wasm-interfaces.md §2);
+# none when it is outside the memory or does not decode
+func wasmCallValue(
+  T: type
+  instance: view WasmInstance
+  call: view WasmHostCall
+  at: view Int
+) ret opt T {
+  if let bytes: List(UInt8) = wasmCallBytes(instance: instance, call: call, at: at) {
+    ret T.fromBinary(bytes: bytes)
+  }
+  ret none
+}
+
+# Answer a typed import with encoded bytes: written into the module's buffer
+# (the call's last two arguments, its address and capacity) and the length
+# answered; when they do not fit, kept on the instance and minus the length
+# answered, and the module fetches them (rae.raeTakeAnswer)
+func wasmAnswerBytes(
+  instance: mod WasmInstance
+  call: view WasmHostCall
+  bytes: view List(UInt8)
+) ret WasmHostAnswer {
+  let count: Int = call.args.length
+  let address: Int = call.args.copyAtFallback(index: count - 2, fallback: wasmI32(value: 0)).integer
+  let capacity: Int = call.args.copyAtFallback(index: count - 1, fallback: wasmI32(value: 0)).integer
+  if bytes.length <= capacity {
+    if wasmMemoryWrite(instance: instance, address: address, bytes: bytes) is false {
+      ret wasmTrap(message: "{call.name}: the answer buffer is outside the module's memory")
+    }
+    let written: List(WasmValue) = { wasmI64(value: bytes.length) }
+    ret wasmAnswer(results: written)
+  }
+  var kept: List(UInt8) = List.create(UInt8, cap: bytes.length)
+  loop let byte: view UInt8 in bytes {
+    kept.add(value: byte)
+  }
+  instance.pendingAnswer = kept
+  let pending: List(WasmValue) = { wasmI64(value: -bytes.length) }
+  ret wasmAnswer(results: pending)
+}
+
+func wasmAnswerText(
+  instance: mod WasmInstance
+  call: view WasmHostCall
+  text: view String
+) ret WasmHostAnswer {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret wasmAnswerBytes(instance: instance, call: call, bytes: bytes)
+}
+
+# Answer a typed import with a value of type T, encoded
+func wasmAnswerValue(
+  T: type
+  instance: mod WasmInstance
+  call: view WasmHostCall
+  value: view T
+) ret WasmHostAnswer {
+  ret wasmAnswerBytes(instance: instance, call: call, bytes: value.toBinary())
+}
