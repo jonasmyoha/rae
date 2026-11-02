@@ -49,11 +49,16 @@ func easeTowards(
 # paintSubtree's pass loop:
 #   0  — no HoverScale, or current is at rest (paints in normal flow)
 #   1  — popped, easing back toward rest (target = restScale)
-#   2  — popped, actively hovered (target = hoverScale)
+#   2  — popped, actively hovered (target = hoverScale), or marked
+#        PaintOnTop (a lifted list row, ui/listReorderSystem)
 # Higher rank paints later (= on top). Rank-2 paints over rank-1 so a
 # newly-hovered tile beats a still-unhovering sibling regardless of
 # their order in the Children list.
 func hoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
+  # Marked to paint over its siblings (ui/PaintOnTop: a lifted list row)
+  if componentHas(this: world.paintOnTops, entityId: entityId) {
+    ret 2
+  }
   if componentHas(this: world.hoverScales, entityId: entityId) is false {
     ret 0
   }

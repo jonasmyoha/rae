@@ -367,3 +367,46 @@ and that every `OnClick` id has a label.
   it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
   when it next changes, for the event loop's heartbeat
   (`earliestDeadlineSec` combines it with another deadline).
+
+## 12. `ListReorder`: drag to reorder a list's rows
+
+A virtual `ListView` (the default mode) whose node also carries
+`ListReorder` lets a person drag its rows into another order
+(lib/ui/ListReorder, the system is ui/listReorderSystem):
+
+```json
+"Tasks": {
+  "ScrollRoot": { "axis": "y", "floor": "content" },
+  "ListView": { "itemSceneId": "scenes/TaskRow", "itemHeight": 52, "itemGap": 6, ... },
+  "ListReorder": { "actionId": "tasks.move", "label": "Move task" }
+}
+```
+
+| field | default | what it does |
+|---|---|---|
+| `actionId` | (required) | the UI action a drop fires: `<actionId>.<from>.<to>`, the moved row's index in the list's data and the index it moves to (a template action, so an action table row `tasks.move` takes `2.5` as its payload); nothing is fired when the row is put back where it was |
+| `label` | `""` | what the gesture does, in words, sentence case, as `OnClick.label` |
+| `enabled` | `true` | `false` turns the gesture off |
+| `holdMs` | `350` | how long a press must stay still to lift the row |
+| `handleNodeId` | `""` | a node of the row scene (a grip): a press on it lifts the row at once, a press anywhere else never does |
+| `edgePoints` | `64` | the band at each end of the scroll window where a held row scrolls the list, faster closer to the edge |
+| `liftScale` | `1.03` | the lifted row's size, as a multiple of its own |
+
+The gesture is the one phones use. A press that stays still for `holdMs`
+lifts the row: it grows to `liftScale`, is painted over its neighbors
+(`PaintOnTop`), and follows the finger, while the rows between its old and
+its new place step aside to open a gap. The press is the row's from then on:
+its release clicks nothing and the scroll root does not follow the finger. A
+press that moves before the hold is a scroll or a tap, as without
+`ListReorder`. On the drop the app reorders its data from the action; every
+row then eases from where it was drawn into its new place. An app that does
+not take the move (its data does not change within half a second) sees the
+rows ease back into the old order.
+
+The app runs `listReorderSystem(world, uiSystems, input, nowSec)` each frame
+`listReorderNeedsRun` says so, after `updateUiInput` and before
+`updateScrollRoot`, then the list system and the layout as usual. It returns
+true while a row is held or rows still move, so an event-driven loop keeps
+drawing frames until they are home, and then runs nothing. Rows are moved by
+their `RuntimeOffset` (no relayout). Flow lists (`mode: "Flow"`) are not
+reorderable yet.
