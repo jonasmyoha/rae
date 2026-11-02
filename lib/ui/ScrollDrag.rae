@@ -10,7 +10,10 @@
 #   velocity is picked;
 # - `wheelIdleFrames`: frames since the last wheel (or trackpad) event. The
 #   spring and the momentum wait while it is small, so they do not fight a
-#   trackpad's own momentum events, which keep arriving after the lift.
+#   trackpad's own momentum events, which keep arriving after the lift;
+# - `pinnedToEnd`: an end-anchored root (ScrollAnchor.end) holds its end in
+#   view: set when it is mounted with no remembered position and when it
+#   comes to rest at its end, cleared by a drag or the wheel.
 type ScrollDrag {
   dragging: Bool
   lastPointer: Float
@@ -20,4 +23,5 @@ type ScrollDrag {
   active: Bool = false
   pressPointer: Float = 0.0
   wheelIdleFrames: Int = 1000
+  pinnedToEnd: Bool = false
 }

@@ -1,0 +1,243 @@
+# A ScrollRoot anchored at its end (`"anchor": "end"`, ui/ScrollAnchor) on a
+# virtual ListView, the bottom-up list of a one-thumb UI or a chat: 50-point
+# rows in a 400-point window. A short list sits at the window's end; a long
+# one opens scrolled to its end, the windowed rows its last ones; a list that
+# grows keeps its end at the window's end. A drag away lets go of the end (a
+# row added then does not move it); coming back to rest at the end holds it
+# again. The default anchor (start) still puts a short list at the top.
+# "content" is the list's top and bottom on screen. `\{`/`\}` keep the JSON
+# braces literal.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/UiSystems
+open ui/InputKind
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/listViewSystem/ListViewSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+const rowHeight: Float = 50.0
+
+func listScene(anchor: view String) ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"todo\",\"root\":\"Window\",\"nodes\":\{"
+  )
+  s = s.concat(
+    other: "\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Children\":[\"Tasks\"]\},"
+  )
+  s = s.concat(
+    other: "\"Tasks\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},"
+  )
+  s = s.concat(other: "\"ScrollRoot\":\{\"axis\":\"y\",\"anchor\":\"{anchor}\"\},")
+  s = s.concat(
+    other: "\"ListView\":\{\"itemHeight\":50,\"itemGap\":0,\"visibleItemCount\":8,\"overscanRows\":2,"
+  )
+  s = s.concat(
+    other: "\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"label\"\}]\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func makeRow(label: own String) ret ListViewRow {
+  var keys: List(String) = List.create(String, cap: 1)
+  keys.add(value: "label")
+  var values: List(String) = List.create(String, cap: 1)
+  values.add(value: own label)
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  memory: ScrollMemory
+  scenes: SceneRegistry
+  list: EntityId
+}
+
+func createRig(anchor: view String) ret Rig {
+  let scene: Scene = parseScene(source: listScene(anchor: anchor))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 400.0
+  let rootEntityId: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  var list: EntityId = noEntity()
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: "Tasks") {
+    list = nodeEntityId(world: world, index: raw)
+  }
+  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 4)
+  componentSet(this: world.listViewDatas, entityId: list, data: ListViewData { rows: own rows })
+  ret Rig {
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    memory: createScrollMemory()
+    scenes: createSceneRegistry()
+    list: list
+  }
+}
+
+# Set the list's rows to `count` ("Task 0" .. "Task count-1")
+func setRows(rig: mod Rig, count: view Int) {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    rows.add(value: makeRow(label: "Task {i}"))
+  }
+  componentSet(
+    this: rig.world.listViewDatas
+    entityId: rig.list
+    data: ListViewData { rows: own rows }
+  )
+}
+
+# One frame in a host's order: the pointer, the scroll root, the list's
+# window, the layout and the transforms
+func frame(rig: mod Rig, y: view Float, down: view Bool) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: 150.0
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  scrollRootSystem(world: rig.world, uiSystems: rig.uiSystems, memory: rig.memory)
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+  )
+  listViewSystem(world: rig.world, uiSystems: rig.uiSystems, scenes: rig.scenes)
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+}
+
+# Frames with the finger up until the list is at rest (bounded)
+func settle(rig: mod Rig) {
+  loop var i: Int = 0, i < 400, ++i {
+    frame(rig: rig, y: 200.0, down: false)
+    if scrollRootSettling(world: rig.world, uiSystems: rig.uiSystems, entityId: rig.list) is false {
+      ret
+    }
+  }
+}
+
+# The first live (windowed) row's label
+func firstLiveRow(rig: view Rig) ret String {
+  if componentHas(this: rig.world.childrens, entityId: rig.list) is false {
+    ret "(none)"
+  }
+  let rows: view Children = componentView(this: rig.world.childrens, entityId: rig.list)
+  let rowRoot: EntityId = rows.ids.copyAtFallback(index: 0, fallback: noEntity())
+  if componentHas(this: rig.world.childrens, entityId: rowRoot) is false {
+    ret "(none)"
+  }
+  let label: EntityId = componentView(this: rig.world.childrens, entityId: rowRoot).ids.copyAtFallback(
+    index: 0
+    fallback: noEntity()
+  )
+  if componentHas(this: rig.world.texts, entityId: label) is false {
+    ret "(none)"
+  }
+  ret "{componentView(this: rig.world.texts, entityId: label).text}"
+}
+
+func report(rig: view Rig, label: view String) {
+  let count: Int = componentView(this: rig.world.listViewDatas, entityId: rig.list).rows.length
+  let top: Float = componentView(
+    this: rig.uiSystems.transform2d.worldTransforms
+    entityId: rig.list
+  ).position.y
+  let bottom: Float = top + count.toFloat() * rowHeight
+  log(
+    "{label}: {count} rows, position {scrollPositionOf(world: rig.world, entityId: rig.list).toInt()}, content {top.toInt()} to {bottom.toInt()}, first live row {firstLiveRow(
+      rig: rig
+    )}"
+  )
+}
+
+# A drag of the finger from y `from` to y `to` in 10-point steps, then the lift
+func drag(rig: mod Rig, from: view Float, to: view Float) {
+  frame(rig: rig, y: from, down: true)
+  var y: Float = from
+  let step: Float = 10.0
+  loop y is not to {
+    if to > y {
+      y = y + step
+    } else {
+      y = y - step
+    }
+    frame(rig: rig, y: y, down: true)
+  }
+  frame(rig: rig, y: to, down: false)
+}
+
+func main() {
+  # short: three rows sit at the window's end (400)
+  var rig: Rig = createRig(anchor: "end")
+  setRows(rig: rig, count: 3)
+  settle(rig: rig)
+  report(rig: rig, label: "short, anchored at the end")
+
+  # growing: each row added keeps the end at 400, also once it overflows
+  loop var count: Int = 4, count <= 11, ++count {
+    setRows(rig: rig, count: count)
+    settle(rig: rig)
+    if count is 8 or count is 9 or count is 11 {
+      report(rig: rig, label: "grown")
+    }
+  }
+
+  # scrolled away: a drag toward the start lets go of the end, so a row
+  # added then does not move the list
+  drag(rig: rig, from: 100.0, to: 300.0)
+  settle(rig: rig)
+  report(rig: rig, label: "dragged toward the start")
+  setRows(rig: rig, count: 12)
+  settle(rig: rig)
+  report(rig: rig, label: "a row added while scrolled away")
+  # dragged back past the end, it springs to the end and holds it again
+  drag(rig: rig, from: 300.0, to: 20.0)
+  settle(rig: rig)
+  report(rig: rig, label: "dragged back to the end")
+  setRows(rig: rig, count: 13)
+  settle(rig: rig)
+  report(rig: rig, label: "a row added at the end")
+
+  # long: twenty rows open at their end, the window on the last rows
+  var long: Rig = createRig(anchor: "end")
+  setRows(rig: long, count: 20)
+  settle(rig: long)
+  report(rig: long, label: "long, opened")
+
+  # the default anchor: a short list at the top, a long one at its first row
+  var start: Rig = createRig(anchor: "start")
+  setRows(rig: start, count: 3)
+  settle(rig: start)
+  report(rig: start, label: "short, anchored at the start")
+  setRows(rig: start, count: 20)
+  settle(rig: start)
+  report(rig: start, label: "long, anchored at the start")
+}
