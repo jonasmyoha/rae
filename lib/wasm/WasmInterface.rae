@@ -1,0 +1,280 @@
+# WasmInterface — typed calls into a WASM module (docs/wasm-interfaces.md §3,
+# §5). A module built by `rae build --target wasm` describes its exports in
+# the custom section `rae.interface`: each parameter's and the result's type
+# as its canonical description and hash. A host built from the SAME Rae types
+# checks each export it will call once, before the first call, and then calls
+# it with a value's binary encoding:
+#
+#   if let mismatch: WasmError = wasmCheckExport(
+#     module: module
+#     name: "summarize"
+#     params: { binarySchemaText(AppFrameIn) }
+#     result: binarySchemaText(AppFrameOut)
+#   ) {
+#     log(mismatch.message)   # the module was built from other types
+#   }
+#   let reply: WasmBytesResult = wasmCallEncoded(Shell, host: shell, instance: instance, name:
+#   "summarize", input: frame.toBinary(), timeoutMs: 200)
+#   let frameOut: opt AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes)
+import Json
+import String
+open wasm/Wasm
+
+# One parameter or the result of an export: its name ("" for the result),
+# its type's canonical description and that description's hash (16 hex
+# digits)
+type WasmInterfaceValue {
+  name: String
+  typeText: String
+  hash: String
+}
+
+type WasmInterfaceExport {
+  name: String
+  params: List(WasmInterfaceValue)
+  hasResult: Bool
+  result: WasmInterfaceValue
+}
+
+type WasmInterface {
+  version: Int
+  exports: List(WasmInterfaceExport)
+  requests: List(String)
+}
+
+type WasmBytesResult {
+  bytes: List(UInt8)
+  error: WasmError
+}
+
+func wasmInterfaceValueAt(doc: view JsonDoc, value: view JsonValue) ret WasmInterfaceValue {
+  ret WasmInterfaceValue {
+    name: Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: Json.field(doc: doc, this: value, key: "name"))
+      fallback: ""
+    )
+    typeText: Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: Json.field(doc: doc, this: value, key: "type"))
+      fallback: ""
+    )
+    hash: Json.jsonString(
+      this: Json.jsonValueAt(doc: doc, idx: Json.field(doc: doc, this: value, key: "hash"))
+      fallback: ""
+    )
+  }
+}
+
+# The module's `rae.interface`, or none when it has none (a module built
+# without exports, or not by Rae) or the section does not parse
+func wasmModuleInterface(module: view WasmModule) ret opt WasmInterface {
+  if module.interfaceText.length() is 0 {
+    ret none
+  }
+  let doc: JsonDoc = Json.parseJson(source: module.interfaceText)
+  if doc.ok is false {
+    ret none
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  let version: Int = Json.jsonInt(
+    this: Json.jsonValueAt(doc: doc, idx: Json.field(doc: doc, this: root, key: "version"))
+    fallback: 0
+  )
+  var exports: List(WasmInterfaceExport) = List.create(WasmInterfaceExport, cap: 8)
+  let exportsIndex: Int = Json.field(doc: doc, this: root, key: "exports")
+  if exportsIndex >= 0 {
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: exportsIndex)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      let entry: JsonValue = Json.arrayAt(doc: doc, this: array, idx: i)
+      var params: List(WasmInterfaceValue) = List.create(WasmInterfaceValue, cap: 4)
+      let paramsIndex: Int = Json.field(doc: doc, this: entry, key: "params")
+      if paramsIndex >= 0 {
+        let paramArray: JsonValue = Json.jsonValueAt(doc: doc, idx: paramsIndex)
+        loop var p: Int = 0, p < Json.arrayLen(this: paramArray), ++p {
+          params.add(
+            value: wasmInterfaceValueAt(
+              doc: doc
+              value: Json.arrayAt(doc: doc, this: paramArray, idx: p)
+            )
+          )
+        }
+      }
+      var hasResult: Bool = false
+      var result: WasmInterfaceValue = { name: "", typeText: "", hash: "" }
+      let resultIndex: Int = Json.field(doc: doc, this: entry, key: "result")
+      if resultIndex >= 0 {
+        let resultValue: JsonValue = Json.jsonValueAt(doc: doc, idx: resultIndex)
+        if resultValue.kind is JsonKind.object {
+          hasResult = true
+          result = wasmInterfaceValueAt(doc: doc, value: resultValue)
+        }
+      }
+      exports.add(
+        value: WasmInterfaceExport {
+          name: Json.jsonString(
+            this: Json.jsonValueAt(doc: doc, idx: Json.field(doc: doc, this: entry, key: "name"))
+            fallback: ""
+          )
+          params: params
+          hasResult: hasResult
+          result: result
+        }
+      )
+    }
+  }
+  var requests: List(String) = List.create(String, cap: 4)
+  let requestsIndex: Int = Json.field(doc: doc, this: root, key: "requests")
+  if requestsIndex >= 0 {
+    let array: JsonValue = Json.jsonValueAt(doc: doc, idx: requestsIndex)
+    loop var i: Int = 0, i < Json.arrayLen(this: array), ++i {
+      requests.add(
+        value: Json.jsonString(this: Json.arrayAt(doc: doc, this: array, idx: i), fallback: "")
+      )
+    }
+  }
+  ret WasmInterface { version: version, exports: exports, requests: requests }
+}
+
+func wasmMismatch(message: view String) ret WasmError {
+  ret WasmError { kind: WasmErrorKind.interfaceMismatch, message: "{message}" }
+}
+
+# Whether export `name` takes exactly the types `params` and returns
+# `result`, each the host's `binarySchemaText(T)` ("" for no result). none
+# when it does; else an `interfaceMismatch` whose message names the export,
+# the position and both descriptions. Check each export once, before its
+# first call: a module built from other types is refused before it runs.
+func wasmCheckExport(
+  module: view WasmModule
+  name: view String
+  params: view List(String)
+  result: view String
+) ret opt WasmError {
+  if let described: WasmInterface = wasmModuleInterface(module: module) {
+    loop let entry: view WasmInterfaceExport in described.exports {
+      if entry.name is not name {
+        continue
+      }
+      if entry.params.length is not params.length {
+        ret wasmMismatch(
+          message: "export {name} takes {entry.params.length} parameter(s) in the module, the host passes {params.length}"
+        )
+      }
+      loop var i: Int = 0, i < params.length, ++i {
+        let expected: String = params.copyAtFallback(index: i, fallback: "")
+        if let value: view WasmInterfaceValue = entry.params.viewAt(index: i) {
+          if value.typeText is not expected {
+            ret wasmMismatch(
+              message: "export {name}: parameter {i + 1} ({value.name}) is {value.typeText} in the module, {expected} in the host"
+            )
+          }
+        }
+      }
+      var moduleResult: String = ""
+      if entry.hasResult {
+        moduleResult = "{entry.result.typeText}"
+      }
+      if moduleResult is not result {
+        ret wasmMismatch(
+          message: "export {name}: the result is {moduleResult} in the module, {result} in the host"
+        )
+      }
+      ret none
+    }
+    ret wasmMismatch(message: "the module's rae.interface has no export {name}")
+  }
+  ret wasmMismatch(
+    message: "the module has no rae.interface section (not built by rae build --target wasm?)"
+  )
+}
+
+func wasmFirstInteger(result: view WasmCallResult) ret Int {
+  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+}
+
+func wasmBytesFailed(error: view WasmError) ret WasmBytesResult {
+  ret WasmBytesResult { bytes: List.create(UInt8, cap: 0), error: error }
+}
+
+# Call export `name` with one encoded value (docs/wasm-modules.md: the
+# address and length of `input` in the module's memory) and answer the
+# encoded result: the bytes are written into memory the module allocates
+# (raeModuleAlloc), the result is read back, and both are freed
+# (raeModuleFree). A failed step answers its error and empty bytes.
+func wasmCallEncoded(
+  H: type
+  host: mod H
+  instance: mod WasmInstance
+  name: view String
+  input: view List(UInt8)
+  timeoutMs: view Int
+) ret WasmBytesResult {
+  let allocated: WasmCallResult = wasmCall(
+    H
+    host: host
+    instance: instance
+    name: "raeModuleAlloc"
+    args: { wasmI32(value: input.length) }
+    timeoutMs: timeoutMs
+  )
+  if wasmFailed(error: allocated.error) {
+    ret wasmBytesFailed(error: allocated.error)
+  }
+  let address: Int = wasmFirstInteger(result: allocated)
+  if wasmMemoryWrite(instance: instance, address: address, bytes: input) is false {
+    ret wasmBytesFailed(
+      error: WasmError {
+        kind: WasmErrorKind.memory
+        message: "{name}: the input does not fit the module's memory at {address}"
+      }
+    )
+  }
+  let called: WasmCallResult = wasmCall(
+    H
+    host: host
+    instance: instance
+    name: name
+    args: { wasmI32(value: address), wasmI32(value: input.length) }
+    timeoutMs: timeoutMs
+  )
+  let freedInput: WasmCallResult = wasmCall(
+    H
+    host: host
+    instance: instance
+    name: "raeModuleFree"
+    args: { wasmI32(value: address) }
+    timeoutMs: timeoutMs
+  )
+  if wasmFailed(error: called.error) {
+    ret wasmBytesFailed(error: called.error)
+  }
+  let packed: Int = wasmFirstInteger(result: called)
+  let resultAddress: Int = (packed shr 32) bitand 4294967295
+  let resultLength: Int = packed bitand 4294967295
+  var bytes: List(UInt8) = List.create(UInt8, cap: 0)
+  var error: WasmError = wasmOk()
+  if resultLength > 0 {
+    if let read: List(UInt8) = wasmMemoryRead(
+      instance: instance
+      address: resultAddress
+      count: resultLength
+    ) {
+      bytes = read
+    } else {
+      error = WasmError {
+        kind: WasmErrorKind.memory
+        message: "{name}: the result at {resultAddress} ({resultLength} bytes) is outside the module's memory"
+      }
+    }
+  }
+  if resultAddress is not 0 {
+    let freedResult: WasmCallResult = wasmCall(
+      H
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: resultAddress) }
+      timeoutMs: timeoutMs
+    )
+  }
+  ret WasmBytesResult { bytes: bytes, error: error }
+}

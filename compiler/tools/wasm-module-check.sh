@@ -9,7 +9,10 @@
 # and read back, the `rae.interface` section parsed with every hash checked,
 # and a malformed value trapping with its export and parameter named. The same
 # module then runs in a native Rae program through lib/wasm
-# (tests/wasmEmbedHost and its expected.txt; skipped without
+# (tests/wasmEmbedHost and its expected.txt): built from the same frame
+# types (the `frames` package, tests/wasmFrames), it checks the module's
+# rae.interface, runs 1000 encoded frames in bounded memory, and refuses a
+# module built from a changed AppFrameIn before calling it (skipped without
 # tools/wamr/build.sh's library). Then three bad packs must be refused: an
 # export that names no function, a `mod` parameter, and a struct holding a
 # Ptr. SKIP without wasi-sdk ($WASI_SDK,
@@ -39,11 +42,26 @@ if ! diff -q "$TMP/out.txt" "$FIXTURE/expected.txt" > /dev/null; then
   diff "$TMP/out.txt" "$FIXTURE/expected.txt" | head -12 | sed 's/^/    /'; exit 1
 fi
 
+# a module built from a changed AppFrameIn (a field more): the native host's
+# wasmCheckExport must refuse it before any call
+mkdir -p "$TMP/changed"
+cp -R "$FIXTURE" "$TMP/changed/wasmModule"
+cp -R tests/wasmFrames "$TMP/changed/wasmFrames"
+rm -f "$TMP/changed/wasmModule/rae.lock"
+perl -0pi -e 's/  note: opt String\n/  note: opt String\n  urgent: Bool\n/' "$TMP/changed/wasmFrames/Frames.rae"
+if ! grep -q "urgent: Bool" "$TMP/changed/wasmFrames/Frames.rae"; then
+  echo "FAIL: wasm-module-check (could not change AppFrameIn for the refusal test)"; exit 1
+fi
+if ! perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/changed/wasmModule" \
+    --out "$TMP/changed.wasm" "$TMP/changed/wasmModule/Main.rae" > "$TMP/changed.log" 2>&1; then
+  echo "FAIL: wasm-module-check (the changed module did not build)"; tail -10 "$TMP/changed.log" | sed 's/^/    /'; exit 1
+fi
+
 # the same module in a native Rae host, through lib/wasm (WAMR)
 WAMR_LIB="${RAE_WAMR:-$HOME/.cache/rae/wamr/install}/lib/librae_wamr.a"
 EMBEDDED="the Rae host skipped (no $WAMR_LIB)"
 if [ -f "$WAMR_LIB" ]; then
-  if ! RAE_WASM_MODULE="$TMP/module.wasm" perl -e 'alarm shift; exec @ARGV' 300 "$RAE" run tests/wasmEmbedHost/Main.rae \
+  if ! RAE_WASM_MODULE="$TMP/module.wasm" RAE_WASM_CHANGED_MODULE="$TMP/changed.wasm" perl -e 'alarm shift; exec @ARGV' 300 "$RAE" run tests/wasmEmbedHost/Main.rae \
       > "$TMP/host.raw" 2>&1; then
     echo "FAIL: wasm-module-check (the Rae host failed)"; tail -10 "$TMP/host.raw" | sed 's/^/    /'; exit 1
   fi
@@ -52,7 +70,7 @@ if [ -f "$WAMR_LIB" ]; then
     echo "FAIL: wasm-module-check (the Rae host's output differs from tests/wasmEmbedHost/expected.txt)"
     diff "$TMP/host.txt" tests/wasmEmbedHost/expected.txt | head -12 | sed 's/^/    /'; exit 1
   fi
-  EMBEDDED="run in a Rae host through lib/wasm"
+  EMBEDDED="run in a Rae host through lib/wasm (1000 typed frames)"
 fi
 
 # two packs a module build refuses
@@ -60,7 +78,9 @@ bad() {
   local name="$1" exports="$2" source="$3" expect="$4"
   mkdir -p "$TMP/$name"
   printf '%s\n' "$source" > "$TMP/$name/Main.rae"
-  sed "s/exports: \"add, greet, summarize, doubled, flip\"/exports: \"$exports\"/" "$FIXTURE/Module.raepack" > "$TMP/$name/Module.raepack"
+  # the fixture's pack with these exports and without its `frames` dependency
+  sed "s/exports: \"add, greet, summarize, doubled, flip\"/exports: \"$exports\"/" "$FIXTURE/Module.raepack" \
+    | perl -0pe 's/  dependencies: \{.*?\n  \}\n//s' > "$TMP/$name/Module.raepack"
   if RAE_FORMAT=off perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/$name" \
       --out "$TMP/$name/m.wasm" "$TMP/$name/Main.rae" > "$TMP/$name/build.log" 2>&1; then
     echo "FAIL: wasm-module-check (the $name pack built)"; exit 1
@@ -84,4 +104,4 @@ func keep(native: view Native) ret Int {
   ret 1
 }' "cannot cross"
 
-echo "PASS: wasm-module-check (a reactor exporting scalars, Strings and encoded values, called from Node with its rae.interface checked, $EMBEDDED; bad exports refused)"
+echo "PASS: wasm-module-check (a reactor exporting scalars, Strings and encoded values, called from Node with its rae.interface checked, $EMBEDDED; a changed frame type and bad exports refused)"

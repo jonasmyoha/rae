@@ -1,6 +1,8 @@
 # A WASM module (docs/wasm-modules.md): no main; the .raepack's wasm target
 # exports `add` and `greet` by name, and tools/wasm-module-check.sh builds it
 # with `rae build --target wasm` and calls them from host.mjs.
+open frames/Frames
+
 func add(a: view Int, b: view Int) ret Int {
   ret a + b
 }
@@ -13,27 +15,10 @@ func greet(name: view String, times: view Int) ret String {
   ret text.trim()
 }
 
-# Values that cross as their binary encoding (docs/wasm-interfaces.md §2).
-enum Mood { calm, busy }
-
-type Command {
-  name: String
-  count: Int32
-}
-
-type FrameIn {
-  commands: List(Command)
-  mood: Mood
-  note: opt String
-}
-
-type FrameOut {
-  total: Int
-  names: String
-  mood: Mood
-}
-
-func summarize(frame: view FrameIn) ret FrameOut {
+# Values that cross as their binary encoding (docs/wasm-interfaces.md §2):
+# the frame types are the `frames` package (tests/wasmFrames), which the
+# native host in tests/wasmEmbedHost imports too.
+func summarize(frame: view AppFrameIn) ret AppFrameOut {
   var total: Int = 0
   var names: String = ""
   loop let command: view Command in frame.commands {
@@ -47,7 +32,7 @@ func summarize(frame: view FrameIn) ret FrameOut {
   if total > 10 {
     mood = Mood.busy
   }
-  ret FrameOut { total: total, names: names, mood: mood }
+  ret AppFrameOut { total: total, names: names, mood: mood }
 }
 
 func doubled(values: copy List(Int)) ret List(Int) {

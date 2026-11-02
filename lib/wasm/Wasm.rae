@@ -214,6 +214,7 @@ enum WasmErrorKind {
   timedOut
   memory
   unsupported
+  interfaceMismatch
 }
 
 # the bytes are not a module this engine runs
@@ -223,6 +224,8 @@ enum WasmErrorKind {
 # the call ran past its time and was stopped
 # an address outside the instance's memory
 # no WASM engine on this platform
+# an export's types differ from the host's, or the module describes none
+# (wasm/WasmInterface: wasmCheckExport)
 type WasmError {
   kind: WasmErrorKind
   message: String
@@ -255,6 +258,9 @@ type WasmModule {
   handle: Int
   imports: List(WasmImport)
   error: WasmError
+  # The module's `rae.interface` custom section, "" when it has none
+  # (docs/wasm-interfaces.md §3; read by wasm/WasmInterface)
+  interfaceText: String
 }
 
 # How much an instance may use: the WASM stack, the host-managed heap (0 for
@@ -387,11 +393,82 @@ func wasmLoad(bytes: view List(UInt8)) ret WasmModule {
         handle: 0
         imports: List.create(WasmImport, cap: 0)
         error: wasmLastError(kind: WasmErrorKind.load)
+        interfaceText: ""
       }
     }
-    ret WasmModule { handle: handle, imports: wasmReadImports(module: handle), error: wasmOk() }
+    ret WasmModule {
+      handle: handle
+      imports: wasmReadImports(module: handle)
+      error: wasmOk()
+      interfaceText: wasmCustomSectionText(bytes: bytes, name: "rae.interface")
+    }
   }
-  ret WasmModule { handle: 0, imports: List.create(WasmImport, cap: 0), error: wasmUnsupported() }
+  ret WasmModule {
+    handle: 0
+    imports: List.create(WasmImport, cap: 0)
+    error: wasmUnsupported()
+    interfaceText: ""
+  }
+}
+
+# An unsigned LEB128 number at `position`: its value and the position after
+# it; `ok` false when it runs past the bytes or is longer than 5 bytes
+type WasmLeb {
+  value: Int
+  next: Int
+  ok: Bool
+}
+
+func wasmReadLeb(bytes: view List(UInt8), position: view Int) ret WasmLeb {
+  var value: Int = 0
+  var shift: Int = 0
+  var at: Int = position
+  loop shift < 35 {
+    if at >= bytes.length {
+      ret WasmLeb { value: 0, next: at, ok: false }
+    }
+    let byte: Int = bytes.copyAtFallback(index: at, fallback: 0) as Int
+    at = at + 1
+    value = value bitor ((byte bitand 127) shl shift)
+    if (byte bitand 128) is 0 {
+      ret WasmLeb { value: value, next: at, ok: true }
+    }
+    shift = shift + 7
+  }
+  ret WasmLeb { value: 0, next: at, ok: false }
+}
+
+# The text of the custom section `name` in a module's bytes, "" when there is
+# none. Read here, in Rae, from the bytes: after the 8-byte header every
+# section is an id byte, a LEB128 size and its contents, and a custom section
+# (id 0) starts with its name. (WAMR answers custom sections only when built
+# with them, which this build is not.)
+func wasmCustomSectionText(bytes: view List(UInt8), name: view String) ret String {
+  var position: Int = 8
+  loop position < bytes.length {
+    let id: Int = bytes.copyAtFallback(index: position, fallback: 0) as Int
+    let size: WasmLeb = wasmReadLeb(bytes: bytes, position: position + 1)
+    let end: Int = size.next + size.value
+    if size.ok is false or end > bytes.length {
+      ret ""
+    }
+    if id is 0 {
+      let nameLength: WasmLeb = wasmReadLeb(bytes: bytes, position: size.next)
+      let payload: Int = nameLength.next + nameLength.value
+      if nameLength.ok and payload <= end {
+        let found: String = String.fromBytes(
+          bytes: bytes
+          start: nameLength.next
+          count: nameLength.value
+        )
+        if found is name {
+          ret String.fromBytes(bytes: bytes, start: payload, count: end - payload)
+        }
+      }
+    }
+    position = end
+  }
+  ret ""
 }
 
 func wasmReadImports(module: view Int) ret List(WasmImport) {

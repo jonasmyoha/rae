@@ -1,0 +1,22 @@
+# The frame types a WASM module and its native host share (the `frames`
+# package): tests/wasmModule exports `summarize(frame: view AppFrameIn) ret
+# AppFrameOut`, and tests/wasmEmbedHost calls it, both built from this file,
+# so their rae.interface hashes agree (docs/wasm-interfaces.md §3).
+enum Mood { calm, busy }
+
+type Command {
+  name: String
+  count: Int32
+}
+
+type AppFrameIn {
+  commands: List(Command)
+  mood: Mood
+  note: opt String
+}
+
+type AppFrameOut {
+  total: Int
+  names: String
+  mood: Mood
+}

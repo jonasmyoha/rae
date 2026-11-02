@@ -51,6 +51,43 @@ wasmUnload(module: module)
   every file, `proc_exit` a trap. Grant `wasiMinimalGrants()` and call
   `wasiMinimalAnswer` from `wasmHostCall`.
 
+## Typed calls: `wasm/WasmInterface`
+
+A module built by `rae build --target wasm` describes its exports in its
+`rae.interface` section (docs/wasm-modules.md). A host built from the same Rae
+types (a package both import, as `tests/wasmFrames` is for the check below)
+checks an export once and then calls it with encoded values
+(docs/wasm-interfaces.md §3, §5):
+
+```rae
+if let mismatch: WasmError = wasmCheckExport(
+  module: module
+  name: "summarize"
+  params: { binarySchemaText(AppFrameIn) }
+  result: binarySchemaText(AppFrameOut)
+) {
+  log(mismatch.message)      # interfaceMismatch: both descriptions, which part differs
+}
+let reply: WasmBytesResult = wasmCallEncoded(Host, host: host, instance: instance, name: "summarize", input: frame.toBinary(), timeoutMs: 200)
+if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes) { ... }
+```
+
+- `wasmLoad` reads the section from the module's bytes (in Rae: the sections
+  are an id byte, a LEB128 size and the contents; this WAMR build answers no
+  custom sections) into `module.interfaceText`. `wasmModuleInterface(module)`
+  parses it into a `WasmInterface` (version, each export's params and result
+  as name / description / hash, the requests), none when there is none.
+- `wasmCheckExport` answers none when the export takes exactly those types
+  (`""` as `result` for none). Otherwise it answers an `interfaceMismatch`
+  that names the export, the parameter and both descriptions. A module
+  without the section, or without that export, is a mismatch too.
+- `wasmCallEncoded(H, host, instance, name, input, timeoutMs)` allocates
+  memory in the module (`raeModuleAlloc`), writes the bytes, calls the export
+  with their address and length, reads the result and frees both
+  (`raeModuleFree`). A failed step answers its error and empty bytes. A value
+  the module cannot decode traps (docs/wasm-modules.md) and comes back as a
+  `trap` error.
+
 ## How it runs
 
 Rae cannot hand C a function to call, so a host function cannot be a C
@@ -81,6 +118,10 @@ app that does (the device's or the simulator's library by SDK).
 - `compiler/tools/wasm-module-check.sh` also runs the module
   `rae build --target wasm` makes in a Rae host (`compiler/tests/wasmEmbedHost`):
   refused with nothing granted, then `_initialize`, `add` and a Unicode `greet`
-  through the module ABI with the minimal WASI.
+  through the module ABI with the minimal WASI. Built from the same frame
+  types (`compiler/tests/wasmFrames`), the host checks `summarize` and runs
+  1000 `AppFrameIn -> AppFrameOut` frames in bounded memory. A module built
+  from an `AppFrameIn` with one field more is refused by `wasmCheckExport`
+  before any call.
 - An iPhone build of case 1292's program (gen-ios, xcodebuild for iphoneos
   without signing) links WAMR's iOS library.
