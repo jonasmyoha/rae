@@ -3517,6 +3517,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // A WASM module export's struct / List / opt / enum values are encoded too.
   wasm_module_exports_register(ctx);
   binary_emit_helpers(ctx, out);
+  // A WASM module's typed host imports: the extern wrappers' prototypes,
+  // before any body calls them (their bodies come with the exports).
+  if (g_wasm_module_exports && *g_wasm_module_exports) wasm_module_imports_prototypes(ctx, out);
 
   progress_work(EMIT_STAGE_DISCOVER_HI, EMIT_STAGE_REDISCOVER_LO, 2, 3);
   // Generate rae_to_str_TYPE_ for non-c_struct user types so interpolation

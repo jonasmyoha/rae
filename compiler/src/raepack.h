@@ -32,6 +32,10 @@ typedef struct RaePackTarget {
    * asks a host for (docs/wasm-interfaces.md §4). A request never grants; the
    * module build fails on an import no request (nor `runtime`) covers. */
   Str requests;
+  /* `imports: "game.describe"` on the wasm target: `extern` functions that
+   * become WASM imports of the module `rae`, each in the named capability
+   * (docs/wasm-interfaces.md §6) */
+  Str imports;
   RaePackSource* sources;
   size_t source_count;
   struct RaePackTarget* next;

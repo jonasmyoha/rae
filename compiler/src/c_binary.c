@@ -297,6 +297,11 @@ const AstTypeRef* binary_opt_type(CompilerContext* ctx, const AstTypeRef* type) 
   copy->is_view = false;
   copy->is_mod = false;
   copy->next = NULL;
+  /* A type substituted from a generic parameter carries the payload's own
+   * TypeInfo; the optional's is the mangler's source of truth. */
+  TypeInfo* payload = type->resolved_type;
+  while (payload && payload->kind == TYPE_REF) payload = payload->as.ref.base;
+  copy->resolved_type = (payload && payload->kind != TYPE_OPT) ? type_get_opt(ctx->type_registry, payload) : payload;
   return copy;
 }
 
@@ -704,9 +709,7 @@ void binary_emit_helpers(CompilerContext* ctx, FILE* out) {
     const AstTypeRef* type = ctx->binary_types[i];
     if (bin_classify(ctx, type).kind != BK_STRUCT) continue;
     const char* m = rae_mangle_type_specialized(ctx, NULL, NULL, type);
-    AstTypeRef opt_type = *type;
-    opt_type.is_opt = true;
-    const char* opt_c = rae_mangle_type_specialized(ctx, NULL, NULL, &opt_type);
+    const char* opt_c = rae_mangle_type_specialized(ctx, NULL, NULL, binary_opt_type(ctx, type));
     unsigned char uses = ctx->binary_type_uses[i];
     if (uses & 1) {
     fprintf(out, "RAE_UNUSED static %s rae_toBinary_%s_(const %s* value) {\n", bytes_c, m, m);

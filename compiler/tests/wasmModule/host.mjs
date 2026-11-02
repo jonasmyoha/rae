@@ -8,18 +8,46 @@ import { WASI } from 'node:wasi';
 
 const module = await WebAssembly.compile(await readFile(process.argv[2]));
 const imports = WebAssembly.Module.imports(module).map((i) => i.module);
-console.log('imports only WASI:', imports.every((name) => name === 'wasi_snapshot_preview1'));
+console.log('imports only WASI and rae:', imports.every((name) => name === 'wasi_snapshot_preview1' || name === 'rae'));
 const exported = WebAssembly.Module.exports(module).map((e) => e.name);
-console.log('exports:', ['add', 'greet', 'summarize', 'doubled', 'flip', 'raeModuleAlloc', 'raeModuleFree', '_initialize'].every((n) => exported.includes(n)),
+console.log('exports:', ['add', 'greet', 'summarize', 'doubled', 'flip', 'useDescribe', 'raeModuleAlloc', 'raeModuleFree', '_initialize'].every((n) => exported.includes(n)),
   'main:', exported.includes('main') || exported.includes('_start'));
 
 // The module's stderr goes to a file, read back after the trap below.
 const stderrPath = join(mkdtempSync(join(tmpdir(), 'rae_module_')), 'stderr.txt');
 const stderrFd = openSync(stderrPath, 'w');
 const wasi = new WASI({ version: 'preview1', args: [], env: {}, stderr: stderrFd });
-const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasi.wasiImport });
+// The typed host import rae.describe (docs/wasm-interfaces.md §6): a Command
+// in as (address, length), the factor, and the module's answer buffer
+// (address, capacity); the answer's length back, or minus it when it did not
+// fit and rae.raeTakeAnswer fetches it.
+let pendingAnswer = null;
+let x = null;
+const raeImports = {
+  describe(address, length, factor, outAddress, outCapacity) {
+    const r = new Reader(new Uint8Array(x.memory.buffer, address, length).slice());
+    const name = r.string();
+    const count = r.u32();
+    const w = new Writer();
+    w.string(factor > 100n ? 'x'.repeat(Number(factor)) : `${name} x${factor}`);
+    w.u32(count * Number(factor));
+    if (w.bytes.length <= outCapacity) {
+      new Uint8Array(x.memory.buffer, outAddress, w.bytes.length).set(w.bytes);
+      return BigInt(w.bytes.length);
+    }
+    pendingAnswer = w.bytes;
+    return -BigInt(w.bytes.length);
+  },
+  raeTakeAnswer(address) {
+    new Uint8Array(x.memory.buffer, address, pendingAnswer.length).set(pendingAnswer);
+    const length = pendingAnswer.length;
+    pendingAnswer = null;
+    return BigInt(length);
+  },
+};
+const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1: wasi.wasiImport, rae: raeImports });
 wasi.initialize(instance);
-const x = instance.exports;
+x = instance.exports;
 
 console.log('add(40, 2) =', x.add(40n, 2n));
 console.log('add(-7, 3) =', x.add(-7n, 3n));
@@ -134,3 +162,14 @@ console.log('after the trap add(1, 2) =', x.add(1n, 2n));
 const before = x.memory.buffer.byteLength;
 for (let i = 0; i < 1000; i++) summarize({ commands: [{ name: 'loop', count: i }], mood: 'calm', note: 'n' });
 console.log('1000 value calls grew memory:', x.memory.buffer.byteLength > before + 1048576);
+
+// ---- the typed host import, called through the export useDescribe ----
+function useDescribe(name, count, factor) {
+  const w = new Writer(); w.string(name); w.u32(count);
+  const r = new Reader(callEncoded((at, length) => x.useDescribe(at, length, BigInt(factor)), w.bytes));
+  return { name: r.string(), count: r.u32() };
+}
+const short = useDescribe('lamp', 4, 3);
+console.log('useDescribe =', JSON.stringify(short));
+const long = useDescribe('lamp', 1, 3000);
+console.log('useDescribe with a 3000-byte answer: name length', long.name.length, 'count', long.count);

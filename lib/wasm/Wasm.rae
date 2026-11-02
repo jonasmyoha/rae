@@ -290,6 +290,9 @@ type WasmInstance {
   # not granted ("" when it may be called). wasmCall answers such a call with
   # a trap itself, before the host's wasmHostCall.
   denied: List(String)
+  # A typed import's answer that did not fit the module's buffer, until the
+  # module fetches it (rae.raeTakeAnswer; wasm/WasmInterface wasmAnswerBytes)
+  pendingAnswer: List(UInt8)
 }
 
 # A capability (docs/wasm-interfaces.md §4): a named set of imports, each
@@ -506,6 +509,7 @@ func wasmRefusedInstance(
     imports: List.create(WasmImport, cap: 0)
     error: WasmError { kind: kind, message: "{message}" }
     denied: List.create(String, cap: 0)
+    pendingAnswer: List.create(UInt8, cap: 0)
   }
 }
 
@@ -532,6 +536,7 @@ func wasmInstantiate(
       imports: List.create(WasmImport, cap: 0)
       error: WasmError { kind: module.error.kind, message: "{module.error.message}" }
       denied: List.create(String, cap: 0)
+      pendingAnswer: List.create(UInt8, cap: 0)
     }
   }
   var requested: List(String) = List.create(String, cap: 4)
@@ -578,7 +583,11 @@ func wasmInstantiate(
   var denied: List(String) = List.create(String, cap: module.imports.length)
   loop let wasmImport: view WasmImport in module.imports {
     let key: String = wasmImportKey(wasmImport: wasmImport)
+    # lib/wasm's own: the fetch of a typed import's answer
     var owner: String = ""
+    if key is "rae.raeTakeAnswer" {
+      owner = "runtime"
+    }
     loop let name: view String in requested {
       if let index: Int = wasmCapabilityNamed(exposed: exposed, name: name) {
         if let capability: view WasmCapability = exposed.viewAt(index: index) {
@@ -628,6 +637,7 @@ func wasmInstantiate(
         imports: List.create(WasmImport, cap: 0)
         error: wasmLastError(kind: WasmErrorKind.instantiate)
         denied: List.create(String, cap: 0)
+        pendingAnswer: List.create(UInt8, cap: 0)
       }
     }
     ret WasmInstance {
@@ -636,6 +646,7 @@ func wasmInstantiate(
       imports: module.imports
       error: wasmOk()
       denied: denied
+      pendingAnswer: List.create(UInt8, cap: 0)
     }
   }
   ret WasmInstance {
@@ -644,6 +655,7 @@ func wasmInstantiate(
     imports: List.create(WasmImport, cap: 0)
     error: wasmUnsupported()
     denied: List.create(String, cap: 0)
+    pendingAnswer: List.create(UInt8, cap: 0)
   }
 }
 
@@ -837,7 +849,12 @@ func wasmCall(
           index: call.importIndex
           fallback: ""
         )
-        if capability.length() > 0 {
+        if call.module is "rae" and call.name is "raeTakeAnswer" {
+          wasmGiveHostAnswer(
+            instance: instance
+            answer: wasmTakePendingAnswer(instance: instance, call: call)
+          )
+        } else if capability.length() > 0 {
           # requested but not granted: refused here, the host never sees it
           wasmGiveHostAnswer(
             instance: instance
@@ -860,6 +877,19 @@ func wasmCall(
     }
   }
   ret WasmCallResult { values: List.create(WasmValue, cap: 0), error: wasmUnsupported() }
+}
+
+# rae.raeTakeAnswer(address): the pending typed answer written at `address`,
+# its length answered, and forgotten
+func wasmTakePendingAnswer(instance: mod WasmInstance, call: view WasmHostCall) ret WasmHostAnswer {
+  let address: Int = call.args.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+  let length: Int = instance.pendingAnswer.length
+  if wasmMemoryWrite(instance: instance, address: address, bytes: instance.pendingAnswer) is false {
+    ret wasmTrap(message: "raeTakeAnswer: the answer does not fit the module's memory at {address}")
+  }
+  instance.pendingAnswer = List.create(UInt8, cap: 0)
+  let results: List(WasmValue) = { wasmI64(value: length) }
+  ret wasmAnswer(results: results)
 }
 
 # Stop the running call of the instance whose handle is `instanceHandle`

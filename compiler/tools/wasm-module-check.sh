@@ -16,7 +16,10 @@
 # tools/wamr/build.sh's library). Then three bad packs must be refused: an
 # export that names no function, a `mod` parameter, and a struct holding a
 # Ptr; and a module whose `requests` miss `clock` must fail to build, naming
-# clock_time_get (docs/wasm-interfaces.md §4). SKIP without wasi-sdk ($WASI_SDK,
+# clock_time_get, and one whose requests miss `game` must fail naming its
+# typed host import rae.describe (docs/wasm-interfaces.md §4, §6). The Node
+# host and the Rae host both answer that import (`useDescribe`), the Rae
+# host also with `game` ungranted, where it traps. SKIP without wasi-sdk ($WASI_SDK,
 # default ~/.local/wasi-sdk) or node. One pre-suite case of every full run;
 # `make wasm-module-check` alone.
 set -u
@@ -79,9 +82,10 @@ bad() {
   local name="$1" exports="$2" source="$3" expect="$4"
   mkdir -p "$TMP/$name"
   printf '%s\n' "$source" > "$TMP/$name/Main.rae"
-  # the fixture's pack with these exports and without its `frames` dependency
-  sed "s/exports: \"add, greet, summarize, doubled, flip\"/exports: \"$exports\"/" "$FIXTURE/Module.raepack" \
-    | perl -0pe 's/  dependencies: \{.*?\n  \}\n//s' > "$TMP/$name/Module.raepack"
+  # the fixture's pack with these exports, without its `frames` dependency
+  # and its typed import
+  sed "s/exports: \"add, greet, summarize, doubled, flip, useDescribe\"/exports: \"$exports\"/" "$FIXTURE/Module.raepack" \
+    | perl -0pe 's/  dependencies: \{.*?\n  \}\n//s; s/\n *imports: "[^"]*"//' > "$TMP/$name/Module.raepack"
   if RAE_FORMAT=off perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/$name" \
       --out "$TMP/$name/m.wasm" "$TMP/$name/Main.rae" > "$TMP/$name/build.log" 2>&1; then
     echo "FAIL: wasm-module-check (the $name pack built)"; exit 1
@@ -110,13 +114,22 @@ mkdir -p "$TMP/underRequested"
 cp -R "$FIXTURE" "$TMP/underRequested/wasmModule"
 cp -R tests/wasmFrames "$TMP/underRequested/wasmFrames"
 rm -f "$TMP/underRequested/wasmModule/rae.lock"
-perl -pi -e 's/requests: "log, clock"/requests: "log"/' "$TMP/underRequested/wasmModule/Module.raepack"
+perl -pi -e 's/requests: "log, clock, game"/requests: "log, game"/' "$TMP/underRequested/wasmModule/Module.raepack"
 if perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/underRequested/wasmModule" \
     --out "$TMP/underRequested.wasm" "$TMP/underRequested/wasmModule/Main.rae" > "$TMP/underRequested.log" 2>&1; then
   echo "FAIL: wasm-module-check (a module whose requests miss clock built)"; exit 1
 fi
 if ! grep -q 'clock_time_get: add `clock` to the requests' "$TMP/underRequested.log" || [ -f "$TMP/underRequested.wasm" ]; then
   echo "FAIL: wasm-module-check (a module whose requests miss clock failed without naming the import, or left its .wasm)"
+  tail -5 "$TMP/underRequested.log" | sed 's/^/    /'; exit 1
+fi
+
+# a typed host import whose capability the requests leave out
+perl -pi -e 's/requests: "log, game"/requests: "log, clock"/' "$TMP/underRequested/wasmModule/Module.raepack"
+if perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target wasm --project "$TMP/underRequested/wasmModule" \
+    --out "$TMP/underRequested.wasm" "$TMP/underRequested/wasmModule/Main.rae" > "$TMP/underRequested.log" 2>&1 \
+    || ! grep -q 'rae.describe: add `game` to the requests' "$TMP/underRequested.log"; then
+  echo "FAIL: wasm-module-check (a typed import outside the requests was not refused by name)"
   tail -5 "$TMP/underRequested.log" | sed 's/^/    /'; exit 1
 fi
 

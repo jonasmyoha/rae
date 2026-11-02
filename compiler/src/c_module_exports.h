@@ -14,6 +14,15 @@ extern const char* g_wasm_module_exports;
  * NULL / "" for none */
 extern const char* g_wasm_module_requests;
 
+/* The typed host imports (`imports: "game.describe"` on the wasm target):
+ * `extern` functions that become imports of the WASM module `rae`
+ * (docs/wasm-interfaces.md §6), or NULL / "" for none */
+extern const char* g_wasm_module_imports;
+
+/* The C prototype of each typed host import's wrapper, before the function
+ * bodies call them (their bodies come with the exports) */
+void wasm_module_imports_prototypes(CompilerContext* ctx, FILE* out);
+
 /* After the link: whether every import of the module at `wasm_path` is in
  * `runtime` or a requested capability; false after naming each one that is
  * not (docs/wasm-interfaces.md §4). */

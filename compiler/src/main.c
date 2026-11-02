@@ -3019,9 +3019,10 @@ static bool find_project_pack(const char* entry_path, const char* project_root, 
 /* The `exports` of the project pack's wasm target (empty when there is no
  * pack, no wasm target or no exports: a program, not a module) */
 static void wasm_module_exports_of(const char* entry_path, const char* project_root, char* out, size_t cap,
-                                   char* requests, size_t requests_cap) {
+                                   char* requests, size_t requests_cap, char* imports, size_t imports_cap) {
   out[0] = '\0';
   requests[0] = '\0';
+  imports[0] = '\0';
   char pack_path[PATH_MAX];
   if (!find_project_pack(entry_path, project_root, pack_path)) return;
   RaePack pack;
@@ -3033,6 +3034,7 @@ static void wasm_module_exports_of(const char* entry_path, const char* project_r
   if (target && target->exports.len > 0) {
     snprintf(out, cap, "%.*s", (int)target->exports.len, target->exports.data);
     snprintf(requests, requests_cap, "%.*s", (int)target->requests.len, target->requests.data ? target->requests.data : "");
+    snprintf(imports, imports_cap, "%.*s", (int)target->imports.len, target->imports.data ? target->imports.data : "");
   }
   raepack_free(&pack);
 }
@@ -4675,11 +4677,13 @@ static int run_command(const char* cmd, int argc, char** argv) {
          * instead of a browser program */
         char module_exports[1024] = {0};
         char module_requests[1024] = {0};
+        char module_imports[1024] = {0};
         wasm_module_exports_of(build_opts.entry_path, final_root, module_exports, sizeof(module_exports),
-                               module_requests, sizeof(module_requests));
+                               module_requests, sizeof(module_requests), module_imports, sizeof(module_imports));
         if (module_exports[0]) {
           g_wasm_module_exports = module_exports;
           g_wasm_module_requests = module_requests;
+          g_wasm_module_imports = module_imports;
           bool m_sdl3 = false, m_webgpu = false;
           bool emitted = build_c_backend_output(build_opts.entry_path, final_root, temp_c, build_opts.no_implicit,
                                                 &m_sdl3, &m_webgpu, NULL, PROGRESS_EMIT);

@@ -40,6 +40,7 @@
 
 const char* g_wasm_module_exports = NULL;
 const char* g_wasm_module_requests = NULL;
+const char* g_wasm_module_imports = NULL;
 
 /* The standard capabilities: named sets of the WASI imports a module built
  * here makes (docs/wasm-interfaces.md §4). The same table is
@@ -155,7 +156,64 @@ static char* next_export_name(char* names, char** cursor) {
   return strtok_r(names, " ,\t\n", cursor);
 }
 
+/* ---- typed host imports (docs/wasm-interfaces.md §6) ------------------
+ *
+ * `imports: "game.describe"` on the wasm target: the `extern` function
+ * `describe` becomes the WASM import `rae.describe`, in capability `game`.
+ * The compiler writes the C function the extern names (its `extern("...")`
+ * symbol): it encodes the arguments as an export's are (scalars directly, a
+ * String or a value as an address and length), calls the raw import, and
+ * decodes the answer. A String or value answer comes back in a buffer the
+ * wrapper passes (address, capacity) as the last two arguments; the import
+ * answers the length, or minus the length when it did not fit, and then the
+ * wrapper fetches it with `rae.raeTakeAnswer(address)`, which lib/wasm
+ * answers itself. So the host function runs once per call. */
+
+typedef struct { char capability[64]; char name[128]; } ImportEntry;
+#define MAX_IMPORTS 64
+#define IMPORT_ANSWER_SPACE 1024
+
+/* The pack's `capability.function` entries; false (reported) when one is not
+ * written that way. */
+static int import_entries(ImportEntry* entries, bool report) {
+  int count = 0;
+  if (!g_wasm_module_imports || !*g_wasm_module_imports) return 0;
+  char list[1024];
+  snprintf(list, sizeof list, "%s", g_wasm_module_imports);
+  char* cursor = NULL;
+  for (char* item = strtok_r(list, " ,\t\n", &cursor); item && count < MAX_IMPORTS;
+       item = strtok_r(NULL, " ,\t\n", &cursor)) {
+    char* dot = strchr(item, '.');
+    if (!dot || dot == item || !dot[1]) {
+      if (report) fprintf(stderr, "error: wasm target import '%s' is not written capability.function (\"game.describe\")\n", item);
+      return -1;
+    }
+    *dot = 0;
+    snprintf(entries[count].capability, sizeof entries[count].capability, "%s", item);
+    snprintf(entries[count].name, sizeof entries[count].name, "%s", dot + 1);
+    count++;
+  }
+  return count;
+}
+
+/* The one `extern` function named `name`, or NULL. */
+static const AstFuncDecl* find_import_extern(CompilerContext* ctx, const char* name) {
+  size_t count = 0;
+  const size_t* named = decl_index_functions(ctx, str_from_cstr(name), &count);
+  for (size_t k = 0; k < count; k++) {
+    const AstFuncDecl* fd = &ctx->all_decls[named[k]]->as.func_decl;
+    if (fd->is_extern && fd->extern_symbol) return fd;
+  }
+  return NULL;
+}
+
+static bool g_import_failed = false;
+
+static void wasm_module_imports_register(CompilerContext* ctx);
+static bool emit_import_wrappers(CompilerContext* ctx, FILE* out);
+
 void wasm_module_exports_register(CompilerContext* ctx) {
+  wasm_module_imports_register(ctx);
   if (!g_wasm_module_exports || !*g_wasm_module_exports) return;
   char names[4096];
   snprintf(names, sizeof names, "%s", g_wasm_module_exports);
@@ -369,6 +427,28 @@ static void emit_interface_section(CompilerContext* ctx, FILE* out) {
     else fprintf(text, "null");
     fprintf(text, "}");
   }
+  fprintf(text, "],\"imports\":[");
+  {
+    ImportEntry entries[MAX_IMPORTS];
+    int count = import_entries(entries, false);
+    bool first_import = true;
+    for (int i = 0; i < count; i++) {
+      const AstFuncDecl* f = find_import_extern(ctx, entries[i].name);
+      if (!f) continue;
+      fprintf(text, "%s{\"name\":\"%s\",\"capability\":\"%s\",\"params\":[", first_import ? "" : ",",
+              entries[i].name, entries[i].capability);
+      first_import = false;
+      for (const AstParam* p = f->params; p; p = p->next) {
+        fprintf(text, "{\"name\":\"%.*s\",", (int)p->name.len, p->name.data);
+        json_type(ctx, text, p->type);
+        fprintf(text, "}%s", p->next ? "," : "");
+      }
+      fprintf(text, "],\"result\":");
+      if (f->returns && f->returns->type) { fprintf(text, "{"); json_type(ctx, text, f->returns->type); fprintf(text, "}"); }
+      else fprintf(text, "null");
+      fprintf(text, "}");
+    }
+  }
   fprintf(text, "],\"requests\":[");
   if (g_wasm_module_requests) {
     char requests[1024];
@@ -414,6 +494,7 @@ bool emit_wasm_module_exports(CompilerContext* ctx, FILE* out) {
     const AstFuncDecl* f = find_export(ctx, name, true);
     if (!f || !emit_wrapper(ctx, out, name, f)) ok = false;
   }
+  if (!emit_import_wrappers(ctx, out)) ok = false;
   if (ok) emit_interface_section(ctx, out);
   return ok;
 }
@@ -491,6 +572,14 @@ bool wasm_module_check_imports(const char* wasm_path) {
         else if (kind == 4) { b.pos++; read_leb(&b); }
         else { b.ok = false; break; }
         const char* capability = strcmp(module_name, WASI_MODULE) == 0 ? standard_capability(name) : NULL;
+        if (strcmp(module_name, "rae") == 0) {
+          /* lib/wasm's own answer fetch, and the typed imports' capabilities */
+          if (strcmp(name, "raeTakeAnswer") == 0) continue;
+          ImportEntry entries[MAX_IMPORTS];
+          int entry_count = import_entries(entries, false);
+          for (int e = 0; e < entry_count; e++)
+            if (strcmp(entries[e].name, name) == 0) capability = entries[e].capability;
+        }
         if (capability && (strcmp(capability, "runtime") == 0 || list_has(g_wasm_module_requests, capability))) continue;
         if (refused++ == 0)
           fprintf(stderr, "error: the module imports what its wasm target's `requests` do not cover (docs/wasm-interfaces.md §4):\n");
@@ -508,4 +597,207 @@ bool wasm_module_check_imports(const char* wasm_path) {
     return false;
   }
   return refused == 0;
+}
+
+
+/* ---- typed host imports: register, check, prototypes, wrappers ------------ */
+
+static void wasm_module_imports_register(CompilerContext* ctx) {
+  ImportEntry entries[MAX_IMPORTS];
+  int count = import_entries(entries, false);
+  for (int i = 0; i < count; i++) {
+    const AstFuncDecl* f = find_import_extern(ctx, entries[i].name);
+    if (!f) continue;
+    for (const AstParam* p = f->params; p; p = p->next) {
+      ExportKind kind = export_kind(ctx, p->type, NULL, 0);
+      if (kind == EXPORT_VALUE || kind == EXPORT_STRING) binary_register_type(ctx, plain_type(ctx, p->type), 0);
+    }
+    if (f->returns && f->returns->type) {
+      ExportKind kind = export_kind(ctx, f->returns->type, NULL, 0);
+      if (kind == EXPORT_VALUE || kind == EXPORT_STRING) binary_register_type(ctx, plain_type(ctx, f->returns->type), 0);
+    }
+  }
+}
+
+/* Whether the import's types can cross; false after saying why. */
+static bool import_signature_ok(CompilerContext* ctx, const char* name, const AstFuncDecl* f, ExportKind* result) {
+  char why[1024];
+  *result = EXPORT_NONE;
+  if (f->returns) {
+    if (f->returns->next) {
+      fprintf(stderr, "error: wasm module import '%s' returns more than one value\n", name);
+      return false;
+    }
+    *result = export_kind(ctx, f->returns->type, why, sizeof why);
+    if (*result == EXPORT_BAD) {
+      fprintf(stderr, "error: wasm module import '%s' returns a type that cannot cross: %s\n", name, why);
+      return false;
+    }
+  }
+  for (const AstParam* p = f->params; p; p = p->next) {
+    ExportKind kind = export_kind(ctx, p->type, why, sizeof why);
+    bool by_view = p->type->is_view;
+    if (kind == EXPORT_BAD || kind == EXPORT_NONE || p->type->is_mod
+        || ((kind == EXPORT_STRING || kind == EXPORT_VALUE) && !by_view)) {
+      fprintf(stderr, "error: wasm module import '%s': parameter '%.*s' must be an Int, Float, Float64 or Bool, "
+                      "or a String or a struct, List, opt or enum value passed by view%s%s\n",
+              name, (int)p->name.len, p->name.data, why[0] ? ": " : "", why);
+      return false;
+    }
+  }
+  return true;
+}
+
+static const char* import_scalar_c(ExportKind kind) {
+  switch (kind) {
+    case EXPORT_INT: return "int64_t";
+    case EXPORT_FLOAT: return "float";
+    case EXPORT_FLOAT64: return "double";
+    case EXPORT_BOOL: return "rae_Bool";
+    default: return "void";
+  }
+}
+
+/* `<result> <symbol>(<params>)`: the extern's C signature, as its call sites
+ * pass the arguments. */
+static void emit_import_signature(CompilerContext* ctx, FILE* out, const AstFuncDecl* f, ExportKind result) {
+  if (result == EXPORT_STRING) fprintf(out, "rae_String ");
+  else if (result == EXPORT_VALUE) { char* c = value_c_type(ctx, f->returns->type); fprintf(out, "%s ", c ? c : "int64_t"); free(c); }
+  else fprintf(out, "%s ", import_scalar_c(result));
+  fprintf(out, "%s(", f->extern_symbol);
+  int index = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    if (index > 0) fprintf(out, ", ");
+    ExportKind kind = export_kind(ctx, p->type, NULL, 0);
+    if (kind == EXPORT_STRING) fprintf(out, "rae_View_String p%d", index);
+    else if (kind == EXPORT_VALUE) { char* c = value_c_type(ctx, p->type); fprintf(out, "const %s* p%d", c ? c : "int64_t", index); free(c); }
+    else fprintf(out, "%s p%d", import_scalar_c(kind), index);
+  }
+  if (index == 0) fprintf(out, "void");
+  fprintf(out, ")");
+}
+
+void wasm_module_imports_prototypes(CompilerContext* ctx, FILE* out) {
+  ImportEntry entries[MAX_IMPORTS];
+  int count = import_entries(entries, true);
+  if (count < 0) { g_import_failed = true; return; }
+  for (int i = 0; i < count; i++) {
+    const AstFuncDecl* f = find_import_extern(ctx, entries[i].name);
+    if (!f) {
+      fprintf(stderr, "error: wasm target import '%s.%s' names no `extern` function of the program\n",
+              entries[i].capability, entries[i].name);
+      g_import_failed = true;
+      continue;
+    }
+    ExportKind result;
+    if (!import_signature_ok(ctx, entries[i].name, f, &result)) { g_import_failed = true; continue; }
+    emit_import_signature(ctx, out, f, result);
+    fprintf(out, ";\n");
+  }
+}
+
+static void emit_import_wrapper(CompilerContext* ctx, FILE* out, const ImportEntry* entry, const AstFuncDecl* f) {
+  ExportKind result;
+  if (!import_signature_ok(ctx, entry->name, f, &result)) return;
+  const char* name = entry->name;
+  bool answer_in_memory = result == EXPORT_STRING || result == EXPORT_VALUE;
+  /* the codecs of its values */
+  int index = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    if (export_kind(ctx, p->type, NULL, 0) != EXPORT_VALUE) continue;
+    char codec[256];
+    snprintf(codec, sizeof codec, "%s_import_p%d", name, index);
+    binary_emit_value_codec(ctx, out, codec, p->type);
+  }
+  if (result == EXPORT_VALUE) {
+    char codec[256];
+    snprintf(codec, sizeof codec, "%s_import_result", name);
+    binary_emit_value_codec(ctx, out, codec, f->returns->type);
+  }
+  /* the raw WASM import */
+  const char* raw_result = result == EXPORT_BOOL ? "int32_t" : answer_in_memory ? "int64_t" : import_scalar_c(result);
+  fprintf(out, "__attribute__((import_module(\"rae\"), import_name(\"%s\"))) %s rae_import_raw_%s(", name, raw_result, name);
+  index = 0;
+  int raw_count = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    ExportKind kind = export_kind(ctx, p->type, NULL, 0);
+    if (kind == EXPORT_STRING || kind == EXPORT_VALUE) fprintf(out, "%sint32_t, int32_t", raw_count++ ? ", " : "");
+    else if (kind == EXPORT_BOOL) fprintf(out, "%sint32_t", raw_count++ ? ", " : "");
+    else fprintf(out, "%s%s", raw_count++ ? ", " : "", import_scalar_c(kind));
+  }
+  if (answer_in_memory) fprintf(out, "%sint32_t, int32_t", raw_count++ ? ", " : "");
+  if (raw_count == 0) fprintf(out, "void");
+  fprintf(out, ");\n");
+  /* the wrapper the extern's call sites call */
+  emit_import_signature(ctx, out, f, result);
+  fprintf(out, " {\n");
+  index = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    if (export_kind(ctx, p->type, NULL, 0) != EXPORT_VALUE) continue;
+    fprintf(out, "  rae_BinOut p%d_out = {0}; rae_binPutValue_%s_import_p%d(&p%d_out, p%d);\n", index, name, index, index, index);
+    fprintf(out, "  if (p%d_out.failed) rae_module_trap(\"host import '%s': parameter '%.*s' is too large to encode\");\n",
+            index, name, (int)p->name.len, p->name.data);
+  }
+  if (answer_in_memory) fprintf(out, "  uint8_t answer_space[%d];\n", IMPORT_ANSWER_SPACE);
+  if (result == EXPORT_NONE) fprintf(out, "  rae_import_raw_%s(", name);
+  else fprintf(out, "  %s raw = rae_import_raw_%s(", raw_result, name);
+  index = 0;
+  raw_count = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    ExportKind kind = export_kind(ctx, p->type, NULL, 0);
+    if (raw_count++) fprintf(out, ", ");
+    if (kind == EXPORT_STRING) fprintf(out, "(int32_t)(intptr_t)p%d.ptr->data, (int32_t)p%d.ptr->len", index, index);
+    else if (kind == EXPORT_VALUE) fprintf(out, "(int32_t)(intptr_t)p%d_out.data, (int32_t)p%d_out.len", index, index);
+    else if (kind == EXPORT_BOOL) fprintf(out, "p%d ? 1 : 0", index);
+    else fprintf(out, "p%d", index);
+  }
+  if (answer_in_memory) fprintf(out, "%s(int32_t)(intptr_t)answer_space, %d", raw_count++ ? ", " : "", IMPORT_ANSWER_SPACE);
+  fprintf(out, ");\n");
+  index = 0;
+  for (const AstParam* p = f->params; p; p = p->next, index++) {
+    if (export_kind(ctx, p->type, NULL, 0) == EXPORT_VALUE) fprintf(out, "  rae_ext_rae_buf_free(p%d_out.data);\n", index);
+  }
+  if (result == EXPORT_NONE) { fprintf(out, "}\n"); return; }
+  if (!answer_in_memory) {
+    if (result == EXPORT_BOOL) fprintf(out, "  return raw != 0;\n}\n");
+    else fprintf(out, "  return raw;\n}\n");
+    return;
+  }
+  /* the answer: in answer_space, or fetched when it did not fit */
+  fprintf(out, "  const uint8_t* answer = answer_space; uint8_t* big = NULL; int64_t answer_length = raw;\n");
+  fprintf(out, "  if (raw > %d) rae_module_trap(\"host import '%s' answered more than its buffer\");\n", IMPORT_ANSWER_SPACE, name);
+  fprintf(out, "  if (raw < 0) {\n");
+  fprintf(out, "    big = (uint8_t*)malloc((size_t)-raw);\n");
+  fprintf(out, "    if (!big) rae_module_trap(\"host import '%s': no memory for its answer\");\n", name);
+  fprintf(out, "    answer_length = rae_import_take_answer((int32_t)(intptr_t)big);\n");
+  fprintf(out, "    if (answer_length != -raw) { free(big); rae_module_trap(\"host import '%s': its answer did not arrive\"); }\n", name);
+  fprintf(out, "    answer = big;\n  }\n");
+  if (result == EXPORT_STRING) {
+    fprintf(out, "  if (!rae_bin_utf8(answer, answer_length)) { free(big); rae_module_trap(\"host import '%s' answered text that is not UTF-8\"); }\n", name);
+    fprintf(out, "  rae_String text = answer_length > 0 ? rae_ext_rae_str_from_bytes((uint8_t*)answer, 0, answer_length) : (rae_String){0};\n");
+    fprintf(out, "  free(big);\n  return text;\n}\n");
+    return;
+  }
+  char* c = value_c_type(ctx, f->returns->type);
+  fprintf(out, "  rae_BinIn in = { answer, answer_length, 0 };\n");
+  fprintf(out, "  %s value; memset(&value, 0, sizeof value);\n", c ? c : "int64_t");
+  fprintf(out, "  if (!rae_binGetValue_%s_import_result(&in, &value)) {\n", name);
+  fprintf(out, "    rae_binFreeValue_%s_import_result(&value); free(big);\n", name);
+  fprintf(out, "    rae_module_trap(\"host import '%s' answered a value that does not decode as %s\");\n  }\n",
+          name, binary_schema_text(ctx, plain_type(ctx, f->returns->type)));
+  fprintf(out, "  free(big);\n  return value;\n}\n");
+  free(c);
+}
+
+static bool emit_import_wrappers(CompilerContext* ctx, FILE* out) {
+  ImportEntry entries[MAX_IMPORTS];
+  int count = import_entries(entries, false);
+  if (count <= 0) return !g_import_failed;
+  fprintf(out, "__attribute__((import_module(\"rae\"), import_name(\"raeTakeAnswer\"))) "
+               "int64_t rae_import_take_answer(int32_t address);\n");
+  for (int i = 0; i < count; i++) {
+    const AstFuncDecl* f = find_import_extern(ctx, entries[i].name);
+    if (f) emit_import_wrapper(ctx, out, &entries[i], f);
+  }
+  return !g_import_failed;
 }
