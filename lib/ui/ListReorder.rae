@@ -44,7 +44,8 @@ enum ListReorderPhase { idle, pressing, lifted, settling }
 # `i * pitch`. `shifts` holds every row's offset from its resting place while
 # rows make room and while they ease home; `rowY` is where the lifted row's
 # top is. `settled` says which order the rows ease home in once dropped: 0
-# waiting for the app, 1 its new order, 2 the old one.
+# waiting for the app, 1 its new order, 2 the old one. `poseDue`: the step
+# moved something that listReorderPoseSystem has not placed on the rows yet.
 type ListReorderDrag {
   phase: ListReorderPhase
   fromIndex: Int
@@ -61,4 +62,5 @@ type ListReorderDrag {
   dataGeneration: Int
   settled: Int
   scrollRoot: EntityId
+  poseDue: Bool = false
 }

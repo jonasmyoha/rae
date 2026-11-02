@@ -1,18 +1,27 @@
 # listReorderSystem — drag to reorder the rows of a virtual ListView that
 # carries a `ListReorder` (ui/ListReorder has the gesture and the action it
-# fires). Run it every frame that has a press or a drag in progress
-# (`listReorderNeedsRun`), after the input step (updateUiInput) and before
-# the scroll root's update, then the list system and the layout as usual. It
-# returns true while something moves, so the app keeps drawing frames; once
-# every row is home it returns false and does nothing until the next press.
+# fires). Two steps a frame:
 #
-# Each frame of a drag it writes, on the list's pooled row entities only: a
-# `RuntimeOffset` (the row's place along the list, a transform-time move,
-# never a relayout), and on the lifted row a `TransformFx` (its lift scale,
-# about its middle) and a `PaintOnTop` (painted over its neighbors). When the
-# rows are home it takes all three away again. A row whose data changes under
-# it (the window recycles rows as the list scrolls) gets the offset of the
-# data row it now shows, so nothing jumps.
+# - `listReorderSystem`, every frame that has a press or a drag in progress
+#   (`listReorderNeedsRun`), after the input step (updateUiInput) and before
+#   the scroll root's update: the gesture, the drop's action, the rows'
+#   offsets easing. It returns true while something moves, so the app keeps
+#   drawing frames; once every row is home it returns false and does nothing
+#   until the next press.
+# - `listReorderPoseSystem`, after listViewSystem has bound the rows to this
+#   frame's data and before the layout: it puts those offsets on the rows.
+#   A drop's new order arrives in the same frame as the drop (the app takes
+#   the action in its update), and the list rebinds every row to it there;
+#   placing the rows after that rebinding is what keeps the frame that shows
+#   the new order from drawing it with the old order's offsets.
+#
+# Each frame of a drag the pose writes, on the list's pooled row entities
+# only: a `RuntimeOffset` (the row's place along the list, a transform-time
+# move, never a relayout), and on the lifted row a `TransformFx` (its lift
+# scale, about its middle) and a `PaintOnTop` (painted over its neighbors).
+# When the rows are home it takes all three away again. A row whose data
+# changes under it (the window recycles rows as the list scrolls) gets the
+# offset of the data row it now shows, so nothing jumps.
 #
 # While a row is lifted the scroll root around the list does not follow the
 # finger (updateScrollRoot asks `listReorderHolds`), the press is claimed
@@ -115,6 +124,7 @@ func idleReorderDrag() ret ListReorderDrag {
     dataGeneration: 0
     settled: 0
     scrollRoot: noEntity()
+    poseDue: false
   }
 }
 
@@ -446,24 +456,18 @@ func listReorderStep(
     )
   }
 
-  listReorderPose(
-    world: world
-    uiSystems: uiSystems
-    listEntity: listEntity
-    listView: listView
-    reorder: reorder
-    drag: drag
-    count: count
-    pitch: pitch
-  )
+  # Placed on the rows by listReorderPoseSystem, after the list has bound
+  # them to this frame's data
+  drag.poseDue = true
   let moving: Bool = drag.phase is not ListReorderPhase.idle
   componentSet(this: world.listReorderDrags, entityId: listEntity, data: own drag)
   ret moving or wasIdle is false
 }
 
-# After the drop: once the app has reordered its data, every row eases from
-# where it was drawn into its new place; with no new data in time (or a row
-# put back where it was), into its old place. Then the drag is over.
+# After the drop: once the app has reordered its data (listReorderTakeOrder),
+# every row eases from where it was drawn into its new place; with no new
+# data in time (or a row put back where it was), into its old place. Then
+# the drag is over.
 func listReorderSettle(
   drag: mod ListReorderDrag
   world: view UiWorld
@@ -473,33 +477,9 @@ func listReorderSettle(
   seconds: view Float
 ) {
   if drag.settled is 0 {
+    # The new order is taken by listReorderPoseSystem, in the frame it comes
     let moved: Bool = drag.toIndex is not drag.fromIndex
-    let dataChanged: Bool = componentTableGeneration(ListViewData, this: world.listViewDatas) is not drag.dataGeneration
-    if moved and dataChanged and count is drag.shifts.length {
-      # Each row's drawn place, now in the new order
-      var shifts: List(Float) = List.create(Float, cap: count)
-      loop var i: Int = 0, i < count, ++i {
-        shifts.add(value: 0.0)
-      }
-      loop var index: Int = 0, index < count, ++index {
-        var drawn: Float = drag.rowY
-        if index is not drag.fromIndex {
-          var shift: Float = 0.0
-          if let current: Float = drag.shifts.copyAt(index: index) {
-            shift = current
-          }
-          drawn = index.toFloat() * pitch + shift
-        }
-        let newIndex: Int = reorderNewIndex(
-          index: index
-          fromIndex: drag.fromIndex
-          toIndex: drag.toIndex
-        )
-        shifts.set(index: newIndex, value: drawn - newIndex.toFloat() * pitch)
-      }
-      drag.shifts = own shifts
-      drag.settled = 1
-    } else if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or count is not drag.shifts.length {
+    if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or count is not drag.shifts.length {
       # Back home in the old order: the lifted row from where it was dropped
       if drag.fromIndex < drag.shifts.length {
         drag.shifts.set(index: drag.fromIndex, value: drag.rowY - drag.fromIndex.toFloat() * pitch)
@@ -533,6 +513,104 @@ func listReorderSettle(
   if home and drag.lift is 0.0 {
     drag.phase = ListReorderPhase.idle
   }
+}
+
+# The rows of every reorderable list at their places for this frame: run it
+# after listViewSystem (the rows show this frame's data) and before the
+# layout. It does work only in the frames listReorderSystem stepped a drag.
+func listReorderPoseSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  var lists: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: world.listReorderDrags), ++i {
+    let drag: view ListReorderDrag = queryViewAt(table: world.listReorderDrags, denseIndex: i)
+    if drag.poseDue {
+      lists.add(value: componentEntityAt(this: world.listReorderDrags, i: i))
+    }
+  }
+  loop let listEntity: view EntityId in lists {
+    if componentHas(this: world.listViews, entityId: listEntity) and componentHas(
+      this: world.listReorders
+      entityId: listEntity
+    ) {
+      listReorderPoseList(world: world, uiSystems: uiSystems, listEntity: listEntity)
+    }
+  }
+}
+
+func listReorderPoseList(world: mod UiWorld, uiSystems: mod UiSystems, listEntity: view EntityId) {
+  var reorder: ListReorder = { actionId: "" }
+  if let authored: ListReorder = componentCopy(this: world.listReorders, entityId: listEntity) {
+    reorder = own authored
+  }
+  var listView: ListView = ListView.default()
+  if let copied: ListView = componentCopy(this: world.listViews, entityId: listEntity) {
+    listView = own copied
+  }
+  var drag: ListReorderDrag = idleReorderDrag()
+  if let stored: ListReorderDrag = componentCopy(this: world.listReorderDrags, entityId: listEntity) {
+    drag = own stored
+  }
+  let count: Int = listReorderRowCount(world: world, listEntity: listEntity)
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  listReorderTakeOrder(
+    drag: drag
+    world: world
+    count: count
+    pitch: pitch
+  )
+  listReorderPose(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    listView: listView
+    reorder: reorder
+    drag: drag
+    count: count
+    pitch: pitch
+  )
+  drag.poseDue = false
+  componentSet(this: world.listReorderDrags, entityId: listEntity, data: own drag)
+}
+
+# A drop waiting for the app (settled 0) whose new order has come: every
+# row's place as drawn until now, written as an offset from its place in the
+# new order, so the rows ease into the new order from where they are and
+# nothing jumps
+func listReorderTakeOrder(
+  drag: mod ListReorderDrag
+  world: view UiWorld
+  count: view Int
+  pitch: view Float
+) {
+  if drag.phase is not ListReorderPhase.settling or drag.settled is not 0 {
+    ret
+  }
+  let moved: Bool = drag.toIndex is not drag.fromIndex
+  let dataChanged: Bool = componentTableGeneration(ListViewData, this: world.listViewDatas) is not drag.dataGeneration
+  if moved is false or dataChanged is false or count is not drag.shifts.length {
+    ret
+  }
+  var shifts: List(Float) = List.create(Float, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    shifts.add(value: 0.0)
+  }
+  loop var index: Int = 0, index < count, ++index {
+    var drawn: Float = drag.rowY
+    if index is not drag.fromIndex {
+      var shift: Float = 0.0
+      if let current: Float = drag.shifts.copyAt(index: index) {
+        shift = current
+      }
+      drawn = index.toFloat() * pitch + shift
+    }
+    let newIndex: Int = reorderNewIndex(
+      index: index
+      fromIndex: drag.fromIndex
+      toIndex: drag.toIndex
+    )
+    shifts.set(index: newIndex, value: drawn - newIndex.toFloat() * pitch)
+  }
+  drag.shifts = own shifts
+  drag.settled = 1
 }
 
 # The lifted row's data index while it is drawn as lifted
