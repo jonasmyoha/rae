@@ -3,8 +3,10 @@
 # Dates are computed here, in Rae, from epoch seconds (docs/runtime-c-audit.md
 # row 6; docs/server-benchmarks-design.md §9 G4): `civilFromEpochSeconds` is
 # the one calendar routine, shared by `formatTimestamp`, `formatDate` and the
-# HTTP Date header. All of them are UTC (as gmtime_r was), so no time-zone
-# call is needed.
+# HTTP Date header. All of them are UTC (as gmtime_r was). A clock a person
+# reads wants the local time: `localCivilFromEpochSeconds` is the same
+# calendar shifted by `localUtcOffsetSeconds`, the one time-zone call (the
+# OS knows the zone and its daylight saving).
 
 # A moment broken into its UTC calendar fields
 type CivilTime {
@@ -65,6 +67,27 @@ func civilFromEpochSeconds(epochSeconds: view Int) ret CivilTime {
 
 # `value` in decimal, at least `width` characters wide with zeros in front; a
 # minus sign counts toward the width (strftime's %Y: year -1 is "-001")
+# The local time zone's offset from UTC at `epochSeconds`, seconds east
+# (7200 in Helsinki in winter, 10800 in summer); 0 where the platform has no
+# zone (WASM)
+func nativeLocalOffsetSeconds(
+  epochSeconds: Int
+) unsafe extern("rae_ext_Time_localOffsetSeconds") ret Int
+
+func localUtcOffsetSeconds(epochSeconds: view Int) ret Int {
+  unsafe {
+    ret nativeLocalOffsetSeconds(epochSeconds: epochSeconds)
+  }
+}
+
+# `epochSeconds` as the local calendar and clock a person reads (the
+# weekday too)
+func localCivilFromEpochSeconds(epochSeconds: view Int) ret CivilTime {
+  ret civilFromEpochSeconds(
+    epochSeconds: epochSeconds + localUtcOffsetSeconds(epochSeconds: epochSeconds)
+  )
+}
+
 func padded(value: view Int, width: view Int) ret String {
   var digits: String = "{value}"
   var digitWidth: Int = width

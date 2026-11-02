@@ -1,0 +1,25 @@
+# lib/Time: the local time a clock shows (localUtcOffsetSeconds,
+# localCivilFromEpochSeconds). The machine's zone is not known here, so
+# the checks hold in any zone: the local calendar is the UTC one shifted by
+# the offset, the offset is whole quarter hours within a day, and the local
+# time of a moment and of the same moment an hour on is an hour apart (no
+# zone moves twice in an hour). The UTC calendar itself is unchanged.
+open Time
+
+func main() {
+  let moments: List(Int) = [0, 1793581548, 1782900000, 1767225600]
+  loop let moment: view Int in moments {
+    let offset: Int = localUtcOffsetSeconds(epochSeconds: moment)
+    let local: CivilTime = localCivilFromEpochSeconds(epochSeconds: moment)
+    let shifted: CivilTime = civilFromEpochSeconds(epochSeconds: moment + offset)
+    let same: Bool = local.year is shifted.year and local.month is shifted.month and local.day is shifted.day and local.hour is shifted.hour and local.minute is shifted.minute and local.second is shifted.second and local.weekday is shifted.weekday
+    let quarters: Bool = offset % 900 is 0 and offset >= -50400 and offset <= 50400
+    log(
+      "{moment}: local is UTC shifted by the offset: {same}, the offset is whole quarter hours within 14 h: {quarters}"
+    )
+  }
+  let utc: CivilTime = civilFromEpochSeconds(epochSeconds: 1793581548)
+  log(
+    "UTC as before: {utc.year}-{utc.month}-{utc.day} {utc.hour}:{utc.minute}:{utc.second} weekday {utc.weekday}"
+  )
+}
