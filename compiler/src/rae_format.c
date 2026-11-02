@@ -333,7 +333,9 @@ static void json_string(FILE* out, const char* s) {
 static bool format_raepack_to_buffer(const char* path, char** out_body, size_t* out_len,
                                      char* message, size_t message_len) {
   RaePack pack;
-  if (!raepack_parse_file(path, &pack, false)) {
+  /* As a library pack: a dependency's pack (format, version, dependencies)
+   * has no targets, and a project pack parses the same way with them. */
+  if (!raepack_parse_library_file(path, &pack)) {
     snprintf(message, message_len, "parse error");
     return false;
   }
