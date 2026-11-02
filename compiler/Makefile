@@ -79,6 +79,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_stmt.c \
        $(SRC_DIR)/c_twin.c \
        $(SRC_DIR)/c_module_exports.c \
+       $(SRC_DIR)/c_binary.c \
        $(SRC_DIR)/c_lend.c \
        $(SRC_DIR)/c_blocking.c \
        $(SRC_DIR)/c_names.c \

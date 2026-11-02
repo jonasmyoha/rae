@@ -1,0 +1,142 @@
+# The derived binary encoding round-trips a frame-shaped value
+# (docs/wasm-interfaces.md §2): lists of structs, opt, enums, Unicode text,
+# every number width, a generic struct field and a list of lists. Encoding the
+# decoded value again gives the same bytes, and a small value's bytes are the
+# documented little-endian layout.
+enum CommandKind { tap, swipe, scroll }
+
+type Wrap(T: type) {
+  value: T
+}
+
+type AppCommand {
+  name: String
+  payload: String
+  kind: CommandKind
+}
+
+type NewComponent {
+  entityIndex: Int32
+  component: String
+  json: String
+}
+
+type AppFrameIn {
+  commands: List(AppCommand)
+  newComponents: List(NewComponent)
+  resetScene: Bool
+  selfTest: opt String
+  focus: opt AppCommand
+  frame: Int
+  mask: UInt8
+  big: UInt64
+  small: Int8
+  scale: Float
+  ratio: Float64
+  pair: Wrap(Int)
+  grid: List(List(Int16))
+}
+
+type Small {
+  count: Int32
+  done: Bool
+  text: String
+}
+
+func hex(bytes: view List(UInt8)) ret String {
+  let digits: String = "0123456789abcdef"
+  var text: String = ""
+  loop let byte: view UInt8 in bytes {
+    let value: Int = byte as Int
+    text = "{text}{digits.sub(start: value / 16, len: 1)}{digits.sub(start: value % 16, len: 1)} "
+  }
+  ret text
+}
+
+func sameBytes(first: view List(UInt8), second: view List(UInt8)) ret Bool {
+  if first.length is not second.length {
+    ret false
+  }
+  loop var i: Int = 0, i < first.length, ++i {
+    if first.copyAtDefault(index: i) is not second.copyAtDefault(index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func makeFrame() ret AppFrameIn {
+  var commands: List(AppCommand) = List.create(AppCommand, cap: 2)
+  commands.add(
+    value: AppCommand { name: "open", payload: "héllo wörld ✓ 日本", kind: CommandKind.swipe }
+  )
+  commands.add(value: AppCommand { name: "", payload: "", kind: CommandKind.scroll })
+  var components: List(NewComponent) = List.create(NewComponent, cap: 1)
+  components.add(
+    value: NewComponent { entityIndex: -7, component: "TodoList", json: "\{\"rows\": 3\}" }
+  )
+  var firstRow: List(Int16) = List.create(Int16, cap: 2)
+  firstRow.add(value: -300)
+  firstRow.add(value: 300)
+  let emptyRow: List(Int16) = List.create(Int16, cap: 1)
+  let grid: List(List(Int16)) = { firstRow, emptyRow }
+  ret AppFrameIn {
+    commands: commands
+    newComponents: components
+    resetScene: true
+    selfTest: "launcher"
+    focus: AppCommand { name: "focus", payload: "row 2", kind: CommandKind.tap }
+    frame: -9000000000
+    mask: 255
+    big: 18446744073709551615
+    small: -128
+    scale: 1.5
+    ratio: 0.1
+    pair: Wrap(Int) { value: 77 }
+    grid: grid
+  }
+}
+
+func main() {
+  let frame: AppFrameIn = makeFrame()
+  let bytes: List(UInt8) = frame.toBinary()
+  log("encoded {bytes.length} bytes")
+  if let decoded: AppFrameIn = AppFrameIn.fromBinary(bytes: bytes) {
+    log(
+      "frame {decoded.frame}, reset {decoded.resetScene}, mask {decoded.mask}, big {decoded.big}, small {decoded.small}"
+    )
+    log("scale {decoded.scale}, ratio {decoded.ratio}, pair {decoded.pair.value}")
+    loop let command: view AppCommand in decoded.commands {
+      log("command '{command.name}' '{command.payload}' {command.kind}")
+    }
+    loop let component: view NewComponent in decoded.newComponents {
+      log("component {component.entityIndex} {component.component} {component.json}")
+    }
+    if let selfTest: view String = decoded.selfTest {
+      log("selfTest {selfTest}")
+    }
+    if let focus: view AppCommand = decoded.focus {
+      log("focus {focus.name} {focus.payload} {focus.kind}")
+    }
+    loop let row: view List(Int16) in decoded.grid {
+      log("row of {row.length}: {row}")
+    }
+    let again: List(UInt8) = decoded.toBinary()
+    log("encoding the decoded value gives the same bytes: {sameBytes(first: bytes, second: again)}")
+  } else {
+    log("the frame did not decode")
+  }
+
+  # An empty value: empty lists, none, zeros.
+  let empty: AppFrameIn = AppFrameIn.default()
+  let emptyBytes: List(UInt8) = empty.toBinary()
+  if let decoded: AppFrameIn = AppFrameIn.fromBinary(bytes: emptyBytes) {
+    log(
+      "empty: {emptyBytes.length} bytes, {decoded.commands.length} commands, selfTest none {decoded.selfTest is none}"
+    )
+  }
+
+  # The layout itself: Int32 -2, Bool true, String "hé".
+  let small: Small = { count: -2, done: true, text: "hé" }
+  log("small: {hex(bytes: small.toBinary())}")
+}

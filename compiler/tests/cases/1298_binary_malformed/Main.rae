@@ -1,0 +1,149 @@
+# fromBinary trusts nothing (docs/wasm-interfaces.md §2): every malformed input
+# answers none, without a crash, an overread or a huge allocation, and what a
+# failed read built is freed (the case runs under the leak check). The nesting
+# limit (200 levels) is not tested here: a type that holds a List of itself
+# does not compile yet (queued).
+enum Kind { first, second, third }
+
+type Probe {
+  flag: Bool
+  kind: Kind
+  note: opt String
+  text: String
+  items: List(Int32)
+}
+
+func bytesOf(values: view List(Int)) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: values.length)
+  loop let value: view Int in values {
+    bytes.add(value: value as UInt8)
+  }
+  ret bytes
+}
+
+# A valid Probe with `text` replaced by these raw bytes (length-prefixed).
+func probeWithText(text: view List(Int)) ret List(UInt8) {
+  var values: List(Int) = List.create(Int, cap: 16)
+  values.add(value: 1)
+  loop var i: Int = 0, i < 4, ++i {
+    values.add(value: 0)
+  }
+  values.add(value: 0)
+  values.add(value: text.length)
+  values.add(value: 0)
+  values.add(value: 0)
+  values.add(value: 0)
+  loop let byte: view Int in text {
+    values.add(value: byte)
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    values.add(value: 0)
+  }
+  ret bytesOf(values: values)
+}
+
+func report(label: view String, bytes: view List(UInt8)) {
+  if let probe: Probe = Probe.fromBinary(bytes: bytes) {
+    log("{label}: decoded (text '{probe.text}')")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func patched(bytes: view List(UInt8), index: view Int, value: view Int) ret List(UInt8) {
+  var copy: List(UInt8) = List.create(UInt8, cap: bytes.length)
+  loop let byte: view UInt8 in bytes {
+    copy.add(value: byte)
+  }
+  copy.set(index: index, value: value as UInt8)
+  ret copy
+}
+
+func main() {
+  var items: List(Int32) = List.create(Int32, cap: 2)
+  items.add(value: 5)
+  items.add(value: -6)
+  let probe: Probe = {
+    flag: true
+    kind: Kind.third
+    note: "a note"
+    text: "text ✓"
+    items: items
+  }
+  let valid: List(UInt8) = probe.toBinary()
+  report(label: "valid", bytes: valid)
+  report(label: "empty", bytes: List.create(UInt8, cap: 1))
+
+  # Every strict prefix: short input.
+  var prefixesDecoded: Int = 0
+  loop var cut: Int = 0, cut < valid.length, ++cut {
+    var prefix: List(UInt8) = List.create(UInt8, cap: cut + 1)
+    loop var i: Int = 0, i < cut, ++i {
+      prefix.add(value: valid.copyAtDefault(index: i))
+    }
+    if Probe.fromBinary(bytes: prefix) is not none {
+      prefixesDecoded = prefixesDecoded + 1
+    }
+  }
+  log("{valid.length} strict prefixes, {prefixesDecoded} decoded")
+
+  # Long input: one byte too many.
+  var longer: List(UInt8) = List.create(UInt8, cap: valid.length + 1)
+  loop let byte: view UInt8 in valid {
+    longer.add(value: byte)
+  }
+  longer.add(value: 0)
+  report(label: "one trailing byte", bytes: longer)
+
+  report(label: "Bool 2", bytes: patched(bytes: valid, index: 0, value: 2))
+  report(label: "enum index 3 of 3", bytes: patched(bytes: valid, index: 1, value: 3))
+  report(label: "enum index 2 of 3", bytes: patched(bytes: valid, index: 1, value: 2))
+  report(label: "opt tag 2", bytes: patched(bytes: valid, index: 5, value: 2))
+
+  report(label: "UTF-8 plain", bytes: probeWithText(text: { 104, 105 }))
+  report(label: "UTF-8 overlong", bytes: probeWithText(text: { 192, 175 }))
+  report(label: "UTF-8 surrogate", bytes: probeWithText(text: { 237, 160, 128 }))
+  report(label: "UTF-8 lone continuation", bytes: probeWithText(text: { 128 }))
+  report(label: "UTF-8 cut sequence", bytes: probeWithText(text: { 226, 130 }))
+  report(label: "UTF-8 past U+10FFFF", bytes: probeWithText(text: { 244, 144, 128, 128 }))
+
+  # A count far beyond the bytes left: refused before anything is allocated.
+  report(
+    label: "String length 4294967295"
+    bytes: bytesOf(values: {
+      1
+      0
+      0
+      0
+      0
+      0
+      255
+      255
+      255
+      255
+      0
+      0
+      0
+      0
+    })
+  )
+  report(
+    label: "List count 4294967295"
+    bytes: bytesOf(values: {
+      1
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      255
+      255
+      255
+      255
+    })
+  )
+}

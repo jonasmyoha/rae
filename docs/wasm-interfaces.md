@@ -66,7 +66,8 @@ written in declaration order:
 |---|---|
 | `Int`, `Int64`, `UInt64` | 8 |
 | `Int32`, `UInt32` | 4 |
-| `UInt8` | 1 |
+| `Int16`, `UInt16` | 2 |
+| `Int8`, `UInt8` | 1 |
 | `Float` / `Float64` | 4 (f32) / 8 (f64) |
 | `Bool` | 1: 0 or 1; any other value is a decode error |
 | enum | 4: the member's index (the hash covers the member names, so the index is safe) |
@@ -84,9 +85,22 @@ written in declaration order:
   `none` for a short, long or malformed input; a count is checked against the
   bytes that are left before anything is allocated, so a bad count cannot ask
   for gigabytes. It never crashes and never reads outside the list.
+- **Nesting is limited to 200 levels** of structs inside structs, so a
+  deeply nested input cannot overflow the stack.
 - The encoding is also Rae's general binary serialization: it is the
   "Binary Gen" item of QUEUE_NETWORKING.md Step 1 (compact packets), so it is
   not a WASM-only feature.
+
+**Implemented (compiler 0.2.286).** `toBinary` and `fromBinary` are derived
+for struct types. A list, an enum or a number on its own is wrapped in a
+struct first, and the compiler says so. `compiler/src/c_binary.c` writes the
+encoder, the decoder and a free function for each struct a program uses them
+on, and for every struct inside it. The byte reading and writing is generated
+C in each program, like the JSON writer's. A value too big for the format (a
+String or List over 4 GiB) encodes to an empty list. Cases:
+1297 (round trip and the exact bytes), 1298 (every malformed input),
+1299 (the hash), 1300 (the refusals). Not tested yet: the nesting limit,
+because a struct that holds a List of itself does not compile (queued).
 
 ## 3. Versioning: a structural hash, checked once at load
 

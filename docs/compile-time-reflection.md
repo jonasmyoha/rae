@@ -49,6 +49,8 @@ rest are values.
 | `enumMembers(E)` | `List(String)` | every member name, declaration order (a non-enum instantiation: `[]`) |
 | `enumCount(E)` | `Int` | the member count (a non-enum instantiation: `0`) |
 | `value.toJson()` / `T.fromJson(json:)` | `String` / `T` | synthesized machine round-trip; an enum field is written and read by its member NAME |
+| `value.toBinary()` / `T.fromBinary(bytes:)` | `List(UInt8)` / `opt T` | the compact binary round-trip of a struct (docs/wasm-interfaces.md §2); `none` for any malformed input; a field that cannot cross (`Ptr`, `Buffer`, ...) is a compile error naming it |
+| `binarySchemaHash(T)` / `binarySchemaText(T)` | `Int` / `String` | the type's canonical description (`Point{x:Int,y:Int}`) and its FNV-1a hash, literals; a concrete type only |
 | `value.toString()` / `"{value}"` | `String` | the value in Rae's own literal spelling, per instantiation (`Point { x: 1, y: 2 }`, `[1, 2]`, an enum's member name) |
 | `equals(a: x, b: y)` | `Bool` | deep value equality, per type (structs field by field, lists element-wise, `Ptr`/`Buffer` by identity) |
 
