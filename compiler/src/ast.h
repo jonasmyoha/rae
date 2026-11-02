@@ -44,6 +44,12 @@ typedef struct AstTypeRef {
    * `open`ed module's last name, or its `as` alias); {0} for a bare type.
    * Resolved and cleared before sema (type_names.c). */
   Str qualifier;
+  /* #37133245: the file whose package decides which types this ref may name,
+   * when it is not the file being analyzed. A fields() loop copies a field's
+   * type out of the caller's struct into a generic's body (another package);
+   * the copy still names what the struct's own file could name. NULL: the
+   * file being analyzed. */
+  const char* resolve_origin;
 
   /* A compile-time VALUE generic argument — the `cap: 16` in
    * `Array(Float, cap: 16)`. Rae's rule is that type arguments are positional

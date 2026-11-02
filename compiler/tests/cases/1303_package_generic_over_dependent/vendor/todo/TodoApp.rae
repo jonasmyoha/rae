@@ -1,0 +1,48 @@
+# The `todo` package: its own types, handed to the generics of the `sdk`
+# package it depends on.
+open ecs/ComponentTable
+open ecs/Entity
+open sdk/Systems
+
+type TodoTitle {
+  text: String
+}
+
+type TodoDone {
+  done: Bool
+}
+
+type TodoSystem {
+  titles: ComponentTable(TodoTitle)
+  done: ComponentTable(TodoDone)
+}
+
+func runTodo() {
+  var system: TodoSystem = {
+    titles: ComponentTable.create(TodoTitle)
+    done: ComponentTable.create(TodoDone)
+  }
+  let first: EntityId = { index: 1, generation: 0 }
+  let second: EntityId = { index: 2, generation: 0 }
+  componentSet(this: system.titles, entityId: first, data: TodoTitle { text: "milk" })
+  componentSet(this: system.titles, entityId: second, data: TodoTitle { text: "bread" })
+  componentSet(this: system.done, entityId: first, data: TodoDone { done: true })
+  log("tables: {tableCounts(TodoSystem, system: system)}")
+  # the system's type inferred from the argument
+  log("tables, S inferred: {tableCounts(system: system)}")
+  clearEntity(TodoSystem, system: system, entityId: first)
+  log("after clearing entity 1: {tableCounts(TodoSystem, system: system)}")
+  let decoded: Bool = componentInto(
+    system: system
+    name: "TodoTitle"
+    entityId: second
+    json: "\{\"text\": \"butter\"\}"
+  )
+  if let title: view TodoTitle = componentView(this: system.titles, entityId: second) {
+    log("decoded {decoded}: entity 2's title is {title.text}")
+  }
+  let titles: List(TodoTitle) = { TodoTitle { text: "a" }, TodoTitle { text: "b" } }
+  if let last: TodoTitle = lastOf(TodoTitle, items: titles) {
+    log("last title: {last.text}")
+  }
+}
