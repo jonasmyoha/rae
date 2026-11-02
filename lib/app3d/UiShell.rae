@@ -373,6 +373,10 @@ func presentPage(
     overrides: overrides
   )
   runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  # A card placed `at` a height is moved once its size is known
+  if dialogPlaceSystem(world: world, uiSystems: uiSystems) {
+    runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  }
   ret host
 }
 

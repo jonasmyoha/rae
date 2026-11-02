@@ -263,6 +263,40 @@ func main() {
   )}")
   closePresentedPage(world: world, uiSystems: uiSystems, host: lowHost)
 
+  # ----- B3. a dialog two thirds down, and one that would run off the
+  # bottom (it stops at the margin) -----
+  let placedFractions: List(Float) = [0.67, 0.98]
+  loop let fraction: view Float in placedFractions {
+    let placed: EntityId = loadSceneIntoPage(
+      world: world
+      uiSystems: uiSystems
+      scene: parseScene(
+        source: removeSceneWith(
+          presentation: "dialog"
+          options: "\"DialogOptions\":\{\"placement\":\"at\",\"at\":{fraction}\},"
+        )
+      )
+      pageId: "removeTask"
+    )
+    let placedHost: EntityId = presentMountedPage(
+      world: world
+      uiSystems: uiSystems
+      pageRoot: placed
+      pageId: "removeTask"
+      overrides: overridesForTask()
+    )
+    layOut(world: world, uiSystems: uiSystems)
+    let moved: Bool = dialogPlaceSystem(world: world, uiSystems: uiSystems)
+    layOut(world: world, uiSystems: uiSystems)
+    log(
+      "at {fraction}: moved {moved}, card {boxText(uiSystems: uiSystems, entityId: placed)}, placed again: {dialogPlaceSystem(
+        world: world
+        uiSystems: uiSystems
+      )}"
+    )
+    closePresentedPage(world: world, uiSystems: uiSystems, host: placedHost)
+  }
+
   # ----- C. the same scene as a page -----
   let page: EntityId = loadSceneIntoPage(
     world: world
