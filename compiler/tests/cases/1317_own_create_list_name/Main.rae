@@ -1,0 +1,27 @@
+# A program may name a function of its own `createList`, the internal name
+# `List.create(T, cap:)` is lowered to. Before, every `List.create` in the
+# stdlib (lib/core, Sys, String, ...) failed with "'createList' is in module
+# 'Main', which is not open here": sema did not count the positional type
+# argument of core's generic `createList(T: type, cap:)`, so the program's
+# function looked like the only match; and the C backend, binding the call by
+# name, preferred the program's non-generic function and called it with
+# core's type arguments. A call with type arguments now binds only to a
+# generic function taking that many, and the functions the calling file sees
+# are tried first.
+import String
+
+func createList(count: view Int) ret Int {
+  ret count * 10
+}
+
+func main() {
+  let numbers: List(Int) = List.create(Int, cap: 4)
+  var words: List(String) = createList(String, cap: 2)
+  words.add(value: "one")
+  # lib code that makes its own lists still gets core's createList
+  let parts: List(String) = "a,b,c".split(sep: ",")
+  log("List.create: {numbers.length} of {numbers.cap}")
+  log("createList(String, cap:): {words.length} of {words.cap}")
+  log("split: {parts.length} parts")
+  log("the program's own createList: {createList(count: 3)}")
+}

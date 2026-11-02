@@ -2188,6 +2188,24 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
 
         if (fd->generic_params) open_generic_candidate = true;
+        // A generic callee given its type arguments positionally
+        // (`createList(Int, cap: 4)`, what `List.create(Int, cap: 4)` desugars
+        // to) has its value parameters after them: the call matches it when
+        // the leading type arguments plus the value parameters are the
+        // arguments. Such a call is bound by name in the backend, but it IS
+        // this open candidate, so a same-name function of a module that is
+        // not open here (a program's own `createList`) must not be reported
+        // as the one meant.
+        if (fd->generic_params && param_count != arg_count) {
+            size_t type_params = 0;
+            for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) type_params++;
+            size_t leading_types = 0;
+            for (AstCallArg* ta = args; ta && leading_types < type_params; ta = ta->next) {
+                if (!ta->value || !sema_arg_is_type_name(symbols, ta->value)) break;
+                leading_types++;
+            }
+            if (leading_types > 0 && param_count + leading_types == arg_count) open_arity_match = true;
+        }
         if (param_count != arg_count) {
             if (!fd->generic_params && !fd->specialization_args) {
                 bool dup = false;
