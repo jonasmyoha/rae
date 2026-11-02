@@ -9,17 +9,31 @@ behind the same functions.
 
 ```rae
 var module: WasmModule = wasmLoad(bytes: bytes)                 # nothing runs
-var instance: WasmInstance = wasmInstantiate(module: module, granted: grants, limits: limits)
+var instance: WasmInstance = wasmInstantiate(module: module, exposed: wasiMinimalCapabilities(), granted: { "log", "clock" }, limits: limits)
 let result: WasmCallResult = wasmCall(MyHost, host: host, instance: instance, name: "add", args: { wasmI64(value: 40), wasmI64(value: 2) }, timeoutMs: 1000)
 wasmDestroy(instance: instance)
 wasmUnload(module: module)
 ```
 
-- **Imports are refused by name before anything runs.** `wasmLoad` lists a
-  module's imports (`module.imports`: kind, module and field name, parameter
-  and result kinds). `wasmInstantiate` takes the granted set as
-  `"module.name"` strings; any other import, and any non-function import,
-  answers `importRefused` naming them all.
+- **Capabilities, deny by default** (docs/wasm-interfaces.md §4). A
+  `WasmCapability { name, imports }` is a named set of imports
+  (`"module.name"`) that the host defines. `wasmLoad` lists a module's imports
+  (`module.imports`: kind, module and field name, parameter and result kinds)
+  and its requests (the `rae.interface` section's `requests`; a module
+  without the section, not built by Rae, requests every exposed capability).
+  `wasmInstantiate(module, exposed, granted, limits)` checks, before anything
+  runs:
+  - every request is exposed, else `requestNotExposed`;
+  - every grant was requested, else `grantNotRequested` (a request never
+    grants: an edited section gains nothing the host did not grant);
+  - every import is a function in a requested capability, else
+    `importRefused`, naming them all.
+
+  `runtime` is granted whenever it is exposed. The imports of a capability
+  that was requested but not granted still link, so the module loads, and
+  `wasmCall` answers a call to one with the trap
+  `capability <name> is not granted`. The host's `wasmHostCall` never sees
+  that call.
 - **Host functions are Rae.** `wasmCall(H, host, ...)` answers each import the
   module calls by calling `wasmHostCall(host: mod H, instance: mod WasmInstance,
   call: view WasmHostCall) ret WasmHostAnswer`, which the program writes for its
@@ -48,8 +62,12 @@ wasmUnload(module: module)
   `rae build --target wasm` imports (docs/wasm-modules.md) with nothing behind
   them: stdout / stderr text collected in a `WasiOutput` for the host's log,
   the real clock and random bytes, no environment, no arguments, EBADF for
-  every file, `proc_exit` a trap. Grant `wasiMinimalGrants()` and call
-  `wasiMinimalAnswer` from `wasmHostCall`.
+  every file, `proc_exit` a trap. `wasiMinimalCapabilities()` is the
+  standard set over it: `runtime` (the calls with no authority), `log`
+  (`fd_write`), `clock` (`clock_time_get`, `clock_res_get`) and `random`
+  (`random_get`). Expose it, grant the names a module may use, and call
+  `wasiMinimalAnswer` from `wasmHostCall`. (`wasm/WasmMemory` reads and
+  writes the little-endian integers WASI's pointer arguments need.)
 
 ## Typed calls: `wasm/WasmInterface`
 
@@ -110,14 +128,21 @@ app that does (the device's or the simulator's library by SDK).
 
 ## Checks
 
+- Case 1302 runs an 823-byte module that imports one function per standard
+  capability and requests only `log` (`ModuleSource.txt`, its bytes inline):
+  the imports no request covers are refused by name. With its section edited
+  to request all three and only `log` granted, `say` writes, while the clock
+  and random calls trap in lib/wasm unseen by the host. Granting `clock`
+  makes the clock answer. A grant that was not requested and a request this
+  host does not expose are refused. It is on the TSan gate.
 - Case 1292 runs a 391-byte module (`ModuleSource.txt`, compiled with wasi-sdk,
-  its bytes inline as hex): an ungranted import refused by name, `i64` /
+  its bytes inline as hex): an import no exposed capability covers refused by name, `i64` /
   `i32` / `f64` / `f32` values, a Rae host function, text through memory, a trap
   and the instance after it, the memory cap, a time limit and a watchdog
   thread. It is on the TSan gate.
 - `compiler/tools/wasm-module-check.sh` also runs the module
   `rae build --target wasm` makes in a Rae host (`compiler/tests/wasmEmbedHost`):
-  refused with nothing granted, then `_initialize`, `add` and a Unicode `greet`
+  refused on a host that exposes nothing, then `_initialize`, `add` and a Unicode `greet`
   through the module ABI with the minimal WASI. Built from the same frame
   types (`compiler/tests/wasmFrames`), the host checks `summarize` and runs
   1000 `AppFrameIn -> AppFrameOut` frames in bounded memory. A module built

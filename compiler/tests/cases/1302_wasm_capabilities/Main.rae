@@ -1,0 +1,218 @@
+# lib/wasm capabilities (docs/wasm-interfaces.md §4), with the module in
+# ModuleSource.txt (its bytes below): it imports fd_write, clock_time_get and
+# random_get, one per standard capability, and its rae.interface section
+# requests only `log`. Deny by default: an import no requested capability
+# covers refuses the instance by name; a grant the module did not request and
+# a request the host does not expose are refused; and a module whose section
+# is edited to request more still gets only what the host grants: the calls
+# of a requested but ungranted capability trap in lib/wasm, and the host's
+# wasmHostCall never sees them.
+import String
+open wasm/Wasm
+open wasm/WasmBytes
+open wasm/WasiMinimal
+open crypto/CryptoBytes
+
+const moduleHex: String = "0061736d01000000011a0460047f7f7f7f017f60037f7e7f017f60027f7f017f6000017f026f0316776173695f736e617073686f745f70726576696577310866645f7772697465000016776173695f736e617073686f745f70726576696577310e636c6f636b5f74696d655f676574000116776173695f736e617073686f745f70726576696577310a72616e646f6d5f67657400020304030303030405017001010105030100020608017f01418080040b072904066d656d6f727902000373617900030972656164436c6f636b00040a7265616452616e646f6d00050a6e0332004100411636029c808480004100418080848000360298808480004101419880848000410141a0808480001080808080000b2801017f41004100420141a88084800010818080800022006b41002903a88084800042005220001b0b100041b08084800041081082808080000b0b1f0100418080040b1768656c6c6f2066726f6d20746865206d6f64756c650a00003b0d7261652e696e746572666163657b2276657273696f6e223a312c226578706f727473223a5b5d2c227265717565737473223a5b226c6f67225d7d0073046e616d650007066d2e7761736d014306000866645f7772697465010e636c6f636b5f74696d655f676574020a72616e646f6d5f6765740303736179040972656164436c6f636b050a7265616452616e646f6d071201000f5f5f737461636b5f706f696e746572090a0100072e726f64617461007f0970726f647563657273010c70726f6365737365642d62790105636c616e675f32322e312e302d776173692d73646b202868747470733a2f2f6769746875622e636f6d2f6c6c766d2f6c6c766d2d70726f6a6563742034343334646162623639393136383536623832346636386136346230323963363731373565353332290094010f7461726765745f6665617475726573082b0b62756c6b2d6d656d6f72792b0f62756c6b2d6d656d6f72792d6f70742b1663616c6c2d696e6469726563742d6f7665726c6f6e672b0a6d756c746976616c75652b0f6d757461626c652d676c6f62616c732b136e6f6e7472617070696e672d6670746f696e742b0f7265666572656e63652d74797065732b087369676e2d657874"
+
+type Host {
+  output: WasiOutput
+  seen: List(String)
+}
+
+func wasmHostCall(
+  host: mod Host
+  instance: mod WasmInstance
+  call: view WasmHostCall
+) ret WasmHostAnswer {
+  host.seen.add(value: "{call.name}")
+  if let answer: WasmHostAnswer = wasiMinimalAnswer(
+    instance: instance
+    call: call
+    output: host.output
+  ) {
+    ret answer
+  }
+  ret wasmTrap(message: "no host function {call.module}.{call.name}")
+}
+
+func lebBytes(value: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 5)
+  var rest: Int = value
+  loop {
+    let low: Int = rest bitand 127
+    rest = rest shr 7
+    if rest is 0 {
+      bytes.add(value: low as UInt8)
+      ret bytes
+    }
+    bytes.add(value: (low bitor 128) as UInt8)
+  }
+}
+
+func appendAll(
+  into: mod List(UInt8)
+  from: view List(UInt8)
+  start: view Int
+  end: view Int
+) {
+  loop var i: Int = start, i < end, ++i {
+    into.add(value: bytes(of: from, index: i))
+  }
+}
+
+func bytes(of: view List(UInt8), index: view Int) ret UInt8 {
+  ret of.copyAtFallback(index: index, fallback: 0)
+}
+
+# The module with its rae.interface section rewritten to request `requests`
+# (a quoted, comma-separated list): what an edited download could claim.
+func withRequests(module: view List(UInt8), requests: view String) ret List(UInt8) {
+  var position: Int = 8
+  loop position < module.length {
+    let id: Int = bytes(of: module, index: position) as Int
+    let size: WasmLeb = wasmReadLeb(bytes: module, position: position + 1)
+    let end: Int = size.next + size.value
+    if id is 0 {
+      let nameLength: WasmLeb = wasmReadLeb(bytes: module, position: size.next)
+      let name: String = String.fromBytes(
+        bytes: module
+        start: nameLength.next
+        count: nameLength.value
+      )
+      if name is "rae.interface" {
+        let payload: List(UInt8) = bytesOfText(
+          text: "\{\"version\":1,\"exports\":[],\"requests\":[{requests}]\}"
+        )
+        var content: List(UInt8) = lebBytes(value: name.length())
+        appendAll(
+          into: content
+          from: bytesOfText(text: name)
+          start: 0
+          end: name.length()
+        )
+        appendAll(
+          into: content
+          from: payload
+          start: 0
+          end: payload.length
+        )
+        var edited: List(UInt8) = List.create(UInt8, cap: module.length + 64)
+        appendAll(
+          into: edited
+          from: module
+          start: 0
+          end: position
+        )
+        edited.add(value: 0)
+        let contentSize: List(UInt8) = lebBytes(value: content.length)
+        appendAll(
+          into: edited
+          from: contentSize
+          start: 0
+          end: contentSize.length
+        )
+        appendAll(
+          into: edited
+          from: content
+          start: 0
+          end: content.length
+        )
+        appendAll(
+          into: edited
+          from: module
+          start: end
+          end: module.length
+        )
+        ret edited
+      }
+    }
+    position = end
+  }
+  ret List.create(UInt8, cap: 0)
+}
+
+func call(host: mod Host, instance: mod WasmInstance, name: view String) ret String {
+  let result: WasmCallResult = wasmCall(
+    Host
+    host: host
+    instance: instance
+    name: name
+    args: {}
+    timeoutMs: 1000
+  )
+  if wasmFailed(error: result.error) {
+    ret "{result.error.kind}: {result.error.message}"
+  }
+  ret "{result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer}"
+}
+
+func instantiate(
+  module: view WasmModule
+  exposed: view List(WasmCapability)
+  granted: view List(String)
+) ret WasmInstance {
+  ret wasmInstantiate(
+    module: module
+    exposed: exposed
+    granted: granted
+    limits: WasmLimits { stackBytes: 65536, heapBytes: 0, maxMemoryPages: 0 }
+  )
+}
+
+func main() {
+  var original: List(UInt8) = List.create(UInt8, cap: 0)
+  if let decoded: List(UInt8) = bytesOfHex(hex: moduleHex) {
+    original = own decoded
+  }
+  let standard: List(WasmCapability) = wasiMinimalCapabilities()
+  var host: Host = { output: createWasiOutput(), seen: List.create(String, cap: 8) }
+
+  # As built: requests log, imports clock and random too.
+  var honest: WasmModule = wasmLoad(bytes: original)
+  let refused: WasmInstance = instantiate(module: honest, exposed: standard, granted: { "log" })
+  log("requests log only: {refused.error.kind}: {refused.error.message}")
+  wasmUnload(module: honest)
+
+  # Edited to request log, clock and random; the host grants log only.
+  let forged: List(UInt8) = withRequests(module: original, requests: "\"log\",\"clock\",\"random\"")
+  var edited: WasmModule = wasmLoad(bytes: forged)
+  var instance: WasmInstance = instantiate(module: edited, exposed: standard, granted: { "log" })
+  log("edited to request more, log granted: {instance.error.kind}")
+  log(
+    "  say: {call(host: host, instance: instance, name: "say")}, wrote '{host.output.text.trim()}'"
+  )
+  log("  readClock: {call(host: host, instance: instance, name: "readClock")}")
+  log("  readRandom: {call(host: host, instance: instance, name: "readRandom")}")
+  log("  the host saw: {host.seen}")
+  wasmDestroy(instance: instance)
+
+  # The same module with clock granted as well: clock answers.
+  var clocked: WasmInstance = instantiate(
+    module: edited
+    exposed: standard
+    granted: { "log", "clock" }
+  )
+  log("log and clock granted: readClock {call(host: host, instance: clocked, name: "readClock")}")
+  log("  readRandom: {call(host: host, instance: clocked, name: "readRandom")}")
+  wasmDestroy(instance: clocked)
+
+  # A grant the module did not request.
+  let unrequested: WasmInstance = instantiate(
+    module: edited
+    exposed: standard
+    granted: { "log", "files" }
+  )
+  log("granting files: {unrequested.error.kind}: {unrequested.error.message}")
+
+  # A request this host does not expose.
+  var noRandom: List(WasmCapability) = List.create(WasmCapability, cap: 4)
+  loop let capability: view WasmCapability in standard {
+    if capability.name is not "random" {
+      noRandom.add(value: capability)
+    }
+  }
+  let unexposed: WasmInstance = instantiate(module: edited, exposed: noRandom, granted: { "log" })
+  log("a host without random: {unexposed.error.kind}: {unexposed.error.message}")
+  wasmUnload(module: edited)
+}

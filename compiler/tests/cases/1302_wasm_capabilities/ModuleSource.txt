@@ -1,0 +1,33 @@
+/* Case 1302's module (wasi-sdk: clang --target=wasm32 -O2 -nostdlib
+ * -Wl,--no-entry): three WASI imports, one per standard capability (log,
+ * clock, random), an export that uses each, and a rae.interface section that
+ * requests only `log`. The case edits that section to request more. */
+#define WASI(name) __attribute__((import_module("wasi_snapshot_preview1"), import_name(name)))
+WASI("fd_write") int fd_write(int fd, int iovs, int count, int written);
+WASI("clock_time_get") int clock_time_get(int id, long long precision, int out);
+WASI("random_get") int random_get(int buffer, int length);
+
+static const char text[] = "hello from the module\n";
+static int iov[2];
+static int written;
+static unsigned long long now;
+static unsigned char noise[8];
+
+__attribute__((export_name("say"))) int say(void) {
+  iov[0] = (int)text;
+  iov[1] = (int)sizeof text - 1;
+  return fd_write(1, (int)iov, 1, (int)&written);
+}
+
+__attribute__((export_name("readClock"))) int readClock(void) {
+  int error = clock_time_get(0, 1, (int)&now);
+  return error ? -error : (now > 0);
+}
+
+__attribute__((export_name("readRandom"))) int readRandom(void) {
+  return random_get((int)noise, 8);
+}
+
+__asm__(".section .custom_section.rae.interface,\"\",@\n"
+        ".ascii \"{\\\"version\\\":1,\\\"exports\\\":[],\\\"requests\\\":[\\\"log\\\"]}\"\n"
+        ".text\n");

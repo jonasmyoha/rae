@@ -179,18 +179,21 @@ func main() {
   let path: String = getEnv(name: "RAE_WASM_MODULE")
   var module: WasmModule = wasmLoad(bytes: moduleBytes(path: path))
   log("loaded: {module.error.kind}")
+  let exposesNothing: List(WasmCapability) = List.create(WasmCapability, cap: 1)
   let without: WasmInstance = wasmInstantiate(
     module: module
+    exposed: exposesNothing
     granted: {}
     limits: wasmDefaultLimits()
   )
-  log("with nothing granted: {without.error.kind}")
+  log("on a host that exposes nothing: {without.error.kind}")
   var instance: WasmInstance = wasmInstantiate(
     module: module
-    granted: wasiMinimalGrants()
+    exposed: wasiMinimalCapabilities()
+    granted: { "log", "clock" }
     limits: wasmDefaultLimits()
   )
-  log("with the minimal WASI: {instance.error.kind}")
+  log("with log and clock granted: {instance.error.kind}")
   var host: Host = { output: createWasiOutput() }
   let initialized: WasmCallResult = wasmCall(
     Host

@@ -64,18 +64,29 @@ func main() {
   let garbage: WasmModule = wasmLoad(bytes: bytesOfText(text: "not wasm"))
   log("garbage: {garbage.error.kind}")
 
-  # an import that is not granted refuses the instance, by name
-  let partial: List(String) = { "host.twice" }
+  # The host's capabilities: one per host function. The module has no
+  # rae.interface (it was not built by Rae), so it requests every exposed
+  # capability, and only the grant limits it.
+  let twice: WasmCapability = { name: "twice", imports: { "host.twice" } }
+  let note: WasmCapability = { name: "note", imports: { "host.note" } }
+  # an import no exposed capability covers refuses the instance, by name
+  let partial: List(WasmCapability) = { twice }
   let refused: WasmInstance = wasmInstantiate(
     module: module
-    granted: partial
+    exposed: partial
+    granted: { "twice" }
     limits: wasmDefaultLimits()
   )
-  log("partial grant: {refused.error.kind}: {refused.error.message}")
+  log("partial exposure: {refused.error.kind}: {refused.error.message}")
 
-  let granted: List(String) = { "host.twice", "host.note" }
+  let exposed: List(WasmCapability) = { twice, note }
   let limits: WasmLimits = { stackBytes: 65536, heapBytes: 0, maxMemoryPages: 4 }
-  var instance: WasmInstance = wasmInstantiate(module: module, granted: granted, limits: limits)
+  var instance: WasmInstance = wasmInstantiate(
+    module: module
+    exposed: exposed
+    granted: { "twice", "note" }
+    limits: limits
+  )
   log("instance: {instance.error.kind}, memory {wasmMemorySize(instance: instance)} bytes")
   var host: Host = { notes: List.create(String, cap: 4), twiceCalls: 0 }
 

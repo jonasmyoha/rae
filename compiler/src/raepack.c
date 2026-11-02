@@ -547,6 +547,14 @@ static bool parse_target_block(RaePackParser* parser,
         return false;
       }
       target->exports = field->value.as.string;
+    } else if (str_eq_cstr(field->key, "requests")) {
+      if (field->value.kind != RAEPACK_VALUE_STRING) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "requests must be a string of capability names (\"log, clock\")");
+        parser->had_error = true;
+        return false;
+      }
+      target->requests = field->value.as.string;
     } else if (str_eq_cstr(field->key, "sources")) {
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
         diag_error(parser->file_path, (int)field->line, (int)field->column,

@@ -3018,8 +3018,10 @@ static bool find_project_pack(const char* entry_path, const char* project_root, 
 
 /* The `exports` of the project pack's wasm target (empty when there is no
  * pack, no wasm target or no exports: a program, not a module) */
-static void wasm_module_exports_of(const char* entry_path, const char* project_root, char* out, size_t cap) {
+static void wasm_module_exports_of(const char* entry_path, const char* project_root, char* out, size_t cap,
+                                   char* requests, size_t requests_cap) {
   out[0] = '\0';
+  requests[0] = '\0';
   char pack_path[PATH_MAX];
   if (!find_project_pack(entry_path, project_root, pack_path)) return;
   RaePack pack;
@@ -3030,6 +3032,7 @@ static void wasm_module_exports_of(const char* entry_path, const char* project_r
   const RaePackTarget* target = raepack_find_target(&pack, str_from_cstr("wasm"));
   if (target && target->exports.len > 0) {
     snprintf(out, cap, "%.*s", (int)target->exports.len, target->exports.data);
+    snprintf(requests, requests_cap, "%.*s", (int)target->requests.len, target->requests.data ? target->requests.data : "");
   }
   raepack_free(&pack);
 }
@@ -4671,9 +4674,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
          * module (a WASI reactor with named exports, docs/wasm-modules.md)
          * instead of a browser program */
         char module_exports[1024] = {0};
-        wasm_module_exports_of(build_opts.entry_path, final_root, module_exports, sizeof(module_exports));
+        char module_requests[1024] = {0};
+        wasm_module_exports_of(build_opts.entry_path, final_root, module_exports, sizeof(module_exports),
+                               module_requests, sizeof(module_requests));
         if (module_exports[0]) {
           g_wasm_module_exports = module_exports;
+          g_wasm_module_requests = module_requests;
           bool m_sdl3 = false, m_webgpu = false;
           bool emitted = build_c_backend_output(build_opts.entry_path, final_root, temp_c, build_opts.no_implicit,
                                                 &m_sdl3, &m_webgpu, NULL, PROGRESS_EMIT);
@@ -4681,6 +4687,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
           if (g_target_check_only || g_print_target || g_report_waits) return emitted ? 0 : 1;
           bool built = emitted && wasi_link_module(temp_c, build_opts.out_path, build_opts.profile);
           unlink(temp_c);
+          /* deny by default: every import must be one a request (or
+           * `runtime`) covers, or the module is not written */
+          if (built && !wasm_module_check_imports(build_opts.out_path)) {
+            unlink(build_opts.out_path);
+            return 1;
+          }
           return built ? 0 : 1;
         }
         bool b_sdl3 = false, b_webgpu = false;

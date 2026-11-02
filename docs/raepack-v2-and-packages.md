@@ -280,6 +280,16 @@ Note `remoteUi` *requests* `[gpu2d, net]` but the desktop target *grants* only
 
 ## 8. Capabilities — the three-way contract
 
+> **Implemented for WASM modules (2026-11-02, docs/wasm-interfaces.md §4):**
+> a capability is a host-defined `WasmCapability { name, imports }`; a module
+> requests with `requests: "log, clock"` on its pack's wasm target (written
+> into its `rae.interface` section, and the build fails on an import no
+> request covers); `wasmInstantiate(module, exposed, granted, limits)` checks
+> granted ⊆ requested ⊆ exposed (`grantNotRequested`, `requestNotExposed`,
+> `importRefused`), and a requested but ungranted capability's imports trap
+> when called. The standard set is `runtime`, `log`, `clock`, `random`
+> (wasm/WasiMinimal). The pack spelling below is the v2 sketch.
+
 **A module request must never grant access.** Three distinct concepts, kept
 separate in the model (names provisional):
 

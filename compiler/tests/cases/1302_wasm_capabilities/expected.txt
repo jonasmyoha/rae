@@ -1,0 +1,10 @@
+requests log only: importRefused: imports no requested capability covers: wasi_snapshot_preview1.clock_time_get, wasi_snapshot_preview1.random_get
+edited to request more, log granted: none
+  say: 0, wrote 'hello from the module'
+  readClock: trap: Exception: capability clock is not granted
+  readRandom: trap: Exception: capability random is not granted
+  the host saw: ["fd_write"]
+log and clock granted: readClock 1
+  readRandom: trap: Exception: capability random is not granted
+granting files: grantNotRequested: granted but not requested by the module: files
+a host without random: requestNotExposed: the module requests what this host does not expose: random

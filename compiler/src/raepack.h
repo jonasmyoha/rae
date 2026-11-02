@@ -28,6 +28,10 @@ typedef struct RaePackTarget {
    * reactor) exporting these functions by name (docs/wasm-modules.md);
    * empty for a program */
   Str exports;
+  /* `requests: "log, clock"` on the wasm target: the capabilities the module
+   * asks a host for (docs/wasm-interfaces.md §4). A request never grants; the
+   * module build fails on an import no request (nor `runtime`) covers. */
+  Str requests;
   RaePackSource* sources;
   size_t source_count;
   struct RaePackTarget* next;
