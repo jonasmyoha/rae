@@ -29,7 +29,14 @@ type JsonField {
 type JsonValue {
   kind: JsonKind
   asBool: Bool
+  # A number: `asNumber` is its Float (32-bit, for coordinates and sizes),
+  # `asFloat64` the double it parses to, and when its text is a whole number
+  # with no fraction and no exponent that fits an Int, `isInteger` is true and
+  # `asInt` is that exact Int (ids, revisions, times in ms: jsonInt).
   asNumber: Float
+  asFloat64: Float64
+  asInt: Int
+  isInteger: Bool
   asString: String
   # For Array: range in JsonDoc.children.
   # For Object: range in JsonDoc.fields.
@@ -56,26 +63,30 @@ type JsonParser {
 }
 
 # ---------- value constructors ----------
-func jsonNull() ret JsonValue {
+# An array or object (its range in the doc's children / fields), or a value
+# with no payload
+func rangeValue(kind: view JsonKind, start: view Int, count: view Int) ret JsonValue {
   ret JsonValue {
-    kind: JsonKind.null
+    kind: kind
     asBool: false
     asNumber: 0.0
+    asFloat64: 0.0
+    asInt: 0
+    isInteger: false
     asString: ""
-    rangeStart: 0
-    rangeLen: 0
+    rangeStart: start
+    rangeLen: count
   }
 }
 
+func jsonNull() ret JsonValue {
+  ret Json.rangeValue(kind: JsonKind.null, start: 0, count: 0)
+}
+
 func boolValue(v: view Bool) ret JsonValue {
-  ret JsonValue {
-    kind: JsonKind.bool
-    asBool: v
-    asNumber: 0.0
-    asString: ""
-    rangeStart: 0
-    rangeLen: 0
-  }
+  var value: JsonValue = Json.rangeValue(kind: JsonKind.bool, start: 0, count: 0)
+  value.asBool = v
+  ret value
 }
 
 func numberValue(value: view Float) ret JsonValue {
@@ -83,6 +94,34 @@ func numberValue(value: view Float) ret JsonValue {
     kind: JsonKind.number
     asBool: false
     asNumber: value
+    asFloat64: value as Float64
+    asInt: 0
+    isInteger: false
+    asString: ""
+    rangeStart: 0
+    rangeLen: 0
+  }
+}
+
+# A number from its JSON text: a whole number (no `.`, `e` or `E`) that fits
+# an Int is kept exactly; any other is the double the text parses to
+func numberFromText(text: view String) ret JsonValue {
+  let wide: Float64 = text.toFloat64()
+  var whole: Bool = text.indexOf(sub: ".") is none and text.indexOf(sub: "e") is none
+  whole = whole and text.indexOf(sub: "E") is none
+  var exact: Int = 0
+  if whole {
+    exact = text.toInt()
+    # out of Int's range (toInt clamps): not exact, keep the double
+    whole = "{exact}" is text
+  }
+  ret JsonValue {
+    kind: JsonKind.number
+    asBool: false
+    asNumber: wide as Float
+    asFloat64: wide
+    asInt: exact
+    isInteger: whole
     asString: ""
     rangeStart: 0
     rangeLen: 0
@@ -90,14 +129,9 @@ func numberValue(value: view Float) ret JsonValue {
 }
 
 func stringValue(v: own String) ret JsonValue {
-  ret JsonValue {
-    kind: JsonKind.string
-    asBool: false
-    asNumber: 0.0
-    asString: v
-    rangeStart: 0
-    rangeLen: 0
-  }
+  var value: JsonValue = Json.rangeValue(kind: JsonKind.string, start: 0, count: 0)
+  value.asString = v
+  ret value
 }
 
 # ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled)
@@ -138,16 +172,35 @@ func root(doc: view JsonDoc) ret JsonValue {
   ret Json.valueAt(doc: doc, idx: doc.rootIdx)
 }
 
+# The number as an Int: exact for a whole number in Int's range (up to
+# 2^63), else its double truncated toward zero and clamped to Int's range
 func jsonInt(this: view JsonValue, fallback: view Int) ret Int {
-  if this.kind is JsonKind.number {
-    ret this.asNumber.toInt()
+  if this.kind is not JsonKind.number {
+    ret fallback
   }
-  ret fallback
+  if this.isInteger {
+    ret this.asInt
+  }
+  if this.asFloat64 >= 9223372036854775807.0 {
+    ret 9223372036854775807
+  }
+  if this.asFloat64 <= -9223372036854775808.0 {
+    ret -9223372036854775807 - 1
+  }
+  ret this.asFloat64 as Int
 }
 
 func jsonFloat(this: view JsonValue, fallback: view Float) ret Float {
   if this.kind is JsonKind.number {
     ret this.asNumber
+  }
+  ret fallback
+}
+
+# The number as a double (a whole number above 2^53 rounds, as a double does)
+func jsonFloat64(this: view JsonValue, fallback: view Float64) ret Float64 {
+  if this.kind is JsonKind.number {
+    ret this.asFloat64
   }
   ret fallback
 }
@@ -501,8 +554,9 @@ func parseUnicodeEscape(jsonParser: mod JsonParser) ret String {
   ret String.fromCodepoint(code: code)
 }
 
-# Consume a JSON number (int or float). `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.
-func parseNumber(jsonParser: mod JsonParser) ret Float {
+# Consume a JSON number (int or float) and answer its text.
+# `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.
+func parseNumber(jsonParser: mod JsonParser) ret String {
   let start: Int = jsonParser.pos
   if Json.peek(jsonParser: jsonParser) is '-' {
     jsonParser.pos = jsonParser.pos + 1
@@ -527,10 +581,9 @@ func parseNumber(jsonParser: mod JsonParser) ret Float {
   }
   if jsonParser.pos is start {
     jsonParser.ok = false
-    ret 0.0
+    ret ""
   }
-  let lit: String = jsonParser.source.sub(start: start, len: jsonParser.pos - start)
-  ret lit.toFloat()
+  ret jsonParser.source.sub(start: start, len: jsonParser.pos - start)
 }
 
 # parseValue mutates `p` and the three pools, and returns the
@@ -611,14 +664,11 @@ func parseValue(
               # on why the per-T element iteration stays STRICT until
               # cross-list ownership transfer has a proper primitive.
               localFields.length = 0
-              let v: JsonValue = {
+              let v: JsonValue = Json.rangeValue(
                 kind: JsonKind.object
-                asBool: false
-                asNumber: 0.0
-                asString: ""
-                rangeStart: firstField
-                rangeLen: count
-              }
+                start: firstField
+                count: count
+              )
               ret Json.pushValue(vals: vals, v: v)
             } else {
               jsonParser.ok = false
@@ -629,14 +679,7 @@ func parseValue(
       }
       # Empty object: still bulk-append (no-op) and return.
       let firstField: Int = fields.length
-      let v: JsonValue = {
-        kind: JsonKind.object
-        asBool: false
-        asNumber: 0.0
-        asString: ""
-        rangeStart: firstField
-        rangeLen: 0
-      }
+      let v: JsonValue = Json.rangeValue(kind: JsonKind.object, start: firstField, count: 0)
       ret Json.pushValue(vals: vals, v: v)
     }
 
@@ -674,14 +717,11 @@ func parseValue(
                 kids.add(value: kidIdx)
                 i = i + 1
               }
-              let v: JsonValue = {
+              let v: JsonValue = Json.rangeValue(
                 kind: JsonKind.array
-                asBool: false
-                asNumber: 0.0
-                asString: ""
-                rangeStart: firstChild
-                rangeLen: count
-              }
+                start: firstChild
+                count: count
+              )
               ret Json.pushValue(vals: vals, v: v)
             } else {
               jsonParser.ok = false
@@ -691,14 +731,7 @@ func parseValue(
         }
       }
       let firstChild: Int = kids.length
-      let v: JsonValue = {
-        kind: JsonKind.array
-        asBool: false
-        asNumber: 0.0
-        asString: ""
-        rangeStart: firstChild
-        rangeLen: 0
-      }
+      let v: JsonValue = Json.rangeValue(kind: JsonKind.array, start: firstChild, count: 0)
       ret Json.pushValue(vals: vals, v: v)
     }
 
@@ -735,11 +768,11 @@ func parseValue(
     }
 
     if c is '-' or c.isDigit() {
-      let n: Float = Json.parseNumber(jsonParser)
+      let text: String = Json.parseNumber(jsonParser)
       if jsonParser.ok is false {
         ret -1
       }
-      ret Json.pushValue(vals: vals, v: Json.numberValue(value: n))
+      ret Json.pushValue(vals: vals, v: Json.numberFromText(text: text))
     }
 
     jsonParser.ok = false
@@ -808,7 +841,10 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
       ret "false"
     }
     case JsonKind.number {
-      ret jbNumber(value: value.asNumber)
+      if value.isInteger {
+        ret jbInt(value: value.asInt)
+      }
+      ret jbNumber64(value: value.asFloat64)
     }
     case JsonKind.string {
       ret quote(text: value.asString)
@@ -882,6 +918,20 @@ func jbNumber(value: view Float) ret String {
   unsafe {
     ret nativeJsonNumber(value: value)
   }
+}
+
+func nativeJsonNumber64(value: Float64) unsafe extern("rae_ext_json_number64") ret String
+
+# The shortest decimal that round-trips this double exactly
+func jbNumber64(value: view Float64) ret String {
+  unsafe {
+    ret nativeJsonNumber64(value: value)
+  }
+}
+
+# A whole number, every digit (exact for every Int)
+func jbInt(value: view Int) ret String {
+  ret "{value}"
 }
 
 func jbString(value: view String) ret String {

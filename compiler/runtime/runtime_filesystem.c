@@ -377,6 +377,23 @@ rae_String rae_ext_json_number(float v) {
   return rae_str_from_buf_impl((uint8_t*)best, best_len, RAE_SITE_FLOAT_TO_STR);
 }
 
+/* The same for a double (lib/Json jbNumber64): the shortest of %.1g .. %.17g
+ * that strtod reads back to the same double, so an epoch time in ms or any
+ * Float64 survives a save and reload unchanged. */
+rae_String rae_ext_json_number64(double v) {
+  char best[40]; int best_len = -1;
+  for (int prec = 1; prec <= 17; prec++) {
+    char tmp[40];
+    int len = snprintf(tmp, sizeof tmp, "%.*g", prec, v);
+    if (len > 0 && len < (int)sizeof tmp && strtod(tmp, NULL) == v) {
+      best_len = len; memcpy(best, tmp, (size_t)len + 1);
+      break;
+    }
+  }
+  if (best_len < 0) best_len = snprintf(best, sizeof best, "%.17g", v);
+  return rae_str_from_buf_impl((uint8_t*)best, best_len, RAE_SITE_FLOAT_TO_STR);
+}
+
 /* Float (f32) views. Formatting promotes to double, so the shared f64
  * formatter produces the same text a plain Float would. */
 

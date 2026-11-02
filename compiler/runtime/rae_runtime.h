@@ -914,6 +914,7 @@ void    rae_ext_audio_set_muted(int64_t muted);
 
 rae_String rae_ext_rae_str_f64(double v);
 rae_String rae_ext_json_number(float v);
+rae_String rae_ext_json_number64(double v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
 rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
