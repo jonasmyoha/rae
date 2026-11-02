@@ -1,0 +1,85 @@
+# lib/Time epochSecondsFromCivil: known moments, and a round trip through
+# civilFromEpochSeconds over four centuries in steps of a bit over a day
+open Time
+
+func at(
+  year: view Int
+  month: view Int
+  day: view Int
+  hour: view Int
+  minute: view Int
+  second: view Int
+) ret Int {
+  ret epochSecondsFromCivil(civil: CivilTime {
+    year: year
+    month: month
+    day: day
+    hour: hour
+    minute: minute
+    second: second
+    weekday: 0
+  })
+}
+
+func main() {
+  log("1970-01-01 00:00:00: {at(
+    year: 1970
+    month: 1
+    day: 1
+    hour: 0
+    minute: 0
+    second: 0
+  )}")
+  log("2026-11-02 19:00:00: {at(
+    year: 2026
+    month: 11
+    day: 2
+    hour: 19
+    minute: 0
+    second: 0
+  )}")
+  log("2024-02-29 12:30:15: {at(
+    year: 2024
+    month: 2
+    day: 29
+    hour: 12
+    minute: 30
+    second: 15
+  )}")
+  log("2000-03-01 00:00:00: {at(
+    year: 2000
+    month: 3
+    day: 1
+    hour: 0
+    minute: 0
+    second: 0
+  )}")
+  log("1969-12-31 23:59:59: {at(
+    year: 1969
+    month: 12
+    day: 31
+    hour: 23
+    minute: 59
+    second: 59
+  )}")
+  log("1900-02-28 00:00:00: {at(
+    year: 1900
+    month: 2
+    day: 28
+    hour: 0
+    minute: 0
+    second: 0
+  )}")
+  var wrong: Int = 0
+  var checked: Int = 0
+  var seconds: Int = -6311433600
+  loop seconds < 6311433600 {
+    let civil: CivilTime = civilFromEpochSeconds(epochSeconds: seconds)
+    if epochSecondsFromCivil(civil: civil) is not seconds {
+      wrong = wrong + 1
+    }
+    checked = checked + 1
+    seconds = seconds + 90061
+  }
+  log("round trips: {checked}, wrong: {wrong}")
+}

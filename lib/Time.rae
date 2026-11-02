@@ -3,10 +3,11 @@
 # Dates are computed here, in Rae, from epoch seconds (docs/runtime-c-audit.md
 # row 6; docs/server-benchmarks-design.md §9 G4): `civilFromEpochSeconds` is
 # the one calendar routine, shared by `formatTimestamp`, `formatDate` and the
-# HTTP Date header. All of them are UTC (as gmtime_r was). A clock a person
-# reads wants the local time: `localCivilFromEpochSeconds` is the same
-# calendar shifted by `localUtcOffsetSeconds`, the one time-zone call (the
-# OS knows the zone and its daylight saving).
+# HTTP Date header, and `epochSecondsFromCivil` goes back. All of them are UTC
+# (as gmtime_r was). A clock a person reads wants the local time:
+# `localCivilFromEpochSeconds` is the same calendar shifted by
+# `localUtcOffsetSeconds`, the one time-zone call (the OS knows the zone and
+# its daylight saving).
 
 # A moment broken into its UTC calendar fields
 type CivilTime {
@@ -63,6 +64,24 @@ func civilFromEpochSeconds(epochSeconds: view Int) ret CivilTime {
     second: secondOfDay % 60
     weekday: days + 4 - floorDivide(value: days + 4, divisor: 7) * 7
   }
+}
+
+# The epoch seconds of a UTC calendar moment: the inverse of
+# civilFromEpochSeconds (its `weekday` is not read). Howard Hinnant's
+# days-from-civil, exact for every year, before 1970 too
+func epochSecondsFromCivil(civil: view CivilTime) ret Int {
+  var year: Int = civil.year
+  var monthIndex: Int = civil.month - 3
+  if civil.month <= 2 {
+    year = year - 1
+    monthIndex = civil.month + 9
+  }
+  let era: Int = floorDivide(value: year, divisor: 400)
+  let yearOfEra: Int = year - era * 400
+  let dayOfYear: Int = (153 * monthIndex + 2) / 5 + civil.day - 1
+  let dayOfEra: Int = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+  let days: Int = era * 146097 + dayOfEra - 719468
+  ret days * 86400 + civil.hour * 3600 + civil.minute * 60 + civil.second
 }
 
 # `value` in decimal, at least `width` characters wide with zeros in front; a
