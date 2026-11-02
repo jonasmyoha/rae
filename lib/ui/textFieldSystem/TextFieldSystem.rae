@@ -27,10 +27,8 @@
 #   (textFieldMenuSystem): Paste when the clipboard has text, Copy and Cut when
 #   the field has some. The item picked arrives as the next frame's paste /
 #   copy / cut (readTextInputFrame polls Gpu2dTextInput.editMenuChoice).
-import Gpu2d
 import Gpu2dTextInput
 import Sdl3
-open ui/inputSystem/InputSystem
 open Keys
 open ui/Ecs
 open ui/Components
@@ -55,17 +53,7 @@ type TextInputFrame {
   paste: Bool = false
   copy: Bool = false
   cut: Bool = false
-  # the pointer (a finger on a phone), in design units
-  pointerDown: Bool = false
-  pointerX: Float = 0.0
-  pointerY: Float = 0.0
 }
-
-# How long a press must stay on the focused field, and how little it may move
-# (design units), before the edit menu shows: UIKit's long press
-const textFieldMenuHoldSec: Float64 = 0.5
-
-const textFieldMenuSlop: Float = 10.0
 
 # This frame's typing from the window (Gpu2dTextInput and the SDL keys);
 # `tapped` is the app's own pointer state
@@ -88,70 +76,7 @@ func readTextInputFrame(tapped: view Bool) ret TextInputFrame {
     paste: (command and Sdl3.isKeyPressed(key: keyV)) or menuChoice is 1
     copy: (command and Sdl3.isKeyPressed(key: keyC)) or menuChoice is 2
     cut: (command and Sdl3.isKeyPressed(key: keyX)) or menuChoice is 3
-    pointerDown: Gpu2d.pointerDown()
-    pointerX: Gpu2d.pointerX()
-    pointerY: Gpu2d.pointerY()
   }
-}
-
-# The edit menu on a long press (iOS; the keys copy and paste elsewhere): a
-# press that begins on the focused field (the field is the topmost clickable
-# node under it) and stays within textFieldMenuSlop for textFieldMenuHoldSec
-# shows the system menu there once, with Paste when the clipboard has text and
-# Copy and Cut when the field has some. Run it after textFieldSystem. True
-# when it showed the menu.
-func textFieldMenuSystem(
-  world: view UiWorld
-  uiSystems: mod UiSystems
-  input: view TextInputFrame
-  now: view Float64
-) ret Bool {
-  let focused: EntityId = focusedTextFieldEntityId(world: world)
-  if isNone(this: focused) or input.pointerDown is false {
-    uiSystems.textField.pressTracking = false
-    uiSystems.textField.pressMenuShown = false
-    ret false
-  }
-  if uiSystems.textField.pressTracking is false {
-    if uiHitTest(
-      world: world
-      uiSystems: uiSystems
-      x: input.pointerX
-      y: input.pointerY
-    ) is not focused {
-      ret false
-    }
-    uiSystems.textField.pressTracking = true
-    uiSystems.textField.pressStartSec = now
-    uiSystems.textField.pressX = input.pointerX
-    uiSystems.textField.pressY = input.pointerY
-    uiSystems.textField.pressMenuShown = false
-    ret false
-  }
-  let movedX: Float = input.pointerX - uiSystems.textField.pressX
-  let movedY: Float = input.pointerY - uiSystems.textField.pressY
-  if movedX * movedX + movedY * movedY > textFieldMenuSlop * textFieldMenuSlop {
-    # a drag, not a long press
-    uiSystems.textField.pressMenuShown = true
-    ret false
-  }
-  if uiSystems.textField.pressMenuShown or now - uiSystems.textField.pressStartSec < textFieldMenuHoldSec {
-    ret false
-  }
-  uiSystems.textField.pressMenuShown = true
-  let canPaste: Bool = textFieldClipboard(textFieldSystem: uiSystems.textField).length() > 0
-  let canCopy: Bool = componentView(this: world.textFields, entityId: focused).text.length() > 0
-  if not canPaste and not canCopy {
-    ret false
-  }
-  Gpu2dTextInput.showEditMenu(
-    x: input.pointerX
-    y: input.pointerY
-    canPaste: canPaste
-    canCopy: canCopy
-  )
-  uiSystems.textField.menuShows = uiSystems.textField.menuShows + 1
-  ret true
 }
 
 # Make the text field system's clipboard a scripted one holding `text` (a

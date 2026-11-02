@@ -14,6 +14,9 @@ open ui/UiSystems
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ui/textFieldSystem/TextFieldSystem
+open ui/textFieldMenuSystem/TextFieldMenuSystem
+open ui/inputSystem/InputSystem
+open ui/InputKind
 open ecs/Entity
 open ecs/Event
 open ecs/ComponentTable
@@ -59,14 +62,14 @@ func frame(
       value: UiAction { entityId: entityOf(world: world, nodeId: "Address"), actionId: "" }
     )
   }
-  let input: TextInputFrame = {
-    typed: ""
-    backspaces: 0
-    enter: false
-    tapped: false
-    pointerDown: down
-    pointerX: x
-    pointerY: y
+  let input: TextInputFrame = { typed: "", backspaces: 0, enter: false, tapped: false }
+  let pointer: UiPointerState = {
+    x: x
+    y: y
+    down: down
+    pressed: false
+    released: false
+    kind: InputKind.touch
   }
   textFieldSystem(
     world: world
@@ -78,7 +81,7 @@ func frame(
   ret textFieldMenuSystem(
     world: world
     uiSystems: uiSystems
-    input: input
+    pointer: pointer
     now: now
   )
 }

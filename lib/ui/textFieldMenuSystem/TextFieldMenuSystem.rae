@@ -1,0 +1,81 @@
+# The text field's edit menu on a long press (iOS), split from
+# TextFieldSystem so that system needs no window: this one hit-tests the
+# pointer (ui/inputSystem), which reaches the window's code, and the text
+# field system is also used where there is none (an app built to WASM).
+import Gpu2dTextInput
+open ui/inputSystem/InputSystem
+open ui/textFieldSystem/TextFieldSystem
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# How long a press must stay on the focused field, and how little it may move
+# (design units), before the edit menu shows: UIKit's long press
+const textFieldMenuHoldSec: Float64 = 0.5
+
+const textFieldMenuSlop: Float = 10.0
+
+# The edit menu on a long press (iOS; the keys copy and paste elsewhere): a
+# press that begins on the focused field (the field is the topmost clickable
+# node under it) and stays within textFieldMenuSlop for textFieldMenuHoldSec
+# shows the system menu there once, with Paste when the clipboard has text and
+# Copy and Cut when the field has some. Run it after textFieldSystem with the
+# frame's pointer (the app's UiInput.pointer: a finger on a phone, in design
+# units; the input step read it, so this system needs no window). True when
+# it showed the menu.
+func textFieldMenuSystem(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  pointer: view UiPointerState
+  now: view Float64
+) ret Bool {
+  let focused: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: focused) or pointer.down is false {
+    uiSystems.textField.pressTracking = false
+    uiSystems.textField.pressMenuShown = false
+    ret false
+  }
+  if uiSystems.textField.pressTracking is false {
+    if uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: pointer.x
+      y: pointer.y
+    ) is not focused {
+      ret false
+    }
+    uiSystems.textField.pressTracking = true
+    uiSystems.textField.pressStartSec = now
+    uiSystems.textField.pressX = pointer.x
+    uiSystems.textField.pressY = pointer.y
+    uiSystems.textField.pressMenuShown = false
+    ret false
+  }
+  let movedX: Float = pointer.x - uiSystems.textField.pressX
+  let movedY: Float = pointer.y - uiSystems.textField.pressY
+  if movedX * movedX + movedY * movedY > textFieldMenuSlop * textFieldMenuSlop {
+    # a drag, not a long press
+    uiSystems.textField.pressMenuShown = true
+    ret false
+  }
+  if uiSystems.textField.pressMenuShown or now - uiSystems.textField.pressStartSec < textFieldMenuHoldSec {
+    ret false
+  }
+  uiSystems.textField.pressMenuShown = true
+  let canPaste: Bool = textFieldClipboard(textFieldSystem: uiSystems.textField).length() > 0
+  let canCopy: Bool = componentView(this: world.textFields, entityId: focused).text.length() > 0
+  if not canPaste and not canCopy {
+    ret false
+  }
+  Gpu2dTextInput.showEditMenu(
+    x: pointer.x
+    y: pointer.y
+    canPaste: canPaste
+    canCopy: canCopy
+  )
+  uiSystems.textField.menuShows = uiSystems.textField.menuShows + 1
+  ret true
+}
