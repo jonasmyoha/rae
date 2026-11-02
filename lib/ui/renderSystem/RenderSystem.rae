@@ -86,16 +86,6 @@ func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
   applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
 }
 
-# A Shape's stroke color: its palette slot from the ACTIVE theme (#235) or
-# its literal, through the opacity chain
-func shapeStroke(world: view UiWorld, shape: view Shape, chain255: view Int) ret RgbaColor {
-  var strokeBase: RgbaColor = shape.stroke
-  if shape.strokeSlot.length() > 0 {
-    strokeBase = uiThemeColor(theme: world.theme, name: shape.strokeSlot)
-  }
-  ret g2dChain(color: strokeBase, chain255: chain255)
-}
-
 func paintShapeG(
   world: view UiWorld
   uiSystems: view UiSystems

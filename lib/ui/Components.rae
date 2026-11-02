@@ -367,8 +367,11 @@ type HoverScale {
   target: Float = 1.0
 }
 
-# Linear gradient; angle is degrees, and CornerRadius rounds it.
-# Takes precedence over Shape.fill on the same entity.
+# Linear gradient; angle is degrees. It replaces Shape.fill on the same
+# entity: it rounds with the Shape's radius (a Circle: half its smaller side),
+# else a CornerRadius, and the Shape's stroke is painted over it. `from` /
+# `to` may be palette names; fromSlot / toSlot name a palette color directly
+# (an unknown name is a diagnostic and paints magenta).
 type GradientFill {
   from: RgbaColor
   to: RgbaColor
