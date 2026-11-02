@@ -17,6 +17,12 @@
 #   event loop's wait.
 # - `keyboardHeight` is the on-screen keyboard's height in points (0 when none
 #   is shown, always 0 on a desktop), so a layout can keep a field above it.
+# - Cmd+V (Ctrl+V) pastes the clipboard's text at the caret (the end of the
+#   field) with its line breaks dropped, as every field is one line; Cmd+C
+#   copies and Cmd+X cuts the field's whole text. The clipboard is the
+#   system's (Gpu2dTextInput.clipboardText), or a scripted one a test fills
+#   with setTextFieldClipboard: the scripted step "put this on the clipboard,
+#   then paste" is that plus a frame with `paste`.
 import Gpu2dTextInput
 import Sdl3
 open Keys
@@ -39,6 +45,10 @@ type TextInputFrame {
   enter: Bool
   # a tap ended this frame, on anything or on nothing
   tapped: Bool
+  # Cmd/Ctrl + V, C, X pressed this frame
+  paste: Bool = false
+  copy: Bool = false
+  cut: Bool = false
 }
 
 # This frame's typing from the window (Gpu2dTextInput and the SDL keys);
@@ -48,12 +58,48 @@ func readTextInputFrame(tapped: view Bool) ret TextInputFrame {
   if Sdl3.isKeyPressed(key: keyBackspace) {
     backspaces = 1
   }
+  # the command key: Command on the Mac, Ctrl elsewhere (either works)
+  let command: Bool = Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui) or Sdl3.isKeyDown(
+    key: keyLCtrl
+  ) or Sdl3.isKeyDown(key: keyRCtrl)
   ret TextInputFrame {
     typed: Gpu2dTextInput.textInput()
     backspaces: backspaces
     enter: Sdl3.isKeyPressed(key: keyEnter)
     tapped: tapped
+    paste: command and Sdl3.isKeyPressed(key: keyV)
+    copy: command and Sdl3.isKeyPressed(key: keyC)
+    cut: command and Sdl3.isKeyPressed(key: keyX)
   }
+}
+
+# Make the text field system's clipboard a scripted one holding `text` (a
+# test, a self-test): paste, copy and cut then use it, and the system
+# clipboard is never read or changed
+func setTextFieldClipboard(textFieldSystem: mod TextFieldSystem, text: view String) {
+  textFieldSystem.clipboardScripted = true
+  textFieldSystem.clipboardText = "{text}"
+}
+
+# The clipboard's text: the scripted one, else the system's
+func textFieldClipboard(textFieldSystem: view TextFieldSystem) ret String {
+  if textFieldSystem.clipboardScripted {
+    ret "{textFieldSystem.clipboardText}"
+  }
+  ret Gpu2dTextInput.clipboardText()
+}
+
+func putOnTextFieldClipboard(textFieldSystem: mod TextFieldSystem, text: view String) {
+  if textFieldSystem.clipboardScripted {
+    textFieldSystem.clipboardText = "{text}"
+    ret
+  }
+  let put: Bool = Gpu2dTextInput.setClipboardText(text: text)
+}
+
+# `text` on one line: every line break (CR, LF) dropped
+func withoutLineBreaks(text: view String) ret String {
+  ret text.replace(old: "\r", new: "").replace(old: "\n", new: "")
 }
 
 # Drop the last character (a whole UTF-8 sequence) of `text`
@@ -135,6 +181,24 @@ func textFieldSystem(
     if input.typed.length() > 0 {
       field.text = "{field.text}{input.typed}"
       changed = true
+    }
+    if input.copy or input.cut {
+      if field.text.length() > 0 {
+        putOnTextFieldClipboard(textFieldSystem: textFieldSystem, text: field.text)
+      }
+      if input.cut and field.text.length() > 0 {
+        field.text = ""
+        changed = true
+      }
+    }
+    if input.paste {
+      let pasted: String = withoutLineBreaks(
+        text: textFieldClipboard(textFieldSystem: textFieldSystem)
+      )
+      if pasted.length() > 0 {
+        field.text = "{field.text}{pasted}"
+        changed = true
+      }
     }
     if input.enter {
       if field.actionId.length() > 0 {

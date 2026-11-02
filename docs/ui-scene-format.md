@@ -363,6 +363,16 @@ and that every `OnClick` id has a label.
 - OS text input is on only while a field has focus (on a phone that is what
   shows the keyboard), and `uiSystems.textField.keyboardHeight` is the
   keyboard's height in points so a layout can keep the field above it.
+- Cmd+V (Ctrl+V) pastes the clipboard's text at the caret (the field's end;
+  line breaks dropped, as the field is one line). Cmd+C copies and Cmd+X cuts
+  the field's whole text. `readTextInputFrame` reads those keys into the
+  frame's `paste` / `copy` / `cut`. The clipboard is the system's
+  (`Gpu2dTextInput.clipboardText` / `setClipboardText`, SDL3 over
+  NSPasteboard and UIPasteboard; never touched under a headless run). A test
+  or self-test calls `setTextFieldClipboard(textFieldSystem:, text:)`, which
+  makes the clipboard a scripted one holding `text`, then sends a frame with
+  `paste: true` (case 1309). On iOS the long-press Paste menu is not there yet
+  (queued).
 - The caret is drawn by the renderer after the text, not written into it;
   it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
   when it next changes, for the event loop's heartbeat

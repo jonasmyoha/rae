@@ -743,6 +743,29 @@ float rae_ext_Gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y);
 /* The characters typed since the last event poll, as one UTF-8 String. */
 rae_String rae_ext_Gpu2d_textInput(void){ return rae_ext_rae_str_from_cstr(g_g2d_text_input); }
 
+/* The system clipboard's text (NSPasteboard on macOS, UIPasteboard on iOS,
+ * through SDL3), "" when it holds none. Never read headless: an automated
+ * run must not depend on, or change, the person's clipboard. */
+rae_String rae_ext_Gpu2d_clipboardText(void) {
+    if (rae_g2d_headless_requested()) return rae_ext_rae_str_from_cstr("");
+    char* text = SDL_GetClipboardText();
+    rae_String out = rae_ext_rae_str_from_cstr(text ? text : "");
+    SDL_free(text);
+    return out;
+}
+
+/* Put `text` on the system clipboard; false when SDL could not (or headless). */
+rae_Bool rae_ext_Gpu2d_setClipboardText(rae_String text) {
+    if (rae_g2d_headless_requested()) return 0;
+    char* copy = (char*)malloc((size_t)text.len + 1);
+    if (!copy) return 0;
+    if (text.len > 0) memcpy(copy, text.data, (size_t)text.len);
+    copy[text.len] = 0;
+    bool ok = SDL_SetClipboardText(copy);
+    free(copy);
+    return ok ? 1 : 0;
+}
+
 /* Start / stop SDL text input for the window: on while a text field is on
  * screen, off otherwise (see the note at window creation). Idempotent — the
  * app calls it every frame with its current state. Never started headless
