@@ -374,9 +374,10 @@ and that every `OnClick` id has a label.
   `paste: true` (case 1309).
 - On iOS a press held still (0.5 s, within 10 units) on the focused field
   shows the system edit menu there, as a UITextField does:
-  `textFieldMenuSystem(world:, uiSystems:, input:, now:)`, run after
-  `textFieldSystem`, detects the press from the frame's `pointerDown` /
-  `pointerX` / `pointerY` and calls `Gpu2dTextInput.showEditMenu` (a
+  `textFieldMenuSystem(world:, uiSystems:, pointer:, now:)`
+  (ui/textFieldMenuSystem), run after `textFieldSystem` with the frame's
+  pointer (the app's `UiInput.pointer`), detects the press and calls
+  `Gpu2dTextInput.showEditMenu` (a
   UIEditMenuInteraction, iOS 16+) with Paste when the clipboard has text and
   Copy and Cut when the field has some. The item picked is polled by the next
   `readTextInputFrame` (`Gpu2dTextInput.editMenuChoice`) and arrives as that
