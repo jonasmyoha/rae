@@ -34,3 +34,26 @@ that import `Keychain`, which alone link `-framework Security`. Case 1291 runs
 against the real login Keychain on macOS under a random account name (a new
 binary per `rae run` would otherwise meet an earlier run's item, and macOS asks
 before letting another program read it).
+
+## A key in a file instead: `Sys.writeFilePrivate`
+
+macOS asks a person before a new build of a command-line program may read a
+Keychain item that an earlier build made. So a program that is rebuilt all the
+time (SUMU's Mac Shell) keeps its key the way ssh does, as a file only its
+owner can read:
+
+```rae
+let saved: Bool = writeFilePrivate(path: "{dataFolder}/device.key", content: seed)
+if let mode: Int = fileMode(path: keyPath) { ... }   # privateFileMode, 0600 (384)
+let narrowed: Bool = setFileMode(path: keyPath, mode: privateFileMode)
+```
+
+`writeFilePrivate` writes into a new file next to the target. That file is
+created with mode 0600 from the start (`open` with `O_CREAT | O_EXCL` and
+mode 0600, which the umask can only narrow), so the content is never readable
+by others. It is synced and then renamed over the target. The target therefore
+ends 0600 even when it existed with a wider mode, and a reader sees the old
+content or all of the new one. `setFileMode` is `chmod`, and `fileMode`
+answers the permission bits, or none for a missing file. All three are Rae
+over one-call shims in `compiler/runtime/runtime_filesystem.c` (Linux and
+macOS; case 1305).

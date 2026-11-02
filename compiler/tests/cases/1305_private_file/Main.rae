@@ -1,0 +1,59 @@
+# A file only its owner can read (lib/Sys writeFilePrivate, setFileMode,
+# fileMode): written mode 0600 from the start, also over an existing file
+# with a wider mode, with no temporary file left behind; a mode set and read
+# back; and the failures (a folder that is not there, a missing file).
+open Sys
+
+func octal(mode: view Int) ret String {
+  ret "0{(mode / 64) % 8}{(mode / 8) % 8}{mode % 8}"
+}
+
+func modeOf(path: view String) ret String {
+  if let mode: Int = fileMode(path: path) {
+    ret octal(mode: mode)
+  }
+  ret "none"
+}
+
+func main() {
+  let folder: String = "{getEnv(name: "TMPDIR")}/rae_case_1305_{nowNs()}"
+  let made: Bool = makeDir(path: folder)
+  let key: String = "{folder}/device.key"
+
+  log("privateFileMode is {octal(mode: privateFileMode)}")
+  log("write private: {writeFilePrivate(path: key, content: "seed one")}, mode {modeOf(path: key)}")
+  if let text: String = readFile(path: key) {
+    log("  reads back '{text}'")
+  }
+
+  # An existing file with a wider mode: replaced, and 0600 afterwards
+  let shared: String = "{folder}/shared.txt"
+  let wrote: Bool = writeFile(path: shared, content: "old")
+  let widened: Bool = setFileMode(path: shared, mode: 420)
+  log("before: mode {modeOf(path: shared)}")
+  log(
+    "write private over it: {writeFilePrivate(path: shared, content: "new seed")}, mode {modeOf(
+      path: shared
+    )}"
+  )
+  if let text: String = readFile(path: shared) {
+    log("  reads back '{text}'")
+  }
+  log("  a temporary file is left: {exists(path: "{shared}.private-0")}")
+
+  # Setting a mode
+  log("setFileMode 0640: {setFileMode(path: key, mode: 416)}, mode {modeOf(path: key)}")
+
+  # Failures
+  log(
+    "write private into a missing folder: {writeFilePrivate(
+      path: "{folder}/missing/key"
+      content: "x"
+    )}"
+  )
+  log("mode of a missing file: {modeOf(path: "{folder}/nothing")}")
+  log("setFileMode of a missing file: {setFileMode(path: "{folder}/nothing", mode: 384)}")
+
+  let removed: Bool = delete(path: key) and delete(path: shared) and delete(path: folder)
+  log("cleaned up: {removed}")
+}

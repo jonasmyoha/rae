@@ -183,6 +183,57 @@ rae_Bool rae_ext_rae_sys_delete(rae_String path) {
     return remove((const char*)path.data) == 0;
 }
 
+/* Private files (lib/Sys.rae writeFilePrivate, setFileMode, fileMode). Each
+ * shim is ONE system call answering its result or a negated errno; the
+ * temporary name, the retries and the rename are Rae. Platform reason:
+ * open(2) with a mode is variadic, and mode bits and errno are per-OS. */
+
+/* open(path, O_WRONLY | O_CREAT | O_EXCL, 0600): a NEW file only its owner
+ * can read or write (the umask can only take bits away). The descriptor, or
+ * -errno (-EEXIST when the path exists). */
+int64_t rae_ext_rae_sys_open_private(rae_String path) {
+    if (!path.data) return -EINVAL;
+    int fd = open((const char*)path.data, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    return fd >= 0 ? (int64_t)fd : -(int64_t)errno;
+}
+
+/* write(fd, text + offset, count): the bytes written, or -errno */
+int64_t rae_ext_rae_sys_write_fd(int64_t fd, rae_String text, int64_t offset, int64_t count) {
+    if (count <= 0) return 0;
+    if (!text.data || offset < 0 || offset + count > text.len) return -EINVAL;
+    ssize_t n = write((int)fd, text.data + offset, (size_t)count);
+    return n >= 0 ? (int64_t)n : -(int64_t)errno;
+}
+
+/* fsync(fd): 0 or -errno */
+int64_t rae_ext_rae_sys_fsync(int64_t fd) {
+    return fsync((int)fd) == 0 ? 0 : -(int64_t)errno;
+}
+
+/* close(fd): 0 or -errno */
+int64_t rae_ext_rae_sys_close_fd(int64_t fd) {
+    return close((int)fd) == 0 ? 0 : -(int64_t)errno;
+}
+
+/* chmod(path, mode): 0 or -errno */
+int64_t rae_ext_rae_sys_chmod(rae_String path, int64_t mode) {
+    if (!path.data) return -EINVAL;
+#ifdef __wasm__
+    (void)mode;
+    return -ENOSYS;
+#else
+    return chmod((const char*)path.data, (mode_t)mode) == 0 ? 0 : -(int64_t)errno;
+#endif
+}
+
+/* stat(path).st_mode's permission bits (07777), or -errno */
+int64_t rae_ext_rae_sys_file_mode(rae_String path) {
+    if (!path.data) return -EINVAL;
+    struct stat st;
+    if (stat((const char*)path.data, &st) != 0) return -(int64_t)errno;
+    return (int64_t)(st.st_mode & 07777);
+}
+
 rae_Bool rae_ext_rae_sys_make_dir(rae_String path) {
     if (!path.data) return false;
     // mkdir(2) returns -1 with EEXIST when the dir already exists; we
