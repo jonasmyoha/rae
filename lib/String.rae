@@ -625,6 +625,16 @@ func join(this: view List(String), sep: view String) ret String {
   ret result
 }
 
+func rae_str_to_f64_wide(s: String) unsafe extern("rae_ext_rae_str_to_f64") ret Float64
+
+# The decimal number at the start of the String as a double, without the
+# rounding to Float that toFloat makes
+func toFloat64(this: view String) ret Float64 {
+  unsafe {
+    ret rae_str_to_f64_wide(s: this)
+  }
+}
+
 func toFloat(this: view String) ret Float {
   unsafe {
     ret rae_str_to_f64(s: this)
