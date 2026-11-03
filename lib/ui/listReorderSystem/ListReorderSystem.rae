@@ -125,7 +125,61 @@ func idleReorderDrag() ret ListReorderDrag {
     settled: 0
     scrollRoot: noEntity()
     poseDue: false
+    lowIndex: 0
+    highIndex: 0
+    keys: List.create(String, cap: 0)
   }
+}
+
+# Each row's key (`keyField`, ListView.itemKeyField) in the list's data;
+# empty when the list has no keys
+func listReorderRowKeys(
+  world: view UiWorld
+  listEntity: view EntityId
+  keyField: view String
+) ret List(String) {
+  var keys: List(String) = List.create(String, cap: 0)
+  if keyField.length() is 0 or componentHas(this: world.listViewDatas, entityId: listEntity) is false {
+    ret keys
+  }
+  let data: view ListViewData = componentView(this: world.listViewDatas, entityId: listEntity)
+  loop let row: view ListViewRow in data.rows {
+    var key: String = ""
+    loop var c: Int = 0, c < row.keys.length, ++c {
+      if row.keys.copyAtFallback(index: c, fallback: "") is keyField {
+        key = row.values.copyAtFallback(index: c, fallback: "")
+      }
+    }
+    keys.add(value: key)
+  }
+  ret keys
+}
+
+# Which rows stay where they are: one Bool per row of the list's data, true
+# where the row's cell `field` is "true" (ListReorder.fixedField; none when
+# `field` is "")
+func listReorderFixedRows(
+  world: view UiWorld
+  listEntity: view EntityId
+  field: view String
+) ret List(Bool) {
+  var fixed: List(Bool) = List.create(Bool, cap: 0)
+  if componentHas(this: world.listViewDatas, entityId: listEntity) is false {
+    ret fixed
+  }
+  let data: view ListViewData = componentView(this: world.listViewDatas, entityId: listEntity)
+  loop let row: view ListViewRow in data.rows {
+    var isFixed: Bool = false
+    if field.length() > 0 {
+      loop var c: Int = 0, c < row.keys.length, ++c {
+        if row.keys.copyAtFallback(index: c, fallback: "") is field {
+          isFixed = row.values.copyAtFallback(index: c, fallback: "") is "true"
+        }
+      }
+    }
+    fixed.add(value: isFixed)
+  }
+  ret fixed
 }
 
 # The list's top on screen along its axis (its scroll included): where row 0
@@ -286,7 +340,15 @@ func listReorderStep(
           firstRow: firstRow
           dataIndex: index
         )
-        if isNone(this: rowEntity) is false and listReorderPressOnHandle(
+        # A fixed row (a section's heading) is never lifted, and a lifted
+        # row stays between the fixed rows around it
+        let fixed: List(Bool) = listReorderFixedRows(
+          world: world
+          listEntity: listEntity
+          field: reorder.fixedField
+        )
+        let span: ReorderSpan = reorderSpan(fixed: fixed, index: index)
+        if isNone(this: rowEntity) is false and fixed.copyAtFallback(index: index, fallback: false) is false and listReorderPressOnHandle(
           world: world
           uiSystems: uiSystems
           reorder: reorder
@@ -296,6 +358,8 @@ func listReorderStep(
           drag.phase = ListReorderPhase.pressing
           drag.fromIndex = index
           drag.toIndex = index
+          drag.lowIndex = span.low
+          drag.highIndex = span.high
           drag.pressX = pointer.x
           drag.pressY = pointer.y
           drag.pressSec = nowSec
@@ -386,9 +450,15 @@ func listReorderStep(
       }
     }
     var rowY: Float = pointer.y - top - drag.grabY
-    let lastY: Float = (count - 1).toFloat() * pitch
-    if rowY < 0.0 {
-      rowY = 0.0
+    # Only between the fixed rows around it (all the list when none)
+    var high: Int = drag.highIndex
+    if high > count - 1 {
+      high = count - 1
+    }
+    let firstY: Float = drag.lowIndex.toFloat() * pitch
+    let lastY: Float = high.toFloat() * pitch
+    if rowY < firstY {
+      rowY = firstY
     }
     if rowY > lastY {
       rowY = lastY
@@ -441,6 +511,11 @@ func listReorderStep(
         )
       }
       drag.phase = ListReorderPhase.settling
+      drag.keys = listReorderRowKeys(
+        world: world
+        listEntity: listEntity
+        keyField: listView.itemKeyField
+      )
       drag.dropSec = nowSec
       drag.dataGeneration = componentTableGeneration(ListViewData, this: world.listViewDatas)
       drag.settled = 0
@@ -479,7 +554,7 @@ func listReorderSettle(
   if drag.settled is 0 {
     # The new order is taken by listReorderPoseSystem, in the frame it comes
     let moved: Bool = drag.toIndex is not drag.fromIndex
-    if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or count is not drag.shifts.length {
+    if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or (count is not drag.shifts.length and drag.keys.length is 0) {
       # Back home in the old order: the lifted row from where it was dropped
       if drag.fromIndex < drag.shifts.length {
         drag.shifts.set(index: drag.fromIndex, value: drag.rowY - drag.fromIndex.toFloat() * pitch)
@@ -554,6 +629,8 @@ func listReorderPoseList(world: mod UiWorld, uiSystems: mod UiSystems, listEntit
   listReorderTakeOrder(
     drag: drag
     world: world
+    listEntity: listEntity
+    keyField: listView.itemKeyField
     count: count
     pitch: pitch
   )
@@ -578,6 +655,8 @@ func listReorderPoseList(world: mod UiWorld, uiSystems: mod UiSystems, listEntit
 func listReorderTakeOrder(
   drag: mod ListReorderDrag
   world: view UiWorld
+  listEntity: view EntityId
+  keyField: view String
   count: view Int
   pitch: view Float
 ) {
@@ -586,7 +665,47 @@ func listReorderTakeOrder(
   }
   let moved: Bool = drag.toIndex is not drag.fromIndex
   let dataChanged: Bool = componentTableGeneration(ListViewData, this: world.listViewDatas) is not drag.dataGeneration
-  if moved is false or dataChanged is false or count is not drag.shifts.length {
+  if moved is false or dataChanged is false {
+    ret
+  }
+  # A keyed list: every row by its key, from where it was drawn, also when
+  # a row came or went in the same change (the app's heading)
+  if drag.keys.length > 0 and drag.keys.length is drag.shifts.length {
+    var drawnAt: List(Float) = List.create(Float, cap: drag.keys.length)
+    loop var index: Int = 0, index < drag.keys.length, ++index {
+      if index is drag.fromIndex {
+        drawnAt.add(value: drag.rowY)
+      } else {
+        drawnAt.add(
+          value: index.toFloat() * pitch + drag.shifts.copyAtFallback(index: index, fallback: 0.0)
+        )
+      }
+    }
+    let newKeys: List(String) = listReorderRowKeys(
+      world: world
+      listEntity: listEntity
+      keyField: keyField
+    )
+    let liftedKey: String = drag.keys.copyAtFallback(index: drag.fromIndex, fallback: "")
+    var liftedAt: Int = -1
+    loop var index: Int = 0, index < newKeys.length, ++index {
+      if newKeys.copyAtFallback(index: index, fallback: "") is liftedKey {
+        liftedAt = index
+      }
+    }
+    drag.shifts = reorderKeyedShifts(
+      oldKeys: drag.keys
+      drawnAt: drawnAt
+      newKeys: newKeys
+      pitch: pitch
+    )
+    if liftedAt >= 0 {
+      drag.toIndex = liftedAt
+    }
+    drag.settled = 1
+    ret
+  }
+  if count is not drag.shifts.length {
     ret
   }
   var shifts: List(Float) = List.create(Float, cap: count)

@@ -421,6 +421,7 @@ A virtual `ListView` (the default mode) whose node also carries
 | `liftScale` | `1.03` | the lifted row's size, as a multiple of its own |
 | `liftShadow` | `true` | a soft drop shadow under the lifted row, growing with the lift (a row root with a `Shadow` of its own keeps it) |
 | `haptics` | `true` | the phone's ticks (lib/Haptics): a light impact when the row lifts and a selection tick each time the gap moves to another index; the generators are warmed at the press, so neither lags. Nothing to feel off iOS; a headless run logs `[haptics] ...` lines instead |
+| `fixedField` | `""` | the name of a cell of the list's rows (`"isHeading"`): a row whose cell is `"true"` stays where it is, as a section's heading. A press on it never lifts it, and a lifted row moves only among the rows between the fixed rows around it, so no fixed row moves and the drop's indexes never cross one |
 
 The gesture is the one phones use. A press that stays still for `holdMs`
 lifts the row: it grows to `liftScale`, casts a shadow, is painted over its
@@ -431,7 +432,10 @@ press that moves before the hold is a scroll or a tap, as without
 `ListReorder`. On the drop the app reorders its data from the action; every
 row then eases from where it was drawn into its new place. An app that does
 not take the move (its data does not change within half a second) sees the
-rows ease back into the old order.
+rows ease back into the old order. With an `itemKeyField` the new order is
+taken by key, so an answer that also adds or removes a row (a heading that
+goes once its last task moved out from under it) still moves every row
+smoothly from where it was drawn.
 
 The app runs `listReorderSystem(world, uiSystems, input, nowSec)` each frame
 `listReorderNeedsRun` says so, after `updateUiInput` and before

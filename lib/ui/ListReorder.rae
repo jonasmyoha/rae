@@ -20,6 +20,12 @@
 # never lifts it. With `haptics` (on by default) the phone ticks as its own
 # lists do (lib/Haptics): a light impact when the row lifts, a selection tick
 # each time the gap moves to another index.
+#
+# With `fixedField`, the name of a cell of the list's rows ("heading"), a
+# row whose cell is "true" stays where it is (a section's heading): a press
+# on it never lifts it, and a lifted row moves only among the rows between
+# the fixed rows around it, so no fixed row ever moves and the indexes in
+# `<actionId>.<from>.<to>` never cross one.
 type ListReorder {
   actionId: String
   # What the gesture does in words, sentence case ("Move task"): what a
@@ -35,6 +41,7 @@ type ListReorder {
   # its own), growing with the lift
   liftShadow: Bool = true
   haptics: Bool = true
+  fixedField: String = ""
 }
 
 enum ListReorderPhase { idle, pressing, lifted, settling }
@@ -63,4 +70,13 @@ type ListReorderDrag {
   settled: Int
   scrollRoot: EntityId
   poseDue: Bool = false
+  # The indexes the lifted row may land on (between the fixed rows around
+  # it, ListReorder.fixedField)
+  lowIndex: Int = 0
+  highIndex: Int = 0
+  # The rows' keys (ListView.itemKeyField) when the row was dropped: the
+  # app's new order is then taken by key, so a row that comes or goes in
+  # the same change (a heading) moves nothing by a jump. Empty for a list
+  # without keys.
+  keys: List(String) = List.create(String, cap: 0)
 }
