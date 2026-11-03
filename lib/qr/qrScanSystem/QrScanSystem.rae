@@ -1,0 +1,112 @@
+# An in-game camera that reads QR codes in the 3D world (docs/qr.md,
+# "Scanning the rendered frame"): every `intervalFrames` frames a square in
+# the middle of the rendered frame is read back from the GPU
+# (lib/gpu/FrameRegionReader: a frame or two later, nothing waits), turned
+# to gray and decoded (lib/qr/QrReader). `scanner.latest` is the last code
+# read, `scanner.lastRead` whether the last scan read one.
+#
+# The app calls `qrScanFrame` after each present, on the frame's canvas.
+import Math
+open gpu/FrameRegionReader
+open Gpu2dCanvas
+open qr/GrayImage
+open qr/QrReader
+
+type QrScanner {
+  enabled: Bool
+  # A scan every this many frames (1: as often as the readback allows)
+  intervalFrames: Int
+  # The square read, physical pixels, centered in the frame
+  regionSide: Int
+  reader: FrameRegionReader
+  framesUntilScan: Int
+  # Scans done, and how many read a code
+  scans: Int
+  reads: Int
+  lastRead: Bool
+  latest: opt QrReadResult
+  # The last scan's decode time, and how many frames its pixels took
+  lastDecodeNs: Int
+  lastLatencyFrames: Int
+}
+
+func createQrScanner(intervalFrames: view Int, regionSide: view Int) ret QrScanner {
+  ret QrScanner {
+    enabled: true
+    intervalFrames: intervalFrames
+    regionSide: regionSide
+    reader: createFrameRegionReader()
+    framesUntilScan: 0
+    scans: 0
+    reads: 0
+    lastRead: false
+    latest: none
+    lastDecodeNs: 0
+    lastLatencyFrames: 0
+  }
+}
+
+# The pixels that arrived, as gray (RGBA8 or BGRA8: green weighs twice,
+# red and blue once, the same in either order)
+func regionGray(reader: view FrameRegionReader) ret GrayImage {
+  var pixels: List(UInt8) = List.create(UInt8, cap: reader.width * reader.height)
+  loop var y: Int = 0, y < reader.height, ++y {
+    let row: Int = y * reader.bytesPerRow
+    loop var x: Int = 0, x < reader.width, ++x {
+      let at: Int = row + x * 4
+      let first: Int = reader.bytes.copyAtFallback(index: at, fallback: 0) as Int
+      let green: Int = reader.bytes.copyAtFallback(index: at + 1, fallback: 0) as Int
+      let third: Int = reader.bytes.copyAtFallback(index: at + 2, fallback: 0) as Int
+      pixels.add(value: ((first + green * 2 + third) / 4) as UInt8)
+    }
+  }
+  ret GrayImage { width: reader.width, height: reader.height, pixels: own pixels }
+}
+
+# One frame (after present): true when a scan finished this frame (read or
+# not: see `scanner.lastRead`)
+func qrScanFrame(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) ret Bool {
+  if not scanner.enabled {
+    ret false
+  }
+  frameRegionKeepOffscreen(canvas: canvas)
+  var finished: Bool = false
+  if frameRegionUpdate(reader: scanner.reader, canvas: canvas) {
+    let start: Int = nowNs()
+    let image: GrayImage = regionGray(reader: scanner.reader)
+    scanner.lastRead = false
+    if let result: QrReadResult = qrRead(image: image) {
+      scanner.latest = result
+      scanner.lastRead = true
+      scanner.reads = scanner.reads + 1
+    }
+    scanner.lastDecodeNs = nowNs() - start
+    scanner.lastLatencyFrames = scanner.reader.latencyFrames
+    scanner.scans = scanner.scans + 1
+    finished = true
+  }
+  if frameRegionIsIdle(reader: scanner.reader) {
+    if scanner.framesUntilScan <= 0 {
+      let side: Int = Math.min(
+        a: scanner.regionSide
+        b: Math.min(a: canvas.offscreenWidth, b: canvas.offscreenHeight)
+      )
+      let started: Bool = frameRegionStart(
+        reader: scanner.reader
+        canvas: canvas
+        x: (canvas.offscreenWidth - side) / 2
+        y: (canvas.offscreenHeight - side) / 2
+        width: side
+        height: side
+      )
+      scanner.framesUntilScan = scanner.intervalFrames
+    } else {
+      scanner.framesUntilScan = scanner.framesUntilScan - 1
+    }
+  }
+  ret finished
+}
+
+func qrScanRelease(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) {
+  frameRegionRelease(reader: scanner.reader, canvas: canvas)
+}

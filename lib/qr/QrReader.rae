@@ -132,6 +132,32 @@ func decodeAt(
   moduleSize: view Float
   field: view GaloisField
 ) ret opt QrReadResult {
+  # With the alignment pattern found near the fourth corner, then (when that
+  # does not decode: the search took a wrong spot) without it
+  # 0: the strict alignment check, 1: the loose one, 2: none
+  loop let useAlignment: Int in List(Int) { 0, 1, 2 } {
+    if let result: QrReadResult = decodeWith(
+      image: image
+      triple: triple
+      dimension: dimension
+      moduleSize: moduleSize
+      field: field
+      useAlignment: useAlignment
+    ) {
+      ret result
+    }
+  }
+  ret none
+}
+
+func decodeWith(
+  image: view BitImage
+  triple: view FinderTriple
+  dimension: view Int
+  moduleSize: view Float
+  field: view GaloisField
+  useAlignment: view Int
+) ret opt QrReadResult {
   var size: Int = dimension
   loop var attempt: Int = 0, attempt < 2, ++attempt {
     if let homography: Homography = gridMap(
@@ -139,6 +165,7 @@ func decodeAt(
       triple: triple
       size: size
       moduleSize: moduleSize
+      useAlignment: useAlignment
     ) {
       let grid: List(Bool) = sampleGrid(image: image, homography: homography, size: size)
       var outcome: GridOutcome = decodeGrid(grid: grid, size: size, field: field)
@@ -175,6 +202,7 @@ func gridMap(
   triple: view FinderTriple
   size: view Int
   moduleSize: view Float
+  useAlignment: view Int
 ) ret opt Homography {
   let near: Float = 3.5
   let far: Float = (size as Float) - 3.5
@@ -192,7 +220,7 @@ func gridMap(
     x: topRight.x + bottomLeft.x - topLeft.x
     y: topRight.y + bottomLeft.y - topLeft.y
   )
-  if size > 21 {
+  if size > 21 and useAlignment < 2 {
     let alignment: Float = (size as Float) - 6.5
     let share: Float = (alignment - near) / (far - near)
     let estimate: QrPoint = qrPoint(
@@ -204,6 +232,7 @@ func gridMap(
       estimate: estimate
       moduleSize: moduleSize
       radius: moduleSize * 8.0
+      strict: useAlignment is 0
     ) {
       fourthFrom = qrPoint(x: alignment, y: alignment)
       fourthTo = found

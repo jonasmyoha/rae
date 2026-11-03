@@ -5,7 +5,9 @@
 # scans both. Drag to turn the view, the wheel zooms.
 #
 #   RAE_QR_TEST_FRAME=1 holds the box still at a fixed angle (screenshots);
-#   RAE_QR_YAW / RAE_QR_DISTANCE look at a face straight on
+#   RAE_QR_YAW / RAE_QR_DISTANCE look at a face straight on;
+#   RAE_QR_SCAN=1 reads the middle of the rendered frame every 10 frames
+#   (lib/qr/qrScanSystem) and logs what it reads
 import Gpu2d
 import Math
 import Sys
@@ -27,6 +29,8 @@ open ui/UiSystems
 open qr/QrTables
 open qr/QrEncoder
 open qr/QrImage
+open qr/QrReader
+open qr/qrScanSystem/QrScanSystem
 
 const boxText: String = "https://example.com/rae/qr/box"
 
@@ -117,6 +121,8 @@ func main() ret Int {
     ret 1
   }
   let testFrame: Bool = Sys.getEnv(name: "RAE_QR_TEST_FRAME").length() > 0
+  var scanner: QrScanner = createQrScanner(intervalFrames: 10, regionSide: 512)
+  scanner.enabled = Sys.getEnv(name: "RAE_QR_SCAN").length() > 0
   let startTime: Float64 = Gpu2d.nowSeconds()
   var yaw: Float = -0.45
   var pitch: Float = 0.28
@@ -204,9 +210,23 @@ func main() ret Int {
         }
       }
       world3dPrevTransformSystem(world: scene)
+      if qrScanFrame(scanner: scanner, canvas: renderer.canvas) {
+        if scanner.lastRead {
+          if let result: view QrReadResult = scanner.latest {
+            log(
+              "[qr] scan {scanner.scans}: \"{result.text}\" ({scanner.lastLatencyFrames} frames, decoded in {scanner.lastDecodeNs / 1000} us)"
+            )
+          }
+        } else {
+          log(
+            "[qr] scan {scanner.scans}: no code ({scanner.lastLatencyFrames} frames, {scanner.lastDecodeNs / 1000} us)"
+          )
+        }
+      }
     }
     uiFrameEnd(world: world, uiSystems: uiSystems)
   }
+  qrScanRelease(scanner: scanner, canvas: renderer.canvas)
   shutdownDeferredRenderer(renderer: renderer)
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
