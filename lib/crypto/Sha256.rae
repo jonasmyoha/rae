@@ -1,0 +1,297 @@
+# SHA-256 (FIPS 180-4), HMAC-SHA256 (RFC 2104) and HKDF-SHA256 (RFC 5869),
+# in Rae. lib/net uses them to turn an X25519 shared secret into a
+# connection's keys: once per connection, so this is the plain reference
+# code with no platform fast path.
+#
+# The 32-bit words live in Int and are masked back to 32 bits after every
+# operation that can overflow them.
+const sha256WordMask: Int = 4294967295
+
+type Sha256State {
+  hash: List(Int)
+  schedule: List(Int)
+  constants: List(Int)
+}
+
+func sha256Constants() ret List(Int) {
+  ret List(Int) {
+    1116352408
+    1899447441
+    3049323471
+    3921009573
+    961987163
+    1508970993
+    2453635748
+    2870763221
+    3624381080
+    310598401
+    607225278
+    1426881987
+    1925078388
+    2162078206
+    2614888103
+    3248222580
+    3835390401
+    4022224774
+    264347078
+    604807628
+    770255983
+    1249150122
+    1555081692
+    1996064986
+    2554220882
+    2821834349
+    2952996808
+    3210313671
+    3336571891
+    3584528711
+    113926993
+    338241895
+    666307205
+    773529912
+    1294757372
+    1396182291
+    1695183700
+    1986661051
+    2177026350
+    2456956037
+    2730485921
+    2820302411
+    3259730800
+    3345764771
+    3516065817
+    3600352804
+    4094571909
+    275423344
+    430227734
+    506948616
+    659060556
+    883997877
+    958139571
+    1322822218
+    1537002063
+    1747873779
+    1955562222
+    2024104815
+    2227730452
+    2361852424
+    2428436474
+    2756734187
+    3204031479
+    3329325298
+  }
+}
+
+func createSha256State() ret Sha256State {
+  var schedule: List(Int) = List.create(Int, cap: 64)
+  schedule.addDefaults(count: 64)
+  ret Sha256State {
+    hash: List(Int) {
+      1779033703
+      3144134277
+      1013904242
+      2773480762
+      1359893119
+      2600822924
+      528734635
+      1541459225
+    }
+    schedule: schedule
+    constants: sha256Constants()
+  }
+}
+
+func rotateRight32(value: view Int, count: view Int) ret Int {
+  ret ((value shr count) bitor (value shl (32 - count))) bitand sha256WordMask
+}
+
+func wordAt(values: view List(Int), index: view Int) ret Int {
+  ret values.copyAtFallback(index: index, fallback: 0)
+}
+
+# Mix the 64-byte block of `bytes` at `offset` into the state
+func sha256Block(state: mod Sha256State, bytes: view List(UInt8), offset: view Int) {
+  loop var i: Int = 0, i < 16, ++i {
+    let at: Int = offset + i * 4
+    let word: Int = ((bytes.copyAtFallback(index: at, fallback: 0) as Int) shl 24) bitor ((bytes.copyAtFallback(
+      index: at + 1
+      fallback: 0
+    ) as Int) shl 16) bitor ((bytes.copyAtFallback(index: at + 2, fallback: 0) as Int) shl 8) bitor (bytes.copyAtFallback(
+      index: at + 3
+      fallback: 0
+    ) as Int)
+    state.schedule.set(index: i, value: word)
+  }
+  loop var i: Int = 16, i < 64, ++i {
+    let before15: Int = wordAt(values: state.schedule, index: i - 15)
+    let before2: Int = wordAt(values: state.schedule, index: i - 2)
+    let small0: Int = rotateRight32(value: before15, count: 7) bitxor rotateRight32(
+      value: before15
+      count: 18
+    ) bitxor (before15 shr 3)
+    let small1: Int = rotateRight32(value: before2, count: 17) bitxor rotateRight32(
+      value: before2
+      count: 19
+    ) bitxor (before2 shr 10)
+    state.schedule.set(
+      index: i
+      value: (wordAt(values: state.schedule, index: i - 16) + small0 + wordAt(
+        values: state.schedule
+        index: i - 7
+      ) + small1) bitand sha256WordMask
+    )
+  }
+  var a: Int = wordAt(values: state.hash, index: 0)
+  var b: Int = wordAt(values: state.hash, index: 1)
+  var c: Int = wordAt(values: state.hash, index: 2)
+  var d: Int = wordAt(values: state.hash, index: 3)
+  var e: Int = wordAt(values: state.hash, index: 4)
+  var f: Int = wordAt(values: state.hash, index: 5)
+  var g: Int = wordAt(values: state.hash, index: 6)
+  var h: Int = wordAt(values: state.hash, index: 7)
+  loop var i: Int = 0, i < 64, ++i {
+    let big1: Int = rotateRight32(value: e, count: 6) bitxor rotateRight32(value: e, count: 11) bitxor rotateRight32(
+      value: e
+      count: 25
+    )
+    let choose: Int = (e bitand f) bitxor ((e bitxor sha256WordMask) bitand g)
+    let first: Int = (h + big1 + choose + wordAt(values: state.constants, index: i) + wordAt(
+      values: state.schedule
+      index: i
+    )) bitand sha256WordMask
+    let big0: Int = rotateRight32(value: a, count: 2) bitxor rotateRight32(value: a, count: 13) bitxor rotateRight32(
+      value: a
+      count: 22
+    )
+    let majority: Int = (a bitand b) bitxor (a bitand c) bitxor (b bitand c)
+    let second: Int = (big0 + majority) bitand sha256WordMask
+    h = g
+    g = f
+    f = e
+    e = (d + first) bitand sha256WordMask
+    d = c
+    c = b
+    b = a
+    a = (first + second) bitand sha256WordMask
+  }
+  addToHash(state: state, index: 0, value: a)
+  addToHash(state: state, index: 1, value: b)
+  addToHash(state: state, index: 2, value: c)
+  addToHash(state: state, index: 3, value: d)
+  addToHash(state: state, index: 4, value: e)
+  addToHash(state: state, index: 5, value: f)
+  addToHash(state: state, index: 6, value: g)
+  addToHash(state: state, index: 7, value: h)
+}
+
+func addToHash(state: mod Sha256State, index: view Int, value: view Int) {
+  state.hash.set(
+    index: index
+    value: (wordAt(values: state.hash, index: index) + value) bitand sha256WordMask
+  )
+}
+
+# The 32-byte SHA-256 digest of `count` bytes of `bytes` from `start`
+func sha256Range(bytes: view List(UInt8), start: view Int, count: view Int) ret List(UInt8) {
+  var state: Sha256State = createSha256State()
+  var length: Int = count
+  if start < 0 or count < 0 or start + count > bytes.length {
+    length = 0
+  }
+  # The message, a 1 bit, zeros, and the bit length: a whole number of blocks
+  let padded: Int = ((length + 9 + 63) / 64) * 64
+  var message: List(UInt8) = List.create(UInt8, cap: padded)
+  loop var i: Int = 0, i < length, ++i {
+    message.add(value: bytes.copyAtFallback(index: start + i, fallback: 0))
+  }
+  message.add(value: 128)
+  loop message.length < padded - 8 {
+    message.add(value: 0)
+  }
+  let bits: Int = length * 8
+  loop var i: Int = 0, i < 8, ++i {
+    message.add(value: ((bits shr ((7 - i) * 8)) bitand 255) as UInt8)
+  }
+  loop var block: Int = 0, block < padded / 64, ++block {
+    sha256Block(state: state, bytes: message, offset: block * 64)
+  }
+  var digest: List(UInt8) = List.create(UInt8, cap: 32)
+  loop var i: Int = 0, i < 8, ++i {
+    let word: Int = wordAt(values: state.hash, index: i)
+    digest.add(value: ((word shr 24) bitand 255) as UInt8)
+    digest.add(value: ((word shr 16) bitand 255) as UInt8)
+    digest.add(value: ((word shr 8) bitand 255) as UInt8)
+    digest.add(value: (word bitand 255) as UInt8)
+  }
+  ret digest
+}
+
+func sha256(bytes: view List(UInt8)) ret List(UInt8) {
+  ret sha256Range(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# HMAC-SHA256 of `message` under `key` (RFC 2104): 32 bytes
+func hmacSha256(key: view List(UInt8), message: view List(UInt8)) ret List(UInt8) {
+  var block: List(UInt8) = List.create(UInt8, cap: 64)
+  if key.length > 64 {
+    let hashed: List(UInt8) = sha256(bytes: key)
+    loop let byte: UInt8 in hashed {
+      block.add(value: byte)
+    }
+  } else {
+    loop let byte: UInt8 in key {
+      block.add(value: byte)
+    }
+  }
+  loop block.length < 64 {
+    block.add(value: 0)
+  }
+  var inner: List(UInt8) = List.create(UInt8, cap: 64 + message.length)
+  loop let byte: UInt8 in block {
+    inner.add(value: ((byte as Int) bitxor 54) as UInt8)
+  }
+  loop let byte: UInt8 in message {
+    inner.add(value: byte)
+  }
+  let innerHash: List(UInt8) = sha256(bytes: inner)
+  var outer: List(UInt8) = List.create(UInt8, cap: 96)
+  loop let byte: UInt8 in block {
+    outer.add(value: ((byte as Int) bitxor 92) as UInt8)
+  }
+  loop let byte: UInt8 in innerHash {
+    outer.add(value: byte)
+  }
+  ret sha256(bytes: outer)
+}
+
+# HKDF-SHA256 (RFC 5869): `length` bytes (at most 8160) of key material from
+# `inputKey`, bound to `salt` and `info`
+func hkdfSha256(
+  salt: view List(UInt8)
+  inputKey: view List(UInt8)
+  info: view List(UInt8)
+  length: view Int
+) ret List(UInt8) {
+  let pseudoRandomKey: List(UInt8) = hmacSha256(key: salt, message: inputKey)
+  var output: List(UInt8) = List.create(UInt8, cap: length + 32)
+  var previous: List(UInt8) = List.create(UInt8, cap: 32)
+  var counter: Int = 1
+  loop output.length < length and counter <= 255 {
+    var message: List(UInt8) = List.create(UInt8, cap: previous.length + info.length + 1)
+    loop let byte: UInt8 in previous {
+      message.add(value: byte)
+    }
+    loop let byte: UInt8 in info {
+      message.add(value: byte)
+    }
+    message.add(value: counter as UInt8)
+    previous = hmacSha256(key: pseudoRandomKey, message: message)
+    loop let byte: UInt8 in previous {
+      if output.length < length {
+        output.add(value: byte)
+      }
+    }
+    counter = counter + 1
+  }
+  ret output
+}

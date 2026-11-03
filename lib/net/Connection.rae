@@ -31,6 +31,10 @@
 # - Disconnect: `connectionDisconnect` sends `disconnectPackets` disconnect
 #   packets (one may be lost), and the peer becomes `disconnected`.
 #
+# - Encryption (`encrypted`, on by default): X25519 keys agreed in the
+#   handshake and every later packet sealed with ChaCha20-Poly1305; a
+#   changed or replayed packet is refused (lib/net/PacketSeal.rae).
+#
 # Every table is made once, by `createConnection`; after the caller's packet
 # and message lists have grown to their working size (the warmup), sending,
 # receiving, acking and resending allocate nothing.
@@ -44,7 +48,13 @@
 open net/Wire
 open net/ByteBuffer
 open net/ReliableChannel
+open net/PacketSeal
 
+# idle: made, not yet connecting or listening. listening: waiting for a
+# connect request (the accepting end). connecting: sending connect requests
+# (the connecting end). disconnecting: sending its disconnect packets.
+# disconnected: closed by either end. timedOut: the handshake or the peer went
+# silent for too long. failed: no random source for the connection's keys.
 enum ConnectionState {
   idle
   listening
@@ -53,6 +63,7 @@ enum ConnectionState {
   disconnecting
   disconnected
   timedOut
+  failed
 }
 
 # Made, not yet connecting or listening
@@ -79,6 +90,9 @@ type ConnectionConfig {
   # The round trip assumed before the first ack measures one
   initialRttMs: Int
   disconnectPackets: Int
+  # Seal every packet after the handshake (lib/net/PacketSeal.rae); both
+  # ends must agree
+  encrypted: Bool
 }
 
 type ConnectionStats {
@@ -125,6 +139,8 @@ type Connection {
   unreliableNextSequence: Int
   # The newest unreliable sequence received, -1 for none
   unreliableLatest: Int
+  # The keys and the sealing of packets (unused when not encrypted)
+  seal: PacketSeal
   stats: ConnectionStats
 }
 
@@ -174,6 +190,7 @@ func defaultConnectionConfig() ret ConnectionConfig {
     minResendMs: 30
     initialRttMs: 100
     disconnectPackets: 3
+    encrypted: true
   }
 }
 
@@ -184,9 +201,13 @@ func normalizedConfig(config: view ConnectionConfig) ret ConnectionConfig {
   if maxPacketBytes < 64 {
     maxPacketBytes = 64
   }
+  var plainBytes: Int = maxPacketBytes
+  if config.encrypted {
+    plainBytes = maxPacketBytes - sealOverhead
+  }
   var fragmentBytes: Int = config.fragmentBytes
-  if fragmentBytes > maxPacketBytes - headerBytes - reliableMessageHeader {
-    fragmentBytes = maxPacketBytes - headerBytes - reliableMessageHeader
+  if fragmentBytes > plainBytes - headerBytes - reliableMessageHeader {
+    fragmentBytes = plainBytes - headerBytes - reliableMessageHeader
   }
   if fragmentBytes < 1 {
     fragmentBytes = 1
@@ -206,6 +227,7 @@ func normalizedConfig(config: view ConnectionConfig) ret ConnectionConfig {
     minResendMs: config.minResendMs
     initialRttMs: config.initialRttMs
     disconnectPackets: config.disconnectPackets
+    encrypted: config.encrypted
   }
 }
 
@@ -243,6 +265,7 @@ func createConnection(config: view ConnectionConfig) ret Connection {
     unreliableIn: createByteBuffer(capacity: queueBytes)
     unreliableNextSequence: 0
     unreliableLatest: -1
+    seal: createPacketSeal(enabled: settled.encrypted, maxPacketBytes: settled.maxPacketBytes)
     stats: {
       packetsSent: 0
       packetsReceived: 0
@@ -261,6 +284,9 @@ func connectionConnect(connection: mod Connection, connectionId: view Int, nowMs
   connection.startMs = nowMs
   connection.lastReceiveMs = nowMs
   connection.lastConnectSendMs = -1
+  if connection.config.encrypted and not sealMakeKeyPair(seal: connection.seal) {
+    connection.state = ConnectionState.failed
+  }
 }
 
 # Wait for a connect request (the accepting end)
@@ -268,6 +294,9 @@ func connectionListen(connection: mod Connection, nowMs: view Int) {
   connection.state = ConnectionState.listening
   connection.startMs = nowMs
   connection.lastReceiveMs = nowMs
+  if connection.config.encrypted and not sealMakeKeyPair(seal: connection.seal) {
+    connection.state = ConnectionState.failed
+  }
 }
 
 # Close: the next packets are the disconnect packets, then `disconnected`
@@ -409,7 +438,8 @@ func connectionWritePacket(
     ret packetWritten(connection: connection, nowMs: nowMs)
   }
   if connection.state is ConnectionState.disconnecting {
-    if connection.disconnectsLeft <= 0 {
+    # An encrypted end with no keys yet has no peer that could read it
+    if connection.disconnectsLeft <= 0 or (connection.config.encrypted and not connection.seal.hasKeys) {
       connection.state = ConnectionState.disconnected
       ret false
     }
@@ -418,7 +448,7 @@ func connectionWritePacket(
     if connection.disconnectsLeft is 0 {
       connection.state = ConnectionState.disconnected
     }
-    ret packetWritten(connection: connection, nowMs: nowMs)
+    ret sequencedPacketWritten(connection: connection, packet: packet, nowMs: nowMs)
   }
   if connection.state is not ConnectionState.connected {
     ret false
@@ -431,6 +461,26 @@ func connectionWritePacket(
   ret writeDataPacket(connection: connection, packet: packet, nowMs: nowMs)
 }
 
+# A sequenced packet is done: seal it when the connection is encrypted
+func sequencedPacketWritten(
+  connection: mod Connection
+  packet: mod List(UInt8)
+  nowMs: view Int
+) ret Bool {
+  if connection.config.encrypted {
+    sealPacket(seal: connection.seal, packet: packet)
+  }
+  ret packetWritten(connection: connection, nowMs: nowMs)
+}
+
+# The most bytes a plain packet may take (a sealed one adds `sealOverhead`)
+func plainPacketLimit(connection: view Connection) ret Int {
+  if connection.config.encrypted {
+    ret connection.config.maxPacketBytes - sealOverhead
+  }
+  ret connection.config.maxPacketBytes
+}
+
 func packetWritten(connection: mod Connection, nowMs: view Int) ret Bool {
   connection.lastSendMs = nowMs
   connection.stats.packetsSent = connection.stats.packetsSent + 1
@@ -441,6 +491,14 @@ func writeHandshake(connection: view Connection, packet: mod List(UInt8), kind: 
   writeU8(bytes: packet, value: kind)
   writeU32(bytes: packet, value: connection.connectionId)
   writeU32(bytes: packet, value: protocolMagic)
+  if connection.config.encrypted {
+    appendCopy(
+      destination: packet
+      source: connection.seal.publicKey
+      start: 0
+      count: publicKeyBytes
+    )
+  }
 }
 
 # The sequenced header: kind, id, this packet's sequence and the acks
@@ -489,7 +547,7 @@ func writeDataPacket(
   connection.sentMessageCount.set(index: historySlot, value: reliableCount)
   connection.nextSequence = sequenceNext(sequence: connection.nextSequence)
   connection.ackPending = false
-  ret packetWritten(connection: connection, nowMs: nowMs)
+  ret sequencedPacketWritten(connection: connection, packet: packet, nowMs: nowMs)
 }
 
 # The due reliable fragments that fit, oldest first: how many were written
@@ -517,7 +575,7 @@ func writeReliableFragments(
       continue
     }
     let length: Int = intAt(values: connection.sender.slotLength, index: slot)
-    if packet.length + reliableMessageHeader + length > connection.config.maxPacketBytes {
+    if packet.length + reliableMessageHeader + length > plainPacketLimit(connection: connection) {
       continue
     }
     writeU8(bytes: packet, value: messageReliable)
@@ -547,7 +605,7 @@ func writeUnreliableMessages(connection: mod Connection, packet: mod List(UInt8)
   loop byteBufferLength(buffer: connection.unreliableOut) >= 4 {
     let sequence: Int = bufferWordAt(buffer: connection.unreliableOut, index: 0)
     let length: Int = bufferWordAt(buffer: connection.unreliableOut, index: 2)
-    if packet.length + unreliableMessageHeader + length > connection.config.maxPacketBytes {
+    if packet.length + unreliableMessageHeader + length > plainPacketLimit(connection: connection) {
       break
     }
     writeU8(bytes: packet, value: messageUnreliable)
@@ -594,7 +652,8 @@ func refused(connection: mod Connection) ret Bool {
 }
 
 # Take one received packet (`count` bytes of `packet` from `start`): false
-# when it was refused (malformed, another connection's, or not expected now)
+# when it was refused (malformed, another connection's, not expected now,
+# or, encrypted, changed in flight or seen before)
 func connectionReadPacket(
   connection: mod Connection
   packet: view List(UInt8)
@@ -606,14 +665,68 @@ func connectionReadPacket(
     ret refused(connection: connection)
   }
   let kind: Int = readU8(bytes: packet, offset: start) bitand 127
+  if not connection.config.encrypted or kind is kindConnectRequest or kind is kindConnectAccept {
+    ret readPlainPacket(
+      connection: connection
+      packet: packet
+      start: start
+      count: count
+      nowMs: nowMs
+    )
+  }
+  if readU32(bytes: packet, offset: start + 1) is not connection.connectionId or not openPacket(
+    seal: connection.seal
+    packet: packet
+    start: start
+    count: count
+  ) {
+    ret refused(connection: connection)
+  }
+  # The plain packet is in connection.seal.opened, which nothing below
+  # writes to while it is read
+  ret readPlainPacket(
+    connection: connection
+    packet: connection.seal.opened
+    start: 0
+    count: connection.seal.opened.length
+    nowMs: nowMs
+  )
+}
+
+# The packet's public key (encrypted handshakes): whether it is there
+func hasPublicKey(connection: view Connection, count: view Int) ret Bool {
+  ret not connection.config.encrypted or count >= handshakeBytes + publicKeyBytes
+}
+
+# Take one plain (or just opened) packet
+func readPlainPacket(
+  connection: mod Connection
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+  nowMs: view Int
+) ret Bool {
+  let kind: Int = readU8(bytes: packet, offset: start) bitand 127
   let connectionId: Int = readU32(bytes: packet, offset: start + 1)
   if kind is kindConnectRequest or kind is kindConnectAccept {
-    if count < handshakeBytes or readU32(bytes: packet, offset: start + 5) is not protocolMagic {
+    if count < handshakeBytes or readU32(bytes: packet, offset: start + 5) is not protocolMagic or not hasPublicKey(
+      connection: connection
+      count: count
+    ) {
       ret refused(connection: connection)
     }
   }
   if connection.state is ConnectionState.listening {
     if kind is not kindConnectRequest {
+      ret refused(connection: connection)
+    }
+    if connection.config.encrypted and not sealDeriveKeys(
+      seal: connection.seal
+      bytes: packet
+      start: start + handshakeBytes
+      isConnectingEnd: false
+      connectionId: connectionId
+    ) {
       ret refused(connection: connection)
     }
     connection.connectionId = connectionId
@@ -629,14 +742,33 @@ func connectionReadPacket(
     ret refused(connection: connection)
   }
   if kind is kindConnectRequest {
-    # Our accept was lost: send it again
-    if state is ConnectionState.connected {
+    # Our accept was lost: send it again (to the same peer: a request with
+    # another public key is someone else's)
+    if state is ConnectionState.connected and (not connection.config.encrypted or sealSamePeer(
+      seal: connection.seal
+      bytes: packet
+      start: start + handshakeBytes
+    )) {
       connection.acceptPending = true
       ret received(connection: connection, nowMs: nowMs)
     }
     ret refused(connection: connection)
   }
   if kind is kindConnectAccept {
+    if state is ConnectionState.connecting and connection.config.encrypted {
+      if not sealDeriveKeys(
+        seal: connection.seal
+        bytes: packet
+        start: start + handshakeBytes
+        isConnectingEnd: true
+        connectionId: connection.connectionId
+      ) {
+        ret refused(connection: connection)
+      }
+    } else if connection.config.encrypted {
+      # A repeated accept: the keys are made already
+      ret received(connection: connection, nowMs: nowMs)
+    }
     connection.state = ConnectionState.connected
     ret received(connection: connection, nowMs: nowMs)
   }

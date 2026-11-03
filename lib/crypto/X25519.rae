@@ -1,0 +1,540 @@
+# X25519 key agreement (RFC 7748), in Rae. Two ends each make a random
+# 32-byte secret, send `x25519PublicKey` of it, and `x25519` of their secret
+# and the other's public key gives both the same 32-byte shared secret.
+# lib/net runs it once per connection and turns the secret into keys with
+# HKDF (lib/crypto/Sha256.rae).
+#
+# The field arithmetic follows TweetNaCl: an element of GF(2^255 - 19) is 16
+# limbs of 16 bits in Int, so every product and sum stays far inside 64
+# bits, and the scalar ladder swaps with masks, never with a branch on a
+# secret bit. All elements live in one `X25519Work` made once.
+const fieldLimbs: Int = 16
+
+# Element slots in the work area
+const slotX: Int = 0
+
+const slotA: Int = 1
+
+const slotB: Int = 2
+
+const slotC: Int = 3
+
+const slotD: Int = 4
+
+const slotE: Int = 5
+
+const slotF: Int = 6
+
+const slotConstant: Int = 7
+
+const slotInverse: Int = 8
+
+const slotPackT: Int = 9
+
+const slotPackM: Int = 10
+
+const slotCount: Int = 11
+
+type X25519Work {
+  field: List(Int)
+  # A product before reduction (31 limbs)
+  wide: List(Int)
+  # The clamped scalar
+  scalar: List(UInt8)
+}
+
+func createX25519Work() ret X25519Work {
+  var field: List(Int) = List.create(Int, cap: slotCount * fieldLimbs)
+  field.addDefaults(count: slotCount * fieldLimbs)
+  var wide: List(Int) = List.create(Int, cap: 31)
+  wide.addDefaults(count: 31)
+  var scalar: List(UInt8) = List.create(UInt8, cap: 32)
+  scalar.addDefaults(count: 32)
+  ret X25519Work { field: field, wide: wide, scalar: scalar }
+}
+
+func limb(work: view X25519Work, slot: view Int, index: view Int) ret Int {
+  ret work.field.copyAtFallback(index: slot * fieldLimbs + index, fallback: 0)
+}
+
+func setLimb(
+  work: mod X25519Work
+  slot: view Int
+  index: view Int
+  value: view Int
+) {
+  work.field.set(index: slot * fieldLimbs + index, value: value)
+}
+
+func fieldSetSmall(work: mod X25519Work, slot: view Int, value: view Int) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    setLimb(
+      work: work
+      slot: slot
+      index: i
+      value: 0
+    )
+  }
+  setLimb(
+    work: work
+    slot: slot
+    index: 0
+    value: value
+  )
+}
+
+func fieldCopy(work: mod X25519Work, out: view Int, from: view Int) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    setLimb(
+      work: work
+      slot: out
+      index: i
+      value: limb(work: work, slot: from, index: i)
+    )
+  }
+}
+
+# Carry each limb into the next, the top one back into the bottom (x 38)
+func fieldCarry(work: mod X25519Work, slot: view Int) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    let value: Int = limb(work: work, slot: slot, index: i) + 65536
+    let carry: Int = value shr 16
+    setLimb(
+      work: work
+      slot: slot
+      index: i
+      value: value - (carry shl 16)
+    )
+    if i < 15 {
+      setLimb(
+        work: work
+        slot: slot
+        index: i + 1
+        value: limb(work: work, slot: slot, index: i + 1) + carry - 1
+      )
+    } else {
+      setLimb(
+        work: work
+        slot: slot
+        index: 0
+        value: limb(work: work, slot: slot, index: 0) + 38 * (carry - 1)
+      )
+    }
+  }
+}
+
+# Swap the elements in two slots when `bit` is 1, with masks only
+func fieldSwap(
+  work: mod X25519Work
+  first: view Int
+  second: view Int
+  bit: view Int
+) {
+  let mask: Int = bitnot (bit - 1)
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    let firstLimb: Int = limb(work: work, slot: first, index: i)
+    let secondLimb: Int = limb(work: work, slot: second, index: i)
+    let flip: Int = mask bitand (firstLimb bitxor secondLimb)
+    setLimb(
+      work: work
+      slot: first
+      index: i
+      value: firstLimb bitxor flip
+    )
+    setLimb(
+      work: work
+      slot: second
+      index: i
+      value: secondLimb bitxor flip
+    )
+  }
+}
+
+func fieldAdd(
+  work: mod X25519Work
+  out: view Int
+  first: view Int
+  second: view Int
+) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    setLimb(
+      work: work
+      slot: out
+      index: i
+      value: limb(work: work, slot: first, index: i) + limb(work: work, slot: second, index: i)
+    )
+  }
+}
+
+func fieldSubtract(
+  work: mod X25519Work
+  out: view Int
+  first: view Int
+  second: view Int
+) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    setLimb(
+      work: work
+      slot: out
+      index: i
+      value: limb(work: work, slot: first, index: i) - limb(work: work, slot: second, index: i)
+    )
+  }
+}
+
+# out = first * second (out may be either input)
+func fieldMultiply(
+  work: mod X25519Work
+  out: view Int
+  first: view Int
+  second: view Int
+) {
+  loop var i: Int = 0, i < 31, ++i {
+    work.wide.set(index: i, value: 0)
+  }
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    let firstLimb: Int = limb(work: work, slot: first, index: i)
+    loop var j: Int = 0, j < fieldLimbs, ++j {
+      let at: Int = i + j
+      work.wide.set(
+        index: at
+        value: work.wide.copyAtFallback(index: at, fallback: 0) + firstLimb * limb(
+          work: work
+          slot: second
+          index: j
+        )
+      )
+    }
+  }
+  loop var i: Int = 0, i < 15, ++i {
+    work.wide.set(
+      index: i
+      value: work.wide.copyAtFallback(index: i, fallback: 0) + 38 * work.wide.copyAtFallback(
+        index: i + 16
+        fallback: 0
+      )
+    )
+  }
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    setLimb(
+      work: work
+      slot: out
+      index: i
+      value: work.wide.copyAtFallback(index: i, fallback: 0)
+    )
+  }
+  fieldCarry(work: work, slot: out)
+  fieldCarry(work: work, slot: out)
+}
+
+# out = 1 / slot, as slot^(p - 2)
+func fieldInvert(work: mod X25519Work, out: view Int, from: view Int) {
+  fieldCopy(work: work, out: slotInverse, from: from)
+  var bit: Int = 253
+  loop bit >= 0 {
+    fieldMultiply(
+      work: work
+      out: slotInverse
+      first: slotInverse
+      second: slotInverse
+    )
+    if bit is not 2 and bit is not 4 {
+      fieldMultiply(
+        work: work
+        out: slotInverse
+        first: slotInverse
+        second: from
+      )
+    }
+    bit = bit - 1
+  }
+  fieldCopy(work: work, out: out, from: slotInverse)
+}
+
+# Load 32 little-endian bytes (the top bit ignored)
+func fieldUnpack(
+  work: mod X25519Work
+  slot: view Int
+  bytes: view List(UInt8)
+  start: view Int
+) {
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    let low: Int = bytes.copyAtFallback(index: start + 2 * i, fallback: 0) as Int
+    let high: Int = bytes.copyAtFallback(index: start + 2 * i + 1, fallback: 0) as Int
+    setLimb(
+      work: work
+      slot: slot
+      index: i
+      value: low + (high shl 8)
+    )
+  }
+  setLimb(
+    work: work
+    slot: slot
+    index: 15
+    value: limb(work: work, slot: slot, index: 15) bitand 32767
+  )
+}
+
+# Append the fully reduced element as 32 little-endian bytes
+func fieldPack(work: mod X25519Work, slot: view Int, out: mod List(UInt8)) {
+  fieldCopy(work: work, out: slotPackT, from: slot)
+  fieldCarry(work: work, slot: slotPackT)
+  fieldCarry(work: work, slot: slotPackT)
+  fieldCarry(work: work, slot: slotPackT)
+  loop var round: Int = 0, round < 2, ++round {
+    setLimb(
+      work: work
+      slot: slotPackM
+      index: 0
+      value: limb(work: work, slot: slotPackT, index: 0) - 65517
+    )
+    loop var i: Int = 1, i < 15, ++i {
+      let previous: Int = limb(work: work, slot: slotPackM, index: i - 1)
+      setLimb(
+        work: work
+        slot: slotPackM
+        index: i
+        value: limb(work: work, slot: slotPackT, index: i) - 65535 - ((previous shr 16) bitand 1)
+      )
+      setLimb(
+        work: work
+        slot: slotPackM
+        index: i - 1
+        value: previous bitand 65535
+      )
+    }
+    let fourteen: Int = limb(work: work, slot: slotPackM, index: 14)
+    setLimb(
+      work: work
+      slot: slotPackM
+      index: 15
+      value: limb(work: work, slot: slotPackT, index: 15) - 32767 - ((fourteen shr 16) bitand 1)
+    )
+    let borrow: Int = (limb(work: work, slot: slotPackM, index: 15) shr 16) bitand 1
+    setLimb(
+      work: work
+      slot: slotPackM
+      index: 14
+      value: fourteen bitand 65535
+    )
+    fieldSwap(
+      work: work
+      first: slotPackT
+      second: slotPackM
+      bit: 1 - borrow
+    )
+  }
+  loop var i: Int = 0, i < fieldLimbs, ++i {
+    let value: Int = limb(work: work, slot: slotPackT, index: i)
+    out.add(value: (value bitand 255) as UInt8)
+    out.add(value: ((value shr 8) bitand 255) as UInt8)
+  }
+}
+
+# Append X25519(scalar, point): 32 bytes. `scalar` and `point` are 32 bytes
+# each, from `scalarStart` and `pointStart`.
+func x25519(
+  work: mod X25519Work
+  scalar: view List(UInt8)
+  scalarStart: view Int
+  point: view List(UInt8)
+  pointStart: view Int
+  out: mod List(UInt8)
+) {
+  loop var i: Int = 0, i < 32, ++i {
+    work.scalar.set(index: i, value: scalar.copyAtFallback(index: scalarStart + i, fallback: 0))
+  }
+  # Clamp: a multiple of 8, bit 254 set
+  work.scalar.set(
+    index: 0
+    value: ((work.scalar.copyAtFallback(index: 0, fallback: 0) as Int) bitand 248) as UInt8
+  )
+  work.scalar.set(
+    index: 31
+    value: (((work.scalar.copyAtFallback(index: 31, fallback: 0) as Int) bitand 127) bitor 64) as UInt8
+  )
+  fieldUnpack(
+    work: work
+    slot: slotX
+    bytes: point
+    start: pointStart
+  )
+  fieldCopy(work: work, out: slotB, from: slotX)
+  fieldSetSmall(work: work, slot: slotA, value: 1)
+  fieldSetSmall(work: work, slot: slotC, value: 0)
+  fieldSetSmall(work: work, slot: slotD, value: 1)
+  # (486662 - 2) / 4 = 121665 = 0xDB41 + 1 * 65536
+  fieldSetSmall(work: work, slot: slotConstant, value: 56129)
+  setLimb(
+    work: work
+    slot: slotConstant
+    index: 1
+    value: 1
+  )
+  var bit: Int = 254
+  loop bit >= 0 {
+    let swap: Int = ((work.scalar.copyAtFallback(index: bit shr 3, fallback: 0) as Int) shr (bit bitand 7)) bitand 1
+    fieldSwap(
+      work: work
+      first: slotA
+      second: slotB
+      bit: swap
+    )
+    fieldSwap(
+      work: work
+      first: slotC
+      second: slotD
+      bit: swap
+    )
+    fieldAdd(
+      work: work
+      out: slotE
+      first: slotA
+      second: slotC
+    )
+    fieldSubtract(
+      work: work
+      out: slotA
+      first: slotA
+      second: slotC
+    )
+    fieldAdd(
+      work: work
+      out: slotC
+      first: slotB
+      second: slotD
+    )
+    fieldSubtract(
+      work: work
+      out: slotB
+      first: slotB
+      second: slotD
+    )
+    fieldMultiply(
+      work: work
+      out: slotD
+      first: slotE
+      second: slotE
+    )
+    fieldMultiply(
+      work: work
+      out: slotF
+      first: slotA
+      second: slotA
+    )
+    fieldMultiply(
+      work: work
+      out: slotA
+      first: slotC
+      second: slotA
+    )
+    fieldMultiply(
+      work: work
+      out: slotC
+      first: slotB
+      second: slotE
+    )
+    fieldAdd(
+      work: work
+      out: slotE
+      first: slotA
+      second: slotC
+    )
+    fieldSubtract(
+      work: work
+      out: slotA
+      first: slotA
+      second: slotC
+    )
+    fieldMultiply(
+      work: work
+      out: slotB
+      first: slotA
+      second: slotA
+    )
+    fieldSubtract(
+      work: work
+      out: slotC
+      first: slotD
+      second: slotF
+    )
+    fieldMultiply(
+      work: work
+      out: slotA
+      first: slotC
+      second: slotConstant
+    )
+    fieldAdd(
+      work: work
+      out: slotA
+      first: slotA
+      second: slotD
+    )
+    fieldMultiply(
+      work: work
+      out: slotC
+      first: slotC
+      second: slotA
+    )
+    fieldMultiply(
+      work: work
+      out: slotA
+      first: slotD
+      second: slotF
+    )
+    fieldMultiply(
+      work: work
+      out: slotD
+      first: slotB
+      second: slotX
+    )
+    fieldMultiply(
+      work: work
+      out: slotB
+      first: slotE
+      second: slotE
+    )
+    fieldSwap(
+      work: work
+      first: slotA
+      second: slotB
+      bit: swap
+    )
+    fieldSwap(
+      work: work
+      first: slotC
+      second: slotD
+      bit: swap
+    )
+    bit = bit - 1
+  }
+  fieldInvert(work: work, out: slotC, from: slotC)
+  fieldMultiply(
+    work: work
+    out: slotA
+    first: slotA
+    second: slotC
+  )
+  fieldPack(work: work, slot: slotA, out: out)
+}
+
+# Append the public key of the 32-byte `secret` (X25519 with the base point 9)
+func x25519PublicKey(
+  work: mod X25519Work
+  secret: view List(UInt8)
+  secretStart: view Int
+  out: mod List(UInt8)
+) {
+  var basePoint: List(UInt8) = List.create(UInt8, cap: 32)
+  basePoint.addDefaults(count: 32)
+  basePoint.set(index: 0, value: 9)
+  x25519(
+    work: work
+    scalar: secret
+    scalarStart: secretStart
+    point: basePoint
+    pointStart: 0
+    out: out
+  )
+}

@@ -1,0 +1,45 @@
+# Cryptographically secure random bytes, for keys (lib/net's X25519 key
+# pairs): the operating system's random source through one `getentropy` call
+# per 256 bytes (compiler/runtime/runtime_crypto_platform.c). The loop is
+# here, in Rae.
+#
+# Unix (Apple, the BSDs, a Linux kernel) and the web (Emscripten asks
+# crypto.getRandomValues). Elsewhere there is no source and
+# `secureRandomFill` answers false: never fall back to a predictable
+# generator for a key.
+const hasGetEntropy: Bool = Target.isUnix or Target.os is Os.web
+
+when hasGetEntropy {
+  func systemGetEntropy(
+    buffer: Buffer(UInt8)
+    offset: Int
+    count: Int
+  ) unsafe extern("rae_ext_SecureRandom_getEntropy") ret Int
+}
+
+# Overwrite `count` bytes of `bytes` from `start` with random bytes: false
+# when the range is not inside `bytes` or the system has no source
+func secureRandomFill(bytes: mod List(UInt8), start: view Int, count: view Int) ret Bool {
+  if start < 0 or count < 0 or start + count > bytes.length {
+    ret false
+  }
+  when hasGetEntropy {
+    var done: Int = 0
+    loop done < count {
+      var chunk: Int = count - done
+      if chunk > 256 {
+        chunk = 256
+      }
+      var code: Int = 0
+      unsafe {
+        code = systemGetEntropy(buffer: bytes.data, offset: start + done, count: chunk)
+      }
+      if code < 0 {
+        ret false
+      }
+      done = done + chunk
+    }
+    ret true
+  }
+  ret false
+}
