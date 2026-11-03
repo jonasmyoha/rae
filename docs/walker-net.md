@@ -9,7 +9,8 @@ and fall. Headless bots can fill a session.
 ```sh
 # a relay (prints "relay listening on port P")
 bin/rae run tools/relay/Main.rae -- --port 7777
-# a window that hosts (prints "[net] session token T")
+# a window that hosts (prints "[net] invite T": the relay token and the
+# session key, lib/net/relay RelayWire)
 RAE_WALKER_NET=host RAE_WALKER_RELAY=127.0.0.1:7777 bin/rae run examples/143_walker_forest/Main.rae
 # more windows that join
 RAE_WALKER_NET=join RAE_WALKER_RELAY=127.0.0.1:7777 RAE_WALKER_TOKEN=T bin/rae run examples/143_walker_forest/Main.rae

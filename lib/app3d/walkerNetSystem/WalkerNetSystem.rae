@@ -77,7 +77,8 @@ type WalkerNetSettings {
   mode: WalkerNetMode
   relayHost: String
   relayPort: Int
-  # join: the session token (32 hex digits)
+  # join: the host's invite ("<relay token>-<session key>", lib/net/relay
+  # RelayWire; a bare 32-digit token joins with no session key)
   token: String
   # deviceDesktop / deviceMobile (lib/net/relay)
   device: Int
@@ -155,6 +156,9 @@ type WalkerNet {
   helloSent: Bool
   # walkerNetStart was called
   started: Bool
+  # The connections' settings, with the session key that authenticates
+  # every handshake (the host makes it; a player reads it from the invite)
+  connectionConfig: ConnectionConfig
   # When this side started, and when it was first playing (-1: not yet)
   startMs: Int
   playingAtMs: Int
@@ -211,6 +215,7 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
     replicationPlayer: createReplicationPlayer(config: config)
     sessionPlayer: createSessionPlayer()
     helloSent: false
+    connectionConfig: defaultConnectionConfig()
     started: false
     startMs: 0
     playingAtMs: -1
@@ -239,6 +244,9 @@ func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view 
   net.started = true
   net.startMs = nowMs
   if net.settings.mode is WalkerNetMode.host {
+    # The session key the relay never sees: it goes to players in the invite
+    net.connectionConfig.sessionKey = newRelaySessionKey()
+    net.relayHost.connectionConfig = net.connectionConfig
     relayClientOpen(client: net.relayHost.client, nowMs: nowMs)
     net.ownEntityId = allocEntity(this: net.world.entities)
     componentSet(this: net.world.poses, entityId: net.ownEntityId, data: localPose)
@@ -263,9 +271,16 @@ func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view 
     ret true
   }
   if net.settings.mode is WalkerNetMode.join {
+    var token: List(UInt8) = {}
+    var sessionKey: List(UInt8) = {}
+    if not relayInviteParts(text: net.settings.token, token: token, sessionKey: sessionKey) {
+      ret false
+    }
+    net.connectionConfig.sessionKey = sessionKey
+    net.relayPlayer.connection = createConnection(config: net.connectionConfig)
     ret relayPlayerJoin(
       player: net.relayPlayer
-      tokenText: net.settings.token
+      tokenText: relayTokenText(token: token)
       connectionId: nowMs bitand 65535
       nowMs: nowMs
     )
@@ -277,10 +292,14 @@ func walkerNetIsHost(net: view WalkerNet) ret Bool {
   ret net.settings.mode is WalkerNetMode.host
 }
 
-# The session token to give to players (host, once the relay answered; "" before)
+# The invite to give to players: the relay token and the session key (host,
+# once the relay answered; "" before)
 func walkerNetToken(net: view WalkerNet) ret String {
   if walkerNetIsHost(net: net) and relayClientIsReady(client: net.relayHost.client) {
-    ret relayTokenText(token: net.relayHost.client.token)
+    ret relayInviteText(
+      token: net.relayHost.client.token
+      sessionKey: net.connectionConfig.sessionKey
+    )
   }
   ret ""
 }
@@ -528,7 +547,7 @@ func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
   if not net.sessionPlayer.welcomed and (state is ConnectionState.timedOut or state is ConnectionState.failed) {
     relayPlayerReconnect(
       player: net.relayPlayer
-      connectionConfig: defaultConnectionConfig()
+      connectionConfig: net.connectionConfig
       connectionId: nowMs bitand 65535
       nowMs: nowMs
     )
