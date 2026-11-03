@@ -116,6 +116,20 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         receiver_cap = rae_array_ref_cap(recv_tr);
                     }
                     const AstFuncDecl* generic_fallback = NULL;
+                    /* As in emit_call_expr: an overload whose parameters take
+                     * the arguments' concrete types beats declaration order. */
+                    const AstFuncDecl* typed_match = NULL;
+                    enum { max_typed_args = 16 };
+                    Str arg_bases[max_typed_args];
+                    size_t typed_arg_count = 0;
+                    for (const AstCallArg* ca = expr->as.call.args; ca && typed_arg_count < max_typed_args; ca = ca->next) {
+                        const AstTypeRef* atr = ca->value ? infer_expr_type_ref(ctx, ca->value) : NULL;
+                        if (atr && ctx->generic_params && ctx->generic_args)
+                            atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
+                        Str base = atr ? get_base_type_name(atr) : (Str){0};
+                        if (str_eq_cstr(base, "Any")) base = (Str){0};
+                        arg_bases[typed_arg_count++] = base;
+                    }
                     size_t named_count = 0;
                     const size_t* named = decl_index_functions(ctx->compiler_ctx, callee->as.ident, &named_count);
                     for (size_t k = 0; k < named_count && !d; k++) {
@@ -135,8 +149,16 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                             if (!cap_ok) continue;
                         }
                         if (!generic_fallback) generic_fallback = &dd->as.func_decl;
+                        if (!typed_match && !dd->as.func_decl.generic_params && typed_arg_count == param_count) {
+                            bool typed = true;
+                            size_t ai = 0;
+                            for (const AstParam* pp = dd->as.func_decl.params; pp && typed && ai < typed_arg_count; pp = pp->next, ai++) {
+                                if (arg_bases[ai].len > 0 && !str_eq(arg_bases[ai], get_base_type_name(pp->type))) typed = false;
+                            }
+                            if (typed) typed_match = &dd->as.func_decl;
+                        }
                     }
-                    if (!d) d = generic_fallback;
+                    if (!d) d = typed_match ? typed_match : generic_fallback;
                 }
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);

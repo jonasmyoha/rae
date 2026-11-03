@@ -1,0 +1,58 @@
+# A call to an overloaded function inside a generic body picks the overload
+# per instantiation, by the concrete argument type. It used to pick the
+# FIRST overload for every instantiation (sema checks the template once,
+# where a `T` argument matches any overload), so `describe(Health, ...)` ran
+# the Position version, silently.
+type Position {
+  x: Float
+  y: Float
+}
+
+type Health {
+  value: Int
+}
+
+type Label {
+  text: String
+}
+
+func encode(value: view Position, out: mod List(String)) {
+  out.add(value: "position {value.x},{value.y}")
+}
+
+func encode(value: view Health, out: mod List(String)) {
+  out.add(value: "health {value.value}")
+}
+
+func encode(value: view Label, out: mod List(String)) {
+  out.add(value: "label {value.text}")
+}
+
+# The overloaded call inside a generic body
+func describe(T: type, value: view T, out: mod List(String)) {
+  encode(value: value, out: out)
+}
+
+# Two levels of generics, and the argument second
+func describeTwice(T: type, out: mod List(String), value: view T) {
+  describe(T, value: value, out: out)
+  encode(value: value, out: out)
+}
+
+func main() ret Int {
+  var out: List(String) = {}
+  let position: Position = { x: 1.5, y: 2.0 }
+  let health: Health = { value: 7 }
+  let label: Label = { text: "hi" }
+  describe(Position, value: position, out: out)
+  describe(Health, value: health, out: out)
+  describe(Label, value: label, out: out)
+  describeTwice(Health, out: out, value: health)
+  describeTwice(Label, out: out, value: label)
+  # Direct calls, as before
+  encode(value: health, out: out)
+  loop let line: String in out {
+    log(line)
+  }
+  ret 0
+}
