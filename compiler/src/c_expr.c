@@ -587,6 +587,30 @@ static void emit_string_eq_operand(CFuncContext* ctx, const AstExpr* operand, FI
     if (reference_call) fprintf(out, ").ptr)");
 }
 
+/* The non-generic function `fn` of the module whose import path ends in
+ * `qualifier` (`Vec3` for module Vec3, `WalkerKnockdown` for
+ * app3d/WalkerKnockdown), the one taking as many arguments as `args` when
+ * there are several; NULL for none. */
+static const AstDecl* module_qualified_function(CFuncContext* ctx, Str qualifier, Str fn, const AstCallArg* args) {
+    size_t arg_count = 0;
+    for (const AstCallArg* a = args; a; a = a->next) arg_count++;
+    const AstDecl* first = NULL;
+    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+        const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, fn) || !d->module_name) continue;
+        if (d->as.func_decl.generic_params) continue;
+        const char* path = d->module_name;
+        const char* slash = strrchr(path, '/');
+        const char* last = slash ? slash + 1 : path;
+        if (strlen(last) != qualifier.len || memcmp(last, qualifier.data, qualifier.len) != 0) continue;
+        size_t param_count = 0;
+        for (const AstParam* p = d->as.func_decl.params; p; p = p->next) param_count++;
+        if (param_count == arg_count) return d;
+        if (!first) first = d;
+    }
+    return first;
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   /* A wait a resumable twin hoisted before the statement: its result */
@@ -1446,6 +1470,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, expr->as.method_call.method_name)) {
                         fn_exists = true; break;
                     }
+                }
+            }
+            // A MODULE-qualified call whose module also names a type (module
+            // Vec3 defines type Vec3): `Vec3.create(x:, y:, z:)`. Sema
+            // rewrites it into a linked call, but a generic function's body
+            // reaches here as written, and the type reading below would pass
+            // `Vec3` as a type argument to a `create(T: type, ...)` that does
+            // not exist. A function of that name in a module whose last path
+            // part is the qualifier wins (the arity picks among overloads).
+            if (!obj_has_value && obj_name.len > 0) {
+                const AstDecl* qualified = module_qualified_function(
+                    ctx, obj_name, expr->as.method_call.method_name, expr->as.method_call.args);
+                if (qualified) {
+                    AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = (AstDecl*)qualified };
+                    call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    call.as.call.callee->kind = AST_EXPR_IDENT;
+                    call.as.call.callee->as.ident = expr->as.method_call.method_name;
+                    call.as.call.args = expr->as.method_call.args;
+                    call.as.call.generic_args = expr->as.method_call.generic_args;
+                    emit_call_expr(ctx, &call, out); break;
                 }
             }
             // Type-on-LHS dot-call (new generic-call syntax): `Type.fn(...)`
