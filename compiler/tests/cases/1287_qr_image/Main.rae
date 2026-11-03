@@ -1,0 +1,56 @@
+# lib/qr/QrImage: a QR symbol as a picture for a 3D material. Every module
+# is the same whole number of pixels (crisp edges), the symbol is centered,
+# and the quiet zone and the rest are white. Read back at each module's
+# center, the picture gives the symbol's modules exactly; every pixel is
+# pure black or white (nothing blended).
+open qr/QrTables
+open qr/QrEncoder
+open qr/QrImage
+
+func check(text: view String, side: view Int) {
+  if let symbol: QrSymbol = qrEncodeText(text: text, level: QrErrorCorrection.medium) {
+    let pixels: List(Float) = qrImagePixels(symbol: symbol, side: side, quietZone: 4)
+    let modulePixels: Int = qrImageModulePixels(symbol: symbol, side: side, quietZone: 4)
+    let origin: Int = (side - symbol.size * modulePixels) / 2
+    var mismatches: Int = 0
+    loop var y: Int = 0, y < symbol.size, ++y {
+      loop var x: Int = 0, x < symbol.size, ++x {
+        let px: Int = origin + x * modulePixels + modulePixels / 2
+        let py: Int = origin + y * modulePixels + modulePixels / 2
+        let dark: Bool = pixels.copyAtFallback(index: (py * side + px) * 4, fallback: 1.0) < 0.5
+        if dark is not qrModule(symbol: symbol, x: x, y: y) {
+          mismatches = mismatches + 1
+        }
+      }
+    }
+    var blended: Int = 0
+    var darkOutside: Int = 0
+    loop var y: Int = 0, y < side, ++y {
+      loop var x: Int = 0, x < side, ++x {
+        let value: Float = pixels.copyAtFallback(index: (y * side + x) * 4, fallback: 1.0)
+        if value is not 0.0 and value is not 1.0 {
+          blended = blended + 1
+        }
+        let inside: Bool = x >= origin and y >= origin and x < origin + symbol.size * modulePixels and y < origin + symbol.size * modulePixels
+        if not inside and value < 0.5 {
+          darkOutside = darkOutside + 1
+        }
+      }
+    }
+    let quietPixels: Int = origin
+    log(
+      "{text.length()} bytes, version {symbol.version} ({symbol.size} modules) in {side} px: {modulePixels} px per module, quiet zone {quietPixels} px (at least {4 * modulePixels}), {mismatches} modules wrong, {blended} blended pixels, {darkOutside} dark outside the symbol"
+    )
+  }
+}
+
+func main() ret Int {
+  check(text: "https://example.com/rae/qr/box", side: 512)
+  check(text: "01234567", side: 64)
+  var long: String = ""
+  loop var i: Int = 0, i < 300, ++i {
+    long = "{long}q"
+  }
+  check(text: long, side: 512)
+  ret 0
+}

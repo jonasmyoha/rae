@@ -1,0 +1,307 @@
+# QR codes in the UI (docs/qr.md): a `QrCode` component on a .raescene node
+# shows its `text` as a QR code (lib/qr) in the node's laid-out box,
+#
+#   { "id": "invite", "components": { "QrCode": { "text": "https://..." },
+#     "Layout": { ... } } }
+#
+# black modules on a white quiet zone, as large as the box allows and
+# centered in it. Every module is the same whole number of pixels, so the
+# edges are crisp: the code is painted as rectangles (one per run of dark
+# modules in a row), never as a scaled picture.
+#
+# The system owns its tables (docs/ecs-systems-own-their-tables.md): an app
+# hands it the scene's pending components (`qrCodeTakePending`) and calls
+# `qrCodePaint` after the UI's own render, on the same canvas. A code is
+# encoded once and again only when its text or level changes.
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiSystems
+open ui/Transform
+open ui/ScenePolicy
+open ui/Registry
+open ui/renderSystem/RenderPaintBox
+open qr/QrTables
+open qr/QrEncoder
+open Gpu2dCanvas
+import Gpu2d
+
+# The authored component
+type QrCode {
+  text: String = ""
+  # "L", "M", "Q" or "H"
+  errorCorrection: String = "M"
+  # Light modules round the code (4 is the standard's minimum)
+  quietZone: Int = 4
+}
+
+# The code a node shows, and what it was made from
+type QrCodeSymbol {
+  text: String
+  errorCorrection: String
+  # false: the text does not fit a QR code (nothing is drawn)
+  valid: Bool
+  symbol: QrSymbol
+}
+
+type QrCodeSystem {
+  qrCodes: ComponentTable(QrCode)
+  symbols: ComponentTable(QrCodeSymbol)
+}
+
+func createQrCodeSystem() ret QrCodeSystem {
+  ret QrCodeSystem {
+    qrCodes: ComponentTable.create(QrCode)
+    symbols: ComponentTable.create(QrCodeSymbol)
+  }
+}
+
+# Take the scene's QrCode components out of the world's pending outbox into
+# this system; the other pending components stay for the app's systems
+func qrCodeTakePending(world: mod UiWorld, qrCodeSystem: mod QrCodeSystem) {
+  var kept: List(PendingComponent) = List.create(PendingComponent, cap: 4)
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if applyComponentInto(system: qrCodeSystem, world: world, pending: pending) {
+      continue
+    }
+    kept.add(value: PendingComponent {
+      entityId: pending.entityId
+      name: "{pending.name}"
+      json: "{pending.json}"
+      sceneId: "{pending.sceneId}"
+      nodeId: "{pending.nodeId}"
+    })
+  }
+  world.pendingComponents = own kept
+}
+
+# Set (or change) a node's text from code
+func qrCodeSetText(qrCodeSystem: mod QrCodeSystem, entityId: view EntityId, text: view String) {
+  if componentHas(this: qrCodeSystem.qrCodes, entityId: entityId) {
+    let qrCode: mod QrCode = componentMod(this: qrCodeSystem.qrCodes, entityId: entityId)
+    qrCode.text = text
+  } else {
+    componentSet(this: qrCodeSystem.qrCodes, entityId: entityId, data: QrCode { text: text })
+  }
+}
+
+# A destroyed node's rows go
+func qrCodeForget(qrCodeSystem: mod QrCodeSystem, entityId: view EntityId) {
+  componentRemove(this: qrCodeSystem.qrCodes, entityId: entityId)
+  componentRemove(this: qrCodeSystem.symbols, entityId: entityId)
+}
+
+func levelFromName(name: view String) ret QrErrorCorrection {
+  if name is "L" {
+    ret QrErrorCorrection.low
+  }
+  if name is "Q" {
+    ret QrErrorCorrection.quartile
+  }
+  if name is "H" {
+    ret QrErrorCorrection.high
+  }
+  ret QrErrorCorrection.medium
+}
+
+func emptySymbol() ret QrSymbol {
+  ret QrSymbol {
+    version: 0
+    size: 0
+    level: QrErrorCorrection.medium
+    mask: 0
+    mode: QrMode.byte
+    modules: {}
+  }
+}
+
+# Encode the codes whose text or level changed
+func qrCodeUpdate(qrCodeSystem: mod QrCodeSystem) {
+  loop var i: Int = 0, i < componentCount(this: qrCodeSystem.qrCodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: qrCodeSystem.qrCodes, i: i)
+    let qrCode: view QrCode = componentView(this: qrCodeSystem.qrCodes, entityId: entityId)
+    var current: Bool = false
+    if componentHas(this: qrCodeSystem.symbols, entityId: entityId) {
+      let cached: view QrCodeSymbol = componentView(this: qrCodeSystem.symbols, entityId: entityId)
+      current = cached.text is qrCode.text and cached.errorCorrection is qrCode.errorCorrection
+    }
+    if not current {
+      var made: QrCodeSymbol = {
+        text: qrCode.text
+        errorCorrection: qrCode.errorCorrection
+        valid: false
+        symbol: emptySymbol()
+      }
+      if let symbol: QrSymbol = qrEncodeText(
+        text: qrCode.text
+        level: levelFromName(name: qrCode.errorCorrection)
+      ) {
+        made.symbol = symbol
+        made.valid = true
+      } else {
+        log("[ui] a QrCode's text does not fit a QR code ({qrCode.text.length()} bytes)")
+      }
+      componentSet(this: qrCodeSystem.symbols, entityId: entityId, data: made)
+    }
+  }
+}
+
+# Paint every visible code into its node's box (after the UI's own render)
+func qrCodePaint(
+  qrCodeSystem: mod QrCodeSystem
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvas: mod Gpu2dCanvas
+) {
+  qrCodeUpdate(qrCodeSystem: qrCodeSystem)
+  loop var i: Int = 0, i < componentCount(this: qrCodeSystem.qrCodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: qrCodeSystem.qrCodes, i: i)
+    if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) and componentHas(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: entityId
+    ) and componentHas(this: qrCodeSystem.symbols, entityId: entityId) {
+      let visual: WorldVisual = worldVisualOf(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+      )
+      let cached: view QrCodeSymbol = componentView(this: qrCodeSystem.symbols, entityId: entityId)
+      if visual.visible and visual.alpha > 0.0 and cached.valid {
+        let box: PaintBox = g2dPaintBox(
+          world: world
+          entityId: entityId
+          wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+          cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+        )
+        paintSymbol(
+          symbol: cached.symbol
+          quietZone: componentView(this: qrCodeSystem.qrCodes, entityId: entityId).quietZone
+          box: box
+          canvas: canvas
+        )
+      }
+    }
+  }
+}
+
+# The code in `box`: whole-pixel modules, centered, on its white quiet zone
+func paintSymbol(
+  symbol: view QrSymbol
+  quietZone: view Int
+  box: view PaintBox
+  canvas: mod Gpu2dCanvas
+) {
+  var side: Float = box.w
+  if box.h < side {
+    side = box.h
+  }
+  let modules: Int = symbol.size + quietZone * 2
+  var modulePixels: Float = ((side / (modules as Float)) as Int) as Float
+  if modulePixels < 1.0 {
+    modulePixels = side / (modules as Float)
+  }
+  let whole: Float = modulePixels * (modules as Float)
+  let left: Float = ((box.x + (box.w - whole) * 0.5) as Int) as Float
+  let top: Float = ((box.y + (box.h - whole) * 0.5) as Int) as Float
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: left
+    y: top
+    w: whole
+    h: whole
+    color: 4294967295
+  )
+  let codeLeft: Float = left + modulePixels * (quietZone as Float)
+  let codeTop: Float = top + modulePixels * (quietZone as Float)
+  # Each run of dark modules in a row, and again in a column: rectangle
+  # edges are antialiased, so two dark rectangles meeting edge to edge would
+  # leave a faint seam; with both, every join lies inside one rectangle
+  loop var line: Int = 0, line < symbol.size, ++line {
+    paintRuns(
+      symbol: symbol
+      line: line
+      vertical: false
+      codeLeft: codeLeft
+      codeTop: codeTop
+      modulePixels: modulePixels
+      canvas: canvas
+    )
+    paintRuns(
+      symbol: symbol
+      line: line
+      vertical: true
+      codeLeft: codeLeft
+      codeTop: codeTop
+      modulePixels: modulePixels
+      canvas: canvas
+    )
+  }
+}
+
+func darkAt(
+  symbol: view QrSymbol
+  line: view Int
+  along: view Int
+  vertical: view Bool
+) ret Bool {
+  if vertical {
+    ret qrModule(symbol: symbol, x: line, y: along)
+  }
+  ret qrModule(symbol: symbol, x: along, y: line)
+}
+
+# The runs of dark modules along row `line` (or column, `vertical`)
+func paintRuns(
+  symbol: view QrSymbol
+  line: view Int
+  vertical: view Bool
+  codeLeft: view Float
+  codeTop: view Float
+  modulePixels: view Float
+  canvas: mod Gpu2dCanvas
+) {
+  var along: Int = 0
+  loop along < symbol.size {
+    if darkAt(
+      symbol: symbol
+      line: line
+      along: along
+      vertical: vertical
+    ) {
+      var end: Int = along + 1
+      loop end < symbol.size and darkAt(
+        symbol: symbol
+        line: line
+        along: end
+        vertical: vertical
+      ) {
+        end = end + 1
+      }
+      let start: Float = modulePixels * (along as Float)
+      let length: Float = modulePixels * ((end - along) as Float)
+      let across: Float = modulePixels * (line as Float)
+      if vertical {
+        Gpu2d.drawRect(
+          canvas: canvas
+          x: codeLeft + across
+          y: codeTop + start
+          w: modulePixels
+          h: length
+          color: 4278190080
+        )
+      } else {
+        Gpu2d.drawRect(
+          canvas: canvas
+          x: codeLeft + start
+          y: codeTop + across
+          w: length
+          h: modulePixels
+          color: 4278190080
+        )
+      }
+      along = end
+    } else {
+      along = along + 1
+    }
+  }
+}

@@ -1,0 +1,214 @@
+# QR codes in 3D and in the UI (lib/qr, docs/qr.md): a turning box whose
+# faces carry a code as a material picture (lib/qr/QrImage, crisp: every
+# module a whole number of texels), and a QrCode node in the .raescene UI
+# (lib/ui/qrCodeSystem, painted as whole-pixel rectangles). A phone camera
+# scans both. Drag to turn the view, the wheel zooms.
+#
+#   RAE_QR_TEST_FRAME=1 holds the box still at a fixed angle (screenshots);
+#   RAE_QR_YAW / RAE_QR_DISTANCE look at a face straight on
+import Gpu2d
+import Math
+import Sys
+import Vec3
+open app3d/UiShell
+open Gbuffer
+open Math3d
+open Mesh3d
+open RendererDeferred
+open RendererImages
+open Rendergraph
+open Scene3d
+open ui/Ecs
+open ui/Registry
+open ui/renderSystem/RenderSystem
+open ui/qrCodeSystem/QrCodeSystem
+open Gpu2dCanvas
+open ui/UiSystems
+open qr/QrTables
+open qr/QrEncoder
+open qr/QrImage
+
+const boxText: String = "https://example.com/rae/qr/box"
+
+# The box's code as a material picture layer (-1 when it cannot be made)
+func boxCodeLayer(renderer: mod DeferredRenderer) ret Int {
+  if let symbol: QrSymbol = qrEncodeText(text: boxText, level: QrErrorCorrection.medium) {
+    ret rendererAddSurfaceImagePixels(
+      renderer: renderer
+      name: "qr-box"
+      pixels: qrImagePixels(symbol: symbol, side: 512, quietZone: 4)
+    )
+  }
+  ret -1
+}
+
+func meshOf(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+func plainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: roughness
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "147: QR codes in 3D and UI")
+  Gpu2d.setDesignResolution(width: 1280.0, height: 800.0, fit: 0)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let box: MeshHandle = meshOf(renderer: renderer, meshData: makeBox(size: 2.0))
+  let ground: MeshHandle = meshOf(renderer: renderer, meshData: makePlane(size: 30.0, segments: 1))
+  var boxMaterial: Material3d = plainMaterial(
+    color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    roughness: 0.6
+  )
+  boxMaterial.colorTextureLayer = boxCodeLayer(renderer: renderer)
+  var scene: World3d = create()
+  let boxEntityId: EntityId = world3dAddMeshInstance(
+    world: scene
+    mesh: box
+    material: boxMaterial
+    position: Vec3.create(x: 0.0, y: 0.0, z: 1.2)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  let groundEntityId: EntityId = world3dAddMeshInstance(
+    world: scene
+    mesh: ground
+    material: plainMaterial(color: Vec3.create(x: 0.2, y: 0.24, z: 0.3), roughness: 0.85)
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  var camera: Camera3d = defaultCamera3d()
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.2)
+  let light: Light3d = defaultLight3d()
+
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  var qrCodeSystem: QrCodeSystem = createQrCodeSystem()
+  seedWorldTheme(world: world, res: uiResources)
+  let uiRoot: EntityId = mountUiScene(
+    world: world
+    uiSystems: uiSystems
+    path: "examples/147_qr_codes/assets/ui.raescene"
+    res: uiResources
+  )
+  # The scene's QrCode components belong to the QR system
+  qrCodeTakePending(world: world, qrCodeSystem: qrCodeSystem)
+
+  if compileDeferred(renderer: renderer) is not 0 {
+    log("deferred graph invalid")
+    ret 1
+  }
+  let testFrame: Bool = Sys.getEnv(name: "RAE_QR_TEST_FRAME").length() > 0
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var yaw: Float = -0.45
+  var pitch: Float = 0.28
+  var distance: Float = 6.0
+  # A test view straight at one face (screenshots: RAE_QR_YAW=<radians>,
+  # RAE_QR_DISTANCE=<m>)
+  if Sys.getEnv(name: "RAE_QR_YAW").length() > 0 {
+    yaw = Sys.getEnv(name: "RAE_QR_YAW").toFloat()
+    pitch = 0.05
+  }
+  if Sys.getEnv(name: "RAE_QR_PITCH").length() > 0 {
+    pitch = Sys.getEnv(name: "RAE_QR_PITCH").toFloat()
+  }
+  if Sys.getEnv(name: "RAE_QR_DISTANCE").length() > 0 {
+    distance = Sys.getEnv(name: "RAE_QR_DISTANCE").toFloat()
+  }
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  loop not Gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
+    let pointerX: Float = Gpu2d.pointerX()
+    let pointerY: Float = Gpu2d.pointerY()
+    if Gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (pointerX - lastX) * 0.008
+        pitch = Math.clamp(val: pitch - (pointerY - lastY) * 0.008, low: 0.05, high: 1.4)
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = pointerX
+    lastY = pointerY
+    distance = Math.clamp(val: distance - Gpu2d.wheelMove() * 0.6, low: 3.0, high: 20.0)
+    camera.position = orbitEye(
+      targetX: camera.target.x
+      targetY: camera.target.y
+      targetZ: camera.target.z
+      yaw: yaw
+      pitch: pitch
+      dist: distance
+    )
+    var turn: Float = ((Gpu2d.nowSeconds() - startTime) as Float) * 0.35
+    if testFrame {
+      turn = 0.0
+    }
+    world3dWriteTransform(
+      world: scene
+      entityId: boxEntityId
+      transform: Transform3d {
+        position: Vec3.create(x: 0.0, y: 0.0, z: 1.2)
+        rotation: Vec3.create(x: 0.0, y: 0.0, z: turn)
+        scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      }
+    )
+    runUiSystems(world: world, uiSystems: uiSystems, res: uiResources)
+    if Gpu2d.renderGate() {
+      let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+      loop var pass: Int = 0, pass < deferredOrderLength(renderer: renderer), ++pass {
+        let tag: Int = deferredTagAt(renderer: renderer, i: pass)
+        if tag is RenderTag.uiOverlay {
+          Gpu2d.beginFrameLoad(canvas: renderer.canvas)
+          renderSystemGpu2d(
+            world: world
+            uiSystems: uiSystems
+            res: uiResources
+            canvas: renderer.canvas
+          )
+          qrCodePaint(
+            qrCodeSystem: qrCodeSystem
+            world: world
+            uiSystems: uiSystems
+            canvas: renderer.canvas
+          )
+        } else {
+          renderDeferredPassWorld(
+            renderer: renderer
+            tag: tag
+            world: scene
+            camera: camera
+            light: light
+            aspect: aspect
+          )
+        }
+      }
+      world3dPrevTransformSystem(world: scene)
+    }
+    uiFrameEnd(world: world, uiSystems: uiSystems)
+  }
+  shutdownDeferredRenderer(renderer: renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}

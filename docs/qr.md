@@ -7,8 +7,8 @@ a square grid of modules out.
 open qr/QrTables
 open qr/QrEncoder
 
-if let code: QrCode = qrEncodeText(text: invite, level: QrErrorCorrection.medium) {
-  # code.size x code.size modules, qrModule(code:, x:, y:) true = dark;
+if let symbol: QrSymbol = qrEncodeText(text: invite, level: QrErrorCorrection.medium) {
+  # symbol.size x symbol.size modules, qrModule(symbol:, x:, y:) true = dark;
   # draw 4 light modules round it (the quiet zone)
 }
 ```
@@ -43,3 +43,56 @@ adds a whole zero byte of padding bits when the bit stream already ends on a
 codeword boundary (ISO 7.4.10 adds none), and its penalty score picks
 another mask for some codes. With its padding corrected it gives the same
 modules at the same mask (`tools/qr/segnoGrids.py`).
+
+## In 3D: a picture for a material
+
+`lib/qr/QrImage.rae`: `qrImagePixels(symbol:, side:, quietZone:)` makes
+`side` x `side` linear RGBA pixels, black modules on white, every module the
+same whole number of pixels (crisp: no module is blended into its neighbor)
+and centered, the side's remainder going to a wider quiet zone. 512 suits
+the deferred renderer's made images:
+
+```rae
+let layer: Int = rendererAddSurfaceImagePixels(
+  renderer: renderer
+  name: "qr-plate"
+  pixels: qrImagePixels(symbol: symbol, side: 512, quietZone: 4)
+)
+material.colorTextureLayer = layer
+```
+
+The material's sampler filters linearly, so up close a module's edge is
+one texel soft; a version 3 code is 13 texels per module at 512, which scans
+from any distance the code is readable at. `makeBox`'s faces all show a
+picture the right way round (they used to mirror it on two sides), so a box
+carries a code that scans from every side.
+
+## In the UI: the QrCode node
+
+`lib/ui/qrCodeSystem`: a `QrCode` component on a `.raescene` node,
+
+```json
+"Invite": {
+  "Rect": { "x": 1016, "y": 52, "w": 240, "h": 240 },
+  "QrCode": { "text": "https://example.com/join", "errorCorrection": "M", "quietZone": 4 }
+}
+```
+
+draws the code in the node's laid-out box, as large as the box allows, as
+whole-pixel rectangles (runs of dark modules along rows and along columns,
+so no antialiased seam shows between two dark modules). The system owns its
+tables: the app hands it the scene's pending components
+(`qrCodeTakePending(world:, qrCodeSystem:)` after mounting the scene) and
+paints after the UI's own render (`qrCodePaint`, same canvas). A code is
+encoded again only when its text or level changes; `qrCodeSetText` changes
+it from code.
+
+## Example 147
+
+`examples/147_qr_codes`: a box with a code on every face, turning, and a
+`QrCode` node in the UI. `RAE_QR_TEST_FRAME=1` holds the box still;
+`RAE_QR_YAW` / `RAE_QR_PITCH` / `RAE_QR_DISTANCE` aim the camera. Checked
+on screenshots with OpenCV's QR detector (opencv-python 5.0): the default
+frame decodes both codes; straight on, all four sides and the top decode
+(before the `makeBox` fix two sides read only mirrored).
+`compiler/tests/cases/1287_qr_image` checks the picture module by module.

@@ -1,5 +1,5 @@
 # A QR code encoder (ISO/IEC 18004:2015) in plain Rae: text or bytes in, a
-# square grid of modules out (`QrCode`, true = dark), without the quiet
+# square grid of modules out (`QrSymbol`, true = dark), without the quiet
 # zone (draw 4 light modules round it).
 #
 #   qrEncodeText(text:, level:)     the most compact single mode for the
@@ -28,7 +28,7 @@ type QrOptions {
   mask: Int = -1
 }
 
-type QrCode {
+type QrSymbol {
   version: Int
   # Modules per side: 4 * version + 17
   size: Int
@@ -44,20 +44,20 @@ func qrOptions(level: view QrErrorCorrection) ret QrOptions {
 }
 
 # The module at column `x`, row `y` (false outside the symbol)
-func qrModule(code: view QrCode, x: view Int, y: view Int) ret Bool {
-  if x < 0 or y < 0 or x >= code.size or y >= code.size {
+func qrModule(symbol: view QrSymbol, x: view Int, y: view Int) ret Bool {
+  if x < 0 or y < 0 or x >= symbol.size or y >= symbol.size {
     ret false
   }
-  ret code.modules.copyAtFallback(index: y * code.size + x, fallback: false)
+  ret symbol.modules.copyAtFallback(index: y * symbol.size + x, fallback: false)
 }
 
 # The grid as text: one line per row, "#" dark and "." light
-func qrText(code: view QrCode) ret String {
+func qrText(symbol: view QrSymbol) ret String {
   var text: String = ""
-  loop var y: Int = 0, y < code.size, ++y {
+  loop var y: Int = 0, y < symbol.size, ++y {
     var line: String = ""
-    loop var x: Int = 0, x < code.size, ++x {
-      if qrModule(code: code, x: x, y: y) {
+    loop var x: Int = 0, x < symbol.size, ++x {
+      if qrModule(symbol: symbol, x: x, y: y) {
         line = "{line}#"
       } else {
         line = "{line}."
@@ -196,7 +196,7 @@ func segmentBits(
 }
 
 # ----- encoding -----------------------------------------------------------------
-func qrEncodeText(text: view String, level: view QrErrorCorrection) ret opt QrCode {
+func qrEncodeText(text: view String, level: view QrErrorCorrection) ret opt QrSymbol {
   var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
   loop var i: Int = 0, i < text.length(), ++i {
     bytes.add(value: text.byteAt(index: i) as UInt8)
@@ -204,7 +204,7 @@ func qrEncodeText(text: view String, level: view QrErrorCorrection) ret opt QrCo
   ret qrEncodeIn(bytes: bytes, mode: qrBestMode(bytes: bytes), options: qrOptions(level: level))
 }
 
-func qrEncodeBytes(bytes: view List(UInt8), options: view QrOptions) ret opt QrCode {
+func qrEncodeBytes(bytes: view List(UInt8), options: view QrOptions) ret opt QrSymbol {
   ret qrEncodeIn(bytes: bytes, mode: QrMode.byte, options: options)
 }
 
@@ -215,7 +215,7 @@ func qrEncodeIn(
   bytes: view List(UInt8)
   mode: view QrMode
   options: view QrOptions
-) ret opt QrCode {
+) ret opt QrSymbol {
   if options.mask < -1 or options.mask > 7 {
     ret none
   }
@@ -676,7 +676,7 @@ func qrBuildSymbol(
   mask: view Int
   mode: view QrMode
   codewords: view List(Int)
-) ret QrCode {
+) ret QrSymbol {
   let size: Int = qrSize(version: version)
   var modules: List(Bool) = {}
   modules.addDefaults(count: size * size)
@@ -703,7 +703,7 @@ func qrBuildSymbol(
   }
   applyMask(grid: grid, mask: chosen)
   drawFormat(grid: grid, level: level, mask: chosen)
-  ret QrCode {
+  ret QrSymbol {
     version: version
     size: size
     level: level

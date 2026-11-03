@@ -1,0 +1,47 @@
+# A QR symbol as a square picture for a 3D material (docs/qr.md): `side` x
+# `side` linear RGBA pixels, dark modules black, the rest and the quiet zone
+# white. Every module is the same whole number of pixels, so its edges fall
+# on pixel boundaries and the picture is crisp (nearest, not blended); what
+# the side cannot divide evenly goes to a wider quiet zone. For the
+# deferred renderer's made images (RendererImages
+# rendererAddSurfaceImagePixels: 512 x 512), a Material3d's
+# colorTextureLayer then shows it.
+open qr/QrEncoder
+
+# The pixels of one module, at least 1
+func qrImageModulePixels(symbol: view QrSymbol, side: view Int, quietZone: view Int) ret Int {
+  let modules: Int = symbol.size + quietZone * 2
+  if side / modules < 1 {
+    ret 1
+  }
+  ret side / modules
+}
+
+func qrImagePixels(symbol: view QrSymbol, side: view Int, quietZone: view Int) ret List(Float) {
+  let modulePixels: Int = qrImageModulePixels(symbol: symbol, side: side, quietZone: quietZone)
+  let codePixels: Int = symbol.size * modulePixels
+  # The symbol's top left corner, centered
+  let origin: Int = (side - codePixels) / 2
+  var pixels: List(Float) = List.create(Float, cap: side * side * 4)
+  loop var y: Int = 0, y < side, ++y {
+    loop var x: Int = 0, x < side, ++x {
+      var dark: Bool = false
+      if x >= origin and y >= origin and x < origin + codePixels and y < origin + codePixels {
+        dark = qrModule(
+          symbol: symbol
+          x: (x - origin) / modulePixels
+          y: (y - origin) / modulePixels
+        )
+      }
+      var value: Float = 1.0
+      if dark {
+        value = 0.0
+      }
+      pixels.add(value: value)
+      pixels.add(value: value)
+      pixels.add(value: value)
+      pixels.add(value: 1.0)
+    }
+  }
+  ret pixels
+}
