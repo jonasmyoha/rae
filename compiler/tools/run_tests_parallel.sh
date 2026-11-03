@@ -273,6 +273,13 @@ if [ -f tools/test-build-out.sh ]; then
   if bash tools/test-build-out.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
   stage_time "tools/test-build-out.sh" "$stage_start"
 fi
+# The test clock (RAE_NOW), which a single-file case cannot set
+if [ -f tools/test-test-clock.sh ]; then
+  echo
+  stage_start=$(date +%s)
+  if bash tools/test-test-clock.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-test-clock.sh" "$stage_start"
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"

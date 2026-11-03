@@ -94,6 +94,9 @@ func noShaderConstants() ret List(ShaderConstant) {
 
 func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
 
+# The wall clock, in epoch milliseconds. With RAE_NOW set (a local time like
+# 2026-11-03T10:00, or epoch ms) it starts there and runs on: a test clock
+# (docs/stdlib-design.md).
 func nowMs() ret Int {
   unsafe {
     ret nativeNowMs()

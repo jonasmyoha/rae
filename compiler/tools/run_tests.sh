@@ -637,6 +637,11 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-build-out.sh" ]; then
   echo
   if ! bash tools/test-build-out.sh; then FAILED=$((FAILED+1)); fi
 fi
+# The test clock (RAE_NOW). Full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-test-clock.sh" ]; then
+  echo
+  if ! bash tools/test-test-clock.sh; then FAILED=$((FAILED+1)); fi
+fi
 
 # The browser build (tools/wasm_webgpu_smoke.sh: 109/110 through Emscripten +
 # EmdawnWebGPU, ~50 s; SKIP without emcc). Full run only.
