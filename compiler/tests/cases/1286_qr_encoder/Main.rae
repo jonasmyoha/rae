@@ -1,0 +1,211 @@
+# lib/qr's encoder against known codes (ISO/IEC 18004:2015). The grids in
+# expected.txt were written by a reference encoder, not by lib/qr:
+# qrcodegen 1.8 (Project Nayuki), and segno 1.6.6 gives the same modules at
+# the same mask (with its padding corrected: it adds a whole zero byte of
+# padding bits when the bit stream already ends on a codeword boundary,
+# which 7.4.10 does not; and its penalty score picks other masks for four
+# of these, which scan just as well). The ISO example's codewords are the
+# standard's own. The byte capacity of every version and level is checked
+# against segno's capacity table.
+open qr/QrTables
+open qr/QrEncoder
+
+func textBytes(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+func show(
+  name: view String
+  text: view String
+  mode: view QrMode
+  level: view QrErrorCorrection
+  version: view Int
+  mask: view Int
+) {
+  var options: QrOptions = qrOptions(level: level)
+  options.version = version
+  options.mask = mask
+  if let code: QrCode = qrEncodeIn(bytes: textBytes(text: text), mode: mode, options: options) {
+    log("case {name} {code.version} {qrLevelName(level: code.level)} {code.mask}")
+    let grid: String = qrText(code: code)
+    log(grid.sub(start: 0, len: grid.length() - 1))
+  } else {
+    log("case {name}: does not fit")
+  }
+}
+
+func fits(text: view String, level: view QrErrorCorrection, version: view Int) ret String {
+  var options: QrOptions = qrOptions(level: level)
+  options.version = version
+  if let code: QrCode = qrEncodeBytes(bytes: textBytes(text: text), options: options) {
+    ret "version {code.version}"
+  }
+  ret "does not fit"
+}
+
+func repeated(character: view String, count: view Int) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < count, ++i {
+    text = "{text}{character}"
+  }
+  ret text
+}
+
+func main() ret Int {
+  # The ISO example (Annex I): "01234567", 1-M, numeric
+  if let message: QrMessage = qrMessage(
+    bytes: textBytes(text: "01234567")
+    mode: QrMode.numeric
+    options: qrOptions(level: QrErrorCorrection.medium)
+  ) {
+    log("iso codewords {message.codewords}")
+  }
+  let url100: String = "https://example.com/{repeated(character: "a", count: 60)}?q={repeated(
+    character: "b"
+    count: 17
+  )}"
+  show(
+    name: "iso"
+    text: "01234567"
+    mode: QrMode.numeric
+    level: QrErrorCorrection.medium
+    version: 0
+    mask: -1
+  )
+  show(
+    name: "hello"
+    text: "HELLO WORLD"
+    mode: QrMode.alphanumeric
+    level: QrErrorCorrection.quartile
+    version: 0
+    mask: -1
+  )
+  show(
+    name: "byteL"
+    text: "Hello, world!"
+    mode: QrMode.byte
+    level: QrErrorCorrection.low
+    version: 0
+    mask: -1
+  )
+  show(
+    name: "byteH"
+    text: "https://example.com"
+    mode: QrMode.byte
+    level: QrErrorCorrection.high
+    version: 0
+    mask: -1
+  )
+  show(
+    name: "url100"
+    text: url100
+    mode: QrMode.byte
+    level: QrErrorCorrection.medium
+    version: 0
+    mask: -1
+  )
+  show(
+    name: "version7"
+    text: "rae"
+    mode: QrMode.byte
+    level: QrErrorCorrection.low
+    version: 7
+    mask: -1
+  )
+  show(
+    name: "version10"
+    text: "rae relay invite"
+    mode: QrMode.byte
+    level: QrErrorCorrection.quartile
+    version: 10
+    mask: -1
+  )
+  show(
+    name: "version27"
+    text: "Rae"
+    mode: QrMode.byte
+    level: QrErrorCorrection.high
+    version: 27
+    mask: -1
+  )
+  show(
+    name: "version40"
+    text: "the largest symbol"
+    mode: QrMode.byte
+    level: QrErrorCorrection.low
+    version: 40
+    mask: -1
+  )
+  show(
+    name: "mask3"
+    text: "mask three"
+    mode: QrMode.byte
+    level: QrErrorCorrection.medium
+    version: 0
+    mask: 3
+  )
+  show(
+    name: "mask6"
+    text: "mask six"
+    mode: QrMode.byte
+    level: QrErrorCorrection.high
+    version: 0
+    mask: 6
+  )
+  # The byte capacity of every version and level
+  loop var version: Int = qrMinVersion, version <= qrMaxVersion, ++version {
+    log(
+      "capacity {version}: L {qrByteCapacity(version: version, level: QrErrorCorrection.low)} M {qrByteCapacity(
+        version: version
+        level: QrErrorCorrection.medium
+      )} Q {qrByteCapacity(version: version, level: QrErrorCorrection.quartile)} H {qrByteCapacity(
+        version: version
+        level: QrErrorCorrection.high
+      )}"
+    )
+  }
+  # The smallest version that fits, and what does not fit
+  log(
+    "17 bytes at L: {fits(
+      text: repeated(character: "x", count: 17)
+      level: QrErrorCorrection.low
+      version: 0
+    )}"
+  )
+  log(
+    "18 bytes at L: {fits(
+      text: repeated(character: "x", count: 18)
+      level: QrErrorCorrection.low
+      version: 0
+    )}"
+  )
+  log(
+    "2953 bytes at L: {fits(
+      text: repeated(character: "x", count: 2953)
+      level: QrErrorCorrection.low
+      version: 0
+    )}"
+  )
+  log(
+    "2954 bytes at L: {fits(
+      text: repeated(character: "x", count: 2954)
+      level: QrErrorCorrection.low
+      version: 0
+    )}"
+  )
+  log(
+    "100 bytes forced into version 3 at M: {fits(
+      text: url100
+      level: QrErrorCorrection.medium
+      version: 3
+    )}"
+  )
+  if let code: QrCode = qrEncodeText(text: url100, level: QrErrorCorrection.medium) {
+    log("the 100-character URL: version {code.version}, {code.size} x {code.size} modules")
+  }
+  ret 0
+}

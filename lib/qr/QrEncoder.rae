@@ -1,0 +1,858 @@
+# A QR code encoder (ISO/IEC 18004:2015) in plain Rae: text or bytes in, a
+# square grid of modules out (`QrCode`, true = dark), without the quiet
+# zone (draw 4 light modules round it).
+#
+#   qrEncodeText(text:, level:)     the most compact single mode for the
+#                                   text (numeric, alphanumeric or byte)
+#   qrEncodeBytes(bytes:, options:) byte mode, with a forced version or
+#                                   mask if wanted
+#
+# The steps: the data as one segment (mode indicator, character count,
+# data), the terminator and padding, the smallest version 1-40 it fits at
+# the level (or the forced one), Reed-Solomon blocks interleaved
+# (lib/qr/ReedSolomon), the function patterns (finders, separators, timing,
+# alignment, dark module), the data placed in the zigzag, each of the eight
+# masks scored with the four penalty rules and the lowest kept (or the
+# forced one), then the format and version information. One segment only:
+# no mixed modes, no ECI, no Kanji.
+open qr/QrTables
+open qr/ReedSolomon
+
+enum QrMode { numeric, alphanumeric, byte }
+
+type QrOptions {
+  level: QrErrorCorrection
+  # 1-40, or 0: the smallest that fits
+  version: Int = 0
+  # 0-7, or -1: the best by the penalty score
+  mask: Int = -1
+}
+
+type QrCode {
+  version: Int
+  # Modules per side: 4 * version + 17
+  size: Int
+  level: QrErrorCorrection
+  mask: Int
+  mode: QrMode
+  # size * size modules, row by row from the top left; true is dark
+  modules: List(Bool)
+}
+
+func qrOptions(level: view QrErrorCorrection) ret QrOptions {
+  ret QrOptions { level: level, version: 0, mask: -1 }
+}
+
+# The module at column `x`, row `y` (false outside the symbol)
+func qrModule(code: view QrCode, x: view Int, y: view Int) ret Bool {
+  if x < 0 or y < 0 or x >= code.size or y >= code.size {
+    ret false
+  }
+  ret code.modules.copyAtFallback(index: y * code.size + x, fallback: false)
+}
+
+# The grid as text: one line per row, "#" dark and "." light
+func qrText(code: view QrCode) ret String {
+  var text: String = ""
+  loop var y: Int = 0, y < code.size, ++y {
+    var line: String = ""
+    loop var x: Int = 0, x < code.size, ++x {
+      if qrModule(code: code, x: x, y: y) {
+        line = "{line}#"
+      } else {
+        line = "{line}."
+      }
+    }
+    text = "{text}{line}\n"
+  }
+  ret text
+}
+
+# ----- segments ---------------------------------------------------------------
+const alphanumericCharacters: String = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+
+func modeIndicator(mode: view QrMode) ret Int {
+  if mode is QrMode.numeric {
+    ret 1
+  }
+  if mode is QrMode.alphanumeric {
+    ret 2
+  }
+  ret 4
+}
+
+# Bits of the character count, by mode and version range (ISO table 3)
+func countBits(mode: view QrMode, version: view Int) ret Int {
+  var range: Int = 0
+  if version >= 27 {
+    range = 2
+  } else if version >= 10 {
+    range = 1
+  }
+  if mode is QrMode.numeric {
+    ret 10 + range * 2
+  }
+  if mode is QrMode.alphanumeric {
+    ret 9 + range * 2
+  }
+  if range is 0 {
+    ret 8
+  }
+  ret 16
+}
+
+func alphanumericValue(code: view Int) ret Int {
+  loop var i: Int = 0, i < alphanumericCharacters.length(), ++i {
+    if alphanumericCharacters.byteAt(index: i) is code {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# The most compact single mode for `bytes`
+func qrBestMode(bytes: view List(UInt8)) ret QrMode {
+  var numeric: Bool = true
+  var alphanumeric: Bool = true
+  loop let byte: UInt8 in bytes {
+    let code: Int = byte as Int
+    if code < 48 or code > 57 {
+      numeric = false
+    }
+    if alphanumericValue(code: code) < 0 {
+      alphanumeric = false
+    }
+  }
+  if numeric {
+    ret QrMode.numeric
+  }
+  if alphanumeric {
+    ret QrMode.alphanumeric
+  }
+  ret QrMode.byte
+}
+
+func appendBits(bits: mod List(Bool), value: view Int, count: view Int) {
+  var bit: Int = count - 1
+  loop bit >= 0 {
+    bits.add(value: ((value shr bit) bitand 1) is 1)
+    bit = bit - 1
+  }
+}
+
+# The segment's data bits (without the mode and count)
+func segmentDataBits(mode: view QrMode, bytes: view List(UInt8)) ret List(Bool) {
+  var bits: List(Bool) = {}
+  if mode is QrMode.numeric {
+    var i: Int = 0
+    loop i < bytes.length {
+      var group: Int = 0
+      var digits: Int = 0
+      loop digits < 3 and i < bytes.length {
+        group = group * 10 + (bytes.copyAtFallback(index: i, fallback: 48) as Int) - 48
+        digits = digits + 1
+        i = i + 1
+      }
+      appendBits(bits: bits, value: group, count: digits * 3 + 1)
+    }
+  } else if mode is QrMode.alphanumeric {
+    var i: Int = 0
+    loop i + 1 < bytes.length {
+      let first: Int = alphanumericValue(code: bytes.copyAtFallback(index: i, fallback: 0) as Int)
+      let second: Int = alphanumericValue(
+        code: bytes.copyAtFallback(index: i + 1, fallback: 0) as Int
+      )
+      appendBits(bits: bits, value: first * 45 + second, count: 11)
+      i = i + 2
+    }
+    if i < bytes.length {
+      appendBits(
+        bits: bits
+        value: alphanumericValue(code: bytes.copyAtFallback(index: i, fallback: 0) as Int)
+        count: 6
+      )
+    }
+  } else {
+    loop let byte: UInt8 in bytes {
+      appendBits(bits: bits, value: byte as Int, count: 8)
+    }
+  }
+  ret bits
+}
+
+# The segment's whole length at `version` in bits, -1 when its character
+# count does not fit the count field
+func segmentBits(
+  mode: view QrMode
+  count: view Int
+  dataBits: view Int
+  version: view Int
+) ret Int {
+  let field: Int = countBits(mode: mode, version: version)
+  if count >= (1 shl field) {
+    ret -1
+  }
+  ret 4 + field + dataBits
+}
+
+# ----- encoding -----------------------------------------------------------------
+func qrEncodeText(text: view String, level: view QrErrorCorrection) ret opt QrCode {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret qrEncodeIn(bytes: bytes, mode: qrBestMode(bytes: bytes), options: qrOptions(level: level))
+}
+
+func qrEncodeBytes(bytes: view List(UInt8), options: view QrOptions) ret opt QrCode {
+  ret qrEncodeIn(bytes: bytes, mode: QrMode.byte, options: options)
+}
+
+# Encode in `mode`: none when the data does not fit (any version 1-40, or
+# the forced one), the mode does not suit the data, or an option is out of
+# range
+func qrEncodeIn(
+  bytes: view List(UInt8)
+  mode: view QrMode
+  options: view QrOptions
+) ret opt QrCode {
+  if options.mask < -1 or options.mask > 7 {
+    ret none
+  }
+  if let message: QrMessage = qrMessage(bytes: bytes, mode: mode, options: options) {
+    ret qrBuildSymbol(
+      version: message.version
+      level: options.level
+      mask: options.mask
+      mode: mode
+      codewords: message.codewords
+    )
+  }
+  ret none
+}
+
+# The final message: the version chosen and its codewords, data and error
+# correction, interleaved as they are placed in the symbol
+type QrMessage {
+  version: Int
+  codewords: List(Int)
+}
+
+# The data as one segment in the smallest version that holds it (or the
+# forced one), padded, split into blocks with their error correction
+func qrMessage(
+  bytes: view List(UInt8)
+  mode: view QrMode
+  options: view QrOptions
+) ret opt QrMessage {
+  if options.version < 0 or options.version > qrMaxVersion {
+    ret none
+  }
+  if mode is QrMode.numeric and qrBestMode(bytes: bytes) is not QrMode.numeric {
+    ret none
+  }
+  if mode is QrMode.alphanumeric and qrBestMode(bytes: bytes) is QrMode.byte {
+    ret none
+  }
+  let data: List(Bool) = segmentDataBits(mode: mode, bytes: bytes)
+  var first: Int = qrMinVersion
+  var last: Int = qrMaxVersion
+  if options.version > 0 {
+    first = options.version
+    last = options.version
+  }
+  var version: Int = -1
+  loop var candidate: Int = first, candidate <= last and version < 0, ++candidate {
+    let length: Int = segmentBits(
+      mode: mode
+      count: bytes.length
+      dataBits: data.length
+      version: candidate
+    )
+    if length >= 0 and length <= qrDataCodewords(version: candidate, level: options.level) * 8 {
+      version = candidate
+    }
+  }
+  if version < 0 {
+    ret none
+  }
+  # The bit stream: mode, count, data, terminator, padding to a byte, then
+  # the pad codewords 0xEC 0x11 alternately
+  let capacityBits: Int = qrDataCodewords(version: version, level: options.level) * 8
+  var bits: List(Bool) = List.create(Bool, cap: capacityBits)
+  appendBits(bits: bits, value: modeIndicator(mode: mode), count: 4)
+  appendBits(bits: bits, value: bytes.length, count: countBits(mode: mode, version: version))
+  loop let bit: Bool in data {
+    bits.add(value: bit)
+  }
+  var terminator: Int = capacityBits - bits.length
+  if terminator > 4 {
+    terminator = 4
+  }
+  appendBits(bits: bits, value: 0, count: terminator)
+  appendBits(bits: bits, value: 0, count: (8 - bits.length % 8) % 8)
+  var padByte: Int = 236
+  loop bits.length < capacityBits {
+    appendBits(bits: bits, value: padByte, count: 8)
+    padByte = padByte bitxor 253
+  }
+  var codewords: List(Int) = List.create(Int, cap: capacityBits / 8)
+  var at: Int = 0
+  loop at < bits.length {
+    var value: Int = 0
+    loop var j: Int = 0, j < 8, ++j {
+      value = value * 2
+      if bits.copyAtFallback(index: at + j, fallback: false) {
+        value = value + 1
+      }
+    }
+    codewords.add(value: value)
+    at = at + 8
+  }
+  ret QrMessage {
+    version: version
+    codewords: addErrorCorrection(codewords: codewords, version: version, level: options.level)
+  }
+}
+
+# The most bytes a version holds at a level in byte mode
+func qrByteCapacity(version: view Int, level: view QrErrorCorrection) ret Int {
+  ret (qrDataCodewords(version: version, level: level) * 8 - 4 - countBits(
+    mode: QrMode.byte
+    version: version
+  )) / 8
+}
+
+# Split the data codewords into the version's blocks, add each block's
+# error correction, and interleave: the data codewords column by column,
+# then the error-correction ones (ISO 7.6)
+func addErrorCorrection(
+  codewords: view List(Int)
+  version: view Int
+  level: view QrErrorCorrection
+) ret List(Int) {
+  let blocks: Int = qrBlockCount(level: level, version: version)
+  let eccLength: Int = qrEccPerBlock(level: level, version: version)
+  let total: Int = qrTotalCodewords(version: version)
+  let shortBlocks: Int = blocks - total % blocks
+  let shortData: Int = total / blocks - eccLength
+  let divisor: List(Int) = reedSolomonDivisor(degree: eccLength)
+  var starts: List(Int) = {}
+  var lengths: List(Int) = {}
+  var corrections: List(List(Int)) = {}
+  var start: Int = 0
+  loop var b: Int = 0, b < blocks, ++b {
+    var length: Int = shortData
+    if b >= shortBlocks {
+      length = shortData + 1
+    }
+    starts.add(value: start)
+    lengths.add(value: length)
+    corrections.add(value: reedSolomonRemainder(
+      data: codewords
+      start: start
+      count: length
+      divisor: divisor
+    ))
+    start = start + length
+  }
+  var result: List(Int) = List.create(Int, cap: total)
+  loop var i: Int = 0, i <= shortData, ++i {
+    loop var b: Int = 0, b < blocks, ++b {
+      if i < lengths.copyAtFallback(index: b, fallback: 0) {
+        result.add(
+          value: codewords.copyAtFallback(
+            index: starts.copyAtFallback(index: b, fallback: 0) + i
+            fallback: 0
+          )
+        )
+      }
+    }
+  }
+  loop var i: Int = 0, i < eccLength, ++i {
+    loop var b: Int = 0, b < blocks, ++b {
+      if let correction: view List(Int) = corrections.viewAt(index: b) {
+        result.add(value: correction.copyAtFallback(index: i, fallback: 0))
+      }
+    }
+  }
+  ret result
+}
+
+# ----- the symbol -----------------------------------------------------------------
+
+# A symbol being built: its modules and which of them are function modules
+type QrGrid {
+  size: Int
+  modules: List(Bool)
+  function: List(Bool)
+}
+
+func gridGet(grid: view QrGrid, x: view Int, y: view Int) ret Bool {
+  ret grid.modules.copyAtFallback(index: y * grid.size + x, fallback: false)
+}
+
+func gridIsFunction(grid: view QrGrid, x: view Int, y: view Int) ret Bool {
+  ret grid.function.copyAtFallback(index: y * grid.size + x, fallback: false)
+}
+
+func setFunction(
+  grid: mod QrGrid
+  x: view Int
+  y: view Int
+  dark: view Bool
+) {
+  grid.modules.set(index: y * grid.size + x, value: dark)
+  grid.function.set(index: y * grid.size + x, value: true)
+}
+
+func absolute(value: view Int) ret Int {
+  if value < 0 {
+    ret -value
+  }
+  ret value
+}
+
+func drawFinder(grid: mod QrGrid, centerX: view Int, centerY: view Int) {
+  loop var dy: Int = -4, dy <= 4, ++dy {
+    loop var dx: Int = -4, dx <= 4, ++dx {
+      let x: Int = centerX + dx
+      let y: Int = centerY + dy
+      if x >= 0 and y >= 0 and x < grid.size and y < grid.size {
+        var distance: Int = absolute(value: dx)
+        if absolute(value: dy) > distance {
+          distance = absolute(value: dy)
+        }
+        setFunction(
+          grid: grid
+          x: x
+          y: y
+          dark: distance is not 2 and distance is not 4
+        )
+      }
+    }
+  }
+}
+
+func drawAlignment(grid: mod QrGrid, centerX: view Int, centerY: view Int) {
+  loop var dy: Int = -2, dy <= 2, ++dy {
+    loop var dx: Int = -2, dx <= 2, ++dx {
+      var distance: Int = absolute(value: dx)
+      if absolute(value: dy) > distance {
+        distance = absolute(value: dy)
+      }
+      setFunction(
+        grid: grid
+        x: centerX + dx
+        y: centerY + dy
+        dark: distance is not 1
+      )
+    }
+  }
+}
+
+func bitOf(value: view Int, index: view Int) ret Bool {
+  ret ((value shr index) bitand 1) is 1
+}
+
+# The 15 format bits: the level and mask, BCH(15, 5), XOR 101010000010010
+func formatBits(level: view QrErrorCorrection, mask: view Int) ret Int {
+  let data: Int = (qrLevelFormatBits(level: level) shl 3) bitor mask
+  var remainder: Int = data
+  loop var i: Int = 0, i < 10, ++i {
+    remainder = (remainder shl 1) bitxor ((remainder shr 9) * 1335)
+  }
+  ret ((data shl 10) bitor remainder) bitxor 21522
+}
+
+func drawFormat(grid: mod QrGrid, level: view QrErrorCorrection, mask: view Int) {
+  let bits: Int = formatBits(level: level, mask: mask)
+  let size: Int = grid.size
+  # Round the top left finder
+  loop var i: Int = 0, i <= 5, ++i {
+    setFunction(
+      grid: grid
+      x: 8
+      y: i
+      dark: bitOf(value: bits, index: i)
+    )
+  }
+  setFunction(
+    grid: grid
+    x: 8
+    y: 7
+    dark: bitOf(value: bits, index: 6)
+  )
+  setFunction(
+    grid: grid
+    x: 8
+    y: 8
+    dark: bitOf(value: bits, index: 7)
+  )
+  setFunction(
+    grid: grid
+    x: 7
+    y: 8
+    dark: bitOf(value: bits, index: 8)
+  )
+  loop var i: Int = 9, i < 15, ++i {
+    setFunction(
+      grid: grid
+      x: 14 - i
+      y: 8
+      dark: bitOf(value: bits, index: i)
+    )
+  }
+  # The copy by the other two finders
+  loop var i: Int = 0, i < 8, ++i {
+    setFunction(
+      grid: grid
+      x: size - 1 - i
+      y: 8
+      dark: bitOf(value: bits, index: i)
+    )
+  }
+  loop var i: Int = 8, i < 15, ++i {
+    setFunction(
+      grid: grid
+      x: 8
+      y: size - 15 + i
+      dark: bitOf(value: bits, index: i)
+    )
+  }
+  # The dark module
+  setFunction(
+    grid: grid
+    x: 8
+    y: size - 8
+    dark: true
+  )
+}
+
+# The 18 version bits (version 7 and up): BCH(18, 6), in two 6 x 3 blocks
+func drawVersion(grid: mod QrGrid, version: view Int) {
+  if version < 7 {
+    ret
+  }
+  var remainder: Int = version
+  loop var i: Int = 0, i < 12, ++i {
+    remainder = (remainder shl 1) bitxor ((remainder shr 11) * 7973)
+  }
+  let bits: Int = (version shl 12) bitor remainder
+  loop var i: Int = 0, i < 18, ++i {
+    let dark: Bool = bitOf(value: bits, index: i)
+    let a: Int = grid.size - 11 + i % 3
+    let b: Int = i / 3
+    setFunction(
+      grid: grid
+      x: a
+      y: b
+      dark: dark
+    )
+    setFunction(
+      grid: grid
+      x: b
+      y: a
+      dark: dark
+    )
+  }
+}
+
+func drawFunctionPatterns(grid: mod QrGrid, version: view Int, level: view QrErrorCorrection) {
+  let size: Int = grid.size
+  loop var i: Int = 0, i < size, ++i {
+    setFunction(
+      grid: grid
+      x: 6
+      y: i
+      dark: i % 2 is 0
+    )
+    setFunction(
+      grid: grid
+      x: i
+      y: 6
+      dark: i % 2 is 0
+    )
+  }
+  drawFinder(grid: grid, centerX: 3, centerY: 3)
+  drawFinder(grid: grid, centerX: size - 4, centerY: 3)
+  drawFinder(grid: grid, centerX: 3, centerY: size - 4)
+  let positions: List(Int) = qrAlignmentPositions(version: version)
+  let last: Int = positions.length - 1
+  loop var i: Int = 0, i < positions.length, ++i {
+    loop var j: Int = 0, j < positions.length, ++j {
+      let corner: Bool = (i is 0 and j is 0) or (i is 0 and j is last) or (i is last and j is 0)
+      if not corner {
+        drawAlignment(
+          grid: grid
+          centerX: positions.copyAtFallback(index: i, fallback: 0)
+          centerY: positions.copyAtFallback(index: j, fallback: 0)
+        )
+      }
+    }
+  }
+  # Placeholders, so the data skips these modules (drawn for real once the
+  # mask is known)
+  drawFormat(grid: grid, level: level, mask: 0)
+  drawVersion(grid: grid, version: version)
+}
+
+# The codewords' bits in the zigzag: two columns at a time from the right,
+# up then down, skipping function modules and the vertical timing column
+func placeData(grid: mod QrGrid, codewords: view List(Int)) {
+  let size: Int = grid.size
+  let totalBits: Int = codewords.length * 8
+  var index: Int = 0
+  var right: Int = size - 1
+  loop right >= 1 {
+    if right is 6 {
+      right = 5
+    }
+    loop var vertical: Int = 0, vertical < size, ++vertical {
+      loop var j: Int = 0, j < 2, ++j {
+        let x: Int = right - j
+        let upward: Bool = ((right + 1) bitand 2) is 0
+        var y: Int = vertical
+        if upward {
+          y = size - 1 - vertical
+        }
+        if not gridIsFunction(grid: grid, x: x, y: y) and index < totalBits {
+          let codeword: Int = codewords.copyAtFallback(index: index shr 3, fallback: 0)
+          grid.modules.set(
+            index: y * size + x
+            value: bitOf(value: codeword, index: 7 - (index bitand 7))
+          )
+          index = index + 1
+        }
+      }
+    }
+    right = right - 2
+  }
+}
+
+func maskBit(mask: view Int, x: view Int, y: view Int) ret Bool {
+  if mask is 0 {
+    ret (x + y) % 2 is 0
+  }
+  if mask is 1 {
+    ret y % 2 is 0
+  }
+  if mask is 2 {
+    ret x % 3 is 0
+  }
+  if mask is 3 {
+    ret (x + y) % 3 is 0
+  }
+  if mask is 4 {
+    ret (x / 3 + y / 2) % 2 is 0
+  }
+  if mask is 5 {
+    ret x * y % 2 + x * y % 3 is 0
+  }
+  if mask is 6 {
+    ret (x * y % 2 + x * y % 3) % 2 is 0
+  }
+  ret ((x + y) % 2 + x * y % 3) % 2 is 0
+}
+
+# XOR the mask into every data module (twice undoes it)
+func applyMask(grid: mod QrGrid, mask: view Int) {
+  loop var y: Int = 0, y < grid.size, ++y {
+    loop var x: Int = 0, x < grid.size, ++x {
+      if not gridIsFunction(grid: grid, x: x, y: y) and maskBit(mask: mask, x: x, y: y) {
+        let index: Int = y * grid.size + x
+        grid.modules.set(
+          index: index
+          value: not grid.modules.copyAtFallback(index: index, fallback: false)
+        )
+      }
+    }
+  }
+}
+
+func qrBuildSymbol(
+  version: view Int
+  level: view QrErrorCorrection
+  mask: view Int
+  mode: view QrMode
+  codewords: view List(Int)
+) ret QrCode {
+  let size: Int = qrSize(version: version)
+  var modules: List(Bool) = {}
+  modules.addDefaults(count: size * size)
+  var function: List(Bool) = {}
+  function.addDefaults(count: size * size)
+  var grid: QrGrid = { size: size, modules: own modules, function: own function }
+  drawFunctionPatterns(grid: grid, version: version, level: level)
+  placeData(grid: grid, codewords: codewords)
+  var chosen: Int = mask
+  if chosen < 0 {
+    # Each mask with its real format information, scored; the lowest wins
+    # (the first on a tie)
+    var best: Int = -1
+    loop var candidate: Int = 0, candidate < 8, ++candidate {
+      applyMask(grid: grid, mask: candidate)
+      drawFormat(grid: grid, level: level, mask: candidate)
+      let penalty: Int = qrPenalty(grid: grid)
+      if best < 0 or penalty < best {
+        best = penalty
+        chosen = candidate
+      }
+      applyMask(grid: grid, mask: candidate)
+    }
+  }
+  applyMask(grid: grid, mask: chosen)
+  drawFormat(grid: grid, level: level, mask: chosen)
+  ret QrCode {
+    version: version
+    size: size
+    level: level
+    mask: chosen
+    mode: mode
+    modules: grid.modules
+  }
+}
+
+# ----- the penalty score (ISO 7.8.3) ------------------------------------------
+const penaltyRun: Int = 3
+
+const penaltyBlock: Int = 3
+
+const penaltyFinderLike: Int = 40
+
+const penaltyBalance: Int = 10
+
+# The run lengths of a line, newest first (7 kept), for the finder-like
+# pattern rule (1:1:3:1:1 with 4 light modules on a side; outside the
+# symbol counts as light)
+type RunHistory {
+  runs: List(Int)
+}
+
+func historyAdd(history: mod RunHistory, length: view Int, size: view Int) {
+  var run: Int = length
+  if history.runs.copyAtFallback(index: 0, fallback: 0) is 0 {
+    # The first run of a line: the light border before it counts
+    run = run + size
+  }
+  var i: Int = 6
+  loop i >= 1 {
+    history.runs.set(index: i, value: history.runs.copyAtFallback(index: i - 1, fallback: 0))
+    i = i - 1
+  }
+  history.runs.set(index: 0, value: run)
+}
+
+func historyFinderLike(history: view RunHistory) ret Int {
+  let n: Int = history.runs.copyAtFallback(index: 1, fallback: 0)
+  let core: Bool = n > 0 and history.runs.copyAtFallback(index: 2, fallback: 0) is n and history.runs.copyAtFallback(
+    index: 3
+    fallback: 0
+  ) is n * 3 and history.runs.copyAtFallback(index: 4, fallback: 0) is n and history.runs.copyAtFallback(
+    index: 5
+    fallback: 0
+  ) is n
+  let first: Int = history.runs.copyAtFallback(index: 0, fallback: 0)
+  let seventh: Int = history.runs.copyAtFallback(index: 6, fallback: 0)
+  var count: Int = 0
+  if core and first >= n * 4 and seventh >= n {
+    count = count + 1
+  }
+  if core and seventh >= n * 4 and first >= n {
+    count = count + 1
+  }
+  ret count
+}
+
+# The end of a line: its last run, then the light border after it
+func historyFinish(
+  history: mod RunHistory
+  dark: view Bool
+  length: view Int
+  size: view Int
+) ret Int {
+  var run: Int = length
+  if dark {
+    historyAdd(history: history, length: run, size: size)
+    run = 0
+  }
+  historyAdd(history: history, length: run + size, size: size)
+  ret historyFinderLike(history: history)
+}
+
+# The penalty of one row (`vertical` false) or column: runs of five or more
+# of one color, and finder-like patterns
+func linePenalty(grid: view QrGrid, line: view Int, vertical: view Bool) ret Int {
+  let size: Int = grid.size
+  var result: Int = 0
+  var color: Bool = false
+  var run: Int = 0
+  var history: RunHistory = { runs: List(Int) {
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+  } }
+  loop var i: Int = 0, i < size, ++i {
+    var dark: Bool = gridGet(grid: grid, x: i, y: line)
+    if vertical {
+      dark = gridGet(grid: grid, x: line, y: i)
+    }
+    if dark is color {
+      run = run + 1
+      if run is 5 {
+        result = result + penaltyRun
+      } else if run > 5 {
+        result = result + 1
+      }
+    } else {
+      historyAdd(history: history, length: run, size: size)
+      if not color {
+        result = result + historyFinderLike(history: history) * penaltyFinderLike
+      }
+      color = dark
+      run = 1
+    }
+  }
+  ret result + historyFinish(
+    history: history
+    dark: color
+    length: run
+    size: size
+  ) * penaltyFinderLike
+}
+
+func qrPenalty(grid: view QrGrid) ret Int {
+  let size: Int = grid.size
+  var result: Int = 0
+  loop var line: Int = 0, line < size, ++line {
+    result = result + linePenalty(grid: grid, line: line, vertical: false)
+    result = result + linePenalty(grid: grid, line: line, vertical: true)
+  }
+  # 2 x 2 blocks of one color
+  loop var y: Int = 0, y + 1 < size, ++y {
+    loop var x: Int = 0, x + 1 < size, ++x {
+      let color: Bool = gridGet(grid: grid, x: x, y: y)
+      if color is gridGet(grid: grid, x: x + 1, y: y) and color is gridGet(
+        grid: grid
+        x: x
+        y: y + 1
+      ) and color is gridGet(grid: grid, x: x + 1, y: y + 1) {
+        result = result + penaltyBlock
+      }
+    }
+  }
+  # The share of dark modules: 10 points per 5 % away from half
+  var dark: Int = 0
+  loop let module: Bool in grid.modules {
+    if module {
+      dark = dark + 1
+    }
+  }
+  let total: Int = size * size
+  let steps: Int = (absolute(value: dark * 20 - total * 10) + total - 1) / total - 1
+  ret result + steps * penaltyBalance
+}
