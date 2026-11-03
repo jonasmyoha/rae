@@ -53,6 +53,17 @@ fn grassDrawnWeight(s: RaeBiome) -> f32 {
   let sgMix = smoothstep(sandHi - GRASS_SANDGRASS_BLUR, sandHi + GRASS_SANDGRASS_BLUR, s.elevation);
   return (s.wSand + s.wGrass) * sgMix;
 }
+// The meadow's own green where a blade stands: the grass field of
+// grass_field.wgsl round the frame's ground palette (G.e), mixed toward its
+// dry grass by the soil's moisture (G.j). The blade's tip brightens toward
+// it; on the plain ground it is the root too (grass_root_field.wgsl).
+fn grassFieldGreen(position: vec2<f32>, biome: RaeBiome) -> vec3<f32> {
+  var base = G.e.rgb;
+  if (G.j.w > 0.0) {
+    base = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, biome.moisture);
+  }
+  return grassGroundColor(base, position, G.h.x, G.h.y);
+}
 fn mTranslate(t: vec3<f32>) -> mat4x4<f32> {
   return mat4x4<f32>(vec4<f32>(1.0,0.0,0.0,0.0), vec4<f32>(0.0,1.0,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(t.x,t.y,t.z,1.0));
 }
@@ -118,7 +129,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Keep broad variation inside each tuft. The four-segment ribbon supplies
   // the close silhouette; density is deliberately unchanged.
   let variation = clamp(G.h.w, 0.0, 1.5);
-  let baseHeight = mix(0.50, 0.28 + hHeight * 0.44, variation) * G.g.x;
+  // Height varies across the meadow, not only blade by blade: a broad field
+  // about 9 m across makes low lawn in one place and tall grass in another
+  // (0.35x to 1.65x), and each blade varies within it (0.75x to 1.25x).
+  let tallField = smoothstep(-0.55, 0.55, perlin2(bladePosition / 9.0, 601u) * 0.75
+    + perlin2(bladePosition / 3.7, 607u) * 0.25);
+  let fieldHeight = mix(1.0, mix(0.35, 1.65, tallField), clamp(variation, 0.0, 1.0));
+  let bladeHeight = mix(1.0, 0.75 + hHeight * 0.5, variation);
+  let baseHeight = 0.50 * fieldHeight * bladeHeight * G.g.x;
   let width = mix(0.079, 0.052 + hWidth * 0.054, variation) * G.g.y;
   let distToCenter = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
@@ -126,21 +144,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let patchBody = smoothstep(0.36, 0.61, grassPatchValue(bladePosition, G.h.x));
   var patchHeight = mix(0.62, 1.08, patchBody);
   if (clusterStrength < 1.0) { patchHeight = mix(1.0, patchHeight, clusterStrength); }
-  let height = baseHeight * patchHeight * edgeFade;
   let pos = vec3<f32>(bx, by, bz);
-  if (height < 0.02) { return; }
   if (G.g.z < 0.999 && hash2u(cellI, 131u) > G.g.z) { return; }
   let toBlade = pos - G.c.xyz;
   let dist = length(toBlade);
   let cosA = dot(toBlade / max(dist, 0.0001), normalize(G.d.xyz));
-  if (dist > G.c.w && cosA < G.d.w) { return; }
+  // No blade appears or vanishes in one frame as the camera moves: every cut
+  // below (the view cone past the near field, the distance thinning) SHRINKS
+  // a blade to nothing over a band instead, so it grows in and out smoothly.
+  // The cone: whole inside it or within the near field, gone a little
+  // outside it (off screen) or beyond.
+  let inCone = smoothstep(G.d.w - 0.12, G.d.w, cosA);
+  let inNear = 1.0 - smoothstep(G.c.w, G.c.w + 2.0, dist);
+  let viewShrink = max(inCone, inNear);
   // Thin only after the near field. Patch membership stays unchanged, while
   // surviving far ribbons widen a little so the painted ground still reads as
-  // meadow instead of a uniformly empty ring.
+  // meadow instead of a uniformly empty ring. A blade's own threshold is its
+  // hash: as the share kept falls past it the blade shrinks over the next
+  // 0.15 of the share rather than going at once.
   let distanceShare = dist / max(radius, 0.001);
   let lodT = smoothstep(clamp(G.i.x, 0.0, 0.9), 0.96, distanceShare);
   let keepProb = mix(1.0, clamp(G.i.y, 0.05, 1.0), lodT);
-  if (hash2u(cellI, 151u) > keepProb) { return; }
+  let thinShrink = clamp((keepProb + 0.15 - hash2u(cellI, 151u)) / 0.15, 0.0, 1.0);
+  let height = baseHeight * patchHeight * edgeFade * viewShrink * thinShrink;
+  if (height < 0.01) { return; }
   let distanceWidth = mix(1.0, max(G.i.z, 1.0), lodT);
   let scale = vec3<f32>(width * distanceWidth, width * distanceWidth, height);
   let slot = atomicAdd(&indirect.instanceCount, 1u);
@@ -153,11 +180,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // ground instead of standing on it (grass_render.wgsl lightens the tip)
   // (the frame's ground palette, mixed toward its dry grass where the soil
   // is dry: grass_field.wgsl groundPaletteGrass, as the terrain does)
-  var groundBase = G.e.rgb;
-  if (G.j.w > 0.0) {
-    groundBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, bladeBiome.moisture);
-  }
-  let groundColor = grassGroundColor(groundBase, bladePosition, G.h.x, G.h.y);
+  // (the composition's grassRootColor: grass_root_field.wgsl by default,
+  // grass_root_painted.wgsl on the walkers' painted ground)
+  let groundColor = grassRootColor(bladePosition, bladeBiome);
   outBuf[slot].albedoMetallic = vec4<f32>(groundColor, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
@@ -165,7 +190,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // x: the gust at the blade (the trees' gust field, lib/wind.wgsl
   // windGustAt, as this file's grassGustAt copy), once per blade, for
   // grass_render.wgsl's sway (the grass draws no level fade)
-  outBuf[slot].fade = vec4<f32>(grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), 0.0, 0.0, 0.0);
+  // y, z, w: the blade's own tip color, before grass_render.wgsl brightens it
+  // (tipLighten): the meadow's green here, at the blade's own brightness
+  // (0.86 to 1.12) and warmth (cooler and bluer, or warmer and yellower), so
+  // a meadow is not two flat greens. The blade runs from its root, the
+  // ground's color, to this.
+  let tipBrightness = 0.86 + hash2u(cellI, 211u) * 0.26;
+  let tipWarmth = hash2u(cellI, 223u) * 2.0 - 1.0;
+  let warmTint = select(vec3<f32>(0.93, 0.99, 1.08), vec3<f32>(1.08, 1.02, 0.84), tipWarmth > 0.0);
+  let tipColor = grassFieldGreen(bladePosition, bladeBiome) * tipBrightness
+    * mix(vec3<f32>(1.0), warmTint, abs(tipWarmth));
+  outBuf[slot].fade = vec4<f32>(grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), tipColor);
 }
 
 // --- gust field begin: lib/wind.wgsl's gust field (windGustAt), renamed

@@ -638,12 +638,13 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       gpuCapacity = walkerGpuCapacityWithSea
     }
     # The GPU grass grows on the world's terrain: its compute shader gets the
-    # world's island radius
+    # world's island radius, and its blades' roots take the painted ground's
+    # own color where they stand (walkerGrassComputeShader)
     var grassCompute: GrassCompute = createGrassCompute()
     grassSetComputeShaderWithConstants(
       grass: grassCompute
-      shader: defaultGrassComputeShader()
-      constants: islandConstantsFor(cfg: biome)
+      shader: walkerGrassComputeShader()
+      constants: walkerGrassComputeConstants(biome: biome)
     )
     grassSetSurfaceField(grass: grassCompute, values: emptyWalkerGrassObstacles())
     # Who the local player may control, in switching order: the hero, then

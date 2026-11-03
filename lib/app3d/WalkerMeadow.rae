@@ -75,6 +75,67 @@ const meadowRadius: Float = 130.0
 # Past this distance (m) a tuft's blades are one straight segment each
 const meadowNearRadius: Float = 32.0
 
+# The share of the edge thinning over which a tuft shrinks away (meadowGather)
+const meadowThinBand: Float = 0.12
+
+# The walkers' painted ground colors (MUST MATCH lib/terrain_palette_walker.wgsl)
+# and its sand-to-grass blur (lib/terrain_detail_painted.wgsl): a tuft's root
+# is the ground where it stands, which is partly sand, mud or rock where the
+# meadow thins out (meadowEarth)
+const meadowSandColor: Vec3 = { x: 0.70, y: 0.42, z: 0.12 }
+
+const meadowMudColor: Vec3 = { x: 0.25, y: 0.19, z: 0.10 }
+
+const meadowRockColor: Vec3 = { x: 0.38, y: 0.35, z: 0.27 }
+
+const meadowSandGrassBlur: Float = 0.10
+
+# The least grass in a tuft's root color: the tufts stand on ground up to half
+# rock and on the odd sandy spot, and a root of mostly rock or sand is a pale
+# gray or orange that its brightening to the tip turns whitish; a little of
+# that ground (a tenth at most) makes such a tuft a grayer green, and on
+# grassy ground (nearly all of a meadow) the root is the ground's own color
+const meadowRootGrassMin: Float = 0.9
+
+# What the painted ground is where a tuft stands, as
+# terrain_detail_painted.wgsl paints it: the share of it that is grass, and
+# the color of the rest (the beach sand, the mud and the rock by their
+# weights; the shader's small noise is left out)
+type MeadowEarth {
+  grassShare: Float
+  earth: Vec3
+}
+
+func meadowEarth(ground: view WorldSample, biome: view BiomeConfig) ret MeadowEarth {
+  let beachTop: Float = biome.waterLevel + biome.beachBand
+  let grassMix: Float = smooth01(
+    edge0: beachTop - meadowSandGrassBlur
+    edge1: beachTop + meadowSandGrassBlur
+    x: ground.elevation
+  )
+  let shore: Float = ground.wSand + ground.wGrass
+  let grassShare: Float = grassMix * shore
+  let sandShare: Float = (1.0 - grassMix) * shore + ground.wWater
+  let rest: Float = sandShare + ground.wMud + ground.wRock
+  if rest <= 0.0001 {
+    ret MeadowEarth { grassShare: 1.0, earth: meadowSandColor }
+  }
+  let earth: Vec3 = Vec3.vscale(
+    a: Vec3.vadd(
+      a: Vec3.vadd(
+        a: Vec3.vscale(a: meadowSandColor, s: sandShare)
+        b: Vec3.vscale(a: meadowMudColor, s: ground.wMud)
+      )
+      b: Vec3.vscale(a: meadowRockColor, s: ground.wRock)
+    )
+    s: 1.0 / rest
+  )
+  ret MeadowEarth {
+    grassShare: Math.max(a: Math.min(a: grassShare, b: 1.0), b: meadowRootGrassMin)
+    earth: earth
+  }
+}
+
 type WalkerMeadow {
   cellSize: Float
   # The window: gridSide x gridSide slots, each holding one cell
@@ -91,6 +152,10 @@ type WalkerMeadow {
   # the soil's moisture where each stands (WorldBiome), for the ground
   # palette's dry grass (GroundPalette.groundGrassAt)
   moistures: List(Float)
+  # what the ground is where each stands besides grass (meadowEarth): its
+  # grass share and the color of the rest, so the root is the ground's color
+  grassShares: List(Float)
+  earths: List(Vec3)
   keeps: List(Float)
   # One instancer per form and level: index form * 2 + level, level 0 near
   # and 1 far; each tuft carries its own color in its instance record
@@ -184,12 +249,16 @@ func createWalkerMeadow(
   var feet: List(Vec3) = List.create(Vec3, cap: places)
   var forms: List(Int) = List.create(Int, cap: places)
   var moistures: List(Float) = List.create(Float, cap: places)
+  var grassShares: List(Float) = List.create(Float, cap: places)
+  var earths: List(Vec3) = List.create(Vec3, cap: places)
   var keeps: List(Float) = List.create(Float, cap: places)
   loop var i: Int = 0, i < places, ++i {
     models.add(value: mat4Identity())
     feet.add(value: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
     forms.add(value: 0)
     moistures.add(value: 1.0)
+    grassShares.add(value: 1.0)
+    earths.add(value: meadowSandColor)
     keeps.add(value: 0.0)
   }
   ret WalkerMeadow {
@@ -202,6 +271,8 @@ func createWalkerMeadow(
     feet: own feet
     forms: own forms
     moistures: own moistures
+    grassShares: own grassShares
+    earths: own earths
     keeps: own keeps
     parts: own parts
     centerCellX: 1000000000
@@ -340,6 +411,9 @@ func placeMeadowCell(
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: form)
     meadow.moistures.set(index: place, value: ground.moisture)
+    let earth: MeadowEarth = meadowEarth(ground: ground, biome: biome)
+    meadow.grassShares.set(index: place, value: earth.grassShare)
+    meadow.earths.set(index: place, value: earth.earth)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
     count = count + 1
   }
@@ -394,6 +468,9 @@ func placeMeadowCell(
     meadow.feet.set(index: place, value: foot)
     meadow.forms.set(index: place, value: meadowTurfForm)
     meadow.moistures.set(index: place, value: ground.moisture)
+    let earth: MeadowEarth = meadowEarth(ground: ground, biome: biome)
+    meadow.grassShares.set(index: place, value: earth.grassShare)
+    meadow.earths.set(index: place, value: earth.earth)
     meadow.keeps.set(index: place, value: hash2(x: cellX * 43 + t, y: cellY * 47 + t, seed: 737))
     count = count + 1
   }
@@ -426,9 +503,20 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
       if distance > 6.0 and (dx * flat.x + dy * flat.y) < -0.35 * distance {
         continue
       }
+      # Thinned toward the edge, by each tuft's own stable draw: one whose
+      # draw the share kept passes shrinks to nothing over the next
+      # meadowThinBand of the share, about its root, instead of going at
+      # once, so walking makes none pop (lib/grass_compute.wgsl shrinks
+      # its blades the same way)
+      var shrink: Float = 1.0
       if distance > thinFrom {
         let share: Float = 1.0 - (distance - thinFrom) / (meadowRadius - thinFrom)
-        if meadow.keeps.copyAtFallback(index: place, fallback: 1.0) > share {
+        let keep: Float = meadow.keeps.copyAtFallback(index: place, fallback: 1.0)
+        shrink = Math.min(
+          a: Math.max(a: (share + meadowThinBand - keep) / meadowThinBand, b: 0.0)
+          b: 1.0
+        )
+        if shrink <= 0.0 {
           continue
         }
       }
@@ -439,11 +527,23 @@ func meadowGather(meadow: mod WalkerMeadow, eye: view Vec3, forward: view Vec3) 
       let part: Int = meadow.forms.copyAtFallback(index: place, fallback: 0) * 2 + level
       if let instancer: mod PropInstancer = meadow.parts.modAt(index: part) {
         var material: Material3d = instancer.material
-        material.baseColor = groundGrassAt(
-          palette: meadow.palette
-          moisture: meadow.moistures.copyAtFallback(index: place, fallback: 1.0)
+        # the root: the painted ground where it stands, its grass the
+        # frame's palette grass and the rest the sand, mud or rock there
+        let grassShare: Float = meadow.grassShares.copyAtFallback(index: place, fallback: 1.0)
+        material.baseColor = Vec3.vadd(
+          a: Vec3.vscale(a: meadow.earths.copyAtDefault(index: place), s: 1.0 - grassShare)
+          b: Vec3.vscale(
+            a: groundGrassAt(
+              palette: meadow.palette
+              moisture: meadow.moistures.copyAtFallback(index: place, fallback: 1.0)
+            )
+            s: grassShare
+          )
         )
-        let model: Mat4 = meadow.models.copyAtDefault(index: place)
+        var model: Mat4 = meadow.models.copyAtDefault(index: place)
+        if shrink < 1.0 {
+          model = mat4Mul(a: model, b: mat4Scale(s: shrink))
+        }
         let before: Int = instancer.batch.count
         addInstance(
           batch: instancer.batch

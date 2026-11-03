@@ -198,16 +198,20 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     o.albedo = gbEmblem(in.uv, o.albedo, d.params.w);
   } else if (d.params.w > 2.5 && d.params.w < 3.5) {
     // A grass blade (GbufferRecord grassBladePattern): at its root the
-    // terrain's own grass color where it stands (the painted ground's field,
-    // grass_field.wgsl grassGroundColor round the instance color, the
-    // terrain's base grass), lighter to its tip by the factor the code
-    // carries, as the GPU grass (grass_render.wgsl), so it grows out of the
-    // ground. The blade's height is 1 - uv.y.
+    // terrain's own color where it stands (the painted ground's field,
+    // grass_field.wgsl grassGroundColor round the instance color, which is
+    // the ground there: its grass and any sand, mud or rock), lighter to
+    // its tip by the factor the code carries, as the GPU grass
+    // (grass_render.wgsl), so it grows out of the ground. The blade's
+    // height is 1 - uv.y.
     let tip = 1.0 + (d.params.w - 3.0) * 10.0;
     let height = clamp(1.0 - in.uv.y, 0.0, 1.0);
     let ground = grassGroundColor(d.albedoMetallic.rgb, in.wpos.xy, RAE_GRASS_PATCH_SCALE,
       RAE_GRASS_PATCH_COVERAGE);
-    o.albedo = ground * mix(1.0, tip, height);
+    // the tip leans toward green as it brightens, so a blade rooted in
+    // paler ground (partly sand or mud, app3d/WalkerMeadow meadowEarth)
+    // grows to a green tip, not a whitish one
+    o.albedo = ground * mix(vec3<f32>(1.0), vec3<f32>(0.92, 1.06, 0.80) * tip, height);
     return o;
   } else if (d.params.w > 1.5) {
     o = gbRoofTiles(in.wpos, n, o.albedo);
