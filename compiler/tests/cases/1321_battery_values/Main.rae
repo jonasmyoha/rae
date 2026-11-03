@@ -1,0 +1,37 @@
+# lib/Battery's values without depending on the machine: the percent from
+# the C side's thousandths, what a UIDevice battery state and an IOKit power
+# source mean, and the words for a status bar. The machine's own reading is
+# checked only for its range (a laptop, a desktop Mac and a CI runner all
+# differ).
+open Battery
+
+func main() {
+  log(
+    "percent: 1000 -> {batteryPercent(thousandths: 1000)}, 804 -> {batteryPercent(thousandths: 804)}, 805 -> {batteryPercent(
+      thousandths: 805
+    )}, 0 -> {batteryPercent(thousandths: 0)}, unknown -> {batteryPercent(thousandths: -1000)}"
+  )
+  # UIDeviceBatteryState: 0 unknown, 1 unplugged, 2 charging, 3 full
+  loop var raw: Int = 0, raw <= 3, ++raw {
+    log("UIDevice {raw}: {batteryStateFromUiDevice(raw: raw)}")
+  }
+  # IOKit bits: 1 present, 2 charging, 4 charged, 8 on AC power
+  log("no battery: {batteryStateFromPowerSource(bits: 0)}")
+  log("on battery: {batteryStateFromPowerSource(bits: 1)}")
+  log("charging on AC: {batteryStateFromPowerSource(bits: 1 + 2 + 8)}")
+  log("charged on AC: {batteryStateFromPowerSource(bits: 1 + 4 + 8)}")
+  log("held below full on AC: {batteryStateFromPowerSource(bits: 1 + 8)}")
+  log("charged, unplugged: {batteryStateFromPowerSource(bits: 1 + 4)}")
+  log("text: {batteryText(status: BatteryStatus { level: 80, state: BatteryState.charging })}")
+  log("text: {batteryText(status: BatteryStatus { level: -1, state: BatteryState.unknown })}")
+  log("text: {batteryText(status: BatteryStatus { level: -1, state: BatteryState.noBattery })}")
+
+  # this machine's reading: a level in range and a watch that starts quiet
+  let status: BatteryStatus = batteryStatus()
+  var watch: BatteryWatch = createBatteryWatch()
+  log(
+    "reading in range: {status.level >= -1 and status.level <= 100}, changed before any change: {batteryChanged(
+      watch: watch
+    )}"
+  )
+}
