@@ -333,7 +333,7 @@ the render / camera systems owning the tables they derive — once the UI side
 has lived with it. Do not start that refactor as a side effect of a UI task.
 
 
-### 2.8 Resources — world-global singletons, named as such
+### 2.8 Resources — one per World, named as such
 Every real program has state with exactly one instance: the frame clock, input,
 the active camera, the layout viewport (`layoutW`/`layoutH`, `ecs.rae:520`), GPU
 handles, the MSDF font state. Today these are ad hoc fields on `UiWorld` or loose
