@@ -166,6 +166,38 @@ func setWalkerTerrainShader(
   )
 }
 
+# The walkers' GPU grass pass: the default composition with the painted
+# ground in front of it (the same palette and painted grass and detail the
+# terrain shader above composes), so each blade's root is the terrain's own
+# color where it stands (lib/grass_root_painted.wgsl), not a pure grass green
+# over a ground that is partly sand, mud or rock
+func walkerGrassComputeShader() ret Shader {
+  ret shader(files: [
+    "lib/gpu/computeBounds.wgsl"
+    "lib/noise.wgsl"
+    "lib/world_biome.wgsl"
+    "lib/grass_obstacles.wgsl"
+    "lib/terrain_palette_walker.wgsl"
+    "lib/grass_field.wgsl"
+    "lib/terrain_grass_painted.wgsl"
+    "lib/terrain_detail_painted.wgsl"
+    "lib/grass_root_painted.wgsl"
+    "lib/grass_compute.wgsl"
+  ])
+}
+
+# Its constants: the world's island radius, and the meadow's patch scale and
+# coverage that the terrain's painted grass reads too
+func walkerGrassComputeConstants(biome: view BiomeConfig) ret List(ShaderConstant) {
+  var constants: List(ShaderConstant) = islandConstantsFor(cfg: biome)
+  loop let entry: ShaderConstant in grassPatchConstants(
+    settings: GrassConfig.grassMeadowSettings(groundColor: groundSummerGrass())
+  ) {
+    constants.add(value: entry)
+  }
+  ret constants
+}
+
 func createTransportPanel(
   world: mod UiWorld
   uiSystems: mod UiSystems

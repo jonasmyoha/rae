@@ -147,6 +147,12 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   var localNormal = bladeNormal(lp.z, d.params.w);
   if (GW.i.w < 0.5 || GW.i.w > 1.5) { localNormal = vec3<f32>(0.0, 0.0, 1.0); }
+  // The low-poly blade's root faces up, as the ground does, so it is lit as
+  // the terrain under it is and the blade grows out of the ground's own
+  // shade; its own curved normal takes over toward the tip
+  if (GW.i.w > 0.5 && GW.i.w < 1.5) {
+    localNormal = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), localNormal, smoothstep(0.0, 0.55, lp.z)));
+  }
   let restNormal = normalize((d.model * vec4<f32>(localNormal, 0.0)).xyz);
   o.nrm = normalize(restNormal + vec3<f32>(-offsetNow * lp.z * 0.9, 0.0));
   o.inst = ii;
@@ -188,9 +194,19 @@ fn gbufferSurface(in: VsOut) -> FsOut {
     let tone = clamp(dot(tuft.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) / 0.16, 0.62, 1.18);
     albedo = mix(botCol, topCol, height) * mix(0.94, tone, smoothstep(0.0, 0.32, height));
   }
-  // The flat and the low-poly blades: the root exactly the ground's color
-  // (grass_compute.wgsl), no darkening, so they blend into the terrain
-  if (GW.i.w < 1.5) { albedo = mix(botCol, topCol, height); }
+  // The flat blade: the root exactly the ground's color (grass_compute.wgsl),
+  // no darkening, so it blends into the terrain
+  if (GW.i.w < 0.5) { albedo = mix(botCol, topCol, height); }
+  // The low-poly blade: the root exactly the ground's color where it stands
+  // (grass_compute.wgsl grassRootColor), staying close to it up most of the
+  // blade, then brightening to its own green tip (fade.yzw: the meadow's
+  // green at the blade's own brightness and warmth, times tipLighten), so
+  // the grass grows out of the ground in a gradient, not a flat bright
+  // carpet over a darker ground
+  if (GW.i.w > 0.5 && GW.i.w < 1.5) {
+    let tipCol = d.fade.yzw * GW.g.w;
+    albedo = mix(botCol, tipCol, pow(height, 1.8));
+  }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);
