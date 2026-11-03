@@ -5,7 +5,7 @@ This document outlines the standard library design, utilizing Rae's "extension m
 ## 1. Core (`lib/core.rae`) - Always available implicitly
 
 ### Execution & Time
-- `nowMs(): ret Int` - Current monotonic time in milliseconds.
+- `nowMs(): ret Int` - The wall clock: epoch milliseconds (`nowNs` is the monotonic one). A test sets `RAE_NOW` (a local time like `2026-11-03T10:00`, seconds optional, or epoch milliseconds) to make the clock start there and run on, so a test that depends on the date or the time of day gives the same answer at any hour; a value that is not a time stops the program at its first clock read (compiler/tools/test-test-clock.sh).
 - `sleep(ms: Int)` - Suspend execution.
 - `nextTick(): ret Int` - Global tick counter.
 

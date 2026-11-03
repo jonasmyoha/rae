@@ -9,10 +9,69 @@ int64_t rae_ext_nextTick(void) {
   return atomic_fetch_add_explicit(&g_tick_counter, 1, memory_order_relaxed) + 1;
 }
 
-int64_t rae_ext_nowMs(void) {
+static int64_t rae_real_now_ms(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+}
+
+/* A test clock: with RAE_NOW set, the wall clock (nowMs, and everything that
+ * reads the date or the time of day from it) starts at that moment and runs
+ * on from there, so a test that depends on the time of day gives the same
+ * answer at any hour. RAE_NOW is a local time, 2026-11-03T10:00 (seconds
+ * optional), or epoch milliseconds. A value that is not a time stops the
+ * program at its first clock read, naming it: a test must never run on the
+ * real clock while it believes it runs on a fixed one. The monotonic clock
+ * (nowNs, frame timing) is not touched. */
+static pthread_once_t g_now_once = PTHREAD_ONCE_INIT;
+static int64_t g_now_offset_ms = 0;
+
+/* RAE_NOW as epoch ms, or -1 when it is not a time */
+static int64_t rae_now_parse(const char* text) {
+  size_t len = strlen(text);
+  int digits = len > 0;
+  for (size_t i = 0; i < len; i++) {
+    if (text[i] < '0' || text[i] > '9') digits = 0;
+  }
+  if (digits) return (int64_t)strtoll(text, NULL, 10);
+  int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0, used = 0;
+  if (sscanf(text, "%4d-%2d-%2dT%2d:%2d%n", &y, &mo, &d, &h, &mi, &used) != 5) return -1;
+  if (text[used] == ':') {
+    int more = 0;
+    if (sscanf(text + used, ":%2d%n", &sec, &more) != 1) return -1;
+    used += more;
+  }
+  if (text[used] != '\0') return -1;
+  struct tm tm;
+  memset(&tm, 0, sizeof tm);
+  tm.tm_year = y - 1900;
+  tm.tm_mon = mo - 1;
+  tm.tm_mday = d;
+  tm.tm_hour = h;
+  tm.tm_min = mi;
+  tm.tm_sec = sec;
+  tm.tm_isdst = -1;
+  time_t t = mktime(&tm);
+  /* mktime moves a day or an hour that does not exist (2026-02-30): refused */
+  if (t == (time_t)-1 || tm.tm_year != y - 1900 || tm.tm_mon != mo - 1 || tm.tm_mday != d ||
+      tm.tm_hour != h || tm.tm_min != mi || tm.tm_sec != sec) return -1;
+  return (int64_t)t * 1000;
+}
+
+static void rae_now_setup(void) {
+  const char* text = getenv("RAE_NOW");
+  if (!text || !*text) return;
+  int64_t start = rae_now_parse(text);
+  if (start < 0) {
+    fprintf(stderr, "rae: RAE_NOW='%s' is not a time: write a local time like 2026-11-03T10:00 (seconds optional), or epoch milliseconds\n", text);
+    exit(2);
+  }
+  g_now_offset_ms = start - rae_real_now_ms();
+}
+
+int64_t rae_ext_nowMs(void) {
+  pthread_once(&g_now_once, rae_now_setup);
+  return rae_real_now_ms() + g_now_offset_ms;
 }
 
 int64_t rae_ext_nowNs(void) {
