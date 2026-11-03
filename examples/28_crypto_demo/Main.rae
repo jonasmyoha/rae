@@ -1,62 +1,135 @@
-import sys
+# lib/crypto in a few steps: two sides agree a key with X25519 (each makes a
+# key pair and gets the other's public key), turn the shared secret into a
+# message key with HKDF-SHA256, then seal a message with ChaCha20-Poly1305
+# and open it on the other side. A changed byte is refused. The sealing and
+# X25519 run through Monocypher (lib/crypto's fast path), checked against
+# lib/crypto's own Rae code by compiler/tests/cases/1285.
+open net/Wire
+open crypto/SecureRandom
+open crypto/X25519
+open crypto/ChaCha20Poly1305
+open crypto/Sha256
 
-func main() {
-  unsafe {
-    log("1. Hashing password...")
-    let pwd: String = "password123"
-    let salt: String = "saltsaltsalt"
-    let hash: Buffer(Int) = __buf_alloc(size: 32)
-    # 1 block (1KB), 1 iteration, 32 bytes output
-    Sys.rae_crypto_argon2i(
-      password: pwd
-      salt: salt
-      nb_blocks: 1
-      nb_iterations: 1
-      hash_buf: hash
-      hash_len: 32
-    )
-    log("Hash generated (32 bytes).")
+func randomKey() ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 32)
+  bytes.addDefaults(count: 32)
+  let filled: Bool = secureRandomFill(bytes: bytes, start: 0, count: 32)
+  ret bytes
+}
 
-    log("2. Encrypting data...")
-    let key: Buffer(Int) = hash  # Use hash as key
-    let nonce: Buffer(Int) = __buf_alloc(size: 24)  # Zero nonce for demo
-
-    let msgLen: Int = 3
-    let plain: Buffer(Int) = __buf_alloc(size: msgLen)
-    __buf_set(buf: plain, index: 0, value: 65)  # 'A'
-    __buf_set(buf: plain, index: 1, value: 66)  # 'B'
-    __buf_set(buf: plain, index: 2, value: 67)  # 'C'
-
-    let mac: Buffer(Int) = __buf_alloc(size: 16)
-    let cipher: Buffer(Int) = __buf_alloc(size: msgLen)
-
-    Sys.encrypt(
-      key: key
-      nonce: nonce
-      plain: plain
-      len: msgLen
-      mac: mac
-      cipher: cipher
-    )
-    log("Encryption done.")
-
-    log("3. Decrypting data...")
-    let recovered: Buffer(Int) = __buf_alloc(size: msgLen)
-    if Sys.decrypt(
-      key: key
-      nonce: nonce
-      mac: mac
-      cipher: cipher
-      len: msgLen
-      plain: recovered
-    ) {
-      log("Decryption successful!")
-      let v0: Int = __buf_get(buf: recovered, index: 0)
-      let v1: Int = __buf_get(buf: recovered, index: 1)
-      let v2: Int = __buf_get(buf: recovered, index: 2)
-      log("Recovered: {v0}, {v1}, {v2}")
-    } else {
-      log("ERROR: Decryption failed.")
-    }
+func textBytes(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
   }
+  ret bytes
+}
+
+func main() ret Int {
+  var work: X25519Work = createX25519Work()
+  var chacha: ChaChaState = createChaChaState()
+  log("1. Each side makes a key pair")
+  let aliceSecret: List(UInt8) = randomKey()
+  let bobSecret: List(UInt8) = randomKey()
+  var alicePublic: List(UInt8) = {}
+  var bobPublic: List(UInt8) = {}
+  x25519PublicKey(
+    work: work
+    secret: aliceSecret
+    secretStart: 0
+    out: alicePublic
+  )
+  x25519PublicKey(
+    work: work
+    secret: bobSecret
+    secretStart: 0
+    out: bobPublic
+  )
+  log("2. Each side combines its secret with the other's public key")
+  var aliceShared: List(UInt8) = {}
+  var bobShared: List(UInt8) = {}
+  x25519(
+    work: work
+    scalar: aliceSecret
+    scalarStart: 0
+    point: bobPublic
+    pointStart: 0
+    out: aliceShared
+  )
+  x25519(
+    work: work
+    scalar: bobSecret
+    scalarStart: 0
+    point: alicePublic
+    pointStart: 0
+    out: bobShared
+  )
+  log("   the same shared secret on both sides: {aliceShared is bobShared}")
+  let key: List(UInt8) = hkdfSha256(
+    salt: textBytes(text: "demo salt")
+    inputKey: aliceShared
+    info: textBytes(text: "message key")
+    length: 32
+  )
+  log("3. Alice seals a message")
+  var nonce: List(UInt8) = List.create(UInt8, cap: 12)
+  nonce.addDefaults(count: 12)
+  let message: List(UInt8) = textBytes(text: "meet at noon")
+  let noAdditional: List(UInt8) = {}
+  var sealed: List(UInt8) = {}
+  aeadSeal(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    plain: message
+    plainStart: 0
+    plainCount: message.length
+    output: sealed
+  )
+  log("   {message.length} bytes became {sealed.length} (the ciphertext and a 16-byte tag)")
+  log("4. Bob opens it")
+  var opened: List(UInt8) = {}
+  let opens: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    sealed: sealed
+    sealedStart: 0
+    sealedCount: sealed.length
+    output: opened
+  )
+  log("   opened {opens}: \"{fromBytes(bytes: opened, start: 0, count: opened.length)}\"")
+  log("5. One changed byte is refused")
+  var changed: List(UInt8) = sealed
+  changed.set(
+    index: 0
+    value: ((changed.copyAtFallback(index: 0, fallback: 0) as Int) bitxor 1) as UInt8
+  )
+  var refused: List(UInt8) = {}
+  let changedOpens: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    sealed: changed
+    sealedStart: 0
+    sealedCount: changed.length
+    output: refused
+  )
+  log("   opened {changedOpens}")
+  if opens and not changedOpens and aliceShared is bobShared {
+    ret 0
+  }
+  ret 1
 }

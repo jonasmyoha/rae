@@ -6,13 +6,13 @@
 #
 # Measured cost per packet (Apple M1 Max, release build, 2026-11-03), from
 # the timing loop at the end of main (its numbers are not in the expected
-# output, only a loose bound):
+# output, only a loose bound). With lib/crypto's Rae code, the reference:
 #   seal a full packet (1200 bytes on the wire)        ~6.5 us
 #   open it                                            ~6.5 us
 #   key agreement (X25519 key pair + shared secret)    ~2.5 ms, once per connection
 #   the whole round in the loop (seal, protocol, open) ~12.5 us per packet
-# For comparison, the vendored Monocypher C library does the same AEAD in
-# ~3.2 us each way and an X25519 in ~0.07 ms.
+# lib/crypto now runs Monocypher's (case 1285 checks it against the Rae
+# code): ~3 us each way and ~0.07 ms per X25519.
 open net/Wire
 open net/Connection
 open crypto/Sha1

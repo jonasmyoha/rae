@@ -73,6 +73,23 @@
 #include "runtime_file_notify.c"
 #include "runtime_net.c"
 #include "runtime_web_socket.c"
+/* Vendored Monocypher (CC0 / BSD-2-Clause, monocypher.h): the fast
+ * ChaCha20-Poly1305 and X25519 behind lib/crypto (runtime_crypto_platform.c).
+ * Its own code, compiled as it comes. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma push_macro("MIN")
+#pragma push_macro("MAX")
+#undef MIN
+#undef MAX
+#include "monocypher.c"
+#undef MIN
+#undef MAX
+#pragma pop_macro("MAX")
+#pragma pop_macro("MIN")
+#pragma GCC diagnostic pop
 #include "runtime_crypto_platform.c"
 #include "runtime_buffers_math.c"
 /* The cooked sky table. Ahead of every renderer that reads it, and outside

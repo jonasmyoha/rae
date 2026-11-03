@@ -1078,10 +1078,11 @@ RAE_UNUSED static inline RaeAny rae_any_copy(RaeAny v) {
     return v;
 }
 
-/* Crypto function declarations */
-void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher);
-int64_t rae_ext_rae_crypto_unlock(RaeAny key, RaeAny nonce, RaeAny mac, RaeAny cipher, int64_t cipher_len, RaeAny plain);
-void rae_ext_rae_crypto_argon2i(rae_String password, rae_String salt, int64_t nb_blocks, int64_t nb_iterations, RaeAny hash_buf, int64_t hash_len);
+/* runtime_crypto_platform.c: Monocypher's ChaCha20-Poly1305 and X25519,
+ * every build (lib/crypto's fast path) */
+void rae_ext_Crypto_aeadSeal(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad, int64_t adOffset, int64_t adCount, uint8_t* plain, int64_t plainOffset, int64_t count, uint8_t* out, int64_t outOffset);
+int64_t rae_ext_Crypto_aeadOpen(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad, int64_t adOffset, int64_t adCount, uint8_t* sealed, int64_t sealedOffset, int64_t count, uint8_t* out, int64_t outOffset);
+void rae_ext_Crypto_x25519(uint8_t* out, int64_t outOffset, uint8_t* scalar, int64_t scalarOffset, uint8_t* point, int64_t pointOffset);
 
 /* Raylib wrapper function declarations */
 #ifdef RAE_HAS_RAYLIB

@@ -332,9 +332,8 @@ func fieldPack(work: mod X25519Work, slot: view Int, out: mod List(UInt8)) {
   }
 }
 
-# Append X25519(scalar, point): 32 bytes. `scalar` and `point` are 32 bytes
-# each, from `scalarStart` and `pointStart`.
-func x25519(
+# The Rae reference of x25519 (what the fast path is checked against)
+func x25519Reference(
   work: mod X25519Work
   scalar: view List(UInt8)
   scalarStart: view Int
@@ -517,6 +516,68 @@ func x25519(
     second: slotC
   )
   fieldPack(work: work, slot: slotA, out: out)
+}
+
+# The Rae reference of x25519PublicKey
+func x25519PublicKeyReference(
+  work: mod X25519Work
+  secret: view List(UInt8)
+  secretStart: view Int
+  out: mod List(UInt8)
+) {
+  var basePoint: List(UInt8) = List.create(UInt8, cap: 32)
+  basePoint.addDefaults(count: 32)
+  basePoint.set(index: 0, value: 9)
+  x25519Reference(
+    work: work
+    scalar: secret
+    scalarStart: secretStart
+    point: basePoint
+    pointStart: 0
+    out: out
+  )
+}
+
+# ----- the fast path ------------------------------------------------------------
+#
+# Monocypher's X25519 (compiler/runtime/runtime_crypto_platform.c), in every
+# build: about twenty times as fast as the Rae code above, which stays as
+# the reference (compiler/tests/cases/1285_fast_crypto_matches_reference).
+func nativeX25519(
+  out: Buffer(UInt8)
+  outOffset: Int
+  scalar: Buffer(UInt8)
+  scalarOffset: Int
+  point: Buffer(UInt8)
+  pointOffset: Int
+) unsafe extern("rae_ext_Crypto_x25519")
+
+# Append X25519(scalar, point): 32 bytes. `scalar` and `point` are 32 bytes
+# each, from `scalarStart` and `pointStart` (nothing is appended when either
+# is out of range).
+func x25519(
+  work: mod X25519Work
+  scalar: view List(UInt8)
+  scalarStart: view Int
+  point: view List(UInt8)
+  pointStart: view Int
+  out: mod List(UInt8)
+) {
+  if scalarStart < 0 or scalarStart + 32 > scalar.length or pointStart < 0 or pointStart + 32 > point.length {
+    ret
+  }
+  let outStart: Int = out.length
+  out.addDefaults(count: 32)
+  unsafe {
+    nativeX25519(
+      out: out.data
+      outOffset: outStart
+      scalar: scalar.data
+      scalarOffset: scalarStart
+      point: point.data
+      pointOffset: pointStart
+    )
+  }
 }
 
 # Append the public key of the 32-byte `secret` (X25519 with the base point 9)
