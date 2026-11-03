@@ -1,0 +1,117 @@
+# A band the host keeps for itself on top of the safe area (setReservedInsets,
+# lib/ui/safeAreaSystem): a host that draws its own bar along the top of every
+# screen reserves its height, and every SafeArea node lays out inside both the
+# screen's safe area and the band. Each frame is the scheduled pipeline's:
+# the safe-area step, then the layout only when the schedule says it must
+# (the safe insets are a layout input, so a new band reruns it and an idle
+# frame does not). The header is the SafeArea screen's first child.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Schedule
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/Scene
+open ui/SceneLoader
+open ui/Pipeline
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/safeAreaSystem/SafeAreaSystem
+
+func screenScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":852\},\"SafeArea\":\{\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Header\"]\},"
+  )
+  s = s.concat(other: "\"Header\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":44\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func frame(
+  label: view String
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  schedule: mod Schedule
+  header: view EntityId
+) {
+  feedSafeArea(world: world, uiSystems: uiSystems)
+  let laidOut: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  )
+  if laidOut {
+    layoutSystem(world: world, uiSystems: uiSystems)
+    transformSystem(world: world, uiSystems: uiSystems)
+  }
+  let top: Float = componentView(this: uiSystems.transform2d.worldTransforms, entityId: header).position.y
+  log("{label}: laid out {laidOut}, header at y {top}")
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var schedule: Schedule = createUiPipeline(world: world)
+  world.layoutW = 393.0
+  world.layoutH = 852.0
+  let rootEntityId: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: screenScene())
+  )
+  var header: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Header") {
+    header = id(v: raw)
+  }
+  log("mounted = {rootEntityId.index >= 0}")
+  frame(
+    label: "no safe area"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+  frame(
+    label: "nothing changed"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+  setSimulatedSafeInsets(world: world, insets: Insets { l: 0.0, t: 59.0, r: 0.0, b: 34.0 })
+  frame(
+    label: "a phone's notch (59)"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+  setReservedInsets(world: world, insets: Insets { l: 0.0, t: 48.0, r: 0.0, b: 0.0 })
+  frame(
+    label: "the host's 48-point bar on top"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+  frame(
+    label: "nothing changed"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+  let reserved: Insets = reservedInsets(world: world)
+  log("reserved: top {reserved.t}, bottom {reserved.b}")
+  setReservedInsets(world: world, insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 })
+  frame(
+    label: "the band given back"
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    header: header
+  )
+}

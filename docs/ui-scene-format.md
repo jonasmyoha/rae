@@ -560,3 +560,36 @@ default is `"start"`, the top):
 
 Case 1315 checks a short, a long and a growing list, scrolling away and
 back, and the start anchor.
+
+## 16. `SafeArea`, and a band the host keeps for itself
+
+A node with `SafeArea` lays its content out inside the screen's safe area:
+the notch, the status bar and the home indicator are added to its padding.
+`apply` says which sides take part (1 a side, 0 not; all four by default)
+and `extra` adds a fixed inset of its own:
+
+```json
+"Screen": { "SafeArea": {}, "Layout": { "type": "Vertical" }, "Children": [...] }
+```
+
+The insets are the OS's, or a simulator's or a layout test's
+(`setSimulatedSafeInsets(world:, insets:)`), fed each frame by
+`feedSafeArea` (lib/ui/safeAreaSystem) before the layout.
+
+A host that draws its own bar along the top of every screen (a date, the
+time, the weather, the battery), in its own UI world, keeps that band for
+itself the same way: `setReservedInsets(world:, insets:)` on each screen's
+world, in that world's layout units (points for a world laid out in
+points). The reserved insets are added to the screen's, so every SafeArea
+node lays out inside both, as it stays out of the notch:
+
+```rae
+setReservedInsets(world: screenWorld, insets: Insets { l: 0.0, t: 48.0, r: 0.0, b: 0.0 })
+```
+
+Zero insets give the band back; `reservedInsets(world:)` reads them. The
+safe-area step writes a node's insets only when they change, and the
+scheduled layout reads them (the layout step's input), so a new band, a
+rotation or a new notch lays the screen out again and an idle frame does
+not. Case 1322 checks a header moving down by the notch and then by the
+band, and back.
