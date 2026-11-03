@@ -236,17 +236,27 @@ A small weather model drives cloud cover, rain and mist, with fronts that
 pass over several hours:
 
 - **State:** cloud cover (0..1), precipitation (mm per hour), humidity,
-  wind (it already exists: lib/Wind), and a front: a slow random walk in
-  time (deterministic from a seed and the date), so the weather changes
-  over hours, with more rain in the climate's wet season.
+  wind (it already exists: lib/Wind), a storm amount (0..1), and a front:
+  a slow random walk in time (deterministic from a seed and the date), so
+  the weather changes over hours, with more rain in the climate's wet
+  season. The storm is the front at its peak (0.8 to 0.95 of its rise),
+  strongest on a summer day (a thunder day) and a third of that in the
+  winter (lib/Weather weatherStorm).
 - **Its effects:**
   - **The sun:** the sun's illuminance on the ground falls with cloud
     cover (full cover lets about 20% through, mostly as diffuse light); the
     sky's own light gets grayer and its share of the light grows. This is
     the sun lux the settings already have (`sunNoonLux`), now scaled per
     frame. The auto exposure follows.
-  - **Clouds:** the sky's clouds (today a fixed look) take their cover and
-    their darkness from it.
+  - **Clouds:** the sky's clouds take their cover and their darkness from
+    it. The darkness comes from the rain (up to 0.45 by 0.5 mm/h) and the
+    storm (up to 0.5), and only a little from the cover (up to 0.12 as it
+    closes): a full cover with no rain is a bright, white-gray layer, and
+    rain or a storm darkens it (weatherCloudDarkness). The sky shader
+    (sky_hosek.wgsl skyClouds) darkens a cloud's thick underside only as
+    far as it is a dark cloud, and lights a white one a little brighter.
+    In 143 at noon the sky under a full cover with no rain went from a
+    gray of 123 (of 255) to 170, a rain sky from 97 to 105.
   - **Mist:** RendererMist's density rises when the air is near its dew
     point (cool mornings after a humid day, autumn), and falls by midday.
   - **Rain:** a screen-space or near-camera particle rain, and wet ground
@@ -255,7 +265,12 @@ pass over several hours:
   - **Temperature:** §2 (clouds and rain cool the day).
 - **The tree lab and the walkers' settings** get a weather override
   (clear, cloudy, rain, snow, mist) next to the time controls, as the time
-  of day has today, so a look can be judged without waiting for it.
+  of day has today, so a look can be judged without waiting for it. The
+  walkers' panel has a slider for each number (Clouds, Darkness, Rain,
+  Snow, Mist, Wind; app3d/SettingsWeather): the buttons set them at once
+  (Rain and Snow with a dark storm, Cloudy, Clear and Mist with white
+  clouds), the model sets them on Auto, and RAE_WALKER_WEATHER_VALUES
+  (`cloud,rain,snow,mist,wind,storm`) sets them by hand for a screenshot.
 
 ## 6. The tree lab and the walkers
 

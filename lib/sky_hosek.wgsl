@@ -125,8 +125,8 @@ fn earthShadow(dir: vec3<f32>) -> vec3<f32> {
 }
 // The clouds (lib/Weather through Sky.cloudCover, L.clouds): a layer of
 // soft noise on a plane overhead, seen along `dir`, drifting with the clock;
-// the cover sets how much of it is cloud (a full cover is one gray sheet),
-// the darkness how gray it is. Lit as the sky round it: the sky's own
+// the cover sets how much of it is cloud (a full cover is one sheet),
+// the darkness how gray it is (white without rain or a storm). Lit as the sky round it: the sky's own
 // brightness, whiter than a blue sky, grayer and darker as it rains; thinner
 // toward the horizon. Returns the cloud's color and its share in w.
 fn skyCloudHash(p: vec2<f32>) -> f32 {
@@ -152,11 +152,14 @@ fn skyClouds(dir: vec3<f32>, sky: vec3<f32>) -> vec4<f32> {
   // a full cover is all cloud, a light one a few puffs
   let threshold = mix(0.78, -0.1, cover);
   let share = smoothstep(threshold, threshold + 0.18, n) * smoothstep(0.0, 0.1, dir.z);
-  // the sky's own brightness, whiter than its blue, darker underneath
-  // where the cloud is thick and as it rains
+  // the sky's own brightness, whiter than its blue; darker underneath where
+  // the cloud is thick only as far as it is a dark cloud (L.clouds.y, the
+  // rain and the storm, lib/Weather weatherCloudDarkness), so a full cover
+  // with no rain is a bright white-gray sheet and a storm's base is dark
   let bright = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
   let thick = smoothstep(threshold + 0.1, threshold + 0.5, n);
-  let shade = (1.45 - 0.55 * thick) * (1.0 - 0.55 * clamp(L.clouds.y, 0.0, 1.0));
+  let dark = clamp(L.clouds.y, 0.0, 1.0);
+  let shade = (mix(1.75, 1.45, dark) - 0.55 * thick * mix(0.3, 1.0, dark)) * (1.0 - 0.62 * dark);
   return vec4<f32>(vec3<f32>(bright * shade) * vec3<f32>(0.98, 0.99, 1.02), share);
 }
 

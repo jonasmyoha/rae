@@ -180,9 +180,15 @@ func main() ret Int {
     label: "a humid autumn dawn is misty, gone by noon, a dry dawn is not"
     ok: dawn > 4.0 and noon is 1.0 and dryDawn < 1.1
   )
+  # (the darkness is the rain's and the storm's, not the cover's: a full
+  # cover with no rain stays white-gray, a storm is the darkest)
+  let whiteCover: Weather = { cloud: 1.0 }
+  let thunder: Weather = { cloud: 1.0, precipitation: 1.5, storm: 1.0 }
   check(
-    label: "the clouds white when clear, gray in the rain"
-    ok: weatherCloudDarkness(weather: clear) is 0.0 and weatherCloudDarkness(weather: rain) > 0.9
+    label: "the clouds white when clear and under a full cover, gray in the rain, dark in a storm"
+    ok: weatherCloudDarkness(weather: clear) is 0.0 and weatherCloudDarkness(weather: whiteCover) < 0.2 and weatherCloudDarkness(
+      weather: rain
+    ) > 0.5 and weatherCloudDarkness(weather: thunder) > 0.95
   )
   # rain and snow (seasons step 13): the drops by the rate, the ground wet
   # while it rains and the hour after, not by snow

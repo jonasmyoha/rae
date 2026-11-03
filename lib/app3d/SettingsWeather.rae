@@ -76,6 +76,9 @@ const weatherSnowKey: String = "weather.snow"
 
 const weatherMistKey: String = "weather.mist"
 
+# how dark the clouds are besides the rain (0 .. 1, lib/Weather storm)
+const weatherStormKey: String = "weather.storm"
+
 const windSpeedKey: String = "wind.speed"
 
 # Rain or snow lighter than this is none (mm/h)
@@ -97,6 +100,7 @@ func settingsWeatherPresetToValues(values: mod UiValues, override: view Settings
     rain = 0.0
   }
   let changedCloud: Bool = setUiValue(values: values, key: weatherCloudKey, value: preset.cloud)
+  let changedStorm: Bool = setUiValue(values: values, key: weatherStormKey, value: preset.storm)
   let changedRain: Bool = setUiValue(values: values, key: weatherRainKey, value: rain)
   let changedSnow: Bool = setUiValue(values: values, key: weatherSnowKey, value: snow)
   let changedMist: Bool = setUiValue(
@@ -122,6 +126,7 @@ func settingsWeatherModelToValues(
     rain = 0.0
   }
   let changedCloud: Bool = setUiValue(values: values, key: weatherCloudKey, value: weather.cloud)
+  let changedStorm: Bool = setUiValue(values: values, key: weatherStormKey, value: weather.storm)
   let changedRain: Bool = setUiValue(values: values, key: weatherRainKey, value: rain)
   let changedSnow: Bool = setUiValue(values: values, key: weatherSnowKey, value: snow)
   let changedMist: Bool = setUiValue(
@@ -167,6 +172,7 @@ func settingsWeatherFromValues(
     let snow: Float = uiValue(values: values, key: weatherSnowKey, fallback: 0.0)
     let mist: Float = uiValue(values: values, key: weatherMistKey, fallback: 0.0)
     drawn.cloud = cloud
+    drawn.storm = uiValue(values: values, key: weatherStormKey, fallback: 0.0)
     drawn.precipitation = Math.max(a: rain, b: snow)
     drawn.humidity = Math.clamp(
       val: 0.45 + 0.25 * cloud + 0.5 * mist + 0.15 * Math.min(a: drawn.precipitation, b: 1.0)
@@ -263,28 +269,35 @@ func settingsWeatherApplied(override: view SettingsWeather, weather: view Weathe
   # the override sets the sky; the wind stays the model's, a little
   # stronger under the rain and snow overrides' fronts
   var applied: Weather = weather
+  # the rain and the snow come from dark storm clouds, the rest from white
+  # ones (lib/Weather weatherCloudDarkness)
   if override is SettingsWeather.clear {
     applied.cloud = 0.0
     applied.precipitation = 0.0
     applied.humidity = 0.45
+    applied.storm = 0.0
   } else if override is SettingsWeather.cloudy {
     applied.cloud = 0.7
     applied.precipitation = 0.0
     applied.humidity = 0.6
+    applied.storm = 0.0
   } else if override is SettingsWeather.rain {
     applied.cloud = 1.0
     applied.precipitation = 1.5
     applied.humidity = 0.9
+    applied.storm = 0.6
     applied.windSpeed = Math.max(a: weather.windSpeed, b: 7.0)
   } else if override is SettingsWeather.snow {
     applied.cloud = 1.0
     applied.precipitation = 0.8
     applied.humidity = 0.85
+    applied.storm = 0.5
     applied.windSpeed = Math.max(a: weather.windSpeed, b: 5.0)
   } else if override is SettingsWeather.mist {
     applied.cloud = 0.5
     applied.precipitation = 0.0
     applied.humidity = 1.0
+    applied.storm = 0.0
     applied.windSpeed = Math.min(a: weather.windSpeed, b: 1.5)
   }
   ret applied

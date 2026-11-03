@@ -11,7 +11,11 @@
 #   latitudes about evenly, a little more in summer.
 # - Cloud cover (0 .. 1) rises with the front, sooner in a wet season;
 #   precipitation (mm of water an hour) falls under the thickest cover;
-#   humidity (0 .. 1) follows the cloud and the rain.
+#   humidity (0 .. 1) follows the cloud and the rain; the storm (0 .. 1) is
+#   the front at its peak, strongest on a summer day (a thunder day).
+# - How dark the clouds are comes from the rain and the storm, not from the
+#   cover (weatherCloudDarkness): a full cover with no rain is a bright,
+#   white-gray sky, and rain or a storm darkens it.
 #
 # - The wind (lib/WeatherWind, docs/leaf-particles-design.md §2.1): its
 #   speed (m/s), direction and gustiness from the season, the front's
@@ -29,6 +33,9 @@ type Weather {
   precipitation: Float = 0.0
   humidity: Float = 0.5
   front: Float = 0.5
+  # how stormy (0 .. 1): the front at its peak, a thunder day in summer;
+  # what darkens the clouds besides the rain (weatherCloudDarkness)
+  storm: Float = 0.0
   # the mean wind at 10 m (m/s), the direction it blows toward (radians,
   # 0 toward east (+x), counter-clockwise, as lib/Wind) and its gustiness
   # (0 .. 1)
@@ -111,6 +118,7 @@ func weatherAt(
   if cloud > 0.8 {
     precipitation = (cloud - 0.8) / 0.2 * 0.35 * (0.4 + wet)
   }
+  let storm: Float = weatherStorm(front: front, latitude: latitude, dayOfYear: dayOfYear)
   let wind: WeatherWind = weatherWindAt(
     seed: seed
     latitude: latitude
@@ -129,10 +137,23 @@ func weatherAt(
       high: 1.0
     )
     front: front
+    storm: storm
     windSpeed: wind.speed
     windAngle: wind.angle
     gustiness: wind.gustiness
   }
+}
+
+# How stormy it is (0 .. 1): the front's peak (0.8 to 0.95, the top of its
+# rise), most in the local summer (a thunder day), a third of that in the
+# winter
+func weatherStorm(front: view Float, latitude: view Float, dayOfYear: view Int) ret Float {
+  var summer: Float = Math.cos(x: (dayOfYear.toFloat() - 196.0) / 365.25 * 2.0 * weatherPi)
+  if latitude < 0.0 {
+    summer = -summer
+  }
+  let warmth: Float = 0.5 + 0.5 * summer
+  ret weatherRamp(from: 0.8, to: 0.95, value: front) * (0.35 + 0.65 * warmth)
 }
 
 # The front (0 .. 1) at `hours` (weatherHours, shifted by the place's
@@ -183,13 +204,16 @@ func weatherMistFactor(weather: view Weather, localHour: view Float, autumn: vie
   ret 1.0 + 5.0 * weatherRamp(from: 0.74, to: 0.95, value: dew) * (1.0 - midday)
 }
 
-# The clouds' darkness (0 white .. 1 the gray of rain): thick cover and rain
+# The clouds' darkness (0 white .. 1 the dark gray of a storm): the rain
+# (up to 0.45 by 0.5 mm/h) and the storm (up to 0.5), and only a little
+# from the cover (up to 0.12 as it closes), so a full cover with no rain
+# is a bright, white-gray layer
 func weatherCloudDarkness(weather: view Weather) ret Float {
   ret Math.min(
-    a: 0.6 * weatherRamp(from: 0.6, to: 1.0, value: weather.cloud) + 0.4 * Math.min(
+    a: 0.12 * weatherRamp(from: 0.8, to: 1.0, value: weather.cloud) + 0.45 * Math.min(
       a: weather.precipitation / 0.5
       b: 1.0
-    )
+    ) + 0.5 * Math.clamp(val: weather.storm, low: 0.0, high: 1.0)
     b: 1.0
   )
 }

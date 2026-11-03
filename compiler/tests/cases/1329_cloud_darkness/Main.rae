@@ -1,0 +1,90 @@
+# How dark the clouds are (lib/Weather weatherCloudDarkness) comes from the
+# rain and the storm, not from the cover: a full cover with no rain stays a
+# white-gray sky, rain and a storm darken it. The storm is the front at its
+# peak, strongest on a summer day (weatherStorm). The settings panel's
+# presets carry it (app3d/SettingsWeather: Rain and Snow dark, Cloudy
+# white) and the saved line keeps it, a line saved before it still loads.
+import Math
+open Weather
+open ui/UiValues
+open app3d/SettingsWeather
+open app3d/SettingsPersist
+
+func dark(cloud: view Float, precipitation: view Float, storm: view Float) ret Int {
+  let weather: Weather = { cloud: cloud, precipitation: precipitation, storm: storm }
+  ret (weatherCloudDarkness(weather: weather) * 100.0 + 0.5).toInt()
+}
+
+func percent(value: view Float) ret Int {
+  ret (value * 100.0 + 0.5).toInt()
+}
+
+func main() {
+  log("a clear sky: {dark(cloud: 0.0, precipitation: 0.0, storm: 0.0)}%")
+  log("half cover: {dark(cloud: 0.5, precipitation: 0.0, storm: 0.0)}%")
+  log("full cover, no rain: {dark(cloud: 1.0, precipitation: 0.0, storm: 0.0)}%")
+  log("full cover, light rain 0.2 mm/h: {dark(cloud: 1.0, precipitation: 0.2, storm: 0.0)}%")
+  log("full cover, rain 1.5 mm/h: {dark(cloud: 1.0, precipitation: 1.5, storm: 0.0)}%")
+  log("full cover, rain and a storm: {dark(cloud: 1.0, precipitation: 1.5, storm: 1.0)}%")
+
+  # the storm: the front's peak, in the summer and the winter of the north
+  # and of the south
+  log(
+    "storm at a summer peak (north, 15 Jul): {percent(
+      value: weatherStorm(front: 1.0, latitude: 60.0, dayOfYear: 196)
+    )}%"
+  )
+  log(
+    "storm at a winter peak (north, 15 Jan): {percent(
+      value: weatherStorm(front: 1.0, latitude: 60.0, dayOfYear: 15)
+    )}%"
+  )
+  log(
+    "storm at a summer peak (south, 15 Jan): {percent(
+      value: weatherStorm(front: 1.0, latitude: -35.0, dayOfYear: 15)
+    )}%"
+  )
+  log(
+    "storm under a weak front: {percent(
+      value: weatherStorm(front: 0.7, latitude: 60.0, dayOfYear: 196)
+    )}%"
+  )
+
+  # the presets
+  var values: UiValues = createUiValues()
+  let presets: List(SettingsWeather) = [
+    SettingsWeather.clear
+    SettingsWeather.cloudy
+    SettingsWeather.rain
+    SettingsWeather.snow
+    SettingsWeather.mist
+  ]
+  loop let preset: view SettingsWeather in presets {
+    settingsWeatherPresetToValues(values: values, override: preset)
+    let drawn: Weather = settingsWeatherFromValues(
+      values: values
+      weather: Weather {}
+      override: preset
+      windOverride: SettingsWind.auto
+    )
+    log(
+      "{preset}: cloud {percent(value: drawn.cloud)}%, storm {percent(value: drawn.storm)}%, darkness {percent(
+        value: weatherCloudDarkness(weather: drawn)
+      )}%"
+    )
+  }
+
+  # the saved line: six numbers, and a line saved before the storm (five)
+  log("saved: {settingsWeatherValuesText(values: values)}")
+  var older: UiValues = createUiValues()
+  settingsWeatherValuesRestore(values: older, text: "1,0,0,0,5")
+  log(
+    "an older line: cloud {uiValue(values: older, key: weatherCloudKey, fallback: -1.0)}, storm {uiValue(
+      values: older
+      key: weatherStormKey
+      fallback: 0.0
+    )}"
+  )
+  settingsWeatherValuesRestore(values: older, text: "1,0,0,0,5,0.8")
+  log("a line with the storm: storm {uiValue(values: older, key: weatherStormKey, fallback: 0.0)}")
+}
