@@ -43,6 +43,17 @@ answers `none`. A spawned worker waits instead (`timeoutMs` > 0; the call is
 `blocking`). One connection is used from one thread. `httpGet` waits for its
 events, so a UI app calls it in a worker.
 
+`httpGet` sends `User-Agent: Rae`. A service that asks its clients to name
+themselves (api.met.no wants an app name and a contact) gets the caller's
+own header lines through `httpGetWith(url:, headers:, timeoutMs:)`:
+
+    httpGetWith(url: forecastUrl, headers: ["User-Agent: SumuWeather/1.0 sumu@example.org"], timeoutMs: 15000)
+
+A `User-Agent` or `Accept` line replaces the default one. `Host` and
+`Connection` are the request's own, and a line with a line break or
+without a colon is refused, before anything is sent. `httpGetRequestText`
+gives the request text (case 1323).
+
 ## The C side
 
 `compiler/runtime/runtime_network_apple.h` (platform reason: Network.framework's

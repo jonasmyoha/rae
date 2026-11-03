@@ -4,6 +4,10 @@
 # `Connection: close`; the body is read whole (Content-Length, chunked, or to
 # the close). It waits for the connection's events, so a UI app runs it in a
 # spawned worker. Every failure is a value (`ok` false and `error`).
+#
+# httpGetWith adds request header lines of the caller's ("User-Agent:
+# Weather/1.0 me@example.org", which api.met.no asks every client for);
+# httpGet is httpGetWith with none.
 import String
 open net/NetworkConnection
 
@@ -217,12 +221,84 @@ func parseHttpResponse(bytes: view List(UInt8)) ret HttpGetResult {
   }
 }
 
+# The name of a header line ("User-Agent: x" -> "user-agent"), lowercased
+# and trimmed; "" when it has no colon
+func headerLineName(line: view String) ret String {
+  if let colon: Int = line.indexOf(sub: ":") {
+    ret line.sub(start: 0, len: colon).trim().toLower()
+  }
+  ret ""
+}
+
+# What is wrong with the caller's header lines, "" when nothing: each is
+# "Name: value" on one line (a line break would let a value add headers of
+# its own), and Host and Connection are the request's own
+func headerLinesError(headers: view List(String)) ret String {
+  loop let line: view String in headers {
+    if line.contains(sub: "\r") or line.contains(sub: "\n") {
+      let visible: String = line.replace(old: "\r", new: "\\r").replace(old: "\n", new: "\\n")
+      ret "a header line may not contain a line break: {visible}"
+    }
+    let name: String = headerLineName(line: line)
+    if name.length() is 0 {
+      ret "a header line is \"Name: value\": {line}"
+    }
+    if name is "host" or name is "connection" {
+      ret "the {name} header is the request's own: {line}"
+    }
+  }
+  ret ""
+}
+
+func headerLinesName(headers: view List(String), name: view String) ret Bool {
+  loop let line: view String in headers {
+    if headerLineName(line: line) is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The request text: the GET line, Host, then User-Agent (Rae) and Accept
+# (*/*) unless the caller's lines name their own, the caller's lines in
+# their order, and Connection: close
+func httpGetRequestText(url: view HttpUrl, headers: view List(String)) ret String {
+  var text: String = "GET {url.path} HTTP/1.1\r\nHost: {url.host}\r\n"
+  if headerLinesName(headers: headers, name: "user-agent") is false {
+    text = "{text}User-Agent: Rae\r\n"
+  }
+  if headerLinesName(headers: headers, name: "accept") is false {
+    text = "{text}Accept: */*\r\n"
+  }
+  loop let line: view String in headers {
+    text = "{text}{line}\r\n"
+  }
+  ret "{text}Connection: close\r\n\r\n"
+}
+
 # GET `url`, waiting up to `timeoutMs` in all. Redirects are not followed
 # (a 3xx comes back as it is, its Location in `headers`).
 func httpGet(url: view String, timeoutMs: view Int) ret HttpGetResult {
+  let noHeaders: List(String) = List.create(String, cap: 0)
+  ret httpGetWith(url: url, headers: noHeaders, timeoutMs: timeoutMs)
+}
+
+# httpGet with request header lines of the caller's ("Name: value" each, no
+# line break): a User-Agent or Accept line replaces the default one; Host
+# and Connection are the request's own and are refused, as is a line with a
+# line break, before anything is sent
+func httpGetWith(
+  url: view String
+  headers: view List(String)
+  timeoutMs: view Int
+) ret HttpGetResult {
   let parsed: HttpUrl = parseHttpUrl(url: url)
   if parsed.valid is false {
     ret httpGetFailed(error: "not an http:// or https:// URL: {url}")
+  }
+  let headerError: String = headerLinesError(headers: headers)
+  if headerError.length() > 0 {
+    ret httpGetFailed(error: headerError)
   }
   var connection: NetworkConnection = networkConnectTcp(host: parsed.host, port: parsed.port)
   if parsed.secure {
@@ -240,7 +316,7 @@ func httpGet(url: view String, timeoutMs: view Int) ret HttpGetResult {
     }
     let event: NetworkEvent = networkNextEvent(connection: connection, timeoutMs: left)
     if event.kind is NetworkEventKind.ready {
-      let request: String = "GET {parsed.path} HTTP/1.1\r\nHost: {parsed.host}\r\nUser-Agent: Rae\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+      let request: String = httpGetRequestText(url: parsed, headers: headers)
       let sent: Bool = networkSendText(connection: connection, text: request)
     } else if event.kind is NetworkEventKind.message {
       loop let byte: view UInt8 in event.bytes {
