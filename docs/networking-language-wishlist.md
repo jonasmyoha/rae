@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-6/12 but are not. They are listed so the
+These looked like gaps during 1/12-7/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender
@@ -68,4 +68,12 @@ next task does not propose them again.
   `sendPunch(client: ...)` only after the alias's block ends. A `mod` of the
   whole client while an alias into `client.paths` is live is the aliasing
   rule working as designed. Copying out first is the intended shape.
-
+- **A generic encoder for nested structs (7/12).**
+  `lib/net/replication/ReplicaValues.rae` handles `Float`, `Int`, `Bool`,
+  `Vec3` and `Quat` fields with one filtered `fields()` loop each, because
+  `fields()` is one level deep. Recursing into any nested struct is already
+  possible: `typeName(x)` folds to a literal in a generic body and a constant
+  `if` drops the untaken arm (`docs/compile-time-reflection.md`). That is a
+  `lib/` change for when a component needs it, not a language gap. (Found on
+  the way, and queued as bugs, not wishes: overloads in generic bodies,
+  `is` on Lists, and copyAtFallback leaks.)

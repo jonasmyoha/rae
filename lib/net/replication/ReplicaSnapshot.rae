@@ -1,0 +1,238 @@
+# A snapshot of the replicated state and the delta between two of them
+# (lib/net/replication, docs/replication.md).
+#
+# A snapshot is a set of RECORDS: (net id, kind, values), one per replicated
+# component of a replicated entity. `kind` is the component's table number
+# (the app chooses the numbers, 0-31), the values are the component's fields
+# as Ints (ReplicaValues). An entity may also have an interest point (where it
+# is), which decides which players see it.
+#
+# A delta says how to get from a baseline snapshot the receiver already has
+# to the new one: records that changed (each with a bit mask of the changed
+# fields and their differences as signed varints), components that went, and
+# entities that went (or left the receiver's interest). An unchanged record
+# costs nothing; an unchanged field one bit. With no baseline every record is
+# sent whole (its differences from 0).
+open collections/IntMap
+open net/Wire
+
+const recordStride: Int = 4
+
+# Record operations in a delta
+const opSet: Int = 1
+
+const opRemoveEntity: Int = 2
+
+const opRemoveComponent: Int = 3
+
+# A component has at most this many replicated values (the change mask is
+# one varint of this many bits)
+const maxRecordValues: Int = 62
+
+type ReplicaSnapshot {
+  # -1: empty
+  tick: Int
+  # Per record: net id, kind, first value, value count
+  records: List(Int)
+  values: List(Int)
+  # (net id, kind) key -> record index
+  lookup: IntMap(Int)
+  # Per interest point: net id, then x, y, z in `points`
+  pointNetIds: List(Int)
+  points: List(Float)
+  pointLookup: IntMap(Int)
+}
+
+func createReplicaSnapshot() ret ReplicaSnapshot {
+  ret ReplicaSnapshot {
+    tick: -1
+    records: List.create(Int, cap: 64)
+    values: List.create(Int, cap: 256)
+    lookup: createIntMap(Int, cap: 64)
+    pointNetIds: List.create(Int, cap: 16)
+    points: List.create(Float, cap: 48)
+    pointLookup: createIntMap(Int, cap: 16)
+  }
+}
+
+func recordKey(netId: view Int, kind: view Int) ret Int {
+  ret netId * 32 + kind
+}
+
+# Empty the snapshot for `tick`
+func snapshotReset(snapshot: mod ReplicaSnapshot, tick: view Int) {
+  snapshot.tick = tick
+  snapshot.records.clear()
+  snapshot.values.clear()
+  snapshot.lookup = createIntMap(Int, cap: 64)
+  snapshot.pointNetIds.clear()
+  snapshot.points.clear()
+  snapshot.pointLookup = createIntMap(Int, cap: 16)
+}
+
+func snapshotRecordCount(snapshot: view ReplicaSnapshot) ret Int {
+  ret snapshot.records.length / recordStride
+}
+
+func recordField(snapshot: view ReplicaSnapshot, record: view Int, field: view Int) ret Int {
+  ret snapshot.records.copyAtFallback(index: record * recordStride + field, fallback: 0)
+}
+
+func recordNetId(snapshot: view ReplicaSnapshot, record: view Int) ret Int {
+  ret recordField(snapshot: snapshot, record: record, field: 0)
+}
+
+func recordKind(snapshot: view ReplicaSnapshot, record: view Int) ret Int {
+  ret recordField(snapshot: snapshot, record: record, field: 1)
+}
+
+func recordStart(snapshot: view ReplicaSnapshot, record: view Int) ret Int {
+  ret recordField(snapshot: snapshot, record: record, field: 2)
+}
+
+func recordCount(snapshot: view ReplicaSnapshot, record: view Int) ret Int {
+  ret recordField(snapshot: snapshot, record: record, field: 3)
+}
+
+func recordValue(snapshot: view ReplicaSnapshot, record: view Int, index: view Int) ret Int {
+  ret snapshot.values.copyAtFallback(
+    index: recordStart(snapshot: snapshot, record: record) + index
+    fallback: 0
+  )
+}
+
+# The record of (net id, kind), -1 for none
+func snapshotFind(snapshot: view ReplicaSnapshot, netId: view Int, kind: view Int) ret Int {
+  if let record: Int = snapshot.lookup.get(k: recordKey(netId: netId, kind: kind)) {
+    ret record
+  }
+  ret -1
+}
+
+# Add a record: `count` values of `values` from `start`
+func snapshotAdd(
+  snapshot: mod ReplicaSnapshot
+  netId: view Int
+  kind: view Int
+  values: view List(Int)
+  start: view Int
+  count: view Int
+) {
+  let record: Int = snapshotRecordCount(snapshot: snapshot)
+  snapshot.records.add(value: netId)
+  snapshot.records.add(value: kind)
+  snapshot.records.add(value: snapshot.values.length)
+  snapshot.records.add(value: count)
+  loop var i: Int = 0, i < count, ++i {
+    snapshot.values.add(value: values.copyAtFallback(index: start + i, fallback: 0))
+  }
+  snapshot.lookup.set(k: recordKey(netId: netId, kind: kind), value: record)
+}
+
+func snapshotSetPoint(
+  snapshot: mod ReplicaSnapshot
+  netId: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+) {
+  snapshot.pointLookup.set(k: netId, value: snapshot.pointNetIds.length)
+  snapshot.pointNetIds.add(value: netId)
+  snapshot.points.add(value: x)
+  snapshot.points.add(value: y)
+  snapshot.points.add(value: z)
+}
+
+# Whether `netId` is within `radius` of the point (x, y, z): true for an entity
+# with no interest point (global state everyone sees)
+func snapshotPointWithin(
+  snapshot: view ReplicaSnapshot
+  netId: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+  radius: view Float
+) ret Bool {
+  if let index: Int = snapshot.pointLookup.get(k: netId) {
+    let dx: Float = snapshot.points.copyAtFallback(index: index * 3, fallback: 0.0) - x
+    let dy: Float = snapshot.points.copyAtFallback(index: index * 3 + 1, fallback: 0.0) - y
+    let dz: Float = snapshot.points.copyAtFallback(index: index * 3 + 2, fallback: 0.0) - z
+    ret dx * dx + dy * dy + dz * dz <= radius * radius
+  }
+  ret true
+}
+
+# The point of `netId` as x, y, z into `out` (false when it has none)
+func snapshotPointOf(
+  snapshot: view ReplicaSnapshot
+  netId: view Int
+  out: mod List(Float)
+) ret Bool {
+  out.clear()
+  if let index: Int = snapshot.pointLookup.get(k: netId) {
+    out.add(value: snapshot.points.copyAtFallback(index: index * 3, fallback: 0.0))
+    out.add(value: snapshot.points.copyAtFallback(index: index * 3 + 1, fallback: 0.0))
+    out.add(value: snapshot.points.copyAtFallback(index: index * 3 + 2, fallback: 0.0))
+    ret true
+  }
+  ret false
+}
+
+# ----- deltas -------------------------------------------------------------------
+
+# Write the record `record` of `current` as a set operation against record
+# `baseRecord` of `baseline` (-1: none, every value against 0): false when it
+# is unchanged and nothing was written
+func writeRecordDelta(
+  bytes: mod List(UInt8)
+  current: view ReplicaSnapshot
+  record: view Int
+  baseline: view ReplicaSnapshot
+  baseRecord: view Int
+) ret Bool {
+  var count: Int = recordCount(snapshot: current, record: record)
+  if count > maxRecordValues {
+    count = maxRecordValues
+  }
+  var mask: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    var base: Int = 0
+    if baseRecord >= 0 {
+      base = recordValue(snapshot: baseline, record: baseRecord, index: i)
+    }
+    if recordValue(snapshot: current, record: record, index: i) is not base or baseRecord < 0 {
+      mask = mask bitor (1 shl i)
+    }
+  }
+  if mask is 0 {
+    ret false
+  }
+  writeU8(bytes: bytes, value: opSet)
+  writeVarint(bytes: bytes, value: recordNetId(snapshot: current, record: record))
+  writeU8(bytes: bytes, value: recordKind(snapshot: current, record: record))
+  writeVarint(bytes: bytes, value: count)
+  writeVarint(bytes: bytes, value: mask)
+  loop var i: Int = 0, i < count, ++i {
+    if (mask bitand (1 shl i)) is not 0 {
+      var base: Int = 0
+      if baseRecord >= 0 {
+        base = recordValue(snapshot: baseline, record: baseRecord, index: i)
+      }
+      writeSignedVarint(
+        bytes: bytes
+        value: recordValue(snapshot: current, record: record, index: i) - base
+      )
+    }
+  }
+  ret true
+}
+
+# One decoded set operation, held until the whole delta is read
+type RecordChange {
+  netId: Int
+  kind: Int
+  count: Int
+  mask: Int
+  # Index of its first difference in the decoder's `differences`
+  first: Int
+}
