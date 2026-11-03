@@ -146,3 +146,82 @@ func sequenceGreater(first: view Int, second: view Int) ret Bool {
   let distance: Int = sequenceDistance(newer: first, older: second)
   ret distance is not 0 and distance < sequenceHalf
 }
+
+# ----- variable-length integers (snapshots, inputs) ---------------------------
+
+# A non-negative value in 7-bit groups, low first, the top bit set on every
+# byte but the last: 0-127 take one byte
+func writeVarint(bytes: mod List(UInt8), value: view Int) {
+  var rest: Int = value
+  loop rest >= 128 {
+    writeU8(bytes: bytes, value: (rest bitand 127) bitor 128)
+    rest = rest shr 7
+  }
+  writeU8(bytes: bytes, value: rest)
+}
+
+# A signed value as a varint: 0, -1, 1, -2, 2 ... become 0, 1, 2, 3, 4
+func writeSignedVarint(bytes: mod List(UInt8), value: view Int) {
+  if value >= 0 {
+    writeVarint(bytes: bytes, value: value * 2)
+  } else {
+    writeVarint(bytes: bytes, value: -value * 2 - 1)
+  }
+}
+
+# Where a reader is in its bytes, and whether a read ran past `end`
+type ByteReader {
+  offset: Int
+  end: Int
+  failed: Bool
+}
+
+func byteReader(start: view Int, end: view Int) ret ByteReader {
+  ret ByteReader { offset: start, end: end, failed: false }
+}
+
+func readerU8(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  if reader.offset >= reader.end {
+    reader.failed = true
+    ret 0
+  }
+  let value: Int = readU8(bytes: bytes, offset: reader.offset)
+  reader.offset = reader.offset + 1
+  ret value
+}
+
+func readerU32(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  if reader.offset + 4 > reader.end {
+    reader.failed = true
+    ret 0
+  }
+  let value: Int = readU32(bytes: bytes, offset: reader.offset)
+  reader.offset = reader.offset + 4
+  ret value
+}
+
+func readerVarint(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  var value: Int = 0
+  var shift: Int = 0
+  loop shift < 63 {
+    let byte: Int = readerU8(reader: reader, bytes: bytes)
+    if reader.failed {
+      ret 0
+    }
+    value = value bitor ((byte bitand 127) shl shift)
+    if byte < 128 {
+      ret value
+    }
+    shift = shift + 7
+  }
+  reader.failed = true
+  ret 0
+}
+
+func readerSignedVarint(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  let encoded: Int = readerVarint(reader: reader, bytes: bytes)
+  if (encoded bitand 1) is 0 {
+    ret encoded shr 1
+  }
+  ret -((encoded + 1) shr 1)
+}
