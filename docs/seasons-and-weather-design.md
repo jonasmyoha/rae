@@ -257,6 +257,28 @@ pass over several hours:
     far as it is a dark cloud, and lights a white one a little brighter.
     In 143 at noon the sky under a full cover with no rain went from a
     gray of 123 (of 255) to 170, a rain sky from 97 to 105.
+  - **Cloud kinds** (clouds 3/4; the cheap layer of
+    docs/cloud-rendering-research.md §8.1): the weather also gives the
+    clouds' kind, `cloudType` (0 stratus .. 1 cumulus, weatherCloudType):
+    fair-weather cumulus on a warm afternoon (from about 10:00, gone by
+    21:00, more in summer), a stratus sheet under a front (front 0.6 to
+    0.85), towers again on a thunder day (the storm). `cirrus`
+    (weatherCirrus) is thin high cloud while a front is still rising (the
+    front 8 hours later is higher) and the sky is not yet covered. The
+    base's height follows the kind (weatherCloudHeight: about 500 m for
+    stratus, 1400 m for cumulus, 30% lower under a storm), and
+    `cloudScale` is the shapes' size (1 by default). The settings panel has
+    a slider for each (Cumulus, Cirrus, Height, Size), bound like the other
+    weather sliders, and the presets set them (Clear and Cloudy fair
+    cumulus, Rain and Snow a front's sheet, Mist a low stratus). The saved
+    line keeps all ten numbers; the five- and six-number lines saved
+    before still load. The sky shader draws cumulus as rounded puffs with
+    smaller puffs heaped on them, a flat, darker base and a lighter side
+    toward the sun; stratus as an even sheet with soft gray patches; cirrus
+    as streaks at 8 km; a band of cumulus standing on the horizon on a day
+    with cumulus. The light comes from the sun's direction: the edges
+    toward the sun shine (a forward-scattering phase), and a low sun lights
+    the clouds in its reddened color a while after the ground is dark.
   - **Mist:** RendererMist's density rises when the air is near its dew
     point (cool mornings after a humid day, autumn), and falls by midday.
   - **Rain:** a screen-space or near-camera particle rain, and wet ground

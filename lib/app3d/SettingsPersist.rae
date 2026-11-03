@@ -83,40 +83,46 @@ func serializeSettingsState(settingsState: view SettingsState, editor: view Bool
   ret "{panel} {rendering} {light} {clock}"
 }
 
-# The weather's numbers on the saved line: cloud, rain, snow, mist, wind
-# and storm, comma-separated (app3d/SettingsWeather's keys)
+# The weather's numbers on the saved line: cloud, rain, snow, mist, wind,
+# storm and the clouds' kind, cirrus, height and size, comma-separated
+# (app3d/SettingsWeather's keys, settingsWeatherValueKeys)
 func settingsWeatherValuesText(values: view UiValues) ret String {
-  ret "{uiValue(values: values, key: weatherCloudKey, fallback: 0.0)},{uiValue(
-    values: values
-    key: weatherRainKey
-    fallback: 0.0
-  )},{uiValue(values: values, key: weatherSnowKey, fallback: 0.0)},{uiValue(
-    values: values
-    key: weatherMistKey
-    fallback: 0.0
-  )},{uiValue(values: values, key: windSpeedKey, fallback: 0.0)},{uiValue(
-    values: values
-    key: weatherStormKey
-    fallback: 0.0
-  )}"
+  var text: String = ""
+  let keys: List(String) = settingsWeatherValueKeys()
+  loop var i: Int = 0, i < keys.length, ++i {
+    if i > 0 {
+      text = "{text},"
+    }
+    text = "{text}{uiValue(values: values, key: keys.copyAtDefault(index: i), fallback: 0.0)}"
+  }
+  ret text
 }
 
-# The numbers of a saved line (or RAE_WALKER_WEATHER_VALUES) back into
-# `values`: five (before the storm was saved) or six; any other count is
-# left as it was
-func settingsWeatherValuesRestore(values: mod UiValues, text: view String) {
-  let parts: List(String) = text.split(sep: ",")
-  if parts.length is not 5 and parts.length is not 6 {
-    ret
-  }
-  let keys: List(String) = [
+# The saved line's keys, in its order
+func settingsWeatherValueKeys() ret List(String) {
+  ret List(String) {
     weatherCloudKey
     weatherRainKey
     weatherSnowKey
     weatherMistKey
     windSpeedKey
     weatherStormKey
-  ]
+    weatherCloudTypeKey
+    weatherCirrusKey
+    weatherCloudHeightKey
+    weatherCloudScaleKey
+  }
+}
+
+# The numbers of a saved line (or RAE_WALKER_WEATHER_VALUES) back into
+# `values`: five (before the storm was saved), six (before the clouds'
+# shape was) or ten; any other count is left as it was
+func settingsWeatherValuesRestore(values: mod UiValues, text: view String) {
+  let parts: List(String) = text.split(sep: ",")
+  if parts.length is not 5 and parts.length is not 6 and parts.length is not 10 {
+    ret
+  }
+  let keys: List(String) = settingsWeatherValueKeys()
   loop var i: Int = 0, i < parts.length, ++i {
     let changed: Bool = setUiValue(
       values: values

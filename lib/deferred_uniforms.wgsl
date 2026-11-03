@@ -37,8 +37,11 @@ struct LightU {
   // its center, w its umbra's angular radius as drawn (0: no shadow)
   moonShadow: vec4<f32>,
   // The clouds (Sky.cloudCover / cloudDarkness / cloudDrift, lib/Weather):
-  // x how much of the sky they cover, y how dark, z how far they drifted
+  // x how much of the sky they cover, y how dark, z how far they drifted;
+  // cloudShape (lib/SkyClouds): x their kind (0 stratus .. 1 cumulus), y the
+  // high cirrus (0 .. 1), z the base's height (m), w the shapes' size
   clouds: vec4<f32>,
+  cloudShape: vec4<f32>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,

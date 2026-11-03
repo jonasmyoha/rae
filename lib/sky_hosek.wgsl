@@ -123,14 +123,27 @@ fn earthShadow(dir: vec3<f32>) -> vec3<f32> {
   let inside = 1.0 - smoothstep(umbra * 0.97, umbra * 1.03, d);
   return mix(vec3<f32>(half), red, inside);
 }
-// The clouds (lib/Weather through Sky.cloudCover, L.clouds): a layer of
-// soft noise on a plane overhead, seen along `dir`, drifting with the clock;
-// the cover sets how much of it is cloud (a full cover is one sheet),
-// the darkness how gray it is (white without rain or a storm). Lit as the sky round it: the sky's own
-// brightness, whiter than a blue sky, grayer and darker as it rains; thinner
-// toward the horizon. Returns the cloud's color and its share in w.
+// The clouds (lib/SkyClouds through L.clouds and L.cloudShape; the cheap
+// layer of docs/cloud-rendering-research.md §8.1): a 2D cloud field on a
+// plane at the clouds' height, seen along `dir`, drifting with the clock.
+// Its kind (cloudShape.x) blends an even stratus sheet (0) into separate
+// rounded cumulus puffs (1); cirrus streaks (cloudShape.y) lie high above
+// it; a band of cumulus stands on the horizon on a day with cumulus. The
+// cover sets how much of it is cloud, the darkness how gray (white without
+// rain or a storm). Lit by the sky round it and by the sun: thin parts let
+// the sun through, a puff's sunward side is lighter, the edges toward the
+// sun shine (a forward-scattering phase, the silver lining), the band is
+// gray at its flat base and white at its tops. Returns the cloud's color
+// and its share in w.
 fn skyCloudHash(p: vec2<f32>) -> f32 {
-  return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+  var p3 = fract(vec3<f32>(p.xyx) * 0.1031);
+  p3 = p3 + dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+fn skyCloudHash3(p: vec2<f32>) -> vec3<f32> {
+  var p3 = fract(vec3<f32>(p.xyx) * vec3<f32>(0.1031, 0.1030, 0.0973));
+  p3 = p3 + dot(p3, p3.yxz + 33.33);
+  return fract((p3.xxy + p3.yzz) * p3.zyx);
 }
 fn skyCloudNoise(p: vec2<f32>) -> f32 {
   let i = floor(p);
@@ -142,25 +155,161 @@ fn skyCloudNoise(p: vec2<f32>) -> f32 {
   let d = skyCloudHash(i + vec2<f32>(1.0, 1.0));
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-fn skyClouds(dir: vec3<f32>, sky: vec3<f32>) -> vec4<f32> {
-  let cover = clamp(L.clouds.x, 0.0, 1.0);
-  if (cover <= 0.001 || dir.z <= 0.0) { return vec4<f32>(0.0); }
-  // where the ray meets a plane overhead, the far ones squeezed
-  let p = dir.xy / (dir.z + 0.12) * 1.4 + vec2<f32>(L.clouds.z, L.clouds.z * 0.35);
-  var n = skyCloudNoise(p) * 0.5 + skyCloudNoise(p * 2.13 + vec2<f32>(5.2, 1.3)) * 0.3
+fn skyCloudFbm(p: vec2<f32>) -> f32 {
+  return skyCloudNoise(p) * 0.5 + skyCloudNoise(p * 2.13 + vec2<f32>(5.2, 1.3)) * 0.3
     + skyCloudNoise(p * 4.71 + vec2<f32>(2.7, 8.1)) * 0.2;
-  // a full cover is all cloud, a light one a few puffs
-  let threshold = mix(0.78, -0.1, cover);
-  let share = smoothstep(threshold, threshold + 0.18, n) * smoothstep(0.0, 0.1, dir.z);
-  // the sky's own brightness, whiter than its blue; darker underneath where
-  // the cloud is thick only as far as it is a dark cloud (L.clouds.y, the
-  // rain and the storm, lib/Weather weatherCloudDarkness), so a full cover
-  // with no rain is a bright white-gray sheet and a storm's base is dark
-  let bright = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
-  let thick = smoothstep(threshold + 0.1, threshold + 0.5, n);
+}
+// Henyey-Greenstein: how much light scatters forward by the angle's cosine
+fn skyCloudPhase(cosAngle: f32, g: f32) -> f32 {
+  let g2 = g * g;
+  return (1.0 - g2) / (12.566 * pow(max(1.0 + g2 - 2.0 * g * cosAngle, 1e-4), 1.5));
+}
+// Rounded puffs, one in a cell, as many as the cover asks for: x how thick
+// (a dome: 1 at its middle, 0 at its rim, below 0 outside it; -1 where no
+// puff is near), yz where in its puff the point is (from its middle, in its
+// radius)
+fn skyCloudPuffs(p: vec2<f32>, cover: f32) -> vec3<f32> {
+  let i = floor(p);
+  let f = fract(p);
+  var best = vec3<f32>(-1.0, 0.0, 0.0);
+  for (var y = -1; y <= 1; y = y + 1) {
+    for (var x = -1; x <= 1; x = x + 1) {
+      let cell = vec2<f32>(f32(x), f32(y));
+      let h = skyCloudHash3(i + cell);
+      let radius = (0.2 + 0.4 * h.z) * mix(0.75, 1.6, cover);
+      let away = (f - cell - 0.2 - 0.6 * h.xy) / radius;
+      let present = smoothstep(h.z - 0.15, h.z + 0.15, cover * 1.3);
+      let dome = mix(-1.0, 1.0 - dot(away, away), present);
+      if (dome > best.x) { best = vec3<f32>(dome, away); }
+    }
+  }
+  return best;
+}
+// One cloud layer over another (colors not premultiplied)
+fn skyCloudOver(top: vec4<f32>, under: vec4<f32>) -> vec4<f32> {
+  let a = top.w + under.w * (1.0 - top.w);
+  if (a <= 1e-4) { return vec4<f32>(0.0); }
+  return vec4<f32>((top.rgb * top.w + under.rgb * under.w * (1.0 - top.w)) / a, a);
+}
+fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
+  let cover = clamp(L.clouds.x, 0.0, 1.0);
+  let cirrusAmount = clamp(L.cloudShape.y, 0.0, 1.0);
+  if ((cover <= 0.001 && cirrusAmount <= 0.001) || dir.z <= -0.02) { return vec4<f32>(0.0); }
+  let kind = clamp(L.cloudShape.x, 0.0, 1.0);
+  let height = max(L.cloudShape.z, 100.0);
+  let size = max(L.cloudShape.w, 0.1);
   let dark = clamp(L.clouds.y, 0.0, 1.0);
-  let shade = (mix(1.75, 1.45, dark) - 0.55 * thick * mix(0.3, 1.0, dark)) * (1.0 - 0.62 * dark);
-  return vec4<f32>(vec3<f32>(bright * shade) * vec3<f32>(0.98, 0.99, 1.02), share);
+  let drift = vec2<f32>(L.clouds.z, L.clouds.z * 0.35);
+  // the light: the sky's (whiter than its blue; under a low sun, sunrise or
+  // sunset, its own colors, and the sun lights the clouds from the side
+  // and below in its reddened color, a while before and after it is up),
+  // the sun's (the key light, exposed; the moon at night) and how it
+  // scatters toward the eye
+  let bright = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let toSunZ = toSun.z;
+  let lowSun = smoothstep(-0.08, 0.0, toSunZ) * (1.0 - smoothstep(0.06, 0.3, toSunZ));
+  let ambient = mix(vec3<f32>(bright), sky, 0.2 + 0.6 * lowSun) * (1.0 + 0.35 * lowSun)
+    * vec3<f32>(0.98, 0.99, 1.02);
+  let sun = L.sunColor.rgb * (1.0 - 0.85 * dark);
+  // the low sun's light on the clouds: through the long air path, reddened
+  // (the clouds see it a while after the ground no longer does), as bright
+  // as a few times the sky round them
+  let airPath = min(1.0 / (max(toSunZ, 0.0) + 0.025), 40.0);
+  let glow = bright * 2.6 * exp(-vec3<f32>(0.012, 0.03, 0.075) * airPath) * lowSun * (1.0 - 0.85 * dark);
+  let cosSun = dot(dir, toSun);
+  let silver = skyCloudPhase(cosSun, 0.6) * 2.2;
+  let sunFlat = normalize(toSun.xy + vec2<f32>(1e-4, 0.0));
+  let grayOf = (1.0 - 0.62 * dark);
+  var result = vec4<f32>(0.0);
+  // cirrus: thin streaks along the drift, at 8 km, white and shining
+  if (cirrusAmount > 0.001 && dir.z > 0.0) {
+    let q = dir.xy / (dir.z + 0.08) * (8000.0 / (2500.0 * size)) + drift * 0.6;
+    let along = vec2<f32>(0.94, 0.33);
+    let streak = vec2<f32>(dot(q, along) * 0.35, dot(q, vec2<f32>(-along.y, along.x)) * 3.2);
+    let n = skyCloudFbm(streak) * (0.6 + 0.4 * skyCloudNoise(streak * vec2<f32>(4.0, 0.5)));
+    let share = smoothstep(0.42, 0.75, n) * cirrusAmount * 0.6 * smoothstep(0.0, 0.15, dir.z);
+    let color = (ambient * 1.5 + sun * (0.25 + silver) + glow * 1.2) * grayOf;
+    result = vec4<f32>(color, share);
+  }
+  if (cover <= 0.001) { return result; }
+  // the band on the horizon: cumulus far away, seen from the side, standing
+  // on a flat base; the tops rounded domes, a few to a cell of azimuth
+  let elevation = dir.z;
+  let band = kind * smoothstep(0.03, 0.3, cover) * (1.0 - smoothstep(0.8, 1.0, cover));
+  if (band > 0.001 && elevation < 0.12) {
+    let azimuth = atan2(dir.y, dir.x) / 6.2832 + 0.5 + L.clouds.z * 0.0004;
+    let cells = 40.0;
+    let u = azimuth * cells;
+    var top = 0.0;
+    for (var k = -1; k <= 1; k = k + 1) {
+      let index = floor(u) + f32(k);
+      let h = skyCloudHash3(vec2<f32>(index - floor(index / cells) * cells, 7.0));
+      let present = smoothstep(h.z - 0.1, h.z + 0.1, band * 1.2);
+      let across = (u - index - 0.2 - 0.6 * h.x) / ((0.35 + 0.5 * h.y) * mix(0.6, 1.0, band));
+      let dome = (0.015 + 0.04 * h.y) * size * sqrt(max(1.0 - across * across, 0.0)) * present;
+      top = max(top, dome);
+    }
+    // cauliflower tops: smaller domes heaped on the big ones
+    let small = u * 3.3;
+    var heap = 0.0;
+    for (var k = -1; k <= 1; k = k + 1) {
+      let index = floor(small) + f32(k);
+      let h = skyCloudHash3(vec2<f32>(index - floor(index / (cells * 3.3)) * cells * 3.3, 11.0));
+      let across = (small - index - 0.5) / (0.55 + 0.4 * h.x);
+      heap = max(heap, (0.3 + 0.7 * h.y) * sqrt(max(1.0 - across * across, 0.0)));
+    }
+    top = top * (0.7 + 0.45 * heap);
+    let base = 0.006;
+    let share = smoothstep(base - 0.004, base + 0.002, elevation)
+      * smoothstep(-0.0015, 0.0015, base + top - elevation) * step(0.003, top);
+    if (share > 0.0) {
+      let up = clamp((elevation - base) / max(top, 1e-4), 0.0, 1.0);
+      // lit from the front (the sun behind the eye) white, against the sun
+      // darker with a shining rim
+      let front = 0.5 - 0.5 * dot(normalize(dir.xy + vec2<f32>(1e-4, 0.0)), sunFlat);
+      let rim = 1.0 - smoothstep(0.0, 0.006, base + top - elevation);
+      let color = (ambient * (0.9 + 0.55 * up) + sun * (0.08 + 0.22 * front * up + silver * rim * 0.5) + glow * (0.4 + 0.6 * up))
+        * grayOf;
+      // far away: the haze takes some of it
+      result = skyCloudOver(vec4<f32>(mix(color, sky, 0.3), share * band), result);
+    }
+  }
+  if (dir.z <= 0.0) { return result; }
+  // the layer overhead: on a plane at the clouds' height, nearer the eye
+  // larger; a cell is a cumulus puff's spacing (about 1.6 km at size 1)
+  let p = dir.xy / (dir.z + 0.08) * (height / (1600.0 * size)) + drift;
+  let detail = skyCloudFbm(p * 3.1 + vec2<f32>(1.7, 4.4));
+  // stratus: an even sheet with soft, slow thickness
+  let sheetNoise = skyCloudFbm(p * vec2<f32>(1.4, 2.4));
+  let threshold = mix(0.78, -0.1, cover);
+  let sheet = smoothstep(threshold, threshold + 0.25, sheetNoise * 0.85 + detail * 0.15);
+  let sheetThick = smoothstep(threshold + 0.1, threshold + 0.6, sheetNoise);
+  // cumulus: puffs with smaller puffs heaped on them (cauliflower), closing
+  // into a sheet at full cover; seen at a slant, the far side of a puff is
+  // its flat base (lower on the screen), cut straight and darker
+  let puff = skyCloudPuffs(p, cover);
+  let bud = skyCloudPuffs(p * 2.7 + vec2<f32>(3.3, 1.9), 0.8);
+  let viewFlat = normalize(dir.xy + vec2<f32>(1e-4, 0.0));
+  let slant = 1.0 - smoothstep(0.25, 0.8, dir.z);
+  let farSide = dot(puff.yz, viewFlat);
+  let flatBase = 1.0 - slant * smoothstep(0.35, 0.55, farSide);
+  let lump = max(puff.x, 0.0) * 0.6 + max(bud.x, 0.0) * 0.75 * smoothstep(-0.5, 0.2, puff.x);
+  let body = max((lump - 0.45 * (1.0 - detail)) * flatBase, (cover - 0.85) / 0.15 * detail);
+  let heap = smoothstep(0.0, 0.1, body);
+  let heapThick = smoothstep(0.05, 0.6, body);
+  let share = mix(sheet, heap, kind) * smoothstep(0.0, 0.1, dir.z);
+  if (share <= 0.001) { return result; }
+  let thick = mix(sheetThick, heapThick, kind);
+  // a puff's sunward side lighter, its middle and its base darker
+  // underneath; puffs away from the sun lit on the side we see
+  let sunward = 0.5 + 0.5 * dot(normalize(puff.yz + vec2<f32>(1e-4, 0.0)), sunFlat) * kind;
+  let front = 0.5 - 0.5 * dot(viewFlat, sunFlat);
+  let baseShade = 1.0 - 0.3 * kind * slant * smoothstep(-0.1, 0.5, farSide);
+  let through = (1.0 - thick) * (1.0 - thick);
+  let shade = (mix(1.75, 1.45, dark) - 0.55 * thick * mix(0.3, 1.0, dark) - 0.45 * thick * kind - 0.35 * (sheetNoise - 0.5) * (1.0 - kind)) * baseShade;
+  let lit = 0.05 + 0.06 * sunward + 0.1 * front * kind * (1.0 - 0.5 * thick);
+  let color = (ambient * shade + sun * (lit + silver * through * 0.7) + glow * (1.0 - 0.6 * thick)) * grayOf;
+  return skyCloudOver(vec4<f32>(color, share), result);
 }
 
 // The sky toward `dir`, ready to sum: the physical models (Preetham and
@@ -236,7 +385,7 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   // the weather's clouds over all of it: the sun, the moon and the stars
   // go behind them
   if (kind > 1.5) {
-    let cloud = skyClouds(dir, clearSky);
+    let cloud = skyClouds(dir, clearSky, toSun);
     c = mix(c, cloud.rgb, cloud.w);
   }
   return c;
