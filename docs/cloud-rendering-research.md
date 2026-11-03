@@ -862,11 +862,18 @@ Each step is one queue task that leaves the walkers working.
        slab 0.75-2.5 ms, medians about 1.2, 1.5 and 1.6 ms. The clouds cost a
        few tenths of a millisecond above an empty pass, and the slab is not
        distinguishable from the layer in this noise.
-     - iPhone 15 Pro: off 0 ms (nothing measurable). The slab's passes up to
-       the trace read 1.30-1.35 ms (before the end pass existed; its resolve
-       read 0). The layer and the slab with the end pass are not measured
-       yet: the phone stopped giving its files to devicectl (locked) partway
-       through the runs; queued.
+     - iPhone 15 Pro (2026-11-03, 143 at noon, cumulus 50%, 75 s runs):
+       off 0 ms (one sample of 0.15 ms, the rest 0: nothing measurable); the
+       layer 0.31-0.42 ms, median 0.39 ms (two samples of 0, its passes
+       overlapping the start pass), well inside the phone's 1.5 ms budget
+       (lib/CloudTier). The slab with the end pass is not measured yet: the
+       phone locks after a few minutes and then devicectl cannot copy the
+       app's log; before the end pass existed, its passes up to the trace read
+       1.30-1.35 ms, also inside the budget. The whole frame differed more
+       than the cloud passes: GPU total about 40 ms with the tier off,
+       52-54 ms with the layer (one run each), which the cloud passes' 0.4 ms
+       does not explain; the layer's sky drawing in the lighting pass and the
+       shading's cloud lookups are outside this timing (queued).
      The fallback now reads this number on every device (a phone no longer
      ignores it).
 5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
