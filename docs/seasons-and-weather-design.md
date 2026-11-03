@@ -279,6 +279,12 @@ pass over several hours:
     with cumulus. The light comes from the sun's direction: the edges
     toward the sun shine (a forward-scattering phase), and a low sun lights
     the clouds in its reddened color a while after the ground is dark.
+  - **Cloud shadows** (docs/cloud-rendering-research.md §9 step 2): the
+    clouds' shadow map (lib/CloudShadow) is the same field seen along the
+    key light; the land takes the sun through it, so cumulus shadows lie
+    on it and drift with the clouds, and its average dims the sky light.
+    It replaced the uniform dimming by the cover (the sun to a fifth, the
+    sky to a half under a full cover), which a full cover still matches.
   - **Mist:** RendererMist's density rises when the air is near its dew
     point (cool mornings after a humid day, autumn), and falls by midday.
   - **Rain:** a screen-space or near-camera particle rain, and wet ground

@@ -781,7 +781,18 @@ Each step is one queue task that leaves the walkers working.
      horizon band of cumulus.
    - Add type and height settings to the panel, bound like the weather
      sliders.
-2. **Cloud shadows on the ground and the sky light**: new.
+2. **Cloud shadows on the ground and the sky light**: done (2026-11-03).
+   lib/CloudShadow draws a 256 x 257 RG16Float map (8 km of the clouds'
+   plane round the point above the eye along the key light, snapped to a
+   texel; the last row holds the average) from skyCloudSunThrough each
+   frame, right after the light uniform upload, in its own submission.
+   deferred_shade.wgsl cloudSunLight multiplies the sun by it (four loads,
+   no sampler), cloudSkyLight dims the sky light by its average share of
+   cloud, and a toon band shades only where the map is darker than its
+   average. The uniform dimming in app3d/SettingsSky is gone; the clouds'
+   own light and the water dim by the cover instead. Under a full cover
+   143 at noon keeps its old brightness (ground gray 76 against 74, rain
+   87 against 87).
    - A small 2D cloud shadow map projected along the sun from the same
      field.
    - The deferred sun light multiplies by it; its average dims the sky

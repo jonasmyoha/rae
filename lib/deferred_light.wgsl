@@ -12,6 +12,8 @@
 @group(0) @binding(8) var shadowSamp: sampler_comparison;
 // The SSAO's half-resolution depth (deferred_ao_depth.wgsl), for the upsample.
 @group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
+// The clouds' shadow map (lib/CloudShadow; cloudSunLight in deferred_shade.wgsl)
+@group(0) @binding(10) var cloudShadowTex: texture_2d<f32>;
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
   var points = array<vec2<f32>, 3>(

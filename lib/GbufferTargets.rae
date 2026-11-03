@@ -33,6 +33,7 @@ open GbufferResources
 open GbufferPassesNative
 open GbufferFullscreen
 open SkyClouds
+open CloudShadow
 
 const pyramidMaxMips: Int = 16
 
@@ -107,6 +108,7 @@ type DeferredTargets {
   mistLight: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   # The sky's clouds (SkyClouds, from the Sky's cloud fields; sky_hosek.wgsl)
   clouds: SkyClouds = SkyClouds {}
+  cloudShadow: CloudShadowMap = CloudShadowMap {}
   # uniforms + pipelines (created once, survive resizes)
   lightUniform: BufferId
   taaUniform: BufferId
@@ -979,6 +981,7 @@ func deferredTargetsShutdown(targets: mod DeferredTargets, resources: mod GpuRes
   flushPostPasses(targets: targets, resources: resources)
   drainSubmissions(inFlight: targets.postInFlight, resources: resources)
   retireDeferredTargets(targets: targets, resources: resources)
+  retireCloudShadow(map: targets.cloudShadow, resources: resources)
   retireBuffer(resources: resources, id: targets.lightUniform)
   retireBuffer(resources: resources, id: targets.taaUniform)
   retireRenderPipeline(resources: resources, id: targets.lightPipeline)

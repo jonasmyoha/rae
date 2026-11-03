@@ -17,6 +17,7 @@ open Scene3d
 open Vec3
 open Sky
 open SkyClouds
+open CloudShadow
 open LightUnits
 open webgpu/Webgpu
 open webgpu/Context
@@ -432,7 +433,7 @@ func uploadSceneLight(
   setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
   setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
   setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)
-  ret uploadLightUniform(
+  let uploaded: Bool = uploadLightUniform(
     targets: targets
     resources: resources
     gbuffer: gbuffer
@@ -461,6 +462,15 @@ func uploadSceneLight(
     moonUmbra: sky.moonUmbra
     moonPenumbra: sky.moonPenumbra
   )
+  # the clouds' shadow map, from the uniform just uploaded (lib/CloudShadow)
+  if uploaded {
+    drawCloudShadow(
+      map: targets.cloudShadow
+      resources: resources
+      lightUniform: targets.lightUniform
+    )
+  }
+  ret uploaded
 }
 
 # The deferred lighting pass: upload the light uniform, build the bind
@@ -512,6 +522,7 @@ func lightingPassSky(
     entries.add(value: textureViewRef(id: shadow.arrayView))
     entries.add(value: samplerRef(id: shadow.sampler))
     entries.add(value: textureViewRef(id: targets.aoDepthView))
+    entries.add(value: textureViewRef(id: targets.cloudShadow.textureView))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: targets.lightPipeline

@@ -13,6 +13,8 @@
 // read out). Composed after ssao_upsample.wgsl.
 @group(0) @binding(8) var aoTex: texture_2d<f32>;
 @group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
+// The clouds' shadow map (lib/CloudShadow; cloudSunLight in deferred_shade.wgsl)
+@group(0) @binding(10) var cloudShadowTex: texture_2d<f32>;
 override forwardSsao: f32 = 0.0;
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {

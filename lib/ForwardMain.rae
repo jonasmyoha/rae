@@ -340,6 +340,7 @@ func ensureForwardBinds(
     gbuffer.sdf.forwardInputs.add(value: samplerRef(id: shadow.sampler))
     gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: targets.aoView))
     gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: targets.aoDepthView))
+    gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: targets.cloudShadow.textureView))
     # And the G-buffer materials' forward binds (ForwardMaterial)
     gbuffer.forward.inputs.clear()
     gbuffer.forward.inputs.add(value: bufferRef(id: targets.lightUniform))
@@ -348,6 +349,7 @@ func ensureForwardBinds(
     gbuffer.forward.inputs.add(value: samplerRef(id: shadow.sampler))
     gbuffer.forward.inputs.add(value: textureViewRef(id: targets.aoView))
     gbuffer.forward.inputs.add(value: textureViewRef(id: targets.aoDepthView))
+    gbuffer.forward.inputs.add(value: textureViewRef(id: targets.cloudShadow.textureView))
     gbuffer.forward.inputsGen = gbuffer.forward.inputsGen + 1
   }
   gbuffer.sdf.forwardPipeline = forward.sdfPipeline
@@ -364,6 +366,7 @@ func ensureForwardBinds(
     entries.add(value: samplerRef(id: shadow.sampler))
     entries.add(value: textureViewRef(id: targets.aoView))
     entries.add(value: textureViewRef(id: targets.aoDepthView))
+    entries.add(value: textureViewRef(id: targets.cloudShadow.textureView))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: forward.staticPipeline
