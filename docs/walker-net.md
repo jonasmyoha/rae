@@ -33,15 +33,19 @@ seconds after it joined. With no `RAE_WALKER_NET` an app is offline, as before. 
   walkers from the interpolated table (`shownPoses`).
 - `lib/app3d/remoteWalkerSystem/RemoteWalkerSystem.rae`: the app side. The
   local walker's pose comes from its controller and mover. Each remote
-  walker takes a crowd character and drives it with the crowd's own mover
-  drive: it walks or runs toward the remote pose, jumps when the remote
-  walker takes off, and gets a knock when it falls. So remote walkers use
-  this app's physics, clips and ground. A character more than 3 m from its
-  remote walker is moved there at once. A window shows at most as many
-  remote walkers as it has crowd characters (5); the rest of the crowd
-  keeps wandering.
+  walker that appears gets a character of its own (controller, clip, model,
+  height, mover, name label "Player <n>"), and the character is freed when
+  the walker leaves: its ragdoll taken apart if it lies, its rows in the
+  world and the physics cleared, the entity freed. The character is driven
+  with the crowd's mover drive: it walks or runs toward the remote pose,
+  jumps when the remote walker takes off, and gets a knock when it falls.
+  So remote walkers use this app's physics, clips and ground. A character
+  more than 3 m from its remote walker is moved there at once. A window
+  shows up to 32 remote walkers (the renderer has 64 skin palettes). In a
+  networked session the app has no crowd: every other character is a
+  player.
 - `tools/walkerBot/Main.rae`: a headless host or bot. A bot walks in a
-  circle round the host's walker, jumps every 3 s and falls every 7 s.
+  circle round the host's walker, jumps every 3 s and falls every 15 s.
 - `tools/walkerBot/soak.sh [SECONDS] [BOTS]`: relay, headless host and bots
   joining and leaving in 20 s waves. It fails on a bot that never played, a
   desync, a leak at exit, or host memory that grew between quiet points.

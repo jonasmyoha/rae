@@ -325,12 +325,29 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       treeSet: StylizedTrees.createStylizedTrees()
     )
 
-    let cloneCount: Int = walkerCrowdCount
+    # Settings that say offline take the environment's (RAE_WALKER_NET), so
+    # every walker app can host or join
+    var netSettings: WalkerNetSettings = settings.net
+    if netSettings.mode is WalkerNetMode.offline {
+      netSettings = walkerNetSettingsFromEnvironment()
+    }
+    # The session starts at the first frame (app3d/remoteWalkerSystem
+    # walkerNetAppFrame): the loading before it takes longer than a connect
+    # attempt may
+    # The crowd is offline-only: in a networked session every other
+    # character is a player (app3d/remoteWalkerSystem makes and frees them)
+    var cloneCount: Int = walkerCrowdCount
+    var remoteCapacity: Int = 0
+    if netSettings.mode is not WalkerNetMode.offline {
+      cloneCount = 0
+      remoteCapacity = remoteWalkerMax
+    }
     let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
-    # One skinned instance batch for every character, the hero's and the crowd's
+    # One skinned instance batch for every character: the hero's, the crowd's
+    # and the remote walkers'
     var characterBatch: InstanceBatch = createInstanceBatch(
       mesh: firstPart
-      capacity: 1 + cloneCount
+      capacity: 1 + cloneCount + remoteCapacity
     )
     # The physics cubes: one unit box, scaled per cube (app3d/WalkerPhysics)
     let cubeMesh: MeshHandle = uploadMeshDataForTerrain(
@@ -602,15 +619,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # quad are uploaded into, so both systems are built before it moves into
     # the app.
     # A networked session: hosted, or joined by its token (app3d/walkerNetSystem)
-    # Settings that say offline take the environment's (RAE_WALKER_NET), so
-    # every walker app can host or join
-    var netSettings: WalkerNetSettings = settings.net
-    if netSettings.mode is WalkerNetMode.offline {
-      netSettings = walkerNetSettingsFromEnvironment()
-    }
-    # The session starts at the first frame (app3d/remoteWalkerSystem
-    # walkerNetAppFrame): the loading before it takes longer than a connect
-    # attempt may
     var walkerNet: opt WalkerNet = none
     if netSettings.mode is not WalkerNetMode.offline {
       walkerNet = createWalkerNet(settings: netSettings)
