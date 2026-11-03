@@ -1,0 +1,202 @@
+# Reading a rectangle of the rendered frame back from the GPU without
+# stalling the frame (docs/qr.md, "Scanning the rendered frame"): the
+# canvas's offscreen target holds the composed frame after present; a copy
+# of the rectangle into a staging buffer is recorded and submitted, and on
+# the following frames the submission is polled, the buffer mapped and
+# polled again, so the pixels arrive a frame or two later and nothing waits.
+#
+# Each frame, after present:
+#   frameRegionUpdate(reader:, canvas:)      advance; true when pixels arrived
+#   frameRegionStart(reader:, canvas:, ...)  ask for a rectangle (when idle)
+#
+# While a reader is in use the frame renders into the offscreen target (not
+# straight into the drawable), so there is something to copy: one more
+# full-frame copy per frame (`frameRegionKeepOffscreen`).
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+open webgpu/Webgpu
+open Gpu2dCanvas
+import Math
+
+enum FrameRegionState { idle, copying, mapping }
+
+type FrameRegionReader {
+  state: FrameRegionState
+  buffer: BufferId
+  bufferBytes: Int
+  bytesPerRow: Int
+  width: Int
+  height: Int
+  submission: SubmissionId
+  readback: ReadbackId
+  bytes: List(UInt8)
+  # Frames since the copy was asked for, and how many the last one took
+  framesWaited: Int
+  latencyFrames: Int
+}
+
+func createFrameRegionReader() ret FrameRegionReader {
+  ret FrameRegionReader {
+    state: FrameRegionState.idle
+    buffer: noBufferId()
+    bufferBytes: 0
+    bytesPerRow: 0
+    width: 0
+    height: 0
+    submission: noSubmissionId()
+    readback: noReadbackId()
+    bytes: {}
+    framesWaited: 0
+    latencyFrames: 0
+  }
+}
+
+# Render frames into the offscreen target, so they can be read
+func frameRegionKeepOffscreen(canvas: mod Gpu2dCanvas) {
+  canvas.frameTarget.directAllowed = false
+}
+
+func frameRegionIsIdle(reader: view FrameRegionReader) ret Bool {
+  ret reader.state is FrameRegionState.idle
+}
+
+# Ask for the `width` x `height` rectangle at (`x`, `y`) of the last
+# presented frame (physical pixels, clamped to the frame): false when a read
+# is still going or the frame has no offscreen target
+func frameRegionStart(
+  reader: mod FrameRegionReader
+  canvas: mod Gpu2dCanvas
+  x: view Int
+  y: view Int
+  width: view Int
+  height: view Int
+) ret Bool {
+  if reader.state is not FrameRegionState.idle {
+    ret false
+  }
+  let left: Int = Math.clamp(val: x, low: 0, high: canvas.offscreenWidth - 1)
+  let top: Int = Math.clamp(val: y, low: 0, high: canvas.offscreenHeight - 1)
+  let regionWidth: Int = Math.clamp(val: width, low: 1, high: canvas.offscreenWidth - left)
+  let regionHeight: Int = Math.clamp(val: height, low: 1, high: canvas.offscreenHeight - top)
+  let bytesPerRow: Int = (regionWidth * 4 + 255) / 256 * 256
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if not isValidTexture(resources: resources, id: canvas.offscreenTexture) {
+      ret false
+    }
+    if reader.bufferBytes < bytesPerRow * regionHeight or not isValidBuffer(
+      resources: resources
+      id: reader.buffer
+    ) {
+      if isValidBuffer(resources: resources, id: reader.buffer) {
+        let retired: Bool = retireBuffer(resources: resources, id: reader.buffer)
+      }
+      if let buffer: BufferId = createBuffer(
+        resources: resources
+        size: bytesPerRow * regionHeight
+        usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+      ) {
+        reader.buffer = buffer
+        reader.bufferBytes = bytesPerRow * regionHeight
+      } else {
+        ret false
+      }
+    }
+    if var recording: Recording = beginRecording(resources: resources) {
+      if not recordCopyTextureRegionToBuffer(
+        recording: recording
+        resources: resources
+        texture: canvas.offscreenTexture
+        x: left
+        y: top
+        width: regionWidth
+        height: regionHeight
+        buffer: reader.buffer
+        bytesPerRow: bytesPerRow
+      ) {
+        ret false
+      }
+      if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+        reader.submission = submission
+        reader.bytesPerRow = bytesPerRow
+        reader.width = regionWidth
+        reader.height = regionHeight
+        reader.framesWaited = 0
+        reader.state = FrameRegionState.copying
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# One frame of a read: true when the pixels arrived (in `reader.bytes`;
+# `frameRegionGray` turns them to gray)
+func frameRegionUpdate(reader: mod FrameRegionReader, canvas: mod Gpu2dCanvas) ret Bool {
+  if reader.state is FrameRegionState.idle {
+    ret false
+  }
+  reader.framesWaited = reader.framesWaited + 1
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if reader.state is FrameRegionState.copying {
+      let status: Int = pollSubmission(resources: resources, id: reader.submission)
+      if status is 0 {
+        ret false
+      }
+      let retired: Bool = retireSubmission(resources: resources, id: reader.submission)
+      if status is not 1 {
+        reader.state = FrameRegionState.idle
+        ret false
+      }
+      if let readback: ReadbackId = startReadback(
+        resources: resources
+        buffer: reader.buffer
+        offset: 0
+        size: reader.bytesPerRow * reader.height
+      ) {
+        reader.readback = readback
+        reader.state = FrameRegionState.mapping
+      } else {
+        reader.state = FrameRegionState.idle
+      }
+      ret false
+    }
+    let status: Int = pollReadback(resources: resources, id: reader.readback)
+    if status is 0 {
+      ret false
+    }
+    var arrived: Bool = false
+    if status is 1 {
+      let size: Int = reader.bytesPerRow * reader.height
+      if reader.bytes.length is not size {
+        reader.bytes.clear()
+        reader.bytes.addDefaults(count: size)
+      }
+      arrived = copyReadback(resources: resources, id: reader.readback, destination: reader.bytes)
+    }
+    let retired: Bool = retireReadback(resources: resources, id: reader.readback)
+    reader.state = FrameRegionState.idle
+    reader.latencyFrames = reader.framesWaited
+    ret arrived
+  }
+  reader.state = FrameRegionState.idle
+  ret false
+}
+
+# Release the staging buffer (the app's shutdown, before the canvas's)
+func frameRegionRelease(reader: mod FrameRegionReader, canvas: mod Gpu2dCanvas) {
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if reader.state is FrameRegionState.copying {
+      let retired: Bool = retireSubmission(resources: resources, id: reader.submission)
+    }
+    if reader.state is FrameRegionState.mapping {
+      let retired: Bool = retireReadback(resources: resources, id: reader.readback)
+    }
+    if isValidBuffer(resources: resources, id: reader.buffer) {
+      let retired: Bool = retireBuffer(resources: resources, id: reader.buffer)
+    }
+  }
+  reader.state = FrameRegionState.idle
+}

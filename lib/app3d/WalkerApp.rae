@@ -89,6 +89,7 @@ open app3d/CameraFov
 open app3d/SceneLook
 open app3d/walkerNetSystem/WalkerNetSystem
 open app3d/remoteWalkerSystem/RemoteWalkerSystem
+open app3d/WalkerQrScan
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -654,6 +655,15 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       renderer: renderer
       characterCount: 1 + crowdEntities.length
     )
+    # RAE_WALKER_QR: a cube with a QR code and the camera that scans it
+    let qrScan: WalkerQrScan = createWalkerQrScan(
+      renderer: renderer
+      physicsSystem: physicsSystem
+      world: walkerWorld
+      heroEntityId: heroEntityId
+      groundZ: groundZ
+      biome: biome
+    )
     ret WalkerApp {
       settings: settings
       biome: biome
@@ -737,6 +747,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       netSeam: createNetSeam()
       walkerNet: own walkerNet
       remoteWalkers: createRemoteWalkers()
+      qrScan: own qrScan
       players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       wadeSplash: own wadeSplash

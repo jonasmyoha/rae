@@ -39,6 +39,8 @@ open app3d/RagdollRig
 open app3d/WalkerKnockdown
 open app3d/WalkerKnockTest
 open app3d/WalkerApp
+open app3d/WalkerQrScan
+open qr/qrScanSystem/QrScanSystem
 open app3d/walkerNetSystem/WalkerNetSystem
 
 # A networked session whose time is up (RAE_WALKER_NET_SECONDS) closes the app
@@ -180,8 +182,14 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   }
   loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() and not netSessionOver(
     app: app
-  ) {
+  ) and not walkerQrTestDone(scan: app.qrScan) {
     beginWalkerFrame(app: app)
+    walkerQrAim(
+      scan: app.qrScan
+      world: app.world
+      rig: app.cameraSystem.rig
+      camera: app.cameraSystem.camera
+    )
     updateWalkerApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
       # Park until the OS has something to say (shared policy, lib/ui/event_loop).
@@ -214,6 +222,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
           grassCompute: app.grassCompute
         )
       }
+      walkerQrFrame(scan: app.qrScan, canvas: app.renderSystem.renderer.canvas)
     }
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
@@ -237,6 +246,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     treeForestShutdown(forest: app.terrainSystem.forest, resources: resources)
     shutdown(resources: resources)
   }
+  qrScanRelease(scanner: app.qrScan.scanner, canvas: app.renderSystem.renderer.canvas)
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   destroyPhysicsSystem(physicsSystem: app.physicsSystem)
   shutdown()

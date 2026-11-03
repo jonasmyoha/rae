@@ -61,6 +61,7 @@ func crossCheck(
   dy: view Int
   maxRun: view Int
   finder: view Bool
+  strict: view Bool
 ) ret CrossCheck {
   if not bitAt(image: image, x: x, y: y) {
     ret noCrossCheck()
@@ -70,7 +71,7 @@ func crossCheck(
   var cx: Int = x
   var cy: Int = y
   var phases: Int = 3
-  if not finder {
+  if not finder and not strict {
     phases = 2
   }
   var expectDark: Bool = true
@@ -140,11 +141,24 @@ func crossCheck(
     }
     ret CrossCheck { valid: true, center: center, total: total as Float }
   }
-  # Alignment: light, dark, light, each about a module
-  let module: Float = (middle as Float)
+  # Alignment: the outer dark ring, the light ring, the dark middle, the
+  # light ring, the dark ring: the middle three about a module each, the
+  # rings (strict) at least half one (data next to them may be dark too)
   let before: Float = backward.copyAtFallback(index: 1, fallback: 0) as Float
   let after: Float = forward.copyAtFallback(index: 1, fallback: 0) as Float
-  if Math.abs(value: before - module) > module * 0.7 or Math.abs(value: after - module) > module * 0.7 {
+  if not strict {
+    let single: Float = middle as Float
+    if Math.abs(value: before - single) > single * 0.7 or Math.abs(value: after - single) > single * 0.7 {
+      ret noCrossCheck()
+    }
+    ret CrossCheck { valid: true, center: center, total: single * 3.0 }
+  }
+  let module: Float = ((middle as Float) + before + after) / 3.0
+  let ringBefore: Float = backward.copyAtFallback(index: 2, fallback: 0) as Float
+  let ringAfter: Float = forward.copyAtFallback(index: 2, fallback: 0) as Float
+  if Math.abs(value: before - module) > module * 0.6 or Math.abs(value: after - module) > module * 0.6 or Math.abs(
+    value: (middle as Float) - module
+  ) > module * 0.6 or ringBefore < module * 0.5 or ringAfter < module * 0.5 {
     ret noCrossCheck()
   }
   ret CrossCheck { valid: true, center: center, total: module * 3.0 }
@@ -168,6 +182,7 @@ func confirmFinder(
     dy: 1
     maxRun: maxRun
     finder: true
+    strict: true
   )
   if not vertical.valid or vertical.total > (rowTotal as Float) * 2.0 or vertical.total * 2.0 < (rowTotal as Float) {
     ret none
@@ -180,6 +195,7 @@ func confirmFinder(
     dy: 0
     maxRun: maxRun
     finder: true
+    strict: true
   )
   if not horizontal.valid {
     ret none
@@ -192,6 +208,7 @@ func confirmFinder(
     dy: 1
     maxRun: maxRun
     finder: true
+    strict: true
   )
   if not diagonal.valid {
     ret none
@@ -408,12 +425,17 @@ func findAlignment(
   estimate: view QrPoint
   moduleSize: view Float
   radius: view Float
+  strict: view Bool
 ) ret opt QrPoint {
   let left: Int = Math.clamp(val: (estimate.x - radius) as Int, low: 0, high: image.width - 1)
   let right: Int = Math.clamp(val: (estimate.x + radius) as Int, low: 0, high: image.width - 1)
   let top: Int = Math.clamp(val: (estimate.y - radius) as Int, low: 0, high: image.height - 1)
   let bottom: Int = Math.clamp(val: (estimate.y + radius) as Int, low: 0, high: image.height - 1)
-  let maxRun: Int = (moduleSize * 2.5) as Int + 2
+  # A strict check lets the outer ring run on into dark data
+  var maxRun: Int = (moduleSize * 2.5) as Int + 2
+  if strict {
+    maxRun = (moduleSize * 6.0) as Int + 2
+  }
   var best: Float = -1.0
   var found: QrPoint = estimate
   loop var y: Int = top, y <= bottom, ++y {
@@ -428,6 +450,7 @@ func findAlignment(
           dy: 0
           maxRun: maxRun
           finder: false
+          strict: strict
         )
         if row.valid and Math.abs(value: row.total / 3.0 - moduleSize) < moduleSize * 0.6 {
           let column: CrossCheck = crossCheck(
@@ -438,6 +461,7 @@ func findAlignment(
             dy: 1
             maxRun: maxRun
             finder: false
+            strict: strict
           )
           if column.valid and Math.abs(value: column.total / 3.0 - moduleSize) < moduleSize * 0.6 {
             let point: QrPoint = qrPoint(x: row.center, y: column.center)
