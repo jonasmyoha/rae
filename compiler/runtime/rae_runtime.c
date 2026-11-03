@@ -72,6 +72,7 @@
 #include "runtime_filesystem.c"
 #include "runtime_file_notify.c"
 #include "runtime_net.c"
+#include "runtime_web_socket.c"
 #include "runtime_crypto_platform.c"
 #include "runtime_buffers_math.c"
 /* The cooked sky table. Ahead of every renderer that reads it, and outside

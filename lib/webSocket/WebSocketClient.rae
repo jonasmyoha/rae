@@ -5,6 +5,10 @@
 # close is answered and ends the connection. lib/net/relay uses it as the
 # transport of a client that cannot send UDP (docs/relay.md, "WebSocket").
 #
+# In a browser (the WASM build) there is no TCP socket: the same functions
+# drive the page's own WebSocket instead (lib/webSocket/WebSocketBrowser),
+# which does the handshake and the framing itself.
+#
 # Each frame:
 #   webSocketClientUpdate        write what is queued, read what came
 #   webSocketClientNextBinary    the next binary message (loop until false)
@@ -18,6 +22,7 @@ open webSocket/FrameEncoder
 open webSocket/Handshake
 open crypto/SecureRandom
 import text/Base64
+open webSocket/WebSocketBrowser
 
 enum WebSocketClientState { handshaking, open, closed }
 
@@ -34,6 +39,8 @@ type WebSocketClient {
   expectedAccept: String
   # Mask keys: a xorshift stream seeded from the system's secure random
   maskState: Int
+  # In a browser: the page's WebSocket (WebSocketBrowser), -1 for none
+  browserHandle: Int
 }
 
 # A key's 16 random bytes, or the time when the system gives none
@@ -71,6 +78,16 @@ func webSocketConnect(
     message: createWebSocketMessage()
     expectedAccept: webSocketAccept(key: key)
     maskState: seed
+    browserHandle: -1
+  }
+  when hasBrowserWebSocket {
+    client.browserHandle = browserWebSocketOpenUrl(url: "ws://{host}:{port}{path}")
+    if client.browserHandle < 0 {
+      client.closeCode = -1
+    } else {
+      client.state = WebSocketClientState.handshaking
+    }
+    ret client
   }
   let connected: SocketResult = tcpConnect(host: host, port: port, timeoutMs: timeoutMs)
   if connected.status is not NetStatus.ok {
@@ -97,6 +114,12 @@ func webSocketClientIsClosed(client: view WebSocketClient) ret Bool {
 
 # Close the socket (no closing handshake: `webSocketClientClose` sends one)
 func webSocketClientEnd(client: mod WebSocketClient) {
+  when hasBrowserWebSocket {
+    if client.browserHandle >= 0 {
+      browserWebSocketClose(handle: client.browserHandle)
+      client.browserHandle = -1
+    }
+  }
   if socketIsValid(socketId: client.socketId) {
     socketClose(socketId: client.socketId)
     client.socketId = noSocket()
@@ -106,6 +129,11 @@ func webSocketClientEnd(client: mod WebSocketClient) {
 
 # Say goodbye (a close frame, 1000) and end
 func webSocketClientClose(client: mod WebSocketClient) {
+  when hasBrowserWebSocket {
+    # The page's WebSocket sends the close itself
+    webSocketClientEnd(client: client)
+    ret
+  }
   if client.state is WebSocketClientState.open {
     webSocketAppendHeader(
       output: client.output
@@ -151,6 +179,16 @@ func webSocketClientUpdate(client: mod WebSocketClient) {
   if client.state is WebSocketClientState.closed {
     ret
   }
+  when hasBrowserWebSocket {
+    let state: Int = browserWebSocketState(handle: client.browserHandle)
+    if state is browserWebSocketOpen {
+      client.state = WebSocketClientState.open
+    } else if state is not browserWebSocketConnecting {
+      client.closeCode = -3
+      webSocketClientEnd(client: client)
+    }
+    ret
+  }
   webSocketClientFlush(client: client)
   loop client.state is not WebSocketClientState.closed {
     let read: IoResult = socketReadBuffer(
@@ -190,6 +228,12 @@ func takeHandshakeAnswer(client: mod WebSocketClient) {
 # The next binary message's payload into `out`: false when no whole one is
 # there. Pings are answered on the way; a close ends the connection.
 func webSocketClientNextBinary(client: mod WebSocketClient, out: mod List(UInt8)) ret Bool {
+  when hasBrowserWebSocket {
+    if client.state is not WebSocketClientState.open {
+      ret false
+    }
+    ret browserWebSocketTake(handle: client.browserHandle, out: out)
+  }
   loop client.state is WebSocketClientState.open {
     let result: WebSocketDecodeResult = webSocketDecodeNext(
       state: client.decode
@@ -258,6 +302,14 @@ func webSocketClientSendBinary(
 ) ret Bool {
   if client.state is not WebSocketClientState.open {
     ret false
+  }
+  when hasBrowserWebSocket {
+    ret browserWebSocketSend(
+      handle: client.browserHandle
+      bytes: bytes
+      start: start
+      count: count
+    )
   }
   webSocketAppendMaskedBinary(
     output: client.output
