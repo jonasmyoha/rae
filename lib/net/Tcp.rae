@@ -31,6 +31,7 @@ enum NetStatus {
   connectionRefused
   connectionReset
   invalidAddress
+  messageTooLarge
   tooManyOpen
   unsupported
   failed
@@ -91,6 +92,9 @@ func netStatusFromCode(code: view Int) ret NetStatus {
     which: errorFamilyNotSupported
   ) {
     ret NetStatus.invalidAddress
+  }
+  if isError(code: code, which: errorMessageTooLarge) {
+    ret NetStatus.messageTooLarge
   }
   if isError(code: code, which: errorTooManyFilesProcess) or isError(
     code: code
@@ -175,6 +179,7 @@ func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketR
       host: host
       port: port
       passive: true
+      datagram: false
       records: records.data
       maxRecords: maxAddressRecords
     )
@@ -262,6 +267,7 @@ func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret Sock
       host: host
       port: port
       passive: false
+      datagram: false
       records: records.data
       maxRecords: maxAddressRecords
     )
