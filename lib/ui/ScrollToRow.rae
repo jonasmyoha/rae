@@ -1,0 +1,16 @@
+# ScrollToRow: a request to scroll a list so a row is in view (taken by
+# ui/scrollRootSystem's scrollToRowSystem).
+
+# Where a row brought into view sits in its scroll root's window: at its end
+# (the bottom of a list read from the bottom, near the thumb) or its start
+enum ScrollRowPlace { end, start }
+
+# A request on a virtual `ListView`: scroll its scroll root (the list's own,
+# else its nearest ancestor's) so data row `index` is wholly in view, at the
+# window's `place`. ui/scrollRootSystem's scrollToRowSystem takes it once,
+# before the list binds its rows; a list not laid out yet keeps it until it
+# is. Never authored in a scene: an app sets it (requestScrollToRow).
+type ScrollToRow {
+  index: Int
+  place: ScrollRowPlace = ScrollRowPlace.end
+}

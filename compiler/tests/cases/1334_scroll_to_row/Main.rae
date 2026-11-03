@@ -1,0 +1,260 @@
+# Scroll a list so a row is in view (Components.ScrollToRow,
+# ui/scrollRootSystem/ScrollToRowSystem), headless:
+#   A. the rule: the position that puts a row at the window's end or start,
+#      kept in [floor, 0].
+#   B. a 30-row virtual list in its own 400-point scroll root: row 20 asked
+#      at the end lands at the bottom; the list then binds rows around it;
+#      at the start, clamped to the floor; an index past the end is the last
+#      row; the request is taken once.
+#   C. a list not laid out yet keeps its request until it is.
+#   D. a list that does not overflow its window does not move.
+import ui/Components
+open ui/ScrollToRow
+open ui/Ecs
+open ui/UiSystems
+open ui/listViewSystem/ListViewSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/scrollRootSystem/ScrollToRowSystem
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+
+const rowHeight: Float = 36.0
+
+const rowGap: Float = 4.0
+
+func makeData(count: view Int) ret ListViewData {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    var keys: List(String) = List.create(String, cap: 1)
+    keys.add(value: "label")
+    var values: List(String) = List.create(String, cap: 1)
+    values.add(value: "Row {i}")
+    rows.add(value: ListViewRow { keys: own keys, values: own values })
+  }
+  ret ListViewData { rows: own rows }
+}
+
+func makeListView() ret ListView {
+  ret ListView {
+    itemSceneId: ""
+    itemKeyField: ""
+    itemHeight: rowHeight
+    itemGap: rowGap
+    visibleItemCount: 10
+    overscanRows: 2
+    bindings: List.create(ListViewBinding, cap: 0)
+    loadingSceneId: ""
+    emptySceneId: ""
+    errorSceneId: ""
+    mode: ListViewMode.virtual
+    rowKindField: ""
+    rowScenes: List.create(ListViewRowScene, cap: 0)
+    itemWidth: 0.0
+    fitToColumns: false
+  }
+}
+
+# A list that is its own scroll root, 300 x 400 points, with `count` rows;
+# laid out when `laidOut`
+func makeList(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  count: view Int
+  laidOut: view Bool
+) ret EntityId {
+  let listEntity: EntityId = createEntity(world: world)
+  componentSet(this: world.listViews, entityId: listEntity, data: makeListView())
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: makeData(count: count))
+  componentSet(
+    this: world.scrollRoots
+    entityId: listEntity
+    data: ScrollRoot {
+      axis: ScrollAxis.y
+      floor: ScrollFloorMode.content
+      fixedFloor: 0.0
+      endInset: 0.0
+    }
+  )
+  componentSet(
+    this: world.scrollStates
+    entityId: listEntity
+    data: ScrollState { y: 0.0, velocity: 0.0 }
+  )
+  if laidOut {
+    layOut(uiSystems: uiSystems, listEntity: listEntity)
+  }
+  ret listEntity
+}
+
+func layOut(uiSystems: mod UiSystems, listEntity: view EntityId) {
+  componentSet(
+    this: uiSystems.layout.computedRects
+    entityId: listEntity
+    data: ComputedRect { position: Vec2 { x: 0.0, y: 0.0 }, size: Vec2 { x: 300.0, y: 400.0 } }
+  )
+}
+
+func scrollOf(world: view UiWorld, listEntity: view EntityId) ret Float {
+  ret componentView(this: world.scrollStates, entityId: listEntity).y
+}
+
+func main() {
+  # ----- A. the rule -----
+  log("row at 800 to the end: {scrollRowPosition(
+    rowTop: 800.0
+    rowHeight: 36.0
+    window: 400.0
+    endInset: 0.0
+    floor: -796.0
+    place: ScrollRowPlace.end
+  )}, with a 50-point end band: {scrollRowPosition(
+    rowTop: 800.0
+    rowHeight: 36.0
+    window: 400.0
+    endInset: 50.0
+    floor: -796.0
+    place: ScrollRowPlace.end
+  )}, to the start: {scrollRowPosition(
+    rowTop: 400.0
+    rowHeight: 36.0
+    window: 400.0
+    endInset: 0.0
+    floor: -796.0
+    place: ScrollRowPlace.start
+  )}, past the floor: {scrollRowPosition(
+    rowTop: 1000.0
+    rowHeight: 36.0
+    window: 400.0
+    endInset: 0.0
+    floor: -796.0
+    place: ScrollRowPlace.start
+  )}, the first row: {scrollRowPosition(
+    rowTop: 0.0
+    rowHeight: 36.0
+    window: 400.0
+    endInset: 0.0
+    floor: -796.0
+    place: ScrollRowPlace.end
+  )}")
+
+  # ----- B. a 30-row list -----
+  let scenes: SceneRegistry = createSceneRegistry()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let list: EntityId = makeList(
+    world: world
+    uiSystems: uiSystems
+    count: 30
+    laidOut: true
+  )
+  log("nothing asked: moved {scrollToRowSystem(world: world, uiSystems: uiSystems)}")
+  requestScrollToRow(
+    world: world
+    listEntity: list
+    index: 20
+    place: ScrollRowPlace.end
+  )
+  let moved: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  let position: Float = scrollOf(world: world, listEntity: list)
+  let rowBottom: Float = 20.0 * (rowHeight + rowGap) + rowHeight + position
+  log(
+    "row 20 at the end: moved {moved}, position {position}, its bottom at {rowBottom} of 400, first bound row {listViewFirstRow(
+      lv: makeListView()
+      scrollY: position
+      count: 30
+    )}, requests left {componentCount(this: world.scrollToRows)}"
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: list
+    index: 28
+    place: ScrollRowPlace.start
+  )
+  let toStart: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log(
+    "row 28 at the start: clamped to the floor, position {scrollOf(world: world, listEntity: list)}"
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: list
+    index: 99
+    place: ScrollRowPlace.end
+  )
+  let pastEnd: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log(
+    "row 99 (past the end) at the end: the last row, position {scrollOf(
+      world: world
+      listEntity: list
+    )}"
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: list
+    index: 0
+    place: ScrollRowPlace.end
+  )
+  let first: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log("row 0 at the end: back at the top, position {scrollOf(world: world, listEntity: list)}")
+
+  # ----- C. not laid out yet -----
+  let waiting: EntityId = makeList(
+    world: world
+    uiSystems: uiSystems
+    count: 30
+    laidOut: false
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: waiting
+    index: 20
+    place: ScrollRowPlace.end
+  )
+  let early: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log("not laid out: moved {early}, requests left {componentCount(this: world.scrollToRows)}")
+  layOut(uiSystems: uiSystems, listEntity: waiting)
+  let later: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log(
+    "laid out: moved {later}, position {scrollOf(world: world, listEntity: waiting)}, requests left {componentCount(
+      this: world.scrollToRows
+    )}"
+  )
+
+  # ----- C2. a list never scrolled yet (no ScrollState): it gets one -----
+  let fresh: EntityId = makeList(
+    world: world
+    uiSystems: uiSystems
+    count: 30
+    laidOut: true
+  )
+  componentRemove(this: world.scrollStates, entityId: fresh)
+  requestScrollToRow(
+    world: world
+    listEntity: fresh
+    index: 20
+    place: ScrollRowPlace.end
+  )
+  let freshMoved: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log("never scrolled: moved {freshMoved}, its state {scrollOf(world: world, listEntity: fresh)}")
+
+  # ----- D. a short list -----
+  let short: EntityId = makeList(
+    world: world
+    uiSystems: uiSystems
+    count: 5
+    laidOut: true
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: short
+    index: 4
+    place: ScrollRowPlace.end
+  )
+  let shortMoved: Bool = scrollToRowSystem(world: world, uiSystems: uiSystems)
+  log(
+    "5 rows in 400 points: moved {shortMoved}, position {scrollOf(world: world, listEntity: short)}, requests left {componentCount(
+      this: world.scrollToRows
+    )}"
+  )
+}

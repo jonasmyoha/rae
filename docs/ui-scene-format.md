@@ -573,6 +573,21 @@ default is `"start"`, the top):
 Case 1315 checks a short, a long and a growing list, scrolling away and
 back, and the start anchor.
 
+### Scrolling a list to a row
+
+An app asks for a row of a virtual `ListView` in view with
+`requestScrollToRow(world, listEntity, index, place)` (lib/ui/ScrollToRow,
+ui/scrollRootSystem/ScrollToRowSystem): the list's scroll root (its own,
+else its nearest ancestor's) scrolls so data row `index` is wholly in view
+at the window's `end` (the bottom: a list read from the bottom, near the
+thumb) or `start`, kept within the root's range; an index past the end is
+the last row, and a list that does not overflow its window does not move.
+The request waits in the `scrollToRows` table until
+`scrollToRowSystem(world, uiSystems)` takes it, which the app runs each
+frame before the list system (so the rows bound are the ones now in view);
+it reads the last layout, so a list not laid out yet keeps its request
+until it is. It returns true when a root moved (the frame must draw).
+
 ## 16. `SafeArea`, and a band the host keeps for itself
 
 A node with `SafeArea` lays its content out inside the screen's safe area:
