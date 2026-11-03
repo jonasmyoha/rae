@@ -53,6 +53,7 @@ open RendererDeferredShadow
 open Sky
 open CloudTier
 open CloudShadow
+open CloudSlab
 open Shadow3d
 open ShadowMaps
 open ShadowMapsRecords
@@ -741,6 +742,26 @@ func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
           lightUniform: renderer.passes.targets.lightUniform
           encoder: postEncoder(targets: renderer.passes.targets, resources: resources)
         )
+      }
+      # the slab tier's clouds too, before the lighting pass composites them
+      if tag is RenderTag.lighting and cloudTierRank(tier: renderer.cloudTier) >= 2 and renderer.sky.cloudCover > 0.001 {
+        if ensureCloudSlab(
+          slab: renderer.passes.targets.cloudShadow.slab
+          resources: resources
+          litWidth: renderer.passes.targets.width
+          litHeight: renderer.passes.targets.height
+        ) {
+          unsafe {
+            drawCloudSlab(
+              slab: renderer.passes.targets.cloudShadow.slab
+              resources: resources
+              lightUniform: renderer.passes.targets.lightUniform
+              viewProj: renderer.passes.gbuffer.viewProj
+              encoder: postEncoder(targets: renderer.passes.targets, resources: resources)
+            )
+          }
+          renderer.passes.targets.cloudShadow.slabDrawnByStep = true
+        }
       }
       # the lighting pass records into the same recording after it (and its
       # light upload lands before it is submitted); the forward pass is

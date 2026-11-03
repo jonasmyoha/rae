@@ -1,0 +1,468 @@
+# CloudSlab — the 2.5D slab cloud tier (lib/CloudTier slab,
+# docs/cloud-rendering-research.md §8.1 tier 2, §9 step 4): the clouds as a
+# thin slab ray-marched at half resolution, from the same field the 2D layer
+# draws.
+#
+# Each frame, recorded into the frame's post recording before the lighting
+# pass (GbufferPasses lightingPassSky, or the timed clouds step):
+# 1. the field map (cloud_field.wgsl): the 2D field round the eye, 512 x 512
+#    texels over 32 km, so the march reads a texture instead of the noise;
+# 2. the trace (cloud_slab_trace.wgsl): one pixel of each 2x2 tile of the
+#    half-resolution grid, the four pixels in turn over four frames, marched
+#    8-16 steps through the slab with 3 light steps each; the slab's shape
+#    in height is the profile strip, a 128 x 1 texture (stratus,
+#    stratocumulus, cumulus, as RDR2's cloud LUT);
+# 3. the resolve (cloud_slab_resolve.wgsl): the trace where it is new, the
+#    reprojected history elsewhere, into the half-resolution result, then
+#    copied into the history for the next frame.
+# The deferred lighting pass upsamples the result over the sky
+# (deferred_light.wgsl cloudSlabAt). The forward pass keeps the layer.
+import Math
+open Math3d
+open gpu/GpuResources
+open gpu/GpuRender
+open gpu/GpuLifetime
+open gpu/GpuTextures
+open gpu/GpuIds
+open gpu/GpuArgs
+open gpu/GpuRenderTransfer
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open GbufferFullscreen
+
+const cloudFieldTexels: Int = 512
+
+const cloudProfileTexels: Int = 128
+
+# SlabU: prevViewProj, pattern, sizes (24 floats)
+const cloudSlabUniformBytes: Int = 96
+
+type CloudSlab {
+  field: TextureId = noTextureId()
+  fieldView: TextureViewId = noTextureViewId()
+  profile: TextureId = noTextureId()
+  profileView: TextureViewId = noTextureViewId()
+  trace: TextureId = noTextureId()
+  traceView: TextureViewId = noTextureViewId()
+  resolved: TextureId = noTextureId()
+  resolvedView: TextureViewId = noTextureViewId()
+  history: TextureId = noTextureId()
+  historyView: TextureViewId = noTextureViewId()
+  uniform: BufferId = noBufferId()
+  fieldPipeline: RenderPipelineId = noRenderPipelineId()
+  tracePipeline: RenderPipelineId = noRenderPipelineId()
+  resolvePipeline: RenderPipelineId = noRenderPipelineId()
+  fieldBind: BindGroupId = noBindGroupId()
+  traceBind: BindGroupId = noBindGroupId()
+  resolveBind: BindGroupId = noBindGroupId()
+  # the light uniform the binds read
+  boundUniform: BufferId = noBufferId()
+  # the half-resolution size (the resolve's); 0 before the first frame
+  width: Int = 0
+  height: Int = 0
+  # bumped when the textures are made again (the lighting pass's bind
+  # follows it)
+  generation: Int = 0
+  frame: Int = 0
+  lastViewProj: List(Float) = List.create(Float, cap: 16)
+}
+
+# The profile strip: density by height in the column (0 base .. 1 top), in
+# red a stratus sheet (thin, even), in green stratocumulus (lower, rounder),
+# in blue cumulus (a flat base, a rounded top)
+func cloudProfileBytes() ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: cloudProfileTexels * 4)
+  loop var i: Int = 0, i < cloudProfileTexels, ++i {
+    let h: Float = (i.toFloat() + 0.5) / cloudProfileTexels.toFloat()
+    let stratus: Float = cloudRamp(from: 0.0, to: 0.12, value: h) * (1.0 - cloudRamp(
+      from: 0.55
+      to: 1.0
+      value: h
+    ))
+    let strato: Float = cloudRamp(from: 0.0, to: 0.08, value: h) * (1.0 - cloudRamp(
+      from: 0.35
+      to: 0.95
+      value: h
+    ))
+    let cumulus: Float = cloudRamp(from: 0.0, to: 0.04, value: h) * Math.sqrt(
+      x: Math.max(a: 1.0 - h * h, b: 0.0)
+    )
+    bytes.add(value: cloudByte(value: stratus))
+    bytes.add(value: cloudByte(value: strato))
+    bytes.add(value: cloudByte(value: cumulus))
+    bytes.add(value: 255)
+  }
+  ret bytes
+}
+
+func cloudRamp(from: view Float, to: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - from) / (to - from), low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+func cloudByte(value: view Float) ret UInt8 {
+  ret (Math.clamp(val: value, low: 0.0, high: 1.0) * 255.0 + 0.5).toInt() as UInt8
+}
+
+func cloudSlabTexture(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  format: view Int32
+  usage: view UInt64
+  texture: mod TextureId
+  textureView: mod TextureViewId
+) {
+  let viewRetired: Bool = retireTextureView(resources: resources, id: textureView)
+  let textureRetired: Bool = retireTexture(resources: resources, id: texture)
+  texture = noTextureId()
+  textureView = noTextureViewId()
+  if let made: TextureId = createTexture(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+  ) {
+    texture = made
+    if let madeView: TextureViewId = createTextureView(resources: resources, texture: made) {
+      textureView = madeView
+    }
+  }
+}
+
+# The slab's textures, pipelines and uniform for a lit target of `litWidth`
+# x `litHeight`, made once and again when the size changes; false while they
+# cannot be made
+func ensureCloudSlab(
+  slab: mod CloudSlab
+  resources: mod GpuResources
+  litWidth: view Int
+  litHeight: view Int
+) ret Bool {
+  let width: Int = Math.max(a: (litWidth + 1) / 2, b: 2)
+  let height: Int = Math.max(a: (litHeight + 1) / 2, b: 2)
+  let attach: UInt64 = WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+  if not isValidTextureView(resources: resources, id: slab.fieldView) {
+    cloudSlabTexture(
+      resources: resources
+      width: cloudFieldTexels
+      height: cloudFieldTexels
+      format: WGPUTextureFormat_RGBA16Float
+      usage: attach
+      texture: slab.field
+      textureView: slab.fieldView
+    )
+    cloudSlabTexture(
+      resources: resources
+      width: cloudProfileTexels
+      height: 1
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+      texture: slab.profile
+      textureView: slab.profileView
+    )
+    let written: Bool = writeTexture(
+      resources: resources
+      texture: slab.profile
+      bytes: cloudProfileBytes()
+      bytesPerRow: cloudProfileTexels * 4
+    )
+    slab.generation = slab.generation + 1
+  }
+  if width is not slab.width or height is not slab.height or not isValidTextureView(
+    resources: resources
+    id: slab.resolvedView
+  ) {
+    cloudSlabTexture(
+      resources: resources
+      width: (width + 1) / 2
+      height: (height + 1) / 2
+      format: WGPUTextureFormat_RGBA16Float
+      usage: attach
+      texture: slab.trace
+      textureView: slab.traceView
+    )
+    cloudSlabTexture(
+      resources: resources
+      width: width
+      height: height
+      format: WGPUTextureFormat_RGBA16Float
+      usage: attach + WGPUTextureUsage_CopySrc
+      texture: slab.resolved
+      textureView: slab.resolvedView
+    )
+    cloudSlabTexture(
+      resources: resources
+      width: width
+      height: height
+      format: WGPUTextureFormat_RGBA16Float
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+      texture: slab.history
+      textureView: slab.historyView
+    )
+    slab.width = width
+    slab.height = height
+    slab.lastViewProj.clear()
+    slab.generation = slab.generation + 1
+    retireCloudSlabBinds(slab: slab, resources: resources)
+  }
+  if not isValidBuffer(resources: resources, id: slab.uniform) {
+    if let made: BufferId = createBuffer(
+      resources: resources
+      size: cloudSlabUniformBytes
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      slab.uniform = made
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: slab.tracePipeline) {
+    let fieldShader: Shader = shader(
+      files: [
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/cloud_slab_common.wgsl"
+        "lib/cloud_field.wgsl"
+      ]
+    )
+    let traceShader: Shader = shader(
+      files: [
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/cloud_slab_common.wgsl"
+        "lib/cloud_slab_trace.wgsl"
+      ]
+    )
+    let resolveShader: Shader = shader(
+      files: [
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/cloud_slab_common.wgsl"
+        "lib/cloud_slab_resolve.wgsl"
+      ]
+    )
+    slab.fieldPipeline = createFullscreenPipeline(
+      resources: resources
+      shader: fieldShader
+      format: WGPUTextureFormat_RGBA16Float
+    )
+    slab.tracePipeline = createFullscreenPipeline(
+      resources: resources
+      shader: traceShader
+      format: WGPUTextureFormat_RGBA16Float
+    )
+    slab.resolvePipeline = createFullscreenPipeline(
+      resources: resources
+      shader: resolveShader
+      format: WGPUTextureFormat_RGBA16Float
+    )
+  }
+  ret isValidTextureView(resources: resources, id: slab.resolvedView) and isValidRenderPipeline(
+    resources: resources
+    id: slab.resolvePipeline
+  ) and isValidBuffer(resources: resources, id: slab.uniform)
+}
+
+func retireCloudSlabBinds(slab: mod CloudSlab, resources: mod GpuResources) {
+  let fieldRetired: Bool = retireBindGroup(resources: resources, id: slab.fieldBind)
+  let traceRetired: Bool = retireBindGroup(resources: resources, id: slab.traceBind)
+  let resolveRetired: Bool = retireBindGroup(resources: resources, id: slab.resolveBind)
+  slab.fieldBind = noBindGroupId()
+  slab.traceBind = noBindGroupId()
+  slab.resolveBind = noBindGroupId()
+}
+
+func cloudSlabBinds(
+  slab: mod CloudSlab
+  resources: mod GpuResources
+  lightUniform: view BufferId
+) ret Bool {
+  if not (slab.boundUniform is lightUniform) {
+    retireCloudSlabBinds(slab: slab, resources: resources)
+    slab.boundUniform = lightUniform
+  }
+  if not bindGroupIsUsable(resources: resources, id: slab.fieldBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+    entries.add(value: bufferRef(id: lightUniform))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: slab.fieldPipeline
+      entries: entries
+    ) {
+      slab.fieldBind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: slab.traceBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: lightUniform))
+    entries.add(value: bufferRef(id: slab.uniform))
+    entries.add(value: textureViewRef(id: slab.fieldView))
+    entries.add(value: textureViewRef(id: slab.profileView))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: slab.tracePipeline
+      entries: entries
+    ) {
+      slab.traceBind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: slab.resolveBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: lightUniform))
+    entries.add(value: bufferRef(id: slab.uniform))
+    entries.add(value: textureViewRef(id: slab.traceView))
+    entries.add(value: textureViewRef(id: slab.historyView))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: slab.resolvePipeline
+      entries: entries
+    ) {
+      slab.resolveBind = bind
+    }
+  }
+  ret bindGroupIsUsable(resources: resources, id: slab.fieldBind) and bindGroupIsUsable(
+    resources: resources
+    id: slab.traceBind
+  ) and bindGroupIsUsable(resources: resources, id: slab.resolveBind)
+}
+
+# The 2x2 tile's pixel traced in `frame`: the four in turn, diagonals first
+func cloudSlabPatternX(frame: view Int) ret Float {
+  let step: Int = frame % 4
+  if step is 1 or step is 2 {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+func cloudSlabPatternY(frame: view Int) ret Float {
+  let step: Int = frame % 4
+  if step is 1 or step is 3 {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+# Record this frame's slab into `encoder` (the frame's post recording), from
+# the light uniform `lightUniform` and the frame's view-projection
+# `viewProj` (the unjittered one); the result is ready for the lighting pass
+func drawCloudSlab(
+  slab: mod CloudSlab
+  resources: mod GpuResources
+  lightUniform: view BufferId
+  viewProj: view Mat4
+  encoder: copy Ptr
+) {
+  unsafe {
+    if encoder is webgpuNull() or slab.width < 2 {
+      ret
+    }
+  }
+  if not cloudSlabBinds(slab: slab, resources: resources, lightUniform: lightUniform) {
+    ret
+  }
+  var current: List(Float) = List.create(Float, cap: 16)
+  loop let value: Float in viewProj.m {
+    current.add(value: value)
+  }
+  if slab.lastViewProj.length < 16 {
+    slab.lastViewProj = current
+  }
+  var writer: ArgWriter = createArgs(uniform: true)
+  let pushed: Bool = pushMat4(writer: writer, columns: slab.lastViewProj)
+  pushVec4F(
+    writer: writer
+    x: cloudSlabPatternX(frame: slab.frame)
+    y: cloudSlabPatternY(frame: slab.frame)
+    z: (slab.frame % 64).toFloat()
+    w: 0.0
+  )
+  pushVec4F(
+    writer: writer
+    x: ((slab.width + 1) / 2).toFloat()
+    y: ((slab.height + 1) / 2).toFloat()
+    z: slab.width.toFloat()
+    w: slab.height.toFloat()
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: slab.uniform
+    offset: 0
+  )
+  unsafe {
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: slab.fieldPipeline
+      bind: slab.fieldBind
+      target: textureViewHandle(resources: resources, id: slab.fieldView)
+    )
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: slab.tracePipeline
+      bind: slab.traceBind
+      target: textureViewHandle(resources: resources, id: slab.traceView)
+    )
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: slab.resolvePipeline
+      bind: slab.resolveBind
+      target: textureViewHandle(resources: resources, id: slab.resolvedView)
+    )
+    let from: Ptr = textureHandle(resources: resources, id: slab.resolved)
+    let into: Ptr = textureHandle(resources: resources, id: slab.history)
+    if from is not webgpuNull() and into is not webgpuNull() {
+      let source: WGPUTexelCopyTextureInfo = { texture: from, aspect: WGPUTextureAspect_All }
+      let destination: WGPUTexelCopyTextureInfo = { texture: into, aspect: WGPUTextureAspect_All }
+      let extent: WGPUExtent3D = { width: slab.width, height: slab.height, depthOrArrayLayers: 1 }
+      wgpuCommandEncoderCopyTextureToTexture(
+        commandEncoder: encoder
+        source: source
+        destination: destination
+        copySize: extent
+      )
+    }
+  }
+  slab.lastViewProj = current
+  slab.frame = slab.frame + 1
+}
+
+# The slab's GPU objects (renderer shutdown)
+func retireCloudSlab(slab: mod CloudSlab, resources: mod GpuResources) {
+  retireCloudSlabBinds(slab: slab, resources: resources)
+  let pipelines: List(RenderPipelineId) = [
+    slab.fieldPipeline
+    slab.tracePipeline
+    slab.resolvePipeline
+  ]
+  loop let pipeline: view RenderPipelineId in pipelines {
+    let retired: Bool = retireRenderPipeline(resources: resources, id: pipeline)
+  }
+  let views: List(TextureViewId) = [
+    slab.fieldView
+    slab.profileView
+    slab.traceView
+    slab.resolvedView
+    slab.historyView
+  ]
+  loop let textureView: view TextureViewId in views {
+    let retired: Bool = retireTextureView(resources: resources, id: textureView)
+  }
+  let textures: List(TextureId) = [
+    slab.field
+    slab.profile
+    slab.trace
+    slab.resolved
+    slab.history
+  ]
+  loop let texture: view TextureId in textures {
+    let retired: Bool = retireTexture(resources: resources, id: texture)
+  }
+  let bufferRetired: Bool = retireBuffer(resources: resources, id: slab.uniform)
+  slab = CloudSlab {}
+}
