@@ -13,6 +13,7 @@ import SdfText
 import String
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
 open ui/Components
 open ui/Ecs
 open ui/UiSystems
@@ -24,13 +25,18 @@ open ui/safeAreaSystem/SafeAreaSystem
 open ui/DevicePresets
 open app3d/UiShell
 
-# Where a node landed after layout, in points; not shown when inactive
+# Where a node landed after layout, in points, as far as its clipping
+# ancestors let it be seen; not shown when inactive or clipped away
 type LayoutBox {
   shown: Bool
   x: Float
   y: Float
   w: Float
   h: Float
+  # The node's whole size, clipped or not: what a finger can hit when it
+  # scrolls into view (a touch target's size)
+  fullW: Float = 0.0
+  fullH: Float = 0.0
 }
 
 func hiddenLayoutBox() ret LayoutBox {
@@ -88,13 +94,67 @@ func layoutBoxOfEntity(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
-  ret LayoutBox {
+  var box: LayoutBox = {
     shown: true
     x: placed.position.x
     y: placed.position.y
     w: sized.size.x * placed.scale.x
     h: sized.size.y * placed.scale.y
+    fullW: sized.size.x * placed.scale.x
+    fullH: sized.size.y * placed.scale.y
   }
+  # What its clipping ancestors (Overflow clip: a scroll window) let be
+  # seen: a list row scrolled out of its window is not shown, and one half
+  # out of it is shown only as far as it is in
+  var current: EntityId = { index: entityId.index, generation: entityId.generation }
+  loop componentHas(this: uiSystems.hierarchy.parents, entityId: current) {
+    let link: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = { index: link.parent.index, generation: link.parent.generation }
+    if layoutClips(world: world, entityId: current) and componentHas(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: current
+    ) and componentHas(this: uiSystems.layout.computedRects, entityId: current) {
+      let clipPlaced: view WorldTransform2D = componentView(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: current
+      )
+      let clipSized: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: current
+      )
+      let left: Float = Math.max(a: box.x, b: clipPlaced.position.x)
+      let top: Float = Math.max(a: box.y, b: clipPlaced.position.y)
+      let right: Float = Math.min(
+        a: box.x + box.w
+        b: clipPlaced.position.x + clipSized.size.x * clipPlaced.scale.x
+      )
+      let bottom: Float = Math.min(
+        a: box.y + box.h
+        b: clipPlaced.position.y + clipSized.size.y * clipPlaced.scale.y
+      )
+      if right <= left or bottom <= top {
+        ret hiddenLayoutBox()
+      }
+      box = LayoutBox {
+        shown: true
+        x: left
+        y: top
+        w: right - left
+        h: bottom - top
+        fullW: box.fullW
+        fullH: box.fullH
+      }
+    }
+  }
+  ret box
+}
+
+# Does `entityId` clip its descendants (Overflow clip)?
+func layoutClips(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.overflows, entityId: entityId) is false {
+    ret false
+  }
+  ret componentView(this: world.overflows, entityId: entityId).mode is OverflowMode.clip
 }
 
 # Inside a `width` x `height` window less its safe-area insets (half a point
