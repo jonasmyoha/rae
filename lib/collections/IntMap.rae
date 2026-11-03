@@ -199,11 +199,43 @@ func remove(V: type, this: mod IntMap(V), k: view Int) {
         ret
       }
       if entry.k is k {
+        # Backward-shift deletion, as in StringMap.remove: linear probing
+        # with no tombstones, so merely clearing the slot cut the probe
+        # chain and every key that had probed past it became unreachable
+        # (a relay's peers of one session vanished after another session's
+        # peer was removed). Pull back each entry of the run whose home slot
+        # is not cyclically inside (hole, probe], carrying the dead entry to
+        # the final hole.
         entry.occupied = false
         rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+        let dead: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+        var hole: Int = idx
+        var probe: Int = idx
+        loop true {
+          probe = (probe + 1) % this.cap
+          let next: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: probe)
+          if not next.occupied or probe is idx {
+            break
+          }
+          var home: Int = next.k % this.cap
+          if home < 0 {
+            home = -home
+          }
+          var stays: Bool = false
+          if hole < probe {
+            stays = home > hole and home <= probe
+          } else {
+            stays = home > hole or home <= probe
+          }
+          if not stays {
+            rae_ext_rae_buf_set(buf: this.data, index: hole, value: next)
+            hole = probe
+          }
+        }
+        rae_ext_rae_buf_set(buf: this.data, index: hole, value: dead)
         # The removed value ends here: release its heap. The slot stays
         # unoccupied, so nothing reads it again.
-        rae_ext_rae_buf_drop_at(buf: this.data, index: idx)
+        rae_ext_rae_buf_drop_at(buf: this.data, index: hole)
         this.length = this.length - 1
         ret
       }

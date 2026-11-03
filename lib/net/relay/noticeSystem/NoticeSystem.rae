@@ -1,0 +1,26 @@
+# The relay's notice system: tells a host which players left, and the
+# players of a closed session that it is over (best effort, once: a host
+# also notices a silent player through its connection's own timeout).
+open ecs/ComponentTable
+open ecs/Event
+open net/Wire
+open net/relay/RelayWire
+open net/relay/RelayServer
+
+func noticeSystem(server: mod RelayServer) {
+  let leftCount: Int = eventCount(this: server.peersLeft)
+  loop var i: Int = 0, i < leftCount, ++i {
+    let left: PeerLeftEvent = eventAt(this: server.peersLeft, i: i)
+    if let host: RelayPeer = componentCopy(this: server.peers, entityId: left.hostEntityId) {
+      relayWriteKind(packet: server.outbox, kind: relayKindPeerLeft)
+      writeU32(bytes: server.outbox, value: left.peerId)
+      sendOutbox(server: server, address: host.address)
+    }
+  }
+  let closedCount: Int = eventCount(this: server.sessionsClosed)
+  loop var i: Int = 0, i < closedCount, ++i {
+    let closed: SessionClosedEvent = eventAt(this: server.sessionsClosed, i: i)
+    relayWriteKind(packet: server.outbox, kind: relayKindClosed)
+    sendOutbox(server: server, address: closed.playerAddress)
+  }
+}

@@ -1,0 +1,125 @@
+# The relay's session system: answers this frame's control requests. A host
+# opens a session and gets its token; a player joins with a token and gets
+# its peer id; a peer that leaves is removed. A reply that was lost is
+# answered again when the request comes again (the client retries).
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open net/Udp
+open net/Wire
+open net/relay/RelayWire
+open net/relay/RelayServer
+
+func sessionSystem(server: mod RelayServer) {
+  let count: Int = eventCount(this: server.requests)
+  loop var i: Int = 0, i < count, ++i {
+    let request: RelayRequestEvent = eventAt(this: server.requests, i: i)
+    if request.kind is relayKindOpen {
+      takeOpen(server: server, request: request)
+    } else if request.kind is relayKindJoin {
+      takeJoin(server: server, request: request)
+    } else if request.kind is relayKindLeave {
+      if componentHas(this: server.peers, entityId: request.peerEntityId) {
+        removePeer(server: server, peerEntityId: request.peerEntityId)
+      }
+    }
+  }
+}
+
+func refuse(server: mod RelayServer, request: view RelayRequestEvent, reason: view Int) {
+  relayWriteRequest(packet: server.outbox, kind: relayKindRefused, requestId: request.requestId)
+  writeU8(bytes: server.outbox, value: reason)
+  sendOutbox(server: server, address: request.address)
+  server.stats.refused = server.stats.refused + 1
+}
+
+func sendOpened(
+  server: mod RelayServer
+  request: view RelayRequestEvent
+  sessionEntityId: view EntityId
+) {
+  relayWriteRequest(packet: server.outbox, kind: relayKindOpened, requestId: request.requestId)
+  let session: view RelaySession = componentView(this: server.sessions, entityId: sessionEntityId)
+  appendCopy(
+    destination: server.outbox
+    source: session.token
+    start: 0
+    count: relayTokenBytes
+  )
+  sendOutbox(server: server, address: request.address)
+}
+
+func sendJoined(server: mod RelayServer, request: view RelayRequestEvent, peerId: view Int) {
+  relayWriteRequest(packet: server.outbox, kind: relayKindJoined, requestId: request.requestId)
+  writeU32(bytes: server.outbox, value: peerId)
+  sendOutbox(server: server, address: request.address)
+}
+
+func takeOpen(server: mod RelayServer, request: view RelayRequestEvent) {
+  if not isNone(this: request.peerEntityId) {
+    # Already a peer: the host of a session asking again (its reply was
+    # lost) gets the same token; a player cannot host as well
+    let peer: RelayPeer = componentCopyOrNone(server: server, peerEntityId: request.peerEntityId)
+    if peer.peerId is hostPeerId {
+      sendOpened(server: server, request: request, sessionEntityId: peer.sessionEntityId)
+    } else {
+      server.stats.packetsDropped = server.stats.packetsDropped + 1
+    }
+    ret
+  }
+  if componentCount(this: server.sessions) >= server.config.maxSessions {
+    refuse(server: server, request: request, reason: refusedRelayFull)
+    ret
+  }
+  let sessionEntityId: EntityId = openSession(server: server, address: request.address)
+  if isNone(this: sessionEntityId) {
+    refuse(server: server, request: request, reason: refusedRelayFull)
+    ret
+  }
+  sendOpened(server: server, request: request, sessionEntityId: sessionEntityId)
+}
+
+func componentCopyOrNone(server: view RelayServer, peerEntityId: view EntityId) ret RelayPeer {
+  if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
+    ret peer
+  }
+  ret RelayPeer { address: noNetAddress(), sessionEntityId: noEntity(), peerId: -1, lastHeardNs: 0 }
+}
+
+func takeJoin(server: mod RelayServer, request: view RelayRequestEvent) {
+  let sessionEntityId: EntityId = sessionWithToken(
+    server: server
+    tokenHigh: request.tokenHigh
+    tokenLow: request.tokenLow
+  )
+  if not isNone(this: request.peerEntityId) {
+    # Already in this session (the joined reply was lost): the same peer id
+    let peer: RelayPeer = componentCopyOrNone(server: server, peerEntityId: request.peerEntityId)
+    if peer.sessionEntityId is sessionEntityId and peer.peerId is not hostPeerId {
+      sendJoined(server: server, request: request, peerId: peer.peerId)
+    } else {
+      server.stats.packetsDropped = server.stats.packetsDropped + 1
+    }
+    ret
+  }
+  if isNone(this: sessionEntityId) {
+    refuse(server: server, request: request, reason: refusedUnknownSession)
+    ret
+  }
+  let session: mod RelaySession = componentMod(this: server.sessions, entityId: sessionEntityId)
+  if session.playerCount >= server.config.maxPlayersPerSession {
+    refuse(server: server, request: request, reason: refusedSessionFull)
+    ret
+  }
+  let peerId: Int = session.nextPeerId
+  session.nextPeerId = peerId + 1
+  session.playerCount = session.playerCount + 1
+  let peerEntityId: EntityId = addPeer(
+    server: server
+    address: request.address
+    sessionEntityId: sessionEntityId
+    peerId: peerId
+  )
+  server.stats.playersJoined = server.stats.playersJoined + 1
+  sendJoined(server: server, request: request, peerId: peerId)
+}

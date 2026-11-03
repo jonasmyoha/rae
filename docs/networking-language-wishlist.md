@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-4/12 but are not. They are listed so the
+These looked like gaps during 1/12-5/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender
@@ -56,3 +56,9 @@ next task does not propose them again.
   the inline fixed-size type, and `[]` is absent from both by decision
   (`docs/array-vs-list-indexing.md`). Use the vendored C library if X25519
   ever becomes the bottleneck.
+- **A generic "run until this holds" (5/12).** The relay test
+  (`compiler/tests/cases/1269_relay_sessions`) writes each wait as its own
+  `loop now < deadline and not <condition>`, because Rae has no function
+  values to pass a condition in. This is already recorded and deferred
+  (`docs/concurrency-model.md`, `docs/ecs-systems-and-data-observation.md`).
+  The relay code itself needed none.

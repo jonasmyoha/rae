@@ -1,0 +1,145 @@
+# The relay's packets (lib/net/relay): what a host or player and the relay
+# say to each other over UDP. Shared by the relay (RelayServer and its
+# systems) and its clients (RelayClient).
+#
+# Every packet starts with its kind (1 byte). The ones a client sends:
+#   open      host -> relay   request id (4)
+#   join      player -> relay request id (4), session token (16)
+#   forward   client -> relay destination peer id (4), payload
+#   keepAlive client -> relay (nothing)
+#   leave     client -> relay (nothing)
+# The ones the relay sends:
+#   opened    relay -> host   request id (4), session token (16)
+#   joined    relay -> player request id (4), peer id (4)
+#   refused   relay -> client request id (4), reason (1)
+#   forward   relay -> client source peer id (4), payload
+#   peerLeft  relay -> host   peer id (4)
+#   closed    relay -> player (nothing): the session ended
+#
+# The host is peer 0; players are 1, 2, ... in the order they joined. A
+# player forwards only to the host, the host to any of its players. The
+# payload is opaque to the relay (a sealed lib/net/Connection packet), and a
+# client sees only peer ids, never another client's address.
+open net/Wire
+
+const relayKindOpen: Int = 201
+
+const relayKindOpened: Int = 202
+
+const relayKindJoin: Int = 203
+
+const relayKindJoined: Int = 204
+
+const relayKindRefused: Int = 205
+
+const relayKindForward: Int = 206
+
+const relayKindKeepAlive: Int = 207
+
+const relayKindLeave: Int = 208
+
+const relayKindPeerLeft: Int = 209
+
+const relayKindClosed: Int = 210
+
+# Refusal reasons
+const refusedUnknownSession: Int = 1
+
+const refusedSessionFull: Int = 2
+
+const refusedRelayFull: Int = 3
+
+# The session token's size, and the forward header's (kind, peer id)
+const relayTokenBytes: Int = 16
+
+const forwardHeaderBytes: Int = 5
+
+# The host's peer id
+const hostPeerId: Int = 0
+
+# The largest datagram either side reads (a 1200-byte protocol packet plus
+# the forward header, with room to spare)
+const relayDatagramBytes: Int = 2048
+
+func relayWriteRequest(packet: mod List(UInt8), kind: view Int, requestId: view Int) {
+  packet.clear()
+  writeU8(bytes: packet, value: kind)
+  writeU32(bytes: packet, value: requestId)
+}
+
+func relayWriteKind(packet: mod List(UInt8), kind: view Int) {
+  packet.clear()
+  writeU8(bytes: packet, value: kind)
+}
+
+# The forward header for `peerId`, ahead of a payload the caller appends
+func relayWriteForwardHeader(packet: mod List(UInt8), peerId: view Int) {
+  packet.clear()
+  writeU8(bytes: packet, value: relayKindForward)
+  writeU32(bytes: packet, value: peerId)
+}
+
+# The 16 token bytes as 32 lowercase hex digits (to pass a token on: a join
+# code, a command line)
+func relayTokenText(token: view List(UInt8)) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < token.length, ++i {
+    let byte: Int = readU8(bytes: token, offset: i)
+    text = "{text}{tokenHexDigit(value: byte shr 4)}{tokenHexDigit(value: byte bitand 15)}"
+  }
+  ret text
+}
+
+func tokenHexDigit(value: view Int) ret String {
+  if value < 10 {
+    ret "{value}"
+  }
+  if value is 10 {
+    ret "a"
+  }
+  if value is 11 {
+    ret "b"
+  }
+  if value is 12 {
+    ret "c"
+  }
+  if value is 13 {
+    ret "d"
+  }
+  if value is 14 {
+    ret "e"
+  }
+  ret "f"
+}
+
+func tokenHexValue(code: view Int) ret Int {
+  if code >= 48 and code <= 57 {
+    ret code - 48
+  }
+  if code >= 97 and code <= 102 {
+    ret code - 87
+  }
+  if code >= 65 and code <= 70 {
+    ret code - 55
+  }
+  ret -1
+}
+
+# The token written as 32 hex digits into `token` (replacing its contents):
+# false when the text is not 32 hex digits
+func relayTokenFromText(text: view String, token: mod List(UInt8)) ret Bool {
+  token.clear()
+  if text.length() is not relayTokenBytes * 2 {
+    ret false
+  }
+  loop var i: Int = 0, i < relayTokenBytes, ++i {
+    let high: Int = tokenHexValue(code: text.byteAt(index: 2 * i))
+    let low: Int = tokenHexValue(code: text.byteAt(index: 2 * i + 1))
+    if high < 0 or low < 0 {
+      token.clear()
+      ret false
+    }
+    token.add(value: (high * 16 + low) as UInt8)
+  }
+  ret true
+}

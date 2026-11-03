@@ -1,0 +1,215 @@
+# lib/net/Connections over the relay (docs/relay.md): the host keeps one
+# Connection per player, the player one to the host, and every protocol
+# packet travels as a relay forward, sealed (the relay never reads it).
+#
+# Each frame: `relayHostReceive` / `relayPlayerReceive` takes what came
+# through the relay into the connections, the app reads and queues messages
+# on them (connectionReceive, connectionSendReliable, ...), then
+# `relayHostSend` / `relayPlayerSend` sends what the connections have.
+#
+# On the host a player appears with its first connect request (a new peer
+# id) and goes when the relay says it left or its connection closes or
+# times out: `host.peersLeft` lists this frame's leavers.
+open net/Tcp
+open net/Udp
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayClient
+
+type HostPeer {
+  peerId: Int
+  connection: Connection
+}
+
+type RelayHost {
+  client: RelayClient
+  connectionConfig: ConnectionConfig
+  peers: List(HostPeer)
+  # The peer ids that left since the last relayHostReceive
+  peersLeft: List(Int)
+  packet: List(UInt8)
+}
+
+type RelayPlayer {
+  client: RelayClient
+  connection: Connection
+  # The relay said the session is over
+  sessionClosed: Bool
+  packet: List(UInt8)
+}
+
+func createRelayHost(
+  relayAddress: view NetAddress
+  clientConfig: view RelayClientConfig
+  connectionConfig: view ConnectionConfig
+) ret RelayHost {
+  ret RelayHost {
+    client: createRelayClient(relayAddress: relayAddress, config: clientConfig)
+    connectionConfig: connectionConfig
+    peers: {}
+    peersLeft: {}
+    packet: List.create(UInt8, cap: relayDatagramBytes)
+  }
+}
+
+func createRelayPlayer(
+  relayAddress: view NetAddress
+  clientConfig: view RelayClientConfig
+  connectionConfig: view ConnectionConfig
+) ret RelayPlayer {
+  ret RelayPlayer {
+    client: createRelayClient(relayAddress: relayAddress, config: clientConfig)
+    connection: createConnection(config: connectionConfig)
+    sessionClosed: false
+    packet: List.create(UInt8, cap: relayDatagramBytes)
+  }
+}
+
+# The index of player `peerId` in `host.peers`, -1 for none
+func hostPeerIndex(host: view RelayHost, peerId: view Int) ret Int {
+  loop var i: Int = 0, i < host.peers.length, ++i {
+    if let peer: view HostPeer = host.peers.viewAt(index: i) {
+      if peer.peerId is peerId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func dropHostPeer(host: mod RelayHost, index: view Int) {
+  if let peer: view HostPeer = host.peers.viewAt(index: index) {
+    host.peersLeft.add(value: peer.peerId)
+  }
+  host.peers.remove(index: index)
+}
+
+# Take everything the relay has for the host: packets into their players'
+# connections (a connect request from a new peer id makes its connection),
+# and players that left
+func relayHostReceive(host: mod RelayHost, nowMs: view Int) {
+  host.peersLeft.clear()
+  relayClientUpdate(client: host.client, nowMs: nowMs)
+  loop {
+    let incoming: RelayIncoming = relayClientReceive(client: host.client, nowMs: nowMs)
+    if incoming.kind is RelayIncomingKind.none {
+      ret
+    }
+    if incoming.kind is RelayIncomingKind.peerLeft {
+      let index: Int = hostPeerIndex(host: host, peerId: incoming.peerId)
+      if index >= 0 {
+        dropHostPeer(host: host, index: index)
+      }
+    } else if incoming.kind is RelayIncomingKind.packet {
+      var index: Int = hostPeerIndex(host: host, peerId: incoming.peerId)
+      if index < 0 and packetIsConnectRequest(
+        packet: host.client.inbox
+        start: incoming.start
+        count: incoming.count
+      ) {
+        var connection: Connection = createConnection(config: host.connectionConfig)
+        connectionListen(connection: connection, nowMs: nowMs)
+        host.peers.add(value: HostPeer { peerId: incoming.peerId, connection: connection })
+        index = host.peers.length - 1
+      }
+      if let peer: mod HostPeer = host.peers.modAt(index: index) {
+        let taken: Bool = connectionReadPacket(
+          connection: peer.connection
+          packet: host.client.inbox
+          start: incoming.start
+          count: incoming.count
+          nowMs: nowMs
+        )
+      }
+    }
+  }
+}
+
+# Send what every player's connection has; a closed or silent one goes
+func relayHostSend(host: mod RelayHost, nowMs: view Int) {
+  var i: Int = 0
+  loop i < host.peers.length {
+    var gone: Bool = false
+    if let peer: mod HostPeer = host.peers.modAt(index: i) {
+      connectionUpdate(connection: peer.connection, nowMs: nowMs)
+      loop connectionWritePacket(connection: peer.connection, packet: host.packet, nowMs: nowMs) {
+        let sent: IoResult = relayClientSend(
+          client: host.client
+          peerId: peer.peerId
+          bytes: host.packet
+          start: 0
+          count: host.packet.length
+          nowMs: nowMs
+        )
+      }
+      let state: ConnectionState = peer.connection.state
+      gone = state is ConnectionState.disconnected or state is ConnectionState.timedOut or state is ConnectionState.failed
+    }
+    if gone {
+      dropHostPeer(host: host, index: i)
+    } else {
+      i = i + 1
+    }
+  }
+}
+
+# Join the session `tokenText` names and start connecting to its host
+func relayPlayerJoin(
+  player: mod RelayPlayer
+  tokenText: view String
+  connectionId: view Int
+  nowMs: view Int
+) ret Bool {
+  if not relayClientJoin(client: player.client, tokenText: tokenText, nowMs: nowMs) {
+    ret false
+  }
+  connectionConnect(connection: player.connection, connectionId: connectionId, nowMs: nowMs)
+  ret true
+}
+
+# Take what the relay has for the player into its connection
+func relayPlayerReceive(player: mod RelayPlayer, nowMs: view Int) {
+  relayClientUpdate(client: player.client, nowMs: nowMs)
+  loop {
+    let incoming: RelayIncoming = relayClientReceive(client: player.client, nowMs: nowMs)
+    if incoming.kind is RelayIncomingKind.none {
+      ret
+    }
+    if incoming.kind is RelayIncomingKind.sessionClosed {
+      player.sessionClosed = true
+    } else if incoming.kind is RelayIncomingKind.packet and incoming.peerId is hostPeerId {
+      let taken: Bool = connectionReadPacket(
+        connection: player.connection
+        packet: player.client.inbox
+        start: incoming.start
+        count: incoming.count
+        nowMs: nowMs
+      )
+    }
+  }
+}
+
+# Send what the player's connection has (once the relay has let it in)
+func relayPlayerSend(player: mod RelayPlayer, nowMs: view Int) {
+  connectionUpdate(connection: player.connection, nowMs: nowMs)
+  if not relayClientIsReady(client: player.client) {
+    ret
+  }
+  loop connectionWritePacket(connection: player.connection, packet: player.packet, nowMs: nowMs) {
+    let sent: IoResult = relayClientSend(
+      client: player.client
+      peerId: hostPeerId
+      bytes: player.packet
+      start: 0
+      count: player.packet.length
+      nowMs: nowMs
+    )
+  }
+}
+
+# Leave: the connection says goodbye through the relay, then the relay is
+# told (call relayPlayerSend for a few frames between the two when the
+# goodbye matters)
+func relayPlayerLeave(player: mod RelayPlayer, nowMs: view Int) {
+  relayClientLeave(client: player.client, nowMs: nowMs)
+}

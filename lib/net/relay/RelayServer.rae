@@ -1,0 +1,351 @@
+# The relay's World: sessions and peers as entities, the UDP socket and the
+# lookups as resources (docs/relay.md). The systems that run over it are in
+# their own folders; lib/net/relay/Relay.rae runs them in order each frame.
+#
+# A session is an entity with a RelaySession: its token and its host. A
+# peer (the host or a player) is an entity with a RelayPeer: its UDP
+# address, its session and its peer id. The relay forwards a peer's packets
+# to the other side of its session without reading them, so the host and
+# the players see only the relay's address and each other's peer ids.
+#
+# Silent peers time out (`peerTimeoutMs`): a player is removed and its host
+# told; a host takes its session with it, and its players are told.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open collections/IntMap
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/relay/RelayWire
+open crypto/SecureRandom
+
+# ----- components -------------------------------------------------------------
+type RelayPeer {
+  address: NetAddress
+  sessionEntityId: EntityId
+  # 0 for the host, 1, 2, ... for players
+  peerId: Int
+  # The monotonic time (nowNs) a packet last came from this peer
+  lastHeardNs: Int
+}
+
+type RelaySession {
+  token: List(UInt8)
+  hostEntityId: EntityId
+  nextPeerId: Int
+  playerCount: Int
+}
+
+# ----- events -----------------------------------------------------------------
+
+# A control packet, decoded by the receive system for the session system
+type RelayRequestEvent {
+  kind: Int
+  address: NetAddress
+  requestId: Int
+  # The sender's peer entity (leave), noEntity() when it has none
+  peerEntityId: EntityId
+  # join: the token, as its two 8-byte halves
+  tokenHigh: Int
+  tokenLow: Int
+}
+
+# A player left its session (it said so, or went silent): its host is told
+type PeerLeftEvent {
+  hostEntityId: EntityId
+  peerId: Int
+}
+
+# A session ended (its host left or went silent): its players are told
+type SessionClosedEvent {
+  playerAddress: NetAddress
+}
+
+# ----- the World --------------------------------------------------------------
+type RelayConfig {
+  # A peer silent this long is removed
+  peerTimeoutMs: Int
+  maxPlayersPerSession: Int
+  maxSessions: Int
+}
+
+type RelayStats {
+  sessionsOpened: Int
+  playersJoined: Int
+  packetsForwarded: Int
+  bytesForwarded: Int
+  # Packets from unknown addresses, malformed or not allowed
+  packetsDropped: Int
+  refused: Int
+  timedOut: Int
+}
+
+type RelayServer {
+  entities: EntityAllocator
+  peers: ComponentTable(RelayPeer)
+  sessions: ComponentTable(RelaySession)
+  # Resources
+  udpSocket: UdpSocket
+  config: RelayConfig
+  # Address key -> peer entity; token key -> session entity; (session, peer
+  # id) key -> peer entity
+  peersByAddress: IntMap(EntityId)
+  sessionsByToken: IntMap(EntityId)
+  peersBySessionPeerId: IntMap(EntityId)
+  requests: EventQueue(RelayRequestEvent)
+  peersLeft: EventQueue(PeerLeftEvent)
+  sessionsClosed: EventQueue(SessionClosedEvent)
+  # One received datagram, one packet being sent, and peers to remove
+  inbox: List(UInt8)
+  outbox: List(UInt8)
+  expired: List(EntityId)
+  stats: RelayStats
+  # The monotonic clock of this frame, and when the next timeout scan is due
+  frameNs: Int
+  nextTimeoutScanNs: Int
+}
+
+func defaultRelayConfig() ret RelayConfig {
+  ret RelayConfig { peerTimeoutMs: 10000, maxPlayersPerSession: 128, maxSessions: 4096 }
+}
+
+# A relay on `host`:`port` (0 picks a free port: `relayPort`); its `udpSocket`
+# status says whether it opened
+func createRelayServer(
+  host: view String
+  port: view Int
+  config: view RelayConfig
+) ret RelayServer {
+  ret RelayServer {
+    entities: createEntityAllocator()
+    peers: create()
+    sessions: create()
+    udpSocket: udpOpen(host: host, port: port)
+    config: config
+    peersByAddress: createIntMap(EntityId, cap: 256)
+    sessionsByToken: createIntMap(EntityId, cap: 64)
+    peersBySessionPeerId: createIntMap(EntityId, cap: 256)
+    requests: createEventQueue(RelayRequestEvent)
+    peersLeft: createEventQueue(PeerLeftEvent)
+    sessionsClosed: createEventQueue(SessionClosedEvent)
+    inbox: List.create(UInt8, cap: relayDatagramBytes)
+    outbox: List.create(UInt8, cap: relayDatagramBytes)
+    expired: List.create(EntityId, cap: 64)
+    stats: {
+      sessionsOpened: 0
+      playersJoined: 0
+      packetsForwarded: 0
+      bytesForwarded: 0
+      packetsDropped: 0
+      refused: 0
+      timedOut: 0
+    }
+    frameNs: nowNs()
+    nextTimeoutScanNs: 0
+  }
+}
+
+func relayPort(server: view RelayServer) ret Int {
+  if let port: Int = socketLocalPort(socketId: server.udpSocket.socketId) {
+    ret port
+  }
+  ret -1
+}
+
+func closeRelayServer(server: mod RelayServer) {
+  udpClose(udpSocket: server.udpSocket)
+}
+
+# ----- keys -------------------------------------------------------------------
+
+# A map key for an address (equal addresses, equal keys; a rare collision is
+# caught by comparing the stored address)
+func addressKey(address: view NetAddress) ret Int {
+  let mixed: Int = address.low bitxor (address.high shl 7) bitxor (address.port shl 40) bitxor (address.scopeId shl 20)
+  ret mixed bitand 4611686018427387903
+}
+
+func sessionPeerKey(sessionEntityId: view EntityId, peerId: view Int) ret Int {
+  ret (sessionEntityId.index shl 32) bitor (peerId bitand 4294967295)
+}
+
+func tokenKey(tokenLow: view Int) ret Int {
+  ret tokenLow bitand 4611686018427387903
+}
+
+# The 8-byte big-endian half of `bytes` at `offset`
+func readHalf(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret (readU32(bytes: bytes, offset: offset) shl 32) bitor readU32(bytes: bytes, offset: offset + 4)
+}
+
+# ----- lookups ----------------------------------------------------------------
+
+# The peer sending from `address`, noEntity() for a stranger
+func peerAt(server: view RelayServer, address: view NetAddress) ret EntityId {
+  if let peerEntityId: EntityId = server.peersByAddress.get(k: addressKey(address: address)) {
+    if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
+      if netAddressEquals(first: peer.address, second: address) {
+        ret peerEntityId
+      }
+    }
+  }
+  ret noEntity()
+}
+
+# The session holding `tokenHigh`/`tokenLow`, noEntity() for none
+func sessionWithToken(
+  server: view RelayServer
+  tokenHigh: view Int
+  tokenLow: view Int
+) ret EntityId {
+  if let sessionEntityId: EntityId = server.sessionsByToken.get(k: tokenKey(tokenLow: tokenLow)) {
+    if let session: RelaySession = componentCopy(this: server.sessions, entityId: sessionEntityId) {
+      if readHalf(bytes: session.token, offset: 0) is tokenHigh and readHalf(
+        bytes: session.token
+        offset: 8
+      ) is tokenLow {
+        ret sessionEntityId
+      }
+    }
+  }
+  ret noEntity()
+}
+
+func peerInSession(
+  server: view RelayServer
+  sessionEntityId: view EntityId
+  peerId: view Int
+) ret EntityId {
+  if let peerEntityId: EntityId = server.peersBySessionPeerId.get(
+    k: sessionPeerKey(sessionEntityId: sessionEntityId, peerId: peerId)
+  ) {
+    ret peerEntityId
+  }
+  ret noEntity()
+}
+
+# ----- sending ----------------------------------------------------------------
+
+# Send `server.outbox` to `address` (best effort: UDP)
+func sendOutbox(server: view RelayServer, address: view NetAddress) {
+  let sent: IoResult = udpSend(
+    udpSocket: server.udpSocket
+    bytes: server.outbox
+    start: 0
+    count: server.outbox.length
+    destination: address
+  )
+}
+
+# ----- making and removing ----------------------------------------------------
+func addPeer(
+  server: mod RelayServer
+  address: view NetAddress
+  sessionEntityId: view EntityId
+  peerId: view Int
+) ret EntityId {
+  let peerEntityId: EntityId = allocEntity(this: server.entities)
+  componentSet(
+    this: server.peers
+    entityId: peerEntityId
+    data: RelayPeer {
+      address: address
+      sessionEntityId: sessionEntityId
+      peerId: peerId
+      lastHeardNs: server.frameNs
+    }
+  )
+  server.peersByAddress.set(k: addressKey(address: address), value: peerEntityId)
+  server.peersBySessionPeerId.set(
+    k: sessionPeerKey(sessionEntityId: sessionEntityId, peerId: peerId)
+    value: peerEntityId
+  )
+  ret peerEntityId
+}
+
+func forgetPeer(server: mod RelayServer, peerEntityId: view EntityId, peer: view RelayPeer) {
+  server.peersByAddress.remove(k: addressKey(address: peer.address))
+  server.peersBySessionPeerId.remove(
+    k: sessionPeerKey(sessionEntityId: peer.sessionEntityId, peerId: peer.peerId)
+  )
+  componentRemove(this: server.peers, entityId: peerEntityId)
+  freeEntity(this: server.entities, entityId: peerEntityId)
+}
+
+# Remove a peer (it left or went silent). A player's host hears of it; a
+# host's session closes and its players hear of that.
+func removePeer(server: mod RelayServer, peerEntityId: view EntityId) {
+  if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
+    if peer.peerId is hostPeerId {
+      closeSession(server: server, sessionEntityId: peer.sessionEntityId)
+      ret
+    }
+    forgetPeer(server: server, peerEntityId: peerEntityId, peer: peer)
+    if componentHas(this: server.sessions, entityId: peer.sessionEntityId) {
+      let session: mod RelaySession = componentMod(
+        this: server.sessions
+        entityId: peer.sessionEntityId
+      )
+      session.playerCount = session.playerCount - 1
+      eventSend(
+        this: server.peersLeft
+        value: PeerLeftEvent { hostEntityId: session.hostEntityId, peerId: peer.peerId }
+      )
+    }
+  }
+}
+
+# End a session: its players hear of it, then every peer and the session go
+func closeSession(server: mod RelayServer, sessionEntityId: view EntityId) {
+  if let session: RelaySession = componentCopy(this: server.sessions, entityId: sessionEntityId) {
+    loop var peerId: Int = 0, peerId < session.nextPeerId, ++peerId {
+      let peerEntityId: EntityId = peerInSession(
+        server: server
+        sessionEntityId: sessionEntityId
+        peerId: peerId
+      )
+      if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
+        if peerId is not hostPeerId {
+          eventSend(
+            this: server.sessionsClosed
+            value: SessionClosedEvent { playerAddress: peer.address }
+          )
+        }
+        forgetPeer(server: server, peerEntityId: peerEntityId, peer: peer)
+      }
+    }
+    server.sessionsByToken.remove(k: tokenKey(tokenLow: readHalf(bytes: session.token, offset: 8)))
+    componentRemove(this: server.sessions, entityId: sessionEntityId)
+    freeEntity(this: server.entities, entityId: sessionEntityId)
+  }
+}
+
+# A new session hosted from `address`: its token is random (false when the
+# system has no random source)
+func openSession(server: mod RelayServer, address: view NetAddress) ret EntityId {
+  var token: List(UInt8) = List.create(UInt8, cap: relayTokenBytes)
+  token.addDefaults(count: relayTokenBytes)
+  if not secureRandomFill(bytes: token, start: 0, count: relayTokenBytes) {
+    ret noEntity()
+  }
+  let sessionEntityId: EntityId = allocEntity(this: server.entities)
+  let tokenLow: Int = readHalf(bytes: token, offset: 8)
+  componentSet(
+    this: server.sessions
+    entityId: sessionEntityId
+    data: RelaySession { token: token, hostEntityId: noEntity(), nextPeerId: 1, playerCount: 0 }
+  )
+  server.sessionsByToken.set(k: tokenKey(tokenLow: tokenLow), value: sessionEntityId)
+  let hostEntityId: EntityId = addPeer(
+    server: server
+    address: address
+    sessionEntityId: sessionEntityId
+    peerId: hostPeerId
+  )
+  let session: mod RelaySession = componentMod(this: server.sessions, entityId: sessionEntityId)
+  session.hostEntityId = hostEntityId
+  server.stats.sessionsOpened = server.stats.sessionsOpened + 1
+  ret sessionEntityId
+}
