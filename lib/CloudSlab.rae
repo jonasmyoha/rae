@@ -17,6 +17,11 @@
 #    copied into the history for the next frame.
 # The deferred lighting pass upsamples the result over the sky
 # (deferred_light.wgsl cloudSlabAt). The forward pass keeps the layer.
+#
+# The volumetric tier (lib/CloudTier volumetric) is the same passes with
+# another trace (cloud_volume_trace.wgsl): a deep cloud volume shaped by 3D
+# noise, `steps` steps (48 at High, 64 at Ultra), 5 light samples and two
+# scattering octaves.
 import Math
 open Math3d
 open gpu/GpuResources
@@ -54,9 +59,12 @@ type CloudSlab {
   uniform: BufferId = noBufferId()
   fieldPipeline: RenderPipelineId = noRenderPipelineId()
   tracePipeline: RenderPipelineId = noRenderPipelineId()
+  # the volumetric tier's trace (cloud_volume_trace.wgsl), the same bindings
+  volumePipeline: RenderPipelineId = noRenderPipelineId()
   resolvePipeline: RenderPipelineId = noRenderPipelineId()
   fieldBind: BindGroupId = noBindGroupId()
   traceBind: BindGroupId = noBindGroupId()
+  volumeBind: BindGroupId = noBindGroupId()
   resolveBind: BindGroupId = noBindGroupId()
   # the light uniform the binds read
   boundUniform: BufferId = noBufferId()
@@ -236,6 +244,14 @@ func ensureCloudSlab(
         "lib/cloud_slab_trace.wgsl"
       ]
     )
+    let volumeShader: Shader = shader(
+      files: [
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/cloud_slab_common.wgsl"
+        "lib/cloud_volume_trace.wgsl"
+      ]
+    )
     let resolveShader: Shader = shader(
       files: [
         "lib/sky_hosek.wgsl"
@@ -254,6 +270,11 @@ func ensureCloudSlab(
       shader: traceShader
       format: WGPUTextureFormat_RGBA16Float
     )
+    slab.volumePipeline = createFullscreenPipeline(
+      resources: resources
+      shader: volumeShader
+      format: WGPUTextureFormat_RGBA16Float
+    )
     slab.resolvePipeline = createFullscreenPipeline(
       resources: resources
       shader: resolveShader
@@ -269,9 +290,11 @@ func ensureCloudSlab(
 func retireCloudSlabBinds(slab: mod CloudSlab, resources: mod GpuResources) {
   let fieldRetired: Bool = retireBindGroup(resources: resources, id: slab.fieldBind)
   let traceRetired: Bool = retireBindGroup(resources: resources, id: slab.traceBind)
+  let volumeRetired: Bool = retireBindGroup(resources: resources, id: slab.volumeBind)
   let resolveRetired: Bool = retireBindGroup(resources: resources, id: slab.resolveBind)
   slab.fieldBind = noBindGroupId()
   slab.traceBind = noBindGroupId()
+  slab.volumeBind = noBindGroupId()
   slab.resolveBind = noBindGroupId()
 }
 
@@ -307,6 +330,20 @@ func cloudSlabBinds(
       entries: entries
     ) {
       slab.traceBind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: slab.volumeBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: lightUniform))
+    entries.add(value: bufferRef(id: slab.uniform))
+    entries.add(value: textureViewRef(id: slab.fieldView))
+    entries.add(value: textureViewRef(id: slab.profileView))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: slab.volumePipeline
+      entries: entries
+    ) {
+      slab.volumeBind = bind
     }
   }
   if not bindGroupIsUsable(resources: resources, id: slab.resolveBind) {
@@ -356,6 +393,8 @@ func drawCloudSlab(
   viewProj: view Mat4
   encoder: copy Ptr
   cloudTiming: mod CloudTiming
+  volumetric: view Bool
+  steps: view Int
 ) {
   unsafe {
     if encoder is webgpuNull() or slab.width < 2 {
@@ -379,7 +418,7 @@ func drawCloudSlab(
     x: cloudSlabPatternX(frame: slab.frame)
     y: cloudSlabPatternY(frame: slab.frame)
     z: (slab.frame % 64).toFloat()
-    w: 0.0
+    w: steps.toFloat()
   )
   pushVec4F(
     writer: writer
@@ -403,14 +442,25 @@ func drawCloudSlab(
       target: textureViewHandle(resources: resources, id: slab.fieldView)
       timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud field")
     )
-    runFullscreenInBatchTimed(
-      encoder: encoder
-      resources: resources
-      pipeline: slab.tracePipeline
-      bind: slab.traceBind
-      target: textureViewHandle(resources: resources, id: slab.traceView)
-      timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud trace")
-    )
+    if volumetric and bindGroupIsUsable(resources: resources, id: slab.volumeBind) {
+      runFullscreenInBatchTimed(
+        encoder: encoder
+        resources: resources
+        pipeline: slab.volumePipeline
+        bind: slab.volumeBind
+        target: textureViewHandle(resources: resources, id: slab.traceView)
+        timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud volume")
+      )
+    } else {
+      runFullscreenInBatchTimed(
+        encoder: encoder
+        resources: resources
+        pipeline: slab.tracePipeline
+        bind: slab.traceBind
+        target: textureViewHandle(resources: resources, id: slab.traceView)
+        timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud trace")
+      )
+    }
     runFullscreenInBatchTimed(
       encoder: encoder
       resources: resources
@@ -443,6 +493,7 @@ func retireCloudSlab(slab: mod CloudSlab, resources: mod GpuResources) {
   let pipelines: List(RenderPipelineId) = [
     slab.fieldPipeline
     slab.tracePipeline
+    slab.volumePipeline
     slab.resolvePipeline
   ]
   loop let pipeline: view RenderPipelineId in pipelines {

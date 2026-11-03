@@ -6,7 +6,7 @@
 # The tier is chosen in three layers, each only lowering the one before:
 # - the game's ceiling, CloudSettings (maxTier, preferredTier), set in code;
 # - the device's starting tier, at run time: a phone (or a browser on one)
-#   starts at the layer, a desktop at the slab; and the quality setting
+#   starts at the layer, a desktop at the volumetric clouds; and the quality setting
 #   (the app maps its low / mid / high steps, cloudTierForQuality);
 # - the measured fallback (cloudTierFrame): when the clouds' own GPU time
 #   stays over its budget for a window of frames, or the OS reports a
@@ -20,7 +20,7 @@
 enum CloudTier { off, layer, slab, volumetric }
 
 # The highest tier that exists; a higher one draws this one
-const cloudTierBuilt: CloudTier = CloudTier.slab
+const cloudTierBuilt: CloudTier = CloudTier.volumetric
 
 # The game's ceiling, set in code: the highest tier it ever wants, and the
 # one it prefers (the start, before the device and the quality lower it)
@@ -115,20 +115,25 @@ func cloudTierNamed(name: view String) ret opt CloudTier {
 }
 
 # The tier a device starts at: a phone or a tablet (or a browser on one) the
-# layer, a desktop the slab
+# layer, a desktop the volumetric clouds (its quality setting lowers them:
+# Mid the slab, Low the layer)
 func cloudDeviceTier(mobile: view Bool) ret CloudTier {
   if mobile {
     ret CloudTier.layer
   }
-  ret CloudTier.slab
+  ret CloudTier.volumetric
 }
 
-# The clouds' GPU budget a frame: 1.5 ms on a phone, 2.5 ms on a desktop
+# The clouds' GPU budget a frame: 1.5 ms on a phone, 4 ms on a desktop.
+# Their time (lib/CloudTiming) is wall-clock GPU time, an upper bound: on a
+# Mac shared with other work it read 1.2-1.5 ms for the off tier and the
+# layer alike, so a desktop's budget sits that much above the 2-4 ms the
+# console engines spend (docs/cloud-rendering-research.md §9 step 5).
 func cloudTierBudgetMicroseconds(mobile: view Bool) ret Int {
   if mobile {
     ret 1500
   }
-  ret 2500
+  ret 4000
 }
 
 # The tier a quality step allows (0 low, 1 mid, 2 high, 3 ultra): low the

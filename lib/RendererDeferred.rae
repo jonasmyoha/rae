@@ -125,6 +125,8 @@ type DeferredRenderer {
   # The cloud tier drawn (lib/CloudTier, setCloudTier): copied into the sky
   # of each frame
   cloudTier: CloudTier = CloudTier.layer
+  # the volumetric tier's march steps (setCloudSteps)
+  cloudSteps: Int = 48
   # The look applied by the composite pass (#556). Defaults to neutralGrade(),
   # which is exactly the historical ACES-plus-gamma result -- opting in is the
   # app's call, so this library cannot silently restyle an example that was
@@ -611,6 +613,7 @@ func renderDeferredPassWith(
       sky = renderer.sky
     }
     sky.cloudTier = renderer.cloudTier
+    sky.cloudSteps = renderer.cloudSteps
     lightingPassSky(
       cache: renderer.passes.light
       resources: resources
@@ -851,6 +854,11 @@ func flushDeferredWork(renderer: mod DeferredRenderer) {
 # app's CloudTierControl decides it
 func setCloudTier(renderer: mod DeferredRenderer, tier: view CloudTier) {
   renderer.cloudTier = tier
+}
+
+# The volumetric tier's march steps: more is smoother and dearer
+func setCloudSteps(renderer: mod DeferredRenderer, steps: view Int) {
+  renderer.cloudSteps = steps
 }
 
 func setRendererSky(renderer: mod DeferredRenderer, sky: view Sky) pub {
