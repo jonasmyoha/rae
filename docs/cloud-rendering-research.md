@@ -873,9 +873,14 @@ Each step is one queue task that leaves the walkers working.
        than the cloud passes: GPU total about 40 ms with the tier off,
        52-54 ms with the layer (one run each), which the cloud passes' 0.4 ms
        does not explain; the slab's run, which draws the layer's cirrus and
-       band and the same shading lookups, was about 41 ms, so the layer's
-       52-54 ms was more likely a disturbed run than its cost (queued to
-       repeat).
+       band and the same shading lookups, was about 41 ms. Repeated with the
+       tiers alternating (off, layer, layer, off; 60 s each): the frame's
+       GPU total follows the phone's thermal state, not the tier. At
+       thermal state 0 off was 40.3 ms and the layer 42.9-43.7 ms (its first
+       samples); once the phone reached state 1 ("fair") the layer was
+       52-57 ms and off, run after it, 51-56 ms. The 12 ms was the phone
+       warming and slowing its GPU; the layer's whole-frame cost at a cool
+       phone is within about 2-3 ms of off, nothing to cut yet.
      The fallback now reads this number on every device (a phone no longer
      ignores it).
 5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
