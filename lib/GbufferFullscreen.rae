@@ -127,6 +127,28 @@ func runFullscreenInBatch(
   target: copy Ptr
 ) unsafe {
   unsafe {
+    runFullscreenInBatchTimed(
+      encoder: encoder
+      resources: resources
+      pipeline: pipeline
+      bind: bind
+      target: target
+      timestampWrites: webgpuNull()
+    )
+  }
+}
+
+# runFullscreenInBatch with timestamp writes on the pass (gpu/GpuTiming
+# timingWrites; null: untimed)
+func runFullscreenInBatchTimed(
+  encoder: copy Ptr
+  resources: view GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  target: copy Ptr
+  timestampWrites: copy Ptr
+) unsafe {
+  unsafe {
     if target is webgpuNull() or encoder is webgpuNull() {
       ret
     }
@@ -142,7 +164,11 @@ func runFullscreenInBatch(
         storeOp: WGPUStoreOp_Store
       }
     )
-    let rpDesc: WGPURenderPassDescriptor = { colorAttachmentCount: 1, colorAttachments: atts.data }
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1
+      colorAttachments: atts.data
+      timestampWrites: timestampWrites
+    }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: encoder, descriptor: rpDesc)
     let drawn: Bool = recordDrawInPass(
       resources: resources

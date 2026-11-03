@@ -3,8 +3,8 @@
 # thin slab ray-marched at half resolution, from the same field the 2D layer
 # draws.
 #
-# Each frame, recorded into the frame's post recording before the lighting
-# pass (GbufferPasses lightingPassSky, or the timed clouds step):
+# Each frame, recorded with the cloud shadow map before the lighting pass
+# (lib/CloudShadow drawFrameClouds), each pass timed (lib/CloudTiming):
 # 1. the field map (cloud_field.wgsl): the 2D field round the eye, 512 x 512
 #    texels over 32 km, so the march reads a texture instead of the noise;
 # 2. the trace (cloud_slab_trace.wgsl): one pixel of each 2x2 tile of the
@@ -31,6 +31,7 @@ open webgpu/Context
 open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open GbufferFullscreen
+open CloudTiming
 
 const cloudFieldTexels: Int = 512
 
@@ -354,6 +355,7 @@ func drawCloudSlab(
   lightUniform: view BufferId
   viewProj: view Mat4
   encoder: copy Ptr
+  cloudTiming: mod CloudTiming
 ) {
   unsafe {
     if encoder is webgpuNull() or slab.width < 2 {
@@ -393,26 +395,29 @@ func drawCloudSlab(
     offset: 0
   )
   unsafe {
-    runFullscreenInBatch(
+    runFullscreenInBatchTimed(
       encoder: encoder
       resources: resources
       pipeline: slab.fieldPipeline
       bind: slab.fieldBind
       target: textureViewHandle(resources: resources, id: slab.fieldView)
+      timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud field")
     )
-    runFullscreenInBatch(
+    runFullscreenInBatchTimed(
       encoder: encoder
       resources: resources
       pipeline: slab.tracePipeline
       bind: slab.traceBind
       target: textureViewHandle(resources: resources, id: slab.traceView)
+      timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud trace")
     )
-    runFullscreenInBatch(
+    runFullscreenInBatchTimed(
       encoder: encoder
       resources: resources
       pipeline: slab.resolvePipeline
       bind: slab.resolveBind
       target: textureViewHandle(resources: resources, id: slab.resolvedView)
+      timestampWrites: cloudTimingPass(cloudTiming: cloudTiming, name: "cloud resolve")
     )
     let from: Ptr = textureHandle(resources: resources, id: slab.resolved)
     let into: Ptr = textureHandle(resources: resources, id: slab.history)

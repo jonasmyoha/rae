@@ -465,20 +465,6 @@ func uploadSceneLight(
     moonUmbra: sky.moonUmbra
     moonPenumbra: sky.moonPenumbra
   )
-  # the clouds' shadow map, from the uniform just uploaded (lib/CloudShadow)
-  # (unless the timed clouds step drew it already, RendererDeferred gpuPassMark)
-  if uploaded and targets.cloudShadow.drawnByStep {
-    targets.cloudShadow.drawnByStep = false
-  } else if uploaded {
-    unsafe {
-      drawCloudShadow(
-        map: targets.cloudShadow
-        resources: resources
-        lightUniform: targets.lightUniform
-        encoder: webgpuNull()
-      )
-    }
-  }
   ret uploaded
 }
 
@@ -487,42 +473,6 @@ func uploadSceneLight(
 # fullscreen pass into the lit target. The whole G-buffer + AO + the shadow
 # cascades (the renderer's ShadowCache, #925 — its default targets when no
 # shadow pass ran) are read once per pixel.
-# The slab tier's clouds for this frame (lib/CloudSlab): its textures always
-# (the lighting pass binds them), its passes when the sky's tier is the slab
-# or higher, into the frame's post recording; skipped when the timed clouds
-# step drew them already
-func drawFrameCloudSlab(
-  targets: mod DeferredTargets
-  resources: mod GpuResources
-  gbuffer: view GbufferCache
-  sky: view Sky
-) {
-  if not ensureCloudSlab(
-    slab: targets.cloudShadow.slab
-    resources: resources
-    litWidth: targets.width
-    litHeight: targets.height
-  ) {
-    ret
-  }
-  if targets.cloudShadow.slabDrawnByStep {
-    targets.cloudShadow.slabDrawnByStep = false
-    ret
-  }
-  if cloudTierRank(tier: sky.cloudTier) < 2 or sky.cloudCover <= 0.001 {
-    ret
-  }
-  unsafe {
-    drawCloudSlab(
-      slab: targets.cloudShadow.slab
-      resources: resources
-      lightUniform: targets.lightUniform
-      viewProj: gbuffer.viewProj
-      encoder: postEncoder(targets: targets, resources: resources)
-    )
-  }
-}
-
 func lightingPassSky(
   cache: mod LightPassCache
   resources: mod GpuResources
@@ -548,14 +498,20 @@ func lightingPassSky(
   if not shadowTargetsReady(shadow: shadow, resources: resources) {
     ret
   }
-  # the slab tier's clouds, recorded before the lighting that composites them
-  # (unless the timed clouds step did, RendererDeferred gpuPassMark)
-  drawFrameCloudSlab(
-    targets: targets
-    resources: resources
-    gbuffer: gbuffer
-    sky: sky
-  )
+  # the clouds' shadow map and the slab tier's clouds, from the uniform just
+  # uploaded, before the lighting that reads them (lib/CloudShadow)
+  if uploaded {
+    drawFrameClouds(
+      map: targets.cloudShadow
+      resources: resources
+      lightUniform: targets.lightUniform
+      viewProj: gbuffer.viewProj
+      litWidth: targets.width
+      litHeight: targets.height
+      deferred: true
+      slabTier: cloudTierRank(tier: sky.cloudTier) >= 2 and sky.cloudCover > 0.001
+    )
+  }
   let gen: Int = targets.gen
   let slabGen: Int = targets.cloudShadow.slab.generation
   if not (gen is cache.bindGen) or not (shadow.gen is cache.shadowGen) or not (slabGen is cache.slabGen) {

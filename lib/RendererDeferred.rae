@@ -52,8 +52,6 @@ open RendererDeferredGraph
 open RendererDeferredShadow
 open Sky
 open CloudTier
-open CloudShadow
-open CloudSlab
 open Shadow3d
 open ShadowMaps
 open ShadowMapsRecords
@@ -725,53 +723,6 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
 }
 
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
-  # While a frame is timed, the clouds' map is its own span before the pass
-  # that reads it (lib/CloudShadow)
-  if renderer.passTiming.marking and (tag is RenderTag.lighting or tag is RenderTag.forward) {
-    if let resources: mod GpuResources = renderer.gpuResources {
-      passTimingMark(
-        passTiming: renderer.passTiming
-        resources: resources
-        targets: renderer.passes.targets
-        tag: passTimingCloudsTag
-      )
-      unsafe {
-        drawCloudShadow(
-          map: renderer.passes.targets.cloudShadow
-          resources: resources
-          lightUniform: renderer.passes.targets.lightUniform
-          encoder: postEncoder(targets: renderer.passes.targets, resources: resources)
-        )
-      }
-      # the slab tier's clouds too, before the lighting pass composites them
-      if tag is RenderTag.lighting and cloudTierRank(tier: renderer.cloudTier) >= 2 and renderer.sky.cloudCover > 0.001 {
-        if ensureCloudSlab(
-          slab: renderer.passes.targets.cloudShadow.slab
-          resources: resources
-          litWidth: renderer.passes.targets.width
-          litHeight: renderer.passes.targets.height
-        ) {
-          unsafe {
-            drawCloudSlab(
-              slab: renderer.passes.targets.cloudShadow.slab
-              resources: resources
-              lightUniform: renderer.passes.targets.lightUniform
-              viewProj: renderer.passes.gbuffer.viewProj
-              encoder: postEncoder(targets: renderer.passes.targets, resources: resources)
-            )
-          }
-          renderer.passes.targets.cloudShadow.slabDrawnByStep = true
-        }
-      }
-      # the lighting pass records into the same recording after it (and its
-      # light upload lands before it is submitted); the forward pass is
-      # another submission, so the map goes first
-      if tag is RenderTag.forward {
-        flushPostPasses(targets: renderer.passes.targets, resources: resources)
-      }
-      renderer.passes.targets.cloudShadow.drawnByStep = true
-    }
-  }
   if let resources: mod GpuResources = renderer.gpuResources {
     passTimingMark(
       passTiming: renderer.passTiming

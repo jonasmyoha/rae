@@ -33,6 +33,7 @@ open GbufferIssue
 open GbufferSdf
 open ForwardMaterial
 open GbufferTargets
+open CloudShadow
 open GbufferPasses
 open ShadowMaps
 open webgpu/Webgpu
@@ -425,6 +426,20 @@ func beginForwardMain(
     light: light
     sky: sky
   )
+  # the clouds' shadow map from it (lib/CloudShadow; the forward frame keeps
+  # the 2D layer)
+  if lightUploaded {
+    drawFrameClouds(
+      map: targets.cloudShadow
+      resources: resources
+      lightUniform: targets.lightUniform
+      viewProj: gbuffer.viewProj
+      litWidth: targets.width
+      litHeight: targets.height
+      deferred: false
+      slabTier: false
+    )
+  }
   ensureShadowDefaults(shadow: shadow, resources: resources)
   if not shadowTargetsReady(shadow: shadow, resources: resources) {
     ret

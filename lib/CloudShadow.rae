@@ -8,15 +8,13 @@
 # light under the clouds (cloudSkyLight). It is the one map every cloud tier
 # writes: a later tier draws into the same texture.
 #
-# It is drawn right after the light uniform is uploaded (GbufferPasses
-# uploadSceneLight), in its own small submission, so both the deferred
-# lighting pass and the forward main pass read this frame's map. While the
-# pass timing samples a frame, the map is drawn instead just before the
-# lighting or forward pass as its own "clouds" span (RendererDeferred
-# gpuPassMark; before the forward pass from the light uniform of the frame
-# before): that span is the clouds' GPU time lib/CloudTier's fallback reads. Its cost is
-# one fullscreen pass over cloudShadowTexels x (cloudShadowTexels + 1)
-# texels.
+# drawFrameClouds draws it right after the light uniform is uploaded
+# (GbufferPasses lightingPassSky, ForwardMain beginForwardMain), with the
+# slab tier's passes (lib/CloudSlab) when the deferred frame draws them: one
+# recording of their own, submitted before the pass that reads them. Each
+# pass carries its own timestamps (lib/CloudTiming): that is the clouds' GPU
+# time lib/CloudTier's fallback reads. The map itself is one fullscreen pass
+# over cloudShadowTexels x (cloudShadowTexels + 1) texels.
 open gpu/GpuResources
 open gpu/GpuRender
 open gpu/GpuLifetime
@@ -26,6 +24,8 @@ open webgpu/Webgpu
 open webgpu/Context
 open GbufferFullscreen
 open CloudSlab
+open CloudTiming
+open Math3d
 
 # The map's side in texels (cloud_shadow.wgsl cloudShadowTexels); one more
 # row holds the average
@@ -38,13 +38,20 @@ type CloudShadowMap {
   bind: BindGroupId = noBindGroupId()
   # the light uniform the bind reads (it is made again for another one)
   boundUniform: BufferId = noBufferId()
-  # this frame's map was drawn by the timed clouds step (RendererDeferred
-  # gpuPassMark), so the light upload does not draw it again
-  drawnByStep: Bool = false
-  # the slab tier's clouds (lib/CloudSlab), and whether the timed clouds
-  # step drew them this frame
+  # the 1 x 1 target of the timing's start pass (lib/CloudTiming)
+  startTexture: TextureId = noTextureId()
+  startView: TextureViewId = noTextureViewId()
+  # the slab tier's clouds (lib/CloudSlab)
   slab: CloudSlab = CloudSlab {}
-  slabDrawnByStep: Bool = false
+  # the cloud passes' own GPU time, and the submissions still running
+  timing: CloudTiming = createCloudTiming()
+  inFlight: List(SubmissionId) = List.create(SubmissionId, cap: 4)
+}
+
+func createCloudShadowMap() ret CloudShadowMap {
+  unsafe {
+    ret CloudShadowMap {}
+  }
 }
 
 # The map's texture and pipeline, made once; false while they cannot be made
@@ -111,21 +118,113 @@ func drawCloudShadow(
     ret
   }
   unsafe {
-    if encoder is webgpuNull() {
-      runFullscreen(
-        resources: resources
-        pipeline: map.pipeline
-        bind: map.bind
-        target: textureViewHandle(resources: resources, id: map.textureView)
-      )
-    } else {
-      runFullscreenInBatch(
+    # the start pass: one texel, which waits for the work ahead of the clouds
+    # so the passes after it are timed alone (lib/CloudTiming)
+    let startWrites: Ptr = cloudTimingPass(cloudTiming: map.timing, name: "cloud start")
+    if startWrites is not webgpuNull() {
+      if not isValidTextureView(resources: resources, id: map.startView) {
+        if let made: TextureId = createTexture(
+          resources: resources
+          width: 1
+          height: 1
+          format: WGPUTextureFormat_RG16Float
+          usage: WGPUTextureUsage_RenderAttachment
+        ) {
+          map.startTexture = made
+          if let madeView: TextureViewId = createTextureView(resources: resources, texture: made) {
+            map.startView = madeView
+          }
+        }
+      }
+      runFullscreenInBatchTimed(
         encoder: encoder
         resources: resources
         pipeline: map.pipeline
         bind: map.bind
-        target: textureViewHandle(resources: resources, id: map.textureView)
+        target: textureViewHandle(resources: resources, id: map.startView)
+        timestampWrites: startWrites
       )
+    }
+    runFullscreenInBatchTimed(
+      encoder: encoder
+      resources: resources
+      pipeline: map.pipeline
+      bind: map.bind
+      target: textureViewHandle(resources: resources, id: map.textureView)
+      timestampWrites: cloudTimingPass(cloudTiming: map.timing, name: "cloud shadow")
+    )
+  }
+}
+
+# This frame's cloud passes, from the light uniform `lightUniform` just
+# uploaded: the shadow map, and for a deferred frame (`deferred`) the slab's
+# textures for a lit target of `litWidth` x `litHeight` (the lighting pass
+# binds them) and, when `slabTier`, its passes, with the frame's unjittered
+# `viewProj`. One recording of their own, each pass timed (lib/CloudTiming).
+func drawFrameClouds(
+  map: mod CloudShadowMap
+  resources: mod GpuResources
+  lightUniform: view BufferId
+  viewProj: view Mat4
+  litWidth: view Int
+  litHeight: view Int
+  deferred: view Bool
+  slabTier: view Bool
+) {
+  pollSubmissions(inFlight: map.inFlight, resources: resources)
+  cloudTimingBegin(cloudTiming: map.timing, resources: resources)
+  var slabReady: Bool = false
+  if deferred {
+    slabReady = ensureCloudSlab(
+      slab: map.slab
+      resources: resources
+      litWidth: litWidth
+      litHeight: litHeight
+    )
+  }
+  if var recording: Recording = beginRecording(resources: resources) {
+    unsafe {
+      let encoder: Ptr = recording.encoder
+      drawCloudShadow(
+        map: map
+        resources: resources
+        lightUniform: lightUniform
+        encoder: encoder
+      )
+      if slabReady and slabTier {
+        drawCloudSlab(
+          slab: map.slab
+          resources: resources
+          lightUniform: lightUniform
+          viewProj: viewProj
+          encoder: encoder
+          cloudTiming: map.timing
+        )
+      }
+    }
+    # the end pass (lib/CloudTiming): one texel after the clouds' passes
+    unsafe {
+      let endWrites: Ptr = cloudTimingPass(cloudTiming: map.timing, name: "cloud end")
+      if endWrites is not webgpuNull() and isValidTextureView(
+        resources: resources
+        id: map.startView
+      ) {
+        runFullscreenInBatchTimed(
+          encoder: recording.encoder
+          resources: resources
+          pipeline: map.pipeline
+          bind: map.bind
+          target: textureViewHandle(resources: resources, id: map.startView)
+          timestampWrites: endWrites
+        )
+      }
+    }
+    cloudTimingResolve(cloudTiming: map.timing, recording: recording, resources: resources)
+    if let submitted: SubmissionId = submit(resources: resources, recording: recording) {
+      map.inFlight.add(value: submitted)
+      cloudTimingSubmitted(cloudTiming: map.timing, submission: submitted)
+    } else {
+      cloudTimingSubmitted(cloudTiming: map.timing, submission: noSubmissionId())
     }
   }
 }
@@ -133,9 +232,12 @@ func drawCloudShadow(
 # The map's GPU objects (renderer shutdown)
 func retireCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) {
   retireCloudSlab(slab: map.slab, resources: resources)
+  releaseCloudTiming(cloudTiming: map.timing, resources: resources)
   let bindRetired: Bool = retireBindGroup(resources: resources, id: map.bind)
   let pipelineRetired: Bool = retireRenderPipeline(resources: resources, id: map.pipeline)
   let viewRetired: Bool = retireTextureView(resources: resources, id: map.textureView)
+  let startViewRetired: Bool = retireTextureView(resources: resources, id: map.startView)
+  let startRetired: Bool = retireTexture(resources: resources, id: map.startTexture)
   let textureRetired: Bool = retireTexture(resources: resources, id: map.texture)
-  map = CloudShadowMap {}
+  map = createCloudShadowMap()
 }

@@ -1,0 +1,144 @@
+# CloudTiming — the clouds' own GPU time (lib/CloudTier's fallback reads it):
+# the cloud shadow map's pass and the slab's three (lib/CloudShadow,
+# lib/CloudSlab) carry timestamp writes on the passes themselves
+# (gpu/GpuTiming), on every GPU. A pass's beginning is stamped before it
+# waits for the work ahead of it (Apple's GPUs start its vertex stage
+# early), so the clouds' passes follow a 1 x 1 "cloud start" pass, and the
+# clouds' time is from that pass's end to the latest end of theirs (a 1 x 1
+# "cloud end" pass after them keeps the last of theirs from reading 0, as
+# the last timed pass of a recording does on the iPhone).
+# Independent passes may run side by side, with each other and with other
+# work, so it is wall-clock GPU time: an upper bound on their cost, which
+# the fallback compares with its budget. The cloud
+# passes of a frame are one recording of their own; it resolves the
+# timestamps, and once it completed they are read back without waiting.
+# One sample is in flight at a time, so a sample lands every few frames. On
+# a GPU without timestamps every answer is -1 and only the thermal state
+# moves the tier.
+import Math
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuTiming
+open gpu/GpuIds
+open webgpu/Context
+
+# The passes a frame times at most (the start, the shadow map, the field
+# map, the trace, the resolve, the end: on the iPhone the last timed pass of
+# a recording reads 0, so a 1 x 1 end pass follows the clouds' and is left
+# out)
+const cloudTimingPasses: Int = 6
+
+type CloudTiming {
+  timing: opt GpuTiming
+  made: Bool = false
+  # this frame's passes carry timestamps
+  timed: Bool = false
+  resolvePending: Bool = false
+  submission: SubmissionId = noSubmissionId()
+  passTimes: List(Int) = List.create(Int, cap: 5)
+  # each cloud pass's own beginning-to-end time in the last sample (the
+  # start pass left out; they may overlap)
+  cloudPassTimes: List(Int) = List.create(Int, cap: 4)
+  # samples read back, and the last one's microseconds (the cloud passes)
+  samples: Int = 0
+  lastMicroseconds: Int = -1
+}
+
+func createCloudTiming() ret CloudTiming {
+  unsafe {
+    ret CloudTiming { timing: none }
+  }
+}
+
+# Read back a finished sample, and decide whether this frame's cloud
+# passes are timed (no sample in flight). Call once a frame, before them.
+func cloudTimingBegin(cloudTiming: mod CloudTiming, resources: mod GpuResources) {
+  cloudTiming.timed = false
+  if not cloudTiming.made {
+    cloudTiming.timing = createGpuTiming(resources: resources, maxPasses: cloudTimingPasses)
+    cloudTiming.made = true
+  }
+  if let timing: mod GpuTiming = cloudTiming.timing {
+    if not timingAvailable(timing: timing) {
+      ret
+    }
+    if timingSampleInFlight(timing: timing) {
+      if collectTiming(timing: timing, resources: resources, out: cloudTiming.passTimes) {
+        let ends: view List(Int) = timing.lastEndMicroseconds
+        cloudTiming.cloudPassTimes.clear()
+        var latest: Int = 0
+        loop var i: Int = 1, i < ends.length - 1, ++i {
+          cloudTiming.cloudPassTimes.add(value: cloudTiming.passTimes.copyAtDefault(index: i))
+          latest = Math.max(a: latest, b: ends.copyAtDefault(index: i))
+        }
+        if ends.length >= 3 {
+          cloudTiming.lastMicroseconds = Math.max(a: latest - ends.copyAtDefault(index: 0), b: 0)
+          cloudTiming.samples = cloudTiming.samples + 1
+        }
+      }
+      ret
+    }
+    if cloudTiming.resolvePending {
+      if pollSubmission(resources: resources, id: cloudTiming.submission) is 0 {
+        ret
+      }
+      cloudTiming.resolvePending = false
+      let started: Bool = startTimingSample(timing: timing, resources: resources)
+      ret
+    }
+    beginTimingFrame(timing: timing)
+    cloudTiming.timed = true
+  }
+}
+
+# The timestamp writes for the next cloud pass, named `name` (null when this
+# frame is not timed: the pass runs untimed)
+func cloudTimingPass(cloudTiming: mod CloudTiming, name: view String) ret Ptr {
+  if cloudTiming.timed {
+    if let timing: mod GpuTiming = cloudTiming.timing {
+      if let index: Int = timedPassNamed(timing: timing, name: name) {
+        unsafe {
+          ret timingWrites(timing: timing)
+        }
+      }
+    }
+  }
+  unsafe {
+    ret webgpuNull()
+  }
+}
+
+# After the frame's cloud passes, on their recording: resolve the timestamps
+func cloudTimingResolve(
+  cloudTiming: mod CloudTiming
+  recording: mod Recording
+  resources: view GpuResources
+) {
+  if not cloudTiming.timed {
+    ret
+  }
+  if let timing: view GpuTiming = cloudTiming.timing {
+    let resolved: Bool = recordTimingResolve(
+      timing: timing
+      recording: recording
+      resources: resources
+    )
+  }
+}
+
+# The recording was submitted: its timestamps are read back once it completed
+func cloudTimingSubmitted(cloudTiming: mod CloudTiming, submission: view SubmissionId) {
+  if cloudTiming.timed {
+    cloudTiming.submission = submission
+    cloudTiming.resolvePending = true
+  }
+  cloudTiming.timed = false
+}
+
+func releaseCloudTiming(cloudTiming: mod CloudTiming, resources: mod GpuResources) {
+  if let timing: mod GpuTiming = cloudTiming.timing {
+    shutdownTiming(timing: timing, resources: resources)
+  }
+  cloudTiming.timing = none
+  cloudTiming.made = false
+}

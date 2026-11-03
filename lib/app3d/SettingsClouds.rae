@@ -1,14 +1,14 @@
 # app3d/SettingsClouds — the walkers' cloud tier (lib/CloudTier,
 # docs/cloud-rendering-research.md §8.4): the game's ceiling, the device it
 # runs on, the quality setting's tier, and each frame the measured fallback,
-# fed by the clouds' GPU span (RendererPassTiming, "clouds"; measured only
-# while the pass timing runs, RAE_GPU_PASS_TIMING or a capture) and the OS
-# thermal state. The tier it settles on goes to the renderer (setCloudTier).
+# fed by the cloud passes' own GPU time (lib/CloudTiming, their timestamps,
+# on every device) and the OS thermal state. The tier it settles on goes to the renderer
+# (setCloudTier).
 import Sys
 import Device
 open CloudTier
 open RendererDeferred
-open RendererPassTiming
+open CloudTiming
 open app3d/SettingsDialog
 open app3d/RenderScale
 
@@ -68,24 +68,29 @@ func createWalkerClouds(
   }
 }
 
-# The clouds' GPU time in the pass timing's newest sample, once per sample
-# (-1 when there is no new one, or it has no clouds span). Not on a phone:
-# there the span between two marks holds other passes' work too (on the
-# iPhone 15 Pro it read 7-8.5 ms for the off tier, the layer and the slab
-# alike), so only the thermal state moves the tier until the cloud passes
-# carry their own timestamps.
+# The clouds' own GPU time in the newest sample of their pass timestamps
+# (lib/CloudTiming), once per sample (-1 when there is no new one, or the
+# GPU has no timestamps)
 func walkerCloudMicroseconds(clouds: mod WalkerClouds, renderer: view DeferredRenderer) ret Int {
-  let timing: view DeferredPassTiming = renderer.passTiming
-  if timing.samples is clouds.seenSamples or walkerCloudDeviceMobile() {
+  let cloudTiming: view CloudTiming = renderer.passes.targets.cloudShadow.timing
+  if cloudTiming.samples is clouds.seenSamples {
     ret -1
   }
-  clouds.seenSamples = timing.samples
-  loop var i: Int = 0, i < timing.lastTags.length, ++i {
-    if timing.lastTags.copyAtDefault(index: i) is passTimingCloudsTag {
-      ret timing.lastMicroseconds.copyAtDefault(index: i)
+  clouds.seenSamples = cloudTiming.samples
+  # under a profile's timing (RAE_GPU_PASS_TIMING, RAE_FRAME_TIMING), a line
+  # every 60 samples: the clouds' time and each pass's
+  if cloudTiming.samples % 60 is 1 and (Sys.getEnv(name: "RAE_GPU_PASS_TIMING").length() > 0 or Sys.getEnv(
+    name: "RAE_FRAME_TIMING"
+  ).length() > 0) {
+    var passes: String = ""
+    loop var i: Int = 0, i < cloudTiming.cloudPassTimes.length, ++i {
+      passes = "{passes} {cloudTiming.cloudPassTimes.copyAtDefault(index: i)}"
     }
+    log(
+      "[clouds gpu] {clouds.control.tier}: {cloudTiming.lastMicroseconds} us (passes us:{passes})"
+    )
   }
-  ret -1
+  ret cloudTiming.lastMicroseconds
 }
 
 # One frame: the quality's ceiling, the fallback, and the tier to the renderer
