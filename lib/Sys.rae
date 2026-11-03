@@ -54,33 +54,6 @@ func rae_sys_rss_kb() unsafe extern ret Int
 
 func rae_ext_rae_mem_alloc_total() unsafe extern ret Int
 
-func rae_crypto_argon2i(
-  password: String
-  salt: String
-  nb_blocks: Int
-  nb_iterations: Int
-  hash_buf: Any
-  hash_len: Int
-) unsafe extern
-
-func rae_crypto_lock(
-  key: Any
-  nonce: Any
-  plain: Any
-  plain_len: Int
-  mac: Any
-  cipher: Any
-) unsafe extern
-
-func rae_crypto_unlock(
-  key: Any
-  nonce: Any
-  mac: Any
-  cipher: Any
-  cipher_len: Int
-  plain: Any
-) unsafe extern ret Int
-
 func exit(code: view Int) {
   unsafe {
     rae_sys_exit(code: code)
@@ -428,52 +401,5 @@ func processRssKb() ret Int {
 func allocationCount() ret Int {
   unsafe {
     ret rae_ext_rae_mem_alloc_total()
-  }
-}
-
-# The crypto helpers take raw Buffer(Any) pointers; the C ABI is
-# `void*` and adding `view` here breaks the conversion through
-# rae_any(). Leave bare until the buffer helpers grow proper
-# Buffer(T) types we can annotate.
-# The crypto helpers pass raw `Any` (void*) buffers and separate lengths whose
-# validity and sizing the caller must guarantee — an unchecked memory-safety
-# obligation this wrapper cannot verify — so it is itself unsafe.
-func encrypt(
-  key: Any
-  nonce: Any
-  plain: Any
-  len: view Int
-  mac: Any
-  cipher: Any
-) unsafe {
-  unsafe {
-    rae_crypto_lock(
-      key: key
-      nonce: nonce
-      plain: plain
-      plain_len: len
-      mac: mac
-      cipher: cipher
-    )
-  }
-}
-
-func decrypt(
-  key: Any
-  nonce: Any
-  mac: Any
-  cipher: Any
-  len: view Int
-  plain: Any
-) unsafe ret Bool {
-  unsafe {
-    ret rae_crypto_unlock(
-      key: key
-      nonce: nonce
-      mac: mac
-      cipher: cipher
-      cipher_len: len
-      plain: plain
-    ) is 0
   }
 }

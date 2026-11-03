@@ -104,6 +104,9 @@ const pollFilterUser: Int = 41
 
 const pollChangeAddClear: Int = 42
 
+# EMSGSIZE: a datagram larger than the path or the socket allows
+const errorMessageTooLarge: Int = 43
+
 # The socket calls, as a capability (docs/platform-conditional-code.md §3.1
 # layer 3): POSIX sockets on Apple, the BSDs and a Linux kernel. Elsewhere (the
 # web, Windows) the same names are Rae that answer the unsupported marker, so
@@ -120,6 +123,7 @@ when hasPosixSockets {
     host: String
     port: Int
     passive: Bool
+    datagram: Bool
     records: Buffer(UInt8)
     maxRecords: Int
   ) blocking unsafe extern("rae_ext_NetSys_resolve") ret Int
@@ -193,6 +197,37 @@ when hasPosixSockets {
   func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
 
   func systemLocalPort(handle: Int) unsafe extern("rae_ext_NetSys_localPort") ret Int
+
+  # UDP (lib/net/Udp.rae). An address crosses as five words: family (4, 6, 0),
+  # the address's high and low 64 bits, port, IPv6 scope id. `recordAddress`
+  # writes a resolved record's words; `receiveFrom` writes the sender's words
+  # and, as a sixth, 1 when the datagram did not fit.
+  func systemRecordAddress(
+    records: Buffer(UInt8)
+    index: Int
+    words: Buffer(Int)
+  ) unsafe extern("rae_ext_NetSys_recordAddress") ret Int
+
+  func systemSendTo(
+    handle: Int
+    buffer: Buffer(UInt8)
+    offset: Int
+    count: Int
+    flags: Int
+    family: Int
+    high: Int
+    low: Int
+    port: Int
+    scopeId: Int
+  ) unsafe extern("rae_ext_NetSys_sendTo") ret Int
+
+  func systemReceiveFrom(
+    handle: Int
+    buffer: Buffer(UInt8)
+    offset: Int
+    maxBytes: Int
+    words: Buffer(Int)
+  ) unsafe extern("rae_ext_NetSys_receiveFrom") ret Int
 } else {
   func platformConstant(which: view Int) ret Int {
     if which is addressRecordBytes {
@@ -214,6 +249,7 @@ when hasPosixSockets {
     host: view String
     port: view Int
     passive: view Bool
+    datagram: view Bool
     records: view Buffer(UInt8)
     maxRecords: view Int
   ) ret Int {
@@ -297,6 +333,39 @@ when hasPosixSockets {
   }
 
   func systemLocalPort(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemRecordAddress(
+    records: view Buffer(UInt8)
+    index: view Int
+    words: view Buffer(Int)
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSendTo(
+    handle: view Int
+    buffer: view Buffer(UInt8)
+    offset: view Int
+    count: view Int
+    flags: view Int
+    family: view Int
+    high: view Int
+    low: view Int
+    port: view Int
+    scopeId: view Int
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemReceiveFrom(
+    handle: view Int
+    buffer: view Buffer(UInt8)
+    offset: view Int
+    maxBytes: view Int
+    words: view Buffer(Int)
+  ) ret Int {
     ret unsupportedAnswer
   }
 }

@@ -1,0 +1,77 @@
+# The relay as a headless program (lib/net/relay, docs/relay.md): hosts open
+# sessions on it, players join them with the session token, and it forwards
+# their sealed packets without reading them.
+#
+#   relay [--host 0.0.0.0] [--port 7777] [--web-socket-port P] [--seconds N]
+#         [--timeout-ms 10000] [--stats]
+#
+# --web-socket-port P also takes peers over WebSocket (ws://host:P/relay,
+# for a browser that cannot send UDP; 0 picks a free port) and prints
+# "relay WebSocket on port P".
+# --seconds N stops after N seconds (0, the default, runs until killed);
+# --stats prints the counters once a second. It prints "relay listening on
+# port P" first (port 0 picks a free one).
+open net/Tcp
+open net/relay/RelayServer
+open net/relay/Relay
+open ecs/ComponentTable
+open Sys
+open String
+
+func argumentAfter(name: view String, fallback: view String) ret String {
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret argAt(index: i + 1)
+    }
+  }
+  ret fallback
+}
+
+func hasArgument(name: view String) ret Bool {
+  loop var i: Int = 0, i < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+func statsLine(server: view RelayServer) ret String {
+  ret "relay: {componentCount(this: server.sessions)} sessions, {componentCount(this: server.peers)} peers, forwarded {server.stats.packetsForwarded} packets ({server.stats.bytesForwarded} bytes), dropped {server.stats.packetsDropped}, refused {server.stats.refused}, timed out {server.stats.timedOut}, host migrations {server.stats.migrations}"
+}
+
+func main() ret Int {
+  var config: RelayConfig = defaultRelayConfig()
+  config.peerTimeoutMs = argumentAfter(name: "--timeout-ms", fallback: "10000").toInt()
+  let host: String = argumentAfter(name: "--host", fallback: "0.0.0.0")
+  let port: Int = argumentAfter(name: "--port", fallback: "7777").toInt()
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "0").toInt()
+  let stats: Bool = hasArgument(name: "--stats")
+  var server: RelayServer = createRelayServer(host: host, port: port, config: config)
+  if server.udpSocket.status is not NetStatus.ok {
+    log("relay: cannot open {host}:{port}: {server.udpSocket.status}")
+    ret 1
+  }
+  log("relay listening on port {relayPort(server: server)}")
+  if hasArgument(name: "--web-socket-port") {
+    let webSocketPort: Int = argumentAfter(name: "--web-socket-port", fallback: "0").toInt()
+    let listening: NetStatus = relayListenWebSocket(server: server, host: host, port: webSocketPort)
+    if listening is not NetStatus.ok {
+      log("relay: cannot take WebSockets on {host}:{webSocketPort}: {listening}")
+      ret 1
+    }
+    log("relay WebSocket on port {relayWebSocketPort(server: server)}")
+  }
+  let startMs: Int = nowMs()
+  var nextStatsMs: Int = startMs + 1000
+  loop seconds <= 0 or nowMs() - startMs < seconds * 1000 {
+    relayStep(server: server, waitMs: 50)
+    if stats and nowMs() >= nextStatsMs {
+      log(statsLine(server: server))
+      nextStatsMs = nextStatsMs + 1000
+    }
+  }
+  log(statsLine(server: server))
+  closeRelayServer(server: server)
+  ret 0
+}

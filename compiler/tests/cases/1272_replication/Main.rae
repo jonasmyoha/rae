@@ -1,0 +1,702 @@
+# lib/net/replication: the host's World is the truth, players get it as
+# snapshot deltas through lib/net/Connections driven by hand through
+# lib/net/BadNetwork (no sockets). Players send inputs that move their own
+# entity; a player sees only entities within the interest radius of its
+# own. After a stretch of 10% loss the players' worlds match the host's;
+# a far entity is not sent until it comes near, and goes when it leaves;
+# bytes per snapshot are measured for 4, 32 and 100 moving entities.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Vec3
+open net/Wire
+open net/Udp
+open net/Connection
+open net/BadNetwork
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+
+# The game's World, the same type on the host and the players
+type Mover {
+  velocityX: Float
+  velocityZ: Float
+  health: Int
+  boosted: Bool
+}
+
+type ArenaWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  transforms: ComponentTable(Transform3D)
+  movers: ComponentTable(Mover)
+}
+
+# What a player sends each frame
+type MoveInput {
+  moveX: Float
+  moveZ: Float
+}
+
+const kindReplicated: Int = 0
+
+const kindTransform: Int = 1
+
+const kindMover: Int = 2
+
+func createArena() ret ArenaWorld {
+  ret ArenaWorld {
+    entities: createEntityAllocator()
+    replicated: create()
+    transforms: create()
+    movers: create()
+  }
+}
+
+func moverTemplate() ret Mover {
+  ret Mover { velocityX: 0.0, velocityZ: 0.0, health: 0, boosted: false }
+}
+
+func at(x: view Float, z: view Float) ret Transform3D {
+  var transform: Transform3D = createTransform3D()
+  transform.position = Vec3 { x: x, y: 0.0, z: z }
+  ret transform
+}
+
+# A replicated entity with a transform and a mover: its net id
+func spawnMover(
+  host: mod ReplicationHost
+  world: mod ArenaWorld
+  x: view Float
+  z: view Float
+  owner: view Int
+) ret Int {
+  let entityId: EntityId = allocEntity(this: world.entities)
+  componentSet(this: world.transforms, entityId: entityId, data: at(x: x, z: z))
+  componentSet(
+    this: world.movers
+    entityId: entityId
+    data: Mover { velocityX: 0.0, velocityZ: 0.0, health: 100, boosted: false }
+  )
+  ret replicateEntity(
+    host: host
+    replicated: world.replicated
+    entityId: entityId
+    owner: owner
+  )
+}
+
+func entityWithNetId(world: view ArenaWorld, netId: view Int) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: world.replicated), ++i {
+    if let replicated: Replicated = componentCopyAt(this: world.replicated, i: i) {
+      if replicated.netId is netId {
+        ret componentEntityAt(this: world.replicated, i: i)
+      }
+    }
+  }
+  ret noEntity()
+}
+
+func captureArena(host: mod ReplicationHost, world: view ArenaWorld, nowMs: view Int) {
+  replicaBeginSnapshot(host: host, nowMs: nowMs)
+  captureReplicaTable(
+    Replicated
+    host: host
+    table: world.replicated
+    replicated: world.replicated
+    kind: kindReplicated
+  )
+  captureReplicaTable(
+    Transform3D
+    host: host
+    table: world.transforms
+    replicated: world.replicated
+    kind: kindTransform
+  )
+  captureReplicaTable(
+    Mover
+    host: host
+    table: world.movers
+    replicated: world.replicated
+    kind: kindMover
+  )
+  captureInterestPoints(host: host, transforms: world.transforms, replicated: world.replicated)
+}
+
+func applyArena(player: mod ReplicationPlayer, world: mod ArenaWorld) {
+  replicaSyncEntities(player: player, entities: world.entities)
+  loop var i: Int = 0, i < player.goneEntityIds.length, ++i {
+    let entityId: EntityId = player.goneEntityIds.copyAtFallback(index: i, fallback: noEntity())
+    clearEntityComponents(ArenaWorld, world: world, entityId: entityId)
+    freeEntity(this: world.entities, entityId: entityId)
+  }
+  applyReplicaTable(
+    Replicated
+    player: player
+    table: world.replicated
+    kind: kindReplicated
+    template: Replicated { netId: 0, owner: -1 }
+  )
+  applyReplicaTable(
+    Transform3D
+    player: player
+    table: world.transforms
+    kind: kindTransform
+    template: createTransform3D()
+  )
+  applyReplicaTable(
+    Mover
+    player: player
+    table: world.movers
+    kind: kindMover
+    template: moverTemplate()
+  )
+  replicaFinishApply(player: player)
+}
+
+# ----- one player's link: two connection ends and two bad network paths --------
+type Seat {
+  peer: ReplicaPeer
+  replication: ReplicationPlayer
+  world: ArenaWorld
+  hostEnd: Connection
+  playerEnd: Connection
+  toPlayer: BadNetwork
+  toHost: BadNetwork
+  packet: List(UInt8)
+  message: List(UInt8)
+  # The input this player is giving
+  input: MoveInput
+}
+
+func createSeat(peerId: view Int, config: view ReplicationConfig, seed: view Int) ret Seat {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.latencyMs = 20
+  settings.seed = seed
+  var back: BadNetworkSettings = settings
+  back.seed = seed + 1
+  ret Seat {
+    peer: createReplicaPeer(peerId: peerId, config: config)
+    replication: createReplicationPlayer(config: config)
+    world: createArena()
+    hostEnd: createConnection(config: defaultConnectionConfig())
+    playerEnd: createConnection(config: defaultConnectionConfig())
+    toPlayer: createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 1024)
+    toHost: createBadNetwork(settings: back, maxPacketBytes: 1200, capacity: 1024)
+    packet: List.create(UInt8, cap: 1200)
+    message: List.create(UInt8, cap: 1200)
+    input: MoveInput { moveX: 0.0, moveZ: 0.0 }
+  }
+}
+
+func setLoss(seat: mod Seat, lossPercent: view Int, latencyMs: view Int) {
+  seat.toPlayer.settings.lossPercent = lossPercent
+  seat.toHost.settings.lossPercent = lossPercent
+  seat.toPlayer.settings.latencyMs = latencyMs
+  seat.toHost.settings.latencyMs = latencyMs
+}
+
+# Move packets both ways and let each end read what arrived
+func pump(seat: mod Seat, nowMs: view Int) {
+  connectionUpdate(connection: seat.hostEnd, nowMs: nowMs)
+  connectionUpdate(connection: seat.playerEnd, nowMs: nowMs)
+  loop connectionWritePacket(connection: seat.hostEnd, packet: seat.packet, nowMs: nowMs) {
+    badNetworkSend(
+      network: seat.toPlayer
+      packet: seat.packet
+      start: 0
+      count: seat.packet.length
+      destination: noNetAddress()
+      nowMs: nowMs
+    )
+  }
+  loop connectionWritePacket(connection: seat.playerEnd, packet: seat.packet, nowMs: nowMs) {
+    badNetworkSend(
+      network: seat.toHost
+      packet: seat.packet
+      start: 0
+      count: seat.packet.length
+      destination: noNetAddress()
+      nowMs: nowMs
+    )
+  }
+  loop badNetworkNext(network: seat.toPlayer, packet: seat.packet, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: seat.playerEnd
+      packet: seat.packet
+      start: 0
+      count: seat.packet.length
+      nowMs: nowMs
+    )
+  }
+  loop badNetworkNext(network: seat.toHost, packet: seat.packet, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: seat.hostEnd
+      packet: seat.packet
+      start: 0
+      count: seat.packet.length
+      nowMs: nowMs
+    )
+  }
+}
+
+func connectSeat(seat: mod Seat, connectionId: view Int) {
+  connectionListen(connection: seat.hostEnd, nowMs: 0)
+  connectionConnect(connection: seat.playerEnd, connectionId: connectionId, nowMs: 0)
+  var nowMs: Int = 0
+  loop nowMs < 2000 and not (connectionIsConnected(connection: seat.hostEnd) and connectionIsConnected(
+    connection: seat.playerEnd
+  )) {
+    nowMs = nowMs + 10
+    pump(seat: seat, nowMs: nowMs)
+  }
+}
+
+# ----- the game ---------------------------------------------------------------
+type Game {
+  host: ReplicationHost
+  world: ArenaWorld
+  seats: List(Seat)
+  nowMs: Int
+  tick: Int
+  # Wanderers circle while this is true
+  moving: Bool
+}
+
+# The host applies each player's inputs to the entity that player owns
+func applyInputs(game: mod Game) {
+  var input: MoveInput = { moveX: 0.0, moveZ: 0.0 }
+  loop var s: Int = 0, s < game.seats.length, ++s {
+    if let seat: mod Seat = game.seats.modAt(index: s) {
+      loop seat.hostEnd.state is ConnectionState.connected and connectionReceive(
+        connection: seat.hostEnd
+        message: seat.message
+      ) is not MessageChannel.none {
+        let taken: Bool = replicaTakeMessage(
+          host: game.host
+          peer: seat.peer
+          message: seat.message
+        )
+      }
+      loop replicaNextInput(
+        MoveInput
+        host: game.host
+        peer: seat.peer
+        input: input
+      ) >= 0 {
+        let entityId: EntityId = entityWithNetId(world: game.world, netId: seat.peer.focusNetId)
+        if componentHas(this: game.world.transforms, entityId: entityId) {
+          let transform: mod Transform3D = componentMod(
+            this: game.world.transforms
+            entityId: entityId
+          )
+          transform.position = Vec3 {
+            x: transform.position.x + input.moveX
+            y: 0.0
+            z: transform.position.z + input.moveZ
+          }
+        }
+      }
+    }
+  }
+}
+
+# The wanderers (owner -1) circle around where they started
+func moveWanderers(game: mod Game) {
+  if not game.moving {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: game.world.replicated), ++i {
+    if let replicated: Replicated = componentCopyAt(this: game.world.replicated, i: i) {
+      let entityId: EntityId = componentEntityAt(this: game.world.replicated, i: i)
+      if replicated.owner < 0 and componentHas(this: game.world.transforms, entityId: entityId) {
+        let phase: Float = (game.tick + replicated.netId * 7) as Float * 0.1
+        let transform: mod Transform3D = componentMod(
+          this: game.world.transforms
+          entityId: entityId
+        )
+        transform.position = Vec3 {
+          x: transform.position.x + Math.cos(x: phase) * 0.3
+          y: 0.0
+          z: transform.position.z + Math.sin(x: phase) * 0.3
+        }
+        let mover: mod Mover = componentMod(this: game.world.movers, entityId: entityId)
+        mover.velocityX = Math.cos(x: phase) * 6.0
+        mover.velocityZ = Math.sin(x: phase) * 6.0
+        mover.boosted = game.tick % 20 < 10
+      }
+    }
+  }
+}
+
+# One 10 ms frame: players send input, the host takes it and every 50 ms
+# moves the world and sends snapshots, the players apply what arrived
+func frame(game: mod Game) {
+  game.nowMs = game.nowMs + 10
+  loop var s: Int = 0, s < game.seats.length, ++s {
+    if let seat: mod Seat = game.seats.modAt(index: s) {
+      let sent: Bool = replicaSendInput(
+        MoveInput
+        player: seat.replication
+        input: seat.input
+        tick: game.nowMs / 10
+        connection: seat.playerEnd
+      )
+      pump(seat: seat, nowMs: game.nowMs)
+    }
+  }
+  applyInputs(game: game)
+  if replicaSnapshotDue(host: game.host, nowMs: game.nowMs) {
+    game.tick = game.tick + 1
+    moveWanderers(game: game)
+    captureArena(host: game.host, world: game.world, nowMs: game.nowMs)
+    loop var s: Int = 0, s < game.seats.length, ++s {
+      if let seat: mod Seat = game.seats.modAt(index: s) {
+        let bytes: Int = replicaSnapshotSystem(
+          host: game.host
+          peer: seat.peer
+          connection: seat.hostEnd
+        )
+      }
+    }
+  }
+  loop var s: Int = 0, s < game.seats.length, ++s {
+    if let seat: mod Seat = game.seats.modAt(index: s) {
+      pump(seat: seat, nowMs: game.nowMs)
+      loop connectionReceive(connection: seat.playerEnd, message: seat.message) is not MessageChannel.none {
+        let taken: Bool = replicaReceiveSystem(player: seat.replication, message: seat.message)
+      }
+      if replicaHasUpdate(player: seat.replication) {
+        applyArena(player: seat.replication, world: seat.world)
+      }
+    }
+  }
+}
+
+func run(game: mod Game, milliseconds: view Int) {
+  let until: Int = game.nowMs + milliseconds
+  loop game.nowMs < until {
+    frame(game: game)
+  }
+}
+
+# ----- checks -----------------------------------------------------------------
+func positionOf(world: view ArenaWorld, entityId: view EntityId) ret Vec3 {
+  if componentHas(this: world.transforms, entityId: entityId) {
+    ret componentView(this: world.transforms, entityId: entityId).position
+  }
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+# Whether a component's replicated values are the same on both sides
+func sameValues(
+  T: type
+  first: view ComponentTable(T)
+  firstId: view EntityId
+  second: view ComponentTable(T)
+  secondId: view EntityId
+) ret Bool {
+  let hasFirst: Bool = componentHas(this: first, entityId: firstId)
+  if hasFirst is not componentHas(this: second, entityId: secondId) {
+    ret false
+  }
+  if not hasFirst {
+    ret true
+  }
+  var firstValues: List(Int) = {}
+  var secondValues: List(Int) = {}
+  appendReplicaValues(
+    T
+    value: componentView(this: first, entityId: firstId)
+    scale: 1000.0
+    values: firstValues
+  )
+  appendReplicaValues(
+    T
+    value: componentView(this: second, entityId: secondId)
+    scale: 1000.0
+    values: secondValues
+  )
+  ret equals(a: firstValues, b: secondValues)
+}
+
+# How the seat's world compares with the host's: every entity within the
+# radius of the seat's own is there with the same values, no other is
+func compare(game: view Game, seat: view Seat) ret String {
+  let center: Vec3 = positionOf(
+    world: game.world
+    entityId: entityWithNetId(world: game.world, netId: seat.peer.focusNetId)
+  )
+  let radius: Float = game.host.config.interestRadius
+  var expected: Int = 0
+  var matching: Int = 0
+  var wrong: Int = 0
+  loop var i: Int = 0, i < componentCount(this: game.world.replicated), ++i {
+    let hostId: EntityId = componentEntityAt(this: game.world.replicated, i: i)
+    if let replicated: Replicated = componentCopyAt(this: game.world.replicated, i: i) {
+      let position: Vec3 = positionOf(world: game.world, entityId: hostId)
+      let dx: Float = position.x - center.x
+      let dz: Float = position.z - center.z
+      let visible: Bool = not componentHas(this: game.world.transforms, entityId: hostId) or dx * dx + dz * dz <= radius * radius
+      let playerId: EntityId = replicaEntityOf(player: seat.replication, netId: replicated.netId)
+      if visible {
+        expected = expected + 1
+        if not isNone(this: playerId) and sameValues(
+          Transform3D
+          first: game.world.transforms
+          firstId: hostId
+          second: seat.world.transforms
+          secondId: playerId
+        ) and sameValues(
+          Mover
+          first: game.world.movers
+          firstId: hostId
+          second: seat.world.movers
+          secondId: playerId
+        ) and sameValues(
+          Replicated
+          first: game.world.replicated
+          firstId: hostId
+          second: seat.world.replicated
+          secondId: playerId
+        ) {
+          matching = matching + 1
+        } else {
+          wrong = wrong + 1
+        }
+      } else if not isNone(this: playerId) {
+        wrong = wrong + 1
+      }
+    }
+  }
+  ret "{matching} of {expected} visible entities match, {wrong} wrong, {allocatorAliveCount(
+    this: seat.world.entities
+  )} in its world"
+}
+
+# A seat's report, read in place (no copy of the seat)
+func seatReport(game: view Game, index: view Int) ret String {
+  if let seat: view Seat = game.seats.viewAt(index: index) {
+    ret compare(game: game, seat: seat)
+  }
+  ret "no such seat"
+}
+
+# Whether player `index` has an entity for `netId`
+func seatSees(game: view Game, index: view Int, netId: view Int) ret Bool {
+  if let seat: view Seat = game.seats.viewAt(index: index) {
+    ret not isNone(this: replicaEntityOf(player: seat.replication, netId: netId))
+  }
+  ret false
+}
+
+func seatFocus(game: view Game, index: view Int) ret Int {
+  if let seat: view Seat = game.seats.viewAt(index: index) {
+    ret seat.peer.focusNetId
+  }
+  ret -1
+}
+
+func seatRebuilt(game: view Game, index: view Int) ret Int {
+  if let seat: view Seat = game.seats.viewAt(index: index) {
+    ret seat.replication.snapshotsRebuilt
+  }
+  ret 0
+}
+
+# Bytes per snapshot for `count` moving entities, all in view, no loss: the
+# first (whole) snapshot, then the average delta over two seconds
+func measure(count: view Int) ret String {
+  let config: ReplicationConfig = defaultReplicationConfig()
+  var game: Game = {
+    host: createReplicationHost(config: config)
+    world: createArena()
+    seats: {}
+    nowMs: 0
+    tick: 0
+    moving: true
+  }
+  var seat: Seat = createSeat(peerId: 1, config: config, seed: 99)
+  connectSeat(seat: seat, connectionId: 9000 + count)
+  game.seats.add(value: seat)
+  loop var i: Int = 0, i < count, ++i {
+    let netId: Int = spawnMover(
+      host: game.host
+      world: game.world
+      x: (i % 10) as Float * 4.0 - 20.0
+      z: (i / 10) as Float * 4.0 - 20.0
+      owner: -1
+    )
+  }
+  loop game.host.tick < 0 {
+    frame(game: game)
+  }
+  let whole: Int = game.host.bytesSent
+  run(game: game, milliseconds: 1000)
+  let bytesBefore: Int = game.host.bytesSent
+  let ticksBefore: Int = game.host.tick
+  run(game: game, milliseconds: 2000)
+  let perSnapshot: Int = (game.host.bytesSent - bytesBefore) / (game.host.tick - ticksBefore)
+  # The same world through 10% loss (snapshots in several parts lose some),
+  # then still: the player's world still matches
+  if let lossy: mod Seat = game.seats.modAt(index: 0) {
+    setLoss(seat: lossy, lossPercent: 10, latencyMs: 40)
+  }
+  run(game: game, milliseconds: 2000)
+  game.moving = false
+  run(game: game, milliseconds: 1000)
+  log(
+    "{count} moving entities after 10% loss: {seatReport(game: game, index: 0)}, parts in a whole snapshot {(whole + config.maxMessageBytes - 1) / config.maxMessageBytes}"
+  )
+  ret "{count} moving entities: whole snapshot {whole} bytes, delta {perSnapshot} bytes per snapshot ({perSnapshot / count} per entity), {perSnapshot * 20} bytes/s at 20 snapshots/s"
+}
+
+func main() ret Int {
+  let config: ReplicationConfig = defaultReplicationConfig()
+  var game: Game = {
+    host: createReplicationHost(config: config)
+    world: createArena()
+    seats: {}
+    nowMs: 0
+    tick: 0
+    moving: true
+  }
+  # Two players, each with its own entity; six wanderers near the middle;
+  # one far away; one with no position (global state everyone sees)
+  loop var p: Int = 0, p < 2, ++p {
+    var seat: Seat = createSeat(peerId: p + 1, config: config, seed: 10 + p * 10)
+    connectSeat(seat: seat, connectionId: 7000 + p)
+    seat.peer.focusNetId = spawnMover(
+      host: game.host
+      world: game.world
+      x: p as Float * 20.0
+      z: 0.0
+      owner: p + 1
+    )
+    game.seats.add(value: seat)
+  }
+  loop var i: Int = 0, i < 6, ++i {
+    let wanderer: Int = spawnMover(
+      host: game.host
+      world: game.world
+      x: (i as Float) * 5.0 - 10.0
+      z: 15.0
+      owner: -1
+    )
+  }
+  let farNetId: Int = spawnMover(
+    host: game.host
+    world: game.world
+    x: 1000.0
+    z: 0.0
+    owner: -1
+  )
+  let scoreEntityId: EntityId = allocEntity(this: game.world.entities)
+  componentSet(
+    this: game.world.movers
+    entityId: scoreEntityId
+    data: Mover { velocityX: 0.0, velocityZ: 0.0, health: 3, boosted: true }
+  )
+  let scoreNetId: Int = replicateEntity(
+    host: game.host
+    replicated: game.world.replicated
+    entityId: scoreEntityId
+    owner: -1
+  )
+
+  # Three seconds of play at 10% loss and 40 ms each way; the players steer
+  loop var s: Int = 0, s < 2, ++s {
+    if let seat: mod Seat = game.seats.modAt(index: s) {
+      setLoss(seat: seat, lossPercent: 10, latencyMs: 40)
+      seat.input = MoveInput { moveX: 0.05, moveZ: 0.02 * (s as Float + 1.0) }
+    }
+  }
+  run(game: game, milliseconds: 3000)
+  # Then everything stops, and the last snapshots get through
+  game.moving = false
+  loop var s: Int = 0, s < 2, ++s {
+    if let seat: mod Seat = game.seats.modAt(index: s) {
+      seat.input = MoveInput { moveX: 0.0, moveZ: 0.0 }
+    }
+  }
+  run(game: game, milliseconds: 1000)
+  log("after 10% loss, player 1: {seatReport(game: game, index: 0)}")
+  log("after 10% loss, player 2: {seatReport(game: game, index: 1)}")
+  let avatar: Vec3 = positionOf(
+    world: game.world
+    entityId: entityWithNetId(world: game.world, netId: seatFocus(game: game, index: 0))
+  )
+  log("player 1's inputs moved its entity on the host: {avatar.x > 1.0 and avatar.z > 0.5}")
+  log(
+    "player 1 rebuilt most snapshots {seatRebuilt(game: game, index: 0) > game.host.tick / 2}, not all (the loss) {seatRebuilt(
+      game: game
+      index: 0
+    ) < game.host.tick}"
+  )
+  log(
+    "the far entity: on the host {not isNone(
+      this: entityWithNetId(world: game.world, netId: farNetId)
+    )}, sent to player 1 {seatSees(game: game, index: 0, netId: farNetId)}"
+  )
+  log(
+    "the global entity reached both: {seatSees(game: game, index: 0, netId: scoreNetId) and seatSees(
+      game: game
+      index: 1
+      netId: scoreNetId
+    )}"
+  )
+
+  # The far entity comes near player 1, then goes away again
+  let farEntityId: EntityId = entityWithNetId(world: game.world, netId: farNetId)
+  if componentHas(this: game.world.transforms, entityId: farEntityId) {
+    let transform: mod Transform3D = componentMod(
+      this: game.world.transforms
+      entityId: farEntityId
+    )
+    transform.position = Vec3 { x: avatar.x + 10.0, y: 0.0, z: avatar.z }
+  }
+  run(game: game, milliseconds: 500)
+  log(
+    "the far entity near player 1: sent {seatSees(game: game, index: 0, netId: farNetId)}; {seatReport(
+      game: game
+      index: 0
+    )}"
+  )
+  if componentHas(this: game.world.transforms, entityId: farEntityId) {
+    let transform: mod Transform3D = componentMod(
+      this: game.world.transforms
+      entityId: farEntityId
+    )
+    transform.position = Vec3 { x: 1000.0, y: 0.0, z: 0.0 }
+  }
+  run(game: game, milliseconds: 500)
+  log(
+    "the far entity gone again: removed from player 1 {not seatSees(
+      game: game
+      index: 0
+      netId: farNetId
+    )}; {seatReport(game: game, index: 0)}"
+  )
+
+  # An entity destroyed on the host goes from the players too
+  let wandererId: EntityId = entityWithNetId(world: game.world, netId: 3)
+  clearEntityComponents(ArenaWorld, world: game.world, entityId: wandererId)
+  freeEntity(this: game.world.entities, entityId: wandererId)
+  run(game: game, milliseconds: 500)
+  log(
+    "a destroyed entity: gone from player 1 {not seatSees(game: game, index: 0, netId: 3)}; {seatReport(
+      game: game
+      index: 0
+    )}"
+  )
+  log(measure(count: 4))
+  log(measure(count: 32))
+  log(measure(count: 100))
+  ret 0
+}

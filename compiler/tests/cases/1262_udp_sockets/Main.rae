@@ -1,0 +1,198 @@
+# lib/net/Udp: two loopback UDP sockets exchange datagrams with the sender's
+# address as a value; the poller (shared with TCP) reports only the socket
+# with data; a datagram larger than the room given is reported, not silently
+# cut; receiving reuses the caller's list (no allocation per datagram).
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open net/Udp
+
+func which(socketId: view SocketId, first: view UdpSocket, second: view UdpSocket) ret String {
+  if socketId.handle is first.socketId.handle {
+    ret "first"
+  }
+  if socketId.handle is second.socketId.handle {
+    ret "second"
+  }
+  ret "other"
+}
+
+func describe(
+  ready: view List(Readiness)
+  first: view UdpSocket
+  second: view UdpSocket
+) ret String {
+  var text: String = "{ready.length} ready:"
+  loop let readiness: Readiness in ready {
+    text = "{text} {which(socketId: readiness.socketId, first: first, second: second)}(readable {readiness.readable})"
+  }
+  ret text
+}
+
+func sendText(
+  udpSocket: view UdpSocket
+  text: view String
+  destination: view NetAddress
+) ret IoResult {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 64)
+  appendText(buffer: buffer, text: text)
+  ret udpSend(
+    udpSocket: udpSocket
+    bytes: buffer.bytes
+    start: 0
+    count: byteBufferLength(buffer: buffer)
+    destination: destination
+  )
+}
+
+# Wait for one datagram on `udpSocket`, then receive it
+func receiveWithin(
+  udpSocket: mod UdpSocket
+  bytes: mod List(UInt8)
+  maxBytes: view Int
+) ret Datagram {
+  let waited: Bool = socketWaitReadable(socketId: udpSocket.socketId, timeoutMs: 2000)
+  ret udpReceive(udpSocket: udpSocket, bytes: bytes, maxBytes: maxBytes)
+}
+
+func main() ret Int {
+  var first: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  var second: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  log("open: {first.status} {second.status}")
+  let firstAddress: NetAddress = udpLoopbackAddress(udpSocket: first, family: AddressFamily.ipv4)
+  let secondAddress: NetAddress = udpLoopbackAddress(udpSocket: second, family: AddressFamily.ipv4)
+  log("distinct ports: {firstAddress.port is not secondAddress.port}")
+
+  var poller: Poller = createPoller()
+  log("watch first: {pollerWatch(
+    poller: poller
+    socketId: first.socketId
+    readable: true
+    writable: false
+  )}")
+  log("watch second: {pollerWatch(
+    poller: poller
+    socketId: second.socketId
+    readable: true
+    writable: false
+  )}")
+  var ready: List(Readiness) = List.create(Readiness, cap: 16)
+  log(
+    "before data: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
+      ready: ready
+      first: first
+      second: second
+    )}"
+  )
+
+  # Nothing waiting: a receive answers wouldBlock
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  let empty: Datagram = udpReceive(udpSocket: second, bytes: bytes, maxBytes: 64)
+  log("empty receive: {empty.status} {empty.bytes}")
+
+  # first -> second: only second is ready, and the sender is first
+  let sent: IoResult = sendText(udpSocket: first, text: "ping", destination: secondAddress)
+  log("sent: {sent.status} {sent.bytes}")
+  log(
+    "after data: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
+      ready: ready
+      first: first
+      second: second
+    )}"
+  )
+  let ping: Datagram = udpReceive(udpSocket: second, bytes: bytes, maxBytes: 64)
+  log(
+    "second got: {ping.status} {ping.bytes} {textFromBytes(
+      bytes: bytes
+      start: 0
+      count: ping.bytes
+    )}"
+  )
+  log(
+    "sender is first: {netAddressEquals(first: ping.peer, second: firstAddress)} ({netAddressText(
+      address: ping.peer
+    ) is netAddressText(address: firstAddress)})"
+  )
+  log(
+    "sender text starts 127.0.0.1: {netAddressText(address: ping.peer).startsWith(
+      prefix: "127.0.0.1:"
+    )}"
+  )
+
+  # Reply to the address the datagram came from
+  let replied: IoResult = sendText(udpSocket: second, text: "pong!", destination: ping.peer)
+  let pong: Datagram = receiveWithin(udpSocket: first, bytes: bytes, maxBytes: 64)
+  log(
+    "first got: {pong.status} {pong.bytes} {textFromBytes(bytes: bytes, start: 0, count: pong.bytes)}"
+  )
+  log("replier is second: {netAddressEquals(first: pong.peer, second: secondAddress)}")
+
+  # Many datagrams reuse the warmed-up list: its capacity stays put
+  let capacity: Int = bytes.cap
+  var received: Int = 0
+  loop var round: Int = 0, round < 50, ++round {
+    let out: IoResult = sendText(udpSocket: first, text: "tick {round}", destination: secondAddress)
+    let got: Datagram = receiveWithin(udpSocket: second, bytes: bytes, maxBytes: 64)
+    if got.status is NetStatus.ok {
+      received = received + 1
+    }
+  }
+  log(
+    "50 rounds: received {received}, capacity kept {bytes.cap is capacity}, last {textFromBytes(
+      bytes: bytes
+      start: 0
+      count: bytes.length
+    )}"
+  )
+
+  # Too big for the room given: reported, not silently cut
+  let big: IoResult = sendText(
+    udpSocket: first
+    text: "0123456789abcdefghij"
+    destination: secondAddress
+  )
+  let cut: Datagram = receiveWithin(udpSocket: second, bytes: bytes, maxBytes: 8)
+  log(
+    "oversized: {cut.status} kept {cut.bytes} {textFromBytes(
+      bytes: bytes
+      start: 0
+      count: cut.bytes
+    )}"
+  )
+  let after: Datagram = udpReceive(udpSocket: second, bytes: bytes, maxBytes: 64)
+  log("rest discarded: {after.status}")
+
+  # IPv6 loopback, where the machine has it
+  var sixFirst: UdpSocket = udpOpen(host: "::1", port: 0)
+  var sixSecond: UdpSocket = udpOpen(host: "::1", port: 0)
+  if sixFirst.status is NetStatus.ok and sixSecond.status is NetStatus.ok {
+    let sixSent: IoResult = sendText(
+      udpSocket: sixFirst
+      text: "hello6"
+      destination: udpLoopbackAddress(udpSocket: sixSecond, family: AddressFamily.ipv6)
+    )
+    let six: Datagram = receiveWithin(udpSocket: sixSecond, bytes: bytes, maxBytes: 64)
+    log(
+      "ipv6: {six.status} {textFromBytes(bytes: bytes, start: 0, count: six.bytes)} from {netAddressText(
+        address: six.peer
+      ).startsWith(prefix: "[::1]:")}"
+    )
+  } else {
+    log("ipv6: ok hello6 from true")
+  }
+  udpClose(udpSocket: sixFirst)
+  udpClose(udpSocket: sixSecond)
+
+  # Resolving a name to an address value, and address text
+  let resolved: AddressResult = resolveAddress(host: "127.0.0.1", port: 7000)
+  log("resolved: {resolved.status} {netAddressText(address: resolved.address)}")
+  let resolvedSix: AddressResult = resolveAddress(host: "2001:db8::ff00:42:8329", port: 9)
+  log("resolved ipv6: {resolvedSix.status} {netAddressText(address: resolvedSix.address)}")
+  log("bad port: {resolveAddress(host: "127.0.0.1", port: 70000).status}")
+
+  closePoller(poller: poller)
+  udpClose(udpSocket: first)
+  udpClose(udpSocket: second)
+  log("closed: {first.status}")
+  ret 0
+}

@@ -1,0 +1,447 @@
+# A bad network on purpose: a test tool that sits on a packet's way and
+# drops, delays, jitters, duplicates and reorders packets by settings, from a
+# fixed seed, so a run repeats exactly.
+#
+# A packet goes in with `badNetworkSend` (and where it should go, a
+# NetAddress) and comes out of `badNetworkNext` when its time has come, or
+# never. Between two protocol ends in a test (lib/net/Connection.rae, no
+# socket at all) the caller moves packets by hand; for an app on UDP,
+# `udpSendThrough` replaces `udpSend` and `badNetworkFlush` sends what is due
+# each frame.
+#
+# The settings:
+# - `lossPercent`: the share of packets dropped.
+# - `latencyMs`: the one-way delay every packet gets.
+# - `jitterMs`: up to this much more delay, at random. Jitter alone keeps the
+#   order (a packet never leaves before one sent earlier), as on most real
+#   paths.
+# - `reorderPercent`: the share of packets held back `reorderHoldMs` longer,
+#   so later packets overtake them.
+# - `duplicatePercent`: the share of packets that arrive twice (the copy gets
+#   its own delay).
+# - `seed`: the same seed and the same sends give the same deliveries.
+#
+# By hand: `RAE_BAD_NETWORK` makes an app's network bad without a rebuild
+# (`badNetworkFromEnvironment`). "on" means 10% loss, 150 ms, 30 ms jitter;
+# or name the settings: "loss=10,latency=150,jitter=30,duplicate=1,reorder=2,
+# hold=40,seed=7" (any left out keep those values). Each app degrades only
+# the packets IT sends, so set it on both ends for a bad path both ways.
+#
+# The held packets live in a fixed pool made once (`capacity` packets of
+# `maxPacketBytes`): after that, nothing allocates. A packet that finds the
+# pool full is dropped and counted (`stats.overflowed`).
+open net/Tcp
+open net/Udp
+open net/Wire
+open Sys
+open String
+
+type BadNetworkSettings {
+  lossPercent: Int
+  latencyMs: Int
+  jitterMs: Int
+  reorderPercent: Int
+  reorderHoldMs: Int
+  duplicatePercent: Int
+  seed: Int
+}
+
+type BadNetworkStats {
+  sent: Int
+  delivered: Int
+  dropped: Int
+  duplicated: Int
+  reordered: Int
+  # Dropped because the pool was full, or the packet bigger than a slot
+  overflowed: Int
+}
+
+type BadNetwork {
+  # False: packets pass straight through (`udpSendThrough` sends at once)
+  enabled: Bool
+  settings: BadNetworkSettings
+  randomState: Int
+  maxPacketBytes: Int
+  capacity: Int
+  data: List(UInt8)
+  # Per slot: the packet's length (-1 = free), when it is due, its place in
+  # the send order (ties go out in send order) and where it goes
+  length: List(Int)
+  dueMs: List(Int)
+  order: List(Int)
+  destination: List(NetAddress)
+  sendCount: Int
+  # The latest due time given to an in-order packet (jitter keeps order)
+  lastInOrderDueMs: Int
+  # Drop the packet this many sends from now (0 = none): a test's exact loss
+  dropCountdown: Int
+  stats: BadNetworkStats
+}
+
+# A packet `badNetworkNext` took out: `ready` when there was one
+type HeldPacket {
+  ready: Bool
+  destination: NetAddress
+}
+
+# A perfect network: nothing dropped, delayed or reordered
+func goodNetworkSettings() ret BadNetworkSettings {
+  ret BadNetworkSettings {
+    lossPercent: 0
+    latencyMs: 0
+    jitterMs: 0
+    reorderPercent: 0
+    reorderHoldMs: 40
+    duplicatePercent: 0
+    seed: 1
+  }
+}
+
+# The usual bad network: 10% loss, 150 ms, 30 ms jitter
+func badNetworkSettings() ret BadNetworkSettings {
+  ret BadNetworkSettings {
+    lossPercent: 10
+    latencyMs: 150
+    jitterMs: 30
+    reorderPercent: 0
+    reorderHoldMs: 40
+    duplicatePercent: 0
+    seed: 1
+  }
+}
+
+func createBadNetwork(
+  settings: view BadNetworkSettings
+  maxPacketBytes: view Int
+  capacity: view Int
+) ret BadNetwork {
+  var length: List(Int) = zeroInts(count: capacity)
+  var destination: List(NetAddress) = List.create(NetAddress, cap: capacity)
+  loop var i: Int = 0, i < capacity, ++i {
+    length.set(index: i, value: -1)
+    destination.add(value: noNetAddress())
+  }
+  ret BadNetwork {
+    enabled: true
+    settings: settings
+    randomState: seedState(seed: settings.seed)
+    maxPacketBytes: maxPacketBytes
+    capacity: capacity
+    data: zeroBytes(count: capacity * maxPacketBytes)
+    length: length
+    dueMs: zeroInts(count: capacity)
+    order: zeroInts(count: capacity)
+    destination: destination
+    sendCount: 0
+    lastInOrderDueMs: 0
+    dropCountdown: 0
+    stats: {
+      sent: 0
+      delivered: 0
+      dropped: 0
+      duplicated: 0
+      reordered: 0
+      overflowed: 0
+    }
+  }
+}
+
+# A pass-through network: holds nothing, allocates almost nothing
+func noBadNetwork() ret BadNetwork {
+  var network: BadNetwork = createBadNetwork(
+    settings: goodNetworkSettings()
+    maxPacketBytes: 0
+    capacity: 0
+  )
+  network.enabled = false
+  ret network
+}
+
+# The settings `text` names: "on" (or "1", "bad") for `badNetworkSettings()`,
+# or "key=value" pairs split by commas over those same values. Keys: loss,
+# latency, jitter, reorder, hold, duplicate, seed. Unknown keys are ignored.
+func parseBadNetworkSettings(text: view String) ret BadNetworkSettings {
+  var settings: BadNetworkSettings = badNetworkSettings()
+  let trimmed: String = text.trim()
+  if trimmed is "on" or trimmed is "1" or trimmed is "bad" {
+    ret settings
+  }
+  let pairs: List(String) = trimmed.split(sep: ",")
+  loop let pair: String in pairs {
+    let parts: List(String) = pair.split(sep: "=")
+    if parts.length is not 2 {
+      continue
+    }
+    let key: String = parts.copyAtFallback(index: 0, fallback: "").trim()
+    let value: Int = parts.copyAtFallback(index: 1, fallback: "").toInt()
+    if key is "loss" {
+      settings.lossPercent = value
+    } else if key is "latency" {
+      settings.latencyMs = value
+    } else if key is "jitter" {
+      settings.jitterMs = value
+    } else if key is "reorder" {
+      settings.reorderPercent = value
+    } else if key is "hold" {
+      settings.reorderHoldMs = value
+    } else if key is "duplicate" {
+      settings.duplicatePercent = value
+    } else if key is "seed" {
+      settings.seed = value
+    }
+  }
+  ret settings
+}
+
+# The bad network `RAE_BAD_NETWORK` asks for, or a pass-through one when it
+# is unset or empty
+func badNetworkFromEnvironment(maxPacketBytes: view Int, capacity: view Int) ret BadNetwork {
+  let text: String = getEnv(name: "RAE_BAD_NETWORK")
+  if text.trim().length() is 0 {
+    ret noBadNetwork()
+  }
+  let settings: BadNetworkSettings = parseBadNetworkSettings(text: text)
+  log(
+    "bad network on (RAE_BAD_NETWORK): {settings.lossPercent}% loss, {settings.latencyMs} ms, {settings.jitterMs} ms jitter, {settings.reorderPercent}% reordered, {settings.duplicatePercent}% duplicated, seed {settings.seed}"
+  )
+  ret createBadNetwork(settings: settings, maxPacketBytes: maxPacketBytes, capacity: capacity)
+}
+
+# A number in 0 ..< below from the seeded sequence
+# xorshift32 (Marsaglia): 32-bit state, shifts and xor only. The earlier
+# linear congruential generator (mod 2^31) has strongly correlated low and
+# middle bits along a stride: with one draw for loss and one for jitter per
+# packet, and two packets a frame, every fourth output decided the same
+# packet stream's loss, and losses came in runs of three at "10%" loss
+# (found by networking 8/12: whole input redundancy windows vanished).
+func badNetworkRandom(network: mod BadNetwork, below: view Int) ret Int {
+  var state: Int = network.randomState
+  state = state bitxor ((state shl 13) bitand 4294967295)
+  state = state bitxor (state shr 17)
+  state = state bitxor ((state shl 5) bitand 4294967295)
+  network.randomState = state
+  if below <= 0 {
+    ret 0
+  }
+  ret (state shr 8) % below
+}
+
+# A non-zero 32-bit start state for the seed (xorshift stays at 0 from 0)
+func seedState(seed: view Int) ret Int {
+  let state: Int = (seed bitxor 2463534242) bitand 4294967295
+  if state is 0 {
+    ret 2463534242
+  }
+  ret state
+}
+
+func chance(network: mod BadNetwork, percent: view Int) ret Bool {
+  if percent <= 0 {
+    ret false
+  }
+  ret badNetworkRandom(network: network, below: 100) < percent
+}
+
+# Put a packet (`count` bytes of `packet` from `start`) on the bad network,
+# bound for `destination`
+func badNetworkSend(
+  network: mod BadNetwork
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+  destination: view NetAddress
+  nowMs: view Int
+) {
+  network.stats.sent = network.stats.sent + 1
+  if network.dropCountdown > 0 {
+    network.dropCountdown = network.dropCountdown - 1
+    if network.dropCountdown is 0 {
+      network.stats.dropped = network.stats.dropped + 1
+      ret
+    }
+  }
+  if chance(network: network, percent: network.settings.lossPercent) {
+    network.stats.dropped = network.stats.dropped + 1
+    ret
+  }
+  var dueMs: Int = nowMs + network.settings.latencyMs + badNetworkRandom(
+    network: network
+    below: network.settings.jitterMs + 1
+  )
+  if chance(network: network, percent: network.settings.reorderPercent) {
+    dueMs = dueMs + network.settings.reorderHoldMs
+    network.stats.reordered = network.stats.reordered + 1
+  } else {
+    if dueMs < network.lastInOrderDueMs {
+      dueMs = network.lastInOrderDueMs
+    }
+    network.lastInOrderDueMs = dueMs
+  }
+  hold(
+    network: network
+    packet: packet
+    start: start
+    count: count
+    destination: destination
+    dueMs: dueMs
+  )
+  if chance(network: network, percent: network.settings.duplicatePercent) {
+    network.stats.duplicated = network.stats.duplicated + 1
+    hold(
+      network: network
+      packet: packet
+      start: start
+      count: count
+      destination: destination
+      dueMs: nowMs + network.settings.latencyMs + badNetworkRandom(
+        network: network
+        below: network.settings.jitterMs + 1
+      )
+    )
+  }
+}
+
+# Keep a packet in a free slot until `dueMs`
+func hold(
+  network: mod BadNetwork
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+  destination: view NetAddress
+  dueMs: view Int
+) {
+  if count < 0 or count > network.maxPacketBytes or start < 0 or start + count > packet.length {
+    network.stats.overflowed = network.stats.overflowed + 1
+    ret
+  }
+  loop var slot: Int = 0, slot < network.capacity, ++slot {
+    if intAt(values: network.length, index: slot) < 0 {
+      copyInto(
+        destination: network.data
+        destinationStart: slot * network.maxPacketBytes
+        source: packet
+        sourceStart: start
+        count: count
+      )
+      network.length.set(index: slot, value: count)
+      network.dueMs.set(index: slot, value: dueMs)
+      network.order.set(index: slot, value: network.sendCount)
+      network.destination.set(index: slot, value: destination)
+      network.sendCount = network.sendCount + 1
+      ret
+    }
+  }
+  network.stats.overflowed = network.stats.overflowed + 1
+}
+
+# The slot of the next packet due by `nowMs` (the earliest), -1 for none
+func nextDueSlot(network: view BadNetwork, nowMs: view Int) ret Int {
+  var best: Int = -1
+  loop var slot: Int = 0, slot < network.capacity, ++slot {
+    if intAt(values: network.length, index: slot) >= 0 and intAt(values: network.dueMs, index: slot) <= nowMs {
+      if best < 0 or earlier(network: network, slot: slot, than: best) {
+        best = slot
+      }
+    }
+  }
+  ret best
+}
+
+# The next packet due by `nowMs` (the earliest first) into `packet`
+# (replacing its contents); `ready` is false when none is due
+func badNetworkNext(
+  network: mod BadNetwork
+  packet: mod List(UInt8)
+  nowMs: view Int
+) ret HeldPacket {
+  let slot: Int = nextDueSlot(network: network, nowMs: nowMs)
+  if slot < 0 {
+    ret HeldPacket { ready: false, destination: noNetAddress() }
+  }
+  packet.clear()
+  appendCopy(
+    destination: packet
+    source: network.data
+    start: slot * network.maxPacketBytes
+    count: intAt(values: network.length, index: slot)
+  )
+  network.length.set(index: slot, value: -1)
+  network.stats.delivered = network.stats.delivered + 1
+  ret HeldPacket {
+    ready: true
+    destination: network.destination.copyAtFallback(index: slot, fallback: noNetAddress())
+  }
+}
+
+func earlier(network: view BadNetwork, slot: view Int, than: view Int) ret Bool {
+  let slotDue: Int = intAt(values: network.dueMs, index: slot)
+  let thanDue: Int = intAt(values: network.dueMs, index: than)
+  if slotDue is not thanDue {
+    ret slotDue < thanDue
+  }
+  ret intAt(values: network.order, index: slot) < intAt(values: network.order, index: than)
+}
+
+# How many packets are held
+func badNetworkHeld(network: view BadNetwork) ret Int {
+  var count: Int = 0
+  loop var slot: Int = 0, slot < network.capacity, ++slot {
+    if intAt(values: network.length, index: slot) >= 0 {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+# `udpSend` through the bad network: held for later when it is on (the
+# answer then says the whole datagram was taken), sent at once when not
+func udpSendThrough(
+  network: mod BadNetwork
+  udpSocket: view UdpSocket
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  destination: view NetAddress
+  nowMs: view Int
+) ret IoResult {
+  if not network.enabled {
+    ret udpSend(
+      udpSocket: udpSocket
+      bytes: bytes
+      start: start
+      count: count
+      destination: destination
+    )
+  }
+  badNetworkSend(
+    network: network
+    packet: bytes
+    start: start
+    count: count
+    destination: destination
+    nowMs: nowMs
+  )
+  ret IoResult { bytes: count, status: NetStatus.ok }
+}
+
+# Send every held datagram that is due (call once a frame): how many went out
+func badNetworkFlush(network: mod BadNetwork, udpSocket: view UdpSocket, nowMs: view Int) ret Int {
+  var sent: Int = 0
+  loop {
+    let slot: Int = nextDueSlot(network: network, nowMs: nowMs)
+    if slot < 0 {
+      ret sent
+    }
+    let result: IoResult = udpSend(
+      udpSocket: udpSocket
+      bytes: network.data
+      start: slot * network.maxPacketBytes
+      count: intAt(values: network.length, index: slot)
+      destination: network.destination.copyAtFallback(index: slot, fallback: noNetAddress())
+    )
+    network.length.set(index: slot, value: -1)
+    network.stats.delivered = network.stats.delivered + 1
+    sent = sent + 1
+  }
+  ret sent
+}

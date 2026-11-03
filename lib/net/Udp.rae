@@ -1,0 +1,427 @@
+# UDP sockets: the base of real-time multiplayer (a host and its players, a
+# relay when a direct path fails).
+#
+# A UDP socket is a `UdpSocket`: its `socketId` is an ordinary SocketId, so
+# the same Poller that watches TCP sockets watches it too (`pollerWatch(...,
+# socketId: udpSocket.socketId, readable: true, ...)`), and one frame waits on
+# both. Every socket is non-blocking: a send or receive that would have to
+# wait answers `wouldBlock`.
+#
+# A peer is a `NetAddress`: a plain value (family, the address as two 64-bit
+# halves, port, IPv6 scope id) that is stored, compared and sent to like any
+# other value. It owns no heap, so receiving a datagram allocates nothing: the
+# bytes go into the caller's list (it grows only until it is big enough, the
+# warmup) and the sender comes back in the `Datagram` value.
+#
+# A datagram larger than the room given is not silently cut: the receive
+# answers `messageTooLarge` with the bytes that fit (the rest is gone; UDP
+# delivers a datagram whole or not at all, so the caller should drop it).
+#
+# Like lib/net/Tcp.rae this is the policy, in Rae, over the one-call shims of
+# lib/net/NetSystem.rae (AGENTS.md "Runtime C rule"); C only converts an
+# address between NetAddress's words and the per-OS sockaddr layout.
+open net/NetSystem
+open net/Tcp
+
+enum AddressFamily { none, ipv4, ipv6 }
+
+# One peer's address. IPv4 keeps its 32 bits in `low` (`high` is 0); IPv6
+# keeps bytes 0-7 in `high` and 8-15 in `low`, big-endian.
+type NetAddress {
+  family: AddressFamily
+  high: Int
+  low: Int
+  port: Int
+  scopeId: Int
+}
+
+# An address, or why there is none
+type AddressResult {
+  address: NetAddress
+  status: NetStatus
+}
+
+type UdpSocket {
+  socketId: SocketId
+  # Why there is no socket (`ok` when there is one)
+  status: NetStatus
+  # The last receive's sender (5 words) and its cut flag, made once
+  words: List(Int)
+}
+
+# One received datagram: how many bytes were kept, its status and its sender
+type Datagram {
+  bytes: Int
+  status: NetStatus
+  peer: NetAddress
+}
+
+# NetAddress's words as the shims read and write them
+const wordFamily: Int = 0
+
+const wordHigh: Int = 1
+
+const wordLow: Int = 2
+
+const wordPort: Int = 3
+
+const wordScopeId: Int = 4
+
+const wordTruncated: Int = 5
+
+const wordCount: Int = 6
+
+func noNetAddress() ret NetAddress {
+  ret NetAddress {
+    family: AddressFamily.none
+    high: 0
+    low: 0
+    port: 0
+    scopeId: 0
+  }
+}
+
+func netAddressIsValid(address: view NetAddress) ret Bool {
+  ret address.family is not AddressFamily.none
+}
+
+func netAddressEquals(first: view NetAddress, second: view NetAddress) ret Bool {
+  ret first.family is second.family and first.high is second.high and first.low is second.low and first.port is second.port and first.scopeId is second.scopeId
+}
+
+func familyFromWord(word: view Int) ret AddressFamily {
+  if word is 4 {
+    ret AddressFamily.ipv4
+  }
+  if word is 6 {
+    ret AddressFamily.ipv6
+  }
+  ret AddressFamily.none
+}
+
+func familyWord(family: view AddressFamily) ret Int {
+  if family is AddressFamily.ipv4 {
+    ret 4
+  }
+  if family is AddressFamily.ipv6 {
+    ret 6
+  }
+  ret 0
+}
+
+func addressFromWords(words: view List(Int)) ret NetAddress {
+  ret NetAddress {
+    family: familyFromWord(word: words.copyAtFallback(index: wordFamily, fallback: 0))
+    high: words.copyAtFallback(index: wordHigh, fallback: 0)
+    low: words.copyAtFallback(index: wordLow, fallback: 0)
+    port: words.copyAtFallback(index: wordPort, fallback: 0)
+    scopeId: words.copyAtFallback(index: wordScopeId, fallback: 0)
+  }
+}
+
+# The address `host`:`port` names ("127.0.0.1", "::1", a host name). The
+# first address the name resolves to; `invalidAddress` when there is none.
+func resolveAddress(host: view String, port: view Int) ret AddressResult {
+  if port < 0 or port > 65535 {
+    ret AddressResult { address: noNetAddress(), status: NetStatus.invalidAddress }
+  }
+  var records: List(UInt8) = List.create(
+    UInt8
+    cap: maxAddressRecords * netConstant(which: addressRecordBytes)
+  )
+  var words: List(Int) = List.create(Int, cap: wordCount)
+  unsafe {
+    let count: Int = systemResolve(
+      host: host
+      port: port
+      passive: false
+      datagram: true
+      records: records.data
+      maxRecords: maxAddressRecords
+    )
+    if count < 0 {
+      ret AddressResult { address: noNetAddress(), status: netStatusFromCode(code: count) }
+    }
+    loop var index: Int = 0, index < count, ++index {
+      let code: Int = systemRecordAddress(records: records.data, index: index, words: words.data)
+      if code is 0 {
+        words.length = wordCount
+        ret AddressResult { address: addressFromWords(words: words), status: NetStatus.ok }
+      }
+    }
+  }
+  ret AddressResult { address: noNetAddress(), status: NetStatus.invalidAddress }
+}
+
+func noUdpSocket(status: view NetStatus) ret UdpSocket {
+  ret UdpSocket { socketId: noSocket(), status: status, words: {} }
+}
+
+# A UDP socket bound to `host` ("" = every local address; "0.0.0.0" or "::"
+# picks the family; "127.0.0.1" = this machine only) and `port` (0 picks a
+# free port; `socketLocalPort(socketId: udpSocket.socketId)` says which).
+# Non-blocking and close-on-exec. An IPv4 socket sends to IPv4 peers, an IPv6
+# one to IPv6 peers.
+func udpOpen(host: view String, port: view Int) ret UdpSocket {
+  if port < 0 or port > 65535 {
+    ret noUdpSocket(status: NetStatus.invalidAddress)
+  }
+  var records: List(UInt8) = List.create(
+    UInt8
+    cap: maxAddressRecords * netConstant(which: addressRecordBytes)
+  )
+  var status: NetStatus = NetStatus.invalidAddress
+  unsafe {
+    let count: Int = systemResolve(
+      host: host
+      port: port
+      passive: true
+      datagram: true
+      records: records.data
+      maxRecords: maxAddressRecords
+    )
+    if count < 0 {
+      ret noUdpSocket(status: netStatusFromCode(code: count))
+    }
+    loop var index: Int = 0, index < count, ++index {
+      let handle: Int = systemSocketFor(records: records.data, index: index)
+      if handle < 0 {
+        status = netStatusFromCode(code: handle)
+        continue
+      }
+      let closeOnExec: Int = systemSetCloseOnExec(handle: handle)
+      var code: Int = systemBindTo(handle: handle, records: records.data, index: index)
+      if code is 0 {
+        code = setNonBlocking(handle: handle)
+      }
+      if code < 0 {
+        status = netStatusFromCode(code: code)
+        closeHandle(handle: handle)
+        continue
+      }
+      ret UdpSocket {
+        socketId: { handle: handle }
+        status: NetStatus.ok
+        words: List.create(Int, cap: wordCount)
+      }
+    }
+  }
+  ret noUdpSocket(status: status)
+}
+
+# Send `count` bytes of `bytes` from `start` as ONE datagram to `destination`.
+# A datagram goes whole or not at all: `messageTooLarge` when it is too big,
+# `wouldBlock` when the socket's send buffer is full.
+func udpSend(
+  udpSocket: view UdpSocket
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  destination: view NetAddress
+) ret IoResult {
+  if start < 0 or count < 0 or start + count > bytes.length {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
+  if not netAddressIsValid(address: destination) {
+    ret IoResult { bytes: 0, status: NetStatus.invalidAddress }
+  }
+  unsafe {
+    loop {
+      let code: Int = systemSendTo(
+        handle: udpSocket.socketId.handle
+        buffer: bytes.data
+        offset: start
+        count: count
+        flags: 0
+        family: familyWord(family: destination.family)
+        high: destination.high
+        low: destination.low
+        port: destination.port
+        scopeId: destination.scopeId
+      )
+      if isError(code: code, which: errorInterrupted) {
+        continue
+      }
+      ret ioResultFromCode(code: code)
+    }
+  }
+  ret IoResult { bytes: 0, status: NetStatus.failed }
+}
+
+# Receive one datagram into `bytes`, replacing its contents, with room for
+# `maxBytes` (the list grows once to that and then is reused: no allocation
+# per datagram). `wouldBlock` when none is waiting; `messageTooLarge` when the
+# datagram was bigger than `maxBytes` (`bytes` holds the part that fit, the
+# rest is lost). The sender is the answer's `peer`.
+func udpReceive(udpSocket: mod UdpSocket, bytes: mod List(UInt8), maxBytes: view Int) ret Datagram {
+  bytes.length = 0
+  if maxBytes <= 0 or udpSocket.socketId.handle < 0 {
+    ret Datagram { bytes: 0, status: NetStatus.failed, peer: noNetAddress() }
+  }
+  loop bytes.cap < maxBytes {
+    bytes.grow()
+  }
+  loop udpSocket.words.cap < wordCount {
+    udpSocket.words.grow()
+  }
+  unsafe {
+    loop {
+      let code: Int = systemReceiveFrom(
+        handle: udpSocket.socketId.handle
+        buffer: bytes.data
+        offset: 0
+        maxBytes: maxBytes
+        words: udpSocket.words.data
+      )
+      if code >= 0 {
+        bytes.length = code
+        udpSocket.words.length = wordCount
+        var status: NetStatus = NetStatus.ok
+        if udpSocket.words.copyAtFallback(index: wordTruncated, fallback: 0) is not 0 {
+          status = NetStatus.messageTooLarge
+        }
+        ret Datagram { bytes: code, status: status, peer: addressFromWords(words: udpSocket.words) }
+      }
+      if isError(code: code, which: errorInterrupted) {
+        continue
+      }
+      ret Datagram { bytes: 0, status: netStatusFromCode(code: code), peer: noNetAddress() }
+    }
+  }
+  ret Datagram { bytes: 0, status: NetStatus.failed, peer: noNetAddress() }
+}
+
+# The address the socket is bound to, as a peer on this machine would reach
+# it: the loopback address of the socket's family and its port
+func udpLoopbackAddress(udpSocket: view UdpSocket, family: view AddressFamily) ret NetAddress {
+  if let port: Int = socketLocalPort(socketId: udpSocket.socketId) {
+    if family is AddressFamily.ipv4 {
+      # 127.0.0.1
+      ret NetAddress {
+        family: family
+        high: 0
+        low: 2130706433
+        port: port
+        scopeId: 0
+      }
+    }
+    if family is AddressFamily.ipv6 {
+      # ::1
+      ret NetAddress {
+        family: family
+        high: 0
+        low: 1
+        port: port
+        scopeId: 0
+      }
+    }
+  }
+  ret noNetAddress()
+}
+
+# Close the socket (closing also removes it from any poller)
+func udpClose(udpSocket: mod UdpSocket) {
+  socketClose(socketId: udpSocket.socketId)
+  udpSocket.socketId = noSocket()
+  udpSocket.status = NetStatus.failed
+}
+
+# The address as text: "192.168.1.5:7000", "[::1]:7000"
+func netAddressText(address: view NetAddress) ret String {
+  if address.family is AddressFamily.ipv4 {
+    let value: Int = address.low
+    ret "{(value shr 24) bitand 255}.{(value shr 16) bitand 255}.{(value shr 8) bitand 255}.{value bitand 255}:{address.port}"
+  }
+  if address.family is AddressFamily.ipv6 {
+    ret "[{ipv6Text(high: address.high, low: address.low)}]:{address.port}"
+  }
+  ret "none"
+}
+
+# Group `index` (0-7) of an IPv6 address: 16 bits
+func ipv6Group(high: view Int, low: view Int, index: view Int) ret Int {
+  if index < 4 {
+    ret (high shr (48 - 16 * index)) bitand 65535
+  }
+  ret (low shr (48 - 16 * (index - 4))) bitand 65535
+}
+
+# RFC 5952 text: lowercase hex groups, the longest run of two or more zero
+# groups written as "::"
+func ipv6Text(high: view Int, low: view Int) ret String {
+  var runStart: Int = -1
+  var runLength: Int = 0
+  var index: Int = 0
+  loop index < 8 {
+    if ipv6Group(high: high, low: low, index: index) is 0 {
+      var end: Int = index
+      loop end < 8 and ipv6Group(high: high, low: low, index: end) is 0 {
+        end = end + 1
+      }
+      if end - index > runLength {
+        runStart = index
+        runLength = end - index
+      }
+      index = end
+    } else {
+      index = index + 1
+    }
+  }
+  if runLength < 2 {
+    runStart = -1
+  }
+  var text: String = ""
+  var needsColon: Bool = false
+  var group: Int = 0
+  loop group < 8 {
+    if group is runStart {
+      text = "{text}::"
+      needsColon = false
+      group = group + runLength
+    } else {
+      if needsColon {
+        text = "{text}:"
+      }
+      text = "{text}{hexText(value: ipv6Group(high: high, low: low, index: group))}"
+      needsColon = true
+      group = group + 1
+    }
+  }
+  ret text
+}
+
+# A non-negative value in lowercase hexadecimal, no leading zeros
+func hexText(value: view Int) ret String {
+  if value is 0 {
+    ret "0"
+  }
+  var text: String = ""
+  var rest: Int = value
+  loop rest > 0 {
+    text = "{hexDigit(value: rest bitand 15)}{text}"
+    rest = rest shr 4
+  }
+  ret text
+}
+
+func hexDigit(value: view Int) ret String {
+  if value < 10 {
+    ret "{value}"
+  }
+  if value is 10 {
+    ret "a"
+  }
+  if value is 11 {
+    ret "b"
+  }
+  if value is 12 {
+    ret "c"
+  }
+  if value is 13 {
+    ret "d"
+  }
+  if value is 14 {
+    ret "e"
+  }
+  ret "f"
+}

@@ -1,0 +1,310 @@
+# app3d/WalkerCubes — the walker world's loose cubes (split out of
+# app3d/WalkerPhysics, which steps them): a dynamic cube (spawnPhysicsCube), a
+# kinematic one that stays where its Transform3D puts it (spawnKinematicCube),
+# the stacks of cubes near the spawn (spawnCubeStacks), and the model matrix
+# the renderer draws a cube with (physicsCubeModel). Each cube is an entity
+# with a body, a box collider, a Transform3D the pull system keeps up to date,
+# and the PhysicsCube component of WalkerPhysics.
+import Math
+import Vec3
+import Quat
+open Vec2
+open Math3d
+open WorldBiome
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/Tag
+open app3d/CharacterController
+open app3d/WalkerCharacter
+open treeSets/TreeSet
+open app3d/PropField
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/CharacterMover
+open box3d/ecs/VenueMesh
+open box3d/ecs/NatureBodies
+open box3d/Box3d
+open box3d/Box3dTypes
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open GltfSkin
+open app3d/KnockedDown
+open app3d/RagdollRig
+open app3d/Ragdoll
+open app3d/PropColliderRules
+open app3d/PropBodyPool
+open app3d/ClimbRules
+open app3d/Climbing
+open app3d/CharacterContact
+open app3d/Wander
+open app3d/Characters
+open water/WaterIce
+open app3d/WalkerPhysics
+
+# A dynamic cube of half edge `halfSize` at `center`, as a new entity of
+# `allocator`: a body, a box collider, a Transform3D in `transforms` the pull
+# system keeps up to date, and the PhysicsCube the renderer draws.
+func spawnPhysicsCube(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+) ret EntityId {
+  ret spawnCubeOfType(
+    physicsSystem: physicsSystem
+    allocator: allocator
+    transforms: transforms
+    center: center
+    halfSize: halfSize
+    color: color
+    bodyType: BodyType.dynamicBody
+  )
+}
+
+# A kinematic cube: it stays where its Transform3D puts it (gravity and
+# bumps do not move it) and pushes what it meets as it moves or turns; a
+# game drives it by writing the Transform3D (docs/walker-kit.md)
+func spawnKinematicCube(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+) ret EntityId {
+  ret spawnCubeOfType(
+    physicsSystem: physicsSystem
+    allocator: allocator
+    transforms: transforms
+    center: center
+    halfSize: halfSize
+    color: color
+    bodyType: BodyType.kinematicBody
+  )
+}
+
+func spawnCubeOfType(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+  bodyType: view BodyType
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = bodyType
+  bodyDef.position = center
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = 200.0
+  shapeDef.baseMaterial.friction = 0.6
+  # A loose cube does not stop the camera (app3d/CameraObstruction)
+  shapeDef.filter.categoryBits = walkerWorldCategory
+  let shapeId: ShapeId = addBoxCollider(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+    def: shapeDef
+    halfExtents: Vec3 { x: halfSize, y: halfSize, z: halfSize }
+    transform: transformIdentity()
+  )
+  componentSet(
+    this: physicsSystem.cubes
+    entityId: entityId
+    data: PhysicsCube { halfSize: halfSize, color: color }
+  )
+  ret entityId
+}
+
+# Remove a cube's body, collider and PhysicsCube row (the app then clears the
+# entity's other component rows and frees the entity)
+func despawnPhysicsCube(physicsSystem: mod WalkerPhysics, entityId: view EntityId) {
+  despawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+  )
+  componentRemove(this: physicsSystem.cubes, entityId: entityId)
+}
+
+# One stack: `columns` x `columns` cubes per layer, `layers` high, its center
+# `offsetX` / `offsetY` from the spawn, resting on the highest ground under it.
+type CubeStack {
+  offsetX: Float
+  offsetY: Float
+  halfSize: Float
+  columns: Int
+  layers: Int
+  color: Vec3
+}
+
+func walkerCubeStacks() ret List(CubeStack) {
+  ret List(CubeStack) {
+    CubeStack {
+      offsetX: 0.0
+      offsetY: 5.0
+      halfSize: 0.25
+      columns: 2
+      layers: 3
+      color: Vec3 { x: 0.85, y: 0.45, z: 0.18 }
+    }
+    CubeStack {
+      offsetX: -4.5
+      offsetY: 2.5
+      halfSize: 0.3
+      columns: 1
+      layers: 3
+      color: Vec3 { x: 0.25, y: 0.5, z: 0.85 }
+    }
+    CubeStack {
+      offsetX: 4.0
+      offsetY: 2.0
+      halfSize: 0.4
+      columns: 2
+      layers: 2
+      color: Vec3 { x: 0.8, y: 0.75, z: 0.3 }
+    }
+    CubeStack {
+      offsetX: 1.5
+      offsetY: -4.0
+      halfSize: 0.5
+      columns: 1
+      layers: 1
+      color: Vec3 { x: 0.55, y: 0.35, z: 0.6 }
+    }
+  }
+}
+
+# The ground under a square footprint of side `span` centered at x / y: its
+# highest point (where the stack rests), its lowest, and whether it is all
+# land. Sampled at the corners and the center.
+type Footprint {
+  highest: Float
+  lowest: Float
+  onLand: Bool
+}
+
+func footprintAt(
+  physicsSystem: view WalkerPhysics
+  x: view Float
+  y: view Float
+  span: view Float
+) ret Footprint {
+  let biome: BiomeConfig = physicsSystem.biome
+  let groundZ: Float = physicsSystem.groundZ
+  let centerZ: Float = worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: groundZ
+    cfg: biome
+  )
+  var highest: Float = centerZ
+  var lowest: Float = centerZ
+  var onLand: Bool = worldIsLand(x: x, y: y, cfg: biome)
+  loop var corner: Int = 0, corner < 4, ++corner {
+    var cornerX: Float = x - span * 0.5
+    var cornerY: Float = y - span * 0.5
+    if corner % 2 is 1 {
+      cornerX = x + span * 0.5
+    }
+    if corner >= 2 {
+      cornerY = y + span * 0.5
+    }
+    let cornerZ: Float = worldTerrainHeight(
+      x: cornerX
+      y: cornerY
+      groundZ: groundZ
+      cfg: biome
+    )
+    highest = Math.max(a: highest, b: cornerZ)
+    lowest = Math.min(a: lowest, b: cornerZ)
+    onLand = onLand and worldIsLand(x: cornerX, y: cornerY, cfg: biome)
+  }
+  ret Footprint { highest: highest, lowest: lowest, onLand: onLand }
+}
+
+# The stacks around `spawnPoint` (world space). Each takes the flattest land
+# within 3 m of its place (the meadow rolls, and a stack on a slope slides as
+# it settles); a stack with no land there is left out. The count of cubes.
+func spawnCubeStacks(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  spawnPoint: view Vec3
+) ret Int {
+  var spawned: Int = 0
+  let stacks: List(CubeStack) = walkerCubeStacks()
+  loop let stack: view CubeStack in stacks {
+    let edge: Float = stack.halfSize * 2.0
+    let span: Float = edge * (stack.columns as Float)
+    var centerX: Float = 0.0
+    var centerY: Float = 0.0
+    var baseZ: Float = 0.0
+    var flattest: Float = 1000000.0
+    loop var candidate: Int = 0, candidate < 25, ++candidate {
+      let x: Float = spawnPoint.x + stack.offsetX + ((candidate % 5 - 2) as Float) * 1.5
+      let y: Float = spawnPoint.y + stack.offsetY + ((candidate / 5 - 2) as Float) * 1.5
+      let footprint: Footprint = footprintAt(
+        physicsSystem: physicsSystem
+        x: x
+        y: y
+        span: span
+      )
+      if footprint.onLand and footprint.highest - footprint.lowest < flattest {
+        flattest = footprint.highest - footprint.lowest
+        centerX = x
+        centerY = y
+        baseZ = footprint.highest
+      }
+    }
+    if flattest >= 1000000.0 {
+      continue
+    }
+    loop var layer: Int = 0, layer < stack.layers, ++layer {
+      loop var row: Int = 0, row < stack.columns, ++row {
+        loop var column: Int = 0, column < stack.columns, ++column {
+          let center: Vec3 = {
+            x: centerX - span * 0.5 + edge * ((column as Float) + 0.5)
+            y: centerY - span * 0.5 + edge * ((row as Float) + 0.5)
+            z: baseZ + 0.01 + edge * ((layer as Float) + 0.5)
+          }
+          let cubeId: EntityId = spawnPhysicsCube(
+            physicsSystem: physicsSystem
+            allocator: allocator
+            transforms: transforms
+            center: center
+            halfSize: stack.halfSize
+            color: stack.color
+          )
+          spawned = spawned + 1
+        }
+      }
+    }
+  }
+  ret spawned
+}
+
+# The model matrix of a cube: its body's pose, scaled from the unit box mesh.
+func physicsCubeModel(transform: view Transform3D, cube: view PhysicsCube) ret Mat4 {
+  ret mat4Mul(
+    a: mat4Translate(x: transform.position.x, y: transform.position.y, z: transform.position.z)
+    b: mat4Mul(a: Quat.toMat4(q: transform.rotation), b: mat4Scale(s: cube.halfSize * 2.0))
+  )
+}

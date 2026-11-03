@@ -220,6 +220,76 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     return true;
 }
 
+/* Sema checks a generic body once, for the template, where an argument of
+ * a generic parameter's type (`value: view T`) matches every overload, so it
+ * links the FIRST one. Inside each specialization, pick again from the
+ * concrete types: the non-generic overload of the same name, arity and
+ * labels whose parameters take those types. Without this every
+ * instantiation silently called the first overload (`encode(value: health)`
+ * ran the Position version). When none takes the concrete type,
+ * `*no_overload` is set (the caller reports it) and `fd` is kept. */
+static const AstFuncDecl* respecialize_overload(CFuncContext* ctx, const AstExpr* expr,
+                                                const AstFuncDecl* fd, bool* no_overload,
+                                                Str* generic_arg_type) {
+    if (!ctx->generic_params || !ctx->generic_args || fd->generic_params) return fd;
+    if (expr->as.call.callee->kind != AST_EXPR_IDENT) return fd;
+    /* Which arguments have a generic parameter's type, and what it is here */
+    enum { max_args = 16 };
+    Str concrete[max_args];
+    bool generic[max_args];
+    size_t arg_count = 0;
+    bool any_generic = false;
+    for (const AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (arg_count >= max_args) return fd;
+        generic[arg_count] = false;
+        concrete[arg_count] = (Str){0};
+        /* Sema typed the argument in the template: a generic parameter's
+         * type there. The written type in this specialization may already
+         * be the concrete one, so substitute either way. */
+        const TypeInfo* sema_type = a->value ? a->value->resolved_type : NULL;
+        while (sema_type && sema_type->kind == TYPE_REF) sema_type = sema_type->as.ref.base;
+        const AstTypeRef* raw = a->value ? infer_expr_type_ref(ctx, a->value) : NULL;
+        if (raw) {
+            Str raw_base = get_base_type_name(raw);
+            if (sema_type && sema_type->kind == TYPE_GENERIC_PARAM) generic[arg_count] = true;
+            for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next) {
+                if (str_eq(raw_base, gp->text)) { generic[arg_count] = true; break; }
+            }
+            if (generic[arg_count]) {
+                const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, raw);
+                concrete[arg_count] = sub ? get_base_type_name(sub) : (Str){0};
+                if (concrete[arg_count].len == 0) generic[arg_count] = false;
+                else any_generic = true;
+            }
+        }
+        arg_count++;
+    }
+    if (!any_generic) return fd;
+    Str name = expr->as.call.callee->as.ident;
+    size_t named_count = 0;
+    const size_t* named = decl_index_functions(ctx->compiler_ctx, name, &named_count);
+    for (size_t k = 0; k < named_count; k++) {
+        const AstFuncDecl* candidate = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+        if (candidate->generic_params || candidate->specialization_args) continue;
+        size_t param_count = 0;
+        for (const AstParam* p = candidate->params; p; p = p->next) param_count++;
+        if (param_count != arg_count) continue;
+        bool fits = true;
+        size_t i = 0;
+        const AstCallArg* a = expr->as.call.args;
+        for (const AstParam* p = candidate->params; p && a && fits; p = p->next, a = a->next, i++) {
+            if (a->name.len && !str_eq(a->name, p->name)) fits = false;
+            else if (generic[i] && !str_eq(get_base_type_name(p->type), concrete[i])) fits = false;
+        }
+        if (fits) return candidate;
+    }
+    *no_overload = true;
+    for (size_t i = 0; i < arg_count; i++) {
+        if (generic[i]) { *generic_arg_type = concrete[i]; break; }
+    }
+    return fd;
+}
+
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
     // `s`. One statement-expression: look the name up through the enum's
@@ -296,15 +366,26 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             char an[64], bn[64];
             snprintf(an, sizeof an, "__eqa%d", eid);
             snprintf(bn, sizeof bn, "__eqb%d", eid);
-            fprintf(out, "(__extension__ ({ __typeof__(");
-            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
-            fprintf(out, ") %s = (", an);
-            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
-            fprintf(out, "); __typeof__(");
-            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
-            fprintf(out, ") %s = (", bn);
-            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
-            fprintf(out, "); (rae_Bool)(");
+            /* Each operand once into a local of its type; a fresh owned
+             * value (a call's result) is held in a statement temporary and
+             * freed after the statement, as `is` does (it leaked: one list
+             * per `equals(a: makeList(), b: other)`) */
+            const AstExpr* operands[2] = { av, bv };
+            const char* names[2] = { an, bn };
+            fprintf(out, "(__extension__ ({ ");
+            for (int side = 0; side < 2; side++) {
+                emit_type_ref_as_c_type(ctx, &value_tr, out, false);
+                fprintf(out, " %s = (", names[side]);
+                int held = -1;
+                if (c_stmt_temp_value_owns(ctx, operands[side])
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &value_tr, 0))
+                    held = register_stmt_temp(ctx, &value_tr, true);
+                if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+                emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
+                fprintf(out, "); ");
+            }
+            fprintf(out, "(rae_Bool)(");
             rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &value_tr, an, bn, out);
             fprintf(out, "); }))");
             return true;
@@ -669,6 +750,19 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     const AstFuncDecl* fd = NULL;
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
         fd = &expr->decl_link->as.func_decl;
+        bool no_overload = false;
+        Str generic_arg_type = {0};
+        fd = respecialize_overload(ctx, expr, fd, &no_overload, &generic_arg_type);
+        if (no_overload) {
+            char message[512];
+            snprintf(message, sizeof message,
+                "no overload of '%.*s' takes a '%.*s' here: this generic function is "
+                "instantiated with that type, and the call was checked only against the "
+                "first overload; add an overload for it",
+                (int)fd->name.len, fd->name.data,
+                (int)generic_arg_type.len, generic_arg_type.data);
+            diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+        }
     } else if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
         uint16_t call_arg_count = 0;
@@ -697,9 +791,28 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // can re-infer per call.
         const AstFuncDecl* nongeneric_receiver_match = NULL;
         const AstFuncDecl* receiver_match = NULL;
+        const AstFuncDecl* nongeneric_typed_match = NULL;
         const AstFuncDecl* nongeneric_fallback = NULL;
         const AstFuncDecl* generic_fallback = NULL;
+        /* Each argument's concrete base type (substituted through the generic
+         * context), so an overload set like `encode(value: view Position)` /
+         * `encode(value: view Health)` picks by the argument instead of by
+         * declaration order. In a generic body specialized for Health the
+         * call reaches here unlinked, and the first overload used to win
+         * for every instantiation. */
+        enum { max_typed_args = 16 };
+        Str arg_bases[max_typed_args];
+        size_t typed_arg_count = 0;
+        for (const AstCallArg* ca = expr->as.call.args; ca && typed_arg_count < max_typed_args; ca = ca->next) {
+            const AstTypeRef* atr = ca->value ? infer_expr_type_ref(ctx, ca->value) : NULL;
+            if (atr && ctx->generic_params && ctx->generic_args)
+                atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
+            Str base = atr ? get_base_type_name(atr) : (Str){0};
+            if (str_eq_cstr(base, "Any")) base = (Str){0};
+            arg_bases[typed_arg_count++] = base;
+        }
         size_t named_count = 0;
+        size_t nongeneric_candidates = 0;
         const size_t* named = decl_index_functions(ctx->compiler_ctx, callee_name, &named_count);
         // A call that carries type arguments (`createList<Int>(cap: 4)`, the
         // hoisted form of `createList(Int, cap: 4)` and of `List.create(Int,
@@ -708,7 +821,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         // `createList(count:)` must not take over every List.create in the
         // stdlib. (When there is none, the "type" was a module qualifier
         // lowered the same way, `String.fromBytes(...)`, and the non-generic
-        // functions stay candidates.) Within each of the four levels below, a
+        // functions stay candidates.) Within each of the five levels below, a
         // function the calling file sees by a bare name (its own module, the
         // opened ones, the prelude) wins over one it does not, as sema
         // resolves the name; the levels keep their order.
@@ -725,7 +838,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         const char* calling_file = (ctx->func_decl && ctx->func_decl->origin_file) ? ctx->func_decl->origin_file : NULL;
         bool nongeneric_receiver_seen = false, receiver_seen = false, nongeneric_fallback_seen = false,
-             generic_fallback_seen = false;
+             generic_fallback_seen = false, nongeneric_typed_seen = false;
         for (size_t k = 0; k < named_count; k++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
             const AstFuncDecl* candidate = &d->as.func_decl;
@@ -756,8 +869,20 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     if (!nongeneric_receiver_match || (seen_here && !nongeneric_receiver_seen)) {
                         nongeneric_receiver_match = candidate; nongeneric_receiver_seen = seen_here;
                     }
-                } else if (!nongeneric_fallback || (seen_here && !nongeneric_fallback_seen)) {
-                    nongeneric_fallback = candidate; nongeneric_fallback_seen = seen_here;
+                } else {
+                    nongeneric_candidates++;
+                    if (!nongeneric_fallback || (seen_here && !nongeneric_fallback_seen)) {
+                        nongeneric_fallback = candidate; nongeneric_fallback_seen = seen_here;
+                    }
+                    /* Every argument whose type is known names the parameter's type */
+                    bool typed = typed_arg_count == call_arg_count;
+                    size_t ai = 0;
+                    for (const AstParam* pp = candidate->params; pp && typed && ai < typed_arg_count; pp = pp->next, ai++) {
+                        if (arg_bases[ai].len > 0 && !str_eq(arg_bases[ai], get_base_type_name(pp->type))) typed = false;
+                    }
+                    if (typed && (!nongeneric_typed_match || (seen_here && !nongeneric_typed_seen))) {
+                        nongeneric_typed_match = candidate; nongeneric_typed_seen = seen_here;
+                    }
                 }
             } else {
                 if (receiver_matches) {
@@ -772,8 +897,30 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (!fd) {
             fd = nongeneric_receiver_match ? nongeneric_receiver_match
                : receiver_match ? receiver_match
+               : nongeneric_typed_match ? nongeneric_typed_match
                : nongeneric_fallback ? nongeneric_fallback
                : generic_fallback;
+            /* An overload set where a struct argument fits none of them (a
+             * generic body instantiated with a type nobody wrote an overload
+             * for): calling the first would pass the wrong struct. Refuse. */
+            if (fd == nongeneric_fallback && !nongeneric_typed_match && nongeneric_candidates >= 2 && !generic_fallback && !receiver_match) {
+                size_t ai = 0;
+                for (const AstParam* pp = fd->params; pp && ai < typed_arg_count; pp = pp->next, ai++) {
+                    Str arg_base = arg_bases[ai];
+                    if (arg_base.len == 0 || str_eq(arg_base, get_base_type_name(pp->type))) continue;
+                    const AstDecl* td = find_type_decl(ctx, ctx->module, arg_base);
+                    if (!td || td->kind != AST_DECL_TYPE) continue;
+                    char message[512];
+                    snprintf(message, sizeof message,
+                        "no overload of '%.*s' takes a '%.*s' for '%.*s' (this call is in a generic "
+                        "function instantiated with it); add an overload for '%.*s'",
+                        (int)callee_name.len, callee_name.data, (int)arg_base.len, arg_base.data,
+                        (int)pp->name.len, pp->name.data, (int)arg_base.len, arg_base.data);
+                    diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+                    fprintf(out, "0 /* no overload */");
+                    return true;
+                }
+            }
         }
     }
 

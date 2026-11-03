@@ -1,0 +1,515 @@
+# The walker app's side of a networked session (lib/app3d/walkerNetSystem,
+# docs/walker-net.md): the local walker's pose out, and every other player's
+# walker as a character of its own.
+#
+# A remote walker that appears gets a walker character (an entity of the
+# app's world: controller, clip, model, height, name label, mover) and the
+# character goes when the walker leaves: its rows in the world and the
+# physics are cleared and the entity freed, so its index is reused clean.
+# The character is DRIVEN through the same mover drive the crowd walks with:
+# toward where the remote walker is, at a walk or a run, with a jump when it
+# jumps and a knock when it falls. So a remote walker walks, jumps and falls
+# with this app's own physics and clips, on this app's ground. One more than
+# 3 m away (a bot whose made-up walk crosses a tree) is put there at once.
+# In a networked session the app has no crowd (app3d/WalkerApp): every
+# other character is a player.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open Vec3
+open WorldBiome
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterMovers
+open app3d/CharacterBodies
+open app3d/Characters
+open app3d/KnockedDown
+open app3d/Ragdoll
+open app3d/Wander
+open app3d/WalkerNames
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerReset
+open app3d/WalkerAppSetup
+open app3d/WalkerCharacter
+open app3d/walkerNetSystem/WalkerNetSystem
+
+# Farther than this (m) from its remote walker, a character is put there
+const remoteTeleportDistance: Float = 3.0
+
+# Nearer than this (m), it stands
+const remoteArriveDistance: Float = 0.15
+
+# Faster than this (m/s), the remote walker runs
+const remoteRunSpeed: Float = 2.5
+
+# The most remote walkers shown at once: with the hero (and an offline
+# crowd) well inside the renderer's 64 skin palettes (SkinStore)
+const remoteWalkerMax: Int = 32
+
+# One remote walker shown: the WalkerNetWorld entity it is, the app's
+# character that shows it, and its last airborne and knocked-down state (a
+# jump or a fall starts on the change)
+type RemoteWalker {
+  netEntityId: EntityId
+  entityId: EntityId
+  number: Int
+  wasAirborne: Bool
+  wasDown: Bool
+}
+
+type RemoteWalkers {
+  walkers: List(RemoteWalker)
+  # The name number of the next one ("Player <n>")
+  nextNumber: Int
+  # More remote walkers than remoteWalkerMax were in the session
+  overflowLogged: Bool
+  # Scratch: the remote walkers this frame
+  remote: List(EntityId)
+  # The host's invite was printed
+  tokenShown: Bool
+}
+
+func createRemoteWalkers() ret RemoteWalkers {
+  ret RemoteWalkers {
+    walkers: {}
+    nextNumber: 2
+    overflowLogged: false
+    remote: {}
+    tokenShown: false
+  }
+}
+
+# The local walker's pose: where its controller is, how fast its mover goes,
+# whether it is in the air or knocked down
+func localWalkerPose(
+  physicsSystem: view WalkerPhysics
+  controllers: view ComponentTable(ThirdPersonController)
+  controlledEntityId: view EntityId
+) ret WalkerPose {
+  var pose: WalkerPose = walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  if componentHas(this: controllers, entityId: controlledEntityId) {
+    let controller: view ThirdPersonController = componentView(
+      this: controllers
+      entityId: controlledEntityId
+    )
+    pose.position = controller.position
+    pose.heading = controller.heading
+  }
+  if componentHas(this: physicsSystem.characters, entityId: controlledEntityId) {
+    let character: view CharacterBody = componentView(
+      this: physicsSystem.characters
+      entityId: controlledEntityId
+    )
+    let vx: Float = character.mover.velocity.x
+    let vy: Float = character.mover.velocity.y
+    pose.speed = Math.sqrt(x: vx * vx + vy * vy)
+    pose.airborne = not character.grounded
+  }
+  pose.knockedDown = componentHas(this: physicsSystem.knockedDown, entityId: controlledEntityId)
+  if pose.knockedDown {
+    pose.clip = 3
+  } else if pose.airborne {
+    pose.clip = 2
+  } else if pose.speed > 0.2 {
+    pose.clip = 1
+  }
+  ret pose
+}
+
+# The remote walkers this side knows, as entities of `net.world`: the
+# interpolated ones on a player, the received ones on the host (its own
+# walker left out on both)
+func gatherRemoteWalkers(net: view WalkerNet, remote: mod List(EntityId)) {
+  remote.clear()
+  if walkerNetIsHost(net: net) {
+    loop var i: Int = 0, i < componentCount(this: net.world.poses), ++i {
+      let entityId: EntityId = componentEntityAt(this: net.world.poses, i: i)
+      if entityId is not net.ownEntityId {
+        remote.add(value: entityId)
+      }
+    }
+    ret
+  }
+  let ownEntityId: EntityId = walkerNetOwnEntityId(net: net)
+  loop var i: Int = 0, i < componentCount(this: net.world.shownPoses), ++i {
+    let entityId: EntityId = componentEntityAt(this: net.world.shownPoses, i: i)
+    if entityId is not ownEntityId {
+      remote.add(value: entityId)
+    }
+  }
+}
+
+# The pose of remote walker `entityId` into `pose`: false when it has none
+func remotePose(net: view WalkerNet, entityId: view EntityId, pose: mod WalkerPose) ret Bool {
+  if walkerNetIsHost(net: net) {
+    if componentHas(this: net.world.poses, entityId: entityId) {
+      let current: view WalkerPose = componentView(this: net.world.poses, entityId: entityId)
+      pose = current
+      ret true
+    }
+    ret false
+  }
+  if componentHas(this: net.world.shownPoses, entityId: entityId) {
+    let current: view WalkerPose = componentView(this: net.world.shownPoses, entityId: entityId)
+    pose = current
+    ret true
+  }
+  ret false
+}
+
+# A character for a remote walker that just appeared, standing at its pose
+# on this side's ground: what a crowd member has (app3d/WalkerAppSetup
+# spawnWalkerCrowd, createWalkerAppPhysics, app3d/WalkerAppWorld), and its
+# name "Player <number>"
+func spawnRemoteCharacter(
+  world: mod WalkerWorld
+  physicsSystem: mod WalkerPhysics
+  characterSystem: view CharacterSystem
+  biome: view BiomeConfig
+  pose: view WalkerPose
+  number: view Int
+) ret EntityId {
+  let groundZ: Float = characterSystem.groundZ
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position.x = pose.position.x
+  controller.position.y = pose.position.y
+  controller.position.z = worldTerrainHeight(
+    x: pose.position.x
+    y: pose.position.y
+    groundZ: groundZ
+    cfg: biome
+  ) - groundZ
+  controller.heading = pose.heading
+  let entityId: EntityId = walkerWorldAddEntity(world: world)
+  walkerWorldSetController(world: world, entityId: entityId, controller: controller)
+  walkerWorldSetAnim(
+    world: world
+    entityId: entityId
+    anim: AnimationState { clipIndex: 0, animTime: 0.0, playbackScale: 1.0 }
+  )
+  walkerWorldSetTransform(
+    world: world
+    entityId: entityId
+    transform: controllerTransform3D(controller: controller)
+  )
+  addWalkerCharacterComponents(
+    world: world
+    entityId: entityId
+    skeleton: characterSystem.skeleton
+    basePartModel: characterSystem.basePartModel
+  )
+  let label: WorldLabel = {
+    text: "Player {number}"
+    point: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    height: crowdNameHeight
+    fullUntil: 18.0
+    goneAt: 28.0
+  }
+  componentSet(this: world.worldLabels, entityId: entityId, data: label)
+  addCharacterBody(
+    characters: physicsSystem.characters
+    entityId: entityId
+    feet: controllerFeet(controller: controller, groundZ: groundZ)
+  )
+  setWalkerCharacterHeight(
+    world: world
+    physicsSystem: physicsSystem
+    entityId: entityId
+    height: walkerCrowdHeight(index: number)
+  )
+  ret entityId
+}
+
+# A remote walker left: its character's ragdoll (if it lies) taken apart,
+# every row of it in the world and the physics cleared, the entity freed
+func despawnRemoteCharacter(
+  world: mod WalkerWorld
+  physicsSystem: mod WalkerPhysics
+  entityId: view EntityId
+) {
+  let boneEntities: List(EntityId) = removeRagdoll(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    ragdolls: physicsSystem.ragdolls
+    characterId: entityId
+  )
+  loop let boneId: view EntityId in boneEntities {
+    clearEntityComponents(WalkerWorld, world: world, entityId: boneId)
+    clearEntityComponents(WalkerPhysics, world: physicsSystem, entityId: boneId)
+    freeEntity(this: world.allocator, entityId: boneId)
+  }
+  clearEntityComponents(WalkerPhysics, world: physicsSystem, entityId: entityId)
+  clearEntityComponents(WalkerWorld, world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
+}
+
+func walkerIndexOf(remoteWalkers: view RemoteWalkers, netEntityId: view EntityId) ret Int {
+  loop var k: Int = 0, k < remoteWalkers.walkers.length, ++k {
+    if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+      if walker.netEntityId is netEntityId {
+        ret k
+      }
+    }
+  }
+  ret -1
+}
+
+# The characters follow the session: one that left goes, one that appeared
+# gets a character (up to remoteWalkerMax)
+func syncRemoteCharacters(
+  remoteWalkers: mod RemoteWalkers
+  net: view WalkerNet
+  world: mod WalkerWorld
+  physicsSystem: mod WalkerPhysics
+  characterSystem: view CharacterSystem
+  biome: view BiomeConfig
+) {
+  gatherRemoteWalkers(net: net, remote: remoteWalkers.remote)
+  var k: Int = 0
+  loop k < remoteWalkers.walkers.length {
+    var gone: Bool = false
+    var entityId: EntityId = noEntity()
+    if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+      gone = not remoteWalkers.remote.contains(value: walker.netEntityId)
+      entityId = walker.entityId
+    }
+    if gone {
+      if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+        log("[net] Player {walker.number} left")
+      }
+      despawnRemoteCharacter(world: world, physicsSystem: physicsSystem, entityId: entityId)
+      remoteWalkers.walkers.remove(index: k)
+    } else {
+      k = k + 1
+    }
+  }
+  var pose: WalkerPose = walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  loop let netEntityId: EntityId in remoteWalkers.remote {
+    if walkerIndexOf(remoteWalkers: remoteWalkers, netEntityId: netEntityId) < 0 and remotePose(
+      net: net
+      entityId: netEntityId
+      pose: pose
+    ) {
+      if remoteWalkers.walkers.length >= remoteWalkerMax {
+        if not remoteWalkers.overflowLogged {
+          log("[net] more than {remoteWalkerMax} other walkers: the rest are not shown")
+          remoteWalkers.overflowLogged = true
+        }
+      } else {
+        let number: Int = remoteWalkers.nextNumber
+        remoteWalkers.nextNumber = number + 1
+        let entityId: EntityId = spawnRemoteCharacter(
+          world: world
+          physicsSystem: physicsSystem
+          characterSystem: characterSystem
+          biome: biome
+          pose: pose
+          number: number
+        )
+        remoteWalkers.walkers.add(value: RemoteWalker {
+          netEntityId: netEntityId
+          entityId: entityId
+          number: number
+          wasAirborne: pose.airborne
+          wasDown: pose.knockedDown
+        })
+        log(
+          "[net] Player {number} joined: {remoteWalkers.walkers.length} other walkers, {componentCount(
+            this: world.characterModels
+          )} characters"
+        )
+      }
+    }
+  }
+}
+
+# One remote walker's character driven toward its pose (before the movers
+# step)
+func driveRemoteWalker(
+  remoteWalkers: mod RemoteWalkers
+  index: view Int
+  pose: view WalkerPose
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  groundZ: view Float
+) {
+  var entityId: EntityId = noEntity()
+  var wasAirborne: Bool = false
+  var wasDown: Bool = false
+  if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: index) {
+    entityId = walker.entityId
+    wasAirborne = walker.wasAirborne
+    wasDown = walker.wasDown
+  }
+  if not componentHas(this: world.controllers, entityId: entityId) {
+    ret
+  }
+  let at: Vec3 = componentView(this: world.controllers, entityId: entityId).position
+  let dx: Float = pose.position.x - at.x
+  let dy: Float = pose.position.y - at.y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let down: Bool = componentHas(this: physicsSystem.knockedDown, entityId: entityId)
+  if distance > remoteTeleportDistance and not down {
+    # Put it there, a little above its present height: it lands on this
+    # side's ground
+    placeCharacter(
+      physicsSystem: physicsSystem
+      world: world
+      entityId: entityId
+      feet: Vec3.create(x: pose.position.x, y: pose.position.y, z: at.z + groundZ + 0.5)
+      heading: pose.heading
+      groundZ: groundZ
+    )
+  }
+  var drive: MoverDrive = createMoverDrive()
+  drive.yaw = pose.heading
+  if distance > remoteArriveDistance and distance <= remoteTeleportDistance {
+    drive.intent.moveY = 1.0
+    drive.intent.walking = pose.speed < remoteRunSpeed and distance < 1.0
+    drive.yaw = headingTo(
+      x: at.x
+      y: at.y
+      toX: pose.position.x
+      toY: pose.position.y
+    )
+  }
+  if pose.airborne and not wasAirborne {
+    drive.intent.jump = true
+  }
+  componentSet(this: physicsSystem.moverDrives, entityId: entityId, data: drive)
+  if pose.knockedDown and not wasDown and not down {
+    componentSet(
+      this: physicsSystem.knocks
+      entityId: entityId
+      data: KnockRequest {
+        velocity: Vec3.create(
+          x: -Math.sin(pose.heading) * 3.0
+          y: Math.cos(pose.heading) * 3.0
+          z: 1.0
+        )
+      }
+    )
+  }
+  if let walker: mod RemoteWalker = remoteWalkers.walkers.modAt(index: index) {
+    walker.wasAirborne = pose.airborne
+    walker.wasDown = pose.knockedDown
+  }
+}
+
+# Every remote walker's character: made or freed as walkers come and go,
+# then driven toward its walker. Call between the app's own drives
+# (stepWanderers) and driveMovers.
+func driveRemoteWalkers(
+  remoteWalkers: mod RemoteWalkers
+  net: view WalkerNet
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: view CharacterSystem
+  biome: view BiomeConfig
+) {
+  syncRemoteCharacters(
+    remoteWalkers: remoteWalkers
+    net: net
+    world: world
+    physicsSystem: physicsSystem
+    characterSystem: characterSystem
+    biome: biome
+  )
+  var pose: WalkerPose = walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  loop var k: Int = 0, k < remoteWalkers.walkers.length, ++k {
+    var netEntityId: EntityId = noEntity()
+    if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+      netEntityId = walker.netEntityId
+    }
+    if remotePose(net: net, entityId: netEntityId, pose: pose) {
+      driveRemoteWalker(
+        remoteWalkers: remoteWalkers
+        index: k
+        pose: pose
+        physicsSystem: physicsSystem
+        world: world
+        groundZ: characterSystem.groundZ
+      )
+    }
+  }
+}
+
+# The walkers' drives in a networked session: the player's, any wanderer's
+# own, then the remote walkers' characters (instead of driveWalkers)
+func driveWalkersNetworked(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  remoteWalkers: mod RemoteWalkers
+  net: view WalkerNet
+  characterSystem: view CharacterSystem
+  biome: view BiomeConfig
+  controlledEntityId: view EntityId
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+  deltaTime: view Float
+) {
+  setPlayerDrive(
+    physicsSystem: physicsSystem
+    controlledEntityId: controlledEntityId
+    intent: intent
+    cameraYaw: cameraYaw
+    speedScale: speedScale
+  )
+  stepWanderers(
+    wandering: physicsSystem.wandering
+    controllers: world.controllers
+    controlled: world.controlled
+    parked: physicsSystem.moverParked
+    drives: physicsSystem.moverDrives
+    deltaTime: deltaTime
+  )
+  driveRemoteWalkers(
+    remoteWalkers: remoteWalkers
+    net: net
+    physicsSystem: physicsSystem
+    world: world
+    characterSystem: characterSystem
+    biome: biome
+  )
+  driveMovers(
+    characters: physicsSystem.characters
+    controllers: world.controllers
+    drives: physicsSystem.moverDrives
+  )
+}
+
+# One frame of the session from the app: the local walker's pose out, the
+# others' in; the host prints its invite once the relay gave it
+func walkerNetAppFrame(
+  net: mod WalkerNet
+  remoteWalkers: mod RemoteWalkers
+  physicsSystem: view WalkerPhysics
+  controllers: view ComponentTable(ThirdPersonController)
+  controlledEntityId: view EntityId
+) {
+  let pose: WalkerPose = localWalkerPose(
+    physicsSystem: physicsSystem
+    controllers: controllers
+    controlledEntityId: controlledEntityId
+  )
+  if not net.started {
+    if walkerNetStart(net: net, localPose: pose, nowMs: nowMs()) {
+      log(
+        "[net] {walkerNetModeName(settings: net.settings)} through the relay at {net.settings.relayHost}:{net.settings.relayPort}"
+      )
+    } else {
+      log("[net] not joined: RAE_WALKER_TOKEN is not an invite")
+      net.settings.mode = WalkerNetMode.offline
+    }
+  }
+  walkerNetFrame(net: net, localPose: pose, nowMs: nowMs())
+  if not remoteWalkers.tokenShown and walkerNetToken(net: net).length() > 0 {
+    log(
+      "[net] invite {walkerNetToken(net: net)} (join with RAE_WALKER_NET=join RAE_WALKER_TOKEN=...)"
+    )
+    remoteWalkers.tokenShown = true
+  }
+}

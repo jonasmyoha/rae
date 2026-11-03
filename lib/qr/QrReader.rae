@@ -1,0 +1,667 @@
+# A QR code reader (ISO/IEC 18004:2015) in plain Rae: a grayscale image in,
+# the code's text and bytes out (docs/qr.md).
+#
+#   qrRead(image:) -> opt QrReadResult
+#
+# The steps: binarize with an adaptive threshold (lib/qr/GrayImage), find
+# the three finder patterns (lib/qr/QrFinder), estimate the module count
+# from their distances, find the alignment pattern near the fourth corner,
+# map the module grid into the image with a homography (four point pairs:
+# lib/qr/QrPerspective), sample each module (a majority of five points),
+# read the format information (the nearest valid code, up to 3 bits off) and
+# from version 7 the version information, unmask, read the codewords in the
+# zigzag, split the blocks, correct them (lib/qr/ReedSolomon) and decode the
+# segments (numeric, alphanumeric, byte; an ECI is skipped). A mirrored code
+# (seen from behind) is read too. An image with no code is answered `none`.
+import Math
+open qr/QrTables
+open qr/QrEncoder
+open qr/ReedSolomon
+open qr/GrayImage
+open qr/QrPerspective
+open qr/QrFinder
+
+type QrReadResult {
+  text: String
+  bytes: List(UInt8)
+  version: Int
+  level: QrErrorCorrection
+  mask: Int
+  # Codewords Reed-Solomon corrected
+  corrected: Int
+  # The code was mirrored
+  mirrored: Bool
+  # The finder patterns' middles in the image
+  topLeft: QrPoint
+  topRight: QrPoint
+  bottomLeft: QrPoint
+}
+
+# One decode attempt's outcome: the result, or the version the code's
+# version information named when it differs from the one tried
+type GridOutcome {
+  ok: Bool
+  version: Int
+  result: QrReadResult
+}
+
+func emptyResult() ret QrReadResult {
+  ret QrReadResult {
+    text: ""
+    bytes: {}
+    version: 0
+    level: QrErrorCorrection.medium
+    mask: 0
+    corrected: 0
+    mirrored: false
+    topLeft: qrPoint(x: 0.0, y: 0.0)
+    topRight: qrPoint(x: 0.0, y: 0.0)
+    bottomLeft: qrPoint(x: 0.0, y: 0.0)
+  }
+}
+
+func failedGrid(version: view Int) ret GridOutcome {
+  ret GridOutcome { ok: false, version: version, result: emptyResult() }
+}
+
+func qrRead(image: view GrayImage) ret opt QrReadResult {
+  let bits: BitImage = binarize(image: image)
+  ret qrReadBits(image: bits)
+}
+
+func qrReadBits(image: view BitImage) ret opt QrReadResult {
+  let patterns: List(FinderPattern) = findFinderPatterns(image: image)
+  if patterns.length < 3 {
+    ret none
+  }
+  let field: GaloisField = createGaloisField()
+  let triples: List(FinderTriple) = finderTriples(patterns: patterns, limit: 4)
+  loop let triple: view FinderTriple in triples {
+    let moduleSize: Float = (triple.topLeft.moduleSize + triple.topRight.moduleSize + triple.bottomLeft.moduleSize) / 3.0
+    let top: Float = pointDistance(
+      first: patternPoint(pattern: triple.topLeft)
+      second: patternPoint(pattern: triple.topRight)
+    )
+    let side: Float = pointDistance(
+      first: patternPoint(pattern: triple.topLeft)
+      second: patternPoint(pattern: triple.bottomLeft)
+    )
+    # Each side in its own modules (a tilted code's are smaller far off)
+    let topModules: Float = top / ((triple.topLeft.moduleSize + triple.topRight.moduleSize) / 2.0)
+    let sideModules: Float = side / ((triple.topLeft.moduleSize + triple.bottomLeft.moduleSize) / 2.0)
+    var estimate: Int = (((topModules + sideModules) / 2.0 + 0.5) as Int) + 7
+    let remainder: Int = estimate % 4
+    if remainder is 0 {
+      estimate = estimate + 1
+    } else if remainder is 2 {
+      estimate = estimate - 1
+    } else if remainder is 3 {
+      estimate = estimate - 2
+    }
+    # The estimate, then its neighbors (perspective makes module sizes differ)
+    loop let offset: Int in List(Int) {
+      0
+      -4
+      4
+      -8
+      8
+    } {
+      let dimension: Int = estimate + offset
+      if dimension >= 21 and dimension <= 177 {
+        if let result: QrReadResult = decodeAt(
+          image: image
+          triple: triple
+          dimension: dimension
+          moduleSize: moduleSize
+          field: field
+        ) {
+          ret result
+        }
+      }
+    }
+  }
+  ret none
+}
+
+# Decode the code whose finders are `triple`, assuming `dimension` modules
+# a side
+func decodeAt(
+  image: view BitImage
+  triple: view FinderTriple
+  dimension: view Int
+  moduleSize: view Float
+  field: view GaloisField
+) ret opt QrReadResult {
+  # With the alignment pattern found near the fourth corner, then (when that
+  # does not decode: the search took a wrong spot) without it
+  # 0: the strict alignment check, 1: the loose one, 2: none
+  loop let useAlignment: Int in List(Int) { 0, 1, 2 } {
+    if let result: QrReadResult = decodeWith(
+      image: image
+      triple: triple
+      dimension: dimension
+      moduleSize: moduleSize
+      field: field
+      useAlignment: useAlignment
+    ) {
+      ret result
+    }
+  }
+  ret none
+}
+
+func decodeWith(
+  image: view BitImage
+  triple: view FinderTriple
+  dimension: view Int
+  moduleSize: view Float
+  field: view GaloisField
+  useAlignment: view Int
+) ret opt QrReadResult {
+  var size: Int = dimension
+  loop var attempt: Int = 0, attempt < 2, ++attempt {
+    if let homography: Homography = gridMap(
+      image: image
+      triple: triple
+      size: size
+      moduleSize: moduleSize
+      useAlignment: useAlignment
+    ) {
+      let grid: List(Bool) = sampleGrid(image: image, homography: homography, size: size)
+      var outcome: GridOutcome = decodeGrid(grid: grid, size: size, field: field)
+      if not outcome.ok and outcome.version is (size - 17) / 4 {
+        # Seen from behind: the transposed grid
+        outcome = decodeGrid(grid: transposed(grid: grid, size: size), size: size, field: field)
+        outcome.result.mirrored = true
+      }
+      if outcome.ok {
+        var result: QrReadResult = outcome.result
+        result.topLeft = patternPoint(pattern: triple.topLeft)
+        result.topRight = patternPoint(pattern: triple.topRight)
+        result.bottomLeft = patternPoint(pattern: triple.bottomLeft)
+        ret result
+      }
+      # The version information named another size: sample again at it
+      if outcome.version is not (size - 17) / 4 and outcome.version >= 7 {
+        size = outcome.version * 4 + 17
+      } else {
+        ret none
+      }
+    } else {
+      ret none
+    }
+  }
+  ret none
+}
+
+# The map from module coordinates to the image: the finders' middles (3.5
+# modules in from their corners) and the alignment pattern's (6.5 in from
+# the bottom right; the parallelogram's fourth corner when there is none)
+func gridMap(
+  image: view BitImage
+  triple: view FinderTriple
+  size: view Int
+  moduleSize: view Float
+  useAlignment: view Int
+) ret opt Homography {
+  let near: Float = 3.5
+  let far: Float = (size as Float) - 3.5
+  let topLeft: QrPoint = patternPoint(pattern: triple.topLeft)
+  let topRight: QrPoint = patternPoint(pattern: triple.topRight)
+  let bottomLeft: QrPoint = patternPoint(pattern: triple.bottomLeft)
+  var from: List(QrPoint) = {
+    qrPoint(x: near, y: near)
+    qrPoint(x: far, y: near)
+    qrPoint(x: near, y: far)
+  }
+  var to: List(QrPoint) = { topLeft, topRight, bottomLeft }
+  var fourthFrom: QrPoint = qrPoint(x: far, y: far)
+  var fourthTo: QrPoint = qrPoint(
+    x: topRight.x + bottomLeft.x - topLeft.x
+    y: topRight.y + bottomLeft.y - topLeft.y
+  )
+  if size > 21 and useAlignment < 2 {
+    let alignment: Float = (size as Float) - 6.5
+    let share: Float = (alignment - near) / (far - near)
+    let estimate: QrPoint = qrPoint(
+      x: topLeft.x + (topRight.x - topLeft.x) * share + (bottomLeft.x - topLeft.x) * share
+      y: topLeft.y + (topRight.y - topLeft.y) * share + (bottomLeft.y - topLeft.y) * share
+    )
+    if let found: QrPoint = findAlignment(
+      image: image
+      estimate: estimate
+      moduleSize: moduleSize
+      radius: moduleSize * 8.0
+      strict: useAlignment is 0
+    ) {
+      fourthFrom = qrPoint(x: alignment, y: alignment)
+      fourthTo = found
+    }
+  }
+  from.add(value: fourthFrom)
+  to.add(value: fourthTo)
+  ret homographyFrom(from: from, to: to)
+}
+
+# Each module dark or light: the majority of its middle and four points a
+# fifth of a module round it
+func sampleGrid(image: view BitImage, homography: view Homography, size: view Int) ret List(Bool) {
+  var grid: List(Bool) = List.create(Bool, cap: size * size)
+  loop var y: Int = 0, y < size, ++y {
+    loop var x: Int = 0, x < size, ++x {
+      var dark: Int = 0
+      loop var sample: Int = 0, sample < 5, ++sample {
+        var u: Float = (x as Float) + 0.5
+        var v: Float = (y as Float) + 0.5
+        if sample is 1 {
+          u = u - 0.2
+        } else if sample is 2 {
+          u = u + 0.2
+        } else if sample is 3 {
+          v = v - 0.2
+        } else if sample is 4 {
+          v = v + 0.2
+        }
+        let point: QrPoint = homographyApply(homography: homography, point: qrPoint(x: u, y: v))
+        if bitAt(image: image, x: Math.floor(x: point.x) as Int, y: Math.floor(x: point.y) as Int) {
+          dark = dark + 1
+        }
+      }
+      grid.add(value: dark >= 3)
+    }
+  }
+  ret grid
+}
+
+func transposed(grid: view List(Bool), size: view Int) ret List(Bool) {
+  var result: List(Bool) = List.create(Bool, cap: size * size)
+  loop var y: Int = 0, y < size, ++y {
+    loop var x: Int = 0, x < size, ++x {
+      result.add(value: grid.copyAtFallback(index: x * size + y, fallback: false))
+    }
+  }
+  ret result
+}
+
+func gridAt(
+  grid: view List(Bool)
+  size: view Int
+  x: view Int
+  y: view Int
+) ret Bool {
+  ret grid.copyAtFallback(index: y * size + x, fallback: false)
+}
+
+func bitCount(value: view Int) ret Int {
+  var count: Int = 0
+  var rest: Int = value
+  loop rest is not 0 {
+    count = count + (rest bitand 1)
+    rest = rest shr 1
+  }
+  ret count
+}
+
+# The 18 version bits of `version` (as the encoder draws them)
+func versionBits(version: view Int) ret Int {
+  var remainder: Int = version
+  loop var i: Int = 0, i < 12, ++i {
+    remainder = (remainder shl 1) bitxor ((remainder shr 11) * 7973)
+  }
+  ret (version shl 12) bitor remainder
+}
+
+func levelFromBits(bits: view Int) ret QrErrorCorrection {
+  if bits is 1 {
+    ret QrErrorCorrection.low
+  }
+  if bits is 0 {
+    ret QrErrorCorrection.medium
+  }
+  if bits is 3 {
+    ret QrErrorCorrection.quartile
+  }
+  ret QrErrorCorrection.high
+}
+
+# Decode a sampled grid of `size` modules a side
+func decodeGrid(grid: view List(Bool), size: view Int, field: view GaloisField) ret GridOutcome {
+  var version: Int = (size - 17) / 4
+  # The format information, both copies, the nearest valid code
+  var first: Int = 0
+  loop var i: Int = 0, i <= 5, ++i {
+    if gridAt(
+      grid: grid
+      size: size
+      x: 8
+      y: i
+    ) {
+      first = first bitor (1 shl i)
+    }
+  }
+  if gridAt(
+    grid: grid
+    size: size
+    x: 8
+    y: 7
+  ) {
+    first = first bitor (1 shl 6)
+  }
+  if gridAt(
+    grid: grid
+    size: size
+    x: 8
+    y: 8
+  ) {
+    first = first bitor (1 shl 7)
+  }
+  if gridAt(
+    grid: grid
+    size: size
+    x: 7
+    y: 8
+  ) {
+    first = first bitor (1 shl 8)
+  }
+  loop var i: Int = 9, i < 15, ++i {
+    if gridAt(
+      grid: grid
+      size: size
+      x: 14 - i
+      y: 8
+    ) {
+      first = first bitor (1 shl i)
+    }
+  }
+  var second: Int = 0
+  loop var i: Int = 0, i < 8, ++i {
+    if gridAt(
+      grid: grid
+      size: size
+      x: size - 1 - i
+      y: 8
+    ) {
+      second = second bitor (1 shl i)
+    }
+  }
+  loop var i: Int = 8, i < 15, ++i {
+    if gridAt(
+      grid: grid
+      size: size
+      x: 8
+      y: size - 15 + i
+    ) {
+      second = second bitor (1 shl i)
+    }
+  }
+  var bestDistance: Int = 99
+  var level: QrErrorCorrection = QrErrorCorrection.medium
+  var mask: Int = 0
+  loop var levelBits: Int = 0, levelBits < 4, ++levelBits {
+    loop var candidate: Int = 0, candidate < 8, ++candidate {
+      let code: Int = formatBits(level: levelFromBits(bits: levelBits), mask: candidate)
+      var distance: Int = bitCount(value: code bitxor first)
+      let other: Int = bitCount(value: code bitxor second)
+      if other < distance {
+        distance = other
+      }
+      if distance < bestDistance {
+        bestDistance = distance
+        level = levelFromBits(bits: levelBits)
+        mask = candidate
+      }
+    }
+  }
+  if bestDistance > 3 {
+    ret failedGrid(version: version)
+  }
+  # From version 7 the version information: the nearest valid code
+  if version >= 7 {
+    var topRight: Int = 0
+    var bottomLeft: Int = 0
+    loop var i: Int = 0, i < 18, ++i {
+      let a: Int = size - 11 + i % 3
+      let b: Int = i / 3
+      if gridAt(
+        grid: grid
+        size: size
+        x: a
+        y: b
+      ) {
+        topRight = topRight bitor (1 shl i)
+      }
+      if gridAt(
+        grid: grid
+        size: size
+        x: b
+        y: a
+      ) {
+        bottomLeft = bottomLeft bitor (1 shl i)
+      }
+    }
+    var nearest: Int = -1
+    var nearestDistance: Int = 99
+    loop var candidate: Int = 7, candidate <= qrMaxVersion, ++candidate {
+      let code: Int = versionBits(version: candidate)
+      var distance: Int = bitCount(value: code bitxor topRight)
+      let other: Int = bitCount(value: code bitxor bottomLeft)
+      if other < distance {
+        distance = other
+      }
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = candidate
+      }
+    }
+    if nearestDistance <= 3 and nearest is not version {
+      ret failedGrid(version: nearest)
+    }
+  }
+  # The function modules, as the encoder draws them, and the data in the
+  # zigzag, unmasked
+  var modules: List(Bool) = {}
+  modules.addDefaults(count: size * size)
+  var function: List(Bool) = {}
+  function.addDefaults(count: size * size)
+  var layout: QrGrid = { size: size, modules: own modules, function: own function }
+  drawFunctionPatterns(grid: layout, version: version, level: level)
+  let total: Int = qrTotalCodewords(version: version)
+  var codewords: List(Int) = List.create(Int, cap: total)
+  var value: Int = 0
+  var bitsRead: Int = 0
+  var right: Int = size - 1
+  loop right >= 1 {
+    if right is 6 {
+      right = 5
+    }
+    loop var vertical: Int = 0, vertical < size, ++vertical {
+      loop var j: Int = 0, j < 2, ++j {
+        let x: Int = right - j
+        var y: Int = vertical
+        if ((right + 1) bitand 2) is 0 {
+          y = size - 1 - vertical
+        }
+        if not gridIsFunction(grid: layout, x: x, y: y) and codewords.length < total {
+          var bit: Bool = gridAt(
+            grid: grid
+            size: size
+            x: x
+            y: y
+          )
+          if maskBit(mask: mask, x: x, y: y) {
+            bit = not bit
+          }
+          value = value * 2
+          if bit {
+            value = value + 1
+          }
+          bitsRead = bitsRead + 1
+          if bitsRead is 8 {
+            codewords.add(value: value)
+            value = 0
+            bitsRead = 0
+          }
+        }
+      }
+    }
+    right = right - 2
+  }
+  # The blocks, corrected; their data codewords in order
+  let blocks: Int = qrBlockCount(level: level, version: version)
+  let eccLength: Int = qrEccPerBlock(level: level, version: version)
+  let shortBlocks: Int = blocks - total % blocks
+  let shortData: Int = total / blocks - eccLength
+  var blockData: List(List(Int)) = {}
+  loop var b: Int = 0, b < blocks, ++b {
+    blockData.add(value: List.create(Int, cap: shortData + 1 + eccLength))
+  }
+  var at: Int = 0
+  loop var i: Int = 0, i <= shortData, ++i {
+    loop var b: Int = 0, b < blocks, ++b {
+      if i < shortData or b >= shortBlocks {
+        if let block: mod List(Int) = blockData.modAt(index: b) {
+          block.add(value: codewords.copyAtFallback(index: at, fallback: 0))
+        }
+        at = at + 1
+      }
+    }
+  }
+  loop var i: Int = 0, i < eccLength, ++i {
+    loop var b: Int = 0, b < blocks, ++b {
+      if let block: mod List(Int) = blockData.modAt(index: b) {
+        block.add(value: codewords.copyAtFallback(index: at, fallback: 0))
+      }
+      at = at + 1
+    }
+  }
+  var corrected: Int = 0
+  var data: List(Int) = List.create(Int, cap: total)
+  loop var b: Int = 0, b < blocks, ++b {
+    if let block: mod List(Int) = blockData.modAt(index: b) {
+      let fixed: Int = reedSolomonCorrect(field: field, block: block, eccCount: eccLength)
+      if fixed < 0 {
+        ret failedGrid(version: version)
+      }
+      corrected = corrected + fixed
+      loop var i: Int = 0, i < block.length - eccLength, ++i {
+        data.add(value: block.copyAtFallback(index: i, fallback: 0))
+      }
+    }
+  }
+  var bytes: List(UInt8) = {}
+  if not decodeSegments(data: data, version: version, out: bytes) {
+    ret failedGrid(version: version)
+  }
+  ret GridOutcome {
+    ok: true
+    version: version
+    result: QrReadResult {
+      text: fromBytes(bytes: bytes, start: 0, count: bytes.length)
+      bytes: bytes
+      version: version
+      level: level
+      mask: mask
+      corrected: corrected
+      mirrored: false
+      topLeft: qrPoint(x: 0.0, y: 0.0)
+      topRight: qrPoint(x: 0.0, y: 0.0)
+      bottomLeft: qrPoint(x: 0.0, y: 0.0)
+    }
+  }
+}
+
+# Bits from the data codewords, most significant first
+type BitReader {
+  position: Int
+}
+
+func readBits(reader: mod BitReader, data: view List(Int), count: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let codeword: Int = data.copyAtFallback(index: reader.position / 8, fallback: 0)
+    let bit: Int = (codeword shr (7 - reader.position % 8)) bitand 1
+    value = value * 2 + bit
+    reader.position = reader.position + 1
+  }
+  ret value
+}
+
+# The segments' bytes into `out`: false for a mode this reader does not know
+func decodeSegments(data: view List(Int), version: view Int, out: mod List(UInt8)) ret Bool {
+  var reader: BitReader = { position: 0 }
+  let totalBits: Int = data.length * 8
+  loop totalBits - reader.position >= 4 {
+    let mode: Int = readBits(reader: reader, data: data, count: 4)
+    if mode is 0 {
+      ret true
+    }
+    if mode is 7 {
+      # ECI: its designator is 1, 2 or 3 bytes; the bytes after it are kept as they are
+      let first: Int = readBits(reader: reader, data: data, count: 8)
+      if (first bitand 128) is 128 {
+        let more: Int = readBits(reader: reader, data: data, count: 8)
+        if (first bitand 64) is 64 {
+          let last: Int = readBits(reader: reader, data: data, count: 8)
+        }
+      }
+      continue
+    }
+    var segmentMode: QrMode = QrMode.byte
+    if mode is 1 {
+      segmentMode = QrMode.numeric
+    } else if mode is 2 {
+      segmentMode = QrMode.alphanumeric
+    } else if mode is not 4 {
+      ret false
+    }
+    let count: Int = readBits(
+      reader: reader
+      data: data
+      count: countBits(mode: segmentMode, version: version)
+    )
+    if segmentMode is QrMode.byte {
+      if reader.position + count * 8 > totalBits {
+        ret false
+      }
+      loop var i: Int = 0, i < count, ++i {
+        out.add(value: readBits(reader: reader, data: data, count: 8) as UInt8)
+      }
+    } else if segmentMode is QrMode.numeric {
+      var left: Int = count
+      loop left > 0 {
+        var digits: Int = 3
+        if left < 3 {
+          digits = left
+        }
+        let group: Int = readBits(reader: reader, data: data, count: digits * 3 + 1)
+        var divisor: Int = 1
+        loop var i: Int = 1, i < digits, ++i {
+          divisor = divisor * 10
+        }
+        loop var i: Int = 0, i < digits, ++i {
+          out.add(value: (48 + (group / divisor) % 10) as UInt8)
+          divisor = divisor / 10
+        }
+        left = left - digits
+      }
+    } else {
+      var left: Int = count
+      loop left > 0 {
+        if left >= 2 {
+          let pair: Int = readBits(reader: reader, data: data, count: 11)
+          out.add(value: alphanumericCharacters.byteAt(index: pair / 45) as UInt8)
+          out.add(value: alphanumericCharacters.byteAt(index: pair % 45) as UInt8)
+          left = left - 2
+        } else {
+          out.add(
+            value: alphanumericCharacters.byteAt(
+              index: readBits(reader: reader, data: data, count: 6)
+            ) as UInt8
+          )
+          left = left - 1
+        }
+      }
+    }
+  }
+  ret true
+}

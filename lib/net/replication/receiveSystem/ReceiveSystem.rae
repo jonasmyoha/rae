@@ -1,0 +1,254 @@
+# The player's receive system (lib/net/replication, docs/replication.md):
+# collects a snapshot's parts and, once it has them all, rebuilds the
+# snapshot from its baseline (a snapshot this side rebuilt before) and the
+# operations, into the ring. A snapshot older than the newest one, or whose
+# baseline is gone, is dropped: a later one replaces it.
+open collections/IntMap
+open net/Wire
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+
+const maxSnapshotParts: Int = 64
+
+# Take one message from the host: false when it is not a snapshot part (the
+# app's own message)
+func replicaReceiveSystem(player: mod ReplicationPlayer, message: view List(UInt8)) ret Bool {
+  if message.length < 19 or readU8(bytes: message, offset: 0) is not replicaMessageSnapshot {
+    ret false
+  }
+  player.bytesReceived = player.bytesReceived + message.length
+  let tick: Int = readU32(bytes: message, offset: 1)
+  let baseTick: Int = readU32(bytes: message, offset: 5)
+  let partIndex: Int = readU8(bytes: message, offset: 9)
+  let partCount: Int = readU8(bytes: message, offset: 10)
+  let ownNetId: Int = readU32(bytes: message, offset: 11)
+  let appliedInputTick: Int = readU32(bytes: message, offset: 15)
+  if tick <= player.latestTick or partCount < 1 or partCount > maxSnapshotParts or partIndex >= partCount {
+    ret true
+  }
+  if tick is not player.assemblingTick {
+    if tick < player.assemblingTick {
+      ret true
+    }
+    if player.assemblingTick >= 0 and player.partsHave < player.partCount {
+      player.snapshotsDropped = player.snapshotsDropped + 1
+    }
+    startAssembly(
+      player: player
+      tick: tick
+      baseTick: baseTick
+      partCount: partCount
+    )
+    player.assemblingOwn = ownNetId
+    player.assemblingApplied = appliedInputTick
+  }
+  if player.partHas.copyAtFallback(index: partIndex, fallback: true) {
+    ret true
+  }
+  player.partHas.set(index: partIndex, value: true)
+  player.partsHave = player.partsHave + 1
+  if let part: mod List(UInt8) = player.parts.modAt(index: partIndex) {
+    part.clear()
+    appendCopy(
+      destination: part
+      source: message
+      start: 19
+      count: message.length - 19
+    )
+  }
+  if player.partsHave is player.partCount {
+    rebuild(player: player)
+  }
+  ret true
+}
+
+func startAssembly(
+  player: mod ReplicationPlayer
+  tick: view Int
+  baseTick: view Int
+  partCount: view Int
+) {
+  player.assemblingTick = tick
+  player.assemblingBase = baseTick
+  player.partCount = partCount
+  player.partsHave = 0
+  loop player.parts.length < partCount {
+    player.parts.add(value: List.create(UInt8, cap: 1024))
+    player.partHas.add(value: false)
+  }
+  loop var i: Int = 0, i < player.partHas.length, ++i {
+    player.partHas.set(index: i, value: false)
+  }
+}
+
+# All parts are here: read the operations, then build the new snapshot
+func rebuild(player: mod ReplicationPlayer) {
+  let tick: Int = player.assemblingTick
+  let baseTick: Int = player.assemblingBase
+  let hasBase: Bool = baseTick is not 4294967295
+  let baseSlot: Int = playerSlot(player: player, tick: baseTick)
+  if hasBase {
+    var baseHere: Bool = false
+    if let baseline: view ReplicaSnapshot = player.snapshots.viewAt(index: baseSlot) {
+      baseHere = baseline.tick is baseTick
+    }
+    if not baseHere {
+      player.snapshotsDropped = player.snapshotsDropped + 1
+      player.assemblingTick = -1
+      ret
+    }
+  }
+  if not readOperations(player: player) {
+    player.snapshotsDropped = player.snapshotsDropped + 1
+    player.assemblingTick = -1
+    ret
+  }
+  let slot: Int = playerSlot(player: player, tick: tick)
+  # The new snapshot: the baseline's records, changed or dropped as the
+  # operations say, then the records that are new
+  var fresh: ReplicaSnapshot = createReplicaSnapshot()
+  snapshotReset(snapshot: fresh, tick: tick)
+  var values: List(Int) = List.create(Int, cap: 64)
+  if hasBase {
+    if let baseline: view ReplicaSnapshot = player.snapshots.viewAt(index: baseSlot) {
+      loop var record: Int = 0, record < snapshotRecordCount(snapshot: baseline), ++record {
+        let netId: Int = recordNetId(snapshot: baseline, record: record)
+        let kind: Int = recordKind(snapshot: baseline, record: record)
+        let key: Int = recordKey(netId: netId, kind: kind)
+        if not player.removedNetIds.has(k: netId) and not player.removedKeys.has(k: key) {
+          let count: Int = recordCount(snapshot: baseline, record: record)
+          values.clear()
+          loop var i: Int = 0, i < count, ++i {
+            values.add(value: recordValue(snapshot: baseline, record: record, index: i))
+          }
+          if let changeIndex: Int = player.changeLookup.get(k: key) {
+            applyChange(player: player, changeIndex: changeIndex, values: values)
+            player.changeLookup.remove(k: key)
+          }
+          snapshotAdd(
+            snapshot: fresh
+            netId: netId
+            kind: kind
+            values: values
+            start: 0
+            count: values.length
+          )
+        }
+      }
+    }
+  }
+  loop var changeIndex: Int = 0, changeIndex < player.changes.length, ++changeIndex {
+    if let change: RecordChange = player.changes.copyAt(index: changeIndex) {
+      let key: Int = recordKey(netId: change.netId, kind: change.kind)
+      if player.changeLookup.has(k: key) {
+        values.clear()
+        loop var i: Int = 0, i < change.count, ++i {
+          values.add(value: 0)
+        }
+        applyChange(player: player, changeIndex: changeIndex, values: values)
+        snapshotAdd(
+          snapshot: fresh
+          netId: change.netId
+          kind: change.kind
+          values: values
+          start: 0
+          count: values.length
+        )
+      }
+    }
+  }
+  player.snapshots.set(index: slot, value: own fresh)
+  player.latestTick = tick
+  # What this snapshot says about the player itself: its own entity, and
+  # which of its inputs the host had applied (the rest are still pending)
+  player.ownNetId = -1
+  if player.assemblingOwn is not 4294967295 {
+    player.ownNetId = player.assemblingOwn
+  }
+  if player.assemblingApplied is not 4294967295 {
+    player.hostAppliedInputTick = player.assemblingApplied
+    dropAppliedInputs(player: player)
+  }
+  player.ownSnapshotFresh = true
+  player.assemblingTick = -1
+  player.snapshotsRebuilt = player.snapshotsRebuilt + 1
+}
+
+# Add change `changeIndex`'s differences to `values` (its baseline, or zeros)
+func applyChange(player: view ReplicationPlayer, changeIndex: view Int, values: mod List(Int)) {
+  if let change: RecordChange = player.changes.copyAt(index: changeIndex) {
+    loop values.length < change.count {
+      values.add(value: 0)
+    }
+    var next: Int = change.first
+    loop var i: Int = 0, i < change.count, ++i {
+      if (change.mask bitand (1 shl i)) is not 0 {
+        values.set(
+          index: i
+          value: values.copyAtFallback(index: i, fallback: 0) + player.differences.copyAtFallback(
+            index: next
+            fallback: 0
+          )
+        )
+        next = next + 1
+      }
+    }
+  }
+}
+
+# Read every part's operations into the decoding scratch: false for a
+# malformed snapshot
+func readOperations(player: mod ReplicationPlayer) ret Bool {
+  player.changes.clear()
+  player.differences.clear()
+  player.changeLookup = createIntMap(Int, cap: 64)
+  player.removedNetIds = createIntMap(Int, cap: 16)
+  player.removedKeys = createIntMap(Int, cap: 16)
+  loop var partIndex: Int = 0, partIndex < player.partCount, ++partIndex {
+    if let part: view List(UInt8) = player.parts.viewAt(index: partIndex) {
+      var reader: ByteReader = byteReader(start: 0, end: part.length)
+      loop reader.offset < reader.end {
+        let operation: Int = readerU8(reader: reader, bytes: part)
+        if operation is opSet {
+          let netId: Int = readerVarint(reader: reader, bytes: part)
+          let kind: Int = readerU8(reader: reader, bytes: part)
+          let count: Int = readerVarint(reader: reader, bytes: part)
+          let mask: Int = readerVarint(reader: reader, bytes: part)
+          if count > maxRecordValues {
+            ret false
+          }
+          let first: Int = player.differences.length
+          loop var i: Int = 0, i < count, ++i {
+            if (mask bitand (1 shl i)) is not 0 {
+              player.differences.add(value: readerSignedVarint(reader: reader, bytes: part))
+            }
+          }
+          player.changeLookup.set(
+            k: recordKey(netId: netId, kind: kind)
+            value: player.changes.length
+          )
+          player.changes.add(value: RecordChange {
+            netId: netId
+            kind: kind
+            count: count
+            mask: mask
+            first: first
+          })
+        } else if operation is opRemoveEntity {
+          player.removedNetIds.set(k: readerVarint(reader: reader, bytes: part), value: 1)
+        } else if operation is opRemoveComponent {
+          let netId: Int = readerVarint(reader: reader, bytes: part)
+          let kind: Int = readerU8(reader: reader, bytes: part)
+          player.removedKeys.set(k: recordKey(netId: netId, kind: kind), value: 1)
+        } else {
+          ret false
+        }
+        if reader.failed {
+          ret false
+        }
+      }
+    }
+  }
+  ret true
+}

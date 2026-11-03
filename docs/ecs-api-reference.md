@@ -126,7 +126,7 @@ by THAT table alone — never a general ordered structure.
 | 114 terrain props / tiles | `propKinds`, `tileMeshes` | each entity carries `PropKind.slot`; pool slot is a component field, never the dense index |
 | UI layers (`ui/Layer`) | `LayerRoot` | explicit `order` field |
 | 106 hero widgets | `heroWidgets`, `sprites` | key lookup / rename-all — position irrelevant |
-| 106 debug anchor | `debugAnchors` | first-of-one (a singleton by design) |
+| 106 debug anchor | `debugAnchors` | first-of-one (only one entity, by design) |
 | Query joins (`query2`..`query5`) | dense indices | valid only during the walk, by contract |
 | Cross-frame cached dense indices | — | none exist in the tree |
 
@@ -481,8 +481,8 @@ in Rae via a general reflection primitive.
 
 ## Resources — `lib/ecs/world.rae`, `docs/ecs-resources.md`
 
-A resource is a world-global singleton (one Clock, one input snapshot), so it is a
-PLAIN FIELD on the World struct, not a per-entity component — no id, no table, no
+A resource is what a World has exactly one of (one Clock, one input snapshot), so
+it is a PLAIN FIELD on the World struct, not a per-entity component — no id, no table, no
 query. It serializes as a single top-level value (`addResource`/`resourceJson`),
 gated by the same registry rule (`registerResource(reg, name, serialize)` for an
 authored resource; `flags: 0` for a runtime one that is rebuilt each run).

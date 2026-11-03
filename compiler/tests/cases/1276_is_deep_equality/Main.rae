@@ -1,0 +1,93 @@
+# `is` / `is not` on Lists and on structs that hold Strings or Lists is deep
+# value equality, the same comparison as `equals(a:, b:)`. It type-checked
+# but reached C as `a == b` on two structs and failed to build. A call's
+# result as an operand is freed after the statement (leak-checked at exit).
+type Point {
+  x: Int
+  y: Int
+}
+
+type Bag {
+  name: String
+  items: List(Int)
+}
+
+type Shelf {
+  bags: List(Bag)
+  label: String
+}
+
+func makeBag(name: view String, first: view Int) ret Bag {
+  ret Bag { name: name, items: { first, 2 } }
+}
+
+# Through view and mod aliases
+func sameItems(first: view Bag, second: view Bag) ret Bool {
+  ret first.items is second.items
+}
+
+func sameBag(first: view Bag, second: mod Bag) ret Bool {
+  ret first is second
+}
+
+# In a generic body
+func sameValue(T: type, first: view T, second: view T) ret Bool {
+  ret first is second
+}
+
+func main() ret Int {
+  let numbers: List(Int) = { 1, 2, 3 }
+  let same: List(Int) = { 1, 2, 3 }
+  let shorter: List(Int) = { 1, 2 }
+  let words: List(String) = { "a", "b" }
+  let sameWords: List(String) = { "a", "b" }
+  log(
+    "List(Int): {numbers is same} {numbers is shorter} {numbers is not shorter} {numbers is not same}"
+  )
+  log("List(String): {words is sameWords}")
+  let nested: List(List(Int)) = { { 1 }, { 2, 3 } }
+  let sameNested: List(List(Int)) = { { 1 }, { 2, 3 } }
+  let otherNested: List(List(Int)) = { { 1 }, { 2, 4 } }
+  log("List(List(Int)): {nested is sameNested} {nested is otherNested}")
+
+  let bag: Bag = { name: "a", items: { 1, 2 } }
+  var sameBagValue: Bag = { name: "a", items: { 1, 2 } }
+  let renamed: Bag = { name: "b", items: { 1, 2 } }
+  log(
+    "structs with a String and a List: {bag is sameBagValue} {bag is renamed} {bag is not renamed}"
+  )
+  log("fields: {bag.items is renamed.items} {bag.name is renamed.name}")
+  log("call results: {makeBag(name: "a", first: 1) is bag} {makeBag(name: "a", first: 9) is bag}")
+  log(
+    "aliases: {sameItems(first: bag, second: renamed)} {sameBag(first: bag, second: sameBagValue)}"
+  )
+  log(
+    "generic: {sameValue(List(Int), first: numbers, second: same)} {sameValue(
+      Bag
+      first: bag
+      second: renamed
+    )}"
+  )
+
+  let shelf: Shelf = { bags: { bag, renamed }, label: "top" }
+  let sameShelf: Shelf = {
+    bags: { makeBag(name: "a", first: 1), makeBag(name: "b", first: 1) }
+    label: "top"
+  }
+  log("a struct of a List of structs: {shelf is sameShelf}")
+
+  # In conditions
+  var count: Int = 0
+  if numbers is same {
+    count = count + 1
+  }
+  loop var i: Int = 0, i < 3 and shorter is not numbers, ++i {
+    count = count + 1
+  }
+  log("conditions: {count}")
+
+  # Plain-number structs, as before
+  let point: Point = { x: 1, y: 2 }
+  log("points: {point is Point { x: 1, y: 2 }} {point is Point { x: 2, y: 2 }}")
+  ret 0
+}

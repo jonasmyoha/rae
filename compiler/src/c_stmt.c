@@ -2991,6 +2991,11 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // Collection literal: let x: List(Int) = { 10, 20, 30 }
                 // Emit as: createList(count) followed by add() calls
                 const AstTypeRef* list_type = stmt->as.let_stmt.type;
+                /* In a specialized generic body `List(T)` is the concrete
+                 * list: createList / add for T would name `rae_T`, declared
+                 * nowhere. */
+                if (list_type && ctx->generic_params && ctx->generic_args)
+                    list_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, list_type);
                 const AstTypeRef* elem_type = list_type ? list_type->generic_args : NULL;
                 int count = 0;
                 for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) count++;

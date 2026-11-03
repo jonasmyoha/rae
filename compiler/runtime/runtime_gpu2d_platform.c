@@ -22,11 +22,63 @@
  * g_sdl_w/h) are shared with the SDL3 block so sdl3 input works.
  * Tier 0 slice: window + clear-color present.
  * ============================================================ */
-#ifndef __EMSCRIPTEN__
+/* The surface comes from a Metal layer on Apple, from the window's
+ * ANativeWindow on Android (Vulkan, tools/android) and from the page's
+ * canvas in the browser */
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+#define RAE_G2D_METAL 1
+#endif
+#ifdef RAE_G2D_METAL
 static SDL_MetalView g_g2d_metal_view = NULL;
 #endif
 static WGPUSurface   g_g2d_surface = NULL;
 static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
+#ifdef __ANDROID__
+#include <android/native_window.h>
+/* Android destroys the window's ANativeWindow when the app goes to the
+ * background and makes a new one when it comes back. The surface's window
+ * is held here with its own reference, so the pointer stays valid, and a
+ * configure first asks it whether Android still shows it: Java's thread can
+ * destroy it in the middle of a frame, before the background event reaches
+ * the poll loop, and a configure on a destroyed window aborts in wgpu. A dead
+ * window's surface is released; the foreground event makes a new one. In
+ * between there is no surface: Rae's frame finds a null handle and acquires
+ * nothing. */
+static ANativeWindow* g_g2d_android_window = NULL;
+
+static void rae_g2d_android_release_surface(void) {
+    if (g_g2d_surface) fprintf(stderr, "[gpu2d] the window is gone (background): surface released\n");
+    if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
+    if (g_g2d_android_window) { ANativeWindow_release(g_g2d_android_window); g_g2d_android_window = NULL; }
+}
+
+/* False (and the surface released) once Android abandoned the window */
+static int rae_g2d_android_window_alive(void) {
+    if (!g_g2d_android_window) return 0;
+    if (ANativeWindow_getWidth(g_g2d_android_window) > 0) return 1;
+    rae_g2d_android_release_surface();
+    return 0;
+}
+
+/* The surface for the window's current ANativeWindow (at start and when the
+ * app comes back to the foreground) */
+static WGPUSurface rae_g2d_android_create_surface(void) {
+    void* nativeWindow = SDL_GetPointerProperty(SDL_GetWindowProperties(g_sdl_win),
+                                                SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
+    if (!nativeWindow) { fprintf(stderr, "[gpu2d] no Android native window: %s\n", SDL_GetError()); return NULL; }
+    WGPUSurfaceSourceAndroidNativeWindow source; memset(&source, 0, sizeof(source));
+    source.chain.sType = WGPUSType_SurfaceSourceAndroidNativeWindow;
+    source.window = nativeWindow;
+    WGPUSurfaceDescriptor descriptor; memset(&descriptor, 0, sizeof(descriptor));
+    descriptor.nextInChain = &source.chain;
+    WGPUSurface surface = wgpuInstanceCreateSurface(g_wgpu_inst, &descriptor);
+    if (surface) {
+        g_g2d_android_window = (ANativeWindow*)nativeWindow;
+        ANativeWindow_acquire(g_g2d_android_window);
+    }
+    return surface;
+}
+#endif
 
 /* Coordinate system (#112): draw coords are in DESIGN units; the renderer
  * maps them to physical pixels via a per-frame scale + offset. Default
@@ -139,6 +191,9 @@ void rae_g2d_xform(float* out) { if (out) rae_g2d_compute_xform(out); }
  * to the configured surface size, rebuilt on resize); C only configures the
  * surface and reports its size/format. */
 static void rae_g2d_configure(int pw, int ph) {
+#ifdef __ANDROID__
+    if (!rae_g2d_android_window_alive()) return;
+#endif
     if (!g_g2d_surface || pw <= 0 || ph <= 0) return;
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
     cfg.device = g_wgpu_dev;
@@ -164,6 +219,48 @@ static void rae_g2d_configure(int pw, int ph) {
         rae_presentation_layer_fit(g_g2d_presentation_layer, pointsW, pointsH);
     }
 #endif
+}
+
+#ifdef __ANDROID__
+static void rae_g2d_android_make_surface(void) {
+    if (g_g2d_surface || !g_sdl_win || !g_wgpu_inst) return;
+    g_g2d_surface = rae_g2d_android_create_surface();
+    if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed after resume\n"); return; }
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    fprintf(stderr, "[gpu2d] back in the foreground: a new surface, %dx%d\n", pw, ph);
+    if (pw != g_sdl_w || ph != g_sdl_h) g_g2d_win_resized = 1;
+    rae_g2d_configure(pw, ph);
+}
+#endif
+
+/* The app lifecycle events. SDL does not queue them: it calls the event
+ * watchers with them, at once, on the thread that noticed (on Android and
+ * iOS the app's own, inside its poll), so they are handled here and never
+ * reach the poll loop's switch.
+ * - Going to the background, no touch carries on: drop every finger, whether
+ *   or not the OS sent its cancel before the app was suspended.
+ * - Android: the window goes with the background, so its surface is released
+ *   (Android blocks the app in the poll until it comes back) and made again
+ *   for the new window when it does. */
+static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
+    (void)userdata;
+    switch (e->type) {
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+            g_g2d_touch_n = 0;
+#ifdef __ANDROID__
+            rae_g2d_android_release_surface();
+#endif
+            break;
+#ifdef __ANDROID__
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            rae_g2d_android_make_surface();
+            break;
+#endif
+        default: break;
+    }
+    return true;
 }
 
 /* The configured surface, for the canvas that owns the presentable target:
@@ -238,7 +335,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     int headless = rae_g2d_headless_requested();
     const char* t = title.data ? (const char*)title.data : "Rae (GPU 2D)";
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-#ifndef __EMSCRIPTEN__
+#ifdef RAE_G2D_METAL
     flags |= SDL_WINDOW_METAL;
 #endif
     /* A headless run renders to the offscreen target and screenshots THAT
@@ -259,7 +356,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
      * the press-and-hold accent popover (e -> è é ê …) — in a game that reads
      * WASD. An app turns it on while a text field is on screen
      * (rae_ext_Gpu2d_setTextInput, Gpu2d.setTextInput) and off again. */
-#ifndef __EMSCRIPTEN__
+#ifdef RAE_G2D_METAL
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
     void* layer = SDL_Metal_GetLayer(g_g2d_metal_view);
@@ -296,11 +393,17 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     WGPUEmscriptenSurfaceSourceCanvasHTMLSelector cs; memset(&cs, 0, sizeof(cs));
     cs.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
     cs.selector = rae_wgpu_sv("#canvas");
+#elif defined(__ANDROID__)
+    /* SDL's surface view is up (SDL_CreateWindow waits for it), so the
+     * window has its ANativeWindow */
 #else
     WGPUSurfaceSourceMetalLayer ms; memset(&ms, 0, sizeof(ms));
     ms.chain.sType = WGPUSType_SurfaceSourceMetalLayer;
     ms.layer = layer;
 #endif
+#ifdef __ANDROID__
+    g_g2d_surface = rae_g2d_android_create_surface();
+#else
     WGPUSurfaceDescriptor sd; memset(&sd, 0, sizeof(sd));
 #ifdef __EMSCRIPTEN__
     sd.nextInChain = &cs.chain;
@@ -308,6 +411,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     sd.nextInChain = &ms.chain;
 #endif
     g_g2d_surface = wgpuInstanceCreateSurface(g_wgpu_inst, &sd);
+#endif
     if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed\n"); return; }
 
     WGPUSurfaceCapabilities caps; memset(&caps, 0, sizeof(caps));
@@ -327,6 +431,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
 #ifndef __EMSCRIPTEN__
     SDL_AddEventWatch(rae_g2d_live_resize_watch, NULL);
 #endif
+    SDL_AddEventWatch(rae_g2d_lifecycle_watch, NULL);
 
     /* Test hook: RAE_GPU2D_TEST_RESIZE=WxH resizes the window (logical
      * points) just after boot so the resize path can be exercised
@@ -551,13 +656,8 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             case SDL_EVENT_MOUSE_WHEEL:
                 g_g2d_wheel += e.wheel.y;
                 break;
-            /* Going to the background (and losing focus), no touch carries
-             * on: drop every finger, whether or not the OS sent its cancel
-             * before the app was suspended. */
-            case SDL_EVENT_WILL_ENTER_BACKGROUND:
-            case SDL_EVENT_DID_ENTER_BACKGROUND:
-                g_g2d_touch_n = 0;
-                break;
+            /* Going to the background: rae_g2d_lifecycle_watch (SDL does
+             * not queue the app lifecycle events) */
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 g_g2d_touch_n = 0;
                 memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));

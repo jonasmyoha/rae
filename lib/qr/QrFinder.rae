@@ -1,0 +1,483 @@
+# Finding a QR code in a black-and-white image (lib/qr/QrReader): its three
+# finder patterns (the 7 x 7 squares at three corners, crossed by any line
+# through their middle as dark-light-dark-light-dark runs in the ratio
+# 1:1:3:1:1) and the alignment pattern near the fourth corner (a 5 x 5 one,
+# 1:1:1 through its middle).
+import Math
+open qr/GrayImage
+open qr/QrPerspective
+
+type FinderPattern {
+  x: Float
+  y: Float
+  moduleSize: Float
+  # How many scan rows confirmed it
+  count: Int
+}
+
+# A run across a pattern: its total length, and where its middle is along
+# the line (valid false when the runs are not in the pattern's ratio)
+type CrossCheck {
+  valid: Bool
+  center: Float
+  total: Float
+}
+
+func noCrossCheck() ret CrossCheck {
+  ret CrossCheck { valid: false, center: 0.0, total: 0.0 }
+}
+
+# Whether five run lengths are 1:1:3:1:1
+func finderRatio(counts: view List(Int)) ret Bool {
+  var total: Int = 0
+  loop let count: Int in counts {
+    if count is 0 {
+      ret false
+    }
+    total = total + count
+  }
+  if total < 7 {
+    ret false
+  }
+  let module: Float = (total as Float) / 7.0
+  let allowed: Float = module / 2.0
+  ret Math.abs(value: module - (counts.copyAtFallback(index: 0, fallback: 0) as Float)) < allowed and Math.abs(
+    value: module - (counts.copyAtFallback(index: 1, fallback: 0) as Float)
+  ) < allowed and Math.abs(
+    value: module * 3.0 - (counts.copyAtFallback(index: 2, fallback: 0) as Float)
+  ) < allowed * 3.0 and Math.abs(
+    value: module - (counts.copyAtFallback(index: 3, fallback: 0) as Float)
+  ) < allowed and Math.abs(value: module - (counts.copyAtFallback(index: 4, fallback: 0) as Float)) < allowed
+}
+
+# The runs through (x, y) along (dx, dy) and back, as a finder pattern
+# (`ratios` 5) or an alignment pattern (3: light-dark-light round a dark
+# middle); each run at most `maxRun` long
+func crossCheck(
+  image: view BitImage
+  x: view Int
+  y: view Int
+  dx: view Int
+  dy: view Int
+  maxRun: view Int
+  finder: view Bool
+  strict: view Bool
+) ret CrossCheck {
+  if not bitAt(image: image, x: x, y: y) {
+    ret noCrossCheck()
+  }
+  # Backward from the middle: the middle's own dark run, a light one, a dark one
+  var backward: List(Int) = { 0, 0, 0 }
+  var cx: Int = x
+  var cy: Int = y
+  var phases: Int = 3
+  if not finder and not strict {
+    phases = 2
+  }
+  var expectDark: Bool = true
+  loop var phase: Int = 0, phase < phases, ++phase {
+    loop bitAt(image: image, x: cx, y: cy) is expectDark and cx >= 0 and cy >= 0 and cx < image.width and cy < image.height and backward.copyAtFallback(
+      index: phase
+      fallback: 0
+    ) <= maxRun {
+      backward.set(index: phase, value: backward.copyAtFallback(index: phase, fallback: 0) + 1)
+      cx = cx - dx
+      cy = cy - dy
+    }
+    if backward.copyAtFallback(index: phase, fallback: 0) is 0 or backward.copyAtFallback(
+      index: phase
+      fallback: 0
+    ) > maxRun {
+      ret noCrossCheck()
+    }
+    expectDark = not expectDark
+  }
+  var forward: List(Int) = { 0, 0, 0 }
+  cx = x + dx
+  cy = y + dy
+  expectDark = true
+  loop var phase: Int = 0, phase < phases, ++phase {
+    loop bitAt(image: image, x: cx, y: cy) is expectDark and cx >= 0 and cy >= 0 and cx < image.width and cy < image.height and forward.copyAtFallback(
+      index: phase
+      fallback: 0
+    ) <= maxRun {
+      forward.set(index: phase, value: forward.copyAtFallback(index: phase, fallback: 0) + 1)
+      cx = cx + dx
+      cy = cy + dy
+    }
+    if (phase > 0 and forward.copyAtFallback(index: phase, fallback: 0) is 0) or forward.copyAtFallback(
+      index: phase
+      fallback: 0
+    ) > maxRun {
+      ret noCrossCheck()
+    }
+    expectDark = not expectDark
+  }
+  let middle: Int = backward.copyAtFallback(index: 0, fallback: 0) + forward.copyAtFallback(
+    index: 0
+    fallback: 0
+  )
+  # Where the middle run starts, along the line, from (x, y)
+  let startOffset: Float = (1 - backward.copyAtFallback(index: 0, fallback: 0)) as Float
+  var position: Float = (x as Float)
+  if dx is 0 {
+    position = (y as Float)
+  }
+  let center: Float = position + startOffset + (middle as Float) / 2.0
+  if finder {
+    let counts: List(Int) = {
+      backward.copyAtFallback(index: 2, fallback: 0)
+      backward.copyAtFallback(index: 1, fallback: 0)
+      middle
+      forward.copyAtFallback(index: 1, fallback: 0)
+      forward.copyAtFallback(index: 2, fallback: 0)
+    }
+    if not finderRatio(counts: counts) {
+      ret noCrossCheck()
+    }
+    var total: Int = 0
+    loop let count: Int in counts {
+      total = total + count
+    }
+    ret CrossCheck { valid: true, center: center, total: total as Float }
+  }
+  # Alignment: the outer dark ring, the light ring, the dark middle, the
+  # light ring, the dark ring: the middle three about a module each, the
+  # rings (strict) at least half one (data next to them may be dark too)
+  let before: Float = backward.copyAtFallback(index: 1, fallback: 0) as Float
+  let after: Float = forward.copyAtFallback(index: 1, fallback: 0) as Float
+  if not strict {
+    let single: Float = middle as Float
+    if Math.abs(value: before - single) > single * 0.7 or Math.abs(value: after - single) > single * 0.7 {
+      ret noCrossCheck()
+    }
+    ret CrossCheck { valid: true, center: center, total: single * 3.0 }
+  }
+  let module: Float = ((middle as Float) + before + after) / 3.0
+  let ringBefore: Float = backward.copyAtFallback(index: 2, fallback: 0) as Float
+  let ringAfter: Float = forward.copyAtFallback(index: 2, fallback: 0) as Float
+  if Math.abs(value: before - module) > module * 0.6 or Math.abs(value: after - module) > module * 0.6 or Math.abs(
+    value: (middle as Float) - module
+  ) > module * 0.6 or ringBefore < module * 0.5 or ringAfter < module * 0.5 {
+    ret noCrossCheck()
+  }
+  ret CrossCheck { valid: true, center: center, total: module * 3.0 }
+}
+
+# Confirm a finder pattern found in a row at (x, y): vertically, again
+# horizontally at the vertical middle, and diagonally; its exact middle and
+# module size
+func confirmFinder(
+  image: view BitImage
+  x: view Float
+  y: view Float
+  rowTotal: view Int
+) ret opt FinderPattern {
+  let maxRun: Int = rowTotal
+  let vertical: CrossCheck = crossCheck(
+    image: image
+    x: x as Int
+    y: y as Int
+    dx: 0
+    dy: 1
+    maxRun: maxRun
+    finder: true
+    strict: true
+  )
+  if not vertical.valid or vertical.total > (rowTotal as Float) * 2.0 or vertical.total * 2.0 < (rowTotal as Float) {
+    ret none
+  }
+  let horizontal: CrossCheck = crossCheck(
+    image: image
+    x: x as Int
+    y: vertical.center as Int
+    dx: 1
+    dy: 0
+    maxRun: maxRun
+    finder: true
+    strict: true
+  )
+  if not horizontal.valid {
+    ret none
+  }
+  let diagonal: CrossCheck = crossCheck(
+    image: image
+    x: horizontal.center as Int
+    y: vertical.center as Int
+    dx: 1
+    dy: 1
+    maxRun: maxRun
+    finder: true
+    strict: true
+  )
+  if not diagonal.valid {
+    ret none
+  }
+  ret FinderPattern {
+    x: horizontal.center
+    y: vertical.center
+    moduleSize: (horizontal.total + vertical.total) / 14.0
+    count: 1
+  }
+}
+
+# Add a confirmed pattern, merged into one found before at the same place
+func addFinder(found: mod List(FinderPattern), pattern: view FinderPattern) {
+  loop var i: Int = 0, i < found.length, ++i {
+    if let known: mod FinderPattern = found.modAt(index: i) {
+      if Math.abs(value: known.x - pattern.x) <= known.moduleSize * 2.0 and Math.abs(
+        value: known.y - pattern.y
+      ) <= known.moduleSize * 2.0 and Math.abs(value: known.moduleSize - pattern.moduleSize) <= known.moduleSize {
+        let weight: Float = known.count as Float
+        known.x = (known.x * weight + pattern.x) / (weight + 1.0)
+        known.y = (known.y * weight + pattern.y) / (weight + 1.0)
+        known.moduleSize = (known.moduleSize * weight + pattern.moduleSize) / (weight + 1.0)
+        known.count = known.count + 1
+        ret
+      }
+    }
+  }
+  found.add(value: pattern)
+}
+
+# Every finder pattern in the image: each row's runs are checked for the
+# 1:1:3:1:1 ratio, and every hit confirmed across
+func findFinderPatterns(image: view BitImage) ret List(FinderPattern) {
+  var found: List(FinderPattern) = {}
+  var runs: List(Int) = List.create(Int, cap: 64)
+  var starts: List(Int) = List.create(Int, cap: 64)
+  var counts: List(Int) = {
+    0
+    0
+    0
+    0
+    0
+  }
+  loop var y: Int = 0, y < image.height, ++y {
+    runs.clear()
+    starts.clear()
+    # The row as runs, the first light (the edge counts as light)
+    var current: Bool = false
+    var length: Int = 0
+    var start: Int = 0
+    loop var x: Int = 0, x < image.width, ++x {
+      let dark: Bool = bitAt(image: image, x: x, y: y)
+      if dark is current {
+        length = length + 1
+      } else {
+        runs.add(value: length)
+        starts.add(value: start)
+        current = dark
+        length = 1
+        start = x
+      }
+    }
+    runs.add(value: length)
+    starts.add(value: start)
+    # Dark runs are at odd indices
+    var k: Int = 1
+    loop k + 4 < runs.length {
+      loop var i: Int = 0, i < 5, ++i {
+        counts.set(index: i, value: runs.copyAtFallback(index: k + i, fallback: 0))
+      }
+      if finderRatio(counts: counts) {
+        var total: Int = 0
+        loop let count: Int in counts {
+          total = total + count
+        }
+        let middle: Float = (starts.copyAtFallback(index: k + 2, fallback: 0) as Float) + (counts.copyAtFallback(
+          index: 2
+          fallback: 0
+        ) as Float) / 2.0
+        if let pattern: FinderPattern = confirmFinder(
+          image: image
+          x: middle
+          y: (y as Float) + 0.5
+          rowTotal: total
+        ) {
+          addFinder(found: found, pattern: pattern)
+        }
+      }
+      k = k + 2
+    }
+  }
+  ret found
+}
+
+# Three patterns that make a code's corners, in order: top left (at the
+# right angle), top right, bottom left
+type FinderTriple {
+  topLeft: FinderPattern
+  topRight: FinderPattern
+  bottomLeft: FinderPattern
+  # How far from a right isosceles triangle (lower is better)
+  error: Float
+}
+
+func patternPoint(pattern: view FinderPattern) ret QrPoint {
+  ret qrPoint(x: pattern.x, y: pattern.y)
+}
+
+# Up to `limit` triples of the patterns, best first
+func finderTriples(patterns: view List(FinderPattern), limit: view Int) ret List(FinderTriple) {
+  var triples: List(FinderTriple) = {}
+  let count: Int = patterns.length
+  loop var i: Int = 0, i < count, ++i {
+    loop var j: Int = i + 1, j < count, ++j {
+      loop var k: Int = j + 1, k < count, ++k {
+        let first: FinderPattern = patterns.copyAtDefault(index: i)
+        let second: FinderPattern = patterns.copyAtDefault(index: j)
+        let third: FinderPattern = patterns.copyAtDefault(index: k)
+        var smallest: Float = first.moduleSize
+        var largest: Float = first.moduleSize
+        loop let size: Float in List(Float) { second.moduleSize, third.moduleSize } {
+          if size < smallest {
+            smallest = size
+          }
+          if size > largest {
+            largest = size
+          }
+        }
+        if largest <= smallest * 3.0 {
+          # The corner at the right angle is opposite the longest side
+          let a: Float = pointDistance(
+            first: patternPoint(pattern: second)
+            second: patternPoint(pattern: third)
+          )
+          let b: Float = pointDistance(
+            first: patternPoint(pattern: first)
+            second: patternPoint(pattern: third)
+          )
+          let c: Float = pointDistance(
+            first: patternPoint(pattern: first)
+            second: patternPoint(pattern: second)
+          )
+          var corner: FinderPattern = first
+          var one: FinderPattern = second
+          var two: FinderPattern = third
+          var hypotenuse: Float = a
+          var legA: Float = b
+          var legB: Float = c
+          if b >= a and b >= c {
+            corner = second
+            one = first
+            two = third
+            hypotenuse = b
+            legA = a
+            legB = c
+          } else if c >= a and c >= b {
+            corner = third
+            one = first
+            two = second
+            hypotenuse = c
+            legA = a
+            legB = b
+          }
+          let pythagoras: Float = Math.abs(
+            value: hypotenuse * hypotenuse - legA * legA - legB * legB
+          ) / (hypotenuse * hypotenuse)
+          var legRatio: Float = legA / legB
+          if legRatio < 1.0 {
+            legRatio = 1.0 / legRatio
+          }
+          # A code is at least 21 modules: the legs at least 14 modules
+          if legA >= smallest * 10.0 and legB >= smallest * 10.0 and pythagoras < 0.6 and legRatio < 3.0 {
+            # Top right is where the top left's x axis points: (one -
+            # corner) x (two - corner) > 0 with y down
+            let cross: Float = (one.x - corner.x) * (two.y - corner.y) - (one.y - corner.y) * (two.x - corner.x)
+            var topRight: FinderPattern = one
+            var bottomLeft: FinderPattern = two
+            if cross < 0.0 {
+              topRight = two
+              bottomLeft = one
+            }
+            triples.add(
+              value: FinderTriple {
+                topLeft: corner
+                topRight: topRight
+                bottomLeft: bottomLeft
+                error: pythagoras + (legRatio - 1.0) + (largest / smallest - 1.0)
+              }
+            )
+          }
+        }
+      }
+    }
+  }
+  # Best first (a short selection sort: there are few)
+  var sorted: List(FinderTriple) = {}
+  loop sorted.length < limit and triples.length > 0 {
+    var best: Int = 0
+    loop var i: Int = 1, i < triples.length, ++i {
+      if triples.copyAtDefault(index: i).error < triples.copyAtDefault(index: best).error {
+        best = i
+      }
+    }
+    sorted.add(value: triples.copyAtDefault(index: best))
+    triples.remove(index: best)
+  }
+  ret sorted
+}
+
+# The alignment pattern nearest `estimate`, searched within `radius` pixels
+func findAlignment(
+  image: view BitImage
+  estimate: view QrPoint
+  moduleSize: view Float
+  radius: view Float
+  strict: view Bool
+) ret opt QrPoint {
+  let left: Int = Math.clamp(val: (estimate.x - radius) as Int, low: 0, high: image.width - 1)
+  let right: Int = Math.clamp(val: (estimate.x + radius) as Int, low: 0, high: image.width - 1)
+  let top: Int = Math.clamp(val: (estimate.y - radius) as Int, low: 0, high: image.height - 1)
+  let bottom: Int = Math.clamp(val: (estimate.y + radius) as Int, low: 0, high: image.height - 1)
+  # A strict check lets the outer ring run on into dark data
+  var maxRun: Int = (moduleSize * 2.5) as Int + 2
+  if strict {
+    maxRun = (moduleSize * 6.0) as Int + 2
+  }
+  var best: Float = -1.0
+  var found: QrPoint = estimate
+  loop var y: Int = top, y <= bottom, ++y {
+    var x: Int = left
+    loop x <= right {
+      if bitAt(image: image, x: x, y: y) and not bitAt(image: image, x: x - 1, y: y) {
+        let row: CrossCheck = crossCheck(
+          image: image
+          x: x
+          y: y
+          dx: 1
+          dy: 0
+          maxRun: maxRun
+          finder: false
+          strict: strict
+        )
+        if row.valid and Math.abs(value: row.total / 3.0 - moduleSize) < moduleSize * 0.6 {
+          let column: CrossCheck = crossCheck(
+            image: image
+            x: row.center as Int
+            y: y
+            dx: 0
+            dy: 1
+            maxRun: maxRun
+            finder: false
+            strict: strict
+          )
+          if column.valid and Math.abs(value: column.total / 3.0 - moduleSize) < moduleSize * 0.6 {
+            let point: QrPoint = qrPoint(x: row.center, y: column.center)
+            let distance: Float = pointDistance(first: point, second: estimate)
+            if best < 0.0 or distance < best {
+              best = distance
+              found = point
+            }
+          }
+        }
+      }
+      x = x + 1
+    }
+  }
+  if best < 0.0 {
+    ret none
+  }
+  ret found
+}

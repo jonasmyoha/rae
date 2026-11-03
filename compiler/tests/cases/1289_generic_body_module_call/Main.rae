@@ -1,0 +1,23 @@
+# A module-qualified call inside a GENERIC function body (Runner.runWith):
+# `Vec3.create(...)` names module Vec3's function, though Vec3 is a type
+# too. Outside a generic body sema links the call; inside one the C backend
+# took the type reading and called a `create(T: type, ...)` with T = Vec3
+# that does not exist, so the C did not compile. The generic is used with
+# two game types, so two instantiations are emitted.
+open Runner
+
+type Game {
+  count: Int
+}
+
+type OtherGame {
+  name: String
+}
+
+func main() ret Int {
+  var game: Game = { count: 0 }
+  var other: OtherGame = { name: "other" }
+  log("{runWith(Game, game: game)}")
+  log("{runWith(OtherGame, game: other)}")
+  ret 0
+}

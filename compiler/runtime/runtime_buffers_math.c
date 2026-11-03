@@ -1,4 +1,4 @@
-/* Raw buffers, libc math wrappers, the toJson buffer as a String, and crypto stubs. Buffers are permanent kernel; crypto stubs are a compatibility bridge.
+/* Raw buffers, libc math wrappers, the toJson buffer as a String. Buffers are permanent kernel.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.

@@ -1,0 +1,301 @@
+# The host's side of replication (lib/net/replication, docs/replication.md):
+# the host's World is the truth. A Replicated component marks an entity whose
+# chosen components are sent; each snapshot tick the app captures its chosen
+# tables into the host's snapshot ring (`captureReplicaTable` per table, with
+# the table's kind number), and the snapshot system sends each player a delta
+# against the last snapshot that player acknowledged, holding only the
+# entities within `interestRadius` of the player's own entity.
+#
+# A player is a ReplicaPeer: its acks, which net ids it was sent at each
+# tick (so a delta knows what the player had), and the inputs it sent.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open collections/IntMap
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+
+# ----- the component ----------------------------------------------------------
+
+# Marks a replicated entity. `netId` names it on every side (the player's
+# own entity id differs); `owner` is the peer id of the player that controls
+# it, -1 for the host. A replicated component, kind 0 by convention, so the
+# players have it too.
+type Replicated {
+  netId: Int
+  owner: Int
+}
+
+# ----- settings ---------------------------------------------------------------
+type ReplicationConfig {
+  # Floats are sent as round(value * floatScale): 1000 = millimeters
+  floatScale: Float
+  # A player sees the entities within this distance of its own entity
+  # (entities with no interest point are seen by everyone)
+  interestRadius: Float
+  # How many past snapshots a delta can start from (a player that acked
+  # none of them gets a whole one)
+  historySize: Int
+  # The largest snapshot message (a snapshot is split into parts this size)
+  maxMessageBytes: Int
+  # A snapshot every this often (`replicaSnapshotDue`)
+  snapshotIntervalMs: Int
+  # How many of its latest inputs a player sends in every input message
+  inputRedundancy: Int
+  # Players draw other entities this many snapshot intervals in the past,
+  # between two snapshots they already have (lib/net/replication/Interpolation)
+  interpolationDelayTicks: Float
+}
+
+func defaultReplicationConfig() ret ReplicationConfig {
+  ret ReplicationConfig {
+    floatScale: 1000.0
+    interestRadius: 60.0
+    historySize: 32
+    maxMessageBytes: 1000
+    snapshotIntervalMs: 50
+    inputRedundancy: 3
+    interpolationDelayTicks: 2.0
+  }
+}
+
+# The messages replication puts on a lib/net/Connection start with one of
+# these bytes; an app's own messages use 16 and up
+const replicaMessageSnapshot: Int = 1
+
+const replicaMessageInput: Int = 2
+
+# ----- the host resource ------------------------------------------------------
+type ReplicationHost {
+  config: ReplicationConfig
+  nextNetId: Int
+  # The tick of the newest snapshot (-1: none yet)
+  tick: Int
+  lastSnapshotMs: Int
+  snapshots: List(ReplicaSnapshot)
+  scratch: List(Int)
+  # Encoding scratch: one record, and the parts of the snapshot being sent
+  recordBytes: List(UInt8)
+  parts: List(List(UInt8))
+  partCount: Int
+  # Net ids visible to the player being encoded for
+  visible: List(Int)
+  visibleSet: IntMap(Int)
+  baseSet: IntMap(Int)
+  focus: List(Float)
+  # Totals
+  snapshotsSent: Int
+  messagesSent: Int
+  bytesSent: Int
+}
+
+type ReplicaPeer {
+  peerId: Int
+  # The net id of the player's own entity (interest is measured from it), -1
+  # for none: the player sees everything
+  focusNetId: Int
+  # The newest snapshot tick the player acknowledged, -1 for none
+  ackedTick: Int
+  # Per ring slot: the tick and the net ids the player was sent
+  visibleTicks: List(Int)
+  visibleNetIds: List(List(Int))
+  # Inputs received and not yet taken: tick, value count, values ...
+  inputs: List(Int)
+  inputRead: Int
+  lastInputTick: Int
+  # The newest input tick the host APPLIED (taken with replicaNextInput):
+  # sent with every snapshot so the player knows which of its inputs the
+  # snapshot already contains (prediction replays the rest)
+  appliedInputTick: Int
+  # The newest snapshot's size, and totals
+  lastSnapshotBytes: Int
+  bytesSent: Int
+}
+
+func createReplicationHost(config: view ReplicationConfig) ret ReplicationHost {
+  var snapshots: List(ReplicaSnapshot) = List.create(ReplicaSnapshot, cap: config.historySize)
+  loop var i: Int = 0, i < config.historySize, ++i {
+    snapshots.add(value: createReplicaSnapshot())
+  }
+  ret ReplicationHost {
+    config: config
+    nextNetId: 1
+    tick: -1
+    lastSnapshotMs: -1000000
+    snapshots: snapshots
+    scratch: List.create(Int, cap: 64)
+    recordBytes: List.create(UInt8, cap: 512)
+    parts: {}
+    partCount: 0
+    visible: List.create(Int, cap: 64)
+    visibleSet: createIntMap(Int, cap: 64)
+    baseSet: createIntMap(Int, cap: 64)
+    focus: List.create(Float, cap: 3)
+    snapshotsSent: 0
+    messagesSent: 0
+    bytesSent: 0
+  }
+}
+
+func createReplicaPeer(peerId: view Int, config: view ReplicationConfig) ret ReplicaPeer {
+  var visibleTicks: List(Int) = List.create(Int, cap: config.historySize)
+  var visibleNetIds: List(List(Int)) = List.create(List(Int), cap: config.historySize)
+  loop var i: Int = 0, i < config.historySize, ++i {
+    visibleTicks.add(value: -1)
+    visibleNetIds.add(value: List.create(Int, cap: 16))
+  }
+  ret ReplicaPeer {
+    peerId: peerId
+    focusNetId: -1
+    ackedTick: -1
+    visibleTicks: visibleTicks
+    visibleNetIds: visibleNetIds
+    inputs: List.create(Int, cap: 64)
+    inputRead: 0
+    lastInputTick: -1
+    appliedInputTick: -1
+    lastSnapshotBytes: 0
+    bytesSent: 0
+  }
+}
+
+# Make `entityId` replicated, owned by peer `owner` (-1: the host): its net id
+func replicateEntity(
+  host: mod ReplicationHost
+  replicated: mod ComponentTable(Replicated)
+  entityId: view EntityId
+  owner: view Int
+) ret Int {
+  let netId: Int = host.nextNetId
+  host.nextNetId = netId + 1
+  componentSet(
+    this: replicated
+    entityId: entityId
+    data: Replicated { netId: netId, owner: owner }
+  )
+  ret netId
+}
+
+# Whether a snapshot is due (every `snapshotIntervalMs`)
+func replicaSnapshotDue(host: view ReplicationHost, nowMs: view Int) ret Bool {
+  ret nowMs - host.lastSnapshotMs >= host.config.snapshotIntervalMs
+}
+
+func ringSlot(host: view ReplicationHost, tick: view Int) ret Int {
+  ret tick % host.config.historySize
+}
+
+# Start the next snapshot (then capture the tables into it)
+func replicaBeginSnapshot(host: mod ReplicationHost, nowMs: view Int) {
+  host.tick = host.tick + 1
+  host.lastSnapshotMs = nowMs
+  if let snapshot: mod ReplicaSnapshot = host.snapshots.modAt(
+    index: ringSlot(host: host, tick: host.tick)
+  ) {
+    snapshotReset(snapshot: snapshot, tick: host.tick)
+  }
+}
+
+# Capture one chosen table (kind `kind`, 0-31) of the replicated entities into
+# the current snapshot
+func captureReplicaTable(
+  T: type
+  host: mod ReplicationHost
+  table: view ComponentTable(T)
+  replicated: view ComponentTable(Replicated)
+  kind: view Int
+) {
+  let slot: Int = ringSlot(host: host, tick: host.tick)
+  let scale: Float = host.config.floatScale
+  let count: Int = componentCount(this: table)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: table, i: i)
+    if componentHas(this: replicated, entityId: entityId) {
+      let netId: Int = componentView(this: replicated, entityId: entityId).netId
+      host.scratch.clear()
+      if let value: T = componentCopyAt(this: table, i: i) {
+        appendReplicaValues(
+          T
+          value: value
+          scale: scale
+          values: host.scratch
+        )
+      }
+      if let snapshot: mod ReplicaSnapshot = host.snapshots.modAt(index: slot) {
+        snapshotAdd(
+          snapshot: snapshot
+          netId: netId
+          kind: kind
+          values: host.scratch
+          start: 0
+          count: host.scratch.length
+        )
+      }
+    }
+  }
+}
+
+# The interest points of the replicated entities from their Transform3D
+# positions (an app with its own position type calls `replicaSetPoint`)
+func captureInterestPoints(
+  host: mod ReplicationHost
+  transforms: view ComponentTable(Transform3D)
+  replicated: view ComponentTable(Replicated)
+) {
+  let count: Int = componentCount(this: transforms)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: transforms, i: i)
+    if componentHas(this: replicated, entityId: entityId) {
+      let netId: Int = componentView(this: replicated, entityId: entityId).netId
+      if let transform: Transform3D = componentCopyAt(this: transforms, i: i) {
+        replicaSetPoint(
+          host: host
+          netId: netId
+          x: transform.position.x
+          y: transform.position.y
+          z: transform.position.z
+        )
+      }
+    }
+  }
+}
+
+func replicaSetPoint(
+  host: mod ReplicationHost
+  netId: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+) {
+  if let snapshot: mod ReplicaSnapshot = host.snapshots.modAt(
+    index: ringSlot(host: host, tick: host.tick)
+  ) {
+    snapshotSetPoint(
+      snapshot: snapshot
+      netId: netId
+      x: x
+      y: y
+      z: z
+    )
+  }
+}
+
+# A host built from a player's replicated copy (host migration): its net ids
+# continue after the largest one the copy holds, so a new entity never takes
+# an id the players already know. Everything else of the old host's (its
+# snapshot ring, the players' acks and inputs) is not needed: every player
+# reconnects and gets a whole snapshot first.
+func replicationHostTakeOver(
+  config: view ReplicationConfig
+  replicated: view ComponentTable(Replicated)
+) ret ReplicationHost {
+  var host: ReplicationHost = createReplicationHost(config: config)
+  loop var i: Int = 0, i < componentCount(this: replicated), ++i {
+    if let value: Replicated = componentCopyAt(this: replicated, i: i) {
+      if value.netId >= host.nextNetId {
+        host.nextNetId = value.netId + 1
+      }
+    }
+  }
+  ret host
+}

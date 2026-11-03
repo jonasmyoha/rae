@@ -1,0 +1,227 @@
+# Bytes on the wire for the connection protocol (lib/net/Connection.rae):
+# big-endian integers appended to and read from a `List(UInt8)`, bounded
+# byte copies, and 16-bit sequence numbers that wrap around.
+#
+# Reads never fail: a read past the end answers 0, so a parser checks the
+# packet's length once before it reads a field instead of at every byte.
+
+# Sequence numbers (packets, reliable messages, unreliable messages) are 16
+# bits and wrap: 65535 is followed by 0
+const sequenceModulo: Int = 65536
+
+const sequenceMask: Int = 65535
+
+# Half the sequence space: a sequence less than this far ahead is "newer"
+const sequenceHalf: Int = 32768
+
+func writeU8(bytes: mod List(UInt8), value: view Int) {
+  bytes.add(value: (value bitand 255) as UInt8)
+}
+
+func writeU16(bytes: mod List(UInt8), value: view Int) {
+  writeU8(bytes: bytes, value: value shr 8)
+  writeU8(bytes: bytes, value: value)
+}
+
+func writeU32(bytes: mod List(UInt8), value: view Int) {
+  writeU16(bytes: bytes, value: value shr 16)
+  writeU16(bytes: bytes, value: value)
+}
+
+func readU8(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret bytes.copyAtFallback(index: offset, fallback: 0) as Int
+}
+
+func readU16(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret (readU8(bytes: bytes, offset: offset) shl 8) bitor readU8(bytes: bytes, offset: offset + 1)
+}
+
+func readU32(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret (readU16(bytes: bytes, offset: offset) shl 16) bitor readU16(bytes: bytes, offset: offset + 2)
+}
+
+# Append `count` bytes of `source` from `start` to `destination` (one copy;
+# the destination grows only when its capacity is too small)
+func appendCopy(
+  destination: mod List(UInt8)
+  source: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  if count <= 0 or start < 0 or start + count > source.length {
+    ret
+  }
+  loop destination.cap - destination.length < count {
+    destination.grow()
+  }
+  unsafe {
+    rae_ext_rae_buf_copy(
+      src: source.data
+      src_off: start
+      dst: destination.data
+      dst_off: destination.length
+      len: count
+      elemSize: 1
+    )
+  }
+  destination.length = destination.length + count
+}
+
+# Overwrite `count` bytes of `destination` from `destinationStart` with
+# `source`'s from `sourceStart`; ignored unless both ranges are inside
+func copyInto(
+  destination: mod List(UInt8)
+  destinationStart: view Int
+  source: view List(UInt8)
+  sourceStart: view Int
+  count: view Int
+) {
+  if count <= 0 or sourceStart < 0 or destinationStart < 0 {
+    ret
+  }
+  if sourceStart + count > source.length or destinationStart + count > destination.length {
+    ret
+  }
+  unsafe {
+    rae_ext_rae_buf_copy(
+      src: source.data
+      src_off: sourceStart
+      dst: destination.data
+      dst_off: destinationStart
+      len: count
+      elemSize: 1
+    )
+  }
+}
+
+# Make sure `bytes` can hold `count` bytes without growing later
+func reserveBytes(bytes: mod List(UInt8), count: view Int) {
+  loop bytes.cap < count {
+    bytes.grow()
+  }
+}
+
+# A list of `count` zero values, made once (the protocol's fixed tables)
+func zeroInts(count: view Int) ret List(Int) {
+  var values: List(Int) = List.create(Int, cap: count)
+  values.addDefaults(count: count)
+  ret values
+}
+
+func zeroBools(count: view Int) ret List(Bool) {
+  var values: List(Bool) = List.create(Bool, cap: count)
+  values.addDefaults(count: count)
+  ret values
+}
+
+func zeroBytes(count: view Int) ret List(UInt8) {
+  var values: List(UInt8) = List.create(UInt8, cap: count)
+  values.addDefaults(count: count)
+  ret values
+}
+
+func intAt(values: view List(Int), index: view Int) ret Int {
+  ret values.copyAtFallback(index: index, fallback: 0)
+}
+
+func boolAt(values: view List(Bool), index: view Int) ret Bool {
+  ret values.copyAtFallback(index: index, fallback: false)
+}
+
+func sequenceNext(sequence: view Int) ret Int {
+  ret (sequence + 1) bitand sequenceMask
+}
+
+func sequenceAdd(sequence: view Int, count: view Int) ret Int {
+  ret (sequence + count) bitand sequenceMask
+}
+
+# How far `newer` is ahead of `older`, going forward around the wrap (0-65535)
+func sequenceDistance(newer: view Int, older: view Int) ret Int {
+  ret (newer - older) bitand sequenceMask
+}
+
+# Whether `first` comes after `second` (less than half the space ahead)
+func sequenceGreater(first: view Int, second: view Int) ret Bool {
+  let distance: Int = sequenceDistance(newer: first, older: second)
+  ret distance is not 0 and distance < sequenceHalf
+}
+
+# ----- variable-length integers (snapshots, inputs) ---------------------------
+
+# A non-negative value in 7-bit groups, low first, the top bit set on every
+# byte but the last: 0-127 take one byte
+func writeVarint(bytes: mod List(UInt8), value: view Int) {
+  var rest: Int = value
+  loop rest >= 128 {
+    writeU8(bytes: bytes, value: (rest bitand 127) bitor 128)
+    rest = rest shr 7
+  }
+  writeU8(bytes: bytes, value: rest)
+}
+
+# A signed value as a varint: 0, -1, 1, -2, 2 ... become 0, 1, 2, 3, 4
+func writeSignedVarint(bytes: mod List(UInt8), value: view Int) {
+  if value >= 0 {
+    writeVarint(bytes: bytes, value: value * 2)
+  } else {
+    writeVarint(bytes: bytes, value: -value * 2 - 1)
+  }
+}
+
+# Where a reader is in its bytes, and whether a read ran past `end`
+type ByteReader {
+  offset: Int
+  end: Int
+  failed: Bool
+}
+
+func byteReader(start: view Int, end: view Int) ret ByteReader {
+  ret ByteReader { offset: start, end: end, failed: false }
+}
+
+func readerU8(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  if reader.offset >= reader.end {
+    reader.failed = true
+    ret 0
+  }
+  let value: Int = readU8(bytes: bytes, offset: reader.offset)
+  reader.offset = reader.offset + 1
+  ret value
+}
+
+func readerU32(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  if reader.offset + 4 > reader.end {
+    reader.failed = true
+    ret 0
+  }
+  let value: Int = readU32(bytes: bytes, offset: reader.offset)
+  reader.offset = reader.offset + 4
+  ret value
+}
+
+func readerVarint(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  var value: Int = 0
+  var shift: Int = 0
+  loop shift < 63 {
+    let byte: Int = readerU8(reader: reader, bytes: bytes)
+    if reader.failed {
+      ret 0
+    }
+    value = value bitor ((byte bitand 127) shl shift)
+    if byte < 128 {
+      ret value
+    }
+    shift = shift + 7
+  }
+  reader.failed = true
+  ret 0
+}
+
+func readerSignedVarint(reader: mod ByteReader, bytes: view List(UInt8)) ret Int {
+  let encoded: Int = readerVarint(reader: reader, bytes: bytes)
+  if (encoded bitand 1) is 0 {
+    ret encoded shr 1
+  }
+  ret -((encoded + 1) shr 1)
+}

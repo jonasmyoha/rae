@@ -1,0 +1,125 @@
+# The relay's WebSocket half (docs/relay.md, "WebSocket"): peers that cannot
+# send UDP (a browser) connect to relayWebSocketPath, and each binary
+# message is one relay packet, taken exactly like a datagram from the
+# connection's stand-in address (RelayServer webSocketPeerAddress). The
+# HTTP server's frame runs around the relay frame: its first half waits for
+# the TCP sockets AND the relay's UDP socket, reads and decodes; its second
+# half writes the frames the relay queued (relaySendBytes).
+#
+# A peer whose connection closed is removed as if it had left (its host or
+# its players told), looked for every 100 ms.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open ecs/Event
+open net/Tcp
+open net/Udp
+open net/Wire
+open http/Http
+open webSocket/FrameDecoder
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/ecs/WebSocketSystems
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/receiveSystem/ReceiveSystem
+
+# The relay answers plain HTTP with 404: it serves nothing but the upgrade
+type RelayHttpRouter {
+  refused: Int
+}
+
+func route(router: mod RelayHttpRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.refused = router.refused + 1
+  respond(
+    server: server
+    event: event
+    status: 404
+    contentType: "text/plain"
+    body: "relay: WebSocket upgrades only, on {relayWebSocketPath}"
+  )
+}
+
+func relayHasWebSocket(server: view RelayServer) ret Bool {
+  ret server.webSocket is not none
+}
+
+# The first half of the HTTP frame: wait up to `waitMs` (for TCP or UDP),
+# accept, read, upgrade, decode
+func webSocketFrameBegin(server: mod RelayServer, router: mod RelayHttpRouter, waitMs: view Int) {
+  if let http: mod HttpServer = server.webSocket {
+    httpServerFrameBegin(
+      RelayHttpRouter
+      router: router
+      server: http
+      timeoutMs: waitMs
+    )
+  }
+}
+
+# The second half: write, time out, close
+func webSocketFrameEnd(server: mod RelayServer) {
+  if let http: mod HttpServer = server.webSocket {
+    httpServerFrameEnd(server: http)
+  }
+}
+
+# This frame's binary messages, each taken as a datagram from its
+# connection's stand-in address; a text message is not a relay packet
+func webSocketReceiveSystem(server: mod RelayServer) {
+  var count: Int = 0
+  if let http: view HttpServer = server.webSocket {
+    count = eventCount(this: http.webSocketMessages)
+  }
+  loop var i: Int = 0, i < count, ++i {
+    var from: NetAddress = noNetAddress()
+    var binary: Bool = false
+    if let http: view HttpServer = server.webSocket {
+      let event: WebSocketMessageEvent = eventAt(this: http.webSocketMessages, i: i)
+      binary = event.message.kind is WebSocketOpcode.binary
+      if binary {
+        messageBytes(server: http, event: event, out: server.inbox)
+        from = webSocketPeerAddress(connectionEntityId: event.connectionEntityId)
+      }
+    }
+    if binary {
+      takeDatagram(server: server, from: from)
+    } else {
+      server.stats.packetsDropped = server.stats.packetsDropped + 1
+    }
+  }
+  closedConnectionSystem(server: server)
+}
+
+# Peers whose WebSocket connection is gone leave (every 100 ms)
+func closedConnectionSystem(server: mod RelayServer) {
+  if server.frameNs < server.nextWebSocketScanNs {
+    ret
+  }
+  server.nextWebSocketScanNs = server.frameNs + 100000000
+  loop var i: Int = 0, i < componentCount(this: server.peers), ++i {
+    let peerEntityId: EntityId = componentEntityAt(this: server.peers, i: i)
+    let address: NetAddress = componentView(this: server.peers, entityId: peerEntityId).address
+    if isWebSocketPeerAddress(address: address) {
+      var open: Bool = false
+      if let http: view HttpServer = server.webSocket {
+        open = sessionIsOpen(server: http, entityId: webSocketConnectionOf(address: address))
+      }
+      if not open {
+        eventSend(
+          this: server.requests
+          value: RelayRequestEvent {
+            kind: relayKindLeave
+            address: address
+            requestId: 0
+            peerEntityId: peerEntityId
+            tokenHigh: 0
+            tokenLow: 0
+            relayOnly: true
+            device: deviceUnknown
+          }
+        )
+      }
+    }
+  }
+}

@@ -1,0 +1,196 @@
+# A grayscale image for lib/qr's reader (0 black .. 255 white per pixel,
+# row by row), its binarization, and the drawing of test images: a QR
+# symbol through a perspective map, blurred, with noise.
+import Math
+open qr/QrEncoder
+open qr/QrPerspective
+
+type GrayImage {
+  width: Int
+  height: Int
+  pixels: List(UInt8)
+}
+
+# A black-and-white image: true is dark
+type BitImage {
+  width: Int
+  height: Int
+  dark: List(Bool)
+}
+
+func createGrayImage(width: view Int, height: view Int, value: view Int) ret GrayImage {
+  var pixels: List(UInt8) = List.create(UInt8, cap: width * height)
+  loop var i: Int = 0, i < width * height, ++i {
+    pixels.add(value: value as UInt8)
+  }
+  ret GrayImage { width: width, height: height, pixels: own pixels }
+}
+
+func grayAt(image: view GrayImage, x: view Int, y: view Int) ret Int {
+  ret image.pixels.copyAtFallback(index: y * image.width + x, fallback: 255) as Int
+}
+
+func bitAt(image: view BitImage, x: view Int, y: view Int) ret Bool {
+  if x < 0 or y < 0 or x >= image.width or y >= image.height {
+    ret false
+  }
+  ret image.dark.copyAtFallback(index: y * image.width + x, fallback: false)
+}
+
+# Adaptive threshold (Bradley's): a pixel is dark when it is darker than
+# the mean of the square round it by more than 15 %, so uneven light, a
+# shadow or a glow across the code does not matter. The means come from an
+# integral image, so the whole thing is linear in the pixels.
+func binarize(image: view GrayImage) ret BitImage {
+  let width: Int = image.width
+  let height: Int = image.height
+  let stride: Int = width + 1
+  var integral: List(Int) = {}
+  integral.addDefaults(count: stride * (height + 1))
+  loop var y: Int = 0, y < height, ++y {
+    var row: Int = 0
+    loop var x: Int = 0, x < width, ++x {
+      row = row + grayAt(image: image, x: x, y: y)
+      integral.set(
+        index: (y + 1) * stride + x + 1
+        value: integral.copyAtFallback(index: y * stride + x + 1, fallback: 0) + row
+      )
+    }
+  }
+  var side: Int = width
+  if height < side {
+    side = height
+  }
+  var radius: Int = side / 16
+  if radius < 4 {
+    radius = 4
+  }
+  var dark: List(Bool) = List.create(Bool, cap: width * height)
+  loop var y: Int = 0, y < height, ++y {
+    var top: Int = y - radius
+    if top < 0 {
+      top = 0
+    }
+    var bottom: Int = y + radius + 1
+    if bottom > height {
+      bottom = height
+    }
+    loop var x: Int = 0, x < width, ++x {
+      var left: Int = x - radius
+      if left < 0 {
+        left = 0
+      }
+      var right: Int = x + radius + 1
+      if right > width {
+        right = width
+      }
+      let area: Int = (right - left) * (bottom - top)
+      let sum: Int = integral.copyAtFallback(index: bottom * stride + right, fallback: 0) - integral.copyAtFallback(
+        index: top * stride + right
+        fallback: 0
+      ) - integral.copyAtFallback(index: bottom * stride + left, fallback: 0) + integral.copyAtFallback(
+        index: top * stride + left
+        fallback: 0
+      )
+      dark.add(value: grayAt(image: image, x: x, y: y) * area * 100 <= sum * 85)
+    }
+  }
+  ret BitImage { width: width, height: height, dark: own dark }
+}
+
+# ----- test images --------------------------------------------------------------
+
+# Draw `symbol` with a `quietZone` into a `width` x `height` image on a
+# `background` gray, its outer square (the quiet zone's corners, clockwise
+# from the top left) at `corners`. Each pixel is the mean of 4 samples, so
+# edges come out antialiased like a camera's.
+func qrDrawGray(
+  symbol: view QrSymbol
+  quietZone: view Int
+  width: view Int
+  height: view Int
+  corners: view List(QrPoint)
+  background: view Int
+) ret GrayImage {
+  var image: GrayImage = createGrayImage(width: width, height: height, value: background)
+  let outer: Float = (symbol.size + quietZone * 2) as Float
+  let square: List(QrPoint) = {
+    qrPoint(x: 0.0, y: 0.0)
+    qrPoint(x: outer, y: 0.0)
+    qrPoint(x: outer, y: outer)
+    qrPoint(x: 0.0, y: outer)
+  }
+  # Image -> module coordinates
+  if let inverse: Homography = homographyFrom(from: corners, to: square) {
+    loop var y: Int = 0, y < height, ++y {
+      loop var x: Int = 0, x < width, ++x {
+        var total: Int = 0
+        var inside: Int = 0
+        loop var sample: Int = 0, sample < 4, ++sample {
+          let sx: Float = (x as Float) + 0.25 + 0.5 * ((sample % 2) as Float)
+          let sy: Float = (y as Float) + 0.25 + 0.5 * ((sample / 2) as Float)
+          let module: QrPoint = homographyApply(homography: inverse, point: qrPoint(x: sx, y: sy))
+          if module.x >= 0.0 and module.y >= 0.0 and module.x < outer and module.y < outer {
+            inside = inside + 1
+            let mx: Int = (module.x as Int) - quietZone
+            let my: Int = (module.y as Int) - quietZone
+            if not qrModule(symbol: symbol, x: mx, y: my) {
+              total = total + 255
+            }
+          } else {
+            total = total + background
+          }
+        }
+        if inside > 0 {
+          image.pixels.set(index: y * width + x, value: (total / 4) as UInt8)
+        }
+      }
+    }
+  }
+  ret image
+}
+
+# A box blur of `radius` pixels (twice, close to a Gaussian)
+func grayBlur(image: view GrayImage, radius: view Int) ret GrayImage {
+  var result: GrayImage = image
+  loop var pass: Int = 0, pass < 2, ++pass {
+    var next: GrayImage = result
+    loop var y: Int = 0, y < image.height, ++y {
+      loop var x: Int = 0, x < image.width, ++x {
+        var sum: Int = 0
+        var count: Int = 0
+        loop var dy: Int = -radius, dy <= radius, ++dy {
+          loop var dx: Int = -radius, dx <= radius, ++dx {
+            let sx: Int = x + dx
+            let sy: Int = y + dy
+            if sx >= 0 and sy >= 0 and sx < image.width and sy < image.height {
+              sum = sum + grayAt(image: result, x: sx, y: sy)
+              count = count + 1
+            }
+          }
+        }
+        next.pixels.set(index: y * image.width + x, value: (sum / count) as UInt8)
+      }
+    }
+    result = next
+  }
+  ret result
+}
+
+# Add noise of up to +-`amount` to every pixel (a fixed `seed`: the same
+# image every run)
+func grayAddNoise(image: mod GrayImage, amount: view Int, seed: view Int) {
+  var state: Int = seed
+  loop var i: Int = 0, i < image.pixels.length, ++i {
+    state = (state * 1103515245 + 12345) % 2147483648
+    let offset: Int = (state shr 8) % (amount * 2 + 1) - amount
+    var value: Int = (image.pixels.copyAtFallback(index: i, fallback: 0) as Int) + offset
+    if value < 0 {
+      value = 0
+    }
+    if value > 255 {
+      value = 255
+    }
+    image.pixels.set(index: i, value: value as UInt8)
+  }
+}

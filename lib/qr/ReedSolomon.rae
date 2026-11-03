@@ -1,0 +1,275 @@
+# Reed-Solomon error correction over GF(256) for QR codes (ISO/IEC 18004,
+# 7.5.2): the field's polynomial is x^8 + x^4 + x^3 + x^2 + 1 (0x11D) and
+# the generator of degree n has the roots 2^0 .. 2^(n-1). Plain Rae; a
+# block is at most 153 data codewords and 30 error-correction ones, so
+# multiplying bit by bit is fast enough.
+
+# a * b in GF(256)
+func gfMultiply(a: view Int, b: view Int) ret Int {
+  var product: Int = 0
+  var bit: Int = 7
+  loop bit >= 0 {
+    product = (product shl 1) bitxor ((product shr 7) * 285)
+    product = product bitxor (((b shr bit) bitand 1) * a)
+    bit = bit - 1
+  }
+  ret product
+}
+
+# The generator polynomial of `degree`, its coefficients from the highest
+# power down, the leading 1 left out
+func reedSolomonDivisor(degree: view Int) ret List(Int) {
+  var result: List(Int) = {}
+  result.addDefaults(count: degree)
+  result.set(index: degree - 1, value: 1)
+  var root: Int = 1
+  loop var i: Int = 0, i < degree, ++i {
+    loop var j: Int = 0, j < degree, ++j {
+      var value: Int = gfMultiply(a: result.copyAtFallback(index: j, fallback: 0), b: root)
+      if j + 1 < degree {
+        value = value bitxor result.copyAtFallback(index: j + 1, fallback: 0)
+      }
+      result.set(index: j, value: value)
+    }
+    root = gfMultiply(a: root, b: 2)
+  }
+  ret result
+}
+
+# The error-correction codewords of `count` data codewords of `data` from
+# `start`: the remainder of the data polynomial divided by `divisor`
+func reedSolomonRemainder(
+  data: view List(Int)
+  start: view Int
+  count: view Int
+  divisor: view List(Int)
+) ret List(Int) {
+  let degree: Int = divisor.length
+  var result: List(Int) = {}
+  result.addDefaults(count: degree)
+  loop var i: Int = start, i < start + count, ++i {
+    let factor: Int = data.copyAtFallback(index: i, fallback: 0) bitxor result.copyAtFallback(
+      index: 0
+      fallback: 0
+    )
+    loop var j: Int = 0, j + 1 < degree, ++j {
+      result.set(index: j, value: result.copyAtFallback(index: j + 1, fallback: 0))
+    }
+    result.set(index: degree - 1, value: 0)
+    loop var j: Int = 0, j < degree, ++j {
+      result.set(
+        index: j
+        value: result.copyAtFallback(index: j, fallback: 0) bitxor gfMultiply(
+          a: divisor.copyAtFallback(index: j, fallback: 0)
+          b: factor
+        )
+      )
+    }
+  }
+  ret result
+}
+
+# ----- decoding -----------------------------------------------------------------
+#
+# Correcting a received block (ISO 18004 annex B's syndrome decoder): the
+# syndromes S_j = c(2^j), the error locator by Berlekamp-Massey, its roots by
+# Chien search, the error values by Forney's formula. A block of n
+# codewords with e error-correction ones is corrected when at most e / 2
+# codewords are wrong.
+
+# Logs and powers of 2 in GF(256), made once per read
+type GaloisField {
+  # exp[i] = 2^i for i in 0..511 (twice round, so a sum of two logs needs no
+  # wrap); log[v] for v in 1..255
+  exp: List(Int)
+  log: List(Int)
+}
+
+func createGaloisField() ret GaloisField {
+  var exp: List(Int) = {}
+  exp.addDefaults(count: 512)
+  var log: List(Int) = {}
+  log.addDefaults(count: 256)
+  var value: Int = 1
+  loop var i: Int = 0, i < 255, ++i {
+    exp.set(index: i, value: value)
+    exp.set(index: i + 255, value: value)
+    log.set(index: value, value: i)
+    value = value shl 1
+    if value >= 256 {
+      value = value bitxor 285
+    }
+  }
+  exp.set(index: 510, value: exp.copyAtFallback(index: 0, fallback: 1))
+  exp.set(index: 511, value: exp.copyAtFallback(index: 1, fallback: 2))
+  ret GaloisField { exp: own exp, log: own log }
+}
+
+func gfMul(field: view GaloisField, a: view Int, b: view Int) ret Int {
+  if a is 0 or b is 0 {
+    ret 0
+  }
+  ret field.exp.copyAtFallback(
+    index: field.log.copyAtFallback(index: a, fallback: 0) + field.log.copyAtFallback(
+      index: b
+      fallback: 0
+    )
+    fallback: 0
+  )
+}
+
+func gfDiv(field: view GaloisField, a: view Int, b: view Int) ret Int {
+  if a is 0 or b is 0 {
+    ret 0
+  }
+  ret field.exp.copyAtFallback(
+    index: field.log.copyAtFallback(index: a, fallback: 0) + 255 - field.log.copyAtFallback(
+      index: b
+      fallback: 0
+    )
+    fallback: 0
+  )
+}
+
+# 2^power (power may be negative)
+func gfPow2(field: view GaloisField, power: view Int) ret Int {
+  var p: Int = power % 255
+  if p < 0 {
+    p = p + 255
+  }
+  ret field.exp.copyAtFallback(index: p, fallback: 1)
+}
+
+# The polynomial (lowest power first) at x
+func gfEval(field: view GaloisField, poly: view List(Int), x: view Int) ret Int {
+  var result: Int = 0
+  var i: Int = poly.length - 1
+  loop i >= 0 {
+    result = gfMul(field: field, a: result, b: x) bitxor poly.copyAtFallback(index: i, fallback: 0)
+    i = i - 1
+  }
+  ret result
+}
+
+# Correct `block` in place (its codewords highest power first, the last
+# `eccCount` the error correction): how many codewords were wrong, or -1 when
+# there are too many to correct
+func reedSolomonCorrect(field: view GaloisField, block: mod List(Int), eccCount: view Int) ret Int {
+  let n: Int = block.length
+  var syndromes: List(Int) = {}
+  var anyError: Bool = false
+  loop var j: Int = 0, j < eccCount, ++j {
+    let x: Int = gfPow2(field: field, power: j)
+    var value: Int = 0
+    loop let codeword: Int in block {
+      value = gfMul(field: field, a: value, b: x) bitxor codeword
+    }
+    syndromes.add(value: value)
+    if value is not 0 {
+      anyError = true
+    }
+  }
+  if not anyError {
+    ret 0
+  }
+  # Berlekamp-Massey: the error locator (lowest power first)
+  var locator: List(Int) = { 1 }
+  var previous: List(Int) = { 1 }
+  var length: Int = 0
+  var shift: Int = 1
+  var previousDiscrepancy: Int = 1
+  loop var step: Int = 0, step < eccCount, ++step {
+    var discrepancy: Int = syndromes.copyAtFallback(index: step, fallback: 0)
+    loop var i: Int = 1, i <= length, ++i {
+      discrepancy = discrepancy bitxor gfMul(
+        field: field
+        a: locator.copyAtFallback(index: i, fallback: 0)
+        b: syndromes.copyAtFallback(index: step - i, fallback: 0)
+      )
+    }
+    if discrepancy is 0 {
+      shift = shift + 1
+    } else {
+      let factor: Int = gfDiv(field: field, a: discrepancy, b: previousDiscrepancy)
+      let before: List(Int) = locator
+      loop locator.length < previous.length + shift {
+        locator.add(value: 0)
+      }
+      loop var i: Int = 0, i < previous.length, ++i {
+        locator.set(
+          index: i + shift
+          value: locator.copyAtFallback(index: i + shift, fallback: 0) bitxor gfMul(
+            field: field
+            a: factor
+            b: previous.copyAtFallback(index: i, fallback: 0)
+          )
+        )
+      }
+      if 2 * length <= step {
+        length = step + 1 - length
+        previous = before
+        previousDiscrepancy = discrepancy
+        shift = 1
+      } else {
+        shift = shift + 1
+      }
+    }
+  }
+  loop locator.length > length + 1 {
+    locator.removeLast()
+  }
+  if length * 2 > eccCount {
+    ret -1
+  }
+  # Chien search: an error at index i (power p = n - 1 - i) when
+  # locator(2^-p) is 0
+  var positions: List(Int) = {}
+  loop var i: Int = 0, i < n, ++i {
+    let power: Int = n - 1 - i
+    if gfEval(field: field, poly: locator, x: gfPow2(field: field, power: -power)) is 0 {
+      positions.add(value: i)
+    }
+  }
+  if positions.length is not length {
+    ret -1
+  }
+  # Forney: omega = S(x) * locator(x) mod x^eccCount; the derivative of
+  # the locator keeps its odd terms
+  var omega: List(Int) = {}
+  omega.addDefaults(count: eccCount)
+  loop var i: Int = 0, i < eccCount, ++i {
+    loop var k: Int = 0, k <= i and k < locator.length, ++k {
+      omega.set(
+        index: i
+        value: omega.copyAtFallback(index: i, fallback: 0) bitxor gfMul(
+          field: field
+          a: syndromes.copyAtFallback(index: i - k, fallback: 0)
+          b: locator.copyAtFallback(index: k, fallback: 0)
+        )
+      )
+    }
+  }
+  var derivative: List(Int) = {}
+  loop var i: Int = 1, i < locator.length, ++i {
+    if i % 2 is 1 {
+      derivative.add(value: locator.copyAtFallback(index: i, fallback: 0))
+    } else {
+      derivative.add(value: 0)
+    }
+  }
+  loop let index: Int in positions {
+    let power: Int = n - 1 - index
+    let inverse: Int = gfPow2(field: field, power: -power)
+    let denominator: Int = gfEval(field: field, poly: derivative, x: inverse)
+    if denominator is 0 {
+      ret -1
+    }
+    let magnitude: Int = gfMul(
+      field: field
+      a: gfPow2(field: field, power: power)
+      b: gfDiv(field: field, a: gfEval(field: field, poly: omega, x: inverse), b: denominator)
+    )
+    block.set(index: index, value: block.copyAtFallback(index: index, fallback: 0) bitxor magnitude)
+  }
+  ret positions.length
+}

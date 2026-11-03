@@ -63,6 +63,8 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
 | crypto | SHA-1, 16 MB | C 77 ms, CommonCrypto 7 ms | CommonCrypto on Apple (0.1.226) | platform path |
 | text | base64 encode / decode, 1 MB, best of 20, reused buffers (us) | plain C 442 / 452 | 469 / 498 (0.1.243: 1 730 / 1 480) | 1.06x / 1.1x (0.1.245) |
 | crypto | portable SHA-1 (the non-Apple path), 16 MB | plain C 77 ms | 84 ms (was 96) | 1.09x (0.1.244) |
+| crypto | ChaCha20-Poly1305 seal + open, 1200-byte packet | Monocypher 6 us | Rae 13 us | Monocypher in every build (0.2.255; Rae is the reference, case 1285) |
+| crypto | X25519 | Monocypher 0.07 ms | Rae 1.3 ms | Monocypher in every build (0.2.255) |
 | net | ByteBuffer.appendText, 1.6 KB | memcpy | 22 ns (was 1 083) | memcpy (0.1.244) |
 
 - **toJson was the one regression, and it was not Rae:** the generated writer
@@ -107,6 +109,7 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
 | file(s) | reason |
 |---|---|
 | `lodepng.{c,h}`, `stb_image.h` | vendored libraries, used as libraries (a Rae PNG path exists separately in `lib/Png` / `lib/compress`) |
+| `monocypher.{c,h}` + the three `rae_ext_Crypto_*` shims in `runtime_crypto_platform.c` | vendored library (CC0), the faster ChaCha20-Poly1305 and X25519 behind `lib/crypto` in every build, native and WASM; the Rae code stays as the reference checked against it (`compiler/tests/cases/1285_fast_crypto_matches_reference`) |
 | `runtime_core_memory.c` | the crash handler (signals, alternate stacks), `malloc` size queries, the memory-statistics counters the generated code updates: platform calls and compiler runtime ABI |
 | `runtime_strings_core.c` | the `rae_String` pool and allocation the generated code calls on every string; interpolation's variadic entry point |
 | `runtime_buffers_math.c` (buffers part) | `Buffer` alloc/free/get/set and the debug bounds records, the generated code's storage primitive |

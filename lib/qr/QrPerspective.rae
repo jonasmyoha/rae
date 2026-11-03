@@ -1,0 +1,133 @@
+# The perspective map between a QR code's module grid and an image
+# (lib/qr/QrReader): a homography, x' = (a u + b v + c) / (g u + h v + 1)
+# and y' = (d u + e v + f) / (g u + h v + 1), from four point pairs. The
+# reader maps module centers into the image with it; the test images are
+# drawn with its inverse.
+import Math
+
+type QrPoint {
+  x: Float
+  y: Float
+}
+
+type Homography {
+  a: Float
+  b: Float
+  c: Float
+  d: Float
+  e: Float
+  f: Float
+  g: Float
+  h: Float
+}
+
+func qrPoint(x: view Float, y: view Float) ret QrPoint {
+  ret QrPoint { x: x, y: y }
+}
+
+func pointDistance(first: view QrPoint, second: view QrPoint) ret Float {
+  let dx: Float = first.x - second.x
+  let dy: Float = first.y - second.y
+  ret Math.sqrt(x: dx * dx + dy * dy)
+}
+
+func homographyApply(homography: view Homography, point: view QrPoint) ret QrPoint {
+  let w: Float = homography.g * point.x + homography.h * point.y + 1.0
+  ret QrPoint {
+    x: (homography.a * point.x + homography.b * point.y + homography.c) / w
+    y: (homography.d * point.x + homography.e * point.y + homography.f) / w
+  }
+}
+
+# The homography taking each of `from` to the matching one of `to` (four
+# each): none when the points are degenerate (three on a line)
+func homographyFrom(from: view List(QrPoint), to: view List(QrPoint)) ret opt Homography {
+  # Eight equations in a..h, as an 8 x 9 augmented matrix
+  var matrix: List(Float) = {}
+  matrix.addDefaults(count: 72)
+  loop var i: Int = 0, i < 4, ++i {
+    if let source: view QrPoint = from.viewAt(index: i) {
+      if let target: view QrPoint = to.viewAt(index: i) {
+        let row: Int = i * 2 * 9
+        matrix.set(index: row + 0, value: source.x)
+        matrix.set(index: row + 1, value: source.y)
+        matrix.set(index: row + 2, value: 1.0)
+        matrix.set(index: row + 6, value: -source.x * target.x)
+        matrix.set(index: row + 7, value: -source.y * target.x)
+        matrix.set(index: row + 8, value: target.x)
+        let next: Int = row + 9
+        matrix.set(index: next + 3, value: source.x)
+        matrix.set(index: next + 4, value: source.y)
+        matrix.set(index: next + 5, value: 1.0)
+        matrix.set(index: next + 6, value: -source.x * target.y)
+        matrix.set(index: next + 7, value: -source.y * target.y)
+        matrix.set(index: next + 8, value: target.y)
+      }
+    }
+  }
+  # Gaussian elimination with partial pivoting
+  loop var column: Int = 0, column < 8, ++column {
+    var pivot: Int = column
+    var best: Float = Math.abs(
+      value: matrix.copyAtFallback(index: column * 9 + column, fallback: 0.0)
+    )
+    loop var row: Int = column + 1, row < 8, ++row {
+      let value: Float = Math.abs(
+        value: matrix.copyAtFallback(index: row * 9 + column, fallback: 0.0)
+      )
+      if value > best {
+        best = value
+        pivot = row
+      }
+    }
+    if best < 0.000000001 {
+      ret none
+    }
+    if pivot is not column {
+      loop var k: Int = 0, k < 9, ++k {
+        let swap: Float = matrix.copyAtFallback(index: column * 9 + k, fallback: 0.0)
+        matrix.set(
+          index: column * 9 + k
+          value: matrix.copyAtFallback(index: pivot * 9 + k, fallback: 0.0)
+        )
+        matrix.set(index: pivot * 9 + k, value: swap)
+      }
+    }
+    let diagonal: Float = matrix.copyAtFallback(index: column * 9 + column, fallback: 1.0)
+    loop var row: Int = 0, row < 8, ++row {
+      if row is not column {
+        let factor: Float = matrix.copyAtFallback(index: row * 9 + column, fallback: 0.0) / diagonal
+        if factor is not 0.0 {
+          loop var k: Int = column, k < 9, ++k {
+            matrix.set(
+              index: row * 9 + k
+              value: matrix.copyAtFallback(index: row * 9 + k, fallback: 0.0) - factor * matrix.copyAtFallback(
+                index: column * 9 + k
+                fallback: 0.0
+              )
+            )
+          }
+        }
+      }
+    }
+  }
+  var solution: List(Float) = {}
+  loop var row: Int = 0, row < 8, ++row {
+    solution.add(
+      value: matrix.copyAtFallback(index: row * 9 + 8, fallback: 0.0) / matrix.copyAtFallback(
+        index: row * 9 + row
+        fallback: 1.0
+      )
+    )
+  }
+  ret Homography {
+    a: solution.copyAtFallback(index: 0, fallback: 0.0)
+    b: solution.copyAtFallback(index: 1, fallback: 0.0)
+    c: solution.copyAtFallback(index: 2, fallback: 0.0)
+    d: solution.copyAtFallback(index: 3, fallback: 0.0)
+    e: solution.copyAtFallback(index: 4, fallback: 0.0)
+    f: solution.copyAtFallback(index: 5, fallback: 0.0)
+    g: solution.copyAtFallback(index: 6, fallback: 0.0)
+    h: solution.copyAtFallback(index: 7, fallback: 0.0)
+  }
+}

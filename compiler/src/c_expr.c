@@ -593,6 +593,30 @@ static void emit_string_eq_operand(CFuncContext* ctx, const AstExpr* operand, FI
     if (reference_call) fprintf(out, ").ptr)");
 }
 
+/* The non-generic function `fn` of the module whose import path ends in
+ * `qualifier` (`Vec3` for module Vec3, `WalkerKnockdown` for
+ * app3d/WalkerKnockdown), the one taking as many arguments as `args` when
+ * there are several; NULL for none. */
+static const AstDecl* module_qualified_function(CFuncContext* ctx, Str qualifier, Str fn, const AstCallArg* args) {
+    size_t arg_count = 0;
+    for (const AstCallArg* a = args; a; a = a->next) arg_count++;
+    const AstDecl* first = NULL;
+    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+        const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, fn) || !d->module_name) continue;
+        if (d->as.func_decl.generic_params) continue;
+        const char* path = d->module_name;
+        const char* slash = strrchr(path, '/');
+        const char* last = slash ? slash + 1 : path;
+        if (strlen(last) != qualifier.len || memcmp(last, qualifier.data, qualifier.len) != 0) continue;
+        size_t param_count = 0;
+        for (const AstParam* p = d->as.func_decl.params; p; p = p->next) param_count++;
+        if (param_count == arg_count) return d;
+        if (!first) first = d;
+    }
+    return first;
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   /* A wait a resumable twin hoisted before the statement: its result */
@@ -880,6 +904,56 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
               fprintf(out, ")))");
               break;
+          }
+          /* A List, or a struct that holds a String / List / other heap
+           * field: `is` is deep value equality, the same comparison as
+           * `equals(a:, b:)` (rae_value_equals_expr, the generated
+           * rae_eq_<T>_). C has no `==` for structs, so these used to reach
+           * the C compiler as `a == b` and fail to build. Each operand is
+           * evaluated once into a local; the comparison only reads them. */
+          const AstTypeRef* deep_tr = ltr;
+          if (deep_tr && ctx->generic_params && ctx->generic_args)
+              deep_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, deep_tr);
+          if (deep_tr && !deep_tr->is_opt) {
+              Str dbase = get_base_type_name(deep_tr);
+              bool is_list = str_eq_cstr(dbase, "List") && deep_tr->generic_args;
+              const AstDecl* dtd = (dbase.len > 0 && !is_list) ? find_type_decl(ctx, ctx->module, dbase) : NULL;
+              bool is_struct = dtd && dtd->kind == AST_DECL_TYPE
+                  && !has_property(dtd->as.type_decl.properties, "c_struct")
+                  && !dtd->as.type_decl.generic_params && !deep_tr->generic_args;
+              if (is_list || is_struct) {
+                  AstTypeRef plain = *deep_tr;
+                  plain.is_view = false; plain.is_mod = false; plain.is_own = false; plain.is_copy = false;
+                  plain.next = NULL;
+                  int eq_id = ctx->temp_counter++;
+                  char a_name[48], b_name[48];
+                  snprintf(a_name, sizeof a_name, "__rae_eq_a%d", eq_id);
+                  snprintf(b_name, sizeof b_name, "__rae_eq_b%d", eq_id);
+                  fprintf(out, "((bool)(%s(__extension__ ({ ", expr->as.binary.op == AST_BIN_NEQ ? "!" : "");
+                  emit_type_ref_as_c_type(ctx, &plain, out, false);
+                  /* the first local's type is written above, the second's
+                   * at the end of the first iteration below */
+                  /* An operand that is a fresh owned value (a call's
+                   * result) is held in a statement temporary, freed after
+                   * the statement like a borrowed argument's (#884). */
+                  const AstExpr* operands[2] = { expr->as.binary.lhs, expr->as.binary.rhs };
+                  const char* names[2] = { a_name, b_name };
+                  for (int side = 0; side < 2; side++) {
+                      fprintf(out, " %s = (", names[side]);
+                      int held = -1;
+                      if (c_stmt_temp_value_owns(ctx, operands[side])
+                          && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &plain, 0))
+                          held = register_stmt_temp(ctx, &plain, true);
+                      if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+                      emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                      if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
+                      fprintf(out, "); ");
+                      if (side == 0) emit_type_ref_as_c_type(ctx, &plain, out, false);
+                  }
+                  rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &plain, a_name, b_name, out);
+                  fprintf(out, "; }))))");
+                  break;
+              }
           }
       }
       // String concatenation: `lhs + rhs` lowers to a direct runtime
@@ -1454,6 +1528,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, expr->as.method_call.method_name)) {
                         fn_exists = true; break;
                     }
+                }
+            }
+            // A MODULE-qualified call whose module also names a type (module
+            // Vec3 defines type Vec3): `Vec3.create(x:, y:, z:)`. Sema
+            // rewrites it into a linked call, but a generic function's body
+            // reaches here as written, and the type reading below would pass
+            // `Vec3` as a type argument to a `create(T: type, ...)` that does
+            // not exist. A function of that name in a module whose last path
+            // part is the qualifier wins (the arity picks among overloads).
+            if (!obj_has_value && obj_name.len > 0) {
+                const AstDecl* qualified = module_qualified_function(
+                    ctx, obj_name, expr->as.method_call.method_name, expr->as.method_call.args);
+                if (qualified) {
+                    AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = (AstDecl*)qualified };
+                    call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
+                    call.as.call.callee->kind = AST_EXPR_IDENT;
+                    call.as.call.callee->as.ident = expr->as.method_call.method_name;
+                    call.as.call.args = expr->as.method_call.args;
+                    call.as.call.generic_args = expr->as.method_call.generic_args;
+                    emit_call_expr(ctx, &call, out); break;
                 }
             }
             // Type-on-LHS dot-call (new generic-call syntax): `Type.fn(...)`

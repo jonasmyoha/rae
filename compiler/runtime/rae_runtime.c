@@ -54,7 +54,11 @@
 #define RAE_UNLOCK(m) ((void)(m))
 #endif
 
-#if defined(__APPLE__) || defined(__linux__) || defined(__GLIBC__)
+/* Android's libc has backtrace() only from API 33; below that the crash
+ * handler prints no frames (logcat's tombstone has them) */
+#if defined(__APPLE__) || defined(__GLIBC__) || \
+    (defined(__linux__) && !defined(__ANDROID__)) || \
+    (defined(__ANDROID__) && __ANDROID_API__ >= 33)
 #include <execinfo.h>
 #define RAE_HAVE_BACKTRACE 1
 #endif
@@ -72,6 +76,7 @@
 #include "runtime_filesystem.c"
 #include "runtime_file_notify.c"
 #include "runtime_net.c"
+#include "runtime_web_socket.c"
 #include "runtime_crypto_platform.c"
 #include "runtime_crypto_monocypher.c"
 #include "runtime_buffers_math.c"

@@ -1,0 +1,200 @@
+# Headless walkers for a networked walker session (lib/app3d/walkerNetSystem,
+# docs/walker-net.md): no window and no physics, a made-up walk.
+#
+#   walkerBot host --relay-port P [--seconds S] [--steady N]
+#       opens a session, prints "token T", walks its own walker, and at the
+#       end (past S while players are still here) prints how many it saw
+#   walkerBot bot --relay-port P --token T [--start-after-ms D]
+#       [--leave-after-ms L] [--seconds S] [--name N]
+#       joins after D ms, walks in a circle, jumps and falls now and then,
+#       leaves after L ms (or at the end), and prints what it saw: the
+#       desync checks done and failed and the most walkers seen at once
+#
+# The walk: a circle of 4-12 m around a point of its own, a jump every 3 s
+# (airborne for 0.6 s, a parabola), a fall every 15 s (knocked down for 1 s).
+open net/Tcp
+open net/Udp
+open Sys
+open String
+open Vec3
+open Math
+open ecs/Entity
+open ecs/ComponentTable
+open net/replication/ReplicationHost
+open app3d/walkerNetSystem/WalkerNetSystem
+
+# The runtime's live allocation counts (0 unless RAE_MEM_STATS=1)
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+func argumentAfter(name: view String, fallback: view String) ret String {
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret argAt(index: i + 1)
+    }
+  }
+  ret fallback
+}
+
+# Where the host's own walker is (owner -1), once this side has it: the bots
+# walk round it, so a window that hosts sees them
+func hostWalkerPosition(net: view WalkerNet, out: mod Vec3) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: net.world.replicated), ++i {
+    let entityId: EntityId = componentEntityAt(this: net.world.replicated, i: i)
+    if componentView(this: net.world.replicated, entityId: entityId).owner is -1 and componentHas(
+      this: net.world.poses
+      entityId: entityId
+    ) {
+      out = componentView(this: net.world.poses, entityId: entityId).position
+      ret true
+    }
+  }
+  ret false
+}
+
+# The bot's pose `timeMs` into its walk round `home`; `seed` places and
+# times it
+func botPose(seed: view Int, timeMs: view Int, home: view Vec3) ret WalkerPose {
+  let seconds: Float = (timeMs as Float) / 1000.0
+  let radius: Float = 4.0 + (((seed * 7) % 9) as Float)
+  let centerX: Float = home.x + (((seed * 13) % 30) as Float) - 15.0
+  let centerY: Float = home.y + (((seed * 29) % 30) as Float) - 15.0
+  let angle: Float = seconds * 0.8 + (seed as Float)
+  let jumpMs: Int = (timeMs + seed * 311) % 3000
+  let fallMs: Int = (timeMs + seed * 977) % 15000
+  # Z up, like the walker app's ground
+  var pose: WalkerPose = walkerPoseAt(
+    position: Vec3 { x: centerX + radius * cos(angle), y: centerY + radius * sin(angle), z: 0.0 }
+  )
+  pose.heading = angle
+  pose.speed = radius * 0.8
+  pose.clip = 1
+  if jumpMs < 600 {
+    let t: Float = (jumpMs as Float) / 600.0
+    pose.position.z = home.z + 4.0 * 0.9 * t * (1.0 - t)
+    pose.airborne = true
+    pose.clip = 2
+  }
+  if fallMs < 1000 {
+    pose.knockedDown = true
+    pose.speed = 0.0
+    pose.clip = 3
+  }
+  ret pose
+}
+
+func settingsFor(mode: view WalkerNetMode) ret WalkerNetSettings {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  settings.mode = mode
+  settings.relayPort = argumentAfter(name: "--relay-port", fallback: "7777").toInt()
+  settings.token = argumentAfter(name: "--token", fallback: "")
+  ret settings
+}
+
+func runHost() ret Int {
+  let origin: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "10").toInt()
+  var net: WalkerNet = createWalkerNet(settings: settingsFor(mode: WalkerNetMode.host))
+  let startMs: Int = nowMs()
+  let started: Bool = walkerNetStart(
+    net: net
+    localPose: botPose(seed: 0, timeMs: 0, home: origin)
+    nowMs: 0
+  )
+  var printedToken: Bool = false
+  # A quiet point: exactly `--steady N` other walkers (the windows that stay
+  # all the run; 0 by default) for a second, after more were here. Its
+  # live allocation counts are printed ("quiet ..."): the soak script checks
+  # the last against the first, so the host's memory does not grow with
+  # every player that came and went.
+  let steady: Int = argumentAfter(name: "--steady", fallback: "0").toInt()
+  var lastBusyMs: Int = -1
+  var quietLogged: Bool = true
+  # Past --seconds it stays while players are still here (at most 5 minutes
+  # more), so windows that joined late are not left without a host
+  loop nowMs() - startMs < seconds * 1000 or (walkerNetRemoteCount(net: net) > 0 and nowMs() - startMs < seconds * 1000 + 300000) {
+    let ready: Bool = socketWaitReadable(socketId: walkerNetSocketId(net: net), timeoutMs: 5)
+    let now: Int = nowMs() - startMs
+    walkerNetFrame(net: net, localPose: botPose(seed: 0, timeMs: now, home: origin), nowMs: now)
+    if walkerNetRemoteCount(net: net) > steady or net.seats.length > steady {
+      lastBusyMs = now
+      quietLogged = false
+    } else if not quietLogged and now - lastBusyMs > 1000 and walkerNetRemoteCount(net: net) is steady and net.seats.length is steady {
+      var strings: Int = 0
+      var buffers: Int = 0
+      unsafe {
+        strings = rae_ext_rae_mem_stats_outstanding()
+        buffers = rae_ext_rae_mem_stats_buf_outstanding()
+      }
+      log("quiet {now} ms: strings {strings} buffers {buffers} walkers {steady}")
+      quietLogged = true
+    }
+    if not printedToken and walkerNetToken(net: net).length() > 0 {
+      log("token {walkerNetToken(net: net)}")
+      printedToken = true
+    }
+  }
+  let now: Int = nowMs() - startMs
+  log(
+    "host: at most {net.mostRemote} other walkers, {walkerNetRemoteCount(net: net)} at the end, {net.replication.tick + 1} snapshots"
+  )
+  walkerNetLeave(net: net, nowMs: now)
+  ret 0
+}
+
+func runBot() ret Int {
+  let name: String = argumentAfter(name: "--name", fallback: "bot")
+  let seed: Int = argumentAfter(name: "--seed", fallback: "1").toInt()
+  let startAfterMs: Int = argumentAfter(name: "--start-after-ms", fallback: "0").toInt()
+  let leaveAfterMs: Int = argumentAfter(name: "--leave-after-ms", fallback: "-1").toInt()
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "10").toInt()
+  sleep(ms: startAfterMs)
+  var net: WalkerNet = createWalkerNet(settings: settingsFor(mode: WalkerNetMode.join))
+  let startMs: Int = nowMs()
+  var home: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+  var homeFound: Bool = false
+  if not walkerNetStart(net: net, localPose: botPose(seed: seed, timeMs: 0, home: home), nowMs: 0) {
+    log("{name}: not a token")
+    ret 1
+  }
+  var ending: String = "stayed"
+  loop nowMs() - startMs < seconds * 1000 {
+    let ready: Bool = socketWaitReadable(socketId: walkerNetSocketId(net: net), timeoutMs: 5)
+    let now: Int = nowMs() - startMs
+    if not homeFound {
+      homeFound = hostWalkerPosition(net: net, out: home)
+    }
+    walkerNetFrame(net: net, localPose: botPose(seed: seed, timeMs: now, home: home), nowMs: now)
+    if net.relayPlayer.sessionClosed {
+      ending = "session closed"
+      break
+    }
+    if leaveAfterMs >= 0 and now >= leaveAfterMs {
+      ending = "left"
+      break
+    }
+  }
+  let now: Int = nowMs() - startMs
+  walkerNetLeave(net: net, nowMs: now)
+  var playing: String = "never playing"
+  if net.playingAtMs >= 0 {
+    playing = "playing after {net.playingAtMs} ms"
+  }
+  log(
+    "{name}: {playing}, checks {net.checks}, desyncs {net.desyncs}, at most {net.mostRemote} other walkers, {ending}"
+  )
+  ret 0
+}
+
+func main() ret Int {
+  let mode: String = argAt(index: 0)
+  if mode is "host" {
+    ret runHost()
+  }
+  if mode is "bot" {
+    ret runBot()
+  }
+  log("usage: walkerBot host|bot --relay-port P [--token T] ...")
+  ret 2
+}

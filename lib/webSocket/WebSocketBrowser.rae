@@ -1,0 +1,119 @@
+# The browser's own WebSocket, for the WASM build (docs/relay.md,
+# "WebSocket"): a page has no TCP socket, so lib/webSocket/WebSocketClient
+# uses this there instead. The page's WebSocket does the connect, the
+# handshake and the framing; compiler/runtime/runtime_web_socket.c binds
+# Emscripten's emscripten/websocket.h, one call each, and queues the binary
+# messages its callback receives for `browserWebSocketTake`.
+#
+# Elsewhere (native) the same names are Rae that answer "no browser" (-1),
+# so the callers need no `when` of their own around these calls.
+const hasBrowserWebSocket: Bool = Target.os is Os.web
+
+# browserWebSocketState answers
+const browserWebSocketConnecting: Int = 0
+
+const browserWebSocketOpen: Int = 1
+
+const browserWebSocketClosed: Int = 2
+
+when hasBrowserWebSocket {
+  func nativeBrowserOpen(url: String) unsafe extern("rae_ext_WebSocketWeb_open") ret Int
+
+  func nativeBrowserState(handle: Int) unsafe extern("rae_ext_WebSocketWeb_state") ret Int
+
+  func nativeBrowserSend(
+    handle: Int
+    buffer: Buffer(UInt8)
+    offset: Int
+    count: Int
+  ) unsafe extern("rae_ext_WebSocketWeb_send") ret Int
+
+  func nativeBrowserNextLength(handle: Int) unsafe extern("rae_ext_WebSocketWeb_nextLength") ret Int
+
+  func nativeBrowserTake(
+    handle: Int
+    out: Buffer(UInt8)
+  ) unsafe extern("rae_ext_WebSocketWeb_take") ret Int
+
+  func nativeBrowserClose(handle: Int) unsafe extern("rae_ext_WebSocketWeb_close")
+
+  # Open a WebSocket to `url` (ws://host:port/path): a handle, or -1
+  func browserWebSocketOpenUrl(url: view String) ret Int {
+    unsafe {
+      ret nativeBrowserOpen(url: url)
+    }
+  }
+
+  # browserWebSocketConnecting / Open / Closed, or -1 for no such socket
+  func browserWebSocketState(handle: view Int) ret Int {
+    unsafe {
+      ret nativeBrowserState(handle: handle)
+    }
+  }
+
+  # Send `count` bytes of `bytes` from `start` as one binary message
+  func browserWebSocketSend(
+    handle: view Int
+    bytes: view List(UInt8)
+    start: view Int
+    count: view Int
+  ) ret Bool {
+    if start < 0 or count < 0 or start + count > bytes.length {
+      ret false
+    }
+    unsafe {
+      ret nativeBrowserSend(
+        handle: handle
+        buffer: bytes.data
+        offset: start
+        count: count
+      ) is 0
+    }
+  }
+
+  # The next received binary message into `out`: false when none is waiting
+  func browserWebSocketTake(handle: view Int, out: mod List(UInt8)) ret Bool {
+    var length: Int = -1
+    unsafe {
+      length = nativeBrowserNextLength(handle: handle)
+    }
+    if length < 0 {
+      ret false
+    }
+    out.clear()
+    out.addDefaults(count: length)
+    unsafe {
+      ret nativeBrowserTake(handle: handle, out: out.data) is length
+    }
+  }
+
+  func browserWebSocketClose(handle: view Int) {
+    unsafe {
+      nativeBrowserClose(handle: handle)
+    }
+  }
+} else {
+  func browserWebSocketOpenUrl(url: view String) ret Int {
+    ret -1
+  }
+
+  func browserWebSocketState(handle: view Int) ret Int {
+    ret -1
+  }
+
+  func browserWebSocketSend(
+    handle: view Int
+    bytes: view List(UInt8)
+    start: view Int
+    count: view Int
+  ) ret Bool {
+    ret false
+  }
+
+  func browserWebSocketTake(handle: view Int, out: mod List(UInt8)) ret Bool {
+    ret false
+  }
+
+  func browserWebSocketClose(handle: view Int) {
+  }
+}

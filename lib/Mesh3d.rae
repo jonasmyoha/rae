@@ -386,7 +386,9 @@ func makeFbmTerrain(
 #
 # Winding matches makePlane's convention per face, checked against the
 # outward normal — see the note in makeSphere for what an inverted winding
-# costs.
+# costs. A picture on the box reads the right way round on every face, not
+# mirrored (the +X and +Y faces' U runs the other way to the others' for
+# that; a QR code on a box scans from every side, example 147).
 func makeBox(size: view Float) pub ret MeshData {
   var verts: List(Float) = List.create(Float, cap: 24 * 8)
   var indices: List(Int) = List.create(Int, cap: 36)
@@ -403,7 +405,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 1.0
     ny: 0.0
     nz: 0.0
-    u: 0.0
+    u: 1.0
     value: 0.0
   )
   pushVert(
@@ -414,7 +416,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 1.0
     ny: 0.0
     nz: 0.0
-    u: 1.0
+    u: 0.0
     value: 0.0
   )
   pushVert(
@@ -425,7 +427,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 1.0
     ny: 0.0
     nz: 0.0
-    u: 1.0
+    u: 0.0
     value: 1.0
   )
   pushVert(
@@ -436,7 +438,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 1.0
     ny: 0.0
     nz: 0.0
-    u: 0.0
+    u: 1.0
     value: 1.0
   )
   # -X
@@ -493,7 +495,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 0.0
     ny: 1.0
     nz: 0.0
-    u: 0.0
+    u: 1.0
     value: 0.0
   )
   pushVert(
@@ -504,7 +506,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 0.0
     ny: 1.0
     nz: 0.0
-    u: 1.0
+    u: 0.0
     value: 0.0
   )
   pushVert(
@@ -515,7 +517,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 0.0
     ny: 1.0
     nz: 0.0
-    u: 1.0
+    u: 0.0
     value: 1.0
   )
   pushVert(
@@ -526,7 +528,7 @@ func makeBox(size: view Float) pub ret MeshData {
     nx: 0.0
     ny: 1.0
     nz: 0.0
-    u: 0.0
+    u: 1.0
     value: 1.0
   )
   # -Y

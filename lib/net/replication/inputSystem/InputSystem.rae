@@ -1,0 +1,86 @@
+# The host's input system (lib/net/replication, docs/replication.md): takes a
+# player's replication messages, its snapshot acknowledgment and its inputs.
+# Hand it every message that arrived on that player's connection
+# (`replicaTakeMessage` answers false for the app's own messages, kind 16
+# and up), then take the inputs in order with `replicaNextInput`.
+#
+# An input message: kind (1), acknowledged snapshot tick (4; 4294967295 for
+# none), input count (1), then per input: its tick (4), value count
+# (varint), values (signed varints). Each message repeats the player's last
+# few inputs, so a lost message loses none; an input older than the newest
+# taken is skipped.
+open net/Wire
+open net/replication/ReplicaValues
+open net/replication/ReplicationHost
+
+func replicaTakeMessage(
+  host: mod ReplicationHost
+  peer: mod ReplicaPeer
+  message: view List(UInt8)
+) ret Bool {
+  if message.length < 1 or readU8(bytes: message, offset: 0) is not replicaMessageInput {
+    ret false
+  }
+  var reader: ByteReader = byteReader(start: 1, end: message.length)
+  let ackTick: Int = readerU32(reader: reader, bytes: message)
+  let count: Int = readerU8(reader: reader, bytes: message)
+  if reader.failed {
+    ret true
+  }
+  # An ack only moves forward, and never past the newest snapshot
+  if ackTick is not 4294967295 and ackTick > peer.ackedTick and ackTick <= host.tick {
+    peer.ackedTick = ackTick
+  }
+  loop var i: Int = 0, i < count, ++i {
+    let tick: Int = readerU32(reader: reader, bytes: message)
+    let valueCount: Int = readerVarint(reader: reader, bytes: message)
+    if reader.failed or valueCount > 1024 {
+      ret true
+    }
+    let keep: Bool = tick > peer.lastInputTick
+    if keep {
+      peer.inputs.add(value: tick)
+      peer.inputs.add(value: valueCount)
+    }
+    loop var v: Int = 0, v < valueCount, ++v {
+      let value: Int = readerSignedVarint(reader: reader, bytes: message)
+      if keep {
+        peer.inputs.add(value: value)
+      }
+    }
+    if reader.failed {
+      ret true
+    }
+    if keep {
+      peer.lastInputTick = tick
+    }
+  }
+  ret true
+}
+
+# The next input the player sent, decoded into `input`: its tick, or -1 when
+# there is none left
+func replicaNextInput(
+  T: type
+  host: view ReplicationHost
+  peer: mod ReplicaPeer
+  input: mod T
+) ret Int {
+  if peer.inputRead >= peer.inputs.length {
+    peer.inputs.clear()
+    peer.inputRead = 0
+    ret -1
+  }
+  let tick: Int = peer.inputs.copyAtFallback(index: peer.inputRead, fallback: -1)
+  let count: Int = peer.inputs.copyAtFallback(index: peer.inputRead + 1, fallback: 0)
+  readReplicaValues(
+    T
+    value: input
+    scale: host.config.floatScale
+    values: peer.inputs
+    start: peer.inputRead + 2
+  )
+  peer.inputRead = peer.inputRead + 2 + count
+  peer.appliedInputTick = tick
+  ret tick
+}

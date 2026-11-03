@@ -1,0 +1,29 @@
+# A call that returns a reference cannot be assigned to a `mod` parameter or
+# a `mod` alias either: `=` copies into the place the alias points at, so it
+# is the same rule as for a value variable (1221). The C compiler used to be
+# the first to notice (`*out = <pointer>`).
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+func copyOut(
+  transforms: view ComponentTable(Transform3D)
+  entityId: view EntityId
+  out: mod Transform3D
+) {
+  out = componentView(this: transforms, entityId: entityId)
+  # The spelled-out copy is fine
+  let source: view Transform3D = componentView(this: transforms, entityId: entityId)
+  out = source
+}
+
+func main() {
+  var transforms: ComponentTable(Transform3D) = ComponentTable.create(Transform3D)
+  let entityId: EntityId = id(v: 1)
+  componentSet(this: transforms, entityId: entityId, data: createTransform3D())
+  var pose: Transform3D = createTransform3D()
+  copyOut(transforms: transforms, entityId: entityId, out: pose)
+  let place: mod Transform3D = pose
+  place = componentView(this: transforms, entityId: entityId)
+  log("{pose.position.x}")
+}

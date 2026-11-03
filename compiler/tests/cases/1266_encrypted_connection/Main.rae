@@ -1,0 +1,295 @@
+# lib/net/Connection with encryption (lib/net/PacketSeal): X25519 keys per
+# connection, every packet after the handshake sealed with
+# ChaCha20-Poly1305 and a 64-bit counter in the nonce. A changed packet and
+# a replayed packet are refused; no two connections share a key; what a
+# relay forwards shows nothing of the messages.
+#
+# Measured cost per packet (Apple M1 Max, release build, 2026-11-03), from
+# the timing loop at the end of main (its numbers are not in the expected
+# output, only a loose bound). With lib/crypto's Rae code, the reference:
+#   seal a full packet (1200 bytes on the wire)        ~6.5 us
+#   open it                                            ~6.5 us
+#   key agreement (X25519 key pair + shared secret)    ~2.5 ms, once per connection
+#   the whole round in the loop (seal, protocol, open) ~12.5 us per packet
+# lib/crypto now runs Monocypher's (case 1285 checks it against the Rae
+# code): ~3 us each way and ~0.07 ms per X25519.
+open net/Wire
+open net/Connection
+open crypto/Sha1
+open net/Tcp
+
+type Pair {
+  client: Connection
+  server: Connection
+  packet: List(UInt8)
+  nowMs: Int
+}
+
+func createPair(encrypted: view Bool) ret Pair {
+  var config: ConnectionConfig = defaultConnectionConfig()
+  config.encrypted = encrypted
+  ret Pair {
+    client: createConnection(config: config)
+    server: createConnection(config: config)
+    packet: List.create(UInt8, cap: 1200)
+    nowMs: 0
+  }
+}
+
+# Every packet each end has, straight to the other (a perfect network)
+func pump(pair: mod Pair) {
+  pair.nowMs = pair.nowMs + 10
+  loop connectionWritePacket(connection: pair.client, packet: pair.packet, nowMs: pair.nowMs) {
+    let taken: Bool = connectionReadPacket(
+      connection: pair.server
+      packet: pair.packet
+      start: 0
+      count: pair.packet.length
+      nowMs: pair.nowMs
+    )
+  }
+  loop connectionWritePacket(connection: pair.server, packet: pair.packet, nowMs: pair.nowMs) {
+    let taken: Bool = connectionReadPacket(
+      connection: pair.client
+      packet: pair.packet
+      start: 0
+      count: pair.packet.length
+      nowMs: pair.nowMs
+    )
+  }
+}
+
+func connectPair(pair: mod Pair, connectionId: view Int) {
+  connectionListen(connection: pair.server, nowMs: 0)
+  connectionConnect(connection: pair.client, connectionId: connectionId, nowMs: 0)
+  loop var i: Int = 0, i < 20 and not connectionIsConnected(connection: pair.client), ++i {
+    pump(pair: pair)
+  }
+  pump(pair: pair)
+}
+
+func textMessage(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+# Whether `needle` appears anywhere in `bytes`
+func contains(bytes: view List(UInt8), needle: view List(UInt8)) ret Bool {
+  loop var start: Int = 0, start + needle.length <= bytes.length, ++start {
+    var same: Bool = true
+    loop var i: Int = 0, i < needle.length and same, ++i {
+      if readU8(bytes: bytes, offset: start + i) is not readU8(bytes: needle, offset: i) {
+        same = false
+      }
+    }
+    if same {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Queue `message` on the client and take the next packet it sends (not
+# delivered): what a relay in the middle would forward
+func capture(pair: mod Pair, message: view List(UInt8), captured: mod List(UInt8)) {
+  let queued: Bool = connectionSendReliable(
+    connection: pair.client
+    bytes: message
+    start: 0
+    count: message.length
+  )
+  pair.nowMs = pair.nowMs + 10
+  let wrote: Bool = connectionWritePacket(
+    connection: pair.client
+    packet: captured
+    nowMs: pair.nowMs
+  )
+}
+
+func deliver(pair: mod Pair, packet: view List(UInt8)) ret Bool {
+  ret connectionReadPacket(
+    connection: pair.server
+    packet: packet
+    start: 0
+    count: packet.length
+    nowMs: pair.nowMs
+  )
+}
+
+func receivedText(pair: mod Pair) ret String {
+  var message: List(UInt8) = List.create(UInt8, cap: 64)
+  if connectionReceive(connection: pair.server, message: message) is MessageChannel.none {
+    ret "(nothing)"
+  }
+  ret textFromBytes(bytes: message, start: 0, count: message.length)
+}
+
+func main() ret Int {
+  var pair: Pair = createPair(encrypted: true)
+  connectPair(pair: pair, connectionId: 1001)
+  log(
+    "connected: {connectionIsConnected(connection: pair.client)} {connectionIsConnected(
+      connection: pair.server
+    )}"
+  )
+  let clientSend: String = hexText(bytes: pair.client.seal.sendKey)
+  let clientReceive: String = hexText(bytes: pair.client.seal.receiveKey)
+  log(
+    "keys agree: {clientSend is hexText(bytes: pair.server.seal.receiveKey) and clientReceive is hexText(
+      bytes: pair.server.seal.sendKey
+    )}, the two directions differ {clientSend is not clientReceive}"
+  )
+
+  # What the relay sees: the message is in the clear only without encryption
+  let marker: List(UInt8) = textMessage(text: "the treasure is under the old oak")
+  var sealed: List(UInt8) = List.create(UInt8, cap: 1200)
+  capture(pair: pair, message: marker, captured: sealed)
+  var plainPair: Pair = createPair(encrypted: false)
+  connectPair(pair: plainPair, connectionId: 1002)
+  var plain: List(UInt8) = List.create(UInt8, cap: 1200)
+  capture(pair: plainPair, message: marker, captured: plain)
+  log(
+    "relay sees the message: encrypted {contains(bytes: sealed, needle: marker)}, unencrypted {contains(
+      bytes: plain
+      needle: marker
+    )}"
+  )
+  log(
+    "sealed packet: {sealed.length} bytes for {plain.length} plain (+24: counter and tag), connection id readable {packetConnectionId(
+      packet: sealed
+      start: 0
+      count: sealed.length
+    ) is 1001}"
+  )
+
+  # A changed packet is refused, in its body or in its clear header
+  var tampered: List(UInt8) = List.create(UInt8, cap: 1200)
+  appendCopy(
+    destination: tampered
+    source: sealed
+    start: 0
+    count: sealed.length
+  )
+  tampered.set(index: 30, value: ((readU8(bytes: tampered, offset: 30)) bitxor 4) as UInt8)
+  let refusedBefore: Int = pair.server.stats.packetsRefused
+  log("changed body taken: {deliver(pair: pair, packet: tampered)}")
+  tampered.clear()
+  appendCopy(
+    destination: tampered
+    source: sealed
+    start: 0
+    count: sealed.length
+  )
+  tampered.set(index: 12, value: ((readU8(bytes: tampered, offset: 12)) bitxor 1) as UInt8)
+  log("changed counter taken: {deliver(pair: pair, packet: tampered)}")
+  tampered.clear()
+  appendCopy(
+    destination: tampered
+    source: sealed
+    start: 0
+    count: sealed.length - 1
+  )
+  log("cut short taken: {deliver(pair: pair, packet: tampered)}")
+  log(
+    "refused counted: {pair.server.stats.packetsRefused - refusedBefore}, nothing delivered: {receivedText(
+      pair: pair
+    )}"
+  )
+
+  # The genuine packet is taken once; the same bytes again are refused
+  log("genuine taken: {deliver(pair: pair, packet: sealed)}, message: {receivedText(pair: pair)}")
+  log("replayed taken: {deliver(pair: pair, packet: sealed)}, message: {receivedText(pair: pair)}")
+  # A packet far older than the replay window is refused too
+  loop var i: Int = 0, i < 300, ++i {
+    let queued: Bool = connectionSendUnreliable(
+      connection: pair.client
+      bytes: marker
+      start: 0
+      count: 4
+    )
+    pump(pair: pair)
+    loop receivedText(pair: pair) is not "(nothing)" {
+    }
+  }
+  log("after 300 more packets, the old one taken: {deliver(pair: pair, packet: sealed)}")
+
+  # Sealed with another connection's keys: refused even with the right id
+  var otherPair: Pair = createPair(encrypted: true)
+  connectPair(pair: otherPair, connectionId: 1001)
+  var foreign: List(UInt8) = List.create(UInt8, cap: 1200)
+  capture(pair: otherPair, message: marker, captured: foreign)
+  log("same id, other keys taken: {deliver(pair: pair, packet: foreign)}")
+  # No two connections share a key, even with the same connection id
+  let otherSend: String = hexText(bytes: otherPair.client.seal.sendKey)
+  let otherReceive: String = hexText(bytes: otherPair.client.seal.receiveKey)
+  log(
+    "two connections share a key: {otherSend is clientSend or otherReceive is clientReceive or otherSend is clientReceive or otherReceive is clientSend}"
+  )
+
+  # A plain packet to an encrypted end is refused
+  log("plain packet to an encrypted end taken: {deliver(pair: pair, packet: plain)}")
+
+  # A connect request whose public key is all zeros (a low-order point) gets
+  # no keys and no connection
+  var lonely: Pair = createPair(encrypted: true)
+  connectionListen(connection: lonely.server, nowMs: 0)
+  var request: List(UInt8) = List.create(UInt8, cap: 64)
+  writeU8(bytes: request, value: 1)
+  writeU32(bytes: request, value: 77)
+  writeU32(bytes: request, value: 1380009265)
+  loop var i: Int = 0, i < 32, ++i {
+    writeU8(bytes: request, value: 0)
+  }
+  log("zero public key taken: {connectionReadPacket(
+    connection: lonely.server
+    packet: request
+    start: 0
+    count: request.length
+    nowMs: 0
+  )}, server {lonely.server.state}")
+
+  # Still talking after all that
+  let hello: List(UInt8) = textMessage(text: "still here")
+  let queued: Bool = connectionSendReliable(
+    connection: pair.client
+    bytes: hello
+    start: 0
+    count: hello.length
+  )
+  pump(pair: pair)
+  var latest: String = ""
+  loop {
+    let text: String = receivedText(pair: pair)
+    if text is "(nothing)" {
+      break
+    }
+    latest = text
+  }
+  log("after the attacks: {latest}")
+
+  # The cost of sealing and opening a full packet (numbers in the header)
+  var timing: Pair = createPair(encrypted: true)
+  connectPair(pair: timing, connectionId: 5)
+  var big: List(UInt8) = List.create(UInt8, cap: 1100)
+  big.addDefaults(count: 1000)
+  let begin: Int = nowNs()
+  let rounds: Int = 400
+  loop var i: Int = 0, i < rounds, ++i {
+    let sent: Bool = connectionSendReliable(
+      connection: timing.client
+      bytes: big
+      start: 0
+      count: big.length
+    )
+    pump(pair: timing)
+    var message: List(UInt8) = List.create(UInt8, cap: 1100)
+    loop connectionReceive(connection: timing.server, message: message) is not MessageChannel.none {
+    }
+  }
+  let perPacketNs: Int = (nowNs() - begin) / timing.client.stats.packetsSent
+  log("a full packet sealed, sent and opened in under 200 us: {perPacketNs < 200000}")
+  ret 0
+}

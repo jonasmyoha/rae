@@ -187,7 +187,7 @@ type UiWorld {
   # authored rotation/scale), the input the general lib/ecs TransformSystem folds
   # into worldTransforms over the depth order. Rebuilt each transform pass.
 
-  # ----- RESOURCES (world-global singletons, #753) -----
+  # ----- RESOURCES (one per world, #753) -----
   # These are RESOURCES, not components: one per world, so they are plain fields
   # read as `world.msdfState` / `world.layoutW`, never per-entity tables and never
   # faked as entities (docs/ecs-resources.md). msdfState is a RUNTIME resource
@@ -206,13 +206,13 @@ type UiWorld {
   # these from the live window size (see the frames coordinate plan,
   # rae/docs/ui-coordinate-and-responsive-layout.md). Replaces the
   # old disconnected module globals in layout.rae.
-  # resource: a world-global singleton, not a per-entity component.
+  # resource: one per world, not a per-entity component.
   layoutW: Float
   layoutH: Float
   # The screen's safe area (notch, home indicator) as a simulator or a layout
   # test sets it (a phone's on a desktop); while not simulating, the layout
   # pass reads the OS's (lib/ui/safeAreaSystem feedSafeArea)
-  # resource: a world-global singleton, runtime only.
+  # resource: one per world, runtime only.
   safeInsetsSimulated: Bool = false
   simulatedSafeInsets: Insets = Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   # A band the host keeps for itself on top of the safe area (its own bar
