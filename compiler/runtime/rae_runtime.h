@@ -867,7 +867,7 @@ int64_t rae_ext_FileNotify_takePending(int64_t queue);
 /* The socket system-call shim (runtime_net.c, lib/net/NetSystem.rae): one
  * call per function, the result or -errno; the policy is lib/net/Tcp.rae. */
 int64_t rae_ext_NetSys_constant(int64_t which);
-int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords);
+int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, rae_Bool datagram, uint8_t* records, int64_t maxRecords);
 int64_t rae_ext_NetSys_socketFor(uint8_t* records, int64_t index);
 int64_t rae_ext_NetSys_bindTo(int64_t fd, uint8_t* records, int64_t index);
 int64_t rae_ext_NetSys_connectTo(int64_t fd, uint8_t* records, int64_t index);
@@ -895,6 +895,9 @@ int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEve
 #endif
 int64_t rae_ext_NetSys_close(int64_t fd);
 int64_t rae_ext_NetSys_localPort(int64_t fd);
+int64_t rae_ext_NetSys_recordAddress(uint8_t* records, int64_t index, int64_t* words);
+int64_t rae_ext_NetSys_sendTo(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags, int64_t family, int64_t high, int64_t low, int64_t port, int64_t scopeId);
+int64_t rae_ext_NetSys_receiveFrom(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes, int64_t* words);
 rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);
 int64_t rae_ext_rae_sys_rss_kb(void);
 

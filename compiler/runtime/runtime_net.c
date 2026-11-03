@@ -42,6 +42,7 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #ifdef RAE_HAS_KQUEUE
 #include <sys/event.h>
@@ -106,13 +107,15 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
     case 39: return EPOLL_CTL_DEL;
 #endif
     case 40: return EEXIST;
+    case 41: return EMSGSIZE;
     default: return -1;
   }
 }
 
-/* getaddrinfo for TCP: writes up to maxRecords records into `records` and
- * answers how many, or RAE_NET_RESOLVE_FAILED. host "" = any local address. */
-int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords) {
+/* getaddrinfo for TCP (or UDP when `datagram`): writes up to maxRecords
+ * records into `records` and answers how many, or RAE_NET_RESOLVE_FAILED.
+ * host "" = any local address. */
+int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, rae_Bool datagram, uint8_t* records, int64_t maxRecords) {
   char service[16];
   snprintf(service, sizeof service, "%lld", (long long)port);
   char name[256];
@@ -126,7 +129,7 @@ int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, 
   struct addrinfo hints;
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_socktype = datagram ? SOCK_DGRAM : SOCK_STREAM;
   hints.ai_flags = passive ? AI_PASSIVE : 0;
   struct addrinfo* addresses = NULL;
   if (getaddrinfo(node, service, &hints, &addresses) != 0) return RAE_NET_RESOLVE_FAILED;
@@ -295,6 +298,92 @@ int64_t rae_ext_NetSys_epollWait(int64_t queue, int64_t* events, int64_t maxEven
   return count;
 }
 #endif
+
+/* A UDP peer address crosses into Rae as five words (lib/net/Udp.rae's
+ * NetAddress): family (4, 6, or 0 for none), the address as two big-endian
+ * 64-bit halves (IPv4: all in `low`), the port and the IPv6 scope id. These
+ * two helpers only convert between those words and the per-OS sockaddr
+ * layout; they make no call. */
+static void rae_net_words_from_address(const struct sockaddr_storage* address, int64_t* words) {
+  memset(words, 0, 5 * sizeof(int64_t));
+  if (address->ss_family == AF_INET) {
+    const struct sockaddr_in* ipv4 = (const struct sockaddr_in*)(const void*)address;
+    words[0] = 4;
+    words[2] = (int64_t)ntohl(ipv4->sin_addr.s_addr);
+    words[3] = ntohs(ipv4->sin_port);
+  } else if (address->ss_family == AF_INET6) {
+    const struct sockaddr_in6* ipv6 = (const struct sockaddr_in6*)(const void*)address;
+    uint64_t high = 0, low = 0;
+    for (int i = 0; i < 8; i++) high = (high << 8) | ipv6->sin6_addr.s6_addr[i];
+    for (int i = 8; i < 16; i++) low = (low << 8) | ipv6->sin6_addr.s6_addr[i];
+    words[0] = 6;
+    words[1] = (int64_t)high;
+    words[2] = (int64_t)low;
+    words[3] = ntohs(ipv6->sin6_port);
+    words[4] = (int64_t)ipv6->sin6_scope_id;
+  }
+}
+
+static socklen_t rae_net_address_from_words(struct sockaddr_storage* address, int64_t family, int64_t high, int64_t low, int64_t port, int64_t scopeId) {
+  memset(address, 0, sizeof *address);
+  if (family == 4) {
+    struct sockaddr_in* ipv4 = (struct sockaddr_in*)(void*)address;
+    ipv4->sin_family = AF_INET;
+    ipv4->sin_port = htons((uint16_t)port);
+    ipv4->sin_addr.s_addr = htonl((uint32_t)low);
+    return sizeof *ipv4;
+  }
+  if (family == 6) {
+    struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)(void*)address;
+    ipv6->sin6_family = AF_INET6;
+    ipv6->sin6_port = htons((uint16_t)port);
+    ipv6->sin6_scope_id = (uint32_t)scopeId;
+    for (int i = 0; i < 8; i++) ipv6->sin6_addr.s6_addr[i] = (uint8_t)((uint64_t)high >> (56 - 8 * i));
+    for (int i = 0; i < 8; i++) ipv6->sin6_addr.s6_addr[8 + i] = (uint8_t)((uint64_t)low >> (56 - 8 * i));
+    return sizeof *ipv6;
+  }
+  return 0;
+}
+
+/* A resolved record's address as the five NetAddress words (no call) */
+int64_t rae_ext_NetSys_recordAddress(uint8_t* records, int64_t index, int64_t* words) {
+  const int32_t* header = rae_net_record_header(records, index);
+  struct sockaddr_storage address;
+  memset(&address, 0, sizeof address);
+  size_t length = (size_t)header[3] < sizeof address ? (size_t)header[3] : sizeof address;
+  memcpy(&address, records + index * RAE_NET_RECORD_BYTES + RAE_NET_RECORD_HEADER, length);
+  rae_net_words_from_address(&address, words);
+  return words[0] == 0 ? -EAFNOSUPPORT : 0;
+}
+
+/* sendto one datagram to the address given as words: bytes sent or -errno */
+int64_t rae_ext_NetSys_sendTo(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags, int64_t family, int64_t high, int64_t low, int64_t port, int64_t scopeId) {
+  struct sockaddr_storage address;
+  socklen_t length = rae_net_address_from_words(&address, family, high, low, port, scopeId);
+  if (length == 0) return -EAFNOSUPPORT;
+  ssize_t sent = sendto((int)fd, buffer + offset, (size_t)count, (int)flags, (struct sockaddr*)&address, length);
+  return sent >= 0 ? (int64_t)sent : -errno;
+}
+
+/* recvmsg one datagram into buffer[offset ..): the bytes kept, or -errno.
+ * Writes the sender as words[0..4] and, in words[5], 1 when the datagram was
+ * larger than maxBytes (the kernel cut it: MSG_TRUNC), else 0. */
+int64_t rae_ext_NetSys_receiveFrom(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes, int64_t* words) {
+  struct sockaddr_storage address;
+  memset(&address, 0, sizeof address);
+  struct iovec part = { .iov_base = buffer + offset, .iov_len = (size_t)maxBytes };
+  struct msghdr message;
+  memset(&message, 0, sizeof message);
+  message.msg_name = &address;
+  message.msg_namelen = sizeof address;
+  message.msg_iov = &part;
+  message.msg_iovlen = 1;
+  ssize_t got = recvmsg((int)fd, &message, 0);
+  if (got < 0) return -errno;
+  rae_net_words_from_address(&address, words);
+  words[5] = (message.msg_flags & MSG_TRUNC) ? 1 : 0;
+  return (int64_t)got;
+}
 
 /* getsockname, decoded per address family: the local port, or -errno */
 int64_t rae_ext_NetSys_localPort(int64_t fd) {
