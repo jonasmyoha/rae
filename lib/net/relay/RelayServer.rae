@@ -10,6 +10,13 @@
 #
 # Silent peers time out (`peerTimeoutMs`): a player is removed and its host
 # told; a host takes its session with it, and its players are told.
+#
+# A peer can also come over a WebSocket (a browser cannot send UDP;
+# `relayListenWebSocket`): each binary message is one relay packet, the same
+# bytes as a datagram. Such a peer's address is a stand-in in the IPv6
+# discard prefix 100::/64 (RFC 6666, never a real sender) naming its
+# connection, so every lookup by address works unchanged; `relaySendBytes`
+# sends to it as a frame. It is always relay-only (no direct path).
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
@@ -20,6 +27,9 @@ open net/Udp
 open net/Wire
 open net/relay/RelayWire
 open crypto/SecureRandom
+open net/Poller
+open net/ecs/HttpServer
+open net/ecs/WebSocketSystems
 
 # ----- components -------------------------------------------------------------
 type RelayPeer {
@@ -119,6 +129,10 @@ type RelayServer {
   # The monotonic clock of this frame, and when the next timeout scan is due
   frameNs: Int
   nextTimeoutScanNs: Int
+  # The WebSocket listener (none until relayListenWebSocket), and when its
+  # closed connections are next looked for
+  webSocket: opt HttpServer
+  nextWebSocketScanNs: Int
 }
 
 func defaultRelayConfig() ret RelayConfig {
@@ -165,6 +179,8 @@ func createRelayServer(
     }
     frameNs: nowNs()
     nextTimeoutScanNs: 0
+    webSocket: none
+    nextWebSocketScanNs: 0
   }
 }
 
@@ -176,7 +192,74 @@ func relayPort(server: view RelayServer) ret Int {
 }
 
 func closeRelayServer(server: mod RelayServer) {
+  if let http: mod HttpServer = server.webSocket {
+    closeHttpServer(server: http)
+  }
   udpClose(udpSocket: server.udpSocket)
+}
+
+# Also take peers over WebSocket on `host`:`port` (0 picks a free one:
+# `relayWebSocketPort`), at relayWebSocketPath. The UDP socket is watched
+# by the same poller, so one wait covers both.
+func relayListenWebSocket(
+  server: mod RelayServer
+  host: view String
+  port: view Int
+) ret NetStatus {
+  var http: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  http.webSocketPath = relayWebSocketPath
+  http.maxWebSocketMessageBytes = relayDatagramBytes
+  let listening: NetStatus = httpServerListen(
+    server: http
+    host: host
+    port: port
+    backlog: 128
+  )
+  if listening is not NetStatus.ok {
+    closeHttpServer(server: http)
+    ret listening
+  }
+  let watched: NetStatus = pollerWatch(
+    poller: http.poller
+    socketId: server.udpSocket.socketId
+    readable: true
+    writable: false
+  )
+  server.webSocket = own http
+  ret watched
+}
+
+func relayWebSocketPort(server: view RelayServer) ret Int {
+  if let http: view HttpServer = server.webSocket {
+    if let port: Int = socketLocalPort(socketId: http.listenerSocketId) {
+      ret port
+    }
+  }
+  ret -1
+}
+
+# ----- WebSocket peers' addresses ---------------------------------------------
+
+# 0100:0000:0000:0000, the IPv6 discard prefix (RFC 6666)
+const webSocketAddressHigh: Int = 72057594037927936
+
+# The stand-in address of WebSocket connection `connectionEntityId`
+func webSocketPeerAddress(connectionEntityId: view EntityId) ret NetAddress {
+  ret NetAddress {
+    family: AddressFamily.ipv6
+    high: webSocketAddressHigh
+    low: (connectionEntityId.generation shl 32) bitor (connectionEntityId.index bitand 4294967295)
+    port: 0
+    scopeId: 0
+  }
+}
+
+func isWebSocketPeerAddress(address: view NetAddress) ret Bool {
+  ret address.family is AddressFamily.ipv6 and address.high is webSocketAddressHigh
+}
+
+func webSocketConnectionOf(address: view NetAddress) ret EntityId {
+  ret EntityId { index: address.low bitand 4294967295, generation: address.low shr 32 }
 }
 
 # ----- keys -------------------------------------------------------------------
@@ -249,14 +332,50 @@ func peerInSession(
 
 # ----- sending ----------------------------------------------------------------
 
-# Send `server.outbox` to `address` (best effort: UDP)
-func sendOutbox(server: view RelayServer, address: view NetAddress) {
+# Send `count` bytes of `bytes` from `start` to `address`: a datagram, or a
+# frame on the WebSocket connection a stand-in address names (best effort)
+func relaySendBytes(
+  server: mod RelayServer
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  address: view NetAddress
+) ret Bool {
+  if isWebSocketPeerAddress(address: address) {
+    if let http: mod HttpServer = server.webSocket {
+      let connectionEntityId: EntityId = webSocketConnectionOf(address: address)
+      if not sessionIsOpen(server: http, entityId: connectionEntityId) {
+        ret false
+      }
+      sendBinary(
+        server: http
+        entityId: connectionEntityId
+        bytes: bytes
+        start: start
+        count: count
+      )
+      ret true
+    }
+    ret false
+  }
   let sent: IoResult = udpSend(
     udpSocket: server.udpSocket
+    bytes: bytes
+    start: start
+    count: count
+    destination: address
+  )
+  ret sent.status is NetStatus.ok
+}
+
+# Send `server.outbox` to `address` (best effort)
+func sendOutbox(server: mod RelayServer, address: view NetAddress) {
+  let sent: Bool = relaySendBytes(
+    server: server
     bytes: server.outbox
     start: 0
     count: server.outbox.length
-    destination: address
+    address: address
   )
 }
 

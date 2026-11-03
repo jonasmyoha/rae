@@ -15,7 +15,8 @@
 #   relayPeer game-host / game-player: the host-migration game
 #       (MigrationGame.rae)
 # Every mode takes --relay-only (no direct path; the bench uses it, so it
-# measures the relay)
+# measures the relay). A player given --web-socket-port P reaches the relay
+# over WebSocket on that port (as a browser would), not UDP.
 #       measures round trips through the relay and directly, then the
 #       relay's throughput with 64 round trips in flight
 open net/Tcp
@@ -123,6 +124,19 @@ func runPlayer() ret Int {
     clientConfig: clientConfigArgument()
     connectionConfig: defaultConnectionConfig()
   )
+  let webSocketPort: Int = argumentAfter(name: "--web-socket-port", fallback: "-1").toInt()
+  if webSocketPort >= 0 {
+    relayClientClose(client: player.client)
+    player = createRelayPlayerWith(
+      client: createRelayClientOverWebSocket(
+        host: "127.0.0.1"
+        port: webSocketPort
+        config: clientConfigArgument()
+        connectTimeoutMs: 2000
+      )
+      connectionConfig: defaultConnectionConfig()
+    )
+  }
   let startMs: Int = nowMs()
   if not relayPlayerJoin(
     player: player
@@ -140,7 +154,10 @@ func runPlayer() ret Int {
   var leftAtMs: Int = -1
   var message: List(UInt8) = List.create(UInt8, cap: 64)
   loop nowMs() - startMs < seconds * 1000 and leftAtMs < 0 and not player.sessionClosed {
-    waitFor(client: player.client, waitMs: 5)
+    let ready: Bool = socketWaitReadable(
+      socketId: relayClientSocketId(client: player.client)
+      timeoutMs: 5
+    )
     let now: Int = nowMs() - startMs
     relayPlayerReceive(player: player, nowMs: now)
     # At most 32 messages waiting for their echo, so neither side's
@@ -182,7 +199,9 @@ func runPlayer() ret Int {
     ending = "session closed"
   }
   var path: String = "relay"
-  if relayClientPathState(client: player.client, peerId: hostPeerId) is DirectPathState.direct {
+  if relayClientUsesWebSocket(client: player.client) {
+    path = "WebSocket"
+  } else if relayClientPathState(client: player.client, peerId: hostPeerId) is DirectPathState.direct {
     path = "direct"
   }
   log(

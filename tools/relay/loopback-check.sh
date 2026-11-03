@@ -82,15 +82,18 @@ wait_line() {
 build tools/relay/Main.rae relay
 build tools/relayPeer/Main.rae relayPeer
 
-# The scenario: host + players 1-3, player 3 leaves, player 4 joins late
-start "$WORK/relay.log" "$WORK/relay" --host 127.0.0.1 --port 0 --seconds 20 --stats
+# The scenario: host + players 1-3, player 3 leaves, player 4 joins late,
+# player 5 joins over WebSocket (as a browser would)
+start "$WORK/relay.log" "$WORK/relay" --host 127.0.0.1 --port 0 --web-socket-port 0 --seconds 20 --stats
 PORT=$(wait_line "$WORK/relay.log" "relay listening on port" | awk '{print $NF}') || exit 1
+WS_PORT=$(wait_line "$WORK/relay.log" "relay WebSocket on port" | awk '{print $NF}') || exit 1
 start "$WORK/host.log" "$WORK/relayPeer" host --relay-port "$PORT" --seconds 6
 TOKEN=$(wait_line "$WORK/host.log" "^token " | awk '{print $2}') || exit 1
 start "$WORK/player1.log" "$WORK/relayPeer" player --relay-port "$PORT" --token "$TOKEN" --count 200 --seconds 5
 start "$WORK/player2.log" "$WORK/relayPeer" player --relay-port "$PORT" --token "$TOKEN" --count 200 --seconds 5
 start "$WORK/player3.log" "$WORK/relayPeer" player --relay-port "$PORT" --token "$TOKEN" --count 200 --leave-after-ms 200 --seconds 5
 start "$WORK/player4.log" "$WORK/relayPeer" player --relay-port "$PORT" --token "$TOKEN" --count 200 --start-after-ms 1500 --seconds 3
+start "$WORK/player5.log" "$WORK/relayPeer" player --relay-port "$PORT" --web-socket-port "$WS_PORT" --token "$TOKEN" --count 200 --seconds 5
 sleep 6.5
 status=0
 for who in player1 player2 player3 player4; do
@@ -102,10 +105,19 @@ for who in player1 player2 player3 player4; do
   esac
 done
 grep "^player" "$WORK/player3.log" | grep -q "left" || status=1
+line=$(grep "^player" "$WORK/player5.log")
+echo "player5: ${line:-no result}"
+case "$line" in
+  *"echoes 200/200, out of order 0"*"path WebSocket"*) ;;
+  *) status=1 ;;
+esac
 host_line=$(grep "^host:" "$WORK/host.log")
 echo "$host_line"
 case "$host_line" in
-  *"received 800 messages"*"told of 1 leaving"*) ;;
+  # Two leave: player 3 says so; player 5's process ends at 5 s, before the
+  # host's, and a closed WebSocket is noticed at once (an ended UDP player
+  # only times out, after the host has stopped)
+  *"received 1000 messages"*"told of 2 leaving"*) ;;
   *) status=1 ;;
 esac
 

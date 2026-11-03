@@ -24,9 +24,11 @@ direct path once it works and stays on the relay when it does not (see
 | `lib/net/relay/sessionSystem/SessionSystem.rae` | answers open / join / leave |
 | `lib/net/relay/timeoutSystem/TimeoutSystem.rae` | removes peers silent for `peerTimeoutMs` (scans every 100 ms) |
 | `lib/net/relay/noticeSystem/NoticeSystem.rae` | tells a host which players left, players that the session closed |
+| `lib/net/relay/webSocketSystem/WebSocketSystem.rae` | WebSocket peers' binary messages in as packets; peers whose connection closed leave |
 | `lib/net/relay/Relay.rae` | `relayFrame` (the systems in order) and `relayStep` (wait, then a frame) |
 | `lib/net/relay/RelayClient.rae` | a host's or player's side: open / join, keep-alive, forward header, the direct paths |
 | `lib/net/relay/RelayConnections.rae` | Connections over the relay: `RelayHost` (one per player), `RelayPlayer` |
+| `lib/webSocket/WebSocketClient.rae` | a native WebSocket client (connect, handshake, masked binary messages) |
 | `tools/relay/Main.rae` | the relay program |
 | `tools/relayPeer/Main.rae`, `tools/relay/loopback-check.sh` | the multi-process check and its measurements |
 
@@ -164,6 +166,66 @@ once that a player left. Then it measures with 64-byte payloads:
 The throughput is one relay process on one core, and the test client
 shares the machine. It is a lower bound for the relay itself, not a limit
 of it.
+
+## WebSocket: peers that cannot send UDP
+
+A browser cannot send UDP, so the WASM build of a game reaches the relay
+over a WebSocket. `relay --web-socket-port P` (`relayListenWebSocket`) also
+listens for TCP on P and upgrades `ws://host:P/relay`; plain HTTP there is
+answered 404. Each binary message is one relay packet, byte for byte what a
+datagram would carry, so the relay's systems and the client's handshake,
+keep-alives and forward header are unchanged, and so is everything above
+them: lib/net/Connection's encryption and reliable channel, replication,
+sessions.
+
+- **Relay side.** A WebSocket peer gets a stand-in address in the IPv6
+  discard prefix `100::/64` (RFC 6666, never a real sender) that names its
+  connection entity in the relay's HTTP server (lib/net/ecs). Every lookup
+  by address works unchanged; `relaySendBytes` sends to such an address as
+  a binary frame and to any other as a datagram, so a forward from a UDP
+  peer to a WebSocket peer (or back) is the same code. A WebSocket peer is
+  always relay-only: its address means nothing to anyone else. The UDP
+  socket is watched by the HTTP server's poller, so one wait covers both. A
+  closed connection is noticed within 100 ms and the peer leaves at once
+  (an ended UDP peer only times out).
+- **Client side.** `createRelayClientOverWebSocket(host, port, config,
+  connectTimeoutMs)` makes a relay-only `RelayClient` whose transport is a
+  `WebSocketClient` (no UDP socket); `createRelayHostWith` /
+  `createRelayPlayerWith` wrap it. `relayClientSocketId` is the socket to
+  wait on. When the connection breaks, the client reports the session closed.
+- **Checks.** `compiler/tests/cases/1283_relay_web_socket` (one process): a
+  UDP host with a UDP and a WebSocket player, and a WebSocket host with a UDP
+  player; every player's messages come back in order; a dropped WebSocket
+  player's host is told within 1 s. `tools/relay/loopback-check.sh` runs a
+  WebSocket player as its own process (`relayPeer player --web-socket-port`).
+- **Not yet: the browser itself.** `WebSocketClient` uses a TCP socket,
+  which a browser does not have. In the WASM build it needs a second branch
+  (`when Target.os is Os.web`) over Emscripten's `emscripten/websocket.h`:
+  one-call shims for open, send and close, and a small C queue that the
+  message callback fills and Rae drains each frame. The lib already
+  type-checks for web/wasm32. Queued.
+- **Cost.** TCP delivers in order and retransmits, so a lost packet stalls
+  every packet behind it (head-of-line blocking). Connection's own
+  reliability then runs over a channel that never loses anything, and
+  unreliable messages (snapshots) can arrive late instead of not at all.
+  That is the price of a browser on WebSocket.
+
+### WebTransport, later
+
+WebTransport gives a browser UDP-like unreliable datagrams (and streams)
+without head-of-line blocking. A relay that speaks it needs:
+
+- **QUIC** (RFC 9000) with TLS 1.3: a C library behind a shim (ngtcp2 +
+  a TLS library, or quiche or msquic prebuilt), on its own UDP port.
+- **HTTP/3** (RFC 9114) with Extended CONNECT (RFC 9220) to open a
+  WebTransport session, and HTTP datagrams (RFC 9297, QUIC datagrams RFC
+  9221) for the unreliable packets; each datagram would be one relay packet,
+  like a WebSocket message now.
+- **A certificate the browser accepts.** A real one for the relay's name,
+  or, for development, a self-signed ECDSA one valid for at most 14 days
+  whose hash the page passes in `serverCertificateHashes`.
+- **The browser side** through JS glue (Emscripten has no WebTransport
+  API): `new WebTransport(url)`, `datagrams.writable` / `readable`.
 
 ## Limits and next steps
 

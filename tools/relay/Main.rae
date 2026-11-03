@@ -2,8 +2,12 @@
 # sessions on it, players join them with the session token, and it forwards
 # their sealed packets without reading them.
 #
-#   relay [--host 0.0.0.0] [--port 7777] [--seconds N] [--timeout-ms 10000] [--stats]
+#   relay [--host 0.0.0.0] [--port 7777] [--web-socket-port P] [--seconds N]
+#         [--timeout-ms 10000] [--stats]
 #
+# --web-socket-port P also takes peers over WebSocket (ws://host:P/relay,
+# for a browser that cannot send UDP; 0 picks a free port) and prints
+# "relay WebSocket on port P".
 # --seconds N stops after N seconds (0, the default, runs until killed);
 # --stats prints the counters once a second. It prints "relay listening on
 # port P" first (port 0 picks a free one).
@@ -49,6 +53,15 @@ func main() ret Int {
     ret 1
   }
   log("relay listening on port {relayPort(server: server)}")
+  if hasArgument(name: "--web-socket-port") {
+    let webSocketPort: Int = argumentAfter(name: "--web-socket-port", fallback: "0").toInt()
+    let listening: NetStatus = relayListenWebSocket(server: server, host: host, port: webSocketPort)
+    if listening is not NetStatus.ok {
+      log("relay: cannot take WebSockets on {host}:{webSocketPort}: {listening}")
+      ret 1
+    }
+    log("relay WebSocket on port {relayWebSocketPort(server: server)}")
+  }
   let startMs: Int = nowMs()
   var nextStatsMs: Int = startMs + 1000
   loop seconds <= 0 or nowMs() - startMs < seconds * 1000 {

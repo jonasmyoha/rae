@@ -1,0 +1,317 @@
+# lib/net/relay over WebSocket (docs/relay.md, "WebSocket"): a browser cannot
+# send UDP, so a client can reach the relay over a WebSocket instead; the
+# relay forwards between WebSocket and UDP peers, and everything above the
+# transport (lib/net/Connection's encrypted reliable messages) is the same.
+# In one process on loopback: a relay with a WebSocket listener; session A
+# with a UDP host, a UDP player and a WebSocket player (a native client
+# forced onto WebSocket, as the WASM build would be); session B with a
+# WebSocket host and a UDP player. Every player's numbered messages come
+# back from its host in order. Then the WebSocket player drops its
+# connection without a goodbye, and its host is told it left. Plain HTTP on
+# the WebSocket port is answered 404.
+open ecs/ComponentTable
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open net/relay/RelayConnections
+open webSocket/WebSocketClient
+
+type Host {
+  relayHost: RelayHost
+  message: List(UInt8)
+  received: Int
+  peersLeft: Int
+}
+
+type Player {
+  relayPlayer: RelayPlayer
+  message: List(UInt8)
+  sent: Int
+  echoes: Int
+  outOfOrder: Int
+}
+
+func clientConfig() ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.keepAliveMs = 150
+  config.relayOnly = true
+  ret config
+}
+
+func udpHost(relayAddress: view NetAddress) ret Host {
+  ret Host {
+    relayHost: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: clientConfig()
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    received: 0
+    peersLeft: 0
+  }
+}
+
+func webSocketHost(port: view Int) ret Host {
+  ret Host {
+    relayHost: createRelayHostWith(
+      client: createRelayClientOverWebSocket(
+        host: "127.0.0.1"
+        port: port
+        config: clientConfig()
+        connectTimeoutMs: 1000
+      )
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    received: 0
+    peersLeft: 0
+  }
+}
+
+func udpPlayer(relayAddress: view NetAddress) ret Player {
+  ret Player {
+    relayPlayer: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: clientConfig()
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    sent: 0
+    echoes: 0
+    outOfOrder: 0
+  }
+}
+
+func webSocketPlayer(port: view Int) ret Player {
+  ret Player {
+    relayPlayer: createRelayPlayerWith(
+      client: createRelayClientOverWebSocket(
+        host: "127.0.0.1"
+        port: port
+        config: clientConfig()
+        connectTimeoutMs: 1000
+      )
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    sent: 0
+    echoes: 0
+    outOfOrder: 0
+  }
+}
+
+# The host echoes every message back to its sender
+func stepHost(host: mod Host, nowMs: view Int) {
+  relayHostReceive(host: host.relayHost, nowMs: nowMs)
+  loop var i: Int = 0, i < host.relayHost.peers.length, ++i {
+    if let peer: mod HostPeer = host.relayHost.peers.modAt(index: i) {
+      loop connectionReceive(connection: peer.connection, message: host.message) is MessageChannel.reliable {
+        host.received = host.received + 1
+        let echoed: Bool = connectionSendReliable(
+          connection: peer.connection
+          bytes: host.message
+          start: 0
+          count: host.message.length
+        )
+      }
+    }
+  }
+  relayHostSend(host: host.relayHost, nowMs: nowMs)
+  # This frame's leavers: the relay's word (receive) and connections that
+  # ended (send); the list is emptied by the next receive
+  host.peersLeft = host.peersLeft + host.relayHost.peersLeft.length
+}
+
+# The player sends its numbers (at most 32 waiting for their echo) and
+# checks the echoes come back in order
+func stepPlayer(player: mod Player, total: view Int, nowMs: view Int) {
+  relayPlayerReceive(player: player.relayPlayer, nowMs: nowMs)
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  loop connectionIsConnected(connection: player.relayPlayer.connection) and player.sent < total and player.sent - player.echoes < 32 {
+    bytes.clear()
+    writeU32(bytes: bytes, value: player.sent)
+    if not connectionSendReliable(
+      connection: player.relayPlayer.connection
+      bytes: bytes
+      start: 0
+      count: bytes.length
+    ) {
+      break
+    }
+    player.sent = player.sent + 1
+  }
+  loop connectionReceive(connection: player.relayPlayer.connection, message: player.message) is MessageChannel.reliable {
+    if readU32(bytes: player.message, offset: 0) is not player.echoes {
+      player.outOfOrder = player.outOfOrder + 1
+    }
+    player.echoes = player.echoes + 1
+  }
+  relayPlayerSend(player: player.relayPlayer, nowMs: nowMs)
+}
+
+type Scene {
+  relay: RelayServer
+  hostA: Host
+  udpPlayerA: Player
+  webSocketPlayerA: Player
+  hostB: Host
+  udpPlayerB: Player
+  webSocketPlayerAwake: Bool
+  startMs: Int
+}
+
+func since(scene: view Scene) ret Int {
+  ret nowMs() - scene.startMs
+}
+
+func round(scene: mod Scene) {
+  let now: Int = since(scene: scene)
+  relayStep(server: scene.relay, waitMs: 0)
+  stepHost(host: scene.hostA, nowMs: now)
+  stepHost(host: scene.hostB, nowMs: now)
+  stepPlayer(player: scene.udpPlayerA, total: 200, nowMs: now)
+  if scene.webSocketPlayerAwake {
+    stepPlayer(player: scene.webSocketPlayerA, total: 200, nowMs: now)
+  }
+  stepPlayer(player: scene.udpPlayerB, total: 100, nowMs: now)
+  sleep(ms: 1)
+}
+
+func allEchoed(scene: view Scene) ret Bool {
+  ret scene.udpPlayerA.echoes >= 200 and scene.webSocketPlayerA.echoes >= 200 and scene.udpPlayerB.echoes >= 100
+}
+
+func pathOf(client: view RelayClient) ret String {
+  if relayClientUsesWebSocket(client: client) {
+    ret "WebSocket"
+  }
+  ret "UDP"
+}
+
+func report(label: view String, player: view Player) {
+  log(
+    "{label} ({pathOf(client: player.relayPlayer.client)}): {player.echoes} echoes, out of order {player.outOfOrder}"
+  )
+}
+
+# Plain HTTP on the WebSocket port: the relay serves only the upgrade
+func plainHttpAnswer(scene: mod Scene, port: view Int) ret String {
+  let connected: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 1000)
+  if connected.status is not NetStatus.ok {
+    ret "no connection"
+  }
+  let written: IoResult = socketWriteText(
+    socketId: connected.socketId
+    text: "GET / HTTP/1.1\r\nHost: relay\r\n\r\n"
+  )
+  var answer: List(UInt8) = List.create(UInt8, cap: 512)
+  let until: Int = since(scene: scene) + 2000
+  loop since(scene: scene) < until and answer.length < 12 {
+    relayStep(server: scene.relay, waitMs: 5)
+    let read: IoResult = socketRead(socketId: connected.socketId, bytes: answer, maxBytes: 512)
+  }
+  socketClose(socketId: connected.socketId)
+  if answer.length < 12 {
+    ret "no answer"
+  }
+  ret textFromBytes(bytes: answer, start: 0, count: 12)
+}
+
+func main() ret Int {
+  var relay: RelayServer = createRelayServer(
+    host: "127.0.0.1"
+    port: 0
+    config: defaultRelayConfig()
+  )
+  if relayListenWebSocket(server: relay, host: "127.0.0.1", port: 0) is not NetStatus.ok {
+    log("no WebSocket listener")
+    ret 1
+  }
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let webSocketPort: Int = relayWebSocketPort(server: relay)
+  var scene: Scene = {
+    relay: own relay
+    hostA: udpHost(relayAddress: relayAddress)
+    udpPlayerA: udpPlayer(relayAddress: relayAddress)
+    webSocketPlayerA: webSocketPlayer(port: webSocketPort)
+    hostB: webSocketHost(port: webSocketPort)
+    udpPlayerB: udpPlayer(relayAddress: relayAddress)
+    webSocketPlayerAwake: true
+    startMs: nowMs()
+  }
+  log("HTTP on the WebSocket port: {plainHttpAnswer(scene: scene, port: webSocketPort)}")
+  # Both hosts open their sessions
+  relayClientOpen(client: scene.hostA.relayHost.client, nowMs: since(scene: scene))
+  relayClientOpen(client: scene.hostB.relayHost.client, nowMs: since(scene: scene))
+  var until: Int = since(scene: scene) + 3000
+  loop since(scene: scene) < until and not (relayClientIsReady(client: scene.hostA.relayHost.client) and relayClientIsReady(
+    client: scene.hostB.relayHost.client
+  )) {
+    round(scene: scene)
+  }
+  log(
+    "host A (UDP) ready {relayClientIsReady(client: scene.hostA.relayHost.client)}, host B (WebSocket) ready {relayClientIsReady(
+      client: scene.hostB.relayHost.client
+    )}"
+  )
+  let tokenA: String = relayTokenText(token: scene.hostA.relayHost.client.token)
+  let tokenB: String = relayTokenText(token: scene.hostB.relayHost.client.token)
+  let now: Int = since(scene: scene)
+  let joinedUdpA: Bool = relayPlayerJoin(
+    player: scene.udpPlayerA.relayPlayer
+    tokenText: tokenA
+    connectionId: 11
+    nowMs: now
+  )
+  let joinedWebSocketA: Bool = relayPlayerJoin(
+    player: scene.webSocketPlayerA.relayPlayer
+    tokenText: tokenA
+    connectionId: 12
+    nowMs: now
+  )
+  let joinedUdpB: Bool = relayPlayerJoin(
+    player: scene.udpPlayerB.relayPlayer
+    tokenText: tokenB
+    connectionId: 21
+    nowMs: now
+  )
+  until = since(scene: scene) + 10000
+  loop since(scene: scene) < until and not allEchoed(scene: scene) {
+    round(scene: scene)
+  }
+  log("session A: host received {scene.hostA.received} messages")
+  report(label: "  player 1", player: scene.udpPlayerA)
+  report(label: "  player 2", player: scene.webSocketPlayerA)
+  log(
+    "session B (host over WebSocket): host received {scene.hostB.received} messages, relay-only {scene.hostB.relayHost.client.config.relayOnly}"
+  )
+  report(label: "  player 1", player: scene.udpPlayerB)
+  # The WebSocket player's connection drops (no goodbye): the relay notices
+  # the closed connection and tells its host
+  if let webSocket: mod WebSocketClient = scene.webSocketPlayerA.relayPlayer.client.webSocket {
+    webSocketClientEnd(client: webSocket)
+  }
+  scene.webSocketPlayerAwake = false
+  let droppedAt: Int = since(scene: scene)
+  until = droppedAt + 3000
+  loop since(scene: scene) < until and scene.hostA.peersLeft is 0 {
+    round(scene: scene)
+  }
+  let toldWithin: Bool = scene.hostA.peersLeft is 1 and since(scene: scene) - droppedAt < 1000
+  log(
+    "the WebSocket player dropped: host A told {scene.hostA.peersLeft} left (within 1 s: {toldWithin}), {componentCount(
+      this: scene.relay.peers
+    )} peers left on the relay"
+  )
+  relayClientClose(client: scene.hostA.relayHost.client)
+  relayClientClose(client: scene.hostB.relayHost.client)
+  relayClientClose(client: scene.udpPlayerA.relayPlayer.client)
+  relayClientClose(client: scene.udpPlayerB.relayPlayer.client)
+  closeRelayServer(server: scene.relay)
+  ret 0
+}

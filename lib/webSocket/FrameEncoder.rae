@@ -128,3 +128,52 @@ func webSocketAppendMaskedFrame(
     appendByte(buffer: output, byte: text.byteAt(index: i) bitxor key)
   }
 }
+
+# A whole unmasked binary frame of `count` bytes of `bytes` from `start`, as
+# a server sends it
+func webSocketAppendBinary(
+  output: mod ByteBuffer
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: count
+    masked: false
+    maskKey: 0
+  )
+  appendBytes(
+    buffer: output
+    bytes: bytes
+    start: start
+    count: count
+  )
+}
+
+# A whole masked binary frame, as a client sends it: the bytes XOR the key
+func webSocketAppendMaskedBinary(
+  output: mod ByteBuffer
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  maskKey: view Int
+) {
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: count
+    masked: true
+    maskKey: maskKey
+  )
+  loop var i: Int = 0, i < count, ++i {
+    let key: Int = (maskKey shr (24 - (i % 4) * 8)) bitand 255
+    appendByte(
+      buffer: output
+      byte: (bytes.copyAtFallback(index: start + i, fallback: 0) as Int) bitxor key
+    )
+  }
+}
