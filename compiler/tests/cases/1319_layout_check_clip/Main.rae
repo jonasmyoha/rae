@@ -1,0 +1,45 @@
+# app3d/LayoutCheck layoutBoxOf: a node inside a clipping window (Overflow
+# clip) is shown as far as the window lets it be seen. Window 100 high:
+# Inside (0..60) whole, Half (60..140) only to 100, Out (140..220) not.
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open app3d/LayoutCheck
+open ecs/Entity
+
+func dump(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    let box: LayoutBox = layoutBoxOfEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeEntityId(world: world, index: raw)
+    )
+    log("{nodeId}: shown {box.shown} y {box.y} h {box.h} (whole {box.fullH})")
+  }
+}
+
+func main() {
+  let scene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"clip\",\"root\":\"Root\",\"nodes\":\{\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Window\"]\},\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Overflow\":\{\"mode\":\"Clip\"\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Inside\",\"Half\",\"Out\"]\},\"Inside\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":60\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"Half\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":80\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"Out\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":80\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\}\}\}"
+  )
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, nodeId: "Inside")
+  dump(world: world, uiSystems: uiSystems, nodeId: "Half")
+  dump(world: world, uiSystems: uiSystems, nodeId: "Out")
+  dump(world: world, uiSystems: uiSystems, nodeId: "Window")
+}
