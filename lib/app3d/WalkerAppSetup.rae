@@ -31,6 +31,7 @@ open box3d/ecs/CharacterMover
 open app3d/Climbing
 open app3d/Wander
 open app3d/CharacterHeight
+open app3d/walkerNetSystem/WalkerNetSystem
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -52,6 +53,10 @@ type WalkerAppSettings {
   # A stand of the hand-made T02 trees (app3d/ReferenceTree) among the wide
   # forest, ahead of the spawn (WalkerLand.forest only)
   referenceTree: Bool = false
+  # Offline, or host or join a networked session through a relay
+  # (app3d/walkerNetSystem). Offline here takes the environment's:
+  # RAE_WALKER_NET=host|join, RAE_WALKER_RELAY=host:port, RAE_WALKER_TOKEN
+  net: WalkerNetSettings = offlineWalkerNetSettings()
 }
 
 # A walker day lasts 30 minutes of wall time (app3d/TimeOfDay's default is

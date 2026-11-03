@@ -87,6 +87,8 @@ open app3d/NetSeam
 open app3d/CameraKnockdownFollow
 open app3d/CameraFov
 open app3d/SceneLook
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/remoteWalkerSystem/RemoteWalkerSystem
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -599,6 +601,20 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # #905: the renderer owns the mesh store the water grid and the particle
     # quad are uploaded into, so both systems are built before it moves into
     # the app.
+    # A networked session: hosted, or joined by its token (app3d/walkerNetSystem)
+    # Settings that say offline take the environment's (RAE_WALKER_NET), so
+    # every walker app can host or join
+    var netSettings: WalkerNetSettings = settings.net
+    if netSettings.mode is WalkerNetMode.offline {
+      netSettings = walkerNetSettingsFromEnvironment()
+    }
+    # The session starts at the first frame (app3d/remoteWalkerSystem
+    # walkerNetAppFrame): the loading before it takes longer than a connect
+    # attempt may
+    var walkerNet: opt WalkerNet = none
+    if netSettings.mode is not WalkerNetMode.offline {
+      walkerNet = createWalkerNet(settings: netSettings)
+    }
     var wadeSplash: opt WadeSplash = none
     var waterSystem: opt WaterSystem = none
     var gpuCapacity: Int = walkerGpuCapacity
@@ -711,6 +727,8 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       walkerReset: own walkerReset
       walkerMarks: own walkerMarks
       netSeam: createNetSeam()
+      walkerNet: own walkerNet
+      remoteWalkers: createRemoteWalkers()
       players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       wadeSplash: own wadeSplash

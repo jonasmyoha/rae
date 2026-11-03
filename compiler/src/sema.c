@@ -5600,11 +5600,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value, true);
             // The `let x: T = f()` rule for an assignment too: a value place
             // cannot take a reference-returning call (`pose = componentView(...)`
-            // used to reach the C compiler as a pointer assigned to a struct)
+            // used to reach the C compiler as a pointer assigned to a struct).
+            // A `mod` parameter or alias on the left is a place as well (`=`
+            // copies into what it points at), so it is held to the same rule
+            // (`out = componentView(...)` reached C as `*out = <pointer>`).
             {
                 const TypeInfo* target_type = stmt->as.assign_stmt.target->resolved_type;
                 const AstExpr* value = stmt->as.assign_stmt.value;
-                if (target_type && target_type->kind != TYPE_REF && value && value->kind == AST_EXPR_CALL
+                if (target_type && value && value->kind == AST_EXPR_CALL
                     && sema_call_returns_reference(module, value)) {
                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "this call returns a reference; copying what it refers to must be spelled out: "

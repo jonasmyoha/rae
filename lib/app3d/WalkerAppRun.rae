@@ -39,6 +39,15 @@ open app3d/RagdollRig
 open app3d/WalkerKnockdown
 open app3d/WalkerKnockTest
 open app3d/WalkerApp
+open app3d/walkerNetSystem/WalkerNetSystem
+
+# A networked session whose time is up (RAE_WALKER_NET_SECONDS) closes the app
+func netSessionOver(app: view WalkerApp) ret Bool {
+  if let walkerNet: view WalkerNet = app.walkerNet {
+    ret walkerNetTimeUp(net: walkerNet, nowMs: nowMs())
+  }
+  ret false
+}
 
 func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   var app: WalkerApp = createWalkerApp(settings: settings)
@@ -169,7 +178,9 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       exitCode = 1
     }
   }
-  loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() {
+  loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() and not netSessionOver(
+    app: app
+  ) {
     beginWalkerFrame(app: app)
     updateWalkerApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
@@ -207,6 +218,13 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.
     uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
+  }
+  # A networked session: what its desync check found, then leave it
+  if let walkerNet: mod WalkerNet = app.walkerNet {
+    log(
+      "[net] desync checks {walkerNet.checks}, desyncs {walkerNet.desyncs}, at most {walkerNet.mostRemote} other walkers"
+    )
+    walkerNetLeave(net: walkerNet, nowMs: nowMs())
   }
   if let resources: mod GpuResources = app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)

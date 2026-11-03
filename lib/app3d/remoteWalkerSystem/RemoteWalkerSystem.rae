@@ -1,0 +1,360 @@
+# The walker app's side of a networked session (lib/app3d/walkerNetSystem,
+# docs/walker-net.md): the local walker's pose out, and the other players'
+# walkers shown by the app's crowd characters.
+#
+# A remote walker takes a crowd character (the first one free) for as long as
+# it is in the session and DRIVES it, through the same mover drive the crowd
+# walks with: toward where the remote walker is, at a walk or a run, with a
+# jump when it jumps and a knock when it falls. So a remote walker walks,
+# jumps and falls with this app's own physics and clips, on this app's
+# ground. One more than 3 m away (it just joined, or a bot whose made-up
+# walk crosses a tree) is put there at once. Crowd characters no remote
+# walker has keep wandering on their own.
+open ecs/Entity
+open ecs/ComponentTable
+open Vec3
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterMovers
+open app3d/KnockedDown
+open app3d/Wander
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerReset
+open app3d/walkerNetSystem/WalkerNetSystem
+
+# Farther than this (m) from its remote walker, a character is put there
+const remoteTeleportDistance: Float = 3.0
+
+# Nearer than this (m), it stands
+const remoteArriveDistance: Float = 0.15
+
+# Faster than this (m/s), the remote walker runs
+const remoteRunSpeed: Float = 2.5
+
+type RemoteWalkers {
+  # Per crowd character: its entity, the WalkerNetWorld entity of the remote
+  # walker it shows (noEntity: none), and that walker's last airborne and
+  # knocked-down state (a jump or a fall starts on the change)
+  crowd: List(EntityId)
+  shown: List(EntityId)
+  wasAirborne: List(Bool)
+  wasDown: List(Bool)
+  # Scratch: the remote walkers this frame
+  remote: List(EntityId)
+  # The host's session token was printed
+  tokenShown: Bool
+}
+
+func createRemoteWalkers() ret RemoteWalkers {
+  ret RemoteWalkers {
+    crowd: {}
+    shown: {}
+    wasAirborne: {}
+    wasDown: {}
+    remote: {}
+    tokenShown: false
+  }
+}
+
+# The local walker's pose: where its controller is, how fast its mover goes,
+# whether it is in the air or knocked down
+func localWalkerPose(
+  physicsSystem: view WalkerPhysics
+  controllers: view ComponentTable(ThirdPersonController)
+  controlledEntityId: view EntityId
+) ret WalkerPose {
+  var pose: WalkerPose = walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  if componentHas(this: controllers, entityId: controlledEntityId) {
+    let controller: view ThirdPersonController = componentView(
+      this: controllers
+      entityId: controlledEntityId
+    )
+    pose.position = controller.position
+    pose.heading = controller.heading
+  }
+  if componentHas(this: physicsSystem.characters, entityId: controlledEntityId) {
+    let character: view CharacterBody = componentView(
+      this: physicsSystem.characters
+      entityId: controlledEntityId
+    )
+    let vx: Float = character.mover.velocity.x
+    let vy: Float = character.mover.velocity.y
+    pose.speed = Math.sqrt(x: vx * vx + vy * vy)
+    pose.airborne = not character.grounded
+  }
+  pose.knockedDown = componentHas(this: physicsSystem.knockedDown, entityId: controlledEntityId)
+  if pose.knockedDown {
+    pose.clip = 3
+  } else if pose.airborne {
+    pose.clip = 2
+  } else if pose.speed > 0.2 {
+    pose.clip = 1
+  }
+  ret pose
+}
+
+# The remote walkers this side knows, as entities of `net.world`: the
+# interpolated ones on a player, the received ones on the host (its own
+# walker left out on both)
+func gatherRemoteWalkers(net: view WalkerNet, remote: mod List(EntityId)) {
+  remote.clear()
+  if walkerNetIsHost(net: net) {
+    loop var i: Int = 0, i < componentCount(this: net.world.poses), ++i {
+      let entityId: EntityId = componentEntityAt(this: net.world.poses, i: i)
+      if entityId is not net.ownEntityId {
+        remote.add(value: entityId)
+      }
+    }
+    ret
+  }
+  let ownEntityId: EntityId = walkerNetOwnEntityId(net: net)
+  loop var i: Int = 0, i < componentCount(this: net.world.shownPoses), ++i {
+    let entityId: EntityId = componentEntityAt(this: net.world.shownPoses, i: i)
+    if entityId is not ownEntityId {
+      remote.add(value: entityId)
+    }
+  }
+}
+
+# The pose of remote walker `entityId` into `pose`: false when it has none
+func remotePose(net: view WalkerNet, entityId: view EntityId, pose: mod WalkerPose) ret Bool {
+  if walkerNetIsHost(net: net) {
+    if componentHas(this: net.world.poses, entityId: entityId) {
+      let current: view WalkerPose = componentView(this: net.world.poses, entityId: entityId)
+      pose = current
+      ret true
+    }
+    ret false
+  }
+  if componentHas(this: net.world.shownPoses, entityId: entityId) {
+    let current: view WalkerPose = componentView(this: net.world.shownPoses, entityId: entityId)
+    pose = current
+    ret true
+  }
+  ret false
+}
+
+# The crowd: every character but the controlled one, once
+func takeCrowd(
+  remoteWalkers: mod RemoteWalkers
+  physicsSystem: view WalkerPhysics
+  controlledEntityId: view EntityId
+) {
+  if remoteWalkers.crowd.length > 0 {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
+    if entityId is not controlledEntityId {
+      remoteWalkers.crowd.add(value: entityId)
+      remoteWalkers.shown.add(value: noEntity())
+      remoteWalkers.wasAirborne.add(value: false)
+      remoteWalkers.wasDown.add(value: false)
+    }
+  }
+}
+
+func shownIndexOf(remoteWalkers: view RemoteWalkers, entityId: view EntityId) ret Int {
+  loop var k: Int = 0, k < remoteWalkers.shown.length, ++k {
+    if remoteWalkers.shown.copyAtFallback(index: k, fallback: noEntity()) is entityId {
+      ret k
+    }
+  }
+  ret -1
+}
+
+# Which crowd character shows which remote walker: one that left frees its
+# character, a new one takes the first free character
+func assignRemoteWalkers(remoteWalkers: mod RemoteWalkers, net: view WalkerNet) {
+  gatherRemoteWalkers(net: net, remote: remoteWalkers.remote)
+  loop var k: Int = 0, k < remoteWalkers.shown.length, ++k {
+    let shown: EntityId = remoteWalkers.shown.copyAtFallback(index: k, fallback: noEntity())
+    if not isNone(this: shown) and not remoteWalkers.remote.contains(value: shown) {
+      remoteWalkers.shown.set(index: k, value: noEntity())
+    }
+  }
+  loop let entityId: EntityId in remoteWalkers.remote {
+    if shownIndexOf(remoteWalkers: remoteWalkers, entityId: entityId) < 0 {
+      let free: Int = shownIndexOf(remoteWalkers: remoteWalkers, entityId: noEntity())
+      if free >= 0 {
+        remoteWalkers.shown.set(index: free, value: entityId)
+        remoteWalkers.wasAirborne.set(index: free, value: false)
+        remoteWalkers.wasDown.set(index: free, value: false)
+      }
+    }
+  }
+}
+
+# One crowd character's drive toward its remote walker's pose (after the
+# crowd's own drives, before the movers step)
+func driveRemoteWalker(
+  remoteWalkers: mod RemoteWalkers
+  index: view Int
+  pose: view WalkerPose
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  groundZ: view Float
+) {
+  let entityId: EntityId = remoteWalkers.crowd.copyAtFallback(index: index, fallback: noEntity())
+  if not componentHas(this: world.controllers, entityId: entityId) {
+    ret
+  }
+  let at: Vec3 = componentView(this: world.controllers, entityId: entityId).position
+  let dx: Float = pose.position.x - at.x
+  let dy: Float = pose.position.y - at.y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let down: Bool = componentHas(this: physicsSystem.knockedDown, entityId: entityId)
+  if distance > remoteTeleportDistance and not down {
+    # Put it there, a little above its present height: it lands on this
+    # side's ground
+    placeCharacter(
+      physicsSystem: physicsSystem
+      world: world
+      entityId: entityId
+      feet: Vec3.create(x: pose.position.x, y: pose.position.y, z: at.z + groundZ + 0.5)
+      heading: pose.heading
+      groundZ: groundZ
+    )
+  }
+  var drive: MoverDrive = createMoverDrive()
+  drive.yaw = pose.heading
+  if distance > remoteArriveDistance and distance <= remoteTeleportDistance {
+    drive.intent.moveY = 1.0
+    drive.intent.walking = pose.speed < remoteRunSpeed and distance < 1.0
+    drive.yaw = headingTo(
+      x: at.x
+      y: at.y
+      toX: pose.position.x
+      toY: pose.position.y
+    )
+  }
+  if pose.airborne and not remoteWalkers.wasAirborne.copyAtFallback(index: index, fallback: false) {
+    drive.intent.jump = true
+  }
+  componentSet(this: physicsSystem.moverDrives, entityId: entityId, data: drive)
+  if pose.knockedDown and not remoteWalkers.wasDown.copyAtFallback(index: index, fallback: false) and not down {
+    componentSet(
+      this: physicsSystem.knocks
+      entityId: entityId
+      data: KnockRequest {
+        velocity: Vec3.create(
+          x: -Math.sin(pose.heading) * 3.0
+          y: Math.cos(pose.heading) * 3.0
+          z: 1.0
+        )
+      }
+    )
+  }
+  remoteWalkers.wasAirborne.set(index: index, value: pose.airborne)
+  remoteWalkers.wasDown.set(index: index, value: pose.knockedDown)
+}
+
+# Every crowd character that shows a remote walker, driven toward it. Call
+# between the crowd's own drives (stepWanderers) and driveMovers.
+func driveRemoteWalkers(
+  remoteWalkers: mod RemoteWalkers
+  net: view WalkerNet
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  controlledEntityId: view EntityId
+  groundZ: view Float
+) {
+  takeCrowd(
+    remoteWalkers: remoteWalkers
+    physicsSystem: physicsSystem
+    controlledEntityId: controlledEntityId
+  )
+  assignRemoteWalkers(remoteWalkers: remoteWalkers, net: net)
+  var pose: WalkerPose = walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  loop var k: Int = 0, k < remoteWalkers.shown.length, ++k {
+    let shown: EntityId = remoteWalkers.shown.copyAtFallback(index: k, fallback: noEntity())
+    if not isNone(this: shown) and remotePose(net: net, entityId: shown, pose: pose) {
+      driveRemoteWalker(
+        remoteWalkers: remoteWalkers
+        index: k
+        pose: pose
+        physicsSystem: physicsSystem
+        world: world
+        groundZ: groundZ
+      )
+    }
+  }
+}
+
+# The walkers' drives in a networked session: the player's, the crowd's own,
+# then the crowd characters that show remote walkers (instead of driveWalkers)
+func driveWalkersNetworked(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  remoteWalkers: mod RemoteWalkers
+  net: view WalkerNet
+  controlledEntityId: view EntityId
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  setPlayerDrive(
+    physicsSystem: physicsSystem
+    controlledEntityId: controlledEntityId
+    intent: intent
+    cameraYaw: cameraYaw
+    speedScale: speedScale
+  )
+  stepWanderers(
+    wandering: physicsSystem.wandering
+    controllers: world.controllers
+    controlled: world.controlled
+    parked: physicsSystem.moverParked
+    drives: physicsSystem.moverDrives
+    deltaTime: deltaTime
+  )
+  driveRemoteWalkers(
+    remoteWalkers: remoteWalkers
+    net: net
+    physicsSystem: physicsSystem
+    world: world
+    controlledEntityId: controlledEntityId
+    groundZ: groundZ
+  )
+  driveMovers(
+    characters: physicsSystem.characters
+    controllers: world.controllers
+    drives: physicsSystem.moverDrives
+  )
+}
+
+# One frame of the session from the app: the local walker's pose out, the
+# others' in; the host prints its session token once the relay gave it
+func walkerNetAppFrame(
+  net: mod WalkerNet
+  remoteWalkers: mod RemoteWalkers
+  physicsSystem: view WalkerPhysics
+  controllers: view ComponentTable(ThirdPersonController)
+  controlledEntityId: view EntityId
+) {
+  let pose: WalkerPose = localWalkerPose(
+    physicsSystem: physicsSystem
+    controllers: controllers
+    controlledEntityId: controlledEntityId
+  )
+  if not net.started {
+    if walkerNetStart(net: net, localPose: pose, nowMs: nowMs()) {
+      log(
+        "[net] {walkerNetModeName(settings: net.settings)} through the relay at {net.settings.relayHost}:{net.settings.relayPort}"
+      )
+    } else {
+      log("[net] not joined: RAE_WALKER_TOKEN is not a session token")
+      net.settings.mode = WalkerNetMode.offline
+    }
+  }
+  walkerNetFrame(net: net, localPose: pose, nowMs: nowMs())
+  if not remoteWalkers.tokenShown and walkerNetToken(net: net).length() > 0 {
+    log(
+      "[net] session token {walkerNetToken(net: net)} (join with RAE_WALKER_NET=join RAE_WALKER_TOKEN=...)"
+    )
+    remoteWalkers.tokenShown = true
+  }
+}
