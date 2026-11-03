@@ -1,0 +1,249 @@
+# lib/net/Connection authenticated with a session key (lib/net/PacketSeal,
+# docs/relay.md "Invites"). Encryption alone does not stop an ACTIVE
+# attacker in the path, a relay that does more than forward: it can answer
+# each end's handshake with its own keys, decrypt everything and pass it on
+# sealed again. Here that attacker is two Connections, one facing the
+# player and one facing the host, copying every message between them.
+#   1. No session key: the attack works and the attacker reads the message.
+#   2. A session key at both ends that the attacker does not have (it uses
+#      a guess): both handshakes are refused, nothing connects, nothing is
+#      read.
+#   3. The same key, an honest path that forwards bytes: it connects and
+#      the message arrives.
+#   4. Different keys at the two ends: refused.
+# And the invite text that carries the relay token and the session key.
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+
+func configWith(sessionKey: view List(UInt8)) ret ConnectionConfig {
+  var config: ConnectionConfig = defaultConnectionConfig()
+  config.sessionKey = sessionKey
+  ret config
+}
+
+func keyOf(seed: view Int) ret List(UInt8) {
+  var key: List(UInt8) = List.create(UInt8, cap: 16)
+  loop var i: Int = 0, i < 16, ++i {
+    key.add(value: ((seed * 37 + i * 11) bitand 255) as UInt8)
+  }
+  ret key
+}
+
+func textMessage(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length())
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+func textOf(bytes: view List(UInt8)) ret String {
+  ret fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# The player, the host, and what sits between them: an attacker (two
+# connections of its own) or an honest path that forwards bytes
+type Path {
+  player: Connection
+  host: Connection
+  attacked: Bool
+  # The attacker's end facing the player (it listens) and the host (it connects)
+  towardPlayer: Connection
+  towardHost: Connection
+  packet: List(UInt8)
+  message: List(UInt8)
+  # What the attacker read, and what the host received
+  attackerRead: String
+  hostReceived: String
+  nowMs: Int
+}
+
+func createPath(
+  playerKey: view List(UInt8)
+  hostKey: view List(UInt8)
+  attackerKey: view List(UInt8)
+  attacked: view Bool
+) ret Path {
+  ret Path {
+    player: createConnection(config: configWith(sessionKey: playerKey))
+    host: createConnection(config: configWith(sessionKey: hostKey))
+    attacked: attacked
+    towardPlayer: createConnection(config: configWith(sessionKey: attackerKey))
+    towardHost: createConnection(config: configWith(sessionKey: attackerKey))
+    packet: List.create(UInt8, cap: 1200)
+    message: List.create(UInt8, cap: 64)
+    attackerRead: ""
+    hostReceived: ""
+    nowMs: 0
+  }
+}
+
+# Every packet `from` has, into `to`
+func carry(
+  from: mod Connection
+  to: mod Connection
+  packet: mod List(UInt8)
+  nowMs: view Int
+) {
+  loop connectionWritePacket(connection: from, packet: packet, nowMs: nowMs) {
+    let taken: Bool = connectionReadPacket(
+      connection: to
+      packet: packet
+      start: 0
+      count: packet.length
+      nowMs: nowMs
+    )
+  }
+}
+
+func step(path: mod Path) {
+  path.nowMs = path.nowMs + 10
+  if path.attacked {
+    carry(
+      from: path.player
+      to: path.towardPlayer
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+    carry(
+      from: path.towardPlayer
+      to: path.player
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+    carry(
+      from: path.towardHost
+      to: path.host
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+    carry(
+      from: path.host
+      to: path.towardHost
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+    # The attacker reads what the player sent and passes it on, sealed again
+    loop connectionReceive(connection: path.towardPlayer, message: path.message) is MessageChannel.reliable {
+      path.attackerRead = textOf(bytes: path.message)
+      let passed: Bool = connectionSendReliable(
+        connection: path.towardHost
+        bytes: path.message
+        start: 0
+        count: path.message.length
+      )
+    }
+  } else {
+    carry(
+      from: path.player
+      to: path.host
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+    carry(
+      from: path.host
+      to: path.player
+      packet: path.packet
+      nowMs: path.nowMs
+    )
+  }
+  loop connectionReceive(connection: path.host, message: path.message) is MessageChannel.reliable {
+    path.hostReceived = textOf(bytes: path.message)
+  }
+}
+
+# Connect, send one message from the player, run a second of steps
+func run(path: mod Path, label: view String) {
+  connectionListen(connection: path.host, nowMs: 0)
+  connectionConnect(connection: path.player, connectionId: 4242, nowMs: 0)
+  if path.attacked {
+    connectionListen(connection: path.towardPlayer, nowMs: 0)
+    connectionConnect(connection: path.towardHost, connectionId: 4242, nowMs: 0)
+  }
+  var sent: Bool = false
+  loop var i: Int = 0, i < 100, ++i {
+    step(path: path)
+    if not sent and connectionIsConnected(connection: path.player) {
+      let message: List(UInt8) = textMessage(text: "meet at the old mill")
+      sent = connectionSendReliable(
+        connection: path.player
+        bytes: message
+        start: 0
+        count: message.length
+      )
+    }
+  }
+  var refusedText: String = "{path.player.stats.authRefused} at the player, {path.host.stats.authRefused} at the host"
+  if path.attacked {
+    refusedText = "{path.player.stats.authRefused} at the player, {path.host.stats.authRefused} at the host, {path.towardPlayer.stats.authRefused + path.towardHost.stats.authRefused} at the attacker"
+  }
+  log("{label}")
+  log(
+    "  player connected {connectionIsConnected(connection: path.player)}, host connected {connectionIsConnected(
+      connection: path.host
+    )}"
+  )
+  log("  host received \"{path.hostReceived}\"")
+  if path.attacked {
+    log("  the attacker read \"{path.attackerRead}\"")
+  }
+  log("  proofs refused: {refusedText}")
+}
+
+func main() ret Int {
+  let noKeyBytes: List(UInt8) = {}
+  let sessionKey: List(UInt8) = keyOf(seed: 1)
+  var noKey: Path = createPath(
+    playerKey: noKeyBytes
+    hostKey: noKeyBytes
+    attackerKey: noKeyBytes
+    attacked: true
+  )
+  run(path: noKey, label: "1. no session key, an attacker in the path")
+  var keyed: Path = createPath(
+    playerKey: sessionKey
+    hostKey: sessionKey
+    attackerKey: keyOf(seed: 2)
+    attacked: true
+  )
+  run(path: keyed, label: "2. a session key the attacker does not have")
+  var honest: Path = createPath(
+    playerKey: sessionKey
+    hostKey: sessionKey
+    attackerKey: noKeyBytes
+    attacked: false
+  )
+  run(path: honest, label: "3. the same key, an honest path")
+  var mismatched: Path = createPath(
+    playerKey: keyOf(seed: 3)
+    hostKey: sessionKey
+    attackerKey: noKeyBytes
+    attacked: false
+  )
+  run(path: mismatched, label: "4. different keys at the two ends")
+  # Invites
+  let token: List(UInt8) = keyOf(seed: 9)
+  let invite: String = relayInviteText(token: token, sessionKey: sessionKey)
+  var readToken: List(UInt8) = {}
+  var readKey: List(UInt8) = {}
+  let parsed: Bool = relayInviteParts(text: invite, token: readToken, sessionKey: readKey)
+  log(
+    "invite {invite}: read {parsed}, token same {readToken is token}, key same {readKey is sessionKey}"
+  )
+  let bare: Bool = relayInviteParts(
+    text: relayTokenText(token: token)
+    token: readToken
+    sessionKey: readKey
+  )
+  log("a bare token: read {bare}, key bytes {readKey.length}")
+  let broken: Bool = relayInviteParts(text: "{invite}0", token: readToken, sessionKey: readKey)
+  let notHex: Bool = relayInviteParts(
+    text: invite.sub(start: 0, len: 32) + "-zz" + invite.sub(start: 35, len: 30)
+    token: readToken
+    sessionKey: readKey
+  )
+  log("a long invite: read {broken}; a key that is not hex: read {notHex}")
+  log("a fresh session key has {newRelaySessionKey().length} bytes")
+  ret 0
+}

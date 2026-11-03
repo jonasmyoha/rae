@@ -33,6 +33,8 @@
 # client sees only peer ids, never another client's address.
 open net/Wire
 open net/Udp
+open crypto/SecureRandom
+open String
 
 const relayKindOpen: Int = 201
 
@@ -228,4 +230,58 @@ func relayReadAddress(bytes: view List(UInt8), offset: view Int) ret NetAddress 
     port: readU16(bytes: bytes, offset: offset + 17)
     scopeId: readU32(bytes: bytes, offset: offset + 19)
   }
+}
+
+# ----- invites ------------------------------------------------------------------
+#
+# An invite is what a host gives its players (as text, a QR code, a link):
+# the relay token, which the relay sees, and a session key, which it never
+# does, as "<token>-<key>" in hex. A player sends only the token to the
+# relay and puts the key in its ConnectionConfig.sessionKey, so the host's
+# and the player's handshake proves both ends have it (lib/net/PacketSeal):
+# a relay that swaps in its own keys is refused (docs/relay.md, "Invites").
+# A bare token is an invite with no key (no authentication).
+const relaySessionKeyBytes: Int = 16
+
+# A fresh random session key (empty when the system has no random source)
+func newRelaySessionKey() ret List(UInt8) {
+  var key: List(UInt8) = List.create(UInt8, cap: relaySessionKeyBytes)
+  key.addDefaults(count: relaySessionKeyBytes)
+  if not secureRandomFill(bytes: key, start: 0, count: relaySessionKeyBytes) {
+    key.clear()
+  }
+  ret key
+}
+
+func relayInviteText(token: view List(UInt8), sessionKey: view List(UInt8)) ret String {
+  if sessionKey.length is 0 {
+    ret relayTokenText(token: token)
+  }
+  ret "{relayTokenText(token: token)}-{relayTokenText(token: sessionKey)}"
+}
+
+# Split an invite into its token and its session key (empty for a bare
+# token): false when it is not an invite
+func relayInviteParts(
+  text: view String
+  token: mod List(UInt8)
+  sessionKey: mod List(UInt8)
+) ret Bool {
+  sessionKey.clear()
+  let tokenDigits: Int = relayTokenBytes * 2
+  if text.length() is tokenDigits {
+    ret relayTokenFromText(text: text, token: token)
+  }
+  if text.length() is not tokenDigits + 1 + relaySessionKeyBytes * 2 or text.byteAt(
+    index: tokenDigits
+  ) is not 45 {
+    ret false
+  }
+  if not relayTokenFromText(text: text.sub(start: 0, len: tokenDigits), token: token) {
+    ret false
+  }
+  ret relayTokenFromText(
+    text: text.sub(start: tokenDigits + 1, len: relaySessionKeyBytes * 2)
+    token: sessionKey
+  )
 }

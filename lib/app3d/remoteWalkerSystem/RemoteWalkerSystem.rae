@@ -66,7 +66,7 @@ type RemoteWalkers {
   overflowLogged: Bool
   # Scratch: the remote walkers this frame
   remote: List(EntityId)
-  # The host's session token was printed
+  # The host's invite was printed
   tokenShown: Bool
 }
 
@@ -482,7 +482,7 @@ func driveWalkersNetworked(
 }
 
 # One frame of the session from the app: the local walker's pose out, the
-# others' in; the host prints its session token once the relay gave it
+# others' in; the host prints its invite once the relay gave it
 func walkerNetAppFrame(
   net: mod WalkerNet
   remoteWalkers: mod RemoteWalkers
@@ -501,14 +501,14 @@ func walkerNetAppFrame(
         "[net] {walkerNetModeName(settings: net.settings)} through the relay at {net.settings.relayHost}:{net.settings.relayPort}"
       )
     } else {
-      log("[net] not joined: RAE_WALKER_TOKEN is not a session token")
+      log("[net] not joined: RAE_WALKER_TOKEN is not an invite")
       net.settings.mode = WalkerNetMode.offline
     }
   }
   walkerNetFrame(net: net, localPose: pose, nowMs: nowMs())
   if not remoteWalkers.tokenShown and walkerNetToken(net: net).length() > 0 {
     log(
-      "[net] session token {walkerNetToken(net: net)} (join with RAE_WALKER_NET=join RAE_WALKER_TOKEN=...)"
+      "[net] invite {walkerNetToken(net: net)} (join with RAE_WALKER_NET=join RAE_WALKER_TOKEN=...)"
     )
     remoteWalkers.tokenShown = true
   }

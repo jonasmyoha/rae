@@ -233,6 +233,39 @@ without head-of-line blocking. A relay that speaks it needs:
 - **The browser side** through JS glue (Emscripten has no WebTransport
   API): `new WebTransport(url)`, `datagrams.writable` / `readable`.
 
+## Invites: a secret the relay never sees
+
+The relay sees the session token: every player sends it to join. So the
+token cannot also be what proves the two ends of a connection belong to the
+same session. The host makes a second secret for that, a 16-byte **session
+key**, and hands players an **invite** that carries both:
+`<token>-<session key>`, 65 hex characters (`relayInviteText`; as text, a
+QR code or a link). A player splits it (`relayInviteParts`), sends only the
+token to the relay, and puts the key in `ConnectionConfig.sessionKey`; the
+host puts the same key in its `RelayHost.connectionConfig`. A bare token is
+still an invite, with no key and no authentication.
+
+With a key, lib/net/PacketSeal adds to each handshake packet a 16-byte
+proof, HMAC-SHA256 under the key: the connect request's covers the
+connection id and the connecting end's public key, the accept's covers both
+public keys. A packet whose proof is wrong is refused
+(`Connection.stats.authRefused`), so a relay that answers each end with its
+own keys is caught before any data flows, and neither end ever connects to
+it. The key is also mixed into the HKDF salt, so keys derived without it
+never open a packet. The key never travels: not to the relay, not in any
+packet.
+
+Every player holds the key, so after a host migration the new host uses the
+same key and the players' reconnects authenticate as before. Anyone the host
+gives the invite to can join and speak in the session; the key keeps the
+relay (and anyone on the path) out, not an invited player.
+
+`compiler/tests/cases/1284_authenticated_connections` plays the attacker in
+the middle: without a key it reads the player's message; with a key it does
+not have, both handshakes are refused and nothing connects; with matching
+keys on an honest path the message arrives; mismatched keys are refused.
+The walker session (lib/app3d/walkerNetSystem) hosts and joins by invite.
+
 ## Limits and next steps
 
 - **Spoofing.** The relay knows a peer only by its UDP source address, so
@@ -240,10 +273,10 @@ without head-of-line blocking. A relay that speaks it needs:
   for that peer. The packets themselves are sealed: a forged packet fails
   to open at the other end, so the attacker can disrupt the session but
   not read it or speak in it.
-- **Active relay.** The connection keys are agreed with unsigned X25519
-  keys, so a malicious relay (not one that only forwards) could put its own
-  keys in the handshake. This is queued as "authenticate encrypted
-  connections".
+- **Active relay.** Without a session key, the connection keys are agreed
+  with unsigned X25519 keys, and a malicious relay (not one that only
+  forwards) could put its own keys in both handshakes. An invite's session
+  key closes that (see "Invites"); a bare token leaves it open.
 - **Players talk only to their host** (a star). Player-to-player traffic
   goes through the host, which is what a host-authoritative game wants.
 - **Direct paths reveal addresses.** When neither side is relay-only, the

@@ -1,0 +1,22 @@
+1. no session key, an attacker in the path
+  player connected true, host connected true
+  host received "meet at the old mill"
+  the attacker read "meet at the old mill"
+  proofs refused: 0 at the player, 0 at the host, 0 at the attacker
+2. a session key the attacker does not have
+  player connected false, host connected false
+  host received ""
+  the attacker read ""
+  proofs refused: 0 at the player, 10 at the host, 10 at the attacker
+3. the same key, an honest path
+  player connected true, host connected true
+  host received "meet at the old mill"
+  proofs refused: 0 at the player, 0 at the host
+4. different keys at the two ends
+  player connected false, host connected false
+  host received ""
+  proofs refused: 0 at the player, 10 at the host
+invite 4d58636e79848f9aa5b0bbc6d1dce7f2-25303b46515c67727d88939ea9b4bfca: read true, token same true, key same true
+a bare token: read true, key bytes 0
+a long invite: read false; a key that is not hex: read false
+a fresh session key has 16 bytes
