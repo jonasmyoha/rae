@@ -1,0 +1,288 @@
+# listMotionSystem — the rows of a virtual ListView with `animateMoves` glide
+# to their new places when the data's order changes, instead of jumping
+# there: a task ticked done slides down to the list's end, a row another
+# device moved slides to where it went. A row is known across data changes
+# by its `itemKeyField` cell (ListView.itemKeyField; without one, by its
+# index, which never moves).
+#
+# Run it after listViewSystem (the rows show this frame's data) and before
+# the layout, every frame `listMotionNeedsRun` says so; it returns true while
+# a row is still moving, so the app keeps drawing frames, and false once all
+# are home. It writes only `RuntimeOffset` on the list's pooled rows (a
+# transform-time move, never a relayout) and takes them away at rest. While a
+# row is held by drag to reorder (ui/listReorderSystem places the rows then)
+# it only notes the new order.
+#
+# The system owns its state (docs/ecs-systems-own-their-tables.md): the app
+# keeps a ListMotionSystem and makes a new one with each new UI world.
+import Math
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/ListReorder
+open ui/listViewSystem/ListViewSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/hierarchySystem/HierarchySystem
+
+# How fast a row eases home: about 95% of the way in 3 / rate seconds
+const listMotionRate: Float = 14.0
+
+# One list's state: the keys of the order it last showed, each row's offset
+# from its place now, and the data generation it saw
+type ListMotionList {
+  list: EntityId
+  keys: List(String)
+  offsets: List(Float)
+  generation: Int
+  lastSec: Float64
+}
+
+type ListMotionSystem {
+  lists: List(ListMotionList)
+}
+
+func createListMotionSystem() ret ListMotionSystem {
+  ret ListMotionSystem { lists: List.create(ListMotionList, cap: 2) }
+}
+
+# A new data order to look at, or a row still moving
+func listMotionNeedsRun(system: view ListMotionSystem, world: view UiWorld) ret Bool {
+  let generation: Int = componentTableGeneration(ListViewData, this: world.listViewDatas)
+  var animated: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.listViews), ++i {
+    if queryViewAt(table: world.listViews, denseIndex: i).animateMoves {
+      animated = true
+    }
+  }
+  if animated is false {
+    ret false
+  }
+  loop let state: view ListMotionList in system.lists {
+    if state.generation is not generation {
+      ret true
+    }
+    loop let offset: view Float in state.offsets {
+      if offset is not 0.0 {
+        ret true
+      }
+    }
+  }
+  ret system.lists.length is 0
+}
+
+# One frame for every animated list; true while a row is moving
+func listMotionSystem(
+  system: mod ListMotionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  nowSec: view Float64
+) ret Bool {
+  var moving: Bool = false
+  let generation: Int = componentTableGeneration(ListViewData, this: world.listViewDatas)
+  var lists: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: world.listViews), ++i {
+    if queryViewAt(table: world.listViews, denseIndex: i).animateMoves {
+      lists.add(value: componentEntityAt(this: world.listViews, i: i))
+    }
+  }
+  loop let listEntity: view EntityId in lists {
+    if listMotionStep(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      listEntity: listEntity
+      generation: generation
+      nowSec: nowSec
+    ) {
+      moving = true
+    }
+  }
+  ret moving
+}
+
+# The keys of a list's data rows, in order
+func listMotionKeys(
+  world: view UiWorld
+  listEntity: view EntityId
+  listView: view ListView
+) ret List(String) {
+  var keys: List(String) = List.create(String, cap: 16)
+  if componentHas(this: world.listViewDatas, entityId: listEntity) {
+    let data: view ListViewData = componentView(this: world.listViewDatas, entityId: listEntity)
+    loop var i: Int = 0, i < data.rows.length, ++i {
+      if let row: ListViewRow = data.rows.copyAt(index: i) {
+        keys.add(value: listViewRowKeyOf(lv: listView, row: row, index: i))
+      }
+    }
+  }
+  ret keys
+}
+
+# Each row's offset in the new order: where it was drawn (its old place and
+# offset) less its new place; a new row starts at home
+func listMotionRemap(
+  oldKeys: view List(String)
+  oldOffsets: view List(Float)
+  newKeys: view List(String)
+  pitch: view Float
+) ret List(Float) {
+  var offsets: List(Float) = List.create(Float, cap: newKeys.length)
+  loop var i: Int = 0, i < newKeys.length, ++i {
+    let key: String = newKeys.copyAtFallback(index: i, fallback: "")
+    var offset: Float = 0.0
+    loop var j: Int = 0, j < oldKeys.length, ++j {
+      if oldKeys.copyAtFallback(index: j, fallback: "") is key {
+        let drawn: Float = j.toFloat() * pitch + oldOffsets.copyAtFallback(index: j, fallback: 0.0)
+        offset = drawn - i.toFloat() * pitch
+      }
+    }
+    offsets.add(value: offset)
+  }
+  ret offsets
+}
+
+func listMotionStep(
+  system: mod ListMotionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  listEntity: view EntityId
+  generation: view Int
+  nowSec: view Float64
+) ret Bool {
+  var listView: ListView = ListView.default()
+  if let copied: ListView = componentCopy(this: world.listViews, entityId: listEntity) {
+    listView = own copied
+  }
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  # Its state (made the first time: the order it shows now, at rest)
+  var index: Int = -1
+  loop var i: Int = 0, i < system.lists.length, ++i {
+    if system.lists.copyAtFallback(index: i, fallback: listMotionEmpty()).list is listEntity {
+      index = i
+    }
+  }
+  if index < 0 {
+    let keys: List(String) = listMotionKeys(
+      world: world
+      listEntity: listEntity
+      listView: listView
+    )
+    var zeros: List(Float) = List.create(Float, cap: keys.length)
+    loop var k: Int = 0, k < keys.length, ++k {
+      zeros.add(value: 0.0)
+    }
+    system.lists.add(value: ListMotionList {
+      list: listEntity
+      keys: keys
+      offsets: zeros
+      generation: generation
+      lastSec: nowSec
+    })
+    ret false
+  }
+  var state: ListMotionList = system.lists.copyAtFallback(index: index, fallback: listMotionEmpty())
+  var seconds: Float = (nowSec - state.lastSec) as Float
+  if seconds < 0.0 or seconds > 0.05 {
+    seconds = 1.0 / 60.0
+  }
+  state.lastSec = nowSec
+  let held: Bool = componentHas(this: world.listReorderDrags, entityId: listEntity) and componentView(
+    this: world.listReorderDrags
+    entityId: listEntity
+  ).phase is not ListReorderPhase.idle
+  if state.generation is not generation {
+    let keys: List(String) = listMotionKeys(
+      world: world
+      listEntity: listEntity
+      listView: listView
+    )
+    if held {
+      # The reorder places the rows: the new order only noted
+      var zeros: List(Float) = List.create(Float, cap: keys.length)
+      loop var k: Int = 0, k < keys.length, ++k {
+        zeros.add(value: 0.0)
+      }
+      state.offsets = own zeros
+    } else {
+      state.offsets = listMotionRemap(
+        oldKeys: state.keys
+        oldOffsets: state.offsets
+        newKeys: keys
+        pitch: pitch
+      )
+    }
+    state.keys = own keys
+    state.generation = generation
+  }
+  var moving: Bool = false
+  if held is false {
+    loop var i: Int = 0, i < state.offsets.length, ++i {
+      let offset: Float = state.offsets.copyAtFallback(index: i, fallback: 0.0)
+      if offset is not 0.0 {
+        var eased: Float = offset * Math.exp(x: 0.0 - listMotionRate * seconds)
+        if eased < 0.25 and eased > -0.25 {
+          eased = 0.0
+        }
+        state.offsets.set(index: i, value: eased)
+        if eased is not 0.0 {
+          moving = true
+        }
+      }
+    }
+    listMotionPose(
+      world: world
+      uiSystems: uiSystems
+      listEntity: listEntity
+      listView: listView
+      offsets: state.offsets
+    )
+  }
+  system.lists.set(index: index, value: own state)
+  ret moving
+}
+
+func listMotionEmpty() ret ListMotionList {
+  ret ListMotionList {
+    list: noEntity()
+    keys: List.create(String, cap: 0)
+    offsets: List.create(Float, cap: 0)
+    generation: -1
+    lastSec: 0.0
+  }
+}
+
+# Every pooled row at its data row's offset (none at rest)
+func listMotionPose(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  listEntity: view EntityId
+  listView: view ListView
+  offsets: view List(Float)
+) {
+  if componentHas(this: world.childrens, entityId: listEntity) is false {
+    ret
+  }
+  var scrollY: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: listEntity) {
+    scrollY = componentView(this: world.scrollStates, entityId: listEntity).y
+  }
+  let firstRow: Int = listViewFirstRow(lv: listView, scrollY: scrollY, count: offsets.length)
+  let children: view Children = componentView(this: world.childrens, entityId: listEntity)
+  loop var slot: Int = 0, slot < children.ids.length, ++slot {
+    let rowEntity: EntityId = children.ids.copyAtFallback(index: slot, fallback: noEntity())
+    let offset: Float = offsets.copyAtFallback(index: firstRow + slot, fallback: 0.0)
+    if offset is 0.0 {
+      if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: rowEntity) {
+        componentRemove(this: uiSystems.transform2d.runtimeOffsets, entityId: rowEntity)
+      }
+    } else {
+      componentSet(
+        this: uiSystems.transform2d.runtimeOffsets
+        entityId: rowEntity
+        data: RuntimeOffset { delta: Vec2 { x: 0.0, y: offset } }
+      )
+    }
+  }
+}
