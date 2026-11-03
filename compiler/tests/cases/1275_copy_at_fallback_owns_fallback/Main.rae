@@ -1,0 +1,70 @@
+# List.copyAtFallback owns its fallback (`fallback: copy T`, as Array's has):
+# a temporary fallback is freed when the index is in range, and a named one
+# comes back as an independent copy when it is not. With a bare `T` the
+# fallback was borrowed bitwise: `fallback: makeHolder()` leaked one buffer
+# per call, a copy out of a struct's List field with a named fallback kept
+# the fallback's whole heap (~340 buffers per call for a networking seat),
+# and an out-of-range result shared its buffer with the caller's variable.
+# The runner's leak check at exit is part of the test.
+type Holder {
+  items: List(Int)
+}
+
+type Room {
+  holders: List(Holder)
+  name: String
+}
+
+func makeHolder(first: view Int) ret Holder {
+  var holder: Holder = { items: {} }
+  holder.items.add(value: first)
+  ret holder
+}
+
+func main() ret Int {
+  var list: List(Holder) = {}
+  list.add(value: makeHolder(first: 1))
+
+  # A temporary fallback, index in range: the temporary is freed
+  var total: Int = 0
+  loop var i: Int = 0, i < 100, ++i {
+    let copied: Holder = list.copyAtFallback(index: 0, fallback: makeHolder(first: 99))
+    total = total + copied.items.length
+  }
+  log("in range with a temporary fallback: {total} items read")
+
+  # A named fallback, index out of range: an independent copy
+  let spare: Holder = makeHolder(first: 7)
+  var outside: Holder = list.copyAtFallback(index: 5, fallback: spare)
+  outside.items.add(value: 8)
+  outside.items.set(index: 0, value: 70)
+  log("out of range: the copy has {outside.items}, the named fallback still {spare.items}")
+
+  # A temporary fallback out of range: it becomes the result
+  let made: Holder = list.copyAtFallback(index: 9, fallback: makeHolder(first: 5))
+  log("out of range with a temporary: {made.items}")
+
+  # Out of a List field of a local struct, with a named fallback
+  var room: Room = { holders: {}, name: "hall" }
+  room.holders.add(value: makeHolder(first: 3))
+  var fieldTotal: Int = 0
+  loop var i: Int = 0, i < 100, ++i {
+    let copied: Holder = room.holders.copyAtFallback(index: 0, fallback: spare)
+    fieldTotal = fieldTotal + copied.items.copyAtFallback(index: 0, fallback: 0)
+  }
+  log("from a struct's List field: {fieldTotal}")
+
+  # Scalars and Strings, as before
+  let numbers: List(Int) = { 4, 5 }
+  let words: List(String) = { "a" }
+  log(
+    "scalars: {numbers.copyAtFallback(index: 1, fallback: -1)} {numbers.copyAtFallback(
+      index: 7
+      fallback: -1
+    )}, strings: {words.copyAtFallback(index: 0, fallback: "none")} {words.copyAtFallback(
+      index: 3
+      fallback: "none"
+    )}"
+  )
+  ret 0
+}
