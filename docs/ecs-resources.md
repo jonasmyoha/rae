@@ -1,11 +1,11 @@
-# ECS Resources (world-global singletons)
+# ECS Resources (one per World, a plain field)
 
 A **World** holds two kinds of state:
 
 - **Components** are *per-entity*. Each is a `ComponentTable(T)` field on the
   World, one row per entity, looked up by `EntityId`.
-- **Resources** are *world-global singletons*. There is exactly **one** — so a
-  resource is just a **plain field on the World struct**, read directly as
+- **Resources** are what a World has exactly **one** of. A resource is not a
+  global (Rae has none): it is just a **plain field on the World struct**, read directly as
   `world.frame`, `world.input`, `world.layoutW`. No id, no table, no query.
 
 ```rae
@@ -20,9 +20,9 @@ type GameWorld {
 ## Rule: a resource is NEVER an entity
 
 Do **not** model the camera, the input snapshot, the clock, GPU handles, or any
-other singleton as a one-off entity carrying a component. That fakes an
+anything else there is one of, as a one-off entity carrying a component. That fakes an
 entity/table for something there is exactly one of, costs an id + a sparse-set
-lookup, and reads worse than a field. A singleton is a field — full stop.
+lookup, and reads worse than a field. One of a thing is a field — full stop.
 
 ## Serialization
 

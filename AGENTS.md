@@ -286,13 +286,14 @@ These instructions define **how Codex should work**, communicate progress, and i
   `const` may not own heap (a `List`, a `Map`, a struct carrying one); a
   String const is a literal with a static buffer, so it is fine. A value
   computed at run time belongs on its owner, not at module level.
-- The replacement is **ownership**, matching the ECS architecture: a singleton
-  becomes a **resource on the World or App** and is threaded explicitly through
+- The replacement is **ownership**, matching the ECS architecture: state a
+  program has exactly one of becomes a **resource**, a plain field on the World
+  or App that owns it, and is threaded explicitly through
   the `mod`/`view` parameter that already says who may touch it — e.g. a former
   `var activeTheme` becomes `app.theme`, passed to the systems that read it.
 - Enforcement is phased: it is a **hard compiler error in `lib/`** (the stdlib is
-  globals-clean) and a **warning in app/example code** whose singletons are still
-  being migrated onto their owners. Do not add new module-level `var`/heap-`let`
+  globals-clean) and a **warning in app/example code** whose module-level state
+  is still being migrated onto its owners. Do not add new module-level `var`/heap-`let`
   anywhere; when you touch a file that still has one, prefer moving it onto its
   owner.
 
@@ -357,8 +358,9 @@ Rae is a **minimalistic language designed for both humans and AI agents**.
 **Rae is built around the Entity Component System (ECS) as its general
 architecture — not just for games, but for programs of any kind.** ECS is the
 default way to structure state and behavior: data lives in components on
-entities, logic lives in systems that run over them, and shared singletons are
-resources owned by a World or App. This is a deliberate bet that one small,
+entities, logic lives in systems that run over them, and state there is one of
+per World or App is a resource: a plain field on that owner. This is a
+deliberate bet that one small,
 explicit, data-oriented model — the same for a UI, a renderer, a simulation, or
 a CLI tool — is easier for a person to reason about and for an agent to generate
 and refactor than a grab-bag of ad-hoc patterns. Language features (compile-time
