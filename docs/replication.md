@@ -1,4 +1,4 @@
-# Entity replication (networking 7/12, 8/12)
+# Entity replication (networking 7/12, 8/12, 9/12)
 
 `lib/net/replication`: the host's ECS World is the truth, and each player
 keeps a copy of the part of it near the player. The layer runs over
@@ -165,6 +165,43 @@ decided one stream's losses, and "10%" loss came in runs of three. That
 was exactly a window of three redundant inputs. It is now xorshift32,
 whose runs match independent loss (89 runs of three in 100,000 sends,
 where independent loss gives about 90).
+
+## Join, leave, reconnect (9/12)
+
+`lib/net/session/Session.rae` keeps the host's player slots. It sits beside
+replication, over the same connection:
+
+- **The first exchange.** A player's first reliable message is a hello
+  (kind 3) with its rejoin token, all zeros the first time. The host
+  answers with a welcome (kind 4): the slot id, whether the slot was
+  resumed, and the 16-byte random token to use next time. A new slot gets
+  a new entity (the app makes it: `sessionSetEntity`). Its replication peer
+  is fresh, so its first snapshot is whole.
+- **Leaving.** A connection that ends (the player disconnected on purpose)
+  frees its slot at the next `sessionExpired`, and the app removes the
+  entity. The entity disappears from every other world with the next
+  snapshot. Nobody else's connection or world is touched.
+- **Dropping out.** A connection that times out (an app sent to the
+  background, a network change) keeps its slot for `graceMs` (10 s in the
+  fixture). A hello with that slot's token within the grace period resumes
+  the slot and its entity, on a new connection, with a fresh peer (a whole
+  snapshot). If the old connection has not timed out yet, the new one takes
+  the slot over and the host stops serving the old one. After the grace
+  period the slot is freed. The token then no longer matches, so the
+  player gets a new slot.
+
+Measured in fixture `1279_join_leave_reconnect`, a simulated minute over
+lib/net/BadNetwork at 5% loss, 30 ms each way and 10 ms jitter:
+
+- **Joining.** A late joiner is playing, with its own entity in a world
+  built from a whole snapshot, 210 ms after its connection starts (310 ms
+  when a packet was lost). That is the handshake, the hello and welcome,
+  and the next snapshot. The fixture's bound is 500 ms.
+- **Comings and goings.** Six players join, leave, go away for 3, 7 and
+  17 seconds, and come back while the host keeps running.
+- **Worlds.** Every second, every connected world is compared with the
+  host's snapshot at the tick the player last applied. That is about 140
+  comparisons, with no mismatch.
 
 ## Not yet
 
