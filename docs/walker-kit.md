@@ -48,6 +48,21 @@ exactly as before.
   `walkerGameStart` adds the game's own .raescene over the walker's;
   `setNodeText` changes its text.
 
+## Shared assets
+
+The kit's own assets (the walker's model and clips, its palette, the UI
+scenes and their font) live in the stdlib at `lib/assets/walker/`, and a
+game names them with the constant `walkerAssets` (`app3d/WalkerAppSetup`):
+`assets: walkerAssets`. The walker app resolves the folder with
+`Sys.stdlibPath`: a `"lib/..."` path that does not exist where the app runs
+is read from `$RAE_STDLIB`, which `rae run` sets to the lib/ of the Rae the
+project builds against, the same lib the project's `dep lib` lock record
+names. So a project outside the Rae checkout never copies these files and
+never writes a path into the checkout; the examples (136, 137, 143, 148)
+use the same constant. A game with its own model or scenes points `assets`
+at its own folder holding the same file names. The iOS bundle stages
+`lib/assets/walker` with the other shared stdlib data.
+
 ## Example 148
 
 `examples/148_walker_game`: the 143 forest walker with a red box 6 m ahead
