@@ -96,3 +96,50 @@ on screenshots with OpenCV's QR detector (opencv-python 5.0): the default
 frame decodes both codes; straight on, all four sides and the top decode
 (before the `makeBox` fix two sides read only mirrored).
 `compiler/tests/cases/1287_qr_image` checks the picture module by module.
+
+## Reading: lib/qr/QrReader
+
+```rae
+if let result: QrReadResult = qrRead(image: gray) {
+  # result.text, result.bytes, result.version, result.level,
+  # result.corrected (codewords Reed-Solomon fixed), result.mirrored,
+  # result.topLeft / topRight / bottomLeft (the finders in the image)
+}
+```
+
+`gray` is a `GrayImage` (lib/qr/GrayImage: width, height, one `UInt8` per
+pixel, 0 black). The steps, all plain Rae:
+
+1. Binarize with an adaptive threshold (Bradley's: darker than the mean of
+   the square round the pixel by 15 %, means from an integral image), so
+   uneven light and shadows do not matter.
+2. Find the finder patterns: each row's runs in the ratio 1:1:3:1:1,
+   confirmed vertically, horizontally and diagonally, merged; the three
+   that make the best right isosceles triangle (module sizes up to 3x apart
+   and sides up to 3x apart, for steep perspective), ordered by the sign of
+   their cross product.
+3. The module count from each side in its own module size, then its
+   neighbors (+-4, +-8) if that fails; the alignment pattern searched near
+   where the three finders put it; a homography from the four points
+   (lib/qr/QrPerspective).
+4. Each module the majority of five samples; the format information (the
+   nearest of the 32 valid codes, up to 3 bits off, either copy); from
+   version 7 the version information the same way (and the grid sampled
+   again if it names another size).
+5. The codewords in the zigzag, unmasked, split into blocks, each
+   corrected (lib/qr/ReedSolomon: syndromes, Berlekamp-Massey, Chien
+   search, Forney), and the segments decoded (numeric, alphanumeric, byte;
+   an ECI skipped). A failed grid is tried transposed: a code seen from
+   behind.
+
+`compiler/tests/cases/1288_qr_reader` reads codes drawn by
+`qrDrawGray` (antialiased, through any four corners): straight, 3 and 12
+pixel modules, rotated 30 and 135 degrees, tilted, steeply tilted (a plate
+seen from above), blurred with noise, under uneven light, mirrored,
+versions 1 to 25; damage within each level's error correction is corrected
+(3, 7, 10 and 14 codewords at L, M, Q, H) and beyond it gives no result
+(never a wrong text); noise, a gradient and a checkerboard give none.
+
+Time (Apple M1 Max, release build): a 512 x 512 image with a code reads in
+about 1.3 ms; one with no code is turned down in 3.5-7 ms. Scanning a part
+of the rendered frame every few frames costs little.
