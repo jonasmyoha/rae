@@ -448,7 +448,11 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   }
   // the weather's clouds over all of it: the sun, the moon and the stars
   // go behind them
-  if (kind > 1.5) {
+  // (the cloud tier off, L.clouds.w 0, lib/CloudTier: no clouds drawn, the
+  // sky only dimmed by their cover)
+  if (kind > 1.5 && L.clouds.w < 0.5) {
+    c = c * (1.0 - 0.5 * clamp(L.clouds.x, 0.0, 1.0));
+  } else if (kind > 1.5) {
     let cloud = skyClouds(dir, clearSky, toSun);
     c = mix(c, cloud.rgb, cloud.w);
   }

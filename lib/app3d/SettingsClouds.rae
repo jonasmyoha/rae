@@ -1,0 +1,103 @@
+# app3d/SettingsClouds — the walkers' cloud tier (lib/CloudTier,
+# docs/cloud-rendering-research.md §8.4): the game's ceiling, the device it
+# runs on, the quality setting's tier, and each frame the measured fallback,
+# fed by the clouds' GPU span (RendererPassTiming, "clouds"; measured only
+# while the pass timing runs, RAE_GPU_PASS_TIMING or a capture) and the OS
+# thermal state. The tier it settles on goes to the renderer (setCloudTier).
+import Sys
+import Device
+open CloudTier
+open RendererDeferred
+open RendererPassTiming
+open app3d/SettingsDialog
+open app3d/RenderScale
+
+# The walkers' clouds (an app resource, on the render state)
+type WalkerClouds {
+  settings: CloudSettings
+  control: CloudTierControl
+  # the pass timing samples already read
+  seenSamples: Int
+}
+
+# A phone or a tablet, or a browser on one (a coarse main pointer): the
+# device question is asked at run time
+func walkerCloudDeviceMobile() ret Bool {
+  if Target.isMobileOs {
+    ret true
+  }
+  when Target.os is Os.web {
+    ret Device.primaryPointer() is Pointer.coarse
+  } else {
+    ret false
+  }
+}
+
+# The tier a quality step allows: Low the layer, Mid the slab, High and
+# Ultra the game's ceiling (lib/CloudTier cloudTierForQuality)
+func settingsQualityCloudTier(
+  quality: view SettingsQuality
+  maxTier: view CloudTier
+) ret CloudTier {
+  var level: Int = 3
+  if quality is SettingsQuality.low {
+    level = 0
+  } else if quality is SettingsQuality.mid {
+    level = 1
+  } else if quality is SettingsQuality.high {
+    level = 2
+  }
+  ret cloudTierForQuality(level: level, maxTier: maxTier)
+}
+
+# The walkers' clouds at the start: the game's ceiling `settings`, this
+# device, the quality setting, or RAE_CLOUD_TIER (logged once)
+func createWalkerClouds(
+  settings: view CloudSettings
+  quality: view SettingsQuality
+) ret WalkerClouds {
+  ret WalkerClouds {
+    settings: settings
+    control: createCloudTierControl(
+      settings: settings
+      mobile: walkerCloudDeviceMobile()
+      qualityTier: settingsQualityCloudTier(quality: quality, maxTier: settings.maxTier)
+      forcedName: Sys.getEnv(name: "RAE_CLOUD_TIER")
+    )
+    seenSamples: 0
+  }
+}
+
+# The clouds' GPU time in the pass timing's newest sample, once per sample
+# (-1 when there is no new one, or it has no clouds span)
+func walkerCloudMicroseconds(clouds: mod WalkerClouds, renderer: view DeferredRenderer) ret Int {
+  let timing: view DeferredPassTiming = renderer.passTiming
+  if timing.samples is clouds.seenSamples {
+    ret -1
+  }
+  clouds.seenSamples = timing.samples
+  loop var i: Int = 0, i < timing.lastTags.length, ++i {
+    if timing.lastTags.copyAtDefault(index: i) is passTimingCloudsTag {
+      ret timing.lastMicroseconds.copyAtDefault(index: i)
+    }
+  }
+  ret -1
+}
+
+# One frame: the quality's ceiling, the fallback, and the tier to the renderer
+func walkerCloudsFrame(
+  clouds: mod WalkerClouds
+  renderer: mod DeferredRenderer
+  quality: view SettingsQuality
+) {
+  let qualityChanged: Bool = cloudTierSetQuality(
+    control: clouds.control
+    qualityTier: settingsQualityCloudTier(quality: quality, maxTier: clouds.settings.maxTier)
+  )
+  let fellBack: Bool = cloudTierFrame(
+    control: clouds.control
+    cloudMicroseconds: walkerCloudMicroseconds(clouds: clouds, renderer: renderer)
+    thermal: thermalState()
+  )
+  setCloudTier(renderer: renderer, tier: clouds.control.tier)
+}

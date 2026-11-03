@@ -1,0 +1,269 @@
+# CloudTier — which cloud tier a frame draws (docs/cloud-rendering-research.md
+# §8.4): off, the 2D layer, the 2.5D slab or the volumetric clouds, all from
+# the same cloud field (lib/SkyClouds), so a step down changes the detail,
+# not where the clouds are.
+#
+# The tier is chosen in three layers, each only lowering the one before:
+# - the game's ceiling, CloudSettings (maxTier, preferredTier), set in code;
+# - the device's starting tier, at run time: a phone (or a browser on one)
+#   starts at the layer, a desktop at the slab; and the quality setting
+#   (the app maps its low / mid / high steps, cloudTierForQuality);
+# - the measured fallback (cloudTierFrame): when the clouds' own GPU time
+#   stays over its budget for a window of frames, or the OS reports a
+#   serious thermal state, the tier steps down one, logged once; it steps
+#   back up only after a long good stretch. It never touches the dynamic
+#   resolution: the clouds alone being slow does not shrink the frame.
+#
+# A tier that is not built yet (cloudTierBuilt) draws the highest one that
+# is. RAE_CLOUD_TIER=off|layer|slab|volumetric forces a tier and turns the
+# fallback off, for testing.
+enum CloudTier { off, layer, slab, volumetric }
+
+# The highest tier that exists; a higher one draws this one
+const cloudTierBuilt: CloudTier = CloudTier.layer
+
+# The game's ceiling, set in code: the highest tier it ever wants, and the
+# one it prefers (the start, before the device and the quality lower it)
+type CloudSettings {
+  maxTier: CloudTier = CloudTier.volumetric
+  preferredTier: CloudTier = CloudTier.volumetric
+}
+
+# The frames of the fallback's window, how many of them over the budget step
+# the tier down, the good frames that step it back up, and the frames after a
+# change before another one
+const cloudTierWindowFrames: Int = 120
+
+const cloudTierOverFrames: Int = 90
+
+const cloudTierGoodFrames: Int = 3600
+
+const cloudTierCooldownFrames: Int = 600
+
+# The OS thermal state that steps the tier down (RenderScale thermalState:
+# 0 nominal, 1 fair, 2 serious, 3 critical)
+const cloudTierThermalSerious: Int = 2
+
+# The tier drawn now and why (an app resource: on the app's render state)
+type CloudTierControl {
+  tier: CloudTier
+  # the highest tier this run may draw (the game's, the device's and the
+  # quality's, and what is built), and the same without the quality's
+  ceiling: CloudTier
+  startCeiling: CloudTier
+  # RAE_CLOUD_TIER set it: the fallback never moves it
+  forced: Bool
+  # the clouds' GPU budget (microseconds a frame)
+  budgetMicroseconds: Int
+  # the fallback's window: measured frames, and how many were over
+  windowFrames: Int
+  overFrames: Int
+  # good frames in a row, and frames left before another change
+  goodFrames: Int
+  cooldownFrames: Int
+}
+
+func cloudTierRank(tier: view CloudTier) ret Int {
+  if tier is CloudTier.layer {
+    ret 1
+  }
+  if tier is CloudTier.slab {
+    ret 2
+  }
+  if tier is CloudTier.volumetric {
+    ret 3
+  }
+  ret 0
+}
+
+func cloudTierOfRank(rank: view Int) ret CloudTier {
+  if rank >= 3 {
+    ret CloudTier.volumetric
+  }
+  if rank is 2 {
+    ret CloudTier.slab
+  }
+  if rank is 1 {
+    ret CloudTier.layer
+  }
+  ret CloudTier.off
+}
+
+# The lower of two tiers
+func cloudTierLower(first: view CloudTier, second: view CloudTier) ret CloudTier {
+  if cloudTierRank(tier: second) < cloudTierRank(tier: first) {
+    ret second
+  }
+  ret first
+}
+
+# The tier a name spells ("off", "layer", "slab", "volumetric"), else none
+func cloudTierNamed(name: view String) ret opt CloudTier {
+  if name is "off" {
+    ret CloudTier.off
+  }
+  if name is "layer" {
+    ret CloudTier.layer
+  }
+  if name is "slab" {
+    ret CloudTier.slab
+  }
+  if name is "volumetric" {
+    ret CloudTier.volumetric
+  }
+  ret none
+}
+
+# The tier a device starts at: a phone or a tablet (or a browser on one) the
+# layer, a desktop the slab
+func cloudDeviceTier(mobile: view Bool) ret CloudTier {
+  if mobile {
+    ret CloudTier.layer
+  }
+  ret CloudTier.slab
+}
+
+# The clouds' GPU budget a frame: 1.5 ms on a phone, 2.5 ms on a desktop
+func cloudTierBudgetMicroseconds(mobile: view Bool) ret Int {
+  if mobile {
+    ret 1500
+  }
+  ret 2500
+}
+
+# The tier a quality step allows (0 low, 1 mid, 2 high, 3 ultra): low the
+# layer, mid the slab, high and ultra the game's ceiling (`maxTier`)
+func cloudTierForQuality(level: view Int, maxTier: view CloudTier) ret CloudTier {
+  if level <= 0 {
+    ret cloudTierLower(first: CloudTier.layer, second: maxTier)
+  }
+  if level is 1 {
+    ret cloudTierLower(first: CloudTier.slab, second: maxTier)
+  }
+  ret maxTier
+}
+
+# The control a run starts with: the lowest of the game's ceiling, its
+# preferred tier, the device's, the quality's and what is built; or the tier
+# `forcedName` spells (RAE_CLOUD_TIER; "" for none), the fallback then off.
+# The choice and its reasons are logged once.
+func createCloudTierControl(
+  settings: view CloudSettings
+  mobile: view Bool
+  qualityTier: view CloudTier
+  forcedName: view String
+) ret CloudTierControl {
+  let device: CloudTier = cloudDeviceTier(mobile: mobile)
+  var ceiling: CloudTier = cloudTierLower(first: settings.maxTier, second: settings.preferredTier)
+  ceiling = cloudTierLower(first: ceiling, second: device)
+  ceiling = cloudTierLower(first: ceiling, second: cloudTierBuilt)
+  let startCeiling: CloudTier = ceiling
+  ceiling = cloudTierLower(first: ceiling, second: qualityTier)
+  var control: CloudTierControl = {
+    tier: ceiling
+    ceiling: ceiling
+    startCeiling: startCeiling
+    forced: false
+    budgetMicroseconds: cloudTierBudgetMicroseconds(mobile: mobile)
+    windowFrames: 0
+    overFrames: 0
+    goodFrames: 0
+    cooldownFrames: 0
+  }
+  if let forced: CloudTier = cloudTierNamed(name: forcedName) {
+    control.tier = cloudTierLower(first: forced, second: cloudTierBuilt)
+    control.ceiling = control.tier
+    control.startCeiling = control.tier
+    control.forced = true
+    log("[clouds] tier {control.tier}: forced by RAE_CLOUD_TIER={forcedName}")
+    ret control
+  }
+  log(
+    "[clouds] tier {control.tier} (game {settings.maxTier}, preferred {settings.preferredTier}, device {device}, quality {qualityTier}, built {cloudTierBuilt})"
+  )
+  ret control
+}
+
+# One frame of the fallback: `cloudMicroseconds` is the clouds' GPU time this
+# frame (-1 when it was not measured), `thermal` the OS thermal state. True
+# when the tier changed (logged once, with why).
+func cloudTierFrame(
+  control: mod CloudTierControl
+  cloudMicroseconds: view Int
+  thermal: view Int
+) ret Bool {
+  if control.forced {
+    ret false
+  }
+  if control.cooldownFrames > 0 {
+    control.cooldownFrames = control.cooldownFrames - 1
+  }
+  let over: Bool = cloudMicroseconds > control.budgetMicroseconds
+  if cloudMicroseconds >= 0 {
+    control.windowFrames = control.windowFrames + 1
+    if over {
+      control.overFrames = control.overFrames + 1
+    }
+  }
+  let hot: Bool = thermal >= cloudTierThermalSerious
+  let slowWindow: Bool = control.windowFrames >= cloudTierWindowFrames and control.overFrames >= cloudTierOverFrames
+  if control.windowFrames >= cloudTierWindowFrames {
+    control.windowFrames = 0
+    control.overFrames = 0
+  }
+  if (hot or slowWindow) and control.cooldownFrames is 0 and control.tier is not CloudTier.off {
+    let from: CloudTier = control.tier
+    control.tier = cloudTierOfRank(rank: cloudTierRank(tier: from) - 1)
+    control.goodFrames = 0
+    control.cooldownFrames = cloudTierCooldownFrames
+    if hot {
+      log("[clouds] {from}: thermal state {thermal}: now {control.tier}")
+    } else {
+      log(
+        "[clouds] {from}: {cloudMicroseconds} us > {control.budgetMicroseconds} us budget: now {control.tier}"
+      )
+    }
+    ret true
+  }
+  # a good frame: cool, and measured well under the budget (or not measured)
+  let good: Bool = not hot and (cloudMicroseconds < 0 or cloudMicroseconds * 10 < control.budgetMicroseconds * 6)
+  if good {
+    control.goodFrames = control.goodFrames + 1
+  } else {
+    control.goodFrames = 0
+  }
+  if control.goodFrames >= cloudTierGoodFrames and control.cooldownFrames is 0 and cloudTierRank(
+    tier: control.tier
+  ) < cloudTierRank(tier: control.ceiling) {
+    let from: CloudTier = control.tier
+    control.tier = cloudTierOfRank(rank: cloudTierRank(tier: from) + 1)
+    control.goodFrames = 0
+    control.cooldownFrames = cloudTierCooldownFrames
+    log("[clouds] {from}: {cloudTierGoodFrames} good frames: back to {control.tier}")
+    ret true
+  }
+  ret false
+}
+
+# The quality setting changed: its tier (cloudTierForQuality) is the new
+# ceiling below the game's and the device's, and the tier goes to it (the
+# person asked for it). True when the tier changed (logged once).
+func cloudTierSetQuality(control: mod CloudTierControl, qualityTier: view CloudTier) ret Bool {
+  if control.forced {
+    ret false
+  }
+  let ceiling: CloudTier = cloudTierLower(first: control.startCeiling, second: qualityTier)
+  if ceiling is control.ceiling {
+    ret false
+  }
+  control.ceiling = ceiling
+  let changed: Bool = control.tier is not ceiling
+  control.tier = ceiling
+  control.goodFrames = 0
+  control.windowFrames = 0
+  control.overFrames = 0
+  if changed {
+    log("[clouds] quality {qualityTier}: tier {control.tier}")
+  }
+  ret changed
+}

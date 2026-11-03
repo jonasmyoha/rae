@@ -21,6 +21,7 @@ open Weather
 open WeatherWind
 open Wind
 open GeoPlace
+open app3d/SettingsClouds
 open app3d/SeasonImpostors
 open app3d/GroundPalette
 open app3d/SnowField
@@ -368,6 +369,13 @@ func beginWalkerFrame(app: mod WalkerApp) {
   # NO CLAMP before DRS: the scale controller reacts to the true frame time.
   updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
   setDynamicRenderScale(renderer: app.renderSystem.renderer, scale: app.renderSystem.drs.scale)
+  # the cloud tier: the quality's ceiling and the measured fallback (never
+  # through the render scale above)
+  walkerCloudsFrame(
+    clouds: app.renderSystem.clouds
+    renderer: app.renderSystem.renderer
+    quality: app.inputSystem.settings.quality
+  )
   # Negative dt is a clock going backwards, not a long frame; refuse it.
   if deltaTime < 0.0 {
     deltaTime = 0.0

@@ -18,6 +18,8 @@
 import Profile
 import Gpu2d
 import Quat
+open app3d/SettingsClouds
+open CloudTier
 open app3d/UiModes
 open app3d/ReferenceTree
 open app3d/WalkerAppWorld
@@ -742,6 +744,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         cubeBatch: own cubeBatch
         frameLog: createFrameLog()
         frameLogOn: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
+        # the walkers ask for every cloud tier; the device, the quality and
+        # the fallback lower it (lib/CloudTier)
+        clouds: createWalkerClouds(settings: CloudSettings {}, quality: settingsState.quality)
         statsLogged: false
         windSettings: windSettings
         wind: createWindState(settings: windSettings)
