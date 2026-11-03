@@ -1,0 +1,422 @@
+# lib/net/relay: a relay, hosts and players on loopback UDP in one process
+# (each with its own socket; tools/relay/loopback-check.sh runs them as
+# separate processes). A host opens a session and gets a token, players
+# join with it, and encrypted lib/net/Connections run through the relay,
+# which forwards the sealed packets without reading them. Messages go both
+# ways; a player leaves and the host is told; a player joins late; a wrong
+# token is refused; two sessions do not mix; a silent player and a silent
+# host time out.
+open ecs/ComponentTable
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open net/relay/RelayConnections
+
+# A host that echoes every message back to its sender
+type Host {
+  relayHost: RelayHost
+  message: List(UInt8)
+  received: Int
+  peersLeft: Int
+}
+
+# A player that counts the echoes (each must be the next number)
+type Player {
+  relayPlayer: RelayPlayer
+  message: List(UInt8)
+  echoes: Int
+  outOfOrder: Int
+}
+
+func clientConfig() ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.keepAliveMs = 150
+  ret config
+}
+
+func createHost(relayAddress: view NetAddress) ret Host {
+  ret Host {
+    relayHost: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: clientConfig()
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    received: 0
+    peersLeft: 0
+  }
+}
+
+func createPlayer(relayAddress: view NetAddress) ret Player {
+  ret Player {
+    relayPlayer: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: clientConfig()
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    echoes: 0
+    outOfOrder: 0
+  }
+}
+
+func stepHost(host: mod Host, nowMs: view Int) {
+  relayHostReceive(host: host.relayHost, nowMs: nowMs)
+  loop var i: Int = 0, i < host.relayHost.peers.length, ++i {
+    if let peer: mod HostPeer = host.relayHost.peers.modAt(index: i) {
+      loop connectionReceive(connection: peer.connection, message: host.message) is MessageChannel.reliable {
+        host.received = host.received + 1
+        let echoed: Bool = connectionSendReliable(
+          connection: peer.connection
+          bytes: host.message
+          start: 0
+          count: host.message.length
+        )
+      }
+    }
+  }
+  relayHostSend(host: host.relayHost, nowMs: nowMs)
+  # This frame's leavers (the relay said so, or the connection closed)
+  host.peersLeft = host.peersLeft + host.relayHost.peersLeft.length
+}
+
+func stepPlayer(player: mod Player, nowMs: view Int) {
+  relayPlayerReceive(player: player.relayPlayer, nowMs: nowMs)
+  loop connectionReceive(connection: player.relayPlayer.connection, message: player.message) is MessageChannel.reliable {
+    if readU32(bytes: player.message, offset: 0) is not player.echoes {
+      player.outOfOrder = player.outOfOrder + 1
+    }
+    player.echoes = player.echoes + 1
+  }
+  relayPlayerSend(player: player.relayPlayer, nowMs: nowMs)
+}
+
+# Queue `count` numbered messages (from `first`) on a player's connection
+func sendNumbers(player: mod Player, first: view Int, count: view Int) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  loop var i: Int = first, i < first + count, ++i {
+    bytes.clear()
+    writeU32(bytes: bytes, value: i)
+    let queued: Bool = connectionSendReliable(
+      connection: player.relayPlayer.connection
+      bytes: bytes
+      start: 0
+      count: bytes.length
+    )
+  }
+}
+
+type Scene {
+  relay: RelayServer
+  host: Host
+  players: List(Player)
+  # Players and the host stop stepping when these are false (going silent)
+  hostAwake: Bool
+  awake: List(Bool)
+  startMs: Int
+}
+
+func nowSinceStart(scene: view Scene) ret Int {
+  ret nowMs() - scene.startMs
+}
+
+# Step everything for up to `limitMs`, or until `done` says so (checked by
+# the caller between calls): one round
+func round(scene: mod Scene) {
+  let now: Int = nowSinceStart(scene: scene)
+  relayFrame(server: scene.relay)
+  if scene.hostAwake {
+    stepHost(host: scene.host, nowMs: now)
+  }
+  loop var i: Int = 0, i < scene.players.length, ++i {
+    if scene.awake.copyAtFallback(index: i, fallback: false) {
+      if let player: mod Player = scene.players.modAt(index: i) {
+        stepPlayer(player: player, nowMs: now)
+      }
+    }
+  }
+  sleep(ms: 1)
+}
+
+func run(scene: mod Scene, milliseconds: view Int) {
+  let until: Int = nowSinceStart(scene: scene) + milliseconds
+  loop nowSinceStart(scene: scene) < until {
+    round(scene: scene)
+  }
+}
+
+func playerAt(scene: view Scene, index: view Int) ret Player {
+  if let player: Player = scene.players.copyAt(index: index) {
+    ret player
+  }
+  ret createPlayer(relayAddress: noNetAddress())
+}
+
+# Add a player that joins `token` and connects
+func addPlayer(scene: mod Scene, token: view String, connectionId: view Int) {
+  let relayAddress: NetAddress = scene.host.relayHost.client.relayAddress
+  var player: Player = createPlayer(relayAddress: relayAddress)
+  let now: Int = nowSinceStart(scene: scene)
+  let joining: Bool = relayPlayerJoin(
+    player: player.relayPlayer
+    tokenText: token
+    connectionId: connectionId
+    nowMs: now
+  )
+  scene.players.add(value: player)
+  scene.awake.add(value: true)
+}
+
+func connectedCount(scene: view Scene) ret Int {
+  var count: Int = 0
+  loop var i: Int = 0, i < scene.players.length, ++i {
+    if scene.awake.copyAtFallback(index: i, fallback: false) and connectionIsConnected(
+      connection: playerAt(scene: scene, index: i).relayPlayer.connection
+    ) {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+# Whether every awake player has at least `echoes` echoes (the late joiner,
+# player 4, at least `lateEchoes`)
+func allEchoed(scene: view Scene, echoes: view Int, lateEchoes: view Int) ret Bool {
+  loop var i: Int = 0, i < scene.players.length, ++i {
+    if scene.awake.copyAtFallback(index: i, fallback: false) {
+      var wanted: Int = echoes
+      if i is 3 {
+        wanted = lateEchoes
+      }
+      if playerAt(scene: scene, index: i).echoes < wanted {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+# The limit for a wait that ends when its condition holds: 5 s from now
+func deadline(scene: view Scene) ret Int {
+  ret nowSinceStart(scene: scene) + 5000
+}
+
+func peerIdOf(scene: view Scene, index: view Int) ret Int {
+  ret playerAt(scene: scene, index: index).relayPlayer.client.peerId
+}
+
+func echoesOf(scene: view Scene, index: view Int) ret String {
+  let player: Player = playerAt(scene: scene, index: index)
+  ret "{player.echoes} (out of order {player.outOfOrder})"
+}
+
+func main() ret Int {
+  var config: RelayConfig = defaultRelayConfig()
+  config.peerTimeoutMs = 1500
+  var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
+  log("relay: {relay.udpSocket.status}")
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  var scene: Scene = {
+    relay: relay
+    host: createHost(relayAddress: relayAddress)
+    players: {}
+    hostAwake: true
+    awake: {}
+    startMs: nowMs()
+  }
+  relayClientOpen(client: scene.host.relayHost.client, nowMs: 0)
+  loop var i: Int = 0, i < 2000 and not relayClientIsReady(client: scene.host.relayHost.client), ++i {
+    round(scene: scene)
+  }
+  let token: String = relayTokenText(token: scene.host.relayHost.client.token)
+  log(
+    "host: {scene.host.relayHost.client.state}, peer {scene.host.relayHost.client.peerId}, token of {token.length()} hex digits"
+  )
+
+  # Three players join and connect through the relay
+  loop var p: Int = 0, p < 3, ++p {
+    addPlayer(scene: scene, token: token, connectionId: 1001 + p)
+  }
+  let joinBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < joinBy and (connectedCount(scene: scene) < 3 or scene.host.relayHost.peers.length < 3) {
+    round(scene: scene)
+  }
+  log(
+    "joined: peer ids {peerIdOf(scene: scene, index: 0)} {peerIdOf(scene: scene, index: 1)} {peerIdOf(
+      scene: scene
+      index: 2
+    )}, connected {connectedCount(scene: scene)} of 3, host has {scene.host.relayHost.peers.length} connections"
+  )
+
+  # Messages both ways: each player sends 20, the host echoes each back
+  loop var p: Int = 0, p < 3, ++p {
+    if let player: mod Player = scene.players.modAt(index: p) {
+      sendNumbers(player: player, first: 0, count: 20)
+    }
+  }
+  let echoBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < echoBy and not allEchoed(
+    scene: scene
+    echoes: 20
+    lateEchoes: 0
+  ) {
+    round(scene: scene)
+  }
+  log(
+    "host received {scene.host.received}; echoes back: {echoesOf(scene: scene, index: 0)}, {echoesOf(
+      scene: scene
+      index: 1
+    )}, {echoesOf(scene: scene, index: 2)}"
+  )
+
+  # Player 3 leaves: its connection says goodbye, then the relay is told
+  if let leaving: mod Player = scene.players.modAt(index: 2) {
+    connectionDisconnect(
+      connection: leaving.relayPlayer.connection
+      nowMs: nowSinceStart(scene: scene)
+    )
+  }
+  run(scene: scene, milliseconds: 100)
+  if let leaving: mod Player = scene.players.modAt(index: 2) {
+    relayPlayerLeave(player: leaving.relayPlayer, nowMs: nowSinceStart(scene: scene))
+  }
+  scene.awake.set(index: 2, value: false)
+  let leaveBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < leaveBy and scene.host.peersLeft < 1 {
+    round(scene: scene)
+  }
+  log(
+    "player 3 left: host told {scene.host.peersLeft} time(s), host has {scene.host.relayHost.peers.length} connections"
+  )
+
+  # Player 4 joins late and talks; players 1 and 2 keep talking
+  addPlayer(scene: scene, token: token, connectionId: 1004)
+  let lateBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < lateBy and (connectedCount(scene: scene) < 3 or scene.host.relayHost.peers.length < 3) {
+    round(scene: scene)
+  }
+  loop var p: Int = 0, p < 4, ++p {
+    if p is not 2 {
+      if let player: mod Player = scene.players.modAt(index: p) {
+        if p is 3 {
+          sendNumbers(player: player, first: 0, count: 20)
+        } else {
+          sendNumbers(player: player, first: 20, count: 10)
+        }
+      }
+    }
+  }
+  let lateEchoBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < lateEchoBy and not allEchoed(
+    scene: scene
+    echoes: 30
+    lateEchoes: 20
+  ) {
+    round(scene: scene)
+  }
+  log(
+    "late joiner: peer id {playerAt(scene: scene, index: 3).relayPlayer.client.peerId}, echoes {echoesOf(
+      scene: scene
+      index: 3
+    )}; players 1 and 2 now {echoesOf(scene: scene, index: 0)}, {echoesOf(scene: scene, index: 1)}; host received {scene.host.received}"
+  )
+
+  # A wrong token is refused
+  var stranger: RelayClient = createRelayClient(relayAddress: relayAddress, config: clientConfig())
+  let wrongJoin: Bool = relayClientJoin(
+    client: stranger
+    tokenText: "00112233445566778899aabbccddeeff"
+    nowMs: nowSinceStart(scene: scene)
+  )
+  loop var i: Int = 0, i < 300 and stranger.state is RelayClientState.joining, ++i {
+    round(scene: scene)
+    let incoming: RelayIncoming = relayClientReceive(
+      client: stranger
+      nowMs: nowSinceStart(scene: scene)
+    )
+  }
+  log(
+    "wrong token: {stranger.state}, reason unknown session {stranger.refusedReason is refusedUnknownSession}"
+  )
+  relayClientClose(client: stranger)
+
+  # A second session on the same relay: its traffic stays its own
+  var otherHost: Host = createHost(relayAddress: relayAddress)
+  relayClientOpen(client: otherHost.relayHost.client, nowMs: nowSinceStart(scene: scene))
+  loop var i: Int = 0, i < 2000 and not relayClientIsReady(client: otherHost.relayHost.client), ++i {
+    round(scene: scene)
+    stepHost(host: otherHost, nowMs: nowSinceStart(scene: scene))
+  }
+  let otherToken: String = relayTokenText(token: otherHost.relayHost.client.token)
+  var otherPlayer: Player = createPlayer(relayAddress: relayAddress)
+  let otherJoin: Bool = relayPlayerJoin(
+    player: otherPlayer.relayPlayer
+    tokenText: otherToken
+    connectionId: 2001
+    nowMs: nowSinceStart(scene: scene)
+  )
+  let firstHostBefore: Int = scene.host.received
+  let until: Int = deadline(scene: scene)
+  var queued: Bool = false
+  loop nowSinceStart(scene: scene) < until and (otherPlayer.echoes < 5 or otherHost.received < 5) {
+    round(scene: scene)
+    stepHost(host: otherHost, nowMs: nowSinceStart(scene: scene))
+    stepPlayer(player: otherPlayer, nowMs: nowSinceStart(scene: scene))
+    if not queued and connectionIsConnected(connection: otherPlayer.relayPlayer.connection) {
+      sendNumbers(player: otherPlayer, first: 0, count: 5)
+      queued = true
+    }
+  }
+  log(
+    "second session: tokens differ {otherToken is not token}, its player is peer {otherPlayer.relayPlayer.client.peerId}, echoes {otherPlayer.echoes}, its host received {otherHost.received}, first host unchanged {scene.host.received is firstHostBefore}"
+  )
+  log("relay: {componentCountText(relay: scene.relay)}")
+
+  # Player 2 goes silent: the relay drops it after 1.5 s and tells the host
+  scene.awake.set(index: 1, value: false)
+  let leftBefore: Int = scene.host.peersLeft
+  let silentBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < silentBy and scene.host.peersLeft - leftBefore < 1 {
+    round(scene: scene)
+  }
+  log("silent player: host told {scene.host.peersLeft - leftBefore} time(s)")
+
+  # The host goes silent: its session closes and its players are told
+  scene.hostAwake = false
+  let closeBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < closeBy and not (playerAt(scene: scene, index: 0).relayPlayer.sessionClosed and playerAt(
+    scene: scene
+    index: 3
+  ).relayPlayer.sessionClosed) {
+    round(scene: scene)
+  }
+  log(
+    "silent host: player 1 told {playerAt(scene: scene, index: 0).relayPlayer.sessionClosed}, player 4 told {playerAt(
+      scene: scene
+      index: 3
+    ).relayPlayer.sessionClosed}, state {playerAt(scene: scene, index: 0).relayPlayer.client.state}"
+  )
+  # The timeout scan may still be on its way to the second session's peers
+  let emptyBy: Int = deadline(scene: scene)
+  loop nowSinceStart(scene: scene) < emptyBy and componentCount(this: scene.relay.peers) > 0 {
+    round(scene: scene)
+  }
+  log("relay: {componentCountText(relay: scene.relay)}")
+  log(
+    "nobody heard from anyone but the relay: {playerAt(scene: scene, index: 0).relayPlayer.client.strangerPackets is 0 and scene.host.relayHost.client.strangerPackets is 0}"
+  )
+  log(
+    "relay forwarded packets {scene.relay.stats.packetsForwarded > 100}, opened {scene.relay.stats.sessionsOpened}, joined {scene.relay.stats.playersJoined}, refused {scene.relay.stats.refused}, timed out {scene.relay.stats.timedOut}"
+  )
+  closeRelayServer(server: scene.relay)
+  ret 0
+}
+
+func componentCountText(relay: view RelayServer) ret String {
+  ret "{componentCount(this: relay.sessions)} session(s), {componentCount(this: relay.peers)} peer(s)"
+}

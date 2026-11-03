@@ -1,0 +1,143 @@
+# The relay's receive system: drains the UDP socket each frame. A forward
+# packet from a known peer goes straight on to the other side of its
+# session, rewritten in place (the destination peer id becomes the source
+# peer id) and never read past its header: the hot path allocates nothing
+# and copies nothing. Control packets become RelayRequestEvents for the
+# session system; a keep-alive marks its peer as heard and is answered.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/relay/RelayWire
+open net/relay/RelayServer
+
+# The most datagrams one frame takes (the rest wait for the next frame)
+const maxDatagramsPerFrame: Int = 4096
+
+func receiveSystem(server: mod RelayServer) {
+  loop var count: Int = 0, count < maxDatagramsPerFrame, ++count {
+    let datagram: Datagram = udpReceive(
+      udpSocket: server.udpSocket
+      bytes: server.inbox
+      maxBytes: relayDatagramBytes
+    )
+    if datagram.status is NetStatus.wouldBlock {
+      ret
+    }
+    if datagram.status is NetStatus.ok {
+      takeDatagram(server: server, from: datagram.peer)
+    } else {
+      server.stats.packetsDropped = server.stats.packetsDropped + 1
+    }
+  }
+}
+
+func dropped(server: mod RelayServer) {
+  server.stats.packetsDropped = server.stats.packetsDropped + 1
+}
+
+# One datagram in `server.inbox`, from `from`
+func takeDatagram(server: mod RelayServer, from: view NetAddress) {
+  let length: Int = server.inbox.length
+  if length < 1 {
+    dropped(server: server)
+    ret
+  }
+  let kind: Int = readU8(bytes: server.inbox, offset: 0)
+  let peerEntityId: EntityId = peerAt(server: server, address: from)
+  if kind is relayKindForward {
+    forward(server: server, peerEntityId: peerEntityId)
+    ret
+  }
+  if kind is relayKindKeepAlive {
+    if isNone(this: peerEntityId) {
+      dropped(server: server)
+      ret
+    }
+    let peer: mod RelayPeer = componentMod(this: server.peers, entityId: peerEntityId)
+    peer.lastHeardNs = server.frameNs
+    # Answered, so a quiet client knows the relay is still there
+    relayWriteKind(packet: server.outbox, kind: relayKindKeepAlive)
+    sendOutbox(server: server, address: from)
+    ret
+  }
+  var request: RelayRequestEvent = {
+    kind: kind
+    address: from
+    requestId: 0
+    peerEntityId: peerEntityId
+    tokenHigh: 0
+    tokenLow: 0
+  }
+  if kind is relayKindLeave {
+    if isNone(this: peerEntityId) {
+      dropped(server: server)
+      ret
+    }
+  } else if kind is relayKindOpen and length >= 5 {
+    request.requestId = readU32(bytes: server.inbox, offset: 1)
+  } else if kind is relayKindJoin and length >= 5 + relayTokenBytes {
+    request.requestId = readU32(bytes: server.inbox, offset: 1)
+    request.tokenHigh = readHalf(bytes: server.inbox, offset: 5)
+    request.tokenLow = readHalf(bytes: server.inbox, offset: 13)
+  } else {
+    dropped(server: server)
+    ret
+  }
+  eventSend(this: server.requests, value: request)
+}
+
+# Pass a forward packet on: host -> the named player, player -> its host
+func forward(server: mod RelayServer, peerEntityId: view EntityId) {
+  let length: Int = server.inbox.length
+  if isNone(this: peerEntityId) or length < forwardHeaderBytes {
+    dropped(server: server)
+    ret
+  }
+  let peer: mod RelayPeer = componentMod(this: server.peers, entityId: peerEntityId)
+  peer.lastHeardNs = server.frameNs
+  let sourcePeerId: Int = peer.peerId
+  let sessionEntityId: EntityId = peer.sessionEntityId
+  var destinationPeerId: Int = readU32(bytes: server.inbox, offset: 1)
+  if sourcePeerId is not hostPeerId {
+    # A player reaches only its host
+    if destinationPeerId is not hostPeerId {
+      dropped(server: server)
+      ret
+    }
+  } else if destinationPeerId is hostPeerId {
+    dropped(server: server)
+    ret
+  }
+  let targetEntityId: EntityId = peerInSession(
+    server: server
+    sessionEntityId: sessionEntityId
+    peerId: destinationPeerId
+  )
+  if not componentHas(this: server.peers, entityId: targetEntityId) {
+    dropped(server: server)
+    ret
+  }
+  let target: view RelayPeer = componentView(this: server.peers, entityId: targetEntityId)
+  # The destination's id becomes the source's: the receiver learns who sent
+  # it, never from where
+  server.inbox.set(index: 1, value: ((sourcePeerId shr 24) bitand 255) as UInt8)
+  server.inbox.set(index: 2, value: ((sourcePeerId shr 16) bitand 255) as UInt8)
+  server.inbox.set(index: 3, value: ((sourcePeerId shr 8) bitand 255) as UInt8)
+  server.inbox.set(index: 4, value: (sourcePeerId bitand 255) as UInt8)
+  let sent: IoResult = udpSend(
+    udpSocket: server.udpSocket
+    bytes: server.inbox
+    start: 0
+    count: length
+    destination: target.address
+  )
+  if sent.status is NetStatus.ok {
+    server.stats.packetsForwarded = server.stats.packetsForwarded + 1
+    server.stats.bytesForwarded = server.stats.bytesForwarded + length - forwardHeaderBytes
+  } else {
+    dropped(server: server)
+  }
+}

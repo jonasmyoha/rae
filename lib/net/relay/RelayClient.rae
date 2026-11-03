@@ -1,0 +1,327 @@
+# A host's or a player's side of the relay (docs/relay.md): its own UDP
+# socket, the open or join handshake with the relay, keep-alives, and the
+# forward header around every packet.
+#
+# A host calls `relayClientOpen` and, once `ready`, hands `relayTokenText` of
+# `client.token` to its players; a player calls `relayClientJoin` with it.
+# Then each side sends with `relayClientSend` (to a peer id: the host is 0)
+# and takes what arrives with `relayClientReceive`, which answers the next
+# packet (where its bytes are in `client.inbox`), a player that left (host),
+# or the end of the session (player). Datagrams from any address but the
+# relay's are ignored.
+#
+# The relay never reads a packet's payload; seal it (lib/net/Connection
+# does) so the relay sees only sealed bytes.
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/relay/RelayWire
+open crypto/SecureRandom
+
+enum RelayClientState {
+  idle
+  # Asking the relay for a session (host) or a place in one (player)
+  opening
+  joining
+  ready
+  # The relay said no (`refusedReason`)
+  refused
+  # The session ended, or this side left
+  closed
+  # No answer to the request, or the relay went silent
+  timedOut
+}
+
+# What `relayClientReceive` found
+enum RelayIncomingKind {
+  none
+  # A packet from `peerId`: `count` bytes at `start` in `client.inbox`
+  packet
+  # Host: player `peerId` left the session
+  peerLeft
+  # Player: the session is over
+  sessionClosed
+}
+
+type RelayIncoming {
+  kind: RelayIncomingKind
+  peerId: Int
+  start: Int
+  count: Int
+}
+
+type RelayClientConfig {
+  # How often an unanswered open or join is sent again, and for how long
+  retryMs: Int
+  requestTimeoutMs: Int
+  # A keep-alive when nothing was sent for this long (the relay answers it)
+  keepAliveMs: Int
+  # The relay silent this long: `timedOut`
+  silenceTimeoutMs: Int
+}
+
+type RelayClient {
+  udpSocket: UdpSocket
+  relayAddress: NetAddress
+  state: RelayClientState
+  config: RelayClientConfig
+  # Host: the session's token (to give to players); player: the token joined
+  token: List(UInt8)
+  # 0 for the host, 1, 2, ... for players
+  peerId: Int
+  requestId: Int
+  refusedReason: Int
+  startMs: Int
+  lastRequestMs: Int
+  lastSendMs: Int
+  lastHeardMs: Int
+  inbox: List(UInt8)
+  outbox: List(UInt8)
+  # Datagrams that did not come from the relay (ignored)
+  strangerPackets: Int
+}
+
+func defaultRelayClientConfig() ret RelayClientConfig {
+  ret RelayClientConfig {
+    retryMs: 200
+    requestTimeoutMs: 5000
+    keepAliveMs: 1000
+    silenceTimeoutMs: 15000
+  }
+}
+
+# A client of the relay at `relayAddress`, on a fresh UDP socket of the same
+# family; `client.udpSocket.status` says whether it opened
+func createRelayClient(
+  relayAddress: view NetAddress
+  config: view RelayClientConfig
+) ret RelayClient {
+  var host: String = "0.0.0.0"
+  if relayAddress.family is AddressFamily.ipv6 {
+    host = "::"
+  }
+  ret RelayClient {
+    udpSocket: udpOpen(host: host, port: 0)
+    relayAddress: relayAddress
+    state: RelayClientState.idle
+    config: config
+    token: List.create(UInt8, cap: relayTokenBytes)
+    peerId: -1
+    requestId: 0
+    refusedReason: 0
+    startMs: 0
+    lastRequestMs: 0
+    lastSendMs: 0
+    lastHeardMs: 0
+    inbox: List.create(UInt8, cap: relayDatagramBytes)
+    outbox: List.create(UInt8, cap: relayDatagramBytes)
+    strangerPackets: 0
+  }
+}
+
+func relayClientIsReady(client: view RelayClient) ret Bool {
+  ret client.state is RelayClientState.ready
+}
+
+func newRequestId() ret Int {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  bytes.addDefaults(count: 4)
+  let filled: Bool = secureRandomFill(bytes: bytes, start: 0, count: 4)
+  ret readU32(bytes: bytes, offset: 0)
+}
+
+# Ask the relay for a new session (this side is its host)
+func relayClientOpen(client: mod RelayClient, nowMs: view Int) {
+  client.state = RelayClientState.opening
+  client.requestId = newRequestId()
+  client.startMs = nowMs
+  client.lastHeardMs = nowMs
+  sendRequest(client: client, nowMs: nowMs)
+}
+
+# Join the session `tokenText` names (32 hex digits): false when it is not
+# a token
+func relayClientJoin(client: mod RelayClient, tokenText: view String, nowMs: view Int) ret Bool {
+  if not relayTokenFromText(text: tokenText, token: client.token) {
+    ret false
+  }
+  client.state = RelayClientState.joining
+  client.requestId = newRequestId()
+  client.startMs = nowMs
+  client.lastHeardMs = nowMs
+  sendRequest(client: client, nowMs: nowMs)
+  ret true
+}
+
+func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
+  client.lastSendMs = nowMs
+  ret udpSend(
+    udpSocket: client.udpSocket
+    bytes: client.outbox
+    start: 0
+    count: client.outbox.length
+    destination: client.relayAddress
+  )
+}
+
+func sendRequest(client: mod RelayClient, nowMs: view Int) {
+  if client.state is RelayClientState.opening {
+    relayWriteRequest(packet: client.outbox, kind: relayKindOpen, requestId: client.requestId)
+  } else {
+    relayWriteRequest(packet: client.outbox, kind: relayKindJoin, requestId: client.requestId)
+    appendCopy(
+      destination: client.outbox
+      source: client.token
+      start: 0
+      count: relayTokenBytes
+    )
+  }
+  client.lastRequestMs = nowMs
+  let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+}
+
+# Move the clock: retry an unanswered request, keep the relay's record of
+# this side alive, and notice a relay that went silent
+func relayClientUpdate(client: mod RelayClient, nowMs: view Int) {
+  let waiting: Bool = client.state is RelayClientState.opening or client.state is RelayClientState.joining
+  if waiting {
+    if nowMs - client.startMs > client.config.requestTimeoutMs {
+      client.state = RelayClientState.timedOut
+    } else if nowMs - client.lastRequestMs >= client.config.retryMs {
+      sendRequest(client: client, nowMs: nowMs)
+    }
+    ret
+  }
+  if client.state is not RelayClientState.ready {
+    ret
+  }
+  if nowMs - client.lastHeardMs > client.config.silenceTimeoutMs {
+    client.state = RelayClientState.timedOut
+    ret
+  }
+  if nowMs - client.lastSendMs >= client.config.keepAliveMs {
+    relayWriteKind(packet: client.outbox, kind: relayKindKeepAlive)
+    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+  }
+}
+
+# Send `count` bytes of `bytes` from `start` to peer `peerId` (the host is
+# 0) through the relay
+func relayClientSend(
+  client: mod RelayClient
+  peerId: view Int
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  nowMs: view Int
+) ret IoResult {
+  if client.state is not RelayClientState.ready {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
+  relayWriteForwardHeader(packet: client.outbox, peerId: peerId)
+  appendCopy(
+    destination: client.outbox
+    source: bytes
+    start: start
+    count: count
+  )
+  ret sendClientOutbox(client: client, nowMs: nowMs)
+}
+
+# Leave the session (the relay tells the host, or closes the session)
+func relayClientLeave(client: mod RelayClient, nowMs: view Int) {
+  if client.state is RelayClientState.ready {
+    relayWriteKind(packet: client.outbox, kind: relayKindLeave)
+    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+  }
+  client.state = RelayClientState.closed
+}
+
+func relayClientClose(client: mod RelayClient) {
+  udpClose(udpSocket: client.udpSocket)
+  client.state = RelayClientState.closed
+}
+
+func nothingIncoming() ret RelayIncoming {
+  ret RelayIncoming { kind: RelayIncomingKind.none, peerId: -1, start: 0, count: 0 }
+}
+
+# The next thing from the relay: a packet (its bytes in `client.inbox`), a
+# player that left, the end of the session, or none when nothing is
+# waiting. Answers to this side's own requests are taken on the way.
+func relayClientReceive(client: mod RelayClient, nowMs: view Int) ret RelayIncoming {
+  loop {
+    let datagram: Datagram = udpReceive(
+      udpSocket: client.udpSocket
+      bytes: client.inbox
+      maxBytes: relayDatagramBytes
+    )
+    if datagram.status is NetStatus.wouldBlock {
+      ret nothingIncoming()
+    }
+    if datagram.status is not NetStatus.ok {
+      continue
+    }
+    if not netAddressEquals(first: datagram.peer, second: client.relayAddress) {
+      client.strangerPackets = client.strangerPackets + 1
+      continue
+    }
+    client.lastHeardMs = nowMs
+    let length: Int = client.inbox.length
+    let kind: Int = readU8(bytes: client.inbox, offset: 0)
+    if kind is relayKindForward and length >= forwardHeaderBytes {
+      if client.state is RelayClientState.ready {
+        ret RelayIncoming {
+          kind: RelayIncomingKind.packet
+          peerId: readU32(bytes: client.inbox, offset: 1)
+          start: forwardHeaderBytes
+          count: length - forwardHeaderBytes
+        }
+      }
+    } else if kind is relayKindPeerLeft and length >= 5 {
+      ret RelayIncoming {
+        kind: RelayIncomingKind.peerLeft
+        peerId: readU32(bytes: client.inbox, offset: 1)
+        start: 0
+        count: 0
+      }
+    } else if kind is relayKindClosed {
+      client.state = RelayClientState.closed
+      ret RelayIncoming {
+        kind: RelayIncomingKind.sessionClosed
+        peerId: hostPeerId
+        start: 0
+        count: 0
+      }
+    } else {
+      takeReply(client: client, kind: kind, length: length)
+    }
+  }
+  ret nothingIncoming()
+}
+
+# An answer to this side's open or join (a stale or repeated one is ignored)
+func takeReply(client: mod RelayClient, kind: view Int, length: view Int) {
+  if length < 5 or readU32(bytes: client.inbox, offset: 1) is not client.requestId {
+    ret
+  }
+  if kind is relayKindOpened and client.state is RelayClientState.opening and length >= 5 + relayTokenBytes {
+    client.token.clear()
+    appendCopy(
+      destination: client.token
+      source: client.inbox
+      start: 5
+      count: relayTokenBytes
+    )
+    client.peerId = hostPeerId
+    client.state = RelayClientState.ready
+  } else if kind is relayKindJoined and client.state is RelayClientState.joining and length >= 9 {
+    client.peerId = readU32(bytes: client.inbox, offset: 5)
+    client.state = RelayClientState.ready
+  } else if kind is relayKindRefused and length >= 6 {
+    if client.state is RelayClientState.opening or client.state is RelayClientState.joining {
+      client.refusedReason = readU8(bytes: client.inbox, offset: 5)
+      client.state = RelayClientState.refused
+    }
+  }
+}
