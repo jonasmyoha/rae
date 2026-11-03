@@ -133,7 +133,7 @@ echo "gen-ios: emitting C for $name..."
 #    the bundle at the SAME relative path so the emitted relative reads resolve
 #    after the chdir shim.
 # Rae examples read assets by two conventions: repo-root-relative (e.g. 136's
-# "examples/136_walker_character/assets/...", "lib/data/...") and {dir}/CWD-
+# "lib/assets/walker/...", "lib/data/...") and {dir}/CWD-
 # relative ("assets/..."). The chdir shim makes the bundle root the CWD, so we
 # STAGE resources under both layouts and bundle them preserving those relative
 # paths (mirrors the emcc --preload-file @/path scheme). Shared lib data that
@@ -153,7 +153,7 @@ if [ -d "$ex_dir/assets" ]; then
       mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/" ;;
   esac
 fi
-for shared in lib/app3d/scenes lib/data; do
+for shared in lib/app3d/scenes lib/data lib/assets/walker; do
   if [ -e "$root/$shared" ]; then
     dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
   fi
@@ -161,7 +161,7 @@ done
 # Assets an app reads from ANOTHER in-repo example (118/119 draw their debug
 # HUD with 136's font): every string the C names under examples/<x>/assets/ is
 # staged at its repo-root path. A path built by interpolation is only a prefix
-# in the C ("examples/136_walker_character/assets/Roboto-Regular" + ".mtsdf.json"),
+# in the C ("lib/assets/walker/Roboto-Regular" + ".mtsdf.json"),
 # so every file starting with it is copied. On the desktop the CWD is the repo
 # root and these resolve on their own; on a device only bundled files exist.
 grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort -u \

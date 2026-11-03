@@ -126,7 +126,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     let extentH: Float = windowExtentH()
     Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
-    let assets: String = settings.assets
+    # A "lib/..." folder (walkerAssets) from the Rae this app builds against
+    let assets: String = Sys.stdlibPath(path: settings.assets)
+    log("[assets] walker assets from {assets}")
     let biome: BiomeConfig = walkerBiome(land: settings.land)
     let gpuUi: Gpu2dUi = loadUiAssets(
       dir: assets
