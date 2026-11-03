@@ -1,0 +1,250 @@
+# Player slots of a hosted game (lib/net/session, docs/replication.md "Join,
+# leave, reconnect"): who is in the game, which entity is theirs, and how a
+# player who dropped gets back into the same slot.
+#
+# Over any lib/net/Connection, before replication starts: the player's first
+# reliable message is a hello, with its rejoin token (all zeros the first
+# time); the host answers with a welcome: the slot id, whether it resumed an
+# existing slot, and the token to use next time.
+#
+#   hello    3, token (16)
+#   welcome  4, slot id (4), resumed (1), token (16)
+#
+# (Replication's own messages are kinds 1 and 2; kinds below 16 are lib's,
+# an app's start at 16.)
+#
+# A connection that ENDS (the player disconnected on purpose) frees its slot
+# at once. A connection that TIMES OUT (a phone app sent to the background,
+# a network change) keeps its slot for `graceMs`: a hello with that slot's
+# token within the grace period resumes it, with the same entity. A hello
+# for a slot that is still connected (the player came back on a new
+# connection before the old one timed out) takes it over. After the grace
+# period the slot is freed (`sessionExpired`) and the app removes the entity.
+open ecs/Entity
+open net/Wire
+open crypto/SecureRandom
+
+const sessionMessageHello: Int = 3
+
+const sessionMessageWelcome: Int = 4
+
+const sessionTokenBytes: Int = 16
+
+type PlayerSlot {
+  slotId: Int
+  token: List(UInt8)
+  connected: Bool
+  # When the connection was lost (connected false)
+  disconnectedAtMs: Int
+  # The slot's entity on the host, and its replication net id (-1 until set)
+  entityId: EntityId
+  netId: Int
+}
+
+enum JoinKind {
+  # Not a hello, or the game is full
+  refused
+  # A new slot (the app makes the player's entity: sessionSetEntity)
+  joined
+  # The slot of the token, with its entity
+  resumed
+}
+
+type JoinResult {
+  kind: JoinKind
+  slotIndex: Int
+}
+
+type SessionHost {
+  slots: List(PlayerSlot)
+  graceMs: Int
+  maxPlayers: Int
+  nextSlotId: Int
+}
+
+type SessionPlayer {
+  # The token to send in a hello (empty: none yet)
+  token: List(UInt8)
+  slotId: Int
+  welcomed: Bool
+  resumed: Bool
+}
+
+func createSessionHost(graceMs: view Int, maxPlayers: view Int) ret SessionHost {
+  ret SessionHost { slots: {}, graceMs: graceMs, maxPlayers: maxPlayers, nextSlotId: 1 }
+}
+
+func createSessionPlayer() ret SessionPlayer {
+  ret SessionPlayer { token: {}, slotId: -1, welcomed: false, resumed: false }
+}
+
+func sameToken(slot: view PlayerSlot, message: view List(UInt8), start: view Int) ret Bool {
+  if slot.token.length is not sessionTokenBytes {
+    ret false
+  }
+  var difference: Int = 0
+  loop var i: Int = 0, i < sessionTokenBytes, ++i {
+    difference = difference bitor (readU8(bytes: slot.token, offset: i) bitxor readU8(
+      bytes: message
+      offset: start + i
+    ))
+  }
+  ret difference is 0
+}
+
+# Take a player's hello: resume the slot of its token (within the grace
+# period, or still connected), or make a new slot
+func sessionTakeHello(
+  host: mod SessionHost
+  message: view List(UInt8)
+  nowMs: view Int
+) ret JoinResult {
+  if message.length < 1 + sessionTokenBytes or readU8(bytes: message, offset: 0) is not sessionMessageHello {
+    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+  }
+  loop var i: Int = 0, i < host.slots.length, ++i {
+    var matches: Bool = false
+    if let slot: view PlayerSlot = host.slots.viewAt(index: i) {
+      matches = sameToken(slot: slot, message: message, start: 1) and (slot.connected or nowMs - slot.disconnectedAtMs <= host.graceMs)
+    }
+    if matches {
+      if let slot: mod PlayerSlot = host.slots.modAt(index: i) {
+        slot.connected = true
+      }
+      ret JoinResult { kind: JoinKind.resumed, slotIndex: i }
+    }
+  }
+  if host.slots.length >= host.maxPlayers {
+    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+  }
+  var token: List(UInt8) = List.create(UInt8, cap: sessionTokenBytes)
+  token.addDefaults(count: sessionTokenBytes)
+  if not secureRandomFill(bytes: token, start: 0, count: sessionTokenBytes) {
+    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+  }
+  host.slots.add(value: PlayerSlot {
+    slotId: host.nextSlotId
+    token: token
+    connected: true
+    disconnectedAtMs: 0
+    entityId: noEntity()
+    netId: -1
+  })
+  host.nextSlotId = host.nextSlotId + 1
+  ret JoinResult { kind: JoinKind.joined, slotIndex: host.slots.length - 1 }
+}
+
+# The welcome for slot `slotIndex` into `out` (send it reliably)
+func sessionWriteWelcome(
+  host: view SessionHost
+  slotIndex: view Int
+  resumed: view Bool
+  out: mod List(UInt8)
+) {
+  out.clear()
+  if let slot: view PlayerSlot = host.slots.viewAt(index: slotIndex) {
+    writeU8(bytes: out, value: sessionMessageWelcome)
+    writeU32(bytes: out, value: slot.slotId)
+    if resumed {
+      writeU8(bytes: out, value: 1)
+    } else {
+      writeU8(bytes: out, value: 0)
+    }
+    appendCopy(
+      destination: out
+      source: slot.token
+      start: 0
+      count: sessionTokenBytes
+    )
+  }
+}
+
+# The slot's entity and net id (after the app made the player's entity)
+func sessionSetEntity(
+  host: mod SessionHost
+  slotIndex: view Int
+  entityId: view EntityId
+  netId: view Int
+) {
+  if let slot: mod PlayerSlot = host.slots.modAt(index: slotIndex) {
+    slot.entityId = entityId
+    slot.netId = netId
+  }
+}
+
+# The index of slot `slotId`, -1 for none
+func sessionSlotIndex(host: view SessionHost, slotId: view Int) ret Int {
+  loop var i: Int = 0, i < host.slots.length, ++i {
+    if let slot: view PlayerSlot = host.slots.viewAt(index: i) {
+      if slot.slotId is slotId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The connection of slot `slotId` is gone: on purpose (`left`: the slot goes
+# at the next sessionExpired) or by timing out (it waits `graceMs`)
+func sessionConnectionLost(
+  host: mod SessionHost
+  slotId: view Int
+  left: view Bool
+  nowMs: view Int
+) {
+  let index: Int = sessionSlotIndex(host: host, slotId: slotId)
+  if let slot: mod PlayerSlot = host.slots.modAt(index: index) {
+    slot.connected = false
+    slot.disconnectedAtMs = nowMs
+    if left {
+      slot.disconnectedAtMs = nowMs - host.graceMs - 1
+    }
+  }
+}
+
+# Free the slots whose player left, or stayed away past the grace period:
+# appended to `out` (the app removes their entities)
+func sessionExpired(host: mod SessionHost, nowMs: view Int, out: mod List(PlayerSlot)) {
+  var i: Int = 0
+  loop i < host.slots.length {
+    var expired: Bool = false
+    if let slot: view PlayerSlot = host.slots.viewAt(index: i) {
+      expired = not slot.connected and nowMs - slot.disconnectedAtMs > host.graceMs
+    }
+    if expired {
+      if let slot: view PlayerSlot = host.slots.viewAt(index: i) {
+        out.add(value: slot)
+      }
+      host.slots.remove(index: i)
+    } else {
+      i = i + 1
+    }
+  }
+}
+
+# The player's hello into `out` (send it reliably as the first message)
+func sessionWriteHello(player: view SessionPlayer, out: mod List(UInt8)) {
+  out.clear()
+  writeU8(bytes: out, value: sessionMessageHello)
+  loop var i: Int = 0, i < sessionTokenBytes, ++i {
+    writeU8(bytes: out, value: readU8(bytes: player.token, offset: i))
+  }
+}
+
+# Take the host's welcome: false when the message is not one
+func sessionTakeWelcome(player: mod SessionPlayer, message: view List(UInt8)) ret Bool {
+  if message.length < 6 + sessionTokenBytes or readU8(bytes: message, offset: 0) is not sessionMessageWelcome {
+    ret false
+  }
+  player.slotId = readU32(bytes: message, offset: 1)
+  player.resumed = readU8(bytes: message, offset: 5) is 1
+  player.token.clear()
+  appendCopy(
+    destination: player.token
+    source: message
+    start: 6
+    count: sessionTokenBytes
+  )
+  player.welcomed = true
+  ret true
+}
