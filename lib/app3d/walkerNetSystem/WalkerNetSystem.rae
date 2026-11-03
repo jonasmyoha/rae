@@ -1,0 +1,660 @@
+# Walkers over the network (docs/replication.md, docs/walker-net.md): every
+# player's walker pose reaches every other player through lib/net/relay, as
+# replicated entities (lib/net/replication), with player slots
+# (lib/net/session). No window and no physics: the walker app gives it the
+# local walker's pose each frame and draws the remote ones it hands back,
+# and a headless bot (tools/walkerBot) makes up a pose of its own.
+#
+# The pose is the player's word (each player moves its own walker; the host
+# relays it): a player sends its pose as its input, and the host sets that
+# player's entity to it. The host's own walker is an entity too.
+#
+# Desync check: with every snapshot the host captures a WalkerNetCheck, the
+# sum of every replicated pose value at that snapshot. A player that applied
+# the snapshot sums its own copy and counts a desync when they differ
+# (`net.desyncs`, out of `net.checks`).
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open Vec3
+open Sys
+open String
+open net/Tcp
+open net/Udp
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayClient
+open net/relay/RelayConnections
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/replication/interpolationSystem/InterpolationSystem
+open net/session/Session
+
+# ----- components ---------------------------------------------------------------
+
+# One walker as the others see it
+type WalkerPose {
+  position: Vec3
+  heading: Float
+  speed: Float
+  airborne: Bool
+  knockedDown: Bool
+  # The app's clip number (its locomotion clip)
+  clip: Int
+}
+
+# The host's check sum of all poses at a snapshot (one global entity)
+type WalkerNetCheck {
+  tick: Int
+  sum: Int
+}
+
+type WalkerNetWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  poses: ComponentTable(WalkerPose)
+  checks: ComponentTable(WalkerNetCheck)
+  # Player side: the remote walkers interpolated (draw these)
+  shownPoses: ComponentTable(WalkerPose)
+}
+
+const kindReplicated: Int = 0
+
+const kindPose: Int = 1
+
+const kindCheck: Int = 2
+
+# ----- settings -----------------------------------------------------------------
+enum WalkerNetMode { offline, host, join }
+
+type WalkerNetSettings {
+  mode: WalkerNetMode
+  relayHost: String
+  relayPort: Int
+  # join: the session token (32 hex digits)
+  token: String
+  # deviceDesktop / deviceMobile (lib/net/relay)
+  device: Int
+  # Leave the session this long after it started (0: stay)
+  seconds: Int = 0
+}
+
+func offlineWalkerNetSettings() ret WalkerNetSettings {
+  ret WalkerNetSettings {
+    mode: WalkerNetMode.offline
+    relayHost: "127.0.0.1"
+    relayPort: 7777
+    token: ""
+    device: deviceDesktop
+  }
+}
+
+# The settings from the environment: RAE_WALKER_NET=host or join,
+# RAE_WALKER_RELAY=host:port (127.0.0.1:7777), RAE_WALKER_TOKEN=<32 hex
+# digits> to join, RAE_WALKER_NET_SECONDS=<n> to leave after n seconds.
+# Unset: offline.
+func walkerNetSettingsFromEnvironment() ret WalkerNetSettings {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  let mode: String = getEnv(name: "RAE_WALKER_NET").trim()
+  if mode is "host" {
+    settings.mode = WalkerNetMode.host
+  } else if mode is "join" {
+    settings.mode = WalkerNetMode.join
+  }
+  let relay: String = getEnv(name: "RAE_WALKER_RELAY").trim()
+  if relay.length() > 0 {
+    let parts: List(String) = relay.split(sep: ":")
+    if parts.length is 2 {
+      settings.relayHost = parts.copyAtFallback(index: 0, fallback: "127.0.0.1")
+      settings.relayPort = parts.copyAtFallback(index: 1, fallback: "7777").toInt()
+    }
+  }
+  settings.token = getEnv(name: "RAE_WALKER_TOKEN").trim()
+  settings.seconds = getEnv(name: "RAE_WALKER_NET_SECONDS").trim().toInt()
+  ret settings
+}
+
+func walkerNetModeName(settings: view WalkerNetSettings) ret String {
+  if settings.mode is WalkerNetMode.host {
+    ret "hosting"
+  }
+  if settings.mode is WalkerNetMode.join {
+    ret "joining"
+  }
+  ret "offline"
+}
+
+# ----- the resource -------------------------------------------------------------
+type WalkerSeat {
+  peerId: Int
+  peer: ReplicaPeer
+  slotId: Int
+}
+
+type WalkerNet {
+  settings: WalkerNetSettings
+  config: ReplicationConfig
+  world: WalkerNetWorld
+  # Host side
+  relayHost: RelayHost
+  replication: ReplicationHost
+  session: SessionHost
+  seats: List(WalkerSeat)
+  ownEntityId: EntityId
+  checkEntityId: EntityId
+  # Player side
+  relayPlayer: RelayPlayer
+  replicationPlayer: ReplicationPlayer
+  sessionPlayer: SessionPlayer
+  helloSent: Bool
+  # walkerNetStart was called
+  started: Bool
+  # When this side started, and when it was first playing (-1: not yet)
+  startMs: Int
+  playingAtMs: Int
+  message: List(UInt8)
+  values: List(Int)
+  # Desync checks done and failed (player side)
+  checks: Int
+  desyncs: Int
+  # The most remote walkers seen at once
+  mostRemote: Int
+}
+
+func createWalkerNetWorld() ret WalkerNetWorld {
+  ret WalkerNetWorld {
+    entities: createEntityAllocator()
+    replicated: create()
+    poses: create()
+    checks: create()
+    shownPoses: create()
+  }
+}
+
+func walkerClientConfig(settings: view WalkerNetSettings) ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.device = settings.device
+  config.relayOnly = true
+  ret config
+}
+
+func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
+  var config: ReplicationConfig = defaultReplicationConfig()
+  # Every walker sees every walker (a session is a handful of players)
+  config.interestRadius = 1000000.0
+  let relayAddress: NetAddress = resolveAddress(host: settings.relayHost, port: settings.relayPort).address
+  ret WalkerNet {
+    settings: settings
+    config: config
+    world: createWalkerNetWorld()
+    relayHost: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: walkerClientConfig(settings: settings)
+      connectionConfig: defaultConnectionConfig()
+    )
+    replication: createReplicationHost(config: config)
+    session: createSessionHost(graceMs: 10000, maxPlayers: 64)
+    seats: {}
+    ownEntityId: noEntity()
+    checkEntityId: noEntity()
+    relayPlayer: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: walkerClientConfig(settings: settings)
+      connectionConfig: defaultConnectionConfig()
+    )
+    replicationPlayer: createReplicationPlayer(config: config)
+    sessionPlayer: createSessionPlayer()
+    helloSent: false
+    started: false
+    startMs: 0
+    playingAtMs: -1
+    message: List.create(UInt8, cap: 1200)
+    values: {}
+    checks: 0
+    desyncs: 0
+    mostRemote: 0
+  }
+}
+
+func walkerPoseAt(position: view Vec3) ret WalkerPose {
+  ret WalkerPose {
+    position: position
+    heading: 0.0
+    speed: 0.0
+    airborne: false
+    knockedDown: false
+    clip: 0
+  }
+}
+
+# Open the session (host) or join it (join): false when the settings say
+# offline or the token is not one
+func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) ret Bool {
+  net.started = true
+  net.startMs = nowMs
+  if net.settings.mode is WalkerNetMode.host {
+    relayClientOpen(client: net.relayHost.client, nowMs: nowMs)
+    net.ownEntityId = allocEntity(this: net.world.entities)
+    componentSet(this: net.world.poses, entityId: net.ownEntityId, data: localPose)
+    let ownNetId: Int = replicateEntity(
+      host: net.replication
+      replicated: net.world.replicated
+      entityId: net.ownEntityId
+      owner: -1
+    )
+    net.checkEntityId = allocEntity(this: net.world.entities)
+    componentSet(
+      this: net.world.checks
+      entityId: net.checkEntityId
+      data: WalkerNetCheck { tick: -1, sum: 0 }
+    )
+    let checkNetId: Int = replicateEntity(
+      host: net.replication
+      replicated: net.world.replicated
+      entityId: net.checkEntityId
+      owner: -2
+    )
+    ret true
+  }
+  if net.settings.mode is WalkerNetMode.join {
+    ret relayPlayerJoin(
+      player: net.relayPlayer
+      tokenText: net.settings.token
+      connectionId: nowMs bitand 65535
+      nowMs: nowMs
+    )
+  }
+  ret false
+}
+
+func walkerNetIsHost(net: view WalkerNet) ret Bool {
+  ret net.settings.mode is WalkerNetMode.host
+}
+
+# The session token to give to players (host, once the relay answered; "" before)
+func walkerNetToken(net: view WalkerNet) ret String {
+  if walkerNetIsHost(net: net) and relayClientIsReady(client: net.relayHost.client) {
+    ret relayTokenText(token: net.relayHost.client.token)
+  }
+  ret ""
+}
+
+# The socket to wait on between frames
+func walkerNetSocketId(net: view WalkerNet) ret SocketId {
+  if walkerNetIsHost(net: net) {
+    ret net.relayHost.client.udpSocket.socketId
+  }
+  ret net.relayPlayer.client.udpSocket.socketId
+}
+
+# Sum of the replicated values of every pose in `poses` (the desync check)
+func poseSum(
+  poses: view ComponentTable(WalkerPose)
+  scale: view Float
+  values: mod List(Int)
+) ret Int {
+  var sum: Int = 0
+  loop var i: Int = 0, i < componentCount(this: poses), ++i {
+    if let pose: WalkerPose = componentCopyAt(this: poses, i: i) {
+      values.clear()
+      appendReplicaValues(
+        WalkerPose
+        value: pose
+        scale: scale
+        values: values
+      )
+      loop let value: Int in values {
+        sum = (sum + value) bitand 1099511627775
+      }
+    }
+  }
+  ret sum
+}
+
+# One frame: the local walker's pose out, everyone's in
+func walkerNetFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  if net.settings.mode is WalkerNetMode.host {
+    walkerNetHostFrame(net: net, localPose: localPose, nowMs: nowMs)
+  } else if net.settings.mode is WalkerNetMode.join {
+    walkerNetPlayerFrame(net: net, localPose: localPose, nowMs: nowMs)
+  }
+}
+
+func seatIndexOf(net: view WalkerNet, peerId: view Int) ret Int {
+  loop var i: Int = 0, i < net.seats.length, ++i {
+    if let seat: view WalkerSeat = net.seats.viewAt(index: i) {
+      if seat.peerId is peerId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func slotEntityId(session: view SessionHost, slotId: view Int) ret EntityId {
+  if let slot: view PlayerSlot = session.slots.viewAt(
+    index: sessionSlotIndex(host: session, slotId: slotId)
+  ) {
+    ret slot.entityId
+  }
+  ret noEntity()
+}
+
+# The players the relay said left, or whose connection ended: their slots
+# go at once (a player that comes back joins anew)
+func takeLeavers(net: mod WalkerNet, nowMs: view Int) {
+  loop let peerId: Int in net.relayHost.peersLeft {
+    let index: Int = seatIndexOf(net: net, peerId: peerId)
+    if index >= 0 {
+      sessionConnectionLost(
+        host: net.session
+        slotId: peerId
+        left: true
+        nowMs: nowMs
+      )
+      net.seats.remove(index: index)
+    }
+  }
+  net.relayHost.peersLeft.clear()
+}
+
+func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  if net.playingAtMs < 0 and relayClientIsReady(client: net.relayHost.client) {
+    net.playingAtMs = nowMs
+  }
+  relayHostReceive(host: net.relayHost, nowMs: nowMs)
+  takeLeavers(net: net, nowMs: nowMs)
+
+  loop var p: Int = 0, p < net.relayHost.peers.length, ++p {
+    var peerId: Int = -1
+    if let hostPeer: view HostPeer = net.relayHost.peers.viewAt(index: p) {
+      peerId = hostPeer.peerId
+    }
+    var s: Int = seatIndexOf(net: net, peerId: peerId)
+    if s < 0 {
+      net.seats.add(
+        value: WalkerSeat {
+          peerId: peerId
+          peer: createReplicaPeer(peerId: peerId, config: net.config)
+          slotId: -1
+        }
+      )
+      s = net.seats.length - 1
+    }
+    if let hostPeer: mod HostPeer = net.relayHost.peers.modAt(index: p) {
+      if let seat: mod WalkerSeat = net.seats.modAt(index: s) {
+        loop connectionReceive(connection: hostPeer.connection, message: net.message) is not MessageChannel.none {
+          if seat.slotId < 0 {
+            let result: JoinResult = sessionTakeHelloFromPeer(
+              host: net.session
+              message: net.message
+              peerId: peerId
+              nowMs: nowMs
+            )
+            if result.kind is JoinKind.joined {
+              let entityId: EntityId = allocEntity(this: net.world.entities)
+              componentSet(
+                this: net.world.poses
+                entityId: entityId
+                data: walkerPoseAt(position: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+              )
+              let netId: Int = replicateEntity(
+                host: net.replication
+                replicated: net.world.replicated
+                entityId: entityId
+                owner: peerId
+              )
+              sessionSetEntity(
+                host: net.session
+                slotIndex: result.slotIndex
+                entityId: entityId
+                netId: netId
+              )
+            }
+            if result.kind is not JoinKind.refused {
+              if let slot: view PlayerSlot = net.session.slots.viewAt(index: result.slotIndex) {
+                seat.slotId = slot.slotId
+                seat.peer = createReplicaPeer(peerId: peerId, config: net.config)
+                seat.peer.focusNetId = slot.netId
+              }
+              sessionWriteWelcome(
+                host: net.session
+                slotIndex: result.slotIndex
+                resumed: result.kind is JoinKind.resumed
+                out: net.message
+              )
+              let queued: Bool = connectionSendReliable(
+                connection: hostPeer.connection
+                bytes: net.message
+                start: 0
+                count: net.message.length
+              )
+            }
+          } else {
+            let taken: Bool = replicaTakeMessage(
+              host: net.replication
+              peer: seat.peer
+              message: net.message
+            )
+          }
+        }
+        # A player's input is its pose
+        var pose: WalkerPose = walkerPoseAt(position: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+        loop seat.slotId >= 0 and replicaNextInput(
+          WalkerPose
+          host: net.replication
+          peer: seat.peer
+          input: pose
+        ) >= 0 {
+          let entityId: EntityId = slotEntityId(session: net.session, slotId: seat.slotId)
+          if componentHas(this: net.world.poses, entityId: entityId) {
+            componentSet(this: net.world.poses, entityId: entityId, data: pose)
+          }
+        }
+      }
+    }
+  }
+  var expired: List(PlayerSlot) = {}
+  sessionExpired(host: net.session, nowMs: nowMs, out: expired)
+  loop let slot: view PlayerSlot in expired {
+    clearEntityComponents(WalkerNetWorld, world: net.world, entityId: slot.entityId)
+    freeEntity(this: net.world.entities, entityId: slot.entityId)
+  }
+  componentSet(this: net.world.poses, entityId: net.ownEntityId, data: localPose)
+  if replicaSnapshotDue(host: net.replication, nowMs: nowMs) {
+    replicaBeginSnapshot(host: net.replication, nowMs: nowMs)
+    let sum: Int = poseSum(poses: net.world.poses, scale: net.config.floatScale, values: net.values)
+    componentSet(
+      this: net.world.checks
+      entityId: net.checkEntityId
+      data: WalkerNetCheck { tick: net.replication.tick, sum: sum }
+    )
+    captureReplicaTable(
+      Replicated
+      host: net.replication
+      table: net.world.replicated
+      replicated: net.world.replicated
+      kind: kindReplicated
+    )
+    captureReplicaTable(
+      WalkerPose
+      host: net.replication
+      table: net.world.poses
+      replicated: net.world.replicated
+      kind: kindPose
+    )
+    captureReplicaTable(
+      WalkerNetCheck
+      host: net.replication
+      table: net.world.checks
+      replicated: net.world.replicated
+      kind: kindCheck
+    )
+    loop var p: Int = 0, p < net.relayHost.peers.length, ++p {
+      if let hostPeer: mod HostPeer = net.relayHost.peers.modAt(index: p) {
+        let s: Int = seatIndexOf(net: net, peerId: hostPeer.peerId)
+        if let seat: mod WalkerSeat = net.seats.modAt(index: s) {
+          if seat.slotId >= 0 {
+            let bytes: Int = replicaSnapshotSystem(
+              host: net.replication
+              peer: seat.peer
+              connection: hostPeer.connection
+            )
+          }
+        }
+      }
+    }
+  }
+  relayHostSend(host: net.relayHost, nowMs: nowMs)
+  # The players whose connection closed or went silent in the send
+  takeLeavers(net: net, nowMs: nowMs)
+  let remote: Int = componentCount(this: net.world.poses) - 1
+  if remote > net.mostRemote {
+    net.mostRemote = remote
+  }
+}
+
+func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  relayPlayerReceive(player: net.relayPlayer, nowMs: nowMs)
+  # A connect attempt that ran out before the host welcomed this player (a
+  # slow start, a lost burst) is made again
+  let state: ConnectionState = net.relayPlayer.connection.state
+  if not net.sessionPlayer.welcomed and (state is ConnectionState.timedOut or state is ConnectionState.failed) {
+    relayPlayerReconnect(
+      player: net.relayPlayer
+      connectionConfig: defaultConnectionConfig()
+      connectionId: nowMs bitand 65535
+      nowMs: nowMs
+    )
+    net.helloSent = false
+  }
+  if not net.helloSent and connectionIsConnected(connection: net.relayPlayer.connection) {
+    sessionWriteHello(player: net.sessionPlayer, out: net.message)
+    let queued: Bool = connectionSendReliable(
+      connection: net.relayPlayer.connection
+      bytes: net.message
+      start: 0
+      count: net.message.length
+    )
+    net.helloSent = true
+  }
+  loop connectionReceive(connection: net.relayPlayer.connection, message: net.message) is not MessageChannel.none {
+    if not sessionTakeWelcome(player: net.sessionPlayer, message: net.message) {
+      let taken: Bool = replicaReceiveSystem(player: net.replicationPlayer, message: net.message)
+    }
+  }
+  if replicaHasUpdate(player: net.replicationPlayer) {
+    replicaSyncEntities(player: net.replicationPlayer, entities: net.world.entities)
+    loop var i: Int = 0, i < net.replicationPlayer.goneEntityIds.length, ++i {
+      let entityId: EntityId = net.replicationPlayer.goneEntityIds.copyAtFallback(
+        index: i
+        fallback: noEntity()
+      )
+      clearEntityComponents(WalkerNetWorld, world: net.world, entityId: entityId)
+      freeEntity(this: net.world.entities, entityId: entityId)
+    }
+    applyReplicaTable(
+      Replicated
+      player: net.replicationPlayer
+      table: net.world.replicated
+      kind: kindReplicated
+      template: Replicated { netId: 0, owner: 0 }
+    )
+    applyReplicaTable(
+      WalkerPose
+      player: net.replicationPlayer
+      table: net.world.poses
+      kind: kindPose
+      template: walkerPoseAt(position: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+    )
+    applyReplicaTable(
+      WalkerNetCheck
+      player: net.replicationPlayer
+      table: net.world.checks
+      kind: kindCheck
+      template: WalkerNetCheck { tick: -1, sum: 0 }
+    )
+    replicaFinishApply(player: net.replicationPlayer)
+    # The desync check: this side's copy against the host's sum at the tick
+    if componentCount(this: net.world.checks) > 0 {
+      if let check: WalkerNetCheck = componentCopyAt(this: net.world.checks, i: 0) {
+        if check.tick is net.replicationPlayer.appliedTick {
+          net.checks = net.checks + 1
+          if poseSum(poses: net.world.poses, scale: net.config.floatScale, values: net.values) is not check.sum {
+            net.desyncs = net.desyncs + 1
+          }
+        }
+      }
+    }
+    let remote: Int = componentCount(this: net.world.poses) - 1
+    if remote > net.mostRemote {
+      net.mostRemote = remote
+    }
+  }
+  replicaAdvanceClock(player: net.replicationPlayer, nowMs: nowMs)
+  applyReplicaTableInterpolated(
+    WalkerPose
+    player: net.replicationPlayer
+    table: net.world.shownPoses
+    kind: kindPose
+    template: walkerPoseAt(position: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+    renderTick: replicaRenderTick(player: net.replicationPlayer)
+  )
+  if net.playingAtMs < 0 and net.sessionPlayer.welcomed and net.replicationPlayer.ownNetId >= 0 and not isNone(
+    this: replicaEntityOf(player: net.replicationPlayer, netId: net.replicationPlayer.ownNetId)
+  ) {
+    net.playingAtMs = nowMs
+  }
+  if net.sessionPlayer.welcomed {
+    let sent: Bool = replicaSendInput(
+      WalkerPose
+      player: net.replicationPlayer
+      input: localPose
+      tick: nowMs / 10
+      connection: net.relayPlayer.connection
+    )
+  }
+  relayPlayerSend(player: net.relayPlayer, nowMs: nowMs)
+}
+
+# Leave the session (a player: goodbye through the connection, then the
+# relay; a host: the relay promotes a player or closes the session)
+func walkerNetLeave(net: mod WalkerNet, nowMs: view Int) {
+  if net.settings.mode is WalkerNetMode.join {
+    connectionDisconnect(connection: net.relayPlayer.connection, nowMs: nowMs)
+    relayPlayerSend(player: net.relayPlayer, nowMs: nowMs)
+    relayPlayerLeave(player: net.relayPlayer, nowMs: nowMs)
+    relayClientClose(client: net.relayPlayer.client)
+  } else if net.settings.mode is WalkerNetMode.host {
+    relayClientLeave(client: net.relayHost.client, nowMs: nowMs)
+    relayClientClose(client: net.relayHost.client)
+  }
+}
+
+# This side's own walker in `net.world` (a player's, once the host's
+# snapshots name it; noEntity before)
+func walkerNetOwnEntityId(net: view WalkerNet) ret EntityId {
+  if walkerNetIsHost(net: net) {
+    ret net.ownEntityId
+  }
+  if net.replicationPlayer.ownNetId < 0 {
+    ret noEntity()
+  }
+  ret replicaEntityOf(player: net.replicationPlayer, netId: net.replicationPlayer.ownNetId)
+}
+
+# The session's time (settings.seconds) is up
+func walkerNetTimeUp(net: view WalkerNet, nowMs: view Int) ret Bool {
+  ret net.started and net.settings.seconds > 0 and nowMs - net.startMs >= net.settings.seconds * 1000
+}
+
+# How many remote walkers this side knows now
+func walkerNetRemoteCount(net: view WalkerNet) ret Int {
+  ret componentCount(this: net.world.poses) - 1
+}

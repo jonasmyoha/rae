@@ -80,6 +80,8 @@ open app3d/CameraKnockdownFollow
 open app3d/WalkerKnockdown
 open app3d/CameraStudy
 open app3d/LocomotionClips
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/remoteWalkerSystem/RemoteWalkerSystem
 
 # The walker app: the system list (WalkerApp.rae's header has the convention)
 type WalkerApp {
@@ -105,6 +107,10 @@ type WalkerApp {
   # Footprints and what the steps kick up (app3d/WalkerMarks)
   walkerMarks: WalkerMarks
   netSeam: NetSeam  # multiplayer seam (app3d/NetSeam, #554)
+  # A networked session (none offline) and the crowd characters that show
+  # its other walkers (app3d/remoteWalkerSystem)
+  walkerNet: opt WalkerNet
+  remoteWalkers: RemoteWalkers
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: WalkerPersist
   # The spray of wading feet (lib/water/WadeSplash) and the FFT sea at the
@@ -264,17 +270,33 @@ func updateWalkerApp(app: mod WalkerApp) {
     controllers: app.world.controllers
     entityId: controlledEntityId
   ).heading
-  # The player's drive, and the crowd's own: walking about (app3d/Wander)
-  driveWalkers(
-    physicsSystem: app.physicsSystem
-    controlledEntityId: controlledEntityId
-    controllers: app.world.controllers
-    controlled: app.world.controlled
-    intent: intent
-    cameraYaw: app.cameraSystem.rig.viewYaw
-    speedScale: app.characterSystem.speed
-    deltaTime: deltaTime
-  )
+  # The player's drive, and the crowd's own: walking about (app3d/Wander),
+  # or, in a networked session, following the other players' walkers
+  if let walkerNet: view WalkerNet = app.walkerNet {
+    driveWalkersNetworked(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      remoteWalkers: app.remoteWalkers
+      net: walkerNet
+      controlledEntityId: controlledEntityId
+      intent: intent
+      cameraYaw: app.cameraSystem.rig.viewYaw
+      speedScale: app.characterSystem.speed
+      groundZ: app.characterSystem.groundZ
+      deltaTime: deltaTime
+    )
+  } else {
+    driveWalkers(
+      physicsSystem: app.physicsSystem
+      controlledEntityId: controlledEntityId
+      controllers: app.world.controllers
+      controlled: app.world.controlled
+      intent: intent
+      cameraYaw: app.cameraSystem.rig.viewYaw
+      speedScale: app.characterSystem.speed
+      deltaTime: deltaTime
+    )
+  }
   # Fixed-timestep physics (#553, lib/box3d/ecs): the movers, then the bodies,
   # at 60 Hz from the frame time, decoupled from render; it writes every
   # character's controller and every cube's Transform3D.
@@ -289,6 +311,16 @@ func updateWalkerApp(app: mod WalkerApp) {
     controllers: app.world.controllers
     entityId: controlledEntityId
   )
+  # The local walker's pose out to the session, the others' in
+  if let walkerNet: mod WalkerNet = app.walkerNet {
+    walkerNetAppFrame(
+      net: walkerNet
+      remoteWalkers: app.remoteWalkers
+      physicsSystem: app.physicsSystem
+      controllers: app.world.controllers
+      controlledEntityId: controlledEntityId
+    )
+  }
   characterMoved = physicsSteps > 0 and (after.position.x is not before.x or after.position.y is not before.y or after.position.z is not before.z or after.heading is not headingBefore)
   # The crowd's names over their heads (app3d/WalkerNames)
   updateCrowdNameLabels(
