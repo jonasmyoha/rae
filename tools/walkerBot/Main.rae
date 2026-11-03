@@ -11,7 +11,7 @@
 #       desync checks done and failed and the most walkers seen at once
 #
 # The walk: a circle of 4-12 m around a point of its own, a jump every 3 s
-# (airborne for 0.6 s, a parabola), a fall every 7 s (knocked down for 1 s).
+# (airborne for 0.6 s, a parabola), a fall every 15 s (knocked down for 1 s).
 open net/Tcp
 open net/Udp
 open Sys
@@ -62,7 +62,7 @@ func botPose(seed: view Int, timeMs: view Int, home: view Vec3) ret WalkerPose {
   let centerY: Float = home.y + (((seed * 29) % 30) as Float) - 15.0
   let angle: Float = seconds * 0.8 + (seed as Float)
   let jumpMs: Int = (timeMs + seed * 311) % 3000
-  let fallMs: Int = (timeMs + seed * 977) % 7000
+  let fallMs: Int = (timeMs + seed * 977) % 15000
   # Z up, like the walker app's ground
   var pose: WalkerPose = walkerPoseAt(
     position: Vec3 { x: centerX + radius * cos(angle), y: centerY + radius * sin(angle), z: 0.0 }
