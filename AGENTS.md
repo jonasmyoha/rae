@@ -507,8 +507,11 @@ compiler's own C.
 
 - **Stateful runtime code is ECS.** Each system lives in its own camelCase
   folder with a PascalCase module (`relaySystem/RelaySystem.rae`). Per-thing
-  data is components on entities. A singleton is a resource on the World or
-  App. When something happens that other systems react to (a player joined,
+  data is components on entities. Data there is exactly one of per World
+  or App (a socket, a session table, a clock) is a resource: a plain field
+  on that World or App, passed to systems through their `mod`/`view`
+  parameters, never a global and never a one-entity component
+  (`docs/ecs-resources.md`). When something happens that other systems react to (a player joined,
   a packet was refused, a session ended), send an event and let those
   systems read it, instead of calling across into them. `lib/ecs` and
   `lib/net/ecs` are the models.
