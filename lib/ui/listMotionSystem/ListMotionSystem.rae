@@ -192,7 +192,11 @@ func listMotionStep(
     this: world.listReorderDrags
     entityId: listEntity
   ).phase is not ListReorderPhase.idle
-  if state.generation is not generation {
+  # The frame the order changes: every row is placed where it was drawn,
+  # and the glide starts with the next frame (so a burst of changes holds
+  # the rows, then they glide)
+  let changed: Bool = state.generation is not generation
+  if changed {
     let keys: List(String) = listMotionKeys(
       world: world
       listEntity: listEntity
@@ -219,6 +223,12 @@ func listMotionStep(
   var moving: Bool = false
   if held is false {
     loop var i: Int = 0, i < state.offsets.length, ++i {
+      if changed {
+        if state.offsets.copyAtFallback(index: i, fallback: 0.0) is not 0.0 {
+          moving = true
+        }
+        continue
+      }
       let offset: Float = state.offsets.copyAtFallback(index: i, fallback: 0.0)
       if offset is not 0.0 {
         var eased: Float = offset * Math.exp(x: 0.0 - listMotionRate * seconds)
