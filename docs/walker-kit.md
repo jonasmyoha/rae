@@ -61,6 +61,7 @@ angle at frames 5 and 120 (a headless check).
 - The game cannot add its own draw calls to the frame (only what the kit
   draws: cubes, the walker's characters); a render hook is the next step
   when a game needs its own meshes.
-- `runWalkerGame` is kept thin (the hooks and four plain functions) because
-  a qualified call such as `Vec3.create(...)` inside a generic function's
-  body is mangled as a generic instantiation and does not build (queued).
+- `runWalkerGame` is thin (the hooks and four plain functions). A
+  qualified call such as `Vec3.create(...)` inside a generic body once did
+  not build (it was mangled as a generic instantiation); that is fixed
+  (compiler/tests/cases/1289_generic_body_module_call).
