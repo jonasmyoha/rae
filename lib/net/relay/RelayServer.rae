@@ -29,6 +29,8 @@ type RelayPeer {
   peerId: Int
   # The monotonic time (nowNs) a packet last came from this peer
   lastHeardNs: Int
+  # Never tell the other side this peer's address (no direct path)
+  relayOnly: Bool
 }
 
 type RelaySession {
@@ -50,6 +52,8 @@ type RelayRequestEvent {
   # join: the token, as its two 8-byte halves
   tokenHigh: Int
   tokenLow: Int
+  # open / join: the sender wants its address kept from the other side
+  relayOnly: Bool
 }
 
 # A player left its session (it said so, or went silent): its host is told
@@ -80,6 +84,8 @@ type RelayStats {
   packetsDropped: Int
   refused: Int
   timedOut: Int
+  # Player-host pairs given each other's address for a direct path
+  introduced: Int
 }
 
 type RelayServer {
@@ -141,6 +147,7 @@ func createRelayServer(
       packetsDropped: 0
       refused: 0
       timedOut: 0
+      introduced: 0
     }
     frameNs: nowNs()
     nextTimeoutScanNs: 0
@@ -245,6 +252,7 @@ func addPeer(
   address: view NetAddress
   sessionEntityId: view EntityId
   peerId: view Int
+  relayOnly: view Bool
 ) ret EntityId {
   let peerEntityId: EntityId = allocEntity(this: server.entities)
   componentSet(
@@ -255,6 +263,7 @@ func addPeer(
       sessionEntityId: sessionEntityId
       peerId: peerId
       lastHeardNs: server.frameNs
+      relayOnly: relayOnly
     }
   )
   server.peersByAddress.set(k: addressKey(address: address), value: peerEntityId)
@@ -324,7 +333,11 @@ func closeSession(server: mod RelayServer, sessionEntityId: view EntityId) {
 
 # A new session hosted from `address`: its token is random (false when the
 # system has no random source)
-func openSession(server: mod RelayServer, address: view NetAddress) ret EntityId {
+func openSession(
+  server: mod RelayServer
+  address: view NetAddress
+  relayOnly: view Bool
+) ret EntityId {
   var token: List(UInt8) = List.create(UInt8, cap: relayTokenBytes)
   token.addDefaults(count: relayTokenBytes)
   if not secureRandomFill(bytes: token, start: 0, count: relayTokenBytes) {
@@ -343,6 +356,7 @@ func openSession(server: mod RelayServer, address: view NetAddress) ret EntityId
     address: address
     sessionEntityId: sessionEntityId
     peerId: hostPeerId
+    relayOnly: relayOnly
   )
   let session: mod RelaySession = componentMod(this: server.sessions, entityId: sessionEntityId)
   session.hostEntityId = hostEntityId

@@ -1,12 +1,18 @@
-# The relay (networking 5/12)
+# The relay (networking 5/12, 6/12)
 
 A headless Rae program that sits between a game's host and its players
 when they cannot (or should not) reach each other directly. The host opens
 a session and gets a token, the players join with the token, and the relay
 forwards each packet between the host and the session's players. It does
 not read the packets: they are lib/net/Connection packets, sealed with
-ChaCha20-Poly1305 (lib/net/PacketSeal.rae). Every side sees only the
-relay's address and peer ids, never another side's IP address.
+ChaCha20-Poly1305 (lib/net/PacketSeal.rae). Through the relay, every side
+sees only the relay's address and peer ids, never another side's IP
+address.
+
+When both sides allow it, the relay also tells a player and its host each
+other's public address, and they try a direct path. Traffic moves to the
+direct path once it works and stays on the relay when it does not (see
+"Direct first, the relay as a fallback").
 
 ## Pieces
 
@@ -19,7 +25,7 @@ relay's address and peer ids, never another side's IP address.
 | `lib/net/relay/timeoutSystem/TimeoutSystem.rae` | removes peers silent for `peerTimeoutMs` (scans every 100 ms) |
 | `lib/net/relay/noticeSystem/NoticeSystem.rae` | tells a host which players left, players that the session closed |
 | `lib/net/relay/Relay.rae` | `relayFrame` (the systems in order) and `relayStep` (wait, then a frame) |
-| `lib/net/relay/RelayClient.rae` | a host's or player's side: open / join, keep-alive, forward header |
+| `lib/net/relay/RelayClient.rae` | a host's or player's side: open / join, keep-alive, forward header, the direct paths |
 | `lib/net/relay/RelayConnections.rae` | Connections over the relay: `RelayHost` (one per player), `RelayPlayer` |
 | `tools/relay/Main.rae` | the relay program |
 | `tools/relayPeer/Main.rae`, `tools/relay/loopback-check.sh` | the multi-process check and its measurements |
@@ -66,10 +72,75 @@ Byte 0 is the kind. Integers are big-endian.
 | 208 leave | client -> relay | nothing |
 | 209 peerLeft | relay -> host | peer id (4) |
 | 210 closed | relay -> player | nothing |
+| 211 introduce | relay -> host, player | the other side's peer id (4), secret (8), address (23: family, high, low, port, scope) |
+| 212 punch | client -> client, direct | secret (8), sender's peer id (4) |
+| 213 punchAck | client -> client, direct | secret (8), sender's peer id (4) |
+| 214 direct | client -> client, direct | sender's peer id (4), payload (a forward that skipped the relay) |
+
+`open` and `join` may end with one more byte, 1 = relay only.
 
 The host is peer 0, and players are 1, 2, ... in the order they joined. A
-player forwards only to its host. A client ignores datagrams that do not
-come from the relay's address.
+player forwards only to its host. A client ignores datagrams that come
+neither from the relay's address nor from a peer the relay introduced.
+
+## Direct first, the relay as a fallback
+
+1. When a player joins, the session system sends `introduce` (twice, in
+   case one is lost) to the player, with the host's address, and to the
+   host, with the player's address. Both get the same random 8-byte secret.
+   The address is what the relay saw: behind a NAT, the public mapping of
+   the very socket the client talks to the relay from.
+2. Both sides send `punch` from that same socket every `punchIntervalMs`
+   (50 ms). A NAT that lets the outgoing punch create a mapping then lets
+   the other side's punch in. A punch with the right secret and peer id is
+   answered with a `punchAck`. The first ack, or the first `direct` packet,
+   makes the path `direct` (`RelayClient`'s `DirectPath`).
+3. Traffic does not wait for this: until the path is direct, packets go
+   through the relay as before. When no ack comes within `punchTimeoutMs`
+   (1.5 s), the path is `fallback`, the punching stops, and the relay
+   carries the traffic. A direct path that hears nothing for
+   `directSilenceMs` (3 s) goes back to the relay too. The connection's
+   keep-alives (every 100 ms) keep a working path from looking silent.
+4. Keep-alives still go to the relay (`lastRelaySendMs`), so the relay
+   keeps the peer and its NAT mapping alive while the game traffic is
+   direct.
+5. `RelayClientConfig.relayOnly` (on either side) makes the relay skip
+   the introduction, so neither side learns the other's address and no
+   direct path is tried. A streaming host that hides its address sets it.
+
+The direct packets are the same sealed Connection packets. A forged
+`direct` packet from the right address still fails to open.
+
+What the loopback tests show (fixture `1271_direct_first_relay_fallback`,
+and `loopback-check.sh`, where all four player processes end up direct):
+
+- the punches meet and the traffic leaves the relay;
+- with a lib/net/BadNetwork dropping every direct packet (standing in for
+  a NAT that blocks the punches), both sides fall back after 0.6 s and
+  every message still arrives;
+- a relay-only host or player is never introduced;
+- a direct path that dies later falls back, and nothing is lost.
+
+What one machine cannot test, and so is not tested yet:
+
+- **Real NAT behavior.** Endpoint-independent ("cone") NATs let the
+  punches through. Symmetric NATs map each destination to a new port, so
+  the address the relay saw is not the one the punch comes from, and the
+  punches fail. That case falls back to the relay by design, but no test
+  shows it on a real NAT. NATs that need both punches within a few
+  milliseconds, and ones that expire a mapping quickly, are untested.
+- **Carrier-grade NAT on mobile networks (CGNAT)**, often symmetric, and
+  IPv6 on carriers (no NAT, but a stateful firewall: the simultaneous
+  punches should open it, untested).
+- **Two players behind the same NAT** (a LAN party). The relay gives them
+  each other's public address, which works only if the router
+  "hairpins". Local-address candidates are not sent yet.
+- **A network change mid-game** (Wi-Fi to cellular). The address changes,
+  the direct path goes silent and falls back to the relay, but the relay
+  knows the peer by its old address, so the peer times out there.
+  Reconnect is 9/12.
+- **Real latency and loss.** Loopback has neither. lib/net/BadNetwork
+  simulates them, but not on the direct path's NAT timing.
 
 ## Measured (loopback, Apple M1 Max, release build, 2026-11-03)
 
@@ -103,4 +174,6 @@ of it.
   connections".
 - **Players talk only to their host** (a star). Player-to-player traffic
   goes through the host, which is what a host-authoritative game wants.
-- **Direct connection first, the relay as a fallback** is 6/12.
+- **Direct paths reveal addresses.** When neither side is relay-only, the
+  introduction gives each side the other's public address. That is
+  inherent to a direct path; `relayOnly` is the switch.

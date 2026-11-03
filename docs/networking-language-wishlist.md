@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-5/12 but are not. They are listed so the
+These looked like gaps during 1/12-6/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender
@@ -62,3 +62,10 @@ next task does not propose them again.
   values to pass a condition in. This is already recorded and deferred
   (`docs/concurrency-model.md`, `docs/ecs-systems-and-data-observation.md`).
   The relay code itself needed none.
+- **Calling the owner while holding an alias into it (6/12).** In
+  `lib/net/relay/RelayClient.rae`, `updatePaths` and `takeDirect` copy what
+  they need out of a `mod DirectPath` alias (address, secret) and call
+  `sendPunch(client: ...)` only after the alias's block ends. A `mod` of the
+  whole client while an alias into `client.paths` is live is the aliasing
+  rule working as designed. Copying out first is the intended shape.
+
