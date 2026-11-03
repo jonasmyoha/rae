@@ -29,9 +29,9 @@ func show(
   var options: QrOptions = qrOptions(level: level)
   options.version = version
   options.mask = mask
-  if let code: QrCode = qrEncodeIn(bytes: textBytes(text: text), mode: mode, options: options) {
-    log("case {name} {code.version} {qrLevelName(level: code.level)} {code.mask}")
-    let grid: String = qrText(code: code)
+  if let symbol: QrSymbol = qrEncodeIn(bytes: textBytes(text: text), mode: mode, options: options) {
+    log("case {name} {symbol.version} {qrLevelName(level: symbol.level)} {symbol.mask}")
+    let grid: String = qrText(symbol: symbol)
     log(grid.sub(start: 0, len: grid.length() - 1))
   } else {
     log("case {name}: does not fit")
@@ -41,8 +41,8 @@ func show(
 func fits(text: view String, level: view QrErrorCorrection, version: view Int) ret String {
   var options: QrOptions = qrOptions(level: level)
   options.version = version
-  if let code: QrCode = qrEncodeBytes(bytes: textBytes(text: text), options: options) {
-    ret "version {code.version}"
+  if let symbol: QrSymbol = qrEncodeBytes(bytes: textBytes(text: text), options: options) {
+    ret "version {symbol.version}"
   }
   ret "does not fit"
 }
@@ -204,8 +204,8 @@ func main() ret Int {
       version: 3
     )}"
   )
-  if let code: QrCode = qrEncodeText(text: url100, level: QrErrorCorrection.medium) {
-    log("the 100-character URL: version {code.version}, {code.size} x {code.size} modules")
+  if let symbol: QrSymbol = qrEncodeText(text: url100, level: QrErrorCorrection.medium) {
+    log("the 100-character URL: version {symbol.version}, {symbol.size} x {symbol.size} modules")
   }
   ret 0
 }
