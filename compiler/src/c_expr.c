@@ -875,6 +875,56 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               fprintf(out, ")))");
               break;
           }
+          /* A List, or a struct that holds a String / List / other heap
+           * field: `is` is deep value equality, the same comparison as
+           * `equals(a:, b:)` (rae_value_equals_expr, the generated
+           * rae_eq_<T>_). C has no `==` for structs, so these used to reach
+           * the C compiler as `a == b` and fail to build. Each operand is
+           * evaluated once into a local; the comparison only reads them. */
+          const AstTypeRef* deep_tr = ltr;
+          if (deep_tr && ctx->generic_params && ctx->generic_args)
+              deep_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, deep_tr);
+          if (deep_tr && !deep_tr->is_opt) {
+              Str dbase = get_base_type_name(deep_tr);
+              bool is_list = str_eq_cstr(dbase, "List") && deep_tr->generic_args;
+              const AstDecl* dtd = (dbase.len > 0 && !is_list) ? find_type_decl(ctx, ctx->module, dbase) : NULL;
+              bool is_struct = dtd && dtd->kind == AST_DECL_TYPE
+                  && !has_property(dtd->as.type_decl.properties, "c_struct")
+                  && !dtd->as.type_decl.generic_params && !deep_tr->generic_args;
+              if (is_list || is_struct) {
+                  AstTypeRef plain = *deep_tr;
+                  plain.is_view = false; plain.is_mod = false; plain.is_own = false; plain.is_copy = false;
+                  plain.next = NULL;
+                  int eq_id = ctx->temp_counter++;
+                  char a_name[48], b_name[48];
+                  snprintf(a_name, sizeof a_name, "__rae_eq_a%d", eq_id);
+                  snprintf(b_name, sizeof b_name, "__rae_eq_b%d", eq_id);
+                  fprintf(out, "((bool)(%s(__extension__ ({ ", expr->as.binary.op == AST_BIN_NEQ ? "!" : "");
+                  emit_type_ref_as_c_type(ctx, &plain, out, false);
+                  /* the first local's type is written above, the second's
+                   * at the end of the first iteration below */
+                  /* An operand that is a fresh owned value (a call's
+                   * result) is held in a statement temporary, freed after
+                   * the statement like a borrowed argument's (#884). */
+                  const AstExpr* operands[2] = { expr->as.binary.lhs, expr->as.binary.rhs };
+                  const char* names[2] = { a_name, b_name };
+                  for (int side = 0; side < 2; side++) {
+                      fprintf(out, " %s = (", names[side]);
+                      int held = -1;
+                      if (c_stmt_temp_value_owns(ctx, operands[side])
+                          && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &plain, 0))
+                          held = register_stmt_temp(ctx, &plain, true);
+                      if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+                      emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                      if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
+                      fprintf(out, "); ");
+                      if (side == 0) emit_type_ref_as_c_type(ctx, &plain, out, false);
+                  }
+                  rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &plain, a_name, b_name, out);
+                  fprintf(out, "; }))))");
+                  break;
+              }
+          }
       }
       // String concatenation: `lhs + rhs` lowers to a direct runtime
       // call when both sides are String (any combination of owned
