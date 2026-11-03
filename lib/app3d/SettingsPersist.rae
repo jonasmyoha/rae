@@ -12,6 +12,7 @@
 import Math
 import String
 import Sys
+open CloudTier
 open Calendar
 open app3d/SettingsDialog
 open app3d/SettingsSky
@@ -71,8 +72,10 @@ func serializeSettingsState(settingsState: view SettingsState, editor: view Bool
   )} latitude={settingsState.latitude} longitude={settingsState.longitude} yearSpeed={settingsState.timeOfDay.yearSpeed} weather={settingsState.weatherOverride.toString()} wind={settingsState.windOverride.toString()} weatherValues={settingsWeatherValuesText(
     values: settingsState.values
   )}"
-  let rendering: String = "toon={settingsFlag(value: settingsState.toon)} volumetricClouds={settingsFlag(
-    value: settingsState.volumetricClouds
+  let rendering: String = "toon={settingsFlag(value: settingsState.toon)} clouds={cloudOptionsName(
+    options: settingsState.clouds
+  )} cloudSteps={settingsState.clouds.steps} cloudShadows={settingsFlag(
+    value: settingsState.clouds.shadows
   )} shadows={settingsFlag(value: settingsState.shadows)} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
   let light: String = "sky={settingsState.skyModel.toString()} sunLux={settingsState.sunNoonLux} exposure={settingsState.exposureCompensation} autoExposure={settingsFlag(
     value: settingsState.autoExposure
@@ -168,8 +171,14 @@ func restoreSettingsState(
       settingsState.scene = Math.clamp(val: value.toInt(), low: 1, high: settingsState.sceneCount)
     } else if name is "toon" {
       settingsState.toon = flag
-    } else if name is "volumetricClouds" and not settingsEnvSets(name: "RAE_VOLUMETRIC_CLOUDS") {
-      settingsState.volumetricClouds = flag
+    } else if name is "clouds" and not settingsEnvSets(name: "RAE_CLOUD_TIER") {
+      if let chosen: CloudOptions = cloudOptionsNamed(name: value, options: settingsState.clouds) {
+        settingsState.clouds = chosen
+      }
+    } else if name is "cloudSteps" and value.toInt() > 0 {
+      settingsState.clouds.steps = value.toInt()
+    } else if name is "cloudShadows" {
+      settingsState.clouds.shadows = flag
     } else if name is "shadows" {
       settingsState.shadows = flag
     } else if name is "antialias" {

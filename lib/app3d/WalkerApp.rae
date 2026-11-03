@@ -512,9 +512,18 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       skyModel: settingsSkyFromEnv(fallback: SettingsSkyModel.hosek)
     )
     settingsState.timeOfDay.daySeconds = walkerDaySeconds
-    # the ray-marched clouds are off until the panel's button turns them on
-    # (RAE_VOLUMETRIC_CLOUDS=1 starts with them on, for screenshots)
-    settingsState.volumetricClouds = Sys.getEnv(name: "RAE_VOLUMETRIC_CLOUDS") is "1"
+    # the clouds start on the 2D layer: nothing ray-marched until the panel's
+    # Clouds group picks it (RAE_CLOUD_TIER=auto|off|layer|slab|volumetric
+    # and RAE_CLOUD_STEPS=<n> start on another, for screenshots)
+    if let chosen: CloudOptions = cloudOptionsNamed(
+      name: Sys.getEnv(name: "RAE_CLOUD_TIER")
+      options: settingsState.clouds
+    ) {
+      settingsState.clouds = chosen
+    }
+    if Sys.getEnv(name: "RAE_CLOUD_STEPS").toInt() > 0 {
+      settingsState.clouds.steps = Sys.getEnv(name: "RAE_CLOUD_STEPS").toInt()
+    }
     # The walker's camera a half stop darker than the meter says, so the
     # real-strength sun's noon does not wash out the sunlit sand (the
     # settings panel's Exposure row starts here)
@@ -753,7 +762,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         clouds: createWalkerClouds(
           settings: CloudSettings {}
           quality: settingsState.quality
-          volumetric: settingsState.volumetricClouds
+          options: settingsState.clouds
         )
         statsLogged: false
         windSettings: windSettings

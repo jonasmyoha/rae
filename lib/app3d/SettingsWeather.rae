@@ -19,6 +19,7 @@
 # (settingsWeatherFromValues).
 import Math
 open Weather
+open CloudTier
 open ui/UiValues
 open ui/Ecs
 open app3d/UiShell
@@ -413,10 +414,27 @@ func settingsWeatherPick(settingsState: mod SettingsState, override: view Settin
 # Apply a weather, wind or year-speed action id to `settingsState`; true when it
 # changed something
 func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
-  # the ray-marched clouds (the slab and the volumetric tiers) on or off;
-  # off, only the 2D layer is drawn (app3d/SettingsClouds)
-  if actionId is "settings.clouds.volumetric" {
-    settingsState.volumetricClouds = settingsState.volumetricClouds is false
+  # the panel's Clouds group (app3d/SettingsClouds): which renderer draws
+  # them ("settings.clouds.renderer.<auto|off|layer|slab|volumetric>"), the
+  # volumetric steps ("settings.clouds.steps.<n>") and their shadows
+  if actionId.startsWith(prefix: "settings.clouds.renderer.") {
+    if let chosen: CloudOptions = cloudOptionsNamed(
+      name: actionId.sub(start: 25, len: actionId.length() - 25)
+      options: settingsState.clouds
+    ) {
+      settingsState.clouds = chosen
+    }
+    ret true
+  }
+  if actionId.startsWith(prefix: "settings.clouds.steps.") {
+    let steps: Int = actionId.sub(start: 22, len: actionId.length() - 22).toInt()
+    if steps > 0 {
+      settingsState.clouds.steps = steps
+    }
+    ret true
+  }
+  if actionId is "settings.clouds.shadows" {
+    settingsState.clouds.shadows = settingsState.clouds.shadows is false
     ret true
   }
   # a slider moved by hand: the weather's numbers (or the wind's) are set
@@ -487,10 +505,42 @@ func settingsWeatherToWorld(world: mod UiWorld, settingsState: view SettingsStat
       )
     )
   }
+  # the Clouds group: the renderer chosen, the volumetric steps, the shadows
+  let renderers: List(String) = [
+    "Auto"
+    "Off"
+    "Layer"
+    "Slab"
+    "Volumetric"
+  ]
+  let rendererNames: List(String) = [
+    "auto"
+    "off"
+    "layer"
+    "slab"
+    "volumetric"
+  ]
+  loop var i: Int = 0, i < renderers.length, ++i {
+    setNodeFillSlot(
+      world: world
+      nodeId: "SettingsCloudRenderer{renderers.copyAtDefault(index: i)}"
+      slot: settingsWeatherSlot(
+        on: cloudOptionsName(options: settingsState.clouds) is rendererNames.copyAtDefault(index: i)
+      )
+    )
+  }
+  let stepCounts: List(Int) = [32, 48, 64, 96]
+  loop let count: view Int in stepCounts {
+    setNodeFillSlot(
+      world: world
+      nodeId: "SettingsCloudSteps{count}"
+      slot: settingsWeatherSlot(on: settingsState.clouds.steps is count)
+    )
+  }
   setNodeFillSlot(
     world: world
-    nodeId: "SettingsCloudVolumeButton"
-    slot: settingsWeatherSlot(on: settingsState.volumetricClouds)
+    nodeId: "SettingsCloudShadowsButton"
+    slot: settingsWeatherSlot(on: settingsState.clouds.shadows)
   )
   setNodeFillSlot(
     world: world

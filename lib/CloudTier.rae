@@ -178,9 +178,8 @@ func createCloudTierControl(
   if let forced: CloudTier = cloudTierNamed(name: forcedName) {
     control.tier = cloudTierLower(first: forced, second: cloudTierBuilt)
     control.ceiling = control.tier
-    control.startCeiling = control.tier
     control.forced = true
-    log("[clouds] tier {control.tier}: forced by RAE_CLOUD_TIER={forcedName}")
+    log("[clouds] tier {control.tier}: chosen")
     ret control
   }
   log(
@@ -271,4 +270,73 @@ func cloudTierSetQuality(control: mod CloudTierControl, qualityTier: view CloudT
     log("[clouds] quality {qualityTier}: tier {control.tier}")
   }
   ret changed
+}
+
+# What a game or a person chose for the clouds (an app's settings panel):
+# `auto` lets the device, the quality step and the measured fallback pick the
+# tier; otherwise `tier` is drawn exactly, never moved. `steps` are the
+# volumetric tier's march steps, `shadows` the clouds' shadows on the ground
+# (lib/CloudShadow; off: the sun dimmed evenly by the cover).
+type CloudOptions {
+  auto: Bool = false
+  tier: CloudTier = CloudTier.layer
+  steps: Int = 48
+  shadows: Bool = true
+}
+
+# The choice a name spells: "auto" or a tier's name ("off", "layer",
+# "slab", "volumetric"); none for another word
+func cloudOptionsNamed(name: view String, options: view CloudOptions) ret opt CloudOptions {
+  var chosen: CloudOptions = options
+  if name is "auto" {
+    chosen.auto = true
+    ret chosen
+  }
+  if let tier: CloudTier = cloudTierNamed(name: name) {
+    chosen.auto = false
+    chosen.tier = tier
+    ret chosen
+  }
+  ret none
+}
+
+# The choice's name (its saved word)
+func cloudOptionsName(options: view CloudOptions) ret String {
+  if options.auto {
+    ret "auto"
+  }
+  ret "{options.tier}"
+}
+
+# Follow a choice: an exact tier is drawn as it is (the fallback never
+# moves it); Auto goes back to the device's and the quality's ceiling
+# (`qualityTier`) and the fallback. True when the tier changed (logged once).
+func cloudTierUseOptions(
+  control: mod CloudTierControl
+  options: view CloudOptions
+  qualityTier: view CloudTier
+) ret Bool {
+  if not options.auto {
+    let target: CloudTier = cloudTierLower(first: options.tier, second: cloudTierBuilt)
+    if control.forced and control.tier is target {
+      ret false
+    }
+    control.forced = true
+    control.tier = target
+    control.ceiling = target
+    log("[clouds] tier {target}: chosen")
+    ret true
+  }
+  if control.forced {
+    control.forced = false
+    control.ceiling = cloudTierLower(first: control.startCeiling, second: qualityTier)
+    control.tier = control.ceiling
+    control.windowFrames = 0
+    control.overFrames = 0
+    control.goodFrames = 0
+    control.cooldownFrames = 0
+    log("[clouds] auto: tier {control.tier}")
+    ret true
+  }
+  ret cloudTierSetQuality(control: control, qualityTier: qualityTier)
 }

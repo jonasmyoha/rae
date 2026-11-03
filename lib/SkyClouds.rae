@@ -21,6 +21,8 @@ type SkyClouds {
   scale: Float = 1.0
   # the cloud tier (lib/CloudTier rank: 0 off, 1 layer, 2 slab, 3 volumetric)
   tier: Int = 1
+  # their shadows on the ground (off: the sun dimmed evenly by the cover)
+  shadows: Bool = true
 }
 
 # The clouds `sky` asks for
@@ -34,10 +36,12 @@ func skyCloudsOf(sky: view Sky) ret SkyClouds {
     height: sky.cloudHeight
     scale: sky.cloudScale
     tier: cloudTierRank(tier: sky.cloudTier)
+    shadows: sky.cloudShadows
   }
 }
 
-# Write `clouds` as the uniform's two vec4s: clouds (cover, darkness, drift,
+# Write `clouds` as the uniform's three vec4s (the third: cloudOptions, x
+# the shadows on): clouds (cover, darkness, drift,
 # tier)
 # and cloudShape (kind, cirrus, height, scale)
 func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
@@ -54,5 +58,16 @@ func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
     y: clouds.cirrus
     z: clouds.height
     w: clouds.scale
+  )
+  var shadowsOn: Float = 0.0
+  if clouds.shadows {
+    shadowsOn = 1.0
+  }
+  pushVec4F(
+    writer: writer
+    x: shadowsOn
+    y: 0.0
+    z: 0.0
+    w: 0.0
   )
 }

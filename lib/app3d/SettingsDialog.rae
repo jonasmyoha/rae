@@ -34,6 +34,7 @@ open app3d/SettingsSky
 open Vec3
 open SkyHosek
 open Sky
+open CloudTier
 open Calendar
 open app3d/TimeOfDay
 open Moon
@@ -157,14 +158,13 @@ type SettingsState {
   latDragging: Bool
   # ----- rendering toggles -------------------------------------------
   # A renderer you cannot A/B is a renderer you cannot debug. Shadows are here
-  # because the shadow pass is APP-owned, so switching it off is simply not
-  # doing the work. SSAO and TAA are deliberately absent: in the deferred path
-  # their targets feed the composite, so skipping the pass leaves it sampling a
-  # stale or empty texture — measured, that is a near-black frame for TAA and
-  # 21k blacked-out samples for SSAO. They need real enable flags in the
-  # renderer, not a skipped pass.
+  # because the shadow pass is APP-owned: off, it is simply not done. SSAO and
+  # TAA are absent: in the deferred path their targets feed the composite, so
+  # skipping the pass leaves it sampling a stale or empty texture (a near-black
+  # frame for TAA, 21k blacked-out samples for SSAO); they need real enable
+  # flags in the renderer, not a skipped pass.
   shadows: Bool
-  volumetricClouds: Bool = false  # ray-marched clouds allowed (app3d/SettingsClouds)
+  clouds: CloudOptions = CloudOptions {}  # the cloud renderer chosen (app3d/SettingsClouds)
   # The renderer's quality step (High: today's renderer)
   quality: SettingsQuality = SettingsQuality.high
   # The sun's illuminance at its highest, in lux (SettingsSky
