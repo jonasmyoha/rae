@@ -1,0 +1,82 @@
+# The settings panel's Clouds group (app3d/SettingsWeather, SettingsClouds,
+# lib/CloudTier CloudOptions): the 2D layer at start; the renderer buttons
+# choose an exact tier or Auto, the steps buttons the volumetric steps, the
+# shadows button the clouds' shadows; all three are saved on the settings
+# line and restored. An exact tier is drawn as it is; Auto goes back to the
+# device's ceiling and the fallback.
+open CloudTier
+open app3d/SettingsDialog
+open app3d/SettingsPersist
+open app3d/SettingsWeather
+
+func freshSettings() ret SettingsState {
+  ret createSettingsState(
+    scene: 1
+    sceneCount: 1
+    speed: 1.0
+    toon: false
+    hour: 12.0
+    skyModel: SettingsSkyModel.hosek
+  )
+}
+
+func main() {
+  var settings: SettingsState = freshSettings()
+  log(
+    "start: {cloudOptionsName(options: settings.clouds)}, steps {settings.clouds.steps}, shadows {settings.clouds.shadows}"
+  )
+  let picked: Bool = settingsWeatherHandleAction(
+    settingsState: settings
+    actionId: "settings.clouds.renderer.volumetric"
+  )
+  let stepped: Bool = settingsWeatherHandleAction(
+    settingsState: settings
+    actionId: "settings.clouds.steps.96"
+  )
+  let shaded: Bool = settingsWeatherHandleAction(
+    settingsState: settings
+    actionId: "settings.clouds.shadows"
+  )
+  log(
+    "after the buttons: {cloudOptionsName(options: settings.clouds)}, steps {settings.clouds.steps}, shadows {settings.clouds.shadows} ({picked} {stepped} {shaded})"
+  )
+  let unknown: Bool = settingsWeatherHandleAction(
+    settingsState: settings
+    actionId: "settings.clouds.renderer.fog"
+  )
+  log("an unknown renderer keeps it: {cloudOptionsName(options: settings.clouds)}")
+
+  # saved and restored
+  let line: String = serializeSettingsState(settingsState: settings, editor: false)
+  var restored: SettingsState = freshSettings()
+  var editor: Bool = false
+  let had: Bool = restoreSettingsState(raw: line, settingsState: restored, editor: editor)
+  log(
+    "restored: {cloudOptionsName(options: restored.clouds)}, steps {restored.clouds.steps}, shadows {restored.clouds.shadows}"
+  )
+
+  # the control follows the choice: exact, then Auto (a desktop's ceiling)
+  var control: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: "layer"
+  )
+  var exact: CloudOptions = CloudOptions {}
+  exact.tier = CloudTier.slab
+  let toSlab: Bool = cloudTierUseOptions(
+    control: control
+    options: exact
+    qualityTier: CloudTier.volumetric
+  )
+  let fallback: Bool = cloudTierFrame(control: control, cloudMicroseconds: 99999, thermal: 3)
+  log("exact slab: {control.tier}, moved by a slow hot frame: {fallback}")
+  var auto: CloudOptions = CloudOptions {}
+  auto.auto = true
+  let toAuto: Bool = cloudTierUseOptions(
+    control: control
+    options: auto
+    qualityTier: CloudTier.volumetric
+  )
+  log("auto: {control.tier} ({toAuto})")
+}

@@ -1,6 +1,8 @@
-# app3d/SettingsClouds — the walkers' cloud tier (lib/CloudTier,
-# docs/cloud-rendering-research.md §8.4): the game's ceiling, the device it
-# runs on, the quality setting's tier, and each frame the measured fallback,
+# app3d/SettingsClouds — the walkers' clouds (lib/CloudTier,
+# docs/cloud-rendering-research.md §8.4) from the settings panel's Clouds
+# group: an exact renderer (off, the 2D layer, the slab, volumetric; the 2D
+# layer at start) or Auto, which takes the game's ceiling, the device it runs
+# on, the quality setting's tier, and each frame the measured fallback,
 # fed by the cloud passes' own GPU time (lib/CloudTiming, their timestamps,
 # on every device) and the OS thermal state. The tier it settles on goes to the renderer
 # (setCloudTier).
@@ -11,13 +13,18 @@ open RendererDeferred
 open CloudTiming
 open app3d/SettingsDialog
 open app3d/RenderScale
+open ui/Ecs
+open app3d/UiShell
 
 # The walkers' clouds (an app resource, on the render state)
 type WalkerClouds {
   settings: CloudSettings
   control: CloudTierControl
-  # the pass timing samples already read
+  # the pass timing samples already read, the last GPU time measured (-1
+  # none yet) and the status line shown
   seenSamples: Int
+  lastMicroseconds: Int = -1
+  status: String = ""
 }
 
 # A phone or a tablet, or a browser on one (a coarse main pointer): the
@@ -66,39 +73,28 @@ func settingsQualityCloudSteps(quality: view SettingsQuality) ret Int {
 
 # The walkers' clouds at the start: the game's ceiling `settings`, this
 # device, the quality setting, or RAE_CLOUD_TIER (logged once)
-# The tier the settings allow: the quality step's, and only the 2D layer
-# while the ray-marched clouds are off (the panel's "Volumetric clouds"
-# button, off by default)
-func settingsCloudTierAllowed(
-  quality: view SettingsQuality
-  volumetric: view Bool
-  maxTier: view CloudTier
-) ret CloudTier {
-  let tier: CloudTier = settingsQualityCloudTier(quality: quality, maxTier: maxTier)
-  if volumetric {
-    ret tier
-  }
-  ret cloudTierLower(first: tier, second: CloudTier.layer)
-}
-
+# The walkers' clouds at the start: the game's ceiling `settings`, this
+# device, the quality setting and the panel's choice `options` (an exact
+# tier, or Auto; logged once)
 func createWalkerClouds(
   settings: view CloudSettings
   quality: view SettingsQuality
-  volumetric: view Bool
+  options: view CloudOptions
 ) ret WalkerClouds {
+  var forced: String = ""
+  if not options.auto {
+    forced = "{options.tier}"
+  }
   ret WalkerClouds {
     settings: settings
     control: createCloudTierControl(
       settings: settings
       mobile: walkerCloudDeviceMobile()
-      qualityTier: settingsCloudTierAllowed(
-        quality: quality
-        volumetric: volumetric
-        maxTier: settings.maxTier
-      )
-      forcedName: Sys.getEnv(name: "RAE_CLOUD_TIER")
+      qualityTier: settingsQualityCloudTier(quality: quality, maxTier: settings.maxTier)
+      forcedName: forced
     )
     seenSamples: 0
+    status: ""
   }
 }
 
@@ -127,26 +123,64 @@ func walkerCloudMicroseconds(clouds: mod WalkerClouds, renderer: view DeferredRe
   ret cloudTiming.lastMicroseconds
 }
 
-# One frame: the quality's ceiling, the fallback, and the tier to the renderer
+# One frame: the panel's choice (an exact tier, or Auto with the quality's
+# ceiling and the measured fallback), the tier, the steps and the shadows to
+# the renderer, and the Clouds group's status line in `world`
 func walkerCloudsFrame(
   clouds: mod WalkerClouds
   renderer: mod DeferredRenderer
   quality: view SettingsQuality
-  volumetric: view Bool
+  options: view CloudOptions
+  world: mod UiWorld
 ) {
-  let qualityChanged: Bool = cloudTierSetQuality(
+  let chosen: Bool = cloudTierUseOptions(
     control: clouds.control
-    qualityTier: settingsCloudTierAllowed(
-      quality: quality
-      volumetric: volumetric
-      maxTier: clouds.settings.maxTier
-    )
+    options: options
+    qualityTier: settingsQualityCloudTier(quality: quality, maxTier: clouds.settings.maxTier)
   )
+  let measured: Int = walkerCloudMicroseconds(clouds: clouds, renderer: renderer)
+  if measured >= 0 {
+    clouds.lastMicroseconds = measured
+  }
   let fellBack: Bool = cloudTierFrame(
     control: clouds.control
-    cloudMicroseconds: walkerCloudMicroseconds(clouds: clouds, renderer: renderer)
+    cloudMicroseconds: measured
     thermal: thermalState()
   )
   setCloudTier(renderer: renderer, tier: clouds.control.tier)
-  setCloudSteps(renderer: renderer, steps: settingsQualityCloudSteps(quality: quality))
+  setCloudSteps(renderer: renderer, steps: options.steps)
+  setCloudShadows(renderer: renderer, on: options.shadows)
+  let status: String = walkerCloudStatus(clouds: clouds, options: options)
+  if not (status is clouds.status) {
+    clouds.status = status
+    setNodeText(world: world, nodeId: "SettingsCloudStatus", value: status)
+  }
+}
+
+# The Clouds group's status line: the tier drawn, how it was chosen, and the
+# cloud passes' last GPU time ("Drawing slab (auto, fell back), 2.2 ms")
+func walkerCloudStatus(clouds: view WalkerClouds, options: view CloudOptions) ret String {
+  var how: String = ""
+  if options.auto {
+    how = " (auto)"
+    if cloudTierRank(tier: clouds.control.tier) < cloudTierRank(tier: clouds.control.ceiling) {
+      how = " (auto, fell back)"
+    }
+  } else if not (clouds.control.tier is options.tier) {
+    how = " (not built: the highest)"
+  }
+  var cost: String = ""
+  if clouds.lastMicroseconds >= 0 {
+    let tenths: Int = (clouds.lastMicroseconds + 50) / 100
+    cost = ", {tenths / 10}.{tenths % 10} ms"
+  }
+  ret "Drawing {walkerCloudTierLabel(tier: clouds.control.tier)}{how}{cost}"
+}
+
+# A tier as the panel's buttons name it
+func walkerCloudTierLabel(tier: view CloudTier) ret String {
+  if tier is CloudTier.layer {
+    ret "2D layer"
+  }
+  ret "{tier}"
 }
