@@ -63,6 +63,11 @@ typedef struct {
   /* Optional toolchain requirement: the string from `rae: { version: "..." }`
    * (#931). Empty (len 0) when the pack declares no requirement. */
   Str rae_version;
+  /* Optional `meta: { name: "...", version: "..." }`: what the program is
+   * called and its release (the App Store's version); the program reads
+   * them as Pack.name / Pack.version. Empty (len 0) when absent. */
+  Str meta_name;
+  Str meta_version;
   /* Optional `dependencies` block (#933), in declaration order. */
   RaePackDep* deps;
   size_t dep_count;

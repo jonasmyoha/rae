@@ -1,0 +1,16 @@
+# The program's own pack: the `meta` of the project's .raepack, the name and
+# the version a store shows (tools/ios), so a program that must name itself
+# (an HTTP User-Agent, an About line, a log's first line) writes its version
+# once, in the pack.
+#
+#     meta: { name: "SUMU", version: "0.1.0" }   # in the .raepack
+#     log("{Pack.name} {Pack.version}")            # SUMU 0.1.0
+#
+# Every program sees this module as `Pack` without an import, as it sees
+# `Target`; its names are always written qualified. The compiler replaces
+# the two values below with the project pack's meta for every build (rae
+# run, rae build, --emit-c, --target wasm); a build with no pack, or a pack
+# without a meta, a name or a version, keeps "".
+const name: String = ""
+
+const version: String = ""

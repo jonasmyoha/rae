@@ -431,6 +431,14 @@ App Store approval or general iOS compatibility — that is investigated separat
 
 ## 12. Package metadata, dependencies, and `rae.lock`
 
+- **The program reads its own `meta`** (2026-11-03): `Pack.name` and
+  `Pack.version` (lib/Pack.rae) are the project pack's `meta.name` and
+  `meta.version`, Strings, "" when there is no pack or the pack has no
+  meta. Every program sees `Pack` without an import, qualified like
+  `Target`; the compiler writes the two values for every build (`rae run`,
+  `rae build`, `--emit-c`, `--target wasm`), so a program that must name
+  itself (an HTTP User-Agent, an About line) keeps its version in one place.
+  Cases 1331 and 1332.
 - **`meta`** absorbs `devtools.json`'s human/UI data, but **build/package
   semantics and devtools-presentation data are clearly separated** within the
   file. Provisional split:

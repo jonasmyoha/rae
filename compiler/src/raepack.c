@@ -835,6 +835,18 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
           pack->rae_version = rae_field->value.as.string;
         }
       }
+    } else if (str_eq_cstr(field->key, "meta") && field->value.kind == RAEPACK_VALUE_BLOCK) {
+      /* The pack's presentation (name, version, description, ...): only the
+       * name and the version are read; the program sees them as Pack.name
+       * and Pack.version */
+      RaePackBlock* meta_block = field->value.as.block;
+      for (const RaePackField* meta_field = meta_block ? meta_block->fields : NULL;
+           meta_field;
+           meta_field = meta_field->next) {
+        if (meta_field->value.kind != RAEPACK_VALUE_STRING) continue;
+        if (str_eq_cstr(meta_field->key, "name")) pack->meta_name = meta_field->value.as.string;
+        if (str_eq_cstr(meta_field->key, "version")) pack->meta_version = meta_field->value.as.string;
+      }
     }
   }
 
