@@ -171,25 +171,30 @@ func updateWalkerClimate(app: mod WalkerApp) {
     north: look.y
   )
   # the weather there (lib/Weather): its clouds dim the sun and the sky
-  # (app3d/SettingsSky), the panel names it (or the panel's overrides,
-  # app3d/SettingsWeather and SettingsWind)
-  settings.weather = settingsWindApplied(
-    override: settings.windOverride
-    weather: settingsWeatherApplied(
-      override: settings.weatherOverride
-      weather: weatherAt(
-        seed: app.climate.weatherSeed
-        latitude: place.latitude
-        longitude: place.longitude
-        year: settings.timeOfDay.year
-        dayOfYear: settings.timeOfDay.dayOfYear
-        hour: climateLocalHour(
-          sceneHour: settings.timeOfDay.hour
-          sceneLongitude: settings.longitude
-          longitude: place.longitude
-        )
-      )
+  # (app3d/SettingsSky), the panel names it. On Auto the model's numbers
+  # go into the panel's (its sliders show them); the weather drawn is read
+  # back from them, the weather's and the wind's each set by hand or not
+  # (app3d/SettingsWeather)
+  let modelWeather: Weather = weatherAt(
+    seed: app.climate.weatherSeed
+    latitude: place.latitude
+    longitude: place.longitude
+    year: settings.timeOfDay.year
+    dayOfYear: settings.timeOfDay.dayOfYear
+    hour: climateLocalHour(
+      sceneHour: settings.timeOfDay.hour
+      sceneLongitude: settings.longitude
+      longitude: place.longitude
     )
+  )
+  if settings.windOverride is SettingsWind.auto {
+    settingsWindModelToValues(values: settings.values, weather: modelWeather)
+  }
+  settings.weather = settingsWeatherFromValues(
+    values: settings.values
+    weather: modelWeather
+    override: settings.weatherOverride
+    windOverride: settings.windOverride
   )
   # the trees, bushes and grass sway in the weather's wind (lib/WeatherWind)
   app.renderSystem.windSettings = windSettingsFromWeather(
@@ -212,7 +217,8 @@ func updateWalkerClimate(app: mod WalkerApp) {
     weather: settings.weather
   )
   app.walkerMarks.precipitationRate = settings.weather.precipitation
-  app.walkerMarks.precipitationAir = settingsWeatherAir(
+  app.walkerMarks.precipitationAir = settingsValuesAir(
+    values: settings.values
     override: settings.weatherOverride
     air: air
   )
@@ -267,7 +273,8 @@ func updateWalkerClimate(app: mod WalkerApp) {
   }
   setGbufferWetness(
     cache: app.renderSystem.renderer.passes.gbuffer
-    wet: settingsWeatherWet(
+    wet: settingsValuesWet(
+      values: settings.values
       override: settings.weatherOverride
       wet: weatherGroundWet(
         seed: app.climate.weatherSeed
@@ -283,28 +290,36 @@ func updateWalkerClimate(app: mod WalkerApp) {
   let field: mod PropField = app.terrainSystem.forest.field
   # the mist thickens near the dew point (lib/Weather): humid air, early
   # morning, autumn; gone by midday
+  let warmingHere: Bool = climateWarming(
+    latitude: place.latitude
+    year: settings.timeOfDay.year
+    dayOfYear: settings.timeOfDay.dayOfYear
+  )
+  let autumn: Bool = warmingHere is false and settings.slowTemperature > 2.0 and settings.slowTemperature < 12.0
+  let modelMist: Float = weatherMistFactor(
+    weather: modelWeather
+    localHour: localHour
+    autumn: autumn
+  )
+  # on Auto the panel's numbers are the model's: its cover, its rain or snow
+  # by the air there, its mist (the sliders show them)
+  if settings.weatherOverride is SettingsWeather.auto {
+    settingsWeatherModelToValues(
+      values: settings.values
+      weather: modelWeather
+      air: air
+      mistFactor: modelMist
+    )
+  }
   let targets: mod DeferredTargets = app.renderSystem.renderer.passes.targets
   if targets.mistOn {
     if app.renderSystem.mistBaseDensity <= 0.0 {
       app.renderSystem.mistBaseDensity = targets.mistDensity
     }
-    let warmingHere: Bool = climateWarming(
-      latitude: place.latitude
-      year: settings.timeOfDay.year
-      dayOfYear: settings.timeOfDay.dayOfYear
-    )
-    let autumn: Bool = warmingHere is false and settings.slowTemperature > 2.0 and settings.slowTemperature < 12.0
-    targets.mistDensity = app.renderSystem.mistBaseDensity * settingsWeatherMist(
+    targets.mistDensity = app.renderSystem.mistBaseDensity * settingsValuesMist(
+      values: settings.values
       override: settings.weatherOverride
-      factor: weatherMistFactor(
-        weather: settings.weather
-        localHour: climateLocalHour(
-          sceneHour: settings.timeOfDay.hour
-          sceneLongitude: settings.longitude
-          longitude: place.longitude
-        )
-        autumn: autumn
-      )
+      factor: modelMist
     )
   }
   field.seasonsOn = true

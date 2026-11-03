@@ -29,6 +29,7 @@ open ui/inputSystem/InputSystem
 open app3d/UiShell
 open app3d/Playback
 open app3d/Slider
+open ui/UiValues
 open app3d/SettingsSky
 open Vec3
 open SkyHosek
@@ -208,6 +209,9 @@ type SettingsState {
   # The weather the panel asks for (app3d/SettingsWeather; auto: the model's)
   weatherOverride: SettingsWeather = SettingsWeather.auto
   windOverride: SettingsWind = SettingsWind.auto
+  # The weather's numbers the panel's sliders show and change (ui/UiValues;
+  # app3d/SettingsWeather settingsWeatherKeys): the model's in Auto
+  values: UiValues = createUiValues()
 }
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene

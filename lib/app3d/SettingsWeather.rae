@@ -1,18 +1,30 @@
 # app3d/SettingsWeather — the settings panel's season and weather controls
-# (docs/seasons-and-weather-design.md §5, §6): a weather override (Auto:
-# the weather model's own, lib/Weather; or Clear, Cloudy, Rain, Snow,
-# Mist) and the year's speed (1, 7 or 30 days a day; TimeOfDay.yearSpeed),
-# so a look can be judged without waiting for it. The override changes
-# what is drawn (the sky's clouds, the light, the rain or snow falling, the
-# wet ground, the mist), not the climate: its snow and ice keep following
-# the weather model.
+# (docs/seasons-and-weather-design.md §5, §6): the weather's sliders
+# (Clouds, Rain, Snow, Mist and Wind), the weather buttons that set them at
+# once (Auto: the weather model's own, lib/Weather; or Clear, Cloudy, Rain,
+# Snow, Mist) and the year's speed (1, 7 or 30 days a day;
+# TimeOfDay.yearSpeed), so a look can be judged without waiting for it.
+# What is set changes what is drawn (the sky's clouds, the light, the rain
+# or snow falling, the wet ground, the mist), not the climate: its snow and
+# ice keep following the weather model.
+#
+# The numbers live in one place, SettingsState.values (ui/UiValues), under
+# settingsWeatherKeys; the sliders and their readouts are bound to them
+# (ValueSlider, ValueText in the panel's scene; ui/valueSystem draws them).
+# In Auto the model writes them every frame, so the sliders move with the
+# weather; a weather button writes its own and the weather is then set by
+# hand; a slider moved by hand makes the weather (or the wind) custom. The
+# drawn weather is always read back from the numbers
+# (settingsWeatherFromValues).
 import Math
 open Weather
+open ui/UiValues
 open ui/Ecs
 open app3d/UiShell
 open app3d/SettingsDialog
 open app3d/SettingsWind
 
+# custom: set by hand on the panel's sliders
 enum SettingsWeather {
   auto
   clear
@@ -20,6 +32,7 @@ enum SettingsWeather {
   rain
   snow
   mist
+  custom
 }
 
 # The override an action id picks ("settings.weather.<name>"), else
@@ -46,7 +59,183 @@ func settingsWeatherPicked(
   if actionId is "settings.weather.mist" {
     ret SettingsWeather.mist
   }
+  if actionId is "settings.weather.custom" {
+    ret SettingsWeather.custom
+  }
   ret fallback
+}
+
+# The numbers' keys: cloud cover (0 .. 1), rain and snow (mm of water an
+# hour), mist (0 .. 1: the scene's haze .. a thick morning mist) and the
+# wind (m/s)
+const weatherCloudKey: String = "weather.cloud"
+
+const weatherRainKey: String = "weather.rain"
+
+const weatherSnowKey: String = "weather.snow"
+
+const weatherMistKey: String = "weather.mist"
+
+const windSpeedKey: String = "wind.speed"
+
+# Rain or snow lighter than this is none (mm/h)
+const weatherFallingMin: Float = 0.05
+
+# The weather button `override`'s numbers into `values` (Auto writes none:
+# the model does, settingsWeatherModelToValues). From the same table the
+# override applies (settingsWeatherApplied, settingsWeatherMist), so a
+# button and the slider it moves agree.
+func settingsWeatherPresetToValues(values: mod UiValues, override: view SettingsWeather) {
+  if override is SettingsWeather.auto or override is SettingsWeather.custom {
+    ret
+  }
+  let preset: Weather = settingsWeatherApplied(override: override, weather: Weather {})
+  var rain: Float = preset.precipitation
+  var snow: Float = 0.0
+  if override is SettingsWeather.snow {
+    snow = preset.precipitation
+    rain = 0.0
+  }
+  let changedCloud: Bool = setUiValue(values: values, key: weatherCloudKey, value: preset.cloud)
+  let changedRain: Bool = setUiValue(values: values, key: weatherRainKey, value: rain)
+  let changedSnow: Bool = setUiValue(values: values, key: weatherSnowKey, value: snow)
+  let changedMist: Bool = setUiValue(
+    values: values
+    key: weatherMistKey
+    value: (settingsWeatherMist(override: override, factor: 1.0) - 1.0) / 5.0
+  )
+}
+
+# The model's weather into `values` (Auto), so the sliders show it: its
+# precipitation is rain or snow by `air` (°C), its mist from its mist
+# factor (weatherMistFactor, 1 .. 6)
+func settingsWeatherModelToValues(
+  values: mod UiValues
+  weather: view Weather
+  air: view Float
+  mistFactor: view Float
+) {
+  var rain: Float = weather.precipitation
+  var snow: Float = 0.0
+  if air < 0.5 {
+    snow = weather.precipitation
+    rain = 0.0
+  }
+  let changedCloud: Bool = setUiValue(values: values, key: weatherCloudKey, value: weather.cloud)
+  let changedRain: Bool = setUiValue(values: values, key: weatherRainKey, value: rain)
+  let changedSnow: Bool = setUiValue(values: values, key: weatherSnowKey, value: snow)
+  let changedMist: Bool = setUiValue(
+    values: values
+    key: weatherMistKey
+    value: Math.clamp(val: (mistFactor - 1.0) / 5.0, low: 0.0, high: 1.0)
+  )
+}
+
+# The model's wind into `values` (the wind on Auto)
+func settingsWindModelToValues(values: mod UiValues, weather: view Weather) {
+  let changed: Bool = setUiValue(values: values, key: windSpeedKey, value: weather.windSpeed)
+}
+
+# The wind button `override`'s speed into `values` (RAE_WEATHER_WIND, a
+# saved line): from the same table settingsWindApplied uses
+func settingsWindPresetToValues(values: mod UiValues, override: view SettingsWind) {
+  if override is SettingsWind.auto or override is SettingsWind.custom {
+    ret
+  }
+  let changed: Bool = setUiValue(
+    values: values
+    key: windSpeedKey
+    value: settingsWindApplied(override: override, weather: Weather {}).windSpeed
+  )
+}
+
+# The weather drawn, from the numbers: the model's `weather` with its cover,
+# precipitation and humidity from the weather's numbers (unless it is on
+# Auto: they are the model's then) and its wind from the wind's (unless the
+# wind is on Auto). A gust follows a wind set by hand: about 0.2 at a calm,
+# 0.95 in a gale.
+func settingsWeatherFromValues(
+  values: view UiValues
+  weather: view Weather
+  override: view SettingsWeather
+  windOverride: view SettingsWind
+) ret Weather {
+  var drawn: Weather = weather
+  if override is not SettingsWeather.auto {
+    let cloud: Float = uiValue(values: values, key: weatherCloudKey, fallback: weather.cloud)
+    let rain: Float = uiValue(values: values, key: weatherRainKey, fallback: 0.0)
+    let snow: Float = uiValue(values: values, key: weatherSnowKey, fallback: 0.0)
+    let mist: Float = uiValue(values: values, key: weatherMistKey, fallback: 0.0)
+    drawn.cloud = cloud
+    drawn.precipitation = Math.max(a: rain, b: snow)
+    drawn.humidity = Math.clamp(
+      val: 0.45 + 0.25 * cloud + 0.5 * mist + 0.15 * Math.min(a: drawn.precipitation, b: 1.0)
+      low: 0.0
+      high: 1.0
+    )
+  }
+  if windOverride is not SettingsWind.auto {
+    let speed: Float = uiValue(values: values, key: windSpeedKey, fallback: weather.windSpeed)
+    drawn.windSpeed = speed
+    drawn.gustiness = Math.clamp(val: 0.2 + 0.045 * speed, low: 0.2, high: 0.95)
+  }
+  ret drawn
+}
+
+# The air the falling drops feel (°C) under the numbers: snow set by hand
+# falls as snow, rain as rain (Auto: the model's `air`)
+func settingsValuesAir(
+  values: view UiValues
+  override: view SettingsWeather
+  air: view Float
+) ret Float {
+  if override is SettingsWeather.auto {
+    ret air
+  }
+  let rain: Float = uiValue(values: values, key: weatherRainKey, fallback: 0.0)
+  let snow: Float = uiValue(values: values, key: weatherSnowKey, fallback: 0.0)
+  if snow > weatherFallingMin and snow >= rain {
+    ret Math.min(a: air, b: -2.0)
+  }
+  if rain > weatherFallingMin {
+    ret Math.max(a: air, b: 4.0)
+  }
+  ret air
+}
+
+# How wet the ground is under the numbers (the model's `wet` on Auto): wet
+# while rain is set
+func settingsValuesWet(
+  values: view UiValues
+  override: view SettingsWeather
+  wet: view Float
+) ret Float {
+  if override is SettingsWeather.auto {
+    ret wet
+  }
+  let rain: Float = uiValue(values: values, key: weatherRainKey, fallback: 0.0)
+  let snow: Float = uiValue(values: values, key: weatherSnowKey, fallback: 0.0)
+  if rain > weatherFallingMin and rain > snow {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+# The mist's factor under the numbers (the model's `factor` on Auto): the
+# scene's own haze at 0, a thick mist at 1
+func settingsValuesMist(
+  values: view UiValues
+  override: view SettingsWeather
+  factor: view Float
+) ret Float {
+  if override is SettingsWeather.auto {
+    ret factor
+  }
+  ret 1.0 + 5.0 * Math.clamp(
+    val: uiValue(values: values, key: weatherMistKey, fallback: 0.0)
+    low: 0.0
+    high: 1.0
+  )
 }
 
 # The override named `name` (the persisted line), else `fallback`
@@ -135,11 +324,28 @@ func settingsWeatherMist(override: view SettingsWeather, factor: view Float) ret
   ret 1.0
 }
 
+# Put the weather on `override` (a weather button, RAE_WALKER_WEATHER): its
+# numbers into the values; Auto puts the wind back on the model too, as it
+# does the weather
+func settingsWeatherPick(settingsState: mod SettingsState, override: view SettingsWeather) {
+  settingsState.weatherOverride = override
+  settingsWeatherPresetToValues(values: settingsState.values, override: override)
+  if override is SettingsWeather.auto {
+    settingsState.windOverride = SettingsWind.auto
+  }
+}
+
 # Apply a weather, wind or year-speed action id to `settingsState`; true when it
 # changed something
 func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
-  # the wind's buttons (app3d/SettingsWind)
-  if settingsWindHandleAction(settingsState: settingsState, actionId: actionId) {
+  # a slider moved by hand: the weather's numbers (or the wind's) are set
+  # by hand from now on, at what the slider now holds
+  if actionId is "settings.weather.slider" {
+    settingsState.weatherOverride = SettingsWeather.custom
+    ret true
+  }
+  if actionId is "settings.wind.slider" {
+    settingsState.windOverride = SettingsWind.custom
     ret true
   }
   let weatherPick: SettingsWeather = settingsWeatherPicked(
@@ -150,10 +356,15 @@ func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: vie
     actionId: actionId
     fallback: settingsState.timeOfDay.yearSpeed
   )
-  if weatherPick is settingsState.weatherOverride and yearPick is settingsState.timeOfDay.yearSpeed {
+  if actionId.startsWith(prefix: "settings.weather.") and weatherPick is not SettingsWeather.custom {
+    # a weather button sets its numbers even when it is already lit (the
+    # sliders may have moved since)
+    settingsWeatherPick(settingsState: settingsState, override: weatherPick)
+    ret true
+  }
+  if yearPick is settingsState.timeOfDay.yearSpeed {
     ret false
   }
-  settingsState.weatherOverride = weatherPick
   settingsState.timeOfDay.yearSpeed = yearPick
   ret true
 }
@@ -170,7 +381,6 @@ func settingsWeatherSlot(on: view Bool) ret String {
 func settingsWeatherToWorld(world: mod UiWorld, settingsState: view SettingsState) {
   let override: SettingsWeather = settingsState.weatherOverride
   let yearSpeed: Float = settingsState.timeOfDay.yearSpeed
-  settingsWindToWorld(world: world, override: settingsState.windOverride)
   let names: List(String) = {
     "Auto"
     "Clear"

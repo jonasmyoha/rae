@@ -1,0 +1,255 @@
+# ui/valueSystem — the widgets bound to the app's value store (ui/UiValues,
+# ui/ValueComponents): a ValueSlider's drag writes its value, and every
+# ValueSlider's fill and every ValueText's text show the store as it is.
+# Run it once a frame after updateUiInput, before the layout; it returns
+# true when it changed a value or what a widget shows (the app's layout
+# runs again then). Nothing else keeps the widgets in step: an app that
+# writes a value into the store (a button's handler, its own model) sees
+# the widgets follow on the next frame.
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ui/UiValues
+open ui/ValueComponents
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+func valueShare(slider: view ValueSlider, value: view Float) ret Float {
+  let span: Float = slider.max - slider.min
+  if span <= 0.0 {
+    ret 0.0
+  }
+  let share: Float = (value - slider.min) / span
+  if share < 0.0 {
+    ret 0.0
+  }
+  if share > 1.0 {
+    ret 1.0
+  }
+  ret share
+}
+
+# Where the track is on screen and how wide (none when not laid out yet)
+type ValueTrackBox {
+  placed: Bool
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func valueTrackBox(uiSystems: view UiSystems, entityId: view EntityId) ret ValueTrackBox {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false or componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  ) is false {
+    ret ValueTrackBox {
+      placed: false
+      x: 0.0
+      y: 0.0
+      w: 0.0
+      h: 0.0
+    }
+  }
+  let rect: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let placed: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  ret ValueTrackBox {
+    placed: rect.size.x > 0.0
+    x: placed.position.x
+    y: placed.position.y
+    w: rect.size.x * placed.scale.x
+    h: rect.size.y * placed.scale.y
+  }
+}
+
+# `value` as text with `decimals` decimals (0 .. 3)
+func valueFormat(value: view Float, decimals: view Int) ret String {
+  var places: Int = decimals
+  if places < 0 {
+    places = 0
+  }
+  if places > 3 {
+    places = 3
+  }
+  var unit: Int = 1
+  loop var i: Int = 0, i < places, ++i {
+    unit = unit * 10
+  }
+  var negative: Bool = value < 0.0
+  var scaled: Float = value * unit.toFloat()
+  if negative {
+    scaled = 0.0 - scaled
+  }
+  let whole: Int = (scaled + 0.5).toInt()
+  if whole is 0 {
+    negative = false
+  }
+  var text: String = "{whole / unit}"
+  if places > 0 {
+    var fraction: String = "{whole % unit}"
+    loop fraction.length() < places {
+      fraction = "0{fraction}"
+    }
+    text = "{text}.{fraction}"
+  }
+  if negative {
+    ret "-{text}"
+  }
+  ret text
+}
+
+# The pointer on the sliders: a press on a track takes the drag, the drag
+# writes the value until the release. True when it changed a value.
+func valueSliderDrag(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+  values: mod UiValues
+) ret Bool {
+  if input.pointer.pressed {
+    loop var i: Int = 0, i < componentCount(this: world.valueSliders), ++i {
+      let entityId: EntityId = componentEntityAt(this: world.valueSliders, i: i)
+      let box: ValueTrackBox = valueTrackBox(uiSystems: uiSystems, entityId: entityId)
+      if box.placed and input.pointer.x >= box.x and input.pointer.x <= box.x + box.w and input.pointer.y >= box.y and input.pointer.y <= box.y + box.h {
+        values.dragging = entityId
+      }
+    }
+  }
+  if isNone(this: values.dragging) {
+    ret false
+  }
+  if input.pointer.released or (input.pointer.down is false and input.pointer.pressed is false) {
+    values.dragging = noEntity()
+    ret false
+  }
+  if componentHas(this: world.valueSliders, entityId: values.dragging) is false {
+    values.dragging = noEntity()
+    ret false
+  }
+  # the slider's settings, copied out: the action is sent on the world below
+  let sliderView: view ValueSlider = componentView(
+    this: world.valueSliders
+    entityId: values.dragging
+  )
+  let slider: ValueSlider = sliderView
+  let box: ValueTrackBox = valueTrackBox(uiSystems: uiSystems, entityId: values.dragging)
+  if box.placed is false {
+    ret false
+  }
+  var share: Float = (input.pointer.x - box.x) / box.w
+  if share < 0.0 {
+    share = 0.0
+  }
+  if share > 1.0 {
+    share = 1.0
+  }
+  let changed: Bool = setUiValue(
+    values: values
+    key: slider.key
+    value: slider.min + share * (slider.max - slider.min)
+  )
+  if changed and slider.actionId.length() > 0 {
+    eventSend(
+      this: world.uiActions
+      value: UiAction { entityId: values.dragging, actionId: "{slider.actionId}" }
+    )
+  }
+  ret changed
+}
+
+# Every slider's fill as wide as its value's share of the track (written
+# only when it moved, so an idle frame changes nothing)
+func valueSliderFills(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  values: view UiValues
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.valueSliders), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.valueSliders, i: i)
+    if componentHas(this: world.childrens, entityId: entityId) is false or componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    ) is false {
+      continue
+    }
+    let fill: EntityId = componentView(this: world.childrens, entityId: entityId).ids.copyAtFallback(
+      index: 0
+      fallback: noEntity()
+    )
+    if isNone(this: fill) or componentHas(this: world.rects, entityId: fill) is false {
+      continue
+    }
+    let slider: view ValueSlider = componentView(this: world.valueSliders, entityId: entityId)
+    let trackWidth: Float = componentView(this: uiSystems.layout.computedRects, entityId: entityId).size.x
+    let want: Float = trackWidth * valueShare(
+      slider: slider
+      value: uiValue(values: values, key: slider.key, fallback: slider.min)
+    )
+    let rect: view Rect = componentView(this: world.rects, entityId: fill)
+    var delta: Float = want - rect.size.x
+    if delta < 0.0 {
+      delta = 0.0 - delta
+    }
+    if delta > 0.25 {
+      let fillRect: mod Rect = componentMod(this: world.rects, entityId: fill)
+      fillRect.size.x = want
+      if componentHas(this: uiSystems.layout.computedRects, entityId: fill) {
+        let computed: mod ComputedRect = componentMod(
+          this: uiSystems.layout.computedRects
+          entityId: fill
+        )
+        computed.size.x = want
+      }
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# Every ValueText's text from its value (written only when it differs)
+func valueTexts(world: mod UiWorld, values: view UiValues) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.valueTexts), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.valueTexts, i: i)
+    if componentHas(this: world.texts, entityId: entityId) is false {
+      continue
+    }
+    let bound: view ValueText = componentView(this: world.valueTexts, entityId: entityId)
+    let shown: String = "{bound.prefix}{valueFormat(
+      value: uiValue(values: values, key: bound.key, fallback: 0.0) * bound.scale
+      decimals: bound.decimals
+    )}{bound.suffix}"
+    if componentView(this: world.texts, entityId: entityId).text is not shown {
+      let text: mod Text = componentMod(this: world.texts, entityId: entityId)
+      text.text = shown
+      changed = true
+    }
+  }
+  ret changed
+}
+
+func valueSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  values: mod UiValues
+) ret Bool {
+  let dragged: Bool = valueSliderDrag(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    values: values
+  )
+  let filled: Bool = valueSliderFills(world: world, uiSystems: uiSystems, values: values)
+  let written: Bool = valueTexts(world: world, values: values)
+  ret dragged or filled or written
+}

@@ -1,0 +1,178 @@
+# Widgets bound to an app-owned value store (ui/UiValues, ui/ValueComponents,
+# ui/valueSystem): a ValueSlider's fill and a ValueText's text show the value
+# as the store holds it, so writing the value (a button's handler, the app's
+# model) moves them on the next valueSystem with no other call; a drag on
+# the track writes the value and sends the slider's UI action; an idle frame
+# changes nothing. `\{`/`\}` keep the JSON braces literal.
+open ui/Ecs
+open ui/Components
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/UiValues
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/valueSystem/ValueSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func panelScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Panel\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Panel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"Children\":[\"CloudsLabel\",\"Clouds\"]\},"
+  )
+  s = s.concat(
+    other: "\"CloudsLabel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":20\},\"Text\":\{\"text\":\"\"\},\"ValueText\":\{\"key\":\"weather.cloud\",\"prefix\":\"Clouds \",\"suffix\":\"%\",\"scale\":100\}\},"
+  )
+  s = s.concat(
+    other: "\"Clouds\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":24\},\"ValueSlider\":\{\"key\":\"weather.cloud\",\"actionId\":\"weather.slider\"\},\"Children\":[\"CloudsFill\"]\},"
+  )
+  s = s.concat(other: "\"CloudsFill\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":24\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  values: UiValues
+}
+
+# One frame: the pointer, the value system, the layout
+func frame(
+  rig: mod Rig
+  x: view Float
+  down: view Bool
+  pressed: view Bool
+) ret Bool {
+  frameAdvance(this: rig.world.uiActions)
+  rig.input.pointer.x = x
+  rig.input.pointer.y = 42.0
+  rig.input.pointer.released = rig.input.pointer.down and down is false
+  rig.input.pointer.pressed = pressed
+  rig.input.pointer.down = down
+  let changed: Bool = valueSystem(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    input: rig.input
+    values: rig.values
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  ret changed
+}
+
+func report(rig: view Rig, label: view String, changed: view Bool) {
+  let fill: view Rect = componentView(
+    this: rig.world.rects
+    entityId: entityOf(world: rig.world, nodeId: "CloudsFill")
+  )
+  let text: view Text = componentView(
+    this: rig.world.texts
+    entityId: entityOf(world: rig.world, nodeId: "CloudsLabel")
+  )
+  var actions: String = ""
+  loop var i: Int = 0, i < eventCount(this: rig.world.uiActions), ++i {
+    actions = "{actions} {eventAt(this: rig.world.uiActions, i: i).actionId}"
+  }
+  log(
+    "{label}: changed {changed}, value {(uiValue(
+      values: rig.values
+      key: "weather.cloud"
+      fallback: -1.0
+    ) * 100.0 + 0.5).toInt()}%, fill {fill.size.x.toInt()} of 200, text '{text.text}', actions:{actions}"
+  )
+}
+
+func main() {
+  var rig: Rig = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    values: createUiValues()
+  }
+  rig.world.layoutW = 300.0
+  rig.world.layoutH = 200.0
+  let rootEntityId: EntityId = loadScene(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    scene: parseScene(source: panelScene())
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  log("mounted = {rootEntityId.index >= 0}")
+
+  # the app writes the value (a preset button, its model): the widgets follow
+  let set: Bool = setUiValue(values: rig.values, key: "weather.cloud", value: 0.7)
+  var changed: Bool = frame(
+    rig: rig
+    x: 0.0
+    down: false
+    pressed: false
+  )
+  report(rig: rig, label: "the app sets 70%", changed: changed)
+  changed = frame(
+    rig: rig
+    x: 0.0
+    down: false
+    pressed: false
+  )
+  report(rig: rig, label: "an idle frame", changed: changed)
+
+  # a press on the track at a quarter, then a drag past its right end
+  changed = frame(
+    rig: rig
+    x: 50.0
+    down: true
+    pressed: true
+  )
+  report(rig: rig, label: "press at a quarter", changed: changed)
+  changed = frame(
+    rig: rig
+    x: 150.0
+    down: true
+    pressed: false
+  )
+  report(rig: rig, label: "drag to three quarters", changed: changed)
+  changed = frame(
+    rig: rig
+    x: 400.0
+    down: true
+    pressed: false
+  )
+  report(rig: rig, label: "drag past the end", changed: changed)
+  changed = frame(
+    rig: rig
+    x: 400.0
+    down: false
+    pressed: false
+  )
+  report(rig: rig, label: "release", changed: changed)
+  # after the release the pointer moves nothing
+  changed = frame(
+    rig: rig
+    x: 20.0
+    down: false
+    pressed: false
+  )
+  report(rig: rig, label: "moving after the release", changed: changed)
+  # a press beside the track drags nothing
+  changed = frame(
+    rig: rig
+    x: 250.0
+    down: true
+    pressed: true
+  )
+  report(rig: rig, label: "press beside the track", changed: changed)
+}

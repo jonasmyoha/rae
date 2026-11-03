@@ -7,6 +7,7 @@ open app3d/SettingsDialog
 open app3d/SettingsPersist
 open app3d/SettingsWeather
 open app3d/SettingsWind
+open ui/UiValues
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -50,8 +51,11 @@ func main() ret Int {
   changed.latitude = -33.5
   changed.longitude = 151.25
   changed.timeOfDay.yearSpeed = 7.0
-  changed.weatherOverride = SettingsWeather.rain
+  # Rain and a gale as the panel picks them: their numbers go into the
+  # sliders' values, and the line keeps them
+  settingsWeatherPick(settingsState: changed, override: SettingsWeather.rain)
   changed.windOverride = SettingsWind.gale
+  settingsWindPresetToValues(values: changed.values, override: SettingsWind.gale)
   let line: String = serializeSettingsState(settingsState: changed, editor: true)
   log(line)
   var restored: SettingsState = freshSettings()
@@ -84,6 +88,14 @@ func main() ret Int {
   check(
     label: "the year's speed, the weather and the wind"
     ok: restored.timeOfDay.yearSpeed is 7.0 and restored.weatherOverride is SettingsWeather.rain and restored.windOverride is SettingsWind.gale
+  )
+  check(
+    label: "the weather's numbers (the sliders)"
+    ok: uiValue(values: restored.values, key: weatherRainKey, fallback: 0.0) is 1.5 and uiValue(
+      values: restored.values
+      key: windSpeedKey
+      fallback: 0.0
+    ) is 17.0 and uiValue(values: restored.values, key: weatherCloudKey, fallback: 0.0) is 1.0
   )
   check(
     label: "the same line again"

@@ -1,21 +1,24 @@
-# app3d/SettingsWind — the settings panel's wind override
-# (docs/leaf-particles-design.md §2.4): Auto (the weather model's wind,
-# lib/WeatherWind) or Calm, Breeze, Strong, Gale, so the trees, the grass,
-# the rain and the falling leaves can be judged in a wind without waiting
-# for one. The override sets the wind's speed and gustiness; its direction
-# stays the model's. RAE_WEATHER_WIND=<name> starts it (the walkers and the
-# tree lab).
+# app3d/SettingsWind — the wind override (docs/leaf-particles-design.md
+# §2.4): Auto (the weather model's wind, lib/WeatherWind), Calm, Breeze,
+# Strong, Gale, or custom, so the trees, the grass, the rain and the falling
+# leaves can be judged in a wind without waiting for one. The override sets
+# the wind's speed and gustiness; its direction stays the model's. The
+# settings panel sets it on its Wind slider (custom, app3d/SettingsWeather);
+# the named winds are RAE_WEATHER_WIND's (the walkers and the tree lab) and
+# the tree lab's key.
 open Weather
 open ui/Ecs
 open app3d/UiShell
 open app3d/SettingsDialog
 
+# custom: set by hand on the panel's Wind slider (app3d/SettingsWeather)
 enum SettingsWind {
   auto
   calm
   breeze
   strong
   gale
+  custom
 }
 
 # The override an action id picks ("settings.wind.<name>"), else `fallback`
@@ -34,6 +37,9 @@ func settingsWindPicked(actionId: view String, fallback: view SettingsWind) ret 
   }
   if actionId is "settings.wind.gale" {
     ret SettingsWind.gale
+  }
+  if actionId is "settings.wind.custom" {
+    ret SettingsWind.custom
   }
   ret fallback
 }
@@ -92,29 +98,4 @@ func settingsWindHandleAction(settingsState: mod SettingsState, actionId: view S
   }
   settingsState.windOverride = pick
   ret true
-}
-
-# The panel's wind buttons lit for `override`
-func settingsWindToWorld(world: mod UiWorld, override: view SettingsWind) {
-  let names: List(String) = {
-    "Auto"
-    "Calm"
-    "Breeze"
-    "Strong"
-    "Gale"
-  }
-  let picks: List(SettingsWind) = {
-    SettingsWind.auto
-    SettingsWind.calm
-    SettingsWind.breeze
-    SettingsWind.strong
-    SettingsWind.gale
-  }
-  loop var i: Int = 0, i < names.length, ++i {
-    var slot: String = "surfaceAlt"
-    if picks.copyAtFallback(index: i, fallback: SettingsWind.auto) is override {
-      slot = "accent"
-    }
-    setNodeFillSlot(world: world, nodeId: "SettingsWind{names.copyAtDefault(index: i)}", slot: slot)
-  }
 }

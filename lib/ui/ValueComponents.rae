@@ -1,0 +1,25 @@
+# ui/ValueComponents — widgets bound to a named value of the app's store
+# (ui/UiValues), drawn and dragged by ui/valueSystem. The value lives in the
+# store; these only say which key a node shows and how.
+
+# A slider: the node is its track, its FIRST child the fill, as wide as the
+# value's share of [min, max] of the track. A press on the track jumps the
+# value there and a drag moves it (also outside the track, until the
+# release); each change sends the UI action `actionId` (when set), with the
+# track as its entity, so the app learns the value was changed by hand.
+type ValueSlider {
+  key: String
+  min: Float = 0.0
+  max: Float = 1.0
+  actionId: String = ""
+}
+
+# A text that shows a value: `prefix`, the value times `scale` with
+# `decimals` decimals, `suffix` ("Clouds " 0.7 x 100 "%" = "Clouds 70%")
+type ValueText {
+  key: String
+  prefix: String = ""
+  suffix: String = ""
+  scale: Float = 1.0
+  decimals: Int = 0
+}

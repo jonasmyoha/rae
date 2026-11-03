@@ -38,6 +38,7 @@ open ui/UiSystems
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/scrollRootSystem/ScrollRootSystem
+open ui/valueSystem/ValueSystem
 open ui/DebugOverlay
 open app3d/UiShell
 open app3d/CameraRig
@@ -251,9 +252,10 @@ func applyEditorPanelOpen(world: mod UiWorld, open: view Bool) {
   setEdgeTabOpen(world: world, tab: editorSettingsTab(), open: open)
 }
 
-# This frame's settings: every UI action (the edge tab's "settings.open"
-# too; the settings ignore what they do not own), the time, latitude and date
-# sliders, the running clock. When they changed, the panel is written again
+# This frame's settings: the sliders bound to its numbers (ui/valueSystem),
+# every UI action (the edge tab's "settings.open" too; the settings ignore
+# what they do not own), the time, latitude and date sliders, the running
+# clock. When they changed, the panel is written again
 # and the result is true: the app applies them (its sky, sun, TAA) and lays
 # its UI out again.
 func updateEditorSettings(
@@ -263,7 +265,15 @@ func updateEditorSettings(
   settings: mod SettingsState
   deltaTime: view Float
 ) ret Bool {
-  var settingsChanged: Bool = false
+  # the sliders bound to the settings' numbers (the weather's): a drag
+  # writes its number and sends its action, handled just below; every
+  # slider and readout shows its number as it now is
+  var settingsChanged: Bool = valueSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    values: settings.values
+  )
   loop var i: Int = 0, i < uiActionCount(world: world), ++i {
     if settingsHandleAction(settingsState: settings, actionId: uiActionAt(world: world, index: i)) {
       settingsChanged = true
