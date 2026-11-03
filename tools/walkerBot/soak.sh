@@ -212,9 +212,10 @@ while [ "$w" -lt "$WINDOWS" ]; do
   w=$((w + 1))
 done
 
-# Leaks at exit (RAE_MEM_STATS dumps): every process that ended normally.
-# Not the windows: 143 leaves one 2 MB buffer at exit offline as well (queued)
-for log in "$WORK"/host.log "$WORK"/relay.log "$WORK"/bot*.log; do
+# Leaks at exit (RAE_MEM_STATS dumps): every process that ended normally,
+# the windows too (their dump is the app's: `rae run` prints none of its own)
+for log in "$WORK"/host.log "$WORK"/relay.log "$WORK"/bot*.log "$WORK"/window*.log; do
+  [ -f "$log" ] || continue
   s=$(sed -n 's/^  \[mem:string:TOTAL *\].* outstanding=\([0-9-]*\).*/\1/p' "$log" | tail -1)
   b=$(sed -n 's/^  \[mem:buf *\].* outstanding=\([0-9-]*\).*/\1/p' "$log" | tail -1)
   if [ "${s:-0}" != "0" ] || [ "${b:-0}" != "0" ]; then

@@ -53,6 +53,10 @@ func setSdl3ProgramIcon() {
     }
     log("[sdl] app icon {path}: set={set is 1}")
   }
+  # loadPng's buffer is the caller's
+  unsafe {
+    rae_ext_rae_buf_free(buf: pixels)
+  }
 }
 
 # Cap the present rate (frames/sec). 0 disables the cap. sdlPresent sleeps the
