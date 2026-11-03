@@ -1593,6 +1593,9 @@ static AstExpr* parse_primary(Parser* parser) {
         /* docs/platform-conditional-code.md §3.3: `when` picks whole blocks */
         parser_error(parser, token, "`when` cannot be a value: it selects statements or declarations at compile time "
                                     "(use `when` around whole statements, or `if` for a value)");
+      } else if (is_keyword(token->kind)) {
+        /* A keyword used as a name (`any = any bitor 1`): say why it cannot be */
+        parser_error(parser, token, "'%.*s' is a reserved keyword", (int)token->lexeme.len, token->lexeme.data);
       } else {
         parser_error(parser, token, "unexpected token in expression");
       }
@@ -1828,7 +1831,7 @@ static AstExpr* parse_binary(Parser* parser, int min_prec) {
     // as `(a bitand b) bitor c`) is exactly the kind of ambiguity Rae avoids. Same
     // operator repeated (`a bitand b bitand c`) is fine. Require explicit parens.
     bool op_is_bitwise = info.op >= AST_BIN_BITAND && info.op <= AST_BIN_SHR;
-    if (op_is_bitwise && left->kind == AST_EXPR_BINARY && !left->is_parenthesized
+    if (op_is_bitwise && left && left->kind == AST_EXPR_BINARY && !left->is_parenthesized
         && left->as.binary.op >= AST_BIN_BITAND && left->as.binary.op <= AST_BIN_SHR
         && left->as.binary.op != info.op) {
       parser_error(parser, op_token,
