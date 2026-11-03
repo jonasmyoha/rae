@@ -866,14 +866,16 @@ Each step is one queue task that leaves the walkers working.
        off 0 ms (one sample of 0.15 ms, the rest 0: nothing measurable); the
        layer 0.31-0.42 ms, median 0.39 ms (two samples of 0, its passes
        overlapping the start pass), well inside the phone's 1.5 ms budget
-       (lib/CloudTier). The slab with the end pass is not measured yet: the
-       phone locks after a few minutes and then devicectl cannot copy the
-       app's log; before the end pass existed, its passes up to the trace read
-       1.30-1.35 ms, also inside the budget. The whole frame differed more
+       (lib/CloudTier). The slab (a later 75 s run, the same build): 0.99-
+       1.22 ms, median 1.06 ms, also inside the budget, with a frame GPU
+       total of about 41 ms. (An earlier attempt could not copy the app's log:
+       devicectl hung while another session was using the phone.) The whole frame differed more
        than the cloud passes: GPU total about 40 ms with the tier off,
        52-54 ms with the layer (one run each), which the cloud passes' 0.4 ms
-       does not explain; the layer's sky drawing in the lighting pass and the
-       shading's cloud lookups are outside this timing (queued).
+       does not explain; the slab's run, which draws the layer's cirrus and
+       band and the same shading lookups, was about 41 ms, so the layer's
+       52-54 ms was more likely a disturbed run than its cost (queued to
+       repeat).
      The fallback now reads this number on every device (a phone no longer
      ignores it).
 5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
