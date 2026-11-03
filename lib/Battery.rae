@@ -1,0 +1,156 @@
+cheader "runtime_battery_apple.h"
+
+# Battery — how full the battery is and whether it is charging, for a status
+# bar.
+#
+#     var watch: BatteryWatch = createBatteryWatch()
+#     let battery: BatteryStatus = batteryStatus()      # level 0..100, state
+#     ...                                               # each frame:
+#     if batteryChanged(watch: watch) { ...read batteryStatus() again... }
+#
+# `level` is 0..100, or -1 when it is not known (no battery, or the
+# platform does not say). `state` is `charging`, `full`, `onBattery`,
+# `noBattery` (a desktop Mac) or `unknown`. `batteryChanged` is true once
+# for each change the system has announced since it was last asked; the
+# system's change notifications also wake the frame loop (EventLoop.wake),
+# so an idle loop redraws the bar.
+#
+# On iOS this is UIDevice (battery monitoring is turned on by the first
+# read; iOS updates the level in steps of 5%, and only on a device: the
+# simulator answers unknown). On macOS it is IOKit's power sources (the
+# internal battery). Elsewhere every answer is `unknown`. The C side is
+# runtime_battery_apple.h, one platform call per function.
+const hasUiDeviceBattery: Bool = Target.os is Os.ios
+
+const hasPowerSources: Bool = Target.os is Os.macos
+
+when hasUiDeviceBattery or hasPowerSources {
+  func rae_ext_Battery_rawLevel() unsafe extern("rae_ext_Battery_rawLevel") ret Int
+
+  func rae_ext_Battery_rawState() unsafe extern("rae_ext_Battery_rawState") ret Int
+
+  func rae_ext_Battery_changes() unsafe extern("rae_ext_Battery_changes") ret Int
+}
+
+enum BatteryState {
+  unknown
+  noBattery
+  onBattery
+  charging
+  full
+}
+
+type BatteryStatus {
+  # 0..100, -1 when not known
+  level: Int
+  state: BatteryState
+}
+
+# Which of the system's change announcements this reader has seen (an app
+# resource: on the app's state)
+type BatteryWatch {
+  seen: Int
+}
+
+func createBatteryWatch() ret BatteryWatch {
+  ret BatteryWatch { seen: 0 }
+}
+
+# A level in thousandths (the C side's raw value) as a percent, rounded;
+# -1 for a negative (unknown) one
+func batteryPercent(thousandths: view Int) ret Int {
+  if thousandths < 0 {
+    ret -1
+  }
+  var percent: Int = (thousandths + 5) / 10
+  if percent > 100 {
+    percent = 100
+  }
+  ret percent
+}
+
+# UIDeviceBatteryState: 0 unknown, 1 unplugged, 2 charging, 3 full
+func batteryStateFromUiDevice(raw: view Int) ret BatteryState {
+  if raw is 1 {
+    ret BatteryState.onBattery
+  }
+  if raw is 2 {
+    ret BatteryState.charging
+  }
+  if raw is 3 {
+    ret BatteryState.full
+  }
+  ret BatteryState.unknown
+}
+
+# IOKit's internal battery as bits: 1 present, 2 charging, 4 charged, 8 on
+# AC power (0: the Mac has no battery). Charged on AC is full; on AC and
+# neither charging nor charged (a battery held below full to protect it) is
+# still plugged in, so it reads as charging rather than on battery.
+func batteryStateFromPowerSource(bits: view Int) ret BatteryState {
+  if bits is 0 {
+    ret BatteryState.noBattery
+  }
+  let charging: Bool = (bits / 2) % 2 is 1
+  let charged: Bool = (bits / 4) % 2 is 1
+  let onPower: Bool = (bits / 8) % 2 is 1
+  if charging {
+    ret BatteryState.charging
+  }
+  if onPower and charged {
+    ret BatteryState.full
+  }
+  if onPower {
+    ret BatteryState.charging
+  }
+  ret BatteryState.onBattery
+}
+
+# The battery now
+func batteryStatus() ret BatteryStatus {
+  when hasUiDeviceBattery {
+    unsafe {
+      ret BatteryStatus {
+        level: batteryPercent(thousandths: rae_ext_Battery_rawLevel())
+        state: batteryStateFromUiDevice(raw: rae_ext_Battery_rawState())
+      }
+    }
+  } else when hasPowerSources {
+    unsafe {
+      ret BatteryStatus {
+        level: batteryPercent(thousandths: rae_ext_Battery_rawLevel())
+        state: batteryStateFromPowerSource(bits: rae_ext_Battery_rawState())
+      }
+    }
+  } else {
+    ret BatteryStatus { level: -1, state: BatteryState.unknown }
+  }
+}
+
+# Whether the system announced a change (level or state) since this watch
+# last asked; the first call starts listening
+func batteryChanged(watch: mod BatteryWatch) ret Bool {
+  when hasUiDeviceBattery or hasPowerSources {
+    unsafe {
+      let changes: Int = rae_ext_Battery_changes()
+      if changes is watch.seen {
+        ret false
+      }
+      watch.seen = changes
+      ret true
+    }
+  } else {
+    ret false
+  }
+}
+
+# The level and state in words, for a status bar or a log ("80%, charging")
+func batteryText(status: view BatteryStatus) ret String {
+  if status.state is BatteryState.noBattery {
+    ret "no battery"
+  }
+  if status.level < 0 {
+    ret "{status.state}"
+  }
+  ret "{status.level}%, {status.state}"
+}
