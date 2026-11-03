@@ -787,6 +787,56 @@ bool rae_func_returns_alias(CompilerContext* cctx, const AstFuncDecl* fd) {
   return func_returns_alias_v(cctx, fd, &v);
 }
 
+// Is `e` a call whose result is an ALIAS of storage someone else owns (a
+// buffer slot, a list element: `jsonValueAt`, `List.get`), rather than a
+// fresh value? Such a result READS AN EXISTING LOCATION, so `=` must copy it
+// as it copies an ident or a field: stored bit for bit into an owning place,
+// the place's later drop frees the owner's heap (#99610285: a JsonValue
+// local reassigned from jsonValueAt freed the document's strings). The
+// callee is the call's resolved declaration, else the first function of that
+// name (the rule the `let` path uses).
+static bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e) {
+  if (!e || (e->kind != AST_EXPR_CALL && e->kind != AST_EXPR_METHOD_CALL)) return false;
+  Str name = {0};
+  if (e->kind == AST_EXPR_CALL) {
+    if (!e->as.call.callee || e->as.call.callee->kind != AST_EXPR_IDENT) return false;
+    name = e->as.call.callee->as.ident;
+  } else {
+    name = e->as.method_call.method_name;
+  }
+  if (str_eq_cstr(name, "rae_ext_rae_buf_get") || str_eq_cstr(name, "__buf_get")
+      || str_eq_cstr(name, "rae_ext___buf_get")) return true;
+  if (e->decl_link && e->decl_link->kind == AST_DECL_FUNC) {
+    const AstFuncDecl* fd = &e->decl_link->as.func_decl;
+    if (fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC)
+      fd = &fd->generic_template->as.func_decl;
+    return fd->body && rae_func_returns_alias(ctx->compiler_ctx, fd);
+  }
+  for (size_t k = 0; k < ctx->compiler_ctx->all_decl_count; k++) {
+    const AstDecl* d = ctx->compiler_ctx->all_decls[k];
+    if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, name)) continue;
+    return d->as.func_decl.body && rae_func_returns_alias(ctx->compiler_ctx, &d->as.func_decl);
+  }
+  return false;
+}
+
+// A deep copy of `source` as an expression of C type `type_name`: a place
+// is copied where it is; an alias call (expr_is_alias_call) is evaluated
+// into a temporary first, since a call is no lvalue to take the address of.
+static void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
+                                 int id, FILE* out) {
+  if (source->kind == AST_EXPR_CALL || source->kind == AST_EXPR_METHOD_CALL) {
+    fprintf(out, "(__extension__ ({ %s __src%d = ", type_name, id);
+    emit_expr(ctx, source, out, PREC_LOWEST, false, false);
+    fprintf(out, "; %s __dc%d; rae_deep_copy_%s(&__dc%d, &__src%d); __dc%d; }))", type_name, id, type_name,
+            id, id, id);
+    return;
+  }
+  fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ", type_name, id, type_name, id);
+  emit_deep_copy_source(ctx, source, out);
+  fprintf(out, "); __dc%d; }))", id);
+}
+
 // Count identifier references to `name` in an expression subtree.
 // Used by Phase 2 deep-copy to decide whether a parameter source can
 // be moved into a struct field (count==1, this is the only use) or
@@ -3433,7 +3483,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // location lands as a deep copy, never as an alias of the
                     // source's heap — the same rule as the local/field store.
                     bool rhs_reads_location = rhs && (rhs->kind == AST_EXPR_IDENT
-                        || rhs->kind == AST_EXPR_MEMBER || rhs->kind == AST_EXPR_INDEX);
+                        || rhs->kind == AST_EXPR_MEMBER || rhs->kind == AST_EXPR_INDEX
+                        || (!pointee_is_string && expr_is_alias_call(ctx, rhs)));
                     fprintf(out, "{ ");
                     emit_type_ref_as_c_type(ctx, &pointee, out, false);
                     fprintf(out, " __asg%d = ", tmpn);
@@ -3444,10 +3495,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     } else if (rhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
                             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &pointee);
-                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
-                                tn_dc, tmpn, tn_dc, tmpn);
-                        emit_deep_copy_source(ctx, rhs, out);
-                        fprintf(out, "); __dc%d; }))", tmpn);
+                        emit_deep_copy_value(ctx, tn_dc, rhs, tmpn, out);
                     } else {
                         if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
                             fprintf(out, "(");
@@ -3790,14 +3838,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // the move, handled below.
                     const AstExpr* arhs = stmt->as.assign_stmt.value;
                     bool arhs_reads_location = arhs->kind == AST_EXPR_IDENT
-                        || arhs->kind == AST_EXPR_MEMBER || arhs->kind == AST_EXPR_INDEX;
+                        || arhs->kind == AST_EXPR_MEMBER || arhs->kind == AST_EXPR_INDEX
+                        || expr_is_alias_call(ctx, arhs);
                     if (arhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
                             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
-                        fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
-                                tn_dc, tmpn, tn_dc, tmpn);
-                        emit_deep_copy_source(ctx, arhs, out);
-                        fprintf(out, "); __dc%d; }))", tmpn);
+                        emit_deep_copy_value(ctx, tn_dc, arhs, tmpn, out);
                     } else {
                         if (arhs->kind == AST_EXPR_OBJECT && !arhs->as.object_literal.type) {
                             fprintf(out, "(");
