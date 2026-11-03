@@ -1,109 +1,48 @@
 # lib/net/Connection: the connection protocol over bytes, driven by hand
-# with no network. Two ends talk through two simulated one-way pipes that
+# with no network. Two ends talk through two lib/net/BadNetwork paths that
 # lose, delay and reorder packets (a fixed seed: every run is the same).
 # Every reliable message arrives once and in order under loss; unreliable
 # ones never arrive out of order; a fragmented message survives a lost
 # fragment; a silent peer times out; a steady connection allocates nothing.
 open net/Wire
 open net/Connection
+open net/BadNetwork
+open net/Udp
 open Sys
-
-# One direction of a simulated network: a fixed pool of packet slots
-type Pipe {
-  slotBytes: Int
-  data: List(UInt8)
-  length: List(Int)
-  deliverAtMs: List(Int)
-  lossPercent: Int
-  latencyMs: Int
-  jitterMs: Int
-  seed: Int
-  # Drop the packet this many sends from now (0 = none)
-  dropCountdown: Int
-  dropped: Int
-}
 
 type Link {
   client: Connection
   server: Connection
-  toServer: Pipe
-  toClient: Pipe
+  toServer: BadNetwork
+  toClient: BadNetwork
   packet: List(UInt8)
+  arrived: List(UInt8)
   nowMs: Int
 }
 
-const pipeSlots: Int = 512
-
-func createPipe(seed: view Int) ret Pipe {
-  var length: List(Int) = zeroInts(count: pipeSlots)
-  loop var i: Int = 0, i < pipeSlots, ++i {
-    length.set(index: i, value: -1)
-  }
-  ret Pipe {
-    slotBytes: 1200
-    data: zeroBytes(count: pipeSlots * 1200)
-    length: length
-    deliverAtMs: zeroInts(count: pipeSlots)
-    lossPercent: 0
-    latencyMs: 20
-    jitterMs: 0
-    seed: seed
-    dropCountdown: 0
-    dropped: 0
-  }
+# A fast clean path (20 ms each way), from `seed`
+func cleanPath(seed: view Int) ret BadNetwork {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.latencyMs = 20
+  settings.seed = seed
+  ret createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 512)
 }
 
-func nextRandom(pipe: mod Pipe, below: view Int) ret Int {
-  pipe.seed = (pipe.seed * 1103515245 + 12345) bitand 2147483647
-  ret (pipe.seed shr 8) % below
-}
-
-func pipeSend(pipe: mod Pipe, packet: view List(UInt8), nowMs: view Int) {
-  if pipe.dropCountdown > 0 {
-    pipe.dropCountdown = pipe.dropCountdown - 1
-    if pipe.dropCountdown is 0 {
-      pipe.dropped = pipe.dropped + 1
-      ret
-    }
-  }
-  if pipe.lossPercent > 0 and nextRandom(pipe: pipe, below: 100) < pipe.lossPercent {
-    pipe.dropped = pipe.dropped + 1
-    ret
-  }
-  var delay: Int = pipe.latencyMs
-  if pipe.jitterMs > 0 {
-    delay = delay + nextRandom(pipe: pipe, below: pipe.jitterMs + 1)
-  }
-  loop var slot: Int = 0, slot < pipeSlots, ++slot {
-    if intAt(values: pipe.length, index: slot) < 0 {
-      copyInto(
-        destination: pipe.data
-        destinationStart: slot * pipe.slotBytes
-        source: packet
-        sourceStart: 0
-        count: packet.length
-      )
-      pipe.length.set(index: slot, value: packet.length)
-      pipe.deliverAtMs.set(index: slot, value: nowMs + delay)
-      ret
-    }
-  }
-  pipe.dropped = pipe.dropped + 1
-}
-
-func pipeDeliver(pipe: mod Pipe, connection: mod Connection, nowMs: view Int) {
-  loop var slot: Int = 0, slot < pipeSlots, ++slot {
-    let length: Int = intAt(values: pipe.length, index: slot)
-    if length >= 0 and intAt(values: pipe.deliverAtMs, index: slot) <= nowMs {
-      let taken: Bool = connectionReadPacket(
-        connection: connection
-        packet: pipe.data
-        start: slot * pipe.slotBytes
-        count: length
-        nowMs: nowMs
-      )
-      pipe.length.set(index: slot, value: -1)
-    }
+# Hand each packet due on `network` to `connection`
+func deliver(
+  network: mod BadNetwork
+  connection: mod Connection
+  arrived: mod List(UInt8)
+  nowMs: view Int
+) {
+  loop badNetworkNext(network: network, packet: arrived, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: connection
+      packet: arrived
+      start: 0
+      count: arrived.length
+      nowMs: nowMs
+    )
   }
 }
 
@@ -111,9 +50,10 @@ func createLink(seed: view Int) ret Link {
   ret Link {
     client: createConnection(config: defaultConnectionConfig())
     server: createConnection(config: defaultConnectionConfig())
-    toServer: createPipe(seed: seed)
-    toClient: createPipe(seed: seed + 7)
+    toServer: cleanPath(seed: seed)
+    toClient: cleanPath(seed: seed + 7)
     packet: List.create(UInt8, cap: 1200)
+    arrived: List.create(UInt8, cap: 1200)
     nowMs: 0
   }
 }
@@ -124,13 +64,37 @@ func step(link: mod Link) {
   connectionUpdate(connection: link.client, nowMs: link.nowMs)
   connectionUpdate(connection: link.server, nowMs: link.nowMs)
   loop connectionWritePacket(connection: link.client, packet: link.packet, nowMs: link.nowMs) {
-    pipeSend(pipe: link.toServer, packet: link.packet, nowMs: link.nowMs)
+    badNetworkSend(
+      network: link.toServer
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
   }
   loop connectionWritePacket(connection: link.server, packet: link.packet, nowMs: link.nowMs) {
-    pipeSend(pipe: link.toClient, packet: link.packet, nowMs: link.nowMs)
+    badNetworkSend(
+      network: link.toClient
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
   }
-  pipeDeliver(pipe: link.toServer, connection: link.server, nowMs: link.nowMs)
-  pipeDeliver(pipe: link.toClient, connection: link.client, nowMs: link.nowMs)
+  deliver(
+    network: link.toServer
+    connection: link.server
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
+  deliver(
+    network: link.toClient
+    connection: link.client
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
 }
 
 func connectLink(link: mod Link) {
@@ -218,7 +182,7 @@ func handshakeAndTimeouts() {
 
   # The client stops hearing the server: it times out after timeoutMs, and
   # then, as it falls silent too, so does the server
-  link.toClient.lossPercent = 100
+  link.toClient.settings.lossPercent = 100
   let silentFrom: Int = link.nowMs
   var clientTimedOutAt: Int = -1
   loop var i: Int = 0, i < 1200 and link.server.state is ConnectionState.connected, ++i {
@@ -255,12 +219,15 @@ func handshakeAndTimeouts() {
 func reliableUnderLoss() {
   var link: Link = createLink(seed: 11)
   connectLink(link: link)
-  link.toServer.lossPercent = 20
-  link.toClient.lossPercent = 20
-  link.toServer.latencyMs = 40
-  link.toClient.latencyMs = 40
-  link.toServer.jitterMs = 30
-  link.toClient.jitterMs = 30
+  # The usual bad network both ways (10% loss, 150 ms, 30 ms jitter), plus
+  # a few duplicated and reordered packets
+  var settings: BadNetworkSettings = badNetworkSettings()
+  settings.duplicatePercent = 3
+  settings.reorderPercent = 5
+  settings.seed = 11
+  link.toServer = createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 1024)
+  settings.seed = 12
+  link.toClient = createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 1024)
   var message: List(UInt8) = List.create(UInt8, cap: 1200)
   var toServer: Tally = emptyTally()
   var toClient: Tally = emptyTally()
@@ -321,10 +288,10 @@ func reliableUnderLoss() {
     )
   }
   log(
-    "reliable at 20% loss: client->server {toServer.received}/{total} out of order {toServer.outOfOrder}, server->client {toClient.received}/{total} out of order {toClient.outOfOrder}"
+    "reliable at 10% loss, 150 ms, 30 ms jitter: client->server {toServer.received}/{total} out of order {toServer.outOfOrder}, server->client {toClient.received}/{total} out of order {toClient.outOfOrder}"
   )
   log(
-    "losses made resends: {link.toServer.dropped > 0 and link.client.stats.fragmentsResent > 0 and link.server.stats.fragmentsResent > 0}"
+    "losses made resends: {link.toServer.stats.dropped > 0 and link.client.stats.fragmentsResent > 0 and link.server.stats.fragmentsResent > 0}"
   )
   log(
     "still connected: {connectionIsConnected(connection: link.client)} {connectionIsConnected(
@@ -332,14 +299,17 @@ func reliableUnderLoss() {
     )}"
   )
   log(
-    "round trip measured near 80-110 ms: {link.client.rttMs > 60.0 and link.client.rttMs < 140.0}"
+    "round trip measured near 300-360 ms: {link.client.rttMs > 280.0 and link.client.rttMs < 420.0}"
+  )
+  log(
+    "the network duplicated {link.toServer.stats.duplicated > 0} and reordered {link.toServer.stats.reordered > 0}"
   )
   log(
     "unreliable: out of order {serverUnreliable.outOfOrder}, some arrived {serverUnreliable.received > unreliableSent / 2}, some lost or dropped {serverUnreliable.received < unreliableSent}, old ones dropped {link.server.stats.unreliableDropped > 0}"
   )
 
   # Now nothing more is sent: no reliable message arrives a second time
-  loop var i: Int = 0, i < 100, ++i {
+  loop var i: Int = 0, i < 200, ++i {
     step(link: link)
     drain(
       connection: link.server
@@ -377,13 +347,37 @@ func fragmentedMessage() {
       if link.packet.length > largest {
         largest = link.packet.length
       }
-      pipeSend(pipe: link.toServer, packet: link.packet, nowMs: link.nowMs)
+      badNetworkSend(
+        network: link.toServer
+        packet: link.packet
+        start: 0
+        count: link.packet.length
+        destination: noNetAddress()
+        nowMs: link.nowMs
+      )
     }
     loop connectionWritePacket(connection: link.server, packet: link.packet, nowMs: link.nowMs) {
-      pipeSend(pipe: link.toClient, packet: link.packet, nowMs: link.nowMs)
+      badNetworkSend(
+        network: link.toClient
+        packet: link.packet
+        start: 0
+        count: link.packet.length
+        destination: noNetAddress()
+        nowMs: link.nowMs
+      )
     }
-    pipeDeliver(pipe: link.toServer, connection: link.server, nowMs: link.nowMs)
-    pipeDeliver(pipe: link.toClient, connection: link.client, nowMs: link.nowMs)
+    deliver(
+      network: link.toServer
+      connection: link.server
+      arrived: link.arrived
+      nowMs: link.nowMs
+    )
+    deliver(
+      network: link.toClient
+      connection: link.client
+      arrived: link.arrived
+      nowMs: link.nowMs
+    )
     if connectionReceive(connection: link.server, message: message) is MessageChannel.reliable {
       gotIt = true
     }
@@ -395,7 +389,7 @@ func fragmentedMessage() {
     }
   }
   log(
-    "fragmented: arrived {gotIt}, {message.length} bytes, identical {same}, a fragment was lost {link.toServer.dropped is 1}, resent {link.client.stats.fragmentsResent >= 1}"
+    "fragmented: arrived {gotIt}, {message.length} bytes, identical {same}, a fragment was lost {link.toServer.stats.dropped is 1}, resent {link.client.stats.fragmentsResent >= 1}"
   )
   log("largest packet {largest} bytes (under 1200: {largest <= 1200})")
 }
@@ -405,10 +399,10 @@ func fragmentedMessage() {
 func zeroAllocations() {
   var link: Link = createLink(seed: 31)
   connectLink(link: link)
-  link.toServer.lossPercent = 10
-  link.toClient.lossPercent = 10
-  link.toServer.jitterMs = 20
-  link.toClient.jitterMs = 20
+  link.toServer.settings.lossPercent = 10
+  link.toClient.settings.lossPercent = 10
+  link.toServer.settings.jitterMs = 20
+  link.toClient.settings.jitterMs = 20
   var message: List(UInt8) = List.create(UInt8, cap: 1200)
   var serverReliable: Tally = emptyTally()
   var serverUnreliable: Tally = emptyTally()
@@ -469,9 +463,9 @@ func acrossTheWrap() {
   link.server.receiver.nextId = 65530
   link.client.unreliableNextSequence = 65530
   connectLink(link: link)
-  link.toServer.lossPercent = 10
-  link.toClient.lossPercent = 10
-  link.toServer.jitterMs = 30
+  link.toServer.settings.lossPercent = 10
+  link.toClient.settings.lossPercent = 10
+  link.toServer.settings.jitterMs = 30
   var message: List(UInt8) = List.create(UInt8, cap: 16)
   var reliable: Tally = emptyTally()
   var unreliable: Tally = emptyTally()
