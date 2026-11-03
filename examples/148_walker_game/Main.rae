@@ -1,0 +1,150 @@
+# A game on the walker kit (docs/walker-kit.md): the 143 forest walker, plus
+# this game's own parts, with no walker kit file copied. runWalkerGame runs
+# the walker with a BoxGame and calls its three hooks:
+#
+#   walkerGameStart   a red box (a kinematic physics cube the walker kit
+#                     draws) 6 m ahead, the game's own SpinBox component on
+#                     it, and the game's own UI scene
+#   walkerGameUpdate  the spin system: a SpinBox turns while the walker is
+#                     within its reach, and the UI says so
+#   walkerGameEnd     nothing to release
+#
+# RAE_GAME_TEST=1 puts the box 3 m ahead (within reach) and logs its angle
+# at frame 5 and frame 120, for a headless check.
+import Math
+import Quat
+import Sys
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/WalkerAppRun
+open app3d/WalkerAppSetup
+open app3d/WalkerAppUpdate
+open app3d/WalkerPhysics
+open app3d/CharacterController
+open app3d/PlayerRoster
+open app3d/UiShell
+
+# The game's own component: turns at `speed` (radians a second) while the
+# walker is within `reach` meters
+type SpinBox {
+  speed: Float
+  reach: Float
+  angle: Float
+  center: Vec3
+}
+
+type BoxGame {
+  spinBoxes: ComponentTable(SpinBox)
+  # The walker was near a box last frame (the UI changes only when this does)
+  near: Bool
+  started: Bool
+  frames: Int
+}
+
+func walkerGameStart(game: mod BoxGame, app: mod WalkerApp) {
+  let heroEntityId: EntityId = rosterControlledEntityId(players: app.players)
+  let hero: view ThirdPersonController = controllerOf(
+    controllers: app.world.controllers
+    entityId: heroEntityId
+  )
+  # 6 m ahead (3 m in the headless check: the walker stands within reach)
+  var ahead: Float = 6.0
+  if Sys.getEnv(name: "RAE_GAME_TEST").length() > 0 {
+    ahead = 3.0
+  }
+  let center: Vec3 = Vec3.create(
+    x: hero.position.x - Math.sin(x: hero.heading) * ahead
+    y: hero.position.y + Math.cos(x: hero.heading) * ahead
+    z: app.characterSystem.groundZ + hero.position.z + 1.2
+  )
+  let boxEntityId: EntityId = spawnKinematicCube(
+    physicsSystem: app.physicsSystem
+    allocator: app.world.allocator
+    transforms: app.world.transforms
+    center: center
+    halfSize: 0.6
+    color: Vec3.create(x: 0.85, y: 0.15, z: 0.12)
+  )
+  componentSet(
+    this: game.spinBoxes
+    entityId: boxEntityId
+    data: SpinBox { speed: 2.5, reach: 4.0, angle: 0.0, center: center }
+  )
+  let gameRoot: EntityId = mountUiScene(
+    world: app.inputSystem.world
+    uiSystems: app.inputSystem.uiSystems
+    path: "examples/148_walker_game/assets/game.raescene"
+    res: app.inputSystem.gpuUi
+  )
+  game.started = true
+  log("[game] a spinning box at ({center.x}, {center.y}); walk to it")
+}
+
+# The spin system: each SpinBox near the walker turns about its upright axis
+func walkerGameUpdate(game: mod BoxGame, app: mod WalkerApp) {
+  let heroEntityId: EntityId = rosterControlledEntityId(players: app.players)
+  let hero: view ThirdPersonController = controllerOf(
+    controllers: app.world.controllers
+    entityId: heroEntityId
+  )
+  var anyNear: Bool = false
+  loop var i: Int = 0, i < componentCount(this: game.spinBoxes), ++i {
+    let entityId: EntityId = componentEntityAt(this: game.spinBoxes, i: i)
+    let box: mod SpinBox = componentMod(this: game.spinBoxes, entityId: entityId)
+    let dx: Float = box.center.x - hero.position.x
+    let dy: Float = box.center.y - hero.position.y
+    if Math.sqrt(x: dx * dx + dy * dy) <= box.reach {
+      anyNear = true
+      box.angle = box.angle + box.speed * app.frame.deltaTime
+      if componentHas(this: app.world.transforms, entityId: entityId) {
+        let transform: mod Transform3D = componentMod(
+          this: app.world.transforms
+          entityId: entityId
+        )
+        transform.position = box.center
+        transform.rotation = Quat.fromAxisAngle(
+          axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+          angle: box.angle
+        )
+      }
+    }
+  }
+  if anyNear is not game.near {
+    game.near = anyNear
+    var status: String = "walk to the red box"
+    if anyNear {
+      status = "the box spins while you are near"
+    }
+    setNodeText(world: app.inputSystem.world, nodeId: "GameStatus", value: status)
+  }
+  game.frames = game.frames + 1
+  if Sys.getEnv(name: "RAE_GAME_TEST").length() > 0 and (game.frames is 5 or game.frames is 120) {
+    var angle: Float = 0.0
+    if componentCount(this: game.spinBoxes) > 0 {
+      angle = componentCopyAtDefault(this: game.spinBoxes, i: 0).angle
+    }
+    log("[game] frame {game.frames}: the walker near the box {anyNear}, its angle {angle}")
+  }
+}
+
+func walkerGameEnd(game: mod BoxGame, app: mod WalkerApp) {
+}
+
+func main() ret Int {
+  let settings: WalkerAppSettings = {
+    title: "148: a game on the walker kit"
+    appId: "148_walker_game"
+    assets: "examples/136_walker_character/assets/"
+    forward: false
+    land: WalkerLand.forest
+  }
+  var game: BoxGame = {
+    spinBoxes: ComponentTable.create(SpinBox)
+    near: false
+    started: false
+    frames: 0
+  }
+  ret runWalkerGame(BoxGame, game: game, settings: settings)
+}

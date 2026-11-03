@@ -1,6 +1,21 @@
 # app3d/WalkerAppRun — the walker app's run: makes the app (app3d/WalkerApp
 # createWalkerApp), then its self-tests or its frame loop, and its shutdown.
 # 136, 137 and 143 each call runWalkerApp from their Main.rae.
+#
+# A game built on the walker kit (docs/walker-kit.md) calls runWalkerGame
+# with its own type G instead, and defines three functions for G that the
+# run calls, as a router type's `route` is for lib/ui's dispatch:
+#
+#   walkerGameStart(game: mod G, app: mod WalkerApp)    once, the app built:
+#                                                       its entities, its
+#                                                       components, its UI
+#   walkerGameUpdate(game: mod G, app: mod WalkerApp)   every frame, after
+#                                                       the walker's update:
+#                                                       its systems
+#   walkerGameEnd(game: mod G, app: mod WalkerApp)      before shutdown
+#
+# The game's components live in its own tables, keyed by the walker world's
+# entity ids (app.world.allocator); no walker kit file is copied.
 import Profile
 import Gpu2d
 open app3d/ReferenceTree
@@ -51,8 +66,53 @@ func netSessionOver(app: view WalkerApp) ret Bool {
   ret false
 }
 
+# The walker app with no game of its own (136, 137, 143)
+type NoWalkerGame {
+}
+
+func walkerGameStart(game: mod NoWalkerGame, app: mod WalkerApp) {
+}
+
+func walkerGameUpdate(game: mod NoWalkerGame, app: mod WalkerApp) {
+}
+
+func walkerGameEnd(game: mod NoWalkerGame, app: mod WalkerApp) {
+}
+
 func runWalkerApp(settings: view WalkerAppSettings) ret Int {
+  var game: NoWalkerGame = {}
+  ret runWalkerGame(NoWalkerGame, game: game, settings: settings)
+}
+
+# The walker app with a game's own parts (the hooks above). Thin on
+# purpose: the walker's own work is in the plain functions below, and only
+# the hooks are called here.
+func runWalkerGame(G: type, game: mod G, settings: view WalkerAppSettings) ret Int {
   var app: WalkerApp = createWalkerApp(settings: settings)
+  walkerGameStart(game: game, app: app)
+  let run: WalkerRun = walkerRunStart(app: app)
+  loop walkerRunGoing(run: run, app: app) {
+    walkerRunUpdate(app: app)
+    walkerGameUpdate(game: game, app: app)
+    walkerRunRender(app: app)
+  }
+  walkerGameEnd(game: game, app: app)
+  walkerRunEnd(app: app)
+  ret run.exitCode
+}
+
+# What the start decided: a self-test that runs instead of the window loop,
+# and the exit code so far
+type WalkerRun {
+  physicsTest: Bool
+  splashTest: Bool
+  layoutTest: Bool
+  exitCode: Int
+}
+
+# The start: the world's log line, the ragdoll rig, and the self-tests
+# (RAE_WALKER_PHYSICS_TEST, RAE_WALKER_SPLASH_TEST, RAE_WALKER_LAYOUT_TEST)
+func walkerRunStart(app: mod WalkerApp) ret WalkerRun {
   # #739/#740/#741: the WalkerWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (TerrainProp) — all recycled ECS entities.
@@ -180,54 +240,75 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       exitCode = 1
     }
   }
-  loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() and not netSessionOver(
-    app: app
-  ) and not walkerQrTestDone(scan: app.qrScan) {
-    beginWalkerFrame(app: app)
-    walkerQrAim(
-      scan: app.qrScan
-      world: app.world
-      rig: app.cameraSystem.rig
-      camera: app.cameraSystem.camera
-    )
-    updateWalkerApp(app: app)
-    if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
-      # Park until the OS has something to say (shared policy, lib/ui/event_loop).
-      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        visible: Gpu2d.renderableNow()
-        animating: false
-        mouseDown: false
-        pollWatcher: false
-        frameSec: 0.016667
-        heartbeatSec: 1.0
-      ))
-    } else {
-      if let resources: mod GpuResources = app.gpuResources {
-        renderWalkerApp(
-          uiSystems: app.inputSystem.uiSystems
-          cameraSystem: app.cameraSystem
-          characterSystem: app.characterSystem
-          frame: app.frame
-          inputSystem: app.inputSystem
-          renderSystem: app.renderSystem
-          world: app.world
-          physicsSystem: app.physicsSystem
-          walkerMarks: app.walkerMarks
-          terrainSystem: app.terrainSystem
-          wadeSplash: app.wadeSplash
-          waterSystem: app.waterSystem
-          biome: app.biome
-          resources: resources
-          profiler: app.profiler
-          grassCompute: app.grassCompute
-        )
-      }
-      walkerQrFrame(scan: app.qrScan, canvas: app.renderSystem.renderer.canvas)
-    }
-    # Frame end: report the authored components no lib table matched (this app
-    # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
+  ret WalkerRun {
+    physicsTest: physicsTest
+    splashTest: splashTest
+    layoutTest: layoutTest
+    exitCode: exitCode
   }
+}
+
+# Whether the window loop goes on
+func walkerRunGoing(run: view WalkerRun, app: view WalkerApp) ret Bool {
+  ret not run.physicsTest and not run.splashTest and not run.layoutTest and not Gpu2d.pollClose() and not netSessionOver(
+    app: app
+  ) and not walkerQrTestDone(scan: app.qrScan)
+}
+
+# A frame's update: time, the sweep's camera, the walker's systems
+func walkerRunUpdate(app: mod WalkerApp) {
+  beginWalkerFrame(app: app)
+  walkerQrAim(
+    scan: app.qrScan
+    world: app.world
+    rig: app.cameraSystem.rig
+    camera: app.cameraSystem.camera
+  )
+  updateWalkerApp(app: app)
+}
+
+# A frame's render (or the wait when nothing needs drawing), and its end
+func walkerRunRender(app: mod WalkerApp) {
+  if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
+    # Park until the OS has something to say (shared policy, lib/ui/event_loop).
+    Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      visible: Gpu2d.renderableNow()
+      animating: false
+      mouseDown: false
+      pollWatcher: false
+      frameSec: 0.016667
+      heartbeatSec: 1.0
+    ))
+  } else {
+    if let resources: mod GpuResources = app.gpuResources {
+      renderWalkerApp(
+        uiSystems: app.inputSystem.uiSystems
+        cameraSystem: app.cameraSystem
+        characterSystem: app.characterSystem
+        frame: app.frame
+        inputSystem: app.inputSystem
+        renderSystem: app.renderSystem
+        world: app.world
+        physicsSystem: app.physicsSystem
+        walkerMarks: app.walkerMarks
+        terrainSystem: app.terrainSystem
+        wadeSplash: app.wadeSplash
+        waterSystem: app.waterSystem
+        biome: app.biome
+        resources: resources
+        profiler: app.profiler
+        grassCompute: app.grassCompute
+      )
+    }
+    walkerQrFrame(scan: app.qrScan, canvas: app.renderSystem.renderer.canvas)
+  }
+  # Frame end: report the authored components no lib table matched (this app
+  # has no tables of its own) and recycle the indices of destroyed entities.
+  uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
+}
+
+# The shutdown
+func walkerRunEnd(app: mod WalkerApp) {
   # A networked session: what its desync check found, then leave it
   if let walkerNet: mod WalkerNet = app.walkerNet {
     log(
@@ -251,5 +332,4 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   destroyPhysicsSystem(physicsSystem: app.physicsSystem)
   shutdown()
   Gpu2d.closeWindow()
-  ret exitCode
 }
