@@ -6574,6 +6574,21 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
         inst_args = sema_type_ref_of(s_lifecycle_ctx, structType)->generic_args;
     }
     for (AstObjectField* f = fields; f; f = f->next) {
+        /* A field given twice in one literal: the C initializer would name it
+         * twice and keep the last value silently */
+        for (AstObjectField* earlier = fields; earlier != f; earlier = earlier->next) {
+            if (!str_eq(earlier->name, f->name)) continue;
+            char twice[320];
+            snprintf(twice, sizeof twice,
+                "field '%.*s' is given twice in this literal of type '%.*s': here and at line %d:%d; remove one of them",
+                (int)f->name.len, f->name.data, (int)structType->name.len, structType->name.data,
+                earlier->value ? (int)earlier->value->line : (int)litLine,
+                earlier->value ? (int)earlier->value->column : (int)litCol);
+            diag_error(errFile, f->value ? (int)f->value->line : (int)litLine,
+                       f->value ? (int)f->value->column : (int)litCol, twice);
+            if (s_current_module) s_current_module->had_error = true;
+            break;
+        }
         bool known = false;
         for (AstTypeField* tf = td->fields; tf; tf = tf->next)
             if (str_eq(tf->name, f->name)) { known = true; break; }
