@@ -390,6 +390,14 @@ and that every `OnClick` id has a label.
 
 ## 12. `ListReorder`: drag to reorder a list's rows
 
+A virtual `ListView` with `"animateMoves": true` and an `itemKeyField`
+animates its rows when the data's order changes: each row eases from where
+it was drawn to its new place (ui/listMotionSystem: a task ticked done
+glides to the end) instead of jumping there. The app runs
+`listMotionSystem(system, world, uiSystems, nowSec)` after the list system
+while `listMotionNeedsRun` says so, keeping a `ListMotionSystem` (new with
+each UI world); it returns true while a row moves.
+
 A virtual `ListView` (the default mode) whose node also carries
 `ListReorder` lets a person drag its rows into another order
 (lib/ui/ListReorder, the system is ui/listReorderSystem):

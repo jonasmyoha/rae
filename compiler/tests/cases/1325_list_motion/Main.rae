@@ -1,0 +1,159 @@
+# ui/listMotionSystem: a virtual ListView with `animateMoves` and a key per
+# row; the data's first row moves to the end (a task ticked done). The row
+# that shows it is drawn where it was (its offset its old place less its
+# new one), eases home over frames, and then the list is at rest with no
+# offsets left. A list without `animateMoves` is not touched.
+import ui/Components
+open ui/Ecs
+open ui/listViewSystem/ListViewSystem
+open ui/listMotionSystem/ListMotionSystem
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+func makeRow(label: own String) ret ListViewRow {
+  var keys: List(String) = List.create(String, cap: 1)
+  keys.add(value: "label")
+  var values: List(String) = List.create(String, cap: 1)
+  values.add(value: own label)
+  ret ListViewRow { keys: own keys, values: own values }
+}
+
+func buildData(order: view List(Int)) ret ListViewData {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: order.length)
+  loop let index: view Int in order {
+    rows.add(value: makeRow(label: "Row {index}"))
+  }
+  ret ListViewData { rows: own rows }
+}
+
+func makeListView(animate: view Bool) ret ListView {
+  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 1)
+  bindings.add(value: ListViewBinding {
+    nodeId: "Label"
+    componentName: "Text"
+    fieldName: "text"
+    itemField: "label"
+    prefix: ""
+    suffix: ""
+  })
+  ret ListView {
+    itemSceneId: ""
+    itemKeyField: "label"
+    itemHeight: 36.0
+    itemGap: 4.0
+    visibleItemCount: 10
+    overscanRows: 2
+    bindings: own bindings
+    loadingSceneId: ""
+    emptySceneId: ""
+    errorSceneId: ""
+    mode: ListViewMode.virtual
+    rowKindField: ""
+    rowScenes: List.create(ListViewRowScene, cap: 0)
+    itemWidth: 0.0
+    fitToColumns: false
+    animateMoves: animate
+  }
+}
+
+# The offset of the pooled row showing data row `index` (0 when none)
+func rowOffset(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+  index: view Int
+) ret Float {
+  let children: view Children = componentView(this: world.childrens, entityId: listEntity)
+  let row: EntityId = children.ids.copyAtFallback(index: index, fallback: noEntity())
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: row) {
+    ret componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: row).delta.y
+  }
+  ret 0.0
+}
+
+func main() {
+  let scenes: SceneRegistry = createSceneRegistry()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var motion: ListMotionSystem = createListMotionSystem()
+  let listEntity: EntityId = createEntity(world: world)
+  let plain: EntityId = createEntity(world: world)
+  componentSet(this: world.listViews, entityId: listEntity, data: makeListView(animate: true))
+  componentSet(this: world.listViews, entityId: plain, data: makeListView(animate: false))
+  var order: List(Int) = [
+    0
+    1
+    2
+    3
+    4
+  ]
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(order: order))
+  componentSet(this: world.listViewDatas, entityId: plain, data: buildData(order: order))
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("needs run at the start: {listMotionNeedsRun(system: motion, world: world)}")
+  var moving: Bool = listMotionSystem(
+    system: motion
+    world: world
+    uiSystems: uiSystems
+    nowSec: 10.0
+  )
+  log(
+    "first frame: moving {moving}, needs run after: {listMotionNeedsRun(
+      system: motion
+      world: world
+    )}"
+  )
+  # Row 0 is done: it goes to the end
+  var after: List(Int) = [
+    1
+    2
+    3
+    4
+    0
+  ]
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(order: after))
+  componentSet(this: world.listViewDatas, entityId: plain, data: buildData(order: after))
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("a new order: needs run {listMotionNeedsRun(system: motion, world: world)}")
+  moving = listMotionSystem(
+    system: motion
+    world: world
+    uiSystems: uiSystems
+    nowSec: 10.016
+  )
+  log("the moved row (now last) is drawn {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    index: 4
+  )} from its place; the next one {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    index: 0
+  )}; moving {moving}")
+  log("the plain list's rows: {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: plain
+    index: 4
+  )}")
+  var frames: Int = 0
+  loop moving and frames < 120 {
+    frames = frames + 1
+    moving = listMotionSystem(
+      system: motion
+      world: world
+      uiSystems: uiSystems
+      nowSec: (10.016 + frames.toFloat() / 60.0) as Float64
+    )
+  }
+  log("home in under 40 frames: {frames < 40}, offset left {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    index: 4
+  )}, needs run {listMotionNeedsRun(system: motion, world: world)}")
+}
