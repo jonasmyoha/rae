@@ -463,12 +463,18 @@ func uploadSceneLight(
     moonPenumbra: sky.moonPenumbra
   )
   # the clouds' shadow map, from the uniform just uploaded (lib/CloudShadow)
-  if uploaded {
-    drawCloudShadow(
-      map: targets.cloudShadow
-      resources: resources
-      lightUniform: targets.lightUniform
-    )
+  # (unless the timed clouds step drew it already, RendererDeferred gpuPassMark)
+  if uploaded and targets.cloudShadow.drawnByStep {
+    targets.cloudShadow.drawnByStep = false
+  } else if uploaded {
+    unsafe {
+      drawCloudShadow(
+        map: targets.cloudShadow
+        resources: resources
+        lightUniform: targets.lightUniform
+        encoder: webgpuNull()
+      )
+    }
   }
   ret uploaded
 }

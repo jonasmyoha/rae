@@ -15,6 +15,13 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 }
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+  // the cloud tier off (L.clouds.w 0, lib/CloudTier): no field, the sun
+  // dimmed evenly by the cover (a fifth under a full one), as the weather
+  // still asks
+  if (L.clouds.w < 0.5) {
+    let cover = clamp(L.clouds.x, 0.0, 1.0);
+    return vec4<f32>(1.0 - 0.8 * cover, cover, 0.0, 1.0);
+  }
   let texel = cloudShadowSpan / cloudShadowTexels;
   let origin = cloudShadowOrigin();
   if (pos.y < cloudShadowTexels) {

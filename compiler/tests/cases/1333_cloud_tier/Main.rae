@@ -1,0 +1,121 @@
+# The cloud tier (lib/CloudTier): the lowest of the game's ceiling, the
+# device's start and the quality's, clamped to what is built (the layer);
+# RAE_CLOUD_TIER's name forces one; the measured fallback steps down when the
+# clouds stay over their GPU budget for a window of frames or the OS is hot,
+# once, and back up only after a long good stretch; a quality change moves
+# the ceiling.
+open CloudTier
+
+func main() {
+  # the start: a desktop asks for the slab, the built layer draws
+  let desktop: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  log("desktop: {desktop.tier}, budget {desktop.budgetMicroseconds} us")
+  let phone: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: true
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  log("phone: {phone.tier}, budget {phone.budgetMicroseconds} us")
+  let stylized: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings { maxTier: CloudTier.off, preferredTier: CloudTier.off }
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  log("a game without clouds: {stylized.tier}")
+  log("quality low: {cloudTierForQuality(level: 0, maxTier: CloudTier.volumetric)}")
+  log("quality mid: {cloudTierForQuality(level: 1, maxTier: CloudTier.volumetric)}")
+  log("quality high: {cloudTierForQuality(level: 2, maxTier: CloudTier.volumetric)}")
+  log(
+    "quality ultra, a game up to the layer: {cloudTierForQuality(level: 3, maxTier: CloudTier.layer)}"
+  )
+
+  # forced
+  var forced: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: "volumetric"
+  )
+  let moved: Bool = cloudTierFrame(control: forced, cloudMicroseconds: 99999, thermal: 3)
+  log("forced: {forced.tier}, moved by a slow hot frame: {moved}")
+
+  # over the budget: a window of 120 measured frames, 90 of them over
+  var control: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: true
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  var stepped: Int = -1
+  loop var frame: Int = 0, frame < 240, ++frame {
+    var cost: Int = 1000
+    if frame % 4 is not 0 {
+      cost = 2000
+    }
+    if cloudTierFrame(control: control, cloudMicroseconds: cost, thermal: 0) and stepped < 0 {
+      stepped = frame
+    }
+  }
+  log("slow clouds: {control.tier} after {stepped + 1} frames")
+
+  # a short spike does not step down
+  var spiky: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: true
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  loop var frame: Int = 0, frame < 240, ++frame {
+    var cost: Int = 800
+    if frame < 40 {
+      cost = 5000
+    }
+    let changed: Bool = cloudTierFrame(control: spiky, cloudMicroseconds: cost, thermal: 0)
+  }
+  log("a short spike: {spiky.tier}")
+
+  # back up after a long good stretch, not before
+  var early: Bool = false
+  loop var frame: Int = 0, frame < cloudTierGoodFrames + cloudTierCooldownFrames, ++frame {
+    let changed: Bool = cloudTierFrame(control: control, cloudMicroseconds: 300, thermal: 0)
+    if changed and frame < cloudTierGoodFrames - 1 {
+      early = true
+    }
+  }
+  log("after a good stretch: {control.tier}, too early: {early}")
+
+  # a serious thermal state steps down at once, and only once in a cooldown
+  var hot: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  var steps: Int = 0
+  loop var frame: Int = 0, frame < 100, ++frame {
+    if cloudTierFrame(control: hot, cloudMicroseconds: -1, thermal: 2) {
+      steps = steps + 1
+    }
+  }
+  log("hot: {hot.tier}, {steps} step")
+
+  # the quality setting moves the ceiling
+  var quality: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  let lowered: Bool = cloudTierSetQuality(control: quality, qualityTier: CloudTier.off)
+  log("quality to off: {quality.tier} ({lowered})")
+  let raised: Bool = cloudTierSetQuality(control: quality, qualityTier: CloudTier.volumetric)
+  log("quality back up: {quality.tier} ({raised})")
+  log("names: {cloudTierNamed(name: "slab") is not none}, {cloudTierNamed(name: "fog") is none}")
+}

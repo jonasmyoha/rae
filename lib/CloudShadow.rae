@@ -10,7 +10,11 @@
 #
 # It is drawn right after the light uniform is uploaded (GbufferPasses
 # uploadSceneLight), in its own small submission, so both the deferred
-# lighting pass and the forward main pass read this frame's map. Its cost is
+# lighting pass and the forward main pass read this frame's map. While the
+# pass timing samples a frame, the map is drawn instead just before the
+# lighting or forward pass as its own "clouds" span (RendererDeferred
+# gpuPassMark; before the forward pass from the light uniform of the frame
+# before): that span is the clouds' GPU time lib/CloudTier's fallback reads. Its cost is
 # one fullscreen pass over cloudShadowTexels x (cloudShadowTexels + 1)
 # texels.
 open gpu/GpuResources
@@ -19,6 +23,7 @@ open gpu/GpuLifetime
 open gpu/GpuTextures
 open gpu/GpuIds
 open webgpu/Webgpu
+open webgpu/Context
 open GbufferFullscreen
 
 # The map's side in texels (cloud_shadow.wgsl cloudShadowTexels); one more
@@ -32,6 +37,9 @@ type CloudShadowMap {
   bind: BindGroupId = noBindGroupId()
   # the light uniform the bind reads (it is made again for another one)
   boundUniform: BufferId = noBufferId()
+  # this frame's map was drawn by the timed clouds step (RendererDeferred
+  # gpuPassMark), so the light upload does not draw it again
+  drawnByStep: Bool = false
 }
 
 # The map's texture and pipeline, made once; false while they cannot be made
@@ -66,12 +74,14 @@ func ensureCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) ret
   )
 }
 
-# Draw this frame's map from the light uniform `lightUniform` (the clouds,
-# the key light's way and the eye, already uploaded)
+# Draw the map from the light uniform `lightUniform` (the clouds, the key
+# light's way and the eye): recorded into `encoder`, or its own submission
+# when `encoder` is null
 func drawCloudShadow(
   map: mod CloudShadowMap
   resources: mod GpuResources
   lightUniform: view BufferId
+  encoder: copy Ptr
 ) {
   if not ensureCloudShadow(map: map, resources: resources) {
     ret
@@ -96,12 +106,22 @@ func drawCloudShadow(
     ret
   }
   unsafe {
-    runFullscreen(
-      resources: resources
-      pipeline: map.pipeline
-      bind: map.bind
-      target: textureViewHandle(resources: resources, id: map.textureView)
-    )
+    if encoder is webgpuNull() {
+      runFullscreen(
+        resources: resources
+        pipeline: map.pipeline
+        bind: map.bind
+        target: textureViewHandle(resources: resources, id: map.textureView)
+      )
+    } else {
+      runFullscreenInBatch(
+        encoder: encoder
+        resources: resources
+        pipeline: map.pipeline
+        bind: map.bind
+        target: textureViewHandle(resources: resources, id: map.textureView)
+      )
+    }
   }
 }
 

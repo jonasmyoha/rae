@@ -51,6 +51,8 @@ open GbufferTargets
 open RendererDeferredGraph
 open RendererDeferredShadow
 open Sky
+open CloudTier
+open CloudShadow
 open Shadow3d
 open ShadowMaps
 open ShadowMapsRecords
@@ -121,6 +123,9 @@ type DeferredRenderer {
   # is opt-in rather than a silent change to every existing example.
   sky: Sky
   hasSky: Bool
+  # The cloud tier drawn (lib/CloudTier, setCloudTier): copied into the sky
+  # of each frame
+  cloudTier: CloudTier = CloudTier.layer
   # The look applied by the composite pass (#556). Defaults to neutralGrade(),
   # which is exactly the historical ACES-plus-gamma result -- opting in is the
   # app's call, so this library cannot silently restyle an example that was
@@ -606,6 +611,7 @@ func renderDeferredPassWith(
     if renderer.hasSky {
       sky = renderer.sky
     }
+    sky.cloudTier = renderer.cloudTier
     lightingPassSky(
       cache: renderer.passes.light
       resources: resources
@@ -718,6 +724,33 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
 }
 
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
+  # While a frame is timed, the clouds' map is its own span before the pass
+  # that reads it (lib/CloudShadow)
+  if renderer.passTiming.marking and (tag is RenderTag.lighting or tag is RenderTag.forward) {
+    if let resources: mod GpuResources = renderer.gpuResources {
+      passTimingMark(
+        passTiming: renderer.passTiming
+        resources: resources
+        targets: renderer.passes.targets
+        tag: passTimingCloudsTag
+      )
+      unsafe {
+        drawCloudShadow(
+          map: renderer.passes.targets.cloudShadow
+          resources: resources
+          lightUniform: renderer.passes.targets.lightUniform
+          encoder: postEncoder(targets: renderer.passes.targets, resources: resources)
+        )
+      }
+      # the lighting pass records into the same recording after it (and its
+      # light upload lands before it is submitted); the forward pass is
+      # another submission, so the map goes first
+      if tag is RenderTag.forward {
+        flushPostPasses(targets: renderer.passes.targets, resources: resources)
+      }
+      renderer.passes.targets.cloudShadow.drawnByStep = true
+    }
+  }
   if let resources: mod GpuResources = renderer.gpuResources {
     passTimingMark(
       passTiming: renderer.passTiming
@@ -842,6 +875,12 @@ func flushDeferredWork(renderer: mod DeferredRenderer) {
 # Bind an environment. The frame's background and its ambient both come
 # from it after this, which is the whole point of #399's interface — a
 # scene cannot end up lit by one sky and drawn against another.
+# The cloud tier the frames draw (lib/CloudTier: off, the layer, ...): the
+# app's CloudTierControl decides it
+func setCloudTier(renderer: mod DeferredRenderer, tier: view CloudTier) {
+  renderer.cloudTier = tier
+}
+
 func setRendererSky(renderer: mod DeferredRenderer, sky: view Sky) pub {
   renderer.sky = sky
   renderer.hasSky = true

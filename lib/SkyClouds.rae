@@ -4,6 +4,7 @@
 # (docs/cloud-rendering-research.md §8.2), from a Sky's cloud fields, which
 # the app sets from lib/Weather.
 open Sky
+open CloudTier
 open gpu/GpuArgs
 
 type SkyClouds {
@@ -18,6 +19,8 @@ type SkyClouds {
   cirrus: Float = 0.0
   height: Float = 1200.0
   scale: Float = 1.0
+  # the cloud tier (lib/CloudTier rank: 0 off, 1 layer, 2 slab, 3 volumetric)
+  tier: Int = 1
 }
 
 # The clouds `sky` asks for
@@ -30,10 +33,12 @@ func skyCloudsOf(sky: view Sky) ret SkyClouds {
     cirrus: sky.cloudCirrus
     height: sky.cloudHeight
     scale: sky.cloudScale
+    tier: cloudTierRank(tier: sky.cloudTier)
   }
 }
 
-# Write `clouds` as the uniform's two vec4s: clouds (cover, darkness, drift)
+# Write `clouds` as the uniform's two vec4s: clouds (cover, darkness, drift,
+# tier)
 # and cloudShape (kind, cirrus, height, scale)
 func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
   pushVec4F(
@@ -41,7 +46,7 @@ func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
     x: clouds.cover
     y: clouds.darkness
     z: clouds.drift
-    w: 0.0
+    w: clouds.tier.toFloat()
   )
   pushVec4F(
     writer: writer

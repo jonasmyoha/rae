@@ -799,8 +799,25 @@ Each step is one queue task that leaves the walkers working.
      light.
    - This replaces the uniform `settingsCloudSunLight` dimming. It is
      shared by every later tier.
-3. **The tier switch and the fallback**: new; could be folded into
-   clouds 4/4.
+3. **The tier switch and the fallback**: done (2026-11-03). lib/CloudTier
+   (CloudTier, CloudSettings, CloudTierControl: the start is the lowest
+   of the game's maxTier / preferredTier, the device's tier, the quality's
+   and cloudTierBuilt, today the layer; cloudTierFrame steps down one tier
+   when 90 of a window of 120 measured frames are over budget, 1.5 ms on a
+   phone and 2.5 ms on a desktop, or the thermal state is serious, logs it
+   once, and steps back up after 3600 good frames, with 600 frames of
+   cooldown after any change; RAE_CLOUD_TIER forces a tier). The walkers
+   use it through app3d/SettingsClouds (a phone, or a browser with a coarse
+   main pointer, starts at the layer; Low = layer, Mid = slab, High/Ultra =
+   the game's ceiling) and hand the tier to the renderer (setCloudTier,
+   LightU clouds.w). Off draws no clouds; the sky and the land are dimmed
+   evenly by the cover. The measurement is the "clouds" span of
+   RendererPassTiming (only while it runs, RAE_GPU_PASS_TIMING or a
+   capture): the shadow map drawn as its own step before the lighting or
+   forward pass. On the Mac under load that span was 0.6-0.8 ms for
+   both the layer and off, its fixed cost rather than the layer's
+   work (1.7 ms before a forward pass, which needs a submission of its
+   own); the layer's sky drawing stays in the lighting pass.
    - `CloudSettings` (`maxTier`, `preferredTier`), the per-device starting
      tier, the `SettingsQuality` mapping, the `RendererPassTiming`
      fallback with its log line, and `RAE_CLOUD_TIER`.
