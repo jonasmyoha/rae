@@ -69,10 +69,14 @@ func createWalkerClouds(
 }
 
 # The clouds' GPU time in the pass timing's newest sample, once per sample
-# (-1 when there is no new one, or it has no clouds span)
+# (-1 when there is no new one, or it has no clouds span). Not on a phone:
+# there the span between two marks holds other passes' work too (on the
+# iPhone 15 Pro it read 7-8.5 ms for the off tier, the layer and the slab
+# alike), so only the thermal state moves the tier until the cloud passes
+# carry their own timestamps.
 func walkerCloudMicroseconds(clouds: mod WalkerClouds, renderer: view DeferredRenderer) ret Int {
   let timing: view DeferredPassTiming = renderer.passTiming
-  if timing.samples is clouds.seenSamples {
+  if timing.samples is clouds.seenSamples or walkerCloudDeviceMobile() {
     ret -1
   }
   clouds.seenSamples = timing.samples

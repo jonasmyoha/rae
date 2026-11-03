@@ -14,6 +14,20 @@
 @group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
 // The clouds' shadow map (lib/CloudShadow; cloudSunLight in deferred_shade.wgsl)
 @group(0) @binding(10) var cloudShadowTex: texture_2d<f32>;
+// The slab tier's half-resolution clouds (lib/CloudSlab): premultiplied light
+// and how much of the sky they hide, upsampled over the sky
+@group(0) @binding(11) var cloudSlabTex: texture_2d<f32>;
+fn cloudSlabAt(uv: vec2<f32>) -> vec4<f32> {
+  let size = vec2<f32>(textureDimensions(cloudSlabTex, 0));
+  let at = uv * size - 0.5;
+  let cell = clamp(vec2<i32>(floor(at)), vec2<i32>(0), vec2<i32>(size) - vec2<i32>(2));
+  let f = clamp(at - vec2<f32>(cell), vec2<f32>(0.0), vec2<f32>(1.0));
+  let a = textureLoad(cloudSlabTex, cell, 0);
+  let b = textureLoad(cloudSlabTex, cell + vec2<i32>(1, 0), 0);
+  let c = textureLoad(cloudSlabTex, cell + vec2<i32>(0, 1), 0);
+  let d = textureLoad(cloudSlabTex, cell + vec2<i32>(1, 1), 0);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
   var points = array<vec2<f32>, 3>(
@@ -30,7 +44,14 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     if (L.clearColor.w > 0.5) { return vec4<f32>(L.clearColor.rgb, 1.0); }
     let farW = L.invViewProj * ndcF;
     let dirF = normalize(farW.xyz / farW.w - L.camPos.xyz);
-    return vec4<f32>(skyColor(dirF), 1.0);
+    // the slab tier (L.clouds.w 2 and up): its clouds over the sky
+    skySlabActive = L.clouds.w > 1.5 && L.clouds.x > 0.001;
+    var skyLit = skyColor(dirF);
+    if (skySlabActive) {
+      let slab = cloudSlabAt(uvF);
+      skyLit = skyLit * (1.0 - slab.w) + slab.rgb;
+    }
+    return vec4<f32>(skyLit, 1.0);
   }
   let gbb = textureLoad(gbbTex, px, 0);
   let gba = textureLoad(gbaTex, px, 0);

@@ -264,6 +264,10 @@ fn cloudShadowOrigin() -> vec2<f32> {
   let texel = cloudShadowSpan / cloudShadowTexels;
   return floor(cloudShadowPlane(L.camPos.xyz) / texel) * texel - vec2<f32>(0.5 * cloudShadowSpan);
 }
+// The slab tier draws the overhead clouds itself (lib/CloudSlab): a pass that
+// composites it sets this, and the layer then draws only its cirrus and its
+// horizon band. Every other pass leaves it false and draws the whole layer.
+var<private> skySlabActive: bool = false;
 fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
   let cover = clamp(L.clouds.x, 0.0, 1.0);
   let cirrusAmount = clamp(L.cloudShape.y, 0.0, 1.0);
@@ -350,7 +354,7 @@ fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
       result = skyCloudOver(vec4<f32>(mix(color, sky, 0.3), share * band), result);
     }
   }
-  if (dir.z <= 0.0) { return result; }
+  if (dir.z <= 0.0 || skySlabActive) { return result; }
   // the layer overhead: on a plane at the clouds' height over the world,
   // nearer the eye larger (the same field the shadow on the ground comes
   // from, skyCloudSunThrough); seen at a slant, the far side of a puff is

@@ -25,6 +25,7 @@ open gpu/GpuIds
 open webgpu/Webgpu
 open webgpu/Context
 open GbufferFullscreen
+open CloudSlab
 
 # The map's side in texels (cloud_shadow.wgsl cloudShadowTexels); one more
 # row holds the average
@@ -40,6 +41,10 @@ type CloudShadowMap {
   # this frame's map was drawn by the timed clouds step (RendererDeferred
   # gpuPassMark), so the light upload does not draw it again
   drawnByStep: Bool = false
+  # the slab tier's clouds (lib/CloudSlab), and whether the timed clouds
+  # step drew them this frame
+  slab: CloudSlab = CloudSlab {}
+  slabDrawnByStep: Bool = false
 }
 
 # The map's texture and pipeline, made once; false while they cannot be made
@@ -127,6 +132,7 @@ func drawCloudShadow(
 
 # The map's GPU objects (renderer shutdown)
 func retireCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) {
+  retireCloudSlab(slab: map.slab, resources: resources)
   let bindRetired: Bool = retireBindGroup(resources: resources, id: map.bind)
   let pipelineRetired: Bool = retireRenderPipeline(resources: resources, id: map.pipeline)
   let viewRetired: Bool = retireTextureView(resources: resources, id: map.textureView)

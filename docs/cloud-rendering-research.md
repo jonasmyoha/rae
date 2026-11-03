@@ -823,12 +823,32 @@ Each step is one queue task that leaves the walkers working.
      fallback with its log line, and `RAE_CLOUD_TIER`.
    - With only tiers 0 and 1 present at first, the switch is proved before
      the expensive tiers exist.
-4. **The 2.5D slab (tier 2)**: new.
-   - A separate ¼-resolution pass with 1-in-4 temporal reuse, upsampled
-     into the sky, from the same cloud map plus a height profile LUT (the
-     RDR2 1×128 strip).
-   - Measure it on the Mac and the iPhone, and compare with tier 1 in 143
-     at noon, at sunset and under a front.
+4. **The 2.5D slab (tier 2)**: done (2026-11-03), lib/CloudSlab.
+   - A field map (cloud_field.wgsl): the layer's 2D field, 512 x 512
+     texels over 32 km round the eye (share, how thick, where in its puff).
+   - A trace (cloud_slab_trace.wgsl) at a quarter of the half-resolution
+     grid's pixels, the four pixels of each 2x2 tile in turn: 8-16 steps
+     through the slab (base cloudShape.z, depth 300 m for stratus to 1 km
+     for cumulus, taller under a storm), 3 light steps, the two-lobe phase,
+     two Beer lobes, powder darkening, one more octave, energy-conserving
+     steps. The column is a dome (the footprint's thickness and the puff's
+     radius); its shape in height is a 128 x 1 profile strip (stratus,
+     stratocumulus, cumulus).
+   - A resolve (cloud_slab_resolve.wgsl): the new trace blended into the
+     history (35%), the other pixels reprojected along their ray with the
+     frame before's view-projection and held to the range of the traces
+     round them; copied into the history.
+   - The deferred lighting pass upsamples it over the sky
+     (deferred_light.wgsl), and the layer then draws only its cirrus and
+     its horizon band (skySlabActive). The forward pass keeps the layer.
+   - Cost. Mac (50% render scale, load 14): the clouds span went from
+     0.4 ms (layer) to 0.57 ms (slab), while lighting dropped 0.06 ms; net
+     +0.1 ms. iPhone 15 Pro: the clouds span read 7-8.5 ms for off, the
+     layer and the slab alike, and the frame's GPU total was about 52 ms in
+     all three; the mark-based span cannot isolate the clouds there, so
+     the slab's cost is inside that noise, and a phone's fallback ignores
+     the span (thermal state only) until the cloud passes carry their own
+     timestamps. A phone starts at the layer anyway.
 5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
    - Tiling Perlin-Worley 3D noise (generated once, for example with the
      method of sebh/TileableVolumeNoise), Wrenninge octaves, a Beer shadow
