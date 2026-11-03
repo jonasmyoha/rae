@@ -71,9 +71,9 @@ func serializeSettingsState(settingsState: view SettingsState, editor: view Bool
   )} latitude={settingsState.latitude} longitude={settingsState.longitude} yearSpeed={settingsState.timeOfDay.yearSpeed} weather={settingsState.weatherOverride.toString()} wind={settingsState.windOverride.toString()} weatherValues={settingsWeatherValuesText(
     values: settingsState.values
   )}"
-  let rendering: String = "toon={settingsFlag(value: settingsState.toon)} shadows={settingsFlag(
-    value: settingsState.shadows
-  )} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
+  let rendering: String = "toon={settingsFlag(value: settingsState.toon)} volumetricClouds={settingsFlag(
+    value: settingsState.volumetricClouds
+  )} shadows={settingsFlag(value: settingsState.shadows)} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
   let light: String = "sky={settingsState.skyModel.toString()} sunLux={settingsState.sunNoonLux} exposure={settingsState.exposureCompensation} autoExposure={settingsFlag(
     value: settingsState.autoExposure
   )} moon={settingsFlag(value: settingsState.moon)} moons={settingsState.moonCount} eclipse={settingsState.eclipse}"
@@ -168,6 +168,8 @@ func restoreSettingsState(
       settingsState.scene = Math.clamp(val: value.toInt(), low: 1, high: settingsState.sceneCount)
     } else if name is "toon" {
       settingsState.toon = flag
+    } else if name is "volumetricClouds" and not settingsEnvSets(name: "RAE_VOLUMETRIC_CLOUDS") {
+      settingsState.volumetricClouds = flag
     } else if name is "shadows" {
       settingsState.shadows = flag
     } else if name is "antialias" {
