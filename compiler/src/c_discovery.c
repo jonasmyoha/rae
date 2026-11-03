@@ -416,6 +416,10 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             // registered and its calls hit undeclared symbols in the C.
             if (ctx->has_expected_type && ctx->expected_type.generic_args) {
                 const AstTypeRef* elem_type = ctx->expected_type.generic_args;
+                /* Inside a specialization the literal's element is the
+                 * concrete argument, not the template's `T` */
+                if (ctx->generic_params && ctx->generic_args)
+                    elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                 const AstFuncDecl* create_fd = NULL;
                 const AstFuncDecl* add_fd = NULL;
                 // The LAST generic createList / add in list order, as the scan found
@@ -517,6 +521,14 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                         Str loc_base = get_base_type_name(type);
                         const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
                         const AstTypeRef* elem_type = type->generic_args;
+                        /* Inside a specialization the element is the concrete
+                         * argument: a `List(T)` local of a generic body,
+                         * instantiated with Holder, needs List's drop for
+                         * Holder. Registered for the template's `T`, the drop
+                         * was declared nowhere and defined after its caller
+                         * (an undeclared rae_core_List_drop_rae_Holder_...). */
+                        if (elem_type && ctx->generic_params && ctx->generic_args)
+                            elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                         if (drop_fd && elem_type) {
                             register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
                         }
