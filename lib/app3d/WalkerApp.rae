@@ -560,6 +560,15 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         )
       )
     }
+    # RAE_WALKER_WEATHER_VALUES sets the weather's numbers by hand, as the
+    # panel's sliders do: cloud, rain, snow, mist, wind and storm,
+    # comma-separated ("1,0,0,0,5,0": a full cover, no rain, a breeze)
+    let weatherValues: String = Sys.getEnv(name: "RAE_WALKER_WEATHER_VALUES")
+    if weatherValues.length() > 0 {
+      settingsWeatherValuesRestore(values: settingsState.values, text: weatherValues)
+      settingsState.weatherOverride = SettingsWeather.custom
+      settingsState.windOverride = SettingsWind.custom
+    }
     # RAE_WEATHER_WIND overrides the wind (auto, calm, breeze, strong,
     # gale; app3d/SettingsWind), as the panel's buttons do
     let windSetting: String = Sys.getEnv(name: "RAE_WEATHER_WIND")
