@@ -12,12 +12,23 @@
 # means it has no dependency on the windowing backend or on any
 # particular Viewport shape.
 #
+# The world's reserved insets (setReservedInsets: a band a host keeps for its
+# own bar) are added to them, so every SafeArea node lays out inside both the
+# screen's safe area and the host's band.
+#
 # See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, item 2).
 import Gpu2d
 open ecs/ComponentTable
 open ui/UiSystems
 
 func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view Insets) {
+  # the screen's insets plus the host's reserved band
+  let total: Insets = {
+    l: insets.l + world.reservedInsets.l
+    t: insets.t + world.reservedInsets.t
+    r: insets.r + world.reservedInsets.r
+    b: insets.b + world.reservedInsets.b
+  }
   unsafe {
     let alive: view List(EntityId) = world.allocator.alive
     let n: Int = alive.length
@@ -34,13 +45,13 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
         var changed: Bool = true
         if componentHas(this: uiSystems.safeArea.safeInsets, entityId: e) {
           let cur: view SafeInsets = componentView(this: uiSystems.safeArea.safeInsets, entityId: e)
-          if equals(a: cur.insets, b: insets) {
+          if equals(a: cur.insets, b: total) {
             changed = false
           }
         }
         if changed {
           let payload: SafeInsets = {
-            insets: Insets { l: insets.l, t: insets.t, r: insets.r, b: insets.b }
+            insets: Insets { l: total.l, t: total.t, r: total.r, b: total.b }
           }
           componentSet(this: uiSystems.safeArea.safeInsets, entityId: e, data: payload)
         }
@@ -81,4 +92,23 @@ func setSimulatedSafeInsets(world: mod UiWorld, insets: view Insets) {
 
 func clearSimulatedSafeInsets(world: mod UiWorld) {
   world.safeInsetsSimulated = false
+}
+
+# Keep a band for the host on top of the safe area (`insets` in the world's
+# layout units: points for a world laid out in points), as a host that draws
+# its own bar along the top of every screen does. Every SafeArea node then
+# lays out inside both. The next safe-area step writes the new insets, which
+# reruns the layout (the layout step reads the safe insets' generation);
+# zero insets give the band back.
+func setReservedInsets(world: mod UiWorld, insets: view Insets) {
+  world.reservedInsets = Insets { l: insets.l, t: insets.t, r: insets.r, b: insets.b }
+}
+
+func reservedInsets(world: view UiWorld) ret Insets {
+  ret Insets {
+    l: world.reservedInsets.l
+    t: world.reservedInsets.t
+    r: world.reservedInsets.r
+    b: world.reservedInsets.b
+  }
 }

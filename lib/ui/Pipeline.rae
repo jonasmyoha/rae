@@ -148,8 +148,10 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
   # layoutSystem — the set LayoutCache tracked. Deliberately NOT declared as
   # reads (as before): the outputs measuredSizes/computedRects (tracking them
   # would re-dirty the entry on its own first run), and extentAnchors /
-  # safeAreas / safeInsets, which are set at build and ride the rebuild that
-  # already dirties rects.
+  # safeAreas, which are set at build and ride the rebuild that already
+  # dirties rects. The safe insets (uiSystems.safeArea.safeInsets, written
+  # only when they change: a rotation, a reserved band) are an extra
+  # generation of this entry, below.
   uiRegister(
     schedule: schedule
     world: world
@@ -316,7 +318,7 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
 # are no longer world fields the declared sets can name, so what each stage
 # reads of them is listed here by hand, next to the declarations above:
 #   every stage after layout: computedRects; plus per stage —
-#   input: worldTransforms, interactions      layout: parents, measuredTexts
+#   input: worldTransforms, interactions      layout: parents, measuredTexts, safeInsets
 #   camera: runtimeOffsets                    transform: parents, runtimeOffsets
 #   animFrames: animStates                    animTrigger: interactions, animStates
 #   smokeFx: smokeStates                      carousel: worldTransforms, carouselStates
@@ -338,7 +340,9 @@ func uiSystemsReadGeneration(uiSystems: view UiSystems, index: view Int) ret Int
     ret componentTableGeneration(this: uiSystems.safeArea.safeInsets)
   }
   if index is uiSystemLayout {
-    ret parents + componentTableGeneration(this: uiSystems.layout.measuredTexts)
+    ret parents + componentTableGeneration(this: uiSystems.layout.measuredTexts) + componentTableGeneration(
+      this: uiSystems.safeArea.safeInsets
+    )
   }
   if index is uiSystemCamera {
     ret rects + runtimeOffsets
