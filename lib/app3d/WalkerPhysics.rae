@@ -272,9 +272,51 @@ func spawnPhysicsCube(
   halfSize: view Float
   color: view Vec3
 ) ret EntityId {
+  ret spawnCubeOfType(
+    physicsSystem: physicsSystem
+    allocator: allocator
+    transforms: transforms
+    center: center
+    halfSize: halfSize
+    color: color
+    bodyType: BodyType.dynamicBody
+  )
+}
+
+# A kinematic cube: it stays where its Transform3D puts it (gravity and
+# bumps do not move it) and pushes what it meets as it moves or turns; a
+# game drives it by writing the Transform3D (docs/walker-kit.md)
+func spawnKinematicCube(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+) ret EntityId {
+  ret spawnCubeOfType(
+    physicsSystem: physicsSystem
+    allocator: allocator
+    transforms: transforms
+    center: center
+    halfSize: halfSize
+    color: color
+    bodyType: BodyType.kinematicBody
+  )
+}
+
+func spawnCubeOfType(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+  bodyType: view BodyType
+) ret EntityId {
   let entityId: EntityId = allocEntity(this: allocator)
   var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
-  bodyDef.bodyType = BodyType.dynamicBody
+  bodyDef.bodyType = bodyType
   bodyDef.position = center
   let bodyId: BodyId = spawnRigidBody(
     physics: physicsSystem.physics
