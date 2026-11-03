@@ -248,3 +248,64 @@ func sessionTakeWelcome(player: mod SessionPlayer, message: view List(UInt8)) re
   player.welcomed = true
   ret true
 }
+
+# ----- slots keyed by the relay's peer id (host migration) ---------------------
+#
+# Behind lib/net/relay a player's peer id is vouched for by the relay (it
+# knows the player by its address and gave it the id). A host that keys its
+# slots by that id can be replaced: the new host rebuilds the slots from
+# the replicated entities' owners (`sessionRestoreSlot`), and a player who
+# reconnects to it is recognized by its peer id, not by a token the new
+# host never saw (docs/replication.md, "Host migration").
+
+# Take a player's hello as relay peer `peerId`: its token's slot if the token
+# matches, else the slot of that peer id (restored after a migration, or
+# already this peer's), else a new slot with id `peerId`
+func sessionTakeHelloFromPeer(
+  host: mod SessionHost
+  message: view List(UInt8)
+  peerId: view Int
+  nowMs: view Int
+) ret JoinResult {
+  if message.length < 1 + sessionTokenBytes or readU8(bytes: message, offset: 0) is not sessionMessageHello {
+    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+  }
+  let index: Int = sessionSlotIndex(host: host, slotId: peerId)
+  if index >= 0 {
+    if let slot: mod PlayerSlot = host.slots.modAt(index: index) {
+      slot.connected = true
+      if slot.token.length is not sessionTokenBytes {
+        slot.token.addDefaults(count: sessionTokenBytes - slot.token.length)
+        let filled: Bool = secureRandomFill(bytes: slot.token, start: 0, count: sessionTokenBytes)
+      }
+    }
+    ret JoinResult { kind: JoinKind.resumed, slotIndex: index }
+  }
+  let result: JoinResult = sessionTakeHello(host: host, message: message, nowMs: nowMs)
+  if result.kind is JoinKind.joined {
+    if let slot: mod PlayerSlot = host.slots.modAt(index: result.slotIndex) {
+      slot.slotId = peerId
+    }
+  }
+  ret result
+}
+
+# A slot for peer `peerId` that already has its entity (the new host after a
+# migration, from its replicated copy): not connected until the player says
+# hello, freed after the grace period if it never does
+func sessionRestoreSlot(
+  host: mod SessionHost
+  peerId: view Int
+  entityId: view EntityId
+  netId: view Int
+  nowMs: view Int
+) {
+  host.slots.add(value: PlayerSlot {
+    slotId: peerId
+    token: {}
+    connected: false
+    disconnectedAtMs: nowMs
+    entityId: entityId
+    netId: netId
+  })
+}

@@ -71,13 +71,17 @@ Byte 0 is the kind. Integers are big-endian.
 | 207 keepAlive | both ways | nothing |
 | 208 leave | client -> relay | nothing |
 | 209 peerLeft | relay -> host | peer id (4) |
-| 210 closed | relay -> player | nothing |
+| 210 closed | relay -> player | nothing (the host went and no player was left, or migration is off) |
 | 211 introduce | relay -> host, player | the other side's peer id (4), secret (8), address (23: family, high, low, port, scope) |
 | 212 punch | client -> client, direct | secret (8), sender's peer id (4) |
 | 213 punchAck | client -> client, direct | secret (8), sender's peer id (4) |
 | 214 direct | client -> client, direct | sender's peer id (4), payload (a forward that skipped the relay) |
 
-`open` and `join` may end with one more byte, 1 = relay only.
+`open` and `join` may end with two more bytes: relay only (1), then the
+device (1 desktop, 2 mobile), which the host-migration rule uses. When the
+host goes, kind 215 `hostChanged` (the promoted player's former peer id)
+goes to every peer of the session; see docs/replication.md, "Host
+migration".
 
 The host is peer 0, and players are 1, 2, ... in the order they joined. A
 player forwards only to its host. A client ignores datagrams that come

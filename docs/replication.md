@@ -1,4 +1,4 @@
-# Entity replication (networking 7/12, 8/12, 9/12)
+# Entity replication (networking 7/12-10/12)
 
 `lib/net/replication`: the host's ECS World is the truth, and each player
 keeps a copy of the part of it near the player. The layer runs over
@@ -202,6 +202,65 @@ lib/net/BadNetwork at 5% loss, 30 ms each way and 10 ms jitter:
 - **Worlds.** Every second, every connected world is compared with the
   host's snapshot at the tick the player last applied. That is about 140
   comparisons, with no mismatch.
+
+## Host migration (10/12)
+
+When the host quits or drops, the session goes on.
+
+1. **The relay notices.** The host's peer times out (the relay's
+   `peerTimeoutMs`) or leaves. With `RelayConfig.migrateHost` on (the
+   default) and a player still there, the relay does not close the session.
+   It promotes a player by one fixed rule: a desktop first
+   (`RelayClientConfig.device`, sent with the join), then the player
+   connected longest, which is the lowest peer id. The relay is the one
+   deciding, so all players agree on the outcome.
+2. **The successor becomes peer 0.** Every player's traffic to the host
+   therefore reaches it with no change on their side. Everyone, including
+   the successor, gets `hostChanged` with the successor's former peer id,
+   sent twice in case one is lost. The successor is then introduced to each
+   player for a direct path (6/12).
+3. **The successor takes over** from its own replicated copy:
+   - its World is the last state it applied;
+   - `relayHostFromPlayer` turns its relay client into a host's;
+   - `replicationHostTakeOver` continues net ids after the largest it has
+     seen, so a new entity never reuses an id;
+   - player slots are rebuilt from each entity's `Replicated.owner`, the
+     relay peer id of the player that controls it (`sessionRestoreSlot`).
+4. **The others reconnect** through the relay (`relayPlayerReconnect`, a
+   fresh `ReplicationPlayer`). Their hello is recognized by their relay
+   peer id (`sessionTakeHelloFromPeer`), not by a token the new host never
+   saw. The relay vouches for that id, because it knows each player by its
+   address. Each gets its own entity back and a whole snapshot.
+
+What only the old host had, and what becomes of it:
+
+| state | where it lived | after a migration |
+|---|---|---|
+| player slots and rejoin tokens | `SessionHost` | rebuilt from `Replicated.owner` (relay peer ids); new tokens are issued at the next welcome |
+| the next net id | `ReplicationHost.nextNetId` | rebuilt: the largest net id in the copy + 1 |
+| snapshot history, acks, per-player visibility | `ReplicationHost`, `ReplicaPeer` | dropped: every player reconnects and gets a whole snapshot |
+| pending inputs not yet applied | `ReplicaPeer.inputs` | lost (at most one round trip of input); the players' prediction resends nothing, and the new host's state is the truth |
+| the old host's own entity | its world, `owner` -1 | removed by the new host (that player left) |
+| game state that is not replicated (AI plans, timers, random seeds, anything the app keeps outside replicated components) | the app | must be replicated as components to survive (the fixture's `Wander` holds the wanderers' motion), or rebuilt by the new host from what is replicated. The layer cannot know it: this is the app's list |
+| entities outside the successor's interest radius | nowhere on the successor | lost. A game that needs them gives its likely successors an interest radius that covers the world (the fixture does), or replicates them to every player |
+| the old host's direct paths | its socket | gone; the relay introduces the successor to each player |
+
+Measured in fixture `1280_host_migration`: a relay, a host and three
+players over loopback UDP in one process, the relay's peer timeout 1.5 s,
+player 2 the only desktop. The host is killed (not stepped again, its
+socket closed). The relay promotes player 2 over player 1, who had been
+connected longer. All three are playing again about 1.6 s after the kill
+(the timeout plus about 100 ms; the fixture's bound is 3 s):
+
+- every player has its own entity back, with the same net id;
+- every world holds the same entities as the new host's (the old host's
+  own entity is gone);
+- the wanderers go on from where they were;
+- a new entity gets a net id nobody had used.
+
+Not tested yet: the same with the host as a separate process killed with
+a signal (queued). The relay already treats a killed host exactly as this
+fixture does: its packets stop.
 
 ## Not yet
 

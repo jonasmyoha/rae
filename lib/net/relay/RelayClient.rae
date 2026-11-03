@@ -56,6 +56,9 @@ enum RelayIncomingKind {
   peerLeft
   # Player: the session is over
   sessionClosed
+  # The host went and the player whose former peer id is `peerId` is the
+  # host now (peer 0). If that is this side, `client.peerId` is now 0.
+  hostChanged
 }
 
 enum DirectPathState {
@@ -101,6 +104,9 @@ type RelayClientConfig {
   punchTimeoutMs: Int
   # A direct path that heard nothing for this long goes back to the relay
   directSilenceMs: Int
+  # What this side runs on (deviceDesktop, deviceMobile): a desktop is
+  # preferred as the next host when the host goes
+  device: Int
 }
 
 type RelayClient {
@@ -130,6 +136,9 @@ type RelayClient {
   directPacketsReceived: Int
   # Paths that fell back to the relay
   fallbacks: Int
+  # The former peer id of the last player promoted to host (the relay sends
+  # the notice twice; peer ids are never reused in a session)
+  promotedPeerId: Int
 }
 
 func defaultRelayClientConfig() ret RelayClientConfig {
@@ -142,6 +151,7 @@ func defaultRelayClientConfig() ret RelayClientConfig {
     punchIntervalMs: 50
     punchTimeoutMs: 1500
     directSilenceMs: 3000
+    device: deviceUnknown
   }
 }
 
@@ -177,6 +187,7 @@ func createRelayClient(
     directPacketsSent: 0
     directPacketsReceived: 0
     fallbacks: 0
+    promotedPeerId: -1
   }
 }
 
@@ -240,7 +251,10 @@ func sendRequest(client: mod RelayClient, nowMs: view Int) {
   }
   if client.config.relayOnly {
     writeU8(bytes: client.outbox, value: 1)
+  } else {
+    writeU8(bytes: client.outbox, value: 0)
   }
+  writeU8(bytes: client.outbox, value: client.config.device)
   client.lastRequestMs = nowMs
   let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
 }
@@ -557,6 +571,24 @@ func relayClientReceive(client: mod RelayClient, nowMs: view Int) ret RelayIncom
           peerId: readU32(bytes: client.inbox, offset: 1)
           start: forwardHeaderBytes
           count: length - forwardHeaderBytes
+        }
+      }
+    } else if kind is relayKindHostChanged and length >= 5 {
+      # Twice from the relay: only the first is news
+      let formerPeerId: Int = readU32(bytes: client.inbox, offset: 1)
+      if formerPeerId is not client.promotedPeerId {
+        client.promotedPeerId = formerPeerId
+        # The direct path to the old host is gone with it
+        removePath(client: client, peerId: hostPeerId)
+        if formerPeerId is client.peerId {
+          client.peerId = hostPeerId
+          client.paths.clear()
+        }
+        ret RelayIncoming {
+          kind: RelayIncomingKind.hostChanged
+          peerId: formerPeerId
+          start: 0
+          count: 0
         }
       }
     } else if kind is relayKindIntroduce {

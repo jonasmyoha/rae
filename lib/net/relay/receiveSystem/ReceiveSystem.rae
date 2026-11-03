@@ -71,6 +71,7 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
     tokenHigh: 0
     tokenLow: 0
     relayOnly: false
+    device: deviceUnknown
   }
   if kind is relayKindLeave {
     if isNone(this: peerEntityId) {
@@ -80,6 +81,9 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
   } else if kind is relayKindOpen and length >= 5 {
     request.requestId = readU32(bytes: server.inbox, offset: 1)
     request.relayOnly = length >= 6 and readU8(bytes: server.inbox, offset: 5) is not 0
+    if length >= 7 {
+      request.device = readU8(bytes: server.inbox, offset: 6)
+    }
   } else if kind is relayKindJoin and length >= 5 + relayTokenBytes {
     request.requestId = readU32(bytes: server.inbox, offset: 1)
     request.tokenHigh = readHalf(bytes: server.inbox, offset: 5)
@@ -88,6 +92,9 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
       bytes: server.inbox
       offset: 5 + relayTokenBytes
     ) is not 0
+    if length >= 7 + relayTokenBytes {
+      request.device = readU8(bytes: server.inbox, offset: 6 + relayTokenBytes)
+    }
   } else {
     dropped(server: server)
     ret

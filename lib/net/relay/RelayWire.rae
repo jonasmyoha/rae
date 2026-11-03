@@ -22,8 +22,10 @@
 #   punchAck  secret (8), sender's peer id (4)
 #   direct    sender's peer id (4), payload (a forward that skipped the relay)
 #
-# open and join may end with one more byte: 1 = relay only (this side's
-# address is never given to the other side, so no direct path is tried).
+# open and join may end with two more bytes: relay only (1: this side's
+# address is never given to the other side, so no direct path is tried),
+# then the device (deviceDesktop, deviceMobile) for the host-migration rule.
+#   hostChanged relay -> all  the promoted player's former peer id (4)
 #
 # The host is peer 0; players are 1, 2, ... in the order they joined. A
 # player forwards only to the host, the host to any of its players. The
@@ -59,6 +61,18 @@ const relayKindPunch: Int = 212
 const relayKindPunchAck: Int = 213
 
 const relayKindDirect: Int = 214
+
+# relay -> every peer of a session whose host went: the promoted player's
+# former peer id (4); it is peer 0 from now on
+const relayKindHostChanged: Int = 215
+
+# What a client runs on (the last byte of open / join): the host-migration
+# rule prefers a desktop
+const deviceUnknown: Int = 0
+
+const deviceDesktop: Int = 1
+
+const deviceMobile: Int = 2
 
 # Refusal reasons
 const refusedUnknownSession: Int = 1

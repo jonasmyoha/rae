@@ -1,0 +1,37 @@
+# `equals(a:, b:)` with a call's result as an operand frees that result
+# after the statement, as `is` does: it kept one List per call (found by
+# networking 10/12's host-migration fixture). Leak-checked at exit.
+type Point {
+  x: Int
+  label: String
+}
+
+func makeList(first: view Int) ret List(Int) {
+  ret List(Int) { first, 2 }
+}
+
+func makePoint(x: view Int) ret Point {
+  ret Point { x: x, label: "p" }
+}
+
+func main() ret Int {
+  let other: List(Int) = { 1, 2 }
+  var same: Int = 0
+  loop var i: Int = 0, i < 50, ++i {
+    if equals(a: makeList(first: 1), b: other) {
+      same = same + 1
+    }
+    if equals(a: makePoint(x: i), b: makePoint(x: 3)) {
+      same = same + 100
+    }
+  }
+  log("lists equal 50 times and points once: {same is 150}")
+  log(
+    "both sides calls {equals(a: makeList(first: 3), b: makeList(first: 3))}, different {equals(
+      a: makeList(first: 3)
+      b: makeList(first: 4)
+    )}"
+  )
+  log("scalars and strings as before: {equals(a: 2, b: 2)} {equals(a: "a", b: "b")}")
+  ret 0
+}

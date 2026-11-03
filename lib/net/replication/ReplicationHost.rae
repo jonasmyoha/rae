@@ -279,3 +279,23 @@ func replicaSetPoint(
     )
   }
 }
+
+# A host built from a player's replicated copy (host migration): its net ids
+# continue after the largest one the copy holds, so a new entity never takes
+# an id the players already know. Everything else of the old host's (its
+# snapshot ring, the players' acks and inputs) is not needed: every player
+# reconnects and gets a whole snapshot first.
+func replicationHostTakeOver(
+  config: view ReplicationConfig
+  replicated: view ComponentTable(Replicated)
+) ret ReplicationHost {
+  var host: ReplicationHost = createReplicationHost(config: config)
+  loop var i: Int = 0, i < componentCount(this: replicated), ++i {
+    if let value: Replicated = componentCopyAt(this: replicated, i: i) {
+      if value.netId >= host.nextNetId {
+        host.nextNetId = value.netId + 1
+      }
+    }
+  }
+  ret host
+}

@@ -221,6 +221,8 @@ func echoesOf(scene: view Scene, index: view Int) ret String {
 func main() ret Int {
   var config: RelayConfig = defaultRelayConfig()
   config.peerTimeoutMs = 1500
+  # This case tests a session closing with its host (1280 tests migration)
+  config.migrateHost = false
   var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
   log("relay: {relay.udpSocket.status}")
   let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address

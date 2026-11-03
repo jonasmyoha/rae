@@ -35,6 +35,10 @@ type RelayPlayer {
   connection: Connection
   # The relay said the session is over
   sessionClosed: Bool
+  # The relay said the host went and another player took over (the app
+  # reconnects, or, when `client.peerId` is now 0, becomes the host); the
+  # app sets it back to false
+  hostChanged: Bool
   packet: List(UInt8)
 }
 
@@ -61,6 +65,7 @@ func createRelayPlayer(
     client: createRelayClient(relayAddress: relayAddress, config: clientConfig)
     connection: createConnection(config: connectionConfig)
     sessionClosed: false
+    hostChanged: false
     packet: List.create(UInt8, cap: relayDatagramBytes)
   }
 }
@@ -177,6 +182,8 @@ func relayPlayerReceive(player: mod RelayPlayer, nowMs: view Int) {
     }
     if incoming.kind is RelayIncomingKind.sessionClosed {
       player.sessionClosed = true
+    } else if incoming.kind is RelayIncomingKind.hostChanged {
+      player.hostChanged = true
     } else if incoming.kind is RelayIncomingKind.packet and incoming.peerId is hostPeerId {
       let taken: Bool = connectionReadPacket(
         connection: player.connection
@@ -212,4 +219,34 @@ func relayPlayerSend(player: mod RelayPlayer, nowMs: view Int) {
 # goodbye matters)
 func relayPlayerLeave(player: mod RelayPlayer, nowMs: view Int) {
   relayClientLeave(client: player.client, nowMs: nowMs)
+}
+
+# ----- host migration -----------------------------------------------------------
+
+# The relay promoted this player to host: the same relay client (same socket,
+# now peer 0) as a RelayHost with no players yet. The player's connection to
+# the old host is dropped; the others connect to this side anew.
+func relayHostFromPlayer(
+  player: view RelayPlayer
+  connectionConfig: view ConnectionConfig
+) ret RelayHost {
+  ret RelayHost {
+    client: player.client
+    connectionConfig: connectionConfig
+    peers: {}
+    peersLeft: {}
+    packet: List.create(UInt8, cap: relayDatagramBytes)
+  }
+}
+
+# Another player is host now: a new connection to it (peer 0 again, through
+# the same relay client)
+func relayPlayerReconnect(
+  player: mod RelayPlayer
+  connectionConfig: view ConnectionConfig
+  connectionId: view Int
+  nowMs: view Int
+) {
+  player.connection = createConnection(config: connectionConfig)
+  connectionConnect(connection: player.connection, connectionId: connectionId, nowMs: nowMs)
 }
