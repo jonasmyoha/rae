@@ -44,3 +44,51 @@ int64_t rae_ext_SecureRandom_getEntropy(uint8_t* buffer, int64_t offset, int64_t
   return getentropy(buffer + offset, (size_t)count) == 0 ? 0 : -errno;
 }
 #endif
+
+/* ChaCha20-Poly1305 and X25519 through the vendored Monocypher
+ * (compiler/runtime/monocypher.c, included by rae_runtime.c in every build:
+ * native and the browser's). lib/crypto's Rae code does the same work and
+ * is the reference checked against these (compiler/tests/cases/
+ * 1285_fast_crypto_matches_reference); these are the ones used, being
+ * about twice as fast for a 1200-byte packet and twenty times for X25519
+ * (AGENTS.md: the faster implementation wins).
+ *
+ * Reason for the C: a faster established library (Monocypher, CC0). Each
+ * function is one library operation over buffers Rae sized; no policy. */
+
+/* Seal `count` bytes of `plain` from `plainOffset` under the 32-byte key at
+ * `key + keyOffset` and the 12-byte `nonce` (RFC 8439), covering `adCount`
+ * bytes of `ad` from `adOffset`: the ciphertext then the 16-byte tag at
+ * `out + outOffset` */
+void rae_ext_Crypto_aeadSeal(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad,
+                             int64_t adOffset, int64_t adCount, uint8_t* plain,
+                             int64_t plainOffset, int64_t count, uint8_t* out, int64_t outOffset) {
+  crypto_aead_ctx context;
+  crypto_aead_init_ietf(&context, key + keyOffset, nonce);
+  crypto_aead_write(&context, out + outOffset, out + outOffset + count,
+                    adCount > 0 ? ad + adOffset : NULL, (size_t)adCount,
+                    count > 0 ? plain + plainOffset : NULL, (size_t)count);
+  crypto_wipe(&context, sizeof(context));
+}
+
+/* Open `count` bytes of ciphertext at `sealed + sealedOffset`, its tag right
+ * after them: 0 and the plaintext at `out + outOffset`, or -1 when the tag
+ * does not match (nothing written) */
+int64_t rae_ext_Crypto_aeadOpen(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad,
+                                int64_t adOffset, int64_t adCount, uint8_t* sealed,
+                                int64_t sealedOffset, int64_t count, uint8_t* out,
+                                int64_t outOffset) {
+  crypto_aead_ctx context;
+  crypto_aead_init_ietf(&context, key + keyOffset, nonce);
+  int mismatch = crypto_aead_read(&context, out + outOffset, sealed + sealedOffset + count,
+                                  adCount > 0 ? ad + adOffset : NULL, (size_t)adCount,
+                                  count > 0 ? sealed + sealedOffset : NULL, (size_t)count);
+  crypto_wipe(&context, sizeof(context));
+  return mismatch ? -1 : 0;
+}
+
+/* X25519 of the 32-byte scalar and point into the 32 bytes at `out` */
+void rae_ext_Crypto_x25519(uint8_t* out, int64_t outOffset, uint8_t* scalar, int64_t scalarOffset,
+                           uint8_t* point, int64_t pointOffset) {
+  crypto_x25519(out + outOffset, scalar + scalarOffset, point + pointOffset);
+}

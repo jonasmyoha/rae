@@ -501,11 +501,8 @@ func aeadTag(
   polyFinish(chacha: chacha)
 }
 
-# Seal `plainCount` bytes of `plain` from `plainStart` under `key` (32 bytes
-# from `keyStart`) and the 12-byte `nonce`, covering the additional data:
-# appends the ciphertext and the 16-byte tag to `output` (which must not be
-# one of the inputs)
-func aeadSeal(
+# The Rae reference of aeadSeal (what the fast path is checked against)
+func aeadSealReference(
   chacha: mod ChaChaState
   key: view List(UInt8)
   keyStart: view Int
@@ -550,11 +547,8 @@ func aeadSeal(
   }
 }
 
-# Open `sealedCount` bytes of `sealed` from `sealedStart` (ciphertext and
-# tag): true and the plaintext appended to `output` when the tag matches;
-# false, and nothing appended, when the bytes or the additional data were
-# changed, or the key or nonce is not the one that sealed them
-func aeadOpen(
+# The Rae reference of aeadOpen
+func aeadOpenReference(
   chacha: mod ChaChaState
   key: view List(UInt8)
   keyStart: view Int
@@ -608,5 +602,144 @@ func aeadOpen(
     count: cipherCount
     output: output
   )
+  ret true
+}
+
+# ----- the fast path ------------------------------------------------------------
+#
+# The sealing used everywhere is Monocypher's (compiler/runtime/
+# runtime_crypto_platform.c), linked into every build, native and the
+# browser's: about twice as fast as the Rae code above, which stays as the
+# reference it is checked against (compiler/tests/cases/
+# 1285_fast_crypto_matches_reference). `chacha` is kept in the signatures
+# for the reference; the fast path needs no state.
+func nativeAeadSeal(
+  key: Buffer(UInt8)
+  keyOffset: Int
+  nonce: Buffer(UInt8)
+  additional: Buffer(UInt8)
+  additionalOffset: Int
+  additionalCount: Int
+  plain: Buffer(UInt8)
+  plainOffset: Int
+  count: Int
+  out: Buffer(UInt8)
+  outOffset: Int
+) unsafe extern("rae_ext_Crypto_aeadSeal")
+
+func nativeAeadOpen(
+  key: Buffer(UInt8)
+  keyOffset: Int
+  nonce: Buffer(UInt8)
+  additional: Buffer(UInt8)
+  additionalOffset: Int
+  additionalCount: Int
+  sealed: Buffer(UInt8)
+  sealedOffset: Int
+  count: Int
+  out: Buffer(UInt8)
+  outOffset: Int
+) unsafe extern("rae_ext_Crypto_aeadOpen") ret Int
+
+# Whether `count` bytes from `start` lie inside `bytes`
+func spanInside(bytes: view List(UInt8), start: view Int, count: view Int) ret Bool {
+  ret start >= 0 and count >= 0 and start + count <= bytes.length
+}
+
+# Seal `plainCount` bytes of `plain` from `plainStart` under `key` (32 bytes
+# from `keyStart`) and the 12-byte `nonce`, covering the additional data:
+# appends the ciphertext and the 16-byte tag to `output` (which must not be
+# one of the inputs). Nothing is appended for a key, nonce or span out of
+# range.
+func aeadSeal(
+  chacha: mod ChaChaState
+  key: view List(UInt8)
+  keyStart: view Int
+  nonce: view List(UInt8)
+  additional: view List(UInt8)
+  additionalStart: view Int
+  additionalCount: view Int
+  plain: view List(UInt8)
+  plainStart: view Int
+  plainCount: view Int
+  output: mod List(UInt8)
+) {
+  if not spanInside(bytes: key, start: keyStart, count: aeadKeyBytes) or nonce.length < aeadNonceBytes or not spanInside(
+    bytes: additional
+    start: additionalStart
+    count: additionalCount
+  ) or not spanInside(bytes: plain, start: plainStart, count: plainCount) {
+    ret
+  }
+  let outStart: Int = output.length
+  output.addDefaults(count: plainCount + aeadTagBytes)
+  unsafe {
+    nativeAeadSeal(
+      key: key.data
+      keyOffset: keyStart
+      nonce: nonce.data
+      additional: additional.data
+      additionalOffset: additionalStart
+      additionalCount: additionalCount
+      plain: plain.data
+      plainOffset: plainStart
+      count: plainCount
+      out: output.data
+      outOffset: outStart
+    )
+  }
+}
+
+# Open `sealedCount` bytes of `sealed` from `sealedStart` (ciphertext and
+# tag): true and the plaintext appended to `output` when the tag matches;
+# false, and nothing appended, when the bytes or the additional data were
+# changed, or the key or nonce is not the one that sealed them
+func aeadOpen(
+  chacha: mod ChaChaState
+  key: view List(UInt8)
+  keyStart: view Int
+  nonce: view List(UInt8)
+  additional: view List(UInt8)
+  additionalStart: view Int
+  additionalCount: view Int
+  sealed: view List(UInt8)
+  sealedStart: view Int
+  sealedCount: view Int
+  output: mod List(UInt8)
+) ret Bool {
+  let cipherCount: Int = sealedCount - aeadTagBytes
+  if cipherCount < 0 or not spanInside(bytes: sealed, start: sealedStart, count: sealedCount) or not spanInside(
+    bytes: key
+    start: keyStart
+    count: aeadKeyBytes
+  ) or nonce.length < aeadNonceBytes or not spanInside(
+    bytes: additional
+    start: additionalStart
+    count: additionalCount
+  ) {
+    ret false
+  }
+  let outStart: Int = output.length
+  output.addDefaults(count: cipherCount)
+  var answer: Int = -1
+  unsafe {
+    answer = nativeAeadOpen(
+      key: key.data
+      keyOffset: keyStart
+      nonce: nonce.data
+      additional: additional.data
+      additionalOffset: additionalStart
+      additionalCount: additionalCount
+      sealed: sealed.data
+      sealedOffset: sealedStart
+      count: cipherCount
+      out: output.data
+      outOffset: outStart
+    )
+  }
+  if answer is not 0 {
+    output.truncate(len: outStart)
+    ret false
+  }
   ret true
 }
