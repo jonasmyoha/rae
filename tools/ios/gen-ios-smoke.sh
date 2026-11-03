@@ -16,6 +16,9 @@
 #   - Info.plist gets NSLocalNetworkUsageDescription and NSBonjourServices
 #     only when RAE_IOS_LOCAL_NETWORK_USAGE / RAE_IOS_BONJOUR_SERVICES ask,
 #     and Bonjour without the text, or a malformed service type, is refused.
+#   - Info.plist gets NSLocationWhenInUseUsageDescription only when
+#     RAE_IOS_LOCATION_USAGE asks, and an app without lib/Location does not
+#     link CoreLocation.
 # Needs the compiler and the two iOS xcframeworks, like gen-ios.sh.
 set -eu
 
@@ -72,12 +75,18 @@ check "the staging holds no other project file" \
   '[ "$(find "$gen/bundle/assets" -type f | wc -l | tr -d " ")" = "1" ]'
 check "no local network key unless asked" '! grep -q "NSLocalNetworkUsageDescription" "$gen/CMakeLists.txt"'
 check "no Bonjour key unless asked" '! grep -q "NSBonjourServices" "$gen/CMakeLists.txt"'
+check "no location key unless asked" '! grep -q "NSLocationWhenInUseUsageDescription" "$gen/CMakeLists.txt"'
+check "CoreLocation is not linked by an app without lib/Location" '! grep -q "CoreLocation" "$gen/CMakeLists.txt"'
 
 # the local network permission, asked for
 export RAE_IOS_LOCAL_NETWORK_USAGE="Sync talks to your Mac on this network."
 export RAE_IOS_BONJOUR_SERVICES="_sumu._tcp _sumu._udp"
+export RAE_IOS_LOCATION_USAGE="The weather is shown for where you are."
 generate
-unset RAE_IOS_LOCAL_NETWORK_USAGE RAE_IOS_BONJOUR_SERVICES
+unset RAE_IOS_LOCAL_NETWORK_USAGE RAE_IOS_BONJOUR_SERVICES RAE_IOS_LOCATION_USAGE
+check "the location text is in Info.plist" \
+  'grep -q "<key>NSLocationWhenInUseUsageDescription</key><string>The weather is shown for where you are.</string>" "$gen/CMakeLists.txt"'
+
 check "the local network text is in Info.plist" \
   'grep -q "<key>NSLocalNetworkUsageDescription</key><string>Sync talks to your Mac on this network.</string>" "$gen/CMakeLists.txt"'
 check "the Bonjour services are in Info.plist" \

@@ -102,6 +102,14 @@ set, so other apps are unchanged:
     RAE_IOS_LOCAL_NETWORK_USAGE="Sync talks to your Mac on this network." \
       RAE_IOS_BONJOUR_SERVICES="_sumu._tcp" sh tools/ios/gen-ios.sh <project>
 
+**The location.** An app that uses lib/Location (docs/location.md) needs
+`RAE_IOS_LOCATION_USAGE`, the text iOS shows when it asks for the location
+("The weather is shown for where you are."); gen-ios.sh refuses to generate
+such an app without it, since iOS would never ask and App Store Connect
+refuses the build. It is written as `NSLocationWhenInUseUsageDescription`
+whenever it is set, and CoreLocation is linked only for an app that uses
+lib/Location.
+
 `sh tools/ios/gen-ios-smoke.sh` checks both keys (absent by default, present
 when set, the bad combinations refused) along with the staged assets. Like
 gen-ios.sh it needs Xcode's iOS SDK: with only the Command Line Tools
