@@ -14,7 +14,7 @@ const maxSnapshotParts: Int = 64
 # Take one message from the host: false when it is not a snapshot part (the
 # app's own message)
 func replicaReceiveSystem(player: mod ReplicationPlayer, message: view List(UInt8)) ret Bool {
-  if message.length < 11 or readU8(bytes: message, offset: 0) is not replicaMessageSnapshot {
+  if message.length < 19 or readU8(bytes: message, offset: 0) is not replicaMessageSnapshot {
     ret false
   }
   player.bytesReceived = player.bytesReceived + message.length
@@ -22,6 +22,8 @@ func replicaReceiveSystem(player: mod ReplicationPlayer, message: view List(UInt
   let baseTick: Int = readU32(bytes: message, offset: 5)
   let partIndex: Int = readU8(bytes: message, offset: 9)
   let partCount: Int = readU8(bytes: message, offset: 10)
+  let ownNetId: Int = readU32(bytes: message, offset: 11)
+  let appliedInputTick: Int = readU32(bytes: message, offset: 15)
   if tick <= player.latestTick or partCount < 1 or partCount > maxSnapshotParts or partIndex >= partCount {
     ret true
   }
@@ -38,6 +40,8 @@ func replicaReceiveSystem(player: mod ReplicationPlayer, message: view List(UInt
       baseTick: baseTick
       partCount: partCount
     )
+    player.assemblingOwn = ownNetId
+    player.assemblingApplied = appliedInputTick
   }
   if player.partHas.copyAtFallback(index: partIndex, fallback: true) {
     ret true
@@ -49,8 +53,8 @@ func replicaReceiveSystem(player: mod ReplicationPlayer, message: view List(UInt
     appendCopy(
       destination: part
       source: message
-      start: 11
-      count: message.length - 11
+      start: 19
+      count: message.length - 19
     )
   }
   if player.partsHave is player.partCount {
@@ -156,6 +160,17 @@ func rebuild(player: mod ReplicationPlayer) {
   }
   player.snapshots.set(index: slot, value: own fresh)
   player.latestTick = tick
+  # What this snapshot says about the player itself: its own entity, and
+  # which of its inputs the host had applied (the rest are still pending)
+  player.ownNetId = -1
+  if player.assemblingOwn is not 4294967295 {
+    player.ownNetId = player.assemblingOwn
+  }
+  if player.assemblingApplied is not 4294967295 {
+    player.hostAppliedInputTick = player.assemblingApplied
+    dropAppliedInputs(player: player)
+  }
+  player.ownSnapshotFresh = true
   player.assemblingTick = -1
   player.snapshotsRebuilt = player.snapshotsRebuilt + 1
 }

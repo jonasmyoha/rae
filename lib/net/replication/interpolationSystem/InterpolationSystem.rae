@@ -1,0 +1,270 @@
+# The player's interpolation system (lib/net/replication, docs/replication.md):
+# draws the OTHER entities a little in the past, between two snapshots it
+# already has, so they move smoothly although snapshots come only every
+# `snapshotIntervalMs`, late by a varying amount (jitter), or not at all
+# (loss).
+#
+# The player estimates the host's snapshot clock (`replicaAdvanceClock`,
+# once a frame): it runs at the snapshot rate and is steered gently toward
+# the newest snapshot that arrived, so jitter does not make it jump. The
+# render time is that clock minus `interpolationDelayTicks` (2 by default):
+# usually two snapshots behind, so the snapshot after the render time has
+# normally arrived. `applyReplicaTableInterpolated` then sets each other
+# entity's component from the snapshots just before and just after the
+# render time: Float, Vec3 and Quat values are blended, Int and Bool values
+# are the earlier snapshot's. The player's own entity is skipped (it is
+# predicted, lib/net/replication/predictionSystem).
+open ecs/Entity
+open ecs/ComponentTable
+open Vec3
+open Quat
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationPlayer
+
+# Move the clock estimate to `nowMs`
+func replicaAdvanceClock(player: mod ReplicationPlayer, nowMs: view Int) {
+  if player.latestTick < 0 {
+    ret
+  }
+  let target: Float = player.latestTick as Float
+  if not player.clockStarted {
+    player.clockTick = target
+    player.clockMs = nowMs
+    player.clockStarted = true
+    ret
+  }
+  let interval: Float = player.config.snapshotIntervalMs as Float
+  var advanced: Float = player.clockTick + ((nowMs - player.clockMs) as Float) / interval
+  let error: Float = target - advanced
+  if error > 3.0 or error < -3.0 {
+    # Far off (the start, a long stall): jump
+    advanced = target
+  } else {
+    # Near: a small share of the difference per frame, so jitter in the
+    # arrival times only bends the clock's speed a little
+    advanced = advanced + error * 0.05
+  }
+  player.clockTick = advanced
+  player.clockMs = nowMs
+}
+
+# The snapshot tick (a fraction) the other entities are drawn at
+func replicaRenderTick(player: view ReplicationPlayer) ret Float {
+  ret player.clockTick - player.config.interpolationDelayTicks
+}
+
+# Which of T's replicated values are blended (Float, Vec3, Quat parts), in
+# the order ReplicaValues writes them
+func replicaBlendedValues(T: type, value: view T) ret List(Bool) {
+  var blended: List(Bool) = {}
+  loop let field: view Float in fields(value) {
+    blended.add(value: true)
+  }
+  loop let field: view Int in fields(value) {
+    blended.add(value: false)
+  }
+  loop let field: view Bool in fields(value) {
+    blended.add(value: false)
+  }
+  loop let field: view Vec3 in fields(value) {
+    loop var i: Int = 0, i < 3, ++i {
+      blended.add(value: true)
+    }
+  }
+  loop let field: view Quat in fields(value) {
+    loop var i: Int = 0, i < 4, ++i {
+      blended.add(value: true)
+    }
+  }
+  ret blended
+}
+
+# The snapshot of `tick` if the ring still has it
+func snapshotTickAt(player: view ReplicationPlayer, tick: view Int) ret Bool {
+  if tick < 0 or tick > player.latestTick or player.latestTick - tick >= player.config.historySize {
+    ret false
+  }
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(
+    index: playerSlot(player: player, tick: tick)
+  ) {
+    ret snapshot.tick is tick
+  }
+  ret false
+}
+
+# The record of (net id, kind) in the snapshot of `tick`, -1 for none
+func recordAt(
+  player: view ReplicationPlayer
+  tick: view Int
+  netId: view Int
+  kind: view Int
+) ret Int {
+  if not snapshotTickAt(player: player, tick: tick) {
+    ret -1
+  }
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(
+    index: playerSlot(player: player, tick: tick)
+  ) {
+    ret snapshotFind(snapshot: snapshot, netId: netId, kind: kind)
+  }
+  ret -1
+}
+
+func recordValueAt(
+  player: view ReplicationPlayer
+  tick: view Int
+  record: view Int
+  index: view Int
+) ret Int {
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(
+    index: playerSlot(player: player, tick: tick)
+  ) {
+    ret recordValue(snapshot: snapshot, record: record, index: index)
+  }
+  ret 0
+}
+
+# Set table `kind`'s components of the other entities from the snapshots
+# around `renderTick` (a new component starts as a copy of `template`). An
+# entity with a snapshot only before the render time holds its last value;
+# one only after it (it just appeared) takes its first.
+func applyReplicaTableInterpolated(
+  T: type
+  player: mod ReplicationPlayer
+  table: mod ComponentTable(T)
+  kind: view Int
+  template: view T
+  renderTick: view Float
+) {
+  if player.latestTick < 0 {
+    ret
+  }
+  let blended: List(Bool) = replicaBlendedValues(T, value: template)
+  let scale: Float = player.config.floatScale
+  let floorTick: Int = renderTick as Int
+  var values: List(Int) = List.create(Int, cap: blended.length)
+  let latestSlot: Int = playerSlot(player: player, tick: player.latestTick)
+  let latestCount: Int = recordCountOf(player: player, slot: latestSlot)
+  loop var record: Int = 0, record < latestCount, ++record {
+    let netId: Int = recordNetIdOf(player: player, slot: latestSlot, record: record)
+    if recordKindOf(player: player, slot: latestSlot, record: record) is kind and netId is not player.ownNetId {
+      # The newest snapshot at or before the render time, and the oldest after it
+      var before: Int = -1
+      var beforeRecord: Int = -1
+      var tick: Int = floorTick
+      loop before < 0 and tick >= 0 and player.latestTick - tick < player.config.historySize {
+        let found: Int = recordAt(
+          player: player
+          tick: tick
+          netId: netId
+          kind: kind
+        )
+        if found >= 0 {
+          before = tick
+          beforeRecord = found
+        }
+        tick = tick - 1
+      }
+      var after: Int = -1
+      var afterRecord: Int = -1
+      tick = floorTick + 1
+      loop after < 0 and tick <= player.latestTick {
+        let found: Int = recordAt(
+          player: player
+          tick: tick
+          netId: netId
+          kind: kind
+        )
+        if found >= 0 {
+          after = tick
+          afterRecord = found
+        }
+        tick = tick + 1
+      }
+      values.clear()
+      loop var i: Int = 0, i < blended.length, ++i {
+        if before >= 0 and after >= 0 {
+          let from: Int = recordValueAt(
+            player: player
+            tick: before
+            record: beforeRecord
+            index: i
+          )
+          let to: Int = recordValueAt(
+            player: player
+            tick: after
+            record: afterRecord
+            index: i
+          )
+          if blended.copyAtFallback(index: i, fallback: false) {
+            let share: Float = (renderTick - (before as Float)) / ((after - before) as Float)
+            values.add(
+              value: quantize(value: (from as Float) + ((to - from) as Float) * share, scale: 1.0)
+            )
+          } else {
+            values.add(value: from)
+          }
+        } else if before >= 0 {
+          values.add(value: recordValueAt(
+            player: player
+            tick: before
+            record: beforeRecord
+            index: i
+          ))
+        } else if after >= 0 {
+          values.add(value: recordValueAt(
+            player: player
+            tick: after
+            record: afterRecord
+            index: i
+          ))
+        }
+      }
+      let entityId: EntityId = replicaEntityOf(player: player, netId: netId)
+      if values.length is blended.length and not isNone(this: entityId) {
+        if componentHas(this: table, entityId: entityId) {
+          let value: mod T = componentMod(this: table, entityId: entityId)
+          readReplicaValues(
+            T
+            value: value
+            scale: scale
+            values: values
+            start: 0
+          )
+        } else {
+          var fresh: T = template
+          readReplicaValues(
+            T
+            value: fresh
+            scale: scale
+            values: values
+            start: 0
+          )
+          componentSet(this: table, entityId: entityId, data: own fresh)
+        }
+      }
+    }
+  }
+}
+
+func recordCountOf(player: view ReplicationPlayer, slot: view Int) ret Int {
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(index: slot) {
+    ret snapshotRecordCount(snapshot: snapshot)
+  }
+  ret 0
+}
+
+func recordNetIdOf(player: view ReplicationPlayer, slot: view Int, record: view Int) ret Int {
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(index: slot) {
+    ret recordNetId(snapshot: snapshot, record: record)
+  }
+  ret -1
+}
+
+func recordKindOf(player: view ReplicationPlayer, slot: view Int, record: view Int) ret Int {
+  if let snapshot: view ReplicaSnapshot = player.snapshots.viewAt(index: slot) {
+    ret recordKind(snapshot: snapshot, record: record)
+  }
+  ret -1
+}

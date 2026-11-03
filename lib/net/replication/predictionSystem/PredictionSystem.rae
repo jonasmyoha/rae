@@ -1,0 +1,85 @@
+# The player's prediction system (lib/net/replication, docs/replication.md):
+# the player's OWN entity moves at once from its own inputs, not a round
+# trip later. The host still decides: each snapshot carries the own entity's
+# authoritative state and the newest input tick the host had applied, and
+# the player then rebuilds its prediction from that state, replaying the
+# inputs the host had not applied yet (reconciliation).
+#
+# The movement itself is the app's (Rae has no function values to hand it
+# in, and the app knows its game): each frame
+#
+#   if replicaOwnFresh(player) {
+#     applyReplicaOwn(Transform3D, player: ..., table: ..., kind: ..., template: ...)
+#     loop var i: Int = 0, i < replicaPendingCount(player: player), ++i {
+#       let tick: Int = replicaPendingInput(Input, player: player, index: i, input: input)
+#       move(own entity, input)            # the same code the host runs
+#     }
+#     replicaOwnTaken(player: player)
+#   }
+#   move(own entity, this frame's input); replicaSendInput(Input, ...)
+#
+# With the same movement code on both sides, the replayed prediction is
+# exactly what the host will compute once those inputs arrive; it differs
+# only when the host did something the player could not know (a push, a
+# lost input), and then the next snapshot corrects it.
+open ecs/Entity
+open ecs/ComponentTable
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationPlayer
+
+# A snapshot arrived whose own state has not been taken yet
+func replicaOwnFresh(player: view ReplicationPlayer) ret Bool {
+  ret player.ownSnapshotFresh and player.ownNetId >= 0
+}
+
+func replicaOwnTaken(player: mod ReplicationPlayer) {
+  player.ownSnapshotFresh = false
+}
+
+# Set the own entity's table `kind` component to its state in the newest
+# snapshot (the host's word): false when the snapshot has no such record
+func applyReplicaOwn(
+  T: type
+  player: mod ReplicationPlayer
+  table: mod ComponentTable(T)
+  kind: view Int
+  template: view T
+) ret Bool {
+  let entityId: EntityId = replicaEntityOf(player: player, netId: player.ownNetId)
+  if isNone(this: entityId) {
+    ret false
+  }
+  let scale: Float = player.config.floatScale
+  if let latest: view ReplicaSnapshot = player.snapshots.viewAt(
+    index: playerSlot(player: player, tick: player.latestTick)
+  ) {
+    let record: Int = snapshotFind(snapshot: latest, netId: player.ownNetId, kind: kind)
+    if record < 0 {
+      ret false
+    }
+    let start: Int = recordStart(snapshot: latest, record: record)
+    if componentHas(this: table, entityId: entityId) {
+      let value: mod T = componentMod(this: table, entityId: entityId)
+      readReplicaValues(
+        T
+        value: value
+        scale: scale
+        values: latest.values
+        start: start
+      )
+    } else {
+      var fresh: T = template
+      readReplicaValues(
+        T
+        value: fresh
+        scale: scale
+        values: latest.values
+        start: start
+      )
+      componentSet(this: table, entityId: entityId, data: own fresh)
+    }
+    ret true
+  }
+  ret false
+}
