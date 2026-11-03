@@ -3381,6 +3381,7 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
       
       AstEnumMember* member = parser_alloc(parser, sizeof(AstEnumMember));
       member->name = parser_copy_str(parser, member_name->lexeme);
+      member->line = member_name->line;
       member->next = NULL;
       
       if (!head) {
@@ -3402,8 +3403,9 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
     } while (!parser_check(parser, TOK_RBRACE));
   }
   
-  parser_consume(parser, TOK_RBRACE, "expected '}' at end of enum body");
+  const Token* close = parser_consume(parser, TOK_RBRACE, "expected '}' at end of enum body");
   decl->as.enum_decl.members = head;
+  decl->as.enum_decl.end_line = close ? close->line : 0;
   return decl;
 }
 
