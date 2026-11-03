@@ -1,0 +1,133 @@
+# The settings panel's weather numbers (app3d/SettingsWeather over
+# ui/UiValues), without a window: a weather button writes its numbers (the
+# same table its drawn weather comes from), Auto writes the model's every
+# frame and puts the wind back on the model, a slider moved by hand makes
+# the weather or the wind custom at what it holds, and the weather drawn,
+# the air the drops feel, the wet ground and the mist are read from the
+# numbers.
+import Math
+open Weather
+open ui/UiValues
+open app3d/SettingsDialog
+open app3d/SettingsSky
+open app3d/SettingsWeather
+open app3d/SettingsWind
+
+func numbers(values: view UiValues) ret String {
+  ret "cloud {(uiValue(values: values, key: weatherCloudKey, fallback: -1.0) * 100.0 + 0.5).toInt()}%, rain {uiValue(
+    values: values
+    key: weatherRainKey
+    fallback: -1.0
+  )}, snow {uiValue(values: values, key: weatherSnowKey, fallback: -1.0)}, mist {uiValue(
+    values: values
+    key: weatherMistKey
+    fallback: -1.0
+  )}, wind {uiValue(values: values, key: windSpeedKey, fallback: -1.0)}"
+}
+
+func drawn(settingsState: view SettingsState, model: view Weather) ret String {
+  let weather: Weather = settingsWeatherFromValues(
+    values: settingsState.values
+    weather: model
+    override: settingsState.weatherOverride
+    windOverride: settingsState.windOverride
+  )
+  ret "drawn cloud {weather.cloud}, precipitation {weather.precipitation}, wind {weather.windSpeed} gusts {(weather.gustiness * 100.0 + 0.5).toInt()}%, air {settingsValuesAir(
+    values: settingsState.values
+    override: settingsState.weatherOverride
+    air: 10.0
+  )}, wet {settingsValuesWet(
+    values: settingsState.values
+    override: settingsState.weatherOverride
+    wet: 0.0
+  )}, mist factor {settingsValuesMist(
+    values: settingsState.values
+    override: settingsState.weatherOverride
+    factor: 1.0
+  )}"
+}
+
+func main() {
+  var settingsState: SettingsState = createSettingsState(
+    scene: 1
+    sceneCount: 1
+    speed: 1.0
+    toon: false
+    hour: 12.0
+    skyModel: SettingsSkyModel.hosek
+  )
+  let model: Weather = {
+    cloud: 0.35
+    precipitation: 0.0
+    humidity: 0.5
+    windSpeed: 4.0
+    gustiness: 0.5
+  }
+
+  # Auto: the model's numbers, the sliders show them
+  settingsWeatherModelToValues(
+    values: settingsState.values
+    weather: model
+    air: 10.0
+    mistFactor: 2.0
+  )
+  settingsWindModelToValues(values: settingsState.values, weather: model)
+  log("auto: {numbers(values: settingsState.values)}")
+  log("  {drawn(settingsState: settingsState, model: model)}")
+
+  # the buttons
+  let buttons: List(String) = [
+    "cloudy"
+    "rain"
+    "snow"
+    "mist"
+    "clear"
+  ]
+  loop let button: view String in buttons {
+    let handled: Bool = settingsWeatherHandleAction(
+      settingsState: settingsState
+      actionId: "settings.weather.{button}"
+    )
+    log("{button}: {settingsState.weatherOverride}, {numbers(values: settingsState.values)}")
+    log("  {drawn(settingsState: settingsState, model: model)}")
+  }
+
+  # a slider moved by hand: the cloud to 40 %, then the rain
+  let cloudSet: Bool = setUiValue(values: settingsState.values, key: weatherCloudKey, value: 0.4)
+  let cloudHandled: Bool = settingsWeatherHandleAction(
+    settingsState: settingsState
+    actionId: "settings.weather.slider"
+  )
+  let rainSet: Bool = setUiValue(values: settingsState.values, key: weatherRainKey, value: 0.8)
+  log("by hand: {settingsState.weatherOverride}, {numbers(values: settingsState.values)}")
+  log("  {drawn(settingsState: settingsState, model: model)}")
+  # the wind by hand: 12 m/s, the gusts follow
+  let windSet: Bool = setUiValue(values: settingsState.values, key: windSpeedKey, value: 12.0)
+  let windHandled: Bool = settingsWeatherHandleAction(
+    settingsState: settingsState
+    actionId: "settings.wind.slider"
+  )
+  log(
+    "wind by hand: {settingsState.windOverride}, {drawn(settingsState: settingsState, model: model)}"
+  )
+
+  # Auto: the weather and the wind back on the model
+  let autoHandled: Bool = settingsWeatherHandleAction(
+    settingsState: settingsState
+    actionId: "settings.weather.auto"
+  )
+  settingsWeatherModelToValues(
+    values: settingsState.values
+    weather: model
+    air: -4.0
+    mistFactor: 1.0
+  )
+  settingsWindModelToValues(values: settingsState.values, weather: model)
+  log(
+    "auto again: {settingsState.weatherOverride} {settingsState.windOverride}, {drawn(
+      settingsState: settingsState
+      model: model
+    )}"
+  )
+  log("  numbers in a frost: {numbers(values: settingsState.values)}")
+}

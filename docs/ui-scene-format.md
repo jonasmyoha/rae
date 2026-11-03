@@ -601,3 +601,38 @@ scheduled layout reads them (the layout step's input), so a new band, a
 rotation or a new notch lays the screen out again and an idle frame does
 not. Case 1322 checks a header moving down by the notch and then by the
 band, and back.
+
+## 17. `ValueSlider` and `ValueText`: widgets bound to the app's numbers
+
+A slider or a readout shows one named number of a store the app owns
+(`UiValues`, lib/ui/UiValues), and the number lives only there. Whatever
+writes it (a button's handler, the app's own model, a drag) the widgets
+bound to its key show it on the next frame; nothing else keeps them in
+step. Their system is `valueSystem(world, uiSystems, input, values)`
+(lib/ui/valueSystem), run once a frame after `updateUiInput`, before the
+layout; it returns true when it changed a number or what a widget shows.
+
+```json
+"CloudLabel": { "Text": { "text": "Clouds" },
+                "ValueText": { "key": "weather.cloud", "prefix": "Clouds ", "suffix": "%", "scale": 100 } },
+"CloudTrack": { "Shape": { ... }, "Children": ["CloudFill"],
+                "ValueSlider": { "key": "weather.cloud", "min": 0, "max": 1, "actionId": "weather.slider" } },
+"CloudFill":  { "Rect": { "x": 0, "y": 0, "w": 0, "h": 24 }, "Shape": { ... } }
+```
+
+- `ValueSlider` is on the track; its FIRST child is the fill, as wide as
+  the number's share of `[min, max]` of the track's width (written only
+  when it moves). A press on the track jumps the number there and a drag
+  moves it, also past the track's ends, until the release. Each change by
+  hand sends the UI action `actionId` (when set) with the track as its
+  entity, so the app learns that the number is now set by hand.
+- `ValueText` writes its node's text: `prefix`, the number times `scale`
+  with `decimals` decimals, `suffix` (0.7, scale 100, `"%"`: `70%`).
+- The app writes a number with `setUiValue(values:, key:, value:)` and
+  reads it with `uiValue(values:, key:, fallback:)`.
+
+The walkers' settings panel binds its weather sliders this way (Clouds,
+Rain, Snow, Mist, Wind; app3d/SettingsWeather): the weather buttons write
+their numbers, the weather model writes its own on Auto, and the drawn
+weather is read back from them. Cases 1327 (the widgets) and 1328 (the
+weather's numbers).

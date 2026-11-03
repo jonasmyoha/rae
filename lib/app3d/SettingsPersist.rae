@@ -17,6 +17,7 @@ open app3d/SettingsDialog
 open app3d/SettingsSky
 open app3d/SettingsWeather
 open app3d/SettingsWind
+open ui/UiValues
 
 # The HotReload slot of an app's settings
 func settingsStateSlot(appId: view String) ret String {
@@ -67,7 +68,9 @@ func settingsFlag(value: view Bool) ret String {
 func serializeSettingsState(settingsState: view SettingsState, editor: view Bool) ret String {
   let clock: String = "hour={settingsState.timeOfDay.hour} day={settingsState.timeOfDay.dayOfYear} year={settingsState.timeOfDay.year} animateTime={settingsFlag(
     value: settingsState.animateTime
-  )} latitude={settingsState.latitude} longitude={settingsState.longitude} yearSpeed={settingsState.timeOfDay.yearSpeed} weather={settingsState.weatherOverride.toString()} wind={settingsState.windOverride.toString()}"
+  )} latitude={settingsState.latitude} longitude={settingsState.longitude} yearSpeed={settingsState.timeOfDay.yearSpeed} weather={settingsState.weatherOverride.toString()} wind={settingsState.windOverride.toString()} weatherValues={settingsWeatherValuesText(
+    values: settingsState.values
+  )}"
   let rendering: String = "toon={settingsFlag(value: settingsState.toon)} shadows={settingsFlag(
     value: settingsState.shadows
   )} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
@@ -78,6 +81,43 @@ func serializeSettingsState(settingsState: view SettingsState, editor: view Bool
     value: settingsState.open
   )} playing={settingsFlag(value: settingsState.playing)} scene={settingsState.scene}"
   ret "{panel} {rendering} {light} {clock}"
+}
+
+# The weather's numbers on the saved line: cloud, rain, snow, mist and
+# wind, comma-separated (app3d/SettingsWeather settingsWeatherKeys)
+func settingsWeatherValuesText(values: view UiValues) ret String {
+  ret "{uiValue(values: values, key: weatherCloudKey, fallback: 0.0)},{uiValue(
+    values: values
+    key: weatherRainKey
+    fallback: 0.0
+  )},{uiValue(values: values, key: weatherSnowKey, fallback: 0.0)},{uiValue(
+    values: values
+    key: weatherMistKey
+    fallback: 0.0
+  )},{uiValue(values: values, key: windSpeedKey, fallback: 0.0)}"
+}
+
+# The numbers of a saved line back into `values` (a line with fewer is left
+# as it was)
+func settingsWeatherValuesRestore(values: mod UiValues, text: view String) {
+  let parts: List(String) = text.split(sep: ",")
+  if parts.length is not 5 {
+    ret
+  }
+  let keys: List(String) = [
+    weatherCloudKey
+    weatherRainKey
+    weatherSnowKey
+    weatherMistKey
+    windSpeedKey
+  ]
+  loop var i: Int = 0, i < 5, ++i {
+    let changed: Bool = setUiValue(
+      values: values
+      key: keys.copyAtDefault(index: i)
+      value: parts.copyAtDefault(index: i).toFloat()
+    )
+  }
 }
 
 # Is the value `name` set by an environment variable for this run
@@ -136,11 +176,18 @@ func restoreSettingsState(
         name: value
         fallback: settingsState.weatherOverride
       )
+      settingsWeatherPresetToValues(
+        values: settingsState.values
+        override: settingsState.weatherOverride
+      )
     } else if name is "wind" {
       settingsState.windOverride = settingsWindNamed(
         name: value
         fallback: settingsState.windOverride
       )
+      settingsWindPresetToValues(values: settingsState.values, override: settingsState.windOverride)
+    } else if name is "weatherValues" {
+      settingsWeatherValuesRestore(values: settingsState.values, text: value)
     } else if name is "exposure" {
       settingsState.exposureCompensation = value.toFloat()
     } else if name is "autoExposure" {

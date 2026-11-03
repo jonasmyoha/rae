@@ -1,0 +1,45 @@
+# ui/UiValues — named numbers an app's widgets show and change: the store a
+# ValueSlider drags and a ValueText prints (ui/ValueComponents; their system
+# is ui/valueSystem). The app owns the store, a resource on its own state
+# (passed to valueSystem as ScrollMemory is passed to scrollRootSystem), and
+# it is the one place the value lives: whatever writes it (a preset button's
+# handler, the app's model, a drag) the widgets bound to its key show it on
+# the next frame, with no other call.
+#
+#     var values: UiValues = createUiValues()
+#     setUiValue(values: values, key: "weather.cloud", value: 0.7)
+#     "Clouds": { "Children": ["CloudsFill"], "ValueSlider": { "key": "weather.cloud" } }
+open ecs/Entity
+open collections/StringMap
+
+type UiValues {
+  values: StringMap(Float)
+  # bumped by every change, so a system can tell a frame with none
+  generation: Int = 0
+  # the ValueSlider being dragged (none between drags)
+  dragging: EntityId = noEntity()
+}
+
+func createUiValues() ret UiValues {
+  ret UiValues { values: StringMap.create(Float, cap: 16) }
+}
+
+# The value at `key`, `fallback` when none was set
+func uiValue(values: view UiValues, key: view String, fallback: view Float) ret Float {
+  if let value: Float = values.values.get(k: key) {
+    ret value
+  }
+  ret fallback
+}
+
+# Set `key` to `value`; true when it changed (the store's generation moves)
+func setUiValue(values: mod UiValues, key: view String, value: view Float) ret Bool {
+  if let current: Float = values.values.get(k: key) {
+    if current is value {
+      ret false
+    }
+  }
+  values.values.set(k: "{key}", value: value)
+  values.generation = values.generation + 1
+  ret true
+}
