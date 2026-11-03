@@ -413,6 +413,12 @@ func settingsWeatherPick(settingsState: mod SettingsState, override: view Settin
 # Apply a weather, wind or year-speed action id to `settingsState`; true when it
 # changed something
 func settingsWeatherHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  # the ray-marched clouds (the slab and the volumetric tiers) on or off;
+  # off, only the 2D layer is drawn (app3d/SettingsClouds)
+  if actionId is "settings.clouds.volumetric" {
+    settingsState.volumetricClouds = settingsState.volumetricClouds is false
+    ret true
+  }
   # a slider moved by hand: the weather's numbers (or the wind's) are set
   # by hand from now on, at what the slider now holds
   if actionId is "settings.weather.slider" {
@@ -481,6 +487,11 @@ func settingsWeatherToWorld(world: mod UiWorld, settingsState: view SettingsStat
       )
     )
   }
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsCloudVolumeButton"
+    slot: settingsWeatherSlot(on: settingsState.volumetricClouds)
+  )
   setNodeFillSlot(
     world: world
     nodeId: "SettingsYearReal"

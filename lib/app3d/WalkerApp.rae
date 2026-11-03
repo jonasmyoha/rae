@@ -512,6 +512,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       skyModel: settingsSkyFromEnv(fallback: SettingsSkyModel.hosek)
     )
     settingsState.timeOfDay.daySeconds = walkerDaySeconds
+    # the ray-marched clouds are off until the panel's button turns them on
+    # (RAE_VOLUMETRIC_CLOUDS=1 starts with them on, for screenshots)
+    settingsState.volumetricClouds = Sys.getEnv(name: "RAE_VOLUMETRIC_CLOUDS") is "1"
     # The walker's camera a half stop darker than the meter says, so the
     # real-strength sun's noon does not wash out the sunlit sand (the
     # settings panel's Exposure row starts here)
@@ -747,7 +750,11 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         frameLogOn: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
         # the walkers ask for every cloud tier; the device, the quality and
         # the fallback lower it (lib/CloudTier)
-        clouds: createWalkerClouds(settings: CloudSettings {}, quality: settingsState.quality)
+        clouds: createWalkerClouds(
+          settings: CloudSettings {}
+          quality: settingsState.quality
+          volumetric: settingsState.volumetricClouds
+        )
         statsLogged: false
         windSettings: windSettings
         wind: createWindState(settings: windSettings)

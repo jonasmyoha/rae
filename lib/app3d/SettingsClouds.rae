@@ -66,16 +66,36 @@ func settingsQualityCloudSteps(quality: view SettingsQuality) ret Int {
 
 # The walkers' clouds at the start: the game's ceiling `settings`, this
 # device, the quality setting, or RAE_CLOUD_TIER (logged once)
+# The tier the settings allow: the quality step's, and only the 2D layer
+# while the ray-marched clouds are off (the panel's "Volumetric clouds"
+# button, off by default)
+func settingsCloudTierAllowed(
+  quality: view SettingsQuality
+  volumetric: view Bool
+  maxTier: view CloudTier
+) ret CloudTier {
+  let tier: CloudTier = settingsQualityCloudTier(quality: quality, maxTier: maxTier)
+  if volumetric {
+    ret tier
+  }
+  ret cloudTierLower(first: tier, second: CloudTier.layer)
+}
+
 func createWalkerClouds(
   settings: view CloudSettings
   quality: view SettingsQuality
+  volumetric: view Bool
 ) ret WalkerClouds {
   ret WalkerClouds {
     settings: settings
     control: createCloudTierControl(
       settings: settings
       mobile: walkerCloudDeviceMobile()
-      qualityTier: settingsQualityCloudTier(quality: quality, maxTier: settings.maxTier)
+      qualityTier: settingsCloudTierAllowed(
+        quality: quality
+        volumetric: volumetric
+        maxTier: settings.maxTier
+      )
       forcedName: Sys.getEnv(name: "RAE_CLOUD_TIER")
     )
     seenSamples: 0
@@ -112,10 +132,15 @@ func walkerCloudsFrame(
   clouds: mod WalkerClouds
   renderer: mod DeferredRenderer
   quality: view SettingsQuality
+  volumetric: view Bool
 ) {
   let qualityChanged: Bool = cloudTierSetQuality(
     control: clouds.control
-    qualityTier: settingsQualityCloudTier(quality: quality, maxTier: clouds.settings.maxTier)
+    qualityTier: settingsCloudTierAllowed(
+      quality: quality
+      volumetric: volumetric
+      maxTier: clouds.settings.maxTier
+    )
   )
   let fellBack: Bool = cloudTierFrame(
     control: clouds.control
