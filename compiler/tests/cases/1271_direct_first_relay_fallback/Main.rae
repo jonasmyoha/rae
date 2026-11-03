@@ -1,0 +1,326 @@
+# lib/net/relay: direct first, the relay as a fallback (docs/relay.md,
+# "Direct first"). On loopback every "public" address works, so the direct
+# path opens; a lib/net/BadNetwork with 100% loss on the direct path stands
+# in for a NAT that will not let punches through, and forces the fallback.
+# Relay-only on either side means no introduction at all (the address stays
+# hidden). A direct path that dies later falls back to the relay too.
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/Connection
+open net/BadNetwork
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/RelayConnections
+open net/relay/Relay
+
+type Pair {
+  host: RelayHost
+  player: RelayPlayer
+  message: List(UInt8)
+  hostReceived: Int
+  echoes: Int
+  outOfOrder: Int
+  sent: Int
+}
+
+func clientConfig(relayOnly: view Bool) ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.keepAliveMs = 150
+  config.punchTimeoutMs = 600
+  config.directSilenceMs = 800
+  config.relayOnly = relayOnly
+  ret config
+}
+
+func createPair(
+  relayAddress: view NetAddress
+  hostRelayOnly: view Bool
+  playerRelayOnly: view Bool
+) ret Pair {
+  ret Pair {
+    host: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: clientConfig(relayOnly: hostRelayOnly)
+      connectionConfig: defaultConnectionConfig()
+    )
+    player: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: clientConfig(relayOnly: playerRelayOnly)
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    hostReceived: 0
+    echoes: 0
+    outOfOrder: 0
+    sent: 0
+  }
+}
+
+# One frame of everything: the relay, the host echoing, the player counting
+func step(relay: mod RelayServer, pair: mod Pair, startMs: view Int) {
+  let now: Int = nowMs() - startMs
+  relayFrame(server: relay)
+  relayHostReceive(host: pair.host, nowMs: now)
+  loop var i: Int = 0, i < pair.host.peers.length, ++i {
+    if let peer: mod HostPeer = pair.host.peers.modAt(index: i) {
+      loop connectionReceive(connection: peer.connection, message: pair.message) is MessageChannel.reliable {
+        pair.hostReceived = pair.hostReceived + 1
+        let echoed: Bool = connectionSendReliable(
+          connection: peer.connection
+          bytes: pair.message
+          start: 0
+          count: pair.message.length
+        )
+      }
+    }
+  }
+  relayHostSend(host: pair.host, nowMs: now)
+  relayPlayerReceive(player: pair.player, nowMs: now)
+  loop connectionReceive(connection: pair.player.connection, message: pair.message) is MessageChannel.reliable {
+    if readU32(bytes: pair.message, offset: 0) is not pair.echoes {
+      pair.outOfOrder = pair.outOfOrder + 1
+    }
+    pair.echoes = pair.echoes + 1
+  }
+  relayPlayerSend(player: pair.player, nowMs: now)
+  sleep(ms: 1)
+}
+
+# Open, join and connect (at most 5 s)
+func start(relay: mod RelayServer, pair: mod Pair, startMs: view Int) {
+  relayClientOpen(client: pair.host.client, nowMs: nowMs() - startMs)
+  let limit: Int = nowMs() + 5000
+  loop nowMs() < limit and not relayClientIsReady(client: pair.host.client) {
+    step(relay: relay, pair: pair, startMs: startMs)
+  }
+  let joined: Bool = relayPlayerJoin(
+    player: pair.player
+    tokenText: relayTokenText(token: pair.host.client.token)
+    connectionId: 4000 + pair.host.client.requestId bitand 1023
+    nowMs: nowMs() - startMs
+  )
+  loop nowMs() < limit and not (connectionIsConnected(connection: pair.player.connection) and pair.host.peers.length is 1) {
+    step(relay: relay, pair: pair, startMs: startMs)
+  }
+}
+
+# Run until the paths are no longer punching (or `limitMs` passed)
+func settle(
+  relay: mod RelayServer
+  pair: mod Pair
+  startMs: view Int
+  limitMs: view Int
+) {
+  let limit: Int = nowMs() + limitMs
+  loop nowMs() < limit and (pathOfPlayer(pair: pair) is DirectPathState.punching or pathOfHost(
+    pair: pair
+  ) is DirectPathState.punching) {
+    step(relay: relay, pair: pair, startMs: startMs)
+  }
+}
+
+# Send `count` more numbered messages and wait for their echoes (at most 5 s)
+func exchange(
+  relay: mod RelayServer
+  pair: mod Pair
+  startMs: view Int
+  count: view Int
+) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.clear()
+    writeU32(bytes: bytes, value: pair.sent)
+    let queued: Bool = connectionSendReliable(
+      connection: pair.player.connection
+      bytes: bytes
+      start: 0
+      count: bytes.length
+    )
+    pair.sent = pair.sent + 1
+  }
+  let limit: Int = nowMs() + 5000
+  loop nowMs() < limit and pair.echoes < pair.sent {
+    step(relay: relay, pair: pair, startMs: startMs)
+  }
+}
+
+# The player's view of its path to the host, and the host's of its player
+func pathOfPlayer(pair: view Pair) ret DirectPathState {
+  ret relayClientPathState(client: pair.player.client, peerId: hostPeerId)
+}
+
+func pathOfHost(pair: view Pair) ret DirectPathState {
+  ret relayClientPathState(client: pair.host.client, peerId: pair.player.client.peerId)
+}
+
+func report(
+  name: view String
+  relay: view RelayServer
+  pair: view Pair
+  forwardedBefore: view Int
+) {
+  let forwarded: Int = relay.stats.packetsForwarded - forwardedBefore
+  log(
+    "{name}: player path {pathOfPlayer(pair: pair)}, host path {pathOfHost(pair: pair)}, echoes {pair.echoes}/{pair.sent} (out of order {pair.outOfOrder}), relay forwarded during the exchange: {forwarded > 0}"
+  )
+}
+
+func main() ret Int {
+  var config: RelayConfig = defaultRelayConfig()
+  var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let startMs: Int = nowMs()
+
+  # Both sides may go direct: the punches meet, the traffic skips the relay
+  var direct: Pair = createPair(
+    relayAddress: relayAddress
+    hostRelayOnly: false
+    playerRelayOnly: false
+  )
+  start(relay: relay, pair: direct, startMs: startMs)
+  settle(
+    relay: relay
+    pair: direct
+    startMs: startMs
+    limitMs: 3000
+  )
+  var before: Int = relay.stats.packetsForwarded
+  exchange(
+    relay: relay
+    pair: direct
+    startMs: startMs
+    count: 30
+  )
+  report(
+    name: "direct"
+    relay: relay
+    pair: direct
+    forwardedBefore: before
+  )
+  log(
+    "direct: packets came straight to the player {direct.player.client.directPacketsReceived > 0} and to the host {direct.host.client.directPacketsReceived > 0}, the relay introduced them {relay.stats.introduced >= 1}"
+  )
+
+  # The direct path is blocked both ways (a NAT that drops the punches): no
+  # ack within punchTimeoutMs, both sides stay on the relay
+  var blocked: Pair = createPair(
+    relayAddress: relayAddress
+    hostRelayOnly: false
+    playerRelayOnly: false
+  )
+  var lossy: BadNetworkSettings = goodNetworkSettings()
+  lossy.lossPercent = 100
+  blocked.host.client.directNetwork = createBadNetwork(
+    settings: lossy
+    maxPacketBytes: 1300
+    capacity: 64
+  )
+  blocked.player.client.directNetwork = createBadNetwork(
+    settings: lossy
+    maxPacketBytes: 1300
+    capacity: 64
+  )
+  start(relay: relay, pair: blocked, startMs: startMs)
+  settle(
+    relay: relay
+    pair: blocked
+    startMs: startMs
+    limitMs: 3000
+  )
+  before = relay.stats.packetsForwarded
+  exchange(
+    relay: relay
+    pair: blocked
+    startMs: startMs
+    count: 30
+  )
+  report(
+    name: "blocked"
+    relay: relay
+    pair: blocked
+    forwardedBefore: before
+  )
+  log(
+    "blocked: the player fell back {blocked.player.client.fallbacks}, the host {blocked.host.client.fallbacks}, punches sent {blocked.player.client.directPacketsSent > 0}, none arrived {blocked.host.client.directPacketsReceived is 0}"
+  )
+
+  # A host that hides its address: never introduced, all through the relay
+  let introducedBefore: Int = relay.stats.introduced
+  var hiddenHost: Pair = createPair(
+    relayAddress: relayAddress
+    hostRelayOnly: true
+    playerRelayOnly: false
+  )
+  start(relay: relay, pair: hiddenHost, startMs: startMs)
+  before = relay.stats.packetsForwarded
+  exchange(
+    relay: relay
+    pair: hiddenHost
+    startMs: startMs
+    count: 30
+  )
+  report(
+    name: "relay-only host"
+    relay: relay
+    pair: hiddenHost
+    forwardedBefore: before
+  )
+  log(
+    "relay-only host: the player knows no host address {hiddenHost.player.client.paths.length is 0}, no introduction {relay.stats.introduced is introducedBefore}"
+  )
+
+  # A player that hides its address: the same
+  var hiddenPlayer: Pair = createPair(
+    relayAddress: relayAddress
+    hostRelayOnly: false
+    playerRelayOnly: true
+  )
+  start(relay: relay, pair: hiddenPlayer, startMs: startMs)
+  before = relay.stats.packetsForwarded
+  exchange(
+    relay: relay
+    pair: hiddenPlayer
+    startMs: startMs
+    count: 30
+  )
+  report(
+    name: "relay-only player"
+    relay: relay
+    pair: hiddenPlayer
+    forwardedBefore: before
+  )
+  log(
+    "relay-only player: the host knows no player address {hiddenPlayer.host.client.paths.length is 0}, no introduction {relay.stats.introduced is introducedBefore}"
+  )
+
+  # The direct pair's path dies (the host's packets stop getting through):
+  # after directSilenceMs both sides go back to the relay, and nothing is lost
+  direct.host.client.directNetwork = createBadNetwork(
+    settings: lossy
+    maxPacketBytes: 1300
+    capacity: 64
+  )
+  let silenceLimit: Int = nowMs() + 5000
+  loop nowMs() < silenceLimit and (pathOfPlayer(pair: direct) is DirectPathState.direct or pathOfHost(
+    pair: direct
+  ) is DirectPathState.direct) {
+    step(relay: relay, pair: direct, startMs: startMs)
+  }
+  before = relay.stats.packetsForwarded
+  exchange(
+    relay: relay
+    pair: direct
+    startMs: startMs
+    count: 30
+  )
+  report(
+    name: "direct path died"
+    relay: relay
+    pair: direct
+    forwardedBefore: before
+  )
+  closeRelayServer(server: relay)
+  ret 0
+}

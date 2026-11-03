@@ -36,6 +36,9 @@ type Player {
 func clientConfig() ret RelayClientConfig {
   var config: RelayClientConfig = defaultRelayClientConfig()
   config.keepAliveMs = 150
+  # Everything through the relay: this case tests the relay itself (1271
+  # tests the direct path and the fallback)
+  config.relayOnly = true
   ret config
 }
 

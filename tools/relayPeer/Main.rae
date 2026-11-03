@@ -12,6 +12,8 @@
 #       prints "token T" and "direct port D" and echoes every payload back,
 #       through the relay and on a plain UDP socket
 #   relayPeer bench-player --relay-port P --token T --direct-port D
+# Every mode takes --relay-only (no direct path; the bench uses it, so it
+# measures the relay)
 #       measures round trips through the relay and directly, then the
 #       relay's throughput with 64 round trips in flight
 open net/Tcp
@@ -34,6 +36,22 @@ func argumentAfter(name: view String, fallback: view String) ret String {
   ret fallback
 }
 
+func hasArgument(name: view String) ret Bool {
+  loop var i: Int = 0, i < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The client settings: --relay-only keeps every packet on the relay
+func clientConfigArgument() ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.relayOnly = hasArgument(name: "--relay-only")
+  ret config
+}
+
 func relayAddressArgument() ret NetAddress {
   let port: Int = argumentAfter(name: "--relay-port", fallback: "7777").toInt()
   ret resolveAddress(host: "127.0.0.1", port: port).address
@@ -48,7 +66,7 @@ func runHost() ret Int {
   let seconds: Int = argumentAfter(name: "--seconds", fallback: "10").toInt()
   var host: RelayHost = createRelayHost(
     relayAddress: relayAddressArgument()
-    clientConfig: defaultRelayClientConfig()
+    clientConfig: clientConfigArgument()
     connectionConfig: defaultConnectionConfig()
   )
   let startMs: Int = nowMs()
@@ -100,7 +118,7 @@ func runPlayer() ret Int {
   sleep(ms: startAfterMs)
   var player: RelayPlayer = createRelayPlayer(
     relayAddress: relayAddressArgument()
-    clientConfig: defaultRelayClientConfig()
+    clientConfig: clientConfigArgument()
     connectionConfig: defaultConnectionConfig()
   )
   let startMs: Int = nowMs()
@@ -161,7 +179,13 @@ func runPlayer() ret Int {
   } else if player.sessionClosed {
     ending = "session closed"
   }
-  log("player {player.client.peerId}: echoes {echoes}/{count}, out of order {outOfOrder}, {ending}")
+  var path: String = "relay"
+  if relayClientPathState(client: player.client, peerId: hostPeerId) is DirectPathState.direct {
+    path = "direct"
+  }
+  log(
+    "player {player.client.peerId}: echoes {echoes}/{count}, out of order {outOfOrder}, {ending}, path {path}"
+  )
   ret 0
 }
 
@@ -169,7 +193,7 @@ func runBenchHost() ret Int {
   let seconds: Int = argumentAfter(name: "--seconds", fallback: "20").toInt()
   var client: RelayClient = createRelayClient(
     relayAddress: relayAddressArgument()
-    config: defaultRelayClientConfig()
+    config: clientConfigArgument()
   )
   var direct: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
   if let port: Int = socketLocalPort(socketId: direct.socketId) {
@@ -345,7 +369,7 @@ func runBenchPlayer() ret Int {
   let directPort: Int = argumentAfter(name: "--direct-port", fallback: "0").toInt()
   var client: RelayClient = createRelayClient(
     relayAddress: relayAddressArgument()
-    config: defaultRelayClientConfig()
+    config: clientConfigArgument()
   )
   let startMs: Int = nowMs()
   let joining: Bool = relayClientJoin(client: client, tokenText: token, nowMs: 0)

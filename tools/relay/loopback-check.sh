@@ -1,8 +1,9 @@
 #!/bin/sh
 # The relay with every side in its own process, on loopback (docs/relay.md):
-# a relay, a host and three players exchange messages through it, one
-# player leaves, one joins late; then the relay's added latency and its
-# throughput are measured against direct UDP.
+# a relay, a host and four players exchange messages (each player finds a
+# direct path to the host through the relay's introduction, as loopback
+# always allows), one player leaves, one joins late; then, relay-only, the
+# relay's added latency and its throughput are measured against direct UDP.
 #
 #   sh tools/relay/loopback-check.sh        (from the repository root)
 #
@@ -90,7 +91,7 @@ for who in player1 player2 player3 player4; do
   line=$(grep "^player" "$WORK/$who.log")
   echo "$who: ${line:-no result}"
   case "$line" in
-    *"echoes 200/200, out of order 0"*) ;;
+    *"echoes 200/200, out of order 0"*"path direct"*) ;;
     *) status=1 ;;
   esac
 done
@@ -103,11 +104,11 @@ case "$host_line" in
 esac
 
 # Latency and throughput through the relay, against direct UDP
-start "$WORK/benchHost.log" "$WORK/relayPeer" bench-host --relay-port "$PORT" --seconds 12
+start "$WORK/benchHost.log" "$WORK/relayPeer" bench-host --relay-port "$PORT" --seconds 12 --relay-only
 BENCH_TOKEN=$(wait_line "$WORK/benchHost.log" "^token " | awk '{print $2}') || exit 1
 DIRECT=$(wait_line "$WORK/benchHost.log" "^direct port" | awk '{print $NF}') || exit 1
 run_with_timeout 30 "$WORK/relayPeer" bench-player --relay-port "$PORT" --token "$BENCH_TOKEN" \
-  --direct-port "$DIRECT" >"$WORK/benchPlayer.log" 2>&1 || status=1
+  --direct-port "$DIRECT" --relay-only >"$WORK/benchPlayer.log" 2>&1 || status=1
 cat "$WORK/benchPlayer.log"
 for pid in $PIDS; do
   kill "$pid" 2>/dev/null

@@ -15,12 +15,22 @@
 #   forward   relay -> client source peer id (4), payload
 #   peerLeft  relay -> host   peer id (4)
 #   closed    relay -> player (nothing): the session ended
+#   introduce relay -> both   peer id (4), secret (8), address (23): the
+#             other side's public address, to try a direct path
+# And the ones that travel the direct path, client to client:
+#   punch     secret (8), sender's peer id (4)
+#   punchAck  secret (8), sender's peer id (4)
+#   direct    sender's peer id (4), payload (a forward that skipped the relay)
+#
+# open and join may end with one more byte: 1 = relay only (this side's
+# address is never given to the other side, so no direct path is tried).
 #
 # The host is peer 0; players are 1, 2, ... in the order they joined. A
 # player forwards only to the host, the host to any of its players. The
 # payload is opaque to the relay (a sealed lib/net/Connection packet), and a
 # client sees only peer ids, never another client's address.
 open net/Wire
+open net/Udp
 
 const relayKindOpen: Int = 201
 
@@ -42,6 +52,14 @@ const relayKindPeerLeft: Int = 209
 
 const relayKindClosed: Int = 210
 
+const relayKindIntroduce: Int = 211
+
+const relayKindPunch: Int = 212
+
+const relayKindPunchAck: Int = 213
+
+const relayKindDirect: Int = 214
+
 # Refusal reasons
 const refusedUnknownSession: Int = 1
 
@@ -53,6 +71,16 @@ const refusedRelayFull: Int = 3
 const relayTokenBytes: Int = 16
 
 const forwardHeaderBytes: Int = 5
+
+# An address in an introduce packet: family (1), high (8), low (8), port
+# (2), scope id (4)
+const addressBytes: Int = 23
+
+# introduce: kind, peer id, secret, address
+const introduceBytes: Int = 13 + addressBytes
+
+# punch / punchAck: kind, secret, peer id
+const punchBytes: Int = 13
 
 # The host's peer id
 const hostPeerId: Int = 0
@@ -142,4 +170,45 @@ func relayTokenFromText(text: view String, token: mod List(UInt8)) ret Bool {
     token.add(value: (high * 16 + low) as UInt8)
   }
   ret true
+}
+
+# The 8-byte big-endian value at `offset` (a secret, an address half)
+func readU64(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret (readU32(bytes: bytes, offset: offset) shl 32) bitor readU32(bytes: bytes, offset: offset + 4)
+}
+
+func writeU64(bytes: mod List(UInt8), value: view Int) {
+  writeU32(bytes: bytes, value: value shr 32)
+  writeU32(bytes: bytes, value: value)
+}
+
+func relayWriteAddress(packet: mod List(UInt8), address: view NetAddress) {
+  var family: Int = 0
+  if address.family is AddressFamily.ipv4 {
+    family = 4
+  } else if address.family is AddressFamily.ipv6 {
+    family = 6
+  }
+  writeU8(bytes: packet, value: family)
+  writeU64(bytes: packet, value: address.high)
+  writeU64(bytes: packet, value: address.low)
+  writeU16(bytes: packet, value: address.port)
+  writeU32(bytes: packet, value: address.scopeId)
+}
+
+func relayReadAddress(bytes: view List(UInt8), offset: view Int) ret NetAddress {
+  let family: Int = readU8(bytes: bytes, offset: offset)
+  var addressFamily: AddressFamily = AddressFamily.none
+  if family is 4 {
+    addressFamily = AddressFamily.ipv4
+  } else if family is 6 {
+    addressFamily = AddressFamily.ipv6
+  }
+  ret NetAddress {
+    family: addressFamily
+    high: readU64(bytes: bytes, offset: offset + 1)
+    low: readU64(bytes: bytes, offset: offset + 9)
+    port: readU16(bytes: bytes, offset: offset + 17)
+    scopeId: readU32(bytes: bytes, offset: offset + 19)
+  }
 }

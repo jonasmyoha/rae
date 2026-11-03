@@ -9,6 +9,7 @@ open net/Udp
 open net/Wire
 open net/relay/RelayWire
 open net/relay/RelayServer
+open crypto/SecureRandom
 
 func sessionSystem(server: mod RelayServer) {
   let count: Int = eventCount(this: server.requests)
@@ -71,7 +72,11 @@ func takeOpen(server: mod RelayServer, request: view RelayRequestEvent) {
     refuse(server: server, request: request, reason: refusedRelayFull)
     ret
   }
-  let sessionEntityId: EntityId = openSession(server: server, address: request.address)
+  let sessionEntityId: EntityId = openSession(
+    server: server
+    address: request.address
+    relayOnly: request.relayOnly
+  )
   if isNone(this: sessionEntityId) {
     refuse(server: server, request: request, reason: refusedRelayFull)
     ret
@@ -83,7 +88,13 @@ func componentCopyOrNone(server: view RelayServer, peerEntityId: view EntityId) 
   if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
     ret peer
   }
-  ret RelayPeer { address: noNetAddress(), sessionEntityId: noEntity(), peerId: -1, lastHeardNs: 0 }
+  ret RelayPeer {
+    address: noNetAddress()
+    sessionEntityId: noEntity()
+    peerId: -1
+    lastHeardNs: 0
+    relayOnly: true
+  }
 }
 
 func takeJoin(server: mod RelayServer, request: view RelayRequestEvent) {
@@ -97,6 +108,7 @@ func takeJoin(server: mod RelayServer, request: view RelayRequestEvent) {
     let peer: RelayPeer = componentCopyOrNone(server: server, peerEntityId: request.peerEntityId)
     if peer.sessionEntityId is sessionEntityId and peer.peerId is not hostPeerId {
       sendJoined(server: server, request: request, peerId: peer.peerId)
+      introduce(server: server, playerEntityId: request.peerEntityId)
     } else {
       server.stats.packetsDropped = server.stats.packetsDropped + 1
     }
@@ -119,7 +131,49 @@ func takeJoin(server: mod RelayServer, request: view RelayRequestEvent) {
     address: request.address
     sessionEntityId: sessionEntityId
     peerId: peerId
+    relayOnly: request.relayOnly
   )
   server.stats.playersJoined = server.stats.playersJoined + 1
   sendJoined(server: server, request: request, peerId: peerId)
+  introduce(server: server, playerEntityId: peerEntityId)
+}
+
+# Give a player and its host each other's public address (as the relay sees
+# it) and a shared random secret, so both can try a direct path (docs/relay.md,
+# "Direct first"). Not when either side asked to stay relay-only. Sent twice:
+# a lost introduce only costs the direct path, but that is worth a packet.
+func introduce(server: mod RelayServer, playerEntityId: view EntityId) {
+  let player: RelayPeer = componentCopyOrNone(server: server, peerEntityId: playerEntityId)
+  if player.relayOnly or not componentHas(this: server.sessions, entityId: player.sessionEntityId) {
+    ret
+  }
+  let session: view RelaySession = componentView(
+    this: server.sessions
+    entityId: player.sessionEntityId
+  )
+  let host: RelayPeer = componentCopyOrNone(server: server, peerEntityId: session.hostEntityId)
+  if host.relayOnly {
+    ret
+  }
+  var secretBytes: List(UInt8) = List.create(UInt8, cap: 8)
+  secretBytes.addDefaults(count: 8)
+  if not secureRandomFill(bytes: secretBytes, start: 0, count: 8) {
+    ret
+  }
+  let secret: Int = readU64(bytes: secretBytes, offset: 0)
+  loop var sending: Int = 0, sending < 2, ++sending {
+    # To the host: the player's address
+    relayWriteKind(packet: server.outbox, kind: relayKindIntroduce)
+    writeU32(bytes: server.outbox, value: player.peerId)
+    writeU64(bytes: server.outbox, value: secret)
+    relayWriteAddress(packet: server.outbox, address: player.address)
+    sendOutbox(server: server, address: host.address)
+    # To the player: the host's address
+    relayWriteKind(packet: server.outbox, kind: relayKindIntroduce)
+    writeU32(bytes: server.outbox, value: hostPeerId)
+    writeU64(bytes: server.outbox, value: secret)
+    relayWriteAddress(packet: server.outbox, address: host.address)
+    sendOutbox(server: server, address: player.address)
+  }
+  server.stats.introduced = server.stats.introduced + 1
 }
