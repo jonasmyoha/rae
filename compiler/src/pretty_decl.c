@@ -567,10 +567,38 @@ static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_newline(pp);
 }
 
+/* Whether a source comment lies strictly inside the enum's braces */
+static bool pp_enum_has_comment(const PrettyPrinter* pp, const AstDecl* decl) {
+  size_t end_line = decl->as.enum_decl.end_line;
+  for (size_t i = pp->next_comment_idx; i < pp->comment_count; i++) {
+    size_t line = pp->comments[i].line;
+    if (line >= end_line) break;
+    if (line > decl->line) return true;
+  }
+  return false;
+}
+
 static void pp_print_enum_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_write(pp, "enum ");
   pp_write_str(pp, decl->as.enum_decl.name);
   pp_space(pp);
+  /* A comment inside the braces belongs to the member it precedes (or
+   * trails): the enum stays one member per line so it keeps its place,
+   * like a `type` body */
+  if (decl->as.enum_decl.end_line > 0 && pp_enum_has_comment(pp, decl)) {
+    pp_begin_block(pp);
+    pp->block_start = false;
+    for (const AstEnumMember* m = decl->as.enum_decl.members; m; m = m->next) {
+      pp_flush_comments_before(pp, m->line);
+      size_t lines_before = pp->lines_written;
+      pp_write_str(pp, m->name);
+      pp_flush_trailing_comment(pp, m->line, lines_before);
+      pp_newline(pp);
+    }
+    pp_end_block(pp, decl->as.enum_decl.end_line);
+    pp_newline(pp);
+    return;
+  }
   int count = 0;
   for (const AstEnumMember* m = decl->as.enum_decl.members; m; m = m->next) count++;
   PpListStyle style = { PP_WRAP_FIELDS, "{", "}", true, 0, NULL, false };

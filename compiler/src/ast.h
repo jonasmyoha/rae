@@ -453,12 +453,14 @@ typedef enum {
 
 typedef struct AstEnumMember {
   Str name;
+  size_t line; /* source line of the member name (the formatter places comments by it) */
   struct AstEnumMember* next;
 } AstEnumMember;
 
 typedef struct {
   Str name;
   AstEnumMember* members;
+  size_t end_line; /* source line of the closing brace */
 } AstEnumDecl;
 
 typedef struct {

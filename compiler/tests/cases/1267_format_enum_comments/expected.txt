@@ -1,0 +1,30 @@
+# An enum keeps the comments inside its braces in place, one member per
+# line (a comment belongs to the member it precedes or trails); an enum
+# with no comment inside still takes the one-line form when it fits.
+# Deliberately NOT canonical: the members and comments are misindented.
+enum ConnectionState {
+  # made, not yet connecting
+  idle
+  listening  # waiting for a connect request
+  connected
+  # closed by either end
+  disconnected
+  # nothing after the last member but this
+}
+
+enum Plain { one, two }
+
+enum Spread {
+  north
+  east
+  # the odd one
+  south
+  west
+  up
+  down
+}
+
+func main() ret Int {
+  let state: ConnectionState = ConnectionState.idle
+  ret 0
+}

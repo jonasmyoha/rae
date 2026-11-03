@@ -50,19 +50,21 @@ open net/ByteBuffer
 open net/ReliableChannel
 open net/PacketSeal
 
-# idle: made, not yet connecting or listening. listening: waiting for a
-# connect request (the accepting end). connecting: sending connect requests
-# (the connecting end). disconnecting: sending its disconnect packets.
-# disconnected: closed by either end. timedOut: the handshake or the peer went
-# silent for too long. failed: no random source for the connection's keys.
 enum ConnectionState {
+  # Made, not yet connecting or listening
   idle
+  # Waiting for a connect request (the accepting end)
   listening
+  # Sending connect requests (the connecting end)
   connecting
   connected
+  # Sending its disconnect packets
   disconnecting
+  # Closed by either end
   disconnected
+  # The handshake or the peer went silent for too long
   timedOut
+  # No random source for the connection's keys (encrypted only)
   failed
 }
 
