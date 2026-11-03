@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-7/12 but are not. They are listed so the
+These looked like gaps during 1/12-8/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender
@@ -61,7 +61,10 @@ next task does not propose them again.
   `loop now < deadline and not <condition>`, because Rae has no function
   values to pass a condition in. This is already recorded and deferred
   (`docs/concurrency-model.md`, `docs/ecs-systems-and-data-observation.md`).
-  The relay code itself needed none.
+  The relay code itself needed none. 8/12 hit the same thing once more:
+  prediction (`lib/net/replication/predictionSystem`) cannot be handed the
+  app's movement function, so the app writes the replay loop (about 6
+  lines, shown in the module header). Explicit is acceptable here.
 - **Calling the owner while holding an alias into it (6/12).** In
   `lib/net/relay/RelayClient.rae`, `updatePaths` and `takeDirect` copy what
   they need out of a `mod DirectPath` alias (address, secret) and call

@@ -124,7 +124,7 @@ func createBadNetwork(
   ret BadNetwork {
     enabled: true
     settings: settings
-    randomState: settings.seed bitand 2147483647
+    randomState: seedState(seed: settings.seed)
     maxPacketBytes: maxPacketBytes
     capacity: capacity
     data: zeroBytes(count: capacity * maxPacketBytes)
@@ -208,12 +208,31 @@ func badNetworkFromEnvironment(maxPacketBytes: view Int, capacity: view Int) ret
 }
 
 # A number in 0 ..< below from the seeded sequence
+# xorshift32 (Marsaglia): 32-bit state, shifts and xor only. The earlier
+# linear congruential generator (mod 2^31) has strongly correlated low and
+# middle bits along a stride: with one draw for loss and one for jitter per
+# packet, and two packets a frame, every fourth output decided the same
+# packet stream's loss, and losses came in runs of three at "10%" loss
+# (found by networking 8/12: whole input redundancy windows vanished).
 func badNetworkRandom(network: mod BadNetwork, below: view Int) ret Int {
-  network.randomState = (network.randomState * 1103515245 + 12345) bitand 2147483647
+  var state: Int = network.randomState
+  state = state bitxor ((state shl 13) bitand 4294967295)
+  state = state bitxor (state shr 17)
+  state = state bitxor ((state shl 5) bitand 4294967295)
+  network.randomState = state
   if below <= 0 {
     ret 0
   }
-  ret (network.randomState shr 8) % below
+  ret (state shr 8) % below
+}
+
+# A non-zero 32-bit start state for the seed (xorshift stays at 0 from 0)
+func seedState(seed: view Int) ret Int {
+  let state: Int = (seed bitxor 2463534242) bitand 4294967295
+  if state is 0 {
+    ret 2463534242
+  }
+  ret state
 }
 
 func chance(network: mod BadNetwork, percent: view Int) ret Bool {

@@ -12,7 +12,9 @@
 # them (a lost part costs that snapshot, never a wrong world).
 #
 # A part: kind (1), tick (4), baseline tick (4; 4294967295 for none), part
-# number (1), part count (1), then operations.
+# number (1), part count (1), the player's own net id (4; 4294967295 for
+# none), the newest input tick the host applied for the player (4;
+# 4294967295 for none), then operations.
 open collections/IntMap
 open net/Wire
 open net/Connection
@@ -21,7 +23,7 @@ open net/replication/ReplicationHost
 
 const noBaseline: Int = 4294967295
 
-const partHeaderBytes: Int = 11
+const partHeaderBytes: Int = 19
 
 func recordCountAt(host: view ReplicationHost, slot: view Int) ret Int {
   if let snapshot: view ReplicaSnapshot = host.snapshots.viewAt(index: slot) {
@@ -31,7 +33,12 @@ func recordCountAt(host: view ReplicationHost, slot: view Int) ret Int {
 }
 
 # Start part `index` of the snapshot `tick` against `baseTick`
-func startPart(host: mod ReplicationHost, tick: view Int, baseTick: view Int) {
+func startPart(
+  host: mod ReplicationHost
+  peer: view ReplicaPeer
+  tick: view Int
+  baseTick: view Int
+) {
   if host.partCount >= host.parts.length {
     host.parts.add(value: List.create(UInt8, cap: host.config.maxMessageBytes))
   }
@@ -42,19 +49,39 @@ func startPart(host: mod ReplicationHost, tick: view Int, baseTick: view Int) {
     writeU32(bytes: part, value: baseTick)
     writeU8(bytes: part, value: host.partCount)
     writeU8(bytes: part, value: 0)
+    writeU32(bytes: part, value: headerValue(value: peer.focusNetId))
+    writeU32(bytes: part, value: headerValue(value: peer.appliedInputTick))
   }
   host.partCount = host.partCount + 1
 }
 
+# A value for a 4-byte header field: -1 is written as 4294967295
+func headerValue(value: view Int) ret Int {
+  if value < 0 {
+    ret noBaseline
+  }
+  ret value
+}
+
 # Put the operation in `host.recordBytes` into the current part, or a new
 # one when it does not fit
-func addOperation(host: mod ReplicationHost, tick: view Int, baseTick: view Int) {
+func addOperation(
+  host: mod ReplicationHost
+  peer: view ReplicaPeer
+  tick: view Int
+  baseTick: view Int
+) {
   var fits: Bool = false
   if let part: view List(UInt8) = host.parts.viewAt(index: host.partCount - 1) {
     fits = part.length + host.recordBytes.length <= host.config.maxMessageBytes
   }
   if not fits {
-    startPart(host: host, tick: tick, baseTick: baseTick)
+    startPart(
+      host: host
+      peer: peer
+      tick: tick
+      baseTick: baseTick
+    )
   }
   if let part: mod List(UInt8) = host.parts.modAt(index: host.partCount - 1) {
     appendCopy(
@@ -142,7 +169,12 @@ func replicaSnapshotSystem(
     }
   }
   host.partCount = 0
-  startPart(host: host, tick: tick, baseTick: baseTick)
+  startPart(
+    host: host
+    peer: peer
+    tick: tick
+    baseTick: baseTick
+  )
   # Changed and new records
   let recordTotal: Int = recordCountAt(host: host, slot: slot)
   loop var record: Int = 0, record < recordTotal, ++record {
@@ -171,7 +203,12 @@ func replicaSnapshotSystem(
       }
     }
     if wrote {
-      addOperation(host: host, tick: tick, baseTick: baseTick)
+      addOperation(
+        host: host
+        peer: peer
+        tick: tick
+        baseTick: baseTick
+      )
     }
   }
   # What the player had and no longer gets
@@ -232,7 +269,12 @@ func writeRemovals(
         host.recordBytes.clear()
         writeU8(bytes: host.recordBytes, value: opRemoveEntity)
         writeVarint(bytes: host.recordBytes, value: netId)
-        addOperation(host: host, tick: tick, baseTick: baseTick)
+        addOperation(
+          host: host
+          peer: peer
+          tick: tick
+          baseTick: baseTick
+        )
       }
     }
   }
@@ -255,7 +297,12 @@ func writeRemovals(
       writeU8(bytes: host.recordBytes, value: opRemoveComponent)
       writeVarint(bytes: host.recordBytes, value: netId)
       writeU8(bytes: host.recordBytes, value: kind)
-      addOperation(host: host, tick: tick, baseTick: baseTick)
+      addOperation(
+        host: host
+        peer: peer
+        tick: tick
+        baseTick: baseTick
+      )
     }
   }
 }

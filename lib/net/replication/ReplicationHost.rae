@@ -42,6 +42,9 @@ type ReplicationConfig {
   snapshotIntervalMs: Int
   # How many of its latest inputs a player sends in every input message
   inputRedundancy: Int
+  # Players draw other entities this many snapshot intervals in the past,
+  # between two snapshots they already have (lib/net/replication/Interpolation)
+  interpolationDelayTicks: Float
 }
 
 func defaultReplicationConfig() ret ReplicationConfig {
@@ -52,6 +55,7 @@ func defaultReplicationConfig() ret ReplicationConfig {
     maxMessageBytes: 1000
     snapshotIntervalMs: 50
     inputRedundancy: 3
+    interpolationDelayTicks: 2.0
   }
 }
 
@@ -99,6 +103,10 @@ type ReplicaPeer {
   inputs: List(Int)
   inputRead: Int
   lastInputTick: Int
+  # The newest input tick the host APPLIED (taken with replicaNextInput):
+  # sent with every snapshot so the player knows which of its inputs the
+  # snapshot already contains (prediction replays the rest)
+  appliedInputTick: Int
   # The newest snapshot's size, and totals
   lastSnapshotBytes: Int
   bytesSent: Int
@@ -145,6 +153,7 @@ func createReplicaPeer(peerId: view Int, config: view ReplicationConfig) ret Rep
     inputs: List.create(Int, cap: 64)
     inputRead: 0
     lastInputTick: -1
+    appliedInputTick: -1
     lastSnapshotBytes: 0
     bytesSent: 0
   }

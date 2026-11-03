@@ -1,0 +1,495 @@
+# lib/net/replication: interpolation and prediction, over lib/net/BadNetwork
+# at 10% loss, 40 ms each way and 30 ms of jitter (no sockets; the network
+# is moved by hand, every 10 ms).
+#
+# Other entities (wanderers circling at 4 units/s, 0.04 per frame) are drawn
+# from the interpolation buffer two snapshots in the past: their on-screen
+# step per frame stays near the true one, where the newest snapshot alone
+# moves them in 0.2-unit jumps (0 between snapshots, more after a loss).
+#
+# The player's own entity is predicted from its inputs and reconciled with
+# each snapshot. Its error is measured against the truth: the host's state
+# plus the player's inputs the host has not applied yet. It is held at the
+# quantization (a millimeter per axis) except while the host did something
+# the player could not know: once, the host moves the player's entity
+# itself, and the next snapshot corrects the prediction.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Vec3
+open net/Wire
+open net/Udp
+open net/Connection
+open net/BadNetwork
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/replication/interpolationSystem/InterpolationSystem
+open net/replication/predictionSystem/PredictionSystem
+
+type ArenaWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  transforms: ComponentTable(Transform3D)
+  # Player side only: the same entities straight from the newest snapshot
+  raw: ComponentTable(Transform3D)
+}
+
+type MoveInput {
+  moveX: Float
+  moveZ: Float
+}
+
+const kindReplicated: Int = 0
+
+const kindTransform: Int = 1
+
+const frameMs: Int = 10
+
+func createArena() ret ArenaWorld {
+  ret ArenaWorld {
+    entities: createEntityAllocator()
+    replicated: create()
+    transforms: create()
+    raw: create()
+  }
+}
+
+func at(x: view Float, z: view Float) ret Transform3D {
+  var transform: Transform3D = createTransform3D()
+  transform.position = Vec3 { x: x, y: 0.0, z: z }
+  ret transform
+}
+
+# The movement both sides run for an input: the host to move the entity,
+# the player to predict it
+func stepPosition(position: view Vec3, input: view MoveInput) ret Vec3 {
+  ret Vec3 { x: position.x + input.moveX, y: position.y, z: position.z + input.moveZ }
+}
+
+func distance(first: view Vec3, second: view Vec3) ret Float {
+  let dx: Float = first.x - second.x
+  let dz: Float = first.z - second.z
+  ret Math.sqrt(x: dx * dx + dz * dz)
+}
+
+func positionIn(table: view ComponentTable(Transform3D), entityId: view EntityId) ret Vec3 {
+  if componentHas(this: table, entityId: entityId) {
+    ret componentView(this: table, entityId: entityId).position
+  }
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+type Game {
+  host: ReplicationHost
+  hostWorld: ArenaWorld
+  peer: ReplicaPeer
+  player: ReplicationPlayer
+  playerWorld: ArenaWorld
+  hostEnd: Connection
+  playerEnd: Connection
+  toPlayer: BadNetwork
+  toHost: BadNetwork
+  packet: List(UInt8)
+  message: List(UInt8)
+  nowMs: Int
+  avatarEntityId: EntityId
+  wandererEntityIds: List(EntityId)
+  wandererNetIds: List(Int)
+  # Every input the player sent, by tick (tick, moveX, moveZ): the truth for
+  # the error is the host's state plus the inputs it has not applied
+  sentInputs: List(Float)
+  # The host moves the player's entity once, after applying this input tick
+  pushAtInputTick: Int
+  pushed: Bool
+}
+
+func pump(game: mod Game) {
+  connectionUpdate(connection: game.hostEnd, nowMs: game.nowMs)
+  connectionUpdate(connection: game.playerEnd, nowMs: game.nowMs)
+  loop connectionWritePacket(connection: game.hostEnd, packet: game.packet, nowMs: game.nowMs) {
+    badNetworkSend(
+      network: game.toPlayer
+      packet: game.packet
+      start: 0
+      count: game.packet.length
+      destination: noNetAddress()
+      nowMs: game.nowMs
+    )
+  }
+  loop connectionWritePacket(connection: game.playerEnd, packet: game.packet, nowMs: game.nowMs) {
+    badNetworkSend(
+      network: game.toHost
+      packet: game.packet
+      start: 0
+      count: game.packet.length
+      destination: noNetAddress()
+      nowMs: game.nowMs
+    )
+  }
+  loop badNetworkNext(network: game.toPlayer, packet: game.packet, nowMs: game.nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: game.playerEnd
+      packet: game.packet
+      start: 0
+      count: game.packet.length
+      nowMs: game.nowMs
+    )
+  }
+  loop badNetworkNext(network: game.toHost, packet: game.packet, nowMs: game.nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: game.hostEnd
+      packet: game.packet
+      start: 0
+      count: game.packet.length
+      nowMs: game.nowMs
+    )
+  }
+}
+
+# The host: take the inputs (move the player's entity), move the wanderers
+# (every frame: continuous motion), and every 50 ms send a snapshot
+func hostFrame(game: mod Game) {
+  loop connectionReceive(connection: game.hostEnd, message: game.message) is not MessageChannel.none {
+    let taken: Bool = replicaTakeMessage(host: game.host, peer: game.peer, message: game.message)
+  }
+  var input: MoveInput = { moveX: 0.0, moveZ: 0.0 }
+  loop {
+    let tick: Int = replicaNextInput(
+      MoveInput
+      host: game.host
+      peer: game.peer
+      input: input
+    )
+    if tick < 0 {
+      break
+    }
+    let transform: mod Transform3D = componentMod(
+      this: game.hostWorld.transforms
+      entityId: game.avatarEntityId
+    )
+    transform.position = stepPosition(position: transform.position, input: input)
+    if not game.pushed and tick >= game.pushAtInputTick {
+      # Something the player cannot predict: the host moves it 3 units
+      transform.position = Vec3 { x: transform.position.x, y: 0.0, z: transform.position.z + 3.0 }
+      game.pushed = true
+    }
+  }
+  loop var i: Int = 0, i < game.wandererEntityIds.length, ++i {
+    let entityId: EntityId = game.wandererEntityIds.copyAtFallback(index: i, fallback: noEntity())
+    let angle: Float = (game.nowMs as Float) * 0.0004 + (i as Float) * 2.0
+    let transform: mod Transform3D = componentMod(
+      this: game.hostWorld.transforms
+      entityId: entityId
+    )
+    transform.position = Vec3 {
+      x: Math.cos(x: angle) * 10.0
+      y: 0.0
+      z: 20.0 + Math.sin(x: angle) * 10.0
+    }
+  }
+  if replicaSnapshotDue(host: game.host, nowMs: game.nowMs) {
+    replicaBeginSnapshot(host: game.host, nowMs: game.nowMs)
+    captureReplicaTable(
+      Replicated
+      host: game.host
+      table: game.hostWorld.replicated
+      replicated: game.hostWorld.replicated
+      kind: kindReplicated
+    )
+    captureReplicaTable(
+      Transform3D
+      host: game.host
+      table: game.hostWorld.transforms
+      replicated: game.hostWorld.replicated
+      kind: kindTransform
+    )
+    captureInterestPoints(
+      host: game.host
+      transforms: game.hostWorld.transforms
+      replicated: game.hostWorld.replicated
+    )
+    let bytes: Int = replicaSnapshotSystem(
+      host: game.host
+      peer: game.peer
+      connection: game.hostEnd
+    )
+  }
+}
+
+# The player: take snapshots, keep the entities, draw the others
+# interpolated (and raw, for comparison), reconcile and predict its own
+func playerFrame(game: mod Game, input: view MoveInput) {
+  loop connectionReceive(connection: game.playerEnd, message: game.message) is not MessageChannel.none {
+    let taken: Bool = replicaReceiveSystem(player: game.player, message: game.message)
+  }
+  if replicaHasUpdate(player: game.player) {
+    replicaSyncEntities(player: game.player, entities: game.playerWorld.entities)
+    loop var i: Int = 0, i < game.player.goneEntityIds.length, ++i {
+      let entityId: EntityId = game.player.goneEntityIds.copyAtFallback(
+        index: i
+        fallback: noEntity()
+      )
+      clearEntityComponents(ArenaWorld, world: game.playerWorld, entityId: entityId)
+      freeEntity(this: game.playerWorld.entities, entityId: entityId)
+    }
+    applyReplicaTable(
+      Transform3D
+      player: game.player
+      table: game.playerWorld.raw
+      kind: kindTransform
+      template: createTransform3D()
+    )
+    replicaFinishApply(player: game.player)
+  }
+  replicaAdvanceClock(player: game.player, nowMs: game.nowMs)
+  applyReplicaTableInterpolated(
+    Transform3D
+    player: game.player
+    table: game.playerWorld.transforms
+    kind: kindTransform
+    template: createTransform3D()
+    renderTick: replicaRenderTick(player: game.player)
+  )
+  # Reconcile: the host's word, then the inputs it has not applied
+  let ownEntityId: EntityId = replicaEntityOf(player: game.player, netId: game.player.ownNetId)
+  if replicaOwnFresh(player: game.player) and applyReplicaOwn(
+    Transform3D
+    player: game.player
+    table: game.playerWorld.transforms
+    kind: kindTransform
+    template: createTransform3D()
+  ) {
+    var pending: MoveInput = { moveX: 0.0, moveZ: 0.0 }
+    loop var i: Int = 0, i < replicaPendingCount(player: game.player), ++i {
+      let tick: Int = replicaPendingInput(
+        MoveInput
+        player: game.player
+        index: i
+        input: pending
+      )
+      let transform: mod Transform3D = componentMod(
+        this: game.playerWorld.transforms
+        entityId: ownEntityId
+      )
+      transform.position = stepPosition(position: transform.position, input: pending)
+    }
+    replicaOwnTaken(player: game.player)
+  }
+  # This frame's input: predicted at once, and sent
+  let tick: Int = game.nowMs / frameMs
+  if componentHas(this: game.playerWorld.transforms, entityId: ownEntityId) {
+    let transform: mod Transform3D = componentMod(
+      this: game.playerWorld.transforms
+      entityId: ownEntityId
+    )
+    transform.position = stepPosition(position: transform.position, input: input)
+  }
+  let sent: Bool = replicaSendInput(
+    MoveInput
+    player: game.player
+    input: input
+    tick: tick
+    connection: game.playerEnd
+  )
+  game.sentInputs.add(value: tick as Float)
+  game.sentInputs.add(value: input.moveX)
+  game.sentInputs.add(value: input.moveZ)
+}
+
+# The truth for the own entity: the host's position plus the inputs the
+# host has not applied yet (they are on their way)
+func truePosition(game: view Game) ret Vec3 {
+  var position: Vec3 = positionIn(table: game.hostWorld.transforms, entityId: game.avatarEntityId)
+  var at: Int = 0
+  loop at + 2 < game.sentInputs.length {
+    let tick: Int = game.sentInputs.copyAtFallback(index: at, fallback: 0.0) as Int
+    if tick > game.peer.appliedInputTick {
+      let input: MoveInput = {
+        moveX: game.sentInputs.copyAtFallback(index: at + 1, fallback: 0.0)
+        moveZ: game.sentInputs.copyAtFallback(index: at + 2, fallback: 0.0)
+      }
+      position = stepPosition(position: position, input: input)
+    }
+    at = at + 3
+  }
+  ret position
+}
+
+func main() ret Int {
+  let config: ReplicationConfig = defaultReplicationConfig()
+  var lossy: BadNetworkSettings = badNetworkSettings()
+  lossy.latencyMs = 40
+  lossy.jitterMs = 30
+  lossy.seed = 5
+  var back: BadNetworkSettings = lossy
+  back.seed = 6
+  var game: Game = {
+    host: createReplicationHost(config: config)
+    hostWorld: createArena()
+    peer: createReplicaPeer(peerId: 1, config: config)
+    player: createReplicationPlayer(config: config)
+    playerWorld: createArena()
+    hostEnd: createConnection(config: defaultConnectionConfig())
+    playerEnd: createConnection(config: defaultConnectionConfig())
+    toPlayer: createBadNetwork(settings: lossy, maxPacketBytes: 1200, capacity: 1024)
+    toHost: createBadNetwork(settings: back, maxPacketBytes: 1200, capacity: 1024)
+    packet: List.create(UInt8, cap: 1200)
+    message: List.create(UInt8, cap: 1200)
+    nowMs: 0
+    avatarEntityId: noEntity()
+    wandererEntityIds: {}
+    wandererNetIds: {}
+    sentInputs: {}
+    pushAtInputTick: 250
+    pushed: false
+  }
+  connectionListen(connection: game.hostEnd, nowMs: 0)
+  connectionConnect(connection: game.playerEnd, connectionId: 81, nowMs: 0)
+  loop game.nowMs < 3000 and not (connectionIsConnected(connection: game.hostEnd) and connectionIsConnected(
+    connection: game.playerEnd
+  )) {
+    game.nowMs = game.nowMs + frameMs
+    pump(game: game)
+  }
+  game.avatarEntityId = allocEntity(this: game.hostWorld.entities)
+  componentSet(
+    this: game.hostWorld.transforms
+    entityId: game.avatarEntityId
+    data: at(x: 0.0, z: 0.0)
+  )
+  game.peer.focusNetId = replicateEntity(
+    host: game.host
+    replicated: game.hostWorld.replicated
+    entityId: game.avatarEntityId
+    owner: 1
+  )
+  loop var i: Int = 0, i < 3, ++i {
+    let entityId: EntityId = allocEntity(this: game.hostWorld.entities)
+    componentSet(this: game.hostWorld.transforms, entityId: entityId, data: at(x: 0.0, z: 20.0))
+    game.wandererEntityIds.add(value: entityId)
+    game.wandererNetIds.add(value: replicateEntity(
+      host: game.host
+      replicated: game.hostWorld.replicated
+      entityId: entityId
+      owner: -1
+    ))
+  }
+
+  # Four seconds of play; the player walks a square-ish path
+  var interpolatedMax: Float = 0.0
+  var rawMax: Float = 0.0
+  var previousInterpolated: List(Vec3) = {}
+  var previousRaw: List(Vec3) = {}
+  loop var i: Int = 0, i < 3, ++i {
+    previousInterpolated.add(value: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+    previousRaw.add(value: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+  }
+  var framesMeasured: Int = 0
+  var errorFrames: Int = 0
+  var worstError: Float = 0.0
+  var pushFrameMs: Int = -1
+  var correctedAfterMs: Int = -1
+  var worstAfterCorrection: Float = 0.0
+  let startMs: Int = game.nowMs
+  loop game.nowMs < startMs + 4000 {
+    game.nowMs = game.nowMs + frameMs
+    let phase: Int = ((game.nowMs - startMs) / 1000) % 4
+    var input: MoveInput = { moveX: 0.02, moveZ: 0.0 }
+    if phase is 1 {
+      input = MoveInput { moveX: 0.0, moveZ: 0.02 }
+    } else if phase is 2 {
+      input = MoveInput { moveX: -0.02, moveZ: 0.0 }
+    } else if phase is 3 {
+      input = MoveInput { moveX: 0.0, moveZ: -0.02 }
+    }
+    playerFrame(game: game, input: input)
+    pump(game: game)
+    hostFrame(game: game)
+    pump(game: game)
+    # Measure once everything is flowing
+    if game.nowMs - startMs >= 500 {
+      framesMeasured = framesMeasured + 1
+      let firstMeasured: Bool = framesMeasured is 1
+      loop var w: Int = 0, w < 3, ++w {
+        let entityId: EntityId = replicaEntityOf(
+          player: game.player
+          netId: game.wandererNetIds.copyAtFallback(index: w, fallback: -1)
+        )
+        let shown: Vec3 = positionIn(table: game.playerWorld.transforms, entityId: entityId)
+        let raw: Vec3 = positionIn(table: game.playerWorld.raw, entityId: entityId)
+        let interpolatedStep: Float = distance(
+          first: shown
+          second: previousInterpolated.copyAtFallback(index: w, fallback: shown)
+        )
+        let rawStep: Float = distance(
+          first: raw
+          second: previousRaw.copyAtFallback(index: w, fallback: raw)
+        )
+        if not firstMeasured and interpolatedStep > interpolatedMax {
+          interpolatedMax = interpolatedStep
+        }
+        if not firstMeasured and rawStep > rawMax {
+          rawMax = rawStep
+        }
+        previousInterpolated.set(index: w, value: shown)
+        previousRaw.set(index: w, value: raw)
+      }
+      let ownEntityId: EntityId = replicaEntityOf(player: game.player, netId: game.player.ownNetId)
+      let error: Float = distance(
+        first: positionIn(table: game.playerWorld.transforms, entityId: ownEntityId)
+        second: truePosition(game: game)
+      )
+      if game.pushed and pushFrameMs < 0 {
+        pushFrameMs = game.nowMs
+      }
+      if pushFrameMs >= 0 and correctedAfterMs < 0 and error <= 0.002 {
+        correctedAfterMs = game.nowMs - pushFrameMs
+      }
+      if correctedAfterMs >= 0 and game.nowMs - pushFrameMs - correctedAfterMs <= 1000 and error > worstAfterCorrection {
+        worstAfterCorrection = error
+      }
+      if error > 0.002 {
+        errorFrames = errorFrames + 1
+      }
+      if pushFrameMs < 0 and error > worstError {
+        worstError = error
+      }
+    }
+  }
+  log(
+    "remote entities, per-frame step (true: 0.04): under 1.5 times that {interpolatedMax < 0.06}, newest snapshot alone {rawMax > 0.15} (it jumps)"
+  )
+  log("own entity before the push: error at most a millimeter or two {worstError <= 0.003}")
+  log(
+    "the push: corrected after one round trip {correctedAfterMs > 0 and correctedAfterMs <= 300}, then within 2 mm for a second {worstAfterCorrection <= 0.002}"
+  )
+  log(
+    "frames with the own error above 2 mm (the push window): under 10% {errorFrames * 100 / framesMeasured < 10}"
+  )
+  log(
+    "the host applied the inputs (none lost for good): {game.peer.appliedInputTick > 0}, pending on the player {replicaPendingCount(
+      player: game.player
+    ) < 30}"
+  )
+
+  # Standing still at the end: prediction and host agree exactly
+  loop var i: Int = 0, i < 100, ++i {
+    game.nowMs = game.nowMs + frameMs
+    playerFrame(game: game, input: MoveInput { moveX: 0.0, moveZ: 0.0 })
+    pump(game: game)
+    hostFrame(game: game)
+    pump(game: game)
+  }
+  let ownEntityId: EntityId = replicaEntityOf(player: game.player, netId: game.player.ownNetId)
+  let settled: Float = distance(
+    first: positionIn(table: game.playerWorld.transforms, entityId: ownEntityId)
+    second: positionIn(table: game.hostWorld.transforms, entityId: game.avatarEntityId)
+  )
+  log("standing still: the predicted entity is where the host has it {settled <= 0.002}")
+  ret 0
+}

@@ -40,6 +40,22 @@ type ReplicationPlayer {
   removedNetIds: IntMap(Int)
   removedKeys: IntMap(Int)
   netIdsSeen: IntMap(Int)
+  # The header of the snapshot being assembled: own net id, applied input
+  assemblingOwn: Int
+  assemblingApplied: Int
+  # From the newest snapshot: this player's own entity (-1: none) and the
+  # newest of its inputs the host had applied (-1: none)
+  ownNetId: Int
+  hostAppliedInputTick: Int
+  # A new snapshot arrived whose own state the app has not taken yet
+  ownSnapshotFresh: Bool
+  # Inputs sent and not yet applied by the host (tick, count, values ...):
+  # prediction replays them on top of each snapshot
+  pendingInputs: List(Int)
+  # The estimate of the host's snapshot clock, in ticks, at `clockMs`
+  clockTick: Float
+  clockMs: Int
+  clockStarted: Bool
   # The latest inputs (tick, count, values ...) and the input message
   recentInputs: List(Int)
   recentCount: Int
@@ -77,6 +93,15 @@ func createReplicationPlayer(config: view ReplicationConfig) ret ReplicationPlay
     removedNetIds: createIntMap(Int, cap: 16)
     removedKeys: createIntMap(Int, cap: 16)
     netIdsSeen: createIntMap(Int, cap: 64)
+    assemblingOwn: 4294967295
+    assemblingApplied: 4294967295
+    ownNetId: -1
+    hostAppliedInputTick: -1
+    ownSnapshotFresh: false
+    pendingInputs: {}
+    clockTick: 0.0
+    clockMs: 0
+    clockStarted: false
     recentInputs: {}
     recentCount: 0
     inputValues: {}
@@ -120,6 +145,15 @@ func replicaSendInput(
     scale: player.config.floatScale
     values: player.inputValues
   )
+  # Pending until a snapshot says the host applied it (prediction replays it)
+  player.pendingInputs.add(value: tick)
+  player.pendingInputs.add(value: player.inputValues.length)
+  loop let value: Int in player.inputValues {
+    player.pendingInputs.add(value: value)
+  }
+  if replicaPendingCount(player: player) > maxPendingInputs {
+    dropOldestPending(player: player)
+  }
   # Keep the newest `inputRedundancy` inputs, oldest first
   var kept: List(Int) = List.create(
     Int
@@ -178,4 +212,78 @@ func replicaSendInput(
     start: 0
     count: player.inputMessage.length
   )
+}
+
+# ----- pending inputs (prediction) --------------------------------------------
+
+# A player that sends inputs the host never applies keeps at most this many
+const maxPendingInputs: Int = 256
+
+func replicaPendingCount(player: view ReplicationPlayer) ret Int {
+  var count: Int = 0
+  var at: Int = 0
+  loop at < player.pendingInputs.length {
+    at = at + 2 + player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+    count = count + 1
+  }
+  ret count
+}
+
+# Keep the pending inputs from offset `from` on
+func keepPendingFrom(player: mod ReplicationPlayer, from: view Int) {
+  var kept: List(Int) = List.create(Int, cap: player.pendingInputs.length - from + 1)
+  loop var i: Int = from, i < player.pendingInputs.length, ++i {
+    kept.add(value: player.pendingInputs.copyAtFallback(index: i, fallback: 0))
+  }
+  player.pendingInputs = own kept
+}
+
+func dropOldestPending(player: mod ReplicationPlayer) {
+  keepPendingFrom(
+    player: player
+    from: 2 + player.pendingInputs.copyAtFallback(index: 1, fallback: 0)
+  )
+}
+
+# Forget the pending inputs the host has applied (up to
+# `hostAppliedInputTick`): the newest snapshot already contains them
+func dropAppliedInputs(player: mod ReplicationPlayer) {
+  var at: Int = 0
+  loop at < player.pendingInputs.length and player.pendingInputs.copyAtFallback(
+    index: at
+    fallback: 0
+  ) <= player.hostAppliedInputTick {
+    at = at + 2 + player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+  }
+  if at > 0 {
+    keepPendingFrom(player: player, from: at)
+  }
+}
+
+# Pending input number `index` (0 is the oldest) decoded into `input`: its
+# tick, -1 when there is no such input. Prediction replays them in order.
+func replicaPendingInput(
+  T: type
+  player: view ReplicationPlayer
+  index: view Int
+  input: mod T
+) ret Int {
+  var at: Int = 0
+  var number: Int = 0
+  loop at < player.pendingInputs.length {
+    let count: Int = player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+    if number is index {
+      readReplicaValues(
+        T
+        value: input
+        scale: player.config.floatScale
+        values: player.pendingInputs
+        start: at + 2
+      )
+      ret player.pendingInputs.copyAtFallback(index: at, fallback: -1)
+    }
+    at = at + 2 + count
+    number = number + 1
+  }
+  ret -1
 }
