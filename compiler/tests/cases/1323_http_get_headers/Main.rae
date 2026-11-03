@@ -1,0 +1,38 @@
+# The request httpGet and httpGetWith send (lib/net/HttpGet), without a
+# network: httpGet's is the same as before (User-Agent: Rae); the caller's
+# header lines come after Host, and a User-Agent or Accept of theirs replaces
+# the default one (api.met.no asks every client to name itself with an app
+# name and a contact). A line with a line break, one without a colon, and a
+# Host or Connection of the caller's are refused before anything is sent.
+# Line ends are shown as \r\n.
+import String
+open net/HttpGet
+
+func shown(text: view String) ret String {
+  ret text.replace(old: "\r\n", new: "\\r\\n")
+}
+
+func main() {
+  let url: HttpUrl = parseHttpUrl(
+    url: "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=60.17&lon=24.94"
+  )
+  let noHeaders: List(String) = List.create(String, cap: 0)
+  log("httpGet: {shown(text: httpGetRequestText(url: url, headers: noHeaders))}")
+  let named: List(String) = ["User-Agent: SumuWeather/1.0 sumu@example.org"]
+  log("named: {shown(text: httpGetRequestText(url: url, headers: named))}")
+  let both: List(String) = ["accept: application/json", "User-Agent: SumuWeather/1.0", "X-Trace: 7"]
+  log("accept too: {shown(text: httpGetRequestText(url: url, headers: both))}")
+
+  let injected: List(String) = ["User-Agent: x\r\nX-Evil: 1"]
+  log(
+    "a line break: {httpGetWith(url: "https://api.met.no/", headers: injected, timeoutMs: 10).error}"
+  )
+  let noColon: List(String) = ["User-Agent SumuWeather"]
+  log("no colon: {httpGetWith(url: "https://api.met.no/", headers: noColon, timeoutMs: 10).error}")
+  let host: List(String) = ["Host: elsewhere.example"]
+  log("host: {httpGetWith(url: "https://api.met.no/", headers: host, timeoutMs: 10).error}")
+  let connection: List(String) = ["connection: keep-alive"]
+  log(
+    "connection: {httpGetWith(url: "https://api.met.no/", headers: connection, timeoutMs: 10).error}"
+  )
+}
