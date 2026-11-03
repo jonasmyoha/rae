@@ -258,9 +258,15 @@ connected longer. All three are playing again about 1.6 s after the kill
 - the wanderers go on from where they were;
 - a new entity gets a net id nobody had used.
 
-Not tested yet: the same with the host as a separate process killed with
-a signal (queued). The relay already treats a killed host exactly as this
-fixture does: its packets stop.
+The same with every side its own process: `tools/relay/loopback-check.sh`
+(the host-migration game in `tools/relayPeer/MigrationGame.rae`, the
+fixture's machine code) kills the game host with SIGKILL 3 s into a session
+of three players. The relay promotes player 2, the desktop. Measured from
+each player's last snapshot of the old host to playing again (the processes
+share no clock), all three are playing again after 1.55-1.68 s (3 runs;
+the check's bound is 3 s). Each has its own entity back, and all three hold
+the same entities: the old host's own entity is gone, the rest are the
+same.
 
 ## Not yet
 

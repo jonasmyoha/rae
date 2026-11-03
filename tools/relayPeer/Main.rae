@@ -12,6 +12,8 @@
 #       prints "token T" and "direct port D" and echoes every payload back,
 #       through the relay and on a plain UDP socket
 #   relayPeer bench-player --relay-port P --token T --direct-port D
+#   relayPeer game-host / game-player: the host-migration game
+#       (MigrationGame.rae)
 # Every mode takes --relay-only (no direct path; the bench uses it, so it
 # measures the relay)
 #       measures round trips through the relay and directly, then the
@@ -409,6 +411,20 @@ func main() ret Int {
   }
   if mode is "bench-host" {
     ret runBenchHost()
+  }
+  if mode is "game-host" {
+    ret runGameHost(
+      relayAddress: relayAddressArgument()
+      seconds: argumentAfter(name: "--seconds", fallback: "30").toInt()
+    )
+  }
+  if mode is "game-player" {
+    ret runGamePlayer(
+      relayAddress: relayAddressArgument()
+      token: argumentAfter(name: "--token", fallback: "")
+      device: parseDevice(text: argumentAfter(name: "--device", fallback: "mobile"))
+      seconds: argumentAfter(name: "--seconds", fallback: "20").toInt()
+    )
   }
   if mode is "bench-player" {
     ret runBenchPlayer()
