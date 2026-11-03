@@ -27,11 +27,14 @@
 # Where bundles come from: the scene's OWN `bundles` block, then the world's
 # `bundles` resource — the imported set the host seeds from the entry scene's
 # `import` list (sceneImportedBundles), first declaration wins, exactly like
-# the theme tokens. A cycle in the includes is a diagnostic, not a hang.
+# the theme tokens; last, lib/ui's built-in bundles (ui/BuiltInBundles:
+# circleButton), which a scene or a theme may redeclare. A cycle in the includes is a diagnostic,
+# not a hang.
 open ui/Scene
 open ui/SceneImports
 open ui/SceneInstance
 open ui/ScenePolicy
+open ui/BuiltInBundles
 import Json
 
 # The bundles a node was expanded from: written by the LOADER, never authored
@@ -304,6 +307,9 @@ func expandBundleInto(
   } else {
     if let importedIdx: Int = bundleIndex(set: imported, name: name) {
       json = imported.jsons.copyAtFallback(index: importedIdx, fallback: "")
+    } else if builtInBundleJson(name: name).length() > 0 {
+      # lib/ui's own (ui/BuiltInBundles), after the scene's and its imports'
+      json = builtInBundleJson(name: name)
     } else {
       reportSceneDiagnostic(
         diagnostics: diagnostics
@@ -311,7 +317,7 @@ func expandBundleInto(
         nodeId: nodeId
         kind: SceneDiagnosticKind.unknownBundle
         name: name
-        message: "no bundle named {name} in the scene or its imports; ignored"
+        message: "no bundle named {name} in the scene, its imports or lib/ui's built-in ones; ignored"
       )
       ret
     }

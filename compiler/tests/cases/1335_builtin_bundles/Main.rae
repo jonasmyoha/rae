@@ -1,0 +1,91 @@
+import ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneBundles
+open ui/BuiltInBundles
+open ui/SceneImports
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+# lib/ui's built-in bundles (ui/BuiltInBundles, docs/ui-scene-format.md §9):
+# `circleButton` with no declaration in the scene or its imports: a square
+# 44-point box, a Circle shape, a tap on its box. Combined with a theme's
+# bundle listed before it, the theme's fill stays and the shape becomes a
+# circle. A node's own Rect sets another size. A scene that declares the
+# same name replaces the built-in one. An unknown name is still reported.
+func scene(declareOwn: view Bool) ret String {
+  var s: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Root\",\"bundles\":\{"
+  s = s.concat(
+    other: "\"quiet\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"surface\",\"radius\":22\},\"Opacity\":\{\"value\":0.5\}\}"
+  )
+  if declareOwn {
+    s = s.concat(other: ",\"circleButton\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":60,\"h\":30\}\}")
+  }
+  s = s.concat(other: "\},\"nodes\":\{")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Children\":[\"Plain\",\"Themed\",\"Big\",\"Missing\"]\},"
+  )
+  s = s.concat(other: "\"Plain\":\{\"bundles\":[\"circleButton\"]\},")
+  s = s.concat(other: "\"Themed\":\{\"bundles\":[\"quiet\",\"circleButton\"]\},")
+  s = s.concat(other: "\"Big\":\{\"bundles\":[\"circleButton\"],\"Rect\":\{\"w\":56,\"h\":56\}\},")
+  s = s.concat(other: "\"Missing\":\{\"bundles\":[\"circleButtonX\"]\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func describe(world: view UiWorld, entityId: view EntityId) ret String {
+  var text: String = ""
+  if componentHas(this: world.rects, entityId: entityId) {
+    let r: view Rect = componentView(this: world.rects, entityId: entityId)
+    text = "{r.size.x.toInt()}x{r.size.y.toInt()}"
+  } else {
+    text = "no Rect"
+  }
+  if componentHas(this: world.shapes, entityId: entityId) {
+    let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+    text = "{text} shape {shape.kind} fill {shape.fillSlot}"
+  } else {
+    text = "{text} no Shape"
+  }
+  if componentHas(this: world.hitAreas, entityId: entityId) {
+    let hit: view HitArea = componentView(this: world.hitAreas, entityId: entityId)
+    text = "{text} hit {hit.kind} {hit.radius}"
+  }
+  if componentHas(this: world.opacities, entityId: entityId) {
+    text = "{text} opacity {componentView(this: world.opacities, entityId: entityId).value}"
+  }
+  ret text
+}
+
+func show(declareOwn: view Bool) {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let entry: Scene = parseScene(source: scene(declareOwn: declareOwn))
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: entry)
+  let nodeIds: List(String) = ["Plain", "Themed", "Big"]
+  loop let nodeId: view String in nodeIds {
+    if let index: Int = findNodeInPage(world: world, pageId: "", nodeId: nodeId) {
+      log(
+        "  {nodeId}: {describe(world: world, entityId: nodeEntityId(world: world, index: index))}"
+      )
+    }
+  }
+  loop let d: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  diagnostic {d.nodeId}: {d.kind.toString()} {d.name}")
+  }
+}
+
+func main() {
+  log(
+    "built in: circleButton {builtInBundleJson(name: "circleButton").length() > 0}, other {builtInBundleJson(
+      name: "other"
+    ).length() > 0}"
+  )
+  log("no declaration (lib/ui's own):")
+  show(declareOwn: false)
+  log("the scene declares circleButton (its own wins):")
+  show(declareOwn: true)
+}

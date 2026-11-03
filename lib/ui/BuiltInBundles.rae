@@ -1,0 +1,23 @@
+# Built-in bundles: named component sets lib/ui itself provides, so every
+# scene can use them without declaring them in its theme
+# (docs/ui-scene-format.md §9). A scene's own `bundles` block and its
+# imports come first: a theme that declares the same name replaces the
+# built-in one. They carry SHAPE and PLACEMENT, never colors, so they
+# combine with a theme's look: `"bundles": ["secondaryButton",
+# "circleButton"]` is the theme's button drawn as a true circle.
+#
+#   circleButton  a round button for an icon: a 44-point square box (the
+#                 smallest touch target; a node's own Rect sets another
+#                 size, keep it square), a Circle shape (its fill and
+#                 stroke come from an earlier bundle or the node), and its
+#                 child (the icon) centered; a tap anywhere in the square
+#                 counts (lib/ui tests taps against the node's box)
+const builtInCircleButton: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":44,\"h\":44\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"Circle\",\"radius\":0\},\"Layout\":\{\"type\":\"Stack\",\"alignMain\":\"Center\",\"alignCross\":\"Center\"\}\}"
+
+# The built-in bundle `name`'s JSON object, or "" when lib/ui has none
+func builtInBundleJson(name: view String) ret String {
+  if name is "circleButton" {
+    ret builtInCircleButton
+  }
+  ret ""
+}
