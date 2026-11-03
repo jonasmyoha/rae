@@ -9,6 +9,12 @@
 #   C. a press that moves before the hold lifts nothing (a scroll or a tap).
 #   D. a row dropped where it was fires nothing and goes home.
 #   E. a move the app does not make: the rows ease back into the old order.
+#   F. fixed rows (ListReorder.fixedField, rows 0 and 5 are headings): a
+#      press on one never lifts it, and a lifted row stays between the fixed
+#      rows around it (the drop's indexes never cross one).
+#   G. a keyed list whose app answers a drop with the move AND a row gone
+#      (its heading): the new order is taken by key, so in that frame every
+#      row is still drawn where it was, then eases home.
 import ui/Components
 open ui/Ecs
 open ui/ListReorder
@@ -37,6 +43,136 @@ func makeRow(label: own String) ret ListViewRow {
   var values: List(String) = List.create(String, cap: 1)
   values.add(value: own label)
   ret ListViewRow { keys: own keys, values: own values }
+}
+
+# Ten rows, rows 0 and 5 headings (their cell "heading" is "true")
+func buildFixedData() ret ListViewData {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: rowCount)
+  loop var i: Int = 0, i < rowCount, ++i {
+    var keys: List(String) = List.create(String, cap: 2)
+    keys.add(value: "label")
+    keys.add(value: "heading")
+    var values: List(String) = List.create(String, cap: 2)
+    values.add(value: "Row {i}")
+    if i is 0 or i is 5 {
+      values.add(value: "true")
+    } else {
+      values.add(value: "false")
+    }
+    rows.add(value: ListViewRow { keys: own keys, values: own values })
+  }
+  ret ListViewData { rows: own rows }
+}
+
+# Press row `index`, hold it 0.4 s, move the finger by `by` points over 30
+# frames, hold, and lift the finger; returns the phase after the hold and
+# the actions fired
+func dragRow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  listEntity: view EntityId
+  index: view Int
+  by: view Float
+  start: view Float64
+) ret String {
+  setPointer(
+    input: input
+    y: rowMiddle(index: index)
+    pressed: true
+    down: true
+    released: false
+  )
+  var moving: Bool = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: start
+  )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  setPointer(
+    input: input
+    y: rowMiddle(index: index)
+    pressed: false
+    down: true
+    released: false
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: start + 0.4
+  )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  let held: String = phaseName(world: world, listEntity: listEntity)
+  loop var frame: Int = 1, frame <= 30, ++frame {
+    setPointer(
+      input: input
+      y: rowMiddle(index: index) + by * frame.toFloat() / 30.0
+      pressed: false
+      down: true
+      released: false
+    )
+    moving = listReorderSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      nowSec: start + 0.4 + (frame.toFloat() / 60.0) as Float64
+    )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  }
+  var over: String = ""
+  if let drag: ListReorderDrag = componentCopy(this: world.listReorderDrags, entityId: listEntity) {
+    if drag.phase is ListReorderPhase.lifted {
+      over = ", over {drag.toIndex}"
+    }
+  }
+  setPointer(
+    input: input
+    y: rowMiddle(index: index) + by
+    pressed: false
+    down: false
+    released: true
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: start + 1.0
+  )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  let fired: String = actionsText(world: world)
+  frameAdvance(this: world.uiActions)
+  frameAdvance(this: world.uiActions)
+  let frames: Int = runUntilIdle(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    listEntity: listEntity
+    scenes: createSceneRegistry()
+    start: start + 1.02
+    limit: 200
+  )
+  ret "{held}{over}, actions '{fired}', then {phaseName(world: world, listEntity: listEntity)}"
+}
+
+# The fixed rows' data in a new order, by their numbers
+func buildFixedOrder(order: view List(Int)) ret ListViewData {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: order.length)
+  loop let i: view Int in order {
+    var keys: List(String) = List.create(String, cap: 2)
+    keys.add(value: "label")
+    keys.add(value: "heading")
+    var values: List(String) = List.create(String, cap: 2)
+    values.add(value: "Row {i}")
+    if i is 0 or i is 5 {
+      values.add(value: "true")
+    } else {
+      values.add(value: "false")
+    }
+    rows.add(value: ListViewRow { keys: own keys, values: own values })
+  }
+  ret ListViewData { rows: own rows }
 }
 
 func buildData(order: view List(Int)) ret ListViewData {
@@ -242,6 +378,24 @@ func main() {
     maxSpeed: 900.0
   )}")
   log("action: {reorderActionId(actionId: "move", fromIndex: 2, toIndex: 5)}")
+  var fixedRows: List(Bool) = [
+    true
+    false
+    false
+    false
+    false
+    true
+    false
+    false
+    false
+    false
+  ]
+  let firstSpan: ReorderSpan = reorderSpan(fixed: fixedRows, index: 2)
+  let lastSpan: ReorderSpan = reorderSpan(fixed: fixedRows, index: 7)
+  let noFixed: ReorderSpan = reorderSpan(fixed: [false, false, false], index: 1)
+  log(
+    "span of row 2: {firstSpan.low}..{firstSpan.high}, of row 7: {lastSpan.low}..{lastSpan.high}, with none fixed: {noFixed.low}..{noFixed.high}"
+  )
 
   # ----- the list -----
   let scenes: SceneRegistry = createSceneRegistry()
@@ -643,6 +797,169 @@ func main() {
   )
   log(
     "not taken, back home: {phaseName(world: world, listEntity: listEntity)} (waited the half second: {backFrames > 30}), rows with an offset: {offsetRows(
+      uiSystems: uiSystems
+    ) - 1}"
+  )
+
+  # ----- F. fixed rows: headings at 0 and 5 -----
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildFixedData())
+  componentSet(
+    this: world.listReorders
+    entityId: listEntity
+    data: ListReorder { actionId: "move", label: "Move row", fixedField: "heading" }
+  )
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("the heading (row 0) held: {dragRow(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    listEntity: listEntity
+    index: 0
+    by: 120.0
+    start: 50.0
+  )}")
+  log("row 2 dragged far down: {dragRow(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    listEntity: listEntity
+    index: 2
+    by: 300.0
+    start: 60.0
+  )}")
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildFixedData())
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("row 7 dragged far up: {dragRow(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    listEntity: listEntity
+    index: 7
+    by: -300.0
+    start: 70.0
+  )}")
+
+  # ----- G. keyed: the app's answer also removes the heading -----
+  var keyed: ListView = makeListView()
+  keyed.itemKeyField = "label"
+  componentSet(this: world.listViews, entityId: listEntity, data: own keyed)
+  componentSet(this: world.listViewDatas, entityId: listEntity, data: buildFixedData())
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  setPointer(
+    input: input
+    y: rowMiddle(index: 1)
+    pressed: true
+    down: true
+    released: false
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 80.0
+  )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  setPointer(
+    input: input
+    y: rowMiddle(index: 1)
+    pressed: false
+    down: true
+    released: false
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 80.4
+  )
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  loop var frame: Int = 1, frame <= 30, ++frame {
+    setPointer(
+      input: input
+      y: rowMiddle(index: 1) + 40.0 * frame.toFloat() / 30.0
+      pressed: false
+      down: true
+      released: false
+    )
+    moving = listReorderSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      nowSec: (80.4 + frame.toFloat() / 60.0) as Float64
+    )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  }
+  loop var frame: Int = 1, frame <= 30, ++frame {
+    moving = listReorderSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      nowSec: (80.9 + frame.toFloat() / 60.0) as Float64
+    )
+    listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  }
+  setPointer(
+    input: input
+    y: rowMiddle(index: 2)
+    pressed: false
+    down: false
+    released: true
+  )
+  moving = listReorderSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    nowSec: 81.5
+  )
+  log("keyed, dropped: actions '{actionsText(world: world)}'")
+  frameAdvance(this: world.uiActions)
+  frameAdvance(this: world.uiActions)
+  # The app's answer: Row 1 after Row 2, and the heading (Row 0) gone
+  var answer: List(Int) = [
+    2
+    1
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+  ]
+  componentSet(
+    this: world.listViewDatas
+    entityId: listEntity
+    data: buildFixedOrder(order: answer)
+  )
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  listReorderPoseSystem(world: world, uiSystems: uiSystems)
+  log("keyed, same frame: Row 2 (now 0) offset {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 0
+  )} (drawn at 40: it had stepped up), Row 3 (now 2) {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 2
+  )} (drawn at 120), Row 1 (the moved one, now 1) {rowOffset(
+    world: world
+    uiSystems: uiSystems
+    listEntity: listEntity
+    dataIndex: 1
+  )} (drawn where it was dropped)")
+  let keyedFrames: Int = runUntilIdle(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    listEntity: listEntity
+    scenes: scenes
+    start: 81.52
+    limit: 200
+  )
+  log(
+    "keyed, home: {phaseName(world: world, listEntity: listEntity)}, rows with an offset: {offsetRows(
       uiSystems: uiSystems
     ) - 1}"
   )

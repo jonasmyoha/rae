@@ -5,6 +5,56 @@
 # list's content: row `index` rests at `index * pitch`.
 import Math
 
+# The indexes a row lifted at `index` may land on: `low` to `high`, the rows
+# between the fixed rows around it (`fixed`: one Bool per row, true for a
+# row that stays where it is, ListReorder.fixedField)
+type ReorderSpan {
+  low: Int
+  high: Int
+}
+
+func reorderSpan(fixed: view List(Bool), index: view Int) ret ReorderSpan {
+  var low: Int = 0
+  loop var i: Int = index - 1, i >= 0, --i {
+    if fixed.copyAtFallback(index: i, fallback: false) {
+      low = i + 1
+      break
+    }
+  }
+  var high: Int = fixed.length - 1
+  loop var i: Int = index + 1, i < fixed.length, ++i {
+    if fixed.copyAtFallback(index: i, fallback: false) {
+      high = i - 1
+      break
+    }
+  }
+  ret ReorderSpan { low: low, high: high }
+}
+
+# After a drop, the app's new rows by key: for each new row, how far from
+# its resting place it is drawn now (where the same key was drawn,
+# `drawnAt`, one per old row), so it eases from there; 0 for a row that is
+# new
+func reorderKeyedShifts(
+  oldKeys: view List(String)
+  drawnAt: view List(Float)
+  newKeys: view List(String)
+  pitch: view Float
+) ret List(Float) {
+  var shifts: List(Float) = List.create(Float, cap: newKeys.length)
+  loop var index: Int = 0, index < newKeys.length, ++index {
+    var shift: Float = 0.0
+    let key: String = newKeys.copyAtFallback(index: index, fallback: "")
+    loop var old: Int = 0, old < oldKeys.length, ++old {
+      if oldKeys.copyAtFallback(index: old, fallback: "") is key {
+        shift = drawnAt.copyAtFallback(index: old, fallback: index.toFloat() * pitch) - index.toFloat() * pitch
+      }
+    }
+    shifts.add(value: shift)
+  }
+  ret shifts
+}
+
 # The index a lifted row whose top is at `rowY` would land on
 func reorderTargetIndex(rowY: view Float, pitch: view Float, count: view Int) ret Int {
   if pitch <= 0.0 or count <= 0 {
