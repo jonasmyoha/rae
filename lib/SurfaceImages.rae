@@ -144,6 +144,9 @@ func setSurfaceImages(
     let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
     if width is not size or height is not size {
       log("surface image must be a 512 x 512 PNG: {path}")
+      unsafe {
+        rae_ext_rae_buf_free(buf: pixels)
+      }
       ret false
     }
     var linear: List(Float) = List.create(Float, cap: size * size * 4)
@@ -156,6 +159,10 @@ func setSurfaceImages(
       linear.add(value: surfaceLinear(value: ((packed / 256) % 256).toFloat() / 255.0))
       linear.add(value: surfaceLinear(value: (packed % 256).toFloat() / 255.0))
       linear.add(value: ((packed / 16777216) % 256).toFloat() / 255.0)
+    }
+    # loadPng's buffer is the caller's: 512 x 512 Ints, 2 MB per picture
+    unsafe {
+      rae_ext_rae_buf_free(buf: pixels)
     }
     decoded.add(value: own linear)
   }

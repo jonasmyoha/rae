@@ -21,6 +21,7 @@ open app3d/CharacterController
 open app3d/WalkerCharacter
 open app3d/Characters
 open app3d/WalkerPhysics
+open app3d/WalkerCubes
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
 open app3d/WalkerWorld
@@ -32,10 +33,19 @@ open box3d/ecs/CharacterMover
 open app3d/Climbing
 open app3d/Wander
 open app3d/CharacterHeight
+open app3d/walkerNetSystem/WalkerNetSystem
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
 enum WalkerLand { island, forest }
+
+# The walker kit's own assets (the walker's model and clips, its palette, the
+# UI scenes and their font): the engine's, shared by every walker app. A
+# "lib/..." name resolves from the Rae the app builds against (Sys.stdlibPath:
+# here when the app runs in the Rae checkout, else $RAE_STDLIB, which `rae
+# run` sets to the toolchain's lib/), so a downstream project names them with
+# this and never copies them or hard-codes a path (docs/walker-kit.md).
+const walkerAssets: String = "lib/assets/walker/"
 
 # What makes one walker app different from another (app3d/WalkerApp)
 type WalkerAppSettings {
@@ -43,7 +53,9 @@ type WalkerAppSettings {
   title: String
   # The hot-reload state and window geometry are kept under this id
   appId: String
-  # The folder of the walker's model, clips, UI scenes and environment meshes
+  # The folder of the walker's model, clips, UI scenes and environment meshes:
+  # `walkerAssets` for the kit's own, or a game's own folder with the same
+  # files (a "lib/..." folder resolves through the toolchain, Sys.stdlibPath)
   assets: String
   # The forward renderer (4x MSAA, SSAO from a depth + normal pre-pass)
   # instead of the deferred one. A forward frame has no water: no sea, no
@@ -53,6 +65,10 @@ type WalkerAppSettings {
   # A stand of the hand-made T02 trees (app3d/ReferenceTree) among the wide
   # forest, ahead of the spawn (WalkerLand.forest only)
   referenceTree: Bool = false
+  # Offline, or host or join a networked session through a relay
+  # (app3d/walkerNetSystem). Offline here takes the environment's:
+  # RAE_WALKER_NET=host|join, RAE_WALKER_RELAY=host:port, RAE_WALKER_TOKEN
+  net: WalkerNetSettings = offlineWalkerNetSettings()
 }
 
 # A walker day lasts 30 minutes of wall time (app3d/TimeOfDay's default is

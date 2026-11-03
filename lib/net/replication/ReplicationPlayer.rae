@@ -1,0 +1,289 @@
+# A player's side of replication (lib/net/replication, docs/replication.md):
+# the snapshots it rebuilt from the host's deltas, the map from net ids to
+# its own entities, and the inputs it sends.
+#
+# Each frame: hand every message from the host to `replicaReceiveSystem`;
+# when `replicaHasUpdate`, run the apply system (sync the entities, then one
+# `applyReplicaTable` per chosen table, then `replicaFinishApply`); and send
+# the frame's input with `replicaSendInput`, which also acknowledges the
+# newest snapshot.
+open ecs/Entity
+open collections/IntMap
+open net/Wire
+open net/Connection
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+
+type ReplicationPlayer {
+  config: ReplicationConfig
+  snapshots: List(ReplicaSnapshot)
+  # The newest snapshot rebuilt (-1: none), and the one last applied
+  latestTick: Int
+  appliedTick: Int
+  # The snapshot being assembled from its parts
+  assemblingTick: Int
+  assemblingBase: Int
+  partCount: Int
+  partsHave: Int
+  parts: List(List(UInt8))
+  partHas: List(Bool)
+  # Net id -> this side's entity, and back (by entity index)
+  entityByNetId: IntMap(EntityId)
+  netIdByEntityIndex: IntMap(Int)
+  # Entities whose net id left the newest snapshot: the app destroys them
+  goneEntityIds: List(EntityId)
+  # Decoding scratch
+  changes: List(RecordChange)
+  differences: List(Int)
+  changeLookup: IntMap(Int)
+  removedNetIds: IntMap(Int)
+  removedKeys: IntMap(Int)
+  netIdsSeen: IntMap(Int)
+  # The header of the snapshot being assembled: own net id, applied input
+  assemblingOwn: Int
+  assemblingApplied: Int
+  # From the newest snapshot: this player's own entity (-1: none) and the
+  # newest of its inputs the host had applied (-1: none)
+  ownNetId: Int
+  hostAppliedInputTick: Int
+  # A new snapshot arrived whose own state the app has not taken yet
+  ownSnapshotFresh: Bool
+  # Inputs sent and not yet applied by the host (tick, count, values ...):
+  # prediction replays them on top of each snapshot
+  pendingInputs: List(Int)
+  # The estimate of the host's snapshot clock, in ticks, at `clockMs`
+  clockTick: Float
+  clockMs: Int
+  clockStarted: Bool
+  # The latest inputs (tick, count, values ...) and the input message
+  recentInputs: List(Int)
+  recentCount: Int
+  inputValues: List(Int)
+  inputMessage: List(UInt8)
+  # Totals
+  snapshotsRebuilt: Int
+  # Snapshots dropped: a part lost, or the baseline no longer here
+  snapshotsDropped: Int
+  bytesReceived: Int
+}
+
+func createReplicationPlayer(config: view ReplicationConfig) ret ReplicationPlayer {
+  var snapshots: List(ReplicaSnapshot) = List.create(ReplicaSnapshot, cap: config.historySize)
+  loop var i: Int = 0, i < config.historySize, ++i {
+    snapshots.add(value: createReplicaSnapshot())
+  }
+  ret ReplicationPlayer {
+    config: config
+    snapshots: snapshots
+    latestTick: -1
+    appliedTick: -1
+    assemblingTick: -1
+    assemblingBase: -1
+    partCount: 0
+    partsHave: 0
+    parts: {}
+    partHas: {}
+    entityByNetId: createIntMap(EntityId, cap: 64)
+    netIdByEntityIndex: createIntMap(Int, cap: 64)
+    goneEntityIds: {}
+    changes: {}
+    differences: {}
+    changeLookup: createIntMap(Int, cap: 64)
+    removedNetIds: createIntMap(Int, cap: 16)
+    removedKeys: createIntMap(Int, cap: 16)
+    netIdsSeen: createIntMap(Int, cap: 64)
+    assemblingOwn: 4294967295
+    assemblingApplied: 4294967295
+    ownNetId: -1
+    hostAppliedInputTick: -1
+    ownSnapshotFresh: false
+    pendingInputs: {}
+    clockTick: 0.0
+    clockMs: 0
+    clockStarted: false
+    recentInputs: {}
+    recentCount: 0
+    inputValues: {}
+    inputMessage: List.create(UInt8, cap: 256)
+    snapshotsRebuilt: 0
+    snapshotsDropped: 0
+    bytesReceived: 0
+  }
+}
+
+func playerSlot(player: view ReplicationPlayer, tick: view Int) ret Int {
+  ret tick % player.config.historySize
+}
+
+# A new snapshot is rebuilt and not yet applied
+func replicaHasUpdate(player: view ReplicationPlayer) ret Bool {
+  ret player.latestTick > player.appliedTick
+}
+
+# This side's entity for `netId`, noEntity() for none
+func replicaEntityOf(player: view ReplicationPlayer, netId: view Int) ret EntityId {
+  if let entityId: EntityId = player.entityByNetId.get(k: netId) {
+    ret entityId
+  }
+  ret noEntity()
+}
+
+# Send this frame's input (tick `tick`) with the last few before it, and the
+# acknowledgment of the newest snapshot, as one unreliable message
+func replicaSendInput(
+  T: type
+  player: mod ReplicationPlayer
+  input: view T
+  tick: view Int
+  connection: mod Connection
+) ret Bool {
+  player.inputValues.clear()
+  appendReplicaValues(
+    T
+    value: input
+    scale: player.config.floatScale
+    values: player.inputValues
+  )
+  # Pending until a snapshot says the host applied it (prediction replays it)
+  player.pendingInputs.add(value: tick)
+  player.pendingInputs.add(value: player.inputValues.length)
+  loop let value: Int in player.inputValues {
+    player.pendingInputs.add(value: value)
+  }
+  if replicaPendingCount(player: player) > maxPendingInputs {
+    dropOldestPending(player: player)
+  }
+  # Keep the newest `inputRedundancy` inputs, oldest first
+  var kept: List(Int) = List.create(
+    Int
+    cap: player.recentInputs.length + player.inputValues.length + 2
+  )
+  var skip: Int = player.recentCount + 1 - player.config.inputRedundancy
+  var at: Int = 0
+  var keptCount: Int = 0
+  loop at < player.recentInputs.length {
+    let count: Int = player.recentInputs.copyAtFallback(index: at + 1, fallback: 0)
+    if skip > 0 {
+      skip = skip - 1
+    } else {
+      loop var i: Int = 0, i < count + 2, ++i {
+        kept.add(value: player.recentInputs.copyAtFallback(index: at + i, fallback: 0))
+      }
+      keptCount = keptCount + 1
+    }
+    at = at + count + 2
+  }
+  kept.add(value: tick)
+  kept.add(value: player.inputValues.length)
+  loop let value: Int in player.inputValues {
+    kept.add(value: value)
+  }
+  player.recentInputs = own kept
+  player.recentCount = keptCount + 1
+  # The message
+  player.inputMessage.clear()
+  writeU8(bytes: player.inputMessage, value: replicaMessageInput)
+  if player.latestTick >= 0 {
+    writeU32(bytes: player.inputMessage, value: player.latestTick)
+  } else {
+    writeU32(bytes: player.inputMessage, value: 4294967295)
+  }
+  writeU8(bytes: player.inputMessage, value: player.recentCount)
+  at = 0
+  loop at < player.recentInputs.length {
+    let count: Int = player.recentInputs.copyAtFallback(index: at + 1, fallback: 0)
+    writeU32(
+      bytes: player.inputMessage
+      value: player.recentInputs.copyAtFallback(index: at, fallback: 0)
+    )
+    writeVarint(bytes: player.inputMessage, value: count)
+    loop var i: Int = 0, i < count, ++i {
+      writeSignedVarint(
+        bytes: player.inputMessage
+        value: player.recentInputs.copyAtFallback(index: at + 2 + i, fallback: 0)
+      )
+    }
+    at = at + count + 2
+  }
+  ret connectionSendUnreliable(
+    connection: connection
+    bytes: player.inputMessage
+    start: 0
+    count: player.inputMessage.length
+  )
+}
+
+# ----- pending inputs (prediction) --------------------------------------------
+
+# A player that sends inputs the host never applies keeps at most this many
+const maxPendingInputs: Int = 256
+
+func replicaPendingCount(player: view ReplicationPlayer) ret Int {
+  var count: Int = 0
+  var at: Int = 0
+  loop at < player.pendingInputs.length {
+    at = at + 2 + player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+    count = count + 1
+  }
+  ret count
+}
+
+# Keep the pending inputs from offset `from` on
+func keepPendingFrom(player: mod ReplicationPlayer, from: view Int) {
+  var kept: List(Int) = List.create(Int, cap: player.pendingInputs.length - from + 1)
+  loop var i: Int = from, i < player.pendingInputs.length, ++i {
+    kept.add(value: player.pendingInputs.copyAtFallback(index: i, fallback: 0))
+  }
+  player.pendingInputs = own kept
+}
+
+func dropOldestPending(player: mod ReplicationPlayer) {
+  keepPendingFrom(
+    player: player
+    from: 2 + player.pendingInputs.copyAtFallback(index: 1, fallback: 0)
+  )
+}
+
+# Forget the pending inputs the host has applied (up to
+# `hostAppliedInputTick`): the newest snapshot already contains them
+func dropAppliedInputs(player: mod ReplicationPlayer) {
+  var at: Int = 0
+  loop at < player.pendingInputs.length and player.pendingInputs.copyAtFallback(
+    index: at
+    fallback: 0
+  ) <= player.hostAppliedInputTick {
+    at = at + 2 + player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+  }
+  if at > 0 {
+    keepPendingFrom(player: player, from: at)
+  }
+}
+
+# Pending input number `index` (0 is the oldest) decoded into `input`: its
+# tick, -1 when there is no such input. Prediction replays them in order.
+func replicaPendingInput(
+  T: type
+  player: view ReplicationPlayer
+  index: view Int
+  input: mod T
+) ret Int {
+  var at: Int = 0
+  var number: Int = 0
+  loop at < player.pendingInputs.length {
+    let count: Int = player.pendingInputs.copyAtFallback(index: at + 1, fallback: 0)
+    if number is index {
+      readReplicaValues(
+        T
+        value: input
+        scale: player.config.floatScale
+        values: player.pendingInputs
+        start: at + 2
+      )
+      ret player.pendingInputs.copyAtFallback(index: at, fallback: -1)
+    }
+    at = at + 2 + count
+    number = number + 1
+  }
+  ret -1
+}

@@ -1,0 +1,10 @@
+# A module whose generic function calls functions qualified by a module
+# that also names a type: Vec3 (module Vec3, type Vec3) and Math.
+import Vec3
+import Math
+
+func runWith(G: type, game: mod G) ret Float {
+  let v: Vec3 = Vec3.create(x: 3.0, y: 2.0, z: 1.5)
+  let w: Vec3 = Vec3.vadd(a: v, b: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+  ret w.x + Math.sqrt(x: 16.0)
+}

@@ -1,0 +1,505 @@
+# Encryption for one connection (lib/net/Connection.rae): the key agreement
+# and the sealing of every packet after the handshake.
+#
+# Keys. Each end makes a fresh random X25519 key pair for the connection
+# (lib/crypto/X25519.rae, lib/crypto/SecureRandom.rae) and sends its public
+# key in the handshake: the connecting end in its connect request, the
+# accepting end in its accept. Both compute the same shared secret, and
+# HKDF-SHA256 (salt: both public keys, info: "rae-net-1" and the connection
+# id) turns it into two 32-byte keys, one per direction. So no two
+# connections share a key, and neither do the two directions of one.
+#
+# Packets. A sealed packet is: kind (1), connection id (4), packet counter
+# (8), then the rest of the plain packet encrypted with ChaCha20-Poly1305
+# (lib/crypto/ChaCha20Poly1305.rae) and its 16-byte tag. The first 13
+# bytes are sent in the clear but covered by the tag, so a relay can route
+# by the connection id and change nothing. The nonce is the 64-bit counter,
+# which never repeats under one key. The receiver keeps the newest counter
+# and the last `replayWindow` it accepted: a packet seen before, or too old
+# to tell, is refused. That is what stops a replayed packet, even one whose
+# 16-bit protocol sequence has wrapped since.
+#
+# Authentication (a session key, `ConnectionConfig.sessionKey`). The
+# public keys travel unsigned, so without one an active attacker in the path
+# (a relay that does more than forward) could put its own keys in both
+# handshakes and read everything. With a session key, a secret both ends
+# have and the path never saw (docs/relay.md, "Invites"), each handshake
+# packet carries a 16-byte proof, HMAC-SHA256 under the session key:
+#   connect request  "rae-net-connect", connection id, connecting key
+#   accept           "rae-net-accept", connection id, connecting key,
+#                    accepting key
+# and a packet whose proof does not match is refused, so a swapped key is
+# caught in the handshake. The session key is also mixed into the HKDF salt,
+# so keys derived without it never open a packet. Both ends must have the
+# same key, or none.
+#
+# Every buffer is made by `createPacketSeal`: sealing and opening a packet
+# allocate nothing.
+open net/Wire
+open crypto/SecureRandom
+open crypto/X25519
+open crypto/ChaCha20Poly1305
+open crypto/Sha256
+
+# The bytes a sealed packet adds: counter (8) and tag (16)
+const sealOverhead: Int = 24
+
+# kind (1), connection id (4), counter (8): sent in the clear, authenticated
+const sealHeaderBytes: Int = 13
+
+const publicKeyBytes: Int = 32
+
+# How many recent packet counters a receiver remembers
+const replayWindow: Int = 256
+
+# The handshake proof's bytes (a truncated HMAC-SHA256)
+const authProofBytes: Int = 16
+
+type PacketSeal {
+  # Whether this connection encrypts at all
+  enabled: Bool
+  # Set once both directions' keys are derived
+  hasKeys: Bool
+  secretKey: List(UInt8)
+  publicKey: List(UInt8)
+  peerPublicKey: List(UInt8)
+  sendKey: List(UInt8)
+  receiveKey: List(UInt8)
+  # The next counter this end seals with
+  sendCounter: Int
+  # The newest counter accepted (-1: none yet) and, per slot, the counters
+  # accepted recently
+  replayNewest: Int
+  replaySeen: List(Int)
+  chacha: ChaChaState
+  nonce: List(UInt8)
+  header: List(UInt8)
+  # The plain packet being sealed, and the packet just opened
+  plain: List(UInt8)
+  opened: List(UInt8)
+  # The secret both ends share, never sent (empty: no authentication)
+  sessionKey: List(UInt8)
+}
+
+func createPacketSeal(
+  enabled: view Bool
+  maxPacketBytes: view Int
+  sessionKey: view List(UInt8)
+) ret PacketSeal {
+  var replaySeen: List(Int) = zeroInts(count: replayWindow)
+  loop var i: Int = 0, i < replayWindow, ++i {
+    replaySeen.set(index: i, value: -1)
+  }
+  ret PacketSeal {
+    enabled: enabled
+    hasKeys: false
+    secretKey: zeroBytes(count: 32)
+    publicKey: List.create(UInt8, cap: publicKeyBytes)
+    peerPublicKey: List.create(UInt8, cap: publicKeyBytes)
+    sendKey: List.create(UInt8, cap: 32)
+    receiveKey: List.create(UInt8, cap: 32)
+    sendCounter: 0
+    replayNewest: -1
+    replaySeen: replaySeen
+    chacha: createChaChaState()
+    nonce: zeroBytes(count: aeadNonceBytes)
+    header: List.create(UInt8, cap: sealHeaderBytes)
+    plain: List.create(UInt8, cap: maxPacketBytes)
+    opened: List.create(UInt8, cap: maxPacketBytes)
+    sessionKey: sessionKey
+  }
+}
+
+func sealAuthenticates(seal: view PacketSeal) ret Bool {
+  ret seal.enabled and seal.sessionKey.length > 0
+}
+
+# The bytes a handshake packet carries for its proof (0 without a key)
+func sealProofBytes(seal: view PacketSeal) ret Int {
+  if sealAuthenticates(seal: seal) {
+    ret authProofBytes
+  }
+  ret 0
+}
+
+# The handshake proof: HMAC-SHA256 under the session key of the label, the
+# connection id, the connecting end's public key and, for an accept, the
+# accepting end's (all 32 bytes from their starts)
+func handshakeProof(
+  seal: view PacketSeal
+  accept: view Bool
+  connectionId: view Int
+  connectingKey: view List(UInt8)
+  connectingStart: view Int
+  acceptingKey: view List(UInt8)
+  acceptingStart: view Int
+) ret List(UInt8) {
+  var label: String = "rae-net-connect"
+  if accept {
+    label = "rae-net-accept"
+  }
+  var message: List(UInt8) = List.create(UInt8, cap: 96)
+  loop var i: Int = 0, i < label.length(), ++i {
+    message.add(value: label.byteAt(index: i) as UInt8)
+  }
+  writeU32(bytes: message, value: connectionId)
+  appendCopy(
+    destination: message
+    source: connectingKey
+    start: connectingStart
+    count: publicKeyBytes
+  )
+  if accept {
+    appendCopy(
+      destination: message
+      source: acceptingKey
+      start: acceptingStart
+      count: publicKeyBytes
+    )
+  }
+  ret hmacSha256(key: seal.sessionKey, message: message)
+}
+
+# Append this end's proof to a handshake packet: for a connect request
+# (`accept` false, this end connects) or an accept (this end accepts; the
+# peer's key is known by then)
+func sealWriteProof(
+  seal: view PacketSeal
+  packet: mod List(UInt8)
+  accept: view Bool
+  connectionId: view Int
+) {
+  if not sealAuthenticates(seal: seal) {
+    ret
+  }
+  var proof: List(UInt8) = handshakeProof(
+    seal: seal
+    accept: false
+    connectionId: connectionId
+    connectingKey: seal.publicKey
+    connectingStart: 0
+    acceptingKey: seal.publicKey
+    acceptingStart: 0
+  )
+  if accept {
+    proof = handshakeProof(
+      seal: seal
+      accept: true
+      connectionId: connectionId
+      connectingKey: seal.peerPublicKey
+      connectingStart: 0
+      acceptingKey: seal.publicKey
+      acceptingStart: 0
+    )
+  }
+  appendCopy(
+    destination: packet
+    source: proof
+    start: 0
+    count: authProofBytes
+  )
+}
+
+# Whether a handshake packet's proof is right: the peer's public key is at
+# `keyStart` of `packet` and its proof right after it. A connect request is
+# checked by the accepting end (`accept` false), an accept by the connecting
+# end. Always true without a session key.
+func sealCheckProof(
+  seal: view PacketSeal
+  packet: view List(UInt8)
+  keyStart: view Int
+  accept: view Bool
+  connectionId: view Int
+) ret Bool {
+  if not sealAuthenticates(seal: seal) {
+    ret true
+  }
+  var expected: List(UInt8) = handshakeProof(
+    seal: seal
+    accept: false
+    connectionId: connectionId
+    connectingKey: packet
+    connectingStart: keyStart
+    acceptingKey: packet
+    acceptingStart: keyStart
+  )
+  if accept {
+    expected = handshakeProof(
+      seal: seal
+      accept: true
+      connectionId: connectionId
+      connectingKey: seal.publicKey
+      connectingStart: 0
+      acceptingKey: packet
+      acceptingStart: keyStart
+    )
+  }
+  # Every byte compared, whatever differs first (no early answer to time)
+  var difference: Int = 0
+  loop var i: Int = 0, i < authProofBytes, ++i {
+    difference = difference bitor (readU8(bytes: packet, offset: keyStart + publicKeyBytes + i) bitxor readU8(
+      bytes: expected
+      offset: i
+    ))
+  }
+  ret difference is 0
+}
+
+# Make this end's fresh key pair: false when the system has no random source
+func sealMakeKeyPair(seal: mod PacketSeal) ret Bool {
+  seal.hasKeys = false
+  seal.sendCounter = 0
+  seal.replayNewest = -1
+  loop var i: Int = 0, i < replayWindow, ++i {
+    seal.replaySeen.set(index: i, value: -1)
+  }
+  if not secureRandomFill(bytes: seal.secretKey, start: 0, count: 32) {
+    ret false
+  }
+  seal.publicKey = x25519PublicKey(secretKey: seal.secretKey)
+  ret true
+}
+
+# Whether `count` bytes of `bytes` from `start` are the peer's public key
+# already in use
+func sealSamePeer(seal: view PacketSeal, bytes: view List(UInt8), start: view Int) ret Bool {
+  if seal.peerPublicKey.length is not publicKeyBytes {
+    ret false
+  }
+  loop var i: Int = 0, i < publicKeyBytes, ++i {
+    if readU8(bytes: seal.peerPublicKey, offset: i) is not readU8(bytes: bytes, offset: start + i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Derive both directions' keys from the peer's public key (32 bytes of
+# `bytes` from `start`): false for a public key that gives no secret (a
+# low-order point)
+func sealDeriveKeys(
+  seal: mod PacketSeal
+  bytes: view List(UInt8)
+  start: view Int
+  isConnectingEnd: view Bool
+  connectionId: view Int
+) ret Bool {
+  seal.peerPublicKey.clear()
+  appendCopy(
+    destination: seal.peerPublicKey
+    source: bytes
+    start: start
+    count: publicKeyBytes
+  )
+  let shared: List(UInt8) = x25519SharedSecret(
+    secretKey: seal.secretKey
+    theirPublicKey: seal.peerPublicKey
+  )
+  var combined: Int = 0
+  loop let byte: UInt8 in shared {
+    combined = combined bitor (byte as Int)
+  }
+  if combined is 0 {
+    ret false
+  }
+  # Salt: the connecting end's public key, then the accepting end's
+  var salt: List(UInt8) = List.create(UInt8, cap: 64)
+  if isConnectingEnd {
+    appendCopy(
+      destination: salt
+      source: seal.publicKey
+      start: 0
+      count: publicKeyBytes
+    )
+    appendCopy(
+      destination: salt
+      source: seal.peerPublicKey
+      start: 0
+      count: publicKeyBytes
+    )
+  } else {
+    appendCopy(
+      destination: salt
+      source: seal.peerPublicKey
+      start: 0
+      count: publicKeyBytes
+    )
+    appendCopy(
+      destination: salt
+      source: seal.publicKey
+      start: 0
+      count: publicKeyBytes
+    )
+  }
+  # The session key (when there is one) after the public keys: keys made
+  # without it differ, so its packets never open
+  appendCopy(
+    destination: salt
+    source: seal.sessionKey
+    start: 0
+    count: seal.sessionKey.length
+  )
+  # "rae-net-1" and the connection id
+  var info: List(UInt8) = {
+    114
+    97
+    101
+    45
+    110
+    101
+    116
+    45
+    49
+  }
+  writeU32(bytes: info, value: connectionId)
+  let keys: List(UInt8) = hkdfSha256(
+    salt: salt
+    inputKey: shared
+    info: info
+    length: 64
+  )
+  seal.sendKey.clear()
+  seal.receiveKey.clear()
+  # The first key seals what the connecting end sends
+  if isConnectingEnd {
+    appendCopy(
+      destination: seal.sendKey
+      source: keys
+      start: 0
+      count: 32
+    )
+    appendCopy(
+      destination: seal.receiveKey
+      source: keys
+      start: 32
+      count: 32
+    )
+  } else {
+    appendCopy(
+      destination: seal.sendKey
+      source: keys
+      start: 32
+      count: 32
+    )
+    appendCopy(
+      destination: seal.receiveKey
+      source: keys
+      start: 0
+      count: 32
+    )
+  }
+  seal.hasKeys = true
+  ret true
+}
+
+# The nonce for packet counter `counter`: 4 zero bytes, then the counter
+func setNonce(seal: mod PacketSeal, counter: view Int) {
+  loop var i: Int = 0, i < 4, ++i {
+    seal.nonce.set(index: i, value: 0)
+  }
+  loop var i: Int = 0, i < 8, ++i {
+    seal.nonce.set(index: 4 + i, value: ((counter shr (56 - 8 * i)) bitand 255) as UInt8)
+  }
+}
+
+# Seal the plain packet in `packet` in place (its first 5 bytes, kind and
+# connection id, stay readable)
+func sealPacket(seal: mod PacketSeal, packet: mod List(UInt8)) {
+  seal.plain.clear()
+  appendCopy(
+    destination: seal.plain
+    source: packet
+    start: 0
+    count: packet.length
+  )
+  let counter: Int = seal.sendCounter
+  seal.sendCounter = counter + 1
+  seal.header.clear()
+  appendCopy(
+    destination: seal.header
+    source: seal.plain
+    start: 0
+    count: 5
+  )
+  writeU32(bytes: seal.header, value: counter shr 32)
+  writeU32(bytes: seal.header, value: counter)
+  setNonce(seal: seal, counter: counter)
+  packet.clear()
+  appendCopy(
+    destination: packet
+    source: seal.header
+    start: 0
+    count: sealHeaderBytes
+  )
+  aeadSeal(
+    chacha: seal.chacha
+    key: seal.sendKey
+    keyStart: 0
+    nonce: seal.nonce
+    additional: seal.header
+    additionalStart: 0
+    additionalCount: sealHeaderBytes
+    plain: seal.plain
+    plainStart: 5
+    plainCount: seal.plain.length - 5
+    output: packet
+  )
+}
+
+# Open a sealed packet (`count` bytes of `packet` from `start`) into
+# `seal.opened` as the plain packet: false when there are no keys yet, the
+# packet was changed, sealed under another key, or seen before
+func openPacket(
+  seal: mod PacketSeal
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if not seal.hasKeys or count < sealHeaderBytes + aeadTagBytes {
+    ret false
+  }
+  let counter: Int = (readU32(bytes: packet, offset: start + 5) shl 32) bitor readU32(
+    bytes: packet
+    offset: start + 9
+  )
+  if counter < 0 {
+    ret false
+  }
+  # Too old to tell whether it came before, or already seen: refused
+  if seal.replayNewest >= 0 and counter + replayWindow <= seal.replayNewest {
+    ret false
+  }
+  let slot: Int = counter % replayWindow
+  if intAt(values: seal.replaySeen, index: slot) is counter {
+    ret false
+  }
+  setNonce(seal: seal, counter: counter)
+  seal.opened.clear()
+  appendCopy(
+    destination: seal.opened
+    source: packet
+    start: start
+    count: 5
+  )
+  if not aeadOpen(
+    chacha: seal.chacha
+    key: seal.receiveKey
+    keyStart: 0
+    nonce: seal.nonce
+    additional: packet
+    additionalStart: start
+    additionalCount: sealHeaderBytes
+    sealed: packet
+    sealedStart: start + sealHeaderBytes
+    sealedCount: count - sealHeaderBytes
+    output: seal.opened
+  ) {
+    ret false
+  }
+  # Only a genuine packet moves the window
+  seal.replaySeen.set(index: slot, value: counter)
+  if counter > seal.replayNewest {
+    seal.replayNewest = counter
+  }
+  ret true
+}

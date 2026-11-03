@@ -1,0 +1,46 @@
+# One relay frame: the systems over the RelayServer World, in their fixed
+# order, then the events' frame boundary (docs/relay.md).
+#
+#   receiveSystem  datagrams in; forwards go straight out, control -> events
+#   webSocketReceiveSystem  the same for WebSocket peers' binary messages,
+#                  and peers whose connection closed leave
+#   sessionSystem  open / join / leave requests answered
+#   timeoutSystem  silent peers removed (every 100 ms)
+#   noticeSystem   hosts told of players who left, players of closed sessions
+#
+# `relayRun` is the whole relay process: wait for a datagram (or the next
+# timeout scan), run a frame, repeat.
+open ecs/Event
+open net/Tcp
+open net/relay/RelayServer
+open net/relay/receiveSystem/ReceiveSystem
+open net/relay/sessionSystem/SessionSystem
+open net/relay/timeoutSystem/TimeoutSystem
+open net/relay/noticeSystem/NoticeSystem
+open net/relay/webSocketSystem/WebSocketSystem
+
+func relayFrame(server: mod RelayServer) {
+  server.frameNs = nowNs()
+  receiveSystem(server: server)
+  webSocketReceiveSystem(server: server)
+  sessionSystem(server: server)
+  timeoutSystem(server: server)
+  noticeSystem(server: server)
+  frameAdvance(this: server.requests)
+  frameAdvance(this: server.peersLeft)
+  frameAdvance(this: server.sessionsClosed)
+}
+
+# Wait up to `waitMs` for a datagram (or, with a WebSocket listener, for
+# any of its sockets too), then run one frame
+func relayStep(server: mod RelayServer, waitMs: view Int) {
+  if relayHasWebSocket(server: server) {
+    var router: RelayHttpRouter = { refused: 0 }
+    webSocketFrameBegin(server: server, router: router, waitMs: waitMs)
+    relayFrame(server: server)
+    webSocketFrameEnd(server: server)
+    ret
+  }
+  let ready: Bool = socketWaitReadable(socketId: server.udpSocket.socketId, timeoutMs: waitMs)
+  relayFrame(server: server)
+}

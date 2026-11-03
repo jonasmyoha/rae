@@ -27,9 +27,9 @@ Every material 136 uses has a forward version (`lib/ForwardMaterial.rae`,
 137 is not a copy of 136: both are the walker app shell (`lib/app3d/WalkerApp`,
 with 143), and `Main.rae` holds only the settings: `forward: true` picks the
 forward renderer (and with it no sea and no wading spray), `WalkerLand.island`
-the island. The binary assets (glTF, textures, fonts, UI scenes) are 136's,
-read from `examples/136_walker_character/assets/`, which the iOS bundler
-stages like any cross-example asset path.
+the island. The binary assets (glTF, textures, fonts, UI scenes) are the walker kit's
+shared ones, `walkerAssets` (`lib/assets/walker/`), which the iOS bundler
+stages with the other shared stdlib data (docs/walker-kit.md).
 
 ## Measured (2026-10-15, iPhone 15 Pro)
 

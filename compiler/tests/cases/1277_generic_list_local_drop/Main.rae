@@ -1,0 +1,70 @@
+# A generic function whose local is a `List(T)` (or a `List(List(T))`)
+# instantiated with a struct: the list's drop for that struct is declared
+# before the function that frees the local. It was registered for the
+# template's `T` instead of the concrete type, so the C called an undeclared
+# `rae_core_List_drop_rae_Holder_...` and then defined it after the caller,
+# and the program did not build. Leak-checked at exit.
+type Holder {
+  items: List(Int)
+}
+
+type Crate {
+  holders: List(Holder)
+  label: String
+}
+
+func makeHolder(first: view Int) ret Holder {
+  var holder: Holder = { items: {} }
+  holder.items.add(value: first)
+  ret holder
+}
+
+# A List(T) local, filled and let go
+func countCopies(T: type, value: view T, times: view Int) ret Int {
+  var list: List(T) = List.create(T, cap: 1)
+  loop var i: Int = 0, i < times, ++i {
+    list.add(value: value)
+  }
+  ret list.length
+}
+
+# A List(List(T)) local
+func countNested(T: type, value: view T) ret Int {
+  var rows: List(List(T)) = {}
+  var row: List(T) = {}
+  row.add(value: value)
+  row.add(value: value)
+  rows.add(value: row)
+  var total: Int = 0
+  loop let inner: view List(T) in rows {
+    total = total + inner.length
+  }
+  ret total
+}
+
+# Two levels: the outer generic calls the inner one with its own T
+func countTwice(T: type, value: view T) ret Int {
+  ret countCopies(T, value: value, times: 2) + countNested(T, value: value)
+}
+
+func main() ret Int {
+  let holder: Holder = makeHolder(first: 1)
+  var crate: Crate = { holders: {}, label: "box" }
+  crate.holders.add(value: makeHolder(first: 2))
+  log("Holder: {countCopies(Holder, value: holder, times: 3)} {countNested(Holder, value: holder)}")
+  log(
+    "Crate (a List of structs inside): {countCopies(Crate, value: crate, times: 2)} {countNested(
+      Crate
+      value: crate
+    )}"
+  )
+  log("two levels: {countTwice(Holder, value: holder)}")
+  log(
+    "Int and String, as before: {countCopies(Int, value: 4, times: 2)} {countCopies(
+      String
+      value: "a"
+      times: 3
+    )} {countNested(String, value: "b")}"
+  )
+  ret 0
+}

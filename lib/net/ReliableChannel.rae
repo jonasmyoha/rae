@@ -1,0 +1,251 @@
+# The reliable ordered channel of the connection protocol
+# (lib/net/Connection.rae): every message arrives once and in order.
+#
+# A message is split into fragments of at most `slotBytes` (one fragment for a
+# small message); each fragment gets the next 16-bit message id, so a
+# fragmented message is a run of consecutive ids. The sender keeps each
+# fragment in a slot of its send window until a packet that carried it is
+# acked, and sends it again when no ack came in time. The receiver keeps
+# fragments in its receive window until the run starting at the next id it
+# owes the app is complete, then joins it into the caller's list.
+#
+# `windowSize` is a power of two (lib/net/Connection.rae makes it one), so
+# `id % windowSize` keeps consecutive ids in distinct slots across the
+# 65535 -> 0 wrap.
+#
+# Both windows are fixed tables made once (`windowSize` slots of `slotBytes`
+# each): sending and receiving allocate nothing. A full send window refuses a
+# message (`reliableSend` answers false) instead of growing: that is the
+# back-pressure a caller sees when the peer cannot keep up.
+open net/Wire
+
+type ReliableSender {
+  windowSize: Int
+  slotBytes: Int
+  # The id the next fragment gets
+  nextId: Int
+  # The oldest id not yet acked (`nextId` when nothing is in flight)
+  oldestId: Int
+  # Per slot: the id held (-1 = empty), its length, acked, when it was last
+  # sent (-1 = never), and its place in its message
+  slotId: List(Int)
+  slotLength: List(Int)
+  slotAcked: List(Bool)
+  slotLastSentMs: List(Int)
+  slotFragmentIndex: List(Int)
+  slotFragmentCount: List(Int)
+  # windowSize * slotBytes bytes
+  data: List(UInt8)
+}
+
+type ReliableReceiver {
+  windowSize: Int
+  slotBytes: Int
+  # The id of the next fragment the app is owed
+  nextId: Int
+  slotId: List(Int)
+  slotLength: List(Int)
+  slotFragmentIndex: List(Int)
+  slotFragmentCount: List(Int)
+  data: List(UInt8)
+}
+
+func emptySlots(count: view Int) ret List(Int) {
+  var values: List(Int) = zeroInts(count: count)
+  loop var i: Int = 0, i < count, ++i {
+    values.set(index: i, value: -1)
+  }
+  ret values
+}
+
+func createReliableSender(windowSize: view Int, slotBytes: view Int) ret ReliableSender {
+  ret ReliableSender {
+    windowSize: windowSize
+    slotBytes: slotBytes
+    nextId: 0
+    oldestId: 0
+    slotId: emptySlots(count: windowSize)
+    slotLength: zeroInts(count: windowSize)
+    slotAcked: zeroBools(count: windowSize)
+    slotLastSentMs: zeroInts(count: windowSize)
+    slotFragmentIndex: zeroInts(count: windowSize)
+    slotFragmentCount: zeroInts(count: windowSize)
+    data: zeroBytes(count: windowSize * slotBytes)
+  }
+}
+
+func createReliableReceiver(windowSize: view Int, slotBytes: view Int) ret ReliableReceiver {
+  ret ReliableReceiver {
+    windowSize: windowSize
+    slotBytes: slotBytes
+    nextId: 0
+    slotId: emptySlots(count: windowSize)
+    slotLength: zeroInts(count: windowSize)
+    slotFragmentIndex: zeroInts(count: windowSize)
+    slotFragmentCount: zeroInts(count: windowSize)
+    data: zeroBytes(count: windowSize * slotBytes)
+  }
+}
+
+# How many fragments a message of `count` bytes takes
+func fragmentsFor(count: view Int, slotBytes: view Int) ret Int {
+  if count <= 0 {
+    ret 1
+  }
+  ret (count + slotBytes - 1) / slotBytes
+}
+
+# How many fragments are sent and not yet acked
+func reliableInFlight(sender: view ReliableSender) ret Int {
+  ret sequenceDistance(newer: sender.nextId, older: sender.oldestId)
+}
+
+# Queue `count` bytes of `bytes` from `start` as one message: false when the
+# send window has no room for all its fragments
+func reliableSend(
+  sender: mod ReliableSender
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if count < 0 or start < 0 or start + count > bytes.length {
+    ret false
+  }
+  let fragments: Int = fragmentsFor(count: count, slotBytes: sender.slotBytes)
+  if reliableInFlight(sender: sender) + fragments > sender.windowSize {
+    ret false
+  }
+  loop var index: Int = 0, index < fragments, ++index {
+    let id: Int = sender.nextId
+    let slot: Int = id % sender.windowSize
+    let offset: Int = index * sender.slotBytes
+    var length: Int = count - offset
+    if length > sender.slotBytes {
+      length = sender.slotBytes
+    }
+    sender.slotId.set(index: slot, value: id)
+    sender.slotLength.set(index: slot, value: length)
+    sender.slotAcked.set(index: slot, value: false)
+    sender.slotLastSentMs.set(index: slot, value: -1)
+    sender.slotFragmentIndex.set(index: slot, value: index)
+    sender.slotFragmentCount.set(index: slot, value: fragments)
+    copyInto(
+      destination: sender.data
+      destinationStart: slot * sender.slotBytes
+      source: bytes
+      sourceStart: start + offset
+      count: length
+    )
+    sender.nextId = sequenceNext(sequence: id)
+  }
+  ret true
+}
+
+# A packet that carried fragment `id` was acked: the fragment is done. The
+# window's front moves past every acked fragment.
+func reliableAcked(sender: mod ReliableSender, id: view Int) {
+  let slot: Int = id % sender.windowSize
+  if intAt(values: sender.slotId, index: slot) is id {
+    sender.slotAcked.set(index: slot, value: true)
+  }
+  loop sender.oldestId is not sender.nextId {
+    let front: Int = sender.oldestId % sender.windowSize
+    if intAt(values: sender.slotId, index: front) is not sender.oldestId or not boolAt(
+      values: sender.slotAcked
+      index: front
+    ) {
+      break
+    }
+    sender.slotId.set(index: front, value: -1)
+    sender.oldestId = sequenceNext(sequence: sender.oldestId)
+  }
+}
+
+# Whether the fragment in `slot` should go out now: never sent, or sent
+# `resendMs` ago with no ack
+func reliableSlotDue(
+  sender: view ReliableSender
+  slot: view Int
+  nowMs: view Int
+  resendMs: view Int
+) ret Bool {
+  if intAt(values: sender.slotId, index: slot) < 0 or boolAt(values: sender.slotAcked, index: slot) {
+    ret false
+  }
+  let lastSentMs: Int = intAt(values: sender.slotLastSentMs, index: slot)
+  ret lastSentMs < 0 or nowMs - lastSentMs >= resendMs
+}
+
+# Store fragment `id` (`count` bytes of `packet` from `start`): false when it
+# is a duplicate, already delivered, outside the window or malformed
+func reliableReceive(
+  receiver: mod ReliableReceiver
+  id: view Int
+  fragmentIndex: view Int
+  fragmentCount: view Int
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if count < 0 or count > receiver.slotBytes or fragmentCount < 1 or fragmentCount > receiver.windowSize or fragmentIndex >= fragmentCount {
+    ret false
+  }
+  # Old ids (already delivered) are far "ahead" around the wrap: refused too
+  if sequenceDistance(newer: id, older: receiver.nextId) >= receiver.windowSize {
+    ret false
+  }
+  let slot: Int = id % receiver.windowSize
+  if intAt(values: receiver.slotId, index: slot) is id {
+    ret false
+  }
+  receiver.slotId.set(index: slot, value: id)
+  receiver.slotLength.set(index: slot, value: count)
+  receiver.slotFragmentIndex.set(index: slot, value: fragmentIndex)
+  receiver.slotFragmentCount.set(index: slot, value: fragmentCount)
+  copyInto(
+    destination: receiver.data
+    destinationStart: slot * receiver.slotBytes
+    source: packet
+    sourceStart: start
+    count: count
+  )
+  ret true
+}
+
+# Join the next whole message into `message` (replacing its contents): false
+# when its fragments are not all here yet
+func reliableDeliver(receiver: mod ReliableReceiver, message: mod List(UInt8)) ret Bool {
+  let firstSlot: Int = receiver.nextId % receiver.windowSize
+  if intAt(values: receiver.slotId, index: firstSlot) is not receiver.nextId {
+    ret false
+  }
+  let fragments: Int = intAt(values: receiver.slotFragmentCount, index: firstSlot)
+  loop var index: Int = 0, index < fragments, ++index {
+    let id: Int = sequenceAdd(sequence: receiver.nextId, count: index)
+    let slot: Int = id % receiver.windowSize
+    if intAt(values: receiver.slotId, index: slot) is not id {
+      ret false
+    }
+    # A run whose parts disagree came from a broken peer: never deliver it
+    # (the channel stalls rather than hand over wrong bytes)
+    if intAt(values: receiver.slotFragmentIndex, index: slot) is not index or intAt(
+      values: receiver.slotFragmentCount
+      index: slot
+    ) is not fragments {
+      ret false
+    }
+  }
+  message.clear()
+  loop var index: Int = 0, index < fragments, ++index {
+    let slot: Int = sequenceAdd(sequence: receiver.nextId, count: index) % receiver.windowSize
+    appendCopy(
+      destination: message
+      source: receiver.data
+      start: slot * receiver.slotBytes
+      count: intAt(values: receiver.slotLength, index: slot)
+    )
+    receiver.slotId.set(index: slot, value: -1)
+  }
+  receiver.nextId = sequenceAdd(sequence: receiver.nextId, count: fragments)
+  ret true
+}

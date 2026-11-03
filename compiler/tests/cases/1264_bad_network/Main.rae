@@ -1,0 +1,257 @@
+# lib/net/BadNetwork: loss, latency, jitter, duplicates and reordering by
+# settings, repeatable from a seed; RAE_BAD_NETWORK for apps; a UDP send
+# through it; no allocation per packet.
+open net/Wire
+open net/Tcp
+open net/Udp
+open net/BadNetwork
+open Sys
+
+# What came out of one run: per delivered packet its number and the time
+type Run {
+  numbers: List(Int)
+  times: List(Int)
+}
+
+# Send `count` numbered packets, one per ms, and collect what comes out
+func runNetwork(network: mod BadNetwork, count: view Int) ret Run {
+  var packet: List(UInt8) = List.create(UInt8, cap: 16)
+  var arrived: List(UInt8) = List.create(UInt8, cap: 16)
+  var run: Run = {
+    numbers: List.create(Int, cap: count * 2)
+    times: List.create(Int, cap: count * 2)
+  }
+  loop var nowMs: Int = 0, nowMs < count + 1000, ++nowMs {
+    if nowMs < count {
+      packet.clear()
+      writeU32(bytes: packet, value: nowMs)
+      badNetworkSend(
+        network: network
+        packet: packet
+        start: 0
+        count: packet.length
+        destination: noNetAddress()
+        nowMs: nowMs
+      )
+    }
+    loop badNetworkNext(network: network, packet: arrived, nowMs: nowMs).ready {
+      run.numbers.add(value: readU32(bytes: arrived, offset: 0))
+      run.times.add(value: nowMs)
+    }
+  }
+  ret run
+}
+
+func sameRun(first: view Run, second: view Run) ret Bool {
+  if first.numbers.length is not second.numbers.length {
+    ret false
+  }
+  loop var i: Int = 0, i < first.numbers.length, ++i {
+    if intAt(values: first.numbers, index: i) is not intAt(values: second.numbers, index: i) or intAt(
+      values: first.times
+      index: i
+    ) is not intAt(values: second.times, index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# How many delivered packets came after one with a higher number
+func outOfOrder(run: view Run) ret Int {
+  var count: Int = 0
+  var highest: Int = -1
+  loop let number: Int in run.numbers {
+    if number < highest {
+      count = count + 1
+    }
+    if number > highest {
+      highest = number
+    }
+  }
+  ret count
+}
+
+# The smallest and largest delay (arrival - send time)
+func delayRange(run: view Run) ret String {
+  var smallest: Int = 1000000
+  var largest: Int = -1
+  loop var i: Int = 0, i < run.numbers.length, ++i {
+    let delay: Int = intAt(values: run.times, index: i) - intAt(values: run.numbers, index: i)
+    if delay < smallest {
+      smallest = delay
+    }
+    if delay > largest {
+      largest = delay
+    }
+  }
+  ret "{smallest}..{largest} ms"
+}
+
+func main() ret Int {
+  # The usual bad network: 10% loss, 150 ms, 30 ms jitter
+  var first: BadNetwork = createBadNetwork(
+    settings: badNetworkSettings()
+    maxPacketBytes: 64
+    capacity: 512
+  )
+  let firstRun: Run = runNetwork(network: first, count: 2000)
+  let lossPercent: Int = first.stats.dropped * 100 / first.stats.sent
+  log(
+    "10% loss: lost {lossPercent}% ({lossPercent >= 8 and lossPercent <= 12}), delivered + dropped = sent {first.stats.delivered + first.stats.dropped is first.stats.sent}"
+  )
+  log(
+    "150 ms + 30 ms jitter: delays {delayRange(run: firstRun)}, jitter alone keeps the order: {outOfOrder(
+      run: firstRun
+    ) is 0}"
+  )
+
+  # The same seed repeats exactly; another seed does not
+  var again: BadNetwork = createBadNetwork(
+    settings: badNetworkSettings()
+    maxPacketBytes: 64
+    capacity: 512
+  )
+  log(
+    "same seed, same run: {sameRun(first: firstRun, second: runNetwork(network: again, count: 2000))}"
+  )
+  var otherSettings: BadNetworkSettings = badNetworkSettings()
+  otherSettings.seed = 2
+  var other: BadNetwork = createBadNetwork(
+    settings: otherSettings
+    maxPacketBytes: 64
+    capacity: 512
+  )
+  log(
+    "another seed, another run: {not sameRun(
+      first: firstRun
+      second: runNetwork(network: other, count: 2000)
+    )}"
+  )
+
+  # Reordering and duplicates, no loss
+  var messy: BadNetworkSettings = goodNetworkSettings()
+  messy.latencyMs = 50
+  messy.reorderPercent = 10
+  messy.reorderHoldMs = 40
+  messy.duplicatePercent = 5
+  var shuffled: BadNetwork = createBadNetwork(settings: messy, maxPacketBytes: 64, capacity: 512)
+  let shuffledRun: Run = runNetwork(network: shuffled, count: 2000)
+  log(
+    "10% reordered: {shuffled.stats.reordered >= 150 and shuffled.stats.reordered <= 250}, out of order {outOfOrder(
+      run: shuffledRun
+    ) > 0}, delays {delayRange(run: shuffledRun)}"
+  )
+  log(
+    "5% duplicated: {shuffled.stats.duplicated >= 60 and shuffled.stats.duplicated <= 140}, delivered = sent + duplicated {shuffled.stats.delivered is 2000 + shuffled.stats.duplicated}"
+  )
+
+  # An exact loss for a test: the third packet from now
+  var exact: BadNetwork = createBadNetwork(
+    settings: goodNetworkSettings()
+    maxPacketBytes: 64
+    capacity: 16
+  )
+  exact.dropCountdown = 3
+  let exactRun: Run = runNetwork(network: exact, count: 5)
+  log(
+    "drop the third: {exactRun.numbers.length} of 5 arrive, missing {not exactRun.numbers.contains(
+      value: 2
+    )}"
+  )
+
+  # A full pool drops and counts instead of growing
+  var small: BadNetwork = createBadNetwork(
+    settings: badNetworkSettings()
+    maxPacketBytes: 64
+    capacity: 4
+  )
+  let smallRun: Run = runNetwork(network: small, count: 100)
+  log(
+    "pool of 4: overflowed {small.stats.overflowed > 0}, still delivered {smallRun.numbers.length > 0}"
+  )
+
+  # Settings from text, and from RAE_BAD_NETWORK
+  let parsed: BadNetworkSettings = parseBadNetworkSettings(
+    text: "loss=5, latency=80,jitter=10,duplicate=1,reorder=2,hold=30,seed=9,color=3"
+  )
+  log(
+    "parsed: loss {parsed.lossPercent} latency {parsed.latencyMs} jitter {parsed.jitterMs} duplicate {parsed.duplicatePercent} reorder {parsed.reorderPercent} hold {parsed.reorderHoldMs} seed {parsed.seed}"
+  )
+  let preset: BadNetworkSettings = parseBadNetworkSettings(text: "on")
+  log("on: loss {preset.lossPercent} latency {preset.latencyMs} jitter {preset.jitterMs}")
+  let unset: Bool = setEnv(name: "RAE_BAD_NETWORK", value: "")
+  log("unset: enabled {badNetworkFromEnvironment(maxPacketBytes: 1200, capacity: 64).enabled}")
+  let set: Bool = setEnv(name: "RAE_BAD_NETWORK", value: "latency=50,loss=0,jitter=0")
+  var fromEnvironment: BadNetwork = badNetworkFromEnvironment(maxPacketBytes: 1200, capacity: 64)
+  log("set: enabled {fromEnvironment.enabled}, latency {fromEnvironment.settings.latencyMs}")
+
+  # A UDP app: sends are held, and the frame's flush sends what is due
+  var sender: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  var receiver: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  let destination: NetAddress = udpLoopbackAddress(udpSocket: receiver, family: AddressFamily.ipv4)
+  var bytes: List(UInt8) = List.create(UInt8, cap: 64)
+  writeU32(bytes: bytes, value: 4242)
+  let held: IoResult = udpSendThrough(
+    network: fromEnvironment
+    udpSocket: sender
+    bytes: bytes
+    start: 0
+    count: bytes.length
+    destination: destination
+    nowMs: 1000
+  )
+  log(
+    "held: {held.status}, flushed at 1020 ms: {badNetworkFlush(
+      network: fromEnvironment
+      udpSocket: sender
+      nowMs: 1020
+    )}, receiver has data {socketWaitReadable(socketId: receiver.socketId, timeoutMs: 50)}"
+  )
+  log(
+    "flushed at 1050 ms: {badNetworkFlush(network: fromEnvironment, udpSocket: sender, nowMs: 1050)}"
+  )
+  var inbox: List(UInt8) = List.create(UInt8, cap: 64)
+  let waited: Bool = socketWaitReadable(socketId: receiver.socketId, timeoutMs: 2000)
+  let datagram: Datagram = udpReceive(udpSocket: receiver, bytes: inbox, maxBytes: 64)
+  log("received {datagram.status} {readU32(bytes: inbox, offset: 0)}")
+  # Off: straight through
+  var passThrough: BadNetwork = noBadNetwork()
+  let direct: IoResult = udpSendThrough(
+    network: passThrough
+    udpSocket: sender
+    bytes: bytes
+    start: 0
+    count: bytes.length
+    destination: destination
+    nowMs: 0
+  )
+  log("off: sent at once {socketWaitReadable(socketId: receiver.socketId, timeoutMs: 2000)}")
+  udpClose(udpSocket: sender)
+  udpClose(udpSocket: receiver)
+
+  # Sending and taking out packets allocates nothing
+  var steady: BadNetwork = createBadNetwork(
+    settings: badNetworkSettings()
+    maxPacketBytes: 64
+    capacity: 512
+  )
+  var packet: List(UInt8) = List.create(UInt8, cap: 64)
+  var arrived: List(UInt8) = List.create(UInt8, cap: 64)
+  writeU32(bytes: packet, value: 1)
+  let before: Int = allocationCount()
+  loop var nowMs: Int = 0, nowMs < 3000, ++nowMs {
+    badNetworkSend(
+      network: steady
+      packet: packet
+      start: 0
+      count: packet.length
+      destination: destination
+      nowMs: nowMs
+    )
+    loop badNetworkNext(network: steady, packet: arrived, nowMs: nowMs).ready {
+    }
+  }
+  log("3000 packets: {allocationCount() - before} allocations")
+  ret 0
+}

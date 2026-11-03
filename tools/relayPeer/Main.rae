@@ -1,0 +1,453 @@
+# A host or a player for tools/relay/loopback-check.sh: the relay test with
+# every side in its own process (lib/net/relay, docs/relay.md).
+#
+#   relayPeer host --relay-port P [--seconds S]
+#       opens a session, prints "token T", echoes every message back to its
+#       sender, and at the end prints what it received
+#   relayPeer player --relay-port P --token T [--count N] [--start-after-ms D]
+#       [--leave-after-ms L] [--seconds S]
+#       joins (after D ms), sends N numbered messages, checks the echoes;
+#       with L, leaves L ms after its echoes are all back
+#   relayPeer bench-host --relay-port P [--seconds S]
+#       prints "token T" and "direct port D" and echoes every payload back,
+#       through the relay and on a plain UDP socket
+#   relayPeer bench-player --relay-port P --token T --direct-port D
+#   relayPeer game-host / game-player: the host-migration game
+#       (MigrationGame.rae)
+# Every mode takes --relay-only (no direct path; the bench uses it, so it
+# measures the relay). A player given --web-socket-port P reaches the relay
+# over WebSocket on that port (as a browser would), not UDP.
+#       measures round trips through the relay and directly, then the
+#       relay's throughput with 64 round trips in flight
+open net/Tcp
+open net/Udp
+open net/Poller
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayClient
+open net/relay/RelayConnections
+open Sys
+open String
+
+func argumentAfter(name: view String, fallback: view String) ret String {
+  loop var i: Int = 0, i + 1 < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret argAt(index: i + 1)
+    }
+  }
+  ret fallback
+}
+
+func hasArgument(name: view String) ret Bool {
+  loop var i: Int = 0, i < argCount(), ++i {
+    if argAt(index: i) is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The client settings: --relay-only keeps every packet on the relay
+func clientConfigArgument() ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.relayOnly = hasArgument(name: "--relay-only")
+  ret config
+}
+
+func relayAddressArgument() ret NetAddress {
+  let port: Int = argumentAfter(name: "--relay-port", fallback: "7777").toInt()
+  ret resolveAddress(host: "127.0.0.1", port: port).address
+}
+
+# Wait for the client's socket (at most `waitMs`)
+func waitFor(client: view RelayClient, waitMs: view Int) {
+  let ready: Bool = socketWaitReadable(socketId: client.udpSocket.socketId, timeoutMs: waitMs)
+}
+
+func runHost() ret Int {
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "10").toInt()
+  var host: RelayHost = createRelayHost(
+    relayAddress: relayAddressArgument()
+    clientConfig: clientConfigArgument()
+    connectionConfig: defaultConnectionConfig()
+  )
+  let startMs: Int = nowMs()
+  relayClientOpen(client: host.client, nowMs: 0)
+  var printedToken: Bool = false
+  var received: Int = 0
+  var left: Int = 0
+  var mostPlayers: Int = 0
+  var message: List(UInt8) = List.create(UInt8, cap: 64)
+  loop nowMs() - startMs < seconds * 1000 {
+    waitFor(client: host.client, waitMs: 5)
+    let now: Int = nowMs() - startMs
+    relayHostReceive(host: host, nowMs: now)
+    if not printedToken and relayClientIsReady(client: host.client) {
+      log("token {relayTokenText(token: host.client.token)}")
+      printedToken = true
+    }
+    loop var i: Int = 0, i < host.peers.length, ++i {
+      if let peer: mod HostPeer = host.peers.modAt(index: i) {
+        loop connectionReceive(connection: peer.connection, message: message) is MessageChannel.reliable {
+          received = received + 1
+          let echoed: Bool = connectionSendReliable(
+            connection: peer.connection
+            bytes: message
+            start: 0
+            count: message.length
+          )
+        }
+      }
+    }
+    relayHostSend(host: host, nowMs: now)
+    left = left + host.peersLeft.length
+    if host.peers.length > mostPlayers {
+      mostPlayers = host.peers.length
+    }
+  }
+  log(
+    "host: received {received} messages, at most {mostPlayers} players at once, told of {left} leaving, {host.peers.length} still here"
+  )
+  ret 0
+}
+
+func runPlayer() ret Int {
+  let token: String = argumentAfter(name: "--token", fallback: "")
+  let count: Int = argumentAfter(name: "--count", fallback: "50").toInt()
+  let startAfterMs: Int = argumentAfter(name: "--start-after-ms", fallback: "0").toInt()
+  let leaveAfterMs: Int = argumentAfter(name: "--leave-after-ms", fallback: "-1").toInt()
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "10").toInt()
+  sleep(ms: startAfterMs)
+  var player: RelayPlayer = createRelayPlayer(
+    relayAddress: relayAddressArgument()
+    clientConfig: clientConfigArgument()
+    connectionConfig: defaultConnectionConfig()
+  )
+  let webSocketPort: Int = argumentAfter(name: "--web-socket-port", fallback: "-1").toInt()
+  if webSocketPort >= 0 {
+    relayClientClose(client: player.client)
+    player = createRelayPlayerWith(
+      client: createRelayClientOverWebSocket(
+        host: "127.0.0.1"
+        port: webSocketPort
+        config: clientConfigArgument()
+        connectTimeoutMs: 2000
+      )
+      connectionConfig: defaultConnectionConfig()
+    )
+  }
+  let startMs: Int = nowMs()
+  if not relayPlayerJoin(
+    player: player
+    tokenText: token
+    connectionId: startMs bitand 65535
+    nowMs: 0
+  ) {
+    log("player: not a token: {token}")
+    ret 1
+  }
+  var sent: Int = 0
+  var echoes: Int = 0
+  var outOfOrder: Int = 0
+  var echoedAtMs: Int = -1
+  var leftAtMs: Int = -1
+  var message: List(UInt8) = List.create(UInt8, cap: 64)
+  loop nowMs() - startMs < seconds * 1000 and leftAtMs < 0 and not player.sessionClosed {
+    let ready: Bool = socketWaitReadable(
+      socketId: relayClientSocketId(client: player.client)
+      timeoutMs: 5
+    )
+    let now: Int = nowMs() - startMs
+    relayPlayerReceive(player: player, nowMs: now)
+    # At most 32 messages waiting for their echo, so neither side's
+    # reliable window (64) fills up
+    loop connectionIsConnected(connection: player.connection) and sent < count and sent - echoes < 32 {
+      message.clear()
+      writeU32(bytes: message, value: sent)
+      if not connectionSendReliable(
+        connection: player.connection
+        bytes: message
+        start: 0
+        count: message.length
+      ) {
+        break
+      }
+      sent = sent + 1
+    }
+    loop connectionReceive(connection: player.connection, message: message) is MessageChannel.reliable {
+      if readU32(bytes: message, offset: 0) is not echoes {
+        outOfOrder = outOfOrder + 1
+      }
+      echoes = echoes + 1
+      if echoes is count {
+        echoedAtMs = now
+      }
+    }
+    relayPlayerSend(player: player, nowMs: now)
+    if leaveAfterMs >= 0 and echoedAtMs >= 0 and now - echoedAtMs >= leaveAfterMs {
+      connectionDisconnect(connection: player.connection, nowMs: now)
+      relayPlayerSend(player: player, nowMs: now)
+      relayPlayerLeave(player: player, nowMs: now)
+      leftAtMs = now
+    }
+  }
+  var ending: String = "stayed"
+  if leftAtMs >= 0 {
+    ending = "left"
+  } else if player.sessionClosed {
+    ending = "session closed"
+  }
+  var path: String = "relay"
+  if relayClientUsesWebSocket(client: player.client) {
+    path = "WebSocket"
+  } else if relayClientPathState(client: player.client, peerId: hostPeerId) is DirectPathState.direct {
+    path = "direct"
+  }
+  log(
+    "player {player.client.peerId}: echoes {echoes}/{count}, out of order {outOfOrder}, {ending}, path {path}"
+  )
+  ret 0
+}
+
+func runBenchHost() ret Int {
+  let seconds: Int = argumentAfter(name: "--seconds", fallback: "20").toInt()
+  var client: RelayClient = createRelayClient(
+    relayAddress: relayAddressArgument()
+    config: clientConfigArgument()
+  )
+  var direct: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  if let port: Int = socketLocalPort(socketId: direct.socketId) {
+    log("direct port {port}")
+  }
+  # One wait for both sockets: the relay's and the direct one
+  var poller: Poller = createPoller()
+  let watchRelay: NetStatus = pollerWatch(
+    poller: poller
+    socketId: client.udpSocket.socketId
+    readable: true
+    writable: false
+  )
+  let watchDirect: NetStatus = pollerWatch(
+    poller: poller
+    socketId: direct.socketId
+    readable: true
+    writable: false
+  )
+  var ready: List(Readiness) = List.create(Readiness, cap: 4)
+  let startMs: Int = nowMs()
+  relayClientOpen(client: client, nowMs: 0)
+  var printedToken: Bool = false
+  var bytes: List(UInt8) = List.create(UInt8, cap: relayDatagramBytes)
+  loop nowMs() - startMs < seconds * 1000 {
+    let waited: NetStatus = pollWait(poller: poller, ready: ready, timeoutMs: 5)
+    let now: Int = nowMs() - startMs
+    relayClientUpdate(client: client, nowMs: now)
+    loop {
+      let incoming: RelayIncoming = relayClientReceive(client: client, nowMs: now)
+      if incoming.kind is RelayIncomingKind.none {
+        break
+      }
+      if incoming.kind is RelayIncomingKind.packet {
+        let sent: IoResult = relayClientSend(
+          client: client
+          peerId: incoming.peerId
+          bytes: client.inbox
+          start: incoming.start
+          count: incoming.count
+          nowMs: now
+        )
+      }
+    }
+    if not printedToken and relayClientIsReady(client: client) {
+      log("token {relayTokenText(token: client.token)}")
+      printedToken = true
+    }
+    loop {
+      let datagram: Datagram = udpReceive(
+        udpSocket: direct
+        bytes: bytes
+        maxBytes: relayDatagramBytes
+      )
+      if datagram.status is not NetStatus.ok {
+        break
+      }
+      let sent: IoResult = udpSend(
+        udpSocket: direct
+        bytes: bytes
+        start: 0
+        count: bytes.length
+        destination: datagram.peer
+      )
+    }
+  }
+  ret 0
+}
+
+# The median of `values` (sorted in place)
+func median(values: mod List(Int)) ret Int {
+  values.sort()
+  ret values.copyAtFallback(index: values.length / 2, fallback: 0)
+}
+
+# `rounds` round trips one at a time, each a 64-byte payload: the median
+# in microseconds (-1 when an answer did not come)
+func timeRelayRoundTrips(client: mod RelayClient, rounds: view Int) ret Int {
+  var payload: List(UInt8) = List.create(UInt8, cap: 64)
+  payload.addDefaults(count: 64)
+  var times: List(Int) = List.create(Int, cap: rounds)
+  loop var i: Int = 0, i < rounds, ++i {
+    let begin: Int = nowNs()
+    let sent: IoResult = relayClientSend(
+      client: client
+      peerId: hostPeerId
+      bytes: payload
+      start: 0
+      count: payload.length
+      nowMs: nowMs()
+    )
+    var answered: Bool = false
+    loop not answered and nowNs() - begin < 1000000000 {
+      if relayClientReceive(client: client, nowMs: nowMs()).kind is RelayIncomingKind.packet {
+        answered = true
+      }
+    }
+    if not answered {
+      ret -1
+    }
+    times.add(value: (nowNs() - begin) / 1000)
+  }
+  ret median(values: times)
+}
+
+func timeDirectRoundTrips(destination: view NetAddress, rounds: view Int) ret Int {
+  var socket: UdpSocket = udpOpen(host: "127.0.0.1", port: 0)
+  var payload: List(UInt8) = List.create(UInt8, cap: 64)
+  payload.addDefaults(count: 64)
+  var answer: List(UInt8) = List.create(UInt8, cap: relayDatagramBytes)
+  var times: List(Int) = List.create(Int, cap: rounds)
+  loop var i: Int = 0, i < rounds, ++i {
+    let begin: Int = nowNs()
+    let sent: IoResult = udpSend(
+      udpSocket: socket
+      bytes: payload
+      start: 0
+      count: payload.length
+      destination: destination
+    )
+    var answered: Bool = false
+    loop not answered and nowNs() - begin < 1000000000 {
+      if udpReceive(udpSocket: socket, bytes: answer, maxBytes: relayDatagramBytes).status is NetStatus.ok {
+        answered = true
+      }
+    }
+    if not answered {
+      udpClose(udpSocket: socket)
+      ret -1
+    }
+    times.add(value: (nowNs() - begin) / 1000)
+  }
+  udpClose(udpSocket: socket)
+  ret median(values: times)
+}
+
+# Round trips through the relay with `window` in flight for `milliseconds`:
+# round trips completed per second
+func relayThroughput(client: mod RelayClient, window: view Int, milliseconds: view Int) ret Int {
+  var payload: List(UInt8) = List.create(UInt8, cap: 64)
+  payload.addDefaults(count: 64)
+  let begin: Int = nowMs()
+  var inFlight: Int = 0
+  var completed: Int = 0
+  var lastAnswerMs: Int = begin
+  loop nowMs() - begin < milliseconds {
+    loop inFlight < window {
+      let sent: IoResult = relayClientSend(
+        client: client
+        peerId: hostPeerId
+        bytes: payload
+        start: 0
+        count: payload.length
+        nowMs: nowMs()
+      )
+      inFlight = inFlight + 1
+    }
+    if relayClientReceive(client: client, nowMs: nowMs()).kind is RelayIncomingKind.packet {
+      inFlight = inFlight - 1
+      completed = completed + 1
+      lastAnswerMs = nowMs()
+    } else if nowMs() - lastAnswerMs > 200 {
+      # Lost in a full socket buffer: send the window again
+      inFlight = 0
+      lastAnswerMs = nowMs()
+    }
+  }
+  ret completed * 1000 / milliseconds
+}
+
+func runBenchPlayer() ret Int {
+  let token: String = argumentAfter(name: "--token", fallback: "")
+  let directPort: Int = argumentAfter(name: "--direct-port", fallback: "0").toInt()
+  var client: RelayClient = createRelayClient(
+    relayAddress: relayAddressArgument()
+    config: clientConfigArgument()
+  )
+  let startMs: Int = nowMs()
+  let joining: Bool = relayClientJoin(client: client, tokenText: token, nowMs: 0)
+  loop nowMs() - startMs < 5000 and not relayClientIsReady(client: client) {
+    waitFor(client: client, waitMs: 5)
+    let now: Int = nowMs() - startMs
+    relayClientUpdate(client: client, nowMs: now)
+    let incoming: RelayIncoming = relayClientReceive(client: client, nowMs: now)
+  }
+  if not relayClientIsReady(client: client) {
+    log("bench: could not join ({client.state})")
+    ret 1
+  }
+  # Warm up both paths, then measure
+  let warmRelay: Int = timeRelayRoundTrips(client: client, rounds: 200)
+  let directAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: directPort).address
+  let warmDirect: Int = timeDirectRoundTrips(destination: directAddress, rounds: 200)
+  let relayMedian: Int = timeRelayRoundTrips(client: client, rounds: 2000)
+  let directMedian: Int = timeDirectRoundTrips(destination: directAddress, rounds: 2000)
+  log(
+    "round trip, median of 2000 (64-byte payload): through the relay {relayMedian} us, direct {directMedian} us, added by the relay {relayMedian - directMedian} us per round trip ({(relayMedian - directMedian) / 2} us per packet)"
+  )
+  let perSecond: Int = relayThroughput(client: client, window: 64, milliseconds: 3000)
+  log(
+    "throughput, 64 in flight for 3 s: {perSecond} round trips/s = {perSecond * 2} packets/s forwarded by the relay"
+  )
+  ret 0
+}
+
+func main() ret Int {
+  let mode: String = argAt(index: 0)
+  if mode is "host" {
+    ret runHost()
+  }
+  if mode is "player" {
+    ret runPlayer()
+  }
+  if mode is "bench-host" {
+    ret runBenchHost()
+  }
+  if mode is "game-host" {
+    ret runGameHost(
+      relayAddress: relayAddressArgument()
+      seconds: argumentAfter(name: "--seconds", fallback: "30").toInt()
+    )
+  }
+  if mode is "game-player" {
+    ret runGamePlayer(
+      relayAddress: relayAddressArgument()
+      token: argumentAfter(name: "--token", fallback: "")
+      device: parseDevice(text: argumentAfter(name: "--device", fallback: "mobile"))
+      seconds: argumentAfter(name: "--seconds", fallback: "20").toInt()
+    )
+  }
+  if mode is "bench-player" {
+    ret runBenchPlayer()
+  }
+  log("usage: relayPeer host|player|bench-host|bench-player --relay-port P ...")
+  ret 2
+}

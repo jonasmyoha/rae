@@ -1,0 +1,114 @@
+# The player's apply system (lib/net/replication, docs/replication.md): makes
+# the player's World match the newest rebuilt snapshot. In this order:
+#
+#   replicaSyncEntities   an entity for every new net id; the entities whose
+#                         net id is gone are listed in `goneEntityIds` for
+#                         the app to destroy (its tables are its own)
+#   applyReplicaTable     once per chosen table, with the same kind number
+#                         the host captured it with
+#   replicaFinishApply    the snapshot is applied
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open collections/IntMap
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationPlayer
+
+func latestSlot(player: view ReplicationPlayer) ret Int {
+  ret playerSlot(player: player, tick: player.latestTick)
+}
+
+func replicaSyncEntities(player: mod ReplicationPlayer, entities: mod EntityAllocator) {
+  player.goneEntityIds.clear()
+  player.netIdsSeen = createIntMap(Int, cap: 64)
+  let slot: Int = latestSlot(player: player)
+  var newNetIds: List(Int) = {}
+  if let latest: view ReplicaSnapshot = player.snapshots.viewAt(index: slot) {
+    loop var record: Int = 0, record < snapshotRecordCount(snapshot: latest), ++record {
+      let netId: Int = recordNetId(snapshot: latest, record: record)
+      player.netIdsSeen.set(k: netId, value: 1)
+      if not player.entityByNetId.has(k: netId) {
+        newNetIds.add(value: netId)
+      }
+    }
+  }
+  loop let netId: Int in newNetIds {
+    if not player.entityByNetId.has(k: netId) {
+      let entityId: EntityId = allocEntity(this: entities)
+      player.entityByNetId.set(k: netId, value: entityId)
+      player.netIdByEntityIndex.set(k: entityId.index, value: netId)
+    }
+  }
+  let known: List(Int) = player.entityByNetId.keys()
+  loop let netId: Int in known {
+    if not player.netIdsSeen.has(k: netId) {
+      let entityId: EntityId = replicaEntityOf(player: player, netId: netId)
+      player.goneEntityIds.add(value: entityId)
+      player.entityByNetId.remove(k: netId)
+      player.netIdByEntityIndex.remove(k: entityId.index)
+    }
+  }
+}
+
+# Set table `kind`'s components from the newest snapshot: each replicated
+# entity with a record of this kind gets it (a new component starts as a
+# copy of `template`), and a replicated entity without one loses it
+func applyReplicaTable(
+  T: type
+  player: mod ReplicationPlayer
+  table: mod ComponentTable(T)
+  kind: view Int
+  template: view T
+) {
+  let slot: Int = latestSlot(player: player)
+  let scale: Float = player.config.floatScale
+  if let latest: view ReplicaSnapshot = player.snapshots.viewAt(index: slot) {
+    loop var record: Int = 0, record < snapshotRecordCount(snapshot: latest), ++record {
+      if recordKind(snapshot: latest, record: record) is kind {
+        let entityId: EntityId = replicaEntityOf(
+          player: player
+          netId: recordNetId(snapshot: latest, record: record)
+        )
+        let start: Int = recordStart(snapshot: latest, record: record)
+        if componentHas(this: table, entityId: entityId) {
+          let value: mod T = componentMod(this: table, entityId: entityId)
+          readReplicaValues(
+            T
+            value: value
+            scale: scale
+            values: latest.values
+            start: start
+          )
+        } else if not isNone(this: entityId) {
+          var fresh: T = template
+          readReplicaValues(
+            T
+            value: fresh
+            scale: scale
+            values: latest.values
+            start: start
+          )
+          componentSet(this: table, entityId: entityId, data: own fresh)
+        }
+      }
+    }
+    # A replicated entity whose record of this kind is gone loses the component
+    var losing: List(EntityId) = {}
+    loop var i: Int = 0, i < componentCount(this: table), ++i {
+      let entityId: EntityId = componentEntityAt(this: table, i: i)
+      if let netId: Int = player.netIdByEntityIndex.get(k: entityId.index) {
+        if snapshotFind(snapshot: latest, netId: netId, kind: kind) < 0 {
+          losing.add(value: entityId)
+        }
+      }
+    }
+    loop let entityId: EntityId in losing {
+      componentRemove(this: table, entityId: entityId)
+    }
+  }
+}
+
+func replicaFinishApply(player: mod ReplicationPlayer) {
+  player.appliedTick = player.latestTick
+}

@@ -408,6 +408,96 @@ func recordCopyTextureLevelToBuffer(
   ret true
 }
 
+# Copies the `width` x `height` rectangle at (`x`, `y`) of a 2D texture's
+# level 0 into a buffer laid out row by row with `bytesPerRow` (a multiple of
+# 256, at least width * texel size): a region of a rendered frame
+# (lib/gpu/FrameRegionReader). False for a rectangle outside the texture.
+func recordCopyTextureRegionToBuffer(
+  recording: mod Recording
+  resources: view GpuResources
+  texture: view TextureId
+  x: view Int
+  y: view Int
+  width: view Int
+  height: view Int
+  buffer: view BufferId
+  bytesPerRow: view Int
+) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false {
+    ret false
+  }
+  if isValidTexture(resources: resources, id: texture) is false or width < 1 or height < 1 or x < 0 or y < 0 {
+    ret false
+  }
+  if x + width > textureWidth(resources: resources, id: texture) or y + height > textureHeight(
+    resources: resources
+    id: texture
+  ) {
+    ret false
+  }
+  var texel: Int = -1
+  unsafe {
+    texel = texelBytes(
+      format: wgpuTextureGetFormat(
+        texture: slotHandle(table: resources.textures, slot: texture.slot)
+      )
+    )
+  }
+  if texel < 1 or bytesPerRow - (bytesPerRow / 256) * 256 is not 0 or bytesPerRow < width * texel {
+    ret false
+  }
+  if bufferRangeIsValid(
+    resources: resources
+    id: buffer
+    offset: 0
+    size: bytesPerRow * height
+  ) is false {
+    ret false
+  }
+  if hasUsageFlag(
+    usage: bufferUsage(resources: resources, id: buffer)
+    flag: WGPUBufferUsage_CopyDst
+  ) is false {
+    ret false
+  }
+  unsafe {
+    let source: WGPUTexelCopyTextureInfo = {
+      texture: slotHandle(table: resources.textures, slot: texture.slot)
+      mipLevel: 0
+      origin: { x: x as UInt32, y: y as UInt32, z: 0 }
+      aspect: WGPUTextureAspect_All
+    }
+    let destination: WGPUTexelCopyBufferInfo = {
+      layout: { offset: 0, bytesPerRow: bytesPerRow as UInt32, rowsPerImage: height as UInt32 }
+      buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
+    }
+    let size: WGPUExtent3D = {
+      width: width as UInt32
+      height: height as UInt32
+      depthOrArrayLayers: 1
+    }
+    wgpuCommandEncoderCopyTextureToBuffer(
+      commandEncoder: recording.encoder
+      source: source
+      destination: destination
+      copySize: size
+    )
+  }
+  recordUse(
+    recording: recording
+    kind: kindTexture
+    slot: texture.slot
+    generation: texture.generation
+  )
+  recordUse(
+    recording: recording
+    kind: kindBuffer
+    slot: buffer.slot
+    generation: buffer.generation
+  )
+  ret true
+}
+
 # ----- draws into an EXTERNAL render pass ------------------------------------
 #
 # The legacy gbuffer opens its geometry pass in C; grass and sprites draw INTO

@@ -1,0 +1,113 @@
+# A replicated component as a list of Ints, and back (lib/net/replication):
+# the one place that knows component types. Everything after it (snapshots,
+# deltas, interest) works on Int lists, the same for every component.
+#
+# Generic over the component type with compile-time field reflection
+# (docs/compile-time-reflection.md): the fields of these types are taken, in
+# this order, each kind in declaration order:
+#   Float  quantized: round(value * scale) (scale 1000: millimeters)
+#   Int    as it is
+#   Bool   0 or 1
+#   Vec3   x, y, z quantized
+#   Quat   x, y, z, w quantized
+# Other fields (Strings, Lists, enums, other structs) are not replicated: a
+# replicated component is a plain struct of numbers. Both ends read the same
+# order, so the type is the schema.
+open Vec3
+open Quat
+
+func quantize(value: view Float, scale: view Float) ret Int {
+  let scaled: Float = value * scale
+  if scaled >= 0.0 {
+    ret (scaled + 0.5) as Int
+  }
+  ret -((-scaled + 0.5) as Int)
+}
+
+func dequantize(value: view Int, scale: view Float) ret Float {
+  ret (value as Float) / scale
+}
+
+func valueAt(values: view List(Int), index: view Int) ret Int {
+  ret values.copyAtFallback(index: index, fallback: 0)
+}
+
+# Append the component's replicated fields to `values`
+func appendReplicaValues(
+  T: type
+  value: view T
+  scale: view Float
+  values: mod List(Int)
+) {
+  loop let field: view Float in fields(value) {
+    values.add(value: quantize(value: field, scale: scale))
+  }
+  loop let field: view Int in fields(value) {
+    values.add(value: field)
+  }
+  loop let field: view Bool in fields(value) {
+    var bit: Int = 0
+    if field {
+      bit = 1
+    }
+    values.add(value: bit)
+  }
+  loop let field: view Vec3 in fields(value) {
+    values.add(value: quantize(value: field.x, scale: scale))
+    values.add(value: quantize(value: field.y, scale: scale))
+    values.add(value: quantize(value: field.z, scale: scale))
+  }
+  loop let field: view Quat in fields(value) {
+    values.add(value: quantize(value: field.x, scale: scale))
+    values.add(value: quantize(value: field.y, scale: scale))
+    values.add(value: quantize(value: field.z, scale: scale))
+    values.add(value: quantize(value: field.w, scale: scale))
+  }
+}
+
+# Set the component's replicated fields from `values` at `start` (the other
+# fields keep what they had)
+func readReplicaValues(
+  T: type
+  value: mod T
+  scale: view Float
+  values: view List(Int)
+  start: view Int
+) {
+  var at: Int = start
+  loop let field: mod Float in fields(value) {
+    fieldSet(field, value: dequantize(value: valueAt(values: values, index: at), scale: scale))
+    at = at + 1
+  }
+  loop let field: mod Int in fields(value) {
+    fieldSet(field, value: valueAt(values: values, index: at))
+    at = at + 1
+  }
+  loop let field: mod Bool in fields(value) {
+    fieldSet(field, value: valueAt(values: values, index: at) is not 0)
+    at = at + 1
+  }
+  loop let field: mod Vec3 in fields(value) {
+    fieldSet(
+      field
+      value: Vec3 {
+        x: dequantize(value: valueAt(values: values, index: at), scale: scale)
+        y: dequantize(value: valueAt(values: values, index: at + 1), scale: scale)
+        z: dequantize(value: valueAt(values: values, index: at + 2), scale: scale)
+      }
+    )
+    at = at + 3
+  }
+  loop let field: mod Quat in fields(value) {
+    fieldSet(
+      field
+      value: Quat {
+        x: dequantize(value: valueAt(values: values, index: at), scale: scale)
+        y: dequantize(value: valueAt(values: values, index: at + 1), scale: scale)
+        z: dequantize(value: valueAt(values: values, index: at + 2), scale: scale)
+        w: dequantize(value: valueAt(values: values, index: at + 3), scale: scale)
+      }
+    )
+    at = at + 4
+  }
+}

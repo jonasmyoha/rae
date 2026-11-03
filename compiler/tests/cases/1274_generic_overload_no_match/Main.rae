@@ -1,0 +1,35 @@
+# A generic body instantiated with a type that no overload of a call takes
+# is a compile error, not a call to the first overload with the wrong struct
+# (which compiled and ran before: `describe(Other, ...)` passed an Other to
+# the Position version).
+type Position {
+  x: Float
+}
+
+type Health {
+  value: Int
+}
+
+type Other {
+  name: Int
+}
+
+func encode(value: view Position, out: mod List(Int)) {
+  out.add(value: 1)
+}
+
+func encode(value: view Health, out: mod List(Int)) {
+  out.add(value: 2)
+}
+
+func describe(T: type, value: view T, out: mod List(Int)) {
+  encode(value: value, out: out)
+}
+
+func main() ret Int {
+  var out: List(Int) = {}
+  let other: Other = { name: 3 }
+  describe(Other, value: other, out: out)
+  log("{out}")
+  ret 0
+}

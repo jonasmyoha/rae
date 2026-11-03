@@ -1,0 +1,33 @@
+# The relay's timeout system: a peer silent for `peerTimeoutMs` is removed (a
+# player's host hears of it, a host's session closes). The scan runs every
+# `timeoutScanMs`, not every frame: a busy relay has many frames.
+open ecs/Entity
+open ecs/ComponentTable
+open net/relay/RelayServer
+
+const timeoutScanMs: Int = 100
+
+func timeoutSystem(server: mod RelayServer) {
+  if server.frameNs < server.nextTimeoutScanNs {
+    ret
+  }
+  server.nextTimeoutScanNs = server.frameNs + timeoutScanMs * 1000000
+  let limitNs: Int = server.config.peerTimeoutMs * 1000000
+  server.expired.clear()
+  let count: Int = componentCount(this: server.peers)
+  loop var i: Int = 0, i < count, ++i {
+    if let peer: RelayPeer = componentCopyAt(this: server.peers, i: i) {
+      if server.frameNs - peer.lastHeardNs > limitNs {
+        server.expired.add(value: componentEntityAt(this: server.peers, i: i))
+      }
+    }
+  }
+  loop var i: Int = 0, i < server.expired.length, ++i {
+    let peerEntityId: EntityId = server.expired.copyAtFallback(index: i, fallback: noEntity())
+    # A host's session may already have taken this peer with it
+    if componentHas(this: server.peers, entityId: peerEntityId) {
+      removePeer(server: server, peerEntityId: peerEntityId)
+      server.stats.timedOut = server.stats.timedOut + 1
+    }
+  }
+}

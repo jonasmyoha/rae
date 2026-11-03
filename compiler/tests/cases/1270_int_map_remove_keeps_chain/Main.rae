@@ -1,0 +1,47 @@
+# collections/IntMap: removing a key keeps every other key reachable. The map
+# is open addressing with linear probing and no tombstones; `remove` used
+# to clear the slot only, which cut the probe chain, so a key stored past it
+# (a collision) was no longer found. A relay's lookups lost peers this way
+# (lib/net/relay). Now it shifts the chain back, as StringMap.remove does.
+open collections/IntMap
+
+func show(map: view IntMap(String), keys: view List(Int)) ret String {
+  var text: String = ""
+  loop let key: Int in keys {
+    if let value: String = map.get(k: key) {
+      text = "{text} {value}"
+    } else {
+      text = "{text} -"
+    }
+  }
+  ret text
+}
+
+func main() ret Int {
+  var map: IntMap(String) = createIntMap(String, cap: 16)
+  # Six keys with the same home slot (16 apart), then two that wrap around
+  # the end of the table
+  var keys: List(Int) = {}
+  loop var i: Int = 0, i < 6, ++i {
+    keys.add(value: i * 16 + 3)
+    map.set(k: i * 16 + 3, value: "v{i}")
+  }
+  keys.add(value: 15)
+  keys.add(value: 31)
+  map.set(k: 15, value: "w0")
+  map.set(k: 31, value: "w1")
+  log("all:{show(map: map, keys: keys)}")
+  map.remove(k: 3)
+  map.remove(k: 35)
+  log("without v0 and v2:{show(map: map, keys: keys)}, length {map.length}")
+  map.remove(k: 15)
+  log("without w0 (the chain wraps):{show(map: map, keys: keys)}, length {map.length}")
+  map.set(k: 3, value: "v0 again")
+  log("v0 back:{show(map: map, keys: keys)}, length {map.length}")
+  # Negative keys hash the same way
+  map.set(k: -5, value: "n0")
+  map.set(k: -21, value: "n1")
+  map.remove(k: -5)
+  log("negative: {show(map: map, keys: List(Int) { -5, -21 })}")
+  ret 0
+}

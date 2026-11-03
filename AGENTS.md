@@ -286,13 +286,14 @@ These instructions define **how Codex should work**, communicate progress, and i
   `const` may not own heap (a `List`, a `Map`, a struct carrying one); a
   String const is a literal with a static buffer, so it is fine. A value
   computed at run time belongs on its owner, not at module level.
-- The replacement is **ownership**, matching the ECS architecture: a singleton
-  becomes a **resource on the World or App** and is threaded explicitly through
+- The replacement is **ownership**, matching the ECS architecture: state a
+  program has exactly one of becomes a **resource**, a plain field on the World
+  or App that owns it, and is threaded explicitly through
   the `mod`/`view` parameter that already says who may touch it — e.g. a former
   `var activeTheme` becomes `app.theme`, passed to the systems that read it.
 - Enforcement is phased: it is a **hard compiler error in `lib/`** (the stdlib is
-  globals-clean) and a **warning in app/example code** whose singletons are still
-  being migrated onto their owners. Do not add new module-level `var`/heap-`let`
+  globals-clean) and a **warning in app/example code** whose module-level state
+  is still being migrated onto its owners. Do not add new module-level `var`/heap-`let`
   anywhere; when you touch a file that still has one, prefer moving it onto its
   owner.
 
@@ -357,8 +358,9 @@ Rae is a **minimalistic language designed for both humans and AI agents**.
 **Rae is built around the Entity Component System (ECS) as its general
 architecture — not just for games, but for programs of any kind.** ECS is the
 default way to structure state and behavior: data lives in components on
-entities, logic lives in systems that run over them, and shared singletons are
-resources owned by a World or App. This is a deliberate bet that one small,
+entities, logic lives in systems that run over them, and state there is one of
+per World or App is a resource: a plain field on that owner. This is a
+deliberate bet that one small,
 explicit, data-oriented model — the same for a UI, a renderer, a simulation, or
 a CLI tool — is easier for a person to reason about and for an agent to generate
 and refactor than a grab-bag of ad-hoc patterns. Language features (compile-time
@@ -500,6 +502,29 @@ Compiler code should favor:
 
 ---
 
+## New code: ECS systems, written in the stdlib
+
+These rules apply to every app and library task. They do not apply to the
+compiler's own C.
+
+- **Stateful runtime code is ECS.** Each system lives in its own camelCase
+  folder with a PascalCase module (`relaySystem/RelaySystem.rae`). Per-thing
+  data is components on entities. Data there is exactly one of per World
+  or App (a socket, a session table, a clock) is a resource: a plain field
+  on that World or App, passed to systems through their `mod`/`view`
+  parameters, never a global and never a one-entity component
+  (`docs/ecs-resources.md`). When something happens that other systems react to (a player joined,
+  a packet was refused, a session ended), send an event and let those
+  systems read it, instead of calling across into them. `lib/ecs` and
+  `lib/net/ecs` are the models.
+- **Pure functions stay plain.** A codec, a parser, or a protocol step over
+  bytes and time (`lib/net/Wire.rae`, `lib/net/Connection.rae`) is a set of
+  functions over its data. It is not a system. Systems call these functions.
+- **Reusable code goes into `lib/` from the start.** Write anything another
+  app could use (a transport, a session layer, a replication system, a test
+  tool) in the stdlib, with a fixture. Keep only the app's own wiring,
+  settings and content in the app.
+
 ## Example families: shared code lives in lib/
 
 Some examples are one program in several forms: the walkers (136 deferred,
@@ -613,7 +638,7 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   run) and the example gate all run in CHECK mode (`RAE_FORMAT=check`) — an
   unformatted file fails them instead of being rewritten under the runner.
   The only deliberately non-canonical inputs are the format fixtures (200–208,
-  568, 786, 810–813, 829, 830, 1055, 1091), the expected-parse-error fixtures, the lexer
+  568, 786, 810–813, 829, 830, 1055, 1091, 1267), the expected-parse-error fixtures, the lexer
   fixtures whose token columns are the test (006, 015, 019) and the CRLF /
   missing-final-newline fixtures (345, 346, 348 — the runner sets
   `RAE_FORMAT=off` for them); the generated `lib/webgpu` bindings are a

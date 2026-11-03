@@ -649,6 +649,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm_webgpu_smoke.sh" ]; then
   echo
   if ! bash tools/wasm_webgpu_smoke.sh; then FAILED=$((FAILED+1)); fi
 fi
+# A browser player in a relay session (tools/wasm_relay_smoke.sh; SKIP without
+# emcc or Chrome). Full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm_relay_smoke.sh" ]; then
+  echo
+  if ! bash tools/wasm_relay_smoke.sh; then FAILED=$((FAILED+1)); fi
+fi
 
 # #44411932: native file-open dialog binding on its env-driven headless path
 # (RAE_SDL_FILE_DIALOG_RESULT / RAE_SDL_HEADLESS_MS), which a single-file

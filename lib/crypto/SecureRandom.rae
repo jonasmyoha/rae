@@ -1,0 +1,34 @@
+# Cryptographically secure random bytes into a range of a list that is
+# already there, for keys (lib/net's X25519 key pairs, its relay and session
+# tokens): the operating system's random source through lib/crypto/
+# CryptoRandom (one call per 256 bytes, compiler/runtime/
+# runtime_crypto_monocypher.c). `cryptoRandomBytes` makes a new list; this
+# fills part of one, the way lib/net's buffers are reused.
+#
+# A failed source answers false: never fall back to a predictable generator
+# for a key.
+open crypto/CryptoRandom
+
+# Overwrite `count` bytes of `bytes` from `start` with random bytes: false
+# when the range is not inside `bytes` or the system's source failed
+func secureRandomFill(bytes: mod List(UInt8), start: view Int, count: view Int) ret Bool {
+  if start < 0 or count < 0 or start + count > bytes.length {
+    ret false
+  }
+  var done: Int = 0
+  loop done < count {
+    var chunk: Int = count - done
+    if chunk > cryptoRandomChunk {
+      chunk = cryptoRandomChunk
+    }
+    var got: Int = 0
+    unsafe {
+      got = cryptoRandomFill(bytes: bytes.data, offset: start + done, count: chunk)
+    }
+    if got <= 0 {
+      ret false
+    }
+    done = done + got
+  }
+  ret true
+}

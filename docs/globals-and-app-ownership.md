@@ -12,8 +12,9 @@ Rae is an ECS-first language. In ECS vocabulary the rule is one sentence:
 > **All program state is a component, a resource, or a constant. Nothing else.**
 
 - A **component** is per-entity state in a `ComponentTable(T)` on a World.
-- A **resource** (#753, `docs/ecs-resources.md`) is world-global singleton state:
-  a plain field on the World, created with it, passed down, dropped with it.
+- A **resource** (#753, `docs/ecs-resources.md`) is state a World has exactly
+  one of: a plain field on the World, created with it, passed down, dropped with
+  it. It is not a global.
 - A **constant** is a compile-time value (`const`), immutable, heap-free.
 
 There is no fourth category. A module-level `var` is a **compiler error**, and
@@ -60,7 +61,7 @@ Concrete failures this repo has already paid for:
 - `lib/ui/theme.rae` holds `var activeTheme` AND a separate token global.
   `lib/app3d/ui_shell.rae:74` documents the result: *"palette slots resolve
   through a different global … nothing was bridging the two"* — a scene's
-  theme color silently rendered as the built-in mint. Two singletons, an
+  theme color silently rendered as the built-in mint. Two globals, an
   invisible dependency between them.
 - `lib/ui/RenderSystem/RenderSystem.rae:6`: fonts are *"PASSED IN via Gpu2dUi
   (module-level heap globals miscompile)"* — the compiler itself already pushes
@@ -163,8 +164,8 @@ in the final shape in between** — so 112/114 are structured once, not twice.
    #763 add the diagnostic as a WARNING (module-level `var` / heap `let`);
    #765 convert the ~112 scalar module-level `let`s to `const` (mechanical).
 2. **Then the ECS refactor continues (#731–#750)** under the rule: new
-   GameWorlds and Apps put every singleton on the World/App, never at module
-   level. The warning catches regressions as they are written.
+   GameWorlds and Apps put all state there is one of on the World/App, never
+   at module level. The warning catches regressions as they are written.
 3. **After #750:** #764 migrate the lib-level globals (`theme.activeTheme`,
    `gpu2d.gG2dColorAtts`, `gbuffer_passes.gTaa*`/`gComposite*`,
    `profile.gProf*`) into App-owned resources — these libs are reworked by

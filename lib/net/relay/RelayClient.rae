@@ -1,0 +1,752 @@
+# A host's or a player's side of the relay (docs/relay.md): its own UDP
+# socket, the open or join handshake with the relay, keep-alives, and the
+# forward header around every packet.
+#
+# A host calls `relayClientOpen` and, once `ready`, hands `relayTokenText` of
+# `client.token` to its players; a player calls `relayClientJoin` with it.
+# Then each side sends with `relayClientSend` (to a peer id: the host is 0)
+# and takes what arrives with `relayClientReceive`, which answers the next
+# packet (where its bytes are in `client.inbox`), a player that left (host),
+# or the end of the session (player). Datagrams from any address but the
+# relay's and the introduced peers' are ignored.
+#
+# Direct first, relay as a fallback (docs/relay.md, "Direct first"): when a
+# player joins, the relay tells it and its host each other's public address
+# and a shared secret. Both then send punch packets to that address from
+# this same socket (so the NAT mapping the relay saw is the one used); a
+# punch is answered with a punchAck, and the first ack makes the path
+# `direct`: from then on `relayClientSend` sends to that peer straight,
+# skipping the relay. Until then, and when no ack comes within
+# `punchTimeoutMs` (`fallback`), packets go through the relay, so nothing
+# waits for the punching. A direct path silent for `directSilenceMs` falls
+# back too. `relayOnly` asks the relay never to give this side's address to
+# the other side: no direct path is tried, and the address stays hidden.
+# `directNetwork` (a lib/net/BadNetwork, pass-through by default) carries the
+# direct path's packets, so a test can make that path fail.
+#
+# The relay never reads a packet's payload; seal it (lib/net/Connection
+# does) so the relay sees only sealed bytes.
+#
+# Over WebSocket (`createRelayClientOverWebSocket`, for a side that cannot
+# send UDP): the same packets, one per binary message, to the relay's
+# WebSocket listener. Such a side is relay-only; everything above it is the
+# same.
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/relay/RelayWire
+open net/BadNetwork
+open crypto/SecureRandom
+open webSocket/WebSocketClient
+
+enum RelayClientState {
+  idle
+  # Asking the relay for a session (host) or a place in one (player)
+  opening
+  joining
+  ready
+  # The relay said no (`refusedReason`)
+  refused
+  # The session ended, or this side left
+  closed
+  # No answer to the request, or the relay went silent
+  timedOut
+}
+
+# What `relayClientReceive` found
+enum RelayIncomingKind {
+  none
+  # A packet from `peerId`: `count` bytes at `start` in `client.inbox`
+  packet
+  # Host: player `peerId` left the session
+  peerLeft
+  # Player: the session is over
+  sessionClosed
+  # The host went and the player whose former peer id is `peerId` is the
+  # host now (peer 0). If that is this side, `client.peerId` is now 0.
+  hostChanged
+}
+
+enum DirectPathState {
+  # Punching: packets still go through the relay
+  punching
+  # A punch was answered: packets go straight to the peer
+  direct
+  # No answer in time, or the direct path went silent: the relay it is
+  fallback
+}
+
+# The direct path to one peer (introduced by the relay)
+type DirectPath {
+  peerId: Int
+  address: NetAddress
+  secret: Int
+  state: DirectPathState
+  startMs: Int
+  lastPunchMs: Int
+  lastHeardMs: Int
+}
+
+type RelayIncoming {
+  kind: RelayIncomingKind
+  peerId: Int
+  start: Int
+  count: Int
+}
+
+type RelayClientConfig {
+  # How often an unanswered open or join is sent again, and for how long
+  retryMs: Int
+  requestTimeoutMs: Int
+  # A keep-alive when nothing was sent for this long (the relay answers it)
+  keepAliveMs: Int
+  # The relay silent this long: `timedOut`
+  silenceTimeoutMs: Int
+  # Never let the relay give this side's address to the other side, and try
+  # no direct path (a streaming host hiding its address)
+  relayOnly: Bool
+  # Punch every `punchIntervalMs`; give up (relay) after `punchTimeoutMs`
+  punchIntervalMs: Int
+  punchTimeoutMs: Int
+  # A direct path that heard nothing for this long goes back to the relay
+  directSilenceMs: Int
+  # What this side runs on (deviceDesktop, deviceMobile): a desktop is
+  # preferred as the next host when the host goes
+  device: Int
+}
+
+type RelayClient {
+  udpSocket: UdpSocket
+  relayAddress: NetAddress
+  state: RelayClientState
+  config: RelayClientConfig
+  # Host: the session's token (to give to players); player: the token joined
+  token: List(UInt8)
+  # 0 for the host, 1, 2, ... for players
+  peerId: Int
+  requestId: Int
+  refusedReason: Int
+  startMs: Int
+  lastRequestMs: Int
+  lastSendMs: Int
+  lastHeardMs: Int
+  inbox: List(UInt8)
+  outbox: List(UInt8)
+  # Datagrams that came neither from the relay nor an introduced peer
+  strangerPackets: Int
+  # The time of the last packet to the relay (its keep-alives are due by it)
+  lastRelaySendMs: Int
+  paths: List(DirectPath)
+  directNetwork: BadNetwork
+  directPacketsSent: Int
+  directPacketsReceived: Int
+  # Paths that fell back to the relay
+  fallbacks: Int
+  # The former peer id of the last player promoted to host (the relay sends
+  # the notice twice; peer ids are never reused in a session)
+  promotedPeerId: Int
+  # The WebSocket transport, instead of the UDP socket (none: UDP)
+  webSocket: opt WebSocketClient
+}
+
+func defaultRelayClientConfig() ret RelayClientConfig {
+  ret RelayClientConfig {
+    retryMs: 200
+    requestTimeoutMs: 5000
+    keepAliveMs: 1000
+    silenceTimeoutMs: 15000
+    relayOnly: false
+    punchIntervalMs: 50
+    punchTimeoutMs: 1500
+    directSilenceMs: 3000
+    device: deviceUnknown
+  }
+}
+
+# A client of the relay at `relayAddress`, on a fresh UDP socket of the same
+# family; `client.udpSocket.status` says whether it opened
+func createRelayClient(
+  relayAddress: view NetAddress
+  config: view RelayClientConfig
+) ret RelayClient {
+  var host: String = "0.0.0.0"
+  if relayAddress.family is AddressFamily.ipv6 {
+    host = "::"
+  }
+  ret createRelayClientOn(
+    relayAddress: relayAddress
+    config: config
+    udpSocket: udpOpen(host: host, port: 0)
+  )
+}
+
+func createRelayClientOn(
+  relayAddress: view NetAddress
+  config: view RelayClientConfig
+  udpSocket: own UdpSocket
+) ret RelayClient {
+  ret RelayClient {
+    udpSocket: own udpSocket
+    relayAddress: relayAddress
+    state: RelayClientState.idle
+    config: config
+    token: List.create(UInt8, cap: relayTokenBytes)
+    peerId: -1
+    requestId: 0
+    refusedReason: 0
+    startMs: 0
+    lastRequestMs: 0
+    lastSendMs: 0
+    lastHeardMs: 0
+    inbox: List.create(UInt8, cap: relayDatagramBytes)
+    outbox: List.create(UInt8, cap: relayDatagramBytes)
+    strangerPackets: 0
+    lastRelaySendMs: 0
+    paths: {}
+    directNetwork: noBadNetwork()
+    directPacketsSent: 0
+    directPacketsReceived: 0
+    fallbacks: 0
+    promotedPeerId: -1
+    webSocket: none
+  }
+}
+
+# A client that reaches the relay over WebSocket at `host`:`port`
+# (relayWebSocketPath), waiting up to `connectTimeoutMs` for the TCP
+# connect; it is relay-only and has no UDP socket. `relayClientIsBroken`
+# says whether the connection failed.
+func createRelayClientOverWebSocket(
+  host: view String
+  port: view Int
+  config: view RelayClientConfig
+  connectTimeoutMs: view Int
+) ret RelayClient {
+  var onlyRelay: RelayClientConfig = config
+  onlyRelay.relayOnly = true
+  var client: RelayClient = createRelayClientOn(
+    relayAddress: noNetAddress()
+    config: onlyRelay
+    udpSocket: noUdpSocket(status: NetStatus.ok)
+  )
+  client.webSocket = webSocketConnect(
+    host: host
+    port: port
+    path: relayWebSocketPath
+    timeoutMs: connectTimeoutMs
+  )
+  ret client
+}
+
+func relayClientUsesWebSocket(client: view RelayClient) ret Bool {
+  ret client.webSocket is not none
+}
+
+# Its transport is gone (a WebSocket that failed or closed)
+func relayClientIsBroken(client: view RelayClient) ret Bool {
+  if let webSocket: view WebSocketClient = client.webSocket {
+    ret webSocketClientIsClosed(client: webSocket)
+  }
+  ret false
+}
+
+# The socket to wait on between frames
+func relayClientSocketId(client: view RelayClient) ret SocketId {
+  if let webSocket: view WebSocketClient = client.webSocket {
+    ret webSocket.socketId
+  }
+  ret client.udpSocket.socketId
+}
+
+func relayClientIsReady(client: view RelayClient) ret Bool {
+  ret client.state is RelayClientState.ready
+}
+
+func newRequestId() ret Int {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  bytes.addDefaults(count: 4)
+  let filled: Bool = secureRandomFill(bytes: bytes, start: 0, count: 4)
+  ret readU32(bytes: bytes, offset: 0)
+}
+
+# Ask the relay for a new session (this side is its host)
+func relayClientOpen(client: mod RelayClient, nowMs: view Int) {
+  client.state = RelayClientState.opening
+  client.requestId = newRequestId()
+  client.startMs = nowMs
+  client.lastHeardMs = nowMs
+  sendRequest(client: client, nowMs: nowMs)
+}
+
+# Join the session `tokenText` names (32 hex digits): false when it is not
+# a token
+func relayClientJoin(client: mod RelayClient, tokenText: view String, nowMs: view Int) ret Bool {
+  if not relayTokenFromText(text: tokenText, token: client.token) {
+    ret false
+  }
+  client.state = RelayClientState.joining
+  client.requestId = newRequestId()
+  client.startMs = nowMs
+  client.lastHeardMs = nowMs
+  sendRequest(client: client, nowMs: nowMs)
+  ret true
+}
+
+func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
+  client.lastSendMs = nowMs
+  client.lastRelaySendMs = nowMs
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    if webSocketClientSendBinary(
+      client: webSocket
+      bytes: client.outbox
+      start: 0
+      count: client.outbox.length
+    ) {
+      ret IoResult { bytes: client.outbox.length, status: NetStatus.ok }
+    }
+    ret IoResult { bytes: 0, status: NetStatus.wouldBlock }
+  }
+  ret udpSend(
+    udpSocket: client.udpSocket
+    bytes: client.outbox
+    start: 0
+    count: client.outbox.length
+    destination: client.relayAddress
+  )
+}
+
+func sendRequest(client: mod RelayClient, nowMs: view Int) {
+  if client.state is RelayClientState.opening {
+    relayWriteRequest(packet: client.outbox, kind: relayKindOpen, requestId: client.requestId)
+  } else {
+    relayWriteRequest(packet: client.outbox, kind: relayKindJoin, requestId: client.requestId)
+    appendCopy(
+      destination: client.outbox
+      source: client.token
+      start: 0
+      count: relayTokenBytes
+    )
+  }
+  if client.config.relayOnly {
+    writeU8(bytes: client.outbox, value: 1)
+  } else {
+    writeU8(bytes: client.outbox, value: 0)
+  }
+  writeU8(bytes: client.outbox, value: client.config.device)
+  client.lastRequestMs = nowMs
+  let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+}
+
+# Move the clock: retry an unanswered request, keep the relay's record of
+# this side alive, and notice a relay that went silent
+func relayClientUpdate(client: mod RelayClient, nowMs: view Int) {
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    webSocketClientUpdate(client: webSocket)
+  }
+  let waiting: Bool = client.state is RelayClientState.opening or client.state is RelayClientState.joining
+  if waiting {
+    if nowMs - client.startMs > client.config.requestTimeoutMs {
+      client.state = RelayClientState.timedOut
+    } else if nowMs - client.lastRequestMs >= client.config.retryMs {
+      sendRequest(client: client, nowMs: nowMs)
+    }
+    ret
+  }
+  if client.state is not RelayClientState.ready {
+    ret
+  }
+  if nowMs - client.lastHeardMs > client.config.silenceTimeoutMs {
+    client.state = RelayClientState.timedOut
+    ret
+  }
+  # Keep-alives go to the relay even while the traffic is direct
+  if nowMs - client.lastRelaySendMs >= client.config.keepAliveMs {
+    relayWriteKind(packet: client.outbox, kind: relayKindKeepAlive)
+    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+  }
+  updatePaths(client: client, nowMs: nowMs)
+}
+
+# Punch the paths still punching; give up on the ones that took too long or
+# went silent; send what the direct network holds
+func updatePaths(client: mod RelayClient, nowMs: view Int) {
+  loop var i: Int = 0, i < client.paths.length, ++i {
+    var punch: Bool = false
+    var address: NetAddress = noNetAddress()
+    var secret: Int = 0
+    if let path: mod DirectPath = client.paths.modAt(index: i) {
+      if path.state is DirectPathState.punching {
+        if nowMs - path.startMs > client.config.punchTimeoutMs {
+          path.state = DirectPathState.fallback
+          client.fallbacks = client.fallbacks + 1
+        } else if nowMs - path.lastPunchMs >= client.config.punchIntervalMs {
+          path.lastPunchMs = nowMs
+          punch = true
+          address = path.address
+          secret = path.secret
+        }
+      } else if path.state is DirectPathState.direct and nowMs - path.lastHeardMs > client.config.directSilenceMs {
+        path.state = DirectPathState.fallback
+        client.fallbacks = client.fallbacks + 1
+      }
+    }
+    if punch {
+      sendPunch(
+        client: client
+        kind: relayKindPunch
+        secret: secret
+        address: address
+        nowMs: nowMs
+      )
+    }
+  }
+  let flushed: Int = badNetworkFlush(
+    network: client.directNetwork
+    udpSocket: client.udpSocket
+    nowMs: nowMs
+  )
+}
+
+# Send `client.outbox` to a peer straight (through `directNetwork`)
+func sendDirect(client: mod RelayClient, address: view NetAddress, nowMs: view Int) ret IoResult {
+  client.lastSendMs = nowMs
+  client.directPacketsSent = client.directPacketsSent + 1
+  ret udpSendThrough(
+    network: client.directNetwork
+    udpSocket: client.udpSocket
+    bytes: client.outbox
+    start: 0
+    count: client.outbox.length
+    destination: address
+    nowMs: nowMs
+  )
+}
+
+func sendPunch(
+  client: mod RelayClient
+  kind: view Int
+  secret: view Int
+  address: view NetAddress
+  nowMs: view Int
+) {
+  relayWriteKind(packet: client.outbox, kind: kind)
+  writeU64(bytes: client.outbox, value: secret)
+  writeU32(bytes: client.outbox, value: client.peerId)
+  let sent: IoResult = sendDirect(client: client, address: address, nowMs: nowMs)
+}
+
+# The index of the path to `peerId`, -1 for none
+func pathIndexOfPeer(client: view RelayClient, peerId: view Int) ret Int {
+  loop var i: Int = 0, i < client.paths.length, ++i {
+    if let path: view DirectPath = client.paths.viewAt(index: i) {
+      if path.peerId is peerId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func pathIndexOfAddress(client: view RelayClient, address: view NetAddress) ret Int {
+  loop var i: Int = 0, i < client.paths.length, ++i {
+    if let path: view DirectPath = client.paths.viewAt(index: i) {
+      if netAddressEquals(first: path.address, second: address) {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The state of the path to `peerId` (fallback when there is none: the relay)
+func relayClientPathState(client: view RelayClient, peerId: view Int) ret DirectPathState {
+  let index: Int = pathIndexOfPeer(client: client, peerId: peerId)
+  if let path: view DirectPath = client.paths.viewAt(index: index) {
+    ret path.state
+  }
+  ret DirectPathState.fallback
+}
+
+func removePath(client: mod RelayClient, peerId: view Int) {
+  let index: Int = pathIndexOfPeer(client: client, peerId: peerId)
+  if index >= 0 {
+    client.paths.remove(index: index)
+  }
+}
+
+# The relay introduced a peer (in `client.inbox`): start punching it, unless
+# this side is relay-only. A repeated introduce while punching takes the new
+# secret; a direct path stays as it is.
+func takeIntroduce(client: mod RelayClient, nowMs: view Int) {
+  if client.config.relayOnly or client.inbox.length < introduceBytes {
+    ret
+  }
+  let peerId: Int = readU32(bytes: client.inbox, offset: 1)
+  let path: DirectPath = {
+    peerId: peerId
+    address: relayReadAddress(bytes: client.inbox, offset: 13)
+    secret: readU64(bytes: client.inbox, offset: 5)
+    state: DirectPathState.punching
+    startMs: nowMs
+    lastPunchMs: -1000000
+    lastHeardMs: nowMs
+  }
+  let index: Int = pathIndexOfPeer(client: client, peerId: peerId)
+  if index < 0 {
+    client.paths.add(value: path)
+  } else if relayClientPathState(client: client, peerId: peerId) is DirectPathState.punching {
+    client.paths.set(index: index, value: path)
+  }
+}
+
+# A datagram from an introduced peer's address (in `client.inbox`): a punch
+# is answered, an ack opens the path, a direct packet is handed on. -1 when
+# it was taken here, else the sender's peer id for a packet.
+func takeDirect(client: mod RelayClient, pathIndex: view Int, nowMs: view Int) ret Int {
+  let length: Int = client.inbox.length
+  let kind: Int = readU8(bytes: client.inbox, offset: 0)
+  var answer: Bool = false
+  var address: NetAddress = noNetAddress()
+  var secret: Int = 0
+  var packetFrom: Int = -1
+  if let path: mod DirectPath = client.paths.modAt(index: pathIndex) {
+    let isPunch: Bool = kind is relayKindPunch or kind is relayKindPunchAck
+    if isPunch and length >= punchBytes {
+      if readU64(bytes: client.inbox, offset: 1) is path.secret and readU32(
+        bytes: client.inbox
+        offset: 9
+      ) is path.peerId {
+        path.lastHeardMs = nowMs
+        if kind is relayKindPunch {
+          answer = true
+          address = path.address
+          secret = path.secret
+        } else if path.state is DirectPathState.punching {
+          path.state = DirectPathState.direct
+        }
+      }
+    } else if kind is relayKindDirect and length >= forwardHeaderBytes and readU32(
+      bytes: client.inbox
+      offset: 1
+    ) is path.peerId {
+      # A packet straight from the peer: its side found the path open, and
+      # so ours works too
+      path.lastHeardMs = nowMs
+      if path.state is DirectPathState.punching {
+        path.state = DirectPathState.direct
+      }
+      packetFrom = path.peerId
+    }
+  }
+  if answer {
+    sendPunch(
+      client: client
+      kind: relayKindPunchAck
+      secret: secret
+      address: address
+      nowMs: nowMs
+    )
+  }
+  if packetFrom >= 0 {
+    client.directPacketsReceived = client.directPacketsReceived + 1
+  }
+  ret packetFrom
+}
+
+# Send `count` bytes of `bytes` from `start` to peer `peerId` (the host is
+# 0) through the relay
+func relayClientSend(
+  client: mod RelayClient
+  peerId: view Int
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  nowMs: view Int
+) ret IoResult {
+  if client.state is not RelayClientState.ready {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
+  let pathIndex: Int = pathIndexOfPeer(client: client, peerId: peerId)
+  if let path: view DirectPath = client.paths.viewAt(index: pathIndex) {
+    if path.state is DirectPathState.direct {
+      let address: NetAddress = path.address
+      relayWriteKind(packet: client.outbox, kind: relayKindDirect)
+      writeU32(bytes: client.outbox, value: client.peerId)
+      appendCopy(
+        destination: client.outbox
+        source: bytes
+        start: start
+        count: count
+      )
+      ret sendDirect(client: client, address: address, nowMs: nowMs)
+    }
+  }
+  relayWriteForwardHeader(packet: client.outbox, peerId: peerId)
+  appendCopy(
+    destination: client.outbox
+    source: bytes
+    start: start
+    count: count
+  )
+  ret sendClientOutbox(client: client, nowMs: nowMs)
+}
+
+# Leave the session (the relay tells the host, or closes the session)
+func relayClientLeave(client: mod RelayClient, nowMs: view Int) {
+  if client.state is RelayClientState.ready {
+    relayWriteKind(packet: client.outbox, kind: relayKindLeave)
+    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+  }
+  client.state = RelayClientState.closed
+}
+
+func relayClientClose(client: mod RelayClient) {
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    webSocketClientClose(client: webSocket)
+  }
+  udpClose(udpSocket: client.udpSocket)
+  client.state = RelayClientState.closed
+}
+
+func nothingIncoming() ret RelayIncoming {
+  ret RelayIncoming { kind: RelayIncomingKind.none, peerId: -1, start: 0, count: 0 }
+}
+
+# The next thing from the relay: a packet (its bytes in `client.inbox`), a
+# player that left, the end of the session, or none when nothing is
+# waiting. Answers to this side's own requests are taken on the way.
+func relayClientReceive(client: mod RelayClient, nowMs: view Int) ret RelayIncoming {
+  loop {
+    var peer: NetAddress = client.relayAddress
+    if relayClientUsesWebSocket(client: client) {
+      var got: Bool = false
+      var broken: Bool = false
+      if let webSocket: mod WebSocketClient = client.webSocket {
+        got = webSocketClientNextBinary(client: webSocket, out: client.inbox)
+        broken = webSocketClientIsClosed(client: webSocket)
+      }
+      if not got {
+        # The connection to the relay is gone: for this side the session is
+        if broken and client.state is RelayClientState.ready {
+          client.state = RelayClientState.closed
+          ret RelayIncoming {
+            kind: RelayIncomingKind.sessionClosed
+            peerId: hostPeerId
+            start: 0
+            count: 0
+          }
+        }
+        ret nothingIncoming()
+      }
+    } else {
+      let datagram: Datagram = udpReceive(
+        udpSocket: client.udpSocket
+        bytes: client.inbox
+        maxBytes: relayDatagramBytes
+      )
+      if datagram.status is NetStatus.wouldBlock {
+        ret nothingIncoming()
+      }
+      if datagram.status is not NetStatus.ok {
+        continue
+      }
+      peer = datagram.peer
+    }
+    if not netAddressEquals(first: peer, second: client.relayAddress) {
+      let pathIndex: Int = pathIndexOfAddress(client: client, address: peer)
+      if pathIndex < 0 or client.state is not RelayClientState.ready {
+        client.strangerPackets = client.strangerPackets + 1
+        continue
+      }
+      let from: Int = takeDirect(client: client, pathIndex: pathIndex, nowMs: nowMs)
+      if from >= 0 {
+        ret RelayIncoming {
+          kind: RelayIncomingKind.packet
+          peerId: from
+          start: forwardHeaderBytes
+          count: client.inbox.length - forwardHeaderBytes
+        }
+      }
+      continue
+    }
+    client.lastHeardMs = nowMs
+    let length: Int = client.inbox.length
+    let kind: Int = readU8(bytes: client.inbox, offset: 0)
+    if kind is relayKindForward and length >= forwardHeaderBytes {
+      if client.state is RelayClientState.ready {
+        ret RelayIncoming {
+          kind: RelayIncomingKind.packet
+          peerId: readU32(bytes: client.inbox, offset: 1)
+          start: forwardHeaderBytes
+          count: length - forwardHeaderBytes
+        }
+      }
+    } else if kind is relayKindHostChanged and length >= 5 {
+      # Twice from the relay: only the first is news
+      let formerPeerId: Int = readU32(bytes: client.inbox, offset: 1)
+      if formerPeerId is not client.promotedPeerId {
+        client.promotedPeerId = formerPeerId
+        # The direct path to the old host is gone with it
+        removePath(client: client, peerId: hostPeerId)
+        if formerPeerId is client.peerId {
+          client.peerId = hostPeerId
+          client.paths.clear()
+        }
+        ret RelayIncoming {
+          kind: RelayIncomingKind.hostChanged
+          peerId: formerPeerId
+          start: 0
+          count: 0
+        }
+      }
+    } else if kind is relayKindIntroduce {
+      takeIntroduce(client: client, nowMs: nowMs)
+    } else if kind is relayKindPeerLeft and length >= 5 {
+      removePath(client: client, peerId: readU32(bytes: client.inbox, offset: 1))
+      ret RelayIncoming {
+        kind: RelayIncomingKind.peerLeft
+        peerId: readU32(bytes: client.inbox, offset: 1)
+        start: 0
+        count: 0
+      }
+    } else if kind is relayKindClosed {
+      client.state = RelayClientState.closed
+      client.paths.clear()
+      ret RelayIncoming {
+        kind: RelayIncomingKind.sessionClosed
+        peerId: hostPeerId
+        start: 0
+        count: 0
+      }
+    } else {
+      takeReply(client: client, kind: kind, length: length)
+    }
+  }
+  ret nothingIncoming()
+}
+
+# An answer to this side's open or join (a stale or repeated one is ignored)
+func takeReply(client: mod RelayClient, kind: view Int, length: view Int) {
+  if length < 5 or readU32(bytes: client.inbox, offset: 1) is not client.requestId {
+    ret
+  }
+  if kind is relayKindOpened and client.state is RelayClientState.opening and length >= 5 + relayTokenBytes {
+    client.token.clear()
+    appendCopy(
+      destination: client.token
+      source: client.inbox
+      start: 5
+      count: relayTokenBytes
+    )
+    client.peerId = hostPeerId
+    client.state = RelayClientState.ready
+  } else if kind is relayKindJoined and client.state is RelayClientState.joining and length >= 9 {
+    client.peerId = readU32(bytes: client.inbox, offset: 5)
+    client.state = RelayClientState.ready
+  } else if kind is relayKindRefused and length >= 6 {
+    if client.state is RelayClientState.opening or client.state is RelayClientState.joining {
+      client.refusedReason = readU8(bytes: client.inbox, offset: 5)
+      client.state = RelayClientState.refused
+    }
+  }
+}

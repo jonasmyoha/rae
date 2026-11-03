@@ -234,6 +234,15 @@ if [ -f tools/wasm_webgpu_smoke.sh ]; then
   if bash tools/wasm_webgpu_smoke.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
   stage_time "tools/wasm_webgpu_smoke.sh" "$stage_start"
 fi
+# A browser player in a relay session with a native UDP host
+# (tools/wasm_relay_smoke.sh: checks/webRelay in headless Chrome over the
+# page's WebSocket). SKIP without emcc or Chrome.
+if [ -f tools/wasm_relay_smoke.sh ]; then
+  echo
+  stage_start=$(date +%s)
+  if bash tools/wasm_relay_smoke.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/wasm_relay_smoke.sh" "$stage_start"
+fi
 # The compiler's speed on one standard program (tools/compiler-speed.sh): a
 # measurement, not a case, so it never changes the pass/fail count.
 if [ -f tools/compiler-speed.sh ]; then

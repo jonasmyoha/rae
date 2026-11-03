@@ -144,8 +144,38 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         receiver_cap = rae_array_ref_cap(recv_tr);
                     }
                     const AstFuncDecl* generic_fallback = NULL;
+                    /* As in emit_call_expr: an overload whose parameters take
+                     * the arguments' concrete types beats declaration order. */
+                    const AstFuncDecl* typed_match = NULL;
+                    enum { max_typed_args = 16 };
+                    Str arg_bases[max_typed_args];
+                    size_t typed_arg_count = 0;
+                    for (const AstCallArg* ca = expr->as.call.args; ca && typed_arg_count < max_typed_args; ca = ca->next) {
+                        const AstTypeRef* atr = ca->value ? infer_expr_type_ref(ctx, ca->value) : NULL;
+                        if (atr && ctx->generic_params && ctx->generic_args)
+                            atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
+                        Str base = atr ? get_base_type_name(atr) : (Str){0};
+                        if (str_eq_cstr(base, "Any")) base = (Str){0};
+                        arg_bases[typed_arg_count++] = base;
+                    }
                     size_t named_count = 0;
                     const size_t* named = decl_index_functions(ctx->compiler_ctx, callee->as.ident, &named_count);
+                    /* As in emit_call_expr: a call that carries type arguments
+                     * (`createList<Int>(cap: 4)`, the lowered List.create)
+                     * binds to a generic taking that many when there is one,
+                     * never to a program's own non-generic namesake whose
+                     * parameters happen to fit the value arguments. */
+                    size_t call_type_args = 0;
+                    for (const AstTypeRef* ga = expr->as.call.generic_args; ga; ga = ga->next) call_type_args++;
+                    bool generic_takes_type_args = false;
+                    for (size_t k = 0; k < named_count && call_type_args > 0 && !generic_takes_type_args; k++) {
+                        const AstFuncDecl* candidate = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+                        if (!candidate->generic_params || candidate->specialization_args) continue;
+                        uint16_t pc = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) pc++;
+                        size_t type_params = 0;
+                        for (const AstIdentifierPart* gp = candidate->generic_params; gp; gp = gp->next) type_params++;
+                        generic_takes_type_args = pc == param_count && type_params == call_type_args;
+                    }
                     for (size_t k = 0; k < named_count && !d; k++) {
                         const AstDecl* dd = ctx->compiler_ctx->all_decls[named[k]];
                         uint16_t pc = 0; for (const AstParam* pp = dd->as.func_decl.params; pp; pp = pp->next) pc++;
@@ -163,8 +193,16 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                             if (!cap_ok) continue;
                         }
                         if (!generic_fallback) generic_fallback = &dd->as.func_decl;
+                        if (!typed_match && !generic_takes_type_args && !dd->as.func_decl.generic_params && typed_arg_count == param_count) {
+                            bool typed = true;
+                            size_t ai = 0;
+                            for (const AstParam* pp = dd->as.func_decl.params; pp && typed && ai < typed_arg_count; pp = pp->next, ai++) {
+                                if (arg_bases[ai].len > 0 && !str_eq(arg_bases[ai], get_base_type_name(pp->type))) typed = false;
+                            }
+                            if (typed) typed_match = &dd->as.func_decl;
+                        }
                     }
-                    if (!d) d = generic_fallback;
+                    if (!d) d = typed_match ? typed_match : generic_fallback;
                 }
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);
@@ -422,6 +460,10 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             // registered and its calls hit undeclared symbols in the C.
             if (ctx->has_expected_type && ctx->expected_type.generic_args) {
                 const AstTypeRef* elem_type = ctx->expected_type.generic_args;
+                /* Inside a specialization the literal's element is the
+                 * concrete argument, not the template's `T` */
+                if (ctx->generic_params && ctx->generic_args)
+                    elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                 const AstFuncDecl* create_fd = NULL;
                 const AstFuncDecl* add_fd = NULL;
                 // The LAST generic createList / add in list order, as the scan found
@@ -523,6 +565,14 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                         Str loc_base = get_base_type_name(type);
                         const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
                         const AstTypeRef* elem_type = type->generic_args;
+                        /* Inside a specialization the element is the concrete
+                         * argument: a `List(T)` local of a generic body,
+                         * instantiated with Holder, needs List's drop for
+                         * Holder. Registered for the template's `T`, the drop
+                         * was declared nowhere and defined after its caller
+                         * (an undeclared rae_core_List_drop_rae_Holder_...). */
+                        if (elem_type && ctx->generic_params && ctx->generic_args)
+                            elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                         if (drop_fd && elem_type) {
                             register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
                         }

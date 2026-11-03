@@ -1,0 +1,262 @@
+# An in-game camera that reads QR codes in the walker world (docs/qr.md,
+# "Scanning the rendered frame"). With RAE_WALKER_QR=1 a 1 m cube with a
+# code on every side (lib/qr/QrImage on the cube's material) stands 10 m in
+# front of the walker, pushable like the other cubes, and the
+# middle of the rendered frame is scanned every 10 frames (lib/qr/
+# qrScanSystem: read back from the GPU a frame or two later, decoded); a
+# code read is logged.
+#
+# RAE_WALKER_QR_TEST=1 sweeps the camera round the cube (placed 10 m ahead,
+# clear of the cube stacks), at eye height (pitch 0.2): at each angle (0,
+# +-30 and +-55 degrees off a side's normal) and distance (1.5 to 30 m) it waits
+# for three scans (a read in any counts), then reports the farthest distance each angle still read
+# and ends the app.
+import Math
+import Sys
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Scene3d
+open RendererDeferred
+open RendererImages
+open WorldBiome
+open app3d/CameraRig
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerCubes
+open app3d/CharacterController
+open qr/QrTables
+open qr/QrEncoder
+open qr/QrImage
+open qr/QrReader
+open qr/qrScanSystem/QrScanSystem
+open Gpu2dCanvas
+
+const walkerQrText: String = "https://example.com/rae/walker/cube"
+
+type WalkerQrScan {
+  enabled: Bool
+  scanner: QrScanner
+  cubeEntityId: EntityId
+  # The text last logged (a read is logged when it changes)
+  lastLogged: String
+  # The sweep (RAE_WALKER_QR_TEST)
+  testing: Bool
+  step: Int
+  stepFrames: Int
+  stepScans: Int
+  stepRead: Bool
+  results: List(Bool)
+  done: Bool
+  # The sweep looks at the cube from the side away from the walker (yaw of
+  # its 0 degrees)
+  baseYaw: Float
+}
+
+func walkerQrAngles() ret List(Float) {
+  ret List(Float) {
+    0.0
+    30.0
+    -30.0
+    55.0
+    -55.0
+  }
+}
+
+func walkerQrDistances() ret List(Float) {
+  ret List(Float) {
+    1.5
+    2.0
+    3.0
+    4.0
+    5.0
+    6.0
+    8.0
+    10.0
+    12.0
+    15.0
+    18.0
+    22.0
+    26.0
+    30.0
+  }
+}
+
+func disabledWalkerQrScan() ret WalkerQrScan {
+  ret WalkerQrScan {
+    enabled: false
+    scanner: createQrScanner(intervalFrames: 10, regionSide: 512)
+    cubeEntityId: noEntity()
+    lastLogged: ""
+    testing: false
+    step: 0
+    stepFrames: 0
+    stepScans: 0
+    stepRead: false
+    results: {}
+    done: false
+    baseYaw: 0.0
+  }
+}
+
+# The cube and the scanner (when RAE_WALKER_QR or RAE_WALKER_QR_TEST is
+# set): the cube 4 m in front of the walker, on the ground
+func createWalkerQrScan(
+  renderer: mod DeferredRenderer
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  heroEntityId: view EntityId
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret WalkerQrScan {
+  var scan: WalkerQrScan = disabledWalkerQrScan()
+  scan.testing = Sys.getEnv(name: "RAE_WALKER_QR_TEST").length() > 0
+  scan.enabled = scan.testing or Sys.getEnv(name: "RAE_WALKER_QR").length() > 0
+  if not scan.enabled {
+    ret scan
+  }
+  if scan.testing {
+    scan.scanner.intervalFrames = 1
+  }
+  var layer: Int = -1
+  if let symbol: QrSymbol = qrEncodeText(text: walkerQrText, level: QrErrorCorrection.medium) {
+    layer = rendererAddSurfaceImagePixels(
+      renderer: renderer
+      name: "walker-qr-cube"
+      pixels: qrImagePixels(symbol: symbol, side: 512, quietZone: 4)
+    )
+  }
+  let hero: view ThirdPersonController = controllerOf(
+    controllers: world.controllers
+    entityId: heroEntityId
+  )
+  let x: Float = hero.position.x - Math.sin(x: hero.heading) * 10.0
+  let y: Float = hero.position.y + Math.cos(x: hero.heading) * 10.0
+  let ground: Float = worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: groundZ
+    cfg: biome
+  )
+  scan.cubeEntityId = spawnPhysicsCube(
+    physicsSystem: physicsSystem
+    allocator: world.allocator
+    transforms: world.transforms
+    center: Vec3.create(x: x, y: y, z: ground + 0.55)
+    halfSize: 0.5
+    color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  if componentHas(this: physicsSystem.cubes, entityId: scan.cubeEntityId) {
+    let cube: mod PhysicsCube = componentMod(this: physicsSystem.cubes, entityId: scan.cubeEntityId)
+    cube.textureLayer = layer
+  }
+  scan.baseYaw = hero.heading + 3.14159265
+  log("[qr] a cube with a code at ({x}, {y}); scanning the middle of the frame")
+  ret scan
+}
+
+func cubeCenter(scan: view WalkerQrScan, world: view WalkerWorld) ret Vec3 {
+  if componentHas(this: world.transforms, entityId: scan.cubeEntityId) {
+    ret componentView(this: world.transforms, entityId: scan.cubeEntityId).position
+  }
+  ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+}
+
+# Aim the camera for the sweep's current step (before the frame's camera
+# update): an orbit round the cube's middle
+func walkerQrAim(
+  scan: view WalkerQrScan
+  world: view WalkerWorld
+  rig: mod CameraRig
+  camera: mod Camera3d
+) {
+  if not scan.testing or scan.done {
+    ret
+  }
+  let distances: List(Float) = walkerQrDistances()
+  let angle: Float = walkerQrAngles().copyAtFallback(
+    index: scan.step / distances.length
+    fallback: 0.0
+  )
+  rig.mode = CameraRigMode.orbit
+  rig.maxDistance = 40.0
+  rig.minDistance = 0.5
+  rig.yaw = scan.baseYaw + angle * 3.14159265 / 180.0
+  rig.orbitPitch = 0.2
+  rig.distance = distances.copyAtFallback(index: scan.step % distances.length, fallback: 5.0)
+  camera.target = cubeCenter(scan: scan, world: world)
+  snapCameraRigView(rig: rig)
+}
+
+# One frame, after present: scan, log a new read, run the sweep
+func walkerQrFrame(scan: mod WalkerQrScan, canvas: mod Gpu2dCanvas) {
+  if not scan.enabled or scan.done {
+    ret
+  }
+  let finished: Bool = qrScanFrame(scanner: scan.scanner, canvas: canvas)
+  var read: String = ""
+  if finished and scan.scanner.lastRead {
+    if let result: view QrReadResult = scan.scanner.latest {
+      read = result.text
+    }
+  }
+  if not scan.testing {
+    if finished and scan.scanner.lastRead and read is not scan.lastLogged {
+      log(
+        "[qr] read \"{read}\" ({scan.scanner.lastLatencyFrames} frames after the copy, decoded in {scan.scanner.lastDecodeNs / 1000} us)"
+      )
+      scan.lastLogged = read
+    }
+    ret
+  }
+  # The sweep: a few frames to settle, then two scans of this view
+  scan.stepFrames = scan.stepFrames + 1
+  if finished and scan.stepFrames > 4 {
+    scan.stepScans = scan.stepScans + 1
+    if read is walkerQrText {
+      scan.stepRead = true
+    }
+  }
+  if scan.stepScans >= 3 or scan.stepFrames > 50 {
+    scan.results.add(value: scan.stepRead)
+    scan.step = scan.step + 1
+    scan.stepFrames = 0
+    scan.stepScans = 0
+    scan.stepRead = false
+    if scan.step >= walkerQrAngles().length * walkerQrDistances().length {
+      walkerQrReport(scan: scan)
+      scan.done = true
+    }
+  }
+}
+
+func walkerQrReport(scan: view WalkerQrScan) {
+  let distances: List(Float) = walkerQrDistances()
+  let angles: List(Float) = walkerQrAngles()
+  loop var a: Int = 0, a < angles.length, ++a {
+    var line: String = ""
+    var farthest: Float = -1.0
+    var nearest: Float = -1.0
+    loop var d: Int = 0, d < distances.length, ++d {
+      let distance: Float = distances.copyAtFallback(index: d, fallback: 0.0)
+      if scan.results.copyAtFallback(index: a * distances.length + d, fallback: false) {
+        line = "{line} {distance}:read"
+        farthest = distance
+        if nearest < 0.0 {
+          nearest = distance
+        }
+      } else {
+        line = "{line} {distance}:-"
+      }
+    }
+    log("[qr-test] {angles.copyAtFallback(index: a, fallback: 0.0)} degrees off the side:{line}")
+    log(
+      "[qr-test] {angles.copyAtFallback(index: a, fallback: 0.0)} degrees: reads from {nearest} m to {farthest} m"
+    )
+  }
+}
+
+func walkerQrTestDone(scan: view WalkerQrScan) ret Bool {
+  ret scan.testing and scan.done
+}

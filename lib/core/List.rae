@@ -117,11 +117,17 @@ func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
 # the element's heap (String/List/Map data pointer); the caller that then owned
 # and dropped it double-freed the list's buffer (#1010). `copyAt`'s value
 # accessor deep-copies heap fields, so the returned T is independent.
+#
+# The fallback is a `copy T`, as in Array's copyAtFallback: the function owns
+# its own fallback, frees it when the index is in range, and returns it as
+# its own value when not. A bare `T` was borrowed bitwise, so a temporary
+# fallback (`fallback: makeHolder()`) was never freed, and a named one came
+# back sharing its heap with the caller's variable.
 func copyAtFallback(
   T: type
   this: view List(T)
   index: view Int
-  fallback: T
+  fallback: copy T
 ) ret T {
   if let value: T = copyAt(this, index: index) {
     ret value

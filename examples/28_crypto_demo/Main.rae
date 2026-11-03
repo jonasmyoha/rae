@@ -1,13 +1,104 @@
 # lib/crypto in one walk: hash a password with Argon2id, use the hash as a
 # key to lock a message with XChaCha20-Poly1305 (a fresh random nonce), unlock
 # it, and see a changed message refused; then sign with Ed25519 and take a
-# BLAKE2b content hash.
+# BLAKE2b content hash. Then what lib/net does per connection: two sides agree
+# a key with X25519, turn the shared secret into a message key with
+# HKDF-SHA256, and seal a packet with ChaCha20-Poly1305 (RFC 8439, the 12-byte
+# nonce lib/net counts up) that the other side opens and a changed byte
+# spoils. All of it runs through Monocypher, checked against lib/crypto's own
+# Rae code by compiler/tests/cases/1285_fast_crypto_matches_reference.
 open crypto/CryptoBytes
 open crypto/CryptoRandom
 open crypto/Argon2
 open crypto/Aead
 open crypto/Ed25519
 open crypto/Blake2b
+open crypto/X25519
+open crypto/Sha256
+open crypto/ChaCha20Poly1305
+open net/Wire
+
+# Steps 6 to 8: a key agreed with X25519, then a packet sealed and opened
+# with it. True when both sides got the same secret, the packet opened and
+# the changed one did not.
+func agreeAndSeal() ret Bool {
+  var chacha: ChaChaState = createChaChaState()
+  log("6. Two sides each make an X25519 key pair and swap the public keys")
+  let aliceSecret: List(UInt8) = x25519NewSecretKey()
+  let bobSecret: List(UInt8) = x25519NewSecretKey()
+  let alicePublic: List(UInt8) = x25519PublicKey(secretKey: aliceSecret)
+  let bobPublic: List(UInt8) = x25519PublicKey(secretKey: bobSecret)
+  let aliceShared: List(UInt8) = x25519SharedSecret(
+    secretKey: aliceSecret
+    theirPublicKey: bobPublic
+  )
+  let bobShared: List(UInt8) = x25519SharedSecret(secretKey: bobSecret, theirPublicKey: alicePublic)
+  log("   the same shared secret on both sides: {aliceShared is bobShared}")
+  let key: List(UInt8) = hkdfSha256(
+    salt: bytesOfText(text: "demo salt")
+    inputKey: aliceShared
+    info: bytesOfText(text: "message key")
+    length: 32
+  )
+  log("7. Alice seals a packet with ChaCha20-Poly1305")
+  # The first packet's nonce: lib/net counts it up per packet, never reused
+  var nonce: List(UInt8) = List.create(UInt8, cap: 12)
+  nonce.addDefaults(count: 12)
+  let message: List(UInt8) = bytesOfText(text: "meet at noon")
+  let noAdditional: List(UInt8) = {}
+  var sealed: List(UInt8) = {}
+  aeadSeal(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    plain: message
+    plainStart: 0
+    plainCount: message.length
+    output: sealed
+  )
+  log("   {message.length} bytes became {sealed.length} (the ciphertext and a 16-byte tag)")
+  var opened: List(UInt8) = {}
+  let opens: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    sealed: sealed
+    sealedStart: 0
+    sealedCount: sealed.length
+    output: opened
+  )
+  log("   Bob opens it: {opens}, \"{fromBytes(bytes: opened, start: 0, count: opened.length)}\"")
+  log("8. One changed byte is refused")
+  var changed: List(UInt8) = sealed
+  changed.set(
+    index: 0
+    value: ((changed.copyAtFallback(index: 0, fallback: 0) as Int) bitxor 1) as UInt8
+  )
+  var refused: List(UInt8) = {}
+  let changedOpens: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: noAdditional
+    additionalStart: 0
+    additionalCount: 0
+    sealed: changed
+    sealedStart: 0
+    sealedCount: changed.length
+    output: refused
+  )
+  log("   the changed packet opens: {changedOpens}")
+  ret opens and not changedOpens and aliceShared is bobShared
+}
 
 func main() {
   log("1. Hashing a password with Argon2id...")
@@ -73,4 +164,8 @@ func main() {
 
   log("5. A BLAKE2b content hash:")
   log("   {hexOfBytes(bytes: blake2b(message: document, hashSize: 32))}")
+
+  if not agreeAndSeal() {
+    log("   ERROR: the key agreement or the packet went wrong")
+  }
 }

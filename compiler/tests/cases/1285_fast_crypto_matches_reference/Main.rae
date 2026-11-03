@@ -1,0 +1,330 @@
+# lib/crypto's fast path (Monocypher, compiler/runtime/
+# runtime_crypto_monocypher.c) against its Rae reference: the same bytes for
+# every input. ChaCha20-Poly1305: plain and additional data of many lengths
+# (empty, around the 16- and 64-byte block edges, a whole 1200-byte packet)
+# sealed both ways must be the same bytes, each must open what the other
+# sealed, and a changed byte must be refused by both. X25519: random scalars
+# and points, and public keys, the same 32 bytes.
+#
+# Measured (Apple M1 Max, release build, 2026-11-03), from the timing at the
+# end (only a loose bound is in the expected output):
+#   seal + open a 1200-byte packet   Rae ~13 us, Monocypher ~6 us
+#   X25519                           Rae ~1.3 ms, Monocypher ~0.07 ms
+open net/Wire
+open crypto/ChaCha20Poly1305
+open crypto/X25519
+open crypto/X25519Reference
+
+type Random {
+  state: Int
+}
+
+func nextByte(random: mod Random) ret UInt8 {
+  var x: Int = random.state
+  x = (x bitxor (x shl 13)) bitand 4294967295
+  x = x bitxor (x shr 17)
+  x = (x bitxor (x shl 5)) bitand 4294967295
+  random.state = x
+  ret (x bitand 255) as UInt8
+}
+
+func randomBytes(random: mod Random, count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: nextByte(random: random))
+  }
+  ret bytes
+}
+
+func checkAead(
+  random: mod Random
+  chacha: mod ChaChaState
+  plainCount: view Int
+  additionalCount: view Int
+) ret Bool {
+  let key: List(UInt8) = randomBytes(random: random, count: 32)
+  let nonce: List(UInt8) = randomBytes(random: random, count: 12)
+  let additional: List(UInt8) = randomBytes(random: random, count: additionalCount)
+  let plain: List(UInt8) = randomBytes(random: random, count: plainCount)
+  var fast: List(UInt8) = {}
+  var reference: List(UInt8) = {}
+  aeadSeal(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    plain: plain
+    plainStart: 0
+    plainCount: plainCount
+    output: fast
+  )
+  aeadSealReference(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    plain: plain
+    plainStart: 0
+    plainCount: plainCount
+    output: reference
+  )
+  if fast is not reference {
+    log("  sealed bytes differ: {plainCount} bytes, {additionalCount} additional")
+    ret false
+  }
+  # Each opens the other's
+  var openedFast: List(UInt8) = {}
+  var openedReference: List(UInt8) = {}
+  let fastOpens: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    sealed: reference
+    sealedStart: 0
+    sealedCount: reference.length
+    output: openedFast
+  )
+  let referenceOpens: Bool = aeadOpenReference(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    sealed: fast
+    sealedStart: 0
+    sealedCount: fast.length
+    output: openedReference
+  )
+  if not fastOpens or not referenceOpens or openedFast is not plain or openedReference is not plain {
+    log("  opening failed: {plainCount} bytes")
+    ret false
+  }
+  # A changed byte: both refuse, and neither writes anything
+  var changed: List(UInt8) = fast
+  let at: Int = (nextByte(random: random) as Int) % changed.length
+  changed.set(
+    index: at
+    value: ((changed.copyAtFallback(index: at, fallback: 0) as Int) bitxor 1) as UInt8
+  )
+  var refusedFast: List(UInt8) = {}
+  var refusedReference: List(UInt8) = {}
+  let fastRefuses: Bool = not aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    sealed: changed
+    sealedStart: 0
+    sealedCount: changed.length
+    output: refusedFast
+  )
+  let referenceRefuses: Bool = not aeadOpenReference(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additionalCount
+    sealed: changed
+    sealedStart: 0
+    sealedCount: changed.length
+    output: refusedReference
+  )
+  if not fastRefuses or not referenceRefuses or refusedFast.length is not 0 or refusedReference.length is not 0 {
+    log("  a changed byte was not refused: {plainCount} bytes")
+    ret false
+  }
+  ret true
+}
+
+func checkX25519(random: mod Random, work: mod X25519Work) ret Bool {
+  let scalar: List(UInt8) = randomBytes(random: random, count: 32)
+  let point: List(UInt8) = randomBytes(random: random, count: 32)
+  let fast: List(UInt8) = x25519SharedSecret(secretKey: scalar, theirPublicKey: point)
+  var reference: List(UInt8) = {}
+  x25519Reference(
+    work: work
+    scalar: scalar
+    scalarStart: 0
+    point: point
+    pointStart: 0
+    out: reference
+  )
+  let fastPublic: List(UInt8) = x25519PublicKey(secretKey: scalar)
+  var referencePublic: List(UInt8) = {}
+  x25519PublicKeyReference(
+    work: work
+    secret: scalar
+    secretStart: 0
+    out: referencePublic
+  )
+  ret fast is reference and fastPublic is referencePublic and fast.length is 32
+}
+
+func main() ret Int {
+  var random: Random = { state: 2463534242 }
+  var chacha: ChaChaState = createChaChaState()
+  var work: X25519Work = createX25519Work()
+  let plainCounts: List(Int) = {
+    0
+    1
+    15
+    16
+    17
+    63
+    64
+    65
+    129
+    1000
+    1163
+  }
+  let additionalCounts: List(Int) = {
+    0
+    1
+    13
+    16
+    33
+  }
+  var aeadCases: Int = 0
+  var aeadSame: Int = 0
+  loop let plainCount: Int in plainCounts {
+    loop let additionalCount: Int in additionalCounts {
+      aeadCases = aeadCases + 1
+      if checkAead(
+        random: random
+        chacha: chacha
+        plainCount: plainCount
+        additionalCount: additionalCount
+      ) {
+        aeadSame = aeadSame + 1
+      }
+    }
+  }
+  log(
+    "chacha20-poly1305: {aeadSame} of {aeadCases} inputs the same both ways, opened across, a changed byte refused by both"
+  )
+  var x25519Same: Int = 0
+  loop var i: Int = 0, i < 20, ++i {
+    if checkX25519(random: random, work: work) {
+      x25519Same = x25519Same + 1
+    }
+  }
+  log("x25519: {x25519Same} of 20 scalars and points the same, and their public keys")
+  # Timing: seal + open of a full packet's payload (1163 bytes plain, 13
+  # additional, 1200 on the wire), and X25519
+  let key: List(UInt8) = randomBytes(random: random, count: 32)
+  let nonce: List(UInt8) = randomBytes(random: random, count: 12)
+  let header: List(UInt8) = randomBytes(random: random, count: 13)
+  let plain: List(UInt8) = randomBytes(random: random, count: 1163)
+  var sealed: List(UInt8) = List.create(UInt8, cap: 1200)
+  var opened: List(UInt8) = List.create(UInt8, cap: 1200)
+  let rounds: Int = 200
+  var startNs: Int = nowNs()
+  loop var i: Int = 0, i < rounds, ++i {
+    sealed.clear()
+    opened.clear()
+    aeadSeal(
+      chacha: chacha
+      key: key
+      keyStart: 0
+      nonce: nonce
+      additional: header
+      additionalStart: 0
+      additionalCount: 13
+      plain: plain
+      plainStart: 0
+      plainCount: 1163
+      output: sealed
+    )
+    let ok: Bool = aeadOpen(
+      chacha: chacha
+      key: key
+      keyStart: 0
+      nonce: nonce
+      additional: header
+      additionalStart: 0
+      additionalCount: 13
+      sealed: sealed
+      sealedStart: 0
+      sealedCount: sealed.length
+      output: opened
+    )
+  }
+  let fastNs: Int = (nowNs() - startNs) / rounds
+  startNs = nowNs()
+  loop var i: Int = 0, i < rounds, ++i {
+    sealed.clear()
+    opened.clear()
+    aeadSealReference(
+      chacha: chacha
+      key: key
+      keyStart: 0
+      nonce: nonce
+      additional: header
+      additionalStart: 0
+      additionalCount: 13
+      plain: plain
+      plainStart: 0
+      plainCount: 1163
+      output: sealed
+    )
+    let ok: Bool = aeadOpenReference(
+      chacha: chacha
+      key: key
+      keyStart: 0
+      nonce: nonce
+      additional: header
+      additionalStart: 0
+      additionalCount: 13
+      sealed: sealed
+      sealedStart: 0
+      sealedCount: sealed.length
+      output: opened
+    )
+  }
+  let referenceNs: Int = (nowNs() - startNs) / rounds
+  var shared: List(UInt8) = List.create(UInt8, cap: 32)
+  startNs = nowNs()
+  loop var i: Int = 0, i < 20, ++i {
+    shared = x25519SharedSecret(secretKey: key, theirPublicKey: key)
+  }
+  let fastX25519Ns: Int = (nowNs() - startNs) / 20
+  startNs = nowNs()
+  loop var i: Int = 0, i < 20, ++i {
+    shared.clear()
+    x25519Reference(
+      work: work
+      scalar: key
+      scalarStart: 0
+      point: key
+      pointStart: 0
+      out: shared
+    )
+  }
+  let referenceX25519Ns: Int = (nowNs() - startNs) / 20
+  if Sys.getEnv(name: "RAE_CRYPTO_TIMES").length() > 0 {
+    log(
+      "seal + open 1200 bytes: fast {fastNs / 1000} us, reference {referenceNs / 1000} us; x25519: fast {fastX25519Ns / 1000} us, reference {referenceX25519Ns / 1000} us"
+    )
+  }
+  log(
+    "the fast path is faster: packets {fastNs < referenceNs}, x25519 {fastX25519Ns * 4 < referenceX25519Ns}"
+  )
+  ret 0
+}

@@ -98,6 +98,42 @@ int64_t rae_ext_Crypto_aeadUnlock(uint8_t* plain, uint8_t* mac, uint8_t* key, ui
                             cipher + offset, (size_t)count);
 }
 
+/* ChaCha20-Poly1305 as RFC 8439 has it (the IETF form, a 12-byte nonce): the
+ * packets of lib/net (lib/crypto/ChaCha20Poly1305.rae, whose Rae code is the
+ * reference these are checked against in compiler/tests/cases/
+ * 1285_fast_crypto_matches_reference). The ciphertext and its tag are
+ * contiguous, as on the wire. */
+/* Seal `count` bytes of `plain` from `plainOffset` under the 32-byte key at
+ * `key + keyOffset` and the 12-byte `nonce` (RFC 8439), covering `adCount`
+ * bytes of `ad` from `adOffset`: the ciphertext then the 16-byte tag at
+ * `out + outOffset` */
+void rae_ext_Crypto_aeadSeal(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad,
+                             int64_t adOffset, int64_t adCount, uint8_t* plain,
+                             int64_t plainOffset, int64_t count, uint8_t* out, int64_t outOffset) {
+  crypto_aead_ctx context;
+  crypto_aead_init_ietf(&context, key + keyOffset, nonce);
+  crypto_aead_write(&context, out + outOffset, out + outOffset + count,
+                    adCount > 0 ? ad + adOffset : NULL, (size_t)adCount,
+                    count > 0 ? plain + plainOffset : NULL, (size_t)count);
+  crypto_wipe(&context, sizeof(context));
+}
+
+/* Open `count` bytes of ciphertext at `sealed + sealedOffset`, its tag right
+ * after them: 0 and the plaintext at `out + outOffset`, or -1 when the tag
+ * does not match (nothing written) */
+int64_t rae_ext_Crypto_aeadOpen(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad,
+                                int64_t adOffset, int64_t adCount, uint8_t* sealed,
+                                int64_t sealedOffset, int64_t count, uint8_t* out,
+                                int64_t outOffset) {
+  crypto_aead_ctx context;
+  crypto_aead_init_ietf(&context, key + keyOffset, nonce);
+  int mismatch = crypto_aead_read(&context, out + outOffset, sealed + sealedOffset + count,
+                                  adCount > 0 ? ad + adOffset : NULL, (size_t)adCount,
+                                  count > 0 ? sealed + sealedOffset : NULL, (size_t)count);
+  crypto_wipe(&context, sizeof(context));
+  return mismatch ? -1 : 0;
+}
+
 /* `count` (at most 256) secure random bytes into `bytes` from `offset`: the
  * number written, or a negative error. One call to the platform's source. */
 #if defined(__EMSCRIPTEN__) || defined(__wasm__)

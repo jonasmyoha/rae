@@ -1,0 +1,210 @@
+# A player reaches a relay session over WebSocket and gets its messages
+# echoed by a UDP host (docs/relay.md, "WebSocket"), natively and in the
+# browser. In the browser (compiler/tools/wasm_relay_smoke.sh) the page has
+# no UDP, so a native relay and a native UDP host run outside it and the
+# page is told where: ?RAE_RELAY_WS_PORT=<port>&RAE_RELAY_TOKEN=<token>.
+# Natively, with no such settings, the check runs that relay and host
+# itself. The player joins, sends 100 numbered reliable messages through
+# lib/net/Connection (encrypted) and checks each comes back in order. Logs
+# "RELAY OK" or "RELAY FAIL" and exits 0 only on OK.
+open ecs/ComponentTable
+open net/Tcp
+open net/Udp
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open net/relay/RelayConnections
+open Sys
+open String
+
+const messageCount: Int = 100
+
+# Give up after this long
+const timeLimitMs: Int = 15000
+
+type RelayCheck {
+  # The relay and the UDP host this check runs itself (native, no settings)
+  ownRelay: opt RelayServer
+  host: opt RelayHost
+  player: RelayPlayer
+  hostMessage: List(UInt8)
+  message: List(UInt8)
+  token: String
+  joined: Bool
+  sent: Int
+  echoes: Int
+  outOfOrder: Int
+  startMs: Int
+  passed: Bool
+}
+
+func clientConfig() ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.relayOnly = true
+  ret config
+}
+
+func webSocketPlayer(port: view Int) ret RelayPlayer {
+  ret createRelayPlayerWith(
+    client: createRelayClientOverWebSocket(
+      host: "127.0.0.1"
+      port: port
+      config: clientConfig()
+      connectTimeoutMs: 2000
+    )
+    connectionConfig: defaultConnectionConfig()
+  )
+}
+
+# The echo host: every reliable message back to its sender
+func stepHost(host: mod RelayHost, message: mod List(UInt8), nowMs: view Int) {
+  relayHostReceive(host: host, nowMs: nowMs)
+  loop var i: Int = 0, i < host.peers.length, ++i {
+    if let peer: mod HostPeer = host.peers.modAt(index: i) {
+      loop connectionReceive(connection: peer.connection, message: message) is MessageChannel.reliable {
+        let echoed: Bool = connectionSendReliable(
+          connection: peer.connection
+          bytes: message
+          start: 0
+          count: message.length
+        )
+      }
+    }
+  }
+  relayHostSend(host: host, nowMs: nowMs)
+}
+
+func stepPlayer(check: mod RelayCheck, nowMs: view Int) {
+  if not check.joined and check.token.length() > 0 {
+    check.joined = relayPlayerJoin(
+      player: check.player
+      tokenText: check.token
+      connectionId: 77
+      nowMs: nowMs
+    )
+  }
+  relayPlayerReceive(player: check.player, nowMs: nowMs)
+  var bytes: List(UInt8) = List.create(UInt8, cap: 4)
+  loop connectionIsConnected(connection: check.player.connection) and check.sent < messageCount and check.sent - check.echoes < 32 {
+    bytes.clear()
+    writeU32(bytes: bytes, value: check.sent)
+    if not connectionSendReliable(
+      connection: check.player.connection
+      bytes: bytes
+      start: 0
+      count: bytes.length
+    ) {
+      break
+    }
+    check.sent = check.sent + 1
+  }
+  loop connectionReceive(connection: check.player.connection, message: check.message) is MessageChannel.reliable {
+    if readU32(bytes: check.message, offset: 0) is not check.echoes {
+      check.outOfOrder = check.outOfOrder + 1
+    }
+    check.echoes = check.echoes + 1
+  }
+  relayPlayerSend(player: check.player, nowMs: nowMs)
+}
+
+# One frame: false once the check is decided
+func checkFrame(check: mod RelayCheck) ret Bool {
+  let now: Int = nowMs() - check.startMs
+  if let relay: mod RelayServer = check.ownRelay {
+    relayStep(server: relay, waitMs: 0)
+  }
+  if let host: mod RelayHost = check.host {
+    stepHost(host: host, message: check.hostMessage, nowMs: now)
+    if check.token.length() is 0 and relayClientIsReady(client: host.client) {
+      check.token = relayTokenText(token: host.client.token)
+    }
+  }
+  stepPlayer(check: check, nowMs: now)
+  if check.echoes >= messageCount {
+    check.passed = check.outOfOrder is 0
+    var transport: String = "UDP"
+    if relayClientUsesWebSocket(client: check.player.client) {
+      transport = "WebSocket"
+    }
+    if check.passed {
+      log("RELAY OK: {check.echoes} echoes in order over {transport} in {now} ms")
+    } else {
+      log("RELAY FAIL: {check.outOfOrder} of {check.echoes} echoes out of order")
+    }
+    ret false
+  }
+  if relayClientIsBroken(client: check.player.client) {
+    log(
+      "RELAY FAIL: the WebSocket to the relay closed (joined {check.joined}, {check.echoes} echoes)"
+    )
+    ret false
+  }
+  if now > timeLimitMs {
+    log(
+      "RELAY FAIL: {check.echoes} of {messageCount} echoes after {now} ms (joined {check.joined}, relay client ready {relayClientIsReady(
+        client: check.player.client
+      )})"
+    )
+    ret false
+  }
+  ret true
+}
+
+func main() ret Int {
+  var webSocketPort: Int = getEnv(name: "RAE_RELAY_WS_PORT").trim().toInt()
+  var token: String = getEnv(name: "RAE_RELAY_TOKEN").trim()
+  var ownRelay: opt RelayServer = none
+  var host: opt RelayHost = none
+  if token.length() is 0 {
+    # No session given: run the relay and the UDP host here
+    var relay: RelayServer = createRelayServer(
+      host: "127.0.0.1"
+      port: 0
+      config: defaultRelayConfig()
+    )
+    if relayListenWebSocket(server: relay, host: "127.0.0.1", port: 0) is not NetStatus.ok {
+      log("RELAY FAIL: no WebSocket listener")
+      ret 1
+    }
+    webSocketPort = relayWebSocketPort(server: relay)
+    var udpHost: RelayHost = createRelayHost(
+      relayAddress: resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+      clientConfig: clientConfig()
+      connectionConfig: defaultConnectionConfig()
+    )
+    relayClientOpen(client: udpHost.client, nowMs: 0)
+    ownRelay = own relay
+    host = own udpHost
+  }
+  var check: RelayCheck = {
+    ownRelay: own ownRelay
+    host: own host
+    player: webSocketPlayer(port: webSocketPort)
+    hostMessage: List.create(UInt8, cap: 64)
+    message: List.create(UInt8, cap: 64)
+    token: token
+    joined: false
+    sent: 0
+    echoes: 0
+    outOfOrder: 0
+    startMs: nowMs()
+    passed: false
+  }
+  mainLoop check {
+    if checkFrame(check: check) is false {
+      relayClientClose(client: check.player.client)
+      break
+    }
+  }
+  ret exitCodeOf(check: check)
+}
+
+func exitCodeOf(check: view RelayCheck) ret Int {
+  if check.passed {
+    ret 0
+  }
+  ret 1
+}

@@ -1,0 +1,308 @@
+# The host's snapshot system (lib/net/replication, docs/replication.md): after
+# a snapshot is captured, send one player its view of it. Call it once per
+# player per snapshot, with that player's lib/net/Connection.
+#
+# The player's view is the records of the entities within `interestRadius`
+# of its own entity (`peer.focusNetId`; entities with no interest point are
+# always in). It is sent as a delta against the newest snapshot the player
+# acknowledged, if the host still has it and what the player was sent then:
+# changed records, components that went, and entities that went or left the
+# player's interest. Unreliable messages, at most `maxMessageBytes` each: a
+# big snapshot goes in parts, and the player uses it only when it has all of
+# them (a lost part costs that snapshot, never a wrong world).
+#
+# A part: kind (1), tick (4), baseline tick (4; 4294967295 for none), part
+# number (1), part count (1), the player's own net id (4; 4294967295 for
+# none), the newest input tick the host applied for the player (4;
+# 4294967295 for none), then operations.
+open collections/IntMap
+open net/Wire
+open net/Connection
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+
+const noBaseline: Int = 4294967295
+
+const partHeaderBytes: Int = 19
+
+func recordCountAt(host: view ReplicationHost, slot: view Int) ret Int {
+  if let snapshot: view ReplicaSnapshot = host.snapshots.viewAt(index: slot) {
+    ret snapshotRecordCount(snapshot: snapshot)
+  }
+  ret 0
+}
+
+# Start part `index` of the snapshot `tick` against `baseTick`
+func startPart(
+  host: mod ReplicationHost
+  peer: view ReplicaPeer
+  tick: view Int
+  baseTick: view Int
+) {
+  if host.partCount >= host.parts.length {
+    host.parts.add(value: List.create(UInt8, cap: host.config.maxMessageBytes))
+  }
+  if let part: mod List(UInt8) = host.parts.modAt(index: host.partCount) {
+    part.clear()
+    writeU8(bytes: part, value: replicaMessageSnapshot)
+    writeU32(bytes: part, value: tick)
+    writeU32(bytes: part, value: baseTick)
+    writeU8(bytes: part, value: host.partCount)
+    writeU8(bytes: part, value: 0)
+    writeU32(bytes: part, value: headerValue(value: peer.focusNetId))
+    writeU32(bytes: part, value: headerValue(value: peer.appliedInputTick))
+  }
+  host.partCount = host.partCount + 1
+}
+
+# A value for a 4-byte header field: -1 is written as 4294967295
+func headerValue(value: view Int) ret Int {
+  if value < 0 {
+    ret noBaseline
+  }
+  ret value
+}
+
+# Put the operation in `host.recordBytes` into the current part, or a new
+# one when it does not fit
+func addOperation(
+  host: mod ReplicationHost
+  peer: view ReplicaPeer
+  tick: view Int
+  baseTick: view Int
+) {
+  var fits: Bool = false
+  if let part: view List(UInt8) = host.parts.viewAt(index: host.partCount - 1) {
+    fits = part.length + host.recordBytes.length <= host.config.maxMessageBytes
+  }
+  if not fits {
+    startPart(
+      host: host
+      peer: peer
+      tick: tick
+      baseTick: baseTick
+    )
+  }
+  if let part: mod List(UInt8) = host.parts.modAt(index: host.partCount - 1) {
+    appendCopy(
+      destination: part
+      source: host.recordBytes
+      start: 0
+      count: host.recordBytes.length
+    )
+  }
+}
+
+# Which net ids of the current snapshot the player sees: into `host.visible`
+# (in record order) and `host.visibleSet`
+func findVisible(host: mod ReplicationHost, peer: view ReplicaPeer, slot: view Int) {
+  host.visible.clear()
+  host.visibleSet = createIntMap(Int, cap: 64)
+  if let current: view ReplicaSnapshot = host.snapshots.viewAt(index: slot) {
+    let hasFocus: Bool = peer.focusNetId >= 0 and snapshotPointOf(
+      snapshot: current
+      netId: peer.focusNetId
+      out: host.focus
+    )
+    let x: Float = host.focus.copyAtFallback(index: 0, fallback: 0.0)
+    let y: Float = host.focus.copyAtFallback(index: 1, fallback: 0.0)
+    let z: Float = host.focus.copyAtFallback(index: 2, fallback: 0.0)
+    loop var record: Int = 0, record < snapshotRecordCount(snapshot: current), ++record {
+      let netId: Int = recordNetId(snapshot: current, record: record)
+      if not host.visibleSet.has(k: netId) {
+        if not hasFocus or snapshotPointWithin(
+          snapshot: current
+          netId: netId
+          x: x
+          y: y
+          z: z
+          radius: host.config.interestRadius
+        ) {
+          host.visibleSet.set(k: netId, value: 1)
+          host.visible.add(value: netId)
+        }
+      }
+    }
+  }
+}
+
+# Whether the player's acknowledged snapshot can be the baseline: the host
+# still has it and remembers what the player was sent then
+func baselineUsable(host: view ReplicationHost, peer: view ReplicaPeer) ret Bool {
+  let baseTick: Int = peer.ackedTick
+  if baseTick < 0 or baseTick >= host.tick or host.tick - baseTick >= host.config.historySize {
+    ret false
+  }
+  let baseSlot: Int = ringSlot(host: host, tick: baseTick)
+  if let baseline: view ReplicaSnapshot = host.snapshots.viewAt(index: baseSlot) {
+    ret baseline.tick is baseTick and peer.visibleTicks.copyAtFallback(
+      index: baseSlot
+      fallback: -1
+    ) is baseTick
+  }
+  ret false
+}
+
+# Send the player its delta of the newest snapshot: the bytes sent
+func replicaSnapshotSystem(
+  host: mod ReplicationHost
+  peer: mod ReplicaPeer
+  connection: mod Connection
+) ret Int {
+  if host.tick < 0 {
+    ret 0
+  }
+  let tick: Int = host.tick
+  let slot: Int = ringSlot(host: host, tick: tick)
+  findVisible(host: host, peer: peer, slot: slot)
+  let usable: Bool = baselineUsable(host: host, peer: peer)
+  var baseTick: Int = noBaseline
+  var baseSlot: Int = slot
+  host.baseSet = createIntMap(Int, cap: 64)
+  if usable {
+    baseTick = peer.ackedTick
+    baseSlot = ringSlot(host: host, tick: baseTick)
+    if let baseNetIds: view List(Int) = peer.visibleNetIds.viewAt(index: baseSlot) {
+      loop let netId: Int in baseNetIds {
+        host.baseSet.set(k: netId, value: 1)
+      }
+    }
+  }
+  host.partCount = 0
+  startPart(
+    host: host
+    peer: peer
+    tick: tick
+    baseTick: baseTick
+  )
+  # Changed and new records
+  let recordTotal: Int = recordCountAt(host: host, slot: slot)
+  loop var record: Int = 0, record < recordTotal, ++record {
+    var wrote: Bool = false
+    host.recordBytes.clear()
+    if let current: view ReplicaSnapshot = host.snapshots.viewAt(index: slot) {
+      let netId: Int = recordNetId(snapshot: current, record: record)
+      if host.visibleSet.has(k: netId) {
+        if let baseline: view ReplicaSnapshot = host.snapshots.viewAt(index: baseSlot) {
+          var baseRecord: Int = -1
+          if usable and host.baseSet.has(k: netId) {
+            baseRecord = snapshotFind(
+              snapshot: baseline
+              netId: netId
+              kind: recordKind(snapshot: current, record: record)
+            )
+          }
+          wrote = writeRecordDelta(
+            bytes: host.recordBytes
+            current: current
+            record: record
+            baseline: baseline
+            baseRecord: baseRecord
+          )
+        }
+      }
+    }
+    if wrote {
+      addOperation(
+        host: host
+        peer: peer
+        tick: tick
+        baseTick: baseTick
+      )
+    }
+  }
+  # What the player had and no longer gets
+  if usable {
+    writeRemovals(
+      host: host
+      peer: peer
+      slot: slot
+      baseSlot: baseSlot
+      tick: tick
+      baseTick: baseTick
+    )
+  }
+  # Remember what this snapshot gave the player
+  peer.visibleTicks.set(index: slot, value: tick)
+  if let sentNetIds: mod List(Int) = peer.visibleNetIds.modAt(index: slot) {
+    sentNetIds.clear()
+    loop let netId: Int in host.visible {
+      sentNetIds.add(value: netId)
+    }
+  }
+  # Send the parts, each knowing how many there are
+  var bytes: Int = 0
+  loop var i: Int = 0, i < host.partCount, ++i {
+    if let part: mod List(UInt8) = host.parts.modAt(index: i) {
+      part.set(index: 10, value: host.partCount as UInt8)
+      if connectionSendUnreliable(
+        connection: connection
+        bytes: part
+        start: 0
+        count: part.length
+      ) {
+        bytes = bytes + part.length
+        host.messagesSent = host.messagesSent + 1
+      }
+    }
+  }
+  peer.lastSnapshotBytes = bytes
+  peer.bytesSent = peer.bytesSent + bytes
+  host.bytesSent = host.bytesSent + bytes
+  host.snapshotsSent = host.snapshotsSent + 1
+  ret bytes
+}
+
+# Entities the player had at the baseline but does not see now, and
+# components that went from entities it still sees
+func writeRemovals(
+  host: mod ReplicationHost
+  peer: view ReplicaPeer
+  slot: view Int
+  baseSlot: view Int
+  tick: view Int
+  baseTick: view Int
+) {
+  if let baseNetIds: view List(Int) = peer.visibleNetIds.viewAt(index: baseSlot) {
+    loop let netId: Int in baseNetIds {
+      if not host.visibleSet.has(k: netId) {
+        host.recordBytes.clear()
+        writeU8(bytes: host.recordBytes, value: opRemoveEntity)
+        writeVarint(bytes: host.recordBytes, value: netId)
+        addOperation(
+          host: host
+          peer: peer
+          tick: tick
+          baseTick: baseTick
+        )
+      }
+    }
+  }
+  let baseRecords: Int = recordCountAt(host: host, slot: baseSlot)
+  loop var record: Int = 0, record < baseRecords, ++record {
+    var gone: Bool = false
+    var netId: Int = 0
+    var kind: Int = 0
+    if let baseline: view ReplicaSnapshot = host.snapshots.viewAt(index: baseSlot) {
+      netId = recordNetId(snapshot: baseline, record: record)
+      kind = recordKind(snapshot: baseline, record: record)
+      if host.visibleSet.has(k: netId) and host.baseSet.has(k: netId) {
+        if let current: view ReplicaSnapshot = host.snapshots.viewAt(index: slot) {
+          gone = snapshotFind(snapshot: current, netId: netId, kind: kind) < 0
+        }
+      }
+    }
+    if gone {
+      host.recordBytes.clear()
+      writeU8(bytes: host.recordBytes, value: opRemoveComponent)
+      writeVarint(bytes: host.recordBytes, value: netId)
+      writeU8(bytes: host.recordBytes, value: kind)
+      addOperation(
+        host: host
+        peer: peer
+        tick: tick
+        baseTick: baseTick
+      )
+    }
+  }
+}

@@ -1,0 +1,751 @@
+# lib/net/session with lib/net/replication: a host runs for a simulated
+# minute (lib/net/BadNetwork: 5% loss, 30 ms each way, 10 ms jitter) while
+# players join late, leave, go to the background and come back:
+#
+# - a late joiner is playing (its own entity in a world built from a full
+#   snapshot) within half a second;
+# - a player that leaves frees its slot at once, and its entity goes from
+#   everyone's world; nobody else is disturbed;
+# - a player whose app was in the background reconnects on a new connection
+#   with its token and gets the same slot and entity, within the grace
+#   period (10 s), whether its old connection timed out (7 s away) or not
+#   yet (3 s away: the new connection takes the slot over);
+# - one that stays away past the grace period gets a new slot;
+# - every second, every connected player's world is the host's at the
+#   snapshot it last applied.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Vec3
+open net/Wire
+open net/Udp
+open net/Connection
+open net/BadNetwork
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/session/Session
+
+type ArenaWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  transforms: ComponentTable(Transform3D)
+}
+
+type MoveInput {
+  moveX: Float
+  moveZ: Float
+}
+
+const kindReplicated: Int = 0
+
+const kindTransform: Int = 1
+
+const frameMs: Int = 10
+
+func createArena() ret ArenaWorld {
+  ret ArenaWorld { entities: createEntityAllocator(), replicated: create(), transforms: create() }
+}
+
+func at(x: view Float, z: view Float) ret Transform3D {
+  var transform: Transform3D = createTransform3D()
+  transform.position = Vec3 { x: x, y: 0.0, z: z }
+  ret transform
+}
+
+# One connection: both ends and both directions of the bad network
+type Link {
+  hostEnd: Connection
+  playerEnd: Connection
+  toPlayer: BadNetwork
+  toHost: BadNetwork
+  peer: ReplicaPeer
+  # The slot the host gave it (-1: no hello yet)
+  slotId: Int
+  # The host still serves it
+  live: Bool
+}
+
+type Client {
+  name: String
+  session: SessionPlayer
+  replication: ReplicationPlayer
+  world: ArenaWorld
+  link: Int
+  # The app is running (not in the background)
+  awake: Bool
+  helloSent: Bool
+  startMs: Int
+  playingAtMs: Int
+}
+
+type Game {
+  config: ReplicationConfig
+  host: ReplicationHost
+  session: SessionHost
+  world: ArenaWorld
+  links: List(Link)
+  clients: List(Client)
+  wandererIds: List(EntityId)
+  packet: List(UInt8)
+  message: List(UInt8)
+  nowMs: Int
+  seed: Int
+  checks: Int
+  mismatches: Int
+}
+
+func createClient(name: view String, config: view ReplicationConfig) ret Client {
+  ret Client {
+    name: name
+    session: createSessionPlayer()
+    replication: createReplicationPlayer(config: config)
+    world: createArena()
+    link: -1
+    awake: false
+    helloSent: false
+    startMs: 0
+    playingAtMs: -1
+  }
+}
+
+# A new connection for client `index` (a join or a reconnect): a fresh
+# replication state and world (a reconnect rebuilds from a full snapshot)
+func connect(game: mod Game, index: view Int) {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.lossPercent = 5
+  settings.latencyMs = 30
+  settings.jitterMs = 10
+  settings.seed = game.seed
+  var back: BadNetworkSettings = settings
+  back.seed = game.seed + 1
+  game.seed = game.seed + 2
+  var link: Link = {
+    hostEnd: createConnection(config: defaultConnectionConfig())
+    playerEnd: createConnection(config: defaultConnectionConfig())
+    toPlayer: createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 512)
+    toHost: createBadNetwork(settings: back, maxPacketBytes: 1200, capacity: 512)
+    peer: createReplicaPeer(peerId: -1, config: game.config)
+    slotId: -1
+    live: true
+  }
+  connectionListen(connection: link.hostEnd, nowMs: game.nowMs)
+  connectionConnect(connection: link.playerEnd, connectionId: 500 + game.seed, nowMs: game.nowMs)
+  game.links.add(value: link)
+  if let client: mod Client = game.clients.modAt(index: index) {
+    client.link = game.links.length - 1
+    client.awake = true
+    client.helloSent = false
+    client.replication = createReplicationPlayer(config: game.config)
+    client.world = createArena()
+    client.startMs = game.nowMs
+    client.playingAtMs = -1
+  }
+}
+
+# The host side of a link: its packets out, and in when the player's side
+# runs (a backgrounded player's side does not)
+func pumpLink(
+  link: mod Link
+  playerAwake: view Bool
+  nowMs: view Int
+  packet: mod List(UInt8)
+) {
+  if link.live {
+    connectionUpdate(connection: link.hostEnd, nowMs: nowMs)
+    loop connectionWritePacket(connection: link.hostEnd, packet: packet, nowMs: nowMs) {
+      badNetworkSend(
+        network: link.toPlayer
+        packet: packet
+        start: 0
+        count: packet.length
+        destination: noNetAddress()
+        nowMs: nowMs
+      )
+    }
+    loop badNetworkNext(network: link.toHost, packet: packet, nowMs: nowMs).ready {
+      let taken: Bool = connectionReadPacket(
+        connection: link.hostEnd
+        packet: packet
+        start: 0
+        count: packet.length
+        nowMs: nowMs
+      )
+    }
+  }
+  if playerAwake {
+    connectionUpdate(connection: link.playerEnd, nowMs: nowMs)
+    loop connectionWritePacket(connection: link.playerEnd, packet: packet, nowMs: nowMs) {
+      badNetworkSend(
+        network: link.toHost
+        packet: packet
+        start: 0
+        count: packet.length
+        destination: noNetAddress()
+        nowMs: nowMs
+      )
+    }
+    loop badNetworkNext(network: link.toPlayer, packet: packet, nowMs: nowMs).ready {
+      let taken: Bool = connectionReadPacket(
+        connection: link.playerEnd
+        packet: packet
+        start: 0
+        count: packet.length
+        nowMs: nowMs
+      )
+    }
+  }
+}
+
+func clientAwakeOn(game: view Game, linkIndex: view Int) ret Bool {
+  loop let client: view Client in game.clients {
+    if client.link is linkIndex and client.awake {
+      ret true
+    }
+  }
+  ret false
+}
+
+func pumpAll(game: mod Game) {
+  loop var l: Int = 0, l < game.links.length, ++l {
+    let awake: Bool = clientAwakeOn(game: game, linkIndex: l)
+    if let link: mod Link = game.links.modAt(index: l) {
+      pumpLink(
+        link: link
+        playerAwake: awake
+        nowMs: game.nowMs
+        packet: game.packet
+      )
+    }
+  }
+}
+
+func slotEntity(game: view Game, slotId: view Int) ret EntityId {
+  if let slot: view PlayerSlot = game.session.slots.viewAt(
+    index: sessionSlotIndex(host: game.session, slotId: slotId)
+  ) {
+    ret slot.entityId
+  }
+  ret noEntity()
+}
+
+# The host: hellos (join or resume), inputs, lost connections, expired
+# slots, the wanderers, and a snapshot to every served link
+func hostFrame(game: mod Game) {
+  loop var l: Int = 0, l < game.links.length, ++l {
+    var welcome: Int = -1
+    var resumedSlot: Int = -1
+    if let link: mod Link = game.links.modAt(index: l) {
+      loop link.live and connectionReceive(connection: link.hostEnd, message: game.message) is not MessageChannel.none {
+        if link.slotId < 0 {
+          let result: JoinResult = sessionTakeHello(
+            host: game.session
+            message: game.message
+            nowMs: game.nowMs
+          )
+          if result.kind is not JoinKind.refused {
+            welcome = result.slotIndex
+            if result.kind is JoinKind.joined {
+              let entityId: EntityId = allocEntity(this: game.world.entities)
+              componentSet(
+                this: game.world.transforms
+                entityId: entityId
+                data: at(x: (result.slotIndex as Float) * 3.0, z: 0.0)
+              )
+              let netId: Int = replicateEntity(
+                host: game.host
+                replicated: game.world.replicated
+                entityId: entityId
+                owner: result.slotIndex
+              )
+              sessionSetEntity(
+                host: game.session
+                slotIndex: result.slotIndex
+                entityId: entityId
+                netId: netId
+              )
+            }
+            if let slot: view PlayerSlot = game.session.slots.viewAt(index: result.slotIndex) {
+              link.slotId = slot.slotId
+              link.peer = createReplicaPeer(peerId: slot.slotId, config: game.config)
+              link.peer.focusNetId = slot.netId
+            }
+            if result.kind is JoinKind.resumed {
+              resumedSlot = link.slotId
+            }
+          }
+        } else {
+          let taken: Bool = replicaTakeMessage(
+            host: game.host
+            peer: link.peer
+            message: game.message
+          )
+        }
+      }
+      if welcome >= 0 {
+        sessionWriteWelcome(
+          host: game.session
+          slotIndex: welcome
+          resumed: resumedSlot >= 0
+          out: game.message
+        )
+        let queued: Bool = connectionSendReliable(
+          connection: link.hostEnd
+          bytes: game.message
+          start: 0
+          count: game.message.length
+        )
+      }
+      # Inputs move the slot's entity
+      var input: MoveInput = { moveX: 0.0, moveZ: 0.0 }
+      loop link.slotId >= 0 and replicaNextInput(
+        MoveInput
+        host: game.host
+        peer: link.peer
+        input: input
+      ) >= 0 {
+        let entityId: EntityId = slotEntityOf(session: game.session, slotId: link.slotId)
+        if componentHas(this: game.world.transforms, entityId: entityId) {
+          let transform: mod Transform3D = componentMod(
+            this: game.world.transforms
+            entityId: entityId
+          )
+          transform.position = Vec3 {
+            x: transform.position.x + input.moveX
+            y: 0.0
+            z: transform.position.z + input.moveZ
+          }
+        }
+      }
+      # A connection that ended (left) or timed out (maybe back later)
+      let state: ConnectionState = link.hostEnd.state
+      if link.live and (state is ConnectionState.disconnected or state is ConnectionState.timedOut) {
+        link.live = false
+        if link.slotId >= 0 {
+          sessionConnectionLost(
+            host: game.session
+            slotId: link.slotId
+            left: state is ConnectionState.disconnected
+            nowMs: game.nowMs
+          )
+        }
+      }
+    }
+    # A resumed slot: the new connection takes over from an old one
+    if resumedSlot >= 0 {
+      loop var other: Int = 0, other < game.links.length, ++other {
+        if other is not l {
+          if let old: mod Link = game.links.modAt(index: other) {
+            if old.slotId is resumedSlot and old.live {
+              old.live = false
+            }
+          }
+        }
+      }
+    }
+  }
+  var expired: List(PlayerSlot) = {}
+  sessionExpired(host: game.session, nowMs: game.nowMs, out: expired)
+  loop let slot: view PlayerSlot in expired {
+    clearEntityComponents(ArenaWorld, world: game.world, entityId: slot.entityId)
+    freeEntity(this: game.world.entities, entityId: slot.entityId)
+  }
+  loop var i: Int = 0, i < game.wandererIds.length, ++i {
+    let entityId: EntityId = game.wandererIds.copyAtFallback(index: i, fallback: noEntity())
+    let angle: Float = (game.nowMs as Float) * 0.0005 + (i as Float) * 2.1
+    let transform: mod Transform3D = componentMod(this: game.world.transforms, entityId: entityId)
+    transform.position = Vec3 {
+      x: Math.cos(x: angle) * 8.0
+      y: 0.0
+      z: 15.0 + Math.sin(x: angle) * 8.0
+    }
+  }
+  if replicaSnapshotDue(host: game.host, nowMs: game.nowMs) {
+    replicaBeginSnapshot(host: game.host, nowMs: game.nowMs)
+    captureReplicaTable(
+      Replicated
+      host: game.host
+      table: game.world.replicated
+      replicated: game.world.replicated
+      kind: kindReplicated
+    )
+    captureReplicaTable(
+      Transform3D
+      host: game.host
+      table: game.world.transforms
+      replicated: game.world.replicated
+      kind: kindTransform
+    )
+    captureInterestPoints(
+      host: game.host
+      transforms: game.world.transforms
+      replicated: game.world.replicated
+    )
+    loop var l: Int = 0, l < game.links.length, ++l {
+      if let link: mod Link = game.links.modAt(index: l) {
+        if link.live and link.slotId >= 0 {
+          let bytes: Int = replicaSnapshotSystem(
+            host: game.host
+            peer: link.peer
+            connection: link.hostEnd
+          )
+        }
+      }
+    }
+  }
+}
+
+func slotEntityOf(session: view SessionHost, slotId: view Int) ret EntityId {
+  if let slot: view PlayerSlot = session.slots.viewAt(
+    index: sessionSlotIndex(host: session, slotId: slotId)
+  ) {
+    ret slot.entityId
+  }
+  ret noEntity()
+}
+
+# A player: hello once connected, welcome and snapshots in, input out
+func clientFrame(game: mod Game, index: view Int) {
+  if let client: mod Client = game.clients.modAt(index: index) {
+    if not client.awake or client.link < 0 {
+      ret
+    }
+    if let link: mod Link = game.links.modAt(index: client.link) {
+      if not client.helloSent and connectionIsConnected(connection: link.playerEnd) {
+        sessionWriteHello(player: client.session, out: game.message)
+        let queued: Bool = connectionSendReliable(
+          connection: link.playerEnd
+          bytes: game.message
+          start: 0
+          count: game.message.length
+        )
+        client.helloSent = true
+      }
+      loop connectionReceive(connection: link.playerEnd, message: game.message) is not MessageChannel.none {
+        if not sessionTakeWelcome(player: client.session, message: game.message) {
+          let taken: Bool = replicaReceiveSystem(player: client.replication, message: game.message)
+        }
+      }
+      if replicaHasUpdate(player: client.replication) {
+        replicaSyncEntities(player: client.replication, entities: client.world.entities)
+        loop var i: Int = 0, i < client.replication.goneEntityIds.length, ++i {
+          let entityId: EntityId = client.replication.goneEntityIds.copyAtFallback(
+            index: i
+            fallback: noEntity()
+          )
+          clearEntityComponents(ArenaWorld, world: client.world, entityId: entityId)
+          freeEntity(this: client.world.entities, entityId: entityId)
+        }
+        applyReplicaTable(
+          Replicated
+          player: client.replication
+          table: client.world.replicated
+          kind: kindReplicated
+          template: Replicated { netId: 0, owner: -1 }
+        )
+        applyReplicaTable(
+          Transform3D
+          player: client.replication
+          table: client.world.transforms
+          kind: kindTransform
+          template: createTransform3D()
+        )
+        replicaFinishApply(player: client.replication)
+      }
+      if client.playingAtMs < 0 and client.session.welcomed and client.replication.ownNetId >= 0 and not isNone(
+        this: replicaEntityOf(player: client.replication, netId: client.replication.ownNetId)
+      ) {
+        client.playingAtMs = game.nowMs
+      }
+      if client.session.welcomed {
+        let sent: Bool = replicaSendInput(
+          MoveInput
+          player: client.replication
+          input: MoveInput { moveX: 0.002, moveZ: 0.001 }
+          tick: game.nowMs / frameMs
+          connection: link.playerEnd
+        )
+      }
+    }
+  }
+}
+
+# Whether client `index`'s world is the host's at the snapshot it applied
+func matchesHost(game: view Game, index: view Int) ret Bool {
+  if let client: view Client = game.clients.viewAt(index: index) {
+    let tick: Int = client.replication.appliedTick
+    if tick < 0 {
+      ret true
+    }
+    if let snapshot: view ReplicaSnapshot = game.host.snapshots.viewAt(
+      index: tick % game.config.historySize
+    ) {
+      if snapshot.tick is not tick {
+        ret true
+      }
+      var netIds: Int = 0
+      var values: List(Int) = {}
+      loop var record: Int = 0, record < snapshotRecordCount(snapshot: snapshot), ++record {
+        let netId: Int = recordNetId(snapshot: snapshot, record: record)
+        let entityId: EntityId = replicaEntityOf(player: client.replication, netId: netId)
+        if isNone(this: entityId) {
+          ret false
+        }
+        values.clear()
+        if recordKind(snapshot: snapshot, record: record) is kindTransform {
+          netIds = netIds + 1
+          appendReplicaValues(
+            Transform3D
+            value: componentView(this: client.world.transforms, entityId: entityId)
+            scale: game.config.floatScale
+            values: values
+          )
+        } else {
+          appendReplicaValues(
+            Replicated
+            value: componentView(this: client.world.replicated, entityId: entityId)
+            scale: game.config.floatScale
+            values: values
+          )
+        }
+        loop var i: Int = 0, i < values.length, ++i {
+          if values.copyAtFallback(index: i, fallback: 0) is not recordValue(
+            snapshot: snapshot
+            record: record
+            index: i
+          ) {
+            ret false
+          }
+        }
+      }
+      ret allocatorAliveCount(this: client.world.entities) is netIds
+    }
+  }
+  ret true
+}
+
+func frame(game: mod Game) {
+  game.nowMs = game.nowMs + frameMs
+  loop var c: Int = 0, c < game.clients.length, ++c {
+    clientFrame(game: game, index: c)
+  }
+  pumpAll(game: game)
+  hostFrame(game: game)
+  pumpAll(game: game)
+  if game.nowMs % 1000 is 0 {
+    loop var c: Int = 0, c < game.clients.length, ++c {
+      var connected: Bool = false
+      if let client: view Client = game.clients.viewAt(index: c) {
+        connected = client.awake and client.playingAtMs >= 0
+      }
+      if connected {
+        game.checks = game.checks + 1
+        if not matchesHost(game: game, index: c) {
+          game.mismatches = game.mismatches + 1
+        }
+      }
+    }
+  }
+}
+
+func runUntil(game: mod Game, timeMs: view Int) {
+  loop game.nowMs < timeMs {
+    frame(game: game)
+  }
+}
+
+func clientReport(game: view Game, index: view Int) ret String {
+  if let client: view Client = game.clients.viewAt(index: index) {
+    ret "{client.name}: slot {client.session.slotId}, resumed {client.session.resumed}, playing within half a second {client.playingAtMs >= 0 and client.playingAtMs - client.startMs <= 500}"
+  }
+  ret "?"
+}
+
+func clientSlot(game: view Game, index: view Int) ret Int {
+  if let client: view Client = game.clients.viewAt(index: index) {
+    ret client.session.slotId
+  }
+  ret -1
+}
+
+func clientOwnNetId(game: view Game, index: view Int) ret Int {
+  if let client: view Client = game.clients.viewAt(index: index) {
+    ret client.replication.ownNetId
+  }
+  ret -1
+}
+
+# Client `index` goes to the background (stops running), or leaves
+func sleepClient(game: mod Game, index: view Int) {
+  if let client: mod Client = game.clients.modAt(index: index) {
+    client.awake = false
+  }
+}
+
+func leaveClient(game: mod Game, index: view Int) {
+  var linkIndex: Int = -1
+  if let client: view Client = game.clients.viewAt(index: index) {
+    linkIndex = client.link
+  }
+  if let link: mod Link = game.links.modAt(index: linkIndex) {
+    connectionDisconnect(connection: link.playerEnd, nowMs: game.nowMs)
+  }
+  # A few frames for the goodbye to get out, then the app is gone
+  runUntil(game: game, timeMs: game.nowMs + 100)
+  sleepClient(game: game, index: index)
+}
+
+func hostSlotCount(game: view Game) ret Int {
+  ret game.session.slots.length
+}
+
+func main() ret Int {
+  var config: ReplicationConfig = defaultReplicationConfig()
+  config.interestRadius = 1000.0
+  var game: Game = {
+    config: config
+    host: createReplicationHost(config: config)
+    session: createSessionHost(graceMs: 10000, maxPlayers: 8)
+    world: createArena()
+    links: {}
+    clients: {}
+    wandererIds: {}
+    packet: List.create(UInt8, cap: 1200)
+    message: List.create(UInt8, cap: 1200)
+    nowMs: 0
+    seed: 40
+    checks: 0
+    mismatches: 0
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    let entityId: EntityId = allocEntity(this: game.world.entities)
+    componentSet(this: game.world.transforms, entityId: entityId, data: at(x: 0.0, z: 15.0))
+    let netId: Int = replicateEntity(
+      host: game.host
+      replicated: game.world.replicated
+      entityId: entityId
+      owner: -1
+    )
+    game.wandererIds.add(value: entityId)
+  }
+  let names: List(String) = {
+    "A"
+    "B"
+    "C"
+    "D"
+    "E"
+    "B again"
+  }
+  loop let name: String in names {
+    game.clients.add(value: createClient(name: name, config: config))
+  }
+  # A joins at once, B and C late
+  connect(game: game, index: 0)
+  runUntil(game: game, timeMs: 3000)
+  log(clientReport(game: game, index: 0))
+  connect(game: game, index: 1)
+  runUntil(game: game, timeMs: 6000)
+  log(clientReport(game: game, index: 1))
+  connect(game: game, index: 2)
+  runUntil(game: game, timeMs: 9000)
+  log(clientReport(game: game, index: 2))
+
+  # B leaves: its slot goes at once, its entity from everyone's world
+  let bNetId: Int = clientOwnNetId(game: game, index: 1)
+  leaveClient(game: game, index: 1)
+  runUntil(game: game, timeMs: 10000)
+  log(
+    "B left: {hostSlotCount(game: game)} slots left, gone from A's world {isNone(
+      this: replicaEntityOfClient(game: game, index: 0, netId: bNetId)
+    )}"
+  )
+
+  # A goes to the background for 7 s: its connection times out (5 s), the
+  # slot waits; back with its token it gets the same slot and entity
+  let aSlot: Int = clientSlot(game: game, index: 0)
+  let aNetId: Int = clientOwnNetId(game: game, index: 0)
+  sleepClient(game: game, index: 0)
+  runUntil(game: game, timeMs: 17000)
+  connect(game: game, index: 0)
+  runUntil(game: game, timeMs: 19000)
+  log(
+    "A back after 7 s: same slot {clientSlot(game: game, index: 0) is aSlot}, same entity {clientOwnNetId(
+      game: game
+      index: 0
+    ) is aNetId}; {clientReport(game: game, index: 0)}"
+  )
+
+  # D joins; C goes away for 20 s (past the grace period)
+  connect(game: game, index: 3)
+  runUntil(game: game, timeMs: 22000)
+  log(clientReport(game: game, index: 3))
+  let cSlot: Int = clientSlot(game: game, index: 2)
+  let cNetId: Int = clientOwnNetId(game: game, index: 2)
+  sleepClient(game: game, index: 2)
+  runUntil(game: game, timeMs: 25000)
+  connect(game: game, index: 4)
+  runUntil(game: game, timeMs: 30000)
+  log(clientReport(game: game, index: 4))
+
+  # D leaves; B comes back as a new player (it left: no slot to resume)
+  leaveClient(game: game, index: 3)
+  runUntil(game: game, timeMs: 36000)
+  connect(game: game, index: 5)
+  runUntil(game: game, timeMs: 38000)
+  log(clientReport(game: game, index: 5))
+  runUntil(game: game, timeMs: 42000)
+  log(
+    "C's slot after 17 s away: freed {sessionSlotIndex(host: game.session, slotId: cSlot) < 0}, its entity gone from A's world {isNone(
+      this: replicaEntityOfClient(game: game, index: 0, netId: cNetId)
+    )}"
+  )
+  connect(game: game, index: 2)
+  runUntil(game: game, timeMs: 45000)
+  log(
+    "C back after the grace period: a new slot {clientSlot(game: game, index: 2) is not cSlot}, a new entity {clientOwnNetId(
+      game: game
+      index: 2
+    ) is not cNetId}; {clientReport(game: game, index: 2)}"
+  )
+
+  # E goes away for 3 s only: back on a new connection before the old one
+  # timed out, it takes its slot over
+  let eSlot: Int = clientSlot(game: game, index: 4)
+  let eNetId: Int = clientOwnNetId(game: game, index: 4)
+  sleepClient(game: game, index: 4)
+  runUntil(game: game, timeMs: 48000)
+  connect(game: game, index: 4)
+  runUntil(game: game, timeMs: 51000)
+  log(
+    "E back after 3 s: same slot {clientSlot(game: game, index: 4) is eSlot}, same entity {clientOwnNetId(
+      game: game
+      index: 4
+    ) is eNetId}; {clientReport(game: game, index: 4)}"
+  )
+
+  # A leaves; the host runs on to the minute
+  leaveClient(game: game, index: 0)
+  runUntil(game: game, timeMs: 60000)
+  log(
+    "at the minute: {hostSlotCount(game: game)} players (C, E, B again), {allocatorAliveCount(
+      this: game.world.entities
+    )} entities on the host (3 players + 3 wanderers)"
+  )
+  log(
+    "every second, every connected world matched the host's: {game.checks > 100} checks, {game.mismatches} mismatches"
+  )
+  ret 0
+}
+
+func replicaEntityOfClient(game: view Game, index: view Int, netId: view Int) ret EntityId {
+  if let client: view Client = game.clients.viewAt(index: index) {
+    ret replicaEntityOf(player: client.replication, netId: netId)
+  }
+  ret noEntity()
+}

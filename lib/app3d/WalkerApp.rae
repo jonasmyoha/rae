@@ -92,6 +92,9 @@ open app3d/CameraFov
 open app3d/SceneLook
 open app3d/SettingsWeather
 open app3d/SettingsWind
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/remoteWalkerSystem/RemoteWalkerSystem
+open app3d/WalkerQrScan
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -128,7 +131,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     let extentH: Float = windowExtentH()
     Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
-    let assets: String = settings.assets
+    # A "lib/..." folder (walkerAssets) from the Rae this app builds against
+    let assets: String = Sys.stdlibPath(path: settings.assets)
+    log("[assets] walker assets from {assets}")
     let biome: BiomeConfig = walkerBiome(land: settings.land)
     let gpuUi: Gpu2dUi = loadUiAssets(
       dir: assets
@@ -328,12 +333,29 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       treeSet: StylizedTrees.createStylizedTrees()
     )
 
-    let cloneCount: Int = walkerCrowdCount
+    # Settings that say offline take the environment's (RAE_WALKER_NET), so
+    # every walker app can host or join
+    var netSettings: WalkerNetSettings = settings.net
+    if netSettings.mode is WalkerNetMode.offline {
+      netSettings = walkerNetSettingsFromEnvironment()
+    }
+    # The session starts at the first frame (app3d/remoteWalkerSystem
+    # walkerNetAppFrame): the loading before it takes longer than a connect
+    # attempt may
+    # The crowd is offline-only: in a networked session every other
+    # character is a player (app3d/remoteWalkerSystem makes and frees them)
+    var cloneCount: Int = walkerCrowdCount
+    var remoteCapacity: Int = 0
+    if netSettings.mode is not WalkerNetMode.offline {
+      cloneCount = 0
+      remoteCapacity = remoteWalkerMax
+    }
     let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
-    # One skinned instance batch for every character, the hero's and the crowd's
+    # One skinned instance batch for every character: the hero's, the crowd's
+    # and the remote walkers'
     var characterBatch: InstanceBatch = createInstanceBatch(
       mesh: firstPart
-      capacity: 1 + cloneCount
+      capacity: 1 + cloneCount + remoteCapacity
     )
     # The physics cubes: one unit box, scaled per cube (app3d/WalkerPhysics)
     let cubeMesh: MeshHandle = uploadMeshDataForTerrain(
@@ -654,6 +676,11 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # #905: the renderer owns the mesh store the water grid and the particle
     # quad are uploaded into, so both systems are built before it moves into
     # the app.
+    # A networked session: hosted, or joined by its token (app3d/walkerNetSystem)
+    var walkerNet: opt WalkerNet = none
+    if netSettings.mode is not WalkerNetMode.offline {
+      walkerNet = createWalkerNet(settings: netSettings)
+    }
     var wadeSplash: opt WadeSplash = none
     var waterSystem: opt WaterSystem = none
     var gpuCapacity: Int = walkerGpuCapacity
@@ -685,6 +712,15 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     let walkerMarks: WalkerMarks = createWalkerMarks(
       renderer: renderer
       characterCount: 1 + crowdEntities.length
+      biome: biome
+    )
+    # RAE_WALKER_QR: a cube with a QR code and the camera that scans it
+    let qrScan: WalkerQrScan = createWalkerQrScan(
+      renderer: renderer
+      physicsSystem: physicsSystem
+      world: walkerWorld
+      heroEntityId: heroEntityId
+      groundZ: groundZ
       biome: biome
     )
     ret WalkerApp {
@@ -775,6 +811,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       walkerReset: own walkerReset
       walkerMarks: own walkerMarks
       netSeam: createNetSeam()
+      walkerNet: own walkerNet
+      remoteWalkers: createRemoteWalkers()
+      qrScan: own qrScan
       players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       climate: own createClimate(reach: walkerClimateReach(land: settings.land))

@@ -29,8 +29,10 @@
  * renderer client tips it over): the substitute_type_ref specialization nodes
  * for one more heavily-generic module graph run to tens of MiB. Raised 128 -> 512
  * MiB so production-sized module graphs have real headroom; it is a one-shot
- * malloc freed after emit, and only touched pages become resident. */
-#define RAE_C_BACKEND_ARENA_CAPACITY (512ULL * 1024ULL * 1024ULL)
+ * malloc freed after emit, and only touched pages become resident. Raised
+ * 512 MiB -> 2 GiB when the walker kit's networking, QR and seasons met in
+ * one program (143 emits with 515 MiB). */
+#define RAE_C_BACKEND_ARENA_CAPACITY (2048ULL * 1024ULL * 1024ULL)
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -311,6 +313,9 @@ static const char* host_target_arch(void) {
 /* Whether this host can hand C emitted for `os` to a toolchain that builds
  * it: an Apple OS's C on a macOS host goes into Xcode (tools/ios). */
 static bool host_builds_target_c(const char* os) {
+  /* Android's C is built by the NDK, which runs on every desktop host
+   * (tools/android) */
+  if (strcmp(os, "android") == 0) return true;
   if (strcmp(host_target_os(), "macos") != 0) return false;
   return strcmp(os, "ios") == 0 || strcmp(os, "tvos") == 0 || strcmp(os, "watchos") == 0 ||
          strcmp(os, "visionos") == 0;
@@ -3314,6 +3319,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
      * read-only compatibility getter. */
     args[n++] = "-sEXPORTED_RUNTIME_METHODS=requestFullscreen";
   }
+  /* Browser WebSockets (compiler/runtime/runtime_web_socket.c,
+   * lib/webSocket/WebSocketBrowser): Emscripten's library for them */
+  if (file_contains_text(c_path, "rae_ext_WebSocketWeb_")) {
+    args[n++] = "-lwebsocket.js";
+  }
   if (uses_sdl3) {
     args[n++] = "-DRAE_HAS_SDL3";
     args[n++] = "-sUSE_SDL=3";
@@ -4661,7 +4671,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
      * target make a check-only build: it type-checks against that target
      * and emits nothing, since this toolchain cannot produce its binary.
      * The exception is a compiled build that writes `--emit-c` for a target
-     * whose C this host's tools build (an Apple OS on macOS, through Xcode):
+     * whose C this host's tools build (an Apple OS on macOS, through Xcode;
+     * Android anywhere, through the NDK):
      * it emits that target's C, so Target says what the app runs on. */
     {
       const char* native_os = build_opts.target == BUILD_TARGET_WASM ? "web" : host_target_os();

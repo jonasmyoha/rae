@@ -1,0 +1,11 @@
+# A reserved keyword used as a variable's name is reported as one wherever
+# it appears: at the binding, as an assignment target and as an operand.
+# It used to crash the parser (SIGSEGV in parse_binary, also under
+# `rae format`): the failed operand came back as NULL and the check for
+# mixed bitwise operators read it.
+func main() ret Int {
+  var any: Int = 0
+  any = any bitor 1
+  let total: Int = 2 bitand any
+  ret 0
+}
