@@ -841,14 +841,34 @@ Each step is one queue task that leaves the walkers working.
    - The deferred lighting pass upsamples it over the sky
      (deferred_light.wgsl), and the layer then draws only its cirrus and
      its horizon band (skySlabActive). The forward pass keeps the layer.
-   - Cost. Mac (50% render scale, load 14): the clouds span went from
-     0.4 ms (layer) to 0.57 ms (slab), while lighting dropped 0.06 ms; net
-     +0.1 ms. iPhone 15 Pro: the clouds span read 7-8.5 ms for off, the
-     layer and the slab alike, and the frame's GPU total was about 52 ms in
-     all three; the mark-based span cannot isolate the clouds there, so
-     the slab's cost is inside that noise, and a phone's fallback ignores
-     the span (thermal state only) until the cloud passes carry their own
-     timestamps. A phone starts at the layer anyway.
+   - Cost, first measured with RendererPassTiming's marks. Mac (50%
+     render scale, load 14): the clouds span went from 0.4 ms (layer) to
+     0.57 ms (slab), while lighting dropped 0.06 ms; net +0.1 ms. iPhone 15
+     Pro: the span read 7-8.5 ms for off, the layer and the slab alike, and
+     the frame's GPU total was about 52 ms in all three: the marks hold
+     other passes' work there.
+   - Cost, measured with the cloud passes' own timestamps (lib/CloudTiming,
+     2026-11-03): every cloud pass of a frame is one recording, each render
+     pass carries timestamp writes, between a 1 x 1 "cloud start" pass and a
+     1 x 1 "cloud end" pass; the clouds' time is the start pass's end to the
+     latest end of theirs. Apple's GPUs stamp a pass's beginning when its
+     vertex stage starts, before it waits for the work ahead, so a pass's
+     own beginning-to-end reads 3.7-4.9 ms whatever it does; independent
+     passes also run side by side (the field map's pass can end before the
+     shadow map's), so this is wall-clock time, an upper bound on the cost.
+     On the iPhone the last timed pass of a recording read 0, which the end
+     pass works around. Numbers (143 at noon, cumulus 50%):
+     - Mac, under load 6-20 from other work: off 0-2.0 ms, layer 1.3-2.4 ms,
+       slab 0.75-2.5 ms, medians about 1.2, 1.5 and 1.6 ms. The clouds cost a
+       few tenths of a millisecond above an empty pass, and the slab is not
+       distinguishable from the layer in this noise.
+     - iPhone 15 Pro: off 0 ms (nothing measurable). The slab's passes up to
+       the trace read 1.30-1.35 ms (before the end pass existed; its resolve
+       read 0). The layer and the slab with the end pass are not measured
+       yet: the phone stopped giving its files to devicectl (locked) partway
+       through the runs; queued.
+     The fallback now reads this number on every device (a phone no longer
+     ignores it).
 5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
    - Tiling Perlin-Worley 3D noise (generated once, for example with the
      method of sebh/TileableVolumeNoise), Wrenninge octaves, a Beer shadow

@@ -47,6 +47,11 @@ type GpuTiming {
   sampleNames: List(String)
   lastNames: List(String)
   lastMicroseconds: List(Int)
+  # and when each of its passes ended, in microseconds after the first
+  # pass's beginning (collectTiming): on a tiler a pass's beginning is
+  # stamped when its vertex stage starts, before it waits for the work
+  # ahead of it, so the time between two passes' ends is the later one's
+  lastEndMicroseconds: List(Int)
 }
 
 # 8 bytes per timestamp, 2 timestamps per pass.
@@ -74,6 +79,7 @@ func unavailableTiming(resources: view GpuResources) ret GpuTiming {
       sampleNames: List.create(String, cap: 8)
       lastNames: List.create(String, cap: 8)
       lastMicroseconds: List.create(Int, cap: 8)
+      lastEndMicroseconds: List.create(Int, cap: 8)
     }
   }
 }
@@ -140,6 +146,7 @@ func createGpuTiming(resources: mod GpuResources, maxPasses: view Int) ret GpuTi
           sampleNames: List.create(String, cap: 8)
           lastNames: List.create(String, cap: 8)
           lastMicroseconds: List.create(Int, cap: 8)
+          lastEndMicroseconds: List.create(Int, cap: 8)
         }
       }
     }
@@ -313,6 +320,8 @@ func collectTiming(
     ret false
   }
   out.clear()
+  timing.lastEndMicroseconds.clear()
+  let first: Int = readU64(bytes: bytes, offset: 0)
   var total: Int = 0
   var pass: Int = 0
   loop pass < count {
@@ -322,7 +331,12 @@ func collectTiming(
     if endTick > begin {
       microseconds = ((endTick - begin) as Float * timing.periodNs / 1000.0).toInt()
     }
+    var ended: Int = 0
+    if endTick > first {
+      ended = ((endTick - first) as Float * timing.periodNs / 1000.0).toInt()
+    }
     out.add(value: microseconds)
+    timing.lastEndMicroseconds.add(value: ended)
     total = total + microseconds
     pass = pass + 1
   }

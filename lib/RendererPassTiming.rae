@@ -25,10 +25,6 @@ open RendererDeferred
 # (RendererDeferred.endUiFrameTimed): not a graph pass, so outside RenderTag
 const passTimingCopyTag: Int = 1000
 
-# The clouds' step before the lighting or the forward pass (lib/CloudShadow
-# drawn as its own span; lib/CloudTier reads it): not a graph pass either
-const passTimingCloudsTag: Int = 1001
-
 # Marks per frame: one before each graph pass and one at the end
 const passTimingMaxMarks: Int = 24
 
@@ -339,9 +335,6 @@ func renderTagName(tag: view Int) ret String {
   }
   if tag is passTimingCopyTag {
     ret "present: copy to drawable, present"
-  }
-  if tag is passTimingCloudsTag {
-    ret "clouds"
   }
   ret "pass {tag}"
 }
