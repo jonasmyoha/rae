@@ -170,6 +170,28 @@ echo "gen-ios: emitting C for $name..."
 "$rae" build --entry "$entry" --project "$ex_dir" --out "$gen/app.c" --target compiled --emit-c --target-os ios --target-arch arm64
 { printf '#include <SDL3/SDL_main.h>\n'; cat "$gen/app.c"; } > "$gen/app_ios.c"
 
+# Where the device is (lib/Location): iOS asks the person for it only with a
+# purpose string in Info.plist (NSLocationWhenInUseUsageDescription), and App
+# Store Connect refuses a build that uses Core Location without one. An app
+# whose C includes the Location shim links CoreLocation and must set
+# RAE_IOS_LOCATION_USAGE (plain text, no < & >: why it needs the location);
+# the text is written whenever it is set.
+location_usage=${RAE_IOS_LOCATION_USAGE:-}
+location_link=""
+if grep -q 'runtime_location_apple.h' "$gen/app.c"; then
+  if [ -z "$location_usage" ]; then
+    echo "error: the app uses lib/Location: set RAE_IOS_LOCATION_USAGE to the words iOS shows when it asks (why the app needs the location)" >&2
+    exit 1
+  fi
+  location_link=' "-framework CoreLocation"'
+fi
+if [ -n "$location_usage" ]; then
+  case "$location_usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $location_usage" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
+fi
+
 # 2. Enumerate bundled assets (the example's assets/ tree). Each file is added to
 #    the bundle at the SAME relative path so the emitted relative reads resolve
 #    after the chdir shim.
@@ -360,7 +382,7 @@ target_link_libraries(\${APP}
   "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreHaptics"
   "-framework CoreText" "-framework UniformTypeIdentifiers"
   "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"
-  "-framework OpenGLES" "-framework Security")
+  "-framework OpenGLES" "-framework Security"$location_link)
 
 # A real Info.plist (with UILaunchScreen for native resolution + portrait lock);
 # CMake's INFOPLIST_KEY_* build settings do not apply to a MACOSX_BUNDLE target.

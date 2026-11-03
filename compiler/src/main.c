@@ -2967,9 +2967,14 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
 #if defined(__APPLE__)
   /* lib/Keychain: Security.framework, for a program whose C includes its
    * shim (runtime_keychain_apple.h) */
-  const char* network_flags = c_output_includes(c_path, "runtime_network_apple.h")
+  const char* network_only_flags = c_output_includes(c_path, "runtime_network_apple.h")
       ? " -framework Network -framework Security"
       : (c_output_includes(c_path, "runtime_keychain_apple.h") ? " -framework Security" : "");
+  /* lib/Location: CoreLocation.framework, for a program whose C includes its
+   * shim (runtime_location_apple.h) */
+  char network_flags[160];
+  snprintf(network_flags, sizeof network_flags, "%s%s", network_only_flags,
+           c_output_includes(c_path, "runtime_location_apple.h") ? " -framework CoreLocation" : "");
 #else
   const char* network_flags = "";
 #endif

@@ -1,0 +1,83 @@
+# lib/Location without a device: its value types, what a Core Location
+# authorization status and error code mean, and a headless run, which never
+# asks Core Location. There `startLocation` answers `notAvailable` at once
+# and `pollLocation` hands the answer over exactly once; a request still
+# locating when its timeout passes answers `timedOut`.
+import Sys
+open Location
+
+func describe(answer: view LocationAnswer) ret String {
+  if answer.failure is LocationFailure.none {
+    ret "fix {answer.fix.latitude}, {answer.fix.longitude} within {answer.fix.accuracyMeters} m, reduced {answer.fix.reduced}"
+  }
+  ret "{answer.failure}: {answer.message}"
+}
+
+func main() {
+  # the value types
+  let fix: LocationFix = {
+    latitude: 60.1699
+    longitude: 24.9384
+    accuracyMeters: 3000.0
+    epochMs: 1762171200000
+    reduced: true
+  }
+  log("found: {describe(answer: locationFound(fix: fix))}")
+  log(
+    "failed: {describe(
+      answer: locationFailed(
+        failure: LocationFailure.off
+        message: locationFailureMessage(failure: LocationFailure.off)
+      )
+    )}"
+  )
+
+  # authorization statuses: 0 not determined, 1 restricted, 2 denied,
+  # 3 always, 4 when in use; services off reads as denied
+  loop var status: Int = 0, status <= 4, ++status {
+    log(
+      "status {status}: {locationAuthorizationFailure(status: status, servicesOn: true)}, services off: {locationAuthorizationFailure(
+        status: status
+        servicesOn: false
+      )}"
+    )
+  }
+  # CLError codes: 0 location unknown, 1 denied, 2 network
+  log(
+    "error 0: {locationErrorFailure(code: 0, servicesOn: true)}, 1: {locationErrorFailure(
+      code: 1
+      servicesOn: true
+    )}, 1 services off: {locationErrorFailure(code: 1, servicesOn: false)}, 2: {locationErrorFailure(
+      code: 2
+      servicesOn: true
+    )}"
+  )
+
+  # a headless run
+  let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
+  var request: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+  log(
+    "before start: pending {locationPending(request: request)}, answer {pollLocation(
+      request: request
+      now: 100.0
+    ) is none}"
+  )
+  startLocation(request: request, now: 100.0)
+  if let answer: LocationAnswer = pollLocation(request: request, now: 100.0) {
+    log("headless: {describe(answer: answer)}")
+  }
+  log("asked again: no answer {pollLocation(request: request, now: 101.0) is none}")
+
+  # the timeout, for a request that is locating
+  var slow: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+  slow.phase = LocationPhase.locating
+  slow.startedSec = 200.0
+  log(
+    "after 10 s: no answer {pollLocation(request: slow, now: 210.0) is none}, pending {locationPending(
+      request: slow
+    )}"
+  )
+  if let late: LocationAnswer = pollLocation(request: slow, now: 216.0) {
+    log("after 16 s: {describe(answer: late)}, pending {locationPending(request: slow)}")
+  }
+}

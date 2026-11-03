@@ -1,0 +1,329 @@
+# Location — where the device is, once: for local weather, a nearby list.
+#
+#     var request: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+#     startLocation(request: request, now: Time.now().epochSeconds())  # asks first
+#     ...                                                 # each frame:
+#     if let answer: LocationAnswer = pollLocation(request: request, now:
+#     Time.now().epochSeconds()) {
+#       if answer.failure is LocationFailure.none { ...answer.fix.latitude... }
+#     }
+#
+# The answer is a value: a fix (latitude and longitude in degrees, the
+# accuracy in meters, the time it was measured) or a failure (`denied`, `off`,
+# `timedOut`, `notAvailable`, `failed`) with words for it. Nothing blocks: the
+# request asks Core Location and returns; Core Location answers on the frame
+# loop's run loop, which wakes the loop (EventLoop.wake), and the next
+# pollLocation hands the answer over, once.
+#
+# Permission is "when in use", asked the first time (the system shows the
+# app's purpose text: on iOS RAE_IOS_LOCATION_USAGE, which tools/ios writes
+# into Info.plist as NSLocationWhenInUseUsageDescription). When the person
+# chose an approximate location, the fix is still a fix: `reduced` is true
+# and its accuracy is a few kilometers.
+#
+# On iOS and macOS this is Core Location (runtime_location_apple.h); a macOS
+# program must run as an app bundle whose Info.plist has a usage text, or
+# macOS denies it. Elsewhere, and in a headless run (RAE_UI_HEADLESS,
+# RAE_SDL_HEADLESS_MS or RAE_HEADLESS_FRAMES), the answer is `notAvailable`
+# at once.
+import Sys
+cheader "runtime_location_apple.h"
+
+const hasCoreLocation: Bool = Target.isApple
+
+when hasCoreLocation {
+  func rae_ext_Location_authorization() unsafe extern("rae_ext_Location_authorization") ret Int
+
+  func rae_ext_Location_authorizationChanges() unsafe extern("rae_ext_Location_authorizationChanges") ret
+    Int
+
+  func rae_ext_Location_servicesEnabled() unsafe extern("rae_ext_Location_servicesEnabled") ret Int
+
+  func rae_ext_Location_requestWhenInUse() unsafe extern("rae_ext_Location_requestWhenInUse") ret
+    Int
+
+  func rae_ext_Location_setDesiredAccuracy(
+    meters: Float64
+  ) unsafe extern("rae_ext_Location_setDesiredAccuracy") ret Int
+
+  func rae_ext_Location_requestOnce() unsafe extern("rae_ext_Location_requestOnce") ret Int
+
+  func rae_ext_Location_stop() unsafe extern("rae_ext_Location_stop") ret Int
+
+  func rae_ext_Location_accuracyReduced() unsafe extern("rae_ext_Location_accuracyReduced") ret Int
+
+  func rae_ext_Location_state() unsafe extern("rae_ext_Location_state") ret Int
+
+  func rae_ext_Location_fix(field: Int) unsafe extern("rae_ext_Location_fix") ret Float64
+
+  func rae_ext_Location_errorCode() unsafe extern("rae_ext_Location_errorCode") ret Int
+}
+
+# Why there is no fix:
+# - `denied`: the person said no (now or before), or a parental control forbids it;
+# - `off`: Location Services are off for the whole device;
+# - `timedOut`: no answer within the request's timeout;
+# - `notAvailable`: no Core Location here (not Apple), or a headless run;
+# - `failed`: Core Location could not tell (no signal), or another error.
+enum LocationFailure {
+  none
+  denied
+  off
+  timedOut
+  notAvailable
+  failed
+}
+
+# A place: degrees, meters, ms since 1970. `reduced`: the person chose an
+# approximate location, and `accuracyMeters` says how rough it is.
+type LocationFix {
+  latitude: Float64
+  longitude: Float64
+  accuracyMeters: Float64
+  epochMs: Int64
+  reduced: Bool
+}
+
+# A request's answer: `failure` none and the fix, or the failure and its words
+type LocationAnswer {
+  fix: LocationFix
+  failure: LocationFailure
+  message: String
+}
+
+enum LocationPhase { idle, asking, locating, answered }
+
+# One request for the current place (an app resource: on the app's state).
+# `accuracyMeters` is what to ask for; a weather lookup needs a kilometer.
+type LocationRequest {
+  phase: LocationPhase
+  timeoutSec: Float64
+  accuracyMeters: Float64
+  startedSec: Float64
+  # the answer once it is known, handed over by pollLocation
+  answer: LocationAnswer
+  handedOver: Bool
+}
+
+func noLocationFix() ret LocationFix {
+  ret LocationFix {
+    latitude: 0.0
+    longitude: 0.0
+    accuracyMeters: 0.0
+    epochMs: 0
+    reduced: false
+  }
+}
+
+func locationFailed(failure: view LocationFailure, message: view String) ret LocationAnswer {
+  ret LocationAnswer { fix: noLocationFix(), failure: failure, message: "{message}" }
+}
+
+func locationFound(fix: view LocationFix) ret LocationAnswer {
+  ret LocationAnswer { fix: fix, failure: LocationFailure.none, message: "" }
+}
+
+func createLocationRequest(timeoutSec: view Float64) ret LocationRequest {
+  ret LocationRequest {
+    phase: LocationPhase.idle
+    timeoutSec: timeoutSec
+    accuracyMeters: 1000.0
+    startedSec: 0.0
+    answer: locationFailed(failure: LocationFailure.none, message: "")
+    handedOver: false
+  }
+}
+
+# A headless run, by the window's own definition (lib/Gpu2d headlessRequested)
+func locationHeadless() ret Bool {
+  ret Sys.getEnv(name: "RAE_UI_HEADLESS").length() > 0 or Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
+}
+
+# What a Core Location authorization status means for a request: none (may
+# locate: always or when in use), `asking` is not a failure either (not
+# determined: ask), else the failure. Services off reads as denied, so
+# `servicesOn` tells the two apart.
+func locationAuthorizationFailure(status: view Int, servicesOn: view Bool) ret LocationFailure {
+  if status is 3 or status is 4 or status is 0 {
+    ret LocationFailure.none
+  }
+  if status is 1 or status is 2 {
+    if servicesOn {
+      ret LocationFailure.denied
+    }
+    ret LocationFailure.off
+  }
+  ret LocationFailure.notAvailable
+}
+
+# What a CLError code means (kCLErrorLocationUnknown 0, kCLErrorDenied 1,
+# kCLErrorNetwork 2, ...)
+func locationErrorFailure(code: view Int, servicesOn: view Bool) ret LocationFailure {
+  if code is 1 {
+    if servicesOn {
+      ret LocationFailure.denied
+    }
+    ret LocationFailure.off
+  }
+  ret LocationFailure.failed
+}
+
+# The words for a failure, for a status line
+func locationFailureMessage(failure: view LocationFailure) ret String {
+  if failure is LocationFailure.denied {
+    ret "Location access is off for this app"
+  }
+  if failure is LocationFailure.off {
+    ret "Location Services are off"
+  }
+  if failure is LocationFailure.timedOut {
+    ret "No location within the time allowed"
+  }
+  if failure is LocationFailure.notAvailable {
+    ret "Location is not available here"
+  }
+  if failure is LocationFailure.failed {
+    ret "The location could not be found"
+  }
+  ret ""
+}
+
+func answerLocation(request: mod LocationRequest, answer: own LocationAnswer) {
+  request.answer = answer
+  request.phase = LocationPhase.answered
+  request.handedOver = false
+}
+
+func answerLocationFailure(request: mod LocationRequest, failure: view LocationFailure) {
+  answerLocation(
+    request: request
+    answer: locationFailed(failure: failure, message: locationFailureMessage(failure: failure))
+  )
+}
+
+# Start finding the place: ask for permission when it was never asked, else
+# ask Core Location for one fix. The answer comes from pollLocation.
+func startLocation(request: mod LocationRequest, now: view Float64) {
+  request.startedSec = now
+  if locationHeadless() {
+    answerLocationFailure(request: request, failure: LocationFailure.notAvailable)
+    ret
+  }
+  when hasCoreLocation {
+    unsafe {
+      let status: Int = rae_ext_Location_authorization()
+      if status < 0 {
+        answerLocationFailure(request: request, failure: LocationFailure.notAvailable)
+        ret
+      }
+      if status is 0 {
+        let asked: Int = rae_ext_Location_requestWhenInUse()
+        request.phase = LocationPhase.asking
+        ret
+      }
+      let failure: LocationFailure = locationAuthorizationFailure(
+        status: status
+        servicesOn: rae_ext_Location_servicesEnabled() is 1
+      )
+      if failure is not LocationFailure.none {
+        answerLocationFailure(request: request, failure: failure)
+        ret
+      }
+      locateOnce(request: request)
+    }
+  } else {
+    answerLocationFailure(request: request, failure: LocationFailure.notAvailable)
+  }
+}
+
+func locateOnce(request: mod LocationRequest) {
+  when hasCoreLocation {
+    unsafe {
+      let accuracy: Int = rae_ext_Location_setDesiredAccuracy(meters: request.accuracyMeters)
+      let asked: Int = rae_ext_Location_requestOnce()
+      request.phase = LocationPhase.locating
+    }
+  }
+}
+
+# One frame of the request: the answer, once, when it has arrived (or the
+# request timed out); none while it is still on its way or after it was
+# handed over.
+func pollLocation(request: mod LocationRequest, now: view Float64) ret opt LocationAnswer {
+  if request.phase is LocationPhase.answered {
+    if request.handedOver {
+      ret none
+    }
+    request.handedOver = true
+    let answer: LocationAnswer = request.answer
+    ret answer
+  }
+  if request.phase is LocationPhase.idle {
+    ret none
+  }
+  # (a headless run never asked Core Location, so only the timeout applies)
+  let native: Bool = locationHeadless() is false
+  when hasCoreLocation {
+    unsafe {
+      if native is false {
+        # nothing to read
+      } else if request.phase is LocationPhase.asking {
+        let status: Int = rae_ext_Location_authorization()
+        if status is not 0 {
+          let failure: LocationFailure = locationAuthorizationFailure(
+            status: status
+            servicesOn: rae_ext_Location_servicesEnabled() is 1
+          )
+          if failure is LocationFailure.none {
+            locateOnce(request: request)
+          } else {
+            answerLocationFailure(request: request, failure: failure)
+          }
+        }
+      } else if request.phase is LocationPhase.locating {
+        let state: Int = rae_ext_Location_state()
+        if state is 1 {
+          let fix: LocationFix = {
+            latitude: rae_ext_Location_fix(field: 0)
+            longitude: rae_ext_Location_fix(field: 1)
+            accuracyMeters: rae_ext_Location_fix(field: 2)
+            epochMs: rae_ext_Location_fix(field: 3) as Int64
+            reduced: rae_ext_Location_accuracyReduced() is 1
+          }
+          answerLocation(request: request, answer: locationFound(fix: fix))
+        } else if state is 2 {
+          answerLocationFailure(
+            request: request
+            failure: locationErrorFailure(
+              code: rae_ext_Location_errorCode()
+              servicesOn: rae_ext_Location_servicesEnabled() is 1
+            )
+          )
+        }
+      }
+    }
+  }
+  if request.phase is not LocationPhase.answered and now - request.startedSec > request.timeoutSec {
+    when hasCoreLocation {
+      unsafe {
+        if native {
+          let stopped: Int = rae_ext_Location_stop()
+        }
+      }
+    }
+    answerLocationFailure(request: request, failure: LocationFailure.timedOut)
+  }
+  if request.phase is LocationPhase.answered and request.handedOver is false {
+    request.handedOver = true
+    let answer: LocationAnswer = request.answer
+    ret answer
+  }
+  ret none
+}
+
+# Whether a request is under way (the loop keeps a heartbeat for its timeout)
+func locationPending(request: view LocationRequest) ret Bool {
+  ret request.phase is LocationPhase.asking or request.phase is LocationPhase.locating
+}
