@@ -500,6 +500,26 @@ Compiler code should favor:
 
 ---
 
+## New code: ECS systems, written in the stdlib
+
+These rules apply to every app and library task. They do not apply to the
+compiler's own C.
+
+- **Stateful runtime code is ECS.** Each system lives in its own camelCase
+  folder with a PascalCase module (`relaySystem/RelaySystem.rae`). Per-thing
+  data is components on entities. A singleton is a resource on the World or
+  App. When something happens that other systems react to (a player joined,
+  a packet was refused, a session ended), send an event and let those
+  systems read it, instead of calling across into them. `lib/ecs` and
+  `lib/net/ecs` are the models.
+- **Pure functions stay plain.** A codec, a parser, or a protocol step over
+  bytes and time (`lib/net/Wire.rae`, `lib/net/Connection.rae`) is a set of
+  functions over its data. It is not a system. Systems call these functions.
+- **Reusable code goes into `lib/` from the start.** Write anything another
+  app could use (a transport, a session layer, a replication system, a test
+  tool) in the stdlib, with a fixture. Keep only the app's own wiring,
+  settings and content in the app.
+
 ## Example families: shared code lives in lib/
 
 Some examples are one program in several forms: the walkers (136 deferred,
