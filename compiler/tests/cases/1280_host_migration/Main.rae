@@ -1,0 +1,777 @@
+# Host migration through lib/net/relay (docs/replication.md, "Host
+# migration"): a relay, a host and three players on loopback UDP in one
+# process, each side with its own socket. Mid-session the host is killed
+# (no more steps, its socket closed). The relay notices (peer timeout
+# 1.5 s) and promotes a player by the fixed rule: a desktop first, then the
+# longest connected. Here player 2 is the only desktop, so it is chosen over
+# player 1. Player 2 takes over the simulation from its own replicated copy:
+# its world, its net ids (continuing after the largest one), its player
+# slots (rebuilt from each entity's owner, the relay peer id). The others
+# reconnect to it through the relay and get a whole snapshot. Everybody is
+# playing again within 3 s of the kill, every player has its own entity
+# back, and the shared entities (wanderers, whose motion is replicated
+# state) go on.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Vec3
+open net/Wire
+open net/Tcp
+open net/Udp
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/RelayConnections
+open net/relay/Relay
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/session/Session
+
+# A wanderer's motion is replicated state, so a new host can go on with it
+type Wander {
+  centerX: Float
+  centerZ: Float
+  angle: Float
+  speed: Float
+}
+
+type ArenaWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  transforms: ComponentTable(Transform3D)
+  wanders: ComponentTable(Wander)
+}
+
+type MoveInput {
+  moveX: Float
+  moveZ: Float
+}
+
+const kindReplicated: Int = 0
+
+const kindTransform: Int = 1
+
+const kindWander: Int = 2
+
+# Replicated.owner: a player's relay peer id; the host's own entity;
+# the world's (no player)
+const ownerHost: Int = -1
+
+const ownerWorld: Int = -2
+
+const frameMs: Int = 10
+
+func createArena() ret ArenaWorld {
+  ret ArenaWorld {
+    entities: createEntityAllocator()
+    replicated: create()
+    transforms: create()
+    wanders: create()
+  }
+}
+
+func at(x: view Float, z: view Float) ret Transform3D {
+  var transform: Transform3D = createTransform3D()
+  transform.position = Vec3 { x: x, y: 0.0, z: z }
+  ret transform
+}
+
+# What the host keeps per connected player
+type Seat {
+  peerId: Int
+  peer: ReplicaPeer
+  # -1 until its hello
+  slotId: Int
+}
+
+type Machine {
+  name: String
+  device: Int
+  alive: Bool
+  isHost: Bool
+  world: ArenaWorld
+  # As the host
+  relayHost: RelayHost
+  replication: ReplicationHost
+  session: SessionHost
+  seats: List(Seat)
+  # The entity this machine moves (its own)
+  ownEntityId: EntityId
+  # As a player
+  relayPlayer: RelayPlayer
+  replicationPlayer: ReplicationPlayer
+  sessionPlayer: SessionPlayer
+  helloSent: Bool
+  playingAtMs: Int
+  message: List(UInt8)
+}
+
+func clientConfig(device: view Int) ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.keepAliveMs = 150
+  config.relayOnly = true
+  config.device = device
+  ret config
+}
+
+func createMachine(
+  name: view String
+  device: view Int
+  relayAddress: view NetAddress
+  config: view ReplicationConfig
+) ret Machine {
+  ret Machine {
+    name: name
+    device: device
+    alive: true
+    isHost: false
+    world: createArena()
+    relayHost: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: clientConfig(device: device)
+      connectionConfig: defaultConnectionConfig()
+    )
+    replication: createReplicationHost(config: config)
+    session: createSessionHost(graceMs: 5000, maxPlayers: 8)
+    seats: {}
+    ownEntityId: noEntity()
+    relayPlayer: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: clientConfig(device: device)
+      connectionConfig: defaultConnectionConfig()
+    )
+    replicationPlayer: createReplicationPlayer(config: config)
+    sessionPlayer: createSessionPlayer()
+    helloSent: false
+    playingAtMs: -1
+    message: List.create(UInt8, cap: 1200)
+  }
+}
+
+func spawnAvatar(machine: mod Machine, owner: view Int, x: view Float) ret EntityId {
+  let entityId: EntityId = allocEntity(this: machine.world.entities)
+  componentSet(this: machine.world.transforms, entityId: entityId, data: at(x: x, z: 0.0))
+  let netId: Int = replicateEntity(
+    host: machine.replication
+    replicated: machine.world.replicated
+    entityId: entityId
+    owner: owner
+  )
+  ret entityId
+}
+
+func seatIndex(machine: view Machine, peerId: view Int) ret Int {
+  loop var i: Int = 0, i < machine.seats.length, ++i {
+    if let seat: view Seat = machine.seats.viewAt(index: i) {
+      if seat.peerId is peerId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func slotEntity(session: view SessionHost, slotId: view Int) ret EntityId {
+  if let slot: view PlayerSlot = session.slots.viewAt(
+    index: sessionSlotIndex(host: session, slotId: slotId)
+  ) {
+    ret slot.entityId
+  }
+  ret noEntity()
+}
+
+func moveEntity(world: mod ArenaWorld, entityId: view EntityId, input: view MoveInput) {
+  if componentHas(this: world.transforms, entityId: entityId) {
+    let transform: mod Transform3D = componentMod(this: world.transforms, entityId: entityId)
+    transform.position = Vec3 {
+      x: transform.position.x + input.moveX
+      y: 0.0
+      z: transform.position.z + input.moveZ
+    }
+  }
+}
+
+# The host: players' messages (hello, inputs), slots, the world, snapshots
+func hostFrame(machine: mod Machine, nowMs: view Int) {
+  relayHostReceive(host: machine.relayHost, nowMs: nowMs)
+  loop let peerId: Int in machine.relayHost.peersLeft {
+    let index: Int = seatIndex(machine: machine, peerId: peerId)
+    if index >= 0 {
+      sessionConnectionLost(
+        host: machine.session
+        slotId: peerId
+        left: false
+        nowMs: nowMs
+      )
+      machine.seats.remove(index: index)
+    }
+  }
+  loop var p: Int = 0, p < machine.relayHost.peers.length, ++p {
+    var peerId: Int = -1
+    if let hostPeer: view HostPeer = machine.relayHost.peers.viewAt(index: p) {
+      peerId = hostPeer.peerId
+    }
+    var s: Int = seatIndex(machine: machine, peerId: peerId)
+    if s < 0 {
+      machine.seats.add(
+        value: Seat {
+          peerId: peerId
+          peer: createReplicaPeer(peerId: peerId, config: machine.replication.config)
+          slotId: -1
+        }
+      )
+      s = machine.seats.length - 1
+    }
+    if let hostPeer: mod HostPeer = machine.relayHost.peers.modAt(index: p) {
+      if let seat: mod Seat = machine.seats.modAt(index: s) {
+        loop connectionReceive(connection: hostPeer.connection, message: machine.message) is not MessageChannel.none {
+          if seat.slotId < 0 {
+            let result: JoinResult = sessionTakeHelloFromPeer(
+              host: machine.session
+              message: machine.message
+              peerId: peerId
+              nowMs: nowMs
+            )
+            if result.kind is JoinKind.joined {
+              let entityId: EntityId = allocEntity(this: machine.world.entities)
+              componentSet(
+                this: machine.world.transforms
+                entityId: entityId
+                data: at(x: (peerId as Float) * 4.0, z: 0.0)
+              )
+              let netId: Int = replicateEntity(
+                host: machine.replication
+                replicated: machine.world.replicated
+                entityId: entityId
+                owner: peerId
+              )
+              sessionSetEntity(
+                host: machine.session
+                slotIndex: result.slotIndex
+                entityId: entityId
+                netId: netId
+              )
+            }
+            if result.kind is not JoinKind.refused {
+              if let slot: view PlayerSlot = machine.session.slots.viewAt(index: result.slotIndex) {
+                seat.slotId = slot.slotId
+                seat.peer = createReplicaPeer(peerId: peerId, config: machine.replication.config)
+                seat.peer.focusNetId = slot.netId
+              }
+              sessionWriteWelcome(
+                host: machine.session
+                slotIndex: result.slotIndex
+                resumed: result.kind is JoinKind.resumed
+                out: machine.message
+              )
+              let queued: Bool = connectionSendReliable(
+                connection: hostPeer.connection
+                bytes: machine.message
+                start: 0
+                count: machine.message.length
+              )
+            }
+          } else {
+            let taken: Bool = replicaTakeMessage(
+              host: machine.replication
+              peer: seat.peer
+              message: machine.message
+            )
+          }
+        }
+        var input: MoveInput = { moveX: 0.0, moveZ: 0.0 }
+        loop seat.slotId >= 0 and replicaNextInput(
+          MoveInput
+          host: machine.replication
+          peer: seat.peer
+          input: input
+        ) >= 0 {
+          moveEntity(
+            world: machine.world
+            entityId: slotEntity(session: machine.session, slotId: seat.slotId)
+            input: input
+          )
+        }
+      }
+    }
+  }
+  var expired: List(PlayerSlot) = {}
+  sessionExpired(host: machine.session, nowMs: nowMs, out: expired)
+  loop let slot: view PlayerSlot in expired {
+    clearEntityComponents(ArenaWorld, world: machine.world, entityId: slot.entityId)
+    freeEntity(this: machine.world.entities, entityId: slot.entityId)
+  }
+  # The host's own entity and the wanderers
+  moveEntity(
+    world: machine.world
+    entityId: machine.ownEntityId
+    input: MoveInput { moveX: 0.001, moveZ: 0.0 }
+  )
+  loop var i: Int = 0, i < componentCount(this: machine.world.wanders), ++i {
+    let entityId: EntityId = componentEntityAt(this: machine.world.wanders, i: i)
+    let wander: mod Wander = componentMod(this: machine.world.wanders, entityId: entityId)
+    wander.angle = wander.angle + wander.speed
+    let transform: mod Transform3D = componentMod(
+      this: machine.world.transforms
+      entityId: entityId
+    )
+    transform.position = Vec3 {
+      x: wander.centerX + Math.cos(x: wander.angle) * 5.0
+      y: 0.0
+      z: wander.centerZ + Math.sin(x: wander.angle) * 5.0
+    }
+  }
+  if replicaSnapshotDue(host: machine.replication, nowMs: nowMs) {
+    replicaBeginSnapshot(host: machine.replication, nowMs: nowMs)
+    captureReplicaTable(
+      Replicated
+      host: machine.replication
+      table: machine.world.replicated
+      replicated: machine.world.replicated
+      kind: kindReplicated
+    )
+    captureReplicaTable(
+      Transform3D
+      host: machine.replication
+      table: machine.world.transforms
+      replicated: machine.world.replicated
+      kind: kindTransform
+    )
+    captureReplicaTable(
+      Wander
+      host: machine.replication
+      table: machine.world.wanders
+      replicated: machine.world.replicated
+      kind: kindWander
+    )
+    captureInterestPoints(
+      host: machine.replication
+      transforms: machine.world.transforms
+      replicated: machine.world.replicated
+    )
+    loop var p: Int = 0, p < machine.relayHost.peers.length, ++p {
+      if let hostPeer: mod HostPeer = machine.relayHost.peers.modAt(index: p) {
+        let s: Int = seatIndex(machine: machine, peerId: hostPeer.peerId)
+        if let seat: mod Seat = machine.seats.modAt(index: s) {
+          if seat.slotId >= 0 {
+            let bytes: Int = replicaSnapshotSystem(
+              host: machine.replication
+              peer: seat.peer
+              connection: hostPeer.connection
+            )
+          }
+        }
+      }
+    }
+  }
+  relayHostSend(host: machine.relayHost, nowMs: nowMs)
+}
+
+# The relay made this player the host: take over from the replicated copy
+func takeOver(machine: mod Machine, nowMs: view Int) {
+  let ownNetId: Int = machine.replicationPlayer.ownNetId
+  machine.relayHost = relayHostFromPlayer(
+    player: machine.relayPlayer
+    connectionConfig: defaultConnectionConfig()
+  )
+  machine.replication = replicationHostTakeOver(
+    config: machine.replicationPlayer.config
+    replicated: machine.world.replicated
+  )
+  machine.session = createSessionHost(graceMs: 5000, maxPlayers: 8)
+  machine.seats.clear()
+  machine.ownEntityId = replicaEntityOf(player: machine.replicationPlayer, netId: ownNetId)
+  # Slots back from the owners; the old host's own entity goes with it
+  var leaving: List(EntityId) = {}
+  loop var i: Int = 0, i < componentCount(this: machine.world.replicated), ++i {
+    let entityId: EntityId = componentEntityAt(this: machine.world.replicated, i: i)
+    if let replicated: Replicated = componentCopyAt(this: machine.world.replicated, i: i) {
+      if replicated.owner is ownerHost {
+        leaving.add(value: entityId)
+      } else if replicated.owner >= 0 and replicated.netId is not ownNetId {
+        sessionRestoreSlot(
+          host: machine.session
+          peerId: replicated.owner
+          entityId: entityId
+          netId: replicated.netId
+          nowMs: nowMs
+        )
+      }
+    }
+  }
+  loop let entityId: EntityId in leaving {
+    clearEntityComponents(ArenaWorld, world: machine.world, entityId: entityId)
+    freeEntity(this: machine.world.entities, entityId: entityId)
+  }
+  machine.isHost = true
+  machine.playingAtMs = nowMs
+}
+
+# A player: welcome and snapshots in, input out; reconnect or take over when
+# the host changes
+func playerFrame(machine: mod Machine, nowMs: view Int) {
+  relayPlayerReceive(player: machine.relayPlayer, nowMs: nowMs)
+  if machine.relayPlayer.hostChanged {
+    machine.relayPlayer.hostChanged = false
+    if machine.relayPlayer.client.peerId is hostPeerId {
+      takeOver(machine: machine, nowMs: nowMs)
+      ret
+    }
+    relayPlayerReconnect(
+      player: machine.relayPlayer
+      connectionConfig: defaultConnectionConfig()
+      connectionId: 9000 + machine.relayPlayer.client.peerId
+      nowMs: nowMs
+    )
+    machine.replicationPlayer = createReplicationPlayer(config: machine.replicationPlayer.config)
+    machine.world = createArena()
+    machine.helloSent = false
+    machine.playingAtMs = -1
+  }
+  if not machine.helloSent and connectionIsConnected(connection: machine.relayPlayer.connection) {
+    sessionWriteHello(player: machine.sessionPlayer, out: machine.message)
+    let queued: Bool = connectionSendReliable(
+      connection: machine.relayPlayer.connection
+      bytes: machine.message
+      start: 0
+      count: machine.message.length
+    )
+    machine.helloSent = true
+  }
+  loop connectionReceive(connection: machine.relayPlayer.connection, message: machine.message) is not MessageChannel.none {
+    if not sessionTakeWelcome(player: machine.sessionPlayer, message: machine.message) {
+      let taken: Bool = replicaReceiveSystem(
+        player: machine.replicationPlayer
+        message: machine.message
+      )
+    }
+  }
+  if replicaHasUpdate(player: machine.replicationPlayer) {
+    replicaSyncEntities(player: machine.replicationPlayer, entities: machine.world.entities)
+    loop var i: Int = 0, i < machine.replicationPlayer.goneEntityIds.length, ++i {
+      let entityId: EntityId = machine.replicationPlayer.goneEntityIds.copyAtFallback(
+        index: i
+        fallback: noEntity()
+      )
+      clearEntityComponents(ArenaWorld, world: machine.world, entityId: entityId)
+      freeEntity(this: machine.world.entities, entityId: entityId)
+    }
+    applyReplicaTable(
+      Replicated
+      player: machine.replicationPlayer
+      table: machine.world.replicated
+      kind: kindReplicated
+      template: Replicated { netId: 0, owner: 0 }
+    )
+    applyReplicaTable(
+      Transform3D
+      player: machine.replicationPlayer
+      table: machine.world.transforms
+      kind: kindTransform
+      template: createTransform3D()
+    )
+    applyReplicaTable(
+      Wander
+      player: machine.replicationPlayer
+      table: machine.world.wanders
+      kind: kindWander
+      template: Wander { centerX: 0.0, centerZ: 0.0, angle: 0.0, speed: 0.0 }
+    )
+    replicaFinishApply(player: machine.replicationPlayer)
+  }
+  if machine.playingAtMs < 0 and machine.sessionPlayer.welcomed and machine.replicationPlayer.ownNetId >= 0 and not isNone(
+    this: replicaEntityOf(
+      player: machine.replicationPlayer
+      netId: machine.replicationPlayer.ownNetId
+    )
+  ) {
+    machine.playingAtMs = nowMs
+  }
+  if machine.sessionPlayer.welcomed {
+    let sent: Bool = replicaSendInput(
+      MoveInput
+      player: machine.replicationPlayer
+      input: MoveInput { moveX: 0.0, moveZ: 0.002 }
+      tick: nowMs / frameMs
+      connection: machine.relayPlayer.connection
+    )
+  }
+  relayPlayerSend(player: machine.relayPlayer, nowMs: nowMs)
+}
+
+type Scene {
+  relay: RelayServer
+  machines: List(Machine)
+  startMs: Int
+}
+
+func now(scene: view Scene) ret Int {
+  ret nowMs() - scene.startMs
+}
+
+func round(scene: mod Scene) {
+  let time: Int = now(scene: scene)
+  relayFrame(server: scene.relay)
+  loop var m: Int = 0, m < scene.machines.length, ++m {
+    if let machine: mod Machine = scene.machines.modAt(index: m) {
+      if machine.alive {
+        if machine.isHost {
+          hostFrame(machine: machine, nowMs: time)
+        } else {
+          playerFrame(machine: machine, nowMs: time)
+        }
+      }
+    }
+  }
+  sleep(ms: 1)
+}
+
+func run(scene: mod Scene, milliseconds: view Int) {
+  let until: Int = now(scene: scene) + milliseconds
+  loop now(scene: scene) < until {
+    round(scene: scene)
+  }
+}
+
+# The net ids in a machine's world, in order
+func netIdsOf(machine: view Machine) ret List(Int) {
+  var ids: List(Int) = {}
+  loop var i: Int = 0, i < componentCount(this: machine.world.replicated), ++i {
+    if let replicated: Replicated = componentCopyAt(this: machine.world.replicated, i: i) {
+      ids.add(value: replicated.netId)
+    }
+  }
+  ids.sort()
+  ret ids
+}
+
+func ownNetIdOf(machine: view Machine) ret Int {
+  if machine.isHost {
+    if componentHas(this: machine.world.replicated, entityId: machine.ownEntityId) {
+      ret componentView(this: machine.world.replicated, entityId: machine.ownEntityId).netId
+    }
+    ret -1
+  }
+  ret machine.replicationPlayer.ownNetId
+}
+
+func machineAt(scene: view Scene, index: view Int) ret String {
+  if let machine: view Machine = scene.machines.viewAt(index: index) {
+    ret "{machine.name}: host {machine.isHost}, own net id {ownNetIdOf(machine: machine)}, entities {netIdsOf(
+      machine: machine
+    )}"
+  }
+  ret "?"
+}
+
+func wanderAngle(machine: view Machine) ret Float {
+  if componentCount(this: machine.world.wanders) > 0 {
+    if let wander: Wander = componentCopyAt(this: machine.world.wanders, i: 0) {
+      ret wander.angle
+    }
+  }
+  ret 0.0
+}
+
+func main() ret Int {
+  var relayConfig: RelayConfig = defaultRelayConfig()
+  relayConfig.peerTimeoutMs = 1500
+  var config: ReplicationConfig = defaultReplicationConfig()
+  config.interestRadius = 1000.0
+  var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: relayConfig)
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  var scene: Scene = { relay: relay, machines: {}, startMs: nowMs() }
+  scene.machines.add(value: createMachine(
+    name: "host"
+    device: deviceDesktop
+    relayAddress: relayAddress
+    config: config
+  ))
+  scene.machines.add(value: createMachine(
+    name: "player 1"
+    device: deviceMobile
+    relayAddress: relayAddress
+    config: config
+  ))
+  scene.machines.add(value: createMachine(
+    name: "player 2"
+    device: deviceDesktop
+    relayAddress: relayAddress
+    config: config
+  ))
+  scene.machines.add(value: createMachine(
+    name: "player 3"
+    device: deviceMobile
+    relayAddress: relayAddress
+    config: config
+  ))
+
+  # The host opens the session, makes its own entity and three wanderers
+  if let host: mod Machine = scene.machines.modAt(index: 0) {
+    host.isHost = true
+    relayClientOpen(client: host.relayHost.client, nowMs: 0)
+    host.ownEntityId = spawnAvatar(machine: host, owner: ownerHost, x: -4.0)
+    loop var i: Int = 0, i < 3, ++i {
+      let entityId: EntityId = allocEntity(this: host.world.entities)
+      componentSet(this: host.world.transforms, entityId: entityId, data: at(x: 0.0, z: 20.0))
+      componentSet(
+        this: host.world.wanders
+        entityId: entityId
+        data: Wander {
+          centerX: (i as Float) * 12.0
+          centerZ: 20.0
+          angle: 0.0
+          speed: 0.01 + (i as Float) * 0.005
+        }
+      )
+      let netId: Int = replicateEntity(
+        host: host.replication
+        replicated: host.world.replicated
+        entityId: entityId
+        owner: ownerWorld
+      )
+    }
+  }
+  run(scene: scene, milliseconds: 300)
+  var token: String = ""
+  if let host: view Machine = scene.machines.viewAt(index: 0) {
+    token = relayTokenText(token: host.relayHost.client.token)
+  }
+  # The players join in order (1 has been connected longest)
+  loop var m: Int = 1, m < 4, ++m {
+    if let machine: mod Machine = scene.machines.modAt(index: m) {
+      let joining: Bool = relayPlayerJoin(
+        player: machine.relayPlayer
+        tokenText: token
+        connectionId: 100 + m
+        nowMs: now(scene: scene)
+      )
+    }
+    run(scene: scene, milliseconds: 200)
+  }
+  run(scene: scene, milliseconds: 800)
+  log("before: {machineAt(scene: scene, index: 0)}")
+  loop var m: Int = 1, m < 4, ++m {
+    log("before: {machineAt(scene: scene, index: m)}")
+  }
+  var ownBefore: List(Int) = {}
+  loop var m: Int = 1, m < 4, ++m {
+    if let machine: view Machine = scene.machines.viewAt(index: m) {
+      ownBefore.add(value: ownNetIdOf(machine: machine))
+    }
+  }
+  var angleBefore: Float = 0.0
+  if let witness: view Machine = scene.machines.viewAt(index: 1) {
+    angleBefore = wanderAngle(machine: witness)
+  }
+
+  # The host process dies: no more steps, its socket gone
+  if let host: mod Machine = scene.machines.modAt(index: 0) {
+    host.alive = false
+    relayClientClose(client: host.relayHost.client)
+  }
+  let killedMs: Int = now(scene: scene)
+  var everyonePlaying: Bool = false
+  loop not everyonePlaying and now(scene: scene) - killedMs < 6000 {
+    round(scene: scene)
+    everyonePlaying = true
+    loop var m: Int = 1, m < 4, ++m {
+      if let machine: view Machine = scene.machines.viewAt(index: m) {
+        if machine.playingAtMs < killedMs {
+          everyonePlaying = false
+        }
+      }
+    }
+  }
+  let backAfterMs: Int = now(scene: scene) - killedMs
+  run(scene: scene, milliseconds: 500)
+  loop var m: Int = 1, m < 4, ++m {
+    log("after: {machineAt(scene: scene, index: m)}")
+  }
+  log(
+    "everyone playing again within 3 s of the kill: {everyonePlaying and backAfterMs <= 3000} (the relay's timeout is 1.5 s)"
+  )
+  var sameOwn: Bool = true
+  loop var m: Int = 1, m < 4, ++m {
+    if let machine: view Machine = scene.machines.viewAt(index: m) {
+      if ownNetIdOf(machine: machine) is not ownBefore.copyAtFallback(index: m - 1, fallback: -9) {
+        sameOwn = false
+      }
+    }
+  }
+  log(
+    "the new host is player 2 (the desktop) {machineIsHost(scene: scene, index: 2)}; every player has its own entity back {sameOwn}"
+  )
+  var sameWorlds: Bool = true
+  var hostIds: List(Int) = {}
+  if let newHost: view Machine = scene.machines.viewAt(index: 2) {
+    hostIds = netIdsOf(machine: newHost)
+  }
+  loop var m: Int = 1, m < 4, ++m {
+    if let machine: view Machine = scene.machines.viewAt(index: m) {
+      if not equals(a: netIdsOf(machine: machine), b: hostIds) {
+        sameWorlds = false
+      }
+    }
+  }
+  log(
+    "every world has the same entities as the new host's {sameWorlds}: the 3 players and the 3 wanderers, the old host's own entity gone"
+  )
+  var angleAfter: Float = 0.0
+  if let witness: view Machine = scene.machines.viewAt(index: 1) {
+    angleAfter = wanderAngle(machine: witness)
+  }
+  log("the wanderers go on from where they were: {angleAfter > angleBefore}")
+  # A new entity on the new host gets a net id nobody has used
+  var newNetId: Int = -1
+  var largest: Int = 0
+  loop let id: Int in hostIds {
+    if id > largest {
+      largest = id
+    }
+  }
+  if let newHost: mod Machine = scene.machines.modAt(index: 2) {
+    let entityId: EntityId = allocEntity(this: newHost.world.entities)
+    componentSet(this: newHost.world.transforms, entityId: entityId, data: at(x: 0.0, z: -10.0))
+    newNetId = replicateEntity(
+      host: newHost.replication
+      replicated: newHost.world.replicated
+      entityId: entityId
+      owner: ownerWorld
+    )
+  }
+  run(scene: scene, milliseconds: 500)
+  var seenByAll: Bool = true
+  loop var m: Int = 1, m < 4, ++m {
+    if let machine: view Machine = scene.machines.viewAt(index: m) {
+      if not netIdsOf(machine: machine).contains(value: newNetId) {
+        seenByAll = false
+      }
+    }
+  }
+  log(
+    "a new entity after the migration: a fresh net id {newNetId > largest}, seen by everyone {seenByAll}"
+  )
+  log(
+    "relay: migrations {scene.relay.stats.migrations}, sessions {componentCount(
+      this: scene.relay.sessions
+    )}"
+  )
+  closeRelayServer(server: scene.relay)
+  ret 0
+}
+
+func machineIsHost(scene: view Scene, index: view Int) ret Bool {
+  if let machine: view Machine = scene.machines.viewAt(index: index) {
+    ret machine.isHost
+  }
+  ret false
+}

@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-9/12 but are not. They are listed so the
+These looked like gaps during 1/12-10/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender

@@ -31,6 +31,9 @@ type RelayPeer {
   lastHeardNs: Int
   # Never tell the other side this peer's address (no direct path)
   relayOnly: Bool
+  # What the client said it runs on (deviceDesktop, deviceMobile, 0): the
+  # host-migration rule prefers a desktop
+  device: Int
 }
 
 type RelaySession {
@@ -54,6 +57,7 @@ type RelayRequestEvent {
   tokenLow: Int
   # open / join: the sender wants its address kept from the other side
   relayOnly: Bool
+  device: Int
 }
 
 # A player left its session (it said so, or went silent): its host is told
@@ -73,6 +77,8 @@ type RelayConfig {
   peerTimeoutMs: Int
   maxPlayersPerSession: Int
   maxSessions: Int
+  # When a host goes, promote a player (true) or close the session (false)
+  migrateHost: Bool
 }
 
 type RelayStats {
@@ -86,6 +92,8 @@ type RelayStats {
   timedOut: Int
   # Player-host pairs given each other's address for a direct path
   introduced: Int
+  # Sessions that lost their host and went on with a promoted player
+  migrations: Int
 }
 
 type RelayServer {
@@ -114,7 +122,12 @@ type RelayServer {
 }
 
 func defaultRelayConfig() ret RelayConfig {
-  ret RelayConfig { peerTimeoutMs: 10000, maxPlayersPerSession: 128, maxSessions: 4096 }
+  ret RelayConfig {
+    peerTimeoutMs: 10000
+    maxPlayersPerSession: 128
+    maxSessions: 4096
+    migrateHost: true
+  }
 }
 
 # A relay on `host`:`port` (0 picks a free port: `relayPort`); its `udpSocket`
@@ -148,6 +161,7 @@ func createRelayServer(
       refused: 0
       timedOut: 0
       introduced: 0
+      migrations: 0
     }
     frameNs: nowNs()
     nextTimeoutScanNs: 0
@@ -253,6 +267,7 @@ func addPeer(
   sessionEntityId: view EntityId
   peerId: view Int
   relayOnly: view Bool
+  device: view Int
 ) ret EntityId {
   let peerEntityId: EntityId = allocEntity(this: server.entities)
   componentSet(
@@ -264,6 +279,7 @@ func addPeer(
       peerId: peerId
       lastHeardNs: server.frameNs
       relayOnly: relayOnly
+      device: device
     }
   )
   server.peersByAddress.set(k: addressKey(address: address), value: peerEntityId)
@@ -288,7 +304,15 @@ func forgetPeer(server: mod RelayServer, peerEntityId: view EntityId, peer: view
 func removePeer(server: mod RelayServer, peerEntityId: view EntityId) {
   if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
     if peer.peerId is hostPeerId {
-      closeSession(server: server, sessionEntityId: peer.sessionEntityId)
+      # The host went: a player takes over (docs/relay.md, "Host
+      # migration"), or with no player left the session ends
+      forgetPeer(server: server, peerEntityId: peerEntityId, peer: peer)
+      if not server.config.migrateHost or not promoteSuccessor(
+        server: server
+        sessionEntityId: peer.sessionEntityId
+      ) {
+        closeSession(server: server, sessionEntityId: peer.sessionEntityId)
+      }
       ret
     }
     forgetPeer(server: server, peerEntityId: peerEntityId, peer: peer)
@@ -337,6 +361,7 @@ func openSession(
   server: mod RelayServer
   address: view NetAddress
   relayOnly: view Bool
+  device: view Int
 ) ret EntityId {
   var token: List(UInt8) = List.create(UInt8, cap: relayTokenBytes)
   token.addDefaults(count: relayTokenBytes)
@@ -357,9 +382,140 @@ func openSession(
     sessionEntityId: sessionEntityId
     peerId: hostPeerId
     relayOnly: relayOnly
+    device: device
   )
   let session: mod RelaySession = componentMod(this: server.sessions, entityId: sessionEntityId)
   session.hostEntityId = hostEntityId
   server.stats.sessionsOpened = server.stats.sessionsOpened + 1
   ret sessionEntityId
+}
+
+func componentCopyOrNone(server: view RelayServer, peerEntityId: view EntityId) ret RelayPeer {
+  if let peer: RelayPeer = componentCopy(this: server.peers, entityId: peerEntityId) {
+    ret peer
+  }
+  ret RelayPeer {
+    address: noNetAddress()
+    sessionEntityId: noEntity()
+    peerId: -1
+    lastHeardNs: 0
+    relayOnly: true
+    device: 0
+  }
+}
+
+# Give a player and its host each other's public address (as the relay sees
+# it) and a shared random secret, so both can try a direct path (docs/relay.md,
+# "Direct first"). Not when either side asked to stay relay-only. Sent twice:
+# a lost introduce only costs the direct path, but that is worth a packet.
+func introduce(server: mod RelayServer, playerEntityId: view EntityId) {
+  let player: RelayPeer = componentCopyOrNone(server: server, peerEntityId: playerEntityId)
+  if player.relayOnly or not componentHas(this: server.sessions, entityId: player.sessionEntityId) {
+    ret
+  }
+  let session: view RelaySession = componentView(
+    this: server.sessions
+    entityId: player.sessionEntityId
+  )
+  let host: RelayPeer = componentCopyOrNone(server: server, peerEntityId: session.hostEntityId)
+  if host.relayOnly {
+    ret
+  }
+  var secretBytes: List(UInt8) = List.create(UInt8, cap: 8)
+  secretBytes.addDefaults(count: 8)
+  if not secureRandomFill(bytes: secretBytes, start: 0, count: 8) {
+    ret
+  }
+  let secret: Int = readU64(bytes: secretBytes, offset: 0)
+  loop var sending: Int = 0, sending < 2, ++sending {
+    # To the host: the player's address
+    relayWriteKind(packet: server.outbox, kind: relayKindIntroduce)
+    writeU32(bytes: server.outbox, value: player.peerId)
+    writeU64(bytes: server.outbox, value: secret)
+    relayWriteAddress(packet: server.outbox, address: player.address)
+    sendOutbox(server: server, address: host.address)
+    # To the player: the host's address
+    relayWriteKind(packet: server.outbox, kind: relayKindIntroduce)
+    writeU32(bytes: server.outbox, value: hostPeerId)
+    writeU64(bytes: server.outbox, value: secret)
+    relayWriteAddress(packet: server.outbox, address: host.address)
+    sendOutbox(server: server, address: player.address)
+  }
+  server.stats.introduced = server.stats.introduced + 1
+}
+
+# The host of `sessionEntityId` is gone: promote the player the fixed rule
+# picks (a desktop first, then the one connected longest: the lowest peer
+# id). It becomes peer 0, so every player's traffic to the host reaches it;
+# everyone is told (hostChanged, with its former peer id), and it is
+# introduced to each player for a direct path. False when there is nobody.
+func promoteSuccessor(server: mod RelayServer, sessionEntityId: view EntityId) ret Bool {
+  if not componentHas(this: server.sessions, entityId: sessionEntityId) {
+    ret false
+  }
+  let nextPeerId: Int = componentView(this: server.sessions, entityId: sessionEntityId).nextPeerId
+  var best: EntityId = noEntity()
+  var bestPeerId: Int = -1
+  var bestDesktop: Bool = false
+  loop var peerId: Int = 1, peerId < nextPeerId, ++peerId {
+    let peerEntityId: EntityId = peerInSession(
+      server: server
+      sessionEntityId: sessionEntityId
+      peerId: peerId
+    )
+    if componentHas(this: server.peers, entityId: peerEntityId) {
+      let desktop: Bool = componentView(this: server.peers, entityId: peerEntityId).device is deviceDesktop
+      if isNone(this: best) or (desktop and not bestDesktop) {
+        best = peerEntityId
+        bestPeerId = peerId
+        bestDesktop = desktop
+      }
+    }
+  }
+  if isNone(this: best) {
+    ret false
+  }
+  # The successor is peer 0 from now on
+  server.peersBySessionPeerId.remove(
+    k: sessionPeerKey(sessionEntityId: sessionEntityId, peerId: bestPeerId)
+  )
+  server.peersBySessionPeerId.set(
+    k: sessionPeerKey(sessionEntityId: sessionEntityId, peerId: hostPeerId)
+    value: best
+  )
+  let successor: mod RelayPeer = componentMod(this: server.peers, entityId: best)
+  successor.peerId = hostPeerId
+  let session: mod RelaySession = componentMod(this: server.sessions, entityId: sessionEntityId)
+  session.hostEntityId = best
+  session.playerCount = session.playerCount - 1
+  # Tell everyone, twice (a lost notice costs a session)
+  loop var sending: Int = 0, sending < 2, ++sending {
+    loop var peerId: Int = 0, peerId < nextPeerId, ++peerId {
+      let peerEntityId: EntityId = peerInSession(
+        server: server
+        sessionEntityId: sessionEntityId
+        peerId: peerId
+      )
+      if componentHas(this: server.peers, entityId: peerEntityId) {
+        relayWriteKind(packet: server.outbox, kind: relayKindHostChanged)
+        writeU32(bytes: server.outbox, value: bestPeerId)
+        sendOutbox(
+          server: server
+          address: componentView(this: server.peers, entityId: peerEntityId).address
+        )
+      }
+    }
+  }
+  loop var peerId: Int = 1, peerId < nextPeerId, ++peerId {
+    let peerEntityId: EntityId = peerInSession(
+      server: server
+      sessionEntityId: sessionEntityId
+      peerId: peerId
+    )
+    if componentHas(this: server.peers, entityId: peerEntityId) {
+      introduce(server: server, playerEntityId: peerEntityId)
+    }
+  }
+  server.stats.migrations = server.stats.migrations + 1
+  ret true
 }

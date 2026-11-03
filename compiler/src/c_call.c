@@ -366,15 +366,26 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             char an[64], bn[64];
             snprintf(an, sizeof an, "__eqa%d", eid);
             snprintf(bn, sizeof bn, "__eqb%d", eid);
-            fprintf(out, "(__extension__ ({ __typeof__(");
-            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
-            fprintf(out, ") %s = (", an);
-            emit_expr(ctx, av, out, PREC_LOWEST, false, false);
-            fprintf(out, "); __typeof__(");
-            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
-            fprintf(out, ") %s = (", bn);
-            emit_expr(ctx, bv, out, PREC_LOWEST, false, false);
-            fprintf(out, "); (rae_Bool)(");
+            /* Each operand once into a local of its type; a fresh owned
+             * value (a call's result) is held in a statement temporary and
+             * freed after the statement, as `is` does (it leaked: one list
+             * per `equals(a: makeList(), b: other)`) */
+            const AstExpr* operands[2] = { av, bv };
+            const char* names[2] = { an, bn };
+            fprintf(out, "(__extension__ ({ ");
+            for (int side = 0; side < 2; side++) {
+                emit_type_ref_as_c_type(ctx, &value_tr, out, false);
+                fprintf(out, " %s = (", names[side]);
+                int held = -1;
+                if (c_stmt_temp_value_owns(ctx, operands[side])
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &value_tr, 0))
+                    held = register_stmt_temp(ctx, &value_tr, true);
+                if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+                emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
+                fprintf(out, "); ");
+            }
+            fprintf(out, "(rae_Bool)(");
             rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &value_tr, an, bn, out);
             fprintf(out, "); }))");
             return true;
