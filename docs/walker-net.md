@@ -59,8 +59,9 @@ copy, and a difference counts as a desync (`net.desyncs` of `net.checks`).
   Desync checks: 104,637 by the bots and 8,000-11,700 by each window, 0
   desyncs. Host live allocations at the first and the last steady point
   (the 4 windows, no bots) were equal: 2 strings, 761 buffers. No relay,
-  host or bot process leaked at exit. (143 itself leaves one 2 MB buffer at
-  exit, offline too; queued.)
+  host or bot process leaked at exit. (The windows then left one 2 MB
+  buffer at exit, offline too: the grass picture's decoded PNG in
+  lib/SurfaceImages, freed since; soak.sh now checks the windows as well.)
 - Two 143 windows (one host, one joined) and 3 bots: the joined window
   shows the host's walker beside its own, bots running in, and bots lying
   where they fell.
