@@ -7,8 +7,13 @@
 #
 #   sh tools/relay/loopback-check.sh        (from the repository root)
 #
-# Exits non-zero when a message is missing or out of order, or a process
-# fails. Builds into a temporary directory and leaves no process running.
+# Then a host-migration game: the host process is killed with SIGKILL
+# mid-session and the players must be playing again within 3 s, player 2
+# (the desktop) as the new host, everyone with their own entity and the same
+# entities.
+#
+# Exits non-zero when a message is missing or out of order, a migration
+# check fails, or a process fails. Builds into a temporary directory and leaves no process running.
 set -u
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 RAE="$ROOT/compiler/bin/rae"
@@ -55,6 +60,7 @@ start() {
   # in the background would be a subshell, and killing it would leave the
   # program running)
   perl -e 'alarm shift; exec @ARGV' 60 "$@" >"$log" 2>&1 &
+  LAST_PID=$!
   PIDS="$PIDS $!"
 }
 
@@ -115,6 +121,48 @@ for pid in $PIDS; do
 done
 sleep 0.3
 grep "^relay:" "$WORK/relay.log" | tail -1
+
+# Host migration: the game host is killed with SIGKILL mid-session; the
+# relay (peer timeout 1.5 s) promotes player 2, the only desktop, who takes
+# over from its replicated copy; players 1 and 3 reconnect to it
+# (MigrationGame.rae, docs/replication.md "Host migration")
+start "$WORK/gameRelay.log" "$WORK/relay" --host 127.0.0.1 --port 0 --seconds 30 --timeout-ms 1500 --stats
+GAME_PORT=$(wait_line "$WORK/gameRelay.log" "relay listening on port" | awk '{print $NF}') || exit 1
+start "$WORK/gameHost.log" "$WORK/relayPeer" game-host --relay-port "$GAME_PORT" --seconds 25
+GAME_HOST_PID=$LAST_PID
+GAME_TOKEN=$(wait_line "$WORK/gameHost.log" "^token " | awk '{print $2}') || exit 1
+start "$WORK/game1.log" "$WORK/relayPeer" game-player --relay-port "$GAME_PORT" --token "$GAME_TOKEN" --device mobile --seconds 15
+sleep 0.2
+start "$WORK/game2.log" "$WORK/relayPeer" game-player --relay-port "$GAME_PORT" --token "$GAME_TOKEN" --device desktop --seconds 15
+sleep 0.2
+start "$WORK/game3.log" "$WORK/relayPeer" game-player --relay-port "$GAME_PORT" --token "$GAME_TOKEN" --device mobile --seconds 15
+sleep 3
+kill -9 "$GAME_HOST_PID"
+{ wait "$GAME_HOST_PID"; } 2>/dev/null
+echo "game host killed (SIGKILL)"
+sleep 6
+first_after=""
+for who in game1 game2 game3; do
+  line=$(grep "^migration:" "$WORK/$who.log")
+  echo "$who: ${line:-no migration seen}"
+  host=$(echo "$line" | sed -n 's/^migration: host \([a-z]*\),.*/\1/p')
+  gap=$(echo "$line" | sed -n 's/.*gap \(-*[0-9]*\) ms.*/\1/p')
+  own_before=$(echo "$line" | sed -n 's/.*own before \(-*[0-9]*\) after.*/\1/p')
+  own_after=$(echo "$line" | sed -n 's/.*own before -*[0-9]* after \(-*[0-9]*\),.*/\1/p')
+  after=$(echo "$line" | sed -n 's/.*after \[\([^]]*\)\]$/\1/p')
+  expected_host=false
+  [ "$who" = game2 ] && expected_host=true
+  if [ -z "$gap" ] || [ "$gap" -gt 3000 ] || [ "$host" != "$expected_host" ] \
+     || [ -z "$own_before" ] || [ "$own_before" -lt 0 ] || [ "$own_before" != "$own_after" ]; then
+    status=1
+  fi
+  if [ -z "$first_after" ]; then
+    first_after=$after
+  elif [ "$after" != "$first_after" ]; then
+    status=1
+  fi
+done
+grep "^relay:" "$WORK/gameRelay.log" | tail -1
 
 if [ "$status" -eq 0 ]; then
   echo "PASS: relay loopback check"
