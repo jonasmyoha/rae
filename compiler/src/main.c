@@ -338,6 +338,22 @@ static void apply_build_target(AstModule* module) {
     }
   }
 }
+/* The project pack's meta (name, version), "" without one: written into
+ * lib/Pack.rae's two consts for every build (apply_pack_meta) */
+static char g_pack_name[256] = "";
+static char g_pack_version[64] = "";
+
+/* Write the project pack's meta into lib/Pack.rae's consts, in the parsed
+ * AST (the file's own values are the "" a build without a pack keeps) */
+static void apply_pack_meta(AstModule* module) {
+  for (AstDecl* d = module->decls; d; d = d->next) {
+    if (d->kind != AST_DECL_GLOBAL_LET || !d->as.let_decl.value) continue;
+    AstExpr* value = d->as.let_decl.value;
+    if (value->kind != AST_EXPR_STRING) continue;
+    if (str_eq_cstr(d->as.let_decl.name, "name")) value->as.string_lit = str_from_cstr(g_pack_name);
+    else if (str_eq_cstr(d->as.let_decl.name, "version")) value->as.string_lit = str_from_cstr(g_pack_version);
+  }
+}
 static bool copy_runtime_assets(const char* dest_dir);
 typedef struct {
   WatchSources sources;
@@ -1000,6 +1016,7 @@ static bool module_graph_append(ModuleGraph* graph,
   if (module) {
       module->file_path = node->file_path;
       if (module_path && strcmp(module_path, "Target") == 0) apply_build_target(module);
+      if (module_path && strcmp(module_path, "Pack") == 0) apply_pack_meta(module);
   }
   if ((module_path && !node->module_path) || !node->file_path || !node->canonical_path) {
     fprintf(stderr, "error: out of memory while duplicating module paths\n");
@@ -1797,7 +1814,8 @@ static bool module_graph_load_module(ModuleGraph* graph,
                         strcmp(module_path, "Io") != 0 &&
                         strcmp(module_path, "String") != 0 &&
                         strcmp(module_path, "Sys") != 0 &&
-                        strcmp(module_path, "Target") != 0))) {
+                        strcmp(module_path, "Target") != 0 &&
+                        strcmp(module_path, "Pack") != 0))) {
     // Prelude: auto-loaded => auto-opened for every file. `core/Core` pulls in
     // its sibling `core/List` (the generic List(T)), which is a fundamental type
     // used pervasively via bare/UFCS (.add/.get) — requiring a per-file
@@ -1843,6 +1861,18 @@ static bool module_graph_load_module(ModuleGraph* graph,
         if (!loaded_ok) return false;
         ModuleNode* target_node = module_graph_find(graph, "Target");
         if (target_node) target_node->is_prelude_import = true;
+      }
+    }
+    /* Pack: the program's own pack's meta (Pack.name, Pack.version), seen
+     * like Target, qualified */
+    if (!module_graph_has_module(graph, "Pack") && !module_stack_contains(&frame, "Pack")) {
+      char* pack_module_path = try_resolve_lib_module(graph->root_path, "Pack");
+      if (pack_module_path) {
+        bool loaded_ok = module_graph_load_module(graph, "Pack", pack_module_path, &frame, hash_out, no_implicit);
+        free(pack_module_path);
+        if (!loaded_ok) return false;
+        ModuleNode* pack_node = module_graph_find(graph, "Pack");
+        if (pack_node) pack_node->is_prelude_import = true;
       }
     }
   }
@@ -4359,6 +4389,26 @@ static void write_rae_lock(const char* pack_path, const char* version) {
   fclose(out);
 }
 
+/* The project pack's meta into g_pack_name / g_pack_version (both "" when
+ * there is no pack or it has no meta): the same pack the toolchain check
+ * reads, parsed quietly */
+static void load_pack_meta(const char* entry_path, const char* project_root) {
+  g_pack_name[0] = '\0';
+  g_pack_version[0] = '\0';
+  char pack_path[PATH_MAX];
+  if (!find_project_pack(entry_path, project_root, pack_path)) return;
+  RaePack pack;
+  diag_set_quiet(true);
+  bool parsed = raepack_parse_file(pack_path, &pack, false);
+  diag_set_quiet(false);
+  if (!parsed) return;
+  snprintf(g_pack_name, sizeof g_pack_name, "%.*s", (int)pack.meta_name.len,
+           pack.meta_name.data ? pack.meta_name.data : "");
+  snprintf(g_pack_version, sizeof g_pack_version, "%.*s", (int)pack.meta_version.len,
+           pack.meta_version.data ? pack.meta_version.data : "");
+  raepack_free(&pack);
+}
+
 /* Run the requirement check before the format preflight. Returns true to let
  * the build proceed, false to abort it. `entry_path` may be NULL (zero-config
  * with no discoverable entry) — then only `project_root` is searched. */
@@ -4515,6 +4565,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
 
+                      load_pack_meta(run_opts.input_path, final_root);
                       if (!toolchain_check(run_opts.input_path, final_root, argc, argv)) {
                         return 1;
                       }
@@ -4530,6 +4581,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                       s_explicit_project_root = (run_opts.project_path != NULL);
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
+                      load_pack_meta(run_opts.input_path, final_root);
                       if (!toolchain_check(run_opts.input_path, final_root, argc, argv)) {
                         return 1;
                       }
@@ -4558,6 +4610,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
 
+    load_pack_meta(build_opts.entry_path, final_root);
     if (!toolchain_check(build_opts.entry_path, final_root, argc, argv)) {
       return 1;
     }

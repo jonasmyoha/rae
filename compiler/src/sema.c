@@ -7792,7 +7792,17 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 if (sema_shader_from_call(ctx, module, symbols, expr)) sema_analyze_expr(ctx, module, symbols, expr, true);
                 break;
             }
-            sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
+            /* A call names a function, never a const: a qualified-only
+             * prelude const of the same name (Pack.name, Target.os) does not
+             * stand in for the program's own `func name(...)` */
+            Symbol* callee_symbol = expr->as.call.callee->kind == AST_EXPR_IDENT
+                                        ? symbol_table_lookup(symbols, expr->as.call.callee->as.ident)
+                                        : NULL;
+            bool callee_is_prelude_const = callee_symbol && callee_symbol->decl &&
+                                           callee_symbol->decl->kind == AST_DECL_GLOBAL_LET &&
+                                           callee_symbol->decl->module_name &&
+                                           sema_module_globally_imported(callee_symbol->decl->module_name);
+            if (!callee_is_prelude_const) sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
             AstCallArg* arg = expr->as.call.args;
             while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value, true); arg = arg->next; }
             /* Skip name re-resolution if this call is ALREADY resolved (decl_link
