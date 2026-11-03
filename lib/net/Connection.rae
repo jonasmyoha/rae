@@ -1,0 +1,826 @@
+# The connection protocol over bytes: one end of a connection, with no I/O.
+#
+# A `Connection` is driven with bytes and the time and answers bytes: the app
+# hands it each packet that arrived (`connectionReadPacket`) and asks it for
+# the packets to send (`connectionWritePacket`, until it answers false), and
+# moves the clock forward (`connectionUpdate`). Which socket the bytes travel
+# on (lib/net/Udp.rae, a relay, a test that drops packets by hand) is the
+# caller's business, so the whole protocol is tested without a network.
+#
+# What it does:
+# - Handshake. The connecting end sends a connect request every
+#   `connectRetryMs` until the listening end accepts (or data arrives); it
+#   gives up as `timedOut` after `connectTimeoutMs`. The connecting end picks
+#   the 32-bit connection id; a packet with another id is refused.
+# - Sequence numbers and acks in every packet. Each packet after the
+#   handshake carries its own 16-bit sequence, the newest sequence received
+#   from the peer and 32 bits for the 32 before it. An ack measures the
+#   round trip (a smoothed `rttMs`).
+# - A reliable ordered channel (lib/net/ReliableChannel.rae): a fragment
+#   with no ack after `max(minResendMs, 1.5 * rttMs)` is sent again.
+# - Fragments: a reliable message bigger than `fragmentBytes` is split, each
+#   fragment resent on its own, and joined again for the receiver. Every
+#   packet stays within `maxPacketBytes` (1200 by default: under the usual
+#   1280-byte IPv6 minimum path, so no IP fragmentation).
+# - An unreliable sequenced channel: sent once, never resent; a message
+#   older than the newest one received is dropped, so they never arrive out
+#   of order. An unreliable message fits in one packet (`fragmentBytes`).
+# - Keep-alive: a packet at least every `keepAliveMs`, so acks flow and the
+#   peer knows this end is there. A peer silent for `timeoutMs` is
+#   `timedOut`.
+# - Disconnect: `connectionDisconnect` sends `disconnectPackets` disconnect
+#   packets (one may be lost), and the peer becomes `disconnected`.
+#
+# Every table is made once, by `createConnection`; after the caller's packet
+# and message lists have grown to their working size (the warmup), sending,
+# receiving, acking and resending allocate nothing.
+#
+# Packet layout (big-endian): kind (1 byte; 128 set = the ack fields are
+# valid), connection id (4). A connect request or accept adds the protocol
+# magic (4). A data, keep-alive or disconnect packet adds sequence (2),
+# ack (2), ack bits (4), then for data its messages: reliable = 1, id (2),
+# fragment index (2), fragment count (2), length (2), bytes; unreliable = 2,
+# sequence (2), length (2), bytes.
+open net/Wire
+open net/ByteBuffer
+open net/ReliableChannel
+
+enum ConnectionState {
+  idle
+  listening
+  connecting
+  connected
+  disconnecting
+  disconnected
+  timedOut
+}
+
+# Made, not yet connecting or listening
+# Waiting for a connect request (the accepting end)
+# Sending connect requests (the connecting end)
+# Sending its disconnect packets
+# Closed by either end
+# The handshake or the peer went silent for too long
+enum MessageChannel { none, reliable, unreliable }
+
+type ConnectionConfig {
+  maxPacketBytes: Int
+  # The largest fragment of a reliable message, and the largest unreliable
+  # message
+  fragmentBytes: Int
+  # Fragments in flight per direction (a power of two; a reliable message may
+  # have at most this many fragments)
+  windowSize: Int
+  connectTimeoutMs: Int
+  connectRetryMs: Int
+  timeoutMs: Int
+  keepAliveMs: Int
+  minResendMs: Int
+  # The round trip assumed before the first ack measures one
+  initialRttMs: Int
+  disconnectPackets: Int
+}
+
+type ConnectionStats {
+  packetsSent: Int
+  packetsReceived: Int
+  # Too short, malformed, another connection's, or the wrong state
+  packetsRefused: Int
+  fragmentsResent: Int
+  # Unreliable messages older than the newest one already received
+  unreliableDropped: Int
+}
+
+type Connection {
+  config: ConnectionConfig
+  state: ConnectionState
+  connectionId: Int
+  startMs: Int
+  lastReceiveMs: Int
+  lastSendMs: Int
+  lastConnectSendMs: Int
+  acceptPending: Bool
+  ackPending: Bool
+  disconnectsLeft: Int
+  # Packet sequences: ours, and the newest of the peer's with the 32 before it
+  nextSequence: Int
+  receivedAny: Bool
+  remoteSequence: Int
+  receivedBits: Int
+  # Per sent packet (`packetHistory` of them): its sequence, when, whether it
+  # was acked, and the reliable fragment ids it carried
+  sentSequence: List(Int)
+  sentMs: List(Int)
+  sentAcked: List(Bool)
+  sentMessageCount: List(Int)
+  sentMessageIds: List(Int)
+  rttMs: Float
+  hasRtt: Bool
+  sender: ReliableSender
+  receiver: ReliableReceiver
+  # Queued unreliable messages: sequence (2), length (2), bytes
+  unreliableOut: ByteBuffer
+  # Received unreliable messages: length (2), bytes
+  unreliableIn: ByteBuffer
+  unreliableNextSequence: Int
+  # The newest unreliable sequence received, -1 for none
+  unreliableLatest: Int
+  stats: ConnectionStats
+}
+
+const kindConnectRequest: Int = 1
+
+const kindConnectAccept: Int = 2
+
+const kindData: Int = 3
+
+const kindKeepAlive: Int = 4
+
+const kindDisconnect: Int = 5
+
+const flagAckValid: Int = 128
+
+# "RAE1": a packet of another protocol is refused at the handshake
+const protocolMagic: Int = 1380009265
+
+const handshakeBytes: Int = 9
+
+const headerBytes: Int = 13
+
+const messageReliable: Int = 1
+
+const messageUnreliable: Int = 2
+
+const reliableMessageHeader: Int = 9
+
+const unreliableMessageHeader: Int = 5
+
+# Sent packets remembered for their acks
+const packetHistory: Int = 256
+
+const maxReliablePerPacket: Int = 64
+
+const ackBitsMask: Int = 4294967295
+
+func defaultConnectionConfig() ret ConnectionConfig {
+  ret ConnectionConfig {
+    maxPacketBytes: 1200
+    fragmentBytes: 1024
+    windowSize: 64
+    connectTimeoutMs: 5000
+    connectRetryMs: 100
+    timeoutMs: 5000
+    keepAliveMs: 100
+    minResendMs: 30
+    initialRttMs: 100
+    disconnectPackets: 3
+  }
+}
+
+# The config made safe: packets that fit their headers, a power-of-two
+# window within the 16-bit id space
+func normalizedConfig(config: view ConnectionConfig) ret ConnectionConfig {
+  var maxPacketBytes: Int = config.maxPacketBytes
+  if maxPacketBytes < 64 {
+    maxPacketBytes = 64
+  }
+  var fragmentBytes: Int = config.fragmentBytes
+  if fragmentBytes > maxPacketBytes - headerBytes - reliableMessageHeader {
+    fragmentBytes = maxPacketBytes - headerBytes - reliableMessageHeader
+  }
+  if fragmentBytes < 1 {
+    fragmentBytes = 1
+  }
+  var windowSize: Int = 1
+  loop windowSize < config.windowSize and windowSize < 32768 {
+    windowSize = windowSize * 2
+  }
+  ret ConnectionConfig {
+    maxPacketBytes: maxPacketBytes
+    fragmentBytes: fragmentBytes
+    windowSize: windowSize
+    connectTimeoutMs: config.connectTimeoutMs
+    connectRetryMs: config.connectRetryMs
+    timeoutMs: config.timeoutMs
+    keepAliveMs: config.keepAliveMs
+    minResendMs: config.minResendMs
+    initialRttMs: config.initialRttMs
+    disconnectPackets: config.disconnectPackets
+  }
+}
+
+func createConnection(config: view ConnectionConfig) ret Connection {
+  let settled: ConnectionConfig = normalizedConfig(config: config)
+  let queueBytes: Int = settled.windowSize * (settled.fragmentBytes + 4)
+  ret Connection {
+    config: settled
+    state: ConnectionState.idle
+    connectionId: 0
+    startMs: 0
+    lastReceiveMs: 0
+    lastSendMs: 0
+    lastConnectSendMs: -1
+    acceptPending: false
+    ackPending: false
+    disconnectsLeft: 0
+    nextSequence: 0
+    receivedAny: false
+    remoteSequence: 0
+    receivedBits: 0
+    sentSequence: emptySlots(count: packetHistory)
+    sentMs: zeroInts(count: packetHistory)
+    sentAcked: zeroBools(count: packetHistory)
+    sentMessageCount: zeroInts(count: packetHistory)
+    sentMessageIds: zeroInts(count: packetHistory * maxReliablePerPacket)
+    rttMs: settled.initialRttMs as Float
+    hasRtt: false
+    sender: createReliableSender(windowSize: settled.windowSize, slotBytes: settled.fragmentBytes)
+    receiver: createReliableReceiver(
+      windowSize: settled.windowSize
+      slotBytes: settled.fragmentBytes
+    )
+    unreliableOut: createByteBuffer(capacity: queueBytes)
+    unreliableIn: createByteBuffer(capacity: queueBytes)
+    unreliableNextSequence: 0
+    unreliableLatest: -1
+    stats: {
+      packetsSent: 0
+      packetsReceived: 0
+      packetsRefused: 0
+      fragmentsResent: 0
+      unreliableDropped: 0
+    }
+  }
+}
+
+# Start connecting with `connectionId` (pick it at random: it tells this
+# connection's packets from any other's)
+func connectionConnect(connection: mod Connection, connectionId: view Int, nowMs: view Int) {
+  connection.connectionId = connectionId bitand ackBitsMask
+  connection.state = ConnectionState.connecting
+  connection.startMs = nowMs
+  connection.lastReceiveMs = nowMs
+  connection.lastConnectSendMs = -1
+}
+
+# Wait for a connect request (the accepting end)
+func connectionListen(connection: mod Connection, nowMs: view Int) {
+  connection.state = ConnectionState.listening
+  connection.startMs = nowMs
+  connection.lastReceiveMs = nowMs
+}
+
+# Close: the next packets are the disconnect packets, then `disconnected`
+func connectionDisconnect(connection: mod Connection, nowMs: view Int) {
+  if connection.state is ConnectionState.connected or connection.state is ConnectionState.connecting {
+    connection.state = ConnectionState.disconnecting
+    connection.disconnectsLeft = connection.config.disconnectPackets
+    ret
+  }
+  if connection.state is not ConnectionState.disconnecting {
+    connection.state = ConnectionState.disconnected
+  }
+}
+
+func connectionIsConnected(connection: view Connection) ret Bool {
+  ret connection.state is ConnectionState.connected
+}
+
+# Move the clock: a handshake or a peer silent for too long times out
+func connectionUpdate(connection: mod Connection, nowMs: view Int) {
+  if connection.state is ConnectionState.connecting and nowMs - connection.startMs > connection.config.connectTimeoutMs {
+    connection.state = ConnectionState.timedOut
+  }
+  if connection.state is ConnectionState.connected and nowMs - connection.lastReceiveMs > connection.config.timeoutMs {
+    connection.state = ConnectionState.timedOut
+  }
+}
+
+# Queue a reliable message (`count` bytes of `bytes` from `start`): false
+# when the send window is full or the connection is closed
+func connectionSendReliable(
+  connection: mod Connection
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if not connectionCanSend(connection: connection) {
+    ret false
+  }
+  ret reliableSend(
+    sender: connection.sender
+    bytes: bytes
+    start: start
+    count: count
+  )
+}
+
+# Queue an unreliable message: false when it is bigger than `fragmentBytes`,
+# its queue is full, or the connection is closed
+func connectionSendUnreliable(
+  connection: mod Connection
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if not connectionCanSend(connection: connection) {
+    ret false
+  }
+  if count < 0 or start < 0 or start + count > bytes.length or count > connection.config.fragmentBytes {
+    ret false
+  }
+  let limit: Int = connection.config.windowSize * (connection.config.fragmentBytes + 4)
+  if byteBufferLength(buffer: connection.unreliableOut) + 4 + count > limit {
+    ret false
+  }
+  appendWord(buffer: connection.unreliableOut, value: connection.unreliableNextSequence)
+  appendWord(buffer: connection.unreliableOut, value: count)
+  appendBytes(
+    buffer: connection.unreliableOut
+    bytes: bytes
+    start: start
+    count: count
+  )
+  connection.unreliableNextSequence = sequenceNext(sequence: connection.unreliableNextSequence)
+  ret true
+}
+
+func connectionCanSend(connection: view Connection) ret Bool {
+  ret connection.state is ConnectionState.connected or connection.state is ConnectionState.connecting or connection.state is ConnectionState.listening
+}
+
+# A 16-bit value onto a ByteBuffer
+func appendWord(buffer: mod ByteBuffer, value: view Int) {
+  appendByte(buffer: buffer, byte: value shr 8)
+  appendByte(buffer: buffer, byte: value)
+}
+
+func bufferWordAt(buffer: view ByteBuffer, index: view Int) ret Int {
+  ret readU16(bytes: buffer.bytes, offset: buffer.start + index)
+}
+
+# The next received message into `message` (replacing its contents) and its
+# channel; `none` when there is none. Reliable messages come first.
+func connectionReceive(connection: mod Connection, message: mod List(UInt8)) ret MessageChannel {
+  if reliableDeliver(receiver: connection.receiver, message: message) {
+    ret MessageChannel.reliable
+  }
+  if byteBufferLength(buffer: connection.unreliableIn) >= 2 {
+    let length: Int = bufferWordAt(buffer: connection.unreliableIn, index: 0)
+    message.clear()
+    appendCopy(
+      destination: message
+      source: connection.unreliableIn.bytes
+      start: connection.unreliableIn.start + 2
+      count: length
+    )
+    consume(buffer: connection.unreliableIn, count: 2 + length)
+    ret MessageChannel.unreliable
+  }
+  ret MessageChannel.none
+}
+
+# How long to wait for an ack before sending a fragment again
+func resendDelayMs(connection: view Connection) ret Int {
+  let fromRoundTrip: Int = (connection.rttMs * 1.5) as Int
+  if fromRoundTrip > connection.config.minResendMs {
+    ret fromRoundTrip
+  }
+  ret connection.config.minResendMs
+}
+
+# --- Writing packets ---
+
+# The next packet to send into `packet` (replacing its contents): false when
+# there is nothing to send now. Call it until it answers false.
+func connectionWritePacket(
+  connection: mod Connection
+  packet: mod List(UInt8)
+  nowMs: view Int
+) ret Bool {
+  packet.clear()
+  reserveBytes(bytes: packet, count: connection.config.maxPacketBytes)
+  if connection.state is ConnectionState.connecting {
+    if connection.lastConnectSendMs >= 0 and nowMs - connection.lastConnectSendMs < connection.config.connectRetryMs {
+      ret false
+    }
+    writeHandshake(connection: connection, packet: packet, kind: kindConnectRequest)
+    connection.lastConnectSendMs = nowMs
+    ret packetWritten(connection: connection, nowMs: nowMs)
+  }
+  if connection.state is ConnectionState.disconnecting {
+    if connection.disconnectsLeft <= 0 {
+      connection.state = ConnectionState.disconnected
+      ret false
+    }
+    writeHeader(connection: connection, packet: packet, kind: kindDisconnect)
+    connection.disconnectsLeft = connection.disconnectsLeft - 1
+    if connection.disconnectsLeft is 0 {
+      connection.state = ConnectionState.disconnected
+    }
+    ret packetWritten(connection: connection, nowMs: nowMs)
+  }
+  if connection.state is not ConnectionState.connected {
+    ret false
+  }
+  if connection.acceptPending {
+    writeHandshake(connection: connection, packet: packet, kind: kindConnectAccept)
+    connection.acceptPending = false
+    ret packetWritten(connection: connection, nowMs: nowMs)
+  }
+  ret writeDataPacket(connection: connection, packet: packet, nowMs: nowMs)
+}
+
+func packetWritten(connection: mod Connection, nowMs: view Int) ret Bool {
+  connection.lastSendMs = nowMs
+  connection.stats.packetsSent = connection.stats.packetsSent + 1
+  ret true
+}
+
+func writeHandshake(connection: view Connection, packet: mod List(UInt8), kind: view Int) {
+  writeU8(bytes: packet, value: kind)
+  writeU32(bytes: packet, value: connection.connectionId)
+  writeU32(bytes: packet, value: protocolMagic)
+}
+
+# The sequenced header: kind, id, this packet's sequence and the acks
+func writeHeader(connection: view Connection, packet: mod List(UInt8), kind: view Int) {
+  var flags: Int = kind
+  if connection.receivedAny {
+    flags = flags bitor flagAckValid
+  }
+  writeU8(bytes: packet, value: flags)
+  writeU32(bytes: packet, value: connection.connectionId)
+  writeU16(bytes: packet, value: connection.nextSequence)
+  writeU16(bytes: packet, value: connection.remoteSequence)
+  writeU32(bytes: packet, value: connection.receivedBits)
+}
+
+# A data packet with the reliable fragments that are due and the queued
+# unreliable messages that fit; a keep-alive when there are none but an ack
+# is owed or the line has been quiet for `keepAliveMs`
+func writeDataPacket(
+  connection: mod Connection
+  packet: mod List(UInt8)
+  nowMs: view Int
+) ret Bool {
+  writeHeader(connection: connection, packet: packet, kind: kindData)
+  let historySlot: Int = connection.nextSequence % packetHistory
+  let reliableCount: Int = writeReliableFragments(
+    connection: connection
+    packet: packet
+    nowMs: nowMs
+    historySlot: historySlot
+  )
+  let unreliableCount: Int = writeUnreliableMessages(connection: connection, packet: packet)
+  if reliableCount is 0 and unreliableCount is 0 {
+    if not connection.ackPending and nowMs - connection.lastSendMs < connection.config.keepAliveMs {
+      packet.clear()
+      ret false
+    }
+    packet.set(
+      index: 0
+      value: (readU8(bytes: packet, offset: 0) - kindData + kindKeepAlive) as UInt8
+    )
+  }
+  connection.sentSequence.set(index: historySlot, value: connection.nextSequence)
+  connection.sentMs.set(index: historySlot, value: nowMs)
+  connection.sentAcked.set(index: historySlot, value: false)
+  connection.sentMessageCount.set(index: historySlot, value: reliableCount)
+  connection.nextSequence = sequenceNext(sequence: connection.nextSequence)
+  connection.ackPending = false
+  ret packetWritten(connection: connection, nowMs: nowMs)
+}
+
+# The due reliable fragments that fit, oldest first: how many were written
+# (their ids are noted for the packet's history slot)
+func writeReliableFragments(
+  connection: mod Connection
+  packet: mod List(UInt8)
+  nowMs: view Int
+  historySlot: view Int
+) ret Int {
+  let resendMs: Int = resendDelayMs(connection: connection)
+  let inFlight: Int = reliableInFlight(sender: connection.sender)
+  let windowSize: Int = connection.sender.windowSize
+  let slotBytes: Int = connection.sender.slotBytes
+  var written: Int = 0
+  loop var step: Int = 0, step < inFlight and written < maxReliablePerPacket, ++step {
+    let id: Int = sequenceAdd(sequence: connection.sender.oldestId, count: step)
+    let slot: Int = id % windowSize
+    if not reliableSlotDue(
+      sender: connection.sender
+      slot: slot
+      nowMs: nowMs
+      resendMs: resendMs
+    ) {
+      continue
+    }
+    let length: Int = intAt(values: connection.sender.slotLength, index: slot)
+    if packet.length + reliableMessageHeader + length > connection.config.maxPacketBytes {
+      continue
+    }
+    writeU8(bytes: packet, value: messageReliable)
+    writeU16(bytes: packet, value: id)
+    writeU16(bytes: packet, value: intAt(values: connection.sender.slotFragmentIndex, index: slot))
+    writeU16(bytes: packet, value: intAt(values: connection.sender.slotFragmentCount, index: slot))
+    writeU16(bytes: packet, value: length)
+    appendCopy(
+      destination: packet
+      source: connection.sender.data
+      start: slot * slotBytes
+      count: length
+    )
+    if intAt(values: connection.sender.slotLastSentMs, index: slot) >= 0 {
+      connection.stats.fragmentsResent = connection.stats.fragmentsResent + 1
+    }
+    connection.sender.slotLastSentMs.set(index: slot, value: nowMs)
+    connection.sentMessageIds.set(index: historySlot * maxReliablePerPacket + written, value: id)
+    written = written + 1
+  }
+  ret written
+}
+
+# The queued unreliable messages that fit, in order: how many were written
+func writeUnreliableMessages(connection: mod Connection, packet: mod List(UInt8)) ret Int {
+  var written: Int = 0
+  loop byteBufferLength(buffer: connection.unreliableOut) >= 4 {
+    let sequence: Int = bufferWordAt(buffer: connection.unreliableOut, index: 0)
+    let length: Int = bufferWordAt(buffer: connection.unreliableOut, index: 2)
+    if packet.length + unreliableMessageHeader + length > connection.config.maxPacketBytes {
+      break
+    }
+    writeU8(bytes: packet, value: messageUnreliable)
+    writeU16(bytes: packet, value: sequence)
+    writeU16(bytes: packet, value: length)
+    appendCopy(
+      destination: packet
+      source: connection.unreliableOut.bytes
+      start: connection.unreliableOut.start + 4
+      count: length
+    )
+    consume(buffer: connection.unreliableOut, count: 4 + length)
+    written = written + 1
+  }
+  ret written
+}
+
+# --- Reading packets ---
+
+# The connection id of a packet, -1 when it is too short to have one (a host
+# routes each packet to its connection by this)
+func packetConnectionId(packet: view List(UInt8), start: view Int, count: view Int) ret Int {
+  if count < 5 or start < 0 or start + count > packet.length {
+    ret -1
+  }
+  ret readU32(bytes: packet, offset: start + 1)
+}
+
+# Whether a packet is a connect request (a host makes a listening Connection
+# for one from a new peer)
+func packetIsConnectRequest(packet: view List(UInt8), start: view Int, count: view Int) ret Bool {
+  if count < handshakeBytes or start < 0 or start + count > packet.length {
+    ret false
+  }
+  ret (readU8(bytes: packet, offset: start) bitand 127) is kindConnectRequest and readU32(
+    bytes: packet
+    offset: start + 5
+  ) is protocolMagic
+}
+
+func refused(connection: mod Connection) ret Bool {
+  connection.stats.packetsRefused = connection.stats.packetsRefused + 1
+  ret false
+}
+
+# Take one received packet (`count` bytes of `packet` from `start`): false
+# when it was refused (malformed, another connection's, or not expected now)
+func connectionReadPacket(
+  connection: mod Connection
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+  nowMs: view Int
+) ret Bool {
+  if count < 5 or start < 0 or start + count > packet.length {
+    ret refused(connection: connection)
+  }
+  let kind: Int = readU8(bytes: packet, offset: start) bitand 127
+  let connectionId: Int = readU32(bytes: packet, offset: start + 1)
+  if kind is kindConnectRequest or kind is kindConnectAccept {
+    if count < handshakeBytes or readU32(bytes: packet, offset: start + 5) is not protocolMagic {
+      ret refused(connection: connection)
+    }
+  }
+  if connection.state is ConnectionState.listening {
+    if kind is not kindConnectRequest {
+      ret refused(connection: connection)
+    }
+    connection.connectionId = connectionId
+    connection.state = ConnectionState.connected
+    connection.acceptPending = true
+    ret received(connection: connection, nowMs: nowMs)
+  }
+  if connectionId is not connection.connectionId {
+    ret refused(connection: connection)
+  }
+  let state: ConnectionState = connection.state
+  if state is not ConnectionState.connected and state is not ConnectionState.connecting {
+    ret refused(connection: connection)
+  }
+  if kind is kindConnectRequest {
+    # Our accept was lost: send it again
+    if state is ConnectionState.connected {
+      connection.acceptPending = true
+      ret received(connection: connection, nowMs: nowMs)
+    }
+    ret refused(connection: connection)
+  }
+  if kind is kindConnectAccept {
+    connection.state = ConnectionState.connected
+    ret received(connection: connection, nowMs: nowMs)
+  }
+  if kind is kindDisconnect {
+    connection.state = ConnectionState.disconnected
+    ret received(connection: connection, nowMs: nowMs)
+  }
+  if kind is not kindData and kind is not kindKeepAlive or count < headerBytes {
+    ret refused(connection: connection)
+  }
+  # Data before the accept: the accept was lost, the peer is there
+  connection.state = ConnectionState.connected
+  noteReceivedSequence(connection: connection, sequence: readU16(bytes: packet, offset: start + 5))
+  if (readU8(bytes: packet, offset: start) bitand flagAckValid) is not 0 {
+    takeAcks(
+      connection: connection
+      ack: readU16(bytes: packet, offset: start + 7)
+      ackBits: readU32(bytes: packet, offset: start + 9)
+      nowMs: nowMs
+    )
+  }
+  readMessages(
+    connection: connection
+    packet: packet
+    start: start + headerBytes
+    end: start + count
+  )
+  ret received(connection: connection, nowMs: nowMs)
+}
+
+func received(connection: mod Connection, nowMs: view Int) ret Bool {
+  connection.lastReceiveMs = nowMs
+  connection.stats.packetsReceived = connection.stats.packetsReceived + 1
+  ret true
+}
+
+# Note the peer's packet `sequence` for our acks
+func noteReceivedSequence(connection: mod Connection, sequence: view Int) {
+  connection.ackPending = true
+  if not connection.receivedAny {
+    connection.receivedAny = true
+    connection.remoteSequence = sequence
+    connection.receivedBits = 0
+    ret
+  }
+  if sequenceGreater(first: sequence, second: connection.remoteSequence) {
+    let shift: Int = sequenceDistance(newer: sequence, older: connection.remoteSequence)
+    if shift <= 32 {
+      connection.receivedBits = ((connection.receivedBits shl shift) bitor (1 shl (shift - 1))) bitand ackBitsMask
+    } else {
+      connection.receivedBits = 0
+    }
+    connection.remoteSequence = sequence
+    ret
+  }
+  let behind: Int = sequenceDistance(newer: connection.remoteSequence, older: sequence)
+  if behind >= 1 and behind <= 32 {
+    connection.receivedBits = connection.receivedBits bitor (1 shl (behind - 1))
+  }
+}
+
+# The peer acked packet `ack` and, by bit i of `ackBits`, packet ack - 1 - i
+func takeAcks(
+  connection: mod Connection
+  ack: view Int
+  ackBits: view Int
+  nowMs: view Int
+) {
+  ackPacket(connection: connection, sequence: ack, nowMs: nowMs)
+  loop var bit: Int = 0, bit < 32, ++bit {
+    if (ackBits bitand (1 shl bit)) is not 0 {
+      ackPacket(connection: connection, sequence: (ack - 1 - bit) bitand sequenceMask, nowMs: nowMs)
+    }
+  }
+}
+
+# One of our packets arrived: measure the round trip and finish the
+# reliable fragments it carried
+func ackPacket(connection: mod Connection, sequence: view Int, nowMs: view Int) {
+  let slot: Int = sequence % packetHistory
+  if intAt(values: connection.sentSequence, index: slot) is not sequence or boolAt(
+    values: connection.sentAcked
+    index: slot
+  ) {
+    ret
+  }
+  connection.sentAcked.set(index: slot, value: true)
+  let sample: Float = (nowMs - intAt(values: connection.sentMs, index: slot)) as Float
+  if connection.hasRtt {
+    connection.rttMs = connection.rttMs + (sample - connection.rttMs) * 0.125
+  } else {
+    connection.rttMs = sample
+    connection.hasRtt = true
+  }
+  let count: Int = intAt(values: connection.sentMessageCount, index: slot)
+  loop var i: Int = 0, i < count, ++i {
+    reliableAcked(
+      sender: connection.sender
+      id: intAt(values: connection.sentMessageIds, index: slot * maxReliablePerPacket + i)
+    )
+  }
+}
+
+# The messages of a data packet, `start` up to `end`; a malformed tail ends
+# the reading (what was read stays)
+func readMessages(
+  connection: mod Connection
+  packet: view List(UInt8)
+  start: view Int
+  end: view Int
+) {
+  var offset: Int = start
+  loop offset < end {
+    let messageKind: Int = readU8(bytes: packet, offset: offset)
+    if messageKind is messageReliable {
+      if offset + reliableMessageHeader > end {
+        ret
+      }
+      let length: Int = readU16(bytes: packet, offset: offset + 7)
+      let dataStart: Int = offset + reliableMessageHeader
+      if dataStart + length > end {
+        ret
+      }
+      let stored: Bool = reliableReceive(
+        receiver: connection.receiver
+        id: readU16(bytes: packet, offset: offset + 1)
+        fragmentIndex: readU16(bytes: packet, offset: offset + 3)
+        fragmentCount: readU16(bytes: packet, offset: offset + 5)
+        packet: packet
+        start: dataStart
+        count: length
+      )
+      offset = dataStart + length
+    } else if messageKind is messageUnreliable {
+      if offset + unreliableMessageHeader > end {
+        ret
+      }
+      let sequence: Int = readU16(bytes: packet, offset: offset + 1)
+      let length: Int = readU16(bytes: packet, offset: offset + 3)
+      let dataStart: Int = offset + unreliableMessageHeader
+      if dataStart + length > end {
+        ret
+      }
+      takeUnreliable(
+        connection: connection
+        sequence: sequence
+        packet: packet
+        start: dataStart
+        count: length
+      )
+      offset = dataStart + length
+    } else {
+      ret
+    }
+  }
+}
+
+# Keep an unreliable message unless an equal or newer one already came (or
+# the app has let too many pile up)
+func takeUnreliable(
+  connection: mod Connection
+  sequence: view Int
+  packet: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  if connection.unreliableLatest >= 0 and not sequenceGreater(
+    first: sequence
+    second: connection.unreliableLatest
+  ) {
+    connection.stats.unreliableDropped = connection.stats.unreliableDropped + 1
+    ret
+  }
+  connection.unreliableLatest = sequence
+  let limit: Int = connection.config.windowSize * (connection.config.fragmentBytes + 4)
+  if byteBufferLength(buffer: connection.unreliableIn) + 2 + count > limit {
+    connection.stats.unreliableDropped = connection.stats.unreliableDropped + 1
+    ret
+  }
+  appendWord(buffer: connection.unreliableIn, value: count)
+  appendBytes(
+    buffer: connection.unreliableIn
+    bytes: packet
+    start: start
+    count: count
+  )
+}
