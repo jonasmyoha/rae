@@ -28,7 +28,7 @@ it ships.
 
 ## Checked, not missing
 
-These looked like gaps during 1/12-3/12 but are not. They are listed so the
+These looked like gaps during 1/12-4/12 but are not. They are listed so the
 next task does not propose them again.
 
 - **Passing a struct to a C shim.** `lib/net/Udp.rae` passes a sender
@@ -43,3 +43,16 @@ next task does not propose them again.
 - **Fixed tables per connection.** `lib/net/ReliableChannel.rae` keeps
   slot fields in parallel `List(Int)`s that are made once. A `List` of a
   slot struct with `modAt` works as well. Neither needs a new feature.
+- **Updating several locals from one helper (4/12).** The ChaCha20 block
+  in `lib/crypto/ChaCha20Poly1305.rae` is written out round by round on 16
+  locals. `mod Int` parameters on locals already work
+  (`quarter(a: first, b: second)`). Writing it out was a speed choice.
+- **32-bit wrapping words (4/12).** SHA-256, ChaCha20 and Poly1305 keep
+  32-bit words in `Int` and mask after every add. `UInt32` arithmetic
+  already wraps (`4294967295 + 2` is `1`), so the masks are a style choice.
+- **Fast fixed-size limb arrays (4/12).** X25519 keeps its field elements
+  in a `List(Int)` and reads them with `copyAtFallback`. It is about 18x
+  slower than C, but it runs once per connection. `Array(T, cap: N)` is
+  the inline fixed-size type, and `[]` is absent from both by decision
+  (`docs/array-vs-list-indexing.md`). Use the vendored C library if X25519
+  ever becomes the bottleneck.

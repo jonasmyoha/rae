@@ -886,6 +886,9 @@ int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags);
 #if defined(__APPLE__) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
 int64_t rae_ext_Sha1_commonCrypto(uint8_t* bytes, int64_t offset, int64_t count, uint8_t* digest);
 #endif
+#if !defined(_WIN32)
+int64_t rae_ext_SecureRandom_getEntropy(uint8_t* buffer, int64_t offset, int64_t count);
+#endif
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs);
 #ifdef RAE_HAS_KQUEUE
 /* The kqueue poller: declared in Rae under `when hasKqueue` */

@@ -1,0 +1,612 @@
+# ChaCha20-Poly1305 authenticated encryption (RFC 8439), in Rae: lib/net
+# seals every packet of an encrypted connection with it.
+#
+# `aeadSeal` encrypts and appends a 16-byte tag that covers the ciphertext
+# and the additional data (bytes sent in the clear, like a packet header);
+# `aeadOpen` checks the tag first, in constant time, and decrypts only a
+# packet that is whole and unchanged. A key must never seal two messages
+# with the same nonce: lib/net puts a per-direction packet counter in it.
+#
+# All working memory is in a `ChaChaState` made once (`createChaChaState`):
+# sealing and opening allocate nothing beyond the caller's output list.
+#
+# The 32-bit words live in Int, masked back to 32 bits after every operation
+# that can overflow them. Poly1305 uses five 26-bit limbs, so every product
+# and sum stays far inside 64 bits.
+const wordMask: Int = 4294967295
+
+const limbMask: Int = 67108863
+
+const aeadTagBytes: Int = 16
+
+const aeadKeyBytes: Int = 32
+
+const aeadNonceBytes: Int = 12
+
+type ChaChaState {
+  # The 16 input words: constants, key, block counter, nonce
+  input: List(Int)
+  # One keystream block
+  block: List(UInt8)
+  # The 16-byte length block, and the tag being checked
+  lengths: List(UInt8)
+  tag: List(UInt8)
+  # Poly1305: the key r (r0-r4, and 5 * r1-r4), the pad s, the hash h
+  r0: Int
+  r1: Int
+  r2: Int
+  r3: Int
+  r4: Int
+  s1: Int
+  s2: Int
+  s3: Int
+  s4: Int
+  pad0: Int
+  pad1: Int
+  pad2: Int
+  pad3: Int
+  h0: Int
+  h1: Int
+  h2: Int
+  h3: Int
+  h4: Int
+}
+
+func createChaChaState() ret ChaChaState {
+  var input: List(Int) = List.create(Int, cap: 16)
+  input.addDefaults(count: 16)
+  var block: List(UInt8) = List.create(UInt8, cap: 64)
+  block.addDefaults(count: 64)
+  var lengths: List(UInt8) = List.create(UInt8, cap: 16)
+  lengths.addDefaults(count: 16)
+  var tag: List(UInt8) = List.create(UInt8, cap: 16)
+  tag.addDefaults(count: 16)
+  ret ChaChaState {
+    input: input
+    block: block
+    lengths: lengths
+    tag: tag
+    r0: 0
+    r1: 0
+    r2: 0
+    r3: 0
+    r4: 0
+    s1: 0
+    s2: 0
+    s3: 0
+    s4: 0
+    pad0: 0
+    pad1: 0
+    pad2: 0
+    pad3: 0
+    h0: 0
+    h1: 0
+    h2: 0
+    h3: 0
+    h4: 0
+  }
+}
+
+func wordAt(values: view List(Int), index: view Int) ret Int {
+  ret values.copyAtFallback(index: index, fallback: 0)
+}
+
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  ret bytes.copyAtFallback(index: index, fallback: 0) as Int
+}
+
+# The little-endian 32-bit word at `offset`
+func loadWord(bytes: view List(UInt8), offset: view Int) ret Int {
+  ret byteAt(bytes: bytes, index: offset) bitor (byteAt(bytes: bytes, index: offset + 1) shl 8) bitor (byteAt(
+    bytes: bytes
+    index: offset + 2
+  ) shl 16) bitor (byteAt(bytes: bytes, index: offset + 3) shl 24)
+}
+
+# The little-endian word at `offset`, reading 0 at and past `limit` (a
+# Poly1305 block padded with zeros)
+func loadWordBounded(bytes: view List(UInt8), offset: view Int, limit: view Int) ret Int {
+  if offset + 4 <= limit {
+    ret loadWord(bytes: bytes, offset: offset)
+  }
+  var word: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    if offset + i < limit {
+      word = word bitor (byteAt(bytes: bytes, index: offset + i) shl (8 * i))
+    }
+  }
+  ret word
+}
+
+func storeWord(bytes: mod List(UInt8), offset: view Int, word: view Int) {
+  bytes.set(index: offset, value: (word bitand 255) as UInt8)
+  bytes.set(index: offset + 1, value: ((word shr 8) bitand 255) as UInt8)
+  bytes.set(index: offset + 2, value: ((word shr 16) bitand 255) as UInt8)
+  bytes.set(index: offset + 3, value: ((word shr 24) bitand 255) as UInt8)
+}
+
+# Set the input words for `key` (32 bytes from `keyStart`), the 12-byte
+# `nonce` and block `counter`
+func chachaSetInput(
+  chacha: mod ChaChaState
+  key: view List(UInt8)
+  keyStart: view Int
+  nonce: view List(UInt8)
+  counter: view Int
+) {
+  # "expand 32-byte k"
+  chacha.input.set(index: 0, value: 1634760805)
+  chacha.input.set(index: 1, value: 857760878)
+  chacha.input.set(index: 2, value: 2036477234)
+  chacha.input.set(index: 3, value: 1797285236)
+  loop var i: Int = 0, i < 8, ++i {
+    chacha.input.set(index: 4 + i, value: loadWord(bytes: key, offset: keyStart + i * 4))
+  }
+  chacha.input.set(index: 12, value: counter bitand wordMask)
+  loop var i: Int = 0, i < 3, ++i {
+    chacha.input.set(index: 13 + i, value: loadWord(bytes: nonce, offset: i * 4))
+  }
+}
+
+# The 64-byte ChaCha20 block for the state's current input (key, counter,
+# nonce) into `chacha.block`: 20 rounds on 16 local words
+func chacha20Block(chacha: mod ChaChaState) {
+  let input0: Int = wordAt(values: chacha.input, index: 0)
+  var x0: Int = input0
+  let input1: Int = wordAt(values: chacha.input, index: 1)
+  var x1: Int = input1
+  let input2: Int = wordAt(values: chacha.input, index: 2)
+  var x2: Int = input2
+  let input3: Int = wordAt(values: chacha.input, index: 3)
+  var x3: Int = input3
+  let input4: Int = wordAt(values: chacha.input, index: 4)
+  var x4: Int = input4
+  let input5: Int = wordAt(values: chacha.input, index: 5)
+  var x5: Int = input5
+  let input6: Int = wordAt(values: chacha.input, index: 6)
+  var x6: Int = input6
+  let input7: Int = wordAt(values: chacha.input, index: 7)
+  var x7: Int = input7
+  let input8: Int = wordAt(values: chacha.input, index: 8)
+  var x8: Int = input8
+  let input9: Int = wordAt(values: chacha.input, index: 9)
+  var x9: Int = input9
+  let input10: Int = wordAt(values: chacha.input, index: 10)
+  var x10: Int = input10
+  let input11: Int = wordAt(values: chacha.input, index: 11)
+  var x11: Int = input11
+  let input12: Int = wordAt(values: chacha.input, index: 12)
+  var x12: Int = input12
+  let input13: Int = wordAt(values: chacha.input, index: 13)
+  var x13: Int = input13
+  let input14: Int = wordAt(values: chacha.input, index: 14)
+  var x14: Int = input14
+  let input15: Int = wordAt(values: chacha.input, index: 15)
+  var x15: Int = input15
+  loop var round: Int = 0, round < 10, ++round {
+    x0 = (x0 + x4) bitand wordMask
+    x12 = x12 bitxor x0
+    x12 = ((x12 shl 16) bitand wordMask) bitor (x12 shr 16)
+    x8 = (x8 + x12) bitand wordMask
+    x4 = x4 bitxor x8
+    x4 = ((x4 shl 12) bitand wordMask) bitor (x4 shr 20)
+    x0 = (x0 + x4) bitand wordMask
+    x12 = x12 bitxor x0
+    x12 = ((x12 shl 8) bitand wordMask) bitor (x12 shr 24)
+    x8 = (x8 + x12) bitand wordMask
+    x4 = x4 bitxor x8
+    x4 = ((x4 shl 7) bitand wordMask) bitor (x4 shr 25)
+    x1 = (x1 + x5) bitand wordMask
+    x13 = x13 bitxor x1
+    x13 = ((x13 shl 16) bitand wordMask) bitor (x13 shr 16)
+    x9 = (x9 + x13) bitand wordMask
+    x5 = x5 bitxor x9
+    x5 = ((x5 shl 12) bitand wordMask) bitor (x5 shr 20)
+    x1 = (x1 + x5) bitand wordMask
+    x13 = x13 bitxor x1
+    x13 = ((x13 shl 8) bitand wordMask) bitor (x13 shr 24)
+    x9 = (x9 + x13) bitand wordMask
+    x5 = x5 bitxor x9
+    x5 = ((x5 shl 7) bitand wordMask) bitor (x5 shr 25)
+    x2 = (x2 + x6) bitand wordMask
+    x14 = x14 bitxor x2
+    x14 = ((x14 shl 16) bitand wordMask) bitor (x14 shr 16)
+    x10 = (x10 + x14) bitand wordMask
+    x6 = x6 bitxor x10
+    x6 = ((x6 shl 12) bitand wordMask) bitor (x6 shr 20)
+    x2 = (x2 + x6) bitand wordMask
+    x14 = x14 bitxor x2
+    x14 = ((x14 shl 8) bitand wordMask) bitor (x14 shr 24)
+    x10 = (x10 + x14) bitand wordMask
+    x6 = x6 bitxor x10
+    x6 = ((x6 shl 7) bitand wordMask) bitor (x6 shr 25)
+    x3 = (x3 + x7) bitand wordMask
+    x15 = x15 bitxor x3
+    x15 = ((x15 shl 16) bitand wordMask) bitor (x15 shr 16)
+    x11 = (x11 + x15) bitand wordMask
+    x7 = x7 bitxor x11
+    x7 = ((x7 shl 12) bitand wordMask) bitor (x7 shr 20)
+    x3 = (x3 + x7) bitand wordMask
+    x15 = x15 bitxor x3
+    x15 = ((x15 shl 8) bitand wordMask) bitor (x15 shr 24)
+    x11 = (x11 + x15) bitand wordMask
+    x7 = x7 bitxor x11
+    x7 = ((x7 shl 7) bitand wordMask) bitor (x7 shr 25)
+    x0 = (x0 + x5) bitand wordMask
+    x15 = x15 bitxor x0
+    x15 = ((x15 shl 16) bitand wordMask) bitor (x15 shr 16)
+    x10 = (x10 + x15) bitand wordMask
+    x5 = x5 bitxor x10
+    x5 = ((x5 shl 12) bitand wordMask) bitor (x5 shr 20)
+    x0 = (x0 + x5) bitand wordMask
+    x15 = x15 bitxor x0
+    x15 = ((x15 shl 8) bitand wordMask) bitor (x15 shr 24)
+    x10 = (x10 + x15) bitand wordMask
+    x5 = x5 bitxor x10
+    x5 = ((x5 shl 7) bitand wordMask) bitor (x5 shr 25)
+    x1 = (x1 + x6) bitand wordMask
+    x12 = x12 bitxor x1
+    x12 = ((x12 shl 16) bitand wordMask) bitor (x12 shr 16)
+    x11 = (x11 + x12) bitand wordMask
+    x6 = x6 bitxor x11
+    x6 = ((x6 shl 12) bitand wordMask) bitor (x6 shr 20)
+    x1 = (x1 + x6) bitand wordMask
+    x12 = x12 bitxor x1
+    x12 = ((x12 shl 8) bitand wordMask) bitor (x12 shr 24)
+    x11 = (x11 + x12) bitand wordMask
+    x6 = x6 bitxor x11
+    x6 = ((x6 shl 7) bitand wordMask) bitor (x6 shr 25)
+    x2 = (x2 + x7) bitand wordMask
+    x13 = x13 bitxor x2
+    x13 = ((x13 shl 16) bitand wordMask) bitor (x13 shr 16)
+    x8 = (x8 + x13) bitand wordMask
+    x7 = x7 bitxor x8
+    x7 = ((x7 shl 12) bitand wordMask) bitor (x7 shr 20)
+    x2 = (x2 + x7) bitand wordMask
+    x13 = x13 bitxor x2
+    x13 = ((x13 shl 8) bitand wordMask) bitor (x13 shr 24)
+    x8 = (x8 + x13) bitand wordMask
+    x7 = x7 bitxor x8
+    x7 = ((x7 shl 7) bitand wordMask) bitor (x7 shr 25)
+    x3 = (x3 + x4) bitand wordMask
+    x14 = x14 bitxor x3
+    x14 = ((x14 shl 16) bitand wordMask) bitor (x14 shr 16)
+    x9 = (x9 + x14) bitand wordMask
+    x4 = x4 bitxor x9
+    x4 = ((x4 shl 12) bitand wordMask) bitor (x4 shr 20)
+    x3 = (x3 + x4) bitand wordMask
+    x14 = x14 bitxor x3
+    x14 = ((x14 shl 8) bitand wordMask) bitor (x14 shr 24)
+    x9 = (x9 + x14) bitand wordMask
+    x4 = x4 bitxor x9
+    x4 = ((x4 shl 7) bitand wordMask) bitor (x4 shr 25)
+  }
+  storeWord(bytes: chacha.block, offset: 0, word: (x0 + input0) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 4, word: (x1 + input1) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 8, word: (x2 + input2) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 12, word: (x3 + input3) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 16, word: (x4 + input4) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 20, word: (x5 + input5) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 24, word: (x6 + input6) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 28, word: (x7 + input7) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 32, word: (x8 + input8) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 36, word: (x9 + input9) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 40, word: (x10 + input10) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 44, word: (x11 + input11) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 48, word: (x12 + input12) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 52, word: (x13 + input13) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 56, word: (x14 + input14) bitand wordMask)
+  storeWord(bytes: chacha.block, offset: 60, word: (x15 + input15) bitand wordMask)
+}
+
+# XOR `count` bytes of `source` from `sourceStart` with the keystream (from
+# the input's current block counter) and append them to `output`
+func chachaXorAppend(
+  chacha: mod ChaChaState
+  source: view List(UInt8)
+  sourceStart: view Int
+  count: view Int
+  output: mod List(UInt8)
+) {
+  loop output.cap - output.length < count {
+    output.grow()
+  }
+  var done: Int = 0
+  loop done < count {
+    chacha20Block(chacha: chacha)
+    chacha.input.set(
+      index: 12
+      value: (wordAt(values: chacha.input, index: 12) + 1) bitand wordMask
+    )
+    var take: Int = count - done
+    if take > 64 {
+      take = 64
+    }
+    loop var i: Int = 0, i < take, ++i {
+      output.add(
+        value: (byteAt(bytes: source, index: sourceStart + done + i) bitxor byteAt(
+          bytes: chacha.block
+          index: i
+        )) as UInt8
+      )
+    }
+    done = done + take
+  }
+}
+
+# Start Poly1305 with the one-time key in the first 32 bytes of `chacha.block`
+func polyStart(chacha: mod ChaChaState) {
+  chacha.r0 = loadWord(bytes: chacha.block, offset: 0) bitand 67108863
+  chacha.r1 = (loadWord(bytes: chacha.block, offset: 3) shr 2) bitand 67108611
+  chacha.r2 = (loadWord(bytes: chacha.block, offset: 6) shr 4) bitand 67092735
+  chacha.r3 = (loadWord(bytes: chacha.block, offset: 9) shr 6) bitand 66076671
+  chacha.r4 = (loadWord(bytes: chacha.block, offset: 12) shr 8) bitand 1048575
+  chacha.s1 = chacha.r1 * 5
+  chacha.s2 = chacha.r2 * 5
+  chacha.s3 = chacha.r3 * 5
+  chacha.s4 = chacha.r4 * 5
+  chacha.pad0 = loadWord(bytes: chacha.block, offset: 16)
+  chacha.pad1 = loadWord(bytes: chacha.block, offset: 20)
+  chacha.pad2 = loadWord(bytes: chacha.block, offset: 24)
+  chacha.pad3 = loadWord(bytes: chacha.block, offset: 28)
+  chacha.h0 = 0
+  chacha.h1 = 0
+  chacha.h2 = 0
+  chacha.h3 = 0
+  chacha.h4 = 0
+}
+
+# Hash `count` bytes of `bytes` from `start`, zero-padded to whole 16-byte
+# blocks (the AEAD's padding)
+func polyUpdate(
+  chacha: mod ChaChaState
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  let limit: Int = start + count
+  var offset: Int = start
+  var h0: Int = chacha.h0
+  var h1: Int = chacha.h1
+  var h2: Int = chacha.h2
+  var h3: Int = chacha.h3
+  var h4: Int = chacha.h4
+  let r0: Int = chacha.r0
+  let r1: Int = chacha.r1
+  let r2: Int = chacha.r2
+  let r3: Int = chacha.r3
+  let r4: Int = chacha.r4
+  let s1: Int = chacha.s1
+  let s2: Int = chacha.s2
+  let s3: Int = chacha.s3
+  let s4: Int = chacha.s4
+  loop offset < limit {
+    let word0: Int = loadWordBounded(bytes: bytes, offset: offset, limit: limit)
+    let word1: Int = loadWordBounded(bytes: bytes, offset: offset + 4, limit: limit)
+    let word2: Int = loadWordBounded(bytes: bytes, offset: offset + 8, limit: limit)
+    let word3: Int = loadWordBounded(bytes: bytes, offset: offset + 12, limit: limit)
+    h0 = h0 + (word0 bitand limbMask)
+    h1 = h1 + (((word0 shr 26) bitor (word1 shl 6)) bitand limbMask)
+    h2 = h2 + (((word1 shr 20) bitor (word2 shl 12)) bitand limbMask)
+    h3 = h3 + (((word2 shr 14) bitor (word3 shl 18)) bitand limbMask)
+    h4 = h4 + ((word3 shr 8) bitor 16777216)
+    let d0: Int = h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1
+    var d1: Int = h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2
+    var d2: Int = h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3
+    var d3: Int = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4
+    var d4: Int = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0
+    h0 = d0 bitand limbMask
+    d1 = d1 + (d0 shr 26)
+    h1 = d1 bitand limbMask
+    d2 = d2 + (d1 shr 26)
+    h2 = d2 bitand limbMask
+    d3 = d3 + (d2 shr 26)
+    h3 = d3 bitand limbMask
+    d4 = d4 + (d3 shr 26)
+    h4 = d4 bitand limbMask
+    h0 = h0 + (d4 shr 26) * 5
+    h1 = h1 + (h0 shr 26)
+    h0 = h0 bitand limbMask
+    offset = offset + 16
+  }
+  chacha.h0 = h0
+  chacha.h1 = h1
+  chacha.h2 = h2
+  chacha.h3 = h3
+  chacha.h4 = h4
+}
+
+# Finish Poly1305: the 16-byte tag into `chacha.tag`
+func polyFinish(chacha: mod ChaChaState) {
+  var h0: Int = chacha.h0
+  var h1: Int = chacha.h1
+  var h2: Int = chacha.h2
+  var h3: Int = chacha.h3
+  var h4: Int = chacha.h4
+  h2 = h2 + (h1 shr 26)
+  h1 = h1 bitand limbMask
+  h3 = h3 + (h2 shr 26)
+  h2 = h2 bitand limbMask
+  h4 = h4 + (h3 shr 26)
+  h3 = h3 bitand limbMask
+  h0 = h0 + (h4 shr 26) * 5
+  h4 = h4 bitand limbMask
+  h1 = h1 + (h0 shr 26)
+  h0 = h0 bitand limbMask
+  # h - p, where p = 2^130 - 5; keep it when it is not negative
+  var g0: Int = h0 + 5
+  var g1: Int = h1 + (g0 shr 26)
+  g0 = g0 bitand limbMask
+  var g2: Int = h2 + (g1 shr 26)
+  g1 = g1 bitand limbMask
+  var g3: Int = h3 + (g2 shr 26)
+  g2 = g2 bitand limbMask
+  var g4: Int = h4 + (g3 shr 26) - 67108864
+  g3 = g3 bitand limbMask
+  # all ones when g4 is negative (keep h), else zero (take g): no branch
+  let keepH: Int = g4 shr 63
+  let takeG: Int = bitnot keepH
+  h0 = (h0 bitand keepH) bitor (g0 bitand takeG)
+  h1 = (h1 bitand keepH) bitor (g1 bitand takeG)
+  h2 = (h2 bitand keepH) bitor (g2 bitand takeG)
+  h3 = (h3 bitand keepH) bitor (g3 bitand takeG)
+  h4 = (h4 bitand keepH) bitor ((g4 bitand limbMask) bitand takeG)
+  let word0: Int = (h0 bitor (h1 shl 26)) bitand wordMask
+  let word1: Int = ((h1 shr 6) bitor (h2 shl 20)) bitand wordMask
+  let word2: Int = ((h2 shr 12) bitor (h3 shl 14)) bitand wordMask
+  let word3: Int = ((h3 shr 18) bitor (h4 shl 8)) bitand wordMask
+  var sum: Int = word0 + chacha.pad0
+  storeWord(bytes: chacha.tag, offset: 0, word: sum bitand wordMask)
+  sum = word1 + chacha.pad1 + (sum shr 32)
+  storeWord(bytes: chacha.tag, offset: 4, word: sum bitand wordMask)
+  sum = word2 + chacha.pad2 + (sum shr 32)
+  storeWord(bytes: chacha.tag, offset: 8, word: sum bitand wordMask)
+  sum = word3 + chacha.pad3 + (sum shr 32)
+  storeWord(bytes: chacha.tag, offset: 12, word: sum bitand wordMask)
+}
+
+# The AEAD tag over the additional data and the ciphertext into `chacha.tag`
+# (the one-time key must already be started)
+func aeadTag(
+  chacha: mod ChaChaState
+  additional: view List(UInt8)
+  additionalStart: view Int
+  additionalCount: view Int
+  cipher: view List(UInt8)
+  cipherStart: view Int
+  cipherCount: view Int
+) {
+  polyUpdate(
+    chacha: chacha
+    bytes: additional
+    start: additionalStart
+    count: additionalCount
+  )
+  polyUpdate(
+    chacha: chacha
+    bytes: cipher
+    start: cipherStart
+    count: cipherCount
+  )
+  storeWord(bytes: chacha.lengths, offset: 0, word: additionalCount bitand wordMask)
+  storeWord(bytes: chacha.lengths, offset: 4, word: (additionalCount shr 32) bitand wordMask)
+  storeWord(bytes: chacha.lengths, offset: 8, word: cipherCount bitand wordMask)
+  storeWord(bytes: chacha.lengths, offset: 12, word: (cipherCount shr 32) bitand wordMask)
+  polyUpdate(
+    chacha: chacha
+    bytes: chacha.lengths
+    start: 0
+    count: 16
+  )
+  polyFinish(chacha: chacha)
+}
+
+# Seal `plainCount` bytes of `plain` from `plainStart` under `key` (32 bytes
+# from `keyStart`) and the 12-byte `nonce`, covering the additional data:
+# appends the ciphertext and the 16-byte tag to `output` (which must not be
+# one of the inputs)
+func aeadSeal(
+  chacha: mod ChaChaState
+  key: view List(UInt8)
+  keyStart: view Int
+  nonce: view List(UInt8)
+  additional: view List(UInt8)
+  additionalStart: view Int
+  additionalCount: view Int
+  plain: view List(UInt8)
+  plainStart: view Int
+  plainCount: view Int
+  output: mod List(UInt8)
+) {
+  chachaSetInput(
+    chacha: chacha
+    key: key
+    keyStart: keyStart
+    nonce: nonce
+    counter: 0
+  )
+  chacha20Block(chacha: chacha)
+  polyStart(chacha: chacha)
+  chacha.input.set(index: 12, value: 1)
+  let cipherStart: Int = output.length
+  chachaXorAppend(
+    chacha: chacha
+    source: plain
+    sourceStart: plainStart
+    count: plainCount
+    output: output
+  )
+  aeadTag(
+    chacha: chacha
+    additional: additional
+    additionalStart: additionalStart
+    additionalCount: additionalCount
+    cipher: output
+    cipherStart: cipherStart
+    cipherCount: plainCount
+  )
+  loop var i: Int = 0, i < aeadTagBytes, ++i {
+    output.add(value: chacha.tag.copyAtFallback(index: i, fallback: 0))
+  }
+}
+
+# Open `sealedCount` bytes of `sealed` from `sealedStart` (ciphertext and
+# tag): true and the plaintext appended to `output` when the tag matches;
+# false, and nothing appended, when the bytes or the additional data were
+# changed, or the key or nonce is not the one that sealed them
+func aeadOpen(
+  chacha: mod ChaChaState
+  key: view List(UInt8)
+  keyStart: view Int
+  nonce: view List(UInt8)
+  additional: view List(UInt8)
+  additionalStart: view Int
+  additionalCount: view Int
+  sealed: view List(UInt8)
+  sealedStart: view Int
+  sealedCount: view Int
+  output: mod List(UInt8)
+) ret Bool {
+  let cipherCount: Int = sealedCount - aeadTagBytes
+  if cipherCount < 0 or sealedStart < 0 or sealedStart + sealedCount > sealed.length {
+    ret false
+  }
+  chachaSetInput(
+    chacha: chacha
+    key: key
+    keyStart: keyStart
+    nonce: nonce
+    counter: 0
+  )
+  chacha20Block(chacha: chacha)
+  polyStart(chacha: chacha)
+  aeadTag(
+    chacha: chacha
+    additional: additional
+    additionalStart: additionalStart
+    additionalCount: additionalCount
+    cipher: sealed
+    cipherStart: sealedStart
+    cipherCount: cipherCount
+  )
+  # Compare every byte, whatever differs first: the time says nothing
+  var difference: Int = 0
+  loop var i: Int = 0, i < aeadTagBytes, ++i {
+    difference = difference bitor (byteAt(bytes: chacha.tag, index: i) bitxor byteAt(
+      bytes: sealed
+      index: sealedStart + cipherCount + i
+    ))
+  }
+  if difference is not 0 {
+    ret false
+  }
+  chacha.input.set(index: 12, value: 1)
+  chachaXorAppend(
+    chacha: chacha
+    source: sealed
+    sourceStart: sealedStart
+    count: cipherCount
+    output: output
+  )
+  ret true
+}

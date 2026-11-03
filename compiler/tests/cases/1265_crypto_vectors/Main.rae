@@ -1,0 +1,232 @@
+# lib/crypto: SHA-256, HMAC-SHA256, HKDF-SHA256, X25519 and
+# ChaCha20-Poly1305 against their specifications' test vectors (FIPS 180-4
+# examples, RFC 4231, RFC 5869, RFC 7748, RFC 8439), and the random source.
+open crypto/Sha1
+open crypto/Sha256
+open crypto/X25519
+open crypto/ChaCha20Poly1305
+open crypto/SecureRandom
+open net/ByteBuffer
+
+func nibble(code: view Int) ret Int {
+  if code >= 97 {
+    ret code - 87
+  }
+  ret code - 48
+}
+
+func fromHex(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() / 2 + 1)
+  var i: Int = 0
+  loop i + 1 < text.length() {
+    bytes.add(
+      value: (nibble(code: text.byteAt(index: i)) * 16 + nibble(code: text.byteAt(index: i + 1))) as UInt8
+    )
+    i = i + 2
+  }
+  ret bytes
+}
+
+func textBytes(text: view String) ret List(UInt8) {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 16)
+  appendText(buffer: buffer, text: text)
+  ret buffer.bytes
+}
+
+func check(name: view String, got: view List(UInt8), expected: view String) {
+  let text: String = hexText(bytes: got)
+  if text is expected {
+    log("{name}: ok")
+  } else {
+    log("{name}: WRONG {text}")
+  }
+}
+
+func main() ret Int {
+  check(
+    name: "sha256 abc"
+    got: sha256(bytes: textBytes(text: "abc"))
+    expected: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  )
+  check(
+    name: "sha256 empty"
+    got: sha256(bytes: textBytes(text: ""))
+    expected: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  )
+  check(
+    name: "sha256 two blocks"
+    got: sha256(bytes: textBytes(text: "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"))
+    expected: "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+  )
+  check(
+    name: "hmac-sha256 (RFC 4231 case 2)"
+    got: hmacSha256(
+      key: textBytes(text: "Jefe")
+      message: textBytes(text: "what do ya want for nothing?")
+    )
+    expected: "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+  )
+  check(
+    name: "hkdf-sha256 (RFC 5869 case 1)"
+    got: hkdfSha256(
+      salt: fromHex(text: "000102030405060708090a0b0c")
+      inputKey: fromHex(text: "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+      info: fromHex(text: "f0f1f2f3f4f5f6f7f8f9")
+      length: 42
+    )
+    expected: "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+  )
+
+  # RFC 7748 6.1: Alice and Bob
+  var work: X25519Work = createX25519Work()
+  let alice: List(UInt8) = fromHex(
+    text: "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+  )
+  let bob: List(UInt8) = fromHex(
+    text: "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"
+  )
+  var alicePublic: List(UInt8) = List.create(UInt8, cap: 32)
+  x25519PublicKey(
+    work: work
+    secret: alice
+    secretStart: 0
+    out: alicePublic
+  )
+  check(
+    name: "x25519 alice public"
+    got: alicePublic
+    expected: "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"
+  )
+  var bobPublic: List(UInt8) = List.create(UInt8, cap: 32)
+  x25519PublicKey(
+    work: work
+    secret: bob
+    secretStart: 0
+    out: bobPublic
+  )
+  check(
+    name: "x25519 bob public"
+    got: bobPublic
+    expected: "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f"
+  )
+  var aliceShared: List(UInt8) = List.create(UInt8, cap: 32)
+  x25519(
+    work: work
+    scalar: alice
+    scalarStart: 0
+    point: bobPublic
+    pointStart: 0
+    out: aliceShared
+  )
+  var bobShared: List(UInt8) = List.create(UInt8, cap: 32)
+  x25519(
+    work: work
+    scalar: bob
+    scalarStart: 0
+    point: alicePublic
+    pointStart: 0
+    out: bobShared
+  )
+  check(
+    name: "x25519 shared (alice)"
+    got: aliceShared
+    expected: "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+  )
+  check(
+    name: "x25519 shared (bob)"
+    got: bobShared
+    expected: "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+  )
+  # RFC 7748 5.2, first vector: a scalar and a u-coordinate given directly
+  var direct: List(UInt8) = List.create(UInt8, cap: 32)
+  x25519(
+    work: work
+    scalar: fromHex(text: "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
+    scalarStart: 0
+    point: fromHex(text: "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
+    pointStart: 0
+    out: direct
+  )
+  check(
+    name: "x25519 RFC 7748 5.2"
+    got: direct
+    expected: "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"
+  )
+
+  # RFC 8439 2.8.2: seal, open, and refuse a changed byte
+  var chacha: ChaChaState = createChaChaState()
+  let key: List(UInt8) = fromHex(
+    text: "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+  )
+  let nonce: List(UInt8) = fromHex(text: "070000004041424344454647")
+  let additional: List(UInt8) = fromHex(text: "50515253c0c1c2c3c4c5c6c7")
+  let plain: List(UInt8) = textBytes(
+    text: "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."
+  )
+  var sealed: List(UInt8) = List.create(UInt8, cap: 200)
+  aeadSeal(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additional.length
+    plain: plain
+    plainStart: 0
+    plainCount: plain.length
+    output: sealed
+  )
+  check(
+    name: "chacha20-poly1305 seal"
+    got: sealed
+    expected: "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600691"
+  )
+  var opened: List(UInt8) = List.create(UInt8, cap: 200)
+  let openedOk: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additional.length
+    sealed: sealed
+    sealedStart: 0
+    sealedCount: sealed.length
+    output: opened
+  )
+  log("open: {openedOk}, same text {hexText(bytes: opened) is hexText(bytes: plain)}")
+  sealed.set(
+    index: 10
+    value: ((sealed.copyAtFallback(index: 10, fallback: 0) as Int) bitxor 1) as UInt8
+  )
+  opened.clear()
+  let tampered: Bool = aeadOpen(
+    chacha: chacha
+    key: key
+    keyStart: 0
+    nonce: nonce
+    additional: additional
+    additionalStart: 0
+    additionalCount: additional.length
+    sealed: sealed
+    sealedStart: 0
+    sealedCount: sealed.length
+    output: opened
+  )
+  log("one bit changed: opened {tampered}, nothing written {opened.length is 0}")
+
+  var random: List(UInt8) = List.create(UInt8, cap: 600)
+  random.addDefaults(count: 600)
+  var other: List(UInt8) = List.create(UInt8, cap: 600)
+  other.addDefaults(count: 600)
+  let filled: Bool = secureRandomFill(bytes: random, start: 0, count: 600)
+  let filledOther: Bool = secureRandomFill(bytes: other, start: 0, count: 600)
+  log(
+    "random: filled {filled and filledOther}, two fills differ {hexText(bytes: random) is not hexText(
+      bytes: other
+    )}, out of range refused {not secureRandomFill(bytes: random, start: 590, count: 20)}"
+  )
+  ret 0
+}

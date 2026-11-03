@@ -25,3 +25,22 @@ int64_t rae_ext_Sha1_commonCrypto(uint8_t* bytes, int64_t offset, int64_t count,
   return 1;
 }
 #endif
+
+/* Random bytes for keys (lib/crypto/SecureRandom.rae): ONE getentropy call,
+ * the OS's cryptographic random source (arc4random's kernel source on Apple,
+ * getrandom on Linux, crypto.getRandomValues under Emscripten). At most 256
+ * bytes per call; the Rae side loops. Answers 0 or -errno.
+ *
+ * Platform reason: a system call. Declared in Rae under `when
+ * hasGetEntropy` (Unix and the web), so nothing else references it. */
+#if !defined(_WIN32)
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/random.h>
+#include <unistd.h>
+
+int64_t rae_ext_SecureRandom_getEntropy(uint8_t* buffer, int64_t offset, int64_t count) {
+  if (count < 0 || count > 256) return -EINVAL;
+  return getentropy(buffer + offset, (size_t)count) == 0 ? 0 : -errno;
+}
+#endif
