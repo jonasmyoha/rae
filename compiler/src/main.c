@@ -3114,6 +3114,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
      * read-only compatibility getter. */
     args[n++] = "-sEXPORTED_RUNTIME_METHODS=requestFullscreen";
   }
+  /* Browser WebSockets (compiler/runtime/runtime_web_socket.c,
+   * lib/webSocket/WebSocketBrowser): Emscripten's library for them */
+  if (file_contains_text(c_path, "rae_ext_WebSocketWeb_")) {
+    args[n++] = "-lwebsocket.js";
+  }
   if (uses_sdl3) {
     args[n++] = "-DRAE_HAS_SDL3";
     args[n++] = "-sUSE_SDL=3";

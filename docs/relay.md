@@ -198,12 +198,18 @@ sessions.
   player; every player's messages come back in order; a dropped WebSocket
   player's host is told within 1 s. `tools/relay/loopback-check.sh` runs a
   WebSocket player as its own process (`relayPeer player --web-socket-port`).
-- **Not yet: the browser itself.** `WebSocketClient` uses a TCP socket,
-  which a browser does not have. In the WASM build it needs a second branch
-  (`when Target.os is Os.web`) over Emscripten's `emscripten/websocket.h`:
-  one-call shims for open, send and close, and a small C queue that the
-  message callback fills and Rae drains each frame. The lib already
-  type-checks for web/wasm32. Queued.
+- **The browser.** A page has no TCP socket, so in the WASM build
+  `WebSocketClient` drives the page's own WebSocket instead
+  (`lib/webSocket/WebSocketBrowser.rae`, `when Target.os is Os.web`; the
+  same names answer -1 natively). `compiler/runtime/runtime_web_socket.c`
+  binds Emscripten's `emscripten/websocket.h` one call each (open, state,
+  send binary, close); its onmessage callback fills a byte queue per socket
+  that Rae drains each frame. The build links `-lwebsocket.js` when a
+  program uses it. `checks/webRelay` is a player that joins over WebSocket
+  and checks 100 echoes; `compiler/tools/wasm_relay_smoke.sh` (in the full
+  suite; SKIP without emcc or Chrome) runs it in headless Chrome against a
+  native relay and a native UDP host (`relayPeer host`): about 0.4 s for
+  the 100 echoes on loopback.
 - **Cost.** TCP delivers in order and retransmits, so a lost packet stalls
   every packet behind it (head-of-line blocking). Connection's own
   reliability then runs over a channel that never loses anything, and
