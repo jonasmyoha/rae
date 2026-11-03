@@ -280,6 +280,18 @@ transport buttons are `transportButton` / `transportButtonSmall`
 (`examples/106_mobile_ui/assets/scenes/Bundles.raescene`) — both pixel-identical
 to the hand-written nodes they replaced.
 
+### Built-in bundles
+
+lib/ui provides a few bundles itself (lib/ui/BuiltInBundles), so every scene
+can use them without declaring them; they are looked up last, after the
+scene's own and its imports', so a theme that declares the same name
+replaces one. They carry shape and placement, never colors, and combine
+with a theme's look by coming after it in the list:
+
+| bundle | what it is |
+|---|---|
+| `circleButton` | a round button for an icon: a 44-point square box (`Size` fixed; a node's own `Rect` sets another size, keep it square), a `Circle` shape (fill and stroke from the bundles before it or the node) and its child centered. `"bundles": ["secondaryButton", "circleButton"]` is the theme's button drawn as a true circle. A tap anywhere in the square counts. |
+
 ## 10. `OnClick` labels: what a tap does, in words
 
 Every action an `OnClick` fires carries a human label: `label` for
