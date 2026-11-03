@@ -1,0 +1,183 @@
+# Scroll a list so a row is in view (ui/ScrollToRow): an app asks
+# with requestScrollToRow on a virtual `ListView`; scrollToRowSystem takes
+# the request once, BEFORE the list binds its rows (so the rows bound are the
+# ones now in view), from the last layout (the scroll root's window) and the
+# list's data (its row count: a virtual list's content is rows x pitch). A
+# list not laid out yet (a screen's first frame) keeps the request until it
+# is. The scroll root is the list's own, else its nearest ancestor's. The
+# row lands at the window's end (the bottom: a list read from the bottom,
+# near the thumb) or start; a list that does not overflow its window does
+# not move.
+open ui/Ecs
+open ui/Components
+open ui/ScrollToRow
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# Ask for data row `index` of the virtual ListView `listEntity` in view, at
+# the window's `place`; a newer request replaces an older one
+func requestScrollToRow(
+  world: mod UiWorld
+  listEntity: view EntityId
+  index: view Int
+  place: view ScrollRowPlace
+) {
+  componentSet(
+    this: world.scrollToRows
+    entityId: listEntity
+    data: ScrollToRow { index: index, place: place }
+  )
+}
+
+# The scroll position that puts a row whose top is `rowTop` (along the
+# content, from its start) and `rowHeight` long at the window's `place`, in
+# [floor, 0]; `window` is the root's length and `endInset` the band at its
+# end that content keeps clear of
+func scrollRowPosition(
+  rowTop: view Float
+  rowHeight: view Float
+  window: view Float
+  endInset: view Float
+  floor: view Float
+  place: view ScrollRowPlace
+) ret Float {
+  var position: Float = 0.0 - rowTop
+  if place is ScrollRowPlace.end {
+    position = window - endInset - (rowTop + rowHeight)
+  }
+  if position > 0.0 {
+    position = 0.0
+  }
+  if position < floor {
+    position = floor
+  }
+  ret position
+}
+
+# The scroll root that moves `listEntity`: its own ScrollRoot, else its
+# nearest ancestor's (none: noEntity)
+func scrollToRowRoot(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+) ret EntityId {
+  var current: EntityId = listEntity
+  loop var depth: Int = 0, depth < 64, ++depth {
+    if componentHas(this: world.scrollRoots, entityId: current) {
+      ret current
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret noEntity()
+    }
+    current = componentView(this: uiSystems.hierarchy.parents, entityId: current).parent
+  }
+  ret noEntity()
+}
+
+# Take every waiting request whose list is laid out; true when one moved a
+# scroll root (the frame must draw)
+func scrollToRowSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
+  if componentCount(this: world.scrollToRows) is 0 {
+    ret false
+  }
+  var moved: Bool = false
+  var done: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: world.scrollToRows), ++i {
+    let listEntity: EntityId = componentEntityAt(this: world.scrollToRows, i: i)
+    var request: ScrollToRow = { index: 0 }
+    if let asked: ScrollToRow = componentCopy(this: world.scrollToRows, entityId: listEntity) {
+      request = own asked
+    }
+    let root: EntityId = scrollToRowRoot(world: world, uiSystems: uiSystems, listEntity: listEntity)
+    if componentHas(this: world.listViews, entityId: listEntity) is false or isNone(this: root) {
+      log(
+        "[ui] scrollToRow: entity {listEntity.index} is not a ListView in a scroll root; the request is dropped"
+      )
+      done.add(value: listEntity)
+      continue
+    }
+    # Not laid out yet: wait for the first layout
+    if componentHas(this: uiSystems.layout.computedRects, entityId: root) is false or componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: listEntity
+    ) is false {
+      continue
+    }
+    done.add(value: listEntity)
+    let listView: view ListView = componentView(this: world.listViews, entityId: listEntity)
+    var scrollRoot: ScrollRoot = {
+      axis: ScrollAxis.y
+      floor: ScrollFloorMode.content
+      fixedFloor: 0.0
+      endInset: 0.0
+    }
+    if let authored: ScrollRoot = componentCopy(this: world.scrollRoots, entityId: root) {
+      scrollRoot = own authored
+    }
+    if listView.mode is not ListViewMode.virtual or scrollRoot.axis is not ScrollAxis.y {
+      log(
+        "[ui] scrollToRow: entity {listEntity.index} is not a virtual list in a vertical scroll root; the request is dropped"
+      )
+      continue
+    }
+    var count: Int = 0
+    if componentHas(this: world.listViewDatas, entityId: listEntity) {
+      count = componentView(this: world.listViewDatas, entityId: listEntity).rows.length
+    }
+    if count is 0 {
+      continue
+    }
+    var index: Int = request.index
+    if index < 0 {
+      index = 0
+    }
+    if index > count - 1 {
+      index = count - 1
+    }
+    let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: root)
+    if range.active is false {
+      continue
+    }
+    # The row's top along the root's content: the list's place in it (none
+    # when the list is the root) and the row's in the list
+    var listTop: Float = 0.0
+    if root.index is not listEntity.index and componentHas(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: listEntity
+    ) and componentHas(this: uiSystems.transform2d.worldTransforms, entityId: root) {
+      listTop = componentView(this: uiSystems.transform2d.worldTransforms, entityId: listEntity).position.y - componentView(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: root
+      ).position.y
+    }
+    let pitch: Float = listView.itemHeight + listView.itemGap
+    let position: Float = scrollRowPosition(
+      rowTop: listTop + index.toFloat() * pitch
+      rowHeight: listView.itemHeight
+      window: range.window
+      endInset: scrollRoot.endInset
+      floor: range.floor
+      place: request.place
+    )
+    # The root's position lives in its ScrollState (updateScrollRoot reads
+    # it each frame); a root not scrolled yet has none, so it gets one
+    componentSet(
+      this: world.scrollStates
+      entityId: root
+      data: ScrollState { y: position, velocity: 0.0 }
+    )
+    applyScrollPosition(
+      world: world
+      uiSystems: uiSystems
+      entityId: root
+      root: scrollRoot
+      position: position
+    )
+    moved = true
+  }
+  loop let entityId: view EntityId in done {
+    componentRemove(this: world.scrollToRows, entityId: entityId)
+  }
+  ret moved
+}
