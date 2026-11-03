@@ -50,6 +50,20 @@ func settingsQualityCloudTier(
   ret cloudTierForQuality(level: level, maxTier: maxTier)
 }
 
+# The volumetric tier's march steps a quality step asks for: 64 at Ultra
+# (at the native resolution; 96 cost 7.4 ms on a Mac), 48 below
+# (RAE_CLOUD_STEPS overrides, for measuring)
+func settingsQualityCloudSteps(quality: view SettingsQuality) ret Int {
+  let forced: Int = Sys.getEnv(name: "RAE_CLOUD_STEPS").toInt()
+  if forced > 0 {
+    ret forced
+  }
+  if quality is SettingsQuality.ultra {
+    ret 64
+  }
+  ret 48
+}
+
 # The walkers' clouds at the start: the game's ceiling `settings`, this
 # device, the quality setting, or RAE_CLOUD_TIER (logged once)
 func createWalkerClouds(
@@ -79,7 +93,7 @@ func walkerCloudMicroseconds(clouds: mod WalkerClouds, renderer: view DeferredRe
   clouds.seenSamples = cloudTiming.samples
   # under a profile's timing (RAE_GPU_PASS_TIMING, RAE_FRAME_TIMING), a line
   # every 60 samples: the clouds' time and each pass's
-  if cloudTiming.samples % 60 is 1 and (Sys.getEnv(name: "RAE_GPU_PASS_TIMING").length() > 0 or Sys.getEnv(
+  if cloudTiming.samples % 15 is 1 and (Sys.getEnv(name: "RAE_GPU_PASS_TIMING").length() > 0 or Sys.getEnv(
     name: "RAE_FRAME_TIMING"
   ).length() > 0) {
     var passes: String = ""
@@ -109,4 +123,5 @@ func walkerCloudsFrame(
     thermal: thermalState()
   )
   setCloudTier(renderer: renderer, tier: clouds.control.tier)
+  setCloudSteps(renderer: renderer, steps: settingsQualityCloudSteps(quality: quality))
 }

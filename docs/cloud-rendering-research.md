@@ -883,12 +883,38 @@ Each step is one queue task that leaves the walkers working.
        phone is within about 2-3 ms of off, nothing to cut yet.
      The fallback now reads this number on every device (a phone no longer
      ignores it).
-5. **The volumetric tier (tier 3)**: clouds 4/4, already queued.
-   - Tiling Perlin-Worley 3D noise (generated once, for example with the
-     method of sebh/TileableVolumeNoise), Wrenninge octaves, a Beer shadow
-     map, ¼ resolution with a 1-in-16 update.
-   - It plugs into the switch from step 3, and the phone falls back to
-     tier 2 or 1 by measurement.
+5. **The volumetric tier (tier 3)**: done (2026-11-04). lib/CloudSlab
+   draws it with the slab's passes and another trace,
+   cloud_volume_trace.wgsl:
+   - the weather map is the field map (coverage, how thick, the puff), the
+     shape in height the profile strip; the column a rounded dome up to
+     1.4 km deep for cumulus (deeper under a storm);
+   - 3D noise: ridged value-noise billows at 480 m and 1.3 km, remapped
+     from (1 - shape) up to 1 as in Horizon Zero Dawn, and a fine noise
+     (90 m, 40 m) eroding the thin edges, more at the base;
+   - the march: 48 steps at High, 64 at Ultra (the quality setting), the
+     search through clear air on the shape alone, a step back and half
+     steps once inside a cloud; 5 light samples in a cone (the last one
+     far), the first two with the billows; two scattering octaves, the
+     two-lobe phase, powder darkening, the sky's light by height;
+   - half resolution, one pixel of each 2x2 tile a frame, reprojected
+     (the slab's resolve), so 1 in 16 of the frame's pixels is marched a
+     frame, as in Horizon Zero Dawn.
+   The tier is chosen as the others (lib/CloudTier): a desktop starts at
+   it (Low gives the layer, Mid the slab), a phone at the layer;
+   CloudSettings.maxTier caps it per game, RAE_CLOUD_TIER forces it, and
+   RAE_CLOUD_STEPS sets its steps for measuring. The desktop budget is now
+   4 ms (the timing's floor on a busy Mac is 1.2-1.5 ms).
+   Cost (the cloud passes' own timestamps, 143 at noon, cumulus 50%):
+   | | Low (layer) | Mid (slab) | High (volumetric 48) | Ultra (volumetric 64, native resolution) |
+   |---|---|---|---|---|
+   | Mac, unforced, medians | 1.7 ms | 2.2 ms | 3.7 ms, stays | 5.4 ms at first: over the 4 ms budget, so the fallback stepped it to the slab and logged it |
+   | iPhone 15 Pro, tier forced | layer 0.31 ms | slab 1.22 ms | volumetric 48: 2.40 ms | volumetric 96: 3.59 ms |
+   On the iPhone only the layer and the slab fit its 1.5 ms budget; a
+   phone starts at the layer and would fall back from the volumetric
+   tier. (The iPhone's slab and volumetric runs were at thermal state 1,
+   the layer's at 0.) Pictures against the layer at noon, sunset and under
+   a front: looks-development rendering/cloudVolume.html.
 6. **Later, only if a game needs it:**
    - fly-through voxel clouds in the manner of Nubis³;
    - lightning lights inside storm clouds (RDR2);
