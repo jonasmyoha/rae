@@ -26,12 +26,18 @@
 #
 # The relay never reads a packet's payload; seal it (lib/net/Connection
 # does) so the relay sees only sealed bytes.
+#
+# Over WebSocket (`createRelayClientOverWebSocket`, for a side that cannot
+# send UDP): the same packets, one per binary message, to the relay's
+# WebSocket listener. Such a side is relay-only; everything above it is the
+# same.
 open net/Tcp
 open net/Udp
 open net/Wire
 open net/relay/RelayWire
 open net/BadNetwork
 open crypto/SecureRandom
+open webSocket/WebSocketClient
 
 enum RelayClientState {
   idle
@@ -139,6 +145,8 @@ type RelayClient {
   # The former peer id of the last player promoted to host (the relay sends
   # the notice twice; peer ids are never reused in a session)
   promotedPeerId: Int
+  # The WebSocket transport, instead of the UDP socket (none: UDP)
+  webSocket: opt WebSocketClient
 }
 
 func defaultRelayClientConfig() ret RelayClientConfig {
@@ -165,8 +173,20 @@ func createRelayClient(
   if relayAddress.family is AddressFamily.ipv6 {
     host = "::"
   }
-  ret RelayClient {
+  ret createRelayClientOn(
+    relayAddress: relayAddress
+    config: config
     udpSocket: udpOpen(host: host, port: 0)
+  )
+}
+
+func createRelayClientOn(
+  relayAddress: view NetAddress
+  config: view RelayClientConfig
+  udpSocket: own UdpSocket
+) ret RelayClient {
+  ret RelayClient {
+    udpSocket: own udpSocket
     relayAddress: relayAddress
     state: RelayClientState.idle
     config: config
@@ -188,7 +208,54 @@ func createRelayClient(
     directPacketsReceived: 0
     fallbacks: 0
     promotedPeerId: -1
+    webSocket: none
   }
+}
+
+# A client that reaches the relay over WebSocket at `host`:`port`
+# (relayWebSocketPath), waiting up to `connectTimeoutMs` for the TCP
+# connect; it is relay-only and has no UDP socket. `relayClientIsBroken`
+# says whether the connection failed.
+func createRelayClientOverWebSocket(
+  host: view String
+  port: view Int
+  config: view RelayClientConfig
+  connectTimeoutMs: view Int
+) ret RelayClient {
+  var onlyRelay: RelayClientConfig = config
+  onlyRelay.relayOnly = true
+  var client: RelayClient = createRelayClientOn(
+    relayAddress: noNetAddress()
+    config: onlyRelay
+    udpSocket: noUdpSocket(status: NetStatus.ok)
+  )
+  client.webSocket = webSocketConnect(
+    host: host
+    port: port
+    path: relayWebSocketPath
+    timeoutMs: connectTimeoutMs
+  )
+  ret client
+}
+
+func relayClientUsesWebSocket(client: view RelayClient) ret Bool {
+  ret client.webSocket is not none
+}
+
+# Its transport is gone (a WebSocket that failed or closed)
+func relayClientIsBroken(client: view RelayClient) ret Bool {
+  if let webSocket: view WebSocketClient = client.webSocket {
+    ret webSocketClientIsClosed(client: webSocket)
+  }
+  ret false
+}
+
+# The socket to wait on between frames
+func relayClientSocketId(client: view RelayClient) ret SocketId {
+  if let webSocket: view WebSocketClient = client.webSocket {
+    ret webSocket.socketId
+  }
+  ret client.udpSocket.socketId
 }
 
 func relayClientIsReady(client: view RelayClient) ret Bool {
@@ -228,6 +295,17 @@ func relayClientJoin(client: mod RelayClient, tokenText: view String, nowMs: vie
 func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
   client.lastSendMs = nowMs
   client.lastRelaySendMs = nowMs
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    if webSocketClientSendBinary(
+      client: webSocket
+      bytes: client.outbox
+      start: 0
+      count: client.outbox.length
+    ) {
+      ret IoResult { bytes: client.outbox.length, status: NetStatus.ok }
+    }
+    ret IoResult { bytes: 0, status: NetStatus.wouldBlock }
+  }
   ret udpSend(
     udpSocket: client.udpSocket
     bytes: client.outbox
@@ -262,6 +340,9 @@ func sendRequest(client: mod RelayClient, nowMs: view Int) {
 # Move the clock: retry an unanswered request, keep the relay's record of
 # this side alive, and notice a relay that went silent
 func relayClientUpdate(client: mod RelayClient, nowMs: view Int) {
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    webSocketClientUpdate(client: webSocket)
+  }
   let waiting: Bool = client.state is RelayClientState.opening or client.state is RelayClientState.joining
   if waiting {
     if nowMs - client.startMs > client.config.requestTimeoutMs {
@@ -520,6 +601,9 @@ func relayClientLeave(client: mod RelayClient, nowMs: view Int) {
 }
 
 func relayClientClose(client: mod RelayClient) {
+  if let webSocket: mod WebSocketClient = client.webSocket {
+    webSocketClientClose(client: webSocket)
+  }
   udpClose(udpSocket: client.udpSocket)
   client.state = RelayClientState.closed
 }
@@ -533,19 +617,43 @@ func nothingIncoming() ret RelayIncoming {
 # waiting. Answers to this side's own requests are taken on the way.
 func relayClientReceive(client: mod RelayClient, nowMs: view Int) ret RelayIncoming {
   loop {
-    let datagram: Datagram = udpReceive(
-      udpSocket: client.udpSocket
-      bytes: client.inbox
-      maxBytes: relayDatagramBytes
-    )
-    if datagram.status is NetStatus.wouldBlock {
-      ret nothingIncoming()
+    var peer: NetAddress = client.relayAddress
+    if relayClientUsesWebSocket(client: client) {
+      var got: Bool = false
+      var broken: Bool = false
+      if let webSocket: mod WebSocketClient = client.webSocket {
+        got = webSocketClientNextBinary(client: webSocket, out: client.inbox)
+        broken = webSocketClientIsClosed(client: webSocket)
+      }
+      if not got {
+        # The connection to the relay is gone: for this side the session is
+        if broken and client.state is RelayClientState.ready {
+          client.state = RelayClientState.closed
+          ret RelayIncoming {
+            kind: RelayIncomingKind.sessionClosed
+            peerId: hostPeerId
+            start: 0
+            count: 0
+          }
+        }
+        ret nothingIncoming()
+      }
+    } else {
+      let datagram: Datagram = udpReceive(
+        udpSocket: client.udpSocket
+        bytes: client.inbox
+        maxBytes: relayDatagramBytes
+      )
+      if datagram.status is NetStatus.wouldBlock {
+        ret nothingIncoming()
+      }
+      if datagram.status is not NetStatus.ok {
+        continue
+      }
+      peer = datagram.peer
     }
-    if datagram.status is not NetStatus.ok {
-      continue
-    }
-    if not netAddressEquals(first: datagram.peer, second: client.relayAddress) {
-      let pathIndex: Int = pathIndexOfAddress(client: client, address: datagram.peer)
+    if not netAddressEquals(first: peer, second: client.relayAddress) {
+      let pathIndex: Int = pathIndexOfAddress(client: client, address: peer)
       if pathIndex < 0 or client.state is not RelayClientState.ready {
         client.strangerPackets = client.strangerPackets + 1
         continue

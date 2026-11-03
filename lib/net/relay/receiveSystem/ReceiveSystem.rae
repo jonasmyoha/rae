@@ -99,6 +99,10 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
     dropped(server: server)
     ret
   }
+  # A WebSocket peer has no address another peer could reach
+  if isWebSocketPeerAddress(address: from) {
+    request.relayOnly = true
+  }
   eventSend(this: server.requests, value: request)
 }
 
@@ -140,14 +144,14 @@ func forward(server: mod RelayServer, peerEntityId: view EntityId) {
   server.inbox.set(index: 2, value: ((sourcePeerId shr 16) bitand 255) as UInt8)
   server.inbox.set(index: 3, value: ((sourcePeerId shr 8) bitand 255) as UInt8)
   server.inbox.set(index: 4, value: (sourcePeerId bitand 255) as UInt8)
-  let sent: IoResult = udpSend(
-    udpSocket: server.udpSocket
+  let sent: Bool = relaySendBytes(
+    server: server
     bytes: server.inbox
     start: 0
     count: length
-    destination: target.address
+    address: target.address
   )
-  if sent.status is NetStatus.ok {
+  if sent {
     server.stats.packetsForwarded = server.stats.packetsForwarded + 1
     server.stats.bytesForwarded = server.stats.bytesForwarded + length - forwardHeaderBytes
   } else {

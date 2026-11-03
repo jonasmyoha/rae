@@ -1,0 +1,271 @@
+# A WebSocket client (RFC 6455) over a non-blocking TCP socket, as plain
+# functions over its state: connect and send the opening handshake, check
+# the server's 101 and Sec-WebSocket-Accept, then send masked binary
+# messages and read the server's (unmasked) ones. Pings are answered and a
+# close is answered and ends the connection. lib/net/relay uses it as the
+# transport of a client that cannot send UDP (docs/relay.md, "WebSocket").
+#
+# Each frame:
+#   webSocketClientUpdate        write what is queued, read what came
+#   webSocketClientNextBinary    the next binary message (loop until false)
+#   webSocketClientSendBinary    queue a message (written by the next update)
+open net/Tcp
+open net/ByteBuffer
+open net/Wire
+open http/Http
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open webSocket/Handshake
+open crypto/SecureRandom
+import text/Base64
+
+enum WebSocketClientState { handshaking, open, closed }
+
+type WebSocketClient {
+  socketId: SocketId
+  state: WebSocketClientState
+  # Why it closed: the TCP connect's status, or the close code
+  closeCode: Int
+  input: ByteBuffer
+  output: ByteBuffer
+  decode: WebSocketDecodeState
+  message: WebSocketMessage
+  # The Sec-WebSocket-Accept the server must answer
+  expectedAccept: String
+  # Mask keys: a xorshift stream seeded from the system's secure random
+  maskState: Int
+}
+
+# A key's 16 random bytes, or the time when the system gives none
+func randomBytes(count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  bytes.addDefaults(count: count)
+  if not secureRandomFill(bytes: bytes, start: 0, count: count) {
+    loop var i: Int = 0, i < count, ++i {
+      bytes.set(index: i, value: ((nowNs() shr (i % 8)) bitand 255) as UInt8)
+    }
+  }
+  ret bytes
+}
+
+# Connect to `host`:`port` (waiting up to `timeoutMs`) and send the opening
+# handshake for `path`; `state` is `closed` when the connect failed
+func webSocketConnect(
+  host: view String
+  port: view Int
+  path: view String
+  timeoutMs: view Int
+) ret WebSocketClient {
+  let key: String = Base64.base64Encode(bytes: randomBytes(count: 16))
+  var seed: Int = readU32(bytes: randomBytes(count: 4), offset: 0)
+  if seed is 0 {
+    seed = 2463534242
+  }
+  var client: WebSocketClient = {
+    socketId: noSocket()
+    state: WebSocketClientState.closed
+    closeCode: 0
+    input: createByteBuffer(capacity: 4096)
+    output: createByteBuffer(capacity: 4096)
+    decode: createWebSocketDecodeState(requireMask: false, maxMessageBytes: 1048576)
+    message: createWebSocketMessage()
+    expectedAccept: webSocketAccept(key: key)
+    maskState: seed
+  }
+  let connected: SocketResult = tcpConnect(host: host, port: port, timeoutMs: timeoutMs)
+  if connected.status is not NetStatus.ok {
+    client.closeCode = -1
+    ret client
+  }
+  client.socketId = connected.socketId
+  client.state = WebSocketClientState.handshaking
+  appendText(
+    buffer: client.output
+    text: "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+  )
+  webSocketClientFlush(client: client)
+  ret client
+}
+
+func webSocketClientIsOpen(client: view WebSocketClient) ret Bool {
+  ret client.state is WebSocketClientState.open
+}
+
+func webSocketClientIsClosed(client: view WebSocketClient) ret Bool {
+  ret client.state is WebSocketClientState.closed
+}
+
+# Close the socket (no closing handshake: `webSocketClientClose` sends one)
+func webSocketClientEnd(client: mod WebSocketClient) {
+  if socketIsValid(socketId: client.socketId) {
+    socketClose(socketId: client.socketId)
+    client.socketId = noSocket()
+  }
+  client.state = WebSocketClientState.closed
+}
+
+# Say goodbye (a close frame, 1000) and end
+func webSocketClientClose(client: mod WebSocketClient) {
+  if client.state is WebSocketClientState.open {
+    webSocketAppendHeader(
+      output: client.output
+      kind: WebSocketOpcode.close
+      fin: true
+      length: 2
+      masked: true
+      maskKey: nextMaskKey(client: client)
+    )
+    # The code's two bytes, masked by the key's first two
+    let key: Int = client.maskState
+    appendByte(buffer: client.output, byte: (1000 shr 8) bitxor ((key shr 24) bitand 255))
+    appendByte(buffer: client.output, byte: (1000 bitand 255) bitxor ((key shr 16) bitand 255))
+    webSocketClientFlush(client: client)
+  }
+  webSocketClientEnd(client: client)
+}
+
+func nextMaskKey(client: mod WebSocketClient) ret Int {
+  var x: Int = client.maskState
+  x = (x bitxor (x shl 13)) bitand 4294967295
+  x = x bitxor (x shr 17)
+  x = (x bitxor (x shl 5)) bitand 4294967295
+  client.maskState = x
+  ret x
+}
+
+# Write what is queued (as much as the socket takes now)
+func webSocketClientFlush(client: mod WebSocketClient) {
+  if not socketIsValid(socketId: client.socketId) or byteBufferLength(buffer: client.output) is 0 {
+    ret
+  }
+  let written: IoResult = socketWriteBuffer(socketId: client.socketId, buffer: client.output)
+  if written.status is not NetStatus.ok and written.status is not NetStatus.wouldBlock {
+    client.closeCode = -2
+    webSocketClientEnd(client: client)
+  }
+}
+
+# Write what is queued, read what came, and finish the handshake when the
+# server's answer is in
+func webSocketClientUpdate(client: mod WebSocketClient) {
+  if client.state is WebSocketClientState.closed {
+    ret
+  }
+  webSocketClientFlush(client: client)
+  loop client.state is not WebSocketClientState.closed {
+    let read: IoResult = socketReadBuffer(
+      socketId: client.socketId
+      buffer: client.input
+      maxBytes: 16384
+    )
+    if read.status is NetStatus.wouldBlock {
+      break
+    }
+    if read.status is not NetStatus.ok or read.bytes is 0 {
+      client.closeCode = -3
+      webSocketClientEnd(client: client)
+      ret
+    }
+  }
+  if client.state is WebSocketClientState.handshaking {
+    takeHandshakeAnswer(client: client)
+  }
+}
+
+# The server's answer to the handshake: 101 with the right accept opens the
+# connection; anything else closes it
+func takeHandshakeAnswer(client: mod WebSocketClient) {
+  if let headerEnd: Int = byteBufferIndexOf(buffer: client.input, pattern: "\r\n\r\n", from: 0) {
+    let header: String = byteBufferText(buffer: client.input, start: 0, count: headerEnd)
+    consume(buffer: client.input, count: headerEnd + 4)
+    if header.startsWith(prefix: "HTTP/1.1 101") and header.contains(sub: client.expectedAccept) {
+      client.state = WebSocketClientState.open
+    } else {
+      client.closeCode = -4
+      webSocketClientEnd(client: client)
+    }
+  }
+}
+
+# The next binary message's payload into `out`: false when no whole one is
+# there. Pings are answered on the way; a close ends the connection.
+func webSocketClientNextBinary(client: mod WebSocketClient, out: mod List(UInt8)) ret Bool {
+  loop client.state is WebSocketClientState.open {
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: client.decode
+      buffer: client.input
+      message: client.message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      webSocketDecodeConsumed(state: client.decode, buffer: client.input)
+      ret false
+    }
+    if result is WebSocketDecodeResult.failed {
+      client.closeCode = client.decode.failCode
+      webSocketClientEnd(client: client)
+      ret false
+    }
+    let kind: WebSocketOpcode = client.message.kind
+    let payload: ByteRange = client.message.payload
+    if kind is WebSocketOpcode.binary {
+      out.clear()
+      if payload.start >= 0 {
+        loop var i: Int = 0, i < payload.count, ++i {
+          out.add(value: byteBufferAt(buffer: client.input, index: payload.start + i) as UInt8)
+        }
+      }
+      ret true
+    }
+    if kind is WebSocketOpcode.ping {
+      var pong: List(UInt8) = List.create(UInt8, cap: 125)
+      if payload.start >= 0 {
+        loop var i: Int = 0, i < payload.count, ++i {
+          pong.add(value: byteBufferAt(buffer: client.input, index: payload.start + i) as UInt8)
+        }
+      }
+      let maskKey: Int = nextMaskKey(client: client)
+      webSocketAppendHeader(
+        output: client.output
+        kind: WebSocketOpcode.pong
+        fin: true
+        length: pong.length
+        masked: true
+        maskKey: maskKey
+      )
+      loop var i: Int = 0, i < pong.length, ++i {
+        let key: Int = (maskKey shr (24 - (i % 4) * 8)) bitand 255
+        appendByte(
+          buffer: client.output
+          byte: (pong.copyAtFallback(index: i, fallback: 0) as Int) bitxor key
+        )
+      }
+    } else if kind is WebSocketOpcode.close {
+      client.closeCode = client.message.closeCode
+      webSocketClientClose(client: client)
+      ret false
+    }
+  }
+  ret false
+}
+
+# Queue a binary message of `count` bytes of `bytes` from `start` (masked),
+# and write it at once if the socket takes it
+func webSocketClientSendBinary(
+  client: mod WebSocketClient
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret Bool {
+  if client.state is not WebSocketClientState.open {
+    ret false
+  }
+  webSocketAppendMaskedBinary(
+    output: client.output
+    bytes: bytes
+    start: start
+    count: count
+    maskKey: nextMaskKey(client: client)
+  )
+  webSocketClientFlush(client: client)
+  ret client.state is WebSocketClientState.open
+}

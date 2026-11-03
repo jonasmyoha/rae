@@ -80,3 +80,11 @@ next task does not propose them again.
   `lib/` change for when a component needs it, not a language gap. (Found on
   the way, and queued as bugs, not wishes: overloads in generic bodies,
   `is` on Lists, and copyAtFallback leaks.)
+- **Testing whether an `opt` field holds a value (12/12).** The relay's and
+  the client's "is there a WebSocket" helpers were first written as `if let
+  x: view T = field { ret true }`. `field is not none` already works.
+- **One transport behind two kinds of address (12/12).** The relay keeps one
+  `NetAddress` per peer, and a WebSocket peer needed its own kind of
+  address. A transport field next to the address would work with today's
+  language; a stand-in address (the IPv6 discard prefix naming the
+  connection) did it with every lookup unchanged. Nothing new is needed.

@@ -206,6 +206,47 @@ func sendText(server: mod HttpServer, entityId: view EntityId, text: view String
   addTag(table: server.sendings, entityId: entityId)
 }
 
+# A binary frame of `count` bytes of `bytes` from `start` to one connection
+func sendBinary(
+  server: mod HttpServer
+  entityId: view EntityId
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  if not sessionIsOpen(server: server, entityId: entityId) {
+    ret
+  }
+  let writeBuffer: mod WriteBuffer = componentMod(this: server.writeBuffers, entityId: entityId)
+  webSocketAppendBinary(
+    output: writeBuffer.buffer
+    bytes: bytes
+    start: start
+    count: count
+  )
+  addTag(table: server.sendings, entityId: entityId)
+}
+
+# The payload of a binary message appended to `out` (cleared first)
+func messageBytes(
+  server: view HttpServer
+  event: view WebSocketMessageEvent
+  out: mod List(UInt8)
+) {
+  out.clear()
+  let readBuffer: view ReadBuffer = componentView(
+    this: server.readBuffers
+    entityId: event.connectionEntityId
+  )
+  let payload: ByteRange = event.message.payload
+  if payload.start < 0 {
+    ret
+  }
+  loop var i: Int = 0, i < payload.count, ++i {
+    out.add(value: byteBufferAt(buffer: readBuffer.buffer, index: payload.start + i) as UInt8)
+  }
+}
+
 # A message's own payload sent back as a frame of its kind to `entityId` (an
 # echo), copied from the ReadBuffer with no String in between
 func sendFrom(server: mod HttpServer, entityId: view EntityId, event: view WebSocketMessageEvent) {

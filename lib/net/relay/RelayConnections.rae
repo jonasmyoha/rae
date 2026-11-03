@@ -70,6 +70,34 @@ func createRelayPlayer(
   }
 }
 
+# A host or a player over a client made elsewhere (a WebSocket one:
+# createRelayClientOverWebSocket); everything after is the same
+func createRelayHostWith(
+  client: own RelayClient
+  connectionConfig: view ConnectionConfig
+) ret RelayHost {
+  ret RelayHost {
+    client: own client
+    connectionConfig: connectionConfig
+    peers: {}
+    peersLeft: {}
+    packet: List.create(UInt8, cap: relayDatagramBytes)
+  }
+}
+
+func createRelayPlayerWith(
+  client: own RelayClient
+  connectionConfig: view ConnectionConfig
+) ret RelayPlayer {
+  ret RelayPlayer {
+    client: own client
+    connection: createConnection(config: connectionConfig)
+    sessionClosed: false
+    hostChanged: false
+    packet: List.create(UInt8, cap: relayDatagramBytes)
+  }
+}
+
 # The index of player `peerId` in `host.peers`, -1 for none
 func hostPeerIndex(host: view RelayHost, peerId: view Int) ret Int {
   loop var i: Int = 0, i < host.peers.length, ++i {
