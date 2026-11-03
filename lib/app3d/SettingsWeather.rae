@@ -1,6 +1,7 @@
 # app3d/SettingsWeather — the settings panel's season and weather controls
 # (docs/seasons-and-weather-design.md §5, §6): the weather's sliders
-# (Clouds, Rain, Snow, Mist and Wind), the weather buttons that set them at
+# (Clouds, Rain, Snow, Mist and Wind, and the clouds' kind, cirrus,
+# height and size), the weather buttons that set them at
 # once (Auto: the weather model's own, lib/Weather; or Clear, Cloudy, Rain,
 # Snow, Mist) and the year's speed (1, 7 or 30 days a day;
 # TimeOfDay.yearSpeed), so a look can be judged without waiting for it.
@@ -66,8 +67,8 @@ func settingsWeatherPicked(
 }
 
 # The numbers' keys: cloud cover (0 .. 1), rain and snow (mm of water an
-# hour), mist (0 .. 1: the scene's haze .. a thick morning mist) and the
-# wind (m/s)
+# hour), mist (0 .. 1: the scene's haze .. a thick morning mist), the wind
+# (m/s) and the clouds' shape (below)
 const weatherCloudKey: String = "weather.cloud"
 
 const weatherRainKey: String = "weather.rain"
@@ -80,6 +81,37 @@ const weatherMistKey: String = "weather.mist"
 const weatherStormKey: String = "weather.storm"
 
 const windSpeedKey: String = "wind.speed"
+
+# The clouds' shape (lib/Weather, drawn by the sky's cloud layer): their
+# kind (0 stratus .. 1 cumulus), the high cirrus (0 .. 1), the base's
+# height (m) and the shapes' size (1: the kind's own)
+const weatherCloudTypeKey: String = "weather.cloudType"
+
+const weatherCirrusKey: String = "weather.cirrus"
+
+const weatherCloudHeightKey: String = "weather.cloudHeight"
+
+const weatherCloudScaleKey: String = "weather.cloudScale"
+
+# The clouds' shape of `weather` into `values`
+func settingsCloudShapeToValues(values: mod UiValues, weather: view Weather) {
+  let changedType: Bool = setUiValue(
+    values: values
+    key: weatherCloudTypeKey
+    value: weather.cloudType
+  )
+  let changedCirrus: Bool = setUiValue(values: values, key: weatherCirrusKey, value: weather.cirrus)
+  let changedHeight: Bool = setUiValue(
+    values: values
+    key: weatherCloudHeightKey
+    value: weather.cloudHeight
+  )
+  let changedScale: Bool = setUiValue(
+    values: values
+    key: weatherCloudScaleKey
+    value: weather.cloudScale
+  )
+}
 
 # Rain or snow lighter than this is none (mm/h)
 const weatherFallingMin: Float = 0.05
@@ -108,6 +140,7 @@ func settingsWeatherPresetToValues(values: mod UiValues, override: view Settings
     key: weatherMistKey
     value: (settingsWeatherMist(override: override, factor: 1.0) - 1.0) / 5.0
   )
+  settingsCloudShapeToValues(values: values, weather: preset)
 }
 
 # The model's weather into `values` (Auto), so the sliders show it: its
@@ -134,6 +167,7 @@ func settingsWeatherModelToValues(
     key: weatherMistKey
     value: Math.clamp(val: (mistFactor - 1.0) / 5.0, low: 0.0, high: 1.0)
   )
+  settingsCloudShapeToValues(values: values, weather: weather)
 }
 
 # The model's wind into `values` (the wind on Auto)
@@ -173,6 +207,18 @@ func settingsWeatherFromValues(
     let mist: Float = uiValue(values: values, key: weatherMistKey, fallback: 0.0)
     drawn.cloud = cloud
     drawn.storm = uiValue(values: values, key: weatherStormKey, fallback: 0.0)
+    drawn.cloudType = uiValue(values: values, key: weatherCloudTypeKey, fallback: weather.cloudType)
+    drawn.cirrus = uiValue(values: values, key: weatherCirrusKey, fallback: weather.cirrus)
+    drawn.cloudHeight = uiValue(
+      values: values
+      key: weatherCloudHeightKey
+      fallback: weather.cloudHeight
+    )
+    drawn.cloudScale = uiValue(
+      values: values
+      key: weatherCloudScaleKey
+      fallback: weather.cloudScale
+    )
     drawn.precipitation = Math.max(a: rain, b: snow)
     drawn.humidity = Math.clamp(
       val: 0.45 + 0.25 * cloud + 0.5 * mist + 0.15 * Math.min(a: drawn.precipitation, b: 1.0)
@@ -266,8 +312,10 @@ func settingsYearSpeedPicked(actionId: view String, fallback: view Float) ret Fl
 
 # The weather drawn: the model's (`weather`), or the override's
 func settingsWeatherApplied(override: view SettingsWeather, weather: view Weather) ret Weather {
-  # the override sets the sky; the wind stays the model's, a little
-  # stronger under the rain and snow overrides' fronts
+  # the override sets the sky (its clouds' kind too: Clear and Cloudy fair
+  # cumulus, Rain and Snow a front's sheet, Mist a low stratus); the wind
+  # stays the model's, a little stronger under the rain and snow overrides'
+  # fronts
   var applied: Weather = weather
   # the rain and the snow come from dark storm clouds, the rest from white
   # ones (lib/Weather weatherCloudDarkness)
@@ -276,29 +324,43 @@ func settingsWeatherApplied(override: view SettingsWeather, weather: view Weathe
     applied.precipitation = 0.0
     applied.humidity = 0.45
     applied.storm = 0.0
+    applied.cloudType = 1.0
+    applied.cirrus = 0.0
   } else if override is SettingsWeather.cloudy {
     applied.cloud = 0.7
     applied.precipitation = 0.0
     applied.humidity = 0.6
     applied.storm = 0.0
+    applied.cloudType = 0.8
+    applied.cirrus = 0.2
   } else if override is SettingsWeather.rain {
     applied.cloud = 1.0
     applied.precipitation = 1.5
     applied.humidity = 0.9
     applied.storm = 0.6
+    applied.cloudType = 0.1
+    applied.cirrus = 0.0
     applied.windSpeed = Math.max(a: weather.windSpeed, b: 7.0)
   } else if override is SettingsWeather.snow {
     applied.cloud = 1.0
     applied.precipitation = 0.8
     applied.humidity = 0.85
     applied.storm = 0.5
+    applied.cloudType = 0.05
+    applied.cirrus = 0.0
     applied.windSpeed = Math.max(a: weather.windSpeed, b: 5.0)
   } else if override is SettingsWeather.mist {
     applied.cloud = 0.5
     applied.precipitation = 0.0
     applied.humidity = 1.0
     applied.storm = 0.0
+    applied.cloudType = 0.0
+    applied.cirrus = 0.0
     applied.windSpeed = Math.min(a: weather.windSpeed, b: 1.5)
+  }
+  if override is not SettingsWeather.auto and override is not SettingsWeather.custom {
+    applied.cloudHeight = weatherCloudHeight(cloudType: applied.cloudType, storm: applied.storm)
+    applied.cloudScale = 1.0
   }
   ret applied
 }

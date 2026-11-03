@@ -13,6 +13,10 @@
 #   precipitation (mm of water an hour) falls under the thickest cover;
 #   humidity (0 .. 1) follows the cloud and the rain; the storm (0 .. 1) is
 #   the front at its peak, strongest on a summer day (a thunder day).
+# - The clouds' kind (weatherCloudType, docs/cloud-rendering-research.md
+#   §8.5): fair-weather cumulus on a warm afternoon, stratus under a front,
+#   towers on a thunder day; cirrus streaks ahead of a rising front; how
+#   high the clouds' base is, and the size of their shapes.
 # - How dark the clouds are comes from the rain and the storm, not from the
 #   cover (weatherCloudDarkness): a full cover with no rain is a bright,
 #   white-gray sky, and rain or a storm darkens it.
@@ -36,6 +40,15 @@ type Weather {
   # how stormy (0 .. 1): the front at its peak, a thunder day in summer;
   # what darkens the clouds besides the rain (weatherCloudDarkness)
   storm: Float = 0.0
+  # what kind the clouds are (0 stratus, an even sheet .. 0.5 stratocumulus
+  # .. 1 cumulus, separate rounded puffs; the cloud map's type channel of
+  # docs/cloud-rendering-research.md §2.2), how much thin high cirrus there
+  # is (0 .. 1), the height of the clouds' base (m) and the size of their
+  # shapes (1: the type's own)
+  cloudType: Float = 0.6
+  cirrus: Float = 0.0
+  cloudHeight: Float = 1200.0
+  cloudScale: Float = 1.0
   # the mean wind at 10 m (m/s), the direction it blows toward (radians,
   # 0 toward east (+x), counter-clockwise, as lib/Wind) and its gustiness
   # (0 .. 1)
@@ -119,6 +132,12 @@ func weatherAt(
     precipitation = (cloud - 0.8) / 0.2 * 0.35 * (0.4 + wet)
   }
   let storm: Float = weatherStorm(front: front, latitude: latitude, dayOfYear: dayOfYear)
+  let cloudType: Float = weatherCloudType(
+    front: front
+    storm: storm
+    warmth: weatherWarmth(latitude: latitude, dayOfYear: dayOfYear)
+    hour: hour
+  )
   let wind: WeatherWind = weatherWindAt(
     seed: seed
     latitude: latitude
@@ -138,22 +157,87 @@ func weatherAt(
     )
     front: front
     storm: storm
+    cloudType: cloudType
+    cirrus: weatherCirrus(
+      seed: seed
+      hours: hours
+      front: front
+      cloud: cloud
+    )
+    cloudHeight: weatherCloudHeight(cloudType: cloudType, storm: storm)
+    cloudScale: 1.0
     windSpeed: wind.speed
     windAngle: wind.angle
     gustiness: wind.gustiness
   }
 }
 
-# How stormy it is (0 .. 1): the front's peak (0.8 to 0.95, the top of its
-# rise), most in the local summer (a thunder day), a third of that in the
-# winter
-func weatherStorm(front: view Float, latitude: view Float, dayOfYear: view Int) ret Float {
+# How warm the season is at `latitude` on day `dayOfYear` (0 the depth of
+# winter .. 1 the height of summer, about 15 July in the north)
+func weatherWarmth(latitude: view Float, dayOfYear: view Int) ret Float {
   var summer: Float = Math.cos(x: (dayOfYear.toFloat() - 196.0) / 365.25 * 2.0 * weatherPi)
   if latitude < 0.0 {
     summer = -summer
   }
-  let warmth: Float = 0.5 + 0.5 * summer
+  ret 0.5 + 0.5 * summer
+}
+
+# How stormy it is (0 .. 1): the front's peak (0.8 to 0.95, the top of its
+# rise), most in the local summer (a thunder day), a third of that in the
+# winter
+func weatherStorm(front: view Float, latitude: view Float, dayOfYear: view Int) ret Float {
+  let warmth: Float = weatherWarmth(latitude: latitude, dayOfYear: dayOfYear)
   ret weatherRamp(from: 0.8, to: 0.95, value: front) * (0.35 + 0.65 * warmth)
+}
+
+# What kind the clouds are (0 stratus .. 1 cumulus) at `hour` (the place's
+# clock): the sun heating the ground lifts cumulus in the afternoon (from
+# about 10:00, gone by 21:00), more in summer (`warmth`, weatherWarmth); a
+# front spreads a stratus sheet (from 0.6, all of it by 0.85); a storm
+# builds towers again (cumulonimbus)
+func weatherCloudType(
+  front: view Float
+  storm: view Float
+  warmth: view Float
+  hour: view Float
+) ret Float {
+  let afternoon: Float = weatherRamp(from: 9.0, to: 13.0, value: hour) * (1.0 - weatherRamp(
+    from: 17.0
+    to: 21.0
+    value: hour
+  ))
+  let fair: Float = 0.35 + 0.65 * afternoon * (0.4 + 0.6 * warmth)
+  let frontal: Float = weatherRamp(from: 0.6, to: 0.85, value: front)
+  let sheet: Float = fair + (0.08 - fair) * frontal
+  ret Math.clamp(val: Math.max(a: sheet, b: storm), low: 0.0, high: 1.0)
+}
+
+# How much thin high cirrus there is (0 .. 1): it runs ahead of a front, so
+# it shows while the front is still rising (the front 8 hours later is
+# higher than now) and the sky is not yet covered (`cloud`)
+func weatherCirrus(
+  seed: view Int
+  hours: view Float
+  front: view Float
+  cloud: view Float
+) ret Float {
+  let rise: Float = weatherFront(seed: seed, hours: hours + 8.0) - front
+  ret weatherRamp(from: 0.02, to: 0.12, value: rise) * (1.0 - weatherRamp(
+    from: 0.6
+    to: 0.95
+    value: cloud
+  ))
+}
+
+# The height of the clouds' base (m) for their kind: a stratus sheet low
+# (about 500 m), cumulus higher (about 1400 m), a storm's base lower again
+# under its rain
+func weatherCloudHeight(cloudType: view Float, storm: view Float) ret Float {
+  ret (500.0 + 900.0 * Math.clamp(val: cloudType, low: 0.0, high: 1.0)) * (1.0 - 0.3 * Math.clamp(
+    val: storm
+    low: 0.0
+    high: 1.0
+  ))
 }
 
 # The front (0 .. 1) at `hours` (weatherHours, shifted by the place's

@@ -1,0 +1,147 @@
+# The clouds' kind (lib/Weather, drawn by the sky's cloud layer): the
+# weather model picks fair-weather cumulus on a summer afternoon, stratus
+# under a front, towers on a thunder day (weatherCloudType); cirrus while a
+# front is still rising (weatherCirrus); the base's height follows the kind
+# (weatherCloudHeight). The settings panel's presets carry the kind, and the
+# saved line keeps it with the cirrus, the height and the size; the shorter
+# lines saved before still load.
+import Math
+open Weather
+open ui/UiValues
+open app3d/SettingsWeather
+open app3d/SettingsPersist
+
+func percent(value: view Float) ret Int {
+  ret (value * 100.0 + 0.5).toInt()
+}
+
+func kindAt(
+  front: view Float
+  storm: view Float
+  warmth: view Float
+  hour: view Float
+) ret Int {
+  ret percent(value: weatherCloudType(
+    front: front
+    storm: storm
+    warmth: warmth
+    hour: hour
+  ))
+}
+
+func main() {
+  log("a summer afternoon, fair: cumulus {kindAt(
+    front: 0.4
+    storm: 0.0
+    warmth: 1.0
+    hour: 15.0
+  )}%")
+  log("a summer morning, fair: cumulus {kindAt(
+    front: 0.4
+    storm: 0.0
+    warmth: 1.0
+    hour: 7.0
+  )}%")
+  log("a winter afternoon, fair: cumulus {kindAt(
+    front: 0.4
+    storm: 0.0
+    warmth: 0.0
+    hour: 15.0
+  )}%")
+  log("under a front: cumulus {kindAt(
+    front: 0.9
+    storm: 0.0
+    warmth: 1.0
+    hour: 15.0
+  )}%")
+  log("a thunder day: cumulus {kindAt(
+    front: 0.9
+    storm: 0.9
+    warmth: 1.0
+    hour: 15.0
+  )}%")
+  log("stratus base: {weatherCloudHeight(cloudType: 0.0, storm: 0.0).toInt()} m")
+  log("cumulus base: {weatherCloudHeight(cloudType: 1.0, storm: 0.0).toInt()} m")
+  log("a storm's base: {weatherCloudHeight(cloudType: 1.0, storm: 1.0).toInt()} m")
+
+  # the cirrus: ahead of a rising front somewhere in the model's days, never
+  # under a full cover
+  var cirrusHours: Int = 0
+  var cirrusUnderCover: Int = 0
+  loop var hour: Int = 0, hour < 24 * 60, ++hour {
+    let weather: Weather = weatherAt(
+      seed: weatherDefaultSeed
+      latitude: 60.0
+      longitude: 25.0
+      year: 2024
+      dayOfYear: 150 + hour / 24
+      hour: (hour % 24).toFloat()
+    )
+    if weather.cirrus > 0.3 {
+      cirrusHours = cirrusHours + 1
+      if weather.cloud > 0.95 {
+        cirrusUnderCover = cirrusUnderCover + 1
+      }
+    }
+  }
+  log(
+    "cirrus in 60 days: {cirrusHours > 24 and cirrusHours < 24 * 40}, under a full cover: {cirrusUnderCover}"
+  )
+
+  # the presets: their kind, and the height that follows it
+  var values: UiValues = createUiValues()
+  let presets: List(SettingsWeather) = [
+    SettingsWeather.clear
+    SettingsWeather.cloudy
+    SettingsWeather.rain
+    SettingsWeather.snow
+    SettingsWeather.mist
+  ]
+  loop let preset: view SettingsWeather in presets {
+    settingsWeatherPresetToValues(values: values, override: preset)
+    let drawn: Weather = settingsWeatherFromValues(
+      values: values
+      weather: Weather {}
+      override: preset
+      windOverride: SettingsWind.auto
+    )
+    log(
+      "{preset}: cumulus {percent(value: drawn.cloudType)}%, cirrus {percent(value: drawn.cirrus)}%, base {drawn.cloudHeight.toInt()} m, size {drawn.cloudScale}"
+    )
+  }
+
+  # a slider moved by hand: the drawn weather follows the numbers
+  let changed: Bool = setUiValue(values: values, key: weatherCloudTypeKey, value: 0.9)
+  let scaled: Bool = setUiValue(values: values, key: weatherCloudScaleKey, value: 1.5)
+  let custom: Weather = settingsWeatherFromValues(
+    values: values
+    weather: Weather {}
+    override: SettingsWeather.custom
+    windOverride: SettingsWind.auto
+  )
+  log("by hand: cumulus {percent(value: custom.cloudType)}%, size {custom.cloudScale}")
+
+  # the saved line: ten numbers; the five- and six-number lines still load
+  log("saved: {settingsWeatherValuesText(values: values)}")
+  var older: UiValues = createUiValues()
+  settingsWeatherValuesRestore(values: older, text: "1,0,0,0,5,0.8")
+  log(
+    "a six-number line: storm {uiValue(values: older, key: weatherStormKey, fallback: 0.0)}, kind {uiValue(
+      values: older
+      key: weatherCloudTypeKey
+      fallback: -1.0
+    )}"
+  )
+  settingsWeatherValuesRestore(values: older, text: "1,0,0,0,5,0.8,0.2,0.5,600,1.25")
+  log(
+    "a ten-number line: kind {uiValue(values: older, key: weatherCloudTypeKey, fallback: -1.0)}, cirrus {uiValue(
+      values: older
+      key: weatherCirrusKey
+      fallback: -1.0
+    )}, base {uiValue(values: older, key: weatherCloudHeightKey, fallback: -1.0)}, size {uiValue(
+      values: older
+      key: weatherCloudScaleKey
+      fallback: -1.0
+    )}"
+  )
+}

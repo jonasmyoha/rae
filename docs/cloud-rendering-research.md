@@ -767,8 +767,13 @@ as Nubis and RDR2 build theirs every frame.
 
 Each step is one queue task that leaves the walkers working.
 
-1. **The shared field and the lit layer (tier 1)**: clouds 3/4, already
-   queued.
+1. **The shared field and the lit layer (tier 1)**: clouds 3/4, done
+   (2026-11-03). The field's kind, cirrus, height and size are Weather
+   fields (`cloudType`, `cirrus`, `cloudHeight`, `cloudScale`) carried to
+   the shader by lib/SkyClouds (LightU `cloudShape`); the layer is
+   `skyClouds` in lib/sky_hosek.wgsl. Its cost on the Mac was below the
+   pass timing's noise (under about 0.05 ms); on the iPhone it is still to
+   be measured.
    - Add `CloudField` and the three new weather numbers.
    - Grow `skyClouds` into the tier 1 layer: cloud types (cumulus puffs
      with flat bases, a stratus sheet, cirrus streaks), the two-lobe silver

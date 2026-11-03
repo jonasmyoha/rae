@@ -32,10 +32,11 @@ open Gbuffer
 open GbufferResources
 open GbufferPassesNative
 open GbufferFullscreen
+open SkyClouds
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 156  # 624 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 160  # 640 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -104,8 +105,8 @@ type DeferredTargets {
   # The light the mist scatters toward the eye from all round, exposed
   # (GbufferPasses.uploadSceneLight; LightU night.yzw, and the water's mist)
   mistLight: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  # The sky's clouds: Sky.cloudCover, cloudDarkness, cloudDrift (sky_hosek.wgsl)
-  clouds: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  # The sky's clouds (SkyClouds, from the Sky's cloud fields; sky_hosek.wgsl)
+  clouds: SkyClouds = SkyClouds {}
   # uniforms + pipelines (created once, survive resizes)
   lightUniform: BufferId
   taaUniform: BufferId
@@ -924,13 +925,7 @@ func uploadLightUniform(
     z: -moonShadowDir.z
     w: moonUmbra
   )
-  pushVec4F(
-    writer: targets.args
-    x: targets.clouds.x
-    y: targets.clouds.y
-    z: targets.clouds.z
-    w: 0.0
-  )
+  pushSkyClouds(writer: targets.args, clouds: targets.clouds)
   ret uploadArgs(
     writer: targets.args
     resources: resources

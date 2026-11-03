@@ -371,6 +371,9 @@ func applyLabWeather(season: mod LabSeason, renderer: mod DeferredRenderer) {
   let weather: Weather = labWeather(season: season)
   renderer.sky.cloudCover = weather.cloud
   renderer.sky.cloudDarkness = weatherCloudDarkness(weather: weather)
+  renderer.sky.cloudType = weather.cloudType
+  renderer.sky.cloudCirrus = weather.cirrus
+  renderer.sky.cloudHeight = weather.cloudHeight
   renderer.sky.cloudDrift = season.seconds * 0.02
   if renderer.passes.targets.mistOn {
     if season.mistBase <= 0.0 {
