@@ -1,0 +1,313 @@
+# lib/qr's reader against codes from lib/qr's encoder, drawn into gray
+# images (lib/qr/GrayImage qrDrawGray: antialiased like a camera's):
+# straight, scaled down and up, rotated, tilted in perspective, blurred with
+# noise, under uneven light, mirrored, versions 1 to 25; codes damaged
+# within their error correction are corrected (and beyond it are not read
+# wrongly); images with no code give no result, quickly. RAE_QR_TIMES=1
+# prints the times (a 512 x 512 read; the expected output only bounds them).
+import Math
+open qr/QrTables
+open qr/QrEncoder
+open qr/QrPerspective
+open qr/GrayImage
+open qr/QrReader
+
+const url: String = "https://example.com/rae/qr/box"
+
+func square(left: view Float, top: view Float, side: view Float) ret List(QrPoint) {
+  ret List(QrPoint) {
+    qrPoint(x: left, y: top)
+    qrPoint(x: left + side, y: top)
+    qrPoint(x: left + side, y: top + side)
+    qrPoint(x: left, y: top + side)
+  }
+}
+
+# The square of `side` round (256, 256), turned by `angle`
+func turned(side: view Float, angle: view Float) ret List(QrPoint) {
+  var corners: List(QrPoint) = {}
+  let half: Float = side / 2.0
+  let offsets: List(Float) = {
+    -1.0
+    -1.0
+    1.0
+    -1.0
+    1.0
+    1.0
+    -1.0
+    1.0
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    let ox: Float = offsets.copyAtFallback(index: i * 2, fallback: 0.0) * half
+    let oy: Float = offsets.copyAtFallback(index: i * 2 + 1, fallback: 0.0) * half
+    corners.add(
+      value: qrPoint(
+        x: 256.0 + ox * Math.cos(x: angle) - oy * Math.sin(x: angle)
+        y: 256.0 + ox * Math.sin(x: angle) + oy * Math.cos(x: angle)
+      )
+    )
+  }
+  ret corners
+}
+
+func symbolOf(text: view String, level: view QrErrorCorrection) ret QrSymbol {
+  if let symbol: QrSymbol = qrEncodeText(text: text, level: level) {
+    ret symbol
+  }
+  ret QrSymbol {
+    version: 0
+    size: 0
+    level: level
+    mask: 0
+    mode: QrMode.byte
+    modules: {}
+  }
+}
+
+func report(name: view String, image: view GrayImage, expected: view String) {
+  if let result: QrReadResult = qrRead(image: image) {
+    var verdict: String = "WRONG TEXT"
+    if result.text is expected {
+      verdict = "ok"
+    }
+    var mirrored: String = ""
+    if result.mirrored {
+      mirrored = ", mirrored"
+    }
+    log(
+      "{name}: {verdict}, version {result.version} {qrLevelName(level: result.level)}, {result.corrected} codewords corrected{mirrored}"
+    )
+  } else {
+    log("{name}: no code")
+  }
+}
+
+func draw(symbol: view QrSymbol, corners: view List(QrPoint)) ret GrayImage {
+  ret qrDrawGray(
+    symbol: symbol
+    quietZone: 4
+    width: 512
+    height: 512
+    corners: corners
+    background: 140
+  )
+}
+
+# The symbol with its data modules in the square [x0, x0 + side) x [y0, y0 +
+# side) flipped (function patterns left as they are)
+func damaged(
+  symbol: view QrSymbol
+  x0: view Int
+  y0: view Int
+  side: view Int
+) ret QrSymbol {
+  var modules: List(Bool) = {}
+  modules.addDefaults(count: symbol.size * symbol.size)
+  var function: List(Bool) = {}
+  function.addDefaults(count: symbol.size * symbol.size)
+  var layout: QrGrid = { size: symbol.size, modules: own modules, function: own function }
+  drawFunctionPatterns(grid: layout, version: symbol.version, level: symbol.level)
+  var result: QrSymbol = symbol
+  loop var y: Int = y0, y < y0 + side, ++y {
+    loop var x: Int = x0, x < x0 + side, ++x {
+      if x < symbol.size and y < symbol.size and not gridIsFunction(grid: layout, x: x, y: y) {
+        let index: Int = y * symbol.size + x
+        result.modules.set(
+          index: index
+          value: not result.modules.copyAtFallback(index: index, fallback: false)
+        )
+      }
+    }
+  }
+  ret result
+}
+
+func longText(count: view Int) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < count, ++i {
+    text = "{text}{i % 10}"
+  }
+  ret text
+}
+
+func main() ret Int {
+  let times: Bool = Sys.getEnv(name: "RAE_QR_TIMES").length() > 0
+  let symbol: QrSymbol = symbolOf(text: url, level: QrErrorCorrection.medium)
+  report(
+    name: "straight"
+    image: draw(symbol: symbol, corners: square(left: 96.0, top: 96.0, side: 320.0))
+    expected: url
+  )
+  report(
+    name: "small (3 px modules)"
+    image: draw(symbol: symbol, corners: square(left: 200.0, top: 160.0, side: 111.0))
+    expected: url
+  )
+  report(
+    name: "large (12 px modules)"
+    image: draw(symbol: symbol, corners: square(left: 20.0, top: 20.0, side: 444.0))
+    expected: url
+  )
+  report(
+    name: "rotated 30 degrees"
+    image: draw(symbol: symbol, corners: turned(side: 300.0, angle: 0.5236))
+    expected: url
+  )
+  report(
+    name: "rotated 135 degrees"
+    image: draw(symbol: symbol, corners: turned(side: 280.0, angle: 2.3562))
+    expected: url
+  )
+  let tilted: List(QrPoint) = {
+    qrPoint(x: 140.0, y: 90.0)
+    qrPoint(x: 400.0, y: 130.0)
+    qrPoint(x: 420.0, y: 400.0)
+    qrPoint(x: 110.0, y: 440.0)
+  }
+  report(name: "tilted in perspective", image: draw(symbol: symbol, corners: tilted), expected: url)
+  let steep: List(QrPoint) = {
+    qrPoint(x: 180.0, y: 110.0)
+    qrPoint(x: 340.0, y: 110.0)
+    qrPoint(x: 470.0, y: 420.0)
+    qrPoint(x: 50.0, y: 420.0)
+  }
+  report(
+    name: "steeply tilted (a plate seen from above)"
+    image: draw(symbol: symbol, corners: steep)
+    expected: url
+  )
+  var noisy: GrayImage = grayBlur(
+    image: draw(symbol: symbol, corners: turned(side: 300.0, angle: 0.2))
+    radius: 1
+  )
+  grayAddNoise(image: noisy, amount: 40, seed: 7)
+  report(name: "blurred, noise +-40", image: noisy, expected: url)
+  # Uneven light: one side of the image three times as bright as the other
+  var shaded: GrayImage = draw(symbol: symbol, corners: square(left: 96.0, top: 96.0, side: 320.0))
+  loop var y: Int = 0, y < 512, ++y {
+    loop var x: Int = 0, x < 512, ++x {
+      let index: Int = y * 512 + x
+      let value: Int = shaded.pixels.copyAtFallback(index: index, fallback: 0) as Int
+      shaded.pixels.set(index: index, value: (value * (85 + x * 170 / 511) / 255) as UInt8)
+    }
+  }
+  report(name: "uneven light", image: shaded, expected: url)
+  # Mirrored: the corners swapped left for right
+  let mirror: List(QrPoint) = {
+    qrPoint(x: 416.0, y: 96.0)
+    qrPoint(x: 96.0, y: 96.0)
+    qrPoint(x: 96.0, y: 416.0)
+    qrPoint(x: 416.0, y: 416.0)
+  }
+  report(name: "mirrored", image: draw(symbol: symbol, corners: mirror), expected: url)
+  # Versions
+  report(
+    name: "version 1, numeric"
+    image: draw(
+      symbol: symbolOf(text: "01234567", level: QrErrorCorrection.high)
+      corners: square(left: 150.0, top: 150.0, side: 200.0)
+    )
+    expected: "01234567"
+  )
+  loop let count: Int in List(Int) { 140, 230, 700, 1200 } {
+    let text: String = "{url}?{longText(count: count)}"
+    let big: QrSymbol = symbolOf(text: text, level: QrErrorCorrection.low)
+    report(
+      name: "version {big.version} ({text.length()} bytes)"
+      image: draw(symbol: big, corners: square(left: 6.0, top: 6.0, side: 500.0))
+      expected: text
+    )
+  }
+  # Damage: a square of data modules flipped, within and beyond each level
+  loop let levelIndex: Int in List(Int) { 0, 1, 2, 3 } {
+    var level: QrErrorCorrection = QrErrorCorrection.low
+    var within: Int = 3
+    var beyond: Int = 8
+    if levelIndex is 1 {
+      level = QrErrorCorrection.medium
+      within = 5
+      beyond = 11
+    } else if levelIndex is 2 {
+      level = QrErrorCorrection.quartile
+      within = 7
+      beyond = 13
+    } else if levelIndex is 3 {
+      level = QrErrorCorrection.high
+      within = 8
+      beyond = 15
+    }
+    let plain: QrSymbol = symbolOf(text: url, level: level)
+    let x0: Int = plain.size / 2 - 2
+    report(
+      name: "level {qrLevelName(level: level)}, {within} x {within} modules damaged"
+      image: draw(
+        symbol: damaged(
+          symbol: plain
+          x0: x0
+          y0: 9
+          side: within
+        )
+        corners: square(left: 96.0, top: 96.0, side: 320.0)
+      )
+      expected: url
+    )
+    report(
+      name: "level {qrLevelName(level: level)}, {beyond} x {beyond} modules damaged"
+      image: draw(
+        symbol: damaged(
+          symbol: plain
+          x0: x0
+          y0: 9
+          side: beyond
+        )
+        corners: square(left: 96.0, top: 96.0, side: 320.0)
+      )
+      expected: url
+    )
+  }
+  # No code: noise, a gradient, a checkerboard
+  var noise: GrayImage = createGrayImage(width: 512, height: 512, value: 128)
+  grayAddNoise(image: noise, amount: 127, seed: 3)
+  var gradient: GrayImage = createGrayImage(width: 512, height: 512, value: 0)
+  var checkers: GrayImage = createGrayImage(width: 512, height: 512, value: 0)
+  loop var y: Int = 0, y < 512, ++y {
+    loop var x: Int = 0, x < 512, ++x {
+      gradient.pixels.set(index: y * 512 + x, value: ((x + y) / 4) as UInt8)
+      var value: Int = 30
+      if ((x / 16) + (y / 16)) % 2 is 0 {
+        value = 220
+      }
+      checkers.pixels.set(index: y * 512 + x, value: value as UInt8)
+    }
+  }
+  var slowestEmptyNs: Int = 0
+  loop let empty: view GrayImage in List(GrayImage) { noise, gradient, checkers } {
+    let start: Int = nowNs()
+    let found: Bool = qrRead(image: empty) is not none
+    let elapsed: Int = nowNs() - start
+    if elapsed > slowestEmptyNs {
+      slowestEmptyNs = elapsed
+    }
+    log("no code in the image: {not found}")
+  }
+  # Time: a 512 x 512 image with a code, the best of 5
+  let timed: GrayImage = draw(symbol: symbol, corners: tilted)
+  var bestNs: Int = 0
+  loop var round: Int = 0, round < 5, ++round {
+    let start: Int = nowNs()
+    let read: Bool = qrRead(image: timed) is not none
+    let elapsed: Int = nowNs() - start
+    if round is 0 or elapsed < bestNs {
+      bestNs = elapsed
+    }
+  }
+  if times {
+    log(
+      "read 512 x 512 with a code: {bestNs / 1000} us; slowest image with no code: {slowestEmptyNs / 1000} us"
+    )
+  }
+  log(
+    "a 512 x 512 read takes under a second: {bestNs < 1000000000}, an empty one too: {slowestEmptyNs < 1000000000}"
+  )
+  ret 0
+}
