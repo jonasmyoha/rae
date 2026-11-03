@@ -17,6 +17,8 @@
 // read out). Composed after ssao_upsample.wgsl.
 @group(0) @binding(16) var aoTex: texture_2d<f32>;
 @group(0) @binding(17) var aoDepthTex: texture_2d<f32>;
+// The clouds' shadow map (lib/CloudShadow; cloudSunLight in deferred_shade.wgsl)
+@group(0) @binding(18) var cloudShadowTex: texture_2d<f32>;
 override forwardSsao: f32 = 0.0;
 // gbuffer_octahedral.wgsl's octDecode under its own name: not every material
 // composes that file, and some define their own octEncode

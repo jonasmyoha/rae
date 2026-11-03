@@ -510,10 +510,19 @@ func uploadWaterUniform(
     }
     # in real units (the sun in lux, the sky in cd/m2), exposed by the
     # camera as the lighting pass does (LightUnits)
-    let scale: Float = exposureScale(ev100: light.ev100)
-    sunColor = Vec3.vscale(a: sunColor, s: scale)
-    zenith = Vec3.vscale(a: zenith, s: scale)
-    horizon = Vec3.vscale(a: horizon, s: scale)
+    # under the sky's clouds the water sees, on average, the light they let
+    # through (the land reads their shadow map, lib/CloudShadow): the sun's
+    # down to a fifth, the sky's to a half under a full cover
+    var sunScale: Float = exposureScale(ev100: light.ev100)
+    var skyScale: Float = sunScale
+    if hasSky {
+      let cover: Float = Math.clamp(val: sky.cloudCover, low: 0.0, high: 1.0)
+      sunScale = sunScale * (1.0 - 0.8 * cover)
+      skyScale = skyScale * (1.0 - 0.5 * cover)
+    }
+    sunColor = Vec3.vscale(a: sunColor, s: sunScale)
+    zenith = Vec3.vscale(a: zenith, s: skyScale)
+    horizon = Vec3.vscale(a: horizon, s: skyScale)
     put4(
       uniform: waterSystem.uniform
       base: 0

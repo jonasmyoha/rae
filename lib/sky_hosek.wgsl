@@ -191,6 +191,79 @@ fn skyCloudOver(top: vec4<f32>, under: vec4<f32>) -> vec4<f32> {
   if (a <= 1e-4) { return vec4<f32>(0.0); }
   return vec4<f32>((top.rgb * top.w + under.rgb * under.w * (1.0 - top.w)) / a, a);
 }
+// The cloud layer at a point of its plane (skyCloudPoint): its share (0
+// clear .. 1 cloud), how thick, where in its puff the point is (from the
+// puff's middle, in its radius) and the stratus sheet's slow noise. The
+// kind (cloudShape.x) blends the even stratus sheet into the cumulus puffs,
+// with smaller puffs heaped on them (cauliflower), closing into a sheet at
+// full cover. Seen at a slant (`slant` 0 .. 1) along `viewFlat`, a puff's
+// far side is its flat base, cut straight; the sun's shadow sees it from
+// straight along the light (slant 0).
+struct SkyCloudSample {
+  share: f32,
+  thick: f32,
+  away: vec2<f32>,
+  sheetNoise: f32,
+};
+// A point over the world (meters, on the clouds' plane) in the layer's own
+// units: a cell is a cumulus puff's spacing (about 1.6 km at size 1),
+// drifting with the clock
+fn skyCloudPoint(world: vec2<f32>) -> vec2<f32> {
+  return world / (1600.0 * max(L.cloudShape.w, 0.1)) + vec2<f32>(L.clouds.z, L.clouds.z * 0.35);
+}
+fn skyCloudSample(p: vec2<f32>, viewFlat: vec2<f32>, slant: f32) -> SkyCloudSample {
+  let cover = clamp(L.clouds.x, 0.0, 1.0);
+  let kind = clamp(L.cloudShape.x, 0.0, 1.0);
+  let detail = skyCloudFbm(p * 3.1 + vec2<f32>(1.7, 4.4));
+  let sheetNoise = skyCloudFbm(p * vec2<f32>(1.4, 2.4));
+  let threshold = mix(0.78, -0.1, cover);
+  let sheet = smoothstep(threshold, threshold + 0.25, sheetNoise * 0.85 + detail * 0.15);
+  let sheetThick = smoothstep(threshold + 0.1, threshold + 0.6, sheetNoise);
+  let puff = skyCloudPuffs(p, cover);
+  let bud = skyCloudPuffs(p * 2.7 + vec2<f32>(3.3, 1.9), 0.8);
+  let flatBase = 1.0 - slant * smoothstep(0.35, 0.55, dot(puff.yz, viewFlat));
+  let lump = max(puff.x, 0.0) * 0.6 + max(bud.x, 0.0) * 0.75 * smoothstep(-0.5, 0.2, puff.x);
+  let body = max((lump - 0.45 * (1.0 - detail)) * flatBase, (cover - 0.85) / 0.15 * detail);
+  let heap = smoothstep(0.0, 0.1, body);
+  let heapThick = smoothstep(0.05, 0.6, body);
+  return SkyCloudSample(mix(sheet, heap, kind), mix(sheetThick, heapThick, kind), puff.yz, sheetNoise);
+}
+// How much of the key light gets through the clouds at a point of their
+// plane (skyCloudPoint): all of it in a gap, a fifth to a half under a
+// cloud (less under a thick one and a dark one). The clouds' shadow on the
+// ground (cloud_shadow.wgsl) is made of it.
+fn skyCloudThrough(layer: SkyCloudSample) -> f32 {
+  let dark = clamp(L.clouds.y, 0.0, 1.0);
+  return 1.0 - layer.share * clamp(0.5 + 0.25 * layer.thick + 0.05 * dark, 0.0, 0.8);
+}
+fn skyCloudSunThrough(p: vec2<f32>) -> f32 {
+  if (L.clouds.x <= 0.001) { return 1.0; }
+  return skyCloudThrough(skyCloudSample(p, vec2<f32>(1.0, 0.0), 0.0));
+}
+// The clouds' shadow map (lib/CloudShadow, drawn by cloud_shadow.wgsl, read
+// by deferred_shade.wgsl cloudSunLight): cloudShadowTexels square texels
+// over cloudShadowSpan meters of the clouds' plane, round the point of the
+// plane the key light reaches the eye through, snapped to a texel so the
+// shadows do not crawl as the eye moves; one more row holds the map's
+// average (texel 0: the light let through, and the share of cloud)
+const cloudShadowTexels: f32 = 256.0;
+const cloudShadowSpan: f32 = 8000.0;
+// The way to the key light, never flatter than 0.1 up (a low sun's shadows
+// would reach kilometers away)
+fn cloudShadowToLight() -> vec3<f32> {
+  let toLight = normalize(-L.sunDir.xyz);
+  return vec3<f32>(toLight.xy, max(toLight.z, 0.1));
+}
+// Where the ray from `wpos` toward the key light meets the clouds' plane
+fn cloudShadowPlane(wpos: vec3<f32>) -> vec2<f32> {
+  let toLight = cloudShadowToLight();
+  return wpos.xy + toLight.xy / toLight.z * max(max(L.cloudShape.z, 100.0) - wpos.z, 0.0);
+}
+// The map's corner on the plane (meters)
+fn cloudShadowOrigin() -> vec2<f32> {
+  let texel = cloudShadowSpan / cloudShadowTexels;
+  return floor(cloudShadowPlane(L.camPos.xyz) / texel) * texel - vec2<f32>(0.5 * cloudShadowSpan);
+}
 fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
   let cover = clamp(L.clouds.x, 0.0, 1.0);
   let cirrusAmount = clamp(L.cloudShape.y, 0.0, 1.0);
@@ -205,12 +278,15 @@ fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
   // and below in its reddened color, a while before and after it is up),
   // the sun's (the key light, exposed; the moon at night) and how it
   // scatters toward the eye
-  let bright = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+  // the sky's and the sun's light reach the clouds through the layer
+  // itself: an overcast's own light is the dimmer light under it
+  let skyUnder = sky * (1.0 - 0.5 * cover);
+  let bright = dot(skyUnder, vec3<f32>(0.2126, 0.7152, 0.0722));
   let toSunZ = toSun.z;
   let lowSun = smoothstep(-0.08, 0.0, toSunZ) * (1.0 - smoothstep(0.06, 0.3, toSunZ));
-  let ambient = mix(vec3<f32>(bright), sky, 0.2 + 0.6 * lowSun) * (1.0 + 0.35 * lowSun)
+  let ambient = mix(vec3<f32>(bright), skyUnder, 0.2 + 0.6 * lowSun) * (1.0 + 0.35 * lowSun)
     * vec3<f32>(0.98, 0.99, 1.02);
-  let sun = L.sunColor.rgb * (1.0 - 0.85 * dark);
+  let sun = L.sunColor.rgb * (1.0 - 0.85 * dark) * (1.0 - 0.8 * cover);
   // the low sun's light on the clouds: through the long air path, reddened
   // (the clouds see it a while after the ground no longer does), as bright
   // as a few times the sky round them
@@ -275,34 +351,22 @@ fn skyClouds(dir: vec3<f32>, sky: vec3<f32>, toSun: vec3<f32>) -> vec4<f32> {
     }
   }
   if (dir.z <= 0.0) { return result; }
-  // the layer overhead: on a plane at the clouds' height, nearer the eye
-  // larger; a cell is a cumulus puff's spacing (about 1.6 km at size 1)
-  let p = dir.xy / (dir.z + 0.08) * (height / (1600.0 * size)) + drift;
-  let detail = skyCloudFbm(p * 3.1 + vec2<f32>(1.7, 4.4));
-  // stratus: an even sheet with soft, slow thickness
-  let sheetNoise = skyCloudFbm(p * vec2<f32>(1.4, 2.4));
-  let threshold = mix(0.78, -0.1, cover);
-  let sheet = smoothstep(threshold, threshold + 0.25, sheetNoise * 0.85 + detail * 0.15);
-  let sheetThick = smoothstep(threshold + 0.1, threshold + 0.6, sheetNoise);
-  // cumulus: puffs with smaller puffs heaped on them (cauliflower), closing
-  // into a sheet at full cover; seen at a slant, the far side of a puff is
+  // the layer overhead: on a plane at the clouds' height over the world,
+  // nearer the eye larger (the same field the shadow on the ground comes
+  // from, skyCloudSunThrough); seen at a slant, the far side of a puff is
   // its flat base (lower on the screen), cut straight and darker
-  let puff = skyCloudPuffs(p, cover);
-  let bud = skyCloudPuffs(p * 2.7 + vec2<f32>(3.3, 1.9), 0.8);
+  let world = L.camPos.xy + dir.xy / (dir.z + 0.08) * max(height - L.camPos.z, 100.0);
   let viewFlat = normalize(dir.xy + vec2<f32>(1e-4, 0.0));
   let slant = 1.0 - smoothstep(0.25, 0.8, dir.z);
-  let farSide = dot(puff.yz, viewFlat);
-  let flatBase = 1.0 - slant * smoothstep(0.35, 0.55, farSide);
-  let lump = max(puff.x, 0.0) * 0.6 + max(bud.x, 0.0) * 0.75 * smoothstep(-0.5, 0.2, puff.x);
-  let body = max((lump - 0.45 * (1.0 - detail)) * flatBase, (cover - 0.85) / 0.15 * detail);
-  let heap = smoothstep(0.0, 0.1, body);
-  let heapThick = smoothstep(0.05, 0.6, body);
-  let share = mix(sheet, heap, kind) * smoothstep(0.0, 0.1, dir.z);
+  let layer = skyCloudSample(skyCloudPoint(world), viewFlat, slant);
+  let share = layer.share * smoothstep(0.0, 0.1, dir.z);
   if (share <= 0.001) { return result; }
-  let thick = mix(sheetThick, heapThick, kind);
+  let thick = layer.thick;
+  let farSide = dot(layer.away, viewFlat);
+  let sheetNoise = layer.sheetNoise;
   // a puff's sunward side lighter, its middle and its base darker
   // underneath; puffs away from the sun lit on the side we see
-  let sunward = 0.5 + 0.5 * dot(normalize(puff.yz + vec2<f32>(1e-4, 0.0)), sunFlat) * kind;
+  let sunward = 0.5 + 0.5 * dot(normalize(layer.away + vec2<f32>(1e-4, 0.0)), sunFlat) * kind;
   let front = 0.5 - 0.5 * dot(viewFlat, sunFlat);
   let baseShade = 1.0 - 0.3 * kind * slant * smoothstep(-0.1, 0.5, farSide);
   let through = (1.0 - thick) * (1.0 - thick);

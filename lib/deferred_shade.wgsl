@@ -5,7 +5,8 @@
 // composition: the includer declares the bindings these functions read, `L`
 // (LightU), `SH` (ShadowU), `shadowTex` and `shadowSamp`, at its own binding
 // numbers, and composes the precision prelude, gbuffer_octahedral.wgsl,
-// sky_hosek.wgsl and deferred_uniforms.wgsl in front.
+// sky_hosek.wgsl and deferred_uniforms.wgsl in front. It also declares
+// `cloudShadowTex`, the clouds' shadow map (lib/CloudShadow).
 fn shadowCascadeIndex(viewDepth: f32, count: i32) -> i32 {
   var c = 0;
   if (viewDepth > SH.splitFar.x) { c = 1; }
@@ -204,6 +205,36 @@ struct ShadedSurface {
   // default, so a surface built without it keeps the rim)
   noRim: f32,
 };
+// How much of the key light the clouds let through at `wpos` (the clouds'
+// shadow map, lib/CloudShadow; read with four loads and blended between
+// them, so the map needs no sampler): the map's average beyond its edge,
+// faded to it over the last tenth
+fn cloudSunLight(wpos: vec3<f32>) -> f32 {
+  if (L.clouds.x <= 0.001) { return 1.0; }
+  let average = textureLoad(cloudShadowTex, vec2<i32>(0, i32(cloudShadowTexels)), 0).x;
+  let at = (cloudShadowPlane(wpos) - cloudShadowOrigin()) / cloudShadowSpan * cloudShadowTexels - 0.5;
+  let edge = min(min(at.x, at.y), min(cloudShadowTexels - 1.0 - at.x, cloudShadowTexels - 1.0 - at.y));
+  if (edge <= 0.0) { return average; }
+  let cell = vec2<i32>(floor(at));
+  let f = at - floor(at);
+  let a = textureLoad(cloudShadowTex, cell, 0).x;
+  let b = textureLoad(cloudShadowTex, cell + vec2<i32>(1, 0), 0).x;
+  let c = textureLoad(cloudShadowTex, cell + vec2<i32>(0, 1), 0).x;
+  let d = textureLoad(cloudShadowTex, cell + vec2<i32>(1, 1), 0).x;
+  let here = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  return mix(average, here, smoothstep(0.0, cloudShadowTexels * 0.1, edge));
+}
+// The light the clouds let through on the map's average (1 with no clouds)
+fn cloudSunAverage() -> f32 {
+  if (L.clouds.x <= 0.001) { return 1.0; }
+  return textureLoad(cloudShadowTex, vec2<i32>(0, i32(cloudShadowTexels)), 0).x;
+}
+// The share of the sky's light under the clouds: it falls less than the
+// sun's (half under a full cover), by the cloud the map holds on average
+fn cloudSkyLight() -> f32 {
+  if (L.clouds.x <= 0.001) { return 1.0; }
+  return 1.0 - 0.5 * textureLoad(cloudShadowTex, vec2<i32>(0, i32(cloudShadowTexels)), 0).y;
+}
 // The radiance of a surface (linear HDR), fog included
 fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   let mode = s.mode;
@@ -239,9 +270,12 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   let kd = (half3(1.0) - Fs) * (1.0 - metallic);
   let sunVisF = sunVisibility(wpos, N, length(L.camPos.xyz - wpos));
   let sunVis = half(sunVisF);
-  let directF = (vec3<f32>(kd * albedo) / PI + specF) * L.sunColor.rgb * NoLf * sunVisF;
+  // the clouds' shadow and their dimming of the sky's light
+  let cloudSun = cloudSunLight(wpos);
+  let skyUnder = half(cloudSkyLight());
+  let directF = (vec3<f32>(kd * albedo) / PI + specF) * L.sunColor.rgb * NoLf * sunVisF * cloudSun;
   let direct = half3(min(directF, vec3<f32>(60000.0)));
-  let hemi = mix(half3(L.ambGround.rgb), half3(L.ambSky.rgb), Nh.z * 0.5 + 0.5);
+  let hemi = mix(half3(L.ambGround.rgb), half3(L.ambSky.rgb), Nh.z * 0.5 + 0.5) * skyUnder;
   let ambF = envBrdf(f0, rough, NoV);
   let hl = half(dot(N, Ldir) * 0.5 + 0.5);
   let toonT1 = smoothstep(half(0.0), half(0.03), clamp(hl - 0.50, 0.0, 1.0));
@@ -252,14 +286,17 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   let toonDeep = albedo * 0.34 * shadeTint;
   var toonCol = mix(toonMid, toonLit, toonT2);
   toonCol = mix(toonDeep, toonCol, toonT1);
-  toonCol = mix(toonDeep, toonCol, mix(half(1.0), sunVis, half(0.85)));
-  let toonLight = half3(L.sunColor.rgb) * 0.34 + hemi * 0.75;
+  // a toon band is in a cloud's shadow only where it is darker than the
+  // clouds are on average: an even overcast keeps its lit bands
+  let cloudBand = half(clamp(cloudSun / max(cloudSunAverage(), 0.05), 0.0, 1.0));
+  toonCol = mix(toonDeep, toonCol, mix(half(1.0), sunVis * cloudBand, half(0.85)));
+  let toonLight = half3(L.sunColor.rgb * cloudSun) * 0.34 + hemi * 0.75;
   let toonShaded = toonCol * toonLight;
   let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF) * ao * ssao;
   let emit = albedo * emissive;
   let rimF = pow(clamp(1.0 - NoV, half(0.0), half(1.0)), half(RAE_RIM_POWER));
   let rimUp = 1.0 - clamp(Nh.z, half(0.0), half(1.0));
-  let rim = half3(L.ambSky.rgb) * (rimF * rimUp * RAE_RIM_STRENGTH) * half(1.0 - s.noRim);
+  let rim = half3(L.ambSky.rgb) * skyUnder * (rimF * rimUp * RAE_RIM_STRENGTH) * half(1.0 - s.noRim);
   let contactAO = mix(half(1.0), ao * ssao, half(RAE_AO_CONTACT));
   let castShadowAmb = mix(half(1.0), sunVis, half(SH.shadowCfg.z));
   var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;
@@ -309,6 +346,7 @@ fn applyMist(radiance: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
   }
   let amount = 1.0 - exp(-max(depth, 0.0));
   let toLight = normalize(-L.sunDir.xyz);
-  let mistLight = L.night.yzw + L.sunColor.rgb * mistPhase(dot(dir, toLight));
+  // under the clouds the mist is lit by the light they let through on average
+  let mistLight = L.night.yzw * cloudSkyLight() + L.sunColor.rgb * cloudSunLight(L.camPos.xyz) * mistPhase(dot(dir, toLight));
   return mix(radiance, mistLight, amount);
 }

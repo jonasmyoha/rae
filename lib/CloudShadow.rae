@@ -1,0 +1,115 @@
+# CloudShadow — the clouds' shadow on the ground (docs/cloud-rendering-research.md
+# §8.2): a small map of how much of the key light the cloud layer lets
+# through, over the clouds' plane round the eye, drawn each frame from the
+# same field the sky draws (lib/cloud_shadow.wgsl, sky_hosek.wgsl
+# skyCloudSunThrough). Every shaded surface multiplies its sunlight by it
+# (deferred_shade.wgsl cloudSunLight), so the clouds' shadows lie on the land
+# and move with the wind; its average, in its last row, dims the sky's
+# light under the clouds (cloudSkyLight). It is the one map every cloud tier
+# writes: a later tier draws into the same texture.
+#
+# It is drawn right after the light uniform is uploaded (GbufferPasses
+# uploadSceneLight), in its own small submission, so both the deferred
+# lighting pass and the forward main pass read this frame's map. Its cost is
+# one fullscreen pass over cloudShadowTexels x (cloudShadowTexels + 1)
+# texels.
+open gpu/GpuResources
+open gpu/GpuRender
+open gpu/GpuLifetime
+open gpu/GpuTextures
+open gpu/GpuIds
+open webgpu/Webgpu
+open GbufferFullscreen
+
+# The map's side in texels (cloud_shadow.wgsl cloudShadowTexels); one more
+# row holds the average
+const cloudShadowTexels: Int = 256
+
+type CloudShadowMap {
+  texture: TextureId = noTextureId()
+  textureView: TextureViewId = noTextureViewId()
+  pipeline: RenderPipelineId = noRenderPipelineId()
+  bind: BindGroupId = noBindGroupId()
+  # the light uniform the bind reads (it is made again for another one)
+  boundUniform: BufferId = noBufferId()
+}
+
+# The map's texture and pipeline, made once; false while they cannot be made
+func ensureCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) ret Bool {
+  if not isValidTextureView(resources: resources, id: map.textureView) {
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: cloudShadowTexels
+      height: cloudShadowTexels + 1
+      format: WGPUTextureFormat_RG16Float
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+    ) {
+      map.texture = texture
+      if let made: TextureViewId = createTextureView(resources: resources, texture: texture) {
+        map.textureView = made
+      }
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: map.pipeline) {
+    let mapShader: Shader = shader(
+      files: ["lib/sky_hosek.wgsl", "lib/deferred_uniforms.wgsl", "lib/cloud_shadow.wgsl"]
+    )
+    map.pipeline = createFullscreenPipeline(
+      resources: resources
+      shader: mapShader
+      format: WGPUTextureFormat_RG16Float
+    )
+  }
+  ret isValidTextureView(resources: resources, id: map.textureView) and isValidRenderPipeline(
+    resources: resources
+    id: map.pipeline
+  )
+}
+
+# Draw this frame's map from the light uniform `lightUniform` (the clouds,
+# the key light's way and the eye, already uploaded)
+func drawCloudShadow(
+  map: mod CloudShadowMap
+  resources: mod GpuResources
+  lightUniform: view BufferId
+) {
+  if not ensureCloudShadow(map: map, resources: resources) {
+    ret
+  }
+  if not (map.boundUniform is lightUniform) {
+    let retired: Bool = retireBindGroup(resources: resources, id: map.bind)
+    map.bind = noBindGroupId()
+    map.boundUniform = lightUniform
+  }
+  if not bindGroupIsUsable(resources: resources, id: map.bind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+    entries.add(value: bufferRef(id: lightUniform))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: map.pipeline
+      entries: entries
+    ) {
+      map.bind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: map.bind) {
+    ret
+  }
+  unsafe {
+    runFullscreen(
+      resources: resources
+      pipeline: map.pipeline
+      bind: map.bind
+      target: textureViewHandle(resources: resources, id: map.textureView)
+    )
+  }
+}
+
+# The map's GPU objects (renderer shutdown)
+func retireCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) {
+  let bindRetired: Bool = retireBindGroup(resources: resources, id: map.bind)
+  let pipelineRetired: Bool = retireRenderPipeline(resources: resources, id: map.pipeline)
+  let viewRetired: Bool = retireTextureView(resources: resources, id: map.textureView)
+  let textureRetired: Bool = retireTexture(resources: resources, id: map.texture)
+  map = CloudShadowMap {}
+}
