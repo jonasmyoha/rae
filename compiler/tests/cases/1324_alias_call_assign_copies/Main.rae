@@ -1,0 +1,86 @@
+# `=` copies the result of a call that hands back an alias (a JsonValue
+# stored in its document: lib/Json jsonValueAt / valueAt return the slot
+# itself). Stored bit for bit into an owning `var`, the var's drop (at the
+# next reassignment and at the end) freed the document's strings: the
+# "time" strings read afterwards were garbage and the program exited 1
+# although main returned 0. The same store into a struct field and through
+# a `mod` parameter copies too. (The program SUMU found it with, a lib/Json
+# walk of a MET Norway forecast, then the two other stores.)
+open Json
+
+func answer() ret String {
+  ret "\{\"type\":\"Feature\",\"properties\":\{\"meta\":\{\"updated_at\":\"2026-11-02T18:29:08Z\"\},\"timeseries\":[" + "\{\"time\":\"2026-11-02T19:00:00Z\",\"data\":\{\"instant\":\{\"details\":\{\"air_pressure_at_sea_level\":1027.4,\"air_temperature\":7.8,\"cloud_area_fraction\":100.0,\"relative_humidity\":89.1,\"wind_from_direction\":359.0,\"wind_speed\":5.1\}\},\"next_1_hours\":\{\"summary\":\{\"symbol_code\":\"cloudy\"\},\"details\":\{\"precipitation_amount\":0.2\}\},\"next_6_hours\":\{\"summary\":\{\"symbol_code\":\"partlycloudy_night\"\},\"details\":\{\}\}\}\}," + "\{\"time\":\"2026-11-02T20:00:00Z\",\"data\":\{\"instant\":\{\"details\":\{\"air_temperature\":6.4\}\},\"next_1_hours\":\{\"summary\":\{\"symbol_code\":\"lightrain\"\},\"details\":\{\"precipitation_amount\":0.4\}\}\}\}," + "\{\"time\":\"2026-11-03T06:00:00Z\",\"data\":\{\"instant\":\{\"details\":\{\"air_temperature\":-1.6\}\},\"next_6_hours\":\{\"summary\":\{\"symbol_code\":\"lightsnow\"\},\"details\":\{\}\}\}\}," + "\{\"time\":\"2026-11-03T12:00:00Z\",\"data\":\{\"instant\":\{\"details\":\{\"air_temperature\":3.0\}\},\"next_6_hours\":\{\"summary\":\{\"symbol_code\":\"clearsky_day\"\},\"details\":\{\}\}\}\}" + "]\}\}"
+}
+
+func pathField(doc: view JsonDoc, start: view JsonValue, path: view String) ret Int {
+  var index: Int = -1
+  var current: JsonValue = start
+  loop let key: view String in path.split(sep: ".") {
+    index = field(doc: doc, this: current, key: key)
+    if index < 0 {
+      ret -1
+    }
+    current = jsonValueAt(doc: doc, idx: index)
+  }
+  ret index
+}
+
+type Cursor {
+  value: JsonValue
+  steps: Int
+}
+
+# a struct field reassigned from jsonValueAt
+func walkField(doc: view JsonDoc, start: view JsonValue, path: view String) ret String {
+  var cursor: Cursor = { value: start, steps: 0 }
+  loop let key: view String in path.split(sep: ".") {
+    let index: Int = field(doc: doc, this: cursor.value, key: key)
+    if index < 0 {
+      ret "?"
+    }
+    cursor.value = jsonValueAt(doc: doc, idx: index)
+    cursor.steps = cursor.steps + 1
+  }
+  ret jsonString(this: cursor.value, fallback: "?")
+}
+
+# a store through a `mod` parameter from jsonValueAt
+func stepInto(doc: view JsonDoc, current: mod JsonValue, key: view String) ret Bool {
+  let index: Int = field(doc: doc, this: current, key: key)
+  if index < 0 {
+    ret false
+  }
+  current = jsonValueAt(doc: doc, idx: index)
+  ret true
+}
+
+func main() ret Int {
+  let doc: JsonDoc = parseJson(source: answer())
+  let top: JsonValue = root(doc: doc)
+  let series: JsonValue = jsonValueAt(
+    doc: doc
+    idx: pathField(doc: doc, start: top, path: "properties.timeseries")
+  )
+  loop var i: Int = 0, i < arrayLen(this: series), ++i {
+    let step: JsonValue = arrayAt(doc: doc, this: series, idx: i)
+    let at: Int = pathField(doc: doc, start: step, path: "time")
+    log("time {i}: {jsonString(this: jsonValueAt(doc: doc, idx: at), fallback: "?")}")
+  }
+  log("updated (a field): {walkField(doc: doc, start: top, path: "properties.meta.updated_at")}")
+  var walker: JsonValue = top
+  loop let key: view String in "properties.meta.updated_at".split(sep: ".") {
+    let moved: Bool = stepInto(doc: doc, current: walker, key: key)
+  }
+  log("updated (through mod): {jsonString(this: walker, fallback: "?")}")
+  # the document is intact after all of it
+  log(
+    "time 0 again: {jsonString(
+      this: jsonValueAt(
+        doc: doc
+        idx: pathField(doc: doc, start: arrayAt(doc: doc, this: series, idx: 0), path: "time")
+      )
+      fallback: "?"
+    )}"
+  )
+  ret 0
+}
