@@ -310,6 +310,9 @@ static const char* host_target_arch(void) {
 /* Whether this host can hand C emitted for `os` to a toolchain that builds
  * it: an Apple OS's C on a macOS host goes into Xcode (tools/ios). */
 static bool host_builds_target_c(const char* os) {
+  /* Android's C is built by the NDK, which runs on every desktop host
+   * (tools/android) */
+  if (strcmp(os, "android") == 0) return true;
   if (strcmp(host_target_os(), "macos") != 0) return false;
   return strcmp(os, "ios") == 0 || strcmp(os, "tvos") == 0 || strcmp(os, "watchos") == 0 ||
          strcmp(os, "visionos") == 0;
@@ -4434,7 +4437,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
      * target make a check-only build: it type-checks against that target
      * and emits nothing, since this toolchain cannot produce its binary.
      * The exception is a compiled build that writes `--emit-c` for a target
-     * whose C this host's tools build (an Apple OS on macOS, through Xcode):
+     * whose C this host's tools build (an Apple OS on macOS, through Xcode;
+     * Android anywhere, through the NDK):
      * it emits that target's C, so Target says what the app runs on. */
     {
       const char* native_os = build_opts.target == BUILD_TARGET_WASM ? "web" : host_target_os();
