@@ -1,0 +1,130 @@
+# applyOverride sets TextField.text: a page opens with text in its field, the field's other
+# data stays, and textFieldViewSystem shows it on the field's line. A field applyOverride does
+# not know, or a node with no TextField, is a scene diagnostic, not silence.
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func dialogScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{")
+  s = s.concat(other: "\"Card\":\{\"Children\":[\"Task\",\"Note\",\"Title\"]\},")
+  s = s.concat(
+    other: "\"Task\":\{\"TextField\":\{\"placeholder\":\"Task\",\"actionId\":\"todo.save\"\},"
+  )
+  s = s.concat(other: "\"Children\":[\"TaskLine\"]\},")
+  s = s.concat(other: "\"TaskLine\":\{\"Text\":\{\"text\":\"\"\}\},")
+  s = s.concat(other: "\"Note\":\{\"TextField\":\{\"placeholder\":\"Note\"\},")
+  s = s.concat(other: "\"Children\":[\"NoteLine\"]\},")
+  s = s.concat(other: "\"NoteLine\":\{\"Text\":\{\"text\":\"\"\}\},")
+  s = s.concat(other: "\"Title\":\{\"Text\":\{\"text\":\"Edit\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, pageId: view String, nodeId: view String) ret EntityId {
+  if let found: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: found)
+  }
+  ret noEntity()
+}
+
+func showField(world: view UiWorld, nodeId: view String) {
+  let field: view TextField = componentView(
+    this: world.textFields
+    entityId: entityOf(world: world, pageId: "dialog", nodeId: nodeId)
+  )
+  log("{nodeId}: text '{field.text}', placeholder '{field.placeholder}', action '{field.actionId}'")
+}
+
+func showLine(world: view UiWorld, nodeId: view String) {
+  let text: view Text = componentView(
+    this: world.texts
+    entityId: entityOf(world: world, pageId: "dialog", nodeId: nodeId)
+  )
+  log("{nodeId}: '{text.text}'")
+}
+
+func showDiagnostics(world: view UiWorld) {
+  log("diagnostics: {world.sceneDiagnostics.length}")
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  {formatSceneDiagnostic(diagnostic: diagnostic)}")
+  }
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let scene: Scene = parseScene(source: dialogScene())
+  var overrides: List(SceneOverride) = emptyOverrides()
+  addTextFieldOverride(list: overrides, nodeId: "Task", value: "Buy milk")
+  let rootEntityId: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    pageId: "dialog"
+    scene: scene
+    overrides: overrides
+    w: 300.0
+    h: 400.0
+  )
+  log("mounted = {rootEntityId.index >= 0}")
+  log("the override, at mount; Note has none")
+  showField(world: world, nodeId: "Task")
+  showField(world: world, nodeId: "Note")
+  showDiagnostics(world: world)
+
+  log("the field's line shows it")
+  textFieldViewSystem(world: world, textFieldSystem: uiSystems.textField)
+  showLine(world: world, nodeId: "TaskLine")
+  showLine(world: world, nodeId: "NoteLine")
+
+  log("on an open page: a new text, set twice")
+  let taskEntityId: EntityId = entityOf(world: world, pageId: "dialog", nodeId: "Task")
+  let texts: List(String) = { "Buy oats", "Buy eggs" }
+  loop let text: view String in texts {
+    applyOverride(
+      world: world
+      entityId: taskEntityId
+      override: SceneOverride {
+        nodeId: "Task"
+        componentName: "TextField"
+        fieldName: "text"
+        valueString: "{text}"
+      }
+    )
+  }
+  showField(world: world, nodeId: "Task")
+
+  log("what cannot be applied is reported, and changes nothing")
+  applyOverride(
+    world: world
+    entityId: taskEntityId
+    override: SceneOverride {
+      nodeId: "Task"
+      componentName: "TextField"
+      fieldName: "textStyle"
+      valueString: "muted"
+    }
+  )
+  applyOverride(
+    world: world
+    entityId: entityOf(world: world, pageId: "dialog", nodeId: "Title")
+    override: SceneOverride {
+      nodeId: "Title"
+      componentName: "TextField"
+      fieldName: "text"
+      valueString: "not a field"
+    }
+  )
+  showField(world: world, nodeId: "Task")
+  showLine(world: world, nodeId: "Title")
+  showDiagnostics(world: world)
+}
