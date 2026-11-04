@@ -65,6 +65,7 @@ open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
+open ui/qrCodeSystem/QrCodeSystem
 open app3d/RenderScale
 open Gpu2dCanvas
 open ui/UiSystems
@@ -530,6 +531,13 @@ func renderWalkerApp(
           transforms: world.transforms
           camera: cameraSystem.camera
           editor: inputSystem.uiModes.editor
+        )
+        # A game's QrCode nodes (docs/walker-kit.md, "UI"), after the UI they are in
+        qrCodePaint(
+          qrCodeSystem: inputSystem.qrCodeSystem
+          world: inputSystem.world
+          uiSystems: uiSystems
+          canvas: renderSystem.renderer.canvas
         )
       }
       case RenderTag.present {
