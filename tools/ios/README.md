@@ -88,6 +88,10 @@ app's own declaration), and `RAE_IOS_VERSION` / `RAE_IOS_BUILD` set
 They are always written, because SDL3 links those APIs and App Store
 Connect refuses a build without them.
 
+**Links that open the app.** `RAE_APP_LINKS` (`https` hosts: universal links)
+and `RAE_APP_SCHEME` (a custom scheme) make a link open the app, which receives
+it through lib/AppLinks. docs/app-links.md lists the file the website must serve.
+
 **The local network.** An app that connects to a machine on the local
 network (an address like `192.168.1.20`, a name like `mymac.local`) needs
 `RAE_IOS_LOCAL_NETWORK_USAGE`, the text iOS shows when it asks the person.

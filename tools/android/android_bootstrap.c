@@ -180,3 +180,17 @@ int SDL_main(int argc, char** argv) {
   fflush(stdout);
   return code;
 }
+
+/* A link that opened the app (tools/android/RaeActivity.java, lib/AppLinks):
+ * SDLActivity loaded this library before RaeActivity calls this. */
+void rae_app_links_push(const char* url);
+void rae_ext_EventLoop_wake(void);
+
+JNIEXPORT void JNICALL Java_org_rae_app_RaeActivity_nativeOpenLink(JNIEnv* env, jclass cls, jstring url) {
+  (void)cls;
+  const char* text = (*env)->GetStringUTFChars(env, url, NULL);
+  if (!text) return;
+  rae_app_links_push(text);
+  (*env)->ReleaseStringUTFChars(env, url, text);
+  rae_ext_EventLoop_wake();
+}

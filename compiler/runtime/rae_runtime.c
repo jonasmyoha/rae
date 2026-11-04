@@ -128,4 +128,5 @@ void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
  * no wait to interrupt, so it is a no-op. */
 void rae_ext_EventLoop_wake(void) {}
 #endif
+#include "runtime_applinks.c"
 #include "runtime_spotify_apple.c"

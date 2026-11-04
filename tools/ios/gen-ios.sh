@@ -192,6 +192,34 @@ if [ -n "$location_usage" ]; then
   extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
 fi
 
+# The links that open this app (docs/app-links.md). RAE_APP_LINKS lists hosts
+# (host or host/path; iOS takes the paths from the website's
+# apple-app-site-association, so only the host is used here): each becomes an
+# applinks: associated domain in an entitlements file, a capability the team's
+# App ID must allow. RAE_APP_SCHEME registers a custom scheme in Info.plist.
+entitlements_line=""
+if [ -n "${RAE_APP_LINKS:-}" ]; then
+  domains=""
+  for link in $RAE_APP_LINKS; do
+    case "$link" in
+      *'<'*|*'>'*|*'&'*|*'"'*|*://*) echo "error: an RAE_APP_LINKS entry is host or host/path, no scheme: $link" >&2; exit 1 ;;
+    esac
+    domains="$domains<string>applinks:${link%%/*}</string>"
+  done
+  cat > "$gen/RaeApp.entitlements" <<ENTITLEMENTS
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.developer.associated-domains</key><array>$domains</array></dict></plist>
+ENTITLEMENTS
+  entitlements_line="XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS \"$gen/RaeApp.entitlements\""
+fi
+if [ -n "${RAE_APP_SCHEME:-}" ]; then
+  case "$RAE_APP_SCHEME" in
+    *[!a-z0-9.+-]*) echo "error: RAE_APP_SCHEME is lowercase letters, digits, . + -: $RAE_APP_SCHEME" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>$bundle_id</string><key>CFBundleURLSchemes</key><array><string>$RAE_APP_SCHEME</string></array></dict></array>"
+fi
+
 # 2. Stage the files the app reads at run time (tools/stage-app-assets.sh,
 #    shared with tools/android): each at the relative path the app names it
 #    by, so the reads resolve after the chdir shim.
@@ -351,6 +379,7 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+  $entitlements_line
   XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target")
 $(printf "%b" "$icon_properties")
 $(printf "%b" "$wamr_cmake")
