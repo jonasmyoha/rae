@@ -70,13 +70,69 @@ func setMoverAfterContact(
   }
 }
 
+# A mover that is a copy of another client's walker (a networked session). A bump
+# never moves it, and two copies do not bump: each is where its own client says
+# (resolveRemoteContact has why). `localYields`: in a resting overlap with this copy,
+# this client's walker is the one to move out. Every client must agree who that is.
+# `speed`: how fast that walker says it moves (its pose).
+type RemoteMover {
+  localYields: Bool
+  speed: Float
+}
+
+# The bump of this client's walker with a copy: only the walker changes. 1 when it
+# is knocked over, else 0.
+func bumpLocalWithCopy(
+  characters: mod ComponentTable(CharacterBody)
+  localId: view EntityId
+  copyId: view EntityId
+  remote: view RemoteMover
+  knocks: mod ComponentTable(KnockRequest)
+) ret Int {
+  let walker: view CharacterBody = componentView(this: characters, entityId: localId)
+  let copied: view CharacterBody = componentView(this: characters, entityId: copyId)
+  let contact: CharacterContact = resolveRemoteContact(
+    shapeA: characterShapeOf(character: walker)
+    shapeB: characterShapeOf(character: copied)
+    positionA: moverPosition(character: walker)
+    velocityA: moverVelocity(character: walker)
+    positionB: moverPosition(character: copied)
+    velocityB: moverVelocity(character: copied)
+    remoteSpeed: remote.speed
+    localYields: remote.localYields
+  )
+  if contact.touching is false {
+    ret 0
+  }
+  let falls: Bool = contact.knockdown is Knockdown.aFalls
+  setMoverAfterContact(
+    character: componentMod(this: characters, entityId: localId)
+    position: contact.positionA
+    velocity: contact.velocityA
+    falls: falls
+  )
+  if not falls {
+    ret 0
+  }
+  componentSet(
+    this: knocks
+    entityId: localId
+    data: KnockRequest {
+      velocity: Vec3.create(x: contact.velocityA.x, y: contact.velocityA.y, z: 1.5)
+    }
+  )
+  ret 1
+}
+
 # One fixed step of bumps among every mover in `characters` not `parked`:
 # each overlapping pair pushed apart and shoved; whoever a bump knocks over
 # gets a KnockRequest in `knocks` with the velocity it falls at (a little
-# upward, so the body leaves the ground). The number knocked over.
+# upward, so the body leaves the ground). A copy in `remotes` is met as
+# bumpLocalWithCopy says. The number knocked over.
 func bumpMovers(
   characters: mod ComponentTable(CharacterBody)
   parked: view ComponentTable(MoverParked)
+  remotes: view ComponentTable(RemoteMover)
   knocks: mod ComponentTable(KnockRequest)
 ) ret Int {
   var fallen: Int = 0
@@ -90,6 +146,31 @@ func bumpMovers(
         table: parked
         entityId: idB
       ) or componentHas(this: knocks, entityId: idA) or componentHas(this: knocks, entityId: idB) {
+        continue
+      }
+      let copyA: Bool = componentHas(this: remotes, entityId: idA)
+      let copyB: Bool = componentHas(this: remotes, entityId: idB)
+      if copyA and copyB {
+        continue
+      }
+      if copyA {
+        fallen = fallen + bumpLocalWithCopy(
+          characters: characters
+          localId: idB
+          copyId: idA
+          remote: componentView(this: remotes, entityId: idA)
+          knocks: knocks
+        )
+        continue
+      }
+      if copyB {
+        fallen = fallen + bumpLocalWithCopy(
+          characters: characters
+          localId: idA
+          copyId: idB
+          remote: componentView(this: remotes, entityId: idB)
+          knocks: knocks
+        )
         continue
       }
       let a: CharacterBody = componentCopyAtDefault(this: characters, i: i)

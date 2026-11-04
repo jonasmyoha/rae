@@ -1,0 +1,54 @@
+# How a remote walker's character follows that walker's pose, on its own so a test
+# without a window can run it (compiler/tests/cases/1343_walkers_on_one_spot).
+import Math
+open Vec3
+open ecs/ComponentTable
+open ecs/Entity
+open app3d/CharacterMovers
+open app3d/Wander
+open app3d/walkerNetSystem/WalkerNetSystem
+
+# Farther than this (m) from its remote walker, a character is put there
+const remoteTeleportDistance: Float = 3.0
+
+# Nearer than this (m), it stands
+const remoteArriveDistance: Float = 0.15
+
+# Faster than this (m/s), the remote walker runs
+const remoteRunSpeed: Float = 2.5
+
+# How a remote walker's character at `at` goes toward its pose: it stands within
+# remoteArriveDistance of it, else walks or runs to it
+func remoteCopyDrive(at: view Vec3, pose: view WalkerPose) ret MoverDrive {
+  let dx: Float = pose.position.x - at.x
+  let dy: Float = pose.position.y - at.y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  var drive: MoverDrive = createMoverDrive()
+  drive.yaw = pose.heading
+  if distance > remoteArriveDistance and distance <= remoteTeleportDistance {
+    drive.intent.moveY = 1.0
+    drive.intent.walking = pose.speed < remoteRunSpeed and distance < 1.0
+    drive.yaw = headingTo(
+      x: at.x
+      y: at.y
+      toX: pose.position.x
+      toY: pose.position.y
+    )
+  }
+  ret drive
+}
+
+# Whether this client's walker is the one to get out of an overlap with the walker of
+# `netEntityId`: the lower net id gives way. Every client holds the same net ids, so
+# they agree. Before this side knows its own, it gives way.
+func walkerLocalYields(net: view WalkerNet, netEntityId: view EntityId) ret Bool {
+  let ownEntityId: EntityId = walkerNetOwnEntityId(net: net)
+  if not componentHas(this: net.world.replicated, entityId: ownEntityId) or not componentHas(
+    this: net.world.replicated
+    entityId: netEntityId
+  ) {
+    ret true
+  }
+  let ownNetId: Int = componentView(this: net.world.replicated, entityId: ownEntityId).netId
+  ret ownNetId < componentView(this: net.world.replicated, entityId: netEntityId).netId
+}

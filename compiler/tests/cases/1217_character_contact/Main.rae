@@ -251,6 +251,7 @@ func main() {
   var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
   var parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
   var knocks: ComponentTable(KnockRequest) = ComponentTable.create(KnockRequest)
+  let remotes: ComponentTable(RemoteMover) = ComponentTable.create(RemoteMover)
   let runner: EntityId = allocEntity(this: allocator)
   let stander: EntityId = allocEntity(this: allocator)
   let lying: EntityId = allocEntity(this: allocator)
@@ -272,7 +273,12 @@ func main() {
   addTag(MoverParked, table: parked, entityId: lying)
   componentMod(this: characters, entityId: runner).mover.velocity.x = 5.0
   let lyingBefore: Float = componentView(this: characters, entityId: lying).mover.transform.p.y
-  let fallen: Int = bumpMovers(characters: characters, parked: parked, knocks: knocks)
+  let fallen: Int = bumpMovers(
+    characters: characters
+    parked: parked
+    remotes: remotes
+    knocks: knocks
+  )
   let apartNow: Float = componentView(this: characters, entityId: stander).mover.transform.p.x - componentView(
     this: characters
     entityId: runner
@@ -298,7 +304,12 @@ func main() {
   ).mover.transform.p.x + 0.45
   componentMod(this: characters, entityId: runner).mover.velocity.x = 1.4
   componentMod(this: characters, entityId: stander).mover.velocity.x = 0.0
-  let walkFallen: Int = bumpMovers(characters: characters, parked: parked, knocks: walkKnocks)
+  let walkFallen: Int = bumpMovers(
+    characters: characters
+    parked: parked
+    remotes: remotes
+    knocks: walkKnocks
+  )
   check(
     condition: walkFallen is 0 and componentView(this: characters, entityId: stander).mover.velocity.x > 0.0
     message: "a walk into someone standing shoves them, and nobody falls"
