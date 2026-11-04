@@ -1,0 +1,57 @@
+# A game's own messages through a walker session, for a game on the kit
+# (docs/walker-net.md): player to host, host to every player, reliable and in order.
+open net/Connection
+open net/relay/RelayConnections
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/walkerNetSystem/WalkerGameMessages
+
+# A player's message to the host, reliable and in order (Connection): false when
+# this side has no working connection to a host now
+func walkerNetSendToHost(net: mod WalkerNet, bytes: view List(UInt8)) ret Bool {
+  if net.settings.mode is not WalkerNetMode.join or not connectionIsConnected(
+    connection: net.relayPlayer.connection
+  ) {
+    ret false
+  }
+  let wire: List(UInt8) = gameMessageOnWire(bytes: bytes)
+  ret connectionSendReliable(
+    connection: net.relayPlayer.connection
+    bytes: wire
+    start: 0
+    count: wire.length
+  )
+}
+
+# The host's message to every connected player, reliable and in order: false on a
+# side that does not host
+func walkerNetSendToPlayers(net: mod WalkerNet, bytes: view List(UInt8)) ret Bool {
+  if net.settings.mode is not WalkerNetMode.host {
+    ret false
+  }
+  let wire: List(UInt8) = gameMessageOnWire(bytes: bytes)
+  loop var i: Int = 0, i < net.relayHost.peers.length, ++i {
+    if let hostPeer: mod HostPeer = net.relayHost.peers.modAt(index: i) {
+      if connectionIsConnected(connection: hostPeer.connection) {
+        let queued: Bool = connectionSendReliable(
+          connection: hostPeer.connection
+          bytes: wire
+          start: 0
+          count: wire.length
+        )
+      }
+    }
+  }
+  ret true
+}
+
+# The game's messages that came since the last call
+func walkerNetTakeGameMessages(net: mod WalkerNet) ret List(WalkerGameMessage) {
+  let messages: List(WalkerGameMessage) = own net.gameMessages
+  net.gameMessages = {}
+  ret messages
+}
+
+# Whether the player with this relay peer id is in the session (host)
+func walkerNetHasPeer(net: view WalkerNet, peerId: view Int) ret Bool {
+  ret seatIndexOf(net: net, peerId: peerId) >= 0
+}

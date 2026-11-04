@@ -1,0 +1,39 @@
+# A game's own messages through a walker session (docs/walker-net.md): the message
+# and how it looks on a connection. WalkerNetGameMessages.rae sends and takes them.
+
+# From whom (a player's relay peer id at the host; -1 at a player, it is the host)
+# and its bytes
+type WalkerGameMessage {
+  peerId: Int
+  bytes: List(UInt8)
+}
+
+# The first byte of a game's message on a connection: the session's own messages
+# (lib/net/session, lib/net/replication) use small numbers
+const walkerGameMessageTag: Int = 200
+
+# Keep `message` in `into` when it is a game's message
+func takeGameMessage(
+  message: view List(UInt8)
+  peerId: view Int
+  into: mod List(WalkerGameMessage)
+) ret Bool {
+  if message.length is 0 or message.copyAtFallback(index: 0, fallback: 0) as Int is not walkerGameMessageTag {
+    ret false
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: message.length - 1)
+  loop var i: Int = 1, i < message.length, ++i {
+    bytes.add(value: message.copyAtFallback(index: i, fallback: 0))
+  }
+  into.add(value: WalkerGameMessage { peerId: peerId, bytes: own bytes })
+  ret true
+}
+
+func gameMessageOnWire(bytes: view List(UInt8)) ret List(UInt8) {
+  var wire: List(UInt8) = List.create(UInt8, cap: bytes.length + 1)
+  wire.add(value: walkerGameMessageTag as UInt8)
+  loop var i: Int = 0, i < bytes.length, ++i {
+    wire.add(value: bytes.copyAtFallback(index: i, fallback: 0))
+  }
+  ret wire
+}
