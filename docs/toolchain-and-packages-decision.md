@@ -256,6 +256,30 @@ the sparse checkout, and a `status` verdict that knows `./rae` builds with the p
 pin of its own: the generator copies the block from a tracked pack. A pin before 0.2.340 still writes `rae.lock` on a
 build, which is why SUMU moved on to 0.3.0 the same day. A pin before 0.2.349 cannot build its iOS frameworks on Xcode 27.
 
+Game proto1 moved second (pin 0.2.321, the tag on the commit its worktree `rae-pinned` held, now deleted). The C the
+compiler emits for it stayed identical but for the toolchain's path, so the move cannot have changed the game. A pin
+before 0.2.340 writes an ignored `rae.lock`, and its iOS frameworks must be built on an Xcode before 27 or copied into the
+store, until the pin moves.
+
+Game proto2 moved third (pin 0.2.340, both packs). Its old locks named 0.2.329, but its `.env` pointed at the live Rae
+checkout, so its code had moved on: it imports a module added in 0.2.337. So a lock that follows a live checkout is not
+evidence of what a project builds on: build at the tag before pinning. 0.2.340 is the first version that never writes
+`rae.lock`, which is the lowest pin worth choosing when a project can use it.
+
+Both active games then moved to 0.3.0, game proto1 and game proto2: **pin an active project to the current version.** An old
+pin only suits a project nobody is working on, which keeps it on old tools and an old `rae.lock`. Game proto1 needed two
+small changes, and is the first project outside this repo to use a package: `physicsScenes` by `git`, `subdir`, `version` and
+`hash` from GitHub, where a fresh clone fetched it with no local Rae. A project that builds its tests in isolated folders
+gives each a pack declaring the copy it fetched.
+
+Game proto3 moved last (pin 0.1.91, for now, as nobody is working on it), which finished the migration: every project now
+builds through `./rae`. The commit
+in its lock no longer exists after a history rewrite, but the tag `v0.1.91` built it with no change. Its lockstep hash
+over 1200 ticks stayed the one its history records, the best evidence a move changed nothing. At this pin `make ios`
+needs Xcode 16 or older, because `tools/ios` at 0.1.91 targets iOS 13.
+
+This was the plan:
+
 Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
 and its `make rae-pin`; game proto2; game proto3, starting from `v0.1.91`. Each `scripts/rae-env.sh` shrinks
 to what is truly the project's own, or goes. Each project's `.env` line that sets `RAE_ROOT` must go in
