@@ -1,0 +1,23 @@
+# A package may hold a function with the package's own name: the first part of a
+# qualified call is still the package, and both functions can be called.
+import one/One
+
+type Inner {
+  value: Int
+}
+
+type Holder {
+  inner: Inner
+}
+
+func doubled(this: view Inner) ret Int {
+  ret this.value * 2
+}
+
+func main() ret Int {
+  log("other = {one.One.other()}")
+  log("one = {one.One.one()}")
+  let one: Holder = { inner: { value: 3 } }
+  log("a value named like the package is the value: {one.inner.doubled()}")
+  ret 0
+}

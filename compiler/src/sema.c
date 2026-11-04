@@ -8222,9 +8222,13 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 AstExpr* mem = expr->as.method_call.object;
                 Str pkg = mem->as.member.object->as.ident;
                 Str mod = mem->as.member.member;
+                // A function named like the package (`func one` in package `one`) is
+                // no value: `one.Module` cannot mean a call, so it does not hide the
+                // package. The same rule as the two-part `module.name` path.
                 Symbol* pkgSym = symbol_table_lookup(symbols, pkg);
                 bool pkgIsValue = pkgSym && pkgSym->decl
-                    && pkgSym->decl->kind != AST_DECL_TYPE && pkgSym->decl->kind != AST_DECL_ENUM;
+                    && pkgSym->decl->kind != AST_DECL_TYPE && pkgSym->decl->kind != AST_DECL_ENUM
+                    && pkgSym->decl->kind != AST_DECL_FUNC;
                 char qbuf[512];
                 int qn = snprintf(qbuf, sizeof qbuf, "%.*s/%.*s",
                     (int)pkg.len, pkg.data, (int)mod.len, mod.data);
