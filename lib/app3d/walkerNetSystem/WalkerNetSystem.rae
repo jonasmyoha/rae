@@ -16,6 +16,7 @@
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
+open ecs/Event
 open Vec3
 open Sys
 open String
@@ -138,6 +139,22 @@ type WalkerSeat {
   slotId: Int
 }
 
+# What an app hears when this side's place in the session changes. Which side it is
+# now is walkerNetIsHost.
+enum WalkerNetEvent {
+  none
+  # The relay promoted this player: it hosts now, with the same invite
+  becameHost
+  # Another player hosts now: this side reconnects to it
+  hostChanged
+  # This side hosted, the relay lost it, and it came back as a player
+  becamePlayer
+  # This side hosted and has no session to go back to: a new one, a new invite
+  hostingNewSession
+  # A player that reconnected has the host's word again
+  playingAgain
+}
+
 type WalkerNet {
   settings: WalkerNetSettings
   config: ReplicationConfig
@@ -158,6 +175,12 @@ type WalkerNet {
   started: Bool
   # This side was hosting when the relay lost it, and is on its way back
   lostHosting: Bool
+  # What changed about this side in the session, this frame (walkerNetEvents), and
+  # the last change of role
+  events: EventQueue(WalkerNetEvent)
+  lastRoleEvent: WalkerNetEvent
+  # A player that reconnected, until its first desync check says it plays again
+  awaitingPlay: Bool
   # The connections' settings, with the session key that authenticates
   # every handshake (the host makes it; a player reads it from the invite)
   connectionConfig: ConnectionConfig
@@ -244,6 +267,9 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
     settledFrames: 0
     started: false
     lostHosting: false
+    events: createEventQueue(WalkerNetEvent)
+    lastRoleEvent: WalkerNetEvent.none
+    awaitingPlay: false
     startMs: 0
     playingAtMs: -1
     message: List.create(UInt8, cap: 1200)
@@ -406,6 +432,7 @@ func poseSum(
 
 # One frame: the local walker's pose out, everyone's in
 func walkerNetFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  eventClear(this: net.events)
   if net.settings.mode is WalkerNetMode.host {
     walkerNetHostFrame(net: net, localPose: localPose, nowMs: nowMs)
   } else if net.settings.mode is WalkerNetMode.join {
@@ -499,6 +526,8 @@ func walkerNetTakeOver(net: mod WalkerNet, localPose: view WalkerPose, nowMs: vi
     addCheckEntity(net: net)
   }
   net.settings.mode = WalkerNetMode.host
+  net.awaitingPlay = false
+  sendRoleEvent(net: net, event: WalkerNetEvent.becameHost)
   log("[net] the host went: hosting the session now")
 }
 
@@ -521,6 +550,8 @@ func hostLost(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
   }
   log("[net] the relay lost this host: joining the session again as a player")
   net.settings.mode = WalkerNetMode.join
+  net.awaitingPlay = true
+  sendRoleEvent(net: net, event: WalkerNetEvent.becamePlayer)
   relayPlayerRejoin(
     player: net.relayPlayer
     connectionConfig: net.connectionConfig
@@ -541,6 +572,8 @@ func hostAnew(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
   net.session = createWalkerSession()
   net.seats.clear()
   net.settings.mode = WalkerNetMode.host
+  net.awaitingPlay = false
+  sendRoleEvent(net: net, event: WalkerNetEvent.hostingNewSession)
   # The time this side has been in a session goes on counting
   let startMs: Int = net.startMs
   let started: Bool = walkerNetStart(net: net, localPose: localPose, nowMs: nowMs)
@@ -708,10 +741,34 @@ func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: v
   }
 }
 
-# What this player knows of the session, gone: a rejoin starts from nothing. The
-# host's side freed this player's slot and entity when it went, so it comes back
-# as a new player. Every entity here is freed, so the app's characters for them go
-# too, and new ones come with the next snapshot.
+# This frame's changes to this side's place in the session. Read them after the
+# frame; each frame's are gone by the next.
+func walkerNetEvents(net: view WalkerNet) ret List(WalkerNetEvent) {
+  var events: List(WalkerNetEvent) = {}
+  loop var i: Int = 0, i < eventCount(this: net.events), ++i {
+    events.add(value: eventAt(this: net.events, i: i))
+  }
+  ret events
+}
+
+func sendRoleEvent(net: mod WalkerNet, event: view WalkerNetEvent) {
+  eventSend(this: net.events, value: event)
+  net.lastRoleEvent = event
+}
+
+# This player's connection to the host starts over, with this host or a new one.
+# What it sees stays until the whole snapshot that comes next says otherwise: the
+# walkers keep their entities, so the app's characters for them carry on.
+func restartPlayerSession(net: mod WalkerNet) {
+  net.replicationPlayer = replicaPlayerForNewHost(player: net.replicationPlayer)
+  net.sessionPlayer = createSessionPlayer()
+  net.helloSent = false
+  net.playingAtMs = -1
+  net.awaitingPlay = true
+}
+
+# Everything this side knows of the session, gone: its session ended, or it hosted
+# and starts over. Every entity here is freed, so the app's characters go too.
 func forgetPlayerSession(net: mod WalkerNet) {
   freeAllOf(WalkerPose, net: net, table: net.world.poses)
   freeAllOf(WalkerPose, net: net, table: net.world.shownPoses)
@@ -743,6 +800,9 @@ func recoverPlayerSession(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
     if net.lostHosting and clientState is RelayClientState.refused and net.relayPlayer.client.refusedReason is refusedUnknownSession {
       net.lostHosting = false
       hostAnew(net: net, localPose: localPose, nowMs: nowMs)
+    } else if componentCount(this: net.world.replicated) > 0 {
+      # Nobody is coming back to these walkers
+      forgetPlayerSession(net: net)
     }
     ret
   }
@@ -753,7 +813,7 @@ func recoverPlayerSession(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
     ret
   }
   log("[net] lost the session ({clientState}, {connectionState}): joining again")
-  forgetPlayerSession(net: net)
+  restartPlayerSession(net: net)
   if clientLost {
     relayPlayerRejoin(
       player: net.relayPlayer
@@ -781,7 +841,8 @@ func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
     }
     # Another player hosts now: connect to it. Its hello is known by its relay peer
     # id, so this player gets its own walker back, and a whole snapshot.
-    forgetPlayerSession(net: net)
+    restartPlayerSession(net: net)
+    sendRoleEvent(net: net, event: WalkerNetEvent.hostChanged)
     relayPlayerReconnect(
       player: net.relayPlayer
       connectionConfig: net.connectionConfig
@@ -845,6 +906,10 @@ func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
       if let check: WalkerNetCheck = componentCopyAt(this: net.world.checks, i: 0) {
         if check.tick is net.replicationPlayer.appliedTick {
           net.checks = net.checks + 1
+          if net.awaitingPlay {
+            net.awaitingPlay = false
+            eventSend(this: net.events, value: WalkerNetEvent.playingAgain)
+          }
           if poseSum(poses: net.world.poses, scale: net.config.floatScale, values: net.values) is not check.sum {
             net.desyncs = net.desyncs + 1
           }
@@ -911,6 +976,15 @@ func walkerNetOwnEntityId(net: view WalkerNet) ret EntityId {
 # The session's time (settings.seconds) is up
 func walkerNetTimeUp(net: view WalkerNet, nowMs: view Int) ret Bool {
   ret net.started and net.settings.seconds > 0 and nowMs - net.startMs >= net.settings.seconds * 1000
+}
+
+# This frame's events, as the app's log lines
+func logWalkerNetEvents(net: view WalkerNet) {
+  loop var i: Int = 0, i < eventCount(this: net.events), ++i {
+    if eventAt(this: net.events, i: i) is WalkerNetEvent.playingAgain {
+      log("[net] playing again: {walkerNetRemoteCount(net: net)} other walkers")
+    }
+  }
 }
 
 # How many remote walkers this side knows now

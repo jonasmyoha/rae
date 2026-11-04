@@ -115,6 +115,19 @@ func createReplicationPlayer(config: view ReplicationConfig) ret ReplicationPlay
   }
 }
 
+# The same player starting over with a new host (or the same host on a new
+# connection): nothing of the old snapshots, and a whole snapshot comes next. It
+# keeps which entity holds which net id, so what the new host still has stays the
+# same entity here, and only what it lacks goes (replicaSyncEntities). A new host
+# keeps net ids (replicationHostTakeOver).
+func replicaPlayerForNewHost(player: view ReplicationPlayer) ret ReplicationPlayer {
+  var fresh: ReplicationPlayer = createReplicationPlayer(config: player.config)
+  fresh.entityByNetId = player.entityByNetId
+  fresh.netIdByEntityIndex = player.netIdByEntityIndex
+  fresh.ownNetId = player.ownNetId
+  ret fresh
+}
+
 func playerSlot(player: view ReplicationPlayer, tick: view Int) ret Int {
   ret tick % player.config.historySize
 }

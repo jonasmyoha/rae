@@ -10,6 +10,7 @@ open net/relay/RelayClient
 open net/relay/Relay
 open Vec3
 open ecs/ComponentTable
+open ecs/Entity
 open app3d/walkerNetSystem/WalkerNetSystem
 
 func settingsFor(mode: view WalkerNetMode, port: view Int, device: view Int) ret WalkerNetSettings {
@@ -183,6 +184,109 @@ func totalDesyncs(stage: view Stage) ret Int {
   ret desyncs
 }
 
+# The net entities of the walkers `index` sees, other than its own
+func walkerEntities(stage: view Stage, index: view Int) ret List(EntityId) {
+  var entities: List(EntityId) = {}
+  if let side: view WalkerNet = stage.sides.viewAt(index: index) {
+    let ownEntityId: EntityId = walkerNetOwnEntityId(net: side)
+    loop var i: Int = 0, i < componentCount(this: side.world.poses), ++i {
+      let entityId: EntityId = componentEntityAt(this: side.world.poses, i: i)
+      if entityId is not ownEntityId {
+        entities.add(value: entityId)
+      }
+    }
+  }
+  ret entities
+}
+
+func holds(entities: view List(EntityId), entityId: view EntityId) ret Bool {
+  loop var i: Int = 0, i < entities.length, ++i {
+    if entities.copyAtFallback(index: i, fallback: noEntity()) is entityId {
+      ret true
+    }
+  }
+  ret false
+}
+
+# All of `after` was in `before`: no walker got a new entity, so none a new character
+func keptAll(before: view List(EntityId), after: view List(EntityId)) ret Bool {
+  if after.length is 0 {
+    ret false
+  }
+  loop var i: Int = 0, i < after.length, ++i {
+    if not holds(entities: before, entityId: after.copyAtFallback(index: i, fallback: noEntity())) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func roleOf(stage: view Stage, index: view Int) ret String {
+  if let side: view WalkerNet = stage.sides.viewAt(index: index) {
+    ret "{side.lastRoleEvent}"
+  }
+  ret ""
+}
+
+# The host is gone for good (not stepped again), and the connections time out before
+# the relay does, as with the default timeouts: the players keep what they see while
+# they wait, the survivors keep their entities through it, and the app is told.
+func hostKilled() {
+  var stage: Stage = createStage(peerTimeoutMs: 1000, connectionTimeoutMs: 300)
+  hostAt(stage: stage, index: 0)
+  let invite: String = waitForInvite(stage: stage, index: 0)
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceDesktop
+    connectionTimeoutMs: 300
+  )
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceMobile
+    connectionTimeoutMs: 300
+  )
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceMobile
+    connectionTimeoutMs: 300
+  )
+  log("four sides playing: {runUntilSettled(stage: stage, others: 3, limitMs: 3000)}")
+  let promotedBefore: List(EntityId) = walkerEntities(stage: stage, index: 1)
+  let otherBefore: List(EntityId) = walkerEntities(stage: stage, index: 2)
+  setAwake(stage: stage, index: 0, value: false)
+  # Past the connections' timeout, before the relay's
+  run(stage: stage, milliseconds: 600)
+  log(
+    "while the relay still waits, the walkers stay: {walkerEntities(stage: stage, index: 2).length is 3}"
+  )
+  log("the three play on: {runUntilSettled(stage: stage, others: 2, limitMs: 3000)}")
+  log(
+    "the promoted one hosts: {isHost(stage: stage, index: 1)}; it was told: {roleOf(
+      stage: stage
+      index: 1
+    )}"
+  )
+  log("another player was told: {roleOf(stage: stage, index: 2)}")
+  log(
+    "the promoted one keeps its walkers' entities: {keptAll(
+      before: promotedBefore
+      after: walkerEntities(stage: stage, index: 1)
+    )}"
+  )
+  log(
+    "another player keeps its walkers' entities: {keptAll(
+      before: otherBefore
+      after: walkerEntities(stage: stage, index: 2)
+    )}"
+  )
+  run(stage: stage, milliseconds: 300)
+  log("desyncs {totalDesyncs(stage: stage)}")
+  closeRelayServer(server: stage.relay)
+}
+
 func hostStallsPastTheRelay() {
   var stage: Stage = createStage(peerTimeoutMs: 300, connectionTimeoutMs: 5000)
   hostAt(stage: stage, index: 0)
@@ -219,6 +323,7 @@ func hostStallsPastTheRelay() {
       index: 1
     )}"
   )
+  log("it was told: {roleOf(stage: stage, index: 0)}")
   # And the next host can go too
   setAwake(stage: stage, index: 1, value: false)
   log("the new host stalled too: {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}")
@@ -241,6 +346,7 @@ func hostAloneGetsANewSession() {
   log(
     "it hosts a new session: {isHost(stage: stage, index: 0)}, a new invite {newInvite.length() > 0 and newInvite is not invite}"
   )
+  log("it was told: {roleOf(stage: stage, index: 0)}")
   addPlayer(
     stage: stage
     invite: newInvite
@@ -303,6 +409,7 @@ func hostQuits() {
 }
 
 func main() ret Int {
+  hostKilled()
   hostStallsPastTheRelay()
   hostAloneGetsANewSession()
   hostStallsOnlyPastItsConnections()
