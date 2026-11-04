@@ -1,0 +1,16 @@
+# embedText(file:): a text file built into the program as a String at build time, in a function
+# or a const, with quotes, braces, backslashes and Unicode as they are. No file is opened at run
+# time. In a package's module a path is tried next to the file, then in the package's folder, so
+# the project's own scenes/hud.txt here does not reach it.
+open sdk/deep/Texts
+
+const atTop: String = embedText(file: "data/note.txt")
+
+func main() {
+  let text: String = embedText(file: "data/note.txt")
+  log("[{text}] {text.length()}")
+  log("const is the same: {atTop is text}")
+  log("the project's: {embedText(file: "scenes/hud.txt")}")
+  log("in the package, beside the module: {besideText()}")
+  log("in the package, in its folder: {packageText()}")
+}

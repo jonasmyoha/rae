@@ -57,4 +57,22 @@ ShaderValidation shader_validate(const ShaderComposition* composition,
 /* The naga executable this compiler would run, or NULL. */
 const char* shader_naga_path(void);
 
+/* The `embedText(file: "...")` compile-time construct: one text file built into the program as
+ * a String. A path is tried next to the declaring `.rae` file. In a package's module
+ * (`package_dir` set) it is then tried in the package's folder and nowhere else, since a package
+ * sees only its own files; otherwise against the project root and the toolchain stdlib, as for a
+ * shader. An absolute path, or `..` in a package's module, is refused. On a miss `err` says so,
+ * and the result is false. */
+bool embed_text_read(Arena* arena,
+                     const char* declaring_file,
+                     const char* package_dir,
+                     const char* project_root,
+                     const char* stdlib_dir,
+                     const char* path,
+                     char** out_text,
+                     size_t* out_len,
+                     const char** out_resolved,
+                     char* err,
+                     size_t err_cap);
+
 #endif /* SHADER_COMPOSE_H */

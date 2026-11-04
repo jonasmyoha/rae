@@ -82,6 +82,9 @@ void rae_deps_print_tree(FILE* out, const char* root_label, const char* stdlib_d
  * first). A package reaches itself, and a dep it declares in its own pack (the
  * root: in the project's pack); never the project that depends on it. */
 int rae_deps_owner_of(const char* file_path);
+
+/* The folder of dep `index`. */
+const char* rae_deps_dir(int index);
 bool rae_deps_package_reaches(int from, int to);
 /* The name of dep `index` (NULL for -1) */
 const char* rae_deps_name(int index);

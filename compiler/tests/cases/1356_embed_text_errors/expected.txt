@@ -1,0 +1,15 @@
+tests/cases/1356_embed_text_errors/Main.rae:4:35: embedText(file: "...") takes one argument, 'file', a string literal: the file is read at build time, so its name cannot be computed
+     4 |   let computed: String = embedText(file: name)
+       |                                   ^~~~
+tests/cases/1356_embed_text_errors/Main.rae:5:34: embedText(file: "...") takes one argument, 'file', a string literal: the file is read at build time, so its name cannot be computed
+     5 |   let unnamed: String = embedText("data.txt")
+       |                                  ^~~~
+tests/cases/1356_embed_text_errors/Main.rae:6:35: embedText: '/etc/hosts' is an absolute path, which only this machine has; name a file of the project
+     6 |   let absolute: String = embedText(file: "/etc/hosts")
+       |                                   ^~~~
+tests/cases/1356_embed_text_errors/Main.rae:7:34: embedText: 'no/such/file.txt' not found next to this file or in the project
+     7 |   let missing: String = embedText(file: "no/such/file.txt")
+       |                                  ^~~~
+tests/cases/1356_embed_text_errors/Main.rae:8:31: type mismatch: expected Int, got String
+     8 |   let aNumber: Int = embedText(file: "Main.rae")
+       |                               ^~~~
