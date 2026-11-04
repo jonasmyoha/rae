@@ -1,0 +1,81 @@
+# lib/LocalNotification on a real iPhone: nothing else can show one ringing. Off iOS it has
+# nothing to test, says so and passes. On a phone it asks, then schedules:
+#   closed      in 45 s: must ring with the app closed (end it after it logs "scheduled")
+#   replaced    in 45 s, then the same id again: only "replaced, the new one" rings
+#   cancelled   in 45 s, then cancelled: must not ring
+#   past        a moment ago: answers false
+# Run: RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh checks/localNotification, tap Allow, end the
+# app, and look at the Lock Screen or Notification Center after 45 s.
+import Gpu2d
+open Gpu2dCanvas
+open LocalNotification
+
+const delayMs: Int = 45000
+
+func scheduleAll() ret Bool {
+  let at: Int = nowMs() + delayMs
+  let closed: Bool = localNotificationSchedule(
+    id: "closed"
+    atEpochMs: at
+    title: "Rae check"
+    body: "rang with the app closed"
+  )
+  let first: Bool = localNotificationSchedule(
+    id: "replaced"
+    atEpochMs: at
+    title: "Rae check"
+    body: "WRONG: this one was replaced"
+  )
+  let second: Bool = localNotificationSchedule(
+    id: "replaced"
+    atEpochMs: at
+    title: "Rae check"
+    body: "replaced, the new one"
+  )
+  let toCancel: Bool = localNotificationSchedule(
+    id: "cancelled"
+    atEpochMs: at
+    title: "Rae check"
+    body: "WRONG: this one was cancelled"
+  )
+  let cancelled: Bool = localNotificationCancel(id: "cancelled")
+  let past: Bool = localNotificationSchedule(
+    id: "past"
+    atEpochMs: nowMs() - 1000
+    title: "Rae check"
+    body: "WRONG: this moment was in the past"
+  )
+  log(
+    "scheduled: closed {closed}, replaced {first} {second}, cancel {toCancel} {cancelled}, past {past}"
+  )
+  ret closed and first and second and toCancel and cancelled and past is false
+}
+
+func main() ret Int {
+  when Target.os is Os.ios {
+    log("asked: {localNotificationAsk()}")
+    Gpu2d.initWindow(width: 390, height: 844, title: "Local notification check")
+    var canvas: Gpu2dCanvas = createGpu2dCanvas()
+    log("cleared: {localNotificationClearDelivered()}")
+    var scheduled: Bool = false
+    let startedMs: Int = nowMs()
+    loop Gpu2d.pollClose() is false and nowMs() - startedMs < 300000 {
+      Gpu2d.beginFrame(
+        canvas: canvas
+        r: 0.1
+        g: 0.3
+        b: 0.3
+        a: 1.0
+      )
+      Gpu2d.endFrame(canvas: canvas)
+      if scheduled is false and nowMs() - startedMs > 10000 {
+        scheduled = true
+        log("all as expected: {scheduleAll()}")
+      }
+    }
+    ret 0
+  } else {
+    log("LOCAL NOTIFICATION OK: nothing to test off iOS; run it on a phone (see this file)")
+    ret 0
+  }
+}

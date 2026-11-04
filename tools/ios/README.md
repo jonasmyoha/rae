@@ -114,6 +114,10 @@ refuses the build. It is written as `NSLocationWhenInUseUsageDescription`
 whenever it is set, and CoreLocation is linked only for an app that uses
 lib/Location.
 
+**Notifications at a later time.** An app that uses lib/LocalNotification
+(docs/local-notifications.md) links UserNotifications; iOS needs no purpose
+string for them.
+
 `sh tools/ios/gen-ios-smoke.sh` checks both keys (absent by default, present
 when set, the bad combinations refused) along with the staged assets. Like
 gen-ios.sh it needs Xcode's iOS SDK: with only the Command Line Tools

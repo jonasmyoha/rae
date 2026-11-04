@@ -1,0 +1,158 @@
+# LocalNotification — a system notification at a later time, which rings also with the app
+# in the background or not running (docs/local-notifications.md).
+#
+#     localNotificationAsk()                       # once: the system remembers the answer
+#     localNotificationSchedule(id: "task1", atEpochMs: when, title: "Milk", body: "Buy it")
+#     localNotificationCancel(id: "task1")
+#     localNotificationCancelAll()                 # the ones still to come
+#     localNotificationClearDelivered()            # the ones in Notification Center
+#
+# The moment is by the real clock, never RAE_NOW: the phone rings by its own clock. A moment
+# in the past schedules nothing and answers false, and the same id replaces the one before.
+# While the app is in the foreground the system shows nothing.
+#
+# On iOS this is UNUserNotificationCenter (runtime_local_notification_apple.h): each call
+# answers true when the system was asked. Elsewhere (the Mac, the web) every call does nothing
+# and answers false. In a headless run (RAE_UI_HEADLESS, RAE_SDL_HEADLESS_MS or
+# RAE_HEADLESS_FRAMES set, as for the window) it answers false and logs `[local-notification]
+# <what>`, so a test sees each call.
+import Sys
+cheader "runtime_local_notification_apple.h"
+
+const hasLocalNotifications: Bool = Target.os is Os.ios
+
+func rae_ext_LocalNotification_realNowMs() unsafe extern("rae_ext_LocalNotification_realNowMs") ret
+  Int
+
+when hasLocalNotifications {
+  func rae_ext_LocalNotification_ask() unsafe extern("rae_ext_LocalNotification_ask") ret Int
+
+  func rae_ext_LocalNotification_schedule(
+    id: String
+    seconds: Float64
+    title: String
+    body: String
+  ) unsafe extern("rae_ext_LocalNotification_schedule") ret Int
+
+  func rae_ext_LocalNotification_cancel(
+    id: String
+  ) unsafe extern("rae_ext_LocalNotification_cancel") ret Int
+
+  func rae_ext_LocalNotification_cancelAll() unsafe extern("rae_ext_LocalNotification_cancelAll") ret
+    Int
+
+  func rae_ext_LocalNotification_clearDelivered() unsafe extern("rae_ext_LocalNotification_clearDelivered") ret
+    Int
+
+}
+
+# A headless run, by the window's own definition (lib/Gpu2d headlessRequested)
+func localNotificationHeadless() ret Bool {
+  ret Sys.getEnv(name: "RAE_UI_HEADLESS").length() > 0 or Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
+}
+
+# Seconds from `nowEpochMs` to `atEpochMs`; none for a moment not after it
+func localNotificationDelaySeconds(atEpochMs: view Int, nowEpochMs: view Int) ret opt Float64 {
+  if atEpochMs <= nowEpochMs {
+    ret none
+  }
+  ret (atEpochMs - nowEpochMs) as Float64 / 1000.0
+}
+
+# Ask the person once; the system remembers. True when the system was asked.
+func localNotificationAsk() ret Bool {
+  if localNotificationHeadless() {
+    log("[local-notification] ask")
+    ret false
+  }
+  when hasLocalNotifications {
+    unsafe {
+      ret rae_ext_LocalNotification_ask() is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# One notification at the wall-clock moment `atEpochMs`, with the default sound. False for a
+# moment in the past, which schedules nothing. The same id replaces the one before.
+func localNotificationSchedule(
+  id: view String
+  atEpochMs: view Int
+  title: view String
+  body: view String
+) ret Bool {
+  var now: Int = 0
+  unsafe {
+    now = rae_ext_LocalNotification_realNowMs()
+  }
+  if let seconds: Float64 = localNotificationDelaySeconds(atEpochMs: atEpochMs, nowEpochMs: now) {
+    if localNotificationHeadless() {
+      log("[local-notification] schedule {id} at {atEpochMs}")
+      ret false
+    }
+    when hasLocalNotifications {
+      unsafe {
+        ret rae_ext_LocalNotification_schedule(
+          id: id
+          seconds: seconds
+          title: title
+          body: body
+        ) is 1
+      }
+    } else {
+      ret false
+    }
+  }
+  if localNotificationHeadless() {
+    log("[local-notification] schedule {id} at {atEpochMs}: in the past, nothing scheduled")
+  }
+  ret false
+}
+
+# Cancel the one still to come under `id`
+func localNotificationCancel(id: view String) ret Bool {
+  if localNotificationHeadless() {
+    log("[local-notification] cancel {id}")
+    ret false
+  }
+  when hasLocalNotifications {
+    unsafe {
+      ret rae_ext_LocalNotification_cancel(id: id) is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# Cancel all those still to come
+func localNotificationCancelAll() ret Bool {
+  if localNotificationHeadless() {
+    log("[local-notification] cancelAll")
+    ret false
+  }
+  when hasLocalNotifications {
+    unsafe {
+      ret rae_ext_LocalNotification_cancelAll() is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# Remove those already delivered from Notification Center, when the app comes back
+func localNotificationClearDelivered() ret Bool {
+  if localNotificationHeadless() {
+    log("[local-notification] clearDelivered")
+    ret false
+  }
+  when hasLocalNotifications {
+    unsafe {
+      ret rae_ext_LocalNotification_clearDelivered() is 1
+    }
+  } else {
+    ret false
+  }
+}
