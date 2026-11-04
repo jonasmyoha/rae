@@ -170,17 +170,26 @@ So the compiler and the stdlib stay one version until a package gives a real rea
 **The 3D engine is the right goal and the wrong first package.** It is large (`lib/app3d` alone is 138
 files and 36,000 lines), and two things it needs do not exist yet: a package cannot carry C code, and
 its shaders are found by paths like `lib/foo.wgsl`, which assume the stdlib's folder. `lib/stylizedTrees`,
-`lib/treeSets` and `lib/physicsScenes` also import `app3d` today.
+`lib/treeSets` and `packages/physicsScenes` also import `app3d` today.
 
 **Basic 3D in the base stdlib: leave it there for now.** It already is. Moving it out is a cost with no
 user asking for it. Decide after a second package has shown what a split costs.
 
 **The order:**
 
-1. **`qr` first** (`lib/qr`, 9 files, 3,200 lines, no C): proves `subdir`, versions and hashes.
+1. **`physicsScenes` first** (`packages/physicsScenes`, no C). Done in 0.2.347: tag `physicsScenes/v1.0.0`,
+   used by examples 122-125 and cases 1002, 1005 and 1205 with `git`, `subdir`, `version` and `hash`. It proves
+   the whole path. `qr` was the first plan, and cannot go first: `lib/ui/qrCodeSystem` and the walker kit import
+   it, and a stdlib module cannot import a package. Check who imports a module, not only what it imports.
 2. **Then a package with its own C**, which forces the design for C and shaders. `box3d` is a real
    candidate, because its C is already a separate library.
 3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
+4. **`trees`:** `treeGen`, `stylizedTrees`, `lowPolyTrees` and `treeSets`, one package. `app3d` imports them, so
+   it goes with or after the engine, and it has shaders, so it needs the design from step 2.
+5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
+
+**A file a package reads at run time** has no place yet: a path like `lib/foo` assumes the stdlib's folder. Until
+step 2 designs it, a package holds such data in a module, as `physicsScenes/HudScenes` holds its HUD scenes.
 
 ## 7. Agreed on 2026-11-04
 
@@ -234,7 +243,7 @@ Each step is its own queue item, with the full suite on each step that touches t
    Done in 0.2.344. `make -C compiler toolchain-store-test` runs it from a fresh clone with an empty
    `RAE_HOME`. It takes about two minutes, so it is not part of the full run.
 5. Shared builds per version. Done in 0.2.346.
-6. The first package: `qr`, moved to `packages/qr`.
+6. The first package: `physicsScenes`, moved to `packages/physicsScenes` (section 6). Done in 0.2.347.
 
 Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
 and its `make rae-pin`; game proto2; game proto3, starting from `v0.1.91`. Each `scripts/rae-env.sh` shrinks
