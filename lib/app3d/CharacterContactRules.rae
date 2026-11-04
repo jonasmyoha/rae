@@ -156,6 +156,9 @@ const remoteYieldShare: Float = 0.2
 # Closing slower than this (m/s) is no shove, and a walker slower than this is at rest
 const remoteShoveClosingSpeed: Float = 0.5
 
+# A copy along the line at this speed or more (m/s) is at a run
+const remoteHardHitSpeed: Float = 2.5
+
 # How near a walker on the move gets to a copy, as a share of their two radii
 const remotePressDepth: Float = 0.6
 
@@ -169,6 +172,7 @@ func resolveRemoteContact(
   positionB: view Vec3
   velocityB: view Vec3
   remoteSpeed: view Float
+  remotePeakSpeed: view Float
   localYields: view Bool
 ) ret CharacterContact {
   let apart: CharacterContact = {
@@ -220,7 +224,16 @@ func resolveRemoteContact(
       position.y = positionB.y - normalY * nearest
     }
   }
-  let both: Knockdown = knockdownOf(pushA: pushA, pushB: pushB)
+  # A copy at a run stops and starts as it catches up, and the walker's own client may
+  # already have slowed it: its hit is judged by the fastest the walker has lately said
+  # it went, in the direction its copy comes from. A copy that has slowed below a run
+  # has braked, and hits as it is.
+  var hitB: Float = pushB
+  if pushB >= remoteHardHitSpeed {
+    let copySpeed: Float = Math.sqrt(x: velocityB.x * velocityB.x + velocityB.y * velocityB.y)
+    hitB = Math.max(a: pushB, b: remotePeakSpeed * pushB / copySpeed)
+  }
+  let both: Knockdown = knockdownOf(pushA: pushA, pushB: hitB)
   var knockdown: Knockdown = Knockdown.none
   if both is Knockdown.aFalls or both is Knockdown.bothFall {
     knockdown = Knockdown.aFalls

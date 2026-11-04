@@ -88,16 +88,23 @@ app3d/CharacterContactRules) works differently:
   way, does not shove.
 - A walker on the move presses into a copy to 60% of their two radii, enough to reach
   the real walker and shove it, then slides round it.
-- A bump only knocks over this client's own walker.
+- A bump only knocks over this client's own walker. The others see it fall from its pose.
 
 So a session needs no spacing at its spawn. Measured on 2026-11-04, standing idle through
 a relay: two 143 windows ended 0.6 m apart, and four within 2 m in a line, all at speed 0,
 with 0 desyncs. Case 1343 runs this with real movers and no window: 2 and 3 walkers on one
 spot, a walk-in with either net id walking, and a runner.
 
-Not working: a runner through a copy knocks nobody over. Its own client slows it at the
-first touch, so the other client sees 3.41 m/s at the hit, under the 3.5 m/s it takes. The
-one it hits is sent moving instead.
+A hit through a copy is judged by the fastest the walker has said it went in the last 0.3
+s (`heldRemoteMover`), while its copy is still at a run. A runner's own client slows it at
+the first touch and its pose says so, so the other client would otherwise see 3.41 m/s at
+the hit, under the 3.5 m/s it takes. So a runner into someone standing knocks them over on
+their own client and stays up, and two runners head on both fall. A runner that brakes to
+a walk before it arrives, a walker, and a runner brushing past knock nobody over. Checked
+on 2026-11-04: a 143 window standing, and a scripted runner sending a real runner's poses
+over a relay at 4.2 m/s: the window's walker fell, and the runner read that back over the
+network, 0 desyncs. The fall of a copy on the runner's own client is the older path
+(`pose.knockedDown`); no window was the runner in this check.
 
 ## A slow start, and a player that stalls
 
