@@ -70,6 +70,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/when_resolve.c \
        $(SRC_DIR)/rae_deps.c \
        $(SRC_DIR)/rae_pack_edit.c \
+       $(SRC_DIR)/rae_toolchain.c \
        $(SRC_DIR)/bindgen.c \
        $(SRC_DIR)/bindgen_preprocess.c \
        $(SRC_DIR)/c_backend.c \
@@ -118,7 +119,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -209,6 +210,11 @@ stress: build
 # (tools/tsan-check.sh); `make test` runs it as one pre-suite case too.
 tsan: build
 	@bash tools/tsan-check.sh
+
+# The toolchain store and ./rae, from a fresh clone with an empty RAE_HOME. About two minutes,
+# which the full run cannot spare, so it is not part of it: run it when they change.
+toolchain-store-test:
+	@bash tools/test-toolchain-store.sh
 
 # The memory-boundary fixtures under AddressSanitizer + UBSan
 # (tools/asan-check.sh); `make test` runs it as one pre-suite case too.

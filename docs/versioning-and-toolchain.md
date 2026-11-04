@@ -4,7 +4,7 @@
 (#933 resolution + #934 CLI) are all in the compiler: `compiler/VERSION`,
 `rae --version`/`-v`/`--json`, the bump discipline, the `v0.1.0` tag; the
 `rae: { version }` pack requirement + run/build/watch toolchain check;
-`rae toolchain status`/`list`/`use`; `dependencies: { dep x: { path } | { git, rev } }`
+`rae toolchain status`/`list` (`use` is gone, see §3); `dependencies: { dep x: { path } | { git, rev } }`
 resolved into the module search with git deps cloned into `.rae/deps/<name>`
 and pinned by the generated `rae.lock`; and the package CLI
 `rae add`/`fetch`/`update`/`tree`. A registry is deliberately out of scope
@@ -99,8 +99,8 @@ pack Studio {
 
   ```
   error: this project requires Rae 0.3 (from studio.raepack); this compiler is
-         0.2.0-dev.14 (a1b2c3d). Run:  rae toolchain use 0.3
-         or set RAE_TOOLCHAIN_CHECK=off to build against this compiler anyway.
+         0.2.0-dev.14 (a1b2c3d). Build with ./rae, which runs the pinned one,
+         or set RAE_ROOT=<a Rae checkout> for one command to use that one.
   ```
 - **`-dev` builds satisfy the NEXT version** (`0.3.0-dev.7` satisfies `"0.3"`)
   so that developing Rae and the project together on `main` does not trip the
@@ -122,26 +122,16 @@ toolchain is a sibling git checkout, so the tool is small:
   came from, and (inside a project) the pack's requirement with a
   satisfied/unsatisfied verdict. This is what a project's `make doctor` should
   call rather than re-deriving the answer with `awk`.
-- **`rae toolchain use <req>`** — resolves the requirement to the newest
-  matching tag (`git fetch --tags` in the checkout it was built from, or
-  `$RAE_ROOT`), checks it out, and rebuilds the compiler (`make -C compiler
-  build`). Refuses when the checkout is dirty, so nobody's in-flight work is
-  stashed silently. `rae toolchain use main` returns to the development head.
 - **`rae toolchain list`** — the tags, marking the current one.
 
-Multiple side-by-side toolchains (rustup's real trick) are explicitly out of
-scope: one checkout, moved between tags, is enough while every user is also
-a Rae developer. If that stops being true, the next step is a per-version
-`~/.rae/toolchains/<ver>` layout, not a rewrite.
+The earlier `rae toolchain use`, which moved one checkout between tags, is gone. The
+store of side-by-side toolchains and the generated `./rae` replaced it:
+docs/toolchain-and-packages-decision.md. That document also replaces the version ranges
+and the `-dev` rule described above: a pin is one exact version.
 
-That time has come. The new design replaces parts of this document, and is agreed in
-docs/toolchain-and-packages-decision.md. It is not built yet.
-
-**On the second machine** the loop becomes: `git pull` in the project →
-`make doctor` says *requires 0.3, have 0.2.0* → `rae toolchain use 0.3` (or
-the project's `make rae-use` wrapper) → build. The person maintaining both
-repos keeps `$RAE_ROOT` on `main` and relies on the `-dev` rule plus the
-override.
+**On the second machine** the loop is: `git pull` in the project, then `./rae build`.
+`./rae` prepares the pinned toolchain if the store does not have it. Someone working on
+both repos sets `RAE_ROOT=<their checkout>` for a command.
 
 ## 4. Dependencies and the lockfile — the package manager core (#933, #934)
 

@@ -131,3 +131,45 @@ char* rae_pack_set_block(const char* text, const char* key, const char* block,
   size_t at = line_start(text, close);
   return splice(text, at, at, block);
 }
+
+bool rae_pack_has_block(const char* text, const char* key) {
+  size_t start = 0;
+  size_t end = 0;
+  return find_top_field(text, key, &start, &end);
+}
+
+/* The string value of `key:` in text[from..to]; "" when it has none */
+static void read_string_field(const char* text, size_t from, size_t to, const char* key, char* out, size_t out_len) {
+  out[0] = '\0';
+  size_t key_len = strlen(key);
+  for (size_t i = from; i + key_len < to; ++i) {
+    bool at_word = !(isalnum((unsigned char)text[i - 1]) || text[i - 1] == '_');
+    if (!at_word || strncmp(text + i, key, key_len) != 0) continue;
+    size_t at = i + key_len;
+    while (at < to && (text[at] == ' ' || text[at] == '\t')) at += 1;
+    if (at >= to || text[at] != ':') continue;
+    at += 1;
+    while (at < to && (text[at] == ' ' || text[at] == '\t')) at += 1;
+    if (at >= to || text[at] != '"') continue;
+    at += 1;
+    size_t end = at;
+    while (end < to && text[end] != '"') end += 1;
+    if (end - at < out_len) {
+      memcpy(out, text + at, end - at);
+      out[end - at] = '\0';
+    }
+    return;
+  }
+}
+
+bool rae_pack_read_pin(const char* text, char* version, size_t version_len, char* commit,
+                       size_t commit_len, char* check, size_t check_len) {
+  version[0] = commit[0] = check[0] = '\0';
+  size_t start = 0;
+  size_t end = 0;
+  if (!find_top_field(text, "rae", &start, &end)) return false;
+  read_string_field(text, start, end, "version", version, version_len);
+  read_string_field(text, start, end, "commit", commit, commit_len);
+  read_string_field(text, start, end, "check", check, check_len);
+  return true;
+}

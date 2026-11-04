@@ -42,8 +42,13 @@ build`, and a Makefile calls `./rae` too.
 - It runs `~/.rae/toolchains/<version>/compiler/bin/rae` with the same arguments. If that toolchain
   is missing, it fetches and builds it first.
 - `RAE_ROOT=<checkout> ./rae build` uses that checkout for one command, and prints one line saying so.
-- `./rae toolchain ...` needs commands that old compilers do not have, so it runs in the newest
-  toolchain in the store.
+- `./rae toolchain ...` needs commands that old compilers do not have, so it runs the newer of the
+  compiler that wrote this `./rae` and the pin (the script's `tool=` line).
+- When a toolchain is missing, the script only gets the source and takes `tools/toolchain-prepare.sh`
+  from that version of Rae itself. The script does not grow when preparing does.
+- The source is `RAE_SOURCE`, else the checkout saved in `~/.rae/source` when a compiler built in a
+  checkout pins, else the GitHub repo. Local commits can so be pinned before a push, and `pin` warns
+  that another machine cannot get them yet.
 
 Why this is better than PATH, and not only different:
 
@@ -52,7 +57,7 @@ Why this is better than PATH, and not only different:
 
 **Criticism of this choice:** it puts a script back in each project, which is the problem this task
 started from. The difference is that it is generated and the same everywhere, has no project logic,
-and holds about 25 lines against 142-362 today. `./rae toolchain status` says when it is out of date,
+and holds about 40 lines against 142-362 today. `./rae toolchain status` says when it is out of date,
 and `rae init` writes it. A `~/.rae` store still exists, but it holds only copies that can be made
 again, and nothing in it decides anything.
 
@@ -190,17 +195,18 @@ with point 3 and was not rejected. Dropping it later is one field.
 
 - The manager reads `.raepack` only, and never imports or source. The compiler asks it where a prefix
   `x/` lives and which package owns a file.
-- `rae add`, `fetch`, `update`, `tree`, and path and git dependencies stay. `rae toolchain use` goes.
-- `~/.rae` holds `repo/` (one clone), `toolchains/<version>/` (sparse checkouts), `deps/<name>/<pin>/`
+- `rae add`, `fetch`, `update`, `tree`, and path and git dependencies stay. `rae toolchain use` is gone.
+- `~/.rae` holds `repo/` (one clone), `toolchains/<version>/` or `<version>-<commit>/` (sparse checkouts), `deps/<name>/<pin>/`
   and `projects` (who uses what). `RAE_HOME` moves it.
 - `./rae toolchain pin <version|commit>`, `update` (moves only if the project still builds: every target, or
-  the pack's optional `check` command) and `gc` (removes what no recorded project uses; it comes back
+  the pack's optional command, `rae: { check: "..." }`) and `gc` (removes what no recorded project uses; it comes back
   on demand).
 - Shared builds are stored **per version**: iOS frameworks, Android, SQLite, Box3D and WAMR. Today one
   Box3D fits per machine, and SUMU's shared frameworks have no version at all. The toolchain runner sets
   `RAE_BOX3D`, `RAE_SQLITE_CACHE` and `RAE_WAMR` for old compilers.
 - Several packs in one repo must name the same compiler version. `pin` changes them all, and a
-  disagreement is an error. SUMU has 3 packs and game proto2 has 2.
+  disagreement is an error. SUMU has 3 packs and game proto2 has 2. This means project packs, the
+  ones with a `rae` block and targets. A library's `rae` is the lowest compiler it needs, and stays.
 
 ## 9. Plan
 
@@ -217,7 +223,9 @@ Each step is its own queue item, with the full suite on each step that touches t
    read once and retired. Done in 0.2.342. A compiler at another version than the pin stops the build,
    unless `RAE_ROOT` is set, which also keeps the projects still building on main working until they
    move. `rev` is an error with the repair.
-4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` goes.
+4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` is gone.
+   Done in 0.2.344. `make -C compiler toolchain-store-test` runs it from a fresh clone with an empty
+   `RAE_HOME`. It takes about two minutes, so it is not part of the full run.
 5. Shared builds per version.
 6. The first package: `qr`, moved to `packages/qr`.
 
