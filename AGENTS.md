@@ -844,6 +844,11 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   commit that. A lib change that breaks a package needs the same, or the users fail at the old
   tag. A package is also not in the sparse toolchain. Do not move a module to a package while a
   `lib/` module imports it. Pushing with `--follow-tags` publishes the tags.
+- **A package with its own C: the pack's `native` block** (`build`, `header`, `include`, `link`,
+  `linkBrowser`, `linkLinux`, `sourcesDevice`, `definesDevice`; `packages/sql` is the model). It builds
+  on first need into `~/.rae/packages/<name>/<pin>/install`, and a program links it only when its C
+  includes `header`. No compiler code names a library. `lib/box3d` cannot move this way yet: `lib/app3d`
+  imports it.
 - **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> --version <v>
   [--subdir <dir>] [--commit <c>]` edits the project's `.raepack` (creating the
   `dependencies` block if absent, refusing a duplicate name); `rae fetch` resolves

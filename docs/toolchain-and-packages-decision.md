@@ -182,13 +182,13 @@ user asking for it. Decide after a second package has shown what a split costs.
    the whole path. `qr` was the first plan, and cannot go first: `lib/ui/qrCodeSystem` and the walker kit import
    it, and a stdlib module cannot import a package. Check who imports a module, not only what it imports.
 2. **Then a package with its own C**, which forces the design for C and shaders (below). `box3d` was the
-   candidate, and cannot be first; `sql` is the recommendation.
+   candidate, and cannot be first; `sql` did it in 0.3.4, tag `sql/v1.0.0`.
 3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
 4. **`trees`:** `treeGen`, `stylizedTrees`, `lowPolyTrees` and `treeSets`, one package. `app3d` imports them, so
    it goes with or after the engine, and it has shaders, so it needs the design from step 2.
 5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
 
-### How a package carries C, shaders and files (proposed, not built: decision needed)
+### How a package carries C, shaders and files (C is built; the rest is agreed and not built)
 
 Today each of these assumes the stdlib's folder or names one library by hand:
 
@@ -211,21 +211,24 @@ pack Sql {
     include: "include"
     link: "lib/libsqlite3.a"
     linkBrowser: "lib/emscripten/libsqlite3.a"
-    sourcesDevice: ["src/sqlite3.c", "src/rae_sql_glue.c"]
-    defines: "OPTIONS"
+    linkLinux: "-lpthread -lm"
+    sourcesDevice: "src/sqlite3.c src/rae_sql_glue.c"
+    definesDevice: "DEVICE_DEFINES"
   }
 }
 ```
 
-- A package's build goes in `~/.rae/deps/<name>/<pin>/install`, the store of step 5, and `<pin>` is the package's own
-  `git-tree` hash, so two versions with different C both build. The script gets that folder as `RAE_PACKAGE_INSTALL`.
-- `rae fetch` builds it, and a build that needs it and does not find it stops and names `rae fetch`. A build itself still
-  writes nothing, the rule of step 1.
-- A program links it only when its emitted C includes `header`, the rule today, so importing a package you do not reach
+- A package's build goes in `~/.rae/packages/<name>/<pin>/install`, and `<pin>` is the package's own `git-tree` hash, or a hash
+  of its files for a `path` dep, so two versions with different C both build. Its script gets that folder as
+  `RAE_PACKAGE_INSTALL` and the folder above it as `RAE_PACKAGE_CACHE`. `gc` does not touch these yet.
+- A build that needs it and does not find it builds it, once, under a lock, the way it clones a dep it does not have, so a
+  fresh clone needs one command. `rae fetch` builds them all ahead of time. The pack is never written.
+- A program links it only when its emitted C includes `header`, the rule before this, so importing a package you do not reach
   costs nothing.
-- `rae tree --json` lists each package's native block, and `gen-ios.sh`, `gen-android.sh` and `wasm_build.sh` read that instead
-  of naming libraries. `RAE_BOX3D`, `RAE_SQLITE` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
-- A library that needs `cmake` or a network says so in its script's error. Fresh clones of a project with C need those too.
+- `rae tree --native` lists each package's device sources and options, and `gen-ios.sh` reads that instead of naming a library.
+  `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move. Android never had SQLite; a package with
+  C reaches it when `gen-android.sh` learns the same list.
+- A library that needs `cmake` or a network says so in its script's error. A fresh clone of a project with C needs those too.
 
 **Shaders: a path in a package's module is tried in that package's folder first.** `shader(files: ["spray.wgsl"])` is embedded at
 build and validated by naga, so it needs no run-time path on any platform. The change is one more place to look in
@@ -251,11 +254,11 @@ The plan named `box3d`, as a candidate. Checked on 2026-11-05, as the `qr` lesso
 
 | package | C | importers in `lib/` | real users | verdict |
 |---|---|---|---|---|
-| `sql` | SQLite and a glue header, all four platforms | 0 | 2 servers, case 1288 | **the proof** |
+| `sql` | SQLite and a glue header: native, browser and iOS | 0 | 2 servers, case 1288 | **the proof**, done in 0.3.4 |
 | `wasm` | WAMR, but its header is in `compiler/runtime/` | 0 | cases only | second; its header must move first |
 | `box3d` | Box3D and a glue header | 24 | 3 examples, 19 cases, `physicsScenes` | with the engine |
 
-So the recommended order changes: `sql` proves C; `physicsScenes` 1.1.0 proves `embedText`; `trees`, with its shaders and pictures,
+So the order changed, agreed on 2026-11-05: `sql` proves C; `physicsScenes` 1.1.0 proves `embedText`; `trees`, with its shaders and pictures,
 proves the rest once `app3d` moves; `box3d` goes with `app3d`.
 
 ## 7. Agreed on 2026-11-04

@@ -252,5 +252,90 @@ printf 'pack Broken {\n  format: "raepack"\n  version: 1\n  targets: {\n    targ
 OUT=$(run_app); echo "$OUT" | grep -q 'App.raepack.*not.*parse\|parse.*App.raepack' && echo "$OUT" | grep -q 'built' && ok broken_pack_says_so || bad broken_pack_says_so "[$OUT]"
 RAE_FORMAT=off "$BIN" run --target compiled --check-toolchain Main.rae >/dev/null 2>&1 && bad broken_pack_strict "expected non-zero" || ok broken_pack_strict
 
+# --- a package with its own C: the `native` block
+export RAE_HOME="$WORK/store"
+make_tiny() {  # dir, the value its C answers
+  mkdir -p "$1/native"
+  cat > "$1/Tiny.raepack" <<EOF
+pack Tiny {
+  format: "raepack"
+  version: 1
+  meta: { version: "1.0.0" }
+  native: {
+    build: "native/build.sh"
+    header: "tiny_native.h"
+    include: "include"
+    link: "lib/libtiny.a"
+    linkBrowser: "lib/none.a"
+    sourcesDevice: "src/tiny.c"
+    definesDevice: "DEFINES"
+  }
+}
+EOF
+  cat > "$1/Glue.rae" <<'EOF'
+cheader "tiny_native.h"
+func tiny_value() unsafe extern("tiny_value") ret Int
+func value() ret Int {
+  unsafe {
+    ret tiny_value()
+  }
+}
+EOF
+  printf '#include "tiny_native.h"\nint64_t tiny_value(void) { return %s; }\n' "$2" > "$1/native/tiny.c"
+  printf '#include <stdint.h>\nint64_t tiny_value(void);\n' > "$1/native/tiny_native.h"
+  cat > "$1/native/build.sh" <<'EOF'
+set -eu
+[ -z "${TINY_FAILS:-}" ] || { echo "tiny: told to fail"; exit 3; }
+echo built >> "$RAE_PACKAGE_CACHE/builds"
+mkdir -p "$RAE_PACKAGE_INSTALL/include" "$RAE_PACKAGE_INSTALL/lib" "$RAE_PACKAGE_INSTALL/src"
+cp native/tiny_native.h "$RAE_PACKAGE_INSTALL/include/"
+cp native/tiny.c "$RAE_PACKAGE_INSTALL/src/"
+echo "-DTINY=1" > "$RAE_PACKAGE_INSTALL/DEFINES"
+cc -I native -c native/tiny.c -o "$RAE_PACKAGE_CACHE/tiny.o"
+ar rcs "$RAE_PACKAGE_INSTALL/lib/libtiny.a" "$RAE_PACKAGE_CACHE/tiny.o"
+EOF
+}
+make_tiny "$WORK/tiny" 41
+mkdir -p "$WORK/nativeApp"; cd "$WORK/nativeApp" || exit 1
+write_pack App.raepack NativeApp "" 'dependencies: { dep tiny: { path: "../tiny" } }'
+printf 'import tiny/Glue\n\nfunc main() {\n  log("tiny says {tiny.Glue.value()}")\n}\n' > Main.rae
+OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 41' && ok native_links_and_runs || bad native_links_and_runs "[$OUT]"
+echo "$OUT" | grep -q 'building package tiny' && ok native_says_it_builds || bad native_says_it_builds "[$OUT]"
+tiny_builds() { ls "$RAE_HOME/packages/tiny" | grep -vE '\.(log|lock)$'; }
+FOLDER="$RAE_HOME/packages/tiny/$(tiny_builds | head -1)"
+[ -f "$FOLDER/.ready" ] && [ ! -d "$FOLDER.lock" ] && ok native_ready_no_lock || bad native_ready_no_lock "$FOLDER"
+OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 41' && ! echo "$OUT" | grep -q 'building package' && ok native_builds_once || bad native_builds_once "[$OUT]"
+[ "$(wc -l < "$FOLDER/builds" | tr -d ' ')" = 1 ] && ok native_one_build || bad native_one_build "$(cat "$FOLDER/builds")"
+cmp -s App.raepack <(write_pack /dev/stdout NativeApp "" 'dependencies: { dep tiny: { path: "../tiny" } }') && ok native_build_keeps_pack || bad native_build_keeps_pack "changed"
+TREE=$("$BIN" tree --native 2>/dev/null)
+echo "$TREE" | grep -q "^tiny	tiny_native.h	$FOLDER/install	src/tiny.c	DEFINES$" && ok native_tree_lists_it || bad native_tree_lists_it "[$TREE]"
+# Changed C is another package: its own folder, and the first stays
+make_tiny "$WORK/tiny" 42
+OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 42' && ok native_changed_rebuilds || bad native_changed_rebuilds "[$OUT]"
+[ "$(tiny_builds | wc -l | tr -d ' ')" = 2 ] && [ -f "$FOLDER/.ready" ] && ok native_two_builds_side_by_side || bad native_two_builds_side_by_side "$(ls "$RAE_HOME/packages/tiny")"
+# A build that fails says why, leaves no marker, and comes back when it is fixed
+make_tiny "$WORK/tiny" 43
+OUT=$(TINY_FAILS=1 run_app); [ $? -ne 0 ] && echo "$OUT" | grep -q 'the build of package tiny failed' && echo "$OUT" | grep -q 'told to fail' && ok native_failed_build_says_so || bad native_failed_build_says_so "[$OUT]"
+OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 43' && ok native_build_after_failure || bad native_build_after_failure "[$OUT]"
+# A program that does not reach the header does not need the library
+printf 'func main() {\n  log("no tiny here")\n}\n' > Main.rae
+mkdir -p "$WORK/store2"; OUT=$(RAE_HOME="$WORK/store2" run_app); echo "$OUT" | grep -q 'no tiny here' && [ ! -d "$WORK/store2/packages/tiny" ] && ok native_not_reached_not_built || bad native_not_reached_not_built "[$OUT]"
+# Through git: the pin is the package's git-tree hash, and rae fetch builds it
+cd "$WORK" && git init -q tinyRepo && cd tinyRepo && git config user.email t@t && git config user.name t
+mkdir -p packages && make_tiny "$WORK/tinyRepo/packages/tiny" 7
+git add -A && git commit -qm tiny && git tag tiny/v1.0.0
+TINY_TREE=$(git rev-parse HEAD:packages/tiny)
+mkdir -p "$WORK/nativeGit"; cd "$WORK/nativeGit" || exit 1
+write_pack App.raepack NativeGit "" 'dependencies: { dep tiny: { git: "../tinyRepo", subdir: "packages/tiny", version: "1.0.0" } }'
+printf 'import tiny/Glue\n\nfunc main() {\n  log("tiny says {tiny.Glue.value()}")\n}\n' > Main.rae
+"$BIN" fetch >/dev/null 2>&1 && [ -f "$RAE_HOME/packages/tiny/$(printf %.12s "$TINY_TREE")/.ready" ] && ok native_fetch_builds_by_tree_hash || bad native_fetch_builds_by_tree_hash "$(ls "$RAE_HOME/packages/tiny")"
+OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 7' && ! echo "$OUT" | grep -q 'building package' && ok native_git_runs || bad native_git_runs "[$OUT]"
+# The block's own errors
+mkdir -p "$WORK/nativeBad"; cd "$WORK/nativeBad" || exit 1
+write_pack App.raepack Bad "" 'native: { build: "x.sh" }'
+printf 'func main() {\n  log("x")\n}\n' > Main.rae
+OUT=$("$BIN" pack App.raepack 2>&1); echo "$OUT" | grep -q 'needs build, header and link' && ok native_incomplete_block_said || bad native_incomplete_block_said "[$OUT]"
+unset RAE_HOME
+
 echo "packages-cli: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

@@ -1,29 +1,26 @@
 #!/bin/bash
-# Build SQLite for lib/sql (docs/sql.md).
+# Build SQLite for the sql package (docs/sql.md).
 #
-# usage: tools/sqlite/build.sh
+# `rae` runs this for a program that uses the package, once per version of it, with
+# RAE_PACKAGE_INSTALL (where the result goes) and RAE_PACKAGE_CACHE (its folder for the rest).
 #
-#   - Downloads the pinned amalgamation (tools/sqlite/pin, public domain)
-#     into a cache OUTSIDE the repo ($RAE_SQLITE_CACHE, default
-#     ~/.cache/rae/sqlite) and checks its SHA3-256 (sqlite.org's published
-#     hash), or its SHA-256 where openssl has no SHA3. No SQLite source enters
-#     this repository.
-#   - Compiles sqlite3.c and tools/sqlite/rae_sql_glue.c into the install
-#     directory ($RAE_SQLITE, default <cache>/install), which is what `rae`
-#     links when a program imports sql/...:
+#   - Downloads the pinned amalgamation (native/pin, public domain) into that folder and checks
+#     its SHA3-256 (sqlite.org's published hash), or its SHA-256 where openssl has no SHA3. No
+#     SQLite source enters this repository.
+#   - Compiles sqlite3.c and native/rae_sql_glue.c:
 #       lib/libsqlite3.a              native
 #       lib/emscripten/libsqlite3.a   the browser build (when emcc is found)
-#     plus include/sqlite3.h, include/rae_sql.h, src/ (the sources, which
-#     tools/ios/gen-ios.sh compiles into an app) and VERSION.
+#     plus include/sqlite3.h, include/rae_sql.h, src/ (the sources, which tools/ios/gen-ios.sh
+#     compiles into an app), DEVICE_DEFINES (their options) and VERSION.
 #   - The options: multi-thread mode (THREADSAFE=2: one connection per
-#     thread, lib/sql's rule; single-thread in the browser), API armor (a
+#     thread, this package's rule; single-thread in the browser), API armor (a
 #     misused handle is an error, not a crash), no extension loading, no
 #     double-quoted string literals, no memory statistics.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/pin"
-CACHE="${RAE_SQLITE_CACHE:-$HOME/.cache/rae/sqlite}"
-INSTALL="${RAE_SQLITE:-$CACHE/install}"
+CACHE="$RAE_PACKAGE_CACHE"
+INSTALL="$RAE_PACKAGE_INSTALL"
 ZIP="$CACHE/$SQLITE_DIR.zip"
 start=$(date +%s)
 
@@ -61,7 +58,7 @@ cp "$HERE/rae_sql.h" "$INSTALL/include/"
 cp "$SRC/sqlite3.c" "$SRC/sqlite3.h" "$HERE/rae_sql_glue.c" "$HERE/rae_sql.h" "$INSTALL/src/"
 
 OPTIONS="-DSQLITE_ENABLE_API_ARMOR -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_DQS=0 -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_OMIT_DEPRECATED"
-echo "$OPTIONS" > "$INSTALL/OPTIONS"
+echo "-DSQLITE_THREADSAFE=2 $OPTIONS" > "$INSTALL/DEVICE_DEFINES"
 
 # build <cc> <ar> <out.a> <flags...>
 build() {

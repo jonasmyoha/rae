@@ -30,6 +30,23 @@ typedef struct {
 } RaeDepResolved;
 bool rae_deps_resolved(const char* name, RaeDepResolved* out);
 
+/* Dep `index`'s native block (rae_package_native.h). False when it has none. */
+typedef struct {
+  const char* name;
+  const char* dir;
+  const char* hash;
+  bool is_git;
+  const char* build;
+  const char* header;
+  const char* include;
+  const char* link;
+  const char* link_browser;
+  const char* link_linux;
+  const char* sources_device;
+  const char* defines_device;
+} RaeDepNative;
+bool rae_deps_native_at(int index, RaeDepNative* out);
+
 /* Say which git deps have no hash in their pack. A build only reads the pack, so only
  * `rae fetch` or `rae update` can write one. */
 void rae_deps_note_unpinned(FILE* out);

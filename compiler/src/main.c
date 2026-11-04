@@ -45,6 +45,7 @@
 #include "rae_deps.h"
 #include "rae_pack_edit.h"
 #include "rae_toolchain.h"
+#include "rae_package_native.h"
 #include "../build/version_gen.h"
 #include "c_backend.h"
 #include "c_module_exports.h"
@@ -2852,38 +2853,37 @@ static bool box3d_link_flags(const char* c_path, char* flags, size_t cap) {
   return true;
 }
 
-/* SQLite (lib/sql, docs/sql.md): a program whose C includes the glue header
- * links the static library tools/sqlite/build.sh installed at $RAE_SQLITE
- * (default ~/.cache/rae/sqlite/install): lib/libsqlite3.a natively,
- * lib/emscripten/libsqlite3.a in the browser. The install root goes into
- * `root`. */
-static void sqlite_install_root(char* root, size_t cap) {
-  const char* configured = getenv("RAE_SQLITE");
-  if (configured && *configured) {
-    snprintf(root, cap, "%s", configured);
-    return;
-  }
-  const char* home = getenv("HOME"); if (!home) home = ".";
-  snprintf(root, cap, "%s/.cache/rae/sqlite/install", home);
-}
-
-static bool sqlite_link_flags(const char* c_path, char* flags, size_t cap) {
+/* The packages with C (rae_package_native.h) this program uses: those whose header its C
+ * includes. Adds their include flag and library, the browser's library when `browser`, to
+ * `flags`; a build that needs one and has none builds it. False when one could not be had. */
+static bool package_native_flags(const char* c_path, bool browser, char* flags, size_t cap) {
+  size_t at = 0;
   flags[0] = '\0';
-  if (!c_output_includes(c_path, "rae_sql.h")) return true;
-  char root[PATH_MAX];
-  sqlite_install_root(root, sizeof(root));
-  char lib[PATH_MAX + 32];
-  snprintf(lib, sizeof(lib), "%s/lib/libsqlite3.a", root);
-  struct stat st;
-  if (stat(lib, &st) != 0) {
-    fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh (or ./rae toolchain deps sqlite, or set RAE_SQLITE)\n", lib);
-    return false;
-  }
+  for (int i = 0; i < rae_deps_count(); ++i) {
+    RaeDepNative native;
+    if (!rae_deps_native_at(i, &native) || !c_output_includes(c_path, native.header)) continue;
+    char install[3 * PATH_MAX];
+    if (!rae_package_native_install(i, install, sizeof(install))) return false;
+    const char* relative = browser ? native.link_browser : native.link;
+    char library[4 * PATH_MAX];
+    snprintf(library, sizeof(library), "%s/%s", install, relative);
+    struct stat st;
+    if (!relative[0] || stat(library, &st) != 0) {
+      fprintf(stderr, "error: package %s has no %s library (%s); its build may need a tool it did not find\n",
+              native.name, browser ? "browser" : "native", library);
+      return false;
+    }
 #if defined(__linux__)
-  snprintf(flags, cap, "-I%s/include %s -lpthread -lm", root, lib);
+    const char* system_flags = native.link_linux;
 #else
-  snprintf(flags, cap, "-I%s/include %s", root, lib);
+    const char* system_flags = "";
 #endif
+    at += (size_t)snprintf(flags + at, cap - at, " -I%s/%s %s %s", install, native.include, library, system_flags);
+    if (at >= cap) {
+      fprintf(stderr, "error: the flags of this program's packages are too long\n");
+      return false;
+    }
+  }
   return true;
 }
 
@@ -2995,8 +2995,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   if (!extra_cflags) extra_cflags = "";
   char box3d_flags[PATH_MAX * 2 + 64];
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
-  char sqlite_flags[PATH_MAX * 2 + 64];
-  if (!sqlite_link_flags(c_path, sqlite_flags, sizeof(sqlite_flags))) return false;
+  char package_flags[PATH_MAX * 8];
+  if (!package_native_flags(c_path, false, package_flags, sizeof(package_flags))) return false;
   char wamr_flags[PATH_MAX * 2 + 64];
   if (!wamr_link_flags(c_path, wamr_flags, sizeof(wamr_flags))) return false;
   /* lib/net/NetworkConnection: Apple's Network.framework, linked only for a
@@ -3047,7 +3047,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   char cmd[PATH_MAX * 6];
   snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
            opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, sqlite_flags, wamr_flags, out_bin);
+           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, package_flags, wamr_flags, out_bin);
 
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
@@ -3371,22 +3371,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     args[n++] = box3d_include;
     args[n++] = box3d_library;
   }
-  /* SQLite (lib/sql): the Emscripten build of the library tools/sqlite/build.sh
-   * installs, when the program's C includes the glue header */
-  char sqlite_include[PATH_MAX + 4];
-  char sqlite_library[PATH_MAX + 48];
-  if (c_output_includes(c_path, "rae_sql.h")) {
-    char sqlite_root[PATH_MAX];
-    sqlite_install_root(sqlite_root, sizeof(sqlite_root));
-    snprintf(sqlite_include, sizeof(sqlite_include), "-I%s/include", sqlite_root);
-    snprintf(sqlite_library, sizeof(sqlite_library), "%s/lib/emscripten/libsqlite3.a", sqlite_root);
-    struct stat sqlite_stat;
-    if (stat(sqlite_library, &sqlite_stat) != 0) {
-      fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh with emcc installed (or ./rae toolchain deps sqlite, or set RAE_SQLITE)\n", sqlite_library);
-      return false;
-    }
-    args[n++] = sqlite_include;
-    args[n++] = sqlite_library;
+  /* The packages with C, each its include folder and its browser library */
+  char package_flags[PATH_MAX * 8];
+  if (!package_native_flags(c_path, true, package_flags, sizeof(package_flags))) return false;
+  for (char* word = strtok(package_flags, " "); word && n < 90; word = strtok(NULL, " ")) {
+    args[n++] = word;
   }
   args[n++] = c_path;
   args[n++] = runtime_c;
@@ -5676,7 +5665,7 @@ static int cmd_fetch(void) {
   if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
   /* fetch holds to the pack's versions and only fills in what is missing: the hash of a
    * dependency that has none. */
-  bool ok = pack_write_resolved_deps(pack_path, &pack);
+  bool ok = pack_write_resolved_deps(pack_path, &pack) && rae_package_native_prepare_all();
   printf("fetched %d dependenc%s into %s/.rae/deps\n",
          rae_deps_count(), rae_deps_count() == 1 ? "y" : "ies", pack_dir);
   raepack_free(&pack);
@@ -5704,11 +5693,16 @@ static int cmd_update(int argc, char** argv) {
   return ok ? 0 : 1;
 }
 
-static int cmd_tree(void) {
+static int cmd_tree(bool native) {
   char pack_path[PATH_MAX], pack_dir[PATH_MAX];
   if (!packages_find_pack(pack_path, pack_dir)) return 1;
   RaePack pack;
   if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
+  if (native) {
+    bool printed = rae_package_native_print();
+    raepack_free(&pack);
+    return printed ? 0 : 1;
+  }
   char label[256];
   if (pack.name.len > 0) snprintf(label, sizeof(label), "%.*s", (int)pack.name.len, pack.name.data);
   else snprintf(label, sizeof(label), "(project)");
@@ -5762,7 +5756,7 @@ int main(int argc, char** argv) {
     return cmd_update(argc - 2, argv + 2);
   }
   if (strcmp(cmd, "tree") == 0) {
-    return cmd_tree();
+    return cmd_tree(argc >= 3 && strcmp(argv[2], "--native") == 0);
   }
   if (strcmp(cmd, "bindgen") == 0) {
     return bindgen_run(argc - 2, argv + 2);

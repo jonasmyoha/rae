@@ -20,6 +20,9 @@ int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const
 int rae_toolchain_update(const RaeToolchainSelf* self, const char* pack_path);
 int rae_toolchain_gc(bool dry_run);
 
+/* The store: $RAE_HOME, else ~/.rae */
+void rae_toolchain_store_home(char* out, size_t out_len);
+
 /* Print the folder of the toolchain the pack pins, preparing it if it is missing. */
 int rae_toolchain_path(const RaeToolchainSelf* self, const char* pack_path);
 

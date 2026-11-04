@@ -741,6 +741,34 @@ static bool parse_dependencies(RaePackParser* parser, RaePack* pack, RaePackBloc
   return true;
 }
 
+static bool parse_native(RaePackParser* parser, RaePack* pack, RaePackBlock* block) {
+  for (const RaePackField* field = block ? block->fields : NULL; field; field = field->next) {
+    Str* slot = NULL;
+    if (str_eq_cstr(field->key, "build")) slot = &pack->native_build;
+    else if (str_eq_cstr(field->key, "header")) slot = &pack->native_header;
+    else if (str_eq_cstr(field->key, "include")) slot = &pack->native_include;
+    else if (str_eq_cstr(field->key, "link")) slot = &pack->native_link;
+    else if (str_eq_cstr(field->key, "linkBrowser")) slot = &pack->native_link_browser;
+    else if (str_eq_cstr(field->key, "linkLinux")) slot = &pack->native_link_linux;
+    else if (str_eq_cstr(field->key, "sourcesDevice")) slot = &pack->native_sources_device;
+    else if (str_eq_cstr(field->key, "definesDevice")) slot = &pack->native_defines_device;
+    if (!slot || field->value.kind != RAEPACK_VALUE_STRING) {
+      diag_error(parser->file_path, (int)field->line, (int)field->column,
+                 "a native field is a string: build, header, include, link, linkBrowser, linkLinux, "
+                 "sourcesDevice or definesDevice");
+      parser->had_error = true;
+      return false;
+    }
+    *slot = field->value.as.string;
+  }
+  if (pack->native_build.len == 0 || pack->native_header.len == 0 || pack->native_link.len == 0) {
+    diag_error(parser->file_path, 0, 0, "a native block needs build, header and link");
+    parser->had_error = true;
+    return false;
+  }
+  return true;
+}
+
 static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
   bool saw_format = false;
   bool saw_version = false;
@@ -819,6 +847,14 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
         return false;
       }
       if (!parse_dependencies(parser, pack, field->value.as.block)) return false;
+    } else if (str_eq_cstr(field->key, "native")) {
+      if (field->value.kind != RAEPACK_VALUE_BLOCK) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "native must be a block: { build: \"...\", header: \"...\", ... }");
+        parser->had_error = true;
+        return false;
+      }
+      if (!parse_native(parser, pack, field->value.as.block)) return false;
     } else if (str_eq_cstr(field->key, "rae")) {
       /* Optional toolchain requirement: `rae: { version: "0.3" }` (#931). */
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
