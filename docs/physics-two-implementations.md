@@ -137,7 +137,7 @@ What the C library forced, each listed in its module comment:
 
 ### The shared package and the adapters (2026-10-05)
 
-**Where it lives: `lib/physicsScenes/`.** It is a library package rather than
+**Where it lives: `packages/physicsScenes/`.** It is a library package rather than
 a path dependency because `benchmarks/physics` can use the same scenes. It
 imports no physics track, only Vec3/Quat/Mesh3d and the ECS transform table:
 - **`SceneTypes`:** a `PhysicsScene` (not `Scene`, which lib/ui's `ui/Scene`
@@ -231,7 +231,7 @@ After the first try-out (2026-10-05) the controls changed:
   122's opens `physics/ecs/*` (Box3D's value types sit in
   `box3d/ecs/PhysicsTypes`). Its `trackName` and `assetBase` differ. Its
   `Main.rae` is byte-identical to 122's.
-- **What moved into `lib/physicsScenes`,** so neither example carries a
+- **What moved into `packages/physicsScenes`,** so neither example carries a
   copy:
   - `PlaygroundRender`: the instanced batches, shadow casters, pastel
     materials, the camera ray, and `RenderKind`/`RenderShape`.
@@ -306,7 +306,7 @@ After the first try-out (2026-10-05) the controls changed:
 
 `examples/124_vehicle_port` drives Box3D's Driving sample on the port.
 
-- **The car and course are shared data.** `lib/physicsScenes/VehicleTypes`
+- **The car and course are shared data.** `packages/physicsScenes/VehicleTypes`
   and `VehicleLibrary` hold them, so `125_vehicle_c` reuses them.
   - **The car** is the sample's numbers, verbatim. It keeps its own Y-up
     local frame, and its bodies are placed with a quarter turn about x into
@@ -359,7 +359,7 @@ After the first try-out (2026-10-05) the controls changed:
 differs from 124's in two code lines: `open physicsScenes/box3d/VehicleSpawn`
 and its assets path.
 
-- **Adapter:** `lib/physicsScenes/box3d/VehicleSpawn` is the port's
+- **Adapter:** `packages/physicsScenes/box3d/VehicleSpawn` is the port's
   adapter with its `open` lines switched to `box3d/ecs/*`. Its
   `engineByteCount` is `b3GetByteCount()`.
 - **What track B gained,** with the port's names and signatures:
@@ -713,7 +713,7 @@ lowers to WASM SIMD), and `rae build --target wasm` links it. The .wasm is
 | Rae in the repository | 45 001 lines, 116 files (`lib/physics`, ECS 1 331 of them) | 4 664 lines, 14 files (`lib/box3d`, 2 231 generated bindings) |
 | C in the repository | none | 577 lines (glue 507, build script 70) |
 | upstream C it carries | none (ported) | 68 624 lines, built from a cache outside the repo |
-| shared | `lib/physicsScenes` 4 784 lines; the examples' Main is one file | the same |
+| shared | `packages/physicsScenes` 4 784 lines; the examples' Main is one file | the same |
 | clean release build, playground | 94 s (80 s emitting C, 98 500 lines of C) | 39 s (30 s emitting, 58 500 lines), plus 30-40 s to build the library once per pin |
 | release binary, playground / vehicle | 1.55 / 1.52 MB | 1.77 / 1.73 MB |
 

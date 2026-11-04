@@ -473,7 +473,7 @@ that module, not a restructuring of the solver.
 Measured with the playground's own per-system profile:
 `RAE_PLAYGROUND_PROFILE=<frames>` times `<frames>` frames after 120 warm-up
 frames, logs one `[profile]` report, and logs a `spike` line for any system
-over 8 ms in one frame (`lib/physicsScenes/FrameProfile.rae`). The setup
+over 8 ms in one frame (`packages/physicsScenes/FrameProfile.rae`). The setup
 was the pyramid at 5 000 boxes (~4 950 awake) with autofire, the pool's 8
 workers, release build, M1 Max. Present ran without vsync
 (`RAE_PRESENT_MODE=immediate`, new): the development machine's main display is a
@@ -791,7 +791,7 @@ Five fixes got it running:
   the same values; Dawn lacks wgpu-native's 131 extension constants.
 - Browser builds get an 8 MB stack (`-sSTACK_SIZE`, as a native process
   has); Emscripten's 64 KB default overflowed in the physics step. The
-  `RAE_WGPU_REPORT` diagnostic is native-only. `lib/physicsScenes/scenes`
+  `RAE_WGPU_REPORT` diagnostic is native-only. `packages/physicsScenes/scenes`
   is preloaded with the other `lib` scene folders.
 - Two shaders broke Dawn's stricter WGSL uniformity rule. The deferred
   composite's FXAA samples its one-mip target with `textureSampleLevel`,

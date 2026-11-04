@@ -125,6 +125,19 @@ cmp -s App.raepack "$WORK/fetched" && ok build_keeps_pack || bad build_keeps_pac
 TREE=$("$BIN" tree 2>/dev/null)
 echo "$TREE" | grep -q ' lib  (stdlib' && echo "$TREE" | grep -q 'util  path:' && echo "$TREE" | grep -q 'gr  git:.*1.0.0' && ok tree || bad tree "[$TREE]"
 
+# A dep with a subdir checks out only its folder, and a relative URL is relative to the pack,
+# wherever the build starts
+mkdir -p "$WORK/subdirProject/app"
+(
+  cd "$WORK/subdirProject/app" || exit 1
+  write_pack App.raepack Sub "" "dependencies: { dep one: { git: \"../../mono\", subdir: \"packages/one\", version: \"1.0.0\" } }"
+  printf 'func main() {\n  log("subdir app")\n}\n' > Main.rae
+)
+OUT=$(cd "$WORK" && RAE_FORMAT=off "$BIN" run --target compiled --project subdirProject/app subdirProject/app/Main.rae 2>&1)
+echo "$OUT" | grep -q 'subdir app' && ok relative_url_from_another_directory || bad relative_url_from_another_directory "[$OUT]"
+[ -d "$WORK/subdirProject/app/.rae/deps/one/packages/one" ] && ok subdir_is_checked_out || bad subdir_is_checked_out "$(ls -R "$WORK/subdirProject/app/.rae/deps/one" | head)"
+[ ! -e "$WORK/subdirProject/app/.rae/deps/one/packages/two" ] && ok subdir_only_its_folder || bad subdir_only_its_folder "$(ls "$WORK/subdirProject/app/.rae/deps/one/packages")"
+
 # A wrong hash: a tag that moved, seen by a fresh clone
 sed 's/hash: "git-tree:[0-9a-f]*"/hash: "git-tree:0000"/' App.raepack > A.x && mv A.x App.raepack
 OUT=$(run_app); [ $? -ne 0 ] && echo "$OUT" | grep -q 'hash' && ok wrong_hash_is_error || bad wrong_hash_is_error "[$OUT]"

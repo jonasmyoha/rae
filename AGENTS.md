@@ -833,6 +833,14 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   compile error in the dependency's file; a dependency's own pack (targets
   optional) has its dependencies resolved too (docs/raepack-v2-and-packages.md
   §12, cases 1276-1279).
+- **Packages in this repo: `packages/<name>`.** Each has its own pack with `meta: { version }`
+  and the tag `<name>/v<version>`, and this repo's examples and cases use one like any project
+  does, by `git` (a relative URL, relative to the pack), `subdir`, `version` and `hash`. So a
+  change to a package reaches them only by a release: change it and its `meta.version`, commit,
+  `git tag -a <name>/v<version> -m "<name> <version>"`, run `rae update <name>` in each user, and
+  commit that. A lib change that breaks a package needs the same, or the users fail at the old
+  tag. A package is also not in the sparse toolchain. Do not move a module to a package while a
+  `lib/` module imports it. Pushing with `--follow-tags` publishes the tags.
 - **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> --version <v>
   [--subdir <dir>] [--commit <c>]` edits the project's `.raepack` (creating the
   `dependencies` block if absent, refusing a duplicate name); `rae fetch` resolves
@@ -863,7 +871,7 @@ license text lives once, beside the code:
   hand-edit it in; regenerate.
 - **Rae-side new work built on top keeps no notice.** That covers
   `lib/physics/ecs/`, `lib/box3d/Box3dGlue.rae` and `lib/box3d/ecs/`,
-  `tools/box3d/rae_glue.c`, the oracle drivers, `lib/physicsScenes/`, the
+  `tools/box3d/rae_glue.c`, the oracle drivers, `packages/physicsScenes/`, the
   examples and the tests. This holds even when they reuse a sample's numbers.
 - A new file you port line for line from Box3D gets the line. A new file you
   write gets nothing. A port of some other project adds its own one-line notice,
@@ -942,6 +950,7 @@ and say in the commit message which one you ran:
 | any other `lib/` module | `bash compiler/tools/run_cases.sh --grep '<its import path>'` (the cases that import it, in parallel), plus `rae build --emit-c` of every example that imports it (`grep -rl '<its import path>' examples`) |
 | one example | build it (`rae build --emit-c`), run it if the change shows on screen, `make example-copy-gate` |
 | `compiler/src/rae_toolchain.c`, `tools/toolchain-prepare.sh`, the `./rae` text | the check for the change, and `make -C compiler toolchain-store-test` (about 2 minutes, not in the full run) |
+| `packages/<name>` | `bash compiler/tools/run_cases.sh --grep '<name>/'`, plus `rae build --emit-c` of the examples that use it |
 | one gate or tool script | that gate alone (`make -C compiler tsan`, `bash compiler/tools/wasm_webgpu_smoke.sh`, ...) |
 | docs, `QUEUE.md`, comments, `tools/devtools-web` | no unit tests (the commit hooks run the banned-terms gate) |
 
