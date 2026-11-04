@@ -194,6 +194,13 @@ if [ -n "$location_usage" ]; then
   extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
 fi
 
+# Notifications at a later time (lib/LocalNotification): an app whose C includes the shim
+# links UserNotifications. iOS needs no purpose string for them.
+notification_link=""
+if grep -q 'runtime_local_notification_apple.h' "$gen/app.c"; then
+  notification_link=' "-framework UserNotifications"'
+fi
+
 # The links that open this app (docs/app-links.md). RAE_APP_LINKS lists hosts
 # (host or host/path; iOS takes the paths from the website's
 # apple-app-site-association, so only the host is used here): each becomes an
@@ -358,7 +365,7 @@ target_link_libraries(\${APP}
   "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreHaptics"
   "-framework CoreText" "-framework UniformTypeIdentifiers"
   "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"
-  "-framework OpenGLES" "-framework Security"$location_link)
+  "-framework OpenGLES" "-framework Security"$location_link$notification_link)
 
 # A real Info.plist (with UILaunchScreen for native resolution + portrait lock);
 # CMake's INFOPLIST_KEY_* build settings do not apply to a MACOSX_BUNDLE target.

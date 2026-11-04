@@ -77,6 +77,7 @@ check "no local network key unless asked" '! grep -q "NSLocalNetworkUsageDescrip
 check "no Bonjour key unless asked" '! grep -q "NSBonjourServices" "$gen/CMakeLists.txt"'
 check "no location key unless asked" '! grep -q "NSLocationWhenInUseUsageDescription" "$gen/CMakeLists.txt"'
 check "CoreLocation is not linked by an app without lib/Location" '! grep -q "CoreLocation" "$gen/CMakeLists.txt"'
+check "UserNotifications is not linked by an app without lib/LocalNotification" '! grep -q "UserNotifications" "$gen/CMakeLists.txt"'
 
 # the local network permission, asked for
 export RAE_IOS_LOCAL_NETWORK_USAGE="Sync talks to your Mac on this network."

@@ -1,0 +1,25 @@
+# lib/LocalNotification off iOS, with a window: every call does nothing and answers false, and
+# logs nothing. The delay until a moment is plain arithmetic.
+open LocalNotification
+
+func main() {
+  log("ask {localNotificationAsk()}")
+  log("schedule {localNotificationSchedule(
+    id: "a"
+    atEpochMs: 4102444800000
+    title: "Title"
+    body: "Body"
+  )}")
+  log("cancel {localNotificationCancel(id: "a")}")
+  log("cancelAll {localNotificationCancelAll()}")
+  log("clearDelivered {localNotificationClearDelivered()}")
+  if let seconds: Float64 = localNotificationDelaySeconds(atEpochMs: 2500, nowEpochMs: 1000) {
+    log("in 1.5 s: {seconds}")
+  }
+  log(
+    "now is not later: {localNotificationDelaySeconds(atEpochMs: 1000, nowEpochMs: 1000) is none}"
+  )
+  log(
+    "past is not later: {localNotificationDelaySeconds(atEpochMs: 999, nowEpochMs: 1000) is none}"
+  )
+}

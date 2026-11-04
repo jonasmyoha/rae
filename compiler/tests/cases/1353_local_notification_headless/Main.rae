@@ -1,0 +1,24 @@
+# lib/LocalNotification in a headless run: each call logs a line a test can see, and answers
+# false. The moment is by the real clock: RAE_NOW (config.env) says the year 2000 here, so a
+# moment in 2001 would be later by the test clock, and is still in the past.
+open LocalNotification
+
+func main() {
+  log("test clock year 2000: {nowMs() < 1000000000000}")
+  log("ask {localNotificationAsk()}")
+  log("2100 {localNotificationSchedule(
+    id: "later"
+    atEpochMs: 4102444800000
+    title: "Title"
+    body: "Body"
+  )}")
+  log("2001 {localNotificationSchedule(
+    id: "past"
+    atEpochMs: 978307200000
+    title: "Title"
+    body: "Body"
+  )}")
+  log("cancel {localNotificationCancel(id: "later")}")
+  log("cancelAll {localNotificationCancelAll()}")
+  log("clearDelivered {localNotificationClearDelivered()}")
+}
