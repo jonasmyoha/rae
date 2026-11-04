@@ -189,7 +189,8 @@ echo "rae: preparing Rae $name in $dir (the first time takes a minute)" >&2
 git -C "$repo" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
 git -C "$repo" worktree prune
 git -C "$repo" worktree add --quiet --no-checkout --detach "$dir" "$found"
-git -C "$dir" sparse-checkout set --cone compiler lib tools third_party
+# The UI editor is a tool a project runs (its headless scene check), though it lives in examples
+git -C "$dir" sparse-checkout set --cone compiler lib tools third_party examples/121_ui_editor
 git -C "$dir" checkout --quiet --detach "$found"
 if ! make -j8 -C "$dir/compiler" build >"$log" 2>&1 || [ ! -x "$dir/compiler/bin/rae" ]; then
   tail -20 "$log" >&2

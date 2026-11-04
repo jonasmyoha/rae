@@ -5,6 +5,7 @@
  * `rae toolchain pin`, `update`, `gc`, and the generated ./rae. */
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* This compiler, as the store sees it */
 typedef struct {
@@ -18,6 +19,13 @@ typedef struct {
 int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const char* wanted);
 int rae_toolchain_update(const RaeToolchainSelf* self, const char* pack_path);
 int rae_toolchain_gc(bool dry_run);
+
+/* Print the folder of the toolchain the pack pins, preparing it if it is missing. */
+int rae_toolchain_path(const RaeToolchainSelf* self, const char* pack_path);
+
+/* The repo's project pack, for a folder with no pack of its own, like a repo whose packs are
+ * all in subfolders. False when the repo has none. */
+bool rae_toolchain_repo_pack(const char* dir, char* out, size_t out_len);
 
 /* The shared builds of the pinned toolchain: their state with no names, else build them. */
 int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int count, char** names);
