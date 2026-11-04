@@ -1,4 +1,4 @@
-# The physics playgrounds' lib/ui HUD (HudScenes.rae), shared
+# The physics playgrounds' lib/ui HUD (scenes/PlaygroundHud.raescene), shared
 # by both tracks: the six lines of
 # SceneHud.hudLines (track and scene, body / awake / sleeping counts, contacts
 # and islands, step and frame milliseconds, workers), the pyramid body-count
@@ -22,7 +22,6 @@ open ui/DebugOverlay
 open app3d/UiShell
 open Gpu2dCanvas
 open ecs/Entity
-open physicsScenes/HudScenes
 
 const minBodyCount: Float = 1000.0
 
@@ -78,7 +77,8 @@ func mountPlaygroundUi(
   seedWorldTheme(world: world, res: ui.gpuUi)
   world.layoutW = width
   world.layoutH = height
-  let scene: Scene = playgroundHudScene()
+  var scene: Scene = parseScene(source: embedText(file: "scenes/PlaygroundHud.raescene"))
+  scene.sceneId = "PlaygroundHud"
   let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
   setHudHint(
     ui: ui

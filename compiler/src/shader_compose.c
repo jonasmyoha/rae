@@ -25,6 +25,68 @@ static bool file_is_regular(const char* path) {
   return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+bool embed_text_read(Arena* arena,
+                     const char* declaring_file,
+                     const char* package_dir,
+                     const char* project_root,
+                     const char* stdlib_dir,
+                     const char* path,
+                     char** out_text,
+                     size_t* out_len,
+                     const char** out_resolved,
+                     char* err,
+                     size_t err_cap) {
+  if (path[0] == '/') {
+    snprintf(err, err_cap, "embedText: '%s' is an absolute path, which only this machine has; name a file "
+                           "of the project", path);
+    return false;
+  }
+  if (package_dir && package_dir[0] && (strncmp(path, "../", 3) == 0 || strstr(path, "/../"))) {
+    snprintf(err, err_cap, "embedText: '%s' leaves the package; a package sees only its own files", path);
+    return false;
+  }
+  char tried[3][4096];
+  int tried_count = 0;
+  if (declaring_file && declaring_file[0]) {
+    const char* slash = strrchr(declaring_file, '/');
+    if (slash) snprintf(tried[tried_count++], sizeof tried[0], "%.*s/%s", (int)(slash - declaring_file), declaring_file, path);
+    else snprintf(tried[tried_count++], sizeof tried[0], "%s", path);
+  }
+  if (package_dir && package_dir[0]) {
+    snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", package_dir, path);
+  } else {
+    if (project_root && project_root[0]) snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", project_root, path);
+    if (stdlib_dir && stdlib_dir[0] && strncmp(path, "lib/", 4) == 0)
+      snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", stdlib_dir, path + 4);
+  }
+  for (int t = 0; t < tried_count; t++) {
+    if (!file_is_regular(tried[t])) continue;
+    size_t len = 0;
+    char* text = read_whole_file(arena, tried[t], &len);
+    if (!text) {
+      snprintf(err, err_cap, "embedText: '%s' could not be read ('%s')", path, tried[t]);
+      return false;
+    }
+    if (strlen(text) != len) {
+      snprintf(err, err_cap, "embedText: '%s' holds a zero byte, so it is not text", path);
+      return false;
+    }
+    size_t found_len = strlen(tried[t]);
+    char* keep = arena_alloc(arena, found_len + 1);
+    memcpy(keep, tried[t], found_len + 1);
+    *out_text = text;
+    *out_len = len;
+    *out_resolved = keep;
+    return true;
+  }
+  if (package_dir && package_dir[0]) {
+    snprintf(err, err_cap, "embedText: '%s' not found next to this file or in its package's folder", path);
+  } else {
+    snprintf(err, err_cap, "embedText: '%s' not found next to this file or in the project", path);
+  }
+  return false;
+}
+
 bool shader_compose(Arena* arena,
                     const char* declaring_file,
                     const char* project_root,

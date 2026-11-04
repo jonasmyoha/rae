@@ -188,7 +188,7 @@ user asking for it. Decide after a second package has shown what a split costs.
    it goes with or after the engine, and it has shaders, so it needs the design from step 2.
 5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
 
-### How a package carries C, shaders and files (C is built; the rest is agreed and not built)
+### How a package carries C, shaders and files (C and `embedText` are built; the rest is agreed and not built)
 
 Today each of these assumes the stdlib's folder or names one library by hand:
 
@@ -237,9 +237,12 @@ build and validated by naga, so it needs no run-time path on any platform. The c
 
 **Files read at run time: embed small text, declare the rest.**
 
-- A new compile-time `embedText(file: "scenes/Hud.raescene")`, the same idea and the same path rule as `shader(files:)`, gives
-  a `String` built into the program. It works in the browser and on a phone with nothing to stage. `physicsScenes` goes back to
-  real `.raescene` files with it, and drops `HudScenes.rae`, whose lines nobody can open in the editor.
+- A compile-time `embedText(file: "scenes/Hud.raescene")`, built like `shader(files:)`, gives a `String` built into the program.
+  It works in the browser and on a phone with nothing to stage. Done in 0.3.5: `physicsScenes` 1.1.0 is back on real `.raescene`
+  files with it. A path is tried next to the file. In a package's module it is then tried in the package's folder and nowhere
+  else, so a package cannot reach the project above it, and `..` is refused there. Elsewhere it is tried against the project and
+  the stdlib, as for a shader. The file is a build input, so `rae watch` rebuilds when it changes. The price: a running app does not
+  see an edit until it is rebuilt.
 - Pictures, fonts and models, too large to embed, are declared: `assets: ["assets"]` in the pack. `rae run` exports each
   package's folder, and `Sys.readAsset(package: "water", path: "assets/foam.png")` looks there. `stage-app-assets.sh` and the
   browser's preload copy them to `packages/<name>/...`, read by the same call. The call never contains a path outside the package.

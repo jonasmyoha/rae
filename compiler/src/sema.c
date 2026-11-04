@@ -1269,6 +1269,7 @@ static bool sema_is_scalar_kind(TypeKind k);
 static const char* sema_scalar_name(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
+static bool sema_embed_text_from_call(CompilerContext* ctx, AstModule* module, AstExpr* expr);
 AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
@@ -7810,6 +7811,14 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 if (sema_shader_from_call(ctx, module, symbols, expr)) sema_analyze_expr(ctx, module, symbols, expr, true);
                 break;
             }
+            /* `embedText(file: "...")` too: the call node becomes the file's text as a
+             * string literal (sema_embed_text_from_call). */
+            if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT
+                && str_eq_cstr(expr->as.call.callee->as.ident, "embedText")
+                && !symbol_table_lookup(symbols, expr->as.call.callee->as.ident)) {
+                if (sema_embed_text_from_call(ctx, module, expr)) sema_analyze_expr(ctx, module, symbols, expr, true);
+                break;
+            }
             /* A call names a function, never a const: a qualified-only
              * prelude const of the same name (Pack.name, Target.os) does not
              * stand in for the program's own `func name(...)` */
@@ -9299,6 +9308,52 @@ static void sema_register_shader_part(CompilerContext* ctx, const char* path) {
         ctx->shader_parts = grown; ctx->shader_part_cap = ncap;
     }
     ctx->shader_parts[ctx->shader_part_count++] = path;
+}
+
+/* ---------------------------------------------------------------------
+ * `embedText(file: "scenes/Hud.raescene")`: a text file built into the program as a String
+ * (shader_compose.h). The argument must be a string literal, since it is a build-time fact. It is
+ * read NOW, and the call node is rewritten in place into a string literal, so the backend embeds
+ * it with no new code and no file is opened at run time, on any platform. The file is a build
+ * input, as a shader part is: `rae watch` rebuilds when it changes. */
+static bool sema_embed_text_from_call(CompilerContext* ctx, AstModule* module, AstExpr* expr) {
+    const char* file = sema_diag_file(module);
+    AstCallArg* file_arg = expr->as.call.args;
+    bool shape_ok = file_arg && !file_arg->next && str_eq_cstr(file_arg->name, "file")
+        && file_arg->value && file_arg->value->kind == AST_EXPR_STRING;
+    if (!shape_ok) {
+        diag_error(file, (int)expr->line, (int)expr->column,
+                   "embedText(file: \"...\") takes one argument, 'file', a string literal: the file is "
+                   "read at build time, so its name cannot be computed");
+        module->had_error = true;
+        expr->resolved_type = type_get_string(ctx->type_registry);
+        return false;
+    }
+    Str literal = file_arg->value->as.string_lit;
+    char* path = arena_alloc(ctx->ast_arena, literal.len + 1);
+    memcpy(path, literal.data, literal.len);
+    path[literal.len] = '\0';
+    char err[2048];
+    char* text = NULL;
+    size_t text_len = 0;
+    const char* resolved = NULL;
+    int owner = rae_deps_owner_of(file);
+    const char* package_dir = owner >= 0 ? rae_deps_dir(owner) : NULL;
+    if (!embed_text_read(ctx->ast_arena, file, package_dir, ctx->project_root, ctx->stdlib_dir, path,
+                         &text, &text_len, &resolved, err, sizeof err)) {
+        diag_error(file, (int)expr->line, (int)expr->column, err);
+        module->had_error = true;
+        expr->resolved_type = type_get_string(ctx->type_registry);
+        return false;
+    }
+    sema_register_shader_part(ctx, resolved);
+    size_t line = expr->line, column = expr->column;
+    memset(&expr->as, 0, sizeof(expr->as));
+    expr->kind = AST_EXPR_STRING;
+    expr->as.string_lit = (Str){ text, text_len };
+    expr->line = line;
+    expr->column = column;
+    return true;
 }
 
 static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {

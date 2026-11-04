@@ -459,6 +459,10 @@ bool rae_deps_resolved(const char* name, RaeDepResolved* out) {
   return true;
 }
 
+const char* rae_deps_dir(int index) {
+  return index >= 0 && index < s_dep_count ? s_deps[index].dir : NULL;
+}
+
 int rae_deps_owner_of(const char* file_path) {
   if (!file_path || s_dep_count == 0) return -1;
   for (int i = 0; i < s_dep_count; ++i) {

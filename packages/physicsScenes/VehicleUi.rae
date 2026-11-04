@@ -1,4 +1,4 @@
-# The vehicle examples' lib/ui HUD (HudScenes.rae), shared by both
+# The vehicle examples' lib/ui HUD (scenes/VehicleHud.raescene), shared by both
 # tracks: four lines (track, speed, physics step time, frame time and
 # autopilot) and the controls hint, plus the shared FPS meter in the top
 # right corner (ui/DebugOverlay). The UI lays out again only when a line's
@@ -16,7 +16,6 @@ open ui/Scene
 open ui/DebugOverlay
 open app3d/UiShell
 open ecs/Entity
-open physicsScenes/HudScenes
 
 type VehicleUi {
   gpuUi: Gpu2dUi
@@ -83,7 +82,8 @@ func mountVehicleUi(
   height: view Float
 ) {
   seedWorldTheme(world: world, res: ui.gpuUi)
-  let scene: Scene = vehicleHudScene()
+  var scene: Scene = parseScene(source: embedText(file: "scenes/VehicleHud.raescene"))
+  scene.sceneId = "VehicleHud"
   let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
   resizeVehicleUi(
     ui: ui

@@ -305,3 +305,10 @@ neighbor fails *their* build instead of their first frame.
 
 Everything above is built (2026-09-19). The in-process swap is documented
 above and not queued.
+
+## `embedText`: the same idea for a text file
+
+`embedText(file: "scenes/Hud.raescene")` reads one text file at build time and gives its text as a
+`String`, in a function or a `const`. Like a shader's parts, the file is a build input and is never
+opened at run time. Where a path is looked for, and why a package cannot reach the project above it:
+docs/toolchain-and-packages-decision.md, section 6.
