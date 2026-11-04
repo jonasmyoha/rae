@@ -65,7 +65,7 @@ func addCharacter(client: mod Client, x: view Float, y: view Float) ret EntityId
   ret entityId
 }
 
-func createClient(index: view Int, startX: view List(Float), startY: view Float) ret Client {
+func createClient(index: view Int, startX: view List(Float), startY: view List(Float)) ret Client {
   var client: Client = {
     physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: stepSeconds, subSteps: 4)
     allocator: createEntityAllocator()
@@ -111,7 +111,7 @@ func createClient(index: view Int, startX: view List(Float), startY: view Float)
   client.localEntityId = addCharacter(
     client: client
     x: startX.copyAtFallback(index: index, fallback: 0.0)
-    y: startY
+    y: startY.copyAtFallback(index: index, fallback: 0.0)
   )
   loop var other: Int = 0, other < startX.length, ++other {
     if other is not index {
@@ -119,7 +119,7 @@ func createClient(index: view Int, startX: view List(Float), startY: view Float)
         value: addCharacter(
           client: client
           x: startX.copyAtFallback(index: other, fallback: 0.0)
-          y: startY
+          y: startY.copyAtFallback(index: other, fallback: 0.0)
         )
       )
       componentSet(
@@ -185,7 +185,18 @@ func stepAll(clients: mod List(Client)) {
             index: other
             fallback: walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
           )
-          componentMod(this: client.remotes, entityId: copyEntityId).speed = pose.speed
+          if let previous: RemoteMover = componentCopy(this: client.remotes, entityId: copyEntityId) {
+            componentSet(
+              this: client.remotes
+              entityId: copyEntityId
+              data: heldRemoteMover(
+                previous: previous
+                localYields: previous.localYields
+                speed: pose.speed
+                deltaTime: stepSeconds
+              )
+            )
+          }
           componentSet(
             this: client.drives
             entityId: copyEntityId
@@ -236,9 +247,17 @@ func stepAll(clients: mod List(Client)) {
 }
 
 func createClients(count: view Int, startX: view List(Float)) ret List(Client) {
+  ret createClientsAt(count: count, startX: startX, startY: {})
+}
+
+func createClientsAt(
+  count: view Int
+  startX: view List(Float)
+  startY: view List(Float)
+) ret List(Client) {
   var clients: List(Client) = {}
   loop var c: Int = 0, c < count, ++c {
-    clients.add(value: createClient(index: c, startX: startX, startY: 0.0))
+    clients.add(value: createClient(index: c, startX: startX, startY: startY))
   }
   ret clients
 }
@@ -325,9 +344,43 @@ func walkInto(walkerIndex: view Int, standerIndex: view Int, startX: view List(F
     b: positionOf(clients: pair, index: 1)
   )
   log("  then both rest, apart: {fastest < 0.05 and apart > 0.3}")
+  log(
+    "  nobody fell: {not fellOn(clients: pair, index: 0) and not fellOn(clients: pair, index: 1)}"
+  )
   if fastest >= 0.05 or apart <= 0.3 or closest <= 0.2 or standerX <= 0.3 {
     log("  stander {standerX}, closest {closest}, fastest {fastest}, apart {apart}")
   }
+}
+
+func fellOn(clients: view List(Client), index: view Int) ret Bool {
+  if let client: view Client = clients.viewAt(index: index) {
+    ret client.fell
+  }
+  ret false
+}
+
+# One runs along +x toward the other, standing, stopping at x `stopShortAt`. Who fell?
+func runInto(
+  runnerIndex: view Int
+  startX: view List(Float)
+  startY: view List(Float)
+  stopShortAt: view Float
+) {
+  var pair: List(Client) = createClientsAt(count: 2, startX: startX, startY: startY)
+  if let walker: mod Client = pair.modAt(index: runnerIndex) {
+    walker.throttle = 1.0
+    walker.running = true
+  }
+  loop var i: Int = 0, i < 180, ++i {
+    stepAll(clients: pair)
+    if positionOf(clients: pair, index: runnerIndex).x > stopShortAt {
+      if let walker: mod Client = pair.modAt(index: runnerIndex) {
+        walker.throttle = 0.0
+      }
+    }
+  }
+  log("  the one standing falls: {fellOn(clients: pair, index: 1 - runnerIndex)}")
+  log("  the runner falls: {fellOn(clients: pair, index: runnerIndex)}")
 }
 
 func main() ret Int {
@@ -351,25 +404,51 @@ func main() ret Int {
   log("the same, the one that does not give way at rest walking:")
   walkInto(walkerIndex: 1, standerIndex: 0, startX: { 0.0, -3.0 })
 
-  log("a runner hits one standing:")
-  var runner: List(Client) = createClients(count: 2, startX: { -6.0, 0.0 })
-  if let walker: mod Client = runner.modAt(index: 0) {
-    walker.throttle = 1.0
-    walker.running = true
+  log("a runner hits one standing, the one that gives way at rest running:")
+  runInto(
+    runnerIndex: 0
+    startX: { -6.0, 0.0 }
+    startY: {}
+    stopShortAt: 1000.0
+  )
+  log("the same, the one that does not give way at rest running:")
+  runInto(
+    runnerIndex: 1
+    startX: { 0.0, -6.0 }
+    startY: {}
+    stopShortAt: 1000.0
+  )
+  log("a runner brushes past one standing to its side:")
+  runInto(
+    runnerIndex: 0
+    startX: { -6.0, 0.0 }
+    startY: { 0.0, 0.5 }
+    stopShortAt: 1000.0
+  )
+  log("a runner stops short of one standing:")
+  runInto(
+    runnerIndex: 0
+    startX: { -6.0, 0.0 }
+    startY: {}
+    stopShortAt: -1.2
+  )
+
+  log("two runners head on:")
+  var headOn: List(Client) = createClients(count: 2, startX: { -6.0, 6.0 })
+  if let first: mod Client = headOn.modAt(index: 0) {
+    first.throttle = 1.0
+    first.running = true
   }
-  runSeconds(clients: runner, seconds: 3)
-  var standerFell: Bool = false
-  var runnerFell: Bool = false
-  if let client: view Client = runner.viewAt(index: 1) {
-    standerFell = client.fell
+  if let second: mod Client = headOn.modAt(index: 1) {
+    second.throttle = -1.0
+    second.running = true
   }
-  if let client: view Client = runner.viewAt(index: 0) {
-    runnerFell = client.fell
-  }
-  # Neither falls: the runner's own client slows it first, so the other sees 3.41 m/s
-  # at the hit, under knockdownClosingSpeed. Both stay up, and the one standing is sent
-  # moving. Queued: a bump through a copy knocking someone over.
-  log("  the one standing is sent moving: {positionOf(clients: runner, index: 1).x > 0.5}")
-  log("  nobody falls: {not standerFell and not runnerFell}")
+  runSeconds(clients: headOn, seconds: 3)
+  log(
+    "  each falls on its own client: {fellOn(clients: headOn, index: 0) and fellOn(
+      clients: headOn
+      index: 1
+    )}"
+  )
   ret 0
 }

@@ -392,6 +392,7 @@ func driveRemoteWalkers(
   world: mod WalkerWorld
   characterSystem: view CharacterSystem
   biome: view BiomeConfig
+  deltaTime: view Float
 ) {
   syncRemoteCharacters(
     remoteWalkers: remoteWalkers
@@ -409,13 +410,22 @@ func driveRemoteWalkers(
     }
     if remotePose(net: net, entityId: netEntityId, pose: pose) {
       if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+        var previous: RemoteMover = { localYields: true, speed: 0.0 }
+        if let held: RemoteMover = componentCopy(
+          this: physicsSystem.remoteMovers
+          entityId: walker.entityId
+        ) {
+          previous = held
+        }
         componentSet(
           this: physicsSystem.remoteMovers
           entityId: walker.entityId
-          data: RemoteMover {
+          data: heldRemoteMover(
+            previous: previous
             localYields: walkerLocalYields(net: net, netEntityId: netEntityId)
             speed: pose.speed
-          }
+            deltaTime: deltaTime
+          )
         )
       }
       driveRemoteWalker(
@@ -467,6 +477,7 @@ func driveWalkersNetworked(
     world: world
     characterSystem: characterSystem
     biome: biome
+    deltaTime: deltaTime
   )
   driveMovers(
     characters: physicsSystem.characters

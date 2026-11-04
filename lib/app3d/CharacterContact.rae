@@ -74,10 +74,34 @@ func setMoverAfterContact(
 # never moves it, and two copies do not bump: each is where its own client says
 # (resolveRemoteContact has why). `localYields`: in a resting overlap with this copy,
 # this client's walker is the one to move out. Every client must agree who that is.
-# `speed`: how fast that walker says it moves (its pose).
+# `speed`: how fast that walker says it moves (its pose). `peakSpeed`: the fastest it
+# has said lately, with how long ago (`peakAge`, seconds): a hit is judged by that
+# (resolveRemoteContact, heldRemoteMover).
 type RemoteMover {
   localYields: Bool
   speed: Float
+  peakSpeed: Float = 0.0
+  peakAge: Float = 0.0
+}
+
+# How long a walker's top speed counts for a hit (s). A runner's own client slows it at
+# the first touch, and its pose says so before its copy reaches the one it hits here.
+const remotePeakHoldSeconds: Float = 0.3
+
+# `previous` for this frame: `speed` as its pose says now, the peak kept or let go
+func heldRemoteMover(
+  previous: view RemoteMover
+  localYields: view Bool
+  speed: view Float
+  deltaTime: view Float
+) ret RemoteMover {
+  var peakSpeed: Float = previous.peakSpeed
+  var peakAge: Float = previous.peakAge + deltaTime
+  if speed >= peakSpeed or peakAge > remotePeakHoldSeconds {
+    peakSpeed = speed
+    peakAge = 0.0
+  }
+  ret RemoteMover { localYields: localYields, speed: speed, peakSpeed: peakSpeed, peakAge: peakAge }
 }
 
 # The bump of this client's walker with a copy: only the walker changes. 1 when it
@@ -99,6 +123,7 @@ func bumpLocalWithCopy(
     positionB: moverPosition(character: copied)
     velocityB: moverVelocity(character: copied)
     remoteSpeed: remote.speed
+    remotePeakSpeed: remote.peakSpeed
     localYields: remote.localYields
   )
   if contact.touching is false {
