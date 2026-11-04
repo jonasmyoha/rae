@@ -45,6 +45,7 @@ open ui/BundleApply
 open ui/UiSystems
 open ui/ClickTargets
 open ui/IconCheck
+open ui/ScenePolicy
 
 # -----------------------------------------------------------------
 # Types
@@ -150,6 +151,19 @@ func addTextOverride(list: mod List(SceneOverride), nodeId: own String, value: o
     list: list
     nodeId: own nodeId
     componentName: own textKey
+    fieldName: own textField
+    value: own value
+  )
+}
+
+# Shorthand for the text a TextField shows when it opens.
+func addTextFieldOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
+  let textFieldKey: String = "TextField"
+  let textField: String = "text"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own textFieldKey
     fieldName: own textField
     value: own value
   )
@@ -586,6 +600,18 @@ func parseRgbaString(text: view String) ret RgbaColor {
   }
 }
 
+# An override that cannot be applied says so, rather than leaving the node as it was.
+func reportUnknownOverride(world: mod UiWorld, override: view SceneOverride, message: view String) {
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: ""
+    nodeId: override.nodeId
+    kind: SceneDiagnosticKind.unknownOverride
+    name: "{override.componentName}.{override.fieldName}"
+    message: message
+  )
+}
+
 func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view SceneOverride) {
   let textKey: String = "Text"
   let spriteKey: String = "Sprite"
@@ -634,6 +660,22 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
         # Explicit literal override wins over any scene slot (#235).
         cur.tintSlot = ""
       }
+    }
+    ret
+  }
+
+  if override.componentName is "TextField" {
+    if override.fieldName is not "text" {
+      reportUnknownOverride(
+        world: world
+        override: override
+        message: "a TextField override sets only `text`"
+      )
+    } else if componentHas(this: world.textFields, entityId: entityId) {
+      let field: mod TextField = componentMod(this: world.textFields, entityId: entityId)
+      field.text = override.valueString
+    } else {
+      reportUnknownOverride(world: world, override: override, message: "the node has no TextField")
     }
     ret
   }
