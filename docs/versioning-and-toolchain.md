@@ -119,7 +119,7 @@ scope: one checkout, moved between tags, is enough while every user is also
 a Rae developer. If that stops being true, the next step is a per-version
 `~/.rae/toolchains/<ver>` layout, not a rewrite.
 
-That time has come. The new design replaces parts of this document, and is decided in outline in
+That time has come. The new design replaces parts of this document, and is agreed in
 docs/toolchain-and-packages-decision.md. It is not built yet.
 
 **On the second machine** the loop becomes: `git pull` in the project →

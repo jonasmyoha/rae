@@ -1,7 +1,7 @@
 # Decision record: toolchain pins, one store, and the package manager
 
-**Status: decided in outline on 2026-11-04. Three details wait for agreement (section 7). Nothing is
-built and no project has moved.**
+**Status: agreed on 2026-11-04 (section 7). Not built yet, and no project has moved. The steps are in
+QUEUE.md.**
 
 The three games outside this repo have neutral names here, because their real names must not appear
 in this repository: game proto1 builds with `rae-pinned`, game proto2 has `src` and `server` packs,
@@ -12,7 +12,7 @@ and game proto3's lock names a commit that no longer exists.
 1. **No `rae` on PATH.** Each project has its own small `./rae` (section 3).
 2. **The package manager is in the C compiler, for now.** It extends what exists.
 3. **One file.** The `.raepack` holds what `rae.lock` holds today, and `rae.lock` goes (section 4).
-4. **Pins are version numbers, not commits**, for the compiler and for packages (section 5).
+4. **A pin is a version number, with an optional commit**, for the compiler and for packages (section 5).
 5. **A pin is a name, a source (git URL or local path) and a version.**
 6. **One git repo can hold several packages.**
 7. **No registry yet.** Git and local paths are enough for now.
@@ -63,7 +63,7 @@ pack Game {
   format: "raepack"
   version: 2
   meta: { name: "Game", version: "0.1.6" }
-  rae: { version: "0.2.340" }
+  rae: { version: "0.2.340" }           # or { version: "0.2.340", commit: "55a8ac7e…" }
   dependencies: {
     dep sdk: { path: "../sdk" }
     dep qr: {
@@ -116,13 +116,31 @@ fixed set of files. That requires:
 - **Every `compiler/VERSION` bump gets the tag `v<version>`, on that commit, automatically.** AGENTS.md
   already says a release is a tag on the bump commit, so this only applies the rule every time.
 - **Old versions get tags too**, one on each past bump commit, so the projects have versions to pin to.
-- **A commit between bumps cannot be pinned.** A project that needs a Rae fix gets it through a bump, or
-  through `RAE_ROOT` while developing. This is a real cost: a fix a project needs now means a version
-  bump in Rae, and agents must do it. It is cheap, one line and one tag, and it already happens often.
 - **Before 1.0, a version says nothing about compatibility**, since PATCH can break things. A pin still
   gives the same build every time, which is what it is for.
 
-A tag on an unpushed commit works on this machine only. `pin` warns about that, and allows it.
+**An optional commit covers what a tag cannot.** The version is required. A `commit` may be added:
+
+```
+rae: { version: "0.2.340" }                       # the tag v0.2.340
+rae: { version: "0.2.340", commit: "55a8ac7e…" }  # that exact commit, which must be at version 0.2.340
+```
+
+- **With no commit,** the version means its tag, and a missing tag is an error.
+- **With a commit,** that commit is used, from the remote or from the local Rae checkout, so a fix can be
+  pinned at once, with no bump, even before it is pushed. Its `compiler/VERSION` must equal the version
+  in the pin, or it is an error, so the two cannot disagree without anyone noticing.
+- **The commit is what can die.** A commit may be unpushed, so it exists on one machine only, or a history
+  rewrite may remove it. Then the build stops and says so, and names the version as the way back:
+  `./rae toolchain pin 0.2.340`. `pin` warns when a commit is not on the remote. The version is what
+  lasts, so the commit is the short-term form and the tag is the long-term one.
+- **The store folder** is `toolchains/<version>`, or `toolchains/<version>-<commit>` with a commit.
+- **`./rae toolchain pin <version>`** writes the version alone, and **`pin <commit>`** writes both, reading
+  the version from that commit. A checkout with uncommitted changes cannot be pinned: that is what
+  `RAE_ROOT` is for.
+- **A git dependency works the same way:** a required `version`, an optional `commit`. A `path` dependency
+  needs no version, since it is files in place. If it gives one, that is checked against the dependency's
+  `meta.version`.
 
 Old versions may not build the same way. Each migrating project is built at its tag first, and moves
 to the next tag if it does not build.
@@ -159,16 +177,14 @@ user asking for it. Decide after a second package has shown what a split costs.
    candidate, because its C is already a separate library.
 3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
 
-## 7. What needs agreement
+## 7. Agreed on 2026-11-04
 
-"Agreed" takes all three.
+1. **`./rae` in each project.**
+2. **A version is required, and a commit is optional** (section 5).
+3. **No version ranges. Exact versions only.**
 
-1. **`./rae` in each project** (section 3), since you do not want PATH. The other option is typing the
-   full store path, which every Makefile would have to work out, and that is the script again.
-2. **A tag on every version bump, and only tagged versions can be pinned** (section 5). The cost is that a
-   project needing a Rae fix needs a bump in Rae, or `RAE_ROOT` meanwhile.
-3. **No version ranges, and a tool-written `hash` in the `.raepack`** (section 4). This is what makes one
-   file possible.
+The tool-written `hash` on git dependencies stays, as recommended in section 4. It was asked together
+with point 3 and was not rejected. Dropping it later is one field.
 
 ## 8. Unchanged from the earlier recommendations
 
@@ -177,7 +193,7 @@ user asking for it. Decide after a second package has shown what a split costs.
 - `rae add`, `fetch`, `update`, `tree`, and path and git dependencies stay. `rae toolchain use` goes.
 - `~/.rae` holds `repo/` (one clone), `toolchains/<version>/` (sparse checkouts), `deps/<name>/<pin>/`
   and `projects` (who uses what). `RAE_HOME` moves it.
-- `./rae toolchain pin <version>`, `update` (moves only if the project still builds: every target, or
+- `./rae toolchain pin <version|commit>`, `update` (moves only if the project still builds: every target, or
   the pack's optional `check` command) and `gc` (removes what no recorded project uses; it comes back
   on demand).
 - Shared builds are stored **per version**: iOS frameworks, Android, SQLite, Box3D and WAMR. Today one
@@ -186,13 +202,14 @@ user asking for it. Decide after a second package has shown what a split costs.
 - Several packs in one repo must name the same compiler version. `pin` changes them all, and a
   disagreement is an error. SUMU has 3 packs and game proto2 has 2.
 
-## 9. Plan, after agreement
+## 9. Plan
 
-Each step is its own queue item, with the full suite on the last.
+Each step is its own queue item, with the full suite on each step that touches the compiler.
 
 1. A build stops writing `rae.lock`. Worth doing first: it stops the damage now.
 2. Version tags: automatic on each bump, and the old ones added.
-3. The `.raepack` as the one file: exact versions, `hash`, `subdir`, and `rae.lock` read once and retired.
+3. The `.raepack` as the one file: exact versions, the optional `commit`, `hash`, `subdir`, and `rae.lock`
+   read once and retired.
 4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` goes.
 5. Shared builds per version.
 6. The first package: `qr`, moved to `packages/qr`.
