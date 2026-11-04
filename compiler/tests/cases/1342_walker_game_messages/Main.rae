@@ -1,0 +1,190 @@
+# lib/app3d/walkerNetSystem: a game's own messages through a walker session. A
+# player's reach the host with the player's peer id, the host's reach every player,
+# in order and whole. They do not disturb the session's own messages, and they go on
+# reaching the new host after a migration. Sending before the connection works says
+# so. Real relay and sockets in one process.
+open net/Udp
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open Vec3
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/walkerNetSystem/WalkerGameMessages
+open app3d/walkerNetSystem/WalkerNetGameMessages
+
+func createSide(mode: view WalkerNetMode, port: view Int) ret WalkerNet {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  settings.mode = mode
+  settings.relayPort = port
+  var net: WalkerNet = createWalkerNet(settings: settings)
+  net.connectionConfig.timeoutMs = 500
+  net.relayHost.client.config.keepAliveMs = 100
+  net.relayPlayer.client.config.keepAliveMs = 100
+  ret net
+}
+
+type Stage {
+  relay: RelayServer
+  host: WalkerNet
+  first: WalkerNet
+  second: WalkerNet
+  startMs: Int
+}
+
+func elapsed(stage: view Stage) ret Int {
+  ret nowMs() - stage.startMs
+}
+
+func pose() ret WalkerPose {
+  ret walkerPoseAt(position: Vec3 { x: 0.0, y: 0.0, z: 0.0 })
+}
+
+func tick(stage: mod Stage) {
+  relayFrame(server: stage.relay)
+  walkerNetFrame(net: stage.host, localPose: pose(), nowMs: elapsed(stage: stage))
+  walkerNetFrame(net: stage.first, localPose: pose(), nowMs: elapsed(stage: stage))
+  walkerNetFrame(net: stage.second, localPose: pose(), nowMs: elapsed(stage: stage))
+  sleep(ms: 1)
+}
+
+func run(stage: mod Stage, milliseconds: view Int) {
+  let until: Int = elapsed(stage: stage) + milliseconds
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage)
+  }
+}
+
+func bytesOf(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret bytes
+}
+
+func textsOf(messages: view List(WalkerGameMessage)) ret String {
+  var text: String = ""
+  loop let message: view WalkerGameMessage in messages {
+    text = "{text}[{String.fromBytes(bytes: message.bytes, start: 0, count: message.bytes.length)}]"
+  }
+  ret text
+}
+
+func main() ret Int {
+  var config: RelayConfig = defaultRelayConfig()
+  config.peerTimeoutMs = 500
+  let server: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
+  let port: Int = relayPort(server: server)
+  var stage: Stage = {
+    relay: server
+    host: createSide(mode: WalkerNetMode.host, port: port)
+    first: createSide(mode: WalkerNetMode.join, port: port)
+    second: createSide(mode: WalkerNetMode.join, port: port)
+    startMs: nowMs()
+  }
+  log(
+    "a player not connected yet cannot send: {walkerNetSendToHost(
+      net: stage.first
+      bytes: bytesOf(text: "early")
+    ) is false}"
+  )
+  stage.host.settledFrames = 1000
+  let hostStarted: Bool = walkerNetStart(net: stage.host, localPose: pose(), nowMs: 0)
+  loop walkerNetToken(net: stage.host).length() is 0 and elapsed(stage: stage) < 3000 {
+    relayFrame(server: stage.relay)
+    walkerNetFrame(net: stage.host, localPose: pose(), nowMs: elapsed(stage: stage))
+    sleep(ms: 1)
+  }
+  stage.first.settings.token = walkerNetToken(net: stage.host)
+  stage.second.settings.token = walkerNetToken(net: stage.host)
+  let firstStarted: Bool = walkerNetStart(
+    net: stage.first
+    localPose: pose()
+    nowMs: elapsed(stage: stage)
+  )
+  let secondStarted: Bool = walkerNetStart(
+    net: stage.second
+    localPose: pose()
+    nowMs: elapsed(stage: stage)
+  )
+  run(stage: stage, milliseconds: 600)
+  log(
+    "everyone plays: {stage.host.mostRemote is 2 and stage.first.mostRemote is 2 and stage.second.mostRemote is 2}"
+  )
+
+  # Players to the host: whole, in order, with who sent them
+  let sentA: Bool = walkerNetSendToHost(net: stage.first, bytes: bytesOf(text: "a1"))
+  let sentB: Bool = walkerNetSendToHost(net: stage.first, bytes: bytesOf(text: "a2"))
+  let sentC: Bool = walkerNetSendToHost(net: stage.second, bytes: bytesOf(text: "b1"))
+  log("sent: {sentA and sentB and sentC}")
+  run(stage: stage, milliseconds: 100)
+  let atHost: List(WalkerGameMessage) = walkerNetTakeGameMessages(net: stage.host)
+  var fromFirst: String = ""
+  var fromSecond: String = ""
+  var firstPeer: Int = -1
+  loop let message: view WalkerGameMessage in atHost {
+    let text: String = String.fromBytes(bytes: message.bytes, start: 0, count: message.bytes.length)
+    if text.startsWith(prefix: "a") {
+      fromFirst = "{fromFirst}{text} "
+      firstPeer = message.peerId
+    } else {
+      fromSecond = "{fromSecond}{text} "
+    }
+  }
+  log("from the first player: {fromFirst}")
+  log("from the second player: {fromSecond}")
+  log("each message says who sent it: {walkerNetHasPeer(net: stage.host, peerId: firstPeer)}")
+  log("taken once: {walkerNetTakeGameMessages(net: stage.host).length is 0}")
+
+  # The host to every player
+  log("the host sends: {walkerNetSendToPlayers(net: stage.host, bytes: bytesOf(text: "h1"))}")
+  let sentAgain: Bool = walkerNetSendToPlayers(net: stage.host, bytes: bytesOf(text: "h2"))
+  run(stage: stage, milliseconds: 100)
+  log("first player got {textsOf(messages: walkerNetTakeGameMessages(net: stage.first))}")
+  log("second player got {textsOf(messages: walkerNetTakeGameMessages(net: stage.second))}")
+  log(
+    "no desyncs: {stage.first.desyncs is 0 and stage.second.desyncs is 0 and stage.first.checks > 0}"
+  )
+
+  # The host quits: messages reach the new host
+  walkerNetLeave(net: stage.host, nowMs: elapsed(stage: stage))
+  let until: Int = elapsed(stage: stage) + 3000
+  loop elapsed(stage: stage) < until and walkerNetIsHost(net: stage.first) is false and walkerNetIsHost(
+    net: stage.second
+  ) is false {
+    relayFrame(server: stage.relay)
+    walkerNetFrame(net: stage.first, localPose: pose(), nowMs: elapsed(stage: stage))
+    walkerNetFrame(net: stage.second, localPose: pose(), nowMs: elapsed(stage: stage))
+    sleep(ms: 1)
+  }
+  log(
+    "a player hosts now: {walkerNetIsHost(net: stage.first) or walkerNetIsHost(net: stage.second)}"
+  )
+  let settleUntil: Int = elapsed(stage: stage) + 800
+  loop elapsed(stage: stage) < settleUntil {
+    relayFrame(server: stage.relay)
+    walkerNetFrame(net: stage.first, localPose: pose(), nowMs: elapsed(stage: stage))
+    walkerNetFrame(net: stage.second, localPose: pose(), nowMs: elapsed(stage: stage))
+    sleep(ms: 1)
+  }
+  var newHostGot: String = ""
+  if walkerNetIsHost(net: stage.first) {
+    let sent: Bool = walkerNetSendToHost(net: stage.second, bytes: bytesOf(text: "after"))
+  } else {
+    let sent: Bool = walkerNetSendToHost(net: stage.first, bytes: bytesOf(text: "after"))
+  }
+  let waitUntil: Int = elapsed(stage: stage) + 200
+  loop elapsed(stage: stage) < waitUntil {
+    relayFrame(server: stage.relay)
+    walkerNetFrame(net: stage.first, localPose: pose(), nowMs: elapsed(stage: stage))
+    walkerNetFrame(net: stage.second, localPose: pose(), nowMs: elapsed(stage: stage))
+    sleep(ms: 1)
+  }
+  if walkerNetIsHost(net: stage.first) {
+    newHostGot = textsOf(messages: walkerNetTakeGameMessages(net: stage.first))
+  } else {
+    newHostGot = textsOf(messages: walkerNetTakeGameMessages(net: stage.second))
+  }
+  log("the new host got {newHostGot}")
+  ret 0
+}

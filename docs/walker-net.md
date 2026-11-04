@@ -53,6 +53,17 @@ seconds after it joined. With no `RAE_WALKER_NET` an app is offline, as before. 
   joining and leaving in 20 s waves. It fails on a bot that never played, a
   desync, a leak at exit, or host memory that grew between quiet points.
 
+## A game's own messages
+
+A game on the kit (docs/walker-kit.md) sends its own messages through the session
+(`app3d/walkerNetSystem/WalkerNetGameMessages`): `walkerNetSendToHost(net:, bytes:)`
+from a player, `walkerNetSendToPlayers(net:, bytes:)` from the host, reliable and in
+order; a false answer means no connection to send on yet. `walkerNetTakeGameMessages`
+gives what came, each with the sender's relay peer id at the host (-1 at a player);
+`walkerNetHasPeer` says whether that player is still in the session. After a host
+migration they reach the new host; what the old host held is the game's to rebuild.
+Checked in `compiler/tests/cases/1342_walker_game_messages`.
+
 ## Desync check
 
 With every snapshot the host replicates a `WalkerNetCheck`: the sum of all

@@ -36,6 +36,7 @@ open net/replication/receiveSystem/ReceiveSystem
 open net/replication/applySystem/ApplySystem
 open net/replication/interpolationSystem/InterpolationSystem
 open net/session/Session
+open app3d/walkerNetSystem/WalkerGameMessages
 
 # ----- components ---------------------------------------------------------------
 
@@ -194,6 +195,7 @@ type WalkerNet {
   playingAtMs: Int
   message: List(UInt8)
   values: List(Int)
+  gameMessages: List(WalkerGameMessage)  # until walkerNetTakeGameMessages
   # Desync checks done and failed (player side)
   checks: Int
   desyncs: Int
@@ -273,6 +275,7 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
     startMs: 0
     playingAtMs: -1
     message: List.create(UInt8, cap: 1200)
+    gameMessages: {}
     values: {}
     checks: 0
     desyncs: 0
@@ -611,6 +614,9 @@ func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: v
     if let hostPeer: mod HostPeer = net.relayHost.peers.modAt(index: p) {
       if let seat: mod WalkerSeat = net.seats.modAt(index: s) {
         loop connectionReceive(connection: hostPeer.connection, message: net.message) is not MessageChannel.none {
+          if takeGameMessage(message: net.message, peerId: peerId, into: net.gameMessages) {
+            continue
+          }
           if seat.slotId < 0 {
             let result: JoinResult = sessionTakeHelloFromPeer(
               host: net.session
@@ -865,7 +871,8 @@ func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs:
     net.helloSent = true
   }
   loop connectionReceive(connection: net.relayPlayer.connection, message: net.message) is not MessageChannel.none {
-    if not sessionTakeWelcome(player: net.sessionPlayer, message: net.message) {
+    let isGame: Bool = takeGameMessage(message: net.message, peerId: -1, into: net.gameMessages)
+    if not isGame and not sessionTakeWelcome(player: net.sessionPlayer, message: net.message) {
       let taken: Bool = replicaReceiveSystem(player: net.replicationPlayer, message: net.message)
     }
   }
