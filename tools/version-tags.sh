@@ -81,6 +81,15 @@ follow_rewrites() {
   done
 }
 
+# 0.3.0 to 0.10.0 of September 2026 were abandoned: ad546bbc2 reset 0.10.0 to 0.1.7 and they
+# were never released. Those numbers name the later versions, so no tag for the old commits.
+abandoned_version() {  # version, commit
+  case "$1" in
+    0.[3-9].* | 0.10.*) git merge-base --is-ancestor "$2" ad546bbc2 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
 tag_history() {
   local apply=0 ref="main" argument listed commit version made=0 kept=0 tag date
   for argument in "$@"; do
@@ -94,6 +103,7 @@ tag_history() {
   git rev-list --full-history --topo-order --reverse "$ref" -- "$VERSION_FILE" | while read -r commit; do
     version="$(version_at "$commit")" || continue
     sets_version "$commit" "$version" || continue
+    abandoned_version "$version" "$commit" && continue
     echo "$version $commit"
   done > "$listed"
   local bumps reused

@@ -245,12 +245,16 @@ Each step is its own queue item, with the full suite on each step that touches t
 5. Shared builds per version. Done in 0.2.346.
 6. The first package: `physicsScenes`, moved to `packages/physicsScenes` (section 6). Done in 0.2.347.
 
+Steps 1-6 together are **Rae 0.3.0**, the start of the package manager. The numbers 0.3.0 to 0.10.0 were used once before, in
+September 2026, and abandoned by the reset to 0.1.7. They were never released, so their tags were removed before the first
+push, and `tools/version-tags.sh` does not make them again.
+
 The new SUMU moved first (pin 0.2.326). Its `rae-env.sh` went from 362 lines to 77 and `rae-pin.sh` went. What a
 real project needed: `rae toolchain` run from a repo root with packs only in subfolders, `rae toolchain path` for
 scripts that call `tools/ios` (a script may not export `RAE_ROOT`, which means an override to `./rae`), the UI editor in
 the sparse checkout, and a `status` verdict that knows `./rae` builds with the pin. A pack made from a template holds no
 pin of its own: the generator copies the block from a tracked pack. A pin before 0.2.340 still writes `rae.lock` on a
-build, so it is gitignored until the pin moves. A pin before 0.2.349 cannot build its iOS frameworks on Xcode 27.
+build, which is why SUMU moved on to 0.3.0 the same day. A pin before 0.2.349 cannot build its iOS frameworks on Xcode 27.
 
 Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
 and its `make rae-pin`; game proto2; game proto3, starting from `v0.1.91`. Each `scripts/rae-env.sh` shrinks
