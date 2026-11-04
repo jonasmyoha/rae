@@ -8,14 +8,26 @@
 # and a .ready marker. A project's ./rae runs this from the Rae repo itself, and so does
 # `rae toolchain`. Needs only git, make and a C compiler. A failed build leaves nothing
 # behind but its log.
+#
+#   tools/toolchain-prepare.sh --deps <home> <name> [box3d sqlite wamr ios android]
+#
+# The shared builds of a toolchain, in <home>/deps/<dep>/<pin>. The pin is a hash of the files
+# that decide the build, read from that toolchain's own commit, so two versions with another
+# Box3D use two folders and two versions with the same one share a folder. <toolchain>/.deps
+# holds the variables that point its compiler and build scripts there (./rae reads it), and
+# tools/ios/frameworks and tools/android/deps are links there. With no dep this says what is
+# built; with deps it builds them, which only `rae toolchain deps` asks for. Those builds need
+# more than a C compiler (cmake, and Xcode or the Android NDK).
 set -eu
+mode=prepare
+if [ "${1:-}" = --deps ]; then
+  mode=deps
+  shift
+fi
 home=$1
-source=$2
-name=${3:-}
-repo=$home/repo
-mkdir -p "$home/toolchains"
 
-# Take a lock folder, waiting a bounded time: several builds may start together
+# Take a lock folder, waiting a bounded time: several builds may start together. Returns 1
+# when the marker it was waiting for appears, as the holder finished the work.
 lock=
 take_lock() {  # folder, tries, seconds between tries, ready marker to stop waiting at
   tries=0
@@ -26,7 +38,7 @@ take_lock() {  # folder, tries, seconds between tries, ready marker to stop wait
       exit 1
     fi
     sleep "$3"
-    if [ -n "$4" ] && [ -f "$4" ]; then exit 0; fi
+    if [ -n "$4" ] && [ -f "$4" ]; then return 1; fi
   done
   lock=$1
 }
@@ -36,6 +48,103 @@ drop_lock() {
 }
 trap drop_lock EXIT
 trap 'drop_lock; exit 130' INT TERM
+
+# The files that decide a shared build, the first being what must exist in this version
+dep_inputs() {
+  case $1 in
+    box3d) echo "tools/box3d/build.sh tools/box3d" ;;
+    sqlite) echo "tools/sqlite/build.sh tools/sqlite" ;;
+    wamr) echo "tools/wamr/build.sh tools/wamr compiler/runtime/runtime_wasm_embed.h" ;;
+    ios) echo "tools/ios/build-sdl3-ios.sh tools/ios/build-wgpu-ios.sh" ;;
+    android) echo "tools/android/build-sdl3-android.sh tools/android/build-wgpu-android.sh tools/android/env.sh" ;;
+    *) return 1 ;;
+  esac
+}
+
+# The folder of a shared build for the toolchain in $dir; empty when this version has none
+dep_folder() {
+  inputs=$(dep_inputs "$1")
+  git -C "$dir" rev-parse -q --verify "HEAD:${inputs%% *}" >/dev/null || return 0
+  pin=$(for input in $inputs; do
+    git -C "$dir" rev-parse -q --verify "HEAD:$input" || true
+  done | git hash-object --stdin | cut -c1-12)
+  echo "$home/deps/$1/$pin"
+}
+
+# <toolchain>/.deps and the links. The caller's own value of a variable wins.
+write_deps() {
+  : > "$dir/.deps.tmp"
+  for dep in box3d sqlite wamr; do
+    folder=$(dep_folder "$dep")
+    [ -n "$folder" ] || continue
+    mkdir -p "$folder"
+    variable=RAE_$(echo "$dep" | tr '[:lower:]' '[:upper:]')
+    echo "export ${variable}_CACHE=\"\${${variable}_CACHE:-$folder}\"" >> "$dir/.deps.tmp"
+    echo "export $variable=\"\${$variable:-$folder/install}\"" >> "$dir/.deps.tmp"
+  done
+  for dep in ios android; do
+    folder=$(dep_folder "$dep")
+    [ -n "$folder" ] || continue
+    mkdir -p "$folder"
+    if [ "$dep" = ios ]; then link=$dir/tools/ios/frameworks; else link=$dir/tools/android/deps; fi
+    ln -sfn "$folder" "$link"
+    echo "# $dep $folder" >> "$dir/.deps.tmp"
+  done
+  mv "$dir/.deps.tmp" "$dir/.deps"
+}
+
+build_dep() {
+  case $1 in
+    box3d | sqlite | wamr) bash "$dir/tools/$1/build.sh" ;;
+    ios) sh "$dir/tools/ios/build-sdl3-ios.sh" && sh "$dir/tools/ios/build-wgpu-ios.sh" ;;
+    android) sh "$dir/tools/android/build-sdl3-android.sh" && sh "$dir/tools/android/build-wgpu-android.sh" ;;
+  esac
+}
+
+if [ "$mode" = deps ]; then
+  name=$2
+  shift 2
+  dir=$home/toolchains/$name
+  write_deps
+  if [ $# -eq 0 ]; then
+    for dep in box3d sqlite wamr ios android; do
+      folder=$(dep_folder "$dep")
+      if [ -z "$folder" ]; then echo "$dep: not in this version"
+      elif [ -f "$folder/.ready" ]; then echo "$dep: built, $folder"
+      else echo "$dep: not built: ./rae toolchain deps $dep"; fi
+    done
+    exit 0
+  fi
+  . "$dir/.deps"
+  for dep in "$@"; do
+    if ! dep_inputs "$dep" >/dev/null; then
+      echo "rae: no shared build is called $dep: box3d, sqlite, wamr, ios or android" >&2
+      exit 1
+    fi
+    folder=$(dep_folder "$dep")
+    if [ -z "$folder" ]; then
+      echo "rae: Rae $name has no $dep to build" >&2
+      exit 1
+    fi
+    [ ! -f "$folder/.ready" ] || continue
+    take_lock "$folder.lock" 720 5 "$folder/.ready" || continue
+    if [ ! -f "$folder/.ready" ]; then
+      echo "rae: building $dep for Rae $name in $folder" >&2
+      if ! build_dep "$dep"; then
+        echo "rae: the build of $dep failed" >&2
+        exit 1
+      fi
+      touch "$folder/.ready"
+    fi
+    drop_lock
+  done
+  exit 0
+fi
+
+source=$2
+name=${3:-}
+repo=$home/repo
+mkdir -p "$home/toolchains"
 
 take_lock "$home/repo.lock" 300 1 ""
 if [ ! -d "$repo/.git" ]; then
@@ -72,7 +181,7 @@ if [ "$at" != "$version" ]; then
 fi
 
 # One preparation of a toolchain at a time, the others waiting for its marker
-take_lock "$dir.lock" 240 5 "$dir/.ready"
+take_lock "$dir.lock" 240 5 "$dir/.ready" || exit 0
 [ -f "$dir/.ready" ] && exit 0
 
 log=$home/toolchains/$name.log
@@ -89,4 +198,5 @@ if ! make -j8 -C "$dir/compiler" build >"$log" 2>&1 || [ ! -x "$dir/compiler/bin
   echo "rae: the compiler of Rae $name does not build (log: $log)" >&2
   exit 1
 fi
+write_deps
 touch "$dir/.ready"

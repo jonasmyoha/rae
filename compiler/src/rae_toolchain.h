@@ -19,6 +19,9 @@ int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const
 int rae_toolchain_update(const RaeToolchainSelf* self, const char* pack_path);
 int rae_toolchain_gc(bool dry_run);
 
+/* The shared builds of the pinned toolchain: their state with no names, else build them. */
+int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int count, char** names);
+
 /* Write ./rae in `dir`, running this compiler for `rae toolchain`. */
 bool rae_toolchain_write_wrapper(const RaeToolchainSelf* self, const char* dir);
 

@@ -803,8 +803,13 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   project pack in the repo and writes `./rae`; a project pack has a `rae` block and targets, and
   a library's `rae` stays. `update` moves to the newest version only if the pack's optional
   `rae: { check: "..." }` command passes (run in the repo root, with `RAE_BIN`), or else every
-  compiled target builds to a C object. `gc [--dry-run]` removes the toolchains no project in
-  `projects` uses, and they come back on demand. `list` shows the tags. Packs of one repo that
+  compiled target builds to a C object. `deps [box3d sqlite wamr ios android]` builds those for
+  the pinned Rae into `~/.rae/deps/<name>/<pin>`, the pin being a hash of the files that decide
+  that build; alone, it says what is built. A toolchain's `.deps` file points `RAE_BOX3D`,
+  `RAE_SQLITE`, `RAE_WAMR` and their `_CACHE` forms there, `./rae` reads it, and
+  `tools/ios/frameworks` and `tools/android/deps` link there. `gc [--dry-run]` removes the
+  toolchains no project in `projects` uses, which come back on demand, and the shared builds no
+  kept toolchain names. `list` shows the tags. Packs of one repo that
   pin different Rae stop the build. Checks: `make -C compiler toolchain-store-test`,
   which is not part of the full run.
 - **Dependencies (#933).** A `.raepack` may declare
