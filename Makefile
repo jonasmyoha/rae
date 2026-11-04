@@ -109,7 +109,10 @@ bench-servers:
 install-hooks:
 	@ln -sfn "$(CURDIR)/tools/git-hooks/pre-commit" .git/hooks/pre-commit
 	@ln -sfn "$(CURDIR)/tools/git-hooks/commit-msg" .git/hooks/commit-msg
-	@echo "installed pre-commit + commit-msg hooks -> tools/git-hooks/ (banned-terms gate)"
+	@ln -sfn "$(CURDIR)/tools/git-hooks/post-commit" .git/hooks/post-commit
+	@ln -sfn "$(CURDIR)/tools/git-hooks/post-merge" .git/hooks/post-merge
+	@ln -sfn "$(CURDIR)/tools/git-hooks/post-rewrite" .git/hooks/post-rewrite
+	@echo "installed the hooks -> tools/git-hooks/ (banned-terms gate, a tag on every version bump)"
 
 devtools-install:
 	@cd tools/devtools-web && bun install --frozen-lockfile

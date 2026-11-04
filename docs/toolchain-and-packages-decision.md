@@ -208,7 +208,11 @@ Each step is its own queue item, with the full suite on each step that touches t
 
 1. A build stops writing `rae.lock`. Done in 0.2.340: `rae fetch` and `rae update` still write it and keep
    its toolchain line, and `rae fetch` now pins a dependency added after the lock was made.
-2. Version tags: automatic on each bump, and the old ones added.
+2. Version tags: automatic on each bump, and the old ones added. Done in 0.2.341. `v0.2.321` is exactly
+   `930bf77d`, game proto1's commit, so it needs no `commit` in its pin. `v0.2.325` is one commit before
+   SUMU's `a34534a1`, `v0.2.330` is just after game proto2's `5898190c`, and `v0.1.91` is three before
+   `3937b4d5`. Each still has to build. None of these tags is on the remote until the next
+   `git push --follow-tags`.
 3. The `.raepack` as the one file: exact versions, the optional `commit`, `hash`, `subdir`, and `rae.lock`
    read once and retired.
 4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` goes.
