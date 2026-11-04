@@ -130,3 +130,107 @@ func resolveCharacterContact(
     )
   }
 }
+
+# ----- a local walker and a copy of a remote one -----------------------------------
+#
+# In a networked session each client owns one walker, and draws a copy of every other
+# walker where it was a moment ago (it follows that walker's pose). Applying the rule
+# above to such a pair never comes to rest. On one spot both clients push their own
+# walker the same way, and then each draws the other just behind it, so each is pushed
+# on by the copy, without end (compiler/tests/cases/1343_walkers_on_one_spot: 1.6 m/s,
+# forever). So a copy is never moved, and:
+# - at rest, only one side of the pair gets out of an overlap (`localYields`, which the
+#   clients must agree on), since the other side's walker will be seen to move. A walker
+#   on the move does not give way, or it could never reach anyone to shove them;
+# - a walker is shoved, whichever side it is, only by a walker that says it is moving
+#   (`remoteSpeed`, from its pose) and is really closing on it. A copy catching up with a
+#   walker that slid out of an overlap is not moving by that walker's word, and a copy
+#   trailing behind when both go the same way is lag, not a push;
+# - a walker on the move into a copy presses in only so far (remotePressDepth), which is
+#   enough to reach the real walker and shove it, and never goes through it.
+#
+# Of the overlap, the share the side that gives way moves out per fixed step: gone in
+# about a third of a second, as a slide and not a jump
+const remoteYieldShare: Float = 0.2
+
+# Closing slower than this (m/s) is no shove, and a walker slower than this is at rest
+const remoteShoveClosingSpeed: Float = 0.5
+
+# How near a walker on the move gets to a copy, as a share of their two radii
+const remotePressDepth: Float = 0.6
+
+# The contact of local walker A with remote copy B, whose place and velocity stay.
+# `aFalls` is the only knockdown: B's own client decides whether B falls.
+func resolveRemoteContact(
+  shapeA: view CharacterShape
+  shapeB: view CharacterShape
+  positionA: view Vec3
+  velocityA: view Vec3
+  positionB: view Vec3
+  velocityB: view Vec3
+  remoteSpeed: view Float
+  localYields: view Bool
+) ret CharacterContact {
+  let apart: CharacterContact = {
+    touching: false
+    knockdown: Knockdown.none
+    positionA: positionA
+    velocityA: velocityA
+    positionB: positionB
+    velocityB: velocityB
+  }
+  if Math.abs(value: positionB.z - positionA.z) >= (shapeA.height + shapeB.height) * 0.5 {
+    ret apart
+  }
+  let dx: Float = positionB.x - positionA.x
+  let dy: Float = positionB.y - positionA.y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let contactDistance: Float = shapeA.radius + shapeB.radius
+  if distance >= contactDistance {
+    ret apart
+  }
+  var normalX: Float = 1.0
+  var normalY: Float = 0.0
+  if distance > 0.0001 {
+    normalX = dx / distance
+    normalY = dy / distance
+  }
+  let closing: Float = (velocityA.x - velocityB.x) * normalX + (velocityA.y - velocityB.y) * normalY
+  let pushA: Float = velocityA.x * normalX + velocityA.y * normalY
+  let pushB: Float = 0.0 - (velocityB.x * normalX + velocityB.y * normalY)
+  let atRest: Bool = velocityA.x * velocityA.x + velocityA.y * velocityA.y < remoteShoveClosingSpeed * remoteShoveClosingSpeed
+  let shoved: Bool = closing > remoteShoveClosingSpeed and pushB > remoteShoveClosingSpeed and remoteSpeed > remoteShoveClosingSpeed
+  var position: Vec3 = positionA
+  if (localYields and atRest) or shoved {
+    let move: Float = (contactDistance - distance) * remoteYieldShare
+    position.x = positionA.x - normalX * move
+    position.y = positionA.y - normalY * move
+  }
+  var velocity: Vec3 = velocityA
+  if (closing > remoteShoveClosingSpeed and pushA > remoteShoveClosingSpeed) or shoved {
+    let impulse: Float = (1.0 + characterBounce) * closing * 0.5
+    velocity.x = velocityA.x - normalX * impulse
+    velocity.y = velocityA.y - normalY * impulse
+  }
+  # Any closing at all, or a walker a little faster than the copy ahead of it slips through
+  if closing > 0.0 and pushA > remoteShoveClosingSpeed {
+    let nearest: Float = contactDistance * remotePressDepth
+    if distance < nearest {
+      position.x = positionB.x - normalX * nearest
+      position.y = positionB.y - normalY * nearest
+    }
+  }
+  let both: Knockdown = knockdownOf(pushA: pushA, pushB: pushB)
+  var knockdown: Knockdown = Knockdown.none
+  if both is Knockdown.aFalls or both is Knockdown.bothFall {
+    knockdown = Knockdown.aFalls
+  }
+  ret CharacterContact {
+    touching: true
+    knockdown: knockdown
+    positionA: position
+    velocityA: velocity
+    positionB: positionB
+    velocityB: velocityB
+  }
+}

@@ -70,6 +70,35 @@ With every snapshot the host replicates a `WalkerNetCheck`: the sum of all
 pose values it captured. A player that applied the same snapshot sums its own
 copy, and a difference counts as a desync (`net.desyncs` of `net.checks`).
 
+## Walkers that touch
+
+Each client owns one walker and draws every other one as a copy, a moment in the past.
+Treating such a pair like two local characters never comes to rest: on one spot both
+clients pushed their own walker the same way, and then each drew the other just behind
+it, so each was pushed on by the copy, without end. Two idle 143 windows went 57 m in 35
+s at a steady 1.64 m/s. So a bump with a copy (`resolveRemoteContact`,
+app3d/CharacterContactRules) works differently:
+
+- A copy is never moved by a bump, and two copies do not bump. Each is where its own
+  client says.
+- At rest, only one side gets out of an overlap: the lower net id
+  (`walkerLocalYields`), which every client agrees on. It slides out and does not walk.
+- A walker is shoved only by a walker that says it is moving (its pose's speed) and is
+  really closing on it. A copy catching up, or trailing behind when both go the same
+  way, does not shove.
+- A walker on the move presses into a copy to 60% of their two radii, enough to reach
+  the real walker and shove it, then slides round it.
+- A bump only knocks over this client's own walker.
+
+So a session needs no spacing at its spawn. Measured on 2026-11-04, standing idle through
+a relay: two 143 windows ended 0.6 m apart, and four within 2 m in a line, all at speed 0,
+with 0 desyncs. Case 1343 runs this with real movers and no window: 2 and 3 walkers on one
+spot, a walk-in with either net id walking, and a runner.
+
+Not working: a runner through a copy knocks nobody over. Its own client slows it at the
+first touch, so the other client sees 3.41 m/s at the hit, under the 3.5 m/s it takes. The
+one it hits is sent moving instead.
+
 ## A slow start, and a player that stalls
 
 Nothing reaches the relay while a frame is running, so a window whose frames stop

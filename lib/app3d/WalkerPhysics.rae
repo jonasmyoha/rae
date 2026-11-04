@@ -115,6 +115,9 @@ type WalkerPhysics {
   # Knocked over by a bump this step (app3d/CharacterContact: the one doing
   # less of the pushing), the ragdoll not made yet: the knockdown trips them
   knocks: ComponentTable(KnockRequest)
+  # The copies of other clients' walkers in a networked session
+  # (app3d/remoteWalkerSystem, app3d/CharacterContact)
+  remoteMovers: ComponentTable(RemoteMover)
   ragdollRig: RagdollRig
   moverLimits: ComponentTable(MoverSpeedLimit)
   moverSteps: ComponentTable(MoverStep)
@@ -168,6 +171,7 @@ func createWalkerPhysics(
     ragdolls: ComponentTable.create(Ragdoll)
     knockedDown: ComponentTable.create(KnockedDown)
     knocks: ComponentTable.create(KnockRequest)
+    remoteMovers: ComponentTable.create(RemoteMover)
     ragdollRig: createRagdollRig(
       skeleton: emptySkeleton()
       bones: mixamoRagdollBones(prefix: "mixamorig:")
@@ -417,6 +421,7 @@ func moveCharacters(
   let fallen: Int = bumpMovers(
     characters: physicsSystem.characters
     parked: physicsSystem.moverParked
+    remotes: physicsSystem.remoteMovers
     knocks: physicsSystem.knocks
   )
   # The climbers on their walls (app3d/Climbing), before the rest are read back

@@ -1,0 +1,375 @@
+# Walkers of a session that start on one spot and stand still must come to rest. Each
+# client has its own world: its own walker's mover, and for each other walker a copy
+# that follows that walker's pose as it was 150 ms ago, the way a real session draws it.
+# Real movers on a flat floor, the real bump (app3d/CharacterContact) and the real copy
+# drive (app3d/remoteWalkerSystem). No network and no window.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsQueries
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/KnockedDown
+open app3d/CharacterContact
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/remoteWalkerSystem/RemoteCopyDrive
+
+const stepSeconds: Float = 1.0 / 60.0
+
+# Steps a pose takes to reach another client and be drawn there: 150 ms
+const poseDelaySteps: Int = 9
+
+type Client {
+  physics: Physics
+  allocator: EntityAllocator
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  transforms: ComponentTable(Transform3D)
+  characters: ComponentTable(CharacterBody)
+  controllers: ComponentTable(ThirdPersonController)
+  drives: ComponentTable(MoverDrive)
+  parked: ComponentTable(MoverParked)
+  limits: ComponentTable(MoverSpeedLimit)
+  steps: ComponentTable(MoverStep)
+  knocks: ComponentTable(KnockRequest)
+  remotes: ComponentTable(RemoteMover)
+  # This client's own walker, then a copy per other client, in client order
+  localEntityId: EntityId
+  copyEntityIds: List(EntityId)
+  # This walker's poses, newest last, as the others will read them
+  sentPoses: List(WalkerPose)
+  # What the player does: a throttle along +x
+  throttle: Float
+  running: Bool
+  fell: Bool
+}
+
+func addCharacter(client: mod Client, x: view Float, y: view Float) ret EntityId {
+  let entityId: EntityId = allocEntity(this: client.allocator)
+  addCharacterBody(
+    characters: client.characters
+    entityId: entityId
+    feet: Vec3.create(x: x, y: y, z: 0.0)
+  )
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = Vec3.create(x: x, y: y, z: 0.0)
+  componentSet(this: client.controllers, entityId: entityId, data: controller)
+  ret entityId
+}
+
+func createClient(index: view Int, startX: view List(Float), startY: view Float) ret Client {
+  var client: Client = {
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: stepSeconds, subSteps: 4)
+    allocator: createEntityAllocator()
+    rigidBodies: ComponentTable.create(RigidBody)
+    colliders: ComponentTable.create(Collider)
+    transforms: ComponentTable.create(Transform3D)
+    characters: ComponentTable.create(CharacterBody)
+    controllers: ComponentTable.create(ThirdPersonController)
+    drives: ComponentTable.create(MoverDrive)
+    parked: ComponentTable.create(MoverParked)
+    limits: ComponentTable.create(MoverSpeedLimit)
+    steps: ComponentTable.create(MoverStep)
+    knocks: ComponentTable.create(KnockRequest)
+    remotes: ComponentTable.create(RemoteMover)
+    localEntityId: noEntity()
+    copyEntityIds: {}
+    sentPoses: {}
+    throttle: 0.0
+    running: false
+    fell: false
+  }
+  # The floor
+  let floorEntityId: EntityId = allocEntity(this: client.allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = Vec3.create(x: 0.0, y: 0.0, z: -0.5)
+  let bodyId: BodyId = spawnRigidBody(
+    physics: client.physics
+    rigidBodies: client.rigidBodies
+    transforms: client.transforms
+    entityId: floorEntityId
+    def: bodyDef
+  )
+  let shapeId: ShapeId = addBoxCollider(
+    physics: client.physics
+    rigidBodies: client.rigidBodies
+    colliders: client.colliders
+    entityId: floorEntityId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3.create(x: 200.0, y: 200.0, z: 0.5)
+    transform: transformIdentity()
+  )
+  client.localEntityId = addCharacter(
+    client: client
+    x: startX.copyAtFallback(index: index, fallback: 0.0)
+    y: startY
+  )
+  loop var other: Int = 0, other < startX.length, ++other {
+    if other is not index {
+      client.copyEntityIds.add(
+        value: addCharacter(
+          client: client
+          x: startX.copyAtFallback(index: other, fallback: 0.0)
+          y: startY
+        )
+      )
+      componentSet(
+        this: client.remotes
+        entityId: client.copyEntityIds.copyAtFallback(
+          index: client.copyEntityIds.length - 1
+          fallback: noEntity()
+        )
+        data: RemoteMover { localYields: index < other, speed: 0.0 }
+      )
+    }
+  }
+  ret client
+}
+
+func localPosition(client: view Client) ret Vec3 {
+  ret componentView(this: client.controllers, entityId: client.localEntityId).position
+}
+
+func localSpeed(client: view Client) ret Float {
+  let velocity: Vec3 = moverVelocity(
+    character: componentView(this: client.characters, entityId: client.localEntityId)
+  )
+  ret Math.sqrt(x: velocity.x * velocity.x + velocity.y * velocity.y)
+}
+
+# The pose this client's walker had poseDelaySteps ago
+func delayedPose(client: view Client) ret WalkerPose {
+  let index: Int = Math.max(a: client.sentPoses.length - 1 - poseDelaySteps, b: 0)
+  if let pose: WalkerPose = client.sentPoses.copyAt(index: index) {
+    ret pose
+  }
+  ret walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+}
+
+# One fixed step of every client
+func stepAll(clients: mod List(Client)) {
+  var delayed: List(WalkerPose) = {}
+  loop var c: Int = 0, c < clients.length, ++c {
+    if let client: view Client = clients.viewAt(index: c) {
+      delayed.add(value: delayedPose(client: client))
+    }
+  }
+  loop var c: Int = 0, c < clients.length, ++c {
+    if let client: mod Client = clients.modAt(index: c) {
+      var playerDrive: MoverDrive = createMoverDrive()
+      if client.throttle is not 0.0 {
+        playerDrive.intent.moveY = client.throttle
+        playerDrive.intent.walking = not client.running
+        # Yaw -pi/2 faces +x
+        playerDrive.yaw = -1.5707964
+      }
+      componentSet(this: client.drives, entityId: client.localEntityId, data: playerDrive)
+      var copyIndex: Int = 0
+      loop var other: Int = 0, other < clients.length, ++other {
+        if other is not c {
+          let copyEntityId: EntityId = client.copyEntityIds.copyAtFallback(
+            index: copyIndex
+            fallback: noEntity()
+          )
+          copyIndex = copyIndex + 1
+          let pose: WalkerPose = delayed.copyAtFallback(
+            index: other
+            fallback: walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+          )
+          componentMod(this: client.remotes, entityId: copyEntityId).speed = pose.speed
+          componentSet(
+            this: client.drives
+            entityId: copyEntityId
+            data: remoteCopyDrive(
+              at: componentView(this: client.controllers, entityId: copyEntityId).position
+              pose: pose
+            )
+          )
+        }
+      }
+      driveMovers(
+        characters: client.characters
+        controllers: client.controllers
+        drives: client.drives
+      )
+      moveMovers(
+        physics: client.physics
+        characters: client.characters
+        parked: client.parked
+        limits: client.limits
+        steps: client.steps
+      )
+      let fallen: Int = bumpMovers(
+        characters: client.characters
+        parked: client.parked
+        remotes: client.remotes
+        knocks: client.knocks
+      )
+      if componentHas(this: client.knocks, entityId: client.localEntityId) {
+        client.fell = true
+      }
+      # A knock's ragdoll is the app's; here it just stands again
+      loop componentCount(this: client.knocks) > 0 {
+        componentRemove(this: client.knocks, entityId: componentEntityAt(this: client.knocks, i: 0))
+      }
+      readMoverControllers(
+        characters: client.characters
+        controllers: client.controllers
+        parked: client.parked
+        groundZ: 0.0
+        fixedStep: stepSeconds
+      )
+      var pose: WalkerPose = walkerPoseAt(position: localPosition(client: client))
+      pose.speed = localSpeed(client: client)
+      client.sentPoses.add(value: pose)
+    }
+  }
+}
+
+func createClients(count: view Int, startX: view List(Float)) ret List(Client) {
+  var clients: List(Client) = {}
+  loop var c: Int = 0, c < count, ++c {
+    clients.add(value: createClient(index: c, startX: startX, startY: 0.0))
+  }
+  ret clients
+}
+
+func runSeconds(clients: mod List(Client), seconds: view Int) {
+  loop var i: Int = 0, i < seconds * 60, ++i {
+    stepAll(clients: clients)
+  }
+}
+
+func positionOf(clients: view List(Client), index: view Int) ret Vec3 {
+  if let client: view Client = clients.viewAt(index: index) {
+    ret localPosition(client: client)
+  }
+  ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+}
+
+func flatDistance(a: view Vec3, b: view Vec3) ret Float {
+  let dx: Float = a.x - b.x
+  let dy: Float = a.y - b.y
+  ret Math.sqrt(x: dx * dx + dy * dy)
+}
+
+# Every walker within `distance` of the spot, standing still, and none on another
+func cameToRest(clients: view List(Client), distance: view Float) {
+  var farthest: Float = 0.0
+  var fastest: Float = 0.0
+  var closest: Float = 1000.0
+  let spot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  loop var c: Int = 0, c < clients.length, ++c {
+    let at: Vec3 = positionOf(clients: clients, index: c)
+    farthest = Math.max(a: farthest, b: flatDistance(a: at, b: spot))
+    if let client: view Client = clients.viewAt(index: c) {
+      fastest = Math.max(a: fastest, b: localSpeed(client: client))
+    }
+    loop var other: Int = c + 1, other < clients.length, ++other {
+      closest = Math.min(
+        a: closest
+        b: flatDistance(a: at, b: positionOf(clients: clients, index: other))
+      )
+    }
+  }
+  log("  within {distance} m of the spot: {farthest <= distance}")
+  log("  standing still: {fastest < 0.05}")
+  log("  not on each other: {closest > 0.3}")
+  if farthest > distance or fastest >= 0.05 or closest <= 0.3 {
+    log("  farthest {farthest} m, fastest {fastest} m/s, closest {closest} m")
+  }
+}
+
+# A walker that walks into one standing, for 4 s, then stops. The one standing is moved
+# along, the walker slides round it and never onto it, and then both rest, apart.
+func walkInto(walkerIndex: view Int, standerIndex: view Int, startX: view List(Float)) {
+  var pair: List(Client) = createClients(count: 2, startX: startX)
+  if let walker: mod Client = pair.modAt(index: walkerIndex) {
+    walker.throttle = 1.0
+  }
+  var closest: Float = 1000.0
+  loop var i: Int = 0, i < 240, ++i {
+    stepAll(clients: pair)
+    closest = Math.min(
+      a: closest
+      b: flatDistance(
+        a: positionOf(clients: pair, index: 0)
+        b: positionOf(clients: pair, index: 1)
+      )
+    )
+  }
+  let standerX: Float = positionOf(clients: pair, index: standerIndex).x
+  log("  the one standing was moved along: {standerX > 0.3}")
+  log("  they never stood on each other: {closest > 0.2}")
+  if let walker: mod Client = pair.modAt(index: walkerIndex) {
+    walker.throttle = 0.0
+  }
+  runSeconds(clients: pair, seconds: 5)
+  var fastest: Float = 0.0
+  loop var c: Int = 0, c < 2, ++c {
+    if let client: view Client = pair.viewAt(index: c) {
+      fastest = Math.max(a: fastest, b: localSpeed(client: client))
+    }
+  }
+  let apart: Float = flatDistance(
+    a: positionOf(clients: pair, index: 0)
+    b: positionOf(clients: pair, index: 1)
+  )
+  log("  then both rest, apart: {fastest < 0.05 and apart > 0.3}")
+  if fastest >= 0.05 or apart <= 0.3 or closest <= 0.2 or standerX <= 0.3 {
+    log("  stander {standerX}, closest {closest}, fastest {fastest}, apart {apart}")
+  }
+}
+
+func main() ret Int {
+  log("two walkers start on one spot and stand, 30 s:")
+  var two: List(Client) = createClients(count: 2, startX: { 0.0, 0.0 })
+  runSeconds(clients: two, seconds: 30)
+  cameToRest(clients: two, distance: 1.0)
+
+  log("three walkers start on one spot and stand, 30 s:")
+  var three: List(Client) = createClients(count: 3, startX: { 0.0, 0.0, 0.0 })
+  runSeconds(clients: three, seconds: 30)
+  cameToRest(clients: three, distance: 1.5)
+
+  log("two walkers side by side and touching, whichever clients they are, 30 s:")
+  var touching: List(Client) = createClients(count: 2, startX: { 0.2, -0.2 })
+  runSeconds(clients: touching, seconds: 30)
+  cameToRest(clients: touching, distance: 1.0)
+
+  log("one walks into the other standing, the one that gives way at rest walking:")
+  walkInto(walkerIndex: 0, standerIndex: 1, startX: { -3.0, 0.0 })
+  log("the same, the one that does not give way at rest walking:")
+  walkInto(walkerIndex: 1, standerIndex: 0, startX: { 0.0, -3.0 })
+
+  log("a runner hits one standing:")
+  var runner: List(Client) = createClients(count: 2, startX: { -6.0, 0.0 })
+  if let walker: mod Client = runner.modAt(index: 0) {
+    walker.throttle = 1.0
+    walker.running = true
+  }
+  runSeconds(clients: runner, seconds: 3)
+  var standerFell: Bool = false
+  var runnerFell: Bool = false
+  if let client: view Client = runner.viewAt(index: 1) {
+    standerFell = client.fell
+  }
+  if let client: view Client = runner.viewAt(index: 0) {
+    runnerFell = client.fell
+  }
+  # Neither falls: the runner's own client slows it first, so the other sees 3.41 m/s
+  # at the hit, under knockdownClosingSpeed. Both stay up, and the one standing is sent
+  # moving. Queued: a bump through a copy knocking someone over.
+  log("  the one standing is sent moving: {positionOf(clients: runner, index: 1).x > 0.5}")
+  log("  nobody falls: {not standerFell and not runnerFell}")
+  ret 0
+}

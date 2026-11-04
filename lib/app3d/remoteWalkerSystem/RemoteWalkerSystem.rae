@@ -24,6 +24,7 @@ open app3d/CharacterMovers
 open app3d/CharacterBodies
 open app3d/Characters
 open app3d/KnockedDown
+open app3d/CharacterContact
 open app3d/Ragdoll
 open app3d/Wander
 open app3d/WalkerNames
@@ -33,15 +34,7 @@ open app3d/WalkerReset
 open app3d/WalkerAppSetup
 open app3d/WalkerCharacter
 open app3d/walkerNetSystem/WalkerNetSystem
-
-# Farther than this (m) from its remote walker, a character is put there
-const remoteTeleportDistance: Float = 3.0
-
-# Nearer than this (m), it stands
-const remoteArriveDistance: Float = 0.15
-
-# Faster than this (m/s), the remote walker runs
-const remoteRunSpeed: Float = 2.5
+open app3d/remoteWalkerSystem/RemoteCopyDrive
 
 # The most remote walkers shown at once: with the hero (and an offline
 # crowd) well inside the renderer's 64 skin palettes (SkinStore)
@@ -365,18 +358,7 @@ func driveRemoteWalker(
       groundZ: groundZ
     )
   }
-  var drive: MoverDrive = createMoverDrive()
-  drive.yaw = pose.heading
-  if distance > remoteArriveDistance and distance <= remoteTeleportDistance {
-    drive.intent.moveY = 1.0
-    drive.intent.walking = pose.speed < remoteRunSpeed and distance < 1.0
-    drive.yaw = headingTo(
-      x: at.x
-      y: at.y
-      toX: pose.position.x
-      toY: pose.position.y
-    )
-  }
+  var drive: MoverDrive = remoteCopyDrive(at: at, pose: pose)
   if pose.airborne and not wasAirborne {
     drive.intent.jump = true
   }
@@ -426,6 +408,16 @@ func driveRemoteWalkers(
       netEntityId = walker.netEntityId
     }
     if remotePose(net: net, entityId: netEntityId, pose: pose) {
+      if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: k) {
+        componentSet(
+          this: physicsSystem.remoteMovers
+          entityId: walker.entityId
+          data: RemoteMover {
+            localYields: walkerLocalYields(net: net, netEntityId: netEntityId)
+            speed: pose.speed
+          }
+        )
+      }
       driveRemoteWalker(
         remoteWalkers: remoteWalkers
         index: k
