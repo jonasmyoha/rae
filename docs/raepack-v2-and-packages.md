@@ -244,7 +244,7 @@ pack StudioApp {
 
   dependencies: {
     dep ui:     { path: "../../lib-ui" }
-    dep codec:  { git: "https://github.com/acme/rae-codec", rev: "v1.2.0" }
+    dep codec:  { git: "https://github.com/acme/rae-codec", version: "1.2.0" }
   }
 
   modules: {
@@ -429,7 +429,7 @@ App Store approval or general iOS compatibility — that is investigated separat
 
 ---
 
-## 12. Package metadata, dependencies, and `rae.lock`
+## 12. Package metadata and dependencies
 
 - **The program reads its own `meta`** (2026-11-03): `Pack.name` and
   `Pack.version` (lib/Pack.rae) are the project pack's `meta.name` and
@@ -457,7 +457,7 @@ App Store approval or general iOS compatibility — that is investigated separat
   ```rae
   dependencies: {
     dep ui:    { path: "../../lib-ui" }
-    dep codec: { git: "https://github.com/acme/rae-codec", rev: "v1.2.0" }
+    dep codec: { git: "https://github.com/acme/rae-codec", version: "1.2.0" }
   }
   ```
 - **Package boundaries (2026-11-01).** A package sees only its own files, the
@@ -479,11 +479,11 @@ App Store approval or general iOS compatibility — that is investigated separat
   nested dependency only if its own pack declares it too. Cases
   1276_pack_dependency_cannot_reach_up, 1277_pack_dependent_needs_import,
   1278_pack_sibling_needs_its_own_dependency, 1279_pack_dependency_of_a_dependency.
-- **`rae.lock`** — generated lockfile pinning each resolved dependency to an exact
-  revision + content hash, for reproducible builds. Resolution feeds the
-  compiler's existing module search (the `RAE_STDLIB` / `resolve_stdlib_root` /
-  `try_resolve_lib_module` path is the hook). Workspaces (multiple packages under
-  one root, e.g. `examples/`) are a later layer.
+- **Pins live in the pack (2026-11-04).** There is no `rae.lock`: a dependency's exact
+  version, optional commit and tool-written hash are in its `dep` block
+  (docs/toolchain-and-packages-decision.md section 4). Resolution feeds the compiler's
+  existing module search (the `resolve_stdlib_root` / `try_resolve_lib_module` path is the
+  hook). Workspaces (multiple packages under one root, e.g. `examples/`) are a later layer.
 
 ---
 
@@ -540,8 +540,8 @@ App Store approval or general iOS compatibility — that is investigated separat
    description-only examples, or is folder-derived devtools metadata enough?
 6. **Desktop grouping granularity:** how much shares under one `desktop` target
    before per-OS overrides become their own targets?
-7. **Dependencies:** version-constraint syntax (path/git first), `rae.lock`
-   format, workspace model, and the resolver's integration with stdlib resolution.
+7. **Dependencies:** DECIDED 2026-11-04 (docs/toolchain-and-packages-decision.md): exact versions, the pins in the pack. Still open: the workspace model, and how the
+   resolver joins stdlib resolution.
 8. **OTA per platform (§11):** desktop OTA vs iOS — separate investigations;
    integrity/rollback/versioning protocol; what "compatible interface version"
    means concretely.

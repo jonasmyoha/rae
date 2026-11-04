@@ -1,31 +1,37 @@
 #ifndef RAE_DEPS_H
 #define RAE_DEPS_H
 
-/* Dependency resolution + the `dep` lines of rae.lock (#933,
- * docs/versioning-and-toolchain.md §4, docs/raepack-v2-and-packages.md §12).
+/* Dependency resolution (#933, docs/toolchain-and-packages-decision.md).
  *
  * A dep named `x` makes `import x/Foo` resolve to <depdir>/Foo.rae. Path deps
- * resolve in place; git deps are cloned into <pack dir>/.rae/deps/<name> and
- * pinned to the commit an existing rae.lock names (reproducible from the lock
- * alone), else to the pack's `rev`. Registry or a registry server: not here. */
+ * resolve in place. Git deps are cloned into <pack dir>/.rae/deps/<name> and checked
+ * out at the pack's exact version (its tag) or commit, and their files are checked
+ * against the pack's hash. A build only reads the pack: `rae fetch` and `rae update`
+ * write it. Registry or a registry server: not here. */
 
 #include <stdbool.h>
 #include <stdio.h>
 
 #include "raepack.h"
 
-/* Resolve every dep of `pack` (its file lives in `pack_dir`), consulting the
- * lockfile at `lock_path` (may not exist) for git pins, and register each one.
+/* Resolve every dep of `pack` (its file lives in `pack_dir`) and register each one.
  * Diagnoses and returns false on the first unresolvable dep. */
-bool rae_deps_resolve(const RaePack* pack, const char* pack_dir, const char* lock_path);
+bool rae_deps_resolve(const RaePack* pack, const char* pack_dir);
 
-/* Emit the lock's dependency records (one `dep <name> { ... }` line each,
- * after a first `dep lib { source: "toolchain:lib" }` line: the stdlib of the
- * toolchain the lock names, relative to it, so no machine path is recorded). */
-void rae_deps_write_lock(FILE* out);
+/* The version the project builds with: a dependency's `rae` is checked against it. */
+void rae_deps_set_compiler_version(const char* version);
 
-/* Say which git deps the lock did not pin. A build reads the lock and never
- * writes it, so only `rae fetch` or `rae update` can pin them. */
+/* What resolving a git dep found, for writing it into the pack: the version in force,
+ * its commit ("" for the version's tag) and the hash of its files. */
+typedef struct {
+  const char* version;
+  const char* commit;
+  const char* hash;
+} RaeDepResolved;
+bool rae_deps_resolved(const char* name, RaeDepResolved* out);
+
+/* Say which git deps have no hash in their pack. A build only reads the pack, so only
+ * `rae fetch` or `rae update` can write one. */
 void rae_deps_note_unpinned(FILE* out);
 
 /* Number of deps registered by rae_deps_resolve. */
@@ -44,10 +50,9 @@ char* rae_deps_resolve_folder(const char* normalized);
  * are vendored, so the build's format preflight must not rewrite them. */
 bool rae_deps_owns_path(const char* file_path);
 
-/* #934: before resolving, mark deps whose lock pin should be IGNORED and whose
- * git remote should be re-fetched — i.e. `rae update`. `only_name` NULL means
- * every dep; otherwise just that one. Off by default (rae_deps_resolve honors
- * the lock, which is what a build and `rae fetch` want). */
+/* #934: before resolving, mark deps that move to their newest version, whose git
+ * remote is fetched again: `rae update`. `only_name` NULL means every dep; otherwise
+ * just that one. Off by default (a build and `rae fetch` hold to the pack). */
 void rae_deps_set_update(const char* only_name);
 
 /* #934: print the resolved dependency graph (call after rae_deps_resolve).

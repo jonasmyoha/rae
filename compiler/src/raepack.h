@@ -51,7 +51,15 @@ typedef struct RaePackDep {
   Str name;
   Str path;
   Str git;
+  /* `rev` is no longer a pin: it is read only to answer it with the repair */
   Str rev;
+  /* The exact version; with a git dep required, and it names the tag. */
+  Str version;
+  /* git only: one exact commit (optional), the package's folder in the repo
+   * (optional), and the tool-written hash of its files */
+  Str commit;
+  Str subdir;
+  Str hash;
   struct RaePackDep* next;
 } RaePackDep;
 
@@ -63,6 +71,8 @@ typedef struct {
   /* Optional toolchain requirement: the string from `rae: { version: "..." }`
    * (#931). Empty (len 0) when the pack declares no requirement. */
   Str rae_version;
+  /* The optional exact commit of the same block. */
+  Str rae_commit;
   /* Optional `meta: { name: "...", version: "..." }`: what the program is
    * called and its release (the App Store's version); the program reads
    * them as Pack.name / Pack.version. Empty (len 0) when absent. */

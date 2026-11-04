@@ -659,7 +659,9 @@ static bool parse_targets(RaePackParser* parser, RaePack* pack, RaePackBlock* bl
   return true;
 }
 
-/* #933: `dependencies: { dep <name>: { path: "..." } | { git: "...", rev: "..." } }` */
+/* #933: `dependencies: { dep <name>: { path: "...", version? } | { git: "...", subdir?,
+ * version, commit?, hash? } }`. That a git dep has an exact version is checked when it
+ * is resolved (rae_deps.c), so the message is not lost in a quiet parse. */
 static bool parse_dependencies(RaePackParser* parser, RaePack* pack, RaePackBlock* block) {
   RaePackDep* tail = NULL;
   for (const RaePackField* field = block ? block->fields : NULL; field; field = field->next) {
@@ -691,9 +693,13 @@ static bool parse_dependencies(RaePackParser* parser, RaePack* pack, RaePackBloc
       if (str_eq_cstr(f->key, "path")) { which = "path"; slot = &dep->path; }
       else if (str_eq_cstr(f->key, "git")) { which = "git"; slot = &dep->git; }
       else if (str_eq_cstr(f->key, "rev")) { which = "rev"; slot = &dep->rev; }
+      else if (str_eq_cstr(f->key, "version")) { which = "version"; slot = &dep->version; }
+      else if (str_eq_cstr(f->key, "commit")) { which = "commit"; slot = &dep->commit; }
+      else if (str_eq_cstr(f->key, "subdir")) { which = "subdir"; slot = &dep->subdir; }
+      else if (str_eq_cstr(f->key, "hash")) { which = "hash"; slot = &dep->hash; }
       else {
         diag_error(parser->file_path, (int)f->line, (int)f->column,
-                   "unknown dep field (expected path, git, or rev)");
+                   "unknown dep field (expected path, git, version, commit, subdir or hash)");
         parser->had_error = true;
         return false;
       }
@@ -714,9 +720,9 @@ static bool parse_dependencies(RaePackParser* parser, RaePack* pack, RaePackBloc
       parser->had_error = true;
       return false;
     }
-    if (dep->rev.len > 0 && !has_git) {
+    if ((dep->rev.len > 0 || dep->commit.len > 0 || dep->subdir.len > 0 || dep->hash.len > 0) && !has_git) {
       diag_error(parser->file_path, (int)field->line, (int)field->column,
-                 "dep rev is only meaningful with git");
+                 "dep rev, commit, subdir and hash are only meaningful with git");
       parser->had_error = true;
       return false;
     }
@@ -833,6 +839,14 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
             return false;
           }
           pack->rae_version = rae_field->value.as.string;
+        } else if (str_eq_cstr(rae_field->key, "commit")) {
+          if (rae_field->value.kind != RAEPACK_VALUE_STRING) {
+            diag_error(parser->file_path, (int)rae_field->line,
+                       (int)rae_field->column, "rae commit must be a string");
+            parser->had_error = true;
+            return false;
+          }
+          pack->rae_commit = rae_field->value.as.string;
         }
       }
     } else if (str_eq_cstr(field->key, "meta") && field->value.kind == RAEPACK_VALUE_BLOCK) {

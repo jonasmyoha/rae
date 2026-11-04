@@ -20,6 +20,13 @@ typedef struct {
  * requirement check compares. Returns false on malformed input. */
 bool rae_semver_parse(const char* text, RaeSemver* out);
 
+/* A pin is one exact version: "X.Y.Z" and nothing else, so "0.2" and ranges are
+ * not pins. False for anything else. */
+bool rae_version_exact(const char* text, RaeSemver* out);
+
+/* <0, 0 or >0, as `left` is older than, equal to or newer than `right`. */
+int rae_semver_compare(RaeSemver left, RaeSemver right);
+
 /* Does `compiler` satisfy the requirement string `req`?
  *   - a bare version is a caret requirement: "0.3" -> >=0.3.0 <0.4.0,
  *     "0.3.1" -> >=0.3.1 <0.4.0 (pre-1.0 the MINOR is the breaking axis; at
