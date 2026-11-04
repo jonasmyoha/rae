@@ -1,0 +1,329 @@
+# lib/net/Connection, driven by hand with no I/O: only a packet with a reliable
+# message asks for an ack at once. Two idle ends send about one keep-alive each
+# per keepAliveMs, every message still arrives under loss, and the round trip
+# is measured correctly when one end, or both, send no messages.
+open net/Wire
+open net/Connection
+open net/BadNetwork
+open net/Udp
+open net/replication/ReplicaValues
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+
+type Link {
+  client: Connection
+  server: Connection
+  toServer: BadNetwork
+  toClient: BadNetwork
+  packet: List(UInt8)
+  arrived: List(UInt8)
+  message: List(UInt8)
+  nowMs: Int
+}
+
+func createLink(settings: view BadNetworkSettings) ret Link {
+  ret Link {
+    client: createConnection(config: defaultConnectionConfig())
+    server: createConnection(config: defaultConnectionConfig())
+    toServer: createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 512)
+    toClient: createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 512)
+    packet: List.create(UInt8, cap: 1200)
+    arrived: List.create(UInt8, cap: 1200)
+    message: List.create(UInt8, cap: 1200)
+    nowMs: 0
+  }
+}
+
+func cleanSettings(latencyMs: view Int) ret BadNetworkSettings {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.latencyMs = latencyMs
+  settings.seed = 11
+  ret settings
+}
+
+func deliver(
+  network: mod BadNetwork
+  connection: mod Connection
+  arrived: mod List(UInt8)
+  nowMs: view Int
+) {
+  loop badNetworkNext(network: network, packet: arrived, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: connection
+      packet: arrived
+      start: 0
+      count: arrived.length
+      nowMs: nowMs
+    )
+  }
+}
+
+# One 10 ms tick: clocks, every packet each end wants to send, deliveries
+func step(link: mod Link) {
+  link.nowMs = link.nowMs + 10
+  connectionUpdate(connection: link.client, nowMs: link.nowMs)
+  connectionUpdate(connection: link.server, nowMs: link.nowMs)
+  loop connectionWritePacket(connection: link.client, packet: link.packet, nowMs: link.nowMs) {
+    badNetworkSend(
+      network: link.toServer
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
+  }
+  loop connectionWritePacket(connection: link.server, packet: link.packet, nowMs: link.nowMs) {
+    badNetworkSend(
+      network: link.toClient
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
+  }
+  deliver(
+    network: link.toServer
+    connection: link.server
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
+  deliver(
+    network: link.toClient
+    connection: link.client
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
+}
+
+func steps(link: mod Link, count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    step(link: link)
+  }
+}
+
+func connectLink(link: mod Link) {
+  connectionListen(connection: link.server, nowMs: link.nowMs)
+  connectionConnect(connection: link.client, connectionId: 305419896, nowMs: link.nowMs)
+  loop var i: Int = 0, i < 500 and not (connectionIsConnected(connection: link.client) and connectionIsConnected(
+    connection: link.server
+  )), ++i {
+    step(link: link)
+  }
+}
+
+func sendCounter(link: mod Link, value: view Int) ret Bool {
+  link.message.clear()
+  writeU32(bytes: link.message, value: value)
+  ret connectionSendReliable(
+    connection: link.client
+    bytes: link.message
+    start: 0
+    count: link.message.length
+  )
+}
+
+func packetsSent(link: view Link) ret Int {
+  ret link.client.stats.packetsSent + link.server.stats.packetsSent
+}
+
+# The packets both ends send over one simulated second, from now
+func packetsOverOneSecond(link: mod Link) ret Int {
+  let before: Int = packetsSent(link: link)
+  steps(link: link, count: 100)
+  ret packetsSent(link: link) - before
+}
+
+# The server's received counters: how many arrived, how many out of order
+type Tally {
+  received: Int
+  outOfOrder: Int
+  last: Int
+}
+
+func drainServer(link: mod Link, tally: mod Tally) {
+  loop connectionReceive(connection: link.server, message: link.message) is MessageChannel.reliable {
+    let value: Int = readU32(bytes: link.message, offset: 0)
+    if value is not tally.last + 1 {
+      tally.outOfOrder = tally.outOfOrder + 1
+    }
+    tally.last = value
+    tally.received = tally.received + 1
+  }
+}
+
+# keepAliveMs is 100, so each end owes 10 packets a second: 20 for both
+func nearKeepAlive(count: view Int) ret Bool {
+  ret count >= 18 and count <= 22
+}
+
+func idleAfterMessages() {
+  var link: Link = createLink(settings: cleanSettings(latencyMs: 20))
+  connectLink(link: link)
+  var tally: Tally = { received: 0, outOfOrder: 0, last: -1 }
+  loop var i: Int = 0, i < 10, ++i {
+    let queued: Bool = sendCounter(link: link, value: i)
+  }
+  steps(link: link, count: 50)
+  drainServer(link: link, tally: tally)
+  log("clean: {tally.received}/10 arrived, out of order {tally.outOfOrder}")
+  let idle: Int = packetsOverOneSecond(link: link)
+  log("clean: an idle second is about keepAliveMs's worth: {nearKeepAlive(count: idle)}")
+  if not nearKeepAlive(count: idle) {
+    log("clean: {idle} packets")
+  }
+  log("clean: still connected: {connectionIsConnected(connection: link.client)}")
+}
+
+func everyMessageUnderLoss() {
+  var settings: BadNetworkSettings = cleanSettings(latencyMs: 30)
+  settings.lossPercent = 20
+  settings.jitterMs = 10
+  settings.reorderPercent = 10
+  settings.reorderHoldMs = 20
+  settings.duplicatePercent = 5
+  var link: Link = createLink(settings: settings)
+  connectLink(link: link)
+  var tally: Tally = { received: 0, outOfOrder: 0, last: -1 }
+  var nextValue: Int = 0
+  loop var i: Int = 0, i < 6000 and tally.received < 300, ++i {
+    if nextValue < 300 and sendCounter(link: link, value: nextValue) {
+      nextValue = nextValue + 1
+    }
+    step(link: link)
+    drainServer(link: link, tally: tally)
+  }
+  log("loss: {tally.received}/300 arrived, out of order {tally.outOfOrder}")
+  log("loss: resends happened: {link.client.stats.fragmentsResent > 0}")
+  steps(link: link, count: 200)
+  let idle: Int = packetsOverOneSecond(link: link)
+  log("loss: an idle second is at most keepAliveMs's worth: {idle <= 22}")
+}
+
+func nearRoundTrip(connection: view Connection) ret Bool {
+  ret connection.hasRtt and connection.rttMs >= 80.0 and connection.rttMs <= 110.0
+}
+
+func roundTripOneSideSilent() {
+  var link: Link = createLink(settings: cleanSettings(latencyMs: 40))
+  connectLink(link: link)
+  loop var i: Int = 0, i < 30, ++i {
+    let queued: Bool = sendCounter(link: link, value: i)
+    steps(link: link, count: 20)
+  }
+  log("one side silent: the sender measures 80-110 ms: {nearRoundTrip(connection: link.client)}")
+  log(
+    "one side silent: the silent end measures 80-110 ms: {nearRoundTrip(connection: link.server)}"
+  )
+}
+
+func roundTripBothSilent() {
+  var link: Link = createLink(settings: cleanSettings(latencyMs: 40))
+  connectLink(link: link)
+  steps(link: link, count: 300)
+  log(
+    "both silent: the connecting end measures 80-110 ms: {nearRoundTrip(connection: link.client)}"
+  )
+  log("both silent: the listening end measures 80-110 ms: {nearRoundTrip(connection: link.server)}")
+}
+
+# The two ends' keep-alive timers can have any phase, and a message's answer
+# restarts the answering end's timer. An ack that waits for the next keep-alive
+# must not count as path time, on a short path or a long one, at any phase.
+func roundTripIdleAt(latencyMs: view Int) {
+  let low: Float = (2 * latencyMs) as Float
+  let high: Float = low + 30.0
+  var inRange: Int = 0
+  loop var offset: Int = 0, offset < 10, ++offset {
+    var link: Link = createLink(settings: cleanSettings(latencyMs: latencyMs))
+    connectLink(link: link)
+    steps(link: link, count: offset)
+    let queued: Bool = sendCounter(link: link, value: 0)
+    steps(link: link, count: 500)
+    let clientNear: Bool = link.client.hasRtt and link.client.rttMs >= low and link.client.rttMs <= high
+    let serverNear: Bool = link.server.hasRtt and link.server.rttMs >= low and link.server.rttMs <= high
+    if clientNear and serverNear {
+      inRange = inRange + 1
+    } else {
+      log(
+        "{latencyMs} ms path, offset {offset}: client {link.client.rttMs} server {link.server.rttMs}"
+      )
+    }
+  }
+  log("idle over a {latencyMs} ms path: both ends measure the round trip at {inRange}/10 phases")
+}
+
+# Unreliable messages at 20 a second, one way: they are resent by no one, so
+# they ask for no answer of their own. 20 from the sender, 10 keep-alives back.
+func unreliableAsksForNothing() {
+  var link: Link = createLink(settings: cleanSettings(latencyMs: 20))
+  connectLink(link: link)
+  steps(link: link, count: 20)
+  let before: Int = packetsSent(link: link)
+  loop var i: Int = 0, i < 20, ++i {
+    link.message.clear()
+    writeU32(bytes: link.message, value: i)
+    let queued: Bool = connectionSendUnreliable(
+      connection: link.client
+      bytes: link.message
+      start: 0
+      count: link.message.length
+    )
+    steps(link: link, count: 5)
+  }
+  let sent: Int = packetsSent(link: link) - before
+  log("20 unreliable messages in a second: about 30 packets: {sent >= 28 and sent <= 32}")
+  if sent < 28 or sent > 32 {
+    log("{sent} packets")
+  }
+  log("the listening end measures the round trip: {link.server.hasRtt}")
+}
+
+type MoveInput {
+  speed: Int
+}
+
+# A frame can run for every packet that arrives: an input goes once per tick
+func inputOncePerTick() {
+  var link: Link = createLink(settings: cleanSettings(latencyMs: 20))
+  connectLink(link: link)
+  var player: ReplicationPlayer = createReplicationPlayer(config: defaultReplicationConfig())
+  let input: MoveInput = { speed: 3 }
+  let first: Bool = replicaSendInput(
+    MoveInput
+    player: player
+    input: input
+    tick: 7
+    connection: link.client
+  )
+  let again: Bool = replicaSendInput(
+    MoveInput
+    player: player
+    input: input
+    tick: 7
+    connection: link.client
+  )
+  let next: Bool = replicaSendInput(
+    MoveInput
+    player: player
+    input: input
+    tick: 8
+    connection: link.client
+  )
+  log("input: tick 7 sent {first}, tick 7 again {again}, tick 8 {next}")
+}
+
+func main() ret Int {
+  idleAfterMessages()
+  everyMessageUnderLoss()
+  roundTripOneSideSilent()
+  roundTripBothSilent()
+  roundTripIdleAt(latencyMs: 5)
+  roundTripIdleAt(latencyMs: 20)
+  roundTripIdleAt(latencyMs: 40)
+  roundTripIdleAt(latencyMs: 150)
+  unreliableAsksForNothing()
+  inputOncePerTick()
+  ret 0
+}

@@ -10,11 +10,11 @@ open net/PacketSeal
 open net/Connection
 
 # Note the peer's packet `sequence` for our acks
-func noteReceivedSequence(connection: mod Connection, sequence: view Int) {
-  connection.ackPending = true
+func noteReceivedSequence(connection: mod Connection, sequence: view Int, nowMs: view Int) {
   if not connection.receivedAny {
     connection.receivedAny = true
     connection.remoteSequence = sequence
+    connection.remoteSequenceMs = nowMs
     connection.receivedBits = 0
     ret
   }
@@ -26,6 +26,7 @@ func noteReceivedSequence(connection: mod Connection, sequence: view Int) {
       connection.receivedBits = 0
     }
     connection.remoteSequence = sequence
+    connection.remoteSequenceMs = nowMs
     ret
   }
   let behind: Int = sequenceDistance(newer: connection.remoteSequence, older: sequence)
@@ -34,24 +35,59 @@ func noteReceivedSequence(connection: mod Connection, sequence: view Int) {
   }
 }
 
-# The peer acked packet `ack` and, by bit i of `ackBits`, packet ack - 1 - i
+# The peer acked packet `ack`, `ackDelayMs` after it arrived there, and, by
+# bit i of `ackBits`, packet ack - 1 - i. Only `ack` has its delay known, so
+# only it measures the round trip.
 func takeAcks(
   connection: mod Connection
   ack: view Int
   ackBits: view Int
+  ackDelayMs: view Int
   nowMs: view Int
 ) {
-  ackPacket(connection: connection, sequence: ack, nowMs: nowMs)
+  let slot: Int = ack % packetHistory
+  if intAt(values: connection.sentSequence, index: slot) is ack and not boolAt(
+    values: connection.sentAcked
+    index: slot
+  ) {
+    measureRoundTrip(
+      connection: connection
+      sentMs: intAt(values: connection.sentMs, index: slot)
+      ackDelayMs: ackDelayMs
+      nowMs: nowMs
+    )
+  }
+  ackPacket(connection: connection, sequence: ack)
   loop var bit: Int = 0, bit < 32, ++bit {
     if (ackBits bitand (1 shl bit)) is not 0 {
-      ackPacket(connection: connection, sequence: (ack - 1 - bit) bitand sequenceMask, nowMs: nowMs)
+      ackPacket(connection: connection, sequence: (ack - 1 - bit) bitand sequenceMask)
     }
   }
 }
 
-# One of our packets arrived: measure the round trip and finish the
-# reliable fragments it carried
-func ackPacket(connection: mod Connection, sequence: view Int, nowMs: view Int) {
+# A round trip sample: the time since the packet was sent, less the time its
+# ack waited at the peer for a packet to travel in
+func measureRoundTrip(
+  connection: mod Connection
+  sentMs: view Int
+  ackDelayMs: view Int
+  nowMs: view Int
+) {
+  var pathMs: Int = nowMs - sentMs - ackDelayMs
+  if pathMs < 0 {
+    pathMs = 0
+  }
+  let sample: Float = pathMs as Float
+  if connection.hasRtt {
+    connection.rttMs = connection.rttMs + (sample - connection.rttMs) * 0.125
+  } else {
+    connection.rttMs = sample
+    connection.hasRtt = true
+  }
+}
+
+# One of our packets arrived: finish the reliable fragments it carried
+func ackPacket(connection: mod Connection, sequence: view Int) {
   let slot: Int = sequence % packetHistory
   if intAt(values: connection.sentSequence, index: slot) is not sequence or boolAt(
     values: connection.sentAcked
@@ -60,13 +96,6 @@ func ackPacket(connection: mod Connection, sequence: view Int, nowMs: view Int) 
     ret
   }
   connection.sentAcked.set(index: slot, value: true)
-  let sample: Float = (nowMs - intAt(values: connection.sentMs, index: slot)) as Float
-  if connection.hasRtt {
-    connection.rttMs = connection.rttMs + (sample - connection.rttMs) * 0.125
-  } else {
-    connection.rttMs = sample
-    connection.hasRtt = true
-  }
   let count: Int = intAt(values: connection.sentMessageCount, index: slot)
   loop var i: Int = 0, i < count, ++i {
     reliableAcked(
@@ -77,24 +106,25 @@ func ackPacket(connection: mod Connection, sequence: view Int, nowMs: view Int) 
 }
 
 # The messages of a data packet, `start` up to `end`; a malformed tail ends
-# the reading (what was read stays)
+# the reading (what was read stays). Whether a reliable message was among them.
 func readMessages(
   connection: mod Connection
   packet: view List(UInt8)
   start: view Int
   end: view Int
-) {
+) ret Bool {
+  var carriedReliable: Bool = false
   var offset: Int = start
   loop offset < end {
     let messageKind: Int = readU8(bytes: packet, offset: offset)
     if messageKind is messageReliable {
       if offset + reliableMessageHeader > end {
-        ret
+        ret carriedReliable
       }
       let length: Int = readU16(bytes: packet, offset: offset + 7)
       let dataStart: Int = offset + reliableMessageHeader
       if dataStart + length > end {
-        ret
+        ret carriedReliable
       }
       let stored: Bool = reliableReceive(
         receiver: connection.receiver
@@ -105,16 +135,17 @@ func readMessages(
         start: dataStart
         count: length
       )
+      carriedReliable = true
       offset = dataStart + length
     } else if messageKind is messageUnreliable {
       if offset + unreliableMessageHeader > end {
-        ret
+        ret carriedReliable
       }
       let sequence: Int = readU16(bytes: packet, offset: offset + 1)
       let length: Int = readU16(bytes: packet, offset: offset + 3)
       let dataStart: Int = offset + unreliableMessageHeader
       if dataStart + length > end {
-        ret
+        ret carriedReliable
       }
       takeUnreliable(
         connection: connection
@@ -125,9 +156,10 @@ func readMessages(
       )
       offset = dataStart + length
     } else {
-      ret
+      ret carriedReliable
     }
   }
+  ret carriedReliable
 }
 
 # Keep an unreliable message unless an equal or newer one already came (or

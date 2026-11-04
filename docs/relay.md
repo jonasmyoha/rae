@@ -167,6 +167,42 @@ The throughput is one relay process on one core, and the test client
 shares the machine. It is a lower bound for the relay itself, not a limit
 of it.
 
+Remeasured 2026-11-04 (4 runs), after the traffic fix below: through the
+relay 86-99 us, direct 52-55 us, added by the relay 33-44 us per round trip,
+throughput 81,600-83,200 packets/s. The fix did not touch the forwarding, so
+the difference from the table is probably this machine's load that day; this
+was not measured separately.
+
+### Traffic through the relay
+
+What one relay-only player costs, counted by the relay (`relay --stats`, per
+second):
+
+| session | before | now (2026-11-04) |
+|---|---|---|
+| one player, 10 messages, then idle, UDP or WebSocket | about 27,000 packets/s, 37 bytes each: 1 MB/s | 18-21 packets/s, 39 bytes each: under 1 KB/s |
+| `walkerBot` host and one bot, walking | 23,200-27,900 packets/s: about 1.8 MB/s (measured with the ack fix in, without the input fix) | 114-120 packets/s: about 12 KB/s |
+
+Two loops caused the "before" column, and both ran as fast as the machine
+allowed:
+
+- **Acks answered with acks.** Every packet asked for an ack at once, so each
+  end's ack-only packet was answered by the other's. Now only a packet with a
+  reliable message asks (lib/net/Connection), because only those are resent.
+  An idle end sends one keep-alive per `keepAliveMs`, 100 ms.
+- **Inputs answered by frames.** A headless player runs a frame for every
+  packet that arrives, and each frame sent an input, which came back as an ack.
+  Now `replicaSendInput` sends once per input tick.
+
+An ack can now wait up to `keepAliveMs` for a packet to travel in, and that
+wait is not path time. So each packet carries the 2-byte ack delay: how long
+its newest acked sequence waited. `rttMs` subtracts it (case 1337 checks 10 to
+300 ms paths at 10 timer phases; without it an idle end read 90 ms on a 10 ms
+path). That is why a sealed keep-alive is now 39 bytes.
+
+The bot sends 100 inputs/s (`tick: nowMs / 10`), and a window one per frame.
+Those make most of the walker traffic.
+
 ## WebSocket: peers that cannot send UDP
 
 A browser cannot send UDP, so the WASM build of a game reaches the relay
