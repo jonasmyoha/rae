@@ -159,6 +159,13 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
   if (dep->subdir[0]) snprintf(dep->dir, sizeof(dep->dir), "%s/%s", clone, dep->subdir);
   else snprintf(dep->dir, sizeof(dep->dir), "%s", clone);
 
+  /* A relative URL is relative to its pack, like a `path`, and not to where the build started */
+  if (url[0] == '.') {
+    char relative[PATH_MAX];
+    snprintf(relative, sizeof(relative), "%s", url);
+    snprintf(url, sizeof(url), "%s/%s", pack_dir, relative);
+  }
+
   bool updating = dep_is_updating(dep->name);
   if (!dir_exists(clone)) {
     char parent[PATH_MAX];
@@ -167,7 +174,16 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
     snprintf(mk, sizeof(mk), "mkdir -p \"%s\"", parent);
     (void)system(mk);
     char command[3 * PATH_MAX];
-    snprintf(command, sizeof(command), "git clone --quiet \"%s\" \"%s\" 2>&1", url, clone);
+    /* Of a repo with several packages, check out only this package's folder */
+    if (dep->subdir[0]) {
+      snprintf(command, sizeof(command),
+               "git clone --quiet --no-checkout \"%s\" \"%s\" 2>&1 && "
+               "git -C \"%s\" sparse-checkout set --cone -- \"%s\" 2>&1 && "
+               "git -C \"%s\" checkout --quiet 2>&1",
+               url, clone, clone, dep->subdir, clone);
+    } else {
+      snprintf(command, sizeof(command), "git clone --quiet \"%s\" \"%s\" 2>&1", url, clone);
+    }
     if (system(command) != 0) {
       fprintf(stderr, "error: dependency '%s': could not clone %s\n", dep->name, url);
       return false;
