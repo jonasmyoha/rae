@@ -1,4 +1,4 @@
-/* lib/sql's glue over SQLite (rae_sql.h): each function is one SQLite call
+/* the sql package's glue over SQLite (rae_sql.h): each function is one SQLite call
  * (a copy is one memcpy of what SQLite returned). */
 #include <string.h>
 #include "sqlite3.h"

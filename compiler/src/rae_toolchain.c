@@ -18,7 +18,7 @@
 
 #define RAE_MAX_REPO_PACKS 256
 
-static void store_home(char* out, size_t out_len) {
+void rae_toolchain_store_home(char* out, size_t out_len) {
   const char* env = getenv("RAE_HOME");
   if (env && env[0]) {
     snprintf(out, out_len, "%s", env);
@@ -86,7 +86,7 @@ static void store_source(char* out, size_t out_len) {
     return;
   }
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   char path[PATH_MAX + 16];
   snprintf(path, sizeof(path), "%s/source", home);
   char* saved = read_whole_file(path);
@@ -106,7 +106,7 @@ static void store_source(char* out, size_t out_len) {
 static void remember_source(const RaeToolchainSelf* self) {
   if (!self->root) return;
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   size_t home_len = strlen(home);
   if (strncmp(self->root, home, home_len) == 0) return;
   char dot_git[PATH_MAX + 8];
@@ -144,7 +144,7 @@ static bool store_prepare(const RaeToolchainSelf* self, const char* name) {
   }
   char home[PATH_MAX];
   char source[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   store_source(source, sizeof(source));
   char command[4 * PATH_MAX];
   snprintf(command, sizeof(command), "sh \"%s/tools/toolchain-prepare.sh\" \"%s\" \"%s\" %s", self->root,
@@ -370,7 +370,7 @@ static bool repo_apply_pin(const char* pack_path, const char* version, const cha
 int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const char* wanted) {
   remember_source(self);
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   RaeSemver exact;
   char version[64] = {0};
   char commit[64] = {0};
@@ -458,7 +458,7 @@ static bool pinned_toolchain(const RaeToolchainSelf* self, const char* pack_path
   }
   toolchain_name(version, commit, name, name_len);
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   char ready[2 * PATH_MAX];
   snprintf(ready, sizeof(ready), "%s/toolchains/%s/.ready", home, name);
   return path_exists(ready) || store_prepare(self, name);
@@ -468,7 +468,7 @@ int rae_toolchain_path(const RaeToolchainSelf* self, const char* pack_path) {
   char name[128];
   if (!pinned_toolchain(self, pack_path, name, sizeof(name))) return 1;
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   printf("%s/toolchains/%s\n", home, name);
   return 0;
 }
@@ -477,7 +477,7 @@ int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int 
   char name[128];
   if (!pinned_toolchain(self, pack_path, name, sizeof(name))) return 1;
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   if (!self->root) {
     fprintf(stderr, "error: cannot locate this compiler's Rae checkout (set RAE_ROOT)\n");
     return 1;
@@ -588,7 +588,7 @@ static bool project_still_builds(const char* bin, char** packs, int count, const
 int rae_toolchain_update(const RaeToolchainSelf* self, const char* pack_path) {
   remember_source(self);
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   if (!store_prepare(self, NULL)) return 1;
   char newest[64] = {0};
   if (!newest_tagged_version(home, newest, sizeof(newest))) {
@@ -696,7 +696,7 @@ static int gc_deps(const char* home, const char* kept_deps, bool dry_run) {
 
 int rae_toolchain_gc(bool dry_run) {
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   char projects_path[PATH_MAX + 16];
   snprintf(projects_path, sizeof(projects_path), "%s/projects", home);
   char* projects = read_whole_file(projects_path);
@@ -813,7 +813,7 @@ bool rae_toolchain_wrapper_runs_pin(const char* pack_path, const char* version, 
   snprintf(wrapper, sizeof(wrapper), "%s/rae", root);
   if (!path_exists(wrapper)) return false;
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   char name[128];
   toolchain_name(version, commit, name, sizeof(name));
   char ready[2 * PATH_MAX];
@@ -825,7 +825,7 @@ bool rae_toolchain_wrapper_runs_pin(const char* pack_path, const char* version, 
 
 void rae_toolchain_print_status(const char* pack_path) {
   char home[PATH_MAX];
-  store_home(home, sizeof(home));
+  rae_toolchain_store_home(home, sizeof(home));
   printf("store: %s\n", home);
   if (!pack_path) return;
   char* packs[RAE_MAX_REPO_PACKS];

@@ -71,6 +71,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/rae_deps.c \
        $(SRC_DIR)/rae_pack_edit.c \
        $(SRC_DIR)/rae_toolchain.c \
+       $(SRC_DIR)/rae_package_native.c \
        $(SRC_DIR)/bindgen.c \
        $(SRC_DIR)/bindgen_preprocess.c \
        $(SRC_DIR)/c_backend.c \

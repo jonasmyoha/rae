@@ -43,6 +43,8 @@ set -eu
 mkdir -p "$RAE_BOX3D/lib"
 echo "$BOX3D_COMMIT" > "$RAE_BOX3D/COMMIT"
 EOF
+# An older Rae had SQLite here; the store still handles a version that does
+mkdir -p "$SOURCE/tools/sqlite"
 cat > "$SOURCE/tools/sqlite/build.sh" <<'EOF'
 #!/bin/bash
 set -eu

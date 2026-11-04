@@ -1,11 +1,11 @@
-/* The C glue of lib/sql (docs/sql.md): one SQLite call per function and no
+/* The C glue of the sql package (docs/sql.md): one SQLite call per function and no
  * policy. Byte arguments are a buffer, an offset and a count, as Rae passes a
  * List(UInt8); a path or SQL that SQLite needs NUL-terminated is passed with
  * the 0 already appended by Rae. Text and blobs come back by copying into a
  * buffer Rae sized from the matching *_length / column_bytes call, so this
  * glue never needs the Rae runtime's string type. Handles (sqlite3*,
  * sqlite3_stmt*) travel as integers (0: none), as lib/net's file
- * descriptors do: Rae never looks inside them, only passes them back. tools/sqlite/build.sh compiles this into
+ * descriptors do: Rae never looks inside them, only passes them back. native/build.sh compiles this into
  * libsqlite3.a with the amalgamation and installs this header beside
  * sqlite3.h. */
 #ifndef RAE_SQL_H

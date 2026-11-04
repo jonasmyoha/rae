@@ -25,9 +25,9 @@ stop:
 	@$(MAKE) -C tools/devtools-web stop
 
 # First-time setup: Devtools Web dependencies (when Bun is installed), the
-# compiler, naga, upstream Box3D's C library (lib/box3d links it) and SQLite
-# (lib/sql links it; rebuilt when its pin or Rae's glue moved), and WAMR
-# (lib/wasm links it; the same rule).
+# compiler, naga, upstream Box3D's C library (lib/box3d links it) and WAMR
+# (lib/wasm links it; rebuilt when its pin or Rae's glue moved). A package's C builds
+# when a program first needs it.
 setup:
 	@if command -v bun >/dev/null 2>&1; then \
 	  echo "Installing Devtools Web dependencies..."; \
@@ -49,16 +49,6 @@ setup:
 	else \
 	  echo "Building upstream Box3D (the C-library physics track; tools/box3d/build.sh)..."; \
 	  bash tools/box3d/build.sh; \
-	fi
-	@sqlite="$${RAE_SQLITE:-$$HOME/.cache/rae/sqlite/install}"; \
-	if [ -f "$$sqlite/lib/libsqlite3.a" ] \
-	  && [ "$$(cat "$$sqlite/VERSION" 2>/dev/null)" = "$$(. tools/sqlite/pin; echo $$SQLITE_VERSION)" ] \
-	  && cmp -s "$$sqlite/src/rae_sql_glue.c" tools/sqlite/rae_sql_glue.c \
-	  && cmp -s "$$sqlite/include/rae_sql.h" tools/sqlite/rae_sql.h; then \
-	  echo "sqlite found: programs importing lib/sql link SQLite $$(cat "$$sqlite/VERSION")"; \
-	else \
-	  echo "Building SQLite (lib/sql; tools/sqlite/build.sh)..."; \
-	  bash tools/sqlite/build.sh; \
 	fi
 	@wamr="$${RAE_WAMR:-$$HOME/.cache/rae/wamr/install}"; \
 	if [ -f "$$wamr/lib/librae_wamr.a" ] \

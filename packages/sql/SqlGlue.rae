@@ -1,12 +1,12 @@
 cheader "rae_sql.h"
 
-# The bindings to tools/sqlite/rae_sql_glue.c (docs/sql.md): one SQLite call
+# The bindings to native/rae_sql_glue.c (docs/sql.md): one SQLite call
 # each, no policy. The rules (checks, sizes, the errors as values) are in
 # sql/Sql and sql/SqlStatement. Bytes are a List's `.data` with an offset and
 # a count; a path or SQL that SQLite wants NUL-terminated gets its 0 appended
 # by the caller. Handles are integers (0: none), as lib/net's descriptors
 # are. A program that imports this links SQLite
-# (tools/sqlite/build.sh builds it).
+# (native/build.sh builds it).
 func rae_sql_threadsafe() unsafe extern("rae_sql_threadsafe") ret Int
 
 func rae_sql_version_number() unsafe extern("rae_sql_version_number") ret Int

@@ -20,6 +20,16 @@ typedef struct {
   bool is_git;
   bool from_root;       /* declared by the project: its version wins a diamond */
   char declared_by[128];
+  /* its pack's native block */
+  bool has_native;
+  char native_build[256];
+  char native_header[128];
+  char native_include[128];
+  char native_link[256];
+  char native_link_browser[256];
+  char native_link_linux[128];
+  char native_sources_device[512];
+  char native_defines_device[128];
   /* the deps THIS package's own pack declares (by name): what its files may
    * reach besides themselves and the stdlib */
   char uses[16][128];
@@ -393,6 +403,16 @@ static bool resolve_pack_deps(const RaePack* pack, const char* pack_dir_in, int 
     RaePack nested;
     memset(&nested, 0, sizeof(nested));
     if (raepack_parse_library_file(own_pack, &nested)) {
+      ResolvedDep* found = &s_deps[index];
+      found->has_native = nested.native_build.len > 0;
+      str_copy(found->native_build, sizeof(found->native_build), nested.native_build);
+      str_copy(found->native_header, sizeof(found->native_header), nested.native_header);
+      str_copy(found->native_include, sizeof(found->native_include), nested.native_include);
+      str_copy(found->native_link, sizeof(found->native_link), nested.native_link);
+      str_copy(found->native_link_browser, sizeof(found->native_link_browser), nested.native_link_browser);
+      str_copy(found->native_link_linux, sizeof(found->native_link_linux), nested.native_link_linux);
+      str_copy(found->native_sources_device, sizeof(found->native_sources_device), nested.native_sources_device);
+      str_copy(found->native_defines_device, sizeof(found->native_defines_device), nested.native_defines_device);
       bool nested_ok = check_own_pack(&s_deps[index], &nested, own_pack) &&
                        resolve_pack_deps(&nested, s_deps[index].dir, index, depth + 1);
       raepack_free(&nested);
@@ -410,6 +430,24 @@ bool rae_deps_resolve(const RaePack* pack, const char* pack_dir_in) {
 
 void rae_deps_set_compiler_version(const char* version) {
   snprintf(s_compiler_version, sizeof(s_compiler_version), "%s", version ? version : "");
+}
+
+bool rae_deps_native_at(int index, RaeDepNative* out) {
+  if (index < 0 || index >= s_dep_count || !s_deps[index].has_native) return false;
+  const ResolvedDep* dep = &s_deps[index];
+  out->name = dep->name;
+  out->dir = dep->dir;
+  out->hash = dep->hash;
+  out->is_git = dep->is_git;
+  out->build = dep->native_build;
+  out->header = dep->native_header;
+  out->include = dep->native_include;
+  out->link = dep->native_link;
+  out->link_browser = dep->native_link_browser;
+  out->link_linux = dep->native_link_linux;
+  out->sources_device = dep->native_sources_device;
+  out->defines_device = dep->native_defines_device;
+  return true;
 }
 
 bool rae_deps_resolved(const char* name, RaeDepResolved* out) {

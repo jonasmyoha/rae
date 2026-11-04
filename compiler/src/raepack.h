@@ -73,6 +73,15 @@ typedef struct {
   Str rae_version;
   /* The optional exact commit of the same block. */
   Str rae_commit;
+  /* A package's C: the `native` block (rae_package_native.h). All empty for none. */
+  Str native_build;
+  Str native_header;
+  Str native_include;
+  Str native_link;
+  Str native_link_browser;
+  Str native_link_linux;
+  Str native_sources_device;
+  Str native_defines_device;
   /* Optional `meta: { name: "...", version: "..." }`: what the program is
    * called and its release (the App Store's version); the program reads
    * them as Pack.name / Pack.version. Empty (len 0) when absent. */

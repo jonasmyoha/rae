@@ -17,7 +17,7 @@
  * Header-only: the generated C of a program whose Rae imports the module
  * includes it (`cheader`), and the compiler then links -framework Network,
  * so other programs neither compile nor link it. Handles are integers (a
- * pointer as int64_t, 0 = none), as in lib/sql. */
+ * pointer as int64_t, 0 = none), as in the sql package. */
 #ifndef RAE_RUNTIME_NETWORK_APPLE_H
 #define RAE_RUNTIME_NETWORK_APPLE_H
 

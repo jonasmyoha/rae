@@ -1,6 +1,6 @@
-# lib/sql — SQLite
+# The sql package — SQLite
 
-Rae programs keep data in SQLite through `lib/sql`: `sql/Sql` (databases,
+Rae programs keep data in SQLite through `packages/sql`: `sql/Sql` (databases,
 transactions, errors) and `sql/SqlStatement` (prepared statements). Every
 failure is a value, an `SqlError { code, extendedCode, message }` with
 SQLite's codes and the connection's message; nothing crashes. Case 1288
@@ -8,25 +8,25 @@ exercises all of it on a temporary file.
 
 ## Where SQLite comes from
 
-- `tools/sqlite/pin` names the release (3.54.1) and the hashes of its
-  amalgamation (public domain); `tools/sqlite/build.sh` downloads it into
-  `~/.cache/rae/sqlite` (`$RAE_SQLITE_CACHE`), checks the SHA3-256 sqlite.org
-  publishes, and builds `install/lib/libsqlite3.a` (native) and
-  `install/lib/emscripten/libsqlite3.a` (browser) with Rae's glue. No SQLite
-  source is in this repository; `make setup` builds it, and rebuilds it when
-  the pin or the glue moved.
-- The compiler links it only into a program whose C includes the glue header
-  (`cheader "rae_sql.h"` in `sql/SqlGlue`), natively and in a `--target wasm`
-  build; `tools/ios/gen-ios.sh` compiles the amalgamation into an iOS app that
-  imports it. A program that imports `lib/sql` on a machine without the build
-  stops with "run tools/sqlite/build.sh".
+- `packages/sql/native/pin` names the release (3.54.1) and the hashes of its
+  amalgamation (public domain). A package's `native` block
+  (docs/toolchain-and-packages-decision.md, section 6) runs
+  `packages/sql/native/build.sh`, once per version of the package, when a program
+  first needs it: it downloads the amalgamation into `~/.rae/packages/sql/<pin>`,
+  checks the SHA3-256 sqlite.org publishes, and builds `install/lib/libsqlite3.a`
+  (native) and `install/lib/emscripten/libsqlite3.a` (browser) with Rae's glue. No
+  SQLite source is in this repository.
+- A project declares the package, with `git`, `subdir: "packages/sql"`, `version` and
+  `hash`. It links only into a program whose C includes the glue header
+  (`cheader "rae_sql.h"` in `sql/SqlGlue`), natively and in a `--target wasm` build;
+  `tools/ios/gen-ios.sh` compiles the amalgamation into an iOS app that imports it.
 - Options: multi-thread mode (`SQLITE_THREADSAFE=2`; single-thread in the
   browser), API armor, no extension loading, no double-quoted strings, no
   memory statistics.
 
 ## The glue
 
-`tools/sqlite/rae_sql_glue.c` is one SQLite call per function, no policy
+`packages/sql/native/rae_sql_glue.c` is one SQLite call per function, no policy
 (the lib/net rule). Handles are integers (0: none), never dereferenced by
 Rae. Bytes go in as a `List(UInt8)`'s buffer with an offset and a count; a
 path or SQL that SQLite wants NUL-terminated gets the 0 from Rae; text and
