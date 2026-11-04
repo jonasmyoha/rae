@@ -1,0 +1,101 @@
+# RenderSwitch — a switch (ui/switchSystem): a pill as big as the node's box, in its off color
+# blending to its on color, and a round knob at the side its position says.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open Gpu2dCanvas
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/Theme
+open ui/renderSystem/RenderPaintBox
+
+# The gap between the knob and the pill's edge, as a share of the pill's height
+const switchKnobInset: Float = 0.094
+
+# The eased share of the way across for a position in 0..1: starts and ends gently, and a
+# reversal halfway stays continuous since it is a function of the position alone
+func switchEased(position: view Float) ret Float {
+  ret position * position * (3.0 - 2.0 * position)
+}
+
+# The knob's left edge in a pill at `x`, `w` wide and `h` high
+func switchKnobX(
+  x: view Float
+  w: view Float
+  h: view Float
+  position: view Float
+) ret Float {
+  let inset: Float = h * switchKnobInset
+  let knob: Float = h - inset * 2.0
+  ret x + inset + switchEased(position: position) * (w - inset * 2.0 - knob)
+}
+
+func switchBlend(from: view Int, to: view Int, share: view Float) ret Int {
+  ret from + ((to - from) as Float * share) as Int
+}
+
+func paintSwitchG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let settings: view Switch = componentView(this: world.switches, entityId: entityId)
+  # Before the system's first frame, the knob is at its side
+  var position: Float = 0.0
+  if settings.on {
+    position = 1.0
+  }
+  if componentHas(this: world.switchMotions, entityId: entityId) {
+    position = componentView(this: world.switchMotions, entityId: entityId).position
+  }
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let off: RgbaColor = uiThemeColor(theme: world.theme, name: settings.offColor)
+  let on: RgbaColor = uiThemeColor(theme: world.theme, name: settings.onColor)
+  let share: Float = switchEased(position: position)
+  let track: RgbaColor = {
+    r: switchBlend(from: off.r, to: on.r, share: share)
+    g: switchBlend(from: off.g, to: on.g, share: share)
+    b: switchBlend(from: off.b, to: on.b, share: share)
+    a: switchBlend(from: off.a, to: on.a, share: share)
+  }
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: box.h / 2.0
+    color: g2dColor(color: g2dChain(color: track, chain255: chain255))
+  )
+  let inset: Float = box.h * switchKnobInset
+  let knob: Float = box.h - inset * 2.0
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: switchKnobX(
+      x: box.x
+      w: box.w
+      h: box.h
+      position: position
+    )
+    y: box.y + inset
+    w: knob
+    h: knob
+    radius: knob / 2.0
+    color: g2dColor(
+      color: g2dChain(
+        color: uiThemeColor(theme: world.theme, name: settings.knobColor)
+        chain255: chain255
+      )
+    )
+  )
+}

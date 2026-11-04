@@ -22,6 +22,7 @@
 # make animation shimmer.
 open ui/Ecs
 open ui/renderSystem/RenderPaintBox
+open ui/renderSystem/RenderSwitch
 open ui/renderSystem/RenderFills
 import Gpu2d
 import Gpu2dText
@@ -750,6 +751,15 @@ func paintEntityG(
     paintGradientG(
       world: world
       uiSystems: uiSystems
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  } else if componentHas(this: world.switches, entityId: entityId) {
+    paintSwitchG(
+      world: world
       entityId: entityId
       wt: wt
       cr: cr

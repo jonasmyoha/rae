@@ -680,6 +680,21 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     ret
   }
 
+  if override.componentName is "Switch" {
+    if override.fieldName is not "on" {
+      reportUnknownOverride(
+        world: world
+        override: override
+        message: "a Switch override sets only `on`"
+      )
+    } else if componentHas(this: world.switches, entityId: entityId) {
+      componentMod(this: world.switches, entityId: entityId).on = override.valueString is "true"
+    } else {
+      reportUnknownOverride(world: world, override: override, message: "the node has no Switch")
+    }
+    ret
+  }
+
   if override.componentName is onClickKey {
     # an action id or its label (ui/ClickTargets)
     setOnClickField(

@@ -12,12 +12,20 @@
 #                 stroke come from an earlier bundle or the node), and its
 #                 child (the icon) centered; a tap anywhere in the square
 #                 counts (lib/ui tests taps against the node's box)
+#
+#   switch        an on/off switch (ui/switchSystem): a 52 by 32 point box, a Switch, and an
+#                 OnClick so that a tap reaches it (a node's own OnClick adds its label)
+const builtInSwitch: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":52,\"h\":32\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Switch\":\{\},\"OnClick\":\{\}\}"
+
 const builtInCircleButton: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":44,\"h\":44\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"Circle\",\"radius\":0\},\"Layout\":\{\"type\":\"Stack\",\"alignMain\":\"Center\",\"alignCross\":\"Center\"\}\}"
 
 # The built-in bundle `name`'s JSON object, or "" when lib/ui has none
 func builtInBundleJson(name: view String) ret String {
   if name is "circleButton" {
     ret builtInCircleButton
+  }
+  if name is "switch" {
+    ret builtInSwitch
   }
   ret ""
 }

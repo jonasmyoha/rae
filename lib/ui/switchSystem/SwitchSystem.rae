@@ -1,0 +1,124 @@
+# SwitchSystem — the on/off switches of a scene (ui/BindingComponents Switch,
+# docs/ui-scene-format.md). The state is the `on` field of the node's Switch.
+#
+# - A tap on the node (a UiAction this frame whose entity carries a Switch) flips it, and sends
+#   its `actionId` as a UiAction with no entity. Any action with that id from elsewhere flips it
+#   too, for a whole row that carries the OnClick. The app learns of a flip from that action,
+#   and reads `switchIsOn`.
+# - The knob glides to its side (SwitchMotion, a runtime table). A switch starts at its side
+#   with no motion, so a screen does not open with its switches moving.
+# - `switchSystem` answers true while something changed or moved: feed it into the frame
+#   loop's "is animating" flag (ui/EventLoop), or the knob stops between events.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/Ecs
+open ui/BindingComponents
+open ui/InputComponents
+
+# How long the knob takes from one side to the other
+const switchTravelSec: Float = 0.18
+
+func switchIsOn(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.switches, entityId: entityId) {
+    ret componentView(this: world.switches, entityId: entityId).on
+  }
+  ret false
+}
+
+# Set a switch from the app; its knob glides there. False when the node has no Switch.
+func setSwitch(world: mod UiWorld, entityId: view EntityId, on: view Bool) ret Bool {
+  if componentHas(this: world.switches, entityId: entityId) {
+    componentMod(this: world.switches, entityId: entityId).on = on
+    ret true
+  }
+  ret false
+}
+
+func flipSwitch(world: mod UiWorld, entityId: view EntityId) {
+  let target: mod Switch = componentMod(this: world.switches, entityId: entityId)
+  target.on = target.on is false
+}
+
+# `position` moved `deltaTime` toward `target` (0 off, 1 on), never past it
+func switchStep(position: view Float, target: view Float, deltaTime: view Float) ret Float {
+  let step: Float = deltaTime / switchTravelSec
+  if position < target {
+    let moved: Float = position + step
+    if moved > target {
+      ret target
+    }
+    ret moved
+  }
+  let moved: Float = position - step
+  if moved < target {
+    ret target
+  }
+  ret moved
+}
+
+func switchTarget(on: view Bool) ret Float {
+  if on {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+# Flip what this frame's actions flip, and move each knob. True while anything changed or
+# moved. Call it after the input system, and before the app reads the frame's actions.
+func switchSystem(
+  world: mod UiWorld
+  actions: mod EventQueue(UiAction)
+  deltaTime: view Float
+) ret Bool {
+  var changed: Bool = false
+  # What the taps must still announce: sent after the loop, or the loop would read them too
+  var announce: List(String) = List.create(String, cap: 2)
+  loop var i: Int = 0, i < eventCount(this: actions), ++i {
+    let action: UiAction = eventAt(this: actions, i: i)
+    if isNone(this: action.entityId) is false and componentHas(
+      this: world.switches
+      entityId: action.entityId
+    ) {
+      flipSwitch(world: world, entityId: action.entityId)
+      changed = true
+      let tapped: view Switch = componentView(this: world.switches, entityId: action.entityId)
+      if tapped.actionId.length() > 0 and tapped.actionId is not action.actionId {
+        announce.add(value: "{tapped.actionId}")
+      }
+    } else if action.actionId.length() > 0 {
+      loop var s: Int = 0, s < componentCount(this: world.switches), ++s {
+        let entityId: EntityId = componentEntityAt(this: world.switches, i: s)
+        if componentView(this: world.switches, entityId: entityId).actionId is action.actionId {
+          flipSwitch(world: world, entityId: entityId)
+          changed = true
+        }
+      }
+    }
+  }
+  loop let actionId: view String in announce {
+    eventSend(this: actions, value: UiAction { entityId: noEntity(), actionId: "{actionId}" })
+  }
+  loop var s: Int = 0, s < componentCount(this: world.switches), ++s {
+    let entityId: EntityId = componentEntityAt(this: world.switches, i: s)
+    let target: Float = switchTarget(on: componentView(this: world.switches, entityId: entityId).on)
+    if componentHas(this: world.switchMotions, entityId: entityId) is false {
+      componentSet(
+        this: world.switchMotions
+        entityId: entityId
+        data: SwitchMotion { position: target }
+      )
+    } else {
+      let motion: mod SwitchMotion = componentMod(this: world.switchMotions, entityId: entityId)
+      if motion.position is not target {
+        motion.position = switchStep(
+          position: motion.position
+          target: target
+          deltaTime: deltaTime
+        )
+        changed = true
+      }
+    }
+  }
+  ret changed
+}

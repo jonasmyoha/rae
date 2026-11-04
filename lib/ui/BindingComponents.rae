@@ -61,6 +61,22 @@ type TextField {
   placeholderStyleId: String = "muted"
 }
 
+# An on/off switch (ui/switchSystem): `on` is its state. A tap on the node flips it and sends
+# the action `actionId`, and an action with that id from elsewhere (a row that carries the
+# OnClick) flips it too. The colors are theme slots.
+type Switch {
+  on: Bool = false
+  actionId: String = ""
+  onColor: String = "accent"
+  offColor: String = "surfaceAlt"
+  knobColor: String = "textPrimary"
+}
+
+# Where a switch's knob is: 0 off to 1 on, moving between them (runtime, ui/switchSystem)
+type SwitchMotion {
+  position: Float
+}
+
 # Shown only while a page-level list is EMPTY (the History page's "nothing
 # played yet" block, the Search page's "Recent" stub before a query). Authored
 # on the empty node; `emptyStateSystem` sets its `Active` from `key`:
