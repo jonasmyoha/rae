@@ -420,6 +420,9 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
         g_g2d_fmt = caps.formats[0];
         for (size_t i = 0; i < caps.formatCount; i++) {
             if (caps.formats[i] == WGPUTextureFormat_BGRA8Unorm) { g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm; break; }
+            /* Android lists an sRGB format first: the shaders encode their own
+             * output, and a surface that encodes again washes the picture out. */
+            if (caps.formats[i] == WGPUTextureFormat_RGBA8Unorm) { g_g2d_fmt = WGPUTextureFormat_RGBA8Unorm; }
         }
     }
     /* The format/present-mode/alpha-mode arrays are wgpu-allocated and ours

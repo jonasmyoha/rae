@@ -280,6 +280,10 @@ func texelBytes(format: view Int32) ret Int {
   if (format is WGPUTextureFormat_RGBA8Unorm) or (format is WGPUTextureFormat_BGRA8Unorm) or (format is WGPUTextureFormat_R32Float) {
     ret 4
   }
+  # What an Android surface offers, and so a frame's offscreen copy
+  if (format is WGPUTextureFormat_RGBA8UnormSrgb) or (format is WGPUTextureFormat_BGRA8UnormSrgb) {
+    ret 4
+  }
   if (format is WGPUTextureFormat_RG11B10Ufloat) {
     ret 4  # the renderers' HDR lit format (#370)
   }
