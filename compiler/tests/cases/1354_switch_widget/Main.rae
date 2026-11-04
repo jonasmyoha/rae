@@ -1,0 +1,304 @@
+# The built-in on/off switch (ui/switchSystem, docs/ui-scene-format.md): a `switch` bundle node
+# carries its own state. A tap on it flips it, an action with its `actionId` flips it (a whole
+# row that carries the OnClick), an override or setSwitch sets it, and the knob glides. A
+# screen opens with each knob at its side and nothing moving.
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/InputComponents
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/InputKind
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/UiSystems
+open ui/switchSystem/SwitchSystem
+open ui/renderSystem/RenderSwitch
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+func sceneText() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{")
+  s = s.concat(other: "\"Page\":\{\"Children\":[\"Plain\",\"Small\",\"Row\",\"Title\"]\},")
+  s = s.concat(other: "\"Plain\":\{\"bundles\":[\"switch\"],")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"sound.toggle\",\"label\":\"Sound\"\}\},")
+  s = s.concat(
+    other: "\"Small\":\{\"bundles\":[\"switch\"],\"Rect\":\{\"x\":0,\"y\":0,\"w\":40,\"h\":24\},"
+  )
+  s = s.concat(other: "\"Switch\":\{\"on\":true,\"onColor\":\"textPrimary\"\}\},")
+  s = s.concat(other: "\"Row\":\{\"OnClick\":\{\"actionId\":\"row.toggle\",\"label\":\"Row\"\},")
+  s = s.concat(other: "\"Children\":[\"RowSwitch\"]\},")
+  s = s.concat(
+    other: "\"RowSwitch\":\{\"bundles\":[\"switch\"],\"Switch\":\{\"actionId\":\"row.toggle\"\}\},"
+  )
+  s = s.concat(other: "\"Title\":\{\"Text\":\{\"text\":\"Settings\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let found: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: found)
+  }
+  ret noEntity()
+}
+
+func position(world: view UiWorld, nodeId: view String) ret Float {
+  ret componentView(this: world.switchMotions, entityId: entityOf(world: world, nodeId: nodeId)).position
+}
+
+func show(world: view UiWorld, nodeId: view String) {
+  let entityId: EntityId = entityOf(world: world, nodeId: nodeId)
+  let rect: view Rect = componentView(this: world.rects, entityId: entityId)
+  let settings: view Switch = componentView(this: world.switches, entityId: entityId)
+  log(
+    "{nodeId}: on {switchIsOn(world: world, entityId: entityId)}, knob {position(
+      world: world
+      nodeId: nodeId
+    )}, {rect.size.x} x {rect.size.y}, colors {settings.onColor} {settings.offColor} {settings.knobColor}"
+  )
+}
+
+# Frames of `deltaTime` until the system answers false; how many it took
+func settle(world: mod UiWorld, actions: mod EventQueue(UiAction), deltaTime: view Float) ret Int {
+  var frames: Int = 0
+  loop switchSystem(world: world, actions: actions, deltaTime: deltaTime) and frames < 100 {
+    frames = frames + 1
+  }
+  ret frames
+}
+
+# A real tap: a scripted finger through the input path, which hit-tests the laid-out node
+func tapText() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},"
+  )
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Alone\"]\},")
+  s = s.concat(other: "\"Alone\":\{\"bundles\":[\"switch\"]\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func fingerFrame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  let moving: Bool = switchSystem(world: world, actions: world.uiActions, deltaTime: 0.0)
+}
+
+func realTap() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var scene: Scene = parseScene(source: tapText())
+  scene.sceneId = "tap"
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var input: UiInput = createUiInput()
+  let entityId: EntityId = entityOf(world: world, nodeId: "Alone")
+  log(
+    "a real tap on a node with only the bundle: on {switchIsOn(world: world, entityId: entityId)}"
+  )
+  let onTheNode: List(Bool) = { false, true, false }
+  loop let down: Bool in onTheNode {
+    fingerFrame(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      x: 26.0
+      y: 16.0
+      down: down
+    )
+  }
+  log("after it: on {switchIsOn(world: world, entityId: entityId)}")
+  let besideIt: List(Bool) = { true, false }
+  loop let down: Bool in besideIt {
+    fingerFrame(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      x: 200.0
+      y: 150.0
+      down: down
+    )
+  }
+  log("a tap beside it changes nothing: on {switchIsOn(world: world, entityId: entityId)}")
+}
+
+func main() {
+  realTap()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  var scene: Scene = parseScene(source: sceneText())
+  scene.sceneId = "settings"
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log("mounted {rootEntityId.index >= 0}, {componentCount(this: world.switches)} switches")
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  {formatSceneDiagnostic(diagnostic: diagnostic)}")
+  }
+
+  log("the first frame: each knob at its side, nothing moving")
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 0.05)}")
+  show(world: world, nodeId: "Plain")
+  show(world: world, nodeId: "Small")
+  show(world: world, nodeId: "RowSwitch")
+
+  log("a tap on the node flips it, and the knob glides, never past its side")
+  let plainEntityId: EntityId = entityOf(world: world, nodeId: "Plain")
+  eventSend(this: actions, value: UiAction { entityId: plainEntityId, actionId: "sound.toggle" })
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 0.05)}")
+  eventClear(this: actions)
+  show(world: world, nodeId: "Plain")
+  var last: Float = position(world: world, nodeId: "Plain")
+  var rising: Bool = true
+  loop var i: Int = 0, i < 2, ++i {
+    let moving: Bool = switchSystem(world: world, actions: actions, deltaTime: 0.05)
+    rising = rising and moving and position(world: world, nodeId: "Plain") > last
+    last = position(world: world, nodeId: "Plain")
+  }
+  log("rising: {rising}")
+  log("frames to settle: {settle(world: world, actions: actions, deltaTime: 0.05)}")
+  show(world: world, nodeId: "Plain")
+
+  log("flipped back halfway, it turns round from where it is")
+  eventSend(this: actions, value: UiAction { entityId: plainEntityId, actionId: "sound.toggle" })
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 0.09)}")
+  eventClear(this: actions)
+  show(world: world, nodeId: "Plain")
+  setSwitch(world: world, entityId: plainEntityId, on: true)
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 0.018)}")
+  show(world: world, nodeId: "Plain")
+  log("frames to settle: {settle(world: world, actions: actions, deltaTime: 0.05)}")
+
+  log("an action with its actionId flips it, from a row; another action flips nothing")
+  eventSend(
+    this: actions
+    value: UiAction { entityId: entityOf(world: world, nodeId: "Row"), actionId: "row.toggle" }
+  )
+  eventSend(this: actions, value: UiAction { entityId: noEntity(), actionId: "other" })
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 1.0)}")
+  eventClear(this: actions)
+  show(world: world, nodeId: "RowSwitch")
+  show(world: world, nodeId: "Small")
+
+  log("the bundle alone can be tapped; a tap on the node sends its actionId, once, flipped once")
+  log(
+    "Small has an OnClick: {componentHas(
+      this: world.onClicks
+      entityId: entityOf(world: world, nodeId: "Small")
+    )}"
+  )
+  let plainClick: view OnClick = componentView(this: world.onClicks, entityId: plainEntityId)
+  log("Plain keeps its own: '{plainClick.actionId}' '{plainClick.label}'")
+  let rowSwitchEntityId: EntityId = entityOf(world: world, nodeId: "RowSwitch")
+  eventSend(this: actions, value: UiAction { entityId: rowSwitchEntityId, actionId: "" })
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 1.0)}")
+  log("actions now: {eventCount(this: actions)}")
+  let sent: UiAction = eventAt(this: actions, i: 1)
+  log("the second: '{sent.actionId}', no entity {isNone(this: sent.entityId)}")
+  show(world: world, nodeId: "RowSwitch")
+  eventClear(this: actions)
+
+  log("a tap whose OnClick already says the same id announces nothing more")
+  eventSend(this: actions, value: UiAction { entityId: rowSwitchEntityId, actionId: "row.toggle" })
+  log("moving: {switchSystem(world: world, actions: actions, deltaTime: 1.0)}")
+  log("actions now: {eventCount(this: actions)}")
+  show(world: world, nodeId: "RowSwitch")
+  eventClear(this: actions)
+
+  log("an override sets it, and reports what it cannot do")
+  applyOverride(
+    world: world
+    entityId: entityOf(world: world, nodeId: "Small")
+    override: SceneOverride {
+      nodeId: "Small"
+      componentName: "Switch"
+      fieldName: "on"
+      valueString: "false"
+    }
+  )
+  log("Small on: {switchIsOn(world: world, entityId: entityOf(world: world, nodeId: "Small"))}")
+  applyOverride(
+    world: world
+    entityId: entityOf(world: world, nodeId: "Small")
+    override: SceneOverride {
+      nodeId: "Small"
+      componentName: "Switch"
+      fieldName: "color"
+      valueString: "x"
+    }
+  )
+  applyOverride(
+    world: world
+    entityId: entityOf(world: world, nodeId: "Title")
+    override: SceneOverride {
+      nodeId: "Title"
+      componentName: "Switch"
+      fieldName: "on"
+      valueString: "true"
+    }
+  )
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  {formatSceneDiagnostic(diagnostic: diagnostic)}")
+  }
+  log(
+    "setSwitch on a node with none: {setSwitch(
+      world: world
+      entityId: entityOf(world: world, nodeId: "Title")
+      on: true
+    )}"
+  )
+
+  log("the knob's place in a 52 x 32 pill at x 100")
+  log("off {switchKnobX(
+    x: 100.0
+    w: 52.0
+    h: 32.0
+    position: 0.0
+  )}")
+  log("half {switchKnobX(
+    x: 100.0
+    w: 52.0
+    h: 32.0
+    position: 0.5
+  )}")
+  log("on {switchKnobX(
+    x: 100.0
+    w: 52.0
+    h: 32.0
+    position: 1.0
+  )}")
+
+  log(
+    "authored: {isKnownComponent(world: world, name: "Switch")}; runtime only: {isRuntimeTable(
+      name: "SwitchMotion"
+    )}"
+  )
+}

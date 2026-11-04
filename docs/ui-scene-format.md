@@ -291,6 +291,7 @@ with a theme's look by coming after it in the list:
 | bundle | what it is |
 |---|---|
 | `circleButton` | a round button for an icon: a 44-point square box (`Size` fixed; a node's own `Rect` sets another size, keep it square), a `Circle` shape (fill and stroke from the bundles before it or the node) and its child centered. `"bundles": ["secondaryButton", "circleButton"]` is the theme's button drawn as a true circle. A tap anywhere in the square counts. |
+| `switch` | an on/off switch: a 52 by 32 point box (`Size` fixed; a node's own `Rect` sets another size), a `Switch` and an `OnClick`, so a tap reaches it (§18) |
 
 ## 10. `OnClick` labels: what a tap does, in words
 
@@ -667,3 +668,39 @@ Rain, Snow, Mist, Wind; app3d/SettingsWeather): the weather buttons write
 their numbers, the weather model writes its own on Auto, and the drawn
 weather is read back from them. Cases 1327 (the widgets) and 1328 (the
 weather's numbers).
+
+## 18. `Switch`: an on/off switch
+
+```json
+"Sound": {
+  "bundles": ["switch"],
+  "Switch": { "on": true, "actionId": "settings.sound" },
+  "OnClick": { "label": "Sound" }
+}
+```
+
+A built-in that carries its own state: the node draws a pill and a round knob, with no child
+nodes to show and hide. `Switch` has these fields:
+
+| field | default | what it is |
+|---|---|---|
+| `on` | `false` | its state |
+| `actionId` | `""` | the action a flip sends, and an action that flips it |
+| `onColor` | `"accent"` | the theme slot of the track when on |
+| `offColor` | `"surfaceAlt"` | the theme slot of the track when off |
+| `knobColor` | `"textPrimary"` | the theme slot of the knob |
+
+- A tap on the node flips it and sends `actionId` as a `UiAction` with no entity. The `switch`
+  bundle brings the `OnClick` that lets a tap reach it; a node's own adds its label.
+- An action with that id from elsewhere flips it too, so a whole row can carry the `OnClick` with
+  the same `actionId` and a tap anywhere in the row counts. The action is then not sent again.
+- The app calls `switchSystem(world:, actions:, deltaTime:)` (`ui/switchSystem/SwitchSystem`) each
+  frame, after the input system and before it reads the frame's actions. It answers true while
+  anything changed or moved: **feed that into the frame loop's "is animating" flag**, or the knob
+  stops between events (`ui/EventLoop`).
+- `switchIsOn(world:, entityId:)` reads the state and `setSwitch(world:, entityId:, on:)` sets it.
+  An override sets it too, with `Switch` `on` and the value `"true"` or `"false"`; another field,
+  or a node with no `Switch`, is an `unknownOverride` diagnostic.
+- The knob glides in 0.18 s, and turns round from where it is when flipped halfway. A screen opens
+  with each knob at its side, nothing moving. The position is the runtime table `SwitchMotion`,
+  which a scene does not author.
