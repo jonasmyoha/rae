@@ -291,7 +291,8 @@ static const char* const WRAPPER_TEMPLATE =
   "  git -C \"$home/repo\" show \"$ref:tools/toolchain-prepare.sh\" | sh -s -- \"$home\" \"$source\" \"$name\"\n"
   "fi\n"
   "grep -Fqx \"$here\" \"$home/projects\" 2>/dev/null || echo \"$here\" >> \"$home/projects\"\n"
-  "exec \"$home/toolchains/$name/compiler/bin/rae\" \"$@\"\n";
+  "[ \"${1:-}\" = toolchain ] || [ ! -f \"$home/toolchains/$name/.deps\" ] || . \"$home/toolchains/$name/.deps\"\n"
+    "exec \"$home/toolchains/$name/compiler/bin/rae\" \"$@\"\n";
 
 static void self_name(const RaeToolchainSelf* self, char* out, size_t out_len) {
   toolchain_name(self->version, self->is_release && !self->dirty ? "" : self->commit, out, out_len);
@@ -412,6 +413,38 @@ int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const
   warn_if_only_here(self, version, commit);
   printf("wrote %s/rae. Commit it with the pack, and build with ./rae\n", root);
   return 0;
+}
+
+int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int count, char** names) {
+  char* text = read_whole_file(pack_path);
+  char version[64] = {0};
+  char commit[64] = {0};
+  char check[512];
+  bool pinned = text && rae_pack_read_pin(text, version, sizeof(version), commit, sizeof(commit), check, sizeof(check));
+  free(text);
+  if (!pinned) {
+    fprintf(stderr, "error: %s pins no Rae: rae toolchain pin <version>\n", pack_path);
+    return 1;
+  }
+  char name[128];
+  toolchain_name(version, commit, name, sizeof(name));
+  char home[PATH_MAX];
+  store_home(home, sizeof(home));
+  char ready[2 * PATH_MAX];
+  snprintf(ready, sizeof(ready), "%s/toolchains/%s/.ready", home, name);
+  if (!path_exists(ready) && !store_prepare(self, name)) return 1;
+  if (!self->root) {
+    fprintf(stderr, "error: cannot locate this compiler's Rae checkout (set RAE_ROOT)\n");
+    return 1;
+  }
+  char command[8 * PATH_MAX];
+  size_t at = (size_t)snprintf(command, sizeof(command), "sh \"%s/tools/toolchain-prepare.sh\" --deps \"%s\" \"%s\"",
+                               self->root, home, name);
+  for (int i = 0; i < count; ++i) {
+    at += (size_t)snprintf(command + at, sizeof(command) - at, " \"%s\"", names[i]);
+    if (at >= sizeof(command)) return 1;
+  }
+  return system(command) == 0 ? 0 : 1;
 }
 
 /* The newest exact version among the clone's tags */
@@ -580,6 +613,42 @@ static bool keep_has(const char* keep, const char* name) {
   return false;
 }
 
+/* Remove the shared builds no kept toolchain's .deps names. The count removed. */
+static int gc_deps(const char* home, const char* kept_deps, bool dry_run) {
+  char deps_root[PATH_MAX + 16];
+  snprintf(deps_root, sizeof(deps_root), "%s/deps", home);
+  DIR* names = opendir(deps_root);
+  if (!names) return 0;
+  int removed = 0;
+  struct dirent* dep;
+  while ((dep = readdir(names)) != NULL) {
+    if (dep->d_name[0] == '.') continue;
+    char dep_path[2 * PATH_MAX];
+    snprintf(dep_path, sizeof(dep_path), "%s/%s", deps_root, dep->d_name);
+    DIR* pins = opendir(dep_path);
+    if (!pins) continue;
+    struct dirent* pin;
+    while ((pin = readdir(pins)) != NULL) {
+      size_t n = strlen(pin->d_name);
+      if (pin->d_name[0] == '.' || (n > 5 && strcmp(pin->d_name + n - 5, ".lock") == 0)) continue;
+      char path[3 * PATH_MAX];
+      snprintf(path, sizeof(path), "%s/%s", dep_path, pin->d_name);
+      char lock[3 * PATH_MAX + 8];
+      snprintf(lock, sizeof(lock), "%s.lock", path);
+      if (strstr(kept_deps, path) || path_exists(lock)) continue;
+      removed += 1;
+      printf("%s %s/%s\n", dry_run ? "would remove" : "removing", dep->d_name, pin->d_name);
+      if (dry_run) continue;
+      char command[4 * PATH_MAX];
+      snprintf(command, sizeof(command), "rm -rf \"%s\"", path);
+      if (system(command) != 0) fprintf(stderr, "warning: could not remove %s\n", path);
+    }
+    closedir(pins);
+  }
+  closedir(names);
+  return removed;
+}
+
 int rae_toolchain_gc(bool dry_run) {
   char home[PATH_MAX];
   store_home(home, sizeof(home));
@@ -639,6 +708,9 @@ int rae_toolchain_gc(bool dry_run) {
   DIR* dir = opendir(toolchains);
   int removed = 0;
   int kept = 0;
+  char* kept_deps = calloc(1, keep_cap);
+  if (!kept_deps) return 1;
+  size_t kept_deps_len = 0;
   if (dir) {
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -652,6 +724,13 @@ int rae_toolchain_gc(bool dry_run) {
       snprintf(lock, sizeof(lock), "%s.lock", path);
       if (keep_has(keep, entry->d_name) || path_exists(lock)) {
         kept += 1;
+        char deps_path[2 * PATH_MAX + 8];
+        snprintf(deps_path, sizeof(deps_path), "%s/.deps", path);
+        char* deps_text = read_whole_file(deps_path);
+        if (deps_text && kept_deps_len + strlen(deps_text) + 1 < keep_cap) {
+          kept_deps_len += (size_t)snprintf(kept_deps + kept_deps_len, keep_cap - kept_deps_len, "%s", deps_text);
+        }
+        free(deps_text);
         continue;
       }
       removed += 1;
@@ -665,6 +744,8 @@ int rae_toolchain_gc(bool dry_run) {
     }
     closedir(dir);
   }
+  removed += gc_deps(home, kept_deps, dry_run);
+  free(kept_deps);
   if (!dry_run) {
     char command[PATH_MAX + 64];
     snprintf(command, sizeof(command), "git -C \"%s/repo\" worktree prune >/dev/null 2>&1", home);

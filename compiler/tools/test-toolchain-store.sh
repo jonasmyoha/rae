@@ -31,11 +31,38 @@ mkdir -p "$SOURCE"
   while IFS= read -r file; do [ -f "$file" ] && echo "$file"; done | tar -cf - -T -) | tar -xf - -C "$SOURCE"
 A=$(tr -d ' \n' < "$SOURCE/compiler/VERSION")
 B=${A%.*}.$((${A##*.} + 1))
+# Stand-ins for the shared builds, which take minutes and the network. Version A is an old
+# one with no WAMR; A and B have different Box3D and the same SQLite.
+cat > "$SOURCE/tools/box3d/build.sh" <<'EOF'
+#!/bin/bash
+set -eu
+. "$(dirname "$0")/pin"
+mkdir -p "$RAE_BOX3D/lib"
+echo "$BOX3D_COMMIT" > "$RAE_BOX3D/COMMIT"
+EOF
+cat > "$SOURCE/tools/sqlite/build.sh" <<'EOF'
+#!/bin/bash
+set -eu
+[ -z "${RAE_TEST_SQLITE_FAILS:-}" ] || exit 3
+mkdir -p "$RAE_SQLITE/lib"
+EOF
+cat > "$SOURCE/tools/ios/build-sdl3-ios.sh" <<'EOF'
+#!/bin/sh
+mkdir -p "$(dirname "$0")/frameworks/SDL3.xcframework"
+EOF
+cat > "$SOURCE/tools/ios/build-wgpu-ios.sh" <<'EOF'
+#!/bin/sh
+mkdir -p "$(dirname "$0")/frameworks/wgpu_native.xcframework"
+EOF
+cp -R "$SOURCE/tools/wamr" "$WORK/wamrSaved"
+rm -rf "$SOURCE/tools/wamr"
 git -C "$SOURCE" init --quiet --initial-branch=main
 git -C "$SOURCE" add -A
 git "${git_id[@]}" -C "$SOURCE" commit --quiet -m "version A"
 git "${git_id[@]}" -C "$SOURCE" tag -a "v$A" -m "v$A"
 echo "$B" > "$SOURCE/compiler/VERSION"
+cp -R "$WORK/wamrSaved" "$SOURCE/tools/wamr"
+echo "BOX3D_COMMIT=b0b0b0b" >> "$SOURCE/tools/box3d/pin"
 git -C "$SOURCE" add -A
 git "${git_id[@]}" -C "$SOURCE" commit --quiet -m "version B"
 git "${git_id[@]}" -C "$SOURCE" tag -a "v$B" -m "v$B"
@@ -232,6 +259,49 @@ has update-check-moved "$(cat App.raepack)" "version: \"$B\""
 has pin-keeps-check "$(cat App.raepack)" "check: \"test -f checkPasses\""
 rm -f checkPasses
 
+# ---- Shared builds per version
+dep_value() { (unset RAE_BOX3D RAE_SQLITE RAE_WAMR; . "$RAE_HOME/toolchains/$1/.deps"; eval "echo \"\${$2:-}\""); }
+"$RAE" toolchain pin "$A" >/dev/null 2>&1
+BOX_A=$(dep_value "$A" RAE_BOX3D)
+BOX_B=$(dep_value "$B" RAE_BOX3D)
+case "$BOX_A" in "$RAE_HOME/deps/box3d/"*/install) ok deps-box3d-in-store ;; *) bad deps-box3d-in-store "$BOX_A" ;; esac
+[ "$BOX_A" != "$BOX_B" ] && ok deps-other-box3d-other-folder || bad deps-other-box3d-other-folder "$BOX_A"
+check deps-same-sqlite-same-folder "$(dep_value "$A" RAE_SQLITE)" "$(dep_value "$B" RAE_SQLITE)"
+check deps-sets-cache-beside-install "$(dep_value "$A" RAE_BOX3D_CACHE)/install" "$BOX_A"
+check deps-old-version-has-no-wamr "$(dep_value "$A" RAE_WAMR)" ""
+[ -n "$(dep_value "$B" RAE_WAMR)" ] && ok deps-new-version-has-wamr || bad deps-new-version-has-wamr "empty"
+out=$("$RAE" toolchain deps 2>&1)
+has deps-status-not-built "$out" "box3d: not built"
+has deps-status-not-in-version "$out" "wamr: not in this version"
+out=$("$RAE" toolchain deps box3d 2>&1)
+check deps-build-a "$?" 0
+"$RAE" toolchain pin "$B" >/dev/null 2>&1
+out=$("$RAE" toolchain deps box3d 2>&1)
+check deps-build-b "$?" 0
+check deps-b-has-its-box3d "$(tail -1 "$BOX_B/COMMIT")" b0b0b0b
+[ -f "$BOX_A/COMMIT" ] && ok deps-a-keeps-its-box3d || bad deps-a-keeps-its-box3d "gone"
+[ "$(cat "$BOX_A/COMMIT")" != "$(cat "$BOX_B/COMMIT")" ] && ok deps-two-commits-both-built || bad deps-two-commits-both-built "the same"
+has deps-status-built "$("$RAE" toolchain deps 2>&1)" "box3d: built"
+SQLITE_FOLDER=$(dep_value "$B" RAE_SQLITE_CACHE)
+out=$(RAE_TEST_SQLITE_FAILS=1 "$RAE" toolchain deps sqlite 2>&1)
+check deps-failed-build-fails "$?" 1
+[ ! -f "$SQLITE_FOLDER/.ready" ] && [ ! -d "$SQLITE_FOLDER.lock" ] && ok deps-failed-build-no-marker || bad deps-failed-build-no-marker "marker or lock"
+out=$("$RAE" toolchain deps sqlite 2>&1)
+check deps-build-after-failure "$?" 0
+out=$("$RAE" toolchain deps nonsense 2>&1)
+check deps-unknown-name-fails "$?" 1
+out=$("$RAE" toolchain deps ios 2>&1)
+check deps-build-ios "$?" 0
+frameworks="$RAE_HOME/toolchains/$B/tools/ios/frameworks"
+[ -L "$frameworks" ] && [ -d "$frameworks/SDL3.xcframework" ] && [ -d "$frameworks/wgpu_native.xcframework" ] && ok deps-ios-through-link || bad deps-ios-through-link "$(ls -la "$frameworks")"
+case "$(readlink "$frameworks")" in "$RAE_HOME/deps/ios/"*) ok deps-ios-in-store ;; *) bad deps-ios-in-store "$(readlink "$frameworks")" ;; esac
+[ -L "$RAE_HOME/toolchains/$B/tools/android/deps" ] && ok deps-android-link || bad deps-android-link "no link"
+# What ./rae hands the compiler, and that a person's own value wins
+sed 's#^exec .*#exec printenv RAE_BOX3D#' ./rae > ./raeEnv
+check wrapper-sets-box3d "$(unset RAE_BOX3D; sh ./raeEnv build)" "$BOX_B"
+check wrapper-keeps-own-box3d "$(RAE_BOX3D=/own sh ./raeEnv build)" /own
+rm -f ./raeEnv
+
 # ---- gc: what no project uses goes, and comes back on demand
 OTHER="$WORK/other"
 mkdir -p "$OTHER"
@@ -245,12 +315,16 @@ rm -rf "$OTHER"
 tool=$(sed -n 's/^tool="\(.*\)"$/\1/p' ./rae)
 out=$("$RAE" toolchain gc --dry-run 2>&1)
 has gc-dry-run-names "$out" "would remove $A"
+has gc-dry-run-names-dep "$out" "would remove box3d/$(basename "$(dirname "$BOX_A")")"
 [ -d "$RAE_HOME/toolchains/$A" ] && ok gc-dry-run-removes-nothing || bad gc-dry-run-removes-nothing "gone"
 out=$("$RAE" toolchain gc 2>&1)
 check gc-ok "$?" 0
 [ ! -d "$RAE_HOME/toolchains/$A" ] && ok gc-removes-unused || bad gc-removes-unused "$out"
 [ -f "$RAE_HOME/toolchains/$B/.ready" ] && ok gc-keeps-used || bad gc-keeps-used "$out"
 hasnt gc-forgets-gone-project "$(cat "$RAE_HOME/projects")" "$OTHER"
+[ ! -d "$(dirname "$BOX_A")" ] && ok gc-removes-unused-dep || bad gc-removes-unused-dep "$out"
+[ -f "$BOX_B/COMMIT" ] && ok gc-keeps-used-dep || bad gc-keeps-used-dep "$out"
+[ -f "$SQLITE_FOLDER/.ready" ] && ok gc-keeps-shared-dep || bad gc-keeps-shared-dep "$out"
 # It comes back on demand, with two preparations at once: one builds and one waits
 sh "$REPO_ROOT/tools/toolchain-prepare.sh" "$RAE_HOME" "$SOURCE" "$A" >"$WORK/race1.log" 2>&1 &
 first=$!

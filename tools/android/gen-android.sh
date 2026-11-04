@@ -26,6 +26,8 @@ set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
+# In the store, the shared builds of this version (tools/toolchain-prepare.sh)
+[ ! -f "$root/.deps" ] || . "$root/.deps"
 . "$here/env.sh"
 ex_arg=${1:?usage: gen-android.sh <project-dir>}
 if [ -d "$root/$ex_arg" ]; then ex_dir=$(CDPATH= cd -- "$root/$ex_arg" && pwd)

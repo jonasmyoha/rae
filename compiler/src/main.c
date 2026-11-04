@@ -2372,7 +2372,7 @@ static void print_usage(const char* prog) {
           "                  current directory and download Roboto-Regular.ttf into\n");
   fprintf(stderr,
           "                  assets/. Idempotent — never overwrites existing files.\n");
-  fprintf(stderr, "  toolchain <status|pin|update|gc|list>\n");
+  fprintf(stderr, "  toolchain <status|pin|update|deps|gc|list>\n");
   fprintf(stderr, "                  The Rae this project pins, and the store of them\n");
   fprintf(stderr, "                  `use <req>` checks out + rebuilds a matching tag)\n");
   fprintf(stderr, "  add <name> --path <dir> | --git <url> [--rev <rev>]\n");
@@ -2845,7 +2845,7 @@ static bool box3d_link_flags(const char* c_path, char* flags, size_t cap) {
   snprintf(lib, sizeof(lib), "%s/lib/%slibbox3d.a", root, use_scalar ? "scalar/" : "");
   struct stat st;
   if (stat(lib, &st) != 0) {
-    fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh (or set RAE_BOX3D)\n", lib);
+    fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh (or ./rae toolchain deps box3d, or set RAE_BOX3D)\n", lib);
     return false;
   }
   snprintf(flags, cap, "-I%s/include %s", root, lib);
@@ -2876,7 +2876,7 @@ static bool sqlite_link_flags(const char* c_path, char* flags, size_t cap) {
   snprintf(lib, sizeof(lib), "%s/lib/libsqlite3.a", root);
   struct stat st;
   if (stat(lib, &st) != 0) {
-    fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh (or set RAE_SQLITE)\n", lib);
+    fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh (or ./rae toolchain deps sqlite, or set RAE_SQLITE)\n", lib);
     return false;
   }
 #if defined(__linux__)
@@ -2905,7 +2905,7 @@ static bool wamr_link_flags(const char* c_path, char* flags, size_t cap) {
   snprintf(lib, sizeof lib, "%s/lib/librae_wamr.a", root);
   struct stat st;
   if (stat(lib, &st) != 0) {
-    fprintf(stderr, "error: this program imports wasm, but %s is missing; run tools/wamr/build.sh (or set RAE_WAMR)\n", lib);
+    fprintf(stderr, "error: this program imports wasm, but %s is missing; run tools/wamr/build.sh (or ./rae toolchain deps wamr, or set RAE_WAMR)\n", lib);
     return false;
   }
 #if defined(__linux__)
@@ -3366,7 +3366,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     snprintf(box3d_library, sizeof(box3d_library), "%s/lib/emscripten/libbox3d.a", box3d_root);
     struct stat box3d_stat;
     if (stat(box3d_library, &box3d_stat) != 0) {
-      fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh with emcc installed (or set RAE_BOX3D)\n", box3d_library);
+      fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh with emcc installed (or ./rae toolchain deps box3d, or set RAE_BOX3D)\n", box3d_library);
       return false;
     }
     args[n++] = box3d_include;
@@ -3383,7 +3383,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     snprintf(sqlite_library, sizeof(sqlite_library), "%s/lib/emscripten/libsqlite3.a", sqlite_root);
     struct stat sqlite_stat;
     if (stat(sqlite_library, &sqlite_stat) != 0) {
-      fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh with emcc installed (or set RAE_SQLITE)\n", sqlite_library);
+      fprintf(stderr, "error: this program imports sql, but %s is missing; run tools/sqlite/build.sh with emcc installed (or ./rae toolchain deps sqlite, or set RAE_SQLITE)\n", sqlite_library);
       return false;
     }
     args[n++] = sqlite_include;
@@ -5198,13 +5198,16 @@ static int toolchain_status(const char* root) {
 
 static void toolchain_usage(void) {
   fprintf(stderr,
-          "usage: rae toolchain <status|pin|update|gc|list>\n"
+          "usage: rae toolchain <status|pin|update|deps|gc|list>\n"
           "  status            this compiler, and the Rae this project pins\n"
           "  pin <version|commit|main>\n"
           "                    pin this repo's packs to it, once it builds, and write ./rae\n"
           "  update            pin the newest version, only if the project still builds:\n"
           "                    the pack's rae { check } command, else every compiled target\n"
-          "  gc [--dry-run]    remove the toolchains no project uses (they come back on demand)\n"
+          "  deps [box3d sqlite wamr ios android]\n"
+          "                    build these for the pinned Rae, shared per version; alone, what is built\n"
+          "  gc [--dry-run]    remove the toolchains and shared builds no project uses\n"
+          "                    (toolchains come back on demand)\n"
           "  list              the release tags\n");
 }
 
@@ -5227,7 +5230,7 @@ static int cmd_toolchain(int argc, char** argv) {
   if (strcmp(sub, "gc") == 0) {
     return rae_toolchain_gc(argc >= 2 && strcmp(argv[1], "--dry-run") == 0);
   }
-  if (strcmp(sub, "pin") == 0 || strcmp(sub, "update") == 0) {
+  if (strcmp(sub, "pin") == 0 || strcmp(sub, "update") == 0 || strcmp(sub, "deps") == 0) {
     char cwd[PATH_MAX];
     char pack_path[PATH_MAX];
     if (!getcwd(cwd, sizeof(cwd)) || !find_project_pack(NULL, cwd, pack_path)) {
@@ -5235,6 +5238,7 @@ static int cmd_toolchain(int argc, char** argv) {
       return 1;
     }
     RaeToolchainSelf self = toolchain_self(have_root ? root : NULL);
+    if (strcmp(sub, "deps") == 0) return rae_toolchain_deps(&self, pack_path, argc - 1, argv + 1);
     if (strcmp(sub, "update") == 0) return rae_toolchain_update(&self, pack_path);
     if (argc < 2) {
       fprintf(stderr, "error: 'rae toolchain pin' needs a version, a commit or main\n");

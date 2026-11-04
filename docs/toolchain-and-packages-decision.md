@@ -201,9 +201,16 @@ with point 3 and was not rejected. Dropping it later is one field.
 - `./rae toolchain pin <version|commit>`, `update` (moves only if the project still builds: every target, or
   the pack's optional command, `rae: { check: "..." }`) and `gc` (removes what no recorded project uses; it comes back
   on demand).
-- Shared builds are stored **per version**: iOS frameworks, Android, SQLite, Box3D and WAMR. Today one
-  Box3D fits per machine, and SUMU's shared frameworks have no version at all. The toolchain runner sets
-  `RAE_BOX3D`, `RAE_SQLITE_CACHE` and `RAE_WAMR` for old compilers.
+- Shared builds are stored **per version**: iOS frameworks, Android, SQLite, Box3D and WAMR, in
+  `deps/<name>/<pin>`. The pin is a hash of the files that decide that build, read from the toolchain's own
+  commit: the `tools/box3d`, `tools/sqlite` and `tools/wamr` folders (WAMR also its runtime header), and the
+  iOS and Android build scripts. So two versions with another Box3D use two folders, and two with the same
+  one share a folder. Each toolchain has a `.deps` file with `RAE_BOX3D`, `RAE_SQLITE`, `RAE_WAMR` and their
+  `_CACHE` forms, which `./rae` reads, so old compilers and old build scripts use the store too. A variable
+  someone already set wins. `tools/ios/frameworks` and `tools/android/deps` are links into the store.
+- `./rae toolchain deps box3d` builds one, because these builds need more than a C compiler. Alone, it says
+  what is built. The compiler's "is missing" error names the command. `gc` removes a build no kept toolchain
+  names. Without `./rae`, a checkout keeps using `~/.cache/rae` and `make setup`.
 - Several packs in one repo must name the same compiler version. `pin` changes them all, and a
   disagreement is an error. SUMU has 3 packs and game proto2 has 2. This means project packs, the
   ones with a `rae` block and targets. A library's `rae` is the lowest compiler it needs, and stays.
@@ -226,7 +233,7 @@ Each step is its own queue item, with the full suite on each step that touches t
 4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` is gone.
    Done in 0.2.344. `make -C compiler toolchain-store-test` runs it from a fresh clone with an empty
    `RAE_HOME`. It takes about two minutes, so it is not part of the full run.
-5. Shared builds per version.
+5. Shared builds per version. Done in 0.2.346.
 6. The first package: `qr`, moved to `packages/qr`.
 
 Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
