@@ -26,6 +26,7 @@ open app3d/WalkerCubes
 open app3d/CharacterController
 open app3d/PlayerRoster
 open app3d/UiShell
+open ui/qrCodeSystem/QrCodeSystem
 
 # The game's own component: turns at `speed` (radians a second) while the
 # walker is within `reach` meters
@@ -79,6 +80,7 @@ func walkerGameStart(game: mod BoxGame, app: mod WalkerApp) {
     path: "examples/148_walker_game/assets/game.raescene"
     res: app.inputSystem.gpuUi
   )
+  qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem: app.inputSystem.qrCodeSystem)
   game.started = true
   log("[game] a spinning box at ({center.x}, {center.y}); walk to it")
 }
