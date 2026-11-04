@@ -181,15 +181,82 @@ user asking for it. Decide after a second package has shown what a split costs.
    used by examples 122-125 and cases 1002, 1005 and 1205 with `git`, `subdir`, `version` and `hash`. It proves
    the whole path. `qr` was the first plan, and cannot go first: `lib/ui/qrCodeSystem` and the walker kit import
    it, and a stdlib module cannot import a package. Check who imports a module, not only what it imports.
-2. **Then a package with its own C**, which forces the design for C and shaders. `box3d` is a real
-   candidate, because its C is already a separate library.
+2. **Then a package with its own C**, which forces the design for C and shaders (below). `box3d` was the
+   candidate, and cannot be first; `sql` is the recommendation.
 3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
 4. **`trees`:** `treeGen`, `stylizedTrees`, `lowPolyTrees` and `treeSets`, one package. `app3d` imports them, so
    it goes with or after the engine, and it has shaders, so it needs the design from step 2.
 5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
 
-**A file a package reads at run time** has no place yet: a path like `lib/foo` assumes the stdlib's folder. Until
-step 2 designs it, a package holds such data in a module, as `physicsScenes/HudScenes` holds its HUD scenes.
+### How a package carries C, shaders and files (proposed, not built: decision needed)
+
+Today each of these assumes the stdlib's folder or names one library by hand:
+
+| what | today | where it is hard-coded |
+|---|---|---|
+| C library, native | `box3d_link_flags`, `sqlite_link_flags`, `wamr_link_flags`: found by a header in the emitted C, then `RAE_<NAME>` | `compiler/src/main.c` |
+| C library, browser | the same three again | `compiler/src/main.c`, `compiler/tools/wasm_build.sh` |
+| C library, iOS and Android | compiled from sources, per library | `tools/ios/gen-ios.sh`, `tools/android/gen-android.sh` |
+| shaders | `shader(files:)`, 62 uses over 84 `.wgsl` files, embedded at build; a path is tried in the project, then `lib/...` in the stdlib | `compiler/src/shader_compose.c` |
+| files read at run time | `Sys.readAsset("lib/...")` with `RAE_STDLIB`, staged for a device by `tools/stage-app-assets.sh`, preloaded for the browser by a list in `main.c` | three places, all naming `lib/` |
+
+**C: the package's pack says it, and no compiler code names a library.**
+
+```
+pack Sql {
+  meta: { version: "1.0.0" }
+  native: {
+    build: "native/build.sh"
+    header: "rae_sql.h"
+    include: "include"
+    link: "lib/libsqlite3.a"
+    linkBrowser: "lib/emscripten/libsqlite3.a"
+    sourcesDevice: ["src/sqlite3.c", "src/rae_sql_glue.c"]
+    defines: "OPTIONS"
+  }
+}
+```
+
+- A package's build goes in `~/.rae/deps/<name>/<pin>/install`, the store of step 5, and `<pin>` is the package's own
+  `git-tree` hash, so two versions with different C both build. The script gets that folder as `RAE_PACKAGE_INSTALL`.
+- `rae fetch` builds it, and a build that needs it and does not find it stops and names `rae fetch`. A build itself still
+  writes nothing, the rule of step 1.
+- A program links it only when its emitted C includes `header`, the rule today, so importing a package you do not reach
+  costs nothing.
+- `rae tree --json` lists each package's native block, and `gen-ios.sh`, `gen-android.sh` and `wasm_build.sh` read that instead
+  of naming libraries. `RAE_BOX3D`, `RAE_SQLITE` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
+- A library that needs `cmake` or a network says so in its script's error. Fresh clones of a project with C need those too.
+
+**Shaders: a path in a package's module is tried in that package's folder first.** `shader(files: ["spray.wgsl"])` is embedded at
+build and validated by naga, so it needs no run-time path on any platform. The change is one more place to look in
+`shader_compose.c`: the folder of the package owning the file, which `rae_deps_owner_of` already answers. A package never writes
+`lib/`.
+
+**Files read at run time: embed small text, declare the rest.**
+
+- A new compile-time `embedText(file: "scenes/Hud.raescene")`, the same idea and the same path rule as `shader(files:)`, gives
+  a `String` built into the program. It works in the browser and on a phone with nothing to stage. `physicsScenes` goes back to
+  real `.raescene` files with it, and drops `HudScenes.rae`, whose lines nobody can open in the editor.
+- Pictures, fonts and models, too large to embed, are declared: `assets: ["assets"]` in the pack. `rae run` exports each
+  package's folder, and `Sys.readAsset(package: "water", path: "assets/foam.png")` looks there. `stage-app-assets.sh` and the
+  browser's preload copy them to `packages/<name>/...`, read by the same call. The call never contains a path outside the package.
+
+**What this design refuses:** a build system in the pack (the script is the package's own), version ranges, and a package's C
+reaching into the compiler's `runtime/` folder.
+
+### Which package proves it: `box3d` cannot, yet
+
+The plan named `box3d`, as a candidate. Checked on 2026-11-05, as the `qr` lesson says to: **24 `lib/app3d` modules import
+`box3d`**, the walker kit among them, and a stdlib module cannot import a package. It can only move with `app3d` or after it.
+
+| package | C | importers in `lib/` | real users | verdict |
+|---|---|---|---|---|
+| `sql` | SQLite and a glue header, all four platforms | 0 | 2 servers, case 1288 | **the proof** |
+| `wasm` | WAMR, but its header is in `compiler/runtime/` | 0 | cases only | second; its header must move first |
+| `box3d` | Box3D and a glue header | 24 | 3 examples, 19 cases, `physicsScenes` | with the engine |
+
+So the recommended order changes: `sql` proves C; `physicsScenes` 1.1.0 proves `embedText`; `trees`, with its shaders and pictures,
+proves the rest once `app3d` moves; `box3d` goes with `app3d`.
 
 ## 7. Agreed on 2026-11-04
 
