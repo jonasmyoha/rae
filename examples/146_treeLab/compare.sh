@@ -23,7 +23,7 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 1     # -> the repository root
 CAMERA="${1:-near}"
-LOOKS="${TREELAB_LOOKS_REPO:-$HOME/Documents/my_own_stuff/own_repos/looks-development}"
+LOOKS="${TREELAB_LOOKS_REPO:-$HOME/personal/looks-development/looks-development}"
 T02="${TREELAB_T02:-$LOOKS/references/crops/T02.png}"
 OUT="${TREELAB_OUT:-$LOOKS/treeReference/lab/compare-$CAMERA.png}"
 TRACE="${TREELAB_TRACE:-$LOOKS/treeReference/traces/T02.js}"
