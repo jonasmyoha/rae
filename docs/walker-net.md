@@ -81,7 +81,41 @@ timeout, 0 desyncs). Those windows' first frames were quick, 390-683 ms to the
 start of the session, so the settled start itself was not stressed on this
 machine; case 1340 tests it and the recovery with short timeouts.
 
-A host that stalls past the relay's timeout mid-session is not recovered.
+### A host that goes
+
+A session outlives its host, whether the host stalled, froze, crashed or quit. The
+relay promotes a player (a desktop first), and:
+
+- **The promoted player hosts** (`walkerNetTakeOver`) from its copy of the world, as
+  in docs/replication.md, "Host migration", and logs `[net] the host went: hosting
+  the session now`. The invite stays the same.
+- **The other players connect to it** and get a whole snapshot.
+- **An old host that was only stalled comes back as a player** of the same session
+  (`hostLost`), because the relay answers it `forgotten`. The new host stays.
+- **A host that was alone** has no session left to go back to, since the relay closed
+  it. It hosts a new one, and that means a new invite, which it logs.
+
+The two other options were weighed and not taken. A longer relay
+timeout makes every peer that is really gone take longer to notice, and a stall can
+still outlast it. A thread that sends keep-alives keeps only the relay satisfied: the
+connections still time out, and it cannot help a process that is frozen or dead.
+
+What a player sees, with the default timeouts: the connections time out at 5 s and the
+relay at 10 s. So when a host stalls, the others' walkers disappear at 5 s, when the
+player's connection to the host ends and it forgets the session. They come back after
+the relay promotes someone at 10 s, as new characters, under new numbers ("Player 4"
+where one was "Player 2"). The world has no shared state to lose beyond the poses,
+which each player owns. A host that quits on purpose is replaced at once, with no such
+gap, and there the promoted player's copy carries over.
+
+A stall of 5-10 s leaves the host in place: its connections and the players' end, and
+the players connect again.
+
+Checked on 2026-11-04 with a relay at default timeouts: a 143 window hosting, a 143
+window and a bot joined, the host frozen by SIGSTOP for 12 s. The joined window hosted,
+the bot followed it, the old host came back as a player after it resumed, and both
+windows ended with 2 other walkers and 0 desyncs. Case 1341 covers this with short
+timeouts, a second migration, a host alone, a shorter stall and a host that quits.
 
 ## Measured (2026-11-03, one MacBook, loopback)
 

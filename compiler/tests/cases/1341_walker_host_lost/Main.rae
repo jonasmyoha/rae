@@ -1,0 +1,311 @@
+# lib/app3d/walkerNetSystem: a session outlives its host. Real relay and sockets in
+# one process, with short timeouts. A host that stalls past the relay's timeout is
+# replaced by a promoted player, the others reconnect to it and keep their walkers,
+# and the old host comes back as a player. A host alone in its session gets a new
+# one. A shorter stall leaves the host in place. A host that quits is replaced too.
+open net/Udp
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open Vec3
+open ecs/ComponentTable
+open app3d/walkerNetSystem/WalkerNetSystem
+
+func settingsFor(mode: view WalkerNetMode, port: view Int, device: view Int) ret WalkerNetSettings {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  settings.mode = mode
+  settings.relayPort = port
+  settings.device = device
+  ret settings
+}
+
+func createSide(
+  mode: view WalkerNetMode
+  port: view Int
+  device: view Int
+  connectionTimeoutMs: view Int
+) ret WalkerNet {
+  var net: WalkerNet = createWalkerNet(
+    settings: settingsFor(mode: mode, port: port, device: device)
+  )
+  net.connectionConfig.timeoutMs = connectionTimeoutMs
+  net.relayHost.client.config.keepAliveMs = 100
+  net.relayPlayer.client.config.keepAliveMs = 100
+  ret net
+}
+
+# A relay and the sides, each stepped when awake
+type Stage {
+  relay: RelayServer
+  sides: List(WalkerNet)
+  awake: List(Bool)
+  startMs: Int
+}
+
+func elapsed(stage: view Stage) ret Int {
+  ret nowMs() - stage.startMs
+}
+
+func tick(stage: mod Stage) {
+  relayFrame(server: stage.relay)
+  loop var i: Int = 0, i < stage.sides.length, ++i {
+    if stage.awake.copyAtFallback(index: i, fallback: false) {
+      if let side: mod WalkerNet = stage.sides.modAt(index: i) {
+        walkerNetFrame(
+          net: side
+          localPose: walkerPoseAt(position: Vec3 { x: i as Float, y: 0.0, z: 0.0 })
+          nowMs: elapsed(stage: stage)
+        )
+      }
+    }
+  }
+  sleep(ms: 1)
+}
+
+func run(stage: mod Stage, milliseconds: view Int) {
+  let until: Int = elapsed(stage: stage) + milliseconds
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage)
+  }
+}
+
+# Every awake side sees exactly `others` other walkers, and one awake side hosts
+func settled(stage: view Stage, others: view Int) ret Bool {
+  var hosts: Int = 0
+  loop var i: Int = 0, i < stage.sides.length, ++i {
+    if stage.awake.copyAtFallback(index: i, fallback: false) {
+      if let side: view WalkerNet = stage.sides.viewAt(index: i) {
+        if walkerNetRemoteCount(net: side) is not others {
+          ret false
+        }
+        if walkerNetIsHost(net: side) {
+          hosts = hosts + 1
+        }
+      }
+    }
+  }
+  ret hosts is 1
+}
+
+func runUntilSettled(stage: mod Stage, others: view Int, limitMs: view Int) ret Bool {
+  let until: Int = elapsed(stage: stage) + limitMs
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage)
+    if settled(stage: stage, others: others) {
+      ret true
+    }
+  }
+  ret false
+}
+
+func createStage(peerTimeoutMs: view Int, connectionTimeoutMs: view Int) ret Stage {
+  var relayConfig: RelayConfig = defaultRelayConfig()
+  relayConfig.peerTimeoutMs = peerTimeoutMs
+  var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: relayConfig)
+  let port: Int = relayPort(server: relay)
+  var sides: List(WalkerNet) = {}
+  sides.add(value: createSide(
+    mode: WalkerNetMode.host
+    port: port
+    device: deviceDesktop
+    connectionTimeoutMs: connectionTimeoutMs
+  ))
+  var awake: List(Bool) = {}
+  awake.add(value: true)
+  ret Stage { relay: own relay, sides: own sides, awake: own awake, startMs: nowMs() }
+}
+
+func hostAt(stage: mod Stage, index: view Int) {
+  if let side: mod WalkerNet = stage.sides.modAt(index: index) {
+    let started: Bool = walkerNetStart(
+      net: side
+      localPose: walkerPoseAt(position: Vec3 { x: index as Float, y: 0.0, z: 0.0 })
+      nowMs: elapsed(stage: stage)
+    )
+  }
+}
+
+func inviteOf(stage: view Stage, index: view Int) ret String {
+  if let side: view WalkerNet = stage.sides.viewAt(index: index) {
+    ret walkerNetToken(net: side)
+  }
+  ret ""
+}
+
+func waitForInvite(stage: mod Stage, index: view Int) ret String {
+  let until: Int = elapsed(stage: stage) + 2000
+  loop elapsed(stage: stage) < until and inviteOf(stage: stage, index: index).length() is 0 {
+    tick(stage: stage)
+  }
+  ret inviteOf(stage: stage, index: index)
+}
+
+func addPlayer(
+  stage: mod Stage
+  invite: view String
+  device: view Int
+  connectionTimeoutMs: view Int
+) {
+  var side: WalkerNet = createSide(
+    mode: WalkerNetMode.join
+    port: relayPort(server: stage.relay)
+    device: device
+    connectionTimeoutMs: connectionTimeoutMs
+  )
+  side.settings.token = invite
+  let index: Int = stage.sides.length
+  let started: Bool = walkerNetStart(
+    net: side
+    localPose: walkerPoseAt(position: Vec3 { x: index as Float, y: 0.0, z: 0.0 })
+    nowMs: elapsed(stage: stage)
+  )
+  stage.sides.add(value: side)
+  stage.awake.add(value: true)
+}
+
+func setAwake(stage: mod Stage, index: view Int, value: view Bool) {
+  stage.awake.set(index: index, value: value)
+}
+
+func isHost(stage: view Stage, index: view Int) ret Bool {
+  if let side: view WalkerNet = stage.sides.viewAt(index: index) {
+    ret walkerNetIsHost(net: side)
+  }
+  ret false
+}
+
+func totalDesyncs(stage: view Stage) ret Int {
+  var desyncs: Int = 0
+  loop let side: view WalkerNet in stage.sides {
+    desyncs = desyncs + side.desyncs
+  }
+  ret desyncs
+}
+
+func hostStallsPastTheRelay() {
+  var stage: Stage = createStage(peerTimeoutMs: 300, connectionTimeoutMs: 5000)
+  hostAt(stage: stage, index: 0)
+  let invite: String = waitForInvite(stage: stage, index: 0)
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceDesktop
+    connectionTimeoutMs: 5000
+  )
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceMobile
+    connectionTimeoutMs: 5000
+  )
+  log("three sides playing: {runUntilSettled(stage: stage, others: 2, limitMs: 3000)}")
+  setAwake(stage: stage, index: 0, value: false)
+  log(
+    "the host stalled; the other two play on: {runUntilSettled(
+      stage: stage
+      others: 1
+      limitMs: 3000
+    )}"
+  )
+  log(
+    "the desktop player hosts: {isHost(stage: stage, index: 1)}; relay migrations {stage.relay.stats.migrations}"
+  )
+  setAwake(stage: stage, index: 0, value: true)
+  log("the old host is back: {runUntilSettled(stage: stage, others: 2, limitMs: 3000)}")
+  log(
+    "it joined as a player: {not isHost(stage: stage, index: 0)}; the new host stays: {isHost(
+      stage: stage
+      index: 1
+    )}"
+  )
+  # And the next host can go too
+  setAwake(stage: stage, index: 1, value: false)
+  log("the new host stalled too: {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}")
+  log("the old host hosts again, being the desktop: {isHost(stage: stage, index: 0)}")
+  run(stage: stage, milliseconds: 300)
+  log("desyncs {totalDesyncs(stage: stage)}")
+  closeRelayServer(server: stage.relay)
+}
+
+func hostAloneGetsANewSession() {
+  var stage: Stage = createStage(peerTimeoutMs: 300, connectionTimeoutMs: 5000)
+  hostAt(stage: stage, index: 0)
+  let invite: String = waitForInvite(stage: stage, index: 0)
+  setAwake(stage: stage, index: 0, value: false)
+  run(stage: stage, milliseconds: 600)
+  log("a host alone stalled: sessions on the relay {componentCount(this: stage.relay.sessions)}")
+  setAwake(stage: stage, index: 0, value: true)
+  run(stage: stage, milliseconds: 500)
+  let newInvite: String = waitForInvite(stage: stage, index: 0)
+  log(
+    "it hosts a new session: {isHost(stage: stage, index: 0)}, a new invite {newInvite.length() > 0 and newInvite is not invite}"
+  )
+  addPlayer(
+    stage: stage
+    invite: newInvite
+    device: deviceMobile
+    connectionTimeoutMs: 5000
+  )
+  log("a player joins it: {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}")
+  closeRelayServer(server: stage.relay)
+}
+
+func hostStallsOnlyPastItsConnections() {
+  var stage: Stage = createStage(peerTimeoutMs: 8000, connectionTimeoutMs: 400)
+  hostAt(stage: stage, index: 0)
+  let invite: String = waitForInvite(stage: stage, index: 0)
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceDesktop
+    connectionTimeoutMs: 400
+  )
+  log("a host and a player: {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}")
+  setAwake(stage: stage, index: 0, value: false)
+  run(stage: stage, milliseconds: 800)
+  setAwake(stage: stage, index: 0, value: true)
+  log(
+    "a stall the relay did not notice: back {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}"
+  )
+  log(
+    "the host is still the host: {isHost(stage: stage, index: 0)}; relay migrations {stage.relay.stats.migrations}"
+  )
+  closeRelayServer(server: stage.relay)
+}
+
+func hostQuits() {
+  var stage: Stage = createStage(peerTimeoutMs: 8000, connectionTimeoutMs: 5000)
+  hostAt(stage: stage, index: 0)
+  let invite: String = waitForInvite(stage: stage, index: 0)
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceMobile
+    connectionTimeoutMs: 5000
+  )
+  addPlayer(
+    stage: stage
+    invite: invite
+    device: deviceDesktop
+    connectionTimeoutMs: 5000
+  )
+  log("before the host quits: {runUntilSettled(stage: stage, others: 2, limitMs: 3000)}")
+  if let side: mod WalkerNet = stage.sides.modAt(index: 0) {
+    walkerNetLeave(net: side, nowMs: elapsed(stage: stage))
+  }
+  setAwake(stage: stage, index: 0, value: false)
+  log(
+    "the host quit; the other two play on: {runUntilSettled(stage: stage, others: 1, limitMs: 3000)}"
+  )
+  log("the desktop player hosts: {isHost(stage: stage, index: 2)}")
+  closeRelayServer(server: stage.relay)
+}
+
+func main() ret Int {
+  hostStallsPastTheRelay()
+  hostAloneGetsANewSession()
+  hostStallsOnlyPastItsConnections()
+  hostQuits()
+  ret 0
+}
