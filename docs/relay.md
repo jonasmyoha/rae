@@ -181,7 +181,7 @@ second):
 | session | before | now (2026-11-04) |
 |---|---|---|
 | one player, 10 messages, then idle, UDP or WebSocket | about 27,000 packets/s, 37 bytes each: 1 MB/s | 18-21 packets/s, 39 bytes each: under 1 KB/s |
-| `walkerBot` host and one bot, walking | 23,200-27,900 packets/s: about 1.8 MB/s (measured with the ack fix in, without the input fix) | 114-120 packets/s: about 12 KB/s |
+| `walkerBot` host and one bot, walking | 23,200-27,900 packets/s: about 1.8 MB/s (measured with the ack fix in, without the input fix) | 118-120 packets/s: about 8.6 KB/s |
 
 Two loops caused the "before" column, and both ran as fast as the machine
 allowed:
@@ -201,7 +201,39 @@ its newest acked sequence waited. `rttMs` subtracts it (case 1337 checks 10 to
 path). That is why a sealed keep-alive is now 39 bytes.
 
 The bot sends 100 inputs/s (`tick: nowMs / 10`), and a window one per frame.
-Those make most of the walker traffic.
+Those make most of the walker's packets.
+
+**Why inputs are not paced to the 50 ms snapshots.** It would send fewer
+packets, but it looks wrong. The host's snapshot takes the newest pose, so with
+two unrelated clocks of the same rate a snapshot can repeat a pose and the next
+jump two. Measured with the real replication code on 60 Hz frames (case 1338);
+a bad frame is one whose shown speed is under 25% or over 175% of the truth,
+worst over 8 clock phases:
+
+| input tick | inputs/s | no jitter | 10 ms jitter | 20 ms jitter | 40 ms jitter |
+|---|---|---|---|---|---|
+| 10 ms (now) | 59 | 0% | 0% | 0.3% | 1.8% |
+| 20 ms | 49 | 0% | 3.6% | 4.6% | 10.8% |
+| 25 ms | 39 | 0% | 7.8% | 7.0% | 18.3% |
+| 50 ms | 20 | 0% | 51.5% | 45.0% | 49.8% |
+
+At a lucky phase the 50 ms row shows 0% bad frames, so one test run can pass.
+At 33 ms (30 inputs/s), 30 inputs against 20 snapshots swing the shown speed by
+about 33% all the time, with no jitter at all (shown as speed error, not as bad
+frames).
+
+**What was cut instead: the repeated inputs.** A walker's input is its whole
+pose, so a newer one replaces an older one. Repeating the last 3 in each message
+(`inputRedundancy`) cost 38 bytes per input and showed nothing: every row of that
+measurement was identical with 1, also at 5% packet loss. So the walker sends 1
+(`walkerReplicationConfig`), which took the session above from 12.4 to 8.6 KB/s.
+An input that is a change rather than a state (a key press) still needs the
+repeats, which is why the default stays 3.
+
+Two 143 windows forwarded about 21 packets/s, about 2 KB/s, measured before
+this change on a machine busy with other GPU work, at about 10 frames a second.
+So that is not a figure for 60 frames a second. None of this has been measured
+on a phone.
 
 ## WebSocket: peers that cannot send UDP
 

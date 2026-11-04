@@ -188,10 +188,22 @@ func walkerClientConfig(settings: view WalkerNetSettings) ret RelayClientConfig 
   ret config
 }
 
-func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
+# The replication settings of a walker session. A walker's input is its whole
+# pose, so a newer one replaces an older one: repeating old poses in each message
+# (`inputRedundancy`) costs bytes and shows nothing, even under loss. The input
+# stays one per 10 ms tick at most, and is not paced to the 50 ms snapshots: two
+# clocks of the same rate can beat, and then snapshots repeat a pose and jump
+# two (compiler/tests/cases/1338_input_rate_smoothness).
+func walkerReplicationConfig() ret ReplicationConfig {
   var config: ReplicationConfig = defaultReplicationConfig()
   # Every walker sees every walker (a session is a handful of players)
   config.interestRadius = 1000000.0
+  config.inputRedundancy = 1
+  ret config
+}
+
+func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
+  let config: ReplicationConfig = walkerReplicationConfig()
   let relayAddress: NetAddress = resolveAddress(host: settings.relayHost, port: settings.relayPort).address
   ret WalkerNet {
     settings: settings
