@@ -27,7 +27,7 @@ not change until the last step.
 ## The target: crop T02
 
 `T02` in the private reference study, which lives in the separate, private
-repository `own_repos/looks-development` (with Git LFS):
+repository `personal/looks-development/looks-development` (with Git LFS):
 `looks-development/references/crops/T02.png` (source S04,
 `hienoja_kasveja_ja_kivia4.jpg`, rectangle x 520, y 320, 330 x 570). The
 reference images are private and are not copied into this repository.
@@ -76,7 +76,7 @@ not like a named species from a field guide. So:
   a yes or no. A "no" with a reason starts the next round of
   the same step.
 - **The report and its history** live in the looks-development repository
-  (`own_repos/looks-development`, private, Git LFS for images and videos).
+  (`personal/looks-development/looks-development`, private, Git LFS for images and videos).
   Every round of every step is kept, never overwritten, in
   `treeReference/rounds/YYYY-MM-DD-stepN-short-name/`:
   `TREELAB_ITERATION=<that name> examples/146_treeLab/compare.sh <camera>`
