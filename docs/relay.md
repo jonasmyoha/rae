@@ -63,11 +63,11 @@ Byte 0 is the kind. Integers are big-endian.
 
 | kind | from -> to | rest |
 |---|---|---|
-| 201 open | host -> relay | request id (4) |
+| 201 open | host -> relay | request id (4), then see below |
 | 202 opened | relay -> host | request id (4), token (16) |
 | 203 join | player -> relay | request id (4), token (16) |
 | 204 joined | relay -> player | request id (4), peer id (4) |
-| 205 refused | relay -> client | request id (4), reason (1: unknown session, 2: full, 3: relay full) |
+| 205 refused | relay -> client | request id (4), reason (1: unknown session, 2: full, 3: relay full, 4: open ticket) |
 | 206 forward | client -> relay | destination peer id (4), payload |
 | 206 forward | relay -> client | source peer id (4), payload |
 | 207 keepAlive | both ways | nothing |
@@ -80,7 +80,8 @@ Byte 0 is the kind. Integers are big-endian.
 | 214 direct | client -> client, direct | sender's peer id (4), payload (a forward that skipped the relay) |
 
 `open` and `join` may end with two more bytes: relay only (1), then the
-device (1 desktop, 2 mobile), which the host-migration rule uses. When the
+device (1 desktop, 2 mobile), which the host-migration rule uses. After those
+two, an `open` may carry a signed ticket (see "Who may open a session"). When the
 host goes, kind 215 `hostChanged` (the promoted player's former peer id)
 goes to every peer of the session; see docs/replication.md, "Host
 migration".
@@ -88,6 +89,75 @@ migration".
 The host is peer 0, and players are 1, 2, ... in the order they joined. A
 player forwards only to its host. A client ignores datagrams that come
 neither from the relay's address nor from a peer the relay introduced.
+
+## Who may open a session
+
+By default anyone who can reach a relay can open a session on it, and so use it
+to carry their traffic. A relay given a secret requires a ticket instead, which
+only a backend that holds the same secret can issue. With no secret the relay
+behaves as if none of this existed, and ignores a ticket that comes anyway.
+
+```
+relay --open-secret-file /path/to/secret
+```
+
+The file holds the secret as text, at least 16 bytes; the whitespace around it
+is removed, and the remaining bytes are the key. There is no command line option
+for the secret itself, because any process on the machine can read a command
+line. A file the relay cannot read, or a shorter secret, stops it with an error
+(exit 1). It never runs open by mistake. Keep the file readable only by the
+relay's user.
+
+**The backend** calls one pure function from `lib/net/relay/RelayWire.rae`:
+
+```
+let signed: List(UInt8) = relayIssueOpenTicket(
+  secret: secret
+  ticket: bytesOfText(text: "game-42")   # the backend's own bytes, at most 256
+  expiresAtSeconds: relayWallSeconds() + 60
+)
+```
+
+A backend in another language writes the same bytes:
+
+| bytes | what |
+|---|---|
+| 8 | expires at, in seconds since 1970, big-endian |
+| 32 | HMAC-SHA256 under the secret, over the expiry and then the ticket |
+| the rest | the ticket: the backend's own bytes, at most 256, which the relay does not read |
+
+**The host** puts it in `RelayClientConfig.openTicket`. It goes in its `open`,
+after the relay-only and device bytes. `relayOpenTicketValid` is what the relay
+checks with.
+
+A missing, wrong or expired ticket gets `refused` with reason 4,
+`refusedOpenTicket` (`RelayClientState.refused`, `client.refusedReason`). All
+three look the same to the sender, so the reply tells a stranger nothing. The HMAC
+is compared in constant time, before the expiry is read.
+
+A ticket is checked once, when a session opens:
+
+- A session goes on after its ticket expires, for as long as it lasts.
+- A join needs only the token, as before.
+- Host migration needs no new ticket: the session already exists.
+- A host asking again because its `opened` reply was lost gets the same token.
+- A host that lost its session and opens a new one needs a ticket that is still
+  good.
+
+Limits:
+
+- **A ticket can be used again until it expires**, for any number of sessions,
+  from any address. The relay keeps no list of used tickets. So keep the expiry
+  short: long enough for the host to reach the relay, like a minute.
+- **A ticket is not secret on the path.** UDP and `ws://` carry it unencrypted,
+  so someone who can read the traffic can use it until it expires. The secret
+  itself never travels.
+- **The two clocks must agree** to within what the expiry allows. The relay
+  compares against its own wall clock (`relayWallSeconds`).
+- Changing the secret means restarting the relay, and it refuses tickets issued
+  under the old one. Sessions that are open go down with that restart.
+- The walker apps (`WalkerNetSystem`) do not pass a ticket yet, so they can only
+  host on a relay with no secret.
 
 ## Direct first, the relay as a fallback
 

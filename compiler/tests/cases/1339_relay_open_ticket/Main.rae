@@ -1,0 +1,345 @@
+# lib/net/relay: who may open a session. A relay given a secret takes an open only
+# with a ticket signed under it; a missing, wrong or expired one is refused with
+# its own reason. A session outlives its ticket, a join needs only the token, and
+# host migration needs no new ticket. A relay with no secret behaves as before.
+open ecs/ComponentTable
+open net/Udp
+open net/Wire
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open net/relay/RelayConnections
+open crypto/CryptoBytes
+
+const secretText: String = "the relay's open secret"
+
+func ticketUnder(secretWords: view String, validSeconds: view Int) ret List(UInt8) {
+  ret relayIssueOpenTicket(
+    secret: bytesOfText(text: secretWords)
+    ticket: bytesOfText(text: "game-42")
+    expiresAtSeconds: relayWallSeconds() + validSeconds
+  )
+}
+
+func clientConfigWith(ticket: view List(UInt8)) ret RelayClientConfig {
+  var config: RelayClientConfig = defaultRelayClientConfig()
+  config.keepAliveMs = 150
+  config.relayOnly = true
+  config.openTicket = ticket
+  ret config
+}
+
+func valid(signed: view List(UInt8), secretWords: view String, nowSeconds: view Int) ret Bool {
+  ret relayOpenTicketValid(
+    secret: bytesOfText(text: secretWords)
+    bytes: signed
+    start: 0
+    count: signed.length
+    nowSeconds: nowSeconds
+  )
+}
+
+func changedAt(signed: view List(UInt8), index: view Int) ret List(UInt8) {
+  var changed: List(UInt8) = copyBytes(bytes: signed)
+  let byte: Int = signed.copyAtFallback(index: index, fallback: 0) as Int
+  changed.set(index: index, value: (byte bitxor 1) as UInt8)
+  ret changed
+}
+
+func thePureFunctions() {
+  let signed: List(UInt8) = relayIssueOpenTicket(
+    secret: bytesOfText(text: secretText)
+    ticket: bytesOfText(text: "game-42")
+    expiresAtSeconds: 1000
+  )
+  log("signed ticket: {signed.length} bytes (8 + 32 + 7)")
+  log("good before it expires: {valid(signed: signed, secretWords: secretText, nowSeconds: 999)}")
+  log("at its expiry: {valid(signed: signed, secretWords: secretText, nowSeconds: 1000)}")
+  log(
+    "another secret: {valid(signed: signed, secretWords: "another secret, long", nowSeconds: 999)}"
+  )
+  log(
+    "expiry changed: {valid(
+      signed: changedAt(signed: signed, index: 7)
+      secretWords: secretText
+      nowSeconds: 999
+    )}"
+  )
+  log(
+    "HMAC changed: {valid(
+      signed: changedAt(signed: signed, index: 8)
+      secretWords: secretText
+      nowSeconds: 999
+    )}"
+  )
+  log(
+    "ticket changed: {valid(
+      signed: changedAt(signed: signed, index: 40)
+      secretWords: secretText
+      nowSeconds: 999
+    )}"
+  )
+  var cut: List(UInt8) = List.create(UInt8, cap: 8)
+  writeU64(bytes: cut, value: 1000)
+  log("cut short: {valid(signed: cut, secretWords: secretText, nowSeconds: 999)}")
+  var huge: List(UInt8) = List.create(UInt8, cap: 257)
+  huge.addDefaults(count: 257)
+  log(
+    "an oversized ticket is not issued: {relayIssueOpenTicket(
+      secret: bytesOfText(text: secretText)
+      ticket: huge
+      expiresAtSeconds: 1000
+    ).length is 0}"
+  )
+}
+
+# Open on `server` with `ticket`, until the relay answers
+func tryOpen(server: mod RelayServer, ticket: view List(UInt8)) {
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: server)).address
+  var client: RelayClient = createRelayClient(
+    relayAddress: relayAddress
+    config: clientConfigWith(ticket: ticket)
+  )
+  let startMs: Int = nowMs()
+  relayClientOpen(client: client, nowMs: 0)
+  loop nowMs() - startMs < 3000 and client.state is RelayClientState.opening {
+    relayFrame(server: server)
+    let incoming: RelayIncoming = relayClientReceive(client: client, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log(
+    "  {client.state}, reason open ticket {client.refusedReason is refusedOpenTicket}, token {client.token.length} bytes"
+  )
+  relayClientLeave(client: client, nowMs: nowMs() - startMs)
+  relayFrame(server: server)
+  relayClientClose(client: client)
+}
+
+# A host that echoes every message back
+type Echoer {
+  relayHost: RelayHost
+  message: List(UInt8)
+}
+
+func stepEchoer(echoer: mod Echoer, nowMs: view Int) {
+  relayHostReceive(host: echoer.relayHost, nowMs: nowMs)
+  loop var i: Int = 0, i < echoer.relayHost.peers.length, ++i {
+    if let peer: mod HostPeer = echoer.relayHost.peers.modAt(index: i) {
+      loop connectionReceive(connection: peer.connection, message: echoer.message) is MessageChannel.reliable {
+        let echoed: Bool = connectionSendReliable(
+          connection: peer.connection
+          bytes: echoer.message
+          start: 0
+          count: echoer.message.length
+        )
+      }
+    }
+  }
+  relayHostSend(host: echoer.relayHost, nowMs: nowMs)
+}
+
+type Talker {
+  relayPlayer: RelayPlayer
+  message: List(UInt8)
+  echoes: Int
+}
+
+func stepTalker(talker: mod Talker, nowMs: view Int) {
+  relayPlayerReceive(player: talker.relayPlayer, nowMs: nowMs)
+  loop connectionReceive(connection: talker.relayPlayer.connection, message: talker.message) is MessageChannel.reliable {
+    talker.echoes = talker.echoes + 1
+  }
+  relayPlayerSend(player: talker.relayPlayer, nowMs: nowMs)
+}
+
+func createTalker(relayAddress: view NetAddress, device: view Int) ret Talker {
+  var config: RelayClientConfig = clientConfigWith(ticket: {})
+  config.device = device
+  ret Talker {
+    relayPlayer: createRelayPlayer(
+      relayAddress: relayAddress
+      clientConfig: config
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+    echoes: 0
+  }
+}
+
+func say(talker: mod Talker) {
+  let bytes: List(UInt8) = bytesOfText(text: "hello")
+  let queued: Bool = connectionSendReliable(
+    connection: talker.relayPlayer.connection
+    bytes: bytes
+    start: 0
+    count: bytes.length
+  )
+}
+
+# A ticket good for 3 s opens a session. It stays open after that, players join
+# it with the token alone, and it survives losing its host.
+func aSessionOutlivesItsTicket(server: mod RelayServer) {
+  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: server)).address
+  let ticket: List(UInt8) = ticketUnder(secretWords: secretText, validSeconds: 3)
+  var echoer: Echoer = {
+    relayHost: createRelayHost(
+      relayAddress: relayAddress
+      clientConfig: clientConfigWith(ticket: ticket)
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+  }
+  let expiresAt: Int = relayWallSeconds() + 3
+  let startMs: Int = nowMs()
+  relayClientOpen(client: echoer.relayHost.client, nowMs: 0)
+  loop nowMs() - startMs < 2000 and not relayClientIsReady(client: echoer.relayHost.client) {
+    relayFrame(server: server)
+    stepEchoer(echoer: echoer, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log("opened with a short ticket: {relayClientIsReady(client: echoer.relayHost.client)}")
+  let token: String = relayTokenText(token: echoer.relayHost.client.token)
+  var first: Talker = createTalker(relayAddress: relayAddress, device: deviceDesktop)
+  let joining: Bool = relayPlayerJoin(
+    player: first.relayPlayer
+    tokenText: token
+    connectionId: 2001
+    nowMs: nowMs() - startMs
+  )
+  loop nowMs() - startMs < 2500 and not connectionIsConnected(
+    connection: first.relayPlayer.connection
+  ) {
+    relayFrame(server: server)
+    stepEchoer(echoer: echoer, nowMs: nowMs() - startMs)
+    stepTalker(talker: first, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log(
+    "a player joined with the token alone: {connectionIsConnected(
+      connection: first.relayPlayer.connection
+    )}"
+  )
+  # Past the expiry, with the session kept alive
+  loop relayWallSeconds() < expiresAt + 1 {
+    relayFrame(server: server)
+    stepEchoer(echoer: echoer, nowMs: nowMs() - startMs)
+    stepTalker(talker: first, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log("that ticket now opens nothing:")
+  tryOpen(server: server, ticket: ticket)
+  say(talker: first)
+  let afterExpiry: Int = nowMs()
+  loop nowMs() - afterExpiry < 2000 and first.echoes < 1 {
+    relayFrame(server: server)
+    stepEchoer(echoer: echoer, nowMs: nowMs() - startMs)
+    stepTalker(talker: first, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log("the session still carries messages after its ticket expired: {first.echoes is 1}")
+  var late: Talker = createTalker(relayAddress: relayAddress, device: deviceMobile)
+  let lateJoining: Bool = relayPlayerJoin(
+    player: late.relayPlayer
+    tokenText: token
+    connectionId: 2002
+    nowMs: nowMs() - startMs
+  )
+  let lateStart: Int = nowMs()
+  loop nowMs() - lateStart < 2000 and not connectionIsConnected(
+    connection: late.relayPlayer.connection
+  ) {
+    relayFrame(server: server)
+    stepEchoer(echoer: echoer, nowMs: nowMs() - startMs)
+    stepTalker(talker: first, nowMs: nowMs() - startMs)
+    stepTalker(talker: late, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log(
+    "a player joined after the ticket expired: {connectionIsConnected(
+      connection: late.relayPlayer.connection
+    )}"
+  )
+
+  # The host goes: the desktop player is promoted, with no ticket anywhere
+  let refusedBefore: Int = server.stats.refused
+  relayClientLeave(client: echoer.relayHost.client, nowMs: nowMs() - startMs)
+  relayClientClose(client: echoer.relayHost.client)
+  let migrateStart: Int = nowMs()
+  loop nowMs() - migrateStart < 2000 and not first.relayPlayer.hostChanged {
+    relayFrame(server: server)
+    stepTalker(talker: first, nowMs: nowMs() - startMs)
+    stepTalker(talker: late, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log(
+    "the host left: promoted without a ticket: peer id {first.relayPlayer.client.peerId}, migrations {server.stats.migrations}"
+  )
+  var promoted: Echoer = {
+    relayHost: relayHostFromPlayer(
+      player: first.relayPlayer
+      connectionConfig: defaultConnectionConfig()
+    )
+    message: List.create(UInt8, cap: 64)
+  }
+  let waitReconnect: Int = nowMs()
+  loop nowMs() - waitReconnect < 500 and not late.relayPlayer.hostChanged {
+    relayFrame(server: server)
+    stepEchoer(echoer: promoted, nowMs: nowMs() - startMs)
+    stepTalker(talker: late, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  relayPlayerReconnect(
+    player: late.relayPlayer
+    connectionConfig: defaultConnectionConfig()
+    connectionId: 2003
+    nowMs: nowMs() - startMs
+  )
+  late.relayPlayer.hostChanged = false
+  say(talker: late)
+  let echoStart: Int = nowMs()
+  loop nowMs() - echoStart < 3000 and late.echoes < 1 {
+    relayFrame(server: server)
+    stepEchoer(echoer: promoted, nowMs: nowMs() - startMs)
+    stepTalker(talker: late, nowMs: nowMs() - startMs)
+    sleep(ms: 1)
+  }
+  log("the other player talks to the new host: {late.echoes is 1}")
+  log("nothing was refused meanwhile: {server.stats.refused is refusedBefore}")
+  relayClientClose(client: promoted.relayHost.client)
+  relayClientClose(client: late.relayPlayer.client)
+}
+
+func main() ret Int {
+  thePureFunctions()
+  var config: RelayConfig = defaultRelayConfig()
+  config.openSecret = bytesOfText(text: secretText)
+  var server: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
+  log("a good ticket:")
+  tryOpen(server: server, ticket: ticketUnder(secretWords: secretText, validSeconds: 60))
+  log("a ticket under another secret:")
+  tryOpen(
+    server: server
+    ticket: ticketUnder(secretWords: "another secret, long", validSeconds: 60)
+  )
+  log("an expired ticket:")
+  tryOpen(server: server, ticket: ticketUnder(secretWords: secretText, validSeconds: -5))
+  log("no ticket:")
+  tryOpen(server: server, ticket: {})
+  log("opened {server.stats.sessionsOpened}, refused {server.stats.refused}")
+  aSessionOutlivesItsTicket(server: server)
+  closeRelayServer(server: server)
+
+  var openServer: RelayServer = createRelayServer(
+    host: "127.0.0.1"
+    port: 0
+    config: defaultRelayConfig()
+  )
+  log("no secret on the relay, no ticket:")
+  tryOpen(server: openServer, ticket: {})
+  log("no secret on the relay, a ticket anyway:")
+  tryOpen(server: openServer, ticket: ticketUnder(secretWords: secretText, validSeconds: -5))
+  closeRelayServer(server: openServer)
+  ret 0
+}

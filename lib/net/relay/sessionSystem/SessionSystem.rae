@@ -68,6 +68,10 @@ func takeOpen(server: mod RelayServer, request: view RelayRequestEvent) {
     }
     ret
   }
+  if not request.mayOpen {
+    refuse(server: server, request: request, reason: refusedOpenTicket)
+    ret
+  }
   if componentCount(this: server.sessions) >= server.config.maxSessions {
     refuse(server: server, request: request, reason: refusedRelayFull)
     ret

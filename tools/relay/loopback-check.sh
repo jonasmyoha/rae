@@ -176,6 +176,31 @@ for who in game1 game2 game3; do
 done
 grep "^relay:" "$WORK/gameRelay.log" | tail -1
 
+# Who may open a session: a relay with a secret file refuses an open with no
+# ticket, takes one with a good ticket, and a player joins with the token alone.
+# A file it cannot use stops it.
+if "$WORK/relay" --host 127.0.0.1 --port 0 --seconds 1 --open-secret-file "$WORK/noSuchFile" >"$WORK/noSecret.log" 2>&1; then
+  echo "a relay with an unreadable secret file ran" >&2
+  status=1
+fi
+(umask 077; echo "loopback-check open secret" >"$WORK/openSecret")
+start "$WORK/ticketRelay.log" "$WORK/relay" --host 127.0.0.1 --port 0 --seconds 8 --open-secret-file "$WORK/openSecret"
+TICKET_PORT=$(wait_line "$WORK/ticketRelay.log" "relay listening on port" | awk '{print $NF}') || exit 1
+if run_with_timeout 10 "$WORK/relayPeer" host --relay-port "$TICKET_PORT" --seconds 3 >"$WORK/noTicket.log" 2>&1; then
+  echo "a host with no ticket was not refused" >&2
+  status=1
+fi
+grep "refused" "$WORK/noTicket.log"
+TICKET=$("$WORK/relayPeer" issue-ticket --open-secret-file "$WORK/openSecret" --valid-seconds 30 | awk '/^ticket /{print $2}')
+start "$WORK/ticketHost.log" "$WORK/relayPeer" host --relay-port "$TICKET_PORT" --open-ticket "$TICKET" --seconds 5
+TICKET_TOKEN=$(wait_line "$WORK/ticketHost.log" "^token " | awk '{print $2}') || exit 1
+line=$(run_with_timeout 10 "$WORK/relayPeer" player --relay-port "$TICKET_PORT" --token "$TICKET_TOKEN" --count 20 --seconds 3 | grep "^player")
+echo "ticketed session: $line"
+case "$line" in
+  *"echoes 20/20, out of order 0"*) ;;
+  *) status=1 ;;
+esac
+
 if [ "$status" -eq 0 ]; then
   echo "PASS: relay loopback check"
 else

@@ -3,11 +3,14 @@
 # their sealed packets without reading them.
 #
 #   relay [--host 0.0.0.0] [--port 7777] [--web-socket-port P] [--seconds N]
-#         [--timeout-ms 10000] [--stats]
+#         [--timeout-ms 10000] [--open-secret-file F] [--stats]
 #
 # --web-socket-port P also takes peers over WebSocket (ws://host:P/relay,
 # for a browser that cannot send UDP; 0 picks a free port) and prints
 # "relay WebSocket on port P".
+# --open-secret-file F makes an open need a ticket signed under the secret in F
+# (docs/relay.md, "Who may open a session"). A file that cannot be read, or holds
+# under 16 bytes, stops the relay: it never runs open by mistake.
 # --seconds N stops after N seconds (0, the default, runs until killed);
 # --stats prints the counters once a second. It prints "relay listening on
 # port P" first (port 0 picks a free one).
@@ -43,6 +46,16 @@ func statsLine(server: view RelayServer) ret String {
 func main() ret Int {
   var config: RelayConfig = defaultRelayConfig()
   config.peerTimeoutMs = argumentAfter(name: "--timeout-ms", fallback: "10000").toInt()
+  if hasArgument(name: "--open-secret-file") {
+    let secretPath: String = argumentAfter(name: "--open-secret-file", fallback: "")
+    if let secret: List(UInt8) = relayReadOpenSecret(path: secretPath) {
+      config.openSecret = secret
+      log("relay: opening a session needs a ticket")
+    } else {
+      log("relay: no usable open secret in {secretPath} (at least 16 bytes)")
+      ret 1
+    }
+  }
   let host: String = argumentAfter(name: "--host", fallback: "0.0.0.0")
   let port: Int = argumentAfter(name: "--port", fallback: "7777").toInt()
   let seconds: Int = argumentAfter(name: "--seconds", fallback: "0").toInt()
