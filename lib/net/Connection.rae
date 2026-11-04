@@ -15,7 +15,8 @@
 # - Sequence numbers and acks in every packet. Each packet after the
 #   handshake carries its own 16-bit sequence, the newest sequence received
 #   from the peer and 32 bits for the 32 before it. An ack measures the
-#   round trip (a smoothed `rttMs`).
+#   round trip (a smoothed `rttMs`): the packet says how long the newest
+#   sequence waited at the peer for it, which is not path time.
 # - A reliable ordered channel (lib/net/ReliableChannel.rae): a fragment
 #   with no ack after `max(minResendMs, 1.5 * rttMs)` is sent again.
 # - Fragments: a reliable message bigger than `fragmentBytes` is split, each
@@ -27,7 +28,10 @@
 #   of order. An unreliable message fits in one packet (`fragmentBytes`).
 # - Keep-alive: a packet at least every `keepAliveMs`, so acks flow and the
 #   peer knows this end is there. A peer silent for `timeoutMs` is
-#   `timedOut`.
+#   `timedOut`. A packet with a reliable message is acked at once, since the
+#   peer resends until it hears. Any other packet asks for nothing: its ack
+#   goes in the next packet this end sends anyway, or two idle ends would
+#   answer each other without end.
 # - Disconnect: `connectionDisconnect` sends `disconnectPackets` disconnect
 #   packets (one may be lost), and the peer becomes `disconnected`.
 #
@@ -46,7 +50,7 @@
 # Packet layout (big-endian): kind (1 byte; 128 set = the ack fields are
 # valid), connection id (4). A connect request or accept adds the protocol
 # magic (4). A data, keep-alive or disconnect packet adds sequence (2),
-# ack (2), ack bits (4), then for data its messages: reliable = 1, id (2),
+# ack (2), ack bits (4), ack delay in ms (2), then for data its messages: reliable = 1, id (2),
 # fragment index (2), fragment count (2), length (2), bytes; unreliable = 2,
 # sequence (2), length (2), bytes.
 open net/Wire
@@ -133,6 +137,8 @@ type Connection {
   nextSequence: Int
   receivedAny: Bool
   remoteSequence: Int
+  # When `remoteSequence` arrived: how long it has waited for its ack
+  remoteSequenceMs: Int
   receivedBits: Int
   # Per sent packet (`packetHistory` of them): its sequence, when, whether it
   # was acked, and the reliable fragment ids it carried
@@ -174,7 +180,10 @@ const protocolMagic: Int = 1380009265
 
 const handshakeBytes: Int = 9
 
-const headerBytes: Int = 13
+const headerBytes: Int = 15
+
+# The most an ack delay can say (two bytes)
+const maxAckDelayMs: Int = 65535
 
 const messageReliable: Int = 1
 
@@ -263,6 +272,7 @@ func createConnection(config: view ConnectionConfig) ret Connection {
     nextSequence: 0
     receivedAny: false
     remoteSequence: 0
+    remoteSequenceMs: 0
     receivedBits: 0
     sentSequence: emptySlots(count: packetHistory)
     sentMs: zeroInts(count: packetHistory)
@@ -463,7 +473,12 @@ func connectionWritePacket(
       connection.state = ConnectionState.disconnected
       ret false
     }
-    writeHeader(connection: connection, packet: packet, kind: kindDisconnect)
+    writeHeader(
+      connection: connection
+      packet: packet
+      kind: kindDisconnect
+      nowMs: nowMs
+    )
     connection.disconnectsLeft = connection.disconnectsLeft - 1
     if connection.disconnectsLeft is 0 {
       connection.state = ConnectionState.disconnected
@@ -528,7 +543,12 @@ func writeHandshake(connection: view Connection, packet: mod List(UInt8), kind: 
 }
 
 # The sequenced header: kind, id, this packet's sequence and the acks
-func writeHeader(connection: view Connection, packet: mod List(UInt8), kind: view Int) {
+func writeHeader(
+  connection: view Connection
+  packet: mod List(UInt8)
+  kind: view Int
+  nowMs: view Int
+) {
   var flags: Int = kind
   if connection.receivedAny {
     flags = flags bitor flagAckValid
@@ -538,6 +558,14 @@ func writeHeader(connection: view Connection, packet: mod List(UInt8), kind: vie
   writeU16(bytes: packet, value: connection.nextSequence)
   writeU16(bytes: packet, value: connection.remoteSequence)
   writeU32(bytes: packet, value: connection.receivedBits)
+  var ackDelayMs: Int = 0
+  if connection.receivedAny {
+    ackDelayMs = nowMs - connection.remoteSequenceMs
+  }
+  if ackDelayMs > maxAckDelayMs {
+    ackDelayMs = maxAckDelayMs
+  }
+  writeU16(bytes: packet, value: ackDelayMs)
 }
 
 # A data packet with the reliable fragments that are due and the queued
@@ -548,7 +576,12 @@ func writeDataPacket(
   packet: mod List(UInt8)
   nowMs: view Int
 ) ret Bool {
-  writeHeader(connection: connection, packet: packet, kind: kindData)
+  writeHeader(
+    connection: connection
+    packet: packet
+    kind: kindData
+    nowMs: nowMs
+  )
   let historySlot: Int = connection.nextSequence % packetHistory
   let reliableCount: Int = writeReliableFragments(
     connection: connection
@@ -833,21 +866,29 @@ func readPlainPacket(
   }
   # Data before the accept: the accept was lost, the peer is there
   connection.state = ConnectionState.connected
-  noteReceivedSequence(connection: connection, sequence: readU16(bytes: packet, offset: start + 5))
+  noteReceivedSequence(
+    connection: connection
+    sequence: readU16(bytes: packet, offset: start + 5)
+    nowMs: nowMs
+  )
   if (readU8(bytes: packet, offset: start) bitand flagAckValid) is not 0 {
     takeAcks(
       connection: connection
       ack: readU16(bytes: packet, offset: start + 7)
       ackBits: readU32(bytes: packet, offset: start + 9)
+      ackDelayMs: readU16(bytes: packet, offset: start + 13)
       nowMs: nowMs
     )
   }
-  readMessages(
+  let carriedReliable: Bool = readMessages(
     connection: connection
     packet: packet
     start: start + headerBytes
     end: start + count
   )
+  if carriedReliable {
+    connection.ackPending = true
+  }
   ret received(connection: connection, nowMs: nowMs)
 }
 

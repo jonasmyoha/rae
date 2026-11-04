@@ -52,6 +52,8 @@ type ReplicationPlayer {
   # Inputs sent and not yet applied by the host (tick, count, values ...):
   # prediction replays them on top of each snapshot
   pendingInputs: List(Int)
+  # The tick of the last input sent, -1 for none
+  lastSentInputTick: Int
   # The estimate of the host's snapshot clock, in ticks, at `clockMs`
   clockTick: Float
   clockMs: Int
@@ -99,6 +101,7 @@ func createReplicationPlayer(config: view ReplicationConfig) ret ReplicationPlay
     hostAppliedInputTick: -1
     ownSnapshotFresh: false
     pendingInputs: {}
+    lastSentInputTick: -1
     clockTick: 0.0
     clockMs: 0
     clockStarted: false
@@ -130,7 +133,9 @@ func replicaEntityOf(player: view ReplicationPlayer, netId: view Int) ret Entity
 }
 
 # Send this frame's input (tick `tick`) with the last few before it, and the
-# acknowledgment of the newest snapshot, as one unreliable message
+# acknowledgment of the newest snapshot, as one unreliable message. Once per
+# tick: the host skips a repeat of a tick, so a second call for one sends
+# nothing and answers false. (A frame can run for every packet that arrives.)
 func replicaSendInput(
   T: type
   player: mod ReplicationPlayer
@@ -138,6 +143,10 @@ func replicaSendInput(
   tick: view Int
   connection: mod Connection
 ) ret Bool {
+  if tick is player.lastSentInputTick {
+    ret false
+  }
+  player.lastSentInputTick = tick
   player.inputValues.clear()
   appendReplicaValues(
     T
