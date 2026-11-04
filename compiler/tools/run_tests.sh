@@ -626,6 +626,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
   if ! bash tools/test-packages-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+# A tag on every version bump: tools/version-tags.sh and its hooks, full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-version-tags.sh" ]; then
+  echo
+  if ! bash tools/test-version-tags.sh; then FAILED=$((FAILED+1)); fi
+fi
+
 # File, asset and console policy (docs/runtime-c-audit.md row 7): stdin,
 # $RAE_STDLIB and a scratch directory, which a single-file fixture cannot set.
 # Full run only.

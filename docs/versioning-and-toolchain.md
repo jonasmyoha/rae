@@ -44,18 +44,28 @@ for a language whose toolchain is a sibling git checkout, not a download.
 - **One source of truth: `compiler/VERSION`** — a single line, `0.1.0`. The
   build bakes it into the binary together with `git describe`, so:
   - on the tagged commit: `rae --version` → `rae 0.1.0 (a1b2c3d 2026-09-13)`
-  - between tags: `rae 0.2.0-dev.14 (a1b2c3d 2026-09-13)` — the NEXT version
-    with `-dev.N`, N commits since the last tag, like `git describe`;
+  - after it: `rae 0.1.0-dev.14 (a1b2c3d 2026-09-13)`, the version in
+    `compiler/VERSION` with `-dev.N`, N commits since the last tag, like
+    `git describe`. Since every bump is tagged, that is the version it follows,
+    and no longer a coming one;
   - a dirty tree appends `+dirty`.
   `rae --version --json` prints `{ version, tag, commit, date, dirty }` for
   tooling.
-- **A release is a tag.** `git tag -a v0.1.0` on the commit that bumps
-  `compiler/VERSION`; nothing else. No branches, no artifacts yet: the toolchain
-  is a source checkout, so a tag IS the release.
+- **A release is a tag, and every bump is one (2026-11-04).** The commit that
+  changes `compiler/VERSION` gets the annotated tag `v<version>`, by a hook
+  (`tools/version-tags.sh`, installed by `make install-hooks`, once per clone). No
+  branches, no artifacts yet: the toolchain is a source checkout, so a tag IS the
+  release, and a project can pin it (docs/toolchain-and-packages-decision.md).
+  - A rebase or an amend moves an unpushed tag with its commit.
+  - A tag on a remote branch never moves, so a version keeps naming one thing. A
+    bump to a published version warns and gets no tag: bump again.
+  - Nothing pushes the tags. `git push --follow-tags` does.
+  - `tools/version-tags.sh --history --apply` adds tags for past bumps, safely more
+    than once: for a version used twice (the reset of 2026-09-18, or two branches),
+    the latest commit gets the tag. 623 were added on 2026-11-04.
 - **Bump discipline** goes into `AGENTS.md`: a commit that changes language,
   `lib/` or CLI behavior in a release-notes-worthy way bumps PATCH in the
   same commit and says so in the message; MINOR is never bumped by an agent.
-  The first tag is cut once the current in-flight renderer slices land.
 
 ## 2. The project says which Rae it needs (#931)
 

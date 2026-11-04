@@ -224,6 +224,13 @@ if [ -f tools/test-packages-cli.sh ]; then
   if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
   stage_time "tools/test-packages-cli.sh" "$stage_start"
 fi
+
+if [ -f tools/test-version-tags.sh ]; then
+  echo
+  stage_start=$(date +%s)
+  if bash tools/test-version-tags.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-version-tags.sh" "$stage_start"
+fi
 # The browser build (rae build --target wasm, Emscripten + EmdawnWebGPU):
 # 132 and 134 as pages and an embeddable module, ~50 s. It prints SKIP and
 # passes on a machine without emcc. It broke once unnoticed for every WebGPU

@@ -447,7 +447,7 @@ Do not introduce features that increase expressive power at the cost of clarity,
     `Co-authored-by: GPT-5.6 Sol <codex@openai.com>`. Other agents use their
     established GitHub-associated identity and their exact current model name.
   - Suggest committing and/or pushing when there is meaningful work and a good state to push, but do not push unless explicitly told.
-  - When asked to push, commit and push first, then continue with the next task without pushing at the end.
+  - When asked to push, commit and push first, then continue with the next task without pushing at the end. Push with `git push --follow-tags`, so the version tags go too.
   - **Pull with rebase and autostash before pushing.** Use `git pull --rebase --autostash`
     to replay local commits on the upstream branch and preserve uncommitted edits.
     Resolve rebase or stash-restoration conflicts before pushing; do not discard local
@@ -763,12 +763,20 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   is a caret on MINOR (`>=0.1.0 <0.2.0`) and therefore means "this milestone
   line", not "compatible" — a breaking 0.1.8 satisfies it. A project that
   must pin an exact compiler writes the explicit range `">=0.1.7 <0.1.8"`.
-- **A release is a tag, nothing else.** `git tag -a v0.1.0` on the commit
-  that bumps `compiler/VERSION` to `0.1.0` — no release branches, no build
-  artifacts; the toolchain is a source checkout, so the tag IS the release.
-  Between tags, `rae --version` reports the NEXT version (the current
-  `compiler/VERSION` content) suffixed `-dev.N` for N commits since the last
-  tag, and `+dirty` on an uncommitted tree.
+- **A release is a tag, nothing else, and every version bump is a release.**
+  The commit that changes `compiler/VERSION` gets the annotated tag `v<version>`
+  automatically (the post-commit, post-merge and post-rewrite hooks, which
+  `make install-hooks` installs, so run it once per clone; `tools/version-tags.sh`).
+  No release branches, no build artifacts: the toolchain is a source checkout,
+  so the tag IS the release, and a project can pin that version
+  (docs/toolchain-and-packages-decision.md section 5). A rebase or an amend moves
+  an unpushed tag with its commit. A tag on a remote branch never moves, so a
+  version must not be used twice: a bump to a published version warns and gets no
+  tag. **Pushing is still only when told, and then with `git push --follow-tags`**,
+  or the tags stay on this machine. `tools/version-tags.sh --history --apply` adds
+  any tag a clone without the hooks missed. `rae --version` reports the version
+  on a tagged commit; after it, the same version suffixed `-dev.N` for N commits
+  since that tag, and `+dirty` on an uncommitted tree.
 - **Projects declare which Rae they need (#931).** A `.raepack` may carry
   `rae: { version: "0.1" }` (bare = caret, `>=0.1.0 <0.2.0`; or an explicit
   `">=A <B"` range). `rae run`/`build`/`watch` check it against this compiler

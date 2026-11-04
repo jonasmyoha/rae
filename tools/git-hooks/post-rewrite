@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# A tag on every version bump (tools/version-tags.sh). Installed by
+# `make install-hooks` (git does not version hooks). It never fails.
+script="$(git rev-parse --show-toplevel)/tools/version-tags.sh"
+[ -f "$script" ] || exit 0
+bash "$script" --rewritten || true
+exit 0
