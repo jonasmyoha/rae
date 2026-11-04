@@ -64,7 +64,7 @@ RAE_ANDROID_ENV="RAE_WALKER_PHYSICS_TEST=1" sh tools/android/run-android.sh 143_
 RAE_ANDROID_ENV="RAE_FRAME_TIMING=1" sh tools/android/run-android.sh 143_walker_forest 60
 ```
 
-By hand, the same: `adb shell am start -n <package>/org.libsdl.app.SDLActivity
+By hand, the same: `adb shell am start -n <package>/org.rae.app.RaeActivity
 --es raeEnv "'RAE_X=1 RAE_Y=2'"`. The app's output is in logcat under the tag
 `rae` (`adb logcat -s rae`).
 
