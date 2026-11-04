@@ -1,0 +1,339 @@
+# How often a player may send its input, against the host's 50 ms snapshots:
+# the real replication code over lib/net/BadNetwork, with a mover, a host and a
+# watcher on 60 Hz frames and unrelated clocks. The watcher measures its shown
+# speed of the mover's entity, which truly moves at a constant speed. A frame is
+# bad when its speed is under 25% or over 175% of the truth.
+#
+# Inputs paced to the snapshot rate look fine at a lucky clock phase, and at an
+# unlucky one a snapshot repeats a pose and the next jumps two: a test at one
+# phase would pass. So this runs every phase. A walker's input is its whole pose,
+# so its one-input messages (walkerReplicationConfig) show the same as three.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Vec3
+open net/Wire
+open net/Udp
+open net/Connection
+open net/BadNetwork
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/replication/interpolationSystem/InterpolationSystem
+open app3d/walkerNetSystem/WalkerNetSystem
+
+type ArenaWorld {
+  entities: EntityAllocator
+  replicated: ComponentTable(Replicated)
+  transforms: ComponentTable(Transform3D)
+  raw: ComponentTable(Transform3D)
+}
+
+type MoveInput {
+  x: Float
+}
+
+const kindReplicated: Int = 0
+
+const kindTransform: Int = 1
+
+func createArena() ret ArenaWorld {
+  ret ArenaWorld {
+    entities: createEntityAllocator()
+    replicated: create()
+    transforms: create()
+    raw: create()
+  }
+}
+
+type Pair {
+  hostEnd: Connection
+  playerEnd: Connection
+  toPlayer: BadNetwork
+  toHost: BadNetwork
+}
+
+func createPair(
+  toHostSettings: view BadNetworkSettings
+  toPlayerSettings: view BadNetworkSettings
+) ret Pair {
+  ret Pair {
+    hostEnd: createConnection(config: defaultConnectionConfig())
+    playerEnd: createConnection(config: defaultConnectionConfig())
+    toPlayer: createBadNetwork(settings: toPlayerSettings, maxPacketBytes: 1200, capacity: 1024)
+    toHost: createBadNetwork(settings: toHostSettings, maxPacketBytes: 1200, capacity: 1024)
+  }
+}
+
+func pump(pair: mod Pair, packet: mod List(UInt8), nowMs: view Int) {
+  connectionUpdate(connection: pair.hostEnd, nowMs: nowMs)
+  connectionUpdate(connection: pair.playerEnd, nowMs: nowMs)
+  loop connectionWritePacket(connection: pair.hostEnd, packet: packet, nowMs: nowMs) {
+    badNetworkSend(
+      network: pair.toPlayer
+      packet: packet
+      start: 0
+      count: packet.length
+      destination: noNetAddress()
+      nowMs: nowMs
+    )
+  }
+  loop connectionWritePacket(connection: pair.playerEnd, packet: packet, nowMs: nowMs) {
+    badNetworkSend(
+      network: pair.toHost
+      packet: packet
+      start: 0
+      count: packet.length
+      destination: noNetAddress()
+      nowMs: nowMs
+    )
+  }
+  loop badNetworkNext(network: pair.toPlayer, packet: packet, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: pair.playerEnd
+      packet: packet
+      start: 0
+      count: packet.length
+      nowMs: nowMs
+    )
+  }
+  loop badNetworkNext(network: pair.toHost, packet: packet, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: pair.hostEnd
+      packet: packet
+      start: 0
+      count: packet.length
+      nowMs: nowMs
+    )
+  }
+}
+
+func plain(latencyMs: view Int, jitterMs: view Int, seed: view Int) ret BadNetworkSettings {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.latencyMs = latencyMs
+  settings.jitterMs = jitterMs
+  settings.seed = seed
+  ret settings
+}
+
+func frameDue(nowMs: view Int, framesPer3000: view Int, phaseMs: view Int) ret Bool {
+  ret ((nowMs + phaseMs) * framesPer3000) / 3000 is not ((nowMs + phaseMs - 1) * framesPer3000) / 3000
+}
+
+# The share of bad frames, in tenths of a percent, of one run
+func badFrames(
+  intervalMs: view Int
+  jitterMs: view Int
+  phaseMs: view Int
+  redundancy: view Int
+  lossPercent: view Int
+) ret Int {
+  var config: ReplicationConfig = defaultReplicationConfig()
+  config.inputRedundancy = redundancy
+  var host: ReplicationHost = createReplicationHost(config: config)
+  var hostWorld: ArenaWorld = createArena()
+  var moverPeer: ReplicaPeer = createReplicaPeer(peerId: 1, config: config)
+  var watcherPeer: ReplicaPeer = createReplicaPeer(peerId: 2, config: config)
+  var mover: ReplicationPlayer = createReplicationPlayer(config: config)
+  var watcher: ReplicationPlayer = createReplicationPlayer(config: config)
+  var watcherWorld: ArenaWorld = createArena()
+  var moverPair: Pair = createPair(
+    toHostSettings: plain(latencyMs: 20, jitterMs: jitterMs, seed: 5 + phaseMs)
+    toPlayerSettings: plain(latencyMs: 20, jitterMs: 0, seed: 6)
+  )
+  var watcherPair: Pair = createPair(
+    toHostSettings: plain(latencyMs: 20, jitterMs: 0, seed: 7)
+    toPlayerSettings: plain(latencyMs: 20, jitterMs: 0, seed: 8)
+  )
+  moverPair.toHost.settings.lossPercent = lossPercent
+  var packet: List(UInt8) = List.create(UInt8, cap: 1200)
+  var message: List(UInt8) = List.create(UInt8, cap: 1200)
+  connectionListen(connection: moverPair.hostEnd, nowMs: 0)
+  connectionConnect(connection: moverPair.playerEnd, connectionId: 81, nowMs: 0)
+  connectionListen(connection: watcherPair.hostEnd, nowMs: 0)
+  connectionConnect(connection: watcherPair.playerEnd, connectionId: 82, nowMs: 0)
+  let avatar: EntityId = allocEntity(this: hostWorld.entities)
+  var start: Transform3D = createTransform3D()
+  componentSet(this: hostWorld.transforms, entityId: avatar, data: start)
+  moverPeer.focusNetId = replicateEntity(
+    host: host
+    replicated: hostWorld.replicated
+    entityId: avatar
+    owner: 1
+  )
+  var previousX: Float = 0.0
+  var previousMs: Int = 0
+  var hasPrevious: Bool = false
+  var frames: Int = 0
+  var stalled: Int = 0
+  var fast: Int = 0
+  loop var nowMs: Int = 1, nowMs <= 25000, ++nowMs {
+    pump(pair: moverPair, packet: packet, nowMs: nowMs)
+    pump(pair: watcherPair, packet: packet, nowMs: nowMs)
+    if frameDue(nowMs: nowMs, framesPer3000: 180, phaseMs: phaseMs) and connectionIsConnected(
+      connection: moverPair.playerEnd
+    ) {
+      let input: MoveInput = { x: (nowMs as Float) * 0.005 }
+      let sent: Bool = replicaSendInput(
+        MoveInput
+        player: mover
+        input: input
+        tick: (nowMs + phaseMs) / intervalMs
+        connection: moverPair.playerEnd
+      )
+    }
+    if frameDue(nowMs: nowMs, framesPer3000: 180, phaseMs: 0) {
+      loop connectionReceive(connection: moverPair.hostEnd, message: message) is not MessageChannel.none {
+        let taken: Bool = replicaTakeMessage(host: host, peer: moverPeer, message: message)
+      }
+      var input: MoveInput = { x: 0.0 }
+      loop replicaNextInput(
+        MoveInput
+        host: host
+        peer: moverPeer
+        input: input
+      ) >= 0 {
+        let transform: mod Transform3D = componentMod(this: hostWorld.transforms, entityId: avatar)
+        transform.position = Vec3 { x: input.x, y: 0.0, z: 0.0 }
+      }
+      loop connectionReceive(connection: watcherPair.hostEnd, message: message) is not MessageChannel.none {
+        let taken: Bool = replicaTakeMessage(host: host, peer: watcherPeer, message: message)
+      }
+      if replicaSnapshotDue(host: host, nowMs: nowMs) {
+        replicaBeginSnapshot(host: host, nowMs: nowMs)
+        captureReplicaTable(
+          Replicated
+          host: host
+          table: hostWorld.replicated
+          replicated: hostWorld.replicated
+          kind: kindReplicated
+        )
+        captureReplicaTable(
+          Transform3D
+          host: host
+          table: hostWorld.transforms
+          replicated: hostWorld.replicated
+          kind: kindTransform
+        )
+        captureInterestPoints(
+          host: host
+          transforms: hostWorld.transforms
+          replicated: hostWorld.replicated
+        )
+        let bytes: Int = replicaSnapshotSystem(
+          host: host
+          peer: watcherPeer
+          connection: watcherPair.hostEnd
+        )
+      }
+    }
+    if frameDue(nowMs: nowMs, framesPer3000: 180, phaseMs: 7) {
+      loop connectionReceive(connection: watcherPair.playerEnd, message: message) is not MessageChannel.none {
+        let taken: Bool = replicaReceiveSystem(player: watcher, message: message)
+      }
+      if replicaHasUpdate(player: watcher) {
+        replicaSyncEntities(player: watcher, entities: watcherWorld.entities)
+        replicaFinishApply(player: watcher)
+      }
+      replicaAdvanceClock(player: watcher, nowMs: nowMs)
+      applyReplicaTableInterpolated(
+        Transform3D
+        player: watcher
+        table: watcherWorld.transforms
+        kind: kindTransform
+        template: createTransform3D()
+        renderTick: replicaRenderTick(player: watcher)
+      )
+      if componentCount(this: watcherWorld.transforms) > 0 and nowMs > 5000 {
+        let shown: Transform3D = componentCopyAtDefault(
+          Transform3D
+          this: watcherWorld.transforms
+          i: 0
+        )
+        let x: Float = shown.position.x
+        if hasPrevious {
+          let ratio: Float = ((x - previousX) / ((nowMs - previousMs) as Float)) / 0.005
+          frames = frames + 1
+          if ratio < 0.25 {
+            stalled = stalled + 1
+          }
+          if ratio > 1.75 {
+            fast = fast + 1
+          }
+        }
+        previousX = x
+        previousMs = nowMs
+        hasPrevious = true
+      }
+    }
+  }
+  ret ((stalled + fast) * 1000) / Math.max(a: frames, b: 1)
+}
+
+# The worst share over every phase of the input tick against the snapshots
+func worstOverPhases(
+  intervalMs: view Int
+  jitterMs: view Int
+  redundancy: view Int
+  lossPercent: view Int
+) ret Int {
+  var worst: Int = 0
+  loop var phase: Int = 0, phase < 8, ++phase {
+    worst = Math.max(
+      a: worst
+      b: badFrames(
+        intervalMs: intervalMs
+        jitterMs: jitterMs
+        phaseMs: 2 + phase * 6
+        redundancy: redundancy
+        lossPercent: lossPercent
+      )
+    )
+  }
+  ret worst
+}
+
+func main() ret Int {
+  let walkerRedundancy: Int = walkerReplicationConfig().inputRedundancy
+  log("a walker's message carries {walkerRedundancy} input")
+  let every10: Int = worstOverPhases(
+    intervalMs: 10
+    jitterMs: 20
+    redundancy: 3
+    lossPercent: 0
+  )
+  let every50: Int = worstOverPhases(
+    intervalMs: 50
+    jitterMs: 20
+    redundancy: 3
+    lossPercent: 0
+  )
+  log("20 ms jitter: input every 10 ms, under 1% bad frames at every phase: {every10 < 10}")
+  log("20 ms jitter: input every 50 ms, over 20% bad frames at the worst phase: {every50 > 200}")
+  let clean: Int = worstOverPhases(
+    intervalMs: 10
+    jitterMs: 20
+    redundancy: walkerRedundancy
+    lossPercent: 0
+  )
+  log("the walker's redundancy shows the same with no loss: {clean is every10}")
+  let lossyThree: Int = worstOverPhases(
+    intervalMs: 10
+    jitterMs: 20
+    redundancy: 3
+    lossPercent: 5
+  )
+  let lossyWalker: Int = worstOverPhases(
+    intervalMs: 10
+    jitterMs: 20
+    redundancy: walkerRedundancy
+    lossPercent: 5
+  )
+  log("the walker's redundancy shows the same at 5% loss: {lossyThree is lossyWalker}")
+  log("at 5% loss, under 2% bad frames: {lossyWalker < 20}")
+  ret 0
+}

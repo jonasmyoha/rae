@@ -79,7 +79,9 @@ lines, with the world type, the input, and two players.
 - **Inputs.** Unreliable. Each message repeats the player's last
   `inputRedundancy` (3) inputs with their ticks, so one lost message loses
   none. The host skips inputs older than the newest it took. Inputs use
-  the same field encoding as components.
+  the same field encoding as components. An input that is a whole state,
+  where a newer one replaces an older one (the walker's pose), sets it to 1
+  (docs/relay.md, "Traffic through the relay").
 
 Replication's messages start with kind byte 1 (snapshot part) or 2 (input).
 An app's own messages on the same connection use 16 and up.
