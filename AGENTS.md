@@ -777,8 +777,11 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   and a project on `main` does not trip it). `RAE_TOOLCHAIN_CHECK=off` skips the
   non-strict check; `--check-toolchain` is the strict CI form (requires a tagged
   release, cannot be silenced by the env var). No pack, or a pack without a
-  `rae` block, means no check. A verified build writes the project's `rae.lock`
-  `toolchain { version commit }` block. `rae init` scaffolds the requirement.
+  `rae` block, means no check. A pack that does not parse has no check either,
+  and the build says so (`--check-toolchain` stops). **A build never writes
+  `rae.lock`:** only `rae fetch` and `rae update` do, and they keep its toolchain
+  line, so building cannot move a project's pin. `rae init` scaffolds the
+  requirement.
 - **`rae toolchain` (#932) manages the sibling checkout.** `status` prints this
   compiler's version + checkout and, inside a project, the pack requirement with
   a satisfied/UNSATISFIED verdict (exit 1 on unsatisfied — a scriptable
@@ -812,7 +815,8 @@ The compiler has one version, `compiler/VERSION` — a single semver line
 - **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> [--rev <rev>]`
   edits the project's `.raepack` (creating the `dependencies` block if absent,
   refusing a duplicate name); `rae fetch` resolves dependencies into `.rae/deps`
-  honoring the committed lock (offline-safe, never rewrites an existing lock);
+  honoring the committed lock (offline-safe; the file changes only when a
+  dependency was added or removed);
   `rae update [<name>]` re-resolves within the pack's requirement — re-fetching
   the remote and ignoring the lock pin — then rewrites `rae.lock`; `rae tree`
   prints the resolved graph (the stdlib `lib` edge + each dep with its rev and

@@ -14,6 +14,7 @@ typedef struct {
   char commit[64];
   char tree[64];
   bool is_git;
+  bool unpinned;  /* git: the lock named no commit for it */
   /* the deps THIS package's own pack declares (by name): what its files may
    * reach besides themselves and the stdlib */
   char uses[16][128];
@@ -125,6 +126,7 @@ static bool resolve_git_dep(ResolvedDep* dep, const RaePackDep* spec, const char
   bool updating = dep_is_updating(dep->name);
   char pinned[64] = {0};
   bool have_pin = !updating && lock_pinned_commit(lock_path, dep->name, pinned, sizeof(pinned));
+  dep->unpinned = !have_pin;
 
   if (!dir_exists(dep->dir)) {
     char parent[PATH_MAX];
@@ -324,6 +326,15 @@ void rae_deps_write_lock(FILE* out) {
     /* git-tree: the content-addressed tree object id — a content hash of the
      * checked-out files, computed by git rather than a second hasher here. */
     fprintf(out, " commit: \"%s\" hash: \"git-tree:%s\" }\n", dep->commit, dep->tree);
+  }
+}
+
+void rae_deps_note_unpinned(FILE* out) {
+  for (int i = 0; i < s_dep_count; ++i) {
+    if (s_deps[i].is_git && s_deps[i].unpinned) {
+      fprintf(out, "note: dependency '%s' is not pinned in rae.lock, so this build used the "
+                   "pack's rev: run 'rae fetch' to pin it\n", s_deps[i].name);
+    }
   }
 }
 

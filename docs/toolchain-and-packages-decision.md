@@ -206,7 +206,8 @@ with point 3 and was not rejected. Dropping it later is one field.
 
 Each step is its own queue item, with the full suite on each step that touches the compiler.
 
-1. A build stops writing `rae.lock`. Worth doing first: it stops the damage now.
+1. A build stops writing `rae.lock`. Done in 0.2.340: `rae fetch` and `rae update` still write it and keep
+   its toolchain line, and `rae fetch` now pins a dependency added after the lock was made.
 2. Version tags: automatic on each bump, and the old ones added.
 3. The `.raepack` as the one file: exact versions, the optional `commit`, `hash`, `subdir`, and `rae.lock`
    read once and retired.
