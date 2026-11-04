@@ -46,7 +46,10 @@ exactly as before.
 - **UI**: `mountUiScene(world: app.inputSystem.world, uiSystems:
   app.inputSystem.uiSystems, path:, res: app.inputSystem.gpuUi)` in
   `walkerGameStart` adds the game's own .raescene over the walker's;
-  `setNodeText` changes its text.
+  `setNodeText` changes its text. A scene with `QrCode` nodes (docs/qr.md):
+  call `qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem:
+  app.inputSystem.qrCodeSystem)` after mounting it; the kit paints them, and
+  `qrCodeSetText` changes one.
 
 ## Shared assets
 
