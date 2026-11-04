@@ -752,6 +752,8 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   of 2026-09 queue work; it was reset to 0.1.7 and the rule changed, since
   none of those versions had been tagged.) `1.0.0` is deferred until the
   language stops moving.
+  `0.3.0` (2026-11-04) is the first named one: the start of the package manager (the toolchain
+  store, `./rae`, exact pins in the `.raepack`, and the first package).
 - **Bump discipline: in the SAME commit as the change, not after.** A commit
   that changes language, `lib/` or CLI behavior in a way users should be
   able to tell apart from the last release bumps `compiler/VERSION`'s PATCH
