@@ -37,7 +37,7 @@ if [ "${RAE_ANDROID_INSTALL:-1}" != "0" ]; then
 fi
 "$adb" shell am force-stop "$package"
 "$adb" logcat -c
-"$adb" shell am start -W -n "$package/org.libsdl.app.SDLActivity" --es raeEnv "'${RAE_ANDROID_ENV:-}'" >/dev/null
+"$adb" shell am start -W -n "$package/org.rae.app.RaeActivity" --es raeEnv "'${RAE_ANDROID_ENV:-}'" >/dev/null
 log="$gen/run.log"
 : > "$log"
 waited=0
