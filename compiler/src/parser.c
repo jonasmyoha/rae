@@ -653,6 +653,10 @@ static AstParam* parse_param_list(Parser* parser, AstIdentifierPart** out_generi
   bool seen_value_param = false;
   for (;;) {
     const Token* slot_start = parser_peek(parser);
+    if (slot_start->kind == TOK_EOF) {
+      parser_error(parser, slot_start, "parameter list is not closed: expected ')'");
+      break;
+    }
     bool is_type_param = false;
     AstParam* p = parse_param(parser, &is_type_param);
     if (is_type_param) {

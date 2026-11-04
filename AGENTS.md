@@ -788,15 +788,25 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   A pack that does not parse has no check either, and the build says so
   (`--check-toolchain` stops). `rae init` writes this compiler's pin. A dependency's
   own `rae` is the lowest compiler it needs, checked against the project's pin.
-- **`rae toolchain` (#932) manages the sibling checkout.** `status` prints this
-  compiler's version + checkout and, inside a project, the pack requirement with
-  a satisfied/UNSATISFIED verdict (exit 1 on unsatisfied — a scriptable
-  `make doctor`); `list` shows the release tags, marking the current one;
-  `use <req>` resolves the newest tag matching `<req>` (or `use main`) in the
-  checkout the compiler was built from — or `$RAE_ROOT` — `git checkout`s it and
-  reruns `make -C compiler build`, refusing when the checkout has uncommitted
-  tracked changes. One checkout moved between tags; side-by-side toolchains are
-  out of scope.
+- **The store and `./rae` (docs/toolchain-and-packages-decision.md).** There is no
+  `rae` on PATH. A project commits a generated `./rae`, written by `rae init` and
+  `rae toolchain pin`, which needs only git, make and a C compiler and runs the pinned
+  compiler. `~/.rae` (`RAE_HOME`) holds `repo/` (one clone), `toolchains/<version>` or
+  `<version>-<commit>` (sparse checkouts of `compiler lib tools third_party`, each with a
+  `.ready` marker and a `.lock` while preparing, made by `tools/toolchain-prepare.sh`) and
+  `projects`. `RAE_ROOT=<checkout> ./rae ...` uses that checkout for one command and prints
+  one line. The source is `RAE_SOURCE`, else the checkout saved in `~/.rae/source` when a
+  compiler built in a checkout pins, else the GitHub repo.
+- **`rae toolchain`.** `status` prints this compiler, the pin with its verdict (exit 1 when
+  it does not hold), the store and whether `./rae` is current. `pin <version|commit|main>`
+  prepares that Rae first and refuses with the pin unchanged if it cannot, then changes every
+  project pack in the repo and writes `./rae`; a project pack has a `rae` block and targets, and
+  a library's `rae` stays. `update` moves to the newest version only if the pack's optional
+  `rae: { check: "..." }` command passes (run in the repo root, with `RAE_BIN`), or else every
+  compiled target builds to a C object. `gc [--dry-run]` removes the toolchains no project in
+  `projects` uses, and they come back on demand. `list` shows the tags. Packs of one repo that
+  pin different Rae stop the build. Checks: `make -C compiler toolchain-store-test`,
+  which is not part of the full run.
 - **Dependencies (#933).** A `.raepack` may declare
   `dependencies: { dep ui: { path: "../lib-ui" } dep codec: { git: "<url>", subdir: "packages/codec", version: "1.2.0", commit: "<optional>", hash: "<written by the tool>" } }`.
   A dep named `x` owns the import prefix `x/` — `import x/Foo` resolves to
@@ -926,6 +936,7 @@ and say in the commit message which one you ran:
 | a `lib/` module that many programs use (`ecs/`, `collections/`, `Math`, `Vec3`, `ui/`), or `run_cases.sh --grep` finds 50+ cases | the full suite |
 | any other `lib/` module | `bash compiler/tools/run_cases.sh --grep '<its import path>'` (the cases that import it, in parallel), plus `rae build --emit-c` of every example that imports it (`grep -rl '<its import path>' examples`) |
 | one example | build it (`rae build --emit-c`), run it if the change shows on screen, `make example-copy-gate` |
+| `compiler/src/rae_toolchain.c`, `tools/toolchain-prepare.sh`, the `./rae` text | the check for the change, and `make -C compiler toolchain-store-test` (about 2 minutes, not in the full run) |
 | one gate or tool script | that gate alone (`make -C compiler tsan`, `bash compiler/tools/wasm_webgpu_smoke.sh`, ...) |
 | docs, `QUEUE.md`, comments, `tools/devtools-web` | no unit tests (the commit hooks run the banned-terms gate) |
 
