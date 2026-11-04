@@ -106,8 +106,9 @@ session with the token it kept. It gets a new peer id, and the host hears the ol
 one left. A spoofed `forgotten` cannot put it in another session: if the relay
 still knows it, its join answers with the same peer id.
 
-A host cannot do this. Its session went when it was removed, or a player was
-promoted. The relay answers it the same way, but nothing acts on that yet.
+A forgotten host cannot have its place back: its session closed, or a player was
+promoted. The relay answers it the same way, and what it does next is the app's
+choice (the walkers rejoin as a player or host a new session, docs/walker-net.md).
 
 ## Who may open a session
 

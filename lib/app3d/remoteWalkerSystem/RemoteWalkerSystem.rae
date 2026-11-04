@@ -67,7 +67,9 @@ type RemoteWalkers {
   # Scratch: the remote walkers this frame
   remote: List(EntityId)
   # The host's invite was printed
-  tokenShown: Bool
+  # The invite last logged: a side can get a new one (lost its session, or took
+  # over a session as its host)
+  inviteShown: String
 }
 
 func createRemoteWalkers() ret RemoteWalkers {
@@ -76,7 +78,7 @@ func createRemoteWalkers() ret RemoteWalkers {
     nextNumber: 2
     overflowLogged: false
     remote: {}
-    tokenShown: false
+    inviteShown: ""
   }
 }
 
@@ -509,10 +511,11 @@ func walkerNetAppFrame(
     }
   }
   walkerNetFrame(net: net, localPose: pose, nowMs: nowMs())
-  if not remoteWalkers.tokenShown and walkerNetToken(net: net).length() > 0 {
+  let invite: String = walkerNetToken(net: net)
+  if invite.length() > 0 and invite is not remoteWalkers.inviteShown {
     log(
       "[net] invite {walkerNetToken(net: net)} (join with RAE_WALKER_NET=join RAE_WALKER_TOKEN=...)"
     )
-    remoteWalkers.tokenShown = true
+    remoteWalkers.inviteShown = invite
   }
 }

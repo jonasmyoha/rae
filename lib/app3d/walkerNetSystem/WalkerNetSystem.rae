@@ -156,6 +156,8 @@ type WalkerNet {
   helloSent: Bool
   # walkerNetStart was called
   started: Bool
+  # This side was hosting when the relay lost it, and is on its way back
+  lostHosting: Bool
   # The connections' settings, with the session key that authenticates
   # every handshake (the host makes it; a player reads it from the invite)
   connectionConfig: ConnectionConfig
@@ -207,6 +209,10 @@ func walkerReplicationConfig() ret ReplicationConfig {
   ret config
 }
 
+func createWalkerSession() ret SessionHost {
+  ret createSessionHost(graceMs: 10000, maxPlayers: 64)
+}
+
 func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
   let config: ReplicationConfig = walkerReplicationConfig()
   let relayAddress: NetAddress = resolveAddress(host: settings.relayHost, port: settings.relayPort).address
@@ -220,7 +226,7 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
       connectionConfig: defaultConnectionConfig()
     )
     replication: createReplicationHost(config: config)
-    session: createSessionHost(graceMs: 10000, maxPlayers: 64)
+    session: createWalkerSession()
     seats: {}
     ownEntityId: noEntity()
     checkEntityId: noEntity()
@@ -237,6 +243,7 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
     lastFrameMs: -1
     settledFrames: 0
     started: false
+    lostHosting: false
     startMs: 0
     playingAtMs: -1
     message: List.create(UInt8, cap: 1200)
@@ -287,6 +294,38 @@ func walkerNetStartDue(net: mod WalkerNet, nowMs: view Int) ret Bool {
   ret net.settledFrames >= walkerSettledFrames or nowMs - net.firstFrameMs >= walkerStartLatestMs
 }
 
+# Who holds a replicated entity that no player does: the host's own walker, and
+# the desync check
+const ownerHostWalker: Int = -1
+
+const ownerCheck: Int = -2
+
+func addOwnHostEntity(net: mod WalkerNet, localPose: view WalkerPose) {
+  net.ownEntityId = allocEntity(this: net.world.entities)
+  componentSet(this: net.world.poses, entityId: net.ownEntityId, data: localPose)
+  let netId: Int = replicateEntity(
+    host: net.replication
+    replicated: net.world.replicated
+    entityId: net.ownEntityId
+    owner: ownerHostWalker
+  )
+}
+
+func addCheckEntity(net: mod WalkerNet) {
+  net.checkEntityId = allocEntity(this: net.world.entities)
+  componentSet(
+    this: net.world.checks
+    entityId: net.checkEntityId
+    data: WalkerNetCheck { tick: -1, sum: 0 }
+  )
+  let netId: Int = replicateEntity(
+    host: net.replication
+    replicated: net.world.replicated
+    entityId: net.checkEntityId
+    owner: ownerCheck
+  )
+}
+
 func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) ret Bool {
   net.started = true
   net.startMs = nowMs
@@ -295,26 +334,8 @@ func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view 
     net.connectionConfig.sessionKey = newRelaySessionKey()
     net.relayHost.connectionConfig = net.connectionConfig
     relayClientOpen(client: net.relayHost.client, nowMs: nowMs)
-    net.ownEntityId = allocEntity(this: net.world.entities)
-    componentSet(this: net.world.poses, entityId: net.ownEntityId, data: localPose)
-    let ownNetId: Int = replicateEntity(
-      host: net.replication
-      replicated: net.world.replicated
-      entityId: net.ownEntityId
-      owner: -1
-    )
-    net.checkEntityId = allocEntity(this: net.world.entities)
-    componentSet(
-      this: net.world.checks
-      entityId: net.checkEntityId
-      data: WalkerNetCheck { tick: -1, sum: 0 }
-    )
-    let checkNetId: Int = replicateEntity(
-      host: net.replication
-      replicated: net.world.replicated
-      entityId: net.checkEntityId
-      owner: -2
-    )
+    addOwnHostEntity(net: net, localPose: localPose)
+    addCheckEntity(net: net)
     ret true
   }
   if net.settings.mode is WalkerNetMode.join {
@@ -430,11 +451,112 @@ func takeLeavers(net: mod WalkerNet, nowMs: view Int) {
   net.relayHost.peersLeft.clear()
 }
 
+# The relay promoted this player: it hosts from its own copy of the world, as in
+# docs/replication.md, "Host migration". Each player's walker keeps its entity, so
+# its character here carries on. The old host's walker goes with the old host.
+func walkerNetTakeOver(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  let ownNetId: Int = net.replicationPlayer.ownNetId
+  net.relayHost = relayHostFromPlayer(
+    player: net.relayPlayer
+    connectionConfig: net.connectionConfig
+  )
+  net.replication = replicationHostTakeOver(config: net.config, replicated: net.world.replicated)
+  net.session = createWalkerSession()
+  net.seats.clear()
+  net.ownEntityId = replicaEntityOf(player: net.replicationPlayer, netId: ownNetId)
+  net.checkEntityId = noEntity()
+  var leaving: List(EntityId) = {}
+  loop var i: Int = 0, i < componentCount(this: net.world.replicated), ++i {
+    let entityId: EntityId = componentEntityAt(this: net.world.replicated, i: i)
+    if let replicated: Replicated = componentCopyAt(this: net.world.replicated, i: i) {
+      if replicated.owner is ownerHostWalker {
+        leaving.add(value: entityId)
+      } else if replicated.owner is ownerCheck {
+        net.checkEntityId = entityId
+      } else if replicated.netId is ownNetId {
+        # Its walker is the host's now: the next host must not wait for it
+        componentMod(this: net.world.replicated, entityId: entityId).owner = ownerHostWalker
+      } else if replicated.owner >= 0 {
+        sessionRestoreSlot(
+          host: net.session
+          peerId: replicated.owner
+          entityId: entityId
+          netId: replicated.netId
+          nowMs: nowMs
+        )
+      }
+    }
+  }
+  loop let entityId: EntityId in leaving {
+    clearEntityComponents(WalkerNetWorld, world: net.world, entityId: entityId)
+    freeEntity(this: net.world.entities, entityId: entityId)
+  }
+  # Promoted before the first snapshot told it what it had
+  if isNone(this: net.ownEntityId) {
+    addOwnHostEntity(net: net, localPose: localPose)
+  }
+  if isNone(this: net.checkEntityId) {
+    addCheckEntity(net: net)
+  }
+  net.settings.mode = WalkerNetMode.host
+  log("[net] the host went: hosting the session now")
+}
+
+# The relay no longer has this host (its frames stopped for too long, so the relay
+# promoted a player or closed the session), or never answered it. It comes back as
+# a player of the same session. If that session is gone, or it never had one, it
+# hosts a new one (`hostAnew`).
+func hostLost(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  net.relayPlayer.client = net.relayHost.client
+  net.relayHost.peers.clear()
+  net.relayHost.peersLeft.clear()
+  net.seats.clear()
+  net.ownEntityId = noEntity()
+  net.checkEntityId = noEntity()
+  net.lostHosting = true
+  forgetPlayerSession(net: net)
+  if net.relayPlayer.client.token.length is 0 {
+    hostAnew(net: net, localPose: localPose, nowMs: nowMs)
+    ret
+  }
+  log("[net] the relay lost this host: joining the session again as a player")
+  net.settings.mode = WalkerNetMode.join
+  relayPlayerRejoin(
+    player: net.relayPlayer
+    connectionConfig: net.connectionConfig
+    connectionId: nowMs bitand 65535
+    nowMs: nowMs
+  )
+}
+
+# Host a new session, with a new invite, on the same socket. Nothing of the old one
+# is left to go back to.
+func hostAnew(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  log("[net] no session to go back to: hosting a new one")
+  forgetPlayerSession(net: net)
+  net.relayHost.client = net.relayPlayer.client
+  net.relayHost.peers.clear()
+  net.relayHost.peersLeft.clear()
+  net.replication = createReplicationHost(config: net.config)
+  net.session = createWalkerSession()
+  net.seats.clear()
+  net.settings.mode = WalkerNetMode.host
+  # The time this side has been in a session goes on counting
+  let startMs: Int = net.startMs
+  let started: Bool = walkerNetStart(net: net, localPose: localPose, nowMs: nowMs)
+  net.startMs = startMs
+}
+
 func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
   if net.playingAtMs < 0 and relayClientIsReady(client: net.relayHost.client) {
     net.playingAtMs = nowMs
   }
   relayHostReceive(host: net.relayHost, nowMs: nowMs)
+  let clientState: RelayClientState = net.relayHost.client.state
+  if clientState is RelayClientState.forgotten or clientState is RelayClientState.timedOut {
+    hostLost(net: net, localPose: localPose, nowMs: nowMs)
+    ret
+  }
   takeLeavers(net: net, nowMs: nowMs)
 
   loop var p: Int = 0, p < net.relayHost.peers.length, ++p {
@@ -614,9 +736,14 @@ func freeAllOf(T: type, net: mod WalkerNet, table: view ComponentTable(T)) {
 # client's, which stops listening; the connection's. Each leaves the player unable
 # to come back by itself, so here it joins again. A session that ended, or a relay
 # that refused it, is left alone.
-func recoverPlayerSession(net: mod WalkerNet, nowMs: view Int) {
+func recoverPlayerSession(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
   let clientState: RelayClientState = net.relayPlayer.client.state
   if clientState is RelayClientState.refused or clientState is RelayClientState.closed {
+    # A former host's session ended while it was away, and it was the last one in it
+    if net.lostHosting and clientState is RelayClientState.refused and net.relayPlayer.client.refusedReason is refusedUnknownSession {
+      net.lostHosting = false
+      hostAnew(net: net, localPose: localPose, nowMs: nowMs)
+    }
     ret
   }
   let connectionState: ConnectionState = net.relayPlayer.connection.state
@@ -646,7 +773,26 @@ func recoverPlayerSession(net: mod WalkerNet, nowMs: view Int) {
 
 func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
   relayPlayerReceive(player: net.relayPlayer, nowMs: nowMs)
-  recoverPlayerSession(net: net, nowMs: nowMs)
+  if net.relayPlayer.hostChanged {
+    net.relayPlayer.hostChanged = false
+    if net.relayPlayer.client.peerId is hostPeerId {
+      walkerNetTakeOver(net: net, localPose: localPose, nowMs: nowMs)
+      ret
+    }
+    # Another player hosts now: connect to it. Its hello is known by its relay peer
+    # id, so this player gets its own walker back, and a whole snapshot.
+    forgetPlayerSession(net: net)
+    relayPlayerReconnect(
+      player: net.relayPlayer
+      connectionConfig: net.connectionConfig
+      connectionId: nowMs bitand 65535
+      nowMs: nowMs
+    )
+  }
+  recoverPlayerSession(net: net, localPose: localPose, nowMs: nowMs)
+  if net.settings.mode is not WalkerNetMode.join {
+    ret
+  }
   if not net.helloSent and connectionIsConnected(connection: net.relayPlayer.connection) {
     sessionWriteHello(player: net.sessionPlayer, out: net.message)
     let queued: Bool = connectionSendReliable(
