@@ -137,6 +137,31 @@ static bool parse_requirement(const char* req, VersionRange* range) {
   return true;
 }
 
+bool rae_version_exact(const char* text, RaeSemver* out) {
+  int dots = 0;
+  bool digit_before = false;
+  if (!text || !text[0]) return false;
+  for (const char* c = text; *c; ++c) {
+    if (*c == '.') {
+      if (!digit_before) return false;
+      dots += 1;
+      digit_before = false;
+    } else if (*c >= '0' && *c <= '9') {
+      digit_before = true;
+    } else {
+      return false;
+    }
+  }
+  if (dots != 2 || !digit_before) return false;
+  return rae_semver_parse(text, out);
+}
+
+int rae_semver_compare(RaeSemver left, RaeSemver right) {
+  if (left.major != right.major) return left.major - right.major;
+  if (left.minor != right.minor) return left.minor - right.minor;
+  return left.patch - right.patch;
+}
+
 bool rae_toolchain_satisfies(const char* req, RaeSemver compiler, bool is_dev,
                              bool strict, bool* bad_req) {
   VersionRange range;

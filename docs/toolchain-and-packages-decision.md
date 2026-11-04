@@ -214,7 +214,9 @@ Each step is its own queue item, with the full suite on each step that touches t
    `3937b4d5`. Each still has to build. None of these tags is on the remote until the next
    `git push --follow-tags`.
 3. The `.raepack` as the one file: exact versions, the optional `commit`, `hash`, `subdir`, and `rae.lock`
-   read once and retired.
+   read once and retired. Done in 0.2.342. A compiler at another version than the pin stops the build,
+   unless `RAE_ROOT` is set, which also keeps the projects still building on main working until they
+   move. `rev` is an error with the repair.
 4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` goes.
 5. Shared builds per version.
 6. The first package: `qr`, moved to `packages/qr`.

@@ -69,6 +69,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/may_wait.c \
        $(SRC_DIR)/when_resolve.c \
        $(SRC_DIR)/rae_deps.c \
+       $(SRC_DIR)/rae_pack_edit.c \
        $(SRC_DIR)/bindgen.c \
        $(SRC_DIR)/bindgen_preprocess.c \
        $(SRC_DIR)/c_backend.c \

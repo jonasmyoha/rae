@@ -67,6 +67,11 @@ for a language whose toolchain is a sibling git checkout, not a download.
   `lib/` or CLI behavior in a release-notes-worthy way bumps PATCH in the
   same commit and says so in the message; MINOR is never bumped by an agent.
 
+> **Sections 2 and 4 are replaced (2026-11-04, 0.2.342).** A project now pins one exact
+> version with an optional commit, in the `.raepack`, and there is no `rae.lock` and no
+> version range: see docs/toolchain-and-packages-decision.md and AGENTS.md. These sections
+> stay as the history of how it got here.
+
 ## 2. The project says which Rae it needs (#931)
 
 The `.raepack` (v2 `meta`, per the packages doc) gains a **toolchain

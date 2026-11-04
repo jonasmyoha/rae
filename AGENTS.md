@@ -759,10 +759,6 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   queue work does not need a bump on every commit — use judgment: bump when
   the change is release-notes-worthy, not for every diagnostic tweak; a
   breaking change is always release-notes-worthy).
-- **Consequence for `.raepack` requirements:** a bare `rae: { version: "0.1" }`
-  is a caret on MINOR (`>=0.1.0 <0.2.0`) and therefore means "this milestone
-  line", not "compatible" — a breaking 0.1.8 satisfies it. A project that
-  must pin an exact compiler writes the explicit range `">=0.1.7 <0.1.8"`.
 - **A release is a tag, nothing else, and every version bump is a release.**
   The commit that changes `compiler/VERSION` gets the annotated tag `v<version>`
   automatically (the post-commit, post-merge and post-rewrite hooks, which
@@ -777,19 +773,21 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   any tag a clone without the hooks missed. `rae --version` reports the version
   on a tagged commit; after it, the same version suffixed `-dev.N` for N commits
   since that tag, and `+dirty` on an uncommitted tree.
-- **Projects declare which Rae they need (#931).** A `.raepack` may carry
-  `rae: { version: "0.1" }` (bare = caret, `>=0.1.0 <0.2.0`; or an explicit
-  `">=A <B"` range). `rae run`/`build`/`watch` check it against this compiler
-  BEFORE the format preflight and fail with the repair if it does not match; a
-  between-tags `-dev` build counts as its base version (so co-developing Rae
-  and a project on `main` does not trip it). `RAE_TOOLCHAIN_CHECK=off` skips the
-  non-strict check; `--check-toolchain` is the strict CI form (requires a tagged
-  release, cannot be silenced by the env var). No pack, or a pack without a
-  `rae` block, means no check. A pack that does not parse has no check either,
-  and the build says so (`--check-toolchain` stops). **A build never writes
-  `rae.lock`:** only `rae fetch` and `rae update` do, and they keep its toolchain
-  line, so building cannot move a project's pin. `rae init` scaffolds the
-  requirement.
+- **The `.raepack` is the one file that pins a project's Rae and its packages
+  (docs/toolchain-and-packages-decision.md).** `rae.lock` is gone: `rae add`,
+  `fetch` and `update` read an old one once into the pack and delete it. **A build
+  only reads the pack and writes nothing.**
+- **A project pins one exact Rae:** `rae: { version: "0.2.340" }` means the tag
+  `v0.2.340`, and `rae: { version: "0.2.340", commit: "55a8ac7e" }` means that commit,
+  whose `compiler/VERSION` must be that version. There are no ranges: a bare `"0.2"`
+  or `">=A <B"` is an error, and `rae fetch` repairs it with this compiler's own.
+  `rae run`/`build`/`watch` compare the pin with this compiler BEFORE the format
+  preflight. `RAE_ROOT=<checkout>` builds with this compiler for one command, with one
+  line saying so; `RAE_TOOLCHAIN_CHECK=off` skips the check; `--check-toolchain` is the
+  strict form, which neither can silence. No pack, or no `rae` block, means no check.
+  A pack that does not parse has no check either, and the build says so
+  (`--check-toolchain` stops). `rae init` writes this compiler's pin. A dependency's
+  own `rae` is the lowest compiler it needs, checked against the project's pin.
 - **`rae toolchain` (#932) manages the sibling checkout.** `status` prints this
   compiler's version + checkout and, inside a project, the pack requirement with
   a satisfied/UNSATISFIED verdict (exit 1 on unsatisfied — a scriptable
@@ -800,19 +798,19 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   tracked changes. One checkout moved between tags; side-by-side toolchains are
   out of scope.
 - **Dependencies (#933).** A `.raepack` may declare
-  `dependencies: { dep ui: { path: "../lib-ui" } dep codec: { git: "<url>", rev: "v1.2.0" } }`.
+  `dependencies: { dep ui: { path: "../lib-ui" } dep codec: { git: "<url>", subdir: "packages/codec", version: "1.2.0", commit: "<optional>", hash: "<written by the tool>" } }`.
   A dep named `x` owns the import prefix `x/` — `import x/Foo` resolves to
   `<depdir>/Foo.rae`, ahead of `lib/` and the stdlib — and a dep's own modules
-  address each other the same way (`import x/Bar`). Path deps resolve in place;
-  git deps are cloned into `<project>/.rae/deps/<name>` (gitignored) and pinned
-  to the commit the project's `rae.lock` records — the lock wins over the pack's
-  `rev`, so delete the lock record to move a dep. The lock's `dep` lines carry
-  `source`, `rev`, `commit` and a `git-tree` content hash; its first record is
-  `dep lib { source: "toolchain:lib" }` — the stdlib resolved through the
-  toolchain, relative to it (never a machine path, so a committed lock is the
-  same on every machine building one Rae commit), and projects need no `lib`
-  symlink. Dependency sources are vendored: the format preflight neither
-  rewrites nor check-fails them, and the implicit project scan skips every
+  address each other the same way (`import x/Bar`). Path deps resolve in place, and a
+  `version` on one, when given, is checked against its `meta.version`. Git deps need
+  one exact `version`: it is the tag `v1.2.0`, or with a `subdir` that folder's last
+  name first, `codec/v1.2.0`, so one repo can hold several packages. They are cloned
+  into `<project>/.rae/deps/<name>` (gitignored). A build checks the files against
+  `hash` (`git-tree:`, of the package's folder) and stops if they differ, as when a tag
+  moved. A dep's own pack's `meta.version` must be the pinned version. Two packages
+  wanting different versions of a third is an error, unless the project declares that
+  package: its version wins. Dependency sources are vendored: the format preflight
+  neither rewrites nor check-fails them, and the implicit project scan skips every
   dot-directory and every dependency's folder, so a dependency is reached only
   through the resolver. **A package sees only its own files, the stdlib and
   the dependencies its OWN pack declares**: a dependency calling or naming
@@ -820,15 +818,15 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   compile error in the dependency's file; a dependency's own pack (targets
   optional) has its dependencies resolved too (docs/raepack-v2-and-packages.md
   §12, cases 1276-1279).
-- **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> [--rev <rev>]`
-  edits the project's `.raepack` (creating the `dependencies` block if absent,
-  refusing a duplicate name); `rae fetch` resolves dependencies into `.rae/deps`
-  honoring the committed lock (offline-safe; the file changes only when a
-  dependency was added or removed);
-  `rae update [<name>]` re-resolves within the pack's requirement — re-fetching
-  the remote and ignoring the lock pin — then rewrites `rae.lock`; `rae tree`
-  prints the resolved graph (the stdlib `lib` edge + each dep with its rev and
-  short commit). All four operate on the pack in the current directory.
+- **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> --version <v>
+  [--subdir <dir>] [--commit <c>]` edits the project's `.raepack` (creating the
+  `dependencies` block if absent, refusing a duplicate name); `rae fetch` resolves
+  dependencies into `.rae/deps` and writes the hash of any that has none, holding to
+  the pack's versions (offline-safe); `rae update [<name>]` moves to the newest tagged
+  version, dropping a commit, and rewrites its hash; `rae tree` prints the resolved
+  graph (the stdlib `lib` edge + each dep with its version and short commit). All
+  four operate on the pack in the current directory. Checks:
+  `compiler/tools/test-packages-cli.sh`.
 
 ---
 ## Copyright: claimed file by file
