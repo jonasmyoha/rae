@@ -38,6 +38,15 @@ func dropped(server: mod RelayServer) {
   server.stats.packetsDropped = server.stats.packetsDropped + 1
 }
 
+# A client that talks as a peer, from an address with no peer: it went silent
+# for the timeout and does not know. It is told, so it can join again. One byte,
+# so a forged source address gains nothing by it.
+func answerForgotten(server: mod RelayServer, from: view NetAddress) {
+  dropped(server: server)
+  relayWriteKind(packet: server.outbox, kind: relayKindForgotten)
+  sendOutbox(server: server, address: from)
+}
+
 # One datagram in `server.inbox`, from `from`
 func takeDatagram(server: mod RelayServer, from: view NetAddress) {
   let length: Int = server.inbox.length
@@ -48,12 +57,16 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
   let kind: Int = readU8(bytes: server.inbox, offset: 0)
   let peerEntityId: EntityId = peerAt(server: server, address: from)
   if kind is relayKindForward {
+    if isNone(this: peerEntityId) {
+      answerForgotten(server: server, from: from)
+      ret
+    }
     forward(server: server, peerEntityId: peerEntityId)
     ret
   }
   if kind is relayKindKeepAlive {
     if isNone(this: peerEntityId) {
-      dropped(server: server)
+      answerForgotten(server: server, from: from)
       ret
     }
     let peer: mod RelayPeer = componentMod(this: server.peers, entityId: peerEntityId)

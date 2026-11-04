@@ -15,6 +15,8 @@
 #   forward   relay -> client source peer id (4), payload
 #   peerLeft  relay -> host   peer id (4)
 #   closed    relay -> player (nothing): the session ended
+#   forgotten relay -> client (nothing): a keep-alive or forward came from an
+#             address the relay has no peer for (its timeout passed): join again
 #   introduce relay -> both   peer id (4), secret (8), address (23): the
 #             other side's public address, to try a direct path
 # And the ones that travel the direct path, client to client:
@@ -72,6 +74,10 @@ const relayKindDirect: Int = 214
 # relay -> every peer of a session whose host went: the promoted player's
 # former peer id (4); it is peer 0 from now on
 const relayKindHostChanged: Int = 215
+
+# relay -> a client it has no peer for, which sent a keep-alive or a forward
+# (nothing else: one byte, never more than what it answers)
+const relayKindForgotten: Int = 216
 
 # What a client runs on (the last byte of open / join): the host-migration
 # rule prefers a desktop

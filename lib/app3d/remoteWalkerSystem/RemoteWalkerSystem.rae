@@ -496,9 +496,12 @@ func walkerNetAppFrame(
     controlledEntityId: controlledEntityId
   )
   if not net.started {
+    if not walkerNetStartDue(net: net, nowMs: nowMs()) {
+      ret
+    }
     if walkerNetStart(net: net, localPose: pose, nowMs: nowMs()) {
       log(
-        "[net] {walkerNetModeName(settings: net.settings)} through the relay at {net.settings.relayHost}:{net.settings.relayPort}"
+        "[net] {walkerNetModeName(settings: net.settings)} through the relay at {net.settings.relayHost}:{net.settings.relayPort}, {nowMs() - net.firstFrameMs} ms after the first frame"
       )
     } else {
       log("[net] not joined: RAE_WALKER_TOKEN is not an invite")
