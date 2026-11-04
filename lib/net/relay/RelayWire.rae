@@ -27,6 +27,9 @@
 # then the device (deviceDesktop, deviceMobile) for the host-migration rule.
 #   hostChanged relay -> all  the promoted player's former peer id (4)
 #
+# An open may end, after those two bytes, with a signed ticket (below): what a
+# relay given a secret requires (docs/relay.md, "Who may open a session").
+#
 # The host is peer 0; players are 1, 2, ... in the order they joined. A
 # player forwards only to the host, the host to any of its players. The
 # payload is opaque to the relay (a sealed lib/net/Connection packet), and a
@@ -34,6 +37,8 @@
 open net/Wire
 open net/Udp
 open crypto/SecureRandom
+open crypto/Sha256
+open crypto/CryptoBytes
 open String
 
 const relayKindOpen: Int = 201
@@ -85,6 +90,10 @@ const refusedUnknownSession: Int = 1
 const refusedSessionFull: Int = 2
 
 const refusedRelayFull: Int = 3
+
+# This relay requires a ticket to open a session, and there was none, or it was
+# wrong or expired
+const refusedOpenTicket: Int = 4
 
 # The session token's size, and the forward header's (kind, peer id)
 const relayTokenBytes: Int = 16
@@ -284,4 +293,112 @@ func relayInviteParts(
     text: text.sub(start: tokenDigits + 1, len: relaySessionKeyBytes * 2)
     token: sessionKey
   )
+}
+
+# ----- open tickets --------------------------------------------------------------
+#
+# What lets a host open a session on a relay that was given a secret. A backend
+# that holds the same secret issues one for a host it trusts, and the host sends
+# it in its open. Its bytes:
+#   expires at (8: seconds since 1970), HMAC-SHA256 (32), ticket (the rest)
+# The HMAC is under the secret, over the expiry and the ticket in that order. The
+# ticket is the backend's own bytes (a game id, an account); the relay reads
+# nothing in it. These two functions are pure, so a backend can call them, and
+# one in another language can do the same from this description.
+const openTicketExpiryBytes: Int = 8
+
+const openTicketMacBytes: Int = 32
+
+const openTicketHeaderBytes: Int = openTicketExpiryBytes + openTicketMacBytes
+
+# The largest backend ticket: a signed one must fit a datagram with room to spare
+const openTicketMaxBytes: Int = 256
+
+# The HMAC of a signed ticket's expiry and ticket: `count` bytes from `start`
+func openTicketMac(
+  secret: view List(UInt8)
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret List(UInt8) {
+  var signed: List(UInt8) = List.create(UInt8, cap: count)
+  appendCopy(
+    destination: signed
+    source: bytes
+    start: start
+    count: openTicketExpiryBytes
+  )
+  appendCopy(
+    destination: signed
+    source: bytes
+    start: start + openTicketHeaderBytes
+    count: count - openTicketHeaderBytes
+  )
+  ret hmacSha256(key: secret, message: signed)
+}
+
+# A signed ticket under `secret`: `ticket`, good until `expiresAtSeconds` (seconds
+# since 1970). Empty when `ticket` is over openTicketMaxBytes.
+func relayIssueOpenTicket(
+  secret: view List(UInt8)
+  ticket: view List(UInt8)
+  expiresAtSeconds: view Int
+) ret List(UInt8) {
+  var signed: List(UInt8) = List.create(UInt8, cap: openTicketHeaderBytes + ticket.length)
+  if ticket.length > openTicketMaxBytes {
+    ret signed
+  }
+  writeU64(bytes: signed, value: expiresAtSeconds)
+  signed.addDefaults(count: openTicketMacBytes)
+  appendCopy(
+    destination: signed
+    source: ticket
+    start: 0
+    count: ticket.length
+  )
+  let mac: List(UInt8) = openTicketMac(
+    secret: secret
+    bytes: signed
+    start: 0
+    count: signed.length
+  )
+  loop var i: Int = 0, i < openTicketMacBytes, ++i {
+    signed.set(index: openTicketExpiryBytes + i, value: mac.copyAtFallback(index: i, fallback: 0))
+  }
+  ret signed
+}
+
+# Whether the `count` bytes of `bytes` from `start` are a ticket signed under
+# `secret` and not expired at `nowSeconds`. The HMAC is checked first and in
+# constant time, so a wrong ticket learns nothing.
+func relayOpenTicketValid(
+  secret: view List(UInt8)
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+  nowSeconds: view Int
+) ret Bool {
+  if count < openTicketHeaderBytes or count > openTicketHeaderBytes + openTicketMaxBytes {
+    ret false
+  }
+  if start < 0 or start + count > bytes.length {
+    ret false
+  }
+  var sent: List(UInt8) = List.create(UInt8, cap: openTicketMacBytes)
+  appendCopy(
+    destination: sent
+    source: bytes
+    start: start + openTicketExpiryBytes
+    count: openTicketMacBytes
+  )
+  let expected: List(UInt8) = openTicketMac(
+    secret: secret
+    bytes: bytes
+    start: start
+    count: count
+  )
+  if not bytesEqual(a: sent, b: expected) {
+    ret false
+  }
+  ret nowSeconds < readU64(bytes: bytes, offset: start)
 }

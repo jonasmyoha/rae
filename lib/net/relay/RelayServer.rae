@@ -27,6 +27,10 @@ open net/Udp
 open net/Wire
 open net/relay/RelayWire
 open crypto/SecureRandom
+open crypto/CryptoBytes
+open Sys
+import Time
+open String
 open net/Poller
 open net/ecs/HttpServer
 open net/ecs/WebSocketSystems
@@ -68,6 +72,9 @@ type RelayRequestEvent {
   # open / join: the sender wants its address kept from the other side
   relayOnly: Bool
   device: Int
+  # open: no secret on this relay, or a good ticket came with it. Read from the
+  # datagram, which only the receive system has.
+  mayOpen: Bool
 }
 
 # A player left its session (it said so, or went silent): its host is told
@@ -89,6 +96,10 @@ type RelayConfig {
   maxSessions: Int
   # When a host goes, promote a player (true) or close the session (false)
   migrateHost: Bool
+  # Not empty: an open must carry a ticket signed under this (RelayWire,
+  # relayIssueOpenTicket). Read it with relayReadOpenSecret; never take it from
+  # a command line, which any process on the machine can read.
+  openSecret: List(UInt8)
 }
 
 type RelayStats {
@@ -141,7 +152,30 @@ func defaultRelayConfig() ret RelayConfig {
     maxPlayersPerSession: 128
     maxSessions: 4096
     migrateHost: true
+    openSecret: {}
   }
+}
+
+# The shortest open secret taken (a shorter one can be guessed)
+const openSecretMinBytes: Int = 16
+
+# The open secret in the file at `path`: its text with the whitespace around it
+# removed, as bytes. None when it cannot be read or is under openSecretMinBytes,
+# which a relay must treat as an error, not as having no secret.
+func relayReadOpenSecret(path: view String) ret opt List(UInt8) {
+  if let text: String = readFile(path: path) {
+    let secret: List(UInt8) = bytesOfText(text: text.trim())
+    if secret.length >= openSecretMinBytes {
+      ret secret
+    }
+  }
+  ret none
+}
+
+# The clock open tickets expire by: seconds since 1970. A backend's clock must
+# agree with this one to within what its tickets allow.
+func relayWallSeconds() ret Int {
+  ret Time.now().epochSeconds() as Int
 }
 
 # A relay on `host`:`port` (0 picks a free port: `relayPort`); its `udpSocket`

@@ -72,6 +72,7 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
     tokenLow: 0
     relayOnly: false
     device: deviceUnknown
+    mayOpen: false
   }
   if kind is relayKindLeave {
     if isNone(this: peerEntityId) {
@@ -84,6 +85,15 @@ func takeDatagram(server: mod RelayServer, from: view NetAddress) {
     if length >= 7 {
       request.device = readU8(bytes: server.inbox, offset: 6)
     }
+    # A peer asking again gets its own session back, ticket or not (the session
+    # system): the HMAC is only worth computing for a stranger
+    request.mayOpen = server.config.openSecret.length is 0 or (isNone(this: peerEntityId) and relayOpenTicketValid(
+      secret: server.config.openSecret
+      bytes: server.inbox
+      start: 7
+      count: length - 7
+      nowSeconds: relayWallSeconds()
+    ))
   } else if kind is relayKindJoin and length >= 5 + relayTokenBytes {
     request.requestId = readU32(bytes: server.inbox, offset: 1)
     request.tokenHigh = readHalf(bytes: server.inbox, offset: 5)

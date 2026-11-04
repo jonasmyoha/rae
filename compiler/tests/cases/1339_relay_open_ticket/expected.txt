@@ -1,0 +1,31 @@
+signed ticket: 47 bytes (8 + 32 + 7)
+good before it expires: true
+at its expiry: false
+another secret: false
+expiry changed: false
+HMAC changed: false
+ticket changed: false
+cut short: false
+an oversized ticket is not issued: true
+a good ticket:
+  ready, reason open ticket false, token 16 bytes
+a ticket under another secret:
+  refused, reason open ticket true, token 0 bytes
+an expired ticket:
+  refused, reason open ticket true, token 0 bytes
+no ticket:
+  refused, reason open ticket true, token 0 bytes
+opened 1, refused 3
+opened with a short ticket: true
+a player joined with the token alone: true
+that ticket now opens nothing:
+  refused, reason open ticket true, token 0 bytes
+the session still carries messages after its ticket expired: true
+a player joined after the ticket expired: true
+the host left: promoted without a ticket: peer id 0, migrations 1
+the other player talks to the new host: true
+nothing was refused meanwhile: true
+no secret on the relay, no ticket:
+  ready, reason open ticket false, token 16 bytes
+no secret on the relay, a ticket anyway:
+  ready, reason open ticket false, token 16 bytes

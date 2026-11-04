@@ -113,6 +113,9 @@ type RelayClientConfig {
   # What this side runs on (deviceDesktop, deviceMobile): a desktop is
   # preferred as the next host when the host goes
   device: Int
+  # Sent with an open: the signed ticket a backend issued (RelayWire,
+  # relayIssueOpenTicket), for a relay that requires one. A join needs none.
+  openTicket: List(UInt8)
 }
 
 type RelayClient {
@@ -160,6 +163,7 @@ func defaultRelayClientConfig() ret RelayClientConfig {
     punchTimeoutMs: 1500
     directSilenceMs: 3000
     device: deviceUnknown
+    openTicket: {}
   }
 }
 
@@ -333,6 +337,14 @@ func sendRequest(client: mod RelayClient, nowMs: view Int) {
     writeU8(bytes: client.outbox, value: 0)
   }
   writeU8(bytes: client.outbox, value: client.config.device)
+  if client.state is RelayClientState.opening {
+    appendCopy(
+      destination: client.outbox
+      source: client.config.openTicket
+      start: 0
+      count: client.config.openTicket.length
+    )
+  }
   client.lastRequestMs = nowMs
   let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
 }

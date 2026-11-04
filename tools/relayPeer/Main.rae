@@ -12,8 +12,12 @@
 #       prints "token T" and "direct port D" and echoes every payload back,
 #       through the relay and on a plain UDP socket
 #   relayPeer bench-player --relay-port P --token T --direct-port D
+#   relayPeer issue-ticket --open-secret-file F [--valid-seconds N] [--ticket T]
+#       prints "ticket H": an open ticket in hex, as a backend would issue one
 #   relayPeer game-host / game-player: the host-migration game
 #       (MigrationGame.rae)
+# A host given --open-ticket H sends that ticket in its open, and exits 1 when
+# the relay refuses.
 # Every mode takes --relay-only (no direct path; the bench uses it, so it
 # measures the relay). A player given --web-socket-port P reaches the relay
 # over WebSocket on that port (as a browser would), not UDP.
@@ -27,6 +31,8 @@ open net/Connection
 open net/relay/RelayWire
 open net/relay/RelayClient
 open net/relay/RelayConnections
+open net/relay/RelayServer
+open crypto/CryptoBytes
 open Sys
 open String
 
@@ -52,6 +58,9 @@ func hasArgument(name: view String) ret Bool {
 func clientConfigArgument() ret RelayClientConfig {
   var config: RelayClientConfig = defaultRelayClientConfig()
   config.relayOnly = hasArgument(name: "--relay-only")
+  if let ticket: List(UInt8) = bytesOfHex(hex: argumentAfter(name: "--open-ticket", fallback: "")) {
+    config.openTicket = ticket
+  }
   ret config
 }
 
@@ -63,6 +72,22 @@ func relayAddressArgument() ret NetAddress {
 # Wait for the client's socket (at most `waitMs`)
 func waitFor(client: view RelayClient, waitMs: view Int) {
   let ready: Bool = socketWaitReadable(socketId: client.udpSocket.socketId, timeoutMs: waitMs)
+}
+
+func runIssueTicket() ret Int {
+  let secretPath: String = argumentAfter(name: "--open-secret-file", fallback: "")
+  if let secret: List(UInt8) = relayReadOpenSecret(path: secretPath) {
+    let validSeconds: Int = argumentAfter(name: "--valid-seconds", fallback: "60").toInt()
+    let ticket: List(UInt8) = relayIssueOpenTicket(
+      secret: secret
+      ticket: bytesOfText(text: argumentAfter(name: "--ticket", fallback: "relayPeer"))
+      expiresAtSeconds: relayWallSeconds() + validSeconds
+    )
+    log("ticket {hexOfBytes(bytes: ticket)}")
+    ret 0
+  }
+  log("issue-ticket: no usable open secret in {secretPath}")
+  ret 1
 }
 
 func runHost() ret Int {
@@ -83,6 +108,10 @@ func runHost() ret Int {
     waitFor(client: host.client, waitMs: 5)
     let now: Int = nowMs() - startMs
     relayHostReceive(host: host, nowMs: now)
+    if host.client.state is RelayClientState.refused {
+      log("host: refused, reason {host.client.refusedReason}")
+      ret 1
+    }
     if not printedToken and relayClientIsReady(client: host.client) {
       log("token {relayTokenText(token: host.client.token)}")
       printedToken = true
@@ -424,6 +453,9 @@ func main() ret Int {
   let mode: String = argAt(index: 0)
   if mode is "host" {
     ret runHost()
+  }
+  if mode is "issue-ticket" {
+    ret runIssueTicket()
   }
   if mode is "player" {
     ret runPlayer()
