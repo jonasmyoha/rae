@@ -804,6 +804,25 @@ int rae_toolchain_gc(bool dry_run) {
   return 0;
 }
 
+bool rae_toolchain_wrapper_runs_pin(const char* pack_path, const char* version, const char* commit) {
+  char* packs[RAE_MAX_REPO_PACKS];
+  char root[PATH_MAX];
+  int count = repo_project_packs(pack_path, packs, RAE_MAX_REPO_PACKS, root, sizeof(root));
+  free_packs(packs, count);
+  char wrapper[PATH_MAX + 8];
+  snprintf(wrapper, sizeof(wrapper), "%s/rae", root);
+  if (!path_exists(wrapper)) return false;
+  char home[PATH_MAX];
+  store_home(home, sizeof(home));
+  char name[128];
+  toolchain_name(version, commit, name, sizeof(name));
+  char ready[2 * PATH_MAX];
+  snprintf(ready, sizeof(ready), "%s/toolchains/%s/.ready", home, name);
+  printf("verdict: ./rae builds with %s/toolchains/%s%s\n", home, name,
+         path_exists(ready) ? "" : " (made on its first use)");
+  return true;
+}
+
 void rae_toolchain_print_status(const char* pack_path) {
   char home[PATH_MAX];
   store_home(home, sizeof(home));

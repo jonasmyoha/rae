@@ -5186,7 +5186,12 @@ static int toolchain_status(const char* root) {
   if (!is_exact) {
     printf("verdict: not an exact version\n");
   } else {
-    printf("verdict: %s\n", ok ? "this compiler is that one" : "UNSATISFIED: this compiler is another one");
+    /* ./rae runs `toolchain` in its tool compiler and a build in the pinned one */
+    if (!ok && rae_toolchain_wrapper_runs_pin(pack_path, req, commit ? commit : "")) {
+      ok = true;
+    } else {
+      printf("verdict: %s\n", ok ? "this compiler is that one" : "UNSATISFIED: this compiler is another one");
+    }
   }
   free(req);
   free(commit);
