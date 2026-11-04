@@ -176,7 +176,8 @@ static const Token* parser_consume_name(Parser* parser, const char* message) {
     if (ok) return parser_advance(parser);
   }
   parser_error(parser, t, message);
-  return NULL;
+  parser_recover(parser);
+  return &kDummyIdent;
 }
 
 static void* parser_alloc(Parser* parser, size_t size) {
@@ -382,7 +383,7 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
       if (parser_check(parser, TOK_RPAREN)) break;
       parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic type list");
       if (parser_check(parser, TOK_RPAREN)) break;
-    } while (true);
+    } while (!parser_check(parser, TOK_EOF));
     parser_consume(parser, TOK_RPAREN, "expected ')' after generic type list");
     type->generic_args = generic_params_head;
   }
@@ -1005,7 +1006,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     if (parser->index == prev_index) {
         parser_advance(parser);
     }
-  } while (true);
+  } while (!parser_check(parser, TOK_EOF));
   parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
   expr->as.call.args = args;
 
@@ -1128,7 +1129,7 @@ static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
     if (parser->index == prev_index) {
         parser_advance(parser);
     }
-  } while (true);
+  } while (!parser_check(parser, TOK_EOF));
 
   parser_consume(parser, TOK_RBRACKET, "expected ']' at end of list literal");
   expr->as.collection.elements = head;
@@ -1240,7 +1241,7 @@ static AstExpr* parse_collection_literal(Parser* parser, const Token* start_toke
     if (parser->index == prev_index) {
         parser_advance(parser);
     }
-  } while (true);
+  } while (!parser_check(parser, TOK_EOF));
   
   parser_consume(parser, TOK_RBRACE, "expected '}' after collection literal");
 
@@ -1338,7 +1339,7 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         if (parser->index == prev_index) {
             parser_advance(parser);
         }
-      } while (true);
+      } while (!parser_check(parser, TOK_EOF));
       parser_consume(parser, TOK_RBRACE, "expected '}' after object literal");
       expr->as.object_literal.fields = head;
       return expr;
@@ -1391,7 +1392,7 @@ static AstExpr* parse_typed_literal(Parser* parser, const Token* start_token, As
         if (parser->index == prev_index) {
             parser_advance(parser);
         }
-      } while (true);
+      } while (!parser_check(parser, TOK_EOF));
       parser_consume(parser, TOK_RBRACE, "expected '}' after list literal");
       expr->as.collection.elements = head;
       return expr;
@@ -1578,7 +1579,7 @@ static AstExpr* parse_primary(Parser* parser) {
       parser_advance(parser);
       AstExpr* inner = parse_expression(parser);
       parser_consume(parser, TOK_RPAREN, "expected ')' after expression");
-      inner->is_parenthesized = true;  // lets `(a shl 16) bitor b` past the mixed-bitwise check
+      if (inner) inner->is_parenthesized = true;  // lets `(a shl 16) bitor b` past the mixed-bitwise check
       return inner;
     case TOK_LBRACE: { // Handle untyped collection literal (map or set)
       const Token* start = parser_advance(parser);
@@ -1664,7 +1665,7 @@ static AstExpr* parse_postfix(Parser* parser) {
             if (parser_check(parser, TOK_RPAREN)) {
               break;
             }
-          } while (true);
+          } while (!parser_check(parser, TOK_EOF));
           parser_consume(parser, TOK_RPAREN, "expected ')' after arguments");
         }
         method_call->as.method_call.args = args;
@@ -3407,7 +3408,7 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
         check_no_trailing_comma(parser, "enum variants");
         break;
       }
-    } while (!parser_check(parser, TOK_RBRACE));
+    } while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF));
   }
   
   const Token* close = parser_consume(parser, TOK_RBRACE, "expected '}' at end of enum body");
