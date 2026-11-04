@@ -47,6 +47,8 @@ seconds after it joined. With no `RAE_WALKER_NET` an app is offline, as before. 
   player.
 - `tools/walkerBot/Main.rae`: a headless host or bot. A bot walks in a
   circle round the host's walker, jumps every 3 s and falls every 15 s.
+- `tools/walkerBot/migration-check.sh [BOTS] [WINDOWS]`: kills the host mid-session
+  ("A host that goes").
 - `tools/walkerBot/soak.sh [SECONDS] [BOTS]`: relay, headless host and bots
   joining and leaving in 20 s waves. It fails on a bot that never played, a
   desync, a leak at exit, or host memory that grew between quiet points.
@@ -100,22 +102,44 @@ timeout makes every peer that is really gone take longer to notice, and a stall 
 still outlast it. A thread that sends keep-alives keeps only the relay satisfied: the
 connections still time out, and it cannot help a process that is frozen or dead.
 
-What a player sees, with the default timeouts: the connections time out at 5 s and the
-relay at 10 s. So when a host stalls, the others' walkers disappear at 5 s, when the
-player's connection to the host ends and it forgets the session. They come back after
-the relay promotes someone at 10 s, as new characters, under new numbers ("Player 4"
-where one was "Player 2"). The world has no shared state to lose beyond the poses,
-which each player owns. A host that quits on purpose is replaced at once, with no such
-gap, and there the promoted player's copy carries over.
+**A remote walker's character stays through it.** A player keeps which entity holds
+which net id across the reconnect (`replicaPlayerForNewHost`), and the new host keeps
+the net ids. So only the old host's walker goes away. What a player sees with the
+default timeouts: connections time out at 5 s and the relay at 10 s, so the walkers on
+screen stand at their last poses until the relay promotes someone at 10 s, then move
+again. One that moved more than 3 m in that time jumps to its pose. A host that quits
+on purpose is replaced at once.
+
+**The app is told.** `walkerNetEvents(net:)`, read after the frame, lists what changed
+this frame, and `walkerNetIsHost` says which side this is now:
+
+| event | meaning |
+|---|---|
+| `becameHost` | the relay promoted this player: it hosts, with the same invite |
+| `hostChanged` | another player hosts: this side reconnects to it |
+| `becamePlayer` | this side hosted, the relay lost it, and it came back as a player |
+| `hostingNewSession` | this side hosted and has no session to go back to: a new invite |
+| `playingAgain` | a player that reconnected has the host's word again |
 
 A stall of 5-10 s leaves the host in place: its connections and the players' end, and
-the players connect again.
+the players connect again. The host then gives them new slots, so in that case the
+walkers do get new characters.
 
-Checked on 2026-11-04 with a relay at default timeouts: a 143 window hosting, a 143
-window and a bot joined, the host frozen by SIGSTOP for 12 s. The joined window hosted,
-the bot followed it, the old host came back as a player after it resumed, and both
-windows ended with 2 other walkers and 0 desyncs. Case 1341 covers this with short
-timeouts, a second migration, a host alone, a shorter stall and a host that quits.
+`tools/walkerBot/migration-check.sh [BOTS] [WINDOWS]` kills the host with SIGKILL,
+with a relay at its default timeouts, and fails if a survivor is not back within 13 s,
+if not exactly one hosts, on a desync, or if a window makes a new character for a
+walker that stayed. Measured on 2026-11-04, one MacBook:
+
+| session | back after the kill | characters made | desyncs |
+|---|---|---|---|
+| 3 bots | 10.0 s the new host, 10.2 s the others | not applicable | 0 |
+| 2 143 windows, 2 bots | 10.0 s the new host (a window), 10.2-10.3 s the others | 0 | 0 |
+
+A frozen host that comes back was checked once, before characters stayed through a
+migration: a 143 host frozen by SIGSTOP for 12 s, with a 143 window and a bot joined.
+The window hosted and the old host came back as a player. Case 1341 covers this with short
+timeouts, a killed host, a second migration, a host alone, a shorter stall and a host
+that quits.
 
 ## Measured (2026-11-03, one MacBook, loopback)
 
