@@ -78,6 +78,7 @@ Byte 0 is the kind. Integers are big-endian.
 | 212 punch | client -> client, direct | secret (8), sender's peer id (4) |
 | 213 punchAck | client -> client, direct | secret (8), sender's peer id (4) |
 | 214 direct | client -> client, direct | sender's peer id (4), payload (a forward that skipped the relay) |
+| 216 forgotten | relay -> client | nothing: a keep-alive or forward came from an address with no peer |
 
 `open` and `join` may end with two more bytes: relay only (1), then the
 device (1 desktop, 2 mobile), which the host-migration rule uses. After those
@@ -89,6 +90,24 @@ migration".
 The host is peer 0, and players are 1, 2, ... in the order they joined. A
 player forwards only to its host. A client ignores datagrams that come
 neither from the relay's address nor from a peer the relay introduced.
+
+## A peer the relay has forgotten
+
+A peer silent for `peerTimeoutMs` (10 s by default) is removed. If that peer was
+only stalled, its later packets come from an address the relay no longer knows.
+They used to be dropped without a word, so the peer never found out. Now a
+keep-alive or a forward from such an address is answered with `forgotten`. The
+answer is one byte, never larger than what it answers, so a forged source address
+gains nothing from it. The packet still counts as dropped.
+
+The client's state becomes `RelayClientState.forgotten`. A player can then call
+`relayPlayerRejoin` (`relayClientRejoin` for the relay part), which joins the same
+session with the token it kept. It gets a new peer id, and the host hears the old
+one left. A spoofed `forgotten` cannot put it in another session: if the relay
+still knows it, its join answers with the same peer id.
+
+A host cannot do this. Its session went when it was removed, or a player was
+promoted. The relay answers it the same way, but nothing acts on that yet.
 
 ## Who may open a session
 

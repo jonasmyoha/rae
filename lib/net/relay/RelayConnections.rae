@@ -267,6 +267,23 @@ func relayHostFromPlayer(
   }
 }
 
+# Join the session again (the relay forgot this player or went silent, lib/net/
+# relay/RelayClient relayClientRejoin), with a new connection to its host
+func relayPlayerRejoin(
+  player: mod RelayPlayer
+  connectionConfig: view ConnectionConfig
+  connectionId: view Int
+  nowMs: view Int
+) {
+  relayClientRejoin(client: player.client, nowMs: nowMs)
+  relayPlayerReconnect(
+    player: player
+    connectionConfig: connectionConfig
+    connectionId: connectionId
+    nowMs: nowMs
+  )
+}
+
 # Another player is host now: a new connection to it (peer 0 again, through
 # the same relay client)
 func relayPlayerReconnect(

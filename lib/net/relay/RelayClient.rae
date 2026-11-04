@@ -51,6 +51,9 @@ enum RelayClientState {
   closed
   # No answer to the request, or the relay went silent
   timedOut
+  # The relay has no peer for this side any more (it went silent for the
+  # relay's timeout): relayClientRejoin, or relayPlayerRejoin
+  forgotten
 }
 
 # What `relayClientReceive` found
@@ -294,6 +297,19 @@ func relayClientJoin(client: mod RelayClient, tokenText: view String, nowMs: vie
   client.lastHeardMs = nowMs
   sendRequest(client: client, nowMs: nowMs)
   ret true
+}
+
+# Join the same session again, after the relay forgot this side or went silent:
+# the session's token is kept. The relay gives this side a new peer id, or its
+# old one if it had not forgotten it after all.
+func relayClientRejoin(client: mod RelayClient, nowMs: view Int) {
+  client.state = RelayClientState.joining
+  client.requestId = newRequestId()
+  client.peerId = -1
+  client.paths.clear()
+  client.startMs = nowMs
+  client.lastHeardMs = nowMs
+  sendRequest(client: client, nowMs: nowMs)
 }
 
 func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
@@ -720,6 +736,10 @@ func relayClientReceive(client: mod RelayClient, nowMs: view Int) ret RelayIncom
         peerId: readU32(bytes: client.inbox, offset: 1)
         start: 0
         count: 0
+      }
+    } else if kind is relayKindForgotten {
+      if client.state is RelayClientState.ready {
+        client.state = RelayClientState.forgotten
       }
     } else if kind is relayKindClosed {
       client.state = RelayClientState.closed

@@ -339,9 +339,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     if netSettings.mode is WalkerNetMode.offline {
       netSettings = walkerNetSettingsFromEnvironment()
     }
-    # The session starts at the first frame (app3d/remoteWalkerSystem
-    # walkerNetAppFrame): the loading before it takes longer than a connect
-    # attempt may
+    # The session starts once the first frames have settled (app3d/
+    # walkerNetSystem walkerNetStartDue): the loading and baking before that
+    # takes longer than the relay waits for a silent peer
     # The crowd is offline-only: in a networked session every other
     # character is a player (app3d/remoteWalkerSystem makes and frees them)
     var cloneCount: Int = walkerCrowdCount

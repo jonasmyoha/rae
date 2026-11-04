@@ -159,6 +159,11 @@ type WalkerNet {
   # The connections' settings, with the session key that authenticates
   # every handshake (the host makes it; a player reads it from the invite)
   connectionConfig: ConnectionConfig
+  # When the app's first frame and its last one ran, and how many frames in a
+  # row have been quick (walkerNetStartDue)
+  firstFrameMs: Int
+  lastFrameMs: Int
+  settledFrames: Int
   # When this side started, and when it was first playing (-1: not yet)
   startMs: Int
   playingAtMs: Int
@@ -228,6 +233,9 @@ func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
     sessionPlayer: createSessionPlayer()
     helloSent: false
     connectionConfig: defaultConnectionConfig()
+    firstFrameMs: -1
+    lastFrameMs: -1
+    settledFrames: 0
     started: false
     startMs: 0
     playingAtMs: -1
@@ -252,6 +260,33 @@ func walkerPoseAt(position: view Vec3) ret WalkerPose {
 
 # Open the session (host) or join it (join): false when the settings say
 # offline or the token is not one
+# The session starts once this many frames in a row took under the time below. A
+# window's first frames load and bake for many seconds, and nothing goes to the
+# relay meanwhile: a session started before them would be dropped by the relay's
+# timeout (a host's for good, since its session goes with it).
+const walkerSettledFrames: Int = 5
+
+const walkerSettledFrameMs: Int = 500
+
+# A machine too slow to ever settle still gets its session after this long
+const walkerStartLatestMs: Int = 60000
+
+# Called once per app frame until the session started: whether to start it now
+func walkerNetStartDue(net: mod WalkerNet, nowMs: view Int) ret Bool {
+  if net.firstFrameMs < 0 {
+    net.firstFrameMs = nowMs
+    net.lastFrameMs = nowMs
+    ret false
+  }
+  if nowMs - net.lastFrameMs < walkerSettledFrameMs {
+    net.settledFrames = net.settledFrames + 1
+  } else {
+    net.settledFrames = 0
+  }
+  net.lastFrameMs = nowMs
+  ret net.settledFrames >= walkerSettledFrames or nowMs - net.firstFrameMs >= walkerStartLatestMs
+}
+
 func walkerNetStart(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) ret Bool {
   net.started = true
   net.startMs = nowMs
@@ -551,20 +586,67 @@ func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: v
   }
 }
 
-func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
-  relayPlayerReceive(player: net.relayPlayer, nowMs: nowMs)
-  # A connect attempt that ran out before the host welcomed this player (a
-  # slow start, a lost burst) is made again
-  let state: ConnectionState = net.relayPlayer.connection.state
-  if not net.sessionPlayer.welcomed and (state is ConnectionState.timedOut or state is ConnectionState.failed) {
+# What this player knows of the session, gone: a rejoin starts from nothing. The
+# host's side freed this player's slot and entity when it went, so it comes back
+# as a new player. Every entity here is freed, so the app's characters for them go
+# too, and new ones come with the next snapshot.
+func forgetPlayerSession(net: mod WalkerNet) {
+  freeAllOf(WalkerPose, net: net, table: net.world.poses)
+  freeAllOf(WalkerPose, net: net, table: net.world.shownPoses)
+  freeAllOf(WalkerNetCheck, net: net, table: net.world.checks)
+  freeAllOf(Replicated, net: net, table: net.world.replicated)
+  net.replicationPlayer = createReplicationPlayer(config: net.config)
+  net.sessionPlayer = createSessionPlayer()
+  net.helloSent = false
+  net.playingAtMs = -1
+}
+
+func freeAllOf(T: type, net: mod WalkerNet, table: view ComponentTable(T)) {
+  loop componentCount(this: table) > 0 {
+    let entityId: EntityId = componentEntityAt(this: table, i: 0)
+    clearEntityComponents(WalkerNetWorld, world: net.world, entityId: entityId)
+    freeEntity(this: net.world.entities, entityId: entityId)
+  }
+}
+
+# Frames that stopped for a while (a slow start, a phone in the background) can
+# outlast any of three clocks: the relay's, which forgets the player; the relay
+# client's, which stops listening; the connection's. Each leaves the player unable
+# to come back by itself, so here it joins again. A session that ended, or a relay
+# that refused it, is left alone.
+func recoverPlayerSession(net: mod WalkerNet, nowMs: view Int) {
+  let clientState: RelayClientState = net.relayPlayer.client.state
+  if clientState is RelayClientState.refused or clientState is RelayClientState.closed {
+    ret
+  }
+  let connectionState: ConnectionState = net.relayPlayer.connection.state
+  let clientLost: Bool = clientState is RelayClientState.forgotten or clientState is RelayClientState.timedOut
+  let connectionLost: Bool = connectionState is ConnectionState.timedOut or connectionState is ConnectionState.failed
+  if not clientLost and not connectionLost {
+    ret
+  }
+  log("[net] lost the session ({clientState}, {connectionState}): joining again")
+  forgetPlayerSession(net: net)
+  if clientLost {
+    relayPlayerRejoin(
+      player: net.relayPlayer
+      connectionConfig: net.connectionConfig
+      connectionId: nowMs bitand 65535
+      nowMs: nowMs
+    )
+  } else {
     relayPlayerReconnect(
       player: net.relayPlayer
       connectionConfig: net.connectionConfig
       connectionId: nowMs bitand 65535
       nowMs: nowMs
     )
-    net.helloSent = false
   }
+}
+
+func walkerNetPlayerFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: view Int) {
+  relayPlayerReceive(player: net.relayPlayer, nowMs: nowMs)
+  recoverPlayerSession(net: net, nowMs: nowMs)
   if not net.helloSent and connectionIsConnected(connection: net.relayPlayer.connection) {
     sessionWriteHello(player: net.sessionPlayer, out: net.message)
     let queued: Bool = connectionSendReliable(
@@ -687,5 +769,5 @@ func walkerNetTimeUp(net: view WalkerNet, nowMs: view Int) ret Bool {
 
 # How many remote walkers this side knows now
 func walkerNetRemoteCount(net: view WalkerNet) ret Int {
-  ret componentCount(this: net.world.poses) - 1
+  ret Math.max(a: componentCount(this: net.world.poses) - 1, b: 0)
 }

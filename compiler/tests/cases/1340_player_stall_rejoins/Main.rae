@@ -1,0 +1,258 @@
+# lib/app3d/walkerNetSystem: a player whose frames stop for a while (a slow start:
+# first frames that load and bake) comes back and plays, whichever clock ran out
+# while it was away. Real relay, real sockets, in one process, with short timeouts.
+#
+# - longer than the relay's peer timeout: the relay has forgotten it;
+# - longer than the Connection's timeout, with the relay still knowing it;
+# - longer than its relay client's silence timeout;
+# - during the join itself, longer than the request timeout.
+# Afterwards each side sees exactly one other walker, and the desync checks run.
+# If the session ended meanwhile, it stops asking.
+open net/Udp
+open net/relay/RelayWire
+open net/relay/RelayServer
+open net/relay/RelayClient
+open net/relay/Relay
+open Vec3
+open ecs/ComponentTable
+open app3d/walkerNetSystem/WalkerNetSystem
+
+func settingsFor(
+  mode: view WalkerNetMode
+  port: view Int
+  token: view String
+) ret WalkerNetSettings {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  settings.mode = mode
+  settings.relayPort = port
+  settings.token = token
+  ret settings
+}
+
+type Stage {
+  relay: RelayServer
+  host: WalkerNet
+  player: WalkerNet
+  startMs: Int
+}
+
+func elapsed(stage: view Stage) ret Int {
+  ret nowMs() - stage.startMs
+}
+
+func poseOf(x: view Float) ret WalkerPose {
+  ret walkerPoseAt(position: Vec3 { x: x, y: 0.0, z: 0.0 })
+}
+
+func tick(stage: mod Stage, playerAwake: view Bool) {
+  relayFrame(server: stage.relay)
+  walkerNetFrame(net: stage.host, localPose: poseOf(x: 1.0), nowMs: elapsed(stage: stage))
+  if playerAwake {
+    walkerNetFrame(net: stage.player, localPose: poseOf(x: 2.0), nowMs: elapsed(stage: stage))
+  }
+  sleep(ms: 1)
+}
+
+func playing(stage: view Stage) ret Bool {
+  ret walkerNetRemoteCount(net: stage.host) is 1 and walkerNetRemoteCount(net: stage.player) is 1
+}
+
+func runUntilPlaying(stage: mod Stage, limitMs: view Int) ret Bool {
+  let until: Int = elapsed(stage: stage) + limitMs
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage, playerAwake: true)
+    if playing(stage: stage) {
+      ret true
+    }
+  }
+  ret false
+}
+
+func stallPlayer(stage: mod Stage, stallMs: view Int) {
+  let until: Int = elapsed(stage: stage) + stallMs
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage, playerAwake: false)
+  }
+}
+
+# A relay, a host and a joined player with these timeouts, the player started
+# `joinStallMs` before its frames do (0: at once)
+func createStage(
+  peerTimeoutMs: view Int
+  connectionTimeoutMs: view Int
+  silenceTimeoutMs: view Int
+) ret Stage {
+  var relayConfig: RelayConfig = defaultRelayConfig()
+  relayConfig.peerTimeoutMs = peerTimeoutMs
+  var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: relayConfig)
+  let port: Int = relayPort(server: relay)
+  var host: WalkerNet = createWalkerNet(
+    settings: settingsFor(mode: WalkerNetMode.host, port: port, token: "")
+  )
+  host.connectionConfig.timeoutMs = connectionTimeoutMs
+  # Under the short peer timeout: only the player stalls
+  host.relayHost.client.config.keepAliveMs = 100
+  let started: Bool = walkerNetStart(net: host, localPose: poseOf(x: 1.0), nowMs: 0)
+  var player: WalkerNet = createWalkerNet(
+    settings: settingsFor(mode: WalkerNetMode.join, port: port, token: "")
+  )
+  player.connectionConfig.timeoutMs = connectionTimeoutMs
+  player.relayPlayer.client.config.silenceTimeoutMs = silenceTimeoutMs
+  player.relayPlayer.client.config.keepAliveMs = 100
+  ret Stage { relay: own relay, host: own host, player: own player, startMs: nowMs() }
+}
+
+func startPlayer(stage: mod Stage) {
+  let waited: Int = elapsed(stage: stage) + 2000
+  loop elapsed(stage: stage) < waited and walkerNetToken(net: stage.host).length() is 0 {
+    relayFrame(server: stage.relay)
+    walkerNetFrame(net: stage.host, localPose: poseOf(x: 1.0), nowMs: elapsed(stage: stage))
+    sleep(ms: 1)
+  }
+  stage.player.settings.token = walkerNetToken(net: stage.host)
+  let joining: Bool = walkerNetStart(
+    net: stage.player
+    localPose: poseOf(x: 2.0)
+    nowMs: elapsed(stage: stage)
+  )
+}
+
+func report(stage: mod Stage, name: view String) {
+  let checksBefore: Int = stage.player.checks
+  let back: Bool = runUntilPlaying(stage: stage, limitMs: 6000)
+  # A moment longer, to see the desync checks run and nothing come apart
+  let until: Int = elapsed(stage: stage) + 400
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage, playerAwake: true)
+  }
+  log(
+    "{name}: back {back}, one walker each {playing(stage: stage)}, checks run {stage.player.checks > checksBefore}, desyncs {stage.player.desyncs}"
+  )
+  closeRelayServer(server: stage.relay)
+}
+
+func stallThenPlay(
+  name: view String
+  peerTimeoutMs: view Int
+  connectionTimeoutMs: view Int
+  silenceTimeoutMs: view Int
+  stallMs: view Int
+) {
+  var stage: Stage = createStage(
+    peerTimeoutMs: peerTimeoutMs
+    connectionTimeoutMs: connectionTimeoutMs
+    silenceTimeoutMs: silenceTimeoutMs
+  )
+  startPlayer(stage: stage)
+  let first: Bool = runUntilPlaying(stage: stage, limitMs: 3000)
+  stallPlayer(stage: stage, stallMs: stallMs)
+  log("{name}: played first {first}, relay timed out {stage.relay.stats.timedOut}")
+  report(stage: stage, name: name)
+}
+
+func stallDuringTheJoin() {
+  var stage: Stage = createStage(
+    peerTimeoutMs: 300
+    connectionTimeoutMs: 5000
+    silenceTimeoutMs: 15000
+  )
+  stage.player.relayPlayer.client.config.requestTimeoutMs = 200
+  startPlayer(stage: stage)
+  # The join went out, and its answer waits while the frames stop
+  stallPlayer(stage: stage, stallMs: 800)
+  report(stage: stage, name: "stall during the join")
+}
+
+func sessionEndsDuringTheStall() {
+  var stage: Stage = createStage(
+    peerTimeoutMs: 300
+    connectionTimeoutMs: 5000
+    silenceTimeoutMs: 15000
+  )
+  startPlayer(stage: stage)
+  let first: Bool = runUntilPlaying(stage: stage, limitMs: 3000)
+  stallPlayer(stage: stage, stallMs: 600)
+  walkerNetLeave(net: stage.host, nowMs: elapsed(stage: stage))
+  stage.host.settings.mode = WalkerNetMode.offline
+  let until: Int = elapsed(stage: stage) + 800
+  loop elapsed(stage: stage) < until {
+    tick(stage: stage, playerAwake: true)
+  }
+  log(
+    "the session ended meanwhile: played first {first}, relay client {stage.player.relayPlayer.client.state}, reason unknown session {stage.player.relayPlayer.client.refusedReason is refusedUnknownSession}, no walkers {walkerNetRemoteCount(
+      net: stage.player
+    )}"
+  )
+  closeRelayServer(server: stage.relay)
+}
+
+# A window's first frames: when does the session start?
+func startsAfterSettling() {
+  var net: WalkerNet = createWalkerNet(
+    settings: settingsFor(mode: WalkerNetMode.join, port: 7777, token: "")
+  )
+  # Baking: each frame takes seconds. Then quick frames, and one more stall.
+  let frames: List(Int) = {
+    0
+    4000
+    9000
+    9016
+    9032
+    9048
+    9064
+    12000
+    12016
+    12032
+    12048
+    12064
+    12080
+    12096
+  }
+  var startedAt: Int = -1
+  loop let frameMs: Int in frames {
+    if startedAt < 0 and walkerNetStartDue(net: net, nowMs: frameMs) {
+      startedAt = frameMs
+    }
+  }
+  log("a slow start: the session starts at {startedAt} ms, the fifth quick frame in a row")
+  var slow: WalkerNet = createWalkerNet(
+    settings: settingsFor(mode: WalkerNetMode.join, port: 7777, token: "")
+  )
+  var slowAt: Int = -1
+  var frameMs: Int = 0
+  loop frameMs <= 70000 and slowAt < 0 {
+    if walkerNetStartDue(net: slow, nowMs: frameMs) {
+      slowAt = frameMs
+    }
+    frameMs = frameMs + 800
+  }
+  log("a machine that never settles: the session starts at {slowAt} ms")
+}
+
+func main() ret Int {
+  startsAfterSettling()
+  stallThenPlay(
+    name: "past the relay's timeout"
+    peerTimeoutMs: 300
+    connectionTimeoutMs: 5000
+    silenceTimeoutMs: 15000
+    stallMs: 800
+  )
+  stallThenPlay(
+    name: "past the connection's timeout"
+    peerTimeoutMs: 8000
+    connectionTimeoutMs: 400
+    silenceTimeoutMs: 15000
+    stallMs: 800
+  )
+  stallThenPlay(
+    name: "past the relay client's silence timeout"
+    peerTimeoutMs: 300
+    connectionTimeoutMs: 400
+    silenceTimeoutMs: 500
+    stallMs: 800
+  )
+  stallDuringTheJoin()
+  sessionEndsDuringTheStall()
+  ret 0
+}

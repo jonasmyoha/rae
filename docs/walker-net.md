@@ -57,6 +57,32 @@ With every snapshot the host replicates a `WalkerNetCheck`: the sum of all
 pose values it captured. A player that applied the same snapshot sums its own
 copy, and a difference counts as a desync (`net.desyncs` of `net.checks`).
 
+## A slow start, and a player that stalls
+
+Nothing reaches the relay while a frame is running, so a window whose frames stop
+for a while looks gone. Two things deal with that:
+
+- **The session starts after the first frames have settled** (`walkerNetStartDue`):
+  once 5 frames in a row took under 500 ms, or 60 s after the first frame on a
+  machine that never gets there. This matters most for a host, which cannot come
+  back: its session goes with it.
+- **A player that lost the session joins it again** (`recoverPlayerSession`). A
+  stall can outlast any of three clocks: the relay's peer timeout (10 s), the
+  relay client's silence timeout (15 s) and the connection's (5 s). Each used to
+  leave the player stuck until it quit. Now it frees what it knew of the session
+  and joins again as a new player, so it may come back as "Player 3" where it was
+  "Player 2". It logs `[net] lost the session (...): joining again`. A session that
+  ended, or a refusal, is left alone.
+
+Checked on 2026-11-04 on one MacBook with a relay at its default timeouts: four
+143 windows started at once all joined (no timeouts, 0 desyncs), and a joined 143
+window frozen with SIGSTOP for 12 s came back and played (the relay counted the
+timeout, 0 desyncs). Those windows' first frames were quick, 390-683 ms to the
+start of the session, so the settled start itself was not stressed on this
+machine; case 1340 tests it and the recovery with short timeouts.
+
+A host that stalls past the relay's timeout mid-session is not recovered.
+
 ## Measured (2026-11-03, one MacBook, loopback)
 
 - `soak.sh 600 20 4`: 10 minutes, 4 143 windows joined all the time and 20
