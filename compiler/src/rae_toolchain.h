@@ -37,6 +37,10 @@ bool rae_toolchain_write_wrapper(const RaeToolchainSelf* self, const char* dir);
  * pin. Says which when they do not. */
 bool rae_toolchain_repo_agrees(const char* pack_path, const char* version, const char* commit);
 
+/* When the repo of `pack_path` has a ./rae, print the verdict that a build goes through it, and
+ * return true: which compiler `rae toolchain` itself is then does not matter. */
+bool rae_toolchain_wrapper_runs_pin(const char* pack_path, const char* version, const char* commit);
+
 /* What `rae toolchain status` adds: the store, and whether ./rae is current. */
 void rae_toolchain_print_status(const char* pack_path);
 

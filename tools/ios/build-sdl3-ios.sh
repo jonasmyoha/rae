@@ -12,7 +12,7 @@ out="$here/frameworks"
 tag="release-3.4.10"
 src="$here/.build/SDL"
 b="$here/.build/sdl-ios"
-depmin="13.0"
+depmin="15.0"  # as gen-ios.sh: Xcode 27 refuses anything older
 
 mkdir -p "$out" "$here/.build"
 

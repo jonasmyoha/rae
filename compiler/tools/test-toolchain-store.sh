@@ -280,7 +280,14 @@ has root-pin-changes-two "$(cat "$SUBFOLDERS/two/Two.raepack")" "version: \"$B\"
 check root-path "$(cd "$SUBFOLDERS" && "$RAE" toolchain path 2>/dev/null)" "$RAE_HOME/toolchains/$B"
 has root-status-names-the-pin "$(cd "$SUBFOLDERS" && "$RAE" toolchain status 2>&1)" "pins Rae $B"
 check wrapper-toolchain-path "$(cd "$SUBFOLDERS/two" && ../rae toolchain path 2>/dev/null)" "$RAE_HOME/toolchains/$B"
+# ./rae runs `toolchain` in its tool, and a build in the pin: not a mismatch
+out=$(cd "$SUBFOLDERS" && "$RAE" toolchain status 2>&1)
+check status-with-wrapper-ok "$?" 0
+has status-with-wrapper-says "$out" "verdict: ./rae builds with $RAE_HOME/toolchains/$B"
 rm -f "$SUBFOLDERS/rae"
+out=$(cd "$SUBFOLDERS" && "$RAE" toolchain status 2>&1)
+check status-without-wrapper-fails "$?" 1
+has status-without-wrapper-says "$out" "UNSATISFIED"
 
 # ---- Shared builds per version
 dep_value() { (unset RAE_BOX3D RAE_SQLITE RAE_WAMR; . "$RAE_HOME/toolchains/$1/.deps"; eval "echo \"\${$2:-}\""); }
