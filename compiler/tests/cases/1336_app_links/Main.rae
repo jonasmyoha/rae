@@ -1,0 +1,26 @@
+# A link that opened the app comes from nextAppLink once, whole: the launch
+# stand-in (RAE_OPEN_URL, config.env) first, then what the platform pushed, in
+# order, then nothing.
+open AppLinks
+
+func printNext(appLinks: mod AppLinks) {
+  if let url: String = nextAppLink(appLinks: appLinks) {
+    log("link: {url}")
+  } else {
+    log("no link")
+  }
+}
+
+func main() ret Int {
+  var appLinks: AppLinks = createAppLinks()
+  printNext(appLinks: appLinks)
+  printNext(appLinks: appLinks)
+  simulateAppLink(url: "https://example.com/join/abc?from=mail&x=1#top")
+  simulateAppLink(url: "myapp://join/def")
+  printNext(appLinks: appLinks)
+  simulateAppLink(url: "https://example.com/join/ghi")
+  printNext(appLinks: appLinks)
+  printNext(appLinks: appLinks)
+  printNext(appLinks: appLinks)
+  ret 0
+}

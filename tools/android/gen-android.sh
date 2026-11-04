@@ -17,6 +17,7 @@
 #   RAE_ANDROID_ENTRY     the entry file (default Main.rae or src/Main.rae)
 #   RAE_ANDROID_ICON      a square PNG (default the project's appIcon.png)
 #   RAE_ANDROID_ORIENTATION  any (default) | landscape | portrait
+#   RAE_APP_LINKS / RAE_APP_SCHEME  the links that open the app (docs/app-links.md)
 #   RAE_ANDROID_VERSION / RAE_ANDROID_BUILD  versionName / versionCode
 #   RAE_ANDROID_KEYSTORE  the signing keystore (default ~/.android/debug.keystore,
 #                         made when missing; password "android", alias
@@ -113,10 +114,11 @@ mv "$gen/apk/lib/arm64-v8a/libmain.so.stripped" "$gen/apk/lib/arm64-v8a/libmain.
 # (the unstripped objects stay in $gen/objects; ndk-stack -sym wants a
 # library with symbols: link it again without the strip step)
 
-# 4. SDL's Java half (org.libsdl.app), compiled against the platform and
+# 4. SDL's Java half (org.libsdl.app) and RaeActivity (the link that opened
+#    the app, lib/AppLinks), compiled against the platform and
 #    turned into classes.dex
 echo "gen-android: compiling SDL's Java half..."
-find "$deps/sdl3/java" -name '*.java' > "$gen/javaSources.txt"
+{ find "$deps/sdl3/java" -name '*.java'; find "$here/java" -name '*.java'; } > "$gen/javaSources.txt"
 javac -nowarn -Xlint:none --release 11 -cp "$platform/android.jar" -d "$gen/classes" @"$gen/javaSources.txt" 2>&1 \
   | grep -v '^Note:' || true
 "$build_tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$gen/apk" \
@@ -129,6 +131,36 @@ if [ -f "$icon" ]; then
   cp "$icon" "$gen/res/mipmap/ic_launcher.png"
   "$build_tools/aapt2" compile -o "$gen/resources.zip" --dir "$gen/res"
   icon_attribute='android:icon="@mipmap/ic_launcher"'
+fi
+# The links that open this app (docs/app-links.md): one verified https filter
+# per RAE_APP_LINKS entry (host or host/pathPrefix), one for RAE_APP_SCHEME
+link_filters=""
+for link in ${RAE_APP_LINKS:-}; do
+  case "$link" in
+    *'<'*|*'>'*|*'&'*|*'"'*|*://*) echo "error: an RAE_APP_LINKS entry is host or host/path, no scheme: $link" >&2; exit 1 ;;
+  esac
+  link_host=${link%%/*}
+  link_path=""
+  case "$link" in */*) link_path=" android:pathPrefix=\"/${link#*/}\"" ;; esac
+  link_filters="$link_filters
+      <intent-filter android:autoVerify=\"true\">
+        <action android:name=\"android.intent.action.VIEW\" />
+        <category android:name=\"android.intent.category.DEFAULT\" />
+        <category android:name=\"android.intent.category.BROWSABLE\" />
+        <data android:scheme=\"https\" android:host=\"$link_host\"$link_path />
+      </intent-filter>"
+done
+if [ -n "${RAE_APP_SCHEME:-}" ]; then
+  case "$RAE_APP_SCHEME" in
+    *[!a-z0-9.+-]*) echo "error: RAE_APP_SCHEME is lowercase letters, digits, . + -: $RAE_APP_SCHEME" >&2; exit 1 ;;
+  esac
+  link_filters="$link_filters
+      <intent-filter>
+        <action android:name=\"android.intent.action.VIEW\" />
+        <category android:name=\"android.intent.category.DEFAULT\" />
+        <category android:name=\"android.intent.category.BROWSABLE\" />
+        <data android:scheme=\"$RAE_APP_SCHEME\" />
+      </intent-filter>"
 fi
 cat > "$gen/AndroidManifest.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
@@ -148,7 +180,7 @@ cat > "$gen/AndroidManifest.xml" <<EOF
       android:hardwareAccelerated="true"
       android:extractNativeLibs="true"
       android:enableOnBackInvokedCallback="false">
-    <activity android:name="org.libsdl.app.SDLActivity"
+    <activity android:name="org.rae.app.RaeActivity"
         android:label="$label"
         android:alwaysRetainTaskState="true"
         android:launchMode="singleInstance"
@@ -159,7 +191,7 @@ cat > "$gen/AndroidManifest.xml" <<EOF
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
+      </intent-filter>$link_filters
     </activity>
   </application>
 </manifest>

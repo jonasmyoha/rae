@@ -1,0 +1,64 @@
+# AppLinks — the links that opened this app (docs/app-links.md): a link like
+# https://example.com/join/abc on iOS (a universal link) and Android (an app
+# link), or a custom scheme like myapp://join/abc.
+#
+#     var appLinks: AppLinks = createAppLinks()   # a field on the World or App
+#     ...                                         # each frame:
+#     if let url: String = nextAppLink(appLinks: appLinks) { ...open it... }
+#
+# A link that launched the app waits for the first call; a link that arrives
+# while it runs wakes the frame loop (EventLoop.wake) and comes from the next
+# call. Each link is handed over once, whole, in the order they came.
+#
+# On a desktop nothing opens an app this way. RAE_OPEN_URL=<url> stands in for
+# a link that launched it, so the same code path runs in a test.
+import Sys
+cheader "runtime_applinks_apple.h"
+
+func rae_ext_AppLinks_take() unsafe extern("rae_ext_AppLinks_take") ret String
+
+func rae_ext_AppLinks_simulate(url: String) unsafe extern("rae_ext_AppLinks_simulate")
+
+type AppLinks {
+  waiting: List(String) = List.create(String, cap: 2)
+  # the RAE_OPEN_URL stand-in has been read: it is one link, once
+  standInRead: Bool = false
+}
+
+func createAppLinks() ret AppLinks {
+  ret AppLinks {}
+}
+
+# A link in the system's place, for a test
+func simulateAppLink(url: view String) {
+  unsafe {
+    rae_ext_AppLinks_simulate(url: url)
+  }
+}
+
+# The next link that opened the app, or none: one link per call
+func nextAppLink(appLinks: mod AppLinks) ret opt String {
+  if not appLinks.standInRead {
+    appLinks.standInRead = true
+    let standIn: String = Sys.getEnv(name: "RAE_OPEN_URL")
+    if standIn.length() > 0 {
+      simulateAppLink(url: standIn)
+    }
+  }
+  unsafe {
+    let taken: String = rae_ext_AppLinks_take()
+    if taken.length() > 0 {
+      let lines: List(String) = taken.split(sep: "\n")
+      loop let line: view String in lines {
+        if line.length() > 0 {
+          appLinks.waiting.add(value: line)
+        }
+      }
+    }
+  }
+  if let first: String = appLinks.waiting.copyAt(index: 0) {
+    appLinks.waiting.remove(index: 0)
+    ret first
+  }
+  ret none
+}

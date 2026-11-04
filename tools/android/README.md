@@ -113,3 +113,10 @@ missing), `RAE_ANDROID_API` (the oldest Android, default 28 = Android 9) and
 - In the emulator a frame takes about 80–120 ms. The emulator translates
   Vulkan to Metal, so this says nothing about a phone.
 - Not yet run on a real device.
+
+## Links that open the app
+
+`RAE_APP_LINKS` (`https` hosts and paths: verified app links) and
+`RAE_APP_SCHEME` (a custom scheme) add intent filters to `RaeActivity`, the
+app's activity (`java/org/rae/app/RaeActivity.java`), which passes the URL to
+lib/AppLinks. docs/app-links.md lists the file the website must serve.

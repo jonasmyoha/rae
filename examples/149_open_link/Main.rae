@@ -1,0 +1,83 @@
+# The link that opened this app (lib/AppLinks, docs/app-links.md): it logs the
+# URL and shows it. The link can arrive at launch or while the app runs.
+#
+#   On a desktop, stand in for a link that launched it:
+#     RAE_OPEN_URL=https://example.com/join/abc rae run examples/149_open_link/Main.rae
+#   On an iPhone, with a custom scheme (no website needed):
+#     RAE_APP_SCHEME=raejoin sh tools/ios/run-ios.sh examples/149_open_link
+#     xcrun devicectl device process launch --device <device> \
+#       --payload-url raejoin://join/abc com.rae.149openlink
+import Gpu2d
+import Gpu2dText
+import SdfText
+open AppLinks
+open Gpu2dCanvas
+
+const textColor: Int = 0xFFFFFFFF
+
+const quietColor: Int = 0x9FB3C8FF
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 900, height: 500, title: "149: open from a link")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  Gpu2d.setDesignResolution(width: 900.0, height: 500.0, fit: 0)
+  let font: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "examples/149_open_link/assets/Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "examples/149_open_link/assets/Roboto-Regular.mtsdf.raw"
+  )
+  var appLinks: AppLinks = createAppLinks()
+  var lastUrl: String = ""
+
+  loop not Gpu2d.pollClose() {
+    if let url: String = nextAppLink(appLinks: appLinks) {
+      log("opened with: {url}")
+      lastUrl = url
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.063
+      g: 0.070
+      b: 0.094
+      a: 1.0
+    )
+    if lastUrl.length() is 0 {
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: font
+        text: "Opened without a link."
+        x: 40.0
+        y: 200.0
+        sizePx: 36.0
+        color: quietColor
+      )
+    } else {
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: font
+        text: "Opened with:"
+        x: 40.0
+        y: 160.0
+        sizePx: 28.0
+        color: quietColor
+      )
+      let lines: Int = Gpu2dText.drawTextWrappedEx(
+        canvas: canvas
+        font: font
+        text: lastUrl
+        x: 40.0
+        y: 210.0
+        sizePx: 36.0
+        color: textColor
+        maxWidth: 820.0
+        lineHeight: 44.0
+        outlineWidth: 0.0
+        outlineColor: 0
+      )
+    }
+    Gpu2d.endFrame(canvas: canvas)
+    Gpu2d.waitEvents(timeoutSec: 0.5)
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  ret 0
+}
