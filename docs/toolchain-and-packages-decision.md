@@ -1,259 +1,203 @@
 # Decision record: toolchain pins, one store, and the package manager
 
-**Status: proposed. Not agreed. Nothing here is built, and no project has moved.**
-Section 5 lists the answers that are the owner's to give. The migration in section 6 does not
-start until they are given.
+**Status: decided in outline on 2026-11-04. Three details wait for agreement (section 7). Nothing is
+built and no project has moved.**
 
-This record answers the queue task "toolchain: pins, one shared store, and the package manager".
-It builds on docs/versioning-and-toolchain.md and docs/raepack-v2-and-packages.md.
+The three games outside this repo have neutral names here, because their real names must not appear
+in this repository: game proto1 builds with `rae-pinned`, game proto2 has `src` and `server` packs,
+and game proto3's lock names a commit that no longer exists.
 
-The three games outside this repo are called by neutral names here, because their real names must
-not appear in this repository: game proto1 builds with `rae-pinned`, game proto2 has `src` and `server`
-packs, and game proto3's lock names a commit that no longer exists.
+## 1. Decisions
 
-## 1. What was measured (2026-11-04)
+1. **No `rae` on PATH.** Each project has its own small `./rae` (section 3).
+2. **The package manager is in the C compiler, for now.** It extends what exists.
+3. **One file.** The `.raepack` holds what `rae.lock` holds today, and `rae.lock` goes (section 4).
+4. **Pins are version numbers, not commits**, for the compiler and for packages (section 5).
+5. **A pin is a name, a source (git URL or local path) and a version.**
+6. **One git repo can hold several packages.**
+7. **No registry yet.** Git and local paths are enough for now.
+8. **Build real example packages**, to prove the design (section 6).
+
+## 2. What was measured (2026-11-04)
 
 | question | measured |
 |---|---|
-| Does a normal build change a pin? | Yes. A project pinned to `930bf77d` was built by main's compiler. Its `rae.lock` then said `0.2.339-dev.668+dirty`, `47ba936a`. That is how `+dirty` got into the committed locks of game proto2 and game proto3. |
-| When does a build write the lock? | Only when the pack parses and declares a `rae` requirement or dependencies. A pack that does not parse is skipped without a message, so it has no lock check at all. |
-| Is the commit in the lock always right? | No. It is baked in when the compiler is built, so it can be older than the checkout: `47ba936a` above, with HEAD at `55a8ac7e`. |
-| Can an old compiler be used as it is? | Yes. The real `930bf77d` compiler builds the same project and writes its own commit back. |
-| Size of a pin today | 286-369 MB for a full checkout, 428 MB for `rae-pinned`. |
-| Size with only what a build needs | 55 MB checked out, 64 MB after the compiler build, using a sparse checkout of `compiler lib tools third_party`. 143 and 106 both emit C from it. |
-| Time to make a pin | 14 s from nothing, with the clone from a local repository and the compiler build. |
-| Can the git metadata be dropped (`git archive`)? | No. That compiler reports `unknown unknown`, and would write it into locks. The checkout must stay a git checkout. |
-| The clone every pin shares | 389 MB, once. |
-| Do the pinned commits still exist? | **Not all.** game proto3's `a6c0ae07` is gone from Rae, removed by a history rewrite. The current pins of the new SUMU, game proto1 and game proto2 are on main and pushed. |
+| Does a normal build change a pin? | Yes. Main's compiler overwrote a pin to `930bf77d` with `0.2.339-dev.668+dirty`, `47ba936a`. That is how `+dirty` got into committed locks. |
+| When does a build write the lock? | Only when the pack parses and declares a `rae` requirement or dependencies. A pack that does not parse skips the check with no message. |
+| Can an old compiler be used as it is? | Yes. The real `930bf77d` compiler built the same project. |
+| Size of a pin | 286-428 MB as a full checkout. 64 MB as a sparse checkout of `compiler lib tools third_party`, with the compiler built. 143 and 106 emit C from it. |
+| Time to make a pin | 14 s, including a clone from a local repository. |
+| Can the git metadata be dropped? | Not today. A compiler built from `git archive` reports `unknown unknown`. Its version text would need another source. |
+| The one clone that pins share | 389 MB. |
+| Do commit pins survive? | **No.** Game proto3's `a6c0ae07` is gone from Rae, removed by a history rewrite. |
+| Rae's tags | 3 tags, in a history where `compiler/VERSION` changed in 659 commits. |
 
-How each project picks its Rae today:
+## 3. `./rae`, instead of PATH
 
-| project | env script | Rae it builds with | packs and locks |
-|---|---|---|---|
-| new SUMU | 362 lines, plus 73 in `rae-pin.sh` | committed pin `a34534a1` | 3 locks in one repo, moved together with `sed` |
-| game proto1 | 196 lines | `rae-pinned` at `930bf77d`, named in the uncommitted `.env` | 1 |
-| game proto2 | 143 lines | main checkout; the lock says `5898190c` | 2 (`src`, `server`) |
-| game proto3 | 142 lines | main checkout; the lock says `a6c0ae07`, which no longer exists | 1 |
+A short script committed in each project, the way Gradle's `gradlew` works. A person types `./rae
+build`, and a Makefile calls `./rae` too.
 
-None of these has a real git dependency. Every `dep` line is a path inside the project's own repo.
+- It reads the version from the project's `.raepack`. It can read it with a few lines of shell,
+  because `rae format` owns the file's layout, so the line is always in the same form.
+- It runs `~/.rae/toolchains/<version>/compiler/bin/rae` with the same arguments. If that toolchain
+  is missing, it fetches and builds it first.
+- `RAE_ROOT=<checkout> ./rae build` uses that checkout for one command, and prints one line saying so.
+- `./rae toolchain ...` needs commands that old compilers do not have, so it runs in the newest
+  toolchain in the store.
 
-## 2. The six questions
+Why this is better than PATH, and not only different:
 
-### (a) Inside the compiler, or a separate tool written in Rae?
+- A fresh clone builds with one command and no install step. It needs only git, make and a C compiler.
+- Nothing global chooses a version. The project chooses.
 
-**Recommendation: inside the compiler, in C, extending what is there.**
+**Criticism of this choice:** it puts a script back in each project, which is the problem this task
+started from. The difference is that it is generated and the same everywhere, has no project logic,
+and holds about 25 lines against 142-362 today. `./rae toolchain status` says when it is out of date,
+and `rae init` writes it. A `~/.rae` store still exists, but it holds only copies that can be made
+again, and nothing in it decides anything.
 
-- It is already there: `rae_deps.c` (405 lines), the package commands in `main.c` (about 200) and
-  `rae toolchain` (about 260). It has no bootstrapping problem.
-- Resolution has to run inside every build anyway. Imports are resolved through it, and `sema.c`
-  uses it to enforce package boundaries. A separate tool would have to hand its result back to
-  the compiler on each build, or the compiler would still have to read the lock itself.
-- A build must work with no second program present and no network.
-
-Against it: Rae's rule is "written in Rae whenever it can be". That rule is about the runtime and
-the libraries, and AGENTS.md says it does not apply to the compiler's own C. The compiler is C, so
-this code joins the language it already depends on. If the compiler is ever written in Rae, this
-code moves with it, and nothing here blocks that.
-
-### (b) How much does it need from the parser and semantics?
-
-**Very little, in one direction only.** The manager needs no knowledge of Rae syntax:
-
-- It reads `.raepack`, with `raepack.c` (1,033 lines, using the compiler's lexer), and `rae.lock`.
-- It never reads imports or source. It does not need to know what a program uses.
-- The compiler asks it two questions: where does the import prefix `x/` live, and which package owns
-  this file? Those are the only calls from the compiler into it, apart from the commands and the
-  format preflight, which skips dependency files.
-
-So deep syntax knowledge is not the reason to keep it inside. The reason is the first question: the
-compiler needs its answers on every build, and it needs no bootstrapping.
-
-### (c) If it were written in Rae: what builds it?
-
-This is the case against a Rae tool, so it is answered in full:
-
-- **Fresh machine:** it needs a Rae compiler first, so the C compiler still has to be built by hand
-  or by a script. The tool saves none of that step.
-- **Which Rae builds it:** either the project's pin, so the tool differs per project, and old pins
-  cannot build a tool newer than they are. Or a fixed Rae, which is a second pin to manage, for the
-  thing that manages pins.
-- **Shipping:** a binary per platform, or compiled on first use. A small Rae program takes about
-  0.2 s with the runtime cached, so speed is not the problem. The version tangle is.
-
-Nothing here needs a tool in Rae today. **Recommendation: do not write one.**
-
-### (d) One system, one lockfile, one store, one resolver?
-
-**One lockfile and one store root: yes. One resolver: no, because they answer different things.**
-
-- `rae.lock` keeps both, as it does now. A separate pin file would solve only the case of several
-  packs in one repo, which section 3.3 solves another way.
-- A toolchain is chosen before any compiler runs, by exact commit. Dependencies are resolved by the
-  chosen compiler. A shared resolver would have the launcher depending on the format of whichever
-  compiler is pinned.
-- So the launcher reads and writes the `toolchain` line only. Everything else in the file belongs to
-  the pinned compiler.
-
-### (e) What happens to what exists?
-
-**Extend it. Replace nothing except `rae toolchain use`.**
-
-- Keep `rae add`, `fetch`, `update`, `tree`, path and git dependencies, and `.rae/deps/<name>`.
-- Keep the pack's `rae: { version }`. It says what a library needs, which a pin cannot say. A pin is
-  the exact commit for one project.
-- **Remove `rae toolchain use`.** It moves the one shared checkout, which is what this task ends.
-  Its error message currently tells people to run it, so that text changes too.
-- **Do not build a shared store for git dependencies yet.** No project has one. Add it when one does.
-
-### (f) Is a registry still out of scope?
-
-**Yes, still out.** Several projects can share a package by git URL and commit today, and none does.
-A registry adds hosting, accounts, name ownership and withdrawing bad releases.
-
-Reconsider it when any of these becomes true: people outside these repositories publish packages;
-one project needs two packages that need different versions of a third; or finding a package by
-name is a real problem. The dependency rule stays as it is until then: one version per name in a
-build, and a conflict is an error.
-
-## 3. The toolchain design
-
-### 3.1 The launcher
-
-The proposal does not say which `rae` a person types. Today none is on PATH, and each project finds
-its own path, which is why each project has a script.
-
-- `~/.rae/bin/rae` is on PATH. It is an ordinary compiler binary, taken from a store entry.
-- At the start of a command it finds the nearest `rae.lock` going up from the project. If that lock
-  names a different commit, it makes that toolchain ready if needed and runs the same command with
-  that compiler, passing every argument on.
-- `rae toolchain ...` always runs in the launcher. Everything else runs in the pinned compiler.
-- A pinned compiler can be old and know nothing of this, and that is fine. It only receives a command
-  it already understands. The launcher sets an environment variable so a newer pinned compiler does
-  not dispatch again.
-- It points at a store entry, not at the Rae checkout, so work in progress on Rae cannot break every
-  project. `rae toolchain self-update` moves it.
-- A project with no pin uses the launcher's own compiler, as zero-config projects do now.
-
-### 3.2 The store
+## 4. One file: `.raepack`
 
 ```
-~/.rae/                       (RAE_HOME to move it)
-  bin/rae                     the launcher
-  repo/                       one clone, with no worktree in the Rae checkout
-  toolchains/<commit>/        a sparse checkout, compiler built, a ready marker
-  deps/<name>/<pin>/          iOS frameworks, Android, SQLite, Box3D, WAMR
-  projects                    each project that used a pin: its path and last use
+pack Game {
+  format: "raepack"
+  version: 2
+  meta: { name: "Game", version: "0.1.6" }
+  rae: { version: "0.2.340" }
+  dependencies: {
+    dep sdk: { path: "../sdk" }
+    dep qr: {
+      git: "https://github.com/jonasmyoha/rae"
+      subdir: "packages/qr"
+      version: "1.2.0"
+      hash: "git-tree:…"
+    }
+  }
+}
 ```
 
-- **Where:** `~/.rae`, as the older doc named it, not `~/.cache`. The launcher lives here, and a
-  cache may be deleted at any time.
-- **Size:** sparse checkouts, so a pin is about 64 MB rather than 370 MB. With five pins: 389 + 320 MB
-  against about 1.8 GB today.
-- **Two runs at once:** the first one prepares, the other waits on a lock, as SUMU's script does.
-- **A failed build leaves nothing:** a commit whose compiler does not build gets no ready marker.
+**This works, under one condition, and it is better than two files if that condition holds.** Every
+other package manager has two files because the manifest holds a wish (`^1.2`) and the lock holds the
+answer (`1.2.7`). With a wish there has to be an answer somewhere. If the pin is always one exact
+version, the wish is the answer, and the second file has nothing left to say.
 
-### 3.3 The lock
+So the condition is: **no version ranges.** `"0.2"` stops being accepted as a pin. `./rae update` looks
+for newer versions and writes the exact one.
 
-- **A build never changes the `toolchain` line.** It may change `dep` lines. Only `rae toolchain pin`
-  and `update` move the pin. This is the fix for rule (5).
-- **The line holds the full commit hash**, and the version without `+dirty`. Short hashes are still
-  read, by prefix.
-- **Several packs in one repo:** `pin` and `update` change every tracked `rae.lock` in the git repo,
-  as SUMU's `sed` does now, so they cannot drift apart. Building with locks that disagree is an error
-  that names them.
-- **An old pinned compiler still rewrites the lock on build.** It writes its own commit, which is the
-  pin, so the pin does not move. The file's only change is the longer or shorter hash until that
-  project moves past this change. This was tested with `930bf77d`.
+What this gains:
 
-### 3.4 The commands
+- **A build never writes any file.** That ends the bug in section 2 completely. Only `./rae add`,
+  `update` and `toolchain pin` change the pack.
+- One place to read, and no generated `rae.lock` to merge.
 
-| command | what it does |
-|---|---|
-| `rae toolchain pin <commit\|main>` | Makes the toolchain ready, or refuses and leaves the pin. Writes the locks. Warns when the commit is not on the remote, because another machine could not get it. |
-| `rae toolchain update` | Tries main in a copy of the check below. Moves the pin only when it passes, and otherwise prints what failed. |
-| `rae toolchain gc` | Removes toolchains that no project in `projects` pins now. `--dry-run` lists them. A removed toolchain comes back on demand, so an old branch is slower but never broken. |
-| `rae toolchain status` | The pin, the compiler in use, and why. It replaces each project's `make doctor` logic. |
+What has to stay, or it gets worse:
 
-"Still builds" for `update` means: `rae build --emit-c` and the C compile of every target in the
-pack, or the command in the pack's optional `check` line when it has one (`make check` for SUMU).
+- **The hash stays, written by the tool, in the human's file.** A version is only a name. A git tag can
+  be moved, and a server can return something else. Without the hash, "version 1.2.0" does not promise
+  the same files. Go has the same design and keeps `go.sum` for this one reason. The hash can stay in
+  the pack, because a dependency's own pack holds the hashes of its own dependencies, so the chain is
+  checked without listing them all at the top.
+- **Two dependencies wanting different versions of a third is an error**, unless the project declares
+  that third package itself, and then its version wins. There is no solver.
 
-### 3.5 Working on Rae and a project together
+`rae` means one thing on a project, and another on a dependency: the project's is the exact compiler it
+uses; a dependency's is the lowest compiler it needs, checked against the project's.
 
-`RAE_ROOT=<checkout> rae build ...` uses that checkout's compiler for one command. It prints one line
-saying so, and it does not change the pin, since no build does. game proto1's and game proto2's `.env`
-lines go away.
+## 5. Version pins, and what they require from Rae
 
-### 3.6 Heavy shared builds
+**Agreed: this is right, and proto3 shows why.** A history rewrite killed a commit pin, while a tag name
+survives one (`git filter-repo` moves tags to the new commits). And a version does not tie the design
+to git: `git:` is one source, and a later `url:` or a registry is another, with the same version.
 
-The proposal shares the iOS frameworks and SQLite. The same applies to Android's SDL and wgpu, Box3D
-and WAMR, which it does not list.
+**The catch: today a Rae version number does not name one thing.** `0.2.339` covers every commit until
+the next bump, and there are only 3 tags. A version pin only means something if each version is one
+fixed set of files. That requires:
 
-They must be shared **per version, not one per machine**. Today `~/.cache/rae/box3d` holds one Box3D,
-and gen-ios fails when it is not at the checkout's pin, so two pins with different Box3D commits
-cannot both build. SUMU's shared `frameworks/` has no version at all, so a Rae that moves SDL would
-silently link the old one. The folder name comes from the pin file, or from a hash of the build
-script for those with no pin file.
+- **Every `compiler/VERSION` bump gets the tag `v<version>`, on that commit, automatically.** AGENTS.md
+  already says a release is a tag on the bump commit, so this only applies the rule every time.
+- **Old versions get tags too**, one on each past bump commit, so the projects have versions to pin to.
+- **A commit between bumps cannot be pinned.** A project that needs a Rae fix gets it through a bump, or
+  through `RAE_ROOT` while developing. This is a real cost: a fix a project needs now means a version
+  bump in Rae, and agents must do it. It is cheap, one line and one tag, and it already happens often.
+- **Before 1.0, a version says nothing about compatibility**, since PATCH can break things. A pin still
+  gives the same build every time, which is what it is for.
 
-Old toolchains read the old paths. The launcher sets `RAE_BOX3D`, `RAE_SQLITE_CACHE` and `RAE_WAMR`
-before running them, which all exist already. The iOS and Android folders are symlinked into the
-toolchain's `tools/`, as SUMU does.
+A tag on an unpushed commit works on this machine only. `pin` warns about that, and allows it.
 
-## 4. What changed from the proposal
+Old versions may not build the same way. Each migrating project is built at its tag first, and moves
+to the next tag if it does not build.
 
-1. **Added:** which `rae` runs (3.1). The proposal needs this and does not name it.
-2. **Added:** a pin is only as safe as Rae's history (question 3 below). This has already happened once.
-3. **Changed:** a pin is 64 MB rather than 370 MB, using a sparse checkout.
-4. **Changed:** shared builds are stored per version, and include Android, Box3D and WAMR.
-5. **Added:** several packs in one repo (3.3). SUMU has 3, game proto2 has 2.
-6. **Changed:** `gc` needs a record of projects, because a store cannot otherwise know what is used.
-7. **Removed:** the idea of keeping the newest three pins, which can delete a pin in use.
+## 6. Packages, and what to do with the stdlib
 
-## 5. Questions for the owner
+**Several packages in one git repo: yes.** A `subdir` field and a tag per package (`qr/v1.2.0`), the way
+Go does it. Small to add.
 
-Each has a recommended answer. "Agreed" to all of them is enough to start.
+**Splitting the stdlib into versioned packages: not yet, and I think `core` never.**
 
-1. **(a) Inside the compiler, in C?** The current thinking allowed either. Recommended: inside, per 2(a).
-2. **(f) Registry stays out?** Recommended: yes, until a trigger in 2(f) happens. Is one of those
-   already planned, such as people outside these repositories using Rae?
-3. **History rewrites and pins.** A commit pin dies when Rae's history is rewritten, as game proto3's did.
-   Three options:
-   - **Keep a ref:** `pin` pushes `refs/pins/<commit>` to the remote. A rewrite must then keep those
-     refs, though a rewrite done to remove a term from history would have to delete them. Then a pin
-     breaks with a clear error, and its project has to move.
-   - **Accept it:** no extra ref; after a rewrite, the store clone still has the old commits on this
-     machine, and other machines get an error.
-   - **Recommended: keep a ref**, because it needs no action except during a rewrite.
-4. **Pins on unpushed commits.** Rae's rule is not to push without being told, and main is 2 commits
-   ahead now. A pin to an unpushed commit works on this machine only. Recommended: warn, and allow it.
-5. **The launcher on PATH.** This adds an install step and an entry on PATH on each machine. Recommended:
-   yes. `make -C compiler install` makes the first store entry and prints the PATH line.
-6. **Source of a Rae commit.** Recommended: the remote, plus the local checkout that the launcher was
-   installed from, so new local commits can be pinned, as SUMU can do now.
-7. **game proto3's pin.** Its commit is gone. Its catch-up commit is dated 2026-09-30 10:09, and the last
-   commit on main before that is `3937b4d5`, at version 0.1.91 as its lock says. It has not been built. Recommended:
-   try that one, and if it does not build, pin game proto3 to main and fix it. Or is it OK to bring
-   game proto3 to current main directly?
+- `core` is what the compiler itself understands (`List`, the prelude). Its version is the compiler's
+  version by nature.
+- Much of the rest calls C in `compiler/runtime/` (`rae_ext_...`). `lib/AppLinks` needs
+  `runtime_applinks.c`, for one. A `lib` module at a different version from the compiler would need
+  the C that it expects, and today that C is part of the compiler.
+- Today every `lib` module is tested against every other at each commit. Separate versions replace
+  that with a matrix of combinations, for one user with a few projects.
 
-## 6. Plan, after agreement
+So the compiler and the stdlib stay one version until a package gives a real reason to split.
 
-Each step is a queue item of its own, added once this is agreed, with the full suite on the last one.
+**The 3D engine is the right goal and the wrong first package.** It is large (`lib/app3d` alone is 138
+files and 36,000 lines), and two things it needs do not exist yet: a package cannot carry C code, and
+its shaders are found by paths like `lib/foo.wgsl`, which assume the stdlib's folder. `lib/stylizedTrees`,
+`lib/treeSets` and `lib/physicsScenes` also import `app3d` today.
 
-1. **Stop a build from moving a pin.** The `toolchain` line is left alone, and it holds the full hash.
-   This is worth doing first, because it stops the damage today.
-2. **The store and `pin`, `status`, `gc`.** Sparse checkouts, the ready marker, the lock on preparing,
-   and every tracked lock in the repo.
-3. **The launcher and `RAE_ROOT`.** Dispatch, the install step and `self-update`. Remove
-   `rae toolchain use`.
-4. **`update`,** with the pack's optional `check` line.
-5. **Shared builds per version** (3.6).
+**Basic 3D in the base stdlib: leave it there for now.** It already is. Moving it out is a cost with no
+user asking for it. Decide after a second package has shown what a split costs.
 
-Then the migration, in the order the task gives. Each project's `scripts/rae-env.sh` shrinks to what is
-truly its own, or goes:
+**The order:**
 
-1. the new SUMU, at its `a34534a1` or whatever it is then;
-2. game proto1 at `930bf77d`, then delete `~/personal/rae/rae-pinned` and its `make rae-pin`;
-3. game proto2 at `5898190c`, or newer if it has moved;
-4. game proto3, per question 7.
+1. **`qr` first** (`lib/qr`, 9 files, 3,200 lines, no C): proves `subdir`, versions and hashes.
+2. **Then a package with its own C**, which forces the design for C and shaders. `box3d` is a real
+   candidate, because its C is already a separate library.
+3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
 
-**Risk found for the migration:** the `RAE_ROOT` in game proto1's and game proto2's `.env` has to go at
-the same step as its pin arrives, or that `.env` line keeps overriding the pin without anyone noticing.
+## 7. What needs agreement
+
+"Agreed" takes all three.
+
+1. **`./rae` in each project** (section 3), since you do not want PATH. The other option is typing the
+   full store path, which every Makefile would have to work out, and that is the script again.
+2. **A tag on every version bump, and only tagged versions can be pinned** (section 5). The cost is that a
+   project needing a Rae fix needs a bump in Rae, or `RAE_ROOT` meanwhile.
+3. **No version ranges, and a tool-written `hash` in the `.raepack`** (section 4). This is what makes one
+   file possible.
+
+## 8. Unchanged from the earlier recommendations
+
+- The manager reads `.raepack` only, and never imports or source. The compiler asks it where a prefix
+  `x/` lives and which package owns a file.
+- `rae add`, `fetch`, `update`, `tree`, and path and git dependencies stay. `rae toolchain use` goes.
+- `~/.rae` holds `repo/` (one clone), `toolchains/<version>/` (sparse checkouts), `deps/<name>/<pin>/`
+  and `projects` (who uses what). `RAE_HOME` moves it.
+- `./rae toolchain pin <version>`, `update` (moves only if the project still builds: every target, or
+  the pack's optional `check` command) and `gc` (removes what no recorded project uses; it comes back
+  on demand).
+- Shared builds are stored **per version**: iOS frameworks, Android, SQLite, Box3D and WAMR. Today one
+  Box3D fits per machine, and SUMU's shared frameworks have no version at all. The toolchain runner sets
+  `RAE_BOX3D`, `RAE_SQLITE_CACHE` and `RAE_WAMR` for old compilers.
+- Several packs in one repo must name the same compiler version. `pin` changes them all, and a
+  disagreement is an error. SUMU has 3 packs and game proto2 has 2.
+
+## 9. Plan, after agreement
+
+Each step is its own queue item, with the full suite on the last.
+
+1. A build stops writing `rae.lock`. Worth doing first: it stops the damage now.
+2. Version tags: automatic on each bump, and the old ones added.
+3. The `.raepack` as the one file: exact versions, `hash`, `subdir`, and `rae.lock` read once and retired.
+4. The store, `./rae`, and `toolchain pin`, `status`, `gc`, then `update`. `rae toolchain use` goes.
+5. Shared builds per version.
+6. The first package: `qr`, moved to `packages/qr`.
+
+Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
+and its `make rae-pin`; game proto2; game proto3, starting from `v0.1.91`. Each `scripts/rae-env.sh` shrinks
+to what is truly the project's own, or goes. Each project's `.env` line that sets `RAE_ROOT` must go in
+the same step, or it keeps overriding the pin without anyone noticing.
