@@ -119,6 +119,9 @@ scope: one checkout, moved between tags, is enough while every user is also
 a Rae developer. If that stops being true, the next step is a per-version
 `~/.rae/toolchains/<ver>` layout, not a rewrite.
 
+That time has come. A design for pins and a shared store is proposed, and not yet agreed, in
+docs/toolchain-and-packages-decision.md.
+
 **On the second machine** the loop becomes: `git pull` in the project →
 `make doctor` says *requires 0.3, have 0.2.0* → `rae toolchain use 0.3` (or
 the project's `make rae-use` wrapper) → build. The person maintaining both
