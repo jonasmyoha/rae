@@ -24,6 +24,10 @@ bool rae_deps_resolve(const RaePack* pack, const char* pack_dir, const char* loc
  * toolchain the lock names, relative to it, so no machine path is recorded). */
 void rae_deps_write_lock(FILE* out);
 
+/* Say which git deps the lock did not pin. A build reads the lock and never
+ * writes it, so only `rae fetch` or `rae update` can pin them. */
+void rae_deps_note_unpinned(FILE* out);
+
 /* Number of deps registered by rae_deps_resolve. */
 int rae_deps_count(void);
 
