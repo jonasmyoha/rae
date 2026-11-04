@@ -2372,7 +2372,7 @@ static void print_usage(const char* prog) {
           "                  current directory and download Roboto-Regular.ttf into\n");
   fprintf(stderr,
           "                  assets/. Idempotent — never overwrites existing files.\n");
-  fprintf(stderr, "  toolchain <status|pin|update|deps|gc|list>\n");
+  fprintf(stderr, "  toolchain <status|pin|update|path|deps|gc|list>\n");
   fprintf(stderr, "                  The Rae this project pins, and the store of them\n");
   fprintf(stderr, "                  `use <req>` checks out + rebuilds a matching tag)\n");
   fprintf(stderr, "  add <name> --path <dir> | --git <url> [--rev <rev>]\n");
@@ -5163,7 +5163,7 @@ static int toolchain_status(const char* root) {
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) return 0;
   char pack_path[PATH_MAX];
-  if (!find_project_pack(NULL, cwd, pack_path)) {
+  if (!find_project_pack(NULL, cwd, pack_path) && !rae_toolchain_repo_pack(cwd, pack_path, sizeof(pack_path))) {
     printf("project: no .raepack here (zero-config; no toolchain requirement)\n");
     return 0;
   }
@@ -5197,12 +5197,13 @@ static int toolchain_status(const char* root) {
 
 static void toolchain_usage(void) {
   fprintf(stderr,
-          "usage: rae toolchain <status|pin|update|deps|gc|list>\n"
+          "usage: rae toolchain <status|pin|update|path|deps|gc|list>\n"
           "  status            this compiler, and the Rae this project pins\n"
           "  pin <version|commit|main>\n"
           "                    pin this repo's packs to it, once it builds, and write ./rae\n"
           "  update            pin the newest version, only if the project still builds:\n"
           "                    the pack's rae { check } command, else every compiled target\n"
+          "  path              the folder of the toolchain this project pins\n"
           "  deps [box3d sqlite wamr ios android]\n"
           "                    build these for the pinned Rae, shared per version; alone, what is built\n"
           "  gc [--dry-run]    remove the toolchains and shared builds no project uses\n"
@@ -5229,14 +5230,17 @@ static int cmd_toolchain(int argc, char** argv) {
   if (strcmp(sub, "gc") == 0) {
     return rae_toolchain_gc(argc >= 2 && strcmp(argv[1], "--dry-run") == 0);
   }
-  if (strcmp(sub, "pin") == 0 || strcmp(sub, "update") == 0 || strcmp(sub, "deps") == 0) {
+  if (strcmp(sub, "pin") == 0 || strcmp(sub, "update") == 0 || strcmp(sub, "deps") == 0 ||
+      strcmp(sub, "path") == 0) {
     char cwd[PATH_MAX];
     char pack_path[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd)) || !find_project_pack(NULL, cwd, pack_path)) {
+    if (!getcwd(cwd, sizeof(cwd)) ||
+        (!find_project_pack(NULL, cwd, pack_path) && !rae_toolchain_repo_pack(cwd, pack_path, sizeof(pack_path)))) {
       fprintf(stderr, "error: no .raepack here to pin\n");
       return 1;
     }
     RaeToolchainSelf self = toolchain_self(have_root ? root : NULL);
+    if (strcmp(sub, "path") == 0) return rae_toolchain_path(&self, pack_path);
     if (strcmp(sub, "deps") == 0) return rae_toolchain_deps(&self, pack_path, argc - 1, argv + 1);
     if (strcmp(sub, "update") == 0) return rae_toolchain_update(&self, pack_path);
     if (argc < 2) {

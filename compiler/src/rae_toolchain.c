@@ -415,7 +415,37 @@ int rae_toolchain_pin(const RaeToolchainSelf* self, const char* pack_path, const
   return 0;
 }
 
-int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int count, char** names) {
+bool rae_toolchain_repo_pack(const char* dir, char* out, size_t out_len) {
+  char root[PATH_MAX];
+  char command[PATH_MAX + 64];
+  snprintf(command, sizeof(command), "git -C \"%s\" rev-parse --show-toplevel 2>/dev/null", dir);
+  if (!capture(command, root, sizeof(root)) || !root[0]) return false;
+  snprintf(command, sizeof(command), "git -C \"%s\" ls-files -- '*.raepack' 2>/dev/null", root);
+  FILE* pipe = popen(command, "r");
+  if (!pipe) return false;
+  bool found = false;
+  char line[PATH_MAX];
+  while (!found && fgets(line, sizeof(line), pipe)) {
+    line[strcspn(line, "\r\n")] = '\0';
+    char path[2 * PATH_MAX + 2];
+    snprintf(path, sizeof(path), "%s/%s", root, line);
+    char* text = read_whole_file(path);
+    if (!text) continue;
+    char version[64];
+    char commit[64];
+    char check[512];
+    found = rae_pack_read_pin(text, version, sizeof(version), commit, sizeof(commit), check, sizeof(check)) &&
+            rae_pack_has_block(text, "targets");
+    free(text);
+    if (found) snprintf(out, out_len, "%s", path);
+  }
+  while (fgets(line, sizeof(line), pipe)) { /* let git finish */ }
+  pclose(pipe);
+  return found;
+}
+
+/* The toolchain the pack pins, prepared if it is missing */
+static bool pinned_toolchain(const RaeToolchainSelf* self, const char* pack_path, char* name, size_t name_len) {
   char* text = read_whole_file(pack_path);
   char version[64] = {0};
   char commit[64] = {0};
@@ -424,15 +454,30 @@ int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int 
   free(text);
   if (!pinned) {
     fprintf(stderr, "error: %s pins no Rae: rae toolchain pin <version>\n", pack_path);
-    return 1;
+    return false;
   }
-  char name[128];
-  toolchain_name(version, commit, name, sizeof(name));
+  toolchain_name(version, commit, name, name_len);
   char home[PATH_MAX];
   store_home(home, sizeof(home));
   char ready[2 * PATH_MAX];
   snprintf(ready, sizeof(ready), "%s/toolchains/%s/.ready", home, name);
-  if (!path_exists(ready) && !store_prepare(self, name)) return 1;
+  return path_exists(ready) || store_prepare(self, name);
+}
+
+int rae_toolchain_path(const RaeToolchainSelf* self, const char* pack_path) {
+  char name[128];
+  if (!pinned_toolchain(self, pack_path, name, sizeof(name))) return 1;
+  char home[PATH_MAX];
+  store_home(home, sizeof(home));
+  printf("%s/toolchains/%s\n", home, name);
+  return 0;
+}
+
+int rae_toolchain_deps(const RaeToolchainSelf* self, const char* pack_path, int count, char** names) {
+  char name[128];
+  if (!pinned_toolchain(self, pack_path, name, sizeof(name))) return 1;
+  char home[PATH_MAX];
+  store_home(home, sizeof(home));
   if (!self->root) {
     fprintf(stderr, "error: cannot locate this compiler's Rae checkout (set RAE_ROOT)\n");
     return 1;

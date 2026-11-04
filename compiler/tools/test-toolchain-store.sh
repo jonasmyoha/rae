@@ -29,6 +29,9 @@ SOURCE="$WORK/source"
 mkdir -p "$SOURCE"
 (cd "$REPO_ROOT" && git ls-files -c -o --exclude-standard -- compiler lib tools third_party |
   while IFS= read -r file; do [ -f "$file" ] && echo "$file"; done | tar -cf - -T -) | tar -xf - -C "$SOURCE"
+mkdir -p "$SOURCE/examples/121_ui_editor" "$SOURCE/examples/122_other"
+echo "editor" > "$SOURCE/examples/121_ui_editor/Main.rae"
+echo "other" > "$SOURCE/examples/122_other/Main.rae"
 A=$(tr -d ' \n' < "$SOURCE/compiler/VERSION")
 B=${A%.*}.$((${A##*.} + 1))
 # Stand-ins for the shared builds, which take minutes and the network. Version A is an old
@@ -123,6 +126,7 @@ out=$("$RAE" toolchain pin "$A" 2>&1)
 check pin-ok "$?" 0
 [ -f "$RAE_HOME/toolchains/$A/.ready" ] && ok pin-ready-marker || bad pin-ready-marker "$out"
 [ -d "$RAE_HOME/toolchains/$A/compiler" ] && [ ! -d "$RAE_HOME/toolchains/$A/docs" ] && ok pin-sparse || bad pin-sparse "$(ls "$RAE_HOME/toolchains/$A")"
+[ -f "$RAE_HOME/toolchains/$A/examples/121_ui_editor/Main.rae" ] && [ ! -e "$RAE_HOME/toolchains/$A/examples/122_other" ] && ok pin-has-the-ui-editor-only || bad pin-has-the-ui-editor-only "$(ls "$RAE_HOME/toolchains/$A/examples" 2>&1)"
 [ ! -d "$RAE_HOME/toolchains/$A.lock" ] && ok pin-lock-gone || bad pin-lock-gone "the lock stayed"
 has pin-writes-version "$(cat App.raepack)" "version: \"$A\""
 [ -x ./rae ] && ok pin-writes-wrapper || bad pin-writes-wrapper "no ./rae"
@@ -258,6 +262,25 @@ check update-check-passes "$?" 0
 has update-check-moved "$(cat App.raepack)" "version: \"$B\""
 has pin-keeps-check "$(cat App.raepack)" "check: \"test -f checkPasses\""
 rm -f checkPasses
+
+# ---- A repo whose packs are all in subfolders: `rae toolchain` run from its root
+SUBFOLDERS="$WORK/subfolders"
+mkdir -p "$SUBFOLDERS/one" "$SUBFOLDERS/two"
+git -C "$SUBFOLDERS" init --quiet --initial-branch=main
+write_pack "$SUBFOLDERS/one/One.raepack" One "rae: { version: \"$A\" }"
+write_pack "$SUBFOLDERS/two/Two.raepack" Two "rae: { version: \"$A\" }"
+write_main "$SUBFOLDERS/one"
+write_main "$SUBFOLDERS/two"
+git -C "$SUBFOLDERS" add -A
+out=$(cd "$SUBFOLDERS" && "$RAE" toolchain pin "$B" 2>&1)
+check root-pin-ok "$?" 0
+has root-pin-changes-one "$(cat "$SUBFOLDERS/one/One.raepack")" "version: \"$B\""
+has root-pin-changes-two "$(cat "$SUBFOLDERS/two/Two.raepack")" "version: \"$B\""
+[ -x "$SUBFOLDERS/rae" ] && ok root-pin-wrapper-at-root || bad root-pin-wrapper-at-root "$out"
+check root-path "$(cd "$SUBFOLDERS" && "$RAE" toolchain path 2>/dev/null)" "$RAE_HOME/toolchains/$B"
+has root-status-names-the-pin "$(cd "$SUBFOLDERS" && "$RAE" toolchain status 2>&1)" "pins Rae $B"
+check wrapper-toolchain-path "$(cd "$SUBFOLDERS/two" && ../rae toolchain path 2>/dev/null)" "$RAE_HOME/toolchains/$B"
+rm -f "$SUBFOLDERS/rae"
 
 # ---- Shared builds per version
 dep_value() { (unset RAE_BOX3D RAE_SQLITE RAE_WAMR; . "$RAE_HOME/toolchains/$1/.deps"; eval "echo \"\${$2:-}\""); }

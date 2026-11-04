@@ -792,18 +792,19 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   `rae` on PATH. A project commits a generated `./rae`, written by `rae init` and
   `rae toolchain pin`, which needs only git, make and a C compiler and runs the pinned
   compiler. `~/.rae` (`RAE_HOME`) holds `repo/` (one clone), `toolchains/<version>` or
-  `<version>-<commit>` (sparse checkouts of `compiler lib tools third_party`, each with a
+  `<version>-<commit>` (sparse checkouts of `compiler lib tools third_party` and the UI editor `examples/121_ui_editor`,
+  each with a
   `.ready` marker and a `.lock` while preparing, made by `tools/toolchain-prepare.sh`) and
   `projects`. `RAE_ROOT=<checkout> ./rae ...` uses that checkout for one command and prints
   one line. The source is `RAE_SOURCE`, else the checkout saved in `~/.rae/source` when a
   compiler built in a checkout pins, else the GitHub repo.
-- **`rae toolchain`.** `status` prints this compiler, the pin with its verdict (exit 1 when
+- **`rae toolchain`,** run from a pack's folder or from a repo root with packs in subfolders. `status` prints this compiler, the pin with its verdict (exit 1 when
   it does not hold), the store and whether `./rae` is current. `pin <version|commit|main>`
   prepares that Rae first and refuses with the pin unchanged if it cannot, then changes every
   project pack in the repo and writes `./rae`; a project pack has a `rae` block and targets, and
   a library's `rae` stays. `update` moves to the newest version only if the pack's optional
   `rae: { check: "..." }` command passes (run in the repo root, with `RAE_BIN`), or else every
-  compiled target builds to a C object. `deps [box3d sqlite wamr ios android]` builds those for
+  compiled target builds to a C object. `path` prints the pinned toolchain's folder. `deps [box3d sqlite wamr ios android]` builds those for
   the pinned Rae into `~/.rae/deps/<name>/<pin>`, the pin being a hash of the files that decide
   that build; alone, it says what is built. A toolchain's `.deps` file points `RAE_BOX3D`,
   `RAE_SQLITE`, `RAE_WAMR` and their `_CACHE` forms there, `./rae` reads it, and
