@@ -1,5 +1,10 @@
 # Harebell recovery
 
+> **Off in the walker kit (2026-11-06).** The walkers no longer place, draw or shadow these flowers,
+> since 125 patches of 56,000 triangles with no levels of detail cost 39 ms of a 71 ms frame on an
+> iPhone 15 Pro. They will be rewritten. `lib/procgen` keeps the generator, and the tree lab (146)
+> still shows it. What this page says about the walkers describes how it was.
+
 The harebell now has curved wiry stems, continuous arched flower attachments,
 rounded open bells and quiet lilac shading. Small unequal groups replace the
 regular patch spiral. The original generator and materials remain unchanged

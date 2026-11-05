@@ -24,7 +24,6 @@
 # batch.
 import RendererDeferred
 import RendererDeferredShadow
-import Sys
 import Math
 import Noise
 import Vec3
@@ -54,7 +53,6 @@ open app3d/GroundPalette
 open app3d/SnowField
 open app3d/TerrainTiles
 open app3d/TerrainRocks
-open app3d/WalkerFlowers
 open app3d/GrassTuft
 open app3d/WalkerMeadow
 open FoliageMesh
@@ -80,8 +78,6 @@ const kindBush: Int = 3
 # The forest field's placement group the bushes drawn round the camera go
 # in, when the tree set draws them as a forest kind (bushKind)
 const walkerBushGroup: Int = 0
-
-const kindFlower: Int = 4
 
 const kindGrassA: Int = 5
 
@@ -174,10 +170,6 @@ type WalkerTerrain {
   snowField: SnowField
   # One instancer per rock shape (TerrainProp.variant)
   rockParts: List(PropInstancer)
-  # Oxeye daisies: one shared patch mesh in three instanced material parts.
-  flowerParts: List(PropInstancer)
-  # Harebells: one shared patch mesh in two instanced material parts.
-  harebellParts: List(PropInstancer)
   # The meadow: grass tufts thick over the ground round the camera's focus
   # (app3d/WalkerMeadow)
   meadow: WalkerMeadow
@@ -351,19 +343,6 @@ func kindTransform(
       bush.scale = Vec3.vscale(a: bush.scale, s: 2.6)
     }
     ret bush
-  }
-  if kind is kindFlower {
-    ret propTransform3D(
-      terrainSystem: terrainSystem
-      cellX: cellX
-      cellY: cellY
-      seedX: 61
-      seedY: 67
-      seedScale: 71
-      lift: 0.015
-      minScale: 0.90
-      scaleSpread: 0.25
-    )
   }
   if kind is kindGrassA {
     ret propTransform3D(
@@ -546,9 +525,9 @@ func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bo
     loop var column: Int = 0, column < gridSide, ++column {
       let cellX: Int = centerX - gridSide / 2 + column
       let cellY: Int = centerY - gridSide / 2 + row
-      # The drawn kinds (kindRock .. kindFlower); the grass is the meadow's
+      # The drawn kinds (kindRock .. kindBush); the grass is the meadow's
       # (app3d/WalkerMeadow), the cells' own tufts are not drawn
-      loop var kind: Int = kindRock, kind <= kindFlower, ++kind {
+      loop var kind: Int = kindRock, kind <= kindBush, ++kind {
         let transform: Transform3D = kindTransform(
           terrainSystem: terrainSystem
           kind: kind
@@ -616,12 +595,6 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d)
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     resetInstanceBatch(batch: part.batch)
   }
-  loop let part: mod PropInstancer in terrainSystem.flowerParts {
-    resetInstanceBatch(batch: part.batch)
-  }
-  loop let part: mod PropInstancer in terrainSystem.harebellParts {
-    resetInstanceBatch(batch: part.batch)
-  }
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     resetInstanceBatch(batch: part.batch)
   }
@@ -633,14 +606,6 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain, camera: view Camera3d)
     }
     if prop.kind is kindBush {
       loop let part: mod PropInstancer in terrainSystem.bushParts {
-        addPropInstance(prop: part, model: prop.model)
-      }
-    }
-    if prop.kind is kindFlower {
-      loop let part: mod PropInstancer in terrainSystem.flowerParts {
-        addPropInstance(prop: part, model: prop.model)
-      }
-      loop let part: mod PropInstancer in terrainSystem.harebellParts {
         addPropInstance(prop: part, model: prop.model)
       }
     }
@@ -670,12 +635,6 @@ func drawTerrainProps(
   terrainSystem: mod WalkerTerrain
 ) {
   loop let part: view PropInstancer in terrainSystem.rockParts {
-    drawInstances(cache: cache, resources: resources, batch: part.batch)
-  }
-  loop let part: view PropInstancer in terrainSystem.flowerParts {
-    drawInstances(cache: cache, resources: resources, batch: part.batch)
-  }
-  loop let part: view PropInstancer in terrainSystem.harebellParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
   drawWalkerMeadow(cache: cache, resources: resources, meadow: terrainSystem.meadow)
@@ -748,20 +707,6 @@ func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view 
       batch: part.batch
     )
   }
-  loop let part: view PropInstancer in terrainSystem.flowerParts {
-    RendererDeferredShadow.drawShadowCasterBatchWith(
-      renderer: renderer
-      mesh: part.mesh
-      batch: part.batch
-    )
-  }
-  loop let part: view PropInstancer in terrainSystem.harebellParts {
-    RendererDeferredShadow.drawShadowCasterBatchWith(
-      renderer: renderer
-      mesh: part.mesh
-      batch: part.batch
-    )
-  }
   drawTreeForestShadows(renderer: renderer, forest: terrainSystem.forest)
 }
 
@@ -773,13 +718,6 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
   terrainSystem.forest.toon = toon
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     setPropInstancerToon(prop: part, toon: toon)
-  }
-  # The recovered daisy uses broad physical shading independently of terrain.
-  loop let part: mod PropInstancer in terrainSystem.flowerParts {
-    setPropInstancerToon(prop: part, toon: toon and Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1")
-  }
-  loop let part: mod PropInstancer in terrainSystem.harebellParts {
-    setPropInstancerToon(prop: part, toon: toon and Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1")
   }
   setWalkerMeadowToon(meadow: terrainSystem.meadow, toon: toon)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
@@ -833,13 +771,7 @@ func createWalkerTerrain(
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
   # One entity per pool slot per small prop kind, placed by updateInfiniteTerrain
-  let streamedKinds: List(Int) = [
-    kindRock
-    kindBush
-    kindFlower
-    kindGrassA
-    kindGrassB
-  ]
+  let streamedKinds: List(Int) = [kindRock, kindBush, kindGrassA, kindGrassB]
   loop var slot: Int = 0, slot < cellCount, ++slot {
     loop let kind: view Int in streamedKinds {
       let unusedEntityId: EntityId = spawnProp(
@@ -901,8 +833,6 @@ func createWalkerTerrain(
       biome: biome
     )
     rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
-    flowerParts: own createWalkerDaisyParts(renderer: renderer, capacity: cellCount)
-    harebellParts: own createWalkerHarebellParts(renderer: renderer, capacity: cellCount)
     meadow: own createWalkerMeadow(
       renderer: renderer
       gridSide: gridSide
