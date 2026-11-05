@@ -2,8 +2,9 @@
 # stack (docs/network-connections.md): on Apple, Network.framework, which
 # brings up the cellular radio and VPN on demand, follows the network from
 # Wi-Fi to cellular, checks TLS against the system trust store and reports
-# the path. A plain TCP connection, a TLS one, or a WebSocket client
-# (ws:// or wss://).
+# the path; on Android, Java's sockets and TLS with the system trust store
+# (tools/android/java RaeNetwork). A plain TCP connection, a TLS one, or a
+# WebSocket client (ws:// or wss://).
 #
 # Everything arrives as a NetworkEvent, taken with `networkNextEvent`: the
 # connection is ready, a message (bytes; on a WebSocket a whole text or
@@ -13,17 +14,18 @@
 # of 0; a spawned worker waits for them with a timeout. One connection is
 # used from one thread.
 #
-# The C side (runtime_network_apple.h) only queues the framework's events
-# and makes one framework call per function; what an event means, the
+# The C side (runtime_network_apple.h, runtime_network_android.h) only queues
+# the system's events and makes one call per function; what an event means, the
 # request, the protocol on top, is Rae (lib/net/HttpGet for an HTTP GET).
 # Elsewhere there is no system connection yet: connecting answers a failed
 # event that says so.
 import String
 cheader "runtime_network_apple.h"
+cheader "runtime_network_android.h"
 
-const hasNetworkFramework: Bool = Target.isApple
+const hasSystemConnection: Bool = Target.isApple or Target.os is Os.android
 
-when hasNetworkFramework {
+when hasSystemConnection {
   func rae_ext_Nw_connect(
     hostZ: Buffer(UInt8)
     port: Int
@@ -141,7 +143,7 @@ func networkOpen(
   insecure: view Bool
 ) ret NetworkConnection {
   var handle: Int = 0
-  when hasNetworkFramework {
+  when hasSystemConnection {
     var hostZ: List(UInt8) = networkBytesZ(text: host)
     var urlZ: List(UInt8) = networkBytesZ(text: url)
     var insecureFlag: Int = 0
@@ -228,7 +230,7 @@ func networkNextEvent(connection: view NetworkConnection, timeoutMs: view Int) r
   var kindCode: Int = 0
   var code: Int = 0
   var length: Int = 0
-  when hasNetworkFramework {
+  when hasSystemConnection {
     unsafe {
       kindCode = rae_ext_Nw_nextEvent(handle: connection.handle, timeoutMs: timeoutMs)
       code = rae_ext_Nw_eventCode(handle: connection.handle)
@@ -242,7 +244,7 @@ func networkNextEvent(connection: view NetworkConnection, timeoutMs: view Int) r
   loop var i: Int = 0, i < length, ++i {
     bytes.add(value: 0)
   }
-  when hasNetworkFramework {
+  when hasSystemConnection {
     if length > 0 {
       unsafe {
         rae_ext_Nw_eventCopy(handle: connection.handle, into: bytes.data)
@@ -293,7 +295,7 @@ func networkSendWith(
     ret false
   }
   var answer: Int = -1
-  when hasNetworkFramework {
+  when hasSystemConnection {
     unsafe {
       answer = rae_ext_Nw_send(
         handle: connection.handle
@@ -348,7 +350,7 @@ func networkClose(connection: mod NetworkConnection) {
   if connection.open is false {
     ret
   }
-  when hasNetworkFramework {
+  when hasSystemConnection {
     unsafe {
       rae_ext_Nw_release(handle: connection.handle)
     }

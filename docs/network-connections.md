@@ -1,10 +1,13 @@
 # Client connections through the system's network stack
 
 `lib/net/NetworkConnection` opens a client connection the way the platform
-wants a client to: on Apple (iOS, macOS), through Network.framework, not BSD
-sockets. That brings up the cellular radio and VPN on demand, follows the
+wants a client to. On Apple (iOS, macOS) that is Network.framework, not BSD
+sockets: it brings up the cellular radio and VPN on demand, follows the
 network from Wi-Fi to cellular, checks TLS against the system trust store, and
-reports the path. `lib/net/HttpGet` fetches a URL over it. (`lib/net/Tcp` stays
+reports the path. On Android it is Java's sockets and TLS, which check the
+system trust store and the name in the certificate. There a `pathChanged` event
+comes once, when the connection is made (status satisfied, interface `other`):
+it does not follow the network yet. `lib/net/HttpGet` fetches a URL over it. (`lib/net/Tcp` stays
 the server side's BSD sockets.)
 
 ## Connections
@@ -66,8 +69,17 @@ call. The request, the protocol on top and what an event means are Rae.
 It is header-only and included by a program whose Rae imports the module
 (`cheader`); the compiler then links `-framework Network -framework Security`,
 so other programs neither compile nor link it. `tools/ios/gen-ios.sh` links
-Network.framework into every app. Off Apple, connecting answers a `failed`
-event that says there is no system connection yet.
+Network.framework into every app.
+
+`compiler/runtime/runtime_network_android.h` is the same functions on Android
+(platform reason: the NDK has no TLS and no way to the system's trust store). The
+connection itself is `tools/android/java/org/rae/app/RaeNetwork.java`, on its own
+threads, with the WebSocket frames, because Android has no public WebSocket client.
+As on Apple, a connection that cannot be made says `waiting` and tries again until
+it is closed, and a certificate that fails ends it.
+
+Elsewhere, connecting answers a `failed` event that says there is no system
+connection yet.
 
 ## Checks
 
@@ -76,3 +88,7 @@ echo and close, an HTTP GET, a refused connection waiting, chunked and URL
 parsing; it is on the TSan gate. TLS needs the internet, so it is checked by
 hand: `httpGet(url: "https://www.apple.com/robots.txt", timeoutMs: 15000)`
 answers 200.
+
+Case 1290 also runs on an Android emulator, with the same expected output:
+`sh tools/android/gen-android.sh compiler/tests/cases/1290_network_connection`,
+then `sh tools/android/run-android.sh 1290_network_connection 60`.
