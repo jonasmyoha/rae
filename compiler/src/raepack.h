@@ -73,6 +73,8 @@ typedef struct {
   Str rae_version;
   /* The optional exact commit of the same block. */
   Str rae_commit;
+  /* The folders of a package's files read at run time, space separated: `assets: "assets maps"` */
+  Str assets;
   /* A package's C: the `native` block (rae_package_native.h). All empty for none. */
   Str native_build;
   Str native_header;

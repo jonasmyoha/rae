@@ -38,6 +38,29 @@ EOF
 printf 'kept\n' > "$project/assets/scenes/Kept.raescene"
 printf 'deleted\n' > "$project/assets/scenes/Deleted.raescene"
 
+# A package with declared assets, and a folder it does not declare
+package=$(mktemp -d "${TMPDIR:-/tmp}/rae-gen-ios-smoke-package.XXXXXX")
+trap 'rm -rf "$project" "$gen" "$package"' EXIT
+mkdir -p "$package/assets/deep" "$package/private"
+printf 'hello\n' > "$package/assets/deep/hello.txt"
+printf 'not staged\n' > "$package/private/secret.txt"
+printf 'pack Tiny {\n  format: "raepack"\n  version: 1\n  meta: { version: "1.0.0" }\n  assets: "assets"\n}\n' > "$package/Tiny.raepack"
+cat > "$project/App.raepack" <<EOF
+pack App {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  dependencies: { dep tiny: { path: "$package" } }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: { source: { path: ".", emit: compiled } }
+    }
+  }
+}
+EOF
+
 failures=0
 check() {
   if eval "$2"; then
@@ -57,6 +80,10 @@ mkdir -p "$(dirname "$gen")"
 generate
 check "first run stages both assets" \
   '[ -f "$gen/bundle/assets/scenes/Kept.raescene" ] && [ -f "$gen/bundle/assets/scenes/Deleted.raescene" ]'
+check "a package's declared assets are staged at packages/<name>/" \
+  '[ -f "$gen/bundle/packages/tiny/assets/deep/hello.txt" ]'
+check "what a package does not declare is not" \
+  '[ ! -e "$gen/bundle/packages/tiny/private" ]'
 check "the stdlib's icon atlas is staged" \
   '[ -f "$gen/bundle/lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.json" ] && [ -f "$gen/bundle/lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.png" ]'
 check "a lib/assets picture is staged" '[ -f "$gen/bundle/lib/assets/grass/meadowTuft.png" ]'

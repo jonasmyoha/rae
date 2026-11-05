@@ -337,5 +337,31 @@ printf 'func main() {\n  log("x")\n}\n' > Main.rae
 OUT=$("$BIN" pack App.raepack 2>&1); echo "$OUT" | grep -q 'needs build, header and link' && ok native_incomplete_block_said || bad native_incomplete_block_said "[$OUT]"
 unset RAE_HOME
 
+# --- a package's assets, read as on a phone: no folder from `rae run`, so the staged path
+mkdir -p "$WORK/assetsApp/vendor/sdk/assets/deep" "$WORK/assetsStage/packages/sdk/assets/deep"; cd "$WORK/assetsApp" || exit 1
+printf 'from the package folder\n' > vendor/sdk/assets/deep/hello.txt
+printf 'from the bundle\n' > "$WORK/assetsStage/packages/sdk/assets/deep/hello.txt"
+printf 'pack Sdk {\n  format: "raepack"\n  version: 1\n  meta: {\n    version: "1.0.0"\n  }\n  assets: "assets"\n}\n' > vendor/sdk/Sdk.raepack
+write_pack App.raepack AssetsApp "" 'dependencies: { dep sdk: { path: "vendor/sdk" } }'
+cat > Main.rae <<'EOF'
+import Sys
+
+func main() {
+  log("first [{Sys.readPackageAsset(package: "sdk", path: "assets/deep/hello.txt")}]")
+  let cleared: Bool = Sys.setEnv(name: "RAE_PACKAGE_sdk", value: "")
+  log("then [{Sys.readPackageAsset(package: "sdk", path: "assets/deep/hello.txt")}]")
+}
+EOF
+OUT=$(cd "$WORK/assetsStage" && RAE_FORMAT=off "$BIN" run --target compiled --project "$WORK/assetsApp" "$WORK/assetsApp/Main.rae" 2>&1)
+echo "$OUT" | grep -q 'first \[from the package folder' && ok assets_from_the_package_folder || bad assets_from_the_package_folder "[$OUT]"
+echo "$OUT" | grep -q 'then \[from the bundle' && ok assets_staged_path_on_a_device || bad assets_staged_path_on_a_device "[$OUT]"
+LINE=$("$BIN" tree --assets 2>/dev/null)
+echo "$LINE" | grep -q '^sdk	.*vendor/sdk	assets$' && ok assets_tree_lists_them || bad assets_tree_lists_them "[$LINE]"
+# A folder the pack names and does not have stops the build, with the pack named
+printf 'pack Sdk {\n  format: "raepack"\n  version: 1\n  meta: {\n    version: "1.0.0"\n  }\n  assets: "assets nothere"\n}\n' > vendor/sdk/Sdk.raepack
+OUT=$(run_app); [ $? -ne 0 ] && echo "$OUT" | grep -q "assets names 'nothere'" && ok assets_missing_folder_said || bad assets_missing_folder_said "[$OUT]"
+printf 'pack Sdk {\n  format: "raepack"\n  version: 1\n  meta: {\n    version: "1.0.0"\n  }\n  assets: "../outside"\n}\n' > vendor/sdk/Sdk.raepack
+OUT=$(run_app); [ $? -ne 0 ] && echo "$OUT" | grep -q "assets names '../outside'" && ok assets_outside_refused || bad assets_outside_refused "[$OUT]"
+
 echo "packages-cli: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

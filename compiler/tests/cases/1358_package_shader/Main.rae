@@ -1,0 +1,19 @@
+# shader(files:) in a package's module takes a part from beside the module, from the package's
+# folder and from the stdlib, and validates the composition. The project's own shaders/glow.wgsl
+# is not WGSL: if the package's part resolved to it, naga would fail this build.
+open glow/deep/Glow
+
+func main() {
+  let composed: Shader = glowShader()
+  log("parts {composed.sources.length()}")
+  log("the package's: {composed.text.contains(sub: "glowAmount")}")
+  log("beside the module: {composed.text.contains(sub: "besideAmount")}")
+  log("the project's decoy taken: {composed.text.contains(sub: "not WGSL")}")
+  loop let source: view String in composed.sources {
+    log(
+      "  from a package: {source.contains(sub: "vendor/glow/")}, the stdlib: {source.endsWith(
+        suffix: "lib/noise.wgsl"
+      )}"
+    )
+  }
+}

@@ -9390,7 +9390,8 @@ static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, Symbo
     }
     char err[2048];
     ShaderComposition composition;
-    if (!shader_compose(ctx->ast_arena, file, ctx->project_root, ctx->stdlib_dir, paths, count, &composition, err, sizeof err)) {
+    int shader_owner = rae_deps_owner_of(file);
+    if (!shader_compose(ctx->ast_arena, file, shader_owner >= 0 ? rae_deps_dir(shader_owner) : NULL, ctx->project_root, ctx->stdlib_dir, paths, count, &composition, err, sizeof err)) {
         diag_error(file, (int)expr->line, (int)expr->column, err);
         module->had_error = true;
         expr->resolved_type = type_get_void(ctx->type_registry);

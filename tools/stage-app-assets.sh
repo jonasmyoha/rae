@@ -31,6 +31,20 @@ if [ -d "$ex_dir/assets" ]; then
       mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/" ;;
   esac
 fi
+# Each package's declared `assets`, where Sys.packageAssetPath reads them on a device
+package_lines=$(cd "$ex_dir" && "$root/compiler/bin/rae" tree --assets 2>/dev/null || true)
+if [ -n "$package_lines" ]; then
+  tab=$(printf '\t')
+  while IFS="$tab" read -r package_name package_dir package_assets; do
+    mkdir -p "$stage/packages/$package_name"
+    for package_folder in $package_assets; do
+      mkdir -p "$stage/packages/$package_name/$(dirname "$package_folder")"
+      cp -R "$package_dir/$package_folder" "$stage/packages/$package_name/$(dirname "$package_folder")/"
+    done
+  done <<EOF
+$package_lines
+EOF
+fi
 for shared in lib/app3d/scenes lib/data lib/assets/walker; do
   if [ -e "$root/$shared" ]; then
     dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
