@@ -10,6 +10,7 @@
 
 #include "diag.h"
 #include "rae_pack_edit.h"
+#include "rae_package_native.h"
 #include "rae_version.h"
 #include "raepack.h"
 
@@ -703,7 +704,9 @@ int rae_toolchain_gc(bool dry_run) {
   size_t keep_cap = 1024 * 1024;
   char* keep = calloc(1, keep_cap);
   char* still = calloc(1, keep_cap);
-  if (!keep || !still) return 1;
+  char* package_keep = calloc(1, keep_cap);
+  if (!keep || !still || !package_keep) return 1;
+  size_t package_keep_len = 0;
   size_t keep_len = 0;
   size_t still_len = 0;
   char* saveptr = NULL;
@@ -731,6 +734,7 @@ int rae_toolchain_gc(bool dry_run) {
     char line[PATH_MAX];
     while (fgets(line, sizeof(line), pipe)) {
       line[strcspn(line, "\r\n")] = '\0';
+      rae_package_native_keep(line, package_keep, keep_cap, &package_keep_len, 0);
       char* text = read_whole_file(line);
       if (!text) continue;
       char version[64];
@@ -790,6 +794,8 @@ int rae_toolchain_gc(bool dry_run) {
     closedir(dir);
   }
   removed += gc_deps(home, kept_deps, dry_run);
+  removed += rae_package_native_gc(home, package_keep, dry_run);
+  free(package_keep);
   free(kept_deps);
   if (!dry_run) {
     char command[PATH_MAX + 64];

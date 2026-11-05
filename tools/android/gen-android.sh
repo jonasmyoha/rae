@@ -99,6 +99,29 @@ if grep -q 'box3d/box3d.h' "$gen/app.c"; then
   cflags="$cflags -I$box3d_install/include -I$box3d_src/src"
   sources="$sources $(ls "$box3d_src"/src/*.c | tr '\n' ' ') $root/tools/box3d/rae_glue.c"
 fi
+# The packages with C (a `native` block, docs/toolchain-and-packages-decision.md): an app whose C
+# includes a package's header compiles its sources into the app, with its options.
+package_lines=$(cd "$ex_dir" && "$rae" tree --native 2>/dev/null || true)
+if [ -n "$package_lines" ]; then
+  tab=$(printf '\t')
+  while IFS="$tab" read -r package_name package_header package_install package_sources package_defines; do
+    grep -q "$package_header" "$gen/app.c" || continue
+    if [ -z "$package_sources" ]; then
+      echo "error: package $package_name has no sourcesDevice, so it cannot build for a device" >&2
+      exit 1
+    fi
+    echo "gen-android: compiling package $package_name from source into the app"
+    cflags="$cflags -I$package_install/include"
+    for package_source in $package_sources; do
+      sources="$sources $package_install/$package_source"
+    done
+    if [ -n "$package_defines" ]; then
+      cflags="$cflags $(cat "$package_install/$package_defines")"
+    fi
+  done <<EOF
+$package_lines
+EOF
+fi
 echo "gen-android: compiling $(echo $sources | wc -w | tr -d ' ') C files (NDK $(basename "$ndk"), API $api)..."
 jobs=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 export cc cflags gen
