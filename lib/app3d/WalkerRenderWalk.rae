@@ -65,7 +65,6 @@ open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
-open ui/qrCodeSystem/QrCodeSystem
 open app3d/RenderScale
 open Gpu2dCanvas
 open ui/UiSystems
@@ -126,6 +125,8 @@ func stepWalkerCharacterClock(
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
+# Every pass up to the present, the last in the graph. A game then paints on the
+# open UI frame (walkerGamePaint), and presentWalkerFrame ends the frame.
 func renderWalkerApp(
   uiSystems: view UiSystems
   cameraSystem: mod WalkerCamera
@@ -256,6 +257,9 @@ func renderWalkerApp(
   gpuPassTimingBegin(renderer: renderSystem.renderer)
   loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
     let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
+    if tag is RenderTag.present {
+      ret
+    }
     gpuPassMark(renderer: renderSystem.renderer, tag: tag)
     Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
@@ -532,20 +536,25 @@ func renderWalkerApp(
           camera: cameraSystem.camera
           editor: inputSystem.uiModes.editor
         )
-        # A game's QrCode nodes (docs/walker-kit.md, "UI"), after the UI they are in
-        qrCodePaint(
-          qrCodeSystem: inputSystem.qrCodeSystem
-          world: inputSystem.world
-          uiSystems: uiSystems
-          canvas: renderSystem.renderer.canvas
-        )
       }
       case RenderTag.present {
-        endUiFrameTimed(renderer: renderSystem.renderer)
+        # The walk stops before it: presentWalkerFrame
       }
     }
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
+}
+
+# The frame's last pass, after the game's paint, and what follows a frame
+func presentWalkerFrame(
+  frame: view WalkerFrame
+  renderSystem: mod WalkerRender
+  profiler: mod Profiler
+) {
+  gpuPassMark(renderer: renderSystem.renderer, tag: RenderTag.present)
+  Profile.zoneBegin(profiler: profiler, name: RenderTag.present.toString())
+  endUiFrameTimed(renderer: renderSystem.renderer)
+  Profile.zoneEnd(profiler: profiler, name: RenderTag.present.toString())
   gpuPassTimingEnd(renderer: renderSystem.renderer)
   if renderSystem.frameLogOn and renderSystem.statsLogged is false {
     let store: view MeshStore = renderSystem.renderer.passes.gbuffer.meshes
@@ -563,5 +572,5 @@ func renderWalkerApp(
   # The last read-back frame's per-pass GPU times, into a profiler capture
   # (gpu.<pass> counters; only while RAE_PROFILE captures)
   publishGpuPassCounters(renderer: renderSystem.renderer, profiler: profiler)
-  capFrameSleep(drs: renderSystem.drs, frameStartSec: now)
+  capFrameSleep(drs: renderSystem.drs, frameStartSec: frame.now)
 }

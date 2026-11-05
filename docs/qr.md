@@ -1,7 +1,21 @@
-# QR codes (lib/qr)
+# QR codes (the qr package)
 
-`lib/qr` makes QR codes (ISO/IEC 18004:2015) in plain Rae: text or bytes in,
-a square grid of modules out.
+`packages/qr` makes QR codes (ISO/IEC 18004:2015) in plain Rae: text or bytes
+in, a square grid of modules out. It is a package, so a project declares it:
+
+```
+dependencies: {
+  dep qr: {
+    git: "https://github.com/jonasmyoha/rae.git"
+    subdir: "packages/qr"
+    version: "1.0.0"
+    hash: "<written by rae fetch>"
+  }
+}
+```
+
+or `./rae add qr --git https://github.com/jonasmyoha/rae.git --subdir packages/qr
+--version 1.0.0` and `./rae fetch`. Its modules keep the `qr/` prefix.
 
 ```rae
 open qr/QrTables
@@ -46,7 +60,7 @@ modules at the same mask (`tools/qr/segnoGrids.py`).
 
 ## In 3D: a picture for a material
 
-`lib/qr/QrImage.rae`: `qrImagePixels(symbol:, side:, quietZone:)` makes
+`qr/QrImage.rae`: `qrImagePixels(symbol:, side:, quietZone:)` makes
 `side` x `side` linear RGBA pixels, black modules on white, every module the
 same whole number of pixels (crisp: no module is blended into its neighbor)
 and centered, the side's remainder going to a wider quiet zone. 512 suits
@@ -69,7 +83,7 @@ carries a code that scans from every side.
 
 ## In the UI: the QrCode node
 
-`lib/ui/qrCodeSystem`: a `QrCode` component on a `.raescene` node,
+`qr/qrCodeSystem`: a `QrCode` component on a `.raescene` node,
 
 ```json
 "Invite": {
@@ -85,7 +99,8 @@ tables: the app hands it the scene's pending components
 (`qrCodeTakePending(world:, qrCodeSystem:)` after mounting the scene) and
 paints after the UI's own render (`qrCodePaint`, same canvas). A code is
 encoded again only when its text or level changes; `qrCodeSetText` changes
-it from code.
+it from code. On the walker kit the game owns the `QrCodeSystem` and calls
+`qrCodePaint` from its `walkerGamePaint` hook (docs/walker-kit.md, example 148).
 
 ## Example 147
 
@@ -97,7 +112,7 @@ frame decodes both codes; straight on, all four sides and the top decode
 (before the `makeBox` fix two sides read only mirrored).
 `compiler/tests/cases/1287_qr_image` checks the picture module by module.
 
-## Reading: lib/qr/QrReader
+## Reading: qr/QrReader
 
 ```rae
 if let result: QrReadResult = qrRead(image: gray) {
@@ -107,7 +122,7 @@ if let result: QrReadResult = qrRead(image: gray) {
 }
 ```
 
-`gray` is a `GrayImage` (lib/qr/GrayImage: width, height, one `UInt8` per
+`gray` is a `GrayImage` (qr/GrayImage: width, height, one `UInt8` per
 pixel, 0 black). The steps, all plain Rae:
 
 1. Binarize with an adaptive threshold (Bradley's: darker than the mean of
@@ -121,13 +136,13 @@ pixel, 0 black). The steps, all plain Rae:
 3. The module count from each side in its own module size, then its
    neighbors (+-4, +-8) if that fails; the alignment pattern searched near
    where the three finders put it; a homography from the four points
-   (lib/qr/QrPerspective).
+   (qr/QrPerspective).
 4. Each module the majority of five samples; the format information (the
    nearest of the 32 valid codes, up to 3 bits off, either copy); from
    version 7 the version information the same way (and the grid sampled
    again if it names another size).
 5. The codewords in the zigzag, unmasked, split into blocks, each
-   corrected (lib/qr/ReedSolomon: syndromes, Berlekamp-Massey, Chien
+   corrected (qr/ReedSolomon: syndromes, Berlekamp-Massey, Chien
    search, Forney), and the segments decoded (numeric, alphanumeric, byte;
    an ECI skipped). A failed grid is tried transposed: a code seen from
    behind.
@@ -155,19 +170,24 @@ poll the map, so the pixels arrive two frames later and nothing stalls.
 While a reader is in use the frame renders into the offscreen target rather
 than straight into the drawable (one extra full-frame copy per frame).
 
-`lib/qr/qrScanSystem` (`QrScanner`) turns that into an in-game camera:
+`qr/qrScanSystem` (`QrScanner`) turns that into an in-game camera:
 every `intervalFrames` frames a `regionSide` square in the middle of the
 frame is read back, turned to gray and decoded; `scanner.latest` holds the
 last code read. The app calls `qrScanFrame(scanner:, canvas:)` after each
 present. Example 147 does it with `RAE_QR_SCAN=1` (every 10 frames, logged).
 
-In the walker world, `RAE_WALKER_QR=1` puts a 1 m cube with a code on every
-side 10 m ahead of the walker (a physics cube: it can be pushed) and scans
-the middle of the frame every 10 frames, logging what it reads
-(lib/app3d/WalkerQrScan). `RAE_WALKER_QR_TEST=1` sweeps the camera round the
-cube at eye height and reports how far each angle still reads, then ends.
-Measured in 143 (2560 x 1600 frame, a 512 x 512 scan square, noon,
-2026-11-03):
+In a game on the walker kit that uses this package and holds a `WalkerQrScan`
+(`qr/WalkerQrScan`: `createWalkerQrScan` in `walkerGameStart`, `walkerQrUpdate`
+in `walkerGameUpdate`, `walkerQrRelease` in `walkerGameEnd`; example 148),
+`RAE_WALKER_QR=1` puts a 1 m cube with a code on every side 10 m ahead of the
+walker (a physics cube: it can be pushed) and scans the middle of the frame
+every 10 frames, logging what it reads. `RAE_WALKER_QR_TEST=1` sweeps the camera
+round the cube at eye height and reports how far each angle still reads, then
+ends. The walkers with no game (136, 137, 143) do not have these settings.
+148 gave the same sweep result before and after this code moved to the package
+(2026-11-05), reading 4 to 12 m straight on, a smaller range at an angle, and
+nothing at +55 degrees. Measured earlier in 143 (2560 x 1600 frame, a 512 x 512
+scan square, noon, 2026-11-03):
 
 | angle off the face | reads from | to |
 |---|---|---|

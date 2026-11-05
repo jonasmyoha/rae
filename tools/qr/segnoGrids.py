@@ -1,4 +1,4 @@
-# Reference QR grids from segno for lib/qr's fixture: one block per case,
+# Reference QR grids from segno for the qr package's fixture: one block per case,
 # "case <name> <version> <level> <mask>" then the rows ('#' dark).
 import segno, sys
 import segno.encoder as encoder

@@ -1,8 +1,10 @@
 # An in-game camera that reads QR codes in the walker world (docs/qr.md,
-# "Scanning the rendered frame"). With RAE_WALKER_QR=1 a 1 m cube with a
-# code on every side (lib/qr/QrImage on the cube's material) stands 10 m in
+# "Scanning the rendered frame"), for a game on the walker kit: it holds a
+# WalkerQrScan, calls createWalkerQrScan in walkerGameStart, walkerQrUpdate in
+# walkerGameUpdate and walkerQrRelease in walkerGameEnd. With RAE_WALKER_QR=1 a 1 m cube with a
+# code on every side (qr/QrImage on the cube's material) stands 10 m in
 # front of the walker, pushable like the other cubes, and the
-# middle of the rendered frame is scanned every 10 frames (lib/qr/
+# middle of the rendered frame is scanned every 10 frames (qr/
 # qrScanSystem: read back from the GPU a frame or two later, decoded); a
 # code read is logged.
 #
@@ -18,14 +20,14 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 open Scene3d
-open RendererDeferred
 open RendererImages
 open WorldBiome
 open app3d/CameraRig
+open app3d/WalkerAppUpdate
 open app3d/WalkerWorld
-open app3d/WalkerPhysics
 open app3d/WalkerCubes
 open app3d/CharacterController
+open app3d/PlayerRoster
 open qr/QrTables
 open qr/QrEncoder
 open qr/QrImage
@@ -102,14 +104,7 @@ func disabledWalkerQrScan() ret WalkerQrScan {
 
 # The cube and the scanner (when RAE_WALKER_QR or RAE_WALKER_QR_TEST is
 # set): the cube 4 m in front of the walker, on the ground
-func createWalkerQrScan(
-  renderer: mod DeferredRenderer
-  physicsSystem: mod WalkerPhysics
-  world: mod WalkerWorld
-  heroEntityId: view EntityId
-  groundZ: view Float
-  biome: view BiomeConfig
-) ret WalkerQrScan {
+func createWalkerQrScan(app: mod WalkerApp) ret WalkerQrScan {
   var scan: WalkerQrScan = disabledWalkerQrScan()
   scan.testing = Sys.getEnv(name: "RAE_WALKER_QR_TEST").length() > 0
   scan.enabled = scan.testing or Sys.getEnv(name: "RAE_WALKER_QR").length() > 0
@@ -122,33 +117,36 @@ func createWalkerQrScan(
   var layer: Int = -1
   if let symbol: QrSymbol = qrEncodeText(text: walkerQrText, level: QrErrorCorrection.medium) {
     layer = rendererAddSurfaceImagePixels(
-      renderer: renderer
+      renderer: app.renderSystem.renderer
       name: "walker-qr-cube"
       pixels: qrImagePixels(symbol: symbol, side: 512, quietZone: 4)
     )
   }
   let hero: view ThirdPersonController = controllerOf(
-    controllers: world.controllers
-    entityId: heroEntityId
+    controllers: app.world.controllers
+    entityId: rosterControlledEntityId(players: app.players)
   )
   let x: Float = hero.position.x - Math.sin(x: hero.heading) * 10.0
   let y: Float = hero.position.y + Math.cos(x: hero.heading) * 10.0
   let ground: Float = worldTerrainHeight(
     x: x
     y: y
-    groundZ: groundZ
-    cfg: biome
+    groundZ: app.characterSystem.groundZ
+    cfg: app.biome
   )
   scan.cubeEntityId = spawnPhysicsCube(
-    physicsSystem: physicsSystem
-    allocator: world.allocator
-    transforms: world.transforms
+    physicsSystem: app.physicsSystem
+    allocator: app.world.allocator
+    transforms: app.world.transforms
     center: Vec3.create(x: x, y: y, z: ground + 0.55)
     halfSize: 0.5
     color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
-  if componentHas(this: physicsSystem.cubes, entityId: scan.cubeEntityId) {
-    let cube: mod PhysicsCube = componentMod(this: physicsSystem.cubes, entityId: scan.cubeEntityId)
+  if componentHas(this: app.physicsSystem.cubes, entityId: scan.cubeEntityId) {
+    let cube: mod PhysicsCube = componentMod(
+      this: app.physicsSystem.cubes
+      entityId: scan.cubeEntityId
+    )
     cube.textureLayer = layer
   }
   scan.baseYaw = hero.heading + 3.14159265
@@ -163,8 +161,8 @@ func cubeCenter(scan: view WalkerQrScan, world: view WalkerWorld) ret Vec3 {
   ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 }
 
-# Aim the camera for the sweep's current step (before the frame's camera
-# update): an orbit round the cube's middle
+# Aim the camera for the sweep's current step (the next frame's camera update
+# takes it): an orbit round the cube's middle
 func walkerQrAim(
   scan: view WalkerQrScan
   world: view WalkerWorld
@@ -189,7 +187,31 @@ func walkerQrAim(
   snapCameraRigView(rig: rig)
 }
 
-# One frame, after present: scan, log a new read, run the sweep
+# One frame, from walkerGameUpdate: scan what the last frame rendered, log a
+# new read, run the sweep, aim its camera, and end the app when it is done
+func walkerQrUpdate(scan: mod WalkerQrScan, app: mod WalkerApp) {
+  if not scan.enabled {
+    ret
+  }
+  if app.frame.renderedOnce {
+    walkerQrFrame(scan: scan, canvas: app.renderSystem.renderer.canvas)
+  }
+  walkerQrAim(
+    scan: scan
+    world: app.world
+    rig: app.cameraSystem.rig
+    camera: app.cameraSystem.camera
+  )
+  if walkerQrTestDone(scan: scan) {
+    app.frame.endRequested = true
+  }
+}
+
+func walkerQrRelease(scan: mod WalkerQrScan, app: mod WalkerApp) {
+  qrScanRelease(scanner: scan.scanner, canvas: app.renderSystem.renderer.canvas)
+}
+
+# Scan, log a new read, run the sweep
 func walkerQrFrame(scan: mod WalkerQrScan, canvas: mod Gpu2dCanvas) {
   if not scan.enabled or scan.done {
     ret
