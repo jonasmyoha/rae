@@ -1176,6 +1176,13 @@ void rae_ext_Gpu2d_setDesignResolution(float w, float h, int64_t fit){
 float rae_ext_Gpu2d_designWidth(void){ return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
 float rae_ext_Gpu2d_designHeight(void){ return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
 float rae_ext_Gpu2d_dpr(void){
+#ifdef __ANDROID__
+    /* SDL's window units are physical pixels on Android, so the ratio below is
+     * always 1, and a UI laid out in points came out at a third of its size. The
+     * screen's density is the display scale there. */
+    float density = g_sdl_win ? SDL_GetWindowDisplayScale(g_sdl_win) : 0.0f;
+    if (density > 0.0f) return density;
+#endif
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
 }
