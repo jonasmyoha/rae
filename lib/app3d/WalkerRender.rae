@@ -147,6 +147,8 @@ func drawPhysicsCubes(
   toon: view Bool
 ) {
   resetInstanceBatch(batch: batch)
+  # A game adds cubes as it likes (docs/walker-kit.md): every one is drawn
+  growInstanceBatch(batch: batch, capacity: componentCount(this: physicsSystem.cubes))
   loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
     let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
     if componentHas(this: world.transforms, entityId: cubeId) is false {
