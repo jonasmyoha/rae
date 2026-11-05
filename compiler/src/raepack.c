@@ -847,6 +847,14 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
         return false;
       }
       if (!parse_dependencies(parser, pack, field->value.as.block)) return false;
+    } else if (str_eq_cstr(field->key, "assets")) {
+      if (field->value.kind != RAEPACK_VALUE_STRING) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "assets must be a string: the folders of the files read at run time, like \"assets maps\"");
+        parser->had_error = true;
+        return false;
+      }
+      pack->assets = field->value.as.string;
     } else if (str_eq_cstr(field->key, "native")) {
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
         diag_error(parser->file_path, (int)field->line, (int)field->column,

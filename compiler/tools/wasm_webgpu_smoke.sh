@@ -93,6 +93,15 @@ build_quietly 240 \
   checks/webTask/Main.rae
 test -s "$TMP/task/index.wasm"
 
+# A package's shader and declared file reach a page: the file through the preloaded data, read at
+# packages/<name>/ (docs/toolchain-and-packages-decision.md, section 6).
+build_quietly 240 \
+  --target wasm --profile dev \
+  --project checks/webPackageAsset \
+  --out "$TMP/packageAsset/index.html" \
+  checks/webPackageAsset/Main.rae
+test -s "$TMP/packageAsset/index.wasm"
+
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [ ! -x "$CHROME" ]; then CHROME="$(command -v google-chrome || command -v chromium || true)"; fi
 have_chrome=0
@@ -120,6 +129,15 @@ page_console() {
   wait "$chrome" "$server" 2>/dev/null || true
   grep CONSOLE "$1/chrome.log" || true
 }
+
+if [ "$have_chrome" = 1 ]; then
+  console="$(page_console "$TMP/packageAsset" 7 'PACKAGE ASSET (OK|FAIL)')"
+  if ! printf '%s' "$console" | grep -q 'PACKAGE ASSET OK'; then
+    echo "FAIL wasm_webgpu_smoke: a package's file did not reach the page:"
+    printf '%s\n' "$console" | sed 's/.*CONSOLE:[0-9]*\] "//;s/", source.*//' | head -10
+    exit 1
+  fi
+fi
 
 task_note="task page built (no Chrome: not run)"
 if [ "$have_chrome" = 1 ]; then

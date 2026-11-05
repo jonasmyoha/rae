@@ -188,7 +188,7 @@ user asking for it. Decide after a second package has shown what a split costs.
    it goes with or after the engine, and it has shaders, so it needs the design from step 2.
 5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
 
-### How a package carries C, shaders and files (C and `embedText` are built; the rest is agreed and not built)
+### How a package carries C, shaders and files (all built in 0.3.6; shaders and assets have no real package yet)
 
 Today each of these assumes the stdlib's folder or names one library by hand:
 
@@ -230,10 +230,9 @@ pack Sql {
   C reaches it when `gen-android.sh` learns the same list.
 - A library that needs `cmake` or a network says so in its script's error. A fresh clone of a project with C needs those too.
 
-**Shaders: a path in a package's module is tried in that package's folder first.** `shader(files: ["spray.wgsl"])` is embedded at
-build and validated by naga, so it needs no run-time path on any platform. The change is one more place to look in
-`shader_compose.c`: the folder of the package owning the file, which `rae_deps_owner_of` already answers. A package never writes
-`lib/`.
+**Shaders: a path in a package's module is tried next to the file, then in that package's folder, then `lib/...` in the stdlib.**
+`shader(files: ["shaders/spray.wgsl", "lib/noise.wgsl"])` is embedded at build and validated by naga, so it needs no run-time path
+on any platform. A package never looks in the project above it, even for `lib/...`, and `..` is refused.
 
 **Files read at run time: embed small text, declare the rest.**
 
@@ -243,9 +242,11 @@ build and validated by naga, so it needs no run-time path on any platform. The c
   else, so a package cannot reach the project above it, and `..` is refused there. Elsewhere it is tried against the project and
   the stdlib, as for a shader. The file is a build input, so `rae watch` rebuilds when it changes. The price: a running app does not
   see an edit until it is rebuilt.
-- Pictures, fonts and models, too large to embed, are declared: `assets: ["assets"]` in the pack. `rae run` exports each
-  package's folder, and `Sys.readAsset(package: "water", path: "assets/foam.png")` looks there. `stage-app-assets.sh` and the
-  browser's preload copy them to `packages/<name>/...`, read by the same call. The call never contains a path outside the package.
+- Pictures, fonts and models, too large to embed, are declared: `assets: "assets maps"` in the pack, space separated, as the
+  pack format has no lists. `Sys.readPackageAsset(package:, path:)` reads a text file, and `Sys.packageAssetPath(package:, path:)`
+  gives the path for a loader that takes one. `rae run` exports each package's folder and declared folders, so **a file the pack
+  does not declare is refused on the Mac too**, and not only found missing on a phone. `stage-app-assets.sh`, for iOS and Android,
+  and the browser's preload copy declared folders to `packages/<name>/...`, read by the same calls.
 
 **What this design refuses:** a build system in the pack (the script is the package's own), version ranges, and a package's C
 reaching into the compiler's `runtime/` folder.
@@ -260,6 +261,10 @@ The plan named `box3d`, as a candidate. Checked on 2026-11-05, as the `qr` lesso
 | `sql` | SQLite and a glue header: native, browser and iOS | 0 | 2 servers, case 1288 | **the proof**, done in 0.3.4 |
 | `wasm` | WAMR, but its header is in `compiler/runtime/` | 0 | cases only | second; its header must move first |
 | `box3d` | Box3D and a glue header | 24 | 3 examples, 19 cases, `physicsScenes` | with the engine |
+
+No small package can prove shaders and assets on real code, checked on 2026-11-05: the only unit with a shader and no importer in
+`lib/` is `Gpu`, a general compute API with no `.wgsl` of its own, and `waterSpray` and `sql` have no shader. So cases prove them,
+and `trees` is their first real use.
 
 So the order changed, agreed on 2026-11-05: `sql` proves C; `physicsScenes` 1.1.0 proves `embedText`; `trees`, with its shaders and pictures,
 proves the rest once `app3d` moves; `box3d` goes with `app3d`.

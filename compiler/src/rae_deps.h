@@ -83,6 +83,9 @@ void rae_deps_print_tree(FILE* out, const char* root_label, const char* stdlib_d
  * root: in the project's pack); never the project that depends on it. */
 int rae_deps_owner_of(const char* file_path);
 
+/* Dep `index`'s `assets`: folders of files read at run time, space separated. */
+const char* rae_deps_assets(int index);
+
 /* The folder of dep `index`. */
 const char* rae_deps_dir(int index);
 bool rae_deps_package_reaches(int from, int to);

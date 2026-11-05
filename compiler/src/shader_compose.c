@@ -89,6 +89,7 @@ bool embed_text_read(Arena* arena,
 
 bool shader_compose(Arena* arena,
                     const char* declaring_file,
+                    const char* package_dir,
                     const char* project_root,
                     const char* stdlib_dir,
                     const char** paths,
@@ -108,6 +109,11 @@ bool shader_compose(Arena* arena,
     char tried[3][4096];
     int tried_count = 0;
     const char* found = NULL;
+    bool in_package = package_dir && package_dir[0];
+    if (in_package && (p[0] == '/' || strncmp(p, "../", 3) == 0 || strstr(p, "/../"))) {
+      snprintf(err, err_cap, "shader part '%s' leaves the package; a package sees only its own files and the stdlib", p);
+      return false;
+    }
     if (p[0] == '/') {
       snprintf(tried[tried_count++], sizeof tried[0], "%s", p);
     } else {
@@ -117,8 +123,9 @@ bool shader_compose(Arena* arena,
         if (slash) snprintf(tried[tried_count++], sizeof tried[0], "%.*s/%s", (int)(slash - declaring_file), declaring_file, p);
         else snprintf(tried[tried_count++], sizeof tried[0], "%s", p);
       }
-      /* 2. Against the project root (a project's own `lib/`). */
-      if (project_root && project_root[0]) snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", project_root, p);
+      /* 2. Against the package's folder, or the project root (a project's own `lib/`). */
+      if (in_package) snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", package_dir, p);
+      else if (project_root && project_root[0]) snprintf(tried[tried_count++], sizeof tried[0], "%s/%s", project_root, p);
       else if (tried_count == 0) snprintf(tried[tried_count++], sizeof tried[0], "%s", p);
       /* 3. A `lib/<rest>` part from the toolchain stdlib (that directory IS
        *    the stdlib `lib`, so the prefix is dropped when joining). */
@@ -134,6 +141,10 @@ bool shader_compose(Arena* arena,
     }
     for (int t = 0; t < tried_count && !found; t++)
       if (file_is_regular(tried[t])) found = tried[t];
+    if (!found && in_package) {
+      snprintf(err, err_cap, "shader part '%s' not found next to this file, in its package's folder or in the stdlib", p);
+      return false;
+    }
     if (!found) {
       int n = snprintf(err, err_cap, "shader part '%s' not found (tried", p);
       for (int t = 0; t < tried_count && n < (int)err_cap; t++)

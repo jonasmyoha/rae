@@ -20,6 +20,8 @@ typedef struct {
   bool is_git;
   bool from_root;       /* declared by the project: its version wins a diamond */
   char declared_by[128];
+  /* its pack's `assets`: folders of files read at run time, space separated */
+  char assets[512];
   /* its pack's native block */
   bool has_native;
   char native_build[256];
@@ -361,6 +363,22 @@ static bool check_same_dep(const ResolvedDep* existing, const RaePackDep* spec, 
  * it may reach (#64888955: a package sees only its own files, the stdlib and
  * its own dependencies). All of one pack's deps come first, so the project's
  * are known before any package asks for another version of one. */
+/* Every folder a pack's `assets` names is one of its own, and there */
+static bool check_assets(const ResolvedDep* dep, const char* own_pack) {
+  char words[sizeof(dep->assets)];
+  snprintf(words, sizeof(words), "%s", dep->assets);
+  char* saved = NULL;
+  for (char* word = strtok_r(words, " ", &saved); word; word = strtok_r(NULL, " ", &saved)) {
+    char folder[2 * PATH_MAX];
+    snprintf(folder, sizeof(folder), "%s/%s", dep->dir, word);
+    if (word[0] == '/' || strstr(word, "..") || !dir_exists(folder)) {
+      fprintf(stderr, "error: %s: assets names '%s', which is not a folder of the package\n", own_pack, word);
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool resolve_pack_deps(const RaePack* pack, const char* pack_dir_in, int owner, int depth) {
   if (depth > 16) {
     fprintf(stderr, "error: dependencies nest more than 16 deep (a cycle?)\n");
@@ -404,6 +422,11 @@ static bool resolve_pack_deps(const RaePack* pack, const char* pack_dir_in, int 
     memset(&nested, 0, sizeof(nested));
     if (raepack_parse_library_file(own_pack, &nested)) {
       ResolvedDep* found = &s_deps[index];
+      str_copy(found->assets, sizeof(found->assets), nested.assets);
+      if (!check_assets(found, own_pack)) {
+        raepack_free(&nested);
+        return false;
+      }
       found->has_native = nested.native_build.len > 0;
       str_copy(found->native_build, sizeof(found->native_build), nested.native_build);
       str_copy(found->native_header, sizeof(found->native_header), nested.native_header);
@@ -430,6 +453,10 @@ bool rae_deps_resolve(const RaePack* pack, const char* pack_dir_in) {
 
 void rae_deps_set_compiler_version(const char* version) {
   snprintf(s_compiler_version, sizeof(s_compiler_version), "%s", version ? version : "");
+}
+
+const char* rae_deps_assets(int index) {
+  return index >= 0 && index < s_dep_count ? s_deps[index].assets : "";
 }
 
 bool rae_deps_native_at(int index, RaeDepNative* out) {

@@ -1,0 +1,15 @@
+# A package's shader and its declared file, natively and in a browser, where the file comes from the
+# page's preloaded data at packages/<name>/ and there is no folder from `rae run`.
+import Sys
+open sdk/Amount
+
+func main() ret Int {
+  let text: String = Sys.readPackageAsset(package: "sdk", path: "assets/deep/hello.txt")
+  let composed: Shader = amountShader()
+  if text.contains(sub: "hello from the package") and composed.text.contains(sub: "packageAmount") {
+    log("PACKAGE ASSET OK: the file and the shader came with the package")
+    ret 0
+  }
+  log("PACKAGE ASSET FAIL: the file was [{text}]")
+  ret 1
+}

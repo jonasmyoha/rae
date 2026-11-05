@@ -1,0 +1,27 @@
+# A pack's `assets` declares the folders of files read at run time. Sys reads them by the package's
+# name, a declared file only, as a phone has only those. With no folder from `rae run`, as on a
+# phone
+# or in a browser, the path is where they are staged: packages/<name>/<path>.
+import Sys
+
+func main() {
+  log("[{Sys.readPackageAsset(package: "sdk", path: "assets/hello.txt")}]")
+  log("[{Sys.readPackageAsset(package: "sdk", path: "assets/deep/more.txt")}]")
+  log("[{Sys.readPackageAsset(package: "sdk", path: "maps/one.txt")}]")
+  let found: String = Sys.packageAssetPath(package: "sdk", path: "maps/one.txt")
+  log("a path for a loader: {found.endsWith(suffix: "vendor/sdk/maps/one.txt")}")
+  log("not declared: [{Sys.readPackageAsset(package: "sdk", path: "private/secret.txt")}]")
+  log(
+    "a prefix of a folder is not it: [{Sys.packageAssetPath(
+      package: "sdk"
+      path: "mapsMore/one.txt"
+    )}]"
+  )
+  log(
+    "leaving the package: [{Sys.readPackageAsset(package: "sdk", path: "../../assets/hello.txt")}]"
+  )
+  log("declared, not there: [{Sys.readPackageAsset(package: "sdk", path: "assets/none.txt")}]")
+  log(
+    "no such package, staged path: {Sys.packageAssetPath(package: "other", path: "assets/x.txt")}"
+  )
+}

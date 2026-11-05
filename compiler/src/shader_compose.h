@@ -24,10 +24,13 @@ typedef struct {
 /* Resolve every part — next to the declaring `.rae` file first, then against
  * the project root, then the toolchain stdlib for a `lib/...` path (the
  * order the runtime's rae_ext_rae_gb_read_shader used, plus the declaring
- * file's own directory) — read and compose. On a miss, `err` names the part
- * and the paths tried, and the result is false. */
+ * file's own directory) — read and compose. In a package's module (`package_dir`
+ * set) the package's folder takes the project root's place, since a package sees
+ * its own files and the stdlib, and `..` is refused. On a miss, `err` names the
+ * part and the paths tried, and the result is false. */
 bool shader_compose(Arena* arena,
                     const char* declaring_file,
+                    const char* package_dir,
                     const char* project_root,
                     const char* stdlib_dir,
                     const char** paths,

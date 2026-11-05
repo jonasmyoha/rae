@@ -852,6 +852,10 @@ The compiler has one version, `compiler/VERSION` — a single semver line
 - **A text file a package needs: `embedText(file: "scenes/Hud.raescene")`**, built into the program at
   build time like `shader(files:)`. In a package's module the path is tried next to the file and in the
   package's folder only. `lib/` never holds a package's file.
+- **A package's shaders and big files.** `shader(files:)` in its module looks next to the file, in the
+  package's folder, then `lib/...` in the stdlib, never the project. `assets: "assets maps"` in its pack
+  declares folders for `Sys.readPackageAsset` and `Sys.packageAssetPath(package:, path:)`, staged for a
+  device and the browser at `packages/<name>/`. A file not declared is refused on the Mac too.
 - **Package CLI (#934).** `rae add <name> --path <dir> | --git <url> --version <v>
   [--subdir <dir>] [--commit <c>]` edits the project's `.raepack` (creating the
   `dependencies` block if absent, refusing a duplicate name); `rae fetch` resolves

@@ -2853,6 +2853,22 @@ static bool box3d_link_flags(const char* c_path, char* flags, size_t cap) {
   return true;
 }
 
+/* What Sys.packageAssetPath needs in a program `rae` runs: each package's folder, and which of
+ * its folders it declares, so a file it did not declare fails here as it would on a phone. */
+static void package_assets_export(void) {
+  for (int i = 0; i < rae_deps_count(); ++i) {
+    const char* assets = rae_deps_assets(i);
+    if (!assets[0]) continue;
+    char name[192];
+    char value[sizeof(name) + 1024];
+    snprintf(name, sizeof(name), "RAE_PACKAGE_%s", rae_deps_name(i));
+    setenv(name, rae_deps_dir(i), 1);
+    snprintf(name, sizeof(name), "RAE_PACKAGE_ASSETS_%s", rae_deps_name(i));
+    snprintf(value, sizeof(value), " %s ", assets);
+    setenv(name, value, 1);
+  }
+}
+
 /* The packages with C (rae_package_native.h) this program uses: those whose header its C
  * includes. Adds their include flag and library, the browser's library when `browser`, to
  * `flags`; a build that needs one and has none builds it. False when one could not be had. */
@@ -3349,6 +3365,24 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     args[n++] = "--preload-file";
     args[n++] = preload_lib[i];
   }
+  /* Each package's declared folders, at the path Sys.packageAssetPath reads in a browser */
+  static char preload_packages[12][PATH_MAX * 3];
+  int preload_package_count = 0;
+  for (int i = 0; i < rae_deps_count(); ++i) {
+    char words[1024];
+    snprintf(words, sizeof(words), "%s", rae_deps_assets(i));
+    char* saved = NULL;
+    for (char* word = strtok_r(words, " ", &saved); word; word = strtok_r(NULL, " ", &saved)) {
+      if (preload_package_count >= 12) {
+        fprintf(stderr, "error: more than 12 package asset folders for a browser build\n");
+        return false;
+      }
+      snprintf(preload_packages[preload_package_count], sizeof(preload_packages[0]), "%s/%s@/packages/%s/%s",
+               rae_deps_dir(i), word, rae_deps_name(i), word);
+      args[n++] = "--preload-file";
+      args[n++] = preload_packages[preload_package_count++];
+    }
+  }
   /* Upstream Box3D (the C-library physics track): its headers and the
    * Emscripten build of the library tools/box3d/build.sh installs. */
   char box3d_include[PATH_MAX + 4];
@@ -3610,6 +3644,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   {
     const char* stdlib = compiler_stdlib_dir();
     if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
+    package_assets_export();
   }
   /* The crash handler names the program in its one-line report; the temp
    * binary's own name would say nothing, so hand it the entry (relative as
@@ -3919,6 +3954,7 @@ static pid_t watch_spawn_child(const char* bin_path,
     {
       const char* stdlib = compiler_stdlib_dir();
       if (stdlib && stdlib[0]) setenv("RAE_STDLIB", stdlib, 0);
+    package_assets_export();
     }
     // Run with cwd = lib-root so root-relative asset paths resolve (same as
     // `rae run` and the devtools). bin_path is absolute, so this is safe.
@@ -5693,15 +5729,23 @@ static int cmd_update(int argc, char** argv) {
   return ok ? 0 : 1;
 }
 
-static int cmd_tree(bool native) {
+static int cmd_tree(const char* mode) {
   char pack_path[PATH_MAX], pack_dir[PATH_MAX];
   if (!packages_find_pack(pack_path, pack_dir)) return 1;
   RaePack pack;
   if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
-  if (native) {
+  if (mode && strcmp(mode, "--native") == 0) {
     bool printed = rae_package_native_print();
     raepack_free(&pack);
     return printed ? 0 : 1;
+  }
+  /* For the device scripts: name, folder and declared folders of each package with assets */
+  if (mode && strcmp(mode, "--assets") == 0) {
+    for (int i = 0; i < rae_deps_count(); ++i) {
+      if (rae_deps_assets(i)[0]) printf("%s\t%s\t%s\n", rae_deps_name(i), rae_deps_dir(i), rae_deps_assets(i));
+    }
+    raepack_free(&pack);
+    return 0;
   }
   char label[256];
   if (pack.name.len > 0) snprintf(label, sizeof(label), "%.*s", (int)pack.name.len, pack.name.data);
@@ -5756,7 +5800,7 @@ int main(int argc, char** argv) {
     return cmd_update(argc - 2, argv + 2);
   }
   if (strcmp(cmd, "tree") == 0) {
-    return cmd_tree(argc >= 3 && strcmp(argv[2], "--native") == 0);
+    return cmd_tree(argc >= 3 ? argv[2] : NULL);
   }
   if (strcmp(cmd, "bindgen") == 0) {
     return bindgen_run(argc - 2, argv + 2);
