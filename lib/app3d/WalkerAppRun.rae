@@ -3,7 +3,7 @@
 # 136, 137 and 143 each call runWalkerApp from their Main.rae.
 #
 # A game built on the walker kit (docs/walker-kit.md) calls runWalkerGame
-# with its own type G instead, and defines three functions for G that the
+# with its own type G instead, and defines four functions for G that the
 # run calls, as a router type's `route` is for lib/ui's dispatch:
 #
 #   walkerGameStart(game: mod G, app: mod WalkerApp)    once, the app built:
@@ -12,6 +12,9 @@
 #   walkerGameUpdate(game: mod G, app: mod WalkerApp)   every frame, after
 #                                                       the walker's update:
 #                                                       its systems
+#   walkerGamePaint(game: mod G, app: mod WalkerApp)    each drawn frame, on the
+#                                                       open UI frame, after the
+#                                                       UI, before the present
 #   walkerGameEnd(game: mod G, app: mod WalkerApp)      before shutdown
 #
 # The game's components live in its own tables, keyed by the walker world's
@@ -57,8 +60,6 @@ open app3d/WalkerKnockTest
 open app3d/WalkerApp
 open LeafParticles
 open app3d/WalkerIceTest
-open app3d/WalkerQrScan
-open qr/qrScanSystem/QrScanSystem
 open app3d/walkerNetSystem/WalkerNetSystem
 
 # A networked session whose time is up (RAE_WALKER_NET_SECONDS) closes the app
@@ -79,6 +80,9 @@ func walkerGameStart(game: mod NoWalkerGame, app: mod WalkerApp) {
 func walkerGameUpdate(game: mod NoWalkerGame, app: mod WalkerApp) {
 }
 
+func walkerGamePaint(game: mod NoWalkerGame, app: mod WalkerApp) {
+}
+
 func walkerGameEnd(game: mod NoWalkerGame, app: mod WalkerApp) {
 }
 
@@ -97,7 +101,11 @@ func runWalkerGame(G: type, game: mod G, settings: view WalkerAppSettings) ret I
   loop walkerRunGoing(run: run, app: app) {
     walkerRunUpdate(app: app)
     walkerGameUpdate(game: game, app: app)
-    walkerRunRender(app: app)
+    if walkerRunRender(app: app) {
+      walkerGamePaint(game: game, app: app)
+      walkerRunPresent(app: app)
+    }
+    walkerRunFrameEnd(app: app)
   }
   walkerGameEnd(game: game, app: app)
   walkerRunEnd(app: app)
@@ -278,23 +286,18 @@ func walkerRunStart(app: mod WalkerApp) ret WalkerRun {
 func walkerRunGoing(run: view WalkerRun, app: view WalkerApp) ret Bool {
   ret not run.physicsTest and not run.splashTest and not run.layoutTest and not Gpu2d.pollClose() and not netSessionOver(
     app: app
-  ) and not walkerQrTestDone(scan: app.qrScan)
+  ) and not app.frame.endRequested
 }
 
-# A frame's update: time, the sweep's camera, the walker's systems
+# A frame's update: time, the walker's systems
 func walkerRunUpdate(app: mod WalkerApp) {
   beginWalkerFrame(app: app)
-  walkerQrAim(
-    scan: app.qrScan
-    world: app.world
-    rig: app.cameraSystem.rig
-    camera: app.cameraSystem.camera
-  )
   updateWalkerApp(app: app)
 }
 
-# A frame's render (or the wait when nothing needs drawing), and its end
-func walkerRunRender(app: mod WalkerApp) {
+# A frame's render up to the present, true when it drew (false: the wait when
+# nothing needs drawing)
+func walkerRunRender(app: mod WalkerApp) ret Bool {
   if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
     # Park until the OS has something to say (shared policy, lib/ui/event_loop).
     Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
@@ -305,29 +308,37 @@ func walkerRunRender(app: mod WalkerApp) {
       frameSec: 0.016667
       heartbeatSec: 1.0
     ))
-  } else {
-    if let resources: mod GpuResources = app.gpuResources {
-      renderWalkerApp(
-        uiSystems: app.inputSystem.uiSystems
-        cameraSystem: app.cameraSystem
-        characterSystem: app.characterSystem
-        frame: app.frame
-        inputSystem: app.inputSystem
-        renderSystem: app.renderSystem
-        world: app.world
-        physicsSystem: app.physicsSystem
-        walkerMarks: app.walkerMarks
-        terrainSystem: app.terrainSystem
-        wadeSplash: app.wadeSplash
-        waterSystem: app.waterSystem
-        biome: app.biome
-        resources: resources
-        profiler: app.profiler
-        grassCompute: app.grassCompute
-      )
-    }
-    walkerQrFrame(scan: app.qrScan, canvas: app.renderSystem.renderer.canvas)
+    ret false
   }
+  if let resources: mod GpuResources = app.gpuResources {
+    renderWalkerApp(
+      uiSystems: app.inputSystem.uiSystems
+      cameraSystem: app.cameraSystem
+      characterSystem: app.characterSystem
+      frame: app.frame
+      inputSystem: app.inputSystem
+      renderSystem: app.renderSystem
+      world: app.world
+      physicsSystem: app.physicsSystem
+      walkerMarks: app.walkerMarks
+      terrainSystem: app.terrainSystem
+      wadeSplash: app.wadeSplash
+      waterSystem: app.waterSystem
+      biome: app.biome
+      resources: resources
+      profiler: app.profiler
+      grassCompute: app.grassCompute
+    )
+    ret true
+  }
+  ret false
+}
+
+func walkerRunPresent(app: mod WalkerApp) {
+  presentWalkerFrame(frame: app.frame, renderSystem: app.renderSystem, profiler: app.profiler)
+}
+
+func walkerRunFrameEnd(app: mod WalkerApp) {
   # Frame end: report the authored components no lib table matched (this app
   # has no tables of its own) and recycle the indices of destroyed entities.
   uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
@@ -356,7 +367,6 @@ func walkerRunEnd(app: mod WalkerApp) {
   if let rendererResources: mod GpuResources = app.renderSystem.renderer.gpuResources {
     releaseLeafParticles(leafParticles: app.walkerMarks.leafParticles, resources: rendererResources)
   }
-  qrScanRelease(scanner: app.qrScan.scanner, canvas: app.renderSystem.renderer.canvas)
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   destroyPhysicsSystem(physicsSystem: app.physicsSystem)
   shutdown()

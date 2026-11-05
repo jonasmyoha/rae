@@ -22,11 +22,13 @@ and the game defines, for its own type:
 |---|---|---|
 | `walkerGameStart(game: mod MyGame, app: mod WalkerApp)` | once, the app built | its entities, components, UI scenes |
 | `walkerGameUpdate(game: mod MyGame, app: mod WalkerApp)` | every frame, after the walker's update, before the render | its systems |
+| `walkerGamePaint(game: mod MyGame, app: mod WalkerApp)` | every drawn frame, on the open UI frame, after the UI, before the present | what it paints over the UI, on `app.renderSystem.renderer.canvas` |
 | `walkerGameEnd(game: mod MyGame, app: mod WalkerApp)` | before the shutdown | releasing what it made |
 
-All three must exist (empty is fine). `runWalkerApp` is `runWalkerGame`
+All four must exist (empty is fine). `runWalkerApp` is `runWalkerGame`
 with `NoWalkerGame`, whose hooks do nothing, so the existing walkers run
-exactly as before.
+exactly as before. A game ends the frame loop with
+`app.frame.endRequested = true` (the shutdown and `walkerGameEnd` still run).
 
 ## A game's parts
 
@@ -46,10 +48,12 @@ exactly as before.
 - **UI**: `mountUiScene(world: app.inputSystem.world, uiSystems:
   app.inputSystem.uiSystems, path:, res: app.inputSystem.gpuUi)` in
   `walkerGameStart` adds the game's own .raescene over the walker's;
-  `setNodeText` changes its text. A scene with `QrCode` nodes (docs/qr.md):
-  call `qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem:
-  app.inputSystem.qrCodeSystem)` after mounting it; the kit paints them, and
-  `qrCodeSetText` changes one.
+  `setNodeText` changes its text. A scene with `QrCode` nodes: the game declares
+  the qr package (docs/qr.md) and owns a `QrCodeSystem`, calls
+  `qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem:)` after mounting
+  it and `qrCodePaint(qrCodeSystem:, world: app.inputSystem.world, uiSystems:
+  app.inputSystem.uiSystems, canvas: app.renderSystem.renderer.canvas)` in
+  `walkerGamePaint`; `qrCodeSetText` changes one.
 
 ## Shared assets
 
@@ -71,14 +75,15 @@ at its own folder holding the same file names. The iOS bundle stages
 `examples/148_walker_game`: the 143 forest walker with a red box 6 m ahead
 (a kinematic cube) carrying the game's own `SpinBox` component, a spin
 system that turns it while the walker is within 4 m, and the game's own UI
-scene saying so. `RAE_GAME_TEST=1` puts the box within reach and logs its
-angle at frames 5 and 120 (a headless check).
+scene saying so, with a `QrCode` node and the `RAE_WALKER_QR` cube from the qr
+package. `RAE_GAME_TEST=1` puts the box within reach and logs its angle at
+frames 5 and 120 (a headless check).
 
 ## Not yet
 
-- The game cannot add its own draw calls to the frame (only what the kit
-  draws: cubes, the walker's characters); a render hook is the next step
-  when a game needs its own meshes.
+- The game cannot add its own 3D draw calls to the frame (only what the kit
+  draws: cubes, the walker's characters); `walkerGamePaint` is 2D, over the UI.
+  A 3D hook is the next step when a game needs its own meshes.
 - `runWalkerGame` is thin (the hooks and four plain functions). A
   qualified call such as `Vec3.create(...)` inside a generic body once did
   not build (it was mangled as a generic instantiation); that is fixed

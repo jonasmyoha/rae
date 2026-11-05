@@ -1,13 +1,16 @@
 # A game on the walker kit (docs/walker-kit.md): the 143 forest walker, plus
 # this game's own parts, with no walker kit file copied. runWalkerGame runs
-# the walker with a BoxGame and calls its three hooks:
+# the walker with a BoxGame and calls its four hooks:
 #
 #   walkerGameStart   a red box (a kinematic physics cube the walker kit
 #                     draws) 6 m ahead, the game's own SpinBox component on
-#                     it, and the game's own UI scene
+#                     it, the game's own UI scene with a QrCode node, and with
+#                     RAE_WALKER_QR=1 a cube with a code that the game's camera
+#                     reads (the qr package)
 #   walkerGameUpdate  the spin system: a SpinBox turns while the walker is
-#                     within its reach, and the UI says so
-#   walkerGameEnd     nothing to release
+#                     within its reach, and the UI says so; the scan
+#   walkerGamePaint   the QrCode node, after the UI it is in
+#   walkerGameEnd     the scan's readback
 #
 # RAE_GAME_TEST=1 puts the box 3 m ahead (within reach) and logs its angle
 # at frame 5 and frame 120, for a headless check.
@@ -26,7 +29,8 @@ open app3d/WalkerCubes
 open app3d/CharacterController
 open app3d/PlayerRoster
 open app3d/UiShell
-open ui/qrCodeSystem/QrCodeSystem
+open qr/qrCodeSystem/QrCodeSystem
+open qr/WalkerQrScan
 
 # The game's own component: turns at `speed` (radians a second) while the
 # walker is within `reach` meters
@@ -43,6 +47,9 @@ type BoxGame {
   near: Bool
   started: Bool
   frames: Int
+  # The QrCode nodes of the game's UI, and the camera that reads the cube's code
+  qrCodeSystem: QrCodeSystem
+  qrScan: WalkerQrScan
 }
 
 func walkerGameStart(game: mod BoxGame, app: mod WalkerApp) {
@@ -80,7 +87,8 @@ func walkerGameStart(game: mod BoxGame, app: mod WalkerApp) {
     path: "examples/148_walker_game/assets/game.raescene"
     res: app.inputSystem.gpuUi
   )
-  qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem: app.inputSystem.qrCodeSystem)
+  qrCodeTakePending(world: app.inputSystem.world, qrCodeSystem: game.qrCodeSystem)
+  game.qrScan = createWalkerQrScan(app: app)
   game.started = true
   log("[game] a spinning box at ({center.x}, {center.y}); walk to it")
 }
@@ -130,9 +138,20 @@ func walkerGameUpdate(game: mod BoxGame, app: mod WalkerApp) {
     }
     log("[game] frame {game.frames}: the walker near the box {anyNear}, its angle {angle}")
   }
+  walkerQrUpdate(scan: game.qrScan, app: app)
+}
+
+func walkerGamePaint(game: mod BoxGame, app: mod WalkerApp) {
+  qrCodePaint(
+    qrCodeSystem: game.qrCodeSystem
+    world: app.inputSystem.world
+    uiSystems: app.inputSystem.uiSystems
+    canvas: app.renderSystem.renderer.canvas
+  )
 }
 
 func walkerGameEnd(game: mod BoxGame, app: mod WalkerApp) {
+  walkerQrRelease(scan: game.qrScan, app: app)
 }
 
 func main() ret Int {
@@ -148,6 +167,8 @@ func main() ret Int {
     near: false
     started: false
     frames: 0
+    qrCodeSystem: createQrCodeSystem()
+    qrScan: disabledWalkerQrScan()
   }
   ret runWalkerGame(BoxGame, game: game, settings: settings)
 }

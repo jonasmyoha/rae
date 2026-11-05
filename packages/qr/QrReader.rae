@@ -3,14 +3,14 @@
 #
 #   qrRead(image:) -> opt QrReadResult
 #
-# The steps: binarize with an adaptive threshold (lib/qr/GrayImage), find
-# the three finder patterns (lib/qr/QrFinder), estimate the module count
+# The steps: binarize with an adaptive threshold (qr/GrayImage), find
+# the three finder patterns (qr/QrFinder), estimate the module count
 # from their distances, find the alignment pattern near the fourth corner,
 # map the module grid into the image with a homography (four point pairs:
-# lib/qr/QrPerspective), sample each module (a majority of five points),
+# qr/QrPerspective), sample each module (a majority of five points),
 # read the format information (the nearest valid code, up to 3 bits off) and
 # from version 7 the version information, unmask, read the codewords in the
-# zigzag, split the blocks, correct them (lib/qr/ReedSolomon) and decode the
+# zigzag, split the blocks, correct them (qr/ReedSolomon) and decode the
 # segments (numeric, alphanumeric, byte; an ECI is skipped). A mirrored code
 # (seen from behind) is read too. An image with no code is answered `none`.
 import Math

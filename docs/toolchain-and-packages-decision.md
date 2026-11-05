@@ -186,7 +186,9 @@ user asking for it. Decide after a second package has shown what a split costs.
 3. **Then the engine**, starting from the top of the dependency tree (`app3d`).
 4. **`trees`:** `treeGen`, `stylizedTrees`, `lowPolyTrees` and `treeSets`, one package. `app3d` imports them, so
    it goes with or after the engine, and it has shaders, so it needs the design from step 2.
-5. **`qr`,** once the walker kit has a render hook that can paint a package's nodes.
+5. **`qr`:** done in 0.3.8, tag `qr/v1.0.0`, once the walker kit had a hook that paints a package's nodes
+   (`walkerGamePaint`). `QrCodeSystem` and `WalkerQrScan` moved in with it, so `RAE_WALKER_QR` works only in a game
+   that uses the package.
 
 ### How a package carries C, shaders and files (all built in 0.3.6; shaders and assets have no real package yet)
 
