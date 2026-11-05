@@ -76,7 +76,8 @@ Network.framework into every app.
 connection itself is `tools/android/java/org/rae/app/RaeNetwork.java`, on its own
 threads, with the WebSocket frames, because Android has no public WebSocket client.
 As on Apple, a connection that cannot be made says `waiting` and tries again until
-it is closed, and a certificate that fails ends it.
+it is closed, and a certificate that fails ends it. An attempt gets 3 s, then more, up
+to 10 s, so one lost packet does not use up a caller's patience.
 
 Elsewhere, connecting answers a `failed` event that says there is no system
 connection yet.
