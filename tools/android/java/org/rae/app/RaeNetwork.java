@@ -53,7 +53,10 @@ public final class RaeNetwork {
   private static final int OPCODE_PING = 9;
   private static final int OPCODE_PONG = 10;
 
-  private static final int CONNECT_TIMEOUT_MS = 10000;
+  // One attempt's time, growing: a first packet that is lost must not use up the
+  // whole of a caller's patience
+  private static final int FIRST_ATTEMPT_MS = 3000;
+  private static final int LONGEST_ATTEMPT_MS = 10000;
   private static final int RETRY_EVERY_MS = 1000;
   private static final int LARGEST_MESSAGE = 64 * 1024 * 1024;
   private static final String WEB_SOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -216,10 +219,12 @@ public final class RaeNetwork {
   // A socket, connected (and its TLS done); null when closed first
   private Socket connectUntilClosed() throws IOException {
     boolean told = false;
+    int attemptMs = FIRST_ATTEMPT_MS;
     while (!closed) {
       Socket attempt = null;
+      long startedMs = System.currentTimeMillis();
       try {
-        attempt = openSocket();
+        attempt = openSocket(attemptMs);
         return attempt;
       } catch (SSLException error) {
         // A certificate does not get better by trying again
@@ -233,8 +238,13 @@ public final class RaeNetwork {
           eventText(WAITING, describe(error));
         }
       }
+      attemptMs = Math.min(attemptMs + attemptMs / 2, LONGEST_ATTEMPT_MS);
+      // An attempt that timed out has waited already; a refused one comes back at once
+      long pauseMs = RETRY_EVERY_MS - (System.currentTimeMillis() - startedMs);
       try {
-        Thread.sleep(RETRY_EVERY_MS);
+        if (pauseMs > 0) {
+          Thread.sleep(pauseMs);
+        }
       } catch (InterruptedException error) {
         return null;
       }
@@ -242,11 +252,11 @@ public final class RaeNetwork {
     return null;
   }
 
-  private Socket openSocket() throws IOException {
+  private Socket openSocket(int attemptMs) throws IOException {
     Socket plain = new Socket();
     try {
       plain.setTcpNoDelay(true);
-      plain.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+      plain.connect(new InetSocketAddress(host, port), attemptMs);
       if (!secure) {
         return plain;
       }
@@ -258,7 +268,10 @@ public final class RaeNetwork {
         parameters.setEndpointIdentificationAlgorithm("HTTPS");
         tls.setSSLParameters(parameters);
       }
+      // A handshake that stalls is another attempt, not a wait for ever
+      tls.setSoTimeout(attemptMs);
       tls.startHandshake();
+      tls.setSoTimeout(0);
       return tls;
     } catch (IOException | RuntimeException error) {
       closeQuietly(plain);
