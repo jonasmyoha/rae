@@ -37,10 +37,13 @@ type InstanceBatch {
   capacity: Int
   count: Int
   records: List(Float)
+  # It has said once that it was full (instanceBatchFull)
+  fullLogged: Bool = false
 }
 
 # Build a batch for `mesh` that can hold up to `capacity` instances. Allocates
-# the record buffer ONCE; per-frame use never grows it.
+# the record buffer ONCE; per-frame use does not grow it, unless the caller knows
+# how many are coming (growInstanceBatch).
 func createInstanceBatch(mesh: view MeshHandle, capacity: copy Int) pub ret InstanceBatch {
   let floatCount: Int = capacity * instanceRecordFloats
   var records: List(Float) = List.create(Float, cap: floatCount)
@@ -50,6 +53,33 @@ func createInstanceBatch(mesh: view MeshHandle, capacity: copy Int) pub ret Inst
     floatIndex = floatIndex + 1
   }
   ret InstanceBatch { meshId: mesh.id, capacity: capacity, count: 0, records: records }
+}
+
+# Room for at least `capacity` instances, with what is in the batch kept. Costs nothing
+# when there is room already, so a caller may ask every frame with this frame's count.
+func growInstanceBatch(batch: mod InstanceBatch, capacity: view Int) {
+  if capacity <= batch.capacity {
+    ret
+  }
+  loop batch.records.length < capacity * instanceRecordFloats {
+    batch.records.add(value: 0.0)
+  }
+  batch.capacity = capacity
+}
+
+# Is there no room for one more? What does not fit is not drawn: it says so once, so a
+# thing that is missing from the picture has a reason in the log.
+func instanceBatchFull(batch: mod InstanceBatch) ret Bool {
+  if batch.count < batch.capacity {
+    ret false
+  }
+  if not batch.fullLogged {
+    batch.fullLogged = true
+    log(
+      "[render] an instance batch is full at {batch.capacity} instances: what does not fit is not drawn"
+    )
+  }
+  ret true
 }
 
 # Point an existing batch at a different mesh (same record capacity). Handy when
@@ -87,7 +117,7 @@ func addInstance(
   prevModel: view Mat4
   material: view Material3d
 ) pub {
-  if batch.count >= batch.capacity {
+  if instanceBatchFull(batch: batch) {
     ret
   }
   packInstanceRecord(
@@ -228,7 +258,7 @@ func addSkinnedInstance(
   material: view Material3d
   paletteBase: copy Int
 ) pub {
-  if batch.count >= batch.capacity {
+  if instanceBatchFull(batch: batch) {
     ret
   }
   packInstanceRecord(
@@ -277,7 +307,7 @@ func addInstanceBrick(
   prevModel: view Mat4
   material: view Material3d
 ) pub {
-  if batch.count >= batch.capacity {
+  if instanceBatchFull(batch: batch) {
     ret
   }
   packInstanceRecord(
@@ -322,7 +352,7 @@ func addInstanceTile(
   prevModel: view Mat4
   material: view Material3d
 ) pub {
-  if batch.count >= batch.capacity {
+  if instanceBatchFull(batch: batch) {
     ret
   }
   packInstanceRecord(
@@ -370,7 +400,7 @@ func addInstanceEmblem(
   material: view Material3d
   code: copy Int
 ) pub {
-  if batch.count >= batch.capacity {
+  if instanceBatchFull(batch: batch) {
     ret
   }
   packInstanceRecord(

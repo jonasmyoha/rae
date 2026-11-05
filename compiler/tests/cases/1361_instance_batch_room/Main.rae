@@ -1,0 +1,54 @@
+# A batch of instances (lib/GbufferInstanced): what does not fit is dropped, and it says
+# so once; growInstanceBatch makes room, keeps what is in it, and never shrinks it.
+import Vec3
+open Math3d
+open Scene3d
+open GbufferInstanced
+
+func material() ret Material3d {
+  ret Material3d {
+    colorTextureLayer: -1
+    baseColor: Vec3.create(x: 1.0, y: 0.5, z: 0.25)
+    metallic: 0.0
+    roughness: 0.7
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func addSome(batch: mod InstanceBatch, count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    addInstance(
+      batch: batch
+      model: mat4Translate(x: i.toFloat(), y: 0.0, z: 0.0)
+      prevModel: mat4Translate(x: i.toFloat(), y: 0.0, z: 0.0)
+      material: material()
+    )
+  }
+}
+
+func main() ret Int {
+  var batch: InstanceBatch = createInstanceBatch(
+    mesh: meshHandle(id: 1, generation: 1)
+    capacity: 2
+  )
+  addSome(batch: batch, count: 5)
+  log("2 of room, 5 added: {batch.count} in it")
+  addSome(batch: batch, count: 5)
+  log("5 more: still {batch.count}, and no second word")
+  resetInstanceBatch(batch: batch)
+  addSome(batch: batch, count: 2)
+  let first: Float = batch.records.copyAtFallback(index: 0, fallback: -1.0)
+  growInstanceBatch(batch: batch, capacity: 8)
+  log(
+    "grown: room for {batch.capacity}, {batch.records.length / instanceRecordFloats} records, {batch.count} kept, first the same {batch.records.copyAtFallback(
+      index: 0
+      fallback: -1.0
+    ) is first}"
+  )
+  addSome(batch: batch, count: 6)
+  log("6 more: {batch.count} in it")
+  growInstanceBatch(batch: batch, capacity: 3)
+  log("asked for less: room for {batch.capacity}")
+  ret 0
+}
