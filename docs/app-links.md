@@ -143,6 +143,10 @@ Check the Apple file with
 `https://app-site-association.cdn-apple.com/a/v1/<host>`, which shows what
 phones receive.
 
+On the iOS Simulator, `xcrun simctl openurl` stops at iOS's "Open in ...?" prompt, which
+nothing outside can answer, and the app has not launched by the link until someone taps
+it. A link opened by another app in the foreground (`UIApplication.open`) has no prompt.
+
 On Android:
 
 ```
@@ -173,7 +177,8 @@ A web build has no such link: the page's own address is its link.
 
 ## What has been run
 
-Run: `lib/AppLinks` on a Mac (`RAE_OPEN_URL`, case 1336). Built, not run: the
-iOS app, signed with the `applinks:` entitlement, and the Android APK, whose
-manifest, `RaeActivity` class and `nativeOpenLink` symbol were checked. The
-callbacks on a phone have not run yet; `QUEUE.md` holds that step.
+Run: `lib/AppLinks` on a Mac (`RAE_OPEN_URL`, case 1336). On the iOS Simulator, a custom
+scheme opened by another app: at a cold launch the link is there at the first read in
+`main`, before any window, and a link while the app runs arrives too. On an Android
+emulator, a `VIEW` intent, at launch and while running. Built, not run: a universal link
+and an Android app link (they need a real domain), and anything on a real phone.
