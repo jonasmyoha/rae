@@ -124,6 +124,41 @@ gen-ios.sh it needs Xcode's iOS SDK: with only the Command Line Tools
 selected, run it with
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
 
+## Testing on a device: what an agent can and cannot do
+
+**An agent cannot close an iPhone app.** `xcrun devicectl device process
+terminate --pid <pid>` prints "Sent signal", and the app stays on screen with the
+same pid, so never report an app as closed from that output. To put an app in the
+background, open another app such as Settings (`xcrun devicectl device process
+launch --device <id> com.apple.Preferences`), or ask someone at the phone to go to
+the Home Screen. Check the result by what the app logs or by asking what the
+screen shows.
+
+**A locked phone refuses every launch** (`CoreDeviceError` 10002, reason
+`Locked`). A permission question also needs someone to tap it. So a check that
+needs either one needs someone at the phone. Deleting the app
+(`xcrun devicectl device uninstall app --device <id> <bundle-id>`) makes iOS ask
+its questions again, as on a fresh install.
+
+**Notifications** (lib/LocalNotification, full details in
+docs/local-notifications.md):
+
+- `localNotificationSchedule` asks iOS for one notification at a wall-clock
+  moment. iOS rings it itself, also with the app in the background or not running.
+- **iOS shows nothing while the app is in the foreground,** and the notification
+  does not reach Notification Center either. So a test puts the app in the
+  background before the moment. The app does not need to be closed.
+- Call `localNotificationAsk()` at each start and when the app comes back. It does
+  not wait. What is scheduled after it and before the answer is held and added
+  when the answer comes, and still rings at its moment. It is held in memory, so
+  ending the app during the question loses it.
+- `localNotificationAllowed()` answers `true`, `false` when the person said no, or
+  `none` when no ask has been answered in this run.
+- `checks/localNotification` tries all this on a phone. On a fresh install, tap
+  Allow within 45 s and leave the app: "rang with the app closed" and "replaced, the
+  new one" must ring 45 s after the start, and no line starting with WRONG.
+  The screen is gray until the answer, green for yes, red for no.
+
 ## Profile on a device
 
     APP=<bundle id> PLACES="name|x y" AT_ENV=<the app's start-spot variable> \
