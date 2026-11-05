@@ -330,6 +330,44 @@ write_pack App.raepack NativeGit "" 'dependencies: { dep tiny: { git: "../tinyRe
 printf 'import tiny/Glue\n\nfunc main() {\n  log("tiny says {tiny.Glue.value()}")\n}\n' > Main.rae
 "$BIN" fetch >/dev/null 2>&1 && [ -f "$RAE_HOME/packages/tiny/$(printf %.12s "$TINY_TREE")/.ready" ] && ok native_fetch_builds_by_tree_hash || bad native_fetch_builds_by_tree_hash "$(ls "$RAE_HOME/packages/tiny")"
 OUT=$(run_app); echo "$OUT" | grep -q 'tiny says 7' && ! echo "$OUT" | grep -q 'building package' && ok native_git_runs || bad native_git_runs "[$OUT]"
+# gc: a build no recorded project's packs pin goes, and comes back on demand
+tiny_pin() { (cd "$1" && find . -type f -not -path './.rae/*' | LC_ALL=C sort | xargs shasum | shasum | cut -c1-12); }
+CURRENT=$(tiny_pin "$WORK/tiny")
+GIT_PIN=$(printf %.12s "$TINY_TREE")
+touch "$WORK/nativeApp/rae" "$WORK/nativeGit/rae"
+printf '%s\n%s\n' "$WORK/nativeApp" "$WORK/nativeGit" > "$RAE_HOME/projects"
+# nativeApp's Main stopped reaching tiny, and its pack still pins it, so it is kept
+BUILDS_BEFORE=$(tiny_builds | wc -l | tr -d ' ')
+[ "$BUILDS_BEFORE" -ge 4 ] && ok gc_has_old_builds || bad gc_has_old_builds "$(tiny_builds)"
+OUT=$("$BIN" toolchain gc --dry-run 2>&1)
+echo "$OUT" | grep -q "would remove package tiny/" && ok gc_dry_run_names_packages || bad gc_dry_run_names_packages "[$OUT]"
+[ "$(tiny_builds | wc -l | tr -d ' ')" = "$BUILDS_BEFORE" ] && ok gc_dry_run_removes_nothing || bad gc_dry_run_removes_nothing "$(tiny_builds)"
+mkdir -p "$RAE_HOME/packages/tiny/beingbuilt000" "$RAE_HOME/packages/tiny/beingbuilt000.lock"
+OUT=$("$BIN" toolchain gc 2>&1)
+[ -f "$RAE_HOME/packages/tiny/$CURRENT/.ready" ] && ok gc_keeps_a_path_deps_build || bad gc_keeps_a_path_deps_build "$CURRENT: $(tiny_builds) [$OUT]"
+[ -f "$RAE_HOME/packages/tiny/$GIT_PIN/.ready" ] && ok gc_keeps_a_git_deps_build || bad gc_keeps_a_git_deps_build "$GIT_PIN: $(tiny_builds) [$OUT]"
+[ "$(tiny_builds | grep -c .)" = 3 ] && ok gc_removes_old_builds || bad gc_removes_old_builds "$(tiny_builds)"
+[ -d "$RAE_HOME/packages/tiny/beingbuilt000" ] && ok gc_leaves_a_build_in_progress || bad gc_leaves_a_build_in_progress "$(tiny_builds)"
+rmdir "$RAE_HOME/packages/tiny/beingbuilt000.lock" "$RAE_HOME/packages/tiny/beingbuilt000"
+[ "$(ls "$RAE_HOME/packages/tiny" | grep -c '\.log$')" = 2 ] && ok gc_removes_the_logs_too || bad gc_removes_the_logs_too "$(ls "$RAE_HOME/packages/tiny")"
+# A package another package pins: kept through it
+make_outer() {
+  mkdir -p "$WORK/outer"
+  printf 'pack Outer {\n  format: "raepack"\n  version: 1\n  meta: { version: "1.0.0" }\n  dependencies: { dep tiny: { path: "../tiny" } }\n}\n' > "$WORK/outer/Outer.raepack"
+}
+make_outer
+mkdir -p "$WORK/nestedApp"; write_pack "$WORK/nestedApp/App.raepack" Nested "" 'dependencies: { dep outer: { path: "../outer" } }'
+printf 'func main() {\n  log("x")\n}\n' > "$WORK/nestedApp/Main.rae"
+touch "$WORK/nestedApp/rae"
+printf '%s\n' "$WORK/nestedApp" > "$RAE_HOME/projects"
+OUT=$("$BIN" toolchain gc 2>&1)
+[ -f "$RAE_HOME/packages/tiny/$CURRENT/.ready" ] && ok gc_keeps_a_package_of_a_package || bad gc_keeps_a_package_of_a_package "[$OUT]"
+[ ! -d "$RAE_HOME/packages/tiny/$GIT_PIN" ] && ok gc_removes_what_is_no_longer_recorded || bad gc_removes_what_is_no_longer_recorded "[$OUT]"
+# Nothing recorded: all of it goes, the empty folder too, and it comes back on demand
+: > "$RAE_HOME/projects"
+"$BIN" toolchain gc >/dev/null 2>&1
+[ ! -e "$RAE_HOME/packages/tiny" ] && ok gc_removes_the_empty_folder || bad gc_removes_the_empty_folder "$(ls "$RAE_HOME/packages/tiny")"
+OUT=$(cd "$WORK/nativeGit" && run_app); echo "$OUT" | grep -q 'tiny says 7' && echo "$OUT" | grep -q 'building package' && ok gc_comes_back_on_demand || bad gc_comes_back_on_demand "[$OUT]"
 # The block's own errors
 mkdir -p "$WORK/nativeBad"; cd "$WORK/nativeBad" || exit 1
 write_pack App.raepack Bad "" 'native: { build: "x.sh" }'

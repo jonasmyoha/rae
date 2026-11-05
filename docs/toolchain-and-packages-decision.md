@@ -220,14 +220,14 @@ pack Sql {
 
 - A package's build goes in `~/.rae/packages/<name>/<pin>/install`, and `<pin>` is the package's own `git-tree` hash, or a hash
   of its files for a `path` dep, so two versions with different C both build. Its script gets that folder as
-  `RAE_PACKAGE_INSTALL` and the folder above it as `RAE_PACKAGE_CACHE`. `gc` does not touch these yet.
+  `RAE_PACKAGE_INSTALL` and the folder above it as `RAE_PACKAGE_CACHE`. `gc` removes those no recorded project's packs pin, and
+  they come back on demand.
 - A build that needs it and does not find it builds it, once, under a lock, the way it clones a dep it does not have, so a
   fresh clone needs one command. `rae fetch` builds them all ahead of time. The pack is never written.
 - A program links it only when its emitted C includes `header`, the rule before this, so importing a package you do not reach
   costs nothing.
 - `rae tree --native` lists each package's device sources and options, and `gen-ios.sh` reads that instead of naming a library.
-  `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move. Android never had SQLite; a package with
-  C reaches it when `gen-android.sh` learns the same list.
+  So does `gen-android.sh`. `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
 - A library that needs `cmake` or a network says so in its script's error. A fresh clone of a project with C needs those too.
 
 **Shaders: a path in a package's module is tried next to the file, then in that package's folder, then `lib/...` in the stdlib.**
@@ -258,7 +258,7 @@ The plan named `box3d`, as a candidate. Checked on 2026-11-05, as the `qr` lesso
 
 | package | C | importers in `lib/` | real users | verdict |
 |---|---|---|---|---|
-| `sql` | SQLite and a glue header: native, browser and iOS | 0 | 2 servers, case 1288 | **the proof**, done in 0.3.4 |
+| `sql` | SQLite and a glue header: native, browser, iOS and Android | 0 | 2 servers, case 1288 | **the proof**, done in 0.3.4 |
 | `wasm` | WAMR, but its header is in `compiler/runtime/` | 0 | cases only | second; its header must move first |
 | `box3d` | Box3D and a glue header | 24 | 3 examples, 19 cases, `physicsScenes` | with the engine |
 
