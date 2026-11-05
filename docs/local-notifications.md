@@ -68,4 +68,7 @@ question is open. Tap Allow within 45 s, end the app, and look 45 s after it sta
 app closed" and "replaced, the new one" must be there at that moment, and neither line starting with
 WRONG. The screen is gray until the answer, then green for yes and red for no.
 
-The holding and `localNotificationAllowed()` have been built for a phone but not yet run on one.
+Run on an iPhone on a fresh install (2026-11-05). Requests scheduled while the question was open, then
+Allow and the app sent to the background: "rang with the app closed" and "replaced, the new one" rang,
+and neither line starting with WRONG. With Don't Allow the app logged `answered false`. A request added
+during the question with no hold was not tried, so "as far as known" above stays.
