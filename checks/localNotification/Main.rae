@@ -1,11 +1,14 @@
 # lib/LocalNotification on a real iPhone: nothing else can show one ringing. Off iOS it has
-# nothing to test, says so and passes. On a phone it asks, then schedules:
-#   closed      in 45 s: must ring with the app closed (end it after it logs "scheduled")
+# nothing to test, says so and passes. On a phone it asks and at once, with the question still
+# open on a fresh install, schedules (held until the answer, docs/local-notifications.md):
+#   closed      in 45 s: must ring with the app closed (end it after the answer)
 #   replaced    in 45 s, then the same id again: only "replaced, the new one" rings
 #   cancelled   in 45 s, then cancelled: must not ring
 #   past        a moment ago: answers false
-# Run: RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh checks/localNotification, tap Allow, end the
-# app, and look at the Lock Screen or Notification Center after 45 s.
+# Run: delete the app from the phone, RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh
+# checks/localNotification, tap Allow within 45 s, end the app, and look at the Lock Screen or
+# Notification Center 45 s after it started. The screen is gray until the answer, then green for
+# yes and red for no.
 import Gpu2d
 open Gpu2dCanvas
 open LocalNotification
@@ -53,25 +56,39 @@ func scheduleAll() ret Bool {
 
 func main() ret Int {
   when Target.os is Os.ios {
+    let startedMs: Int = nowMs()
     log("asked: {localNotificationAsk()}")
+    log("all as expected: {scheduleAll()}")
     Gpu2d.initWindow(width: 390, height: 844, title: "Local notification check")
     var canvas: Gpu2dCanvas = createGpu2dCanvas()
     log("cleared: {localNotificationClearDelivered()}")
-    var scheduled: Bool = false
-    let startedMs: Int = nowMs()
+    var answerLogged: Bool = false
     loop Gpu2d.pollClose() is false and nowMs() - startedMs < 300000 {
+      var red: Float = 0.3
+      var green: Float = 0.3
+      var blue: Float = 0.3
+      if let allowed: Bool = localNotificationAllowed() {
+        blue = 0.1
+        if allowed {
+          red = 0.1
+          green = 0.6
+        } else {
+          red = 0.6
+          green = 0.1
+        }
+        if answerLogged is false {
+          answerLogged = true
+          log("answered {allowed} after {nowMs() - startedMs} ms")
+        }
+      }
       Gpu2d.beginFrame(
         canvas: canvas
-        r: 0.1
-        g: 0.3
-        b: 0.3
+        r: red
+        g: green
+        b: blue
         a: 1.0
       )
       Gpu2d.endFrame(canvas: canvas)
-      if scheduled is false and nowMs() - startedMs > 10000 {
-        scheduled = true
-        log("all as expected: {scheduleAll()}")
-      }
     }
     ret 0
   } else {
