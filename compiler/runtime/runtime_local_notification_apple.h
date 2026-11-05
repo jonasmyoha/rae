@@ -6,6 +6,11 @@
  * what the other platforms do are Rae's (lib/LocalNotification). Every iOS function
  * answers 1 when the call was made, 0 when the class is missing.
  *
+ * A request added while the question is open is, as far as known, refused by the system
+ * (UNErrorCodeNotificationsNotAllowed), and Rae cannot run in the block that gets the answer. So schedule and cancel run in order on one
+ * serial dispatch queue, which ask suspends until the answer comes: the queue is what
+ * holds them, and no list is kept here.
+ *
  * rae_ext_LocalNotification_realNowMs is on every target: the wall clock without
  * RAE_NOW, since a notification rings by the phone's real clock.
  *
@@ -29,8 +34,10 @@ int64_t rae_ext_LocalNotification_realNowMs(void) {
 #endif
 
 #if defined(__APPLE__) && defined(TARGET_OS_IOS) && TARGET_OS_IOS
+#include <dispatch/dispatch.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <stdatomic.h>
 
 /* UNAuthorizationOptionSound | UNAuthorizationOptionAlert */
 #define RAE_LOCAL_NOTIFICATION_OPTIONS 6UL
@@ -55,20 +62,42 @@ static void* rae_local_notification_ids(rae_String id) {
                                                       rae_local_notification_string(id));
 }
 
+/* Suspended while a question is open (rae_ext_LocalNotification_ask) */
+static dispatch_queue_t rae_local_notification_queue(void) {
+  static dispatch_once_t once;
+  static dispatch_queue_t queue;
+  dispatch_once(&once, ^{
+    queue = dispatch_queue_create("rae.localNotification", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
+
+/* The last answer: -1 none yet, 0 no, 1 yes */
+static _Atomic int rae_local_notification_answer = -1;
+
+int64_t rae_ext_LocalNotification_answer(void) {
+  return (int64_t)atomic_load(&rae_local_notification_answer);
+}
+
 /* Asks the person the first time; afterward the system answers from what they chose */
 int64_t rae_ext_LocalNotification_ask(void) {
   void* center = rae_local_notification_center();
   if (!center) return 0;
+  dispatch_queue_t queue = rae_local_notification_queue();
+  dispatch_suspend(queue);
   ((void (*)(void*, SEL, unsigned long, void*))objc_msgSend)(
       center, sel_registerName("requestAuthorizationWithOptions:completionHandler:"),
       RAE_LOCAL_NOTIFICATION_OPTIONS, (void*)^(signed char granted, void* error) {
-        (void)granted;
         (void)error;
+        atomic_store(&rae_local_notification_answer, granted ? 1 : 0);
+        dispatch_resume(queue);
       });
   return 1;
 }
 
-/* One request `seconds` from now, with the default sound; the same id replaces it */
+/* One request `seconds` from this call, with the default sound; the same id replaces it.
+ * The trigger is made when the queue reaches it, from the time left then, so a held one
+ * rings at its moment. One whose moment passed while it was held is not added. */
 int64_t rae_ext_LocalNotification_schedule(rae_String id, double seconds, rae_String title, rae_String body) {
   void* center = rae_local_notification_center();
   Class contentClass = objc_getClass("UNMutableNotificationContent");
@@ -84,29 +113,45 @@ int64_t rae_ext_LocalNotification_schedule(rae_String id, double seconds, rae_St
   ((void (*)(void*, SEL, void*))objc_msgSend)(
       content, sel_registerName("setSound:"),
       ((void* (*)(void*, SEL))objc_msgSend)((void*)soundClass, sel_registerName("defaultSound")));
-  void* trigger = ((void* (*)(void*, SEL, double, signed char))objc_msgSend)(
-      (void*)triggerClass, sel_registerName("triggerWithTimeInterval:repeats:"), seconds, 0);
-  void* request = ((void* (*)(void*, SEL, void*, void*, void*))objc_msgSend)(
-      (void*)requestClass, sel_registerName("requestWithIdentifier:content:trigger:"),
-      rae_local_notification_string(id), content, trigger);
-  ((void (*)(void*, SEL, void*, void*))objc_msgSend)(
-      center, sel_registerName("addNotificationRequest:withCompletionHandler:"), request, NULL);
-  ((void (*)(void*, SEL))objc_msgSend)(content, sel_registerName("release"));
+  void* identifier = rae_local_notification_string(id);
+  ((void* (*)(void*, SEL))objc_msgSend)(identifier, sel_registerName("retain"));
+  int64_t calledMs = rae_ext_LocalNotification_realNowMs();
+  dispatch_async(rae_local_notification_queue(), ^{
+    double left = seconds - (double)(rae_ext_LocalNotification_realNowMs() - calledMs) / 1000.0;
+    if (left > 0.0) {
+      void* trigger = ((void* (*)(void*, SEL, double, signed char))objc_msgSend)(
+          (void*)triggerClass, sel_registerName("triggerWithTimeInterval:repeats:"), left, 0);
+      void* request = ((void* (*)(void*, SEL, void*, void*, void*))objc_msgSend)(
+          (void*)requestClass, sel_registerName("requestWithIdentifier:content:trigger:"), identifier, content,
+          trigger);
+      ((void (*)(void*, SEL, void*, void*))objc_msgSend)(
+          center, sel_registerName("addNotificationRequest:withCompletionHandler:"), request, NULL);
+    }
+    ((void (*)(void*, SEL))objc_msgSend)(identifier, sel_registerName("release"));
+    ((void (*)(void*, SEL))objc_msgSend)(content, sel_registerName("release"));
+  });
   return 1;
 }
 
 int64_t rae_ext_LocalNotification_cancel(rae_String id) {
   void* center = rae_local_notification_center();
   if (!center) return 0;
-  ((void (*)(void*, SEL, void*))objc_msgSend)(
-      center, sel_registerName("removePendingNotificationRequestsWithIdentifiers:"), rae_local_notification_ids(id));
+  void* ids = rae_local_notification_ids(id);
+  ((void* (*)(void*, SEL))objc_msgSend)(ids, sel_registerName("retain"));
+  dispatch_async(rae_local_notification_queue(), ^{
+    ((void (*)(void*, SEL, void*))objc_msgSend)(
+        center, sel_registerName("removePendingNotificationRequestsWithIdentifiers:"), ids);
+    ((void (*)(void*, SEL))objc_msgSend)(ids, sel_registerName("release"));
+  });
   return 1;
 }
 
 int64_t rae_ext_LocalNotification_cancelAll(void) {
   void* center = rae_local_notification_center();
   if (!center) return 0;
-  ((void (*)(void*, SEL))objc_msgSend)(center, sel_registerName("removeAllPendingNotificationRequests"));
+  dispatch_async(rae_local_notification_queue(), ^{
+    ((void (*)(void*, SEL))objc_msgSend)(center, sel_registerName("removeAllPendingNotificationRequests"));
+  });
   return 1;
 }
 

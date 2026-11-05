@@ -1,15 +1,17 @@
 # LocalNotification — a system notification at a later time, which rings also with the app
 # in the background or not running (docs/local-notifications.md).
 #
-#     localNotificationAsk()                       # once: the system remembers the answer
+#     localNotificationAsk()                       # first, and again when the app comes back
 #     localNotificationSchedule(id: "task1", atEpochMs: when, title: "Milk", body: "Buy it")
 #     localNotificationCancel(id: "task1")
 #     localNotificationCancelAll()                 # the ones still to come
 #     localNotificationClearDelivered()            # the ones in Notification Center
+#     localNotificationAllowed()                   # none, or what the person answered
 #
 # The moment is by the real clock, never RAE_NOW: the phone rings by its own clock. A moment
 # in the past schedules nothing and answers false, and the same id replaces the one before.
-# While the app is in the foreground the system shows nothing.
+# While the app is in the foreground the system shows nothing. What is scheduled after an ask
+# and before its answer is held until the answer comes, and still rings at its moment.
 #
 # On iOS this is UNUserNotificationCenter (runtime_local_notification_apple.h): each call
 # answers true when the system was asked. Elsewhere (the Mac, the web) every call does nothing
@@ -26,6 +28,8 @@ func rae_ext_LocalNotification_realNowMs() unsafe extern("rae_ext_LocalNotificat
 
 when hasLocalNotifications {
   func rae_ext_LocalNotification_ask() unsafe extern("rae_ext_LocalNotification_ask") ret Int
+
+  func rae_ext_LocalNotification_answer() unsafe extern("rae_ext_LocalNotification_answer") ret Int
 
   func rae_ext_LocalNotification_schedule(
     id: String
@@ -61,7 +65,36 @@ func localNotificationDelaySeconds(atEpochMs: view Int, nowEpochMs: view Int) re
   ret (atEpochMs - nowEpochMs) as Float64 / 1000.0
 }
 
-# Ask the person once; the system remembers. True when the system was asked.
+# The answer from the shim (-1 none yet, 0 no, 1 yes) as what the app reads
+func localNotificationAnswer(answer: view Int) ret opt Bool {
+  if answer is 1 {
+    ret true
+  }
+  if answer is 0 {
+    ret false
+  }
+  ret none
+}
+
+# What the person answered, as of the last ask that was answered: true, false for no, none
+# when no ask has been answered in this run, or where there are no notifications. An ask when
+# the app comes back also picks up a change made in Settings.
+func localNotificationAllowed() ret opt Bool {
+  if localNotificationHeadless() {
+    log("[local-notification] allowed")
+    ret none
+  }
+  when hasLocalNotifications {
+    unsafe {
+      ret localNotificationAnswer(answer: rae_ext_LocalNotification_answer())
+    }
+  } else {
+    ret none
+  }
+}
+
+# Ask the person the first time; afterward the system answers without asking. It does not wait:
+# see localNotificationAllowed. True when the system was asked.
 func localNotificationAsk() ret Bool {
   if localNotificationHeadless() {
     log("[local-notification] ask")
