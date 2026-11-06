@@ -1,0 +1,55 @@
+{
+ "type": "Scene",
+ "version": 2,
+ "root": "Screen",
+ "nodes": {
+  "Screen": {
+   "Rect": { "x": 0, "y": 0, "w": 800, "h": 600 },
+   "Children": [ "Status", "ClockBox", "List" ]
+  },
+  "Status": {
+   "Rect": { "x": 40, "y": 30, "w": 400, "h": 70 },
+   "Text": { "text": "Waiting", "styleId": "display" },
+   "AnimateText": { "kind": "fade" }
+  },
+  "ClockBox": {
+   "Rect": { "x": 520, "y": 30, "w": 240, "h": 70 },
+   "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "radius": 14 },
+   "Children": [ "Clock" ]
+  },
+  "Clock": {
+   "Rect": { "x": 40, "y": 0, "w": 180, "h": 70 },
+   "Text": { "text": "09:59", "styleId": "display" },
+   "AnimateText": { "kind": "roll", "rollFrom": "below", "motion": "smooth" }
+  },
+  "List": {
+   "Rect": { "x": 40, "y": 130, "w": 720, "h": 440 },
+   "Layout": { "type": "Vertical", "gap": 16 },
+   "Children": [ "RowOne", "RowTwo", "RowThree" ]
+  },
+  "RowOne": {
+   "Rect": { "x": 0, "y": 0, "w": 720, "h": 120 },
+   "Shape": { "kind": "RoundedRect", "fill": "accent", "radius": 14 }
+  },
+  "RowTwo": {
+   "Rect": { "x": 0, "y": 0, "w": 720, "h": 120 },
+   "bundles": [ "glideOnChange" ],
+   "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "radius": 14 },
+   "Children": [ "RowTwoLabel" ]
+  },
+  "RowTwoLabel": {
+   "Rect": { "x": 24, "y": 40, "w": 500, "h": 40 },
+   "Text": { "text": "The second row glides up", "styleId": "button" }
+  },
+  "RowThree": {
+   "Rect": { "x": 0, "y": 0, "w": 720, "h": 120 },
+   "bundles": [ "glideOnChange" ],
+   "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "radius": 14 },
+   "Children": [ "RowThreeLabel" ]
+  },
+  "RowThreeLabel": {
+   "Rect": { "x": 24, "y": 40, "w": 500, "h": 40 },
+   "Text": { "text": "The third row glides up", "styleId": "button" }
+  }
+ }
+}

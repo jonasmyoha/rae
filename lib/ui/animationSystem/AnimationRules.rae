@@ -112,6 +112,61 @@ func channelHold(channel: mod AnimationChannel, share: view Float) {
   channel.velocity = 0.0
 }
 
+# A node's last laid-out place, relative to its nearest ancestor that glides too
+type LayoutPlace {
+  x: Float
+  y: Float
+}
+
+type TextSeen {
+  text: String
+}
+
+# The old text while the new one comes. `progress` goes from 0 to 1.
+type TextGhost {
+  text: String
+  progress: AnimationChannel
+}
+
+# How the two texts look at `progress`: alpha shares, and each one's y offset in the node's box.
+# `start` is the progress this old text began at. It is above 0 when the old text was still coming
+# in,
+# and it was then `start` heights from its place, so it leaves from there and does not jump.
+type TextGhostLook {
+  ghostAlpha: Float
+  textAlpha: Float
+  ghostY: Float
+  textY: Float
+}
+
+func textGhostLook(
+  kind: view AnimateTextKind
+  rollFrom: view RollFrom
+  progress: view Float
+  start: view Float
+  height: view Float
+) ret TextGhostLook {
+  # A spring may pass 1; alpha may not
+  let share: Float = Math.max(a: 0.0, b: Math.min(a: 1.0, b: progress))
+  if kind is AnimateTextKind.fade {
+    ret TextGhostLook { ghostAlpha: 1.0 - share, textAlpha: share, ghostY: 0.0, textY: 0.0 }
+  }
+  var direction: Float = 1.0
+  if rollFrom is RollFrom.above {
+    direction = -1.0
+  }
+  var way: Float = 1.0
+  if start < 1.0 {
+    way = (progress - start) / (1.0 - start)
+  }
+  ret TextGhostLook {
+    ghostAlpha: 1.0 - share
+    textAlpha: share
+    ghostY: direction * (start - (1.0 + start) * way) * height
+    textY: direction * (1.0 - progress) * height
+  }
+}
+
 # When child `index` of `count` starts. The step shrinks so the last starts by `maxSeconds`.
 func staggerDelay(
   index: view Int

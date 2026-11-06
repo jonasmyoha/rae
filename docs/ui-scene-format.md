@@ -757,3 +757,26 @@ or `curve` in a theme is logged and that token is not added. A use of a name no 
 
 The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `disappearFade`, `disappearShrink`,
 `staggerFromEnd`, `staggerFromStart`, `pressable`, `dialogMotion`. Case 1368 holds the rules; `checks/uiAppear` paints them.
+
+## 22. `AnimateLayout` and `AnimateText`: moves and text changes
+
+```json
+"Row": { "bundles": ["glideOnChange"] },
+"Time": { "Text": { "text": "09:59" }, "AnimateText": { "kind": "roll", "rollFrom": "below", "motion": "smooth" } }
+```
+
+| Component | Fields and their defaults |
+|---|---|
+| `AnimateLayout` | `motion` smooth |
+| `AnimateText` | `kind` fade (or roll), `rollFrom` below (or above), `motion` quick |
+
+- **`AnimateLayout`**: when layout moves the node, it glides from its old place to the new one. Layout runs once and
+  gets the true places, and later frames run no layout. Only position glides: size changes at once. There is no
+  glide on a first layout, on a window resize, on a scroll, or for a node that was hidden. The bundle
+  `glideOnChange` is this component with its default motion.
+- **`AnimateText`**: when the node's text changes, the old text goes as the new one comes. `fade` crosses the two.
+  `roll` also moves them, inside the node's box, with the new text coming from `rollFrom`. The first text a node
+  shows plays nothing. The old text is only drawn, so the node's measured size never depends on it.
+- A motion no one declares is an `unknownToken` diagnostic at load.
+
+Case 1369 holds the rules; `checks/uiLayoutText` paints them.

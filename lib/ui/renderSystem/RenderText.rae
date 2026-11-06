@@ -1,0 +1,352 @@
+# RenderText: a Text node's glyphs, and a changing text (AnimateText) as its old and new text
+# together.
+# The old text is only drawn here: layout and measuring never see it.
+open ui/Ecs
+open ui/renderSystem/RenderPaintBox
+open ui/renderSystem/RenderTextBounds
+open ui/renderSystem/RenderSwitch
+open ui/renderSystem/RenderFills
+import Gpu2d
+import Gpu2dText
+import SdfText
+import ui/animationSystem/AnimationSystem
+import ui/Components
+import ui/IconCodepoints
+import ui/Layer
+import ui/Theme
+import ui/ThemeResolved
+import ui/TextStyle
+open ecs/ComponentTable
+open Gpu2dCanvas
+open ui/UiSystems
+open ui/Transform
+open ui/AnimationComponents
+open ui/animationSystem/AnimationRules
+open ui/renderSystem/RenderSystem
+
+func paintTextG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  content: view String
+) {
+  let t: view Text = componentView(this: world.texts, entityId: entityId)
+  if content.length() is 0 {
+    ret
+  }
+  var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+  let weight: Float = resolveTextWeight(theme: res.theme, styleId: t.styleId)
+  var baseCol: RgbaColor = resolveTextColor(
+    theme: res.theme
+    styleId: t.styleId
+    active: world.theme.active
+  )
+  # Tier-2 style override (#236): size/color patch over the resolved
+  # style for the sparse set of entities that carry one; base styleId
+  # still drives everything else (alignment, shadow, unset fields).
+  if componentHas(this: world.styleOverrides, entityId: entityId) {
+    let so: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
+    size = styleOverrideSize(base: size, so: so)
+    if so.hasColor and so.colorSlot.length() > 0 {
+      baseCol = uiThemeColor(theme: world.theme, name: so.colorSlot)
+    } else {
+      baseCol = styleOverrideColor(base: baseCol, so: so, active: world.theme.active)
+    }
+  }
+  # An inherited scale (editor camera, scaled parent) scales glyphs + box.
+  size = size * wt.scale.x
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  let boxW: Float = rect.w
+  let boxH: Float = rect.h
+  if t.shrinkToFit and t.wrapWidthMode is WrapWidthMode.none {
+    let natural: SdfTextBounds = visualBoundsAt(
+      world: world
+      entityId: entityId
+      text: content
+      isIcon: false
+      sizePx: size
+      res: res
+    )
+    size = TextStyle.shrinkTextSizeToFit(size: size, naturalWidth: natural.advance, boxWidth: boxW)
+  }
+  let col: RgbaColor = g2dChain(color: baseCol, chain255: chain255)
+  var boldWidth: Float = 0.0
+  if weight > 450.0 {
+    boldWidth = ((weight - 400.0) / 300.0) * size * 0.025
+    if boldWidth > 1.5 {
+      boldWidth = 1.5
+    }
+  }
+  var centerX: Bool = resolveTextIsCentered(theme: res.theme, styleId: t.styleId)
+  var rightX: Bool = resolveTextIsRightAligned(theme: res.theme, styleId: t.styleId)
+  # The optical-align fields this draw uses, read off the component through a
+  # view when the node has one (plain values, no component copy).
+  var opticalEnabled: Bool = false
+  var opticalCenterX: Bool = false
+  var opticalCenterY: Bool = false
+  var opticalBias: Vec2 = { x: 0.0, y: 0.0 }
+  if componentHas(this: world.aligns, entityId: entityId) {
+    let al: view Align = componentView(this: world.aligns, entityId: entityId)
+    if al.hasX {
+      if al.x is AlignKind.center {
+        centerX = true
+      }
+      if al.x is AlignKind.end {
+        rightX = true
+      }
+    }
+  }
+  if componentHas(this: world.opticalAligns, entityId: entityId) {
+    let optical: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
+    opticalEnabled = optical.enabled
+    opticalCenterX = optical.centerX
+    opticalCenterY = optical.centerY
+    opticalBias = optical.bias
+    if optical.enabled {
+      centerX = optical.centerX
+      if optical.centerX {
+        rightX = false
+      }
+    }
+  }
+  var drawX: Float = rect.x
+  var drawY: Float = rect.y + size
+  if resolveTextIsVCentered(theme: res.theme, styleId: t.styleId) {
+    # The style centers the font's capitals in the node's box: the baseline
+    # half a cap height (measured off "H") below the middle, so a label reads
+    # centered whatever its letters, with descenders hanging below. Centering a
+    # line box [top, top + size] with the baseline at its bottom left the
+    # capitals about 0.15 of the size low.
+    let capital: SdfTextBounds = SdfText.sdfMeasureTextBounds(
+      font: res.textFont
+      text: "H"
+      sizePx: size
+    )
+    drawY = rect.y + boxH / 2.0 - (capital.top + capital.bottom) / 2.0
+  }
+  if centerX or rightX {
+    let bounds: SdfTextBounds = visualBoundsAt(
+      world: world
+      entityId: entityId
+      text: content
+      isIcon: false
+      sizePx: size
+      res: res
+    )
+    if centerX {
+      drawX = rect.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0
+    }
+    if rightX {
+      drawX = rect.x + boxW - bounds.right
+    }
+  }
+  if opticalEnabled {
+    let bounds: SdfTextBounds = visualBoundsAt(
+      world: world
+      entityId: entityId
+      text: content
+      isIcon: false
+      sizePx: size
+      res: res
+    )
+    if opticalCenterX {
+      drawX = rect.x + boxW / 2.0 - (bounds.left + bounds.right) / 2.0 + opticalBias.x
+    }
+    if opticalCenterY {
+      drawY = rect.y + boxH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + opticalBias.y
+    }
+  }
+  if t.wrapWidthMode is WrapWidthMode.nodeWidth {
+    let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+    Gpu2dText.drawTextWrappedEx(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(color: col)
+      maxWidth: boxW
+      lineHeight: lineHeight
+      outlineWidth: boldWidth
+      outlineColor: g2dColor(color: col)
+    )
+    ret
+  }
+  # Text shadow (#232). Precedence per §7's override ladder:
+  #   1. a raw TextShadow component (the last-resort per-entity
+  #      override) wins when present;
+  #   2. otherwise the STYLE's shadow token (theme-owned) — the paved
+  #      path that replaced the inline TextShadow blocks from e39a378.
+  # Both feed the same drawTextEx, so a token whose values match the
+  # old inline block renders byte-identically.
+  var hasShadow: Bool = false
+  var shCol: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  var shOffX: Float = 0.0
+  var shOffY: Float = 0.0
+  var shSoft: Float = 1.0
+  if componentHas(this: world.textShadows, entityId: entityId) {
+    let sh: view TextShadow = componentView(this: world.textShadows, entityId: entityId)
+    hasShadow = true
+    shCol = sh.color
+    shOffX = sh.offset.x
+    shOffY = sh.offset.y
+    shSoft = sh.softness
+  } else {
+    let shadowName: String = resolveTextShadowName(theme: res.theme, styleId: t.styleId)
+    if shadowName.length() > 0 {
+      if let si: Int = themeShadowIndex(theme: res.theme, name: shadowName) {
+        hasShadow = true
+        var r: Int = 0
+        var g: Int = 0
+        var b: Int = 0
+        var a: Int = 255
+        if let shadowRVal: Int = res.theme.shadowR.copyAt(index: si) {
+          r = shadowRVal
+        }
+        if let shadowGVal: Int = res.theme.shadowG.copyAt(index: si) {
+          g = shadowGVal
+        }
+        if let shadowBVal: Int = res.theme.shadowB.copyAt(index: si) {
+          b = shadowBVal
+        }
+        if let shadowAVal: Int = res.theme.shadowA.copyAt(index: si) {
+          a = shadowAVal
+        }
+        shCol = RgbaColor { r: r, g: g, b: b, a: a }
+        if let shadowOffXVal: Float = res.theme.shadowOffX.copyAt(index: si) {
+          shOffX = shadowOffXVal
+        }
+        if let shadowOffYVal: Float = res.theme.shadowOffY.copyAt(index: si) {
+          shOffY = shadowOffYVal
+        }
+        if let shadowSoftVal: Float = res.theme.shadowSoft.copyAt(index: si) {
+          shSoft = shadowSoftVal
+        }
+      }
+    }
+  }
+  if hasShadow {
+    let shChained: RgbaColor = g2dChain(color: shCol, chain255: chain255)
+    Gpu2dText.drawTextEx(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(color: col)
+      outlineColor: g2dColor(color: col)
+      outlineWidth: boldWidth
+      shadowColor: g2dColor(color: shChained)
+      shadowOffX: shOffX * wt.scale.x
+      shadowOffY: shOffY * wt.scale.y
+      shadowSoftness: shSoft
+    )
+    ret
+  }
+  if boldWidth > 0.0 {
+    Gpu2dText.drawTextEx(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(color: col)
+      outlineColor: g2dColor(color: col)
+      outlineWidth: boldWidth
+      shadowColor: 0
+      shadowOffX: 0.0
+      shadowOffY: 0.0
+      shadowSoftness: 1.0
+    )
+  } else {
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(color: col)
+    )
+  }
+}
+
+# A text changing (AnimateText): the old one going and the new one coming. A roll stays in the box.
+func paintTextWithGhost(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  let ghost: view TextGhost = componentView(
+    this: uiSystems.animation.textGhosts
+    entityId: entityId
+  )
+  var look: TextGhostLook = textGhostLook(
+    kind: AnimateTextKind.fade
+    rollFrom: RollFrom.below
+    progress: ghost.progress.current
+    start: 0.0
+    height: 0.0
+  )
+  var rolling: Bool = false
+  if componentHas(this: world.animateTexts, entityId: entityId) {
+    let animate: view AnimateText = componentView(this: world.animateTexts, entityId: entityId)
+    rolling = animate.kind is AnimateTextKind.roll
+    look = textGhostLook(
+      kind: animate.kind
+      rollFrom: animate.rollFrom
+      progress: ghost.progress.current
+      start: ghost.progress.start
+      height: cr.size.y * wt.scale.y
+    )
+  }
+  if rolling {
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: wt.position.x
+      y: wt.position.y
+      w: cr.size.x * wt.scale.x
+      h: cr.size.y * wt.scale.y
+    )
+  }
+  var ghostAt: WorldTransform2D = wt
+  ghostAt.position.y = wt.position.y + look.ghostY
+  paintTextG(
+    world: world
+    entityId: entityId
+    wt: ghostAt
+    cr: cr
+    chain255: (chain255.toFloat() * look.ghostAlpha).toInt()
+    res: res
+    canvas: canvas
+    content: ghost.text
+  )
+  var textAt: WorldTransform2D = wt
+  textAt.position.y = wt.position.y + look.textY
+  paintTextG(
+    world: world
+    entityId: entityId
+    wt: textAt
+    cr: cr
+    chain255: (chain255.toFloat() * look.textAlpha).toInt()
+    res: res
+    canvas: canvas
+    content: componentView(this: world.texts, entityId: entityId).text
+  )
+  if rolling {
+    Gpu2d.flush(canvas: canvas)
+    Gpu2d.popClipRect(canvas: canvas)
+  }
+}

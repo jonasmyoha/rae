@@ -486,6 +486,26 @@ func applyAuthoredFixups(
     )
     ret
   }
+  if name is "AnimateLayout" {
+    let motion: String = componentView(this: world.animateLayouts, entityId: entityId).motion
+    reportUnknownMotion(
+      world: world
+      name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
+  if name is "AnimateText" {
+    let motion: String = componentView(this: world.animateTexts, entityId: entityId).motion
+    reportUnknownMotion(
+      world: world
+      name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
   if name is "OnClick" {
     # every action id says what it does (ui/ClickTargets)
     reportMissingClickLabels(

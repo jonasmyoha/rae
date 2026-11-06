@@ -419,8 +419,24 @@ the bundles, in `ui/AnimationComponents` and `AnimationTriggers.rae`. What the c
   and acts at once.
 - "Visible" in a stagger means overlapping the parent's box. A scrolling list's rows overlap their tall content
   parent, so the list step has to say what its window is.
-- `pressable` is `pressedScale` only until `HoverScale` has its motion token (step 11), and `glideOnChange` comes
-  with `AnimateLayout` (step 4).
+- `pressable` is `pressedScale` only until `HoverScale` has its motion token (step 11).
+
+**Built in 0.3.21:** `AnimateLayout`, `AnimateText` and `glideOnChange`, with the rules in `AnimationTriggers.rae`
+and `AnimationRules.rae` and the painting in `renderSystem/RenderText.rae`. What the code decided:
+
+- A node's place counts `ComputedRect`s only, up to its nearest ancestor with `AnimateLayout`. A scroll is a
+  `RuntimeOffset`, which is not in it, so scrolling starts nothing. A marked child inside a marked parent does not
+  move twice: only what changed inside the parent glides.
+- "A window resize" is a change of `world.layoutW` or `layoutH` in the layout that saw the move. Every record then
+  takes the new place with no motion.
+- A hidden node forgets its place, so it comes back where it is laid out, and its `Appear` is what it plays.
+- A glide on a node already moving adds the difference to its x and y and keeps their velocity. Its opacity, scale
+  and rotation carry on, so a glide can start in the middle of an `Appear`.
+- A text changing while the last change still shows: the text that was coming becomes the old text, at the alpha it
+  had and, in a `roll`, at the place it had. The new text starts at the alpha and the place that are left, so the
+  text that was on its way out is dropped at once. With one old text kept this is the smallest jump there is.
+- The old text is drawn only in `paintTextWithGhost`. Layout, measuring and the hit test never see it. A `roll` is
+  clipped to the node's box.
 
 ## 11. Testing
 
