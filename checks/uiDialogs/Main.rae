@@ -1,0 +1,151 @@
+# Dialog motion, painted (docs/ui-animation-design.md section 9), from a card that has no motion of
+# its
+# own. RAE_DIALOG_CHECK picks the moment: "open" (the default) a dialog arriving, "close" one
+# leaving,
+# and "over" a second one arriving while the first steps back. RAE_ANIMATION_HOLD stops every
+# motion at
+# a share of its way, so a picture shows a true middle state:
+#
+#   RAE_DIALOG_CHECK=over RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 \
+#     RAE_GPU2D_SCREENSHOT=/tmp/dialog.bmp compiler/bin/rae run checks/uiDialogs/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1371_dialog_motion. Here: exit 0 when the
+# moment
+# started its motion through the real pipeline and, with no hold, every track ends.
+import Gpu2d
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Dialog
+open ui/Ecs
+open ui/Pipeline
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/dialogSystem/DialogSystem
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func openCard(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  file: view String
+  pageId: view String
+) ret EntityId {
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: file)
+    pageId: pageId
+  )
+  ret presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: pageId
+    overrides: emptyOverrides()
+  )
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI dialogs check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: "checks/uiDialogs/screen.raescene")
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+  let moment: String = Sys.getEnv(name: "RAE_DIALOG_CHECK")
+  # What is already there before the moment is at rest, so only the moment shows
+  let settings: AnimationSettings = uiSystems.animation.settings
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  var firstHost: EntityId = noEntity()
+  if moment is "close" or moment is "over" {
+    firstHost = openCard(
+      world: world
+      uiSystems: uiSystems
+      file: "checks/uiDialogs/card.raescene"
+      pageId: "first"
+    )
+  }
+  var started: Int = 0
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    if frames is 3 {
+      uiSystems.animation.settings = settings
+      if moment is "close" {
+        closePresentedPage(world: world, uiSystems: uiSystems, host: firstHost)
+      } else {
+        let host: EntityId = openCard(
+          world: world
+          uiSystems: uiSystems
+          file: "checks/uiDialogs/cardOver.raescene"
+          pageId: "second"
+        )
+      }
+    }
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    releaseDeadEntities(world: world, uiSystems: uiSystems)
+    if frames is 3 {
+      started = componentCount(this: uiSystems.animation.tracks)
+      log("the moment started {started} tracks")
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    if frames > 30 and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let left: Int = componentCount(this: uiSystems.animation.tracks)
+  let held: Bool = uiSystems.animation.settings.hold >= 0.0
+  let off: Bool = uiSystems.animation.settings.off
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if (started is 0 and not off) or (left > 0 and not held) {
+    log("UI DIALOGS FAILED: {started} tracks started, {left} left")
+    ret 1
+  }
+  log("UI DIALOGS OK: {left} left")
+  ret 0
+}

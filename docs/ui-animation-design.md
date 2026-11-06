@@ -402,6 +402,20 @@ math. It is one thumb's natural Back. The bar's Back stays.
 - A dialog over a dialog: the one under it scales to 0.97 and comes back.
 - `presentation: "page"` follows `PageTransition`, with `sheet` as the default.
 
+**Built in 0.3.23:** the dialog side of this, in `lib/ui/dialogSystem/DialogSystem.rae`. What the code decided:
+
+- A close removes the page from `presentedPages` at once, so `presentedPageCount`, `topPresentedPage` and the blocking of
+  the screen all see it as gone, and its node ids go at once too. A new page can use the same page id. The host is the one
+  thing that stays, with `Leaving`, and `animationChildMoving` now looks at the whole subtree, as the card is inside a slot.
+- Only a card that has been seen has anywhere to leave from. One closed before `animationTriggers` ever looked at it is
+  destroyed at once, and so is a page in a host that runs no animation, which is what those hosts did before.
+- A second close of a closing host does nothing.
+- A dialog steps back only under another dialog: a full page hides it. It comes back when the top one closes, and closing
+  the one under leaves the top one alone. Two dialogs presented in one frame, before the first has a track, do not step back.
+- A full page has no motion here until `PageTransition` (step 7), unless its root has its own `Disappear`.
+- Placement is layout's and the pose scales about the card's middle, so the middle is where placement put it at every scale.
+- A closing scrim and a new one together never dim below 98% of one scrim (case 1371), which is the "no flash".
+
 ## 10. What a person feels
 
 - **Input never waits.** Taps go to the arriving page from its first frame. Hit testing

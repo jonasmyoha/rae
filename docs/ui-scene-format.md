@@ -805,3 +805,16 @@ In `Flow` mode a row whose key went stays in the layout until its `Disappear` en
 a key that comes back meanwhile turns its row around.
 
 Case 1370 holds the rules; `checks/uiLists` paints them.
+
+## 24. Dialog motion
+
+A dialog animates with no change to its scene. The scrim fades. The card plays its root's `Appear` and `Disappear`; a root with neither
+gets the bundle `dialogMotion`. The host needs nothing but `animationRun` and `releaseDeadEntities`.
+
+- `closePresentedPage` closes the page for the app at once: it is out of `presentedPageCount`, its node ids are gone, the screen under
+  it takes input, and a new page can open, even with the same page id. What is on screen stays, taking no input, until its motion ends.
+- A dialog with another dialog over it steps back to scale 0.97, and comes back when the top one closes.
+- `DialogOptions.placement` holds at every scale: the card scales about its middle, which is where placement put it.
+- A page with `"presentation": "page"` has no motion yet unless its root has its own `Disappear`.
+
+Case 1371 holds the rules; `checks/uiDialogs` paints them.

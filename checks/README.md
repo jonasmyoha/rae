@@ -22,6 +22,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `localNotification` | lib/LocalNotification on a real iPhone: rings with the app closed, the same id replaces, a cancel holds (docs/local-notifications.md). Off iOS it passes with nothing to test |
 | `uiAppear` | `Appear` and `Stagger` from a scene alone, through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of a true middle state. Pictures: docs/images/ui-appear |
 | `uiLayoutText` | `AnimateLayout` and `AnimateText` from a scene alone, through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of rows gliding, a text fading and a clock rolling (`docs/images/ui-layout-text/`) |
+| `uiDialogs` | dialog motion from a card with none of its own, through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of a dialog opening, closing (`RAE_DIALOG_CHECK=close`) and one over another (`over`) (`docs/images/ui-dialogs/`) |
 | `uiLists` | list motion through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of a ghost, a new row and a glide, or with `RAE_LIST_CHECK=sideways` a change of all the data (`docs/images/ui-lists/`) |
 | `uiZoom` | a `TransformFx` scale on a whole subtree, painted: a card with a stroke, a shadow, a gradient, text, an icon and a clipped list, at `RAE_UI_ZOOM`. Pictures: docs/images/ui-zoom |
 | `webPackageAsset` | a package's shader and declared file, natively and on a page (`compiler/tools/wasm_webgpu_smoke.sh` runs it in headless Chrome) |
