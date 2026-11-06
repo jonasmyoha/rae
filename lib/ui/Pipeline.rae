@@ -36,32 +36,37 @@ const uiSystemLayout: Int = 3
 
 const uiSystemFit: Int = 4
 
+# animationSystem (animationSystem/AnimationTracks): after layout, so a glide sees the new places,
+# and
+# before transform, which folds the pose in. An idle UI runs none of it.
+const uiSystemAnimation: Int = 5
+
 # #11920833: a Camera2D on a root becomes its TransformFx + RuntimeOffset.
-const uiSystemCamera: Int = 5
+const uiSystemCamera: Int = 6
 
-const uiSystemTransform: Int = 6
+const uiSystemTransform: Int = 7
 
-const uiSystemHoverScale: Int = 7
+const uiSystemHoverScale: Int = 8
 
 # #1005: the effect systems (lib/ui/animationSystem/EffectSystems.rae), in
 # the order the app calls them, after hoverScale and before visualBounds.
-const uiSystemAnimFrames: Int = 8
+const uiSystemAnimFrames: Int = 9
 
-const uiSystemAnimTrigger: Int = 9
+const uiSystemAnimTrigger: Int = 10
 
-const uiSystemWobbleFx: Int = 10
+const uiSystemWobbleFx: Int = 11
 
-const uiSystemBackgroundPan: Int = 11
+const uiSystemBackgroundPan: Int = 12
 
-const uiSystemSmokeFx: Int = 12
+const uiSystemSmokeFx: Int = 13
 
-const uiSystemCarousel: Int = 13
+const uiSystemCarousel: Int = 14
 
-const uiSystemVisualBounds: Int = 14
+const uiSystemVisualBounds: Int = 15
 
-const uiSystemRender: Int = 15
+const uiSystemRender: Int = 16
 
-const uiSystemCount: Int = 16
+const uiSystemCount: Int = 17
 
 # Resolve UiWorld table FIELD names to table ids. A name that is not a
 # ComponentTable field of UiWorld is a registration bug in this file, so it is
@@ -183,6 +188,16 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
       "rects"
       "scaleToFits"
     ]
+    writes: List.create(String, cap: 0)
+    skipWhenClean: false
+  )
+
+  # animationRun — the inbox and the tracks into AnimationPose. It owns its tables, on UiSystems.
+  uiRegister(
+    schedule: schedule
+    world: world
+    name: "animation"
+    reads: List.create(String, cap: 0)
     writes: List.create(String, cap: 0)
     skipWhenClean: false
   )
@@ -319,7 +334,7 @@ func createUiPipeline(world: view UiWorld) ret Schedule {
 # reads of them is listed here by hand, next to the declarations above:
 #   every stage after layout: computedRects; plus per stage —
 #   input: worldTransforms, interactions      layout: parents, measuredTexts, safeInsets
-#   camera: runtimeOffsets                    transform: parents, runtimeOffsets
+#   camera: runtimeOffsets                    transform: parents, runtimeOffsets, poses
 #   animFrames: animStates                    animTrigger: interactions, animStates
 #   smokeFx: smokeStates                      carousel: worldTransforms, carouselStates
 #   render: worldTransforms                   safeArea: safeInsets
@@ -348,7 +363,7 @@ func uiSystemsReadGeneration(uiSystems: view UiSystems, index: view Int) ret Int
     ret rects + runtimeOffsets
   }
   if index is uiSystemTransform {
-    ret rects + parents + runtimeOffsets
+    ret rects + parents + runtimeOffsets + componentTableGeneration(this: uiSystems.animation.poses)
   }
   if index is uiSystemAnimFrames {
     ret rects + animStates

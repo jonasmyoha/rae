@@ -119,3 +119,75 @@ func easeOutBounce(t: copy Float) ret Float {
 func easeInBounce(t: view Float) ret Float {
   ret 1.0 - easeOutBounce(1.0 - t)
 }
+
+# The curves a theme's motion token may name
+const easingNames: String = "linear easeInSine easeOutSine easeInOutSine easeInQuad easeOutQuad easeInOutQuad easeInCubic easeOutCubic easeInOutCubic easeInQuart easeOutQuart easeInOutQuart easeInExpo easeOutExpo easeInBack easeOutBack easeInBounce easeOutBounce"
+
+func easingKnown(name: view String) ret Bool {
+  let names: List(String) = easingNames.split(sep: " ")
+  loop let known: view String in names {
+    if known is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The curve called `name` at `t`; linear for a name it does not know
+func easeNamed(name: view String, t: view Float) ret Float {
+  if name is "easeOutCubic" {
+    ret easeOutCubic(t: t)
+  }
+  if name is "easeInCubic" {
+    ret easeInCubic(t: t)
+  }
+  if name is "easeInOutCubic" {
+    ret easeInOutCubic(t: t)
+  }
+  if name is "easeInSine" {
+    ret easeInSine(t: t)
+  }
+  if name is "easeOutSine" {
+    ret easeOutSine(t: t)
+  }
+  if name is "easeInOutSine" {
+    ret easeInOutSine(t: t)
+  }
+  if name is "easeInQuad" {
+    ret easeInQuad(t: t)
+  }
+  if name is "easeOutQuad" {
+    ret easeOutQuad(t: t)
+  }
+  if name is "easeInOutQuad" {
+    ret easeInOutQuad(t: t)
+  }
+  if name is "easeInQuart" {
+    ret easeInQuart(t: t)
+  }
+  if name is "easeOutQuart" {
+    ret easeOutQuart(t: t)
+  }
+  if name is "easeInOutQuart" {
+    ret easeInOutQuart(t: t)
+  }
+  if name is "easeInExpo" {
+    ret easeInExpo(t: t)
+  }
+  if name is "easeOutExpo" {
+    ret easeOutExpo(t: t)
+  }
+  if name is "easeInBack" {
+    ret easeInBack(t: t)
+  }
+  if name is "easeOutBack" {
+    ret easeOutBack(t: t)
+  }
+  if name is "easeInBounce" {
+    ret easeInBounce(t: t)
+  }
+  if name is "easeOutBounce" {
+    ret easeOutBounce(t: t)
+  }
+  ret easeLinear(t: t)
+}

@@ -14,6 +14,7 @@
 #   Opacity       — multiplied with parent's alpha
 #   Active        — false hides this entity AND its subtree
 #   TransformFx   — scale/rotation/extra alpha (multiplicative)
+#   AnimationPose — animationSystem's result, folded in after all of these
 #
 # Output per entity: WorldTransform2D (position/rotation/scale) plus a
 # WorldVisual (accumulated alpha/visible) — alpha/visible are their own derived
@@ -28,6 +29,7 @@ import ecs/Transform
 open ecs/hierarchySystem/HierarchySystem
 open ecs/transformSystem/TransformSystem
 open ui/UiSystems
+open ui/animationSystem/AnimationRules
 
 # Returns the active flag for entity; defaults to true if no Active.
 func active(world: view UiWorld, entityId: view EntityId) ret Bool {
@@ -129,6 +131,7 @@ func runtimeOffsetOf(
 # the general geometry TransformSystem does not track — see accumulateVisibility.)
 func composeVisual(
   world: view UiWorld
+  uiSystems: view UiSystems
   entityId: view EntityId
   parentAlpha: view Float
   parentVisible: view Bool
@@ -142,6 +145,9 @@ func composeVisual(
     visible = false
   }
   var alpha: Float = parentAlpha * opacity(world: world, entityId: entityId) * fx.alpha
+  if componentHas(this: uiSystems.animation.poses, entityId: entityId) {
+    alpha = alpha * componentView(this: uiSystems.animation.poses, entityId: entityId).opacity
+  }
   if alpha < 0.0 {
     alpha = 0.0
   }
@@ -157,6 +163,8 @@ func composeVisual(
 # rotation/scale. This is the input the general TransformSystem folds into
 # worldTransforms. Iterates the ComputedRect table — one local per laid-out node.
 func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
+  # A page at rest pays nothing for animation: no pose, no lookup per node
+  let anyPose: Bool = componentCount(this: uiSystems.animation.poses) > 0
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
     let cr: view ComputedRect = queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
@@ -169,20 +177,34 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
     # children fold through this, so a scaled card carries its whole subtree.
     var originX: Float = cr.position.x + ro.x
     var originY: Float = cr.position.y + ro.y
-    if fx.rotation is not 0.0 or fx.scaleX is not 1.0 or fx.scaleY is not 1.0 {
+    var scaleX: Float = fx.scaleX
+    var scaleY: Float = fx.scaleY
+    var rotation: Float = fx.rotation
+    if anyPose and componentHas(this: uiSystems.animation.poses, entityId: entityId) {
+      let pose: view AnimationPose = componentView(
+        this: uiSystems.animation.poses
+        entityId: entityId
+      )
+      originX = originX + pose.x
+      originY = originY + pose.y
+      scaleX = scaleX * pose.scale
+      scaleY = scaleY * pose.scale
+      rotation = rotation + pose.rotation
+    }
+    if rotation is not 0.0 or scaleX is not 1.0 or scaleY is not 1.0 {
       let pivotX: Float = cr.size.x * fx.pivot.x
       let pivotY: Float = cr.size.y * fx.pivot.y
-      let scaledX: Float = pivotX * fx.scaleX
-      let scaledY: Float = pivotY * fx.scaleY
-      let cosR: Float = Math.cos(x: fx.rotation)
-      let sinR: Float = Math.sin(x: fx.rotation)
+      let scaledX: Float = pivotX * scaleX
+      let scaledY: Float = pivotY * scaleY
+      let cosR: Float = Math.cos(x: rotation)
+      let sinR: Float = Math.sin(x: rotation)
       originX = originX + pivotX - (scaledX * cosR - scaledY * sinR)
       originY = originY + pivotY - (scaledX * sinR + scaledY * cosR)
     }
     let local: Transform2D = {
       position: { x: originX, y: originY }
-      rotation: fx.rotation
-      scale: { x: fx.scaleX, y: fx.scaleY }
+      rotation: rotation
+      scale: { x: scaleX, y: scaleY }
     }
     componentSet(this: uiSystems.transform2d.localTransforms, entityId: entityId, data: local)
   }
@@ -205,6 +227,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
     let entityId: EntityId = row.entityId
     let wv: WorldVisual = composeVisual(
       world: world
+      uiSystems: uiSystems
       entityId: entityId
       parentAlpha: 1.0
       parentVisible: true
@@ -227,6 +250,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
       )
       let wv: WorldVisual = composeVisual(
         world: world
+        uiSystems: uiSystems
         entityId: entityId
         parentAlpha: parentWv.alpha
         parentVisible: parentWv.visible
@@ -277,6 +301,7 @@ type TransformCache {
   childrensGen: Int
   parentsGen: Int
   runtimeOffsetsGen: Int
+  posesGen: Int
   entityCount: Int
 }
 
@@ -289,6 +314,7 @@ func createTransformCache() pub ret TransformCache {
     childrensGen: -1
     parentsGen: -1
     runtimeOffsetsGen: -1
+    posesGen: -1
     entityCount: -1
   }
 }
@@ -319,9 +345,13 @@ func systemIfDirty(
     RuntimeOffset
     this: uiSystems.transform2d.runtimeOffsets
   )
+  let posesGen: Int = componentTableGeneration(AnimationPose, this: uiSystems.animation.poses)
   let entityCount: Int = world.allocator.alive.length
 
   var dirty: Bool = false
+  if posesGen is not cache.posesGen {
+    dirty = true
+  }
   if crGen is not cache.computedRectsGen {
     dirty = true
   }
@@ -353,6 +383,7 @@ func systemIfDirty(
 
   transformSystem(world: world, uiSystems: uiSystems)
   cache.runtimeOffsetsGen = roGen
+  cache.posesGen = posesGen
   cache.computedRectsGen = crGen
   cache.activesGen = acGen
   cache.opacitiesGen = opGen

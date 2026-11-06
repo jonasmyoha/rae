@@ -4,6 +4,7 @@ open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/animationSystem/AnimationTracks
 open ui/textFieldSystem/TextFieldSystem
 open FileWatch
 open HotReload
@@ -57,7 +58,7 @@ func frameWaitSystem(
   # stays on the throttled 60Hz path so a playing song doesn't peg a core.
   # Idle → blocking event-wait (~0% CPU).
   let heroInFlight: Bool = componentCount(this: uiSystems.heroTransition.heroTransitions) > 0
-  tick.busyAnimating = heroInFlight or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
+  tick.busyAnimating = heroInFlight or animationInFlight(uiSystems: uiSystems) or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )
   # Busy-render is `animating` with a zero-length frame, so the shared policy

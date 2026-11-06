@@ -1,0 +1,423 @@
+# animationSystem's tracks (docs/ui-animation-design.md section 5): what is moving, and the only
+# writer of AnimationPose. Others ask through the inbox with animationPlay, animationTo and
+# animationLeave. A command on an entity with a track retargets it from its current value and
+# velocity, which is what makes everything interruptible.
+#
+# Each channel runs on its own, and a track ends when all of them are at rest. Its pose then goes
+# too, unless it ended somewhere other than the node's place. With no command and no track
+# animationRun returns at once: an idle UI runs no animation code, and the host's wait sees
+# animationInFlight false.
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Queue
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/ScenePolicy
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+
+# Each world steps by the real frame time, but never more than this: a long frame slows a motion and
+# never skips it
+const animationMaxStep: Float = 0.05
+
+const animationFirstStep: Float = 0.016667
+
+# The motion an unknown name falls back to, after its diagnostic
+const animationFallbackMotion: String = "smooth"
+
+enum AnimationPhase { appearing, moving, leaving }
+
+# What happens to the node when its track ends
+enum AnimationEnd { stay, deactivate, destroy, destroySubtree }
+
+type AnimationTrack {
+  opacity: AnimationChannel
+  scale: AnimationChannel
+  x: AnimationChannel
+  y: AnimationChannel
+  rotation: AnimationChannel
+  delayLeft: Float
+  phase: AnimationPhase
+  onEnd: AnimationEnd
+}
+
+type AnimationCommand {
+  entityId: EntityId
+  # Start from this pose; else from where the node is now
+  hasFrom: Bool
+  from: AnimationPose
+  to: AnimationPose
+  motion: String
+  opacityMotion: String
+  delaySeconds: Float
+  phase: AnimationPhase
+  onEnd: AnimationEnd
+}
+
+# The settings a run was started with
+func animationSettingsFromEnv() ret AnimationSettings {
+  ret parseAnimationSettings(
+    animation: Sys.getEnv(name: "RAE_ANIMATION")
+    hold: Sys.getEnv(name: "RAE_ANIMATION_HOLD")
+  )
+}
+
+# True while something moves or waits to start. A held animation is not in flight: it has stopped,
+# and a test may take its picture.
+func animationInFlight(uiSystems: view UiSystems) ret Bool {
+  if queueIsEmpty(this: uiSystems.animation.commands) is false {
+    ret true
+  }
+  ret uiSystems.animation.settings.hold < 0.0 and componentCount(this: uiSystems.animation.tracks) > 0
+}
+
+# Arrive at normal place and look from pose `from`, after `delaySeconds`
+func animationPlay(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  from: view AnimationPose
+  motion: view String
+  opacityMotion: view String
+  delaySeconds: view Float
+) {
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: entityId
+      hasFrom: true
+      from: from
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: opacityMotion
+      delaySeconds: delaySeconds
+      phase: AnimationPhase.appearing
+      onEnd: AnimationEnd.stay
+    }
+  )
+}
+
+# Move from where the node is now to pose `to`, and stay there
+func animationTo(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  to: view AnimationPose
+  motion: view String
+  opacityMotion: view String
+  delaySeconds: view Float
+) {
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: entityId
+      hasFrom: false
+      from: AnimationPose {}
+      to: to
+      motion: motion
+      opacityMotion: opacityMotion
+      delaySeconds: delaySeconds
+      phase: AnimationPhase.moving
+      onEnd: AnimationEnd.stay
+    }
+  )
+}
+
+# Move from where the node is now to pose `to`, then do `onEnd` to it
+func animationLeave(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  to: view AnimationPose
+  motion: view String
+  opacityMotion: view String
+  delaySeconds: view Float
+  onEnd: view AnimationEnd
+) {
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: entityId
+      hasFrom: false
+      from: AnimationPose {}
+      to: to
+      motion: motion
+      opacityMotion: opacityMotion
+      delaySeconds: delaySeconds
+      phase: AnimationPhase.leaving
+      onEnd: onEnd
+    }
+  )
+}
+
+# A motion token by name: an unknown one is a scene diagnostic, then the fallback, never silent
+func animationMotionNamed(
+  world: mod UiWorld
+  entityId: view EntityId
+  name: view String
+) ret MotionToken {
+  if let token: MotionToken = themeMotion(theme: world.theme.resolved, name: name) {
+    ret token
+  }
+  reportSceneDiagnostic(
+    diagnostics: world.sceneDiagnostics
+    sceneId: ""
+    nodeId: "{entityId.index}"
+    kind: SceneDiagnosticKind.unknownToken
+    name: name
+    message: "no motion token named {name}; using {animationFallbackMotion}"
+  )
+  if let token: MotionToken = themeMotion(
+    theme: world.theme.resolved
+    name: animationFallbackMotion
+  ) {
+    ret token
+  }
+  ret MotionToken {}
+}
+
+func poseOfTrack(track: view AnimationTrack) ret AnimationPose {
+  ret AnimationPose {
+    opacity: track.opacity.current
+    scale: track.scale.current
+    x: track.x.current
+    y: track.y.current
+    rotation: track.rotation.current
+  }
+}
+
+func animationPoseOf(uiSystems: view UiSystems, entityId: view EntityId) ret AnimationPose {
+  if componentHas(this: uiSystems.animation.poses, entityId: entityId) {
+    let pose: view AnimationPose = componentView(
+      this: uiSystems.animation.poses
+      entityId: entityId
+    )
+    ret pose
+  }
+  ret AnimationPose {}
+}
+
+# The track a command starts: from its `from` pose, or from where the node is
+func trackFromCommand(
+  command: view AnimationCommand
+  start: view AnimationPose
+  motion: view MotionToken
+  opacityMotion: view MotionToken
+) ret AnimationTrack {
+  ret AnimationTrack {
+    opacity: createChannel(
+      current: start.opacity
+      target: command.to.opacity
+      motion: opacityMotion
+      restDistance: animationRestRatio
+    )
+    scale: createChannel(
+      current: start.scale
+      target: command.to.scale
+      motion: motion
+      restDistance: animationRestRatio
+    )
+    x: createChannel(
+      current: start.x
+      target: command.to.x
+      motion: motion
+      restDistance: animationRestPixels
+    )
+    y: createChannel(
+      current: start.y
+      target: command.to.y
+      motion: motion
+      restDistance: animationRestPixels
+    )
+    rotation: createChannel(
+      current: start.rotation
+      target: command.to.rotation
+      motion: motion
+      restDistance: animationRestRatio
+    )
+    delayLeft: command.delaySeconds
+    phase: command.phase
+    onEnd: command.onEnd
+  }
+}
+
+# The real end of a track: its end action, and the pose goes unless the node stays somewhere else
+func animationFinish(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  onEnd: view AnimationEnd
+  pose: view AnimationPose
+) {
+  componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
+  if onEnd is AnimationEnd.stay and poseIsRest(pose: pose) is false {
+    componentSet(this: uiSystems.animation.poses, entityId: entityId, data: pose)
+    ret
+  }
+  componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+  if onEnd is AnimationEnd.deactivate {
+    componentSet(this: world.actives, entityId: entityId, data: Active { value: false })
+  } else if onEnd is AnimationEnd.destroy {
+    unlinkFromCurrent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+    )
+    destroyEntity(world: world, entityId: entityId)
+  } else if onEnd is AnimationEnd.destroySubtree {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: entityId)
+  }
+}
+
+func animationApplyCommand(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  command: view AnimationCommand
+) {
+  let entityId: EntityId = command.entityId
+  if isAlive(world: world, entityId: entityId) is false {
+    ret
+  }
+  let motion: MotionToken = animationMotionNamed(
+    world: world
+    entityId: entityId
+    name: command.motion
+  )
+  let opacityMotion: MotionToken = animationMotionNamed(
+    world: world
+    entityId: entityId
+    name: command.opacityMotion
+  )
+  let settings: AnimationSettings = uiSystems.animation.settings
+  if settings.off {
+    animationFinish(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      onEnd: command.onEnd
+      pose: command.to
+    )
+    ret
+  }
+  if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+    let track: mod AnimationTrack = componentMod(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+    )
+    channelRetarget(channel: track.opacity, target: command.to.opacity, motion: opacityMotion)
+    channelRetarget(channel: track.scale, target: command.to.scale, motion: motion)
+    channelRetarget(channel: track.x, target: command.to.x, motion: motion)
+    channelRetarget(channel: track.y, target: command.to.y, motion: motion)
+    channelRetarget(channel: track.rotation, target: command.to.rotation, motion: motion)
+    track.delayLeft = command.delaySeconds
+    track.phase = command.phase
+    track.onEnd = command.onEnd
+  } else {
+    var start: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+    if command.hasFrom {
+      start = command.from
+    }
+    componentSet(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+      data: trackFromCommand(
+        command: command
+        start: start
+        motion: motion
+        opacityMotion: opacityMotion
+      )
+    )
+  }
+  # The start pose before the first paint, so a node never flashes at its end place; under a hold,
+  # the stopped middle of the way
+  let moved: mod AnimationTrack = componentMod(this: uiSystems.animation.tracks, entityId: entityId)
+  if settings.hold >= 0.0 {
+    channelHold(channel: moved.opacity, share: settings.hold)
+    channelHold(channel: moved.scale, share: settings.hold)
+    channelHold(channel: moved.x, share: settings.hold)
+    channelHold(channel: moved.y, share: settings.hold)
+    channelHold(channel: moved.rotation, share: settings.hold)
+  }
+  componentSet(this: uiSystems.animation.poses, entityId: entityId, data: poseOfTrack(track: moved))
+}
+
+# One update: drain the inbox, then step every track by `deltaTime` s
+func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  uiSystems.animation.updates = uiSystems.animation.updates + 1
+  let commandCount: Int = queueCount(this: uiSystems.animation.commands)
+  loop var i: Int = 0, i < commandCount, ++i {
+    let command: AnimationCommand = queueAt(this: uiSystems.animation.commands, i: i)
+    animationApplyCommand(world: world, uiSystems: uiSystems, command: command)
+  }
+  clearQueue(this: uiSystems.animation.commands)
+  if uiSystems.animation.settings.hold >= 0.0 {
+    ret
+  }
+  var step: Float = deltaTime
+  if step > animationMaxStep {
+    step = animationMaxStep
+  }
+  step = step / uiSystems.animation.settings.slow
+  var ended: List(EntityId) = List.create(EntityId, cap: 8)
+  let trackCount: Int = componentCount(this: uiSystems.animation.tracks)
+  loop var i: Int = 0, i < trackCount, ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.tracks, i: i)
+    let track: mod AnimationTrack = componentMod(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+    )
+    var left: Float = step
+    if track.delayLeft > 0.0 {
+      track.delayLeft = track.delayLeft - left
+      left = -track.delayLeft
+    }
+    if track.delayLeft <= 0.0 {
+      track.delayLeft = 0.0
+      # All five, with no early stop: each channel runs on its own
+      let opacityDone: Bool = channelStep(channel: track.opacity, deltaTime: left)
+      let scaleDone: Bool = channelStep(channel: track.scale, deltaTime: left)
+      let xDone: Bool = channelStep(channel: track.x, deltaTime: left)
+      let yDone: Bool = channelStep(channel: track.y, deltaTime: left)
+      let rotationDone: Bool = channelStep(channel: track.rotation, deltaTime: left)
+      componentSet(
+        this: uiSystems.animation.poses
+        entityId: entityId
+        data: poseOfTrack(track: track)
+      )
+      if opacityDone and scaleDone and xDone and yDone and rotationDone {
+        ended.add(value: entityId)
+      }
+    }
+  }
+  loop let entityId: view EntityId in ended {
+    let track: view AnimationTrack = componentView(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+    )
+    let onEnd: AnimationEnd = track.onEnd
+    let pose: AnimationPose = poseOfTrack(track: track)
+    animationFinish(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      onEnd: onEnd
+      pose: pose
+    )
+  }
+}
+
+# The `animation` Pipeline entry, between fit and transform: an update by the real frame time when
+# something is in flight, and nothing at all, not even a read of the clock, when not
+func animationRun(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if animationInFlight(uiSystems: uiSystems) is false {
+    uiSystems.animation.lastFrameNs = 0
+    ret
+  }
+  let now: Int = nowNs()
+  var step: Float = animationFirstStep
+  if uiSystems.animation.lastFrameNs > 0 {
+    step = (now - uiSystems.animation.lastFrameNs).toFloat() / 1000000000.0
+  }
+  uiSystems.animation.lastFrameNs = now
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: step)
+}

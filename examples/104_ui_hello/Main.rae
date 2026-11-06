@@ -27,6 +27,7 @@ open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
 open ui/SceneFile
+open ui/animationSystem/AnimationTracks
 open ui/SceneLoader
 open ui/Transform
 open Gpu2dCanvas
@@ -118,7 +119,8 @@ func main() ret Int {
       changed = true
     }
 
-    if hadEvents or changed {
+    let moving: Bool = animationInFlight(uiSystems: uiSystems)
+    if hadEvents or changed or moving {
       runScheduledUiSystems(
         schedule: schedule
         world: world
@@ -131,7 +133,7 @@ func main() ret Int {
     # — a window is not presentable the instant it is created, and a compositor
     # does not promise to keep a frame that was presented once. Never while the
     # window is hidden: shouldRenderFrame folds that rule in.
-    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
+    let needsRender: Bool = hadEvents or changed or moving or wokeUp or renderedOnce is false
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(
         canvas: canvas
@@ -154,7 +156,7 @@ func main() ret Int {
       # the shared policy from lib/ui/eventLoop.rae.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         visible: Gpu2d.renderableNow()
-        animating: false
+        animating: animationInFlight(uiSystems: uiSystems)
         mouseDown: false
         pollWatcher: false
         frameSec: 0.016667

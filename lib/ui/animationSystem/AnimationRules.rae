@@ -1,0 +1,147 @@
+# The rules of animationSystem, pure (docs/ui-animation-design.md section 5): the pose, one channel
+# of a track and how it steps, and the testing settings. No world, no tables.
+import Easing
+import Math
+open Spring
+open ui/ThemeResolved
+
+# Relative to the node's laid-out place. A node at rest has none. The transform pass folds it in
+# after Opacity, TransformFx and RuntimeOffset, and only animationSystem writes it. Scale and
+# rotation act about the node's TransformFx pivot, the middle when it has none.
+type AnimationPose {
+  opacity: Float = 1.0
+  scale: Float = 1.0
+  x: Float = 0.0
+  y: Float = 0.0
+  rotation: Float = 0.0
+}
+
+func poseIsRest(pose: view AnimationPose) ret Bool {
+  ret pose.opacity is 1.0 and pose.scale is 1.0 and pose.x is 0.0 and pose.y is 0.0 and pose.rotation is 0.0
+}
+
+# How close each kind of channel must get for a stop not to show: a little under a pixel, and about
+# one part in 500 of a scale, an opacity or a radian
+const animationRestPixels: Float = 0.1
+
+const animationRestRatio: Float = 0.002
+
+# One number moving: toward `target` by its spring or its curve
+type AnimationChannel {
+  current: Float
+  velocity: Float
+  # Where a curve left from
+  start: Float
+  target: Float
+  motion: MotionToken
+  elapsed: Float
+  restDistance: Float
+}
+
+func createChannel(
+  current: view Float
+  target: view Float
+  motion: view MotionToken
+  restDistance: view Float
+) ret AnimationChannel {
+  ret AnimationChannel {
+    current: current
+    velocity: 0.0
+    start: current
+    target: target
+    motion: motion
+    elapsed: 0.0
+    restDistance: restDistance
+  }
+}
+
+# A new target from where the channel is now: position and velocity carry on. This one rule is what
+# makes every motion interruptible.
+func channelRetarget(channel: mod AnimationChannel, target: view Float, motion: view MotionToken) {
+  channel.start = channel.current
+  channel.target = target
+  channel.motion = motion
+  channel.elapsed = 0.0
+}
+
+# One step of `deltaTime` s. True when the channel has arrived (it then sits exactly on its target).
+func channelStep(channel: mod AnimationChannel, deltaTime: view Float) ret Bool {
+  if channel.current is channel.target and channel.velocity is 0.0 {
+    ret true
+  }
+  if channel.motion.kind is MotionKind.spring {
+    var state: SpringState = { value: channel.current, velocity: channel.velocity }
+    springStep(
+      state: state
+      target: channel.target
+      response: channel.motion.response
+      damping: channel.motion.damping
+      deltaTime: deltaTime
+    )
+    channel.current = state.value
+    channel.velocity = state.velocity
+    if springAtRest(state: state, target: channel.target, distance: channel.restDistance) {
+      channel.current = channel.target
+      channel.velocity = 0.0
+      ret true
+    }
+    ret false
+  }
+  channel.elapsed = channel.elapsed + deltaTime
+  if channel.motion.seconds <= 0.0 or channel.elapsed >= channel.motion.seconds {
+    channel.current = channel.target
+    channel.velocity = 0.0
+    ret true
+  }
+  let before: Float = channel.current
+  let share: Float = Easing.easeNamed(
+    name: channel.motion.curve
+    t: channel.elapsed / channel.motion.seconds
+  )
+  channel.current = channel.start + (channel.target - channel.start) * share
+  if deltaTime > 0.0 {
+    channel.velocity = (channel.current - before) / deltaTime
+  }
+  ret false
+}
+
+# `share` of the way from where the channel started: RAE_ANIMATION_HOLD's true middle state
+func channelHold(channel: mod AnimationChannel, share: view Float) {
+  channel.current = channel.start + (channel.target - channel.start) * share
+  channel.velocity = 0.0
+}
+
+# The testing settings (docs/ui-animation-design.md section 11)
+type AnimationSettings {
+  # RAE_ANIMATION=off: every motion is at its end at once
+  off: Bool = false
+  # RAE_ANIMATION=slow:5: five times slower
+  slow: Float = 1.0
+  # RAE_ANIMATION_HOLD=0.4: every animation stops at 40% of its way and stays; below 0, no hold
+  hold: Float = -1.0
+}
+
+func parseAnimationSettings(animation: view String, hold: view String) ret AnimationSettings {
+  var settings: AnimationSettings = {}
+  if animation is "off" {
+    settings.off = true
+  } else if animation.startsWith(prefix: "slow:") {
+    let factor: Float = animation.sub(start: 5, len: animation.length() - 5).toFloat()
+    if factor > 0.0 {
+      settings.slow = factor
+    } else {
+      log("[animation] RAE_ANIMATION={animation}: a slow factor is a number above 0; ignored")
+    }
+  } else if animation.length() > 0 {
+    log("[animation] RAE_ANIMATION={animation}: use off or slow:<factor>; ignored")
+  }
+  if hold.length() > 0 {
+    let share: Float = hold.toFloat()
+    if share >= 0.0 and share <= 1.0 {
+      settings.hold = share
+    } else {
+      log("[animation] RAE_ANIMATION_HOLD={hold}: a share from 0 to 1; ignored")
+    }
+  }
+  ret settings
+}

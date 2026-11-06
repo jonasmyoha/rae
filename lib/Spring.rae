@@ -1,0 +1,75 @@
+# Spring — a damped spring with an exact step: the closed-form motion from where the value and its
+# velocity are now, so the path does not depend on the frame rate, and a change of target mid-way
+# keeps both position and velocity. That is what lets a motion turn around smoothly.
+#
+# `response` is the seconds of one undamped swing, about the time to get there. `damping` is 1 for
+# no bounce (critical), below 1 for a bounce, above 1 for slower with no bounce. These are the two
+# numbers iOS uses. A `response` of 0 or less arrives at once. docs/ui-animation-design.md section
+# 3.
+import Math
+
+const springTwoPi: Float = 6.2831855
+
+# Damping this close to 1 uses the critical form: the others divide by a number near 0
+const springCriticalBand: Float = 0.0001
+
+type SpringState {
+  value: Float
+  velocity: Float
+}
+
+# `state` after `deltaTime` s of moving toward `target`
+func springStep(
+  state: mod SpringState
+  target: view Float
+  response: view Float
+  damping: view Float
+  deltaTime: view Float
+) {
+  if response <= 0.0 {
+    state.value = target
+    state.velocity = 0.0
+    ret
+  }
+  if deltaTime <= 0.0 {
+    ret
+  }
+  let omega: Float = springTwoPi / response
+  let distance: Float = state.value - target
+  let velocity: Float = state.velocity
+  var nextDistance: Float = 0.0
+  var nextVelocity: Float = 0.0
+  if Math.abs(value: damping - 1.0) < springCriticalBand {
+    let decay: Float = Math.exp(x: -omega * deltaTime)
+    let rate: Float = velocity + omega * distance
+    nextDistance = (distance + rate * deltaTime) * decay
+    nextVelocity = (rate - omega * (distance + rate * deltaTime)) * decay
+  } else if damping < 1.0 {
+    let sinkRate: Float = damping * omega
+    let swing: Float = omega * Math.sqrt(x: 1.0 - damping * damping)
+    let decay: Float = Math.exp(x: -sinkRate * deltaTime)
+    let cosine: Float = Math.cos(x: swing * deltaTime)
+    let sine: Float = Math.sin(x: swing * deltaTime)
+    let part: Float = (velocity + sinkRate * distance) / swing
+    nextDistance = decay * (distance * cosine + part * sine)
+    nextVelocity = decay * ((part * swing - sinkRate * distance) * cosine - (distance * swing + sinkRate * part) * sine)
+  } else {
+    let spread: Float = omega * Math.sqrt(x: damping * damping - 1.0)
+    let fast: Float = -damping * omega - spread
+    let slow: Float = -damping * omega + spread
+    let fastPart: Float = (velocity - slow * distance) / (fast - slow)
+    let slowPart: Float = distance - fastPart
+    let fastDecay: Float = fastPart * Math.exp(x: fast * deltaTime)
+    let slowDecay: Float = slowPart * Math.exp(x: slow * deltaTime)
+    nextDistance = fastDecay + slowDecay
+    nextVelocity = fast * fastDecay + slow * slowDecay
+  }
+  state.value = target + nextDistance
+  state.velocity = nextVelocity
+}
+
+# Close enough to `target`, and slow enough, that a stop will not show. `distance` is in the value's
+# own units; the speed allowed is ten of them a second.
+func springAtRest(state: view SpringState, target: view Float, distance: view Float) ret Bool {
+  ret Math.abs(value: state.value - target) < distance and Math.abs(value: state.velocity) < distance * 10.0
+}

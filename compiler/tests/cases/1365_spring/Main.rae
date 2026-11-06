@@ -1,0 +1,171 @@
+# lib/Spring: the step is exact, so the path does not depend on the frame rate, a spring ends on its
+# target, and a new target carries on from the same place at the same speed.
+import Math
+open Spring
+
+# `seconds` of moving to `target` at `fps`
+func run(
+  state: mod SpringState
+  target: view Float
+  response: view Float
+  damping: view Float
+  fps: view Int
+  seconds: view Float
+) {
+  let frames: Int = (seconds * fps.toFloat()).toInt()
+  loop var i: Int = 0, i < frames, ++i {
+    springStep(
+      state: state
+      target: target
+      response: response
+      damping: damping
+      deltaTime: 1.0 / fps.toFloat()
+    )
+  }
+}
+
+# The highest value on the way to 100 from 0
+func peak(damping: view Float) ret Float {
+  var state: SpringState = { value: 0.0, velocity: 0.0 }
+  var highest: Float = 0.0
+  loop var i: Int = 0, i < 240, ++i {
+    springStep(
+      state: state
+      target: 100.0
+      response: 0.42
+      damping: damping
+      deltaTime: 1.0 / 120.0
+    )
+    highest = Math.max(a: highest, b: state.value)
+  }
+  ret highest
+}
+
+func main() {
+  # After 0.2 s of no bounce: 100 - 100 (1 + w t) e^(-w t), with w = 2 pi / 0.42, is 80. The same
+  # at every frame rate, and on its target after 2 s.
+  let rates: List(Int) = [30, 60, 120, 240]
+  loop let fps: view Int in rates {
+    var state: SpringState = { value: 0.0, velocity: 0.0 }
+    run(
+      state: state
+      target: 100.0
+      response: 0.42
+      damping: 1.0
+      fps: fps
+      seconds: 0.2
+    )
+    let middle: Int = Math.round(x: state.value).toInt()
+    run(
+      state: state
+      target: 100.0
+      response: 0.42
+      damping: 1.0
+      fps: fps
+      seconds: 1.8
+    )
+    log(
+      "{fps} fps: {middle} at 0.2 s, at rest {springAtRest(
+        state: state
+        target: 100.0
+        distance: 0.1
+      )}"
+    )
+  }
+  # One long frame lands where many short ones do
+  var longFrame: SpringState = { value: 0.0, velocity: 0.0 }
+  springStep(
+    state: longFrame
+    target: 100.0
+    response: 0.42
+    damping: 0.76
+    deltaTime: 0.25
+  )
+  var shortFrames: SpringState = { value: 0.0, velocity: 0.0 }
+  run(
+    state: shortFrames
+    target: 100.0
+    response: 0.42
+    damping: 0.76
+    fps: 240
+    seconds: 0.25
+  )
+  log("one frame and 60 agree: {Math.abs(value: longFrame.value - shortFrames.value) < 0.05}")
+
+  # Damping: below 1 bounces past the target (by e^(-pi d / sqrt(1 - d d)), 2.5% at 0.76), 1 and
+  # above never reach past it
+  log("peak at damping 0.76: {Math.round(x: peak(damping: 0.76)).toInt()}")
+  log(
+    "past the target at damping 1: {peak(damping: 1.0) > 100.0}, at 1.5: {peak(damping: 1.5) > 100.0}"
+  )
+  var slowSpring: SpringState = { value: 0.0, velocity: 0.0 }
+  run(
+    state: slowSpring
+    target: 100.0
+    response: 0.42
+    damping: 1.5
+    fps: 120
+    seconds: 4.0
+  )
+  log("damping 1.5 at rest: {springAtRest(state: slowSpring, target: 100.0, distance: 0.1)}")
+
+  # A new target mid-way: no jump in position, and it keeps going the way it was before it turns
+  var turning: SpringState = { value: 0.0, velocity: 0.0 }
+  run(
+    state: turning
+    target: 100.0
+    response: 0.42
+    damping: 1.0
+    fps: 120
+    seconds: 0.1
+  )
+  let before: SpringState = turning
+  springStep(
+    state: turning
+    target: 0.0
+    response: 0.42
+    damping: 1.0
+    deltaTime: 1.0 / 120.0
+  )
+  let moved: Float = turning.value - before.value
+  log(
+    "turning: speed {before.velocity > 0.0}, a frame moves it on {moved > 0.0}, by under a frame of its speed {moved < before.velocity / 120.0}"
+  )
+  run(
+    state: turning
+    target: 0.0
+    response: 0.42
+    damping: 1.0
+    fps: 120
+    seconds: 2.0
+  )
+  log("turned back and at rest: {springAtRest(state: turning, target: 0.0, distance: 0.1)}")
+
+  # The edges
+  var edges: SpringState = { value: 5.0, velocity: 3.0 }
+  springStep(
+    state: edges
+    target: 9.0
+    response: 0.42
+    damping: 1.0
+    deltaTime: 0.0
+  )
+  log("no time: {edges.value.toInt()}, {edges.velocity.toInt()}")
+  springStep(
+    state: edges
+    target: 9.0
+    response: 0.0
+    damping: 1.0
+    deltaTime: 0.016
+  )
+  log("no response: {edges.value.toInt()}, {edges.velocity.toInt()}")
+  var huge: SpringState = { value: 0.0, velocity: 0.0 }
+  springStep(
+    state: huge
+    target: 100.0
+    response: 0.42
+    damping: 0.76
+    deltaTime: 100.0
+  )
+  log("a huge step: {Math.round(x: huge.value).toInt()}")
+}

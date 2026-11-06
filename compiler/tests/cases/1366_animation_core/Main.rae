@@ -1,0 +1,605 @@
+# animationSystem's core (docs/ui-animation-design.md sections 2, 3, 5, 11). Nothing runs with no
+# track. A pose folds into the one world rectangle that paint and the hit test read. Channels run
+# on their own. A second command retargets. End actions, the testing settings and the motion tokens.
+# Time is handed in, so every number is known.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/Scene
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+
+func cardScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":400,\"h\":200\},\"Children\":[\"Row\"]\},\"Row\":\{\"Rect\":\{\"x\":20,\"y\":60,\"w\":360,\"h\":40\},\"OnClick\":\{\"actionId\":\"row\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func mount(world: mod UiWorld, uiSystems: mod UiSystems) {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardScene())
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func placed(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  let alpha: Float = worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).alpha
+  ret "{nodeId} {rect.x} {rect.y} {rect.w} {rect.h} alpha {alpha}"
+}
+
+func hitRow(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret Bool {
+  ret uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  ) is nodeOf(world: world, nodeId: "Row")
+}
+
+func steps(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  deltaTime: view Float
+  count: view Int
+) {
+  loop var i: Int = 0, i < count, ++i {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+}
+
+# Until nothing is in flight, at most 5 s of frames
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 300 and animationInFlight(uiSystems: uiSystems), ++i {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+}
+
+func counts(uiSystems: view UiSystems) ret String {
+  ret "{componentCount(this: uiSystems.animation.tracks)} tracks, {componentCount(
+    this: uiSystems.animation.poses
+  )} poses, in flight {animationInFlight(uiSystems: uiSystems)}"
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func riseFrom() ret AnimationPose {
+  ret AnimationPose { opacity: 0.0, scale: 0.5, y: 16.0 }
+}
+
+func idleRunsNothing() {
+  log("--- no track")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  var schedule: Schedule = createUiPipeline(world: world)
+  let firstRun: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )
+  let posesBefore: Int = componentTableGeneration(this: uiSystems.animation.poses)
+  let worldBefore: Int = componentTableGeneration(this: uiSystems.transform2d.worldTransforms)
+  loop var i: Int = 0, i < 5, ++i {
+    animationRun(world: world, uiSystems: uiSystems)
+  }
+  log(
+    "after 5 frames: {uiSystems.animation.updates} updates, {counts(uiSystems: uiSystems)}, the clock not read {uiSystems.animation.lastFrameNs is 0}"
+  )
+  log(
+    "tables untouched: {componentTableGeneration(this: uiSystems.animation.poses) is posesBefore and componentTableGeneration(
+      this: uiSystems.transform2d.worldTransforms
+    ) is worldBefore}"
+  )
+  log("transform runs again: {uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )}")
+  log(
+    "the entry: {schedule.entries.copyAtDefault(index: uiSystemAnimation).name}, then {schedule.entries.copyAtDefault(
+      index: uiSystemCamera
+    ).name}, {schedule.entries.copyAtDefault(index: uiSystemTransform).name}"
+  )
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Card"))
+}
+
+func poseFoldsAndEnds() {
+  log("--- a pose folds, channels run on their own, and it all ends")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  var schedule: Schedule = createUiPipeline(world: world)
+  let idleRun: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: card
+    from: riseFrom()
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  log("asked: {counts(uiSystems: uiSystems)}")
+  # The start pose before the first paint, no time gone. y 16 and scale 0.5 about the middle.
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("first frame: {counts(uiSystems: uiSystems)}")
+  log("transform sees it: {uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )}")
+  transformSystem(world: world, uiSystems: uiSystems)
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Row"))
+  log("hit where it is drawn: {hitRow(
+    world: world
+    uiSystems: uiSystems
+    x: 215.0
+    y: 200.0
+  )}, where it rests: {hitRow(
+    world: world
+    uiSystems: uiSystems
+    x: 125.0
+    y: 190.0
+  )}")
+  # The fade is 0.2 s and done by 0.25 s, while the spring still has a way to go
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.05
+    count: 5
+  )
+  let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: card)
+  log(
+    "at 0.25 s: opacity {pose.opacity}, still moving {pose.y > 0.1 and pose.scale < 1.0}, {counts(
+      uiSystems: uiSystems
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("ended: {counts(uiSystems: uiSystems)}")
+  transformSystem(world: world, uiSystems: uiSystems)
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Row"))
+  log("hit where it rests: {hitRow(
+    world: world
+    uiSystems: uiSystems
+    x: 125.0
+    y: 190.0
+  )}")
+  # Nothing more: no update, no table moved, and transform is clean once it has seen the end
+  let settled: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )
+  let updates: Int = uiSystems.animation.updates
+  let poses: Int = componentTableGeneration(this: uiSystems.animation.poses)
+  loop var i: Int = 0, i < 5, ++i {
+    animationRun(world: world, uiSystems: uiSystems)
+  }
+  log("after the end: {uiSystems.animation.updates - updates} updates, poses moved {componentTableGeneration(
+    this: uiSystems.animation.poses
+  ) is not poses}, transform runs {uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemTransform
+  )}")
+}
+
+func retargets() {
+  log("--- a second command retargets")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose { x: 100.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.016
+    count: 6
+  )
+  let before: Float = animationPoseOf(uiSystems: uiSystems, entityId: card).x
+  # Turn back. Taking the command moves nothing, and the speed it had carries it on at first.
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose {}
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  let taken: Float = animationPoseOf(uiSystems: uiSystems, entityId: card).x
+  log(
+    "one track {componentCount(this: uiSystems.animation.tracks) is 1}, no jump {Math.abs(
+      value: taken - before
+    ) < 0.001}, moving at all {before > 1.0}"
+  )
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.016
+    count: 1
+  )
+  log("carries on {animationPoseOf(uiSystems: uiSystems, entityId: card).x > before}")
+  settle(world: world, uiSystems: uiSystems)
+  log("back: {counts(uiSystems: uiSystems)}")
+  # Ending somewhere else: the track goes and the pose stays
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose { x: 50.0 }
+    motion: "quick"
+    opacityMotion: "quick"
+    delaySeconds: 0.0
+  )
+  settle(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log(
+    "stays at 50: {counts(uiSystems: uiSystems)}; {placed(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Card"
+    )}"
+  )
+  # From that pose, and home
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose {}
+    motion: "quick"
+    opacityMotion: "quick"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "starts from it: {Math.round(x: animationPoseOf(uiSystems: uiSystems, entityId: card).x).toInt()}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("home: {counts(uiSystems: uiSystems)}")
+  # A delay: the start pose holds, then it moves
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose { y: 16.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.1
+  )
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.05
+    count: 1
+  )
+  log("delayed: y {animationPoseOf(uiSystems: uiSystems, entityId: card).y}")
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.05
+    count: 2
+  )
+  log("after it: moved {animationPoseOf(uiSystems: uiSystems, entityId: card).y < 16.0}")
+}
+
+func leave(uiSystems: mod UiSystems, entityId: view EntityId, onEnd: view AnimationEnd) {
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: entityId
+    to: AnimationPose { opacity: 0.0, scale: 0.96 }
+    motion: "quick"
+    opacityMotion: "fadeOut"
+    delaySeconds: 0.0
+    onEnd: onEnd
+  )
+}
+
+func endActions() {
+  log("--- end actions")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  let row: EntityId = nodeOf(world: world, nodeId: "Row")
+  leave(uiSystems: uiSystems, entityId: card, onEnd: AnimationEnd.deactivate)
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.016
+    count: 2
+  )
+  log("leaving: active {active(world: world, entityId: card)}")
+  settle(world: world, uiSystems: uiSystems)
+  log("deactivate: active {active(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  componentSet(this: world.actives, entityId: card, data: Active { value: true })
+  # Coming back cancels the end
+  leave(uiSystems: uiSystems, entityId: card, onEnd: AnimationEnd.destroySubtree)
+  steps(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.016
+    count: 2
+  )
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose {}
+    motion: "quick"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("called back: alive {isAlive(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  leave(uiSystems: uiSystems, entityId: row, onEnd: AnimationEnd.destroy)
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "destroy: row alive {isAlive(world: world, entityId: row)}, card alive {isAlive(
+      world: world
+      entityId: card
+    )}, card children {componentView(this: world.childrens, entityId: card).ids.length}"
+  )
+  # A command on what is gone is nothing
+  leave(uiSystems: uiSystems, entityId: row, onEnd: AnimationEnd.destroy)
+  settle(world: world, uiSystems: uiSystems)
+  log("on a dead entity: {counts(uiSystems: uiSystems)}")
+  var other: UiWorld = createUiWorld()
+  var otherSystems: UiSystems = createUiSystems()
+  mount(world: other, uiSystems: otherSystems)
+  let otherCard: EntityId = nodeOf(world: other, nodeId: "Card")
+  let otherRow: EntityId = nodeOf(world: other, nodeId: "Row")
+  leave(uiSystems: otherSystems, entityId: otherCard, onEnd: AnimationEnd.destroySubtree)
+  settle(world: other, uiSystems: otherSystems)
+  log(
+    "destroySubtree: card alive {isAlive(world: other, entityId: otherCard)}, row alive {isAlive(
+      world: other
+      entityId: otherRow
+    )}, {counts(uiSystems: otherSystems)}"
+  )
+}
+
+func settings() {
+  log("--- RAE_ANIMATION and RAE_ANIMATION_HOLD")
+  let off: AnimationSettings = parseAnimationSettings(animation: "off", hold: "")
+  let slow: AnimationSettings = parseAnimationSettings(animation: "slow:5", hold: "")
+  let hold: AnimationSettings = parseAnimationSettings(animation: "", hold: "0.4")
+  log("parsed: off {off.off}, slow {slow.slow}, hold {hundredths(value: hold.hold)}")
+  let unset: AnimationSettings = parseAnimationSettings(animation: "", hold: "")
+  log("unset: off {unset.off}, slow {unset.slow}, hold below 0 {unset.hold < 0.0}")
+  let bad: AnimationSettings = parseAnimationSettings(animation: "fast", hold: "2")
+  let badSlow: AnimationSettings = parseAnimationSettings(animation: "slow:0", hold: "")
+  log("bad ones ignored: {bad.off} {bad.hold < 0.0} {badSlow.slow}")
+
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  uiSystems.animation.settings = off
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: card
+    from: riseFrom()
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("off, a play: {counts(uiSystems: uiSystems)}")
+  leave(uiSystems: uiSystems, entityId: card, onEnd: AnimationEnd.deactivate)
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("off, a leave: active {active(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  componentSet(this: world.actives, entityId: card, data: Active { value: true })
+
+  # Held at 40%: y 16 to 0 is 9.6, opacity 0 to 1 is 0.4, scale 0.5 to 1 is 0.7. It stays, and a
+  # host's settle does not wait for it.
+  uiSystems.animation.settings = hold
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: card
+    from: riseFrom()
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.5
+  )
+  log("held, asked: in flight {animationInFlight(uiSystems: uiSystems)}")
+  let updates: Int = uiSystems.animation.updates
+  animationRun(world: world, uiSystems: uiSystems)
+  var held: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: card)
+  log(
+    "held: y {hundredths(value: held.y)}, opacity {hundredths(value: held.opacity)}, scale {hundredths(
+      value: held.scale
+    )}; {counts(uiSystems: uiSystems)}"
+  )
+  loop var i: Int = 0, i < 5, ++i {
+    animationRun(world: world, uiSystems: uiSystems)
+  }
+  held = animationPoseOf(uiSystems: uiSystems, entityId: card)
+  log("still: y {hundredths(value: held.y)}, updates {uiSystems.animation.updates - updates}")
+
+  # A curve at a known place: easeOutCubic is 0.58 at a quarter of its time (0.05 s of 0.2 s), and
+  # 0.14 at a twentieth, which 0.05 s is when five times slower. A frame of 1 s counts as 0.05 s.
+  var plain: UiWorld = createUiWorld()
+  var plainSystems: UiSystems = createUiSystems()
+  mount(world: plain, uiSystems: plainSystems)
+  let plainCard: EntityId = nodeOf(world: plain, nodeId: "Card")
+  animationPlay(
+    uiSystems: plainSystems
+    entityId: plainCard
+    from: AnimationPose { opacity: 0.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: plain, uiSystems: plainSystems, deltaTime: 0.05)
+  log(
+    "normal: {hundredths(
+      value: animationPoseOf(uiSystems: plainSystems, entityId: plainCard).opacity
+    )}"
+  )
+  animationPlay(
+    uiSystems: plainSystems
+    entityId: plainCard
+    from: AnimationPose { opacity: 0.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  settle(world: plain, uiSystems: plainSystems)
+  plainSystems.animation.settings = slow
+  animationPlay(
+    uiSystems: plainSystems
+    entityId: plainCard
+    from: AnimationPose { opacity: 0.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: plain, uiSystems: plainSystems, deltaTime: 0.05)
+  log(
+    "slow:5: {hundredths(
+      value: animationPoseOf(uiSystems: plainSystems, entityId: plainCard).opacity
+    )}"
+  )
+  plainSystems.animation.settings = AnimationSettings {}
+  settle(world: plain, uiSystems: plainSystems)
+  animationPlay(
+    uiSystems: plainSystems
+    entityId: plainCard
+    from: AnimationPose { opacity: 0.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: plain, uiSystems: plainSystems, deltaTime: 1.0)
+  log(
+    "a long frame: {hundredths(
+      value: animationPoseOf(uiSystems: plainSystems, entityId: plainCard).opacity
+    )}"
+  )
+}
+
+func motionText(theme: view ResolvedTheme, name: view String) ret String {
+  if let token: MotionToken = themeMotion(theme: theme, name: name) {
+    ret "{name}: {token.kind} {hundredths(value: token.response)} {hundredths(value: token.damping)} {token.curve} {hundredths(
+      value: token.seconds
+    )}"
+  }
+  ret "{name}: none"
+}
+
+func motionTokens() {
+  log("--- motion tokens")
+  let empty: ResolvedTheme = createResolvedTheme()
+  let names: List(String) = [
+    "quick"
+    "smooth"
+    "lively"
+    "fadeIn"
+    "fadeOut"
+    "nope"
+  ]
+  loop let name: view String in names {
+    log(motionText(theme: empty, name: name))
+  }
+  let scene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"motion\":\{\"quick\":\{\"kind\":\"spring\",\"response\":0.1,\"damping\":0.5\},\"drift\":\{\"kind\":\"curve\",\"curve\":\"easeInQuad\",\"seconds\":1.5\},\"badCurve\":\{\"kind\":\"curve\",\"curve\":\"wobble\"\},\"badKind\":\{\"kind\":\"bounce\"\}\}\}"
+  )
+  let theme: ResolvedTheme = parseTheme(scene: scene)
+  log(motionText(theme: theme, name: "quick"))
+  log(motionText(theme: theme, name: "drift"))
+  log(motionText(theme: theme, name: "smooth"))
+  log(motionText(theme: theme, name: "badCurve"))
+  log(motionText(theme: theme, name: "badKind"))
+
+  # An unknown name is a diagnostic, never silent, and the motion still runs
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let before: Int = sceneDiagnosticCountOfKind(
+    diagnostics: world.sceneDiagnostics
+    kind: SceneDiagnosticKind.unknownToken
+  )
+  animationTo(
+    uiSystems: uiSystems
+    entityId: nodeOf(world: world, nodeId: "Card")
+    to: AnimationPose { x: 10.0 }
+    motion: "smoooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "unknown name: {sceneDiagnosticCountOfKind(
+      diagnostics: world.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    ) - before} diagnostic, it arrived {hundredths(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: nodeOf(world: world, nodeId: "Card")).x
+    )}"
+  )
+  if let diagnostic: view SceneDiagnostic = world.sceneDiagnostics.viewAt(
+    index: world.sceneDiagnostics.length - 1
+  ) {
+    log(diagnostic.message)
+  }
+}
+
+func main() {
+  idleRunsNothing()
+  poseFoldsAndEnds()
+  retargets()
+  endActions()
+  settings()
+  motionTokens()
+}
