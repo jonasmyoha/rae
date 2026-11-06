@@ -64,6 +64,7 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open app3d/FrameLog
+open app3d/AbTest
 open DrawStats
 open ShadowMapsRecords
 open Gpu2dCanvas
@@ -94,6 +95,8 @@ type WalkerRender {
   # RAE_FRAME_TIMING=1 (a device profile's runs)
   frameLog: FrameLog
   frameLogOn: Bool
+  # RAE_AB: features off by turns, to compare them in one launch (app3d/AbTest)
+  ab: AbTest
   # The cloud tier and its fallback (app3d/SettingsClouds)
   clouds: WalkerClouds
   # One resident-geometry line under RAE_FRAME_TIMING, after the first frame
@@ -244,25 +247,35 @@ func renderShadowPass(
     rows: palette
     jointCount: jointCount(sk: characterSystem.skeleton)
   )
-  if inputSystem.settings.shadows {
+  if inputSystem.settings.shadows and not renderSystem.ab.off.shadows {
     beginShadowPass(renderer: renderSystem.renderer, c: cascades)
-    drawTerrainPropsShadow(renderer: renderSystem.renderer, terrainSystem: terrainSystem)
+    drawTerrainPropsShadow(
+      renderer: renderSystem.renderer
+      terrainSystem: terrainSystem
+      off: renderSystem.ab.off
+    )
     renderSystem.renderer.passes.shadow.drawKind = DrawKind.referenceTree
     if let tree: view ReferenceTree = renderSystem.referenceTree {
       drawReferenceTreeShadow(tree: tree, renderer: renderSystem.renderer)
     }
     renderSystem.renderer.passes.shadow.drawKind = DrawKind.cubes
-    drawPhysicsCubesShadow(
-      renderer: renderSystem.renderer
-      batch: renderSystem.cubeBatch
-      physicsSystem: physicsSystem
-      world: world
-    )
+    if not renderSystem.ab.off.cubes {
+      drawPhysicsCubesShadow(
+        renderer: renderSystem.renderer
+        batch: renderSystem.cubeBatch
+        physicsSystem: physicsSystem
+        world: world
+      )
+    }
     renderSystem.renderer.passes.shadow.drawKind = DrawKind.characters
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: characterSystem.skeleton)
-    loop var sp: Int = 0, sp < walkerWorldPartCount(world: world), ++sp {
+    var shadowParts: Int = walkerWorldPartCount(world: world)
+    if renderSystem.ab.off.characters {
+      shadowParts = 0
+    }
+    loop var sp: Int = 0, sp < shadowParts, ++sp {
       let sh: MeshHandle = meshHandle(
         id: walkerWorldPartAt(world: world, i: sp).meshId
         generation: 1
@@ -360,24 +373,34 @@ func drawWalkerScene(
   t: copy Float
   grassCompute: mod GrassCompute
   resources: mod GpuResources
+  off: view AbSwitches
 ) {
   cache.drawKind = DrawKind.ground
-  drawTerrainGround(
+  if not off.ground {
+    drawTerrainGround(
+      cache: cache
+      resources: rendererResources
+      terrainSystem: terrainSystem
+      time: t
+    )
+  }
+  drawTerrainProps(
     cache: cache
     resources: rendererResources
     terrainSystem: terrainSystem
-    time: t
+    off: off
   )
-  drawTerrainProps(cache: cache, resources: rendererResources, terrainSystem: terrainSystem)
   cache.drawKind = DrawKind.cubes
-  drawPhysicsCubes(
-    cache: cache
-    resources: rendererResources
-    batch: cubeBatch
-    physicsSystem: physicsSystem
-    world: world
-    toon: characterSystem.toon
-  )
+  if not off.cubes {
+    drawPhysicsCubes(
+      cache: cache
+      resources: rendererResources
+      batch: cubeBatch
+      physicsSystem: physicsSystem
+      world: world
+      toon: characterSystem.toon
+    )
+  }
   cache.drawKind = DrawKind.characters
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderWalkerApp;
   # the hero's is re-written here into the cache's palette (slot 0).
@@ -389,7 +412,11 @@ func drawWalkerScene(
     jointCount: jc
     baseRow: 0
   )
-  loop var p: Int = 0, p < walkerWorldPartCount(world: world), ++p {
+  var parts: Int = walkerWorldPartCount(world: world)
+  if off.characters {
+    parts = 0
+  }
+  loop var p: Int = 0, p < parts, ++p {
     let part: view PartRoughness = walkerWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
@@ -419,10 +446,12 @@ func drawWalkerScene(
       batch: characterSystem.characterBatch
     )
   }
-  grassDraw(
-    grass: grassCompute
-    resources: resources
-    gbuffer: cache
-    gbufferResources: rendererResources
-  )
+  if not off.grass {
+    grassDraw(
+      grass: grassCompute
+      resources: resources
+      gbuffer: cache
+      gbufferResources: rendererResources
+    )
+  }
 }

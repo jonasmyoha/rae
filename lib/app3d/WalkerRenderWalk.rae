@@ -57,6 +57,7 @@ open Shadow3d
 open app3d/Playback
 open HotReload
 open DrawStats
+open app3d/AbTest
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/EventLoop
@@ -245,13 +246,18 @@ func renderWalkerApp(
 
   # The forest's trees near and in view, at their levels of detail, and the
   # small props, for both the shadow pass and the scene passes below
-  gatherForest(
-    terrainSystem: terrainSystem
-    camera: cameraSystem.camera
-    aspect: aspect
-    deltaTime: deltaTime
-  )
-  gatherTerrainProps(terrainSystem: terrainSystem, camera: cameraSystem.camera)
+  let off: AbSwitches = renderSystem.ab.off
+  if not off.forest {
+    gatherForest(
+      terrainSystem: terrainSystem
+      camera: cameraSystem.camera
+      aspect: aspect
+      deltaTime: deltaTime
+    )
+  }
+  if not off.props {
+    gatherTerrainProps(terrainSystem: terrainSystem, camera: cameraSystem.camera)
+  }
   # The grass is generated once, before the first scene pass draws it (the
   # G-buffer pass, or the forward frame's pre-pass or forward pass)
   var grassGenerated: Bool = false
@@ -283,7 +289,7 @@ func renderWalkerApp(
       case RenderTag.gbuffer {
         # The deferred G-buffer pass, or the forward frame's 1x depth + normal
         # pre-pass (forward-rae-6) the SSAO reads: the same draws
-        if not grassGenerated {
+        if not grassGenerated and not off.grass {
           generateWalkerGrass(
             cameraSystem: cameraSystem
             characterSystem: characterSystem
@@ -318,6 +324,7 @@ func renderWalkerApp(
             t: t
             grassCompute: grassCompute
             resources: resources
+            off: off
           )
           renderSystem.renderer.passes.gbuffer.drawKind = DrawKind.referenceTree
           if let tree: mod ReferenceTree = renderSystem.referenceTree {
@@ -330,18 +337,20 @@ func renderWalkerApp(
               light: cameraSystem.light
             )
           }
-          drawWalkerMarks(
-            cache: renderSystem.renderer.passes.gbuffer
-            resources: rendererResources
-            walkerMarks: walkerMarks
-            toon: characterSystem.toon
-          )
+          if not off.marks {
+            drawWalkerMarks(
+              cache: renderSystem.renderer.passes.gbuffer
+              resources: rendererResources
+              walkerMarks: walkerMarks
+              toon: characterSystem.toon
+            )
+          }
           Gbuffer.endPass(cache: renderSystem.renderer.passes.gbuffer, resources: rendererResources)
         }
       }
       case RenderTag.forward {
         # The forward frame's scene, shaded in one 4x MSAA pass (lib/RendererForward)
-        if not grassGenerated {
+        if not grassGenerated and not off.grass {
           generateWalkerGrass(
             cameraSystem: cameraSystem
             characterSystem: characterSystem
@@ -374,33 +383,40 @@ func renderWalkerApp(
             t: t
             grassCompute: grassCompute
             resources: resources
+            off: off
           )
-          drawWalkerMarks(
-            cache: renderSystem.renderer.passes.gbuffer
-            resources: rendererResources
-            walkerMarks: walkerMarks
-            toon: characterSystem.toon
-          )
+          if not off.marks {
+            drawWalkerMarks(
+              cache: renderSystem.renderer.passes.gbuffer
+              resources: rendererResources
+              walkerMarks: walkerMarks
+              toon: characterSystem.toon
+            )
+          }
         }
         endForwardPass(renderer: renderSystem.renderer)
       }
       case RenderTag.ssao {
-        renderDeferredPass(
-          renderer: renderSystem.renderer
-          tag: tag
-          camera: cameraSystem.camera
-          light: cameraSystem.light
-          aspect: aspect
-        )
+        if not off.ssao {
+          renderDeferredPass(
+            renderer: renderSystem.renderer
+            tag: tag
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            aspect: aspect
+          )
+        }
       }
       case RenderTag.depthPyramid {
-        renderDeferredPass(
-          renderer: renderSystem.renderer
-          tag: tag
-          camera: cameraSystem.camera
-          light: cameraSystem.light
-          aspect: aspect
-        )
+        if not off.depthPyramid {
+          renderDeferredPass(
+            renderer: renderSystem.renderer
+            tag: tag
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            aspect: aspect
+          )
+        }
       }
       case RenderTag.lighting {
         renderDeferredPass(
@@ -423,7 +439,9 @@ func renderWalkerApp(
       case RenderTag.waterFft {
         # The sea's FFT wave cascades for this frame (lib/water/IslandSea)
         if let sea: mod WaterSystem = waterSystem {
-          waterFftStep(waterSystem: sea, resources: resources)
+          if not off.water {
+            waterFftStep(waterSystem: sea, resources: resources)
+          }
         }
       }
       case RenderTag.underwater {
@@ -447,20 +465,22 @@ func renderWalkerApp(
       case RenderTag.transparentForward {
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
         # then the FFT sea (lib/water/IslandSea), then the splash droplets blend OVER it.
-        snapshotOpaque(renderer: renderSystem.renderer)
-        if let sea: mod WaterSystem = waterSystem {
-          if let meshResources: view GpuResources = renderSystem.renderer.gpuResources {
-            waterDraw(
-              waterSystem: sea
-              resources: resources
-              passes: renderSystem.renderer.passes
-              meshResources: meshResources
-              camera: cameraSystem.camera
-              light: cameraSystem.light
-              sky: renderSystem.renderer.sky
-              hasSky: renderSystem.renderer.hasSky
-              deltaTime: deltaTime
-            )
+        if not off.water {
+          snapshotOpaque(renderer: renderSystem.renderer)
+          if let sea: mod WaterSystem = waterSystem {
+            if let meshResources: view GpuResources = renderSystem.renderer.gpuResources {
+              waterDraw(
+                waterSystem: sea
+                resources: resources
+                passes: renderSystem.renderer.passes
+                meshResources: meshResources
+                camera: cameraSystem.camera
+                light: cameraSystem.light
+                sky: renderSystem.renderer.sky
+                hasSky: renderSystem.renderer.hasSky
+                deltaTime: deltaTime
+              )
+            }
           }
         }
         # Splash droplets fade by alpha through the transparent pass (#844).
@@ -482,13 +502,15 @@ func renderWalkerApp(
         )
       }
       case RenderTag.bloom {
-        renderDeferredPass(
-          renderer: renderSystem.renderer
-          tag: tag
-          camera: cameraSystem.camera
-          light: cameraSystem.light
-          aspect: aspect
-        )
+        if not off.bloom {
+          renderDeferredPass(
+            renderer: renderSystem.renderer
+            tag: tag
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            aspect: aspect
+          )
+        }
       }
       case RenderTag.antialias {
         renderDeferredPass(
