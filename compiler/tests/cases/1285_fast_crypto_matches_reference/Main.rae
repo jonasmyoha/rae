@@ -7,9 +7,11 @@
 # and points, and public keys, the same 32 bytes.
 #
 # Measured (Apple M1 Max, release build, 2026-11-03), from the timing at the
-# end (only a loose bound is in the expected output):
+# end (only a loose bound is in the expected output, on each path's best
+# round, so the verdict holds on a busy machine):
 #   seal + open a 1200-byte packet   Rae ~13 us, Monocypher ~6 us
 #   X25519                           Rae ~1.3 ms, Monocypher ~0.07 ms
+import Math
 open net/Wire
 open crypto/ChaCha20Poly1305
 open crypto/X25519
@@ -234,11 +236,14 @@ func main() ret Int {
   let plain: List(UInt8) = randomBytes(random: random, count: 1163)
   var sealed: List(UInt8) = List.create(UInt8, cap: 1200)
   var opened: List(UInt8) = List.create(UInt8, cap: 1200)
-  let rounds: Int = 200
-  var startNs: Int = nowNs()
-  loop var i: Int = 0, i < rounds, ++i {
+  # Each path's best round, with the two taking turns: other programs on the machine can only make a
+  # round slower, so the best one is the path's own speed, and neither path gets a quieter moment
+  var fastNs: Int = 9223372036854775807
+  var referenceNs: Int = 9223372036854775807
+  loop var i: Int = 0, i < 200, ++i {
     sealed.clear()
     opened.clear()
+    var startNs: Int = nowNs()
     aeadSeal(
       chacha: chacha
       key: key
@@ -252,7 +257,7 @@ func main() ret Int {
       plainCount: 1163
       output: sealed
     )
-    let ok: Bool = aeadOpen(
+    let fastOpened: Bool = aeadOpen(
       chacha: chacha
       key: key
       keyStart: 0
@@ -265,12 +270,10 @@ func main() ret Int {
       sealedCount: sealed.length
       output: opened
     )
-  }
-  let fastNs: Int = (nowNs() - startNs) / rounds
-  startNs = nowNs()
-  loop var i: Int = 0, i < rounds, ++i {
+    fastNs = Math.min(a: fastNs, b: nowNs() - startNs)
     sealed.clear()
     opened.clear()
+    startNs = nowNs()
     aeadSealReference(
       chacha: chacha
       key: key
@@ -284,7 +287,7 @@ func main() ret Int {
       plainCount: 1163
       output: sealed
     )
-    let ok: Bool = aeadOpenReference(
+    let referenceOpened: Bool = aeadOpenReference(
       chacha: chacha
       key: key
       keyStart: 0
@@ -297,17 +300,17 @@ func main() ret Int {
       sealedCount: sealed.length
       output: opened
     )
+    referenceNs = Math.min(a: referenceNs, b: nowNs() - startNs)
   }
-  let referenceNs: Int = (nowNs() - startNs) / rounds
   var shared: List(UInt8) = List.create(UInt8, cap: 32)
-  startNs = nowNs()
+  var fastX25519Ns: Int = 9223372036854775807
+  var referenceX25519Ns: Int = 9223372036854775807
   loop var i: Int = 0, i < 20, ++i {
+    var startNs: Int = nowNs()
     shared = x25519SharedSecret(secretKey: key, theirPublicKey: key)
-  }
-  let fastX25519Ns: Int = (nowNs() - startNs) / 20
-  startNs = nowNs()
-  loop var i: Int = 0, i < 20, ++i {
+    fastX25519Ns = Math.min(a: fastX25519Ns, b: nowNs() - startNs)
     shared.clear()
+    startNs = nowNs()
     x25519Reference(
       work: work
       scalar: key
@@ -316,8 +319,8 @@ func main() ret Int {
       pointStart: 0
       out: shared
     )
+    referenceX25519Ns = Math.min(a: referenceX25519Ns, b: nowNs() - startNs)
   }
-  let referenceX25519Ns: Int = (nowNs() - startNs) / 20
   if Sys.getEnv(name: "RAE_CRYPTO_TIMES").length() > 0 {
     log(
       "seal + open 1200 bytes: fast {fastNs / 1000} us, reference {referenceNs / 1000} us; x25519: fast {fastX25519Ns / 1000} us, reference {referenceX25519Ns / 1000} us"
