@@ -1,0 +1,220 @@
+# app3d/AbTest — compare features in one launch (docs/profiling.md). RAE_AB=<cases separated
+# by ;>, each case a comma list of switches named below, turned off for that case:
+#
+#   RAE_AB="shadows;forest,grass;ssao"
+#
+# Each case is held 9 s with a baseline (nothing off) before it, between every two and after
+# the last. The first 3 s of each are skipped. One line per phase, a table of the time saved
+# against each case's two neighboring baselines at the end, and the app ends. The neighbors
+# cancel a slow drift such as a phone heating up, with no restarts or tools. With RAE_AB unset
+# nothing is active, and the frame reads a few false Bools. The rules are pure: the app hands in
+# frame times and reads `test.off`.
+import Math
+
+const abHoldSeconds: Float = 9.0
+
+const abSkipSeconds: Float = 3.0
+
+const abSwitchNames: String = "shadows, forestShadows, props, ground, forest, grass, characters, cubes, marks, ssao, bloom, depthPyramid, water"
+
+# What is off in this phase. `props` is the rocks, the bushes and the meadow. `forest` and `props`
+# also stop their gathering and their shadows; `forestShadows` only the forest's shadows.
+type AbSwitches {
+  shadows: Bool = false
+  forestShadows: Bool = false
+  props: Bool = false
+  ground: Bool = false
+  forest: Bool = false
+  grass: Bool = false
+  characters: Bool = false
+  cubes: Bool = false
+  marks: Bool = false
+  ssao: Bool = false
+  bloom: Bool = false
+  depthPyramid: Bool = false
+  water: Bool = false
+}
+
+type AbCase {
+  name: String
+  off: AbSwitches
+}
+
+type AbTest {
+  # RAE_AB is set and holds cases
+  active: Bool
+  # All phases are over, or RAE_AB could not be read: the app ends
+  done: Bool
+  error: String
+  cases: List(AbCase)
+  phase: Int
+  phaseSeconds: Float
+  measuredSeconds: Float
+  measuredFrames: Int
+  # Average seconds a frame of each phase so far
+  phaseAverages: List(Float)
+  off: AbSwitches
+}
+
+# Sets the switch called `name` in `off`; false for no such switch
+func abSwitchOff(off: mod AbSwitches, name: view String) ret Bool {
+  if name is "shadows" {
+    off.shadows = true
+  } else if name is "forestShadows" {
+    off.forestShadows = true
+  } else if name is "props" {
+    off.props = true
+  } else if name is "ground" {
+    off.ground = true
+  } else if name is "forest" {
+    off.forest = true
+  } else if name is "grass" {
+    off.grass = true
+  } else if name is "characters" {
+    off.characters = true
+  } else if name is "cubes" {
+    off.cubes = true
+  } else if name is "marks" {
+    off.marks = true
+  } else if name is "ssao" {
+    off.ssao = true
+  } else if name is "bloom" {
+    off.bloom = true
+  } else if name is "depthPyramid" {
+    off.depthPyramid = true
+  } else if name is "water" {
+    off.water = true
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# Baselines round every case: the odd phases are the cases
+func abPhaseCount(test: view AbTest) ret Int {
+  ret test.cases.length * 2 + 1
+}
+
+func createAbTest(text: view String) ret AbTest {
+  var test: AbTest = {
+    active: false
+    done: false
+    error: ""
+    cases: {}
+    phase: 0
+    phaseSeconds: 0.0
+    measuredSeconds: 0.0
+    measuredFrames: 0
+    phaseAverages: {}
+    off: {}
+  }
+  loop let caseText: view String in text.split(sep: ";") {
+    var off: AbSwitches = {}
+    var name: String = ""
+    loop let part: view String in caseText.split(sep: ",") {
+      let switchName: String = part.trim()
+      if switchName.length() > 0 {
+        if abSwitchOff(off: off, name: switchName) is false {
+          test.error = "unknown switch \"{switchName}\""
+          test.done = true
+          log("[ab] error: {test.error}; the switches are {abSwitchNames}")
+          ret test
+        }
+        if name.length() > 0 {
+          name = "{name},"
+        }
+        name = "{name}{switchName}"
+      }
+    }
+    if name.length() > 0 {
+      test.cases.add(value: AbCase { name: name, off: off })
+    }
+  }
+  test.active = test.cases.length > 0
+  if test.active {
+    log(
+      "[ab] {test.cases.length} cases, {abPhaseCount(test: test)} phases of {abHoldSeconds.toInt()} s"
+    )
+  }
+  ret test
+}
+
+# `seconds` as milliseconds to a hundredth, with its sign ("-2.00")
+func abMillisecondsText(seconds: view Float) ret String {
+  var hundredths: Int = Math.round(x: seconds * 100000.0).toInt()
+  var sign: String = ""
+  if hundredths < 0 {
+    sign = "-"
+    hundredths = -hundredths
+  }
+  let fraction: Int = hundredths % 100
+  if fraction < 10 {
+    ret "{sign}{hundredths / 100}.0{fraction} ms"
+  }
+  ret "{sign}{hundredths / 100}.{fraction} ms"
+}
+
+func abPhaseName(test: view AbTest, phase: view Int) ret String {
+  if phase % 2 is 0 {
+    ret "baseline"
+  }
+  if let held: view AbCase = test.cases.viewAt(index: phase / 2) {
+    ret held.name
+  }
+  ret ""
+}
+
+func abLogTable(test: view AbTest) {
+  log("[ab] the time saved, against the baselines before and after each case:")
+  loop var i: Int = 0, i < test.cases.length, ++i {
+    let before: Float = test.phaseAverages.copyAtFallback(index: i * 2, fallback: 0.0)
+    let during: Float = test.phaseAverages.copyAtFallback(index: i * 2 + 1, fallback: 0.0)
+    let after: Float = test.phaseAverages.copyAtFallback(index: i * 2 + 2, fallback: 0.0)
+    log(
+      "[ab] {abPhaseName(test: test, phase: i * 2 + 1)}: {abMillisecondsText(seconds: during)}, baselines {abMillisecondsText(
+        seconds: before
+      )} and {abMillisecondsText(seconds: after)}, saved {abMillisecondsText(
+        seconds: (before + after) / 2.0 - during
+      )}"
+    )
+  }
+}
+
+# One frame that took `deltaTime` s under the current `test.off`. Read `test.off` after it for
+# the next frame, and `test.done` for the end.
+func abUpdate(test: mod AbTest, deltaTime: view Float) {
+  if test.active is false or test.done or deltaTime <= 0.0 {
+    ret
+  }
+  test.phaseSeconds = test.phaseSeconds + deltaTime
+  if test.phaseSeconds > abSkipSeconds {
+    test.measuredSeconds = test.measuredSeconds + deltaTime
+    test.measuredFrames = test.measuredFrames + 1
+  }
+  if test.phaseSeconds < abHoldSeconds {
+    ret
+  }
+  var average: Float = 0.0
+  if test.measuredFrames > 0 {
+    average = test.measuredSeconds / test.measuredFrames.toFloat()
+  }
+  test.phaseAverages.add(value: average)
+  log(
+    "[ab] {abPhaseName(test: test, phase: test.phase)}: {abMillisecondsText(seconds: average)} over {test.measuredFrames} frames"
+  )
+  test.phaseSeconds = 0.0
+  test.measuredSeconds = 0.0
+  test.measuredFrames = 0
+  test.off = {}
+  if test.phase + 1 >= abPhaseCount(test: test) {
+    test.done = true
+    abLogTable(test: test)
+    ret
+  }
+  test.phase = test.phase + 1
+  if test.phase % 2 is 1 {
+    if let held: view AbCase = test.cases.viewAt(index: test.phase / 2) {
+      test.off = held.off
+    }
+  }
+}

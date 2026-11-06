@@ -1,0 +1,54 @@
+# app3d/AbTest: RAE_AB's text, the schedule (a baseline between every two cases), the skipped
+# start of each phase and the table of time saved. Driven by made-up frame times, so every
+# number is known. A heating device is the point: the baselines drift, and a case is judged
+# against its own two neighbors.
+open app3d/AbTest
+
+# One whole phase: slow frames all through the part it must skip, then `frameMs` to its end
+func runPhase(test: mod AbTest, frameMs: view Float) {
+  let phase: Int = test.phase
+  loop test.phaseSeconds < abSkipSeconds - 0.1 {
+    abUpdate(test: test, deltaTime: 0.1)
+  }
+  loop test.phase is phase and test.done is false {
+    abUpdate(test: test, deltaTime: frameMs / 1000.0)
+  }
+}
+
+func main() {
+  # Unset: nothing is active and nothing is off
+  var unset: AbTest = createAbTest(text: "")
+  log("unset active {unset.active}, shadows off {unset.off.shadows}")
+  abUpdate(test: unset, deltaTime: 0.016)
+  log("unset after a frame: done {unset.done}, phase {unset.phase}")
+
+  # Unknown names are refused, not measured as nothing
+  let bad: AbTest = createAbTest(text: "shadows;shaddows")
+  log("bad: active {bad.active}, done {bad.done}, error \"{bad.error}\"")
+
+  # Every name
+  let all: AbTest = createAbTest(
+    text: "shadows;forestShadows;props;ground;forest;grass;characters;cubes;marks;ssao;bloom;depthPyramid;water"
+  )
+  log("all names: {all.cases.length} cases, error \"{all.error}\"")
+
+  # Two cases, the second with two switches; spaces and empty cases are forgiven
+  var test: AbTest = createAbTest(text: "ssao ; ; bloom, forest")
+  log("{test.cases.length} cases, active {test.active}, {abPhaseCount(test: test)} phases")
+  log("start: ssao off {test.off.ssao}")
+  # Baseline 1: 20 ms; its slow start must not count
+  runPhase(test: test, frameMs: 20.0)
+  log("case 1: phase {test.phase}, ssao off {test.off.ssao}, bloom off {test.off.bloom}")
+  runPhase(test: test, frameMs: 15.0)
+  log("baseline 2: phase {test.phase}, ssao off {test.off.ssao}")
+  # The device heated up: the baseline is slower now
+  runPhase(test: test, frameMs: 22.0)
+  log("case 2: phase {test.phase}, bloom {test.off.bloom}, forest {test.off.forest}")
+  runPhase(test: test, frameMs: 25.0)
+  log("baseline 3: phase {test.phase}, bloom off {test.off.bloom}, done {test.done}")
+  runPhase(test: test, frameMs: 24.0)
+  log("end: done {test.done}, bloom off {test.off.bloom}")
+  # A frame after the end changes nothing
+  abUpdate(test: test, deltaTime: 1.0)
+  log("still done {test.done}, phase {test.phase}")
+}

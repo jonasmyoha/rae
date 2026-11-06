@@ -78,6 +78,7 @@ open app3d/PlayerRoster
 open app3d/WalkerPhysics
 open app3d/WalkerMarks
 open app3d/FrameLog
+open app3d/AbTest
 open app3d/WalkerWorld
 open app3d/WalkerInput
 open app3d/WalkerCamera
@@ -372,8 +373,17 @@ func beginWalkerFrame(app: mod WalkerApp) {
   var deltaTime: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
   app.frame.now = now
-  # NO CLAMP before DRS: the scale controller reacts to the true frame time.
-  updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
+  # RAE_AB's phases, and the end of them. The render scale holds still meanwhile: it would
+  # hand the time a switch saves back as resolution.
+  if app.renderSystem.ab.active {
+    abUpdate(test: app.renderSystem.ab, deltaTime: deltaTime)
+  } else {
+    # NO CLAMP before DRS: the scale controller reacts to the true frame time.
+    updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
+  }
+  if app.renderSystem.ab.done {
+    app.frame.endRequested = true
+  }
   setDynamicRenderScale(renderer: app.renderSystem.renderer, scale: app.renderSystem.drs.scale)
   # the cloud tier: the quality's ceiling and the measured fallback (never
   # through the render scale above)
@@ -835,8 +845,8 @@ func updateWalkerApp(app: mod WalkerApp) {
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
   var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
-  if app.frame.taaSettleFrames > 0 {
-    needsRender = true  # only meaningful with TAA on
+  if app.frame.taaSettleFrames > 0 or app.renderSystem.ab.active {
+    needsRender = true  # TAA: only meaningful with it on. RAE_AB: a skipped frame is a wait.
   }
   app.frame.dbgDidWork = needsRender
   if needsRender {

@@ -120,6 +120,66 @@ logged.
 - **Not counted:** the water, what is drawn after the scene passes, and metaball casters. An app with
   its own frame loop gets no lines unless it calls `frameLogDraws`, and its draws are all `other`.
 
+## Comparing features in one launch: `RAE_AB`
+
+To learn what a feature costs, switch it off. `RAE_AB` does that in one launch of a walker app, on any
+device, with no restarts and no tools (app3d/AbTest):
+
+```sh
+RAE_FRESH_START=1 RAE_PRESENT_MODE=immediate \
+  RAE_AB="shadows;forest,grass;ssao" ./rae run examples/143_walker_forest/Main.rae
+```
+
+Cases are separated by `;`, and each is a comma list of what is off for that case. The app holds a
+baseline (nothing off), the first case, a baseline, the next case, and so on, ending on a baseline.
+Each is held 9 s, of which the first 3 s are skipped. One line a phase, then a table, and the app ends:
+
+```
+[ab] baseline: 15.78 ms over 382 frames
+[ab] forest,forestShadows,props,grass: 11.69 ms over 515 frames
+[ab] baseline: 16.07 ms over 375 frames
+[ab] the time saved, against the baselines before and after each case:
+[ab] forest,forestShadows,props,grass: 11.69 ms, baselines 15.78 ms and 16.07 ms, saved 4.24 ms
+```
+
+Each case is judged against the two baselines beside it, so a slow drift such as a phone heating up
+cancels. Those were real numbers, and that run's baselines moved by up to 1.8 ms: separate launches
+cannot see a saving of that size.
+
+| switch | what stops |
+|---|---|
+| `shadows` | the whole shadow pass (the lighting still samples the last shadow maps) |
+| `forestShadows` | the forest's shadows only |
+| `props` | the rocks, the bushes and the meadow: gathering, drawing and shadows |
+| `forest` | the forest: gathering, drawing and shadows |
+| `ground` | the ground's draws |
+| `grass` | the GPU grass: its compute and its draw |
+| `characters` | the characters' draws and shadows (their animation still runs) |
+| `cubes` | the physics cubes' draws and shadows |
+| `marks` | footprints, particles, rain and snow |
+| `ssao`, `bloom`, `depthPyramid` | that pass (what reads its result reads the last one) |
+| `water` | the FFT waves, the water's draw and the opaque snapshot it reads |
+
+An unknown name logs `[ab] error:` with the list, and the app ends at once. A new feature worth
+comparing gets a field in `AbSwitches`, a line in `abSwitchOff` and an `if` at its draw.
+
+**Reading it:**
+
+- **Say where to stand.** A saving depends on what is in view. A windowed run restores the walker's
+  saved place, which may have no trees in it, so `forest` would save nothing. `RAE_FRESH_START=1` starts
+  at the spawn. `RAE_WALKER_CAMERA` fixes the view.
+- **Uncap the frame.** With vsync a frame that fits the display's interval still takes the whole interval,
+  so a saving does not show. On a Mac use `RAE_PRESENT_MODE=immediate`. A phone over budget needs nothing.
+- **Learn the noise.** Add a case that does almost nothing (`marks`): what it "saves" is the noise of that
+  run. It was -0.07 ms in the run above, but savings under about 1 ms were noise on a busy machine. Close
+  other work first.
+- **A switch cannot find a cost outside its name.** With every switch off at once, a 4 megapixel Mac frame still
+  took 13 ms: the anti-aliasing, the lighting, the clouds and the UI have no switch.
+- **The dynamic resolution holds still** for the whole run, or it would hand a saving back as resolution, and
+  frames are always drawn, so a skipped frame does not count as a wait. A measured fall in the cloud tier
+  can still happen; it would show as a step in the baselines.
+- With `RAE_AB` unset the frame reads a few false Bools and nothing else changes.
+
 ## Adding zones to your own app
 
 ```rae
