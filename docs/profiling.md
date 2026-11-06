@@ -94,6 +94,48 @@ and the real payload for the Instruments pass (#524). The bindings already exist
 (`wgpuCommandEncoderWriteTimestamp`, `wgpuComputePassEncoderWriteTimestamp`), so
 this stays Rae-over-WebGPU with no new renderer C surface.
 
+## One command: profile a run and read the summary
+
+```sh
+tools/profile-desktop.sh examples/143_walker_forest/Main.rae 40      # this machine
+APP=<bundle id> tools/ios/profile-ios.sh <device id> 80              # a phone
+```
+
+Both print the same summary (`tools/profile-summary.py`), one block a place: the frames, the CPU
+time, what each pass drew and the GPU slots. So a comparison can start on the Mac. Both stop at the
+first run that fails and at a total time limit (`TOTAL_SECONDS`, 30 minutes), say so with a `STOPPED`
+line, summarize what they have and exit 1. A failed launch stops the phone's profile at once: a locked
+phone fails the same way at every place. Options are in each script's header.
+
+Compare the `scale` of two summaries before their times. Dynamic resolution stays on in a profile, so
+a run can settle at a lower scale: 143 on a Mac settled at 0.50, uncapped. `RAE_AB` holds the scale still.
+
+## What to trust
+
+**A `[gpu passes]` slot is not what a pass costs.** It is the time between two timestamps, and on a
+tile-based GPU (every phone, and an Apple Silicon Mac) a pass's vertex and tile work, and the GPU's
+idle time, land in later slots. On a phone a slot read "ssao 31 ms" while switching SSAO off saved
+1 ms. On a Mac, in one launch of 143 with nothing changed (2026-11-06):
+
+| what | read |
+|---|---|
+| the `underwater` slot, with the camera above the water | 178 to 3,607 us |
+| the `antialias` slot | 218 to 2,968 us |
+| SSAO off: its slot, the `lighting` slot, the frame | down 2.2 ms, up 1.5 ms, 0.11 ms saved |
+
+**A timestamp at each encoder's start and end does not fix it.** The clouds' passes have exactly that
+(`CloudTiming`, the `[clouds gpu]` line), and with nothing changed one pass read 395 to 5,751 us over
+one launch, and the tier's total read 0 to 6,859 us. So the other passes were not moved to it. That is
+measured on a Mac only, and on the clouds' passes only.
+
+| trust | for |
+|---|---|
+| `RAE_AB` | what a feature costs: the same case gave 1.54 and 1.82 ms in one launch |
+| the frame times of `[frames]` | whether a frame fits, over a whole run |
+| the `[draws]` counts | what was drawn: exact, checked against the renderer's own counters |
+| the `cpu` time of `[frame]` | the CPU's part of a frame |
+| a `[gpu passes]` slot | only a hint at where to look first; use `RAE_AB` before acting on one |
+
 ## What each pass drew: the `[draws]` lines
 
 `RAE_FRAME_TIMING=1` in a walker app logs, after each `[frames]` line (every 5 s), one line a pass
