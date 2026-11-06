@@ -328,7 +328,8 @@ func trackFromCommand(
   }
 }
 
-# Whether a child of a node is still moving: a leaving parent waits for its staggered children
+# Whether anything under a node is still moving: a leaving parent waits for its staggered children,
+# and a closing dialog's host for the card inside its slot
 func animationChildMoving(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -339,9 +340,11 @@ func animationChildMoving(
   }
   let children: view Children = componentView(this: world.childrens, entityId: entityId)
   loop var i: Int = 0, i < children.ids.length, ++i {
-    if componentHas(
-      this: uiSystems.animation.tracks
-      entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: uiSystems.animation.tracks, entityId: child) or animationChildMoving(
+      world: world
+      uiSystems: uiSystems
+      entityId: child
     ) {
       ret true
     }

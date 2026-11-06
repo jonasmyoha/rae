@@ -1,0 +1,500 @@
+# Dialog motion (docs/ui-animation-design.md section 9). The scrim and the card play from presenting
+# alone; a card with neither Appear nor Disappear gets dialogMotion. A close is two steps: closed
+# to the
+# app at once, and the host goes when its tracks end. A dialog under another steps back to 0.97.
+# The card
+# is 200 high on an 800 high screen, so its middle at 400 is the number to watch at every scale.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/AnimationComponents
+open ui/Components
+open ui/Dialog
+open ui/Ecs
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/dialogSystem/DialogSystem
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func cardScene(presentation: view String, extra: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{{extra}\"PageRoot\":\{\"id\":\"card\",\"presentation\":\"{presentation}\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Answer\"]\},\"Answer\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"OnClick\":\{\"actionId\":\"answer\",\"label\":\"Answer\"\}\}\}\}"
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+}
+
+func mountScreen(world: mod UiWorld, uiSystems: mod UiSystems) {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"Open\"]\},\"Open\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"open\",\"label\":\"Open\"\}\}\}\}"
+    )
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+}
+
+type Shown {
+  host: EntityId
+  card: EntityId
+}
+
+func present(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  pageId: view String
+  extra: view String
+  presentation: view String
+) ret Shown {
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardScene(presentation: presentation, extra: extra))
+    pageId: pageId
+  )
+  let host: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: pageId
+    overrides: emptyOverrides()
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  ret Shown { host: host, card: card }
+}
+
+func scrimOf(world: view UiWorld, host: view EntityId) ret EntityId {
+  ret componentView(this: world.childrens, entityId: host).ids.copyAtFallback(
+    index: 0
+    fallback: noEntity()
+  )
+}
+
+func percent(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func poseText(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+  ret "opacity {percent(value: pose.opacity)}% scale {percent(value: pose.scale)}%"
+}
+
+func middleY(uiSystems: view UiSystems, card: view EntityId) ret Float {
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: card
+  )
+  let cr: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: card)
+  ret wt.position.y + cr.size.y * wt.scale.y / 2.0
+}
+
+func hit(world: view UiWorld, uiSystems: view UiSystems, y: view Float) ret String {
+  let entityId: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: 200.0
+    y: y
+  )
+  if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) {
+    ret "{componentView(this: world.onClicks, entityId: entityId).actionId}"
+  }
+  ret "nothing"
+}
+
+func opening() {
+  log("--- opening")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountScreen(world: world, uiSystems: uiSystems)
+  let plain: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "one"
+    extra: ""
+    presentation: "dialog"
+  )
+  log(
+    "no scene change: card {poseText(uiSystems: uiSystems, entityId: plain.card)}, scrim {poseText(
+      uiSystems: uiSystems
+      entityId: scrimOf(world: world, host: plain.host)
+    )}"
+  )
+  log(
+    "input does not wait: the card's middle hits {hit(world: world, uiSystems: uiSystems, y: 400.0)}, beside it {hit(
+      world: world
+      uiSystems: uiSystems
+      y: 100.0
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {componentCount(this: uiSystems.animation.tracks)} tracks, {componentCount(
+      this: uiSystems.animation.poses
+    )} poses"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: plain.host)
+  settle(world: world, uiSystems: uiSystems)
+  let authored: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "two"
+    extra: "\"Appear\":\{\"scale\":0.5\},"
+    presentation: "dialog"
+  )
+  log(
+    "the card's own Appear: {poseText(uiSystems: uiSystems, entityId: authored.card)}, no Disappear added: {componentHas(
+      this: world.disappears
+      entityId: authored.card
+    ) is false}"
+  )
+}
+
+func closing() {
+  log("--- closing")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountScreen(world: world, uiSystems: uiSystems)
+  let first: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "one"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  let screenButton: String = hit(world: world, uiSystems: uiSystems, y: 50.0)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: first.host)
+  log(
+    "closed to the app: count {presentedPageCount(world: world)}, the screen is free {presentedPageBlocks(
+      world: world
+      uiSystems: uiSystems
+      entityId: first.host
+    ) is false}, node ids gone {isNone(this: nodeOfPage(world: world, pageId: "one")) is true}"
+  )
+  log(
+    "still there: host alive {isAlive(world: world, entityId: first.host)}, Leaving {componentHas(
+      this: world.leavings
+      entityId: first.host
+    )}"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: first.host)
+  log("a second close changes nothing: host alive {isAlive(world: world, entityId: first.host)}")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "before the scrim was hit {screenButton}; now the screen's button: {hit(
+      world: world
+      uiSystems: uiSystems
+      y: 50.0
+    )}, where the card was: {hit(world: world, uiSystems: uiSystems, y: 400.0)}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.1)
+  log("0.1 s later: the card {poseText(uiSystems: uiSystems, entityId: first.card)}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "ended: host alive {isAlive(world: world, entityId: first.host)}, card alive {isAlive(
+      world: world
+      entityId: first.card
+    )}, {componentCount(this: uiSystems.animation.tracks)} tracks"
+  )
+
+  log("--- a new one while the old one closes, on the same page id")
+  let old: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "one"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  let oldScrim: EntityId = scrimOf(world: world, host: old.host)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: old.host)
+  let next: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "one"
+    extra: ""
+    presentation: "dialog"
+  )
+  log(
+    "count {presentedPageCount(world: world)}; the new card's node {nodeOfPage(
+      world: world
+      pageId: "one"
+    ) is next.card}; its button hits {hit(world: world, uiSystems: uiSystems, y: 400.0)}"
+  )
+  # The dimming of two scrims over each other, as a share of one: it must not drop and come back
+  let nextScrim: EntityId = scrimOf(world: world, host: next.host)
+  var lowest: Float = 1.0
+  loop var i: Int = 0, i < 60, ++i {
+    if isAlive(world: world, entityId: oldScrim) {
+      let a: Float = 140.0 / 255.0
+      let share: Float = (1.0 - (1.0 - a * animationPoseOf(uiSystems: uiSystems, entityId: oldScrim).opacity) * (1.0 - a * animationPoseOf(
+        uiSystems: uiSystems
+        entityId: nextScrim
+      ).opacity)) / a
+      lowest = Math.min(a: lowest, b: share)
+    }
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log(
+    "the dimming never fell below {percent(value: lowest)}% of one scrim; old host alive {isAlive(
+      world: world
+      entityId: old.host
+    )}, new {isAlive(world: world, entityId: next.host)}"
+  )
+
+  log("--- a close before anyone saw it, a page, off")
+  closePresentedPage(world: world, uiSystems: uiSystems, host: next.host)
+  settle(world: world, uiSystems: uiSystems)
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardScene(presentation: "dialog", extra: ""))
+    pageId: "unseen"
+  )
+  let unseen: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: "unseen"
+    overrides: emptyOverrides()
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: unseen)
+  log(
+    "never seen: gone at once {isAlive(world: world, entityId: unseen) is false}, flying {componentCount(
+      this: uiSystems.animation.tracks
+    )}"
+  )
+  let page: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "page"
+    extra: ""
+    presentation: "page"
+  )
+  log("a page has no motion here yet: {componentCount(this: uiSystems.animation.tracks)} tracks")
+  settle(world: world, uiSystems: uiSystems)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: page.host)
+  log("closed: gone at once {isAlive(world: world, entityId: page.host) is false}")
+  let leaving: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "page"
+    extra: "\"Disappear\":\{\},"
+    presentation: "page"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: leaving.host)
+  log(
+    "a page with its own Disappear stays for it: {isAlive(world: world, entityId: leaving.host)}, no scrim {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: leaving.card
+    ) is false}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("then gone: {isAlive(world: world, entityId: leaving.host) is false}")
+  let action: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "act"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  eventSend(this: world.uiActions, value: UiAction { entityId: action.card, actionId: "answer" })
+  log(
+    "its own action closes it: {dialogSystem(world: world, uiSystems: uiSystems)}, count {presentedPageCount(
+      world: world
+    )}, host alive {isAlive(world: world, entityId: action.host)}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  let off: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "off"
+    extra: ""
+    presentation: "dialog"
+  )
+  log("off, opened: card {poseText(uiSystems: uiSystems, entityId: off.card)}")
+  closePresentedPage(world: world, uiSystems: uiSystems, host: off.host)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "off, closed: host alive {isAlive(world: world, entityId: off.host)}, {componentCount(
+      this: uiSystems.animation.tracks
+    )} tracks"
+  )
+  uiSystems.animation.settings = parseAnimationSettings(animation: "", hold: "0.5")
+  let held: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "held"
+    extra: ""
+    presentation: "dialog"
+  )
+  log(
+    "hold 0.5, opened: card {poseText(uiSystems: uiSystems, entityId: held.card)}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+}
+
+func nodeOfPage(world: view UiWorld, pageId: view String) ret EntityId {
+  if let index: Int = findNodeInPage(world: world, pageId: pageId, nodeId: "Card") {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func stacked() {
+  log("--- a dialog over a dialog")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountScreen(world: world, uiSystems: uiSystems)
+  let under: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "under"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  let over: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "over"
+    extra: ""
+    presentation: "dialog"
+  )
+  log("the one under starts where it was: {poseText(uiSystems: uiSystems, entityId: under.card)}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled under the other: {poseText(uiSystems: uiSystems, entityId: under.card)}; the top one {poseText(
+      uiSystems: uiSystems
+      entityId: over.card
+    )}; its middle at {middleY(uiSystems: uiSystems, card: under.card)}"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: over.host)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "the top one closes: count {presentedPageCount(world: world)}, the one under starts back from {poseText(
+      uiSystems: uiSystems
+      entityId: under.card
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {componentCount(this: uiSystems.animation.poses)} poses, the top host alive {isAlive(
+      world: world
+      entityId: over.host
+    )}"
+  )
+  let third: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "third"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: under.host)
+  log(
+    "closing the one under leaves the top one alone: count {presentedPageCount(world: world)}, {poseText(
+      uiSystems: uiSystems
+      entityId: third.card
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: third.host)
+  settle(world: world, uiSystems: uiSystems)
+  let covered: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "covered"
+    extra: ""
+    presentation: "dialog"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  let full: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "full"
+    extra: ""
+    presentation: "page"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("a full page over a dialog: {poseText(uiSystems: uiSystems, entityId: covered.card)}")
+}
+
+func placed(options: view String, label: view String) {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountScreen(world: world, uiSystems: uiSystems)
+  let shown: Shown = present(
+    world: world
+    uiSystems: uiSystems
+    pageId: "one"
+    extra: options
+    presentation: "dialog"
+  )
+  if dialogPlaceSystem(world: world, uiSystems: uiSystems) {
+    transformSystem(world: world, uiSystems: uiSystems)
+  }
+  let start: Float = middleY(uiSystems: uiSystems, card: shown.card)
+  let startScale: Int = percent(
+    value: animationPoseOf(uiSystems: uiSystems, entityId: shown.card).scale
+  )
+  loop var i: Int = 0, i < 3, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  let during: Float = middleY(uiSystems: uiSystems, card: shown.card)
+  let duringScale: Int = percent(
+    value: animationPoseOf(uiSystems: uiSystems, entityId: shown.card).scale
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "{label}: middle at {Math.round(x: start)} at scale {startScale}%, {Math.round(x: during)} at {duringScale}%, {Math.round(
+      x: middleY(uiSystems: uiSystems, card: shown.card)
+    )} at rest"
+  )
+}
+
+func placements() {
+  log("--- placement, at every scale")
+  placed(options: "", label: "center")
+  placed(options: "\"DialogOptions\":\{\"placement\":\"bottom\"\},", label: "bottom")
+  placed(options: "\"DialogOptions\":\{\"placement\":\"at\",\"at\":0.25\},", label: "at 0.25")
+}
+
+func main() {
+  opening()
+  closing()
+  stacked()
+  placements()
+}
