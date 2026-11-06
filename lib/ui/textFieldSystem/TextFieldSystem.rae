@@ -140,7 +140,10 @@ func focusTextField(world: mod UiWorld, entityId: view EntityId) ret Bool {
   let count: Int = componentCount(this: world.textFields)
   loop var i: Int = 0, i < count, ++i {
     let fieldEntityId: EntityId = componentEntityAt(this: world.textFields, i: i)
-    let wanted: Bool = fieldEntityId is entityId
+    let wanted: Bool = fieldEntityId is entityId and componentHas(
+      this: world.leavings
+      entityId: entityId
+    ) is false
     if componentView(this: world.textFields, entityId: fieldEntityId).focused is not wanted {
       componentMod(this: world.textFields, entityId: fieldEntityId).focused = wanted
       changed = true

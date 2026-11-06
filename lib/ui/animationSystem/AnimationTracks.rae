@@ -18,12 +18,14 @@ open ui/ScenePolicy
 open ui/ThemeResolved
 open ui/UiSystems
 open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTriggers
 
 # Each world steps by the real frame time, but never more than this: a long frame slows a motion and
 # never skips it
 const animationMaxStep: Float = 0.05
 
-const animationFirstStep: Float = 0.016667
+# No time passes on a motion's first frame, so its start pose is what the first paint shows
+const animationFirstStep: Float = 0.0
 
 # The motion an unknown name falls back to, after its diagnostic
 const animationFallbackMotion: String = "smooth"
@@ -67,8 +69,8 @@ func animationSettingsFromEnv() ret AnimationSettings {
 
 # True while something moves or waits to start. A held animation is not in flight: it has stopped,
 # and a test may take its picture.
-func animationInFlight(uiSystems: view UiSystems) ret Bool {
-  if queueIsEmpty(this: uiSystems.animation.commands) is false {
+func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  if world.animationRequests.length > 0 or queueIsEmpty(this: uiSystems.animation.commands) is false {
     ret true
   }
   ret uiSystems.animation.settings.hold < 0.0 and componentCount(this: uiSystems.animation.tracks) > 0
@@ -241,6 +243,27 @@ func trackFromCommand(
   }
 }
 
+# Whether a child of a node is still moving: a leaving parent waits for its staggered children
+func animationChildMoving(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  if componentHas(this: world.childrens, entityId: entityId) is false {
+    ret false
+  }
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    if componentHas(
+      this: uiSystems.animation.tracks
+      entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
+    ) {
+      ret true
+    }
+  }
+  ret false
+}
+
 # The real end of a track: its end action, and the pose goes unless the node stays somewhere else
 func animationFinish(
   world: mod UiWorld
@@ -250,6 +273,7 @@ func animationFinish(
   pose: view AnimationPose
 ) {
   componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
+  componentRemove(this: world.leavings, entityId: entityId)
   if onEnd is AnimationEnd.stay and poseIsRest(pose: pose) is false {
     componentSet(this: uiSystems.animation.poses, entityId: entityId, data: pose)
     ret
@@ -257,6 +281,16 @@ func animationFinish(
   componentRemove(this: uiSystems.animation.poses, entityId: entityId)
   if onEnd is AnimationEnd.deactivate {
     componentSet(this: world.actives, entityId: entityId, data: Active { value: false })
+    # Its children's poses from a staggered leave: they are hidden now, and rest for next time
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
+      loop var i: Int = 0, i < children.ids.length, ++i {
+        componentRemove(
+          this: uiSystems.animation.poses
+          entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
+        )
+      }
+    }
   } else if onEnd is AnimationEnd.destroy {
     unlinkFromCurrent(
       parents: uiSystems.hierarchy.parents
@@ -385,7 +419,14 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
         data: poseOfTrack(track: track)
       )
       if opacityDone and scaleDone and xDone and yDone and rotationDone {
-        ended.add(value: entityId)
+        let waits: Bool = track.phase is AnimationPhase.leaving and animationChildMoving(
+          world: world
+          uiSystems: uiSystems
+          entityId: entityId
+        )
+        if not waits {
+          ended.add(value: entityId)
+        }
       }
     }
   }
@@ -409,7 +450,8 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
 # The `animation` Pipeline entry, between fit and transform: an update by the real frame time when
 # something is in flight, and nothing at all, not even a read of the clock, when not
 func animationRun(world: mod UiWorld, uiSystems: mod UiSystems) {
-  if animationInFlight(uiSystems: uiSystems) is false {
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) is false {
     uiSystems.animation.lastFrameNs = 0
     ret
   }

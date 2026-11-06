@@ -82,15 +82,15 @@ func steps(
 
 # Until nothing is in flight, at most 5 s of frames
 func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
-  loop var i: Int = 0, i < 300 and animationInFlight(uiSystems: uiSystems), ++i {
+  loop var i: Int = 0, i < 300 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
     animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
   }
 }
 
-func counts(uiSystems: view UiSystems) ret String {
+func counts(world: view UiWorld, uiSystems: view UiSystems) ret String {
   ret "{componentCount(this: uiSystems.animation.tracks)} tracks, {componentCount(
     this: uiSystems.animation.poses
-  )} poses, in flight {animationInFlight(uiSystems: uiSystems)}"
+  )} poses, in flight {animationInFlight(world: world, uiSystems: uiSystems)}"
 }
 
 func hundredths(value: view Float) ret Int {
@@ -119,7 +119,10 @@ func idleRunsNothing() {
     animationRun(world: world, uiSystems: uiSystems)
   }
   log(
-    "after 5 frames: {uiSystems.animation.updates} updates, {counts(uiSystems: uiSystems)}, the clock not read {uiSystems.animation.lastFrameNs is 0}"
+    "after 5 frames: {uiSystems.animation.updates} updates, {counts(
+      world: world
+      uiSystems: uiSystems
+    )}, the clock not read {uiSystems.animation.lastFrameNs is 0}"
   )
   log(
     "tables untouched: {componentTableGeneration(this: uiSystems.animation.poses) is posesBefore and componentTableGeneration(
@@ -161,10 +164,10 @@ func poseFoldsAndEnds() {
     opacityMotion: "fadeIn"
     delaySeconds: 0.0
   )
-  log("asked: {counts(uiSystems: uiSystems)}")
+  log("asked: {counts(world: world, uiSystems: uiSystems)}")
   # The start pose before the first paint, no time gone. y 16 and scale 0.5 about the middle.
   animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
-  log("first frame: {counts(uiSystems: uiSystems)}")
+  log("first frame: {counts(world: world, uiSystems: uiSystems)}")
   log("transform sees it: {uiShouldRun(
     schedule: schedule
     world: world
@@ -195,11 +198,12 @@ func poseFoldsAndEnds() {
   let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: card)
   log(
     "at 0.25 s: opacity {pose.opacity}, still moving {pose.y > 0.1 and pose.scale < 1.0}, {counts(
+      world: world
       uiSystems: uiSystems
     )}"
   )
   settle(world: world, uiSystems: uiSystems)
-  log("ended: {counts(uiSystems: uiSystems)}")
+  log("ended: {counts(world: world, uiSystems: uiSystems)}")
   transformSystem(world: world, uiSystems: uiSystems)
   log(placed(world: world, uiSystems: uiSystems, nodeId: "Card"))
   log(placed(world: world, uiSystems: uiSystems, nodeId: "Row"))
@@ -276,7 +280,7 @@ func retargets() {
   )
   log("carries on {animationPoseOf(uiSystems: uiSystems, entityId: card).x > before}")
   settle(world: world, uiSystems: uiSystems)
-  log("back: {counts(uiSystems: uiSystems)}")
+  log("back: {counts(world: world, uiSystems: uiSystems)}")
   # Ending somewhere else: the track goes and the pose stays
   animationTo(
     uiSystems: uiSystems
@@ -289,7 +293,7 @@ func retargets() {
   settle(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
   log(
-    "stays at 50: {counts(uiSystems: uiSystems)}; {placed(
+    "stays at 50: {counts(world: world, uiSystems: uiSystems)}; {placed(
       world: world
       uiSystems: uiSystems
       nodeId: "Card"
@@ -309,7 +313,7 @@ func retargets() {
     "starts from it: {Math.round(x: animationPoseOf(uiSystems: uiSystems, entityId: card).x).toInt()}"
   )
   settle(world: world, uiSystems: uiSystems)
-  log("home: {counts(uiSystems: uiSystems)}")
+  log("home: {counts(world: world, uiSystems: uiSystems)}")
   # A delay: the start pose holds, then it moves
   animationPlay(
     uiSystems: uiSystems
@@ -363,7 +367,12 @@ func endActions() {
   )
   log("leaving: active {active(world: world, entityId: card)}")
   settle(world: world, uiSystems: uiSystems)
-  log("deactivate: active {active(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  log(
+    "deactivate: active {active(world: world, entityId: card)}, {counts(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
   componentSet(this: world.actives, entityId: card, data: Active { value: true })
   # Coming back cancels the end
   leave(uiSystems: uiSystems, entityId: card, onEnd: AnimationEnd.destroySubtree)
@@ -382,7 +391,12 @@ func endActions() {
     delaySeconds: 0.0
   )
   settle(world: world, uiSystems: uiSystems)
-  log("called back: alive {isAlive(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  log(
+    "called back: alive {isAlive(world: world, entityId: card)}, {counts(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
   leave(uiSystems: uiSystems, entityId: row, onEnd: AnimationEnd.destroy)
   settle(world: world, uiSystems: uiSystems)
   log(
@@ -394,7 +408,7 @@ func endActions() {
   # A command on what is gone is nothing
   leave(uiSystems: uiSystems, entityId: row, onEnd: AnimationEnd.destroy)
   settle(world: world, uiSystems: uiSystems)
-  log("on a dead entity: {counts(uiSystems: uiSystems)}")
+  log("on a dead entity: {counts(world: world, uiSystems: uiSystems)}")
   var other: UiWorld = createUiWorld()
   var otherSystems: UiSystems = createUiSystems()
   mount(world: other, uiSystems: otherSystems)
@@ -406,7 +420,7 @@ func endActions() {
     "destroySubtree: card alive {isAlive(world: other, entityId: otherCard)}, row alive {isAlive(
       world: other
       entityId: otherRow
-    )}, {counts(uiSystems: otherSystems)}"
+    )}, {counts(world: other, uiSystems: otherSystems)}"
   )
 }
 
@@ -436,10 +450,15 @@ func settings() {
     delaySeconds: 0.0
   )
   animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
-  log("off, a play: {counts(uiSystems: uiSystems)}")
+  log("off, a play: {counts(world: world, uiSystems: uiSystems)}")
   leave(uiSystems: uiSystems, entityId: card, onEnd: AnimationEnd.deactivate)
   animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
-  log("off, a leave: active {active(world: world, entityId: card)}, {counts(uiSystems: uiSystems)}")
+  log(
+    "off, a leave: active {active(world: world, entityId: card)}, {counts(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
   componentSet(this: world.actives, entityId: card, data: Active { value: true })
 
   # Held at 40%: y 16 to 0 is 9.6, opacity 0 to 1 is 0.4, scale 0.5 to 1 is 0.7. It stays, and a
@@ -453,14 +472,14 @@ func settings() {
     opacityMotion: "fadeIn"
     delaySeconds: 0.5
   )
-  log("held, asked: in flight {animationInFlight(uiSystems: uiSystems)}")
+  log("held, asked: in flight {animationInFlight(world: world, uiSystems: uiSystems)}")
   let updates: Int = uiSystems.animation.updates
   animationRun(world: world, uiSystems: uiSystems)
   var held: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: card)
   log(
     "held: y {hundredths(value: held.y)}, opacity {hundredths(value: held.opacity)}, scale {hundredths(
       value: held.scale
-    )}; {counts(uiSystems: uiSystems)}"
+    )}; {counts(world: world, uiSystems: uiSystems)}"
   )
   loop var i: Int = 0, i < 5, ++i {
     animationRun(world: world, uiSystems: uiSystems)

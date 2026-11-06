@@ -236,7 +236,7 @@ current value and velocity. That one rule gives interruption everywhere.
 must be written before the transform pass reads it. The `transform` entry adds
 `animationPoses` to its reads, so its dirty check still works.
 
-**In flight.** `animationInFlight(uiSystems)` is true while a track exists and is fed
+**In flight.** `animationInFlight(world, uiSystems)` is true while a track exists or a request waits, and is fed
 to `animating` in the host's wait (lib/ui/EventLoop.rae says a source that forgets this
 flag starves). When it is false, no animation code runs.
 
@@ -408,6 +408,19 @@ somewhere else; its next motion starts from there. Under a hold a track is not i
 settle does not wait for it. The hosts that run `animationRun` and feed the wait are app3d/UiShell, 106,
 121, 104 and the walkers. 105 and app3d's other hosts join when a scene of theirs first animates.
 Nothing starts a track on its own yet: `Appear` and the triggers are the next step.
+
+**Built in 0.3.20:** `Appear`, `Disappear`, `Stagger`, `Leaving`, `setActiveAnimated`, `destroyAnimated` and
+the bundles, in `ui/AnimationComponents` and `AnimationTriggers.rae`. What the code decided:
+
+- `Appear` plays when a node comes to be *shown*, by its own `Active` or a parent's, and not while a parent is
+  shut, so a page's rows play when the page opens.
+- `setActiveAnimated` takes only the world, as written above, so an override can call it: the requests wait on the
+  world, and `animationInFlight` takes the world too and counts them. A node not yet looked at has just been mounted,
+  and acts at once.
+- "Visible" in a stagger means overlapping the parent's box. A scrolling list's rows overlap their tall content
+  parent, so the list step has to say what its window is.
+- `pressable` is `pressedScale` only until `HoverScale` has its motion token (step 11), and `glideOnChange` comes
+  with `AnimateLayout` (step 4).
 
 ## 11. Testing
 

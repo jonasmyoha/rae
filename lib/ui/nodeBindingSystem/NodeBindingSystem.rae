@@ -6,6 +6,7 @@
 open ecs/Entity
 open ecs/ComponentTable
 open ui/Ecs
+open ui/animationSystem/AnimationTriggers
 open ui/Components
 open ui/NodeBinding
 
@@ -38,8 +39,7 @@ func bindNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
   }
   let bound: BoundActive = { value: value }
   componentSet(this: world.boundActives, entityId: entityId, data: bound)
-  let active: Active = { value: value }
-  componentSet(this: world.actives, entityId: entityId, data: active)
+  setActiveAnimated(world: world, entityId: entityId, active: value)
 }
 
 # Write every binding into its node again (a node whose page was taken down
@@ -60,8 +60,7 @@ func applyNodeBindings(world: mod UiWorld) {
     let entityId: EntityId = componentEntityAt(this: world.boundActives, i: i)
     if isAlive(world: world, entityId: entityId) {
       let bound: view BoundActive = componentView(this: world.boundActives, entityId: entityId)
-      let active: Active = { value: bound.value }
-      componentSet(this: world.actives, entityId: entityId, data: active)
+      setActiveAnimated(world: world, entityId: entityId, active: bound.value)
     }
   }
 }

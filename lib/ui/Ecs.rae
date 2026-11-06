@@ -24,6 +24,7 @@ open ecs/hierarchySystem/HierarchySystem
 import ui/MsdfState
 open ui/BindingComponents
 open ui/InputComponents
+open ui/AnimationComponents
 open collections/StringMap
 open ui/TouchStick
 open ui/NodeBinding
@@ -102,6 +103,12 @@ type UiWorld {
   cornerRadiuses: ComponentTable(CornerRadius)
   bundleRefs: ComponentTable(BundleRefs)
   hoverScales: ComponentTable(HoverScale)
+  # How a node arrives and leaves (ui/AnimationComponents); the last two are runtime
+  appears: ComponentTable(Appear)
+  disappears: ComponentTable(Disappear)
+  staggers: ComponentTable(Stagger)
+  leavings: ComponentTable(Leaving)
+  appearSeens: ComponentTable(AppearSeen)
   gradientFills: ComponentTable(GradientFill)
   radialGradientFills: ComponentTable(RadialGradientFill)
   valueSliders: ComponentTable(ValueSlider)
@@ -254,6 +261,8 @@ type UiWorld {
   # deliberately kept); and destroyed entities whose index is NOT recycled
   # until the app has cleared its own tables and called releaseDeadEntities.
   pendingComponents: List(PendingComponent)
+  # setActiveAnimated and destroyAnimated's requests, which animationTriggers takes
+  animationRequests: List(AnimationRequest)
   deadEntities: List(EntityId)
   # The bundles the mounted pages' imports declare (ui/SceneBundles), seeded
   # by the host before a mount the way the theme is; a scene's own block is
@@ -300,6 +309,11 @@ func createUiWorld() ret UiWorld {
     cornerRadiuses: ComponentTable.create(CornerRadius)
     bundleRefs: ComponentTable.create(BundleRefs)
     hoverScales: ComponentTable.create(HoverScale)
+    appears: ComponentTable.create(Appear)
+    disappears: ComponentTable.create(Disappear)
+    staggers: ComponentTable.create(Stagger)
+    leavings: ComponentTable.create(Leaving)
+    appearSeens: ComponentTable.create(AppearSeen)
     gradientFills: ComponentTable.create(GradientFill)
     radialGradientFills: ComponentTable.create(RadialGradientFill)
     valueSliders: ComponentTable.create(ValueSlider)
@@ -369,6 +383,7 @@ func createUiWorld() ret UiWorld {
     scenePolicy: createScenePolicy()
     sceneDiagnostics: createSceneDiagnostics()
     pendingComponents: createPendingComponents()
+    animationRequests: List.create(AnimationRequest, cap: 4)
     bundles: createBundleSet()
     deadEntities: List.create(EntityId, cap: 32)
   }

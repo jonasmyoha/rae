@@ -20,6 +20,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `gpuResources` | `gpu/GpuResources`: two managers, known buffer contents, stale ids, exhaustion, cleanup |
 | `impostorBake` | `ImpostorBake` and `CanopyBake`: every tree species baked into an octahedral impostor atlas on the GPU, then a far canopy of four 40 m cells baked from those impostors; each covers part of its layer and every mip keeps level 0's coverage within 3%; writes the atlas as PNGs to `RAE_IMPOSTOR_PNG_DIR` (default `/tmp/rae-impostor-atlas`; `RAE_IMPOSTOR_PHONE=1` bakes the phone's 4 x 4) |
 | `localNotification` | lib/LocalNotification on a real iPhone: rings with the app closed, the same id replaces, a cancel holds (docs/local-notifications.md). Off iOS it passes with nothing to test |
+| `uiAppear` | `Appear` and `Stagger` from a scene alone, through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of a true middle state. Pictures: docs/images/ui-appear |
 | `uiZoom` | a `TransformFx` scale on a whole subtree, painted: a card with a stroke, a shadow, a gradient, text, an icon and a clipped list, at `RAE_UI_ZOOM`. Pictures: docs/images/ui-zoom |
 | `webPackageAsset` | a package's shader and declared file, natively and on a page (`compiler/tools/wasm_webgpu_smoke.sh` runs it in headless Chrome) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |

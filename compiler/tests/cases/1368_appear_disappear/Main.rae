@@ -1,0 +1,514 @@
+# Appear, Disappear and Stagger (docs/ui-animation-design.md sections 4, 5): from a scene alone,
+# with
+# the built-in bundles. The start pose is on before the first paint. It plays on mount and when a
+# node
+# comes to be shown. A leaving node stays, takes no hit and no focus, and the real end follows. An
+# override of Active goes the same way. Time is handed in, so every number is known.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneEncode
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func mount(world: mod UiWorld, uiSystems: mod UiSystems) {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\",\"Panel\",\"Plain\",\"Shut\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"bundles\":[\"staggerFromEnd\"],\"Disappear\":\{\"opacity\":1,\"scale\":1\},\"Children\":[\"R0\",\"R1\",\"R2\",\"R3\",\"Far\"]\},\"R0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":60\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"R1\":\{\"Rect\":\{\"x\":0,\"y\":60,\"w\":400,\"h\":60\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"R2\":\{\"Rect\":\{\"x\":0,\"y\":120,\"w\":400,\"h\":60\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"R3\":\{\"Rect\":\{\"x\":0,\"y\":180,\"w\":400,\"h\":60\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"Far\":\{\"Rect\":\{\"x\":0,\"y\":400,\"w\":400,\"h\":60\},\"bundles\":[\"appearRise\"]\},\"Panel\":\{\"Rect\":\{\"x\":500,\"y\":0,\"w\":200,\"h\":200\},\"bundles\":[\"dialogMotion\"],\"Appear\":\{\"delaySeconds\":0.5\},\"Children\":[\"Button\",\"Field\"]\},\"Button\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":100,\"h\":40\},\"OnClick\":\{\"actionId\":\"go\",\"label\":\"Go\"\}\},\"Field\":\{\"Rect\":\{\"x\":10,\"y\":60,\"w\":100,\"h\":40\},\"TextField\":\{\}\},\"Plain\":\{\"Rect\":\{\"x\":500,\"y\":300,\"w\":100,\"h\":40\},\"OnClick\":\{\"actionId\":\"plain\",\"label\":\"Plain\"\}\},\"Shut\":\{\"Rect\":\{\"x\":500,\"y\":400,\"w\":100,\"h\":100\},\"Active\":\{\"value\":false\},\"Children\":[\"Inner\"]\},\"Inner\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"bundles\":[\"appearFade\"]\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+}
+
+# One frame as the pipeline runs it: layout, triggers and tracks, transform
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+}
+
+func poseOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret AnimationPose {
+  ret animationPoseOf(uiSystems: uiSystems, entityId: nodeOf(world: world, nodeId: nodeId))
+}
+
+func yOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  ret Math.round(x: poseOf(world: world, uiSystems: uiSystems, nodeId: nodeId).y * 100.0).toInt()
+}
+
+func activeOf(world: view UiWorld, nodeId: view String) ret Bool {
+  ret active(world: world, entityId: nodeOf(world: world, nodeId: nodeId))
+}
+
+func counts(uiSystems: view UiSystems) ret String {
+  ret "{componentCount(this: uiSystems.animation.tracks)} tracks, {componentCount(
+    this: uiSystems.animation.poses
+  )} poses"
+}
+
+func hitName(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  let hit: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: hit) {
+    ret "nothing"
+  }
+  if hit is nodeOf(world: world, nodeId: "Button") {
+    ret "Button"
+  }
+  if hit is nodeOf(world: world, nodeId: "Plain") {
+    ret "Plain"
+  }
+  ret "another"
+}
+
+func rules() {
+  log("--- stagger delays, in thousandths")
+  let froms: List(StaggerFrom) = [
+    StaggerFrom.start
+    StaggerFrom.end
+    StaggerFrom.center
+    StaggerFrom.none
+  ]
+  loop let from: view StaggerFrom in froms {
+    var line: String = ""
+    loop var i: Int = 0, i < 4, ++i {
+      let delay: Float = staggerDelay(
+        index: i
+        count: 4
+        stepSeconds: 0.028
+        maxSeconds: 0.22
+        from: from
+      )
+      line = "{line} {Math.round(x: delay * 1000.0).toInt()}"
+    }
+    log("{from}:{line}")
+  }
+  # A long list: the step shrinks, and the last starts at the cap
+  let lastOfForty: Float = staggerDelay(
+    index: 39
+    count: 40
+    stepSeconds: 0.028
+    maxSeconds: 0.22
+    from: StaggerFrom.start
+  )
+  log("40 rows from the start, the last: {Math.round(x: lastOfForty * 1000.0).toInt()}")
+  let edgeOfForty: Float = staggerDelay(
+    index: 0
+    count: 41
+    stepSeconds: 0.028
+    maxSeconds: 0.22
+    from: StaggerFrom.center
+  )
+  log("41 rows from the center, the first: {Math.round(x: edgeOfForty * 1000.0).toInt()}")
+  log("one row: {staggerDelay(
+    index: 0
+    count: 1
+    stepSeconds: 0.028
+    maxSeconds: 0.22
+    from: StaggerFrom.end
+  )}")
+}
+
+func arrival() {
+  log("--- on mount")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let appears: Appear = componentCopyAtDefault(this: world.appears, i: 0)
+  log(
+    "from a bundle, with the node's field over it: {componentView(
+      this: world.appears
+      entityId: nodeOf(world: world, nodeId: "Panel")
+    ).scale} {componentView(this: world.appears, entityId: nodeOf(world: world, nodeId: "Panel")).delaySeconds} {componentView(
+      this: world.appears
+      entityId: nodeOf(world: world, nodeId: "Panel")
+    ).motion}"
+  )
+  # The start pose before the first paint: no frame has shown the row at its end place
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("first frame: {counts(uiSystems: uiSystems)}")
+  let first: AnimationPose = poseOf(world: world, uiSystems: uiSystems, nodeId: "R0")
+  log(
+    "R0 y {first.y} opacity {first.opacity}; alpha {worldVisualOf(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: "R0")
+    ).alpha}"
+  )
+  # Staggered from the end, the four in the box: R3 at 0, R2 at 28 ms, R1 at 56, R0 at 84. Far is
+  # outside the box and starts at once. 30 ms on, R3, R2 and Far move and R1 and R0 do not.
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.03)
+  log(
+    "after 30 ms: R3 moved {yOf(world: world, uiSystems: uiSystems, nodeId: "R3") < 1600}, R2 {yOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "R2"
+    ) < 1600}, R1 {yOf(world: world, uiSystems: uiSystems, nodeId: "R1") < 1600}, R0 {yOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "R0"
+    ) < 1600}, Far {yOf(world: world, uiSystems: uiSystems, nodeId: "Far") < 1600}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.03)
+  log(
+    "after 60 ms: R1 {yOf(world: world, uiSystems: uiSystems, nodeId: "R1") < 1600}, R0 {yOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "R0"
+    ) < 1600}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.03)
+  log("after 90 ms: R0 {yOf(world: world, uiSystems: uiSystems, nodeId: "R0") < 1600}")
+  # Under a parent that is shut, nothing plays: Inner has no record of being shown
+  log(
+    "Inner, under a shut parent: track {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: nodeOf(world: world, nodeId: "Inner")
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {counts(uiSystems: uiSystems)}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+
+  # It does not play again, and an idle frame finds nothing
+  let updates: Int = uiSystems.animation.updates
+  let generation: Int = uiSystems.animation.triggerGeneration
+  loop var i: Int = 0, i < 5, ++i {
+    animationRun(world: world, uiSystems: uiSystems)
+  }
+  log(
+    "idle: {uiSystems.animation.updates - updates} updates, looked again {uiSystems.animation.triggerGeneration is not generation}"
+  )
+
+  # Its parent opens: Inner comes to be shown, with no Disappear or Appear on the parent
+  componentSet(
+    this: world.actives
+    entityId: nodeOf(world: world, nodeId: "Shut")
+    data: Active { value: true }
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "the parent opens: Inner track {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: nodeOf(world: world, nodeId: "Inner")
+    )}, opacity {poseOf(world: world, uiSystems: uiSystems, nodeId: "Inner").opacity}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  # Its own Active false to true, set directly: it plays again
+  let r0: EntityId = nodeOf(world: world, nodeId: "R0")
+  componentSet(this: world.actives, entityId: r0, data: Active { value: false })
+  settle(world: world, uiSystems: uiSystems)
+  componentSet(this: world.actives, entityId: r0, data: Active { value: true })
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("off and on: R0 y {yOf(world: world, uiSystems: uiSystems, nodeId: "R0")}")
+}
+
+func leaving() {
+  log("--- leaving")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  uiSystems.animation.settings = AnimationSettings { off: true }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  uiSystems.animation.settings = AnimationSettings {}
+  let panel: EntityId = nodeOf(world: world, nodeId: "Panel")
+  let field: EntityId = nodeOf(world: world, nodeId: "Field")
+  log("before: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 520.0
+    y: 20.0
+  )}, focus {focusTextField(world: world, entityId: field)}")
+  # With a Disappear it stays, and takes no hit and no focus, its subtree too
+  setActiveAnimated(world: world, entityId: panel, active: false)
+  log(
+    "asked: active {active(world: world, entityId: panel)}, leaving {isLeaving(
+      world: world
+      entityId: panel
+    )}, field focused {componentView(this: world.textFields, entityId: field).focused}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  log(
+    "a frame on: active {active(world: world, entityId: panel)}, track {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: panel
+    )}, still laid out {componentHas(this: uiSystems.layout.computedRects, entityId: panel)}"
+  )
+  log("hit on it: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 520.0
+    y: 20.0
+  )}")
+  # Called back: it turns around from where it is, and stays
+  let opacityThen: Float = poseOf(world: world, uiSystems: uiSystems, nodeId: "Panel").opacity
+  setActiveAnimated(world: world, entityId: panel, active: true)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "called back: leaving {isLeaving(world: world, entityId: panel)}, no jump {Math.abs(
+      value: poseOf(world: world, uiSystems: uiSystems, nodeId: "Panel").opacity - opacityThen
+    ) < 0.001}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("back: active {active(world: world, entityId: panel)}, {counts(uiSystems: uiSystems)}, hit {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 520.0
+    y: 20.0
+  )}")
+  # Leaving for real
+  setActiveAnimated(world: world, entityId: panel, active: false)
+  settle(world: world, uiSystems: uiSystems)
+  log("gone: active {active(world: world, entityId: panel)}, leaving {isLeaving(
+    world: world
+    entityId: panel
+  )}, {counts(uiSystems: uiSystems)}, hit {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 520.0
+    y: 20.0
+  )}")
+  # And it comes back with its Appear: scale 0.9 from dialogMotion, after its 0.5 s delay
+  setActiveAnimated(world: world, entityId: panel, active: true)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "shown again: scale {Math.round(
+      x: poseOf(world: world, uiSystems: uiSystems, nodeId: "Panel").scale * 100.0
+    ).toInt()}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  # With no Disappear, at once
+  let plain: EntityId = nodeOf(world: world, nodeId: "Plain")
+  setActiveAnimated(world: world, entityId: plain, active: false)
+  log(
+    "no Disappear: active {active(world: world, entityId: plain)}, leaving {isLeaving(
+      world: world
+      entityId: plain
+    )}"
+  )
+  destroyAnimated(world: world, uiSystems: uiSystems, entityId: plain)
+  log("no Disappear, destroy: alive {isAlive(world: world, entityId: plain)}")
+  # An override of Active goes the same way
+  applyOverride(
+    world: world
+    entityId: panel
+    override: SceneOverride {
+      nodeId: "Panel"
+      componentName: "Active"
+      fieldName: "value"
+      valueString: "false"
+    }
+  )
+  log(
+    "an override: active {active(world: world, entityId: panel)}, leaving {isLeaving(
+      world: world
+      entityId: panel
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log("after it: active {active(world: world, entityId: panel)}")
+  applyOverride(
+    world: world
+    entityId: panel
+    override: SceneOverride {
+      nodeId: "Panel"
+      componentName: "Active"
+      fieldName: "value"
+      valueString: "true"
+    }
+  )
+  settle(world: world, uiSystems: uiSystems)
+  # destroyAnimated stays until its track ends, and takes its subtree
+  let button: EntityId = nodeOf(world: world, nodeId: "Button")
+  destroyAnimated(world: world, uiSystems: uiSystems, entityId: panel)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  log("destroying: alive {isAlive(world: world, entityId: panel)}, no hit {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 520.0
+    y: 20.0
+  )}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "destroyed: panel {isAlive(world: world, entityId: panel)}, button {isAlive(
+      world: world
+      entityId: button
+    )}, {counts(uiSystems: uiSystems)}"
+  )
+}
+
+func staggeredLeave() {
+  log("--- a stagger leaves")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  uiSystems.animation.settings = AnimationSettings { off: true }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  uiSystems.animation.settings = AnimationSettings {}
+  let list: EntityId = nodeOf(world: world, nodeId: "List")
+  setActiveAnimated(world: world, entityId: list, active: false)
+  # From the start, in the order of the list, among the 4 with a Disappear in the box: R0 at 0, R3
+  # at 84 ms
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.03)
+  log(
+    "after 30 ms: R0 {poseOf(world: world, uiSystems: uiSystems, nodeId: "R0").opacity < 1.0}, R3 {poseOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "R3"
+    ).opacity < 1.0}, list active {active(world: world, entityId: list)}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "the end: list active {active(world: world, entityId: list)}, {counts(uiSystems: uiSystems)}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+}
+
+func settings() {
+  log("--- off and hold")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  uiSystems.animation.settings = AnimationSettings { hold: 0.5 }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  # A true middle: y 16 to 0 at half is 8, for every row, whatever its delay; opacity 0.5
+  log(
+    "held: R0 y {yOf(world: world, uiSystems: uiSystems, nodeId: "R0")}, R3 y {yOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "R3"
+    )}, opacity {poseOf(world: world, uiSystems: uiSystems, nodeId: "R0").opacity}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  var quiet: UiWorld = createUiWorld()
+  var quietSystems: UiSystems = createUiSystems()
+  mount(world: quiet, uiSystems: quietSystems)
+  quietSystems.animation.settings = AnimationSettings { off: true }
+  frame(world: quiet, uiSystems: quietSystems, deltaTime: 0.0)
+  log("off: {counts(uiSystems: quietSystems)}")
+  let panel: EntityId = nodeOf(world: quiet, nodeId: "Panel")
+  setActiveAnimated(world: quiet, entityId: panel, active: false)
+  frame(world: quiet, uiSystems: quietSystems, deltaTime: 0.0)
+  log(
+    "off, a leave: active {active(world: quiet, entityId: panel)}, leaving {isLeaving(
+      world: quiet
+      entityId: panel
+    )}, {counts(uiSystems: quietSystems)}"
+  )
+}
+
+func sceneFormat() {
+  log("--- the scene format")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems)
+  let saved: String = machineComponentJson(
+    world: world
+    entityId: nodeOf(world: world, nodeId: "List")
+    name: "Stagger"
+  )
+  log(
+    "saved Stagger: end {saved.contains(sub: "\"appearFrom\": \"end\"")}, start {saved.contains(
+      sub: "\"disappearFrom\": \"start\""
+    )}"
+  )
+  let savedAppear: String = machineComponentJson(
+    world: world
+    entityId: nodeOf(world: world, nodeId: "R0")
+    name: "Appear"
+  )
+  log("saved Appear: {savedAppear.contains(sub: "\"motion\": \"smooth\"")}")
+  log(
+    "Leaving is never authored: {isRuntimeTable(name: "Leaving")}, Appear can be: {isRuntimeTable(
+      name: "Appear"
+    ) is false}"
+  )
+  var other: UiWorld = createUiWorld()
+  var otherSystems: UiSystems = createUiSystems()
+  let bad: EntityId = loadScene(
+    world: other
+    uiSystems: otherSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"Appear\":\{\"motion\":\"smoooth\"\},\"Disappear\":\{\"opacityMotion\":\"nope\"\}\}\}\}"
+    )
+  )
+  log(
+    "unknown motions: {sceneDiagnosticCountOfKind(
+      diagnostics: other.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    )} diagnostics"
+  )
+  loop let diagnostic: view SceneDiagnostic in other.sceneDiagnostics {
+    log("  {diagnostic.nodeId}: {diagnostic.message}")
+  }
+  layoutSystem(world: other, uiSystems: otherSystems)
+  animationTriggers(world: other, uiSystems: otherSystems)
+  animationSystem(world: other, uiSystems: otherSystems, deltaTime: 0.0)
+  log(
+    "and it still plays, with no second report: {sceneDiagnosticCountOfKind(
+      diagnostics: other.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    )} diagnostics, {counts(uiSystems: otherSystems)}"
+  )
+}
+
+func main() {
+  rules()
+  arrival()
+  leaving()
+  staggeredLeave()
+  settings()
+  sceneFormat()
+}

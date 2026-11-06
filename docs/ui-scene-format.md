@@ -729,3 +729,31 @@ lower bounces (lib/Spring). A curve has a name from lib/Easing and a length. `qu
 `lively`, `fadeIn` and `fadeOut` are built in, so a scene with no theme still has them. A wrong `kind`
 or `curve` in a theme is logged and that token is not added. A use of a name no one declares is an
 `unknownToken` diagnostic and the motion runs as `smooth`. docs/ui-animation-design.md section 3.
+
+## 21. `Appear`, `Disappear`, `Stagger`: how a node arrives and leaves
+
+```json
+"Row": { "bundles": ["appearRise", "disappearFade"], "Appear": { "y": 40 } }
+```
+
+| component | fields, with their defaults |
+| --- | --- |
+| `Appear` | `motion` lively, `opacityMotion` fadeIn, `opacity` 0, `scale` 1, `x` 0, `y` 16, `rotation` 0, `delaySeconds` 0 |
+| `Disappear` | `motion` quick, `opacityMotion` fadeOut, `opacity` 0, `scale` 0.96, `x` 0, `y` 0, `rotation` 0 |
+| `Stagger` | `stepSeconds` 0.028, `maxSeconds` 0.22, `appearFrom` end, `disappearFrom` start; a from is `start`, `end`, `center` or `none` |
+
+- **`Appear`** says where a node starts from; it ends at its place. It plays on mount and whenever the node
+  comes to be shown, by its own `Active` or by a parent's. Under a parent that is shut it waits. The start pose
+  is on before the first paint.
+- **`Disappear`** says where a node ends. It plays through `setActiveAnimated(world, entity, active)` and
+  `destroyAnimated(world, uiSystems, entity)`, which an override of `Active`, `setNodeActive` and `bindNodeActive`
+  go through. With no `Disappear` they act at once. With one the node stays laid out and drawn and takes no hit
+  and no focus, its subtree too, until its track ends. Showing it again mid-way turns it around from where it is.
+  A plain `componentSet` of `Active` still acts at once.
+- **`Stagger`** on a parent starts its children's `Appear` and `Disappear` one after another. `maxSeconds` caps the
+  total: the step shrinks to fit. Only children overlapping the parent's box count; one outside starts at once. A
+  leaving parent waits for its children.
+- A motion no one declares is an `unknownToken` diagnostic at load, and the default for that field runs.
+
+The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `disappearFade`, `disappearShrink`,
+`staggerFromEnd`, `staggerFromStart`, `pressable`, `dialogMotion`. Case 1368 holds the rules; `checks/uiAppear` paints them.
