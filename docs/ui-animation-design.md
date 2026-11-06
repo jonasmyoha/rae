@@ -303,6 +303,25 @@ arrive from the other, slightly staggered. Without the field, the table above ho
 **The old row-jump check.** A host may check that rows do not jump between frames.
 Such a check reads laid-out places or world places; section 11 says which to read.
 
+**Built in 0.3.22:** all of the above, in `lib/ui/listMotionSystem/` and
+`lib/ui/listViewSystem/ListViewFlow.rae`. What the code decided:
+
+- `listViewSystem` calls list motion itself, because a ghost must be taken before its row is rebound, and only that
+  system sees that moment. So there is no host call any more: `listMotionSystem`, `listMotionNeedsRun` and
+  `createListMotionSystem` are gone, and a host only runs `animationRun`. A host that called them removes the calls
+  and uses `animationInFlight`.
+- A list takes part when it has `animateMoves` or its row root has `Appear` or `Disappear`; `animateMoves` is what makes
+  rows glide. Any other list does what it did. A change with `listRowsChange` works on every list.
+- A virtual list chooses which pool row sits in each slot, so a row keeps its entity across a data change and across a
+  scroll, and its track stays with it. Slot s is still child s: a ghost is at the tail of the children, outside the pool.
+- "In the window" for a stagger is by index and scroll (`listRowVisible`), with the overscan rows out. Those start at once.
+- A list filled while hidden plays through the triggers when it opens, as any node does. Their test for the window is
+  the parent's box, so such a list opened scrolled has no stagger.
+- In the Rae API a sideways change is `listRowsChange(world, listEntityId, direction)`, said together with the new data, and
+  used once. It does not need keys. `listRowsEdit`'s `change` field is SUMU's SDK calling it.
+- In a sideways change a flow row gives up its layout place at once (`Leaving.holdsPlace` false), or the old and new rows
+  would stack. It stays where it was last laid out.
+
 ## 8. Page transitions
 
 ### 8.1 Two worlds, or one

@@ -60,8 +60,17 @@ type AnimateText {
   motion: String = "quick"
 }
 
-# RUNTIME: a node on its way out. It stays laid out and drawn, and takes no hits and no focus.
+enum ListChangeDirection { forward, back }
+
+# RUNTIME: the data this list is getting replaces all of it (ui/listMotionSystem, listRowsChange)
+type ListChange {
+  direction: ListChangeDirection
+}
+
+# RUNTIME: a node on its way out. It stays drawn and takes no hits and no focus. It stays laid out
+# too, unless a list has given its place to the rows arriving there.
 type Leaving {
+  holdsPlace: Bool = true
 }
 
 # RUNTIME: animationTriggers' record of a node with one of the components above: whether it was

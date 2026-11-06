@@ -44,6 +44,13 @@ open ui/UiSystems
 # nodes are filtered per RUICS § 7.3 — they don't contribute to
 # parent measurement or placement.
 func layoutActive(world: view UiWorld, entityId: view EntityId) ret Bool {
+  # A row leaving a list sideways has given its place to the new rows
+  if componentHas(this: world.leavings, entityId: entityId) and componentView(
+    this: world.leavings
+    entityId: entityId
+  ).holdsPlace is false {
+    ret false
+  }
   if componentHas(this: world.actives, entityId: entityId) is false {
     ret true
   }

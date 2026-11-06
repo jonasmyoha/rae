@@ -1,0 +1,52 @@
+# The rules of list motion, pure (docs/ui-animation-design.md section 7): which row a key is, which
+# rows a person can see, and how a sideways change is timed. No world, no tables.
+import Math
+
+# One list's memory: the keys it last showed and the window they were in. A pool row at slot s
+# showed keys[first + s].
+type ListMotionState {
+  keys: List(String)
+  first: Int = 0
+  rowCount: Int = 0
+  generation: Int = -1
+  warned: Bool = false
+}
+
+# Where the pool rows that keep their key go: each one's slot, ascending. The first
+# `matchedSlots.length` pool rows are those rows, and `active` false leaves the pool alone.
+type ListRowsPlan {
+  active: Bool = false
+  matchedSlots: List(Int)
+}
+
+# How far apart the new rows of a sideways change start, and when the last one starts
+const listChangeStepSeconds: Float = 0.02
+
+const listChangeMaxSeconds: Float = 0.12
+
+func listKeyIndex(keys: view List(String), key: view String) ret Int {
+  loop var i: Int = 0, i < keys.length, ++i {
+    if keys.copyAtFallback(index: i, fallback: "") is key {
+      ret i
+    }
+  }
+  ret -1
+}
+
+func listChangeDelay(index: view Int) ret Float {
+  ret Math.min(a: index.toFloat() * listChangeStepSeconds, b: listChangeMaxSeconds)
+}
+
+# Whether data row `index` is in the list's window now. The overscan rows around it are not.
+func listRowVisible(
+  index: view Int
+  scrollY: view Float
+  pitch: view Float
+  visibleItemCount: view Int
+) ret Bool {
+  if pitch <= 0.0 {
+    ret true
+  }
+  let firstVisible: Int = (Math.max(a: 0.0, b: -scrollY) / pitch).toInt()
+  ret index >= firstVisible and index <= firstVisible + visibleItemCount
+}
