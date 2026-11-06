@@ -1,0 +1,130 @@
+# AnimateLayout and AnimateText, painted (docs/ui-animation-design.md section 4): on frame 3 the
+# first
+# row goes, the rows below it glide up, one label fades to a new text and a clock rolls.
+# RAE_ANIMATION_HOLD
+# stops every motion at a share of its way, so a picture shows a true middle state:
+#
+#   RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 RAE_GPU2D_SCREENSHOT=/tmp/glide.bmp \
+#     compiler/bin/rae run checks/uiLayoutText/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1369_animate_layout_text. Here: exit 0 when
+# the
+# change started the glides and the ghosts through the real pipeline and, with no hold, they end.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func setTextOf(world: mod UiWorld, nodeId: view String, text: view String) {
+  let node: mod Text = componentMod(
+    this: world.texts
+    entityId: nodeOf(world: world, nodeId: nodeId)
+  )
+  node.text = text
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI layout and text check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiLayoutText/page.raescene")
+  if scene.ok is false {
+    log("UI LAYOUT TEXT FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var startedTracks: Int = 0
+  var startedGhosts: Int = 0
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    if frames is 3 {
+      setActiveAnimated(
+        world: world
+        entityId: nodeOf(world: world, nodeId: "RowOne")
+        active: false
+      )
+      setTextOf(world: world, nodeId: "Status", text: "Finished")
+      setTextOf(world: world, nodeId: "Clock", text: "10:00")
+    }
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    if frames is 3 {
+      startedTracks = componentCount(this: uiSystems.animation.tracks)
+      startedGhosts = componentCount(this: uiSystems.animation.textGhosts)
+      log("the change started {startedTracks} glides and {startedGhosts} old texts")
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    if frames > 30 and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let tracksLeft: Int = componentCount(this: uiSystems.animation.tracks)
+  let ghostsLeft: Int = componentCount(this: uiSystems.animation.textGhosts)
+  let held: Bool = uiSystems.animation.settings.hold >= 0.0
+  let off: Bool = uiSystems.animation.settings.off
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let startedWrong: Bool = not off and (startedTracks is not 2 or startedGhosts is not 2)
+  if startedWrong or (not held and (tracksLeft > 0 or ghostsLeft > 0)) {
+    log(
+      "UI LAYOUT TEXT FAILED: started {startedTracks}, {startedGhosts}; left {tracksLeft}, {ghostsLeft}"
+    )
+    ret 1
+  }
+  log("UI LAYOUT TEXT OK: {tracksLeft} glides, {ghostsLeft} old texts left")
+  ret 0
+}

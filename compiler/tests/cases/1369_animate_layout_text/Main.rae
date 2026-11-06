@@ -1,0 +1,528 @@
+# AnimateLayout and AnimateText (docs/ui-animation-design.md section 4). Layout moves a marked node
+# to
+# its true place at once, and the pose carries it there from where it was; later frames run no
+# layout.
+# A changed text keeps the old one as a ghost that only the painter sees. Time is handed in, and a
+# critically damped spring from distance d is at d(1 + wt)exp(-wt), w = 2 pi / response, so every
+# number is known: smooth (0.42 s) from 100 is at 55.9 after 0.1 s; quick (0.24 s) from 1 at 0.264.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/Registry
+open ui/Scene
+open ui/SceneEncode
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+# One frame as the pipeline runs it: layout, triggers and tracks, transform
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func frames(world: mod UiWorld, uiSystems: mod UiSystems, count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func poseY(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  ret hundredths(
+    value: animationPoseOf(uiSystems: uiSystems, entityId: nodeOf(world: world, nodeId: nodeId)).y
+  )
+}
+
+# Where the node is drawn: its true place and its pose together
+func drawnY(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  ret hundredths(
+    value: componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    ).position.y
+  )
+}
+
+func placeY(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  ret hundredths(
+    value: componentView(
+      this: uiSystems.layout.computedRects
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    ).position.y
+  )
+}
+
+func tracks(uiSystems: view UiSystems) ret Int {
+  ret componentCount(this: uiSystems.animation.tracks)
+}
+
+func setShown(world: mod UiWorld, nodeId: view String, shown: view Bool) {
+  setActiveAnimated(world: world, entityId: nodeOf(world: world, nodeId: nodeId), active: shown)
+}
+
+func setTextOf(world: mod UiWorld, nodeId: view String, text: view String) {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let node: mod Text = componentMod(this: world.texts, entityId: entityId)
+  node.text = text
+}
+
+func mountColumn(world: mod UiWorld, uiSystems: mod UiSystems) {
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Column\",\"Nest\",\"Box\",\"Stack\"]\},\"Column\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":300\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\}\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\},\"bundles\":[\"glideOnChange\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\},\"bundles\":[\"glideOnChange\"],\"AnimateLayout\":\{\"motion\":\"quick\"\}\},\"Nest\":\{\"Rect\":\{\"x\":300,\"y\":0,\"w\":200,\"h\":300\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Top\",\"Outer\"]\},\"Top\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":50\}\},\"Outer\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\},\"bundles\":[\"glideOnChange\"],\"Children\":[\"Inner\"]\},\"Inner\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":50,\"h\":50\},\"bundles\":[\"glideOnChange\"]\},\"Box\":\{\"Rect\":\{\"x\":600,\"y\":0,\"w\":100,\"h\":100\},\"bundles\":[\"glideOnChange\"]\},\"Stack\":\{\"Rect\":\{\"x\":0,\"y\":400,\"w\":200,\"h\":150\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Head\",\"Door\"]\},\"Head\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":50\}\},\"Door\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":50\},\"bundles\":[\"glideOnChange\"]\}\}\}"
+    )
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+}
+
+func glides() {
+  log("--- glide")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  mountColumn(world: world, uiSystems: uiSystems)
+  log(
+    "first layout: {tracks(uiSystems: uiSystems)} tracks, B at {drawnY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "B"
+    )}"
+  )
+  frames(world: world, uiSystems: uiSystems, count: 3)
+  log("nothing changed: {tracks(uiSystems: uiSystems)} tracks")
+  setShown(world: world, nodeId: "A", shown: false)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "A gone: B is laid out at {placeY(world: world, uiSystems: uiSystems, nodeId: "B")}, pose {poseY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "B"
+    )}, drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "B")}"
+  )
+  log(
+    "C drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "C")}, {tracks(
+      uiSystems: uiSystems
+    )} tracks"
+  )
+  frames(world: world, uiSystems: uiSystems, count: 10)
+  log(
+    "0.1 s later: B drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "B") / 100}, C {drawnY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "C"
+    ) / 100}"
+  )
+  # The way back, from the middle: no jump, and it carries on
+  let before: Int = drawnY(world: world, uiSystems: uiSystems, nodeId: "B")
+  setShown(world: world, nodeId: "A", shown: true)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "A back mid-glide: jump {drawnY(world: world, uiSystems: uiSystems, nodeId: "B") - before}, laid out at {placeY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "B"
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: B drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "B")}, {tracks(
+      uiSystems: uiSystems
+    )} tracks, {componentCount(this: uiSystems.animation.poses)} poses"
+  )
+}
+
+func noLayoutWhileGliding() {
+  log("--- no layout on later frames")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  mountColumn(world: world, uiSystems: uiSystems)
+  var schedule: Schedule = createUiPipeline(world: world)
+  let firstRun: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  )
+  setShown(world: world, nodeId: "A", shown: false)
+  let changed: Bool = uiShouldRun(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    index: uiSystemLayout
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  var later: Int = 0
+  loop var i: Int = 0, i < 10, ++i {
+    if uiShouldRun(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      index: uiSystemLayout
+    ) {
+      later = later + 1
+    }
+    animationTriggers(world: world, uiSystems: uiSystems)
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+    transformSystem(world: world, uiSystems: uiSystems)
+  }
+  log("the change lays out {firstRun and changed}; of 10 frames of glide, {later} lay out")
+}
+
+func cases() {
+  log("--- nested, scroll, hidden")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  mountColumn(world: world, uiSystems: uiSystems)
+  setShown(world: world, nodeId: "Top", shown: false)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "Top gone: Outer pose {poseY(world: world, uiSystems: uiSystems, nodeId: "Outer")}, Inner pose {poseY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Inner"
+    )}, {tracks(uiSystems: uiSystems)} track, Inner drawn at {drawnY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Inner"
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  # A scroll is a runtime offset: drawn elsewhere, and no glide
+  let box: EntityId = nodeOf(world: world, nodeId: "Box")
+  let offset: RuntimeOffset = { delta: { x: 0.0, y: 30.0 } }
+  componentSet(this: uiSystems.transform2d.runtimeOffsets, entityId: box, data: offset)
+  setShown(world: world, nodeId: "Top", shown: true)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "scrolled Box drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "Box")}, pose {poseY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Box"
+    )}, {componentHas(this: uiSystems.animation.tracks, entityId: box)} track"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  # A hidden node has no place to come from: it arrives where it is laid out
+  setShown(world: world, nodeId: "Door", shown: false)
+  frames(world: world, uiSystems: uiSystems, count: 2)
+  setShown(world: world, nodeId: "Head", shown: false)
+  frames(world: world, uiSystems: uiSystems, count: 2)
+  setShown(world: world, nodeId: "Door", shown: true)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "Door back at a new place: laid out at {placeY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Door"
+    )}, {tracks(uiSystems: uiSystems)} tracks"
+  )
+  # An inactive node's own subtree too; and a destroyed node leaves nothing behind
+  let door: EntityId = nodeOf(world: world, nodeId: "Door")
+  destroyEntity(world: world, entityId: door)
+  clearUiSystemsEntity(uiSystems: uiSystems, entityId: door)
+  log(
+    "Door destroyed: its place kept {componentHas(
+      this: uiSystems.animation.layoutPlaces
+      entityId: door
+    )}"
+  )
+  # Under RAE_ANIMATION=off a move simply is at its place
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  setShown(world: world, nodeId: "A", shown: false)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "off: B drawn at {drawnY(world: world, uiSystems: uiSystems, nodeId: "B")}, {tracks(
+      uiSystems: uiSystems
+    )} tracks"
+  )
+  # Under a hold it stops at that share of the way
+  uiSystems.animation.settings = parseAnimationSettings(animation: "", hold: "0.25")
+  setShown(world: world, nodeId: "A", shown: true)
+  frames(world: world, uiSystems: uiSystems, count: 3)
+  log(
+    "hold 0.25: B laid out at {placeY(world: world, uiSystems: uiSystems, nodeId: "B")}, drawn at {drawnY(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "B"
+    )}, in flight {animationInFlight(world: world, uiSystems: uiSystems)}"
+  )
+}
+
+func resize() {
+  log("--- resize")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":0\},\"Children\":[\"Spacer\",\"Tag\"]\},\"Spacer\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":40\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"Tag\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":40\},\"bundles\":[\"glideOnChange\"]\}\}\}"
+    )
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  let tag: EntityId = nodeOf(world: world, nodeId: "Tag")
+  log("Tag at x {componentView(this: uiSystems.layout.computedRects, entityId: tag).position.x}")
+  world.layoutW = 1000.0
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "wider window: Tag at x {componentView(this: uiSystems.layout.computedRects, entityId: tag).position.x}, {tracks(
+      uiSystems: uiSystems
+    )} tracks"
+  )
+  setShown(world: world, nodeId: "Spacer", shown: false)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "then Spacer gone: from the new place, pose x {animationPoseOf(
+      uiSystems: uiSystems
+      entityId: tag
+    ).x}"
+  )
+}
+
+func look(
+  kind: view AnimateTextKind
+  rollFrom: view RollFrom
+  progress: view Float
+  start: view Float
+) ret String {
+  let result: TextGhostLook = textGhostLook(
+    kind: kind
+    rollFrom: rollFrom
+    progress: progress
+    start: start
+    height: 40.0
+  )
+  ret "old {hundredths(value: result.ghostAlpha)}% at {result.ghostY}, new {hundredths(
+    value: result.textAlpha
+  )}% at {result.textY}"
+}
+
+func ghostOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+    let ghost: view TextGhost = componentView(
+      this: uiSystems.animation.textGhosts
+      entityId: entityId
+    )
+    ret "old {ghost.text} at {hundredths(value: ghost.progress.current)}%"
+  }
+  ret "no ghost"
+}
+
+func texts() {
+  log("--- the look")
+  let fade: AnimateTextKind = AnimateTextKind.fade
+  let roll: AnimateTextKind = AnimateTextKind.roll
+  log("fade 0: {look(
+    kind: fade
+    rollFrom: RollFrom.below
+    progress: 0.0
+    start: 0.0
+  )}")
+  log("fade 0.25: {look(
+    kind: fade
+    rollFrom: RollFrom.below
+    progress: 0.25
+    start: 0.0
+  )}")
+  log("fade past the end: {look(
+    kind: fade
+    rollFrom: RollFrom.below
+    progress: 1.1
+    start: 0.0
+  )}")
+  log("roll below 0.25: {look(
+    kind: roll
+    rollFrom: RollFrom.below
+    progress: 0.25
+    start: 0.0
+  )}")
+  log("roll above 0.25: {look(
+    kind: roll
+    rollFrom: RollFrom.above
+    progress: 0.25
+    start: 0.0
+  )}")
+  # At 0.75 the new text is 10 from its place. A change now makes it the old one, at that same 10
+  log("roll at 0.75: {look(
+    kind: roll
+    rollFrom: RollFrom.below
+    progress: 0.75
+    start: 0.0
+  )}")
+  log("changed there: {look(
+    kind: roll
+    rollFrom: RollFrom.below
+    progress: 0.25
+    start: 0.25
+  )}")
+  log("half way out: {look(
+    kind: roll
+    rollFrom: RollFrom.below
+    progress: 0.625
+    start: 0.25
+  )}")
+  log("at the end: {look(
+    kind: roll
+    rollFrom: RollFrom.below
+    progress: 1.0
+    start: 0.25
+  )}")
+  log("--- text")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Label\",\"Clock\",\"Plain\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"one\"\},\"AnimateText\":\{\}\},\"Clock\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"09\"\},\"AnimateText\":\{\"kind\":\"roll\",\"rollFrom\":\"above\",\"motion\":\"smooth\"\}\},\"Plain\":\{\"Rect\":\{\"x\":0,\"y\":200,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"same\"\}\}\}\}"
+    )
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("first sight: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+  setTextOf(world: world, nodeId: "Label", text: "one")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("the same text: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+  setTextOf(world: world, nodeId: "Plain", text: "other")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("no AnimateText: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Plain")}")
+  let label: EntityId = nodeOf(world: world, nodeId: "Label")
+  let widthBefore: Float = componentView(this: uiSystems.layout.computedRects, entityId: label).size.x
+  setTextOf(world: world, nodeId: "Label", text: "two")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "changed: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}, tracks {tracks(uiSystems: uiSystems)}"
+  )
+  frames(world: world, uiSystems: uiSystems, count: 10)
+  log("0.1 s later: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+  # The text that was coming is the old one now, at the alpha it had: nothing pops
+  setTextOf(world: world, nodeId: "Label", text: "three")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("changed again: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+  log(
+    "box unchanged: {componentView(this: uiSystems.layout.computedRects, entityId: label).size.x is widthBefore}"
+  )
+  setTextOf(world: world, nodeId: "Clock", text: "10")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("roll: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Clock")}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}, {ghostOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Clock"
+    )}, in flight {animationInFlight(world: world, uiSystems: uiSystems)}"
+  )
+  let updates: Int = uiSystems.animation.updates
+  loop var i: Int = 0, i < 5, ++i {
+    animationRun(world: world, uiSystems: uiSystems)
+  }
+  log("after the end, updates run: {uiSystems.animation.updates - updates}")
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  setTextOf(world: world, nodeId: "Label", text: "four")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("off: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+  uiSystems.animation.settings = parseAnimationSettings(animation: "", hold: "0.4")
+  setTextOf(world: world, nodeId: "Label", text: "five")
+  frames(world: world, uiSystems: uiSystems, count: 3)
+  log(
+    "hold 0.4: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}, in flight {animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  # A node destroyed with a ghost leaves nothing behind
+  clearUiSystemsEntity(uiSystems: uiSystems, entityId: label)
+  log("cleared: {ghostOf(world: world, uiSystems: uiSystems, nodeId: "Label")}")
+}
+
+func scene() {
+  log("--- scene")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Label\",\"Clock\",\"Plain\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"one\"\},\"AnimateText\":\{\}\},\"Clock\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"09\"\},\"AnimateText\":\{\"kind\":\"roll\",\"rollFrom\":\"above\",\"motion\":\"smooth\"\}\},\"Plain\":\{\"Rect\":\{\"x\":0,\"y\":200,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"same\"\}\}\}\}"
+    )
+  )
+  let clock: EntityId = nodeOf(world: world, nodeId: "Clock")
+  let saved: String = machineComponentJson(world: world, entityId: clock, name: "AnimateText")
+  log(
+    "saved AnimateText: roll {saved.contains(sub: "\"kind\": \"roll\"")}, above {saved.contains(
+      sub: "\"rollFrom\": \"above\""
+    )}, smooth {saved.contains(sub: "\"motion\": \"smooth\"")}"
+  )
+  var other: UiWorld = createUiWorld()
+  var otherSystems: UiSystems = createUiSystems()
+  let bad: EntityId = loadScene(
+    world: other
+    uiSystems: otherSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"AnimateLayout\":\{\"motion\":\"smoooth\"\},\"Text\":\{\"text\":\"x\"\},\"AnimateText\":\{\"motion\":\"quik\"\}\}\}\}"
+    )
+  )
+  log(
+    "unknown motions: {sceneDiagnosticCountOfKind(
+      diagnostics: other.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    )} diagnostics"
+  )
+}
+
+func main() {
+  glides()
+  noLayoutWhileGliding()
+  cases()
+  resize()
+  texts()
+  scene()
+}

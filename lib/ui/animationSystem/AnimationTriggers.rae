@@ -363,8 +363,158 @@ func triggerGeneration(world: view UiWorld, uiSystems: view UiSystems) ret Int {
   )
 }
 
+# A node's place by layout alone, up to its nearest ancestor that glides too: an ancestor's own
+# glide
+# carries it, so it does not move twice. A scroll is a runtime offset and not in here: it starts
+# nothing.
+func layoutPlaceOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret LayoutPlace {
+  var x: Float = 0.0
+  var y: Float = 0.0
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop isNone(this: at) is false and guard < 256 {
+    if guard > 0 and componentHas(this: world.animateLayouts, entityId: at) {
+      ret LayoutPlace { x: x, y: y }
+    }
+    if componentHas(this: uiSystems.layout.computedRects, entityId: at) {
+      let rect: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: at
+      )
+      x = x + rect.position.x
+      y = y + rect.position.y
+    }
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+    guard = guard + 1
+  }
+  ret LayoutPlace { x: x, y: y }
+}
+
+# AnimateLayout: only when layout has run. Nothing on a first layout, and nothing when the window
+# changed: then every place moves at once and there is nothing to follow. A hidden node has no
+# place,
+# so when it comes back it starts where it is laid out.
+func animationLayoutGlides(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if componentCount(this: world.animateLayouts) is 0 {
+    ret
+  }
+  let generation: Int = componentTableGeneration(this: uiSystems.layout.computedRects)
+  if generation is uiSystems.animation.layoutGeneration {
+    ret
+  }
+  uiSystems.animation.layoutGeneration = generation
+  let resized: Bool = world.layoutW is not uiSystems.animation.layoutWidth or world.layoutH is not uiSystems.animation.layoutHeight
+  uiSystems.animation.layoutWidth = world.layoutW
+  uiSystems.animation.layoutHeight = world.layoutH
+  loop var i: Int = 0, i < componentCount(this: world.animateLayouts), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.animateLayouts, i: i)
+    if shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) {
+      let place: LayoutPlace = layoutPlaceOf(world: world, uiSystems: uiSystems, entityId: entityId)
+      if componentHas(this: uiSystems.animation.layoutPlaces, entityId: entityId) and not resized {
+        let last: view LayoutPlace = componentView(
+          this: uiSystems.animation.layoutPlaces
+          entityId: entityId
+        )
+        let dx: Float = last.x - place.x
+        let dy: Float = last.y - place.y
+        if Math.abs(value: dx) > 0.01 or Math.abs(value: dy) > 0.01 {
+          let motion: String = componentView(this: world.animateLayouts, entityId: entityId).motion
+          animationGlide(
+            uiSystems: uiSystems
+            entityId: entityId
+            dx: dx
+            dy: dy
+            motion: motionNameOr(world: world, name: motion, fallback: "smooth")
+          )
+        }
+      }
+      componentSet(this: uiSystems.animation.layoutPlaces, entityId: entityId, data: place)
+    } else {
+      componentRemove(this: uiSystems.animation.layoutPlaces, entityId: entityId)
+    }
+  }
+}
+
+# AnimateText: only when a text has changed, and never the first time one is seen
+func animationTextGhosts(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if componentCount(this: world.animateTexts) is 0 {
+    ret
+  }
+  let generation: Int = componentTableGeneration(this: world.texts)
+  if generation is uiSystems.animation.textGeneration {
+    ret
+  }
+  uiSystems.animation.textGeneration = generation
+  loop var i: Int = 0, i < componentCount(this: world.animateTexts), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.animateTexts, i: i)
+    if componentHas(this: world.texts, entityId: entityId) {
+      let now: String = componentView(this: world.texts, entityId: entityId).text
+      if componentHas(this: uiSystems.animation.textSeens, entityId: entityId) {
+        let before: String = componentView(this: uiSystems.animation.textSeens, entityId: entityId).text
+        if before is not now and uiSystems.animation.settings.off is false {
+          startTextGhost(
+            world: world
+            uiSystems: uiSystems
+            entityId: entityId
+            oldText: before
+          )
+        }
+      }
+      componentSet(
+        this: uiSystems.animation.textSeens
+        entityId: entityId
+        data: TextSeen { text: now }
+      )
+    }
+  }
+}
+
+# The old text starts to go. If one was already going, the text that was coming is the old one now,
+# at
+# the alpha it had got to, so a quick second change does not pop.
+func startTextGhost(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  oldText: view String
+) {
+  var start: Float = 0.0
+  if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+    let current: Float = componentView(this: uiSystems.animation.textGhosts, entityId: entityId).progress.current
+    start = 1.0 - Math.max(a: 0.0, b: Math.min(a: 1.0, b: current))
+  }
+  let name: String = componentView(this: world.animateTexts, entityId: entityId).motion
+  var motion: MotionToken = {}
+  if let token: MotionToken = themeMotion(
+    theme: world.theme.resolved
+    name: motionNameOr(world: world, name: name, fallback: "quick")
+  ) {
+    motion = token
+  }
+  var progress: AnimationChannel = createChannel(
+    current: start
+    target: 1.0
+    motion: motion
+    restDistance: animationRestRatio
+  )
+  if uiSystems.animation.settings.hold >= 0.0 {
+    channelHold(channel: progress, share: uiSystems.animation.settings.hold)
+  }
+  componentSet(
+    this: uiSystems.animation.textGhosts
+    entityId: entityId
+    data: TextGhost { text: oldText, progress: progress }
+  )
+}
+
 # Take the requests, and find what has just come to be shown
 func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
+  animationLayoutGlides(world: world, uiSystems: uiSystems)
+  animationTextGhosts(world: world, uiSystems: uiSystems)
   if world.animationRequests.length > 0 {
     let requests: List(AnimationRequest) = own world.animationRequests
     world.animationRequests = List.create(AnimationRequest, cap: 4)

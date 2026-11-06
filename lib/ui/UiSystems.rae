@@ -90,6 +90,15 @@ type AnimationSystem {
   updates: Int = 0
   # The tables animationTriggers last looked at: what moved since says whether to look again
   triggerGeneration: Int = -1
+  # AnimateLayout: each marked node's last laid-out place, and what that was laid out for
+  layoutPlaces: ComponentTable(LayoutPlace)
+  layoutGeneration: Int = -1
+  layoutWidth: Float = 0.0
+  layoutHeight: Float = 0.0
+  # AnimateText: each marked node's last text, and the old text still being drawn
+  textSeens: ComponentTable(TextSeen)
+  textGhosts: ComponentTable(TextGhost)
+  textGeneration: Int = -1
   lastFrameNs: Int = 0
 }
 
@@ -201,6 +210,9 @@ func createUiSystems() ret UiSystems {
       tracks: ComponentTable.create(AnimationTrack)
       poses: ComponentTable.create(AnimationPose)
       commands: createQueue(AnimationCommand)
+      layoutPlaces: ComponentTable.create(LayoutPlace)
+      textSeens: ComponentTable.create(TextSeen)
+      textGhosts: ComponentTable.create(TextGhost)
       settings: animationSettingsFromEnv()
     }
     heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
@@ -238,6 +250,9 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.carouselStates, entityId: entityId)
   componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
   componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+  componentRemove(this: uiSystems.animation.layoutPlaces, entityId: entityId)
+  componentRemove(this: uiSystems.animation.textSeens, entityId: entityId)
+  componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
   componentRemove(this: uiSystems.heroTransition.heroTransitions, entityId: entityId)
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)

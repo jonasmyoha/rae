@@ -41,6 +41,25 @@ type Stagger {
   disappearFrom: StaggerFrom = StaggerFrom.start
 }
 
+# When layout moves this node, it glides from its old place to the new one. Layout runs once and
+# gets the true places; later frames run no layout. Only position glides; size changes at once.
+type AnimateLayout {
+  motion: String = "smooth"
+}
+
+enum AnimateTextKind { fade, roll }
+
+enum RollFrom { below, above }
+
+# When its text changes, the old text goes as the new one comes: `fade`, or `roll` for a clock or a
+# counter, where the new text comes from `rollFrom`. The old text is only drawn, so layout never
+# sees it.
+type AnimateText {
+  kind: AnimateTextKind = AnimateTextKind.fade
+  rollFrom: RollFrom = RollFrom.below
+  motion: String = "quick"
+}
+
 # RUNTIME: a node on its way out. It stays laid out and drawn, and takes no hits and no focus.
 type Leaving {
 }

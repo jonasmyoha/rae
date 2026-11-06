@@ -57,6 +57,10 @@ type AnimationCommand {
   delaySeconds: Float
   phase: AnimationPhase
   onEnd: AnimationEnd
+  # A layout glide: add (glideX, glideY) to where the node is now, and spring x and y back
+  isGlide: Bool = false
+  glideX: Float = 0.0
+  glideY: Float = 0.0
 }
 
 # The settings a run was started with
@@ -73,7 +77,9 @@ func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool 
   if world.animationRequests.length > 0 or queueIsEmpty(this: uiSystems.animation.commands) is false {
     ret true
   }
-  ret uiSystems.animation.settings.hold < 0.0 and componentCount(this: uiSystems.animation.tracks) > 0
+  ret uiSystems.animation.settings.hold < 0.0 and (componentCount(this: uiSystems.animation.tracks) > 0 or componentCount(
+    this: uiSystems.animation.textGhosts
+  ) > 0)
 }
 
 # Arrive at normal place and look from pose `from`, after `delaySeconds`
@@ -149,6 +155,79 @@ func animationLeave(
       phase: AnimationPhase.leaving
       onEnd: onEnd
     }
+  )
+}
+
+# The node just moved by layout: it keeps looking where it was, shifted by (dx, dy), and springs
+# back.
+# Its other channels carry on: a glide can start in the middle of an Appear.
+func animationGlide(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  dx: view Float
+  dy: view Float
+  motion: view String
+) {
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: entityId
+      hasFrom: false
+      from: AnimationPose {}
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: motion
+      delaySeconds: 0.0
+      phase: AnimationPhase.moving
+      onEnd: AnimationEnd.stay
+      isGlide: true
+      glideX: dx
+      glideY: dy
+    }
+  )
+}
+
+func animationApplyGlide(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  command: view AnimationCommand
+  motion: view MotionToken
+) {
+  if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+    let track: mod AnimationTrack = componentMod(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+    )
+    track.x.current = track.x.current + command.glideX
+    track.y.current = track.y.current + command.glideY
+    channelRetarget(channel: track.x, target: track.x.target, motion: motion)
+    channelRetarget(channel: track.y, target: track.y.target, motion: motion)
+    ret
+  }
+  let rest: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+  var start: AnimationPose = rest
+  start.x = start.x + command.glideX
+  start.y = start.y + command.glideY
+  let glide: AnimationCommand = {
+    entityId: entityId
+    hasFrom: true
+    from: start
+    to: rest
+    motion: command.motion
+    opacityMotion: command.motion
+    delaySeconds: 0.0
+    phase: AnimationPhase.moving
+    onEnd: AnimationEnd.stay
+  }
+  componentSet(
+    this: uiSystems.animation.tracks
+    entityId: entityId
+    data: trackFromCommand(
+      command: glide
+      start: start
+      motion: motion
+      opacityMotion: motion
+    )
   )
 }
 
@@ -323,6 +402,9 @@ func animationApplyCommand(
     name: command.opacityMotion
   )
   let settings: AnimationSettings = uiSystems.animation.settings
+  if command.isGlide and settings.off {
+    ret
+  }
   if settings.off {
     animationFinish(
       world: world
@@ -333,7 +415,14 @@ func animationApplyCommand(
     )
     ret
   }
-  if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+  if command.isGlide {
+    animationApplyGlide(
+      uiSystems: uiSystems
+      entityId: entityId
+      command: command
+      motion: motion
+    )
+  } else if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
     let track: mod AnimationTrack = componentMod(
       this: uiSystems.animation.tracks
       entityId: entityId
@@ -373,6 +462,23 @@ func animationApplyCommand(
     channelHold(channel: moved.rotation, share: settings.hold)
   }
   componentSet(this: uiSystems.animation.poses, entityId: entityId, data: poseOfTrack(track: moved))
+}
+
+func animationStepTextGhosts(uiSystems: mod UiSystems, deltaTime: view Float) {
+  var done: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.textGhosts), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.textGhosts, i: i)
+    let ghost: mod TextGhost = componentMod(
+      this: uiSystems.animation.textGhosts
+      entityId: entityId
+    )
+    if channelStep(channel: ghost.progress, deltaTime: deltaTime) {
+      done.add(value: entityId)
+    }
+  }
+  loop let entityId: view EntityId in done {
+    componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
+  }
 }
 
 # One update: drain the inbox, then step every track by `deltaTime` s
@@ -430,6 +536,7 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
       }
     }
   }
+  animationStepTextGhosts(uiSystems: uiSystems, deltaTime: step)
   loop let entityId: view EntityId in ended {
     let track: view AnimationTrack = componentView(
       this: uiSystems.animation.tracks
