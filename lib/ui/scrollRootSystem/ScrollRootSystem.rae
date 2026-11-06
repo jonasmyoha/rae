@@ -436,10 +436,11 @@ func pointerOverScrollRoot(
     this: uiSystems.transform2d.worldTransforms
     entityId: window
   )
-  if x < wt.position.x or x > wt.position.x + r.size.x {
+  let placed: WorldRect = worldRectOf(wt: wt, cr: r)
+  if x < placed.x or x > placed.x + placed.w {
     ret false
   }
-  if y < wt.position.y or y > wt.position.y + r.size.y {
+  if y < placed.y or y > placed.y + placed.h {
     ret false
   }
   ret true

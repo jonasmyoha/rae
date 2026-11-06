@@ -85,6 +85,25 @@ func computedRectOf(
   ret r
 }
 
+# The rectangle a node occupies on screen. Everything that reads a node's place
+# reads this one: the painters, the clips, the hit test. The transform pass has
+# already moved the origin for the node's own pivot, so nothing moves it again.
+type WorldRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func worldRectOf(wt: view WorldTransform2D, cr: view ComputedRect) ret WorldRect {
+  ret WorldRect {
+    x: wt.position.x
+    y: wt.position.y
+    w: cr.size.x * wt.scale.x
+    h: cr.size.y * wt.scale.y
+  }
+}
+
 # Runtime-only translation applied in TRANSFORM (post-layout), not in
 # layout. Scrolling writes this instead of `Offset` so a scroll step
 # reruns only transform (a cheap translation of the subtree) and never
@@ -143,19 +162,22 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
     let cr: view ComputedRect = queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
     let ro: Vec2 = runtimeOffsetOf(world: world, uiSystems: uiSystems, entityId: entityId)
     let fx: TransformFx = fxOf(world: world, entityId: entityId)
-    # The ECS transform rotates about the entity's ORIGIN (its top-left);
-    # TransformFx.pivot asks for a turn about a point inside the box. The
-    # origin is moved so that rotating about it lands the pivot where it was:
-    # origin' = origin + p - R(θ) p, with p the pivot in the box (#1003).
+    # The ECS transform turns and scales about the entity's ORIGIN (its
+    # top-left); TransformFx.pivot asks for both about a point inside the box.
+    # The origin is moved so that the pivot lands where it was:
+    # origin' = origin + p - R(θ) S p, with p the pivot in the box (#1003). The
+    # children fold through this, so a scaled card carries its whole subtree.
     var originX: Float = cr.position.x + ro.x
     var originY: Float = cr.position.y + ro.y
-    if fx.rotation is not 0.0 {
+    if fx.rotation is not 0.0 or fx.scaleX is not 1.0 or fx.scaleY is not 1.0 {
       let pivotX: Float = cr.size.x * fx.pivot.x
       let pivotY: Float = cr.size.y * fx.pivot.y
+      let scaledX: Float = pivotX * fx.scaleX
+      let scaledY: Float = pivotY * fx.scaleY
       let cosR: Float = Math.cos(x: fx.rotation)
       let sinR: Float = Math.sin(x: fx.rotation)
-      originX = originX + pivotX - (pivotX * cosR - pivotY * sinR)
-      originY = originY + pivotY - (pivotX * sinR + pivotY * cosR)
+      originX = originX + pivotX - (scaledX * cosR - scaledY * sinR)
+      originY = originY + pivotY - (scaledX * sinR + scaledY * cosR)
     }
     let local: Transform2D = {
       position: { x: originX, y: originY }
@@ -219,8 +241,8 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
 # NOT a bespoke recursive walk. Three steps: build the per-entity local
 # Transform2D, run transformSystem2D to fold locals into world transforms, and
 # accumulate the alpha/visible WorldVisual cache the geometry system doesn't
-# carry. Because every UI TransformFx is identity scale/rotation, the general
-# per-axis compose reduces to the old translation-only composition — same output.
+# carry. With an identity scale and rotation, the general per-axis compose
+# reduces to translation only.
 func transformSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
   buildLocalTransforms(world: world, uiSystems: uiSystems)
   transformSystem2D(

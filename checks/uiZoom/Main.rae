@@ -1,0 +1,128 @@
+# A TransformFx scale on a whole subtree, painted (docs/ui-animation-design.md section 6): a card
+# with a stroke, a soft shadow, a gradient band, text, an icon and a clipped list, at the scale
+# RAE_UI_ZOOM asks for (1 when unset), about the card's middle. A dashed outline shows where the
+# card is at rest. Every part must sit inside the card, in the same places, at any scale.
+#
+#   RAE_UI_ZOOM=0.5 RAE_HEADLESS_FRAMES=20 RAE_GPU2D_SCREENSHOT=/tmp/zoom.bmp \
+#     compiler/bin/rae run checks/uiZoom/Main.rae
+#
+# The rectangles and the hit test are checked exactly in
+# compiler/tests/cases/1364_ui_zoom_transform.
+# Here: exit 0 when the card's middle stays where it is at rest, through the real pipeline.
+import Gpu2d
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Schedule
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI zoom check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiZoom/card.raescene")
+  if scene.ok is false {
+    log("UI ZOOM FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+
+  var zoom: Float = 1.0
+  let zoomText: String = Sys.getEnv(name: "RAE_UI_ZOOM")
+  if zoomText.length() > 0 {
+    zoom = zoomText.toFloat()
+  }
+  let cardEntityId: EntityId = nodeOf(world: world, nodeId: "Card")
+  componentSet(
+    this: world.transforms
+    entityId: cardEntityId
+    data: TransformFx {
+      scaleX: zoom
+      scaleY: zoom
+      rotation: 0.0
+      alpha: 1.0
+      visible: true
+      pivot: Vec2 { x: 0.5, y: 0.5 }
+      anchor: Vec2 { x: 0.5, y: 0.5 }
+    }
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+
+  # The card's rectangle holds the rest box scaled about its middle (400, 300)
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: cardEntityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: cardEntityId)
+  )
+  let middleX: Float = rect.x + rect.w / 2.0
+  let middleY: Float = rect.y + rect.h / 2.0
+  log("zoom {zoom}: the card at {rect.x} {rect.y} {rect.w} {rect.h}")
+  var exitCode: Int = 0
+  if middleX < 399.5 or middleX > 400.5 or middleY < 299.5 or middleY > 300.5 {
+    log("UI ZOOM FAILED: the card's middle moved to {middleX} {middleY}")
+    exitCode = 1
+  }
+
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 30 {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if exitCode is 0 {
+    log("UI ZOOM OK")
+  }
+  ret exitCode
+}

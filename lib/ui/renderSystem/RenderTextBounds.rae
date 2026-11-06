@@ -1,0 +1,61 @@
+# RenderTextBounds — the measure of a text the gpu2d painter reads: visualBoundsSystem's cache
+# when it holds, scaled to a zoomed size, else a direct measure. Split out of RenderSystem at the
+# 1000-line cap.
+import SdfText
+open ui/Ecs
+open ui/Components
+open ecs/ComponentTable
+open ui/UiSystems
+
+# Paint-side reader: cached bounds when the cache is fresh, else a
+# direct measure (first frame before the system has run, or a node
+# the system doesn't cover). Return matches sdfMeasureTextBounds so
+# call sites are identical; a fresh hit is bit-identical to measuring
+# inline.
+func visualBoundsAt(
+  world: view UiWorld
+  entityId: view EntityId
+  text: view String
+  isIcon: view Bool
+  sizePx: view Float
+  res: view Gpu2dUi
+) ret SdfTextBounds {
+  if componentHas(this: world.visualBounds, entityId: entityId) {
+    let vb: view VisualBounds = componentView(this: world.visualBounds, entityId: entityId)
+    var isFresh: Bool = false
+    if vb.measuredIcon is isIcon {
+      if vb.measuredSize is sizePx {
+        if vb.measuredText is text {
+          isFresh = true
+        }
+      }
+    }
+    if isFresh {
+      ret SdfTextBounds {
+        hasBounds: vb.hasBounds
+        left: vb.left
+        top: vb.top
+        right: vb.right
+        bottom: vb.bottom
+        advance: vb.advance
+      }
+    }
+    # The same text at a zoomed size: the measure scales with the size, so a
+    # zooming card does not measure its text again every frame.
+    if vb.measuredIcon is isIcon and vb.measuredText is text and vb.measuredSize > 0.0 {
+      let ratio: Float = sizePx / vb.measuredSize
+      ret SdfTextBounds {
+        hasBounds: vb.hasBounds
+        left: vb.left * ratio
+        top: vb.top * ratio
+        right: vb.right * ratio
+        bottom: vb.bottom * ratio
+        advance: vb.advance * ratio
+      }
+    }
+  }
+  if isIcon {
+    ret SdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
+  }
+  ret SdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+}

@@ -12,6 +12,7 @@ open ui/UiSystems
 open ui/buttonSystem/ButtonHoverFade
 import ui/Theme
 import ui/ThemeResolved
+open ui/Transform
 
 func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
@@ -50,11 +51,12 @@ func g2dHoverMul(world: view UiWorld, entityId: view EntityId) ret Float {
   ret 1.0
 }
 
-# The box an entity paints into (#1000): its computed size scaled by the
-# accumulated WorldTransform2D scale (TransformFx.scaleX/Y down the tree) and
-# the hover multiplier, placed about the entity's own TransformFx pivot
-# (center when it has none — the hover scale's convention). Rotation is
-# carried by the transform but not drawn: gpu2d has no rotated quads yet.
+# The box an entity paints into (#1000): its world rectangle (ui/Transform
+# worldRectOf), grown by the hover multiplier about the entity's TransformFx pivot
+# (center when it has none). Hover is paint only: its children and its hit test
+# do not move. `scale` is the whole uniform factor, for what zooms with the box: a
+# radius, a blur. Rotation is drawn about the origin
+# (paintEntityG), not here.
 type PaintBox {
   x: Float
   y: Float
@@ -69,44 +71,24 @@ func g2dPaintBox(
   wt: view WorldTransform2D
   cr: view ComputedRect
 ) ret PaintBox {
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
   let hoverMul: Float = g2dHoverMul(world: world, entityId: entityId)
-  let scaleX: Float = wt.scale.x * hoverMul
-  let scaleY: Float = wt.scale.y * hoverMul
   var pivotX: Float = 0.5
   var pivotY: Float = 0.5
-  # The entity's OWN scale (its TransformFx, times hover) grows the box about
-  # its pivot; the scale it INHERITS from ancestors (an editor camera, a scaled
-  # parent) has already placed its origin, so it only sizes the box. Using
-  # the total scale for the pivot offset made every child of a scaled parent
-  # drift by (1 - scale) * pivot of its size.
-  var ownX: Float = hoverMul
-  var ownY: Float = hoverMul
   if componentHas(this: world.transforms, entityId: entityId) {
     let fx: view TransformFx = componentView(this: world.transforms, entityId: entityId)
     pivotX = fx.pivot.x
     pivotY = fx.pivot.y
-    ownX = fx.scaleX * hoverMul
-    ownY = fx.scaleY * hoverMul
   }
-  var inheritedX: Float = 1.0
-  var inheritedY: Float = 1.0
-  if ownX is not 0.0 {
-    inheritedX = scaleX / ownX
-  }
-  if ownY is not 0.0 {
-    inheritedY = scaleY / ownY
-  }
-  let w: Float = cr.size.x * scaleX
-  let h: Float = cr.size.y * scaleY
-  var uniform: Float = scaleX
-  if scaleY < uniform {
-    uniform = scaleY
+  var uniform: Float = wt.scale.x * hoverMul
+  if wt.scale.y * hoverMul < uniform {
+    uniform = wt.scale.y * hoverMul
   }
   ret PaintBox {
-    x: wt.position.x + cr.size.x * inheritedX * (1.0 - ownX) * pivotX
-    y: wt.position.y + cr.size.y * inheritedY * (1.0 - ownY) * pivotY
-    w: w
-    h: h
+    x: rect.x + rect.w * (1.0 - hoverMul) * pivotX
+    y: rect.y + rect.h * (1.0 - hoverMul) * pivotY
+    w: rect.w * hoverMul
+    h: rect.h * hoverMul
     scale: uniform
   }
 }
@@ -160,8 +142,10 @@ func paintShadowG(
   if shadow.hasColor {
     color = shadow.color
   }
-  let step: Float = shadow.blur / layers.toFloat()
-  var offset: Float = shadow.blur / 3.0
+  # The blur is in design units, so a zoomed box's shadow zooms with it
+  let blur: Float = shadow.blur * box.scale
+  let step: Float = blur / layers.toFloat()
+  var offset: Float = blur / 3.0
   if shadow.centered {
     offset = 0.0
   }
@@ -208,10 +192,11 @@ func pushMaskClipG(
     this: uiSystems.transform2d.worldTransforms
     entityId: source
   )
-  var x: Float = wt.position.x
-  var y: Float = wt.position.y
-  var w: Float = cr.size.x * wt.scale.x
-  var h: Float = cr.size.y * wt.scale.y
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  var x: Float = rect.x
+  var y: Float = rect.y
+  var w: Float = rect.w
+  var h: Float = rect.h
   var radius: Float = mask.radius * wt.scale.x
   if mask.kind is MaskKind.circle {
     var diameter: Float = w
