@@ -382,6 +382,12 @@ func main() ret Int {
   )
   log("relay: {componentCountText(relay: scene.relay)}")
 
+  # The second session ends with its host going silent, from here on. Its player leaves first:
+  # were it silent too, the count of timeouts below would depend on the timing. The scan counts
+  # each peer it removes, and a host takes its players with it uncounted, so the total would be
+  # one higher when the player's row came before its host's, which an earlier removal can cause.
+  relayPlayerLeave(player: otherPlayer.relayPlayer, nowMs: nowSinceStart(scene: scene))
+
   # Player 2 goes silent: the relay drops it after 1.5 s and tells the host
   scene.awake.set(index: 1, value: false)
   let leftBefore: Int = scene.host.peersLeft
@@ -406,7 +412,7 @@ func main() ret Int {
       index: 3
     ).relayPlayer.sessionClosed}, state {playerAt(scene: scene, index: 0).relayPlayer.client.state}"
   )
-  # The timeout scan may still be on its way to the second session's peers
+  # The timeout scan may still be on its way to the second session's host
   let emptyBy: Int = deadline(scene: scene)
   loop nowSinceStart(scene: scene) < emptyBy and componentCount(this: scene.relay.peers) > 0 {
     round(scene: scene)
