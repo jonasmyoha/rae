@@ -1,0 +1,97 @@
+# Appear, painted (docs/ui-animation-design.md sections 4, 11): from the scene alone, a header that
+# drops in, a tile that pops, and a list of rows that rise. RAE_ANIMATION_HOLD stops every one at a
+# share of its way, so a picture shows a true middle state, the same every time:
+#
+#   RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 RAE_GPU2D_SCREENSHOT=/tmp/appear.bmp \
+#     compiler/bin/rae run checks/uiAppear/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1368_appear_disappear. Here: exit 0 when the
+# mount started the six tracks through the real pipeline and, with no hold, they end.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Schedule
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationTracks
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI appear check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiAppear/page.raescene")
+  if scene.ok is false {
+    log("UI APPEAR FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+  let started: Int = componentCount(this: uiSystems.animation.tracks)
+  log("the mount started {started} tracks")
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    # With no hold, the check ends a little after the last track
+    if frames > 30 and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let left: Int = componentCount(this: uiSystems.animation.tracks)
+  let held: Bool = uiSystems.animation.settings.hold >= 0.0
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if (started is not 6 and not uiSystems.animation.settings.off) or (left > 0 and not held) {
+    log("UI APPEAR FAILED: {started} tracks started, {left} left")
+    ret 1
+  }
+  log("UI APPEAR OK: {left} left")
+  ret 0
+}

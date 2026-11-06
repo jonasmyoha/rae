@@ -1,0 +1,63 @@
+# The authored components of UI animation (docs/ui-animation-design.md section 4, and
+# docs/ui-scene-format.md), and the two runtime tables that go with them.
+#
+# A field not written takes the default here. `motion` and `opacityMotion` name motion tokens.
+open ecs/Entity
+
+# How a node arrives. The numbers say where it starts from; it ends at its normal place. It plays
+# when the node is mounted and when it comes to be shown again. The start pose applies before the
+# first paint, so a node never flashes at its end place.
+type Appear {
+  motion: String = "lively"
+  opacityMotion: String = "fadeIn"
+  opacity: Float = 0.0
+  scale: Float = 1.0
+  x: Float = 0.0
+  y: Float = 16.0
+  rotation: Float = 0.0
+  delaySeconds: Float = 0.0
+}
+
+# How a node leaves. The numbers say where it ends. See setActiveAnimated and destroyAnimated.
+type Disappear {
+  motion: String = "quick"
+  opacityMotion: String = "fadeOut"
+  opacity: Float = 0.0
+  scale: Float = 0.96
+  x: Float = 0.0
+  y: Float = 0.0
+  rotation: Float = 0.0
+}
+
+enum StaggerFrom { start, end, center, none }
+
+# On a parent or a list: its children's Appear and Disappear start one after another. `maxSeconds`
+# caps the total, so a long list never makes a person wait: the step shrinks to fit. It counts
+# visible children only, and a child outside its parent's box starts at once.
+type Stagger {
+  stepSeconds: Float = 0.028
+  maxSeconds: Float = 0.22
+  appearFrom: StaggerFrom = StaggerFrom.end
+  disappearFrom: StaggerFrom = StaggerFrom.start
+}
+
+# RUNTIME: a node on its way out. It stays laid out and drawn, and takes no hits and no focus.
+type Leaving {
+}
+
+# RUNTIME: animationTriggers' record of a node with one of the components above: whether it was
+# shown
+# when last looked at, and, for the one pass that finds arrivals, its place among them
+type AppearSeen {
+  shown: Bool = false
+  arrived: Bool = false
+  staggered: Bool = false
+  staggerSeconds: Float = 0.0
+}
+
+# A node asked to leave or to come back, for animationTriggers (setActiveAnimated, destroyAnimated)
+type AnimationRequest {
+  entityId: EntityId
+  active: Bool
+  destroy: Bool
+}

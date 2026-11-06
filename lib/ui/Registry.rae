@@ -29,6 +29,7 @@
 # naming one is a hard error, as is a key naming no table at all (#941).
 open ui/RegistryOpt
 open ui/ScenePolicy
+open ui/AnimationComponents
 open ui/RegistryGeneric
 open ui/RegistryValues
 open ui/ContainerStyle
@@ -49,6 +50,8 @@ open ui/RadialGradientFill
 # in step.
 func isRuntimeTable(name: view String) ret Bool {
   let runtime: List(String) = [
+    "Leaving"
+    "AppearSeen"
     "Children"
     "MeasuredSize"
     "MeasuredText"
@@ -257,15 +260,15 @@ func applyComponentByName(
     # The same list as isRuntimeTable, spelled as literal tests so it folds:
     # `typeName(table)` is a literal per table, so this `if` is decided at
     # compile time and an excluded table instantiates no decoder at all.
-    if typeName(table) is not "Children" and typeName(table) is not "VisualBounds" and typeName(
+    if typeName(table) is not "Leaving" and typeName(table) is not "AppearSeen" and typeName(table) is not "Children" and typeName(
       table
-    ) is not "ScrollDrag" and typeName(table) is not "ListReorderDrag" and typeName(table) is not "PaintOnTop" and typeName(
+    ) is not "VisualBounds" and typeName(table) is not "ScrollDrag" and typeName(table) is not "ListReorderDrag" and typeName(
       table
-    ) is not "PresentedPage" and typeName(table) is not "StateStyle" and typeName(table) is not "ListViewData" and typeName(
+    ) is not "PaintOnTop" and typeName(table) is not "PresentedPage" and typeName(table) is not "StateStyle" and typeName(
       table
-    ) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(
+    ) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(table) is not "StyleOverride" and typeName(
       table
-    ) is not "SceneSource" {
+    ) is not "BundleRefs" and typeName(table) is not "SceneSource" {
       if name is authoredNameOf(typeName: typeName(table)) {
         decodeComponent(
           table: table
@@ -419,6 +422,25 @@ func reportPendingComponents(world: mod UiWorld) {
 # The authored shapes that are not field-structural, patched onto the
 # generically decoded component. Each arm is the difference between the JSON
 # grammar and the Rae fields, nothing more.
+# A motion token a component names and no one declares (docs/ui-animation-design.md section 3)
+func reportUnknownMotion(
+  world: mod UiWorld
+  name: view String
+  sceneId: view String
+  nodeId: view String
+) {
+  if themeMotion(theme: world.theme.resolved, name: name) is none {
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: sceneId
+      nodeId: nodeId
+      kind: SceneDiagnosticKind.unknownToken
+      name: name
+      message: "no motion token named {name}; using the default"
+    )
+  }
+}
+
 func applyAuthoredFixups(
   world: mod UiWorld
   entityId: view EntityId
@@ -428,6 +450,42 @@ func applyAuthoredFixups(
   sceneId: view String
   nodeId: view String
 ) {
+  if name is "Appear" {
+    let appear: view Appear = componentView(this: world.appears, entityId: entityId)
+    let motion: String = appear.motion
+    let opacityMotion: String = appear.opacityMotion
+    reportUnknownMotion(
+      world: world
+      name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    reportUnknownMotion(
+      world: world
+      name: opacityMotion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
+  if name is "Disappear" {
+    let disappear: view Disappear = componentView(this: world.disappears, entityId: entityId)
+    let motion: String = disappear.motion
+    let opacityMotion: String = disappear.opacityMotion
+    reportUnknownMotion(
+      world: world
+      name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    reportUnknownMotion(
+      world: world
+      name: opacityMotion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
   if name is "OnClick" {
     # every action id says what it does (ui/ClickTargets)
     reportMissingClickLabels(

@@ -4,6 +4,7 @@ import Easing
 import Math
 open Spring
 open ui/ThemeResolved
+open ui/AnimationComponents
 
 # Relative to the node's laid-out place. A node at rest has none. The transform pass folds it in
 # after Opacity, TransformFx and RuntimeOffset, and only animationSystem writes it. Scale and
@@ -109,6 +110,32 @@ func channelStep(channel: mod AnimationChannel, deltaTime: view Float) ret Bool 
 func channelHold(channel: mod AnimationChannel, share: view Float) {
   channel.current = channel.start + (channel.target - channel.start) * share
   channel.velocity = 0.0
+}
+
+# When child `index` of `count` starts. The step shrinks so the last starts by `maxSeconds`.
+func staggerDelay(
+  index: view Int
+  count: view Int
+  stepSeconds: view Float
+  maxSeconds: view Float
+  from: view StaggerFrom
+) ret Float {
+  if count < 2 or from is StaggerFrom.none {
+    ret 0.0
+  }
+  let last: Float = (count - 1).toFloat()
+  let step: Float = Math.min(a: stepSeconds, b: maxSeconds / last)
+  if from is StaggerFrom.start {
+    ret index.toFloat() * step
+  }
+  if from is StaggerFrom.end {
+    ret (last - index.toFloat()) * step
+  }
+  # From the middle out, so the last start is half as late: `maxSeconds` still caps it
+  ret Math.abs(value: index.toFloat() - last / 2.0) * Math.min(
+    a: stepSeconds
+    b: maxSeconds / (last / 2.0)
+  )
 }
 
 # The testing settings (docs/ui-animation-design.md section 11)

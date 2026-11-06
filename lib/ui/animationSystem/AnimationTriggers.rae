@@ -1,0 +1,423 @@
+# What starts an animation, found from data (docs/ui-animation-design.md section 5). A node with
+# Appear
+# and no record has just been mounted, and one whose record says hidden has come back. It looks only
+# when a table it reads has changed, so an idle UI does nothing here but compare one number.
+#
+# setActiveAnimated and destroyAnimated replace the direct calls wherever a node may have Disappear.
+# With none they act at once, as before. With one, the node stays and gets the marker Leaving, which
+# takes no hits and no focus. When its track ends, the system does the real deactivate or destroy.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+
+func isLeaving(world: view UiWorld, entityId: view EntityId) ret Bool {
+  ret componentHas(this: world.leavings, entityId: entityId)
+}
+
+# No text field in a leaving subtree keeps the focus
+func blurSubtree(world: mod UiWorld, root: view EntityId) {
+  if componentCount(this: world.textFields) is 0 {
+    ret
+  }
+  var subtree: List(EntityId) = List.create(EntityId, cap: 16)
+  collectSubtree(childrens: world.childrens, node: root, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if componentHas(this: world.textFields, entityId: entityId) {
+      if componentView(this: world.textFields, entityId: entityId).focused {
+        componentMod(this: world.textFields, entityId: entityId).focused = false
+      }
+    }
+  }
+}
+
+func hasLeaveMotion(world: view UiWorld, entityId: view EntityId) ret Bool {
+  ret componentHas(this: world.disappears, entityId: entityId) or componentHas(
+    this: world.staggers
+    entityId: entityId
+  )
+}
+
+# Show or hide a node, with its Disappear if it has one. A node not yet looked at has just been
+# mounted, so an override at mount acts at once: it has nothing to leave from.
+func setActiveAnimated(world: mod UiWorld, entityId: view EntityId, active: view Bool) {
+  let seen: Bool = componentHas(this: world.appearSeens, entityId: entityId)
+  if active {
+    if isLeaving(world: world, entityId: entityId) {
+      world.animationRequests.add(
+        value: AnimationRequest { entityId: entityId, active: true, destroy: false }
+      )
+      ret
+    }
+  } else if isLeaving(world: world, entityId: entityId) {
+    ret
+  } else if seen and hasLeaveMotion(world: world, entityId: entityId) {
+    let isActive: Bool = componentHas(this: world.actives, entityId: entityId) is false or componentView(
+      this: world.actives
+      entityId: entityId
+    ).value
+    if isActive {
+      componentSet(this: world.leavings, entityId: entityId, data: Leaving {})
+      blurSubtree(world: world, root: entityId)
+      world.animationRequests.add(
+        value: AnimationRequest { entityId: entityId, active: false, destroy: false }
+      )
+      ret
+    }
+  }
+  componentSet(this: world.actives, entityId: entityId, data: Active { value: active })
+}
+
+# Destroy a node and its subtree, with its Disappear if it has one
+func destroyAnimated(world: mod UiWorld, uiSystems: mod UiSystems, entityId: view EntityId) {
+  if isAlive(world: world, entityId: entityId) is false {
+    ret
+  }
+  if hasLeaveMotion(world: world, entityId: entityId) and componentHas(
+    this: world.appearSeens
+    entityId: entityId
+  ) {
+    componentSet(this: world.leavings, entityId: entityId, data: Leaving {})
+    blurSubtree(world: world, root: entityId)
+    world.animationRequests.add(
+      value: AnimationRequest { entityId: entityId, active: false, destroy: true }
+    )
+    ret
+  }
+  destroyEntitySubtree(world: world, uiSystems: uiSystems, root: entityId)
+}
+
+# A motion name, or `fallback` for a name no one declares: the loader reported that one
+func motionNameOr(world: view UiWorld, name: view String, fallback: view String) ret String {
+  if themeMotion(theme: world.theme.resolved, name: name) is none {
+    ret fallback
+  }
+  ret name
+}
+
+func playAppear(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  extraDelay: view Float
+) {
+  let appear: view Appear = componentView(this: world.appears, entityId: entityId)
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: entityId
+    from: AnimationPose {
+      opacity: appear.opacity
+      scale: appear.scale
+      x: appear.x
+      y: appear.y
+      rotation: appear.rotation
+    }
+    motion: motionNameOr(world: world, name: appear.motion, fallback: "lively")
+    opacityMotion: motionNameOr(world: world, name: appear.opacityMotion, fallback: "fadeIn")
+    delaySeconds: appear.delaySeconds + extraDelay
+  )
+}
+
+func leaveWith(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  delaySeconds: view Float
+  onEnd: view AnimationEnd
+) {
+  var to: AnimationPose = {}
+  var motion: String = "quick"
+  var opacityMotion: String = "fadeOut"
+  if componentHas(this: world.disappears, entityId: entityId) {
+    let disappear: view Disappear = componentView(this: world.disappears, entityId: entityId)
+    to = AnimationPose {
+      opacity: disappear.opacity
+      scale: disappear.scale
+      x: disappear.x
+      y: disappear.y
+      rotation: disappear.rotation
+    }
+    motion = motionNameOr(world: world, name: disappear.motion, fallback: "quick")
+    opacityMotion = motionNameOr(world: world, name: disappear.opacityMotion, fallback: "fadeOut")
+  }
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: entityId
+    to: to
+    motion: motion
+    opacityMotion: opacityMotion
+    delaySeconds: delaySeconds
+    onEnd: onEnd
+  )
+}
+
+# Whether a child overlaps its parent's box: one outside does not count in a stagger
+func childInParentBox(
+  uiSystems: view UiSystems
+  parent: view EntityId
+  child: view EntityId
+) ret Bool {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: child) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: parent
+  ) is false {
+    ret true
+  }
+  let box: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: child)
+  let outer: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: parent
+  )
+  var x: Float = box.position.x
+  var y: Float = box.position.y
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: child) {
+    let moved: view RuntimeOffset = componentView(
+      this: uiSystems.transform2d.runtimeOffsets
+      entityId: child
+    )
+    x = x + moved.delta.x
+    y = y + moved.delta.y
+  }
+  ret x + box.size.x > 0.0 and y + box.size.y > 0.0 and x < outer.size.x and y < outer.size.y
+}
+
+func parentOf(uiSystems: view UiSystems, entityId: view EntityId) ret EntityId {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    ret componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+  }
+  ret noEntity()
+}
+
+# A leaving Stagger parent: its children leave one after another. Returns when the last starts.
+func leaveChildren(world: view UiWorld, uiSystems: mod UiSystems, parent: view EntityId) ret Float {
+  if componentHas(this: world.staggers, entityId: parent) is false or componentHas(
+    this: world.childrens
+    entityId: parent
+  ) is false {
+    ret 0.0
+  }
+  let stagger: view Stagger = componentView(this: world.staggers, entityId: parent)
+  var leavers: List(EntityId) = List.create(EntityId, cap: 8)
+  let children: view Children = componentView(this: world.childrens, entityId: parent)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: world.disappears, entityId: child) and childInParentBox(
+      uiSystems: uiSystems
+      parent: parent
+      child: child
+    ) {
+      leavers.add(value: child)
+    }
+  }
+  var latest: Float = 0.0
+  loop var i: Int = 0, i < leavers.length, ++i {
+    let delay: Float = staggerDelay(
+      index: i
+      count: leavers.length
+      stepSeconds: stagger.stepSeconds
+      maxSeconds: stagger.maxSeconds
+      from: stagger.disappearFrom
+    )
+    latest = Math.max(a: latest, b: delay)
+    leaveWith(
+      world: world
+      uiSystems: uiSystems
+      entityId: leavers.copyAtFallback(index: i, fallback: noEntity())
+      delaySeconds: delay
+      onEnd: AnimationEnd.stay
+    )
+  }
+  ret latest
+}
+
+func takeRequest(world: mod UiWorld, uiSystems: mod UiSystems, request: view AnimationRequest) {
+  let entityId: EntityId = request.entityId
+  if isAlive(world: world, entityId: entityId) is false {
+    ret
+  }
+  if request.active {
+    # Called back mid-way: it turns around from where it is
+    componentRemove(this: world.leavings, entityId: entityId)
+    var motion: String = "quick"
+    var opacityMotion: String = "fadeIn"
+    if componentHas(this: world.appears, entityId: entityId) {
+      let appear: view Appear = componentView(this: world.appears, entityId: entityId)
+      motion = motionNameOr(world: world, name: appear.motion, fallback: "lively")
+      opacityMotion = motionNameOr(world: world, name: appear.opacityMotion, fallback: "fadeIn")
+    }
+    animationTo(
+      uiSystems: uiSystems
+      entityId: entityId
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: opacityMotion
+      delaySeconds: 0.0
+    )
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
+      loop var i: Int = 0, i < children.ids.length, ++i {
+        let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+        if componentHas(this: uiSystems.animation.tracks, entityId: child) {
+          animationTo(
+            uiSystems: uiSystems
+            entityId: child
+            to: AnimationPose {}
+            motion: motion
+            opacityMotion: opacityMotion
+            delaySeconds: 0.0
+          )
+        }
+      }
+    }
+    ret
+  }
+  let latest: Float = leaveChildren(world: world, uiSystems: uiSystems, parent: entityId)
+  var onEnd: AnimationEnd = AnimationEnd.deactivate
+  if request.destroy {
+    onEnd = AnimationEnd.destroySubtree
+  }
+  leaveWith(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    delaySeconds: latest
+    onEnd: onEnd
+  )
+}
+
+# Whether a node and everything above it is active
+func shownInTree(world: view UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop isNone(this: at) is false and guard < 256 {
+    if componentHas(this: world.actives, entityId: at) and componentView(
+      this: world.actives
+      entityId: at
+    ).value is false {
+      ret false
+    }
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+    guard = guard + 1
+  }
+  ret true
+}
+
+# Record a node, and say if it has just come to be shown
+func noteShown(world: mod UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  let shown: Bool = shownInTree(world: world, uiSystems: uiSystems, entityId: entityId)
+  if componentHas(this: world.appearSeens, entityId: entityId) is false {
+    componentSet(this: world.appearSeens, entityId: entityId, data: AppearSeen { shown: shown })
+    ret shown
+  }
+  if componentView(this: world.appearSeens, entityId: entityId).shown is shown {
+    ret false
+  }
+  componentMod(this: world.appearSeens, entityId: entityId).shown = shown
+  ret shown
+}
+
+# The delays of the arrivals under one Stagger parent, in child order: visible ones count
+func staggerArrivals(world: mod UiWorld, uiSystems: view UiSystems, parent: view EntityId) {
+  let stepSeconds: Float = componentView(this: world.staggers, entityId: parent).stepSeconds
+  let maxSeconds: Float = componentView(this: world.staggers, entityId: parent).maxSeconds
+  let from: StaggerFrom = componentView(this: world.staggers, entityId: parent).appearFrom
+  var counted: List(EntityId) = List.create(EntityId, cap: 8)
+  let children: view Children = componentView(this: world.childrens, entityId: parent)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: world.appearSeens, entityId: child) {
+      if componentView(this: world.appearSeens, entityId: child).arrived {
+        if childInParentBox(uiSystems: uiSystems, parent: parent, child: child) {
+          counted.add(value: child)
+        }
+        componentMod(this: world.appearSeens, entityId: child).staggered = true
+      }
+    }
+  }
+  loop var i: Int = 0, i < counted.length, ++i {
+    componentMod(
+      this: world.appearSeens
+      entityId: counted.copyAtFallback(index: i, fallback: noEntity())
+    ).staggerSeconds = staggerDelay(
+      index: i
+      count: counted.length
+      stepSeconds: stepSeconds
+      maxSeconds: maxSeconds
+      from: from
+    )
+  }
+}
+
+func triggerGeneration(world: view UiWorld, uiSystems: view UiSystems) ret Int {
+  ret componentTableGeneration(this: world.appears) + componentTableGeneration(
+    this: world.disappears
+  ) + componentTableGeneration(this: world.staggers) + componentTableGeneration(this: world.actives) + componentTableGeneration(
+    this: uiSystems.hierarchy.parents
+  )
+}
+
+# Take the requests, and find what has just come to be shown
+func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.animationRequests.length > 0 {
+    let requests: List(AnimationRequest) = own world.animationRequests
+    world.animationRequests = List.create(AnimationRequest, cap: 4)
+    loop let request: view AnimationRequest in requests {
+      takeRequest(world: world, uiSystems: uiSystems, request: request)
+    }
+  }
+  let generation: Int = triggerGeneration(world: world, uiSystems: uiSystems)
+  if generation is uiSystems.animation.triggerGeneration {
+    ret
+  }
+  uiSystems.animation.triggerGeneration = generation
+  var arrivals: List(EntityId) = List.create(EntityId, cap: 8)
+  loop var i: Int = 0, i < componentCount(this: world.appears), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.appears, i: i)
+    if noteShown(world: world, uiSystems: uiSystems, entityId: entityId) {
+      componentMod(this: world.appearSeens, entityId: entityId).arrived = true
+      arrivals.add(value: entityId)
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: world.disappears), ++i {
+    let shown: Bool = noteShown(
+      world: world
+      uiSystems: uiSystems
+      entityId: componentEntityAt(this: world.disappears, i: i)
+    )
+  }
+  loop var i: Int = 0, i < componentCount(this: world.staggers), ++i {
+    let shown: Bool = noteShown(
+      world: world
+      uiSystems: uiSystems
+      entityId: componentEntityAt(this: world.staggers, i: i)
+    )
+  }
+  loop let entityId: view EntityId in arrivals {
+    let parent: EntityId = parentOf(uiSystems: uiSystems, entityId: entityId)
+    if isNone(this: parent) is false and componentHas(this: world.staggers, entityId: parent) {
+      if componentView(this: world.appearSeens, entityId: entityId).staggered is false {
+        staggerArrivals(world: world, uiSystems: uiSystems, parent: parent)
+      }
+    }
+  }
+  loop let entityId: view EntityId in arrivals {
+    let seen: mod AppearSeen = componentMod(this: world.appearSeens, entityId: entityId)
+    let extraDelay: Float = seen.staggerSeconds
+    seen.arrived = false
+    seen.staggered = false
+    seen.staggerSeconds = 0.0
+    playAppear(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      extraDelay: extraDelay
+    )
+  }
+}

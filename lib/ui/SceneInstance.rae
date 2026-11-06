@@ -46,6 +46,7 @@ open ui/UiSystems
 open ui/ClickTargets
 open ui/IconCheck
 open ui/ScenePolicy
+open ui/animationSystem/AnimationTriggers
 
 # -----------------------------------------------------------------
 # Types
@@ -712,8 +713,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     if override.fieldName is valueField {
       let trueStr: String = "true"
       let v: Bool = override.valueString is trueStr
-      let active: Active = { value: v }
-      componentSet(this: world.actives, entityId: entityId, data: active)
+      setActiveAnimated(world: world, entityId: entityId, active: v)
     }
     ret
   }

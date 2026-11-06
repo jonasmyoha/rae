@@ -19,8 +19,61 @@ const builtInSwitch: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":52,\"h\":32\},
 
 const builtInCircleButton: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":44,\"h\":44\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"Circle\",\"radius\":0\},\"Layout\":\{\"type\":\"Stack\",\"alignMain\":\"Center\",\"alignCross\":\"Center\"\}\}"
 
+# Motion (docs/ui-animation-design.md section 4): one bundle on a node gives it good motion. A
+# node's
+# own component wins field by field: "bundles": ["appearRise"], "Appear": { "y": 40 }.
+const builtInAppearFade: String = "\{\"Appear\":\{\"motion\":\"smooth\",\"y\":0\}\}"
+
+const builtInAppearRise: String = "\{\"Appear\":\{\"motion\":\"smooth\",\"y\":16\}\}"
+
+const builtInAppearPop: String = "\{\"Appear\":\{\"motion\":\"lively\",\"y\":0,\"scale\":0.86\}\}"
+
+const builtInAppearDrop: String = "\{\"Appear\":\{\"motion\":\"lively\",\"y\":-24\}\}"
+
+const builtInDisappearFade: String = "\{\"Disappear\":\{\"scale\":1\}\}"
+
+const builtInDisappearShrink: String = "\{\"Disappear\":\{\"scale\":0.94\}\}"
+
+const builtInStaggerFromEnd: String = "\{\"Stagger\":\{\"appearFrom\":\"end\",\"disappearFrom\":\"start\"\}\}"
+
+const builtInStaggerFromStart: String = "\{\"Stagger\":\{\"appearFrom\":\"start\",\"disappearFrom\":\"end\"\}\}"
+
+const builtInPressable: String = "\{\"HoverScale\":\{\"pressedScale\":0.96\}\}"
+
+const builtInDialogMotion: String = "\{\"Appear\":\{\"motion\":\"lively\",\"y\":0,\"scale\":0.9\},\"Disappear\":\{\"scale\":0.96\}\}"
+
 # The built-in bundle `name`'s JSON object, or "" when lib/ui has none
 func builtInBundleJson(name: view String) ret String {
+  if name is "appearFade" {
+    ret builtInAppearFade
+  }
+  if name is "appearRise" {
+    ret builtInAppearRise
+  }
+  if name is "appearPop" {
+    ret builtInAppearPop
+  }
+  if name is "appearDrop" {
+    ret builtInAppearDrop
+  }
+  if name is "disappearFade" {
+    ret builtInDisappearFade
+  }
+  if name is "disappearShrink" {
+    ret builtInDisappearShrink
+  }
+  if name is "staggerFromEnd" {
+    ret builtInStaggerFromEnd
+  }
+  if name is "staggerFromStart" {
+    ret builtInStaggerFromStart
+  }
+  if name is "pressable" {
+    ret builtInPressable
+  }
+  if name is "dialogMotion" {
+    ret builtInDialogMotion
+  }
   if name is "circleButton" {
     ret builtInCircleButton
   }

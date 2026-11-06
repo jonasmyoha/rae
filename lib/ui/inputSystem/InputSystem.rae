@@ -93,6 +93,10 @@ func createUiInput() pub ret UiInput {
 }
 
 func uiEntityActive(world: view UiWorld, entityId: view EntityId) ret Bool {
+  # A leaving node and its subtree take no hits (ui/AnimationComponents)
+  if componentHas(this: world.leavings, entityId: entityId) {
+    ret false
+  }
   if componentHas(this: world.actives, entityId: entityId) {
     let active: view Active = componentView(this: world.actives, entityId: entityId)
     ret active.value

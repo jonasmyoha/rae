@@ -37,6 +37,7 @@ open ui/renderSystem/RenderSystem
 open ui/animationSystem/EffectSystems
 open ui/visualBoundsSystem/VisualBoundsSystem
 open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
 open ui/Scene
 open ui/SceneFile
 open ui/SceneRoots
@@ -645,8 +646,7 @@ func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
   if isNone(this: entityId) {
     ret
   }
-  let active: Active = { value: value }
-  componentSet(this: world.actives, entityId: entityId, data: active)
+  setActiveAnimated(world: world, entityId: entityId, active: value)
 }
 
 # Switch a node's HEIGHT sizing policy at runtime. Hug measures from the active
