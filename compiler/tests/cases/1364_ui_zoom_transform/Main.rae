@@ -1,0 +1,245 @@
+# A TransformFx scale acts on a whole subtree about its pivot (docs/ui-animation-design.md
+# section 6): a zoomed card's text, icon, shadow, clipped list and clickable row all land in one
+# place, and the pointer hits them where they are drawn. Everything reads worldRectOf, so this
+# prints the rectangle every painter and the hit test read, and the box the painter draws in.
+open ui/Ecs
+open ui/Components
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/renderSystem/RenderPaintBox
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+func cardScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":400,\"h\":200\},\"Children\":[\"Title\",\"Icon\",\"List\"]\},\"Title\":\{\"Rect\":\{\"x\":20,\"y\":10,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Hello\"\}\},\"Icon\":\{\"Rect\":\{\"x\":340,\"y\":10,\"w\":40,\"h\":40\}\},\"List\":\{\"Rect\":\{\"x\":20,\"y\":60,\"w\":360,\"h\":120\},\"Overflow\":\{\"mode\":\"Clip\"\},\"Children\":[\"Row\"]\},\"Row\":\{\"Rect\":\{\"x\":0,\"y\":20,\"w\":360,\"h\":40\},\"OnClick\":\{\"actionId\":\"row\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func placed(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret "{nodeId} {rect.x} {rect.y} {rect.w} {rect.h}"
+}
+
+func paintBox(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret "{nodeId} paints {box.x} {box.y} {box.w} {box.h} at {box.scale}"
+}
+
+func setFx(
+  world: mod UiWorld
+  nodeId: view String
+  scale: view Float
+  pivotX: view Float
+  pivotY: view Float
+  rotation: view Float
+) {
+  componentSet(
+    this: world.transforms
+    entityId: nodeOf(world: world, nodeId: nodeId)
+    data: TransformFx {
+      scaleX: scale
+      scaleY: scale
+      rotation: rotation
+      alpha: 1.0
+      visible: true
+      pivot: Vec2 { x: pivotX, y: pivotY }
+      anchor: Vec2 { x: 0.5, y: 0.5 }
+    }
+  )
+}
+
+func hitName(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  let hit: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: hit) {
+    ret "({x}, {y}) nothing"
+  }
+  ret "({x}, {y}) Row {hit is nodeOf(world: world, nodeId: "Row")}"
+}
+
+func report(world: mod UiWorld, uiSystems: mod UiSystems, label: view String) {
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("--- {label}")
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Title"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Icon"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "List"))
+  log(placed(world: world, uiSystems: uiSystems, nodeId: "Row"))
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardScene())
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+
+  report(world: world, uiSystems: uiSystems, label: "at rest")
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 130.0
+    y: 200.0
+  ))
+
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 0.5
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+  report(world: world, uiSystems: uiSystems, label: "0.5 about the middle")
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Row"))
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 215.0
+    y: 195.0
+  ))
+  # where the row was before the zoom, and just past its new edge
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 130.0
+    y: 200.0
+  ))
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 215.0
+    y: 215.0
+  ))
+
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 1.2
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+  report(world: world, uiSystems: uiSystems, label: "1.2 about the middle")
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Row"))
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 90.0
+    y: 180.0
+  ))
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 90.0
+    y: 170.0
+  ))
+
+  # the pivot is the fixed point: at a corner the card keeps that corner
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 0.5
+    pivotX: 0.0
+    pivotY: 0.0
+    rotation: 0.0
+  )
+  report(world: world, uiSystems: uiSystems, label: "0.5 about the top left")
+
+  # a zoom inside a zoom folds
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 0.5
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+  setFx(
+    world: world
+    nodeId: "List"
+    scale: 0.5
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+  report(world: world, uiSystems: uiSystems, label: "the list 0.5 in the card 0.5")
+  log(hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 260.0
+    y: 205.0
+  ))
+  setFx(
+    world: world
+    nodeId: "List"
+    scale: 1.0
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+
+  # hover is paint only: the card's box grows about its pivot, and nothing else moves
+  componentSet(
+    this: world.hoverScales
+    entityId: nodeOf(world: world, nodeId: "Card")
+    data: HoverScale { current: 1.1 }
+  )
+  report(world: world, uiSystems: uiSystems, label: "0.5 with a hover of 1.1")
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Card"))
+  log(paintBox(world: world, uiSystems: uiSystems, nodeId: "Title"))
+  componentRemove(this: world.hoverScales, entityId: nodeOf(world: world, nodeId: "Card"))
+
+  # a turn and a zoom about the same point: the pivot stays (a quarter turn, about the middle)
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 0.5
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 1.5707964
+  )
+  transformSystem(world: world, uiSystems: uiSystems)
+  let turned: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: nodeOf(world: world, nodeId: "Card")
+  )
+  log("turned: origin {turned.position.x.toInt()} {turned.position.y.toInt()}")
+}

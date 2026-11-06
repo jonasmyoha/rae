@@ -262,6 +262,14 @@ card shows its background through its text, and overlapping children show each o
 At the speed and the sizes used here this looks like a normal fade, so offscreen group
 rendering is not in this design (section 15).
 
+Done in 0.3.17 for `TransformFx`; the pose comes with the core. `worldRectOf` is in
+lib/ui/Transform.rae. A shadow's blur and a text shadow's offset scale with the box, and a
+hover grows a blur by its small factor. `visualBoundsAt` scales its cached measure, so a
+zooming card does not measure its text every frame. **A stroke keeps its width:** the UI
+editor's guides, outlines and marquee are strokes inside its camera, and they must stay
+readable at any zoom, so a stroke that scales needs a way to say which is which. Case 1364 holds the rectangles and the hit test, `checks/uiZoom` paints it, and
+at scale 1 example 106 is the same to the pixel. Pictures: docs/images/ui-zoom.
+
 ## 7. Lists
 
 `listMotionSystem` stays the owner of what a row does, and asks `animationSystem` for

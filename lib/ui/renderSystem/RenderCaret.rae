@@ -10,6 +10,7 @@ open ui/TextStyle
 open ui/UiSystems
 open ui/renderSystem/RenderPaintBox
 open ui/renderSystem/RenderSystem
+open ui/Transform
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Transform
@@ -36,13 +37,14 @@ func paintCaretG(
   if text.text.length() > 0 {
     advance = SdfText.sdfMeasureTextBounds(font: res.textFont, text: text.text, sizePx: size).advance
   }
-  let boxW: Float = cr.size.x * wt.scale.x
-  let boxH: Float = cr.size.y * wt.scale.y
-  var x: Float = wt.position.x + advance
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  let boxW: Float = rect.w
+  let boxH: Float = rect.h
+  var x: Float = rect.x + advance
   if resolveTextIsCentered(theme: res.theme, styleId: text.styleId) {
-    x = wt.position.x + boxW / 2.0 + advance / 2.0
+    x = rect.x + boxW / 2.0 + advance / 2.0
   } else if resolveTextIsRightAligned(theme: res.theme, styleId: text.styleId) {
-    x = wt.position.x + boxW
+    x = rect.x + boxW
   }
   let height: Float = size * 1.15
   var width: Float = size * 0.08
@@ -51,9 +53,9 @@ func paintCaretG(
   }
   # centered in the line's box, or from its top when the box is shorter
   # than a line
-  var top: Float = wt.position.y + (boxH - height) / 2.0
+  var top: Float = rect.y + (boxH - height) / 2.0
   if boxH < height {
-    top = wt.position.y
+    top = rect.y
   }
   let color: RgbaColor = resolveTextColor(
     theme: res.theme

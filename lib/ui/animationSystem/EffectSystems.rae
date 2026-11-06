@@ -17,6 +17,7 @@ open ecs/ComponentTable
 open ecs/Query
 open ecs/Event
 open ui/UiSystems
+open ui/Transform
 
 const twoPi: Float = 6.28318530718
 
@@ -351,7 +352,8 @@ func pointOverEntity(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
-  ret x >= transform.position.x and y >= transform.position.y and x <= transform.position.x + rect.size.x and y <= transform.position.y + rect.size.y
+  let placed: WorldRect = worldRectOf(wt: transform, cr: rect)
+  ret x >= placed.x and y >= placed.y and x <= placed.x + placed.w and y <= placed.y + placed.h
 }
 
 func childStrideX(
