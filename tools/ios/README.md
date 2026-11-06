@@ -164,6 +164,11 @@ docs/local-notifications.md):
     APP=<bundle id> PLACES="name|x y" AT_ENV=<the app's start-spot variable> \
       COOL_WAIT=180 tools/ios/profile-ios.sh <device id> [seconds per place]
 
+It stops at the first launch or log copy that fails and at a total time limit
+(`TOTAL_SECONDS`, 30 minutes), says so with a `STOPPED` line and exits 1.
+`tools/profile-desktop.sh` prints the same summary on a desktop, so start a comparison
+there. The GPU slots in it are not costs: docs/profiling.md, "What to trust".
+
 One run per place with GPU pass and frame timing on (the app's
 app3d/FrameLog `[frames]` lines among them), cooling between runs if asked,
 each log copied off the phone and summarized (median and 95th percentile

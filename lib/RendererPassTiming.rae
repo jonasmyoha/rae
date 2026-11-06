@@ -3,9 +3,11 @@
 # many ways (manager recordings, raw encoders, compute, the 2D canvas), so
 # they are not timed one by one: the renderer submits a timestamp mark
 # (gpu/GpuTiming recordTimingMark) before each pass of its graph and one after
-# the last. The queue runs in submission order, so the time between two marks
-# is the GPU time of the pass between them. The readback never blocks: a
-# frame's marks are resolved with its last mark, read back a few frames later,
+# the last. The queue runs in submission order, but a mark does not wait for what is before it:
+# on a tile-based GPU (a phone, an Apple Silicon Mac) a pass's vertex and tile work and the GPU's
+# idle time land between later marks. So the span between two marks is when the timestamps
+# landed, not what the pass costs (docs/profiling.md; RAE_AB measures a cost). The readback never
+# blocks: a frame's marks are resolved with its last mark, read back a few frames later,
 # and a new frame is timed only once the last one has landed.
 #
 # It runs under RAE_GPU_PASS_TIMING=1, which also logs a "[gpu passes]"
