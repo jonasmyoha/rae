@@ -64,6 +64,8 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open app3d/FrameLog
+open DrawStats
+open ShadowMapsRecords
 open Gpu2dCanvas
 open ui/UiSystems
 open app3d/WalkerCharacter
@@ -245,15 +247,18 @@ func renderShadowPass(
   if inputSystem.settings.shadows {
     beginShadowPass(renderer: renderSystem.renderer, c: cascades)
     drawTerrainPropsShadow(renderer: renderSystem.renderer, terrainSystem: terrainSystem)
+    renderSystem.renderer.passes.shadow.drawKind = DrawKind.referenceTree
     if let tree: view ReferenceTree = renderSystem.referenceTree {
       drawReferenceTreeShadow(tree: tree, renderer: renderSystem.renderer)
     }
+    renderSystem.renderer.passes.shadow.drawKind = DrawKind.cubes
     drawPhysicsCubesShadow(
       renderer: renderSystem.renderer
       batch: renderSystem.cubeBatch
       physicsSystem: physicsSystem
       world: world
     )
+    renderSystem.renderer.passes.shadow.drawKind = DrawKind.characters
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: characterSystem.skeleton)
@@ -273,6 +278,8 @@ func renderShadowPass(
       }
     }
     endShadowPass(renderer: renderSystem.renderer)
+  } else {
+    shadowResetDrawStats(shadow: renderSystem.renderer.passes.shadow)
   }
   if renderSystem.shadowLogged is false {
     log(
@@ -354,6 +361,7 @@ func drawWalkerScene(
   grassCompute: mod GrassCompute
   resources: mod GpuResources
 ) {
+  cache.drawKind = DrawKind.ground
   drawTerrainGround(
     cache: cache
     resources: rendererResources
@@ -361,6 +369,7 @@ func drawWalkerScene(
     time: t
   )
   drawTerrainProps(cache: cache, resources: rendererResources, terrainSystem: terrainSystem)
+  cache.drawKind = DrawKind.cubes
   drawPhysicsCubes(
     cache: cache
     resources: rendererResources
@@ -369,6 +378,7 @@ func drawWalkerScene(
     world: world
     toon: characterSystem.toon
   )
+  cache.drawKind = DrawKind.characters
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderWalkerApp;
   # the hero's is re-written here into the cache's palette (slot 0).
   let jc: Int = jointCount(sk: characterSystem.skeleton)

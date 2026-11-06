@@ -78,6 +78,8 @@ type GrassCompute {
   report: Bool = false
   reportFrame: Int = 0
   shapeOverride: Int = -1
+  # Vertices of one blade, as the last frame drew it (triangles, three vertices each)
+  drawnBladeVertices: Int = 0
   images: SurfaceImages = {}
   computeShaderSet: Bool
   computeShader: Shader
@@ -777,6 +779,7 @@ func grassGenerate(
 
   # Reset the indirect args so this frame's atomic append counts from 0.
   resetArgs(writer: grass.resetArgs)
+  grass.drawnBladeVertices = GrassConfig.grassVertexCount(shape: shape)
   pushU32(writer: grass.resetArgs, value: GrassConfig.grassVertexCount(shape: shape))
   pushU32(writer: grass.resetArgs, value: 0)
   pushU32(writer: grass.resetArgs, value: 0)
@@ -860,6 +863,11 @@ func grassDraw(
       indirect: bufferRef(id: grass.indirect)
     )
   }
+}
+
+# Triangles of one blade, as the last frame drew it
+func grassBladeTriangles(grass: view GrassCompute) ret Int {
+  ret grass.drawnBladeVertices / 3
 }
 
 # Total candidate blades the compute considers each frame (#488 diagnostics).

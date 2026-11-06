@@ -1,0 +1,103 @@
+# DrawStats — what a pass drew this frame: instances and triangles by kind of thing. The
+# frame log prints it (app3d/FrameLog), since resident triangles say what is loaded, not what
+# a frame costs. The caller says which kind it is drawing; the pass counts. Pure.
+enum DrawKind {
+  other
+  ground
+  rocks
+  bushes
+  meadow
+  forest
+  characters
+  cubes
+  grass
+  marks
+  referenceTree
+}
+
+const drawKindCount: Int = 11
+
+type DrawStats {
+  instances: List(Int)
+  triangles: List(Int)
+}
+
+func createDrawStats() ret DrawStats {
+  var instances: List(Int) = List.create(Int, cap: drawKindCount)
+  var triangles: List(Int) = List.create(Int, cap: drawKindCount)
+  loop var kind: Int = 0, kind < drawKindCount, ++kind {
+    instances.add(value: 0)
+    triangles.add(value: 0)
+  }
+  ret DrawStats { instances: own instances, triangles: own triangles }
+}
+
+func drawStatsReset(stats: mod DrawStats) {
+  loop var kind: Int = 0, kind < drawKindCount, ++kind {
+    stats.instances.set(index: kind, value: 0)
+    stats.triangles.set(index: kind, value: 0)
+  }
+}
+
+# `triangles` is the total of all the `instances`
+func drawStatsAdd(
+  stats: mod DrawStats
+  kind: view DrawKind
+  instances: view Int
+  triangles: view Int
+) {
+  let at: Int = kind as Int
+  stats.instances.set(
+    index: at
+    value: stats.instances.copyAtFallback(index: at, fallback: 0) + instances
+  )
+  stats.triangles.set(
+    index: at
+    value: stats.triangles.copyAtFallback(index: at, fallback: 0) + triangles
+  )
+}
+
+func drawStatsInstances(stats: view DrawStats, kind: view DrawKind) ret Int {
+  ret stats.instances.copyAtFallback(index: kind as Int, fallback: 0)
+}
+
+func drawStatsTriangles(stats: view DrawStats, kind: view DrawKind) ret Int {
+  ret stats.triangles.copyAtFallback(index: kind as Int, fallback: 0)
+}
+
+func drawStatsTotalInstances(stats: view DrawStats) ret Int {
+  var total: Int = 0
+  loop let count: view Int in stats.instances {
+    total = total + count
+  }
+  ret total
+}
+
+func drawStatsTotalTriangles(stats: view DrawStats) ret Int {
+  var total: Int = 0
+  loop let count: view Int in stats.triangles {
+    total = total + count
+  }
+  ret total
+}
+
+# "[draws] <name>: <n> instances, <n> triangles; <kind> <n> instances <n> triangles, ..."
+func drawStatsLine(name: view String, stats: view DrawStats) ret String {
+  let instances: Int = drawStatsTotalInstances(stats: stats)
+  let triangles: Int = drawStatsTotalTriangles(stats: stats)
+  if instances is 0 and triangles is 0 {
+    ret "[draws] {name}: nothing"
+  }
+  var kinds: String = ""
+  loop var kind: Int = 0, kind < drawKindCount, ++kind {
+    let kindInstances: Int = stats.instances.copyAtFallback(index: kind, fallback: 0)
+    let kindTriangles: Int = stats.triangles.copyAtFallback(index: kind, fallback: 0)
+    if kindInstances > 0 or kindTriangles > 0 {
+      if kinds.length() > 0 {
+        kinds = "{kinds}, "
+      }
+      kinds = "{kinds}{(kind as DrawKind).toString()} {kindInstances} instances {kindTriangles} triangles"
+    }
+  }
+  ret "[draws] {name}: {instances} instances, {triangles} triangles; {kinds}"
+}

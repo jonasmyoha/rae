@@ -394,12 +394,25 @@ func beginWalkerFrame(app: mod WalkerApp) {
   # drops hung still)
   app.frame.time = app.frame.time + deltaTime
   if app.renderSystem.frameLogOn {
-    frameLogUpdate(
+    if frameLogUpdate(
       frameLog: app.renderSystem.frameLog
       deltaTime: deltaTime
       drs: app.renderSystem.drs
       renderer: app.renderSystem.renderer
-    )
+    ) {
+      # The grass's count is on the GPU: this read waits for it, so only here, once a line
+      var grassBlades: Int = 0
+      if let resources: mod GpuResources = app.gpuResources {
+        if let visible: Int = grassReadVisible(grass: app.grassCompute, resources: resources) {
+          grassBlades = visible
+        }
+      }
+      frameLogDraws(
+        renderer: app.renderSystem.renderer
+        grassBlades: grassBlades
+        grassTriangles: grassBlades * grassBladeTriangles(grass: app.grassCompute)
+      )
+    }
   }
 }
 

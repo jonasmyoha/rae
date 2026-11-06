@@ -6,8 +6,10 @@
 # (the 3D scene's size in pixels, the dynamic scale, the frame cap, the OS
 # thermal state). On a phone the line lands in the app's log file, where a
 # device profile (tools/ios/profile-ios.sh) reads it. The line's rules are
-# pure.
+# pure. After it, one "[draws]" line a pass (lib/DrawStats): what the last frame's
+# G-buffer or pre-pass, forward pass and each shadow cascade drew, by kind.
 import Math
+open DrawStats
 open RendererDeferred
 open app3d/RenderScale
 
@@ -96,19 +98,19 @@ func createFrameLog() ret FrameLog {
 }
 
 # One frame of `deltaTime` s: collected, and the line logged when one is due,
-# from the controller `drs` and the scene `renderer` draws
+# from the controller `drs` and the scene `renderer` draws. True when it logged.
 func frameLogUpdate(
   frameLog: mod FrameLog
   deltaTime: view Float
   drs: view RenderScaleController
   renderer: view DeferredRenderer
-) {
+) ret Bool {
   if deltaTime > 0.0 {
     frameLog.times.add(value: deltaTime)
     frameLog.sinceLog = frameLog.sinceLog + deltaTime
   }
   if frameLogDue(sinceLog: frameLog.sinceLog) is false {
-    ret
+    ret false
   }
   log(frameLogLine(
     frameTimes: frameLog.times
@@ -121,4 +123,39 @@ func frameLogUpdate(
   ))
   frameLog.times.clear()
   frameLog.sinceLog = 0.0
+  ret true
+}
+
+# The "[draws]" lines of the frame just drawn. Grass is drawn by a count on the GPU, so the
+# caller reads it back and hands it in, for each pass that draws the scene.
+func frameLogDraws(
+  renderer: mod DeferredRenderer
+  grassBlades: view Int
+  grassTriangles: view Int
+) {
+  if drawStatsTotalInstances(stats: renderer.passes.gbuffer.drawStats) > 0 {
+    drawStatsAdd(
+      stats: renderer.passes.gbuffer.drawStats
+      kind: DrawKind.grass
+      instances: grassBlades
+      triangles: grassTriangles
+    )
+  }
+  if drawStatsTotalInstances(stats: renderer.passes.gbuffer.forwardDrawStats) > 0 {
+    drawStatsAdd(
+      stats: renderer.passes.gbuffer.forwardDrawStats
+      kind: DrawKind.grass
+      instances: grassBlades
+      triangles: grassTriangles
+    )
+    log(drawStatsLine(name: "pre-pass", stats: renderer.passes.gbuffer.drawStats))
+    log(drawStatsLine(name: "forward", stats: renderer.passes.gbuffer.forwardDrawStats))
+  } else {
+    log(drawStatsLine(name: "gbuffer", stats: renderer.passes.gbuffer.drawStats))
+  }
+  loop var cascade: Int = 0, cascade < renderer.passes.shadow.cascadeCount, ++cascade {
+    if let stats: view DrawStats = renderer.passes.shadow.drawStats.viewAt(index: cascade) {
+      log(drawStatsLine(name: "shadow cascade {cascade}", stats: stats))
+    }
+  }
 }

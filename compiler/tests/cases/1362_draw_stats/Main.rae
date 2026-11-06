@@ -1,0 +1,55 @@
+# lib/DrawStats: what a pass drew, by kind, and the line the frame log prints for it. Every
+# kind is counted on its own, a reset forgets all of them, and a kind that drew nothing is
+# left out of the line.
+open DrawStats
+
+func main() {
+  var stats: DrawStats = createDrawStats()
+  log(drawStatsLine(name: "gbuffer", stats: stats))
+  drawStatsAdd(
+    stats: stats
+    kind: DrawKind.forest
+    instances: 10
+    triangles: 1000
+  )
+  drawStatsAdd(
+    stats: stats
+    kind: DrawKind.ground
+    instances: 1
+    triangles: 200
+  )
+  drawStatsAdd(
+    stats: stats
+    kind: DrawKind.forest
+    instances: 5
+    triangles: 500
+  )
+  log("forest {drawStatsInstances(stats: stats, kind: DrawKind.forest)} instances")
+  log("forest {drawStatsTriangles(stats: stats, kind: DrawKind.forest)} triangles")
+  log("rocks {drawStatsTriangles(stats: stats, kind: DrawKind.rocks)} triangles")
+  log("total {drawStatsTotalInstances(stats: stats)} {drawStatsTotalTriangles(stats: stats)}")
+  log(drawStatsLine(name: "gbuffer", stats: stats))
+  # The size of what went unnoticed: 125 patches of 56,000 triangles
+  drawStatsAdd(
+    stats: stats
+    kind: DrawKind.other
+    instances: 125
+    triangles: 125 * 56000
+  )
+  log(drawStatsLine(name: "shadow cascade 0", stats: stats))
+  # Every kind has a name and a slot of its own
+  loop var kind: Int = 0, kind < drawKindCount, ++kind {
+    drawStatsAdd(
+      stats: stats
+      kind: kind as DrawKind
+      instances: 1
+      triangles: 1
+    )
+  }
+  log("after one of each: {drawStatsTotalInstances(stats: stats)}")
+  drawStatsReset(stats: stats)
+  log(
+    "after a reset: {drawStatsTotalInstances(stats: stats)} {drawStatsTotalTriangles(stats: stats)}"
+  )
+  log(drawStatsLine(name: "gbuffer", stats: stats))
+}
