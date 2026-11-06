@@ -49,6 +49,9 @@ open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open ui/RegistryGeneric
 open ui/UiSystems
+open ui/listMotionSystem/ListMotionRules
+open ui/listMotionSystem/ListMotionSystem
+open ui/listViewSystem/ListViewFlow
 
 # The nodeId page a pooled row's sub-scene is mounted under, so several rows
 # of the same scene coexist in `world.nodeIds`.
@@ -552,13 +555,25 @@ func listViewSyncEntity(
 
     let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
 
-    # Snapshot the current pool (the ListView's row-root children).
+    let plan: ListRowsPlan = listMotionBeforeRows(
+      world: world
+      uiSystems: uiSystems
+      listEntityId: entityId
+      listView: lv
+      first: first
+      target: target
+    )
+
+    # Snapshot the current pool (the ListView's row-root children), but its ghosts.
     var pool: List(EntityId) = List.create(EntityId, cap: windowCount + 2)
     if componentHas(this: world.childrens, entityId: entityId) {
       let ch: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
       loop i < ch.ids.length {
-        pool.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
+        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        if componentHas(this: world.leavings, entityId: child) is false {
+          pool.add(value: child)
+        }
         i = i + 1
       }
     }
@@ -589,6 +604,13 @@ func listViewSyncEntity(
       poolCount = poolCount + 1
     }
 
+    listMotionPlaceRows(
+      world: world
+      listEntityId: entityId
+      plan: plan
+      target: target
+    )
+
     # Re-snapshot the pool (post grow/shrink) in stable child order, then
     # re-point each slot at its data row.
     var rows2: List(EntityId) = List.create(EntityId, cap: target)
@@ -596,11 +618,21 @@ func listViewSyncEntity(
       let ch: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
       loop i < ch.ids.length {
-        rows2.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
+        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        if componentHas(this: world.leavings, entityId: child) is false {
+          rows2.add(value: child)
+        }
         i = i + 1
       }
     }
     if count is 0 {
+      listMotionAfterRows(
+        world: world
+        uiSystems: uiSystems
+        listEntityId: entityId
+        listView: lv
+        first: first
+      )
       ret
     }
     let data: view ListViewData = componentView(this: world.listViewDatas, entityId: entityId)
@@ -622,6 +654,13 @@ func listViewSyncEntity(
       )
       s = s + 1
     }
+    listMotionAfterRows(
+      world: world
+      uiSystems: uiSystems
+      listEntityId: entityId
+      listView: lv
+      first: first
+    )
   }
 }
 
@@ -653,310 +692,6 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
     }
   }
   ret "{index}"
-}
-
-# A flow row's size. The container's INNER width (its laid-out ComputedRect,
-# else its authored Rect, else the page extent, minus its Padding) is the
-# reference: with `fitToColumns` the
-# side is that width split by the Grid layout's columns and gap (a cover
-# grid's tile); otherwise the row is `itemWidth` wide (0 = the inner width, a
-# full-width track row) and `itemHeight` tall (0 = square).
-func listViewFlowRowSize(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  listEntityId: view EntityId
-  lv: view ListView
-) ret Vec2 {
-  # The laid-out width is authoritative once layout has run; before the first
-  # layout (the mount that fills the list) the authored Rect stands in, so the
-  # rows exist for that first layout pass and are resized on the next frame.
-  var containerW: Float = 0.0
-  if componentHas(this: uiSystems.layout.computedRects, entityId: listEntityId) {
-    containerW = componentView(this: uiSystems.layout.computedRects, entityId: listEntityId).size.x
-  }
-  if containerW <= 0.0 and componentHas(this: world.rects, entityId: listEntityId) {
-    containerW = componentView(this: world.rects, entityId: listEntityId).size.x
-  }
-  if containerW <= 0.0 {
-    containerW = world.layoutW
-  }
-  if componentHas(this: world.paddings, entityId: listEntityId) {
-    let pad: view Padding = componentView(this: world.paddings, entityId: listEntityId)
-    containerW = containerW - pad.insets.l - pad.insets.r
-  }
-  var w: Float = lv.itemWidth
-  var h: Float = lv.itemHeight
-  if lv.fitToColumns {
-    var cols: Int = 1
-    var gap: Float = 0.0
-    if componentHas(this: world.layouts, entityId: listEntityId) {
-      let layout: view Layout = componentView(this: world.layouts, entityId: listEntityId)
-      if layout.columns > 1 {
-        cols = layout.columns
-      }
-      gap = layout.columnGap
-    }
-    let side: Float = (containerW - gap * (cols - 1).toFloat()) / cols.toFloat()
-    w = side
-    h = side
-  }
-  if w <= 0.0 {
-    w = containerW
-  }
-  if h <= 0.0 {
-    h = w
-  }
-  ret Vec2 { x: w, y: h }
-}
-
-# Build one flow row: the row root, sized, with its sub-scene mounted under
-# the row's own nodeId page and its identity recorded for the next rebind.
-func listViewBuildFlowRow(
-  world: mod UiWorld
-  uiSystems: mod UiSystems
-  lv: view ListView
-  sceneId: view String
-  key: view String
-  size: view Vec2
-  scenes: view SceneRegistry
-) ret EntityId {
-  let rowRoot: EntityId = createEntity(world: world)
-  let identity: ListViewRowKey = { key: "{key}", sceneId: "{sceneId}" }
-  componentSet(this: world.listViewRowKeys, entityId: rowRoot, data: identity)
-  if let idx: Int = sceneRegistryIndex(reg: scenes, key: sceneId) {
-    let scene: view Scene = sceneRegistryGet(reg: scenes, idx: idx)
-    # The row root IS the scene's root (#990, host-less): its authored
-    # placement — `Size`, `Align`, `Layout` — applies, the container's
-    # Layout places it, and only its Rect is the list's row size.
-    let overrides: List(SceneOverride) = emptyOverrides()
-    mountSceneInstanceImpl(
-      world: world
-      uiSystems: uiSystems
-      mountEntityId: rowRoot
-      scene: scene
-      overrides: overrides
-      pageId: listViewRowPage(rowRoot: rowRoot)
-      keepRootPlacement: true
-      markSourceRoot: true
-    )
-  } else {
-    # No sub-scene: one bare child per distinct binding node id (skeleton row).
-    let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
-    var k: Int = 0
-    loop k < distinct.length {
-      let child: EntityId = createEntity(world: world)
-      setParent(
-        parents: uiSystems.hierarchy.parents
-        childrens: world.childrens
-        child: child
-        parent: rowRoot
-      )
-      k = k + 1
-    }
-  }
-  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: size.x, y: size.y } }
-  componentSet(this: world.rects, entityId: rowRoot, data: r)
-  ret rowRoot
-}
-
-# One flow-mode ListView: reconcile its child rows to the data rows by key.
-func listViewSyncFlow(
-  world: mod UiWorld
-  uiSystems: mod UiSystems
-  entityId: view EntityId
-  scenes: view SceneRegistry
-) {
-  unsafe {
-    let lv: view ListView = componentView(this: world.listViews, entityId: entityId)
-    var count: Int = 0
-    if componentHas(this: world.listViewDatas, entityId: entityId) {
-      count = componentView(this: world.listViewDatas, entityId: entityId).rows.length
-    }
-    # Snapshot the current rows (children carrying a ListViewRowKey).
-    var existing: List(EntityId) = List.create(EntityId, cap: count + 4)
-    if componentHas(this: world.childrens, entityId: entityId) {
-      let ch: view Children = componentView(this: world.childrens, entityId: entityId)
-      var i: Int = 0
-      loop i < ch.ids.length {
-        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-        if componentHas(this: world.listViewRowKeys, entityId: child) {
-          existing.add(value: child)
-        }
-        i = i + 1
-      }
-    }
-    var reused: List(Bool) = List.create(Bool, cap: existing.length)
-    loop let unused: view EntityId in existing {
-      reused.add(value: false)
-    }
-    let size: Vec2 = listViewFlowRowSize(
-      world: world
-      uiSystems: uiSystems
-      listEntityId: entityId
-      lv: lv
-    )
-    var ordered: List(EntityId) = List.create(EntityId, cap: count)
-    let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
-    var d: Int = 0
-    loop d < count {
-      let data: view ListViewData = componentView(this: world.listViewDatas, entityId: entityId)
-      let row: ListViewRow = rae_ext_rae_buf_get(buf: data.rows.data, index: d)
-      let key: String = listViewRowKeyOf(lv: lv, row: row, index: d)
-      let sceneId: String = listViewRowSceneId(lv: lv, row: row)
-      # Reuse the row entity built for this key + scene, if it is still here.
-      var rowRoot: EntityId = noEntity()
-      var e: Int = 0
-      loop e < existing.length and isNone(this: rowRoot) {
-        if reused.copyAtFallback(index: e, fallback: true) is false {
-          let candidate: EntityId = rae_ext_rae_buf_get(buf: existing.data, index: e)
-          let identity: view ListViewRowKey = componentView(
-            this: world.listViewRowKeys
-            entityId: candidate
-          )
-          if identity.key is key and identity.sceneId is sceneId {
-            rowRoot = candidate
-            reused.set(index: e, value: true)
-          }
-        }
-        e = e + 1
-      }
-      if isNone(this: rowRoot) {
-        rowRoot = listViewBuildFlowRow(
-          world: world
-          uiSystems: uiSystems
-          lv: lv
-          sceneId: sceneId
-          key: key
-          size: size
-          scenes: scenes
-        )
-        setParent(
-          parents: uiSystems.hierarchy.parents
-          childrens: world.childrens
-          child: rowRoot
-          parent: entityId
-        )
-      } else if componentHas(this: world.rects, entityId: rowRoot) {
-        # The container may have been resized since the row was built.
-        let currentSize: Vec2 = componentView(this: world.rects, entityId: rowRoot).size
-        if currentSize.x is not size.x or currentSize.y is not size.y {
-          let rect: mod Rect = componentMod(this: world.rects, entityId: rowRoot)
-          rect.size = Vec2 { x: size.x, y: size.y }
-        }
-      }
-      ordered.add(value: rowRoot)
-      let sceneRow: Bool = sceneId.length() > 0 and sceneRegistryHas(reg: scenes, key: sceneId)
-      listViewApplyFlowRow(
-        world: world
-        rowRoot: rowRoot
-        lv: lv
-        distinct: distinct
-        row: row
-        sceneRow: sceneRow
-      )
-      d = d + 1
-    }
-    # Destroy the rows whose key went away.
-    var e2: Int = 0
-    loop e2 < existing.length {
-      if reused.copyAtFallback(index: e2, fallback: true) is false {
-        let victim: EntityId = rae_ext_rae_buf_get(buf: existing.data, index: e2)
-        destroyEntitySubtree(world: world, uiSystems: uiSystems, root: victim)
-      }
-      e2 = e2 + 1
-    }
-    # Children order = data order (any non-row children keep their place
-    # ahead of the rows). Compare through a `view` first and take the `mod`
-    # borrow only when the order actually changed: componentMod bumps the
-    # Children generation eagerly, so an unconditional borrow would re-dirty
-    # layout every frame even when nothing moved (an idle busy-loop).
-    if componentHas(this: world.childrens, entityId: entityId) {
-      var currentIds: List(EntityId) = List.create(EntityId, cap: 8)
-      var kept: List(EntityId) = List.create(EntityId, cap: 8)
-      let chv: view Children = componentView(this: world.childrens, entityId: entityId)
-      var i: Int = 0
-      loop i < chv.ids.length {
-        let child: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: i)
-        currentIds.add(value: child)
-        if componentHas(this: world.listViewRowKeys, entityId: child) is false {
-          kept.add(value: child)
-        }
-        i = i + 1
-      }
-      loop let rowRoot: view EntityId in ordered {
-        kept.add(value: rowRoot)
-      }
-      var same: Bool = kept.length is currentIds.length
-      if same {
-        var k: Int = 0
-        loop k < kept.length {
-          let a: EntityId = rae_ext_rae_buf_get(buf: kept.data, index: k)
-          let b: EntityId = rae_ext_rae_buf_get(buf: currentIds.data, index: k)
-          if a is not b {
-            same = false
-          }
-          k = k + 1
-        }
-      }
-      if same is false {
-        let ch: mod Children = componentMod(this: world.childrens, entityId: entityId)
-        ch.ids = kept
-      }
-    }
-  }
-}
-
-# Apply a flow row's bindings (no positioning: the container's Layout does that).
-func listViewApplyFlowRow(
-  world: mod UiWorld
-  rowRoot: view EntityId
-  lv: view ListView
-  distinct: view List(String)
-  row: view ListViewRow
-  sceneRow: view Bool
-) {
-  unsafe {
-    let bn: Int = lv.bindings.length
-    if sceneRow {
-      var sb: Int = 0
-      loop sb < bn {
-        let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: sb)
-        listViewApplySceneBinding(
-          world: world
-          rowRoot: rowRoot
-          binding: binding
-          row: row
-        )
-        sb = sb + 1
-      }
-      ret
-    }
-    var kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
-    if componentHas(this: world.childrens, entityId: rowRoot) {
-      let ch: view Children = componentView(this: world.childrens, entityId: rowRoot)
-      var i: Int = 0
-      loop i < ch.ids.length {
-        kids.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: i))
-        i = i + 1
-      }
-    }
-    var b: Int = 0
-    loop b < bn {
-      let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: b)
-      if let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId) {
-        if slot < kids.length {
-          let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
-          listViewApplyBinding(
-            world: world
-            child: child
-            binding: binding
-            row: row
-          )
-        }
-      }
-      b = b + 1
-    }
-  }
 }
 
 # Virtualise every ListView in the world (#945). Run after input/scroll,

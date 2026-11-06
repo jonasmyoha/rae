@@ -1,0 +1,168 @@
+# List motion, painted (docs/ui-animation-design.md section 7): a filled list loses one row and
+# gains
+# another on frame 3, so a ghost fades in its place, a new row rises and the rows around them glide.
+# With RAE_LIST_CHECK=sideways the whole data goes forward instead. RAE_ANIMATION_HOLD stops every
+# motion at a share of its way, so a picture shows a true middle state:
+#
+#   RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 RAE_GPU2D_SCREENSHOT=/tmp/list.bmp \
+#     compiler/bin/rae run checks/uiLists/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1370_list_motion_tracks. Here: exit 0 when
+# the
+# change started its motion through the real pipeline and, with no hold, everything ends.
+import Gpu2d
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/Registry
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/listMotionSystem/ListMotionSystem
+open ui/listViewSystem/ListViewSystem
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func rowsFrom(words: view List(String)) ret ListViewData {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: words.length)
+  loop let word: view String in words {
+    var names: List(String) = List.create(String, cap: 1)
+    names.add(value: "id")
+    var values: List(String) = List.create(String, cap: 1)
+    values.add(value: word)
+    rows.add(value: ListViewRow { keys: own names, values: own values })
+  }
+  ret ListViewData { rows: own rows }
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI lists check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  var scenes: SceneRegistry = createSceneRegistry()
+  var rowScene: Scene = loadSceneFile(path: "checks/uiLists/row.raescene")
+  rowScene.sceneId = "ListCheckRow"
+  registerScene(reg: scenes, key: "ListCheckRow", scene: own rowScene)
+  let scene: Scene = loadSceneFile(path: "checks/uiLists/page.raescene")
+  if scene.ok is false {
+    log("UI LISTS FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var listEntityId: EntityId = noEntity()
+  if let index: Int = world.nodeIds.get(k: "List") {
+    listEntityId = nodeEntityId(world: world, index: index)
+  }
+  # The filled list is the starting point of the pictures, so its own Appear does not show
+  let settings: AnimationSettings = uiSystems.animation.settings
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  let start: List(String) = [
+    "Apples"
+    "Bread"
+    "Coffee"
+    "Dates"
+    "Eggs"
+  ]
+  componentSet(this: world.listViewDatas, entityId: listEntityId, data: rowsFrom(words: start))
+  var schedule: Schedule = createUiPipeline(world: world)
+  let sideways: Bool = Sys.getEnv(name: "RAE_LIST_CHECK") is "sideways"
+  var started: Int = 0
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    if frames is 3 {
+      uiSystems.animation.settings = settings
+      if sideways {
+        listRowsChange(
+          world: world
+          listEntityId: listEntityId
+          direction: ListChangeDirection.forward
+        )
+        let tomorrow: List(String) = ["Figs", "Grapes", "Honey"]
+        componentSet(
+          this: world.listViewDatas
+          entityId: listEntityId
+          data: rowsFrom(words: tomorrow)
+        )
+      } else {
+        let edited: List(String) = [
+          "Apples"
+          "Avocado"
+          "Bread"
+          "Dates"
+          "Eggs"
+        ]
+        componentSet(
+          this: world.listViewDatas
+          entityId: listEntityId
+          data: rowsFrom(words: edited)
+        )
+      }
+    }
+    listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    if frames is 3 {
+      started = componentCount(this: uiSystems.animation.tracks)
+      log("the change started {started} tracks")
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    if frames > 30 and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let left: Int = componentCount(this: uiSystems.animation.tracks)
+  let held: Bool = uiSystems.animation.settings.hold >= 0.0
+  let off: Bool = uiSystems.animation.settings.off
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if (started is 0 and not off) or (left > 0 and not held) {
+    log("UI LISTS FAILED: {started} tracks started, {left} left")
+    ret 1
+  }
+  log("UI LISTS OK: {left} left")
+  ret 0
+}

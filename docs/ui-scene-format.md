@@ -403,13 +403,9 @@ and that every `OnClick` id has a label.
 
 ## 12. `ListReorder`: drag to reorder a list's rows
 
-A virtual `ListView` with `"animateMoves": true` and an `itemKeyField`
-animates its rows when the data's order changes: each row eases from where
-it was drawn to its new place (ui/listMotionSystem: a task ticked done
-glides to the end) instead of jumping there. The app runs
-`listMotionSystem(system, world, uiSystems, nowSec)` after the list system
-while `listMotionNeedsRun` says so, keeping a `ListMotionSystem` (new with
-each UI world); it returns true while a row moves.
+A `ListView` with `"animateMoves": true` and an `itemKeyField` animates its
+rows when the data's order changes: each row glides from where it was drawn
+to its new place (section 23).
 
 A virtual `ListView` (the default mode) whose node also carries
 `ListReorder` lets a person drag its rows into another order
@@ -780,3 +776,32 @@ The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `di
 - A motion no one declares is an `unknownToken` diagnostic at load.
 
 Case 1369 holds the rules; `checks/uiLayoutText` paints them.
+
+## 23. List motion
+
+```json
+"Tasks": { "bundles": ["staggerFromStart"], "ListView": { "itemKeyField": "id", "itemSceneId": "TaskRow", "animateMoves": true } },
+"TaskRow": { "bundles": ["appearRise", "disappearFade"] }
+```
+
+A list takes part when it has `animateMoves`, or when the root of its row scene has `Appear` or `Disappear`. Rows need an
+`itemKeyField`: without one a list plays its first fill only, and a log line says so once. Any other list is not touched. The
+host needs nothing but `animationRun`, which is already in the pipeline.
+
+| What happened | What the rows do |
+|---|---|
+| First fill | The rows in the window play the row root's `Appear`, in the list's `Stagger` order |
+| A row comes into the window by scrolling | Nothing |
+| The same data again | Nothing |
+| A new key | Its row plays `Appear`, and with `animateMoves` the rows around it glide |
+| A key is gone, its row has `Disappear` | Its row plays it where it was, and takes no hits; with `animateMoves` the rows around it glide |
+| A key moved, with `animateMoves` | The row glides |
+| A row is held by drag | All motion stops, and the new order is only noted |
+
+`listRowsChange(world, listEntityId, direction)` said together with new data (`ListChangeDirection.forward` or `back`) sends every
+old row out to one side as the new rows arrive from the other, slightly staggered. It works on any list, with or without keys.
+
+In `Flow` mode a row whose key went stays in the layout until its `Disappear` ends, then the rows around it glide into the gap, and
+a key that comes back meanwhile turns its row around.
+
+Case 1370 holds the rules; `checks/uiLists` paints them.

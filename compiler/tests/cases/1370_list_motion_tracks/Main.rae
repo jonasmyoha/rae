@@ -1,0 +1,539 @@
+# listMotionSystem on tracks (docs/ui-animation-design.md section 7), virtual and flow. Time is
+# handed in
+# and pitch is 40, so every number is known: a row moved by one place starts its pose at 40 from
+# home, and
+# smooth (0.42 s) from 40 is at 22.4 after 0.1 s. A row's key is what it shows, read from its label.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/ListReorder
+open ui/Registry
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+open ui/listMotionSystem/ListMotionRules
+open ui/listMotionSystem/ListMotionSystem
+open ui/listReorderSystem/ListReorderSystem
+open ui/listViewSystem/ListViewSystem
+
+type Fixture {
+  world: UiWorld
+  uiSystems: UiSystems
+  scenes: SceneRegistry
+  listEntityId: EntityId
+}
+
+func mount(source: view String) ret Fixture {
+  var registry: SceneRegistry = createSceneRegistry()
+  var rowScene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":30\},\"bundles\":[\"appearRise\",\"disappearFade\"],\"Appear\":\{\"y\":20\},\"Children\":[\"Label\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"x\"\}\}\}\}"
+  )
+  rowScene.sceneId = "RowScene"
+  registerScene(reg: registry, key: "RowScene", scene: own rowScene)
+  var plainScene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":30\},\"Children\":[\"Label\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"x\"\}\}\}\}"
+  )
+  plainScene.sceneId = "PlainScene"
+  registerScene(reg: registry, key: "PlainScene", scene: own plainScene)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: source)
+  )
+  var listEntityId: EntityId = noEntity()
+  if let index: Int = world.nodeIds.get(k: "List") {
+    listEntityId = nodeEntityId(world: world, index: index)
+  }
+  ret Fixture {
+    world: own world
+    uiSystems: own uiSystems
+    scenes: own registry
+    listEntityId: listEntityId
+  }
+}
+
+func setKeys(fixture: mod Fixture, keys: view String) {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 8)
+  loop var i: Int = 0, i < keys.length(), ++i {
+    var names: List(String) = List.create(String, cap: 1)
+    names.add(value: "id")
+    var values: List(String) = List.create(String, cap: 1)
+    values.add(value: keys.sub(start: i, len: 1))
+    rows.add(value: ListViewRow { keys: own names, values: own values })
+  }
+  componentSet(
+    this: fixture.world.listViewDatas
+    entityId: fixture.listEntityId
+    data: ListViewData { rows: own rows }
+  )
+}
+
+func frame(fixture: mod Fixture, deltaTime: view Float) {
+  listViewSystem(world: fixture.world, uiSystems: fixture.uiSystems, scenes: fixture.scenes)
+  layoutSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+  animationTriggers(world: fixture.world, uiSystems: fixture.uiSystems)
+  if animationInFlight(world: fixture.world, uiSystems: fixture.uiSystems) {
+    animationSystem(world: fixture.world, uiSystems: fixture.uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+}
+
+func settle(fixture: mod Fixture) {
+  loop var i: Int = 0, i < 400 and animationInFlight(
+    world: fixture.world
+    uiSystems: fixture.uiSystems
+  ), ++i {
+    frame(fixture: fixture, deltaTime: 0.016)
+  }
+  frame(fixture: fixture, deltaTime: 0.016)
+}
+
+func labelOf(fixture: view Fixture, rowEntityId: view EntityId) ret String {
+  if let index: Int = findNodeInPage(
+    world: fixture.world
+    pageId: "listRow{rowEntityId.index}"
+    nodeId: "Label"
+  ) {
+    ret "{componentView(
+      this: fixture.world.texts
+      entityId: nodeEntityId(world: fixture.world, index: index)
+    ).text}"
+  }
+  ret "?"
+}
+
+func childAt(fixture: view Fixture, slot: view Int) ret EntityId {
+  let children: view Children = componentView(
+    this: fixture.world.childrens
+    entityId: fixture.listEntityId
+  )
+  ret children.ids.copyAtFallback(index: slot, fallback: noEntity())
+}
+
+func childCount(fixture: view Fixture) ret Int {
+  if componentHas(this: fixture.world.childrens, entityId: fixture.listEntityId) {
+    ret componentView(this: fixture.world.childrens, entityId: fixture.listEntityId).ids.length
+  }
+  ret 0
+}
+
+func rowNamed(fixture: view Fixture, key: view String) ret EntityId {
+  loop var i: Int = 0, i < childCount(fixture: fixture), ++i {
+    let child: EntityId = childAt(fixture: fixture, slot: i)
+    if labelOf(fixture: fixture, rowEntityId: child) is key {
+      ret child
+    }
+  }
+  ret noEntity()
+}
+
+# Each child: what it shows, its slot's place, and its pose. * is a ghost.
+func rowsOf(fixture: view Fixture) ret String {
+  var out: String = ""
+  loop var i: Int = 0, i < childCount(fixture: fixture), ++i {
+    let child: EntityId = childAt(fixture: fixture, slot: i)
+    let pose: AnimationPose = animationPoseOf(uiSystems: fixture.uiSystems, entityId: child)
+    var mark: String = ""
+    if componentHas(this: fixture.world.leavings, entityId: child) {
+      mark = "*"
+    }
+    var top: Float = 0.0
+    if componentHas(this: fixture.world.offsets, entityId: child) {
+      top = componentView(this: fixture.world.offsets, entityId: child).delta.y
+    }
+    out = "{out} {labelOf(fixture: fixture, rowEntityId: child)}{mark}@{top}"
+    if poseIsRest(pose: pose) is false {
+      out = "{out}({Math.round(x: pose.x)},{Math.round(x: pose.y)})"
+    }
+  }
+  ret out
+}
+
+func tracks(fixture: view Fixture) ret Int {
+  ret componentCount(this: fixture.uiSystems.animation.tracks)
+}
+
+func delayOf(fixture: view Fixture, key: view String) ret Int {
+  let rowEntityId: EntityId = rowNamed(fixture: fixture, key: key)
+  if componentHas(this: fixture.uiSystems.animation.tracks, entityId: rowEntityId) {
+    let track: view AnimationTrack = componentView(
+      this: fixture.uiSystems.animation.tracks
+      entityId: rowEntityId
+    )
+    ret Math.round(x: track.delayLeft * 1000.0).toInt()
+  }
+  ret -1
+}
+
+# What a person sees of a row: its place in the list and its pose
+func drawnY(fixture: view Fixture, key: view String) ret Int {
+  let rowEntityId: EntityId = rowNamed(fixture: fixture, key: key)
+  let pose: AnimationPose = animationPoseOf(uiSystems: fixture.uiSystems, entityId: rowEntityId)
+  let top: Float = componentView(this: fixture.world.offsets, entityId: rowEntityId).delta.y
+  ret Math.round(x: (top + pose.y) * 100.0).toInt()
+}
+
+func setScroll(fixture: mod Fixture, y: view Float) {
+  componentSet(
+    this: fixture.world.scrollStates
+    entityId: fixture.listEntityId
+    data: ScrollState { y: y, velocity: 0.0 }
+  )
+}
+
+func virtualList() {
+  log("--- first fill")
+  var fixture: Fixture = mount(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"bundles\":[\"staggerFromStart\"],\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemKeyField\":\"id\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":3,\"overscanRows\":1,\"animateMoves\":true,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+  )
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("empty: {tracks(fixture: fixture)} tracks")
+  setKeys(fixture: fixture, keys: "abcdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("{rowsOf(fixture: fixture)}")
+  log(
+    "started by the stagger: a {delayOf(fixture: fixture, key: "a")} b {delayOf(
+      fixture: fixture
+      key: "b"
+    )} c {delayOf(fixture: fixture, key: "c")} d {delayOf(fixture: fixture, key: "d")} ms; below the window: e {delayOf(
+      fixture: fixture
+      key: "e"
+    )} f {delayOf(fixture: fixture, key: "f")}"
+  )
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}; {tracks(fixture: fixture)} tracks")
+
+  log("--- a rebuild with the same data")
+  let rowA: EntityId = rowNamed(fixture: fixture, key: "a")
+  setKeys(fixture: fixture, keys: "abcdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "{tracks(fixture: fixture)} tracks, in flight {animationInFlight(
+      world: fixture.world
+      uiSystems: fixture.uiSystems
+    )}"
+  )
+
+  log("--- a scroll starts no track")
+  let rowC: EntityId = rowNamed(fixture: fixture, key: "c")
+  setScroll(fixture: fixture, y: -120.0)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "{rowsOf(fixture: fixture)}; {tracks(fixture: fixture)} tracks; c is the same entity {rowNamed(
+      fixture: fixture
+      key: "c"
+    ) is rowC}"
+  )
+  setScroll(fixture: fixture, y: 0.0)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "back:{rowsOf(fixture: fixture)}; {tracks(fixture: fixture)} tracks; c is the same entity {rowNamed(
+      fixture: fixture
+      key: "c"
+    ) is rowC}"
+  )
+
+  log("--- a new key")
+  let rowB: EntityId = rowNamed(fixture: fixture, key: "b")
+  setKeys(fixture: fixture, keys: "axbcdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "{rowsOf(fixture: fixture)}; {tracks(fixture: fixture)} tracks; b is the same entity {rowNamed(
+      fixture: fixture
+      key: "b"
+    ) is rowB}"
+  )
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}")
+
+  log("--- a key is gone")
+  let rowOfC: EntityId = rowNamed(fixture: fixture, key: "c")
+  setKeys(fixture: fixture, keys: "axbdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "{rowsOf(fixture: fixture)}; the ghost is the old entity {rowNamed(fixture: fixture, key: "c") is rowOfC}"
+  )
+  settle(fixture: fixture)
+  log(
+    "settled:{rowsOf(fixture: fixture)}; the ghost is gone {isAlive(
+      world: fixture.world
+      entityId: rowOfC
+    ) is false}"
+  )
+
+  log("--- a move, interrupted")
+  setKeys(fixture: fixture, keys: "xabdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("{rowsOf(fixture: fixture)}")
+  loop var i: Int = 0, i < 10, ++i {
+    frame(fixture: fixture, deltaTime: 0.01)
+  }
+  log("0.1 s later: a is drawn at {drawnY(fixture: fixture, key: "a")}")
+  let before: Int = drawnY(fixture: fixture, key: "a")
+  setKeys(fixture: fixture, keys: "axbdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("turned back: jump {drawnY(fixture: fixture, key: "a") - before}")
+  loop var i: Int = 0, i < 3, ++i {
+    frame(fixture: fixture, deltaTime: 0.01)
+  }
+  let beforeScroll: Int = drawnY(fixture: fixture, key: "b")
+  setScroll(fixture: fixture, y: -40.0)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("scrolled while moving: b jumps {drawnY(fixture: fixture, key: "b") - beforeScroll}")
+  setScroll(fixture: fixture, y: 0.0)
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}")
+
+  log("--- held by drag")
+  setKeys(fixture: fixture, keys: "xabdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("moving: {tracks(fixture: fixture)} tracks")
+  var drag: ListReorderDrag = idleReorderDrag()
+  drag.phase = ListReorderPhase.lifted
+  componentSet(this: fixture.world.listReorderDrags, entityId: fixture.listEntityId, data: drag)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("lifted: {tracks(fixture: fixture)} tracks,{rowsOf(fixture: fixture)}")
+  setKeys(fixture: fixture, keys: "axbdefgh")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("the order noted: {tracks(fixture: fixture)} tracks,{rowsOf(fixture: fixture)}")
+  componentRemove(this: fixture.world.listReorderDrags, entityId: fixture.listEntityId)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("put down: {tracks(fixture: fixture)} tracks")
+
+  log("--- a sideways change")
+  listRowsChange(
+    world: fixture.world
+    listEntityId: fixture.listEntityId
+    direction: ListChangeDirection.forward
+  )
+  setKeys(fixture: fixture, keys: "pqr")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("first frame:{rowsOf(fixture: fixture)}")
+  log(
+    "new rows start: p {delayOf(fixture: fixture, key: "p")} q {delayOf(fixture: fixture, key: "q")} r {delayOf(
+      fixture: fixture
+      key: "r"
+    )} ms; the request is used {componentHas(
+      this: fixture.world.listChanges
+      entityId: fixture.listEntityId
+    ) is false}"
+  )
+  let ghost: EntityId = rowNamed(fixture: fixture, key: "a")
+  let arriving: EntityId = rowNamed(fixture: fixture, key: "p")
+  frame(fixture: fixture, deltaTime: 0.016)
+  frame(fixture: fixture, deltaTime: 0.016)
+  log(
+    "then: the old row left of its place {animationPoseOf(
+      uiSystems: fixture.uiSystems
+      entityId: ghost
+    ).x < 0.0}, the new one right of it {animationPoseOf(
+      uiSystems: fixture.uiSystems
+      entityId: arriving
+    ).x > 0.0}"
+  )
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}; {childCount(fixture: fixture)} children")
+  listRowsChange(
+    world: fixture.world
+    listEntityId: fixture.listEntityId
+    direction: ListChangeDirection.back
+  )
+  setKeys(fixture: fixture, keys: "st")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("back:{rowsOf(fixture: fixture)}")
+  settle(fixture: fixture)
+
+  log("--- off")
+  fixture.uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  setKeys(fixture: fixture, keys: "t")
+  frame(fixture: fixture, deltaTime: 0.0)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("{rowsOf(fixture: fixture)}; {tracks(fixture: fixture)} tracks")
+}
+
+func noKey() {
+  log("--- no itemKeyField")
+  var fixture: Fixture = mount(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":3,\"overscanRows\":1,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+  )
+  setKeys(fixture: fixture, keys: "ab")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("first fill: {tracks(fixture: fixture)} tracks")
+  settle(fixture: fixture)
+  setKeys(fixture: fixture, keys: "abc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("a row more: {tracks(fixture: fixture)} tracks")
+  settle(fixture: fixture)
+  setKeys(fixture: fixture, keys: "a")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("two rows fewer: {tracks(fixture: fixture)} tracks,{rowsOf(fixture: fixture)}")
+}
+
+func hiddenList() {
+  log("--- filled while hidden")
+  var fixture: Fixture = mount(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Shut\"]\},\"Shut\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"Active\":\{\"value\":false\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemKeyField\":\"id\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":3,\"overscanRows\":1,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+  )
+  setKeys(fixture: fixture, keys: "ab")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("hidden: {tracks(fixture: fixture)} tracks")
+  var shut: EntityId = noEntity()
+  if let index: Int = fixture.world.nodeIds.get(k: "Shut") {
+    shut = nodeEntityId(world: fixture.world, index: index)
+  }
+  setActiveAnimated(world: fixture.world, entityId: shut, active: true)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("opened: {tracks(fixture: fixture)} tracks")
+}
+
+func plainRows() {
+  log("--- no Appear, no Disappear, with animateMoves")
+  var fixture: Fixture = mount(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"ListView\":\{\"itemSceneId\":\"PlainScene\",\"itemKeyField\":\"id\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":3,\"overscanRows\":1,\"animateMoves\":true,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+  )
+  setKeys(fixture: fixture, keys: "abc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("first fill: {tracks(fixture: fixture)} tracks")
+  setKeys(fixture: fixture, keys: "bca")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("the first row to the end:{rowsOf(fixture: fixture)}")
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}")
+  setKeys(fixture: fixture, keys: "ca")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "a key gone, no Disappear:{rowsOf(fixture: fixture)}; {childCount(fixture: fixture)} children"
+  )
+}
+
+func flowY(fixture: view Fixture, key: view String) ret Int {
+  let rowEntityId: EntityId = rowNamed(fixture: fixture, key: key)
+  ret Math.round(
+    x: componentView(this: fixture.uiSystems.layout.computedRects, entityId: rowEntityId).position.y
+  ).toInt()
+}
+
+func flowList() {
+  log("--- flow")
+  var fixture: Fixture = mount(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"ListView\":\{\"mode\":\"Flow\",\"itemKeyField\":\"id\",\"itemSceneId\":\"RowScene\",\"itemHeight\":30,\"animateMoves\":true,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+  )
+  setKeys(fixture: fixture, keys: "abc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "first fill: {tracks(fixture: fixture)} tracks, c laid out at {flowY(fixture: fixture, key: "c")}"
+  )
+  settle(fixture: fixture)
+  setKeys(fixture: fixture, keys: "abc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log("the same data: {tracks(fixture: fixture)} tracks")
+  setKeys(fixture: fixture, keys: "axbc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "a new key:{rowsOf(fixture: fixture)}; b laid out at {flowY(fixture: fixture, key: "b")}, x's track {componentHas(
+      this: fixture.uiSystems.animation.tracks
+      entityId: rowNamed(fixture: fixture, key: "x")
+    )}"
+  )
+  settle(fixture: fixture)
+  let rowOfB: EntityId = rowNamed(fixture: fixture, key: "b")
+  setKeys(fixture: fixture, keys: "axc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "a key gone:{rowsOf(fixture: fixture)}; c keeps its place at {flowY(fixture: fixture, key: "c")}, b is the same entity {rowNamed(
+      fixture: fixture
+      key: "b"
+    ) is rowOfB}"
+  )
+  frame(fixture: fixture, deltaTime: 0.016)
+  setKeys(fixture: fixture, keys: "axbc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "it came back while leaving:{rowsOf(fixture: fixture)}; the same entity {rowNamed(
+      fixture: fixture
+      key: "b"
+    ) is rowOfB}"
+  )
+  settle(fixture: fixture)
+  setKeys(fixture: fixture, keys: "axc")
+  frame(fixture: fixture, deltaTime: 0.0)
+  settle(fixture: fixture)
+  log(
+    "gone, the gap starts to close:{rowsOf(fixture: fixture)}; c laid out at {flowY(
+      fixture: fixture
+      key: "c"
+    )}"
+  )
+  settle(fixture: fixture)
+  log("closed:{rowsOf(fixture: fixture)}")
+  listRowsChange(
+    world: fixture.world
+    listEntityId: fixture.listEntityId
+    direction: ListChangeDirection.forward
+  )
+  setKeys(fixture: fixture, keys: "pq")
+  frame(fixture: fixture, deltaTime: 0.0)
+  log(
+    "sideways:{rowsOf(fixture: fixture)}; p at {flowY(fixture: fixture, key: "p")}, q at {flowY(
+      fixture: fixture
+      key: "q"
+    )}, the old c still at {flowY(fixture: fixture, key: "c")}"
+  )
+  settle(fixture: fixture)
+  log("settled:{rowsOf(fixture: fixture)}")
+}
+
+func rules() {
+  log("--- rules")
+  log("visible at the top: row 3 {listRowVisible(
+    index: 3
+    scrollY: 0.0
+    pitch: 40.0
+    visibleItemCount: 3
+  )}, row 4 {listRowVisible(
+    index: 4
+    scrollY: 0.0
+    pitch: 40.0
+    visibleItemCount: 3
+  )}")
+  log("scrolled 2 rows: row 1 {listRowVisible(
+    index: 1
+    scrollY: -80.0
+    pitch: 40.0
+    visibleItemCount: 3
+  )}, row 2 {listRowVisible(
+    index: 2
+    scrollY: -80.0
+    pitch: 40.0
+    visibleItemCount: 3
+  )}")
+  log(
+    "the sideways delay stops at the cap: {Math.round(x: listChangeDelay(index: 3) * 1000.0)}, {Math.round(
+      x: listChangeDelay(index: 50) * 1000.0
+    )} ms"
+  )
+}
+
+func main() {
+  rules()
+  virtualList()
+  noKey()
+  hiddenList()
+  plainRows()
+  flowList()
+}

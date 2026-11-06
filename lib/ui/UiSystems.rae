@@ -16,6 +16,7 @@ open ecs/Hierarchy
 open ecs/Entity
 open ecs/Queue
 open ui/animationSystem/AnimationRules
+open ui/listMotionSystem/ListMotionRules
 open ui/animationSystem/AnimationTracks
 open ecs/ComponentTable
 
@@ -99,6 +100,8 @@ type AnimationSystem {
   textSeens: ComponentTable(TextSeen)
   textGhosts: ComponentTable(TextGhost)
   textGeneration: Int = -1
+  # listMotionSystem: what each animated list last showed
+  listMotions: ComponentTable(ListMotionState)
   lastFrameNs: Int = 0
 }
 
@@ -213,6 +216,7 @@ func createUiSystems() ret UiSystems {
       layoutPlaces: ComponentTable.create(LayoutPlace)
       textSeens: ComponentTable.create(TextSeen)
       textGhosts: ComponentTable.create(TextGhost)
+      listMotions: ComponentTable.create(ListMotionState)
       settings: animationSettingsFromEnv()
     }
     heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
@@ -253,6 +257,7 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.layoutPlaces, entityId: entityId)
   componentRemove(this: uiSystems.animation.textSeens, entityId: entityId)
   componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
+  componentRemove(this: uiSystems.animation.listMotions, entityId: entityId)
   componentRemove(this: uiSystems.heroTransition.heroTransitions, entityId: entityId)
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)

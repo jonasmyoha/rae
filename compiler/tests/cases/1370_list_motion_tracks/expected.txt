@@ -1,0 +1,62 @@
+--- rules
+visible at the top: row 3 true, row 4 false
+scrolled 2 rows: row 1 false, row 2 true
+the sideways delay stops at the cap: 60, 120 ms
+--- first fill
+empty: 0 tracks
+ a@0(0,20) b@40(0,20) c@80(0,20) d@120(0,20) e@160(0,20) f@200(0,20)
+started by the stagger: a 0 b 28 c 56 d 84 ms; below the window: e 0 f 0
+settled: a@0 b@40 c@80 d@120 e@160 f@200; 0 tracks
+--- a rebuild with the same data
+0 tracks, in flight false
+--- a scroll starts no track
+ c@80 d@120 e@160 f@200 g@240 h@280; 0 tracks; c is the same entity true
+back: a@0 b@40 c@80 d@120 e@160 f@200; 0 tracks; c is the same entity true
+--- a new key
+ a@0 x@40(0,20) b@80(0,-40) c@120(0,-40) d@160(0,-40) e@200(0,-40); 5 tracks; b is the same entity true
+settled: a@0 x@40 b@80 c@120 d@160 e@200
+--- a key is gone
+ a@0 x@40 b@80 d@120(0,40) e@160(0,40) f@200(0,40) c*@120; the ghost is the old entity true
+settled: a@0 x@40 b@80 d@120 e@160 f@200; the ghost is gone true
+--- a move, interrupted
+ x@0(0,40) a@40(0,-40) b@80 d@120 e@160 f@200
+0.1 s later: a is drawn at 1763
+turned back: jump 0
+scrolled while moving: b jumps 0
+settled: a@0 x@40 b@80 d@120 e@160 f@200
+--- held by drag
+moving: 2 tracks
+lifted: 0 tracks, x@0 a@40 b@80 d@120 e@160 f@200
+the order noted: 0 tracks, a@0 x@40 b@80 d@120 e@160 f@200
+put down: 0 tracks
+--- a sideways change
+first frame: p@0(300,0) q@40(300,0) r@80(300,0) a*@0 x*@40 b*@80 d*@120 e*@160 f*@200
+new rows start: p 0 q 20 r 40 ms; the request is used true
+then: the old row left of its place true, the new one right of it true
+settled: p@0 q@40 r@80; 3 children
+back: s@0(-300,0) t@40(-300,0) p*@0 q*@40 r*@80
+--- off
+ t@0; 0 tracks
+--- no itemKeyField
+[ui] list 2 has no itemKeyField: it can only animate its first fill
+first fill: 2 tracks
+a row more: 0 tracks
+two rows fewer: 0 tracks, a@0
+--- filled while hidden
+hidden: 0 tracks
+opened: 2 tracks
+--- no Appear, no Disappear, with animateMoves
+first fill: 0 tracks
+the first row to the end: b@0(0,40) c@40(0,40) a@80(0,-80)
+settled: b@0 c@40 a@80
+a key gone, no Disappear: c@0(0,40) a@40(0,40); 2 children
+--- flow
+first fill: 3 tracks, c laid out at 80
+the same data: 0 tracks
+a new key: a@0 x@0(0,20) b@0(0,-40) c@0(0,-40); b laid out at 80, x's track true
+a key gone: a@0 x@0 b*@0 c@0; c keeps its place at 120, b is the same entity true
+it came back while leaving: a@0 x@0 b@0(0,0) c@0; the same entity true
+gone, the gap starts to close: a@0 x@0 c@0(0,39); c laid out at 80
+closed: a@0 x@0 c@0
+sideways: a*@0 x*@0 c*@0 p@0(300,0) q@0(300,0); p at 0, q at 40, the old c still at 80
+settled: p@0 q@0

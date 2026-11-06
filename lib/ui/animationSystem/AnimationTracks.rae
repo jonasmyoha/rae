@@ -231,6 +231,12 @@ func animationApplyGlide(
   )
 }
 
+# The node stops moving, and is at its place: a list has given its entity to another row
+func animationDropMotion(uiSystems: mod UiSystems, entityId: view EntityId) {
+  componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
+  componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+}
+
 # A motion token by name: an unknown one is a scene diagnostic, then the fallback, never silent
 func animationMotionNamed(
   world: mod UiWorld

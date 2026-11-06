@@ -1,12 +1,15 @@
-# ui/listMotionSystem: a virtual ListView with `animateMoves` and a key per
-# row; the data's first row moves to the end (a task ticked done). The row
-# that shows it is drawn where it was (its offset its old place less its
-# new one), eases home over frames, and then the list is at rest with no
-# offsets left. A list without `animateMoves` is not touched.
+# ui/listMotionSystem: a virtual ListView with `animateMoves` and a key per row; the data's first
+# row
+# moves to the end (a task ticked done). The row that shows it is drawn where it was (its pose its
+# old
+# place less its new one), springs home through animationSystem, and then the list is at rest with
+# no
+# pose left. A list without `animateMoves` is not touched.
 import ui/Components
 open ui/Ecs
 open ui/listViewSystem/ListViewSystem
-open ui/listMotionSystem/ListMotionSystem
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
@@ -58,7 +61,7 @@ func makeListView(animate: view Bool) ret ListView {
   }
 }
 
-# The offset of the pooled row showing data row `index` (0 when none)
+# The pose y of the pooled row showing data row `index` (0 when none)
 func rowOffset(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -67,17 +70,14 @@ func rowOffset(
 ) ret Float {
   let children: view Children = componentView(this: world.childrens, entityId: listEntity)
   let row: EntityId = children.ids.copyAtFallback(index: index, fallback: noEntity())
-  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: row) {
-    ret componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: row).delta.y
-  }
-  ret 0.0
+  ret animationPoseOf(uiSystems: uiSystems, entityId: row).y
 }
 
 func main() {
   let scenes: SceneRegistry = createSceneRegistry()
   var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
-  var motion: ListMotionSystem = createListMotionSystem()
+  uiSystems.animation.settings = AnimationSettings {}
   let listEntity: EntityId = createEntity(world: world)
   let plain: EntityId = createEntity(world: world)
   componentSet(this: world.listViews, entityId: listEntity, data: makeListView(animate: true))
@@ -92,19 +92,7 @@ func main() {
   componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(order: order))
   componentSet(this: world.listViewDatas, entityId: plain, data: buildData(order: order))
   listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
-  log("needs run at the start: {listMotionNeedsRun(system: motion, world: world)}")
-  var moving: Bool = listMotionSystem(
-    system: motion
-    world: world
-    uiSystems: uiSystems
-    nowSec: 10.0
-  )
-  log(
-    "first frame: moving {moving}, needs run after: {listMotionNeedsRun(
-      system: motion
-      world: world
-    )}"
-  )
+  log("first frame: in flight {animationInFlight(world: world, uiSystems: uiSystems)}")
   # Row 0 is done: it goes to the end
   var after: List(Int) = [
     1
@@ -116,13 +104,8 @@ func main() {
   componentSet(this: world.listViewDatas, entityId: listEntity, data: buildData(order: after))
   componentSet(this: world.listViewDatas, entityId: plain, data: buildData(order: after))
   listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
-  log("a new order: needs run {listMotionNeedsRun(system: motion, world: world)}")
-  moving = listMotionSystem(
-    system: motion
-    world: world
-    uiSystems: uiSystems
-    nowSec: 10.016
-  )
+  log("a new order: in flight {animationInFlight(world: world, uiSystems: uiSystems)}")
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
   log("the moved row (now last) is drawn {rowOffset(
     world: world
     uiSystems: uiSystems
@@ -133,7 +116,7 @@ func main() {
     uiSystems: uiSystems
     listEntity: listEntity
     index: 0
-  )}; moving {moving}")
+  )}")
   log("the plain list's rows: {rowOffset(
     world: world
     uiSystems: uiSystems
@@ -141,19 +124,14 @@ func main() {
     index: 4
   )}")
   var frames: Int = 0
-  loop moving and frames < 120 {
+  loop animationInFlight(world: world, uiSystems: uiSystems) and frames < 120 {
     frames = frames + 1
-    moving = listMotionSystem(
-      system: motion
-      world: world
-      uiSystems: uiSystems
-      nowSec: (10.016 + frames.toFloat() / 60.0) as Float64
-    )
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 1.0 / 60.0)
   }
-  log("home in under 40 frames: {frames < 40}, offset left {rowOffset(
+  log("home in under 60 frames: {frames < 60}, offset left {rowOffset(
     world: world
     uiSystems: uiSystems
     listEntity: listEntity
     index: 4
-  )}, needs run {listMotionNeedsRun(system: motion, world: world)}")
+  )}, in flight {animationInFlight(world: world, uiSystems: uiSystems)}")
 }
