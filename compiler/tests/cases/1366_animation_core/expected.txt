@@ -1,0 +1,66 @@
+--- no track
+after 5 frames: 0 updates, 0 tracks, 0 poses, in flight false, the clock not read true
+tables untouched: true
+transform runs again: false
+the entry: animation, then camera, transform
+Card 100 100 400 200 alpha 1
+--- a pose folds, channels run on their own, and it all ends
+asked: 0 tracks, 0 poses, in flight true
+first frame: 1 tracks, 1 poses, in flight true
+transform sees it: true
+Card 200 166 200 100 alpha 0
+Row 210 196 180 20 alpha 0
+hit where it is drawn: true, where it rests: false
+at 0.25 s: opacity 1, still moving true, 1 tracks, 1 poses, in flight true
+ended: 0 tracks, 0 poses, in flight false
+Card 100 100 400 200 alpha 1
+Row 120 160 360 40 alpha 1
+hit where it rests: true
+after the end: 0 updates, poses moved false, transform runs false
+--- a second command retargets
+one track true, no jump true, moving at all true
+carries on true
+back: 0 tracks, 0 poses, in flight false
+stays at 50: 0 tracks, 1 poses, in flight false; Card 150 100 400 200 alpha 1
+starts from it: 50
+home: 0 tracks, 0 poses, in flight false
+delayed: y 16
+after it: moved true
+--- end actions
+leaving: active true
+deactivate: active false, 0 tracks, 0 poses, in flight false
+called back: alive true, 0 tracks, 0 poses, in flight false
+destroy: row alive false, card alive true, card children 0
+on a dead entity: 0 tracks, 0 poses, in flight false
+destroySubtree: card alive false, row alive false, 0 tracks, 0 poses, in flight false
+--- RAE_ANIMATION and RAE_ANIMATION_HOLD
+parsed: off true, slow 5, hold 40
+unset: off false, slow 1, hold below 0 true
+[animation] RAE_ANIMATION=fast: use off or slow:<factor>; ignored
+[animation] RAE_ANIMATION_HOLD=2: a share from 0 to 1; ignored
+[animation] RAE_ANIMATION=slow:0: a slow factor is a number above 0; ignored
+bad ones ignored: false true 1
+off, a play: 0 tracks, 0 poses, in flight false
+off, a leave: active false, 0 tracks, 0 poses, in flight false
+held, asked: in flight true
+held: y 960, opacity 40, scale 70; 1 tracks, 1 poses, in flight false
+still: y 960, updates 1
+normal: 58
+slow:5: 14
+a long frame: 58
+--- motion tokens
+quick: spring 24 100  0
+smooth: spring 42 100  0
+lively: spring 46 76  0
+fadeIn: curve 42 100 easeOutCubic 20
+fadeOut: curve 42 100 easeInCubic 14
+nope: none
+[theme] motion badCurve: no curve named wobble
+[theme] motion badKind: kind bounce: use spring or curve
+quick: spring 10 50  0
+drift: curve 42 100 easeInQuad 150
+smooth: spring 42 100  0
+badCurve: none
+badKind: none
+unknown name: 1 diagnostic, it arrived 1000
+no motion token named smoooth; using smooth

@@ -4,6 +4,7 @@
 # guard, the small field readers and the resolved-theme dump used by the
 # debug tooling. ui/ThemeResolved owns the ResolvedTheme type and the lookups.
 import Json
+import Easing
 import ui/Scene
 open ui/ThemeResolved
 
@@ -49,12 +50,78 @@ func parseThemeInto(out: mod ResolvedTheme, scene: view Scene) {
     section: "radius"
     target: 1
   )
+  parseThemeMotion(out: out, doc: doc, root: root)
   parseThemePadding(out: out, doc: doc, root: root)
   parseThemeShadows(out: out, doc: doc, root: root)
   parseThemeText(out: out, doc: doc, root: root)
   parseThemeContainer(out: out, doc: doc, root: root)
 
   out.ok = true
+}
+
+# Parse the optional `motion` section (docs/ui-animation-design.md section 3). A wrong kind or curve
+# is loud, and the token is not added, so a use of it is the unknown-token diagnostic.
+func parseThemeMotion(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let idx: Int = Json.field(doc: doc, this: root, key: "motion")
+  if idx < 0 {
+    ret
+  }
+  let sec: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+  if sec.kind is not JsonKind.object {
+    ret
+  }
+  loop var i: Int = 0, i < Json.objectLen(this: sec), ++i {
+    let name: String = Json.objectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = Json.objectValueAt(doc: doc, this: sec, idx: i)
+    let kind: String = themeReadStringField(
+      doc: doc
+      obj: val
+      key: "kind"
+      fallback: ""
+    )
+    if kind is "spring" {
+      var token: MotionToken = {}
+      let responseAt: Int = Json.field(doc: doc, this: val, key: "response")
+      if responseAt >= 0 {
+        token.response = Json.jsonFloat(
+          this: Json.jsonValueAt(doc: doc, idx: responseAt)
+          fallback: 0.42
+        )
+      }
+      let dampingAt: Int = Json.field(doc: doc, this: val, key: "damping")
+      if dampingAt >= 0 {
+        token.damping = Json.jsonFloat(
+          this: Json.jsonValueAt(doc: doc, idx: dampingAt)
+          fallback: 1.0
+        )
+      }
+      out.motionNames.add(value: name)
+      out.motionTokens.add(value: token)
+    } else if kind is "curve" {
+      let curve: String = themeReadStringField(
+        doc: doc
+        obj: val
+        key: "curve"
+        fallback: ""
+      )
+      if Easing.easingKnown(name: curve) {
+        var token: MotionToken = { kind: MotionKind.curve, curve: curve, seconds: 0.2 }
+        let secondsAt: Int = Json.field(doc: doc, this: val, key: "seconds")
+        if secondsAt >= 0 {
+          token.seconds = Json.jsonFloat(
+            this: Json.jsonValueAt(doc: doc, idx: secondsAt)
+            fallback: 0.2
+          )
+        }
+        out.motionNames.add(value: name)
+        out.motionTokens.add(value: token)
+      } else {
+        log("[theme] motion {name}: no curve named {curve}")
+      }
+    } else {
+      log("[theme] motion {name}: kind {kind}: use spring or curve")
+    }
+  }
 }
 
 # Parse the optional `container` section (#237, M6). Each entry:

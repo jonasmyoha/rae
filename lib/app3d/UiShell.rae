@@ -36,6 +36,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
 open ui/animationSystem/EffectSystems
 open ui/visualBoundsSystem/VisualBoundsSystem
+open ui/animationSystem/AnimationTracks
 open ui/Scene
 open ui/SceneFile
 open ui/SceneRoots
@@ -513,6 +514,7 @@ func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dU
   feedSafeArea(world: world, uiSystems: uiSystems)
   measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
   layoutSystem(world: world, uiSystems: uiSystems)
+  animationRun(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
   visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
 }
@@ -546,6 +548,7 @@ func runScheduledUiSystems(
   ) {
     layoutSystem(world: world, uiSystems: uiSystems)
   }
+  animationRun(world: world, uiSystems: uiSystems)
   if uiShouldRun(
     schedule: schedule
     world: world

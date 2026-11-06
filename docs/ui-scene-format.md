@@ -711,3 +711,21 @@ nodes to show and hide. `Switch` has these fields:
 like everything else it paints. `"strokeFixed": true` keeps them that wide on screen at any zoom, like
 SVG's non-scaling-stroke: for a guide inside an editor's camera, which would nearly vanish at a low
 zoom. The default is false. Case 1364 checks it; the UI editor's frame and safe-area guides use it.
+
+## 20. `motion`: named springs and curves
+
+A theme section, parsed like `palette` and `space`, imported the same way and redeclared by name
+(the nearest declaration wins):
+
+```json
+"motion": {
+  "quick":  { "kind": "spring", "response": 0.24, "damping": 1.0 },
+  "fadeIn": { "kind": "curve", "curve": "easeOutCubic", "seconds": 0.20 }
+}
+```
+
+A spring has `response`, the seconds to get about there, and `damping`, where 1.0 has no bounce and
+lower bounces (lib/Spring). A curve has a name from lib/Easing and a length. `quick`, `smooth`,
+`lively`, `fadeIn` and `fadeOut` are built in, so a scene with no theme still has them. A wrong `kind`
+or `curve` in a theme is logged and that token is not added. A use of a name no one declares is an
+`unknownToken` diagnostic and the motion runs as `smooth`. docs/ui-animation-design.md section 3.

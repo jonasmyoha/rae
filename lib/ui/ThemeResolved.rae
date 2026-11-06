@@ -9,6 +9,8 @@
 #   "palette": { "<slot>": {r,g,b,a}, … }          semantic colors
 #   "space":   { "<token>": <du> , … }             spacing scale
 #   "radius":  { "<token>": <du> , … }             corner-radius presets
+#   "motion":  { "<token>": { kind, response, damping } or
+#                { kind, curve, seconds } }        named springs and curves
 #   "padding": { "<token>": {l,t,r,b}, … }         inset presets
 #   "shadow":  { "<token>": { color,offsetX,offsetY,softness, extends? } }
 #   "text":    { "<style>": { font,size,weight,lineHeight,tracking,
@@ -40,6 +42,18 @@ import ui/Scene
 open ui/ThemeParse
 
 const themeMaxExtendsDepth: Int = 4
+
+# A named motion (docs/ui-animation-design.md section 3): a spring by `response` and `damping`
+# (lib/Spring), or a curve from lib/Easing by name and length.
+enum MotionKind { spring, curve }
+
+type MotionToken {
+  kind: MotionKind = MotionKind.spring
+  response: Float = 0.42
+  damping: Float = 1.0
+  curve: String = ""
+  seconds: Float = 0.0
+}
 
 # Align codes stored in textAligns: 0 start, 1 center, 2 end.
 # Vertical codes stored in textVAligns: 0 top (the baseline sits at top +
@@ -77,6 +91,8 @@ type ResolvedTheme {
   spaceVals: List(Float)
   radiusNames: List(String)
   radiusVals: List(Float)
+  motionNames: List(String)
+  motionTokens: List(MotionToken)
   # padding: token -> insets.
   padNames: List(String)
   padL: List(Float)
@@ -136,6 +152,8 @@ func createResolvedTheme() pub ret ResolvedTheme {
     spaceVals: List.create(Float, cap: 8)
     radiusNames: List.create(String, cap: 8)
     radiusVals: List.create(Float, cap: 8)
+    motionNames: List.create(String, cap: 8)
+    motionTokens: List.create(MotionToken, cap: 8)
     padNames: List.create(String, cap: 8)
     padL: List.create(Float, cap: 8)
     padT: List.create(Float, cap: 8)
@@ -226,6 +244,36 @@ func themeHasRadius(theme: view ResolvedTheme, name: view String) pub ret Bool {
     }
     ret false
   }
+}
+
+# The five motions lib/ui has with no theme at all
+func builtInMotion(name: view String) ret opt MotionToken {
+  if name is "quick" {
+    ret MotionToken { response: 0.24, damping: 1.0 }
+  }
+  if name is "smooth" {
+    ret MotionToken { response: 0.42, damping: 1.0 }
+  }
+  if name is "lively" {
+    ret MotionToken { response: 0.46, damping: 0.76 }
+  }
+  if name is "fadeIn" {
+    ret MotionToken { kind: MotionKind.curve, curve: "easeOutCubic", seconds: 0.2 }
+  }
+  if name is "fadeOut" {
+    ret MotionToken { kind: MotionKind.curve, curve: "easeInCubic", seconds: 0.14 }
+  }
+  ret none
+}
+
+# The motion called `name`: the theme's first (the nearest declaration wins), else a built-in
+func themeMotion(theme: view ResolvedTheme, name: view String) ret opt MotionToken {
+  loop var i: Int = 0, i < theme.motionNames.length, ++i {
+    if theme.motionNames.copyAtFallback(index: i, fallback: "") is name {
+      ret theme.motionTokens.copyAt(index: i)
+    }
+  }
+  ret builtInMotion(name: name)
 }
 
 func themeRadiusValue(
@@ -427,6 +475,16 @@ func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
       if let value: Float = src.radiusVals.copyAt(index: i) {
         dst.radiusNames.add(value: n)
         dst.radiusVals.add(value: value)
+      }
+    }
+    i = i + 1
+  }
+  i = 0
+  loop i < src.motionNames.length {
+    if let n: String = src.motionNames.copyAt(index: i) {
+      if let token: MotionToken = src.motionTokens.copyAt(index: i) {
+        dst.motionNames.add(value: n)
+        dst.motionTokens.add(value: token)
       }
     }
     i = i + 1

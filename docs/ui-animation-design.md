@@ -400,6 +400,15 @@ math. It is one thumb's natural Back. The bar's Back stays.
   moves, and that is fine at the sizes known. If the measure says otherwise, the fold
   becomes per-subtree, and no API changes.
 
+**Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
+(`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
+(`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
+`AnimationTracks.rae`. A track that ends away from the node's place keeps its pose, so a node can stay
+somewhere else; its next motion starts from there. Under a hold a track is not in flight, so a host's
+settle does not wait for it. The hosts that run `animationRun` and feed the wait are app3d/UiShell, 106,
+121, 104 and the walkers. 105 and app3d's other hosts join when a scene of theirs first animates.
+Nothing starts a track on its own yet: `Appear` and the triggers are the next step.
+
 ## 11. Testing
 
 Motion has to be testable by an agent with no eyes on the phone.

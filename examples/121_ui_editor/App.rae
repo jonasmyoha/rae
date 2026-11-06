@@ -33,6 +33,7 @@ open ui/DebugOverlay
 open ui/WindowGeometry
 open ecs/Event
 open ui/UiSystems
+open ui/animationSystem/AnimationTracks
 
 func toggleChrome(chromeSystem: view ChromeSystem, world: mod UiWorld) {
   let active: Active = { value: not chromeVisible(world: world, chromeSystem: chromeSystem) }
@@ -595,6 +596,7 @@ func runApp(app: mod App) ret Int {
       clock: effectTime
       input: input
     )
+    animating = animating or animationInFlight(uiSystems: app.uiSystems)
     if animating {
       changed = true
     }

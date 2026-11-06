@@ -14,6 +14,9 @@ open ui/InputComponents
 import ecs/Transform
 open ecs/Hierarchy
 open ecs/Entity
+open ecs/Queue
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
 open ecs/ComponentTable
 
 # layoutSystem's output: measured sizes, the font measure of Hug text leaves,
@@ -78,6 +81,14 @@ type AnimationSystem {
   animStates: ComponentTable(AnimState)
   smokeStates: ComponentTable(SmokeState)
   carouselStates: ComponentTable(CarouselState)
+  # What is moving, and the result the transform pass folds in (animationSystem/AnimationTracks)
+  tracks: ComponentTable(AnimationTrack)
+  poses: ComponentTable(AnimationPose)
+  commands: Queue(AnimationCommand)
+  settings: AnimationSettings
+  # Updates run, for the test that an idle UI runs none, and the clock of the last one
+  updates: Int = 0
+  lastFrameNs: Int = 0
 }
 
 # The shared-element transitions in flight (HeroTransitionSystem writes,
@@ -185,6 +196,10 @@ func createUiSystems() ret UiSystems {
       animStates: ComponentTable.create(AnimState)
       smokeStates: ComponentTable.create(SmokeState)
       carouselStates: ComponentTable.create(CarouselState)
+      tracks: ComponentTable.create(AnimationTrack)
+      poses: ComponentTable.create(AnimationPose)
+      commands: createQueue(AnimationCommand)
+      settings: animationSettingsFromEnv()
     }
     heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
     button: ButtonSystem {
@@ -219,6 +234,8 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.animStates, entityId: entityId)
   componentRemove(this: uiSystems.animation.smokeStates, entityId: entityId)
   componentRemove(this: uiSystems.animation.carouselStates, entityId: entityId)
+  componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
+  componentRemove(this: uiSystems.animation.poses, entityId: entityId)
   componentRemove(this: uiSystems.heroTransition.heroTransitions, entityId: entityId)
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)
