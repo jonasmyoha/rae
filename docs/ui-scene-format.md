@@ -704,3 +704,10 @@ nodes to show and hide. `Switch` has these fields:
 - The knob glides in 0.18 s, and turns round from where it is when flipped halfway. A screen opens
   with each knob at its side, nothing moving. The position is the runtime table `SwitchMotion`,
   which a scene does not author.
+
+## 19. `Shape.strokeFixed`: a stroke that does not zoom
+
+`strokeWidth`, `strokeDash` and `strokeGap` scale with a `TransformFx` or a camera above the node,
+like everything else it paints. `"strokeFixed": true` keeps them that wide on screen at any zoom, like
+SVG's non-scaling-stroke: for a guide inside an editor's camera, which would nearly vanish at a low
+zoom. The default is false. Case 1364 checks it; the UI editor's frame and safe-area guides use it.

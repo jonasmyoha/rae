@@ -264,10 +264,14 @@ rendering is not in this design (section 15).
 
 Done in 0.3.17 for `TransformFx`; the pose comes with the core. `worldRectOf` is in
 lib/ui/Transform.rae. A shadow's blur and a text shadow's offset scale with the box, and a
-hover grows a blur by its small factor. `visualBoundsAt` scales its cached measure, so a
-zooming card does not measure its text every frame. **A stroke keeps its width:** the UI
-editor's guides, outlines and marquee are strokes inside its camera, and they must stay
-readable at any zoom, so a stroke that scales needs a way to say which is which. Case 1364 holds the rectangles and the hit test, `checks/uiZoom` paints it, and
+hover grows a blur and a stroke by its small factor. `visualBoundsAt` scales its cached
+measure, so a zooming card does not measure its text every frame.
+
+**A stroke zooms too** (0.3.18), its width, dash and gap, unless its `Shape` says
+`strokeFixed: true`, which keeps them that wide on screen at any zoom, like SVG's
+non-scaling-stroke. The UI editor's frame and safe-area guides say so: they sit inside its
+camera and would nearly vanish at a low zoom. Its outlines and marquee sit outside the
+camera, in screen units, and do not need it. Case 1364 holds the rectangles and the hit test, `checks/uiZoom` paints it, and
 at scale 1 example 106 is the same to the pixel. Pictures: docs/images/ui-zoom.
 
 ## 7. Lists
