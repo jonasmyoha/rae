@@ -200,7 +200,8 @@ body. Two design points:
   `Schedule` + `shouldRun` mechanism the lib pipeline uses. No name list
   calls systems every frame and no page is ever re-mounted to refresh;
   the `[loop]` trace prints `appSystems=N <names>` per frame and the 106
-  gate asserts a paused idle frame reports 0.
+  gate asserts that every paused frame after the images have loaded reports 0
+  (`compiler/tools/assert-idle-frames.py`).
 
 ## 5. The event loop
 
