@@ -5,6 +5,7 @@
 # store's lookups the draws use. Gbuffer owns the GbufferCache type, the
 # pass's begin and end and the app-facing draw calls.
 open FoliagePipeline
+open DrawStats
 open GbufferRecord
 open ecs/Entity  # #793: World3d render path reads entities/components
 open webgpu/Context
@@ -95,7 +96,27 @@ func gbIssueInstancedRange(
       firstInstance: base
     ) {
       gbAdvanceDraws(cache: cache, count: count)
+      gbCountDraw(cache: cache, instances: count, triangles: count * icount / 3)
     }
+  }
+}
+
+# Counts a draw for the frame log, as the kind the caller said it is drawing
+func gbCountDraw(cache: mod GbufferCache, instances: view Int, triangles: view Int) {
+  if cache.forwardFrame {
+    drawStatsAdd(
+      stats: cache.forwardDrawStats
+      kind: cache.drawKind
+      instances: instances
+      triangles: triangles
+    )
+  } else {
+    drawStatsAdd(
+      stats: cache.drawStats
+      kind: cache.drawKind
+      instances: instances
+      triangles: triangles
+    )
   }
 }
 

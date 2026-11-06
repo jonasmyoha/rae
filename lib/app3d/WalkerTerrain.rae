@@ -46,6 +46,7 @@ open ecs/Transform
 open treeSets/TreeSet
 open treeSets/TreeSetKinds
 open app3d/PropInstancer
+open DrawStats
 open app3d/PropField
 open app3d/PropFieldFrame
 open app3d/TreeForest
@@ -634,11 +635,15 @@ func drawTerrainProps(
   resources: mod GpuResources
   terrainSystem: mod WalkerTerrain
 ) {
+  cache.drawKind = DrawKind.rocks
   loop let part: view PropInstancer in terrainSystem.rockParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
+  cache.drawKind = DrawKind.meadow
   drawWalkerMeadow(cache: cache, resources: resources, meadow: terrainSystem.meadow)
+  cache.drawKind = DrawKind.forest
   drawTreeForest(cache: cache, resources: resources, forest: terrainSystem.forest)
+  cache.drawKind = DrawKind.bushes
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
@@ -693,6 +698,7 @@ func drawTerrainGround(
 
 # Rocks, bushes, flowers and forest use one shadow draw per material batch.
 func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view WalkerTerrain) {
+  renderer.passes.shadow.drawKind = DrawKind.rocks
   loop let part: view PropInstancer in terrainSystem.rockParts {
     RendererDeferredShadow.drawShadowCasterBatchWith(
       renderer: renderer
@@ -700,6 +706,7 @@ func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view 
       batch: part.batch
     )
   }
+  renderer.passes.shadow.drawKind = DrawKind.bushes
   loop let part: view PropInstancer in terrainSystem.bushParts {
     RendererDeferredShadow.drawShadowCasterBatchWith(
       renderer: renderer
@@ -707,6 +714,7 @@ func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view 
       batch: part.batch
     )
   }
+  renderer.passes.shadow.drawKind = DrawKind.forest
   drawTreeForestShadows(renderer: renderer, forest: terrainSystem.forest)
 }
 

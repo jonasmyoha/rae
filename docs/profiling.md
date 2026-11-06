@@ -94,6 +94,32 @@ and the real payload for the Instruments pass (#524). The bindings already exist
 (`wgpuCommandEncoderWriteTimestamp`, `wgpuComputePassEncoderWriteTimestamp`), so
 this stays Rae-over-WebGPU with no new renderer C surface.
 
+## What each pass drew: the `[draws]` lines
+
+`RAE_FRAME_TIMING=1` in a walker app logs, after each `[frames]` line (every 5 s), one line a pass
+with what the last frame drew, by kind (lib/DrawStats, app3d/FrameLog):
+
+```
+[draws] gbuffer: 10479 instances, 1027988 triangles; ground 314 instances 411360 triangles, rocks ...
+[draws] shadow cascade 0: 981 instances, 421598 triangles; rocks 235 instances 23500 triangles, ...
+```
+
+Resident triangles say what is loaded. These say what a frame costs, so read them first when a frame
+is slow: 7 million triangles of flowers once went unnoticed because only resident triangles were
+logged.
+
+- **The passes:** `gbuffer` on the deferred path; `pre-pass` and `forward` on the forward path; one
+  `shadow cascade <n>` line each. Every cascade draws every caster today, so the cascade lines are
+  equal, and the real shadow cost is one line times the cascade count.
+- **The kinds:** `ground`, `rocks`, `bushes`, `meadow`, `forest` (with its billboards, two triangles
+  each), `characters`, `cubes`, `grass`, `marks` (footprints, particles, rain and snow) and
+  `referenceTree`. A draw whose caller named no kind is `other`. A new thing the walker draws should
+  name its kind, or it lands in `other`.
+- **Grass** is drawn by a count on the GPU, so once a line the log waits for one read of it. That can
+  add one slow frame in each 5 s under `RAE_FRAME_TIMING`, and none without it.
+- **Not counted:** the water, what is drawn after the scene passes, and metaball casters. An app with
+  its own frame loop gets no lines unless it calls `frameLogDraws`, and its draws are all `other`.
+
 ## Adding zones to your own app
 
 ```rae

@@ -56,6 +56,7 @@ open app3d/CameraBar
 open Shadow3d
 open app3d/Playback
 open HotReload
+open DrawStats
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/EventLoop
@@ -318,6 +319,7 @@ func renderWalkerApp(
             grassCompute: grassCompute
             resources: resources
           )
+          renderSystem.renderer.passes.gbuffer.drawKind = DrawKind.referenceTree
           if let tree: mod ReferenceTree = renderSystem.referenceTree {
             drawReferenceTree(
               tree: tree

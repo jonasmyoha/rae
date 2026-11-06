@@ -8,6 +8,12 @@ open MeshStore
 open gpu/GpuResources
 open gpu/GpuIds
 open ShadowMaps
+open DrawStats
+open ShadowMapsSprite
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open webgpu/Context
+open gpu/GpuLifetime
 
 # Many static casters of one mesh at once: the first `count` records of
 # `records`, `stride` floats each with the model matrix in the first 16 (an
@@ -84,6 +90,7 @@ func shadowQueueRecord(
   }
   shadow.paletteBaseRows.add(value: 0 as Int32)
   shadow.casterKeys.add(value: casterKey)
+  shadow.casterKinds.add(value: shadow.drawKind as Int)
   shadow.casterVbufs.add(value: vbuf)
   shadow.casterIbufs.add(value: ibuf)
   shadow.casterIcounts.add(value: icount)
@@ -118,4 +125,145 @@ func drawShadowCasterRecords(
     stride: stride
     count: count
   )
+}
+
+# The queued casters into one cascade's open pass: INSTANCED batching (#118).
+# Whether queued caster `at` joins the run of a caster of `key` drawing
+# `indexCount` indices from `firstIndex`: the same mesh and the same range.
+func shadowSameDraw(
+  shadow: view ShadowCache
+  at: copy Int
+  key: copy Int
+  firstIndex: copy Int
+  indexCount: copy Int
+) ret Bool {
+  ret shadow.casterKeys.copyAtFallback(index: at, fallback: -1) is key and shadow.casterFirstIndices.copyAtFallback(
+    index: at
+    fallback: 0
+  ) is firstIndex and shadow.casterIcounts.copyAtFallback(index: at, fallback: 0) is indexCount
+}
+
+# Casters sharing a mesh sit consecutively in the queue (every alive walker
+# for one body part) and the model + palette-base buffers are indexed by
+# instance_index (the queue position), so a RUN of equal keys is ONE
+# DrawIndexed (firstInstance = run start, instanceCount = run length).
+func drawShadowCasters(
+  shadow: mod ShadowCache
+  resources: view GpuResources
+  cascade: copy Int
+  pass: copy Ptr
+) {
+  var i: Int = 0
+  loop i < shadow.drawCount {
+    let key: Int = shadow.casterKeys.copyAtFallback(index: i, fallback: -1)
+    let firstIndex: Int = shadow.casterFirstIndices.copyAtFallback(index: i, fallback: 0)
+    let indexCount: Int = shadow.casterIcounts.copyAtFallback(index: i, fallback: 0)
+    var runEnd: Int = i + 1
+    loop runEnd < shadow.drawCount and shadowSameDraw(
+      shadow: shadow
+      at: runEnd
+      key: key
+      firstIndex: firstIndex
+      indexCount: indexCount
+    ) {
+      runEnd = runEnd + 1
+    }
+    var pipeline: RenderPipelineId = shadow.staticPipeline
+    var bind: BindGroupId = shadow.staticBinds.copyAtFallback(
+      index: cascade
+      fallback: noBindGroupId()
+    )
+    if key >= shadowFoliageKeyBit {
+      pipeline = shadow.foliage.pipeline
+      bind = shadow.foliage.binds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    } else if key >= shadowFadeKeyBit {
+      pipeline = shadow.fadePipeline
+      bind = shadow.fadeBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    } else if key >= shadowSkinnedKeyBit {
+      pipeline = shadow.skinPipeline
+      bind = shadow.skinBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    }
+    unsafe {
+      let drawn: Bool = recordDrawIndexedRangeInPass(
+        resources: resources
+        pass: pass
+        pipeline: pipeline
+        bindGroup: bind
+        vertexBuffer: refHandle(
+          resources: resources
+          ref: bufferRef(id: shadow.casterVbufs.copyAtFallback(index: i, fallback: noBufferId()))
+        )
+        indexBuffer: refHandle(
+          resources: resources
+          ref: bufferRef(id: shadow.casterIbufs.copyAtFallback(index: i, fallback: noBufferId()))
+        )
+        firstIndex: firstIndex
+        indexCount: indexCount
+        instanceCount: runEnd - i
+        firstInstance: i
+      )
+      if drawn {
+        shadowCountRun(
+          shadow: shadow
+          cascade: cascade
+          first: i
+          end: runEnd
+          indexCount: indexCount
+        )
+      }
+    }
+    i = runEnd
+  }
+}
+
+# What each cascade drew (lib/DrawStats), one DrawStats a cascade
+func createShadowDrawStats() ret List(DrawStats) {
+  var stats: List(DrawStats) = List.create(DrawStats, cap: shadowMaxCascades)
+  loop var cascade: Int = 0, cascade < shadowMaxCascades, ++cascade {
+    stats.add(value: createDrawStats())
+  }
+  ret stats
+}
+
+# Before a frame's casters are queued, and on a frame with shadows off
+func shadowResetDrawStats(shadow: mod ShadowCache) {
+  shadow.drawKind = DrawKind.other
+  loop let stats: mod DrawStats in shadow.drawStats {
+    drawStatsReset(stats: stats)
+  }
+}
+
+# Counts one run of casters drawn into `cascade`, each by its own kind
+func shadowCountRun(
+  shadow: mod ShadowCache
+  cascade: view Int
+  first: view Int
+  end: view Int
+  indexCount: view Int
+) {
+  loop var at: Int = first, at < end, ++at {
+    let kind: Int = shadow.casterKinds.copyAtFallback(index: at, fallback: 0)
+    if let stats: mod DrawStats = shadow.drawStats.modAt(index: cascade) {
+      drawStatsAdd(
+        stats: stats
+        kind: kind as DrawKind
+        instances: 1
+        triangles: indexCount / 3
+      )
+    }
+  }
+}
+
+# Counts the billboards drawn into `cascade`: two triangles each
+func shadowCountSprites(shadow: mod ShadowCache, cascade: view Int) {
+  let count: Int = shadowSpriteCount(shadow: shadow)
+  let kind: DrawKind = shadow.spriteDrawKind
+  if let stats: mod DrawStats = shadow.drawStats.modAt(index: cascade) {
+    drawStatsAdd(
+      stats: stats
+      kind: kind
+      instances: count
+      triangles: count * 2
+    )
+  }
 }
