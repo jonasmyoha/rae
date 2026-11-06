@@ -159,7 +159,7 @@ func paintShapeG(
         h: circleBox.h
         radius: r
         fill: g2dColor(color: fill)
-        borderWidth: sh.strokeWidth
+        borderWidth: g2dStrokeWidth(shape: sh, box: circleBox)
         border: g2dColor(color: shapeStroke(world: world, shape: sh, chain255: chain255))
       )
       ret
@@ -212,9 +212,9 @@ func paintShapeG(
         y: drawY
         w: drawW
         h: drawH
-        width: sh.strokeWidth
-        dash: sh.strokeDash
-        gap: sh.strokeGap
+        width: g2dStrokeWidth(shape: sh, box: box)
+        dash: sh.strokeDash * g2dStrokeScale(shape: sh, box: box)
+        gap: sh.strokeGap * g2dStrokeScale(shape: sh, box: box)
         color: g2dColor(color: stroke)
       )
       ret
@@ -227,7 +227,7 @@ func paintShapeG(
       h: drawH
       radius: radius * hoverMul
       fill: g2dColor(color: fill)
-      borderWidth: sh.strokeWidth
+      borderWidth: g2dStrokeWidth(shape: sh, box: box)
       border: g2dColor(color: stroke)
     )
     ret

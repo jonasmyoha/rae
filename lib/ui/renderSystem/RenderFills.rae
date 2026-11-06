@@ -154,9 +154,9 @@ func paintShapeStrokeG(
       y: box.y
       w: box.w
       h: box.h
-      width: shape.strokeWidth
-      dash: shape.strokeDash
-      gap: shape.strokeGap
+      width: g2dStrokeWidth(shape: shape, box: box)
+      dash: shape.strokeDash * g2dStrokeScale(shape: shape, box: box)
+      gap: shape.strokeGap * g2dStrokeScale(shape: shape, box: box)
       color: g2dColor(color: stroke)
     )
     ret
@@ -170,7 +170,7 @@ func paintShapeStrokeG(
     h: box.h
     radius: radius
     fill: 0
-    borderWidth: shape.strokeWidth
+    borderWidth: g2dStrokeWidth(shape: shape, box: box)
     border: g2dColor(color: stroke)
   )
 }

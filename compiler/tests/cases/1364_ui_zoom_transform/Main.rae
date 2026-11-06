@@ -5,6 +5,7 @@
 open ui/Ecs
 open ui/Components
 open ui/Scene
+open ui/SceneEncode
 open ui/SceneLoader
 open ui/SceneInstance
 open ui/inputSystem/InputSystem
@@ -16,7 +17,7 @@ open ecs/ComponentTable
 open ui/UiSystems
 
 func cardScene() ret String {
-  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":400,\"h\":200\},\"Children\":[\"Title\",\"Icon\",\"List\"]\},\"Title\":\{\"Rect\":\{\"x\":20,\"y\":10,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Hello\"\}\},\"Icon\":\{\"Rect\":\{\"x\":340,\"y\":10,\"w\":40,\"h\":40\}\},\"List\":\{\"Rect\":\{\"x\":20,\"y\":60,\"w\":360,\"h\":120\},\"Overflow\":\{\"mode\":\"Clip\"\},\"Children\":[\"Row\"]\},\"Row\":\{\"Rect\":\{\"x\":0,\"y\":20,\"w\":360,\"h\":40\},\"OnClick\":\{\"actionId\":\"row\"\}\}\}\}"
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":400,\"h\":200\},\"Children\":[\"Title\",\"Icon\",\"List\"]\},\"Title\":\{\"Rect\":\{\"x\":20,\"y\":10,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"Hello\"\}\},\"Icon\":\{\"Rect\":\{\"x\":340,\"y\":10,\"w\":40,\"h\":40\},\"Shape\":\{\"kind\":\"Rect\",\"strokeWidth\":4\}\},\"List\":\{\"Rect\":\{\"x\":20,\"y\":60,\"w\":360,\"h\":120\},\"Overflow\":\{\"mode\":\"Clip\"\},\"Shape\":\{\"kind\":\"Rect\",\"strokeWidth\":4,\"strokeFixed\":true\},\"Children\":[\"Row\"]\},\"Row\":\{\"Rect\":\{\"x\":0,\"y\":20,\"w\":360,\"h\":40\},\"OnClick\":\{\"actionId\":\"row\"\}\}\}\}"
 }
 
 func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
@@ -242,4 +243,47 @@ func main() {
     entityId: nodeOf(world: world, nodeId: "Card")
   )
   log("turned: origin {turned.position.x.toInt()} {turned.position.y.toInt()}")
+
+  # A stroke zooms with its box, unless it says it keeps its width on screen: a guide in an editor's
+  # camera must stay readable at any zoom. It loads from a scene and it saves.
+  setFx(
+    world: world
+    nodeId: "Card"
+    scale: 0.5
+    pivotX: 0.5
+    pivotY: 0.5
+    rotation: 0.0
+  )
+  transformSystem(world: world, uiSystems: uiSystems)
+  let plainStroke: view Shape = componentView(
+    this: world.shapes
+    entityId: nodeOf(world: world, nodeId: "Icon")
+  )
+  let fixedStroke: view Shape = componentView(
+    this: world.shapes
+    entityId: nodeOf(world: world, nodeId: "List")
+  )
+  let cardBox: PaintBox = g2dPaintBox(
+    world: world
+    entityId: nodeOf(world: world, nodeId: "Icon")
+    wt: componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: nodeOf(world: world, nodeId: "Icon")
+    )
+    cr: componentView(
+      this: uiSystems.layout.computedRects
+      entityId: nodeOf(world: world, nodeId: "Icon")
+    )
+  )
+  log(
+    "a stroke of 4 at 0.5: {g2dStrokeWidth(shape: plainStroke, box: cardBox)}, fixed {fixedStroke.strokeFixed}: {g2dStrokeWidth(
+      shape: fixedStroke
+      box: cardBox
+    )}"
+  )
+  log(
+    "saved: plain {encodeShape(shape: plainStroke).contains(sub: "\"strokeFixed\":true")}, fixed {encodeShape(
+      shape: fixedStroke
+    ).contains(sub: "\"strokeFixed\":true")}"
+  )
 }

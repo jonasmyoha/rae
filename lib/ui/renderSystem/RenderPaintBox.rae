@@ -55,7 +55,7 @@ func g2dHoverMul(world: view UiWorld, entityId: view EntityId) ret Float {
 # worldRectOf), grown by the hover multiplier about the entity's TransformFx pivot
 # (center when it has none). Hover is paint only: its children and its hit test
 # do not move. `scale` is the whole uniform factor, for what zooms with the box: a
-# radius, a blur. Rotation is drawn about the origin
+# radius, a stroke, a blur. Rotation is drawn about the origin
 # (paintEntityG), not here.
 type PaintBox {
   x: Float
@@ -91,6 +91,19 @@ func g2dPaintBox(
     h: rect.h * hoverMul
     scale: uniform
   }
+}
+
+# What a Shape's stroke, dash and gap are multiplied by in `box`
+func g2dStrokeScale(shape: view Shape, box: view PaintBox) ret Float {
+  if shape.strokeFixed {
+    ret 1.0
+  }
+  ret box.scale
+}
+
+# A Shape's stroke width in `box`
+func g2dStrokeWidth(shape: view Shape, box: view PaintBox) ret Float {
+  ret shape.strokeWidth * g2dStrokeScale(shape: shape, box: box)
 }
 
 # A bounded stack of translucent shapes approximates a soft shadow in Rae.
