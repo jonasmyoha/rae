@@ -567,6 +567,10 @@ func premultipliedChannel(color: view Int, shift: view Int) ret Float {
   ret ((color / shift) % 256).toFloat() / 255.0 * alpha
 }
 
+func colorAlpha(color: view Int) ret Int {
+  ret (color / 16777216) % 256
+}
+
 func pushPremultiplied(canvas: mod Gpu2dCanvas, color: copy Int) {
   canvas.prims.add(value: premultipliedChannel(color: color, shift: 65536))
   canvas.prims.add(value: premultipliedChannel(color: color, shift: 256))
@@ -596,6 +600,13 @@ func pushBox(
   gradientAngle: copy Float
   gradientTo: copy Int
 ) {
+  # A box with nothing visible draws nothing: its premultiplied color is 0 at every pixel, and the
+  # GPU would still shade and blend its whole area (a fading shadow's layers round to alpha 0)
+  if colorAlpha(color: fill) is 0 and (borderWidth <= 0.0 or colorAlpha(color: border) is 0) and (not gradient or colorAlpha(
+    color: gradientTo
+  ) is 0) {
+    ret
+  }
   canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
   # The canvas rotation (#1003): the box's center turns about the pivot and
   # the quad itself turns by the same angle in the shader.

@@ -728,6 +728,34 @@ tree. Ten runs of SUMU's motion self-test, with the phone on WiFi:
 - Instruments' Metal System Trace is still not recorded: the phone was on WiFi only (`xctrace list devices` shows it
   offline).
 
+**What the 2D pass spends its GPU time on, and what that does to the pacing (measured 2026-11-07).** The same temporary
+command buffer timing, plus a temporary switch that skipped the box, image or text draws, and a per-frame count of the
+box area (one run each of SUMU's motion self-test; the median of the frame's busiest command buffer, zoom out):
+
+| drawn | GPU | frames shown 21 ms after submit (80 Hz) |
+|---|---|---|
+| everything | 4.6 ms | all 77 |
+| no boxes | 1.0 ms | all 76 |
+| no images | 4.4 ms | all 75 |
+| no text | 4.7 ms | all 76 (and the zoom back too) |
+| nothing | 0.9 ms | all 76 |
+
+- **The boxes are the GPU time.** A zoom frame's boxes cover 6-8 screens of area. One full-screen box is opaque. The
+  zoomed card's shadow (`paintShadowG` in `renderSystem/RenderPaintBox.rae`) is nine rounded rects stacked over the
+  card, 20-40% of the screen each, at alpha 1/255, 2/255 or 0: each layer's alpha is rounded down to a whole step. One
+  more full-screen box has alpha 0. About 2.7 screens of the area changed no pixel.
+- **`pushBox` now drops a box with nothing visible** (fill, border and gradient all alpha 0). That changes no pixel.
+  The GPU time stayed about the same (4.1-4.5 ms in two runs), although a third of the area went. The GPU time does not
+  follow the work. A likely reason is that iOS lowers the GPU's clock until the work fits the time it has, which only
+  a trace with the GPU's clock can show.
+- **The GPU is not what puts the display at 80 Hz.** With nothing drawn, the GPU finishes 1.1 ms after submit, and
+  the zoom out is still shown 21 ms after submit, 8 and 17 ms apart. So the earlier reading above ("the mode is which
+  side of the compositor's deadline the GPU completes on") is wrong. The mode is set by the frame loop itself: when it
+  starts a frame and hands it over, against the 3 drawables. For the same reason, committing the GPU work earlier in
+  the frame cannot fix it.
+- Still to do: "[ui animation: the 80 Hz zoom is set by the frame loop, not the GPU]" and "[gpu timing: the command
+  buffer's GPU time on Apple GPUs]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
