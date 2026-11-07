@@ -224,6 +224,10 @@ type UiWorld {
   # resource: one per world, not a per-entity component.
   layoutW: Float
   layoutH: Float
+  # The next change of the layout's size is the on-screen keyboard's, not a window's: nodes with
+  # AnimateLayout glide to their new places with it (layoutKeyboardMoves). Taken by that change.
+  # resource: one per world, runtime only.
+  layoutKeyboard: Bool = false
   # The screen's safe area (notch, home indicator) as a simulator or a layout
   # test sets it (a phone's on a desktop); while not simulating, the layout
   # pass reads the OS's (lib/ui/safeAreaSystem feedSafeArea)

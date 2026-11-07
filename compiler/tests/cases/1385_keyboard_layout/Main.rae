@@ -1,0 +1,142 @@
+# The on-screen keyboard (docs/ui-animation-design.md section 4, AnimateLayout): a host lays the
+# page out shorter or taller for it. A change of the layout's size is a window's, and moves nothing,
+# unless the host marked it as the keyboard's with layoutKeyboardMoves: then a node with
+# AnimateLayout
+# glides to its new place on the `keyboard` curve, as long as the platform says the keyboard takes.
+# A bar at the page's bottom and a title at its top; time is handed in.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+
+type Page {
+  world: UiWorld
+  uiSystems: UiSystems
+  bar: EntityId
+  title: EntityId
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func mount() ret Page {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 600.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":600\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0,\"alignCross\":\"Stretch\"\},\"Children\":[\"Title\",\"Space\",\"Bar\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":50\},\"AnimateLayout\":\{\}\},\"Space\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":10\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":60\},\"AnimateLayout\":\{\}\}\}\}"
+    )
+  )
+  let bar: EntityId = nodeOf(world: world, nodeId: "Bar")
+  let title: EntityId = nodeOf(world: world, nodeId: "Title")
+  ret Page { world: own world, uiSystems: own uiSystems, bar: bar, title: title }
+}
+
+func frame(page: mod Page, deltaTime: view Float) {
+  layoutSystem(world: page.world, uiSystems: page.uiSystems)
+  animationTriggers(world: page.world, uiSystems: page.uiSystems)
+  if animationInFlight(world: page.world, uiSystems: page.uiSystems) {
+    animationSystem(world: page.world, uiSystems: page.uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: page.world, uiSystems: page.uiSystems)
+}
+
+func settle(page: mod Page) {
+  loop var i: Int = 0, i < 300 and animationInFlight(world: page.world, uiSystems: page.uiSystems), ++i {
+    frame(page: page, deltaTime: 0.016)
+  }
+  frame(page: page, deltaTime: 0.016)
+}
+
+func drawnY(page: view Page, entityId: view EntityId) ret Int {
+  ret Math.round(
+    x: componentView(this: page.uiSystems.transform2d.worldTransforms, entityId: entityId).position.y
+  ).toInt()
+}
+
+func motionOf(page: view Page, entityId: view EntityId) ret String {
+  if componentHas(this: page.uiSystems.animation.tracks, entityId: entityId) {
+    let motion: view MotionToken = componentView(
+      this: page.uiSystems.animation.tracks
+      entityId: entityId
+    ).y.motion
+    ret "gliding on {motion.name}, a {motion.kind} of {Math.round(x: motion.seconds * 100.0).toInt()} hundredths"
+  }
+  ret "still"
+}
+
+func main() {
+  var page: Page = mount()
+  settle(page: page)
+  log("laid out at 600: the bar at y {drawnY(page: page, entityId: page.bar)}")
+  page.world.layoutH = 400.0
+  frame(page: page, deltaTime: 0.0)
+  log(
+    "a window made 400 tall: the bar is at y {drawnY(page: page, entityId: page.bar)} at once, {motionOf(
+      page: page
+      entityId: page.bar
+    )}"
+  )
+  page.world.layoutH = 600.0
+  settle(page: page)
+
+  log("--- the keyboard comes, 0.3 s on this platform")
+  layoutKeyboardMoves(world: page.world, seconds: 0.3)
+  page.world.layoutH = 400.0
+  frame(page: page, deltaTime: 0.0)
+  log(
+    "first frame: the bar is drawn at y {drawnY(page: page, entityId: page.bar)}, where it was, {motionOf(
+      page: page
+      entityId: page.bar
+    )}; the title is {motionOf(page: page, entityId: page.title)}"
+  )
+  var frames: Int = 0
+  loop frames < 300 and componentHas(this: page.uiSystems.animation.tracks, entityId: page.bar) {
+    frame(page: page, deltaTime: 0.01)
+    if frames is 14 {
+      log(
+        "half way in time it is past half way in place, y {drawnY(page: page, entityId: page.bar)}"
+      )
+    }
+    frames = frames + 1
+  }
+  log(
+    "it arrives in {frames + 1} hundredths, at y {drawnY(page: page, entityId: page.bar)}, above the keyboard"
+  )
+  page.world.layoutH = 600.0
+  frame(page: page, deltaTime: 0.0)
+  log(
+    "the mark was used once: the next change, unmarked, jumps to y {drawnY(
+      page: page
+      entityId: page.bar
+    )}, {motionOf(page: page, entityId: page.bar)}"
+  )
+
+  log("--- a platform that says nothing")
+  var other: Page = mount()
+  settle(page: other)
+  layoutKeyboardMoves(world: other.world, seconds: 0.0)
+  other.world.layoutH = 400.0
+  frame(page: other, deltaTime: 0.0)
+  log("the built-in keyboard token: {motionOf(page: other, entityId: other.bar)}")
+}

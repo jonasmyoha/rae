@@ -399,6 +399,26 @@ func layoutPlaceOf(
 # changed: then every place moves at once and there is nothing to follow. A hidden node has no
 # place,
 # so when it comes back it starts where it is laid out.
+# The on-screen keyboard is coming or going, and the host is about to lay the page out shorter or
+# taller for it (world.layoutH). That is not a window resize: the nodes with AnimateLayout glide to
+# their new places with the keyboard, on the `keyboard` motion token, a curve. `seconds` is how long
+# the platform says the keyboard takes (Gpu2d keyboardSeconds: iOS about 0.25); 0 keeps the token's
+# own length, the theme's or the built-in 0.25 s. The next change of the layout's size takes it.
+func layoutKeyboardMoves(world: mod UiWorld, seconds: view Float) {
+  world.layoutKeyboard = true
+  if seconds > 0.0 {
+    var token: MotionToken = { name: "keyboard", kind: MotionKind.curve, curve: "easeOutQuart" }
+    if let current: MotionToken = themeMotion(theme: world.theme.resolved, name: "keyboard") {
+      if current.kind is MotionKind.curve {
+        token = current
+      }
+    }
+    token.kind = MotionKind.curve
+    token.seconds = seconds
+    themeMotionSet(theme: world.theme.resolved, token: token)
+  }
+}
+
 func animationLayoutGlides(world: mod UiWorld, uiSystems: mod UiSystems) {
   if componentCount(this: world.animateLayouts) is 0 {
     ret
@@ -409,13 +429,18 @@ func animationLayoutGlides(world: mod UiWorld, uiSystems: mod UiSystems) {
   }
   uiSystems.animation.layoutGeneration = generation
   let resized: Bool = world.layoutW is not uiSystems.animation.layoutWidth or world.layoutH is not uiSystems.animation.layoutHeight
+  # A size change the host marked as the keyboard's moves things; a window's does not
+  let keyboard: Bool = resized and world.layoutKeyboard
+  if resized {
+    world.layoutKeyboard = false
+  }
   uiSystems.animation.layoutWidth = world.layoutW
   uiSystems.animation.layoutHeight = world.layoutH
   loop var i: Int = 0, i < componentCount(this: world.animateLayouts), ++i {
     let entityId: EntityId = componentEntityAt(this: world.animateLayouts, i: i)
     if shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) {
       let place: LayoutPlace = layoutPlaceOf(world: world, uiSystems: uiSystems, entityId: entityId)
-      if componentHas(this: uiSystems.animation.layoutPlaces, entityId: entityId) and not resized {
+      if componentHas(this: uiSystems.animation.layoutPlaces, entityId: entityId) and (not resized or keyboard) {
         let last: view LayoutPlace = componentView(
           this: uiSystems.animation.layoutPlaces
           entityId: entityId
@@ -423,13 +448,20 @@ func animationLayoutGlides(world: mod UiWorld, uiSystems: mod UiSystems) {
         let dx: Float = last.x - place.x
         let dy: Float = last.y - place.y
         if Math.abs(value: dx) > 0.01 or Math.abs(value: dy) > 0.01 {
-          let motion: String = componentView(this: world.animateLayouts, entityId: entityId).motion
+          var motion: String = motionNameOr(
+            world: world
+            name: componentView(this: world.animateLayouts, entityId: entityId).motion
+            fallback: "smooth"
+          )
+          if keyboard {
+            motion = "keyboard"
+          }
           animationGlide(
             uiSystems: uiSystems
             entityId: entityId
             dx: dx
             dy: dy
-            motion: motionNameOr(world: world, name: motion, fallback: "smooth")
+            motion: motion
           )
         }
       }

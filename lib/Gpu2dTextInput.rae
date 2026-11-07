@@ -40,6 +40,17 @@ func keyboardHeight() ret Float {
   }
 }
 
+# How long the on-screen keyboard's last move takes, in seconds, as the platform says (iOS: about
+# 0.25), and 0 where it does not say or there is none. A host passes it to lib/ui's
+# layoutKeyboardMoves so the page moves with the keyboard.
+func nativeKeyboardSeconds() unsafe extern("rae_ext_Gpu2d_keyboardSeconds") ret Float
+
+func keyboardSeconds() ret Float {
+  unsafe {
+    ret nativeKeyboardSeconds()
+  }
+}
+
 # The system clipboard's text (macOS NSPasteboard, iOS UIPasteboard, through
 # SDL3), "" when it holds none. Under a headless run it is never read, and
 # setClipboardText answers false: an automated run must not touch the
