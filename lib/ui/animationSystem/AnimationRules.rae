@@ -149,6 +149,61 @@ type TextSeen {
 type TextGhost {
   text: String
   progress: AnimationChannel
+  # Where the new text comes from, decided when it changed (an `auto` roll compares the two)
+  rollFrom: RollFrom = RollFrom.below
+}
+
+func textIsDigit(byte: view Int) ret Bool {
+  ret byte >= 48 and byte <= 57
+}
+
+# Whether `text` sorts after `other`, with each run of digits read as a number: "10:45" after
+# "9:30", "Task 10" after "Task 9". Anything else is compared byte by byte, and a text that is the
+# other with more after it sorts after.
+func textSortsAfter(text: view String, other: view String) ret Bool {
+  var i: Int = 0
+  var j: Int = 0
+  loop i < text.length() and j < other.length() {
+    let a: Int = text.byteAt(index: i)
+    let b: Int = other.byteAt(index: j)
+    if textIsDigit(byte: a) and textIsDigit(byte: b) {
+      var first: Int = 0
+      loop i < text.length() and textIsDigit(byte: text.byteAt(index: i)) {
+        first = first * 10 + text.byteAt(index: i) - 48
+        i = i + 1
+      }
+      var second: Int = 0
+      loop j < other.length() and textIsDigit(byte: other.byteAt(index: j)) {
+        second = second * 10 + other.byteAt(index: j) - 48
+        j = j + 1
+      }
+      if first is not second {
+        ret first > second
+      }
+    } else {
+      if a is not b {
+        ret a > b
+      }
+      i = i + 1
+      j = j + 1
+    }
+  }
+  ret text.length() - i > other.length() - j
+}
+
+# The side a new text rolls in from: `auto` decides by the two texts, the same text from below
+func textRollFrom(
+  rollFrom: view RollFrom
+  newText: view String
+  oldText: view String
+) ret RollFrom {
+  if rollFrom is not RollFrom.auto {
+    ret rollFrom
+  }
+  if textSortsAfter(text: oldText, other: newText) {
+    ret RollFrom.above
+  }
+  ret RollFrom.below
 }
 
 # How the two texts look at `progress`: alpha shares, and each one's y offset in the node's box.

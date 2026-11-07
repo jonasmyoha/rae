@@ -487,7 +487,17 @@ func startTextGhost(
     let current: Float = componentView(this: uiSystems.animation.textGhosts, entityId: entityId).progress.current
     start = 1.0 - Math.max(a: 0.0, b: Math.min(a: 1.0, b: current))
   }
-  let name: String = componentView(this: world.animateTexts, entityId: entityId).motion
+  let animate: view AnimateText = componentView(this: world.animateTexts, entityId: entityId)
+  let name: String = animate.motion
+  var newText: String = ""
+  if componentHas(this: world.texts, entityId: entityId) {
+    newText = "{componentView(this: world.texts, entityId: entityId).text}"
+  }
+  let rollFrom: RollFrom = textRollFrom(
+    rollFrom: animate.rollFrom
+    newText: newText
+    oldText: oldText
+  )
   var motion: MotionToken = {}
   if let token: MotionToken = themeMotion(
     theme: world.theme.resolved
@@ -507,7 +517,7 @@ func startTextGhost(
   componentSet(
     this: uiSystems.animation.textGhosts
     entityId: entityId
-    data: TextGhost { text: oldText, progress: progress }
+    data: TextGhost { text: oldText, progress: progress, rollFrom: rollFrom }
   )
 }
 

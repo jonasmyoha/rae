@@ -7,6 +7,7 @@ open ui/renderSystem/RenderTextBounds
 open ui/renderSystem/RenderSwitch
 open ui/renderSystem/RenderFills
 import Gpu2d
+import Math
 import Gpu2dText
 import SdfText
 import ui/animationSystem/AnimationSystem
@@ -17,6 +18,7 @@ import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
 open ecs/ComponentTable
+open ecs/Entity
 open Gpu2dCanvas
 open ui/UiSystems
 open ui/Transform
@@ -278,6 +280,68 @@ func paintTextG(
   }
 }
 
+# Where a rolling text may be drawn: its box, inside the nearest shape it sits on (itself or an
+# ancestor), with that shape's round corners when the text covers the whole shape, as a label that
+# fills its chip does. A parent's Overflow clip is already on the canvas and cuts this too.
+func textRollClip(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+) ret ClipBox {
+  var box: ClipBox = {
+    x: wt.position.x
+    y: wt.position.y
+    w: cr.size.x * wt.scale.x
+    h: cr.size.y * wt.scale.y
+    radius: 0.0
+  }
+  var current: EntityId = entityId
+  loop var depth: Int = 0, depth < 16, ++depth {
+    if componentHas(this: world.shapes, entityId: current) and componentHas(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: current
+    ) and componentHas(this: uiSystems.layout.computedRects, entityId: current) {
+      let shapeAt: view WorldTransform2D = componentView(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: current
+      )
+      let shape: WorldRect = worldRectOf(
+        wt: shapeAt
+        cr: componentView(this: uiSystems.layout.computedRects, entityId: current)
+      )
+      let x0: Float = Math.max(a: box.x, b: shape.x)
+      let y0: Float = Math.max(a: box.y, b: shape.y)
+      let x1: Float = Math.min(a: box.x + box.w, b: shape.x + shape.w)
+      let y1: Float = Math.min(a: box.y + box.h, b: shape.y + shape.h)
+      let covers: Bool = x0 - shape.x < 0.5 and y0 - shape.y < 0.5 and shape.x + shape.w - x1 < 0.5 and shape.y + shape.h - y1 < 0.5
+      box.x = x0
+      box.y = y0
+      box.w = Math.max(a: 0.0, b: x1 - x0)
+      box.h = Math.max(a: 0.0, b: y1 - y0)
+      if covers {
+        let radius: Float = componentView(this: world.shapes, entityId: current).radius * shapeAt.scale.x
+        box.radius = Math.min(a: radius, b: Math.min(a: box.w, b: box.h) / 2.0)
+      }
+      ret box
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret box
+    }
+    current = componentView(this: uiSystems.hierarchy.parents, entityId: current).parent
+  }
+  ret box
+}
+
+type ClipBox {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  radius: Float
+}
+
 # A text changing (AnimateText): the old one going and the new one coming. A roll stays in the box.
 func paintTextWithGhost(
   world: view UiWorld
@@ -308,22 +372,44 @@ func paintTextWithGhost(
     if rolling {
       kind = AnimateTextKind.roll
     }
+    var rollFrom: RollFrom = animate.rollFrom
+    if rollFrom is RollFrom.auto {
+      rollFrom = ghost.rollFrom
+    }
     look = textGhostLook(
       kind: kind
-      rollFrom: animate.rollFrom
+      rollFrom: rollFrom
       progress: ghost.progress.current
       start: ghost.progress.start
       height: cr.size.y * wt.scale.y
     )
   }
   if rolling {
-    Gpu2d.pushClipRect(
-      canvas: canvas
-      x: wt.position.x
-      y: wt.position.y
-      w: cr.size.x * wt.scale.x
-      h: cr.size.y * wt.scale.y
+    let clip: ClipBox = textRollClip(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      wt: wt
+      cr: cr
     )
+    if clip.radius > 0.0 {
+      Gpu2d.pushClipRoundedRect(
+        canvas: canvas
+        x: clip.x
+        y: clip.y
+        w: clip.w
+        h: clip.h
+        radius: clip.radius
+      )
+    } else {
+      Gpu2d.pushClipRect(
+        canvas: canvas
+        x: clip.x
+        y: clip.y
+        w: clip.w
+        h: clip.h
+      )
+    }
   }
   var ghostAt: WorldTransform2D = wt
   ghostAt.position.y = wt.position.y + look.ghostY
