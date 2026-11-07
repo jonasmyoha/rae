@@ -187,6 +187,17 @@ from below when the new text sorts after the old one, numbers read as numbers).
 `HoverScale` stays as the way to react to a press. It gets an optional `motion` token
 in place of `speed`, so a press can use a spring.
 
+**`FocusStyle`** (built in 0.3.39): a field's look while it has focus. On a node with a
+`TextField` and a `Shape`, the edge takes `stroke` (a palette slot or `#hex`) at `strokeWidth`
+(below 0: the Shape's own) while the field has focus, and fades there and back on `motion`. The
+fade is a channel in `focusFades` only while it runs, so a resting field costs nothing: the painter
+then reads `TextField.focused`. A field with no edge of its own fades one in from transparent.
+Case 1384, `checks/uiFocusField`.
+
+```json
+"FocusStyle": { "stroke": "accent", "strokeWidth": 2.5, "motion": "quick" }
+```
+
 ### Bundles
 
 Built into lib/ui (`ui/BuiltInBundles`), so a node gets them by name, and any theme may

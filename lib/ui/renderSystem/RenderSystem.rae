@@ -100,6 +100,14 @@ func paintShapeG(
   canvas: mod Gpu2dCanvas
 ) {
   let sh: view Shape = componentView(this: world.shapes, entityId: entityId)
+  # The edge, with a focused field's look mixed in (FocusStyle)
+  let edge: ShapeEdge = shapeEdge(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    shape: sh
+    chain255: chain255
+  )
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
   # dark/light toggle re-colors without a scene re-parse; empty slot
   # keeps the literal fill.
@@ -152,7 +160,7 @@ func paintShapeG(
     }
     # the stroke as a RoundedRect draws it: a border inset from the edge
     # (a dash pattern is a rectangle guide's, so a circle's stroke is solid)
-    if sh.strokeWidth > 0.0 {
+    if edge.width > 0.0 {
       Gpu2d.drawBox(
         canvas: canvas
         x: circleBox.x
@@ -161,8 +169,8 @@ func paintShapeG(
         h: circleBox.h
         radius: r
         fill: g2dColor(color: fill)
-        borderWidth: g2dStrokeWidth(shape: sh, box: circleBox)
-        border: g2dColor(color: shapeStroke(world: world, shape: sh, chain255: chain255))
+        borderWidth: edge.width * g2dStrokeScale(shape: sh, box: circleBox)
+        border: g2dColor(color: edge.color)
       )
       ret
     }
@@ -192,8 +200,8 @@ func paintShapeG(
       canvas: canvas
     )
   }
-  if sh.strokeWidth > 0.0 {
-    let stroke: RgbaColor = shapeStroke(world: world, shape: sh, chain255: chain255)
+  if edge.width > 0.0 {
+    let stroke: RgbaColor = edge.color
     if sh.strokeDash > 0.0 {
       # A dashed stroke: the fill as a plain box, then the dashes as
       # rect segments along the four edges (square corners; a guide).
@@ -214,7 +222,7 @@ func paintShapeG(
         y: drawY
         w: drawW
         h: drawH
-        width: g2dStrokeWidth(shape: sh, box: box)
+        width: edge.width * g2dStrokeScale(shape: sh, box: box)
         dash: sh.strokeDash * g2dStrokeScale(shape: sh, box: box)
         gap: sh.strokeGap * g2dStrokeScale(shape: sh, box: box)
         color: g2dColor(color: stroke)
@@ -229,7 +237,7 @@ func paintShapeG(
       h: drawH
       radius: radius * hoverMul
       fill: g2dColor(color: fill)
-      borderWidth: g2dStrokeWidth(shape: sh, box: box)
+      borderWidth: edge.width * g2dStrokeScale(shape: sh, box: box)
       border: g2dColor(color: stroke)
     )
     ret

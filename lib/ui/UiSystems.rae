@@ -99,6 +99,10 @@ type AnimationSystem {
   # AnimateText: each marked node's last text, and the old text still being drawn
   textSeens: ComponentTable(TextSeen)
   textGhosts: ComponentTable(TextGhost)
+  # FocusStyle: each field's last focus, and its edge's fade while it runs
+  focusSeens: ComponentTable(FocusSeen)
+  focusFades: ComponentTable(FocusFade)
+  focusGeneration: Int = -1
   textGeneration: Int = -1
   # listMotionSystem: what each animated list last showed
   listMotions: ComponentTable(ListMotionState)
@@ -212,6 +216,8 @@ func createUiSystems() ret UiSystems {
       layoutPlaces: ComponentTable.create(LayoutPlace)
       textSeens: ComponentTable.create(TextSeen)
       textGhosts: ComponentTable.create(TextGhost)
+      focusSeens: ComponentTable.create(FocusSeen)
+      focusFades: ComponentTable.create(FocusFade)
       listMotions: ComponentTable.create(ListMotionState)
       sharedNodes: ComponentTable.create(SharedNode)
       sharedSeens: ComponentTable.create(SharedSeen)
@@ -254,6 +260,8 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.layoutPlaces, entityId: entityId)
   componentRemove(this: uiSystems.animation.textSeens, entityId: entityId)
   componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
+  componentRemove(this: uiSystems.animation.focusSeens, entityId: entityId)
+  componentRemove(this: uiSystems.animation.focusFades, entityId: entityId)
   componentRemove(this: uiSystems.animation.listMotions, entityId: entityId)
   componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
   componentRemove(this: uiSystems.animation.sharedSeens, entityId: entityId)

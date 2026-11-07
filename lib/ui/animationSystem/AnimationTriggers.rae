@@ -522,10 +522,78 @@ func startTextGhost(
   )
 }
 
+# A field with a FocusStyle that gained or lost focus: its edge fades on the style's motion, from
+# wherever it is. The first look plays nothing.
+func animationFocusFades(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if componentCount(this: world.focusStyles) is 0 {
+    ret
+  }
+  let generation: Int = componentTableGeneration(this: world.textFields)
+  if generation is uiSystems.animation.focusGeneration {
+    ret
+  }
+  uiSystems.animation.focusGeneration = generation
+  loop var i: Int = 0, i < componentCount(this: world.focusStyles), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.focusStyles, i: i)
+    if componentHas(this: world.textFields, entityId: entityId) is false {
+      continue
+    }
+    let focused: Bool = componentView(this: world.textFields, entityId: entityId).focused
+    if componentHas(this: uiSystems.animation.focusSeens, entityId: entityId) is false {
+      componentSet(
+        this: uiSystems.animation.focusSeens
+        entityId: entityId
+        data: FocusSeen { focused: focused }
+      )
+      continue
+    }
+    if componentView(this: uiSystems.animation.focusSeens, entityId: entityId).focused is focused {
+      continue
+    }
+    componentMod(this: uiSystems.animation.focusSeens, entityId: entityId).focused = focused
+    if uiSystems.animation.settings.off {
+      componentRemove(this: uiSystems.animation.focusFades, entityId: entityId)
+      continue
+    }
+    var target: Float = 0.0
+    if focused {
+      target = 1.0
+    }
+    let motion: MotionToken = animationMotionNamed(
+      world: world
+      entityId: entityId
+      name: componentView(this: world.focusStyles, entityId: entityId).motion
+    )
+    if componentHas(this: uiSystems.animation.focusFades, entityId: entityId) {
+      let fade: mod FocusFade = componentMod(
+        this: uiSystems.animation.focusFades
+        entityId: entityId
+      )
+      channelRetarget(channel: fade.progress, target: target, motion: motion)
+    } else {
+      var progress: AnimationChannel = createChannel(
+        current: 1.0 - target
+        target: target
+        motion: motion
+        restDistance: animationRestRatio
+      )
+      if uiSystems.animation.settings.hold >= 0.0 {
+        channelHold(channel: progress, share: uiSystems.animation.settings.hold)
+      }
+      componentSet(
+        this: uiSystems.animation.focusFades
+        entityId: entityId
+        data: FocusFade { progress: progress }
+      )
+    }
+  }
+}
+
 # Take the requests, and find what has just come to be shown
 func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
   animationLayoutGlides(world: world, uiSystems: uiSystems)
   animationTextGhosts(world: world, uiSystems: uiSystems)
+  animationFocusFades(world: world, uiSystems: uiSystems)
   if world.animationRequests.length > 0 {
     let requests: List(AnimationRequest) = own world.animationRequests
     world.animationRequests = List.create(AnimationRequest, cap: 4)

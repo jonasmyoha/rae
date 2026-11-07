@@ -1,0 +1,122 @@
+# FocusStyle (a focused field's look): while a TextField has focus its Shape's edge takes the
+# style's color and width, and fades there and back on the style's motion. The first look plays
+# nothing, a fade that ends leaves nothing running, and with motion off the edge changes at once.
+# Time is handed in.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/renderSystem/RenderPaintBox
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+}
+
+func edgeText(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let edge: ShapeEdge = shapeEdge(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    shape: componentView(this: world.shapes, entityId: entityId)
+    chain255: 255
+  )
+  ret "{edge.color.r},{edge.color.g},{edge.color.b},{edge.color.a} at {Math.round(
+    x: edge.width * 10.0
+  ).toInt() / 10}.{Math.round(x: edge.width * 10.0).toInt() % 10}"
+}
+
+func setFocus(world: mod UiWorld, nodeId: view String, focused: view Bool) {
+  componentMod(this: world.textFields, entityId: nodeOf(world: world, nodeId: nodeId)).focused = focused
+}
+
+func fades(uiSystems: view UiSystems) ret Int {
+  ret componentCount(this: uiSystems.animation.focusFades)
+}
+
+func run(off: view Bool) {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings { off: off }
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\},\"Children\":[\"Field\",\"Bare\"]\},\"Field\":\{\"Rect\":\{\"x\":20,\"y\":20,\"w\":300,\"h\":48\},\"Shape\":\{\"kind\":\"RoundedRect\",\"stroke\":\"#406060\",\"strokeWidth\":1.5,\"radius\":24\},\"TextField\":\{\"placeholder\":\"Title\"\},\"FocusStyle\":\{\"stroke\":\"#A0FFE0\",\"strokeWidth\":2.5,\"motion\":\"quick\"\}\},\"Bare\":\{\"Rect\":\{\"x\":20,\"y\":100,\"w\":300,\"h\":48\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24\},\"TextField\":\{\"placeholder\":\"Note\"\},\"FocusStyle\":\{\"stroke\":\"#A0FFE0\",\"strokeWidth\":2\}\}\}\}"
+    )
+  )
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  log(
+    "at rest: {edgeText(world: world, uiSystems: uiSystems, nodeId: "Field")}; nothing runs {fades(
+      uiSystems: uiSystems
+    )}"
+  )
+  setFocus(world: world, nodeId: "Field", focused: true)
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "focused, the first frame: {edgeText(world: world, uiSystems: uiSystems, nodeId: "Field")}; fading {fades(
+      uiSystems: uiSystems
+    )}"
+  )
+  loop var i: Int = 0, i < 4, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log("on its way: {edgeText(world: world, uiSystems: uiSystems, nodeId: "Field")}")
+  loop var i: Int = 0, i < 200 and fades(uiSystems: uiSystems) > 0, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log(
+    "there: {edgeText(world: world, uiSystems: uiSystems, nodeId: "Field")}; fading {fades(
+      uiSystems: uiSystems
+    )}"
+  )
+  setFocus(world: world, nodeId: "Field", focused: false)
+  setFocus(world: world, nodeId: "Bare", focused: true)
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  loop var i: Int = 0, i < 4, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log(
+    "focus to the other field: this one on its way back {edgeText(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Field"
+    )}, the edge-less one gaining one {edgeText(world: world, uiSystems: uiSystems, nodeId: "Bare")}"
+  )
+  loop var i: Int = 0, i < 200 and fades(uiSystems: uiSystems) > 0, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log(
+    "and back: {edgeText(world: world, uiSystems: uiSystems, nodeId: "Field")}; the other {edgeText(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Bare"
+    )}; fading {fades(uiSystems: uiSystems)}"
+  )
+}
+
+func main() {
+  log("--- with motion")
+  run(off: false)
+  log("--- with motion off")
+  run(off: true)
+}

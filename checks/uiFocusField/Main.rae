@@ -1,0 +1,103 @@
+# A focused field's look (FocusStyle), painted: two fields with a mint edge; on frame 3 the second
+# gains focus, and its edge brightens and thickens on its motion. RAE_ANIMATION_HOLD stops the fade
+# at a share of its way, so a picture shows a true middle state:
+#
+#   RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 RAE_GPU2D_SCREENSHOT=/tmp/focus.bmp \
+#     compiler/bin/rae run checks/uiFocusField/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1384_focus_style. Here: exit 0 when the
+# focus
+# started one fade through the real pipeline and, with no hold, it ended.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationTracks
+open Gpu2dCanvas
+
+const designW: Int = 600
+
+const designH: Int = 260
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI focus field check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiFocusField/page.raescene")
+  if scene.ok is false {
+    log("UI FOCUS FIELD FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var started: Int = 0
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    if frames is 3 {
+      if let index: Int = world.nodeIds.get(k: "Note") {
+        componentMod(this: world.textFields, entityId: nodeEntityId(world: world, index: index)).focused = true
+      }
+    }
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    if frames is 3 {
+      started = componentCount(this: uiSystems.animation.focusFades)
+      log("the focus started {started} fades")
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    if frames > 30 and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let left: Int = componentCount(this: uiSystems.animation.focusFades)
+  let held: Bool = uiSystems.animation.settings.hold >= 0.0
+  let off: Bool = uiSystems.animation.settings.off
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if (not off and started is not 1) or (not held and left > 0) {
+    log("UI FOCUS FIELD FAILED: started {started}, left {left}")
+    ret 1
+  }
+  log("UI FOCUS FIELD OK: {left} fades left")
+  ret 0
+}
