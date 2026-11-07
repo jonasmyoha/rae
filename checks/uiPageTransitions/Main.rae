@@ -1,0 +1,189 @@
+# Page transitions, painted (docs/ui-animation-design.md section 8), with a new world per screen,
+# drawn
+# live over a shared background: on frame 3 the page goes to another. RAE_PAGE_KIND names the kind
+# (push
+# by default), and RAE_PAGE_BACK=1 goes back. RAE_ANIMATION_HOLD stops every motion at a share of
+# its way:
+#
+#   RAE_PAGE_KIND=sheet RAE_ANIMATION_HOLD=0.5 RAE_HEADLESS_FRAMES=20 \
+#     RAE_GPU2D_SCREENSHOT=/tmp/page.bmp compiler/bin/rae run checks/uiPageTransitions/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1372_page_transitions. Here: exit 0 when
+# the old
+# world was held and, with no hold, dropped at the end. Scenes are read before the first frame, and
+# the
+# log says when the transition starts and ends, so a trace of file opens can show nothing is loaded.
+import Gpu2d
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/AnimationComponents
+open ui/Ecs
+open ui/Pipeline
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/pageTransitionSystem/PageTransitionSystem
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func kindNamed(name: view String) ret PageTransitionKind {
+  if name is "sibling" {
+    ret PageTransitionKind.sibling
+  }
+  if name is "zoom" {
+    ret PageTransitionKind.zoom
+  }
+  if name is "sheet" {
+    ret PageTransitionKind.sheet
+  }
+  if name is "fade" {
+    ret PageTransitionKind.fade
+  }
+  if name is "none" {
+    ret PageTransitionKind.none
+  }
+  ret PageTransitionKind.push
+}
+
+func mountPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+  scene: view Scene
+  kind: view PageTransitionKind
+) ret EntityId {
+  seedWorldTheme(world: world, res: gpuUi)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  componentSet(this: world.pageTransitions, entityId: root, data: PageTransition { kind: kind })
+  ret root
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI page transitions check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  let firstScene: Scene = loadSceneFile(path: "checks/uiPageTransitions/first.raescene")
+  let secondScene: Scene = loadSceneFile(path: "checks/uiPageTransitions/second.raescene")
+  let kind: PageTransitionKind = kindNamed(name: Sys.getEnv(name: "RAE_PAGE_KIND"))
+  let back: Bool = Sys.getEnv(name: "RAE_PAGE_BACK").length() > 0
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  # The first page is the starting point of the pictures: its own Appear does not show
+  let settings: AnimationSettings = uiSystems.animation.settings
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  var root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    gpuUi: gpuUi
+    scene: firstScene
+    kind: kind
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  # A zoom comes from the tile at the first page's bottom right
+  pageTransitionSetSource(
+    system: system
+    source: PageSource { x: 560.0, y: 420.0, w: 180.0, h: 135.0 }
+  )
+  var held: Bool = false
+  var ended: Bool = false
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    if frames is 3 {
+      log("the transition starts")
+      uiSystems.animation.settings = settings
+      pageTransitionBegin(
+        system: system
+        oldWorld: own world
+        oldUiSystems: own uiSystems
+        root: root
+        back: back
+      )
+      world = create()
+      uiSystems = createUiSystems()
+      root = mountPage(
+        world: world
+        uiSystems: uiSystems
+        gpuUi: gpuUi
+        scene: secondScene
+        kind: kind
+      )
+      schedule = createUiPipeline(world: world)
+      runScheduledUiSystems(
+        schedule: schedule
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+      )
+      pageTransitionArrive(
+        system: system
+        world: world
+        uiSystems: uiSystems
+        root: root
+      )
+      held = pageTransitionInFlight(system: system)
+    }
+    let leaving: Bool = pageTransitionStep(system: system)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    releaseDeadEntities(world: world, uiSystems: uiSystems)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    pageTransitionDraw(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    if frames > 3 and not leaving and not ended {
+      ended = true
+      log("the transition ended")
+    }
+    if frames > 30 and not leaving and animationInFlight(world: world, uiSystems: uiSystems) is false {
+      frames = 600
+    }
+  }
+  let holding: Bool = uiSystems.animation.settings.hold >= 0.0
+  let off: Bool = uiSystems.animation.settings.off
+  let stillHeld: Bool = pageTransitionInFlight(system: system)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let shouldHold: Bool = kind is not PageTransitionKind.none and not off
+  if held is not shouldHold or (stillHeld and not holding) {
+    log("UI PAGES FAILED: held {held}, still {stillHeld}")
+    ret 1
+  }
+  log("UI PAGES OK: the old world still held {stillHeld}")
+  ret 0
+}

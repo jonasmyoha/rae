@@ -1,0 +1,772 @@
+# pageTransitionSystem (docs/ui-animation-design.md section 8), in both page models. Time is handed
+# in,
+# and the page is 400 by 800. smooth is T = 0.42 s, so: the leaving page's opacity is zero by 0.252
+# s (60%),
+# an Appear waits 0.105 s (25%), and a push's x from 400 is at 223.7 after 0.1 s, the page under it
+# at -52.9.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneEncode
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/pageTransitionSystem/PageTransitionSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func poseText(pose: view AnimationPose) ret String {
+  ret "opacity {hundredths(value: pose.opacity)} scale {hundredths(value: pose.scale)} x {hundredths(
+    value: pose.x
+  )} y {hundredths(value: pose.y)}"
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
+}
+
+func frames(world: mod UiWorld, uiSystems: mod UiSystems, count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+}
+
+func poseOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret AnimationPose {
+  ret animationPoseOf(uiSystems: uiSystems, entityId: nodeOf(world: world, nodeId: nodeId))
+}
+
+func delayOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+    ret Math.round(
+      x: componentView(this: uiSystems.animation.tracks, entityId: entityId).delayLeft * 1000.0
+    ).toInt()
+  }
+  ret -1
+}
+
+func hitName(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  let entityId: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) {
+    ret "{componentView(this: world.onClicks, entityId: entityId).actionId}"
+  }
+  ret "nothing"
+}
+
+func activeOf(world: view UiWorld, nodeId: view String) ret Bool {
+  ret active(world: world, entityId: nodeOf(world: world, nodeId: nodeId))
+}
+
+func rules() {
+  log("--- the poses of each kind")
+  let box: PageBox = { x: 0.0, y: 0.0, w: 400.0, h: 800.0 }
+  let source: PageSource = { x: 300.0, y: 700.0, w: 100.0, h: 100.0 }
+  let kinds: List(PageTransitionKind) = [
+    PageTransitionKind.push
+    PageTransitionKind.sibling
+    PageTransitionKind.zoom
+    PageTransitionKind.sheet
+    PageTransitionKind.fade
+  ]
+  let names: List(String) = [
+    "push"
+    "sibling"
+    "zoom"
+    "sheet"
+    "fade"
+  ]
+  loop var i: Int = 0, i < kinds.length, ++i {
+    let kind: PageTransitionKind = kinds.copyAtFallback(index: i, fallback: PageTransitionKind.fade)
+    let forward: PagePoses = pagePosesFor(
+      kind: kind
+      back: false
+      box: box
+      source: source
+    )
+    let back: PagePoses = pagePosesFor(
+      kind: kind
+      back: true
+      box: box
+      source: source
+    )
+    log(
+      "{names.copyAtFallback(index: i, fallback: "")}: arrive from {poseText(
+        pose: forward.arriveFrom
+      )}; leave to {poseText(pose: forward.leaveTo)}"
+    )
+    log(
+      "  back: arrive from {poseText(pose: back.arriveFrom)}; leave to {poseText(pose: back.leaveTo)}"
+    )
+  }
+}
+
+func mountResident(world: mod UiWorld, uiSystems: mod UiSystems, source: view String) {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: source)
+  )
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  uiSystems.animation.settings = AnimationSettings {}
+  settle(world: world, uiSystems: uiSystems)
+}
+
+func residentPush() {
+  log("--- resident, a push")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountResident(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: nodeOf(world: world, nodeId: "A")
+    toRoot: nodeOf(world: world, nodeId: "B")
+    back: false
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "first frame: B {poseText(pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "B"))}; A {poseText(
+      pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "A")
+    )}"
+  )
+  log("the old page's button takes nothing, and where the new one is drawn: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 150.0
+    y: 150.0
+  )}, {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 550.0
+    y: 150.0
+  )}")
+  log(
+    "B's button: its Appear waits {delayOf(world: world, uiSystems: uiSystems, nodeId: "BButton")} ms, and starts at its first pose {poseText(
+      pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "BButton")
+    )}"
+  )
+  log(
+    "B's rows in Stagger order, after that wait: {delayOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "BRow0"
+    )} {delayOf(world: world, uiSystems: uiSystems, nodeId: "BRow1")} {delayOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "BRow2"
+    )} ms"
+  )
+  log(
+    "A's rows in Stagger order, by 40%: {delayOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "ARow0"
+    )} {delayOf(world: world, uiSystems: uiSystems, nodeId: "ARow1")} {delayOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "ARow2"
+    )} ms; A's button {delayOf(world: world, uiSystems: uiSystems, nodeId: "AButton")} ms"
+  )
+  frames(world: world, uiSystems: uiSystems, count: 10)
+  log(
+    "0.1 s: B {poseText(pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "B"))}; A {poseText(
+      pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "A")
+    )}"
+  )
+  log("the new button is hit where it is drawn: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 150.0 + poseOf(world: world, uiSystems: uiSystems, nodeId: "B").x
+    y: 150.0
+  )}")
+  frames(world: world, uiSystems: uiSystems, count: 14)
+  log(
+    "0.24 s: A's opacity above zero {poseOf(world: world, uiSystems: uiSystems, nodeId: "A").opacity > 0.0}"
+  )
+  frames(world: world, uiSystems: uiSystems, count: 2)
+  log(
+    "0.26 s (past 60%): A's opacity {poseOf(world: world, uiSystems: uiSystems, nodeId: "A").opacity}, A still moving {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: nodeOf(world: world, nodeId: "A")
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: A active {activeOf(world: world, nodeId: "A")}, Leaving {componentCount(
+      this: world.leavings
+    )}, B active {activeOf(world: world, nodeId: "B")}, {componentCount(
+      this: uiSystems.animation.tracks
+    )} tracks, {componentCount(this: uiSystems.animation.poses)} poses"
+  )
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: nodeOf(world: world, nodeId: "B")
+    toRoot: nodeOf(world: world, nodeId: "A")
+    back: true
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "Back: A {poseText(pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "A"))}; B going right, the kind is B's own: {componentView(
+      this: uiSystems.animation.tracks
+      entityId: nodeOf(world: world, nodeId: "B")
+    ).x.target}"
+  )
+}
+
+func residentTurns() {
+  log("--- resident, a second navigation")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountResident(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  let a: EntityId = nodeOf(world: world, nodeId: "A")
+  let b: EntityId = nodeOf(world: world, nodeId: "B")
+  let c: EntityId = nodeOf(world: world, nodeId: "C")
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: a
+    toRoot: b
+    back: false
+  )
+  frames(world: world, uiSystems: uiSystems, count: 10)
+  let bx: Float = animationPoseOf(uiSystems: uiSystems, entityId: b).x
+  let ax: Float = animationPoseOf(uiSystems: uiSystems, entityId: a).x
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: b
+    toRoot: a
+    back: true
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("Back mid-push: B jumps {hundredths(
+    value: animationPoseOf(uiSystems: uiSystems, entityId: b).x - bx
+  )}, A jumps {hundredths(value: animationPoseOf(uiSystems: uiSystems, entityId: a).x - ax)}; A takes taps {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 150.0 + animationPoseOf(uiSystems: uiSystems, entityId: a).x
+    y: 150.0
+  )}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: A active {activeOf(world: world, nodeId: "A")}, B active {activeOf(
+      world: world
+      nodeId: "B"
+    )}, {componentCount(this: uiSystems.animation.poses)} poses"
+  )
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: a
+    toRoot: b
+    back: false
+  )
+  frames(world: world, uiSystems: uiSystems, count: 10)
+  let current: Float = animationPoseOf(uiSystems: uiSystems, entityId: b).x
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: b
+    toRoot: c
+    back: false
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "onward mid-push: A dropped at once: active {activeOf(world: world, nodeId: "A")}, no pose {componentHas(
+      this: uiSystems.animation.poses
+      entityId: a
+    ) is false}; B leaves from its pose, jump {hundredths(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: b).x - current
+    )}; C {poseText(pose: animationPoseOf(uiSystems: uiSystems, entityId: c))}"
+  )
+}
+
+func worldPage(world: mod UiWorld, uiSystems: mod UiSystems, source: view String) ret EntityId {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: source)
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  ret root
+}
+
+func oldOpacity(system: view PageTransitionSystem) ret String {
+  loop let page: view LeavingWorld in system.leaving {
+    ret "{poseText(pose: animationPoseOf(uiSystems: page.uiSystems, entityId: page.root))}"
+  }
+  ret "(none)"
+}
+
+# The host's frame: the old world by its step, the new one by the pipeline. The clock of a step is
+# real
+# time, so here the old world is stepped by hand with the same time as the new one.
+func stepBoth(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  deltaTime: view Float
+) {
+  loop let page: mod LeavingWorld in system.leaving {
+    animationSystem(world: page.world, uiSystems: page.uiSystems, deltaTime: deltaTime)
+    transformSystem(world: page.world, uiSystems: page.uiSystems)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+}
+
+func worldModel() {
+  log("--- a new world per screen")
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var root: EntityId = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  log("taken: in flight {pageTransitionInFlight(system: system)}")
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  transformSystem(world: world, uiSystems: uiSystems)
+  log(
+    "the new page: {poseText(pose: animationPoseOf(uiSystems: uiSystems, entityId: root))}; its button waits {delayOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "AButton"
+    )} ms"
+  )
+  log("taps go to it from its first frame, where it is drawn: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 550.0
+    y: 150.0
+  )}")
+  stepBoth(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.0
+  )
+  log("the old page starts at {oldOpacity(system: system)}")
+  loop var i: Int = 0, i < 10, ++i {
+    stepBoth(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      deltaTime: 0.01
+    )
+  }
+  log(
+    "0.1 s: new {poseText(pose: animationPoseOf(uiSystems: uiSystems, entityId: root))}; old {oldOpacity(
+      system: system
+    )}"
+  )
+  let bx: Float = animationPoseOf(uiSystems: uiSystems, entityId: root).x
+  let oldX: Float = oldPoseX(system: system)
+
+  log("--- Back mid-push: the same push run backward")
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: true
+  )
+  log("the older page is dropped at once: {system.leaving.length} world held, the current one")
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  stepBoth(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.0
+  )
+  log(
+    "the returning page is where the old one was: jump {hundredths(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: root).x - oldX
+    )}"
+  )
+  log(
+    "the page going back leaves from its pose: jump {hundredths(
+      value: oldPoseX(system: system) - bx
+    )}"
+  )
+  loop var i: Int = 0, i < 400 and system.leaving.length > 0, ++i {
+    stepBoth(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      deltaTime: 0.016
+    )
+    if pageEnded(system: system) {
+      system.leaving.clear()
+    }
+  }
+  log(
+    "ended: in flight {pageTransitionInFlight(system: system)}, new page's pose {poseText(
+      pose: animationPoseOf(uiSystems: uiSystems, entityId: root)
+    )}"
+  )
+
+  log("--- onward mid-push: no path back to run")
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  loop var i: Int = 0, i < 5, ++i {
+    stepBoth(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      deltaTime: 0.01
+    )
+  }
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log(
+    "the next page starts at the edge: {poseText(
+      pose: animationPoseOf(uiSystems: uiSystems, entityId: root)
+    )}; one world held {system.leaving.length}"
+  )
+
+  log("--- none, off, no arrival, hold")
+  system.leaving.clear()
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log(
+    "none: at once, in flight {pageTransitionInFlight(system: system)}, pose {poseText(
+      pose: animationPoseOf(uiSystems: uiSystems, entityId: root)
+    )}"
+  )
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  uiSystems.animation.settings = parseAnimationSettings(animation: "off", hold: "")
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log("off: at once, in flight {pageTransitionInFlight(system: system)}")
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  let stepped: Bool = pageTransitionStep(system: system)
+  log(
+    "a host that never said what came: dropped, in flight {pageTransitionInFlight(system: system)}"
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  uiSystems.animation.settings = parseAnimationSettings(animation: "", hold: "0.5")
+  settle(world: world, uiSystems: uiSystems)
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  )
+  uiSystems.animation.settings = parseAnimationSettings(animation: "", hold: "0.5")
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log("hold 0.5: new {poseText(pose: animationPoseOf(uiSystems: uiSystems, entityId: root))}")
+  let held: Bool = pageTransitionStep(system: system)
+  log("the old page stays for the picture: {held}, at {oldOpacity(system: system)}")
+}
+
+func oldPoseX(system: view PageTransitionSystem) ret Float {
+  loop let page: view LeavingWorld in system.leaving {
+    ret animationPoseOf(uiSystems: page.uiSystems, entityId: page.root).x
+  }
+  ret 0.0
+}
+
+func pageEnded(system: view PageTransitionSystem) ret Bool {
+  loop let page: view LeavingWorld in system.leaving {
+    ret componentCount(this: page.uiSystems.animation.tracks) is 0
+  }
+  ret false
+}
+
+func otherKinds() {
+  log("--- the kinds, through a resident page")
+  let names: List(String) = [
+    "sheet"
+    "zoom"
+    "sibling"
+    "fade"
+    "none"
+  ]
+  let sources: List(String) = [
+    "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"sheet\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"sheet\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"sheet\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+    "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"zoom\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"zoom\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"zoom\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+    "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"sibling\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"sibling\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"sibling\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+    "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+    "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"BButton\",\"BList\"]\},\"BButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"BRow0\",\"BRow1\",\"BRow2\"]\},\"BRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"BRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"CButton\",\"CList\"]\},\"CButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"CRow0\",\"CRow1\",\"CRow2\"]\},\"CRow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"CRow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+  ]
+  loop var i: Int = 0, i < names.length, ++i {
+    var world: UiWorld = createUiWorld()
+    var uiSystems: UiSystems = createUiSystems()
+    mountResident(
+      world: world
+      uiSystems: uiSystems
+      source: sources.copyAtFallback(index: i, fallback: "")
+    )
+    var system: PageTransitionSystem = createPageTransitionSystem()
+    pageTransitionSetSource(
+      system: system
+      source: PageSource { x: 300.0, y: 700.0, w: 100.0, h: 100.0 }
+    )
+    pageTransitionResident(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      fromRoot: nodeOf(world: world, nodeId: "A")
+      toRoot: nodeOf(world: world, nodeId: "B")
+      back: false
+    )
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+    log(
+      "{names.copyAtFallback(index: i, fallback: "")}: B {poseText(
+        pose: poseOf(world: world, uiSystems: uiSystems, nodeId: "B")
+      )}; A active {activeOf(world: world, nodeId: "A")}"
+    )
+    loop var f: Int = 0, f < 30, ++f {
+      frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+    }
+    log(
+      "  0.3 s, past 60%: A's opacity {poseOf(world: world, uiSystems: uiSystems, nodeId: "A").opacity}, active {activeOf(
+        world: world
+        nodeId: "A"
+      )}"
+    )
+    settle(world: world, uiSystems: uiSystems)
+    log(
+      "  settled: A active {activeOf(world: world, nodeId: "A")}, {componentCount(
+        this: uiSystems.animation.poses
+      )} poses"
+    )
+  }
+}
+
+func sceneParts() {
+  log("--- the scene")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"zoom\"\},\"Children\":[\"AButton\",\"AList\"]\},\"AButton\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"AList\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":200\},\"bundles\":[\"staggerFromStart\"],\"Children\":[\"ARow0\",\"ARow1\",\"ARow2\"]\},\"ARow0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow1\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\},\"ARow2\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":40\},\"bundles\":[\"appearRise\",\"disappearFade\"]\}\}\}"
+    )
+  )
+  let saved: String = machineComponentJson(world: world, entityId: root, name: "PageTransition")
+  log("saved: zoom {saved.contains(sub: "\"kind\": \"zoom\"")}")
+  var other: UiWorld = createUiWorld()
+  var otherSystems: UiSystems = createUiSystems()
+  let bad: EntityId = loadScene(
+    world: other
+    uiSystems: otherSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"PageTransition\":\{\"motion\":\"smoooth\"\}\}\}\}"
+    )
+  )
+  log(
+    "an unknown motion: {sceneDiagnosticCountOfKind(
+      diagnostics: other.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    )} diagnostic"
+  )
+}
+
+func main() {
+  rules()
+  residentPush()
+  residentTurns()
+  worldModel()
+  otherKinds()
+  sceneParts()
+}

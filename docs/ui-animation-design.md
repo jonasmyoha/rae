@@ -87,6 +87,7 @@ and redeclared by name:
   "lively": { "kind": "spring", "response": 0.46, "damping": 0.76 },
   "fadeIn":  { "kind": "curve", "curve": "easeOutCubic", "seconds": 0.20 },
   "fadeOut": { "kind": "curve", "curve": "easeInCubic",  "seconds": 0.14 }
+  # also built in: "livelySoft", a response of 0.46 at damping 0.9, for a page's zoom
 }
 ```
 
@@ -366,6 +367,26 @@ both. Their timing comes from the kind, so a scene needs nothing more.
 are transparent over a shared background (SUMU's are) would show two sets of text
 over each other. So the leaving page's opacity always reaches zero by 60% of the
 transition, in every kind, and the background and any bar in another world stay still.
+
+**Built in 0.3.24:** sections 8.1 and 8.2, in `lib/ui/pageTransitionSystem/`. What the code decided:
+
+- A new world per screen takes two calls, `pageTransitionBegin` before the host builds the new world and
+  `pageTransitionArrive` after, as the kind is the new page's `PageTransition`, or going back the old page's. A host
+  that never calls the second has its old world dropped on the next `pageTransitionStep`. The host also needs a laid-out
+  new page before `pageTransitionArrive`, for the page's size.
+- "The transition" has a length to hang the shares on: a spring's response (98.6% of the way when critically damped), or
+  a curve's seconds. The leaving opacity is a curve that takes 60% of that, whatever the motion.
+- `Disappear` and `Appear` have their own motions, so the shares say when each *starts*: within the first 40% (a `Stagger`'s
+  `maxSeconds` is capped there), and from 25%. A `Disappear` may run past 40%, and the page's fade hides it by 60%.
+- `zoom` runs on a new built-in motion, `livelySoft` (`lively` with damping 0.9): the "low bounce" of the table.
+  With no rectangle said, it grows from the middle of the page, at half size. `pageTransitionSetSource` is remembered
+  for Back.
+- Going forward, the new page is drawn over the old. Going back, the old page is drawn over the new, going away.
+- `RAE_ANIMATION_HOLD` holds the old world too, so it is not dropped, and a picture has both pages. The share is linear,
+  so a held leaving page at 0.7 has opacity 0.3, even though in time it would be zero by then.
+- Nothing is loaded: `res` is a `view` of the host's fonts. A trace of file opens through `checks/uiPageTransitions` shows each
+  font and the theme opened once, in a run with two worlds.
+- Not yet: `presentation: "page"` following `PageTransition` (section 9), which is queued.
 
 ### 8.3 What stays
 

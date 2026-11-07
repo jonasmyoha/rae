@@ -1,0 +1,65 @@
+--- the poses of each kind
+push: arrive from opacity 100 scale 100 x 40000 y 0; leave to opacity 0 scale 100 x -12000 y 0
+  back: arrive from opacity 0 scale 100 x -12000 y 0; leave to opacity 0 scale 100 x 40000 y 0
+sibling: arrive from opacity 0 scale 100 x 4000 y 0; leave to opacity 0 scale 100 x -4000 y 0
+  back: arrive from opacity 0 scale 100 x -4000 y 0; leave to opacity 0 scale 100 x 4000 y 0
+zoom: arrive from opacity 0 scale 25 x 15000 y 35000; leave to opacity 0 scale 105 x 0 y 0
+  back: arrive from opacity 0 scale 105 x 0 y 0; leave to opacity 0 scale 25 x 15000 y 35000
+sheet: arrive from opacity 100 scale 100 x 0 y 80000; leave to opacity 0 scale 95 x 0 y 0
+  back: arrive from opacity 0 scale 95 x 0 y 0; leave to opacity 0 scale 100 x 0 y 80000
+fade: arrive from opacity 0 scale 100 x 0 y 0; leave to opacity 0 scale 100 x 0 y 0
+  back: arrive from opacity 0 scale 100 x 0 y 0; leave to opacity 0 scale 100 x 0 y 0
+--- resident, a push
+first frame: B opacity 100 scale 100 x 40000 y 0; A opacity 100 scale 100 x 0 y 0
+the old page's button takes nothing, and where the new one is drawn: nothing, b
+B's button: its Appear waits 105 ms, and starts at its first pose opacity 0 scale 100 x 0 y 1600
+B's rows in Stagger order, after that wait: 105 133 161 ms
+A's rows in Stagger order, by 40%: 56 28 0 ms; A's button 0 ms
+0.1 s: B opacity 100 scale 100 x 22367 y 0; A opacity 94 scale 100 x -5290 y 0
+the new button is hit where it is drawn: b
+0.24 s: A's opacity above zero true
+0.26 s (past 60%): A's opacity 0, A still moving true
+settled: A active false, Leaving 0, B active true, 0 tracks, 0 poses
+Back: A opacity 0 scale 100 x -12000 y 0; B going right, the kind is B's own: 400
+--- resident, a second navigation
+Back mid-push: B jumps 0, A jumps 0; A takes taps a
+settled: A active true, B active false, 0 poses
+onward mid-push: A dropped at once: active false, no pose true; B leaves from its pose, jump 0; C opacity 100 scale 100 x 40000 y 0
+--- a new world per screen
+taken: in flight true
+the new page: opacity 100 scale 100 x 40000 y 0; its button waits 105 ms
+taps go to it from its first frame, where it is drawn: a
+the old page starts at opacity 100 scale 100 x 0 y 0
+0.1 s: new opacity 100 scale 100 x 22367 y 0; old opacity 94 scale 100 x -5290 y 0
+--- Back mid-push: the same push run backward
+the older page is dropped at once: 1 world held, the current one
+the returning page is where the old one was: jump 0
+the page going back leaves from its pose: jump 0
+ended: in flight false, new page's pose opacity 100 scale 100 x 0 y 0
+--- onward mid-push: no path back to run
+the next page starts at the edge: opacity 100 scale 100 x 40000 y 0; one world held 1
+--- none, off, no arrival, hold
+none: at once, in flight false, pose opacity 100 scale 100 x 0 y 0
+off: at once, in flight false
+a host that never said what came: dropped, in flight false
+hold 0.5: new opacity 100 scale 100 x 20000 y 0
+the old page stays for the picture: true, at opacity 50 scale 100 x -6000 y 0
+--- the kinds, through a resident page
+sheet: B opacity 100 scale 100 x 0 y 80000; A active true
+  0.3 s, past 60%: A's opacity 0, active true
+  settled: A active false, 0 poses
+zoom: B opacity 0 scale 25 x 15000 y 35000; A active true
+  0.3 s, past 60%: A's opacity 0, active true
+  settled: A active false, 0 poses
+sibling: B opacity 0 scale 100 x 4000 y 0; A active true
+  0.3 s, past 60%: A's opacity 0, active true
+  settled: A active false, 0 poses
+fade: B opacity 0 scale 100 x 0 y 0; A active true
+  0.3 s, past 60%: A's opacity 1, active false
+  settled: A active false, 0 poses
+none: B opacity 100 scale 100 x 0 y 0; A active false
+  0.3 s, past 60%: A's opacity 1, active false
+  settled: A active false, 0 poses
+--- the scene
+saved: zoom true
+an unknown motion: 1 diagnostic

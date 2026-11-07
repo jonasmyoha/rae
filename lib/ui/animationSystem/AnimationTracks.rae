@@ -61,6 +61,9 @@ type AnimationCommand {
   isGlide: Bool = false
   glideX: Float = 0.0
   glideY: Float = 0.0
+  # Above 0: the opacity motion's curve takes this long (a page's fade hangs on its transition's
+  # length)
+  opacitySeconds: Float = 0.0
 }
 
 # The settings a run was started with
@@ -369,15 +372,12 @@ func animationFinish(
   componentRemove(this: uiSystems.animation.poses, entityId: entityId)
   if onEnd is AnimationEnd.deactivate {
     componentSet(this: world.actives, entityId: entityId, data: Active { value: false })
-    # Its children's poses from a staggered leave: they are hidden now, and rest for next time
-    if componentHas(this: world.childrens, entityId: entityId) {
-      let children: view Children = componentView(this: world.childrens, entityId: entityId)
-      loop var i: Int = 0, i < children.ids.length, ++i {
-        componentRemove(
-          this: uiSystems.animation.poses
-          entityId: children.ids.copyAtFallback(index: i, fallback: noEntity())
-        )
-      }
+    # Everything under it from a staggered leave: it is hidden now, and at rest for next time
+    var subtree: List(EntityId) = List.create(EntityId, cap: 16)
+    collectSubtree(childrens: world.childrens, node: entityId, out: subtree)
+    loop let under: view EntityId in subtree {
+      componentRemove(this: uiSystems.animation.tracks, entityId: under)
+      componentRemove(this: uiSystems.animation.poses, entityId: under)
     }
   } else if onEnd is AnimationEnd.destroy {
     unlinkFromCurrent(
@@ -405,11 +405,15 @@ func animationApplyCommand(
     entityId: entityId
     name: command.motion
   )
-  let opacityMotion: MotionToken = animationMotionNamed(
+  var opacityMotion: MotionToken = animationMotionNamed(
     world: world
     entityId: entityId
     name: command.opacityMotion
   )
+  if command.opacitySeconds > 0.0 {
+    opacityMotion.kind = MotionKind.curve
+    opacityMotion.seconds = command.opacitySeconds
+  }
   let settings: AnimationSettings = uiSystems.animation.settings
   if command.isGlide and settings.off {
     ret
