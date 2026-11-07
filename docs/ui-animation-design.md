@@ -594,6 +594,24 @@ So a transition holds 120 Hz from its first moving frame, and nothing in lib/ui 
 refresh late, which delays the start by about 8 ms after a tap and cuts no motion; spreading the build over frames would only
 delay it more.
 
+**The zoom out of an icon in SUMU (iPhone 15 Pro, 2026-11-07, Rae 0.3.40, `RAE_IOS_HIGH_REFRESH=1`).** SUMU measured
+its launcher-to-app zoom at a median 15 ms a frame. Timed inside SUMU's frame (temporary timers, the `motion` self-test,
+the 40 frames after the arriving world is built):
+
+- The CPU work is small: input and update 0-1 ms, and in the render the background 0.2-0.6 ms, both pages 1.0-2.5 ms,
+  the overlays 0.4-1.3 ms and the frame end 0.8-2.4 ms. List rows binding and text measuring do not show.
+- The rest of the frame is `beginFrame` waiting for a drawable: 2-5 ms on one frame and 11-15 ms on the next, in turn,
+  so every other frame takes a whole extra refresh.
+- Frames over 9 ms of 39, with one part of the drawing left out each run: everything drawn 18-20; no background 19;
+  no leaving page 9; no arriving page 16; no overlays 17; neither page 7. So the leaving page costs most, and even
+  with neither page drawn some frames still wait a whole refresh.
+- A CADisplayLink asking for 120 Hz (`preferredFrameRateRange` 80-120, preferred 120) changed nothing (16 of 39).
+- Before the zoom, while the scripted finger held the icon, the frames came every 16.7 ms (60 Hz), and at 8.3 ms
+  after it lifted.
+
+What it needs next is the GPU's own time per frame, which the 2D canvas cannot measure yet: queued as "[ui animation:
+GPU time of the 2D canvas]", and the fix after it as "[ui animation: page transition frame time 2]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
