@@ -303,9 +303,13 @@ func paintTextWithGhost(
   var rolling: Bool = false
   if componentHas(this: world.animateTexts, entityId: entityId) {
     let animate: view AnimateText = componentView(this: world.animateTexts, entityId: entityId)
-    rolling = animate.kind is AnimateTextKind.roll
+    rolling = animate.kind is AnimateTextKind.roll and not uiSystems.animation.settings.reduceMotion
+    var kind: AnimateTextKind = AnimateTextKind.fade
+    if rolling {
+      kind = AnimateTextKind.roll
+    }
     look = textGhostLook(
-      kind: animate.kind
+      kind: kind
       rollFrom: animate.rollFrom
       progress: ghost.progress.current
       start: ghost.progress.start

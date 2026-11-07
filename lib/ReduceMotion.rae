@@ -1,0 +1,16 @@
+# The system's reduced motion setting. On iOS and macOS it is one call to the system, cheap enough
+# to make
+# whenever motion starts. Elsewhere nothing says, so it is false.
+when Target.isApple {
+  func nativeReduceMotionEnabled() unsafe extern("rae_ext_reduceMotionEnabled") ret Bool
+}
+
+func reduceMotionEnabled() ret Bool {
+  when Target.isApple {
+    unsafe {
+      ret nativeReduceMotionEnabled()
+    }
+  } else {
+    ret false
+  }
+}

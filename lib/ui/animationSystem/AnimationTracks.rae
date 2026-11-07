@@ -7,6 +7,7 @@
 # too, unless it ended somewhere other than the node's place. With no command and no track
 # animationRun returns at once: an idle UI runs no animation code, and the host's wait sees
 # animationInFlight false.
+import ReduceMotion
 import Sys
 open ecs/ComponentTable
 open ecs/Entity
@@ -74,10 +75,12 @@ type AnimationCommand {
 
 # The settings a run was started with
 func animationSettingsFromEnv() ret AnimationSettings {
-  ret parseAnimationSettings(
+  var settings: AnimationSettings = parseAnimationSettings(
     animation: Sys.getEnv(name: "RAE_ANIMATION")
     hold: Sys.getEnv(name: "RAE_ANIMATION_HOLD")
   )
+  applyReduceMotionEnv(settings: settings, value: Sys.getEnv(name: "RAE_REDUCE_MOTION"))
+  ret settings
 }
 
 # True while something moves or waits to start. A held animation is not in flight: it has stopped,
@@ -440,6 +443,52 @@ func animationFinish(
   }
 }
 
+func animationStill(channel: mod AnimationChannel, leaving: view Bool) {
+  if leaving {
+    channel.target = channel.current
+  } else {
+    channel.current = channel.target
+  }
+  channel.start = channel.current
+  channel.velocity = 0.0
+}
+
+# With reduced motion only fades run. What moves does not: a node leaving stays where it is, and any
+# other is at its place at once. Something that would have arrived by moving fades in instead, and
+# something that would have left by moving fades out. A delay would only make a person wait.
+func animationReduceTrack(
+  world: mod UiWorld
+  entityId: view EntityId
+  track: mod AnimationTrack
+  command: view AnimationCommand
+) {
+  let leaving: Bool = command.phase is AnimationPhase.leaving
+  let moved: Bool = track.x.current is not track.x.target or track.y.current is not track.y.target or track.scale.current is not track.scale.target or track.rotation.current is not track.rotation.target or track.stretchY.current is not track.stretchY.target
+  animationStill(channel: track.x, leaving: leaving)
+  animationStill(channel: track.y, leaving: leaving)
+  animationStill(channel: track.scale, leaving: leaving)
+  animationStill(channel: track.rotation, leaving: leaving)
+  animationStill(channel: track.stretchY, leaving: leaving)
+  track.delayLeft = 0.0
+  if moved and command.hasFrom and leaving is false {
+    track.opacity.current = 0.0
+    track.opacity.target = 1.0
+  }
+  if moved and leaving and command.onEnd is not AnimationEnd.stay {
+    track.opacity.target = 0.0
+  }
+  var name: String = "fadeOut"
+  if track.opacity.target > track.opacity.current {
+    name = "fadeIn"
+  }
+  channelRetarget(
+    channel: track.opacity
+    target: track.opacity.target
+    motion: animationMotionNamed(world: world, entityId: entityId, name: name)
+  )
+  track.opacity.velocity = 0.0
+}
+
 func animationApplyCommand(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -464,7 +513,7 @@ func animationApplyCommand(
     opacityMotion.seconds = command.opacitySeconds
   }
   let settings: AnimationSettings = uiSystems.animation.settings
-  if command.isGlide and settings.off {
+  if command.isGlide and (settings.off or settings.reduceMotion) {
     ret
   }
   if settings.off {
@@ -512,6 +561,18 @@ func animationApplyCommand(
         motion: motion
         opacityMotion: opacityMotion
       )
+    )
+  }
+  if settings.reduceMotion {
+    let reduced: mod AnimationTrack = componentMod(
+      this: uiSystems.animation.tracks
+      entityId: entityId
+    )
+    animationReduceTrack(
+      world: world
+      entityId: entityId
+      track: reduced
+      command: command
     )
   }
   # The start pose before the first paint, so a node never flashes at its end place; under a hold,
@@ -638,6 +699,10 @@ func animationWriteRadius(
 func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
   uiSystems.animation.updates = uiSystems.animation.updates + 1
   let commandCount: Int = queueCount(this: uiSystems.animation.commands)
+  # Read as motion starts, so a change in the system's settings counts from the next motion on
+  if commandCount > 0 and uiSystems.animation.settings.reduceMotionFixed is false {
+    uiSystems.animation.settings.reduceMotion = ReduceMotion.reduceMotionEnabled()
+  }
   loop var i: Int = 0, i < commandCount, ++i {
     let command: AnimationCommand = queueAt(this: uiSystems.animation.commands, i: i)
     animationApplyCommand(world: world, uiSystems: uiSystems, command: command)
