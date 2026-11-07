@@ -617,6 +617,22 @@ and the frame still takes 17 ms every other frame (median 9-11 ms, 90% 17 ms). T
 drawable, in how the frames are paced, not in drawing: that is where "[ui animation: page transition frame time 2]"
 looks next.
 
+**The pacing, looked at (2026-11-07, the same phone and test, `RAE_FRAME_TIMING=1` split per frame):**
+
+- Each frame is CPU, then a wait to acquire the drawable; the present and the GPU wait are under 1 ms. In the zoom
+  out the frames go 8, 17, 8, 17 ms (80 a second on average), each 17 ms frame mostly the acquire (11-13 ms).
+- The zoom out's CPU is a median 4 ms and a 90% 6 ms a frame; the zoom back's 3 and 4 ms, and the zoom back holds
+  8 ms (median 8, 90% 9). The first frames of the zoom out, at 3-4 ms, hold 8 ms too, and the alternation starts as
+  the CPU reaches 5-6 ms.
+- No change from: drawing offscreen and acquiring the drawable late (`RAE_DIRECT_PRESENT=0`); one frame in flight
+  (`RAE_FRAMES_IN_FLIGHT=1`, worse); a CADisplayLink asking for exactly 120 Hz (min = max = preferred = 120), made on
+  the first frame. Even with it, the frames while the scripted finger holds the icon come every 17 ms.
+- The scripted finger is not a touch, and iOS raises the refresh rate for a real touch. So the test may be harsher
+  than a person's tap.
+
+What is left: less CPU in a 2D frame ("[ui 2D canvas: less CPU a frame]"), and a person's tap on the phone
+("[ui animation: the zoom with a real finger]").
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
