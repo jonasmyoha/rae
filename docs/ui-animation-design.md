@@ -615,7 +615,9 @@ phone a 2D pass under about a millisecond reads 0: in `checks/gpu2dTiming` 4 ful
 0.25 ms, and 40 read 1.7 ms. So the GPU draws the zoom in under a millisecond a frame, the CPU's work is 2-5 ms,
 and the frame still takes 17 ms every other frame (median 9-11 ms, 90% 17 ms). The time is lost waiting for the
 drawable, in how the frames are paced, not in drawing: that is where "[ui animation: page transition frame time 2]"
-looks next.
+looks next. **Corrected 2026-11-07:** the command buffer's own `GPUStartTime`/`GPUEndTime` show 3-7 ms of GPU time a
+frame (below, "Why a frame takes 21 ms to reach the screen"). The render pass's timestamps read 0 on this phone, and the
+GPU is not under a millisecond.
 
 **The pacing, looked at (2026-11-07, the same phone and test, `RAE_FRAME_TIMING=1` split per frame):**
 
@@ -695,6 +697,36 @@ buffer, and optionally called `presentDrawable:afterMinimumDuration:` instead. R
 
 What is left is the 4-8 ms before the GPU completes a frame whose passes take under 1 ms, and the two refreshes the
 compositor takes: "[ui animation: why a frame takes 21 ms to reach the iPhone's screen]".
+
+**Why a frame takes 21 ms to reach the screen (measured 2026-11-07).** Temporary code replaced `commit` and
+`presentDrawable:` on the Metal command buffer class. It recorded, for every command buffer, when it was committed and
+its `GPUStartTime` and `GPUEndTime`, and for every drawable its `presentedTime`. It also printed the window's layer
+tree. Ten runs of SUMU's motion self-test, with the phone on WiFi:
+
+- **The GPU really takes 3-7 ms a frame.** A frame commits 7 command buffers. One commits at the start of the frame and
+  six in the last 0.3 ms before the present. One of those six takes 3-7 ms between `GPUStartTime` and `GPUEndTime`, and
+  the others take about 0. In the zoom out its time grows from about 4 to 7 ms as the page grows to fill the screen.
+  The render pass's own timestamps (`RAE_GPU2D_TIMING=1`) read 0 for the same frames, so on this phone they do not
+  measure the pass. The GPU starts only when the CPU's frame has ended, because everything is committed at the end.
+  So the present's command buffer completes 4-8 ms after it is handed over. That is the frame's own GPU work, not a wait
+  in wgpu-native's queue (each buffer starts 0.3-1.5 ms after its commit).
+- **Nothing is drawn over the layer.** The layer tree is UIKit's window, transition and drop-shadow layers, then the one
+  full-screen opaque `CAMetalLayer` (BGRA8, `framebufferOnly` 0, because the surface also asks for `CopyDst` for the
+  copy fallback). The only layer above it is SDL's hidden 0x0 text field.
+- **The compositor runs in one of two modes.** A run either shows each frame about 8 ms after the GPU completes it
+  (13-14 ms after submit, 120 Hz), or about 15 ms after (21-22 ms after submit, 80 Hz). The GPU time is the same in both
+  (median 4.4-5.4 ms). A run mostly stays in one mode for the whole zoom, and one run moved from 22 to 13 ms mid-zoom at
+  the same GPU time. The mode is which side of the compositor's deadline the GPU completes on. The drawable acquire
+  starts each frame at the same point of the display's cycle, so a run stays on one side. Across 10 runs the zoom out
+  was in the slow mode in 7 and the zoom back in 6.
+- **`framebufferOnly` is not the fix.** With `CopyDst` dropped (so `framebufferOnly` 1), the zoom out held 120 Hz in 2
+  runs of 5. Without that change it held 120 Hz in 1 run of 5.
+- **What would fix it:** the GPU must complete well before the compositor's deadline. The frame starts at the display's
+  cycle (the acquire), then CPU about 2-3 ms, then GPU 3-7 ms: about 8 ms, right at the deadline of a 8.3 ms refresh. So
+  the 2D pass needs much less GPU time ("[ui 2D canvas: the zoom's 3-7 ms of GPU time on the iPhone]"). Or the GPU work
+  must start earlier in the frame, by committing passes as they are recorded instead of all at the end.
+- Instruments' Metal System Trace is still not recorded: the phone was on WiFi only (`xctrace list devices` shows it
+  offline).
 
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
