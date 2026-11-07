@@ -71,6 +71,9 @@ type AnimationCommand {
   # Above 0: the Appear of the nodes under this one wait this long (a page's share of its
   # transition)
   appearsWait: Float = 0.0
+  # A fling (animationFling): the track starts at `from` even if one is running, at this speed
+  hasVelocity: Bool = false
+  velocity: AnimationVelocity = {}
 }
 
 # The settings a run was started with
@@ -170,6 +173,79 @@ func animationLeave(
       onEnd: onEnd
     }
   )
+}
+
+# A node a finger let go: from pose `from`, where the finger left it, at `velocity`, the finger's
+# speed in pose units a second, toward `to`, then `onEnd`. A spring carries the speed on, so the
+# node
+# does not stop and start again, and it may pass `to` and come back if it is fast. A curve, such as
+# an
+# opacity fade, runs its own way from `from`. `AnimationEnd.stay` keeps the node where it ends, as a
+# card that springs back; any other end is a leave, as a card swiped away. A host's own gesture code
+# calls this, as pageTransitionDrag does for a page.
+func animationFling(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  from: view AnimationPose
+  to: view AnimationPose
+  velocity: view AnimationVelocity
+  motion: view String
+  opacityMotion: view String
+  onEnd: view AnimationEnd
+) {
+  var phase: AnimationPhase = AnimationPhase.moving
+  if onEnd is not AnimationEnd.stay {
+    phase = AnimationPhase.leaving
+  }
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: entityId
+      hasFrom: true
+      from: from
+      to: to
+      motion: motion
+      opacityMotion: opacityMotion
+      delaySeconds: 0.0
+      phase: phase
+      onEnd: onEnd
+      hasVelocity: true
+      velocity: velocity
+    }
+  )
+}
+
+# A fling's start on a track: where the finger left it, and the finger's speed
+func animationFlingStart(track: mod AnimationTrack, command: view AnimationCommand) {
+  channelFlingStart(
+    channel: track.opacity
+    current: command.from.opacity
+    velocity: command.velocity.opacity
+  )
+  channelFlingStart(
+    channel: track.scale
+    current: command.from.scale
+    velocity: command.velocity.scale
+  )
+  channelFlingStart(channel: track.x, current: command.from.x, velocity: command.velocity.x)
+  channelFlingStart(channel: track.y, current: command.from.y, velocity: command.velocity.y)
+  channelFlingStart(
+    channel: track.rotation
+    current: command.from.rotation
+    velocity: command.velocity.rotation
+  )
+  channelFlingStart(
+    channel: track.stretchY
+    current: command.from.stretchY
+    velocity: command.velocity.stretchY
+  )
+}
+
+func channelFlingStart(channel: mod AnimationChannel, current: view Float, velocity: view Float) {
+  channel.current = current
+  channel.start = current
+  channel.elapsed = 0.0
+  channel.velocity = velocity
 }
 
 # The node just moved by layout: it keeps looking where it was, shifted by (dx, dy), and springs
@@ -593,6 +669,12 @@ func animationApplyCommand(
         motion: motion
         opacityMotion: opacityMotion
       )
+    )
+  }
+  if command.hasVelocity {
+    animationFlingStart(
+      track: componentMod(this: uiSystems.animation.tracks, entityId: entityId)
+      command: command
     )
   }
   if settings.reduceMotion {
