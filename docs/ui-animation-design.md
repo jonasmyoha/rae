@@ -519,7 +519,25 @@ transition. What the code decided:
   lets those frames go past 60, and idle stays at zero frames.
 - The budget is `checks/uiPageBudget`: a page of 30 rows, 123 nodes, a new world each way. A still or a moving transform pass takes
   about 2.7 µs on an M1 Max, so it is nowhere near over budget there, and the fold stays as it is for now. The measure on an
-  iPhone 15 Pro that this section asks for is not in yet.
+  iPhone 15 Pro that this section asks for is below.
+
+**Measured on an iPhone 15 Pro (2026-11-07, 0.3.33, `checks/uiPageBudget` with `RAE_IOS_HIGH_REFRESH=1`):** 16 transitions, 754
+frames with motion in flight, 123 nodes.
+
+| what | p50 | p95 | max |
+|---|---|---|---|
+| frame to frame | 8.33 ms | 8.86 ms | 28.7 ms |
+| systems (pipeline and the old world's step) | 0.09 ms | 0.11 ms | 0.65 ms |
+| paint recorded, both pages | 2.55 ms | 3.49 ms | 6.79 ms |
+| transform pass alone | 4.5 µs | 5.0 µs | 9.7 µs |
+| building the new world (once per transition) | 7.46 ms | 8.93 ms | 8.93 ms |
+
+- Frames with motion hold 120 Hz: the median is one refresh, and 95% are within 0.53 ms of it. The check's "over 8.33 ms" count
+  (368) is the refresh's own jitter around 8.33 ms, not missed frames.
+- The transform pass is 5 µs, so the fold stays whole-tree.
+- What costs is building the arriving page's world: about 7.5 ms, nearly a whole 120 Hz frame, in one frame. 21 of the frames
+  (2.8%) were over 16.67 ms, about one or two per transition. That world is built on the frame the transition starts. Building it
+  before the motion starts, or over several frames, is a queue item of its own.
 
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
