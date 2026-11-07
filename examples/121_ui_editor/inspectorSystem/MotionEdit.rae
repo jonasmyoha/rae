@@ -125,6 +125,32 @@ func motionPageHasAppear(world: view UiWorld, sceneRoot: view EntityId) ret Bool
   ret false
 }
 
+# Whether the page uses motion at all: the seven components, or a button that names a token
+func motionPageUsesMotion(world: view UiWorld, sceneRoot: view EntityId) ret Bool {
+  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+  collectSubtree(childrens: world.childrens, node: sceneRoot, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if componentHas(this: world.appears, entityId: entityId) or componentHas(
+      this: world.disappears
+      entityId: entityId
+    ) or componentHas(this: world.staggers, entityId: entityId) or componentHas(
+      this: world.animateLayouts
+      entityId: entityId
+    ) or componentHas(this: world.animateTexts, entityId: entityId) or componentHas(
+      this: world.pageTransitions
+      entityId: entityId
+    ) or componentHas(this: world.sharedElements, entityId: entityId) {
+      ret true
+    }
+    if componentHas(this: world.hoverScales, entityId: entityId) {
+      if componentView(this: world.hoverScales, entityId: entityId).motion.length() > 0 {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
 # Play Appear on these nodes as the triggers do when a node comes to be shown, so a Stagger above
 # them counts
 func motionReplay(

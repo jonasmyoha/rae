@@ -1,0 +1,188 @@
+# A motion token edited while it runs (docs/ui-animation-design.md section 12): the running motion
+# takes the new numbers from where it is, by name, and motions on other tokens do not. The graph's
+# samples are what a channel does. ThemeWriter changes that one token in a file's text and no other
+# byte.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/ThemeResolved
+open ui/ThemeWriter
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func tokenNamed(theme: view ResolvedTheme, name: view String) ret MotionToken {
+  if let token: MotionToken = themeMotion(theme: theme, name: name) {
+    ret token
+  }
+  ret MotionToken {}
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems, frames: view Int) {
+  loop var i: Int = 0, i < frames, ++i {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+}
+
+func running() {
+  log("--- a running motion")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  let edited: EntityId = createEntity(world: world)
+  let other: EntityId = createEntity(world: world)
+  let same: EntityId = createEntity(world: world)
+  animationTo(
+    uiSystems: uiSystems
+    entityId: edited
+    to: AnimationPose { x: 100.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationTo(
+    uiSystems: uiSystems
+    entityId: other
+    to: AnimationPose { x: 100.0 }
+    motion: "quick"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationTo(
+    uiSystems: uiSystems
+    entityId: same
+    to: AnimationPose { x: 100.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  step(world: world, uiSystems: uiSystems, frames: 10)
+  let before: Float = animationPoseOf(uiSystems: uiSystems, entityId: edited).x
+  log(
+    "after 10 frames the two on smooth agree: {before is animationPoseOf(
+      uiSystems: uiSystems
+      entityId: same
+    ).x}"
+  )
+  var token: MotionToken = tokenNamed(theme: world.theme.resolved, name: "smooth")
+  token.response = 2.0
+  themeMotionSet(theme: world.theme.resolved, token: token)
+  animationMotionChanged(uiSystems: uiSystems, token: token)
+  log(
+    "the track holds the new response: {hundredths(
+      value: componentView(this: uiSystems.animation.tracks, entityId: edited).x.motion.response
+    )}"
+  )
+  log(
+    "and so does the other on that token: {hundredths(
+      value: componentView(this: uiSystems.animation.tracks, entityId: same).x.motion.response
+    )}"
+  )
+  log(
+    "the other token's track does not: {hundredths(
+      value: componentView(this: uiSystems.animation.tracks, entityId: other).x.motion.response
+    )}"
+  )
+  log(
+    "the edit moved nothing at once: {animationPoseOf(uiSystems: uiSystems, entityId: edited).x is before}"
+  )
+  step(world: world, uiSystems: uiSystems, frames: 10)
+  log("slower now: {animationPoseOf(uiSystems: uiSystems, entityId: edited).x - before < before}")
+  log(
+    "a new motion uses it: {hundredths(
+      value: tokenNamed(theme: world.theme.resolved, name: "smooth").response
+    )}"
+  )
+}
+
+func names() {
+  log("--- the names a theme offers")
+  var theme: ResolvedTheme = createResolvedTheme()
+  log("{themeMotionNames(theme: theme).length} built in")
+  themeMotionSet(theme: theme, token: MotionToken { name: "drift", response: 1.0, damping: 1.0 })
+  themeMotionSet(theme: theme, token: MotionToken { name: "quick", response: 0.1, damping: 1.0 })
+  let listed: List(String) = themeMotionNames(theme: theme)
+  log(
+    "{listed.length}, first {listed.copyAtDefault(index: 0)}, last {listed.copyAtDefault(index: 6)}"
+  )
+}
+
+func samples() {
+  log("--- samples")
+  let curve: List(Float) = motionSamples(
+    motion: MotionToken { kind: MotionKind.curve, curve: "easeLinear", seconds: 1.0 }
+    seconds: 1.0
+    count: 5
+  )
+  log(
+    "a linear second: {hundredths(value: curve.copyAtDefault(index: 0))} {hundredths(
+      value: curve.copyAtDefault(index: 1)
+    )} {hundredths(value: curve.copyAtDefault(index: 2))} {hundredths(
+      value: curve.copyAtDefault(index: 3)
+    )} {hundredths(value: curve.copyAtDefault(index: 4))}"
+  )
+  let bouncy: List(Float) = motionSamples(
+    motion: MotionToken { response: 0.4, damping: 0.5 }
+    seconds: 1.0
+    count: 40
+  )
+  let plain: List(Float) = motionSamples(
+    motion: MotionToken { response: 0.4, damping: 1.0 }
+    seconds: 1.0
+    count: 40
+  )
+  log("a low damping passes 1: {listLargest(values: bouncy) > 1.05}")
+  log("a damping of 1 does not: {listLargest(values: plain) <= 1.0}")
+}
+
+func listLargest(values: view List(Float)) ret Float {
+  var largest: Float = -1.0
+  loop let value: view Float in values {
+    if value > largest {
+      largest = value
+    }
+  }
+  ret largest
+}
+
+func writer() {
+  log("--- the writer")
+  let source: String = "\{\n  \"type\": \"Scene\",\n  \"palette\": \{ \"a\":  \{\"r\": 1\} \},\n  \"motion\": \{\n    \"quick\":   \{ \"kind\": \"spring\", \"response\": 0.2, \"damping\": 1 \},\n    \"tricky\\\"\}\": \{ \"kind\": \"curve\", \"curve\": \"easeInQuad\", \"seconds\": 1 \}\n  \},\n  \"text\": \{\}\n\}\n"
+  let spring: MotionToken = { name: "quick", response: 0.5, damping: 0.75 }
+  if let replaced: String = writeThemeMotion(source: source, token: spring) {
+    log(replaced)
+    log("declares: {themeDeclaresMotion(source: replaced, name: "quick")}")
+  }
+  let curve: MotionToken = {
+    name: "fresh"
+    kind: MotionKind.curve
+    curve: "easeOutCubic"
+    seconds: 0.25
+  }
+  if let added: String = writeThemeMotion(source: source, token: curve) {
+    log(added)
+  }
+  if let noSection: String = writeThemeMotion(source: "\{\"type\": \"Scene\"\}\n", token: curve) {
+    log(noSection)
+  }
+  if let emptySection: String = writeThemeMotion(
+    source: "\{\n  \"motion\": \{\}\n\}\n"
+    token: curve
+  ) {
+    log(emptySection)
+  }
+  log("not JSON: {writeThemeMotion(source: "nope", token: curve) is none}")
+}
+
+func main() {
+  running()
+  names()
+  samples()
+  writer()
+}

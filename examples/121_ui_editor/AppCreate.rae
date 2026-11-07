@@ -53,6 +53,8 @@ const selectionOutlineItemScenePath: String = "examples/121_ui_editor/assets/sce
 
 const componentRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/ComponentRow.raescene"
 
+const motionTokenRowScenePath: String = "examples/121_ui_editor/assets/scenes/chrome/MotionTokenRow.raescene"
+
 # Append one builtin scene. A function rather than a bare `.add` of a literal
 # so the path and its id are named at the call site, in the one order the
 # pair is ever written.
@@ -215,6 +217,11 @@ func createApp() ret App {
     builtinScenes: builtinScenes
     path: componentRowScenePath
     sceneId: "chrome/ComponentRow"
+  )
+  addBuiltinScene(
+    builtinScenes: builtinScenes
+    path: motionTokenRowScenePath
+    sceneId: "chrome/MotionTokenRow"
   )
 
   var world: UiWorld = create()
@@ -433,6 +440,7 @@ func createApp() ret App {
       testHover: testHover
       testHoverCycle: testHoverCycle
       builtinScenes: own builtinScenes
+      motionTokens: createMotionTokenSystem()
       headless: headless
       windowGeometry: own windowGeometry
       debugOverlay: createDebugOverlay(

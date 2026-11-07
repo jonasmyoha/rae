@@ -185,7 +185,7 @@ chrome can be hidden for a pure passive view (`H` key).
   `PanelToggle { panel }` (`panelToggleSystem` flips every panel of the kind a
   fired pill names; the key handlers call `setEditorPanelOpen` by kind); the
   space the document is fitted into is tagged `EditArea`; the three lists carry
-  `EditorList { source: hierarchy|project|components }` and one list system
+  `EditorList { source: hierarchy|project|components|motionTokens }` and one list system
   each fills their `ListViewData`; the guide shapes and labels carry `GuideRect
   { kind }`; the count pill `DiagnosticsBadge`. The components are lib tables
   (`lib/ui/BindingComponents.rae`, the "registry is the world" rule), so the

@@ -26,6 +26,9 @@ open inspectorSystem/MotionEdit
 open ecs/Entity
 open ecs/ComponentTable
 
+# A field typed for a motion token, not a component: `motionToken/<name>.<field>`
+const motionTokenFieldPrefix: String = "motionToken/"
+
 func isLabelField(field: view String) ret Bool {
   ret field is "label" or field is "labelDouble" or field is "labelTriple"
 }
@@ -55,11 +58,19 @@ func labelRowText(editing: view LabelEdit, field: view String, value: view Strin
   ret "{editing.draft}|"
 }
 
+# A motion token's field, typed and committed, for motionTokenSystem to take: a token belongs to the
+# theme, not to the selection
+type MotionTokenCommit {
+  field: String
+  text: String
+}
+
 # The input's state: focused or not, which field, what is typed so far
 type LabelEdit {
   active: Bool = false
   field: String = ""
   draft: String = ""
+  motionTokenCommits: List(MotionTokenCommit) = List.create(MotionTokenCommit, cap: 2)
 }
 
 func labelFocus(editing: mod LabelEdit, field: view String) {
@@ -93,6 +104,10 @@ func labelCommit(
   editing.draft = ""
   if wasActive is false or draft.length() is 0 {
     ret 0
+  }
+  if field.startsWith(prefix: motionTokenFieldPrefix) {
+    editing.motionTokenCommits.add(value: MotionTokenCommit { field: field, text: draft })
+    ret 1
   }
   if field.contains(sub: ".") {
     let changed: Int = motionFieldWrite(

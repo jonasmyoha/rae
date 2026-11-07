@@ -80,7 +80,7 @@ func parseThemeMotion(out: mod ResolvedTheme, doc: view JsonDoc, root: view Json
       fallback: ""
     )
     if kind is "spring" {
-      var token: MotionToken = {}
+      var token: MotionToken = { name: name }
       let responseAt: Int = Json.field(doc: doc, this: val, key: "response")
       if responseAt >= 0 {
         token.response = Json.jsonFloat(
@@ -105,7 +105,7 @@ func parseThemeMotion(out: mod ResolvedTheme, doc: view JsonDoc, root: view Json
         fallback: ""
       )
       if Easing.easingKnown(name: curve) {
-        var token: MotionToken = { kind: MotionKind.curve, curve: curve, seconds: 0.2 }
+        var token: MotionToken = { name: name, kind: MotionKind.curve, curve: curve, seconds: 0.2 }
         let secondsAt: Int = Json.field(doc: doc, this: val, key: "seconds")
         if secondsAt >= 0 {
           token.seconds = Json.jsonFloat(

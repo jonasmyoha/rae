@@ -512,6 +512,51 @@ sys.exit(0 if n['Appear']['y']==40 and n['Disappear']['motion']=='smooth' and n[
             echo "  motion components failed:"
             grep -aE "motion|play |scene\]" "$TMP_OUT/render-motion.log" 2>/dev/null | cut -c1-200 | sed 's/^/    /'
           fi
+          # The motion tokens with the theme (motionTokenSystem), on copies of the sample files: a
+          # real click reaches a field and the wheel its list, a typed value is checked, and the
+          # save writes each token to its home with the rest of that file kept byte for byte: a
+          # built-in to the imported theme, one the page declares to the page.
+          TOKEN_DIR="$TMP_OUT/motionTokens"
+          mkdir -p "$TOKEN_DIR"
+          cp ../examples/121_ui_editor/assets/samples/Motion.raescene ../examples/121_ui_editor/assets/samples/Theme.raescene "$TOKEN_DIR/"
+          if (cd .. && RAE_UI_EDITOR_SCENE="$TOKEN_DIR/Motion.raescene" RAE_UI_EDITOR_ROOT="$TOKEN_DIR" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_UI_EDITOR_TEST_WHEEL="MotionTokenPanel:-1" RAE_UI_EDITOR_TEST_TOKEN_CLICK="lively.Second" \
+             RAE_UI_EDITOR_TEST_LABEL="motionToken/lively.damping=0.5 motionToken/lively.damping=nope motionToken/fadeIn.curve=easeOutQuad motionToken/fadeIn.curve=wobble" \
+             RAE_UI_EDITOR_TEST_SAVE="$TOKEN_DIR/saved.raescene" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-tokens.log" 2>&1 \
+             && grep -qaF "routed MotionTokenList" "$TMP_OUT/render-tokens.log" \
+             && grep -qaF "token click lively.Second fired labelFocus:motionToken/lively.damping" "$TMP_OUT/render-tokens.log" \
+             && grep -qaF "lively: damping cannot be nope" "$TMP_OUT/render-tokens.log" \
+             && grep -qaF "fadeIn: curve cannot be wobble" "$TMP_OUT/render-tokens.log" \
+             && grep -qaF "motion token lively saved in $TOKEN_DIR/Theme.raescene" "$TMP_OUT/render-tokens.log" \
+             && python3 -c "
+import json,sys
+new=open(sys.argv[1]).read(); old=open(sys.argv[2]).read()
+kept=old.rstrip()[:-1].rstrip()
+m=json.loads(new)['motion']
+sys.exit(0 if new.startswith(kept) and m['lively']['damping']==0.5 and m['fadeIn']['curve']=='easeOutQuad' else 1)" "$TOKEN_DIR/Theme.raescene" ../examples/121_ui_editor/assets/samples/Theme.raescene \
+             && python3 -c "
+import sys
+t=open(sys.argv[1]).read()
+open(sys.argv[1],'w').write(t.replace('\"type\": \"Scene\",','\"type\": \"Scene\",\n  \"motion\": {\"quick\": {\"kind\": \"spring\", \"response\": 0.3, \"damping\": 1}},',1))" "$TOKEN_DIR/Motion.raescene" \
+             && cp ../examples/121_ui_editor/assets/samples/Theme.raescene "$TOKEN_DIR/Theme.raescene" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="$TOKEN_DIR/Motion.raescene" RAE_UI_EDITOR_ROOT="$TOKEN_DIR" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_UI_EDITOR_TEST_LABEL="motionToken/quick.damping=0.8" \
+             RAE_UI_EDITOR_TEST_SAVE="$TOKEN_DIR/saved.raescene" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-tokens-page.log" 2>&1 \
+             && grep -qaF "motion token quick saved in the page" "$TMP_OUT/render-tokens-page.log" \
+             && cmp -s ../examples/121_ui_editor/assets/samples/Theme.raescene "$TOKEN_DIR/Theme.raescene" \
+             && python3 -c "
+import json,sys
+sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 else 1)" "$TOKEN_DIR/saved.raescene"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  motion tokens failed:"
+            grep -aE "token|wheel|scene\]" "$TMP_OUT/render-tokens.log" "$TMP_OUT/render-tokens-page.log" 2>/dev/null | cut -c1-200 | sed 's/^/    /'
+          fi
           # Canvas selection gestures (#20778145). One run replays a script of
           # real canvas clicks through the live gesture path, so what is gated
           # is the gesture, not a back door into the selection set:

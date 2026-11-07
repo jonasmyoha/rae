@@ -75,6 +75,12 @@ func runTestWheelStep(
     world: world
     source: EditorListSource.components
   )
+  let tokenList: EntityId = editorListEntityId(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.motionTokens
+  )
+  let tokensBefore: Int = scrollPositionOf(world: world, entityId: tokenList)
   let zoomBefore: Int = (cameraOf(cameraSystem: cameraSystem, world: world).zoom * 100.0 + 0.5).toInt()
   let treeBefore: Int = scrollPositionOf(world: world, entityId: treeList)
   let componentsBefore: Int = scrollPositionOf(world: world, entityId: componentList)
@@ -90,6 +96,13 @@ func runTestWheelStep(
     world: world
     uiSystems: uiSystems
     entityId: treeList
+    input: input
+    deltaTime: 1.0 / 60.0
+  )
+  updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entityId: tokenList
     input: input
     deltaTime: 1.0 / 60.0
   )
@@ -112,11 +125,16 @@ func runTestWheelStep(
     routed = "TreeList"
   } else if input.wheelTarget is componentList {
     routed = "ComponentList"
+  } else if input.wheelTarget is tokenList {
+    routed = "MotionTokenList"
   } else if input.wheelTarget is editAreaEntityId(chromeSystem: chromeSystem) {
     routed = "EditArea"
   }
   log(
-    "[ui-editor] wheel {nodeId} {delta.toInt()}: routed {routed} zoom {zoomBefore}->{zoomAfter} tree {treeBefore}->{treeAfter} components {componentsBefore}->{componentsAfter}"
+    "[ui-editor] wheel {nodeId} {delta.toInt()}: routed {routed} zoom {zoomBefore}->{zoomAfter} tree {treeBefore}->{treeAfter} components {componentsBefore}->{componentsAfter} tokens {tokensBefore}->{scrollPositionOf(
+      world: world
+      entityId: tokenList
+    )}"
   )
 }
 
