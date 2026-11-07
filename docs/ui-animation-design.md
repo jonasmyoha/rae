@@ -47,6 +47,18 @@ Five gaps stop the goal above:
    world. An app that makes a new `UiWorld` per screen, as SUMU does, destroys the
    old page before the new one is drawn.
 
+**Done in 0.3.29,** so that one spring and one ease remain in `lib/ui`. The spring is `lib/Spring`, and the curves are `lib/Easing`,
+both reached through a channel or `springStep`. The ease is `easeTowards`, an exponential for what has a rate and no end. No scene changes.
+
+| Piece | Now | Why not a track |
+| --- | --- | --- |
+| `HoverScale` | Takes an optional `motion`, a spring that keeps its speed through a change of target. With none, `speed` is the ease it always was | Its value is read by the painter and multiplies a sprite: it is not a pose. `pressable` uses `quick` |
+| `SwitchSystem` | `SwitchMotion` runs on the spring, 0.18 s as before. The knob's paint curve is gone, as the spring is that curve | A knob is not a node: the painter draws it from the position |
+| `Carousel` | Its offset runs on the spring, `transitionDuration` its response, and starts at the finger's speed | A finger writes the offset directly, and it moves the pages by a runtime offset |
+| `ButtonHoverFade` | As it was | A constant rate has no curve or speed: turning back is already continuous, and takes only as long as the way back |
+| Reorder | Uses `easeTowards` | The rows follow a finger that keeps moving, so there is no end to retarget to |
+| Scroll's rubber band | Runs on the spring, for one 60 Hz frame at a time. `springStepVelocity` is gone | Scrolling counts frames and its velocity is points a frame. It lands where it did, to the point, in the scroll cases |
+
 ## 2. The model in one page
 
 ```

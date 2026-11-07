@@ -14,15 +14,18 @@
 # Permanent components, not one-shots — `HoverScale` lives on every
 # tile that wants the effect. Just change the target by adjusting
 # `restScale` / `hoverScale`; the system handles the rest.
+import Math
 import ui/Ecs
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
 
-# Move `current` toward `target` by an exponential ease at `speed`
-# units per second. Snaps to `target` when `|target - current|` is
-# below `epsilon` so the system can stop reporting "in flight".
+# The one ease in lib/ui outside a motion: `current` toward `target` at `rate` per second, for what
+# has a
+# rate and no end (an authored HoverScale.speed, rows following a finger). It is exactly `target`
+# once
+# within `epsilon`, so the caller can stop saying it is in flight.
 func easeTowards(
   current: view Float
   target: view Float
@@ -31,18 +34,10 @@ func easeTowards(
   epsilon: view Float
 ) ret Float {
   let delta: Float = target - current
-  var absDelta: Float = delta
-  if absDelta < 0.0 {
-    absDelta = 0.0 - absDelta
-  }
-  if absDelta < epsilon {
+  if delta < epsilon and delta > -epsilon {
     ret target
   }
-  var step: Float = deltaTime * speed
-  if step > 1.0 {
-    step = 1.0
-  }
-  ret current + delta * step
+  ret current + delta * (1.0 - Math.exp(x: -speed * deltaTime))
 }
 
 # Three-tier paint-rank a child carrying HoverScale gets in

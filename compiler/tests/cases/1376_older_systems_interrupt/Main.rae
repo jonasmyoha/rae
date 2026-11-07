@@ -1,0 +1,257 @@
+# The older systems when interrupted (docs/ui-animation-design.md sections 1, 15). The one thing
+# that
+# shows is that a change part way carries on from where it is, at the speed it had. A HoverScale
+# with
+# a motion keeps its speed through a change of target, one with none is the ease it always was, a
+# carousel takes the finger's speed, and a switch turned back part way does not stall. A critically
+# damped spring of response 0.24 s (quick) from 1 to 0.96 is at 0.985 after 0.05 s:
+# 0.96 + 0.04 (1 + wt) exp(-wt).
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/InputComponents
+open ui/ScenePolicy
+open ui/UiSystems
+open ui/animationSystem/AnimationSystem
+open ui/animationSystem/EffectSystems
+open ui/buttonSystem/ButtonHoverScale
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Scene
+open ui/SceneLoader
+open ui/switchSystem/SwitchSystem
+open ui/Transform
+
+func thousandths(value: view Float) ret Int {
+  ret Math.round(x: value * 1000.0).toInt()
+}
+
+func hoverScale() {
+  log("--- HoverScale")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let sprung: EntityId = createEntity(world: world)
+  componentSet(
+    this: world.hoverScales
+    entityId: sprung
+    data: HoverScale { hoverScale: 0.96, motion: "quick" }
+  )
+  let eased: EntityId = createEntity(world: world)
+  componentSet(this: world.hoverScales, entityId: eased, data: HoverScale { hoverScale: 0.96 })
+  let moving: Bool = buttonHoverScaleUpdate(
+    world: world
+    uiSystems: uiSystems
+    hovered: sprung
+    deltaTime: 0.05
+  )
+  let sprungNow: view HoverScale = componentView(this: world.hoverScales, entityId: sprung)
+  log(
+    "a motion, 0.05 s: {thousandths(value: sprungNow.current)}, moving {moving}, its speed down {sprungNow.velocity < 0.0}"
+  )
+  let before: Float = sprungNow.current
+  let speed: Float = sprungNow.velocity
+  # The pointer leaves: the target is the other way, and it carries on the way it was going for a
+  # moment
+  let turning: Bool = buttonHoverScaleUpdate(
+    world: world
+    uiSystems: uiSystems
+    hovered: noEntity()
+    deltaTime: 0.004
+  )
+  let turned: view HoverScale = componentView(this: world.hoverScales, entityId: sprung)
+  log(
+    "turned back: it goes on down first {turned.current < before}, no jump {Math.abs(
+      value: turned.current - before
+    ) < Math.abs(value: speed) * 0.006}"
+  )
+  var frames: Int = 0
+  loop buttonHoverScaleUpdate(
+    world: world
+    uiSystems: uiSystems
+    hovered: noEntity()
+    deltaTime: 0.016
+  ) and frames < 200 {
+    frames = frames + 1
+  }
+  let rest: view HoverScale = componentView(this: world.hoverScales, entityId: sprung)
+  log("rests at {rest.current}, speed {rest.velocity}, in under 40 frames {frames < 40}")
+  var ease: UiWorld = createUiWorld()
+  let plain: EntityId = createEntity(world: ease)
+  componentSet(this: ease.hoverScales, entityId: plain, data: HoverScale { hoverScale: 2.0 })
+  let eases: Bool = buttonHoverScaleUpdate(
+    world: ease
+    uiSystems: uiSystems
+    hovered: plain
+    deltaTime: 0.05
+  )
+  log(
+    "no motion is the ease at speed 12: {thousandths(
+      value: componentView(this: ease.hoverScales, entityId: plain).current
+    )}, as 1 + (1 - exp(-0.6)) = 1451"
+  )
+  var other: UiWorld = createUiWorld()
+  let bad: EntityId = loadScene(
+    world: other
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"HoverScale\":\{\"motion\":\"quik\"\}\}\}\}"
+    )
+  )
+  log(
+    "an unknown motion: {sceneDiagnosticCountOfKind(
+      diagnostics: other.sceneDiagnostics
+      kind: SceneDiagnosticKind.unknownToken
+    )} diagnostic"
+  )
+  var good: UiWorld = createUiWorld()
+  let press: EntityId = loadScene(
+    world: good
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"A\",\"nodes\":\{\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"bundles\":[\"pressable\"]\}\}\}"
+    )
+  )
+  log(
+    "pressable: {componentView(this: good.hoverScales, entityId: press).motion}, pressed {componentView(
+      this: good.hoverScales
+      entityId: press
+    ).pressedScale}"
+  )
+}
+
+func switchTurnsBack() {
+  log("--- a switch turned back part way")
+  var world: UiWorld = createUiWorld()
+  let knob: EntityId = createEntity(world: world)
+  componentSet(this: world.switches, entityId: knob, data: Switch { on: false })
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  let first: Bool = switchSystem(world: world, actions: actions, deltaTime: 0.0)
+  setSwitch(world: world, entityId: knob, on: true)
+  let going: Bool = switchSystem(world: world, actions: actions, deltaTime: 0.05)
+  let there: Float = componentView(this: world.switchMotions, entityId: knob).position
+  let speed: Float = componentView(this: world.switchMotions, entityId: knob).velocity
+  log("0.05 s of 0.18 s: {thousandths(value: there)}, by the spring 521; moving on {speed > 0.0}")
+  setSwitch(world: world, entityId: knob, on: false)
+  let back: Bool = switchSystem(world: world, actions: actions, deltaTime: 0.002)
+  log(
+    "turned back: no jump {Math.abs(
+      value: componentView(this: world.switchMotions, entityId: knob).position - there
+    ) < speed * 0.004}, still going on at first {componentView(
+      this: world.switchMotions
+      entityId: knob
+    ).position > there}"
+  )
+  var frames: Int = 0
+  loop switchSystem(world: world, actions: actions, deltaTime: 0.016) and frames < 100 {
+    frames = frames + 1
+  }
+  log(
+    "rests at {componentView(this: world.switchMotions, entityId: knob).position}, speed {componentView(
+      this: world.switchMotions
+      entityId: knob
+    ).velocity}, in under 30 frames {frames < 30}"
+  )
+}
+
+func carouselFollows() {
+  log("--- a carousel let go")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 200.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":0\},\"Carousel\":\{\"axis\":\"Start\",\"swipeThreshold\":50,\"transitionDuration\":0.3,\"travelFactor\":1,\"previewScale\":1,\"autoAdvanceSec\":0\},\"Children\":[\"P0\",\"P1\"]\},\"P0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\}\},\"P1\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  let start: Bool = carouselSystem(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.01
+    pointerX: 300.0
+    pointerY: 100.0
+    pointerDown: true
+  )
+  let drag: Bool = carouselSystem(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.01
+    pointerX: 200.0
+    pointerY: 100.0
+    pointerDown: true
+  )
+  let held: view CarouselState = componentView(
+    this: uiSystems.animation.carouselStates
+    entityId: root
+  )
+  log("dragged 100 in 0.01 s: offset {held.offset}, speed {held.velocity}")
+  let offsetThen: Float = held.offset
+  let speedThen: Float = held.velocity
+  let release: Bool = carouselSystem(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.001
+    pointerX: 200.0
+    pointerY: 100.0
+    pointerDown: false
+  )
+  let letGo: view CarouselState = componentView(
+    this: uiSystems.animation.carouselStates
+    entityId: root
+  )
+  log(
+    "let go: page {letGo.page}, goes on from the finger's speed: moved {Math.round(
+      x: letGo.offset - offsetThen
+    )} in 0.001 s, about -10"
+  )
+  var frames: Int = 0
+  loop carouselSystem(
+    world: world
+    uiSystems: uiSystems
+    deltaTime: 0.016
+    pointerX: 200.0
+    pointerY: 100.0
+    pointerDown: false
+  ) and frames < 200 {
+    frames = frames + 1
+  }
+  log(
+    "rests at {componentView(this: uiSystems.animation.carouselStates, entityId: root).offset}, speed {componentView(
+      this: uiSystems.animation.carouselStates
+      entityId: root
+    ).velocity}"
+  )
+}
+
+func oneEase() {
+  log("--- the one ease")
+  log("{thousandths(value: easeTowards(
+    current: 0.0
+    target: 1.0
+    speed: 12.0
+    deltaTime: 0.05
+    epsilon: 0.001
+  ))}, as 1 - exp(-0.6) = 451")
+  log("{easeTowards(
+    current: 0.9995
+    target: 1.0
+    speed: 12.0
+    deltaTime: 0.05
+    epsilon: 0.001
+  )}: within its epsilon it is the target")
+}
+
+func main() {
+  hoverScale()
+  switchTurnsBack()
+  carouselFollows()
+  oneEase()
+}

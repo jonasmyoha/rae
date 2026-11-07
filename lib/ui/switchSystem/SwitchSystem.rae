@@ -5,8 +5,10 @@
 #   its `actionId` as a UiAction with no entity. Any action with that id from elsewhere flips it
 #   too, for a whole row that carries the OnClick. The app learns of a flip from that action,
 #   and reads `switchIsOn`.
-# - The knob glides to its side (SwitchMotion, a runtime table). A switch starts at its side
-#   with no motion, so a screen does not open with its switches moving.
+# - The knob glides to its side (SwitchMotion, a runtime table), by a spring, so turning it back
+#   half way keeps its speed. It is not a track, as the knob is not a node with a pose: the painter
+#   draws it from the position. A switch starts at its side with no motion, so a screen does not
+#   open with its switches moving.
 # - `switchSystem` answers true while something changed or moved: feed it into the frame
 #   loop's "is animating" flag (ui/EventLoop), or the knob stops between events.
 open ecs/Entity
@@ -15,6 +17,7 @@ open ecs/Event
 open ui/Ecs
 open ui/BindingComponents
 open ui/InputComponents
+open Spring
 
 # How long the knob takes from one side to the other
 const switchTravelSec: Float = 0.18
@@ -41,22 +44,6 @@ func flipSwitch(world: mod UiWorld, entityId: view EntityId) {
 }
 
 # `position` moved `deltaTime` toward `target` (0 off, 1 on), never past it
-func switchStep(position: view Float, target: view Float, deltaTime: view Float) ret Float {
-  let step: Float = deltaTime / switchTravelSec
-  if position < target {
-    let moved: Float = position + step
-    if moved > target {
-      ret target
-    }
-    ret moved
-  }
-  let moved: Float = position - step
-  if moved < target {
-    ret target
-  }
-  ret moved
-}
-
 func switchTarget(on: view Bool) ret Float {
   if on {
     ret 1.0
@@ -110,12 +97,21 @@ func switchSystem(
       )
     } else {
       let motion: mod SwitchMotion = componentMod(this: world.switchMotions, entityId: entityId)
-      if motion.position is not target {
-        motion.position = switchStep(
-          position: motion.position
+      if motion.position is not target or motion.velocity is not 0.0 {
+        var state: SpringState = { value: motion.position, velocity: motion.velocity }
+        springStep(
+          state: state
           target: target
+          response: switchTravelSec
+          damping: 1.0
           deltaTime: deltaTime
         )
+        motion.position = state.value
+        motion.velocity = state.velocity
+        if springAtRest(state: state, target: target, distance: 0.002) {
+          motion.position = target
+          motion.velocity = 0.0
+        }
         changed = true
       }
     }

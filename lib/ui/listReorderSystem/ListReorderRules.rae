@@ -3,6 +3,7 @@
 # where each row goes once the move is made, the easing, and how fast the
 # list scrolls while the finger is near an end. Positions are along the
 # list's content: row `index` rests at `index * pitch`.
+open ui/animationSystem/AnimationSystem
 import Math
 
 # The indexes a row lifted at `index` may land on: `low` to `high`, the rows
@@ -102,19 +103,20 @@ func reorderNewIndex(index: view Int, fromIndex: view Int, toIndex: view Int) re
   ret index
 }
 
-# `current` eased toward `target` over `seconds` (an exponential ease: about
-# 95% of the way in 3 / rate seconds); exactly `target` once within a hair
+# `current` eased toward `target` over `seconds` (about 95% of the way in 3 / rate seconds)
 func reorderEase(
   current: view Float
   target: view Float
   seconds: view Float
   rate: view Float
 ) ret Float {
-  let left: Float = target - current
-  if left < 0.25 and left > -0.25 {
-    ret target
-  }
-  ret current + left * (1.0 - Math.exp(x: 0.0 - rate * seconds))
+  ret easeTowards(
+    current: current
+    target: target
+    speed: rate
+    deltaTime: seconds
+    epsilon: 0.25
+  )
 }
 
 # The auto-scroll speed in points per second while the finger is at

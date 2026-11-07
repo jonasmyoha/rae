@@ -885,3 +885,12 @@ Case 1374 holds the rules; `checks/uiPageTransitions` with `RAE_PAGE_DRAG` runs 
 
 A scene and an app need nothing. With the system's reduced motion setting on (iOS, macOS), position, scale and rotation do not animate, and everything that moved is a short fade. It is read whenever
 motion starts. `RAE_REDUCE_MOTION=on` or `off` fixes it for a test. Case 1375 holds the rules.
+
+## 29. `HoverScale.motion`
+
+```json
+"HoverScale": { "pressedScale": 0.96, "motion": "quick" }
+```
+
+With `motion` the scale runs on that spring, and keeps its speed when the pointer changes its mind. Without one it eases at `speed` as before, so existing scenes look the same. An
+unknown name is an `unknownToken` diagnostic at load. The bundle `pressable` uses `quick`. Case 1376 holds the rules.

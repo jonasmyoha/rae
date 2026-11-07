@@ -353,12 +353,8 @@ type CornerRadius {
   radius: Float
 }
 
-# Hover-scale animation. Permanent component on entities that want
-# a hover-driven scale wiggle. `hoverScaleSystem` picks
-# `target = restScale` (cursor outside), `hoverScale` (inside), or
-# `pressedScale` (an inside press) and eases `current` toward it each frame at
-# `speed` per second. Sprite paint reads `current` as a multiplier
-# — bumping it scales the rendered texture and re-centers it.
+# A scale by the pointer: `current` goes to restScale, hoverScale or pressedScale,
+# by the spring `motion` names, or with none by an ease at `speed` per second.
 type HoverScale {
   restScale: Float = 1.0
   hoverScale: Float = 1.0
@@ -366,6 +362,8 @@ type HoverScale {
   speed: Float = 12.0
   current: Float = 1.0
   target: Float = 1.0
+  motion: String = ""
+  velocity: Float = 0.0
 }
 
 # Linear gradient; angle is degrees. It replaces Shape.fill on the same
@@ -891,6 +889,7 @@ type CarouselState {
   dragStartX: Float
   dragStartOffset: Float
   autoTimerSec: Float
+  velocity: Float = 0.0
 }
 
 # -----------------------------------------------------------------

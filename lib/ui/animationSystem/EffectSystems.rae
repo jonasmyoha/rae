@@ -9,6 +9,7 @@
 # Motion writes go to the runtime channels the transform pass folds in
 # (RuntimeOffset, Opacity, TransformFx scale) — never to layout inputs, so an
 # effect never re-lays-out the page.
+open Spring
 import Math
 import ui/Ecs
 import ui/Components
@@ -387,7 +388,10 @@ func childStrideX(
 # over the container the children follow the drag (the container's runtime
 # offset times travelFactor); on release the page snaps to the nearest one, a
 # drag past swipeThreshold turning it. Between drags the offset eases to the
-# page in transitionDuration seconds; autoAdvanceSec > 0 turns the pages on a
+# page in transitionDuration seconds, by a spring that starts at the finger's
+# speed. It is not a track, as a finger writes this offset directly and a track
+# would be fighting it, and it moves the pages by a runtime offset, not a pose.
+# autoAdvanceSec > 0 turns the pages on a
 # timer. Non-current children are scaled to previewScale (their TransformFx
 # scale — an authored TransformFx on a page keeps its other fields).
 func carouselSystem(
@@ -439,7 +443,12 @@ func carouselSystem(
         state.dragStartX = pointerX
         state.dragStartOffset = state.offset
       }
-      state.offset = state.dragStartOffset + (pointerX - state.dragStartX)
+      let followed: Float = state.dragStartOffset + (pointerX - state.dragStartX)
+      # Its speed is the finger's, for when it lets go
+      if deltaTime > 0.0 {
+        state.velocity = (followed - state.offset) / deltaTime
+      }
+      state.offset = followed
       live = true
     } else {
       if state.dragging {
@@ -461,19 +470,25 @@ func carouselSystem(
         live = true
       }
       let target: Float = 0.0 - state.page.toFloat() * stride
-      let gap: Float = target - state.offset
-      var rate: Float = 1.0
-      if carousel.transitionDuration > 0.0 {
-        rate = deltaTime / carousel.transitionDuration * 4.0
-      }
-      if rate > 1.0 {
-        rate = 1.0
-      }
-      if gap > 0.5 or gap < 0.0 - 0.5 {
-        state.offset = state.offset + gap * rate
-        live = true
-      } else {
+      if carousel.transitionDuration <= 0.0 {
         state.offset = target
+        state.velocity = 0.0
+      } else if state.offset is not target or state.velocity is not 0.0 {
+        var spring: SpringState = { value: state.offset, velocity: state.velocity }
+        springStep(
+          state: spring
+          target: target
+          response: carousel.transitionDuration
+          damping: 1.0
+          deltaTime: deltaTime
+        )
+        state.offset = spring.value
+        state.velocity = spring.velocity
+        live = true
+        if springAtRest(state: spring, target: target, distance: 0.5) {
+          state.offset = target
+          state.velocity = 0.0
+        }
       }
     }
     setRuntimeOffset(

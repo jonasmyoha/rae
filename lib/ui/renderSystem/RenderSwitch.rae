@@ -14,12 +14,6 @@ open ui/renderSystem/RenderPaintBox
 # The gap between the knob and the pill's edge, as a share of the pill's height
 const switchKnobInset: Float = 0.094
 
-# The eased share of the way across for a position in 0..1: starts and ends gently, and a
-# reversal halfway stays continuous since it is a function of the position alone
-func switchEased(position: view Float) ret Float {
-  ret position * position * (3.0 - 2.0 * position)
-}
-
 # The knob's left edge in a pill at `x`, `w` wide and `h` high
 func switchKnobX(
   x: view Float
@@ -29,7 +23,7 @@ func switchKnobX(
 ) ret Float {
   let inset: Float = h * switchKnobInset
   let knob: Float = h - inset * 2.0
-  ret x + inset + switchEased(position: position) * (w - inset * 2.0 - knob)
+  ret x + inset + position * (w - inset * 2.0 - knob)
 }
 
 func switchBlend(from: view Int, to: view Int, share: view Float) ret Int {
@@ -61,7 +55,7 @@ func paintSwitchG(
   )
   let off: RgbaColor = uiThemeColor(theme: world.theme, name: settings.offColor)
   let on: RgbaColor = uiThemeColor(theme: world.theme, name: settings.onColor)
-  let share: Float = switchEased(position: position)
+  let share: Float = position
   let track: RgbaColor = {
     r: switchBlend(from: off.r, to: on.r, share: share)
     g: switchBlend(from: off.g, to: on.g, share: share)
