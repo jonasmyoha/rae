@@ -85,16 +85,17 @@ func edgeSwipeStep(
   } else if swipe.phase is EdgeSwipePhase.active {
     swipe.d2 = swipe.d1
     swipe.d1 = swipe.d0
-    swipe.d0 = pointer.x - swipe.lastX
+    swipe.d0 = 0.0
+    if deltaTime > 0.0 {
+      swipe.d0 = (pointer.x - swipe.lastX) / deltaTime
+    }
     swipe.lastX = pointer.x
     var width: Float = world.layoutW
     if width <= 0.0 {
       width = 1.0
     }
     event.progress = Math.max(a: 0.0, b: Math.min(a: 1.0, b: (pointer.x - swipe.startX) / width))
-    if deltaTime > 0.0 {
-      event.velocity = pickReleaseVelocity(d0: swipe.d0, d1: swipe.d1, d2: swipe.d2) / deltaTime / width
-    }
+    event.velocity = pickReleaseVelocity(d0: swipe.d0, d1: swipe.d1, d2: swipe.d2) / width
     event.kind = EdgeSwipeKind.moved
     if pointer.released or pointer.down is false {
       event.kind = EdgeSwipeKind.released
