@@ -354,6 +354,24 @@ func beginRenderPass(
   target: view RenderTarget
 ) unsafe ret Ptr {
   unsafe {
+    ret beginRenderPassWrites(
+      recording: recording
+      resources: resources
+      target: target
+      timestampWrites: webgpuNull()
+    )
+  }
+}
+
+# beginRenderPass with the pass's own begin and end timestamps written where `timestampWrites`
+# says (gpu/GpuTiming timingWrites); null runs it untimed
+func beginRenderPassWrites(
+  recording: mod Recording
+  resources: mod GpuResources
+  target: view RenderTarget
+  timestampWrites: view Ptr
+) unsafe ret Ptr {
+  unsafe {
     if recordingIsOpen(recording: recording, resources: resources) is false {
       ret webgpuNull()
     }
@@ -433,6 +451,7 @@ func beginRenderPass(
         colorAttachmentCount: 1
         colorAttachments: colorAttachments.data
         depthStencilAttachment: depthAttachments.data
+        timestampWrites: timestampWrites
       }
       ret wgpuCommandEncoderBeginRenderPass(
         commandEncoder: recording.encoder
@@ -442,6 +461,7 @@ func beginRenderPass(
     let descriptor: WGPURenderPassDescriptor = {
       colorAttachmentCount: 1
       colorAttachments: colorAttachments.data
+      timestampWrites: timestampWrites
     }
     ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
   }

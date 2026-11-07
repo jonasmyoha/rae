@@ -136,6 +136,14 @@ measured on a Mac only, and on the clouds' passes only.
 | the `cpu` time of `[frame]` | the CPU's part of a frame |
 | a `[gpu passes]` slot | only a hint at where to look first; use `RAE_AB` before acting on one |
 
+**The 2D canvas: `RAE_GPU2D_TIMING=1`** (lib/Gpu2dCanvasTiming) times the one render pass a 2D frame draws in by
+its own begin and end timestamps, read back without waiting, about every other or third frame: a `[gpu2d] frame N us`
+line per sample and a `[gpu2d] last second` summary. It is one pass, so the overlap above does not split it. On a Mac
+it follows the load (`checks/gpu2dTiming`: 4 full-screen boxes 0.25 ms, 300 boxes 5.5 ms). On an iPhone 15 Pro a pass
+under about a millisecond reads 0 (40 boxes read 1.7 ms), so there a 0 means "under a millisecond".
+`RAE_GPU2D_TIMING=marks` times it by marks before and after the pass instead, as `[gpu passes]` does; those do not wait
+for the pass's pixels on a Mac or a phone (300 boxes read under 0.1 ms), so they are only for comparing.
+
 ## What each pass drew: the `[draws]` lines
 
 `RAE_FRAME_TIMING=1` in a walker app logs, after each `[frames]` line (every 5 s), one line a pass

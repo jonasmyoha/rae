@@ -20,6 +20,7 @@ open Gpu2dCanvas
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 open Gpu2dCanvasText
+open Gpu2dCanvasTiming
 
 # ----- frame (#915) ----------------------------------------------------------
 
@@ -59,10 +60,16 @@ func canvasOpenFrame(
         a: a
       )
       unsafe {
-        canvas.framePass = beginRenderPass(
+        let writes: Ptr = canvas2dTimingFrameBegin(
+          timing: canvas.gpuTiming
+          recording: recording
+          resources: resources
+        )
+        canvas.framePass = beginRenderPassWrites(
           recording: recording
           resources: resources
           target: target
+          timestampWrites: writes
         )
       }
       canvas.recording = own recording
@@ -94,11 +101,16 @@ func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.pipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.imagePipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.textPipeline)
-      let tracked: opt SubmissionId = trackSubmission(
+      canvas2dTimingResolve(timing: canvas.gpuTiming, recording: recording, resources: resources)
+      if let tracked: SubmissionId = trackSubmission(
         inFlight: canvas.inFlight
         resources: resources
         recording: recording
-      )
+      ) {
+        canvas2dTimingSubmitted(timing: canvas.gpuTiming, submission: tracked)
+      } else {
+        canvas2dTimingNotSubmitted(timing: canvas.gpuTiming)
+      }
     }
     canvas.recording = none
   }
