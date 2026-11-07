@@ -391,6 +391,11 @@ func listMotionAfterRows(
     entityId: listEntityId
   )
   let dataChanged: Bool = generation is not state.generation
+  # Used by this sync or by none: a jump with no data change is only a scroll
+  let scrollJump: Float = state.scrollJump
+  if scrollJump is not 0.0 {
+    componentMod(this: uiSystems.animation.listMotions, entityId: listEntityId).scrollJump = 0.0
+  }
   if dataChanged is false and first is state.first and pool.length is state.rowCount and not changing {
     ret
   }
@@ -449,6 +454,7 @@ func listMotionAfterRows(
       oldKeys: oldKeys
       newKeys: newKeys
       shown: shown
+      scrolledBy: scrollJump
     )
   }
   let done: mod ListMotionState = componentMod(
@@ -462,7 +468,10 @@ func listMotionAfterRows(
 }
 
 # The data changed: a new key plays its row's Appear, in Stagger order among the rows a person can
-# see, and a key that moved glides
+# see, and a key that moved glides. `scrolledBy` is how far the scroll moved with the change (an app
+# scrolling the new row into view): a row glides from where it was drawn, so that counts too, or
+# every
+# row would jump by it in one frame.
 func listMotionAskRows(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -473,6 +482,7 @@ func listMotionAskRows(
   oldKeys: view List(String)
   newKeys: view List(String)
   shown: view Bool
+  scrolledBy: view Float
 ) {
   if shown is false {
     ret
@@ -505,12 +515,12 @@ func listMotionAskRows(
           visibleCount = visibleCount + 1
         }
       }
-    } else if oldIndex is not index and listView.animateMoves and keyed {
+    } else if listView.animateMoves and keyed and (oldIndex is not index or scrolledBy is not 0.0) {
       animationGlide(
         uiSystems: uiSystems
         entityId: rowEntityId
         dx: 0.0
-        dy: (oldIndex - index).toFloat() * pitch
+        dy: (oldIndex - index).toFloat() * pitch - scrolledBy
         motion: "smooth"
       )
     }

@@ -12,6 +12,8 @@ open ui/Ecs
 open ui/Components
 open ui/ScrollToRow
 open ui/UiSystems
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/listMotionSystem/ListMotionRules
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -160,6 +162,19 @@ func scrollToRowSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
       floor: range.floor
       place: request.place
     )
+    var before: Float = 0.0
+    if componentHas(this: world.scrollStates, entityId: root) {
+      before = componentView(this: world.scrollStates, entityId: root).y
+    }
+    # A list that animates its moves counts this jump in where its rows were drawn, when the row
+    # it shows came in this frame (ui/listMotionSystem): or each row would jump by it
+    if componentHas(this: uiSystems.animation.listMotions, entityId: listEntity) {
+      let state: mod ListMotionState = componentMod(
+        this: uiSystems.animation.listMotions
+        entityId: listEntity
+      )
+      state.scrollJump = state.scrollJump + position - before
+    }
     # The root's position lives in its ScrollState (updateScrollRoot reads
     # it each frame); a root not scrolled yet has none, so it gets one
     componentSet(

@@ -1,0 +1,195 @@
+# A keyed virtual list that animates its moves, in its own scroll root, gets a row at a time before
+# its last row, and asks to scroll the new row into view at the window's end, as an app adding a
+# task does. Every frame, every row's place on screen is compared with the frame before: no row may
+# move half a row in one frame. The first add that makes the list longer than its window scrolls it
+# by the overflow, and each later one by a whole row, together with the data change.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollToRow
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+open ui/listViewSystem/ListViewSystem
+open ui/scrollRootSystem/ScrollToRowSystem
+
+# Rows of 30 with a gap of 10, in a window of 290: seven fit, the eighth overflows by 20
+const pitch: Float = 40.0
+
+type Fixture {
+  world: UiWorld
+  uiSystems: UiSystems
+  scenes: SceneRegistry
+  listEntityId: EntityId
+  # Each row's place on screen in the frame before, by its key
+  keys: List(String)
+  places: List(Float)
+}
+
+func mount() ret Fixture {
+  var registry: SceneRegistry = createSceneRegistry()
+  var rowScene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":30\},\"bundles\":[\"appearRise\",\"disappearFade\"],\"Children\":[\"Label\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":30\},\"Text\":\{\"text\":\"x\"\}\}\}\}"
+  )
+  rowScene.sceneId = "RowScene"
+  registerScene(reg: registry, key: "RowScene", scene: own rowScene)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":290\},\"ScrollRoot\":\{\"axis\":\"y\",\"floor\":\"content\"\},\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemKeyField\":\"id\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":8,\"overscanRows\":2,\"animateMoves\":true,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+    )
+  )
+  var listEntityId: EntityId = noEntity()
+  if let index: Int = world.nodeIds.get(k: "List") {
+    listEntityId = nodeEntityId(world: world, index: index)
+  }
+  ret Fixture {
+    world: own world
+    uiSystems: own uiSystems
+    scenes: own registry
+    listEntityId: listEntityId
+    keys: List.create(String, cap: 16)
+    places: List.create(Float, cap: 16)
+  }
+}
+
+# Tasks 1 .. count, then the done row "Done" last
+func setTasks(fixture: mod Fixture, count: view Int) {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count + 1)
+  loop var i: Int = 0, i <= count, ++i {
+    var names: List(String) = List.create(String, cap: 1)
+    names.add(value: "id")
+    var values: List(String) = List.create(String, cap: 1)
+    if i < count {
+      values.add(value: "Task {i + 1}")
+    } else {
+      values.add(value: "Done")
+    }
+    rows.add(value: ListViewRow { keys: own names, values: own values })
+  }
+  componentSet(
+    this: fixture.world.listViewDatas
+    entityId: fixture.listEntityId
+    data: ListViewData { rows: own rows }
+  )
+}
+
+func labelOf(fixture: view Fixture, rowEntityId: view EntityId) ret String {
+  if let index: Int = findNodeInPage(
+    world: fixture.world
+    pageId: "listRow{rowEntityId.index}"
+    nodeId: "Label"
+  ) {
+    ret "{componentView(
+      this: fixture.world.texts
+      entityId: nodeEntityId(world: fixture.world, index: index)
+    ).text}"
+  }
+  ret "?"
+}
+
+# One frame in a host's order, then the largest move of a row seen before, in points
+func frame(fixture: mod Fixture) ret Float {
+  let scrolled: Bool = scrollToRowSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+  listViewSystem(world: fixture.world, uiSystems: fixture.uiSystems, scenes: fixture.scenes)
+  layoutSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+  animationTriggers(world: fixture.world, uiSystems: fixture.uiSystems)
+  if animationInFlight(world: fixture.world, uiSystems: fixture.uiSystems) {
+    animationSystem(world: fixture.world, uiSystems: fixture.uiSystems, deltaTime: 0.016)
+  }
+  transformSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+  var keys: List(String) = List.create(String, cap: 16)
+  var places: List(Float) = List.create(Float, cap: 16)
+  var largest: Float = 0.0
+  let children: view Children = componentView(
+    this: fixture.world.childrens
+    entityId: fixture.listEntityId
+  )
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let rowEntityId: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: fixture.world.leavings, entityId: rowEntityId) {
+      continue
+    }
+    let key: String = labelOf(fixture: fixture, rowEntityId: rowEntityId)
+    let place: Float = componentView(
+      this: fixture.uiSystems.transform2d.worldTransforms
+      entityId: rowEntityId
+    ).position.y
+    loop var k: Int = 0, k < fixture.keys.length, ++k {
+      if fixture.keys.copyAtDefault(index: k) is key {
+        largest = Math.max(
+          a: largest
+          b: Math.abs(value: place - fixture.places.copyAtFallback(index: k, fallback: 0.0))
+        )
+      }
+    }
+    keys.add(value: key)
+    places.add(value: place)
+  }
+  fixture.keys = own keys
+  fixture.places = own places
+  ret largest
+}
+
+func scrollOf(fixture: view Fixture) ret Float {
+  if componentHas(this: fixture.world.scrollStates, entityId: fixture.listEntityId) {
+    ret componentView(this: fixture.world.scrollStates, entityId: fixture.listEntityId).y
+  }
+  ret 0.0
+}
+
+func main() {
+  var fixture: Fixture = mount()
+  setTasks(fixture: fixture, count: 4)
+  loop var i: Int = 0, i < 60, ++i {
+    let unused: Float = frame(fixture: fixture)
+  }
+  var worst: Float = 0.0
+  loop var count: Int = 5, count <= 10, ++count {
+    setTasks(fixture: fixture, count: count)
+    requestScrollToRow(
+      world: fixture.world
+      listEntity: fixture.listEntityId
+      index: count - 1
+      place: ScrollRowPlace.end
+    )
+    var largest: Float = 0.0
+    loop var i: Int = 0, i < 60, ++i {
+      largest = Math.max(a: largest, b: frame(fixture: fixture))
+    }
+    worst = Math.max(a: worst, b: largest)
+    log(
+      "task {count}: {count + 1} rows, scroll {Math.round(x: scrollOf(fixture: fixture)).toInt()}, the largest move of a row in one frame is under half a row: {largest < pitch * 0.45}"
+    )
+  }
+  log("no row jumped: {worst < pitch * 0.45}")
+  # A scroll with no data change is only a scroll: the rows move with it, and nothing glides
+  requestScrollToRow(
+    world: fixture.world
+    listEntity: fixture.listEntityId
+    index: 0
+    place: ScrollRowPlace.start
+  )
+  let moved: Float = frame(fixture: fixture)
+  log(
+    "scrolled back to the top with no new data: scroll {Math.round(x: scrollOf(fixture: fixture)).toInt()}, rows moved with it {Math.round(
+      x: moved
+    ).toInt()}, motions started {componentCount(this: fixture.uiSystems.animation.tracks)}"
+  )
+}
