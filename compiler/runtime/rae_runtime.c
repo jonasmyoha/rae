@@ -102,6 +102,7 @@ void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
 #ifdef RAE_HAS_WEBGPU
 #include "runtime_webgpu.c"
 #ifdef RAE_HAS_SDL3
+#include "runtime_gpu2d_ios_display_link.c"
 #include "runtime_gpu2d_platform.c"
 #include "runtime_gpu2d_box.c"
 #include "runtime_gpu2d_text.c"

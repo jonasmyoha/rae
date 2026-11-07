@@ -785,6 +785,32 @@ self-test, plus a temporary SUMU change that opened the app with a tap instead o
   takes its drawable with `nextDrawable` itself, so using it means giving wgpu-native the display link's drawable:
   "[ui animation: drive the iOS frame from a CAMetalDisplayLink]".
 
+**A CAMetalDisplayLink holds 120 Hz (built in 0.3.43, `compiler/runtime/runtime_gpu2d_ios_display_link.c`).** On iOS
+17 and later, the window's drawables come from a `CAMetalDisplayLink` on the layer, at the screen's fastest rate
+(`UIScreen.maximumFramesPerSecond`) and a frame latency of 1. wgpu-native takes its drawable with `nextDrawable` and
+cannot be handed one, so the one layer SDL made gets a runtime subclass (`RaeLinkedMetalLayer`, set with
+`object_setClass`, as key-value observing does) whose `nextDrawable` returns the drawable the link's last update
+handed out. It waits for that update by running the run loop, at most 34 ms, and otherwise falls back to the layer's
+own `nextDrawable`.
+
+- `wgpuSurfaceConfigure` aborts (a Rust panic that cannot unwind) while a display link is attached to the layer, so
+  the link stops before every configure and a new one starts after it.
+- A drawable no frame takes goes back to the layer. After 6 such updates in a row the link pauses, and the next
+  `nextDrawable` starts it again. So an app that is not drawing is not woken 120 times a second: in a self-test run the
+  link paused in the settle between the two zooms and stayed paused once the test was idle.
+- `RAE_METAL_DISPLAY_LINK=0` turns it off, for comparisons. Before iOS 17 (no `CAMetalDisplayLink`) nothing changes.
+
+Measured on the iPhone 15 Pro, SUMU's motion self-test, the zoom out's 40 frames:
+
+| | runs | frames over 9 ms | shown after submit |
+|---|---|---|---|
+| without the link | 5 | 16-19 | 21 ms (80 Hz) |
+| a display link, latency 1 (the experiment, then the built code) | 11 | 0-4 | 13.0-13.4 ms |
+| a display link, latency 2 (experiment) | 2 | 1-2 | 13.1-13.9 ms |
+
+The zoom back held 120 Hz in every run with the link (0-6 of 40 over 9 ms; the worst ones are the first frame of the
+page change). The GPU time and the app's own frame did not change; only iOS's latency did.
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
