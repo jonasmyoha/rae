@@ -10,6 +10,8 @@ open ui/animationSystem/AnimationSystem
 open ui/buttonSystem/ButtonSystem
 open ecs/Entity
 open ecs/ComponentTable
+open Spring
+open ui/ThemeResolved
 import Math
 
 # True when `entityId` is `ancestor` itself or sits anywhere below it in
@@ -84,13 +86,43 @@ func buttonHoverScaleUpdate(
     if containsHover and entityPressed(world: world, uiSystems: uiSystems, entityId: hovered) {
       target = hs.pressedScale
     }
-    let next: Float = easeTowards(
-      current: hs.current
-      target: target
-      speed: hs.speed
-      deltaTime: frameDt
-      epsilon: 0.001
-    )
+    var next: Float = hs.current
+    var velocity: Float = hs.velocity
+    var token: MotionToken = {}
+    var springs: Bool = false
+    if hs.motion.length() > 0 {
+      if let named: MotionToken = themeMotion(theme: world.theme.resolved, name: hs.motion) {
+        token = named
+        springs = named.kind is MotionKind.spring
+      }
+    }
+    if springs {
+      if next is not target or velocity is not 0.0 {
+        # It keeps its speed when the target changes, so a press that ends early does not stall
+        var state: SpringState = { value: next, velocity: velocity }
+        springStep(
+          state: state
+          target: target
+          response: token.response
+          damping: token.damping
+          deltaTime: frameDt
+        )
+        next = state.value
+        velocity = state.velocity
+        if springAtRest(state: state, target: target, distance: 0.001) {
+          next = target
+          velocity = 0.0
+        }
+      }
+    } else {
+      next = easeTowards(
+        current: hs.current
+        target: target
+        speed: hs.speed
+        deltaTime: frameDt
+        epsilon: 0.001
+      )
+    }
     if next is not hs.current or target is not hs.target {
       # Per-frame animation state is a mutable component update, not a
       # replace/drop cycle. Updating in place avoids allocator churn in the
@@ -98,6 +130,7 @@ func buttonHoverScaleUpdate(
       let slot: mod HoverScale = componentMod(this: world.hoverScales, entityId: entityId)
       slot.current = next
       slot.target = target
+      slot.velocity = velocity
       if next is not target {
         stillAnimating = true
       }

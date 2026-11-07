@@ -30,6 +30,7 @@
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
+open Spring
 open ui/Ecs
 open ui/AnimationComponents
 open ui/Components
@@ -378,15 +379,6 @@ const scrollWheelQuietFrames: Int = 3
 # event loop keeps rendering until the wheel has gone quiet (about 0.25 s)
 const scrollWheelSettleFrames: Int = 15
 
-# Rubber-band spring back to the bound after an overshoot. Per-frame coefficients
-# (~60 fps). tension 0.08 + friction 0.56 is a NEAR-CRITICALLY-DAMPED spring
-# (ζ ≈ 0.99): a soft eased return that settles AT the bound WITHOUT overshooting
-# back past it (an underdamped spring would fling the position back into range
-# and scroll away from where the finger left it). Matches 106's tuned feel.
-const springTension: Float = 0.08
-
-const springFriction: Float = 0.56
-
 # Momentum fling decay per frame while inside the bounds — a long, smooth glide.
 const momentumFriction: Float = 0.97
 
@@ -673,14 +665,18 @@ func updateScrollRoot(
       if state.y < floor {
         target = floor
       }
-      state.velocity = springStepVelocity(
-        pos: state.y
-        velocity: state.velocity
+      # Scrolling counts frames, not seconds, and its velocity is points a frame, so this is the
+      # one spring run for one frame at 60 Hz
+      var spring: SpringState = { value: state.y, velocity: state.velocity * scrollFramesPerSecond }
+      springStep(
+        state: spring
         target: target
-        tension: springTension
-        friction: springFriction
+        response: scrollSpringResponse
+        damping: scrollSpringDamping
+        deltaTime: 1.0 / scrollFramesPerSecond
       )
-      state.y = state.y + state.velocity
+      state.y = spring.value
+      state.velocity = spring.velocity / scrollFramesPerSecond
       if scrollAbs(value: state.y - target) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
         state.y = target
         state.velocity = 0.0

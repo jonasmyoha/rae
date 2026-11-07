@@ -20,11 +20,7 @@
 #       drag (which the prior 3-frame average underestimated to
 #       the point of feeling jerky on release).
 #
-#   - `springStepVelocity(pos, vel, target, tension, friction)`
-#       One semi-implicit Euler step of an underdamped spring
-#       toward `target`. Returns the updated velocity; caller
-#       integrates position separately. Per-frame coefficients
-#       (already absorb dt).
+#   - scrollSpringResponse, scrollSpringDamping: the rubber band, for lib/Spring
 #
 # Math: UIScrollView's rubber-band function is
 #
@@ -108,19 +104,13 @@ func pickReleaseVelocity(d0: view Float, d1: view Float, d2: view Float) ret Flo
   ret d2
 }
 
-# One semi-implicit Euler spring step. Returns updated velocity.
-# `tension` and `friction` are per-frame coefficients (absorb dt).
-# Suggested values: tension 0.08, friction 0.30 — gives a ~0.4 s
-# settle with a barely-perceptible overshoot, close to UIKit's
-# default "0.55 damping ratio" interactive feel.
-func springStepVelocity(
-  pos: view Float
-  velocity: view Float
-  target: view Float
-  tension: view Float
-  friction: view Float
-) ret Float {
-  let displ: Float = pos - target
-  let accel: Float = 0.0 - tension * displ - friction * velocity
-  ret velocity + accel
-}
+# The rubber band, for lib/Spring. Scrolling counts frames at this rate. This response and damping
+# are
+# what per-frame coefficients of tension 0.08 and friction 0.56 come to at 60 Hz: 2 pi / (sqrt 0.08
+# * 60)
+# seconds, and 0.56 / (2 * sqrt 0.08), which settles with no overshoot.
+const scrollFramesPerSecond: Float = 60.0
+
+const scrollSpringResponse: Float = 0.37
+
+const scrollSpringDamping: Float = 0.99

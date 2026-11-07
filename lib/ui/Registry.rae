@@ -496,6 +496,18 @@ func applyAuthoredFixups(
     )
     ret
   }
+  if name is "HoverScale" {
+    let motion: String = componentView(this: world.hoverScales, entityId: entityId).motion
+    if motion.length() > 0 {
+      reportUnknownMotion(
+        world: world
+        name: motion
+        sceneId: sceneId
+        nodeId: nodeId
+      )
+    }
+    ret
+  }
   if name is "PageTransition" {
     let motion: String = componentView(this: world.pageTransitions, entityId: entityId).motion
     if motion.length() > 0 {
