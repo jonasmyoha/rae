@@ -104,6 +104,7 @@ type AnimationSystem {
   listMotions: ComponentTable(ListMotionState)
   # SharedElements: the nodes doing a shared element's work
   sharedNodes: ComponentTable(SharedNode)
+  sharedSeens: ComponentTable(SharedSeen)
   lastFrameNs: Int = 0
 }
 
@@ -213,6 +214,7 @@ func createUiSystems() ret UiSystems {
       textGhosts: ComponentTable.create(TextGhost)
       listMotions: ComponentTable.create(ListMotionState)
       sharedNodes: ComponentTable.create(SharedNode)
+      sharedSeens: ComponentTable.create(SharedSeen)
       settings: animationSettingsFromEnv()
     }
     button: ButtonSystem {
@@ -254,6 +256,7 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
   componentRemove(this: uiSystems.animation.listMotions, entityId: entityId)
   componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
+  componentRemove(this: uiSystems.animation.sharedSeens, entityId: entityId)
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)
 }

@@ -864,7 +864,17 @@ A node on each page with one `key`, in either page model, and across worlds. `mo
 
 `HeroWidget { key }` is another way to write a `morph`. A host with two pages in one world and no page transition starts one with `spawnHeroTransition(world, uiSystems, key, source, target)`.
 
-Case 1373 holds the rules; `checks/uiPageTransitions` paints them.
+**Inside one page** a `morph` also moves a marker: when a node with the key hides and another with the same key shows in the same
+frame, on the same page, the one that shows comes from where the other was drawn. A chosen day's fill in a week row, bound to the
+list's data, glides to the newly chosen day:
+
+```json
+"ChosenFill": { "Shape": { "kind": "RoundedRect", "radius": 14 }, "SharedElement": { "key": "chosenDay" } }
+```
+
+It is drawn under the list or row that holds both places, so it passes under the labels. A key that only shows plays nothing.
+
+Case 1373 holds the rules across pages and 1382 inside one; `checks/uiPageTransitions` and `checks/uiLayoutText` paint them.
 
 ## 27. A swipe from the left edge
 

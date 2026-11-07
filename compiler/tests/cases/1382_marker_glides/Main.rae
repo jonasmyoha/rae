@@ -1,0 +1,243 @@
+# A marker that glides between rows (docs/ui-animation-design.md section 8.3): a SharedElement morph
+# that hides and one with its key that shows in the same frame, on one page, make the one that shows
+# come from where the other was drawn, by its pose, and it is drawn in its place (not over its
+# page).
+# Cells of one row, and rows of a ListView whose fill is bound to the data. A key that only shows,
+# one seen for the first time, and one on another page play nothing.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+open ui/listViewSystem/ListViewSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) {
+  step(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    deltaTime: 0.016
+  )
+}
+
+# The frame a change is made in: a motion's first frame takes no time, as animationRun's does
+func changeFrame(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) {
+  step(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    deltaTime: 0.0
+  )
+}
+
+func step(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  deltaTime: view Float
+) {
+  listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func setShown(world: mod UiWorld, entityId: view EntityId, shown: view Bool) {
+  componentSet(this: world.actives, entityId: entityId, data: Active { value: shown })
+}
+
+func drawnX(uiSystems: view UiSystems, entityId: view EntityId) ret Int {
+  ret Math.round(
+    x: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId).position.x
+  ).toInt()
+}
+
+func drawnY(uiSystems: view UiSystems, entityId: view EntityId) ret Int {
+  ret Math.round(
+    x: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId).position.y
+  ).toInt()
+}
+
+# Moving or not, and whether it is drawn under `holder`, the node that holds its old and new place
+func moving(uiSystems: view UiSystems, entityId: view EntityId, holder: view EntityId) ret String {
+  if componentHas(this: uiSystems.animation.sharedNodes, entityId: entityId) {
+    let under: EntityId = componentView(this: uiSystems.animation.sharedNodes, entityId: entityId).paintUnder
+    ret "moving, drawn under the node that holds both {under is holder}"
+  }
+  ret "still"
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) {
+  loop var i: Int = 0, i < 300 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, scenes: scenes)
+  }
+  frame(world: world, uiSystems: uiSystems, scenes: scenes)
+}
+
+func cells() {
+  log("--- cells of one row")
+  let scenes: SceneRegistry = createSceneRegistry()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 300.0
+  # Three cells 100 wide, each with a fill that is the chosen marker; and a second page with one
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Children\":[\"Week\",\"Other\"]\},\"Week\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"PageRoot\":\{\"id\":\"week\"\},\"Children\":[\"C0\",\"C1\",\"C2\"]\},\"C0\":\{\"Rect\":\{\"x\":0,\"y\":20,\"w\":100,\"h\":60\},\"Children\":[\"F0\"]\},\"C1\":\{\"Rect\":\{\"x\":100,\"y\":20,\"w\":100,\"h\":60\},\"Children\":[\"F1\"]\},\"C2\":\{\"Rect\":\{\"x\":200,\"y\":20,\"w\":100,\"h\":60\},\"Children\":[\"F2\"]\},\"F0\":\{\"Rect\":\{\"x\":10,\"y\":5,\"w\":80,\"h\":50\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":10\},\"SharedElement\":\{\"key\":\"chosen\"\}\},\"F1\":\{\"Rect\":\{\"x\":10,\"y\":5,\"w\":80,\"h\":50\},\"Active\":\{\"value\":false\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":10\},\"SharedElement\":\{\"key\":\"chosen\"\}\},\"F2\":\{\"Rect\":\{\"x\":10,\"y\":5,\"w\":80,\"h\":50\},\"Active\":\{\"value\":false\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":10\},\"SharedElement\":\{\"key\":\"chosen\"\}\},\"Other\":\{\"Rect\":\{\"x\":0,\"y\":150,\"w\":400,\"h\":100\},\"PageRoot\":\{\"id\":\"other\"\},\"Children\":[\"OtherFill\"]\},\"OtherFill\":\{\"Rect\":\{\"x\":300,\"y\":0,\"w\":80,\"h\":50\},\"Active\":\{\"value\":false\},\"SharedElement\":\{\"key\":\"chosen\"\}\}\}\}"
+    )
+  )
+  settle(world: world, uiSystems: uiSystems, scenes: scenes)
+  let holderOf: EntityId = nodeOf(world: world, nodeId: "Week")
+  let first: EntityId = nodeOf(world: world, nodeId: "F0")
+  let third: EntityId = nodeOf(world: world, nodeId: "F2")
+  log("at rest: the marker in cell 0 is drawn at x {drawnX(uiSystems: uiSystems, entityId: first)}")
+  setShown(world: world, entityId: first, shown: false)
+  setShown(world: world, entityId: third, shown: true)
+  changeFrame(world: world, uiSystems: uiSystems, scenes: scenes)
+  log(
+    "cell 0 to cell 2: the new marker is {moving(
+      uiSystems: uiSystems
+      entityId: third
+      holder: holderOf
+    )}, drawn at x {drawnX(uiSystems: uiSystems, entityId: third)} where the old one was"
+  )
+  loop var i: Int = 0, i < 8, ++i {
+    frame(world: world, uiSystems: uiSystems, scenes: scenes)
+  }
+  log("on its way: x {drawnX(uiSystems: uiSystems, entityId: third)}")
+  settle(world: world, uiSystems: uiSystems, scenes: scenes)
+  log(
+    "home: x {drawnX(uiSystems: uiSystems, entityId: third)}, {moving(
+      uiSystems: uiSystems
+      entityId: third
+      holder: holderOf
+    )}"
+  )
+  let second: EntityId = nodeOf(world: world, nodeId: "F1")
+  setShown(world: world, entityId: second, shown: true)
+  frame(world: world, uiSystems: uiSystems, scenes: scenes)
+  log(
+    "a marker that only shows: {moving(uiSystems: uiSystems, entityId: second, holder: holderOf)}"
+  )
+  setShown(world: world, entityId: second, shown: false)
+  setShown(world: world, entityId: third, shown: false)
+  let other: EntityId = nodeOf(world: world, nodeId: "OtherFill")
+  setShown(world: world, entityId: other, shown: true)
+  frame(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("one on another page: {moving(uiSystems: uiSystems, entityId: other, holder: holderOf)}")
+}
+
+func list() {
+  log("--- rows of a ListView, the fill bound to the data")
+  var scenes: SceneRegistry = createSceneRegistry()
+  var rowScene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":40\},\"Children\":[\"Fill\",\"Label\"]\},\"Fill\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":40\},\"Active\":\{\"value\":false\},\"Shape\":\{\"kind\":\"Rect\"\},\"SharedElement\":\{\"key\":\"chosenDay\"\}\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"x\"\}\}\}\}"
+  )
+  rowScene.sceneId = "Day"
+  registerScene(reg: scenes, key: "Day", scene: own rowScene)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Days\"]\},\"Days\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":300\},\"ListView\":\{\"itemSceneId\":\"Day\",\"itemKeyField\":\"id\",\"itemHeight\":40,\"itemGap\":10,\"visibleItemCount\":6,\"overscanRows\":0,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\},\{\"nodeId\":\"Fill\",\"component\":\"Active\",\"field\":\"value\",\"itemField\":\"chosen\"\}]\}\}\}\}"
+    )
+  )
+  let days: EntityId = nodeOf(world: world, nodeId: "Days")
+  let holderOf: EntityId = days
+  setChosen(world: world, days: days, chosen: 1)
+  settle(world: world, uiSystems: uiSystems, scenes: scenes)
+  let rowOne: EntityId = fillOfRow(
+    world: world
+    uiSystems: uiSystems
+    days: days
+    slot: 1
+  )
+  log("day 1 chosen: its fill is drawn at y {drawnY(uiSystems: uiSystems, entityId: rowOne)}")
+  setChosen(world: world, days: days, chosen: 4)
+  changeFrame(world: world, uiSystems: uiSystems, scenes: scenes)
+  let rowFour: EntityId = fillOfRow(
+    world: world
+    uiSystems: uiSystems
+    days: days
+    slot: 4
+  )
+  log(
+    "day 4 chosen: its fill is {moving(uiSystems: uiSystems, entityId: rowFour, holder: holderOf)}, drawn at y {drawnY(
+      uiSystems: uiSystems
+      entityId: rowFour
+    )}"
+  )
+  settle(world: world, uiSystems: uiSystems, scenes: scenes)
+  log(
+    "home: y {drawnY(uiSystems: uiSystems, entityId: rowFour)}, {moving(
+      uiSystems: uiSystems
+      entityId: rowFour
+      holder: holderOf
+    )}"
+  )
+}
+
+func setChosen(world: mod UiWorld, days: view EntityId, chosen: view Int) {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 6)
+  loop var i: Int = 0, i < 6, ++i {
+    var names: List(String) = List.create(String, cap: 2)
+    names.add(value: "id")
+    names.add(value: "chosen")
+    var values: List(String) = List.create(String, cap: 2)
+    values.add(value: "Day {i}")
+    values.add(value: "{i is chosen}")
+    rows.add(value: ListViewRow { keys: own names, values: own values })
+  }
+  componentSet(this: world.listViewDatas, entityId: days, data: ListViewData { rows: own rows })
+}
+
+func fillOfRow(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  days: view EntityId
+  slot: view Int
+) ret EntityId {
+  let row: EntityId = componentView(this: world.childrens, entityId: days).ids.copyAtFallback(
+    index: slot
+    fallback: noEntity()
+  )
+  if let index: Int = findNodeInPage(world: world, pageId: "listRow{row.index}", nodeId: "Fill") {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func main() {
+  cells()
+  list()
+}

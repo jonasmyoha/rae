@@ -17,6 +17,7 @@ open ui/ThemeResolved
 open ui/UiSystems
 open ui/animationSystem/AnimationRules
 open ui/animationSystem/AnimationTracks
+open ui/animationSystem/SharedElements
 
 func isLeaving(world: view UiWorld, entityId: view EntityId) ret Bool {
   ret componentHas(this: world.leavings, entityId: entityId)
@@ -359,8 +360,8 @@ func triggerGeneration(world: view UiWorld, uiSystems: view UiSystems) ret Int {
   ret componentTableGeneration(this: world.appears) + componentTableGeneration(
     this: world.disappears
   ) + componentTableGeneration(this: world.staggers) + componentTableGeneration(this: world.actives) + componentTableGeneration(
-    this: uiSystems.hierarchy.parents
-  )
+    this: world.sharedElements
+  ) + componentTableGeneration(this: uiSystems.hierarchy.parents)
 }
 
 # A node's place by layout alone, up to its nearest ancestor that glides too: an ancestor's own
@@ -537,6 +538,7 @@ func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
     ret
   }
   uiSystems.animation.triggerGeneration = generation
+  sharedMovesInWorld(world: world, uiSystems: uiSystems)
   var arrivals: List(EntityId) = List.create(EntityId, cap: 8)
   loop var i: Int = 0, i < componentCount(this: world.appears), ++i {
     let entityId: EntityId = componentEntityAt(this: world.appears, i: i)
