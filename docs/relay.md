@@ -322,8 +322,20 @@ repeats, which is why the default stays 3.
 
 Two 143 windows forwarded about 21 packets/s, about 2 KB/s, measured before
 this change on a machine busy with other GPU work, at about 10 frames a second.
-So that is not a figure for 60 frames a second. None of this has been measured
-on a phone.
+So that is not a figure for 60 frames a second.
+
+**On a phone (2026-11-07, 0.3.34).** An iPhone 15 Pro joined a 143 host on a Mac
+through a relay on the Mac, over Wi-Fi, walking by itself (`RAE_WALKER_AUTOWALK=1`),
+for about 70 s. The relay forwarded 76 packets/s, 5.1 KB/s, both ends together
+(67 bytes a packet), with nothing dropped. The phone drew 60-64 frames a second
+(median 16 ms, p95 18-20 ms, 4-8 frames in 5 s over 20.8 ms; its cap is 60 fps
+there, at a scale of 0.8), so it sent at most about 60 inputs/s, not the 100 a
+120 Hz phone could. **The 20 ms input cap is not worth it:** it would save at most
+about 10 packets/s (under 1 KB/s) here, and case 1338 has it raising the bad frames
+from 0.3% to 4.6% at 20 ms jitter. The tick stays 10 ms with no cap. iOS asks for
+local network access on the first join (`RAE_IOS_LOCAL_NETWORK_USAGE` in
+tools/ios/gen-ios.sh); until it is answered the app is inactive and draws about one
+frame a second.
 
 ## WebSocket: peers that cannot send UDP
 
