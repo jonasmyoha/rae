@@ -1,13 +1,16 @@
-# Gpu2dCanvasTiming — the 2D canvas's GPU time per frame (RAE_GPU2D_TIMING=1): a timestamp mark
-# (gpu/GpuTiming recordTimingMark, a compute pass that does nothing) just before the canvas's frame
-# pass, the one render pass a 2D frame draws in, and one just after it. A render pass's own
-# timestamps would be the plain way, and they work on a Mac, but an iPhone 15 Pro writes 0 for
-# nearly all of them; the marks are what the deferred renderer's timing uses on the phone too. On
-# a tile-based GPU a mark does not wait for all of the pass's tile work, so the span is when the
-# GPU got through the pass, a little under its whole cost at worst. The readback never waits: a
-# frame is timed only once the last timed one's numbers have landed, so about every other or third
-# frame is timed. Each sample is a "[gpu2d] frame N us" line, and every second a line sums up the
-# samples of that second. With timestamps unavailable it says so once and times nothing.
+# Gpu2dCanvasTiming — the 2D canvas's GPU time per frame (RAE_GPU2D_TIMING=1): the begin and end
+# timestamps of the canvas's frame pass, the one render pass a 2D frame draws in, read back without
+# waiting. A frame is timed only once the last timed one's numbers have landed, so about every other
+# or third frame is timed. Each sample is a "[gpu2d] frame N us" line, and every second a line sums
+# up the samples of that second. With timestamps unavailable it says so once and times nothing.
+# RAE_GPU2D_TIMING=marks times the pass by marks (gpu/GpuTiming recordTimingMark, a compute pass
+# that does nothing) before and after it instead; on a tile-based GPU a mark does not wait for the
+# pass's tile work, so that is only for comparing.
+#
+# On an iPhone 15 Pro the pass's end timestamp is often not written (the slot keeps an earlier
+# frame's value, before this frame's begin), and those frames read 0. So on Apple a second line each
+# second gives every Metal command buffer's own GPU time (GPUEndTime - GPUStartTime), counted in C
+# (runtime_gpu_metal_timing.c, installed only here): the longest is the frame's work.
 #
 # It answers what the CPU's frame time cannot: whether a slow frame is the GPU drawing, or the
 # frame waiting for a drawable (docs/ui-animation-design.md section 10).
@@ -19,6 +22,13 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuTiming
 open gpu/GpuIds
+
+# Every Metal command buffer's GPU time, counted in C (runtime_gpu_metal_timing.c): Apple only
+func nativeMetalTimingStart() unsafe extern("rae_gpu_metal_timing_start") ret Int
+
+func nativeMetalTimingTake() unsafe extern("rae_gpu_metal_timing_take")
+
+func nativeMetalTimingTaken(index: copy Int) unsafe extern("rae_gpu_metal_timing_taken") ret Int
 
 type Canvas2dTiming {
   enabled: Bool = false
@@ -38,6 +48,8 @@ type Canvas2dTiming {
   reportAtNs: Int = 0
   samples: Int = 0
   lastUs: Int = -1
+  # The command buffers' GPU time is counted (Apple)
+  commandBuffers: Bool = false
 }
 
 func createCanvas2dTiming() ret Canvas2dTiming {
@@ -72,6 +84,25 @@ func canvas2dTimingSummary(timing: mod Canvas2dTiming) {
   timing.recent.clear()
 }
 
+# Apple: the GPU's own time for every Metal command buffer of the last second, which on an iPhone is
+# the reliable number (a pass's timestamps read 0 there, and a mark does not wait for tile work)
+func canvas2dCommandBufferSummary(timing: view Canvas2dTiming) {
+  if timing.commandBuffers is false {
+    ret
+  }
+  unsafe {
+    nativeMetalTimingTake()
+    let buffers: Int = nativeMetalTimingTaken(index: 0)
+    if buffers > 0 {
+      log(
+        "[gpu2d] last second: {buffers} Metal command buffers, GPU us total {nativeMetalTimingTaken(
+          index: 1
+        ) / 1000}, longest {nativeMetalTimingTaken(index: 2) / 1000}"
+      )
+    }
+  }
+}
+
 # At the frame's open, before its pass begins: take in a sample that landed, and if none is on its
 # way, time this frame from a mark here.
 func canvas2dTimingFrameBegin(
@@ -95,6 +126,10 @@ func canvas2dTimingFrameBegin(
       constants: noShaderConstants()
     )
     timing.reportAtNs = nowNs() + 1000000000
+    # 0 off Apple, where nothing is counted
+    unsafe {
+      timing.commandBuffers = nativeMetalTimingStart() is 1
+    }
     if let made: view GpuTiming = timing.timing {
       if timingAvailable(timing: made) is false {
         log("[gpu2d] GPU timestamps unavailable; no 2D GPU timing")
@@ -129,6 +164,7 @@ func canvas2dTimingFrameBegin(
     }
     if nowNs() >= timing.reportAtNs {
       canvas2dTimingSummary(timing: timing)
+      canvas2dCommandBufferSummary(timing: timing)
       timing.reportAtNs = nowNs() + 1000000000
     }
     unsafe {

@@ -143,10 +143,22 @@ is the question. The clock reads whole milliseconds on an iPhone.
 **The 2D canvas: `RAE_GPU2D_TIMING=1`** (lib/Gpu2dCanvasTiming) times the one render pass a 2D frame draws in by
 its own begin and end timestamps, read back without waiting, about every other or third frame: a `[gpu2d] frame N us`
 line per sample and a `[gpu2d] last second` summary. It is one pass, so the overlap above does not split it. On a Mac
-it follows the load (`checks/gpu2dTiming`: 4 full-screen boxes 0.25 ms, 300 boxes 5.5 ms). On an iPhone 15 Pro a pass
-under about a millisecond reads 0 (40 boxes read 1.7 ms), so there a 0 means "under a millisecond".
+it follows the load (`checks/gpu2dTiming`: 4 full-screen boxes 0.25 ms, 300 boxes 5.5 ms). **On an iPhone 15 Pro the
+pass's own reading is not reliable:** its end-of-fragment timestamp is often not written, so the slot keeps a value
+an earlier frame wrote. The end is then before the begin (the same end value was read in two frames in a row), and
+the reading is 0. When it is written the value is right (SUMU's zoom: 2.3-4.2 ms). So there a 0 means "no reading",
+not "under a millisecond", and the median is meaningless.
 `RAE_GPU2D_TIMING=marks` times it by marks before and after the pass instead, as `[gpu passes]` does; those do not wait
 for the pass's pixels on a Mac or a phone (300 boxes read under 0.1 ms), so they are only for comparing.
+
+**The Metal command buffers' GPU time (Apple, with `RAE_GPU2D_TIMING`):** a second line each second,
+`[gpu2d] last second: N Metal command buffers, GPU us total T, longest L`. It is every command buffer's own
+`GPUEndTime - GPUStartTime`, which Metal measures, and on an iPhone it is the number to read: SUMU's zoom showed 757
+buffers, 486 ms of GPU time and a longest of 7.7 ms in one second, while the pass's median read 0. On a Mac its longest
+matches the pass's maximum (`checks/gpu2dTiming`: both 11.2 ms). wgpu-native does not expose its `MTLCommandBuffer`,
+so `compiler/runtime/runtime_gpu_metal_timing.c` replaces `-commit` of the command buffer class this device uses with
+one that adds a completed handler, then calls the original. It is installed only when `RAE_GPU2D_TIMING` is set,
+never in a normal run. The total counts every buffer of the program, and the frame's work is the longest one.
 
 ## What each pass drew: the `[draws]` lines
 
