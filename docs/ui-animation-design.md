@@ -666,6 +666,36 @@ out).** The CAMetalLayer that wgpu-native makes has `maximumDrawableCount` 3, `p
   wgpu-native.
 - What is left to try is in "[ui animation: present the drawable at a time on iOS]".
 
+**When each drawable reaches the display (measured 2026-11-07).** wgpu-native's Metal backend presents by calling
+`presentDrawable:` on a small command buffer of its own, and its API never hands out the `CAMetalDrawable`. So the
+runtime C cannot present the drawable itself with one call. For the measurement, temporary code replaced
+`presentDrawable:` on the Metal command buffer class (`AGXG16PFamilyCommandBuffer`) at run time. It added
+`addPresentedHandler:` to each drawable (its `presentedTime`), the scheduled and completed handlers to the command
+buffer, and optionally called `presentDrawable:afterMinimumDuration:` instead. Results from SUMU's motion self-test:
+
+- **The display goes to 80 Hz in the zoom out.** The first ~20 frames of the zoom out are shown 8.3 ms apart. Then
+  every frame until the end of the zoom is shown 17, 8, 17, 8 ms apart: 80 frames a second, a fixed ProMotion rate.
+  A zoom back is mostly shown 8.3 ms apart, and in some runs it alternates too. Only the first 13 frames after launch
+  are dropped (never shown).
+- **A frame reaches the screen about 21 ms after it is handed to Metal.** The present's command buffer is scheduled at
+  once and completes 4-8 ms later (after the frame's render work ahead of it on the queue). The frame is shown about
+  15 ms after that, two refreshes at 120 Hz, which is iOS's compositor. When a zoom back holds 120 Hz, a frame is shown
+  13-14 ms after it is handed over.
+- **That latency is what makes the pattern.** A drawable is in use from its acquire, through those ~21 ms, until the
+  next frame replaces it on the screen: about 30-35 ms. iOS allows at most 3 drawables, and 3 drawables used 30-35 ms
+  each give 80-100 frames a second, not 120. So the acquire waits, and the frames come 8 and 17 ms apart.
+- **Presenting at a time cannot help.** `presentDrawable:afterMinimumDuration:` with 1/120 s changed nothing (17-19
+  frames over 9 ms, the same 8/17 display pattern). It can only hold a frame back, and the frames are already late.
+- **A CADisplayLink asking for 120 Hz changed nothing either.** With the link added to the rendering thread's run loop
+  (it ticked) and the loop not waiting on it, the display still went to 80 Hz, so the refresh rate is not a vote the
+  app loses. Rendering the offscreen and acquiring the drawable only at present (`RAE_DIRECT_PRESENT=0`) was already
+  tried with no change.
+- Instruments' Metal System Trace could not be recorded: over WiFi, `xctrace record --device` waits for the device "to
+  boot" and times out. It needs the phone on USB.
+
+What is left is the 4-8 ms before the GPU completes a frame whose passes take under 1 ms, and the two refreshes the
+compositor takes: "[ui animation: why a frame takes 21 ms to reach the iPhone's screen]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
