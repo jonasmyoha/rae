@@ -233,6 +233,15 @@ then the track and the pose are removed.
 drains it. A command on an entity that already has a track retargets it from the
 current value and velocity. That one rule gives interruption everywhere.
 
+**A fling.** `animationFling(uiSystems, entityId, from, to, velocity, motion, opacityMotion, onEnd)`
+is for a host's own gesture code, as a card or a sheet a finger lets go: the track starts at
+`from`, where the finger left the node, even over a running motion, with each channel at the
+`AnimationVelocity` given (pose units a second: points for x and y), toward `to`. A spring
+carries the speed on, so the node does not stop and start again, and a fast one passes `to` and
+comes back. It brakes as it pulls home: from 1200 points a second `smooth`'s first 1/120 s runs at
+about 1000. A curve (an opacity fade) runs its own way from `from`. `onEnd` other than `stay` makes it
+a leave, as a card swiped away that ends switched off. Built in 0.3.38; case 1383.
+
 **Starting and ending from data.** The system compares what it knows:
 
 - A node with `Appear` and no record of being seen has just been mounted.

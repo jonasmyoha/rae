@@ -1,0 +1,172 @@
+# animationFling (docs/ui-animation-design.md sections 2 and 5): a node a finger let go starts where
+# the finger left it, at the finger's speed, and a spring carries the speed on. A card that springs
+# back, one swiped away that ends switched off, a fling over a running motion, and a curve, which
+# keeps its own way. Time is handed in, 1/120 s a frame. A spring brakes as it pulls home, so the
+# first frame is a little under the finger's speed; with no speed the node would move toward home,
+# the other way.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+
+const frameSeconds: Float = 0.008333
+
+func pose(uiSystems: view UiSystems, entityId: view EntityId) ret AnimationPose {
+  ret animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+}
+
+func springBack() {
+  log("--- a card let go at 1200 points a second, springing back to its place")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  let card: EntityId = createEntity(world: world)
+  animationFling(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose { y: 40.0 }
+    to: AnimationPose {}
+    velocity: AnimationVelocity { y: 1200.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    onEnd: AnimationEnd.stay
+  )
+  # The frame it is let go takes no time: it is drawn where the finger left it
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("drawn where the finger left it: y {pose(uiSystems: uiSystems, entityId: card).y}")
+  var before: Float = pose(uiSystems: uiSystems, entityId: card).y
+  loop var i: Int = 0, i < 3, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+    let now: Float = pose(uiSystems: uiSystems, entityId: card).y
+    log("frame {i + 1}: {Math.round(x: (now - before) / frameSeconds).toInt()} points a second")
+    before = now
+  }
+  var deepest: Float = before
+  loop var i: Int = 0, i < 400 and componentHas(this: uiSystems.animation.tracks, entityId: card), ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+    deepest = Math.max(a: deepest, b: pose(uiSystems: uiSystems, entityId: card).y)
+  }
+  log(
+    "it went on to y {Math.round(x: deepest).toInt()}, then came home to {pose(
+      uiSystems: uiSystems
+      entityId: card
+    ).y}"
+  )
+}
+
+func swipedAway() {
+  log("--- a card swiped away up at 2000 points a second, switched off at the end")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  let card: EntityId = createEntity(world: world)
+  componentSet(this: world.actives, entityId: card, data: Active { value: true })
+  animationFling(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose { y: -30.0 }
+    to: AnimationPose { y: -400.0, opacity: 0.0 }
+    velocity: AnimationVelocity { y: -2000.0 }
+    motion: "quick"
+    opacityMotion: "fadeOut"
+    onEnd: AnimationEnd.deactivate
+  )
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+  let first: AnimationPose = pose(uiSystems: uiSystems, entityId: card)
+  log("first frame: {Math.round(x: (first.y + 30.0) / frameSeconds).toInt()} points a second")
+  log(
+    "the fade, a curve, runs its own way from where it was let go: opacity {Math.round(
+      x: first.opacity * 100.0
+    ).toInt()}%"
+  )
+  loop var i: Int = 0, i < 400 and componentHas(this: uiSystems.animation.tracks, entityId: card), ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+  }
+  log(
+    "at the end it is switched off: {componentView(this: world.actives, entityId: card).value is false}"
+  )
+}
+
+func overRunning() {
+  log("--- a fling over a motion that is running")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  let card: EntityId = createEntity(world: world)
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose { x: 100.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  loop var i: Int = 0, i < 5, ++i {
+    step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+  }
+  animationFling(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose { x: 70.0 }
+    to: AnimationPose {}
+    velocity: AnimationVelocity { x: -500.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    onEnd: AnimationEnd.stay
+  )
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "it starts where the finger left it, not where it was going: x {pose(
+      uiSystems: uiSystems
+      entityId: card
+    ).x}"
+  )
+  step(world: world, uiSystems: uiSystems, deltaTime: frameSeconds)
+  log(
+    "and at its speed: {Math.round(
+      x: (pose(uiSystems: uiSystems, entityId: card).x - 70.0) / frameSeconds
+    ).toInt()} points a second"
+  )
+}
+
+func off() {
+  log("--- with motion off")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings { off: true }
+  let card: EntityId = createEntity(world: world)
+  componentSet(this: world.actives, entityId: card, data: Active { value: true })
+  animationFling(
+    uiSystems: uiSystems
+    entityId: card
+    from: AnimationPose { y: -30.0 }
+    to: AnimationPose { y: -400.0 }
+    velocity: AnimationVelocity { y: -2000.0 }
+    motion: "quick"
+    opacityMotion: "fadeOut"
+    onEnd: AnimationEnd.deactivate
+  )
+  step(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "it is at its end at once, switched off {componentView(this: world.actives, entityId: card).value is false}, and nothing runs: {componentCount(
+      this: uiSystems.animation.tracks
+    )}"
+  )
+}
+
+func main() {
+  springBack()
+  swipedAway()
+  overRunning()
+  off()
+}

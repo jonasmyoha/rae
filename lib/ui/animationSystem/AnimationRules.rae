@@ -20,6 +20,17 @@ type AnimationPose {
   stretchY: Float = 1.0
 }
 
+# How fast each pose channel moves, in its units a second: points for x and y, the share for opacity
+# and scale, radians for rotation. A fling starts with this: a finger's speed carries on.
+type AnimationVelocity {
+  opacity: Float = 0.0
+  scale: Float = 0.0
+  x: Float = 0.0
+  y: Float = 0.0
+  rotation: Float = 0.0
+  stretchY: Float = 0.0
+}
+
 func poseIsRest(pose: view AnimationPose) ret Bool {
   ret pose.stretchY is 1.0 and pose.opacity is 1.0 and pose.scale is 1.0 and pose.x is 0.0 and pose.y is 0.0 and pose.rotation is 0.0
 }
