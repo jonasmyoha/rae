@@ -25,6 +25,11 @@
 # close has two steps. The page stops being presented at once: it is out of presentedPageCount, its
 # node ids are gone, and a new one can open. Its host stays with Leaving and takes no input until
 # its tracks end, then it is destroyed. A dialog with another over it scales to 0.97 and comes back.
+# A full page follows its root's PageTransition, a sheet by default, over the screen, which stays
+# still.
+# Its arrival only waits in the inbox here: a host that runs no animation never takes it, shows the
+# page
+# in place, and closes it at once.
 import ui/BundleApply
 import ui/Components
 open ui/AnimationComponents
@@ -34,6 +39,9 @@ open ui/animationSystem/AnimationRules
 open ui/animationSystem/AnimationTracks
 open ui/animationSystem/AnimationTriggers
 open ui/Dialog
+open ecs/Queue
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/pageTransitionSystem/PageTransitionSystem
 open ui/Layer
 open ui/SceneInstance
 open ecs/Entity
@@ -266,6 +274,7 @@ func presentMountedPage(
       child: pageRoot
       parent: host
     )
+    presentedPageArrive(world: world, uiSystems: uiSystems, pageRoot: pageRoot)
   }
   componentSet(
     this: world.presentedPages
@@ -352,6 +361,63 @@ func presentedPageBlocks(
   ret dialogInside(uiSystems: uiSystems, entityId: entityId, ancestor: top) is false
 }
 
+func presentedPageKind(world: view UiWorld, pageRoot: view EntityId) ret PageTransitionKind {
+  if componentHas(this: world.pageTransitions, entityId: pageRoot) {
+    ret componentView(this: world.pageTransitions, entityId: pageRoot).kind
+  }
+  ret PageTransitionKind.sheet
+}
+
+# A presented page's poses: it comes in over the screen, and goes back out the same way
+func presentedPagePoses(
+  world: view UiWorld
+  kind: view PageTransitionKind
+  back: view Bool
+) ret PagePoses {
+  let box: PageBox = { x: 0.0, y: 0.0, w: world.layoutW, h: world.layoutH }
+  ret pagePosesFor(
+    kind: kind
+    back: back
+    box: box
+    source: pageDefaultSource(box: box)
+  )
+}
+
+func presentedPageMotion(
+  world: view UiWorld
+  kind: view PageTransitionKind
+  pageRoot: view EntityId
+) ret String {
+  ret motionNameOr(
+    world: world
+    name: pageMotionName(kind: kind, authored: pageAuthoredMotion(world: world, root: pageRoot))
+    fallback: "smooth"
+  )
+}
+
+func presentedPageArrive(world: view UiWorld, uiSystems: mod UiSystems, pageRoot: view EntityId) {
+  let kind: PageTransitionKind = presentedPageKind(world: world, pageRoot: pageRoot)
+  if kind is PageTransitionKind.none {
+    ret
+  }
+  let motion: String = presentedPageMotion(world: world, kind: kind, pageRoot: pageRoot)
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: pageRoot
+      hasFrom: true
+      from: presentedPagePoses(world: world, kind: kind, back: false).arriveFrom
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: "fadeIn"
+      delaySeconds: 0.0
+      phase: AnimationPhase.appearing
+      onEnd: AnimationEnd.stay
+      appearsWait: pageSecondsNamed(world: world, name: motion) * pageAppearShare
+    }
+  )
+}
+
 # A dialog steps back when a dialog comes over it. A full page over it hides it, so it stays still.
 func dialogStepBack(
   world: view UiWorld
@@ -384,11 +450,15 @@ func closeWithMotion(
   host: view EntityId
   presented: view PresentedPage
 ) ret Bool {
-  let hasMotion: Bool = presented.presentation is PagePresentation.dialog or componentHas(
-    this: world.disappears
-    entityId: presented.pageRoot
-  )
-  if hasMotion is false or componentHas(this: world.appearSeens, entityId: presented.pageRoot) is false {
+  if presented.presentation is not PagePresentation.dialog {
+    ret closePageWithMotion(
+      world: world
+      uiSystems: uiSystems
+      host: host
+      pageRoot: presented.pageRoot
+    )
+  }
+  if componentHas(this: world.appearSeens, entityId: presented.pageRoot) is false {
     ret false
   }
   componentSet(this: world.leavings, entityId: host, data: Leaving {})
@@ -411,6 +481,44 @@ func closeWithMotion(
     onEnd: AnimationEnd.stay
   )
   # The host itself does not move: it waits for what is under it, then goes with it
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: host
+    to: AnimationPose {}
+    motion: "quick"
+    opacityMotion: "quick"
+    delaySeconds: 0.0
+    onEnd: AnimationEnd.destroySubtree
+  )
+  ret true
+}
+
+# A full page goes back out the way it came, unless its arrival is still waiting: then no one has
+# run it
+func closePageWithMotion(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  host: view EntityId
+  pageRoot: view EntityId
+) ret Bool {
+  let kind: PageTransitionKind = presentedPageKind(world: world, pageRoot: pageRoot)
+  if kind is PageTransitionKind.none or animationCommandWaiting(
+    uiSystems: uiSystems
+    entityId: pageRoot
+  ) {
+    ret false
+  }
+  let motion: String = presentedPageMotion(world: world, kind: kind, pageRoot: pageRoot)
+  componentSet(this: world.leavings, entityId: host, data: Leaving {})
+  pageLeave(
+    world: world
+    uiSystems: uiSystems
+    root: pageRoot
+    to: presentedPagePoses(world: world, kind: kind, back: true).leaveTo
+    motion: motion
+    seconds: pageSecondsNamed(world: world, name: motion)
+    onEnd: AnimationEnd.stay
+  )
   animationLeave(
     uiSystems: uiSystems
     entityId: host

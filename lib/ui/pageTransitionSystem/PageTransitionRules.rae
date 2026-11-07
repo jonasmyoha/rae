@@ -45,6 +45,11 @@ type PagePoses {
   leaveTo: AnimationPose
 }
 
+# With no rectangle said, a zoom comes from the middle of the page, at half its size
+func pageDefaultSource(box: view PageBox) ret PageSource {
+  ret PageSource { x: box.x + box.w / 4.0, y: box.y + box.h / 4.0, w: box.w / 2.0, h: box.h / 2.0 }
+}
+
 # The pose that puts a page on `source`: pose scale acts about the page's middle
 func poseOnSource(box: view PageBox, source: view PageSource) ret AnimationPose {
   var scale: Float = 1.0

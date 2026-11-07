@@ -2,7 +2,8 @@
 # its
 # own. RAE_DIALOG_CHECK picks the moment: "open" (the default) a dialog arriving, "close" one
 # leaving,
-# and "over" a second one arriving while the first steps back. RAE_ANIMATION_HOLD stops every
+# "over" a second one arriving while the first steps back, and "page" a full page coming up.
+# RAE_ANIMATION_HOLD stops every
 # motion at
 # a share of its way, so a picture shows a true middle state:
 #
@@ -98,6 +99,13 @@ func main() ret Int {
       uiSystems.animation.settings = settings
       if moment is "close" {
         closePresentedPage(world: world, uiSystems: uiSystems, host: firstHost)
+      } else if moment is "page" {
+        let pageHost: EntityId = openCard(
+          world: world
+          uiSystems: uiSystems
+          file: "checks/uiDialogs/page.raescene"
+          pageId: "page"
+        )
       } else {
         let host: EntityId = openCard(
           world: world
