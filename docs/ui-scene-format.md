@@ -912,3 +912,19 @@ unknown name is an `unknownToken` diagnostic at load. The bundle `pressable` use
 
 `updateScrollRoot(world, uiSystems, entityId, input, deltaTime)` takes the frame's time, so a fling and a spring-back take the same time at 60 and 120 Hz. `ScrollState.velocity` is in points a second. A
 frame longer than 0.05 s counts as 0.05 s, so a long frame slows scrolling and never skips it. At 60 Hz it does what it did. Case 1377 holds the rules.
+
+## 31. `FocusStyle`: a focused field's edge
+
+```json
+"Title": {
+  "Shape": { "kind": "RoundedRect", "fill": "surface", "stroke": "fieldEdge", "strokeWidth": 1.5, "radius": "radiusPill" },
+  "TextField": { "placeholder": "Title" },
+  "FocusStyle": { "stroke": "accent", "strokeWidth": 2.5, "motion": "quick" }
+}
+```
+
+On the node with the `TextField` and its `Shape`: while the field has focus, the edge takes `stroke` (a palette slot, or `#RRGGBB` /
+`#RRGGBBAA`) at `strokeWidth` (below 0, the default, keeps the Shape's width), and it fades there and back on `motion` (`quick` by
+default) as focus comes and goes, from wherever it is. A field with no edge of its own fades one in. With motion off it changes at once.
+An unknown motion is an `unknownToken` diagnostic at load. Case 1384 holds the rules; `checks/uiFocusField` paints them
+(`docs/images/ui-focus/`).

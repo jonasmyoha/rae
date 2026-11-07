@@ -96,7 +96,7 @@ func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool 
     this: uiSystems.animation.sharedNodes
   ) > 0 or componentCount(this: uiSystems.animation.tracks) > 0 or componentCount(
     this: uiSystems.animation.textGhosts
-  ) > 0)
+  ) > 0 or componentCount(this: uiSystems.animation.focusFades) > 0)
 }
 
 # Arrive at normal place and look from pose `from`, after `delaySeconds`
@@ -703,6 +703,21 @@ func animationApplyCommand(
   componentSet(this: uiSystems.animation.poses, entityId: entityId, data: poseOfTrack(track: moved))
 }
 
+# A focus fade that has arrived is done: at rest the painter reads the field's focus
+func animationStepFocusFades(uiSystems: mod UiSystems, deltaTime: view Float) {
+  var done: List(EntityId) = List.create(EntityId, cap: 1)
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.focusFades), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.focusFades, i: i)
+    let fade: mod FocusFade = componentMod(this: uiSystems.animation.focusFades, entityId: entityId)
+    if channelStep(channel: fade.progress, deltaTime: deltaTime) {
+      done.add(value: entityId)
+    }
+  }
+  loop let entityId: view EntityId in done {
+    componentRemove(this: uiSystems.animation.focusFades, entityId: entityId)
+  }
+}
+
 func animationStepTextGhosts(uiSystems: mod UiSystems, deltaTime: view Float) {
   var done: List(EntityId) = List.create(EntityId, cap: 2)
   loop var i: Int = 0, i < componentCount(this: uiSystems.animation.textGhosts), ++i {
@@ -884,6 +899,7 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
     }
   }
   animationStepTextGhosts(uiSystems: uiSystems, deltaTime: step)
+  animationStepFocusFades(uiSystems: uiSystems, deltaTime: step)
   animationStepSharedNodes(world: world, uiSystems: uiSystems, deltaTime: step)
   loop let entityId: view EntityId in ended {
     let track: view AnimationTrack = componentView(

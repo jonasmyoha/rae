@@ -530,6 +530,16 @@ func applyAuthoredFixups(
     )
     ret
   }
+  if name is "FocusStyle" {
+    let motion: String = componentView(this: world.focusStyles, entityId: entityId).motion
+    reportUnknownMotion(
+      world: world
+      name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
   if name is "AnimateText" {
     let motion: String = componentView(this: world.animateTexts, entityId: entityId).motion
     reportUnknownMotion(

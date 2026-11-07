@@ -131,3 +131,13 @@ type AnimationRequest {
   active: Bool
   destroy: Bool
 }
+
+# How a TextField's node looks while it has focus: its Shape's edge takes `stroke` (a palette slot,
+# or "#RRGGBB" / "#RRGGBBAA") at `strokeWidth` (below 0: its own width), and fades there and back on
+# `motion` as focus comes and goes. Written on the node with the TextField and the Shape, as a
+# bundle's field is. The edge it starts from is the Shape's own, so an edge-less field gains one.
+type FocusStyle {
+  stroke: String = "accent"
+  strokeWidth: Float = -1.0
+  motion: String = "quick"
+}

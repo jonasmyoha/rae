@@ -13,6 +13,10 @@ open ui/buttonSystem/ButtonHoverFade
 import ui/Theme
 import ui/ThemeResolved
 open ui/Transform
+open ui/AnimationComponents
+open ui/RegistryValues
+open ui/animationSystem/AnimationRules
+import Math
 
 func g2dColor(color: view RgbaColor) ret Int {
   ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
@@ -342,6 +346,77 @@ func paintDashedEdges(
       gap: step
       color: color
     )
+  }
+}
+
+# A node's edge as painted: its Shape's stroke color (through the opacity chain) and width (design
+# units), toward its FocusStyle's by how far its field's focus fade has come
+type ShapeEdge {
+  color: RgbaColor
+  width: Float
+}
+
+# How far a FocusStyle node is toward its focused look: its fade while one runs, else its focus
+func focusAmount(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.animation.focusFades, entityId: entityId) {
+    let current: Float = componentView(this: uiSystems.animation.focusFades, entityId: entityId).progress.current
+    ret Math.max(a: 0.0, b: Math.min(a: 1.0, b: current))
+  }
+  if componentHas(this: world.textFields, entityId: entityId) and componentView(
+    this: world.textFields
+    entityId: entityId
+  ).focused {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+func mixChannel(from: view Int, to: view Int, amount: view Float) ret Int {
+  ret Math.round(x: from.toFloat() + (to.toFloat() - from.toFloat()) * amount).toInt()
+}
+
+func shapeEdge(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  shape: view Shape
+  chain255: view Int
+) ret ShapeEdge {
+  let base: RgbaColor = shapeStroke(world: world, shape: shape, chain255: chain255)
+  if componentHas(this: world.focusStyles, entityId: entityId) is false {
+    ret ShapeEdge { color: base, width: shape.strokeWidth }
+  }
+  let amount: Float = focusAmount(world: world, uiSystems: uiSystems, entityId: entityId)
+  if amount <= 0.0 {
+    ret ShapeEdge { color: base, width: shape.strokeWidth }
+  }
+  let style: view FocusStyle = componentView(this: world.focusStyles, entityId: entityId)
+  var focusColor: RgbaColor = uiThemeColor(theme: world.theme, name: style.stroke)
+  if let literal: RgbaColor = parseHexColor(text: style.stroke) {
+    focusColor = literal
+  }
+  let to: RgbaColor = g2dChain(color: focusColor, chain255: chain255)
+  var width: Float = shape.strokeWidth
+  if style.strokeWidth >= 0.0 {
+    width = shape.strokeWidth + (style.strokeWidth - shape.strokeWidth) * amount
+  }
+  # An edge-less field fades its edge in from the focused color, not from black
+  var from: RgbaColor = base
+  if shape.strokeWidth <= 0.0 {
+    from = RgbaColor { r: to.r, g: to.g, b: to.b, a: 0 }
+  }
+  ret ShapeEdge {
+    color: RgbaColor {
+      r: mixChannel(from: from.r, to: to.r, amount: amount)
+      g: mixChannel(from: from.g, to: to.g, amount: amount)
+      b: mixChannel(from: from.b, to: to.b, amount: amount)
+      a: mixChannel(from: from.a, to: to.a, amount: amount)
+    }
+    width: width
   }
 }
 
