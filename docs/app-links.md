@@ -180,5 +180,9 @@ A web build has no such link: the page's own address is its link.
 Run: `lib/AppLinks` on a Mac (`RAE_OPEN_URL`, case 1336). On the iOS Simulator, a custom
 scheme opened by another app: at a cold launch the link is there at the first read in
 `main`, before any window, and a link while the app runs arrives too. On an Android
-emulator, a `VIEW` intent, at launch and while running. Built, not run: a universal link
-and an Android app link (they need a real domain), and anything on a real phone.
+emulator, a `VIEW` intent, at launch and while running. On an iPhone 15 Pro (2026-11-07,
+`RAE_APP_SCHEME=raejoin`, `devicectl device process launch --payload-url`): a cold launch
+(`--terminate-existing`) starts, so the wrapped scene delegate works, and logs
+`opened with: raejoin://join/cold`; a second link while it runs logs
+`opened with: raejoin://join/warm` in the same process. Built, not run: a universal link
+and an Android app link (they need a real domain), and a real Android phone.
