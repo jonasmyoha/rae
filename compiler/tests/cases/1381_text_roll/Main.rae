@@ -1,0 +1,150 @@
+# AnimateText's roll (docs/ui-animation-design.md section 4): `rollFrom: auto` rolls a later text in
+# from below and an earlier one from above, with numbers read as numbers, and decides once, when the
+# text changes. A roll is drawn inside the box of the shape it sits on, with the shape's round ends
+# when the text fills it. checks/uiLayoutText paints it.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+open ui/renderSystem/RenderText
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func order() {
+  log("--- what sorts after what")
+  let pairs: List(String) = [
+    "10:45|9:30"
+    "9:30|10:45"
+    "Task 10|Task 9"
+    "b|a"
+    "a|b"
+    "12|12"
+    "12a|12"
+    "007|8"
+    "2026-11-07|2026-11-06"
+  ]
+  loop let pair: view String in pairs {
+    let parts: List(String) = pair.split(sep: "|")
+    let text: String = parts.copyAtDefault(index: 0)
+    let other: String = parts.copyAtDefault(index: 1)
+    log(
+      "{text} after {other}: {textSortsAfter(text: text, other: other)}; rolls in from {textRollFrom(
+        rollFrom: RollFrom.auto
+        newText: text
+        oldText: other
+      )}"
+    )
+  }
+  log(
+    "a set side stays: {textRollFrom(rollFrom: RollFrom.above, newText: "10", oldText: "9")} {textRollFrom(
+      rollFrom: RollFrom.below
+      newText: "9"
+      oldText: "10"
+    )}"
+  )
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func setText(world: mod UiWorld, nodeId: view String, text: view String) {
+  componentMod(this: world.texts, entityId: nodeOf(world: world, nodeId: nodeId)).text = "{text}"
+}
+
+func ghostSide(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+    ret "{componentView(this: uiSystems.animation.textGhosts, entityId: entityId).rollFrom}"
+  }
+  ret "no old text"
+}
+
+func clipOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let clip: ClipBox = textRollClip(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret "{clip.x} {clip.y} {clip.w} {clip.h}, round {clip.radius}"
+}
+
+func scene() {
+  log("--- in a scene")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 300.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Children\":[\"Chip\",\"Card\",\"Bare\"]\},\"Chip\":\{\"Rect\":\{\"x\":20,\"y\":20,\"w\":76,\"h\":48\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24\},\"Layout\":\{\"type\":\"Stack\",\"alignMain\":\"Center\",\"alignCross\":\"Stretch\"\},\"Children\":[\"ChipTime\"]\},\"ChipTime\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":64,\"h\":24\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Text\":\{\"text\":\"9:30\"\},\"AnimateText\":\{\"kind\":\"roll\",\"rollFrom\":\"auto\"\}\},\"Card\":\{\"Rect\":\{\"x\":20,\"y\":100,\"w\":300,\"h\":80\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":12\},\"Children\":[\"Count\"]\},\"Count\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":100,\"h\":40\},\"Text\":\{\"text\":\"9\"\},\"AnimateText\":\{\"kind\":\"roll\"\}\},\"Bare\":\{\"Rect\":\{\"x\":20,\"y\":200,\"w\":100,\"h\":30\},\"Text\":\{\"text\":\"a\"\},\"AnimateText\":\{\"kind\":\"roll\"\}\}\}\}"
+    )
+  )
+  step(world: world, uiSystems: uiSystems)
+  setText(world: world, nodeId: "ChipTime", text: "10:45")
+  step(world: world, uiSystems: uiSystems)
+  log(
+    "9:30 to 10:45: the new text comes from {ghostSide(
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: "ChipTime")
+    )}"
+  )
+  setText(world: world, nodeId: "ChipTime", text: "8:15")
+  step(world: world, uiSystems: uiSystems)
+  log(
+    "then, mid-roll, to 8:15: from {ghostSide(
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: "ChipTime")
+    )}"
+  )
+  log(
+    "a label that fills a round chip rolls inside it: {clipOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "ChipTime"
+    )}"
+  )
+  log(
+    "a number inside a card rolls in its own box: {clipOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Count"
+    )}"
+  )
+  log(
+    "a text on no shape rolls in its own box: {clipOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Bare"
+    )}"
+  )
+}
+
+func main() {
+  order()
+  scene()
+}

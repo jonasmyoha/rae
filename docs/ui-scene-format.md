@@ -764,14 +764,17 @@ The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `di
 | Component | Fields and their defaults |
 |---|---|
 | `AnimateLayout` | `motion` smooth |
-| `AnimateText` | `kind` fade (or roll), `rollFrom` below (or above), `motion` quick |
+| `AnimateText` | `kind` fade (or roll), `rollFrom` below (or above, or auto), `motion` quick |
 
 - **`AnimateLayout`**: when layout moves the node, it glides from its old place to the new one. Layout runs once and
   gets the true places, and later frames run no layout. Only position glides: size changes at once. There is no
   glide on a first layout, on a window resize, on a scroll, or for a node that was hidden. The bundle
   `glideOnChange` is this component with its default motion.
 - **`AnimateText`**: when the node's text changes, the old text goes as the new one comes. `fade` crosses the two.
-  `roll` also moves them, inside the node's box, with the new text coming from `rollFrom`. The first text a node
+  `roll` also moves them, with the new text coming from `rollFrom`. `auto` comes from below when the new text sorts
+  after the old one, each run of digits read as a number ("10:45" after "9:30"), and from above when it sorts before:
+  a time that can go both ways. A roll is drawn inside the node's box and the nearest shape it sits on (itself or
+  an ancestor), with that shape's round corners when the text fills it, as a label that fills a pill does. The first text a node
   shows plays nothing. The old text is only drawn, so the node's measured size never depends on it.
 - A motion no one declares is an `unknownToken` diagnostic at load.
 

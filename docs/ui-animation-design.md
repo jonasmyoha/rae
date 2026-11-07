@@ -168,7 +168,8 @@ frames run no layout. Only position glides; size changes at once in this design
 ```
 
 `kind` is `fade` or `roll` (the new text comes from below, for a clock or a counter;
-`rollFrom: "above"` for one that goes down).
+`rollFrom: "above"` for one that goes down, `rollFrom: "auto"` for one that goes both ways:
+from below when the new text sorts after the old one, numbers read as numbers).
 
 **`PageTransition`**: on a page's root. It says how this page arrives and how it goes
 (section 8).
@@ -579,6 +580,17 @@ the bundles, in `ui/AnimationComponents` and `AnimationTriggers.rae`. What the c
 - "Visible" in a stagger means overlapping the parent's box. A scrolling list's rows overlap their tall content
   parent, so the list step has to say what its window is.
 - `pressable` is `pressedScale` only until `HoverScale` has its motion token (step 11).
+
+**Built in 0.3.36:** the roll's box and `rollFrom: auto` (`textRollClip` in `renderSystem/RenderText.rae`, `textSortsAfter` in
+`AnimationRules.rae`, case 1381, the chip in `checks/uiLayoutText`). What the code decided:
+
+- The roll was always clipped to the text node's own box. A label that fills a pill-shaped chip then rolled through the
+  pill's round ends, outside the chip as a person sees it. The clip is now the text's box inside the nearest shape it sits
+  on (itself or an ancestor), with that shape's corner radius when the text covers the whole shape. A parent's
+  `Overflow: Clip` was already on the canvas and still cuts it too.
+- `auto` decides once, when the text changes, and the old text keeps the side (`TextGhost.rollFrom`). A change in the middle
+  of a roll compares the new text with the text that was coming. Each run of digits is read as a number, anything else byte
+  by byte, and a text that is the other with more after it sorts after. The same text rolls from below.
 
 **Built in 0.3.21:** `AnimateLayout`, `AnimateText` and `glideOnChange`, with the rules in `AnimationTriggers.rae`
 and `AnimationRules.rae` and the painting in `renderSystem/RenderText.rae`. What the code decided:

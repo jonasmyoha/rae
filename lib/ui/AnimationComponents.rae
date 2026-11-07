@@ -49,11 +49,13 @@ type AnimateLayout {
 
 enum AnimateTextKind { fade, roll }
 
-enum RollFrom { below, above }
+enum RollFrom { below, above, auto }
 
 # When its text changes, the old text goes as the new one comes: `fade`, or `roll` for a clock
-# or a counter, where the new text comes from `rollFrom`. The old text is only drawn, so layout
-# never sees it.
+# or a counter, where the new text comes from `rollFrom`. `auto` rolls from below when the new text
+# sorts after the old one, numbers read as numbers ("10:45" after "9:30"), and from above when it
+# sorts before: a time that goes both ways. A roll stays inside the box it is drawn on. The old text
+# is only drawn, so layout never sees it.
 type AnimateText {
   kind: AnimateTextKind = AnimateTextKind.fade
   rollFrom: RollFrom = RollFrom.below
