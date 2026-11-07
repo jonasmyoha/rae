@@ -756,6 +756,35 @@ box area (one run each of SUMU's motion self-test; the median of the frame's bus
 - Still to do: "[ui animation: the 80 Hz zoom is set by the frame loop, not the GPU]" and "[gpu timing: the command
   buffer's GPU time on Apple GPUs]".
 
+**What the frame loop does to the mode (measured 2026-11-07).** The same temporary hooks, plus `nextDrawable` on the
+`CAMetalLayer` replaced, so each frame logged when its acquire started and returned, its submit, its `presentedTime`,
+and how many of its frames were handed over but not yet shown when it acquired. Experiments in the same hook: wait
+before an acquire until at most N frames are queued, a sleep after the acquire, and a "drain" (when a frame was
+shown more than 18 ms after submit, wait before the next acquire until nothing is queued). 20 runs of SUMU's motion
+self-test, plus a temporary SUMU change that opened the app with a tap instead of the 300 ms press:
+
+- **The app's own frame is short.** From the acquire's return to the submit is 1-3 ms. The rest of the 8.3 ms is the
+  wait in the acquire.
+- **The zoom out starts with 2 frames queued, a good zoom back with 1.** In the slow runs the zoom out's first ~20
+  frames each start with 2 frames queued, shown 8.3 ms apart at 22 ms latency. Then the 8/17 pattern starts and stays
+  to the end, with 1 queued. A zoom back that holds 120 Hz has 1 queued from its first frame and 13.5-14 ms latency. A
+  zoom back that drops to 80 Hz started with 2.
+- **Capping the queue does not fix it.** With at most 1 frame queued, the zoom out was 80 Hz in 3 runs of 3, each frame
+  shown 23-24 ms after submit (the zoom back held 120 Hz in all 3). With 0 queued every frame is 60 Hz, as expected.
+- **Draining does not fix it either; the latency is iOS's own.** Right after a drain, with no frame of the app queued
+  at all, the next zoom-out frame is still shown 23-24 ms after submit. A drain on every slow frame made the zoom
+  worse (a median 12-20 ms a frame). Some intervals were 12.5 and 20.8 ms, so the panel itself runs at 80 Hz at times.
+  iOS keeps a longer latency for this layer, and no change in when the app acquires or submits moves it.
+- **The press is not the cause.** With a tap instead of the press the zoom out was in the slow mode in 3 runs of 3, and
+  the zoom back held 120 Hz.
+- **Why it matters.** At about 23 ms from submit to screen, a drawable is in use about 33 ms: the 3 drawables give 80-90
+  frames a second. To hold 120 Hz either iOS's latency must be 1 refresh shorter, or the frame needs a 4th drawable,
+  which `CAMetalLayer` does not allow (`maximumDrawableCount` is 2 or 3).
+- **Next:** `CAMetalDisplayLink` (iOS 17) is Apple's API for this case. It sets the frame rate range and the frame
+  latency (`preferredFrameLatency`) for a `CAMetalLayer` and hands out the drawables at the right time. wgpu-native
+  takes its drawable with `nextDrawable` itself, so using it means giving wgpu-native the display link's drawable:
+  "[ui animation: drive the iOS frame from a CAMetalDisplayLink]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
