@@ -472,11 +472,16 @@ func animationLayoutGlides(world: mod UiWorld, uiSystems: mod UiSystems) {
   }
 }
 
-# AnimateText: only when a text has changed, and never the first time one is seen
+# AnimateText: only when a text has changed, and never the first time one is seen. A text's first
+# value shows at once too: a change from an empty text, or one in the frame the text was first seen
+# or the next (a page mounts with "" or its scene's placeholder, and the app writes its value in
+# that frame, after this look)
 func animationTextGhosts(world: mod UiWorld, uiSystems: mod UiSystems) {
   if componentCount(this: world.animateTexts) is 0 {
     ret
   }
+  uiSystems.animation.textFrame = uiSystems.animation.textFrame + 1
+  let frame: Int = uiSystems.animation.textFrame
   let generation: Int = componentTableGeneration(this: world.texts)
   if generation is uiSystems.animation.textGeneration {
     ret
@@ -486,9 +491,16 @@ func animationTextGhosts(world: mod UiWorld, uiSystems: mod UiSystems) {
     let entityId: EntityId = componentEntityAt(this: world.animateTexts, i: i)
     if componentHas(this: world.texts, entityId: entityId) {
       let now: String = componentView(this: world.texts, entityId: entityId).text
+      var seenFrame: Int = frame
       if componentHas(this: uiSystems.animation.textSeens, entityId: entityId) {
-        let before: String = componentView(this: uiSystems.animation.textSeens, entityId: entityId).text
-        if before is not now and uiSystems.animation.settings.off is false {
+        let seen: view TextSeen = componentView(
+          this: uiSystems.animation.textSeens
+          entityId: entityId
+        )
+        let before: String = seen.text
+        seenFrame = seen.seenFrame
+        let firstValue: Bool = before.trim().length() is 0 or frame - seenFrame <= 1
+        if before is not now and firstValue is false and uiSystems.animation.settings.off is false {
           startTextGhost(
             world: world
             uiSystems: uiSystems
@@ -500,7 +512,7 @@ func animationTextGhosts(world: mod UiWorld, uiSystems: mod UiSystems) {
       componentSet(
         this: uiSystems.animation.textSeens
         entityId: entityId
-        data: TextSeen { text: now }
+        data: TextSeen { text: now, seenFrame: seenFrame }
       )
     }
   }

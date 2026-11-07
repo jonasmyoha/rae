@@ -864,6 +864,10 @@ and `AnimationRules.rae` and the painting in `renderSystem/RenderText.rae`. What
 - A text changing while the last change still shows: the text that was coming becomes the old text, at the alpha it
   had and, in a `roll`, at the place it had. The new text starts at the alpha and the place that are left, so the
   text that was on its way out is dropped at once. With one old text kept this is the smallest jump there is.
+- **A text's first value shows at once (0.3.45).** A page mounts with `""` or its scene's placeholder, and the app
+  writes its value as the page arrives, after the triggers' look. So a change from an empty text, or one in the frame
+  the text was first seen or the next, plays nothing (`TextSeen.seenFrame`; case 1386). Emptying a text still lets the
+  old one leave, and later changes play.
 - The old text is drawn only in `paintTextWithGhost`. Layout, measuring and the hit test never see it. A `roll` is
   clipped to the node's box.
 
