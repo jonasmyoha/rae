@@ -487,6 +487,31 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "  label input failed:"
             grep -a "label" "$TMP_OUT/render-labels.log" 2>/dev/null | cut -c1-200 | sed 's/^/    /'
           fi
+          # The animation components in the inspector (inspectorSystem/MotionEdit): typing a field
+          # writes it, an unknown value is refused by the decoder, and the save keeps it. Play runs
+          # them, and each ends.
+          if (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/Motion.raescene" \
+             RAE_UI_EDITOR_ROOT="examples/121_ui_editor/assets/samples" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_UI_EDITOR_TEST_SELECT=RowOne \
+             RAE_UI_EDITOR_TEST_LABEL="Appear.y=40 Disappear.motion=smooth SharedElement.mode=stay" \
+             RAE_UI_EDITOR_TEST_MOTION="slow slow appear disappear page" \
+             RAE_UI_EDITOR_TEST_SAVE="$TMP_OUT/motion.raescene" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-motion.log" 2>&1 \
+             && grep -qaF "motion commit Appear.y='40' -> 1" "$TMP_OUT/render-motion.log" \
+             && grep -qaF "motion commit SharedElement.mode='stay' -> 1" "$TMP_OUT/render-motion.log" \
+             && grep -qaF "play appear: 1 nodes" "$TMP_OUT/render-motion.log" \
+             && grep -qaF "play disappear: 1 nodes" "$TMP_OUT/render-motion.log" \
+             && grep -qaF "play page: 2 nodes" "$TMP_OUT/render-motion.log" \
+             && python3 -c "
+import json,sys
+n=json.load(open(sys.argv[1]))['nodes']['RowOne']
+sys.exit(0 if n['Appear']['y']==40 and n['Disappear']['motion']=='smooth' and n['SharedElement']['mode'].lower()=='stay' else 1)" "$TMP_OUT/motion.raescene"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  motion components failed:"
+            grep -aE "motion|play |scene\]" "$TMP_OUT/render-motion.log" 2>/dev/null | cut -c1-200 | sed 's/^/    /'
+          fi
           # Canvas selection gestures (#20778145). One run replays a script of
           # real canvas clicks through the live gesture path, so what is gated
           # is the gesture, not a back door into the selection set:

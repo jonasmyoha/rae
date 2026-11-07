@@ -22,6 +22,7 @@ import String
 open ui/Ecs
 open ui/Components
 open ui/ClickTargets
+open inspectorSystem/MotionEdit
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -34,6 +35,10 @@ func isLabelField(field: view String) ret Bool {
 func labelFieldAction(component: view String, field: view String) ret String {
   if component is "OnClick" and isLabelField(field: field) {
     ret "labelFocus:{field}"
+  }
+  # An animation component's field: the same input, by its whole name (MotionEdit.rae)
+  if isMotionComponent(name: component) {
+    ret "labelFocus:{component}.{field}"
   }
   ret ""
 }
@@ -88,6 +93,16 @@ func labelCommit(
   editing.draft = ""
   if wasActive is false or draft.length() is 0 {
     ret 0
+  }
+  if field.contains(sub: ".") {
+    let changed: Int = motionFieldWrite(
+      world: world
+      selection: selection
+      path: field
+      text: draft
+    )
+    log("[ui-editor] motion commit {field}='{draft}' -> {changed}")
+    ret changed
   }
   var written: Int = 0
   loop let entityId: view EntityId in selection {

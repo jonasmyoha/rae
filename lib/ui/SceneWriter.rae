@@ -308,7 +308,19 @@ func writeNode(
   # defaults, the Text override, a bundle's inherited ones).
   let names: List(String) = authoredNamesOf(world: world, entityId: entityId)
   loop let name: view String in names {
-    if listHas(items: written, name: name) or listHas(items: inherited, name: name) {
+    if listHas(items: written, name: name) {
+      continue
+    }
+    # What a bundle gave is the bundle's to write, until someone changed it. Then the node says so,
+    # and
+    # it merges over the bundle on load. Layout rewrites a Rect every frame, so that says nothing.
+    if listHas(items: inherited, name: name) and (name is "Rect" or unchangedSinceSource(
+      world: world
+      entityId: entityId
+      fresh: fresh
+      freshEntityId: freshEntityId
+      name: name
+    )) {
       continue
     }
     if name is "StyleOverride" or name is "NodeId" or name is "Name" or name is "PageRoot" or name is "BundleRefs" {

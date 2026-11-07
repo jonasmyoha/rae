@@ -1,0 +1,259 @@
+# inspectorSystem/MotionEdit — the animation components in the inspector
+# (docs/ui-animation-design.md section 12). Their rows are generated like any
+# component's. Here: typing into a field, and playing what they say.
+#
+# A field is typed as a label is (LabelEdit.rae), with the row action
+# `labelFocus:<Component>.<field>`. A commit rewrites the component's JSON with
+# that one field changed and decodes it by the ordinary path, on every selected
+# node that has it: the same decoder a scene loads through, so a number, an enum
+# and a motion name need no code here, an unknown motion is a scene diagnostic,
+# and the document's save writes the change as it does any other.
+#
+# The Play rows are shown when the page has motion to play: the selected nodes'
+# Appear, their Disappear, the whole page's Appear in Stagger order, and the
+# speed. A played Disappear comes back at its end, as this is an editor and the
+# node is still there.
+import Json
+import String
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Registry
+open ui/SceneEncode
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+
+# How much slower "slow" is
+const motionSlowFactor: Float = 4.0
+
+# The components whose fields are typed into here
+func isMotionComponent(name: view String) ret Bool {
+  ret name is "Appear" or name is "Disappear" or name is "Stagger" or name is "AnimateLayout" or name is "AnimateText" or name is "PageTransition" or name is "SharedElement"
+}
+
+# A value as JSON: a number or true/false as itself, anything else a string
+func motionJsonValue(text: view String) ret String {
+  if text is "true" or text is "false" {
+    ret "{text}"
+  }
+  let parsed: JsonDoc = Json.parseJson(source: "\{\"value\":{text}\}")
+  if parsed.ok {
+    ret "{text}"
+  }
+  ret "\"{text}\""
+}
+
+# The component's JSON with one field set
+func motionFieldJson(current: view String, field: view String, text: view String) ret String {
+  let doc: JsonDoc = Json.parseJson(source: current)
+  var out: String = "\{"
+  var count: Int = 0
+  if doc.ok {
+    let root: JsonValue = Json.root(doc: doc)
+    loop var i: Int = 0, i < Json.objectLen(this: root), ++i {
+      let key: String = Json.objectKeyAt(doc: doc, this: root, idx: i)
+      if key is not field {
+        let value: JsonValue = Json.objectValueAt(doc: doc, this: root, idx: i)
+        if count > 0 {
+          out = "{out},"
+        }
+        out = "{out}\"{key}\":{Json.stringify(doc: doc, value: value)}"
+        count = count + 1
+      }
+    }
+  }
+  if count > 0 {
+    out = "{out},"
+  }
+  ret "{out}\"{field}\":{motionJsonValue(text: text)}\}"
+}
+
+# Write `<Component>.<field>` on every selected node that has the component; how many
+func motionFieldWrite(
+  world: mod UiWorld
+  selection: view List(EntityId)
+  path: view String
+  text: view String
+) ret Int {
+  var dot: Int = -1
+  if let found: Int = path.indexOf(sub: ".") {
+    dot = found
+  }
+  if dot < 0 {
+    ret 0
+  }
+  let component: String = path.sub(start: 0, len: dot)
+  let field: String = path.sub(start: dot + 1, len: path.length() - dot - 1)
+  var written: Int = 0
+  loop let entityId: view EntityId in selection {
+    let current: String = machineComponentJson(world: world, entityId: entityId, name: component)
+    if current.length() > 0 {
+      let changed: JsonDoc = Json.parseJson(
+        source: motionFieldJson(current: current, field: field, text: text)
+      )
+      applyComponentByName(
+        world: world
+        entityId: entityId
+        name: component
+        doc: changed
+        val: Json.root(doc: changed)
+        sceneId: ""
+        nodeId: "{entityId.index}"
+      )
+      written = written + 1
+    }
+  }
+  ret written
+}
+
+func motionPageHasAppear(world: view UiWorld, sceneRoot: view EntityId) ret Bool {
+  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+  collectSubtree(childrens: world.childrens, node: sceneRoot, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if componentHas(this: world.appears, entityId: entityId) or componentHas(
+      this: world.disappears
+      entityId: entityId
+    ) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Play Appear on these nodes as the triggers do when a node comes to be shown, so a Stagger above
+# them counts
+func motionReplay(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  nodes: view List(EntityId)
+) ret Int {
+  var played: Int = 0
+  loop let entityId: view EntityId in nodes {
+    if componentHas(this: world.appears, entityId: entityId) {
+      animationDropMotion(uiSystems: uiSystems, entityId: entityId)
+      componentSet(this: world.appearSeens, entityId: entityId, data: AppearSeen { shown: false })
+      played = played + 1
+    }
+  }
+  # The triggers look again, though no table they read has changed
+  uiSystems.animation.triggerGeneration = -1
+  ret played
+}
+
+func motionPlayDisappear(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  nodes: view List(EntityId)
+  returning: mod List(EntityId)
+) ret Int {
+  var played: Int = 0
+  loop let entityId: view EntityId in nodes {
+    if componentHas(this: world.disappears, entityId: entityId) {
+      leaveWith(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        delaySeconds: 0.0
+        onEnd: AnimationEnd.stay
+      )
+      returning.add(value: entityId)
+      played = played + 1
+    }
+  }
+  ret played
+}
+
+# Each frame: a played Disappear that has ended is back where it was
+func motionPlayedBack(uiSystems: mod UiSystems, returning: mod List(EntityId)) {
+  var i: Int = returning.length - 1
+  loop i >= 0 {
+    let entityId: EntityId = returning.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: uiSystems.animation.tracks, entityId: entityId) is false {
+      componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+      returning.removeAt(index: i)
+    }
+    i = i - 1
+  }
+}
+
+# A Play row was pressed, or a script said so: `appear`, `disappear`, `page`, `slow`. True when it
+# was one.
+func applyMotionAction(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  selection: view List(EntityId)
+  sceneRoot: view EntityId
+  returning: mod List(EntityId)
+  actionId: view String
+) ret Bool {
+  if actionId.startsWith(prefix: "motionPlay:") is false {
+    ret false
+  }
+  let what: String = actionId.sub(start: 11, len: actionId.length() - 11)
+  if what is "slow" {
+    if uiSystems.animation.settings.slow is 1.0 {
+      uiSystems.animation.settings.slow = motionSlowFactor
+    } else {
+      uiSystems.animation.settings.slow = 1.0
+    }
+    log("[ui-editor] play speed slow {uiSystems.animation.settings.slow}")
+    ret true
+  }
+  var played: Int = 0
+  if what is "appear" {
+    played = motionReplay(world: world, uiSystems: uiSystems, nodes: selection)
+  } else if what is "disappear" {
+    played = motionPlayDisappear(
+      world: world
+      uiSystems: uiSystems
+      nodes: selection
+      returning: returning
+    )
+  } else if what is "page" {
+    var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+    collectSubtree(childrens: world.childrens, node: sceneRoot, out: subtree)
+    played = motionReplay(world: world, uiSystems: uiSystems, nodes: subtree)
+  }
+  log("[ui-editor] play {what}: {played} nodes")
+  ret true
+}
+
+# The Play rows' labels and their actions: what the inspector adds below the components
+func motionPlayLabels() ret List(String) {
+  ret List(String) { "appear", "disappear", "page", "slow" }
+}
+
+func motionPlayRowName(what: view String) ret String {
+  if what is "appear" {
+    ret "Play Appear"
+  }
+  if what is "disappear" {
+    ret "Play Disappear"
+  }
+  if what is "page" {
+    ret "Play the page"
+  }
+  ret "Speed"
+}
+
+func motionPlayRowValue(
+  what: view String
+  uiSystems: view UiSystems
+  selectionCount: view Int
+) ret String {
+  if what is "slow" {
+    if uiSystems.animation.settings.slow is 1.0 {
+      ret "normal"
+    }
+    ret "slow"
+  }
+  if what is "page" {
+    ret "in Stagger order"
+  }
+  ret "{selectionCount} selected"
+}

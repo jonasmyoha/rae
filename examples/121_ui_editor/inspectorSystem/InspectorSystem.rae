@@ -37,6 +37,7 @@ open inspectorSystem/RectWidget
 open inspectorSystem/RectEdit
 open inspectorSystem/LabelEdit
 open inspectorSystem/ComponentEdit
+open inspectorSystem/MotionEdit
 
 # Tree rows: one design unit of indent per depth level.
 # The inspector system owns the authored `OutlineFor` components (the hover /
@@ -111,6 +112,8 @@ type InspectorSystem {
   rectLocked: Bool
   # an OnClick label's text input (LabelEdit.rae)
   labelEdit: LabelEdit = {}
+  # Nodes a played Disappear brings back when it ends (MotionEdit.rae)
+  motionReturning: List(EntityId) = List.create(EntityId, cap: 2)
   # Collapsed rows, by NODE ID rather than entity or row index (#72481430).
   # The tree rebuilds constantly and a reload recreates every entity, so an
   # entity handle or an index would lose the state on the next keystroke;
@@ -573,6 +576,7 @@ func inspectorUpdate(
       }
     }
   }
+  motionPlayedBack(uiSystems: uiSystems, returning: inspectorSystem.motionReturning)
   # Component add / remove from the inspector's own rows (#57156455). Both
   # act on the WHOLE selection, and both report how many entities actually
   # changed — "removed Shape from 2" is the only way to tell a real edit from
@@ -581,6 +585,16 @@ func inspectorUpdate(
     loop var a: Int = 0, a < actionCount, ++a {
       let actionId: String = uiActionAt(world: world, index: a)
       if applyComponentAction(inspectorSystem: inspectorSystem, world: world, actionId: actionId) {
+        changed = true
+      }
+      if applyMotionAction(
+        world: world
+        uiSystems: uiSystems
+        selection: inspectorSystem.selection
+        sceneRoot: sceneRoot
+        returning: inspectorSystem.motionReturning
+        actionId: actionId
+      ) {
         changed = true
       }
     }
@@ -816,7 +830,7 @@ func cloneInspectorScenes(scene: view Scene, registry: view SceneRegistry) ret S
 func inspectorAfterLoad(
   inspectorSystem: mod InspectorSystem
   world: mod UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   chromeSystem: mod ChromeSystem
   pageRoot: view EntityId
   selectNodeId: view String
@@ -911,6 +925,20 @@ func inspectorAfterLoad(
         selection: inspectorSystem.selection
       )}"
     )
+  }
+  # RAE_UI_EDITOR_TEST_MOTION: the Play rows, scripted: `appear`, `disappear`, `page`, `slow`
+  let motionScript: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_MOTION")
+  if motionScript.length() > 0 {
+    loop let step: view String in motionScript.split(sep: " ") {
+      let played: Bool = applyMotionAction(
+        world: world
+        uiSystems: uiSystems
+        selection: inspectorSystem.selection
+        sceneRoot: sceneRoot
+        returning: inspectorSystem.motionReturning
+        actionId: "motionPlay:{step}"
+      )
+    }
   }
   syncInspectorPanel(
     world: world
