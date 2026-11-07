@@ -117,6 +117,14 @@ func frameInputSystem(
     tick.scrollFloor = range.floor
   }
 
+  # Before the scroll root: a swipe from the left edge has the press first
+  frameEdgeSwipe(
+    app: app
+    session: session
+    world: world
+    deltaTime: (uiNowSeconds() - session.lastFrameTime) as Float
+  )
+
   # Drag, wheel, momentum and spring-back: the lib's scroll physics on the
   # page's ScrollRoot (lib/ui/scrollRootSystem). A drag claims its press, so
   # its release clicks nothing. It must run before layout/transform and

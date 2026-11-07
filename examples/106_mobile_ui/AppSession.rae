@@ -1,3 +1,4 @@
+open ui/pageTransitionSystem/PageTransitionSystem
 open HotReload
 open ui/Ecs
 open ui/scrollRootSystem/ScrollRootSystem
@@ -51,6 +52,9 @@ type AppSession {
   cachedTrackDurMs: Int
   lastHoverAnimDirty: Bool
   lastFrameTime: Float64
+  # The pages' motion, and the screen a swipe from the edge left
+  pageTransitions: PageTransitionSystem
+  swipedFrom: Screen
   # InputSystem outlives world rebuilds so a held press carries
   # `pressedEntityId` across them.
   input: InputSystem
@@ -124,6 +128,8 @@ func createAppSession(app: mod App) ret AppSession {
     cachedTrackDurMs: 0
     lastHoverAnimDirty: false
     lastFrameTime: 0.0
+    pageTransitions: createPageTransitionSystem()
+    swipedFrom: Screen.home
     input: createInputSystem()
     lastHoveredEntityId: noEntity()
     lastCursorKind: cursorArrow

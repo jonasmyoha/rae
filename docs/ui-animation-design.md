@@ -595,6 +595,18 @@ Motion has to be testable by an agent with no eyes on the phone.
   is added to their scenes.
 - `docs/ui-scene-format.md` documents the components and the `motion` section.
 
+**Built in 0.3.31:** example 106, whose DESIGN.md section 10 has the list. What it decided for lib/ui:
+
+- `pageTransitionSetMorphKey`: two pages can show the same many things, and then one key flies, not all of them.
+- One key on the old page twice is one source, the first on screen.
+- A morph target is marked seen even if its page was shown before, or its `Appear` would pull it away.
+- A hidden flow list drops a row that went at once. A row with `Leaving` holds its layout place, so an album opened with new rows would
+  show the old ones too.
+- `findScrollRoot` skips a page on its way out.
+- A size-class frame restoring a node now expands its `bundles`. Before, a node with a bundle that a frame named stopped the app.
+- 106's hero stays authored as `HeroWidget`, the alias. Its keys are written by list bindings and app systems, which know that component; a
+  move to `SharedElement` in the scenes would change those and nothing that shows.
+
 ## 13. SUMU: every screen
 
 SUMU's pages are transparent over a background world, and its top bar, notification

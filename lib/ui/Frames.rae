@@ -100,6 +100,8 @@ open Device
 open ecs/Entity
 open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
+open ui/BundleApply
+open ui/SceneBundles
 open ui/FramesHierarchy
 open ui/UiSystems
 open ui/nodeBindingSystem/NodeBindingSystem
@@ -477,6 +479,22 @@ func resetNodeToBase(
     let isRoot: Bool = nodeId is scene.rootNodeId
     let keyCount: Int = Json.objectLen(this: baseBag)
     var k: Int = 0
+    # A node that lists bundles is restored from its expansion, as the loader built it
+    if Json.field(doc: doc, this: baseBag, key: bundlesKey) >= 0 {
+      var ownBundles: BundleSet = createBundleSet()
+      parseBundlesInto(out: ownBundles, scene: scene)
+      applyExpandedBag(
+        world: world
+        entityId: entityId
+        local: ownBundles
+        doc: doc
+        bag: baseBag
+        sceneId: scene.sceneId
+        nodeId: nodeId
+        skipPlacement: isRoot
+      )
+      k = keyCount
+    }
     loop k < keyCount {
       let key: String = Json.objectKeyAt(doc: doc, this: baseBag, idx: k)
       var skip: Bool = false

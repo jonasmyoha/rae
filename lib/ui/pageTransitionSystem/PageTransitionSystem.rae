@@ -62,6 +62,8 @@ type PageTransitionSystem {
   # The rectangle a zoom grows from, and shrinks back into
   source: PageSource
   hasSource: Bool = false
+  # If not empty, the one key that morphs (pageTransitionSetMorphKey)
+  morphKey: String = ""
   # A finger has the transition (pageTransitionDragStart). The next transition starts paused.
   dragging: Bool = false
   dragArriving: EntityId
@@ -89,6 +91,13 @@ func createPageTransitionSystem() ret PageTransitionSystem {
 func pageTransitionSetSource(system: mod PageTransitionSystem, source: view PageSource) {
   system.source = source
   system.hasSource = true
+}
+
+# Two pages can show the same many things, as two grids of one library do. Then only this key
+# morphs,
+# and the rest just go with their pages. "" lets all of them morph. `stay` is not affected.
+func pageTransitionSetMorphKey(system: mod PageTransitionSystem, key: view String) {
+  system.morphKey = "{key}"
 }
 
 # True while an old world is still being drawn: feed it to the host's `animating`
@@ -338,6 +347,7 @@ func pageTransitionArrive(
     root: root
     sources: sources
     fromFinger: system.dragging
+    onlyKey: system.morphKey
   )
   loop let page: mod LeavingWorld in system.leaving {
     pageLeave(
@@ -473,6 +483,12 @@ func pageTransitionResident(
   toRoot: view EntityId
   back: view Bool
 ) {
+  # A finger let go and the old page is coming back: the host's screen switch finds it already on
+  # its way
+  if system.springingBack and toRoot is system.dragLeaving {
+    system.springingBack = false
+    ret
+  }
   let still: EntityId = system.residentLeaving
   let turning: Bool = still is toRoot and componentHas(this: world.leavings, entityId: toRoot)
   if isNone(this: still) is false and turning is false and componentHas(
@@ -517,6 +533,7 @@ func pageTransitionResident(
     root: toRoot
     sources: sharedSourcesOf(world: world, uiSystems: uiSystems, root: fromRoot)
     fromFinger: system.dragging
+    onlyKey: system.morphKey
   )
   pageLeave(
     world: world

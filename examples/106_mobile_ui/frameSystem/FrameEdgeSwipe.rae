@@ -1,0 +1,53 @@
+# A swipe from the left edge is Back (lib/ui EdgeSwipe, docs/ui-animation-design.md section 8.4), on
+# a sub-page with nothing over it. It sends the same nav.back a tap on the back button does, so the
+# sub-page stack and the screen switch work as they always do, and the transition then follows the
+# finger. If the finger lets go early the page springs back, and the stack gets its page back: the
+# screen switch that causes finds the pages already where they belong.
+open ecs/Entity
+open ecs/Event
+open ui/Ecs
+open ui/InputComponents
+open ui/pageTransitionSystem/EdgeSwipe
+open ui/pageTransitionSystem/PageTransitionSystem
+open ui/UiSystems
+
+func frameEdgeSwipe(
+  app: mod App
+  session: mod AppSession
+  world: mod UiWorld
+  deltaTime: view Float
+) {
+  let appState: mod AppState = app.appState
+  let input: mod InputSystem = session.input
+  let swiping: Bool = world.edgeSwipe.phase is EdgeSwipePhase.active
+  let free: Bool = isSubPage(state: appState) and not appState.settingsOpen and not appState.canvasOpen and not appState.bottomSheet.visible
+  if not swiping and not free {
+    ret
+  }
+  let event: EdgeSwipeEvent = edgeSwipeStep(world: world, input: input.ui, deltaTime: deltaTime)
+  if event.kind is EdgeSwipeKind.started {
+    log("[edge-swipe] started")
+    session.swipedFrom = session.currentScreen
+    pageTransitionDragStart(system: session.pageTransitions)
+    eventSend(this: input.uiActions, value: UiAction { entityId: noEntity(), actionId: "nav.back" })
+  } else if event.kind is EdgeSwipeKind.moved or event.kind is EdgeSwipeKind.released {
+    pageTransitionDrag(
+      system: session.pageTransitions
+      world: world
+      uiSystems: app.uiSystems
+      progress: event.progress
+      velocity: event.velocity
+    )
+    if event.kind is EdgeSwipeKind.released {
+      let finishes: Bool = pageTransitionDragEnd(
+        system: session.pageTransitions
+        world: world
+        uiSystems: app.uiSystems
+      )
+      log("[edge-swipe] released at {event.progress}: finishes {finishes}")
+      if not finishes {
+        pushSubPage(state: appState, screen: session.swipedFrom)
+      }
+    }
+  }
+}

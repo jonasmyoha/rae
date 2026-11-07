@@ -238,7 +238,8 @@ func listViewSyncFlow(
                 width: listWidth(world: world, uiSystems: uiSystems, listEntityId: entityId)
               )
             }
-          } else if keyed {
+          } else if keyed and shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) {
+            # In a hidden list no one sees it go, and it would hold its place for the rows that come
             destroyAnimated(world: world, uiSystems: uiSystems, entityId: victim)
           } else {
             destroyEntitySubtree(world: world, uiSystems: uiSystems, root: victim)

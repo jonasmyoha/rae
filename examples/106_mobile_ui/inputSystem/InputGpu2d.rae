@@ -22,6 +22,8 @@ open ui/inputSystem/InputSystem
 # real pointer. `dy` 0 = off.
 type ScriptedDrag {
   dy: Float
+  # `RAE_UI_SWIPE=<dx>`: from the left edge instead, later, when a scripted screen has opened
+  dx: Float = 0.0
   frame: Int
   # the release and the rest were logged
   releaseReported: Bool
@@ -31,6 +33,8 @@ type ScriptedDrag {
 const scriptStartFrame: Int = 10
 
 const scriptMoveFrames: Int = 20
+
+const scriptSwipeStartFrame: Int = 60
 
 # Action events are lib/ui's `UiAction`s: the lib's input produces them
 # into `world.uiActions`, and each frame they are moved into this queue,
@@ -62,6 +66,11 @@ func createInputSystem() ret InputSystem {
   if dragEnv.length() > 0 {
     dragDy = dragEnv.toFloat()
   }
+  var swipeDx: Float = 0.0
+  let swipeEnv: String = getEnv(name: "RAE_UI_SWIPE")
+  if swipeEnv.length() > 0 {
+    swipeDx = swipeEnv.toFloat()
+  }
   ret InputSystem {
     ui: createUiInput()
     uiActions: createEventQueue(UiAction)
@@ -73,6 +82,7 @@ func createInputSystem() ret InputSystem {
     scriptedType: getEnv(name: "RAE_UI_TYPE")
     scriptedDrag: ScriptedDrag {
       dy: dragDy
+      dx: swipeDx
       frame: 0
       releaseReported: false
       settleReported: false
@@ -120,7 +130,7 @@ func sendScriptedTap(input: mod InputSystem) {
 
 # Whether the scripted finger is in use this run
 func scriptedDragOn(input: view InputSystem) ret Bool {
-  ret input.scriptedDrag.dy is not 0.0
+  ret input.scriptedDrag.dy is not 0.0 or input.scriptedDrag.dx is not 0.0
 }
 
 # The scripted finger this frame (after `previous`): mid-screen, moving
@@ -131,15 +141,23 @@ func scriptedDragPointer(
   previous: view UiPointerState
 ) ret UiPointerState {
   drag.frame = drag.frame + 1
-  let x: Float = viewport.layoutW * 0.5
+  var startX: Float = viewport.layoutW * 0.5
+  var startFrame: Int = scriptStartFrame
+  if drag.dx is not 0.0 {
+    startX = 4.0
+    startFrame = scriptSwipeStartFrame
+  }
   let startY: Float = viewport.layoutH * 0.5
-  let moved: Int = drag.frame - scriptStartFrame
+  let moved: Int = drag.frame - startFrame
+  var x: Float = startX
   var y: Float = startY
   var down: Bool = false
   if moved >= 0 and moved <= scriptMoveFrames {
+    x = startX + drag.dx * moved.toFloat() / scriptMoveFrames.toFloat()
     y = startY + drag.dy * moved.toFloat() / scriptMoveFrames.toFloat()
     down = true
   } else if moved > scriptMoveFrames {
+    x = startX + drag.dx
     y = startY + drag.dy
   }
   ret uiPointerScriptFrame(
