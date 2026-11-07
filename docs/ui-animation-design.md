@@ -506,7 +506,8 @@ transition. What the code decided:
 - 120 Hz needs nothing new: a host busy-renders while `animationInFlight`, and waits when not, so `RAE_IOS_HIGH_REFRESH=1` is all that
   lets those frames go past 60, and idle stays at zero frames.
 - The budget is `checks/uiPageBudget`: a page of 30 rows, 123 nodes, a new world each way. A still or a moving transform pass takes
-  about 2.7 µs on an M1 Max, so it is nowhere near over budget there, and the fold stays as it is.
+  about 2.7 µs on an M1 Max, so it is nowhere near over budget there, and the fold stays as it is for now. The measure on an
+  iPhone 15 Pro that this section asks for is not in yet.
 
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
