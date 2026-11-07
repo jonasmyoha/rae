@@ -1,0 +1,255 @@
+# Scrolling runs on seconds, not frames: a fling and a rubber band go the same way at 60 and 120
+# Hz, and a
+# long frame slows them and never skips them. A scripted finger drags a list 50 points a 1/60 s, in
+# the
+# same seconds at each rate, and lets go.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/Scene
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/scrollRootSystem/ScrollRootSystem
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  list: EntityId
+}
+
+func mount() ret Rig {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Window\",\"nodes\":\{\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Overflow\":\{\"mode\":\"Clip\"\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":6000\},\"ScrollRoot\":\{\"axis\":\"y\",\"floor\":\"content\"\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var list: EntityId = noEntity()
+  if let index: Int = world.nodeIds.get(k: "List") {
+    list = nodeEntityId(world: world, index: index)
+  }
+  var memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+  ret Rig { world: own world, uiSystems: own uiSystems, input: createUiInput(), list: list }
+}
+
+func frame(
+  rig: mod Rig
+  y: view Float
+  down: view Bool
+  deltaTime: view Float
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: 200.0
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+    deltaTime: deltaTime
+  )
+}
+
+func position(rig: view Rig) ret Float {
+  ret componentView(this: rig.world.scrollStates, entityId: rig.list).y
+}
+
+func speed(rig: view Rig) ret Float {
+  ret componentView(this: rig.world.scrollStates, entityId: rig.list).velocity
+}
+
+# Drag up at 3000 points a second for 0.1 s, and let go. Then `seconds` of nothing.
+func flingFor(rate: view Int, seconds: view Float) ret Rig {
+  var rig: Rig = mount()
+  let deltaTime: Float = 1.0 / rate.toFloat()
+  frame(
+    rig: rig
+    y: 350.0
+    down: true
+    deltaTime: deltaTime
+  )
+  let dragFrames: Int = rate / 10
+  var y: Float = 350.0
+  loop var i: Int = 0, i < dragFrames, ++i {
+    y = y - 3000.0 * deltaTime
+    frame(
+      rig: rig
+      y: y
+      down: true
+      deltaTime: deltaTime
+    )
+  }
+  frame(
+    rig: rig
+    y: y
+    down: false
+    deltaTime: deltaTime
+  )
+  # The frame that let go is the first of those seconds
+  let frames: Int = (seconds * rate.toFloat()).toInt() - 1
+  loop var i: Int = 0, i < frames, ++i {
+    frame(
+      rig: rig
+      y: y
+      down: false
+      deltaTime: deltaTime
+    )
+  }
+  ret rig
+}
+
+func near(a: view Float, b: view Float, share: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= Math.abs(value: b) * share
+}
+
+func fling() {
+  log("--- a fling")
+  let at60: Rig = flingFor(rate: 60, seconds: 0.5)
+  let at120: Rig = flingFor(rate: 120, seconds: 0.5)
+  log(
+    "the release speed is in points a second, near 3000: at 60 Hz {near(
+      a: speed(rig: flingFor(rate: 60, seconds: 0.0))
+      b: -3000.0
+      share: 0.05
+    )}, at 120 Hz {near(a: speed(rig: flingFor(rate: 120, seconds: 0.0)), b: -3000.0, share: 0.05)}"
+  )
+  log(
+    "after 0.5 s the two are within 1.5%: {near(
+      a: position(rig: at120)
+      b: position(rig: at60)
+      share: 0.015
+    )}; speed within 1.5% {near(a: speed(rig: at120), b: speed(rig: at60), share: 0.015)}"
+  )
+  log(
+    "the speed has decayed by 0.97 for each 1/60 s: {near(
+      a: speed(rig: at60)
+      b: -3000.0 * Math.exp(x: -1.8276 * 0.5)
+      share: 0.05
+    )}"
+  )
+}
+
+func stretchFor(rate: view Int) ret Int {
+  var rig: Rig = mount()
+  let deltaTime: Float = 1.0 / rate.toFloat()
+  frame(
+    rig: rig
+    y: 100.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 112.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 300.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 300.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 300.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 300.0
+    down: true
+    deltaTime: deltaTime
+  )
+  frame(
+    rig: rig
+    y: 300.0
+    down: false
+    deltaTime: deltaTime
+  )
+  var ms: Int = 0
+  loop position(rig: rig) > 0.0 and ms < 3000 {
+    frame(
+      rig: rig
+      y: 300.0
+      down: false
+      deltaTime: deltaTime
+    )
+    ms = ms + 1000 / rate
+  }
+  log("{rate} Hz: pulled past the top, it is home at {position(rig: rig)}")
+  ret ms
+}
+
+func rubberBand() {
+  log("--- the rubber band")
+  let at60: Int = stretchFor(rate: 60)
+  let at120: Int = stretchFor(rate: 120)
+  log(
+    "the same time either way, within 2 frames at 60 Hz: {Math.abs(value: (at60 - at120).toFloat()) <= 34.0}; under a second {at60 < 1000}"
+  )
+}
+
+func wheelAndLongFrames() {
+  log("--- a long frame, and no time at all")
+  var rig: Rig = flingFor(rate: 60, seconds: 0.1)
+  let before: Float = position(rig: rig)
+  frame(
+    rig: rig
+    y: 0.0
+    down: false
+    deltaTime: 5.0
+  )
+  log(
+    "a 5 s frame moves it no more than a 0.05 s one: {Math.abs(value: position(rig: rig) - before) <= Math.abs(
+      value: speed(rig: rig)
+    ) * 0.06}"
+  )
+  let still: Float = position(rig: rig)
+  frame(
+    rig: rig
+    y: 0.0
+    down: false
+    deltaTime: 0.0
+  )
+  log("a frame of no time moves nothing: {position(rig: rig) is still}")
+}
+
+func main() {
+  fling()
+  rubberBand()
+  wheelAndLongFrames()
+}

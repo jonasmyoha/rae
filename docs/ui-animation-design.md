@@ -57,7 +57,7 @@ both reached through a channel or `springStep`. The ease is `easeTowards`, an ex
 | `Carousel` | Its offset runs on the spring, `transitionDuration` its response, and starts at the finger's speed | A finger writes the offset directly, and it moves the pages by a runtime offset |
 | `ButtonHoverFade` | As it was | A constant rate has no curve or speed: turning back is already continuous, and takes only as long as the way back |
 | Reorder | Uses `easeTowards` | The rows follow a finger that keeps moving, so there is no end to retarget to |
-| Scroll's rubber band | Runs on the spring, for one 60 Hz frame at a time. `springStepVelocity` is gone | Scrolling counts frames and its velocity is points a frame. It lands where it did, to the point, in the scroll cases |
+| Scroll's rubber band | Runs on the spring, and `springStepVelocity` is gone | A finger writes the position directly. Scrolling runs on seconds since 0.3.30, so a fling and a spring-back take the same time at 60 and 120 Hz |
 
 ## 2. The model in one page
 

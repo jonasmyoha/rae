@@ -81,12 +81,12 @@ func dampedDelta(
   ret delta
 }
 
-# Pick a single velocity estimate from the most recent three
-# per-frame deltas. Prefers the latest sample when it's a real
-# movement; falls back to older samples when the user paused at
+# Pick a single velocity estimate from the most recent three samples, in points a second. Prefers
+# the
+# latest sample when it's a real movement; falls back to older samples when the user paused at
 # end of drag.
 func pickReleaseVelocity(d0: view Float, d1: view Float, d2: view Float) ret Float {
-  let thresh: Float = 0.5
+  let thresh: Float = 30.0
   var a0: Float = d0
   if a0 < 0.0 {
     a0 = 0.0 - a0
@@ -104,13 +104,8 @@ func pickReleaseVelocity(d0: view Float, d1: view Float, d2: view Float) ret Flo
   ret d2
 }
 
-# The rubber band, for lib/Spring. Scrolling counts frames at this rate. This response and damping
-# are
-# what per-frame coefficients of tension 0.08 and friction 0.56 come to at 60 Hz: 2 pi / (sqrt 0.08
-# * 60)
-# seconds, and 0.56 / (2 * sqrt 0.08), which settles with no overshoot.
-const scrollFramesPerSecond: Float = 60.0
-
+# The rubber band, for lib/Spring: a near-critically damped spring that settles at the bound with no
+# overshoot. This is what per-frame coefficients of tension 0.08 and friction 0.56 come to at 60 Hz.
 const scrollSpringResponse: Float = 0.37
 
 const scrollSpringDamping: Float = 0.99

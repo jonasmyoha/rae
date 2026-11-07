@@ -281,6 +281,7 @@ func runApp(app: mod App) ret Int {
     pageRoot: app.document.pageRoot
     chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
     scene: app.document.scene
+    deltaTime: 1.0 / 60.0
   )
   listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
   runScheduledUiSystems(
@@ -567,6 +568,7 @@ func runApp(app: mod App) ret Int {
       pageRoot: app.document.pageRoot
       chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
       scene: app.document.scene
+      deltaTime: (now - previousNow) as Float
     ) {
       changed = true
     }

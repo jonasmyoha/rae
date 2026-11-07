@@ -30,6 +30,7 @@
 #
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
+import Math
 open Spring
 open ui/Ecs
 open ui/AnimationComponents
@@ -370,22 +371,24 @@ const scrollWheelStepPoints: Float = 48.0
 # and a long spring back.
 const scrollWheelOvershootPoints: Float = 120.0
 
-# Frames after the last wheel event before the spring and the momentum run
-# (about 50 ms at 60 fps): a trackpad keeps sending its own momentum events
-# after the fingers lift, and the spring must not fight them
-const scrollWheelQuietFrames: Int = 3
+# Seconds after the last wheel event before the spring and the momentum run: a trackpad keeps
+# sending
+# its own momentum events after the fingers lift, and the spring must not fight them
+const scrollWheelQuietSeconds: Float = 0.0499
 
-# Frames after the last wheel event that still count as settling, so an
-# event loop keeps rendering until the wheel has gone quiet (about 0.25 s)
-const scrollWheelSettleFrames: Int = 15
+# Seconds after the last wheel event that still count as settling, so an event loop keeps rendering
+# until the wheel has gone quiet
+const scrollWheelSettleSeconds: Float = 0.2499
 
-# Momentum fling decay per frame while inside the bounds — a long, smooth glide.
-const momentumFriction: Float = 0.97
+# A long frame slows scrolling and never skips it, as for any motion
+const scrollMaxStepSeconds: Float = 0.05
 
-# Below these, momentum/spring is settled and snapped to rest. 1 px / 0.3 px·frame
-# is just under human perception on a 60 Hz display, so it cuts the asymptotic tail
-# with no visible jump.
-const scrollVelEps: Float = 0.3
+# Momentum fling decay while inside the bounds, a long smooth glide: 0.97 of the speed each 1/60 s
+const momentumDecayPerSecond: Float = 1.8276
+
+# Below these, momentum and spring are settled and snapped to rest: 1 point, and 18 points a second,
+# are just under human perception, so it cuts the asymptotic tail with no visible jump
+const scrollVelEps: Float = 18.0
 
 const scrollPosEps: Float = 1.0
 
@@ -477,7 +480,7 @@ func pinToEnd(
     drag.pinnedToEnd = false
     ret
   }
-  let resting: Bool = drag.dragging is false and state.velocity is 0.0 and drag.wheelIdleFrames >= scrollWheelQuietFrames
+  let resting: Bool = drag.dragging is false and state.velocity is 0.0 and drag.wheelIdleSeconds >= scrollWheelQuietSeconds
   if resting is false {
     ret
   }
@@ -493,7 +496,9 @@ func updateScrollRoot(
   uiSystems: mod UiSystems
   entityId: view EntityId
   input: view UiInput
+  deltaTime: view Float
 ) ret Bool {
+  let step: Float = Math.max(a: 0.0, b: Math.min(a: deltaTime, b: scrollMaxStepSeconds))
   if isNone(this: entityId) {
     ret false
   }
@@ -616,8 +621,8 @@ func updateScrollRoot(
   if input.pointer.down {
     wheel = 0.0
   }
-  if drag.wheelIdleFrames < 1000 {
-    drag.wheelIdleFrames = drag.wheelIdleFrames + 1
+  if drag.wheelIdleSeconds < 1000.0 {
+    drag.wheelIdleSeconds = drag.wheelIdleSeconds + step
   }
   if wheel is not 0.0 {
     let unitsPerPoint: Float = input.touchTargetSize / touchTargetPoints
@@ -639,7 +644,7 @@ func updateScrollRoot(
     # the wheel moves the content itself; the spring and the momentum wait
     # until it is quiet
     state.velocity = 0.0
-    drag.wheelIdleFrames = 0
+    drag.wheelIdleSeconds = 0.0
   }
 
   if drag.active {
@@ -657,26 +662,27 @@ func updateScrollRoot(
     # Keep the last three damped deltas; release velocity is picked from them.
     drag.d2 = drag.d1
     drag.d1 = drag.d0
-    drag.d0 = damped
-  } else if drag.wheelIdleFrames >= scrollWheelQuietFrames {
+    drag.d0 = 0.0
+    if step > 0.0 {
+      drag.d0 = damped / step
+    }
+  } else if drag.wheelIdleSeconds >= scrollWheelQuietSeconds {
     # ----- momentum + rubber-band spring (not dragging, the wheel quiet) -----
     if state.y > 0.0 or state.y < floor {
       var target: Float = 0.0
       if state.y < floor {
         target = floor
       }
-      # Scrolling counts frames, not seconds, and its velocity is points a frame, so this is the
-      # one spring run for one frame at 60 Hz
-      var spring: SpringState = { value: state.y, velocity: state.velocity * scrollFramesPerSecond }
+      var spring: SpringState = { value: state.y, velocity: state.velocity }
       springStep(
         state: spring
         target: target
         response: scrollSpringResponse
         damping: scrollSpringDamping
-        deltaTime: 1.0 / scrollFramesPerSecond
+        deltaTime: step
       )
       state.y = spring.value
-      state.velocity = spring.velocity / scrollFramesPerSecond
+      state.velocity = spring.velocity
       if scrollAbs(value: state.y - target) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
         state.y = target
         state.velocity = 0.0
@@ -684,8 +690,8 @@ func updateScrollRoot(
     } else {
       # In bounds: momentum fling, decaying under friction.
       if scrollAbs(value: state.velocity) > scrollVelEps {
-        state.y = state.y + state.velocity
-        state.velocity = state.velocity * momentumFriction
+        state.y = state.y + state.velocity * step
+        state.velocity = state.velocity * Math.exp(x: -momentumDecayPerSecond * step)
       } else {
         state.velocity = 0.0
       }
@@ -753,7 +759,7 @@ func scrollRootSettling(
     if drag.pinnedToEnd and range.active and state.y is not range.floor {
       ret true
     }
-    ret drag.dragging or drag.wheelIdleFrames < scrollWheelSettleFrames
+    ret drag.dragging or drag.wheelIdleSeconds < scrollWheelSettleSeconds
   }
   ret false
 }

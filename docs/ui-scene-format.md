@@ -894,3 +894,8 @@ motion starts. `RAE_REDUCE_MOTION=on` or `off` fixes it for a test. Case 1375 ho
 
 With `motion` the scale runs on that spring, and keeps its speed when the pointer changes its mind. Without one it eases at `speed` as before, so existing scenes look the same. An
 unknown name is an `unknownToken` diagnostic at load. The bundle `pressable` uses `quick`. Case 1376 holds the rules.
+
+## 30. Scrolling runs on seconds
+
+`updateScrollRoot(world, uiSystems, entityId, input, deltaTime)` takes the frame's time, so a fling and a spring-back take the same time at 60 and 120 Hz. `ScrollState.velocity` is in points a second. A
+frame longer than 0.05 s counts as 0.05 s, so a long frame slows scrolling and never skips it. At 60 Hz it does what it did. Case 1377 holds the rules.
