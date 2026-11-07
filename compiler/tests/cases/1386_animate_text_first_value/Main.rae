@@ -1,0 +1,90 @@
+# AnimateText and a text's first value (docs/ui-animation-design.md section 4): a page mounts with
+# ""
+# or its scene's placeholder and the app writes its value as the page arrives. That first value
+# shows
+# at once: a change from an empty text, or one in the frame the text was first seen or the next. A
+# later change still plays.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+}
+
+func setText(world: mod UiWorld, nodeId: view String, text: view String) {
+  componentMod(this: world.texts, entityId: nodeOf(world: world, nodeId: nodeId)).text = "{text}"
+}
+
+func shown(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+    ret "plays, from '{componentView(this: uiSystems.animation.textGhosts, entityId: entityId).text}'"
+  }
+  ret "shows at once"
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 300.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Children\":[\"Time\",\"Count\"]\},\"Time\":\{\"Rect\":\{\"x\":20,\"y\":20,\"w\":100,\"h\":30\},\"Text\":\{\"text\":\"\"\},\"AnimateText\":\{\"kind\":\"roll\"\}\},\"Count\":\{\"Rect\":\{\"x\":20,\"y\":80,\"w\":100,\"h\":30\},\"Text\":\{\"text\":\"--\"\},\"AnimateText\":\{\"kind\":\"fade\"\}\}\}\}"
+    )
+  )
+  # The page arrives: its first look sees "" and the placeholder, and the app writes its values
+  step(world: world, uiSystems: uiSystems)
+  setText(world: world, nodeId: "Time", text: "10:45")
+  setText(world: world, nodeId: "Count", text: "3")
+  step(world: world, uiSystems: uiSystems)
+  log("the time's first value: {shown(world: world, uiSystems: uiSystems, nodeId: "Time")}")
+  log(
+    "the count over its placeholder: {shown(world: world, uiSystems: uiSystems, nodeId: "Count")}"
+  )
+  # Later changes play
+  step(world: world, uiSystems: uiSystems)
+  setText(world: world, nodeId: "Time", text: "11:00")
+  setText(world: world, nodeId: "Count", text: "4")
+  step(world: world, uiSystems: uiSystems)
+  log("then the time changes: {shown(world: world, uiSystems: uiSystems, nodeId: "Time")}")
+  log("and the count: {shown(world: world, uiSystems: uiSystems, nodeId: "Count")}")
+  # Let them end, empty the time, and write it again: from an empty text it shows at once
+  loop var i: Int = 0, i < 120, ++i {
+    step(world: world, uiSystems: uiSystems)
+  }
+  setText(world: world, nodeId: "Time", text: "")
+  step(world: world, uiSystems: uiSystems)
+  log("the time emptied: {shown(world: world, uiSystems: uiSystems, nodeId: "Time")}")
+  loop var i: Int = 0, i < 120, ++i {
+    step(world: world, uiSystems: uiSystems)
+  }
+  setText(world: world, nodeId: "Time", text: "12:30")
+  step(world: world, uiSystems: uiSystems)
+  log("and written again: {shown(world: world, uiSystems: uiSystems, nodeId: "Time")}")
+  log("root {isNone(this: root)}")
+}
