@@ -862,3 +862,21 @@ A node on each page with one `key`, in either page model, and across worlds. `mo
 `HeroWidget { key }` is another way to write a `morph`. A host with two pages in one world and no page transition starts one with `spawnHeroTransition(world, uiSystems, key, source, target)`.
 
 Case 1373 holds the rules; `checks/uiPageTransitions` paints them.
+
+## 27. A swipe from the left edge
+
+A scene needs nothing: this is a host's Back. Each frame, after the input step and before the scroll root:
+
+```
+let event: EdgeSwipeEvent = edgeSwipeStep(world: world, input: input, deltaTime: deltaTime)
+```
+
+On `started`, call `pageTransitionDragStart(system)`, then go back as usual (`pageTransitionResident`, or `pageTransitionBegin` and `pageTransitionArrive`). On `moved`, call
+`pageTransitionDrag(system, world, uiSystems, progress, velocity)`. On `released`, call it once more, then `pageTransitionDragEnd(system, world, uiSystems)`, which says whether it finishes or
+springs back, from the finger's position and speed. With two worlds, also call `pageTransitionTakeBack(system, world, uiSystems)` each frame after `pageTransitionStep`: when it says true, the
+old world is the host's again.
+
+A press within 24 points of the left edge that moves 10 points along x, more than along y, is the swipe's: its release clicks nothing and a scroll root leaves it alone. A press that moves along
+y first is the scroll's, and one that hardly moves is a tap. It works during a running transition too. `push` and `sheet` are the kinds it is for, and a `SharedElement` morph just goes with its page.
+
+Case 1374 holds the rules; `checks/uiPageTransitions` with `RAE_PAGE_DRAG` runs it.

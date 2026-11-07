@@ -114,6 +114,14 @@ func pageMotionName(kind: view PageTransitionKind, authored: view String) ret St
   ret "smooth"
 }
 
+# How far ahead a release looks: a flick carries on, so where it would be by then is what counts
+const pageDragLookAheadSeconds: Float = 0.15
+
+# Whether a transition a finger let go of finishes, or springs back
+func pageDragFinishes(progress: view Float, velocity: view Float) ret Bool {
+  ret progress + velocity * pageDragLookAheadSeconds >= 0.5
+}
+
 # How long a motion takes, for the timing that hangs on it: a critically damped spring is 98.6% of
 # the way after its response
 func pageSeconds(motion: view MotionToken) ret Float {

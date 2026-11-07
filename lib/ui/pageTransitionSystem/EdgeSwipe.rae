@@ -1,0 +1,106 @@
+# A swipe from the screen's left edge (docs/ui-animation-design.md section 8.4). This finds the
+# gesture;
+# what it does is the host's: on `started` it goes back with the transition paused
+# (pageTransitionDragStart), then hands each move to pageTransitionDrag and the release to
+# pageTransitionDragEnd.
+#
+# It takes the pointer as a scroll takes it from a tap. A press at the edge is only watched at
+# first.
+# When it has moved far enough along x, and more along x than along y, it is the swipe's: the press
+# is claimed (uiPressClaimed), so its release clicks nothing, and a scroll root leaves it alone.
+# Moving along y first leaves it to the scroll. Run edgeSwipeStep after the input step, as it reads
+# this frame's pointer, and before the scroll root.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Ecs
+open ui/InputKind
+open ui/ScrollDrag
+open ui/ScrollPhysics
+open ui/animationSystem/AnimationRules
+open ui/inputSystem/InputSystem
+import Math
+
+# How wide the edge is, in points. It takes as far to become a swipe as to become a scroll.
+const edgeSwipeZonePoints: Float = 24.0
+
+enum EdgeSwipeKind { none, started, moved, released }
+
+# What the swipe did this frame. `progress` is 0 to 1 across the page's width, and `velocity` is
+# progress a second.
+type EdgeSwipeEvent {
+  kind: EdgeSwipeKind = EdgeSwipeKind.none
+  progress: Float = 0.0
+  velocity: Float = 0.0
+}
+
+func edgeSwipeUnits(input: view UiInput, points: view Float) ret Float {
+  ret points * input.touchTargetSize / touchTargetPoints
+}
+
+# Whether a scroll drag already has this press
+func edgeSwipeScrollHasIt(world: view UiWorld) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: world.scrollDrags), ++i {
+    let root: EntityId = componentEntityAt(this: world.scrollDrags, i: i)
+    if componentView(this: world.scrollDrags, entityId: root).active {
+      ret true
+    }
+  }
+  ret false
+}
+
+# One frame. `deltaTime` is the frame's time in seconds, for the finger's velocity.
+func edgeSwipeStep(
+  world: mod UiWorld
+  input: view UiInput
+  deltaTime: view Float
+) ret EdgeSwipeEvent {
+  let pointer: view UiPointerState = input.pointer
+  var swipe: EdgeSwipeState = world.edgeSwipe
+  var event: EdgeSwipeEvent = {}
+  if pointer.pressed and pointer.x <= edgeSwipeUnits(input: input, points: edgeSwipeZonePoints) {
+    swipe = EdgeSwipeState {
+      phase: EdgeSwipePhase.watching
+      pressX: pointer.x
+      pressY: pointer.y
+      startX: pointer.x
+      lastX: pointer.x
+    }
+  }
+  if swipe.phase is EdgeSwipePhase.watching {
+    let alongX: Float = pointer.x - swipe.pressX
+    let alongY: Float = Math.abs(value: pointer.y - swipe.pressY)
+    let enough: Float = scrollActivationUnits(input: input)
+    if pointer.down is false or alongY > enough and alongY >= alongX or edgeSwipeScrollHasIt(
+      world: world
+    ) {
+      swipe.phase = EdgeSwipePhase.idle
+    } else if alongX > enough and alongX > alongY {
+      swipe.phase = EdgeSwipePhase.active
+      # The page starts from where it is, without a jump
+      swipe.startX = pointer.x
+      swipe.lastX = pointer.x
+      event.kind = EdgeSwipeKind.started
+    }
+  } else if swipe.phase is EdgeSwipePhase.active {
+    swipe.d2 = swipe.d1
+    swipe.d1 = swipe.d0
+    swipe.d0 = pointer.x - swipe.lastX
+    swipe.lastX = pointer.x
+    var width: Float = world.layoutW
+    if width <= 0.0 {
+      width = 1.0
+    }
+    event.progress = Math.max(a: 0.0, b: Math.min(a: 1.0, b: (pointer.x - swipe.startX) / width))
+    if deltaTime > 0.0 {
+      event.velocity = pickReleaseVelocity(d0: swipe.d0, d1: swipe.d1, d2: swipe.d2) / deltaTime / width
+    }
+    event.kind = EdgeSwipeKind.moved
+    if pointer.released or pointer.down is false {
+      event.kind = EdgeSwipeKind.released
+      swipe.phase = EdgeSwipePhase.idle
+    }
+  }
+  world.edgeSwipe = swipe
+  ret event
+}

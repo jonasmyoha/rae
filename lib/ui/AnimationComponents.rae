@@ -86,6 +86,21 @@ type SharedElement {
   motion: String = "smooth"
 }
 
+enum EdgeSwipePhase { idle, watching, active }
+
+# RESOURCE on the world: a press at the left edge that may be a swipe
+# (ui/pageTransitionSystem/EdgeSwipe)
+type EdgeSwipeState {
+  phase: EdgeSwipePhase = EdgeSwipePhase.idle
+  pressX: Float = 0.0
+  pressY: Float = 0.0
+  startX: Float = 0.0
+  lastX: Float = 0.0
+  d0: Float = 0.0
+  d1: Float = 0.0
+  d2: Float = 0.0
+}
+
 enum ListChangeDirection { forward, back }
 
 # RUNTIME: the data this list is getting replaces all of it (ui/listMotionSystem, listRowsChange)

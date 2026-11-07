@@ -45,6 +45,8 @@ type AnimationTrack {
   delayLeft: Float
   phase: AnimationPhase
   onEnd: AnimationEnd
+  # A finger has it: it does not step, and only pageTransitionDrag moves it
+  paused: Bool = false
 }
 
 type AnimationCommand {
@@ -670,11 +672,13 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
       entityId: entityId
     )
     var left: Float = step
-    if track.delayLeft > 0.0 {
+    if track.paused {
+      left = 0.0
+    } else if track.delayLeft > 0.0 {
       track.delayLeft = track.delayLeft - left
       left = -track.delayLeft
     }
-    if track.delayLeft <= 0.0 {
+    if track.delayLeft <= 0.0 and not track.paused {
       track.delayLeft = 0.0
       # All five, with no early stop: each channel runs on its own
       let opacityDone: Bool = channelStep(channel: track.opacity, deltaTime: left)

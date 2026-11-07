@@ -13,6 +13,9 @@
 # world was held and, with no hold, dropped at the end. Scenes are read before the first frame, and
 # the
 # log says when the transition starts and ends, so a trace of file opens can show nothing is loaded.
+# RAE_PAGE_DRAG=0.3 goes back as a finger would: the transition stays at that share of the way
+# until frame
+# 15, then lets go, so below half way it springs back and the first page is the host's again.
 import Gpu2d
 import Sys
 import ui/Scene
@@ -84,7 +87,9 @@ func main() ret Int {
   let firstScene: Scene = loadSceneFile(path: "checks/uiPageTransitions/first.raescene")
   let secondScene: Scene = loadSceneFile(path: "checks/uiPageTransitions/second.raescene")
   let kind: PageTransitionKind = kindNamed(name: Sys.getEnv(name: "RAE_PAGE_KIND"))
-  let back: Bool = Sys.getEnv(name: "RAE_PAGE_BACK").length() > 0
+  let dragShare: String = Sys.getEnv(name: "RAE_PAGE_DRAG")
+  let dragged: Bool = dragShare.length() > 0
+  let back: Bool = Sys.getEnv(name: "RAE_PAGE_BACK").length() > 0 or dragged
   var world: UiWorld = create()
   var uiSystems: UiSystems = createUiSystems()
   # The first page is the starting point of the pictures: its own Appear does not show
@@ -105,12 +110,17 @@ func main() ret Int {
     source: PageSource { x: 560.0, y: 340.0, w: 180.0, h: 135.0 }
   )
   var held: Bool = false
+  var tookBack: Bool = false
+  var shortRun: Bool = true
   var ended: Bool = false
   var frames: Int = 0
   loop not Gpu2d.pollClose() and frames < 600 {
     if frames is 3 {
       log("the transition starts")
       uiSystems.animation.settings = settings
+      if dragged {
+        pageTransitionDragStart(system: system)
+      }
       pageTransitionBegin(
         system: system
         oldWorld: own world
@@ -141,8 +151,26 @@ func main() ret Int {
         root: root
       )
       held = pageTransitionInFlight(system: system)
+      if dragged {
+        pageTransitionDrag(
+          system: system
+          world: world
+          uiSystems: uiSystems
+          progress: dragShare.toFloat()
+          velocity: 0.0
+        )
+      }
+    }
+    if frames is 15 and dragged {
+      let finishes: Bool = pageTransitionDragEnd(system: system, world: world, uiSystems: uiSystems)
+      log("let go: it finishes {finishes}")
     }
     let leaving: Bool = pageTransitionStep(system: system)
+    if pageTransitionTakeBack(system: system, world: world, uiSystems: uiSystems) {
+      log("the first page is the host's again")
+      schedule = createUiPipeline(world: world)
+      tookBack = true
+    }
     runScheduledUiSystems(
       schedule: schedule
       world: world
@@ -166,11 +194,15 @@ func main() ret Int {
     )
     Gpu2d.endFrame(canvas: canvas)
     frames = frames + 1
+    shortRun = frames <= 15
     if frames > 3 and not leaving and not ended {
       ended = true
       log("the transition ended")
     }
-    if frames > 30 and not leaving and animationInFlight(world: world, uiSystems: uiSystems) is false {
+    if frames > 30 and not leaving and not system.springingBack and animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    ) is false {
       frames = 600
     }
   }
@@ -180,7 +212,13 @@ func main() ret Int {
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   let shouldHold: Bool = kind is not PageTransitionKind.none and not off
-  if held is not shouldHold or (stillHeld and not holding) {
+  # A short run for a picture of a held finger closes before the release, and has nothing to say
+  if dragged and shortRun {
+    log("UI PAGES OK: closed with the finger still down")
+    ret 0
+  }
+  let wantsBack: Bool = dragged and not holding and dragShare.toFloat() < 0.5
+  if held is not shouldHold or (stillHeld and not holding) or tookBack is not wantsBack {
     log("UI PAGES FAILED: held {held}, still {stillHeld}")
     ret 1
   }

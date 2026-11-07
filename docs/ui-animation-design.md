@@ -426,6 +426,25 @@ continues, or springs back, from the finger's velocity. Since a track retargets 
 the current value and velocity, this needs only a paused state, and no new motion
 math. It is one thumb's natural Back. The bar's Back stays.
 
+**Built in 0.3.27:** `lib/ui/pageTransitionSystem/EdgeSwipe.rae` finds the gesture, and `pageTransitionDrag` drives the
+transition. What the code decided:
+
+- The finding and the driving are apart, as only the host knows what Back means. `edgeSwipeStep` runs after the input step and
+  before the scroll root, and says `started`, `moved` or `released`. On `started` the host calls `pageTransitionDragStart`
+  and goes back with the ordinary calls, so the same page models work, and mid-flight is the ordinary second navigation.
+- The press is the swipe's once it has moved 10 points, a scroll's distance, along x and more than along y, inside
+  `uiPressClaimed` as a scroll's is. Moving along y first leaves it to the scroll. The edge is 24 points wide.
+- `progress` is 0 to 1 from where the pages were when the finger took them. It places them with `channelHold` on a paused
+  track, the leaving page's opacity clear by 60% of the way as always.
+- A release finishes if `progress + velocity * 0.15 s` is at least 0.5. Each channel takes the finger's speed along its own path.
+  Opacity does not fling: it runs on from where it is.
+- Springing back makes the old page the page again at once: no `Leaving`, and its nodes return to rest. Resident, the arriving
+  page deactivates at the end. With two worlds, the host calls `pageTransitionTakeBack` each frame after `pageTransitionStep`, and
+  on the frame it says true the old `UiWorld` and `UiSystems` are its own again, and it rebuilds what is tied to them, such as its schedule.
+- A morph needs time and a finger has none, so a swipe does none: such a node goes with its page. `stay` works as usual.
+- Only the page's root follows the finger: its nodes' `Disappear` and `Appear` run on the clock.
+- With `RAE_ANIMATION=off` or kind `none` there is no motion for a finger to hold, so the transition is at its end at once.
+
 ## 9. Dialogs and other layers
 
 `presentMountedPage` plays motion in the same way as a page, on the "dialog" layer:
