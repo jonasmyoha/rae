@@ -316,6 +316,12 @@ arrive from the other, slightly staggered. Without the field, the table above ho
 **The old row-jump check.** A host may check that rows do not jump between frames.
 Such a check reads laid-out places or world places; section 11 says which to read.
 
+**Fixed in 0.3.35:** an app that scrolls a new row into view (`requestScrollToRow`) in the frame the row comes moved the
+scroll in one step, so on a list longer than its window every row jumped by that scroll (case 1380). `scrollToRowSystem`
+now hands the step to the list's motion state, and the rows that keep their key glide from where they were drawn, the
+scroll included. A scroll with no data change still moves nothing. A row that falls far behind because rows are added
+faster than a glide ends (a test adding a task every few frames) moves fast, but it is never drawn out of place.
+
 **Built in 0.3.22:** all of the above, in `lib/ui/listMotionSystem/` and
 `lib/ui/listViewSystem/ListViewFlow.rae`. What the code decided:
 
