@@ -18,6 +18,7 @@ open gpu/GpuRenderPass
 open gpu/GpuIds
 open Gpu2dCanvas
 open Gpu2dCanvasClip
+open Gpu2dCanvasFrame
 
 func ensureImagePipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   if canvas.imagePipeMade {
@@ -264,6 +265,7 @@ func queueImageEx(
   v1: copy Float
   tiled: copy Bool
 ) {
+  canvasKeepOrder(canvas: canvas, level: 1, atlas: -1)
   if handle < 1 or handle > canvas.images.length {
     ret
   }

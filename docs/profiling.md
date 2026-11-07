@@ -136,6 +136,10 @@ measured on a Mac only, and on the clouds' passes only.
 | the `cpu` time of `[frame]` | the CPU's part of a frame |
 | a `[gpu passes]` slot | only a hint at where to look first; use `RAE_AB` before acting on one |
 
+**Every frame's split: `RAE_FRAME_TIMING=all`** logs each frame as `RAE_FRAME_TIMING=1` logs only the slow ones
+(`[frame] slow: N ms = cpu + drawable acquire + present + gpu wait`), for a run where the pattern from frame to frame
+is the question. The clock reads whole milliseconds on an iPhone.
+
 **The 2D canvas: `RAE_GPU2D_TIMING=1`** (lib/Gpu2dCanvasTiming) times the one render pass a 2D frame draws in by
 its own begin and end timestamps, read back without waiting, about every other or third frame: a `[gpu2d] frame N us`
 line per sample and a `[gpu2d] last second` summary. It is one pass, so the overlap above does not split it. On a Mac

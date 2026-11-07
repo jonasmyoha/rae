@@ -30,7 +30,8 @@
 # submitted), for comparison. RAE_FRAME_TIMING=1 prints, every 120 frames, the
 # average frame time split into the CPU's own work, the present (and, inside
 # it, the drawable acquire, which waits for vsync) and the wait for the GPU here,
-# and logs each frame over 22 ms on its own line, split the same way.
+# and logs each frame over 22 ms on its own line, split the same way;
+# RAE_FRAME_TIMING=all logs every frame so (a "[frame] slow:" line each).
 import Sys
 open gpu/PipelineWatch
 open webgpu/Webgpu
@@ -40,6 +41,7 @@ type FramePacer {
   framesInFlight: Int  # 2, or 1 under RAE_FRAMES_IN_FLIGHT=1
   previousEnd: opt UInt64  # the end mark of the frame before this one
   timing: Bool  # RAE_FRAME_TIMING: print frame / CPU / present / GPU-wait averages
+  timingAll: Bool  # RAE_FRAME_TIMING=all: and every frame's split, not only the slow ones
   frameStart: Float64  # when the previous pace returned: this frame's start
   presentStart: Float64  # when this frame's present began (notePresentStart)
   timedFrames: Int
@@ -78,6 +80,7 @@ func createFramePacer() ret FramePacer {
     framesInFlight: framesInFlight
     previousEnd: none
     timing: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
+    timingAll: Sys.getEnv(name: "RAE_FRAME_TIMING") is "all"
     frameStart: 0.0
     presentStart: 0.0
     timedFrames: 0
@@ -163,7 +166,7 @@ func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: 
     pacer.waitSeconds = pacer.waitSeconds + wait
     pacer.presentSeconds = pacer.presentSeconds + present
     pacer.acquireSeconds = pacer.acquireSeconds + pacer.acquireThisFrame
-    if frame > slowFrameSeconds {
+    if frame > slowFrameSeconds or pacer.timingAll {
       let cpu: Float64 = frame - present - wait - pacer.acquireThisFrame
       log(
         "[frame] slow: {roundTenth(value: frame * 1000.0)} ms = cpu {roundTenth(value: cpu * 1000.0)} + drawable acquire {roundTenth(
