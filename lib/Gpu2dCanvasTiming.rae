@@ -1,0 +1,227 @@
+# Gpu2dCanvasTiming — the 2D canvas's GPU time per frame (RAE_GPU2D_TIMING=1): a timestamp mark
+# (gpu/GpuTiming recordTimingMark, a compute pass that does nothing) just before the canvas's frame
+# pass, the one render pass a 2D frame draws in, and one just after it. A render pass's own
+# timestamps would be the plain way, and they work on a Mac, but an iPhone 15 Pro writes 0 for
+# nearly all of them; the marks are what the deferred renderer's timing uses on the phone too. On
+# a tile-based GPU a mark does not wait for all of the pass's tile work, so the span is when the
+# GPU got through the pass, a little under its whole cost at worst. The readback never waits: a
+# frame is timed only once the last timed one's numbers have landed, so about every other or third
+# frame is timed. Each sample is a "[gpu2d] frame N us" line, and every second a line sums up the
+# samples of that second. With timestamps unavailable it says so once and times nothing.
+#
+# It answers what the CPU's frame time cannot: whether a slow frame is the GPU drawing, or the
+# frame waiting for a drawable (docs/ui-animation-design.md section 10).
+import Math
+import Sys
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuTiming
+open gpu/GpuIds
+
+type Canvas2dTiming {
+  enabled: Bool = false
+  # Time the pass by marks around it (RAE_GPU2D_TIMING=marks) instead of its own timestamps
+  byMarks: Bool = false
+  made: Bool = false
+  timing: opt GpuTiming = none
+  # This frame's pass is timed
+  timed: Bool = false
+  # A timed frame was submitted and its resolve is not yet done
+  resolvePending: Bool = false
+  submission: SubmissionId = { managerTag: 0, slot: -1, generation: 0 }
+  # The compute pipeline a mark dispatches
+  markPipeline: opt PipelineId = none
+  # The samples of the second being summed up, in microseconds
+  recent: List(Int) = List.create(Int, cap: 128)
+  reportAtNs: Int = 0
+  samples: Int = 0
+  lastUs: Int = -1
+}
+
+func createCanvas2dTiming() ret Canvas2dTiming {
+  unsafe {
+    ret Canvas2dTiming {
+      enabled: Sys.getEnv(name: "RAE_GPU2D_TIMING").length() > 0
+      byMarks: Sys.getEnv(name: "RAE_GPU2D_TIMING") is "marks"
+    }
+  }
+}
+
+func canvas2dTimingSummary(timing: mod Canvas2dTiming) {
+  if timing.recent.length is 0 {
+    ret
+  }
+  var sorted: List(Int) = List.create(Int, cap: timing.recent.length)
+  loop let value: view Int in timing.recent {
+    var at: Int = 0
+    loop at < sorted.length and sorted.copyAtFallback(index: at, fallback: 0) < value {
+      at = at + 1
+    }
+    sorted.insert(index: at, value: value)
+  }
+  let count: Int = sorted.length
+  log(
+    "[gpu2d] last second: {count} frames timed, GPU us median {sorted.copyAtDefault(
+      index: count / 2
+    )}, 90% {sorted.copyAtDefault(index: Math.min(a: count - 1, b: count * 9 / 10))}, max {sorted.copyAtDefault(
+      index: count - 1
+    )}"
+  )
+  timing.recent.clear()
+}
+
+# At the frame's open, before its pass begins: take in a sample that landed, and if none is on its
+# way, time this frame from a mark here.
+func canvas2dTimingFrameBegin(
+  timing: mod Canvas2dTiming
+  recording: mod Recording
+  resources: mod GpuResources
+) ret Ptr {
+  timing.timed = false
+  unsafe {
+    if timing.enabled is false {
+      ret webgpuNull()
+    }
+  }
+  if timing.made is false {
+    timing.made = true
+    timing.timing = createGpuTiming(resources: resources, maxPasses: 2)
+    timing.markPipeline = createComputePipelineSource(
+      resources: resources
+      wgsl: "@compute @workgroup_size(1) fn mark() \{\}"
+      entryPoint: "mark"
+      constants: noShaderConstants()
+    )
+    timing.reportAtNs = nowNs() + 1000000000
+    if let made: view GpuTiming = timing.timing {
+      if timingAvailable(timing: made) is false {
+        log("[gpu2d] GPU timestamps unavailable; no 2D GPU timing")
+      }
+    }
+  }
+  if let gpu: mod GpuTiming = timing.timing {
+    if timingAvailable(timing: gpu) is false {
+      unsafe {
+        ret webgpuNull()
+      }
+    }
+    if timing.resolvePending and pollSubmission(resources: resources, id: timing.submission) is not 0 {
+      timing.resolvePending = false
+      let started: Bool = startTimingSample(timing: gpu, resources: resources)
+    }
+    if timingSampleInFlight(timing: gpu) {
+      var out: List(Int) = List.create(Int, cap: 1)
+      var landed: Bool = false
+      if timing.byMarks {
+        landed = collectTimingMarks(timing: gpu, resources: resources, out: out)
+      } else {
+        landed = collectTiming(timing: gpu, resources: resources, out: out)
+      }
+      if landed {
+        let us: Int = out.copyAtFallback(index: 0, fallback: -1)
+        timing.lastUs = us
+        timing.samples = timing.samples + 1
+        timing.recent.add(value: us)
+        log("[gpu2d] frame {us} us")
+      }
+    }
+    if nowNs() >= timing.reportAtNs {
+      canvas2dTimingSummary(timing: timing)
+      timing.reportAtNs = nowNs() + 1000000000
+    }
+    unsafe {
+      if timing.resolvePending or timingSampleInFlight(timing: gpu) {
+        ret webgpuNull()
+      }
+    }
+    beginTimingFrame(timing: gpu)
+    if timing.byMarks {
+      if let pipeline: view PipelineId = timing.markPipeline {
+        timing.timed = recordTimingMark(
+          timing: gpu
+          recording: recording
+          resources: resources
+          pipeline: pipeline
+          name: "2d"
+        )
+      }
+      unsafe {
+        ret webgpuNull()
+      }
+    }
+    if timedPassNamed(timing: gpu, name: "2d") is none {
+      unsafe {
+        ret webgpuNull()
+      }
+    }
+    timing.timed = true
+    unsafe {
+      ret timingWrites(timing: gpu)
+    }
+  }
+  unsafe {
+    ret webgpuNull()
+  }
+}
+
+# After the frame's pass ends, before it is submitted: resolve the timed pass's timestamps
+func canvas2dTimingResolve(
+  timing: mod Canvas2dTiming
+  recording: mod Recording
+  resources: view GpuResources
+) {
+  if timing.timed is false {
+    ret
+  }
+  if let gpu: mod GpuTiming = timing.timing {
+    if timing.byMarks is false {
+      if recordTimingResolve(timing: gpu, recording: recording, resources: resources) is false {
+        timing.timed = false
+      }
+      ret
+    }
+    if let pipeline: view PipelineId = timing.markPipeline {
+      let marked: Bool = recordTimingMark(
+        timing: gpu
+        recording: recording
+        resources: resources
+        pipeline: pipeline
+        name: "end"
+      )
+      if marked is false or recordTimingResolve(
+        timing: gpu
+        recording: recording
+        resources: resources
+      ) is false {
+        timing.timed = false
+      }
+    }
+  }
+}
+
+# After the submit: the resolve is on its way
+func canvas2dTimingSubmitted(timing: mod Canvas2dTiming, submission: view SubmissionId) {
+  if timing.timed {
+    timing.submission = submission
+    timing.resolvePending = true
+  }
+  timing.timed = false
+}
+
+# A frame that could not be submitted: its timestamps never land
+func canvas2dTimingNotSubmitted(timing: mod Canvas2dTiming) {
+  timing.timed = false
+}
+
+func canvas2dTimingShutdown(timing: mod Canvas2dTiming, resources: mod GpuResources) {
+  if let gpu: mod GpuTiming = timing.timing {
+    shutdownTiming(timing: gpu, resources: resources)
+  }
+  timing.timing = none
+  if let pipeline: view PipelineId = timing.markPipeline {
+    retirePipeline(resources: resources, id: pipeline)
+  }
+  timing.markPipeline = none
+}

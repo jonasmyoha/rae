@@ -1,0 +1,85 @@
+# The 2D canvas's GPU time per frame (Gpu2dCanvasTiming, RAE_GPU2D_TIMING): the frame pass's own
+# timestamps, read back without waiting. 40 light frames (a few boxes) and then 40 heavy ones (300
+# translucent boxes over the whole window each): exit 0 when samples landed from both, and the heavy
+# frames took longer on the GPU than the light ones; a middle load of 40 boxes is logged too. On an
+# iPhone 15 Pro a light frame mostly reads 0: a pass that short does not register. With no
+# timestamps on this GPU it says so and
+# passes, having nothing to test.
+import Gpu2d
+import Math
+open Gpu2dCanvas
+open Gpu2dCanvasTiming
+
+const width: Int = 800
+
+const height: Int = 600
+
+func median(values: view List(Int)) ret Int {
+  var sorted: List(Int) = List.create(Int, cap: values.length)
+  loop let value: view Int in values {
+    var at: Int = 0
+    loop at < sorted.length and sorted.copyAtFallback(index: at, fallback: 0) < value {
+      at = at + 1
+    }
+    sorted.insert(index: at, value: value)
+  }
+  ret sorted.copyAtFallback(index: sorted.length / 2, fallback: -1)
+}
+
+# Frames of `boxes` boxes until 40 have run; the GPU times that landed
+func run(canvas: mod Gpu2dCanvas, boxes: view Int) ret List(Int) {
+  var times: List(Int) = List.create(Int, cap: 40)
+  var frames: Int = 0
+  let before: Int = canvas.gpuTiming.samples
+  loop not Gpu2d.pollClose() and frames < 40 {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.05
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    loop var i: Int = 0, i < boxes, ++i {
+      Gpu2d.drawRoundedRect(
+        canvas: canvas
+        x: 0.0
+        y: 0.0
+        w: width.toFloat()
+        h: height.toFloat()
+        radius: 40.0
+        color: 0x10406080
+      )
+    }
+    Gpu2d.endFrame(canvas: canvas)
+    if canvas.gpuTiming.samples > before + times.length {
+      times.add(value: canvas.gpuTiming.lastUs)
+    }
+    frames = frames + 1
+  }
+  ret times
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: width, height: height, title: "2D GPU timing check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  canvas.gpuTiming.enabled = true
+  let light: List(Int) = run(canvas: canvas, boxes: 4)
+  let medium: List(Int) = run(canvas: canvas, boxes: 40)
+  let heavy: List(Int) = run(canvas: canvas, boxes: 300)
+  let available: Bool = canvas.gpuTiming.samples > 0
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if available is false {
+    log("GPU2D TIMING OK: no GPU timestamps here, nothing to test")
+    ret 0
+  }
+  log("light frames: {light.length} timed, median {median(values: light)} us")
+  log("medium frames (40 boxes): {medium.length} timed, median {median(values: medium)} us")
+  log("heavy frames: {heavy.length} timed, median {median(values: heavy)} us")
+  if light.length < 5 or heavy.length < 5 or median(values: heavy) <= median(values: light) {
+    log("GPU2D TIMING FAILED")
+    ret 1
+  }
+  log("GPU2D TIMING OK")
+  ret 0
+}

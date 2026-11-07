@@ -609,8 +609,13 @@ the 40 frames after the arriving world is built):
 - Before the zoom, while the scripted finger held the icon, the frames came every 16.7 ms (60 Hz), and at 8.3 ms
   after it lifted.
 
-What it needs next is the GPU's own time per frame, which the 2D canvas cannot measure yet: queued as "[ui animation:
-GPU time of the 2D canvas]", and the fix after it as "[ui animation: page transition frame time 2]".
+**The GPU's time, measured (0.3.41, `RAE_GPU2D_TIMING=1`, two runs of the same `motion` self-test):** every timed frame
+of the zoom out of the icon reads 0 (45 frames timed of the 80), and of the zoom back all but one (1.35 ms). On this
+phone a 2D pass under about a millisecond reads 0: in `checks/gpu2dTiming` 4 full-screen boxes read 0 where a Mac reads
+0.25 ms, and 40 read 1.7 ms. So the GPU draws the zoom in under a millisecond a frame, the CPU's work is 2-5 ms,
+and the frame still takes 17 ms every other frame (median 9-11 ms, 90% 17 ms). The time is lost waiting for the
+drawable, in how the frames are paced, not in drawing: that is where "[ui animation: page transition frame time 2]"
+looks next.
 
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry

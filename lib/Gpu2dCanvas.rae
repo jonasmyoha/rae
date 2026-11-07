@@ -38,6 +38,7 @@ open gpu/GpuRenderPass
 open gpu/GpuIds
 open gpu/FramePacer
 open gpu/Surface
+open Gpu2dCanvasTiming
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 
@@ -154,6 +155,7 @@ type Gpu2dCanvas {
   inFlight: List(SubmissionId)  # submitted frames not yet retired
   framePacer: FramePacer  # waits on the previous frame's GPU work (gpu/FramePacer)
   frameTarget: FrameTarget  # the drawable or the offscreen this frame (gpu/Surface)
+  gpuTiming: Canvas2dTiming  # the frame pass's GPU time under RAE_GPU2D_TIMING (Gpu2dCanvasTiming)
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
   offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
   offscreenView: TextureViewId
@@ -229,6 +231,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       inFlight: List.create(SubmissionId, cap: 4)
       framePacer: createFramePacer()
       frameTarget: createFrameTarget()
+      gpuTiming: createCanvas2dTiming()
       offscreenTexture: noTextureId()
       offscreenView: noTextureViewId()
       offscreenWidth: 0
@@ -912,6 +915,7 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
 func canvasShutdown(canvas: mod Gpu2dCanvas) {
   if let resources: mod GpuResources = canvas.gpuResources {
     drainSubmissions(inFlight: canvas.inFlight, resources: resources)
+    canvas2dTimingShutdown(timing: canvas.gpuTiming, resources: resources)
     retireOffscreen(canvas: canvas, resources: resources)
     retireBuffer(resources: resources, id: canvas.viewport)
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
