@@ -772,8 +772,13 @@ Each step is one queue task that leaves the walkers working.
    fields (`cloudType`, `cirrus`, `cloudHeight`, `cloudScale`) carried to
    the shader by lib/SkyClouds (LightU `cloudShape`); the layer is
    `skyClouds` in lib/sky_hosek.wgsl. Its cost on the Mac was below the
-   pass timing's noise (under about 0.05 ms); on the iPhone it is still to
-   be measured.
+   pass timing's noise (under about 0.05 ms). On an iPhone 15 Pro
+   (2026-11-07, 143 at noon looking up at a sky of cover 0.5, cumulus 1,
+   cirrus 0.6, two `RAE_AB` pairs with the new `clouds` switch) it saved
+   0.00 ms and 0.14 ms, against -0.08 ms and -2.62 ms for the do-nothing
+   `marks` case (the second straddled the phone warming up): about 0.1 ms
+   or less, under the 0.3 ms that would have cut the second puff layer or
+   the cirrus noise. Nothing was cut.
    - Add `CloudField` and the three new weather numbers.
    - Grow `skyClouds` into the tier 1 layer: cloud types (cumulus puffs
      with flat bases, a stratus sheet, cirrus streaks), the two-lobe silver

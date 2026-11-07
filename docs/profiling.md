@@ -201,6 +201,7 @@ cannot see a saving of that size.
 | `marks` | footprints, particles, rain and snow |
 | `ssao`, `bloom`, `depthPyramid` | that pass (what reads its result reads the last one) |
 | `water` | the FFT waves, the water's draw and the opaque snapshot it reads |
+| `clouds` | the sky's cloud layer: the sky is drawn with no cover and no cirrus (the cloud shadow map still draws) |
 
 An unknown name logs `[ab] error:` with the list, and the app ends at once. A new feature worth
 comparing gets a field in `AbSwitches`, a line in `abSwitchOff` and an `if` at its draw.
