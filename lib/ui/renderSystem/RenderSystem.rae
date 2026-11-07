@@ -553,10 +553,9 @@ func paintEntityG(
       canvas: canvas
     )
   }
-  # gpu2d has separate box/image/text pipelines. Flush per entity so later
-  # entities can correctly paint over earlier images/text, matching raylib's
-  # immediate-mode painter order.
-  Gpu2d.flush(canvas: canvas)
+  # gpu2d has separate box/image/text pipelines; the canvas flushes by itself where a later item
+  # would otherwise draw under an earlier one (Gpu2dCanvasFrame canvasKeepOrder), so a node needs no
+  # flush of its own.
   Gpu2d.clearRotation(canvas: canvas)
 }
 

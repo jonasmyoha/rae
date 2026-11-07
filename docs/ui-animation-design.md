@@ -633,6 +633,14 @@ looks next.
 What is left: less CPU in a 2D frame ("[ui 2D canvas: less CPU a frame]"), and a person's tap on the phone
 ("[ui animation: the zoom with a real finger]").
 
+**Less CPU a frame, tried (0.3.42).** The 2D canvas no longer flushes after every node: it flushes only where an item
+would otherwise draw under one already batched (a box after an image or text, an image after text, text in another
+font; `canvasKeepOrder` in lib/Gpu2dCanvasFrame.rae). In 106's home screen the flushes that draw went from 47 to 14 a
+frame, with the reference pictures of 104, 105, 106 and 121 unchanged; its CPU a frame on a Mac fell by about 2%. On
+the phone it changed nothing measurable: the zoom out still had 18 of 40 frames over 9 ms. And one run's zoom back had
+22 of 40 over 9 ms at a CPU of a median 2 ms and a 90% 3 ms a frame, so the CPU a frame is not what sets the pacing
+either. What is left is how the frames are presented: "[ui animation: present pacing on ProMotion]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and

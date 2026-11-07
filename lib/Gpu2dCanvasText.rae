@@ -19,6 +19,7 @@ open gpu/GpuIds
 open Gpu2dCanvas
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
+open Gpu2dCanvasFrame
 
 # ----- text pass (#909) ---------------------------------------------------
 func ensureTextPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
@@ -196,6 +197,7 @@ func canvasDrawGlyphEx(
   loop canvas.textAtlases.length <= ai {
     canvas.textAtlases.add(value: emptyTextAtlas())
   }
+  canvasKeepOrder(canvas: canvas, level: 2, atlas: ai)
   # #971: append the glyph IN PLACE via modAt. The copyAt+mutate+set form
   # this replaced deep-copied the whole accumulated glyph List on EVERY
   # glyph — O(n^2) per frame and the dominant idle malloc/free churn (114:

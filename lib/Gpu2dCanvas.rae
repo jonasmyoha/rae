@@ -38,6 +38,7 @@ open gpu/GpuRenderPass
 open gpu/GpuIds
 open gpu/FramePacer
 open gpu/Surface
+open Gpu2dCanvasFrame
 open Gpu2dCanvasTiming
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
@@ -154,6 +155,10 @@ type Gpu2dCanvas {
   framePass: Ptr  # the open frame's render pass into the offscreen target
   inFlight: List(SubmissionId)  # submitted frames not yet retired
   framePacer: FramePacer  # waits on the previous frame's GPU work (gpu/FramePacer)
+  # What the batch holds since the last flush, for the painter order (canvasKeepOrder):
+  # -1 nothing, 0 boxes, 1 images, 2 text, and which font's text (its atlas, -1 none)
+  batchLevel: Int = -1
+  batchAtlas: Int = -1
   frameTarget: FrameTarget  # the drawable or the offscreen this frame (gpu/Surface)
   gpuTiming: Canvas2dTiming  # the frame pass's GPU time under RAE_GPU2D_TIMING (Gpu2dCanvasTiming)
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
@@ -591,6 +596,7 @@ func pushBox(
   gradientAngle: copy Float
   gradientTo: copy Int
 ) {
+  canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
   # The canvas rotation (#1003): the box's center turns about the pivot and
   # the quad itself turns by the same angle in the shader.
   var boxX: Float = x

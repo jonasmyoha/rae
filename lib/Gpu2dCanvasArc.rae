@@ -4,6 +4,7 @@
 # of Gpu2dCanvas for the 1000-line cap.
 import Math
 open Gpu2dCanvas
+open Gpu2dCanvasFrame
 
 # A ring round (centerX, centerY) of outer `radius` and `thickness`, drawn
 # clockwise from the top over `share` of the turn (1 the whole ring), with
@@ -17,6 +18,7 @@ func canvasDrawArc(
   share: copy Float
   color: copy Int
 ) {
+  canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
   if share <= 0.0 or radius <= 0.0 or thickness <= 0.0 {
     ret
   }

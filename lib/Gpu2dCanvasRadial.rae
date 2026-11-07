@@ -3,6 +3,7 @@
 # a soft round glow is one smooth fill and not stacked rings. Split out of
 # Gpu2dCanvas for the 1000-line cap, like Gpu2dCanvasArc.
 open Gpu2dCanvas
+open Gpu2dCanvasFrame
 
 # A rounded rect (all four corners `radius`) filled with a radial gradient:
 # `from` (0xAARRGGBB) at (centerX, centerY), each a fraction of the box (0.5,
@@ -23,6 +24,7 @@ func canvasDrawRadialGradientRect(
   reach: copy Float
   stop: copy Float
 ) {
+  canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
   if w <= 0.0 or h <= 0.0 {
     ret
   }
