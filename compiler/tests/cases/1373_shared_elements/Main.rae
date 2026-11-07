@@ -1,0 +1,498 @@
+# SharedElement (docs/ui-animation-design.md section 8.3). A page is 400 by 800. The tile is 100 by
+# 100 at
+# (100, 600) on one page, and 400 by 200 at (0, 100) on the next, so its first pose is scale 0.25,
+# stretch 2, x -50, y 450, and it is drawn exactly on the old rectangle. smooth from 450 is at
+# 251.6 after
+# 0.1 s. A push moves the page 400 to the side, and neither the morph nor the bar goes with it.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/animationSystem/HeroTransitionSystem
+open ui/animationSystem/SharedElements
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/pageTransitionSystem/PageTransitionSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+  releaseDeadEntities(world: world, uiSystems: uiSystems)
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+}
+
+func rounded(value: view Float) ret Int {
+  ret Math.round(x: value).toInt()
+}
+
+func drawn(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret "({rounded(value: rect.x)},{rounded(value: rect.y)} {rounded(value: rect.w)}x{rounded(
+    value: rect.h
+  )})"
+}
+
+func alphaOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Int {
+  ret rounded(
+    value: componentView(
+      this: uiSystems.transform2d.worldVisuals
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    ).alpha * 100.0
+  )
+}
+
+func hitName(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  let entityId: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) {
+    ret "{componentView(this: world.onClicks, entityId: entityId).actionId}"
+  }
+  ret "nothing"
+}
+
+func mountPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  source: view String
+  settings: view String
+) ret EntityId {
+  uiSystems.animation.settings = parseAnimationSettings(animation: settings, hold: "")
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: source)
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  ret root
+}
+
+func oldVisual(system: view PageTransitionSystem, nodeId: view String) ret String {
+  loop let page: view LeavingWorld in system.leaving {
+    let pose: AnimationPose = animationPoseOf(
+      uiSystems: page.uiSystems
+      entityId: nodeOf(world: page.world, nodeId: nodeId)
+    )
+    ret "opacity {pose.opacity}"
+  }
+  ret "(no old page)"
+}
+
+func stepAll(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  deltaTime: view Float
+) {
+  loop let page: mod LeavingWorld in system.leaving {
+    animationSystem(world: page.world, uiSystems: page.uiSystems, deltaTime: deltaTime)
+    transformSystem(world: page.world, uiSystems: page.uiSystems)
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+}
+
+func newWorlds(kind: view String) {
+  log("--- two worlds, a {kind}")
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var source: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"Group\",\"Bar\",\"Moved\",\"Plain\"]\},\"Group\":\{\"Rect\":\{\"x\":100,\"y\":600,\"w\":200,\"h\":100\},\"Children\":[\"Tile\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":20\},\"Children\":[\"TileText\"]\},\"TileText\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"Text\":\{\"text\":\"tile\"\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"bar\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+  var next: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+  if kind is "sibling" {
+    source = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"sibling\"\},\"Children\":[\"Group\",\"Bar\",\"Moved\",\"Plain\"]\},\"Group\":\{\"Rect\":\{\"x\":100,\"y\":600,\"w\":200,\"h\":100\},\"Children\":[\"Tile\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":20\},\"Children\":[\"TileText\"]\},\"TileText\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"Text\":\{\"text\":\"tile\"\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"bar\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    next = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"sibling\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+  }
+  var root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: source
+    settings: ""
+  )
+  let tileBefore: EntityId = nodeOf(world: world, nodeId: "Tile")
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: next
+    settings: ""
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  transformSystem(world: world, uiSystems: uiSystems)
+  let pose: AnimationPose = poseOfNode(world: world, uiSystems: uiSystems, nodeId: "Tile")
+  log("the tile's pose: scale {pose.scale} stretch {pose.stretchY} x {pose.x} y {pose.y}")
+  log(
+    "the tile is drawn at {drawn(world: world, uiSystems: uiSystems, nodeId: "Tile")}, on the old rectangle, while the page is at x {rounded(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: root).x
+    )} with opacity {rounded(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: root).opacity * 100.0
+    )}%"
+  )
+  log(
+    "its own Appear does not pull it: {componentHas(
+      this: world.appearSeens
+      entityId: nodeOf(world: world, nodeId: "Tile")
+    )}, alpha {alphaOf(world: world, uiSystems: uiSystems, nodeId: "Tile")}%"
+  )
+  log("the bar stays at {drawn(world: world, uiSystems: uiSystems, nodeId: "Bar")}, alpha {alphaOf(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Bar"
+  )}%, and takes taps at once: {hitName(
+    world: world
+    uiSystems: uiSystems
+    x: 200.0
+    y: 770.0
+  )}")
+  log(
+    "not at one place, so it goes with the page: {drawn(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Moved"
+    )}; no key, with the page: {drawn(world: world, uiSystems: uiSystems, nodeId: "Plain")}"
+  )
+  log(
+    "the old page: the tile {oldVisual(system: system, nodeId: "Tile")}, the bar {oldVisual(
+      system: system
+      nodeId: "Bar"
+    )}, what is not shared {oldVisual(system: system, nodeId: "Plain")}"
+  )
+  loop var i: Int = 0, i < 10, ++i {
+    stepAll(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      deltaTime: 0.01
+    )
+  }
+  log(
+    "0.1 s: y {rounded(value: poseOfNode(world: world, uiSystems: uiSystems, nodeId: "Tile").y)}, drawn at {drawn(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Tile"
+    )}; the bar {drawn(world: world, uiSystems: uiSystems, nodeId: "Bar")}; the page x {rounded(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: root).x
+    )}"
+  )
+  loop var i: Int = 0, i < 400 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    stepAll(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      deltaTime: 0.016
+    )
+  }
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  log(
+    "settled: the tile {drawn(world: world, uiSystems: uiSystems, nodeId: "Tile")}, the bar {drawn(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Bar"
+    )}, {componentCount(this: uiSystems.animation.sharedNodes)} shared, {componentCount(
+      this: uiSystems.animation.poses
+    )} poses, radius {componentView(
+      this: world.cornerRadiuses
+      entityId: nodeOf(world: world, nodeId: "Tile")
+    ).radius}"
+  )
+}
+
+func poseOfNode(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeId: view String
+) ret AnimationPose {
+  ret animationPoseOf(uiSystems: uiSystems, entityId: nodeOf(world: world, nodeId: nodeId))
+}
+
+func radiusFollows() {
+  log("--- the corner radius, as seen")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    settings: ""
+  )
+  let from: SharedSource = {
+    entityId: noEntity()
+    key: "tile"
+    x: 100.0
+    y: 600.0
+    w: 100.0
+    h: 100.0
+    radius: 20.0
+    onScreen: true
+  }
+  let sources: List(SharedSource) = [from]
+  let taken: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: sources
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  let tile: EntityId = nodeOf(world: world, nodeId: "Tile")
+  log(
+    "first frame: {componentView(this: world.cornerRadiuses, entityId: tile).radius} at scale 0.25, so 20 as seen"
+  )
+  let far: SharedSource = {
+    entityId: noEntity()
+    key: "tile"
+    x: 900.0
+    y: 600.0
+    w: 100.0
+    h: 100.0
+    radius: 20.0
+    onScreen: false
+  }
+  settle(world: world, uiSystems: uiSystems)
+  let farSources: List(SharedSource) = [far]
+  let nothing: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: farSources
+  )
+  log(
+    "a source off screen makes no morph: {nothing.length} taken, {componentCount(
+      this: uiSystems.animation.sharedNodes
+    )} shared"
+  )
+}
+
+func resident() {
+  log("--- one world")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let screen: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"One\",\"Two\"]\},\"One\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"OneBar\"]\},\"OneBar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\}\},\"Two\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"TwoBar\"]\},\"TwoBar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\}\}\}\}"
+    settings: ""
+  )
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  let one: EntityId = nodeOf(world: world, nodeId: "One")
+  let two: EntityId = nodeOf(world: world, nodeId: "Two")
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: one
+    toRoot: two
+    back: false
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "the new bar stays at {drawn(world: world, uiSystems: uiSystems, nodeId: "TwoBar")}; the old is hidden: opacity {poseOfNode(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "OneBar"
+    ).opacity}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {componentCount(this: uiSystems.animation.poses)} poses, so the old bar is ready for next time; {componentCount(
+      this: uiSystems.animation.sharedNodes
+    )} shared"
+  )
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: two
+    toRoot: one
+    back: true
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  loop var i: Int = 0, i < 5, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+  pageTransitionResident(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    fromRoot: one
+    toRoot: two
+    back: false
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "turned around: the bar it comes back to is seen {poseOfNode(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "TwoBar"
+    ).opacity}, drawn at {drawn(world: world, uiSystems: uiSystems, nodeId: "TwoBar")}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {componentCount(this: uiSystems.animation.poses)} poses, {componentCount(
+      this: uiSystems.animation.sharedNodes
+    )} shared"
+  )
+}
+
+func heroAlias() {
+  log("--- HeroWidget is a morph")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let screen: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"From\",\"To\"]\},\"From\":\{\"Rect\":\{\"x\":10,\"y\":20,\"w\":40,\"h\":40\},\"HeroWidget\":\{\"key\":\"cover\"\}\},\"To\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":200,\"h\":200\},\"HeroWidget\":\{\"key\":\"cover\"\}\}\}\}"
+    settings: ""
+  )
+  let from: EntityId = nodeOf(world: world, nodeId: "From")
+  let to: EntityId = nodeOf(world: world, nodeId: "To")
+  log("started: {spawnHeroTransition(
+    world: world
+    uiSystems: uiSystems
+    key: "cover"
+    source: from
+    target: to
+  )}")
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("drawn at {drawn(world: world, uiSystems: uiSystems, nodeId: "To")}, on the source")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "landed at {drawn(world: world, uiSystems: uiSystems, nodeId: "To")}, {componentCount(
+      this: uiSystems.animation.sharedNodes
+    )} shared"
+  )
+  log("no box, no flight: {spawnHeroTransition(
+    world: world
+    uiSystems: uiSystems
+    key: "cover"
+    source: noEntity()
+    target: to
+  )}")
+}
+
+func outcomes() {
+  log("--- none, off")
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"Group\",\"Bar\",\"Moved\",\"Plain\"]\},\"Group\":\{\"Rect\":\{\"x\":100,\"y\":600,\"w\":200,\"h\":100\},\"Children\":[\"Tile\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":20\},\"Children\":[\"TileText\"]\},\"TileText\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"Text\":\{\"text\":\"tile\"\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"bar\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    settings: ""
+  )
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"none\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    settings: ""
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log(
+    "none: {componentCount(this: uiSystems.animation.sharedNodes)} shared, in flight {pageTransitionInFlight(
+      system: system
+    )}"
+  )
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: root
+    back: false
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    settings: "off"
+  )
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  log(
+    "off: {componentCount(this: uiSystems.animation.sharedNodes)} shared, in flight {pageTransitionInFlight(
+      system: system
+    )}"
+  )
+}
+
+func main() {
+  newWorlds(kind: "push")
+  newWorlds(kind: "sibling")
+  radiusFollows()
+  resident()
+  heroAlias()
+  outcomes()
+}

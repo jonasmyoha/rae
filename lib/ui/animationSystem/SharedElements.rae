@@ -1,0 +1,366 @@
+# What stays across a page transition (docs/ui-animation-design.md section 8.3): a node of each
+# page with one key. Across worlds too, as what is carried from the old page is plain data.
+#
+#   stay: on both pages at one place, it does not take part. The new one shows from the first
+#   frame, the
+#   old one is hidden, and the page's pose does not move it. A bar or a header stays still.
+#
+#   morph: the new node moves and resizes from the old one's rectangle with a spring, by its pose,
+#   so
+#   layout never runs and it can be any node with whatever is under it.
+#
+# While it does this a node is a SharedNode: the transform pass takes its page's pose back out
+# of it, and the painter leaves it for a last pass, over its page and outside its clips.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Queue
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/ThemeResolved
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+
+# How far apart two places may be and still be one place, in points
+const sharedSamePlace: Float = 1.0
+
+# A node that takes part, on one page
+type SharedEntry {
+  entityId: EntityId
+  key: String
+  mode: SharedMode
+  motion: String
+}
+
+# What is known of the old node, to carry to the new page
+type SharedSource {
+  entityId: EntityId
+  key: String
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  radius: Float
+  onScreen: Bool
+}
+
+# A node's place by layout alone: no pose, its own or any above it
+func sharedRestRect(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret WorldRect {
+  var x: Float = 0.0
+  var y: Float = 0.0
+  var w: Float = 0.0
+  var h: Float = 0.0
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    let box: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    w = box.size.x
+    h = box.size.y
+  }
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop isNone(this: at) is false and guard < 256 {
+    let place: Vec2 = sharedLocalPlace(uiSystems: uiSystems, entityId: at)
+    x = x + place.x
+    y = y + place.y
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+    guard = guard + 1
+  }
+  ret WorldRect { x: x, y: y, w: w, h: h }
+}
+
+func sharedRadiusOf(world: view UiWorld, entityId: view EntityId) ret Float {
+  if componentHas(this: world.cornerRadiuses, entityId: entityId) {
+    ret componentView(this: world.cornerRadiuses, entityId: entityId).radius
+  }
+  ret 0.0
+}
+
+func sharedIsUnder(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  root: view EntityId
+) ret Bool {
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop isNone(this: at) is false and guard < 256 {
+    if at is root {
+      ret true
+    }
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+    guard = guard + 1
+  }
+  ret false
+}
+
+# The page's nodes that take part. A HeroWidget is a morph.
+func sharedEntriesOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  root: view EntityId
+) ret List(SharedEntry) {
+  var entries: List(SharedEntry) = List.create(SharedEntry, cap: 4)
+  loop var i: Int = 0, i < componentCount(this: world.sharedElements), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.sharedElements, i: i)
+    if sharedIsUnder(uiSystems: uiSystems, entityId: entityId, root: root) {
+      let shared: view SharedElement = componentView(this: world.sharedElements, entityId: entityId)
+      entries.add(
+        value: SharedEntry {
+          entityId: entityId
+          key: "{shared.key}"
+          mode: shared.mode
+          motion: "{shared.motion}"
+        }
+      )
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: world.heroWidgets), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    if sharedIsUnder(uiSystems: uiSystems, entityId: entityId, root: root) and componentHas(
+      this: world.sharedElements
+      entityId: entityId
+    ) is false {
+      entries.add(
+        value: SharedEntry {
+          entityId: entityId
+          key: "{componentView(this: world.heroWidgets, entityId: entityId).key}"
+          mode: SharedMode.morph
+          motion: "smooth"
+        }
+      )
+    }
+  }
+  ret entries
+}
+
+func sharedSourceOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  key: view String
+) ret SharedSource {
+  var rect: WorldRect = sharedRestRect(world: world, uiSystems: uiSystems, entityId: entityId)
+  # Where it is drawn now: it may be moving
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) and componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  ) {
+    rect = worldRectOf(
+      wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+      cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+    )
+  }
+  ret SharedSource {
+    entityId: entityId
+    key: "{key}"
+    x: rect.x
+    y: rect.y
+    w: rect.w
+    h: rect.h
+    radius: sharedRadiusOf(world: world, entityId: entityId)
+    onScreen: rect.x + rect.w > 0.0 and rect.x < world.layoutW and rect.y + rect.h > 0.0 and rect.y < world.layoutH
+  }
+}
+
+# Everything the old page can hand over
+func sharedSourcesOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  root: view EntityId
+) ret List(SharedSource) {
+  var sources: List(SharedSource) = List.create(SharedSource, cap: 4)
+  let entries: List(SharedEntry) = sharedEntriesOf(world: world, uiSystems: uiSystems, root: root)
+  loop let entry: view SharedEntry in entries {
+    sources.add(value: sharedSourceOf(
+      world: world
+      uiSystems: uiSystems
+      entityId: entry.entityId
+      key: entry.key
+    ))
+  }
+  ret sources
+}
+
+func sharedMarkSeen(world: mod UiWorld, uiSystems: view UiSystems, entityId: view EntityId) {
+  # Its own Appear would pull it away from what it is doing
+  if componentHas(this: world.appearSeens, entityId: entityId) is false {
+    componentSet(this: world.appearSeens, entityId: entityId, data: AppearSeen { shown: true })
+  }
+}
+
+# The target node comes from the source's rectangle. `pageRoot` is the page it must not move
+# with, or none.
+func sharedMorph(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  target: view EntityId
+  pageRoot: view EntityId
+  source: view SharedSource
+  motion: view String
+  isHero: view Bool
+) {
+  let rest: WorldRect = sharedRestRect(world: world, uiSystems: uiSystems, entityId: target)
+  if rest.w <= 0.0 or rest.h <= 0.0 {
+    ret
+  }
+  let scale: Float = source.w / rest.w
+  var stretchY: Float = 1.0
+  if scale > 0.0 {
+    stretchY = source.h / rest.h / scale
+  }
+  animationDropMotion(uiSystems: uiSystems, entityId: target)
+  sharedMarkSeen(world: world, uiSystems: uiSystems, entityId: target)
+  let name: String = motionNameOr(world: world, name: motion, fallback: "smooth")
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: target
+      hasFrom: true
+      from: AnimationPose {
+        scale: scale
+        stretchY: stretchY
+        x: source.x + source.w / 2.0 - (rest.x + rest.w / 2.0)
+        y: source.y + source.h / 2.0 - (rest.y + rest.h / 2.0)
+      }
+      to: AnimationPose {}
+      motion: name
+      opacityMotion: "fadeIn"
+      delaySeconds: 0.0
+      phase: AnimationPhase.moving
+      onEnd: AnimationEnd.stay
+    }
+  )
+  var progress: AnimationChannel = createChannel(
+    current: 0.0
+    target: 1.0
+    motion: animationMotionNamed(world: world, entityId: target, name: name)
+    restDistance: animationRestRatio
+  )
+  if uiSystems.animation.settings.hold >= 0.0 {
+    channelHold(channel: progress, share: uiSystems.animation.settings.hold)
+  }
+  var key: String = ""
+  if isHero {
+    key = "{source.key}"
+  }
+  componentSet(
+    this: uiSystems.animation.sharedNodes
+    entityId: target
+    data: SharedNode {
+      pageRoot: pageRoot
+      key: key
+      fromRadius: source.radius
+      toRadius: sharedRadiusOf(world: world, entityId: target)
+      progress: progress
+    }
+  )
+}
+
+# The new page's nodes take over from the old page's. Returns the old nodes that were taken
+# over, to hide.
+func sharedArrive(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+  sources: view List(SharedSource)
+) ret List(EntityId) {
+  var taken: List(EntityId) = List.create(EntityId, cap: 4)
+  if sources.length is 0 {
+    ret taken
+  }
+  let entries: List(SharedEntry) = sharedEntriesOf(world: world, uiSystems: uiSystems, root: root)
+  loop let entry: view SharedEntry in entries {
+    loop let source: view SharedSource in sources {
+      if source.key is entry.key {
+        if entry.mode is SharedMode.morph {
+          if source.onScreen {
+            sharedMorph(
+              world: world
+              uiSystems: uiSystems
+              target: entry.entityId
+              pageRoot: root
+              source: source
+              motion: entry.motion
+              isHero: false
+            )
+            taken.add(value: source.entityId)
+          }
+        } else if sharedAtOnePlace(
+          world: world
+          uiSystems: uiSystems
+          entry: entry
+          source: source
+        ) {
+          animationDropMotion(uiSystems: uiSystems, entityId: entry.entityId)
+          sharedMarkSeen(world: world, uiSystems: uiSystems, entityId: entry.entityId)
+          let radius: Float = sharedRadiusOf(world: world, entityId: entry.entityId)
+          componentSet(
+            this: uiSystems.animation.sharedNodes
+            entityId: entry.entityId
+            data: SharedNode {
+              pageRoot: root
+              key: ""
+              fromRadius: radius
+              toRadius: radius
+              progress: createChannel(
+                current: 1.0
+                target: 1.0
+                motion: MotionToken {}
+                restDistance: animationRestRatio
+              )
+            }
+          )
+          taken.add(value: source.entityId)
+        }
+      }
+    }
+  }
+  ret taken
+}
+
+func sharedAtOnePlace(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entry: view SharedEntry
+  source: view SharedSource
+) ret Bool {
+  let rest: WorldRect = sharedRestRect(world: world, uiSystems: uiSystems, entityId: entry.entityId)
+  ret Math.abs(value: rest.x - source.x) <= sharedSamePlace and Math.abs(value: rest.y - source.y) <= sharedSamePlace and Math.abs(
+    value: rest.w - source.w
+  ) <= sharedSamePlace and Math.abs(value: rest.h - source.h) <= sharedSamePlace
+}
+
+# The old nodes are hidden by a pose, without touching layout. When their page has gone it goes too.
+func sharedHideSources(uiSystems: mod UiSystems, taken: view List(EntityId)) {
+  loop let entityId: view EntityId in taken {
+    animationDropMotion(uiSystems: uiSystems, entityId: entityId)
+    componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
+    componentSet(
+      this: uiSystems.animation.poses
+      entityId: entityId
+      data: AnimationPose { opacity: 0.0 }
+    )
+  }
+}
+
+# A page that is leaving takes its nodes with it, wherever they had got to
+func sharedReleaseUnder(uiSystems: mod UiSystems, root: view EntityId) {
+  var under: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    if sharedIsUnder(uiSystems: uiSystems, entityId: entityId, root: root) {
+      under.add(value: entityId)
+    }
+  }
+  loop let entityId: view EntityId in under {
+    componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
+  }
+}

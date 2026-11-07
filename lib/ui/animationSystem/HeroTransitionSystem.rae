@@ -1,25 +1,14 @@
-# HeroTransitionSystem — the shared-element ("hero") transition as ECS.
-#
-# When navigation moves between two pages that both show the same hero — a
-# `HeroWidget { key }` on each side, e.g. an album cover tile and the album
-# page's header cover — `spawnHeroTransition` creates ONE runtime entity in
-# the overlay layer: a plain `Sprite` + `CornerRadius` root (no custom paint
-# path; the ordinary render pass draws it) carrying a `HeroTransition` with
-# the source and destination rects, and hides the destination hero. Every
-# frame `heroTransitionSystem` eases the entity's box from one rect to the
-# other (an ease-in-out cubic); at `duration` it reveals the destination and
-# destroys the entity. The destination is hidden with `TransformFx.visible`,
-# not `Active`: an inactive child is skipped by LAYOUT and its siblings would
-# shift for the duration, whereas an invisible one keeps its box and is only
-# not painted.
-import Easing
+# HeroTransitionSystem: the hero's way into a shared-element morph
+# (ui/animationSystem/SharedElements), for a host that shows two pages in one world with no page
+# transition. `HeroWidget { key }` is another way to write `SharedElement { key, mode: morph }`,
+# so a scene with one needs no change.
 open ui/Ecs
 open ui/Components
-open ui/Layer
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
+open ui/animationSystem/SharedElements
 
 # The `HeroWidget` with `key` under the page `pageId`, or noEntity().
 func findHeroOnPage(
@@ -54,220 +43,41 @@ func heroPlaced(world: view UiWorld, uiSystems: view UiSystems, entityId: view E
   ret componentHas(this: uiSystems.layout.computedRects, entityId: entityId)
 }
 
-# Is any of the hero's box inside the world's extent? A source the user
-# cannot see (a grid tile scrolled out of view) makes no shared-element
-# transition: the destination just appears, as without one.
-func heroOnScreen(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  entityId: view EntityId
-) ret Bool {
-  let at: view WorldTransform2D = componentView(
-    this: uiSystems.transform2d.worldTransforms
-    entityId: entityId
-  )
-  let box: view ComputedRect = componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
-  if at.position.x + box.size.x <= 0.0 or at.position.x >= world.layoutW {
-    ret false
-  }
-  if at.position.y + box.size.y <= 0.0 or at.position.y >= world.layoutH {
-    ret false
-  }
-  ret true
-}
-
-func heroRadius(world: view UiWorld, entityId: view EntityId) ret Float {
-  if componentHas(this: world.cornerRadiuses, entityId: entityId) {
-    ret componentView(this: world.cornerRadiuses, entityId: entityId).radius
-  }
-  ret 0.0
-}
-
-# Show / hide a hero without touching layout.
-func setHeroVisible(world: mod UiWorld, entityId: view EntityId, visible: view Bool) {
-  if isNone(this: entityId) {
-    ret
-  }
-  if componentHas(this: world.transforms, entityId: entityId) {
-    let fx: mod TransformFx = componentMod(this: world.transforms, entityId: entityId)
-    fx.visible = visible
-    ret
-  }
-  let fx: TransformFx = {
-    scaleX: 1.0
-    scaleY: 1.0
-    rotation: 0.0
-    alpha: 1.0
-    visible: visible
-    pivot: Vec2 { x: 0.5, y: 0.5 }
-    anchor: Vec2 { x: 0.5, y: 0.5 }
-  }
-  componentSet(this: world.transforms, entityId: entityId, data: fx)
-}
-
-# Place the transition entity's box: a fixed Rect for the size and an Offset
-# for the position (a parentless overlay root is positioned by its Offset).
-func placeHeroBox(
-  world: mod UiWorld
-  entityId: view EntityId
-  x: view Float
-  y: view Float
-  w: view Float
-  h: view Float
-  radius: view Float
-) {
-  let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
-  componentSet(this: world.rects, entityId: entityId, data: rect)
-  let offset: Offset = { delta: Vec2 { x: x, y: y } }
-  componentSet(this: world.offsets, entityId: entityId, data: offset)
-  let corner: CornerRadius = { radius: radius }
-  componentSet(this: world.cornerRadiuses, entityId: entityId, data: corner)
-}
-
-# Start a transition from `source` to `target` (both laid-out `HeroWidget`
-# entities sharing `key`): the overlay entity takes the source's sprite and
-# box, the target is hidden until it lands. False — and nothing changes —
-# when either side has no laid-out box yet or the source is off screen.
+# The hero `target` flies from where `source` is drawn (both laid out, sharing `key`). False,
+# and nothing changes, when either has no box yet or the source is off screen, as a grid tile
+# scrolled out of view is: the destination then just appears.
 func spawnHeroTransition(
   world: mod UiWorld
   uiSystems: mod UiSystems
   key: view String
   source: view EntityId
   target: view EntityId
-  now: view Float64
-  duration: view Float
-  layerId: view String
 ) pub ret Bool {
-  if heroPlaced(world: world, uiSystems: uiSystems, entityId: source) is false {
-    ret false
-  }
-  if heroPlaced(world: world, uiSystems: uiSystems, entityId: target) is false {
-    ret false
-  }
-  if heroOnScreen(world: world, uiSystems: uiSystems, entityId: source) is false {
-    ret false
-  }
-  let sourceAt: view WorldTransform2D = componentView(
-    this: uiSystems.transform2d.worldTransforms
-    entityId: source
-  )
-  let sourceBox: view ComputedRect = componentView(
-    this: uiSystems.layout.computedRects
-    entityId: source
-  )
-  let targetAt: view WorldTransform2D = componentView(
-    this: uiSystems.transform2d.worldTransforms
-    entityId: target
-  )
-  let targetBox: view ComputedRect = componentView(
-    this: uiSystems.layout.computedRects
-    entityId: target
-  )
-  let flight: EntityId = createEntity(world: world)
-  let transition: HeroTransition = {
-    key: "{key}"
-    target: target
-    fromX: sourceAt.position.x
-    fromY: sourceAt.position.y
-    fromW: sourceBox.size.x
-    fromH: sourceBox.size.y
-    fromRadius: heroRadius(world: world, entityId: source)
-    toX: targetAt.position.x
-    toY: targetAt.position.y
-    toW: targetBox.size.x
-    toH: targetBox.size.y
-    toRadius: heroRadius(world: world, entityId: target)
-    startedAt: now
-    duration: duration
-  }
-  let size: Size = {
-    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
-    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
-  }
-  componentSet(this: world.sizes, entityId: flight, data: size)
-  placeHeroBox(
+  if heroPlaced(world: world, uiSystems: uiSystems, entityId: source) is false or heroPlaced(
     world: world
-    entityId: flight
-    x: transition.fromX
-    y: transition.fromY
-    w: transition.fromW
-    h: transition.fromH
-    radius: transition.fromRadius
-  )
-  # A real COPY: the flight gets its own Sprite in the SAME table, and adding a
-  # row for a new entity may move the table's storage, so a view of the
-  # source's row cannot be held across it.
-  if let sprite: Sprite = componentCopy(this: world.sprites, entityId: source) {
-    componentSet(this: world.sprites, entityId: flight, data: own sprite)
-  }
-  setLayerById(world: world, entityId: flight, id: layerId)
-  log(
-    "[hero] start key={key} from=({transition.fromX},{transition.fromY} {transition.fromW}x{transition.fromH}) to=({transition.toX},{transition.toY} {transition.toW}x{transition.toH})"
-  )
-  componentSet(
-    this: uiSystems.heroTransition.heroTransitions
-    entityId: flight
-    data: own transition
-  )
-  setHeroVisible(world: world, entityId: target, visible: false)
-  ret true
-}
-
-func lerp(from: view Float, to: view Float, t: view Float) ret Float {
-  ret from + (to - from) * t
-}
-
-# Advance every transition in flight. Returns whether any is still moving
-# (the host keeps rendering at frame cadence while true). A finished one
-# reveals its target and is destroyed.
-func heroTransitionSystem(
-  world: mod UiWorld
-  uiSystems: view UiSystems
-  now: view Float64
-) pub ret Bool {
-  let n: Int = componentCount(this: uiSystems.heroTransition.heroTransitions)
-  if n is 0 {
+    uiSystems: uiSystems
+    entityId: target
+  ) is false {
     ret false
   }
-  var flights: List(EntityId) = List.create(EntityId, cap: n)
-  var i: Int = 0
-  loop i < n {
-    flights.add(value: componentEntityAt(this: uiSystems.heroTransition.heroTransitions, i: i))
-    i = i + 1
+  let from: SharedSource = sharedSourceOf(
+    world: world
+    uiSystems: uiSystems
+    entityId: source
+    key: key
+  )
+  if from.onScreen is false {
+    ret false
   }
-  var moving: Bool = false
-  loop let flight: view EntityId in flights {
-    let transition: view HeroTransition = componentView(
-      this: uiSystems.heroTransition.heroTransitions
-      entityId: flight
-    )
-    var t: Float = 1.0
-    if transition.duration > 0.0 {
-      t = ((now - transition.startedAt) as Float) / transition.duration
-    }
-    if t >= 1.0 {
-      setHeroVisible(world: world, entityId: transition.target, visible: true)
-      log("[hero] done key={transition.key}")
-      destroyEntity(world: world, entityId: flight)
-    } else {
-      if t < 0.0 {
-        t = 0.0
-      }
-      let eased: Float = Easing.easeInOutCubic(t: t)
-      placeHeroBox(
-        world: world
-        entityId: flight
-        x: lerp(from: transition.fromX, to: transition.toX, t: eased)
-        y: lerp(from: transition.fromY, to: transition.toY, t: eased)
-        w: lerp(from: transition.fromW, to: transition.toW, t: eased)
-        h: lerp(from: transition.fromH, to: transition.toH, t: eased)
-        radius: lerp(from: transition.fromRadius, to: transition.toRadius, t: eased)
-      )
-      moving = true
-    }
-  }
-  ret moving
+  log("[hero] start key={key} from=({from.x},{from.y} {from.w}x{from.h})")
+  sharedMorph(
+    world: world
+    uiSystems: uiSystems
+    target: target
+    pageRoot: noEntity()
+    source: from
+    motion: "smooth"
+    isHero: true
+  )
+  ret true
 }

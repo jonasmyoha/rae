@@ -102,13 +102,9 @@ type AnimationSystem {
   textGeneration: Int = -1
   # listMotionSystem: what each animated list last showed
   listMotions: ComponentTable(ListMotionState)
+  # SharedElements: the nodes doing a shared element's work
+  sharedNodes: ComponentTable(SharedNode)
   lastFrameNs: Int = 0
-}
-
-# The shared-element transitions in flight (HeroTransitionSystem writes,
-# an app's frame wait reads `view`).
-type HeroTransitionSystem {
-  heroTransitions: ComponentTable(HeroTransition)
 }
 
 # The button system (buttonSystem/): the per-entity pointer state it derives
@@ -184,7 +180,6 @@ type UiSystems {
   hierarchy: HierarchySystem
   transform2d: Transform2dSystem
   animation: AnimationSystem
-  heroTransition: HeroTransitionSystem
   button: ButtonSystem
   textField: TextFieldSystem
 }
@@ -217,9 +212,9 @@ func createUiSystems() ret UiSystems {
       textSeens: ComponentTable.create(TextSeen)
       textGhosts: ComponentTable.create(TextGhost)
       listMotions: ComponentTable.create(ListMotionState)
+      sharedNodes: ComponentTable.create(SharedNode)
       settings: animationSettingsFromEnv()
     }
-    heroTransition: HeroTransitionSystem { heroTransitions: ComponentTable.create(HeroTransition) }
     button: ButtonSystem {
       interactions: ComponentTable.create(Interaction)
       hoverFades: ComponentTable.create(HoverFade)
@@ -258,7 +253,7 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.textSeens, entityId: entityId)
   componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
   componentRemove(this: uiSystems.animation.listMotions, entityId: entityId)
-  componentRemove(this: uiSystems.heroTransition.heroTransitions, entityId: entityId)
+  componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)
 }

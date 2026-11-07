@@ -23,6 +23,7 @@
 # Coordinate convention: x grows right, y grows down (raylib-friendly).
 # rotation is in radians. scale defaults to 1.0. alpha defaults to 1.0.
 import Math
+open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 import ecs/Transform
@@ -188,7 +189,7 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
       originX = originX + pose.x
       originY = originY + pose.y
       scaleX = scaleX * pose.scale
-      scaleY = scaleY * pose.scale
+      scaleY = scaleY * pose.scale * pose.stretchY
       rotation = rotation + pose.rotation
     }
     if rotation is not 0.0 or scaleX is not 1.0 or scaleY is not 1.0 {
@@ -208,6 +209,112 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
     }
     componentSet(this: uiSystems.transform2d.localTransforms, entityId: entityId, data: local)
   }
+  sharedTakeOutPagePose(world: world, uiSystems: uiSystems)
+}
+
+# A node's local place by layout alone
+func sharedLocalPlace(uiSystems: view UiSystems, entityId: view EntityId) ret Vec2 {
+  var x: Float = 0.0
+  var y: Float = 0.0
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    let box: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    x = box.position.x
+    y = box.position.y
+  }
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
+    let moved: view RuntimeOffset = componentView(
+      this: uiSystems.transform2d.runtimeOffsets
+      entityId: entityId
+    )
+    x = x + moved.delta.x
+    y = y + moved.delta.y
+  }
+  ret Vec2 { x: x, y: y }
+}
+
+# A shared node does not take its page's pose. World place is page place + page scale * local
+# place, so
+# this is the local place that lands it where it would be with the page at rest. The page's pose
+# does not
+# rotate, and the nodes between are taken to have no scale of their own.
+func sharedTakeOutPagePose(world: view UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    let root: EntityId = componentView(this: uiSystems.animation.sharedNodes, entityId: entityId).pageRoot
+    if isNone(this: root) is false and componentHas(
+      this: uiSystems.transform2d.localTransforms
+      entityId: root
+    ) and componentHas(this: uiSystems.transform2d.localTransforms, entityId: entityId) {
+      let rootLocal: view Transform2D = componentView(
+        this: uiSystems.transform2d.localTransforms
+        entityId: root
+      )
+      let scale: Float = rootLocal.scale.x
+      if scale > 0.0 {
+        let rest: Vec2 = sharedLocalPlace(uiSystems: uiSystems, entityId: root)
+        let awayX: Float = rest.x - rootLocal.position.x
+        let awayY: Float = rest.y - rootLocal.position.y
+        # The parents' place under the page
+        var underX: Float = 0.0
+        var underY: Float = 0.0
+        var at: EntityId = entityId
+        var guard: Int = 0
+        loop guard < 256 and componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+          at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+          if at is root {
+            guard = 256
+          } else {
+            let place: Vec2 = sharedLocalPlace(uiSystems: uiSystems, entityId: at)
+            underX = underX + place.x
+            underY = underY + place.y
+            guard = guard + 1
+          }
+        }
+        let local: mod Transform2D = componentMod(
+          this: uiSystems.transform2d.localTransforms
+          entityId: entityId
+        )
+        local.position.x = (awayX + underX + local.position.x) / scale - underX
+        local.position.y = (awayY + underY + local.position.y) / scale - underY
+        local.scale.x = local.scale.x / scale
+        local.scale.y = local.scale.y / scale
+      }
+    }
+  }
+}
+
+# The alpha a shared node inherits: from everything above it but its page's pose
+func sharedParentAlpha(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  root: view EntityId
+) ret Float {
+  var alpha: Float = 1.0
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop guard < 256 and componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    alpha = alpha * opacity(world: world, entityId: at) * fxOf(world: world, entityId: at).alpha
+    if at is root {
+      if componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+        ret alpha * worldVisualOf(
+          world: world
+          uiSystems: uiSystems
+          entityId: componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+        ).alpha
+      }
+      ret alpha
+    }
+    if componentHas(this: uiSystems.animation.poses, entityId: at) {
+      alpha = alpha * componentView(this: uiSystems.animation.poses, entityId: at).opacity
+    }
+    guard = guard + 1
+  }
+  ret alpha
 }
 
 # Accumulate alpha/visible down the hierarchy into WorldVisual, in the SAME
@@ -248,11 +355,26 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
         uiSystems: uiSystems
         entityId: link.parent
       )
+      var inherited: Float = parentWv.alpha
+      if componentHas(this: uiSystems.animation.sharedNodes, entityId: entityId) {
+        let root: EntityId = componentView(
+          this: uiSystems.animation.sharedNodes
+          entityId: entityId
+        ).pageRoot
+        if isNone(this: root) is false {
+          inherited = sharedParentAlpha(
+            world: world
+            uiSystems: uiSystems
+            entityId: entityId
+            root: root
+          )
+        }
+      }
       let wv: WorldVisual = composeVisual(
         world: world
         uiSystems: uiSystems
         entityId: entityId
-        parentAlpha: parentWv.alpha
+        parentAlpha: inherited
         parentVisible: parentWv.visible
       )
       componentSet(this: uiSystems.transform2d.worldVisuals, entityId: entityId, data: wv)
@@ -329,7 +451,7 @@ func createTransformCache() pub ret TransformCache {
 # accumulateVisibility; we don't track `uiSystems.transform2d.worldTransforms` itself (nor the
 # derived localTransforms / worldVisuals) because we're the only writer
 # and any external mutation would still be observable through one of
-# the other tables (e.g. setHeroVisible reads computedRects first).
+# the other tables (e.g. reading computedRects first).
 func systemIfDirty(
   world: mod UiWorld
   uiSystems: mod UiSystems

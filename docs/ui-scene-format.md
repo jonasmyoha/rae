@@ -844,3 +844,21 @@ A second navigation during a transition drops the page still leaving, and the cu
 the same path is the same transition run backward.
 
 Case 1372 holds the rules; `checks/uiPageTransitions` paints them.
+
+## 26. `SharedElement`: what stays across a page transition
+
+```json
+"Bar": { "SharedElement": { "key": "bottomBar", "mode": "stay" } },
+"Cover": { "SharedElement": { "key": "cover", "mode": "morph", "motion": "smooth" } }
+```
+
+A node on each page with one `key`, in either page model, and across worlds. `mode` is `morph` by default.
+
+- **`stay`**: on both pages at one place and size, it does not take part. The new one shows from the first frame, the old one is hidden, and it does not
+  move or fade with its page. It is drawn over the page, which moves under it. At another place it just goes with its page.
+- **`morph`**: the new node moves and resizes from the old one's rectangle with a spring, with no layout, over its page and outside its clips. It can be any
+  node, with its children. Its corner radius goes from the old one's to its own. A source off screen makes no morph.
+
+`HeroWidget { key }` is another way to write a `morph`. A host with two pages in one world and no page transition starts one with `spawnHeroTransition(world, uiSystems, key, source, target)`.
+
+Case 1373 holds the rules; `checks/uiPageTransitions` paints them.

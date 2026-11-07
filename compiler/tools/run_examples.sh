@@ -1088,9 +1088,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # A fake Spotify snapshot (RAE_UI_SPOTIFY_FAKE) proves the
           # now-playing text is a binding: spotifyBindingSystem writes the
           # TextBinding nodes from SpotifyState (spotifySystem/SpotifyView).
-          # Finally a Library -> album tap runs the hero transition as an
-          # ECS entity (ui/animationSystem/HeroTransitionSystem): the log
-          # must show it start (t=0, both rects) and land (done), and the
+          # Finally a Library -> album tap runs the hero as a shared-element
+          # morph (ui/animationSystem/SharedElements): the log
+          # must show it start (from the source's rect) and land (done), and the
           # resting frame after it is non-blank. Last, the Profile page's
           # settings button action opens the settings dialog and its switch
           # flips the theme to light (screenSystem/SettingsView).
