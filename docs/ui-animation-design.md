@@ -535,9 +535,23 @@ frames with motion in flight, 123 nodes.
 - Frames with motion hold 120 Hz: the median is one refresh, and 95% are within 0.53 ms of it. The check's "over 8.33 ms" count
   (368) is the refresh's own jitter around 8.33 ms, not missed frames.
 - The transform pass is 5 µs, so the fold stays whole-tree.
-- What costs is building the arriving page's world: about 7.5 ms, nearly a whole 120 Hz frame, in one frame. 21 of the frames
-  (2.8%) were over 16.67 ms, about one or two per transition. That world is built on the frame the transition starts. Building it
-  before the motion starts, or over several frames, is a queue item of its own.
+- Building the arriving page's world takes about 7.5 ms. The page is already built on the frame it starts on, and that frame
+  paints the start pose with no time passed, so the motion's first step is on the next frame, as a tap's frame should be.
+
+**Measured again (2026-11-07), with the check counting only the transitions:** the 21 frames over 16.67 ms above were not the
+transitions. They were the launch: the first page plays its own `Appear` while iOS is still finishing the app's launch, at 60 Hz,
+and the check counted those frames as motion in flight. The check now waits 2 s before the first transition, and gives the launch
+and the frame a page is built on lines of their own. On the iPhone 15 Pro, 16 transitions:
+
+| what | p50 | p95 | max | over 16.67 ms |
+|---|---|---|---|---|
+| frame to frame, transitions | 8.33 ms | 8.66 ms | 10.44 ms | 0 of 700 |
+| the frame a page is built on | 10.71 ms | 11.32 ms | 11.32 ms | 0 of 16 |
+| the launch's own Appear | | | | 21 of 61 |
+
+So a transition holds 120 Hz from its first moving frame, and nothing in lib/ui changed. The frame a page is built on comes one
+refresh late, which delays the start by about 8 ms after a tap and cuts no motion; spreading the build over frames would only
+delay it more.
 
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
