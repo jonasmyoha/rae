@@ -204,6 +204,7 @@ func sharedMorph(
   source: view SharedSource
   motion: view String
   isHero: view Bool
+  paintUnder: view EntityId
 ) {
   let rest: WorldRect = sharedRestRect(world: world, uiSystems: uiSystems, entityId: target)
   if rest.w <= 0.0 or rest.h <= 0.0 {
@@ -258,6 +259,7 @@ func sharedMorph(
       fromRadius: source.radius
       toRadius: sharedRadiusOf(world: world, entityId: target)
       progress: progress
+      paintUnder: paintUnder
     }
   )
 }
@@ -294,6 +296,7 @@ func sharedArrive(
               source: source
               motion: entry.motion
               isHero: entry.isHero
+              paintUnder: noEntity()
             )
             taken.add(value: source.entityId)
             found = true
@@ -326,6 +329,7 @@ func sharedArrive(
                 motion: MotionToken {}
                 restDistance: animationRestRatio
               )
+              paintUnder: noEntity()
             }
           )
           taken.add(value: source.entityId)
@@ -374,4 +378,142 @@ func sharedReleaseUnder(uiSystems: mod UiSystems, root: view EntityId) {
   loop let entityId: view EntityId in under {
     componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
   }
+}
+
+# The nearest page root above a node, itself included, or none
+func sharedPageOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret EntityId {
+  var at: EntityId = entityId
+  var guard: Int = 0
+  loop isNone(this: at) is false and guard < 256 {
+    if componentHas(this: world.pageRoots, entityId: at) {
+      ret at
+    }
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+    guard = guard + 1
+  }
+  ret noEntity()
+}
+
+# A move in one world: a morph node that hides, and a node with its key on the same page that shows
+# in the same frame, as a chosen row's fill moves to another row (docs/ui-animation-design.md
+# section
+# 8.3). The one that shows comes from where the other was drawn, by its pose, with no layout. A node
+# seen for the first time plays nothing, and neither does a key that only shows or only hides. Pages
+# hand theirs over in sharedArrive instead: the page check keeps the two apart.
+func sharedMovesInWorld(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if componentCount(this: world.sharedElements) is 0 {
+    ret
+  }
+  var sources: List(SharedSource) = List.create(SharedSource, cap: 2)
+  var sourcePages: List(EntityId) = List.create(EntityId, cap: 2)
+  var targets: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: world.sharedElements), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.sharedElements, i: i)
+    let shared: view SharedElement = componentView(this: world.sharedElements, entityId: entityId)
+    if shared.mode is not SharedMode.morph {
+      continue
+    }
+    let shown: Bool = shownInTree(world: world, uiSystems: uiSystems, entityId: entityId)
+    if componentHas(this: uiSystems.animation.sharedSeens, entityId: entityId) is false {
+      componentSet(
+        this: uiSystems.animation.sharedSeens
+        entityId: entityId
+        data: SharedSeen { shown: shown }
+      )
+      continue
+    }
+    if componentView(this: uiSystems.animation.sharedSeens, entityId: entityId).shown is shown {
+      continue
+    }
+    componentMod(this: uiSystems.animation.sharedSeens, entityId: entityId).shown = shown
+    if shown {
+      targets.add(value: entityId)
+    } else {
+      sources.add(value: sharedSourceOf(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        key: shared.key
+      ))
+      sourcePages.add(value: sharedPageOf(world: world, uiSystems: uiSystems, entityId: entityId))
+    }
+  }
+  if sources.length is 0 or targets.length is 0 {
+    ret
+  }
+  loop let target: view EntityId in targets {
+    # A page's own arrival has it already
+    if componentHas(this: uiSystems.animation.sharedNodes, entityId: target) {
+      continue
+    }
+    let shared: view SharedElement = componentView(this: world.sharedElements, entityId: target)
+    let key: String = "{shared.key}"
+    let motion: String = "{shared.motion}"
+    let page: EntityId = sharedPageOf(world: world, uiSystems: uiSystems, entityId: target)
+    loop var s: Int = 0, s < sources.length, ++s {
+      let source: SharedSource = sources.copyAtFallback(
+        index: s
+        fallback: SharedSource {
+          entityId: noEntity()
+          key: ""
+          x: 0.0
+          y: 0.0
+          w: 0.0
+          h: 0.0
+          radius: 0.0
+          onScreen: false
+        }
+      )
+      if source.key is key and source.onScreen and sourcePages.copyAtFallback(
+        index: s
+        fallback: noEntity()
+      ) is page {
+        sharedMorph(
+          world: world
+          uiSystems: uiSystems
+          target: target
+          pageRoot: noEntity()
+          source: source
+          motion: motion
+          isHero: false
+          paintUnder: sharedCommonAncestor(
+            uiSystems: uiSystems
+            first: source.entityId
+            second: target
+          )
+        )
+        sources.removeAt(index: s)
+        sourcePages.removeAt(index: s)
+        break
+      }
+    }
+  }
+}
+
+# The nearest node above both, or none
+func sharedCommonAncestor(
+  uiSystems: view UiSystems
+  first: view EntityId
+  second: view EntityId
+) ret EntityId {
+  var above: List(EntityId) = List.create(EntityId, cap: 16)
+  var at: EntityId = parentOf(uiSystems: uiSystems, entityId: first)
+  loop var guard: Int = 0, isNone(this: at) is false and guard < 256, ++guard {
+    above.add(value: at)
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+  }
+  at = parentOf(uiSystems: uiSystems, entityId: second)
+  loop var guard: Int = 0, isNone(this: at) is false and guard < 256, ++guard {
+    loop let candidate: view EntityId in above {
+      if candidate is at {
+        ret at
+      }
+    }
+    at = parentOf(uiSystems: uiSystems, entityId: at)
+  }
+  ret noEntity()
 }

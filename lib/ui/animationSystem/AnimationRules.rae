@@ -133,6 +133,16 @@ type SharedNode {
   fromRadius: Float
   toRadius: Float
   progress: AnimationChannel
+  # None: drawn in a last pass, over its page and outside its clips, as a page's morph is. A marker
+  # that moves between rows of one world is drawn under the node that holds both rows instead, right
+  # after that node's own box, so it passes under every row's text.
+  paintUnder: EntityId
+}
+
+# Whether a SharedElement morph node was shown when last looked at: one that hides and one with its
+# key that shows in the same frame make a move in one world (SharedElements.rae)
+type SharedSeen {
+  shown: Bool
 }
 
 # A node's last laid-out place, relative to its nearest ancestor that glides too

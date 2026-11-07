@@ -437,6 +437,19 @@ transition, in every kind, and the background and any bar in another world stay 
   the resting picture is identical byte for byte to the one before.
 - A shared node is done when it and its page have stopped.
 
+**Built in 0.3.37:** a marker that moves inside one world, in `sharedMovesInWorld` (`SharedElements.rae`, case 1382, the week row
+in `checks/uiLayoutText`). What the code decided:
+
+- A `SharedElement` morph node that hides, and one with its key that shows in the same frame, on the same page (the nearest
+  `PageRoot` above each, or none for both), make the one that shows come from where the other was last drawn, by the same pose
+  morph a page uses, with no layout. A chosen row's fill bound to the list's data, or a chosen cell's in a grid row, moves so.
+- A node seen for the first time plays nothing, nor does a key that only shows or only hides, nor one whose old node was off
+  screen. Pairs are by key, first found first; a page's own arrival keeps its nodes, as `sharedArrive` has them first.
+- A page's morph is drawn last, over its page. This marker is drawn under the nearest node that holds its old and new place (the
+  list or the row of cells), right after that node's own box and before any of its children, so it passes under every row's text.
+  `SharedNode.paintUnder` says which; none is the old last pass.
+- It is looked for only when `Active`, the hierarchy or the shared elements changed, with the other triggers.
+
 ### 8.4 A swipe from the edge
 
 `pageTransitionDrag(progress, velocity)` runs a transition from a finger, not from

@@ -36,6 +36,7 @@ import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
 open ecs/ComponentTable
+open ecs/Entity
 open Gpu2dCanvas
 open ui/UiSystems
 open ui/Transform
@@ -635,6 +636,15 @@ func paintSubtreeG(
         }
       }
     }
+    if componentCount(this: uiSystems.animation.sharedNodes) > 0 {
+      paintSharedUnderG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
     let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var pass: Int = 0
@@ -733,12 +743,45 @@ func renderSharedNodesGpu2d(
   canvas: mod Gpu2dCanvas
 ) {
   loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
-    paintSubtreeG(
-      world: world
-      uiSystems: uiSystems
-      entityId: componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
-      res: res
-      canvas: canvas
-    )
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    if sharedPaintsLast(uiSystems: uiSystems, entityId: entityId) {
+      paintSubtreeG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
+  }
+}
+
+# A shared node a page hands over is drawn last; a marker moving inside one world is drawn under
+# the node that holds its old and new place (paintSharedUnderG)
+func sharedPaintsLast(uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  ret componentHas(this: uiSystems.animation.sharedNodes, entityId: entityId) and isNone(
+    this: componentView(this: uiSystems.animation.sharedNodes, entityId: entityId).paintUnder
+  )
+}
+
+# The markers moving under `entityId`, before its children
+func paintSharedUnderG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let shared: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    if componentView(this: uiSystems.animation.sharedNodes, entityId: shared).paintUnder is entityId {
+      paintSubtreeG(
+        world: world
+        uiSystems: uiSystems
+        entityId: shared
+        res: res
+        canvas: canvas
+      )
+    }
   }
 }
