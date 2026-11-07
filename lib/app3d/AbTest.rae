@@ -10,12 +10,13 @@
 # nothing is active, and the frame reads a few false Bools. The rules are pure: the app hands in
 # frame times and reads `test.off`.
 import Math
+open Sky
 
 const abHoldSeconds: Float = 9.0
 
 const abSkipSeconds: Float = 3.0
 
-const abSwitchNames: String = "shadows, forestShadows, props, ground, forest, grass, characters, cubes, marks, ssao, bloom, depthPyramid, water"
+const abSwitchNames: String = "shadows, forestShadows, props, ground, forest, grass, characters, cubes, marks, ssao, bloom, depthPyramid, water, clouds"
 
 # What is off in this phase. `props` is the rocks, the bushes and the meadow. `forest` and `props`
 # also stop their gathering and their shadows; `forestShadows` only the forest's shadows.
@@ -33,6 +34,8 @@ type AbSwitches {
   bloom: Bool = false
   depthPyramid: Bool = false
   water: Bool = false
+  # the sky's cloud layer: no cover and no cirrus, as a clear sky draws
+  clouds: Bool = false
 }
 
 type AbCase {
@@ -54,6 +57,10 @@ type AbTest {
   # Average seconds a frame of each phase so far
   phaseAverages: List(Float)
   off: AbSwitches
+  # The sky's cover and cirrus while `clouds` is off, to put back after it
+  cloudsHidden: Bool = false
+  keptCover: Float = 0.0
+  keptCirrus: Float = 0.0
 }
 
 # Sets the switch called `name` in `off`; false for no such switch
@@ -84,6 +91,8 @@ func abSwitchOff(off: mod AbSwitches, name: view String) ret Bool {
     off.depthPyramid = true
   } else if name is "water" {
     off.water = true
+  } else if name is "clouds" {
+    off.clouds = true
   } else {
     ret false
   }
@@ -216,5 +225,20 @@ func abUpdate(test: mod AbTest, deltaTime: view Float) {
     if let held: view AbCase = test.cases.viewAt(index: test.phase / 2) {
       test.off = held.off
     }
+  }
+}
+
+# Each frame: a phase with `clouds` off draws the sky with no cloud layer, and the next has it back
+func abHideClouds(test: mod AbTest, sky: mod Sky) {
+  if test.off.clouds and not test.cloudsHidden {
+    test.keptCover = sky.cloudCover
+    test.keptCirrus = sky.cloudCirrus
+    sky.cloudCover = 0.0
+    sky.cloudCirrus = 0.0
+    test.cloudsHidden = true
+  } else if not test.off.clouds and test.cloudsHidden {
+    sky.cloudCover = test.keptCover
+    sky.cloudCirrus = test.keptCirrus
+    test.cloudsHidden = false
   }
 }
