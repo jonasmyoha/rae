@@ -897,6 +897,9 @@ void rae_ext_Gpu2d_setTextInput(rae_Bool active) {
 #include <objc/runtime.h>
 typedef struct { double x, y, width, height; } RaeKeyboardRect;
 static _Atomic double g_g2d_keyboard_height = 0.0;
+/* How long the keyboard's last move takes, as UIKit says (UIKeyboardAnimationDurationUserInfoKey,
+ * about 0.25 s), so a layout can move with it (lib/ui layoutKeyboardMoves). */
+static _Atomic double g_g2d_keyboard_seconds = 0.0;
 static void rae_g2d_keyboard_frame(CFNotificationCenterRef center, void* observer, CFNotificationName name,
                                    const void* object, CFDictionaryRef info) {
     (void)center; (void)observer; (void)name; (void)object;
@@ -908,6 +911,11 @@ static void rae_g2d_keyboard_frame(CFNotificationCenterRef center, void* observe
     RaeKeyboardRect bounds = ((RaeKeyboardRect (*)(void*, SEL))objc_msgSend)(screen, sel_registerName("bounds"));
     double covered = bounds.height - frame.y;
     g_g2d_keyboard_height = covered > 0.0 ? covered : 0.0;
+    const void* duration = CFDictionaryGetValue(info, CFSTR("UIKeyboardAnimationDurationUserInfoKey"));
+    double seconds = 0.0;
+    if (duration && CFNumberGetValue((CFNumberRef)duration, kCFNumberDoubleType, &seconds)) {
+        g_g2d_keyboard_seconds = seconds > 0.0 ? seconds : 0.0;
+    }
 }
 /* The system edit menu over a text field (lib/ui/textFieldSystem
  * textFieldMenuSystem): UIEditMenuInteraction (iOS 16+) on the SDL Metal view,
@@ -981,7 +989,7 @@ int64_t rae_ext_Gpu2d_editMenuChoice(void) {
     g_g2d_edit_menu_choice = 0;
     return (int64_t)choice;
 }
-float rae_ext_Gpu2d_keyboardHeight(void) {
+static void rae_g2d_keyboard_observe(void) {
     static int observing = 0;
     if (!observing) {
         observing = 1;
@@ -989,10 +997,18 @@ float rae_ext_Gpu2d_keyboardHeight(void) {
                                         CFSTR("UIKeyboardWillChangeFrameNotification"), NULL,
                                         CFNotificationSuspensionBehaviorDeliverImmediately);
     }
+}
+float rae_ext_Gpu2d_keyboardHeight(void) {
+    rae_g2d_keyboard_observe();
     return (float)g_g2d_keyboard_height;
+}
+float rae_ext_Gpu2d_keyboardSeconds(void) {
+    rae_g2d_keyboard_observe();
+    return (float)g_g2d_keyboard_seconds;
 }
 #else
 float rae_ext_Gpu2d_keyboardHeight(void) { return 0.0f; }
+float rae_ext_Gpu2d_keyboardSeconds(void) { return 0.0f; }
 /* No system edit menu off iOS: the keys copy and paste there. */
 void rae_ext_Gpu2d_showEditMenu(float x, float y, rae_Bool canPaste, rae_Bool canCopy) {
     (void)x; (void)y; (void)canPaste; (void)canCopy;

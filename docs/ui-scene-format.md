@@ -769,7 +769,9 @@ The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `di
 - **`AnimateLayout`**: when layout moves the node, it glides from its old place to the new one. Layout runs once and
   gets the true places, and later frames run no layout. Only position glides: size changes at once. There is no
   glide on a first layout, on a window resize, on a scroll, or for a node that was hidden. The bundle
-  `glideOnChange` is this component with its default motion.
+  `glideOnChange` is this component with its default motion. The on-screen keyboard is not a window resize: a host
+  that lays the page out shorter for it calls `layoutKeyboardMoves(world, Gpu2d.keyboardSeconds())` first, and the
+  nodes glide with the keyboard on the `keyboard` token (case 1385).
 - **`AnimateText`**: when the node's text changes, the old text goes as the new one comes. `fade` crosses the two.
   `roll` also moves them, with the new text coming from `rollFrom`. `auto` comes from below when the new text sorts
   after the old one, each run of digits read as a number ("10:45" after "9:30"), and from above when it sorts before:

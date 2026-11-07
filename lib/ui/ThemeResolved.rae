@@ -266,6 +266,14 @@ func builtInMotion(name: view String) ret opt MotionToken {
   if name is "fadeIn" {
     ret MotionToken { name: "fadeIn", kind: MotionKind.curve, curve: "easeOutCubic", seconds: 0.2 }
   }
+  if name is "keyboard" {
+    ret MotionToken {
+      name: "keyboard"
+      kind: MotionKind.curve
+      curve: "easeOutQuart"
+      seconds: 0.25
+    }
+  }
   if name is "fadeOut" {
     ret MotionToken { name: "fadeOut", kind: MotionKind.curve, curve: "easeInCubic", seconds: 0.14 }
   }
@@ -293,6 +301,7 @@ func themeMotionNames(theme: view ResolvedTheme) ret List(String) {
     "livelySoft"
     "fadeIn"
     "fadeOut"
+    "keyboard"
   ]
   loop let name: view String in builtIn {
     names.add(value: "{name}")

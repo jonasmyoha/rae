@@ -99,7 +99,8 @@ and redeclared by name:
   "lively": { "kind": "spring", "response": 0.46, "damping": 0.76 },
   "fadeIn":  { "kind": "curve", "curve": "easeOutCubic", "seconds": 0.20 },
   "fadeOut": { "kind": "curve", "curve": "easeInCubic",  "seconds": 0.14 }
-  # also built in: "livelySoft", a response of 0.46 at damping 0.9, for a page's zoom
+  # also built in: "livelySoft", a response of 0.46 at damping 0.9, for a page's zoom, and
+  # "keyboard", easeOutQuart for 0.25 s, what a layout moves on with the on-screen keyboard
 }
 ```
 
@@ -633,6 +634,13 @@ and `AnimationRules.rae` and the painting in `renderSystem/RenderText.rae`. What
   move twice: only what changed inside the parent glides.
 - "A window resize" is a change of `world.layoutW` or `layoutH` in the layout that saw the move. Every record then
   takes the new place with no motion.
+- **The keyboard is not a resize (0.3.40).** A host that lays the page out shorter or taller for the on-screen keyboard
+  calls `layoutKeyboardMoves(world, seconds)` first. The next change of the layout's size then glides every node with
+  `AnimateLayout` to its new place on the `keyboard` motion token, whatever the node's own motion: a curve
+  (`easeOutQuart`, built in at 0.25 s), as long as the platform says the keyboard takes. `Gpu2d.keyboardSeconds()` is
+  that: on iOS UIKit's `UIKeyboardAnimationDurationUserInfoKey`, read with the keyboard's frame; 0 elsewhere, which keeps
+  the token's own length. UIKit's keyboard curve is a private one, and `easeOutQuart` is close to it. The mark is used
+  by one change; a change of the safe area's bottom inset is no resize and glides anyway. Case 1385.
 - A hidden node forgets its place, so it comes back where it is laid out, and its `Appear` is what it plays.
 - A glide on a node already moving adds the difference to its x and y and keeps their velocity. Its opacity, scale
   and rotation carry on, so a glide can start in the middle of an `Appear`.
