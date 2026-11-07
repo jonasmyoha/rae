@@ -149,9 +149,8 @@ func handleScreenSwitch(
   # world: the outgoing page's `HeroWidget` for the browsed album and the
   # incoming page's. The intermediate layout+transform flush gives the
   # freshly-mounted target page a valid WorldTransform2D before its rect
-  # is read; `spawnHeroTransition` then creates the overlay entity that
-  # flies between the two (ui/animationSystem/HeroTransitionSystem) and
-  # hides the destination until it lands.
+  # is read; `spawnHeroTransition` then has the target fly from the source's
+  # rectangle, over the page, by its pose (ui/animationSystem/SharedElements).
   let heroKey: String = appState.currentAlbumStem
   let heroSource: EntityId = findHeroOnPage(
     world: world
@@ -188,9 +187,6 @@ func handleScreenSwitch(
       key: heroKey
       source: heroSource
       target: heroTarget
-      now: uiNowSeconds()
-      duration: heroTransitionSec
-      layerId: "dialog"
     )
   }
 

@@ -3,6 +3,7 @@
 import Easing
 import Math
 open Spring
+open ecs/Entity
 open ui/ThemeResolved
 open ui/AnimationComponents
 
@@ -15,10 +16,12 @@ type AnimationPose {
   x: Float = 0.0
   y: Float = 0.0
   rotation: Float = 0.0
+  # Height against width, on top of `scale`: a morph between boxes of different shapes
+  stretchY: Float = 1.0
 }
 
 func poseIsRest(pose: view AnimationPose) ret Bool {
-  ret pose.opacity is 1.0 and pose.scale is 1.0 and pose.x is 0.0 and pose.y is 0.0 and pose.rotation is 0.0
+  ret pose.stretchY is 1.0 and pose.opacity is 1.0 and pose.scale is 1.0 and pose.x is 0.0 and pose.y is 0.0 and pose.rotation is 0.0
 }
 
 # How close each kind of channel must get for a stop not to show: a little under a pixel, and about
@@ -110,6 +113,19 @@ func channelStep(channel: mod AnimationChannel, deltaTime: view Float) ret Bool 
 func channelHold(channel: mod AnimationChannel, share: view Float) {
   channel.current = channel.start + (channel.target - channel.start) * share
   channel.velocity = 0.0
+}
+
+# A node doing a shared-element's work (ui/animationSystem/SharedElements). `pageRoot` is the page
+# whose
+# pose it does not take, or none. `key` is a hero's, for the log. `progress` goes from 0 to 1, and
+# carries
+# the corner radius from the old node's to its own.
+type SharedNode {
+  pageRoot: EntityId
+  key: String
+  fromRadius: Float
+  toRadius: Float
+  progress: AnimationChannel
 }
 
 # A node's last laid-out place, relative to its nearest ancestor that glides too

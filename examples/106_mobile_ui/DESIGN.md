@@ -160,11 +160,9 @@ updateScrollRoot             lib scroll physics on the page's ScrollRoot
                              (idle frame: zero app systems). Spotify tick ->
                              mirror, then a second pass; artwork/asset loaders;
                              the History window re-rows in place on scroll
-4. heroTransitionSystem      lib/ui: every `HeroTransition` entity in flight
-                             (a plain Sprite + CornerRadius root in the
-                             dialog layer) eases from its source rect to its
-                             destination's; on landing the destination hero
-                             is revealed and the entity destroyed
+4. (a hero in flight)        lib/ui SharedElements: the target cover has a
+                             pose from the source's rectangle, and
+                             animationRun in the pipeline springs it home.
    runFrameLayoutTransform   safeArea -> layout -> fit -> transform ->
                              visualBounds, each gated by uiShouldRun on the
                              world's Schedule (dirty tables skip)
@@ -173,10 +171,10 @@ updateScrollRoot             lib scroll physics on the page's ScrollRoot
                              renderGpu2dFrame records + presents the canvas
 7. handleScreenSwitch        after the frame, only when input picked a new
                              screen: toggle pages, re-run layout/transform
-                             for the first frame there, and spawn the hero
-                             transition entity when both pages carry a
-                             `HeroWidget` with the browsed album's key and
-                             the source is on screen
+                             for the first frame there, and start the hero
+                             morph when both pages carry a `HeroWidget` with
+                             the browsed album's key and the source is on
+                             screen
 ```
 
 The mapping onto the ECS phase list in

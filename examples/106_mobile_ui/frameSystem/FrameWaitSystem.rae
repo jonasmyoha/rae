@@ -57,8 +57,7 @@ func frameWaitSystem(
   # every frame as fast as the machine allows (no FPS cap). Playback alone
   # stays on the throttled 60Hz path so a playing song doesn't peg a core.
   # Idle → blocking event-wait (~0% CPU).
-  let heroInFlight: Bool = componentCount(this: uiSystems.heroTransition.heroTransitions) > 0
-  tick.busyAnimating = heroInFlight or animationInFlight(world: world, uiSystems: uiSystems) or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
+  tick.busyAnimating = animationInFlight(world: world, uiSystems: uiSystems) or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )
   # Busy-render is `animating` with a zero-length frame, so the shared policy
@@ -94,7 +93,7 @@ func frameWaitSystem(
       "[loop {app.loopDebugFrame}] screen={screenToInt(s: session.currentScreen)} scrollY={scrollPositionOf(
         world: world
         entityId: frame.scrollTarget
-      )} animA={heroInFlight} animP={playbackSystem.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
+      )} animA={animationInFlight(world: world, uiSystems: uiSystems)} animP={playbackSystem.isPlaying} animS={tick.scrollAnimating} mouse={mouseDown} timeout={tick.timeout}"
     )
   }
   # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually

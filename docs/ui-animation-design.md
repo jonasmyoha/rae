@@ -400,6 +400,24 @@ transition, in every kind, and the background and any bar in another world stay 
   `HeroTransitionSystem` becomes this, and `HeroWidget` stays as an alias so that
   existing scenes load.
 
+**Built in 0.3.26:** in `lib/ui/animationSystem/SharedElements.rae`, for both page models. What the code decided:
+
+- A morph is the new node with a pose, not a copy flying above it. So it can be any node, with whatever is under it, and it
+  takes taps where it is drawn. The pose gets a second axis for this, `stretchY`, as two boxes need not have one shape.
+- A node doing this is a `SharedNode`. The transform pass takes its page's pose back out of its local place, and its alpha skips
+  the page's opacity. The painter leaves it for a last pass, over its page and outside its clips, which is what the overlay layer
+  used to give the hero. Going back, that pass runs after the old page, as the old page is drawn over the new one. Taking the
+  page's pose out assumes the page's pose does not rotate and that the nodes between have no scale of their own.
+- `stay` needs the same place and size on both, to a point. A node with the key at another place simply goes with its page.
+- A source off screen makes no morph. The old node is hidden by a pose with opacity 0, so nothing of layout changes and the end of
+  the page clears it, and it plays no `Disappear`.
+- A morph carries the corner radius by writing the node's `CornerRadius` divided by the pose's scale, so it reads as the old
+  radius and then its own, and the end writes its own back. A morph's motion is `SharedElement.motion`, `smooth` by default.
+- `HeroWidget` is a morph, and its table stays. `spawnHeroTransition` starts one with no page transition (example 106). It is
+  a spring now, in place of 0.3 s of ease-in-out, and the overlay entity, `HeroTransition` and `heroTransitionSystem` are gone. In 106
+  the resting picture is identical byte for byte to the one before.
+- A shared node is done when it and its page have stopped.
+
 ### 8.4 A swipe from the edge
 
 `pageTransitionDrag(progress, velocity)` runs a transition from a finger, not from

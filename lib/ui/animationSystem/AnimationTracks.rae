@@ -41,6 +41,7 @@ type AnimationTrack {
   x: AnimationChannel
   y: AnimationChannel
   rotation: AnimationChannel
+  stretchY: AnimationChannel
   delayLeft: Float
   phase: AnimationPhase
   onEnd: AnimationEnd
@@ -83,7 +84,9 @@ func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool 
   if world.animationRequests.length > 0 or queueIsEmpty(this: uiSystems.animation.commands) is false {
     ret true
   }
-  ret uiSystems.animation.settings.hold < 0.0 and (componentCount(this: uiSystems.animation.tracks) > 0 or componentCount(
+  ret uiSystems.animation.settings.hold < 0.0 and (componentCount(
+    this: uiSystems.animation.sharedNodes
+  ) > 0 or componentCount(this: uiSystems.animation.tracks) > 0 or componentCount(
     this: uiSystems.animation.textGhosts
   ) > 0)
 }
@@ -310,6 +313,7 @@ func poseOfTrack(track: view AnimationTrack) ret AnimationPose {
     x: track.x.current
     y: track.y.current
     rotation: track.rotation.current
+    stretchY: track.stretchY.current
   }
 }
 
@@ -359,6 +363,12 @@ func trackFromCommand(
     rotation: createChannel(
       current: start.rotation
       target: command.to.rotation
+      motion: motion
+      restDistance: animationRestRatio
+    )
+    stretchY: createChannel(
+      current: start.stretchY
+      target: command.to.stretchY
       motion: motion
       restDistance: animationRestRatio
     )
@@ -482,6 +492,7 @@ func animationApplyCommand(
     channelRetarget(channel: track.x, target: command.to.x, motion: motion)
     channelRetarget(channel: track.y, target: command.to.y, motion: motion)
     channelRetarget(channel: track.rotation, target: command.to.rotation, motion: motion)
+    channelRetarget(channel: track.stretchY, target: command.to.stretchY, motion: motion)
     track.delayLeft = command.delaySeconds
     track.phase = command.phase
     track.onEnd = command.onEnd
@@ -510,6 +521,7 @@ func animationApplyCommand(
     channelHold(channel: moved.x, share: settings.hold)
     channelHold(channel: moved.y, share: settings.hold)
     channelHold(channel: moved.rotation, share: settings.hold)
+    channelHold(channel: moved.stretchY, share: settings.hold)
   }
   componentSet(this: uiSystems.animation.poses, entityId: entityId, data: poseOfTrack(track: moved))
 }
@@ -529,6 +541,95 @@ func animationStepTextGhosts(uiSystems: mod UiSystems, deltaTime: view Float) {
   loop let entityId: view EntityId in done {
     componentRemove(this: uiSystems.animation.textGhosts, entityId: entityId)
   }
+}
+
+# A morph's corner radius goes from the old node's to its own, as seen: the pose's scale is taken
+# back
+# out, as the painter scales a radius with its node. A shared node is done when it and its page are
+# at rest.
+func animationStepSharedNodes(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  if componentCount(this: uiSystems.animation.sharedNodes) is 0 {
+    ret
+  }
+  var done: List(EntityId) = List.create(EntityId, cap: 2)
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    let arrived: Bool = animationStepSharedProgress(
+      uiSystems: uiSystems
+      entityId: entityId
+      deltaTime: deltaTime
+    )
+    let shared: SharedNode = sharedNodeCopy(uiSystems: uiSystems, entityId: entityId)
+    if shared.fromRadius is not shared.toRadius {
+      animationWriteRadius(
+        world: world
+        entityId: entityId
+        fromRadius: shared.fromRadius
+        toRadius: shared.toRadius
+        progress: shared.progress.current
+        scale: animationPoseOf(uiSystems: uiSystems, entityId: entityId).scale
+      )
+    }
+    let moving: Bool = componentHas(this: uiSystems.animation.tracks, entityId: entityId) or (isNone(
+      this: shared.pageRoot
+    ) is false and componentHas(this: uiSystems.animation.tracks, entityId: shared.pageRoot))
+    if arrived and not moving {
+      done.add(value: entityId)
+    }
+  }
+  loop let entityId: view EntityId in done {
+    let shared: SharedNode = sharedNodeCopy(uiSystems: uiSystems, entityId: entityId)
+    if shared.fromRadius is not shared.toRadius {
+      componentSet(
+        this: world.cornerRadiuses
+        entityId: entityId
+        data: CornerRadius { radius: shared.toRadius }
+      )
+    }
+    if shared.key.length() > 0 {
+      log("[hero] done key={shared.key}")
+    }
+    componentRemove(this: uiSystems.animation.sharedNodes, entityId: entityId)
+  }
+}
+
+func sharedNodeCopy(uiSystems: view UiSystems, entityId: view EntityId) ret SharedNode {
+  let shared: view SharedNode = componentView(
+    this: uiSystems.animation.sharedNodes
+    entityId: entityId
+  )
+  ret shared
+}
+
+func animationStepSharedProgress(
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  deltaTime: view Float
+) ret Bool {
+  let shared: mod SharedNode = componentMod(
+    this: uiSystems.animation.sharedNodes
+    entityId: entityId
+  )
+  ret channelStep(channel: shared.progress, deltaTime: deltaTime)
+}
+
+func animationWriteRadius(
+  world: mod UiWorld
+  entityId: view EntityId
+  fromRadius: view Float
+  toRadius: view Float
+  progress: view Float
+  scale: view Float
+) {
+  if scale <= 0.0 {
+    ret
+  }
+  let seen: Float = fromRadius + (toRadius - fromRadius) * progress
+  componentSet(
+    this: world.cornerRadiuses
+    entityId: entityId
+    data: CornerRadius { radius: seen / scale }
+  )
 }
 
 # One update: drain the inbox, then step every track by `deltaTime` s
@@ -581,12 +682,13 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
       let xDone: Bool = channelStep(channel: track.x, deltaTime: left)
       let yDone: Bool = channelStep(channel: track.y, deltaTime: left)
       let rotationDone: Bool = channelStep(channel: track.rotation, deltaTime: left)
+      let stretchDone: Bool = channelStep(channel: track.stretchY, deltaTime: left)
       componentSet(
         this: uiSystems.animation.poses
         entityId: entityId
         data: poseOfTrack(track: track)
       )
-      if opacityDone and scaleDone and xDone and yDone and rotationDone {
+      if opacityDone and scaleDone and xDone and yDone and rotationDone and stretchDone {
         let waits: Bool = track.phase is AnimationPhase.leaving and animationChildMoving(
           world: world
           uiSystems: uiSystems
@@ -599,6 +701,7 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
     }
   }
   animationStepTextGhosts(uiSystems: uiSystems, deltaTime: step)
+  animationStepSharedNodes(world: world, uiSystems: uiSystems, deltaTime: step)
   loop let entityId: view EntityId in ended {
     let track: view AnimationTrack = componentView(
       this: uiSystems.animation.tracks

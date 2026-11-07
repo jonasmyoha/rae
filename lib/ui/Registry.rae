@@ -77,7 +77,6 @@ func isRuntimeTable(name: view String) ret Bool {
     "ListViewData"
     "ListViewRowKey"
     "ListChange"
-    "HeroTransition"
     "StyleOverride"
     "BundleRefs"
     "SceneSource"
@@ -482,6 +481,16 @@ func applyAuthoredFixups(
     reportUnknownMotion(
       world: world
       name: opacityMotion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
+  if name is "SharedElement" {
+    let motion: String = componentView(this: world.sharedElements, entityId: entityId).motion
+    reportUnknownMotion(
+      world: world
+      name: motion
       sceneId: sceneId
       nodeId: nodeId
     )

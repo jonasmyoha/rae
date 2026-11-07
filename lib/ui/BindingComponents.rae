@@ -133,31 +133,6 @@ type ProgressBar {
   enabled: Bool = true
 }
 
-# A hero (shared-element) transition in flight: a runtime entity in the
-# overlay layer — a plain `Sprite` + `CornerRadius` root the ordinary paint
-# path draws — that flies from the source hero's rect to the destination's
-# while the destination (`target`) is hidden. `heroTransitionSystem`
-# (ui/animationSystem/HeroTransitionSystem) advances it every frame with an
-# ease and, at `duration`, reveals the target and destroys the entity.
-# Never authored: `spawnHeroTransition` creates it from two `HeroWidget`
-# entities that share a key.
-type HeroTransition {
-  key: String
-  target: EntityId
-  fromX: Float
-  fromY: Float
-  fromW: Float
-  fromH: Float
-  fromRadius: Float
-  toX: Float
-  toY: Float
-  toW: Float
-  toH: Float
-  toRadius: Float
-  startedAt: Float64
-  duration: Float
-}
-
 # A camera on a page or layer ROOT (#11920833): zoom about the root's origin
 # and a translation, in the parent's units. The lib cameraSystem (ui/
 # cameraSystem, in the Pipeline before transform) derives the root's

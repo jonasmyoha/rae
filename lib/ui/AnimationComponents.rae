@@ -51,9 +51,9 @@ enum AnimateTextKind { fade, roll }
 
 enum RollFrom { below, above }
 
-# When its text changes, the old text goes as the new one comes: `fade`, or `roll` for a clock or a
-# counter, where the new text comes from `rollFrom`. The old text is only drawn, so layout never
-# sees it.
+# When its text changes, the old text goes as the new one comes: `fade`, or `roll` for a clock
+# or a counter, where the new text comes from `rollFrom`. The old text is only drawn, so layout
+# never sees it.
 type AnimateText {
   kind: AnimateTextKind = AnimateTextKind.fade
   rollFrom: RollFrom = RollFrom.below
@@ -76,6 +76,16 @@ type PageTransition {
   motion: String = ""
 }
 
+# A node that is on two pages with one `key` (lib/ui/animationSystem/SharedElements). `stay`: at one
+# place it does not move with the page. `morph`: it moves and resizes from the old node's rectangle.
+enum SharedMode { stay, morph }
+
+type SharedElement {
+  key: String
+  mode: SharedMode = SharedMode.morph
+  motion: String = "smooth"
+}
+
 enum ListChangeDirection { forward, back }
 
 # RUNTIME: the data this list is getting replaces all of it (ui/listMotionSystem, listRowsChange)
@@ -90,8 +100,7 @@ type Leaving {
 }
 
 # RUNTIME: animationTriggers' record of a node with one of the components above: whether it was
-# shown
-# when last looked at, and, for the one pass that finds arrivals, its place among them
+# shown when last looked at, and, for the one pass that finds arrivals, its place among them
 type AppearSeen {
   shown: Bool = false
   arrived: Bool = false

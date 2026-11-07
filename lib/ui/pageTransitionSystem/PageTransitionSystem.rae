@@ -31,7 +31,9 @@ open ui/UiSystems
 open ui/animationSystem/AnimationRules
 open ui/animationSystem/AnimationTracks
 open ui/animationSystem/AnimationTriggers
+open ui/animationSystem/SharedElements
 open ui/pageTransitionSystem/PageTransitionRules
+open ui/layoutSystem/LayoutSystem
 open ui/renderSystem/RenderSystem
 open Gpu2dCanvas
 
@@ -147,11 +149,11 @@ func pageLeaveNodes(
       node: child
       latest: latest
     )
-    if componentHas(this: world.disappears, entityId: child) and childInParentBox(
-      uiSystems: uiSystems
-      parent: node
-      child: child
-    ) {
+    # A node taken over by the new page is hidden, and has nothing to play
+    if animationPoseOf(uiSystems: uiSystems, entityId: child).opacity > 0.0 and componentHas(
+      this: world.disappears
+      entityId: child
+    ) and childInParentBox(uiSystems: uiSystems, parent: node, child: child) {
       leavers.add(value: child)
     }
   }
@@ -190,6 +192,7 @@ func pageLeave(
 ) {
   componentSet(this: world.leavings, entityId: root, data: Leaving { holdsPlace: false })
   blurSubtree(world: world, root: root)
+  sharedReleaseUnder(uiSystems: uiSystems, root: root)
   pageLeaveNodes(
     world: world
     uiSystems: uiSystems
@@ -213,8 +216,9 @@ func pageLeave(
   )
 }
 
-# The page comes. Its first paint is its start pose, and it takes taps where it is drawn from
-# that frame.
+# The page comes. Its first paint is its start pose, and it takes taps where it is drawn from that
+# frame.
+# It goes in one batch with its nodes' Appear, which wait for their share of the transition.
 func pageArrive(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -223,23 +227,22 @@ func pageArrive(
   motion: view String
   seconds: view Float
 ) {
-  # The nodes that have just come to be shown start now, with their first pose
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: root
+      hasFrom: true
+      from: from
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: "fadeIn"
+      delaySeconds: 0.0
+      phase: AnimationPhase.appearing
+      onEnd: AnimationEnd.stay
+      appearsWait: seconds * pageAppearShare
+    }
+  )
   animationTriggers(world: world, uiSystems: uiSystems)
-  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
-  animationDelayAppears(
-    world: world
-    uiSystems: uiSystems
-    root: root
-    delay: seconds * pageAppearShare
-  )
-  animationPlay(
-    uiSystems: uiSystems
-    entityId: root
-    from: from
-    motion: motion
-    opacityMotion: "fadeIn"
-    delaySeconds: 0.0
-  )
   animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
 }
 
@@ -313,6 +316,16 @@ func pageTransitionArrive(
   if turning {
     from = system.droppedPose
   }
+  var sources: List(SharedSource) = List.create(SharedSource, cap: 4)
+  loop let page: view LeavingWorld in system.leaving {
+    sources = sharedSourcesOf(world: page.world, uiSystems: page.uiSystems, root: page.root)
+  }
+  let taken: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: sources
+  )
   loop let page: mod LeavingWorld in system.leaving {
     pageLeave(
       world: page.world
@@ -323,6 +336,7 @@ func pageTransitionArrive(
       seconds: seconds
       onEnd: AnimationEnd.stay
     )
+    sharedHideSources(uiSystems: page.uiSystems, taken: taken)
   }
   pageArrive(
     world: world
@@ -380,22 +394,38 @@ func pageTransitionDraw(
       )
     }
   }
-  renderSystemGpu2d(
+  if system.back is false or system.leaving.length is 0 {
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: res
+      canvas: canvas
+    )
+    ret
+  }
+  # Going back, what stays is over the page that goes away, though its own page is under that one
+  gpu2dLayerRange(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    canvas: canvas
+    minOrder: -1000000
+    maxOrder: 1000000
+  )
+  loop let page: view LeavingWorld in system.leaving {
+    renderSystemGpu2d(
+      world: page.world
+      uiSystems: page.uiSystems
+      res: res
+      canvas: canvas
+    )
+  }
+  renderSharedNodesGpu2d(
     world: world
     uiSystems: uiSystems
     res: res
     canvas: canvas
   )
-  if system.back {
-    loop let page: view LeavingWorld in system.leaving {
-      renderSystemGpu2d(
-        world: page.world
-        uiSystems: page.uiSystems
-        res: res
-        canvas: canvas
-      )
-    }
-  }
 }
 
 # A resident page stops at once, and is hidden
@@ -437,6 +467,8 @@ func pageTransitionResident(
   system.residentLeaving = noEntity()
   componentRemove(this: world.leavings, entityId: toRoot)
   componentSet(this: world.actives, entityId: toRoot, data: Active { value: true })
+  # It was hidden, so layout has not placed it, and its size and its nodes' places are needed now
+  layoutSystem(world: world, uiSystems: uiSystems)
   if kind is PageTransitionKind.none or uiSystems.animation.settings.off {
     animationDropMotion(uiSystems: uiSystems, entityId: toRoot)
     pageResidentDrop(world: world, uiSystems: uiSystems, root: fromRoot)
@@ -455,6 +487,12 @@ func pageTransitionResident(
     box: box
     source: pageSourceFor(system: system, box: box)
   )
+  let taken: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: toRoot
+    sources: sharedSourcesOf(world: world, uiSystems: uiSystems, root: fromRoot)
+  )
   pageLeave(
     world: world
     uiSystems: uiSystems
@@ -464,6 +502,7 @@ func pageTransitionResident(
     seconds: seconds
     onEnd: AnimationEnd.deactivate
   )
+  sharedHideSources(uiSystems: uiSystems, taken: taken)
   system.residentLeaving = fromRoot
   if turning {
     # It was on its way out: it comes back from where it is, and so do its nodes
