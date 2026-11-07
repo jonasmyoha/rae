@@ -818,3 +818,28 @@ gets the bundle `dialogMotion`. The host needs nothing but `animationRun` and `r
 - A page with `"presentation": "page"` has no motion yet unless its root has its own `Disappear`.
 
 Case 1371 holds the rules; `checks/uiDialogs` paints them.
+
+## 25. `PageTransition`: how a page comes and goes
+
+```json
+"Page": { "PageTransition": { "kind": "push" } }
+```
+
+On a page's root. `kind` is `push`, `sibling`, `zoom`, `sheet`, `fade` (the default) or `none`, and `motion` names its motion (`smooth`
+by default, `livelySoft` for a zoom). Going forward the arriving page's says how; going back the leaving page's does. The
+page's nodes need nothing more: the leaving page's `Disappear` start within the first 40% of the transition, its opacity is zero by
+60% in every kind, and the arriving page's `Appear` start at 25%. Taps go to the arriving page from its first frame, where it is drawn.
+
+A host has one of two page models (`lib/ui/pageTransitionSystem`), with a `PageTransitionSystem` from `createPageTransitionSystem()`:
+
+- **Resident pages in one world:** `pageTransitionResident(system, world, uiSystems, fromRoot, toRoot, back)`. The leaving page deactivates at the end.
+- **A new world per screen:** `pageTransitionBegin(system, own oldWorld, own oldUiSystems, root, back)`, build the new world and lay it out as
+  always, then `pageTransitionArrive(system, world, uiSystems, root)`. Each frame, `pageTransitionStep(system)` runs the old world, and
+  `pageTransitionDraw(system, world, uiSystems, res, canvas)` replaces `renderSystemGpu2d`. `pageTransitionInFlight` goes in the host's `animating`.
+
+For a `zoom`, say the rectangle first with `pageTransitionSetSource`; Back shrinks into the same one.
+
+A second navigation during a transition drops the page still leaving, and the current page leaves from its current pose. Going back along
+the same path is the same transition run backward.
+
+Case 1372 holds the rules; `checks/uiPageTransitions` paints them.

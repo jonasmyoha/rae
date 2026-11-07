@@ -60,6 +60,22 @@ type AnimateText {
   motion: String = "quick"
 }
 
+# How a page comes and goes, on a page's root (lib/ui/pageTransitionSystem). `motion` "" is the
+# kind's own.
+enum PageTransitionKind {
+  push
+  sibling
+  zoom
+  sheet
+  fade
+  none
+}
+
+type PageTransition {
+  kind: PageTransitionKind = PageTransitionKind.fade
+  motion: String = ""
+}
+
 enum ListChangeDirection { forward, back }
 
 # RUNTIME: the data this list is getting replaces all of it (ui/listMotionSystem, listRowsChange)

@@ -1,0 +1,520 @@
+# pageTransitionSystem: one page goes and another comes (docs/ui-animation-design.md section 8). The
+# motion is tracks on the two pages' roots, and the kind is the arriving page's PageTransition, or
+# the leaving page's when going back. Both page models use it:
+#
+#   One world, with both pages resident: pageTransitionResident. The leaving page deactivates at
+#   the end.
+#
+#   A new world per screen: pageTransitionBegin takes the old UiWorld and UiSystems, the host
+#   builds the new ones as it does today, then calls pageTransitionArrive. Each frame
+#   pageTransitionStep runs the old world, which gets no input and only animationSystem (with the
+#   transform pass, to see it), and pageTransitionDraw paints both. At the end the old world is
+#   dropped.
+#
+# Both pages are drawn live, not from a snapshot, with the host's fonts and textures: nothing is
+# loaded.
+#
+# A second navigation during a transition drops the page still leaving, and the current page leaves
+# from its current pose. If it goes back along the path it came, the returning page starts from
+# where the old one was, so it is the same transition run backward.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Queue
+open ecs/hierarchySystem/HierarchySystem
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/ThemeResolved
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+# The page that is leaving, with the world it lives in
+type LeavingWorld {
+  world: UiWorld
+  uiSystems: UiSystems
+  root: EntityId
+}
+
+type PageTransitionSystem {
+  # What a page with no PageTransition gets
+  defaultKind: PageTransitionKind = PageTransitionKind.fade
+  # None or one: the leaving world
+  leaving: List(LeavingWorld)
+  # pageTransitionBegin was called, and pageTransitionArrive not yet
+  waitingForArrival: Bool = false
+  # This transition's direction, and the last one's
+  back: Bool = false
+  lastBack: Bool = false
+  # The last dropped page's pose, for a transition that turns around
+  hasDroppedPose: Bool = false
+  droppedPose: AnimationPose
+  # A resident page still leaving, and the one that came
+  residentLeaving: EntityId
+  # The rectangle a zoom grows from, and shrinks back into
+  source: PageSource
+  hasSource: Bool = false
+}
+
+func createPageTransitionSystem() ret PageTransitionSystem {
+  ret PageTransitionSystem {
+    leaving: List.create(LeavingWorld, cap: 1)
+    droppedPose: AnimationPose {}
+    residentLeaving: noEntity()
+    source: PageSource { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+  }
+}
+
+# A zoom grows from this rectangle, and Back shrinks into it. Say it before the page arrives.
+func pageTransitionSetSource(system: mod PageTransitionSystem, source: view PageSource) {
+  system.source = source
+  system.hasSource = true
+}
+
+# True while an old world is still being drawn: feed it to the host's `animating`
+func pageTransitionInFlight(system: view PageTransitionSystem) ret Bool {
+  ret system.leaving.length > 0
+}
+
+func pageKindOf(
+  system: view PageTransitionSystem
+  world: view UiWorld
+  root: view EntityId
+) ret PageTransitionKind {
+  if componentHas(this: world.pageTransitions, entityId: root) {
+    ret componentView(this: world.pageTransitions, entityId: root).kind
+  }
+  ret system.defaultKind
+}
+
+func pageAuthoredMotion(world: view UiWorld, root: view EntityId) ret String {
+  if componentHas(this: world.pageTransitions, entityId: root) {
+    ret "{componentView(this: world.pageTransitions, entityId: root).motion}"
+  }
+  ret ""
+}
+
+func pageBoxOf(world: view UiWorld, uiSystems: view UiSystems, root: view EntityId) ret PageBox {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: root) {
+    let rect: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: root
+    )
+    ret PageBox { x: rect.position.x, y: rect.position.y, w: rect.size.x, h: rect.size.y }
+  }
+  ret PageBox { x: 0.0, y: 0.0, w: world.layoutW, h: world.layoutH }
+}
+
+# With no rectangle said, a zoom comes from the middle of the page, at half its size
+func pageSourceFor(system: view PageTransitionSystem, box: view PageBox) ret PageSource {
+  if system.hasSource {
+    ret system.source
+  }
+  ret PageSource { x: box.x + box.w / 4.0, y: box.y + box.h / 4.0, w: box.w / 2.0, h: box.h / 2.0 }
+}
+
+func pageSecondsNamed(world: view UiWorld, name: view String) ret Float {
+  if let token: MotionToken = themeMotion(theme: world.theme.resolved, name: name) {
+    ret pageSeconds(motion: token)
+  }
+  ret 0.42
+}
+
+# The leaving page's own nodes play their Disappear, starting within the first part of the
+# transition, a Stagger parent's children one after another
+func pageLeaveNodes(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  node: view EntityId
+  latest: view Float
+) {
+  if componentHas(this: world.childrens, entityId: node) is false {
+    ret
+  }
+  let hasStagger: Bool = componentHas(this: world.staggers, entityId: node)
+  var leavers: List(EntityId) = List.create(EntityId, cap: 8)
+  let children: view Children = componentView(this: world.childrens, entityId: node)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+    pageLeaveNodes(
+      world: world
+      uiSystems: uiSystems
+      node: child
+      latest: latest
+    )
+    if componentHas(this: world.disappears, entityId: child) and childInParentBox(
+      uiSystems: uiSystems
+      parent: node
+      child: child
+    ) {
+      leavers.add(value: child)
+    }
+  }
+  loop var i: Int = 0, i < leavers.length, ++i {
+    var delay: Float = 0.0
+    if hasStagger {
+      let stagger: view Stagger = componentView(this: world.staggers, entityId: node)
+      delay = staggerDelay(
+        index: i
+        count: leavers.length
+        stepSeconds: stagger.stepSeconds
+        maxSeconds: Math.min(a: stagger.maxSeconds, b: latest)
+        from: stagger.disappearFrom
+      )
+    }
+    leaveWith(
+      world: world
+      uiSystems: uiSystems
+      entityId: leavers.copyAtFallback(index: i, fallback: noEntity())
+      delaySeconds: delay
+      onEnd: AnimationEnd.stay
+    )
+  }
+}
+
+# The page goes: its root to `to`, its opacity to zero by its share of the transition, its nodes
+# by their Disappear
+func pageLeave(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+  to: view AnimationPose
+  motion: view String
+  seconds: view Float
+  onEnd: view AnimationEnd
+) {
+  componentSet(this: world.leavings, entityId: root, data: Leaving { holdsPlace: false })
+  blurSubtree(world: world, root: root)
+  pageLeaveNodes(
+    world: world
+    uiSystems: uiSystems
+    node: root
+    latest: seconds * pageDisappearShare
+  )
+  enqueue(
+    this: uiSystems.animation.commands
+    value: AnimationCommand {
+      entityId: root
+      hasFrom: false
+      from: AnimationPose {}
+      to: to
+      motion: motion
+      opacityMotion: "fadeOut"
+      delaySeconds: 0.0
+      phase: AnimationPhase.leaving
+      onEnd: onEnd
+      opacitySeconds: seconds * pageLeaveFadeShare
+    }
+  )
+}
+
+# Every Appear on the page waits for its share of the transition. The first paint already shows each
+# node's start pose, so the page does not flash in its final look.
+func pageDelayAppears(
+  uiSystems: mod UiSystems
+  world: view UiWorld
+  root: view EntityId
+  delay: view Float
+) {
+  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+  collectSubtree(childrens: world.childrens, node: root, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+      let track: mod AnimationTrack = componentMod(
+        this: uiSystems.animation.tracks
+        entityId: entityId
+      )
+      if track.phase is AnimationPhase.appearing {
+        track.delayLeft = track.delayLeft + delay
+      }
+    }
+  }
+}
+
+# The page comes. Its first paint is its start pose, and it takes taps where it is drawn from
+# that frame.
+func pageArrive(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+  from: view AnimationPose
+  motion: view String
+  seconds: view Float
+) {
+  # The nodes that have just come to be shown start now, with their first pose
+  animationTriggers(world: world, uiSystems: uiSystems)
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  pageDelayAppears(
+    uiSystems: uiSystems
+    world: world
+    root: root
+    delay: seconds * pageAppearShare
+  )
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: root
+    from: from
+    motion: motion
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+}
+
+# The old world goes now, whatever it was doing
+func pageDropLeaving(system: mod PageTransitionSystem) {
+  loop let page: view LeavingWorld in system.leaving {
+    system.droppedPose = animationPoseOf(uiSystems: page.uiSystems, entityId: page.root)
+    system.hasDroppedPose = true
+  }
+  system.leaving.clear()
+}
+
+# A new world per screen, step one: the system takes the old world, and the host builds the new one.
+# `back` says the host is going back. `root` is the old page's root.
+func pageTransitionBegin(
+  system: mod PageTransitionSystem
+  oldWorld: own UiWorld
+  oldUiSystems: own UiSystems
+  root: view EntityId
+  back: view Bool
+) {
+  system.hasDroppedPose = false
+  pageDropLeaving(system: system)
+  system.lastBack = system.back
+  system.back = back
+  system.leaving.add(
+    value: LeavingWorld { world: own oldWorld, uiSystems: own oldUiSystems, root: root }
+  )
+  system.waitingForArrival = true
+}
+
+# Step two: the new world is built, and `root` is its page. The transition starts.
+func pageTransitionArrive(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+) {
+  if system.waitingForArrival is false {
+    ret
+  }
+  system.waitingForArrival = false
+  var kind: PageTransitionKind = pageKindOf(system: system, world: world, root: root)
+  var authored: String = pageAuthoredMotion(world: world, root: root)
+  if system.back {
+    loop let page: view LeavingWorld in system.leaving {
+      kind = pageKindOf(system: system, world: page.world, root: page.root)
+      authored = pageAuthoredMotion(world: page.world, root: page.root)
+    }
+  }
+  let turning: Bool = system.hasDroppedPose and system.back is not system.lastBack
+  system.hasDroppedPose = false
+  if kind is PageTransitionKind.none or uiSystems.animation.settings.off {
+    system.leaving.clear()
+    ret
+  }
+  let motion: String = motionNameOr(
+    world: world
+    name: pageMotionName(kind: kind, authored: authored)
+    fallback: "smooth"
+  )
+  let seconds: Float = pageSecondsNamed(world: world, name: motion)
+  let box: PageBox = pageBoxOf(world: world, uiSystems: uiSystems, root: root)
+  let poses: PagePoses = pagePosesFor(
+    kind: kind
+    back: system.back
+    box: box
+    source: pageSourceFor(system: system, box: box)
+  )
+  var from: AnimationPose = poses.arriveFrom
+  if turning {
+    from = system.droppedPose
+  }
+  loop let page: mod LeavingWorld in system.leaving {
+    pageLeave(
+      world: page.world
+      uiSystems: page.uiSystems
+      root: page.root
+      to: poses.leaveTo
+      motion: motion
+      seconds: seconds
+      onEnd: AnimationEnd.stay
+    )
+  }
+  pageArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    from: from
+    motion: motion
+    seconds: seconds
+  )
+}
+
+# One frame of the old world. It is dropped when it has nothing left to do, but not under
+# RAE_ANIMATION_HOLD, where its motion stops part way on purpose. True while it is still being
+# drawn.
+func pageTransitionStep(system: mod PageTransitionSystem) ret Bool {
+  if system.leaving.length is 0 {
+    ret false
+  }
+  # A host that never said what came: there is nothing to leave to
+  if system.waitingForArrival {
+    system.waitingForArrival = false
+    system.leaving.clear()
+    ret false
+  }
+  var ended: Bool = false
+  loop let page: mod LeavingWorld in system.leaving {
+    animationRun(world: page.world, uiSystems: page.uiSystems)
+    transformSystem(world: page.world, uiSystems: page.uiSystems)
+    releaseDeadEntities(world: page.world, uiSystems: page.uiSystems)
+    ended = componentCount(this: page.uiSystems.animation.tracks) is 0
+  }
+  if ended {
+    system.leaving.clear()
+    ret false
+  }
+  ret true
+}
+
+# Paint the screen: the new world, and the old one while it is leaving. Going forward the new page
+# comes over the old one, and going back the old one goes away over the new one.
+func pageTransitionDraw(
+  system: view PageTransitionSystem
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if system.back is false {
+    loop let page: view LeavingWorld in system.leaving {
+      renderSystemGpu2d(
+        world: page.world
+        uiSystems: page.uiSystems
+        res: res
+        canvas: canvas
+      )
+    }
+  }
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    canvas: canvas
+  )
+  if system.back {
+    loop let page: view LeavingWorld in system.leaving {
+      renderSystemGpu2d(
+        world: page.world
+        uiSystems: page.uiSystems
+        res: res
+        canvas: canvas
+      )
+    }
+  }
+}
+
+# A resident page stops at once, and is hidden
+func pageResidentDrop(world: mod UiWorld, uiSystems: mod UiSystems, root: view EntityId) {
+  animationFinish(
+    world: world
+    uiSystems: uiSystems
+    entityId: root
+    onEnd: AnimationEnd.deactivate
+    pose: AnimationPose {}
+  )
+}
+
+# One world, both pages resident: `fromRoot` goes and `toRoot` comes. Taps go to `toRoot` from
+# now on.
+func pageTransitionResident(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  fromRoot: view EntityId
+  toRoot: view EntityId
+  back: view Bool
+) {
+  let still: EntityId = system.residentLeaving
+  let turning: Bool = still is toRoot and componentHas(this: world.leavings, entityId: toRoot)
+  if isNone(this: still) is false and turning is false and componentHas(
+    this: world.leavings
+    entityId: still
+  ) {
+    pageResidentDrop(world: world, uiSystems: uiSystems, root: still)
+  }
+  var kind: PageTransitionKind = pageKindOf(system: system, world: world, root: toRoot)
+  var authored: String = pageAuthoredMotion(world: world, root: toRoot)
+  if back {
+    kind = pageKindOf(system: system, world: world, root: fromRoot)
+    authored = pageAuthoredMotion(world: world, root: fromRoot)
+  }
+  system.back = back
+  system.residentLeaving = noEntity()
+  componentRemove(this: world.leavings, entityId: toRoot)
+  componentSet(this: world.actives, entityId: toRoot, data: Active { value: true })
+  if kind is PageTransitionKind.none or uiSystems.animation.settings.off {
+    animationDropMotion(uiSystems: uiSystems, entityId: toRoot)
+    pageResidentDrop(world: world, uiSystems: uiSystems, root: fromRoot)
+    ret
+  }
+  let motion: String = motionNameOr(
+    world: world
+    name: pageMotionName(kind: kind, authored: authored)
+    fallback: "smooth"
+  )
+  let seconds: Float = pageSecondsNamed(world: world, name: motion)
+  let box: PageBox = pageBoxOf(world: world, uiSystems: uiSystems, root: toRoot)
+  let poses: PagePoses = pagePosesFor(
+    kind: kind
+    back: back
+    box: box
+    source: pageSourceFor(system: system, box: box)
+  )
+  pageLeave(
+    world: world
+    uiSystems: uiSystems
+    root: fromRoot
+    to: poses.leaveTo
+    motion: motion
+    seconds: seconds
+    onEnd: AnimationEnd.deactivate
+  )
+  system.residentLeaving = fromRoot
+  if turning {
+    # It was on its way out: it comes back from where it is, and so do its nodes
+    var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+    collectSubtree(childrens: world.childrens, node: toRoot, out: subtree)
+    loop let entityId: view EntityId in subtree {
+      if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+        animationTo(
+          uiSystems: uiSystems
+          entityId: entityId
+          to: AnimationPose {}
+          motion: motion
+          opacityMotion: "fadeIn"
+          delaySeconds: 0.0
+        )
+      }
+    }
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+    ret
+  }
+  animationDropMotion(uiSystems: uiSystems, entityId: toRoot)
+  pageArrive(
+    world: world
+    uiSystems: uiSystems
+    root: toRoot
+    from: poses.arriveFrom
+    motion: motion
+    seconds: seconds
+  )
+}

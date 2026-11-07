@@ -1,0 +1,119 @@
+# The rules of a page transition, pure (docs/ui-animation-design.md section 8.2): where each page
+# starts and ends for a kind, and the timing that comes from the kind. No world, no tables.
+open ui/AnimationComponents
+open ui/ThemeResolved
+open ui/animationSystem/AnimationRules
+
+# The leaving page's opacity is zero by this share of the transition, in every kind: pages may be
+# see-through, and two sets of text must not show over each other
+const pageLeaveFadeShare: Float = 0.6
+
+# The leaving page's nodes start their Disappear within this share of the transition
+const pageDisappearShare: Float = 0.4
+
+# The arriving page's nodes start their Appear at this share of the transition
+const pageAppearShare: Float = 0.25
+
+# How far a push moves the page under it, as a share of the page's width
+const pagePushUnderShare: Float = 0.3
+
+# How far a sibling moves each way, in points
+const pageSiblingPoints: Float = 40.0
+
+const pageSheetUnderScale: Float = 0.95
+
+const pageZoomUnderScale: Float = 1.05
+
+# A rectangle a zoom grows from, in the same coordinates as the page
+type PageSource {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+# The page's box
+type PageBox {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+type PagePoses {
+  arriveFrom: AnimationPose
+  leaveTo: AnimationPose
+}
+
+# The pose that puts a page on `source`: pose scale acts about the page's middle
+func poseOnSource(box: view PageBox, source: view PageSource) ret AnimationPose {
+  var scale: Float = 1.0
+  if box.w > 0.0 {
+    scale = source.w / box.w
+  }
+  ret AnimationPose {
+    opacity: 0.0
+    scale: scale
+    x: source.x + source.w / 2.0 - (box.x + box.w / 2.0)
+    y: source.y + source.h / 2.0 - (box.y + box.h / 2.0)
+  }
+}
+
+# Going forward, the arriving page moves in and the leaving page moves under. Back is the same path
+# reversed. Whatever the path, the leaving page ends at opacity zero.
+func pagePosesFor(
+  kind: view PageTransitionKind
+  back: view Bool
+  box: view PageBox
+  source: view PageSource
+) ret PagePoses {
+  var over: AnimationPose = {}
+  var under: AnimationPose = { opacity: 0.0 }
+  if kind is PageTransitionKind.push {
+    over.x = box.w
+    under.x = -pagePushUnderShare * box.w
+  } else if kind is PageTransitionKind.sibling {
+    # A sibling has no page under it: each one moves to its own side
+    var direction: Float = 1.0
+    if back {
+      direction = -1.0
+    }
+    ret PagePoses {
+      arriveFrom: AnimationPose { opacity: 0.0, x: direction * pageSiblingPoints }
+      leaveTo: AnimationPose { opacity: 0.0, x: -direction * pageSiblingPoints }
+    }
+  } else if kind is PageTransitionKind.zoom {
+    over = poseOnSource(box: box, source: source)
+    under.scale = pageZoomUnderScale
+  } else if kind is PageTransitionKind.sheet {
+    over.y = box.h
+    under.scale = pageSheetUnderScale
+  } else {
+    over.opacity = 0.0
+  }
+  if back {
+    over.opacity = 0.0
+    ret PagePoses { arriveFrom: under, leaveTo: over }
+  }
+  ret PagePoses { arriveFrom: over, leaveTo: under }
+}
+
+# The motion a kind runs on when its PageTransition names none
+func pageMotionName(kind: view PageTransitionKind, authored: view String) ret String {
+  if authored.length() > 0 {
+    ret authored
+  }
+  if kind is PageTransitionKind.zoom {
+    ret "livelySoft"
+  }
+  ret "smooth"
+}
+
+# How long a motion takes, for the timing that hangs on it: a critically damped spring is 98.6% of
+# the way after its response
+func pageSeconds(motion: view MotionToken) ret Float {
+  if motion.kind is MotionKind.spring {
+    ret motion.response
+  }
+  ret motion.seconds
+}
