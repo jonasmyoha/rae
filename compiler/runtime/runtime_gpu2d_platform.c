@@ -210,7 +210,15 @@ static void rae_g2d_configure(int pw, int ph) {
     const char* present_mode = getenv("RAE_PRESENT_MODE");
     if (present_mode && strcmp(present_mode, "immediate") == 0) cfg.presentMode = WGPUPresentMode_Immediate;
     cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
+#if defined(__APPLE__) && TARGET_OS_IOS && defined(__arm64__)
+    /* The drawables come from a display link (runtime_gpu2d_ios_display_link.c),
+     * which must not be attached while the surface is configured */
+    rae_g2d_display_link_stop();
     wgpuSurfaceConfigure(g_g2d_surface, &cfg);
+    rae_g2d_display_link_start(SDL_Metal_GetLayer(g_g2d_metal_view));
+#else
+    wgpuSurfaceConfigure(g_g2d_surface, &cfg);
+#endif
     g_sdl_w = pw; g_sdl_h = ph;
 #if defined(__APPLE__) && TARGET_OS_OSX
     if (g_g2d_presentation_layer && g_sdl_win) {
