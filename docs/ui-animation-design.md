@@ -641,6 +641,31 @@ the phone it changed nothing measurable: the zoom out still had 18 of 40 frames 
 22 of 40 over 9 ms at a CPU of a median 2 ms and a 90% 3 ms a frame, so the CPU a frame is not what sets the pacing
 either. What is left is how the frames are presented: "[ui animation: present pacing on ProMotion]".
 
+**How the frames are presented (measured 2026-11-07, iPhone 15 Pro, SUMU's motion self-test, 40 frames of the zoom
+out).** The CAMetalLayer that wgpu-native makes has `maximumDrawableCount` 3, `presentsWithTransaction` off and
+`allowsNextDrawableTimeout` off. The base run had 18-21 of 40 frames over 9 ms, with the drawable acquire at a median
+6 ms and a 90% 14 ms. Each change below was made in temporary code and then removed:
+
+| change | zoom out frames over 9 ms | frame time |
+|---|---|---|
+| none (the base) | 18-21 of 40 | 8 and 17 ms, alternating |
+| `desiredMaximumFrameLatency` 3 (`WGPUSurfaceConfigurationExtras`) | the same as the base | the same |
+| `desiredMaximumFrameLatency` 1 | 39 of 40 | median 25 ms |
+| `maximumDrawableCount` 2 | 39 of 40 | median 25 ms |
+| each frame waits for the tick of a CADisplayLink at 120/120/120 Hz | 17 of 40 | median 9 ms, 90% 17 ms; acquire median 1 ms |
+
+- The defaults are already the best of these. Fewer drawables or a lower frame latency make every frame wait for the
+  display.
+- A CADisplayLink only ticks on the run loop of the thread that renders, in the default mode. When it was added to
+  the main run loop in the common modes it never ticked, and each wait ran out. That may also be why the earlier
+  120 Hz link changed nothing. With the link on the right run loop it ticked 119 times a second. Waiting for its tick
+  moved the wait out of the drawable acquire (acquire median 1 ms), but the frames still came 8 and 17 ms apart. So
+  the frame does not start late: a frame that was ready in time is still shown one display refresh later.
+- wgpu-native's `wgpuSurfacePresent` takes only the surface. It cannot present at a time or after a minimum
+  duration (Metal's `presentDrawable:afterMinimumDuration:`). Doing that needs the drawable presented outside
+  wgpu-native.
+- What is left to try is in "[ui animation: present the drawable at a time on iOS]".
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and
