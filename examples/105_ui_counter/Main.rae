@@ -38,6 +38,8 @@ open ui/Registry
 open app3d/UiShell
 open ui/Ecs
 open ui/Pipeline
+open ui/animationSystem/AnimationTracks
+open ui/buttonSystem/ButtonHoverScale
 open ecs/Schedule
 open ui/inputSystem/InputSystem
 open ui/layoutSystem/LayoutSystem
@@ -239,6 +241,15 @@ func main() ret Int {
 
   syncUi(world: world, state: state)
 
+  # RAE_UI_COUNTER_PRESS=n presses +1 on frame n, so a picture can show the change in motion
+  # (RAE_ANIMATION_HOLD): the same state functions a button uses, once the window is up.
+  let pressEnv: String = getEnv(name: "RAE_UI_COUNTER_PRESS")
+  var pressFrame: Int = -1
+  if pressEnv.length() > 0 {
+    pressFrame = pressEnv.toInt()
+  }
+  var frame: Int = 0
+
   # The lib/ui systems run on a #939 Schedule: createUiPipeline registers every
   # UI system in canonical order with its declared read/write tables, and
   # runScheduledUiSystems runs the render-prep ones each gated by `uiShouldRun`
@@ -258,6 +269,10 @@ func main() ret Int {
   var renderedOnce: Bool = false
   # Set when the idle wait returns, and consumed by the next iteration.
   var wokeUp: Bool = false
+  # Something in the scene is moving: the number's roll, or a button under the finger. Those frames
+  # must come by themselves, or the motion stops wherever the last event left it.
+  var animating: Bool = false
+  var lastFrameSec: Float64 = Gpu2d.nowSeconds()
 
   loop not Gpu2d.pollClose() {
     # One call handles the whole resize: it consumes the event, converts pixels
@@ -267,6 +282,21 @@ func main() ret Int {
 
     updateUiInput(input: input, world: world, uiSystems: uiSystems)
     let hadEvents: Bool = uiActionCount(world: world) > 0
+    let now: Float64 = Gpu2d.nowSeconds()
+    let pressing: Bool = buttonHoverScaleUpdate(
+      world: world
+      uiSystems: uiSystems
+      hovered: input.hoveredEntityId
+      deltaTime: (now - lastFrameSec) as Float
+    )
+    lastFrameSec = now
+    frame = frame + 1
+    if frame is pressFrame {
+      state.value = state.value + state.step
+      rememberValue(state: state, value: state.value)
+      syncUi(world: world, state: state)
+      changed = true
+    }
 
     if applyActions(state: state, world: world) {
       # A value change is what the history records. The step buttons report a
@@ -285,7 +315,7 @@ func main() ret Int {
       changed = true
     }
 
-    if hadEvents or changed {
+    if hadEvents or changed or animating or pressing {
       # Layout, then transforms, then the visual bounds the renderer draws from.
       # The order is not a detail: bounds computed before layout are last
       # frame's bounds. The Schedule owns that order and skips layout/transform
@@ -310,7 +340,8 @@ func main() ret Int {
     # `wokeUp` carries a wake across to the next iteration, so anything the OS
     # woke us for -- an expose after another window passed over this one, a
     # move, a focus change -- results in a repaint.
-    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
+    animating = animationInFlight(world: world, uiSystems: uiSystems) or pressing
+    let needsRender: Bool = hadEvents or changed or wokeUp or animating or pressing or renderedOnce is false
     wokeUp = false
 
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
@@ -330,15 +361,15 @@ func main() ret Int {
       Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
     } else {
-      # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake for
-      # except the OS: the loop blocks rather than redrawing an identical frame
-      # sixty times a second. The timeout is the shared policy from
-      # lib/ui/eventLoop.rae, not a number invented here; an app WITH animation
-      # passes animating: true and gets a frame-length wait instead. See
+      # IDLE AT ~0% CPU. With nothing moving there is nothing to wake for except
+      # the OS: the loop blocks rather than redrawing an identical frame sixty
+      # times a second. The timeout is the shared policy from
+      # lib/ui/eventLoop.rae, not a number invented here; a hidden window with
+      # motion in flight gets a frame-length wait. See
       # docs/ui-render-loop-performance.md.
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         visible: Gpu2d.renderableNow()
-        animating: false
+        animating: animating
         mouseDown: false
         pollWatcher: false
         frameSec: 0.016667
