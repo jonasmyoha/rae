@@ -1,0 +1,38 @@
+--- who has the pointer
+a tap at the edge still clicks:  row0, swipes 0
+a press away from the edge is no swipe: 0, phase idle true
+along y first is the scroll's: swipes 0, the list at -30, phase idle true
+and it stays the scroll's: swipes 0
+pressed: the row looks pressed true
+a swipe: started 1, it holds the press true, no pressed row true
+the finger wanders along y: the list stays at 0 from where it was
+released: clicks none
+--- a flick that moves and lifts in one frame
+clicks nothing: none
+--- a finger, then it springs back
+started: the page B x 0 opacity 100, under it A x -12000 opacity 0
+a quarter of the way: B x 10000 opacity 58; A x -9000 opacity 25
+a finger that stops holds them still: B x 10000 opacity 58; taps go nowhere yet
+let go slowly: finished 0, sprang back 1, no jump true
+B is the page again at once: Leaving false
+settled: B active true, A active false, 0 tracks, 0 poses, 0 leaving
+a tap works:  row0
+--- past half way, and a flick
+past half way, held still: finished 1, sprang back 0
+settled: B active false, A active true, 0 poses
+a flick at a fifth of the way, 10 widths a second: finished 1, sprang back 0
+it carries on at the finger's speed: B at x 11769 after one step from 80, its speed true
+rule: 0.25 still false; 0.5 still true; 0.25 at 2 a second true; 0.6 back at -2 a second false
+--- while a push is still running
+the push at 0.1 s: B x 22367 opacity 100; A x -5290 opacity 94
+a finger takes it: B goes on until then, and from there jumps 0, and is paused true
+let go: sprang back 1
+settled on the page it was going to: B active true, A active false, 0 poses
+--- two worlds
+the new page x -9000 opacity 25; a step does not drop the old one: true
+it has not ended: take back false
+let go: finished false
+at rest, the host has its world back: it is the old one true, its page active true, no Leaving true, 0 poses
+in flight false
+past half: finished true
+the old world is not given back: false; the new page rests x 0 opacity 100

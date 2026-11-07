@@ -21,6 +21,7 @@
 # finger clicks through the pointer, on release, as the mouse does, so it is
 # counted once.
 open ui/Ecs
+open ui/AnimationComponents
 open ui/Components
 open ui/Layer
 import Gpu2d
@@ -529,6 +530,21 @@ func scrollActivationUnits(input: view UiInput) ret Float {
 # frame). A claimed press has no pressed entity and its release clicks
 # nothing.
 func uiPressClaimed(input: view UiInput, world: view UiWorld) ret Bool {
+  # A swipe from the edge has it (ui/pageTransitionSystem/EdgeSwipe)
+  if world.edgeSwipe.phase is EdgeSwipePhase.active {
+    ret true
+  }
+  # Or it has just moved far enough, in the frame it may also lift
+  if world.edgeSwipe.phase is EdgeSwipePhase.watching {
+    let alongX: Float = input.pointer.x - world.edgeSwipe.pressX
+    var alongY: Float = input.pointer.y - world.edgeSwipe.pressY
+    if alongY < 0.0 {
+      alongY = -alongY
+    }
+    if alongX > scrollActivationUnits(input: input) and alongX > alongY {
+      ret true
+    }
+  }
   let count: Int = componentCount(this: world.scrollDrags)
   loop var i: Int = 0, i < count, ++i {
     let rootEntityId: EntityId = componentEntityAt(this: world.scrollDrags, i: i)

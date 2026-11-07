@@ -271,6 +271,7 @@ func sharedArrive(
   uiSystems: mod UiSystems
   root: view EntityId
   sources: view List(SharedSource)
+  fromFinger: view Bool
 ) ret List(EntityId) {
   var taken: List(EntityId) = List.create(EntityId, cap: 4)
   if sources.length is 0 {
@@ -281,7 +282,7 @@ func sharedArrive(
     loop let source: view SharedSource in sources {
       if source.key is entry.key {
         if entry.mode is SharedMode.morph {
-          if source.onScreen {
+          if source.onScreen and not fromFinger {
             sharedMorph(
               world: world
               uiSystems: uiSystems

@@ -62,6 +62,15 @@ type PageTransitionSystem {
   # The rectangle a zoom grows from, and shrinks back into
   source: PageSource
   hasSource: Bool = false
+  # A finger has the transition (pageTransitionDragStart). The next transition starts paused.
+  dragging: Bool = false
+  dragArriving: EntityId
+  dragLeaving: EntityId
+  dragFrom: AnimationPose
+  dragProgress: Float = 0.0
+  dragVelocity: Float = 0.0
+  # The finger let go and it is springing back: the old page is the page again
+  springingBack: Bool = false
 }
 
 func createPageTransitionSystem() ret PageTransitionSystem {
@@ -69,6 +78,9 @@ func createPageTransitionSystem() ret PageTransitionSystem {
     leaving: List.create(LeavingWorld, cap: 1)
     droppedPose: AnimationPose {}
     residentLeaving: noEntity()
+    dragArriving: noEntity()
+    dragLeaving: noEntity()
+    dragFrom: AnimationPose {}
     source: PageSource { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
   }
 }
@@ -325,6 +337,7 @@ func pageTransitionArrive(
     uiSystems: uiSystems
     root: root
     sources: sources
+    fromFinger: system.dragging
   )
   loop let page: mod LeavingWorld in system.leaving {
     pageLeave(
@@ -346,6 +359,17 @@ func pageTransitionArrive(
     motion: motion
     seconds: seconds
   )
+  if system.dragging {
+    loop let page: mod LeavingWorld in system.leaving {
+      # Its commands now, as the finger moves it from the next call
+      animationSystem(world: page.world, uiSystems: page.uiSystems, deltaTime: 0.0)
+      pagePause(uiSystems: page.uiSystems, root: page.root)
+      system.dragLeaving = page.root
+    }
+    pagePause(uiSystems: uiSystems, root: root)
+    system.dragArriving = root
+    system.dragFrom = poses.arriveFrom
+  }
 }
 
 # One frame of the old world. It is dropped when it has nothing left to do, but not under
@@ -368,7 +392,7 @@ func pageTransitionStep(system: mod PageTransitionSystem) ret Bool {
     releaseDeadEntities(world: page.world, uiSystems: page.uiSystems)
     ended = componentCount(this: page.uiSystems.animation.tracks) is 0
   }
-  if ended {
+  if ended and not system.springingBack and not system.dragging {
     system.leaving.clear()
     ret false
   }
@@ -492,6 +516,7 @@ func pageTransitionResident(
     uiSystems: uiSystems
     root: toRoot
     sources: sharedSourcesOf(world: world, uiSystems: uiSystems, root: fromRoot)
+    fromFinger: system.dragging
   )
   pageLeave(
     world: world
@@ -521,15 +546,333 @@ func pageTransitionResident(
       }
     }
     animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  } else {
+    animationDropMotion(uiSystems: uiSystems, entityId: toRoot)
+    pageArrive(
+      world: world
+      uiSystems: uiSystems
+      root: toRoot
+      from: poses.arriveFrom
+      motion: motion
+      seconds: seconds
+    )
+  }
+  if system.dragging {
+    pagePause(uiSystems: uiSystems, root: toRoot)
+    pagePause(uiSystems: uiSystems, root: fromRoot)
+    system.dragArriving = toRoot
+    system.dragLeaving = fromRoot
+    system.dragFrom = poses.arriveFrom
+  }
+}
+
+func pagePause(uiSystems: mod UiSystems, root: view EntityId) {
+  if componentHas(this: uiSystems.animation.tracks, entityId: root) {
+    componentMod(this: uiSystems.animation.tracks, entityId: root).paused = true
+  }
+}
+
+# A finger is about to go back: the transition that the host starts next waits for it. A morph needs
+# time, so it stays out of this one: what has a morph key just goes with its page.
+func pageTransitionDragStart(system: mod PageTransitionSystem) {
+  system.dragging = true
+  system.dragProgress = 0.0
+  system.dragVelocity = 0.0
+  system.springingBack = false
+}
+
+# Place one page's root at `progress` of its way. A leaving page is clear by its usual share of the
+# way.
+func pageDragPlace(
+  uiSystems: mod UiSystems
+  root: view EntityId
+  progress: view Float
+  leaving: view Bool
+) {
+  if componentHas(this: uiSystems.animation.tracks, entityId: root) is false {
     ret
   }
-  animationDropMotion(uiSystems: uiSystems, entityId: toRoot)
-  pageArrive(
+  let track: mod AnimationTrack = componentMod(this: uiSystems.animation.tracks, entityId: root)
+  var opacityShare: Float = progress
+  if leaving {
+    opacityShare = Math.min(a: 1.0, b: progress / pageLeaveFadeShare)
+  }
+  channelHold(channel: track.opacity, share: opacityShare)
+  channelHold(channel: track.scale, share: progress)
+  channelHold(channel: track.x, share: progress)
+  channelHold(channel: track.y, share: progress)
+  channelHold(channel: track.rotation, share: progress)
+  channelHold(channel: track.stretchY, share: progress)
+  let pose: AnimationPose = poseOfTrack(track: track)
+  componentSet(this: uiSystems.animation.poses, entityId: root, data: pose)
+}
+
+# The finger moved. `progress` is 0 to 1 of the way, from where the pages were when it took them,
+# and
+# `velocity` is progress a second.
+func pageTransitionDrag(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  progress: view Float
+  velocity: view Float
+) {
+  if system.dragging is false {
+    ret
+  }
+  system.dragProgress = progress
+  system.dragVelocity = velocity
+  pageDragPlace(
+    uiSystems: uiSystems
+    root: system.dragArriving
+    progress: progress
+    leaving: false
+  )
+  if system.leaving.length is 0 {
+    pageDragPlace(
+      uiSystems: uiSystems
+      root: system.dragLeaving
+      progress: progress
+      leaving: true
+    )
+  }
+  loop let page: mod LeavingWorld in system.leaving {
+    pageDragPlace(
+      uiSystems: page.uiSystems
+      root: page.root
+      progress: progress
+      leaving: true
+    )
+    transformSystem(world: page.world, uiSystems: page.uiSystems)
+  }
+}
+
+# One root takes off from the finger: to `target`, with the speed the finger gave it
+func pageDragRelease(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+  target: view AnimationPose
+  rate: view Float
+  motionName: view String
+  phase: view AnimationPhase
+  onEnd: view AnimationEnd
+) {
+  if componentHas(this: uiSystems.animation.tracks, entityId: root) is false {
+    ret
+  }
+  var motion: MotionToken = {}
+  if let token: MotionToken = themeMotion(theme: world.theme.resolved, name: motionName) {
+    motion = token
+  }
+  let track: mod AnimationTrack = componentMod(this: uiSystems.animation.tracks, entityId: root)
+  track.paused = false
+  track.phase = phase
+  track.onEnd = onEnd
+  pageDragChannel(
+    channel: track.x
+    target: target.x
+    rate: rate
+    motion: motion
+  )
+  pageDragChannel(
+    channel: track.y
+    target: target.y
+    rate: rate
+    motion: motion
+  )
+  pageDragChannel(
+    channel: track.scale
+    target: target.scale
+    rate: rate
+    motion: motion
+  )
+  pageDragChannel(
+    channel: track.rotation
+    target: target.rotation
+    rate: rate
+    motion: motion
+  )
+  pageDragChannel(
+    channel: track.stretchY
+    target: target.stretchY
+    rate: rate
+    motion: motion
+  )
+  # Opacity follows a short curve from where it is, as it does not fling
+  track.opacity.velocity = 0.0
+  channelRetarget(channel: track.opacity, target: target.opacity, motion: motion)
+}
+
+func pageDragChannel(
+  channel: mod AnimationChannel
+  target: view Float
+  rate: view Float
+  motion: view MotionToken
+) {
+  # The path it was held on goes from `start` to its old target at `rate`, so that is its speed now
+  channel.velocity = (channel.target - channel.start) * rate
+  channelRetarget(channel: channel, target: target, motion: motion)
+}
+
+# The finger let go: the transition finishes, or springs back, from the finger's velocity. True
+# when it
+# finishes. When it springs back, the old page is the page again: with one world the arriving page
+# deactivates at the end, and with two the host takes its world back with pageTransitionTakeBack.
+func pageTransitionDragEnd(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  if system.dragging is false {
+    ret true
+  }
+  system.dragging = false
+  let finishes: Bool = pageDragFinishes(
+    progress: system.dragProgress
+    velocity: system.dragVelocity
+  )
+  let rate: Float = system.dragVelocity
+  var name: String = "smooth"
+  if finishes {
+    # Each page goes on to where it was going
+    pageDragFinish(uiSystems: uiSystems, root: system.dragArriving, rate: rate)
+    if system.leaving.length is 0 {
+      pageDragFinish(uiSystems: uiSystems, root: system.dragLeaving, rate: rate)
+    }
+    loop let page: mod LeavingWorld in system.leaving {
+      pageDragFinish(uiSystems: page.uiSystems, root: page.root, rate: rate)
+    }
+    ret true
+  }
+  system.springingBack = true
+  pageDragRelease(
     world: world
     uiSystems: uiSystems
-    root: toRoot
-    from: poses.arriveFrom
-    motion: motion
-    seconds: seconds
+    root: system.dragArriving
+    target: system.dragFrom
+    rate: rate
+    motionName: name
+    phase: AnimationPhase.leaving
+    onEnd: pageSpringBackEnd(system: system)
   )
+  componentSet(
+    this: world.leavings
+    entityId: system.dragArriving
+    data: Leaving { holdsPlace: false }
+  )
+  if system.leaving.length is 0 {
+    let leavingRoot: EntityId = system.dragLeaving
+    componentRemove(this: world.leavings, entityId: leavingRoot)
+    pageDragRelease(
+      world: world
+      uiSystems: uiSystems
+      root: leavingRoot
+      target: AnimationPose {}
+      rate: rate
+      motionName: name
+      phase: AnimationPhase.appearing
+      onEnd: AnimationEnd.stay
+    )
+    pageRestoreNodes(world: world, uiSystems: uiSystems, root: leavingRoot)
+    system.residentLeaving = system.dragArriving
+  }
+  loop let page: mod LeavingWorld in system.leaving {
+    componentRemove(this: page.world.leavings, entityId: page.root)
+    pageDragRelease(
+      world: page.world
+      uiSystems: page.uiSystems
+      root: page.root
+      target: AnimationPose {}
+      rate: rate
+      motionName: name
+      phase: AnimationPhase.appearing
+      onEnd: AnimationEnd.stay
+    )
+    pageRestoreNodes(world: page.world, uiSystems: page.uiSystems, root: page.root)
+  }
+  ret false
+}
+
+func pageSpringBackEnd(system: view PageTransitionSystem) ret AnimationEnd {
+  if system.leaving.length is 0 {
+    ret AnimationEnd.deactivate
+  }
+  ret AnimationEnd.stay
+}
+
+func pageDragFinish(uiSystems: mod UiSystems, root: view EntityId, rate: view Float) {
+  if componentHas(this: uiSystems.animation.tracks, entityId: root) is false {
+    ret
+  }
+  let track: mod AnimationTrack = componentMod(this: uiSystems.animation.tracks, entityId: root)
+  track.paused = false
+  pageDragGoOn(channel: track.x, rate: rate)
+  pageDragGoOn(channel: track.y, rate: rate)
+  pageDragGoOn(channel: track.scale, rate: rate)
+  pageDragGoOn(channel: track.rotation, rate: rate)
+  pageDragGoOn(channel: track.stretchY, rate: rate)
+  track.opacity.velocity = 0.0
+  channelRetarget(
+    channel: track.opacity
+    target: track.opacity.target
+    motion: track.opacity.motion
+  )
+}
+
+func pageDragGoOn(channel: mod AnimationChannel, rate: view Float) {
+  channel.velocity = (channel.target - channel.start) * rate
+  channelRetarget(channel: channel, target: channel.target, motion: channel.motion)
+}
+
+# What the old page had started to do comes back: its nodes' Disappear, and what it hid for a node
+# that
+# stays, which looks the same from here
+func pageRestoreNodes(world: view UiWorld, uiSystems: mod UiSystems, root: view EntityId) {
+  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+  collectSubtree(childrens: world.childrens, node: root, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if entityId is not root {
+      if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+        animationTo(
+          uiSystems: uiSystems
+          entityId: entityId
+          to: AnimationPose {}
+          motion: "smooth"
+          opacityMotion: "fadeIn"
+          delaySeconds: 0.0
+        )
+      } else if componentHas(this: uiSystems.animation.poses, entityId: entityId) {
+        componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+      }
+    }
+  }
+}
+
+# With two worlds, after a swipe that sprang back: once it is at rest the old world is the host's
+# again,
+# and the one built for the swipe goes. True on the frame it happens, when the host has anything of
+# its
+# own to put back. Call it each frame after pageTransitionStep.
+func pageTransitionTakeBack(
+  system: mod PageTransitionSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  if system.springingBack is false or system.leaving.length is 0 {
+    ret false
+  }
+  var resting: Bool = false
+  loop let page: view LeavingWorld in system.leaving {
+    resting = componentCount(this: page.uiSystems.animation.tracks) is 0
+  }
+  if resting is false {
+    ret false
+  }
+  let page: LeavingWorld = system.leaving.pop()
+  world = own page.world
+  uiSystems = own page.uiSystems
+  system.springingBack = false
+  system.back = system.lastBack
+  ret true
 }

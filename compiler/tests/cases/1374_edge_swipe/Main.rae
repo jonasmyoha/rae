@@ -1,0 +1,763 @@
+# A swipe from the left edge (docs/ui-animation-design.md section 8.4). A scripted finger goes
+# through the
+# real input path over a list of 100-pt buttons, in a page 400 wide. A push going back takes the
+# leaving page
+# to x 400 and brings the page under it from x -120 at opacity 0, so at a quarter of the way the
+# leaving page
+# is at x 100 with opacity 1 - 0.25 / 0.6, and the other at x -90 with opacity 0.25.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/Scene
+open ui/SceneLoader
+open ui/ScrollDrag
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/pageTransitionSystem/EdgeSwipe
+open ui/pageTransitionSystem/PageTransitionRules
+open ui/pageTransitionSystem/PageTransitionSystem
+open ui/scrollRootSystem/ScrollRootSystem
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  system: PageTransitionSystem
+  list: EntityId
+  a: EntityId
+  b: EntityId
+  clicks: List(String)
+  started: Int
+  finished: Int
+  sprangBack: Int
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func mount() ret Rig {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"A\",\"B\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Active\":\{\"value\":false\},\"PageTransition\":\{\"kind\":\"push\"\}\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"List\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\},\"ScrollRoot\":\{\"axis\":\"y\",\"floor\":\"content\"\},\"Children\":[\"Row0\",\"Row1\",\"Row2\",\"Row3\"]\},\"Row0\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"row0\",\"label\":\"Row 0\"\}\},\"Row1\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"row1\",\"label\":\"Row 1\"\}\},\"Row2\":\{\"Rect\":\{\"x\":0,\"y\":200,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"row2\",\"label\":\"Row 2\"\}\},\"Row3\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"row3\",\"label\":\"Row 3\"\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  let list: EntityId = nodeOf(world: world, nodeId: "List")
+  let a: EntityId = nodeOf(world: world, nodeId: "A")
+  let b: EntityId = nodeOf(world: world, nodeId: "B")
+  ret Rig {
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    system: createPageTransitionSystem()
+    list: list
+    a: a
+    b: b
+    clicks: List.create(String, cap: 4)
+    started: 0
+    finished: 0
+    sprangBack: 0
+  }
+}
+
+# One frame, in a host's order, each 0.01 s
+func frame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  loop var i: Int = 0, i < eventCount(this: rig.world.uiActions), ++i {
+    let action: UiAction = eventAt(this: rig.world.uiActions, i: i)
+    rig.clicks.add(value: "{action.actionId}")
+  }
+  let event: EdgeSwipeEvent = edgeSwipeStep(world: rig.world, input: rig.input, deltaTime: 0.01)
+  if event.kind is EdgeSwipeKind.started {
+    rig.started = rig.started + 1
+    pageTransitionDragStart(system: rig.system)
+    pageTransitionResident(
+      system: rig.system
+      world: rig.world
+      uiSystems: rig.uiSystems
+      fromRoot: rig.b
+      toRoot: rig.a
+      back: true
+    )
+  } else if event.kind is EdgeSwipeKind.moved {
+    pageTransitionDrag(
+      system: rig.system
+      world: rig.world
+      uiSystems: rig.uiSystems
+      progress: event.progress
+      velocity: event.velocity
+    )
+  } else if event.kind is EdgeSwipeKind.released {
+    pageTransitionDrag(
+      system: rig.system
+      world: rig.world
+      uiSystems: rig.uiSystems
+      progress: event.progress
+      velocity: event.velocity
+    )
+    if pageTransitionDragEnd(system: rig.system, world: rig.world, uiSystems: rig.uiSystems) {
+      rig.finished = rig.finished + 1
+    } else {
+      rig.sprangBack = rig.sprangBack + 1
+    }
+  }
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  animationTriggers(world: rig.world, uiSystems: rig.uiSystems)
+  if animationInFlight(world: rig.world, uiSystems: rig.uiSystems) {
+    animationSystem(world: rig.world, uiSystems: rig.uiSystems, deltaTime: 0.01)
+  }
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  releaseDeadEntities(world: rig.world, uiSystems: rig.uiSystems)
+}
+
+func settle(rig: mod Rig) {
+  loop var i: Int = 0, i < 400 and animationInFlight(world: rig.world, uiSystems: rig.uiSystems), ++i {
+    frame(
+      rig: rig
+      x: 300.0
+      y: 700.0
+      down: false
+    )
+  }
+  frame(
+    rig: rig
+    x: 300.0
+    y: 700.0
+    down: false
+  )
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func poseText(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+  ret "x {hundredths(value: pose.x)} opacity {hundredths(value: pose.opacity)}"
+}
+
+func clicksOf(rig: view Rig) ret String {
+  if rig.clicks.length is 0 {
+    ret "none"
+  }
+  var text: String = ""
+  loop let click: view String in rig.clicks {
+    text = "{text} {click}"
+  }
+  ret text
+}
+
+func scrollY(rig: view Rig) ret Int {
+  ret Math.round(x: componentView(this: rig.world.scrollStates, entityId: rig.list).y).toInt()
+}
+
+func activeOf(rig: view Rig, entityId: view EntityId) ret Bool {
+  ret active(world: rig.world, entityId: entityId)
+}
+
+func pointerRules() {
+  log("--- who has the pointer")
+  var rig: Rig = mount()
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 7.0
+    y: 51.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 7.0
+    y: 51.0
+    down: false
+  )
+  log("a tap at the edge still clicks: {clicksOf(rig: rig)}, swipes {rig.started}")
+  rig.clicks.clear()
+  frame(
+    rig: rig
+    x: 100.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 160.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 200.0
+    y: 50.0
+    down: false
+  )
+  log(
+    "a press away from the edge is no swipe: {rig.started}, phase idle {rig.world.edgeSwipe.phase is EdgeSwipePhase.idle}"
+  )
+  rig.clicks.clear()
+  settle(rig: rig)
+  frame(
+    rig: rig
+    x: 5.0
+    y: 150.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 6.0
+    y: 120.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 7.0
+    y: 90.0
+    down: true
+  )
+  log(
+    "along y first is the scroll's: swipes {rig.started}, the list at {scrollY(rig: rig)}, phase idle {rig.world.edgeSwipe.phase is EdgeSwipePhase.idle}"
+  )
+  frame(
+    rig: rig
+    x: 100.0
+    y: 90.0
+    down: true
+  )
+  log("and it stays the scroll's: swipes {rig.started}")
+  frame(
+    rig: rig
+    x: 100.0
+    y: 90.0
+    down: false
+  )
+  settle(rig: rig)
+  rig.clicks.clear()
+  let before: Int = scrollY(rig: rig)
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  log("pressed: the row looks pressed {isNone(this: rig.input.pressedEntityId) is false}")
+  frame(
+    rig: rig
+    x: 40.0
+    y: 50.0
+    down: true
+  )
+  log(
+    "a swipe: started {rig.started}, it holds the press {uiPressClaimed(
+      input: rig.input
+      world: rig.world
+    )}, no pressed row {isNone(this: rig.input.pressedEntityId)}"
+  )
+  frame(
+    rig: rig
+    x: 60.0
+    y: 120.0
+    down: true
+  )
+  log(
+    "the finger wanders along y: the list stays at {scrollY(rig: rig) - before} from where it was"
+  )
+  frame(
+    rig: rig
+    x: 80.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 80.0
+    y: 50.0
+    down: false
+  )
+  log("released: clicks {clicksOf(rig: rig)}")
+}
+
+func oneFlick() {
+  log("--- a flick that moves and lifts in one frame")
+  var rig: Rig = mount()
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 90.0
+    y: 50.0
+    down: false
+  )
+  log("clicks nothing: {clicksOf(rig: rig)}")
+}
+
+func dragAndSpringBack() {
+  log("--- a finger, then it springs back")
+  var rig: Rig = mount()
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 20.0
+    y: 50.0
+    down: true
+  )
+  log(
+    "started: the page B {poseText(uiSystems: rig.uiSystems, entityId: rig.b)}, under it A {poseText(
+      uiSystems: rig.uiSystems
+      entityId: rig.a
+    )}"
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  log(
+    "a quarter of the way: B {poseText(uiSystems: rig.uiSystems, entityId: rig.b)}; A {poseText(
+      uiSystems: rig.uiSystems
+      entityId: rig.a
+    )}"
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  log(
+    "a finger that stops holds them still: B {poseText(uiSystems: rig.uiSystems, entityId: rig.b)}; taps go nowhere yet"
+  )
+  let held: Float = animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.b).x
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: false
+  )
+  log(
+    "let go slowly: finished {rig.finished}, sprang back {rig.sprangBack}, no jump {hundredths(
+      value: animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.b).x - held
+    ) <= 0}"
+  )
+  log(
+    "B is the page again at once: Leaving {componentHas(this: rig.world.leavings, entityId: rig.b)}"
+  )
+  settle(rig: rig)
+  log(
+    "settled: B active {activeOf(rig: rig, entityId: rig.b)}, A active {activeOf(
+      rig: rig
+      entityId: rig.a
+    )}, {componentCount(this: rig.uiSystems.animation.tracks)} tracks, {componentCount(
+      this: rig.uiSystems.animation.poses
+    )} poses, {componentCount(this: rig.world.leavings)} leaving"
+  )
+  frame(
+    rig: rig
+    x: 200.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 200.0
+    y: 50.0
+    down: false
+  )
+  log("a tap works: {clicksOf(rig: rig)}")
+}
+
+func dragAndFinish() {
+  log("--- past half way, and a flick")
+  var rig: Rig = mount()
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 20.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 260.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 260.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 260.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 260.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 260.0
+    y: 50.0
+    down: false
+  )
+  log("past half way, held still: finished {rig.finished}, sprang back {rig.sprangBack}")
+  settle(rig: rig)
+  log(
+    "settled: B active {activeOf(rig: rig, entityId: rig.b)}, A active {activeOf(
+      rig: rig
+      entityId: rig.a
+    )}, {componentCount(this: rig.uiSystems.animation.poses)} poses"
+  )
+  var flick: Rig = mount()
+  frame(
+    rig: flick
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: flick
+    x: 20.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: flick
+    x: 60.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: flick
+    x: 100.0
+    y: 50.0
+    down: false
+  )
+  log(
+    "a flick at a fifth of the way, 10 widths a second: finished {flick.finished}, sprang back {flick.sprangBack}"
+  )
+  let x: Float = animationPoseOf(uiSystems: flick.uiSystems, entityId: flick.b).x
+  log(
+    "it carries on at the finger's speed: B at x {hundredths(value: x)} after one step from 80, its speed {Math.round(
+      x: componentView(this: flick.uiSystems.animation.tracks, entityId: flick.b).x.velocity
+    ).toInt() > 1000}"
+  )
+  log(
+    "rule: 0.25 still {pageDragFinishes(progress: 0.25, velocity: 0.0)}; 0.5 still {pageDragFinishes(
+      progress: 0.5
+      velocity: 0.0
+    )}; 0.25 at 2 a second {pageDragFinishes(progress: 0.25, velocity: 2.0)}; 0.6 back at -2 a second {pageDragFinishes(
+      progress: 0.6
+      velocity: -2.0
+    )}"
+  )
+}
+
+func midFlight() {
+  log("--- while a push is still running")
+  var rig: Rig = mount()
+  componentSet(this: rig.world.actives, entityId: rig.b, data: Active { value: false })
+  componentSet(this: rig.world.actives, entityId: rig.a, data: Active { value: true })
+  frame(
+    rig: rig
+    x: 300.0
+    y: 700.0
+    down: false
+  )
+  pageTransitionResident(
+    system: rig.system
+    world: rig.world
+    uiSystems: rig.uiSystems
+    fromRoot: rig.a
+    toRoot: rig.b
+    back: false
+  )
+  loop var i: Int = 0, i < 10, ++i {
+    frame(
+      rig: rig
+      x: 300.0
+      y: 700.0
+      down: false
+    )
+  }
+  log(
+    "the push at 0.1 s: B {poseText(uiSystems: rig.uiSystems, entityId: rig.b)}; A {poseText(
+      uiSystems: rig.uiSystems
+      entityId: rig.a
+    )}"
+  )
+  let bx: Float = animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.b).x
+  let ax: Float = animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.a).x
+  frame(
+    rig: rig
+    x: 5.0
+    y: 50.0
+    down: true
+  )
+  let press: Float = animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.b).x
+  frame(
+    rig: rig
+    x: 20.0
+    y: 50.0
+    down: true
+  )
+  log(
+    "a finger takes it: B goes on until then, and from there jumps {hundredths(
+      value: animationPoseOf(uiSystems: rig.uiSystems, entityId: rig.b).x - press
+    )}, and is paused {componentView(this: rig.uiSystems.animation.tracks, entityId: rig.b).paused}"
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 120.0
+    y: 50.0
+    down: false
+  )
+  log("let go: sprang back {rig.sprangBack}")
+  settle(rig: rig)
+  log(
+    "settled on the page it was going to: B active {activeOf(rig: rig, entityId: rig.b)}, A active {activeOf(
+      rig: rig
+      entityId: rig.a
+    )}, {componentCount(this: rig.uiSystems.animation.poses)} poses"
+  )
+}
+
+func stepOld(system: mod PageTransitionSystem, deltaTime: view Float) {
+  loop let page: mod LeavingWorld in system.leaving {
+    animationSystem(world: page.world, uiSystems: page.uiSystems, deltaTime: deltaTime)
+    transformSystem(world: page.world, uiSystems: page.uiSystems)
+  }
+}
+
+func worldPage(world: mod UiWorld, uiSystems: mod UiSystems, marker: view String) ret EntityId {
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  ret root
+}
+
+func twoWorlds() {
+  log("--- two worlds")
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let firstRoot: EntityId = worldPage(world: world, uiSystems: uiSystems, marker: "first")
+  world.layoutH = 801.0
+  pageTransitionDragStart(system: system)
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: firstRoot
+    back: true
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  var root: EntityId = worldPage(world: world, uiSystems: uiSystems, marker: "built for the swipe")
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  pageTransitionDrag(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    progress: 0.25
+    velocity: 0.0
+  )
+  log(
+    "the new page {poseText(uiSystems: uiSystems, entityId: root)}; a step does not drop the old one: {pageTransitionStep(
+      system: system
+    )}"
+  )
+  log(
+    "it has not ended: take back {pageTransitionTakeBack(
+      system: system
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  log(
+    "let go: finished {pageTransitionDragEnd(system: system, world: world, uiSystems: uiSystems)}"
+  )
+  loop var i: Int = 0, i < 200 and pageTransitionInFlight(system: system), ++i {
+    stepOld(system: system, deltaTime: 0.016)
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+    if pageTransitionTakeBack(system: system, world: world, uiSystems: uiSystems) {
+      log(
+        "at rest, the host has its world back: it is the old one {world.layoutH is 801.0}, its page active {active(
+          world: world
+          entityId: firstRoot
+        )}, no Leaving {componentHas(this: world.leavings, entityId: firstRoot) is false}, {componentCount(
+          this: uiSystems.animation.poses
+        )} poses"
+      )
+    }
+  }
+  log("in flight {pageTransitionInFlight(system: system)}")
+  pageTransitionDragStart(system: system)
+  pageTransitionBegin(
+    system: system
+    oldWorld: own world
+    oldUiSystems: own uiSystems
+    root: firstRoot
+    back: true
+  )
+  world = createUiWorld()
+  uiSystems = createUiSystems()
+  root = worldPage(world: world, uiSystems: uiSystems, marker: "built for the swipe")
+  pageTransitionArrive(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    root: root
+  )
+  pageTransitionDrag(
+    system: system
+    world: world
+    uiSystems: uiSystems
+    progress: 0.7
+    velocity: 0.0
+  )
+  log(
+    "past half: finished {pageTransitionDragEnd(system: system, world: world, uiSystems: uiSystems)}"
+  )
+  loop var i: Int = 0, i < 200 and animationInFlight(world: world, uiSystems: uiSystems), ++i {
+    stepOld(system: system, deltaTime: 0.016)
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  }
+  log(
+    "the old world is not given back: {pageTransitionTakeBack(
+      system: system
+      world: world
+      uiSystems: uiSystems
+    )}; the new page rests {poseText(uiSystems: uiSystems, entityId: root)}"
+  )
+}
+
+func main() {
+  pointerRules()
+  oneFlick()
+  dragAndSpringBack()
+  dragAndFinish()
+  midFlight()
+  twoWorlds()
+}

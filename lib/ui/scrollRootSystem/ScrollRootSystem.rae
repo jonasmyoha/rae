@@ -31,6 +31,7 @@
 # The position is a `RuntimeOffset` on the root (`applyScrollPosition`): a
 # transform-time translation of the subtree, never a relayout.
 open ui/Ecs
+open ui/AnimationComponents
 open ui/Components
 open ui/inputSystem/InputSystem
 open ui/Transform
@@ -537,7 +538,8 @@ func updateScrollRoot(
     componentSet(this: world.scrollDrags, entityId: entityId, data: drag)
     ret false
   }
-  if listReorderHolds(world: world, scrollRoot: entityId) {
+  # A swipe from the screen's edge (ui/pageTransitionSystem/EdgeSwipe) has it in the same way
+  if listReorderHolds(world: world, scrollRoot: entityId) or world.edgeSwipe.phase is EdgeSwipePhase.active {
     drag.dragging = false
     drag.active = true
     state.velocity = 0.0
