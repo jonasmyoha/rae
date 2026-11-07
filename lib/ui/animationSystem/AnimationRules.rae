@@ -217,6 +217,23 @@ type AnimationSettings {
   slow: Float = 1.0
   # RAE_ANIMATION_HOLD=0.4: every animation stops at 40% of its way and stays; below 0, no hold
   hold: Float = -1.0
+  # The person asked for reduced motion: only fades run. It is read when motion starts, unless
+  # RAE_REDUCE_MOTION=on or off fixed it.
+  reduceMotion: Bool = false
+  reduceMotionFixed: Bool = false
+}
+
+# RAE_REDUCE_MOTION fixes the setting, for a test
+func applyReduceMotionEnv(settings: mod AnimationSettings, value: view String) {
+  if value is "on" {
+    settings.reduceMotion = true
+    settings.reduceMotionFixed = true
+  } else if value is "off" {
+    settings.reduceMotion = false
+    settings.reduceMotionFixed = true
+  } else if value.length() > 0 {
+    log("[animation] RAE_REDUCE_MOTION={value}: use on or off; ignored")
+  }
 }
 
 func parseAnimationSettings(animation: view String, hold: view String) ret AnimationSettings {

@@ -669,36 +669,39 @@ func pageDragRelease(
   track.paused = false
   track.phase = phase
   track.onEnd = onEnd
-  pageDragChannel(
-    channel: track.x
-    target: target.x
-    rate: rate
-    motion: motion
-  )
-  pageDragChannel(
-    channel: track.y
-    target: target.y
-    rate: rate
-    motion: motion
-  )
-  pageDragChannel(
-    channel: track.scale
-    target: target.scale
-    rate: rate
-    motion: motion
-  )
-  pageDragChannel(
-    channel: track.rotation
-    target: target.rotation
-    rate: rate
-    motion: motion
-  )
-  pageDragChannel(
-    channel: track.stretchY
-    target: target.stretchY
-    rate: rate
-    motion: motion
-  )
+  # With reduced motion the finger only ever faded them
+  if uiSystems.animation.settings.reduceMotion is false {
+    pageDragChannel(
+      channel: track.x
+      target: target.x
+      rate: rate
+      motion: motion
+    )
+    pageDragChannel(
+      channel: track.y
+      target: target.y
+      rate: rate
+      motion: motion
+    )
+    pageDragChannel(
+      channel: track.scale
+      target: target.scale
+      rate: rate
+      motion: motion
+    )
+    pageDragChannel(
+      channel: track.rotation
+      target: target.rotation
+      rate: rate
+      motion: motion
+    )
+    pageDragChannel(
+      channel: track.stretchY
+      target: target.stretchY
+      rate: rate
+      motion: motion
+    )
+  }
   # Opacity follows a short curve from where it is, as it does not fling
   track.opacity.velocity = 0.0
   channelRetarget(channel: track.opacity, target: target.opacity, motion: motion)

@@ -1,0 +1,213 @@
+# Reduced motion (docs/ui-animation-design.md section 10): with it on, only fades run, and the app
+# has no
+# code for it. What moves does not: an arriving node is at its place at once and fades in, a
+# leaving one
+# stays where it is and fades out. Springs give way to the short fade curves, and no one waits for
+# a delay.
+import ReduceMotion
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/pageTransitionSystem/PageTransitionRules
+
+func reduced() ret AnimationSettings {
+  var settings: AnimationSettings = {}
+  applyReduceMotionEnv(settings: settings, value: "on")
+  ret settings
+}
+
+func track(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+  ret "x {pose.x} y {pose.y} scale {pose.scale} opacity {Math.round(x: pose.opacity * 100.0)}%"
+}
+
+func secondsToRest(world: mod UiWorld, uiSystems: mod UiSystems) ret Int {
+  var ms: Int = 0
+  loop animationInFlight(world: world, uiSystems: uiSystems) and ms < 2000 {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+    ms = ms + 10
+  }
+  ret ms
+}
+
+func arriving() {
+  log("--- arriving")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = reduced()
+  let node: EntityId = createEntity(world: world)
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: node
+    from: AnimationPose { opacity: 0.0, y: 16.0, scale: 0.9 }
+    motion: "lively"
+    opacityMotion: "smooth"
+    delaySeconds: 0.5
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "a rise and a pop, delayed: {track(uiSystems: uiSystems, entityId: node)}, delay {componentView(
+      this: uiSystems.animation.tracks
+      entityId: node
+    ).delayLeft}"
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.1)
+  log("0.1 s of the 0.2 s fadeIn: {track(uiSystems: uiSystems, entityId: node)}")
+  log("done in {secondsToRest(world: world, uiSystems: uiSystems) + 100} ms")
+
+  # A page's push has no opacity of its own to fade, and fades in all the same
+  let page: EntityId = createEntity(world: world)
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: page
+    from: AnimationPose { x: 400.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("a push: {track(uiSystems: uiSystems, entityId: page)}")
+}
+
+func leaving() {
+  log("--- leaving")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = reduced()
+  let node: EntityId = createEntity(world: world)
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: node
+    to: AnimationPose { opacity: 0.0, x: -120.0, scale: 0.95 }
+    motion: "smooth"
+    opacityMotion: "quick"
+    delaySeconds: 0.2
+    onEnd: AnimationEnd.stay
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "it stays where it is and fades: {track(uiSystems: uiSystems, entityId: node)}, x target {componentView(
+      this: uiSystems.animation.tracks
+      entityId: node
+    ).x.target}"
+  )
+  log("done in {secondsToRest(world: world, uiSystems: uiSystems)} ms, 0.14 s of fadeOut")
+  let keepsOpacity: EntityId = createEntity(world: world)
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: keepsOpacity
+    to: AnimationPose { x: 400.0 }
+    motion: "smooth"
+    opacityMotion: "quick"
+    delaySeconds: 0.0
+    onEnd: AnimationEnd.destroy
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "one that only moved off fades instead: opacity target {componentView(
+      this: uiSystems.animation.tracks
+      entityId: keepsOpacity
+    ).opacity.target}"
+  )
+  let host: EntityId = createEntity(world: world)
+  animationLeave(
+    uiSystems: uiSystems
+    entityId: host
+    to: AnimationPose {}
+    motion: "quick"
+    opacityMotion: "quick"
+    delaySeconds: 0.0
+    onEnd: AnimationEnd.stay
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "one with nothing to do just ends: track {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: host
+    )}, {track(uiSystems: uiSystems, entityId: host)}"
+  )
+}
+
+func moving() {
+  log("--- moving")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = reduced()
+  let back: EntityId = createEntity(world: world)
+  animationTo(
+    uiSystems: uiSystems
+    entityId: back
+    to: AnimationPose { scale: 0.97 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "a dialog stepping back is there at once and does not blink: {track(
+      uiSystems: uiSystems
+      entityId: back
+    )}"
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.016)
+  log(
+    "it stays there, {componentCount(this: uiSystems.animation.tracks)} tracks: {track(
+      uiSystems: uiSystems
+      entityId: back
+    )}"
+  )
+  let glide: EntityId = createEntity(world: world)
+  animationGlide(
+    uiSystems: uiSystems
+    entityId: glide
+    dx: 0.0
+    dy: 40.0
+    motion: "smooth"
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "a layout glide is not there at all: track {componentHas(
+      this: uiSystems.animation.tracks
+      entityId: glide
+    )}, {track(uiSystems: uiSystems, entityId: glide)}"
+  )
+}
+
+func kindsAndEnv() {
+  log("--- pages, text, the setting")
+  var settings: AnimationSettings = {}
+  log("by default it is read from the system: fixed {settings.reduceMotionFixed}")
+  applyReduceMotionEnv(settings: settings, value: "off")
+  log("off: {settings.reduceMotion}, fixed {settings.reduceMotionFixed}")
+  applyReduceMotionEnv(settings: settings, value: "on")
+  log("on: {settings.reduceMotion}, fixed {settings.reduceMotionFixed}")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let node: EntityId = createEntity(world: world)
+  uiSystems.animation.settings = AnimationSettings { reduceMotion: true, reduceMotionFixed: false }
+  animationPlay(
+    uiSystems: uiSystems
+    entityId: node
+    from: AnimationPose { x: 50.0 }
+    motion: "smooth"
+    opacityMotion: "fadeIn"
+    delaySeconds: 0.0
+  )
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "not fixed, it follows the system each time motion starts: it now says {ReduceMotion.reduceMotionEnabled()}, settings {uiSystems.animation.settings.reduceMotion}"
+  )
+}
+
+func main() {
+  arriving()
+  leaving()
+  moving()
+  kindsAndEnv()
+}

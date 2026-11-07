@@ -495,6 +495,19 @@ transition. What the code decided:
   moves, and that is fine at the sizes known. If the measure says otherwise, the fold
   becomes per-subtree, and no API changes.
 
+**Built in 0.3.28:** reduced motion and the budget's check. What the code decided:
+
+- `reduceMotionEnabled()` is in `lib/ReduceMotion.rae`, as `Gpu2d.rae` is at its line cap and every UI program then needs no renderer
+  to ask. It is read whenever a batch of motion starts, so a change in the system's settings counts from the next motion, and an idle UI asks
+  nothing. `RAE_REDUCE_MOTION=on|off` fixes it, for a test.
+- One rule in `animationApplyCommand` covers every kind of motion: a node leaving stays where it is, any other is at its place at once. What
+  would have arrived by moving fades in, what would have left by moving fades out, on `fadeIn` and `fadeOut`, with no delay. A dialog
+  stepping back is at 0.97 at once with no fade, a layout glide does not happen, and a text roll is a fade.
+- 120 Hz needs nothing new: a host busy-renders while `animationInFlight`, and waits when not, so `RAE_IOS_HIGH_REFRESH=1` is all that
+  lets those frames go past 60, and idle stays at zero frames.
+- The budget is `checks/uiPageBudget`: a page of 30 rows, 123 nodes, a new world each way. A still or a moving transform pass takes
+  about 2.7 µs on an M1 Max, so it is nowhere near over budget there, and the fold stays as it is.
+
 **Built in 0.3.19:** lib/Spring, the motion tokens, `AnimationPose`, the tracks and their inbox
 (`animationPlay`, `animationTo`, `animationLeave`), end actions, the `animation` entry
 (`animationRun`), `animationInFlight` and the testing settings, in `AnimationRules.rae` and

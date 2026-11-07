@@ -1,0 +1,275 @@
+# The budget of a page transition (docs/ui-animation-design.md section 10): a page of 30 rows
+# pushes to
+# another and back, a new world each way, 16 times, with a rest between, as on an iPhone:
+#
+#   RAE_IOS_HIGH_REFRESH=1 sh tools/ios/gen-ios.sh checks/uiPageBudget
+#   RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh checks/uiPageBudget
+#
+# One [pageBudget] line says how the frames with motion in flight went: the time from frame to
+# frame, the
+# systems (the pipeline and the old world's step), the paint recorded for both pages, and the
+# frames over the
+# budgets of 120 and 60 Hz. Every other transition times the transform pass alone by running it
+# once more, so
+# those frames are not counted in the rest. Exit 0 when the transitions ran and ended.
+import Gpu2d
+import Math
+open ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Ecs
+open ui/Pipeline
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationTracks
+open ui/pageTransitionSystem/PageTransitionSystem
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 393
+
+const designH: Int = 852
+
+const transitionCount: Int = 16
+
+# Frames between two transitions
+const restFrames: Int = 30
+
+func milliseconds(fromNs: view Int, toNs: view Int) ret Float {
+  ret (toNs - fromNs).toFloat() / 1000000.0
+}
+
+func sorted(values: view List(Float)) ret List(Float) {
+  var out: List(Float) = List.create(Float, cap: values.length)
+  loop let value: view Float in values {
+    var at: Int = 0
+    loop at < out.length and out.copyAtFallback(index: at, fallback: 0.0) < value {
+      at = at + 1
+    }
+    out.insert(index: at, value: value)
+  }
+  ret out
+}
+
+func share(values: view List(Float), part: view Float) ret Float {
+  if values.length is 0 {
+    ret 0.0
+  }
+  let ordered: List(Float) = sorted(values: values)
+  let at: Int = Math.min(a: ordered.length - 1, b: (ordered.length.toFloat() * part).toInt())
+  ret ordered.copyAtFallback(index: at, fallback: 0.0)
+}
+
+func summary(values: view List(Float)) ret String {
+  ret "p50 {share(values: values, part: 0.5)} p95 {share(values: values, part: 0.95)} max {share(
+    values: values
+    part: 1.0
+  )}"
+}
+
+func countOver(values: view List(Float), limit: view Float) ret Int {
+  var count: Int = 0
+  loop let value: view Float in values {
+    if value > limit {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func mountPage(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+  scene: view Scene
+) ret EntityId {
+  seedWorldTheme(world: world, res: gpuUi)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  ret loadScene(world: world, uiSystems: uiSystems, scene: scene)
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI page budget check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  let firstScene: Scene = parseScene(source: embedText(file: "first.raescene"))
+  let secondScene: Scene = parseScene(source: embedText(file: "second.raescene"))
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  var root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    gpuUi: gpuUi
+    scene: firstScene
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+  var system: PageTransitionSystem = createPageTransitionSystem()
+  var intervals: List(Float) = List.create(Float, cap: 512)
+  var systems: List(Float) = List.create(Float, cap: 512)
+  var paints: List(Float) = List.create(Float, cap: 512)
+  var transforms: List(Float) = List.create(Float, cap: 512)
+  var mounts: List(Float) = List.create(Float, cap: 16)
+  var done: Int = 0
+  var resting: Int = 0
+  var onSecond: Bool = false
+  var lastNs: Int = nowNs()
+  loop not Gpu2d.pollClose() and done < transitionCount {
+    let timingTransform: Bool = done % 2 is 1
+    var mountedNow: Bool = false
+    let moving: Bool = pageTransitionInFlight(system: system) or animationInFlight(
+      world: world
+      uiSystems: uiSystems
+    )
+    if moving is false {
+      resting = resting + 1
+    }
+    if moving is false and resting > restFrames {
+      resting = 0
+      done = done + 1
+      let mountStart: Int = nowNs()
+      pageTransitionBegin(
+        system: system
+        oldWorld: own world
+        oldUiSystems: own uiSystems
+        root: root
+        back: onSecond
+      )
+      world = create()
+      uiSystems = createUiSystems()
+      var scene: Scene = secondScene
+      if onSecond {
+        scene = firstScene
+      }
+      root = mountPage(
+        world: world
+        uiSystems: uiSystems
+        gpuUi: gpuUi
+        scene: scene
+      )
+      schedule = createUiPipeline(world: world)
+      runScheduledUiSystems(
+        schedule: schedule
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+      )
+      pageTransitionArrive(
+        system: system
+        world: world
+        uiSystems: uiSystems
+        root: root
+      )
+      onSecond = not onSecond
+      mounts.add(value: milliseconds(fromNs: mountStart, toNs: nowNs()))
+      mountedNow = true
+    }
+    let frameStart: Int = nowNs()
+    let leaving: Bool = pageTransitionStep(system: system)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    releaseDeadEntities(world: world, uiSystems: uiSystems)
+    let systemsEnd: Int = nowNs()
+    if timingTransform and moving {
+      transformSystem(world: world, uiSystems: uiSystems)
+      transforms.add(value: milliseconds(fromNs: systemsEnd, toNs: nowNs()))
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    let paintStart: Int = nowNs()
+    pageTransitionDraw(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    let paintEnd: Int = nowNs()
+    Gpu2d.endFrame(canvas: canvas)
+    let now: Int = nowNs()
+    # The frame a world is built on is its own line: the host builds it on a tap, as it does today
+    if moving and not timingTransform and not mountedNow {
+      intervals.add(value: milliseconds(fromNs: lastNs, toNs: now))
+      systems.add(value: milliseconds(fromNs: frameStart, toNs: systemsEnd))
+      paints.add(value: milliseconds(fromNs: paintStart, toNs: paintEnd))
+    }
+    lastNs = now
+  }
+  # The last one ends
+  var left: Int = 0
+  loop not Gpu2d.pollClose() and left < 240 and (pageTransitionInFlight(system: system) or animationInFlight(
+    world: world
+    uiSystems: uiSystems
+  )) {
+    let leaving: Bool = pageTransitionStep(system: system)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    pageTransitionDraw(
+      system: system
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    left = left + 1
+  }
+  log(
+    "[pageBudget] transitions {done}, frames {intervals.length}, nodes laid out {componentCount(
+      this: uiSystems.layout.computedRects
+    )}, local transforms {componentCount(this: uiSystems.transform2d.localTransforms)}, texts {componentCount(
+      this: world.texts
+    )}"
+  )
+  log(
+    "[pageBudget] frame to frame ms: {summary(values: intervals)}; over 8.33 ms {countOver(
+      values: intervals
+      limit: 8.33
+    )}, over 16.67 ms {countOver(values: intervals, limit: 16.67)}"
+  )
+  log("[pageBudget] systems ms: {summary(values: systems)}")
+  log("[pageBudget] paint recorded ms: {summary(values: paints)}")
+  log("[pageBudget] transform pass alone ms: {summary(values: transforms)}")
+  log("[pageBudget] building the new world ms: {summary(values: mounts)}")
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if done < transitionCount or pageTransitionInFlight(system: system) {
+    log(
+      "UI PAGE BUDGET FAILED: {done} transitions, one still in flight {pageTransitionInFlight(
+        system: system
+      )}"
+    )
+    ret 1
+  }
+  log("UI PAGE BUDGET OK")
+  ret 0
+}

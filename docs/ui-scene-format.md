@@ -880,3 +880,8 @@ A press within 24 points of the left edge that moves 10 points along x, more tha
 y first is the scroll's, and one that hardly moves is a tap. It works during a running transition too. `push` and `sheet` are the kinds it is for, and a `SharedElement` morph just goes with its page.
 
 Case 1374 holds the rules; `checks/uiPageTransitions` with `RAE_PAGE_DRAG` runs it.
+
+## 28. Reduced motion
+
+A scene and an app need nothing. With the system's reduced motion setting on (iOS, macOS), position, scale and rotation do not animate, and everything that moved is a short fade. It is read whenever
+motion starts. `RAE_REDUCE_MOTION=on` or `off` fixes it for a test. Case 1375 holds the rules.

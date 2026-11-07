@@ -30,6 +30,7 @@
  * because it's process-level, not raylib-specific; the symbol has
  * to be defined in both the rae driver build and compiled-target
  * builds so `vm_raylib.c`'s native wrapper can link. */
+#include <TargetConditionals.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -185,4 +186,22 @@ void* rae_presentation_layer(void* sdlLayer, int width, int height) {
   return layer;
 }
 #endif  /* TARGET_OS_OSX */
+/* Whether the person asked for reduced motion: the system setting's one call
+ * (UIKit's C function on iOS, NSWorkspace through objc_msgSend on macOS). */
+#if TARGET_OS_IPHONE
+extern signed char UIAccessibilityIsReduceMotionEnabled(void);
+rae_Bool rae_ext_reduceMotionEnabled(void) {
+  return UIAccessibilityIsReduceMotionEnabled() != 0;
+}
+#else
+rae_Bool rae_ext_reduceMotionEnabled(void) {
+  Class workspaceClass = objc_getClass("NSWorkspace");
+  if (!workspaceClass) return 0;
+  void* workspace = ((void* (*)(Class, SEL))objc_msgSend)(workspaceClass, sel_registerName("sharedWorkspace"));
+  if (!workspace) return 0;
+  return ((signed char (*)(void*, SEL))objc_msgSend)(
+      workspace, sel_registerName("accessibilityDisplayShouldReduceMotion")) != 0;
+}
+#endif
+
 #endif  /* __APPLE__ */
