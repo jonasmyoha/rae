@@ -595,6 +595,19 @@ Motion has to be testable by an agent with no eyes on the phone.
   is added to their scenes.
 - `docs/ui-scene-format.md` documents the components and the `motion` section.
 
+**Built in 0.3.33:** the motion tokens in the editor, `motionTokenSystem` and `lib/ui/ThemeWriter.rae`. What the code decided:
+
+- A panel under the hierarchy lists every token the page can name, the built-ins first so a save does not reorder the rows. It shows only for a
+  document whose theme declares a motion or whose page uses one, so a document with none looks as it did. The token fields are typed like an
+  animation component's, and a wrong value is refused in the status line.
+- `MotionToken` carries its `name`. A commit sets the theme and calls `animationMotionChanged`, which retargets every channel on that name from where
+  it is, as any second command does. A command's own `opacitySeconds` has no name, so it stays what the command said.
+- The graph is 32 thin rectangles from `motionSamples`, which steps a real channel, so it shows what the motion does. Its width is 0.8 s for every
+  token, so two can be compared by eye. A faint line marks the end value.
+- The save writes each edited token to the nearest file that declares it: the page, else its imports in order. A built-in no file declares goes to
+  the first import, or the page when it has none. `ThemeWriter` works on the text, so the rest of that file stays byte for byte; a parsed `JsonDoc`
+  has no positions, and a theme file is shared. A reload drops an edit not saved, as it does a page's. Adding or removing a token is not offered.
+
 **Built in 0.3.32:** the editor's half, in `inspectorSystem/MotionEdit.rae`. What the code decided:
 
 - The seven components' rows were already generated. A click on a field is now the label input, and a commit rewrites the
@@ -606,7 +619,6 @@ Motion has to be testable by an agent with no eyes on the phone.
 - The editor's pills use `pressable` and its panels `appearFade`. It has no dialogs of its own.
 - A component a node inherits from a bundle, changed after load, is now saved (`SceneWriter`, case 1378). Before, the save dropped the change
   without a word. It writes the whole component on the node, and that merges over the bundle on load.
-- Not yet: the motion tokens edited with the theme, with a curve graph. The editor edits no theme and cannot write one, so that is its own queue line.
 
 **Built in 0.3.31:** example 106, whose DESIGN.md section 10 has the list. What it decided for lib/ui:
 

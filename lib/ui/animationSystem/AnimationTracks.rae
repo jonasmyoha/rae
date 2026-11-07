@@ -245,6 +245,36 @@ func animationApplyGlide(
   )
 }
 
+# A motion token was edited: everything running on it now runs on this one, from where it is
+func animationMotionChanged(uiSystems: mod UiSystems, token: view MotionToken) {
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.tracks), ++i {
+    let track: mod AnimationTrack = componentMod(
+      this: uiSystems.animation.tracks
+      entityId: componentEntityAt(this: uiSystems.animation.tracks, i: i)
+    )
+    channelMotionChanged(channel: track.opacity, token: token)
+    channelMotionChanged(channel: track.scale, token: token)
+    channelMotionChanged(channel: track.x, token: token)
+    channelMotionChanged(channel: track.y, token: token)
+    channelMotionChanged(channel: track.rotation, token: token)
+    channelMotionChanged(channel: track.stretchY, token: token)
+  }
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.textGhosts), ++i {
+    let ghost: mod TextGhost = componentMod(
+      this: uiSystems.animation.textGhosts
+      entityId: componentEntityAt(this: uiSystems.animation.textGhosts, i: i)
+    )
+    channelMotionChanged(channel: ghost.progress, token: token)
+  }
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let shared: mod SharedNode = componentMod(
+      this: uiSystems.animation.sharedNodes
+      entityId: componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    )
+    channelMotionChanged(channel: shared.progress, token: token)
+  }
+}
+
 # The node stops moving, and is at its place: a list has given its entity to another row
 func animationDropMotion(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
@@ -511,6 +541,8 @@ func animationApplyCommand(
   if command.opacitySeconds > 0.0 {
     opacityMotion.kind = MotionKind.curve
     opacityMotion.seconds = command.opacitySeconds
+    # This length is the command's own, so an edit of the token does not change it
+    opacityMotion.name = ""
   }
   let settings: AnimationSettings = uiSystems.animation.settings
   if command.isGlide and (settings.off or settings.reduceMotion) {

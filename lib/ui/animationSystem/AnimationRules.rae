@@ -68,6 +68,13 @@ func channelRetarget(channel: mod AnimationChannel, target: view Float, motion: 
   channel.elapsed = 0.0
 }
 
+# The token this channel runs on was edited. It goes on from where it is, as with any retarget.
+func channelMotionChanged(channel: mod AnimationChannel, token: view MotionToken) {
+  if channel.motion.name is token.name {
+    channelRetarget(channel: channel, target: channel.target, motion: token)
+  }
+}
+
 # One step of `deltaTime` s. True when the channel has arrived (it then sits exactly on its target).
 func channelStep(channel: mod AnimationChannel, deltaTime: view Float) ret Bool {
   if channel.current is channel.target and channel.velocity is 0.0 {
@@ -259,4 +266,23 @@ func parseAnimationSettings(animation: view String, hold: view String) ret Anima
     }
   }
   ret settings
+}
+
+# A motion from 0 to 1 at `count` even moments over `seconds`, by the same step a running channel
+# takes, so a graph of it is what the motion does. A spring may go past 1.
+func motionSamples(motion: view MotionToken, seconds: view Float, count: view Int) ret List(Float) {
+  var samples: List(Float) = List.create(Float, cap: count)
+  var channel: AnimationChannel = createChannel(
+    current: 0.0
+    target: 1.0
+    motion: motion
+    restDistance: animationRestRatio
+  )
+  let deltaTime: Float = seconds / (count - 1).toFloat()
+  samples.add(value: 0.0)
+  loop var i: Int = 1, i < count, ++i {
+    let arrived: Bool = channelStep(channel: channel, deltaTime: deltaTime)
+    samples.add(value: channel.current)
+  }
+  ret samples
 }

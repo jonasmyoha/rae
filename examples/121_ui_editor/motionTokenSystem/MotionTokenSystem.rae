@@ -1,0 +1,635 @@
+# motionTokenSystem — the document's motion tokens, listed and edited with the theme
+# (docs/ui-animation-design.md section 12). A panel under the hierarchy has one row per token: its
+# curve, its kind and its numbers. It is shown only for a document whose theme declares a motion or
+# whose page uses one, so a document with none looks as it always did.
+#
+# A field is typed like an animation component's (inspectorSystem/LabelEdit.rae), under the name
+# `motionToken/<token>.<field>`. A commit changes the world's theme at once, which reaches every
+# motion running on that token by name (lib/ui animationMotionChanged), and the row's graph. It
+# reaches
+# the file at the document's save, and goes to the nearest file that declares the token: the page,
+# else its imports in order. A built-in token no file declares goes to the first import, as that is
+# where the theme lives, else to the page. lib/ui ThemeWriter leaves the rest of that file as it
+# was.
+#
+# A reload reads the theme from its files again, so an edit not saved is gone, as a page's is.
+#
+# The graph has no line to draw with: each piece of the curve is a thin rectangle from one sample to
+# the next, so a steep part stays joined. Its width is the same time for every token, so two tokens
+# can
+# be compared by eye, and the faint line across is the motion's end, for seeing the overshoot.
+import Easing
+import Json
+import Math
+import String
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneImports
+open ui/SceneInstance
+open ui/SceneRoots
+open ui/InputKind
+open ui/ThemeResolved
+open ui/ThemeWriter
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/inputSystem/InputSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open inspectorSystem/LabelEdit
+
+# How many thin rectangles chrome/MotionTokenRow.raescene has for its curve
+const motionGraphSegments: Int = 32
+
+# The seconds across a graph
+const motionGraphSeconds: Float = 0.8
+
+# Its size, as the row scene has it
+const motionGraphWidth: Float = 84.0
+
+const motionGraphHeight: Float = 50.0
+
+# The values from the graph's bottom to its top: room for a low spring's overshoot
+const motionGraphLowest: Float = -0.1
+
+const motionGraphHighest: Float = 1.35
+
+# A curve's line, thick enough to read
+const motionGraphLine: Float = 1.5
+
+const motionTokenRowHeight: Float = 56.0
+
+# One row's nodes, found by their ids in the row scene once
+type MotionTokenRow {
+  entityId: EntityId
+  name: EntityId
+  kind: EntityId
+  first: EntityId
+  second: EntityId
+  target: EntityId
+  segments: List(EntityId)
+  # The token the graph shows now, so it is drawn again only when that changes
+  drawn: String = ""
+}
+
+type MotionTokenSystem {
+  # The token each row shows, in order
+  names: List(String) = List.create(String, cap: 8)
+  rows: List(MotionTokenRow) = List.create(MotionTokenRow, cap: 8)
+  # Tokens edited since the last save
+  unsaved: List(String) = List.create(String, cap: 4)
+}
+
+func createMotionTokenSystem() ret MotionTokenSystem {
+  ret MotionTokenSystem {}
+}
+
+func motionTokenPage(index: view Int) ret String {
+  ret "motionTokenRow{index}"
+}
+
+func motionTokenRowNode(world: view UiWorld, index: view Int, nodeId: view String) ret EntityId {
+  if let found: Int = findNodeInPage(
+    world: world
+    pageId: motionTokenPage(index: index)
+    nodeId: nodeId
+  ) {
+    ret nodeEntityId(world: world, index: found)
+  }
+  ret noEntity()
+}
+
+func motionTokenAddRow(
+  system: mod MotionTokenSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  list: view EntityId
+  scene: view Scene
+) {
+  let index: Int = system.rows.length
+  let item: EntityId = createEntity(world: world)
+  componentSet(
+    this: world.rects
+    entityId: item
+    data: Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: motionTokenRowHeight } }
+  )
+  componentSet(
+    this: world.sizes
+    entityId: item
+    data: Size {
+      w: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+      h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    }
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: item
+    parent: list
+  )
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let mounted: EntityId = mountSceneInstanceIntoPage(
+    world: world
+    uiSystems: uiSystems
+    mountEntityId: item
+    scene: scene
+    overrides: overrides
+    pageId: motionTokenPage(index: index)
+  )
+  var segments: List(EntityId) = List.create(EntityId, cap: motionGraphSegments)
+  loop var i: Int = 0, i < motionGraphSegments, ++i {
+    segments.add(value: motionTokenRowNode(world: world, index: index, nodeId: "Segment{i}"))
+  }
+  system.rows.add(value: MotionTokenRow {
+    entityId: item
+    name: motionTokenRowNode(world: world, index: index, nodeId: "Name")
+    kind: motionTokenRowNode(world: world, index: index, nodeId: "Kind")
+    first: motionTokenRowNode(world: world, index: index, nodeId: "First")
+    second: motionTokenRowNode(world: world, index: index, nodeId: "Second")
+    target: motionTokenRowNode(world: world, index: index, nodeId: "Target")
+    segments: own segments
+  })
+}
+
+# After a load: which tokens this document has, and a row for each. No rows and no panel for a
+# document with no motion.
+func motionTokensAfterLoad(
+  system: mod MotionTokenSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: view ChromeSystem
+  document: view SceneDocument
+  editing: view LabelEdit
+) {
+  system.unsaved.clear()
+  system.names.clear()
+  let shown: Bool = world.theme.resolved.motionNames.length > 0 or motionPageUsesMotion(
+    world: world
+    sceneRoot: document.pageRoot
+  )
+  if shown {
+    system.names = themeMotionNames(theme: world.theme.resolved)
+  }
+  setEditorPanelOpen(
+    chromeSystem: chromeSystem
+    world: world
+    kind: EditorPanelKind.motionTokens
+    open: shown
+  )
+  let list: EntityId = editorListEntityId(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.motionTokens
+  )
+  if isNone(this: list) {
+    ret
+  }
+  if system.names.length > system.rows.length {
+    if let at: Int = sceneRegistryIndex(reg: document.registry, key: "chrome/MotionTokenRow") {
+      let scene: view Scene = sceneRegistryGet(reg: document.registry, idx: at)
+      loop system.rows.length < system.names.length {
+        motionTokenAddRow(
+          system: system
+          world: world
+          uiSystems: uiSystems
+          list: list
+          scene: scene
+        )
+      }
+    }
+  }
+  # A row not needed now stays for the next document, switched off
+  loop var i: Int = 0, i < system.rows.length, ++i {
+    if let row: mod MotionTokenRow = system.rows.modAt(index: i) {
+      row.drawn = ""
+      componentSet(
+        this: world.actives
+        entityId: row.entityId
+        data: Active { value: i < system.names.length }
+      )
+    }
+  }
+  let unusedChanged: Bool = motionTokenRowsSync(system: system, world: world, editing: editing)
+}
+
+# The number as a person would type it
+func motionTokenNumber(value: view Float) ret String {
+  ret Json.jbNumber(value: value)
+}
+
+# One rectangle of the graph
+func motionGraphPlace(
+  world: mod UiWorld
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) {
+  componentSet(
+    this: world.rects
+    entityId: entityId
+    data: Rect { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+}
+
+func motionGraphY(value: view Float) ret Float {
+  let share: Float = (value - motionGraphLowest) / (motionGraphHighest - motionGraphLowest)
+  let clamped: Float = Math.max(a: 0.0, b: Math.min(a: 1.0, b: share))
+  ret motionGraphHeight * (1.0 - clamped)
+}
+
+func motionGraphDraw(world: mod UiWorld, row: view MotionTokenRow, token: view MotionToken) {
+  let samples: List(Float) = motionSamples(
+    motion: token
+    seconds: motionGraphSeconds
+    count: motionGraphSegments + 1
+  )
+  let width: Float = motionGraphWidth / motionGraphSegments.toFloat()
+  motionGraphPlace(
+    world: world
+    entityId: row.target
+    x: 0.0
+    y: motionGraphY(value: 1.0)
+    w: motionGraphWidth
+    h: 1.0
+  )
+  loop var i: Int = 0, i < motionGraphSegments, ++i {
+    let from: Float = motionGraphY(value: samples.copyAtDefault(index: i))
+    let to: Float = motionGraphY(value: samples.copyAtDefault(index: i + 1))
+    motionGraphPlace(
+      world: world
+      entityId: row.segments.copyAtFallback(index: i, fallback: noEntity())
+      x: i.toFloat() * width
+      y: Math.min(a: from, b: to)
+      w: width
+      h: Math.abs(value: from - to) + motionGraphLine
+    )
+  }
+}
+
+func motionTokenSetText(world: mod UiWorld, entityId: view EntityId, text: view String) ret Bool {
+  if componentHas(this: world.texts, entityId: entityId) is false {
+    ret false
+  }
+  if componentView(this: world.texts, entityId: entityId).text is text {
+    ret false
+  }
+  componentMod(this: world.texts, entityId: entityId).text = "{text}"
+  ret true
+}
+
+# A field's text and what a click on it does; true if the text changed
+func motionTokenField(
+  world: mod UiWorld
+  entityId: view EntityId
+  name: view String
+  field: view String
+  value: view String
+  editing: view LabelEdit
+) ret Bool {
+  let path: String = "{motionTokenFieldPrefix}{name}.{field}"
+  let click: mod OnClick = componentMod(this: world.onClicks, entityId: entityId)
+  click.actionId = "labelFocus:{path}"
+  click.label = "Edit the {field} of {name}"
+  var shown: String = "{field} {labelRowText(editing: editing, field: path, value: value)}"
+  # These two say what they are
+  if field is "kind" or field is "curve" {
+    shown = labelRowText(editing: editing, field: path, value: value)
+  }
+  ret motionTokenSetText(world: world, entityId: entityId, text: shown)
+}
+
+func motionTokenIsUnsaved(system: view MotionTokenSystem, name: view String) ret Bool {
+  loop let listed: view String in system.unsaved {
+    if listed is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# What each row shows now; true if anything changed
+func motionTokenRowsSync(
+  system: mod MotionTokenSystem
+  world: mod UiWorld
+  editing: view LabelEdit
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < system.names.length, ++i {
+    let name: String = system.names.copyAtDefault(index: i)
+    var token: MotionToken = {}
+    if let found: MotionToken = themeMotion(theme: world.theme.resolved, name: name) {
+      token = found
+    }
+    if let row: mod MotionTokenRow = system.rows.modAt(index: i) {
+      var label: String = "{name}"
+      if motionTokenIsUnsaved(system: system, name: name) {
+        label = "{name} *"
+      }
+      if motionTokenSetText(world: world, entityId: row.name, text: label) {
+        changed = true
+      }
+      var kind: String = "spring"
+      var firstField: String = "response"
+      var firstValue: String = motionTokenNumber(value: token.response)
+      var secondField: String = "damping"
+      var secondValue: String = motionTokenNumber(value: token.damping)
+      if token.kind is MotionKind.curve {
+        kind = "curve"
+        firstField = "seconds"
+        firstValue = motionTokenNumber(value: token.seconds)
+        secondField = "curve"
+        secondValue = "{token.curve}"
+      }
+      if motionTokenField(
+        world: world
+        entityId: row.kind
+        name: name
+        field: "kind"
+        value: kind
+        editing: editing
+      ) {
+        changed = true
+      }
+      if motionTokenField(
+        world: world
+        entityId: row.first
+        name: name
+        field: firstField
+        value: firstValue
+        editing: editing
+      ) {
+        changed = true
+      }
+      if motionTokenField(
+        world: world
+        entityId: row.second
+        name: name
+        field: secondField
+        value: secondValue
+        editing: editing
+      ) {
+        changed = true
+      }
+      let drawn: String = themeMotionJson(token: token)
+      if row.drawn is not drawn {
+        motionGraphDraw(world: world, row: row, token: token)
+        row.drawn = "{drawn}"
+        changed = true
+      }
+    }
+  }
+  ret changed
+}
+
+func motionTokenIsNumber(text: view String) ret Bool {
+  let doc: JsonDoc = Json.parseJson(source: text)
+  ret doc.ok and Json.root(doc: doc).kind is JsonKind.number
+}
+
+# `token` with one field set to what was typed; none when that is no value for the field. A damping
+# of 0 or less would never come to rest, and a time cannot be negative.
+func motionTokenEdited(
+  token: view MotionToken
+  field: view String
+  text: view String
+) ret opt MotionToken {
+  var edited: MotionToken = token
+  if field is "kind" {
+    if text is "spring" {
+      edited.kind = MotionKind.spring
+      ret edited
+    }
+    if text is "curve" {
+      edited.kind = MotionKind.curve
+      if edited.curve.length() is 0 {
+        edited.curve = "easeOutCubic"
+      }
+      if edited.seconds <= 0.0 {
+        edited.seconds = 0.2
+      }
+      ret edited
+    }
+    ret none
+  }
+  if field is "curve" {
+    if Easing.easingKnown(name: text) {
+      edited.curve = "{text}"
+      ret edited
+    }
+    ret none
+  }
+  if motionTokenIsNumber(text: text) is false {
+    ret none
+  }
+  let value: Float = text.toFloat()
+  if field is "response" and value >= 0.0 {
+    edited.response = value
+    ret edited
+  }
+  if field is "damping" and value > 0.0 {
+    edited.damping = value
+    ret edited
+  }
+  if field is "seconds" and value >= 0.0 {
+    edited.seconds = value
+    ret edited
+  }
+  ret none
+}
+
+# One typed field: the theme and everything running on the token change now
+func motionTokenApply(
+  system: mod MotionTokenSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: mod ChromeSystem
+  commit: view MotionTokenCommit
+) {
+  let prefix: Int = motionTokenFieldPrefix.length()
+  var dot: Int = -1
+  if let found: Int = commit.field.lastIndexOf(sub: ".") {
+    dot = found
+  }
+  if dot < prefix {
+    ret
+  }
+  let name: String = commit.field.sub(start: prefix, len: dot - prefix)
+  let field: String = commit.field.sub(start: dot + 1, len: commit.field.length() - dot - 1)
+  if let token: MotionToken = themeMotion(theme: world.theme.resolved, name: name) {
+    if let edited: MotionToken = motionTokenEdited(token: token, field: field, text: commit.text) {
+      themeMotionSet(theme: world.theme.resolved, token: edited)
+      animationMotionChanged(uiSystems: uiSystems, token: edited)
+      if motionTokenIsUnsaved(system: system, name: name) is false {
+        system.unsaved.add(value: "{name}")
+      }
+      log("[ui-editor] motion token {name}: {themeMotionJson(token: edited)}")
+    } else {
+      log("[ui-editor] motion token {name}: {field} cannot be {commit.text}")
+      chromeSystem.statusLine = "the {field} of {name} cannot be {commit.text}"
+    }
+  }
+}
+
+# Each frame: take what was typed, and show it. True if anything changed.
+func motionTokenSystem(
+  system: mod MotionTokenSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  chromeSystem: mod ChromeSystem
+  editing: mod LabelEdit
+  input: view UiInput
+  deltaTime: view Float
+) ret Bool {
+  var changed: Bool = false
+  if system.names.length > 0 and updateScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entityId: editorListEntityId(
+      chromeSystem: chromeSystem
+      world: world
+      source: EditorListSource.motionTokens
+    )
+    input: input
+    deltaTime: deltaTime
+  ) {
+    changed = true
+  }
+  if editing.motionTokenCommits.length > 0 {
+    loop let commit: view MotionTokenCommit in editing.motionTokenCommits {
+      motionTokenApply(
+        system: system
+        world: world
+        uiSystems: uiSystems
+        chromeSystem: chromeSystem
+        commit: commit
+      )
+    }
+    editing.motionTokenCommits.clear()
+    changed = true
+  }
+  if motionTokenRowsSync(system: system, world: world, editing: editing) {
+    changed = true
+  }
+  ret changed
+}
+
+# The file of an import of the document
+func motionTokenImportPath(document: view SceneDocument, importId: view String) ret String {
+  ret sceneRootsFile(roots: documentSceneRoots(document: document), sceneId: importId)
+}
+
+# The file a token is saved to; "" for the page itself
+func motionTokenHome(
+  document: view SceneDocument
+  name: view String
+  documentText: view String
+) ret String {
+  if themeDeclaresMotion(source: documentText, name: name) {
+    ret ""
+  }
+  loop let importId: view String in document.assets.importedIds {
+    let path: String = motionTokenImportPath(document: document, importId: importId)
+    if themeDeclaresMotion(source: Sys.readAsset(path: path), name: name) {
+      ret path
+    }
+  }
+  if document.assets.importedIds.length > 0 {
+    ret motionTokenImportPath(
+      document: document
+      importId: document.assets.importedIds.copyAtDefault(index: 0)
+    )
+  }
+  ret ""
+}
+
+# The save: each edited token into the file that holds it. Answers the page's text, with the tokens
+# the page itself holds.
+func motionTokensSave(
+  system: mod MotionTokenSystem
+  world: view UiWorld
+  document: view SceneDocument
+  documentText: view String
+) ret String {
+  var text: String = "{documentText}"
+  loop let name: view String in system.unsaved {
+    var token: MotionToken = {}
+    if let found: MotionToken = themeMotion(theme: world.theme.resolved, name: name) {
+      token = found
+    }
+    let home: String = motionTokenHome(document: document, name: name, documentText: text)
+    var source: String = "{text}"
+    if home.length() > 0 {
+      source = Sys.readAsset(path: home)
+    }
+    if let written: String = writeThemeMotion(source: source, token: token) {
+      if home.length() is 0 {
+        text = "{written}"
+        log("[ui-editor] motion token {name} saved in the page")
+      } else if Sys.writeFile(path: home, content: written) {
+        log("[ui-editor] motion token {name} saved in {home}")
+      } else {
+        log("[ui-editor] could not write {home}")
+      }
+    } else {
+      log("[ui-editor] motion token {name}: {home} is not a theme file")
+    }
+  }
+  system.unsaved.clear()
+  ret text
+}
+
+# RAE_UI_EDITOR_TEST_TOKEN_CLICK=<token>.<Kind|First|Second>: a real press and release on that field
+# through the input system, after layout, and the action it fired, for the headless gate
+func runMotionTokenClick(
+  system: view MotionTokenSystem
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  script: view String
+) {
+  if script.length() is 0 {
+    ret
+  }
+  var dot: Int = 0
+  if let found: Int = script.indexOf(sub: ".") {
+    dot = found
+  }
+  let name: String = script.sub(start: 0, len: dot)
+  let nodeId: String = script.sub(start: dot + 1, len: script.length() - dot - 1)
+  var target: EntityId = noEntity()
+  loop var i: Int = 0, i < system.names.length, ++i {
+    if system.names.copyAtDefault(index: i) is name {
+      target = motionTokenRowNode(world: world, index: i, nodeId: nodeId)
+    }
+  }
+  let center: ClickPoint = nodeCenterOf(uiSystems: uiSystems, entityId: target)
+  if center.ok is false {
+    log("[ui-editor] token click: no {script} on screen")
+    ret
+  }
+  var input: UiInput = createUiInput()
+  loop let down: view Bool in List(Bool) { true, false } {
+    updateUiInputWith(
+      input: input
+      world: world
+      uiSystems: uiSystems
+      pointer: uiPointerScriptFrame(
+        previous: input.pointer
+        x: center.x
+        y: center.y
+        down: down
+        kind: InputKind.mouse
+      )
+      wheel: 0.0
+    )
+  }
+  loop var a: Int = 0, a < eventCount(this: world.uiActions), ++a {
+    log("[ui-editor] token click {script} fired {eventAt(this: world.uiActions, i: a).actionId}")
+  }
+}

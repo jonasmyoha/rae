@@ -48,6 +48,9 @@ const themeMaxExtendsDepth: Int = 4
 enum MotionKind { spring, curve }
 
 type MotionToken {
+  # What the theme calls it, so a motion that is running can be found when its token is edited. A
+  # motion changed for one use has none.
+  name: String = ""
   kind: MotionKind = MotionKind.spring
   response: Float = 0.42
   damping: Float = 1.0
@@ -249,22 +252,22 @@ func themeHasRadius(theme: view ResolvedTheme, name: view String) pub ret Bool {
 # The motions lib/ui has with no theme at all
 func builtInMotion(name: view String) ret opt MotionToken {
   if name is "quick" {
-    ret MotionToken { response: 0.24, damping: 1.0 }
+    ret MotionToken { name: "quick", response: 0.24, damping: 1.0 }
   }
   if name is "smooth" {
-    ret MotionToken { response: 0.42, damping: 1.0 }
+    ret MotionToken { name: "smooth", response: 0.42, damping: 1.0 }
   }
   if name is "lively" {
-    ret MotionToken { response: 0.46, damping: 0.76 }
+    ret MotionToken { name: "lively", response: 0.46, damping: 0.76 }
   }
   if name is "livelySoft" {
-    ret MotionToken { response: 0.46, damping: 0.9 }
+    ret MotionToken { name: "livelySoft", response: 0.46, damping: 0.9 }
   }
   if name is "fadeIn" {
-    ret MotionToken { kind: MotionKind.curve, curve: "easeOutCubic", seconds: 0.2 }
+    ret MotionToken { name: "fadeIn", kind: MotionKind.curve, curve: "easeOutCubic", seconds: 0.2 }
   }
   if name is "fadeOut" {
-    ret MotionToken { kind: MotionKind.curve, curve: "easeInCubic", seconds: 0.14 }
+    ret MotionToken { name: "fadeOut", kind: MotionKind.curve, curve: "easeInCubic", seconds: 0.14 }
   }
   ret none
 }
@@ -277,6 +280,51 @@ func themeMotion(theme: view ResolvedTheme, name: view String) ret opt MotionTok
     }
   }
   ret builtInMotion(name: name)
+}
+
+# Every motion a theme can name: the built-ins, then its own in the order written. A saved edit of a
+# built-in declares it, and this order does not move it.
+func themeMotionNames(theme: view ResolvedTheme) ret List(String) {
+  var names: List(String) = List.create(String, cap: 8)
+  let builtIn: List(String) = [
+    "quick"
+    "smooth"
+    "lively"
+    "livelySoft"
+    "fadeIn"
+    "fadeOut"
+  ]
+  loop let name: view String in builtIn {
+    names.add(value: "{name}")
+  }
+  loop let name: view String in theme.motionNames {
+    if themeNameListed(names: names, name: name) is false {
+      names.add(value: "{name}")
+    }
+  }
+  ret names
+}
+
+func themeNameListed(names: view List(String), name: view String) ret Bool {
+  loop let listed: view String in names {
+    if listed is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+# `name` now means `token`, wherever it was declared. What is running on it does not change here:
+# animationMotionChanged does that.
+func themeMotionSet(theme: mod ResolvedTheme, token: view MotionToken) {
+  loop var i: Int = 0, i < theme.motionNames.length, ++i {
+    if theme.motionNames.copyAtFallback(index: i, fallback: "") is token.name {
+      theme.motionTokens.set(index: i, value: token)
+      ret
+    }
+  }
+  theme.motionNames.add(value: "{token.name}")
+  theme.motionTokens.add(value: token)
 }
 
 func themeRadiusValue(

@@ -294,6 +294,46 @@
       "Layout": {"type": "Horizontal", "gap": 0, "alignCross": "Stretch"},
       "Children": ["LeftPanel", "EditArea", "RightPanel"]
     },
+    "MotionTokenPanel": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fill"}
+      },
+      "Active": {"value": false},
+      "Layout": {"type": "Vertical", "gap": 12, "alignCross": "Stretch"},
+      "Children": ["MotionTokenTitle", "MotionTokenViewport"],
+      "EditorPanel": {"panel": "motionTokens"}
+    },
+    "MotionTokenTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 30},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "Motion tokens", "styleId": "muted", "styleOverride": {"size": 17, "color": "#78E6DC"}},
+      "OpticalAlign": {"enabled": true, "centerX": false, "centerY": true, "bias": {"x": 0, "y": 0}}
+    },
+    "MotionTokenViewport": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fill"}
+      },
+      "Overflow": {"mode": "Clip"},
+      "Children": ["MotionTokenList"]
+    },
+    "MotionTokenList": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Hug"}
+      },
+      "Layout": {"type": "Vertical", "gap": 6, "alignCross": "Stretch"},
+      "ScrollState": {"y": 0},
+      "ScrollRoot": {"axis": "y", "floor": "content", "endInset": 0},
+      "EditorList": {"source": "motionTokens"}
+    },
     "LeftPanel": {
       "bundles": ["appearFade"],
       "Rect": {"x": 0, "y": 0, "w": 384, "h": 0},
@@ -304,7 +344,7 @@
       "Shape": {"kind": "Rect", "fill": "#041A18", "stroke": "#00000000", "strokeWidth": 0},
       "Layout": {"type": "Vertical", "gap": 20, "alignCross": "Stretch"},
       "Padding": {"l": 19, "t": 19, "r": 19, "b": 19},
-      "Children": ["ProjectPanel", "TreePanel"],
+      "Children": ["ProjectPanel", "TreePanel", "MotionTokenPanel"],
       "EditorPanel": {"panel": "left"},
       "Overflow": {"mode": "Clip"}
     },

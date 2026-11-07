@@ -129,6 +129,14 @@ func reloadDocument(app: mod App) {
       registry: app.document.registry
       pageId: "chrome"
     )
+    motionTokensAfterLoad(
+      system: app.motionTokens
+      world: app.world
+      uiSystems: app.uiSystems
+      chromeSystem: app.chromeSystem
+      document: app.document
+      editing: app.inspectorSystem.labelEdit
+    )
     inspectorAfterLoad(
       inspectorSystem: app.inspectorSystem
       world: app.world
@@ -271,6 +279,14 @@ func runApp(app: mod App) ret Int {
     res: app.gpuUi
   )
   # The first layout has run, so the selection hook can read computed rects.
+  motionTokensAfterLoad(
+    system: app.motionTokens
+    world: app.world
+    uiSystems: app.uiSystems
+    chromeSystem: app.chromeSystem
+    document: app.document
+    editing: app.inspectorSystem.labelEdit
+  )
   inspectorAfterLoad(
     inspectorSystem: app.inspectorSystem
     world: app.world
@@ -375,6 +391,12 @@ func runApp(app: mod App) ret Int {
     chromeSystem: app.chromeSystem
     area: editArea
     script: app.testWheel
+  )
+  runMotionTokenClick(
+    system: app.motionTokens
+    world: app.world
+    uiSystems: app.uiSystems
+    script: Sys.getEnv(name: "RAE_UI_EDITOR_TEST_TOKEN_CLICK")
   )
   runTestHover(world: app.world, uiSystems: app.uiSystems, nodeId: app.testHover)
   runTestHoverCycle(app: app, script: app.testHoverCycle)
@@ -578,6 +600,17 @@ func runApp(app: mod App) ret Int {
       pageRoot: app.document.pageRoot
       chromeVisible: chromeVisible(world: app.world, chromeSystem: app.chromeSystem)
       scene: app.document.scene
+      deltaTime: (now - previousNow) as Float
+    ) {
+      changed = true
+    }
+    if motionTokenSystem(
+      system: app.motionTokens
+      world: app.world
+      uiSystems: app.uiSystems
+      chromeSystem: app.chromeSystem
+      editing: app.inspectorSystem.labelEdit
+      input: input
       deltaTime: (now - previousNow) as Float
     ) {
       changed = true
