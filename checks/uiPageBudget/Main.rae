@@ -1,17 +1,15 @@
-# The budget of a page transition (docs/ui-animation-design.md section 10): a page of 30 rows
-# pushes to
-# another and back, a new world each way, 16 times, with a rest between, as on an iPhone:
+# The budget of a page transition (docs/ui-animation-design.md section 10): a page of 30 rows pushes
+# to another and back, a new world each way, 16 times, with a rest between, as on an iPhone:
 #
 #   RAE_IOS_HIGH_REFRESH=1 sh tools/ios/gen-ios.sh checks/uiPageBudget
 #   RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh checks/uiPageBudget
 #
-# One [pageBudget] line says how the frames with motion in flight went: the time from frame to
-# frame, the
-# systems (the pipeline and the old world's step), the paint recorded for both pages, and the
-# frames over the
-# budgets of 120 and 60 Hz. Every other transition times the transform pass alone by running it
-# once more, so
-# those frames are not counted in the rest. Exit 0 when the transitions ran and ended.
+# The [pageBudget] lines say how the frames of the transitions went: the time from frame to frame,
+# the systems (the pipeline and the old world's step), the paint recorded for both pages, and the
+# frames over the budgets of 120 and 60 Hz. The frame a page is built on, and the launch before the
+# first transition, have lines of their own, and each slow frame says where its time went. Every
+# other transition times the transform pass alone by running it once more, so those frames are not
+# counted in the rest. Exit 0 when the transitions ran and ended.
 import Gpu2d
 import Math
 open ui/Scene
@@ -37,6 +35,11 @@ const transitionCount: Int = 16
 
 # Frames between two transitions
 const restFrames: Int = 30
+
+# Frames before the first: iOS is still finishing the app's launch for a moment (the first page's
+# own
+# Appear ran at 60 Hz there), and a person does not tap a page that early
+const launchFrames: Int = 240
 
 func milliseconds(fromNs: view Int, toNs: view Int) ret Float {
   ret (toNs - fromNs).toFloat() / 1000000.0
@@ -119,6 +122,14 @@ func main() ret Int {
   var paints: List(Float) = List.create(Float, cap: 512)
   var transforms: List(Float) = List.create(Float, cap: 512)
   var mounts: List(Float) = List.create(Float, cap: 16)
+  # The frame a page is built on, from the frame before: it paints the start pose, and the motion
+  # starts on the next
+  var buildFrames: List(Float) = List.create(Float, cap: 16)
+  # Frames with motion before the first transition: the first page's Appear during the launch
+  var launchIntervals: List(Float) = List.create(Float, cap: 64)
+  # Each slow frame: which frame after its build, and where its time went
+  var slowLines: List(String) = List.create(String, cap: 32)
+  var sinceBuild: Int = 0
   var done: Int = 0
   var resting: Int = 0
   var onSecond: Bool = false
@@ -133,7 +144,11 @@ func main() ret Int {
     if moving is false {
       resting = resting + 1
     }
-    if moving is false and resting > restFrames {
+    var rest: Int = restFrames
+    if done is 0 {
+      rest = launchFrames
+    }
+    if moving is false and resting > rest {
       resting = 0
       done = done + 1
       let mountStart: Int = nowNs()
@@ -172,9 +187,13 @@ func main() ret Int {
       onSecond = not onSecond
       mounts.add(value: milliseconds(fromNs: mountStart, toNs: nowNs()))
       mountedNow = true
+      sinceBuild = 0
     }
+    sinceBuild = sinceBuild + 1
     let frameStart: Int = nowNs()
+    let wasLeaving: Bool = system.leaving.length > 0
     let leaving: Bool = pageTransitionStep(system: system)
+    let stepEnd: Int = nowNs()
     runScheduledUiSystems(
       schedule: schedule
       world: world
@@ -205,8 +224,31 @@ func main() ret Int {
     let paintEnd: Int = nowNs()
     Gpu2d.endFrame(canvas: canvas)
     let now: Int = nowNs()
-    # The frame a world is built on is its own line: the host builds it on a tap, as it does today
-    if moving and not timingTransform and not mountedNow {
+    let beginEnd: Int = paintStart
+    let interval: Float = milliseconds(fromNs: lastNs, toNs: now)
+    if mountedNow {
+      buildFrames.add(value: interval)
+    }
+    if moving and done is 0 {
+      launchIntervals.add(value: interval)
+    }
+    if moving and done > 0 and interval > 12.0 and slowLines.length < 32 {
+      slowLines.add(
+        value: "[pageBudget] slow {interval} ms: transition {done}, frame {sinceBuild} after its build (the build's own: {mountedNow}), before the frame {milliseconds(
+          fromNs: lastNs
+          toNs: frameStart
+        )}, old page step {milliseconds(fromNs: frameStart, toNs: stepEnd)}, systems {milliseconds(
+          fromNs: stepEnd
+          toNs: systemsEnd
+        )}, begin frame {milliseconds(fromNs: systemsEnd, toNs: beginEnd)}, paint {milliseconds(
+          fromNs: paintStart
+          toNs: paintEnd
+        )}, end frame {milliseconds(fromNs: paintEnd, toNs: now)}, old page dropped {wasLeaving and not leaving}"
+      )
+    }
+    # The frame a world is built on is its own line: the host builds it on a tap, as it does today.
+    # The launch is its own line too.
+    if moving and done > 0 and not timingTransform and not mountedNow {
       intervals.add(value: milliseconds(fromNs: lastNs, toNs: now))
       systems.add(value: milliseconds(fromNs: frameStart, toNs: systemsEnd))
       paints.add(value: milliseconds(fromNs: paintStart, toNs: paintEnd))
@@ -260,6 +302,21 @@ func main() ret Int {
   log("[pageBudget] paint recorded ms: {summary(values: paints)}")
   log("[pageBudget] transform pass alone ms: {summary(values: transforms)}")
   log("[pageBudget] building the new world ms: {summary(values: mounts)}")
+  log(
+    "[pageBudget] the build's frame, frame to frame ms: {summary(values: buildFrames)}; over 16.67 ms {countOver(
+      values: buildFrames
+      limit: 16.67
+    )}"
+  )
+  log(
+    "[pageBudget] the launch, before the first transition: {launchIntervals.length} frames with motion, over 16.67 ms {countOver(
+      values: launchIntervals
+      limit: 16.67
+    )}"
+  )
+  loop let line: view String in slowLines {
+    log(line)
+  }
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   if done < transitionCount or pageTransitionInFlight(system: system) {
