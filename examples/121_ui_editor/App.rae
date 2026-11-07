@@ -21,6 +21,7 @@ open ui/SceneLoader
 open ui/Pipeline
 open ui/inputSystem/InputSystem
 open ui/buttonSystem/ButtonHoverFade
+open ui/buttonSystem/ButtonHoverScale
 open ui/listViewSystem/ListViewSystem
 open ui/animationSystem/EffectSystems
 open ui/renderSystem/RenderSystem
@@ -221,6 +222,15 @@ func effectSystems(
   input: view UiInput
 ) ret Bool {
   var live: Bool = false
+  # A button under the finger dips (`pressable`, in the editor's own scene and in a document)
+  if buttonHoverScaleUpdate(
+    world: app.world
+    uiSystems: app.uiSystems
+    hovered: input.hoveredEntityId
+    deltaTime: deltaTime
+  ) {
+    live = true
+  }
   # Hover glows fade in and out; live only while one is still moving.
   if buttonHoverFadeUpdate(world: app.world, uiSystems: app.uiSystems, deltaTime: deltaTime) {
     live = true

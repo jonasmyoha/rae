@@ -22,6 +22,7 @@ open inspectorSystem/ComponentWidget
 open inspectorSystem/RectEdit
 open inspectorSystem/LabelEdit
 open inspectorSystem/ComponentEdit
+open inspectorSystem/MotionEdit
 
 # The inspector renders the COMPOSITE of the whole selection. There is no
 # single-selection path: n=1 is this code with one member, which is why a
@@ -221,6 +222,27 @@ func syncInspectorPanel(
       action: ""
     )
   }
+  # Play what the page's motion says (MotionEdit.rae), up here as the list below it is long
+  if motionPageHasAppear(world: world, sceneRoot: sceneRoot) {
+    addWidgetRow(
+      rows: widgetRows
+      id: "motion"
+      name: "Motion"
+      value: ""
+      indent: 0
+      action: ""
+    )
+    loop let what: view String in motionPlayLabels() {
+      addWidgetRow(
+        rows: widgetRows
+        id: "motion.{what}"
+        name: motionPlayRowName(what: what)
+        value: motionPlayRowValue(what: what, uiSystems: uiSystems, selectionCount: members)
+        indent: 1
+        action: "motionPlay:{what}"
+      )
+    }
+  }
   # Select parent, over the WHOLE selection — the operation the click-through
   # gesture cannot express, since that walks one node up the stack under the
   # cursor rather than the set up the tree.
@@ -287,11 +309,14 @@ func syncInspectorPanel(
     if fieldRows.length is 0 {
       continue
     }
-    # the focused OnClick label shows what is typed (LabelEdit.rae)
-    if tally.name is "OnClick" and inspectorSystem.labelEdit.active {
+    # the focused OnClick label or animation field shows what is typed (LabelEdit.rae)
+    if inspectorSystem.labelEdit.active {
       loop let row: mod ListViewRow in fieldRows {
-        let field: String = row.values.copyAtDefault(index: 1)
-        if field is inspectorSystem.labelEdit.field {
+        var field: String = row.values.copyAtDefault(index: 1)
+        if isMotionComponent(name: tally.name) {
+          field = "{tally.name}.{field}"
+        }
+        if (tally.name is "OnClick" or isMotionComponent(name: tally.name)) and field is inspectorSystem.labelEdit.field {
           row.values.set(
             index: 2
             value: labelRowText(

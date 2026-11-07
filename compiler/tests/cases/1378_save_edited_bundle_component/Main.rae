@@ -1,0 +1,98 @@
+# A component a node inherits from a bundle, changed after load, is saved. What is unchanged stays
+# the
+# bundle's to write, and a Rect that layout rewrites says nothing, so a saved node does not grow
+# what
+# its bundle gives it. On loading again the node's own fields merge over the bundle.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneWriter
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+
+const source: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"bundles\":\{\"card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"#112233\"\}\}\},\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":200\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Row\"]\},\"Row\":\{\"bundles\":[\"card\",\"appearRise\"]\}\}\}"
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func save(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scene: view Scene
+  root: view EntityId
+) ret String {
+  let fresh: UiWorld = freshDecodeOf(world: world, uiSystems: uiSystems, scene: scene)
+  ret writeSceneText(
+    world: world
+    uiSystems: uiSystems
+    fresh: fresh
+    scene: scene
+    pageRoot: root
+    pageId: ""
+  )
+}
+
+# The saved text from the node "Row" on: it is the file's last node
+func rowPart(text: view String) ret String {
+  if let at: Int = text.indexOf(sub: "\"Row\": ") {
+    ret text.sub(start: at, len: text.length() - at)
+  }
+  ret ""
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 200.0
+  world.layoutH = 200.0
+  let scene: Scene = parseScene(source: source)
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  let row: EntityId = nodeOf(world: world, nodeId: "Row")
+  log("the bundle's y: {componentView(this: world.appears, entityId: row).y}")
+  let unchanged: String = save(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    root: root
+  )
+  let rowUnchanged: String = rowPart(text: unchanged)
+  log(
+    "unchanged: in the node, Appear {rowUnchanged.contains(sub: "Appear")}, Shape {rowUnchanged.contains(
+      sub: "Shape"
+    )}, Rect {rowUnchanged.contains(sub: "Rect")}"
+  )
+  componentMod(this: world.appears, entityId: row).y = 40.0
+  let edited: String = save(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    root: root
+  )
+  let rowEdited: String = rowPart(text: edited)
+  log(
+    "edited: in the node, Appear {rowEdited.contains(sub: "Appear")} and its bundles {rowEdited.contains(
+      sub: "appearRise"
+    )}; Shape {rowEdited.contains(sub: "Shape")}, Rect {rowEdited.contains(sub: "Rect")}"
+  )
+  var loaded: UiWorld = createUiWorld()
+  var loadedSystems: UiSystems = createUiSystems()
+  let again: EntityId = loadScene(
+    world: loaded
+    uiSystems: loadedSystems
+    scene: parseScene(source: edited)
+  )
+  let reloaded: view Appear = componentView(
+    this: loaded.appears
+    entityId: nodeOf(world: loaded, nodeId: "Row")
+  )
+  log("loaded again: y {reloaded.y}, and the bundle's motion stays {reloaded.motion}")
+}

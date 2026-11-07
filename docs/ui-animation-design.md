@@ -595,6 +595,19 @@ Motion has to be testable by an agent with no eyes on the phone.
   is added to their scenes.
 - `docs/ui-scene-format.md` documents the components and the `motion` section.
 
+**Built in 0.3.32:** the editor's half, in `inspectorSystem/MotionEdit.rae`. What the code decided:
+
+- The seven components' rows were already generated. A click on a field is now the label input, and a commit rewrites the
+  component's JSON with that field changed and decodes it by the scene's own path. So an enum, a number and a motion name take no code, an
+  unknown motion is an ordinary diagnostic, and the document's save writes it.
+- Play rows show when the page has motion: the selected nodes' `Appear` or `Disappear`, the page's `Appear` in `Stagger` order, and normal or
+  slow (four times). They need a selected node, as the inspector's rows do. A played `Disappear` comes back at its end, and a played `Appear`
+  goes through the triggers, so a `Stagger` above it counts. `PageTransition` is edited but not played: it needs a second page.
+- The editor's pills use `pressable` and its panels `appearFade`. It has no dialogs of its own.
+- A component a node inherits from a bundle, changed after load, is now saved (`SceneWriter`, case 1378). Before, the save dropped the change
+  without a word. It writes the whole component on the node, and that merges over the bundle on load.
+- Not yet: the motion tokens edited with the theme, with a curve graph. The editor edits no theme and cannot write one, so that is its own queue line.
+
 **Built in 0.3.31:** example 106, whose DESIGN.md section 10 has the list. What it decided for lib/ui:
 
 - `pageTransitionSetMorphKey`: two pages can show the same many things, and then one key flies, not all of them.

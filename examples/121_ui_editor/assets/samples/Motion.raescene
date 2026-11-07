@@ -1,0 +1,32 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "import": ["Theme"],
+  "root": "Page",
+  "nodes": {
+    "Page": {
+      "Rect": { "x": 0, "y": 0, "w": 400, "h": 400 },
+      "PageRoot": { "id": "motion" },
+      "PageTransition": { "kind": "push" },
+      "Shape": { "kind": "Rect", "fill": "surface" },
+      "bundles": ["staggerFromStart"],
+      "Children": ["Title", "RowOne", "RowTwo"]
+    },
+    "Title": {
+      "Rect": { "x": 20, "y": 20, "w": 360, "h": 50 },
+      "AnimateText": { "kind": "fade" },
+      "Text": { "text": "Motion", "styleId": "title" }
+    },
+    "RowOne": {
+      "Rect": { "x": 20, "y": 90, "w": 360, "h": 80 },
+      "bundles": ["appearRise", "disappearFade"],
+      "SharedElement": { "key": "rowOne" },
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "radius": 12 }
+    },
+    "RowTwo": {
+      "Rect": { "x": 20, "y": 190, "w": 360, "h": 80 },
+      "bundles": ["appearRise", "disappearFade", "glideOnChange"],
+      "Shape": { "kind": "RoundedRect", "fill": "surfaceAlt", "radius": 12 }
+    }
+  }
+}
