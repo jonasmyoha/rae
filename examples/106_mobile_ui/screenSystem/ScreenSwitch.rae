@@ -6,16 +6,15 @@ open ecs/ComponentTable
 open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ui/scrollRootSystem/ScrollRootSystem
-open ui/animationSystem/HeroTransitionSystem
+open ui/pageTransitionSystem/PageTransitionSystem
 open ui/UiSystems
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
-#   * willSwitch=true  → flip Active, re-mount only a page whose row asks
-#                        (`ScreenPage.refreshOnEntry`), and spawn the hero
-#                        transition entity when both pages show the same
-#                        `HeroWidget` key (ui/animationSystem/
-#                        HeroTransitionSystem).
+#   * willSwitch=true  → re-mount only a page whose row asks
+#                        (`ScreenPage.refreshOnEntry`), and run the page
+#                        transition (ui/pageTransitionSystem), which also flies
+#                        a cover both pages show with one `HeroWidget` key.
 #   * willSwitch=false → poll the hot-reload watcher and possibly
 #                        force an outer rebuild.
 #
@@ -61,6 +60,7 @@ func handleScreenSwitch(
   cachedTrackDurMs: view Int
   viewport: view Viewport
   reg: view TextureRegistry
+  pageTransitions: mod PageTransitionSystem
 ) ret ScreenSwitchResult {
   var result: ScreenSwitchResult = {
     newScreen: currentScreen
@@ -110,7 +110,6 @@ func handleScreenSwitch(
     ret result
   }
 
-  setPageActive(world: world, pageId: outgoingPageId, active: false)
   # A page whose row asks for a fresh mount on entry is re-mounted at the
   # top; no page does today — the lists and the "Recently played" section
   # follow their data in place (ScreenPage.refreshOnEntry).
@@ -126,7 +125,25 @@ func handleScreenSwitch(
       viewport: viewport
     )
   }
-  setPageActive(world: world, pageId: incomingPageId, active: true)
+  # The pages move from their scenes' PageTransition: back when the sub-page stack got shorter, or
+  # between tabs to the one further left, so a sibling goes the way the tabs lie. The browsed
+  # album's
+  # cover flies across: the library's grids show every other album too, and those go with their
+  # pages.
+  let stackDepth: Int = appState.subPageStack.length
+  let back: Bool = stackDepth < appState.pageDepth or (stackDepth is appState.pageDepth and screenToInt(
+    s: nextScreen
+  ) < screenToInt(s: currentScreen))
+  appState.pageDepth = stackDepth
+  pageTransitionSetMorphKey(system: pageTransitions, key: appState.currentAlbumStem)
+  pageTransitionResident(
+    system: pageTransitions
+    world: world
+    uiSystems: uiSystems
+    fromRoot: findPageRootEntity(world: world, pageId: outgoingPageId)
+    toRoot: findPageRootEntity(world: world, pageId: incomingPageId)
+    back: back
+  )
   # Seed the ScrollRoot of whatever was just re-mounted (top for a fresh
   # page, the remembered position for an in-place re-mount).
   scrollRootSystem(world: world, uiSystems: uiSystems, memory: scrollMemory)
@@ -144,51 +161,6 @@ func handleScreenSwitch(
   # in main.rae seeds it too late to trigger a relayout, silently losing
   # the notch reserve until something else dirties the layout.
   let switchSafe: Insets = applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
-
-  # Hero transition. Both source and target live in the same persistent
-  # world: the outgoing page's `HeroWidget` for the browsed album and the
-  # incoming page's. The intermediate layout+transform flush gives the
-  # freshly-mounted target page a valid WorldTransform2D before its rect
-  # is read; `spawnHeroTransition` then has the target fly from the source's
-  # rectangle, over the page, by its pose (ui/animationSystem/SharedElements).
-  let heroKey: String = appState.currentAlbumStem
-  let heroSource: EntityId = findHeroOnPage(
-    world: world
-    uiSystems: uiSystems
-    pageId: outgoingPageId
-    key: heroKey
-  )
-  if isNone(this: heroSource) is false {
-    if uiShouldRun(
-      schedule: schedule
-      world: world
-      uiSystems: uiSystems
-      index: uiSystemLayout
-    ) {
-      layoutSystem(world: world, uiSystems: uiSystems)
-    }
-    if uiShouldRun(
-      schedule: schedule
-      world: world
-      uiSystems: uiSystems
-      index: uiSystemTransform
-    ) {
-      transformSystem(world: world, uiSystems: uiSystems)
-    }
-    let heroTarget: EntityId = findHeroOnPage(
-      world: world
-      uiSystems: uiSystems
-      pageId: incomingPageId
-      key: heroKey
-    )
-    let started: Bool = spawnHeroTransition(
-      world: world
-      uiSystems: uiSystems
-      key: heroKey
-      source: heroSource
-      target: heroTarget
-    )
-  }
 
   result.newScreen = nextScreen
   # Refresh outer-loop caches that used to be updated by the rebuild

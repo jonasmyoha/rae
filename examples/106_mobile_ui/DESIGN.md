@@ -294,7 +294,41 @@ the playback overlays), `WorldHelpers.rae` shortens the component setters.
 | raylib immediate-mode painter, no `RenderSyncSystem`? | Replaced by the retained gpu2d canvas; the render system re-records on change and `RenderDecide` skips frames with nothing to draw. |
 | Manual per-component registry — reflection or codegen? | Still manual; the reflection path is queued (#959–#961) on `fields`/`typeName`, which now exist. |
 
-## 10. Cross-references
+## 10. Motion
+
+The motion is in the scenes, on lib/ui's animation (docs/ui-animation-design.md); only the choice of what
+goes back and which cover flies is code.
+
+| Where | What | How |
+|---|---|---|
+| Album, History | Come from the right | `PageTransition` `push` on the page's root |
+| Now Playing | Comes up from the bottom | `PageTransition` `sheet` |
+| The four tabs | Move a little sideways and cross | `PageTransition` `sibling`; the direction is the order of the tabs |
+| Cover grids, track lists, history | Rows arrive one after another as a page opens | `staggerFromStart` on the list, `appearFade` on a tile, `appearRise` on a row |
+| History | A new play enters, an old one fades as a ghost, the rest glide | `animateMoves`, `disappearFade`, keyed by the play's place in the history |
+| The browsed album's cover | Flies between the pages, over everything | `HeroWidget`, which is a `SharedElement` morph |
+| Buttons | Dip under the finger | `pressable` on the album's buttons, the mini player's, the tabs and Back |
+| A sub-page | A swipe from the left edge is Back | `frameSystem/FrameEdgeSwipe.rae` |
+
+`handleScreenSwitch` hands every change of page to `pageTransitionResident`. Back is when the sub-page stack got
+shorter, or between tabs to the one further left. Both pages are resident, so the leaving one deactivates when its
+motion ends, and it takes no input from the first frame. `findScrollRoot` skips it.
+
+Only the browsed album's cover flies (`pageTransitionSetMorphKey`). The library's grids show the same albums, and
+every tile flying between them on each change of tab would be noise.
+
+The swipe sends the same `nav.back` as the back button, after `pageTransitionDragStart`, so the stack and the screen
+switch work as they always do. If it springs back, the stack gets its page back, and the screen switch that causes finds the
+pages already where they belong.
+
+The bottom sheet and the settings dialog keep their own motion for now. The mini player and the tabs are in another
+layer, so they stay still.
+
+`RAE_UI_SWIPE=<dx>` is a scripted finger from the edge, for the gate, as `RAE_UI_DRAG` is for a scroll. Pictures at a share of the
+way are in `docs/images/ui-106/`, by `RAE_ANIMATION_HOLD`: a hold is a straight line between the two ends, so they show more of the
+leaving page than a person sees, as it is gone by 60% of the way in real time.
+
+## 11. Cross-references
 
 - `docs/ui-ecs-refactor-status.md` — what the #939–#950 wave changed in
   `lib/ui` and here, and what is still open.

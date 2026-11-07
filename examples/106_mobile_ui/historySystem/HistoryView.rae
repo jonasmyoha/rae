@@ -95,9 +95,11 @@ func historyListData(history: view PlayHistory) ret ListViewData {
       let i: Int = n - 1 - visual
       let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
       var row: ListViewRow = {
-        keys: List.create(String, cap: 6)
-        values: List.create(String, cap: 6)
+        keys: List.create(String, cap: 7)
+        values: List.create(String, cap: 7)
       }
+      # The play's own place in the history, so a row keeps its key as newer plays come
+      historyRowCell(row: row, key: "key", value: "{i}")
       historyRowCell(row: row, key: "title", value: "{e.trackName}")
       historyRowCell(row: row, key: "artist", value: "{e.artistName}")
       let durMs: Int = (e.durationSec * 1000.0).toInt()

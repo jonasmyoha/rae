@@ -33,6 +33,7 @@ type SharedEntry {
   key: String
   mode: SharedMode
   motion: String
+  isHero: Bool = false
 }
 
 # What is known of the old node, to carry to the new page
@@ -128,14 +129,13 @@ func sharedEntriesOf(
       this: world.sharedElements
       entityId: entityId
     ) is false {
-      entries.add(
-        value: SharedEntry {
-          entityId: entityId
-          key: "{componentView(this: world.heroWidgets, entityId: entityId).key}"
-          mode: SharedMode.morph
-          motion: "smooth"
-        }
-      )
+      entries.add(value: SharedEntry {
+        entityId: entityId
+        key: "{componentView(this: world.heroWidgets, entityId: entityId).key}"
+        mode: SharedMode.morph
+        motion: "smooth"
+        isHero: true
+      })
     }
   }
   ret entries
@@ -190,10 +190,8 @@ func sharedSourcesOf(
 }
 
 func sharedMarkSeen(world: mod UiWorld, uiSystems: view UiSystems, entityId: view EntityId) {
-  # Its own Appear would pull it away from what it is doing
-  if componentHas(this: world.appearSeens, entityId: entityId) is false {
-    componentSet(this: world.appearSeens, entityId: entityId, data: AppearSeen { shown: true })
-  }
+  # Its own Appear would pull it away from what it is doing, even back on a page shown before
+  componentSet(this: world.appearSeens, entityId: entityId, data: AppearSeen { shown: true })
 }
 
 # The target node comes from the source's rectangle. `pageRoot` is the page it must not move
@@ -272,6 +270,7 @@ func sharedArrive(
   root: view EntityId
   sources: view List(SharedSource)
   fromFinger: view Bool
+  onlyKey: view String
 ) ret List(EntityId) {
   var taken: List(EntityId) = List.create(EntityId, cap: 4)
   if sources.length is 0 {
@@ -279,8 +278,12 @@ func sharedArrive(
   }
   let entries: List(SharedEntry) = sharedEntriesOf(world: world, uiSystems: uiSystems, root: root)
   loop let entry: view SharedEntry in entries {
+    # One key may be on the old page twice, as in two lists of one album: one source is enough
+    var found: Bool = false
     loop let source: view SharedSource in sources {
-      if source.key is entry.key {
+      # Pages that show the same many things want one to fly, not all of them: `onlyKey` says which
+      let wanted: Bool = onlyKey.length() is 0 or entry.key is onlyKey or entry.mode is SharedMode.stay
+      if source.key is entry.key and not found and wanted {
         if entry.mode is SharedMode.morph {
           if source.onScreen and not fromFinger {
             sharedMorph(
@@ -290,9 +293,15 @@ func sharedArrive(
               pageRoot: root
               source: source
               motion: entry.motion
-              isHero: false
+              isHero: entry.isHero
             )
             taken.add(value: source.entityId)
+            found = true
+            if entry.isHero {
+              log(
+                "[hero] start key={source.key} from=({source.x},{source.y} {source.w}x{source.h})"
+              )
+            }
           }
         } else if sharedAtOnePlace(
           world: world
@@ -320,6 +329,7 @@ func sharedArrive(
             }
           )
           taken.add(value: source.entityId)
+          found = true
         }
       }
     }

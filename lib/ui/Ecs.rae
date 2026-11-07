@@ -570,7 +570,11 @@ func findScrollRoot(world: view UiWorld, uiSystems: view UiSystems) pub ret Enti
     let e: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
     let pid: String = pageOf(world: world, uiSystems: uiSystems, entityId: e)
     if pid.length() > 0 {
-      if isPageActive(world: world, pageId: pid) {
+      # A page on its way out is still active, and is not the page any more
+      if isPageActive(world: world, pageId: pid) and componentHas(
+        this: world.leavings
+        entityId: findPageRootEntity(world: world, pageId: pid)
+      ) is false {
         ret e
       }
     }

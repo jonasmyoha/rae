@@ -286,6 +286,7 @@ func radiusFollows() {
     root: root
     sources: sources
     fromFinger: false
+    onlyKey: ""
   )
   frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
   let tile: EntityId = nodeOf(world: world, nodeId: "Tile")
@@ -310,12 +311,70 @@ func radiusFollows() {
     root: root
     sources: farSources
     fromFinger: false
+    onlyKey: ""
   )
   log(
     "a source off screen makes no morph: {nothing.length} taken, {componentCount(
       this: uiSystems.animation.sharedNodes
     )} shared"
   )
+}
+
+func onlyOneKey() {
+  log("--- only one key morphs")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = mountPage(
+    world: world
+    uiSystems: uiSystems
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"PageTransition\":\{\"kind\":\"push\"\},\"Children\":[\"Tile\",\"Bar\",\"Moved\",\"Plain\"]\},\"Tile\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":400,\"h\":200\},\"bundles\":[\"appearRise\"],\"SharedElement\":\{\"key\":\"tile\"\},\"CornerRadius\":\{\"radius\":10\}\},\"Bar\":\{\"Rect\":\{\"x\":0,\"y\":740,\"w\":400,\"h\":60\},\"SharedElement\":\{\"key\":\"bar\",\"mode\":\"stay\"\},\"OnClick\":\{\"actionId\":\"barTwo\",\"label\":\"Bar\"\}\},\"Moved\":\{\"Rect\":\{\"x\":0,\"y\":100,\"w\":50,\"h\":50\},\"SharedElement\":\{\"key\":\"moved\",\"mode\":\"stay\"\}\},\"Plain\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+    settings: ""
+  )
+  let from: SharedSource = {
+    entityId: noEntity()
+    key: "tile"
+    x: 100.0
+    y: 600.0
+    w: 100.0
+    h: 100.0
+    radius: 20.0
+    onScreen: true
+  }
+  let sources: List(SharedSource) = [from]
+  let other: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: sources
+    fromFinger: false
+    onlyKey: "something else"
+  )
+  log(
+    "another key was named: {other.length} taken, {componentCount(
+      this: uiSystems.animation.sharedNodes
+    )} shared"
+  )
+  let named: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: sources
+    fromFinger: false
+    onlyKey: "tile"
+  )
+  log(
+    "it was named: {named.length} taken, {componentCount(this: uiSystems.animation.sharedNodes)} shared"
+  )
+  let twice: List(SharedSource) = [from, from]
+  let once: List(EntityId) = sharedArrive(
+    world: world
+    uiSystems: uiSystems
+    root: root
+    sources: twice
+    fromFinger: false
+    onlyKey: ""
+  )
+  log("the key twice on the old page is taken once: {once.length}")
 }
 
 func resident() {
@@ -494,6 +553,7 @@ func main() {
   newWorlds(kind: "push")
   newWorlds(kind: "sibling")
   radiusFollows()
+  onlyOneKey()
   resident()
   heroAlias()
   outcomes()

@@ -1120,6 +1120,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && grep -aq '\[hero\] start key=bjork_post from=' "$TMP_OUT/hero.log" \
              && grep -aq '\[hero\] done key=bjork_post' "$TMP_OUT/hero.log" \
              && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/hero.bmp" --min-colors=50 > "$TMP_OUT/hero-shot.log" 2>&1 \
+             && (cd .. && RAE_UI_SCREEN=library RAE_UI_SCREEN_SEQ='album.open.bjork_post' RAE_UI_SWIPE=60 RAE_UI_NO_SPOTIFY=1 \
+             RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=3 RAE_SDL_HEADLESS_MS=3000 \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/swipe-back.log" 2>&1 \
+             && grep -aq '\[edge-swipe\] started' "$TMP_OUT/swipe-back.log" \
+             && grep -aq '\[edge-swipe\] released at .*: finishes false' "$TMP_OUT/swipe-back.log" \
              && (cd .. && RAE_UI_SCREEN=profile RAE_UI_SCREEN_SEQ='settings.open,settings.darkTheme' RAE_UI_NO_SPOTIFY=1 \
              RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=3 RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$TMP_OUT/settings.bmp" \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/settings.log" 2>&1 \
