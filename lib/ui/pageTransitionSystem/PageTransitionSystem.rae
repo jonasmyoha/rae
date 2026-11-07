@@ -111,12 +111,11 @@ func pageBoxOf(world: view UiWorld, uiSystems: view UiSystems, root: view Entity
   ret PageBox { x: 0.0, y: 0.0, w: world.layoutW, h: world.layoutH }
 }
 
-# With no rectangle said, a zoom comes from the middle of the page, at half its size
 func pageSourceFor(system: view PageTransitionSystem, box: view PageBox) ret PageSource {
   if system.hasSource {
     ret system.source
   }
-  ret PageSource { x: box.x + box.w / 4.0, y: box.y + box.h / 4.0, w: box.w / 2.0, h: box.h / 2.0 }
+  ret pageDefaultSource(box: box)
 }
 
 func pageSecondsNamed(world: view UiWorld, name: view String) ret Float {
@@ -214,29 +213,6 @@ func pageLeave(
   )
 }
 
-# Every Appear on the page waits for its share of the transition. The first paint already shows each
-# node's start pose, so the page does not flash in its final look.
-func pageDelayAppears(
-  uiSystems: mod UiSystems
-  world: view UiWorld
-  root: view EntityId
-  delay: view Float
-) {
-  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
-  collectSubtree(childrens: world.childrens, node: root, out: subtree)
-  loop let entityId: view EntityId in subtree {
-    if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
-      let track: mod AnimationTrack = componentMod(
-        this: uiSystems.animation.tracks
-        entityId: entityId
-      )
-      if track.phase is AnimationPhase.appearing {
-        track.delayLeft = track.delayLeft + delay
-      }
-    }
-  }
-}
-
 # The page comes. Its first paint is its start pose, and it takes taps where it is drawn from
 # that frame.
 func pageArrive(
@@ -250,9 +226,9 @@ func pageArrive(
   # The nodes that have just come to be shown start now, with their first pose
   animationTriggers(world: world, uiSystems: uiSystems)
   animationSystem(world: world, uiSystems: uiSystems, deltaTime: 0.0)
-  pageDelayAppears(
-    uiSystems: uiSystems
+  animationDelayAppears(
     world: world
+    uiSystems: uiSystems
     root: root
     delay: seconds * pageAppearShare
   )

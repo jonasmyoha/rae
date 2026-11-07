@@ -386,7 +386,6 @@ transition, in every kind, and the background and any bar in another world stay 
   so a held leaving page at 0.7 has opacity 0.3, even though in time it would be zero by then.
 - Nothing is loaded: `res` is a `view` of the host's fonts. A trace of file opens through `checks/uiPageTransitions` shows each
   font and the theme opened once, in a run with two worlds.
-- Not yet: `presentation: "page"` following `PageTransition` (section 9), which is queued.
 
 ### 8.3 What stays
 
@@ -433,7 +432,12 @@ math. It is one thumb's natural Back. The bar's Back stays.
 - A second close of a closing host does nothing.
 - A dialog steps back only under another dialog: a full page hides it. It comes back when the top one closes, and closing
   the one under leaves the top one alone. Two dialogs presented in one frame, before the first has a track, do not step back.
-- A full page has no motion here until `PageTransition` (step 7), unless its root has its own `Disappear`.
+- A full page follows its root's `PageTransition`, a `sheet` by default (0.3.25). Only the page moves: the screen under it
+  stays still, so the "leaving page" half of a kind is not used. It closes by going back out the way it came. Its opacity is
+  zero by 60% as always, so a `sheet` going down fades as it goes. `none` opens and closes at once.
+- A full page's arrival only waits in the inbox when it is presented. A host that runs no animation never takes it, so it
+  shows the page in place, and a close that finds the arrival still waiting destroys the page at once.
+- With no rectangle to come from, a presented `zoom` grows from the middle of the page.
 - Placement is layout's and the pose scales about the card's middle, so the middle is where placement put it at every scale.
 - A closing scrim and a new one together never dim below 98% of one scrim (case 1371), which is the "no flash".
 

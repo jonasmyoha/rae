@@ -64,6 +64,9 @@ type AnimationCommand {
   # Above 0: the opacity motion's curve takes this long (a page's fade hangs on its transition's
   # length)
   opacitySeconds: Float = 0.0
+  # Above 0: the Appear of the nodes under this one wait this long (a page's share of its
+  # transition)
+  appearsWait: Float = 0.0
 }
 
 # The settings a run was started with
@@ -238,6 +241,40 @@ func animationApplyGlide(
 func animationDropMotion(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.animation.tracks, entityId: entityId)
   componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+}
+
+# Whether a command for this node has not been taken yet. A host that runs no animation never takes
+# it.
+func animationCommandWaiting(uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  loop var i: Int = 0, i < queueCount(this: uiSystems.animation.commands), ++i {
+    if queueAt(this: uiSystems.animation.commands, i: i).entityId is entityId {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Every Appear under `root` waits this much longer. The first paint already shows each node's start
+# pose, so the page does not flash in its final look.
+func animationDelayAppears(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  root: view EntityId
+  delay: view Float
+) {
+  var subtree: List(EntityId) = List.create(EntityId, cap: 32)
+  collectSubtree(childrens: world.childrens, node: root, out: subtree)
+  loop let entityId: view EntityId in subtree {
+    if entityId is not root and componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+      let track: mod AnimationTrack = componentMod(
+        this: uiSystems.animation.tracks
+        entityId: entityId
+      )
+      if track.phase is AnimationPhase.appearing {
+        track.delayLeft = track.delayLeft + delay
+      }
+    }
+  }
 }
 
 # A motion token by name: an unknown one is a scene diagnostic, then the fallback, never silent
@@ -501,6 +538,18 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
   loop var i: Int = 0, i < commandCount, ++i {
     let command: AnimationCommand = queueAt(this: uiSystems.animation.commands, i: i)
     animationApplyCommand(world: world, uiSystems: uiSystems, command: command)
+  }
+  # After them all: the Appear of a page's nodes are in the same batch as the page
+  loop var i: Int = 0, i < commandCount, ++i {
+    let command: AnimationCommand = queueAt(this: uiSystems.animation.commands, i: i)
+    if command.appearsWait > 0.0 and isAlive(world: world, entityId: command.entityId) {
+      animationDelayAppears(
+        world: world
+        uiSystems: uiSystems
+        root: command.entityId
+        delay: command.appearsWait
+      )
+    }
   }
   clearQueue(this: uiSystems.animation.commands)
   if uiSystems.animation.settings.hold >= 0.0 {

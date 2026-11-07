@@ -815,7 +815,8 @@ gets the bundle `dialogMotion`. The host needs nothing but `animationRun` and `r
   it takes input, and a new page can open, even with the same page id. What is on screen stays, taking no input, until its motion ends.
 - A dialog with another dialog over it steps back to scale 0.97, and comes back when the top one closes.
 - `DialogOptions.placement` holds at every scale: the card scales about its middle, which is where placement put it.
-- A page with `"presentation": "page"` has no motion yet unless its root has its own `Disappear`.
+- A page with `"presentation": "page"` follows its root's `PageTransition` (section 25), a `sheet` by default. Only the page moves, and
+  it closes by going back out the way it came. A host that runs no animation shows it in place and closes it at once.
 
 Case 1371 holds the rules; `checks/uiDialogs` paints them.
 

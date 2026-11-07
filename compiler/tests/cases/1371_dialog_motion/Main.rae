@@ -297,27 +297,15 @@ func closing() {
     extra: ""
     presentation: "page"
   )
-  log("a page has no motion here yet: {componentCount(this: uiSystems.animation.tracks)} tracks")
+  log(
+    "a full page here too: {poseText(uiSystems: uiSystems, entityId: page.card)} y {poseY(
+      uiSystems: uiSystems
+      entityId: page.card
+    )}"
+  )
   settle(world: world, uiSystems: uiSystems)
   closePresentedPage(world: world, uiSystems: uiSystems, host: page.host)
-  log("closed: gone at once {isAlive(world: world, entityId: page.host) is false}")
-  let leaving: Shown = present(
-    world: world
-    uiSystems: uiSystems
-    pageId: "page"
-    extra: "\"Disappear\":\{\},"
-    presentation: "page"
-  )
   settle(world: world, uiSystems: uiSystems)
-  closePresentedPage(world: world, uiSystems: uiSystems, host: leaving.host)
-  log(
-    "a page with its own Disappear stays for it: {isAlive(world: world, entityId: leaving.host)}, no scrim {componentHas(
-      this: uiSystems.animation.tracks
-      entityId: leaving.card
-    ) is false}"
-  )
-  settle(world: world, uiSystems: uiSystems)
-  log("then gone: {isAlive(world: world, entityId: leaving.host) is false}")
   let action: Shown = present(
     world: world
     uiSystems: uiSystems
@@ -492,9 +480,180 @@ func placements() {
   placed(options: "\"DialogOptions\":\{\"placement\":\"at\",\"at\":0.25\},", label: "at 0.25")
 }
 
+func poseY(uiSystems: view UiSystems, entityId: view EntityId) ret Int {
+  ret Math.round(x: animationPoseOf(uiSystems: uiSystems, entityId: entityId).y).toInt()
+}
+
+func poseX(uiSystems: view UiSystems, entityId: view EntityId) ret Int {
+  ret Math.round(x: animationPoseOf(uiSystems: uiSystems, entityId: entityId).x).toInt()
+}
+
+func pageScene(extra: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{{extra}\"PageRoot\":\{\"id\":\"card\",\"presentation\":\"page\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"Label\"]\},\"Label\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"bundles\":[\"appearFade\"],\"OnClick\":\{\"actionId\":\"label\",\"label\":\"Label\"\}\}\}\}"
+}
+
+func mountPage(world: mod UiWorld, uiSystems: mod UiSystems, extra: view String) ret Shown {
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: pageScene(extra: extra))
+    pageId: "page"
+  )
+  let host: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: "page"
+    overrides: emptyOverrides()
+  )
+  ret Shown { host: host, card: card }
+}
+
+func labelDelay(world: view UiWorld, uiSystems: view UiSystems) ret Int {
+  if let index: Int = findNodeInPage(world: world, pageId: "page", nodeId: "Label") {
+    let entityId: EntityId = nodeEntityId(world: world, index: index)
+    if componentHas(this: uiSystems.animation.tracks, entityId: entityId) {
+      ret Math.round(
+        x: componentView(this: uiSystems.animation.tracks, entityId: entityId).delayLeft * 1000.0
+      ).toInt()
+    }
+  }
+  ret -1
+}
+
+func fullPages() {
+  log("--- a full page: T is 0.42 s, so its nodes wait 105 ms, and leaving it is clear by 0.252 s")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mountScreen(world: world, uiSystems: uiSystems)
+  let sheet: Shown = mountPage(world: world, uiSystems: uiSystems, extra: "")
+  log(
+    "presented, nothing run yet: {presentedPageCount(world: world)} presented, y {poseY(
+      uiSystems: uiSystems
+      entityId: sheet.card
+    )}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "the first frame, a sheet by default: y {poseY(uiSystems: uiSystems, entityId: sheet.card)}, opacity {percent(
+      value: animationPoseOf(uiSystems: uiSystems, entityId: sheet.card).opacity
+    )}%; its label waits {labelDelay(world: world, uiSystems: uiSystems)} ms"
+  )
+  log(
+    "a tap where it is drawn, and where it will be: {hit(
+      world: world
+      uiSystems: uiSystems
+      y: 950.0
+    )}, {hit(world: world, uiSystems: uiSystems, y: 150.0)}"
+  )
+  loop var i: Int = 0, i < 10, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+  log("0.1 s: y {poseY(uiSystems: uiSystems, entityId: sheet.card)} of 800 (447.3 by the spring)")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "settled: {componentCount(this: uiSystems.animation.tracks)} tracks, {componentCount(
+      this: uiSystems.animation.poses
+    )} poses; a tap hits {hit(world: world, uiSystems: uiSystems, y: 150.0)}"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: sheet.host)
+  log(
+    "closed to the app: {presentedPageCount(world: world)} presented, the host stays {isAlive(
+      world: world
+      entityId: sheet.host
+    )}; a tap goes under it: {hit(world: world, uiSystems: uiSystems, y: 50.0)}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  loop var i: Int = 0, i < 24, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+  log(
+    "0.24 s: still showing {animationPoseOf(uiSystems: uiSystems, entityId: sheet.card).opacity > 0.0}, going down {poseY(
+      uiSystems: uiSystems
+      entityId: sheet.card
+    ) > 0}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.02)
+  log("0.26 s: opacity {animationPoseOf(uiSystems: uiSystems, entityId: sheet.card).opacity}")
+  settle(world: world, uiSystems: uiSystems)
+  log(
+    "ended: host alive {isAlive(world: world, entityId: sheet.host)}, {componentCount(
+      this: uiSystems.animation.poses
+    )} poses"
+  )
+
+  let push: Shown = mountPage(
+    world: world
+    uiSystems: uiSystems
+    extra: "\"PageTransition\":\{\"kind\":\"push\"\},"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("its own kind, a push: x {poseX(uiSystems: uiSystems, entityId: push.card)}")
+  loop var i: Int = 0, i < 10, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.01)
+  }
+  let before: Int = poseX(uiSystems: uiSystems, entityId: push.card)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: push.host)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log(
+    "closed mid-way: jump {poseX(uiSystems: uiSystems, entityId: push.card) - before}, going to x {componentView(
+      this: uiSystems.animation.tracks
+      entityId: push.card
+    ).x.target}"
+  )
+  settle(world: world, uiSystems: uiSystems)
+  let plain: Shown = mountPage(
+    world: world
+    uiSystems: uiSystems
+    extra: "\"PageTransition\":\{\"kind\":\"none\"\},"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("none: at its place, {poseText(uiSystems: uiSystems, entityId: plain.card)}")
+  settle(world: world, uiSystems: uiSystems)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: plain.host)
+  log("none, closed: gone at once {isAlive(world: world, entityId: plain.host) is false}")
+  let early: Shown = mountPage(world: world, uiSystems: uiSystems, extra: "")
+  closePresentedPage(world: world, uiSystems: uiSystems, host: early.host)
+  log(
+    "closed before a frame ran: gone at once {isAlive(world: world, entityId: early.host) is false}"
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("its arrival goes with it: {componentCount(this: uiSystems.animation.tracks)} tracks")
+}
+
+func noAnimationHost() {
+  log("--- a host that runs no animation")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  uiSystems.animation.settings = AnimationSettings {}
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"Open\"]\},\"Open\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"open\",\"label\":\"Open\"\}\}\}\}"
+    )
+  )
+  let shown: Shown = mountPage(world: world, uiSystems: uiSystems, extra: "")
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log(
+    "the page is in place: y {poseY(uiSystems: uiSystems, entityId: shown.card)}, a tap hits {hit(
+      world: world
+      uiSystems: uiSystems
+      y: 150.0
+    )}"
+  )
+  closePresentedPage(world: world, uiSystems: uiSystems, host: shown.host)
+  log("closed: gone at once {isAlive(world: world, entityId: shown.host) is false}")
+}
+
 func main() {
   opening()
   closing()
   stacked()
   placements()
+  fullPages()
+  noAnimationHost()
 }
