@@ -84,7 +84,7 @@ fn grassPaintBand(value: f32) -> f32 {
 // calling it at the same point gets the same answer and the blades melt into
 // the ground. x: the patch value, 0 dark to 1 light, from soft patches at two
 // scales (about 14 m and 4 m) and thin streaks along x (brush strokes); y: the
-// hue, 0 cool to 1 warm, over a larger scale (about 45 m).
+// hue, 0 cool to 1 warm, over larger scales (about 60 m and 18 m).
 fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
   let broad = perlin2(position / 26.0, 701u);
   let fine = perlin2(position / 9.0, 709u);
@@ -93,7 +93,8 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
   // ragged, painted edges between the patches
   let stroke = perlin2(position * vec2<f32>(0.9, 3.2), 751u);
   let patchValue = grassPaintBand(clamp(0.5 + 1.10 * (broad * 0.60 + fine * 0.26 + streak * 0.08 + stroke * 0.16), 0.0, 1.0));
-  let hue = clamp(0.5 + 0.8 * perlin2(position / 25.0, 727u), 0.0, 1.0);
+  // areas of their own color: a broad field (about 60 m) and a smaller one
+  let hue = clamp(0.5 + 1.1 * perlin2(position / 60.0, 727u) + 0.7 * perlin2(position / 18.0, 733u), 0.0, 1.0);
   return vec2<f32>(patchValue, hue);
 }
 // The painted palette: a value (0 the darkest root, 1 the lightest tip) and a
@@ -103,10 +104,11 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
 // needs only `base`: a ground painted as grass (gbuffer_static_surface.wgsl)
 // matches the blades' roots without knowing how light their tips are. Within
 // each piece it is linear, so a blade blends between its root's and its tip's
-// colors (grass_render.wgsl). The hue tints from cool blue-green to warm
-// yellow-green.
+// colors (grass_render.wgsl). The hue tints from a cool, darker blue-green to
+// a warm, lighter yellow-green.
 fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<f32> {
-  let tint = mix(vec3<f32>(0.84, 1.0, 1.10), vec3<f32>(1.20, 1.07, 0.70), hue);
+  // the cool areas a darker teal, the warm ones a lighter yellow-green
+  let tint = mix(vec3<f32>(0.76, 0.92, 0.96), vec3<f32>(1.22, 1.08, 0.68), hue);
   // the shade a soft teal-mint, the light tips toward yellow-white
   let dark = base * 0.52 * vec3<f32>(0.72, 1.0, 1.18);
   let light = base * lighten + vec3<f32>(0.16, 0.13, 0.05);
