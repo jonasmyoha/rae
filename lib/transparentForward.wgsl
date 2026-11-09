@@ -8,8 +8,10 @@
 // It reads the SAME Frame uniform and DrawU records as the G-buffer geometry pass
 // (group 0, bindings 0/1), so a record packed for one pass can go to either.
 // On this pass albedoMetallic.w is the instance ALPHA (there is no metallic on
-// an unlit blend). params.x selects an opt-in rounded water-drop impostor.
-// Ordinary transparent geometry keeps its original unlit color and alpha.
+// an unlit blend). params.x selects a style: 0 plain (the original unlit color
+// and alpha), 1 an opt-in rounded water-drop impostor, 2 a soft puff of smoke
+// or dust (it thins toward its silhouette and is lit from above), 3 a soft glow
+// (it thins toward its silhouette, with a hot core): lib/Explosions.
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
@@ -29,6 +31,7 @@ struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) @interpolate(flat) inst: u32,
   @location(1) uv: vec2<f32>,
+  @location(2) normal: vec3<f32>,
 };
 
 @vertex
@@ -44,6 +47,7 @@ fn vs(@builtin(instance_index) ii: u32,
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   o.inst = ii;
   o.uv = uv;
+  o.normal = (d.model * vec4<f32>(n, 0.0)).xyz;
   return o;
 }
 
@@ -67,6 +71,18 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let color = d.albedoMetallic.rgb * (mix(0.45, 1.0, reflection) + glint * 0.85);
     let alpha = coverage * d.albedoMetallic.w * (0.12 + 0.20 * rim + 0.68 * glint);
     return vec4<f32>(color, alpha);
+  }
+  if (d.params.x > 1.5) {
+    // How squarely this point of the puff faces the camera: the view's forward
+    // axis is the clip w row, so the normal's clip w is minus its facing
+    let normal = normalize(i.normal);
+    let facing = clamp(-(F.viewProj * vec4<f32>(normal, 0.0)).w, 0.0, 1.0);
+    let soft = smoothstep(0.0, 0.8, facing);
+    if (d.params.x > 2.5) {
+      return vec4<f32>(d.albedoMetallic.rgb * (0.55 + 0.9 * facing * facing), d.albedoMetallic.w * soft);
+    }
+    let fromAbove = 0.5 + 0.5 * normal.z;
+    return vec4<f32>(d.albedoMetallic.rgb * (0.55 + 0.6 * fromAbove), d.albedoMetallic.w * soft);
   }
   return vec4<f32>(d.albedoMetallic.rgb, d.albedoMetallic.w);
 }

@@ -1,0 +1,673 @@
+# Explosions — big blasts as particles, opt-in: an app makes an Explosions,
+# calls explode() where something blows up, steps it each frame and draws it.
+#
+# One blast is five layers, each its own kind of particle:
+# - a flash: one white-hot ball that swells and is gone in a fifth of a second;
+# - the fireball: glowing puffs thrown out and quickly slowed, cooling from
+#   white-yellow through orange to a deep red, and then to soot;
+# - smoke: dark puffs that rise, swell and drift with the wind for seconds,
+#   turning a lighter gray as they thin out;
+# - a dust ring: low, brownish puffs that run out along the ground;
+# - sparks: thin glowing streaks thrown fast and falling, stretched along
+#   their flight;
+# - debris: dark tumbling chunks thrown up, glowing at first, that bounce on
+#   the ground and lie there a while.
+# A rocket's smoke trail is explosionPuff().
+#
+# The puffs, the flash and the sparks are spheres in the transparent forward
+# pass (lib/TransparentForward): unlit, so their colors are the light they give
+# (the fire's above 1 blooms) or, for the smoke and the dust, the light they
+# take, scaled by the `daylight` the app passes. That pass draws one mesh a
+# frame: an app that draws other things in it must not use another mesh in the
+# same frame. The debris are cubes in the G-buffer pass, lit and solid.
+#
+# Purely visual: step it each frame, never in a lockstep simulation. Sizes are
+# in meters at `size` 1: a fireball about 4 m across at its widest, smoke rising
+# about 15 m.
+import Math
+import Quat
+import Vec3
+open Math3d
+open Mesh3d
+open MeshStore
+open Scene3d
+open GbufferInstanced
+open Gbuffer
+open RendererDeferred
+open TransparentForward
+open gpu/GpuResources
+open ecs/Transform
+
+enum ExplosionPuffKind {
+  flash
+  fire
+  smoke
+  dust
+  spark
+  trail
+}
+
+# A sphere of the blast: where it is and how it moves, its age against its life
+# (an age under 0: not born yet), its radius from birth to death
+type ExplosionPuff {
+  kind: ExplosionPuffKind
+  x: Float
+  y: Float
+  z: Float
+  velocityX: Float
+  velocityY: Float
+  velocityZ: Float
+  age: Float
+  life: Float
+  startRadius: Float
+  endRadius: Float
+  # 0..1, for its own shade
+  shade: Float
+}
+
+# A piece of debris: a tumbling cube that bounces on `groundZ`
+type ExplosionChunk {
+  x: Float
+  y: Float
+  z: Float
+  velocityX: Float
+  velocityY: Float
+  velocityZ: Float
+  spinX: Float
+  spinY: Float
+  turnX: Float
+  turnY: Float
+  size: Float
+  age: Float
+  life: Float
+  groundZ: Float
+}
+
+type Explosions {
+  puffs: List(ExplosionPuff)
+  chunks: List(ExplosionChunk)
+  sphere: MeshHandle
+  chunkBatch: InstanceBatch
+  # Every blast and puff gets the next number, for its own random shapes
+  counter: Int
+  # The draw order, farthest first: (distance key * 8192 + index)
+  order: List(Int)
+}
+
+# The most of each kept at once: past it, the oldest go first
+const explosionMaxPuffs: Int = 1200
+
+const explosionMaxChunks: Int = 240
+
+const explosionGravity: Float = 9.81
+
+func createExplosions(renderer: mod DeferredRenderer) ret Explosions {
+  let ball: MeshData = makeSphere(rings: 12, segments: 18)
+  let box: MeshData = makeBox(size: 1.0)
+  let boxMesh: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: box.verts
+    vertCount: box.vertCount
+    indices: box.indices
+  )
+  ret Explosions {
+    puffs: List.create(ExplosionPuff, cap: 256)
+    chunks: List.create(ExplosionChunk, cap: 64)
+    sphere: uploadMesh(
+      renderer: renderer
+      verts: ball.verts
+      vertCount: ball.vertCount
+      indices: ball.indices
+    )
+    chunkBatch: createInstanceBatch(mesh: boxMesh, capacity: 64)
+    counter: 0
+    order: List.create(Int, cap: 256)
+  }
+}
+
+# A number 0..1 for the blast `seed`, its particle `index` and a `salt`: the
+# same each time, different for each
+func explosionRandom(seed: view Int, index: view Int, salt: view Int) ret Float {
+  let value: Float = Math.sin(
+    x: (seed * 7919 + index * 104729 + salt * 1299709).toFloat() * 0.000137 + salt.toFloat() * 1.731
+  ) * 43758.5453
+  ret value - Math.floor(x: value)
+}
+
+# A direction from two numbers 0..1: round the up axis, at least `lowest` up
+# (-1 all of the sphere, 0 the upper half)
+func explosionDirection(around: view Float, up: view Float, lowest: view Float) ret Vec3 {
+  let z: Float = lowest + (1.0 - lowest) * up
+  let flat: Float = Math.sqrt(x: Math.max(a: 0.0, b: 1.0 - z * z))
+  let angle: Float = around * 6.2831853
+  ret Vec3.create(x: Math.cos(x: angle) * flat, y: Math.sin(x: angle) * flat, z: z)
+}
+
+func explosionAddPuff(explosions: mod Explosions, puff: view ExplosionPuff) {
+  if explosions.puffs.length >= explosionMaxPuffs {
+    explosions.puffs.removeAt(index: 0)
+  }
+  explosions.puffs.add(value: puff)
+}
+
+func explosionAddChunk(explosions: mod Explosions, chunk: view ExplosionChunk) {
+  if explosions.chunks.length >= explosionMaxChunks {
+    explosions.chunks.removeAt(index: 0)
+  }
+  explosions.chunks.add(value: chunk)
+}
+
+# A blast at (x, y, z) over the ground at `groundZ`, `size` 1 the full size
+func explode(
+  explosions: mod Explosions
+  x: view Float
+  y: view Float
+  z: view Float
+  groundZ: view Float
+  size: view Float
+) {
+  explosions.counter = explosions.counter + 1
+  let seed: Int = explosions.counter
+  explosionAddPuff(
+    explosions: explosions
+    puff: ExplosionPuff {
+      kind: ExplosionPuffKind.flash
+      x: x
+      y: y
+      z: z
+      velocityX: 0.0
+      velocityY: 0.0
+      velocityZ: 0.0
+      age: 0.0
+      life: 0.2
+      startRadius: 0.6 * size
+      endRadius: 4.2 * size
+      shade: 0.5
+    }
+  )
+  # The fireball: thrown out, slowed hard, swelling and cooling
+  loop var i: Int = 0, i < 18, ++i {
+    let way: Vec3 = explosionDirection(
+      around: explosionRandom(seed: seed, index: i, salt: 1)
+      up: explosionRandom(seed: seed, index: i, salt: 2)
+      lowest: -0.35
+    )
+    let speed: Float = (5.0 + 9.0 * explosionRandom(seed: seed, index: i, salt: 3)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.fire
+        x: x + way.x * 0.3 * size
+        y: y + way.y * 0.3 * size
+        z: z + way.z * 0.3 * size
+        velocityX: way.x * speed
+        velocityY: way.y * speed
+        velocityZ: way.z * speed + 2.0 * size
+        age: 0.0 - 0.06 * explosionRandom(seed: seed, index: i, salt: 4)
+        life: 0.6 + 0.6 * explosionRandom(seed: seed, index: i, salt: 5)
+        startRadius: (0.5 + 0.4 * explosionRandom(seed: seed, index: i, salt: 6)) * size
+        endRadius: (1.8 + 1.4 * explosionRandom(seed: seed, index: i, salt: 7)) * size
+        shade: explosionRandom(seed: seed, index: i, salt: 8)
+      }
+    )
+  }
+  # The smoke: born a little after the fire, inside it, rising and swelling for seconds
+  loop var i: Int = 0, i < 28, ++i {
+    let way: Vec3 = explosionDirection(
+      around: explosionRandom(seed: seed, index: i, salt: 11)
+      up: explosionRandom(seed: seed, index: i, salt: 12)
+      lowest: -0.1
+    )
+    let speed: Float = (1.5 + 4.0 * explosionRandom(seed: seed, index: i, salt: 13)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.smoke
+        x: x + way.x * 1.2 * size
+        y: y + way.y * 1.2 * size
+        z: z + way.z * 0.8 * size
+        velocityX: way.x * speed
+        velocityY: way.y * speed
+        velocityZ: (2.5 + 4.5 * explosionRandom(seed: seed, index: i, salt: 14)) * size
+        age: 0.0 - (0.08 + 0.35 * explosionRandom(seed: seed, index: i, salt: 15))
+        life: 3.5 + 3.0 * explosionRandom(seed: seed, index: i, salt: 16)
+        startRadius: (0.8 + 0.5 * explosionRandom(seed: seed, index: i, salt: 17)) * size
+        endRadius: (3.2 + 2.6 * explosionRandom(seed: seed, index: i, salt: 18)) * size
+        shade: explosionRandom(seed: seed, index: i, salt: 19)
+      }
+    )
+  }
+  # The dust ring along the ground
+  loop var i: Int = 0, i < 16, ++i {
+    let angle: Float = (i.toFloat() + 0.5 * explosionRandom(seed: seed, index: i, salt: 21)) / 16.0 * 6.2831853
+    let speed: Float = (8.0 + 6.0 * explosionRandom(seed: seed, index: i, salt: 22)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.dust
+        x: x
+        y: y
+        z: groundZ + 0.4 * size
+        velocityX: Math.cos(x: angle) * speed
+        velocityY: Math.sin(x: angle) * speed
+        velocityZ: 0.6 * size
+        age: 0.0 - 0.03 * explosionRandom(seed: seed, index: i, salt: 23)
+        life: 1.6 + 1.2 * explosionRandom(seed: seed, index: i, salt: 24)
+        startRadius: 0.5 * size
+        endRadius: (2.2 + 1.2 * explosionRandom(seed: seed, index: i, salt: 25)) * size
+        shade: explosionRandom(seed: seed, index: i, salt: 26)
+      }
+    )
+  }
+  # The sparks: fast, falling, stretched along their flight
+  loop var i: Int = 0, i < 70, ++i {
+    let way: Vec3 = explosionDirection(
+      around: explosionRandom(seed: seed, index: i, salt: 31)
+      up: explosionRandom(seed: seed, index: i, salt: 32)
+      lowest: -0.2
+    )
+    let speed: Float = (12.0 + 26.0 * explosionRandom(seed: seed, index: i, salt: 33)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.spark
+        x: x
+        y: y
+        z: z
+        velocityX: way.x * speed
+        velocityY: way.y * speed
+        velocityZ: way.z * speed + 4.0 * size
+        age: 0.0
+        life: 0.5 + 1.2 * explosionRandom(seed: seed, index: i, salt: 34)
+        startRadius: 0.035 * size
+        endRadius: 0.015 * size
+        shade: explosionRandom(seed: seed, index: i, salt: 35)
+      }
+    )
+  }
+  # The debris
+  loop var i: Int = 0, i < 24, ++i {
+    let way: Vec3 = explosionDirection(
+      around: explosionRandom(seed: seed, index: i, salt: 41)
+      up: explosionRandom(seed: seed, index: i, salt: 42)
+      lowest: 0.25
+    )
+    let speed: Float = (6.0 + 13.0 * explosionRandom(seed: seed, index: i, salt: 43)) * size
+    explosionAddChunk(
+      explosions: explosions
+      chunk: ExplosionChunk {
+        x: x
+        y: y
+        z: Math.max(a: z, b: groundZ + 0.2)
+        velocityX: way.x * speed
+        velocityY: way.y * speed
+        velocityZ: way.z * speed
+        spinX: (explosionRandom(seed: seed, index: i, salt: 44) - 0.5) * 24.0
+        spinY: (explosionRandom(seed: seed, index: i, salt: 45) - 0.5) * 24.0
+        turnX: 0.0
+        turnY: 0.0
+        size: (0.08 + 0.24 * explosionRandom(seed: seed, index: i, salt: 46)) * size
+        age: 0.0
+        life: 3.5 + 2.0 * explosionRandom(seed: seed, index: i, salt: 47)
+        groundZ: groundZ
+      }
+    )
+  }
+}
+
+# A puff of a rocket's trail at (x, y, z): a fiery start, then gray smoke
+func explosionPuff(
+  explosions: mod Explosions
+  x: view Float
+  y: view Float
+  z: view Float
+  size: view Float
+) {
+  explosions.counter = explosions.counter + 1
+  let seed: Int = explosions.counter
+  explosionAddPuff(
+    explosions: explosions
+    puff: ExplosionPuff {
+      kind: ExplosionPuffKind.trail
+      x: x
+      y: y
+      z: z
+      velocityX: (explosionRandom(seed: seed, index: 0, salt: 51) - 0.5) * 0.6
+      velocityY: (explosionRandom(seed: seed, index: 0, salt: 52) - 0.5) * 0.6
+      velocityZ: 0.4
+      age: 0.0
+      life: 1.2 + 0.8 * explosionRandom(seed: seed, index: 0, salt: 53)
+      startRadius: 0.12 * size
+      endRadius: (0.7 + 0.4 * explosionRandom(seed: seed, index: 0, salt: 54)) * size
+      shade: explosionRandom(seed: seed, index: 0, salt: 55)
+    }
+  )
+}
+
+# How fast a kind loses its speed (1/s), and how hard it rises (m/s^2; the
+# sparks fall)
+func explosionDrag(kind: view ExplosionPuffKind) ret Float {
+  if kind is ExplosionPuffKind.fire {
+    ret 4.5
+  }
+  if kind is ExplosionPuffKind.smoke {
+    ret 1.4
+  }
+  if kind is ExplosionPuffKind.dust {
+    ret 2.6
+  }
+  if kind is ExplosionPuffKind.spark {
+    ret 0.6
+  }
+  if kind is ExplosionPuffKind.trail {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+func explosionLift(kind: view ExplosionPuffKind) ret Float {
+  if kind is ExplosionPuffKind.fire {
+    ret 3.0
+  }
+  if kind is ExplosionPuffKind.smoke {
+    ret 1.2
+  }
+  if kind is ExplosionPuffKind.trail {
+    ret 0.5
+  }
+  if kind is ExplosionPuffKind.spark {
+    ret 0.0 - explosionGravity
+  }
+  ret 0.0
+}
+
+# Every particle `deltaTime` on; the smoke and the dust drift toward the wind
+# (`windX`, `windY` in m/s)
+func explosionsStep(
+  explosions: mod Explosions
+  deltaTime: view Float
+  windX: view Float
+  windY: view Float
+) {
+  if deltaTime <= 0.0 {
+    ret
+  }
+  var live: List(ExplosionPuff) = List.create(ExplosionPuff, cap: explosions.puffs.length)
+  loop let puff: view ExplosionPuff in explosions.puffs {
+    var next: ExplosionPuff = puff
+    next.age = puff.age + deltaTime
+    if next.age >= next.life {
+      continue
+    }
+    if next.age > 0.0 {
+      let keep: Float = Math.exp(x: 0.0 - explosionDrag(kind: puff.kind) * deltaTime)
+      var drift: Float = 0.0
+      if puff.kind is ExplosionPuffKind.smoke or puff.kind is ExplosionPuffKind.dust or puff.kind is ExplosionPuffKind.trail {
+        drift = 1.0 - keep
+      }
+      next.velocityX = puff.velocityX * keep + windX * drift
+      next.velocityY = puff.velocityY * keep + windY * drift
+      next.velocityZ = puff.velocityZ * keep + explosionLift(kind: puff.kind) * deltaTime
+      next.x = puff.x + next.velocityX * deltaTime
+      next.y = puff.y + next.velocityY * deltaTime
+      next.z = puff.z + next.velocityZ * deltaTime
+    }
+    live.add(value: next)
+  }
+  explosions.puffs = own live
+  var lying: List(ExplosionChunk) = List.create(ExplosionChunk, cap: explosions.chunks.length)
+  loop let chunk: view ExplosionChunk in explosions.chunks {
+    var next: ExplosionChunk = chunk
+    next.age = chunk.age + deltaTime
+    if next.age >= next.life {
+      continue
+    }
+    next.velocityZ = chunk.velocityZ - explosionGravity * deltaTime
+    next.x = chunk.x + next.velocityX * deltaTime
+    next.y = chunk.y + next.velocityY * deltaTime
+    next.z = chunk.z + next.velocityZ * deltaTime
+    next.turnX = chunk.turnX + chunk.spinX * deltaTime
+    next.turnY = chunk.turnY + chunk.spinY * deltaTime
+    # On the ground: it bounces, a third as high, and slides less each time
+    let floor: Float = chunk.groundZ + chunk.size * 0.5
+    if next.z < floor {
+      next.z = floor
+      if next.velocityZ < 0.0 {
+        next.velocityZ = 0.0 - next.velocityZ * 0.32
+        next.velocityX = next.velocityX * 0.55
+        next.velocityY = next.velocityY * 0.55
+        next.spinX = next.spinX * 0.5
+        next.spinY = next.spinY * 0.5
+      }
+      if Math.abs(value: next.velocityZ) < 0.4 {
+        next.velocityZ = 0.0
+        next.velocityX = next.velocityX * 0.9
+        next.velocityY = next.velocityY * 0.9
+      }
+    }
+    lying.add(value: next)
+  }
+  explosions.chunks = own lying
+}
+
+# How many particles are alive, for a check
+func explosionCount(explosions: view Explosions) ret Int {
+  ret explosions.puffs.length + explosions.chunks.length
+}
+
+func explosionMix(a: view Vec3, b: view Vec3, share: view Float) ret Vec3 {
+  let t: Float = Math.clamp(val: share, low: 0.0, high: 1.0)
+  ret Vec3.create(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t)
+}
+
+func explosionSmooth(low: view Float, high: view Float, value: view Float) ret Float {
+  let t: Float = Math.clamp(val: (value - low) / (high - low), low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# A puff's color (the light it gives, or for smoke and dust the light it takes
+# times `daylight`) and its opacity, at `t` of its life
+type ExplosionLook {
+  color: Vec3
+  alpha: Float
+}
+
+func explosionLook(
+  puff: view ExplosionPuff
+  t: view Float
+  daylight: view Float
+) ret ExplosionLook {
+  let soot: Vec3 = Vec3.create(x: 0.025 * daylight, y: 0.023 * daylight, z: 0.021 * daylight)
+  if puff.kind is ExplosionPuffKind.flash {
+    ret ExplosionLook { color: Vec3.create(x: 9.0, y: 7.5, z: 5.0), alpha: 0.9 * (1.0 - t * t) }
+  }
+  if puff.kind is ExplosionPuffKind.fire {
+    let white: Vec3 = Vec3.create(x: 6.0, y: 4.6, z: 2.4)
+    let orange: Vec3 = Vec3.create(x: 3.6 + 1.2 * puff.shade, y: 1.3 + 0.4 * puff.shade, z: 0.25)
+    let red: Vec3 = Vec3.create(x: 0.9, y: 0.18, z: 0.04)
+    var color: Vec3 = explosionMix(a: white, b: orange, share: t / 0.3)
+    if t > 0.3 {
+      color = explosionMix(a: orange, b: red, share: (t - 0.3) / 0.35)
+    }
+    if t > 0.65 {
+      color = explosionMix(a: red, b: soot, share: (t - 0.65) / 0.3)
+    }
+    ret ExplosionLook { color: color, alpha: 1.0 - explosionSmooth(low: 0.75, high: 1.0, value: t) }
+  }
+  if puff.kind is ExplosionPuffKind.smoke {
+    let gray: Float = (0.10 + 0.08 * puff.shade) * daylight
+    var color: Vec3 = explosionMix(
+      a: soot
+      b: Vec3.create(x: gray, y: gray * 0.97, z: gray * 0.94)
+      share: explosionSmooth(low: 0.0, high: 0.7, value: t)
+    )
+    # Lit from below by the fire at first
+    let glow: Float = 1.0 - explosionSmooth(low: 0.0, high: 0.12, value: t)
+    color = Vec3.create(x: color.x + 2.2 * glow, y: color.y + 0.7 * glow, z: color.z + 0.1 * glow)
+    let alpha: Float = 0.8 * explosionSmooth(low: 0.0, high: 0.06, value: t) * (1.0 - explosionSmooth(
+      low: 0.45
+      high: 1.0
+      value: t
+    ))
+    ret ExplosionLook { color: color, alpha: alpha }
+  }
+  if puff.kind is ExplosionPuffKind.dust {
+    let tone: Float = (0.16 + 0.06 * puff.shade) * daylight
+    let fade: Float = 1.0 - t
+    ret ExplosionLook {
+      color: Vec3.create(x: tone, y: tone * 0.86, z: tone * 0.66)
+      alpha: 0.6 * fade * fade
+    }
+  }
+  if puff.kind is ExplosionPuffKind.spark {
+    let hot: Vec3 = Vec3.create(x: 8.0, y: 5.5, z: 2.0)
+    let cool: Vec3 = Vec3.create(x: 4.0, y: 1.1, z: 0.2)
+    ret ExplosionLook { color: explosionMix(a: hot, b: cool, share: t), alpha: 1.0 - t * t }
+  }
+  # A trail: a fiery start, then smoke
+  let gray: Float = (0.14 + 0.06 * puff.shade) * daylight
+  var color: Vec3 = Vec3.create(x: gray, y: gray, z: gray * 0.97)
+  let hot: Float = 1.0 - explosionSmooth(low: 0.0, high: 0.08, value: t)
+  color = Vec3.create(x: color.x + 6.0 * hot, y: color.y + 2.4 * hot, z: color.z + 0.4 * hot)
+  ret ExplosionLook {
+    color: color
+    alpha: 0.65 * (1.0 - explosionSmooth(low: 0.3, high: 1.0, value: t))
+  }
+}
+
+# The transparent pass's style for a kind: a soft glow for the fire, the flash and the
+# sparks, a soft lit puff for the smoke, the dust and a trail
+func explosionStyle(kind: view ExplosionPuffKind) ret Float {
+  if kind is ExplosionPuffKind.smoke or kind is ExplosionPuffKind.dust or kind is ExplosionPuffKind.trail {
+    ret 2.0
+  }
+  ret 3.0
+}
+
+# A puff's sphere: round, or for a spark long along its flight
+func explosionPuffModel(puff: view ExplosionPuff, radius: view Float) ret Mat4 {
+  if puff.kind is not ExplosionPuffKind.spark {
+    ret transform3dToMatrix(
+      t: Transform3D {
+        position: Vec3.create(x: puff.x, y: puff.y, z: puff.z)
+        rotation: Quat.identity()
+        scale: Vec3.create(x: radius * 2.0, y: radius * 2.0, z: radius * 2.0)
+      }
+    )
+  }
+  let flatSquared: Float = puff.velocityX * puff.velocityX + puff.velocityY * puff.velocityY
+  let speed: Float = Math.sqrt(x: flatSquared + puff.velocityZ * puff.velocityZ)
+  let yaw: Quat = Quat.fromAxisAngle(
+    axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    angle: Math.atan2(y: puff.velocityY, x: puff.velocityX)
+  )
+  let pitch: Quat = Quat.fromAxisAngle(
+    axis: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    angle: 0.0 - Math.atan2(y: puff.velocityZ, x: Math.sqrt(x: flatSquared))
+  )
+  ret transform3dToMatrix(
+    t: Transform3D {
+      position: Vec3.create(x: puff.x, y: puff.y, z: puff.z)
+      rotation: Quat.qmul(a: yaw, b: pitch)
+      scale: Vec3.create(
+        x: Math.max(a: radius * 2.0, b: speed * 0.03)
+        y: radius * 2.0
+        z: radius * 2.0
+      )
+    }
+  )
+}
+
+# The puffs, the flash and the sparks into the transparent pass, the farthest
+# first so the nearer ones blend over them. Call at the transparentForward tag,
+# before the renderer runs the pass. `daylight` (0..1) dims the smoke and the
+# dust at night; the fire gives its own light.
+func explosionsDrawTransparent(
+  explosions: mod Explosions
+  transparent: mod TransparentPassCache
+  eye: view Vec3
+  daylight: view Float
+) {
+  if explosions.puffs.length is 0 {
+    ret
+  }
+  explosions.order.clear()
+  loop var i: Int = 0, i < explosions.puffs.length, ++i {
+    if let puff: view ExplosionPuff = explosions.puffs.viewAt(index: i) {
+      if puff.age > 0.0 {
+        let dx: Float = puff.x - eye.x
+        let dy: Float = puff.y - eye.y
+        let dz: Float = puff.z - eye.z
+        let key: Int = Math.min(a: (dx * dx + dy * dy + dz * dz) * 0.25, b: 200000.0) as Int
+        explosions.order.add(value: key * 8192 + i)
+      }
+    }
+  }
+  sortDesc(Int, this: explosions.order)
+  growInstanceBatch(
+    batch: transparent.batch
+    capacity: transparent.batch.count + explosions.order.length
+  )
+  loop let key: view Int in explosions.order {
+    if let puff: view ExplosionPuff = explosions.puffs.viewAt(index: key % 8192) {
+      let t: Float = Math.clamp(val: puff.age / puff.life, low: 0.0, high: 1.0)
+      # swelling fast at first, then slower
+      let swell: Float = 1.0 - (1.0 - t) * (1.0 - t)
+      let radius: Float = puff.startRadius + (puff.endRadius - puff.startRadius) * swell
+      let look: ExplosionLook = explosionLook(puff: puff, t: t, daylight: daylight)
+      if look.alpha > 0.002 {
+        addTransparentMaterialInstance(
+          cache: transparent
+          mesh: explosions.sphere
+          model: explosionPuffModel(puff: puff, radius: radius)
+          r: look.color.x
+          g: look.color.y
+          b: look.color.z
+          alpha: look.alpha
+          style: explosionStyle(kind: puff.kind)
+        )
+      }
+    }
+  }
+}
+
+# The debris into the G-buffer pass (call inside it): dark, lit, glowing at
+# first
+func explosionsDrawSolid(
+  explosions: mod Explosions
+  cache: mod GbufferCache
+  resources: mod GpuResources
+) {
+  if explosions.chunks.length is 0 {
+    ret
+  }
+  resetInstanceBatch(batch: explosions.chunkBatch)
+  growInstanceBatch(batch: explosions.chunkBatch, capacity: explosions.chunks.length)
+  loop let chunk: view ExplosionChunk in explosions.chunks {
+    let turned: Quat = Quat.qmul(
+      a: Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: chunk.turnX)
+      b: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 1.0, z: 0.0), angle: chunk.turnY)
+    )
+    let model: Mat4 = transform3dToMatrix(
+      t: Transform3D {
+        position: Vec3.create(x: chunk.x, y: chunk.y, z: chunk.z)
+        rotation: turned
+        scale: Vec3.create(x: chunk.size, y: chunk.size * 0.7, z: chunk.size * 0.85)
+      }
+    )
+    let glow: Float = Math.max(a: 0.0, b: 1.0 - chunk.age / 1.2)
+    addInstance(
+      batch: explosions.chunkBatch
+      model: model
+      prevModel: model
+      material: Material3d {
+        baseColor: Vec3.create(x: 0.09, y: 0.08, z: 0.07)
+        metallic: 0.0
+        roughness: 0.9
+        emission: Vec3.create(x: 7.0 * glow, y: 2.4 * glow, z: 0.4 * glow)
+        toon: false
+      }
+    )
+  }
+  drawInstances(cache: cache, resources: resources, batch: explosions.chunkBatch)
+}

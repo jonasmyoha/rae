@@ -1,0 +1,61 @@
+# Explosions (lib/Explosions): a blast makes its layers of particles; stepped
+# on, the smoke rises and drifts with the wind, the debris bounce and stay on
+# the ground, the sparks fall, and after ten seconds nothing is left.
+import Math
+open Explosions
+open RendererDeferred
+open RendererForward
+
+func main() {
+  var renderer: DeferredRenderer = createForwardRenderer()
+  var explosions: Explosions = createExplosions(renderer: renderer)
+  explode(
+    explosions: explosions
+    x: 0.0
+    y: 0.0
+    z: 1.0
+    groundZ: 0.0
+    size: 1.0
+  )
+  log("a blast: {explosions.puffs.length} puffs, {explosions.chunks.length} chunks")
+  var lowestChunk: Float = 100.0
+  var highestSmoke: Float = 0.0
+  var smokeEast: Float = 0.0
+  var sparkFell: Bool = false
+  loop var frame: Int = 0, frame < 600, ++frame {
+    explosionsStep(
+      explosions: explosions
+      deltaTime: 1.0 / 60.0
+      windX: 4.0
+      windY: 0.0
+    )
+    loop let chunk: view ExplosionChunk in explosions.chunks {
+      lowestChunk = Math.min(a: lowestChunk, b: chunk.z - chunk.size * 0.5)
+    }
+    loop let puff: view ExplosionPuff in explosions.puffs {
+      if puff.kind is ExplosionPuffKind.smoke and puff.age > 0.0 {
+        highestSmoke = Math.max(a: highestSmoke, b: puff.z)
+        smokeEast = Math.max(a: smokeEast, b: puff.x)
+      }
+      if puff.kind is ExplosionPuffKind.spark and puff.velocityZ < -5.0 {
+        sparkFell = true
+      }
+    }
+    if frame is 59 {
+      log("after 1 s: {explosionCount(explosions: explosions) > 0}")
+    }
+  }
+  log("the debris stayed on the ground: {lowestChunk > -0.001}")
+  log("the smoke rose over 8 m: {highestSmoke > 8.0}")
+  log("the smoke drifted with the wind: {smokeEast > 6.0}")
+  log("the sparks fell: {sparkFell}")
+  log("after 10 s: {explosionCount(explosions: explosions)} left")
+  explosionPuff(
+    explosions: explosions
+    x: 0.0
+    y: 0.0
+    z: 2.0
+    size: 1.0
+  )
+  log("a trail puff: {explosions.puffs.length}")
+}
