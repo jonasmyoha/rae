@@ -200,7 +200,12 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let base = vec2<f32>(d.model[3].x, d.model[3].y);
   // Grass reads the same base WindVector as foliage. Broad fronts travel in
   // that direction, while a small per-blade phase moves only the tip.
-  let wind = GW.f.xyz;
+  // the painted blade leans along its own turn of the wind (the compute
+  // pass's grassPaintLeanTurn), so the field reads as brushed in long waves
+  let leanTurn = d.prevModel[1].z;
+  let windTurned = vec2<f32>(GW.f.x * cos(leanTurn) - GW.f.y * sin(leanTurn),
+                             GW.f.x * sin(leanTurn) + GW.f.y * cos(leanTurn));
+  let wind = vec3<f32>(windTurned, GW.f.z);
   let timeNow = GW.f.w;
   let timePrev = GW.f.w - GW.b.w;
   let wNow = d.model * vec4<f32>(lp, 1.0);

@@ -211,6 +211,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       bend[1].y = away.y;
     }
   }
+  // [1].z: how far the painted blade's steady lean turns from the wind
+  // (grass_field.wgsl grassPaintLeanTurn)
+  if (G.i.w > 3.5) { bend[1].z = grassPaintLeanTurn(pos.xy); }
   outBuf[slot].prevModel = bend;
   // The terrain's own grass color where the blade stands (the painted
   // ground's field, terrain_grass_painted.wgsl), with no tint of its own:

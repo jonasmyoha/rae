@@ -70,7 +70,7 @@ fn grassGroundColor(base: vec3<f32>, position: vec2<f32>, scale: f32, coverage: 
 // steps gave each blade a dark lower half, soft ones barely showed the
 // patches; this gives broad flat areas of light and dark, as in a painting.
 const grassPaintBands: f32 = 3.0;
-const grassPaintBandSoftness: f32 = 0.3;
+const grassPaintBandSoftness: f32 = 0.6;
 fn grassPaintBand(value: f32) -> f32 {
   if (grassPaintBands < 1.5) { return value; }
   let scaled = clamp(value, 0.0, 1.0) * grassPaintBands;
@@ -86,13 +86,13 @@ fn grassPaintBand(value: f32) -> f32 {
 // scales (about 14 m and 4 m) and thin streaks along x (brush strokes); y: the
 // hue, 0 cool to 1 warm, over a larger scale (about 45 m).
 fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
-  let broad = perlin2(position / 14.0, 701u);
-  let fine = perlin2(position / 4.0, 709u);
+  let broad = perlin2(position / 26.0, 701u);
+  let fine = perlin2(position / 9.0, 709u);
   let streak = perlin2(position * vec2<f32>(0.35, 1.4), 719u);
   // brush strokes: a fine, long noise across the field; the bands turn it into
   // ragged, painted edges between the patches
   let stroke = perlin2(position * vec2<f32>(0.9, 3.2), 751u);
-  let patchValue = grassPaintBand(clamp(0.5 + 0.75 * (broad * 0.60 + fine * 0.26 + streak * 0.08 + stroke * 0.16), 0.0, 1.0));
+  let patchValue = grassPaintBand(clamp(0.5 + 1.10 * (broad * 0.60 + fine * 0.26 + streak * 0.08 + stroke * 0.16), 0.0, 1.0));
   let hue = clamp(0.5 + 0.8 * perlin2(position / 25.0, 727u), 0.0, 1.0);
   return vec2<f32>(patchValue, hue);
 }
@@ -106,12 +106,19 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
 // colors (grass_render.wgsl). The hue tints from cool blue-green to warm
 // yellow-green.
 fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<f32> {
-  let tint = mix(vec3<f32>(0.76, 0.98, 1.16), vec3<f32>(1.24, 1.08, 0.66), hue);
-  let dark = base * 0.42 * vec3<f32>(0.85, 1.0, 1.10);
-  let light = base * lighten + vec3<f32>(0.06, 0.08, 0.03);
+  let tint = mix(vec3<f32>(0.84, 1.0, 1.10), vec3<f32>(1.20, 1.07, 0.70), hue);
+  // the shade a soft teal-mint, the light tips toward yellow-white
+  let dark = base * 0.52 * vec3<f32>(0.72, 1.0, 1.18);
+  let light = base * lighten + vec3<f32>(0.16, 0.13, 0.05);
   let lower = mix(dark, base, clamp(value * 2.0, 0.0, 1.0));
   let upper = mix(base, light, clamp(value * 2.0 - 1.0, 0.0, 1.0));
   return select(lower, upper, value > 0.5) * tint;
+}
+// The painted grass's lean: how far (radians) a blade's steady lean is turned
+// from the wind's direction where it stands, a slow field about 20 m across,
+// so the field reads as brushed in long waves rather than combed one way
+fn grassPaintLeanTurn(position: vec2<f32>) -> f32 {
+  return perlin2(position / 20.0, 761u) * 0.9;
 }
 // The painted grass's wind shimmer at a point: bands of lighter grass rolling
 // downwind across the field, about 28 m apart at 3 m/s, broken into patches,
