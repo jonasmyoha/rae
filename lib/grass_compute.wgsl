@@ -20,6 +20,8 @@ struct GrassU {
   j: vec4<f32>,
   // the air's drift (xy) and the unscaled wind (zw): the gust field's
   k: vec4<f32>,
+  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
+  l: vec4<f32>,
 };
 struct Indirect {
   vertexCount: u32,
@@ -141,6 +143,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let distToCenter = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
   let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCenter);
+  // A ring (GrassViewSettings innerRadius): no blades inside its inner edge,
+  // and they grow in over the band round it, so another field inside can
+  // shrink out where this one grows in, with no line between them
+  let innerFade = select(1.0, smoothstep(G.l.x - G.l.y, G.l.x + G.l.y, distToCenter), G.l.x > 0.0);
   let patchBody = smoothstep(0.36, 0.61, grassPatchValue(bladePosition, G.h.x));
   var patchHeight = mix(0.62, 1.08, patchBody);
   if (clusterStrength < 1.0) { patchHeight = mix(1.0, patchHeight, clusterStrength); }
@@ -166,7 +172,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let lodT = smoothstep(clamp(G.i.x, 0.0, 0.9), 0.96, distanceShare);
   let keepProb = mix(1.0, clamp(G.i.y, 0.05, 1.0), lodT);
   let thinShrink = clamp((keepProb + 0.15 - hash2u(cellI, 151u)) / 0.15, 0.0, 1.0);
-  let height = baseHeight * patchHeight * edgeFade * viewShrink * thinShrink;
+  let height = baseHeight * patchHeight * edgeFade * innerFade * viewShrink * thinShrink;
   if (height < 0.01) { return; }
   let distanceWidth = mix(1.0, max(G.i.z, 1.0), lodT);
   let scale = vec3<f32>(width * distanceWidth, width * distanceWidth, height);
