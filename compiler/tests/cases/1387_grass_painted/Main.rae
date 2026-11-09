@@ -41,6 +41,10 @@ func main() ret Int {
     groundColor: Vec3.create(x: 0.1, y: 0.3, z: 0.1)
   )
   log(meadow.cameraTilt is 0.0)
+  # a field is a disc unless an app makes it a ring
+  log(meadow.innerRadius is 0.0)
+  let compute: Shader = GrassCompute.defaultGrassComputeShader()
+  log(compute.text.contains(sub: "innerFade * viewShrink"))
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
   ret 0

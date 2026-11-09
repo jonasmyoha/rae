@@ -28,6 +28,8 @@ struct GrassU {
   j: vec4<f32>,
   // the air's drift (xy) and the unscaled wind (zw): the gusts' (lib/wind.wgsl)
   k: vec4<f32>,
+  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
+  l: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
