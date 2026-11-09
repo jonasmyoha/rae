@@ -1,0 +1,127 @@
+# A two-legged walking machine (lib/app3d/MechWalker): driven forward it walks more than 10 m in
+# five seconds, its legs step one at a time (it always stands on one foot), each foot stays in
+# its leg's reach, the knees bend forward; a full stick to the side turns it; a jump lifts it
+# and brings it back down on the ground; standing, it settles with both feet down.
+import Math
+import Vec3
+open app3d/MechWalker
+
+func main() {
+  let tuning: MechTuning = MechTuning {}
+  var drive: MechDrive = createMechDrive(
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    heading: 0.0
+  )
+  var gait: MechGait = createMechGait(drive: drive, tuning: tuning)
+  var bothUp: Bool = false
+  var outOfReach: Bool = false
+  var kneeBehind: Bool = false
+  let legLength: Float = tuning.thighLength + tuning.shinLength
+  loop var frame: Int = 0, frame < 300, ++frame {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 0.0
+      stickY: 1.0
+      jump: false
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechGaitStep(
+      gait: gait
+      drive: drive
+      tuning: tuning
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    if gait.left.stepping and gait.right.stepping {
+      bothUp = true
+    }
+    let dip: Float = mechBodyDip(gait: gait, tuning: tuning)
+    let leftHip: Vec3 = mechHip(
+      drive: drive
+      tuning: tuning
+      side: 1.0
+      dip: dip
+    )
+    let rightHip: Vec3 = mechHip(
+      drive: drive
+      tuning: tuning
+      side: -1.0
+      dip: dip
+    )
+    if Vec3.vlen(a: Vec3.vsub(a: gait.left.at, b: leftHip)) > legLength + 0.01 or Vec3.vlen(
+      a: Vec3.vsub(a: gait.right.at, b: rightHip)
+    ) > legLength + 0.01 {
+      outOfReach = true
+    }
+    let knee: Vec3 = mechKnee(
+      hip: leftHip
+      foot: gait.left.at
+      thigh: tuning.thighLength
+      shin: tuning.shinLength
+      forward: mechForward(drive: drive)
+    )
+    if (knee.x - (leftHip.x + gait.left.at.x) * 0.5) < -0.01 {
+      kneeBehind = true
+    }
+  }
+  log("walked over 10 m in 5 s: {drive.x > 10.0}, straight: {Math.abs(value: drive.y) < 0.01}")
+  log("steps taken: {gait.steps > 8}")
+  log("never on no foot: {not bothUp}")
+  log("feet always in reach: {not outOfReach}")
+  log("knees bend forward: {not kneeBehind}")
+  # Stopping: the speed goes, the feet settle
+  loop var frame: Int = 0, frame < 240, ++frame {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 0.0
+      stickY: 0.0
+      jump: false
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechGaitStep(
+      gait: gait
+      drive: drive
+      tuning: tuning
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+  }
+  log(
+    "stopped: {Math.abs(value: drive.speed) < 0.001}, both feet down: {not gait.left.stepping and not gait.right.stepping and gait.left.at.z is 0.0 and gait.right.at.z is 0.0}"
+  )
+  # Turning: right turns it clockwise
+  let before: Float = drive.heading
+  loop var frame: Int = 0, frame < 60, ++frame {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 1.0
+      stickY: 0.0
+      jump: false
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+  }
+  log("a right stick turns it clockwise: {drive.heading < before - 1.0}")
+  # A jump: up, then down on the ground
+  var highest: Float = 0.0
+  loop var frame: Int = 0, frame < 120, ++frame {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 0.0
+      stickY: 0.0
+      jump: frame is 0
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    highest = Math.max(a: highest, b: drive.z)
+  }
+  log("a jump rises over 1 m: {highest > 1.0}, and lands: {drive.grounded and drive.z is 0.0}")
+}
