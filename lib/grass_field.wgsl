@@ -122,25 +122,16 @@ fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<
 fn grassPaintLeanTurn(position: vec2<f32>) -> f32 {
   return perlin2(position / 20.0, 761u) * 0.9;
 }
-// The painted grass's wind shimmer at a point: bands of lighter grass rolling
-// downwind across the field, about 28 m apart at 3 m/s, broken into patches,
-// so a distant field painted as grass moves too. `wind` is the wind's
-// direction times its strength (lib/wind.wgsl's, unscaled: the static
-// surface's F.wind.xy, the grass compute's G.k.zw) and `time` its clock, so
-// the ground and the blades' roots and tips shimmer as one. Added to the
-// painted value; 0 with no wind.
-const grassShimmerSpacing: f32 = 28.0;
-const grassShimmerSpeed: f32 = 3.0;
+// The painted grass's wind shimmer: lighter grass where a gust is (`gust`,
+// the trees' gust field at the point, lib/wind.wgsl windGustAt: patches that
+// travel with the air, so they roll downwind at the wind's own speed, follow
+// its turns smoothly and never jump, however long the game runs). The ground
+// painted as grass, the blades' roots and tips and the blades' gust bend all
+// take it from the same field, so they move as one, with the trees. Added to
+// the painted value; 0 in still air.
 const grassShimmerLight: f32 = 0.30;
-fn grassPaintShimmer(position: vec2<f32>, wind: vec2<f32>, time: f32) -> f32 {
-  let strength = length(wind);
-  if (strength < 0.05) { return 0.0; }
-  let direction = wind / strength;
-  let warp = perlin2(position / 60.0, 739u) * 14.0;
-  let along = dot(position, direction) + warp - time * grassShimmerSpeed;
-  let wave = 0.5 + 0.5 * sin(along * 6.2831853 / grassShimmerSpacing);
-  let patchy = smoothstep(-0.2, 0.4, perlin2(position / 45.0 - direction * time * 0.05, 743u));
-  return smoothstep(0.35, 1.0, wave) * patchy * grassShimmerLight;
+fn grassPaintShimmer(gust: f32) -> f32 {
+  return smoothstep(0.12, 0.6, gust) * grassShimmerLight;
 }
 // The painted value at a blade's root, and of the ground there (under 0.5,
 // so its color is the lower piece of grassPaintColor, which needs only the

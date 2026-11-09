@@ -35,9 +35,14 @@ func main() ret Int {
   log(groundShader.text.contains(sub: "grassPaintColor(grassPaintRootValue(paint)"))
   # and in bands: the patches it stands in step as the blades' do
   log(groundShader.text.contains(sub: "let patchValue = grassPaintBand("))
-  # the wind's shimmer rolls over the painted ground and the blades alike
-  log(groundShader.text.contains(sub: "grassPaintShimmer(in.wpos.xy, F.wind.xy, F.wind.w)"))
-  log(standard.text.contains(sub: "grassPaintShimmer(bladePosition, G.k.zw, G.f.w)"))
+  # the wind's shimmer rolls over the painted ground and the blades alike, from
+  # the trees' gust field (it travels with the air: no clock in it to jump)
+  log(
+    groundShader.text.contains(
+      sub: "grassPaintShimmer(windGustAt(in.wpos.xy, F.wind, F.windDrift.xy))"
+    )
+  )
+  log(standard.text.contains(sub: "grassPaintShimmer(gust)"))
   # blades lean toward a camera looking down, only when an app asks (cameraTilt)
   log(render.text.contains(sub: "fn grassTiltToCamera"))
   let meadow: GrassConfig.GrassViewSettings = GrassConfig.grassMeadowSettings(

@@ -191,11 +191,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // lightens the painted grass, grass_field.wgsl grassPaintShimmer, at the
   // shimmer's strength); [0].z: how much it is pushed aside; [1].xy: the
   // way away from what pushes it (GW.bend's circles).
+  // The gust at the blade (the trees' gust field, lib/wind.wgsl windGustAt,
+  // as this file's grassGustAt copy), now and a frame ago: the air then stood
+  // the wind's travel of one frame (G.k.zw, 5 m/s a unit, lib/Wind) upwind
+  let gust = grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy);
+  let gustBefore = grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w - G.b.w), G.k.xy - G.k.zw * 5.0 * G.b.w);
   var bend = mat4x4<f32>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
   if (length(G.k.zw) > 0.05 && G.l.z > 0.0) {
     let bandScale = G.l.z / grassShimmerLight;
-    bend[0].x = grassPaintShimmer(pos.xy, G.k.zw, G.f.w) * bandScale;
-    bend[0].y = grassPaintShimmer(pos.xy, G.k.zw, G.f.w - G.b.w) * bandScale;
+    bend[0].x = grassPaintShimmer(gust) * bandScale;
+    bend[0].y = grassPaintShimmer(gustBefore) * bandScale;
   }
   for (var index = 0u; index < 8u; index = index + 1u) {
     let circle = G.bend[index];
@@ -228,9 +233,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
-  // x: the gust at the blade (the trees' gust field, lib/wind.wgsl
-  // windGustAt, as this file's grassGustAt copy), once per blade, for
-  // grass_render.wgsl's sway (the grass draws no level fade)
+  // x: the gust at the blade (above), once per blade, for grass_render.wgsl's
+  // sway (the grass draws no level fade)
   // y, z, w: the blade's own tip color, before grass_render.wgsl brightens it
   // (tipLighten): the meadow's green here, at the blade's own brightness
   // (0.86 to 1.12) and warmth (cooler and bluer, or warmer and yellower), so
@@ -241,7 +245,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let warmTint = select(vec3<f32>(0.93, 0.99, 1.08), vec3<f32>(1.08, 1.02, 0.84), tipWarmth > 0.0);
   let tipColor = grassFieldGreen(bladePosition, bladeBiome) * tipBrightness
     * mix(vec3<f32>(1.0), warmTint, abs(tipWarmth));
-  let gust = grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy);
   outBuf[slot].fade = vec4<f32>(gust, tipColor);
   // The painted blade (GrassShape.painted, i.w 4): its look is a value that
   // runs from dark at the root to light at the tip, which the patch it stands
@@ -260,7 +263,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // The root is the ground's own value there, nothing of the blade's: a
     // ground painted with grass_field.wgsl at this point has its color
     // the wind's shimmer, the same as on the ground painted as grass
-    let shimmer = grassPaintShimmer(bladePosition, G.k.zw, G.f.w) * G.l.z;
+    let shimmer = grassPaintShimmer(gust) * G.l.z;
     let rootValue = grassPaintRootValue(paint) + shimmer;
     let tipValue = clamp(0.90 + offset + shimmer, 0.0, 1.25);
     outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.g.w), 0.0);
