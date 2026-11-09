@@ -216,7 +216,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   // The painted blade: its root's and its tip's colors from the compute pass
   // (grass_compute.wgsl, grass_field.wgsl's palette), blended up the blade (the
   // palette is two straight pieces, so this runs close to its own path)
-  if (GW.i.w > 3.5) { albedo = mix(botCol, d.fade.yzw, height); }
+  if (GW.i.w > 3.5) { albedo = mix(botCol, d.fade.yzw, grassPaintBand(height)); }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);
