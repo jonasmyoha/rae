@@ -50,6 +50,7 @@ open ui/UiSystems
 open Weather
 open app3d/SettingsWeather
 open app3d/SettingsWind
+open app3d/SettingsRendering
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
 # also carries `none` and `hdri`, which are not choices this dialog offers.
@@ -167,6 +168,8 @@ type SettingsState {
   clouds: CloudOptions = CloudOptions {}  # the cloud renderer chosen (app3d/SettingsClouds)
   # The renderer's quality step (High: today's renderer)
   quality: SettingsQuality = SettingsQuality.high
+  # How much grass an app draws, % of its blades (app3d/SettingsRendering)
+  grassDensity: Int = 100
   # The sun's illuminance at its highest, in lux (SettingsSky
   # settingsSunNoonLux; RAE_SUN_LUX=<lux> tries another, for screenshots)
   sunNoonLux: Float = settingsSunNoonLuxFromEnv()
@@ -237,6 +240,7 @@ func createSettingsState(
     toon: toon
     skyModel: skyModel
     quality: settingsQualityFromEnv()
+    grassDensity: settingsGrassDensityFromEnv()
     timeOfDay: createTimeOfDay(hour: hour)
     timeDragging: false
     animateTime: true
@@ -447,20 +451,8 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
     )
     ret true
   }
-  if actionId is "settings.quality.low" {
-    settingsState.quality = SettingsQuality.low
-    ret true
-  }
-  if actionId is "settings.quality.mid" {
-    settingsState.quality = SettingsQuality.mid
-    ret true
-  }
-  if actionId is "settings.quality.high" {
-    settingsState.quality = SettingsQuality.high
-    ret true
-  }
-  if actionId is "settings.quality.ultra" {
-    settingsState.quality = SettingsQuality.ultra
+  # the quality step and the grass density (app3d/SettingsRendering)
+  if settingsRenderingAction(settingsState: settingsState, actionId: actionId) {
     ret true
   }
   if actionId is "settings.sky.hosek" {
@@ -897,26 +889,7 @@ func settingsApplyToWorld(
     nodeId: "SettingsAutoExposureButton"
     slot: settingsSlotFor(on: settingsState.autoExposure)
   )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsQualityLow"
-    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.low)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsQualityMid"
-    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.mid)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsQualityHigh"
-    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.high)
-  )
-  setNodeFillSlot(
-    world: world
-    nodeId: "SettingsQualityUltra"
-    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.ultra)
-  )
+  settingsRenderingApplyToWorld(settingsState: settingsState, world: world)
   setNodeFillSlot(
     world: world
     nodeId: "SettingsSkyHosek"
