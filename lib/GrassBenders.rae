@@ -9,6 +9,15 @@ open GrassCompute
 # How many circles can bend the blades at once (grass_render.wgsl GW.bend)
 const grassBenderCount: Int = 8
 
+# A field's candidate grid: `side` x `side` blades a frame round its middle (Rae's default 256),
+# so a dense near field can have more than a far one. Its spacing is the field's extent over
+# `side`. Call before the field's first frame: the instance buffer is sized by it.
+func grassSetBladeSide(grass: mod GrassCompute, side: view Int) {
+  let clamped: Int = Math.clamp(val: side, low: 16, high: 1024)
+  grass.bladeCount = clamped * clamped
+  resetGrassPipeline(grass: grass)
+}
+
 # What bends a field's blades near it this frame: x, y, radius (m), strength (0 to 1) each, up
 # to grassBenderCount. Call before grassGenerate.
 func grassSetBenders(grass: mod GrassCompute, benders: view List(Float)) {

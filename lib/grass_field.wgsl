@@ -93,7 +93,7 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
   // ragged, painted edges between the patches
   let stroke = perlin2(position * vec2<f32>(0.9, 3.2), 751u);
   let patchValue = grassPaintBand(clamp(0.5 + 0.75 * (broad * 0.60 + fine * 0.26 + streak * 0.08 + stroke * 0.16), 0.0, 1.0));
-  let hue = clamp(0.5 + 0.6 * perlin2(position / 45.0, 727u), 0.0, 1.0);
+  let hue = clamp(0.5 + 0.8 * perlin2(position / 25.0, 727u), 0.0, 1.0);
   return vec2<f32>(patchValue, hue);
 }
 // The painted palette: a value (0 the darkest root, 1 the lightest tip) and a
@@ -106,7 +106,7 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
 // colors (grass_render.wgsl). The hue tints from cool blue-green to warm
 // yellow-green.
 fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<f32> {
-  let tint = mix(vec3<f32>(0.84, 1.0, 1.10), vec3<f32>(1.10, 1.04, 0.80), hue);
+  let tint = mix(vec3<f32>(0.76, 0.98, 1.16), vec3<f32>(1.24, 1.08, 0.66), hue);
   let dark = base * 0.42 * vec3<f32>(0.85, 1.0, 1.10);
   let light = base * lighten + vec3<f32>(0.06, 0.08, 0.03);
   let lower = mix(dark, base, clamp(value * 2.0, 0.0, 1.0));
