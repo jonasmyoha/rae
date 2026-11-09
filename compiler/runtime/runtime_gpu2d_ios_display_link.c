@@ -18,9 +18,22 @@
  *   the link pauses, so an app that is not drawing is not woken 120 times a
  *   second; the next nextDrawable starts it again.
  * - nextDrawable waits for the link's update by running the run loop (the
- *   link is on this thread's run loop, the render thread's), at most 34 ms;
- *   then, or with no link, the layer's own nextDrawable answers.
- * - RAE_METAL_DISPLAY_LINK=0 turns it off, for comparisons. */
+ *   link is on this thread's run loop, the render thread's), at most 34 ms,
+ *   and then answers nil (wgpu: a Timeout status, the frame skipped). It
+ *   never asks the layer itself while the link is attached: that raised an
+ *   Objective-C exception inside wgpu's acquire whenever a slow frame missed
+ *   the wait, which wgpu cannot unwind through, and the app aborted.
+ * - An app slower than the screen (a 3D game at 60 fps on a 120 Hz screen)
+ *   only loses by the link: it hands out a fresh drawable every update and
+ *   keeps the newest, so with the app's frames in flight the layer's 3
+ *   drawables run out and the rate halves. When, over 120 drawables, the app
+ *   asked for one on average more than 1.6 screen intervals apart, the link is
+ *   stopped for good and the layer's own nextDrawable answers from then on.
+ *   Gaps over 100 ms (an idle app, which pauses the link instead) do not
+ *   count. (Counting the drawables the link hands out did not work: under
+ *   load its updates come only as fast as drawables free up.)
+ * - RAE_METAL_DISPLAY_LINK=0 turns it off, for comparisons; =keep never stops
+ *   it for a slow app. */
 #if defined(__APPLE__) && TARGET_OS_IOS && defined(__arm64__)
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/message.h>
@@ -31,6 +44,14 @@ typedef struct { float minimum, maximum, preferred; } RaeDisplayLinkRange;
 static void* g_g2d_display_link = NULL;
 static void* g_g2d_display_link_drawable = NULL;
 static int g_g2d_display_link_unused = 0;
+/* For the slow-app check: the screen's interval (s), the last request's time,
+ * the requests and their summed gaps since the last check, and whether the
+ * link has been given up for good */
+static double g_g2d_display_link_interval = 1.0 / 60.0;
+static double g_g2d_display_link_last_request = 0.0;
+static int g_g2d_display_link_requests = 0;
+static double g_g2d_display_link_gaps = 0.0;
+static int g_g2d_display_link_given_up = 0;
 static IMP g_g2d_layer_next_drawable = NULL;
 
 static void* rae_g2d_send(void* target, const char* selector) {
@@ -59,8 +80,33 @@ static void rae_g2d_display_link_update(void* self, SEL cmd, void* link, void* u
     if (drawable) g_g2d_display_link_drawable = rae_g2d_send(drawable, "retain");
 }
 
+static void rae_g2d_display_link_stop(void);
+
+/* Has the app, over the last window of running updates, taken too few of the
+ * link's drawables to gain by it? */
+static int rae_g2d_display_link_app_is_slow(void) {
+    const char* setting = getenv("RAE_METAL_DISPLAY_LINK");
+    if (setting && strcmp(setting, "keep") == 0) return 0;
+    double now = CFAbsoluteTimeGetCurrent();
+    double gap = now - g_g2d_display_link_last_request;
+    g_g2d_display_link_last_request = now;
+    if (gap <= 0.0 || gap > 0.1) return 0;
+    g_g2d_display_link_requests++;
+    g_g2d_display_link_gaps += gap;
+    if (g_g2d_display_link_requests < 120) return 0;
+    int slow = g_g2d_display_link_gaps / g_g2d_display_link_requests > 1.6 * g_g2d_display_link_interval;
+    g_g2d_display_link_requests = 0;
+    g_g2d_display_link_gaps = 0.0;
+    return slow;
+}
+
 /* -[RaeLinkedMetalLayer nextDrawable] */
 static void* rae_g2d_linked_next_drawable(void* self, SEL cmd) {
+    if (g_g2d_display_link && rae_g2d_display_link_app_is_slow()) {
+        rae_g2d_display_link_stop();
+        g_g2d_display_link_given_up = 1;
+        fprintf(stderr, "[display link] the app is slower than the screen: drawables from the layer from now on\n");
+    }
     if (g_g2d_display_link) {
         if (((signed char (*)(void*, SEL))objc_msgSend)(g_g2d_display_link, sel_registerName("isPaused"))) {
             g_g2d_display_link_unused = 0;
@@ -71,7 +117,11 @@ static void* rae_g2d_linked_next_drawable(void* self, SEL cmd) {
         }
         void* drawable = g_g2d_display_link_drawable;
         g_g2d_display_link_drawable = NULL;
-        if (drawable) return rae_g2d_send(drawable, "autorelease");
+        if (drawable) {
+            return rae_g2d_send(drawable, "autorelease");
+        }
+        /* never the layer's own while the link is attached */
+        return NULL;
     }
     return ((void* (*)(void*, SEL))g_g2d_layer_next_drawable)(self, cmd);
 }
@@ -88,7 +138,7 @@ static void rae_g2d_display_link_stop(void) {
 /* After wgpuSurfaceConfigure: give the layer its subclass once, and a new link */
 static void rae_g2d_display_link_start(void* layer) {
     const char* setting = getenv("RAE_METAL_DISPLAY_LINK");
-    if (!layer || (setting && strcmp(setting, "0") == 0)) return;
+    if (!layer || (setting && strcmp(setting, "0") == 0) || g_g2d_display_link_given_up) return;
     Class linkClass = objc_getClass("CAMetalDisplayLink");
     if (!linkClass) return;
     static Class delegateClass = NULL;
@@ -118,6 +168,7 @@ static void rae_g2d_display_link_start(void* layer) {
     void* screen = rae_g2d_send((void*)objc_getClass("UIScreen"), "mainScreen");
     long fastest = ((long (*)(void*, SEL))objc_msgSend)(screen, sel_registerName("maximumFramesPerSecond"));
     float rate = fastest > 0 ? (float)fastest : 60.0f;
+    g_g2d_display_link_interval = 1.0 / rate;
     RaeDisplayLinkRange range = { rate, rate, rate };
     ((void (*)(void*, SEL, RaeDisplayLinkRange))objc_msgSend)(link, sel_registerName("setPreferredFrameRateRange:"), range);
     ((void (*)(void*, SEL, float))objc_msgSend)(link, sel_registerName("setPreferredFrameLatency:"), 1.0f);
