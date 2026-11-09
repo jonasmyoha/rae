@@ -216,10 +216,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let heightLight = (fieldHeight * bladeHeight - 1.0) * 0.18;
     let bendLight = abs(curve) * 0.12;
     let offset = (paint.x - 0.5) * 0.80 + windLight + heightLight + bendLight;
-    let rootValue = clamp(grassPaintRootValue(paint) + windLight * 0.25, 0.0, 1.0);
+    // The root is the ground's own value there, nothing of the blade's: a
+    // ground painted with grass_field.wgsl at this point has its color
+    let rootValue = grassPaintRootValue(paint);
     let tipValue = clamp(0.90 + offset, 0.0, 1.25);
-    outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.j.xyz, G.g.w), 0.0);
-    outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, G.e.xyz, G.j.xyz, G.g.w));
+    outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.g.w), 0.0);
+    outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, G.e.xyz, G.g.w));
   }
 }
 
