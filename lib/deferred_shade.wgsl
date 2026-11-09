@@ -212,7 +212,7 @@ struct ShadedSurface {
 fn cloudSunLight(wpos: vec3<f32>) -> f32 {
   if (L.clouds.x <= 0.001) { return 1.0; }
   let average = textureLoad(cloudShadowTex, vec2<i32>(0, i32(cloudShadowTexels)), 0).x;
-  let at = (cloudShadowPlane(wpos) - cloudShadowOrigin()) / cloudShadowSpan * cloudShadowTexels - 0.5;
+  let at = (cloudShadowPlane(wpos) - cloudShadowOrigin()) / cloudShadowSpan() * cloudShadowTexels - 0.5;
   let edge = min(min(at.x, at.y), min(cloudShadowTexels - 1.0 - at.x, cloudShadowTexels - 1.0 - at.y));
   if (edge <= 0.0) { return average; }
   let cell = vec2<i32>(floor(at));

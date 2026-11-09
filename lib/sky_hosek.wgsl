@@ -211,6 +211,18 @@ struct SkyCloudSample {
 fn skyCloudPoint(world: vec2<f32>) -> vec2<f32> {
   return world / (1600.0 * max(L.cloudShape.w, 0.1)) + vec2<f32>(L.clouds.z, L.clouds.z * 0.35);
 }
+// The shadows' own size against the clouds' (cloudOptions.y; 1 when unset)
+fn cloudShadowScale() -> f32 {
+  if (L.cloudOptions.y <= 0.0) { return 1.0; }
+  return L.cloudOptions.y;
+}
+// A point under the clouds (meters) in the layer's units for their shadow:
+// as skyCloudPoint, with the shapes cloudShadowScale as wide, moving over
+// the ground as fast as the clouds in the sky (the same wind)
+fn skyCloudShadowPoint(world: vec2<f32>) -> vec2<f32> {
+  let scale = max(cloudShadowScale(), 0.005);
+  return world / (1600.0 * max(L.cloudShape.w, 0.1) * scale) + vec2<f32>(L.clouds.z, L.clouds.z * 0.35) / scale;
+}
 fn skyCloudSample(p: vec2<f32>, viewFlat: vec2<f32>, slant: f32) -> SkyCloudSample {
   let cover = clamp(L.clouds.x, 0.0, 1.0);
   let kind = clamp(L.cloudShape.x, 0.0, 1.0);
@@ -242,12 +254,17 @@ fn skyCloudSunThrough(p: vec2<f32>) -> f32 {
 }
 // The clouds' shadow map (lib/CloudShadow, drawn by cloud_shadow.wgsl, read
 // by deferred_shade.wgsl cloudSunLight): cloudShadowTexels square texels
-// over cloudShadowSpan meters of the clouds' plane, round the point of the
+// over cloudShadowSpan() meters of the clouds' plane, round the point of the
 // plane the key light reaches the eye through, snapped to a texel so the
 // shadows do not crawl as the eye moves; one more row holds the map's
 // average (texel 0: the light let through, and the share of cloud)
 const cloudShadowTexels: f32 = 256.0;
-const cloudShadowSpan: f32 = 8000.0;
+const cloudShadowFullSpan: f32 = 8000.0;
+// The map's side (m): the full span at a shadow scale of 1, smaller with
+// smaller shadows (so a texel stays a small part of a shape), down to a fifth
+fn cloudShadowSpan() -> f32 {
+  return cloudShadowFullSpan * clamp(cloudShadowScale(), 0.2, 1.0);
+}
 // The way to the key light, never flatter than 0.1 up (a low sun's shadows
 // would reach kilometers away)
 fn cloudShadowToLight() -> vec3<f32> {
@@ -261,8 +278,9 @@ fn cloudShadowPlane(wpos: vec3<f32>) -> vec2<f32> {
 }
 // The map's corner on the plane (meters)
 fn cloudShadowOrigin() -> vec2<f32> {
-  let texel = cloudShadowSpan / cloudShadowTexels;
-  return floor(cloudShadowPlane(L.camPos.xyz) / texel) * texel - vec2<f32>(0.5 * cloudShadowSpan);
+  let span = cloudShadowSpan();
+  let texel = span / cloudShadowTexels;
+  return floor(cloudShadowPlane(L.camPos.xyz) / texel) * texel - vec2<f32>(0.5 * span);
 }
 // The slab tier draws the overhead clouds itself (lib/CloudSlab): a pass that
 // composites it sets this, and the layer then draws only its cirrus and its
