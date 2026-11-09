@@ -27,6 +27,10 @@ const cloudTierBuilt: CloudTier = CloudTier.volumetric
 type CloudSettings {
   maxTier: CloudTier = CloudTier.volumetric
   preferredTier: CloudTier = CloudTier.volumetric
+  # false: a game that does not want the slab's look never gets it on its
+  # own: the quality's Mid step and the fallback go from the volumetric
+  # clouds straight to the layer (a person may still pick the slab by hand)
+  slabAllowed: Bool = true
 }
 
 # The frames of the fallback's window, how many of them over the budget step
@@ -61,6 +65,16 @@ type CloudTierControl {
   # good frames in a row, and frames left before another change
   goodFrames: Int
   cooldownFrames: Int
+  # the game's CloudSettings slabAllowed
+  slabAllowed: Bool = true
+}
+
+# `tier`, or the layer for the slab when the game does not allow it
+func cloudTierAllowed(tier: view CloudTier, slabAllowed: view Bool) ret CloudTier {
+  if tier is CloudTier.slab and not slabAllowed {
+    ret CloudTier.layer
+  }
+  ret tier
 }
 
 func cloudTierRank(tier: view CloudTier) ret Int {
@@ -162,8 +176,11 @@ func createCloudTierControl(
   var ceiling: CloudTier = cloudTierLower(first: settings.maxTier, second: settings.preferredTier)
   ceiling = cloudTierLower(first: ceiling, second: device)
   ceiling = cloudTierLower(first: ceiling, second: cloudTierBuilt)
-  let startCeiling: CloudTier = ceiling
-  ceiling = cloudTierLower(first: ceiling, second: qualityTier)
+  let startCeiling: CloudTier = cloudTierAllowed(tier: ceiling, slabAllowed: settings.slabAllowed)
+  ceiling = cloudTierAllowed(
+    tier: cloudTierLower(first: startCeiling, second: qualityTier)
+    slabAllowed: settings.slabAllowed
+  )
   var control: CloudTierControl = {
     tier: ceiling
     ceiling: ceiling
@@ -174,6 +191,7 @@ func createCloudTierControl(
     overFrames: 0
     goodFrames: 0
     cooldownFrames: 0
+    slabAllowed: settings.slabAllowed
   }
   if let forced: CloudTier = cloudTierNamed(name: forcedName) {
     control.tier = cloudTierLower(first: forced, second: cloudTierBuilt)
@@ -218,6 +236,9 @@ func cloudTierFrame(
   if (hot or slowWindow) and control.cooldownFrames is 0 and control.tier is not CloudTier.off {
     let from: CloudTier = control.tier
     control.tier = cloudTierOfRank(rank: cloudTierRank(tier: from) - 1)
+    if control.tier is CloudTier.slab and not control.slabAllowed {
+      control.tier = CloudTier.layer
+    }
     control.goodFrames = 0
     control.cooldownFrames = cloudTierCooldownFrames
     if hot {
@@ -241,6 +262,9 @@ func cloudTierFrame(
   ) < cloudTierRank(tier: control.ceiling) {
     let from: CloudTier = control.tier
     control.tier = cloudTierOfRank(rank: cloudTierRank(tier: from) + 1)
+    if control.tier is CloudTier.slab and not control.slabAllowed {
+      control.tier = CloudTier.volumetric
+    }
     control.goodFrames = 0
     control.cooldownFrames = cloudTierCooldownFrames
     log("[clouds] {from}: {cloudTierGoodFrames} good frames: back to {control.tier}")
@@ -256,7 +280,10 @@ func cloudTierSetQuality(control: mod CloudTierControl, qualityTier: view CloudT
   if control.forced {
     ret false
   }
-  let ceiling: CloudTier = cloudTierLower(first: control.startCeiling, second: qualityTier)
+  let ceiling: CloudTier = cloudTierAllowed(
+    tier: cloudTierLower(first: control.startCeiling, second: qualityTier)
+    slabAllowed: control.slabAllowed
+  )
   if ceiling is control.ceiling {
     ret false
   }
@@ -329,7 +356,10 @@ func cloudTierUseOptions(
   }
   if control.forced {
     control.forced = false
-    control.ceiling = cloudTierLower(first: control.startCeiling, second: qualityTier)
+    control.ceiling = cloudTierAllowed(
+      tier: cloudTierLower(first: control.startCeiling, second: qualityTier)
+      slabAllowed: control.slabAllowed
+    )
     control.tier = control.ceiling
     control.windowFrames = 0
     control.overFrames = 0
