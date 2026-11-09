@@ -1,0 +1,340 @@
+# app3d/MechWalker — a two-legged walking machine: how it is driven and how its legs step.
+# Pure values and functions, no rendering and no physics, so an app draws the machine its own
+# way (boxes, a model) and moves it on its own ground; a test without a window runs it.
+#
+# MechDrive is the machine's body as a heavy walker: the stick's forward part sets the speed it
+# walks at (it speeds up and slows down at a heavy machine's rate, and backs up slower), its side
+# part turns it, a jump lifts it with gravity bringing it down, and its feet stay on the ground's
+# height under it. Its heading is radians from +x, counter-clockwise; it walks along
+# (cos heading, sin heading).
+#
+# MechGait is its two legs. Each foot stays planted where it is until it is too far from where
+# it should stand under its hip (a little ahead of it when walking), and then steps there along
+# an arc; one foot at a time, so the machine always stands on one. A step is quicker at speed.
+# mechKnee places a knee between hip and foot (two-bone reach), bending forward.
+import Math
+import Vec3
+
+type MechTuning {
+  # m/s forward and backward, and how fast the speed changes (m/s^2)
+  topSpeed: Float = 4.5
+  reverseSpeed: Float = 2.0
+  acceleration: Float = 3.0
+  braking: Float = 6.0
+  # How fast it turns at a full stick (rad/s), and slower at speed
+  turnRate: Float = 1.6
+  # A jump's upward speed (m/s) and the gravity on it (m/s^2)
+  jumpSpeed: Float = 7.0
+  gravity: Float = 16.0
+  # The legs: the hips' half spacing, their height over the ground standing, the thigh's and the
+  # shin's length (m)
+  hipHalfWidth: Float = 0.75
+  hipHeight: Float = 2.6
+  thighLength: Float = 1.8
+  shinLength: Float = 1.8
+  # A step: how far a foot may lag before it steps (m), how long a step takes standing and at
+  # top speed (s), and how high the foot lifts (m)
+  stepReach: Float = 0.9
+  stepSecondsSlow: Float = 0.55
+  stepSecondsFast: Float = 0.32
+  stepLift: Float = 0.45
+  # How far the body dips mid-step (m)
+  bodyDip: Float = 0.12
+}
+
+type MechDrive {
+  x: Float
+  y: Float
+  # Its feet's height: on the ground, or over it in a jump
+  z: Float
+  heading: Float
+  # Along its heading (m/s; negative backing up), and up (m/s)
+  speed: Float = 0.0
+  verticalSpeed: Float = 0.0
+  grounded: Bool = true
+}
+
+func createMechDrive(
+  x: view Float
+  y: view Float
+  z: view Float
+  heading: view Float
+) ret MechDrive {
+  ret MechDrive { x: x, y: y, z: z, heading: heading }
+}
+
+# Its way on the ground
+func mechForward(drive: view MechDrive) ret Vec3 {
+  ret Vec3.create(x: Math.cos(x: drive.heading), y: Math.sin(x: drive.heading), z: 0.0)
+}
+
+# One step of `deltaTime` s: `stickX` turns (right positive, so it turns clockwise), `stickY`
+# walks (forward positive), `jump` jumps when on the ground; `groundZ` is the ground under it
+func mechDriveStep(
+  drive: mod MechDrive
+  tuning: view MechTuning
+  stickX: view Float
+  stickY: view Float
+  jump: view Bool
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  let throttle: Float = Math.clamp(val: stickY, low: -1.0, high: 1.0)
+  var target: Float = throttle * tuning.topSpeed
+  if throttle < 0.0 {
+    target = throttle * tuning.reverseSpeed
+  }
+  # Speeding up at the machine's rate, slowing down (and turning about) at its brakes'
+  var rate: Float = tuning.acceleration
+  if Math.abs(value: target) < Math.abs(value: drive.speed) or target * drive.speed < 0.0 {
+    rate = tuning.braking
+  }
+  let change: Float = target - drive.speed
+  let most: Float = rate * deltaTime
+  drive.speed = drive.speed + Math.clamp(val: change, low: 0.0 - most, high: most)
+  # Turning: a full stick turns at the turn rate standing, at two thirds of it at top speed
+  let atSpeed: Float = Math.abs(value: drive.speed) / Math.max(a: tuning.topSpeed, b: 0.01)
+  let turn: Float = Math.clamp(val: stickX, low: -1.0, high: 1.0) * tuning.turnRate * (1.0 - 0.33 * atSpeed)
+  drive.heading = drive.heading - turn * deltaTime
+  drive.x = drive.x + Math.cos(x: drive.heading) * drive.speed * deltaTime
+  drive.y = drive.y + Math.sin(x: drive.heading) * drive.speed * deltaTime
+  if jump and drive.grounded {
+    drive.verticalSpeed = tuning.jumpSpeed
+    drive.grounded = false
+  }
+  if not drive.grounded {
+    drive.verticalSpeed = drive.verticalSpeed - tuning.gravity * deltaTime
+    drive.z = drive.z + drive.verticalSpeed * deltaTime
+  }
+  if drive.z <= groundZ or drive.grounded {
+    drive.z = groundZ
+    drive.verticalSpeed = 0.0
+    drive.grounded = true
+  }
+}
+
+# A foot: where it stands (or is on its way, mid-step: from `from` to `to`, `progress` 0..1)
+type MechFoot {
+  at: Vec3
+  from: Vec3
+  to: Vec3
+  stepping: Bool = false
+  progress: Float = 0.0
+}
+
+type MechGait {
+  left: MechFoot
+  right: MechFoot
+  # How many steps it has taken, for a check
+  steps: Int = 0
+}
+
+# Where a foot should stand under its hip (`side` +1 the left, -1 the right), a little ahead of
+# it at speed so it lands where the hip will be
+func mechFootHome(
+  drive: view MechDrive
+  tuning: view MechTuning
+  side: view Float
+  groundZ: view Float
+) ret Vec3 {
+  let forward: Vec3 = mechForward(drive: drive)
+  let ahead: Float = drive.speed * mechStepSeconds(drive: drive, tuning: tuning) * 0.5
+  ret Vec3.create(
+    x: drive.x - forward.y * tuning.hipHalfWidth * side + forward.x * ahead
+    y: drive.y + forward.x * tuning.hipHalfWidth * side + forward.y * ahead
+    z: groundZ
+  )
+}
+
+func mechStepSeconds(drive: view MechDrive, tuning: view MechTuning) ret Float {
+  let atSpeed: Float = Math.clamp(
+    val: Math.abs(value: drive.speed) / Math.max(a: tuning.topSpeed, b: 0.01)
+    low: 0.0
+    high: 1.0
+  )
+  ret tuning.stepSecondsSlow + (tuning.stepSecondsFast - tuning.stepSecondsSlow) * atSpeed
+}
+
+func standingFoot(at: view Vec3) ret MechFoot {
+  ret MechFoot { at: at, from: at, to: at }
+}
+
+# The legs standing under a machine
+func createMechGait(drive: view MechDrive, tuning: view MechTuning) ret MechGait {
+  ret MechGait {
+    left: standingFoot(at: mechFootHome(
+      drive: drive
+      tuning: tuning
+      side: 1.0
+      groundZ: drive.z
+    ))
+    right: standingFoot(at: mechFootHome(
+      drive: drive
+      tuning: tuning
+      side: -1.0
+      groundZ: drive.z
+    ))
+  }
+}
+
+func horizontalDistance(a: view Vec3, b: view Vec3) ret Float {
+  let dx: Float = a.x - b.x
+  let dy: Float = a.y - b.y
+  ret Math.sqrt(x: dx * dx + dy * dy)
+}
+
+# A foot `deltaTime` s further on its step (its ground height `groundZ`)
+func mechFootStep(
+  foot: mod MechFoot
+  tuning: view MechTuning
+  seconds: view Float
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  if not foot.stepping {
+    ret
+  }
+  foot.progress = Math.min(a: 1.0, b: foot.progress + deltaTime / Math.max(a: seconds, b: 0.05))
+  let t: Float = foot.progress
+  let lift: Float = Math.sin(x: t * 3.14159265) * tuning.stepLift
+  foot.at = Vec3.create(
+    x: foot.from.x + (foot.to.x - foot.from.x) * t
+    y: foot.from.y + (foot.to.y - foot.from.y) * t
+    z: groundZ + lift
+  )
+  if foot.progress >= 1.0 {
+    foot.stepping = false
+    foot.at = Vec3.create(x: foot.to.x, y: foot.to.y, z: groundZ)
+  }
+}
+
+# The legs `deltaTime` s on under `drive` (after its own step): a stepping foot goes on; when
+# neither steps, the one farther from its place steps there if it is too far. In a jump the
+# feet hang under the hips.
+func mechGaitStep(
+  gait: mod MechGait
+  drive: view MechDrive
+  tuning: view MechTuning
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  let seconds: Float = mechStepSeconds(drive: drive, tuning: tuning)
+  let leftHome: Vec3 = mechFootHome(
+    drive: drive
+    tuning: tuning
+    side: 1.0
+    groundZ: groundZ
+  )
+  let rightHome: Vec3 = mechFootHome(
+    drive: drive
+    tuning: tuning
+    side: -1.0
+    groundZ: groundZ
+  )
+  if not drive.grounded {
+    let hang: Float = drive.z - groundZ
+    gait.left = standingFoot(at: Vec3.create(x: leftHome.x, y: leftHome.y, z: groundZ + hang))
+    gait.right = standingFoot(at: Vec3.create(x: rightHome.x, y: rightHome.y, z: groundZ + hang))
+    ret
+  }
+  mechFootStep(
+    foot: gait.left
+    tuning: tuning
+    seconds: seconds
+    groundZ: groundZ
+    deltaTime: deltaTime
+  )
+  mechFootStep(
+    foot: gait.right
+    tuning: tuning
+    seconds: seconds
+    groundZ: groundZ
+    deltaTime: deltaTime
+  )
+  if gait.left.stepping or gait.right.stepping {
+    ret
+  }
+  let leftLag: Float = horizontalDistance(a: gait.left.at, b: leftHome)
+  let rightLag: Float = horizontalDistance(a: gait.right.at, b: rightHome)
+  if Math.max(a: leftLag, b: rightLag) < tuning.stepReach {
+    # Standing still: the feet settle onto the ground's height
+    gait.left.at = Vec3.create(x: gait.left.at.x, y: gait.left.at.y, z: groundZ)
+    gait.right.at = Vec3.create(x: gait.right.at.x, y: gait.right.at.y, z: groundZ)
+    ret
+  }
+  # The foot that lags more steps to where it should stand when it lands
+  if leftLag >= rightLag {
+    gait.left = MechFoot {
+      at: gait.left.at
+      from: gait.left.at
+      to: leftHome
+      stepping: true
+      progress: 0.0
+    }
+  } else {
+    gait.right = MechFoot {
+      at: gait.right.at
+      from: gait.right.at
+      to: rightHome
+      stepping: true
+      progress: 0.0
+    }
+  }
+  gait.steps = gait.steps + 1
+}
+
+# How far the body dips now: most mid-step
+func mechBodyDip(gait: view MechGait, tuning: view MechTuning) ret Float {
+  var dip: Float = 0.0
+  if gait.left.stepping {
+    dip = Math.sin(x: gait.left.progress * 3.14159265)
+  }
+  if gait.right.stepping {
+    dip = Math.max(a: dip, b: Math.sin(x: gait.right.progress * 3.14159265))
+  }
+  ret dip * tuning.bodyDip
+}
+
+# A hip's place: over the drive's feet height, beside its middle (`side` +1 the left)
+func mechHip(
+  drive: view MechDrive
+  tuning: view MechTuning
+  side: view Float
+  dip: view Float
+) ret Vec3 {
+  let forward: Vec3 = mechForward(drive: drive)
+  ret Vec3.create(
+    x: drive.x - forward.y * tuning.hipHalfWidth * side
+    y: drive.y + forward.x * tuning.hipHalfWidth * side
+    z: drive.z + tuning.hipHeight - dip
+  )
+}
+
+# The knee between `hip` and `foot` for a thigh and a shin of these lengths, bending toward
+# `forward`; a foot out of reach straightens the leg toward it
+func mechKnee(
+  hip: view Vec3
+  foot: view Vec3
+  thigh: view Float
+  shin: view Float
+  forward: view Vec3
+) ret Vec3 {
+  let toFoot: Vec3 = Vec3.vsub(a: foot, b: hip)
+  let reach: Float = Math.max(a: Vec3.vlen(a: toFoot), b: 0.0001)
+  let way: Vec3 = Vec3.vscale(a: toFoot, s: 1.0 / reach)
+  let span: Float = Math.min(a: reach, b: thigh + shin - 0.001)
+  # How far along the hip-foot line the knee is, and how far out of it
+  let along: Float = (thigh * thigh - shin * shin + span * span) / (2.0 * span)
+  let out: Float = Math.sqrt(x: Math.max(a: 0.0, b: thigh * thigh - along * along))
+  # Out of the line toward `forward`, square to it
+  let ahead: Float = Vec3.vdot(a: forward, b: way)
+  var bend: Vec3 = Vec3.vsub(a: forward, b: Vec3.vscale(a: way, s: ahead))
+  if Vec3.vlen(a: bend) < 0.0001 {
+    bend = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  }
+  bend = Vec3.vnorm(a: bend)
+  ret Vec3.vadd(
+    a: Vec3.vadd(a: hip, b: Vec3.vscale(a: way, s: along))
+    b: Vec3.vscale(a: bend, s: out)
+  )
+}
