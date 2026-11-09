@@ -271,10 +271,19 @@ fn cloudShadowToLight() -> vec3<f32> {
   let toLight = normalize(-L.sunDir.xyz);
   return vec3<f32>(toLight.xy, max(toLight.z, 0.1));
 }
-// Where the ray from `wpos` toward the key light meets the clouds' plane
+// Where the ray from `wpos` toward the key light meets the clouds' plane. At
+// a shadow scale of 1 the plane is the clouds' own height, so each shadow
+// lies under its cloud. Shadows at a scale of their own (under 1/2, Sky
+// cloudShadowScale) no longer match the clouds seen, so they are cast from
+// the ground's plane (z 0) instead: cast from far up, a quick game day's
+// swinging sun would slide the whole pattern over the ground at many times
+// the clouds' own speed (tens of meters a second with a low sun). Between
+// them the height blends.
 fn cloudShadowPlane(wpos: vec3<f32>) -> vec2<f32> {
   let toLight = cloudShadowToLight();
-  return wpos.xy + toLight.xy / toLight.z * max(max(L.cloudShape.z, 100.0) - wpos.z, 0.0);
+  let follow = smoothstep(0.5, 1.0, cloudShadowScale());
+  let lift = max(L.cloudShape.z, 100.0) * follow - wpos.z;
+  return wpos.xy + toLight.xy / toLight.z * select(lift, max(lift, 0.0), follow > 0.999);
 }
 // The map's corner on the plane (meters)
 fn cloudShadowOrigin() -> vec2<f32> {
