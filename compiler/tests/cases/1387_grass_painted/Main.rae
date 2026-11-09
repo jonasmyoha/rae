@@ -3,6 +3,7 @@
 # the grass compute pass and the grass render pass compose, so a ground shader
 # can ask the same functions at a blade's root.
 import GrassConfig
+import Vec3
 import GrassCompute
 
 func main() ret Int {
@@ -34,6 +35,12 @@ func main() ret Int {
   log(groundShader.text.contains(sub: "grassPaintColor(grassPaintRootValue(paint)"))
   # and in bands: the patches it stands in step as the blades' do
   log(groundShader.text.contains(sub: "let patchValue = grassPaintBand("))
+  # blades lean toward a camera looking down, only when an app asks (cameraTilt)
+  log(render.text.contains(sub: "fn grassTiltToCamera"))
+  let meadow: GrassConfig.GrassViewSettings = GrassConfig.grassMeadowSettings(
+    groundColor: Vec3.create(x: 0.1, y: 0.3, z: 0.1)
+  )
+  log(meadow.cameraTilt is 0.0)
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
   ret 0

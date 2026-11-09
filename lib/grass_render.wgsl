@@ -112,6 +112,36 @@ fn ribbonTuft(vertex: u32, curve: f32) -> vec3<f32> {
   let across = local.x * 0.22 + reach;
   return vec3<f32>(cos(angle) * across, sin(angle) * across, local.z * height);
 }
+// A blade's point `p` (world) tilted toward a camera at `camera` looking down
+// at its root `root`: the steeper the view, the further the blade leans away
+// from the camera about its root (up to 70 degrees at `tilt` 1, straight
+// down). With `turn` (a flat blade), its face also turns to the camera: its
+// own across axis `bladeAcross` turns to lie across the view. Its length is
+// kept, so it lies down rather than shrinks.
+fn grassTiltToCamera(p: vec3<f32>, root: vec3<f32>, bladeAcross: vec2<f32>, camera: vec3<f32>,
+    tilt: f32, turn: bool) -> vec3<f32> {
+  let toCamera = camera - root;
+  let ground = length(toCamera.xy);
+  let steep = clamp(toCamera.z / max(length(toCamera), 0.001), 0.0, 1.0);
+  let amount = tilt * steep * steep;
+  if (amount <= 0.0 || ground < 0.0001) { return p; }
+  let away = -toCamera.xy / ground;
+  let viewAcross = vec2<f32>(-away.y, away.x);
+  var rel = p - root;
+  if (turn) {
+    let ownAcross = normalize(bladeAcross + vec2<f32>(0.00001, 0.0));
+    let signedAcross = dot(rel.xy, ownAcross);
+    let rest = rel.xy - ownAcross * signedAcross;
+    let facing = select(-1.0, 1.0, dot(ownAcross, viewAcross) >= 0.0);
+    rel = vec3<f32>(mix(rel.xy, viewAcross * facing * signedAcross + rest, amount), rel.z);
+  }
+  let angle = 1.2217305 * amount;
+  let along = dot(rel.xy, away);
+  let sideways = rel.xy - away * along;
+  let newAlong = along * cos(angle) + rel.z * sin(angle);
+  let newHeight = rel.z * cos(angle) - along * sin(angle);
+  return root + vec3<f32>(sideways + away * newAlong, newHeight);
+}
 @vertex
 fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {
   let d = draws[ii];
@@ -149,7 +179,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // the gust at the blade, from the compute pass (grass_compute.wgsl)
   let gust = d.fade.x;
   let offsetNow = grassWindOffset(base, lp.z, timeNow, wind, gust);
-  let pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
+  var pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   var localNormal = bladeNormal(lp.z, d.params.w);
   if (GW.i.w < 0.5 || GW.i.w > 1.5) { localNormal = vec3<f32>(0.0, 0.0, 1.0); }
@@ -159,13 +189,24 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   if (GW.i.w > 0.5 && GW.i.w < 1.5) {
     localNormal = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), localNormal, smoothstep(0.0, 0.55, lp.z)));
   }
+  // Seen from above, a blade leans away from the camera about its root, and a
+  // painted blade turns its face to it, so the blades cover the ground instead
+  // of showing their edges (GrassViewSettings cameraTilt, GW.a.w)
+  if (GW.a.w > 0.0) {
+    let root = d.model[3].xyz;
+    pNow = grassTiltToCamera(pNow, root, d.model[0].xy, GW.c.xyz, GW.a.w, GW.i.w > 3.5);
+    o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
+  }
   let restNormal = normalize((d.model * vec4<f32>(localNormal, 0.0)).xyz);
   o.nrm = normalize(restNormal + vec3<f32>(-offsetNow * lp.z * 0.9, 0.0));
   o.inst = ii;
   o.clipNow = o.pos;
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
   let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind, gust);
-  let pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
+  var pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
+  if (GW.a.w > 0.0) {
+    pPrev = grassTiltToCamera(pPrev, d.prevModel[3].xyz, d.prevModel[0].xy, GW.c.xyz, GW.a.w, GW.i.w > 3.5);
+  }
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
