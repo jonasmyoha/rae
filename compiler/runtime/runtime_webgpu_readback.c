@@ -9,12 +9,40 @@ typedef struct RaeWgpuReadRequest {
     size_t size;
     int status; /* 0 pending, 1 success, -1 failed/canceled */
     int references;
+    struct RaeWgpuReadRequest* nextDeferred;
 } RaeWgpuReadRequest;
+
+/* Requests whose last reference went in a map callback. wgpu runs map
+ * callbacks while it holds its own locks (in a poll, or inline in Unmap), so
+ * releasing the buffer there takes a lock this thread already holds: wgpu
+ * panics ("panic in a function that cannot unwind", a mutex lock failing) and
+ * the app aborts. It happened on an iPhone when pass timing gave up on reads
+ * still in flight. They are released here instead, outside any callback, at
+ * the next start, poll or release. Context thread only, as the callbacks. */
+static RaeWgpuReadRequest* g_rae_read_deferred = NULL;
+static int g_rae_read_in_callback = 0;
+
+static void raeWgpuReadFree(RaeWgpuReadRequest* request) {
+    if (request->buffer) wgpuBufferRelease(request->buffer);
+    free(request);
+}
+
+static void raeWgpuReadFlushDeferred(void) {
+    while (g_rae_read_deferred) {
+        RaeWgpuReadRequest* request = g_rae_read_deferred;
+        g_rae_read_deferred = request->nextDeferred;
+        raeWgpuReadFree(request);
+    }
+}
 
 static void raeWgpuReadDrop(RaeWgpuReadRequest* request) {
     if (--request->references != 0) return;
-    if (request->buffer) wgpuBufferRelease(request->buffer);
-    free(request);
+    if (g_rae_read_in_callback) {
+        request->nextDeferred = g_rae_read_deferred;
+        g_rae_read_deferred = request;
+        return;
+    }
+    raeWgpuReadFree(request);
 }
 
 static void raeWgpuReadCompleted(WGPUMapAsyncStatus status, WGPUStringView message,
@@ -26,10 +54,13 @@ static void raeWgpuReadCompleted(WGPUMapAsyncStatus status, WGPUStringView messa
      * during Unmap. Never publish success again on a canceled request. */
     if (request->status == 0)
         request->status = status == WGPUMapAsyncStatus_Success ? 1 : -1;
+    g_rae_read_in_callback++;
     raeWgpuReadDrop(request);
+    g_rae_read_in_callback--;
 }
 
 void* rae_wgpu_read_start(void* buffer, uint64_t offset, uint64_t size) {
+    raeWgpuReadFlushDeferred();
     RaeWgpuReadRequest* request = calloc(1, sizeof(*request));
     if (!request) return NULL;
     request->references = 1;
@@ -65,6 +96,7 @@ int rae_wgpu_read_poll(void* handle) {
     RaeWgpuReadRequest* request = handle;
     if (!request) return -1;
     rae_wgpu_poll(0);
+    raeWgpuReadFlushDeferred();
     return request->status;
 }
 
@@ -106,5 +138,6 @@ void* rae_wgpu_read_release(void* handle) {
     /* Pending callback owns its reference until it arrives, even after the
      * caller releases both this request and its original buffer reference. */
     raeWgpuReadDrop(request);
+    raeWgpuReadFlushDeferred();
     return NULL;
 }

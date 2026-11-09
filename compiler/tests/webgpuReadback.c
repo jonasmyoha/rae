@@ -114,12 +114,20 @@ int main(void) {
     rae_wgpu_read_release(secondRead);
     assert(liveRequests == 0 && first.references == 1 && second.references == 1);
 
-    /* Deferred cancellation callback is the last owner of BOTH allocations. */
+    /* Deferred cancellation callback is the last owner of BOTH allocations.
+     * It must not release the buffer inside the callback: wgpu runs map
+     * callbacks under its own locks, and a release there locks again on the
+     * same thread (an abort on an iPhone). The release waits for the next
+     * start, poll or release, outside any callback. */
     firstRead = rae_wgpu_read_start(&first, 0, 32);
     rae_wgpu_read_release(firstRead);
     wgpuBufferRelease(&first);
     assert(liveRequests == 1 && first.references == 1);
     deliver(&first, -1);
+    assert(liveRequests == 1 && first.references == 1);
+    void* nudge = rae_wgpu_read_start(NULL, 0, 0);
+    assert(liveRequests == 1 && first.references == 0);
+    rae_wgpu_read_release(nudge);
     assert(liveRequests == 0 && first.references == 0);
 
     second.inlineCancel = 1;
