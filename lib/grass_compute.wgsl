@@ -224,8 +224,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let offset = (paint.x - 0.5) * 0.80 + windLight + heightLight + bendLight;
     // The root is the ground's own value there, nothing of the blade's: a
     // ground painted with grass_field.wgsl at this point has its color
-    let rootValue = grassPaintRootValue(paint);
-    let tipValue = clamp(0.90 + offset, 0.0, 1.25);
+    // the wind's shimmer, the same as on the ground painted as grass
+    let shimmer = grassPaintShimmer(bladePosition, G.k.zw, G.f.w);
+    let rootValue = grassPaintRootValue(paint) + shimmer;
+    let tipValue = clamp(0.90 + offset + shimmer, 0.0, 1.25);
     outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.g.w), 0.0);
     outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, G.e.xyz, G.g.w));
   }
