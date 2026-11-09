@@ -1,0 +1,20 @@
+# The clouds' shadows' scale (Sky cloudShadowScale, lib/SkyClouds): 1 unless
+# set, so the shadows match the clouds; set apart from the clouds' own scale,
+# it reaches the light uniform's cloudOptions.y and leaves the clouds as they
+# are.
+open Sky
+open SkyClouds
+open gpu/GpuArgs
+
+func main() {
+  var sky: Sky = Sky {}
+  let plain: SkyClouds = skyCloudsOf(sky: sky)
+  log("default: shadow scale {plain.shadowScale}, cloud scale {plain.scale}")
+  sky.cloudScale = 1.5
+  sky.cloudShadowScale = 0.12
+  let small: SkyClouds = skyCloudsOf(sky: sky)
+  log("set: shadow scale {small.shadowScale}, cloud scale {small.scale}")
+  var writer: ArgWriter = createArgs(uniform: true)
+  pushSkyClouds(writer: writer, clouds: small)
+  log("written: {writer.bytes.length()} bytes, three vec4s")
+}

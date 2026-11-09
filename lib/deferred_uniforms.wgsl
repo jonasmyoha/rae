@@ -42,7 +42,8 @@ struct LightU {
   // high cirrus (0 .. 1), z the base's height (m), w the shapes' size
   clouds: vec4<f32>,
   cloudShape: vec4<f32>,
-  // cloudOptions (lib/SkyClouds): x the clouds' shadows on the ground (1 on)
+  // cloudOptions (lib/SkyClouds): x the clouds' shadows on the ground (1 on),
+  // y their shapes' size apart from the clouds' (1 as the clouds)
   cloudOptions: vec4<f32>,
 };
 struct ShadowU {
