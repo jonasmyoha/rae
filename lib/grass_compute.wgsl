@@ -20,7 +20,8 @@ struct GrassU {
   j: vec4<f32>,
   // the air's drift (xy) and the unscaled wind (zw): the gust field's
   k: vec4<f32>,
-  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
+  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none;
+  // z the wind shimmer's strength (GrassViewSettings shimmer)
   l: vec4<f32>,
   // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
   // radius (m) and the strength (0 to 1); a radius of 0 is none
@@ -228,7 +229,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // The root is the ground's own value there, nothing of the blade's: a
     // ground painted with grass_field.wgsl at this point has its color
     // the wind's shimmer, the same as on the ground painted as grass
-    let shimmer = grassPaintShimmer(bladePosition, G.k.zw, G.f.w);
+    let shimmer = grassPaintShimmer(bladePosition, G.k.zw, G.f.w) * G.l.z;
     let rootValue = grassPaintRootValue(paint) + shimmer;
     let tipValue = clamp(0.90 + offset + shimmer, 0.0, 1.25);
     outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.g.w), 0.0);

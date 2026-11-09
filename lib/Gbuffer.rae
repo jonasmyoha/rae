@@ -186,6 +186,9 @@ type GbufferCache {
   # How wet the ground is (0 .. 1; setGbufferWetness): the terrain darker
   # and glossier while it rains and the hour after
   groundWet: Float = 0.0
+  # The painted grass's wind shimmer on the ground painted as grass, 0 none to 1
+  # (setGbufferGrassShimmer)
+  grassShimmer: Float = 1.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
@@ -492,9 +495,10 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.snowMeshCenterX)
   cache.frameFloats.add(value: cache.snowMeshCenterY)
   cache.frameFloats.add(value: cache.snowMeshHalf)
-  # the weather: x how wet the ground is (setGbufferWetness)
+  # the weather: x how wet the ground is (setGbufferWetness), y the painted grass's
+  # wind shimmer on the ground painted as grass (setGbufferGrassShimmer)
   cache.frameFloats.add(value: cache.groundWet)
-  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: cache.grassShimmer)
   cache.frameFloats.add(value: 0.0)
   cache.frameFloats.add(value: 0.0)
   # the air's drift now and last frame (lib/wind.wgsl windGustAt)
@@ -520,6 +524,14 @@ func uploadFrameUniform(
 # its slope and a noise, the static meshes lay on their up-facing parts,
 # and the grass and the meadow sink under (docs/seasons-and-weather-design.md
 # §4; lib/snow.wgsl)
+# How strong the painted grass's wind shimmer is on the ground painted as grass
+# (grass_field.wgsl grassPaintShimmer; the frame uniform's weather.y): 1 as
+# drawn, 0 none. Set it as the grass's GrassViewSettings.shimmer, so the ground
+# and the blades' roots still match.
+func setGbufferGrassShimmer(cache: mod GbufferCache, strength: view Float) {
+  cache.grassShimmer = Math.clamp(val: strength, low: 0.0, high: 2.0)
+}
+
 func setGbufferSnow(cache: mod GbufferCache, depth: view Float) {
   cache.snowDepth = Math.max(a: depth, b: 0.0)
 }
