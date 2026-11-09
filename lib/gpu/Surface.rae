@@ -37,6 +37,9 @@ func nativeSurfaceReconfigure() unsafe extern("rae_surface_reconfigure")
 
 func nativeSurfaceNotePresented() unsafe extern("rae_surface_note_presented")
 
+# Whether wgpu reported the device lost (runtime_webgpu.c's device-lost callback)
+func nativeDeviceIsLost() unsafe extern("rae_wgpu_device_is_lost") ret Int
+
 # One frame's choice of target, and what was acquired for it
 type FrameTarget {
   # Direct rendering is allowed at all (no screenshot asked, not disabled)
@@ -86,6 +89,12 @@ func acquireDrawable(target: mod FrameTarget, pacer: mod FramePacer) unsafe ret 
     }
     if nativeSurfaceWindowVisible() is 0 {
       noteSurfaceSkipped(recovery: target.recovery, reason: "window-not-visible")
+      ret webgpuNull()
+    }
+    # A lost device makes wgpu's acquire fail fatally (an abort inside
+    # wgpuSurfaceGetCurrentTexture): no new drawable, and the log says why
+    if nativeDeviceIsLost() is not 0 {
+      noteSurfaceSkipped(recovery: target.recovery, reason: "device-lost")
       ret webgpuNull()
     }
     let started: Float64 = frameClock()
