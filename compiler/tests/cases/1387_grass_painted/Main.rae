@@ -32,6 +32,8 @@ func main() ret Int {
     "lib/gbuffer_static.wgsl"
   ])
   log(groundShader.text.contains(sub: "grassPaintColor(grassPaintRootValue(paint)"))
+  # and in bands: the patches it stands in step as the blades' do
+  log(groundShader.text.contains(sub: "let patchValue = grassPaintBand("))
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
   ret 0

@@ -62,6 +62,23 @@ fn grassGroundColor(base: vec3<f32>, position: vec2<f32>, scale: f32, coverage: 
   return mix(open, tuft, cover) * (0.94 + fine * 0.10);
 }
 
+// The painted grass's bands: a value (0 to 1) stepped into this many flat bands
+// (0: smooth), with steps this soft (0: hard, 1: as smooth as the bands allow).
+// Cel shading for the painted grass: the patches it stands in (grassPaintAt, so
+// the ground painted as grass steps the same) and its gradient up each blade
+// (grass_render.wgsl) step together. Three bands with soft-ish steps: hard
+// steps gave each blade a dark lower half, soft ones barely showed the
+// patches; this gives broad flat areas of light and dark, as in a painting.
+const grassPaintBands: f32 = 3.0;
+const grassPaintBandSoftness: f32 = 0.3;
+fn grassPaintBand(value: f32) -> f32 {
+  if (grassPaintBands < 1.5) { return value; }
+  let scaled = clamp(value, 0.0, 1.0) * grassPaintBands;
+  let band = min(floor(scaled), grassPaintBands - 1.0);
+  let within = scaled - band;
+  let spread = 0.5 * clamp(grassPaintBandSoftness, 0.001, 1.0);
+  return (band + smoothstep(0.5 - spread, 0.5 + spread, within)) / grassPaintBands;
+}
 // The painted grass's field at a point on the ground (GrassShape.painted).
 // Sampled at a blade's ROOT, never where its bent tip is, so a ground shader
 // calling it at the same point gets the same answer and the blades melt into
@@ -72,7 +89,7 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
   let broad = perlin2(position / 14.0, 701u);
   let fine = perlin2(position / 4.0, 709u);
   let streak = perlin2(position * vec2<f32>(0.35, 1.4), 719u);
-  let patchValue = clamp(0.5 + 0.75 * (broad * 0.62 + fine * 0.28 + streak * 0.10), 0.0, 1.0);
+  let patchValue = grassPaintBand(clamp(0.5 + 0.75 * (broad * 0.62 + fine * 0.28 + streak * 0.10), 0.0, 1.0));
   let hue = clamp(0.5 + 0.6 * perlin2(position / 45.0, 727u), 0.0, 1.0);
   return vec2<f32>(patchValue, hue);
 }
