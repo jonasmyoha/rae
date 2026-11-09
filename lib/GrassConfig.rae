@@ -12,6 +12,7 @@
 # NOTE: this is the view/camera-profile half of #492. The biome-REGION half
 # (per-region params via ECS + a spatial biome map the compute samples) is a
 # separate sub-system, filed as follow-up.
+import Math
 import Vec3
 import Sys
 
@@ -145,6 +146,33 @@ func grassTopDownSettings(groundColor: copy Vec3) ret GrassViewSettings {
     groundColor: groundColor
     tipLighten: 1.5
   }
+}
+
+# A further tier of grass beyond `inner`: a ring from where `inner`'s blades shrink out (the
+# compute pass shrinks a field's blades over 60 % to 98 % of its radius) to `reach` (m), its
+# blades growing in over that same band, so the two tiers meet with no line. Its blades are
+# `widthScale` times as wide, `heightScale` as tall and `densityScale` as many as `inner`'s,
+# with its own distance thinning: fewer and wider over its outer part. Call it again on the
+# result for a tier further out.
+func grassNextRing(
+  inner: view GrassViewSettings
+  reach: view Float
+  widthScale: view Float
+  heightScale: view Float
+  densityScale: view Float
+) ret GrassViewSettings {
+  var settings: GrassViewSettings = inner
+  let innerReach: Float = inner.extent * 0.5
+  settings.extent = reach * 2.0
+  settings.innerRadius = innerReach * 0.79
+  settings.innerFade = innerReach * 0.19
+  settings.bladeWidthScale = inner.bladeWidthScale * widthScale
+  settings.bladeHeightScale = inner.bladeHeightScale * heightScale
+  settings.densityScale = Math.min(a: 1.0, b: inner.densityScale * densityScale)
+  settings.distanceStart = 0.6
+  settings.farDensityScale = 0.5
+  settings.farWidthScale = 1.6
+  ret settings
 }
 
 # Shared meadow tuning; apps may change extent and patch scale explicitly.
