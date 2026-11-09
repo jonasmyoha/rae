@@ -17,8 +17,17 @@ import Sys
 
 # The blade shapes: preQueue a flat tapered quad, lowPoly a curved
 # four-segment blade (the stylized low-poly look the meadow uses), ribbons a
-# tuft of curved ribbons, textured crossed cut-out tuft pictures
-enum GrassShape { preQueue, lowPoly, ribbons, textured }
+# tuft of curved ribbons, textured crossed cut-out tuft pictures, painted one
+# opaque triangle a blade whose look is all in its shading: lit as the ground
+# (an up normal), colored by grass_field.wgsl's paint field and palette at its
+# root (grassPaintAt, grassPaintColor), dark at the root and light at the tip
+enum GrassShape {
+  preQueue
+  lowPoly
+  ribbons
+  textured
+  painted
+}
 
 # One shared capture override; placement and app tuning remain unchanged.
 func grassShapeOverride() ret Int {
@@ -35,6 +44,9 @@ func grassShapeOverride() ret Int {
   if name is "textured" {
     ret 3
   }
+  if name is "painted" {
+    ret 4
+  }
   ret -1
 }
 
@@ -47,6 +59,9 @@ func grassVertexCount(shape: view Int) ret Int {
   }
   if shape is 2 {
     ret 288
+  }
+  if shape is 4 {
+    ret 3
   }
   ret 18
 }
