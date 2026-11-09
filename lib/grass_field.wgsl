@@ -77,20 +77,25 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(patchValue, hue);
 }
 // The painted palette: a value (0 the darkest root, 1 the lightest tip) and a
-// hue to a color, by multiply and add only, so it is linear in the value and a
-// blade can blend between its root's and its tip's colors exactly. `base` is
-// the grass's own green (the middle of the ramp), `warm` the color warm grass
-// leans to, `lighten` how much lighter than `base` the lightest tip is.
-fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, warm: vec3<f32>, lighten: f32) -> vec3<f32> {
-  let coolTint = vec3<f32>(0.82, 1.0, 1.12);
-  let warmTint = mix(vec3<f32>(1.10, 1.04, 0.82), normalize(warm + vec3<f32>(0.001)) * 1.732, 0.25);
-  let tint = mix(coolTint, warmTint, hue);
+// hue to a color, by multiply and add. Two straight pieces: from dark to `base`
+// (the grass's own green) up to 0.5, then from `base` to the light tip, which
+// is `lighten` times as light. A root's value stays under 0.5, so its color
+// needs only `base`: a ground painted as grass (gbuffer_static_surface.wgsl)
+// matches the blades' roots without knowing how light their tips are. Within
+// each piece it is linear, so a blade blends between its root's and its tip's
+// colors (grass_render.wgsl). The hue tints from cool blue-green to warm
+// yellow-green.
+fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<f32> {
+  let tint = mix(vec3<f32>(0.84, 1.0, 1.10), vec3<f32>(1.10, 1.04, 0.80), hue);
   let dark = base * 0.42 * vec3<f32>(0.85, 1.0, 1.10);
   let light = base * lighten + vec3<f32>(0.06, 0.08, 0.03);
-  return mix(dark, light, value) * tint;
+  let lower = mix(dark, base, clamp(value * 2.0, 0.0, 1.0));
+  let upper = mix(base, light, clamp(value * 2.0 - 1.0, 0.0, 1.0));
+  return select(lower, upper, value > 0.5) * tint;
 }
-// The painted value where a blade's root is, with no blade of its own: what a
-// ground shader paints under and past the blades
+// The painted value at a blade's root, and of the ground there (under 0.5,
+// so its color is the lower piece of grassPaintColor, which needs only the
+// base color): what a ground shader paints under and past the blades
 fn grassPaintRootValue(paint: vec2<f32>) -> f32 {
   return clamp(0.12 + (paint.x - 0.5) * 0.60, 0.0, 1.0);
 }

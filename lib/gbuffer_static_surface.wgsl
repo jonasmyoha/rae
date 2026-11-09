@@ -194,6 +194,18 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     let texel = textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv));
     if (texel.a < 0.5) { discard; }
     o.albedo *= texel.rgb;
+    // A texel of alpha about 0.75 is ground painted as grass: its color is the
+    // grass's base color, painted here with the painted grass's own field and
+    // palette at this point (grass_field.wgsl), as the blades' roots are, and
+    // lit by the blades' up normal, so the blades melt into it. Alpha 1 is a
+    // plain texel; the filtered alpha between them blends the two at the edge.
+    let painted = 1.0 - smoothstep(0.78, 0.95, texel.a);
+    if (painted > 0.0) {
+      let paint = grassPaintAt(in.wpos.xy);
+      let ground = grassPaintColor(grassPaintRootValue(paint), paint.y, o.albedo, 1.0);
+      o.albedo = mix(o.albedo, ground, painted);
+      o.nrm = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), painted));
+    }
   } else if (d.params.w > 9.5) {
     o.albedo = gbEmblem(in.uv, o.albedo, d.params.w);
   } else if (d.params.w > 2.5 && d.params.w < 3.5) {

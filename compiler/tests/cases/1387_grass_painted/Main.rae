@@ -20,6 +20,18 @@ func main() ret Int {
     ]
   )
   log(render.text.contains(sub: "fn grassPaintColor"))
+  # a ground painted as grass: the static surface paints a texel of alpha 0.75
+  # with the same field and palette
+  let groundShader: Shader = shader(files: [
+    "lib/gbuffer_octahedral.wgsl"
+    "lib/fade_dither.wgsl"
+    "lib/wind.wgsl"
+    "lib/grass_field.wgsl"
+    "lib/snow.wgsl"
+    "lib/gbuffer_static_surface.wgsl"
+    "lib/gbuffer_static.wgsl"
+  ])
+  log(groundShader.text.contains(sub: "grassPaintColor(grassPaintRootValue(paint)"))
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
   ret 0
