@@ -31,6 +31,7 @@ open gpu/GpuReadback
 open gpu/GpuRender
 open gpu/GpuRenderPass
 open gpu/GpuArgs
+open GrassBenders
 open gpu/GpuIds
 import Profile
 import GrassConfig
@@ -57,7 +58,7 @@ const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferReco
 
 const grassUniformFloats: Int = 44  # eleven vec4 (camera, wind, blade, patch and distance controls, palette, drift)
 
-const grassUniformBytes: Int = 192
+const grassUniformBytes: Int = 320
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
@@ -93,6 +94,8 @@ type GrassCompute {
   # compute shader's surface part reads at @binding(4) — a baked height and
   # grass map, say. Empty: no such binding.
   surfaceField: List(Float)
+  # What bends the blades near it this frame (grassSetBenders): x, y, radius, strength
+  benders: List(Float)
   surfaceFieldBuffer: BufferId
   made: Bool
   drawBindMade: Bool
@@ -131,6 +134,7 @@ func createGrassCompute() ret GrassCompute {
     computeShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
     computeConstants: List.create(ShaderConstant, cap: 0)
     surfaceField: List.create(Float, cap: 0)
+    benders: List.create(Float, cap: grassBenderCount * 4)
     surfaceFieldBuffer: noBufferId()
     made: false
     drawBindMade: false
@@ -771,14 +775,13 @@ func grassGenerate(
   )
   # k: the air's drift and the unscaled wind: the gust field's, the same as
   # the trees' (lib/wind.wgsl windGustAt)
-  pushVec4F(
+  # l: a ring's inner edge and its fade band; bend: what bends the blades near it
+  pushGrassRingAndBenders(
     writer: grass.uniformArgs
-    x: settings.innerRadius
-    y: settings.innerFade
-    z: 0.0
-    w: 0.0
+    innerRadius: settings.innerRadius
+    innerFade: settings.innerFade
+    benders: grass.benders
   )
-  # l: a ring's inner edge and its fade band
   uploadArgs(
     writer: grass.uniformArgs
     resources: resources

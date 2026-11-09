@@ -58,6 +58,12 @@ func main() ret Int {
   log(ring.bladeWidthScale is meadow.bladeWidthScale * 3.0)
   let compute: Shader = GrassCompute.defaultGrassComputeShader()
   log(compute.text.contains(sub: "innerFade * viewShrink"))
+  # gust bands and what walks through bend the blades in the vertex stage
+  log(
+    render.text.contains(sub: "fn grassBend(") and render.text.contains(
+      sub: "bend: array<vec4<f32>, 8>"
+    )
+  )
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
   ret 0

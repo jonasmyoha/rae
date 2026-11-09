@@ -22,6 +22,9 @@ struct GrassU {
   k: vec4<f32>,
   // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
   l: vec4<f32>,
+  // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
+  // radius (m) and the strength (0 to 1); a radius of 0 is none
+  bend: array<vec4<f32>, 8>,
 };
 struct Indirect {
   vertexCount: u32,
