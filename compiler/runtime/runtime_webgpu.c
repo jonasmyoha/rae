@@ -62,6 +62,29 @@ static int g_wgpu_device_done;
 static void rae_wgpu_on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m, void* u1, void* u2) {
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_dev = d; g_wgpu_device_done = 1;
 }
+/* The device's lost and uncaptured-error callbacks: without them a lost
+ * device (an iOS GPU watchdog, a driver reset) or a validation error was
+ * silent, and the next wgpu call that checks the device aborted the app with
+ * no reason in the log. They say why, on stderr. */
+static int g_wgpu_device_lost = 0;
+static int g_wgpu_uncaptured_errors = 0;
+static void rae_wgpu_on_device_lost(WGPUDevice const* d, WGPUDeviceLostReason reason, WGPUStringView m,
+                                    void* u1, void* u2) {
+    (void)d; (void)u1; (void)u2;
+    g_wgpu_device_lost = 1;
+    fprintf(stderr, "[wgpu] device lost (reason %d): %.*s\n", (int)reason,
+            m.data ? (int)(m.length == WGPU_STRLEN ? strlen(m.data) : m.length) : 0, m.data ? m.data : "");
+}
+static void rae_wgpu_on_uncaptured_error(WGPUDevice const* d, WGPUErrorType type, WGPUStringView m,
+                                         void* u1, void* u2) {
+    (void)d; (void)u1; (void)u2;
+    if (++g_wgpu_uncaptured_errors > 20) return;
+    fprintf(stderr, "[wgpu] error (type %d): %.*s\n", (int)type,
+            m.data ? (int)(m.length == WGPU_STRLEN ? strlen(m.data) : m.length) : 0, m.data ? m.data : "");
+}
+/* Whether the device has been lost (rae_wgpu_on_device_lost) */
+int64_t rae_wgpu_device_is_lost(void) { return g_wgpu_device_lost; }
+
 static int g_wgpu_map_done;
 static void rae_wgpu_on_map(WGPUMapAsyncStatus st, WGPUStringView m, void* u1, void* u2) {
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_map_done = 1;
@@ -109,6 +132,9 @@ static int rae_wgpu_init(void) {
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof(dd));
     dd.requiredFeatureCount = g_wgpu_feature_count;
     dd.requiredFeatures = g_wgpu_feature_count ? g_wgpu_features : NULL;
+    dd.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    dd.deviceLostCallbackInfo.callback = rae_wgpu_on_device_lost;
+    dd.uncapturedErrorCallbackInfo.callback = rae_wgpu_on_uncaptured_error;
     WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
     dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_device;
     wgpuAdapterRequestDevice(g_wgpu_adapter, &dd, dci);

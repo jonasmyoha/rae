@@ -1326,6 +1326,7 @@ int64_t rae_gpu_metal_timing_taken(int64_t index);
 int64_t rae_surface_window_visible(void);
 void rae_surface_reconfigure(void);
 void rae_surface_note_presented(void);
+int64_t rae_wgpu_device_is_lost(void);
 void rae_g2d_tick(void);
 /* #915: the design->physical transform (8 floats = 2*vec4) the canvas writes
  * into its viewport uniform each flush; batches, clips and scissor are Rae. */
