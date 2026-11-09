@@ -62,6 +62,39 @@ fn grassGroundColor(base: vec3<f32>, position: vec2<f32>, scale: f32, coverage: 
   return mix(open, tuft, cover) * (0.94 + fine * 0.10);
 }
 
+// The painted grass's field at a point on the ground (GrassShape.painted).
+// Sampled at a blade's ROOT, never where its bent tip is, so a ground shader
+// calling it at the same point gets the same answer and the blades melt into
+// the ground. x: the patch value, 0 dark to 1 light, from soft patches at two
+// scales (about 14 m and 4 m) and thin streaks along x (brush strokes); y: the
+// hue, 0 cool to 1 warm, over a larger scale (about 45 m).
+fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
+  let broad = perlin2(position / 14.0, 701u);
+  let fine = perlin2(position / 4.0, 709u);
+  let streak = perlin2(position * vec2<f32>(0.35, 1.4), 719u);
+  let patchValue = clamp(0.5 + 0.75 * (broad * 0.62 + fine * 0.28 + streak * 0.10), 0.0, 1.0);
+  let hue = clamp(0.5 + 0.6 * perlin2(position / 45.0, 727u), 0.0, 1.0);
+  return vec2<f32>(patchValue, hue);
+}
+// The painted palette: a value (0 the darkest root, 1 the lightest tip) and a
+// hue to a color, by multiply and add only, so it is linear in the value and a
+// blade can blend between its root's and its tip's colors exactly. `base` is
+// the grass's own green (the middle of the ramp), `warm` the color warm grass
+// leans to, `lighten` how much lighter than `base` the lightest tip is.
+fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, warm: vec3<f32>, lighten: f32) -> vec3<f32> {
+  let coolTint = vec3<f32>(0.82, 1.0, 1.12);
+  let warmTint = mix(vec3<f32>(1.10, 1.04, 0.82), normalize(warm + vec3<f32>(0.001)) * 1.732, 0.25);
+  let tint = mix(coolTint, warmTint, hue);
+  let dark = base * 0.42 * vec3<f32>(0.85, 1.0, 1.10);
+  let light = base * lighten + vec3<f32>(0.06, 0.08, 0.03);
+  return mix(dark, light, value) * tint;
+}
+// The painted value where a blade's root is, with no blade of its own: what a
+// ground shader paints under and past the blades
+fn grassPaintRootValue(paint: vec2<f32>) -> f32 {
+  return clamp(0.12 + (paint.x - 0.5) * 0.60, 0.0, 1.0);
+}
+
 // Integer world cells, never camera-relative seeds. Exclusions run AFTER this.
 fn grassCandidatePosition(cell: vec2<i32>, spacing: f32, clusterStrength: f32) -> vec2<f32> {
   let position = vec2<f32>(cell) * spacing;

@@ -120,6 +120,12 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   if (GW.i.w < 0.5) {
     let corner = quadUv(vi);
     lp = vec3<f32>((corner.x - 0.5) * mix(1.0, 0.08, corner.y), 0.0, corner.y);
+  } else if (GW.i.w > 3.5) {
+    // The painted blade: one opaque triangle, its tip leaning by the blade's
+    // curve (wind bends it further below)
+    let corner = vi % 3u;
+    lp = vec3<f32>(select(select(-0.5, 0.5, corner == 1u), d.params.w * 0.6, corner == 2u),
+      0.0, select(0.0, 1.0, corner == 2u));
   } else if (GW.i.w > 2.5) {
     lp = tuftLocal(vi, d.params.w);
     let corner = quadUv(vi);
@@ -189,7 +195,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   var albedo = mix(botCol, topCol, height) * grounded;
   // Sample outside the uniform branch so derivatives remain valid in both paths.
   let tuft = textureSample(tuftImage, tuftSampler, in.uv, 0);
-  if (GW.i.w > 2.5) {
+  if (GW.i.w > 2.5 && GW.i.w < 3.5) {
     if (tuft.a < 0.5) { discard; }
     let tone = clamp(dot(tuft.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) / 0.16, 0.62, 1.18);
     albedo = mix(botCol, topCol, height) * mix(0.94, tone, smoothstep(0.0, 0.32, height));
@@ -207,6 +213,10 @@ fn gbufferSurface(in: VsOut) -> FsOut {
     let tipCol = d.fade.yzw * GW.g.w;
     albedo = mix(botCol, tipCol, pow(height, 1.8));
   }
+  // The painted blade: its root's and its tip's colors from the compute pass
+  // (grass_compute.wgsl, grass_field.wgsl's palette), which is linear in the
+  // value, so the blend between them is the palette's own gradient
+  if (GW.i.w > 3.5) { albedo = mix(botCol, d.fade.yzw, height); }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);

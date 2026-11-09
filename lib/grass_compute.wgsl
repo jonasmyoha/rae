@@ -200,7 +200,27 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let warmTint = select(vec3<f32>(0.93, 0.99, 1.08), vec3<f32>(1.08, 1.02, 0.84), tipWarmth > 0.0);
   let tipColor = grassFieldGreen(bladePosition, bladeBiome) * tipBrightness
     * mix(vec3<f32>(1.0), warmTint, abs(tipWarmth));
-  outBuf[slot].fade = vec4<f32>(grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy), tipColor);
+  let gust = grassGustAt(pos.xy, vec4<f32>(G.k.zw, 0.0, G.f.w), G.k.xy);
+  outBuf[slot].fade = vec4<f32>(gust, tipColor);
+  // The painted blade (GrassShape.painted, i.w 4): its look is a value that
+  // runs from dark at the root to light at the tip, which the patch it stands
+  // in, the wind on it, its height and its bend each push up or down by their
+  // own amount; grass_field.wgsl's palette turns the value into color. All of
+  // it is the blade's own, read at its ROOT, so a ground shader asking
+  // grass_field.wgsl at the same point gets the root's color. The palette is
+  // linear in the value, so the root's and the tip's colors are all the
+  // render pass needs (grass_render.wgsl blends between them).
+  if (G.i.w > 3.5) {
+    let paint = grassPaintAt(bladePosition);
+    let windLight = gust * 0.30 + length(G.f.xy) * 0.03;
+    let heightLight = (fieldHeight * bladeHeight - 1.0) * 0.18;
+    let bendLight = abs(curve) * 0.12;
+    let offset = (paint.x - 0.5) * 0.80 + windLight + heightLight + bendLight;
+    let rootValue = clamp(grassPaintRootValue(paint) + windLight * 0.25, 0.0, 1.0);
+    let tipValue = clamp(0.90 + offset, 0.0, 1.25);
+    outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.j.xyz, G.g.w), 0.0);
+    outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, G.e.xyz, G.j.xyz, G.g.w));
+  }
 }
 
 // --- gust field begin: lib/wind.wgsl's gust field (windGustAt), renamed

@@ -1,0 +1,26 @@
+# The painted grass shape: one opaque triangle a blade, its look all in its
+# shading. Its paint field and palette live in lib/grass_field.wgsl, which both
+# the grass compute pass and the grass render pass compose, so a ground shader
+# can ask the same functions at a blade's root.
+import GrassConfig
+import GrassCompute
+
+func main() ret Int {
+  log(GrassConfig.grassVertexCount(shape: GrassConfig.GrassShape.painted as Int))
+  log(GrassConfig.grassVertexCount(shape: GrassConfig.GrassShape.textured as Int))
+  let standard: Shader = GrassCompute.defaultGrassComputeShader()
+  log(standard.text.contains(sub: "fn grassPaintAt"))
+  log(standard.text.contains(sub: "grassPaintColor(tipValue"))
+  let render: Shader = shader(
+    files: [
+      "lib/grass_field.wgsl"
+      "lib/grass_motion.wgsl"
+      "lib/snow.wgsl"
+      "lib/grass_render.wgsl"
+    ]
+  )
+  log(render.text.contains(sub: "fn grassPaintColor"))
+  # the textured shape's cut-out stays its own: a painted blade discards nothing
+  log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
+  ret 0
+}
