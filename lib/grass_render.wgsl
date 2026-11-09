@@ -30,6 +30,9 @@ struct GrassU {
   k: vec4<f32>,
   // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
   l: vec4<f32>,
+  // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
+  // radius (m) and the strength (0 to 1); a radius of 0 is none
+  bend: array<vec4<f32>, 8>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
@@ -114,6 +117,42 @@ fn ribbonTuft(vertex: u32, curve: f32) -> vec3<f32> {
   let across = local.x * 0.22 + reach;
   return vec3<f32>(cos(angle) * across, sin(angle) * across, local.z * height);
 }
+// A blade's point `p` (world, its root at `root`) bent at `time`: downwind by
+// the wind's gust bands, the same bands that lighten the painted grass
+// (grass_field.wgsl grassPaintShimmer, so the bend and the light roll across
+// the field together), and away from anything in GW.bend's circles, pushed
+// over and lower the nearer its middle. The bend grows with the point's
+// height above the root, so the root stays put. w: how much it is pushed
+// aside (0 to 1), for the camera tilt to leave it alone.
+const grassGustBend: f32 = 0.6;
+const grassPushBend: f32 = 1.3;
+fn grassBend(p: vec3<f32>, root: vec3<f32>, time: f32) -> vec4<f32> {
+  let height = max(p.z - root.z, 0.0);
+  var out = p;
+  let windStrength = length(GW.k.zw);
+  if (windStrength > 0.05) {
+    let band = grassPaintShimmer(root.xy, GW.k.zw, time) / grassShimmerLight;
+    out = vec3<f32>(out.xy + (GW.k.zw / windStrength) * band * grassGustBend * height, out.z);
+  }
+  var push = 0.0;
+  var away = vec2<f32>(0.0);
+  for (var index = 0u; index < 8u; index = index + 1u) {
+    let circle = GW.bend[index];
+    if (circle.z <= 0.0) { continue; }
+    let fromMiddle = root.xy - circle.xy;
+    let distance = length(fromMiddle);
+    if (distance >= circle.z) { continue; }
+    let amount = (1.0 - distance / circle.z) * (1.0 - distance / circle.z) * circle.w;
+    if (amount > push) {
+      push = amount;
+      away = fromMiddle / max(distance, 0.05);
+    }
+  }
+  if (push > 0.0) {
+    out = vec3<f32>(out.xy + away * push * grassPushBend * height, root.z + (out.z - root.z) * (1.0 - 0.7 * push));
+  }
+  return vec4<f32>(out, push);
+}
 // A blade's point `p` (world) tilted toward a camera at `camera` looking down
 // at its root `root`: the steeper the view, the further the blade leans away
 // from the camera about its root (up to 70 degrees at `tilt` 1, straight
@@ -182,6 +221,10 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let gust = d.fade.x;
   let offsetNow = grassWindOffset(base, lp.z, timeNow, wind, gust);
   var pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
+  // the wind's gust bands and anything walking or driving through bend it
+  let rootNow = d.model[3].xyz;
+  let bentNow = grassBend(pNow, rootNow, timeNow);
+  pNow = bentNow.xyz;
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   var localNormal = bladeNormal(lp.z, d.params.w);
   if (GW.i.w < 0.5 || GW.i.w > 1.5) { localNormal = vec3<f32>(0.0, 0.0, 1.0); }
@@ -196,7 +239,8 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // of showing their edges (GrassViewSettings cameraTilt, GW.a.w)
   if (GW.a.w > 0.0) {
     let root = d.model[3].xyz;
-    pNow = grassTiltToCamera(pNow, root, d.model[0].xy, GW.c.xyz, GW.a.w, GW.i.w > 3.5);
+    // a blade being pushed aside does not turn to the camera
+    pNow = grassTiltToCamera(pNow, root, d.model[0].xy, GW.c.xyz, GW.a.w * (1.0 - bentNow.w), GW.i.w > 3.5);
     o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   }
   let restNormal = normalize((d.model * vec4<f32>(localNormal, 0.0)).xyz);
@@ -206,8 +250,10 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
   let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind, gust);
   var pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
+  let bentPrev = grassBend(pPrev, d.prevModel[3].xyz, timePrev);
+  pPrev = bentPrev.xyz;
   if (GW.a.w > 0.0) {
-    pPrev = grassTiltToCamera(pPrev, d.prevModel[3].xyz, d.prevModel[0].xy, GW.c.xyz, GW.a.w, GW.i.w > 3.5);
+    pPrev = grassTiltToCamera(pPrev, d.prevModel[3].xyz, d.prevModel[0].xy, GW.c.xyz, GW.a.w * (1.0 - bentPrev.w), GW.i.w > 3.5);
   }
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
