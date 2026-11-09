@@ -1,0 +1,104 @@
+# app3d/SettingsRendering — the settings panel's rendering choices: the renderer's quality
+# step, and how much grass an app draws (a share of its grass blades, in steps). Their
+# actions and their buttons' look. An app reads settingsGrassShare and scales its grass
+# fields' densityScale by it; 0 draws no blades.
+import Sys
+open ui/Ecs
+open app3d/SettingsDialog
+
+# The grass density steps (%): none, a tenth (with a ground painted as grass, a tenth of the
+# blades still reads as grass), a third, more than half, and all
+func settingsGrassStep(percent: view Int) ret Bool {
+  ret percent is 0 or percent is 10 or percent is 30 or percent is 60 or percent is 100
+}
+
+# RAE_GRASS_DENSITY=<0|10|30|60|100> starts on another step (for measuring), else all
+func settingsGrassDensityFromEnv() ret Int {
+  let text: String = Sys.getEnv(name: "RAE_GRASS_DENSITY").trim()
+  if text.length() > 0 and settingsGrassStep(percent: text.toInt()) {
+    ret text.toInt()
+  }
+  ret 100
+}
+
+# The share of an app's grass blades to draw, 0 to 1
+func settingsGrassShare(settingsState: view SettingsState) ret Float {
+  ret settingsState.grassDensity.toFloat() / 100.0
+}
+
+# A rendering action from the panel: true when it was one
+func settingsRenderingAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
+  if actionId is "settings.quality.low" {
+    settingsState.quality = SettingsQuality.low
+    ret true
+  }
+  if actionId is "settings.quality.mid" {
+    settingsState.quality = SettingsQuality.mid
+    ret true
+  }
+  if actionId is "settings.quality.high" {
+    settingsState.quality = SettingsQuality.high
+    ret true
+  }
+  if actionId is "settings.quality.ultra" {
+    settingsState.quality = SettingsQuality.ultra
+    ret true
+  }
+  if actionId.startsWith(prefix: "settings.grass.") {
+    let percent: Int = actionId.sub(start: 15, len: actionId.length() - 15).toInt()
+    if settingsGrassStep(percent: percent) {
+      settingsState.grassDensity = percent
+      ret true
+    }
+  }
+  ret false
+}
+
+# The rendering buttons: the chosen quality step and grass density lit
+func settingsRenderingApplyToWorld(settingsState: view SettingsState, world: mod UiWorld) {
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityLow"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.low)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityMid"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.mid)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityHigh"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.high)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityUltra"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.ultra)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsGrass0"
+    slot: settingsSlotFor(on: settingsState.grassDensity is 0)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsGrass10"
+    slot: settingsSlotFor(on: settingsState.grassDensity is 10)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsGrass30"
+    slot: settingsSlotFor(on: settingsState.grassDensity is 30)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsGrass60"
+    slot: settingsSlotFor(on: settingsState.grassDensity is 60)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsGrass100"
+    slot: settingsSlotFor(on: settingsState.grassDensity is 100)
+  )
+}

@@ -15,6 +15,7 @@ import Sys
 open CloudTier
 open Calendar
 open app3d/SettingsDialog
+open app3d/SettingsRendering
 open app3d/SettingsSky
 open app3d/SettingsWeather
 open app3d/SettingsWind
@@ -76,7 +77,7 @@ func serializeSettingsState(settingsState: view SettingsState, editor: view Bool
     options: settingsState.clouds
   )} cloudSteps={settingsState.clouds.steps} cloudShadows={settingsFlag(
     value: settingsState.clouds.shadows
-  )} shadows={settingsFlag(value: settingsState.shadows)} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()}"
+  )} shadows={settingsFlag(value: settingsState.shadows)} antialias={settingsState.antialias.toString()} quality={settingsState.quality.toString()} grassDensity={settingsState.grassDensity}"
   let light: String = "sky={settingsState.skyModel.toString()} sunLux={settingsState.sunNoonLux} exposure={settingsState.exposureCompensation} autoExposure={settingsFlag(
     value: settingsState.autoExposure
   )} moon={settingsFlag(value: settingsState.moon)} moons={settingsState.moonCount} eclipse={settingsState.eclipse}"
@@ -188,6 +189,10 @@ func restoreSettingsState(
       )
     } else if name is "quality" and not settingsEnvSets(name: "RAE_QUALITY") {
       settingsState.quality = settingsQualityNamed(name: value, fallback: settingsState.quality)
+    } else if name is "grassDensity" and not settingsEnvSets(name: "RAE_GRASS_DENSITY") {
+      if settingsGrassStep(percent: value.toInt()) {
+        settingsState.grassDensity = value.toInt()
+      }
     } else if name is "sky" and not settingsEnvSets(name: "RAE_SKY") {
       settingsState.skyModel = settingsSkyNamed(name: value, fallback: settingsState.skyModel)
     } else if name is "sunLux" and not settingsEnvSets(name: "RAE_SUN_LUX") {
