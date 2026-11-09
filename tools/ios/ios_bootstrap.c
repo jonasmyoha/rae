@@ -25,8 +25,16 @@ static void rae_ios_bootstrap(void) {
     if (home && *home) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/Documents/rae.log", home);
-        if (freopen(path, "w", stdout)) setvbuf(stdout, NULL, _IOLBF, 0);
-        (void)freopen(path, "a", stderr);
+        /* stderr goes into the SAME open file as stdout: opened twice (stdout
+         * "w", stderr "a") the two wrote at their own offsets and stdout wrote
+         * over stderr's lines, so a crash's own message (Rust's "panicked at
+         * ...: <why>") was lost and lines landed out of order. */
+        if (freopen(path, "w", stdout)) {
+            setvbuf(stdout, NULL, _IOLBF, 0);
+            fflush(stderr);
+            dup2(fileno(stdout), fileno(stderr));
+            setvbuf(stderr, NULL, _IONBF, 0);
+        }
         /* Frame profiler (#527): the cwd is the read-only bundle, so a relative
          * RAE_PROFILE_OUT would fail to write. When a capture is requested
          * (RAE_PROFILE set, e.g. by run-ios.sh --profile) and no explicit output

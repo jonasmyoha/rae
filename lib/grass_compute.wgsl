@@ -225,7 +225,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let windLight = gust * 0.30 + length(G.f.xy) * 0.03;
     let heightLight = (fieldHeight * bladeHeight - 1.0) * 0.18;
     let bendLight = abs(curve) * 0.12;
-    let offset = (paint.x - 0.5) * 0.80 + windLight + heightLight + bendLight;
+    let offset = (paint.x - 0.5) * 1.10 + windLight + heightLight + bendLight;
     // The root is the ground's own value there, nothing of the blade's: a
     // ground painted with grass_field.wgsl at this point has its color
     // the wind's shimmer, the same as on the ground painted as grass

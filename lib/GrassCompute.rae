@@ -94,6 +94,8 @@ type GrassCompute {
   # compute shader's surface part reads at @binding(4) — a baked height and
   # grass map, say. Empty: no such binding.
   surfaceField: List(Float)
+  # Candidate blades a frame, a square (GrassBenders grassSetBladeSide)
+  bladeCount: Int = grassGpuBladeCount
   # What bends the blades near it this frame (grassSetBenders): x, y, radius, strength
   benders: List(Float)
   surfaceFieldBuffer: BufferId
@@ -489,7 +491,7 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
     log("[grass] tuft image could not be loaded")
     ret
   }
-  let instBytes: Int = grassGpuBladeCount * grassRecordBytes
+  let instBytes: Int = grass.bladeCount * grassRecordBytes
   if let instances: BufferId = createBuffer(
     resources: resources
     size: instBytes
@@ -699,7 +701,7 @@ func grassGenerate(
   )
   pushVec4F(
     writer: grass.uniformArgs
-    x: grassGpuBladeCount.toFloat()
+    x: grass.bladeCount.toFloat()
     y: settings.extent
     z: toonF
     w: deltaTime
@@ -813,7 +815,7 @@ func grassGenerate(
       pipeline: grass.computePipeline
       bindGroup: grass.computeBind
       bounds: grass.bounds
-      elementCount: grassGpuBladeCount
+      elementCount: grass.bladeCount
     ) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
     }
@@ -824,7 +826,7 @@ func grassGenerate(
       if let count: Int = grassReadVisible(grass: grass, resources: resources) {
         let vertices: Int = count * GrassConfig.grassVertexCount(shape: shape)
         log(
-          "[grass-study] shape={shape} instances={count} vertices={vertices} storageBytes={grassGpuBladeCount * grassRecordBytes}"
+          "[grass-study] shape={shape} instances={count} vertices={vertices} storageBytes={grass.bladeCount * grassRecordBytes}"
         )
       }
     }
@@ -972,12 +974,12 @@ func grassDiagTick(grass: mod GrassCompute, resources: mod GpuResources, profile
       grass.visibleCache = visible
     }
   }
-  Profile.counter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
+  Profile.counter(profiler: profiler, name: "grass.generated", value: grass.bladeCount)
   Profile.counter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
   Profile.counter(
     profiler: profiler
     name: "grass.culled"
-    value: grassGpuBladeCount - grass.visibleCache
+    value: grass.bladeCount - grass.visibleCache
   )
 }
 
