@@ -1,0 +1,71 @@
+# A game without the slab (CloudSettings slabAllowed false, lib/CloudTier):
+# the quality's Mid step gives the layer, High the volumetric clouds; the
+# fallback steps from the volumetric clouds straight to the layer and back;
+# a tier chosen by hand is still drawn as chosen; a game that allows the slab
+# is as before.
+open CloudTier
+
+func overBudget(control: mod CloudTierControl, frames: view Int) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < frames, ++i {
+    if cloudTierFrame(control: control, cloudMicroseconds: 9000, thermal: 0) {
+      changed = true
+    }
+  }
+  ret changed
+}
+
+func underBudget(control: mod CloudTierControl, frames: view Int) {
+  loop var i: Int = 0, i < frames, ++i {
+    let changed: Bool = cloudTierFrame(control: control, cloudMicroseconds: 500, thermal: 0)
+  }
+}
+
+func main() {
+  let noSlab: CloudSettings = { slabAllowed: false }
+  let mid: CloudTierControl = createCloudTierControl(
+    settings: noSlab
+    mobile: false
+    qualityTier: cloudTierForQuality(level: 1, maxTier: CloudTier.volumetric)
+    forcedName: ""
+  )
+  log("no slab, mid: {mid.tier}")
+  var high: CloudTierControl = createCloudTierControl(
+    settings: noSlab
+    mobile: false
+    qualityTier: cloudTierForQuality(level: 2, maxTier: CloudTier.volumetric)
+    forcedName: ""
+  )
+  log("no slab, high: {high.tier}")
+  let fell: Bool = overBudget(control: high, frames: 120)
+  log("over budget: {high.tier}")
+  underBudget(control: high, frames: 5000)
+  log("good again: {high.tier}")
+  let toMid: Bool = cloudTierSetQuality(
+    control: high
+    qualityTier: cloudTierForQuality(level: 1, maxTier: CloudTier.volumetric)
+  )
+  log("quality to mid: {high.tier}")
+  var picked: CloudOptions = { auto: false, tier: CloudTier.slab }
+  let pickedChanged: Bool = cloudTierUseOptions(
+    control: high
+    options: picked
+    qualityTier: CloudTier.volumetric
+  )
+  log("picked by hand: {high.tier}")
+  picked.auto = true
+  let autoChanged: Bool = cloudTierUseOptions(
+    control: high
+    options: picked
+    qualityTier: cloudTierForQuality(level: 1, maxTier: CloudTier.volumetric)
+  )
+  log("auto at mid: {high.tier}")
+  var withSlab: CloudTierControl = createCloudTierControl(
+    settings: CloudSettings {}
+    mobile: false
+    qualityTier: CloudTier.volumetric
+    forcedName: ""
+  )
+  let fellWith: Bool = overBudget(control: withSlab, frames: 120)
+  log("a game with the slab, over budget: {withSlab.tier}")
+}
