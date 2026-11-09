@@ -43,6 +43,16 @@ func main() ret Int {
   log(meadow.cameraTilt is 0.0)
   # a field is a disc unless an app makes it a ring
   log(meadow.innerRadius is 0.0)
+  # a further tier starts in the middle of the inner one's edge fade (60-98 % of its radius)
+  let ring: GrassConfig.GrassViewSettings = GrassConfig.grassNextRing(
+    inner: meadow
+    reach: 120.0
+    widthScale: 3.0
+    heightScale: 1.5
+    densityScale: 0.5
+  )
+  log(ring.extent is 240.0 and ring.innerRadius is meadow.extent * 0.5 * 0.79)
+  log(ring.bladeWidthScale is meadow.bladeWidthScale * 3.0)
   let compute: Shader = GrassCompute.defaultGrassComputeShader()
   log(compute.text.contains(sub: "innerFade * viewShrink"))
   # the textured shape's cut-out stays its own: a painted blade discards nothing
