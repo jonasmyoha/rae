@@ -28,7 +28,8 @@ struct GrassU {
   j: vec4<f32>,
   // the air's drift (xy) and the unscaled wind (zw): the gusts' (lib/wind.wgsl)
   k: vec4<f32>,
-  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none
+  // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none;
+  // z the wind shimmer's strength (GrassViewSettings shimmer)
   l: vec4<f32>,
   // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
   // radius (m) and the strength (0 to 1); a radius of 0 is none
@@ -130,8 +131,8 @@ fn grassBend(p: vec3<f32>, root: vec3<f32>, time: f32) -> vec4<f32> {
   let height = max(p.z - root.z, 0.0);
   var out = p;
   let windStrength = length(GW.k.zw);
-  if (windStrength > 0.05) {
-    let band = grassPaintShimmer(root.xy, GW.k.zw, time) / grassShimmerLight;
+  if (windStrength > 0.05 && GW.l.z > 0.0) {
+    let band = grassPaintShimmer(root.xy, GW.k.zw, time) / grassShimmerLight * GW.l.z;
     out = vec3<f32>(out.xy + (GW.k.zw / windStrength) * band * grassGustBend * height, out.z);
   }
   var push = 0.0;
