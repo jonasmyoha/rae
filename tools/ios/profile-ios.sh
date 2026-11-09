@@ -97,9 +97,25 @@ stop_game() {
   [ -z "$(game_pid)" ] || echo "   warning: the app is still running; the next launch ends it"
 }
 
+# Copy the app's log to $1. A copy over Wi-Fi fails now and then and works a few seconds
+# later, so a failed copy is tried two more times, 5 s apart. devicectl's output is kept in
+# $1.copy.txt; when all three fail its ERROR line (else its last line) is printed, so a
+# STOPPED line says why.
 copy_log() {
-  device copy from --device "$DEVICE" --domain-type appDataContainer \
-    --domain-identifier "$APP" --source Documents/rae.log --destination "$1" > /dev/null 2>&1
+  local try
+  for try in 1 2 3; do
+    if device copy from --device "$DEVICE" --domain-type appDataContainer \
+      --domain-identifier "$APP" --source Documents/rae.log --destination "$1" > "$1.copy.txt" 2>&1; then
+      [ "$try" -gt 1 ] && echo "   the log copied on try $try"
+      return 0
+    fi
+    [ "$try" -lt 3 ] && sleep 5
+  done
+  local reason
+  reason=$(grep -m1 '^ERROR:' "$1.copy.txt")
+  [ -n "$reason" ] || reason=$(grep -v '^[[:space:]]*$' "$1.copy.txt" | tail -1)
+  echo "   devicectl, three tries: $reason"
+  return 1
 }
 PLACES=${PLACES:-"here|"}
 if [ "$SUMMARY_ONLY" != 1 ]; then
