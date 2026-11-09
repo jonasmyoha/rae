@@ -118,36 +118,22 @@ fn ribbonTuft(vertex: u32, curve: f32) -> vec3<f32> {
   let across = local.x * 0.22 + reach;
   return vec3<f32>(cos(angle) * across, sin(angle) * across, local.z * height);
 }
-// A blade's point `p` (world, its root at `root`) bent at `time`: downwind by
-// the wind's gust bands, the same bands that lighten the painted grass
-// (grass_field.wgsl grassPaintShimmer, so the bend and the light roll across
-// the field together), and away from anything in GW.bend's circles, pushed
-// over and lower the nearer its middle. The bend grows with the point's
-// height above the root, so the root stays put. w: how much it is pushed
-// aside (0 to 1), for the camera tilt to leave it alone.
+// A blade's point `p` (world, its root at `root`) bent downwind by the wind's
+// gust band `band` (the band that lightens the painted grass, so the bend and
+// the light roll across the field together) and away from what pushes it
+// (`push`, 0 to 1, the way `away`), over and lower the more it is pushed. The
+// compute pass works these out once per blade (grass_compute.wgsl, in the
+// record's prevModel). The bend grows with the point's height above the root,
+// so the root stays put. w: how much it is pushed aside, for the camera tilt
+// to leave it alone.
 const grassGustBend: f32 = 0.6;
 const grassPushBend: f32 = 1.3;
-fn grassBend(p: vec3<f32>, root: vec3<f32>, time: f32) -> vec4<f32> {
+fn grassBend(p: vec3<f32>, root: vec3<f32>, band: f32, push: f32, away: vec2<f32>) -> vec4<f32> {
   let height = max(p.z - root.z, 0.0);
   var out = p;
   let windStrength = length(GW.k.zw);
-  if (windStrength > 0.05 && GW.l.z > 0.0) {
-    let band = grassPaintShimmer(root.xy, GW.k.zw, time) / grassShimmerLight * GW.l.z;
+  if (windStrength > 0.05) {
     out = vec3<f32>(out.xy + (GW.k.zw / windStrength) * band * grassGustBend * height, out.z);
-  }
-  var push = 0.0;
-  var away = vec2<f32>(0.0);
-  for (var index = 0u; index < 8u; index = index + 1u) {
-    let circle = GW.bend[index];
-    if (circle.z <= 0.0) { continue; }
-    let fromMiddle = root.xy - circle.xy;
-    let distance = length(fromMiddle);
-    if (distance >= circle.z) { continue; }
-    let amount = (1.0 - distance / circle.z) * (1.0 - distance / circle.z) * circle.w;
-    if (amount > push) {
-      push = amount;
-      away = fromMiddle / max(distance, 0.05);
-    }
   }
   if (push > 0.0) {
     out = vec3<f32>(out.xy + away * push * grassPushBend * height, root.z + (out.z - root.z) * (1.0 - 0.7 * push));
@@ -224,7 +210,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   var pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
   // the wind's gust bands and anything walking or driving through bend it
   let rootNow = d.model[3].xyz;
-  let bentNow = grassBend(pNow, rootNow, timeNow);
+  // the blade's bend, from the compute pass (grass_compute.wgsl)
+  let bladeBend = d.prevModel[0];
+  let bentNow = grassBend(pNow, rootNow, bladeBend.x, bladeBend.z, d.prevModel[1].xy);
   pNow = bentNow.xyz;
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   var localNormal = bladeNormal(lp.z, d.params.w);
@@ -248,13 +236,15 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.nrm = normalize(restNormal + vec3<f32>(-offsetNow * lp.z * 0.9, 0.0));
   o.inst = ii;
   o.clipNow = o.pos;
-  let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
+  // a blade does not move between frames but by its bend: the previous
+  // position is model's (prevModel carries the bend)
+  let wPrev = d.model * vec4<f32>(lp, 1.0);
   let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind, gust);
   var pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
-  let bentPrev = grassBend(pPrev, d.prevModel[3].xyz, timePrev);
+  let bentPrev = grassBend(pPrev, rootNow, bladeBend.y, bladeBend.z, d.prevModel[1].xy);
   pPrev = bentPrev.xyz;
   if (GW.a.w > 0.0) {
-    pPrev = grassTiltToCamera(pPrev, d.prevModel[3].xyz, d.prevModel[0].xy, GW.c.xyz, GW.a.w * (1.0 - bentPrev.w), GW.i.w > 3.5);
+    pPrev = grassTiltToCamera(pPrev, rootNow, d.model[0].xy, GW.c.xyz, GW.a.w * (1.0 - bentPrev.w), GW.i.w > 3.5);
   }
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
