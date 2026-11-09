@@ -183,7 +183,35 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let slot = atomicAdd(&indirect.instanceCount, 1u);
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;
-  outBuf[slot].prevModel = m;
+  // The blade's bend, worked out once here rather than in every vertex,
+  // twice (grass_render.wgsl grassBend reads it). It rides in prevModel,
+  // which the grass needs no more of: a blade does not move between frames
+  // but by its bend, so the render takes the previous position from model.
+  // [0].x and .y: the wind's gust band now and a frame ago (the band that
+  // lightens the painted grass, grass_field.wgsl grassPaintShimmer, at the
+  // shimmer's strength); [0].z: how much it is pushed aside; [1].xy: the
+  // way away from what pushes it (GW.bend's circles).
+  var bend = mat4x4<f32>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
+  if (length(G.k.zw) > 0.05 && G.l.z > 0.0) {
+    let bandScale = G.l.z / grassShimmerLight;
+    bend[0].x = grassPaintShimmer(pos.xy, G.k.zw, G.f.w) * bandScale;
+    bend[0].y = grassPaintShimmer(pos.xy, G.k.zw, G.f.w - G.b.w) * bandScale;
+  }
+  for (var index = 0u; index < 8u; index = index + 1u) {
+    let circle = G.bend[index];
+    if (circle.z <= 0.0) { continue; }
+    let fromMiddle = pos.xy - circle.xy;
+    let distance = length(fromMiddle);
+    if (distance >= circle.z) { continue; }
+    let amount = (1.0 - distance / circle.z) * (1.0 - distance / circle.z) * circle.w;
+    if (amount > bend[0].z) {
+      bend[0].z = amount;
+      let away = fromMiddle / max(distance, 0.05);
+      bend[1].x = away.x;
+      bend[1].y = away.y;
+    }
+  }
+  outBuf[slot].prevModel = bend;
   // The terrain's own grass color where the blade stands (the painted
   // ground's field, terrain_grass_painted.wgsl), with no tint of its own:
   // the blade's root is the ground's color, so the grass grows out of the
