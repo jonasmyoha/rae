@@ -963,5 +963,14 @@ redo its first. An image whose pixels change under the same handle (a video) is 
 would keep an old blur. On a Mac a still screen with three blurred tiles then costs about what it
 does without them (the same number of command buffers; the tiles' own draws are ~16 us a frame).
 
+On the iPhone 15 Pro (2026-11-10, SUMU's weather screen with its `glassCard` tiles, the hour strip
+swiped six times, `RAE_GPU2D_TIMING=1`): the frames hold 120 Hz and the longest Metal command buffer
+a second is 5.1-7.0 ms with the blur against 6.2-7.2 ms without it, so the frame's work does not
+grow. The blur makes one copy every frame there, never kept: an image under the first tile (about
+232 x 101 points at 80, 375) moves about 0.04 points a frame, so what is under the tiles is never
+still. Each of the copy's passes is a Metal command buffer of its own in wgpu-native: 2,197-2,592
+buffers a second with the blur, 702-739 without (about 15 more a frame), and their summed time
+overlaps (2.5-3.3 s a second against 0.53-0.63 s), so it counts waits, not only work.
+
 `checks/backdropBlur` paints three tiles over stripes, reads the picture back, and counts the copies
 over 20 frames (the stripes move once, a box moves on top every frame).
