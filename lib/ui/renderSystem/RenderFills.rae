@@ -13,6 +13,9 @@ open ecs/ComponentTable
 open Gpu2dCanvas
 open Gpu2dCanvasRadial
 open ui/RadialGradientFill
+open ui/BackdropComponents
+open ui/RegistryValues
+open Gpu2dCanvasBackdrop
 
 # The color a gradient end paints: its palette slot when it names one, else
 # its literal color, through the node's opacity chain
@@ -223,5 +226,52 @@ func paintBackdropG(
     h: drawH
     radius: radius * hoverMul
     color: g2dColor(color: chained)
+  )
+}
+
+# BackdropBlur (ui/BackdropComponents): what is drawn under the node so far, blurred, rounded like
+# its Shape, with the tint over it; before the node's own Shape and children. When the frame cannot
+# be read this time (its first frame on a surface that cannot be sampled), only the tint is drawn.
+func paintBackdropBlurG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let blur: view BackdropBlur = componentView(this: world.backdropBlurs, entityId: entityId)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let radius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
+  let drawn: Bool = canvasBackdropBlur(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    blurRadius: blur.radius * box.scale
+    alpha: chain255.toFloat() / 255.0
+  )
+  if blur.tint.length() is 0 {
+    ret
+  }
+  var tint: RgbaColor = uiThemeColor(theme: world.theme, name: blur.tint)
+  if let literal: RgbaColor = parseHexColor(text: blur.tint) {
+    tint = literal
+  }
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    color: g2dColor(color: g2dChain(color: tint, chain255: chain255))
   )
 }

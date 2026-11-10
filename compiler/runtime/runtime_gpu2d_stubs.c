@@ -58,6 +58,7 @@ void rae_surface_note_presented(void) {}
 int64_t rae_g2d_surface_ready(void) { return 0; }
 int64_t rae_g2d_surface_width(void) { return 0; }
 int64_t rae_g2d_surface_height(void) { return 0; }
+int64_t rae_g2d_surface_bindable(void) { return 0; }
 void rae_g2d_tick(void) {}
 void rae_g2d_xform(float* out) { if (out) { for (int i = 0; i < 8; i++) out[i] = (i == 2 || i == 3) ? 1.0f : 0.0f; } }
 void* rae_g2d_decode_image(rae_String path) { (void)path; return (void*)0; }

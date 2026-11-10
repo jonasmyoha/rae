@@ -930,3 +930,27 @@ On the node with the `TextField` and its `Shape`: while the field has focus, the
 default) as focus comes and goes, from wherever it is. A field with no edge of its own fades one in. With motion off it changes at once.
 An unknown motion is an `unknownToken` diagnostic at load. Case 1384 holds the rules; `checks/uiFocusField` paints them
 (`docs/images/ui-focus/`).
+
+## 32. `BackdropBlur`: frosted glass
+
+```json
+"Tile": {
+  "BackdropBlur": { "radius": 24, "tint": "rowFill" },
+  "Shape": { "kind": "RoundedRect", "fill": "#00000000", "radius": 20 }
+}
+```
+
+Before its own `Shape` and children, the node paints what the frame has drawn under its box so far,
+blurred, rounded like its `Shape` (its radius, or `CornerRadius`), with `tint` over it. `radius` is
+how far the blur reaches, in design units (default 24). `tint` is a theme color name or `#RRGGBB` /
+`#RRGGBBAA`, `""` for none (the default). Nothing else is needed: the app does not capture or blur
+anything itself, unlike `BackdropImage`.
+
+How it is drawn (lib/Gpu2dCanvasBackdrop.rae): the canvas flushes, ends its pass, shrinks the frame
+to a quarter of its size and blurs it there (a separable Gaussian, one to three times across and
+down), opens its pass again and draws each node's own region of that copy. Every `BackdropBlur`
+node of a layer shares the one copy; a node in a later layer (a dialog's card over blurred tiles)
+takes a new one when that layer has drawn since. The frame's drawable must be sampleable: the
+surface asks for `TextureBinding` where it supports it, and where it does not, the frames after the
+first render into the offscreen target. The blur's size is that of the first node of a copy.
+`checks/backdropBlur` paints three tiles over stripes and reads the picture back.

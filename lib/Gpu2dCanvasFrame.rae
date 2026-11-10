@@ -21,12 +21,14 @@ open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 open Gpu2dCanvasText
 open Gpu2dCanvasTiming
+open Gpu2dCanvasBackdrop
 
 # ----- frame (#915) ----------------------------------------------------------
 
 # Frame start: reset the clip stack and drop anything queued by a frame that
 # never got a pass (no drawable yet) so it cannot pile up across skipped frames.
 func canvasFrameBegin(canvas: mod Gpu2dCanvas) {
+  backdropFrameBegin(backdrop: canvas.backdrop)
   canvas.batchLevel = -1
   canvas.batchAtlas = -1
   clearBoxBatch(canvas: canvas)
@@ -124,6 +126,7 @@ func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
 # batched, flush. A painter then flushes only where the order needs it, not after every node.
 # Clips and the rotation are taken when an item is queued, so a later flush draws it the same.
 func canvasKeepOrder(canvas: mod Gpu2dCanvas, level: view Int, atlas: view Int) {
+  canvas.backdrop.drawnSince = true
   if canvas.batchLevel > level or (level is 2 and canvas.batchAtlas >= 0 and canvas.batchAtlas is not atlas) {
     canvasFlush(canvas: canvas)
   }
