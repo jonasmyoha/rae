@@ -56,6 +56,16 @@ type Gpu2dBackdrop {
   newLayer: Bool = false
   # Copies made this frame (the timing and the case read it)
   copies: Int = 0
+  # Copies this frame that were last frame's, kept because nothing under them changed
+  reused: Int = 0
+  # Keeping the copy across frames: a signature of what the frame drew before its first copy
+  # (the clear color, then every flushed box, image and glyph), made only when the last frame used
+  # a backdrop. A first copy whose signature, size and blur match the last frame's is not redone.
+  usedThisFrame: Bool = false
+  signing: Bool = false
+  signature: Int = 0
+  lastSignature: Int = -1
+  lastBlur: Float = -1.0
 }
 
 func createGpu2dBackdrop() ret Gpu2dBackdrop {
@@ -68,6 +78,77 @@ func backdropFrameBegin(backdrop: mod Gpu2dBackdrop) {
   backdrop.drawnSince = true
   backdrop.newLayer = false
   backdrop.copies = 0
+  backdrop.reused = 0
+  backdrop.signing = backdrop.usedThisFrame
+  backdrop.usedThisFrame = false
+  backdrop.signature = 17
+  if backdrop.signing is false {
+    backdrop.lastSignature = -1
+  }
+}
+
+# The signature's step: a value folded in (a float to 1/1024)
+const backdropSignPrime: Int = 1000000007
+
+func backdropSignInt(backdrop: mod Gpu2dBackdrop, value: view Int) {
+  var folded: Int = (backdrop.signature * 31 + value) % backdropSignPrime
+  if folded < 0 {
+    folded = folded + backdropSignPrime
+  }
+  backdrop.signature = folded
+}
+
+func backdropSignFloats(backdrop: mod Gpu2dBackdrop, values: view List(Float)) {
+  backdropSignInt(backdrop: backdrop, value: values.length)
+  loop let value: view Float in values {
+    backdropSignInt(backdrop: backdrop, value: (value * 1024.0).toInt())
+  }
+}
+
+func backdropSignInts(backdrop: mod Gpu2dBackdrop, values: view List(Int)) {
+  backdropSignInt(backdrop: backdrop, value: values.length)
+  loop let value: view Int in values {
+    backdropSignInt(backdrop: backdrop, value: value)
+  }
+}
+
+# The frame opens with this clear (Gpu2dCanvasFrame canvasOpenFrame)
+func backdropSignOpen(
+  backdrop: mod Gpu2dBackdrop
+  clear: view Bool
+  r: view Float
+  g: view Float
+  b: view Float
+  width: view Int
+  height: view Int
+) {
+  if backdrop.signing is false {
+    ret
+  }
+  var cleared: Int = 0
+  if clear {
+    cleared = 1
+  }
+  backdropSignInt(backdrop: backdrop, value: cleared)
+  backdropSignInt(backdrop: backdrop, value: (r * 1024.0).toInt())
+  backdropSignInt(backdrop: backdrop, value: (g * 1024.0).toInt())
+  backdropSignInt(backdrop: backdrop, value: (b * 1024.0).toInt())
+  backdropSignInt(backdrop: backdrop, value: width)
+  backdropSignInt(backdrop: backdrop, value: height)
+}
+
+# What this flush draws (Gpu2dCanvasFrame canvasFlush, before it draws it)
+func backdropSignFlush(canvas: mod Gpu2dCanvas) {
+  if canvas.backdrop.signing is false {
+    ret
+  }
+  backdropSignFloats(backdrop: canvas.backdrop, values: canvas.prims)
+  backdropSignInts(backdrop: canvas.backdrop, values: canvas.primClips)
+  backdropSignFloats(backdrop: canvas.backdrop, values: canvas.imageCommands)
+  backdropSignInts(backdrop: canvas.backdrop, values: canvas.imageCommandHandles)
+  loop let atlas: view Gpu2dTextAtlas in canvas.textAtlases {
+    backdropSignFloats(backdrop: canvas.backdrop, values: atlas.glyphs)
+  }
 }
 
 # The render system begins another layer (a page, a dialog): its BackdropBlur nodes see what the
@@ -317,6 +398,25 @@ func backdropSource(canvas: mod Gpu2dCanvas) ret opt ResourceRef {
 # it cannot this frame
 func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
   canvasFlush(canvas: canvas)
+  # The frame's first copy: last frame's still holds when nothing under it changed
+  if canvas.backdrop.signing {
+    canvas.backdrop.signing = false
+    let same: Bool = canvas.backdrop.signature is canvas.backdrop.lastSignature and blurRadius is canvas.backdrop.lastBlur and canvas.backdrop.width is Math.max(
+      a: 1
+      b: canvas.offscreenWidth / backdropShrink
+    ) and canvas.backdrop.height is Math.max(a: 1, b: canvas.offscreenHeight / backdropShrink)
+    canvas.backdrop.lastSignature = canvas.backdrop.signature
+    canvas.backdrop.lastBlur = blurRadius
+    if same {
+      canvas.backdrop.copied = true
+      canvas.backdrop.drawnSince = false
+      canvas.backdrop.newLayer = false
+      canvas.backdrop.reused = canvas.backdrop.reused + 1
+      ret true
+    }
+  } else if canvas.backdrop.copies is 0 {
+    canvas.backdrop.lastSignature = -1
+  }
   var source: ResourceRef = skipRef()
   if let readable: ResourceRef = backdropSource(canvas: canvas) {
     source = readable
@@ -427,6 +527,10 @@ func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
     }
   }
   if made {
+    # A later layer's copy overwrites the first one's texture: the next frame cannot keep it
+    if canvas.backdrop.copies + canvas.backdrop.reused > 0 {
+      canvas.backdrop.lastSignature = -1
+    }
     canvas.backdrop.copied = true
     canvas.backdrop.drawnSince = false
     canvas.backdrop.newLayer = false
@@ -451,6 +555,7 @@ func canvasBackdropBlur(
   if not canvasFrameActive(canvas: canvas) or w <= 0.0 or h <= 0.0 {
     ret false
   }
+  canvas.backdrop.usedThisFrame = true
   let fresh: Bool = canvas.backdrop.copied and not (canvas.backdrop.newLayer and canvas.backdrop.drawnSince)
   if not fresh {
     if backdropCopy(canvas: canvas, blurRadius: blurRadius) is false {
@@ -486,6 +591,11 @@ func canvasBackdropBlur(
 # How many copies this frame has made so far (the case and the timing read it)
 func canvasBackdropCopies(canvas: view Gpu2dCanvas) ret Int {
   ret canvas.backdrop.copies
+}
+
+# How many of this frame's copies were last frame's, kept (nothing under them changed)
+func canvasBackdropReused(canvas: view Gpu2dCanvas) ret Int {
+  ret canvas.backdrop.reused
 }
 
 func backdropShutdown(backdrop: mod Gpu2dBackdrop, resources: mod GpuResources) {

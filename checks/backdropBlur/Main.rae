@@ -2,9 +2,13 @@
 # and white stripes, from the scene alone, through the real pipeline. The frame is written as a BMP
 # (RAE_GPU2D_SCREENSHOT, set here when it is not) and read back: across a tile the stripes are
 # blurred to an even gray, outside one they stay black and white, and the three tiles of one layer
-# took one blurred copy of the frame. Exit 0 when all of that holds.
+# took one blurred copy of the frame. Then the copy across frames: the stripes stand still but for
+# one move at frame 10, and a box moves on top of the tiles every frame. A frame keeps the last
+# one's copy when nothing under the tiles changed, so only the first two frames (no signature yet)
+# and frame 10 blur. Exit 0 when all of that holds.
 #
-#   RAE_HEADLESS_FRAMES=8 compiler/bin/rae run checks/backdropBlur/Main.rae
+#   RAE_GPU2D_SCREENSHOT=/tmp/backdrop.bmp RAE_HEADLESS_FRAMES=20 \
+#     compiler/bin/rae run checks/backdropBlur/Main.rae
 import Gpu2d
 import Sys
 open app3d/UiShell
@@ -108,6 +112,7 @@ func main() ret Int {
   let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
   var schedule: Schedule = createUiPipeline(world: world)
   var copies: Int = 0
+  var made: String = ""
   var frames: Int = 0
   loop not Gpu2d.pollClose() and frames < 600 {
     runScheduledUiSystems(
@@ -124,6 +129,9 @@ func main() ret Int {
       a: 1.0
     )
     var x: Float = 0.0
+    if frames >= 10 {
+      x = 2.0
+    }
     loop x < designW.toFloat() {
       Gpu2d.drawRect(
         canvas: canvas
@@ -141,7 +149,22 @@ func main() ret Int {
       res: gpuUi
       canvas: canvas
     )
+    # Over the tiles' layer, moving: it is drawn after the copy, so it never forces one
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 520.0 + (frames * 4).toFloat()
+      y: 520.0
+      w: 40.0
+      h: 40.0
+      color: 4294901760
+    )
     copies = canvasBackdropCopies(canvas: canvas)
+    made = "{made}{copies}"
+    if canvasBackdropReused(canvas: canvas) > 0 {
+      made = "{made}k "
+    } else {
+      made = "{made} "
+    }
     Gpu2d.endFrame(canvas: canvas)
     frames = frames + 1
   }
@@ -179,6 +202,7 @@ func main() ret Int {
   )
   log("gray across tile A {tileA}, tile B {tileB}, tile C {tileC}; across the stripes {outside}")
   log("blurred copies in the last frame: {copies} (root {isNone(this: root)})")
+  log("copies made each frame, k when the last one was kept: {made}")
   if spreadWidth(text: tileA) > 40 or spreadWidth(text: tileB) > 40 or spreadWidth(text: tileC) > 40 {
     log("BACKDROP BLUR FAILED: a tile still shows the stripes")
     ret 1
@@ -187,8 +211,14 @@ func main() ret Int {
     log("BACKDROP BLUR FAILED: the stripes outside the tiles are not black and white")
     ret 1
   }
-  if copies is not 1 {
-    log("BACKDROP BLUR FAILED: {copies} copies for three tiles in one layer")
+  # Frames 0 and 1 blur, 2-9 keep, 10 blurs, 11 on keep; three tiles, one layer
+  let expected: String = "1 1 0k 0k 0k 0k 0k 0k 0k 0k 1 0k 0k 0k 0k 0k 0k 0k 0k 0k "
+  if frames is 20 and made is not expected {
+    log("BACKDROP BLUR FAILED: copies {made}, expected {expected}")
+    ret 1
+  }
+  if frames is not 20 and copies + canvasBackdropReused(canvas: canvas) is not 1 {
+    log("BACKDROP BLUR FAILED: the tiles' layer did not take exactly one copy")
     ret 1
   }
   log("BACKDROP BLUR OK")
