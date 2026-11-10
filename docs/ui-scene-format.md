@@ -953,4 +953,15 @@ node of a layer shares the one copy; a node in a later layer (a dialog's card ov
 takes a new one when that layer has drawn since. The frame's drawable must be sampleable: the
 surface asks for `TextureBinding` where it supports it, and where it does not, the frames after the
 first render into the offscreen target. The blur's size is that of the first node of a copy.
-`checks/backdropBlur` paints three tiles over stripes and reads the picture back.
+
+A frame keeps the last frame's copy when nothing under the nodes changed (0.3.71): when the last
+frame used a backdrop, the canvas folds the frame's clear color and every box, image and glyph it
+flushes before its first copy into a signature, and a first copy whose signature, size and blur
+match the last frame's is not redone. What is drawn after the copy (a node's own Shape and text, a
+layer on top) never counts. A frame whose later layer took a second copy makes the next frame
+redo its first. An image whose pixels change under the same handle (a video) is not seen: it
+would keep an old blur. On a Mac a still screen with three blurred tiles then costs about what it
+does without them (the same number of command buffers; the tiles' own draws are ~16 us a frame).
+
+`checks/backdropBlur` paints three tiles over stripes, reads the picture back, and counts the copies
+over 20 frames (the stripes move once, a box moves on top every frame).

@@ -51,6 +51,15 @@ func canvasOpenFrame(
   if not canvasEnsureOffscreen(canvas: canvas) {
     ret
   }
+  backdropSignOpen(
+    backdrop: canvas.backdrop
+    clear: clear
+    r: r
+    g: g
+    b: b
+    width: canvas.offscreenWidth
+    height: canvas.offscreenHeight
+  )
   # The drawable when this frame renders straight into it (gpu/Surface)
   let colorView: ResourceRef = canvasFrameTargetRef(canvas: canvas, loads: not clear)
   if let resources: mod GpuResources = canvas.gpuResources {
@@ -147,6 +156,7 @@ func canvasFlush(canvas: mod Gpu2dCanvas) {
     ret
   }
   ensureBoxResources(canvas: canvas)
+  backdropSignFlush(canvas: canvas)
   if let resources: mod GpuResources = canvas.gpuResources {
     uploadViewport(canvas: canvas, resources: resources)
     boxFlushWith(canvas: canvas, resources: resources)
