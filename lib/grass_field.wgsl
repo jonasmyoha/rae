@@ -106,12 +106,16 @@ fn grassPaintAt(position: vec2<f32>) -> vec2<f32> {
 // each piece it is linear, so a blade blends between its root's and its tip's
 // colors (grass_render.wgsl). The hue tints from a cool, darker blue-green to
 // a warm, lighter yellow-green.
-fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32) -> vec3<f32> {
+// `warmth` (GrassViewSettings paintWarmth, 1 as drawn): how far the warm
+// areas go to yellow-green and the light tips to yellow-white; 0 keeps them
+// the base's own hue, lighter (a dark green that stays green)
+fn grassPaintColor(value: f32, hue: f32, base: vec3<f32>, lighten: f32, warmth: f32) -> vec3<f32> {
   // the cool areas a darker teal, the warm ones a lighter yellow-green
-  let tint = mix(vec3<f32>(0.76, 0.92, 0.96), vec3<f32>(1.22, 1.08, 0.68), hue);
+  let warm = mix(vec3<f32>(1.1, 1.1, 1.1), vec3<f32>(1.22, 1.08, 0.68), warmth);
+  let tint = mix(vec3<f32>(0.76, 0.92, 0.96), warm, hue);
   // the shade a soft teal-mint, the light tips toward yellow-white
   let dark = base * 0.52 * vec3<f32>(0.72, 1.0, 1.18);
-  let light = base * lighten + vec3<f32>(0.16, 0.13, 0.05);
+  let light = base * lighten + vec3<f32>(0.16, 0.13, 0.05) * warmth;
   let lower = mix(dark, base, clamp(value * 2.0, 0.0, 1.0));
   let upper = mix(base, light, clamp(value * 2.0 - 1.0, 0.0, 1.0));
   return select(lower, upper, value > 0.5) * tint;
