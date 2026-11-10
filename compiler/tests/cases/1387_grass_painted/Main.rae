@@ -43,12 +43,24 @@ func main() ret Int {
     )
   )
   log(standard.text.contains(sub: "grassPaintShimmer(gust)"))
+  # a dry ground's painted blades are its dry grass, the base mixed by moisture
+  log(
+    standard.text.contains(
+      sub: "paintBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, bladeBiome.moisture)"
+    )
+  )
+  # the warmth: the blades' from their settings, the ground's from its frame,
+  # 1 as drawn
+  log(standard.text.contains(sub: "grassPaintColor(tipValue, paint.y, paintBase, G.g.w, G.l.w)"))
+  log(groundShader.text.contains(sub: "paint.y, o.albedo, 1.0, F.weather.z)"))
   # blades lean toward a camera looking down, only when an app asks (cameraTilt)
   log(render.text.contains(sub: "fn grassTiltToCamera"))
   let meadow: GrassConfig.GrassViewSettings = GrassConfig.grassMeadowSettings(
     groundColor: Vec3.create(x: 0.1, y: 0.3, z: 0.1)
   )
   log(meadow.cameraTilt is 0.0)
+  # and as drawn: the warmth that makes the painted grass's yellow-green
+  log(meadow.paintWarmth is 1.0)
   # a field is a disc unless an app makes it a ring
   log(meadow.innerRadius is 0.0)
   # a further tier starts in the middle of the inner one's edge fade (60-98 % of its radius)

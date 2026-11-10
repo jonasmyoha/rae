@@ -3,6 +3,7 @@
 # strength 0 to 1) an app hands GrassCompute every frame (grassSetBenders); the grass
 # uniform carries them to the render pass's vertex stage (grass_render.wgsl grassBend).
 import Math
+import GrassConfig
 open gpu/GpuArgs
 open GrassCompute
 
@@ -33,21 +34,20 @@ func grassBendersKept(benders: view List(Float)) ret List(Float) {
   ret kept
 }
 
-# The grass uniform's tail: a ring's inner edge and its fade band (l), then the circles,
-# grassBenderCount vec4s, none as zeros (bend)
+# The grass uniform's tail: a ring's inner edge and its fade band, the shimmer and the
+# painted warmth from `settings` (l), then the circles, grassBenderCount vec4s, none as
+# zeros (bend)
 func pushGrassRingAndBenders(
   writer: mod ArgWriter
-  innerRadius: view Float
-  innerFade: view Float
-  shimmer: view Float
+  settings: view GrassConfig.GrassViewSettings
   benders: view List(Float)
 ) {
   pushVec4F(
     writer: writer
-    x: innerRadius
-    y: innerFade
-    z: shimmer
-    w: 0.0
+    x: settings.innerRadius
+    y: settings.innerFade
+    z: settings.shimmer
+    w: settings.paintWarmth
   )
   loop var bender: Int = 0, bender < grassBenderCount, ++bender {
     pushVec4F(

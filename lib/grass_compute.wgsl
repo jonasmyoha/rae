@@ -21,7 +21,8 @@ struct GrassU {
   // the air's drift (xy) and the unscaled wind (zw): the gust field's
   k: vec4<f32>,
   // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none;
-  // z the wind shimmer's strength (GrassViewSettings shimmer)
+  // z the wind shimmer's strength (GrassViewSettings shimmer); w the painted
+  // grass's warmth (GrassViewSettings paintWarmth)
   l: vec4<f32>,
   // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
   // radius (m) and the strength (0 to 1); a radius of 0 is none
@@ -266,8 +267,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let shimmer = grassPaintShimmer(gust) * G.l.z;
     let rootValue = grassPaintRootValue(paint) + shimmer;
     let tipValue = clamp(0.90 + offset + shimmer, 0.0, 1.25);
-    outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, G.e.xyz, G.g.w), 0.0);
-    outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, G.e.xyz, G.g.w));
+    // Its base: the frame's grass, toward its dry grass by the soil's moisture
+    // there, as grassFieldGreen's, so a dry ground's painted blades are dry
+    var paintBase = G.e.xyz;
+    if (G.j.w > 0.0) {
+      paintBase = groundPaletteGrass(G.e.rgb, G.j.rgb, G.j.w, bladeBiome.moisture);
+    }
+    outBuf[slot].albedoMetallic = vec4<f32>(grassPaintColor(rootValue, paint.y, paintBase, G.g.w, G.l.w), 0.0);
+    outBuf[slot].fade = vec4<f32>(gust, grassPaintColor(tipValue, paint.y, paintBase, G.g.w, G.l.w));
   }
 }
 
