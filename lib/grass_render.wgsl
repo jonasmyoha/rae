@@ -31,6 +31,8 @@ struct GrassU {
   // a ring's inner edge (x, m) and the band it fades in over (y, m); 0: none;
   // z the wind shimmer's strength (GrassViewSettings shimmer)
   l: vec4<f32>,
+  // the painted grass's root lift (x; GrassViewSettings paintRootLift); yzw unused
+  m: vec4<f32>,
   // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
   // radius (m) and the strength (0 to 1); a radius of 0 is none
   bend: array<vec4<f32>, 8>,

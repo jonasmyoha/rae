@@ -192,6 +192,9 @@ type GbufferCache {
   # the painted grass's warmth on the ground painted as grass
   # (setGbufferGrassWarmth: GrassViewSettings paintWarmth's twin)
   grassWarmth: Float = 1.0
+  # the painted grass's root lift on the ground painted as grass
+  # (setGbufferGrassRootLift: GrassViewSettings paintRootLift's twin)
+  grassRootLift: Float = 0.0
   # The app's own terrain shader (GbufferTerrain.terrainSetShader): a declared
   # composition that lists its own RAE_TERRAIN_* palette / grass-style parts in
   # place of the lib defaults. Unset = GbufferTerrain.defaultTerrainShader().
@@ -500,11 +503,11 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.snowMeshHalf)
   # the weather: x how wet the ground is (setGbufferWetness), y the painted grass's
   # wind shimmer on the ground painted as grass (setGbufferGrassShimmer), z its
-  # warmth (setGbufferGrassWarmth)
+  # warmth (setGbufferGrassWarmth), w its root lift (setGbufferGrassRootLift)
   cache.frameFloats.add(value: cache.groundWet)
   cache.frameFloats.add(value: cache.grassShimmer)
   cache.frameFloats.add(value: cache.grassWarmth)
-  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: cache.grassRootLift)
   # the air's drift now and last frame (lib/wind.wgsl windGustAt)
   cache.frameFloats.add(value: cache.windDriftX)
   cache.frameFloats.add(value: cache.windDriftY)
@@ -537,6 +540,13 @@ func uploadFrameUniform(
 # and past the blades stays their color
 func setGbufferGrassWarmth(cache: mod GbufferCache, warmth: view Float) {
   cache.grassWarmth = Math.clamp(val: warmth, low: 0.0, high: 2.0)
+}
+
+# The painted grass's root lift on the ground painted as grass: what an app's grass
+# has as GrassViewSettings paintRootLift (0 as drawn), so the ground stays the
+# blades' roots' color
+func setGbufferGrassRootLift(cache: mod GbufferCache, lift: view Float) {
+  cache.grassRootLift = Math.clamp(val: lift, low: 0.0, high: 1.0)
 }
 
 func setGbufferGrassShimmer(cache: mod GbufferCache, strength: view Float) {

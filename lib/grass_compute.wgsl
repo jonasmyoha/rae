@@ -24,6 +24,8 @@ struct GrassU {
   // z the wind shimmer's strength (GrassViewSettings shimmer); w the painted
   // grass's warmth (GrassViewSettings paintWarmth)
   l: vec4<f32>,
+  // the painted grass's root lift (x; GrassViewSettings paintRootLift); yzw unused
+  m: vec4<f32>,
   // what bends the blades near it (GrassCompute grassSetBenders): x, y, the
   // radius (m) and the strength (0 to 1); a radius of 0 is none
   bend: array<vec4<f32>, 8>,
@@ -265,8 +267,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ground painted with grass_field.wgsl at this point has its color
     // the wind's shimmer, the same as on the ground painted as grass
     let shimmer = grassPaintShimmer(gust) * G.l.z;
-    let rootValue = grassPaintRootValue(paint) + shimmer;
-    let tipValue = clamp(0.90 + offset + shimmer, 0.0, 1.25);
+    // lifted toward the blade's middle (paintRootLift), the ground's the same
+    let rootValue = grassPaintRootValue(paint) + G.m.x + shimmer;
+    let tipValue = max(clamp(0.90 + offset + shimmer, 0.0, 1.25), rootValue);
     // Its base: the frame's grass, toward its dry grass by the soil's moisture
     // there, as grassFieldGreen's, so a dry ground's painted blades are dry
     var paintBase = G.e.xyz;

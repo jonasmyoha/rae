@@ -35,8 +35,8 @@ func grassBendersKept(benders: view List(Float)) ret List(Float) {
 }
 
 # The grass uniform's tail: a ring's inner edge and its fade band, the shimmer and the
-# painted warmth from `settings` (l), then the circles, grassBenderCount vec4s, none as
-# zeros (bend)
+# painted warmth from `settings` (l), the painted root lift (m), then the circles,
+# grassBenderCount vec4s, none as zeros (bend)
 func pushGrassRingAndBenders(
   writer: mod ArgWriter
   settings: view GrassConfig.GrassViewSettings
@@ -48,6 +48,14 @@ func pushGrassRingAndBenders(
     y: settings.innerFade
     z: settings.shimmer
     w: settings.paintWarmth
+  )
+  # m: the painted grass's root lift
+  pushVec4F(
+    writer: writer
+    x: settings.paintRootLift
+    y: 0.0
+    z: 0.0
+    w: 0.0
   )
   loop var bender: Int = 0, bender < grassBenderCount, ++bender {
     pushVec4F(
