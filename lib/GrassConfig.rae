@@ -94,6 +94,13 @@ type GrassViewSettings {
   # green. A ground painted as grass takes the same (Gbuffer
   # setGbufferGrassWarmth).
   paintWarmth: Float = 1.0
+  # The painted grass's root lift: added to the value of the blades' roots and of the
+  # ground painted as grass (grass_field.wgsl's palette: 0 dark, 1 light), 0 as
+  # drawn. A thin field (a far ring's) shows the ground between its blades: lifted
+  # toward the blades' middle it reads as they do, not as dark gaps, and the
+  # roots stay the ground's color. The ground takes the same (Gbuffer
+  # setGbufferGrassRootLift).
+  paintRootLift: Float = 0.0
   innerFade: Float = 3.0
   # Zero preserves uniform placement; one groups blades in broad world-space patches.
   clusterStrength: Float = 0.0

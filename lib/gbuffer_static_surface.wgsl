@@ -204,7 +204,7 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
       let paint = grassPaintAt(in.wpos.xy);
       // with the wind's shimmer rolling over it, as over the blades' roots
       let shimmer = grassPaintShimmer(windGustAt(in.wpos.xy, F.wind, F.windDrift.xy)) * F.weather.y;
-      let ground = grassPaintColor(grassPaintRootValue(paint) + shimmer, paint.y, o.albedo, 1.0, F.weather.z);
+      let ground = grassPaintColor(grassPaintRootValue(paint) + F.weather.w + shimmer, paint.y, o.albedo, 1.0, F.weather.z);
       o.albedo = mix(o.albedo, ground, painted);
       o.nrm = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), painted));
     }
