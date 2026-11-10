@@ -1,0 +1,48 @@
+# BackdropBlur (docs/ui-scene-format.md section 32) from a scene: its fields, its defaults, and its
+# removal by name. checks/backdropBlur paints it.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/BackdropComponents
+open ui/Ecs
+open ui/RegistryRemove
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func describe(world: view UiWorld, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if componentHas(this: world.backdropBlurs, entityId: entityId) is false {
+    ret "no BackdropBlur"
+  }
+  let blur: view BackdropBlur = componentView(this: world.backdropBlurs, entityId: entityId)
+  ret "radius {blur.radius}, tint '{blur.tint}'"
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Children\":[\"Glass\",\"Plain\",\"Bare\"]\},\"Glass\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"BackdropBlur\":\{\"radius\":32,\"tint\":\"rowFill\"\}\},\"Plain\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"BackdropBlur\":\{\}\},\"Bare\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\}\}\}"
+    )
+  )
+  log("Glass: {describe(world: world, nodeId: "Glass")}")
+  log("Plain (the defaults): {describe(world: world, nodeId: "Plain")}")
+  log("Bare: {describe(world: world, nodeId: "Bare")}")
+  removeComponentByName(
+    world: world
+    entityId: nodeOf(world: world, nodeId: "Glass")
+    name: "BackdropBlur"
+  )
+  log("Glass after removing it: {describe(world: world, nodeId: "Glass")}")
+  log("root {isNone(this: root)}")
+}

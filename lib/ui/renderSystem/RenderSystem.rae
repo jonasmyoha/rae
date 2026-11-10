@@ -38,6 +38,7 @@ import ui/TextStyle
 open ecs/ComponentTable
 open ecs/Entity
 open Gpu2dCanvas
+open Gpu2dCanvasBackdrop
 open ui/UiSystems
 open ui/Transform
 open ui/renderSystem/RenderCaret
@@ -463,6 +464,16 @@ func paintEntityG(
       pivotY: wt.position.y
     )
   }
+  if componentHas(this: world.backdropBlurs, entityId: entityId) {
+    paintBackdropBlurG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  }
   if componentHas(this: world.gradientFills, entityId: entityId) or componentHas(
     this: world.radialGradientFills
     entityId: entityId
@@ -702,6 +713,7 @@ func gpu2dLayerRange(
         let ord: Int = entityLayerOrder(world: world, entityId: root)
         if ord >= minOrder {
           if ord < maxOrder {
+            canvasBackdropLayer(canvas: canvas)
             paintSubtreeG(
               world: world
               uiSystems: uiSystems

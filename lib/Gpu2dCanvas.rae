@@ -42,6 +42,7 @@ open Gpu2dCanvasFrame
 open Gpu2dCanvasTiming
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
+open Gpu2dCanvasBackdrop
 
 func nativeG2dBoxFormat() unsafe extern("rae_g2d_format") ret Int
 
@@ -160,6 +161,7 @@ type Gpu2dCanvas {
   batchLevel: Int = -1
   batchAtlas: Int = -1
   frameTarget: FrameTarget  # the drawable or the offscreen this frame (gpu/Surface)
+  backdrop: Gpu2dBackdrop  # BackdropBlur's copy of the frame (Gpu2dCanvasBackdrop)
   gpuTiming: Canvas2dTiming  # the frame pass's GPU time under RAE_GPU2D_TIMING (Gpu2dCanvasTiming)
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
   offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
@@ -236,6 +238,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       inFlight: List.create(SubmissionId, cap: 4)
       framePacer: createFramePacer()
       frameTarget: createFrameTarget()
+      backdrop: createGpu2dBackdrop()
       gpuTiming: createCanvas2dTiming()
       offscreenTexture: noTextureId()
       offscreenView: noTextureViewId()
@@ -486,7 +489,7 @@ func canvasEnsureOffscreen(canvas: mod Gpu2dCanvas) ret Bool {
       width: width
       height: height
       format: format
-      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc + WGPUTextureUsage_TextureBinding
     ) {
       if let created: TextureViewId = createTextureView(resources: resources, texture: texture) {
         canvas.offscreenTexture = texture
@@ -959,6 +962,7 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
     canvas.imageKeyHandles.clear()
     clearImageQueue(canvas: canvas)
     retireSampler(resources: resources, id: canvas.imageSampler)
+    backdropShutdown(backdrop: canvas.backdrop, resources: resources)
     retireRenderPipeline(resources: resources, id: canvas.imagePipeline)
     loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
       if var retired: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {

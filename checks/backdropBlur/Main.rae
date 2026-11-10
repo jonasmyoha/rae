@@ -1,0 +1,196 @@
+# BackdropBlur (ui/BackdropComponents, lib/Gpu2dCanvasBackdrop.rae): three frosted tiles over black
+# and white stripes, from the scene alone, through the real pipeline. The frame is written as a BMP
+# (RAE_GPU2D_SCREENSHOT, set here when it is not) and read back: across a tile the stripes are
+# blurred to an even gray, outside one they stay black and white, and the three tiles of one layer
+# took one blurred copy of the frame. Exit 0 when all of that holds.
+#
+#   RAE_HEADLESS_FRAMES=8 compiler/bin/rae run checks/backdropBlur/Main.rae
+import Gpu2d
+import Sys
+open app3d/UiShell
+open ecs/Entity
+open ecs/Schedule
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open Gpu2dCanvas
+open Gpu2dCanvasBackdrop
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+# Black and white stripes this wide, in design units
+const stripe: Float = 10.0
+
+func readLe(bytes: view List(Int), at: view Int, count: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = count - 1, i >= 0, --i {
+    value = value * 256 + bytes.copyAtFallback(index: at + i, fallback: 0)
+  }
+  ret value
+}
+
+# The gray (0-255) at a design-unit point of the 32-bit BMP, its rows stored bottom-up
+func grayAt(bytes: view List(Int), x: view Float, y: view Float) ret Int {
+  let offset: Int = readLe(bytes: bytes, at: 10, count: 4)
+  let width: Int = readLe(bytes: bytes, at: 18, count: 4)
+  let height: Int = readLe(bytes: bytes, at: 22, count: 4)
+  let px: Int = (x * width.toFloat() / designW.toFloat()).toInt()
+  let py: Int = (y * height.toFloat() / designH.toFloat()).toInt()
+  let row: Int = height - 1 - py
+  let at: Int = offset + (row * width + px) * 4
+  ret (bytes.copyAtFallback(index: at, fallback: 0) + bytes.copyAtFallback(
+    index: at + 1
+    fallback: 0
+  ) + bytes.copyAtFallback(index: at + 2, fallback: 0)) / 3
+}
+
+# The lowest and highest gray on a line across, from x0 to x1 at y
+func spread(
+  bytes: view List(Int)
+  x0: view Float
+  x1: view Float
+  y: view Float
+) ret String {
+  var low: Int = 255
+  var high: Int = 0
+  var x: Float = x0
+  loop x < x1 {
+    let gray: Int = grayAt(bytes: bytes, x: x, y: y)
+    if gray < low {
+      low = gray
+    }
+    if gray > high {
+      high = gray
+    }
+    x = x + 1.0
+  }
+  ret "{low}-{high}"
+}
+
+func spreadWidth(text: view String) ret Int {
+  let parts: List(String) = text.split(sep: "-")
+  ret parts.copyAtDefault(index: 1).toInt() - parts.copyAtDefault(index: 0).toInt()
+}
+
+func main() ret Int {
+  var shot: String = Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT")
+  if shot.length() is 0 {
+    log(
+      "set RAE_GPU2D_SCREENSHOT and RAE_HEADLESS_FRAMES (checks/run.sh does): nothing to read back"
+    )
+    ret 1
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "Backdrop blur check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/backdropBlur/page.raescene")
+  if scene.ok is false {
+    log("BACKDROP BLUR FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var copies: Int = 0
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    var x: Float = 0.0
+    loop x < designW.toFloat() {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: x
+        y: 0.0
+        w: stripe
+        h: designH.toFloat()
+        color: 4294967295
+      )
+      x = x + stripe * 2.0
+    }
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    copies = canvasBackdropCopies(canvas: canvas)
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let bytes: List(Int) = Sys.readFileBytes(path: shot)
+  if bytes.length < 54 {
+    log("BACKDROP BLUR FAILED: no picture at {shot}")
+    ret 1
+  }
+  # Across the middle of each tile, and across the stripes between them
+  let tileA: String = spread(
+    bytes: bytes
+    x0: 80.0
+    x1: 200.0
+    y: 140.0
+  )
+  let tileB: String = spread(
+    bytes: bytes
+    x0: 340.0
+    x1: 460.0
+    y: 140.0
+  )
+  let tileC: String = spread(
+    bytes: bytes
+    x0: 100.0
+    x1: 440.0
+    y: 400.0
+  )
+  let outside: String = spread(
+    bytes: bytes
+    x0: 560.0
+    x1: 760.0
+    y: 400.0
+  )
+  log("gray across tile A {tileA}, tile B {tileB}, tile C {tileC}; across the stripes {outside}")
+  log("blurred copies in the last frame: {copies} (root {isNone(this: root)})")
+  if spreadWidth(text: tileA) > 40 or spreadWidth(text: tileB) > 40 or spreadWidth(text: tileC) > 40 {
+    log("BACKDROP BLUR FAILED: a tile still shows the stripes")
+    ret 1
+  }
+  if spreadWidth(text: outside) < 200 {
+    log("BACKDROP BLUR FAILED: the stripes outside the tiles are not black and white")
+    ret 1
+  }
+  if copies is not 1 {
+    log("BACKDROP BLUR FAILED: {copies} copies for three tiles in one layer")
+    ret 1
+  }
+  log("BACKDROP BLUR OK")
+  ret 0
+}

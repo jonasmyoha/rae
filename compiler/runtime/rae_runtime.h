@@ -1273,6 +1273,7 @@ int64_t rae_g2d_format(void);
 /* #920: the presentable target is the Rae canvas's texture; C reports the
  * configured surface and borrows the texture for present / readback. */
 int64_t rae_g2d_surface_ready(void);
+int64_t rae_g2d_surface_bindable(void);
 int64_t rae_g2d_surface_width(void);
 int64_t rae_g2d_surface_height(void);
 /* Deferred passes migrated to Rae (#504): composite first. */

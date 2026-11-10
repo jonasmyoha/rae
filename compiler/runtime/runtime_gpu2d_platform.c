@@ -190,6 +190,10 @@ void rae_g2d_xform(float* out) { if (out) rae_g2d_compute_xform(out); }
 /* #920: the offscreen presentable target is the Rae canvas's texture (built
  * to the configured surface size, rebuilt on resize); C only configures the
  * surface and reports its size/format. */
+/* What the surface's textures can be used for (wgpuSurfaceGetCapabilities):
+ * when they can be sampled, the frame's drawable is too (lib/Gpu2dCanvasBackdrop
+ * blurs what is drawn so far), so the configure asks for it */
+static uint64_t g_g2d_surface_usages = 0;
 static void rae_g2d_configure(int pw, int ph) {
 #ifdef __ANDROID__
     if (!rae_g2d_android_window_alive()) return;
@@ -200,6 +204,7 @@ static void rae_g2d_configure(int pw, int ph) {
     cfg.format = g_g2d_fmt;
     /* CopyDst so we can copy our offscreen render into the drawable to present. */
     cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopyDst;
+    if (g_g2d_surface_usages & WGPUTextureUsage_TextureBinding) cfg.usage |= WGPUTextureUsage_TextureBinding;
     cfg.width = (uint32_t)pw;
     cfg.height = (uint32_t)ph;
     /* Vsync (Fifo). RAE_PRESENT_MODE=immediate presents without waiting for
@@ -277,6 +282,8 @@ static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
 int64_t rae_g2d_surface_ready(void) { return (g_wgpu_dev && g_g2d_surface && g_sdl_w > 0 && g_sdl_h > 0) ? 1 : 0; }
 int64_t rae_g2d_surface_width(void)  { return (int64_t)g_sdl_w; }
 int64_t rae_g2d_surface_height(void) { return (int64_t)g_sdl_h; }
+/* 1 when the frame's drawable can be sampled (configured with TextureBinding) */
+int64_t rae_g2d_surface_bindable(void) { return (g_g2d_surface_usages & WGPUTextureUsage_TextureBinding) ? 1 : 0; }
 
 /* Is the window in a state where rendering + presenting is worthwhile? False
  * when hidden / minimized / occluded (app switched away, another window fully
@@ -424,6 +431,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
 
     WGPUSurfaceCapabilities caps; memset(&caps, 0, sizeof(caps));
     wgpuSurfaceGetCapabilities(g_g2d_surface, g_wgpu_adapter, &caps);
+    g_g2d_surface_usages = (uint64_t)caps.usages;
     if (caps.formatCount > 0) {
         g_g2d_fmt = caps.formats[0];
         for (size_t i = 0; i < caps.formatCount; i++) {

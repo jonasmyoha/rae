@@ -1,0 +1,506 @@
+# Gpu2dCanvasBackdrop — frosted glass on the 2D canvas: a BackdropBlur node (ui/BackdropComponents)
+# shows what the frame has drawn under it, blurred. The frame renders into a texture (its drawable
+# or the offscreen), so the canvas can read what is drawn so far:
+#
+#   1. flush, and end the frame's render pass;
+#   2. shrink the frame to a quarter of its size (one pass, a 4x4 average) and blur it there with
+#      a separable Gaussian, across then down, 1 to 3 times as the blur's size needs
+#      (lib/gpu2d_backdrop.wgsl);
+#   3. open the frame's pass again, keeping what it holds, and draw each node's own region of that
+#      copy as an image (rounded like the node, through the image pass).
+#
+# ONE copy serves every BackdropBlur node of a layer: the render system says where a layer begins
+# (canvasBackdropLayer), and a node takes a new copy only when it is the frame's first or a later
+# layer has drawn since the last copy (a dialog's blurred card over blurred tiles). The blur's
+# size is the first node's of the copy. The frame's drawable must be sampleable for this: the
+# surface is configured with TextureBinding where it supports it (rae_g2d_surface_bindable). Where
+# it does not, a frame that asks draws no blur and the next ones render into the offscreen target.
+import Math
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuIds
+open gpu/Surface
+open Gpu2dCanvas
+open Gpu2dCanvasFrame
+open Gpu2dCanvasImage
+
+func nativeG2dSurfaceBindable() unsafe extern("rae_g2d_surface_bindable") ret Int
+
+# The copy is this many times smaller than the frame on each side
+const backdropShrink: Int = 4
+
+type Gpu2dBackdrop {
+  made: Bool = false
+  down: RenderPipelineId = noRenderPipelineId()
+  blur: RenderPipelineId = noRenderPipelineId()
+  sampler: SamplerId = noSamplerId()
+  # The passes' uniforms: the shrink, a blur across, a blur down
+  uniforms: List(BufferId) = List.create(BufferId, cap: 3)
+  scratch: List(Float) = List.create(Float, cap: 4)
+  # The copy (A) and the blur's other half (B), and A's image handle for the nodes to draw
+  textureA: TextureId = noTextureId()
+  viewA: TextureViewId = noTextureViewId()
+  textureB: TextureId = noTextureId()
+  viewB: TextureViewId = noTextureViewId()
+  width: Int = 0
+  height: Int = 0
+  handle: Int = 0
+  # This frame: a copy exists, something was drawn since it, a layer began since it
+  copied: Bool = false
+  drawnSince: Bool = true
+  newLayer: Bool = false
+  # Copies made this frame (the timing and the case read it)
+  copies: Int = 0
+}
+
+func createGpu2dBackdrop() ret Gpu2dBackdrop {
+  ret Gpu2dBackdrop {}
+}
+
+# A frame opens: nothing is copied yet
+func backdropFrameBegin(backdrop: mod Gpu2dBackdrop) {
+  backdrop.copied = false
+  backdrop.drawnSince = true
+  backdrop.newLayer = false
+  backdrop.copies = 0
+}
+
+# The render system begins another layer (a page, a dialog): its BackdropBlur nodes see what the
+# layers under it drew
+func canvasBackdropLayer(canvas: mod Gpu2dCanvas) {
+  canvas.backdrop.newLayer = true
+}
+
+func backdropPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: format)
+  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
+  ret RenderPipelineSpec {
+    vertexStride: 0
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: true
+    depthFormat: 0
+    depthWrite: false
+    depthCompare: WGPUCompareFunction_Always
+    cullMode: WGPUCullMode_None
+    sampleCount: 1
+  }
+}
+
+func ensureBackdropResources(backdrop: mod Gpu2dBackdrop, resources: mod GpuResources) ret Bool {
+  if backdrop.made {
+    ret isValidRenderPipeline(resources: resources, id: backdrop.blur)
+  }
+  backdrop.made = true
+  let backdropShader: Shader = shader(files: ["lib/gpu2d_backdrop.wgsl"])
+  var format: Int = 0
+  unsafe {
+    format = nativeG2dBoxFormat()
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: backdropShader
+    vertexEntry: "vs"
+    fragmentEntry: "down"
+    spec: backdropPipelineSpec(format: format as Int32)
+  ) {
+    backdrop.down = pipeline
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: backdropShader
+    vertexEntry: "vs"
+    fragmentEntry: "blur"
+    spec: backdropPipelineSpec(format: format as Int32)
+  ) {
+    backdrop.blur = pipeline
+  }
+  if let sampler: SamplerId = createSampler(resources: resources) {
+    backdrop.sampler = sampler
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    if let uniform: BufferId = createBuffer(
+      resources: resources
+      size: 16
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      backdrop.uniforms.add(value: uniform)
+    }
+  }
+  ret isValidRenderPipeline(resources: resources, id: backdrop.down) and isValidRenderPipeline(
+    resources: resources
+    id: backdrop.blur
+  ) and backdrop.uniforms.length is 3
+}
+
+# The copy's two textures at a quarter of the frame's size; the copy is the image `handle`
+func ensureBackdropTextures(canvas: mod Gpu2dCanvas, resources: mod GpuResources) ret Bool {
+  let width: Int = Math.max(a: 1, b: canvas.offscreenWidth / backdropShrink)
+  let height: Int = Math.max(a: 1, b: canvas.offscreenHeight / backdropShrink)
+  if width is canvas.backdrop.width and height is canvas.backdrop.height and isValidTextureView(
+    resources: resources
+    id: canvas.backdrop.viewA
+  ) {
+    ret true
+  }
+  let unusedViewA: Bool = retireTextureView(resources: resources, id: canvas.backdrop.viewA)
+  let unusedA: Bool = retireTexture(resources: resources, id: canvas.backdrop.textureA)
+  let unusedViewB: Bool = retireTextureView(resources: resources, id: canvas.backdrop.viewB)
+  let unusedB: Bool = retireTexture(resources: resources, id: canvas.backdrop.textureB)
+  var format: Int32 = 0
+  unsafe {
+    format = nativeG2dBoxFormat() as Int32
+  }
+  let usage: UInt64 = WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+  if let textureA: TextureId = createTexture(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+  ) {
+    canvas.backdrop.textureA = textureA
+  }
+  if let textureB: TextureId = createTexture(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+  ) {
+    canvas.backdrop.textureB = textureB
+  }
+  if let viewA: TextureViewId = createTextureView(
+    resources: resources
+    texture: canvas.backdrop.textureA
+  ) {
+    canvas.backdrop.viewA = viewA
+  }
+  if let viewB: TextureViewId = createTextureView(
+    resources: resources
+    texture: canvas.backdrop.textureB
+  ) {
+    canvas.backdrop.viewB = viewB
+  }
+  if not isValidTextureView(resources: resources, id: canvas.backdrop.viewA) or not isValidTextureView(
+    resources: resources
+    id: canvas.backdrop.viewB
+  ) {
+    ret false
+  }
+  canvas.backdrop.width = width
+  canvas.backdrop.height = height
+  let image: Gpu2dImage = {
+    texture: canvas.backdrop.textureA
+    textureView: canvas.backdrop.viewA
+    width: width
+    height: height
+  }
+  if canvas.backdrop.handle is 0 {
+    canvas.images.add(value: image)
+    canvas.backdrop.handle = canvas.images.length
+  } else {
+    canvas.images.set(index: canvas.backdrop.handle - 1, value: image)
+    # A draw slot's bind group was made for the old view
+    loop var i: Int = 0, i < canvas.imageBindHandles.length, ++i {
+      if canvas.imageBindHandles.copyAtFallback(index: i, fallback: 0) is canvas.backdrop.handle {
+        canvas.imageBindHandles.set(index: i, value: 0)
+      }
+    }
+  }
+  ret true
+}
+
+func writeBackdropUniform(
+  backdrop: mod Gpu2dBackdrop
+  resources: view GpuResources
+  index: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+  w: view Float
+) {
+  backdrop.scratch.clear()
+  backdrop.scratch.add(value: x)
+  backdrop.scratch.add(value: y)
+  backdrop.scratch.add(value: z)
+  backdrop.scratch.add(value: w)
+  unsafe {
+    let written: Bool = writeBufferFromPtr(
+      resources: resources
+      id: backdrop.uniforms.copyAtFallback(index: index, fallback: noBufferId())
+      offset: 0
+      data: backdrop.scratch.data
+      size: 16
+    )
+  }
+}
+
+# One full-screen pass: `pipeline` reads `source` and writes all of `target`
+func recordBackdropPass(
+  canvas: mod Gpu2dCanvas
+  recording: mod Recording
+  resources: mod GpuResources
+  pipeline: view RenderPipelineId
+  uniform: view Int
+  source: view ResourceRef
+  target: view TextureViewId
+) {
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  entries.add(
+    value: bufferRef(
+      id: canvas.backdrop.uniforms.copyAtFallback(index: uniform, fallback: noBufferId())
+    )
+  )
+  entries.add(value: source)
+  entries.add(value: samplerRef(id: canvas.backdrop.sampler))
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: pipeline
+    entries: entries
+  ) {
+    canvas.frameBinds.add(value: bind)
+    unsafe {
+      let pass: Ptr = beginRenderPassWrites(
+        recording: recording
+        resources: resources
+        target: renderTarget(
+          colorView: textureViewRef(id: target)
+          clear: true
+          r: 0.0
+          g: 0.0
+          b: 0.0
+          a: 0.0
+        )
+        timestampWrites: webgpuNull()
+      )
+      let drawn: Bool = recordDrawInPass(
+        resources: resources
+        pass: pass
+        pipeline: pipeline
+        bindGroup: bind
+        vertexCount: 3
+        instanceCount: 1
+        firstVertex: 0
+        firstInstance: 0
+      )
+      endRenderPass(pass: pass)
+    }
+  }
+}
+
+# The frame's target as a texture to read, if it can be (see the top)
+func backdropSource(canvas: mod Gpu2dCanvas) ret opt ResourceRef {
+  if canvas.frameTarget.direct {
+    var bindable: Int = 0
+    unsafe {
+      bindable = nativeG2dSurfaceBindable()
+    }
+    if bindable is 0 {
+      # The next frames render into the offscreen target, which can be read
+      canvas.frameTarget.directAllowed = false
+      ret none
+    }
+    ret frameTargetRef(target: canvas.frameTarget)
+  }
+  ret textureViewRef(id: canvas.offscreenView)
+}
+
+# Copy and blur what the frame has drawn so far (steps 1-3 at the top, but the drawing); false when
+# it cannot this frame
+func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
+  canvasFlush(canvas: canvas)
+  var source: ResourceRef = skipRef()
+  if let readable: ResourceRef = backdropSource(canvas: canvas) {
+    source = readable
+  } else {
+    ret false
+  }
+  let scale: Float = Math.max(a: 0.0001, b: xformAt(canvas: canvas, index: 2))
+  var made: Bool = false
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if ensureBackdropResources(backdrop: canvas.backdrop, resources: resources) is false {
+      ret false
+    }
+    if ensureBackdropTextures(canvas: canvas, resources: resources) is false {
+      ret false
+    }
+    # The blur's sigma is half its radius, in the copy's texels; each pass reaches 3 of its sigma
+    # in 13 taps 2 steps apart per sigma, and n passes add up to sigma * sqrt(n)
+    let sigma: Float = Math.max(a: 0.5, b: blurRadius * scale / backdropShrink.toFloat() / 2.0)
+    let passes: Int = Math.min(a: 3, b: Math.max(a: 1, b: (sigma / 3.0).ceil().toInt()))
+    let step: Float = sigma / Math.sqrt(x: passes.toFloat()) / 2.0
+    let frameWidth: Float = canvas.offscreenWidth.toFloat()
+    let frameHeight: Float = canvas.offscreenHeight.toFloat()
+    let copyWidth: Float = canvas.backdrop.width.toFloat()
+    let copyHeight: Float = canvas.backdrop.height.toFloat()
+    writeBackdropUniform(
+      backdrop: canvas.backdrop
+      resources: resources
+      index: 0
+      x: 1.0 / frameWidth
+      y: 1.0 / frameHeight
+      z: 0.0
+      w: 0.0
+    )
+    writeBackdropUniform(
+      backdrop: canvas.backdrop
+      resources: resources
+      index: 1
+      x: 1.0 / copyWidth
+      y: 1.0 / copyHeight
+      z: step
+      w: 0.0
+    )
+    writeBackdropUniform(
+      backdrop: canvas.backdrop
+      resources: resources
+      index: 2
+      x: 1.0 / copyWidth
+      y: 1.0 / copyHeight
+      z: 0.0
+      w: step
+    )
+    if let recording: mod Recording = canvas.recording {
+      unsafe {
+        endRenderPass(pass: canvas.framePass)
+        canvas.framePass = webgpuNull()
+      }
+      let down: RenderPipelineId = canvas.backdrop.down
+      let blur: RenderPipelineId = canvas.backdrop.blur
+      let viewA: TextureViewId = canvas.backdrop.viewA
+      let viewB: TextureViewId = canvas.backdrop.viewB
+      recordBackdropPass(
+        canvas: canvas
+        recording: recording
+        resources: resources
+        pipeline: down
+        uniform: 0
+        source: source
+        target: viewA
+      )
+      loop var i: Int = 0, i < passes, ++i {
+        recordBackdropPass(
+          canvas: canvas
+          recording: recording
+          resources: resources
+          pipeline: blur
+          uniform: 1
+          source: textureViewRef(id: viewA)
+          target: viewB
+        )
+        recordBackdropPass(
+          canvas: canvas
+          recording: recording
+          resources: resources
+          pipeline: blur
+          uniform: 2
+          source: textureViewRef(id: viewB)
+          target: viewA
+        )
+      }
+      # The frame's pass again, keeping what it holds
+      let target: RenderTarget = renderTarget(
+        colorView: canvasFrameTargetRef(canvas: canvas, loads: true)
+        clear: false
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+      )
+      unsafe {
+        canvas.framePass = beginRenderPassWrites(
+          recording: recording
+          resources: resources
+          target: target
+          timestampWrites: webgpuNull()
+        )
+      }
+      made = true
+    }
+  }
+  if made {
+    canvas.backdrop.copied = true
+    canvas.backdrop.drawnSince = false
+    canvas.backdrop.newLayer = false
+    canvas.backdrop.copies = canvas.backdrop.copies + 1
+  }
+  ret made
+}
+
+# Draw the frame so far, blurred, in the box (design units), rounded by `radius`, at `alpha`.
+# `blurRadius` is how far the blur reaches, in design units. False when nothing could be drawn
+# (no frame open, or the frame cannot be read this time), so the caller can fall back.
+func canvasBackdropBlur(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  blurRadius: copy Float
+  alpha: copy Float
+) ret Bool {
+  if not canvasFrameActive(canvas: canvas) or w <= 0.0 or h <= 0.0 {
+    ret false
+  }
+  let fresh: Bool = canvas.backdrop.copied and not (canvas.backdrop.newLayer and canvas.backdrop.drawnSince)
+  if not fresh {
+    if backdropCopy(canvas: canvas, blurRadius: blurRadius) is false {
+      ret false
+    }
+  }
+  # The box in the copy's 0..1 coordinates: the frame's pixels over its size
+  let scaleX: Float = xformAt(canvas: canvas, index: 2)
+  let scaleY: Float = xformAt(canvas: canvas, index: 3)
+  let offsetX: Float = xformAt(canvas: canvas, index: 4)
+  let offsetY: Float = xformAt(canvas: canvas, index: 5)
+  let frameWidth: Float = Math.max(a: 1.0, b: canvas.offscreenWidth.toFloat())
+  let frameHeight: Float = Math.max(a: 1.0, b: canvas.offscreenHeight.toFloat())
+  let alpha255: Int = Math.max(a: 0, b: Math.min(a: 255, b: (alpha * 255.0).toInt()))
+  queueImageEx(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: canvas.backdrop.handle
+    tint: alpha255 * 16777216 + 16777215
+    u0: (x * scaleX + offsetX) / frameWidth
+    v0: (y * scaleY + offsetY) / frameHeight
+    u1: ((x + w) * scaleX + offsetX) / frameWidth
+    v1: ((y + h) * scaleY + offsetY) / frameHeight
+    tiled: false
+  )
+  ret true
+}
+
+# How many copies this frame has made so far (the case and the timing read it)
+func canvasBackdropCopies(canvas: view Gpu2dCanvas) ret Int {
+  ret canvas.backdrop.copies
+}
+
+func backdropShutdown(backdrop: mod Gpu2dBackdrop, resources: mod GpuResources) {
+  let unusedViewA: Bool = retireTextureView(resources: resources, id: backdrop.viewA)
+  let unusedA: Bool = retireTexture(resources: resources, id: backdrop.textureA)
+  let unusedViewB: Bool = retireTextureView(resources: resources, id: backdrop.viewB)
+  let unusedB: Bool = retireTexture(resources: resources, id: backdrop.textureB)
+  let unusedDown: Bool = retireRenderPipeline(resources: resources, id: backdrop.down)
+  let unusedBlur: Bool = retireRenderPipeline(resources: resources, id: backdrop.blur)
+  let unusedSampler: Bool = retireSampler(resources: resources, id: backdrop.sampler)
+  loop let uniform: view BufferId in backdrop.uniforms {
+    let unusedBuffer: Bool = retireBuffer(resources: resources, id: uniform)
+  }
+  backdrop.uniforms.clear()
+  backdrop.made = false
+  backdrop.width = 0
+  backdrop.height = 0
+}

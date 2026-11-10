@@ -1,0 +1,13 @@
+# ui/BackdropComponents — frosted glass: a node that shows what is under it, blurred.
+#
+#   "BackdropBlur": { "radius": 24, "tint": "rowFill" }
+#
+# Before its own Shape and children, the node paints what the frame has drawn under its box so far,
+# blurred, clipped to its rounded shape (the Shape's radius), with `tint` over it: a theme color
+# name or "#RRGGBB" / "#RRGGBBAA", "" for none. `radius` is how far the blur reaches, in design
+# units. Every BackdropBlur node of a layer shares one blurred copy of the frame
+# (lib/Gpu2dCanvasBackdrop.rae), so many tiles cost about as much as one.
+type BackdropBlur {
+  radius: Float = 24.0
+  tint: String = ""
+}
