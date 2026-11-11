@@ -7,6 +7,8 @@
 # output is the same everywhere.
 import Math
 open audio/Audio
+open audio/Decoder
+open audio/Sound
 open audio/AudioMixer
 open audio/AudioStreams
 open audio/NowPlaying
@@ -89,4 +91,40 @@ func main() {
   let rendered: List(Float) = gapless.renderOffline(frames: 26460)
   describe(audio: gapless, song: first, label: "600 ms into two files")
   let gaplessBlocks: Int = gapless.stopAudio()
+  seekKeepsTheQueue()
+}
+
+# A seek keeps the files queued after the one it moves in, and moves within
+# the file heard now
+func seekKeepsTheQueue() {
+  let decoded: SoundData = readAnySoundFile(path: "{caseDir}tone.m4a")
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let queued: Bool = audio.queueNext(voiceId: song, path: "{caseDir}tone.m4a")
+  let early: List(Float) = audio.renderOffline(frames: 4410)
+  let moved: Bool = audio.seek(voiceId: song, seconds: 0.4)
+  let fade: List(Float) = audio.renderOffline(frames: 441)
+  describe(audio: audio, song: song, label: "seek to 400 ms in file 0")
+  let across: List(Float) = audio.renderOffline(frames: 8820)
+  describe(audio: audio, song: song, label: "200 ms later")
+  # a seek while file 1 plays moves in file 1
+  let inSecond: Bool = audio.seek(voiceId: song, seconds: 0.1)
+  let secondFade: List(Float) = audio.renderOffline(frames: 441)
+  describe(audio: audio, song: song, label: "seek to 100 ms in file 1")
+  # the new voice started under the fade, so it is 441 frames on
+  let after: List(Float) = audio.renderOffline(frames: 2205)
+  var worst: Float = 0.0
+  loop var i: Int = 0, i < 2205 * 2, ++i {
+    let expected: Float = sampleAt(samples: decoded.samples, index: (4410 + 441) * 2 + i)
+    worst = max(a: worst, b: abs(value: after.copyAtFallback(index: i, fallback: 9.0) - expected))
+  }
+  log("  the samples of file 1 from 110 ms: {worst is 0.0}")
+  let rest: List(Float) = audio.renderOffline(frames: 22050)
+  log("at the end: still playing {audio.streamIsPlaying(voiceId: song)}")
+  let blocks: Int = audio.stopAudio()
+  freeSoundData(data: decoded)
 }
