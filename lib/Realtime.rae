@@ -32,9 +32,9 @@
 # its step.
 import Math
 
-func rae_ext_Realtime_markThread(realtime: Bool) unsafe extern
+func rae_ext_Realtime_markThread(realtime: Bool) realtime unsafe extern
 
-func rae_ext_Realtime_threadIsMarked() unsafe extern ret Bool
+func rae_ext_Realtime_threadIsMarked() realtime unsafe extern ret Bool
 
 func rae_ext_Realtime_reportWanted() unsafe extern ret Bool
 
@@ -48,13 +48,13 @@ func realtimeReportWanted() ret Bool {
 # Four steps per doubling up to 2^63 ns.
 const realtimeBucketCount: Int = 248
 
-func markRealtimeThread() {
+func markRealtimeThread() realtime {
   unsafe {
     rae_ext_Realtime_markThread(realtime: true)
   }
 }
 
-func unmarkRealtimeThread() {
+func unmarkRealtimeThread() realtime {
   unsafe {
     rae_ext_Realtime_markThread(realtime: false)
   }
@@ -91,15 +91,15 @@ func createRealtimeRecorder(name: own String, periodNanoseconds: view Int) ret R
   }
 }
 
-func callStarted(this: mod RealtimeRecorder) {
+func callStarted(this: mod RealtimeRecorder) realtime {
   this.startedAt = nowNs()
 }
 
-func callEnded(this: mod RealtimeRecorder) {
+func callEnded(this: mod RealtimeRecorder) realtime {
   this.recordCall(nanoseconds: nowNs() - this.startedAt)
 }
 
-func recordCall(this: mod RealtimeRecorder, nanoseconds: view Int) {
+func recordCall(this: mod RealtimeRecorder, nanoseconds: view Int) realtime {
   var duration: Int = nanoseconds
   if duration < 0 {
     duration = 0

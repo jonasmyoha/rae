@@ -72,7 +72,7 @@ func createSpscRing(T: type, capacity: Int) ret SpscRing(T) {
 }
 
 # Producer only. Add `value`; answers false (and drops nothing) when full.
-func push(T: type, this: view SpscRing(T), value: T) ret Bool {
+func push(T: type, this: view SpscRing(T), value: T) realtime ret Bool {
   unsafe {
     let written: Int = rae_ext_rae_atomic_load_relaxed(cell: this.counters, index: writtenIndex)
     let read: Int = rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
@@ -87,7 +87,7 @@ func push(T: type, this: view SpscRing(T), value: T) ret Bool {
 }
 
 # Consumer only. The oldest value, or none when the ring is empty.
-func pop(T: type, this: view SpscRing(T)) ret opt T {
+func pop(T: type, this: view SpscRing(T)) realtime ret opt T {
   unsafe {
     let read: Int = rae_ext_rae_atomic_load_relaxed(cell: this.counters, index: readIndex)
     let written: Int = rae_ext_rae_atomic_load(cell: this.counters, index: writtenIndex)
@@ -102,7 +102,7 @@ func pop(T: type, this: view SpscRing(T)) ret opt T {
 
 # How many values wait to be popped. Exact on the consumer's thread; from the
 # producer's thread it may be smaller than the truth (a pop may be under way).
-func count(T: type, this: view SpscRing(T)) ret Int {
+func count(T: type, this: view SpscRing(T)) realtime ret Int {
   unsafe {
     let read: Int = rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
     let written: Int = rae_ext_rae_atomic_load(cell: this.counters, index: writtenIndex)
