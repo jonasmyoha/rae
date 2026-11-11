@@ -40,6 +40,29 @@ const labForestLowPoly: Int = 1
 
 const labForestReference: Int = 2
 
+# The forest's reach and its trees' spacing (m): RAE_TREELAB_FOREST_FAR and
+# RAE_TREELAB_FOREST_SPACING (the panel's Forest group sets them), else the constants above
+func labForestEnvFloat(name: view String, fallback: view Float) ret Float {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() > 0 {
+    ret text.toFloat()
+  }
+  ret fallback
+}
+
+func labForestFarHere() ret Float {
+  ret labForestEnvFloat(name: "RAE_TREELAB_FOREST_FAR", fallback: labForestFar)
+}
+
+func labForestSpacingHere() ret Float {
+  ret labForestEnvFloat(name: "RAE_TREELAB_FOREST_SPACING", fallback: labForestSpacing)
+}
+
+# RAE_TREELAB_FOREST=off: the forest scene without its forests (its ground, sky and grass)
+func labForestOn() ret Bool {
+  ret Sys.getEnv(name: "RAE_TREELAB_FOREST") is not "off"
+}
+
 func labForestRequested() ret Bool {
   ret Sys.getEnv(name: "RAE_TREELAB_SCENE") is "forest"
 }
@@ -90,7 +113,7 @@ func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret
   var forest: TreeForest = createTreeForest(
     treeSet: treeSet
     renderer: renderer
-    settings: defaultTreeForestSettings(extent: labForestFar * 2.0 + 400.0, farReach: 1800.0)
+    settings: defaultTreeForestSettings(extent: labForestFarHere() * 2.0 + 400.0, farReach: 1800.0)
     toon: false
   )
   # RAE_TREE_NEAR_TO_FAR=1: gather and draw near to far (PropField.nearToFar)
@@ -101,12 +124,12 @@ func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret
     band: {
       width: labForestWidth
       near: labForestNear
-      far: labForestFar
-      spacing: labForestSpacing
+      far: labForestFarHere()
+      spacing: labForestSpacingHere()
     }
   )
   let planted: Int = finishTreeForest(forest: forest, renderer: renderer)
-  log("[treelab] forest of the {treeSet.name} set: {planted} trees, to {labForestFar} m")
+  log("[treelab] forest of the {treeSet.name} set: {planted} trees, to {labForestFarHere()} m")
   ret forest
 }
 
@@ -114,6 +137,9 @@ func buildLabForestOf(treeSet: view TreeSet, renderer: mod DeferredRenderer) ret
 # labForestReference
 func buildLabForests(renderer: mod DeferredRenderer) ret List(TreeForest) {
   var forests: List(TreeForest) = List.create(TreeForest, cap: 3)
+  if not labForestOn() {
+    ret forests
+  }
   forests.add(
     value: own buildLabForestOf(treeSet: StylizedTrees.createStylizedTrees(), renderer: renderer)
   )
@@ -160,6 +186,40 @@ func labLevelsForest(renderer: mod DeferredRenderer) ret TreeForest {
   )
   let unusedPlanted: Int = finishTreeForest(forest: forest, renderer: renderer)
   ret forest
+}
+
+# The tree kind One tree shows (RAE_TREELAB_SPECIES): -1 the reference T02 tree, else a kind of
+# the stylized set (or the low-poly set with RAE_TREE_SET=lowPoly)
+func labTreeKind() ret Int {
+  let speciesName: String = Sys.getEnv(name: "RAE_TREELAB_SPECIES")
+  if speciesName.length() is 0 {
+    ret -1
+  }
+  ret speciesName.toInt()
+}
+
+func labTreeKindSet() ret TreeSet {
+  if Sys.getEnv(name: "RAE_TREE_SET") is "lowPoly" {
+    ret LowPolyTrees.createLowPolyTrees()
+  }
+  ret StylizedTrees.createStylizedTrees()
+}
+
+# The kinds the panel steps through: the reference tree, then the set's
+func labTreeKindCount() ret Int {
+  ret treeSpeciesCount(treeSet: labTreeKindSet())
+}
+
+func labTreeKindName() ret String {
+  let kind: Int = labTreeKind()
+  if kind < 0 {
+    ret "T02 tree"
+  }
+  let treeSet: TreeSet = labTreeKindSet()
+  if let species: view TreeSpecies = treeSet.species.viewAt(index: kind) {
+    ret "{species.name}"
+  }
+  ret "kind {kind}"
 }
 
 # The camera at eye height down the forest's lane, or (high) from 35 m

@@ -10,7 +10,9 @@
 #   4 Studies        LabStudies' meadow flower views (RAE_TREELAB_STUDY)
 #
 # A scene is built the first time it is shown and kept: switching only moves its parts in and out
-# of the lab's state (Main.rae labShowScene).
+# of the lab's state (Main.rae labShowScene). A panel control that changes what a scene is built
+# from (the tree kind, the seed, the level drawn, the forest) builds it again: its GPU parts and
+# the meshes it uploaded (meshFirst to meshEnd) are released first (Main.rae labRebuildScenes).
 import Sys
 import Vec3
 open Scene3d
@@ -19,6 +21,7 @@ open LeafParticles
 open app3d/Precipitation
 open app3d/TreeForest
 open RendererDeferred
+open MeshStore
 open LabScene
 open LabGrass
 open LabLook
@@ -87,6 +90,9 @@ type LabSceneContent {
   leafParticles: opt LeafParticles
   light: Light3d
   camera: Camera3d
+  # The meshes its build uploaded to the renderer's mesh store: handles meshFirst to meshEnd - 1
+  meshFirst: Int = 0
+  meshEnd: Int = 0
 }
 
 # Rain and snow for a scene whose pictures a scripted run keeps (Reference, Studies): only in an
@@ -240,8 +246,24 @@ func buildStudiesScene(
   }
 }
 
-# Build `scene`'s parts
+# Build `scene`'s parts, noting the meshes it uploads
 func buildLabScene(
+  renderer: mod DeferredRenderer
+  meshes: view LabMeshes
+  scene: view Int
+) ret LabSceneContent {
+  let meshFirst: Int = meshStoreCount(store: renderer.passes.gbuffer.meshes) + 1
+  var content: LabSceneContent = buildLabSceneParts(
+    renderer: renderer
+    meshes: meshes
+    scene: scene
+  )
+  content.meshFirst = meshFirst
+  content.meshEnd = meshStoreCount(store: renderer.passes.gbuffer.meshes) + 1
+  ret content
+}
+
+func buildLabSceneParts(
   renderer: mod DeferredRenderer
   meshes: view LabMeshes
   scene: view Int
