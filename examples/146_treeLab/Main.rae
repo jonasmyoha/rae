@@ -81,6 +81,7 @@ open Gbuffer
 open Climate
 open app3d/Precipitation
 open app3d/SettingsWeather
+open app3d/SettingsWind
 open GbufferWorld
 open RendererDeferred
 open RendererDeferredShadow
@@ -210,6 +211,16 @@ func createLab() ret LabState {
       lastTime: Gpu2d.nowSeconds()
     }
     labCameraHome(state: state)
+    # the panel's date replaces the season's own bottom slider, and starts at the season's date
+    # (RAE_DAY_OF_YEAR), not the panel's own
+    if let editor: mod LabEditor = state.editor {
+      state.season.shown = false
+      labEditorSetDate(
+        editor: editor
+        year: state.season.clock.year
+        dayOfYear: state.season.clock.dayOfYear
+      )
+    }
     ret state
   }
 }
@@ -291,7 +302,7 @@ func labEditorStep(
   deltaTime: view Float
   rendered: view Bool
 ) {
-  var picked: LabEditorFrame = { scene: 0, framing: "", settingsChanged: false }
+  var picked: LabEditorFrame = { scene: 0, framing: "", settingsChanged: false, control: "" }
   if let editor: mod LabEditor = state.editor {
     picked = labEditorFrame(
       editor: editor
@@ -317,8 +328,127 @@ func labEditorStep(
   if picked.settingsChanged {
     if let editor: view LabEditor = state.editor {
       labEditorApplySettings(editor: editor, renderer: state.renderer, light: state.light)
+      # the panel's date is the lab's: the season follows it
+      state.season.clock.year = labEditorYear(editor: editor)
+      state.season.clock.dayOfYear = labEditorDayOfYear(editor: editor)
     }
   }
+  if picked.control.length() > 0 {
+    applyLabControl(state: state, id: picked.control)
+  }
+  # and back: the date a key or the year's speed moved, and the choices the keys stepped
+  let choices: List(String) = labChoiceIds(state: state)
+  if let editor: mod LabEditor = state.editor {
+    labEditorSetDate(
+      editor: editor
+      year: state.season.clock.year
+      dayOfYear: state.season.clock.dayOfYear
+    )
+    labEditorShowChoices(editor: editor, ids: choices)
+    labEditorSetReadout(editor: editor, text: labShortReadout(state: state))
+  }
+}
+
+# The panel's readout: the latitude, then the temperature, the season and the weather (the first
+# three parts of LabSeason labSeasonClimateText), short enough for the side panel
+func labShortReadout(state: view LabState) ret String {
+  let parts: List(String) = labSeasonClimateText(season: state.season).split(sep: ", ")
+  var text: String = "lat {state.season.latitude.toInt()}"
+  loop var i: Int = 0, i < Math.min(a: 3, b: parts.length), ++i {
+    text = "{text}, {parts.copyAtDefault(index: i)}"
+  }
+  ret text
+}
+
+# A lab control (LabEditor labControlButtons): its group letter, then its value
+func applyLabControl(state: mod LabState, id: view String) {
+  let group: String = id.sub(start: 0, len: 1)
+  let value: String = id.sub(start: 2, len: id.length() - 2)
+  if group is "w" {
+    state.season.weather = settingsWeatherNamed(name: value, fallback: SettingsWeather.auto)
+  } else if group is "n" {
+    state.season.wind = settingsWindNamed(name: value, fallback: SettingsWind.auto)
+  } else if group is "y" {
+    state.season.clock.yearSpeed = value.toFloat()
+  } else if group is "l" {
+    state.season.latitude = value.toFloat()
+  } else if group is "k" {
+    Sys.setEnv(name: "RAE_TREELAB_LOOK", value: value)
+    labApplyLight(state: state)
+  } else if group is "f" {
+    let set: Int = value.toInt()
+    if set < state.forests.length {
+      state.forestShown = set
+    }
+  }
+  log("[treelab] control {id}")
+}
+
+# The scene's own light and sky again (after the look was switched)
+func labApplyLight(state: mod LabState) {
+  if state.scene is labSceneStudies {
+    applyStudyLight(renderer: state.renderer, light: state.light, studyView: state.studyView)
+  } else {
+    applyLabLook(renderer: state.renderer, light: state.light)
+  }
+}
+
+# The lab's choices now, one control id per group, to show them selected in the panel
+func labChoiceIds(state: view LabState) ret List(String) {
+  var look: String = "k:lab"
+  if labLookPlain() {
+    look = "k:plain"
+  }
+  ret List(String) {
+    "w:{labWeatherValue(weather: state.season.weather)}"
+    "n:{labWindValue(wind: state.season.wind)}"
+    "y:{state.season.clock.yearSpeed.toInt()}"
+    "l:{state.season.latitude.toInt()}"
+    look
+    "f:{state.forestShown}"
+  }
+}
+
+# The weather's and the wind's control values (LabEditor labControlButtons)
+func labWeatherValue(weather: view SettingsWeather) ret String {
+  if weather is SettingsWeather.clear {
+    ret "clear"
+  }
+  if weather is SettingsWeather.cloudy {
+    ret "cloudy"
+  }
+  if weather is SettingsWeather.rain {
+    ret "rain"
+  }
+  if weather is SettingsWeather.snow {
+    ret "snow"
+  }
+  if weather is SettingsWeather.mist {
+    ret "mist"
+  }
+  ret "auto"
+}
+
+func labWindValue(wind: view SettingsWind) ret String {
+  if wind is SettingsWind.calm {
+    ret "calm"
+  }
+  if wind is SettingsWind.breeze {
+    ret "breeze"
+  }
+  if wind is SettingsWind.strong {
+    ret "strong"
+  }
+  if wind is SettingsWind.gale {
+    ret "gale"
+  }
+  ret "auto"
+}
+
+# The date and the weather reach every scene of an interactive lab; a scripted run keeps them to
+# the scenes with a forest (the forest and One tree), so its other pictures stay as they were
+func labSeasonHere(state: view LabState) ret Bool {
+  ret state.forests.length > 0 or state.editor is not none
 }
 
 # The sun's cascades, fitted to the camera; every mesh of the world casts
@@ -390,6 +520,16 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
         resources: rendererResources
         forest: forest
       )
+      if let leafParticles: mod LeafParticles = state.leafParticles {
+        drawLeafParticles(
+          leafParticles: leafParticles
+          resources: rendererResources
+          gbuffer: state.renderer.passes.gbuffer
+        )
+      }
+    }
+    # rain and snow falling, where the date reaches
+    if labSeasonHere(state: state) {
       if let precipitation: mod Precipitation = state.precipitation {
         let air: Float = labAir(season: state.season)
         let labWind: WindVector = windVector(state: state.wind, settings: state.windSettings)
@@ -403,13 +543,6 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
           air: settingsWeatherAir(override: state.season.weather, air: air)
           windX: windMetersPerSecond(sway: labWind.x)
           windY: windMetersPerSecond(sway: labWind.y)
-        )
-      }
-      if let leafParticles: mod LeafParticles = state.leafParticles {
-        drawLeafParticles(
-          leafParticles: leafParticles
-          resources: rendererResources
-          gbuffer: state.renderer.passes.gbuffer
         )
       }
     }
@@ -486,14 +619,16 @@ func runLabFrame(state: mod LabState) {
   }
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let gatherStart: Float64 = Gpu2d.nowSeconds()
-  if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
-    applyLabSeason(season: state.season, field: forest.field)
+  if labSeasonHere(state: state) {
     applyLabWeather(season: state.season, renderer: state.renderer)
     # the snow lying in the lab's place (lib/Climate, lib/snow.wgsl)
     setGbufferSnow(
       cache: state.renderer.passes.gbuffer
       depth: climateSnowAt(climate: state.season.climate, east: 0.0, north: 0.0)
     )
+  }
+  if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
+    applyLabSeason(season: state.season, field: forest.field)
     let unusedBaked: Bool = updateSeasonImpostors(forest: forest, renderer: state.renderer)
     gatherTreeForest(
       forest: forest

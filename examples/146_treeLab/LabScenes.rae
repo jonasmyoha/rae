@@ -2,7 +2,8 @@
 #
 #   1 Forest         LabForest's tree sets at every distance (RAE_TREELAB_SCENE=forest); the
 #                    interactive lab's default
-#   2 One tree       one generated tree on the lab ground (seed RAE_TREELAB_SEED)
+#   2 One tree       one tree on the lab ground, drawn as a forest kind so the season reaches it
+#                    (RAE_TREELAB_SCENE=onetree)
 #   3 Reference T02  the reference-comparison scene: the traced tree, the placeholder trees and
 #                    clouds, the lab look; its fixed framings are the panel's camera buttons
 #                    (RAE_TREELAB_CAMERA), and every scripted run starts here unless told otherwise
@@ -56,6 +57,9 @@ func labStartScene() ret Int {
   if labForestRequested() {
     ret labSceneForest
   }
+  if Sys.getEnv(name: "RAE_TREELAB_SCENE") is "onetree" {
+    ret labSceneOneTree
+  }
   if labStudyName().length() > 0 {
     ret labSceneStudies
   }
@@ -83,6 +87,15 @@ type LabSceneContent {
   leafParticles: opt LeafParticles
   light: Light3d
   camera: Camera3d
+}
+
+# Rain and snow for a scene whose pictures a scripted run keeps (Reference, Studies): only in an
+# interactive run, where the date and the weather reach every scene
+func labInteractivePrecipitation(renderer: mod DeferredRenderer) ret opt Precipitation {
+  if labScripted() {
+    ret none
+  }
+  ret createPrecipitation(renderer: renderer)
 }
 
 # The lab's sun from the camera's front left, as in T02 (the trunk is lit on its left): the
@@ -130,26 +143,33 @@ func buildForestScene(renderer: mod DeferredRenderer, meshes: view LabMeshes) re
   }
 }
 
-# One generated tree on the lab ground, the camera looking at it from 20 m
+# One tree on the lab ground, drawn as a forest kind (LabForest labLevelsForest: its near, middle
+# and impostor levels), so the season turns and drops its leaves and the snow lies on it; the
+# camera looks at it from 20 m
 func buildOneTreeScene(renderer: mod DeferredRenderer, meshes: view LabMeshes) ret LabSceneContent {
   var world: World3d = buildLabGround(meshes: meshes)
-  var tree: opt LabTree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
+  var forests: List(TreeForest) = List.create(TreeForest, cap: 1)
+  forests.add(value: own labLevelsForest(renderer: renderer))
   let light: Light3d = labLookLight(renderer: renderer)
+  var precipitation: opt Precipitation = createPrecipitation(renderer: renderer)
   var camera: Camera3d = labCamera(name: "near")
   camera.position = Vec3.create(x: 0.0, y: -20.0, z: 3.0)
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.0)
   ret LabSceneContent {
     scene: labSceneOneTree
     world: own world
-    forests: List.create(TreeForest, cap: 0)
+    forests: own forests
     forestShown: 0
-    tree: own tree
+    tree: none
     grass: createLabGrass(obstacles: labTrunkField())
     grassCenterX: 0.0
     grassCenterY: 0.0
     studyView: ""
-    precipitation: none
-    leafParticles: none
+    precipitation: own precipitation
+    leafParticles: createLeafParticles(
+      capacity: leafDefaultCapacity()
+      constants: List.create(ShaderConstant, cap: 0)
+    )
     light: light
     camera: camera
   }
@@ -184,7 +204,7 @@ func buildReferenceScene(
     grassCenterX: 0.0
     grassCenterY: 0.0
     studyView: ""
-    precipitation: none
+    precipitation: labInteractivePrecipitation(renderer: renderer)
     leafParticles: none
     light: light
     camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
@@ -213,7 +233,7 @@ func buildStudiesScene(
     grassCenterX: studyGrassCenterX
     grassCenterY: studyGrassCenterY
     studyView: studyView
-    precipitation: none
+    precipitation: labInteractivePrecipitation(renderer: renderer)
     leafParticles: none
     light: light
     camera: camera

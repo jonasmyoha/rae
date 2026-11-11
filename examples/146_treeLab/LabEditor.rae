@@ -22,6 +22,52 @@ type LabEditor {
   panel: EditorPanel
   scenes: EditorSceneChooser
   framings: ControlPanel
+  # The lab's own controls (labControlButtons), and the choices they last showed selected
+  controls: ControlPanel
+  shownChoices: String = ""
+  # The readout line under the section's title: the place and the season now
+  readout: String = ""
+  # Frames run: the panel reports its settings changed as it starts, which is not a change made
+  framesRun: Int = 0
+}
+
+# One control: its id ("<group letter>:<value>"), its label and its group
+type LabControl {
+  id: String
+  label: String
+  group: Int
+}
+
+# The lab's controls, group by group (the group numbers follow the framings' 2), each first label
+# naming the key that steps it: the weather (U), the wind (I), the year's speed (N, days a day), the
+# latitude, the look, the forest set (T)
+func labControlButtons() ret List(LabControl) {
+  ret List(LabControl) {
+    { id: "w:auto", label: "Weather auto (U)", group: 3 }
+    { id: "w:clear", label: "Clear", group: 3 }
+    { id: "w:cloudy", label: "Cloudy", group: 3 }
+    { id: "w:rain", label: "Rain", group: 3 }
+    { id: "w:snow", label: "Snow", group: 3 }
+    { id: "w:mist", label: "Mist", group: 3 }
+    { id: "n:auto", label: "Wind auto (I)", group: 4 }
+    { id: "n:calm", label: "Calm", group: 4 }
+    { id: "n:breeze", label: "Breeze", group: 4 }
+    { id: "n:strong", label: "Strong wind", group: 4 }
+    { id: "n:gale", label: "Gale", group: 4 }
+    { id: "y:0", label: "Year still (N)", group: 5 }
+    { id: "y:1", label: "Year 1x", group: 5 }
+    { id: "y:7", label: "Year 7x", group: 5 }
+    { id: "y:30", label: "Year 30x", group: 5 }
+    { id: "l:0", label: "Latitude 0", group: 6 }
+    { id: "l:30", label: "Latitude 30", group: 6 }
+    { id: "l:45", label: "Latitude 45", group: 6 }
+    { id: "l:60", label: "Latitude 60", group: 6 }
+    { id: "k:lab", label: "Lab look", group: 7 }
+    { id: "k:plain", label: "Plain look", group: 7 }
+    { id: "f:0", label: "Stylized set (T)", group: 8 }
+    { id: "f:1", label: "Low-poly set", group: 8 }
+    { id: "f:2", label: "Reference set", group: 8 }
+  }
 }
 
 # What the editor asked for this frame
@@ -32,6 +78,8 @@ type LabEditorFrame {
   framing: String
   # The shared settings changed (the app applies them to its renderer and light)
   settingsChanged: Bool
+  # A lab control clicked (labControlButtons' id; "": none)
+  control: String
 }
 
 func createLabEditor(startScene: view Int) ret LabEditor {
@@ -62,7 +110,23 @@ func createLabEditor(startScene: view Int) ret LabEditor {
     )
   }
   let unusedBuilt: Bool = buildEditorPanelControls(editorPanel: panel, panel: framings)
-  ret LabEditor { panel: own panel, scenes: own scenes, framings: own framings }
+  var controls: ControlPanel = createControlPanel(hostNodeId: editorAppPanelNodeId)
+  loop let control: view LabControl in labControlButtons() {
+    addPanelButton(
+      panel: controls
+      id: control.id
+      label: control.label
+      actionId: "treelab.control.{control.id}"
+      group: control.group
+    )
+  }
+  let unusedControlsBuilt: Bool = buildEditorPanelControls(editorPanel: panel, panel: controls)
+  ret LabEditor {
+    panel: own panel
+    scenes: own scenes
+    framings: own framings
+    controls: own controls
+  }
 }
 
 # One frame of the chrome and the camera (the rig moves the camera: orbit, or WASD in the free
@@ -95,7 +159,13 @@ func labEditorFrame(
     scene = editor.panel.settings.scene
   }
   let framing: String = panelClickedId(panel: editor.framings, world: editor.panel.world)
-  ret LabEditorFrame { scene: scene, framing: framing, settingsChanged: panelFrame.settingsChanged }
+  editor.framesRun = editor.framesRun + 1
+  ret LabEditorFrame {
+    scene: scene
+    framing: framing
+    settingsChanged: panelFrame.settingsChanged and editor.framesRun > 2
+    control: panelClickedId(panel: editor.controls, world: editor.panel.world)
+  }
 }
 
 # Show `scene` as picked in the chooser (a scene the lab switched to by itself)
@@ -143,4 +213,62 @@ func labEditorApplySettings(
     light: light
     sunStrength: labPanelSunStrength
   )
+}
+
+# Show the lab's current choices selected: one id per group (labControlButtons' ids). Only when one
+# changed, by a click or a key
+func labEditorShowChoices(editor: mod LabEditor, ids: view List(String)) {
+  var joined: String = ""
+  loop let id: view String in ids {
+    joined = "{joined} {id}"
+  }
+  if joined is editor.shownChoices {
+    ret
+  }
+  editor.shownChoices = joined
+  loop let id: view String in ids {
+    loop let control: view LabControl in labControlButtons() {
+      if control.id is id {
+        setPanelSelection(
+          panel: editor.controls
+          world: editor.panel.world
+          group: control.group
+          id: id
+        )
+      }
+    }
+  }
+}
+
+# The panel's date, from the lab's season (moved by a key or the year's speed), shown in the panel
+func labEditorSetDate(editor: mod LabEditor, year: view Int, dayOfYear: view Int) {
+  if editor.panel.settings.timeOfDay.dayOfYear is dayOfYear and editor.panel.settings.timeOfDay.year is year {
+    ret
+  }
+  editor.panel.settings.timeOfDay.year = year
+  editor.panel.settings.timeOfDay.dayOfYear = dayOfYear
+  settingsApplyToWorld(
+    settingsState: editor.panel.settings
+    world: editor.panel.world
+    uiSystems: editor.panel.uiSystems
+  )
+}
+
+# The panel's date (its shared settings), for the lab's season
+func labEditorDayOfYear(editor: view LabEditor) ret Int {
+  ret editor.panel.settings.timeOfDay.dayOfYear
+}
+
+func labEditorYear(editor: view LabEditor) ret Int {
+  ret editor.panel.settings.timeOfDay.year
+}
+
+# The app section's readout: the latitude, the temperature, the season and the weather (LabSeason
+# labSeasonClimateText), what the season's own slider showed; laid out again only when it changed
+func labEditorSetReadout(editor: mod LabEditor, text: view String) {
+  if text is editor.readout {
+    ret
+  }
+  editor.readout = "{text}"
+  setEditorPanelAppSection(editorPanel: editor.panel, title: "Tree lab", readout: text)
 }
