@@ -1,0 +1,146 @@
+# The tree lab's editor chrome: the shared editor panel of the 3D examples (lib/app3d/EditorPanel:
+# the camera bar with orbit and the free WASD camera, the "..." menu, the debug readout, the side
+# panel with the shared sky, time of day and date, shadows and TAA), and in its app section the
+# lab's scene chooser (LabScenes) and the Reference scene's fixed framings as camera buttons.
+#
+# The panel's shared settings reach the scene only once they are changed in the panel: until then
+# each scene keeps its own light (the lab look, or a study's hour), so the lab opens as it always
+# looked. A scripted run (LabScenes labScripted) has no editor at all.
+import Gpu2d
+import Math
+import Vec3
+open Scene3d
+open Gpu2dCanvas
+open RendererDeferred
+open app3d/CameraRig
+open app3d/ControlPanel
+open app3d/EditorPanel
+open app3d/SettingsDialog
+open LabScenes
+
+type LabEditor {
+  panel: EditorPanel
+  scenes: EditorSceneChooser
+  framings: ControlPanel
+}
+
+# What the editor asked for this frame
+type LabEditorFrame {
+  # The scene picked (0: none)
+  scene: Int
+  # A Reference framing picked ("": none)
+  framing: String
+  # The shared settings changed (the app applies them to its renderer and light)
+  settingsChanged: Bool
+}
+
+func createLabEditor(startScene: view Int) ret LabEditor {
+  var settings: SettingsState = createSettingsState(
+    scene: startScene
+    sceneCount: labSceneLabels().length
+    speed: 1.0
+    toon: false
+    hour: 10.0
+    skyModel: SettingsSkyModel.preetham
+  )
+  settings.animateTime = false
+  var panel: EditorPanel = createEditorPanel(assetBase: "lib/assets/walker/", settings: settings)
+  var scenes: EditorSceneChooser = createEditorSceneChooser(
+    editorPanel: panel
+    title: "Tree lab"
+    labels: labSceneLabels()
+  )
+  # The Reference scene's framings: a click shows that scene from there; moving away is free
+  var framings: ControlPanel = createControlPanel(hostNodeId: editorAppPanelNodeId)
+  loop let name: view String in labFramingNames() {
+    addPanelButton(
+      panel: framings
+      id: name
+      label: "T02 {name}"
+      actionId: "treelab.framing.{name}"
+      group: 2
+    )
+  }
+  let unusedBuilt: Bool = buildEditorPanelControls(editorPanel: panel, panel: framings)
+  ret LabEditor { panel: own panel, scenes: own scenes, framings: own framings }
+}
+
+# One frame of the chrome and the camera (the rig moves the camera: orbit, or WASD in the free
+# mode), and what was picked
+func labEditorFrame(
+  editor: mod LabEditor
+  rig: mod CameraRig
+  camera: mod Camera3d
+  now: view Float64
+  deltaTime: view Float
+  resized: view Bool
+  rendered: view Bool
+) ret LabEditorFrame {
+  let shown: Int = editor.panel.settings.scene
+  let panelFrame: EditorPanelFrame = updateEditorPanel(
+    editorPanel: editor.panel
+    cameraRig: rig
+    camera: camera
+    now: now
+    deltaTime: deltaTime
+    resized: resized
+    rendered: rendered
+  )
+  let unusedClicked: Bool = updateEditorSceneChooser(
+    editorPanel: editor.panel
+    chooser: editor.scenes
+  )
+  var scene: Int = 0
+  if editor.panel.settings.scene is not shown {
+    scene = editor.panel.settings.scene
+  }
+  let framing: String = panelClickedId(panel: editor.framings, world: editor.panel.world)
+  ret LabEditorFrame { scene: scene, framing: framing, settingsChanged: panelFrame.settingsChanged }
+}
+
+# Show `scene` as picked in the chooser (a scene the lab switched to by itself)
+func labEditorShowScene(editor: mod LabEditor, scene: view Int) {
+  selectEditorPanelScene(editorPanel: editor.panel, scene: scene)
+}
+
+# A new camera to orbit round: the rig starts exactly where the camera is (its orbit's yaw, pitch
+# and distance solved from the camera's place and target, Math3d orbitEye's convention), so taking
+# over does not move it, and Orbit comes back to its target
+func labEditorCameraHome(editor: mod LabEditor, rig: mod CameraRig, camera: view Camera3d) {
+  let offset: Vec3 = Vec3.vsub(a: camera.position, b: camera.target)
+  let distance: Float = Math.max(a: 0.01, b: Vec3.vlen(a: offset))
+  let pitch: Float = Math.asin(x: Math.clamp(val: offset.z / distance, low: -1.0, high: 1.0))
+  rig = createCameraRig(camera: camera)
+  rig.yaw = Math.atan2(y: offset.x, x: 0.0 - offset.y)
+  rig.orbitPitch = pitch
+  rig.freePitch = 0.0 - pitch
+  rig.distance = distance
+  rig.freePosition = camera.position
+  # the lab's framings come as close as 3 m (the bush) and as far as 120 m
+  rig.minDistance = 0.5
+  rig.maxDistance = 400.0
+  snapCameraRigView(rig: rig)
+  setEditorPanelOrbitHome(editorPanel: editor.panel, target: camera.target)
+}
+
+func drawLabEditor(editor: mod LabEditor, canvas: mod Gpu2dCanvas) {
+  drawEditorPanel(editorPanel: editor.panel, canvas: canvas)
+}
+
+# The panel's shared settings onto the renderer and the light, once they were changed in the panel:
+# the sky model, the time of day and date, TAA, the quality. The lab look's sun is 66,000 lux at its
+# brightest, the panel's 20,000 at noon: its sun is scaled to the look's level
+const labPanelSunStrength: Float = 3.0
+
+func labEditorApplySettings(
+  editor: view LabEditor
+  renderer: mod DeferredRenderer
+  light: mod Light3d
+) {
+  applyEditorPanelSettings(
+    editorPanel: editor.panel
+    renderer: renderer
+    light: light
+    sunStrength: labPanelSunStrength
+  )
+}

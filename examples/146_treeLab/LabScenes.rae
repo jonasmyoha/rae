@@ -1,0 +1,322 @@
+# The tree lab's scenes, chosen in the editor panel (LabEditor) or by the variables at launch:
+#
+#   1 Forest         LabForest's tree sets at every distance (RAE_TREELAB_SCENE=forest); the
+#                    interactive lab's default
+#   2 One tree       one generated tree on the lab ground (seed RAE_TREELAB_SEED)
+#   3 Reference T02  the reference-comparison scene: the traced tree, the placeholder trees and
+#                    clouds, the lab look; its fixed framings are the panel's camera buttons
+#                    (RAE_TREELAB_CAMERA), and every scripted run starts here unless told otherwise
+#   4 Studies        LabStudies' meadow flower views (RAE_TREELAB_STUDY)
+#
+# A scene is built the first time it is shown and kept: switching only moves its parts in and out
+# of the lab's state (Main.rae labShowScene).
+import Sys
+import Vec3
+open Scene3d
+open GrassCompute
+open LeafParticles
+open app3d/Precipitation
+open app3d/TreeForest
+open RendererDeferred
+open LabScene
+open LabGrass
+open LabLook
+open LabTree
+open LabStudies
+open LabForest
+
+const labSceneForest: Int = 1
+
+const labSceneOneTree: Int = 2
+
+const labSceneReference: Int = 3
+
+const labSceneStudies: Int = 4
+
+# The study the Studies scene shows when none is named (LabStudies' views)
+const labDefaultStudy: String = "flowers"
+
+func labSceneLabels() ret List(String) {
+  ret List(String) { "Forest", "One tree", "Reference T02", "Studies" }
+}
+
+# A run that makes pictures: headless, a screenshot or the dolly. It starts and stays as the lab
+# always did (no editor panel, no camera rig), so its pictures do not change
+func labScripted() ret Bool {
+  ret Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0 or Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT").length() > 0 or Sys.getEnv(
+    name: "RAE_TREELAB_DOLLY"
+  ).length() > 0
+}
+
+# The scene a run starts in: the variables' scene, as before; an interactive run that names no
+# scene, camera or tree starts in the forest
+func labStartScene() ret Int {
+  if labForestRequested() {
+    ret labSceneForest
+  }
+  if labStudyName().length() > 0 {
+    ret labSceneStudies
+  }
+  let named: Bool = Sys.getEnv(name: "RAE_TREELAB_CAMERA").length() > 0 or Sys.getEnv(
+    name: "RAE_TREELAB_TREE"
+  ).length() > 0 or labRowRequested()
+  if labScripted() or named {
+    ret labSceneReference
+  }
+  ret labSceneForest
+}
+
+# One scene's parts: what Main.rae's LabState holds for the scene shown
+type LabSceneContent {
+  scene: Int
+  world: World3d
+  forests: List(TreeForest)
+  forestShown: Int
+  tree: opt LabTree
+  grass: GrassCompute
+  grassCenterX: Float
+  grassCenterY: Float
+  studyView: String
+  precipitation: opt Precipitation
+  leafParticles: opt LeafParticles
+  light: Light3d
+  camera: Camera3d
+}
+
+# The lab's sun from the camera's front left, as in T02 (the trunk is lit on its left): the
+# direction the light travels, and the lab look on it
+func labLookLight(renderer: mod DeferredRenderer) ret Light3d {
+  var light: Light3d = defaultLight3d()
+  light.sunDir = Vec3.vnorm(a: Vec3.create(x: 0.5, y: 0.55, z: -0.62))
+  applyLabLook(renderer: renderer, light: light)
+  ret light
+}
+
+# Put a scene's light and sky back on the renderer when it is shown again
+func applyLabSceneLight(renderer: mod DeferredRenderer, content: mod LabSceneContent) {
+  if content.scene is labSceneStudies {
+    applyStudyLight(renderer: renderer, light: content.light, studyView: content.studyView)
+    ret
+  }
+  applyLabLook(renderer: renderer, light: content.light)
+}
+
+# The forest scene: both sets' forests, the lab's sun and look, rain and snow, falling leaves
+func buildForestScene(renderer: mod DeferredRenderer, meshes: view LabMeshes) ret LabSceneContent {
+  var world: World3d = buildLabForestWorld(meshes: meshes, renderer: renderer)
+  var forests: List(TreeForest) = buildLabForests(renderer: renderer)
+  let light: Light3d = labLookLight(renderer: renderer)
+  var precipitation: opt Precipitation = createPrecipitation(renderer: renderer)
+  ret LabSceneContent {
+    scene: labSceneForest
+    world: own world
+    forests: own forests
+    forestShown: labForestFirstSet()
+    tree: none
+    # grass round the camera, no obstacles
+    grass: createLabGrass(obstacles: List(Float) { 0.0 })
+    grassCenterX: 0.0
+    grassCenterY: 30.0
+    studyView: ""
+    precipitation: own precipitation
+    leafParticles: createLeafParticles(
+      capacity: leafDefaultCapacity()
+      constants: List.create(ShaderConstant, cap: 0)
+    )
+    light: light
+    camera: labForestCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+  }
+}
+
+# One generated tree on the lab ground, the camera looking at it from 20 m
+func buildOneTreeScene(renderer: mod DeferredRenderer, meshes: view LabMeshes) ret LabSceneContent {
+  var world: World3d = buildLabGround(meshes: meshes)
+  var tree: opt LabTree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
+  let light: Light3d = labLookLight(renderer: renderer)
+  var camera: Camera3d = labCamera(name: "near")
+  camera.position = Vec3.create(x: 0.0, y: -20.0, z: 3.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.0)
+  ret LabSceneContent {
+    scene: labSceneOneTree
+    world: own world
+    forests: List.create(TreeForest, cap: 0)
+    forestShown: 0
+    tree: own tree
+    grass: createLabGrass(obstacles: labTrunkField())
+    grassCenterX: 0.0
+    grassCenterY: 0.0
+    studyView: ""
+    precipitation: none
+    leafParticles: none
+    light: light
+    camera: camera
+  }
+}
+
+# The reference-comparison scene (T02): the traced tree (or the placeholder, or its forest
+# levels: RAE_TREELAB_TREE), the placeholder trees and clouds, the camera RAE_TREELAB_CAMERA names
+func buildReferenceScene(
+  renderer: mod DeferredRenderer
+  meshes: view LabMeshes
+) ret LabSceneContent {
+  let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
+  var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
+  # RAE_TREELAB_TREE=levels: the same tree drawn as a forest kind (its near, middle and impostor
+  # levels, LabForest's labLevelsForest) in place of the leaf pass
+  let levels: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "levels"
+  var forests: List(TreeForest) = List.create(TreeForest, cap: 1)
+  var tree: opt LabTree = none
+  if levels {
+    forests.add(value: own labLevelsForest(renderer: renderer))
+  } else if not placeholder {
+    tree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
+  }
+  let light: Light3d = labLookLight(renderer: renderer)
+  ret LabSceneContent {
+    scene: labSceneReference
+    world: own world
+    forests: own forests
+    forestShown: 0
+    tree: own tree
+    grass: createLabGrass(obstacles: labTrunkField())
+    grassCenterX: 0.0
+    grassCenterY: 0.0
+    studyView: ""
+    precipitation: none
+    leafParticles: none
+    light: light
+    camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+  }
+}
+
+# One of the studies: its world, light and camera
+func buildStudiesScene(
+  renderer: mod DeferredRenderer
+  meshes: view LabMeshes
+  studyView: view String
+) ret LabSceneContent {
+  var obstacles: List(StudyObstacle) = List.create(StudyObstacle, cap: 64)
+  var world: World3d = buildStudyWorld(meshes: meshes, renderer: renderer, obstacles: obstacles)
+  var light: Light3d = defaultLight3d()
+  applyStudyLight(renderer: renderer, light: light, studyView: studyView)
+  var camera: Camera3d = studyCamera()
+  let unusedRig: CameraRig = studyCameraRig(camera: camera, studyView: studyView)
+  ret LabSceneContent {
+    scene: labSceneStudies
+    world: own world
+    forests: List.create(TreeForest, cap: 0)
+    forestShown: 0
+    tree: none
+    grass: createLabGrass(obstacles: studyObstacleField(obstacles: obstacles))
+    grassCenterX: studyGrassCenterX
+    grassCenterY: studyGrassCenterY
+    studyView: studyView
+    precipitation: none
+    leafParticles: none
+    light: light
+    camera: camera
+  }
+}
+
+# Build `scene`'s parts
+func buildLabScene(
+  renderer: mod DeferredRenderer
+  meshes: view LabMeshes
+  scene: view Int
+) ret LabSceneContent {
+  if scene is labSceneForest {
+    ret buildForestScene(renderer: renderer, meshes: meshes)
+  }
+  if scene is labSceneOneTree {
+    ret buildOneTreeScene(renderer: renderer, meshes: meshes)
+  }
+  if scene is labSceneStudies {
+    var studyView: String = labStudyName()
+    if studyView.length() is 0 {
+      studyView = labDefaultStudy
+    }
+    ret buildStudiesScene(renderer: renderer, meshes: meshes, studyView: studyView)
+  }
+  ret buildReferenceScene(renderer: renderer, meshes: meshes)
+}
+
+# The camera RAE_TREELAB_CAMERA names in the Reference scene. The near one is T02's own framing,
+# solved from the hand-drawn trace (examples/146_treeLab/traceTree.py): seen from 1.6 m with a 50
+# degree vertical field, a 12.5 m tree's foot lands on the trace's base dot (98% down the picture)
+# and its top on the trace's top dot, so the trace maps onto the tree one to one: 15.2 m away,
+# looking 18 degrees up, shifted 0.69 m so the trunk stands left of the middle as T02's does.
+func labCamera(name: view String) ret Camera3d {
+  var camera: Camera3d = defaultCamera3d()
+  camera.fovYDeg = 50
+  camera.nearZ = 0.1
+  camera.farZ = 900
+  if name is "mid" {
+    camera.position = Vec3.create(x: 0.0, y: -40.0, z: 1.6)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    ret camera
+  }
+  if name is "row" {
+    # the traced tree and the three grown ones beside it (LabTree's row, 11 m apart along x), all
+    # in one frame from 32 m
+    camera.position = Vec3.create(x: 16.5, y: -32.0, z: 1.6)
+    camera.target = Vec3.create(x: 16.5, y: 0.0, z: 6.0)
+    ret camera
+  }
+  if name is "tracedFork" {
+    camera.position = Vec3.create(x: 1.0, y: -5.5, z: 6.5)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 9.5)
+    ret camera
+  }
+  if name is "fork" {
+    # the first grown tree of the row (x 11), its fork and the joints of its upper branches
+    camera.position = Vec3.create(x: 12.0, y: -5.5, z: 6.5)
+    camera.target = Vec3.create(x: 11.0, y: 0.0, z: 9.5)
+    ret camera
+  }
+  if name is "bark" {
+    # the trunk up close, at eye height, for its color and streaks
+    camera.position = Vec3.create(x: 0.6, y: -4.0, z: 1.7)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.6)
+    ret camera
+  }
+  if name is "bush" {
+    camera.position = Vec3.create(x: 0.0, y: -3.0, z: 0.9)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.3)
+    ret camera
+  }
+  if name is "small" {
+    camera.position = Vec3.create(x: 0.0, y: -13.0, z: 1.6)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 3.4)
+    ret camera
+  }
+  if name is "far" {
+    camera.position = Vec3.create(x: 0.0, y: -120.0, z: 1.6)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    ret camera
+  }
+  let pitch: Float = 18.0 * 3.141592653589793 / 180.0
+  camera.position = Vec3.create(x: 0.69, y: -15.2, z: 1.6)
+  camera.target = Vec3.create(
+    x: 0.69
+    y: -15.2 + 10.0 * Math.cos(x: pitch)
+    z: 1.6 + 10.0 * Math.sin(x: pitch)
+  )
+  ret camera
+}
+
+# The Reference scene's fixed framings, as the panel's camera buttons name them
+func labFramingNames() ret List(String) {
+  ret List(String) {
+    "near"
+    "mid"
+    "far"
+    "bark"
+    "row"
+    "fork"
+    "tracedFork"
+    "small"
+    "bush"
+  }
+}
