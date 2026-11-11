@@ -17,6 +17,10 @@
 #   RAE_ANDROID_ENTRY     the entry file (default Main.rae or src/Main.rae)
 #   RAE_ANDROID_ICON      a square PNG (default the project's appIcon.png)
 #   RAE_ANDROID_ORIENTATION  any (default) | landscape | portrait
+#   RAE_ANDROID_PERMISSIONS  more permissions the app asks for, by their short
+#                         names, separated by spaces (e.g. "RECORD_AUDIO" for
+#                         packages/audio's recording); INTERNET and VIBRATE are
+#                         always there
 #   RAE_APP_LINKS / RAE_APP_SCHEME  the links that open the app (docs/app-links.md)
 #   RAE_ANDROID_VERSION / RAE_ANDROID_BUILD  versionName / versionCode
 #   RAE_ANDROID_KEYSTORE  the signing keystore (default ~/.android/debug.keystore,
@@ -193,6 +197,14 @@ if [ -n "${RAE_APP_SCHEME:-}" ]; then
         <data android:scheme=\"$RAE_APP_SCHEME\" />
       </intent-filter>"
 fi
+extra_permissions=""
+for permission in ${RAE_ANDROID_PERMISSIONS:-}; do
+  case "$permission" in
+    *[!A-Z_]*) echo "error: RAE_ANDROID_PERMISSIONS names are like RECORD_AUDIO: $permission" >&2; exit 1 ;;
+  esac
+  extra_permissions="$extra_permissions
+  <uses-permission android:name=\"android.permission.$permission\" />"
+done
 cat > "$gen/AndroidManifest.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -205,7 +217,7 @@ cat > "$gen/AndroidManifest.xml" <<EOF
   <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
   <uses-feature android:name="android.hardware.gamepad" android:required="false" />
   <uses-permission android:name="android.permission.INTERNET" />
-  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.VIBRATE" />$extra_permissions
   <application android:label="$label" $icon_attribute
       android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
       android:hardwareAccelerated="true"

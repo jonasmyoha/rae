@@ -941,6 +941,21 @@ green.
      speakers and microphone) pass on the Mac. Not yet: Android, Windows,
      Linux and the web's input and MIDI, and the Apogee Duet (not plugged in),
      each queued.
+
+   **Android's input and MIDI (2026-11-12), `packages/audio` 0.12.0:** the
+   microphone permission in the package's Java (`checkSelfPermission`, a flag
+   of our own for "asked and refused", `requestPermissions` on the UI thread;
+   `tools/android/gen-android.sh` writes `RECORD_AUDIO` when
+   `RAE_ANDROID_PERMISSIONS` names it), the duplex device through AAudio
+   (miniaudio; the input's latency is the device's buffer there), and MIDI:
+   `RaeAudioMidi` lists and opens devices with MidiManager, and the C reads
+   and writes their ports with AMidi (loaded at run time) into the same queue
+   CoreMIDI fills, so `audio/Midi` parses it the same. On the Android 35
+   emulator: `checks/audioInput` records (permission 0 before `pm grant`, 3
+   after; nothing lost; round trip 8720 frames); `checks/audioMidi` finds
+   MidiManager and no devices. Android gives a program no virtual MIDI ports
+   (they need a MidiDeviceService), so the AMidi read and send path compiled
+   but did not run here; a loopback device to test it is queued.
 6. **The DAW engine.** The ECS layer (§10.2) in full, plan compilation with
    delay compensation, EQ / compressor / reverb nodes, parallel audio workers
    with workgroups/MMCSS, stage B (once the FFI callback exists), CLAP hosting,

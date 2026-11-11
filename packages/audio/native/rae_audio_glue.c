@@ -1563,11 +1563,209 @@ int64_t rae_audio_microphone_request(void) {
     return 1;
   }
 }
+#elif defined(__ANDROID__)
+/* Android: RECORD_AUDIO, asked by the package's Java (RaeAudioSession) */
+int64_t rae_audio_microphone_permission(void) {
+  return rae_session_int("microphonePermission", "()I", 0, 0, 0);
+}
+int64_t rae_audio_microphone_request(void) {
+  return rae_session_int("requestMicrophone", "()I", 0, 0, 0);
+}
 #else
 int64_t rae_audio_microphone_permission(void) {
   return -1;
 }
 int64_t rae_audio_microphone_request(void) {
+  return 0;
+}
+#endif
+
+/* ---- Android's MIDI: MidiManager (Java) and AMidi (NDK) --------------------
+ * Platform reason: listing and opening devices is Java-only
+ * (org.rae.audio.RaeAudioMidi, through JNI); their ports are read and written
+ * with AMidi (libamidi, loaded at run time). One call each; a received message
+ * goes into the queue CoreMIDI fills on Apple, so audio/Midi parses it the
+ * same way. */
+#if defined(__ANDROID__)
+static jclass g_rae_midi_class = NULL;
+
+static jclass rae_midi_class(JNIEnv* env) {
+  pthread_mutex_lock(&g_rae_session_lock);
+  if (!g_rae_midi_class && env) {
+    jobject activity = (jobject)SDL_GetAndroidActivity();
+    if (activity) {
+      jclass activityClass = (*env)->GetObjectClass(env, activity);
+      jmethodID getLoader = (*env)->GetMethodID(env, activityClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+      jobject loader = (*env)->CallObjectMethod(env, activity, getLoader);
+      jclass loaderClass = (*env)->GetObjectClass(env, loader);
+      jmethodID loadClass = (*env)->GetMethodID(env, loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+      jstring name = (*env)->NewStringUTF(env, "org.rae.audio.RaeAudioMidi");
+      jclass found = (jclass)(*env)->CallObjectMethod(env, loader, loadClass, name);
+      if (!rae_session_failed(env) && found) g_rae_midi_class = (jclass)(*env)->NewGlobalRef(env, found);
+      (*env)->DeleteLocalRef(env, name);
+      (*env)->DeleteLocalRef(env, loaderClass);
+      (*env)->DeleteLocalRef(env, loader);
+      (*env)->DeleteLocalRef(env, activityClass);
+      (*env)->DeleteLocalRef(env, activity);
+    }
+  }
+  pthread_mutex_unlock(&g_rae_session_lock);
+  return g_rae_midi_class;
+}
+
+static int64_t rae_midi_java_int(const char* name, const char* signature, int64_t a) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_midi_class(env) : NULL;
+  if (!type) return 0;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, name, signature);
+  if (!method || rae_session_failed(env)) return 0;
+  jint result = (*env)->CallStaticIntMethod(env, type, method, (jint)a);
+  return rae_session_failed(env) ? 0 : (int64_t)result;
+}
+
+int64_t rae_audio_midi_android_available(void) {
+  return rae_midi_java_int("available", "()I", 0);
+}
+
+int64_t rae_audio_midi_android_refresh(void) {
+  return rae_midi_java_int("refresh", "()I", 0);
+}
+
+int64_t rae_audio_midi_android_device_id(int64_t index) {
+  return rae_midi_java_int("deviceId", "(I)I", index);
+}
+
+int64_t rae_audio_midi_android_outputs(int64_t index) {
+  return rae_midi_java_int("outputPorts", "(I)I", index);
+}
+
+int64_t rae_audio_midi_android_inputs(int64_t index) {
+  return rae_midi_java_int("inputPorts", "(I)I", index);
+}
+
+int64_t rae_audio_midi_android_open(int64_t id) {
+  return rae_midi_java_int("open", "(I)I", id);
+}
+
+int64_t rae_audio_midi_android_device_name(int64_t index, uint8_t* into, int64_t capacity) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_midi_class(env) : NULL;
+  if (!type) return 0;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, "deviceName", "(I)Ljava/lang/String;");
+  if (!method || rae_session_failed(env)) return 0;
+  jstring text = (jstring)(*env)->CallStaticObjectMethod(env, type, method, (jint)index);
+  if (rae_session_failed(env) || !text) return 0;
+  const char* utf8 = (*env)->GetStringUTFChars(env, text, NULL);
+  int64_t length = utf8 ? (int64_t)strlen(utf8) : 0;
+  if (length > capacity) length = capacity;
+  if (utf8) {
+    memcpy(into, utf8, (size_t)length);
+    (*env)->ReleaseStringUTFChars(env, text, utf8);
+  }
+  (*env)->DeleteLocalRef(env, text);
+  return length;
+}
+
+static struct {
+  int32_t (*deviceFromJava)(JNIEnv*, jobject, void**);
+  int32_t (*outputOpen)(const void*, int32_t, void**);
+  ssize_t (*outputReceive)(const void*, int32_t*, uint8_t*, size_t, size_t*, int64_t*);
+  int32_t (*inputOpen)(const void*, int32_t, void**);
+  ssize_t (*inputSend)(const void*, const uint8_t*, size_t);
+} g_rae_amidi;
+static pthread_once_t g_rae_amidi_once = PTHREAD_ONCE_INIT;
+
+static void rae_amidi_load(void) {
+  void* amidi = dlopen("libamidi.so", RTLD_NOW);
+  if (!amidi) return;
+  g_rae_amidi.deviceFromJava = dlsym(amidi, "AMidiDevice_fromJava");
+  g_rae_amidi.outputOpen = dlsym(amidi, "AMidiOutputPort_open");
+  g_rae_amidi.outputReceive = dlsym(amidi, "AMidiOutputPort_receive");
+  g_rae_amidi.inputOpen = dlsym(amidi, "AMidiInputPort_open");
+  g_rae_amidi.inputSend = dlsym(amidi, "AMidiInputPort_send");
+}
+
+/* The AMidi device of an opened Java device, one per id */
+#define RAE_AMIDI_DEVICES 32
+static int64_t g_rae_amidi_ids[RAE_AMIDI_DEVICES];
+static void* g_rae_amidi_devices[RAE_AMIDI_DEVICES];
+
+static void* rae_amidi_device(int64_t id) {
+  pthread_once(&g_rae_amidi_once, rae_amidi_load);
+  if (!g_rae_amidi.deviceFromJava) return NULL;
+  for (int i = 0; i < RAE_AMIDI_DEVICES; i++)
+    if (g_rae_amidi_devices[i] && g_rae_amidi_ids[i] == id) return g_rae_amidi_devices[i];
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_midi_class(env) : NULL;
+  if (!type) return NULL;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, "device", "(I)Ljava/lang/Object;");
+  if (!method || rae_session_failed(env)) return NULL;
+  jobject java = (*env)->CallStaticObjectMethod(env, type, method, (jint)id);
+  if (rae_session_failed(env) || !java) return NULL;
+  void* device = NULL;
+  int32_t status = g_rae_amidi.deviceFromJava(env, java, &device);
+  (*env)->DeleteLocalRef(env, java);
+  if (status != 0 || !device) return NULL;
+  for (int i = 0; i < RAE_AMIDI_DEVICES; i++) {
+    if (!g_rae_amidi_devices[i]) {
+      g_rae_amidi_devices[i] = device;
+      g_rae_amidi_ids[i] = id;
+      break;
+    }
+  }
+  return device;
+}
+
+/* A port of device `id` that sends to us (a keyboard's), once the system has
+ * opened the device; 0 while it is still opening */
+int64_t rae_audio_midi_android_open_output(int64_t id, int64_t port) {
+  void* device = rae_amidi_device(id);
+  void* output = NULL;
+  if (!device || !g_rae_amidi.outputOpen || g_rae_amidi.outputOpen(device, (int32_t)port, &output) != 0) return 0;
+  return (int64_t)(intptr_t)output;
+}
+
+/* A port of device `id` that we send to (a synth's) */
+int64_t rae_audio_midi_android_open_input(int64_t id, int64_t port) {
+  void* device = rae_amidi_device(id);
+  void* input = NULL;
+  if (!device || !g_rae_amidi.inputOpen || g_rae_amidi.inputOpen(device, (int32_t)port, &input) != 0) return 0;
+  return (int64_t)(intptr_t)input;
+}
+
+/* One message from an output port into the queue: 1 received, 0 none, < 0 an
+ * error */
+int64_t rae_audio_midi_android_receive(int64_t output) {
+  uint8_t buffer[1024];
+  int32_t opcode = 0;
+  size_t received = 0;
+  int64_t timestamp = 0;
+  ssize_t messages = g_rae_amidi.outputReceive((const void*)(intptr_t)output, &opcode, buffer, sizeof(buffer),
+                                               &received, &timestamp);
+  if (messages <= 0) return (int64_t)messages;
+  if (opcode == 1 /* AMIDI_OPCODE_DATA */) rae_midi_queue(buffer, (int64_t)received, timestamp);
+  return 1;
+}
+
+int64_t rae_audio_midi_android_send(int64_t input, uint8_t* bytes, int64_t count) {
+  return g_rae_amidi.inputSend((const void*)(intptr_t)input, bytes, (size_t)count) == (ssize_t)count;
+}
+#else
+int64_t rae_audio_midi_android_available(void) { return 0; }
+int64_t rae_audio_midi_android_refresh(void) { return 0; }
+int64_t rae_audio_midi_android_device_id(int64_t index) { (void)index; return -1; }
+int64_t rae_audio_midi_android_outputs(int64_t index) { (void)index; return 0; }
+int64_t rae_audio_midi_android_inputs(int64_t index) { (void)index; return 0; }
+int64_t rae_audio_midi_android_open(int64_t id) { (void)id; return 0; }
+int64_t rae_audio_midi_android_device_name(int64_t index, uint8_t* into, int64_t capacity) {
+  (void)index; (void)into; (void)capacity;
+  return 0;
+}
+int64_t rae_audio_midi_android_open_output(int64_t id, int64_t port) { (void)id; (void)port; return 0; }
+int64_t rae_audio_midi_android_open_input(int64_t id, int64_t port) { (void)id; (void)port; return 0; }
+int64_t rae_audio_midi_android_receive(int64_t output) { (void)output; return 0; }
+int64_t rae_audio_midi_android_send(int64_t input, uint8_t* bytes, int64_t count) {
+  (void)input; (void)bytes; (void)count;
   return 0;
 }
 #endif
