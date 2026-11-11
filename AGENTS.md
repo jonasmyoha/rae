@@ -855,7 +855,9 @@ The compiler has one version, `compiler/VERSION` — a single semver line
 - **A package with its own C: the pack's `native` block** (`build`, `header`, `include`, `link`,
   `linkBrowser`, `linkLinux`, `sourcesDevice`, `definesDevice`, and `sourcesAndroid`/`definesAndroid`
   when Android needs other sources than iOS, as for an Objective-C `.m`; a `.java` there is the package's
-  Android Java, compiled with the app's; `packages/sql` is the model). It builds
+  Android Java, compiled with the app's; an Android part, `android/parts/<name>/` in the install folder
+  (manifest lines, resources), is added only when the build names it in `RAE_ANDROID_PARTS`;
+  `packages/sql` is the model). It builds
   on first need into `~/.rae/packages/<name>/<pin>/install`, and a program links it only when its C
   includes `header`. No compiler code names a library. `lib/box3d` cannot move this way yet: `lib/app3d`
   imports it.

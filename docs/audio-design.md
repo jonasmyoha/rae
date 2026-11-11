@@ -956,6 +956,17 @@ green.
    MidiManager and no devices. Android gives a program no virtual MIDI ports
    (they need a MidiDeviceService), so the AMidi read and send path compiled
    but did not run here; a loopback device to test it is queued.
+
+   **The loopback (2026-11-12), `packages/audio` 0.12.1:** `RaeMidiLoopback`,
+   a MidiDeviceService whose input port sends to its output port, is the
+   package's Android part `midiLoopback` (its manifest service and its
+   `xml/` device description), added to an app only when its build says
+   `RAE_ANDROID_PARTS="midiLoopback"`. `midiSourcesReady` waits until the
+   asked-for sources are open (Android opens a device a moment after it is
+   asked; what it sends before is not heard). `checks/audioMidi` on the
+   emulator sends its five messages (notes with running status, system
+   exclusive, pitch bend, a controller) to the loopback and receives all
+   five back through AMidi, as on the Mac.
 6. **The DAW engine.** The ECS layer (§10.2) in full, plan compilation with
    delay compensation, EQ / compressor / reverb nodes, parallel audio workers
    with workgroups/MMCSS, stage B (once the FFI callback exists), CLAP hosting,
