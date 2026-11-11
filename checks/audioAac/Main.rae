@@ -1,0 +1,147 @@
+# AAC in M4A through the platform's decoder (docs/audio-design.md §7.3):
+# AudioToolbox on Apple, AMediaCodec on Android. The files are fixture 1414's:
+# tone.m4a (ffmpeg, an edit list) and toneApple.m4a (afconvert, iTunSMPB), a
+# 0.5 s stereo sweep at 44.1 kHz, with afconvert's own decodes of them as
+# 16-bit WAVs. On Android run it with sh tools/android/gen-android.sh
+# checks/audioAac, then sh tools/android/run-android.sh audioAac.
+#
+# Each file is decoded whole and compared with that reference: the same 22050
+# frames, no delay (the priming cut by the edit), and close (another
+# platform's decoder rounds differently, so within -40 dB, not the same
+# bits). Then seeks against the whole decode, and a stream played offline.
+# Where the platform has no AAC decoder it says so and passes.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open audio/Decoder
+open audio/Sound
+
+const folder: String = "checks/audioAac/assets/"
+
+# The delay (frames) at which `data` best matches `reference`, and the worst
+# difference there
+func bestMatch(data: view SoundData, reference: view SoundData) ret List(Float) {
+  var bestLag: Int = 0
+  var bestError: Float = 9.0
+  loop var lag: Int = -2200, lag <= 2200, ++lag {
+    var worst: Float = 0.0
+    loop var frame: Int = 3000, frame < 19000 and worst < bestError, ++frame {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        let a: Float = sampleAt(samples: data.samples, index: (frame + lag) * 2 + channel)
+        let b: Float = sampleAt(samples: reference.samples, index: frame * 2 + channel)
+        worst = max(a: worst, b: abs(value: a - b))
+      }
+    }
+    if worst < bestError {
+      bestError = worst
+      bestLag = lag
+    }
+  }
+  ret List(Float) { bestLag as Float, bestError }
+}
+
+func checkFile(name: view String, reference: view String) ret Bool {
+  let data: SoundData = readAnySoundFile(path: "{folder}{name}")
+  if data.frameCount is 0 {
+    log("audioAac: {name}: not decoded ({data.error})")
+    freeSoundData(data: data)
+    ret false
+  }
+  let wanted: SoundData = readSoundFile(path: "{folder}{reference}")
+  let found: List(Float) = bestMatch(data: data, reference: wanted)
+  let lag: Int = found.copyAtFallback(index: 0, fallback: 99.0) as Int
+  let worst: Float = found.copyAtFallback(index: 1, fallback: 9.0)
+  let good: Bool = data.frameCount is wanted.frameCount and lag is 0 and worst < 0.01
+  log(
+    "audioAac: {name}: {data.channels} channels, {data.sampleRate} Hz, {data.frameCount} frames (the reference {wanted.frameCount}), delay {lag}, worst difference {floor(
+      x: worst * 100000.0
+    ) / 100000.0}: {good}"
+  )
+  freeSoundData(data: data)
+  freeSoundData(data: wanted)
+  ret good
+}
+
+func checkSeeks(name: view String) ret Bool {
+  let full: SoundData = readAnySoundFile(path: "{folder}{name}")
+  var worst: Float = 0.0
+  var frames: Int = 0
+  loop let target: Int in List(Int) {
+    1
+    1024
+    3000
+    11025
+    21000
+  } {
+    var decoder: AudioDecoder = openAudioDecoder(path: "{folder}{name}")
+    let moved: Bool = decoder.seekDecoder(frame: target)
+    let chunk: Buffer(Float) = createSampleBuffer(count: 2048 * 2)
+    let got: Int = decoder.readDecodedFrames(into: chunk, frames: 2048)
+    frames = frames + got
+    loop var i: Int = 0, i < got * 2, ++i {
+      worst = max(
+        a: worst
+        b: abs(
+          value: sampleAt(samples: chunk, index: i) - sampleAt(
+            samples: full.samples
+            index: target * 2 + i
+          )
+        )
+      )
+    }
+    closeAudioDecoder(this: decoder)
+    unsafe {
+      rae_ext_rae_buf_free(buf: chunk)
+    }
+  }
+  let good: Bool = frames is 9242 and worst < 0.01
+  log("audioAac: {name}: five seeks, {frames} frames, within -40 dB of the whole decode: {good}")
+  freeSoundData(data: full)
+  ret good
+}
+
+func checkStream() ret Bool {
+  let decoded: SoundData = readAnySoundFile(path: "{folder}tone.m4a")
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 512)
+  let song: VoiceId = audio.playStream(
+    path: "{folder}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: 22050)
+  var worst: Float = 0.0
+  loop var i: Int = 0, i < 22050 * 2, ++i {
+    worst = max(
+      a: worst
+      b: abs(
+        value: rendered.copyAtFallback(index: i, fallback: 9.0) - sampleAt(
+          samples: decoded.samples
+          index: i
+        )
+      )
+    )
+  }
+  let blocks: Int = audio.stopAudio()
+  freeSoundData(data: decoded)
+  log("audioAac: a stream of tone.m4a plays its decoded samples: {worst is 0.0}")
+  ret worst is 0.0
+}
+
+func main() {
+  let probe: AudioDecoder = openAudioDecoder(path: "{folder}tone.m4a")
+  if probe.handle is 0 {
+    log("audioAac: no AAC decoder on this platform; nothing to test")
+    ret
+  }
+  closeAudioDecoder(this: probe)
+  let first: Bool = checkFile(name: "tone.m4a", reference: "toneDecoded.wav")
+  let second: Bool = checkFile(name: "toneApple.m4a", reference: "toneAppleDecoded.wav")
+  let seeks: Bool = checkSeeks(name: "tone.m4a")
+  let stream: Bool = checkStream()
+  if not (first and second and seeks and stream) {
+    log("audioAac: FAILED")
+    exit(code: 1)
+  }
+  log("audioAac: passed")
+}
