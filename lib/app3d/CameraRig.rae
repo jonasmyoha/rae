@@ -126,6 +126,92 @@ type CameraRig {
   camPointerX: Float
   camPointerY: Float
   camPointerDown: Bool
+  # A finger the app gives the camera this frame (giveCameraFinger; -1: none): while it is down
+  # the camera follows it, before its own. A game's fire button, so the finger holding it aims
+  # as it fires. Fingers the camera must not grab (blockCameraFinger): ones that went down on
+  # the app's own buttons. Both cleared by setCameraTouch each frame.
+  camGiveId: Int = -1
+  camBlockedIds: List(Int) = {}
+  # The finger the camera followed last frame (-1: none): a new one starts a fresh drag
+  camSourceId: Int = -1
+}
+
+# One finger down this frame, for cameraTouchPick
+type CameraTouch {
+  id: Int
+  x: Float
+  y: Float
+  # It went down this frame
+  pressed: Bool
+}
+
+# The finger the camera follows this frame (`sourceId`, -1: none, with where it is) and the one
+# it holds by region from now on (`grabId`)
+type CameraTouchPick {
+  grabId: Int
+  sourceId: Int
+  x: Float
+  y: Float
+}
+
+# Which finger turns the camera (#526): a finger the app gives it (`giveId`) while that one is
+# down; else the one it holds (`grabId`) for as long as it stays down, wherever it goes; else a
+# finger that went down this frame outside the joystick's zone (`zoneX`, `zoneY`, `zoneR`; a
+# radius under 0: no zone), not the joystick's own (`excludeId`), not one the app blocked
+# (`blockedIds`: its buttons') and not the given one. Pure, so a test needs no screen.
+func cameraTouchPick(
+  touches: view List(CameraTouch)
+  grabId: view Int
+  giveId: view Int
+  excludeId: view Int
+  blockedIds: view List(Int)
+  zoneX: view Float
+  zoneY: view Float
+  zoneR: view Float
+) ret CameraTouchPick {
+  var grab: Int = grabId
+  # SDL reuses a lifted finger's id: a fresh press carrying the held id is a new finger
+  loop let touch: view CameraTouch in touches {
+    if grab >= 0 and touch.id is grab and touch.pressed {
+      grab = -1
+    }
+  }
+  var held: Bool = false
+  loop let touch: view CameraTouch in touches {
+    if grab >= 0 and touch.id is grab {
+      held = true
+    }
+  }
+  if not held {
+    grab = -1
+    loop let touch: view CameraTouch in touches {
+      let dx: Float = touch.x - zoneX
+      let dy: Float = touch.y - zoneY
+      let outside: Bool = zoneR < 0.0 or dx * dx + dy * dy > zoneR * zoneR
+      if grab < 0 and touch.pressed and outside and touch.id is not excludeId and touch.id is not giveId and not blockedIds.contains(
+        value: touch.id
+      ) {
+        grab = touch.id
+      }
+    }
+  }
+  var pick: CameraTouchPick = { grabId: grab, sourceId: -1, x: 0.0, y: 0.0 }
+  loop let touch: view CameraTouch in touches {
+    if grab >= 0 and touch.id is grab and pick.sourceId < 0 {
+      pick.sourceId = grab
+      pick.x = touch.x
+      pick.y = touch.y
+    }
+  }
+  # The given finger before the camera's own
+  loop let touch: view CameraTouch in touches {
+    if giveId >= 0 and touch.id is giveId {
+      pick.sourceId = giveId
+      pick.x = touch.x
+      pick.y = touch.y
+    }
+  }
+  ret pick
 }
 
 # Camera drag pointer (#526). By default the rig drags with the mouse pointer.
@@ -151,6 +237,20 @@ func setCameraTouch(
   rig.camZoneX = zoneX
   rig.camZoneY = zoneY
   rig.camZoneR = zoneR
+  rig.camGiveId = -1
+  rig.camBlockedIds = {}
+}
+
+# This frame the camera follows finger `id` while it is down, before its own (after
+# setCameraTouch): a game's fire button gives the finger holding it, so it aims as it fires
+func giveCameraFinger(rig: mod CameraRig, id: view Int) {
+  rig.camGiveId = id
+}
+
+# This frame finger `id` does not start a camera drag (after setCameraTouch): one that went down
+# on the app's own button
+func blockCameraFinger(rig: mod CameraRig, id: view Int) {
+  rig.camBlockedIds.add(value: id)
 }
 
 # True when the point is outside the joystick zone (or no zone is set), i.e. the
@@ -181,46 +281,36 @@ func resolveCameraPointer(rig: mod CameraRig) {
   }
   let touches: Int = Gpu2d.touchCount()
   if touches > 0 {
-    # Own a finger from press and hold it: keep our grabbed finger while it stays
-    # down, else grab a newly-pressed finger that goes down OUTSIDE the joystick
-    # zone (the stick owns inside; each holds its finger for the whole drag).
-    var found: Bool = false
-    var index: Int = 0
-    loop index < touches {
-      let id: Int = Gpu2d.touchId(index: index)
-      let tx: Float = Gpu2d.touchX(index: index)
-      let ty: Float = Gpu2d.touchY(index: index)
-      let pressed: Bool = Gpu2d.touchPressed(index: index)
-      # Reused-id release: SDL recycles finger ids after a lift, so a FRESH press
-      # carrying the id we hold means our finger lifted and a new one took the id.
-      # A hold is never a fresh press — drop it here so the grab below re-decides
-      # by region. Without this the camera and stick fight over one finger and
-      # never release it (the "input goes to both" bug).
-      if rig.camGrabId >= 0 and id is rig.camGrabId and pressed {
-        rig.camGrabId = -1
-      }
-      if rig.camGrabId >= 0 and id is rig.camGrabId {
-        # Hold: keep our finger wherever it goes, even into the joystick zone.
-        rig.camPointerX = tx
-        rig.camPointerY = ty
-        found = true
-      }
-      if rig.camGrabId < 0 and pressed and id is not rig.camExcludeId and pointerOutsideCamZone(
-        rig: rig
-        x: tx
-        y: ty
-      ) {
-        rig.camGrabId = id
-        rig.camPointerX = tx
-        rig.camPointerY = ty
-        found = true
-      }
-      index = index + 1
+    var down: List(CameraTouch) = List.create(CameraTouch, cap: touches)
+    loop var index: Int = 0, index < touches, ++index {
+      down.add(
+        value: CameraTouch {
+          id: Gpu2d.touchId(index: index)
+          x: Gpu2d.touchX(index: index)
+          y: Gpu2d.touchY(index: index)
+          pressed: Gpu2d.touchPressed(index: index)
+        }
+      )
     }
-    if found is false {
-      rig.camGrabId = -1
+    let pick: CameraTouchPick = cameraTouchPick(
+      touches: down
+      grabId: rig.camGrabId
+      giveId: rig.camGiveId
+      excludeId: rig.camExcludeId
+      blockedIds: rig.camBlockedIds
+      zoneX: rig.camZoneX
+      zoneY: rig.camZoneY
+      zoneR: rig.camZoneR
+    )
+    rig.camGrabId = pick.grabId
+    # Another finger than last frame's: its drag starts here, not from the last one's place
+    if pick.sourceId is not rig.camSourceId {
+      rig.dragging = false
     }
-    rig.camPointerDown = found
+    rig.camSourceId = pick.sourceId
+    rig.camPointerX = pick.x
+    rig.camPointerY = pick.y
+    rig.camPointerDown = pick.sourceId >= 0
   } else {
     # Desktop mouse: skip while the joystick owns the mouse.
     rig.camPointerX = Gpu2d.pointerX()
