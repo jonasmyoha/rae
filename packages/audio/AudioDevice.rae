@@ -1,0 +1,110 @@
+# audio/AudioDevice — the two ways the sound device gets its samples
+# (docs/audio-design.md §4.2). Stage B (the default): the device's callback
+# calls `audioDeviceRender`, a `realtime cExport` function, which renders
+# straight into the device's buffer. Stage A (RAE_AUDIO_STAGE=A, and the
+# fallback): a Rae render thread keeps a ring one step ahead, and the
+# callback copies from it. audio/Audio chooses and wires them.
+import Math
+open Atomic
+open Realtime
+open Signal
+open audio/AudioGlue
+open audio/AudioMixer
+open audio/Sound
+open collections/SpscRing
+
+# Stage B of docs/audio-design.md §4.2: the device's own callback renders.
+# The engine's state lives in a one-element List whose storage C holds; the
+# callback (native/rae_audio_glue.c) calls `audioDeviceRender` with it and the
+# device's buffer, on the device's real-time thread, which it has attached to
+# the runtime and marked real-time. No ring, no extra period of latency.
+type AudioRenderState {
+  mixer: AudioMixer
+  commands: SpscRing(AudioCommand)
+}
+
+# The state behind the pointer the callback passes (the List's element)
+func renderStateOf(states: view Buffer(AudioRenderState)) ret mod AudioRenderState {
+  unsafe {
+    ret mod rae_ext_rae_buf_get(buf: states, index: 0)
+  }
+}
+
+# Fill `frames` frames of the device's buffer, a period at most at a time
+func audioDeviceRender(
+  states: copy Buffer(AudioRenderState)
+  output: copy Buffer(Float)
+  frames: copy Int
+  channels: copy Int
+) realtime cExport("rae_audio_render") {
+  let render: mod AudioRenderState = renderStateOf(states: states)
+  var done: Int = 0
+  loop done < frames {
+    let count: Int = min(a: frames - done, b: render.mixer.maxFrames)
+    mixerRender(
+      mixer: render.mixer
+      commands: render.commands
+      output: output
+      firstFrame: done
+      frames: count
+      channels: channels
+    )
+    done = done + count
+  }
+}
+
+# Stage A only where stage B is off (RAE_AUDIO_STAGE=A), kept to compare the
+# two and as the fallback. The render thread keeps the device's ring full,
+# one block at a time, and sleeps on the device's Signal between periods.
+func audioRenderThread(
+  mixer: own AudioMixer
+  commands: own SpscRing(AudioCommand)
+  output: own SpscRing(Float)
+  wake: own Signal
+  running: own Atomic(Bool)
+  channels: own Int
+  periodFrames: own Int
+  sampleRate: own Int
+) ret Int {
+  let block: Buffer(Float) = createSampleBuffer(count: periodFrames * channels)
+  let periodNs: Int = periodFrames * 1000000000 / sampleRate
+  unsafe {
+    rae_audio_thread_set_realtime(periodNs: periodNs, computeNs: periodNs / 2)
+  }
+  var blocks: Int = 0
+  var recorder: RealtimeRecorder = createRealtimeRecorder(
+    name: "audio render"
+    periodNanoseconds: periodNs
+  )
+  markRealtimeThread()
+  loop running.load() {
+    loop running.load() and output.capacity - output.count() >= periodFrames * channels {
+      recorder.callStarted()
+      mixerRender(
+        mixer: mixer
+        commands: commands
+        output: block
+        firstFrame: 0
+        frames: periodFrames
+        channels: channels
+      )
+      recorder.callEnded()
+      loop var i: Int = 0, i < periodFrames * channels, ++i {
+        let pushed: Bool = output.push(value: sampleAt(samples: block, index: i))
+      }
+      blocks = blocks + 1
+    }
+    wake.wait()
+  }
+  unmarkRealtimeThread()
+  recorder.report()
+  freeAudioMixer(mixer: mixer)
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  ret blocks
+}
+
+func audioIdle() ret Int {
+  ret 0
+}

@@ -25,6 +25,9 @@ int64_t rae_audio_device_period_frames(int64_t device);
 /* The ring the callback reads and the Signal it posts; before start */
 void rae_audio_device_attach(int64_t device, float* slots, int64_t* counters, int64_t capacity,
                              int64_t signal);
+/* Stage B: the callback renders with audio/AudioDevice's audioDeviceRender
+ * (`rae_audio_render`) and this state, instead of copying from a ring */
+void rae_audio_device_attach_render(int64_t device, void* state);
 int64_t rae_audio_device_start(int64_t device);
 int64_t rae_audio_device_stop(int64_t device);
 void rae_audio_device_close(int64_t device);

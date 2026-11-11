@@ -416,11 +416,13 @@ func renderVoice(
 }
 
 # Render `frames` (at most maxFrames) interleaved frames of `channels` into
-# `output`, after taking every command waiting in `commands`.
+# `output` from frame `firstFrame` on, after taking every command waiting in
+# `commands`.
 func mixerRender(
   mixer: mod AudioMixer
   commands: view SpscRing(AudioCommand)
   output: view Buffer(Float)
+  firstFrame: view Int
   frames: view Int
   channels: view Int
 ) {
@@ -497,13 +499,14 @@ func mixerRender(
         rampAdvance(ramp: ramp)
       }
     }
+    let at: Int = firstFrame + frame
     if channels is 1 {
-      setSampleAt(samples: output, index: frame, value: (left + right) * 0.5)
+      setSampleAt(samples: output, index: at, value: (left + right) * 0.5)
     } else {
-      setSampleAt(samples: output, index: frame * channels, value: left)
-      setSampleAt(samples: output, index: frame * channels + 1, value: right)
+      setSampleAt(samples: output, index: at * channels, value: left)
+      setSampleAt(samples: output, index: at * channels + 1, value: right)
       loop var extra: Int = 2, extra < channels, ++extra {
-        setSampleAt(samples: output, index: frame * channels + extra, value: 0.0)
+        setSampleAt(samples: output, index: at * channels + extra, value: 0.0)
       }
     }
   }

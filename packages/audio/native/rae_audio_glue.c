@@ -27,8 +27,19 @@
 #include <pthread.h>
 #endif
 
-/* lib/Signal.rae's post, from the Rae runtime the program links */
+/* lib/Signal.rae's post, and the runtime's thread attach and real-time mark,
+ * from the Rae runtime the program links */
 void rae_ext_rae_signal_post(int64_t signal);
+void rae_thread_attach(void);
+void rae_ext_Realtime_markThread(bool realtime);
+
+/* Stage B: audio/AudioDevice's `realtime cExport("rae_audio_render")`. A
+ * program that uses audio/Audio defines it, and its definition replaces this
+ * weak, empty one at link time; a program that only uses audio/Sound links
+ * this file too (for its file calls) and never calls it. */
+__attribute__((weak)) void rae_audio_render(void* state, float* output, int64_t frames, int64_t channels) {
+  (void)state; (void)output; (void)frames; (void)channels;
+}
 
 typedef struct {
   ma_context context;
@@ -39,13 +50,29 @@ typedef struct {
   int64_t signal;
   int64_t underrun_frames;
   int64_t callbacks;
+  void* render_state;     /* stage B: the Rae state, or NULL for stage A */
 } RaeAudioDevice;
+
+/* The device's thread, attached to the runtime and marked real-time once */
+static __thread int g_rae_audio_thread_ready;
 
 static void rae_audio_callback(ma_device* device, void* output, const void* input, ma_uint32 frames) {
   (void)input;
   RaeAudioDevice* audio = (RaeAudioDevice*)device->pUserData;
   float* out = (float*)output;
   int64_t channels = (int64_t)device->playback.channels;
+  if (audio->render_state) {
+    /* Stage B: Rae renders straight into the device's buffer. The thread is
+     * attached and marked on its first callback (a device may change it). */
+    if (!g_rae_audio_thread_ready) {
+      rae_thread_attach();
+      rae_ext_Realtime_markThread(true);
+      g_rae_audio_thread_ready = 1;
+    }
+    rae_audio_render(audio->render_state, out, (int64_t)frames, channels);
+    __atomic_fetch_add(&audio->callbacks, 1, __ATOMIC_RELAXED);
+    return;
+  }
   int64_t wanted = (int64_t)frames * channels;
   int64_t taken = 0;
   if (audio->slots) {
@@ -115,6 +142,11 @@ void rae_audio_device_attach(int64_t device, float* slots, int64_t* counters, in
   audio->counters = counters;
   audio->capacity = capacity;
   audio->signal = signal;
+}
+
+void rae_audio_device_attach_render(int64_t device, void* state) {
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  if (audio) audio->render_state = state;
 }
 
 int64_t rae_audio_device_start(int64_t device) {
