@@ -9,3 +9,8 @@ fn terrainGrassBase() -> vec3<f32> {
 fn terrainGrassColor(position: vec2<f32>, variation: f32) -> vec3<f32> {
   return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, variation);
 }
+// The wind's shimmer on the ground's grass (terrain_splat.wgsl): none on this
+// grass (terrain_grass_painted.wgsl has the painted grass's)
+fn terrainGrassShimmer(position: vec2<f32>, wind: vec4<f32>, drift: vec2<f32>, strength: f32) -> f32 {
+  return 0.0;
+}

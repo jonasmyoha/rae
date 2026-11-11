@@ -189,3 +189,9 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let swash = raeWaterSwash(p, bio.x, b.wSand, t);
   return mix(ground, RAE_WATER_FOAM, clamp(swash * RAE_WATER_SWASH_STRENGTH, 0.0, 1.0));
 }
+
+// How much of the ground here is lit as painted grass (terrain_splat.wgsl): none
+// on this ground (terrain_detail_painted.wgsl has its own)
+fn terrainGrassUp(position: vec2<f32>, biome: vec3<f32>) -> f32 {
+  return 0.0;
+}

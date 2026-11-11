@@ -38,6 +38,7 @@ open LightUnits
 open MeshStore
 open Sky
 open Gbuffer
+open GbufferTerrain
 import GbufferSkinned
 open Rendergraph
 open Math3d
@@ -305,6 +306,12 @@ func renderWalkerApp(
           )
           grassGenerated = true
         }
+        setWalkerGroundPaint(
+          cache: renderSystem.renderer.passes.gbuffer
+          walkerGrass: walkerGrass
+          palette: terrainSystem.groundPalette
+        )
+        terrainSetToon(cache: renderSystem.renderer.passes.gbuffer, toon: characterSystem.toon)
         ensureRendererResources(renderer: renderSystem.renderer)
         if let rendererResources: mod GpuResources = renderSystem.renderer.gpuResources {
           Gbuffer.beginPass(
@@ -366,6 +373,12 @@ func renderWalkerApp(
           )
           grassGenerated = true
         }
+        setWalkerGroundPaint(
+          cache: renderSystem.renderer.passes.gbuffer
+          walkerGrass: walkerGrass
+          palette: terrainSystem.groundPalette
+        )
+        terrainSetToon(cache: renderSystem.renderer.passes.gbuffer, toon: characterSystem.toon)
         beginForwardPass(
           renderer: renderSystem.renderer
           camera: cameraSystem.camera

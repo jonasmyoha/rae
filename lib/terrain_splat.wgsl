@@ -23,8 +23,13 @@ struct Frame {
   // x: the snow depth (m; lib/snow.wgsl, Gbuffer setGbufferSnow); y, z, w
   // the deep snow mesh's window (center, half side; 0 none)
   scene: vec4<f32>,
-  // x: how wet the ground is (0 .. 1, Gbuffer setGbufferWetness)
+  // x: how wet the ground is (0 .. 1, Gbuffer setGbufferWetness); y the
+  // painted grass's wind shimmer, z its warmth, w its root lift
+  // (setGbufferGrassShimmer, Warmth, RootLift): the ground painted as grass
   weather: vec4<f32>,
+  // the air's drift (m) now (xy) and last frame (zw): the gust field's
+  // (lib/wind.wgsl windGustAt), for the shimmer on the painted grass
+  windDrift: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -81,6 +86,12 @@ fn octEncode(n: vec3<f32>) -> vec2<f32> {
 var<private> raeGroundGrass: vec3<f32>;
 var<private> raeGroundDry: vec3<f32>;
 var<private> raeGroundDryAmount: f32;
+// The painted grass's root lift, warmth and wind shimmer here (the frame's
+// weather w, z and the gust times y), for a grass part that paints the ground
+// as the painted blades' roots (terrain_grass_painted.wgsl)
+var<private> raeGroundPaintLift: f32;
+var<private> raeGroundPaintWarmth: f32;
+var<private> raeGroundPaintShimmer: f32;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -131,7 +142,11 @@ struct FsOut {
 // (forward_entry.wgsl) decodes and shades it.
 fn gbufferSurface(in: VsOut) -> FsOut {
   let d = draws[in.inst];
-  let n = normalize(in.nrm);
+  raeGroundPaintLift = F.weather.w;
+  raeGroundPaintWarmth = F.weather.z;
+  raeGroundPaintShimmer = terrainGrassShimmer(in.worldXY, F.wind, F.windDrift.xy, F.weather.y);
+  // the painted grass lit by the up normal, as its blades' roots are
+  let n = normalize(mix(normalize(in.nrm), vec3<f32>(0.0, 0.0, 1.0), terrainGrassUp(in.worldXY, in.bio)));
   let oct = octEncode(n);
   let rough = clamp(d.params.x, 0.045, 1.0);
   let now = in.clipNow.xy / in.clipNow.w;
