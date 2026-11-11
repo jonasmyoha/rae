@@ -253,6 +253,17 @@ func pollAndroidPorts(this: mod MidiPorts) {
   }
 }
 
+# Whether every source asked for is listened to (Android opens a device a
+# moment after it is asked: what a source sends before that is not heard).
+# Polls, so call it in a loop until true; always true elsewhere.
+func midiSourcesReady(this: mod MidiPorts) ret Bool {
+  when Target.os is Os.android {
+    this.pollAndroidPorts()
+    ret this.androidOpening.length() is 0
+  }
+  ret true
+}
+
 # Android: the port we send to on device `id` (0 while the device opens)
 func androidInputFor(this: mod MidiPorts, id: view Int) ret Int {
   loop var i: Int = 0, i < this.androidInputIds.length(), ++i {

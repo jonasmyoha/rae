@@ -17,6 +17,11 @@
 #   RAE_ANDROID_ENTRY     the entry file (default Main.rae or src/Main.rae)
 #   RAE_ANDROID_ICON      a square PNG (default the project's appIcon.png)
 #   RAE_ANDROID_ORIENTATION  any (default) | landscape | portrait
+#   RAE_ANDROID_PARTS     parts of the app's packages to add, by name: a
+#                         package's android/parts/<name>/manifest.xml goes
+#                         inside <application> and its res/ is compiled in
+#                         (e.g. "midiLoopback": packages/audio's MIDI loopback
+#                         device, for tests). A normal app names none.
 #   RAE_ANDROID_PERMISSIONS  more permissions the app asks for, by their short
 #                         names, separated by spaces (e.g. "RECORD_AUDIO" for
 #                         packages/audio's recording); INTERNET and VIBRATE are
@@ -107,6 +112,7 @@ fi
 # includes a package's header compiles its sources into the app, with its options. A package's
 # `.java` sources (its Android half, as packages/audio's session) go with the app's Java instead.
 package_java=""
+package_installs=""
 package_lines=$(cd "$ex_dir" && "$rae" tree --native-android 2>/dev/null || true)
 if [ -n "$package_lines" ]; then
   tab=$(printf '\t')
@@ -117,6 +123,7 @@ if [ -n "$package_lines" ]; then
       exit 1
     fi
     echo "gen-android: compiling package $package_name from source into the app"
+    package_installs="$package_installs $package_install"
     cflags="$cflags -I$package_install/include"
     for package_source in $package_sources; do
       case "$package_source" in
@@ -159,7 +166,28 @@ javac -nowarn -Xlint:none --release 11 -cp "$platform/android.jar" -d "$gen/clas
 "$build_tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$gen/apk" \
   $(find "$gen/classes" -name '*.class')
 
-# 5. The manifest and the icon, packed by aapt2 with the assets
+# 5. The manifest and the icon, packed by aapt2 with the assets; and the
+#    package parts the build names (RAE_ANDROID_PARTS): their manifest lines
+#    and their compiled resources
+part_manifest=""
+part_resources=""
+for part in ${RAE_ANDROID_PARTS:-}; do
+  found_part=""
+  for package_install in $package_installs; do
+    part_dir="$package_install/android/parts/$part"
+    [ -d "$part_dir" ] || continue
+    found_part=1
+    if [ -f "$part_dir/manifest.xml" ]; then
+      part_manifest="$part_manifest
+$(cat "$part_dir/manifest.xml")"
+    fi
+    if [ -d "$part_dir/res" ]; then
+      "$build_tools/aapt2" compile -o "$gen/part-$part.zip" --dir "$part_dir/res"
+      part_resources="$part_resources $gen/part-$part.zip"
+    fi
+  done
+  [ -n "$found_part" ] || { echo "error: no package of this app has the Android part $part" >&2; exit 1; }
+done
 mkdir -p "$gen/res/mipmap"
 icon_attribute=""
 if [ -f "$icon" ]; then
@@ -235,7 +263,7 @@ cat > "$gen/AndroidManifest.xml" <<EOF
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>$link_filters
-    </activity>
+    </activity>$part_manifest
   </application>
 </manifest>
 EOF
@@ -243,6 +271,7 @@ target_sdk=$(basename "$platform" | sed 's/android-//')
 set -- -o "$gen/unsigned.apk" --manifest "$gen/AndroidManifest.xml" -I "$platform/android.jar" \
   --min-sdk-version "$api" --target-sdk-version "$target_sdk" -A "$gen/apk/assets"
 [ -f "$gen/resources.zip" ] && set -- "$@" "$gen/resources.zip"
+for part_zip in $part_resources; do set -- "$@" "$part_zip"; done
 "$build_tools/aapt2" link "$@"
 (cd "$gen/apk" && zip -q -r "$gen/unsigned.apk" classes.dex lib)
 

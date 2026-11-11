@@ -27,9 +27,12 @@ cp "$HERE/rae_audio_glue.c" "$INSTALL/src/rae_audio_glue.m"
 cp "$HERE/miniaudio/miniaudio.h" "$HERE/miniaudio/stb_vorbis.c" "$INSTALL/src/miniaudio/"
 # Android's Java half of the session (the audio focus, MediaSession), which an
 # Android build compiles with the app's Java (sourcesAndroid)
-mkdir -p "$INSTALL/src/java/org/rae/audio"
+mkdir -p "$INSTALL/src/java/org/rae/audio" "$INSTALL/android"
 cp "$HERE/android/org/rae/audio/RaeAudioSession.java" "$HERE/android/org/rae/audio/RaeAudioMidi.java" \
-  "$INSTALL/src/java/org/rae/audio/"
+  "$HERE/android/org/rae/audio/RaeMidiLoopback.java" "$INSTALL/src/java/org/rae/audio/"
+# Android parts an app's build takes by name (RAE_ANDROID_PARTS): a manifest
+# part and resources, as the MIDI loopback device for tests
+cp -R "$HERE/android/parts" "$INSTALL/android/"
 echo "" > "$INSTALL/DEVICE_DEFINES"
 
 objs="$(mktemp -d)"
