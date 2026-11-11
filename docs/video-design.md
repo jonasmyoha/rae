@@ -132,6 +132,15 @@ that fills the gaps.
 The demuxer gives packets with **rational timestamps** (§6.1), keyframe flags,
 and the codec configuration (avcC / hvcC / av1C) the decoders need.
 
+**Landed (2026-11-12): the MP4 / MOV reader, `lib/media/Mp4.rae`**, written
+with audio's AAC (`audio-design.md` §11 step 2). Per track: the handler,
+codec, picture size, codec configuration (avcC / hvcC / av1C), sample sizes,
+file offsets, decode times, composition offsets (B-frames), sync samples
+(keyframes) and the edit; all in the track's timescale, Int. Checked against
+ffprobe on an H.264 clip with B-frames (fixture 1414). Not yet: fragmented MP4
+(moof / traf), the `colr` tags, and the packet type with `MediaTime` (§6.1),
+which comes with audio step 4.
+
 ---
 
 ## 4. FFmpeg as a separate package

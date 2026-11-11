@@ -7,7 +7,10 @@
 #
 # The main thread talks to it through a ring of ButlerCommand (open a stream,
 # queue the next file of a stream, close a stream) and hears back on a ring of
-# stream ids it has closed, after which their rings may be freed. A stream's
+# stream ids it has closed, after which their rings may be freed. The main
+# thread opens a file only to learn its format; the butler opens its own
+# decoder from the path in the command, so a decoder's Rae state (an AAC
+# file's sample table) never crosses the ring. A stream's
 # ring and flags (StreamShared) are made by the main thread, read by the mixer's
 # stream voice and filled here.
 #
@@ -15,6 +18,7 @@
 # samples follow in the same ring, so its first sample plays right after the
 # last one of the file before (`advanced` counts the files finished).
 import Math
+import String
 open Atomic
 open audio/Decoder
 open audio/Resampler
@@ -59,9 +63,11 @@ type StreamRecord {
 type ButlerCommand {
   kind: ButlerCommandKind
   streamId: Int
-  decoder: Int
-  channels: Int
-  sampleRate: Int
+  # the file's path and a 0 (C's form), made by the main thread and freed by
+  # the butler once it opened the file; none for a close
+  path: Buffer(UInt8)
+  # the first frame to play (a seek)
+  startFrame: Int
   ring: SpscRing(Float)
   finished: Atomic(Bool)
   advanced: Atomic(Int)
@@ -124,13 +130,29 @@ func closeStreamDecoders(stream: mod ButlerStream) {
   stream.decoder.handle = 0
 }
 
-func decoderOfCommand(command: view ButlerCommand) ret AudioDecoder {
-  ret AudioDecoder {
-    handle: command.decoder
-    channels: command.channels
-    sampleRate: command.sampleRate
-    frameCount: -1
+# The path as C reads it, in a Buffer that can cross the ring
+func pathBufferZ(path: view String) ret Buffer(UInt8) {
+  unsafe {
+    var buffer: Buffer(UInt8) = rae_ext_rae_buf_alloc(size: path.length() + 1, elemSize: 1)
+    loop var i: Int = 0, i < path.length(), ++i {
+      rae_ext_rae_buf_set(buf: buffer, index: i, value: path.byteAt(index: i) as UInt8)
+    }
+    rae_ext_rae_buf_set(buf: buffer, index: path.length(), value: 0)
+    ret buffer
   }
+}
+
+# The butler's own decoder for a command's file, at its start frame; the path
+# is freed
+func openCommandDecoder(command: view ButlerCommand) ret AudioDecoder {
+  var decoder: AudioDecoder = openAudioDecoderZ(pathZ: command.path)
+  if decoder.handle is not 0 and command.startFrame > 0 {
+    let moved: Bool = decoder.seekDecoder(frame: command.startFrame)
+  }
+  unsafe {
+    rae_ext_rae_buf_free(buf: command.path)
+  }
+  ret decoder
 }
 
 func applyButlerCommand(butler: mod Butler, command: view ButlerCommand) {
@@ -138,28 +160,37 @@ func applyButlerCommand(butler: mod Butler, command: view ButlerCommand) {
     # a local, not `{}` in the literal: an empty List literal nested in a
     # struct literal argument is emitted before its createList is declared
     var nextDecoders: List(AudioDecoder) = List.create(AudioDecoder, cap: 4)
+    let decoder: AudioDecoder = openCommandDecoder(command: command)
+    let opened: Bool = decoder.handle is not 0
     butler.streams.add(value: {
       streamId: command.streamId
-      decoder: decoderOfCommand(command: command)
+      decoder: decoder
       nextDecoders: nextDecoders
       resampler: createResampler(
-        channels: command.channels
-        inputRate: command.sampleRate
+        channels: max(a: 1, b: decoder.channels)
+        inputRate: max(a: 1, b: decoder.sampleRate)
         outputRate: butler.outputRate
         taps: 32
       )
       ring: command.ring
       finished: command.finished
       advanced: command.advanced
-      done: false
+      done: not opened
     })
+    if not opened {
+      # the file went away since the main thread opened it: the voice ends
+      command.finished.store(value: true)
+    }
     ret
   }
   loop var i: Int = 0, i < butler.streams.length(), ++i {
     if let stream: mod ButlerStream = butler.streams.modAt(index: i) {
       if stream.streamId is command.streamId {
         if command.kind is ButlerCommandKind.queueNext {
-          stream.nextDecoders.add(value: decoderOfCommand(command: command))
+          let next: AudioDecoder = openCommandDecoder(command: command)
+          if next.handle is not 0 {
+            stream.nextDecoders.add(value: next)
+          }
           if stream.done {
             # it had ended already: go on with the next file after all
             stream.done = false
@@ -183,6 +214,14 @@ func pushSamples(ring: view SpscRing(Float), samples: view List(Float)) {
   }
 }
 
+# The channels of the next file queued after this one, 0 when there is none
+func nextChannels(stream: view ButlerStream) ret Int {
+  if let next: view AudioDecoder = stream.nextDecoders.viewAt(index: 0) {
+    ret next.channels
+  }
+  ret 0
+}
+
 # Fill one stream's ring while it has room for a decoded chunk
 func fillStream(chunk: view Buffer(Float), outputRate: view Int, stream: mod ButlerStream) {
   if stream.done or stream.decoder.handle is 0 {
@@ -200,10 +239,7 @@ func fillStream(chunk: view Buffer(Float), outputRate: view Int, stream: mod But
         input.add(value: sampleAt(samples: chunk, index: i))
       }
       pushSamples(ring: stream.ring, samples: stream.resampler.resample(input: input))
-    } else if stream.nextDecoders.length() > 0 and stream.nextDecoders.copyAtFallback(
-      index: 0
-      fallback: stream.decoder
-    ).channels is channels {
+    } else if nextChannels(stream: stream) is channels {
       # gapless: the next file goes on in the same ring
       pushSamples(ring: stream.ring, samples: stream.resampler.finish())
       closeAudioDecoder(this: stream.decoder)
@@ -279,6 +315,12 @@ func emptyStreamRing() ret SpscRing(Float) {
   }
 }
 
+func emptyPathBuffer() ret Buffer(UInt8) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: 0, elemSize: 1)
+  }
+}
+
 func emptyAtomicBool() ret Atomic(Bool) {
   unsafe {
     ret Atomic(Bool) { cell: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int)) }
@@ -306,9 +348,8 @@ func closeStream(commands: view SpscRing(ButlerCommand), streamId: view Int) {
   let command: ButlerCommand = {
     kind: ButlerCommandKind.close
     streamId: streamId
-    decoder: 0
-    channels: 0
-    sampleRate: 0
+    path: emptyPathBuffer()
+    startFrame: 0
     ring: emptyStreamRing()
     finished: emptyAtomicBool()
     advanced: emptyAtomicIntValue()

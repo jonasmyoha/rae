@@ -1,0 +1,331 @@
+# audio/AacDecoder — AAC in an MP4 / M4A file (docs/audio-design.md §7.3):
+# the file's boxes read in Rae (media/Mp4), each packet read where the sample
+# table says and decoded by the platform (AudioToolbox on Apple, through
+# native/rae_audio_glue.c; elsewhere opening answers "not supported" until the
+# FFmpeg package). The encoder's priming at the start and its padding at the
+# end are cut by the file's edit (or Apple's iTunSMPB), so frame 0 is the first
+# frame the file means to play.
+#
+# Like every decoder it reads the disk: opened and read on the streaming
+# thread or a loading worker, never on the audio thread.
+import Math
+open audio/AudioGlue
+open audio/Sound
+open media/Mp4
+
+# The largest number of frames one packet decodes to (AAC: 1024, HE-AAC: 2048)
+const aacMaxPacketFrames: Int = 4096
+
+# Packets decoded before a seek's target and dropped: AAC's packets overlap, so
+# one is the minimum; two settle the decoder. A seek then lands within about
+# -70 dB of a decode from the start (the platform decoder keeps some state over
+# the whole stream, so only a decode from the start is bit for bit the same).
+const aacPrerollPackets: Int = 2
+
+type AacDecoder {
+  # 0 when the file is not AAC in MP4, or the platform cannot decode it
+  converter: Int
+  file: Int
+  channels: Int
+  sampleRate: Int
+  track: Mp4Track
+  # the playable frames, -1 when unknown
+  frameCount: Int
+  # "" when it opened
+  error: String
+  nextPacket: Int
+  # frames still to drop before the next one handed out (priming, or the part
+  # of a packet before a seek's target)
+  skipFrames: Int
+  # frames still to hand out before the end (the padding after them is cut)
+  framesLeft: Int
+  # decoded frames not handed out yet, from `pendingAt` on, interleaved
+  pending: List(Float)
+  pendingAt: Int
+  packet: List(UInt8)
+  decoded: List(Float)
+  drained: Bool
+}
+
+func closedAacDecoder(error: view String) ret AacDecoder {
+  ret AacDecoder {
+    converter: 0
+    file: -1
+    channels: 0
+    sampleRate: 0
+    track: emptyMp4Track()
+    frameCount: 0
+    error: "{error}"
+    nextPacket: 0
+    skipFrames: 0
+    framesLeft: 0
+    pending: List.create(Float, cap: 0)
+    pendingAt: 0
+    packet: List.create(UInt8, cap: 0)
+    decoded: List.create(Float, cap: 0)
+    drained: true
+  }
+}
+
+# `count` bytes of the file at `offset`; none when they cannot all be read
+func readFileRange(file: view Int, offset: view Int, count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: max(a: 1, b: count))
+  if count <= 0 {
+    ret bytes
+  }
+  bytes.addDefaults(count: count)
+  unsafe {
+    let got: Int = rae_audio_file_read_at(
+      file: file
+      into: bytes.data
+      count: count
+      offset: offset
+    )
+    if got is not count {
+      bytes.clear()
+    }
+  }
+  ret bytes
+}
+
+# Whether the file starts like an MP4 / M4A / MOV (its first box)
+func looksLikeMp4(pathZ: view Buffer(UInt8)) ret Bool {
+  unsafe {
+    let file: Int = rae_audio_file_open(pathZ: pathZ)
+    if file < 0 {
+      ret false
+    }
+    let head: List(UInt8) = readFileRange(file: file, offset: 0, count: 12)
+    rae_audio_file_close(file: file)
+    if head.length() < 12 {
+      ret false
+    }
+    let kind: String = mp4Text(bytes: head, at: 4, count: 4)
+    ret kind is "ftyp" or kind is "moov" or kind is "mdat" or kind is "wide" or kind is "free"
+  }
+}
+
+# The movie of an open file: its top-level boxes walked, the moov read whole
+func readMovieOfFile(file: view Int, fileSize: view Int) ret Mp4Movie {
+  var offset: Int = 0
+  loop offset < fileSize {
+    let header: List(UInt8) = readFileRange(
+      file: file
+      offset: offset
+      count: min(a: 16, b: fileSize - offset)
+    )
+    let box: Mp4Box = mp4BoxAt(bytes: header, at: 0, end: fileSize - offset)
+    if box.kind is "" {
+      ret failedMp4Movie(error: "not an MP4 file")
+    }
+    if box.kind is "moov" {
+      ret parseMp4Movie(moov: readFileRange(file: file, offset: offset, count: box.size))
+    }
+    offset = offset + box.size
+  }
+  ret failedMp4Movie(error: "no moov box")
+}
+
+# Track time units as frames of the track's sample rate
+func unitsToFrames(units: view Int, track: view Mp4Track, sampleRate: view Int) ret Int {
+  if track.timescale <= 0 or track.timescale is sampleRate {
+    ret units
+  }
+  ret units * sampleRate / track.timescale
+}
+
+func openAacDecoder(pathZ: view Buffer(UInt8)) ret AacDecoder {
+  var file: Int = -1
+  var fileSize: Int = -1
+  unsafe {
+    file = rae_audio_file_open(pathZ: pathZ)
+    fileSize = rae_audio_file_size(pathZ: pathZ)
+  }
+  if file < 0 or fileSize <= 0 {
+    ret closedAacDecoder(error: "cannot open the file")
+  }
+  let movie: Mp4Movie = readMovieOfFile(file: file, fileSize: fileSize)
+  let index: Int = mp4TrackIndex(movie: movie, handler: "soun")
+  var decoder: AacDecoder = closedAacDecoder(error: "")
+  if movie.error is not "" {
+    decoder.error = "{movie.error}"
+  } else if index < 0 {
+    decoder.error = "no sound track"
+  } else if let track: view Mp4Track = movie.tracks.viewAt(index: index) {
+    # object type 0x40 is MPEG-4 audio; 0x66-0x68 the MPEG-2 AAC profiles
+    let aac: Bool = track.codec is "mp4a" and (track.objectType is 64 or (track.objectType >= 102 and track.objectType <= 104))
+    if not aac {
+      decoder.error = "the sound track is {track.codec}, not AAC"
+    } else {
+      var sampleRate: Int = track.sampleRate
+      if sampleRate <= 0 {
+        sampleRate = track.timescale
+      }
+      unsafe {
+        decoder.converter = rae_audio_aac_open(sampleRate: sampleRate, channels: track.channels)
+        if decoder.converter is not 0 and track.elementaryStream.length() > 0 {
+          let cookie: Int = rae_audio_aac_set_cookie(
+            converter: decoder.converter
+            cookie: track.elementaryStream.data
+            size: track.elementaryStream.length()
+          )
+        }
+      }
+      if decoder.converter is 0 {
+        decoder.error = "AAC is not supported on this platform"
+      } else {
+        decoder.track = track
+        decoder.sampleRate = sampleRate
+        decoder.channels = track.channels
+      }
+    }
+  }
+  if decoder.converter is 0 {
+    unsafe {
+      rae_audio_file_close(file: file)
+    }
+    ret decoder
+  }
+  decoder.file = file
+  decoder.frameCount = unitsToFrames(
+    units: decoder.track.presentationLength
+    track: decoder.track
+    sampleRate: decoder.sampleRate
+  )
+  decoder.packet = List.create(UInt8, cap: 8192)
+  decoder.decoded = List.create(Float, cap: aacMaxPacketFrames * decoder.channels)
+  decoder.decoded.addDefaults(count: aacMaxPacketFrames * decoder.channels)
+  decoder.pending = List.create(Float, cap: aacMaxPacketFrames * decoder.channels * 2)
+  decoder.startAt(frame: 0)
+  ret decoder
+}
+
+# Start handing out frames from `frame` (of the playable part): one packet
+# before the one holding it is decoded too (AAC's packets overlap) and the
+# frames before `frame` are dropped
+func startAt(this: mod AacDecoder, frame: view Int) {
+  let start: Int = unitsToFrames(
+    units: this.track.presentationStart
+    track: this.track
+    sampleRate: this.sampleRate
+  )
+  let target: Int = start + frame
+  var packet: Int = 0
+  loop packet + 1 < this.track.sampleTimes.length() and unitsToFrames(
+    units: this.track.sampleTimes.copyAtFallback(index: packet + 1, fallback: 0)
+    track: this.track
+    sampleRate: this.sampleRate
+  ) <= target {
+    packet = packet + 1
+  }
+  packet = max(a: 0, b: packet - aacPrerollPackets)
+  this.nextPacket = packet
+  this.skipFrames = target - unitsToFrames(
+    units: this.track.sampleTimes.copyAtFallback(index: packet, fallback: 0)
+    track: this.track
+    sampleRate: this.sampleRate
+  )
+  this.framesLeft = -1
+  if this.frameCount >= 0 {
+    this.framesLeft = max(a: 0, b: this.frameCount - frame)
+  }
+  this.pending.clear()
+  this.pendingAt = 0
+  this.drained = false
+  unsafe {
+    rae_audio_aac_reset(converter: this.converter)
+  }
+}
+
+# Decode the next packet (or, after the last, what the decoder still holds)
+# into `pending`, dropping what is skipped and cutting at the end. False when
+# nothing is left.
+func decodeNextPacket(this: mod AacDecoder) ret Bool {
+  if this.drained or this.framesLeft is 0 {
+    ret false
+  }
+  var size: Int = 0
+  if this.nextPacket < this.track.sampleSizes.length() {
+    size = this.track.sampleSizes.copyAtFallback(index: this.nextPacket, fallback: 0)
+    this.packet = readFileRange(
+      file: this.file
+      offset: this.track.sampleOffsets.copyAtFallback(index: this.nextPacket, fallback: 0)
+      count: size
+    )
+    if this.packet.length() is not size {
+      this.drained = true
+      ret false
+    }
+    this.nextPacket = this.nextPacket + 1
+  } else {
+    # the end: what is still inside the decoder
+    this.drained = true
+  }
+  var got: Int = 0
+  unsafe {
+    got = rae_audio_aac_decode(
+      converter: this.converter
+      packet: this.packet.data
+      size: size
+      out: this.decoded.data
+      maxFrames: aacMaxPacketFrames
+      channels: this.channels
+    )
+  }
+  if got < 0 {
+    this.drained = true
+    ret false
+  }
+  var first: Int = 0
+  if this.skipFrames > 0 {
+    first = min(a: got, b: this.skipFrames)
+    this.skipFrames = this.skipFrames - first
+  }
+  var last: Int = got
+  if this.framesLeft >= 0 {
+    last = min(a: got, b: first + this.framesLeft)
+    this.framesLeft = this.framesLeft - (last - first)
+  }
+  loop var i: Int = first * this.channels, i < last * this.channels, ++i {
+    this.pending.add(value: this.decoded.copyAtFallback(index: i, fallback: 0.0))
+  }
+  ret true
+}
+
+# Up to `frames` interleaved frames into `into`; the frames written, 0 at the end
+func readAacFrames(this: mod AacDecoder, into: view Buffer(Float), frames: view Int) ret Int {
+  var written: Int = 0
+  loop written < frames {
+    let available: Int = (this.pending.length() - this.pendingAt) / max(a: 1, b: this.channels)
+    if available > 0 {
+      let count: Int = min(a: available, b: frames - written)
+      loop var i: Int = 0, i < count * this.channels, ++i {
+        setSampleAt(
+          samples: into
+          index: written * this.channels + i
+          value: this.pending.copyAtFallback(index: this.pendingAt + i, fallback: 0.0)
+        )
+      }
+      this.pendingAt = this.pendingAt + count * this.channels
+      written = written + count
+      if this.pendingAt >= this.pending.length() {
+        this.pending.clear()
+        this.pendingAt = 0
+      }
+    } else if not this.decodeNextPacket() {
+      ret written
+    }
+  }
+  ret written
+}
+
+func closeAacDecoder(this: view AacDecoder) {
+  unsafe {
+    if this.converter is not 0 {
+      rae_audio_aac_close(converter: this.converter)
+    }
+    if this.file >= 0 {
+      rae_audio_file_close(file: this.file)
+    }
+  }
+}

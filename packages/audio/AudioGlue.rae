@@ -109,3 +109,35 @@ func rae_audio_decoder_seek(
 ) unsafe extern("rae_audio_decoder_seek") ret Int
 
 func rae_audio_decoder_close(decoder: Int) unsafe extern("rae_audio_decoder_close")
+
+func rae_audio_file_open(pathZ: Buffer(UInt8)) unsafe extern("rae_audio_file_open") ret Int
+
+func rae_audio_file_read_at(
+  file: Int
+  into: Buffer(UInt8)
+  count: Int
+  offset: Int
+) unsafe extern("rae_audio_file_read_at") ret Int
+
+func rae_audio_file_close(file: Int) unsafe extern("rae_audio_file_close")
+
+func rae_audio_aac_open(sampleRate: Int, channels: Int) unsafe extern("rae_audio_aac_open") ret Int
+
+func rae_audio_aac_set_cookie(
+  converter: Int
+  cookie: Buffer(UInt8)
+  size: Int
+) unsafe extern("rae_audio_aac_set_cookie") ret Int
+
+func rae_audio_aac_decode(
+  converter: Int
+  packet: Buffer(UInt8)
+  size: Int
+  out: Buffer(Float)
+  maxFrames: Int
+  channels: Int
+) unsafe extern("rae_audio_aac_decode") ret Int
+
+func rae_audio_aac_reset(converter: Int) unsafe extern("rae_audio_aac_reset")
+
+func rae_audio_aac_close(converter: Int) unsafe extern("rae_audio_aac_close")

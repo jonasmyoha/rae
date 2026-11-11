@@ -772,6 +772,28 @@ green.
    file, gapless at the exact frame, a seek and a pause to the frame. Not yet:
    the MP4/M4A box reader and AAC through AudioToolbox, Now Playing and the
    remote commands, and iOS background play (queued after this step).
+
+   **Landed, MP4 / M4A and AAC (2026-11-12), `packages/audio` 0.6.0:**
+   `media/Mp4` in the stdlib (shared with video): the box tree, each track's
+   handler, codec, format and codec configuration (esds with its
+   AudioSpecificConfig, avcC / hvcC / av1C / alac), its sample sizes, file
+   offsets, decode times, composition offsets and sync samples, and the
+   playable part from the edit list, or from iTunes' `iTunSMPB` in Apple's
+   M4A. Pure functions over bytes. `audio/AacDecoder`: the moov found by
+   walking the top-level boxes with `pread` (wherever ffmpeg put it), each
+   packet read where the table says and decoded by AudioToolbox's
+   AudioConverter (loaded at run time, one call per shim; elsewhere opening
+   answers "not supported" until the FFmpeg package), the priming and the end
+   padding cut by the edit, a seek two packets early. `audio/Decoder` sniffs
+   the first box, so `readAnySoundFile`, `playStream`, `queueNext` and `seek`
+   take `.m4a` / `.mp4`. The butler now opens its own decoder from the path in
+   the command (with the start frame of a seek), so a decoder's Rae state
+   never crosses the ring. Fixture 1414: every packet of four files equal to
+   ffprobe's; the decode equal to the platform's own decode of the file
+   (afconvert) within 16-bit rounding, 22050 frames, no delay; seeks equal to
+   a decode from the start (with ffmpeg's noise substitution off: it decodes to
+   random noise); a stream equal to its decode, gapless into an Apple file, a
+   seek in a stream to the frame.
 3. **The other platforms.** Android (AAudio, focus, MediaSession, AMediaCodec
    AAC), Windows (WASAPI, SMTC, Media Foundation AAC), Linux (PipeWire through
    Pulse/JACK, MPRIS), the web (AudioWorklet build, COOP/COEP in the web shell,
