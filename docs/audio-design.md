@@ -16,7 +16,8 @@ document makes concrete), `concurrency-model.md` (threads, `Channel`, atomics),
 
 ## 0. The word: "audio", not "sound"
 
-The feature is called **audio**: the package is `lib/audio/`, the types are
+The feature is called **audio**: the package is `audio` (`packages/audio/`,
+imported as `audio/...`), the types are
 `AudioEngine`, `AudioBlock`, `AudioClock`, the environment variables are
 `RAE_AUDIO_*`. Reasons:
 
@@ -39,7 +40,7 @@ This document was asked for as `docs/sound-design.md`; it is
   mute, and module-level C state. No Rae API in `lib/` wraps it: the game calls
   the `rae_ext_audio_*` externs directly (`rae_runtime.h:913-918`).
 - It is the "ad hoc sound" this design exists to stop. It stays untouched until
-  step 1 of §11 lands, then game proto1 moves to `lib/audio` (in that repo's own
+  step 1 of §11 lands, then game proto1 moves to `packages/audio` (in that repo's own
   queue) and the file is deleted.
 - Why not grow SDL3 audio into the engine: SDL3 audio is push-based convenience.
   Its callback runs behind a lock on each stream, it has no control of the
@@ -116,13 +117,13 @@ Short notes on each design, kept to what changes our design.
 ## 3. The layers
 
 From the platform up. A program only ever uses the top two; the rest is the
-`lib/audio` package and the runtime.
+`packages/audio` package and the runtime.
 
 ```
   Program (game, SUMU, DAW, video editor)
   ─────────────────────────────────────────────────────────────────────
-  L6  Simple API          sounds, music, buses, ducking      (Rae, lib/audio)
-  L5  ECS layer           track/bus/send entities, systems   (Rae, lib/audio/*System)
+  L6  Simple API          sounds, music, buses, ducking      (Rae, packages/audio)
+  L5  ECS layer           track/bus/send entities, systems   (Rae, packages/audio/*System)
   L4  Engine              render plan, nodes, voices, mixer, (Rae, runs on the
                           scheduler, clock, meters            real-time thread)
   L3  Media               decoders, streams, resampler, MIDI (Rae + vendored C
@@ -135,16 +136,15 @@ From the platform up. A program only ever uses the top two; the rest is the
   Core Audio · WASAPI · ALSA/PulseAudio/PipeWire/JACK · AAudio · Web Audio
 ```
 
-- **L1 Device.** Vendored miniaudio (`third_party/miniaudio`, public domain /
-  MIT-0, kept with its own license per the copyright rule) built with only the
+- **L1 Device.** Vendored miniaudio (`packages/audio/native/miniaudio/`, public
+  domain / MIT-0, kept with its own license per the copyright rule) built with only the
   device layer (`MA_NO_ENGINE`, `MA_NO_NODE_GRAPH`, `MA_NO_DECODING`,
   `MA_NO_RESOURCE_MANAGER`, `MA_NO_GENERATION`). Plus one-call shims for what
   miniaudio does not expose: output host timestamps per platform, joining the
   Apple audio workgroup, MMCSS, the flush-to-zero CPU flags. This follows the
   runtime C rule: a vendored library used as a library (like `lodepng`), and
   every shim function is one platform call with no policy.
-  This adds one vendored library to the "not to be grown" list in AGENTS.md, so
-  it is §13 decision D1.
+  Vendoring it was decided on 2026-11-11 (§13 D1).
 - **L2 Host.** Per-platform session rules (§9) as one-call shims (Objective-C
   on Apple, JNI on Android, COM on Windows, D-Bus on Linux, JS on the web), with
   every decision (when to duck, what to do on an interruption) in Rae.
@@ -312,7 +312,7 @@ sidechain duck of §6.4), reverb, synth voices.
 
 Rae has no function values and no interfaces, so the plan runs nodes with a
 `match` on the node kind over typed state tables (one dense table per kind, ECS
-style). How a program adds its **own** node kind without editing `lib/audio` is
+style). How a program adds its **own** node kind without editing `packages/audio` is
 open (§13 D5): a generic engine over one program node type, a WASM node (the Rae
 plugin ABI), or a function value once stage B exists.
 
@@ -446,9 +446,8 @@ ran.
 | AAC (M4A) | **the platform**: AudioToolbox (Apple), Media Foundation (Windows), `AMediaCodec` (Android), WebCodecs `AudioDecoder` (web); Linux: FFmpeg's decoder through the Media API | OS / LGPL (dynamic) | no good permissive C AAC decoder exists (`fdk-aac` has a license that is not open source in the usual sense; `faad2` is GPL), and the codec patents are the platform's to carry |
 | MP4 / M4A container | **Rae** | Rae | a box parser, shared with video |
 
-All C decoders are vendored in `third_party/` with their own license files
-(the copyright rule). They are a library behind the Rae API, so they also fall
-under §13 D1.
+All C decoders are vendored in the package (`packages/audio/native/`) with
+their own license files (the copyright rule), behind the Rae API (§13 D1).
 
 ### 7.4 Resampling
 
@@ -634,7 +633,7 @@ Tracks, buses and sends are entities on the program's World:
   `AudioSend` (`targetEntityId`, decibels, `preFader`), `AudioInserts`
   (node kinds and their parameters), `AudioMeter` (written back from the audio
   thread);
-- systems, each in its own folder (`lib/audio/graphSystem/GraphSystem.rae`, ...):
+- systems, each in its own folder (`packages/audio/graphSystem/GraphSystem.rae`, ...):
   `graphSystem` (structure changed → compile and send a plan, §5.2),
   `parameterSystem` (values changed → timestamped events), `feedbackSystem`
   (meters into `AudioMeter`, voice-ended and device events into ECS events),
@@ -659,7 +658,7 @@ tested offline like any function. How a program's own kind joins the engine is
 Each step is one or more queue tasks; each ends with its headless tests (§12)
 green.
 
-1. **Output and the simple API.** `lib/audio`: miniaudio device layer (macOS,
+1. **Output and the simple API.** `packages/audio`: miniaudio device layer (macOS,
    iOS first; the other desktops build and get a manual check), stage A render
    thread, the command / feedback / reclaim rings, the engine with gain, pan,
    sum, bus, voice set, smoothing, the in-mix duck; WAV decode in Rae; `Sound`
@@ -742,28 +741,34 @@ small Rae programs.
 
 ## 13. Decisions still needed
 
-- **D1 — vendored C.** AGENTS.md lists vendored C libraries as an exception "not
-  to be grown". This design adds miniaudio (device layer only) and the decoders
-  dr_mp3, dr_flac, stb_vorbis (later libopus). Recommendation: accept them as
-  libraries behind the Rae API, each in `third_party/` with its license, for the
-  same reason as Box3D: proven, maintained, faster to correct than our own;
-  the Rae API keeps each replaceable. The alternative, every device backend as
-  our own one-call shims, is months of platform work before the first sound.
-- **D2 — calling Rae from C** (stage B, §4.2). Needed for in-callback rendering
-  and the Box3D scheduler. A language design of its own.
-- **D3 — marking real-time functions** for a compile-time check (§4.3): a
-  keyword, or "everything reachable from `renderBlock`". The run-time check
-  comes first either way.
-- **D4 — `Atomic(T)`.** The rings need it; until it lands, two one-call C shims.
-  Building `Atomic(T)` first (as in `parallel-stages-design.md` §5) is better if
-  it is near.
+- **D1 — vendored C. Decided 2026-11-11: yes.** miniaudio (device layer only)
+  and the decoders dr_mp3, dr_flac, stb_vorbis (later libopus) are copied into
+  the package's `native/` folder, each with its license file: proven,
+  maintained libraries are used rather than rewritten, behind the Rae API that
+  keeps each replaceable. They are permissive (public domain / MIT-0 / MIT /
+  BSD), so they can live in this repository; LGPL code (FFmpeg) does not.
+- **D2 — calling Rae from C** (stage B, §4.2). Decided 2026-11-11: the
+  `cExport("cName")` modifier (`realtime-language-design.md` §6.1).
+- **D3 — marking real-time functions.** Decided 2026-11-11: the `realtime`
+  and `noAlloc` keywords (`realtime-language-design.md` §3). The run-time check
+  comes first.
+- **D4 — `Atomic(T)`.** Built first, as queue step `[realtime 1/6]`.
 - **D5 — a program's own node kinds** (§5.3): generic engine over one program
   type, WASM nodes, or wait for D2.
-- **D6 — where it lives.** Recommendation: `lib/audio` in the stdlib (SUMU,
-  games and UI apps all need it, and the runtime already carries audio), not a
-  `packages/` package with a `native` block. A package would keep miniaudio out
-  of programs that do not play sound; the linker already drops it when nothing
-  calls it, so the gain is small.
+- **D6 — where it lives. Decided 2026-11-11: a package in this repository,
+  `packages/audio`** (and video likewise, `packages/video`), with a `native`
+  block like `packages/sql`. A program opts in by declaring it in its
+  `.raepack` (`dep audio: { git: ..., subdir: "packages/audio", version: ...,
+  hash: ... }`), as AGENTS.md "Packages in this repo" describes; a program that
+  does not, never builds or links miniaudio. Consequences: a change reaches the
+  users only by a release of the package (its `meta.version`, the tag
+  `audio/v<version>`, `rae update audio` in each user); the package sees only
+  `lib/` and the packages its own pack declares, so the language-level parts
+  (`Atomic(T)`, `Signal`, `SpscRing(T)`, the run-time real-time flag) stay in
+  `lib/` and the runtime; the platform shims live in the package's `native/`,
+  not in `compiler/runtime`. Check in the first step that a `native` block can
+  build Objective-C (`.m`) for the Apple session shims, and extend it if not.
+  The game engine is to move to a package the same way later.
 - **D7 — SUMU's alarm and Focus** (§9.2): whether SUMU can hold the
   Communication Notifications capability to read Focus, and that the not-running
   case stays a normal notification sound. Settle on the phone during step 1.
@@ -774,8 +779,8 @@ small Rae programs.
 
 ## 14. Style
 
-Everything in `lib/audio` follows AGENTS.md: PascalCase module files in camelCase
-folders (`lib/audio/Audio.rae`, `lib/audio/graphSystem/GraphSystem.rae`), no
+Everything in `packages/audio` follows AGENTS.md: PascalCase module files in camelCase
+folders (`packages/audio/Audio.rae`, `packages/audio/graphSystem/GraphSystem.rae`), no
 globals (the engine is a resource on the App), no `pub`, no `@` attributes, typed
 bindings, full words (`sampleRate`, `deltaTime`, `gainDecibels`, never `sr`,
 `dt`, `db`), US spelling.

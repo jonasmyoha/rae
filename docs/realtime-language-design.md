@@ -1,8 +1,10 @@
 # Real-time code in Rae: what the language needs
 
 Status: **proposal, nothing implemented** (2026-11-11). New syntax needs
-approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. R1 and R2
-are decided: the keywords are `realtime` and `noAlloc`.
+approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
+2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
+function with optional marks on helpers (R3), `cExport("cName")` (R4), and
+Homebrew LLVM for RealtimeSanitizer (R7). R5 and R6 wait.
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -294,7 +296,7 @@ allocator). It is the first step because it needs no language change.
 
 ## 6. Threading features that are missing
 
-### 6.1 Calling Rae from C: `export` (needed)
+### 6.1 Calling Rae from C: `cExport` (decided)
 
 The device calls the audio callback; VideoToolbox calls its decode-output
 callback; CoreMIDI calls its read callback; Box3D wants a scheduler callback.
@@ -303,7 +305,7 @@ proposal keeps the call graph complete: not function values, but **a named Rae
 function exported under a C name**, which C may call from any thread:
 
 ```rae
-func audioRender(engine: Ptr, output: Ptr, frameCount: Int) realtime export("rae_audio_render") {
+func audioRender(engine: Ptr, output: Ptr, frameCount: Int) realtime cExport("rae_audio_render") {
   ...
 }
 ```
@@ -312,15 +314,19 @@ func audioRender(engine: Ptr, output: Ptr, frameCount: Int) realtime export("rae
   (numbers, `Ptr`, `Bool`; no `own` heap parameters, no `String` result).
 - An exported function is a **root** of every analysis: it is treated as callable
   from an unknown thread, so the `spawn` capture rules apply to what it touches,
-  and `realtime export` is checked like any `realtime` root.
-- `export` is already a reserved word in the lexer.
+  and `realtime cExport` is checked like any `realtime` root.
+- Why `cExport` and not `export`: Rae already uses `export` for modules (a
+  re-export, `export "path"`, and a bare `export` that joins a file to its
+  folder's main module). The C boundary already has its own words, `extern`
+  (call C) and `cheader`; `cExport` reads as their pair and says which way the
+  call goes. camelCase, as a keyword of two words is.
 
 ### 6.2 Foreign threads
 
 A thread made by C (the Core Audio IO thread) enters Rae code with none of
 Rae's per-thread runtime state. Its first use must not allocate, so a shim call
 `attachThread()` runs on that thread when the device starts (before real-time
-work) and sets up what Rae needs. The rule for the compiler: an `export`ed
+work) and sets up what Rae needs. The rule for the compiler: a `cExport`
 function used before `attachThread` is a run-time error in debug builds.
 
 ### 6.3 Containers that cannot grow
@@ -404,7 +410,7 @@ steps that need them.
 4. **clang attributes** in the generated C and `-Wfunction-effects` in the test
    build (§5.1); **the RTSan gate** (§5.2) as a pre-suite case like TSan, when the
    Homebrew LLVM is present.
-5. **`export`** and foreign threads (§6.1, §6.2): unlocks rendering inside the
+5. **`cExport`** and foreign threads (§6.1, §6.2): unlocks rendering inside the
    device callback (audio stage B), the VideoToolbox and CoreMIDI callbacks, and
    Box3D's scheduler.
 6. `restrict` emission (§4.6); `mainThread` (§4.3); the real-time team (§6.6).
@@ -418,15 +424,20 @@ steps that need them.
 - **R2 — `noAlloc`** (or the spelled-out `noAllocation`) as the second, weaker
   keyword, or not yet (§3.1). **Decided 2026-11-11: `noAlloc`, built together
   with `realtime`.**
-- **R3 — root-only marking plus required marks on promising `lib/` functions**
-  (§3.3), versus marking every function on the path (more noise, no gain with a
-  complete call graph).
-- **R4 — `export("cName")`** for Rae functions called from C (§6.1).
+- **R3 — where the marks go. Decided 2026-11-11:** the entry function carries
+  `realtime`; everything it reaches is checked without a mark. A helper MAY
+  carry the mark too, to tell a reader (and a later caller) that it is meant to
+  be real-time; a marked helper is checked as its own root, so the mark can
+  never be wrong. `lib/` and package functions that promise to stay real-time
+  for their callers carry it always (§3.3).
+- **R4 — calling Rae from C. Decided 2026-11-11:** the modifier
+  `cExport("cName")` (§6.1).
 - **R5 — `mainThread`** for externs, later (§4.3).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
   the may-wait rule (§6.6).
-- **R7 — the RTSan gate's compiler:** Homebrew LLVM as a test dependency on
-  macOS, or run the gate only on Linux.
+- **R7 — the RTSan gate's compiler. Decided 2026-11-11:** Homebrew LLVM
+  (`brew install llvm`), a test dependency on macOS installed by `make setup`,
+  like `naga`; the gate SKIPs with a message when it is missing.
 
 ---
 

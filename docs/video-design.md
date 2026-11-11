@@ -433,7 +433,7 @@ Depends on the audio steps for its clock (audio 1/6 to 4/6).
    (H.264, HEVC, ProRes), the copy path to textures, the YUV to RGB shader with
    tags, rational time, a simple player synced to the audio engine; demux and
    decode tests. Measure the copy path at 4K (decides §12 V3).
-2. **Color.** `lib/color`: input transforms, ACEScg / ACEScct, CDL, `.cube` LUTs,
+2. **Color.** `lib/color` (used by the renderer too, so in the stdlib): input transforms, ACEScg / ACEScct, CDL, `.cube` LUTs,
    ACES 2.0 output transforms in WGSL, OCIO-oracle tests, SDR output; scopes.
 3. **The editor core.** Timeline ECS, frame cache, frame-accurate seek, scrub,
    reverse, proxies, simple composite (layers, opacity, cross dissolve, titles).
@@ -455,10 +455,13 @@ Depends on the audio steps for its clock (audio 1/6 to 4/6).
   public), and which codecs it enables by default. Recommendation:
   public (LGPL obligations are easier with the build recipe public), decoders on,
   software H.264/HEVC decoders on only as a fallback a program enables.
-- **V2 — vendored permissive libraries in the Rae repo** (dav1d, libvpx,
-  OpenEXR; later SVT-AV1): the same question as audio's D1. They could also be
-  packages. Recommendation: packages too, since only video programs need them,
-  and the package system already builds native code.
+- **V2 — where the permissive libraries live. Decided 2026-11-11:** video is a
+  package in this repository, `packages/video`, like `packages/audio`
+  (`audio-design.md` §13 D6), declaring `audio` as its dependency. dav1d,
+  libvpx, OpenEXR (later SVT-AV1) are used as libraries, not rewritten, in the
+  package's `native/` (copied, or downloaded by a pinned hash at build time like
+  `packages/sql`'s SQLite when the source is large). FFmpeg (LGPL) stays in its
+  own repository (V1).
 - **V3 — zero-copy frames.** If the copy path is too slow on iPhone, the WebGPU
   implementation needs an external-texture import (Dawn has it, wgpu-native does
   not in `webgpu.h`). Decide after the step-1 measurement.
