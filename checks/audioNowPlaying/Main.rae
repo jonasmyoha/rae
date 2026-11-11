@@ -1,0 +1,187 @@
+# Now Playing, the lock screen's buttons and sound in the background
+# (docs/audio-design.md §9.1) on a real device. On iOS run it with
+# RAE_IOS_TEAM=<team> RAE_IOS_BACKGROUND_AUDIO=1 sh tools/ios/run-ios.sh
+# checks/audioNowPlaying, and read Documents/rae.log from the app's container.
+#
+# It writes 100 s of music (a tune of sine tones) to the temporary folder,
+# streams it with the `music` intent, shows it in Now Playing and turns on the
+# buttons. Then, for RAE_CHECK_SECONDS (90 on iOS, 3 elsewhere), it logs each
+# button press and what it did (play / pause / play-pause / a new position on
+# the stream; next: 10 s on, previous: back to the start), the app going to the
+# background and back, and every 5 s the place in the song. It passes when the
+# stream moved on while the app was in the background (on iOS, if it went
+# there) and the device's callbacks kept coming. Off Apple there is no Now
+# Playing: it plays and says so.
+import Math
+import String
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSession
+open audio/AudioStreams
+open audio/NowPlaying
+open audio/Sound
+
+const tuneSeconds: Int = 100
+
+const tuneRate: Int = 44100
+
+# A tune of half-second notes, mono, with a short fade at each note's ends
+func writeTune(path: view String) ret Bool {
+  let notes: List(Float) = List(Float) {
+    261.63
+    329.63
+    392.0
+    523.25
+    392.0
+    329.63
+    293.66
+    349.23
+  }
+  let frames: Int = tuneSeconds * tuneRate
+  let noteFrames: Int = tuneRate / 2
+  let samples: Buffer(Float) = createSampleBuffer(count: frames)
+  loop var frame: Int = 0, frame < frames, ++frame {
+    let note: Int = frame / noteFrames
+    let within: Int = frame % noteFrames
+    let frequency: Float = notes.copyAtFallback(index: note % notes.length(), fallback: 440.0)
+    var envelope: Float = 1.0
+    if within < 441 {
+      envelope = (within as Float) / 441.0
+    } else if noteFrames - within < 441 {
+      envelope = ((noteFrames - within) as Float) / 441.0
+    }
+    let phase: Float = (within as Float) * frequency / (tuneRate as Float)
+    setSampleAt(samples: samples, index: frame, value: sin(x: phase * 6.2831853) * 0.25 * envelope)
+  }
+  let written: Bool = writeWavFile(
+    path: path
+    samples: samples
+    frameCount: frames
+    channels: 1
+    sampleRate: tuneRate
+  )
+  unsafe {
+    rae_ext_rae_buf_free(buf: samples)
+  }
+  ret written
+}
+
+func show(audio: view AudioEngine, song: view VoiceId) {
+  let shown: Bool = showNowPlaying(info: audio.nowPlayingOfStream(
+    voiceId: song
+    title: "A tune of sine tones"
+    artist: "Rae audio check"
+    album: "checks/audioNowPlaying"
+    artworkPath: ""
+  ))
+}
+
+func secondsText(seconds: view Float64) ret String {
+  ret "{floor(x: (seconds * 10.0) as Float) / 10.0} s"
+}
+
+func main() {
+  var folder: String = getEnv(name: "TMPDIR")
+  if folder is "" {
+    folder = "/tmp/"
+  }
+  if not folder.endsWith(suffix: "/") {
+    folder = "{folder}/"
+  }
+  let path: String = "{folder}audioNowPlaying.wav"
+  if not writeTune(path: path) {
+    log("audioNowPlaying: cannot write {path}")
+    exit(code: 1)
+  }
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.session = AudioSessionKind.music
+  var audio: AudioEngine = audioStart(settings: settings)
+  log("audioNowPlaying: device offline {audio.offline}, {audio.sampleRate} Hz")
+  let enabled: Bool = enableRemoteCommands(
+    nextTrack: true
+    previousTrack: true
+    changePosition: true
+  )
+  let song: VoiceId = audio.playStream(path: path, bus: AudioBusKind.music, gainDecibels: -6.0)
+  show(audio: audio, song: song)
+  log("audioNowPlaying: buttons {enabled}, Now Playing: {nowPlayingDescription()}")
+  var seconds: Int = 3
+  when Target.isMobileOs {
+    seconds = 90
+  }
+  let asked: String = getEnv(name: "RAE_CHECK_SECONDS")
+  if asked is not "" {
+    seconds = asked.toInt()
+  }
+  var backgroundStart: Float64 = -1.0
+  var playedInBackground: Float64 = 0.0
+  var wentToBackground: Bool = false
+  var ticks: Int = 0
+  loop ticks < seconds * 10 {
+    sleep(ms: 100)
+    ticks = ticks + 1
+    pumpMainRunLoop()
+    audio.update()
+    loop let event: AudioSessionEvent in audio.takeSessionEvents() {
+      let at: Float64 = audio.positionSeconds(voiceId: song)
+      if event.kind is AudioSessionEventKind.enteredBackground {
+        wentToBackground = true
+        backgroundStart = at
+      } else if event.kind is AudioSessionEventKind.enteredForeground and backgroundStart >= 0.0 {
+        playedInBackground = playedInBackground + at - backgroundStart
+        backgroundStart = -1.0
+      }
+      log("audioNowPlaying: event {event.kind} at {secondsText(seconds: at)}")
+    }
+    var pressed: Bool = false
+    loop let command: RemoteCommandEvent in takeRemoteCommands() {
+      pressed = true
+      let at: Float64 = audio.streamFilePositionSeconds(voiceId: song)
+      var handled: Bool = audio.applyRemoteCommand(voiceId: song, command: command)
+      if command.kind is RemoteCommandKind.nextTrack {
+        handled = audio.seek(voiceId: song, seconds: at + 10.0)
+      } else if command.kind is RemoteCommandKind.previousTrack {
+        handled = audio.seek(voiceId: song, seconds: 0.0)
+      }
+      log(
+        "audioNowPlaying: button {command.kind} ({secondsText(seconds: command.positionSeconds)}) at {secondsText(
+          seconds: at
+        )}: done {handled}, paused {audio.streamIsPaused(voiceId: song)}"
+      )
+    }
+    if pressed or ticks % 10 is 0 {
+      show(audio: audio, song: song)
+    }
+    if ticks % 50 is 0 {
+      log(
+        "audioNowPlaying: {ticks / 10} s: the song at {secondsText(
+          seconds: audio.streamFilePositionSeconds(voiceId: song)
+        )}, playing {audio.streamIsPlaying(voiceId: song)}, paused {audio.streamIsPaused(
+          voiceId: song
+        )}, callbacks {audio.deviceCallbacks()}, underrun {audio.underrunFrames()}"
+      )
+    }
+  }
+  if backgroundStart >= 0.0 {
+    playedInBackground = playedInBackground + audio.positionSeconds(voiceId: song) - backgroundStart
+  }
+  let callbacks: Int = audio.deviceCallbacks()
+  clearNowPlaying()
+  let blocks: Int = audio.stopAudio()
+  let removed: Bool = Sys.delete(path: path)
+  log(
+    "audioNowPlaying: in the background {wentToBackground}, the song moved {secondsText(
+      seconds: playedInBackground
+    )} there; {callbacks} callbacks"
+  )
+  if not audio.offline and callbacks < 100 {
+    log("audioNowPlaying: FAILED (the device stopped)")
+    exit(code: 1)
+  }
+  if wentToBackground and playedInBackground < 1.0 {
+    log("audioNowPlaying: FAILED (no sound in the background)")
+    exit(code: 1)
+  }
+  log("audioNowPlaying: done")
+}
