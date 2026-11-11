@@ -89,6 +89,11 @@ away, and the ground made round a spot 150 m away is at the height the
 renderer draws. The example gate (`compiler/tools/run_examples.sh`) runs it
 and a screenshot.
 
+The grass is game proto1's painted grass in three rings round what the camera looks at, to 20,
+120 and 300 m (`lib/app3d/WalkerGrass.rae`), with the meadow's tufts as accents. `RAE_WALKER_GRASS=meadow`
+draws it as before (the low-poly blades to 20 m and the turf carpet to 130 m);
+`RAE_WALKER_GRASS_NEAR_SIDE`, `_MID_SIDE` and `_FAR_SIDE` set the rings' grids (0 turns a ring off).
+
 `RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 RAE_DRS=off` print the frame and
 GPU pass times; `RAE_CAMERA_AT` (or the older `RAE_WALKER_CAMERA`) and `RAE_WALKER_HOUR` set the start
 camera and hour, as in 136.

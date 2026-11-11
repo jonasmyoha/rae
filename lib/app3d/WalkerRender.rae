@@ -75,6 +75,7 @@ open app3d/WalkerPhysics
 open app3d/WalkerCubes
 open app3d/WalkerTerrain
 open app3d/WalkerGrassObstacles
+open app3d/WalkerGrass
 open app3d/WalkerWorld
 open app3d/WalkerCamera
 open app3d/HudOverlays
@@ -312,21 +313,21 @@ func generateWalkerGrass(
   deltaTime: copy Float
   wind: view WindVector
   profiler: mod Profiler
-  grassCompute: mod GrassCompute
+  walkerGrass: mod WalkerGrass
   resources: mod GpuResources
 ) {
   var grassToonGen: Int = 0
   if characterSystem.toon {
     grassToonGen = 1
   }
-  # the grass's roots: the frame's ground palette, as the terrain's
-  var grassView: GrassViewSettings = GrassConfig.grassMeadowSettings(
-    groundColor: terrainSystem.groundPalette.grass
+  # the grass's roots: the frame's ground palette, as the terrain's; the painted grass or the
+  # meadow's blades (app3d/WalkerGrass)
+  let grassView: GrassViewSettings = walkerGrassSettings(
+    painted: walkerGrass.painted
+    palette: terrainSystem.groundPalette
   )
-  grassView.dryColor = terrainSystem.groundPalette.dry
-  grassView.dryAmount = terrainSystem.groundPalette.dryAmount
   updateWalkerGrassObstacles(
-    grass: grassCompute
+    grass: walkerGrass.near
     resources: resources
     terrainSystem: terrainSystem
     centerX: cameraSystem.camera.target.x
@@ -336,7 +337,7 @@ func generateWalkerGrass(
   # Around what the camera looks at: the character in the game, wherever the
   # editor camera looks in the editor
   grassGenerate(
-    grass: grassCompute
+    grass: walkerGrass.near
     resources: resources
     centerX: cameraSystem.camera.target.x
     centerY: cameraSystem.camera.target.y
@@ -352,7 +353,20 @@ func generateWalkerGrass(
     fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z
     settings: grassView
   )
-  grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
+  # and the painted grass's middle and far rings round the same place
+  generateWalkerGrassRings(
+    walkerGrass: walkerGrass
+    resources: resources
+    terrainSystem: terrainSystem
+    centerX: cameraSystem.camera.target.x
+    centerY: cameraSystem.camera.target.y
+    groundZ: characterSystem.groundZ
+    deltaTime: deltaTime
+    wind: wind
+    toon: grassToonGen
+    camera: cameraSystem.camera
+  )
+  grassDiagTick(grass: walkerGrass.near, resources: resources, profiler: profiler)
 }
 
 # The scene's draws into the open pass (the G-buffer pass, the forward pass,
@@ -371,7 +385,7 @@ func drawWalkerScene(
   cubeBatch: mod InstanceBatch
   palette: view List(Float)
   t: copy Float
-  grassCompute: mod GrassCompute
+  walkerGrass: mod WalkerGrass
   resources: mod GpuResources
   off: view AbSwitches
 ) {
@@ -447,11 +461,11 @@ func drawWalkerScene(
     )
   }
   if not off.grass {
-    grassDraw(
-      grass: grassCompute
+    drawWalkerGrass(
+      walkerGrass: walkerGrass
       resources: resources
-      gbuffer: cache
-      gbufferResources: rendererResources
+      cache: cache
+      rendererResources: rendererResources
     )
   }
 }

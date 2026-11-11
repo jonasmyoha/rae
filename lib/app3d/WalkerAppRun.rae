@@ -62,6 +62,7 @@ open app3d/WalkerApp
 open LeafParticles
 open app3d/WalkerIceTest
 open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/WalkerGrass
 
 # A networked session whose time is up (RAE_WALKER_NET_SECONDS) closes the app
 func netSessionOver(app: view WalkerApp) ret Bool {
@@ -331,7 +332,7 @@ func walkerRunRender(app: mod WalkerApp) ret Bool {
       biome: app.biome
       resources: resources
       profiler: app.profiler
-      grassCompute: app.grassCompute
+      walkerGrass: app.walkerGrass
     )
     ret true
   }
@@ -358,7 +359,7 @@ func walkerRunEnd(app: mod WalkerApp) {
     walkerNetLeave(net: walkerNet, nowMs: nowMs())
   }
   if let resources: mod GpuResources = app.gpuResources {
-    grassShutdown(grass: app.grassCompute, resources: resources)
+    shutdownWalkerGrass(walkerGrass: app.walkerGrass, resources: resources)
     if let tree: mod ReferenceTree = app.renderSystem.referenceTree {
       releaseReferenceTree(tree: tree, resources: resources)
     }

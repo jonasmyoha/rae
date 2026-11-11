@@ -28,7 +28,12 @@
 # toward the edge by each tuft's own stable draw (no ring), and those past
 # meadowNearRadius drawn with one segment a blade. The tufts cast no
 # shadows; they bend in the wind, each blade about its root.
+#
+# The turf carpet is the meadow grass's only (RAE_WALKER_GRASS=meadow): with the painted grass, the
+# walkers' default, its rings to 300 m (app3d/WalkerGrass) cover the ground and the meadow keeps
+# its tufts as accents.
 import Math
+import Sys
 import Vec3
 import Quat
 import RendererDeferred
@@ -168,6 +173,15 @@ type WalkerMeadow {
   # that much lighter: GbufferRecord grassBladePattern)
   palette: GroundPalette = summerGroundPalette()
   pattern: Float
+  # Its turf carpet laid (the meadow grass), or only its tufts (the painted grass)
+  turf: Bool = not walkerPaintedGrass()
+}
+
+# The walkers' grass is the painted grass in rings (app3d/WalkerGrass) unless
+# RAE_WALKER_GRASS=meadow
+# asks for the low-poly meadow blades and this meadow's turf carpet, as before
+func walkerPaintedGrass() ret Bool {
+  ret Sys.getEnv(name: "RAE_WALKER_GRASS") is not "meadow"
 }
 
 func meadowMaterial(color: view Vec3) ret Material3d {
@@ -417,9 +431,13 @@ func placeMeadowCell(
     meadow.keeps.set(index: place, value: hash2(x: cellX * 103 + k, y: cellY * 107 + k, seed: 717))
     count = count + 1
   }
-  # the turf: a patch on every grassy square of the cell's grid
+  # the turf: a patch on every grassy square of the cell's grid (the meadow grass only)
   let step: Float = size / meadowTurfSide.toFloat()
-  loop var t: Int = 0, t < meadowTurfSide * meadowTurfSide, ++t {
+  var turfPatches: Int = 0
+  if meadow.turf {
+    turfPatches = meadowTurfSide * meadowTurfSide
+  }
+  loop var t: Int = 0, t < turfPatches, ++t {
     let column: Int = t % meadowTurfSide
     let row: Int = t / meadowTurfSide
     let x: Float = cellX.toFloat() * size + (column.toFloat() + 0.2 + 0.6 * hash2(

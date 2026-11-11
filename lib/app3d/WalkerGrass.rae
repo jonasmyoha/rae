@@ -1,0 +1,226 @@
+# app3d/WalkerGrass — the walkers' GPU grass (136, 137, 143 and the walker game): the painted grass
+# in three rings round what the camera looks at (game proto1's: GrassConfig grassPaintedSettings,
+# grassPaintedMidRing, grassPaintedFarRing; lib/GrassTiers), to 20, 120 and 300 m. It replaced
+# app3d/WalkerMeadow's CPU turf carpet to 130 m; the meadow's tufts stay as accents.
+# RAE_WALKER_GRASS=meadow draws the grass as it was before (the low-poly meadow blades to 20 m and
+# the turf carpet beyond: WalkerMeadow walkerPaintedGrass).
+#
+# Every ring is its own GrassCompute on the walkers' compute shader (WalkerAppSetup
+# walkerGrassComputeShader: the blades' roots the painted terrain's own color where they stand),
+# with the forest's trunks and the rocks as obstacles (app3d/WalkerGrassObstacles, up to 512
+# circles in each ring's reach). The near field's obstacles are gathered every frame, as before;
+# the rings' only when the center has moved a few meters, as they reach far. The colors follow the
+# frame's ground palette (app3d/GroundPalette) and the snow sinks every blade (lib/snow.wgsl).
+import GrassConfig
+import Sys
+import Target
+open Wind
+open WorldBiome
+open GrassCompute
+open GrassBenders
+open GrassTiers
+open Gbuffer
+open Scene3d
+open gpu/GpuResources
+open app3d/GroundPalette
+open app3d/WalkerMeadow
+open app3d/WalkerAppSetup
+open app3d/WalkerGrassObstacles
+open app3d/WalkerTerrain
+
+# The near field's candidate grid side: game proto1's (512 on a desktop, 384 on a phone, over its
+# 40 m), the meadow's default with the meadow grass
+const walkerPaintedNearSide: Int = 512
+
+const walkerPaintedPhoneNearSide: Int = 384
+
+const walkerPaintedMidSide: Int = 512
+
+const walkerPaintedFarSide: Int = 256
+
+# A phone's rings: game proto1's cost about 9 ms a frame more than the meadow grass did in 143 on
+# an iPhone 15 Pro (40 against 32 ms, its turf carpet included); at a quarter of the blades each
+# they cost what the meadow did (31 ms)
+const walkerPaintedPhoneMidSide: Int = 256
+
+const walkerPaintedPhoneFarSide: Int = 128
+
+# How far (m) the center moves before the rings' obstacles are gathered again
+const walkerRingObstacleStep: Float = 6.0
+
+# A grid side: the variable `name` when it is set (RAE_WALKER_GRASS_NEAR_SIDE, _MID_SIDE,
+# _FAR_SIDE; 0 switches a ring off), else `fallback`
+func walkerGrassSide(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() > 0 {
+    ret text.toInt()
+  }
+  ret fallback
+}
+
+type WalkerGrass {
+  # The near field (to 20 m), and the middle and far rings (the painted grass only)
+  near: GrassCompute
+  rings: GrassTiers
+  painted: Bool
+  # Where the rings' obstacles were gathered last (none yet: a far-off place)
+  ringsCenterX: Float = 1000000.0
+  ringsCenterY: Float = 1000000.0
+}
+
+# One GrassCompute on the walkers' compute shader, for `biome`, with no obstacles yet
+func createWalkerGrassCompute(biome: view BiomeConfig) ret GrassCompute {
+  var grass: GrassCompute = createGrassCompute()
+  grassSetComputeShaderWithConstants(
+    grass: grass
+    shader: walkerGrassComputeShader()
+    constants: walkerGrassComputeConstants(biome: biome)
+  )
+  grassSetSurfaceField(grass: grass, values: emptyWalkerGrassObstacles())
+  ret grass
+}
+
+func createWalkerGrass(biome: view BiomeConfig) ret WalkerGrass {
+  let painted: Bool = walkerPaintedGrass()
+  var near: GrassCompute = createWalkerGrassCompute(biome: biome)
+  var rings: GrassTiers = createGrassTiers()
+  if painted {
+    var nearSide: Int = walkerPaintedNearSide
+    var midFallback: Int = walkerPaintedMidSide
+    var farFallback: Int = walkerPaintedFarSide
+    if Target.isMobileOs {
+      nearSide = walkerPaintedPhoneNearSide
+      midFallback = walkerPaintedPhoneMidSide
+      farFallback = walkerPaintedPhoneFarSide
+    }
+    grassSetBladeSide(
+      grass: near
+      side: walkerGrassSide(name: "RAE_WALKER_GRASS_NEAR_SIDE", fallback: nearSide)
+    )
+    let midSide: Int = walkerGrassSide(name: "RAE_WALKER_GRASS_MID_SIDE", fallback: midFallback)
+    let farSide: Int = walkerGrassSide(name: "RAE_WALKER_GRASS_FAR_SIDE", fallback: farFallback)
+    let nearSettings: GrassViewSettings = walkerGrassSettings(
+      painted: true
+      palette: summerGroundPalette()
+    )
+    let mid: GrassViewSettings = GrassConfig.grassPaintedMidRing(
+      near: nearSettings
+      reach: GrassConfig.grassPaintedMidReach
+    )
+    addGrassTier(
+      tiers: rings
+      compute: createWalkerGrassCompute(biome: biome)
+      settings: mid
+      side: midSide
+      on: midSide > 0
+    )
+    addGrassTier(
+      tiers: rings
+      compute: createWalkerGrassCompute(biome: biome)
+      settings: GrassConfig.grassPaintedFarRing(mid: mid, reach: GrassConfig.grassPaintedFarReach)
+      side: farSide
+      on: farSide > 0
+    )
+  }
+  ret WalkerGrass { near: own near, rings: own rings, painted: painted }
+}
+
+# The near field's settings at the frame's ground palette: the painted grass (its root lift
+# game proto1's 0.3), or the meadow's low-poly blades
+func walkerGrassSettings(painted: view Bool, palette: view GroundPalette) ret GrassViewSettings {
+  var settings: GrassViewSettings = GrassConfig.grassMeadowSettings(groundColor: palette.grass)
+  if painted {
+    settings = GrassConfig.grassPaintedSettings(
+      groundColor: palette.grass
+      dryColor: palette.dry
+      rootLift: 0.3
+    )
+  }
+  settings.dryColor = palette.dry
+  settings.dryAmount = palette.dryAmount
+  ret settings
+}
+
+# This frame's blades of the rings round (`centerX`, `centerY`), after the near field's: their
+# obstacles when the center moved, the palette's colors, then the compute passes
+func generateWalkerGrassRings(
+  walkerGrass: mod WalkerGrass
+  resources: mod GpuResources
+  terrainSystem: view WalkerTerrain
+  centerX: view Float
+  centerY: view Float
+  groundZ: view Float
+  deltaTime: view Float
+  wind: view WindVector
+  toon: view Int
+  camera: view Camera3d
+) {
+  if not walkerGrass.painted {
+    ret
+  }
+  let movedX: Float = centerX - walkerGrass.ringsCenterX
+  let movedY: Float = centerY - walkerGrass.ringsCenterY
+  if movedX * movedX + movedY * movedY > walkerRingObstacleStep * walkerRingObstacleStep {
+    walkerGrass.ringsCenterX = centerX
+    walkerGrass.ringsCenterY = centerY
+    loop var i: Int = 0, i < walkerGrass.rings.tiers.length, ++i {
+      if let tier: mod GrassTier = walkerGrass.rings.tiers.modAt(index: i) {
+        updateWalkerGrassObstacles(
+          grass: tier.compute
+          resources: resources
+          terrainSystem: terrainSystem
+          centerX: centerX
+          centerY: centerY
+          reach: tier.settings.extent * 0.5
+        )
+      }
+    }
+  }
+  let palette: GroundPalette = terrainSystem.groundPalette
+  grassTiersSetGround(
+    tiers: walkerGrass.rings
+    groundColor: palette.grass
+    dryColor: palette.dry
+    dryAmount: palette.dryAmount
+  )
+  grassTiersFrame(
+    tiers: walkerGrass.rings
+    resources: resources
+    centerX: centerX
+    centerY: centerY
+    groundZ: groundZ
+    deltaTime: deltaTime
+    wind: wind
+    toon: toon
+    share: 1.0
+    benders: List.create(Float, cap: 0)
+    camera: camera.position
+    target: camera.target
+  )
+}
+
+# Every field's blades, into the open pass
+func drawWalkerGrass(
+  walkerGrass: mod WalkerGrass
+  resources: mod GpuResources
+  cache: view GbufferCache
+  rendererResources: view GpuResources
+) {
+  grassDraw(
+    grass: walkerGrass.near
+    resources: resources
+    gbuffer: cache
+    gbufferResources: rendererResources
+  )
+  grassTiersDraw(
+    tiers: walkerGrass.rings
+    resources: resources
+    cache: cache
+    rendererResources: rendererResources
+  )
+}
+
+func shutdownWalkerGrass(walkerGrass: mod WalkerGrass, resources: mod GpuResources) {
+  grassShutdown(grass: walkerGrass.near, resources: resources)
+  grassTiersShutdown(tiers: walkerGrass.rings, resources: resources)
+}
