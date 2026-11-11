@@ -1898,8 +1898,30 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
               cat "$TMP_OUT/render-forest-$LAB_SET.log" "$TMP_OUT/screenshot-forest-$LAB_SET.log" 2>/dev/null | tail -8 | sed 's/^/  /'
             fi
           done
+          # the interactive lab: the editor chrome with its side panel open over the forest scene,
+          # a panel control that builds the scene again (the forest's reach) and the Reference
+          # scene shown from the scene chooser's start (LabScenes, LabEditor)
+          for LAB_EDITOR_SCENE in forest reference; do
+            SCREENSHOT="$TMP_OUT/treelab-editor-$LAB_EDITOR_SCENE.bmp"
+            LAB_EDITOR_ENV="RAE_TREELAB_SCENE=forest RAE_TREELAB_CONTROLS=d:400"
+            LAB_EDITOR_LINE='rebuilt Forest'
+            if [ "$LAB_EDITOR_SCENE" = reference ]; then
+              LAB_EDITOR_ENV="RAE_TREELAB_CAMERA=near RAE_TREELAB_CONTROLS=s:1"
+              LAB_EDITOR_LINE='rebuilt Reference T02'
+            fi
+            if ! (cd .. && env $LAB_EDITOR_ENV RAE_TREELAB_EDITOR=1 RAE_SETTINGS_OPEN=1 \
+               RAE_SDL_HEADLESS_MS=8000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV or die $!' 90 "$TMP_OUT/app") > "$TMP_OUT/render-editor-$LAB_EDITOR_SCENE.log" 2>&1 \
+               || ! grep -q "$LAB_EDITOR_LINE" "$TMP_OUT/render-editor-$LAB_EDITOR_SCENE.log" \
+               || ! python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 \
+                  > "$TMP_OUT/screenshot-editor-$LAB_EDITOR_SCENE.log" 2>&1; then
+              LAB_OK=0
+              echo "  editor $LAB_EDITOR_SCENE:"
+              cat "$TMP_OUT/render-editor-$LAB_EDITOR_SCENE.log" "$TMP_OUT/screenshot-editor-$LAB_EDITOR_SCENE.log" 2>/dev/null | tail -8 | sed 's/^/  /'
+            fi
+          done
           if [ "$LAB_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (the T02 scene, the four meadow flower study views and the forest scene with each tree set)"
+            echo "PASS: $EXAMPLE_NAME (the T02 scene, the four meadow flower study views, the forest scene with each tree set, and the editor with its panel open over the Forest and the Reference scene, each built again by a panel control)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (tree lab views)"
