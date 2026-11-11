@@ -104,4 +104,26 @@ int64_t rae_audio_read_file(uint8_t* path_z, uint8_t* into, int64_t count);
 /* Write `count` bytes to a file (the capture WAV). 1 on success. */
 int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count);
 
+/* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
+ * sample table says): open answers a descriptor (>= 0) or -errno; read_at
+ * reads up to `count` bytes at `offset` (pread), the count read or -errno. */
+int64_t rae_audio_file_open(uint8_t* path_z);
+int64_t rae_audio_file_read_at(int64_t file, uint8_t* into, int64_t count, int64_t offset);
+void rae_audio_file_close(int64_t file);
+
+/* AAC through the platform's decoder (AudioToolbox's AudioConverter on Apple;
+ * elsewhere open answers 0, "not supported", until the FFmpeg package).
+ * open: a converter from AAC at this rate and channel count to interleaved
+ * Float, 0 when there is none. set_cookie: the track's ES descriptor (the esds
+ * payload), 1 on success. decode: one AAC packet in, up to `max_frames` frames
+ * out; the frames written, or a negative status; a packet of size 0 asks for
+ * the frames still inside the decoder (the end of the stream). reset: forget
+ * the stream (a seek). */
+int64_t rae_audio_aac_open(int64_t sample_rate, int64_t channels);
+int64_t rae_audio_aac_set_cookie(int64_t converter, uint8_t* cookie, int64_t size);
+int64_t rae_audio_aac_decode(int64_t converter, uint8_t* packet, int64_t size, float* out,
+                             int64_t max_frames, int64_t channels);
+void rae_audio_aac_reset(int64_t converter);
+void rae_audio_aac_close(int64_t converter);
+
 #endif

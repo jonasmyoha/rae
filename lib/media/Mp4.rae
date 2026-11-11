@@ -1,0 +1,762 @@
+# media/Mp4 — the ISO base media file format (MP4, M4A, MOV; ISO/IEC
+# 14496-12, QuickTime) read in Rae: the box tree, each track's sample table
+# (sizes, file offsets, decode times, composition offsets, sync samples), its
+# codec and its codec configuration, and the edit that trims the encoder's
+# priming. Shared by audio (AAC in M4A, docs/audio-design.md §7.3) and video
+# (docs/video-design.md §3.4). Pure functions over bytes: the caller reads the
+# file.
+#
+#     let header: Mp4Box = mp4BoxAt(bytes: firstSixteenBytes, at: 0, end: fileSize)
+#     ... read each top-level box header the same way until `moov` ...
+#     let movie: Mp4Movie = parseMp4Movie(moov: moovBytes)
+#     let track: Mp4Track = movie.tracks.copyAtFallback(...)   # handler "soun" / "vide"
+#
+# `readMp4Movie(bytes:)` does all of it for a file already in memory.
+#
+# Sample i is `sampleSizes[i]` bytes at file offset `sampleOffsets[i]`, decoded
+# at `sampleTimes[i]` and shown at that plus `compositionOffsets[i]` (in the
+# track's `timescale`). The playable part is `presentationLength` units from
+# `presentationStart` (the edit list, or iTunes' iTunSMPB in Apple's M4A).
+import Math
+import String
+
+type Mp4Box {
+  # four characters: "moov", "trak", "mp4a", ...; "" when there is no box here
+  kind: String
+  # where the box starts, its header's size (8, or 16 with a 64-bit size) and
+  # its whole size
+  start: Int
+  headerSize: Int
+  size: Int
+}
+
+type Mp4Track {
+  trackId: Int
+  # "soun", "vide", "text", ...
+  handler: String
+  # the sample entry's four characters: "mp4a", "avc1", "hvc1", "alac", ...
+  codec: String
+  # the track's time unit per second, and its length in it
+  timescale: Int
+  duration: Int
+  channels: Int
+  sampleRate: Int
+  width: Int
+  height: Int
+  # the MPEG-4 object type in an esds (0x40 = MPEG-4 audio, AAC), else 0
+  objectType: Int
+  # the codec's own configuration: AAC's AudioSpecificConfig, the payload of
+  # avcC / hvcC / alac
+  codecConfig: List(UInt8)
+  # an esds payload (the ES descriptor), which some decoders take whole
+  elementaryStream: List(UInt8)
+  sampleSizes: List(Int)
+  sampleOffsets: List(Int)
+  sampleTimes: List(Int)
+  # empty when the track has no ctts (composition time = decode time)
+  compositionOffsets: List(Int)
+  # 0-based; empty when every sample is a sync sample (no stss)
+  syncSamples: List(Int)
+  # the playable part, in `timescale` units: from the edit list, or iTunSMPB
+  presentationStart: Int
+  presentationLength: Int
+}
+
+type Mp4Movie {
+  timescale: Int
+  duration: Int
+  tracks: List(Mp4Track)
+  # "" when the movie was read
+  error: String
+}
+
+func mp4Byte(bytes: view List(UInt8), at: view Int) ret Int {
+  ret bytes.copyAtFallback(index: at, fallback: 0) as Int
+}
+
+func mp4UInt16(bytes: view List(UInt8), at: view Int) ret Int {
+  ret (mp4Byte(bytes: bytes, at: at) shl 8) bitor mp4Byte(bytes: bytes, at: at + 1)
+}
+
+func mp4UInt32(bytes: view List(UInt8), at: view Int) ret Int {
+  ret (mp4UInt16(bytes: bytes, at: at) shl 16) bitor mp4UInt16(bytes: bytes, at: at + 2)
+}
+
+func mp4UInt64(bytes: view List(UInt8), at: view Int) ret Int {
+  ret (mp4UInt32(bytes: bytes, at: at) shl 32) bitor mp4UInt32(bytes: bytes, at: at + 4)
+}
+
+# A signed 32-bit value (an edit's media time is -1 for an empty edit)
+func mp4Int32(bytes: view List(UInt8), at: view Int) ret Int {
+  let value: Int = mp4UInt32(bytes: bytes, at: at)
+  if value >= 2147483648 {
+    ret value - 4294967296
+  }
+  ret value
+}
+
+func mp4Text(bytes: view List(UInt8), at: view Int, count: view Int) ret String {
+  ret fromBytes(bytes: bytes, start: at, count: count)
+}
+
+# The box whose header is at `at`, if it fits before `end`; kind "" otherwise
+func mp4BoxAt(bytes: view List(UInt8), at: view Int, end: view Int) ret Mp4Box {
+  if at + 8 > end or at + 8 > bytes.length() {
+    ret Mp4Box { kind: "", start: at, headerSize: 0, size: 0 }
+  }
+  var size: Int = mp4UInt32(bytes: bytes, at: at)
+  var headerSize: Int = 8
+  if size is 1 {
+    if at + 16 > bytes.length() {
+      ret Mp4Box { kind: "", start: at, headerSize: 0, size: 0 }
+    }
+    size = mp4UInt64(bytes: bytes, at: at + 8)
+    headerSize = 16
+  } else if size is 0 {
+    size = end - at
+  }
+  if size < headerSize or at + size > end {
+    ret Mp4Box { kind: "", start: at, headerSize: 0, size: 0 }
+  }
+  ret Mp4Box {
+    kind: mp4Text(bytes: bytes, at: at + 4, count: 4)
+    start: at
+    headerSize: headerSize
+    size: size
+  }
+}
+
+# The first child of kind `kind` in [from, end); kind "" when there is none
+func mp4FindBox(
+  bytes: view List(UInt8)
+  from: view Int
+  end: view Int
+  kind: view String
+) ret Mp4Box {
+  var at: Int = from
+  loop at < end {
+    let box: Mp4Box = mp4BoxAt(bytes: bytes, at: at, end: end)
+    if box.kind is "" {
+      ret box
+    }
+    if box.kind is kind {
+      ret box
+    }
+    at = at + box.size
+  }
+  ret Mp4Box { kind: "", start: end, headerSize: 0, size: 0 }
+}
+
+func mp4Body(box: view Mp4Box) ret Int {
+  ret box.start + box.headerSize
+}
+
+func mp4End(box: view Mp4Box) ret Int {
+  ret box.start + box.size
+}
+
+# The box at `path` ("mdia/minf/stbl") under [from, end)
+func mp4FindPath(
+  bytes: view List(UInt8)
+  from: view Int
+  end: view Int
+  path: view String
+) ret Mp4Box {
+  var start: Int = from
+  var stop: Int = end
+  var found: Mp4Box = { kind: "", start: end, headerSize: 0, size: 0 }
+  var at: Int = 0
+  loop at + 4 <= path.length() {
+    found = mp4FindBox(
+      bytes: bytes
+      from: start
+      end: stop
+      kind: path.sub(start: at, len: 4)
+    )
+    if found.kind is "" {
+      ret found
+    }
+    start = mp4Body(box: found)
+    stop = mp4End(box: found)
+    at = at + 5
+  }
+  ret found
+}
+
+func emptyMp4Track() ret Mp4Track {
+  ret Mp4Track {
+    trackId: 0
+    handler: ""
+    codec: ""
+    timescale: 0
+    duration: 0
+    channels: 0
+    sampleRate: 0
+    width: 0
+    height: 0
+    objectType: 0
+    codecConfig: List.create(UInt8, cap: 0)
+    elementaryStream: List.create(UInt8, cap: 0)
+    sampleSizes: List.create(Int, cap: 0)
+    sampleOffsets: List.create(Int, cap: 0)
+    sampleTimes: List.create(Int, cap: 0)
+    compositionOffsets: List.create(Int, cap: 0)
+    syncSamples: List.create(Int, cap: 0)
+    presentationStart: 0
+    presentationLength: -1
+  }
+}
+
+func mp4Copy(bytes: view List(UInt8), from: view Int, end: view Int) ret List(UInt8) {
+  var copied: List(UInt8) = List.create(UInt8, cap: max(a: 0, b: end - from))
+  loop var i: Int = from, i < end and i < bytes.length(), ++i {
+    copied.add(value: bytes.copyAtFallback(index: i, fallback: 0))
+  }
+  ret copied
+}
+
+# An MPEG-4 descriptor's size: 1 to 4 bytes of 7 bits; answers [size, header]
+func mp4DescriptorSize(bytes: view List(UInt8), at: view Int) ret List(Int) {
+  var size: Int = 0
+  var used: Int = 0
+  loop used < 4 {
+    let part: Int = mp4Byte(bytes: bytes, at: at + used)
+    size = (size shl 7) bitor (part bitand 127)
+    used = used + 1
+    if part < 128 {
+      break
+    }
+  }
+  ret List(Int) { size, used }
+}
+
+# esds: the ES descriptor (tag 3) holds the decoder config (tag 4: the object
+# type), which holds the decoder-specific info (tag 5: AAC's AudioSpecificConfig)
+func readEsds(bytes: view List(UInt8), box: view Mp4Box, track: mod Mp4Track) {
+  let from: Int = mp4Body(box: box) + 4
+  let end: Int = mp4End(box: box)
+  track.elementaryStream = mp4Copy(bytes: bytes, from: from, end: end)
+  var at: Int = from
+  loop at < end {
+    let tag: Int = mp4Byte(bytes: bytes, at: at)
+    let sized: List(Int) = mp4DescriptorSize(bytes: bytes, at: at + 1)
+    let size: Int = sized.copyAtFallback(index: 0, fallback: 0)
+    let body: Int = at + 1 + sized.copyAtFallback(index: 1, fallback: 1)
+    if tag is 3 {
+      # ES_ID, then flags that add a dependency id, a URL or an OCR id
+      let flags: Int = mp4Byte(bytes: bytes, at: body + 2)
+      var next: Int = body + 3
+      if (flags bitand 128) is not 0 {
+        next = next + 2
+      }
+      if (flags bitand 64) is not 0 {
+        next = next + 1 + mp4Byte(bytes: bytes, at: next)
+      }
+      if (flags bitand 32) is not 0 {
+        next = next + 2
+      }
+      at = next
+    } else if tag is 4 {
+      track.objectType = mp4Byte(bytes: bytes, at: body)
+      at = body + 13
+    } else if tag is 5 {
+      track.codecConfig = mp4Copy(bytes: bytes, from: body, end: min(a: body + size, b: end))
+      ret
+    } else {
+      at = body + size
+    }
+  }
+}
+
+# stsd's first sample entry: the codec, the audio format or the picture size,
+# and the configuration box inside it
+func readSampleEntry(bytes: view List(UInt8), stsd: view Mp4Box, track: mod Mp4Track) {
+  let entry: Mp4Box = mp4BoxAt(bytes: bytes, at: mp4Body(box: stsd) + 8, end: mp4End(box: stsd))
+  if entry.kind is "" {
+    ret
+  }
+  track.codec = entry.kind
+  let body: Int = mp4Body(box: entry)
+  var children: Int = body
+  if track.handler is "soun" {
+    # 8 bytes of reference index, then the (QuickTime) version
+    let version: Int = mp4UInt16(bytes: bytes, at: body + 8)
+    track.channels = mp4UInt16(bytes: bytes, at: body + 16)
+    track.sampleRate = mp4UInt32(bytes: bytes, at: body + 24) shr 16
+    children = body + 28
+    if version is 1 {
+      children = children + 16
+    } else if version is 2 {
+      children = children + 36
+    }
+  } else if track.handler is "vide" {
+    track.width = mp4UInt16(bytes: bytes, at: body + 24)
+    track.height = mp4UInt16(bytes: bytes, at: body + 26)
+    children = body + 78
+  }
+  var at: Int = children
+  let end: Int = mp4End(box: entry)
+  loop at < end {
+    let child: Mp4Box = mp4BoxAt(bytes: bytes, at: at, end: end)
+    if child.kind is "" {
+      ret
+    }
+    if child.kind is "esds" {
+      readEsds(bytes: bytes, box: child, track: track)
+    } else if child.kind is "wave" {
+      # QuickTime puts the esds inside a wave box
+      let inner: Mp4Box = mp4FindBox(
+        bytes: bytes
+        from: mp4Body(box: child)
+        end: mp4End(box: child)
+        kind: "esds"
+      )
+      if inner.kind is "esds" {
+        readEsds(bytes: bytes, box: inner, track: track)
+      }
+    } else if child.kind is "avcC" or child.kind is "hvcC" or child.kind is "av1C" or child.kind is "alac" {
+      track.codecConfig = mp4Copy(bytes: bytes, from: mp4Body(box: child), end: mp4End(box: child))
+    }
+    at = at + child.size
+  }
+}
+
+func readTimes(bytes: view List(UInt8), stts: view Mp4Box, track: mod Mp4Track) {
+  let count: Int = mp4UInt32(bytes: bytes, at: mp4Body(box: stts) + 4)
+  var time: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let at: Int = mp4Body(box: stts) + 8 + i * 8
+    let samples: Int = mp4UInt32(bytes: bytes, at: at)
+    let delta: Int = mp4UInt32(bytes: bytes, at: at + 4)
+    loop var j: Int = 0, j < samples, ++j {
+      track.sampleTimes.add(value: time)
+      time = time + delta
+    }
+  }
+}
+
+func readCompositionOffsets(bytes: view List(UInt8), ctts: view Mp4Box, track: mod Mp4Track) {
+  let version: Int = mp4Byte(bytes: bytes, at: mp4Body(box: ctts))
+  let count: Int = mp4UInt32(bytes: bytes, at: mp4Body(box: ctts) + 4)
+  loop var i: Int = 0, i < count, ++i {
+    let at: Int = mp4Body(box: ctts) + 8 + i * 8
+    let samples: Int = mp4UInt32(bytes: bytes, at: at)
+    var offset: Int = mp4UInt32(bytes: bytes, at: at + 4)
+    if version is 1 {
+      offset = mp4Int32(bytes: bytes, at: at + 4)
+    }
+    loop var j: Int = 0, j < samples, ++j {
+      track.compositionOffsets.add(value: offset)
+    }
+  }
+}
+
+func readSizes(bytes: view List(UInt8), stsz: view Mp4Box, track: mod Mp4Track) {
+  let body: Int = mp4Body(box: stsz)
+  let common: Int = mp4UInt32(bytes: bytes, at: body + 4)
+  let count: Int = mp4UInt32(bytes: bytes, at: body + 8)
+  loop var i: Int = 0, i < count, ++i {
+    if common is not 0 {
+      track.sampleSizes.add(value: common)
+    } else {
+      track.sampleSizes.add(value: mp4UInt32(bytes: bytes, at: body + 12 + i * 4))
+    }
+  }
+}
+
+func readSyncSamples(bytes: view List(UInt8), stss: view Mp4Box, track: mod Mp4Track) {
+  let count: Int = mp4UInt32(bytes: bytes, at: mp4Body(box: stss) + 4)
+  loop var i: Int = 0, i < count, ++i {
+    track.syncSamples.add(value: mp4UInt32(bytes: bytes, at: mp4Body(box: stss) + 8 + i * 4) - 1)
+  }
+}
+
+# The chunks (stco / co64) and how many samples each holds (stsc) give each
+# sample's file offset
+func readOffsets(
+  bytes: view List(UInt8)
+  stsc: view Mp4Box
+  chunks: view Mp4Box
+  track: mod Mp4Track
+) {
+  let wide: Bool = chunks.kind is "co64"
+  let chunkCount: Int = mp4UInt32(bytes: bytes, at: mp4Body(box: chunks) + 4)
+  let runs: Int = mp4UInt32(bytes: bytes, at: mp4Body(box: stsc) + 4)
+  var sample: Int = 0
+  loop var run: Int = 0, run < runs, ++run {
+    let at: Int = mp4Body(box: stsc) + 8 + run * 12
+    let firstChunk: Int = mp4UInt32(bytes: bytes, at: at) - 1
+    let perChunk: Int = mp4UInt32(bytes: bytes, at: at + 4)
+    var lastChunk: Int = chunkCount
+    if run + 1 < runs {
+      lastChunk = mp4UInt32(bytes: bytes, at: at + 12) - 1
+    }
+    loop var chunk: Int = firstChunk, chunk < lastChunk, ++chunk {
+      var offset: Int = 0
+      if wide {
+        offset = mp4UInt64(bytes: bytes, at: mp4Body(box: chunks) + 8 + chunk * 8)
+      } else {
+        offset = mp4UInt32(bytes: bytes, at: mp4Body(box: chunks) + 8 + chunk * 4)
+      }
+      loop var j: Int = 0, j < perChunk and sample < track.sampleSizes.length(), ++j {
+        track.sampleOffsets.add(value: offset)
+        offset = offset + track.sampleSizes.copyAtFallback(index: sample, fallback: 0)
+        sample = sample + 1
+      }
+    }
+  }
+}
+
+# The first edit that plays media: where it starts in the media and how long it
+# is (converted from the movie's time unit to the track's)
+func readEdit(
+  bytes: view List(UInt8)
+  elst: view Mp4Box
+  movieScale: view Int
+  track: mod Mp4Track
+) {
+  let body: Int = mp4Body(box: elst)
+  let version: Int = mp4Byte(bytes: bytes, at: body)
+  let count: Int = mp4UInt32(bytes: bytes, at: body + 4)
+  var at: Int = body + 8
+  loop var i: Int = 0, i < count, ++i {
+    var length: Int = 0
+    var mediaTime: Int = 0
+    if version is 1 {
+      length = mp4UInt64(bytes: bytes, at: at)
+      mediaTime = mp4UInt64(bytes: bytes, at: at + 8)
+      at = at + 20
+    } else {
+      length = mp4UInt32(bytes: bytes, at: at)
+      mediaTime = mp4Int32(bytes: bytes, at: at + 4)
+      at = at + 12
+    }
+    if mediaTime >= 0 {
+      track.presentationStart = mediaTime
+      if movieScale > 0 and length > 0 {
+        track.presentationLength = length * track.timescale / movieScale
+      }
+      ret
+    }
+  }
+}
+
+func hexDigit(byte: view Int) ret Int {
+  if byte >= 48 and byte <= 57 {
+    ret byte - 48
+  }
+  if byte >= 65 and byte <= 70 {
+    ret byte - 55
+  }
+  if byte >= 97 and byte <= 102 {
+    ret byte - 87
+  }
+  ret -1
+}
+
+# iTunes' gapless info (Apple's M4A has it instead of an edit list): the text
+# " 00000000 <priming> <padding> <frames> ..." in hex, in udta/meta/ilst
+func readITunesGapless(
+  bytes: view List(UInt8)
+  from: view Int
+  end: view Int
+  track: mod Mp4Track
+) {
+  let name: String = "iTunSMPB"
+  var found: Int = -1
+  loop var i: Int = from, i + name.length() <= end, ++i {
+    if mp4Byte(bytes: bytes, at: i) is name.byteAt(index: 0) and mp4Text(
+      bytes: bytes
+      at: i
+      count: name.length()
+    ) is name {
+      found = i
+      break
+    }
+  }
+  if found < 0 {
+    ret
+  }
+  let data: Mp4Box = mp4FindBox(
+    bytes: bytes
+    from: found + name.length()
+    end: end
+    kind: "data"
+  )
+  if data.kind is "" {
+    ret
+  }
+  var fields: List(Int) = {}
+  var value: Int = 0
+  var inField: Bool = false
+  loop var i: Int = mp4Body(box: data) + 8, i < mp4End(box: data), ++i {
+    let digit: Int = hexDigit(byte: mp4Byte(bytes: bytes, at: i))
+    if digit >= 0 {
+      value = value * 16 + digit
+      inField = true
+    } else if inField {
+      fields.add(value: value)
+      value = 0
+      inField = false
+    }
+  }
+  if inField {
+    fields.add(value: value)
+  }
+  if fields.length() >= 4 {
+    track.presentationStart = fields.copyAtFallback(index: 1, fallback: 0)
+    track.presentationLength = fields.copyAtFallback(index: 3, fallback: -1)
+  }
+}
+
+func readTrack(
+  bytes: view List(UInt8)
+  trak: view Mp4Box
+  movieScale: view Int
+  udtaFrom: view Int
+  udtaEnd: view Int
+) ret Mp4Track {
+  var track: Mp4Track = emptyMp4Track()
+  let from: Int = mp4Body(box: trak)
+  let end: Int = mp4End(box: trak)
+  let tkhd: Mp4Box = mp4FindBox(
+    bytes: bytes
+    from: from
+    end: end
+    kind: "tkhd"
+  )
+  if tkhd.kind is "tkhd" {
+    if mp4Byte(bytes: bytes, at: mp4Body(box: tkhd)) is 1 {
+      track.trackId = mp4UInt32(bytes: bytes, at: mp4Body(box: tkhd) + 20)
+    } else {
+      track.trackId = mp4UInt32(bytes: bytes, at: mp4Body(box: tkhd) + 12)
+    }
+  }
+  let mdhd: Mp4Box = mp4FindPath(
+    bytes: bytes
+    from: from
+    end: end
+    path: "mdia/mdhd"
+  )
+  if mdhd.kind is "mdhd" {
+    let body: Int = mp4Body(box: mdhd)
+    if mp4Byte(bytes: bytes, at: body) is 1 {
+      track.timescale = mp4UInt32(bytes: bytes, at: body + 20)
+      track.duration = mp4UInt64(bytes: bytes, at: body + 24)
+    } else {
+      track.timescale = mp4UInt32(bytes: bytes, at: body + 12)
+      track.duration = mp4UInt32(bytes: bytes, at: body + 16)
+    }
+  }
+  track.presentationLength = track.duration
+  let hdlr: Mp4Box = mp4FindPath(
+    bytes: bytes
+    from: from
+    end: end
+    path: "mdia/hdlr"
+  )
+  if hdlr.kind is "hdlr" {
+    track.handler = mp4Text(bytes: bytes, at: mp4Body(box: hdlr) + 8, count: 4)
+  }
+  let stbl: Mp4Box = mp4FindPath(
+    bytes: bytes
+    from: from
+    end: end
+    path: "mdia/minf/stbl"
+  )
+  if stbl.kind is "stbl" {
+    let tableFrom: Int = mp4Body(box: stbl)
+    let tableEnd: Int = mp4End(box: stbl)
+    let stsd: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stsd"
+    )
+    if stsd.kind is "stsd" {
+      readSampleEntry(bytes: bytes, stsd: stsd, track: track)
+    }
+    let stts: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stts"
+    )
+    if stts.kind is "stts" {
+      readTimes(bytes: bytes, stts: stts, track: track)
+    }
+    let ctts: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "ctts"
+    )
+    if ctts.kind is "ctts" {
+      readCompositionOffsets(bytes: bytes, ctts: ctts, track: track)
+    }
+    let stsz: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stsz"
+    )
+    if stsz.kind is "stsz" {
+      readSizes(bytes: bytes, stsz: stsz, track: track)
+    }
+    let stss: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stss"
+    )
+    if stss.kind is "stss" {
+      readSyncSamples(bytes: bytes, stss: stss, track: track)
+    }
+    let stsc: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stsc"
+    )
+    var chunks: Mp4Box = mp4FindBox(
+      bytes: bytes
+      from: tableFrom
+      end: tableEnd
+      kind: "stco"
+    )
+    if chunks.kind is "" {
+      chunks = mp4FindBox(
+        bytes: bytes
+        from: tableFrom
+        end: tableEnd
+        kind: "co64"
+      )
+    }
+    if stsc.kind is "stsc" and chunks.kind is not "" {
+      readOffsets(
+        bytes: bytes
+        stsc: stsc
+        chunks: chunks
+        track: track
+      )
+    }
+  }
+  let elst: Mp4Box = mp4FindPath(
+    bytes: bytes
+    from: from
+    end: end
+    path: "edts/elst"
+  )
+  if elst.kind is "elst" {
+    readEdit(
+      bytes: bytes
+      elst: elst
+      movieScale: movieScale
+      track: track
+    )
+  } else if track.handler is "soun" {
+    readITunesGapless(
+      bytes: bytes
+      from: udtaFrom
+      end: udtaEnd
+      track: track
+    )
+  }
+  ret track
+}
+
+func failedMp4Movie(error: view String) ret Mp4Movie {
+  ret Mp4Movie {
+    timescale: 0
+    duration: 0
+    tracks: List.create(Mp4Track, cap: 0)
+    error: "{error}"
+  }
+}
+
+# The movie in `moov`: the bytes of the moov box itself, header included
+func parseMp4Movie(moov: view List(UInt8)) ret Mp4Movie {
+  let box: Mp4Box = mp4BoxAt(bytes: moov, at: 0, end: moov.length())
+  if box.kind is not "moov" {
+    ret failedMp4Movie(error: "no moov box")
+  }
+  let from: Int = mp4Body(box: box)
+  let end: Int = mp4End(box: box)
+  var timescale: Int = 0
+  var duration: Int = 0
+  let mvhd: Mp4Box = mp4FindBox(
+    bytes: moov
+    from: from
+    end: end
+    kind: "mvhd"
+  )
+  if mvhd.kind is "mvhd" {
+    let body: Int = mp4Body(box: mvhd)
+    if mp4Byte(bytes: moov, at: body) is 1 {
+      timescale = mp4UInt32(bytes: moov, at: body + 20)
+      duration = mp4UInt64(bytes: moov, at: body + 24)
+    } else {
+      timescale = mp4UInt32(bytes: moov, at: body + 12)
+      duration = mp4UInt32(bytes: moov, at: body + 16)
+    }
+  }
+  var udtaFrom: Int = end
+  var udtaEnd: Int = end
+  let udta: Mp4Box = mp4FindBox(
+    bytes: moov
+    from: from
+    end: end
+    kind: "udta"
+  )
+  if udta.kind is "udta" {
+    udtaFrom = mp4Body(box: udta)
+    udtaEnd = mp4End(box: udta)
+  }
+  var tracks: List(Mp4Track) = List.create(Mp4Track, cap: 2)
+  var at: Int = from
+  loop at < end {
+    let child: Mp4Box = mp4BoxAt(bytes: moov, at: at, end: end)
+    if child.kind is "" {
+      break
+    }
+    if child.kind is "trak" {
+      tracks.add(value: readTrack(
+        bytes: moov
+        trak: child
+        movieScale: timescale
+        udtaFrom: udtaFrom
+        udtaEnd: udtaEnd
+      ))
+    }
+    at = at + child.size
+  }
+  ret Mp4Movie { timescale: timescale, duration: duration, tracks: tracks, error: "" }
+}
+
+# A whole file in memory: finds its moov, wherever it is, and reads it
+func readMp4Movie(bytes: view List(UInt8)) ret Mp4Movie {
+  var at: Int = 0
+  loop at < bytes.length() {
+    let box: Mp4Box = mp4BoxAt(bytes: bytes, at: at, end: bytes.length())
+    if box.kind is "" {
+      ret failedMp4Movie(error: "not an MP4 file")
+    }
+    if box.kind is "moov" {
+      ret parseMp4Movie(moov: mp4Copy(bytes: bytes, from: box.start, end: mp4End(box: box)))
+    }
+    at = at + box.size
+  }
+  ret failedMp4Movie(error: "no moov box")
+}
+
+# The index of the first track with this handler ("soun", "vide"), or -1
+func mp4TrackIndex(movie: view Mp4Movie, handler: view String) ret Int {
+  loop var i: Int = 0, i < movie.tracks.length(), ++i {
+    if let track: view Mp4Track = movie.tracks.viewAt(index: i) {
+      if track.handler is handler {
+        ret i
+      }
+    }
+  }
+  ret -1
+}

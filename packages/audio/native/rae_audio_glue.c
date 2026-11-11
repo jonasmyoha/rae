@@ -1,7 +1,7 @@
 /* The audio package's C glue (rae_audio.h). Platform reason: opening and
  * running the sound device (miniaudio's device layer over Core Audio, WASAPI,
- * ALSA/PulseAudio/JACK, AAudio, Web Audio), the thread's real-time policy, and
- * writing a file. The one place with more than one call is the device
+ * ALSA/PulseAudio/JACK, AAudio, Web Audio), the thread's real-time policy,
+ * reading and writing files, and the platform's AAC decoder (AudioToolbox). The one place with more than one call is the device
  * callback, which must be C until Rae functions can be called from C
  * (docs/audio-design.md §4.2 stage A): it copies a period out of the Rae ring
  * and posts the Rae Signal, nothing more. */
@@ -454,3 +454,164 @@ void rae_audio_decoder_close(int64_t decoder) {
   ma_decoder_uninit((ma_decoder*)(intptr_t)decoder);
   free((ma_decoder*)(intptr_t)decoder);
 }
+
+/* ---- a file read in pieces (open is variadic in C, pread one call) -------- */
+#if !defined(_WIN32)
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int64_t rae_audio_file_open(uint8_t* path_z) {
+  int file = open((const char*)path_z, O_RDONLY);
+  return file >= 0 ? (int64_t)file : -(int64_t)errno;
+}
+
+int64_t rae_audio_file_read_at(int64_t file, uint8_t* into, int64_t count, int64_t offset) {
+  ssize_t got = pread((int)file, into, (size_t)count, (off_t)offset);
+  return got >= 0 ? (int64_t)got : -(int64_t)errno;
+}
+
+void rae_audio_file_close(int64_t file) { close((int)file); }
+#else
+int64_t rae_audio_file_open(uint8_t* path_z) { (void)path_z; return -1; }
+int64_t rae_audio_file_read_at(int64_t file, uint8_t* into, int64_t count, int64_t offset) {
+  (void)file; (void)into; (void)count; (void)offset; return -1;
+}
+void rae_audio_file_close(int64_t file) { (void)file; }
+#endif
+
+/* ---- AAC through AudioToolbox's AudioConverter ----------------------------
+ * Platform reason: AAC is the platform's to decode (docs/audio-design.md
+ * §7.3, no permissive C decoder exists). AudioToolbox is loaded at run time,
+ * like miniaudio loads Core Audio, so a program links no framework for it.
+ * Each function makes one AudioConverter call; which packet goes in, the
+ * priming to drop and the seeking are Rae (audio/AacDecoder). */
+#if defined(__APPLE__)
+#include <dlfcn.h>
+
+typedef OSStatus (*RaeAudioConverterNew)(const AudioStreamBasicDescription*,
+                                         const AudioStreamBasicDescription*, AudioConverterRef*);
+typedef OSStatus (*RaeAudioConverterSetProperty)(AudioConverterRef, AudioConverterPropertyID, UInt32,
+                                                 const void*);
+typedef OSStatus (*RaeAudioConverterFill)(AudioConverterRef, AudioConverterComplexInputDataProc, void*,
+                                          UInt32*, AudioBufferList*, AudioStreamPacketDescription*);
+typedef OSStatus (*RaeAudioConverterReset)(AudioConverterRef);
+typedef OSStatus (*RaeAudioConverterDispose)(AudioConverterRef);
+
+static struct {
+  RaeAudioConverterNew create;
+  RaeAudioConverterSetProperty setProperty;
+  RaeAudioConverterFill fill;
+  RaeAudioConverterReset reset;
+  RaeAudioConverterDispose dispose;
+} g_rae_aac;
+static pthread_once_t g_rae_aac_once = PTHREAD_ONCE_INIT;
+
+static void rae_aac_load(void) {
+  void* toolbox = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_LAZY);
+  if (!toolbox) return;
+  g_rae_aac.create = (RaeAudioConverterNew)dlsym(toolbox, "AudioConverterNew");
+  g_rae_aac.setProperty = (RaeAudioConverterSetProperty)dlsym(toolbox, "AudioConverterSetProperty");
+  g_rae_aac.fill = (RaeAudioConverterFill)dlsym(toolbox, "AudioConverterFillComplexBuffer");
+  g_rae_aac.reset = (RaeAudioConverterReset)dlsym(toolbox, "AudioConverterReset");
+  g_rae_aac.dispose = (RaeAudioConverterDispose)dlsym(toolbox, "AudioConverterDispose");
+}
+
+int64_t rae_audio_aac_open(int64_t sample_rate, int64_t channels) {
+  pthread_once(&g_rae_aac_once, rae_aac_load);
+  if (!g_rae_aac.create || !g_rae_aac.fill || channels <= 0) return 0;
+  AudioStreamBasicDescription in = {0};
+  in.mSampleRate = (Float64)sample_rate;
+  in.mFormatID = kAudioFormatMPEG4AAC;
+  in.mFramesPerPacket = 1024;
+  in.mChannelsPerFrame = (UInt32)channels;
+  AudioStreamBasicDescription out = {0};
+  out.mSampleRate = (Float64)sample_rate;
+  out.mFormatID = kAudioFormatLinearPCM;
+  out.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+  out.mFramesPerPacket = 1;
+  out.mChannelsPerFrame = (UInt32)channels;
+  out.mBitsPerChannel = 32;
+  out.mBytesPerFrame = 4 * (UInt32)channels;
+  out.mBytesPerPacket = out.mBytesPerFrame;
+  AudioConverterRef converter = NULL;
+  if (g_rae_aac.create(&in, &out, &converter) != noErr) return 0;
+  return (int64_t)(intptr_t)converter;
+}
+
+int64_t rae_audio_aac_set_cookie(int64_t converter, uint8_t* cookie, int64_t size) {
+  if (!converter || !g_rae_aac.setProperty) return 0;
+  return g_rae_aac.setProperty((AudioConverterRef)(intptr_t)converter,
+                               kAudioConverterDecompressionMagicCookie, (UInt32)size, cookie) == noErr;
+}
+
+/* The converter's input: the one packet of this call, then "no more for now"
+ * (a status of our own, so the converter answers with what it has), or with a
+ * packet of size 0 the end of the stream */
+enum { RAE_AAC_WAIT = 0x72616521 };
+typedef struct {
+  uint8_t* data;
+  UInt32 size;
+  UInt32 channels;
+  int given;
+  AudioStreamPacketDescription description;
+} RaeAacInput;
+
+static OSStatus rae_aac_supply(AudioConverterRef converter, UInt32* packets, AudioBufferList* data,
+                               AudioStreamPacketDescription** descriptions, void* user) {
+  (void)converter;
+  RaeAacInput* input = (RaeAacInput*)user;
+  if (input->size == 0 || input->given) {
+    *packets = 0;
+    return input->size == 0 ? noErr : RAE_AAC_WAIT;
+  }
+  data->mNumberBuffers = 1;
+  data->mBuffers[0].mData = input->data;
+  data->mBuffers[0].mDataByteSize = input->size;
+  data->mBuffers[0].mNumberChannels = input->channels;
+  input->description.mStartOffset = 0;
+  input->description.mVariableFramesInPacket = 0;
+  input->description.mDataByteSize = input->size;
+  if (descriptions) *descriptions = &input->description;
+  *packets = 1;
+  input->given = 1;
+  return noErr;
+}
+
+int64_t rae_audio_aac_decode(int64_t converter, uint8_t* packet, int64_t size, float* out,
+                             int64_t max_frames, int64_t channels) {
+  if (!converter) return -1;
+  RaeAacInput input = {packet, (UInt32)size, (UInt32)channels, 0, {0}};
+  AudioBufferList list;
+  list.mNumberBuffers = 1;
+  list.mBuffers[0].mNumberChannels = (UInt32)channels;
+  list.mBuffers[0].mDataByteSize = (UInt32)(max_frames * channels * 4);
+  list.mBuffers[0].mData = out;
+  UInt32 frames = (UInt32)max_frames;
+  OSStatus status = g_rae_aac.fill((AudioConverterRef)(intptr_t)converter, rae_aac_supply, &input,
+                                   &frames, &list, NULL);
+  if (status != noErr && status != RAE_AAC_WAIT) return status < 0 ? (int64_t)status : -(int64_t)status;
+  return (int64_t)frames;
+}
+
+void rae_audio_aac_reset(int64_t converter) {
+  if (converter && g_rae_aac.reset) g_rae_aac.reset((AudioConverterRef)(intptr_t)converter);
+}
+
+void rae_audio_aac_close(int64_t converter) {
+  if (converter && g_rae_aac.dispose) g_rae_aac.dispose((AudioConverterRef)(intptr_t)converter);
+}
+#else
+int64_t rae_audio_aac_open(int64_t sample_rate, int64_t channels) {
+  (void)sample_rate; (void)channels; return 0;
+}
+int64_t rae_audio_aac_set_cookie(int64_t converter, uint8_t* cookie, int64_t size) {
+  (void)converter; (void)cookie; (void)size; return 0;
+}
+int64_t rae_audio_aac_decode(int64_t converter, uint8_t* packet, int64_t size, float* out,
+                             int64_t max_frames, int64_t channels) {
+  (void)converter; (void)packet; (void)size; (void)out; (void)max_frames; (void)channels; return -1;
+}
+void rae_audio_aac_reset(int64_t converter) { (void)converter; }
+void rae_audio_aac_close(int64_t converter) { (void)converter; }
+#endif

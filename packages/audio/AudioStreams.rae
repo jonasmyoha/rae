@@ -12,8 +12,8 @@
 #
 # The streaming thread (audio/AudioButler) decodes about a second ahead and
 # converts the rate (audio/Resampler, 32 taps); the voice on the audio thread
-# only takes samples from its ring. Opening a file (to know its format) happens
-# on the calling thread; the reading is the butler's. A VoiceId stays the same
+# only takes samples from its ring. The calling thread opens a file only to
+# know its format; the butler opens it again and does the reading. A VoiceId stays the same
 # through a seek, which starts a new voice at the place with a 5 ms fade.
 import Math
 open Atomic
@@ -32,8 +32,8 @@ func durationOf(decoder: view AudioDecoder) ret Float64 {
   ret (decoder.frameCount as Float64) / (decoder.sampleRate as Float64)
 }
 
-# Start a stream voice for `decoder` (positioned already), as the program's
-# `voiceId`, starting `startSeconds` into the file
+# Start a stream voice for `path` (whose format `decoder` read), as the
+# program's `voiceId`, from frame `startFrame` of the file
 func startStream(
   this: mod AudioEngine
   decoder: view AudioDecoder
@@ -41,7 +41,7 @@ func startStream(
   voiceId: view Int
   bus: view Int
   gain: view Float
-  startSeconds: view Float64
+  startFrame: view Int
 ) ret StreamRecord {
   let streamId: Int = this.nextStreamId
   this.nextStreamId = this.nextStreamId + 1
@@ -56,9 +56,8 @@ func startStream(
   let open: ButlerCommand = {
     kind: ButlerCommandKind.open
     streamId: streamId
-    decoder: decoder.handle
-    channels: decoder.channels
-    sampleRate: decoder.sampleRate
+    path: pathBufferZ(path: path)
+    startFrame: startFrame
     ring: shared.ring
     finished: shared.finished
     advanced: shared.advanced
@@ -88,7 +87,7 @@ func startStream(
     channels: decoder.channels
     bus: bus
     gain: gain
-    startSeconds: startSeconds
+    startSeconds: (startFrame as Float64) / (max(a: 1, b: decoder.sampleRate) as Float64)
     fileSeconds: fileSeconds
     voiceEnded: false
     closed: false
@@ -120,8 +119,9 @@ func playStream(
     voiceId: voiceId
     bus: busIndex(bus: bus)
     gain: decibelsToGain(decibels: gainDecibels)
-    startSeconds: 0.0
+    startFrame: 0
   )
+  closeAudioDecoder(this: decoder)
   this.streams.add(value: record)
   ret VoiceId { value: voiceId }
 }
@@ -148,17 +148,16 @@ func queueNext(this: mod AudioEngine, voiceId: view VoiceId, path: view String) 
   if decoder.handle is 0 {
     ret false
   }
+  closeAudioDecoder(this: decoder)
   if let record: mod StreamRecord = this.streams.modAt(index: index) {
     if record.channels is not decoder.channels {
-      closeAudioDecoder(this: decoder)
       ret false
     }
     let next: ButlerCommand = {
       kind: ButlerCommandKind.queueNext
       streamId: record.streamId
-      decoder: decoder.handle
-      channels: decoder.channels
-      sampleRate: decoder.sampleRate
+      path: pathBufferZ(path: path)
+      startFrame: 0
       ring: record.shared.ring
       finished: record.shared.finished
       advanced: record.shared.advanced
@@ -225,9 +224,8 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
   if frame < 0 {
     frame = 0
   }
-  if not decoder.seekDecoder(frame: frame) {
-    closeAudioDecoder(this: decoder)
-    ret false
+  if decoder.frameCount >= 0 and frame > decoder.frameCount {
+    frame = decoder.frameCount
   }
   var bus: Int = 0
   var gain: Float = 1.0
@@ -249,8 +247,9 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
     voiceId: voiceId.value
     bus: bus
     gain: gain
-    startSeconds: (frame as Float64) / (decoder.sampleRate as Float64)
+    startFrame: frame
   )
+  closeAudioDecoder(this: decoder)
   this.streams.add(value: record)
   ret true
 }
