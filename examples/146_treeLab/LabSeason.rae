@@ -30,6 +30,10 @@ open Moon
 open app3d/TimeOfDay
 open Climate
 open app3d/PropField
+open app3d/PropSeason
+open treeGen/TreeKind
+import stylizedTrees/ReferenceTrees
+import Vec3
 open app3d/SettingsWeather
 open app3d/SettingsWind
 open WeatherWind
@@ -302,6 +306,35 @@ func applyLabSeason(season: view LabSeason, field: mod PropField) {
     year: season.clock.year
     dayOfYear: season.clock.dayOfYear
   )
+}
+
+# The Reference scene's traced tree (lib/treeGen LeafPass, its T02 kind) through the year as the
+# forest's T02 kind turns: its season (ReferenceTrees propSeasonOf), and its leaves' tint and loss
+# at the lab's slow temperature now. Summer's are a tint of 1 and no loss
+func labReferenceTreeSeason() ret PropSeason {
+  ret ReferenceTrees.propSeasonOf(treeKind: warmBroadleafKind())
+}
+
+func labSummerLeaves() ret PropLeaves {
+  ret PropLeaves { tint: Vec3.create(x: 1.0, y: 1.0, z: 1.0), loss: 0.0 }
+}
+
+func labTreeLeaves(season: view LabSeason, propSeason: view PropSeason) ret PropLeaves {
+  let slow: Float = climateSlowAt(
+    climate: season.climate
+    east: 0.0
+    north: 0.0
+    height: 0.0
+  )
+  let warming: Bool = climateWarming(
+    latitude: season.latitude
+    year: season.clock.year
+    dayOfYear: season.clock.dayOfYear
+  )
+  ret PropLeaves {
+    tint: propSeasonTint(season: propSeason, slow: slow, warming: warming)
+    loss: propSeasonLoss(season: propSeason, slow: slow, warming: warming)
+  }
 }
 
 func labNextWeather(weather: view SettingsWeather) ret SettingsWeather {

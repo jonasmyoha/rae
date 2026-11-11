@@ -106,6 +106,7 @@ open LabForest
 open RendererQuality
 open MeshStore
 open LabSeason
+open app3d/PropSeason
 open LabScenes
 open LabEditor
 open Cities
@@ -176,8 +177,11 @@ type LabState {
   statsFrames: Int = 0
   statsGatherSeconds: Float64 = 0.0
   statsStart: Float64 = 0.0
-  # the generated tree's leaves and its crown's shadow caster
+  # the generated tree's leaves and its crown's shadow caster; in an interactive run its leaves
+  # follow the date (LabSeason labTreeLeaves; a scripted run keeps summer's, so its pictures stay)
   tree: opt LabTree
+  treeSeason: PropSeason = labReferenceTreeSeason()
+  treeLeaves: PropLeaves = labSummerLeaves()
   windSettings: WindSettings
   wind: WindState
   lastTime: Float64
@@ -576,7 +580,8 @@ func renderLabShadows(state: mod LabState, aspect: view Float) {
   }
   # the crown's shadow: its solid leaf masses, drawn only into the shadow maps
   if let tree: view LabTree = state.tree {
-    if tree.castsMassShadow {
+    # a crown that has lost most of its leaves casts the shadow of its wood only
+    if tree.castsMassShadow and state.treeLeaves.loss < 0.6 {
       loop var i: Int = 0, i < tree.massShadows.length, ++i {
         drawShadowCasterWith(
           renderer: state.renderer
@@ -658,6 +663,7 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       )
       if let tree: mod LabTree = state.tree {
         loop let leaves: mod LeafPass in tree.leaves {
+          setLeafSeason(leaves: leaves, tint: state.treeLeaves.tint, loss: state.treeLeaves.loss)
           drawLeaves(
             leaves: leaves
             resources: resources
@@ -736,6 +742,9 @@ func runLabFrame(state: mod LabState) {
       cache: state.renderer.passes.gbuffer
       depth: climateSnowAt(climate: state.season.climate, east: 0.0, north: 0.0)
     )
+  }
+  if state.editor is not none {
+    state.treeLeaves = labTreeLeaves(season: state.season, propSeason: state.treeSeason)
   }
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
     applyLabSeason(season: state.season, field: forest.field)

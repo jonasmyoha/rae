@@ -22,8 +22,8 @@ open GrassCompute
 open treeGen/LeafCards
 open treeGen/LeafImage
 
-# The leaf uniform's size: five vec4s (leaf_cards.wgsl's LeafU)
-const leafUniformBytes: Int = 80
+# The leaf uniform's size: six vec4s (leaf_cards.wgsl's LeafU)
+const leafUniformBytes: Int = 96
 
 # Floats per tree placement: two vec4s (leaf_cards.wgsl's Placement): x y z
 # yaw, then scale 0 0 0
@@ -48,6 +48,10 @@ type LeafPass {
   uniformArgs: ArgWriter
   frameUniform: ExternalId
   drawBind: BindGroupId
+  # The season (setLeafSeason): the leaves' colors are multiplied by `seasonTint`, and the share
+  # `seasonLoss` of the cards (0 all .. 1 bare) is gone, the outer cards of a mass first
+  seasonTint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  seasonLoss: Float = 0.0
 }
 
 # A pass for `cards`, with the leaf stamps (LeafImage.leafImageLayerPixels),
@@ -79,6 +83,13 @@ func createLeafPass(cards: own LeafCards, pictures: own List(List(Float))) ret L
     frameUniform: noExternalId()
     drawBind: noBindGroupId()
   }
+}
+
+# The leaves' season, as a forest kind's (app3d/PropSeason propSeasonTint, propSeasonLoss): their
+# colors' tint and the share of the cards gone (0 .. 1). Summer's is a tint of 1 and no loss
+func setLeafSeason(leaves: mod LeafPass, tint: view Vec3, loss: view Float) {
+  leaves.seasonTint = tint
+  leaves.seasonLoss = loss
 }
 
 # The trees that wear these leaves, each at (x, y, z) turned by `yaw` about
@@ -309,6 +320,13 @@ func drawLeaves(
     y: 0.0
     z: 0.0
     w: 0.0
+  )
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: leaves.seasonTint.x
+    y: leaves.seasonTint.y
+    z: leaves.seasonTint.z
+    w: leaves.seasonLoss
   )
   let uploaded: Bool = uploadArgs(
     writer: leaves.uniformArgs

@@ -20,13 +20,15 @@ struct Card {
   extra: vec4<f32>,     // x: the leaf stamp (image layer); w: light through from behind (0..1)
 };
 // The camera's right and up (world), where it is, the direction TO the sun,
-// and x: the number of cards in one tree
+// x: the number of cards in one tree, and the season (LeafPass setLeafSeason):
+// rgb the tint of the leaves' colors, w the share of the cards gone
 struct LeafU {
   right: vec4<f32>,
   up: vec4<f32>,
   eye: vec4<f32>,
   toSun: vec4<f32>,
   counts: vec4<f32>,
+  season: vec4<f32>,
 };
 // One tree of the same leaves: where (xyz) and its turn about z (w), then
 // its size (x)
@@ -68,6 +70,19 @@ struct VsOut {
   @location(5) normal: vec3<f32>,
 };
 
+// Whether a card is still on the tree at leaf loss `loss`, as lib/wind.wgsl
+// leafCardKept decides it for forest kinds: a hash of the card's place in its
+// tree and the tree's place, biased so the outer cards (the brighter ones: the
+// card's occlusion grows toward its mass's outside and the crown's top) fall
+// first
+fn leafCardOn(center: vec3<f32>, place: vec3<f32>, outer: f32, loss: f32) -> bool {
+  if (loss <= 0.0) { return true; }
+  if (loss >= 1.0) { return false; }
+  let seed = center + fract(place * 0.0137) * 101.0;
+  let random = fract(sin(dot(seed, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+  return 0.7 * random + 0.3 * (1.0 - clamp(outer, 0.0, 1.0)) >= loss;
+}
+
 fn cornerOf(vertex: u32) -> vec2<f32> {
   let corners = array<vec2<f32>, 6>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
     vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
@@ -102,6 +117,10 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.normal = turnByYaw(card.normalOcclusion.xyz, yaw);
   o.uv = vec2<f32>(corner.x, 1.0 - corner.y);
   o.wpos = world;
+  // a card the season took: all six corners on one point outside the view
+  if (!leafCardOn(card.positionSize.xyz, tree.positionYaw.xyz, card.normalOcclusion.w, U.season.w)) {
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+  }
   return o;
 }
 
@@ -128,7 +147,7 @@ fn fs(in: VsOut) -> FsOut {
   // on and paints it with a pale sky reflection)
   let away = dot(n, toEye);
   if (away < 0.15) { n = normalize(n + toEye * (0.15 - away)); }
-  var albedo = card.colorTurn.rgb * picture.rgb;
+  var albedo = card.colorTurn.rgb * picture.rgb * U.season.rgb;
   // light through the leaves: looking toward the sun at a card on the mass's
   // far side (its normal away from the sun) brightens and warms it a little
   let backLit = max(dot(-toEye, U.toSun.xyz), 0.0) * max(-dot(massNormal, U.toSun.xyz), 0.0);
