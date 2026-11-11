@@ -217,7 +217,12 @@ fi
 # apple-app-site-association, so only the host is used here): each becomes an
 # applinks: associated domain in an entitlements file, a capability the team's
 # App ID must allow. RAE_APP_SCHEME registers a custom scheme in Info.plist.
+# RAE_IOS_COMMUNICATION_NOTIFICATIONS=1 adds the Communication Notifications
+# capability (com.apple.developer.usernotifications.communication), which iOS
+# wants before it tells an app whether a Focus is on (packages/audio's
+# focusStatus, docs/audio-design.md §9.2). Both go in one entitlements file.
 entitlements_line=""
+entitlement_keys=""
 if [ -n "${RAE_APP_LINKS:-}" ]; then
   domains=""
   for link in $RAE_APP_LINKS; do
@@ -226,10 +231,16 @@ if [ -n "${RAE_APP_LINKS:-}" ]; then
     esac
     domains="$domains<string>applinks:${link%%/*}</string>"
   done
+  entitlement_keys="$entitlement_keys<key>com.apple.developer.associated-domains</key><array>$domains</array>"
+fi
+if [ "${RAE_IOS_COMMUNICATION_NOTIFICATIONS:-}" = "1" ]; then
+  entitlement_keys="$entitlement_keys<key>com.apple.developer.usernotifications.communication</key><true/>"
+fi
+if [ -n "$entitlement_keys" ]; then
   cat > "$gen/RaeApp.entitlements" <<ENTITLEMENTS
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.developer.associated-domains</key><array>$domains</array></dict></plist>
+<plist version="1.0"><dict>$entitlement_keys</dict></plist>
 ENTITLEMENTS
   entitlements_line="XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS \"$gen/RaeApp.entitlements\""
 fi
