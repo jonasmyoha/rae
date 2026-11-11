@@ -78,15 +78,18 @@ func startStream(
   let sent: Bool = this.sendCommand(command: command)
   var fileSeconds: List(Float64) = {}
   fileSeconds.add(value: durationOf(decoder: decoder))
+  var paths: List(String) = {}
+  paths.add(value: "{path}")
   ret StreamRecord {
     voiceId: voiceId
     mixerVoiceId: mixerVoiceId
     streamId: streamId
-    path: "{path}"
+    paths: paths
     shared: shared
     channels: decoder.channels
     bus: bus
     gain: gain
+    startFile: 0
     startSeconds: (startFrame as Float64) / (max(a: 1, b: decoder.sampleRate) as Float64)
     fileSeconds: fileSeconds
     voiceEnded: false
@@ -153,19 +156,52 @@ func queueNext(this: mod AudioEngine, voiceId: view VoiceId, path: view String) 
     if record.channels is not decoder.channels {
       ret false
     }
-    let next: ButlerCommand = {
-      kind: ButlerCommandKind.queueNext
-      streamId: record.streamId
-      path: pathBufferZ(path: path)
-      startFrame: 0
-      ring: record.shared.ring
-      finished: record.shared.finished
-      advanced: record.shared.advanced
-    }
+    record.paths.add(value: "{path}")
     record.fileSeconds.add(value: durationOf(decoder: decoder))
-    ret this.butlerCommands.push(value: next)
+    ret sendQueueNext(commands: this.butlerCommands, record: record, path: path)
   }
   ret false
+}
+
+# Tell the butler to play `path` after the files the stream has now
+func sendQueueNext(
+  commands: view SpscRing(ButlerCommand)
+  record: view StreamRecord
+  path: view String
+) ret Bool {
+  let next: ButlerCommand = {
+    kind: ButlerCommandKind.queueNext
+    streamId: record.streamId
+    path: pathBufferZ(path: path)
+    startFrame: 0
+    ring: record.shared.ring
+    finished: record.shared.finished
+    advanced: record.shared.advanced
+  }
+  ret commands.push(value: next)
+}
+
+# Where a stream is: the file heard now (an index into its paths) and the
+# seconds into it, from where its voice started and what it has played. A
+# file whose length is unknown is taken to last to the end.
+type StreamPlace {
+  file: Int
+  seconds: Float64
+}
+
+func streamPlaceOf(record: view StreamRecord, sampleRate: view Int) ret StreamPlace {
+  let played: Int = record.shared.ring.popped() / max(a: 1, b: record.channels)
+  var left: Float64 = record.startSeconds + (played as Float64) / (max(a: 1, b: sampleRate) as Float64)
+  var file: Int = record.startFile
+  loop file + 1 < record.fileSeconds.length() {
+    let length: Float64 = record.fileSeconds.copyAtFallback(index: file, fallback: -1.0)
+    if length < 0.0 or left < length {
+      break
+    }
+    left = left - length
+    file = file + 1
+  }
+  ret StreamPlace { file: file, seconds: left }
 }
 
 func pauseVoice(this: mod AudioEngine, voiceId: view VoiceId) {
@@ -200,15 +236,7 @@ func streamIsPaused(this: view AudioEngine, voiceId: view VoiceId) ret Bool {
 func streamFileIndex(this: view AudioEngine, voiceId: view VoiceId) ret Int {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
   if let record: view StreamRecord = this.streams.viewAt(index: index) {
-    var left: Float64 = this.positionSeconds(voiceId: voiceId)
-    loop var file: Int = 0, file + 1 < record.fileSeconds.length(), ++file {
-      let length: Float64 = record.fileSeconds.copyAtFallback(index: file, fallback: -1.0)
-      if length < 0.0 or left < length {
-        ret file
-      }
-      left = left - length
-    }
-    ret max(a: 0, b: record.fileSeconds.length() - 1)
+    ret streamPlaceOf(record: record, sampleRate: this.sampleRate).file
   }
   ret 0
 }
@@ -216,17 +244,10 @@ func streamFileIndex(this: view AudioEngine, voiceId: view VoiceId) ret Int {
 # Seconds into the file that is heard now (streamFileIndex)
 func streamFilePositionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
-  var position: Float64 = this.positionSeconds(voiceId: voiceId)
   if let record: view StreamRecord = this.streams.viewAt(index: index) {
-    let file: Int = this.streamFileIndex(voiceId: voiceId)
-    loop var i: Int = 0, i < file, ++i {
-      position = position - record.fileSeconds.copyAtFallback(index: i, fallback: 0.0)
-    }
+    ret streamPlaceOf(record: record, sampleRate: this.sampleRate).seconds
   }
-  if position < 0.0 {
-    ret 0.0
-  }
-  ret position
+  ret 0.0
 }
 
 # The length of the file heard now, or -1 when its format does not say
@@ -241,13 +262,20 @@ func streamFileDurationSeconds(this: view AudioEngine, voiceId: view VoiceId) re
   ret -1.0
 }
 
-# Seconds played since the stream started (through the files queued after the
-# first), counting a seek
+# Seconds into the stream: the lengths of the files before the one heard now
+# and the place in it (a seek counts; a file of unknown length counts 0)
 func positionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
   if let record: view StreamRecord = this.streams.viewAt(index: index) {
-    let played: Int = record.shared.ring.popped() / max(a: 1, b: record.channels)
-    ret record.startSeconds + (played as Float64) / (this.sampleRate as Float64)
+    let place: StreamPlace = streamPlaceOf(record: record, sampleRate: this.sampleRate)
+    var position: Float64 = place.seconds
+    loop var i: Int = 0, i < place.file, ++i {
+      let length: Float64 = record.fileSeconds.copyAtFallback(index: i, fallback: 0.0)
+      if length > 0.0 {
+        position = position + length
+      }
+    }
+    ret position
   }
   ret 0.0
 }
@@ -270,16 +298,19 @@ func streamIsPlaying(this: view AudioEngine, voiceId: view VoiceId) ret Bool {
   ret false
 }
 
-# Move the stream to `seconds` into its first file: the playing voice fades out
-# in 5 ms and a new one starts there, under the same VoiceId
+# Move the stream to `seconds` into the file heard now (streamFileIndex): the
+# playing voice fades out in 5 ms and a new one starts there, under the same
+# VoiceId, with the files queued after that one queued again
 func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) ret Bool {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
   if index < 0 {
     ret false
   }
+  var file: Int = 0
   var path: String = ""
   if let found: view StreamRecord = this.streams.viewAt(index: index) {
-    path = "{found.path}"
+    file = streamPlaceOf(record: found, sampleRate: this.sampleRate).file
+    path = found.paths.copyAtFallback(index: file, fallback: "")
   }
   let decoder: AudioDecoder = openAudioDecoder(path: path)
   if decoder.handle is 0 {
@@ -295,18 +326,22 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
   var bus: Int = 0
   var gain: Float = 1.0
   var oldMixerVoiceId: Int = 0
-  if let record: mod StreamRecord = this.streams.modAt(index: index) {
+  var paths: List(String) = {}
+  var fileSeconds: List(Float64) = {}
+  if let old: mod StreamRecord = this.streams.modAt(index: index) {
     # the old stream lives on, detached, until its voice has faded and the
     # butler has closed it (update frees it then)
-    record.voiceId = -1
-    bus = record.bus
-    gain = record.gain
-    oldMixerVoiceId = record.mixerVoiceId
+    old.voiceId = -1
+    bus = old.bus
+    gain = old.gain
+    oldMixerVoiceId = old.mixerVoiceId
+    paths = old.paths
+    fileSeconds = old.fileSeconds
   }
   var stop: AudioCommand = emptyCommand(kind: AudioCommandKind.stop)
   stop.voiceId = oldMixerVoiceId
   let stopped: Bool = this.sendCommand(command: stop)
-  let record: StreamRecord = this.startStream(
+  var record: StreamRecord = this.startStream(
     decoder: decoder
     path: path
     voiceId: voiceId.value
@@ -315,6 +350,16 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
     startFrame: frame
   )
   closeAudioDecoder(this: decoder)
+  record.paths = paths
+  record.fileSeconds = fileSeconds
+  record.startFile = file
+  loop var next: Int = file + 1, next < paths.length(), ++next {
+    let queued: Bool = sendQueueNext(
+      commands: this.butlerCommands
+      record: record
+      path: paths.copyAtFallback(index: next, fallback: "")
+    )
+  }
   this.streams.add(value: record)
   ret true
 }

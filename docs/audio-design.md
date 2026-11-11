@@ -815,8 +815,9 @@ green.
    `checks/audioNowPlaying` on the iPhone: with the app in Settings for 27 s
    the song played on, callbacks kept coming, no underrun. Not checked by an
    agent: pressing the lock screen's and the Mac's media buttons (a person's
-   check, queued). Known limit: a `seek` drops the files queued after the
-   first (queued).
+   check, queued). `packages/audio` 0.7.1: a `seek` moves within the file
+   heard now and keeps the files queued after it (the stream's record keeps
+   every path; file numbers stay counted from the stream's first file).
 3. **The other platforms.** Android (AAudio, focus, MediaSession, AMediaCodec
    AAC), Windows (WASAPI, SMTC, Media Foundation AAC), Linux (PipeWire through
    Pulse/JACK, MPRIS), the web (AudioWorklet build, COOP/COEP in the web shell,
