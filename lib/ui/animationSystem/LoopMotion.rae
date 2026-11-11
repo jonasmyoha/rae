@@ -1,0 +1,128 @@
+# Loop (docs/ui-animation-design.md): a motion that repeats for a while, then rests. A node's Loop
+# starts when the node is shown, as Appear does (animationTriggers calls loopStart); each frame
+# loopStep sets its pose from the keyframes at the time into its period, and when `forSec` has
+# passed hands the node to a glide to its laid-out pose (animationTo) and drops its run, so a loop
+# that has ended runs no code and leaves no pose. Reduced motion, or animation off: no loop.
+import Math
+import ReduceMotion
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Ecs
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+
+# Start `entityId`'s loop from its beginning (again, if it was running), unless motion is reduced
+# or off
+func loopStart(world: view UiWorld, uiSystems: mod UiSystems, entityId: view EntityId) {
+  if uiSystems.animation.settings.reduceMotionFixed is false {
+    uiSystems.animation.settings.reduceMotion = ReduceMotion.reduceMotionEnabled()
+  }
+  let settings: view AnimationSettings = uiSystems.animation.settings
+  if settings.off or settings.reduceMotion {
+    ret
+  }
+  let nodeLoop: view Loop = componentView(this: world.loops, entityId: entityId)
+  if nodeLoop.keys.length is 0 or nodeLoop.periodSec <= 0.0 {
+    ret
+  }
+  componentSet(
+    this: uiSystems.animation.loopRuns
+    entityId: entityId
+    data: LoopRun { elapsed: -nodeLoop.delaySeconds }
+  )
+  # before its first frame, so it never shows at its laid-out place first
+  componentSet(
+    this: uiSystems.animation.poses
+    entityId: entityId
+    data: loopPoseAt(keys: nodeLoop.keys, phase: 0.0)
+  )
+}
+
+# Stop `entityId`'s loop where it is (its node is hidden): no glide, and its pose goes
+func loopStop(uiSystems: mod UiSystems, entityId: view EntityId) {
+  if componentHas(this: uiSystems.animation.loopRuns, entityId: entityId) {
+    componentRemove(this: uiSystems.animation.loopRuns, entityId: entityId)
+    componentRemove(this: uiSystems.animation.poses, entityId: entityId)
+  }
+}
+
+# The pose at `phase` (0 to 1) of a period: the two keys round it, mixed in a straight line; before
+# the first key the first one's, after the last the last one's. The keys are in `t` order.
+func loopPoseAt(keys: view List(LoopKey), phase: view Float) ret AnimationPose {
+  var before: LoopKey = keys.copyAtDefault(index: 0)
+  var after: LoopKey = before
+  loop let key: view LoopKey in keys {
+    if key.t <= phase {
+      before = key
+      after = key
+    } else if after.t <= phase {
+      after = key
+    }
+  }
+  var mix: Float = 0.0
+  if after.t > before.t {
+    mix = Math.clamp(val: (phase - before.t) / (after.t - before.t), low: 0.0, high: 1.0)
+  }
+  ret AnimationPose {
+    opacity: before.opacity + (after.opacity - before.opacity) * mix
+    scale: before.scale + (after.scale - before.scale) * mix
+    x: before.x + (after.x - before.x) * mix
+    y: before.y + (after.y - before.y) * mix
+    rotation: before.rotation + (after.rotation - before.rotation) * mix
+  }
+}
+
+# One frame of every running loop, `step` seconds on: its pose now; one past its `forSec` glides to
+# its place on its motion and its run ends (the glide's track then owns the pose)
+func loopStep(world: view UiWorld, uiSystems: mod UiSystems, step: view Float) {
+  var ended: List(EntityId) = List.create(EntityId, cap: 4)
+  # runs whose node lost its Loop (or the node itself): they stop where they are
+  var gone: List(EntityId) = List.create(EntityId, cap: 0)
+  let count: Int = componentCount(this: uiSystems.animation.loopRuns)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.loopRuns, i: i)
+    if componentHas(this: world.loops, entityId: entityId) is false {
+      gone.add(value: entityId)
+      continue
+    }
+    let nodeLoop: view Loop = componentView(this: world.loops, entityId: entityId)
+    let run: mod LoopRun = componentMod(this: uiSystems.animation.loopRuns, entityId: entityId)
+    run.elapsed = run.elapsed + step
+    if nodeLoop.forSec > 0.0 and run.elapsed >= nodeLoop.forSec {
+      ended.add(value: entityId)
+      continue
+    }
+    var phase: Float = 0.0
+    if run.elapsed > 0.0 {
+      let periods: Float = run.elapsed / nodeLoop.periodSec
+      phase = periods - Math.floor(x: periods)
+    }
+    componentSet(
+      this: uiSystems.animation.poses
+      entityId: entityId
+      data: loopPoseAt(keys: nodeLoop.keys, phase: phase)
+    )
+  }
+  loop let entityId: view EntityId in gone {
+    loopStop(uiSystems: uiSystems, entityId: entityId)
+  }
+  loop let entityId: view EntityId in ended {
+    componentRemove(this: uiSystems.animation.loopRuns, entityId: entityId)
+    let motion: String = motionNameOr(
+      world: world
+      name: componentView(this: world.loops, entityId: entityId).motion
+      fallback: "smooth"
+    )
+    animationTo(
+      uiSystems: uiSystems
+      entityId: entityId
+      to: AnimationPose {}
+      motion: motion
+      opacityMotion: motion
+      delaySeconds: 0.0
+    )
+  }
+}

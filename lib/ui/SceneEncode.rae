@@ -17,6 +17,7 @@ open ecs/Entity
 open ecs/ComponentTable
 import Json
 import String
+open ui/AnimationComponents
 
 # ---------------------------------------------------------------------------
 # Value encoders: a field's authored spelling.
@@ -404,6 +405,27 @@ func encodeSceneInstance(instance: view SceneInstance) ret String {
   ret Json.jbEndObject(builder: builder)
 }
 
+# A Loop: its fields, then its keyframes, each as its fields
+func encodeLoop(nodeLoop: view Loop) ret String {
+  let base: String = encodeComponent(value: nodeLoop, skip: "keys")
+  var builder: JsonBuilder = Json.jbObject()
+  var keys: JsonBuilder = Json.jbArray()
+  loop let key: view LoopKey in nodeLoop.keys {
+    Json.jbItem(builder: keys, valueJson: encodeComponent(value: key, skip: ""))
+  }
+  Json.jbField(builder: builder, key: "keys", valueJson: Json.jbEndArray(builder: keys))
+  let doc: JsonDoc = Json.parseJson(source: base)
+  let root: JsonValue = Json.root(doc: doc)
+  loop var i: Int = 0, i < Json.objectLen(this: root), ++i {
+    Json.jbField(
+      builder: builder
+      key: Json.objectKeyAt(doc: doc, this: root, idx: i)
+      valueJson: Json.stringify(doc: doc, value: Json.objectValueAt(doc: doc, this: root, idx: i))
+    )
+  }
+  ret Json.jbEndObject(builder: builder)
+}
+
 func encodeListView(listView: view ListView) ret String {
   let base: String = encodeComponent(value: listView, skip: "bindings,rowScenes")
   var builder: JsonBuilder = Json.jbObject()
@@ -577,6 +599,13 @@ func authoredComponentJson(
     if componentHas(this: world.sceneInstances, entityId: entityId) {
       let value: view SceneInstance = componentView(this: world.sceneInstances, entityId: entityId)
       ret encodeSceneInstance(instance: value)
+    }
+    ret ""
+  }
+  if name is "Loop" {
+    if componentHas(this: world.loops, entityId: entityId) {
+      let value: view Loop = componentView(this: world.loops, entityId: entityId)
+      ret encodeLoop(nodeLoop: value)
     }
     ret ""
   }

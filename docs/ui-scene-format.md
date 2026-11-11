@@ -754,6 +754,38 @@ or `curve` in a theme is logged and that token is not added. A use of a name no 
 The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `disappearFade`, `disappearShrink`,
 `staggerFromEnd`, `staggerFromStart`, `pressable`, `dialogMotion`. Case 1368 holds the rules; `checks/uiAppear` paints them.
 
+### `Loop`: a motion that repeats for a while, then rests
+
+```json
+"Drop1": {
+  "Loop": {
+    "keys": [
+      { "t": 0.0, "y": -10, "opacity": 0.0 },
+      { "t": 0.3, "y": -4, "opacity": 1.0 },
+      { "t": 1.0, "y": 10, "opacity": 0.0 }
+    ],
+    "periodSec": 0.9, "forSec": 4.0, "delaySeconds": 0.15
+  }
+}
+```
+
+| field | default | meaning |
+| --- | --- | --- |
+| `keys` | none | keyframes over one period: `t` (0 to 1 of the period) and the pose's offsets `x`, `y` (points), `scale`, `rotation` (radians), `opacity`; a field a key does not write is the laid-out pose's (0, 0, 1, 0, 1). Read in `t` order; between keys the pose moves in a straight line |
+| `periodSec` | 1 | seconds per period |
+| `forSec` | 0 | how long it runs; 0: as long as the node is shown |
+| `delaySeconds` | 0 | it starts this much later (the first key's pose meanwhile): siblings with different delays run out of phase |
+| `motion` | smooth | the glide home at the end |
+
+- It starts when the node is shown, as `Appear` does: on mount, and when it or a parent comes to be shown
+  again (which starts it over). Its first key's pose is on before the first paint.
+- When `forSec` has passed it glides from where it is to its laid-out place on `motion`, and stops: no
+  code runs and nothing is drawn for it any more. A node hidden while it runs stops where it is.
+- While it runs its pose is the loop's, over any other motion's on the node.
+- With reduced motion (or `RAE_ANIMATION=off`) it does not run: the node stays at its place.
+- A running loop keeps the frame loop awake (`animationInFlight`); one that has ended costs nothing.
+- Case 1398 holds the rules.
+
 ## 22. `AnimateLayout` and `AnimateText`: moves and text changes
 
 ```json

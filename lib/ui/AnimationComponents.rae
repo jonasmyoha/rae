@@ -29,6 +29,32 @@ type Disappear {
   rotation: Float = 0.0
 }
 
+# One keyframe of a Loop: at `t` (0 to 1 of a period) the node is offset from its laid-out place by
+# `x`, `y` (points), drawn at `scale`, turned by `rotation` (radians), at `opacity`. Between keys
+# the pose moves in a straight line.
+type LoopKey {
+  t: Float = 0.0
+  opacity: Float = 1.0
+  scale: Float = 1.0
+  x: Float = 0.0
+  y: Float = 0.0
+  rotation: Float = 0.0
+}
+
+# A motion that repeats for a while, then rests (rain falling from a cloud for a few seconds). From
+# when the node is shown (mounted, or set active: when Appear would start) its pose runs through
+# `keys` every `periodSec` seconds, for `forSec` seconds (0: as long as it is shown); then it glides
+# to its laid-out pose on `motion` and stops, so nothing more runs or draws for it.
+# `delaySeconds` starts it later, which shifts one node's phase against its siblings'. With reduced
+# motion it does not run. While it runs, its pose is the loop's, over any other motion's.
+type Loop {
+  keys: List(LoopKey) = List.create(LoopKey, cap: 4)
+  periodSec: Float = 1.0
+  forSec: Float = 0.0
+  delaySeconds: Float = 0.0
+  motion: String = "smooth"
+}
+
 enum StaggerFrom { start, end, center, none }
 
 # On a parent or a list: its children's Appear and Disappear start one after another. `maxSeconds`

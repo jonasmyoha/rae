@@ -1,0 +1,207 @@
+# Loop (docs/ui-animation-design.md): a motion that repeats for a while, then rests. A rain drop
+# under a cloud falls through its keyframes (written out of order: they are read in time order)
+# every 0.9 s for 4 s, starting 0.15 s late, then glides to its laid-out place and stops: no run,
+# no pose, nothing in flight. A loop under a hidden parent starts when the parent is shown; one
+# with no end runs while shown and stops when its parent is hidden. Reduced motion: no loop. The
+# keys survive the encoder. Time is handed in, so every pose is known.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/AnimationComponents
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneEncode
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/Transform
+open ui/UiSystems
+open ui/animationSystem/AnimationRules
+open ui/animationSystem/AnimationTracks
+open ui/animationSystem/AnimationTriggers
+open ui/layoutSystem/LayoutSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func mount(world: mod UiWorld, uiSystems: mod UiSystems, settings: view AnimationSettings) {
+  uiSystems.animation.settings = settings
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Cloud\",\"Shut\",\"Panel\"]\},\"Cloud\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"Children\":[\"Drop\"]\},\"Drop\":\{\"Rect\":\{\"x\":20,\"y\":80,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":1.0,\"y\":10,\"opacity\":0.0\},\{\"t\":0.0,\"y\":-10,\"opacity\":0.0\},\{\"t\":0.3,\"y\":-4,\"opacity\":1.0\}],\"periodSec\":0.9,\"forSec\":4.0,\"delaySeconds\":0.15\}\},\"Shut\":\{\"Rect\":\{\"x\":400,\"y\":100,\"w\":100,\"h\":100\},\"Active\":\{\"value\":false\},\"Children\":[\"Later\"]\},\"Later\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"x\":0\},\{\"t\":0.5,\"x\":6\},\{\"t\":1.0,\"x\":0\}],\"periodSec\":1.0,\"forSec\":1.0\}\},\"Panel\":\{\"Rect\":\{\"x\":600,\"y\":100,\"w\":100,\"h\":100\},\"Children\":[\"Always\"]\},\"Always\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"scale\":1.0\},\{\"t\":0.5,\"scale\":1.5\},\{\"t\":1.0,\"scale\":1.0\}],\"periodSec\":0.5\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+}
+
+# One frame as the pipeline runs it: layout, triggers and the animation step, transform
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  animationTriggers(world: world, uiSystems: uiSystems)
+  if animationInFlight(world: world, uiSystems: uiSystems) {
+    animationSystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
+  }
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+# The node's pose (x, y, scale, opacity in hundredths) and whether it has one at all
+func poseText(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if componentHas(this: uiSystems.animation.poses, entityId: entityId) is false {
+    ret "{nodeId} at rest"
+  }
+  let pose: AnimationPose = animationPoseOf(uiSystems: uiSystems, entityId: entityId)
+  ret "{nodeId} x {hundredths(value: pose.x)} y {hundredths(value: pose.y)} scale {hundredths(
+    value: pose.scale
+  )} opacity {hundredths(value: pose.opacity)}"
+}
+
+func state(world: view UiWorld, uiSystems: view UiSystems) ret String {
+  ret "{componentCount(this: uiSystems.animation.loopRuns)} loops, {componentCount(
+    this: uiSystems.animation.tracks
+  )} tracks, {componentCount(this: uiSystems.animation.poses)} poses, in flight {animationInFlight(
+    world: world
+    uiSystems: uiSystems
+  )}"
+}
+
+func rainFalls() {
+  log("--- a drop falls for 4 s, then rests")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(world: world, uiSystems: uiSystems, settings: AnimationSettings {})
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  log("shown: {state(world: world, uiSystems: uiSystems)}")
+  log("first paint: {poseText(world: world, uiSystems: uiSystems, nodeId: "Drop")}")
+  # 0.05 s a frame: the delay (0.15 s), then the first period (0.9 s) and a bit of the next
+  loop var i: Int = 1, i <= 24, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+    if i % 3 is 0 {
+      log(
+        "{hundredths(value: i.toFloat() * 0.05)}: {poseText(
+          world: world
+          uiSystems: uiSystems
+          nodeId: "Drop"
+        )}"
+      )
+    }
+  }
+  # on to 4 s: still looping just before, then it glides home
+  loop var i: Int = 25, i < 80, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log(
+    "3.95 s: {poseText(world: world, uiSystems: uiSystems, nodeId: "Drop")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  # its 4 s run out at 4.15 s (the delay counts first): then a glide, a track, takes it home
+  loop var i: Int = 0, i < 9, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log(
+    "4.4 s: {poseText(world: world, uiSystems: uiSystems, nodeId: "Drop")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  # the glide home: a short track from the loop's last pose to the laid-out place
+  loop var i: Int = 0, i < 40, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log(
+    "rests: {poseText(world: world, uiSystems: uiSystems, nodeId: "Drop")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  log("Always still loops: {poseText(world: world, uiSystems: uiSystems, nodeId: "Always")}")
+  # its parent hidden: the endless loop stops where it is, with no glide
+  componentSet(
+    this: world.actives
+    entityId: nodeOf(world: world, nodeId: "Panel")
+    data: Active { value: false }
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  log(
+    "Panel hidden: {poseText(world: world, uiSystems: uiSystems, nodeId: "Always")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  let updates: Int = uiSystems.animation.updates
+  loop var i: Int = 0, i < 10, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log("10 frames at rest ran {uiSystems.animation.updates - updates} animation updates")
+  # a loop under a hidden parent starts when it is shown, runs its 1 s and rests
+  log("Later before: {poseText(world: world, uiSystems: uiSystems, nodeId: "Later")}")
+  componentSet(
+    this: world.actives
+    entityId: nodeOf(world: world, nodeId: "Shut")
+    data: Active { value: true }
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  loop var i: Int = 0, i < 5, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log(
+    "Later at 0.25 s: {poseText(world: world, uiSystems: uiSystems, nodeId: "Later")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  loop var i: Int = 0, i < 60, ++i {
+    frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  }
+  log(
+    "Later after: {poseText(world: world, uiSystems: uiSystems, nodeId: "Later")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  log(
+    "encoded: {authoredComponentJson(
+      world: world
+      entityId: nodeOf(world: world, nodeId: "Drop")
+      name: "Loop"
+    )}"
+  )
+}
+
+func reducedMotion() {
+  log("--- reduced motion: no loop")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  mount(
+    world: world
+    uiSystems: uiSystems
+    settings: AnimationSettings { reduceMotion: true, reduceMotionFixed: true }
+  )
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.0)
+  frame(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  log(
+    "{poseText(world: world, uiSystems: uiSystems, nodeId: "Drop")}; {state(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+}
+
+func main() {
+  rainFalls()
+  reducedMotion()
+}

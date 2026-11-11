@@ -20,6 +20,7 @@ open ui/ThemeResolved
 open ui/UiSystems
 open ui/animationSystem/AnimationRules
 open ui/animationSystem/AnimationTriggers
+open ui/animationSystem/LoopMotion
 
 # Each world steps by the real frame time, but never more than this: a long frame slows a motion and
 # never skips it
@@ -96,7 +97,9 @@ func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool 
     this: uiSystems.animation.sharedNodes
   ) > 0 or componentCount(this: uiSystems.animation.tracks) > 0 or componentCount(
     this: uiSystems.animation.textGhosts
-  ) > 0 or componentCount(this: uiSystems.animation.focusFades) > 0)
+  ) > 0 or componentCount(this: uiSystems.animation.focusFades) > 0 or componentCount(
+    this: uiSystems.animation.loopRuns
+  ) > 0)
 }
 
 # Arrive at normal place and look from pose `from`, after `delaySeconds`
@@ -901,6 +904,8 @@ func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: vi
   animationStepTextGhosts(uiSystems: uiSystems, deltaTime: step)
   animationStepFocusFades(uiSystems: uiSystems, deltaTime: step)
   animationStepSharedNodes(world: world, uiSystems: uiSystems, deltaTime: step)
+  # the loops last: a running loop's pose is its own, over any track's (LoopMotion)
+  loopStep(world: world, uiSystems: uiSystems, step: step)
   loop let entityId: view EntityId in ended {
     let track: view AnimationTrack = componentView(
       this: uiSystems.animation.tracks

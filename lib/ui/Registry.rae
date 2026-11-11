@@ -829,6 +829,17 @@ func applyAuthoredFixups(
     deserSceneInstanceOverrides(instance: instance, doc: doc, val: val)
     ret
   }
+  if name is "Loop" {
+    let nodeLoop: mod Loop = componentMod(this: world.loops, entityId: entityId)
+    nodeLoop.keys = deserLoopKeys(doc: doc, val: val)
+    reportUnknownMotion(
+      world: world
+      name: nodeLoop.motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
   if name is "ListView" {
     let listView: mod ListView = componentMod(this: world.listViews, entityId: entityId)
     listView.bindings = deserListViewBindings(doc: doc, val: val)
