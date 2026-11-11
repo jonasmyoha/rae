@@ -184,6 +184,7 @@ type LabState {
   treeLeaves: PropLeaves = labSummerLeaves()
   # the grass as the panel's Grass groups set it, and the date's tint (LabGrass)
   grassLook: LabGrassLook = {}
+  grassField: LabGrassField = {}
   windSettings: WindSettings
   wind: WindState
   lastTime: Float64
@@ -604,9 +605,11 @@ func renderLabShadows(state: mod LabState, aspect: view Float) {
 # generated just before
 func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view Float) {
   if let resources: mod GpuResources = state.gpuResources {
-    generateLabGrass(
-      grass: state.grass
+    labGrassFrame(
+      field: state.grassField
+      meadow: state.grass
       resources: resources
+      scene: state.scene
       centerX: state.grassCenterX
       centerY: state.grassCenterY
       camera: state.camera
@@ -662,14 +665,14 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       }
     }
     if let resources: mod GpuResources = state.gpuResources {
-      if state.grassLook.on {
-        grassDraw(
-          grass: state.grass
-          resources: resources
-          gbuffer: state.renderer.passes.gbuffer
-          gbufferResources: rendererResources
-        )
-      }
+      labGrassDraw(
+        field: state.grassField
+        meadow: state.grass
+        resources: resources
+        gbuffer: state.renderer.passes.gbuffer
+        gbufferResources: rendererResources
+        look: state.grassLook
+      )
       if let tree: mod LabTree = state.tree {
         loop let leaves: mod LeafPass in tree.leaves {
           setLeafSeason(leaves: leaves, tint: state.treeLeaves.tint, loss: state.treeLeaves.loss)
@@ -754,7 +757,7 @@ func runLabFrame(state: mod LabState) {
   }
   if state.editor is not none {
     state.treeLeaves = labTreeLeaves(season: state.season, propSeason: state.treeSeason)
-    state.grassLook.tint = labGrassTint(palette: labGroundPalette(season: state.season))
+    labGrassFollowDate(look: state.grassLook, palette: labGroundPalette(season: state.season))
     setLabGroundTint(world: state.world, tint: state.grassLook.tint)
   }
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
@@ -940,6 +943,7 @@ func endLab(state: mod LabState) {
   }
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
+    labGrassFieldShutdown(field: state.grassField, resources: resources)
     if let tree: mod LabTree = state.tree {
       loop let leaves: mod LeafPass in tree.leaves {
         releaseLeafPass(leaves: leaves, resources: resources)

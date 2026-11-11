@@ -53,6 +53,31 @@ func addGrassTier(
   )
 }
 
+# Ring `index` (0 the near field) drawn or not
+func grassTierSetOn(tiers: mod GrassTiers, index: view Int, on: view Bool) {
+  if let tier: mod GrassTier = tiers.tiers.modAt(index: index) {
+    tier.on = on
+  }
+}
+
+# Every ring's ground, for a season (app3d/GroundPalette groundPaletteAt): the grass's green, its
+# dry straw and how far the driest ground has gone to it. The painted blades are the ground's
+# color where they stand, so they turn with it; each ring keeps its other settings
+func grassTiersSetGround(
+  tiers: mod GrassTiers
+  groundColor: view Vec3
+  dryColor: view Vec3
+  dryAmount: view Float
+) {
+  loop var i: Int = 0, i < tiers.tiers.length, ++i {
+    if let tier: mod GrassTier = tiers.tiers.modAt(index: i) {
+      tier.settings.groundColor = groundColor
+      tier.settings.dryColor = dryColor
+      tier.settings.dryAmount = dryAmount
+    }
+  }
+}
+
 # Place this frame's blades of every ring round `centerX`, `centerY`, before the G-buffer pass.
 # `share` (0 to 1) scales every ring's density; `benders` are what bends the blades near it (x, y,
 # radius, strength each); the camera and its target turn the blades toward the view.
