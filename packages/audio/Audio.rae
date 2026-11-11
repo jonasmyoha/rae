@@ -40,6 +40,7 @@ import Sys
 open Atomic
 open Realtime
 open Signal
+open audio/AudioDevice
 open audio/AudioGlue
 open audio/AudioMixer
 open audio/AudioSession
@@ -135,64 +136,15 @@ type AudioEngine {
   # iOS: the device was stopped with the session (deactivated, or interrupted)
   # and starts again when the session does
   deviceStopped: Bool
+  # stage B: the state the device callback renders with (one element, never
+  # grown, so the pointer C holds stays valid); empty in stage A and offline
+  renderStates: List(AudioRenderState)
+  # the device's callback renders (stage B) rather than a ring (stage A)
+  deviceRenders: Bool
 }
 
 func audioOfflineWanted() ret Bool {
   ret getEnv(name: "RAE_AUDIO_DEVICE") is "offline"
-}
-
-# The stage-A render thread: keeps the device's ring full, one block at a time,
-# and sleeps on the device's Signal between periods.
-func audioRenderThread(
-  mixer: own AudioMixer
-  commands: own SpscRing(AudioCommand)
-  output: own SpscRing(Float)
-  wake: own Signal
-  running: own Atomic(Bool)
-  channels: own Int
-  periodFrames: own Int
-  sampleRate: own Int
-) ret Int {
-  let block: Buffer(Float) = createSampleBuffer(count: periodFrames * channels)
-  let periodNs: Int = periodFrames * 1000000000 / sampleRate
-  unsafe {
-    rae_audio_thread_set_realtime(periodNs: periodNs, computeNs: periodNs / 2)
-  }
-  var blocks: Int = 0
-  var recorder: RealtimeRecorder = createRealtimeRecorder(
-    name: "audio render"
-    periodNanoseconds: periodNs
-  )
-  markRealtimeThread()
-  loop running.load() {
-    loop running.load() and output.capacity - output.count() >= periodFrames * channels {
-      recorder.callStarted()
-      mixerRender(
-        mixer: mixer
-        commands: commands
-        output: block
-        frames: periodFrames
-        channels: channels
-      )
-      recorder.callEnded()
-      loop var i: Int = 0, i < periodFrames * channels, ++i {
-        let pushed: Bool = output.push(value: sampleAt(samples: block, index: i))
-      }
-      blocks = blocks + 1
-    }
-    wake.wait()
-  }
-  unmarkRealtimeThread()
-  recorder.report()
-  freeAudioMixer(mixer: mixer)
-  unsafe {
-    rae_ext_rae_buf_free(buf: block)
-  }
-  ret blocks
-}
-
-func audioIdle() ret Int {
-  ret 0
 }
 
 func audioStart(settings: view AudioSettings) ret AudioEngine {
@@ -241,7 +193,25 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     reclaim: reclaim
   )
   var renderTask: Task(Int) = spawn audioIdle()
-  if device is not 0 {
+  var renderStates: List(AudioRenderState) = {}
+  let deviceRenders: Bool = device is not 0 and getEnv(name: "RAE_AUDIO_STAGE") is not "A"
+  if deviceRenders {
+    renderStates.add(value: {
+      mixer: createAudioMixer(
+        sampleRate: sampleRate
+        maxFrames: periodFrames
+        feedback: feedback
+        reclaim: reclaim
+      )
+      commands: commands
+    })
+    unsafe {
+      rae_audio_device_attach_render(device: device, state: renderStates.data as Ptr)
+      if rae_audio_device_start(device: device) is 0 {
+        log("[audio] the device did not start")
+      }
+    }
+  } else if device is not 0 {
     let threadMixer: AudioMixer = createAudioMixer(
       sampleRate: sampleRate
       maxFrames: periodFrames
@@ -312,6 +282,8 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     musicPausedByRoute: false
     sessionEvents: {}
     deviceStopped: false
+    renderStates: renderStates
+    deviceRenders: deviceRenders
   }
 }
 
@@ -558,6 +530,7 @@ func renderOffline(this: mod AudioEngine, frames: view Int) ret List(Float) {
       mixer: this.mixer
       commands: this.commands
       output: block
+      firstFrame: 0
       frames: count
       channels: this.channels
     )
@@ -629,6 +602,12 @@ func stopAudio(this: mod AudioEngine) ret Int {
   if this.device is not 0 {
     unsafe {
       rae_audio_device_close(device: this.device)
+    }
+  }
+  # the callback's state: its mixer's buffers (the List drops the rest)
+  loop var i: Int = 0, i < this.renderStates.length(), ++i {
+    if let render: mod AudioRenderState = this.renderStates.modAt(index: i) {
+      freeAudioMixer(mixer: render.mixer)
     }
   }
   this.update()
@@ -928,4 +907,14 @@ func requestFocusAccess() ret Bool {
   unsafe {
     ret rae_audio_focus_request() is 1
   }
+}
+
+# Frames the engine holds between a sample's render and its playing, beyond
+# the device's own buffer: none in stage B (the callback renders that buffer
+# itself), the ring in stage A, none offline
+func latencyFrames(this: view AudioEngine) ret Int {
+  if this.device is 0 or this.deviceRenders {
+    ret 0
+  }
+  ret this.output.capacity / this.channels
 }

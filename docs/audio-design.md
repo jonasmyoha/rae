@@ -197,6 +197,20 @@ between them:
 The language feature for stage B is a design question of its own; this document
 does not add syntax (§13 D2).
 
+**Stage B landed (2026-11-11, `packages/audio` 0.4.0, compiler 0.3.88):** the
+device's callback (`native/rae_audio_glue.c`) calls
+`audio/AudioDevice.audioDeviceRender`, a `realtime cExport("rae_audio_render")`
+function, with the engine's state (the element of a one-element List the
+engine keeps, never grown, so the pointer stays valid) and the device's
+buffer, which it fills a period at a time. The callback attaches the
+device's thread to the runtime (`rae_thread_attach`) and marks it real-time
+on its first call. On a Mac: no underrun, and no frames of latency beyond the
+device's own buffer (stage A held 1024 at a 256-frame period); it passes
+`RAE_REALTIME_CHECK=1`, the Rae `realtime` check and `rae run --sanitize
+realtime`. Stage A stays behind `RAE_AUDIO_STAGE=A`. The glue holds a weak,
+empty `rae_audio_render`, replaced by the program's at link time, so a
+program that links the glue only for `audio/Sound`'s files still links.
+
 ### 4.3 What code on the real-time thread may do
 
 The rule of every engine in §2, in Rae terms. On the audio thread and the audio
