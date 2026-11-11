@@ -208,6 +208,8 @@ int64_t rae_audio_session_poll(void) {
 }
 
 #if defined(MA_APPLE_MOBILE) && defined(__OBJC__)
+#include <dlfcn.h>
+#include <objc/message.h>
 /* iOS: AVAudioSession. This file is compiled as Objective-C there (the
  * package installs it as src/rae_audio_glue.m for device builds), as
  * miniaudio's own iOS code needs. */
@@ -236,6 +238,65 @@ int64_t rae_audio_session_set_active(int64_t active) {
   @autoreleasepool {
     AVAudioSessionSetActiveOptions flags = active ? 0 : AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation;
     return [[AVAudioSession sharedInstance] setActive:(active ? YES : NO) withOptions:flags error:nil] ? 1 : 0;
+  }
+}
+
+int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity) {
+  @autoreleasepool {
+    AVAudioSession* session = [AVAudioSession sharedInstance];
+    NSMutableArray* outputs = [NSMutableArray array];
+    for (AVAudioSessionPortDescription* port in session.currentRoute.outputs) {
+      [outputs addObject:port.portType];
+    }
+    NSString* text = [NSString stringWithFormat:
+        @"category %@ mode %@ options %lu route %@ otherAudioPlaying %d silenceSecondaryHint %d rate %.0f ioBuffer %.4f outputVolume %.2f",
+        session.category, session.mode, (unsigned long)session.categoryOptions,
+        [outputs componentsJoinedByString:@","], session.isOtherAudioPlaying ? 1 : 0,
+        session.secondaryAudioShouldBeSilencedHint ? 1 : 0, session.sampleRate, session.IOBufferDuration,
+        session.outputVolume];
+    const char* utf8 = [text UTF8String];
+    int64_t length = (int64_t)strlen(utf8);
+    if (length > capacity) length = capacity;
+    memcpy(into, utf8, (size_t)length);
+    return length;
+  }
+}
+
+/* INFocusStatusCenter through the Objective-C runtime, so a program that
+ * never asks about Focus does not link Intents */
+static id rae_audio_focus_center(void) {
+  static void* intents = NULL;
+  if (!intents) intents = dlopen("/System/Library/Frameworks/Intents.framework/Intents", RTLD_LAZY);
+  Class center = NSClassFromString(@"INFocusStatusCenter");
+  if (!center) return nil;
+  return [center performSelector:NSSelectorFromString(@"defaultCenter")];
+}
+
+int64_t rae_audio_focus_status(void) {
+  @autoreleasepool {
+    id center = rae_audio_focus_center();
+    if (!center) return -1;
+    NSInteger authorization = (NSInteger)[[center valueForKey:@"authorizationStatus"] integerValue];
+    id status = [center valueForKey:@"focusStatus"];
+    id focused = status ? [status valueForKey:@"isFocused"] : nil;
+    int64_t focusedValue = 2;
+    if ([focused isKindOfClass:[NSNumber class]]) focusedValue = [focused boolValue] ? 1 : 0;
+    return (int64_t)authorization * 10 + focusedValue;
+  }
+}
+
+int64_t rae_audio_focus_request(void) {
+  @autoreleasepool {
+    /* Without the purpose string iOS ends the app at the request (TCC),
+     * as an iPhone run of checks/audioSession showed: ask only with it */
+    if (![[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSFocusStatusUsageDescription"]) return 0;
+    id center = rae_audio_focus_center();
+    if (!center) return 0;
+    SEL request = NSSelectorFromString(@"requestAuthorizationWithCompletionHandler:");
+    if (![center respondsToSelector:request]) return 0;
+    void (^done)(NSInteger) = ^(NSInteger status) { (void)status; };
+    ((void (*)(id, SEL, id))objc_msgSend)(center, request, done);
+    return 1;
   }
 }
 
@@ -276,6 +337,19 @@ int64_t rae_audio_session_observe(void) {
   return 1;
 }
 #else
+int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity) {
+  (void)into; (void)capacity;
+  return 0;
+}
+
+int64_t rae_audio_focus_status(void) {
+  return -1;
+}
+
+int64_t rae_audio_focus_request(void) {
+  return 0;
+}
+
 int64_t rae_audio_session_available(void) {
   return 0;
 }

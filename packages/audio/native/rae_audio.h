@@ -61,6 +61,26 @@ int64_t rae_audio_session_poll(void);
 /* Add an event as if the system had sent it: the headless fake mode, and tests */
 void rae_audio_session_inject(int64_t kind, int64_t value);
 
+/* What the session says now, as one line of text written into `into` (at most
+ * `capacity` bytes, no 0): its category, mode, options, the output route,
+ * whether another app's audio plays, whether the system hints that secondary
+ * audio should be silenced, the hardware rate and the IO buffer. The length,
+ * or 0 off iOS. For logs and probes only; no decision reads it. */
+int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity);
+
+/* Focus (docs/audio-design.md §9.2): INFocusStatusCenter, found at run time
+ * (the Intents framework is loaded only here). The answer is
+ * authorization * 10 + focused: authorization 0 not asked, 1 restricted,
+ * 2 denied, 3 authorized; focused 0 no, 1 yes, 2 unknown. -1 when there is no
+ * Focus API (off iOS, before iOS 15). */
+int64_t rae_audio_focus_status(void);
+/* Ask the person for access to the Focus status (iOS shows a prompt once);
+ * 1 when the request was made. The app's Info.plist must hold
+ * NSFocusStatusUsageDescription (gen-ios.sh: RAE_IOS_FOCUS_USAGE), or iOS
+ * ends the app at the request; without it this asks nothing and answers 0.
+ * Without access, iOS answers "not focused" whatever the Focus is. */
+int64_t rae_audio_focus_request(void);
+
 /* The size of a file in bytes, or -1 when it cannot be opened */
 int64_t rae_audio_file_size(uint8_t* path_z);
 /* Read up to `count` bytes of a file into `into`; the count read, or -1 */
