@@ -641,7 +641,10 @@ static void rae_mem_stats_print(void) {
   fflush(stderr);
 }
 
-__attribute__((constructor))
+/* Priority 200: before the default-priority constructors, so the exit
+ * handlers they register (the real-time check's, runtime_realtime.c) run
+ * before this report */
+__attribute__((constructor(200)))
 static void rae_install_mem_stats(void) {
   const char* v = getenv("RAE_MEM_STATS");
   if (v && v[0] && v[0] != '0') {

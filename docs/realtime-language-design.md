@@ -307,6 +307,24 @@ Tried here: Apple clang 21.0 with `-Wfunction-effects` printed "function with
 'nonblocking' attribute must not call non-'nonblocking' function 'helper'" and
 the note "cannot be inferred 'nonblocking' because it calls … 'malloc'".
 
+**Landed (2026-11-11):** the backend writes `RAE_NONBLOCKING` after the
+parameters of every `realtime` function's prototype and definition, and
+`RAE_NONALLOCATING` for `noAlloc` (`c_effect_attribute`, c_backend.c); a
+user extern's generated prototype gets it too. `rae_runtime.h` defines them as
+clang's `nonblocking` / `nonallocating` where `__has_attribute` says so (empty
+elsewhere, gcc included) and puts them on the runtime C that `lib/` marks: the
+math functions that are not inline, `rae_ext_nowNs`, the signal post /
+try-wait and the real-time mark (`nonblocking`), the signal wait
+(`nonallocating`). The crash-path helpers (`rae_int_trap`,
+`rae_list_set_out_of_range`) are marked too, with the check turned off in
+their own bodies (`RAE_COLD_PATH_BEGIN/END`, §3.6). The real-time fixtures'
+C compiles with `-Werror=function-effects` with no finding; a `noAlloc`
+function that interpolates is found by clang as well as by Rae (1407).
+
+A C function's own header must carry the attribute for clang to trust it:
+clang reports a redeclaration that adds it ("does not match previous
+declaration"), so the backend cannot add it to a prototype it does not write.
+
 ### 5.2 Run-time: RealtimeSanitizer
 
 `rae build --sanitize realtime` (a test mode, like the TSan gate) builds with
@@ -322,6 +340,20 @@ Tried here: Homebrew clang 22.1 with `-fsanitize=realtime` reported
 with the chain `malloc ← helper ← render`. Apple's clang refuses the option, so
 the gate needs the Homebrew LLVM (like `naga`, a test dependency that `make
 setup` installs), or runs on Linux.
+
+**Landed (2026-11-11):** `rae run --sanitize realtime` (and `rae build`
+accepts it) compiles with LLVM's clang (`RAE_RTSAN_CC`, else Homebrew's
+`/opt/homebrew/opt/llvm/bin/clang`; an error naming `brew install llvm` when
+neither is there), adds `-fsanitize=realtime`, and checks the program's own C
+with `-Werror=function-effects` instead of `-w`. The gate
+`compiler/tools/realtime-sanitize-check.sh` (`make -C compiler
+realtime-check`, a pre-suite case of every full run) does both for the
+real-time fixtures, and plants a liar (C promised `realtime` whose body
+calls malloc in another file, invisible to clang) that RealtimeSanitizer must
+catch; it SKIPs the sanitizer part with a message without LLVM. `make setup`
+installs LLVM with Homebrew on a Mac. Its first run caught a real bug: the
+first `markRealtimeThread()` registered the check's exit report with
+`atexit`, which locks; the runtime now registers it at startup.
 
 ### 5.3 Rae's own runtime check
 

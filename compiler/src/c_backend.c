@@ -1087,6 +1087,16 @@ void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_
         emit_type_ref_as_c_type(&p_ctx, &p_type, out, false);
 }
 
+/* `realtime` -> RAE_NONBLOCKING, `noAlloc` -> RAE_NONALLOCATING (rae_runtime.h):
+ * clang's function effects check the generated C against the same promise
+ * the Rae check made (docs/realtime-language-design.md §5.1) */
+const char* c_effect_attribute(const AstFuncDecl* func) {
+  if (!func) return "";
+  if (func->is_realtime) return " RAE_NONBLOCKING";
+  if (func->is_no_alloc) return " RAE_NONALLOCATING";
+  return "";
+}
+
 bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern) {
   size_t index = 0;
   for (const AstParam* p = params; p; p = p->next) {
@@ -2236,7 +2246,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           }
       }
   } else {
-      fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
   }
 
   for (const AstParam* p = f->params; p; p = p->next) {
@@ -2375,7 +2385,7 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
     CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
     fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
     emit_param_list(&tctx, f->params, out, false);
-    fprintf(out, ");\n");
+    fprintf(out, ")%s;\n", c_effect_attribute(f));
   }
 }
 
@@ -2409,7 +2419,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
               rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)args));
     }
   }
-  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
+  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
   for (const AstParam* p = f->params; p; p = p->next) {
       if (tctx.local_count < 256) {
           tctx.locals[tctx.local_count] = p->name;
@@ -4557,7 +4567,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "%s %s(", c_return_type(&tctx, &d->as.func_decl), mangled);
           emit_param_list(&tctx, d->as.func_decl.params, out, true);
-          fprintf(out, ");\n");
+          fprintf(out, ")%s;\n", c_effect_attribute(&d->as.func_decl));
       }
   }
 
@@ -4568,7 +4578,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, &d->as.func_decl), rae_mangle_function(ctx, &d->as.func_decl));
           emit_param_list(&tctx, d->as.func_decl.params, out, false);
-          fprintf(out, ");\n");
+          fprintf(out, ")%s;\n", c_effect_attribute(&d->as.func_decl));
       }
   }
 
@@ -4580,7 +4590,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstIdentifierPart* gp = f->generic_params;
       if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
       CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(f));
   }
   
   // #961: the `T.default()` bodies, declared above; here, after the module
@@ -4721,7 +4731,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstIdentifierPart* pgp = pf->generic_params;
       if (!pgp && pf->generic_template && pf->generic_template->kind == AST_DECL_FUNC) pgp = pf->generic_template->as.func_decl.generic_params;
       CFuncContext ptctx = {.compiler_ctx = ctx, .module = module, .generic_params = pgp, .generic_args = pa};
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ");\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(pf));
   }
   {
       size_t emitted_idx = 0;

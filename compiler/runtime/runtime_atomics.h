@@ -51,14 +51,14 @@ RAE_UNUSED static inline int64_t rae_ext_rae_atomic_fetch_add_relaxed(void* cell
 
 /* Signal (runtime_signal.c): a counting semaphore. post never waits. */
 int64_t rae_ext_rae_signal_new(void);
-void rae_ext_rae_signal_post(int64_t signal);
-void rae_ext_rae_signal_wait(int64_t signal);
-rae_Bool rae_ext_rae_signal_try_wait(int64_t signal);
+void rae_ext_rae_signal_post(int64_t signal) RAE_NONBLOCKING;
+void rae_ext_rae_signal_wait(int64_t signal) RAE_NONALLOCATING;
+rae_Bool rae_ext_rae_signal_try_wait(int64_t signal) RAE_NONBLOCKING;
 void rae_ext_rae_signal_free(int64_t signal);
 
 /* The real-time check and mark (runtime_realtime.c, lib/Realtime.rae). */
-void rae_ext_Realtime_markThread(rae_Bool realtime);
-rae_Bool rae_ext_Realtime_threadIsMarked(void);
+void rae_ext_Realtime_markThread(rae_Bool realtime) RAE_NONBLOCKING;
+rae_Bool rae_ext_Realtime_threadIsMarked(void) RAE_NONBLOCKING;
 rae_Bool rae_ext_Realtime_reportWanted(void);
 
 #endif
