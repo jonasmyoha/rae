@@ -194,6 +194,17 @@ if [ -n "$location_usage" ]; then
   extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
 fi
 
+# The Focus status (packages/audio's focusStatus, docs/audio-design.md §9.2):
+# iOS ends an app that asks for it without this purpose string, so it is
+# written when RAE_IOS_FOCUS_USAGE gives the words iOS shows when it asks.
+focus_usage=${RAE_IOS_FOCUS_USAGE:-}
+if [ -n "$focus_usage" ]; then
+  case "$focus_usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $focus_usage" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>NSFocusStatusUsageDescription</key><string>$focus_usage</string>"
+fi
+
 # Notifications at a later time (lib/LocalNotification): an app whose C includes the shim
 # links UserNotifications. iOS needs no purpose string for them.
 notification_link=""

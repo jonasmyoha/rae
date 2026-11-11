@@ -35,6 +35,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `webRelay` | a player reaches a relay session over WebSocket and gets 100 messages echoed in order by a UDP host: natively (its own relay and host) and in the browser (`compiler/tools/wasm_relay_smoke.sh`, the page's own WebSocket) |
 | `webReadback` | a nonblocking readback completes in a `mainLoop`, natively and in the browser |
 | `webTask` | a spawned task that sleeps runs between the frames of a `mainLoop`, natively and in the browser |
+| `audioSession` | `packages/audio`'s session on an iPhone (`RAE_IOS_TEAM=<team> RAE_IOS_FOCUS_USAGE=<words> sh tools/ios/run-ios.sh checks/audioSession`, then read `Documents/rae.log` from the app's container): an ambient tone, an alert, 20 s of music with the session's events logged (unplug headphones, take a call, ask Siri meanwhile), the device's callbacks at each step, and the Focus status before and after asking (docs/audio-design.md §9.2). Off iOS it plays the same sounds and passes |
 | `audioSine` | `packages/audio` on the real default output: a sine, then one panned left to right, through the stage-A render thread; passes when the device ran, both voices ended and it played no silence for lack of samples (`RAE_REALTIME_CHECK=1` also fails it on an allocation in the render thread). With no output device it passes with nothing to test |
 
 ## Running

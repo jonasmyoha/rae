@@ -567,8 +567,26 @@ during Do Not Disturb or a Focus.
   the capability it answers false even during a Focus. If SUMU cannot get that
   capability for its kind of app, the fallback is to treat "unknown" as "play".
   This is the one item to settle with an experiment on the phone (§13 D7).
-  (2026-11-11: not yet tried. The session part of the package exists; the
-  experiment needs an app on the phone, queued as `[audio 2b/7]`.)
+  **What an iPhone 15 Pro showed (2026-11-11, `checks/audioSession`, audio
+  0.3.0, run and read by an agent; nobody at the phone):**
+  - `INFocusStatusCenter` is there and answers with no entitlement and no
+    permission: authorization 0 (not asked) and `isFocused` false. That false
+    means nothing: iOS gives it without access, Focus on or off.
+  - Asking for access (`requestAuthorization`) without
+    `NSFocusStatusUsageDescription` in Info.plist ends the app (SIGABRT in TCC,
+    iOS's privacy layer). The package now asks only when the key is there, and
+    `tools/ios/gen-ios.sh` writes it from `RAE_IOS_FOCUS_USAGE`. With the key
+    the request is made and iOS shows its prompt; with nobody to answer, the
+    status stayed "not asked".
+  - Not yet known, as it needs a person: the answer after "Allow", with a
+    Focus on and off, with and without the Communication Notifications
+    capability (the forum reports say `isFocused` stays false without it).
+    Queued as `[audio 2c/7]`.
+  - Seen on the way: on iOS, deactivating the session stops the audio unit,
+    and activating it again does not start it (the device's callbacks stopped
+    for good after the first deactivation, so later music was silent).
+    audio 0.3.0 stops the device before it deactivates and starts it after it
+    activates, and after an interruption; the music then ran to its end.
 - SUMU not running: the sound is the local notification's sound
   (`local-notifications.md`). The system already silences it on silent and during
   a Focus, which is the wanted behavior except for "heard on silent". Making a

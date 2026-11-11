@@ -35,6 +35,7 @@
 # mode: the session calls are logged as `[audio-session] ...` instead of made,
 # and `injectSessionEvent` plays the host's part.
 import Math
+import String
 import Sys
 open Atomic
 open Realtime
@@ -131,6 +132,9 @@ type AudioEngine {
   musicPausedByRoute: Bool
   # the host's events since the program last took them
   sessionEvents: List(AudioSessionEvent)
+  # iOS: the device was stopped with the session (deactivated, or interrupted)
+  # and starts again when the session does
+  deviceStopped: Bool
 }
 
 func audioOfflineWanted() ret Bool {
@@ -307,6 +311,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     musicPausedByInterruption: false
     musicPausedByRoute: false
     sessionEvents: {}
+    deviceStopped: false
   }
 }
 
@@ -741,6 +746,25 @@ func applySession(this: mod AudioEngine) {
       }
     }
   }
+  # iOS stops the audio unit with the session; it does not start by itself
+  # (an iPhone run of checks/audioSession: no callbacks after a deactivation)
+  if this.deviceStopped and this.device is not 0 {
+    this.deviceStopped = false
+    unsafe {
+      let started: Int = rae_audio_device_start(device: this.device)
+    }
+  }
+}
+
+# Whether the device stops and starts with the session: only where there is a
+# session (iOS); a Mac keeps its device running
+func deviceFollowsSession(this: view AudioEngine) ret Bool {
+  if this.device is 0 or this.fakeSession {
+    ret false
+  }
+  unsafe {
+    ret rae_audio_session_available() is 1
+  }
 }
 
 func deactivateSession(this: mod AudioEngine) {
@@ -748,6 +772,13 @@ func deactivateSession(this: mod AudioEngine) {
     ret
   }
   this.sessionActive = false
+  # the session cannot be let go while its audio unit runs
+  if this.deviceFollowsSession() {
+    this.deviceStopped = true
+    unsafe {
+      let stopped: Int = rae_audio_device_stop(device: this.device)
+    }
+  }
   if this.fakeSession {
     log("[audio-session] inactive, other apps may resume")
   } else {
@@ -796,8 +827,12 @@ func takeSessionEvents(this: mod AudioEngine) ret List(AudioSessionEvent) {
 
 func handleSessionEvent(this: mod AudioEngine, event: view AudioSessionEvent) {
   if event.kind is AudioSessionEventKind.interruptionBegan {
-    # the system has stopped the session; music waits, alerts are cut
+    # the system has stopped the session and its audio unit; music waits,
+    # alerts are cut, and the device starts again with the session
     this.sessionActive = false
+    if this.deviceFollowsSession() {
+      this.deviceStopped = true
+    }
     this.musicPausedByInterruption = true
     this.sendBusCommand(kind: AudioCommandKind.pauseBus, bus: AudioBusKind.music)
     this.sendBusCommand(kind: AudioCommandKind.stopBus, bus: AudioBusKind.alerts)
@@ -850,5 +885,47 @@ func updateSession(this: mod AudioEngine) {
     }
   } else if this.sessionActive and now - this.lastSoundMs >= 1000 {
     this.deactivateSession()
+  }
+}
+
+# What the host's session says now, as one line (iOS: category, mode, options,
+# route, whether another app plays, the silence hint, rate, IO buffer, volume);
+# "" where there is no session. For logs and probes; no decision reads it.
+func sessionDescription() ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 512)
+  bytes.addDefaults(count: 512)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_session_describe(into: bytes.data, capacity: 512)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# The Focus status (docs/audio-design.md §9.2)
+type AudioFocusStatus {
+  # false off iOS or before iOS 15
+  available: Bool
+  # 0 not asked, 1 restricted, 2 denied, 3 authorized
+  authorization: Int
+  # only when authorized (and, in practice, with the Communication
+  # Notifications capability): 0 no, 1 yes, 2 unknown
+  focused: Int
+}
+
+func focusStatus() ret AudioFocusStatus {
+  var code: Int = -1
+  unsafe {
+    code = rae_audio_focus_status()
+  }
+  if code < 0 {
+    ret AudioFocusStatus { available: false, authorization: 0, focused: 2 }
+  }
+  ret AudioFocusStatus { available: true, authorization: code / 10, focused: code % 10 }
+}
+
+# Ask for access to the Focus status; iOS shows its prompt once
+func requestFocusAccess() ret Bool {
+  unsafe {
+    ret rae_audio_focus_request() is 1
   }
 }
