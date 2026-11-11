@@ -31,6 +31,9 @@ enum AudioCommandKind {
   setBusGain
   setDuck
   releaseSound
+  pauseBus
+  resumeBus
+  stopBus
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -134,6 +137,8 @@ type AudioMixer {
   duckAttackStep: Float
   duckReleaseStep: Float
   duckLevel: Float
+  # bit b set: bus b is paused (its voices keep their place and play nothing)
+  pausedBuses: Int
   sampleTime: Int
   # voices that could not start (all were busy) and feedback the ring refused
   droppedVoices: Int
@@ -169,6 +174,7 @@ func createAudioMixer(
     duckAttackStep: 1.0
     duckReleaseStep: 1.0
     duckLevel: 1.0
+    pausedBuses: 0
     sampleTime: 0
     droppedVoices: 0
     droppedFeedback: 0
@@ -245,6 +251,14 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
     }
     ret
   }
+  if command.kind is AudioCommandKind.pauseBus {
+    mixer.pausedBuses = mixer.pausedBuses bitor (1 shl command.bus)
+    ret
+  }
+  if command.kind is AudioCommandKind.resumeBus {
+    mixer.pausedBuses = mixer.pausedBuses - (mixer.pausedBuses bitand (1 shl command.bus))
+    ret
+  }
   if command.kind is AudioCommandKind.setDuck {
     mixer.duckOn = true
     mixer.duckSource = command.bus
@@ -270,6 +284,11 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
           if voice.soundId is command.soundId {
             voice.active = false
             endedVoiceId = voice.voiceId
+          }
+        } else if command.kind is AudioCommandKind.stopBus {
+          if voice.bus is command.bus {
+            voice.stopping = true
+            rampTo(ramp: voice.gain, target: 0.0, frames: smoothing)
           }
         } else if voice.voiceId is command.voiceId {
           if command.kind is AudioCommandKind.stop {
@@ -430,10 +449,11 @@ func mixerRender(
   let maxFrames: Int = mixer.maxFrames
   let duckOn: Bool = mixer.duckOn
   let duckSource: Int = mixer.duckSource
+  let pausedBuses: Int = mixer.pausedBuses
   loop var index: Int = 0, index < audioMaxVoices, ++index {
     var endedVoiceId: Int = -1
     if let voice: mod AudioVoice = mixer.voices.modAt(index: index) {
-      if voice.active {
+      if voice.active and (pausedBuses bitand (1 shl voice.bus)) is 0 {
         if duckOn and voice.bus is duckSource {
           duckWanted = true
         }

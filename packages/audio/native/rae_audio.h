@@ -38,6 +38,29 @@ int64_t rae_audio_device_callbacks(int64_t device);
  * elsewhere yet. 1 when the request was taken. */
 int64_t rae_audio_thread_set_realtime(int64_t period_ns, int64_t compute_ns);
 
+/* The host's audio session (docs/audio-design.md §9.1). On iOS this is
+ * AVAudioSession; elsewhere every call answers 0 and does nothing. The Rae
+ * policy (audio/AudioSession) decides; these only make the call.
+ *   category: 0 ambient, 1 soloAmbient, 2 playback, 3 playAndRecord
+ *   mode:     0 default, 1 spokenAudio
+ *   options:  1 mixWithOthers, 2 duckOthers, 4 interruptSpokenAudioAndMixWithOthers,
+ *             8 defaultToSpeaker, 16 allowBluetoothA2DP */
+int64_t rae_audio_session_available(void);
+int64_t rae_audio_session_configure(int64_t category, int64_t mode, int64_t options);
+/* Activate, or deactivate telling other apps they may resume */
+int64_t rae_audio_session_set_active(int64_t active);
+/* Start turning the session's notifications into events (once) */
+int64_t rae_audio_session_observe(void);
+/* The next session event as kind * 16 + value, or -1 for none:
+ *   1 interruption began; 2 interruption ended (value 1: should resume);
+ *   3 the route's old device went away (headphones out); 4 a new route
+ *   (value: the reason); 5 the media services were reset.
+ * Events are written on the main thread (the observers run on the main
+ * queue) and read there, by audio/AudioSession. */
+int64_t rae_audio_session_poll(void);
+/* Add an event as if the system had sent it: the headless fake mode, and tests */
+void rae_audio_session_inject(int64_t kind, int64_t value);
+
 /* The size of a file in bytes, or -1 when it cannot be opened */
 int64_t rae_audio_file_size(uint8_t* path_z);
 /* Read up to `count` bytes of a file into `into`; the count read, or -1 */

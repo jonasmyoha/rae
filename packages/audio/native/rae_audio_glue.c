@@ -31,6 +31,7 @@
 void rae_ext_rae_signal_post(int64_t signal);
 
 typedef struct {
+  ma_context context;
   ma_device device;
   float* slots;
   int64_t* counters;      /* [0] read (ours), [8] written (Rae's) */
@@ -75,7 +76,19 @@ int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t per
   config.noFixedSizedCallback = MA_TRUE;
   config.dataCallback = rae_audio_callback;
   config.pUserData = audio;
-  if (ma_device_init(NULL, &config, &audio->device) != MA_SUCCESS) {
+  /* On iOS the Rae policy owns the audio session (audio/AudioSession):
+   * miniaudio leaves its category alone and never activates or deactivates
+   * it. Elsewhere these settings change nothing. */
+  ma_context_config context_config = ma_context_config_init();
+  context_config.coreaudio.sessionCategory = ma_ios_session_category_none;
+  context_config.coreaudio.noAudioSessionActivate = MA_TRUE;
+  context_config.coreaudio.noAudioSessionDeactivate = MA_TRUE;
+  if (ma_context_init(NULL, 0, &context_config, &audio->context) != MA_SUCCESS) {
+    free(audio);
+    return 0;
+  }
+  if (ma_device_init(&audio->context, &config, &audio->device) != MA_SUCCESS) {
+    ma_context_uninit(&audio->context);
     free(audio);
     return 0;
   }
@@ -116,6 +129,7 @@ void rae_audio_device_close(int64_t device) {
   RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
   if (!audio) return;
   ma_device_uninit(&audio->device);
+  ma_context_uninit(&audio->context);
   free(audio);
 }
 
@@ -168,3 +182,115 @@ int64_t rae_audio_read_file(uint8_t* path_z, uint8_t* into, int64_t count) {
   fclose(file);
   return (int64_t)got;
 }
+
+/* The session's events: one producer and one consumer, both the main thread
+ * (the observers run on the main queue; inject is called there too). */
+#define RAE_AUDIO_EVENT_CAPACITY 64
+static int64_t g_rae_audio_events[RAE_AUDIO_EVENT_CAPACITY];
+static int64_t g_rae_audio_events_written;
+static int64_t g_rae_audio_events_read;
+
+void rae_audio_session_inject(int64_t kind, int64_t value) {
+  int64_t written = __atomic_load_n(&g_rae_audio_events_written, __ATOMIC_RELAXED);
+  int64_t read = __atomic_load_n(&g_rae_audio_events_read, __ATOMIC_ACQUIRE);
+  if (written - read >= RAE_AUDIO_EVENT_CAPACITY) return;
+  g_rae_audio_events[written % RAE_AUDIO_EVENT_CAPACITY] = kind * 16 + value;
+  __atomic_store_n(&g_rae_audio_events_written, written + 1, __ATOMIC_RELEASE);
+}
+
+int64_t rae_audio_session_poll(void) {
+  int64_t read = __atomic_load_n(&g_rae_audio_events_read, __ATOMIC_RELAXED);
+  int64_t written = __atomic_load_n(&g_rae_audio_events_written, __ATOMIC_ACQUIRE);
+  if (read == written) return -1;
+  int64_t event = g_rae_audio_events[read % RAE_AUDIO_EVENT_CAPACITY];
+  __atomic_store_n(&g_rae_audio_events_read, read + 1, __ATOMIC_RELEASE);
+  return event;
+}
+
+#if defined(MA_APPLE_MOBILE) && defined(__OBJC__)
+/* iOS: AVAudioSession. This file is compiled as Objective-C there (the
+ * package installs it as src/rae_audio_glue.m for device builds), as
+ * miniaudio's own iOS code needs. */
+int64_t rae_audio_session_available(void) {
+  return 1;
+}
+
+int64_t rae_audio_session_configure(int64_t category, int64_t mode, int64_t options) {
+  @autoreleasepool {
+    AVAudioSessionCategory name = AVAudioSessionCategoryAmbient;
+    if (category == 1) name = AVAudioSessionCategorySoloAmbient;
+    if (category == 2) name = AVAudioSessionCategoryPlayback;
+    if (category == 3) name = AVAudioSessionCategoryPlayAndRecord;
+    AVAudioSessionMode modeName = mode == 1 ? AVAudioSessionModeSpokenAudio : AVAudioSessionModeDefault;
+    AVAudioSessionCategoryOptions flags = 0;
+    if (options & 1) flags |= AVAudioSessionCategoryOptionMixWithOthers;
+    if (options & 2) flags |= AVAudioSessionCategoryOptionDuckOthers;
+    if (options & 4) flags |= AVAudioSessionCategoryOptionInterruptSpokenAudioAndMixWithOthers;
+    if (options & 8) flags |= AVAudioSessionCategoryOptionDefaultToSpeaker;
+    if (options & 16) flags |= AVAudioSessionCategoryOptionAllowBluetoothA2DP;
+    return [[AVAudioSession sharedInstance] setCategory:name mode:modeName options:flags error:nil] ? 1 : 0;
+  }
+}
+
+int64_t rae_audio_session_set_active(int64_t active) {
+  @autoreleasepool {
+    AVAudioSessionSetActiveOptions flags = active ? 0 : AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation;
+    return [[AVAudioSession sharedInstance] setActive:(active ? YES : NO) withOptions:flags error:nil] ? 1 : 0;
+  }
+}
+
+static int g_rae_audio_observing;
+
+int64_t rae_audio_session_observe(void) {
+  if (g_rae_audio_observing) return 1;
+  g_rae_audio_observing = 1;
+  @autoreleasepool {
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    NSOperationQueue* main = [NSOperationQueue mainQueue];
+    AVAudioSession* session = [AVAudioSession sharedInstance];
+    [center addObserverForName:AVAudioSessionInterruptionNotification object:session queue:main
+                    usingBlock:^(NSNotification* note) {
+      NSUInteger type = [note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+      if (type == AVAudioSessionInterruptionTypeBegan) {
+        rae_audio_session_inject(1, 0);
+      } else {
+        NSUInteger options = [note.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue];
+        rae_audio_session_inject(2, (options & AVAudioSessionInterruptionOptionShouldResume) ? 1 : 0);
+      }
+    }];
+    [center addObserverForName:AVAudioSessionRouteChangeNotification object:session queue:main
+                    usingBlock:^(NSNotification* note) {
+      NSUInteger reason = [note.userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue];
+      if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
+        rae_audio_session_inject(3, 0);
+      } else {
+        rae_audio_session_inject(4, (int64_t)(reason & 15));
+      }
+    }];
+    [center addObserverForName:AVAudioSessionMediaServicesWereResetNotification object:session queue:main
+                    usingBlock:^(NSNotification* note) {
+      (void)note;
+      rae_audio_session_inject(5, 0);
+    }];
+  }
+  return 1;
+}
+#else
+int64_t rae_audio_session_available(void) {
+  return 0;
+}
+
+int64_t rae_audio_session_configure(int64_t category, int64_t mode, int64_t options) {
+  (void)category; (void)mode; (void)options;
+  return 0;
+}
+
+int64_t rae_audio_session_set_active(int64_t active) {
+  (void)active;
+  return 0;
+}
+
+int64_t rae_audio_session_observe(void) {
+  return 0;
+}
+#endif

@@ -1,0 +1,15 @@
+# audio/sessionSystem/SessionSystem — the engine's work of a frame, with the
+# host's session events (docs/audio-design.md §9.1) sent as ECS events. Run it
+# once per frame in the program's schedule, before the systems that react to
+# an interruption or a lost route.
+open audio/Audio
+open audio/AudioSession
+open ecs/Event
+
+func audioSessionSystem(audio: mod AudioEngine, events: mod EventQueue(AudioSessionEvent)) {
+  audio.update()
+  let taken: List(AudioSessionEvent) = audio.takeSessionEvents()
+  loop let event: AudioSessionEvent in taken {
+    eventSend(this: events, value: event)
+  }
+}
