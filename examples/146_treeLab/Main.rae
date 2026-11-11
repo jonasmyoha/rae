@@ -133,10 +133,10 @@ type LabState {
   readoutCity: String = ""
   readoutLatitude: Float = -1000.0
   readoutLongitude: Float = -1000.0
-  readoutKind: String = ""
+  readoutKind: String = labTreeKindName()
   # RAE_TREELAB_CONTROLS: control ids (LabEditor labControlButtons, comma separated) clicked once
   # at frame 20, to check a rebuild with no panel; and the frames run so far
-  scriptedControls: String = ""
+  scriptedControls: String = Sys.getEnv(name: "RAE_TREELAB_CONTROLS")
   framesRun: Int = 0
   # the editor chrome and its camera (none in a scripted run: LabScenes labScripted)
   editor: opt LabEditor = none
@@ -168,7 +168,7 @@ type LabState {
   leafParticles: opt LeafParticles = none
   leafFrame: Int = 0
   # the dolly (RAE_TREELAB_DOLLY): its folder and the frame it is at
-  dollyFolder: String = ""
+  dollyFolder: String = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
   dollyFrame: Int = 0
   # RAE_TREELAB_STATS=1: every labStatsFrames frames a line of the leaves released, what the
   # shown forest drew and how long the gather and the frames took
@@ -226,11 +226,6 @@ func createLab() ret LabState {
       wind: createWindState(settings: windSettings)
       lastTime: Gpu2d.nowSeconds()
     }
-    # set here, not as the fields' defaults: a default's String built by a call is freed when this
-    # function returns (a compiler bug, queued)
-    state.readoutKind = labTreeKindName()
-    state.dollyFolder = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
-    state.scriptedControls = Sys.getEnv(name: "RAE_TREELAB_CONTROLS")
     labCameraHome(state: state)
     # the panel's date replaces the season's own bottom slider, and starts at the season's date
     # (RAE_DAY_OF_YEAR), not the panel's own

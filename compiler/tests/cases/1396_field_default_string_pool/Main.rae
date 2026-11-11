@@ -1,0 +1,44 @@
+# A struct field whose default is a String built at run time (a call, an
+# interpolation) keeps that String after the function that built the struct
+# returns. The default used to stay in the String pool, so a function with its
+# own pool mark (here: the `if` on a pooled temporary) freed it on return: the
+# field read garbage and the struct's drop freed it again.
+import Sys
+
+type Holder {
+  count: Int
+  home: String = Sys.getEnv(name: "HOME")
+  label: String = holderLabel(number: 7)
+  plain: String = "plain"
+}
+
+func holderLabel(number: view Int) ret String {
+  ret "label {number}"
+}
+
+func makeHolder() ret Holder {
+  if Sys.getEnv(name: "RAE_CASE_1396_UNSET") is "1" {
+    log("set")
+  }
+  let holder: Holder = { count: 1 }
+  ret holder
+}
+
+func makeDefaultHolder() ret Holder {
+  if "{Sys.getEnv(name: "RAE_CASE_1396_UNSET")}x" is "1x" {
+    log("set")
+  }
+  let holder: Holder = { count: 2, plain: "given" }
+  ret holder
+}
+
+func main() ret Int {
+  let first: Holder = makeHolder()
+  let second: Holder = makeDefaultHolder()
+  let filler: String = "{first.count} a string that reuses freed memory {second.count + 5}"
+  log(
+    "home kept: {first.home is Sys.getEnv(name: "HOME")} {second.home is Sys.getEnv(name: "HOME")}"
+  )
+  log("{first.label}, {second.label}, {first.plain}, {second.plain}, {filler.length()}")
+  ret 0
+}
