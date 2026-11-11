@@ -40,10 +40,12 @@ import Sys
 open Atomic
 open Realtime
 open Signal
+open audio/AudioButler
 open audio/AudioDevice
 open audio/AudioGlue
 open audio/AudioMixer
 open audio/AudioSession
+open audio/Decoder
 open audio/Sound
 open collections/SpscRing
 
@@ -141,6 +143,15 @@ type AudioEngine {
   renderStates: List(AudioRenderState)
   # the device's callback renders (stage B) rather than a ring (stage A)
   deviceRenders: Bool
+  # streams (audio/AudioStreams, audio/AudioButler)
+  butlerCommands: SpscRing(ButlerCommand)
+  butlerClosed: SpscRing(Int)
+  butlerRunning: Atomic(Bool)
+  butlerTask: Task(Int)
+  # the butler itself when offline (stepped before every block)
+  butler: Butler
+  streams: List(StreamRecord)
+  nextStreamId: Int
 }
 
 func audioOfflineWanted() ret Bool {
@@ -193,6 +204,18 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     reclaim: reclaim
   )
   var renderTask: Task(Int) = spawn audioIdle()
+  let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
+  let butlerClosed: SpscRing(Int) = createSpscRing(Int, capacity: 256)
+  let butlerRunning: Atomic(Bool) = createAtomic(Bool, value: true)
+  var butlerTask: Task(Int) = spawn audioIdle()
+  if device is not 0 {
+    let threadButler: Butler = createButler(
+      outputRate: sampleRate
+      commands: butlerCommands
+      closed: butlerClosed
+    )
+    butlerTask = spawn butlerThread(butler: threadButler, running: butlerRunning)
+  }
   var renderStates: List(AudioRenderState) = {}
   let deviceRenders: Bool = device is not 0 and getEnv(name: "RAE_AUDIO_STAGE") is not "A"
   if deviceRenders {
@@ -284,6 +307,13 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     deviceStopped: false
     renderStates: renderStates
     deviceRenders: deviceRenders
+    butlerCommands: butlerCommands
+    butlerClosed: butlerClosed
+    butlerRunning: butlerRunning
+    butlerTask: butlerTask
+    butler: createButler(outputRate: sampleRate, commands: butlerCommands, closed: butlerClosed)
+    streams: {}
+    nextStreamId: 1
   }
 }
 
@@ -322,6 +352,9 @@ func emptyCommand(kind: view AudioCommandKind) ret AudioCommand {
     other: 0.0
     looping: false
     atSample: 0
+    isStream: false
+    stream: emptyStreamRing()
+    streamFinished: emptyAtomicBool()
   }
 }
 
@@ -350,7 +383,7 @@ func addSound(this: mod AudioEngine, data: own SoundData) ret Sound {
 # Read a WAV file and add it (on the calling thread; for a long file, read it
 # with `spawn readSoundFile(path:)` and `addSound` the result)
 func loadSound(this: mod AudioEngine, path: view String) ret Sound {
-  ret this.addSound(data: readSoundFile(path: path))
+  ret this.addSound(data: readAnySoundFile(path: path))
 }
 
 func busIndex(bus: view AudioBusKind) ret Int {
@@ -417,7 +450,7 @@ func sendVoiceCommand(
   value: view Float
 ) {
   var command: AudioCommand = emptyCommand(kind: kind)
-  command.voiceId = voiceId.value
+  command.voiceId = mixerVoiceIdOf(streams: this.streams, voiceId: voiceId.value)
   command.value = value
   let sent: Bool = this.sendCommand(command: command)
 }
@@ -503,12 +536,22 @@ func update(this: mod AudioEngine) {
       if report.kind is AudioFeedbackKind.voiceEnded {
         this.voicesEnded = this.voicesEnded + 1
         this.forgetVoice(voiceId: report.voiceId)
+        streamVoiceEnded(
+          streams: this.streams
+          commands: this.butlerCommands
+          mixerVoiceId: report.voiceId
+        )
       }
     }
   }
   loop this.reclaim.count() > 0 {
     if let soundId: Int = this.reclaim.pop() {
       this.freeSoundSamples(soundId: soundId)
+    }
+  }
+  loop this.butlerClosed.count() > 0 {
+    if let streamId: Int = this.butlerClosed.pop() {
+      streamClosed(streams: this.streams, streamId: streamId)
     }
   }
   this.updateSession()
@@ -525,6 +568,7 @@ func renderOffline(this: mod AudioEngine, frames: view Int) ret List(Float) {
   var left: Int = frames
   loop left > 0 {
     let count: Int = min(a: left, b: this.periodFrames)
+    butlerStep(butler: this.butler)
     markRealtimeThread()
     mixerRender(
       mixer: this.mixer
@@ -599,6 +643,13 @@ func stopAudio(this: mod AudioEngine) ret Int {
   this.running.store(value: false)
   this.wake.post()
   let blocks: Int = this.renderTask.get()
+  this.butlerRunning.store(value: false)
+  let butlerRounds: Int = this.butlerTask.get()
+  freeButler(butler: this.butler)
+  loop let record: StreamRecord in this.streams {
+    freeStreamShared(shared: record.shared)
+  }
+  this.streams.clear()
   if this.device is not 0 {
     unsafe {
       rae_audio_device_close(device: this.device)
@@ -649,6 +700,9 @@ func stopAudio(this: mod AudioEngine) ret Int {
   freeSpscRing(this: this.feedback)
   freeSpscRing(this: this.reclaim)
   freeSpscRing(this: this.output)
+  freeSpscRing(this: this.butlerCommands)
+  freeSpscRing(this: this.butlerClosed)
+  freeAtomic(this: this.butlerRunning)
   freeSignal(this: this.wake)
   freeAtomic(this: this.running)
   ret blocks

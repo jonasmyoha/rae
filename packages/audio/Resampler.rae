@@ -1,0 +1,175 @@
+# audio/Resampler — sample-rate conversion in Rae (docs/audio-design.md §7.4):
+# a windowed-sinc filter (Blackman window) read from a table of phases, with
+# linear interpolation between neighboring phases. Downsampling lowers the
+# cutoff to the output's Nyquist frequency, so nothing aliases.
+#
+#     var resampler: Resampler = createResampler(channels: 2, inputRate: 44100, outputRate: 48000,
+#     taps: 32)
+#     let out: List(Float) = resampler.resample(input: block)    # interleaved, any length
+#     let tail: List(Float) = resampler.finish()                   # the last frames
+#
+# Taps per output sample: 8 (fast), 32 (good, the default for streams), 64
+# (best, for export). Equal rates pass the samples through unchanged. Output
+# frame j is the input at time j * inputRate / outputRate: no delay is added
+# (the filter's half length is waited out at the start and flushed by finish).
+#
+# It allocates (its output and its pending input), so it runs where decoding
+# does: the streaming thread, or a load, never the audio thread.
+import Math
+
+const resamplerPhases: Int = 256
+
+type Resampler {
+  channels: Int
+  inputRate: Int
+  outputRate: Int
+  taps: Int
+  # input frames per output frame
+  step: Float64
+  # (resamplerPhases + 1) rows of `taps` coefficients
+  table: List(Float)
+  # input frames not consumed yet, interleaved, behind the zero-filled start
+  pending: List(Float)
+  # the next output's position in `pending`, in input frames
+  position: Float64
+}
+
+func blackman(x: view Float64) ret Float64 {
+  let angle: Float64 = x * 3.14159265358979
+  let first: Float64 = cos(x: angle as Float) as Float64
+  let second: Float64 = cos(x: (angle * 2.0) as Float) as Float64
+  ret first * 0.5 + second * 0.08 + 0.42
+}
+
+# The windowed sinc at distance `distance` (input frames) from the output time
+func sincKernel(distance: view Float64, cutoff: view Float64, halfTaps: view Int) ret Float64 {
+  let x: Float64 = distance / (halfTaps as Float64)
+  if x <= -1.0 or x >= 1.0 {
+    ret 0.0
+  }
+  let scaled: Float64 = distance * cutoff * 3.14159265358979
+  var sinc: Float64 = 1.0
+  if scaled > 0.000000001 or scaled < -0.000000001 {
+    sinc = (sin(x: scaled as Float) as Float64) / scaled
+  }
+  ret cutoff * sinc * blackman(x: x)
+}
+
+func createResampler(
+  channels: view Int
+  inputRate: view Int
+  outputRate: view Int
+  taps: view Int
+) ret Resampler {
+  var even: Int = taps
+  if even < 4 {
+    even = 4
+  }
+  even = even - even % 2
+  let halfTaps: Int = even / 2
+  var cutoff: Float64 = 1.0
+  if outputRate < inputRate {
+    cutoff = (outputRate as Float64) / (inputRate as Float64)
+  }
+  var table: List(Float) = List.create(Float, cap: (resamplerPhases + 1) * even)
+  loop var phase: Int = 0, phase <= resamplerPhases, ++phase {
+    let fraction: Float64 = (phase as Float64) / (resamplerPhases as Float64)
+    var sum: Float64 = 0.0
+    loop var k: Int = 0, k < even, ++k {
+      sum = sum + sincKernel(
+        distance: fraction + ((halfTaps - 1 - k) as Float64)
+        cutoff: cutoff
+        halfTaps: halfTaps
+      )
+    }
+    # each row sums to 1: a constant input comes out at the same level
+    loop var k: Int = 0, k < even, ++k {
+      let value: Float64 = sincKernel(
+        distance: fraction + ((halfTaps - 1 - k) as Float64)
+        cutoff: cutoff
+        halfTaps: halfTaps
+      )
+      table.add(value: (value / sum) as Float)
+    }
+  }
+  var pending: List(Float) = List.create(Float, cap: 4096)
+  # the filter reaches halfTaps - 1 frames back from the first output
+  pending.addDefaults(count: (halfTaps - 1) * channels)
+  ret Resampler {
+    channels: channels
+    inputRate: inputRate
+    outputRate: outputRate
+    taps: even
+    step: (inputRate as Float64) / (outputRate as Float64)
+    table: table
+    pending: pending
+    position: (halfTaps - 1) as Float64
+  }
+}
+
+# Every output frame the pending input allows, appended to `output`
+func resampleInto(this: mod Resampler, output: mod List(Float)) {
+  let halfTaps: Int = this.taps / 2
+  let frames: Int = this.pending.length() / this.channels
+  loop (this.position as Int) + halfTaps < frames {
+    let base: Int = this.position as Int
+    let fraction: Float64 = this.position - (base as Float64)
+    let scaledPhase: Float64 = fraction * (resamplerPhases as Float64)
+    let phase: Int = scaledPhase as Int
+    let blend: Float = (scaledPhase - (phase as Float64)) as Float
+    let rowA: Int = phase * this.taps
+    let rowB: Int = (phase + 1) * this.taps
+    let first: Int = base - halfTaps + 1
+    loop var channel: Int = 0, channel < this.channels, ++channel {
+      var sum: Float = 0.0
+      loop var k: Int = 0, k < this.taps, ++k {
+        let a: Float = this.table.copyAtFallback(index: rowA + k, fallback: 0.0)
+        let b: Float = this.table.copyAtFallback(index: rowB + k, fallback: 0.0)
+        let sample: Float = this.pending.copyAtFallback(
+          index: (first + k) * this.channels + channel
+          fallback: 0.0
+        )
+        sum = sum + sample * (a + (b - a) * blend)
+      }
+      output.add(value: sum)
+    }
+    this.position = this.position + this.step
+  }
+  # drop the frames no later output reaches
+  let keepFrom: Int = (this.position as Int) - halfTaps + 1
+  if keepFrom > 0 {
+    var kept: List(Float) = List.create(Float, cap: this.pending.length())
+    loop var i: Int = keepFrom * this.channels, i < this.pending.length(), ++i {
+      kept.add(value: this.pending.copyAtFallback(index: i, fallback: 0.0))
+    }
+    this.pending = kept
+    this.position = this.position - (keepFrom as Float64)
+  }
+}
+
+# Convert a block of interleaved input; answers the output frames it allows
+func resample(this: mod Resampler, input: view List(Float)) ret List(Float) {
+  var output: List(Float) = List.create(Float, cap: input.length() * 2 + this.channels)
+  if this.inputRate is this.outputRate {
+    loop let sample: Float in input {
+      output.add(value: sample)
+    }
+    ret output
+  }
+  loop let sample: Float in input {
+    this.pending.add(value: sample)
+  }
+  this.resampleInto(output: output)
+  ret output
+}
+
+# The input has ended: the frames still inside the filter, flushed with zeros
+func finish(this: mod Resampler) ret List(Float) {
+  var output: List(Float) = {}
+  if this.inputRate is this.outputRate {
+    ret output
+  }
+  this.pending.addDefaults(count: (this.taps / 2) * this.channels)
+  this.resampleInto(output: output)
+  ret output
+}

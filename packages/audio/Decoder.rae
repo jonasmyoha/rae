@@ -1,0 +1,109 @@
+# audio/Decoder — MP3, FLAC and Ogg Vorbis files (docs/audio-design.md §7.3):
+# miniaudio's decoders (dr_mp3, dr_flac) and stb_vorbis, through one C call
+# each (native/rae_audio_glue.c). WAV is decoded in Rae (audio/Sound); this
+# reads it too, for streaming. Samples come out at the file's own channels and
+# rate, as Float; audio/Resampler converts the rate.
+#
+# A decoder reads the disk: it is opened and read on the streaming thread or a
+# loading worker, never on the audio thread.
+open audio/AudioGlue
+open audio/Sound
+
+type AudioDecoder {
+  # 0 when the file could not be opened as one of the formats
+  handle: Int
+  channels: Int
+  sampleRate: Int
+  # -1 when the format does not know it without reading it all
+  frameCount: Int
+}
+
+func openAudioDecoder(path: view String) ret AudioDecoder {
+  var pathZ: List(UInt8) = pathBytesZ(path: path)
+  unsafe {
+    let handle: Int = rae_audio_decoder_open(pathZ: pathZ.data)
+    if handle is 0 {
+      ret AudioDecoder { handle: 0, channels: 0, sampleRate: 0, frameCount: 0 }
+    }
+    ret AudioDecoder {
+      handle: handle
+      channels: rae_audio_decoder_channels(decoder: handle)
+      sampleRate: rae_audio_decoder_sample_rate(decoder: handle)
+      frameCount: rae_audio_decoder_length(decoder: handle)
+    }
+  }
+}
+
+# Up to `frames` interleaved frames into `into`; the frames read, 0 at the end
+func readDecodedFrames(
+  this: view AudioDecoder
+  into: view Buffer(Float)
+  frames: view Int
+) ret Int {
+  unsafe {
+    ret rae_audio_decoder_read(decoder: this.handle, into: into, frames: frames)
+  }
+}
+
+func seekDecoder(this: view AudioDecoder, frame: view Int) ret Bool {
+  unsafe {
+    ret rae_audio_decoder_seek(decoder: this.handle, frame: frame) is 1
+  }
+}
+
+func closeAudioDecoder(this: view AudioDecoder) {
+  if this.handle is 0 {
+    ret
+  }
+  unsafe {
+    rae_audio_decoder_close(decoder: this.handle)
+  }
+}
+
+# A whole compressed file decoded into memory (a short sound)
+func decodeSoundFile(path: view String) ret SoundData {
+  let decoder: AudioDecoder = openAudioDecoder(path: path)
+  if decoder.handle is 0 {
+    ret emptySoundData(error: "cannot decode {path}")
+  }
+  let chunkFrames: Int = 4096
+  let chunk: Buffer(Float) = createSampleBuffer(count: chunkFrames * decoder.channels)
+  var all: List(Float) = {}
+  var reading: Bool = true
+  loop reading {
+    let got: Int = decoder.readDecodedFrames(into: chunk, frames: chunkFrames)
+    loop var i: Int = 0, i < got * decoder.channels, ++i {
+      all.add(value: sampleAt(samples: chunk, index: i))
+    }
+    reading = got > 0
+  }
+  closeAudioDecoder(this: decoder)
+  unsafe {
+    rae_ext_rae_buf_free(buf: chunk)
+  }
+  let samples: Buffer(Float) = createSampleBuffer(count: all.length())
+  loop var i: Int = 0, i < all.length(), ++i {
+    setSampleAt(samples: samples, index: i, value: all.copyAtFallback(index: i, fallback: 0.0))
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: all.length() / decoder.channels
+    channels: decoder.channels
+    sampleRate: decoder.sampleRate
+    error: ""
+  }
+}
+
+# Any supported file into memory: WAV in Rae (the reference), the rest through
+# the decoders. Spawnable (`spawn readAnySoundFile(path: path)`).
+func readAnySoundFile(path: copy String) ret SoundData {
+  var head: List(UInt8) = readAudioFileBytes(path: path)
+  if head.length() >= 12 and textAt(bytes: head, at: 0, expected: "RIFF") and textAt(
+    bytes: head
+    at: 8
+    expected: "WAVE"
+  ) {
+    ret decodeWav(bytes: head)
+  }
+  ret decodeSoundFile(path: path)
+}

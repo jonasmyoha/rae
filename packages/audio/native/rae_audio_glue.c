@@ -5,14 +5,21 @@
  * callback, which must be C until Rae functions can be called from C
  * (docs/audio-design.md §4.2 stage A): it copies a period out of the Rae ring
  * and posts the Rae Signal, nothing more. */
-#define MA_NO_DECODING
 #define MA_NO_ENCODING
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE
 #define MA_NO_GENERATION
+/* The decoders: miniaudio's own MP3 and FLAC (dr_mp3, dr_flac) and WAV, and
+ * Ogg Vorbis through stb_vorbis (native/miniaudio/stb_vorbis.c, public domain
+ * or MIT, the copy miniaudio 0.11.26 ships in extras/), in the order
+ * miniaudio's documentation gives */
+#define STB_VORBIS_HEADER_ONLY
+#include "miniaudio/stb_vorbis.c"
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio/miniaudio.h"
+#undef STB_VORBIS_HEADER_ONLY
+#include "miniaudio/stb_vorbis.c"
 
 #include "rae_audio.h"
 
@@ -400,3 +407,50 @@ int64_t rae_audio_session_observe(void) {
   return 0;
 }
 #endif
+
+/* ---- decoders (audio/Decoder): one miniaudio call each ------------------ */
+
+int64_t rae_audio_decoder_open(uint8_t* path_z) {
+  ma_decoder* decoder = (ma_decoder*)calloc(1, sizeof(ma_decoder));
+  if (!decoder) return 0;
+  /* the file's own channels and rate, float samples: the Rae resampler
+   * converts the rate (audio/Resampler) */
+  ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
+  if (ma_decoder_init_file((const char*)path_z, &config, decoder) != MA_SUCCESS) {
+    free(decoder);
+    return 0;
+  }
+  return (int64_t)(intptr_t)decoder;
+}
+
+int64_t rae_audio_decoder_channels(int64_t decoder) {
+  return decoder ? (int64_t)((ma_decoder*)(intptr_t)decoder)->outputChannels : 0;
+}
+
+int64_t rae_audio_decoder_sample_rate(int64_t decoder) {
+  return decoder ? (int64_t)((ma_decoder*)(intptr_t)decoder)->outputSampleRate : 0;
+}
+
+int64_t rae_audio_decoder_length(int64_t decoder) {
+  ma_uint64 frames = 0;
+  if (!decoder || ma_decoder_get_length_in_pcm_frames((ma_decoder*)(intptr_t)decoder, &frames) != MA_SUCCESS) return -1;
+  return (int64_t)frames;
+}
+
+int64_t rae_audio_decoder_read(int64_t decoder, float* into, int64_t frames) {
+  ma_uint64 got = 0;
+  if (!decoder) return 0;
+  ma_result result = ma_decoder_read_pcm_frames((ma_decoder*)(intptr_t)decoder, into, (ma_uint64)frames, &got);
+  if (result != MA_SUCCESS && result != MA_AT_END) return 0;
+  return (int64_t)got;
+}
+
+int64_t rae_audio_decoder_seek(int64_t decoder, int64_t frame) {
+  return decoder && ma_decoder_seek_to_pcm_frame((ma_decoder*)(intptr_t)decoder, (ma_uint64)frame) == MA_SUCCESS;
+}
+
+void rae_audio_decoder_close(int64_t decoder) {
+  if (!decoder) return;
+  ma_decoder_uninit((ma_decoder*)(intptr_t)decoder);
+  free((ma_decoder*)(intptr_t)decoder);
+}

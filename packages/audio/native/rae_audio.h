@@ -84,6 +84,18 @@ int64_t rae_audio_focus_status(void);
  * Without access, iOS answers "not focused" whatever the Focus is. */
 int64_t rae_audio_focus_request(void);
 
+/* A decoder for MP3, FLAC, Ogg Vorbis or WAV (miniaudio's decoders and
+ * stb_vorbis), at the file's own channels and rate, float samples. 0 when the
+ * file is not one of them. length: frames, or -1 when unknown. read: up to
+ * `frames` interleaved frames into `into`; the frames read (0 at the end). */
+int64_t rae_audio_decoder_open(uint8_t* path_z);
+int64_t rae_audio_decoder_channels(int64_t decoder);
+int64_t rae_audio_decoder_sample_rate(int64_t decoder);
+int64_t rae_audio_decoder_length(int64_t decoder);
+int64_t rae_audio_decoder_read(int64_t decoder, float* into, int64_t frames);
+int64_t rae_audio_decoder_seek(int64_t decoder, int64_t frame);
+void rae_audio_decoder_close(int64_t decoder);
+
 /* The size of a file in bytes, or -1 when it cannot be opened */
 int64_t rae_audio_file_size(uint8_t* path_z);
 /* Read up to `count` bytes of a file into `into`; the count read, or -1 */
