@@ -2,10 +2,21 @@
 # the lab's flat ground (assets/lab_surface.wgsl). The grid is centered on the
 # tree (or the studies), so every camera sees grass round it; the trunk (or
 # the studies' trunks and rocks) are obstacle circles.
+#
+# The panel's Grass groups (LabEditor labControlButtons, applyLabGrassControl) set LabGrassLook:
+# the grass on or off, its density, its blades' height and width, how far it reaches and how much
+# the wind moves it; its defaults are the lab's grass as it always was. In an interactive run the
+# grass and the ground follow the date (app3d/GroundPalette, as the walkers' do: dead grass in
+# winter, fresh in spring) as a tint of the lab's summer colors; the snow sinks it (lib/snow.wgsl,
+# Gbuffer setGbufferSnow). The kind (meadow or painted, tiered grass) is "[grass 2/3]"'s switch.
 import GrassConfig
+import Math
 import Vec3
+open ecs/ComponentTable
+open app3d/GroundPalette
 open Wind
 open GrassCompute
+open GrassBenders
 open Scene3d
 open gpu/GpuResources
 open LabScene
@@ -37,12 +48,98 @@ func createLabGrass(obstacles: view List(Float)) ret GrassCompute {
   ret grass
 }
 
-func labGrassSettings() ret GrassViewSettings {
+# The grass as the panel set it (the defaults: the meadow grass as the lab always drew it)
+type LabGrassLook {
+  on: Bool = true
+  # the share of blades kept, their height and width (GrassViewSettings' scales), the grid's
+  # span (m) and the wind's strength on the blades
+  density: Float = 1.0
+  height: Float = 0.55
+  width: Float = 1.8
+  reach: Float = labGrassExtent
+  wind: Float = 0.48
+  # the date's tint of the lab's summer grass and ground (1: summer)
+  tint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+}
+
+func labGrassSettings(look: view LabGrassLook) ret GrassViewSettings {
   var settings: GrassViewSettings = GrassConfig.grassMeadowSettings(
-    groundColor: Vec3.create(x: labGroundRed, y: labGroundGreen, z: labGroundBlue)
+    groundColor: labGroundColor(tint: look.tint)
   )
-  settings.extent = labGrassExtent
+  settings.extent = look.reach
+  settings.densityScale = look.density
+  settings.bladeHeightScale = look.height
+  settings.bladeWidthScale = look.width
+  settings.windStrength = look.wind
   ret settings
+}
+
+func labGroundColor(tint: view Vec3) ret Vec3 {
+  ret Vec3.create(x: labGroundRed * tint.x, y: labGroundGreen * tint.y, z: labGroundBlue * tint.z)
+}
+
+# The date's tint: GroundPalette's grass now against its summer grass, channel by channel, so the
+# lab's own green is kept in summer
+func labGrassTint(palette: view GroundPalette) ret Vec3 {
+  let summer: Vec3 = groundSummerGrass()
+  ret Vec3.create(
+    x: palette.grass.x / summer.x
+    y: palette.grass.y / summer.y
+    z: palette.grass.z / summer.z
+  )
+}
+
+# The ground under the grass takes the same tint: it is the first entity of every scene's world
+# (LabScene buildLabGround)
+func setLabGroundTint(world: mod World3d, tint: view Vec3) {
+  if componentCount(this: world.materials) is 0 {
+    ret
+  }
+  var ground: Material3d = componentCopyAtDefault(this: world.materials, i: 0)
+  ground.baseColor = labGroundColor(tint: tint)
+  world3dSetMaterial(
+    world: world
+    entityId: componentEntityAt(this: world.materials, i: 0)
+    material: ground
+  )
+}
+
+# A Grass control (LabEditor labControlButtons): g on/off, x density, h height, b width, r reach,
+# j wind. False when `group` is not one of them
+func applyLabGrassControl(look: mod LabGrassLook, group: view String, value: view String) ret Bool {
+  if group is "g" {
+    look.on = value is "on"
+  } else if group is "x" {
+    look.density = value.toFloat()
+  } else if group is "h" {
+    look.height = value.toFloat()
+  } else if group is "b" {
+    look.width = value.toFloat()
+  } else if group is "r" {
+    look.reach = value.toFloat()
+  } else if group is "j" {
+    look.wind = value.toFloat()
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The Grass groups' current choices, to show them selected (the values as the buttons' ids spell
+# them)
+func labGrassChoiceIds(look: view LabGrassLook) ret List(String) {
+  var on: String = "off"
+  if look.on {
+    on = "on"
+  }
+  ret List(String) {
+    "g:{on}"
+    "x:{look.density}"
+    "h:{look.height}"
+    "b:{look.width}"
+    "r:{look.reach.toInt()}"
+    "j:{look.wind}"
+  }
 }
 
 # This frame's blades (the compute pass), before the G-buffer pass draws them;
@@ -55,7 +152,18 @@ func generateLabGrass(
   camera: view Camera3d
   deltaTime: view Float
   wind: view WindVector
+  look: view LabGrassLook
 ) {
+  if not look.on {
+    ret
+  }
+  # as many candidates per square meter at every reach: the default grid's side, scaled with the
+  # span (a new side rebuilds the compute pipeline, so it is set only when it changes)
+  let defaultSide: Float = Math.sqrt(x: grassGpuBladeCount.toFloat())
+  let side: Int = (defaultSide * look.reach / labGrassExtent + 0.5).toInt()
+  if side * side is not grass.bladeCount {
+    grassSetBladeSide(grass: grass, side: side)
+  }
   grassGenerate(
     grass: grass
     resources: resources
@@ -71,6 +179,6 @@ func generateLabGrass(
     fwdX: camera.target.x - camera.position.x
     fwdY: camera.target.y - camera.position.y
     fwdZ: camera.target.z - camera.position.z
-    settings: labGrassSettings()
+    settings: labGrassSettings(look: look)
   )
 }

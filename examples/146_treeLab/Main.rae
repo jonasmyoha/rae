@@ -182,6 +182,8 @@ type LabState {
   tree: opt LabTree
   treeSeason: PropSeason = labReferenceTreeSeason()
   treeLeaves: PropLeaves = labSummerLeaves()
+  # the grass as the panel's Grass groups set it, and the date's tint (LabGrass)
+  grassLook: LabGrassLook = {}
   windSettings: WindSettings
   wind: WindState
   lastTime: Float64
@@ -470,7 +472,7 @@ func applyLabControl(state: mod LabState, id: view String) {
     if set < state.forests.length {
       state.forestShown = set
     }
-  } else {
+  } else if not applyLabGrassControl(look: state.grassLook, group: group, value: value) {
     applyLabBuildControl(state: state, group: group, value: value)
   }
   log("[treelab] control {id}")
@@ -538,7 +540,7 @@ func labChoiceIds(state: view LabState) ret List(String) {
   if labLookPlain() {
     look = "k:plain"
   }
-  ret List(String) {
+  var ids: List(String) = List(String) {
     "w:{labWeatherValue(weather: state.season.weather)}"
     "n:{labWindValue(wind: state.season.wind)}"
     "y:{state.season.clock.yearSpeed.toInt()}"
@@ -550,6 +552,10 @@ func labChoiceIds(state: view LabState) ret List(String) {
     "d:{labForestFarHere().toInt()}"
     "p:{labForestSpacingHere().toInt()}"
   }
+  loop let id: view String in labGrassChoiceIds(look: state.grassLook) {
+    ids.add(value: id)
+  }
+  ret ids
 }
 
 # The date and the weather reach every scene of an interactive lab; a scripted run keeps them to
@@ -606,6 +612,7 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       camera: state.camera
       deltaTime: deltaTime
       wind: windVector(state: state.wind, settings: state.windSettings)
+      look: state.grassLook
     )
   }
   ensureRendererResources(renderer: state.renderer)
@@ -655,12 +662,14 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
       }
     }
     if let resources: mod GpuResources = state.gpuResources {
-      grassDraw(
-        grass: state.grass
-        resources: resources
-        gbuffer: state.renderer.passes.gbuffer
-        gbufferResources: rendererResources
-      )
+      if state.grassLook.on {
+        grassDraw(
+          grass: state.grass
+          resources: resources
+          gbuffer: state.renderer.passes.gbuffer
+          gbufferResources: rendererResources
+        )
+      }
       if let tree: mod LabTree = state.tree {
         loop let leaves: mod LeafPass in tree.leaves {
           setLeafSeason(leaves: leaves, tint: state.treeLeaves.tint, loss: state.treeLeaves.loss)
@@ -745,6 +754,8 @@ func runLabFrame(state: mod LabState) {
   }
   if state.editor is not none {
     state.treeLeaves = labTreeLeaves(season: state.season, propSeason: state.treeSeason)
+    state.grassLook.tint = labGrassTint(palette: labGroundPalette(season: state.season))
+    setLabGroundTint(world: state.world, tint: state.grassLook.tint)
   }
   if let forest: mod TreeForest = state.forests.modAt(index: state.forestShown) {
     applyLabSeason(season: state.season, field: forest.field)
