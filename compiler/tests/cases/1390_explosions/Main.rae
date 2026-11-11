@@ -58,4 +58,42 @@ func main() {
     size: 1.0
   )
   log("a trail puff: {explosions.puffs.length}")
+  # A bullet's hit on a wall facing +x: a few particles, all gone within a second; its sparks
+  # fly off the wall's side
+  var hits: Explosions = createExplosions(renderer: renderer)
+  explosionImpact(
+    explosions: hits
+    x: 5.0
+    y: 0.0
+    z: 1.0
+    normalX: 1.0
+    normalY: 0.0
+    normalZ: 0.0
+    size: 1.0
+  )
+  var offTheWall: Bool = true
+  loop let puff: view ExplosionPuff in hits.puffs {
+    if puff.kind is ExplosionPuffKind.spark and puff.velocityX <= 0.0 {
+      offTheWall = false
+    }
+  }
+  log(
+    "a hit: {hits.puffs.length} puffs, {hits.chunks.length} chunks, sparks off the wall {offTheWall}"
+  )
+  explosionFlash(
+    explosions: hits
+    x: 0.0
+    y: 0.0
+    z: 1.5
+    size: 1.0
+  )
+  loop var frame: Int = 0, frame < 60, ++frame {
+    explosionsStep(
+      explosions: hits
+      deltaTime: 1.0 / 60.0
+      windX: 0.0
+      windY: 0.0
+    )
+  }
+  log("a hit after 1 s: {explosionCount(explosions: hits)} left")
 }
