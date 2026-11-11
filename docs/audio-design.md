@@ -578,10 +578,19 @@ during Do Not Disturb or a Focus.
     `tools/ios/gen-ios.sh` writes it from `RAE_IOS_FOCUS_USAGE`. With the key
     the request is made and iOS shows its prompt; with nobody to answer, the
     status stayed "not asked".
-  - Not yet known, as it needs a person: the answer after "Allow", with a
-    Focus on and off, with and without the Communication Notifications
-    capability (the forum reports say `isFocused` stays false without it).
-    Queued as `[audio 2c/7]`.
+  - After "Allow" was tapped on the phone, `authorizationStatus` reads 3
+    (authorized) on later runs.
+  - The Communication Notifications capability: `gen-ios.sh` adds it with
+    `RAE_IOS_COMMUNICATION_NOTIFICATIONS=1`, and automatic signing with the
+    team J44HX74U4S accepted it (the signed app carries
+    `com.apple.developer.usernotifications.communication`). So SUMU can hold
+    it for development builds; whether App Store review accepts it for an app
+    that is not a messaging app is a separate question.
+  - Authorized, with and without the capability, `isFocused` read false on
+    every run. No run had a Focus known to be on, so this does not yet say
+    whether the capability is needed to read true. That run needs a person to
+    switch a Focus on (or a Focus shared from this Mac); it is the one open
+    answer of D7, queued with the hearing checks as `[audio 2d/7]`.
   - Seen on the way: on iOS, deactivating the session stops the audio unit,
     and activating it again does not start it (the device's callbacks stopped
     for good after the first deactivation, so later music was silent).
