@@ -1,0 +1,276 @@
+# The audio engine rendered offline (docs/audio-design.md §12), with
+# RAE_REALTIME_CHECK=1 (config.env): rendering must not allocate, free, lock or
+# log, or the run fails.
+#
+# 1. Null test: a sine on the effects bus at -6 dB, centered, against the same
+#    sine computed here by its formula; the peak difference is below -100 dBFS.
+# 2. Block-size invariance (§6.2): one scene (a voice that starts at sample
+#    1000, a second one that is stopped at sample 3000) rendered in blocks of
+#    1, 17, 64 and 512 frames gives the same samples.
+# 3. The start is exact: the first sound is at frame 1000, the frame before is
+#    silent.
+# 4. A stop fades over 5 ms (240 frames at 48 kHz), and is silent after.
+# 5. The duck: music at full level, an alert starts, and 100 ms later the music
+#    bus is 12 dB down; after the alert, it comes back.
+# 6. Freeing a sound that still plays stops its voices, and its samples are
+#    freed once the audio thread reports it (the leak check at exit sees it).
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+const rate: Int = 48000
+
+func peakDecibels(peak: view Float) ret Float {
+  if peak <= 0.0000000001 {
+    ret -200.0
+  }
+  ret 20.0 * log10(x: peak)
+}
+
+func log10(x: view Float) ret Float {
+  ret ln(x: x) / 2.3025851
+}
+
+func ln(x: view Float) ret Float {
+  # natural log by Newton on exp, enough for a dB report
+  var y: Float = 0.0
+  loop var i: Int = 0, i < 60, ++i {
+    let e: Float = exp(x: y)
+    y = y - (e - x) / e
+  }
+  ret y
+}
+
+func nullTest() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 64)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 1000.0
+    amplitude: 0.5
+    frameCount: 4800
+    channels: 1
+    sampleRate: rate
+  ))
+  let voiceId: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: -6.0)
+  let rendered: List(Float) = audio.renderOffline(frames: 4800)
+  # the reference: the sine's phase as the generator steps it, the -6 dB gain
+  # and the equal-power pan of a centered mono voice, each side its own
+  let gain: Float = pow(base: 10.0, exp: -6.0 / 20.0)
+  let leftGain: Float = cos(x: 0.78539816)
+  let rightGain: Float = sin(x: 0.78539816)
+  let step: Float = 6.2831855 * 1000.0 / (rate as Float)
+  var peak: Float = 0.0
+  loop var frame: Int = 0, frame < 4800, ++frame {
+    let wave: Float = 0.5 * sin(x: step * (frame as Float))
+    let left: Float = rendered.copyAtFallback(index: frame * 2, fallback: 0.0)
+    let right: Float = rendered.copyAtFallback(index: frame * 2 + 1, fallback: 0.0)
+    let leftDifference: Float = abs(value: left - wave * leftGain * gain)
+    let rightDifference: Float = abs(value: right - wave * rightGain * gain)
+    peak = max(a: peak, b: max(a: leftDifference, b: rightDifference))
+  }
+  log("null test: the difference is below -100 dBFS: {peakDecibels(peak: peak) < -100.0}")
+  audio.update()
+  log("voices ended: {audio.voicesEnded}")
+  let blocks: Int = audio.stopAudio()
+}
+
+# The scene of part 2, rendered in blocks of `blockFrames`
+func renderScene(blockFrames: view Int) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 512)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.5
+    frameCount: 9600
+    channels: 1
+    sampleRate: rate
+  ))
+  let late: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: -0.5
+    looping: false
+    atSample: 1000
+  )
+  let held: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.music
+    gainDecibels: -3.0
+    pan: 0.5
+    looping: true
+    atSample: 0
+  )
+  var rendered: List(Float) = audio.renderOfflineInBlocks(frames: 3000, blockFrames: blockFrames)
+  audio.stopVoice(voiceId: held)
+  let rest: List(Float) = audio.renderOfflineInBlocks(frames: 3000, blockFrames: blockFrames)
+  loop let sample: Float in rest {
+    rendered.add(value: sample)
+  }
+  let blocks: Int = audio.stopAudio()
+  ret rendered
+}
+
+func largestDifference(a: view List(Float), b: view List(Float)) ret Float {
+  var largest: Float = 0.0
+  loop var i: Int = 0, i < a.length(), ++i {
+    let difference: Float = abs(
+      value: a.copyAtFallback(index: i, fallback: 0.0) - b.copyAtFallback(index: i, fallback: 9.0)
+    )
+    largest = max(a: largest, b: difference)
+  }
+  ret largest
+}
+
+func blockSizes() {
+  let reference: List(Float) = renderScene(blockFrames: 512)
+  log("scene: {reference.length() / 2} frames")
+  let one: List(Float) = renderScene(blockFrames: 1)
+  let seventeen: List(Float) = renderScene(blockFrames: 17)
+  let sixtyFour: List(Float) = renderScene(blockFrames: 64)
+  log(
+    "blocks of 1, 17, 64 equal blocks of 512: {largestDifference(a: one, b: reference) is 0.0} {largestDifference(
+      a: seventeen
+      b: reference
+    ) is 0.0} {largestDifference(a: sixtyFour, b: reference) is 0.0}"
+  )
+}
+
+func exactStart() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  let click: Sound = audio.addSound(data: sineSoundData(
+    frequency: 12000.0
+    amplitude: 0.8
+    frameCount: 64
+    channels: 1
+    sampleRate: rate
+  ))
+  let voiceId: VoiceId = audio.playAt(
+    sound: click
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 1000
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: 2048)
+  var first: Int = -1
+  loop var frame: Int = 0, frame < 2048 and first < 0, ++frame {
+    if rendered.copyAtFallback(index: frame * 2, fallback: 0.0) is not 0.0 {
+      first = frame
+    }
+  }
+  # frame 1000 is the sine's 0, so its first non-zero sample is frame 1001
+  log("the first sound is at frame {first - 1}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func stopFade() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  var flat: SoundData = sineSoundData(
+    frequency: 0.0
+    amplitude: 0.0
+    frameCount: 4800
+    channels: 1
+    sampleRate: rate
+  )
+  loop var frame: Int = 0, frame < 4800, ++frame {
+    setSampleAt(samples: flat.samples, index: frame, value: 0.5)
+  }
+  let level: Sound = audio.addSound(data: flat)
+  let voiceId: VoiceId = audio.play(sound: level, bus: AudioBusKind.effects, gainDecibels: 0.0)
+  let before: List(Float) = audio.renderOffline(frames: 1024)
+  audio.stopVoice(voiceId: voiceId)
+  let fade: List(Float) = audio.renderOffline(frames: 1024)
+  var silentFrom: Int = -1
+  var falling: Bool = true
+  loop var frame: Int = 1, frame < 1024, ++frame {
+    let now: Float = fade.copyAtFallback(index: frame * 2, fallback: 0.0)
+    let earlier: Float = fade.copyAtFallback(index: frame * 2 - 2, fallback: 0.0)
+    if now > earlier {
+      falling = false
+    }
+    if now is 0.0 and silentFrom < 0 {
+      silentFrom = frame
+    }
+  }
+  log(
+    "a stop fades for {silentFrom} frames, never rising: {falling}; before it the level was steady: {before.copyAtFallback(
+      index: 2000
+      fallback: 0.0
+    ) > 0.35}"
+  )
+  audio.update()
+  log("the stopped voice ended: {audio.voicesEnded}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func duck() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  audio.duckWhilePlaying(
+    source: AudioBusKind.alerts
+    target: AudioBusKind.music
+    gainDecibels: -12.0
+  )
+  var flat: SoundData = sineSoundData(
+    frequency: 0.0
+    amplitude: 0.0
+    frameCount: 48000
+    channels: 1
+    sampleRate: rate
+  )
+  loop var frame: Int = 0, frame < 48000, ++frame {
+    setSampleAt(samples: flat.samples, index: frame, value: 0.5)
+  }
+  let level: Sound = audio.addSound(data: flat)
+  let alarm: Sound = audio.addSound(data: sineSoundData(
+    frequency: 880.0
+    amplitude: 0.0
+    frameCount: 9600
+    channels: 1
+    sampleRate: rate
+  ))
+  let music: VoiceId = audio.play(sound: level, bus: AudioBusKind.music, gainDecibels: 0.0)
+  let calm: List(Float) = audio.renderOffline(frames: 4800)
+  let full: Float = calm.copyAtFallback(index: 4799 * 2, fallback: 0.0)
+  let alert: VoiceId = audio.play(sound: alarm, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+  let ducked: List(Float) = audio.renderOffline(frames: 4800)
+  let down: Float = ducked.copyAtFallback(index: 4799 * 2, fallback: 0.0)
+  let after: List(Float) = audio.renderOffline(frames: 38400)
+  let back: Float = after.copyAtFallback(index: 38399 * 2, fallback: 0.0)
+  let decibels: Float = peakDecibels(peak: down / full)
+  log(
+    "the duck: 100 ms into the alert the music is at {floor(x: decibels + 0.5)} dB; after it, back to full: {back is full}"
+  )
+  let blocks: Int = audio.stopAudio()
+}
+
+func freePlaying() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: rate
+  ))
+  let voiceId: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: 0.0)
+  let first: List(Float) = audio.renderOffline(frames: 512)
+  audio.freeSound(sound: tone)
+  let second: List(Float) = audio.renderOffline(frames: 512)
+  log(
+    "freeing a playing sound ends its voice: {audio.voicesEnded}, and the rest is silent: {second.copyAtFallback(
+      index: 1000
+      fallback: 1.0
+    ) is 0.0}"
+  )
+  let blocks: Int = audio.stopAudio()
+}
+
+func main() {
+  nullTest()
+  blockSizes()
+  exactStart()
+  stopFade()
+  duck()
+  freePlaying()
+}

@@ -1,0 +1,57 @@
+# audio/Audio on the real default output (docs/audio-design.md §11 step 1): a
+# one-second 440 Hz sine at -14 dBFS through the stage-A render thread, then a
+# second one panned left and right. Passes when the device opened, its callback
+# ran for the whole time, the voices ended on their own, the render thread
+# rendered blocks, and the device played no silence for lack of samples
+# (RAE_REALTIME_CHECK=1 also fails it if the render thread allocated or locked;
+# RAE_REALTIME_REPORT=1 prints its block times). With no output device it says
+# so and passes, as a check on a machine without one has nothing to test.
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+func main() {
+  var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
+  if audio.offline {
+    log("audioSine: no output device; nothing to test")
+    let stoppedBlocks: Int = audio.stopAudio()
+    ret
+  }
+  log(
+    "audioSine: {audio.sampleRate} Hz, {audio.channels} channels, a period of {audio.periodFrames} frames"
+  )
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.2
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let middle: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: 0.0)
+  sleep(ms: 1100)
+  let left: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: -3.0
+    pan: -1.0
+    looping: false
+    atSample: 0
+  )
+  sleep(ms: 500)
+  audio.setVoicePan(voiceId: left, pan: 1.0)
+  sleep(ms: 700)
+  audio.update()
+  let callbacks: Int = audio.deviceCallbacks()
+  let underrun: Int = audio.underrunFrames()
+  let ended: Int = audio.voicesEnded
+  let blocks: Int = audio.stopAudio()
+  log(
+    "audioSine: {callbacks} callbacks, {blocks} blocks rendered, {ended} voices ended, {underrun} frames of underrun"
+  )
+  if callbacks < 100 or blocks < 100 or ended is not 2 or underrun > 0 {
+    log("audioSine: FAILED")
+    exit(code: 1)
+  }
+  log("audioSine: passed")
+}
