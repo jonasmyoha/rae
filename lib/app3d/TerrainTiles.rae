@@ -23,11 +23,20 @@
 # gridSide), so when the player crosses into the next cell only the row or
 # column that came into view is rewritten, not the whole grid.
 #
+# AN APP'S OWN TERRAIN (createAppTerrainTiles; docs/open-world-tiles.md (b)):
+# the heights and ground kinds come from the app, not WorldBiome. A tile that
+# moves to a new cell is listed in `wanted` and not drawn until the app answers
+# it with a TerrainPatch (app3d/TerrainPatch, commitTerrainPatch); the
+# patches' kinds go into a wrapping kind map (two RGBA8 layers of the terrain
+# texture array, uploaded by uploadTerrainKinds once a frame) that
+# terrain_kinds.wgsl paints per pixel.
+#
 # A HOLE where a finer ground covers it (setTerrainTilesHole): a coarse far
 # ground drawn under a near one leaves out every quad wholly inside the
 # near one's area, so it is not drawn twice there (seen from below the near
 # ground, it was a second terrain 1 m under the first).
 import Math
+import Vec3
 open MeshStore
 import RendererDeferred
 open Math3d
@@ -37,12 +46,15 @@ open WorldBiome
 open GbufferTerrain
 open Gbuffer
 open gpu/GpuResources
+open app3d/TerrainPatch
 
 # One tile: its mesh and the cell it covers now
 type TerrainTile {
   meshId: Int
   cellX: Int
   cellY: Int
+  # An app terrain's tile is drawn once its patch is committed
+  ready: Bool = true
 }
 
 type TerrainTiles {
@@ -69,6 +81,14 @@ type TerrainTiles {
   holeMaxY: Float = 0.0
   # Reused staging list for one tile's indices
   scratchIndices: List(Int) = List.create(Int, cap: 0)
+  # An app's own terrain (createAppTerrainTiles): the cells it must answer with a patch, and
+  # the kind map's two layers (kinds 0 - 3 and 4 - 7, a texel a lattice point) and whether they
+  # changed since the last upload
+  appSource: Bool = false
+  wanted: List(TerrainCell) = List.create(TerrainCell, cap: 0)
+  kindTexelsLow: List(Int) = List.create(Int, cap: 0)
+  kindTexelsHigh: List(Int) = List.create(Int, cap: 0)
+  kindsChanged: Bool = false
 }
 
 # The pool: gridSide x gridSide tiles of `segments` x `segments` quads, each
@@ -109,6 +129,41 @@ func createTerrainTiles(
     tiles: own tiles
     scratchVerts: own scratch
   }
+}
+
+# The pool for an app's own terrain: as createTerrainTiles, but the tiles ask the app for their
+# patches (`wanted`, commitTerrainPatch) and the kind map is made (all kind 0)
+func createAppTerrainTiles(
+  renderer: mod DeferredRenderer
+  gridSide: view Int
+  cellSize: view Float
+  segments: view Int
+) ret TerrainTiles {
+  var tiles: TerrainTiles = createTerrainTiles(
+    renderer: renderer
+    gridSide: gridSide
+    cellSize: cellSize
+    segments: segments
+    groundZ: 0.0
+    biome: defaultBiomeConfig()
+  )
+  tiles.appSource = true
+  let texels: Int = terrainKindMapSide * terrainKindMapSide
+  tiles.kindTexelsLow = List.create(Int, cap: texels)
+  tiles.kindTexelsHigh = List.create(Int, cap: texels)
+  let first: Int = terrainKindTexel(
+    a: 1.0
+    b: 0.0
+    c: 0.0
+    d: 0.0
+  )
+  loop var i: Int = 0, i < texels, ++i {
+    tiles.kindTexelsLow.add(value: first)
+    tiles.kindTexelsHigh.add(value: 0)
+  }
+  terrainInitArray(w: terrainKindMapSide, h: terrainKindMapSide)
+  tiles.kindsChanged = true
+  ret tiles
 }
 
 # The ground height at world (`x`, `y`)
@@ -161,7 +216,16 @@ func updateTerrainTiles(
           meshId = tile.meshId
         }
       }
-      if meshId > 0 {
+      if meshId > 0 and tiles.appSource {
+        # the app answers it (commitTerrainPatch); hidden until then
+        if let tile: mod TerrainTile = tiles.tiles.modAt(index: slot) {
+          tile.cellX = wantX
+          tile.cellY = wantY
+          tile.ready = false
+        }
+        tiles.wanted.add(value: TerrainCell { x: wantX, y: wantY })
+        moved = true
+      } else if meshId > 0 {
         reshapeTerrainTile(
           tiles: tiles
           renderer: renderer
@@ -253,7 +317,7 @@ func drawTerrainTiles(
   time: view Float
 ) {
   loop let tile: view TerrainTile in tiles.tiles {
-    if tile.meshId >= 1 and tile.cellX is not 1000000000 {
+    if tile.meshId >= 1 and tile.cellX is not 1000000000 and tile.ready {
       let model: Mat4 = mat4Translate(
         x: tile.cellX.toFloat() * tiles.cellSize
         y: tile.cellY.toFloat() * tiles.cellSize
@@ -394,4 +458,180 @@ func cutTerrainTileHole(
       indices: tiles.scratchIndices
     )
   }
+}
+
+# ----- an app's own terrain -------------------------------------------------
+# The app's answer for one wanted cell: its tile's mesh from the patch's heights (normals from
+# the border too, so no seam), its kinds into the kind map; the tile is drawn from now on. False
+# when no tile waits for that cell (the window moved on).
+func commitTerrainPatch(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  patch: view TerrainPatch
+) ret Bool {
+  let slot: Int = terrainTileWrap(value: patch.cellY, side: tiles.gridSide) * tiles.gridSide + terrainTileWrap(
+    value: patch.cellX
+    side: tiles.gridSide
+  )
+  var meshId: Int = 0
+  if let tile: view TerrainTile = tiles.tiles.viewAt(index: slot) {
+    if tile.cellX is patch.cellX and tile.cellY is patch.cellY {
+      meshId = tile.meshId
+    }
+  }
+  var still: List(TerrainCell) = List.create(TerrainCell, cap: tiles.wanted.length)
+  loop let cell: view TerrainCell in tiles.wanted {
+    if cell.x is not patch.cellX or cell.y is not patch.cellY {
+      still.add(value: cell)
+    }
+  }
+  tiles.wanted = still
+  if meshId < 1 or patch.segments is not tiles.segments {
+    ret false
+  }
+  let segments: Int = tiles.segments
+  let spacing: Float = tiles.cellSize / segments.toFloat()
+  loop var j: Int = 0, j <= segments, ++j {
+    loop var i: Int = 0, i <= segments, ++i {
+      let normal: Vec3 = terrainPatchNormal(
+        patch: patch
+        i: i
+        j: j
+        cellSize: tiles.cellSize
+      )
+      let base: Int = (j * (segments + 1) + i) * 8
+      tiles.scratchVerts.set(index: base, value: (i - segments / 2).toFloat() * spacing)
+      tiles.scratchVerts.set(index: base + 1, value: (j - segments / 2).toFloat() * spacing)
+      tiles.scratchVerts.set(index: base + 2, value: terrainPatchHeight(patch: patch, i: i, j: j))
+      tiles.scratchVerts.set(index: base + 3, value: normal.x)
+      tiles.scratchVerts.set(index: base + 4, value: normal.y)
+      tiles.scratchVerts.set(index: base + 5, value: normal.z)
+      tiles.scratchVerts.set(index: base + 6, value: i.toFloat() / segments.toFloat())
+      tiles.scratchVerts.set(index: base + 7, value: j.toFloat() / segments.toFloat())
+      # its kinds, at its lattice point in the wrapping map
+      let texel: Int = terrainKindMapWrap(
+        index: terrainLatticeIndex(cell: patch.cellY, i: j, segments: segments)
+      ) * terrainKindMapSide + terrainKindMapWrap(
+        index: terrainLatticeIndex(cell: patch.cellX, i: i, segments: segments)
+      )
+      tiles.kindTexelsLow.set(
+        index: texel
+        value: terrainKindTexel(
+          a: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 0
+          )
+          b: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 1
+          )
+          c: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 2
+          )
+          d: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 3
+          )
+        )
+      )
+      tiles.kindTexelsHigh.set(
+        index: texel
+        value: terrainKindTexel(
+          a: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 4
+          )
+          b: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 5
+          )
+          c: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 6
+          )
+          d: terrainPatchWeight(
+            patch: patch
+            i: i
+            j: j
+            kind: 7
+          )
+        )
+      )
+    }
+  }
+  RendererDeferred.updateMeshVerts(
+    renderer: renderer
+    mesh: meshHandle(id: meshId, generation: 0)
+    verts: tiles.scratchVerts
+    vertCount: (segments + 1) * (segments + 1)
+  )
+  if terrainTilesHasHole(tiles: tiles) {
+    cutTerrainTileHole(
+      tiles: tiles
+      renderer: renderer
+      meshId: meshId
+      cellX: patch.cellX
+      cellY: patch.cellY
+    )
+  }
+  if let tile: mod TerrainTile = tiles.tiles.modAt(index: slot) {
+    tile.ready = true
+  }
+  tiles.kindsChanged = true
+  ret true
+}
+
+# The kind map to the GPU when patches changed it (once a frame, after the commits)
+func uploadTerrainKinds(tiles: mod TerrainTiles) {
+  if not tiles.appSource or not tiles.kindsChanged {
+    ret
+  }
+  terrainUploadLayer(
+    layer: 0
+    pixels: tiles.kindTexelsLow.data
+    w: terrainKindMapSide
+    h: terrainKindMapSide
+  )
+  terrainUploadLayer(
+    layer: 1
+    pixels: tiles.kindTexelsHigh.data
+    w: terrainKindMapSide
+    h: terrainKindMapSide
+  )
+  tiles.kindsChanged = false
+}
+
+# The kinds shader (terrain_kinds.wgsl) for an app's own terrain, its kinds looking as `looks`
+# say (app3d/TerrainPatch TerrainKindLook), its kind map's spacing the tiles'
+func setTerrainKindsShader(
+  renderer: mod DeferredRenderer
+  tiles: view TerrainTiles
+  looks: view List(TerrainKindLook)
+) {
+  var constants: List(ShaderConstant) = terrainKindConstants(looks: looks)
+  constants.add(
+    value: { name: "RAE_KINDS_SPACING", value: tiles.cellSize / tiles.segments.toFloat() }
+  )
+  RendererDeferred.rendererSetTerrainShaderWithConstants(
+    renderer: renderer
+    shader: shader(
+      files: ["lib/grass_field.wgsl", "lib/wind.wgsl", "lib/snow.wgsl", "lib/terrain_kinds.wgsl"]
+    )
+    constants: own constants
+  )
 }

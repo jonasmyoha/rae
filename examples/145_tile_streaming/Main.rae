@@ -17,6 +17,9 @@
 # The camera flies on its own over the grid. A "[tiles]" line every two
 # seconds says how many slots are held, the loads and the let-gos.
 #
+#   RAE_TILES_TERRAIN=1  the ground as an app's own terrain (TerrainGround.rae): Rae's terrain
+#                      tiles with this example's hills, ridges and kinds, in place of the flat
+#                      ground quads
 #   RAE_TILES_TEST=1   headless: 900 frames of a 2 km flight at a fixed step,
 #                      then one "[tiletest]" line (never more tiles than slots,
 #                      every held slot drawn, free slots empty, the tiles round
@@ -37,6 +40,7 @@ open Gbuffer
 open RendererDeferred
 open RendererDeferredShadow
 open Rendergraph
+open app3d/TerrainTiles
 open Shadow3d
 open gpu/GpuResources
 open ecs/Entity
@@ -209,6 +213,11 @@ func writeTile(
     groundPaint = paintSand
     otherGround = paintGrass
   }
+  # No flat ground quad under an app's own terrain (TerrainGround.rae)
+  var groundQuads: Int = 1
+  if Sys.getEnv(name: "RAE_TILES_TERRAIN") is "1" {
+    groundQuads = 0
+  }
   let laid: Bool = putSlotQuad(
     slotMeshes: slotMeshes
     paint: groundPaint
@@ -223,7 +232,7 @@ func writeTile(
     renderer: renderer
     slot: slot
     paint: groundPaint
-    quads: 1
+    quads: groundQuads
   )
   commitSlotQuads(
     slotMeshes: slotMeshes
@@ -390,6 +399,9 @@ func flightPoint(seconds: view Float) ret Vec3 {
 
 func renderTiles(
   renderer: mod DeferredRenderer
+  terrain: view TerrainTiles
+  terrainOn: view Bool
+  seconds: view Float
   slotMeshes: mod SlotMeshes
   farTiles: mod FarTiles
   streamer: view TileStreamer
@@ -428,6 +440,14 @@ func renderTiles(
           light: light
           aspect: aspect
         )
+        if terrainOn {
+          drawTerrainTiles(
+            tiles: terrain
+            cache: renderer.passes.gbuffer
+            resources: resources
+            time: seconds
+          )
+        }
         drawSlotMeshes(
           cache: renderer.passes.gbuffer
           resources: resources
@@ -539,6 +559,16 @@ func main() ret Int {
   var light: Light3d = defaultLight3d()
   light.clearColor = Vec3 { x: 0.62, y: 0.76, z: 0.9 }
   let testing: Bool = Sys.getEnv(name: "RAE_TILES_TEST").length() > 0
+  let terrainOn: Bool = Sys.getEnv(name: "RAE_TILES_TERRAIN") is "1"
+  var terrain: TerrainTiles = createAppTerrainTiles(
+    renderer: renderer
+    gridSide: 1
+    cellSize: 18.0
+    segments: 2
+  )
+  if terrainOn {
+    terrain = createExampleTerrain(renderer: renderer)
+  }
   let startTime: Float64 = Gpu2d.nowSeconds()
   var seconds: Float = 0.0
   var frames: Int = 0
@@ -554,6 +584,14 @@ func main() ret Int {
     let ahead: Vec3 = flightPoint(seconds: seconds + 2.0)
     camera.position = at
     camera.target = Vec3 { x: ahead.x + 60.0, y: ahead.y, z: 0.0 }
+    if terrainOn {
+      updateExampleTerrain(
+        tiles: terrain
+        renderer: renderer
+        x: camera.target.x
+        y: camera.target.y
+      )
+    }
     streamWorld(
       streamer: streamer
       allocator: allocator
@@ -582,6 +620,9 @@ func main() ret Int {
     if Gpu2d.renderGate() {
       renderTiles(
         renderer: renderer
+        terrain: terrain
+        terrainOn: terrainOn
+        seconds: seconds
         slotMeshes: slotMeshes
         farTiles: farTiles
         streamer: streamer

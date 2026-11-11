@@ -1,0 +1,42 @@
+# app3d/TerrainPatchBodies — an app terrain's ground in the physics world (docs/open-world-tiles.md
+# (b)): a static Box3D height field made from one TerrainPatch (app3d/TerrainPatch), every `step`-th
+# of its points, so what is walked on is what is drawn. An app makes one per content tile when it
+# loads and removes it when the tile goes (box3d/ecs/VenueMesh removeVenueHeightField), as
+# app3d/WalkerPhysics' one following field does for a WorldBiome terrain.
+import Math
+import Vec3
+import Quat
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/VenueMesh
+open app3d/TerrainPatch
+
+# A height field of `patch`'s points every `step` (segments a multiple of it), with `def`'s
+# material and filter; the shape, or none when Box3D refused it
+func addTerrainPatchField(
+  physics: mod Physics
+  patch: view TerrainPatch
+  cellSize: view Float
+  step: view Int
+  def: view ShapeDef
+) ret opt ShapeId {
+  let count: Int = patch.segments / step + 1
+  let spacing: Float = cellSize / patch.segments.toFloat() * step.toFloat()
+  # Box3D's field is a grid over its local x and z with the heights along local y; a quarter
+  # turn about x stands it up, so column i is world x = left + i * spacing and row j is world
+  # y = top - j * spacing (app3d/WalkerPhysics addGroundAround)
+  let left: Float = terrainPatchX(patch: patch, i: 0, cellSize: cellSize)
+  let top: Float = terrainPatchY(patch: patch, j: patch.segments, cellSize: cellSize)
+  ret addVenueHeightField(
+    physics: physics
+    heights: terrainPatchFieldHeights(patch: patch, step: step)
+    countX: count
+    countZ: count
+    scale: Vec3 { x: spacing, y: 1.0, z: spacing }
+    transform: Transform {
+      position: Vec3 { x: left, y: top, z: 0.0 }
+      rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: Math.pi * 0.5)
+    }
+    def: def
+  )
+}
