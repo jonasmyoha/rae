@@ -31,6 +31,7 @@ open app3d/TimeOfDay
 open Climate
 open app3d/PropField
 open app3d/PropSeason
+open app3d/GroundPalette
 open treeGen/TreeKind
 import stylizedTrees/ReferenceTrees
 import Vec3
@@ -317,6 +318,23 @@ func labReferenceTreeSeason() ret PropSeason {
 
 func labSummerLeaves() ret PropLeaves {
   ret PropLeaves { tint: Vec3.create(x: 1.0, y: 1.0, z: 1.0), loss: 0.0 }
+}
+
+# The ground's grass at the lab's slow temperature now (app3d/GroundPalette, as the walkers')
+func labGroundPalette(season: view LabSeason) ret GroundPalette {
+  ret groundPaletteAt(
+    slow: climateSlowAt(
+      climate: season.climate
+      east: 0.0
+      north: 0.0
+      height: 0.0
+    )
+    warming: climateWarming(
+      latitude: season.latitude
+      year: season.clock.year
+      dayOfYear: season.clock.dayOfYear
+    )
+  )
 }
 
 func labTreeLeaves(season: view LabSeason, propSeason: view PropSeason) ret PropLeaves {
