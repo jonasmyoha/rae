@@ -1,0 +1,34 @@
+# A `blocking` extern's `mod` out-parameter inside a spawned task. In a task the
+# call runs on a blocking-call thread while the task suspends; the `mod`
+# argument must point at storage that outlives the suspended step (the task
+# frame's slot), and the value written there must be what the task reads after
+# it resumes. Sys.readFileBytes (`outLen`) answered an empty list in a task
+# and Image.loadPng (`width`, `height`, passed on from its own `mod`
+# parameters) answered 0 x 0, while both worked when called directly.
+open Image
+import Sys
+
+const caseDir: String = "tests/cases/1403_spawn_blocking_mod_out/"
+
+func countBytes(path: copy String) ret Int {
+  ret readFileBytes(path: path).length()
+}
+
+func pngSize(path: copy String) ret Int {
+  var width: Int = 0
+  var height: Int = 0
+  let pixels: Buffer(Int) = loadPng(path: path, width: width, height: height)
+  unsafe {
+    rae_ext_rae_buf_free(buf: pixels)
+  }
+  ret width * 100 + height
+}
+
+func main() {
+  log("bytes called: {countBytes(path: "{caseDir}data.bin")}")
+  let bytesTask: Task(Int) = spawn countBytes(path: "{caseDir}data.bin")
+  log("bytes spawned: {bytesTask.get()}")
+  log("png called: {pngSize(path: "{caseDir}tiny.png")}")
+  let pngTask: Task(Int) = spawn pngSize(path: "{caseDir}tiny.png")
+  log("png spawned: {pngTask.get()}")
+}
