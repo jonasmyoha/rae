@@ -32,6 +32,8 @@ typedef struct {
   char native_link_linux[128];
   char native_sources_device[512];
   char native_defines_device[128];
+  char native_sources_android[512];
+  char native_defines_android[128];
   /* the deps THIS package's own pack declares (by name): what its files may
    * reach besides themselves and the stdlib */
   char uses[16][128];
@@ -436,6 +438,8 @@ static bool resolve_pack_deps(const RaePack* pack, const char* pack_dir_in, int 
       str_copy(found->native_link_linux, sizeof(found->native_link_linux), nested.native_link_linux);
       str_copy(found->native_sources_device, sizeof(found->native_sources_device), nested.native_sources_device);
       str_copy(found->native_defines_device, sizeof(found->native_defines_device), nested.native_defines_device);
+      str_copy(found->native_sources_android, sizeof(found->native_sources_android), nested.native_sources_android);
+      str_copy(found->native_defines_android, sizeof(found->native_defines_android), nested.native_defines_android);
       bool nested_ok = check_own_pack(&s_deps[index], &nested, own_pack) &&
                        resolve_pack_deps(&nested, s_deps[index].dir, index, depth + 1);
       raepack_free(&nested);
@@ -474,6 +478,8 @@ bool rae_deps_native_at(int index, RaeDepNative* out) {
   out->link_linux = dep->native_link_linux;
   out->sources_device = dep->native_sources_device;
   out->defines_device = dep->native_defines_device;
+  out->sources_android = dep->native_sources_android;
+  out->defines_android = dep->native_defines_android;
   return true;
 }
 

@@ -16,6 +16,7 @@
 # Offline there is no device: host time is the sample time at the nominal
 # rate, exactly, starting at 0.
 import Math
+import String
 open audio/AudioGlue
 open audio/AudioMixer
 open collections/SpscRing
@@ -85,6 +86,18 @@ func deviceOutputLatencyFrames(device: view Int, sampleRate: view Int) ret Int {
     }
     ret buffered
   }
+}
+
+# The platform audio system the device runs on ("Core Audio", "AAudio",
+# "WASAPI", "PulseAudio", "Web Audio", ...); "" offline
+func deviceBackendName(device: view Int) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 64)
+  bytes.addDefaults(count: 64)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_device_backend_name(device: device, into: bytes.data, capacity: 64)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
 }
 
 # One observation: sample `sampleTime` reaches the speaker at `hostNs`. A

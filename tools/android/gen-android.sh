@@ -101,7 +101,7 @@ if grep -q 'box3d/box3d.h' "$gen/app.c"; then
 fi
 # The packages with C (a `native` block, docs/toolchain-and-packages-decision.md): an app whose C
 # includes a package's header compiles its sources into the app, with its options.
-package_lines=$(cd "$ex_dir" && "$rae" tree --native 2>/dev/null || true)
+package_lines=$(cd "$ex_dir" && "$rae" tree --native-android 2>/dev/null || true)
 if [ -n "$package_lines" ]; then
   tab=$(printf '\t')
   while IFS="$tab" read -r package_name package_header package_install package_sources package_defines; do

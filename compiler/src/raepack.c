@@ -752,10 +752,12 @@ static bool parse_native(RaePackParser* parser, RaePack* pack, RaePackBlock* blo
     else if (str_eq_cstr(field->key, "linkLinux")) slot = &pack->native_link_linux;
     else if (str_eq_cstr(field->key, "sourcesDevice")) slot = &pack->native_sources_device;
     else if (str_eq_cstr(field->key, "definesDevice")) slot = &pack->native_defines_device;
+    else if (str_eq_cstr(field->key, "sourcesAndroid")) slot = &pack->native_sources_android;
+    else if (str_eq_cstr(field->key, "definesAndroid")) slot = &pack->native_defines_android;
     if (!slot || field->value.kind != RAEPACK_VALUE_STRING) {
       diag_error(parser->file_path, (int)field->line, (int)field->column,
                  "a native field is a string: build, header, include, link, linkBrowser, linkLinux, "
-                 "sourcesDevice or definesDevice");
+                 "sourcesDevice, definesDevice, sourcesAndroid or definesAndroid");
       parser->had_error = true;
       return false;
     }

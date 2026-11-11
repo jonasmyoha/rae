@@ -17,8 +17,10 @@ bool rae_package_native_install(int index, char* out, size_t out_len);
 bool rae_package_native_prepare_all(void);
 
 /* For `rae tree --native` and the device scripts: one line per native package, tab separated:
- * name, header, install folder, device sources, device defines file. */
-bool rae_package_native_print(void);
+ * name, header, install folder, device sources, device defines file. `rae tree
+ * --native-android` (android): Android's sources and defines where the pack gives them
+ * (sourcesAndroid, definesAndroid), else the device ones. */
+bool rae_package_native_print(bool android);
 
 /* For `rae toolchain gc`: add each package the pack at `pack_path` pins, and those its packages pin,
  * to `keep`, one "/<name>/<pin>" per line. */

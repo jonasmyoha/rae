@@ -44,6 +44,8 @@ typedef struct {
   const char* link_linux;
   const char* sources_device;
   const char* defines_device;
+  const char* sources_android;
+  const char* defines_android;
 } RaeDepNative;
 bool rae_deps_native_at(int index, RaeDepNative* out);
 
