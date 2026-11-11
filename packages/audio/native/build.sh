@@ -25,6 +25,10 @@ cp "$HERE/rae_audio.h" "$HERE/rae_audio_glue.c" "$INSTALL/src/"
 # AVAudioSession calls are Objective-C); the same text under a .m name
 cp "$HERE/rae_audio_glue.c" "$INSTALL/src/rae_audio_glue.m"
 cp "$HERE/miniaudio/miniaudio.h" "$HERE/miniaudio/stb_vorbis.c" "$INSTALL/src/miniaudio/"
+# Android's Java half of the session (the audio focus, MediaSession), which an
+# Android build compiles with the app's Java (sourcesAndroid)
+mkdir -p "$INSTALL/src/java/org/rae/audio"
+cp "$HERE/android/org/rae/audio/RaeAudioSession.java" "$INSTALL/src/java/org/rae/audio/"
 echo "" > "$INSTALL/DEVICE_DEFINES"
 
 objs="$(mktemp -d)"

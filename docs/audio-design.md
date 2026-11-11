@@ -845,6 +845,26 @@ green.
    6e-5 of afconvert's own decodes (one 16-bit step), seeks within -40 dB of
    the whole decode, a stream equal to its decode; the same check passes on
    the Mac.
+
+   **Android's session (2026-11-12), `packages/audio` 0.10.0:** the package
+   carries its Android Java (`native/android/.../RaeAudioSession.java`,
+   listed in `sourcesAndroid`, compiled by `gen-android.sh` with the app's).
+   `audio/AudioSession` turns an intent into the audio focus in Rae: music
+   takes it (`GAIN`, media), an alert or spoken text takes it for a while and
+   lets others duck (`GAIN_TRANSIENT_MAY_DUCK`, alarm / assistant), ambient
+   asks for none; the engine asks when its session activates and gives it back
+   a second after the last sound, as on iOS. A focus loss is
+   `interruptionBegan`, its return `interruptionEnded`, a duck the new
+   `ducked` event, "becoming noisy" `routeLost`. `audio/NowPlaying` is a
+   MediaSession (metadata, playback state, play / pause / next / previous /
+   position as RemoteCommandEvents). `RaeActivity` hands media keys to the
+   system's media handling, as SDL took them as keys. The focus listener has
+   a text of its own: Android matched an abandon by a text two Rae apps could
+   share (one app's give-back removed the other's focus on the emulator).
+   `checks/audioNowPlaying` on the emulator: the focus held and given back
+   (`dumpsys audio`), pause / play / next / previous from `cmd media_session
+   dispatch` and from `input keyevent KEYCODE_MEDIA_PLAY_PAUSE`, a duck under
+   another app's alert, an interruption by another app's music.
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.

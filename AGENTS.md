@@ -854,7 +854,8 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   `lib/` module imports it. Pushing with `--follow-tags` publishes the tags.
 - **A package with its own C: the pack's `native` block** (`build`, `header`, `include`, `link`,
   `linkBrowser`, `linkLinux`, `sourcesDevice`, `definesDevice`, and `sourcesAndroid`/`definesAndroid`
-  when Android needs other sources than iOS, as for an Objective-C `.m`; `packages/sql` is the model). It builds
+  when Android needs other sources than iOS, as for an Objective-C `.m`; a `.java` there is the package's
+  Android Java, compiled with the app's; `packages/sql` is the model). It builds
   on first need into `~/.rae/packages/<name>/<pin>/install`, and a program links it only when its C
   includes `header`. No compiler code names a library. `lib/box3d` cannot move this way yet: `lib/app3d`
   imports it.

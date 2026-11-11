@@ -160,6 +160,12 @@ int64_t rae_audio_codec_dequeue_output(int64_t codec, int64_t* info, int64_t tim
 int64_t rae_audio_codec_take_output(int64_t codec, int64_t index, int64_t offset, uint8_t* into, int64_t count);
 int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallback);
 
+/* Android's audio focus (org.rae.audio.RaeAudioSession, through JNI): request
+ * with an AudioManager.AUDIOFOCUS_GAIN* value and AudioAttributes' usage and
+ * content type (1 granted, 2 delayed, 0 refused or not Android); abandon it. */
+int64_t rae_audio_android_focus_request(int64_t gain, int64_t usage, int64_t content);
+int64_t rae_audio_android_focus_abandon(void);
+
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at
  * reads up to `count` bytes at `offset` (pread), the count read or -errno. */

@@ -473,9 +473,11 @@ int64_t rae_audio_session_set_active(int64_t active) {
   return 0;
 }
 
+#if !defined(__ANDROID__)
 int64_t rae_audio_session_observe(void) {
   return 0;
 }
+#endif
 #endif
 
 /* ---- decoders (audio/Decoder): one miniaudio call each ------------------ */
@@ -874,6 +876,147 @@ int64_t rae_audio_remote_enable(int64_t mask) {
 void rae_audio_run_loop_pump(void) {
   CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true);
 }
+#elif defined(__ANDROID__)
+/* ---- Android: the audio focus and MediaSession -----------------------------
+ * Platform reason: Java-only APIs (AudioManager's focus, the noisy broadcast,
+ * MediaSession), in the package's org.rae.audio.RaeAudioSession; each function
+ * here makes one call to it through JNI. Its events come back through the two
+ * native methods below into the queues the iOS observers fill. */
+#include <jni.h>
+#include <pthread.h>
+#include <SDL3/SDL_system.h>
+
+static jclass g_rae_session_class = NULL;
+static pthread_mutex_t g_rae_session_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int rae_session_failed(JNIEnv* env) {
+  if ((*env)->ExceptionCheck(env)) {
+    (*env)->ExceptionClear(env);
+    return 1;
+  }
+  return 0;
+}
+
+/* The class, through the activity's class loader: a thread that did not start
+ * in Java finds only the system's classes with FindClass */
+static jclass rae_session_class(JNIEnv* env) {
+  pthread_mutex_lock(&g_rae_session_lock);
+  if (!g_rae_session_class && env) {
+    jobject activity = (jobject)SDL_GetAndroidActivity();
+    if (activity) {
+      jclass activityClass = (*env)->GetObjectClass(env, activity);
+      jmethodID getLoader = (*env)->GetMethodID(env, activityClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+      jobject loader = (*env)->CallObjectMethod(env, activity, getLoader);
+      jclass loaderClass = (*env)->GetObjectClass(env, loader);
+      jmethodID loadClass = (*env)->GetMethodID(env, loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+      jstring name = (*env)->NewStringUTF(env, "org.rae.audio.RaeAudioSession");
+      jclass found = (jclass)(*env)->CallObjectMethod(env, loader, loadClass, name);
+      if (!rae_session_failed(env) && found) g_rae_session_class = (jclass)(*env)->NewGlobalRef(env, found);
+      (*env)->DeleteLocalRef(env, name);
+      (*env)->DeleteLocalRef(env, loaderClass);
+      (*env)->DeleteLocalRef(env, loader);
+      (*env)->DeleteLocalRef(env, activityClass);
+      (*env)->DeleteLocalRef(env, activity);
+    }
+  }
+  pthread_mutex_unlock(&g_rae_session_lock);
+  return g_rae_session_class;
+}
+
+/* A static int method of no arguments or of ints, by name */
+static int64_t rae_session_int(const char* name, const char* signature, int64_t a, int64_t b, int64_t c) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_session_class(env) : NULL;
+  if (!type) return 0;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, name, signature);
+  if (!method || rae_session_failed(env)) return 0;
+  jint result = (*env)->CallStaticIntMethod(env, type, method, (jint)a, (jint)b, (jint)c);
+  return rae_session_failed(env) ? 0 : (int64_t)result;
+}
+
+int64_t rae_audio_android_focus_request(int64_t gain, int64_t usage, int64_t content) {
+  return rae_session_int("requestFocus", "(III)I", gain, usage, content);
+}
+
+int64_t rae_audio_android_focus_abandon(void) {
+  return rae_session_int("abandonFocus", "()I", 0, 0, 0);
+}
+
+int64_t rae_audio_session_observe(void) {
+  return rae_session_int("observe", "()I", 0, 0, 0);
+}
+
+int64_t rae_audio_remote_enable(int64_t mask) {
+  return rae_session_int("enable", "(I)I", mask, 0, 0);
+}
+
+int64_t rae_audio_now_playing_set(uint8_t* title_z, uint8_t* artist_z, uint8_t* album_z,
+                                  uint8_t* artwork_path_z, double duration, double position, double rate) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_session_class(env) : NULL;
+  if (!type) return 0;
+  jmethodID method = (*env)->GetStaticMethodID(
+      env, type, "show", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JJF)I");
+  if (!method || rae_session_failed(env)) return 0;
+  jstring title = (*env)->NewStringUTF(env, (const char*)title_z);
+  jstring artist = (*env)->NewStringUTF(env, (const char*)artist_z);
+  jstring album = (*env)->NewStringUTF(env, (const char*)album_z);
+  jstring artwork = (*env)->NewStringUTF(env, (const char*)artwork_path_z);
+  jlong durationMs = duration < 0 ? -1 : (jlong)(duration * 1000.0);
+  jint shown = (*env)->CallStaticIntMethod(env, type, method, title, artist, album, artwork, durationMs,
+                                           (jlong)(position * 1000.0), (jfloat)rate);
+  int failed = rae_session_failed(env);
+  (*env)->DeleteLocalRef(env, title);
+  (*env)->DeleteLocalRef(env, artist);
+  (*env)->DeleteLocalRef(env, album);
+  (*env)->DeleteLocalRef(env, artwork);
+  return failed ? 0 : (int64_t)shown;
+}
+
+int64_t rae_audio_now_playing_describe(uint8_t* into, int64_t capacity) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_session_class(env) : NULL;
+  if (!type) return 0;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, "describe", "()Ljava/lang/String;");
+  if (!method || rae_session_failed(env)) return 0;
+  jstring text = (jstring)(*env)->CallStaticObjectMethod(env, type, method);
+  if (rae_session_failed(env) || !text) return 0;
+  const char* utf8 = (*env)->GetStringUTFChars(env, text, NULL);
+  int64_t length = utf8 ? (int64_t)strlen(utf8) : 0;
+  if (length > capacity) length = capacity;
+  if (utf8) {
+    memcpy(into, utf8, (size_t)length);
+    (*env)->ReleaseStringUTFChars(env, text, utf8);
+  }
+  (*env)->DeleteLocalRef(env, text);
+  return length;
+}
+
+void rae_audio_now_playing_clear(void) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  jclass type = env ? rae_session_class(env) : NULL;
+  if (!type) return;
+  jmethodID method = (*env)->GetStaticMethodID(env, type, "clear", "()V");
+  if (!method || rae_session_failed(env)) return;
+  (*env)->CallStaticVoidMethod(env, type, method);
+  rae_session_failed(env);
+}
+
+/* The buttons' handlers run on Android's main looper, which runs by itself */
+void rae_audio_run_loop_pump(void) {}
+
+/* Java's events into the C queues */
+JNIEXPORT void JNICALL Java_org_rae_audio_RaeAudioSession_nativeEvent(JNIEnv* env, jclass type, jint kind,
+                                                                     jint value) {
+  (void)env; (void)type;
+  rae_audio_session_inject(kind, value);
+}
+
+JNIEXPORT void JNICALL Java_org_rae_audio_RaeAudioSession_nativeRemote(JNIEnv* env, jclass type, jint kind,
+                                                                      jlong value) {
+  (void)env; (void)type;
+  rae_audio_remote_inject(kind, value);
+}
 #else
 int64_t rae_audio_now_playing_set(uint8_t* title_z, uint8_t* artist_z, uint8_t* album_z,
                                   uint8_t* artwork_path_z, double duration, double position, double rate) {
@@ -891,6 +1034,16 @@ int64_t rae_audio_remote_enable(int64_t mask) {
   return 0;
 }
 void rae_audio_run_loop_pump(void) {}
+#endif
+#if !defined(__ANDROID__)
+/* The audio focus is Android's; elsewhere there is none to ask for */
+int64_t rae_audio_android_focus_request(int64_t gain, int64_t usage, int64_t content) {
+  (void)gain; (void)usage; (void)content;
+  return 0;
+}
+int64_t rae_audio_android_focus_abandon(void) {
+  return 0;
+}
 #endif
 
 /* ---- AAC through Android's AMediaCodec ------------------------------------
