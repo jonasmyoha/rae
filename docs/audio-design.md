@@ -683,7 +683,12 @@ green.
    the capture), both under `RAE_REALTIME_CHECK=1`; `checks/audioSine` plays
    on the real output with no underrun. Not yet: the iOS session (step 1's
    second half), `nextSafeSampleTime` with a device, and moving
-   `compiler/runtime/runtime_audio_sdl3.c`'s user to this package.
+   `compiler/runtime/runtime_audio_sdl3.c`'s user to this package. For the
+   iOS session in Objective-C: a package's `native` build (`build.sh`, `cc`)
+   compiles `.m` on the Mac, but the iOS project `tools/ios/gen-ios.sh`
+   writes is `project(RaeApp C)`, so a `.m` in `sourcesDevice` would not
+   compile for a device; that step adds `OBJC` there (and checks an iOS
+   build), or calls Objective-C through C as the runtime's Apple code does.
 
 2. **Streams and the music player.** The butler; dr_mp3, dr_flac, stb_vorbis;
    AAC through AudioToolbox; the Rae resampler (`good`); seek, gapless next;
