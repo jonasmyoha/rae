@@ -8,6 +8,9 @@
 # notes are played on the synth with the music bus muted (nothing is heard; a
 # person can unmute it with RAE_AUDIO_MIDI_LISTEN=1, and play a keyboard while
 # RAE_CHECK_SECONDS runs). Where there is no MIDI it says so and passes.
+# Android (MidiManager and AMidi) has no virtual ports for a program (they
+# need a MidiDeviceService): there it lists the devices, says so, and listens
+# to whatever devices there are for RAE_CHECK_SECONDS.
 import Math
 import String
 import Sys
@@ -42,6 +45,27 @@ func main() {
   let virtual: Bool = midi.createVirtualMidi(name: "Rae audioMidi")
   let connected: Int = midi.connectAllMidiSources()
   log("audioMidi: virtual ports {virtual}, listening to {connected} sources")
+  if not virtual {
+    log(
+      "audioMidi: no virtual ports here (Android needs a MidiDeviceService); listening to the devices only"
+    )
+    var listened: Int = 0
+    let wanted: String = getEnv(name: "RAE_CHECK_SECONDS")
+    var seconds: Int = 2
+    if wanted is not "" {
+      seconds = wanted.toInt()
+    }
+    loop var tick: Int = 0, tick < seconds * 100, ++tick {
+      sleep(ms: 10)
+      loop let message: MidiMessage in midi.pollMidi() {
+        listened = listened + 1
+        log("audioMidi: received {describe(message: message)}")
+      }
+    }
+    closeMidi(this: midi)
+    log("audioMidi: {listened} messages from devices; passed with nothing to loop back")
+    ret
+  }
   var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
   if getEnv(name: "RAE_AUDIO_MIDI_LISTEN") is not "1" {
     audio.setBusGain(bus: AudioBusKind.music, gainDecibels: -120.0)

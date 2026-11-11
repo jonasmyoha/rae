@@ -124,7 +124,9 @@ func main() {
   let blocks: Int = audio.stopAudio()
   freeSoundData(data: data)
   let expected: Int = audio.sampleRate * 2 - audio.roundTripFrames()
-  if data.frameCount < expected * 9 / 10 or take.lostSamples > 0 or callbacks < 100 {
+  # at least a second of callbacks, whatever the period (the Android emulator's
+  # is 4360 frames)
+  if data.frameCount < expected * 9 / 10 or take.lostSamples > 0 or callbacks * audio.periodFrames < audio.sampleRate {
     log("audioInput: FAILED (expected about {expected} frames)")
     exit(code: 1)
   }
