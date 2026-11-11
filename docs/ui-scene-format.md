@@ -947,8 +947,10 @@ how far the blur reaches, in design units (default 24). `tint` is a theme color 
 anything itself, unlike `BackdropImage`.
 
 How it is drawn (lib/Gpu2dCanvasBackdrop.rae): the canvas flushes, ends its pass, shrinks the frame
-to a quarter of its size and blurs it there (a separable Gaussian, one to three times across and
-down), opens its pass again and draws each node's own region of that copy. Every `BackdropBlur`
+to a quarter of its size, or an eighth for a blur of 32 pixels or more, and blurs it there with one
+25-tap Gaussian pass across and one down (the taps a quarter of the blur's sigma apart, so never
+more than about a texel), opens its pass again and draws each node's own region of that copy: four
+passes a copy (0.3.77; it was eight, the blur repeated up to three times with 13 taps). Every `BackdropBlur`
 node of a layer shares the one copy; a node in a later layer (a dialog's card over blurred tiles)
 takes a new one when that layer has drawn since. The frame's drawable must be sampleable: the
 surface asks for `TextureBinding` where it supports it, and where it does not, the frames after the
@@ -971,6 +973,12 @@ grow. The blur makes one copy every frame there, never kept: an image under the 
 still. Each of the copy's passes is a Metal command buffer of its own in wgpu-native: 2,197-2,592
 buffers a second with the blur, 702-739 without (about 15 more a frame), and their summed time
 overlaps (2.5-3.3 s a second against 0.53-0.63 s), so it counts waits, not only work.
+
+With four passes a copy (0.3.77), the same run: 1,763-1,853 buffers a second (about 9 more a frame
+than without the blur, not 15), their summed time 2.0-2.3 s a second, the longest 5.2-6.3 ms, and
+the frame interval during the swipes a median 8 ms, 90% 9 ms (2 of 558 over 9 ms).
+`checks/backdropBlur` (its radius 24): the gray across a tile ranges 3 levels, not 13; at radius 64
+it is even, at radius 8 the 20-unit stripes still show (a sigma of 4 units only halves them).
 
 `checks/backdropBlur` paints three tiles over stripes, reads the picture back, and counts the copies
 over 20 frames (the stripes move once, a box moves on top every frame).

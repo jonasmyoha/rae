@@ -31,12 +31,21 @@ open Gpu2dCanvasImage
 
 func nativeG2dSurfaceBindable() unsafe extern("rae_g2d_surface_bindable") ret Int
 
-# The copy is this many times smaller than the frame on each side
-const backdropShrink: Int = 4
+# The copy is this many times smaller than the frame on each side: a quarter, or an eighth for a
+# blur of 32 pixels or more (a smaller blur would be softened by the eighth's 8x8 average alone)
+func backdropShrinkFor(blurPixels: view Float) ret Int {
+  if blurPixels >= 32.0 {
+    ret 8
+  }
+  ret 4
+}
 
 type Gpu2dBackdrop {
   made: Bool = false
   down: RenderPipelineId = noRenderPipelineId()
+  down8: RenderPipelineId = noRenderPipelineId()
+  # The copy is this many times smaller than the frame (backdropShrinkFor)
+  shrink: Int = 4
   blur: RenderPipelineId = noRenderPipelineId()
   sampler: SamplerId = noSamplerId()
   # The passes' uniforms: the shrink, a blur across, a blur down
@@ -198,6 +207,15 @@ func ensureBackdropResources(backdrop: mod Gpu2dBackdrop, resources: mod GpuReso
     resources: resources
     shader: backdropShader
     vertexEntry: "vs"
+    fragmentEntry: "down8"
+    spec: backdropPipelineSpec(format: format as Int32)
+  ) {
+    backdrop.down8 = pipeline
+  }
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: backdropShader
+    vertexEntry: "vs"
     fragmentEntry: "blur"
     spec: backdropPipelineSpec(format: format as Int32)
   ) {
@@ -217,14 +235,18 @@ func ensureBackdropResources(backdrop: mod Gpu2dBackdrop, resources: mod GpuReso
   }
   ret isValidRenderPipeline(resources: resources, id: backdrop.down) and isValidRenderPipeline(
     resources: resources
-    id: backdrop.blur
-  ) and backdrop.uniforms.length is 3
+    id: backdrop.down8
+  ) and isValidRenderPipeline(resources: resources, id: backdrop.blur) and backdrop.uniforms.length is 3
 }
 
 # The copy's two textures at a quarter of the frame's size; the copy is the image `handle`
-func ensureBackdropTextures(canvas: mod Gpu2dCanvas, resources: mod GpuResources) ret Bool {
-  let width: Int = Math.max(a: 1, b: canvas.offscreenWidth / backdropShrink)
-  let height: Int = Math.max(a: 1, b: canvas.offscreenHeight / backdropShrink)
+func ensureBackdropTextures(
+  canvas: mod Gpu2dCanvas
+  resources: mod GpuResources
+  shrink: view Int
+) ret Bool {
+  let width: Int = Math.max(a: 1, b: canvas.offscreenWidth / shrink)
+  let height: Int = Math.max(a: 1, b: canvas.offscreenHeight / shrink)
   if width is canvas.backdrop.width and height is canvas.backdrop.height and isValidTextureView(
     resources: resources
     id: canvas.backdrop.viewA
@@ -403,8 +425,11 @@ func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
     canvas.backdrop.signing = false
     let same: Bool = canvas.backdrop.signature is canvas.backdrop.lastSignature and blurRadius is canvas.backdrop.lastBlur and canvas.backdrop.width is Math.max(
       a: 1
-      b: canvas.offscreenWidth / backdropShrink
-    ) and canvas.backdrop.height is Math.max(a: 1, b: canvas.offscreenHeight / backdropShrink)
+      b: canvas.offscreenWidth / canvas.backdrop.shrink
+    ) and canvas.backdrop.height is Math.max(
+      a: 1
+      b: canvas.offscreenHeight / canvas.backdrop.shrink
+    )
     canvas.backdrop.lastSignature = canvas.backdrop.signature
     canvas.backdrop.lastBlur = blurRadius
     if same {
@@ -429,14 +454,15 @@ func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
     if ensureBackdropResources(backdrop: canvas.backdrop, resources: resources) is false {
       ret false
     }
-    if ensureBackdropTextures(canvas: canvas, resources: resources) is false {
+    let shrink: Int = backdropShrinkFor(blurPixels: blurRadius * scale)
+    if ensureBackdropTextures(canvas: canvas, resources: resources, shrink: shrink) is false {
       ret false
     }
-    # The blur's sigma is half its radius, in the copy's texels; each pass reaches 3 of its sigma
-    # in 13 taps 2 steps apart per sigma, and n passes add up to sigma * sqrt(n)
-    let sigma: Float = Math.max(a: 0.5, b: blurRadius * scale / backdropShrink.toFloat() / 2.0)
-    let passes: Int = Math.min(a: 3, b: Math.max(a: 1, b: (sigma / 3.0).ceil().toInt()))
-    let step: Float = sigma / Math.sqrt(x: passes.toFloat()) / 2.0
+    canvas.backdrop.shrink = shrink
+    # The blur's sigma is half its radius, in the copy's texels; the 25 taps are a quarter of it
+    # apart (gpu2d_backdrop.wgsl), one pass across and one down
+    let sigma: Float = Math.max(a: 0.5, b: blurRadius * scale / shrink.toFloat() / 2.0)
+    let step: Float = sigma / 4.0
     let frameWidth: Float = canvas.offscreenWidth.toFloat()
     let frameHeight: Float = canvas.offscreenHeight.toFloat()
     let copyWidth: Float = canvas.backdrop.width.toFloat()
@@ -473,7 +499,10 @@ func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
         endRenderPass(pass: canvas.framePass)
         canvas.framePass = webgpuNull()
       }
-      let down: RenderPipelineId = canvas.backdrop.down
+      var down: RenderPipelineId = canvas.backdrop.down
+      if shrink is 8 {
+        down = canvas.backdrop.down8
+      }
       let blur: RenderPipelineId = canvas.backdrop.blur
       let viewA: TextureViewId = canvas.backdrop.viewA
       let viewB: TextureViewId = canvas.backdrop.viewB
@@ -486,26 +515,24 @@ func backdropCopy(canvas: mod Gpu2dCanvas, blurRadius: view Float) ret Bool {
         source: source
         target: viewA
       )
-      loop var i: Int = 0, i < passes, ++i {
-        recordBackdropPass(
-          canvas: canvas
-          recording: recording
-          resources: resources
-          pipeline: blur
-          uniform: 1
-          source: textureViewRef(id: viewA)
-          target: viewB
-        )
-        recordBackdropPass(
-          canvas: canvas
-          recording: recording
-          resources: resources
-          pipeline: blur
-          uniform: 2
-          source: textureViewRef(id: viewB)
-          target: viewA
-        )
-      }
+      recordBackdropPass(
+        canvas: canvas
+        recording: recording
+        resources: resources
+        pipeline: blur
+        uniform: 1
+        source: textureViewRef(id: viewA)
+        target: viewB
+      )
+      recordBackdropPass(
+        canvas: canvas
+        recording: recording
+        resources: resources
+        pipeline: blur
+        uniform: 2
+        source: textureViewRef(id: viewB)
+        target: viewA
+      )
       # The frame's pass again, keeping what it holds
       let target: RenderTarget = renderTarget(
         colorView: canvasFrameTargetRef(canvas: canvas, loads: true)
@@ -604,6 +631,7 @@ func backdropShutdown(backdrop: mod Gpu2dBackdrop, resources: mod GpuResources) 
   let unusedViewB: Bool = retireTextureView(resources: resources, id: backdrop.viewB)
   let unusedB: Bool = retireTexture(resources: resources, id: backdrop.textureB)
   let unusedDown: Bool = retireRenderPipeline(resources: resources, id: backdrop.down)
+  let unusedDown8: Bool = retireRenderPipeline(resources: resources, id: backdrop.down8)
   let unusedBlur: Bool = retireRenderPipeline(resources: resources, id: backdrop.blur)
   let unusedSampler: Bool = retireSampler(resources: resources, id: backdrop.sampler)
   loop let uniform: view BufferId in backdrop.uniforms {
