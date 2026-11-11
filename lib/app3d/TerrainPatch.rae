@@ -1,0 +1,269 @@
+# app3d/TerrainPatch — an app's terrain for app3d/TerrainTiles (docs/open-world-tiles.md (b)):
+# the ground's heights and its ground kinds come from the app's own rules, not from WorldBiome.
+# Rae has no function values, so the tiles ask with data: each cell a tile must show is listed
+# (TerrainTiles.wanted), and the app answers it with a TerrainPatch (commitTerrainPatch):
+#
+# - `heights`: the cell's (segments + 3) x (segments + 3) points, its own (segments + 1)^2 and a
+#   border of one point all round (so a tile's normals at its edge are the neighbor's too: no
+#   seam in the light), row by row from the south, on the world's lattice (a point every
+#   cellSize / segments m, the cell's center at cellX * cellSize);
+# - `weights`: up to terrainKindCount ground kinds' weights (0 .. 1, summing to 1) at each of the
+#   cell's own (segments + 1)^2 points, terrainKindCount floats a point.
+#
+# The kinds' looks are the app's (TerrainKindLook: a color, and bare, grass painted as the painted
+# grass, or the ground palette's dry grass); terrain_kinds.wgsl paints them per pixel from a
+# wrapping kind map (TerrainTiles' kind texels), with soft edges. Pure: tested in a case.
+import Math
+import Vec3
+
+# How many ground kinds a terrain holds: two RGBA8 layers of the kind map
+const terrainKindCount: Int = 8
+
+# The kind map's side (texels): it wraps, a texel a lattice point, so it covers 512 points
+# (384 m at 0.75 m a point), more than the tiles' window
+const terrainKindMapSide: Int = 512
+
+type TerrainCell {
+  x: Int
+  y: Int
+}
+
+type TerrainPatch {
+  cellX: Int
+  cellY: Int
+  segments: Int
+  heights: List(Float)
+  weights: List(Float)
+}
+
+# How a ground kind looks: `style` 0 bare (its color), 1 grass (painted as the painted grass, the
+# frame's ground palette, so the blades and the ground are one color), 2 dry grass (the palette's
+# straw); `color` the bare kind's color, and a grass kind's base (1, 1, 1: the palette's own)
+type TerrainKindLook {
+  color: Vec3
+  style: Int = 0
+}
+
+# A patch for cell (`cellX`, `cellY`) with every height 0 and every point of kind 0
+func createTerrainPatch(cellX: view Int, cellY: view Int, segments: view Int) ret TerrainPatch {
+  let side: Int = segments + 3
+  var heights: List(Float) = List.create(Float, cap: side * side)
+  loop var i: Int = 0, i < side * side, ++i {
+    heights.add(value: 0.0)
+  }
+  let points: Int = (segments + 1) * (segments + 1)
+  var weights: List(Float) = List.create(Float, cap: points * terrainKindCount)
+  loop var i: Int = 0, i < points * terrainKindCount, ++i {
+    if i % terrainKindCount is 0 {
+      weights.add(value: 1.0)
+    } else {
+      weights.add(value: 0.0)
+    }
+  }
+  ret TerrainPatch {
+    cellX: cellX
+    cellY: cellY
+    segments: segments
+    heights: own heights
+    weights: own weights
+  }
+}
+
+# The world lattice index of a cell's point `i` (0 .. segments, -1 and segments + 1 the border)
+func terrainLatticeIndex(cell: view Int, i: view Int, segments: view Int) ret Int {
+  ret cell * segments + i - segments / 2
+}
+
+# The world coordinate of lattice index `index` (m)
+func terrainLatticeCoordinate(index: view Int, cellSize: view Float, segments: view Int) ret Float {
+  ret index.toFloat() * cellSize / segments.toFloat()
+}
+
+# Where a patch's point (`i`, `j`) is, x and y (m; -1 .. segments + 1)
+func terrainPatchX(patch: view TerrainPatch, i: view Int, cellSize: view Float) ret Float {
+  ret terrainLatticeCoordinate(
+    index: terrainLatticeIndex(cell: patch.cellX, i: i, segments: patch.segments)
+    cellSize: cellSize
+    segments: patch.segments
+  )
+}
+
+func terrainPatchY(patch: view TerrainPatch, j: view Int, cellSize: view Float) ret Float {
+  ret terrainLatticeCoordinate(
+    index: terrainLatticeIndex(cell: patch.cellY, i: j, segments: patch.segments)
+    cellSize: cellSize
+    segments: patch.segments
+  )
+}
+
+# The index in `heights` of point (`i`, `j`), -1 .. segments + 1 each
+func terrainPatchHeightIndex(patch: view TerrainPatch, i: view Int, j: view Int) ret Int {
+  ret (j + 1) * (patch.segments + 3) + i + 1
+}
+
+func terrainPatchHeight(patch: view TerrainPatch, i: view Int, j: view Int) ret Float {
+  ret patch.heights.copyAtFallback(
+    index: terrainPatchHeightIndex(patch: patch, i: i, j: j)
+    fallback: 0.0
+  )
+}
+
+func setTerrainPatchHeight(
+  patch: mod TerrainPatch
+  i: view Int
+  j: view Int
+  height: view Float
+) {
+  patch.heights.set(index: terrainPatchHeightIndex(patch: patch, i: i, j: j), value: height)
+}
+
+# The index in `weights` of kind `kind` at point (`i`, `j`), 0 .. segments each
+func terrainPatchWeightIndex(
+  patch: view TerrainPatch
+  i: view Int
+  j: view Int
+  kind: view Int
+) ret Int {
+  ret (j * (patch.segments + 1) + i) * terrainKindCount + kind
+}
+
+func terrainPatchWeight(
+  patch: view TerrainPatch
+  i: view Int
+  j: view Int
+  kind: view Int
+) ret Float {
+  ret patch.weights.copyAtFallback(
+    index: terrainPatchWeightIndex(
+      patch: patch
+      i: i
+      j: j
+      kind: kind
+    )
+    fallback: 0.0
+  )
+}
+
+# Point (`i`, `j`) is wholly of kind `kind`
+func setTerrainPatchKind(
+  patch: mod TerrainPatch
+  i: view Int
+  j: view Int
+  kind: view Int
+) {
+  loop var k: Int = 0, k < terrainKindCount, ++k {
+    var weight: Float = 0.0
+    if k is kind {
+      weight = 1.0
+    }
+    patch.weights.set(
+      index: terrainPatchWeightIndex(
+        patch: patch
+        i: i
+        j: j
+        kind: k
+      )
+      value: weight
+    )
+  }
+}
+
+# Point (`i`, `j`)'s weight of kind `kind` (the others as given; the app keeps them summing to 1)
+func setTerrainPatchWeight(
+  patch: mod TerrainPatch
+  i: view Int
+  j: view Int
+  kind: view Int
+  weight: view Float
+) {
+  patch.weights.set(
+    index: terrainPatchWeightIndex(
+      patch: patch
+      i: i
+      j: j
+      kind: kind
+    )
+    value: weight
+  )
+}
+
+# The normal at point (`i`, `j`) from its neighbors (central differences: the border makes the
+# edge points' too)
+func terrainPatchNormal(
+  patch: view TerrainPatch
+  i: view Int
+  j: view Int
+  cellSize: view Float
+) ret Vec3 {
+  let spacing: Float = cellSize / patch.segments.toFloat()
+  let slopeX: Float = (terrainPatchHeight(patch: patch, i: i + 1, j: j) - terrainPatchHeight(
+    patch: patch
+    i: i - 1
+    j: j
+  )) / (spacing * 2.0)
+  let slopeY: Float = (terrainPatchHeight(patch: patch, i: i, j: j + 1) - terrainPatchHeight(
+    patch: patch
+    i: i
+    j: j - 1
+  )) / (spacing * 2.0)
+  let inverseLength: Float = 1.0 / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+  ret Vec3.create(x: -slopeX * inverseLength, y: -slopeY * inverseLength, z: inverseLength)
+}
+
+# One texel of the kind map: four weights (0 .. 1) as RGBA8, packed R in the low byte
+func terrainKindTexel(
+  a: view Float
+  b: view Float
+  c: view Float
+  d: view Float
+) ret Int {
+  ret terrainKindByte(weight: a) + terrainKindByte(weight: b) * 256 + terrainKindByte(weight: c) * 65536 + terrainKindByte(
+    weight: d
+  ) * 16777216
+}
+
+func terrainKindByte(weight: view Float) ret Int {
+  ret ((Math.clamp(val: weight, low: 0.0, high: 1.0) * 255.0) + 0.5) as Int
+}
+
+# Where lattice index `index` falls in the wrapping kind map (0 .. terrainKindMapSide - 1)
+func terrainKindMapWrap(index: view Int) ret Int {
+  let wrapped: Int = index % terrainKindMapSide
+  if wrapped < 0 {
+    ret wrapped + terrainKindMapSide
+  }
+  ret wrapped
+}
+
+# The kinds' looks as the kinds shader's constants (terrain_kinds.wgsl RAE_KIND<n>_R, _G, _B,
+# _STYLE); kinds past the list are bare black
+func terrainKindConstants(looks: view List(TerrainKindLook)) ret List(ShaderConstant) {
+  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: terrainKindCount * 4)
+  loop var k: Int = 0, k < terrainKindCount, ++k {
+    var look: TerrainKindLook = { color: Vec3.create(x: 0.0, y: 0.0, z: 0.0) }
+    if let given: TerrainKindLook = looks.copyAt(index: k) {
+      look = given
+    }
+    constants.add(value: { name: "RAE_KIND{k}_R", value: look.color.x })
+    constants.add(value: { name: "RAE_KIND{k}_G", value: look.color.y })
+    constants.add(value: { name: "RAE_KIND{k}_B", value: look.color.z })
+    constants.add(value: { name: "RAE_KIND{k}_STYLE", value: look.style.toFloat() })
+  }
+  ret constants
+}
+
+# The heights a physics height field takes of a patch: every `step`-th of its own points (0 ..
+# segments), row by row from the NORTH (Box3D's rows run down the world's y; app3d/WalkerPhysics),
+# so (segments / step + 1)^2 heights
+func terrainPatchFieldHeights(patch: view TerrainPatch, step: view Int) ret List(Float) {
+  let count: Int = patch.segments / step + 1
+  var heights: List(Float) = List.create(Float, cap: count * count)
+  loop var row: Int = 0, row < count, ++row {
+    loop var column: Int = 0, column < count, ++column {
+      heights.add(
+        value: terrainPatchHeight(patch: patch, i: column * step, j: patch.segments - row * step)
+      )
+    }
+  }
+  ret heights
+}

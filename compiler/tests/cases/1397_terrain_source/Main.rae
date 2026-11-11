@@ -1,0 +1,191 @@
+# An app's own terrain source (lib/app3d/TerrainPatch, docs/open-world-tiles.md (b)): a small
+# source of its own, a flat plateau and a ridge, two kinds (grass, and rock on the ridge),
+# answered as patches. Two neighboring cells agree on their shared edge (heights and normals,
+# through the border), the lattice puts the points where the tiles draw them, the kind texels
+# pack as RGBA8 and wrap, a physics field takes every second point from the north, and the
+# kinds' looks become the shader's constants.
+import Math
+import Vec3
+open app3d/TerrainPatch
+open app3d/TerrainPatchBodies
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsQueries
+
+const cellSize: Float = 18.0
+
+const segments: Int = 24
+
+# The source: 4 m up on a plateau round the origin (falling off over 6 m past 20 m), and a
+# ridge along x = 30 (6 m at its crest, 8 m to either side)
+func sourceHeight(x: view Float, y: view Float) ret Float {
+  let away: Float = Math.sqrt(x: x * x + y * y)
+  let plateau: Float = 4.0 * (1.0 - Math.clamp(val: (away - 20.0) / 6.0, low: 0.0, high: 1.0))
+  let ridge: Float = 6.0 * Math.max(a: 0.0, b: 1.0 - Math.abs(value: x - 30.0) / 8.0)
+  ret Math.max(a: plateau, b: ridge)
+}
+
+# Grass (0), or rock (1) on the ridge's steep part
+func sourceKind(x: view Float, y: view Float) ret Int {
+  if Math.abs(value: x - 30.0) < 5.0 {
+    ret 1
+  }
+  ret 0
+}
+
+func answer(cellX: view Int, cellY: view Int) ret TerrainPatch {
+  var patch: TerrainPatch = createTerrainPatch(cellX: cellX, cellY: cellY, segments: segments)
+  loop var j: Int = -1, j <= segments + 1, ++j {
+    loop var i: Int = -1, i <= segments + 1, ++i {
+      let x: Float = terrainPatchX(patch: patch, i: i, cellSize: cellSize)
+      let y: Float = terrainPatchY(patch: patch, j: j, cellSize: cellSize)
+      setTerrainPatchHeight(
+        patch: patch
+        i: i
+        j: j
+        height: sourceHeight(x: x, y: y)
+      )
+      if i >= 0 and j >= 0 and i <= segments and j <= segments {
+        setTerrainPatchKind(
+          patch: patch
+          i: i
+          j: j
+          kind: sourceKind(x: x, y: y)
+        )
+      }
+    }
+  }
+  ret patch
+}
+
+func round2(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+func main() {
+  let middle: TerrainPatch = answer(cellX: 1, cellY: 0)
+  let east: TerrainPatch = answer(cellX: 2, cellY: 0)
+  log(
+    "cell 1: x from {terrainPatchX(patch: middle, i: 0, cellSize: cellSize)} to {terrainPatchX(
+      patch: middle
+      i: segments
+      cellSize: cellSize
+    )} m"
+  )
+  # the shared edge: the middle cell's east points are the east cell's west points
+  var sameHeights: Bool = true
+  var sameNormals: Bool = true
+  loop var j: Int = 0, j <= segments, ++j {
+    if terrainPatchHeight(patch: middle, i: segments, j: j) is not terrainPatchHeight(
+      patch: east
+      i: 0
+      j: j
+    ) {
+      sameHeights = false
+    }
+    let a: Vec3 = terrainPatchNormal(
+      patch: middle
+      i: segments
+      j: j
+      cellSize: cellSize
+    )
+    let b: Vec3 = terrainPatchNormal(
+      patch: east
+      i: 0
+      j: j
+      cellSize: cellSize
+    )
+    if Math.abs(value: a.x - b.x) > 0.000001 or Math.abs(value: a.z - b.z) > 0.000001 {
+      sameNormals = false
+    }
+  }
+  log("shared edge: same heights {sameHeights}, same normals {sameNormals}")
+  # the ridge's crest at x = 30 is point 8 of cell 2 (x from 27 m)
+  log("ridge crest {round2(value: terrainPatchHeight(patch: east, i: 4, j: 12))} m, its kind rock {terrainPatchWeight(
+    patch: east
+    i: 4
+    j: 12
+    kind: 1
+  )}")
+  let slope: Vec3 = terrainPatchNormal(
+    patch: east
+    i: 0
+    j: 12
+    cellSize: cellSize
+  )
+  log("the ridge's west face leans west: {slope.x < 0.0}, up {round2(value: slope.z)}")
+  log("plateau top {terrainPatchHeight(patch: answer(cellX: 0, cellY: 0), i: 12, j: 12)} m, grass {terrainPatchWeight(
+    patch: answer(cellX: 0, cellY: 0)
+    i: 12
+    j: 12
+    kind: 0
+  )}")
+  log("texels: grass {terrainKindTexel(
+    a: 1.0
+    b: 0.0
+    c: 0.0
+    d: 0.0
+  )}, rock {terrainKindTexel(
+    a: 0.0
+    b: 1.0
+    c: 0.0
+    d: 0.0
+  )}, half {terrainKindTexel(
+    a: 0.5
+    b: 0.5
+    c: 0.0
+    d: 0.0
+  )}")
+  log(
+    "wrap: -1 -> {terrainKindMapWrap(index: -1)}, 512 -> {terrainKindMapWrap(index: 512)}, lattice of cell -1 point 0: {terrainLatticeIndex(
+      cell: -1
+      i: 0
+      segments: segments
+    )}"
+  )
+  let field: List(Float) = terrainPatchFieldHeights(patch: east, step: 2)
+  log(
+    "field: {field.length} heights, first (north-west) {round2(value: field.copyAtDefault(index: 0))} = {round2(
+      value: terrainPatchHeight(patch: east, i: 0, j: segments)
+    )}"
+  )
+  var looks: List(TerrainKindLook) = {
+    { color: Vec3.create(x: 1.0, y: 1.0, z: 1.0), style: 1 }
+    { color: Vec3.create(x: 0.4, y: 0.4, z: 0.42) }
+  }
+  let constants: List(ShaderConstant) = terrainKindConstants(looks: looks)
+  if let style: ShaderConstant = constants.copyAt(index: 3) {
+    log("constants: {constants.length}, {style.name} {style.value}")
+  }
+  # the east cell's ground in the physics world, every second point: a ray down onto the ridge's
+  # crest (a point it keeps) lands on its height, and one between points on the field's line
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  if let shape: ShapeId = addTerrainPatchField(
+    physics: physics
+    patch: east
+    cellSize: cellSize
+    step: 2
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  ) {
+    let crest: PhysicsHit = raycastClosest(
+      physics: physics
+      origin: Vec3.create(x: 30.0, y: 0.0, z: 20.0)
+      translation: Vec3.create(x: 0.0, y: 0.0, z: -40.0)
+      filter: defaultQueryFilter()
+    )
+    log(
+      "field: the ray down at the crest hits at {round2(value: crest.point.z)} m (hit {crest.hit})"
+    )
+    let off: PhysicsHit = raycastClosest(
+      physics: physics
+      origin: Vec3.create(x: 60.0, y: 0.0, z: 20.0)
+      translation: Vec3.create(x: 0.0, y: 0.0, z: -40.0)
+      filter: defaultQueryFilter()
+    )
+    log("field: no ground past the cell (hit {off.hit})")
+  }
+}

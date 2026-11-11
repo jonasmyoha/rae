@@ -1,0 +1,149 @@
+# The ground as an app's own terrain (RAE_TILES_TERRAIN=1; Rae's docs/open-world-tiles.md (b)):
+# Rae's terrain tiles round where the camera looks, their heights and ground kinds from this
+# example's own source, not WorldBiome: rolling hills, a ridge every 400 m, sand in the hollows,
+# rock on the ridges' steep sides and grass painted as the painted grass elsewhere. Each frame
+# the tiles list the cells they need (TerrainTiles.wanted) and this answers each with a patch
+# (app3d/TerrainPatch), and the kinds go to the GPU once (uploadTerrainKinds).
+import Math
+import Vec3
+open Scene3d
+open RendererDeferred
+open app3d/TerrainPatch
+open app3d/TerrainTiles
+
+# The tiles: 17 x 17 cells of 18 m, a point every 0.75 m (the walkers' terrain's)
+const terrainGridSide: Int = 17
+
+const terrainCellSize: Float = 18.0
+
+const terrainSegments: Int = 24
+
+# The kinds
+const kindGrass: Int = 0
+
+const kindSand: Int = 1
+
+const kindRock: Int = 2
+
+func createExampleTerrain(renderer: mod DeferredRenderer) ret TerrainTiles {
+  var tiles: TerrainTiles = createAppTerrainTiles(
+    renderer: renderer
+    gridSide: terrainGridSide
+    cellSize: terrainCellSize
+    segments: terrainSegments
+  )
+  var looks: List(TerrainKindLook) = {
+    { color: Vec3.create(x: 1.0, y: 1.0, z: 1.0), style: 1 }
+    { color: Vec3.create(x: 0.62, y: 0.55, z: 0.4) }
+    { color: Vec3.create(x: 0.36, y: 0.35, z: 0.34) }
+  }
+  setTerrainKindsShader(renderer: renderer, tiles: tiles, looks: looks)
+  ret tiles
+}
+
+# The source's height at (x, y): hills and the ridges
+func exampleTerrainHeight(x: view Float, y: view Float) ret Float {
+  let hills: Float = 3.0 * Math.sin(x: x / 70.0) * Math.cos(x: y / 55.0) + 1.5 * Math.sin(
+    x: (x + y) / 33.0
+  )
+  let along: Float = x - Math.floor(x: x / 400.0) * 400.0
+  let ridge: Float = 14.0 * Math.max(a: 0.0, b: 1.0 - Math.abs(value: along - 200.0) / 30.0)
+  ret hills + ridge
+}
+
+# Its kinds there, soft: rock by the slope, sand by the low ground, grass the rest
+func exampleTerrainWeights(
+  patch: mod TerrainPatch
+  i: view Int
+  j: view Int
+  x: view Float
+  y: view Float
+) {
+  let height: Float = exampleTerrainHeight(x: x, y: y)
+  let slope: Float = Math.abs(
+    value: exampleTerrainHeight(x: x + 1.0, y: y) - exampleTerrainHeight(x: x - 1.0, y: y)
+  ) * 0.5
+  let rock: Float = Math.clamp(val: (slope - 0.25) / 0.2, low: 0.0, high: 1.0)
+  let sand: Float = (1.0 - rock) * Math.clamp(val: (-1.5 - height) / 1.0, low: 0.0, high: 1.0)
+  setTerrainPatchKind(
+    patch: patch
+    i: i
+    j: j
+    kind: kindGrass
+  )
+  setTerrainPatchWeight(
+    patch: patch
+    i: i
+    j: j
+    kind: kindGrass
+    weight: 1.0 - rock - sand
+  )
+  setTerrainPatchWeight(
+    patch: patch
+    i: i
+    j: j
+    kind: kindSand
+    weight: sand
+  )
+  setTerrainPatchWeight(
+    patch: patch
+    i: i
+    j: j
+    kind: kindRock
+    weight: rock
+  )
+}
+
+func exampleTerrainPatch(cell: view TerrainCell) ret TerrainPatch {
+  var patch: TerrainPatch = createTerrainPatch(
+    cellX: cell.x
+    cellY: cell.y
+    segments: terrainSegments
+  )
+  loop var j: Int = -1, j <= terrainSegments + 1, ++j {
+    loop var i: Int = -1, i <= terrainSegments + 1, ++i {
+      let x: Float = terrainPatchX(patch: patch, i: i, cellSize: terrainCellSize)
+      let y: Float = terrainPatchY(patch: patch, j: j, cellSize: terrainCellSize)
+      setTerrainPatchHeight(
+        patch: patch
+        i: i
+        j: j
+        height: exampleTerrainHeight(x: x, y: y)
+      )
+      if i >= 0 and j >= 0 and i <= terrainSegments and j <= terrainSegments {
+        exampleTerrainWeights(
+          patch: patch
+          i: i
+          j: j
+          x: x
+          y: y
+        )
+      }
+    }
+  }
+  ret patch
+}
+
+# The tiles round (`x`, `y`), every cell they ask for answered, the kinds uploaded
+func updateExampleTerrain(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  x: view Float
+  y: view Float
+) {
+  let moved: Bool = updateTerrainTiles(
+    tiles: tiles
+    renderer: renderer
+    cellX: Math.round(x: x / terrainCellSize) as Int
+    cellY: Math.round(x: y / terrainCellSize) as Int
+  )
+  let wanted: List(TerrainCell) = tiles.wanted
+  loop let cell: view TerrainCell in wanted {
+    let committed: Bool = commitTerrainPatch(
+      tiles: tiles
+      renderer: renderer
+      patch: exampleTerrainPatch(cell: cell)
+    )
+  }
+  uploadTerrainKinds(tiles: tiles)
+}

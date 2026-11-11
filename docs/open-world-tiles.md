@@ -75,6 +75,18 @@ data, as TileStreaming does:
   heights are the drawn ones, so what you walk on is what you see. WalkerPhysics' one following
   field stays for apps without content tiles.
 
+**Built (step 3, Rae 0.3.93):** app3d/TerrainPatch (the patch: heights with a one-point border so
+normals agree across tiles, 8 kind weights a point, the kinds' looks, the kind map's texels),
+app3d/TerrainTiles' app mode (createAppTerrainTiles; `wanted`, commitTerrainPatch,
+uploadTerrainKinds, setTerrainKindsShader; a tile waiting for its patch is not drawn),
+lib/terrain_kinds.wgsl (the "kinds" splat: the kind map in the terrain texture array's layers 0 and
+1, a noise-warped sample for soft edges, bare / painted grass / dry grass, wetness, snow, the grass
+lit by the up normal) and app3d/TerrainPatchBodies (a patch's physics height field). Case 1397;
+example 145 with RAE_TILES_TERRAIN=1. One change from the plan: the walker examples keep their
+WorldBiome path as it was (heights computed in TerrainTiles, the biome splat), not a WorldBiome
+system answering the events, so their pictures stay identical; they move onto the events with
+step 8, when their content does.
+
 ## (c) Content per tile
 
 Each TileLoaded is answered by the app with what stands in the tile, from its own rules and seed:
