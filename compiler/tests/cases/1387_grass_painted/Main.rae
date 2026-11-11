@@ -5,6 +5,8 @@
 import GrassConfig
 import Vec3
 import GrassCompute
+import GbufferInstanced
+open Scene3d
 
 func main() ret Int {
   log(GrassConfig.grassVertexCount(shape: GrassConfig.GrassShape.painted as Int))
@@ -90,5 +92,27 @@ func main() ret Int {
   )
   # the textured shape's cut-out stays its own: a painted blade discards nothing
   log(render.text.contains(sub: "GW.i.w > 2.5 && GW.i.w < 3.5"))
+  # Only a material that paints grass (a ground's) paints its texels: a leaf's soft edge is
+  # not painted as a light outline
+  log(
+    groundShader.text.contains(
+      sub: "select(0.0, 1.0 - smoothstep(0.78, 0.95, texel.a), paintsGrass)"
+    )
+  )
+  let leaves: Material3d = {
+    colorTextureLayer: 3
+    baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    metallic: 0.0
+    roughness: 0.8
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+  var ground: Material3d = leaves
+  ground.paintsGrass = true
+  var plain: Material3d = leaves
+  plain.colorTextureLayer = -1
+  log(GbufferInstanced.materialImageCode(material: leaves))
+  log(GbufferInstanced.materialImageCode(material: ground))
+  log(GbufferInstanced.materialImageCode(material: plain))
   ret 0
 }

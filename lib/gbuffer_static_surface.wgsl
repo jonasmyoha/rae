@@ -190,16 +190,23 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
   o.albedo = d.albedoMetallic.rgb;
   o.nrm = n;
   if (d.params.w < -0.5) {
-    let layer = clamp(i32(round(-d.params.w - 1.0)), 0, i32(textureNumLayers(surfaceImages)) - 1);
+    // the image code: -(layer + 1), 1000 lower for a material that paints grass
+    // (Material3d paintsGrass, GbufferInstanced materialImageCode)
+    let code = -d.params.w - 1.0;
+    let paintsGrass = code > 999.5;
+    let layer = clamp(i32(round(select(code, code - 1000.0, paintsGrass))), 0, i32(textureNumLayers(surfaceImages)) - 1);
     let texel = textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv));
     if (texel.a < 0.5) { discard; }
     o.albedo *= texel.rgb;
-    // A texel of alpha about 0.75 is ground painted as grass: its color is the
-    // grass's base color, painted here with the painted grass's own field and
-    // palette at this point (grass_field.wgsl), as the blades' roots are, and
-    // lit by the blades' up normal, so the blades melt into it. Alpha 1 is a
-    // plain texel; the filtered alpha between them blends the two at the edge.
-    let painted = 1.0 - smoothstep(0.78, 0.95, texel.a);
+    // On a material that paints grass (a ground's), a texel of alpha about 0.75
+    // is ground painted as grass: its color is the grass's base color, painted
+    // here with the painted grass's own field and palette at this point
+    // (grass_field.wgsl), as the blades' roots are, and lit by the blades' up
+    // normal, so the blades melt into it. Alpha 1 is a plain texel; the filtered
+    // alpha between them blends the two at the edge. Only there: a leaf's soft
+    // cut-out edge passes through the same alphas, and was painted as a light
+    // outline round every leaf.
+    let painted = select(0.0, 1.0 - smoothstep(0.78, 0.95, texel.a), paintsGrass);
     if (painted > 0.0) {
       let paint = grassPaintAt(in.wpos.xy);
       // with the wind's shimmer rolling over it, as over the blades' roots
