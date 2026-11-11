@@ -28,7 +28,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 # Every fixture with `realtime` / `noAlloc` functions that keep their promises
 CASES="1395_atomic_signal_ring 1396_spsc_ring_threads 1399_realtime_check_clean 1400_realtime_report \
-1405_realtime_keyword_accepts"
+1405_realtime_keyword_accepts 1408_c_export_calls"
 if [ -n "${RAE_REALTIME_FILTER:-}" ]; then CASES="$RAE_REALTIME_FILTER"; fi
 
 FAILED=0

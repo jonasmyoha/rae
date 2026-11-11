@@ -401,6 +401,12 @@ static RaeMemCounterBlock* rae_mem_block_register(void) {
   return block;
 }
 
+/* rae_runtime.h: get a thread C made ready for Rae code */
+void rae_thread_attach(void) {
+  rae_thread_install_altstack();
+  if (!t_mem_block) (void)rae_mem_block_register();
+}
+
 static inline void rae_mem_stat_add(int counter, int64_t amount) {
   RaeMemCounterBlock* block = t_mem_block;
   if (!block) block = rae_mem_block_register();

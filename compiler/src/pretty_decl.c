@@ -515,7 +515,7 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
   if (decl->as.type_decl.generic_params) pp_param_list(pp, decl->as.type_decl.generic_params, NULL, 0);
   if (decl->as.type_decl.properties) {
     pp_write(pp, ": ");
-    pp_write_properties(pp, decl->as.type_decl.properties, NULL);
+    pp_write_properties(pp, decl->as.type_decl.properties, NULL, NULL);
   }
   pp_space(pp);
   /* A type DECLARATION is a block, one field per line, like a function body —
@@ -533,7 +533,8 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
 static void pp_func_tail(PrettyPrinter* pp, const AstDecl* decl) {
   if (decl->as.func_decl.properties) {
     pp_space(pp);
-    pp_write_properties(pp, decl->as.func_decl.properties, decl->as.func_decl.extern_symbol);
+    pp_write_properties(pp, decl->as.func_decl.properties, decl->as.func_decl.extern_symbol,
+                        decl->as.func_decl.c_export_symbol);
   }
   if (decl->as.func_decl.returns) {
     int count = 0;

@@ -3223,6 +3223,46 @@ static AstDecl* parse_type_declaration(Parser* parser) {
   return decl;
 }
 
+/* A C-ABI type for cExport: a number, Bool, Ptr or Buffer(T), passed by value
+ * (view / copy / own) and never `mod`, `opt` or a struct */
+static bool c_export_type_ok(const AstTypeRef* type) {
+  if (!type || !type->parts || type->parts->next || type->is_mod || type->is_opt) return false;
+  Str name = type->parts->text;
+  static const char* const allowed[] = { "Int", "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32",
+                                         "UInt64", "Float", "Float32", "Float64", "Bool", "Ptr" };
+  if (str_eq_cstr(name, "Buffer")) return type->generic_args != NULL;
+  if (type->generic_args) return false;
+  for (size_t i = 0; i < sizeof allowed / sizeof allowed[0]; i++) {
+    if (str_eq_cstr(name, allowed[i])) return true;
+  }
+  return false;
+}
+
+/* cExport is a Rae function with a body, not generic, whose parameters and
+ * result C can pass */
+static void check_c_export(Parser* parser, const Token* name_token, const AstFuncDecl* func, bool is_extern) {
+  if (is_extern) {
+    parser_error(parser, name_token, "'cExport' is for a Rae function with a body that C calls; 'extern' is the other way");
+    return;
+  }
+  if (func->generic_params) {
+    parser_error(parser, name_token, "a cExport function cannot be generic: C calls one function by one name");
+    return;
+  }
+  for (const AstParam* param = func->params; param; param = param->next) {
+    if (!c_export_type_ok(param->type)) {
+      char message[256];
+      snprintf(message, sizeof message,
+               "cExport parameter '%.*s' must be a C value: a number, Bool, Ptr or Buffer(T), not mod, opt, "
+               "String or a struct", (int)param->name.len, param->name.data);
+      parser_error(parser, name_token, message);
+    }
+  }
+  if (func->returns && (func->returns->next || !c_export_type_ok(func->returns->type))) {
+    parser_error(parser, name_token, "a cExport function returns nothing or one C value (a number, Bool, Ptr or Buffer(T))");
+  }
+}
+
 static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   const Token* func_token = parser_previous(parser);
   const Token* name_token = parser_consume_ident(parser, "expected function name");
@@ -3269,6 +3309,29 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
     if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "realtime")) {
       if (decl->as.func_decl.is_realtime) parser_error(parser, mod_token, "duplicate 'realtime' function modifier");
       decl->as.func_decl.is_realtime = true;
+    }
+    // `cExport("cName")`: C may call this function by that name (§6.1 of
+    // docs/realtime-language-design.md). Not `export`, which is the modules'.
+    if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "cExport")) {
+      if (decl->as.func_decl.c_export_symbol) parser_error(parser, mod_token, "duplicate 'cExport' function modifier");
+      if (parser_consume(parser, TOK_LPAREN, "expected '(' after cExport: `cExport(\"cName\")`")) {
+        const Token* sym_token = parser_consume(parser, TOK_STRING, "expected the C name in cExport(\"...\")");
+        if (sym_token) {
+          Str sym = unescape_string(parser, sym_token->lexeme, true, true);
+          char* buffer = parser_alloc(parser, sym.len + 1);
+          memcpy(buffer, sym.data, sym.len);
+          buffer[sym.len] = '\0';
+          bool valid = sym.len > 0 && !(buffer[0] >= '0' && buffer[0] <= '9');
+          for (size_t k = 0; k < sym.len; k++) {
+            char c = buffer[k];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) valid = false;
+          }
+          if (!valid) parser_error(parser, sym_token, "a cExport name is a C identifier: letters, digits and _");
+          decl->as.func_decl.c_export_symbol = buffer;
+          decl->as.func_decl.c_export_line = mod_token->line;
+        }
+        parser_consume(parser, TOK_RPAREN, "expected ')' after the cExport name");
+      }
     }
     if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "noAlloc")) {
       if (decl->as.func_decl.is_no_alloc) parser_error(parser, mod_token, "duplicate 'noAlloc' function modifier");
@@ -3347,7 +3410,8 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
     bool multiline_ret = (!is_extern && end_brace) ? is_multiline(ret_token, end_brace) : false;
     decl->as.func_decl.returns = parse_return_clause(parser, multiline_ret);
   }
-  
+  if (decl->as.func_decl.c_export_symbol) check_c_export(parser, name_token, &decl->as.func_decl, is_extern);
+
   if (is_extern) {
     if (parser_check(parser, TOK_LBRACE)) {
       parser_error(parser, parser_peek(parser), "extern functions cannot have a body");

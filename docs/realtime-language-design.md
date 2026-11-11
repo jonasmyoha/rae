@@ -415,6 +415,22 @@ func audioRender(engine: Ptr, output: Ptr, frameCount: Int) realtime cExport("ra
   (call C) and `cheader`; `cExport` reads as their pair and says which way the
   call goes. camelCase, as a keyword of two words is.
 
+**Landed (2026-11-11):** `cExport("cName")` parses in the modifier position
+(any order with `realtime`, `noAlloc`); the parser refuses it on an extern, on
+a generic function, with a name that is not a C identifier, and with a
+parameter or result that is not a C value (a number, `Bool`, `Ptr`,
+`Buffer(T)`; never `mod`, `opt`, `String` or a struct). The backend writes,
+after the prototypes, `RAE_EXPORTED <ret> cName(<params>)` (with
+`RAE_NONBLOCKING` when the function is `realtime`) that calls the static Rae
+function, and reports two functions with one C name. `rae format` keeps the
+name. The function is an ordinary node of the may-wait graph, so the
+real-time check covers a `realtime cExport` as a root like any marked
+function. Fixtures 1408 (C calls three exports, one from a thread it starts),
+1409, 1410 (the refusals); 1408 is in the TSan and real-time gates. Not yet:
+the may-wait analysis does not mark an export as "called from an unknown
+thread" (it is never made a resumable twin, which is right for C callers),
+and no package uses it yet.
+
 ### 6.2 Foreign threads
 
 A thread made by C (the Core Audio IO thread) enters Rae code with none of
@@ -422,6 +438,15 @@ Rae's per-thread runtime state. Its first use must not allocate, so a shim call
 `attachThread()` runs on that thread when the device starts (before real-time
 work) and sets up what Rae needs. The rule for the compiler: a `cExport`
 function used before `attachThread` is a run-time error in debug builds.
+
+**Landed (2026-11-11):** the runtime call is `rae_thread_attach()`
+(`rae_runtime.h`): it installs the crash handler's alternate stack and
+registers the thread's memory-statistics counters, the two things a Rae
+thread gets when it starts and a C thread would otherwise get lazily, the
+second by allocating on the first Rae call. It is safe to call twice. The
+run-time error for a missing attach is not built: an unattached thread
+still works (it allocates on its first counted allocation), which
+RAE_REALTIME_CHECK reports if that happens in real-time code.
 
 ### 6.3 Containers that cannot grow
 

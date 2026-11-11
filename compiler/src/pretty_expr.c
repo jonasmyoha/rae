@@ -119,7 +119,8 @@ void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   }
 }
 
-void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol) {
+void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol,
+                         const char* c_export_symbol) {
   const AstProperty* current = prop;
   bool first = true;
   while (current) {
@@ -127,6 +128,10 @@ void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char*
     if (extern_symbol && str_eq_cstr(current->name, "extern")) {
       pp_write(pp, "extern(\"");
       pp_write(pp, extern_symbol);
+      pp_write(pp, "\")");
+    } else if (c_export_symbol && str_eq_cstr(current->name, "cExport")) {
+      pp_write(pp, "cExport(\"");
+      pp_write(pp, c_export_symbol);
       pp_write(pp, "\")");
     } else {
       pp_write_str(pp, current->name);

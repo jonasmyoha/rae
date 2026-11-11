@@ -4582,6 +4582,40 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
+  // `cExport("cName")` (docs/realtime-language-design.md §6.1): a C function
+  // of that name for each exported Rae function, which C calls, from any
+  // thread (a thread C made calls rae_thread_attach() first). The Rae
+  // function itself stays static; the wrapper passes the C values through.
+  {
+    const char* exported[256];
+    size_t exported_count = 0;
+    for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_FUNC) continue;
+      const AstFuncDecl* f = &d->as.func_decl;
+      if (!f->c_export_symbol || f->is_extern || f->generic_params || f->specialization_args) continue;
+      bool twice = false;
+      for (size_t k = 0; k < exported_count; k++) twice = twice || strcmp(exported[k], f->c_export_symbol) == 0;
+      if (twice) {
+        char message[256];
+        snprintf(message, sizeof message, "two functions export the C name `%s`", f->c_export_symbol);
+        diag_error(d->origin_file, (int)f->c_export_line, 1, message);
+        continue;
+      }
+      if (exported_count < 256) exported[exported_count++] = f->c_export_symbol;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f};
+      const char* rt = c_return_type(&tctx, f);
+      fprintf(out, "RAE_EXPORTED %s %s(", rt, f->c_export_symbol);
+      emit_param_list(&tctx, f->params, out, false);
+      fprintf(out, ")%s {\n  %s%s(", c_effect_attribute(f), strcmp(rt, "void") == 0 ? "" : "return ",
+              rae_mangle_function(ctx, f));
+      for (const AstParam* p = f->params; p; p = p->next) {
+        fprintf(out, "%.*s%s", (int)p->name.len, p->name.data, p->next ? ", " : "");
+      }
+      fprintf(out, ");\n}\n");
+    }
+  }
+
   // Prototypes for specialized functions (skip externs — their call sites are inlined)
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;

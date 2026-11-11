@@ -99,7 +99,8 @@ typedef struct {
 void pp_print_list(PrettyPrinter* pp, const void* items, int count, PpListStyle style,
                    PpItemsFn oneline, PpItemsFn vertical);
 void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type);
-void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol);
+void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol,
+                         const char* c_export_symbol);
 void pp_expr(PrettyPrinter* pp, const AstExpr* expr);
 void pp_call_args(PrettyPrinter* pp, const AstCallArg* args);
 
