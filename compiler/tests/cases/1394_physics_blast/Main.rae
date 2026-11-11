@@ -1,0 +1,131 @@
+# A blast's push on the bodies round it (lib/box3d/ecs/PhysicsBlast): a light
+# box and a heavy box near a blast fly away from it and up, at the same
+# speed for the same distance; a box beyond its reach and a static box stay.
+import Vec3
+import Quat
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsBlast
+
+type BlastWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+}
+
+func box(
+  world: mod BlastWorld
+  x: view Float
+  y: view Float
+  density: view Float
+  dynamic: view Bool
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.staticBody
+  if dynamic {
+    def.bodyType = BodyType.dynamicBody
+  }
+  def.position = Vec3 { x: x, y: y, z: 0.5 }
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = density
+  addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: shapeDef
+    halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 }
+    transform: transformIdentity()
+  )
+  ret entityId
+}
+
+func speedText(world: view BlastWorld, entityId: view EntityId) ret String {
+  let velocity: Vec3 = entityLinearVelocity(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    entityId: entityId
+  )
+  ret "({Math.round(x: velocity.x * 10.0) / 10.0}, {Math.round(x: velocity.y * 10.0) / 10.0}, {Math.round(
+    x: velocity.z * 10.0
+  ) / 10.0})"
+}
+
+func main() {
+  var world: BlastWorld = {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+  }
+  let light: EntityId = box(
+    world: world
+    x: 2.0
+    y: 0.0
+    density: 1.0
+    dynamic: true
+  )
+  let heavy: EntityId = box(
+    world: world
+    x: 0.0
+    y: -2.0
+    density: 50.0
+    dynamic: true
+  )
+  let far: EntityId = box(
+    world: world
+    x: 12.0
+    y: 0.0
+    density: 1.0
+    dynamic: true
+  )
+  let wall: EntityId = box(
+    world: world
+    x: -2.0
+    y: 0.0
+    density: 1.0
+    dynamic: false
+  )
+  let moved: Int = blastBodies(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    center: Vec3 { x: 0.0, y: 0.0, z: 0.5 }
+    radius: 6.0
+    speed: 9.0
+    lift: 0.5
+  )
+  log("moved {moved} bodies")
+  log("the light box: {speedText(world: world, entityId: light)}")
+  log("the heavy box: {speedText(world: world, entityId: heavy)}")
+  log("the far box: {speedText(world: world, entityId: far)}")
+  log("the static box: {speedText(world: world, entityId: wall)}")
+  let atCenter: Vec3 = blastVelocity(
+    offset: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    radius: 6.0
+    speed: 9.0
+    lift: 0.5
+  )
+  log("at the very center: ({atCenter.x}, {atCenter.y}, {atCenter.z})")
+}

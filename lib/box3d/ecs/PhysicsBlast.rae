@@ -1,0 +1,87 @@
+# A blast's push on the bodies round it (an explosion, a shock wave): every
+# dynamic body whose shapes are within `radius` of `center` is flung away
+# from it, with all of `speed` (m/s) at the center and none at the edge, and
+# `lift` times that upward, so a car near a rocket's blast flies up and over.
+# The push is a velocity change (an impulse of its mass times it), so a light
+# box and a heavy car near the same spot fly alike, and the bones of one
+# ragdoll fly together. Static and kinematic bodies do not move.
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsQueries
+
+# The velocity change a blast gives a body whose center of mass is `offset`
+# from the blast's center: zero at `radius` and beyond, straight up at the
+# very center
+func blastVelocity(
+  offset: view Vec3
+  radius: view Float
+  speed: view Float
+  lift: view Float
+) ret Vec3 {
+  let distance: Float = vlen(a: offset)
+  if distance >= radius or radius <= 0.0 {
+    ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+  let strength: Float = speed * (1.0 - distance / radius)
+  var way: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+  if distance > 0.001 {
+    way = vscale(a: offset, s: 1.0 / distance)
+  }
+  ret Vec3 { x: way.x * strength, y: way.y * strength, z: way.z * strength + lift * strength }
+}
+
+# Fling the dynamic bodies within `radius` of `center` (blastVelocity); the
+# number of bodies it moved
+func blastBodies(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  center: view Vec3
+  radius: view Float
+  speed: view Float
+  lift: view Float
+) ret Int {
+  let entityIds: List(EntityId) = overlapSphereEntities(
+    physics: physics
+    center: center
+    radius: radius
+    filter: defaultQueryFilter()
+  )
+  var moved: Int = 0
+  loop let entityId: view EntityId in entityIds {
+    let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+    if bodyId.index1 is 0 {
+      continue
+    }
+    unsafe {
+      let body: b3BodyId = toB3BodyId(bodyId: bodyId)
+      if b3Body_GetType(bodyId: body) is not b3_dynamicBody {
+        continue
+      }
+      let mass: Float = b3Body_GetMass(bodyId: body) as Float
+      let middle: Vec3 = fromB3Vector(vector: b3Body_GetWorldCenter(bodyId: body))
+      let change: Vec3 = blastVelocity(
+        offset: vsub(a: middle, b: center)
+        radius: radius
+        speed: speed
+        lift: lift
+      )
+      if mass > 0.0 and vlen(a: change) > 0.0 {
+        b3Body_ApplyLinearImpulse(
+          bodyId: body
+          impulse: toB3Vector(vector: vscale(a: change, s: mass))
+          point: toB3Vector(vector: middle)
+          wake: true
+        )
+        moved = moved + 1
+      }
+    }
+  }
+  ret moved
+}
