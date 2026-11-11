@@ -755,6 +755,23 @@ green.
 2. **Streams and the music player.** The butler; dr_mp3, dr_flac, stb_vorbis;
    AAC through AudioToolbox; the Rae resampler (`good`); seek, gapless next;
    Now Playing and remote commands; background play on iOS. SUMU's music player.
+
+   **Landed, the streams half (2026-11-11), `packages/audio` 0.5.0:**
+   `audio/Decoder` (MP3, FLAC, Ogg Vorbis and WAV through miniaudio's decoders
+   and the `stb_vorbis` that miniaudio 0.11.26 ships, one C call each; the
+   dr_mp3 and dr_flac code is miniaudio's own copy, so all three come from one
+   pinned release), `audio/Resampler` (windowed sinc, Blackman, a 256-phase
+   table with linear interpolation; worst error about 2.5e-5 for a 1 kHz sine
+   44.1 to 48 kHz and back with 32 taps), `audio/AudioButler` (the streaming
+   thread: a second of ring per stream, gapless next in the same ring, closes
+   acknowledged so rings are freed safely) and `audio/AudioStreams`
+   (`playStream`, `queueNext`, `pauseVoice` / `resumeVoice`, `seek`,
+   `positionSeconds`, `durationSeconds`, `streamIsPlaying`). Offline, the
+   butler runs one step before every block, so a test is repeatable. Fixture
+   1411: FLAC bit-exact, MP3 and Vorbis within -30 dB, a stream equal to its
+   file, gapless at the exact frame, a seek and a pause to the frame. Not yet:
+   the MP4/M4A box reader and AAC through AudioToolbox, Now Playing and the
+   remote commands, and iOS background play (queued after this step).
 3. **The other platforms.** Android (AAudio, focus, MediaSession, AMediaCodec
    AAC), Windows (WASAPI, SMTC, Media Foundation AAC), Linux (PipeWire through
    Pulse/JACK, MPRIS), the web (AudioWorklet build, COOP/COEP in the web shell,

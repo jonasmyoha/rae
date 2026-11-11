@@ -13,6 +13,7 @@
 # Every command carries the sample time it takes effect at (0: at once), and a
 # voice starts at exactly that sample, whatever the block size (§6.2).
 import Math
+open Atomic
 open audio/Sound
 open collections/SpscRing
 
@@ -34,6 +35,8 @@ enum AudioCommandKind {
   pauseBus
   resumeBus
   stopBus
+  pauseVoice
+  resumeVoice
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -56,6 +59,12 @@ type AudioCommand {
   looping: Bool
   # the sample time it starts at; 0 (or a past time) for the next block
   atSample: Int
+  # a streamed voice reads `stream` (filled by audio/AudioButler at the
+  # device's rate) instead of `samples`; it ends when `streamFinished` is set
+  # and the ring is empty
+  isStream: Bool
+  stream: SpscRing(Float)
+  streamFinished: Atomic(Bool)
 }
 
 enum AudioFeedbackKind { voiceEnded }
@@ -119,6 +128,12 @@ type AudioVoice {
   delayFrames: Int
   # ends when the gain reaches 0
   stopping: Bool
+  paused: Bool
+  isStream: Bool
+  stream: SpscRing(Float)
+  streamFinished: Atomic(Bool)
+  # frames a stream voice played as silence because its ring was empty
+  underrunFrames: Int
 }
 
 type AudioMixer {
@@ -233,6 +248,11 @@ func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
           voice.delayFrames = command.atSample - sampleTime
         }
         voice.stopping = false
+        voice.paused = false
+        voice.isStream = command.isStream
+        voice.stream = command.stream
+        voice.streamFinished = command.streamFinished
+        voice.underrunFrames = 0
         ret
       }
     }
@@ -301,6 +321,10 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
             rampTo(ramp: voice.gain, target: command.value, frames: smoothing)
           } else if command.kind is AudioCommandKind.setVoicePan {
             rampTo(ramp: voice.pan, target: command.value, frames: smoothing)
+          } else if command.kind is AudioCommandKind.pauseVoice {
+            voice.paused = true
+          } else if command.kind is AudioCommandKind.resumeVoice {
+            voice.paused = false
           }
         }
       }
@@ -355,6 +379,65 @@ func addToBus(
   )
 }
 
+# One frame of a streamed voice: its channels from the ring (already at the
+# device's rate), gain and pan as for a sound. An empty ring is silence and an
+# underrun, unless the stream has finished, which ends the voice.
+func renderStreamFrame(
+  voice: mod AudioVoice
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  index: view Int
+) {
+  if voice.stream.count() < voice.channels {
+    if voice.streamFinished.load() {
+      voice.active = false
+    } else {
+      voice.underrunFrames = voice.underrunFrames + 1
+    }
+    ret
+  }
+  var left: Float = 0.0
+  var right: Float = 0.0
+  if let first: Float = voice.stream.pop() {
+    left = first
+    right = first
+  }
+  if voice.channels >= 2 {
+    if let second: Float = voice.stream.pop() {
+      right = second
+    }
+    loop var extra: Int = 2, extra < voice.channels, ++extra {
+      let skipped: opt Float = voice.stream.pop()
+    }
+  }
+  let gain: Float = voice.gain.current
+  let pan: Float = voice.pan.current
+  if voice.channels >= 2 {
+    if pan > 0.0 {
+      left = left * (1.0 - pan)
+    }
+    if pan < 0.0 {
+      right = right * (1.0 + pan)
+    }
+  } else {
+    let angle: Float = (pan + 1.0) * 0.78539816
+    right = left * sin(x: angle)
+    left = left * cos(x: angle)
+  }
+  addToBus(
+    busLeft: busLeft
+    busRight: busRight
+    index: index
+    left: left * gain
+    right: right * gain
+  )
+  rampAdvance(ramp: voice.gain)
+  rampAdvance(ramp: voice.pan)
+  if voice.stopping and voice.gain.framesLeft is 0 and voice.gain.current <= 0.0 {
+    voice.active = false
+  }
+}
+
 # Play one voice for `frames` frames onto its bus's part of the bus buffers;
 # it stops itself (active false) when it ends.
 func renderVoice(
@@ -367,6 +450,13 @@ func renderVoice(
   loop var frame: Int = 0, frame < frames and voice.active, ++frame {
     if voice.delayFrames > 0 {
       voice.delayFrames = voice.delayFrames - 1
+    } else if voice.isStream {
+      renderStreamFrame(
+        voice: voice
+        busLeft: busLeft
+        busRight: busRight
+        index: voice.bus * maxFrames + frame
+      )
     } else {
       var left: Float = voiceSampleAt(voice: voice, position: voice.position, channel: 0)
       var right: Float = left
@@ -455,7 +545,7 @@ func mixerRender(
   loop var index: Int = 0, index < audioMaxVoices, ++index {
     var endedVoiceId: Int = -1
     if let voice: mod AudioVoice = mixer.voices.modAt(index: index) {
-      if voice.active and (pausedBuses bitand (1 shl voice.bus)) is 0 {
+      if voice.active and not voice.paused and (pausedBuses bitand (1 shl voice.bus)) is 0 {
         if duckOn and voice.bus is duckSource {
           duckWanted = true
         }

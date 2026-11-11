@@ -110,6 +110,14 @@ func count(T: type, this: view SpscRing(T)) realtime ret Int {
   }
 }
 
+# How many values were ever popped: the consumer's position in the stream of
+# values (a streamed voice's place in its file). Any thread may read it.
+func popped(T: type, this: view SpscRing(T)) realtime ret Int {
+  unsafe {
+    ret rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
+  }
+}
+
 # Owner only, once, after the producer and the consumer are done.
 func freeSpscRing(T: type, this: view SpscRing(T)) {
   unsafe {

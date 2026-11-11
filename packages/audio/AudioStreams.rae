@@ -1,0 +1,256 @@
+# audio/AudioStreams — long files played as they are read (docs/audio-design.md
+# §7.2): music, a long recording, a podcast. MP3, FLAC, Ogg Vorbis and WAV.
+#
+#     open audio/AudioStreams
+#     let song: VoiceId = audio.playStream(path: "music/one.mp3", bus: AudioBusKind.music,
+#     gainDecibels: 0.0)
+#     let queued: Bool = audio.queueNext(voiceId: song, path: "music/two.flac")   # gapless
+#     audio.pauseVoice(voiceId: song)
+#     audio.resumeVoice(voiceId: song)
+#     let moved: Bool = audio.seek(voiceId: song, seconds: 61.5)
+#     let at: Float64 = audio.positionSeconds(voiceId: song)
+#
+# The streaming thread (audio/AudioButler) decodes about a second ahead and
+# converts the rate (audio/Resampler, 32 taps); the voice on the audio thread
+# only takes samples from its ring. Opening a file (to know its format) happens
+# on the calling thread; the reading is the butler's. A VoiceId stays the same
+# through a seek, which starts a new voice at the place with a 5 ms fade.
+import Math
+open Atomic
+open audio/Audio
+open audio/AudioButler
+open audio/AudioMixer
+open audio/AudioSession
+open audio/Decoder
+open audio/Sound
+open collections/SpscRing
+
+func durationOf(decoder: view AudioDecoder) ret Float64 {
+  if decoder.frameCount < 0 or decoder.sampleRate <= 0 {
+    ret -1.0
+  }
+  ret (decoder.frameCount as Float64) / (decoder.sampleRate as Float64)
+}
+
+# Start a stream voice for `decoder` (positioned already), as the program's
+# `voiceId`, starting `startSeconds` into the file
+func startStream(
+  this: mod AudioEngine
+  decoder: view AudioDecoder
+  path: view String
+  voiceId: view Int
+  bus: view Int
+  gain: view Float
+  startSeconds: view Float64
+) ret StreamRecord {
+  let streamId: Int = this.nextStreamId
+  this.nextStreamId = this.nextStreamId + 1
+  let mixerVoiceId: Int = this.nextVoiceId
+  this.nextVoiceId = this.nextVoiceId + 1
+  # a second at the device's rate
+  let shared: StreamShared = {
+    ring: createSpscRing(Float, capacity: this.sampleRate * decoder.channels)
+    finished: createAtomic(Bool, value: false)
+    advanced: createAtomic(Int, value: 0)
+  }
+  let open: ButlerCommand = {
+    kind: ButlerCommandKind.open
+    streamId: streamId
+    decoder: decoder.handle
+    channels: decoder.channels
+    sampleRate: decoder.sampleRate
+    ring: shared.ring
+    finished: shared.finished
+    advanced: shared.advanced
+  }
+  let opened: Bool = this.butlerCommands.push(value: open)
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.play)
+  command.voiceId = mixerVoiceId
+  command.channels = decoder.channels
+  command.sampleRate = this.sampleRate
+  command.bus = bus
+  command.value = gain
+  command.isStream = true
+  command.stream = shared.ring
+  command.streamFinished = shared.finished
+  this.liveVoices.add(value: { voiceId: mixerVoiceId, bus: bus })
+  this.lastSoundMs = this.audioNowMs()
+  this.applySession()
+  let sent: Bool = this.sendCommand(command: command)
+  var fileSeconds: List(Float64) = {}
+  fileSeconds.add(value: durationOf(decoder: decoder))
+  ret StreamRecord {
+    voiceId: voiceId
+    mixerVoiceId: mixerVoiceId
+    streamId: streamId
+    path: "{path}"
+    shared: shared
+    channels: decoder.channels
+    bus: bus
+    gain: gain
+    startSeconds: startSeconds
+    fileSeconds: fileSeconds
+    voiceEnded: false
+    closed: false
+    paused: false
+  }
+}
+
+# Play a long file as it is read; a VoiceId that names nothing if the file
+# cannot be decoded
+func playStream(
+  this: mod AudioEngine
+  path: view String
+  bus: view AudioBusKind
+  gainDecibels: view Float
+) ret VoiceId {
+  let voiceId: Int = this.nextVoiceId
+  this.nextVoiceId = this.nextVoiceId + 1
+  let decoder: AudioDecoder = openAudioDecoder(path: path)
+  if decoder.handle is 0 {
+    log("[audio] cannot stream {path}")
+    ret VoiceId { value: voiceId }
+  }
+  if this.offline {
+    log("[audio] stream voice {voiceId} {path} bus {bus}")
+  }
+  let record: StreamRecord = this.startStream(
+    decoder: decoder
+    path: path
+    voiceId: voiceId
+    bus: busIndex(bus: bus)
+    gain: decibelsToGain(decibels: gainDecibels)
+    startSeconds: 0.0
+  )
+  this.streams.add(value: record)
+  ret VoiceId { value: voiceId }
+}
+
+func streamIndexOf(this: view AudioEngine, voiceId: view VoiceId) ret Int {
+  loop var i: Int = 0, i < this.streams.length(), ++i {
+    if let record: StreamRecord = this.streams.copyAt(index: i) {
+      if record.voiceId is voiceId.value {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# After the file the voice plays now, play `path` with no gap (same channel
+# count; the rate may differ). False when the file cannot be decoded.
+func queueNext(this: mod AudioEngine, voiceId: view VoiceId, path: view String) ret Bool {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if index < 0 {
+    ret false
+  }
+  let decoder: AudioDecoder = openAudioDecoder(path: path)
+  if decoder.handle is 0 {
+    ret false
+  }
+  if let record: mod StreamRecord = this.streams.modAt(index: index) {
+    if record.channels is not decoder.channels {
+      closeAudioDecoder(this: decoder)
+      ret false
+    }
+    let next: ButlerCommand = {
+      kind: ButlerCommandKind.queueNext
+      streamId: record.streamId
+      decoder: decoder.handle
+      channels: decoder.channels
+      sampleRate: decoder.sampleRate
+      ring: record.shared.ring
+      finished: record.shared.finished
+      advanced: record.shared.advanced
+    }
+    record.fileSeconds.add(value: durationOf(decoder: decoder))
+    ret this.butlerCommands.push(value: next)
+  }
+  ret false
+}
+
+func pauseVoice(this: mod AudioEngine, voiceId: view VoiceId) {
+  this.sendVoiceCommand(kind: AudioCommandKind.pauseVoice, voiceId: voiceId, value: 0.0)
+}
+
+func resumeVoice(this: mod AudioEngine, voiceId: view VoiceId) {
+  this.sendVoiceCommand(kind: AudioCommandKind.resumeVoice, voiceId: voiceId, value: 0.0)
+}
+
+# Seconds played since the stream started (through the files queued after the
+# first), counting a seek
+func positionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: StreamRecord = this.streams.copyAt(index: index) {
+    let played: Int = record.shared.ring.popped() / max(a: 1, b: record.channels)
+    ret record.startSeconds + (played as Float64) / (this.sampleRate as Float64)
+  }
+  ret 0.0
+}
+
+# The first file's length in seconds, or -1 when the format does not say
+func durationSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: StreamRecord = this.streams.copyAt(index: index) {
+    ret record.fileSeconds.copyAtFallback(index: 0, fallback: -1.0)
+  }
+  ret -1.0
+}
+
+# Whether the stream still plays (or is paused): false once it has ended
+func streamIsPlaying(this: view AudioEngine, voiceId: view VoiceId) ret Bool {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: StreamRecord = this.streams.copyAt(index: index) {
+    ret not record.voiceEnded
+  }
+  ret false
+}
+
+# Move the stream to `seconds` into its first file: the playing voice fades out
+# in 5 ms and a new one starts there, under the same VoiceId
+func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) ret Bool {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if index < 0 {
+    ret false
+  }
+  var path: String = ""
+  if let found: StreamRecord = this.streams.copyAt(index: index) {
+    path = "{found.path}"
+  }
+  let decoder: AudioDecoder = openAudioDecoder(path: path)
+  if decoder.handle is 0 {
+    ret false
+  }
+  var frame: Int = (seconds * (decoder.sampleRate as Float64)) as Int
+  if frame < 0 {
+    frame = 0
+  }
+  if not decoder.seekDecoder(frame: frame) {
+    closeAudioDecoder(this: decoder)
+    ret false
+  }
+  var bus: Int = 0
+  var gain: Float = 1.0
+  var oldMixerVoiceId: Int = 0
+  if let record: mod StreamRecord = this.streams.modAt(index: index) {
+    # the old stream lives on, detached, until its voice has faded and the
+    # butler has closed it (update frees it then)
+    record.voiceId = -1
+    bus = record.bus
+    gain = record.gain
+    oldMixerVoiceId = record.mixerVoiceId
+  }
+  var stop: AudioCommand = emptyCommand(kind: AudioCommandKind.stop)
+  stop.voiceId = oldMixerVoiceId
+  let stopped: Bool = this.sendCommand(command: stop)
+  let record: StreamRecord = this.startStream(
+    decoder: decoder
+    path: path
+    voiceId: voiceId.value
+    bus: bus
+    gain: gain
+    startSeconds: (frame as Float64) / (decoder.sampleRate as Float64)
+  )
+  this.streams.add(value: record)
+  ret true
+}
