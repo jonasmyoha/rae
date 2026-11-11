@@ -1,0 +1,141 @@
+# GrassTiers — grass in rings round the camera, each ring its own GPU grass (lib/GrassCompute): a
+# near field of dense blades, then rings of fewer, wider blades farther out, meeting with no line
+# (GrassConfig grassNextRing fades each ring in where the one inside it shrinks out). Each tier is
+# one compute pass placing its blades before the G-buffer pass and one indirect draw in it.
+#
+# The app makes each tier's GrassCompute (its own compute shader and surface field: where grass
+# grows on its world) and hands it over with the tier's settings; this module runs them all a
+# frame. game proto1's painted grass is three tiers: the near field to 20 m, a ring to 120 m and
+# one to 300 m (GrassConfig grassPaintedSettings, grassPaintedMidRing, grassPaintedFarRing).
+import GrassConfig
+import Vec3
+open gpu/GpuResources
+open GrassCompute
+open GrassBenders
+open Wind
+open Gbuffer
+
+# One ring of grass: its GPU grass and its settings
+type GrassTier {
+  on: Bool
+  compute: GrassCompute
+  settings: GrassConfig.GrassViewSettings
+  # The share of its blades at full density; a frame's `share` scales it
+  fullDensity: Float
+}
+
+type GrassTiers {
+  tiers: List(GrassTier) = List.create(GrassTier, cap: 3)
+}
+
+func createGrassTiers() ret GrassTiers {
+  ret GrassTiers {}
+}
+
+# Add a ring, inner rings first: `compute` placing its blades on a grid of side x side candidates,
+# drawn when `on`
+func addGrassTier(
+  tiers: mod GrassTiers
+  compute: own GrassCompute
+  settings: view GrassConfig.GrassViewSettings
+  side: view Int
+  on: view Bool
+) {
+  var grass: GrassCompute = own compute
+  grassSetBladeSide(grass: grass, side: side)
+  tiers.tiers.add(
+    value: GrassTier {
+      on: on
+      compute: own grass
+      settings: settings
+      fullDensity: settings.densityScale
+    }
+  )
+}
+
+# Place this frame's blades of every ring round `centerX`, `centerY`, before the G-buffer pass.
+# `share` (0 to 1) scales every ring's density; `benders` are what bends the blades near it (x, y,
+# radius, strength each); the camera and its target turn the blades toward the view.
+func grassTiersFrame(
+  tiers: mod GrassTiers
+  resources: mod GpuResources
+  centerX: copy Float
+  centerY: copy Float
+  groundZ: copy Float
+  deltaTime: copy Float
+  wind: view WindVector
+  toon: copy Int
+  share: copy Float
+  benders: view List(Float)
+  camera: view Vec3
+  target: view Vec3
+) {
+  loop var i: Int = 0, i < tiers.tiers.length, ++i {
+    if let tier: mod GrassTier = tiers.tiers.modAt(index: i) {
+      if tier.on {
+        grassSetBenders(grass: tier.compute, benders: benders)
+        tier.settings.densityScale = tier.fullDensity * share
+        grassGenerate(
+          grass: tier.compute
+          resources: resources
+          centerX: centerX
+          centerY: centerY
+          groundZ: groundZ
+          deltaTime: deltaTime
+          wind: wind
+          toon: toon
+          camX: camera.x
+          camY: camera.y
+          camZ: camera.z
+          fwdX: target.x - camera.x
+          fwdY: target.y - camera.y
+          fwdZ: target.z - camera.z
+          settings: tier.settings
+        )
+      }
+    }
+  }
+}
+
+# Every ring's blades, into the open G-buffer pass
+func grassTiersDraw(
+  tiers: mod GrassTiers
+  resources: mod GpuResources
+  cache: view GbufferCache
+  rendererResources: view GpuResources
+) {
+  loop var i: Int = 0, i < tiers.tiers.length, ++i {
+    if let tier: mod GrassTier = tiers.tiers.modAt(index: i) {
+      if tier.on {
+        grassDraw(
+          grass: tier.compute
+          resources: resources
+          gbuffer: cache
+          gbufferResources: rendererResources
+        )
+      }
+    }
+  }
+}
+
+# The settings of the ring at `index` (0 the near field), for an app that paints its ground to
+# match them; `fallback` when there is no such ring
+func grassTierSettings(
+  tiers: view GrassTiers
+  index: view Int
+  fallback: view GrassConfig.GrassViewSettings
+) ret GrassConfig.GrassViewSettings {
+  if let tier: view GrassTier = tiers.tiers.viewAt(index: index) {
+    ret tier.settings
+  }
+  ret fallback
+}
+
+# Release every ring's GPU objects
+func grassTiersShutdown(tiers: mod GrassTiers, resources: mod GpuResources) {
+  loop var i: Int = 0, i < tiers.tiers.length, ++i {
+    if let tier: mod GrassTier = tiers.tiers.modAt(index: i) {
+      grassShutdown(grass: tier.compute, resources: resources)
+    }
+  }
+}
