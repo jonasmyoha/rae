@@ -927,9 +927,12 @@ Codex MUST NOT:
 ## Testing
 
 **Always run the suite through the official script `compiler/tools/watch-tests.sh`,
-NOT a bare `make test`.** The script streams `make test` into the ONE shared log
-file the devtools web UI tails (`/tmp/rae-test-live.log`, override `RAE_TEST_LOG`)
-and wraps it in `@@RAE_RUN_START@@` / `@@RAE_RUN_END exit=N@@` sentinels, so the
+NOT a bare `make test`.** The script streams `make test` into the checkout's live
+log (`compiler/tools/test-log-path.sh` prints it; `RAE_TEST_LOG` overrides it): in the
+repository's main checkout that is `/tmp/rae-test-live.log`, the file the devtools web
+UI tails, and in a linked worktree (`git worktree add`, several agents at once) it is
+`/tmp/rae-test-live-<folder>-<hash>.log`, so suites in different worktrees run side
+by side; devtools shows the main checkout's runs only. It wraps the run in `@@RAE_RUN_START@@` / `@@RAE_RUN_END exit=N@@` sentinels, so the
 "Test log" tab AND the Compiler tab's Test Runner both show the run live — with
 exact start/end boundaries and the real exit code. This matters for subagents
 too: a subagent that runs tests MUST use the script so the human can see the run.
@@ -940,7 +943,7 @@ A bare `make test > /tmp/some-other-file.log` is invisible to the UI (wrong file
 # From the repo root (the script cd's into rae/compiler itself). Use a timeout
 # so a hung test can't block forever (perl form works when `timeout` is absent,
 # common on macOS):
-perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
+perl -e 'alarm shift; exec @ARGV' 600 bash "$PWD/compiler/tools/watch-tests.sh"
 ```
 
 **Run it in the FOREGROUND.** The run takes ~5 minutes (843 cases
@@ -983,17 +986,19 @@ times: a background run was waited on with
 until grep -q 'RAE_RUN_END' "$f"; do sleep 5; done
 ```
 
-`RAE_RUN_END` is written by `watch-tests.sh` into **`/tmp/rae-test-live.log`**
-(or `$RAE_TEST_LOG`) — never to stdout, so it is never in the background task's
+`RAE_RUN_END` is written by `watch-tests.sh` into **the checkout's live log**
+(`compiler/tools/test-log-path.sh`; `/tmp/rae-test-live.log` in the main checkout) —
+never to stdout, so it is never in the background task's
 output file. Piping through `| tail -3` makes it worse: nothing at all reaches
 that file until the pipeline ends. The marker that IS in the task file is the
 runner's own `[exited with code N]`. Wait like this:
 
 ```bash
 # RIGHT — ends the moment the run ends, gives up if the run dies, bounded.
+log="$(compiler/tools/test-log-path.sh)"        # this checkout's live log
 for t in $(seq 1 110); do
   grep -q '\[exited with code' "$f" && break   # the task wrapper's end marker
-  grep -q 'RAE_RUN_END' /tmp/rae-test-live.log && break   # the script's own
+  grep -q 'RAE_RUN_END' "$log" && break         # the script's own
   kill -0 "$pid" 2>/dev/null || break           # producer gone: stop waiting
   sleep 6
 done
@@ -1111,17 +1116,22 @@ the `naga` CLI at build time, and `run_tests.sh` / `run_examples.sh` set
 fixture instead of silently skipping. `make setup` installs it
 (`cargo install naga-cli`); `rae toolchain status` shows which one is found.
 
-**Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
-processes corrupt each other's build cache and interleave the shared log, which
-shows up as spurious failures. Before starting a run, KILL any earlier one:
+**Only ONE test run at a time IN A CHECKOUT.** Concurrent `make test` /
+`watch-tests.sh` processes in one checkout corrupt each other's build files and
+interleave its live log, which shows up as spurious failures. Runs in DIFFERENT
+worktrees are fine side by side: each has its own log, lock and build files (the
+shared runtime cache in `~/.cache/rae/runtime` is written atomically). Before
+starting a run, KILL any earlier one of THIS checkout only, matched by its path, so
+another worktree's run (another agent's) is left alone:
 
 ```bash
-pkill -9 -f 'watch-tests.sh'; pkill -9 -f 'make test'; pkill -9 -f 'run_tests.sh'; pkill -9 -f 'bin/rae run'
+pkill -f "$PWD/compiler/tools/(watch-tests|run_tests)" ; sleep 2
+pkill -9 -f "$PWD/compiler/tools/(watch-tests|run_tests)" 2>/dev/null || true
 ```
 
 Then start the single run. If you need to re-run, kill first, then re-launch —
 never launch a second run on top of a live one. `watch-tests.sh` also enforces
-this itself: a run holds a lock next to the log (`$RAE_TEST_LOG.lock`), and a
+this itself: a run holds a lock next to its log (`<log>.lock`), and a
 second `watch-tests.sh` prints "another test run (pid N) is writing ...;
 waiting" and WAITS for the first to end (up to `RAE_TEST_LOCK_WAIT` seconds,
 default 3600) instead of emptying the shared log under it. A killed run's
