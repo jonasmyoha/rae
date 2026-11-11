@@ -44,15 +44,18 @@ type StreamRecord {
   # the mixer's voice playing it now (a new one after a seek)
   mixerVoiceId: Int
   streamId: Int
-  # the first file (a seek opens it again)
-  path: String
+  # every file of the stream, the first and the ones queued after it (a seek
+  # opens the one it moves in again, and queues the rest after it)
+  paths: List(String)
   shared: StreamShared
   channels: Int
   bus: Int
   gain: Float
-  # where in the first file the current mixer voice started, in seconds
+  # the file (an index into `paths`) and the place in it, in seconds, where
+  # the current mixer voice started (a seek starts a new one)
+  startFile: Int
   startSeconds: Float64
-  # the length of each file of the stream, in seconds (gapless next adds)
+  # the length of each file of the stream, in seconds; -1 when unknown
   fileSeconds: List(Float64)
   # the mixer reported the voice ended / the butler closed the stream
   voiceEnded: Bool
