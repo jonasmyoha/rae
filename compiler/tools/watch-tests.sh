@@ -4,15 +4,27 @@
 # each FAIL printed on its own line as it happens.
 #
 #   ./tools/watch-tests.sh          # run + watch here
-#   tail -f /tmp/rae-test-live.log  # ...or watch from another terminal
+#   tail -f "$(tools/test-log-path.sh)"   # ...or watch from another terminal
+#
+# The log is this checkout's (tools/test-log-path.sh): /tmp/rae-test-live.log in the main
+# checkout, which Rae devtools tails, and a log of its own in each linked worktree, so suites in
+# several worktrees run side by side. RAE_TEST_LOG overrides it.
 set -uo pipefail
-LOG="${RAE_TEST_LOG:-/tmp/rae-test-live.log}"
+# Run under the absolute path, so the checkout's path is in the command line: the scoped kill
+# (pkill -f "$PWD/compiler/tools/(watch-tests|run_tests)", AGENTS.md) then finds this run and
+# no other worktree's
+case "$0" in
+  /*) ;;
+  *) exec bash "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" "$@" ;;
+esac
+LOG="$("$(dirname "$0")/test-log-path.sh")"
 cd "$(dirname "$0")/.." || exit 1        # -> compiler/
-# ONE RUN AT A TIME (AGENTS.md "Only ONE test run at a time"). The log is
-# shared: a second run would empty it in the middle of the first, and the
+# ONE RUN AT A TIME PER CHECKOUT (AGENTS.md "Only ONE test run at a time"). A
+# checkout's log is shared by its runs: a second run would empty it in the middle of the first, and the
 # devtools would drop the first run and show the second (a 900-case suite
 # turned into "27 tests, 9.5 s"), while the two runs corrupt each other's
-# build cache. So a run holds a lock next to the log, and a second one WAITS
+# build files (compiler/build, the cases' outputs). Another worktree has its
+# own log, lock and build files, so its run goes on beside this one. So a run holds a lock next to the log, and a second one WAITS
 # until the first ends (up to RAE_TEST_LOCK_WAIT seconds, default 3600). A
 # lock whose run is gone (killed) is cleared.
 LOCK="$LOG.lock"

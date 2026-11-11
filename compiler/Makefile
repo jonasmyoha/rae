@@ -115,9 +115,9 @@ TARGET = $(BIN_DIR)/rae
 # RAE_TEST_SEQUENTIAL=1. RAE_TEST_PARALLEL=1 is still accepted (now a no-op,
 # parallel being the default) so older invocations keep working.
 ifeq ($(RAE_TEST_SEQUENTIAL),1)
-TEST_RUNNER = tools/run_tests.sh
+TEST_RUNNER = $(CURDIR)/tools/run_tests.sh
 else
-TEST_RUNNER = tools/run_tests_parallel.sh
+TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
 .PHONY: toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
