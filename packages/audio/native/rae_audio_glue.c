@@ -141,6 +141,17 @@ int64_t rae_audio_device_period_frames(int64_t device) {
   return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.playback.internalPeriodSizeInFrames : 0;
 }
 
+/* The name of the platform audio system miniaudio chose ("Core Audio",
+ * "AAudio", "WASAPI", "PulseAudio", "Web Audio", ...), copied into `into` */
+int64_t rae_audio_device_backend_name(int64_t device, uint8_t* into, int64_t capacity) {
+  if (!device) return 0;
+  const char* name = ma_get_backend_name(((RaeAudioDevice*)(intptr_t)device)->context.backend);
+  int64_t length = (int64_t)strlen(name);
+  if (length > capacity) length = capacity;
+  memcpy(into, name, (size_t)length);
+  return length;
+}
+
 /* The output's buffering in frames, for the clock (docs/audio-design.md §6.1):
  * miniaudio's period times its periods, on every platform */
 int64_t rae_audio_device_buffer_frames(int64_t device) {

@@ -129,6 +129,8 @@ void rae_audio_run_loop_pump(void);
  * (2) in frames, -1 elsewhere. session_output_latency_ns: iOS, the route's
  * output latency, -1 elsewhere. */
 int64_t rae_audio_device_buffer_frames(int64_t device);
+/* The platform audio system in use ("Core Audio", "AAudio", "WASAPI", ...), its length */
+int64_t rae_audio_device_backend_name(int64_t device, uint8_t* into, int64_t capacity);
 int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property);
 int64_t rae_audio_session_output_latency_ns(void);
 

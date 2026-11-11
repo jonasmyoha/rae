@@ -115,13 +115,19 @@ bool rae_package_native_prepare_all(void) {
   return true;
 }
 
-bool rae_package_native_print(void) {
+bool rae_package_native_print(bool android) {
   for (int i = 0; i < rae_deps_count(); ++i) {
     RaeDepNative native;
     if (!rae_deps_native_at(i, &native)) continue;
     char install[3 * PATH_MAX];
     if (!rae_package_native_install(i, install, sizeof(install))) return false;
-    printf("%s\t%s\t%s\t%s\t%s\n", native.name, native.header, install, native.sources_device, native.defines_device);
+    /* Android's own sources and options where the pack gives them (an Apple
+     * .m source is not Android's), else the device ones */
+    const char* sources = native.sources_device;
+    const char* defines = native.defines_device;
+    if (android && native.sources_android && native.sources_android[0]) sources = native.sources_android;
+    if (android && native.defines_android && native.defines_android[0]) defines = native.defines_android;
+    printf("%s\t%s\t%s\t%s\t%s\n", native.name, native.header, install, sources, defines);
   }
   return true;
 }

@@ -229,7 +229,8 @@ pack Sql {
 - A program links it only when its emitted C includes `header`, the rule before this, so importing a package you do not reach
   costs nothing.
 - `rae tree --native` lists each package's device sources and options, and `gen-ios.sh` reads that instead of naming a library.
-  So does `gen-android.sh`. `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
+  `gen-android.sh` reads `rae tree --native-android`: the same, with the pack's `sourcesAndroid` / `definesAndroid` where it
+  gives them. `packages/audio` does: its iOS glue is Objective-C (`.m`), the same text that Android compiles as C. `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
 - A library that needs `cmake` or a network says so in its script's error. A fresh clone of a project with C needs those too.
 
 **Shaders: a path in a package's module is tried next to the file, then in that package's folder, then `lib/...` in the stdlib.**

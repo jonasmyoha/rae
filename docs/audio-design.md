@@ -822,6 +822,17 @@ green.
    AAC), Windows (WASAPI, SMTC, Media Foundation AAC), Linux (PipeWire through
    Pulse/JACK, MPRIS), the web (AudioWorklet build, COOP/COEP in the web shell,
    decode through WebCodecs). Each with a real-device check in `checks/`.
+
+   **Landed, Android's device (2026-11-12), `packages/audio` 0.9.0:** the
+   package builds into an Android app (`tools/android/gen-android.sh`; the
+   pack's new `sourcesAndroid` names the C glue, as `sourcesDevice` names the
+   Objective-C copy iOS needs), and miniaudio plays through AAudio with stage
+   B: `checks/audioSine` passes on the Android 35 emulator (AAudio, the
+   callback renders, 0 underrun). `deviceBackendName` says which platform
+   system plays ("Core Audio", "AAudio", ...). Not yet, each queued as its
+   own step: AAC through AMediaCodec and the audio focus and MediaSession
+   (Android), and Windows, Linux and the web, which need a machine or a
+   design decision (see the queue).
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.

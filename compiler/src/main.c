@@ -5811,8 +5811,8 @@ static int cmd_tree(const char* mode) {
   if (!packages_find_pack(pack_path, pack_dir)) return 1;
   RaePack pack;
   if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
-  if (mode && strcmp(mode, "--native") == 0) {
-    bool printed = rae_package_native_print();
+  if (mode && (strcmp(mode, "--native") == 0 || strcmp(mode, "--native-android") == 0)) {
+    bool printed = rae_package_native_print(strcmp(mode, "--native-android") == 0);
     raepack_free(&pack);
     return printed ? 0 : 1;
   }

@@ -84,6 +84,9 @@ typedef struct {
   Str native_link_linux;
   Str native_sources_device;
   Str native_defines_device;
+  /* Android's device build, when it differs (an Apple .m source): else the device ones */
+  Str native_sources_android;
+  Str native_defines_android;
   /* Optional `meta: { name: "...", version: "..." }`: what the program is
    * called and its release (the App Store's version); the program reads
    * them as Pack.name / Pack.version. Empty (len 0) when absent. */
