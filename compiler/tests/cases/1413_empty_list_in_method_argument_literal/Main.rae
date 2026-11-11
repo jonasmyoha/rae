@@ -1,0 +1,14 @@
+# An empty List literal `{}` in a struct literal passed to a method
+# (`entries.add(value: { next: {} })`) gets its List.createList from discovery:
+# the method's parameter type is the literal's expected type. It was created
+# on demand after its first caller, which C refused (#86800923).
+open Streams
+
+func main() {
+  var streams: Streams = { entries: {} }
+  openStream(streams: streams, id: 3)
+  openTwo(streams: streams)
+  loop let stream: view Stream in streams.entries {
+    log("stream {stream.id} decoder {stream.decoder.handle} next {stream.next.length()}")
+  }
+}

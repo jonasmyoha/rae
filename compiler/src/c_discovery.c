@@ -370,6 +370,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             uint16_t param_count = 1; for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
             Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
             const AstFuncDecl* d = find_function_overload(ctx->module, ctx, expr->as.method_call.method_name, &obj_type, param_count, true, expr);
+            AstTypeRef* method_generic_args = NULL;
             if (d && d->generic_params) {
                 const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
                 // When discovering inside a generic body, `this`'s type is the template
@@ -378,9 +379,58 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 if (receiver_type && ctx->generic_params && ctx->generic_args)
                     receiver_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, receiver_type);
                 AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
-                if (inferred) { AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred); register_function_specialization(ctx->compiler_ctx, d, concrete); }
+                if (inferred) {
+                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                    register_function_specialization(ctx->compiler_ctx, d, concrete);
+                    method_generic_args = concrete;
+                }
             }
-            discover_specializations_expr_impl(ctx, expr->as.method_call.object); for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) discover_specializations_expr_impl(ctx, a->value);
+            discover_specializations_expr_impl(ctx, expr->as.method_call.object);
+            {
+                // An untyped struct or collection literal argument takes the
+                // parameter's type as its expected type, as for a plain call,
+                // so the lists it holds register their createList/add/drop
+                // (`entries.add(value: { id: 1, next: {} })`, #86800923). For a
+                // generic method the parameter's type parameters are the ones
+                // the receiver bound (`add(value: own T)` on a List(Entry));
+                // when they could not be bound the argument keeps the ambient
+                // expected type, as before.
+                bool saved_has = ctx->has_expected_type;
+                AstTypeRef saved_exp = ctx->expected_type;
+                const AstParam* first_param = d && d->params ? d->params->next : NULL;
+                uint16_t arg_index = 0;
+                for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next, arg_index++) {
+                    const AstTypeRef* param_tr = NULL;
+                    bool literal = a->value
+                        && ((a->value->kind == AST_EXPR_OBJECT && !a->value->as.object_literal.type)
+                            || (a->value->kind == AST_EXPR_COLLECTION_LITERAL && !a->value->as.collection.type));
+                    if (literal && d && (!d->generic_params || method_generic_args)) {
+                        if (a->name.len > 0) {
+                            for (const AstParam* p = first_param; p; p = p->next)
+                                if (str_eq(p->name, a->name)) { param_tr = p->type; break; }
+                        } else {
+                            const AstParam* p = first_param;
+                            for (uint16_t i = 0; i < arg_index && p; i++) p = p->next;
+                            if (p) param_tr = p->type;
+                        }
+                    }
+                    if (param_tr) {
+                        AstTypeRef* sub = (AstTypeRef*)param_tr;
+                        if (d->generic_params)
+                            sub = substitute_type_ref(ctx->compiler_ctx, d->generic_params, method_generic_args, sub);
+                        else if (ctx->generic_params && ctx->generic_args)
+                            sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, sub);
+                        ctx->expected_type = *sub;
+                        ctx->expected_type.next = NULL;
+                        ctx->expected_type.is_view = false;
+                        ctx->expected_type.is_mod = false;
+                        ctx->has_expected_type = true;
+                    }
+                    discover_specializations_expr_impl(ctx, a->value);
+                    ctx->has_expected_type = saved_has;
+                    ctx->expected_type = saved_exp;
+                }
+            }
             break;
         }
         case AST_EXPR_BINARY: discover_specializations_expr_impl(ctx, expr->as.binary.lhs); discover_specializations_expr_impl(ctx, expr->as.binary.rhs); break;
