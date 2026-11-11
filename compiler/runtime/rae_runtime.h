@@ -1344,4 +1344,7 @@ int64_t rae_sdf_atlas_width(int64_t handle);
 int64_t rae_sdf_atlas_height(int64_t handle);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
 
+/* Atomics and the Signal semaphore (lib/Atomic.rae, lib/Signal.rae). */
+#include "runtime_atomics.h"
+
 #endif

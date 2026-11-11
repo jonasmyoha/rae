@@ -1,0 +1,121 @@
+# SpscRing(T) between two real threads (docs/realtime-language-design.md §4.1,
+# §6.4, §6.5). Runs under the TSan gate (tools/tsan-check.sh).
+#
+# 1. Paced by two Signals, the classic bounded buffer: `space` counts free
+#    slots, `ready` counts filled ones, so neither side ever finds the ring
+#    full or empty. Exercises Signal.wait/post across threads.
+# 2. Free-running: the producer retries a refused push and the consumer
+#    retries an empty pop, so the ring is full and empty many times while the
+#    other side works. Exercises the ring's own acquire/release order.
+#
+# A spawned consumer that waited first and ran synchronously would hang on its
+# first wait, so finishing at all shows the two sides run at the same time.
+open Atomic
+open Signal
+open collections/SpscRing
+
+const total: Int = 100000
+
+func pacedConsumer(
+  ring: own SpscRing(Int)
+  ready: own Signal
+  space: own Signal
+  popped: own Atomic(Int)
+) ret Int {
+  var sum: Int = 0
+  var expected: Int = 1
+  var outOfOrder: Int = 0
+  var received: Int = 0
+  loop received < total {
+    received = received + 1
+    ready.wait()
+    if let value: Int = ring.pop() {
+      if value is not expected {
+        outOfOrder = outOfOrder + 1
+      }
+      expected = value + 1
+      sum = sum + value
+    }
+    popped.fetchAddRelaxed(amount: 1)
+    space.post()
+  }
+  if outOfOrder > 0 {
+    ret -outOfOrder
+  }
+  ret sum
+}
+
+func paced() {
+  let ring: SpscRing(Int) = createSpscRing(Int, capacity: 64)
+  let ready: Signal = createSignal()
+  let space: Signal = createSignal()
+  let popped: Atomic(Int) = createAtomic(Int, value: 0)
+  var primed: Int = 0
+  loop primed < 64 {
+    space.post()
+    primed = primed + 1
+  }
+  let task: Task(Int) = spawn pacedConsumer(
+    ring: ring
+    ready: ready
+    space: space
+    popped: popped
+  )
+  var refused: Int = 0
+  var value: Int = 0
+  loop value < total {
+    value = value + 1
+    space.wait()
+    if not ring.push(value: value) {
+      refused = refused + 1
+    }
+    ready.post()
+  }
+  let sum: Int = task.get()
+  log("paced: sum {sum}, expected {total * (total + 1) / 2}")
+  log("paced: popped {popped.load()}, refused {refused}, left {ring.count()}")
+  freeSpscRing(this: ring)
+  freeSignal(this: ready)
+  freeSignal(this: space)
+  freeAtomic(this: popped)
+}
+
+func spinningConsumer(ring: own SpscRing(Int)) ret Int {
+  var sum: Int = 0
+  var expected: Int = 1
+  var outOfOrder: Int = 0
+  var received: Int = 0
+  loop received < total {
+    if let value: Int = ring.pop() {
+      if value is not expected {
+        outOfOrder = outOfOrder + 1
+      }
+      expected = value + 1
+      sum = sum + value
+      received = received + 1
+    }
+  }
+  if outOfOrder > 0 {
+    ret -outOfOrder
+  }
+  ret sum
+}
+
+func spinning() {
+  let ring: SpscRing(Int) = createSpscRing(Int, capacity: 8)
+  let task: Task(Int) = spawn spinningConsumer(ring: ring)
+  var value: Int = 1
+  loop value <= total {
+    if ring.push(value: value) {
+      value = value + 1
+    }
+  }
+  let sum: Int = task.get()
+  log("spinning: sum {sum}, expected {total * (total + 1) / 2}, left {ring.count()}")
+  freeSpscRing(this: ring)
+}
+
+func main() {
+  paced()
+  spinning()
+}

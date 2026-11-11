@@ -1,0 +1,71 @@
+# Atomic(T), Signal and SpscRing(T) on one thread (docs/realtime-language-design.md
+# §6.4, §6.5, §4.1): each operation's answer, the order of a ring, and its edges
+# (full refuses a push, empty answers none, a slot freed by a pop is reused).
+open Atomic
+open Signal
+open collections/SpscRing
+
+type Note {
+  key: Int
+  velocity: Int32
+}
+
+func atomics() {
+  let counter: Atomic(Int) = createAtomic(Int, value: 5)
+  log("load {counter.load()}")
+  log("fetchAdd {counter.fetchAdd(amount: 3)} then {counter.load()}")
+  log("fetchAddRelaxed {counter.fetchAddRelaxed(amount: -2)} then {counter.loadRelaxed()}")
+  log("exchange {counter.exchange(value: 1)} then {counter.load()}")
+  log("compareExchange hit {counter.compareExchange(expected: 1, desired: 9)}")
+  log(
+    "compareExchange miss {counter.compareExchange(expected: 1, desired: 2)}, holds {counter.load()}"
+  )
+  counter.storeRelaxed(value: -7)
+  log("storeRelaxed {counter.load()}")
+  let flag: Atomic(Bool) = createAtomic(Bool, value: false)
+  flag.store(value: true)
+  log("flag {flag.load()}, exchange {flag.exchange(value: false)}, now {flag.load()}")
+  let small: Atomic(Int32) = createAtomic(Int32, value: -4)
+  log("small {small.fetchAdd(amount: 1)} then {small.load()}")
+  freeAtomic(this: counter)
+  freeAtomic(this: flag)
+  freeAtomic(this: small)
+}
+
+func signals() {
+  let signal: Signal = createSignal()
+  log("tryWait with no post {signal.tryWait()}")
+  signal.post()
+  signal.post()
+  log("tryWait after two posts {signal.tryWait()}")
+  signal.wait()
+  log("tryWait after the wait took the second {signal.tryWait()}")
+  freeSignal(this: signal)
+}
+
+func rings() {
+  let ring: SpscRing(Note) = createSpscRing(Note, capacity: 3)
+  log("empty pop is none {ring.pop() is none}, count {ring.count()}")
+  let first: Bool = ring.push(value: { key: 60, velocity: 100 })
+  let second: Bool = ring.push(value: { key: 62, velocity: 90 })
+  let third: Bool = ring.push(value: { key: 64, velocity: 80 })
+  let fourth: Bool = ring.push(value: { key: 65, velocity: 1 })
+  log("pushes {first} {second} {third}, full refuses {fourth}, count {ring.count()}")
+  if let note: Note = ring.pop() {
+    log("first out {note.key} {note.velocity}")
+  }
+  log("a push into the freed slot {ring.push(value: { key: 67, velocity: 70 })}")
+  loop ring.count() > 0 {
+    if let note: Note = ring.pop() {
+      log("next {note.key}")
+    }
+  }
+  log("drained: pop is none {ring.pop() is none}, count {ring.count()}")
+  freeSpscRing(this: ring)
+}
+
+func main() {
+  atomics()
+  signals()
+  rings()
+}

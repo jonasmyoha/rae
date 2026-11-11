@@ -1,0 +1,23 @@
+# A SpscRing(T) of a T that owns heap is a compile error naming where the heap
+# is (docs/realtime-language-design.md §4.1): the side that dropped such a value
+# would have to free it, and a real-time thread may not.
+open collections/SpscRing
+
+type Message {
+  id: Int
+  text: String
+}
+
+type Envelope {
+  sequence: Int
+  message: Message
+}
+
+func main() {
+  let messages: SpscRing(Message) = createSpscRing(Message, capacity: 4)
+  freeSpscRing(this: messages)
+  let envelopes: SpscRing(Envelope) = createSpscRing(Envelope, capacity: 4)
+  freeSpscRing(this: envelopes)
+  let names: SpscRing(String) = createSpscRing(String, capacity: 4)
+  freeSpscRing(this: names)
+}

@@ -1,0 +1,134 @@
+# Atomic(T) — one value that several threads read and write without a lock
+# (docs/realtime-language-design.md §6.4). T is Int, Int32 or Bool.
+#
+#     let stop: Atomic(Bool) = createAtomic(Bool, value: false)
+#     let task: Task(Int) = spawn worker(stop: stop)     # shares the one cell
+#     stop.store(value: true)
+#     ...
+#     freeAtomic(this: stop)                             # once, after the join
+#
+# The value lives in a one-element Buffer(Int) that every copy of the Atomic
+# shares (like Channel's handle), so passing it to `spawn` shares it, and the
+# methods take `this: view Atomic(T)`. The owner frees it once, after every
+# other thread is done; the leak check sees a forgotten free.
+#
+# Memory order: `load` is acquire and `store` is release, so what a thread wrote
+# before a `store` is seen by the thread whose `load` reads that value. The
+# read-modify-writes (`exchange`, `compareExchange`, `fetchAdd`) are both. The
+# `Relaxed` forms order nothing and are only for counters and statistics.
+# Sequential consistency is not offered: it costs more and nothing here needs
+# it. Every operation is one CPU instruction and never waits, so all of them may
+# be called on a real-time thread.
+#
+# The shims are runtime_atomics.h: one C call each, because Rae cannot spell an
+# atomic instruction or its memory order.
+func rae_ext_rae_atomic_load(cell: Buffer(Int), index: Int) unsafe extern ret Int
+
+func rae_ext_rae_atomic_load_relaxed(cell: Buffer(Int), index: Int) unsafe extern ret Int
+
+func rae_ext_rae_atomic_store(cell: Buffer(Int), index: Int, value: Int) unsafe extern
+
+func rae_ext_rae_atomic_store_relaxed(cell: Buffer(Int), index: Int, value: Int) unsafe extern
+
+func rae_ext_rae_atomic_exchange(cell: Buffer(Int), index: Int, value: Int) unsafe extern ret Int
+
+func rae_ext_rae_atomic_compare_exchange(
+  cell: Buffer(Int)
+  index: Int
+  expected: Int
+  desired: Int
+) unsafe extern ret Int
+
+func rae_ext_rae_atomic_fetch_add(cell: Buffer(Int), index: Int, amount: Int) unsafe extern ret Int
+
+func rae_ext_rae_atomic_fetch_add_relaxed(
+  cell: Buffer(Int)
+  index: Int
+  amount: Int
+) unsafe extern ret Int
+
+type Atomic(T: type) {
+  cell: Buffer(Int)
+}
+
+func createAtomic(T: type, value: T) ret Atomic(T) {
+  unsafe {
+    let cell: Buffer(Int) = rae_ext_rae_buf_alloc(size: 1, elemSize: sizeof(Int))
+    rae_ext_rae_atomic_store(cell: cell, index: 0, value: value as Int)
+    ret Atomic(T) { cell: cell }
+  }
+}
+
+# The value, and everything the thread that stored it wrote before (acquire).
+func load(T: type, this: view Atomic(T)) ret T {
+  unsafe {
+    ret rae_ext_rae_atomic_load(cell: this.cell, index: 0) as T
+  }
+}
+
+# The value, ordering nothing: for a counter or a statistic.
+func loadRelaxed(T: type, this: view Atomic(T)) ret T {
+  unsafe {
+    ret rae_ext_rae_atomic_load_relaxed(cell: this.cell, index: 0) as T
+  }
+}
+
+# Set the value, publishing everything this thread wrote before (release).
+func store(T: type, this: view Atomic(T), value: T) {
+  unsafe {
+    rae_ext_rae_atomic_store(cell: this.cell, index: 0, value: value as Int)
+  }
+}
+
+# Set the value, ordering nothing: for a counter or a statistic.
+func storeRelaxed(T: type, this: view Atomic(T), value: T) {
+  unsafe {
+    rae_ext_rae_atomic_store_relaxed(cell: this.cell, index: 0, value: value as Int)
+  }
+}
+
+# Set the value and answer the one it replaced.
+func exchange(T: type, this: view Atomic(T), value: T) ret T {
+  unsafe {
+    ret rae_ext_rae_atomic_exchange(cell: this.cell, index: 0, value: value as Int) as T
+  }
+}
+
+# Set `desired` only if the value is `expected`; answers whether it did.
+func compareExchange(
+  T: type
+  this: view Atomic(T)
+  expected: T
+  desired: T
+) ret Bool {
+  unsafe {
+    let before: Int = rae_ext_rae_atomic_compare_exchange(
+      cell: this.cell
+      index: 0
+      expected: expected as Int
+      desired: desired as Int
+    )
+    ret before is expected as Int
+  }
+}
+
+# Add `amount` and answer the value before the add. For Int and Int32.
+func fetchAdd(T: type, this: view Atomic(T), amount: T) ret T {
+  unsafe {
+    ret rae_ext_rae_atomic_fetch_add(cell: this.cell, index: 0, amount: amount as Int) as T
+  }
+}
+
+# `fetchAdd` that orders nothing: for a counter or a statistic.
+func fetchAddRelaxed(T: type, this: view Atomic(T), amount: T) ret T {
+  unsafe {
+    ret rae_ext_rae_atomic_fetch_add_relaxed(cell: this.cell, index: 0, amount: amount as Int) as T
+  }
+}
+
+# Owner only, once, after every other thread that holds a copy is done.
+func freeAtomic(T: type, this: view Atomic(T)) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: this.cell)
+  }
+}
