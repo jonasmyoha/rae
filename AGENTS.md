@@ -175,6 +175,13 @@ These instructions define **how Codex should work**, communicate progress, and i
     counters `i`/`j` stay single-letter (those letters ARE the meaning).
 - Same phasing as the single-letter rule: fix it in files you are already
   editing; do not open a mass rename of unrelated code.
+- **This rule is for names in code, not for the language's keywords.** It covers
+  what a program names: bindings, parameters, fields, functions, types, modules.
+  Keywords are a small fixed vocabulary that every reader learns once, and Rae
+  already has short ones (`ret`, `mod`, `func`, `opt`, `var`, `const`, `enum`,
+  `priv`, `pub`, `shl`, `shr`), so a new keyword may be short too. A keyword of
+  more than one word is camelCase (`taskScope`, `parallelLoop`, `mainLoop`),
+  never all lowercase (`taskscope`) or `snake_case`.
 
 ### NO type inference — every binding is written with its type (by design):
 - Rae has **no type inference and it is strictly FORBIDDEN to add it.** Types are

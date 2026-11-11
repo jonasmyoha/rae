@@ -75,7 +75,7 @@ thing it does for Rae specifically.
 
 ## 3. The keywords
 
-### 3.1 Recommendation: `realtime`, and later `noAllocation`
+### 3.1 Recommendation: `realtime`, and later `noAlloc`
 
 ```rae
 func renderBlock(engine: mod AudioEngineState, block: mod AudioBlock) realtime {
@@ -86,7 +86,7 @@ func renderBlock(engine: mod AudioEngineState, block: mod AudioBlock) realtime {
 - **`realtime`** on a function: it and everything it can reach neither
   allocate, free, lock nor wait. It is the strict set, for the audio thread, MIDI
   timing, an audio worker, a control loop.
-- **`noAllocation`** on a function (a second step, only if games or the video
+- **`noAlloc`** on a function (a second step, only if games or the video
   frame path ask for it): it and everything it reaches neither allocate nor
   free. Locks and waits are allowed. For "no garbage per frame" in a game's
   update or a renderer's per-frame record. `realtime` includes it.
@@ -103,9 +103,12 @@ for function modifiers.
 - **`nonblocking`** (clang's word): Rae already has `blocking` for "C that may
   wait a long time", so `nonblocking` would read as "does not wait", while the
   check also bans allocation and locks. Confusing next to `blocking`.
-- **`noalloc`**: abbreviates "allocation"; the naming rule bans abbreviations in
-  identifiers, and a keyword should not be the one exception. Spelled out:
-  `noAllocation`, camelCase like `parallelLoop` and `mainLoop`.
+- **`noalloc`**: a short keyword is fine (Rae has `ret`, `mod`, `func`, `opt`;
+  the no-abbreviations rule is for names in code, not keywords), but a keyword
+  of two words is camelCase (`taskScope`, `parallelLoop`, `mainLoop`), so the
+  short form is `noAlloc`. `noAllocation` is the spelled-out alternative; the
+  short one is chosen because a modifier keyword is read on many lines, like
+  `mod` and `ret`, and "alloc" is the word every programmer knows from `malloc`.
 - **`@realtime`, `#[no_alloc]`**: no `@` attributes, by rule.
 - **Separate `noLock`, `noWait`**: no use found that needs one without the
   other; `realtime` covers the set. Add one only when a real program needs it.
@@ -243,7 +246,7 @@ cheapest to strongest.
 ### 5.1 Compile-time: clang function effects
 
 Every `realtime` Rae function is emitted with `__attribute__((nonblocking))`
-(and `noAllocation` with `nonallocating`); every extern marked `realtime` gets
+(and `noAlloc` with `nonallocating`); every extern marked `realtime` gets
 the attribute on its C declaration. The C build of a test runs with
 `-Wfunction-effects -Werror=function-effects` for those files. Then clang checks
 the generated C **and** any C shim or library compiled in the same build that a
@@ -401,7 +404,7 @@ frame path uses the same recorder against a 16.7 ms period.
 5. **`export`** and foreign threads (§6.1, §6.2): unlocks rendering inside the
    device callback (audio stage B), the VideoToolbox and CoreMIDI callbacks, and
    Box3D's scheduler.
-6. **`noAllocation`** if games or the video frame path ask for it; `restrict`
+6. **`noAlloc`** if games or the video frame path ask for it; `restrict`
    emission (§4.6); `mainThread` (§4.3); the real-time team (§6.6).
 
 ---
@@ -410,7 +413,8 @@ frame path uses the same recorder against a 16.7 ms period.
 
 - **R1 — the keyword `realtime`** on functions and externs, in the modifier
   position (§3.1).
-- **R2 — `noAllocation`** as the second, weaker keyword, or not yet (§3.1).
+- **R2 — `noAlloc`** (or the spelled-out `noAllocation`) as the second, weaker
+  keyword, or not yet (§3.1).
 - **R3 — root-only marking plus required marks on promising `lib/` functions**
   (§3.3), versus marking every function on the path (more noise, no gain with a
   complete call graph).
