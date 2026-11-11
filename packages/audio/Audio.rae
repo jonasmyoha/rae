@@ -1,0 +1,611 @@
+# audio/Audio — what a program uses to play sound (docs/audio-design.md §10.1).
+#
+#     open audio/Audio
+#     var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
+#     audio.duckWhilePlaying(source: AudioBusKind.alerts, target: AudioBusKind.music, gainDecibels:
+#     -12.0)
+#     let alarm: Sound = audio.loadSound(path: "assets/alarm.wav")
+#     let voiceId: VoiceId = audio.play(sound: alarm, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+#     audio.fadeOut(voiceId: voiceId, seconds: 0.3)
+#     audio.update()                       # once per frame, on the main thread
+#     stopAudio(this: audio)               # at the end: frees every sound
+#
+# Two drivers, one engine (audio/AudioMixer):
+# - The device (stage A of §4.2): miniaudio's callback copies blocks out of a
+#   ring that a Rae render thread keeps one period ahead. The render thread
+#   marks itself real-time (lib/Realtime), so RAE_REALTIME_CHECK catches an
+#   allocation in the engine. A device that cannot open leaves the engine
+#   offline and silent, never a crash.
+# - Offline: no device and no thread. `renderOffline(frames:)` renders on the
+#   caller's thread and answers the samples; the tests compare them with a
+#   reference. RAE_AUDIO_DEVICE=offline makes `audioStart` choose it, and with
+#   RAE_AUDIO_CAPTURE=<file.wav> everything rendered is written to that file
+#   at `stopAudio`. Offline, each `play` logs `[audio] play ...`.
+#
+# A VoiceId stays valid after its voice ends; calls on it then do nothing.
+import Math
+import Sys
+open Atomic
+open Realtime
+open Signal
+open audio/AudioGlue
+open audio/AudioMixer
+open audio/Sound
+open collections/SpscRing
+
+type AudioSettings {
+  sampleRate: Int
+  channels: Int
+  # the device period asked for, in frames (the device may choose another)
+  periodFrames: Int
+  # no device: render only through renderOffline
+  offline: Bool
+}
+
+func defaultAudioSettings() ret AudioSettings {
+  ret AudioSettings { sampleRate: 48000, channels: 2, periodFrames: 256, offline: false }
+}
+
+type VoiceId {
+  value: Int
+}
+
+# A sound the engine knows (audio.addSound / audio.loadSound)
+type Sound {
+  soundId: Int
+  samples: Buffer(Float)
+  frameCount: Int
+  channels: Int
+  sampleRate: Int
+  # "" when it loaded, else what was wrong (it then plays nothing)
+  error: String
+}
+
+type SoundSlot {
+  soundId: Int
+  samples: Buffer(Float)
+  live: Bool
+  # freeSound asked; the samples go once the audio thread lets them go
+  releasing: Bool
+}
+
+type AudioEngine {
+  offline: Bool
+  device: Int
+  sampleRate: Int
+  channels: Int
+  periodFrames: Int
+  commands: SpscRing(AudioCommand)
+  feedback: SpscRing(AudioFeedback)
+  reclaim: SpscRing(Int)
+  output: SpscRing(Float)
+  wake: Signal
+  running: Atomic(Bool)
+  renderTask: Task(Int)
+  # the engine itself when offline; the render thread owns its own otherwise
+  mixer: AudioMixer
+  sounds: List(SoundSlot)
+  nextVoiceId: Int
+  nextSoundId: Int
+  voicesEnded: Int
+  capturePath: String
+  capture: List(Float)
+  # sound sample time of the offline driver
+  renderedFrames: Int
+}
+
+func audioOfflineWanted() ret Bool {
+  ret getEnv(name: "RAE_AUDIO_DEVICE") is "offline"
+}
+
+# The stage-A render thread: keeps the device's ring full, one block at a time,
+# and sleeps on the device's Signal between periods.
+func audioRenderThread(
+  mixer: own AudioMixer
+  commands: own SpscRing(AudioCommand)
+  output: own SpscRing(Float)
+  wake: own Signal
+  running: own Atomic(Bool)
+  channels: own Int
+  periodFrames: own Int
+  sampleRate: own Int
+) ret Int {
+  let block: Buffer(Float) = createSampleBuffer(count: periodFrames * channels)
+  let periodNs: Int = periodFrames * 1000000000 / sampleRate
+  unsafe {
+    rae_audio_thread_set_realtime(periodNs: periodNs, computeNs: periodNs / 2)
+  }
+  var blocks: Int = 0
+  var recorder: RealtimeRecorder = createRealtimeRecorder(
+    name: "audio render"
+    periodNanoseconds: periodNs
+  )
+  markRealtimeThread()
+  loop running.load() {
+    loop running.load() and output.capacity - output.count() >= periodFrames * channels {
+      recorder.callStarted()
+      mixerRender(
+        mixer: mixer
+        commands: commands
+        output: block
+        frames: periodFrames
+        channels: channels
+      )
+      recorder.callEnded()
+      loop var i: Int = 0, i < periodFrames * channels, ++i {
+        let pushed: Bool = output.push(value: sampleAt(samples: block, index: i))
+      }
+      blocks = blocks + 1
+    }
+    wake.wait()
+  }
+  unmarkRealtimeThread()
+  recorder.report()
+  freeAudioMixer(mixer: mixer)
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  ret blocks
+}
+
+func audioIdle() ret Int {
+  ret 0
+}
+
+func audioStart(settings: view AudioSettings) ret AudioEngine {
+  let feedback: SpscRing(AudioFeedback) = createSpscRing(AudioFeedback, capacity: 1024)
+  let reclaim: SpscRing(Int) = createSpscRing(Int, capacity: 1024)
+  let commands: SpscRing(AudioCommand) = createSpscRing(AudioCommand, capacity: 1024)
+  let wake: Signal = createSignal()
+  let running: Atomic(Bool) = createAtomic(Bool, value: true)
+  var device: Int = 0
+  var sampleRate: Int = settings.sampleRate
+  var channels: Int = settings.channels
+  var periodFrames: Int = settings.periodFrames
+  let offline: Bool = settings.offline or audioOfflineWanted()
+  if not offline {
+    unsafe {
+      device = rae_audio_device_open(
+        sampleRate: sampleRate
+        channels: channels
+        periodFrames: periodFrames
+      )
+      if device is not 0 {
+        sampleRate = rae_audio_device_sample_rate(device: device)
+        channels = rae_audio_device_channels(device: device)
+        let devicePeriod: Int = rae_audio_device_period_frames(device: device)
+        if devicePeriod > 0 {
+          periodFrames = devicePeriod
+        }
+      }
+    }
+  }
+  # four periods of ring, kept full by the render thread: on a Mac, Core Audio
+  # takes bursts of more than one period, and two periods ran short (about
+  # 0.5 % silence). It is up to 21 ms at 256 frames, the cost of stage A; stage
+  # B (rendering inside the callback, §4.2) removes it.
+  let output: SpscRing(Float) = createSpscRing(Float, capacity: 4 * periodFrames * channels)
+  let mixer: AudioMixer = createAudioMixer(
+    sampleRate: sampleRate
+    maxFrames: periodFrames
+    feedback: feedback
+    reclaim: reclaim
+  )
+  var renderTask: Task(Int) = spawn audioIdle()
+  if device is not 0 {
+    let threadMixer: AudioMixer = createAudioMixer(
+      sampleRate: sampleRate
+      maxFrames: periodFrames
+      feedback: feedback
+      reclaim: reclaim
+    )
+    renderTask = spawn audioRenderThread(
+      mixer: threadMixer
+      commands: commands
+      output: output
+      wake: wake
+      running: running
+      channels: channels
+      periodFrames: periodFrames
+      sampleRate: sampleRate
+    )
+    unsafe {
+      rae_audio_device_attach(
+        device: device
+        slots: output.slots
+        counters: output.counters
+        capacity: output.capacity
+        signal: wake.handle
+      )
+      wake.post()
+    }
+    # let the render thread fill the ring before the device starts reading it
+    # (at most 200 ms), so the first period is not silence
+    var waited: Int = 0
+    loop waited < 200 and output.count() < output.capacity {
+      sleep(ms: 1)
+      waited = waited + 1
+    }
+    unsafe {
+      if rae_audio_device_start(device: device) is 0 {
+        log("[audio] the device did not start")
+      }
+    }
+  }
+  ret AudioEngine {
+    offline: device is 0
+    device: device
+    sampleRate: sampleRate
+    channels: channels
+    periodFrames: periodFrames
+    commands: commands
+    feedback: feedback
+    reclaim: reclaim
+    output: output
+    wake: wake
+    running: running
+    renderTask: renderTask
+    mixer: mixer
+    sounds: {}
+    nextVoiceId: 1
+    nextSoundId: 1
+    voicesEnded: 0
+    capturePath: getEnv(name: "RAE_AUDIO_CAPTURE")
+    capture: {}
+    renderedFrames: 0
+  }
+}
+
+# An engine with no device, for tests and offline renders
+func audioStartOffline(
+  sampleRate: view Int
+  channels: view Int
+  blockFrames: view Int
+) ret AudioEngine {
+  let settings: AudioSettings = {
+    sampleRate: sampleRate
+    channels: channels
+    periodFrames: blockFrames
+    offline: true
+  }
+  ret audioStart(settings: settings)
+}
+
+func sendCommand(this: view AudioEngine, command: view AudioCommand) ret Bool {
+  ret this.commands.push(value: command)
+}
+
+func emptyCommand(kind: view AudioCommandKind) ret AudioCommand {
+  ret AudioCommand {
+    kind: kind
+    voiceId: 0
+    soundId: 0
+    samples: createSampleBufferHandle()
+    frameCount: 0
+    channels: 1
+    sampleRate: 48000
+    bus: 0
+    targetBus: 0
+    value: 0.0
+    other: 0.0
+    looping: false
+    atSample: 0
+  }
+}
+
+# A command carries no sound unless it plays one: an empty handle, not a buffer
+func createSampleBufferHandle() ret Buffer(Float) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+  }
+}
+
+# Hand a decoded sound to the engine; the engine owns its samples from now on
+func addSound(this: mod AudioEngine, data: own SoundData) ret Sound {
+  let soundId: Int = this.nextSoundId
+  this.nextSoundId = this.nextSoundId + 1
+  this.sounds.add(value: { soundId: soundId, samples: data.samples, live: true, releasing: false })
+  ret Sound {
+    soundId: soundId
+    samples: data.samples
+    frameCount: data.frameCount
+    channels: data.channels
+    sampleRate: data.sampleRate
+    error: data.error
+  }
+}
+
+# Read a WAV file and add it (on the calling thread; for a long file, read it
+# with `spawn readSoundFile(path:)` and `addSound` the result)
+func loadSound(this: mod AudioEngine, path: view String) ret Sound {
+  ret this.addSound(data: readSoundFile(path: path))
+}
+
+func busIndex(bus: view AudioBusKind) ret Int {
+  ret bus as Int
+}
+
+# Play `sound` on `bus`, now or at the sample time `atSample`
+func playAt(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  atSample: view Int
+) ret VoiceId {
+  let voiceId: Int = this.nextVoiceId
+  this.nextVoiceId = this.nextVoiceId + 1
+  if sound.frameCount is 0 {
+    ret VoiceId { value: voiceId }
+  }
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.play)
+  command.voiceId = voiceId
+  command.soundId = sound.soundId
+  command.samples = sound.samples
+  command.frameCount = sound.frameCount
+  command.channels = sound.channels
+  command.sampleRate = sound.sampleRate
+  command.bus = busIndex(bus: bus)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  command.other = pan
+  command.looping = looping
+  command.atSample = atSample
+  if this.offline {
+    log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
+  }
+  let sent: Bool = this.sendCommand(command: command)
+  ret VoiceId { value: voiceId }
+}
+
+func play(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+) ret VoiceId {
+  ret this.playAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainDecibels
+    pan: 0.0
+    looping: false
+    atSample: 0
+  )
+}
+
+func sendVoiceCommand(
+  this: view AudioEngine
+  kind: view AudioCommandKind
+  voiceId: view VoiceId
+  value: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.voiceId = voiceId.value
+  command.value = value
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Stop with a 5 ms fade, so it does not click
+func stopVoice(this: view AudioEngine, voiceId: view VoiceId) {
+  this.sendVoiceCommand(kind: AudioCommandKind.stop, voiceId: voiceId, value: 0.0)
+}
+
+func fadeOut(this: view AudioEngine, voiceId: view VoiceId, seconds: view Float) {
+  this.sendVoiceCommand(kind: AudioCommandKind.fadeOut, voiceId: voiceId, value: seconds)
+}
+
+func setVoiceGain(this: view AudioEngine, voiceId: view VoiceId, gainDecibels: view Float) {
+  this.sendVoiceCommand(
+    kind: AudioCommandKind.setVoiceGain
+    voiceId: voiceId
+    value: decibelsToGain(decibels: gainDecibels)
+  )
+}
+
+# -1 left, 0 middle, 1 right
+func setVoicePan(this: view AudioEngine, voiceId: view VoiceId, pan: view Float) {
+  this.sendVoiceCommand(kind: AudioCommandKind.setVoicePan, voiceId: voiceId, value: pan)
+}
+
+func setBusGain(this: view AudioEngine, bus: view AudioBusKind, gainDecibels: view Float) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setBusGain)
+  command.bus = busIndex(bus: bus)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# While any voice plays on `source`, `target` goes down by `gainDecibels`
+# (50 ms down, 400 ms back), on the audio thread (§6.4)
+func duckWhilePlaying(
+  this: view AudioEngine
+  source: view AudioBusKind
+  target: view AudioBusKind
+  gainDecibels: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setDuck)
+  command.bus = busIndex(bus: source)
+  command.targetBus = busIndex(bus: target)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  command.other = 0.4
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Let go of a sound: its voices stop, and its samples are freed once the audio
+# thread has let them go (in a later update)
+func freeSound(this: mod AudioEngine, sound: view Sound) {
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.soundId is sound.soundId and slot.live and not slot.releasing {
+        slot.releasing = true
+      }
+    }
+  }
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.releaseSound)
+  command.soundId = sound.soundId
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+func freeSoundSamples(this: mod AudioEngine, soundId: view Int) {
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.soundId is soundId and slot.live {
+        slot.live = false
+        unsafe {
+          rae_ext_rae_buf_free(buf: slot.samples)
+        }
+      }
+    }
+  }
+}
+
+# Once per frame on the main thread: reads what the audio thread reported and
+# frees the sounds it let go of
+func update(this: mod AudioEngine) {
+  loop this.feedback.count() > 0 {
+    if let report: AudioFeedback = this.feedback.pop() {
+      if report.kind is AudioFeedbackKind.voiceEnded {
+        this.voicesEnded = this.voicesEnded + 1
+      }
+    }
+  }
+  loop this.reclaim.count() > 0 {
+    if let soundId: Int = this.reclaim.pop() {
+      this.freeSoundSamples(soundId: soundId)
+    }
+  }
+}
+
+# Offline only: render `frames` frames on this thread (marked real-time while
+# the engine runs) and answer them, interleaved
+func renderOffline(this: mod AudioEngine, frames: view Int) ret List(Float) {
+  var rendered: List(Float) = List.create(Float, cap: frames * this.channels)
+  if not this.offline {
+    ret rendered
+  }
+  let block: Buffer(Float) = createSampleBuffer(count: this.periodFrames * this.channels)
+  var left: Int = frames
+  loop left > 0 {
+    let count: Int = min(a: left, b: this.periodFrames)
+    markRealtimeThread()
+    mixerRender(
+      mixer: this.mixer
+      commands: this.commands
+      output: block
+      frames: count
+      channels: this.channels
+    )
+    unmarkRealtimeThread()
+    loop var i: Int = 0, i < count * this.channels, ++i {
+      rendered.add(value: sampleAt(samples: block, index: i))
+      if this.capturePath.length() > 0 {
+        this.capture.add(value: sampleAt(samples: block, index: i))
+      }
+    }
+    left = left - count
+  }
+  this.renderedFrames = this.renderedFrames + frames
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  this.update()
+  ret rendered
+}
+
+# Like renderOffline, in blocks of `blockFrames` (tests of block-size invariance)
+func renderOfflineInBlocks(
+  this: mod AudioEngine
+  frames: view Int
+  blockFrames: view Int
+) ret List(Float) {
+  var rendered: List(Float) = List.create(Float, cap: frames * this.channels)
+  var left: Int = frames
+  loop left > 0 {
+    let part: List(Float) = this.renderOffline(frames: min(a: left, b: blockFrames))
+    loop let sample: Float in part {
+      rendered.add(value: sample)
+    }
+    left = left - blockFrames
+  }
+  ret rendered
+}
+
+# The sample time the next play can start at without being late: offline, the
+# next frame to render; with a device, now plus the ring and one period
+func nextSafeSampleTime(this: view AudioEngine) ret Int {
+  ret this.renderedFrames
+}
+
+# Frames of silence the device played because the render thread was late
+func underrunFrames(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_underrun_frames(device: this.device)
+  }
+}
+
+func deviceCallbacks(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_callbacks(device: this.device)
+  }
+}
+
+# Stop the device and the render thread, write the capture, free every sound
+func stopAudio(this: mod AudioEngine) ret Int {
+  # the device first, so it never reads a ring nobody fills any more
+  if this.device is not 0 {
+    unsafe {
+      let stopped: Int = rae_audio_device_stop(device: this.device)
+    }
+  }
+  this.running.store(value: false)
+  this.wake.post()
+  let blocks: Int = this.renderTask.get()
+  if this.device is not 0 {
+    unsafe {
+      rae_audio_device_close(device: this.device)
+    }
+  }
+  this.update()
+  if this.capturePath.length() > 0 {
+    let frames: Int = this.capture.length() / this.channels
+    let samples: Buffer(Float) = createSampleBuffer(count: this.capture.length())
+    loop var i: Int = 0, i < this.capture.length(), ++i {
+      setSampleAt(
+        samples: samples
+        index: i
+        value: this.capture.copyAtFallback(index: i, fallback: 0.0)
+      )
+    }
+    if not writeWavFile(
+      path: this.capturePath
+      samples: samples
+      frameCount: frames
+      channels: this.channels
+      sampleRate: this.sampleRate
+    ) {
+      log("[audio] could not write the capture {this.capturePath}")
+    }
+    unsafe {
+      rae_ext_rae_buf_free(buf: samples)
+    }
+  }
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.live {
+        slot.live = false
+        unsafe {
+          rae_ext_rae_buf_free(buf: slot.samples)
+        }
+      }
+    }
+  }
+  freeAudioMixer(mixer: this.mixer)
+  freeSpscRing(this: this.commands)
+  freeSpscRing(this: this.feedback)
+  freeSpscRing(this: this.reclaim)
+  freeSpscRing(this: this.output)
+  freeSignal(this: this.wake)
+  freeAtomic(this: this.running)
+  ret blocks
+}
