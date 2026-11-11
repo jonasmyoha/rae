@@ -139,6 +139,15 @@ func terrainSetGroundPalette(
   cache.groundDryAmount = dryAmount
 }
 
+# Whether the terrain is shaded in the toon style: as the app's other things are, so its ground
+# is lit as the grass growing on it is (the walkers set it each frame from their toon setting)
+func terrainSetToon(cache: mod GbufferCache, toon: view Bool) {
+  cache.terrainToon = 0
+  if toon {
+    cache.terrainToon = 1
+  }
+}
+
 # Sampler + a 1x1 white fallback ARRAY, so the terrain bind group always has valid
 # resources at binding(2)/(3) even for an app that never uploads tiles (blend is 0
 # there, so the fallback is sampled but never visible). One white texel per layer.
@@ -459,7 +468,7 @@ func drawTerrainMesh(
       metallic: 0.0
       roughness: roughness
       emissive: 0.0
-      toon: 0
+      toon: cache.terrainToon
       paletteBase: 0
     )
     # paletteBase is an Int in the record API; the clock needs sub-second

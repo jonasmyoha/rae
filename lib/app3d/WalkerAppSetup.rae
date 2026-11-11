@@ -4,6 +4,7 @@
 # renderer, the panels, the crowd, the forest and the physics.
 import GrassConfig
 open GrassCompute
+open app3d/WalkerMeadow
 import Math
 import Vec3
 open Scene3d
@@ -124,6 +125,19 @@ func walkerForestSettings(land: view WalkerLand) ret ForestFieldSettings {
   ret islandForestSettings()
 }
 
+# Whether the terrain's grass is painted as the painted grass's own color
+# (lib/terrain_grass_painted.wgsl RAE_GRASS_PAINTED_GROUND): under the painted
+# grass, so the blades and the ground are one color; not under the meadow grass
+# (RAE_WALKER_GRASS=meadow), which keeps its patch noise. The terrain and the
+# grass compute both take it, so a meadow blade's root is still the ground's color.
+func walkerGroundPaintConstants() ret List(ShaderConstant) {
+  var painted: Float = 0.0
+  if walkerPaintedGrass() {
+    painted = 1.0
+  }
+  ret List(ShaderConstant) { { name: "RAE_GRASS_PAINTED_GROUND", value: painted } }
+}
+
 # The sea and the wading spray are drawn in the deferred frame only
 func walkerHasSea(settings: view WalkerAppSettings) ret Bool {
   ret not settings.forward
@@ -144,6 +158,9 @@ func setWalkerTerrainShader(
   ) {
     constants.add(value: entry)
   }
+  loop let entry: ShaderConstant in walkerGroundPaintConstants() {
+    constants.add(value: entry)
+  }
   if forward {
     rendererSetForwardTerrainShader(
       renderer: renderer
@@ -157,6 +174,7 @@ func setWalkerTerrainShader(
         "lib/world_biome.wgsl"
         "lib/terrain_palette_walker.wgsl"
         "lib/grass_field.wgsl"
+        "lib/wind.wgsl"
         "lib/terrain_grass_painted.wgsl"
         "lib/terrain_detail_painted.wgsl"
         "lib/snow.wgsl"
@@ -172,6 +190,7 @@ func setWalkerTerrainShader(
       "lib/world_biome.wgsl"
       "lib/terrain_palette_walker.wgsl"
       "lib/grass_field.wgsl"
+      "lib/wind.wgsl"
       "lib/terrain_grass_painted.wgsl"
       "lib/terrain_detail_painted.wgsl"
       "lib/snow.wgsl"
@@ -195,6 +214,7 @@ func walkerGrassComputeShader() ret Shader {
     "lib/grass_obstacles.wgsl"
     "lib/terrain_palette_walker.wgsl"
     "lib/grass_field.wgsl"
+    "lib/wind.wgsl"
     "lib/terrain_grass_painted.wgsl"
     "lib/terrain_detail_painted.wgsl"
     "lib/grass_root_painted.wgsl"
@@ -209,6 +229,9 @@ func walkerGrassComputeConstants(biome: view BiomeConfig) ret List(ShaderConstan
   loop let entry: ShaderConstant in grassPatchConstants(
     settings: GrassConfig.grassMeadowSettings(groundColor: groundSummerGrass())
   ) {
+    constants.add(value: entry)
+  }
+  loop let entry: ShaderConstant in walkerGroundPaintConstants() {
     constants.add(value: entry)
   }
   ret constants

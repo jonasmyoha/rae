@@ -28,3 +28,14 @@ fn raeTerrainDetailColor(position: vec2<f32>, biome: vec3<f32>, time: f32) -> ve
   let road = RAE_TERRAIN_PATH * (0.94 + broad * 0.12 + grain * 0.025);
   return mix(ground, road, raeBiomePath(position) * (1.0 - weights.wWater));
 }
+
+// How much of the ground here is the painted grass (0 .. 1): there the terrain
+// is lit by the up normal, as the painted blades' roots are (terrain_splat.wgsl),
+// so the blades melt into it; none under the meadow grass (RAE_GRASS_PAINTED_GROUND 0)
+fn terrainGrassUp(position: vec2<f32>, biome: vec3<f32>) -> f32 {
+  if (RAE_GRASS_PAINTED_GROUND < 0.5) { return 0.0; }
+  let weights = raeBiomeClassify(biome.x, biome.y, biome.z);
+  let beachTop = RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND;
+  let grassMix = smoothstep(beachTop - RAE_SANDGRASS_BLUR, beachTop + RAE_SANDGRASS_BLUR, biome.x);
+  return grassMix * (weights.wSand + weights.wGrass) * (1.0 - raeBiomePath(position));
+}

@@ -224,3 +224,20 @@ func shutdownWalkerGrass(walkerGrass: mod WalkerGrass, resources: mod GpuResourc
   grassShutdown(grass: walkerGrass.near, resources: resources)
   grassTiersShutdown(tiers: walkerGrass.rings, resources: resources)
 }
+
+# The frame's painted-grass values for the ground painted as grass (the walkers' terrain,
+# lib/terrain_grass_painted.wgsl): the near field's root lift, warmth and shimmer, so the ground
+# between and past the blades is the blades' roots' color. Before each frame's first scene pass.
+func setWalkerGroundPaint(
+  cache: mod GbufferCache
+  walkerGrass: view WalkerGrass
+  palette: view GroundPalette
+) {
+  let settings: GrassViewSettings = walkerGrassSettings(
+    painted: walkerGrass.painted
+    palette: palette
+  )
+  setGbufferGrassRootLift(cache: cache, lift: settings.paintRootLift)
+  setGbufferGrassWarmth(cache: cache, warmth: settings.paintWarmth)
+  setGbufferGrassShimmer(cache: cache, strength: settings.shimmer)
+}
