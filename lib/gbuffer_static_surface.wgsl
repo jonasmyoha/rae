@@ -197,6 +197,10 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     let layer = clamp(i32(round(select(code, code - 1000.0, paintsGrass))), 0, i32(textureNumLayers(surfaceImages)) - 1);
     let texel = textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv));
     if (texel.a < 0.5) { discard; }
+    // On a material that paints grass, the material's color tints only the
+    // texels painted as grass (a ground's season: its grass turns, its sand
+    // and rock do not); elsewhere it tints the whole picture
+    let tint = o.albedo;
     o.albedo *= texel.rgb;
     // On a material that paints grass (a ground's), a texel of alpha about 0.75
     // is ground painted as grass: its color is the grass's base color, painted
@@ -207,12 +211,15 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
     // cut-out edge passes through the same alphas, and was painted as a light
     // outline round every leaf.
     let painted = select(0.0, 1.0 - smoothstep(0.78, 0.95, texel.a), paintsGrass);
+    if (paintsGrass) {
+      o.albedo = texel.rgb;
+    }
     if (painted > 0.0) {
       let paint = grassPaintAt(in.wpos.xy);
       // with the wind's shimmer rolling over it, as over the blades' roots
       let shimmer = grassPaintShimmer(windGustAt(in.wpos.xy, F.wind, F.windDrift.xy)) * F.weather.y;
-      let ground = grassPaintColor(grassPaintRootValue(paint) + F.weather.w + shimmer, paint.y, o.albedo, 1.0, F.weather.z);
-      o.albedo = mix(o.albedo, ground, painted);
+      let ground = grassPaintColor(grassPaintRootValue(paint) + F.weather.w + shimmer, paint.y, tint * texel.rgb, 1.0, F.weather.z);
+      o.albedo = mix(texel.rgb, ground, painted);
       o.nrm = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), painted));
     }
   } else if (d.params.w > 9.5) {
