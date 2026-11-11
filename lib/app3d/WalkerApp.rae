@@ -81,6 +81,7 @@ open app3d/HudOverlays
 open app3d/WalkerTerrain
 import stylizedTrees/StylizedTrees
 open app3d/WalkerGrassObstacles
+open app3d/WalkerGrass
 open app3d/WalkerAppSetup
 open app3d/WalkerAppUpdate
 open app3d/WalkerState
@@ -694,14 +695,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     }
     # The GPU grass grows on the world's terrain: its compute shader gets the
     # world's island radius, and its blades' roots take the painted ground's
-    # own color where they stand (walkerGrassComputeShader)
-    var grassCompute: GrassCompute = createGrassCompute()
-    grassSetComputeShaderWithConstants(
-      grass: grassCompute
-      shader: walkerGrassComputeShader()
-      constants: walkerGrassComputeConstants(biome: biome)
-    )
-    grassSetSurfaceField(grass: grassCompute, values: emptyWalkerGrassObstacles())
+    # own color where they stand (walkerGrassComputeShader); the painted grass in rings, or
+    # the meadow grass (app3d/WalkerGrass)
+    var walkerGrass: WalkerGrass = createWalkerGrass(biome: biome)
     # Who the local player may control, in switching order: the hero, then
     # its crowd
     var rosterEntities: List(EntityId) = List.create(EntityId, cap: 1 + crowdEntities.length)
@@ -798,7 +794,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         referenceTree: own referenceTree
       }
       profiler: Profile.createProfiler()
-      grassCompute: own grassCompute
+      walkerGrass: own walkerGrass
       physicsSystem: own physicsSystem
       walkerReset: own walkerReset
       walkerMarks: own walkerMarks

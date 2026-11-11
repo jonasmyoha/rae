@@ -86,6 +86,7 @@ open RendererPassTiming
 open app3d/WalkerKnockdown
 open app3d/CharacterHeight
 open app3d/StaminaWheel
+open app3d/WalkerGrass
 
 # One frame of a character's clock (app3d/Characters stepCharacterClock): its
 # clip at the walker's rate (walkFast is the walk clip at 1.6x)
@@ -145,7 +146,7 @@ func renderWalkerApp(
   biome: view BiomeConfig
   resources: mod GpuResources
   profiler: mod Profiler
-  grassCompute: mod GrassCompute
+  walkerGrass: mod WalkerGrass
 ) {
   frame.renderedOnce = true
   inputSystem.lastLogRevision = inputSystem.logOverlay.revision
@@ -299,7 +300,7 @@ func renderWalkerApp(
             deltaTime: deltaTime
             wind: frameWind
             profiler: profiler
-            grassCompute: grassCompute
+            walkerGrass: walkerGrass
             resources: resources
           )
           grassGenerated = true
@@ -323,7 +324,7 @@ func renderWalkerApp(
             cubeBatch: renderSystem.cubeBatch
             palette: palette
             t: t
-            grassCompute: grassCompute
+            walkerGrass: walkerGrass
             resources: resources
             off: off
           )
@@ -360,7 +361,7 @@ func renderWalkerApp(
             deltaTime: deltaTime
             wind: frameWind
             profiler: profiler
-            grassCompute: grassCompute
+            walkerGrass: walkerGrass
             resources: resources
           )
           grassGenerated = true
@@ -382,7 +383,7 @@ func renderWalkerApp(
             cubeBatch: renderSystem.cubeBatch
             palette: palette
             t: t
-            grassCompute: grassCompute
+            walkerGrass: walkerGrass
             resources: resources
             off: off
           )
