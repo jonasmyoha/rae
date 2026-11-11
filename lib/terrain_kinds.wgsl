@@ -121,12 +121,13 @@ fn kindsOctEncode(n: vec3<f32>) -> vec2<f32> {
 }
 
 // The look of kind `style` with color `color` at `position`, `paintValue` the painted grass's
-// root value here (lift and shimmer in), `hue` its hue
+// root value here (lift and shimmer in), `hue` its hue; a bare kind a little lighter or darker in
+// big soft patches (`tone`, 0.88 .. 1.12), so sand and rock are not one flat color
 fn kindColor(style: f32, color: vec3<f32>, grass: vec3<f32>, dry: vec3<f32>, paintValue: f32, hue: f32,
-             warmth: f32) -> vec3<f32> {
+             warmth: f32, tone: f32) -> vec3<f32> {
   if (style > 1.5) { return dry * color; }
   if (style > 0.5) { return grassPaintColor(paintValue, hue, grass * color, 1.0, warmth); }
-  return color;
+  return color * tone;
 }
 
 fn gbufferSurface(in: VsOut) -> FsOut {
@@ -158,13 +159,14 @@ fn gbufferSurface(in: VsOut) -> FsOut {
     shimmer = grassPaintShimmer(windGustAt(in.worldXY, F.wind, F.windDrift.xy)) * F.weather.y;
   }
   let paintValue = grassPaintRootValue(paint) + F.weather.w + shimmer;
+  let tone = 0.88 + 0.24 * clamp(0.5 + 0.5 * perlin2(in.worldXY / 30.0, 977u), 0.0, 1.0);
   var albedo = vec3<f32>(0.0);
   var total = 0.0;
   var grassShare = 0.0;
   for (var k = 0; k < 8; k = k + 1) {
     let w = weights[k];
     if (w > 0.002) {
-      albedo = albedo + w * kindColor(styles[k], colors[k], grass, dry, paintValue, paint.y, F.weather.z);
+      albedo = albedo + w * kindColor(styles[k], colors[k], grass, dry, paintValue, paint.y, F.weather.z, tone);
       total = total + w;
       if (styles[k] > 0.5 && styles[k] < 1.5) { grassShare = grassShare + w; }
     }
