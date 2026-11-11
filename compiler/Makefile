@@ -122,7 +122,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: realtime-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -213,6 +213,12 @@ stress: build
 # (tools/tsan-check.sh); `make test` runs it as one pre-suite case too.
 tsan: build
 	@bash tools/tsan-check.sh
+
+# The C side of realtime / noAlloc (docs/realtime-language-design.md §5):
+# -Wfunction-effects on the real-time fixtures' C, and RealtimeSanitizer runs
+# (LLVM's clang; SKIP without it). `make test` runs it as a pre-suite case too.
+realtime-check: build
+	@bash tools/realtime-sanitize-check.sh
 
 # The toolchain store and ./rae, from a fresh clone with an empty RAE_HOME. About two minutes,
 # which the full run cannot spare, so it is not part of it: run it when they change.

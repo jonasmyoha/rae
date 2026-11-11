@@ -1101,6 +1101,16 @@ report; it runs as one pre-suite case of every full run. A new fixture that
 starts a thread goes on its CASES list. A new mutable static in the runtime
 needs a lock, an `_Atomic`, or `__thread` — the gate is what notices.
 
+**RealtimeSanitizer gate (docs/realtime-language-design.md §5).**
+`compiler/tools/realtime-sanitize-check.sh` (`make -C compiler realtime-check`)
+compiles the real-time fixtures' C with `-Werror=function-effects` (the
+`realtime` / `noAlloc` promises, as clang's `nonblocking` / `nonallocating`)
+and runs them under `rae run --sanitize realtime` (RealtimeSanitizer, LLVM's
+clang: Homebrew's, which `make setup` installs; Apple's has none, and the gate
+SKIPs that part without it). A new fixture with `realtime` functions goes on
+its CASES list. Runtime C that `lib/` marks `realtime` carries
+`RAE_NONBLOCKING` on its prototype in the runtime header.
+
 **Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
 foot-gun programs on two shelves: `handles` (Rae does the right thing) and
 `footgun` (Rae still gets it wrong — the case asserts the CURRENT bad

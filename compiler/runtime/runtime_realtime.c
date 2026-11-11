@@ -76,22 +76,23 @@ static void rae_realtime_check_report(void) {
   _exit(70);
 }
 
+/* The exit report is registered here, at startup, and never by a mark: a
+ * mark runs in real-time code, and atexit takes a lock (RealtimeSanitizer
+ * found the earlier first-mark registration). It is registered after the
+ * RAE_MEM_STATS report (whose constructor has an earlier priority), so it
+ * runs before it at exit (atexit runs in reverse) and the memory report never
+ * comes between a program's output and this one. */
 __attribute__((constructor))
 static void rae_install_realtime_check(void) {
   const char* value = getenv("RAE_REALTIME_CHECK");
-  if (value && value[0] && value[0] != '0') g_rae_realtime_check = 1;
-}
-
-/* The exit report is armed by the first mark, after every constructor's
- * atexit, so it runs first at exit (atexit runs in reverse): the
- * RAE_MEM_STATS report never comes between a program's output and it. */
-static _Atomic int g_rae_realtime_report_armed;
-
-/* lib/Realtime.rae: mark or unmark the calling thread. */
-void rae_ext_Realtime_markThread(rae_Bool realtime) {
-  if (realtime && g_rae_realtime_check && !atomic_exchange(&g_rae_realtime_report_armed, 1)) {
+  if (value && value[0] && value[0] != '0') {
+    g_rae_realtime_check = 1;
     atexit(rae_realtime_check_report);
   }
+}
+
+/* lib/Realtime.rae: mark or unmark the calling thread. One store. */
+void rae_ext_Realtime_markThread(rae_Bool realtime) {
   g_rae_realtime_thread = realtime ? 1 : 0;
 }
 

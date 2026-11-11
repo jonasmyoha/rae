@@ -171,6 +171,31 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
 #define RAE_UNUSED
 #endif
 
+/* The C side of `realtime` / `noAlloc` (docs/realtime-language-design.md §5):
+ * clang's function effects. The backend puts RAE_NONBLOCKING on every
+ * `realtime` Rae function and RAE_NONALLOCATING on every `noAlloc` one, and
+ * the runtime's C that lib/ marks `realtime` carries RAE_NONBLOCKING below,
+ * so -Wfunction-effects checks the generated C against the same promises,
+ * and -fsanitize=realtime (RealtimeSanitizer) checks them while it runs. Empty
+ * for a compiler without them. RAE_COLD_PATH_BEGIN/END wrap the body of a
+ * crash-path helper (a trap that prints and exits; §3.6): it is marked
+ * nonblocking so real-time code may reach it, and its own body is not
+ * checked. */
+#if defined(__clang__) && defined(__has_attribute)
+#if __has_attribute(nonblocking)
+#define RAE_NONBLOCKING __attribute__((nonblocking))
+#define RAE_NONALLOCATING __attribute__((nonallocating))
+#define RAE_COLD_PATH_BEGIN _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wfunction-effects\"")
+#define RAE_COLD_PATH_END _Pragma("clang diagnostic pop")
+#endif
+#endif
+#ifndef RAE_NONBLOCKING
+#define RAE_NONBLOCKING
+#define RAE_NONALLOCATING
+#define RAE_COLD_PATH_BEGIN
+#define RAE_COLD_PATH_END
+#endif
+
 /* ---- Int arithmetic (docs/integer-semantics.md) ----
  *
  * The C backend routes every `+ - * / %` on `Int` (signed 64-bit) through
@@ -188,11 +213,13 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
  *     what a hash (lib/Noise) relies on.
  * A constant divisor of zero never reaches here: sema rejects it. */
 #define RAE_TRAP_EXIT_CODE 70   /* sysexits EX_SOFTWARE: an internal, defined trap, not a crash */
-static inline void rae_int_trap(const char* file, int line, const char* what) {
+RAE_COLD_PATH_BEGIN
+static inline void rae_int_trap(const char* file, int line, const char* what) RAE_NONBLOCKING {
     fprintf(stderr, "%s:%d: runtime error: %s\n", file, line, what);
     fflush(stderr);
     exit(RAE_TRAP_EXIT_CODE);
 }
+RAE_COLD_PATH_END
 static inline int64_t rae_int_div(int64_t a, int64_t b, const char* file, int line) {
     if (b == 0) rae_int_trap(file, line, "division by zero");
     if (a == INT64_MIN && b == -1) rae_int_trap(file, line, "integer overflow: Int.min / -1");
@@ -765,7 +792,7 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
  * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
 void rae_ext_rae_runtime_error(rae_String message);
 void rae_ext_rae_runtime_warning(rae_String message);
-__attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, int64_t length);
+__attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, int64_t length) RAE_NONBLOCKING;
 /* runtime_core_memory.c: per-thread alternate signal stack for the crash
  * handler; the emitted spawn thunk calls it first. No-op on WASM. */
 void rae_thread_install_altstack(void);
@@ -986,7 +1013,7 @@ rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 
-int64_t rae_ext_nowNs(void);
+int64_t rae_ext_nowNs(void) RAE_NONBLOCKING;
 void rae_ext_rae_sleep(int64_t ms);
 int64_t rae_ext_Time_sleepNs(int64_t ns);  /* one nanosleep (lib/Time.rae waitUntil) */
 int64_t rae_ext_Time_localOffsetSeconds(int64_t epochSeconds);  /* the local zone's UTC offset (lib/Time.rae) */
@@ -1008,16 +1035,16 @@ int64_t rae_ext_Time_localOffsetSeconds(int64_t epochSeconds);  /* the local zon
  * object on purpose: libm does not round them correctly, so a compiler that
  * folded `sinf(constant)` with its own implementation (GCC uses MPFR) could
  * produce different bits from the runtime's call. */
-float rae_ext_Math_sin(float x);
-float rae_ext_Math_cos(float x);
-float rae_ext_Math_tan(float x);
-float rae_ext_Math_asin(float x);
-float rae_ext_Math_acos(float x);
-float rae_ext_Math_atan(float x);
-float rae_ext_Math_atan2(float y, float x);
-float rae_ext_Math_pow(float base, float exp);
-float rae_ext_Math_exp(float x);
-float rae_ext_Math_math_log(float x);
+float rae_ext_Math_sin(float x) RAE_NONBLOCKING;
+float rae_ext_Math_cos(float x) RAE_NONBLOCKING;
+float rae_ext_Math_tan(float x) RAE_NONBLOCKING;
+float rae_ext_Math_asin(float x) RAE_NONBLOCKING;
+float rae_ext_Math_acos(float x) RAE_NONBLOCKING;
+float rae_ext_Math_atan(float x) RAE_NONBLOCKING;
+float rae_ext_Math_atan2(float y, float x) RAE_NONBLOCKING;
+float rae_ext_Math_pow(float base, float exp) RAE_NONBLOCKING;
+float rae_ext_Math_exp(float x) RAE_NONBLOCKING;
+float rae_ext_Math_math_log(float x) RAE_NONBLOCKING;
 static inline float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
 /* IEEE remainder: x - n*y with n the nearest integer to x/y. Exact (no
  * rounding), so deterministic on every platform — Box3D's b3UnwindAngle

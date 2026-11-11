@@ -103,6 +103,16 @@ if [ -f tools/tsan-check.sh ]; then
   stage_time "tools/tsan-check.sh" "$stage_start"
   echo
 fi
+# The C side of realtime / noAlloc (tools/realtime-sanitize-check.sh): clang's
+# function effects and RealtimeSanitizer; one more pre-suite "case" (the
+# sanitizer part SKIPs without LLVM's clang).
+REALTIME_CHECK=1
+if [ -f tools/realtime-sanitize-check.sh ]; then
+  stage_start=$(date +%s)
+  if bash tools/realtime-sanitize-check.sh; then REALTIME_CHECK=0; fi
+  stage_time "tools/realtime-sanitize-check.sh" "$stage_start"
+  echo
+fi
 # Every benchmark program still compiles (tools/benchmarks-compile-check.sh):
 # one more pre-suite "case"; their run.sh builds are not run on every change.
 BENCH_CHECK=1
@@ -202,6 +212,7 @@ if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)
 if [ "$COPY_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$FLOAT8_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

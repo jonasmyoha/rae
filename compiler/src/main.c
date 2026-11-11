@@ -247,6 +247,35 @@ static bool ensure_parent_directory(const char* file_path);
  * NEON / SSE2 / wasm SIMD128 (-DRAE_FLOAT4_SCALAR, runtime_float4.h), so the
  * bit-exactness fixture can run both lowerings. */
 static bool g_float4_scalar = false;
+/* `--sanitize realtime` (docs/realtime-language-design.md §5): the program is
+ * compiled by LLVM's clang with -fsanitize=realtime (RealtimeSanitizer: an
+ * allocation, lock or blocking call inside a `realtime` function stops the
+ * program with its stack), and its own C with -Wfunction-effects as an error
+ * (the `realtime` / `noAlloc` promises, checked again by clang). Apple's
+ * clang has no RealtimeSanitizer: RAE_RTSAN_CC, else Homebrew's LLVM. */
+static bool g_sanitize_realtime = false;
+
+/* The LLVM clang that builds a `--sanitize realtime` program, or NULL */
+static const char* rtsan_compiler(void) {
+  const char* chosen = getenv("RAE_RTSAN_CC");
+  if (chosen && *chosen) return chosen;
+  static const char* const candidates[] = { "/opt/homebrew/opt/llvm/bin/clang", "/usr/local/opt/llvm/bin/clang" };
+  for (size_t i = 0; i < sizeof candidates / sizeof candidates[0]; i++) {
+    if (access(candidates[i], X_OK) == 0) return candidates[i];
+  }
+  return NULL;
+}
+
+/* `--sanitize <what>`: only `realtime` exists */
+static bool parse_sanitize(int argc, char** argv, int* i) {
+  if (*i + 1 >= argc || strcmp(argv[*i + 1], "realtime") != 0) {
+    fprintf(stderr, "error: --sanitize expects `realtime` (RealtimeSanitizer)\n");
+    return false;
+  }
+  g_sanitize_realtime = true;
+  *i += 2;
+  return true;
+}
 /* `rae build --report-waits`: run sema, print the may-wait report
  * (docs/lightweight-spawn-design.md §4.1) and stop before emitting C. */
 static bool g_report_waits = false;
@@ -450,6 +479,10 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
       i += 1;
       continue;
     }
+    if (strcmp(arg, "--sanitize") == 0) {
+      if (!parse_sanitize(argc, argv, &i)) return false;
+      continue;
+    }
     if (strcmp(arg, "--check-toolchain") == 0) {
       /* #931: consumed by toolchain_check (which rescans argv); recognized
        * here so the arg parser does not reject it as unknown. */
@@ -605,6 +638,10 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     if (strcmp(arg, "--float4-scalar") == 0) {
       g_float4_scalar = true;
       i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--sanitize") == 0) {
+      if (!parse_sanitize(argc, argv, &i)) return false;
       continue;
     }
     if (strcmp(arg, "--check-toolchain") == 0) {
@@ -2351,6 +2388,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                           --target compiled,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
   fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG),\n");
+  fprintf(stderr, "                           --sanitize realtime (LLVM clang with RealtimeSanitizer, and\n"
+                  "                           -Wfunction-effects on the program's C: brew install llvm)\n");
   fprintf(stderr, "                           --float4-scalar (lib/Float4 on its scalar\n");
   fprintf(stderr, "                           definitions instead of NEON/SSE2/wasm SIMD)\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
@@ -3072,10 +3111,26 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   // The C runtime is compiled once per set of flags and runtime content and
   // linked from a cache (runtime_cache.c): it was most of every program's C
   // compile. Its command carries every flag that reaches it.
+  /* `--sanitize realtime`: LLVM's clang, RealtimeSanitizer, and the program's
+   * own C checked with -Wfunction-effects instead of -w */
+  const char* c_compiler = "gcc";
+  const char* program_warnings = "-w";
+  const char* runtime_sanitize = "";
+  if (g_sanitize_realtime) {
+    c_compiler = rtsan_compiler();
+    if (!c_compiler) {
+      progress_end(false);
+      fprintf(stderr, "error: --sanitize realtime needs LLVM's clang (Apple's has no -fsanitize=realtime): "
+                      "brew install llvm, or set RAE_RTSAN_CC\n");
+      return false;
+    }
+    program_warnings = "-Wno-everything -Wfunction-effects -Werror=function-effects -fsanitize=realtime";
+    runtime_sanitize = " -fsanitize=realtime";
+  }
   char runtime_command[PATH_MAX * 4];
-  snprintf(runtime_command, sizeof(runtime_command), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags,
-           runtime_dir);
+  snprintf(runtime_command, sizeof(runtime_command), "%s -std=c11 %s%s%s %s -w%s %s %s -I%s -I/opt/homebrew/include",
+           c_compiler, opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags,
+           runtime_sanitize, sdl3_flags, wgpu_flags, runtime_dir);
   char runtime_object[PATH_MAX];
   if (!runtime_cached_object(runtime_command, runtime_dir, runtime_object, sizeof(runtime_object))) {
     progress_end(false);
@@ -3083,8 +3138,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "%s -std=c11 %s%s%s %s %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
+           c_compiler, opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, program_warnings, sdl3_flags, wgpu_flags, runtime_dir,
            network_flags, c_path, runtime_object, extra_c_files, box3d_flags, package_flags, wamr_flags, out_bin);
 
   int cc_rc = system(cmd);
