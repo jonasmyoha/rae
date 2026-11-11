@@ -1206,12 +1206,29 @@ bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
 
 // A field's declared default (`count: Int = 5`), written with the field's
 // type as the expected type so a bare `{ x: 1.0 }` default lowers.
+// A String default built at run time (`text: String = Sys.getEnv(...)`, `=
+// someName()`, an interpolation) is a String-pool temporary: taken out of the
+// pool, as a given field's call result is (c_expr.c's struct literal), or the
+// enclosing function's pool flush frees it while the struct still holds it,
+// and the struct's drop frees it a second time.
+static bool field_default_is_pooled_string(const AstTypeField* field, const AstTypeRef* field_tr) {
+    if (!field || !field->default_value || !field_tr) return false;
+    if (field_tr->is_view || field_tr->is_mod || field_tr->is_opt) return false;
+    if (!str_eq_cstr(get_base_type_name(field_tr), "String")) return false;
+    AstExprKind kind = field->default_value->kind;
+    return kind == AST_EXPR_CALL || kind == AST_EXPR_METHOD_CALL
+        || kind == AST_EXPR_INTERP || kind == AST_EXPR_BINARY;
+}
+
 void emit_field_default(CFuncContext* ctx, const AstTypeField* field, const AstTypeRef* field_tr, FILE* out) {
     bool saved_has_expected = ctx->has_expected_type;
     AstTypeRef saved_expected = ctx->expected_type;
     ctx->expected_type = *field_tr;
     ctx->has_expected_type = true;
+    bool take = field_default_is_pooled_string(field, field_tr);
+    if (take) fprintf(out, "rae_string_pool_take(");
     emit_expr(ctx, field->default_value, out, PREC_LOWEST, false, false);
+    if (take) fprintf(out, ")");
     ctx->has_expected_type = saved_has_expected;
     ctx->expected_type = saved_expected;
 }
@@ -4598,9 +4615,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // expected type so a bare `{ x: 1.0, y: 1.0 }` literal lowers.
               CFuncContext dctx = {0}; dctx.compiler_ctx = ctx; dctx.module = module;
               dctx.expected_type = *f->type; dctx.has_expected_type = true;
-              fprintf(out, "  __r.%.*s = ", (int)f->name.len, f->name.data);
+              bool take = field_default_is_pooled_string(f, f->type);
+              fprintf(out, "  __r.%.*s = %s", (int)f->name.len, f->name.data,
+                      take ? "rae_string_pool_take(" : "");
               emit_expr(&dctx, f->default_value, out, PREC_LOWEST, false, false);
-              fprintf(out, ";\n");
+              fprintf(out, "%s;\n", take ? ")" : "");
               continue;
           }
           if (f->type->is_opt || f->type->generic_args) continue;   // none / empty
