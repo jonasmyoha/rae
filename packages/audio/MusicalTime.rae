@@ -1,0 +1,280 @@
+# audio/MusicalTime — beats and bars on the sample clock (docs/audio-design.md
+# §6.3). A TempoMap holds tempo changes (microseconds per quarter note, as MIDI
+# files do, so a tempo is an exact Int) and meter changes, on Int ticks of a
+# fixed resolution (960 per quarter note). A tick becomes a sample time
+# exactly: the microseconds up to it are summed as Ints and divided once,
+# rounded to the nearest sample. A Transport plays the map from a tick at a
+# sample time and stops it, keeping the position.
+#
+#     var tempo: TempoMap = createTempoMap(sampleRate: 48000)
+#     tempo.setTempo(tick: 0, microsecondsPerQuarter: 500000)    # 120 bpm
+#     var transport: Transport = createTransport()
+#     transport.transportPlay(tempo: tempo, fromTick: 0, atSample: audio.nextSafeSampleTime())
+#     let downbeat: Int = transport.transportSampleOfTick(tempo: tempo, tick: tempo.tickOfBar(bar:
+#     2,
+#     beat: 1))
+#     let voice: VoiceId = audio.playAt(sound: kick, ..., atSample: downbeat)
+#
+# Loops and clips are the timeline's: it converts what it will play a little
+# ahead of the audio thread (a block is enough) and schedules it.
+import Math
+open media/MediaTime
+
+const defaultTicksPerQuarter: Int = 960
+
+type TempoChange {
+  tick: Int
+  microsecondsPerQuarter: Int
+}
+
+type MeterChange {
+  # a meter changes at a bar's first tick
+  tick: Int
+  beatsPerBar: Int
+  # the note value of a beat: 4 a quarter, 8 an eighth
+  beatUnit: Int
+}
+
+type TempoMap {
+  ticksPerQuarter: Int
+  sampleRate: Int
+  # in tick order; the first is at tick 0
+  tempos: List(TempoChange)
+  meters: List(MeterChange)
+}
+
+type BarBeat {
+  # from 1, as musicians count
+  bar: Int
+  beat: Int
+  # ticks into the beat
+  tick: Int
+}
+
+type Transport {
+  playing: Bool
+  # playing: tick `anchorTick` sounds at sample `anchorSample`; stopped: the
+  # position is `anchorTick`
+  anchorTick: Int
+  anchorSample: Int
+}
+
+# 120 bpm, 4/4, 960 ticks per quarter note
+func createTempoMap(sampleRate: view Int) ret TempoMap {
+  var tempos: List(TempoChange) = {}
+  tempos.add(value: { tick: 0, microsecondsPerQuarter: 500000 })
+  var meters: List(MeterChange) = {}
+  meters.add(value: { tick: 0, beatsPerBar: 4, beatUnit: 4 })
+  ret TempoMap {
+    ticksPerQuarter: defaultTicksPerQuarter
+    sampleRate: sampleRate
+    tempos: tempos
+    meters: meters
+  }
+}
+
+# Beats per minute as microseconds per quarter note (rounded to the
+# microsecond: 120 bpm is exactly 500000)
+func microsecondsPerQuarterOf(beatsPerMinute: view Float64) ret Int {
+  ret (60000000.0 / beatsPerMinute + 0.5) as Int
+}
+
+# The tempo from `tick` on (a change at the same tick replaces it)
+func setTempo(this: mod TempoMap, tick: view Int, microsecondsPerQuarter: view Int) {
+  var at: Int = 0
+  loop at < this.tempos.length() and this.tempos.copyAtFallback(
+    index: at
+    fallback: { tick: 0, microsecondsPerQuarter: 0 }
+  ).tick < tick {
+    at = at + 1
+  }
+  let change: TempoChange = { tick: tick, microsecondsPerQuarter: microsecondsPerQuarter }
+  if let same: mod TempoChange = this.tempos.modAt(index: at) {
+    if same.tick is tick {
+      same.microsecondsPerQuarter = microsecondsPerQuarter
+      ret
+    }
+  }
+  this.tempos.insert(index: at, value: change)
+}
+
+# The meter from `tick` on (a bar's first tick)
+func setMeter(
+  this: mod TempoMap
+  tick: view Int
+  beatsPerBar: view Int
+  beatUnit: view Int
+) {
+  var at: Int = 0
+  loop at < this.meters.length() and this.meters.copyAtFallback(
+    index: at
+    fallback: { tick: 0, beatsPerBar: 4, beatUnit: 4 }
+  ).tick < tick {
+    at = at + 1
+  }
+  let change: MeterChange = { tick: tick, beatsPerBar: beatsPerBar, beatUnit: beatUnit }
+  if let same: mod MeterChange = this.meters.modAt(index: at) {
+    if same.tick is tick {
+      same.beatsPerBar = beatsPerBar
+      same.beatUnit = beatUnit
+      ret
+    }
+  }
+  this.meters.insert(index: at, value: change)
+}
+
+# Tick-microseconds up to `tick` (ticks times microseconds per quarter, summed
+# over the tempo changes): divided by ticksPerQuarter it is microseconds
+func tickMicroUnits(this: view TempoMap, tick: view Int) ret Int {
+  var units: Int = 0
+  loop var i: Int = 0, i < this.tempos.length(), ++i {
+    if let change: view TempoChange = this.tempos.viewAt(index: i) {
+      if change.tick >= tick {
+        break
+      }
+      var end: Int = tick
+      if let next: view TempoChange = this.tempos.viewAt(index: i + 1) {
+        end = min(a: tick, b: next.tick)
+      }
+      units = units + (end - change.tick) * change.microsecondsPerQuarter
+    }
+  }
+  ret units
+}
+
+# The sample time (from the map's tick 0) of `tick`, rounded once to the
+# nearest sample
+func sampleOfTick(this: view TempoMap, tick: view Int) ret Int {
+  ret rescaleRounded(
+    value: this.tickMicroUnits(tick: tick)
+    multiply: this.sampleRate
+    divide: this.ticksPerQuarter * 1000000
+  )
+}
+
+# value * multiply / divide, rounded down (toward minus infinity)
+func rescaleDown(value: view Int, multiply: view Int, divide: view Int) ret Int {
+  let whole: Int = value / divide
+  let rest: Int = value % divide
+  var result: Int = whole * multiply + rest * multiply / divide
+  if rest < 0 and (rest * multiply) % divide is not 0 {
+    result = result - 1
+  }
+  ret result
+}
+
+# The tick sounding at sample `sampleTime` (from the map's tick 0): the last
+# tick whose exact time is at or before it
+func tickOfSample(this: view TempoMap, sampleTime: view Int) ret Int {
+  # the sample's time in tick-microsecond units, rounded down
+  let units: Int = rescaleDown(
+    value: sampleTime
+    multiply: this.ticksPerQuarter * 1000000
+    divide: max(a: 1, b: this.sampleRate)
+  )
+  var start: Int = 0
+  var startUnits: Int = 0
+  var perTick: Int = 500000
+  loop var i: Int = 0, i < this.tempos.length(), ++i {
+    if let change: view TempoChange = this.tempos.viewAt(index: i) {
+      let changeUnits: Int = this.tickMicroUnits(tick: change.tick)
+      if changeUnits > units {
+        break
+      }
+      start = change.tick
+      startUnits = changeUnits
+      perTick = max(a: 1, b: change.microsecondsPerQuarter)
+    }
+  }
+  ret start + rescaleDown(value: units - startUnits, multiply: 1, divide: perTick)
+}
+
+func meterAt(this: view TempoMap, index: view Int) ret MeterChange {
+  ret this.meters.copyAtFallback(index: index, fallback: { tick: 0, beatsPerBar: 4, beatUnit: 4 })
+}
+
+func ticksPerBeat(this: view TempoMap, meter: view MeterChange) ret Int {
+  ret this.ticksPerQuarter * 4 / max(a: 1, b: meter.beatUnit)
+}
+
+# Bar, beat (both from 1) and ticks into the beat, through the meter changes
+func barBeatOfTick(this: view TempoMap, tick: view Int) ret BarBeat {
+  var bar: Int = 1
+  var index: Int = 0
+  loop index + 1 < this.meters.length() and this.meterAt(index: index + 1).tick <= tick {
+    let meter: MeterChange = this.meterAt(index: index)
+    let barTicks: Int = this.ticksPerBeat(meter: meter) * meter.beatsPerBar
+    bar = bar + (this.meterAt(index: index + 1).tick - meter.tick) / max(a: 1, b: barTicks)
+    index = index + 1
+  }
+  let meter: MeterChange = this.meterAt(index: index)
+  let beatTicks: Int = max(a: 1, b: this.ticksPerBeat(meter: meter))
+  let into: Int = tick - meter.tick
+  let beats: Int = into / beatTicks
+  ret BarBeat {
+    bar: bar + beats / max(a: 1, b: meter.beatsPerBar)
+    beat: beats % max(a: 1, b: meter.beatsPerBar) + 1
+    tick: into % beatTicks
+  }
+}
+
+# The first tick of `beat` (from 1) in `bar` (from 1)
+func tickOfBar(this: view TempoMap, bar: view Int, beat: view Int) ret Int {
+  var firstBar: Int = 1
+  var index: Int = 0
+  loop index + 1 < this.meters.length() {
+    let meter: MeterChange = this.meterAt(index: index)
+    let next: MeterChange = this.meterAt(index: index + 1)
+    let barTicks: Int = max(a: 1, b: this.ticksPerBeat(meter: meter) * meter.beatsPerBar)
+    let bars: Int = (next.tick - meter.tick) / barTicks
+    if bar < firstBar + bars {
+      break
+    }
+    firstBar = firstBar + bars
+    index = index + 1
+  }
+  let meter: MeterChange = this.meterAt(index: index)
+  let beatTicks: Int = this.ticksPerBeat(meter: meter)
+  ret meter.tick + (bar - firstBar) * beatTicks * meter.beatsPerBar + (beat - 1) * beatTicks
+}
+
+func createTransport() ret Transport {
+  ret Transport { playing: false, anchorTick: 0, anchorSample: 0 }
+}
+
+# Play from `fromTick`, which sounds at sample `atSample`
+func transportPlay(
+  this: mod Transport
+  tempo: view TempoMap
+  fromTick: view Int
+  atSample: view Int
+) {
+  this.playing = true
+  this.anchorTick = fromTick
+  this.anchorSample = atSample
+}
+
+# Stop at sample `atSample`, keeping the position there
+func transportStop(this: mod Transport, tempo: view TempoMap, atSample: view Int) {
+  if this.playing {
+    this.anchorTick = this.transportTickAt(tempo: tempo, sampleTime: atSample)
+  }
+  this.playing = false
+}
+
+# The tick at sample time `sampleTime` (the position, when stopped)
+func transportTickAt(this: view Transport, tempo: view TempoMap, sampleTime: view Int) ret Int {
+  if not this.playing {
+    ret this.anchorTick
+  }
+  let offset: Int = this.anchorSample - tempo.sampleOfTick(tick: this.anchorTick)
+  ret tempo.tickOfSample(sampleTime: sampleTime - offset)
+}
+
+# The sample time at which `tick` sounds while playing (-1 when stopped)
+func transportSampleOfTick(this: view Transport, tempo: view TempoMap, tick: view Int) ret Int {
+  if not this.playing {
+    ret -1
+  }
+  ret this.anchorSample + tempo.sampleOfTick(tick: tick) - tempo.sampleOfTick(tick: this.anchorTick)
+}

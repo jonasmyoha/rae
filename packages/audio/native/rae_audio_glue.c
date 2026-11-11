@@ -141,6 +141,41 @@ int64_t rae_audio_device_period_frames(int64_t device) {
   return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.playback.internalPeriodSizeInFrames : 0;
 }
 
+/* The output's buffering in frames, for the clock (docs/audio-design.md §6.1):
+ * miniaudio's period times its periods, on every platform */
+int64_t rae_audio_device_buffer_frames(int64_t device) {
+  if (!device) return 0;
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  return (int64_t)audio->device.playback.internalPeriodSizeInFrames * (int64_t)audio->device.playback.internalPeriods;
+}
+
+/* macOS: one Core Audio property of the output device in frames (0 its
+ * latency, 1 its safety offset, 2 its IO buffer size), read with the
+ * AudioObjectGetPropertyData miniaudio loaded; -1 elsewhere or on failure */
+int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
+#if defined(MA_APPLE_DESKTOP)
+  if (!device) return -1;
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  typedef OSStatus (*GetPropertyData)(AudioObjectID, const AudioObjectPropertyAddress*, UInt32, const void*,
+                                      UInt32*, void*);
+  GetPropertyData get = (GetPropertyData)audio->context.coreaudio.AudioObjectGetPropertyData;
+  if (!get) return -1;
+  AudioObjectPropertySelector selectors[3] = {kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset,
+                                              kAudioDevicePropertyBufferFrameSize};
+  if (property < 0 || property > 2) return -1;
+  AudioObjectPropertyAddress address = {selectors[property], kAudioObjectPropertyScopeOutput,
+                                        kAudioObjectPropertyElementMain};
+  UInt32 value = 0;
+  UInt32 size = sizeof(value);
+  if (get((AudioObjectID)audio->device.coreaudio.deviceObjectIDPlayback, &address, 0, NULL, &size, &value) != 0)
+    return -1;
+  return (int64_t)value;
+#else
+  (void)device; (void)property;
+  return -1;
+#endif
+}
+
 void rae_audio_device_attach(int64_t device, float* slots, int64_t* counters, int64_t capacity,
                              int64_t signal) {
   RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
@@ -280,6 +315,14 @@ int64_t rae_audio_session_set_active(int64_t active) {
   }
 }
 
+/* AVAudioSession's output latency in nanoseconds (the route's: the speaker,
+ * Bluetooth headphones, ...) */
+int64_t rae_audio_session_output_latency_ns(void) {
+  @autoreleasepool {
+    return (int64_t)([[AVAudioSession sharedInstance] outputLatency] * 1e9);
+  }
+}
+
 int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity) {
   @autoreleasepool {
     AVAudioSession* session = [AVAudioSession sharedInstance];
@@ -388,6 +431,10 @@ int64_t rae_audio_session_observe(void) {
   return 1;
 }
 #else
+int64_t rae_audio_session_output_latency_ns(void) {
+  return -1;
+}
+
 int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity) {
   (void)into; (void)capacity;
   return 0;

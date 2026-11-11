@@ -236,6 +236,13 @@ timebases rounds once, by a stated rule. The audio sample time
 (`audio-design.md` §6.1) is the same kind of value with timebase 1/sampleRate.
 Timecode (including drop-frame) is a display format over this.
 
+**Landed (2026-11-12): `lib/media/MediaTime.rae`** (`Rational`, `MediaTime`,
+rescaling rounded once to the nearest with a half away from zero, exact
+comparison), with audio's time step (`audio-design.md` §11 step 4). The audio
+engine's sample time is one, and `audio.heardSampleTimeAt(hostNs)` is the hook
+§6.3 needs. Not yet: timecode display, and MP4 packets carrying MediaTime
+(media/Mp4 still gives Int ticks with the track's timescale beside them).
+
 ### 6.2 Frame-accurate seek and scrubbing
 
 Camera codecs are long-GOP: a frame can only be decoded from the keyframe

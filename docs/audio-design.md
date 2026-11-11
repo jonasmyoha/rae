@@ -825,6 +825,46 @@ green.
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.
+
+   **Landed (2026-11-12), `packages/audio` 0.8.0:**
+   - `media/MediaTime` in the stdlib (for video too): `Rational` and
+     `MediaTime` (an Int count in a stated timebase), rescaling rounded once to
+     the nearest (a half away from zero) without overflowing first, exact
+     comparison across timebases. The engine's sample time is a MediaTime in
+     1/sampleRate (`engineSampleTime`, `toEngineSamples`).
+   - The mixer's event list: every command has a sample time; one for a later
+     sample waits in a fixed list (256, filled once, no allocation on the audio
+     thread) and the block is rendered in parts split at each event's frame.
+     The duck follows its source bus per frame. A command for a past sample
+     is applied at the next block and counted late. `audio/AudioSchedule`:
+     `stopVoiceAt`, `fadeOutAt`, `setVoiceGainAt`, `setVoicePanAt`,
+     `pauseVoiceAt`, `resumeVoiceAt`, `setBusGainAt`, with `playAt` and
+     `nextSafeSampleTime`. There is no node graph yet; the mixer is the one
+     node, and the graph's nodes take the same event list when they come.
+   - `audio/AudioClock`: each render records (its first sample, the host time
+     when it starts); the main thread adds the output latency and smooths the
+     pairs with a second-order delay-locked loop (4 Hz while it locks, then
+     0.05 Hz). The latency is the platform's: macOS, the output device's
+     latency, safety offset and IO buffer (Core Audio, through the
+     AudioObjectGetPropertyData miniaudio loads; AirPods Max report 7680
+     frames, 160 ms); iOS, AVAudioSession's output latency plus the buffer;
+     elsewhere miniaudio's buffer. It gives `hostTimeOfSample`,
+     `sampleTimeAtHost`, `measuredSampleRate` and, for video (§6.5),
+     `heardSampleTimeAt(hostNs)`. The host time is read when the render starts,
+     not the platform's own timestamp (miniaudio does not pass Core Audio's
+     mHostTime, WASAPI's QPC or AAudio's timestamp through); those come with
+     each platform's step (§11 step 3).
+   - `audio/MusicalTime`: `TempoMap` (tempo as microseconds per quarter note,
+     meters, 960 ticks per quarter note; tick to sample summed in Ints and
+     divided once; bars and beats) and `Transport` (play from a tick at a
+     sample, stop keeping the position).
+   - Fixture 1416: MediaTime rounding, tempo and meter changes, the loop on
+     simulated timestamps of a 47998.7 Hz device with ±300 µs of jitter (the
+     rate within 0.1 Hz, the mapping within 25 µs), and the block-size test:
+     a start, a gain, a pan, a pause and resume, a bus gain, a fade, a stop and
+     a duck in blocks of 1, 17, 64, 512 and of changing sizes, the same
+     samples; each event on its frame; a late command counted. On the Mac's
+     device: 6.55 s heard in 6.55 s of host time, no underrun.
 5. **Input and MIDI.** Duplex devices, recording to file with latency
    correction, permissions; MIDI in/out on CoreMIDI first, then the others; a
    small synth node to play.

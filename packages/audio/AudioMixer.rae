@@ -23,6 +23,10 @@ const audioBusCount: Int = 4
 
 const audioMaxVoices: Int = 64
 
+# Commands waiting for a later sample time (the event list, §6.2); more are
+# applied at once and counted in droppedEvents
+const audioMaxEvents: Int = 256
+
 enum AudioCommandKind {
   play
   stop
@@ -57,7 +61,9 @@ type AudioCommand {
   # a new voice's pan, or the duck's release in seconds
   other: Float
   looping: Bool
-  # the sample time it starts at; 0 (or a past time) for the next block
+  # the sample time it takes effect at, to the frame (a sound starts, a gain
+  # moves, a voice stops); 0 for the next block. A time already past is
+  # applied at the next block and counted late.
   atSample: Int
   # a streamed voice reads `stream` (filled by audio/AudioButler at the
   # device's rate) instead of `samples`; it ends when `streamFinished` is set
@@ -68,6 +74,13 @@ type AudioCommand {
 }
 
 enum AudioFeedbackKind { voiceEnded }
+
+# A render's first sample time and the host time (ns) when it started, for the
+# clock (audio/AudioClock)
+type ClockStamp {
+  sampleTime: Int
+  hostNs: Int
+}
 
 type AudioFeedback {
   kind: AudioFeedbackKind
@@ -155,11 +168,24 @@ type AudioMixer {
   # bit b set: bus b is paused (its voices keep their place and play nothing)
   pausedBuses: Int
   sampleTime: Int
-  # voices that could not start (all were busy) and feedback the ring refused
+  # commands waiting for their sample time, in time order: the first
+  # `eventCount` of a list made `audioMaxEvents` long once (no allocation on
+  # the audio thread)
+  events: List(AudioCommand)
+  eventCount: Int
+  # frames in this block where a voice on the duck's source bus sounds
+  # (1.0), so the duck follows them to the frame
+  duckActivity: Buffer(Float)
+  # commands that came after their sample time (applied at the next block)
+  lateCommands: Int
+  # voices that could not start (all were busy), feedback the ring refused,
+  # and commands the full event list applied at once
   droppedVoices: Int
   droppedFeedback: Int
+  droppedEvents: Int
   feedback: SpscRing(AudioFeedback)
   reclaim: SpscRing(Int)
+  clockStamps: SpscRing(ClockStamp)
 }
 
 func createAudioMixer(
@@ -167,9 +193,14 @@ func createAudioMixer(
   maxFrames: view Int
   feedback: view SpscRing(AudioFeedback)
   reclaim: view SpscRing(Int)
+  clockStamps: view SpscRing(ClockStamp)
 ) ret AudioMixer {
   var voices: List(AudioVoice) = List.create(AudioVoice, cap: audioMaxVoices)
   voices.addDefaults(count: audioMaxVoices)
+  var events: List(AudioCommand) = List.create(AudioCommand, cap: audioMaxEvents)
+  loop var i: Int = 0, i < audioMaxEvents, ++i {
+    events.add(value: noEvent())
+  }
   var busGains: List(AudioRamp) = List.create(AudioRamp, cap: audioBusCount)
   loop var bus: Int = 0, bus < audioBusCount, ++bus {
     busGains.add(value: steadyRamp(value: 1.0))
@@ -191,10 +222,16 @@ func createAudioMixer(
     duckLevel: 1.0
     pausedBuses: 0
     sampleTime: 0
+    events: events
+    eventCount: 0
+    duckActivity: createSampleBuffer(count: maxFrames)
+    lateCommands: 0
     droppedVoices: 0
     droppedFeedback: 0
+    droppedEvents: 0
     feedback: feedback
     reclaim: reclaim
+    clockStamps: clockStamps
   }
 }
 
@@ -202,7 +239,91 @@ func freeAudioMixer(mixer: view AudioMixer) {
   unsafe {
     rae_ext_rae_buf_free(buf: mixer.busLeft)
     rae_ext_rae_buf_free(buf: mixer.busRight)
+    rae_ext_rae_buf_free(buf: mixer.duckActivity)
   }
+}
+
+# An empty slot of the event list: handles to nothing
+func noEvent() ret AudioCommand {
+  unsafe {
+    ret AudioCommand {
+      kind: AudioCommandKind.stop
+      voiceId: -1
+      soundId: 0
+      samples: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      frameCount: 0
+      channels: 1
+      sampleRate: 0
+      bus: 0
+      targetBus: 0
+      value: 0.0
+      other: 0.0
+      looping: false
+      atSample: 0
+      isStream: false
+      stream: SpscRing(Float) {
+        slots: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+        counters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+        capacity: 0
+      }
+      streamFinished: Atomic(Bool) { cell: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int)) }
+    }
+  }
+}
+
+# Keep `command` until its sample time: into the event list, after the ones
+# at the same or an earlier time (so equal times keep their order)
+func scheduleEvent(mixer: mod AudioMixer, command: view AudioCommand) realtime {
+  if mixer.eventCount >= audioMaxEvents {
+    mixer.droppedEvents = mixer.droppedEvents + 1
+    applyCommand(mixer: mixer, command: command)
+    ret
+  }
+  var at: Int = mixer.eventCount
+  loop at > 0 and eventTime(mixer: mixer, index: at - 1) > command.atSample {
+    if let moved: AudioCommand = mixer.events.copyAt(index: at - 1) {
+      if let slot: mod AudioCommand = mixer.events.modAt(index: at) {
+        slot = moved
+      }
+    }
+    at = at - 1
+  }
+  if let slot: mod AudioCommand = mixer.events.modAt(index: at) {
+    slot = command
+  }
+  mixer.eventCount = mixer.eventCount + 1
+}
+
+func eventTime(mixer: view AudioMixer, index: view Int) ret Int realtime {
+  if let event: view AudioCommand = mixer.events.viewAt(index: index) {
+    ret event.atSample
+  }
+  ret 0
+}
+
+# Apply, in order, every waiting command whose time has come (at or before
+# `sampleTime`)
+func applyDueEvents(mixer: mod AudioMixer, sampleTime: view Int) realtime {
+  var due: Int = 0
+  loop due < mixer.eventCount and eventTime(mixer: mixer, index: due) <= sampleTime {
+    due = due + 1
+  }
+  loop var i: Int = 0, i < due, ++i {
+    if let event: AudioCommand = mixer.events.copyAt(index: i) {
+      applyCommand(mixer: mixer, command: event)
+    }
+  }
+  if due is 0 {
+    ret
+  }
+  loop var i: Int = due, i < mixer.eventCount, ++i {
+    if let moved: AudioCommand = mixer.events.copyAt(index: i) {
+      if let slot: mod AudioCommand = mixer.events.modAt(index: i - due) {
+        slot = moved
+      }
+    }
+  }
+  mixer.eventCount = mixer.eventCount - due
 }
 
 func decibelsToGain(decibels: view Float) ret Float {
@@ -438,19 +559,29 @@ func renderStreamFrame(
   }
 }
 
-# Play one voice for `frames` frames onto its bus's part of the bus buffers;
-# it stops itself (active false) when it ends.
+# Play one voice for frames [from, from + frames) of the block onto its bus's
+# part of the bus buffers; it stops itself (active false) when it ends. When
+# `activity` is given (`marks`), the frames it sounds are set to 1 there (the
+# duck's source).
 func renderVoice(
   voice: mod AudioVoice
   busLeft: view Buffer(Float)
   busRight: view Buffer(Float)
   maxFrames: view Int
+  from: view Int
   frames: view Int
+  activity: view Buffer(Float)
+  marks: view Bool
 ) {
-  loop var frame: Int = 0, frame < frames and voice.active, ++frame {
+  loop var frame: Int = from, frame < from + frames and voice.active, ++frame {
     if voice.delayFrames > 0 {
       voice.delayFrames = voice.delayFrames - 1
-    } else if voice.isStream {
+      continue
+    }
+    if marks {
+      setSampleAt(samples: activity, index: frame, value: 1.0)
+    }
+    if voice.isStream {
       renderStreamFrame(
         voice: voice
         busLeft: busLeft
@@ -507,7 +638,9 @@ func renderVoice(
 
 # Render `frames` (at most maxFrames) interleaved frames of `channels` into
 # `output` from frame `firstFrame` on, after taking every command waiting in
-# `commands`.
+# `commands`. A command for a later sample waits in the event list; the block
+# is rendered in parts split at each event's frame, so everything lands on its
+# sample whatever the block size (§6.2).
 func mixerRender(
   mixer: mod AudioMixer
   commands: view SpscRing(AudioCommand)
@@ -516,29 +649,80 @@ func mixerRender(
   frames: view Int
   channels: view Int
 ) {
+  let blockStart: Int = mixer.sampleTime
+  if firstFrame is 0 {
+    # one stamp per render (the device's callback renders in parts after it)
+    let stamped: Bool = mixer.clockStamps.push(value: { sampleTime: blockStart, hostNs: nowNs() })
+  }
   loop commands.count() > 0 {
     if let command: AudioCommand = commands.pop() {
-      applyCommand(mixer: mixer, command: command)
+      if command.atSample > 0 and command.atSample < blockStart {
+        mixer.lateCommands = mixer.lateCommands + 1
+      }
+      if command.kind is AudioCommandKind.play or command.atSample <= blockStart {
+        # a sound waits for its sample itself (its delay), to the frame
+        applyCommand(mixer: mixer, command: command)
+      } else {
+        scheduleEvent(mixer: mixer, command: command)
+      }
     }
   }
-  unsafe {
-    rae_ext_rae_buf_zero(
-      buf: mixer.busLeft
-      start: 0
-      count: audioBusCount * mixer.maxFrames
-      elemSize: sizeof(Float)
+  var cursor: Int = 0
+  loop cursor < frames {
+    applyDueEvents(mixer: mixer, sampleTime: blockStart + cursor)
+    var next: Int = frames
+    if mixer.eventCount > 0 {
+      next = min(a: frames, b: eventTime(mixer: mixer, index: 0) - blockStart)
+    }
+    renderPart(
+      mixer: mixer
+      output: output
+      firstFrame: firstFrame
+      from: cursor
+      frames: next - cursor
+      channels: channels
     )
+    cursor = next
+  }
+  mixer.sampleTime = mixer.sampleTime + frames
+}
+
+# Frames [from, from + frames) of the block: the voices onto their buses, then
+# the buses (gain, duck) into `output`
+func renderPart(
+  mixer: mod AudioMixer
+  output: view Buffer(Float)
+  firstFrame: view Int
+  from: view Int
+  frames: view Int
+  channels: view Int
+) {
+  let maxFrames: Int = mixer.maxFrames
+  unsafe {
+    loop var bus: Int = 0, bus < audioBusCount, ++bus {
+      rae_ext_rae_buf_zero(
+        buf: mixer.busLeft
+        start: bus * maxFrames + from
+        count: frames
+        elemSize: sizeof(Float)
+      )
+      rae_ext_rae_buf_zero(
+        buf: mixer.busRight
+        start: bus * maxFrames + from
+        count: frames
+        elemSize: sizeof(Float)
+      )
+    }
     rae_ext_rae_buf_zero(
-      buf: mixer.busRight
-      start: 0
-      count: audioBusCount * mixer.maxFrames
+      buf: mixer.duckActivity
+      start: from
+      count: frames
       elemSize: sizeof(Float)
     )
   }
-  var duckWanted: Bool = false
   let busLeft: Buffer(Float) = mixer.busLeft
   let busRight: Buffer(Float) = mixer.busRight
-  let maxFrames: Int = mixer.maxFrames
+  let activity: Buffer(Float) = mixer.duckActivity
   let duckOn: Bool = mixer.duckOn
   let duckSource: Int = mixer.duckSource
   let pausedBuses: Int = mixer.pausedBuses
@@ -546,15 +730,15 @@ func mixerRender(
     var endedVoiceId: Int = -1
     if let voice: mod AudioVoice = mixer.voices.modAt(index: index) {
       if voice.active and not voice.paused and (pausedBuses bitand (1 shl voice.bus)) is 0 {
-        if duckOn and voice.bus is duckSource {
-          duckWanted = true
-        }
         renderVoice(
           voice: voice
           busLeft: busLeft
           busRight: busRight
           maxFrames: maxFrames
+          from: from
           frames: frames
+          activity: activity
+          marks: duckOn and voice.bus is duckSource
         )
         if not voice.active {
           endedVoiceId = voice.voiceId
@@ -565,9 +749,9 @@ func mixerRender(
       reportVoiceEnded(mixer: mixer, voiceId: endedVoiceId)
     }
   }
-  loop var frame: Int = 0, frame < frames, ++frame {
+  loop var frame: Int = from, frame < from + frames, ++frame {
     if mixer.duckOn {
-      if duckWanted {
+      if sampleAt(samples: activity, index: frame) > 0.0 {
         mixer.duckLevel = max(a: mixer.duckDepth, b: mixer.duckLevel - mixer.duckAttackStep)
       } else {
         mixer.duckLevel = min(a: 1.0, b: mixer.duckLevel + mixer.duckReleaseStep)
@@ -600,5 +784,4 @@ func mixerRender(
       }
     }
   }
-  mixer.sampleTime = mixer.sampleTime + frames
 }
