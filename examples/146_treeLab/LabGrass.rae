@@ -8,15 +8,26 @@
 # the wind moves it; its defaults are the lab's grass as it always was. In an interactive run the
 # grass and the ground follow the date (app3d/GroundPalette, as the walkers' do: dead grass in
 # winter, fresh in spring) as a tint of the lab's summer colors; the snow sinks it (lib/snow.wgsl,
-# Gbuffer setGbufferSnow). The kind (meadow or painted, tiered grass) is "[grass 2/3]"'s switch.
+# Gbuffer setGbufferSnow).
+#
+# Two kinds (the panel's Grass kind, RAE_TREELAB_GRASS=meadow|painted to start with one): the
+# walkers' meadow grass, one field per scene (createLabGrass), and game proto1's painted grass in
+# three rings to 20, 120 and 300 m (GrassConfig grassPaintedSettings, lib/GrassTiers), made the
+# first time it is shown and kept for every scene: it takes the shown scene's obstacles from that
+# scene's meadow field. Its blades are the ground's color where they stand, so the date reaches it
+# through GrassTiers grassTiersSetGround. The blade height, width, reach and wind controls are the
+# meadow's; the painted grass keeps its recipe, takes the density, and its outer rings switch off.
 import GrassConfig
 import Math
+import Sys
 import Vec3
 open ecs/ComponentTable
 open app3d/GroundPalette
 open Wind
 open GrassCompute
 open GrassBenders
+open GrassTiers
+open Gbuffer
 open Scene3d
 open gpu/GpuResources
 open LabScene
@@ -58,8 +69,75 @@ type LabGrassLook {
   width: Float = 1.8
   reach: Float = labGrassExtent
   wind: Float = 0.48
-  # the date's tint of the lab's summer grass and ground (1: summer)
+  # the date's tint of the lab's summer grass and ground (1: summer), and its ground palette
+  # (app3d/GroundPalette: the painted grass's dry straw and how far the ground has gone to it)
   tint: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  palette: GroundPalette = summerGroundPalette()
+  # the kind: "meadow" or "painted"; the painted grass's outer rings (120 and 300 m) on
+  kind: String = labGrassKindAtStart()
+  rings: Bool = true
+}
+
+func labGrassKindAtStart() ret String {
+  if Sys.getEnv(name: "RAE_TREELAB_GRASS") is "painted" {
+    ret "painted"
+  }
+  ret "meadow"
+}
+
+# The grass and the ground at the date's palette (LabSeason labGroundPalette)
+func labGrassFollowDate(look: mod LabGrassLook, palette: view GroundPalette) {
+  look.tint = labGrassTint(palette: palette)
+  look.palette = palette
+}
+
+# The painted grass's rings, made the first time they are shown (none before), and the scene whose
+# obstacles they have
+type LabGrassField {
+  painted: opt GrassTiers = none
+  scene: Int = 0
+}
+
+# The painted rings with `obstacles` (a scene's surface field): the near field, the middle and the
+# far ring, each its own GPU grass on the lab's ground (grids of 512, 512 and 256 blades a side,
+# as game proto1's)
+func createLabPaintedGrass(obstacles: view List(Float)) ret GrassTiers {
+  let near: GrassViewSettings = GrassConfig.grassPaintedSettings(
+    groundColor: labGroundColor(tint: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+    dryColor: groundDryGrass()
+    rootLift: 0.3
+  )
+  let mid: GrassViewSettings = GrassConfig.grassPaintedMidRing(
+    near: near
+    reach: GrassConfig.grassPaintedMidReach
+  )
+  let far: GrassViewSettings = GrassConfig.grassPaintedFarRing(
+    mid: mid
+    reach: GrassConfig.grassPaintedFarReach
+  )
+  var tiers: GrassTiers = createGrassTiers()
+  addGrassTier(
+    tiers: tiers
+    compute: createLabGrass(obstacles: obstacles)
+    settings: near
+    side: 512
+    on: true
+  )
+  addGrassTier(
+    tiers: tiers
+    compute: createLabGrass(obstacles: obstacles)
+    settings: mid
+    side: 512
+    on: true
+  )
+  addGrassTier(
+    tiers: tiers
+    compute: createLabGrass(obstacles: obstacles)
+    settings: far
+    side: 256
+    on: true
+  )
+  ret tiers
 }
 
 func labGrassSettings(look: view LabGrassLook) ret GrassViewSettings {
@@ -119,6 +197,10 @@ func applyLabGrassControl(look: mod LabGrassLook, group: view String, value: vie
     look.reach = value.toFloat()
   } else if group is "j" {
     look.wind = value.toFloat()
+  } else if group is "c" {
+    look.kind = value
+  } else if group is "e" {
+    look.rings = value is "on"
   } else {
     ret false
   }
@@ -132,6 +214,10 @@ func labGrassChoiceIds(look: view LabGrassLook) ret List(String) {
   if look.on {
     on = "on"
   }
+  var rings: String = "off"
+  if look.rings {
+    rings = "on"
+  }
   ret List(String) {
     "g:{on}"
     "x:{look.density}"
@@ -139,6 +225,8 @@ func labGrassChoiceIds(look: view LabGrassLook) ret List(String) {
     "b:{look.width}"
     "r:{look.reach.toInt()}"
     "j:{look.wind}"
+    "c:{look.kind}"
+    "e:{rings}"
   }
 }
 
@@ -181,4 +269,111 @@ func generateLabGrass(
     fwdZ: camera.target.z - camera.position.z
     settings: labGrassSettings(look: look)
   )
+}
+
+# This frame's grass of the kind chosen (the compute passes), before the G-buffer pass: the
+# meadow field of the scene shown (`meadow`), or the painted rings, given that scene's obstacles
+# when the scene changed and the date's ground
+func labGrassFrame(
+  field: mod LabGrassField
+  meadow: mod GrassCompute
+  resources: mod GpuResources
+  scene: view Int
+  centerX: view Float
+  centerY: view Float
+  camera: view Camera3d
+  deltaTime: view Float
+  wind: view WindVector
+  look: view LabGrassLook
+) {
+  if not look.on {
+    ret
+  }
+  if look.kind is not "painted" {
+    generateLabGrass(
+      grass: meadow
+      resources: resources
+      centerX: centerX
+      centerY: centerY
+      camera: camera
+      deltaTime: deltaTime
+      wind: wind
+      look: look
+    )
+    ret
+  }
+  if field.painted is none {
+    field.painted = createLabPaintedGrass(obstacles: meadow.surfaceField)
+    field.scene = scene
+    log("[treelab] painted grass: rings to 20, 120 and 300 m")
+  }
+  if let tiers: mod GrassTiers = field.painted {
+    if field.scene is not scene {
+      loop var i: Int = 0, i < tiers.tiers.length, ++i {
+        if let tier: mod GrassTier = tiers.tiers.modAt(index: i) {
+          grassSetSurfaceField(grass: tier.compute, values: meadow.surfaceField)
+        }
+      }
+      field.scene = scene
+    }
+    grassTierSetOn(tiers: tiers, index: 1, on: look.rings)
+    grassTierSetOn(tiers: tiers, index: 2, on: look.rings)
+    grassTiersSetGround(
+      tiers: tiers
+      groundColor: labGroundColor(tint: look.tint)
+      dryColor: look.palette.dry
+      dryAmount: look.palette.dryAmount
+    )
+    grassTiersFrame(
+      tiers: tiers
+      resources: resources
+      centerX: centerX
+      centerY: centerY
+      groundZ: 0.0
+      deltaTime: deltaTime
+      wind: wind
+      toon: 0
+      share: look.density
+      benders: List.create(Float, cap: 0)
+      camera: camera.position
+      target: camera.target
+    )
+  }
+}
+
+# The kind chosen's blades, into the open G-buffer pass
+func labGrassDraw(
+  field: mod LabGrassField
+  meadow: mod GrassCompute
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+  look: view LabGrassLook
+) {
+  if not look.on {
+    ret
+  }
+  if look.kind is "painted" {
+    if let tiers: mod GrassTiers = field.painted {
+      grassTiersDraw(
+        tiers: tiers
+        resources: resources
+        cache: gbuffer
+        rendererResources: gbufferResources
+      )
+    }
+    ret
+  }
+  grassDraw(
+    grass: meadow
+    resources: resources
+    gbuffer: gbuffer
+    gbufferResources: gbufferResources
+  )
+}
+
+func labGrassFieldShutdown(field: mod LabGrassField, resources: mod GpuResources) {
+  if let tiers: mod GrassTiers = field.painted {
+    grassTiersShutdown(tiers: tiers, resources: resources)
+  }
 }

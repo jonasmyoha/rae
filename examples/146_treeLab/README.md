@@ -49,6 +49,7 @@ buttons, each group showing its current choice:
 | Level drawn | All levels, Near, Middle, Impostor (the T02 kinds honor it) | |
 | Forest | on, off; reach 400, 1000, 1900 m; Sparse, Normal, Dense | |
 | Grass | on, off; Sparse, Half, Full; blades Short, Medium, Tall and Thin, Medium, Wide; to 20, 45, 80 m; wind none, normal, strong | |
+| Grass kind | Meadow grass (the walkers'), Painted grass (game proto1's, in rings to 20, 120 and 300 m); the painted rings on or off. The blade, reach and wind controls are the meadow's; the painted grass keeps its recipe and takes the density | |
 
 Below them are the shared settings of every 3D example: the date and time of day (the lab's
 season runs on this date: `,` and `.` step it a day, held they slide), the sky, shadows, TAA and
@@ -74,6 +75,7 @@ ids in `LabEditor.rae` labControlButtons) at frame 20.
 | `RAE_TREELAB_FOREST`, `_FOREST_FAR`, `_FOREST_SPACING` | the forest off, its reach and spacing (m) |
 | `RAE_DAY_OF_YEAR`, `RAE_LATITUDE`, `RAE_YEAR_SPEED` | the date, the place, the year's speed |
 | `RAE_TREELAB_WEATHER`, `RAE_WEATHER_WIND` | the weather and the wind at the start |
+| `RAE_TREELAB_GRASS` | `meadow` (the default) or `painted` |
 | `RAE_TREELAB_LEAVES=off`, `RAE_TREELAB_CLUMPS=off` | the plain leaf masses; the bare wood |
 | `RAE_TREELAB_DOLLY=<folder>` | a fixed dolly from 20 to 170 m, one picture a frame |
 | `RAE_TREELAB_STATS=1` | a line of what the forest drew and how long frames took |
