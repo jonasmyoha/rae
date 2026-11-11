@@ -794,6 +794,29 @@ green.
    a decode from the start (with ffmpeg's noise substitution off: it decodes to
    random noise); a stream equal to its decode, gapless into an Apple file, a
    seek in a stream to the frame.
+
+   **Landed, Now Playing and background play (2026-11-12), `packages/audio`
+   0.7.0:** `audio/NowPlaying` shows what plays (title, artist, album, an
+   artwork image file, the current file's length and place, playing or
+   paused) through MPNowPlayingInfoCenter, and turns on MPRemoteCommandCenter's
+   play, pause, play/pause, next, previous and position buttons, on iOS and
+   macOS (the glue is Objective-C on both; MediaPlayer is loaded at run time,
+   its keys found by `dlsym`, so nothing new is linked). A button press goes
+   into a queue of its own; `takeRemoteCommands` reads it and
+   `audio/remoteCommandSystem` sends it as an ECS event. `applyRemoteCommand`
+   does what play, pause, play/pause and a new position ask of a stream (a
+   paused stream stays paused when moved); next and previous are the
+   program's. `streamIsPaused`, `streamFileIndex`,
+   `streamFilePositionSeconds` and `streamFileDurationSeconds` say what plays
+   in a stream with queued files. The session sends `enteredBackground` and
+   `enteredForeground` on iOS. `tools/ios/gen-ios.sh`:
+   `RAE_IOS_BACKGROUND_AUDIO=1` adds the `audio` background mode. Fixture
+   1415 (the buttons through the ECS system, applied to a stream);
+   `checks/audioNowPlaying` on the iPhone: with the app in Settings for 27 s
+   the song played on, callbacks kept coming, no underrun. Not checked by an
+   agent: pressing the lock screen's and the Mac's media buttons (a person's
+   check, queued). Known limit: a `seek` drops the files queued after the
+   first (queued).
 3. **The other platforms.** Android (AAudio, focus, MediaSession, AMediaCodec
    AAC), Windows (WASAPI, SMTC, Media Foundation AAC), Linux (PipeWire through
    Pulse/JACK, MPRIS), the web (AudioWorklet build, COOP/COEP in the web shell,
