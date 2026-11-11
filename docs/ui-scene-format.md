@@ -980,5 +980,11 @@ the frame interval during the swipes a median 8 ms, 90% 9 ms (2 of 558 over 9 ms
 `checks/backdropBlur` (its radius 24): the gray across a tile ranges 3 levels, not 13; at radius 64
 it is even, at radius 8 the 20-unit stripes still show (a sigma of 4 units only halves them).
 
+There is no host call to capture a backdrop (decided 2026-11-11): an app keeps what lies under
+its blurred tiles still, and the kept copy does the rest. SUMU's background breathes only on its
+launcher and eases to rest in 0.3 s when an app opens; then its TODO list, dragged on the iPhone,
+keeps the copy in 50 to 107 of every 120 frames, the others being frames where TODO's own text
+above the first blurred row moves with the finger.
+
 `checks/backdropBlur` paints three tiles over stripes, reads the picture back, and counts the copies
 over 20 frames (the stripes move once, a box moves on top every frame).
