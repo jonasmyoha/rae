@@ -10,10 +10,13 @@
 // Java-only Android APIs.
 package org.rae.audio;
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.AudioAttributes;
@@ -245,5 +248,32 @@ public final class RaeAudioSession {
 
   public static String describe() {
     return shown;
+  }
+
+  // The microphone (audio/AudioInput): 3 allowed, 2 asked and not allowed, 0
+  // not asked yet (Android does not say whether it was asked, so a flag of
+  // our own does), -1 no context. The manifest must ask for RECORD_AUDIO
+  // (gen-android.sh: RAE_ANDROID_PERMISSIONS="RECORD_AUDIO").
+  public static int microphonePermission() {
+    Context context = context();
+    if (context == null) {
+      return -1;
+    }
+    if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+      return 3;
+    }
+    return context.getSharedPreferences("rae-audio", 0).getBoolean("askedMicrophone", false) ? 2 : 0;
+  }
+
+  // Show the system's question (on the UI thread); 1 when asked
+  public static int requestMicrophone() {
+    Context context = context();
+    if (!(context instanceof Activity)) {
+      return 0;
+    }
+    context.getSharedPreferences("rae-audio", 0).edit().putBoolean("askedMicrophone", true).apply();
+    Activity activity = (Activity) context;
+    activity.runOnUiThread(() -> activity.requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 7701));
+    return 1;
   }
 }

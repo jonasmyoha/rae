@@ -1,8 +1,11 @@
 # audio/MidiPorts — the platform's MIDI (docs/audio-design.md §8.2): CoreMIDI
-# on macOS and iOS, through native/rae_audio_glue.c, one call per shim; the
-# bytes are parsed in Rae (audio/Midi). Elsewhere openMidi answers a closed
-# MidiPorts (Windows MIDI Services, the ALSA sequencer, AMidi and Web MIDI
-# come with their platforms).
+# on macOS and iOS, MidiManager and AMidi on Android (the package's Java
+# lists and opens devices, the NDK reads and writes their ports), through
+# native/rae_audio_glue.c, one call per shim; the bytes are parsed in Rae
+# (audio/Midi). Elsewhere openMidi answers a closed MidiPorts (Windows MIDI
+# Services, the ALSA sequencer and Web MIDI come with their platforms).
+# Android has no virtual ports here (they need a MidiDeviceService):
+# createVirtualMidi answers false there.
 #
 #     var midi: MidiPorts = openMidi(name: "My app")
 #     let connected: Int = midi.connectAllMidiSources()      # every keyboard and controller
@@ -30,6 +33,12 @@ type MidiPorts {
   virtualDestination: Int
   virtualSource: Int
   parser: MidiParser
+  # Android: devices asked to open whose port is not taken yet, the ports
+  # that send to us, and the ports we send to with their device ids
+  androidOpening: List(Int)
+  androidOutputs: List(Int)
+  androidInputIds: List(Int)
+  androidInputs: List(Int)
 }
 
 func openMidi(name: view String) ret MidiPorts {
@@ -40,10 +49,16 @@ func openMidi(name: view String) ret MidiPorts {
   var inputPort: Int = 0
   var outputPort: Int = 0
   unsafe {
-    client = rae_audio_midi_client(nameZ: nameZ.data)
-    if client is not 0 {
-      inputPort = rae_audio_midi_input_port(client: client, nameZ: inName.data)
-      outputPort = rae_audio_midi_output_port(client: client, nameZ: outName.data)
+    when Target.os is Os.android {
+      client = rae_audio_midi_android_available()
+      inputPort = client
+      outputPort = client
+    } else {
+      client = rae_audio_midi_client(nameZ: nameZ.data)
+      if client is not 0 {
+        inputPort = rae_audio_midi_input_port(client: client, nameZ: inName.data)
+        outputPort = rae_audio_midi_output_port(client: client, nameZ: outName.data)
+      }
     }
   }
   ret MidiPorts {
@@ -53,13 +68,52 @@ func openMidi(name: view String) ret MidiPorts {
     virtualDestination: 0
     virtualSource: 0
     parser: createMidiParser()
+    androidOpening: {}
+    androidOutputs: {}
+    androidInputIds: {}
+    androidInputs: {}
   }
 }
 
 func closeMidi(this: view MidiPorts) {
-  unsafe {
-    rae_audio_midi_client_dispose(client: this.client)
+  when Target.os is not Os.android {
+    unsafe {
+      rae_audio_midi_client_dispose(client: this.client)
+    }
   }
+}
+
+func androidDeviceName(index: view Int) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 256)
+  bytes.addDefaults(count: 256)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_midi_android_device_name(index: index, into: bytes.data, capacity: 256)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# Android: the devices with ports that send to us (`sending`) or that we send to
+func androidEndpoints(sending: view Bool) ret List(MidiEndpoint) {
+  var found: List(MidiEndpoint) = {}
+  unsafe {
+    let count: Int = rae_audio_midi_android_refresh()
+    loop var i: Int = 0, i < count, ++i {
+      var ports: Int = rae_audio_midi_android_inputs(index: i)
+      if sending {
+        ports = rae_audio_midi_android_outputs(index: i)
+      }
+      if ports > 0 {
+        found.add(
+          value: {
+            id: rae_audio_midi_android_device_id(index: i)
+            name: androidDeviceName(index: i)
+          }
+        )
+      }
+    }
+  }
+  ret found
 }
 
 func endpointName(id: view Int) ret String {
@@ -74,6 +128,9 @@ func endpointName(id: view Int) ret String {
 
 # The sources (keyboards, controllers, other programs' outputs) there are now
 func midiSources() ret List(MidiEndpoint) {
+  when Target.os is Os.android {
+    ret androidEndpoints(sending: true)
+  }
   var found: List(MidiEndpoint) = {}
   unsafe {
     let count: Int = rae_audio_midi_source_count()
@@ -87,6 +144,9 @@ func midiSources() ret List(MidiEndpoint) {
 
 # The destinations (synths, other programs' inputs) there are now
 func midiDestinations() ret List(MidiEndpoint) {
+  when Target.os is Os.android {
+    ret androidEndpoints(sending: false)
+  }
   var found: List(MidiEndpoint) = {}
   unsafe {
     let count: Int = rae_audio_midi_destination_count()
@@ -99,8 +159,18 @@ func midiDestinations() ret List(MidiEndpoint) {
 }
 
 # Listen to one source; true when connected
-func connectMidiSource(this: view MidiPorts, source: view Int) ret Bool {
+func connectMidiSource(this: mod MidiPorts, source: view Int) ret Bool {
   if this.inputPort is 0 {
+    ret false
+  }
+  when Target.os is Os.android {
+    # opened by the system a moment later; pollMidi takes its port then
+    unsafe {
+      if rae_audio_midi_android_open(id: source) is 1 {
+        this.androidOpening.add(value: source)
+        ret true
+      }
+    }
     ret false
   }
   unsafe {
@@ -109,7 +179,7 @@ func connectMidiSource(this: view MidiPorts, source: view Int) ret Bool {
 }
 
 # Listen to every source there is now; how many
-func connectAllMidiSources(this: view MidiPorts) ret Int {
+func connectAllMidiSources(this: mod MidiPorts) ret Int {
   var connected: Int = 0
   loop let source: MidiEndpoint in midiSources() {
     if this.connectMidiSource(source: source.id) {
@@ -122,6 +192,9 @@ func connectAllMidiSources(this: view MidiPorts) ret Int {
 # A virtual source and destination named `name`, which other programs see
 func createVirtualMidi(this: mod MidiPorts, name: view String) ret Bool {
   if this.client is 0 {
+    ret false
+  }
+  when Target.os is Os.android {
     ret false
   }
   let nameZ: List(UInt8) = pathBytesZ(path: name)
@@ -138,6 +211,9 @@ func createVirtualMidi(this: mod MidiPorts, name: view String) ret Bool {
 # The messages that arrived since the last call, from every connected source
 # and our virtual destination, oldest first
 func pollMidi(this: mod MidiPorts) ret List(MidiMessage) {
+  when Target.os is Os.android {
+    this.pollAndroidPorts()
+  }
   unsafe {
     var length: Int = rae_audio_midi_poll()
     loop length >= 0 {
@@ -151,10 +227,65 @@ func pollMidi(this: mod MidiPorts) ret List(MidiMessage) {
   ret this.parser.takeMidi()
 }
 
-# Whole messages to a destination; false when not sent
-func sendMidi(this: view MidiPorts, destination: view Int, bytes: view List(UInt8)) ret Bool {
+# Android: take the ports of devices the system has opened, then every
+# message waiting on them, into the queue
+func pollAndroidPorts(this: mod MidiPorts) {
+  var index: Int = this.androidOpening.length() - 1
+  loop index >= 0 {
+    let id: Int = this.androidOpening.copyAtFallback(index: index, fallback: -1)
+    var output: Int = 0
+    unsafe {
+      output = rae_audio_midi_android_open_output(id: id, port: 0)
+    }
+    if output is not 0 {
+      this.androidOutputs.add(value: output)
+      this.androidOpening.removeAt(index: index)
+    }
+    index = index - 1
+  }
+  loop let output: Int in this.androidOutputs {
+    var received: Int = 1
+    loop received is 1 {
+      unsafe {
+        received = rae_audio_midi_android_receive(output: output)
+      }
+    }
+  }
+}
+
+# Android: the port we send to on device `id` (0 while the device opens)
+func androidInputFor(this: mod MidiPorts, id: view Int) ret Int {
+  loop var i: Int = 0, i < this.androidInputIds.length(), ++i {
+    if this.androidInputIds.copyAtFallback(index: i, fallback: -1) is id {
+      ret this.androidInputs.copyAtFallback(index: i, fallback: 0)
+    }
+  }
+  var input: Int = 0
+  unsafe {
+    let asked: Int = rae_audio_midi_android_open(id: id)
+    input = rae_audio_midi_android_open_input(id: id, port: 0)
+  }
+  if input is not 0 {
+    this.androidInputIds.add(value: id)
+    this.androidInputs.add(value: input)
+  }
+  ret input
+}
+
+# Whole messages to a destination; false when not sent (on Android also while
+# the device is still opening: send again)
+func sendMidi(this: mod MidiPorts, destination: view Int, bytes: view List(UInt8)) ret Bool {
   if this.outputPort is 0 {
     ret false
+  }
+  when Target.os is Os.android {
+    let input: Int = this.androidInputFor(id: destination)
+    if input is 0 {
+      ret false
+    }
+    unsafe {
+      ret rae_audio_midi_android_send(input: input, bytes: bytes.data, count: bytes.length()) is 1
+    }
   }
   unsafe {
     ret rae_audio_midi_send(

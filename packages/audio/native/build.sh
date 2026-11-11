@@ -28,7 +28,8 @@ cp "$HERE/miniaudio/miniaudio.h" "$HERE/miniaudio/stb_vorbis.c" "$INSTALL/src/mi
 # Android's Java half of the session (the audio focus, MediaSession), which an
 # Android build compiles with the app's Java (sourcesAndroid)
 mkdir -p "$INSTALL/src/java/org/rae/audio"
-cp "$HERE/android/org/rae/audio/RaeAudioSession.java" "$INSTALL/src/java/org/rae/audio/"
+cp "$HERE/android/org/rae/audio/RaeAudioSession.java" "$HERE/android/org/rae/audio/RaeAudioMidi.java" \
+  "$INSTALL/src/java/org/rae/audio/"
 echo "" > "$INSTALL/DEVICE_DEFINES"
 
 objs="$(mktemp -d)"

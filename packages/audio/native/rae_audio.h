@@ -193,6 +193,22 @@ int64_t rae_audio_midi_send(int64_t port, int64_t endpoint, uint8_t* bytes, int6
 int64_t rae_audio_midi_poll(void);
 int64_t rae_audio_midi_dropped(void);
 
+/* Android's MIDI: devices by index after refresh (their id, name, output
+ * ports that send to us and input ports we send to), open (asynchronous), the
+ * ports of an opened device (0 while it is still opening), receive one message
+ * into the MIDI queue (1, 0 none), send. Elsewhere available answers 0. */
+int64_t rae_audio_midi_android_available(void);
+int64_t rae_audio_midi_android_refresh(void);
+int64_t rae_audio_midi_android_device_id(int64_t index);
+int64_t rae_audio_midi_android_device_name(int64_t index, uint8_t* into, int64_t capacity);
+int64_t rae_audio_midi_android_outputs(int64_t index);
+int64_t rae_audio_midi_android_inputs(int64_t index);
+int64_t rae_audio_midi_android_open(int64_t id);
+int64_t rae_audio_midi_android_open_output(int64_t id, int64_t port);
+int64_t rae_audio_midi_android_open_input(int64_t id, int64_t port);
+int64_t rae_audio_midi_android_receive(int64_t output);
+int64_t rae_audio_midi_android_send(int64_t input, uint8_t* bytes, int64_t count);
+
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at
  * reads up to `count` bytes at `offset` (pread), the count read or -errno. */
