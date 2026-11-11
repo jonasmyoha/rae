@@ -1,0 +1,316 @@
+# Time in the audio engine (docs/audio-design.md §6, docs/video-design.md
+# §6.1), offline, with RAE_REALTIME_CHECK=1 (config.env).
+#
+# 1. MediaTime: rescaling rounds once, to the nearest, a half away from zero;
+#    comparing across timebases is exact; large values do not overflow.
+# 2. TempoMap and Transport: ticks to samples and back, tempo and meter
+#    changes, bars and beats, play and stop.
+# 3. The clock's delay-locked loop, fed simulated timestamps of a device that
+#    runs at 47998.7 Hz with ±300 µs of jitter: it measures the rate and maps
+#    sample time to host time closely.
+# 4. Block size: the same scheduled events (a start, a gain, a pan, a pause and
+#    resume, a bus gain, a fade, a stop, a duck) rendered in blocks of 1, 17,
+#    64, 512 and of changing sizes give the same samples, and each event lands
+#    on its frame.
+import Math
+open audio/Audio
+open audio/AudioClock
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/MusicalTime
+open audio/Sound
+open media/MediaTime
+
+func mediaTimes() {
+  let frame: MediaTime = mediaTime(value: 1001, numerator: 1, denominator: 30000)
+  log(
+    "a 29.97 fps frame: {frame.toSamples(sampleRate: 48000)} samples at 48 kHz (1601.6), {frame.toSamples(
+      sampleRate: 44100
+    )} at 44.1 kHz (1471.47)"
+  )
+  let half: MediaTime = mediaTime(value: 1, numerator: 1, denominator: 2)
+  let minusHalf: MediaTime = mediaTime(value: -1, numerator: 1, denominator: 2)
+  log(
+    "a half rounds away from zero: {half.rescaled(timebase: rational(numerator: 1, denominator: 1)).value} and {minusHalf.rescaled(
+      timebase: rational(numerator: 1, denominator: 1)
+    ).value}"
+  )
+  log(
+    "1/30 s and 1600 samples at 48 kHz compare {compareTimes(
+      a: mediaTime(value: 1, numerator: 1, denominator: 30)
+      b: sampleTime(frames: 1600, sampleRate: 48000)
+    )}; 1601 samples is later: {compareTimes(
+      a: mediaTime(value: 1, numerator: 1, denominator: 30)
+      b: sampleTime(frames: 1601, sampleRate: 48000)
+    )}"
+  )
+  let tenHours: MediaTime = mediaTime(value: 3240000000, numerator: 1, denominator: 90000)
+  log("ten hours at 90 kHz: {tenHours.toSamples(sampleRate: 48000)} samples at 48 kHz")
+  log(
+    "timebase 2/4 is {rational(numerator: 2, denominator: 4).numerator}/{rational(
+      numerator: 2
+      denominator: 4
+    ).denominator}; 3 + 1001/30000 s in ms: {addTimes(
+      a: mediaTime(value: 3000, numerator: 1, denominator: 1000)
+      b: frame
+    ).value}"
+  )
+}
+
+func musicalTime() {
+  var tempo: TempoMap = createTempoMap(sampleRate: 48000)
+  log(
+    "120 bpm: a quarter note is {tempo.sampleOfTick(tick: 960)} samples; bar 3 starts at tick {tempo.tickOfBar(
+      bar: 3
+      beat: 1
+    )}"
+  )
+  tempo.setTempo(
+    tick: tempo.tickOfBar(bar: 3, beat: 1)
+    microsecondsPerQuarter: microsecondsPerQuarterOf(beatsPerMinute: 90.0)
+  )
+  tempo.setMeter(tick: tempo.tickOfBar(bar: 5, beat: 1), beatsPerBar: 6, beatUnit: 8)
+  let bar5: Int = tempo.tickOfBar(bar: 5, beat: 1)
+  let bar6beat4: Int = tempo.tickOfBar(bar: 6, beat: 4)
+  log(
+    "90 bpm from bar 3, 6/8 from bar 5: bar 5 at tick {bar5}, sample {tempo.sampleOfTick(tick: bar5)}; bar 6 beat 4 at tick {bar6beat4}"
+  )
+  let place: BarBeat = tempo.barBeatOfTick(tick: bar6beat4 + 100)
+  log("tick {bar6beat4 + 100} is bar {place.bar} beat {place.beat} tick {place.tick}")
+  var backAndForth: Bool = true
+  var tick: Int = 0
+  loop tick < 40000 {
+    let back: Int = tempo.tickOfSample(sampleTime: tempo.sampleOfTick(tick: tick))
+    if back is not tick and back is not tick - 1 {
+      backAndForth = false
+    }
+    tick = tick + 37
+  }
+  var notAfter: Bool = true
+  var sample: Int = 0
+  loop sample < 400000 {
+    if tempo.sampleOfTick(tick: tempo.tickOfSample(sampleTime: sample)) > sample {
+      notAfter = false
+    }
+    sample = sample + 1013
+  }
+  log(
+    "ticks to samples and back: within a tick {backAndForth}; a sample's tick is never after it {notAfter}"
+  )
+  var transport: Transport = createTransport()
+  transport.transportPlay(tempo: tempo, fromTick: tempo.tickOfBar(bar: 2, beat: 1), atSample: 1000)
+  log(
+    "playing bar 2 from sample 1000: bar 2 beat 2 sounds at {transport.transportSampleOfTick(
+      tempo: tempo
+      tick: tempo.tickOfBar(bar: 2, beat: 2)
+    )}, sample 25000 is tick {transport.transportTickAt(tempo: tempo, sampleTime: 25000)}"
+  )
+  transport.transportStop(tempo: tempo, atSample: 25000)
+  log(
+    "stopped: the position stays at tick {transport.transportTickAt(tempo: tempo, sampleTime: 90000)}, playing {transport.playing}"
+  )
+}
+
+func delayLockedLoop() {
+  var clock: AudioClock = createAudioClock(sampleRate: 48000, offline: false, latencyFrames: 0)
+  let trueRate: Float64 = 47998.7
+  var seed: Int = 12345
+  var worst: Float64 = 0.0
+  loop var block: Int = 0, block < 3000, ++block {
+    let sample: Int = block * 512
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    let jitter: Int = (seed % 600001) - 300000
+    let trueNs: Float64 = (sample as Float64) * 1000000000.0 / trueRate + 5000000000.0
+    clock.clockObserve(sampleTime: sample, hostNs: (trueNs as Int) + jitter)
+    if block >= 2500 {
+      let mapped: Float64 = clock.hostTimeOfSample(sampleTime: sample) as Float64
+      let error: Float64 = mapped - trueNs
+      if error > worst {
+        worst = error
+      }
+      if -error > worst {
+        worst = -error
+      }
+    }
+  }
+  let rateError: Float64 = clock.measuredSampleRate() - trueRate
+  log(
+    "the loop: measured rate within 0.1 Hz of 47998.7: {rateError < 0.1 and rateError > -0.1}; mapping within 25 us: {worst < 25000.0}; the rate {floor(
+      x: (clock.measuredSampleRate() * 10.0 + 0.5) as Float
+    ) / 10.0} Hz"
+  )
+  let heard: Int = clock.sampleTimeAtHost(hostNs: clock.hostTimeOfSample(sampleTime: 1000000))
+  log("host time and back: sample {heard} (1000000 or one before)")
+}
+
+# One engine, the scheduled events, rendered in parts of `sizes` (cycled)
+func renderScene(sizes: view List(Int)) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 512)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let low: Sound = audio.addSound(data: sineSoundData(
+    frequency: 110.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  audio.duckWhilePlaying(
+    source: AudioBusKind.alerts
+    target: AudioBusKind.music
+    gainDecibels: -12.0
+  )
+  let music: VoiceId = audio.playAt(
+    sound: low
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  let voice: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 1000
+  )
+  audio.setVoiceGainAt(voiceId: voice, gainDecibels: -6.0, atSample: 2500)
+  audio.setVoicePanAt(voiceId: voice, pan: 0.5, atSample: 3101)
+  audio.pauseVoiceAt(voiceId: voice, atSample: 4000)
+  audio.resumeVoiceAt(voiceId: voice, atSample: 4700)
+  audio.setBusGainAt(bus: AudioBusKind.effects, gainDecibels: -3.0, atSample: 5203)
+  let alert: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.alerts
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 6000
+  )
+  audio.stopVoiceAt(voiceId: alert, atSample: 6800)
+  audio.fadeOutAt(voiceId: music, seconds: 0.02, atSample: 8000)
+  audio.stopVoiceAt(voiceId: voice, atSample: 7001)
+  var rendered: List(Float) = {}
+  var done: Int = 0
+  var part: Int = 0
+  loop done < 10000 {
+    let count: Int = min(
+      a: 10000 - done
+      b: sizes.copyAtFallback(index: part % sizes.length(), fallback: 512)
+    )
+    let block: List(Float) = audio.renderOffline(frames: count)
+    loop let sample: Float in block {
+      rendered.add(value: sample)
+    }
+    done = done + count
+    part = part + 1
+  }
+  log("  late commands {audio.lateCommandCount()}")
+  let blocks: Int = audio.stopAudio()
+  ret rendered
+}
+
+func sameSamples(a: view List(Float), b: view List(Float)) ret Bool {
+  if a.length() is not b.length() {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length(), ++i {
+    if a.copyAtFallback(index: i, fallback: 0.0) is not b.copyAtFallback(index: i, fallback: 1.0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func blockSizes() {
+  let reference: List(Float) = renderScene(sizes: List(Int) { 512 })
+  let ones: List(Float) = renderScene(sizes: List(Int) { 1 })
+  let seventeen: List(Float) = renderScene(sizes: List(Int) { 17 })
+  let sixtyFour: List(Float) = renderScene(sizes: List(Int) { 64 })
+  let changing: List(Float) = renderScene(sizes: List(Int) {
+    1
+    7
+    128
+    33
+    512
+    250
+    3
+  })
+  log(
+    "blocks of 1, 17, 64 and changing sizes equal blocks of 512: {sameSamples(a: ones, b: reference)} {sameSamples(
+      a: seventeen
+      b: reference
+    )} {sameSamples(a: sixtyFour, b: reference)} {sameSamples(a: changing, b: reference)}"
+  )
+}
+
+# Each event on its frame: one voice alone, its pause and its stop
+func eventFrames() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 512)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let voice: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 1000
+  )
+  audio.pauseVoiceAt(voiceId: voice, atSample: 2049)
+  audio.resumeVoiceAt(voiceId: voice, atSample: 3000)
+  let rendered: List(Float) = audio.renderOffline(frames: 4000)
+  var firstSound: Int = -1
+  var pausedFrom: Int = -1
+  var resumedAt: Int = -1
+  loop var frame: Int = 0, frame < 4000, ++frame {
+    let left: Float = rendered.copyAtFallback(index: frame * 2, fallback: 0.0)
+    if firstSound < 0 and left is not 0.0 {
+      firstSound = frame
+    }
+    if firstSound >= 0 and pausedFrom < 0 and frame > 1001 and left is 0.0 and rendered.copyAtFallback(
+      index: frame * 2 + 2
+      fallback: 0.0
+    ) is 0.0 {
+      pausedFrom = frame
+    }
+    if pausedFrom >= 0 and resumedAt < 0 and left is not 0.0 {
+      resumedAt = frame
+    }
+  }
+  # the sine is 0 at its first frame, so the sound is heard from the next
+  log("one voice: heard from {firstSound}, paused from {pausedFrom}, on again at {resumedAt}")
+  let late: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 0
+  )
+  audio.setVoiceGainAt(voiceId: late, gainDecibels: -6.0, atSample: 100)
+  audio.setVoiceGainAt(voiceId: late, gainDecibels: -6.0, atSample: audio.nextSafeSampleTime())
+  let more: List(Float) = audio.renderOffline(frames: 512)
+  log("a command for a past sample is counted late: {audio.lateCommandCount()}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func main() {
+  mediaTimes()
+  musicalTime()
+  delayLockedLoop()
+  blockSizes()
+  eventFrames()
+}
