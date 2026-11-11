@@ -123,6 +123,15 @@ int64_t rae_audio_remote_poll(void);
 void rae_audio_remote_inject(int64_t kind, int64_t value);
 void rae_audio_run_loop_pump(void);
 
+/* The output's latency for the clock (docs/audio-design.md §6.1).
+ * buffer_frames: miniaudio's period times its periods. core_audio_frames:
+ * macOS, the output device's latency (0), safety offset (1) or IO buffer size
+ * (2) in frames, -1 elsewhere. session_output_latency_ns: iOS, the route's
+ * output latency, -1 elsewhere. */
+int64_t rae_audio_device_buffer_frames(int64_t device);
+int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property);
+int64_t rae_audio_session_output_latency_ns(void);
+
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at
  * reads up to `count` bytes at `offset` (pread), the count read or -errno. */

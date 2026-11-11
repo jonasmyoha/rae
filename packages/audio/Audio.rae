@@ -41,6 +41,7 @@ open Atomic
 open Realtime
 open Signal
 open audio/AudioButler
+open audio/AudioClock
 open audio/AudioDevice
 open audio/AudioGlue
 open audio/AudioMixer
@@ -108,6 +109,9 @@ type AudioEngine {
   commands: SpscRing(AudioCommand)
   feedback: SpscRing(AudioFeedback)
   reclaim: SpscRing(Int)
+  # the renders' (sample time, host time) and the clock they feed (§6.1)
+  clockStamps: SpscRing(ClockStamp)
+  clock: AudioClock
   output: SpscRing(Float)
   wake: Signal
   running: Atomic(Bool)
@@ -161,6 +165,7 @@ func audioOfflineWanted() ret Bool {
 func audioStart(settings: view AudioSettings) ret AudioEngine {
   let feedback: SpscRing(AudioFeedback) = createSpscRing(AudioFeedback, capacity: 1024)
   let reclaim: SpscRing(Int) = createSpscRing(Int, capacity: 1024)
+  let clockStamps: SpscRing(ClockStamp) = createSpscRing(ClockStamp, capacity: 512)
   let commands: SpscRing(AudioCommand) = createSpscRing(AudioCommand, capacity: 1024)
   let wake: Signal = createSignal()
   let running: Atomic(Bool) = createAtomic(Bool, value: true)
@@ -202,6 +207,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     maxFrames: periodFrames
     feedback: feedback
     reclaim: reclaim
+    clockStamps: clockStamps
   )
   var renderTask: Task(Int) = spawn audioIdle()
   let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
@@ -225,6 +231,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         maxFrames: periodFrames
         feedback: feedback
         reclaim: reclaim
+        clockStamps: clockStamps
       )
       commands: commands
     })
@@ -240,6 +247,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
       maxFrames: periodFrames
       feedback: feedback
       reclaim: reclaim
+      clockStamps: clockStamps
     )
     renderTask = spawn audioRenderThread(
       mixer: threadMixer
@@ -283,6 +291,12 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     commands: commands
     feedback: feedback
     reclaim: reclaim
+    clockStamps: clockStamps
+    clock: createAudioClock(
+      sampleRate: sampleRate
+      offline: device is 0
+      latencyFrames: deviceOutputLatencyFrames(device: device, sampleRate: sampleRate)
+    )
     output: output
     wake: wake
     running: running
@@ -544,6 +558,7 @@ func update(this: mod AudioEngine) {
       }
     }
   }
+  this.clock.clockTakeStamps(stamps: this.clockStamps)
   loop this.reclaim.count() > 0 {
     if let soundId: Int = this.reclaim.pop() {
       this.freeSoundSamples(soundId: soundId)
@@ -613,10 +628,14 @@ func renderOfflineInBlocks(
   ret rendered
 }
 
-# The sample time the next play can start at without being late: offline, the
-# next frame to render; with a device, now plus the ring and one period
+# The earliest sample time a command sent now still reaches before it is due,
+# so it is never late (§6.2): offline, the next frame to render; with a
+# device, two periods after the newest render the clock has seen
 func nextSafeSampleTime(this: view AudioEngine) ret Int {
-  ret this.renderedFrames
+  if this.device is 0 {
+    ret this.renderedFrames
+  }
+  ret this.clock.lastRenderSample + 2 * this.periodFrames
 }
 
 # Frames of silence the device played because the render thread was late
@@ -699,6 +718,7 @@ func stopAudio(this: mod AudioEngine) ret Int {
   freeSpscRing(this: this.commands)
   freeSpscRing(this: this.feedback)
   freeSpscRing(this: this.reclaim)
+  freeSpscRing(this: this.clockStamps)
   freeSpscRing(this: this.output)
   freeSpscRing(this: this.butlerCommands)
   freeSpscRing(this: this.butlerClosed)
