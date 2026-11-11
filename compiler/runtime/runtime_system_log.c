@@ -144,6 +144,7 @@ void rae_spawn(void* (*func)(void*), void* data) {
  * text is Rae (lib/core/AnyText.rae, the generated formatters;
  * docs/runtime-c-audit.md row 12). Platform reason: writing to stdout. */
 void rae_ext_rae_log_write(rae_String text, rae_Bool newline) {
+  RAE_REALTIME_GUARD("rae_ext_rae_log_write", "log");
   if (text.data && text.len > 0) fwrite(text.data, 1, (size_t)text.len, stdout);
   if (newline) fputc('\n', stdout);
   rae_flush_stdout();
