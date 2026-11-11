@@ -1,5 +1,10 @@
 # Now Playing, the lock screen's buttons and sound in the background
-# (docs/audio-design.md §9.1) on a real device. On iOS run it with
+# (docs/audio-design.md §9.1) on a real device: iOS and macOS (MediaPlayer),
+# Android (the audio focus and a MediaSession: sh tools/android/gen-android.sh
+# checks/audioNowPlaying, then RAE_ANDROID_ENV="RAE_CHECK_SECONDS=60" sh
+# tools/android/run-android.sh audioNowPlaying 90, and press the media buttons
+# or send them with adb shell cmd media_session dispatch play-pause). On iOS run
+# it with
 # RAE_IOS_TEAM=<team> RAE_IOS_BACKGROUND_AUDIO=1 sh tools/ios/run-ios.sh
 # checks/audioNowPlaying, and read Documents/rae.log from the app's container.
 #
@@ -82,11 +87,10 @@ func secondsText(seconds: view Float64) ret String {
 }
 
 func main() {
+  # the temporary folder (macOS, iOS), else the working folder (Android: the
+  # app's own bundle folder)
   var folder: String = getEnv(name: "TMPDIR")
-  if folder is "" {
-    folder = "/tmp/"
-  }
-  if not folder.endsWith(suffix: "/") {
+  if folder is not "" and not folder.endsWith(suffix: "/") {
     folder = "{folder}/"
   }
   let path: String = "{folder}audioNowPlaying.wav"
@@ -118,11 +122,17 @@ func main() {
   var playedInBackground: Float64 = 0.0
   var wentToBackground: Bool = false
   var ticks: Int = 0
+  var sessionWasActive: Bool = audio.sessionActive
+  log("audioNowPlaying: session active {sessionWasActive} (Android: the audio focus is held)")
   loop ticks < seconds * 10 {
     sleep(ms: 100)
     ticks = ticks + 1
     pumpMainRunLoop()
     audio.update()
+    if audio.sessionActive is not sessionWasActive {
+      sessionWasActive = audio.sessionActive
+      log("audioNowPlaying: session active {sessionWasActive}")
+    }
     loop let event: AudioSessionEvent in audio.takeSessionEvents() {
       let at: Float64 = audio.positionSeconds(voiceId: song)
       if event.kind is AudioSessionEventKind.enteredBackground {
@@ -167,6 +177,14 @@ func main() {
     playedInBackground = playedInBackground + audio.positionSeconds(voiceId: song) - backgroundStart
   }
   let callbacks: Int = audio.deviceCallbacks()
+  # the song stops; a second after the last sound the session is let go (on
+  # Android the focus is given back)
+  audio.stopVoice(voiceId: song)
+  loop var wait: Int = 0, wait < 15, ++wait {
+    sleep(ms: 100)
+    audio.update()
+  }
+  log("audioNowPlaying: after the song: session active {audio.sessionActive}")
   clearNowPlaying()
   let blocks: Int = audio.stopAudio()
   let removed: Bool = Sys.delete(path: path)
