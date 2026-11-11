@@ -111,6 +111,16 @@ func instanceEmissive(material: view Material3d) ret Float {
 # Append one instance from ready-made model matrices. `prevModel` feeds TAA
 # motion vectors; pass the same matrix as `model` for a static instance. Silently
 # drops instances past `capacity` (a fixed-size field must not overrun its buffer).
+# A material's image code for the static shader (its params.w): -(layer + 1), and 1000 lower
+# when it paints grass (Material3d paintsGrass; gbuffer_static_surface.wgsl decodes it)
+func materialImageCode(material: view Material3d) ret Int {
+  var code: Int = 0 - (material.colorTextureLayer + 1)
+  if material.paintsGrass and material.colorTextureLayer >= 0 {
+    code = code - 1000
+  }
+  ret code
+}
+
 func addInstance(
   batch: mod InstanceBatch
   model: view Mat4
@@ -132,7 +142,7 @@ func addInstance(
     roughness: packedRoughness(material: material)
     emissive: instanceEmissive(material: material)
     toon: toonFlag(material: material)
-    paletteBase: -(material.colorTextureLayer + 1)
+    paletteBase: materialImageCode(material: material)
   )
   batch.count = batch.count + 1
 }

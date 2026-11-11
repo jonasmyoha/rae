@@ -78,6 +78,9 @@ type Transform3d {
 type Material3d {
   # Image layer in this renderer's SurfaceImages; alpha < 0.5 cuts out. -1 uses baseColor.
   colorTextureLayer: Int = -1
+  # Its image's texels of alpha about 0.75 are painted as grass, with the painted grass's own
+  # field and palette (a ground's: gbuffer_static_surface.wgsl). Off, alpha only cuts out.
+  paintsGrass: Bool = false
   baseColor: Vec3
   metallic: Float
   roughness: Float
