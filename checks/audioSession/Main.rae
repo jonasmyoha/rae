@@ -1,0 +1,108 @@
+# The audio session on a real device (docs/audio-design.md §9.1, §9.2): a probe
+# that logs what the session does, step by step, for a person (or an agent
+# reading the log) to compare with what was heard. On iOS run it with
+# RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh checks/audioSession, and read
+# Documents/rae.log from the app's container.
+#
+#   1. the intent `ambient`: a 2 s tone (the silent switch silences it)
+#   2. an alert over it: a 2 s chime on the alerts bus (plays through the
+#      switch; another app's music ducks while it sounds)
+#   3. 20 s of music with the session's events logged as they come: unplug
+#      headphones, take a call or ask Siri meanwhile
+#   4. the Focus status (§9.2): before and after asking for access
+# Each step logs the session's own description (category, route, whether
+# another app plays, the silence hint). Off iOS there is no session: it plays
+# the same sounds, logs that, and passes.
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSession
+open audio/Sound
+
+func describeFocus(label: view String) {
+  let status: AudioFocusStatus = focusStatus()
+  log(
+    "audioSession: focus {label}: available {status.available} authorization {status.authorization} focused {status.focused}"
+  )
+}
+
+func playFor(audio: mod AudioEngine, milliseconds: view Int) {
+  var left: Int = milliseconds
+  loop left > 0 {
+    sleep(ms: 100)
+    audio.update()
+    loop let event: AudioSessionEvent in audio.takeSessionEvents() {
+      log(
+        "audioSession: event {event.kind} shouldResume {event.shouldResume} reason {event.reason}; {sessionDescription()}"
+      )
+    }
+    left = left - 100
+  }
+}
+
+func main() {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.session = AudioSessionKind.ambient
+  var audio: AudioEngine = audioStart(settings: settings)
+  log(
+    "audioSession: device offline {audio.offline}, {audio.sampleRate} Hz, period {audio.periodFrames}"
+  )
+  log("audioSession: at start: {sessionDescription()}")
+  describeFocus(label: "at start")
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.3
+    frameCount: 96000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let chime: Sound = audio.addSound(data: sineSoundData(
+    frequency: 880.0
+    amplitude: 0.3
+    frameCount: 96000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let ambient: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: 0.0)
+  playFor(audio: audio, milliseconds: 300)
+  log("audioSession: ambient tone: callbacks {audio.deviceCallbacks()}; {sessionDescription()}")
+  playFor(audio: audio, milliseconds: 1800)
+  let alert: VoiceId = audio.play(sound: chime, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+  playFor(audio: audio, milliseconds: 300)
+  log("audioSession: alert chime: callbacks {audio.deviceCallbacks()}; {sessionDescription()}")
+  playFor(audio: audio, milliseconds: 2000)
+  log("audioSession: after the alert: callbacks {audio.deviceCallbacks()}; {sessionDescription()}")
+  playFor(audio: audio, milliseconds: 1500)
+  log(
+    "audioSession: a second after the last sound: active {audio.sessionActive}; {sessionDescription()}"
+  )
+  let music: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.music
+    gainDecibels: -6.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  log("audioSession: music for 20 s (unplug headphones, take a call, ask Siri now)")
+  playFor(audio: audio, milliseconds: 2000)
+  log("audioSession: 2 s into the music: callbacks {audio.deviceCallbacks()}")
+  playFor(audio: audio, milliseconds: 18000)
+  log(
+    "audioSession: music paused {audio.musicIsPaused()}, callbacks {audio.deviceCallbacks()}; {sessionDescription()}"
+  )
+  audio.stopVoice(voiceId: music)
+  describeFocus(label: "before asking")
+  log("audioSession: asking for the Focus status: {requestFocusAccess()}")
+  playFor(audio: audio, milliseconds: 3000)
+  describeFocus(label: "after asking")
+  let callbacks: Int = audio.deviceCallbacks()
+  let underrun: Int = audio.underrunFrames()
+  let blocks: Int = audio.stopAudio()
+  log("audioSession: {callbacks} callbacks, {blocks} blocks, {underrun} frames of underrun")
+  if not audio.offline and (callbacks < 100 or blocks < 100) {
+    log("audioSession: FAILED")
+    exit(code: 1)
+  }
+  log("audioSession: done")
+}
