@@ -830,9 +830,21 @@ green.
    B: `checks/audioSine` passes on the Android 35 emulator (AAudio, the
    callback renders, 0 underrun). `deviceBackendName` says which platform
    system plays ("Core Audio", "AAudio", ...). Not yet, each queued as its
-   own step: AAC through AMediaCodec and the audio focus and MediaSession
-   (Android), and Windows, Linux and the web, which need a machine or a
-   design decision (see the queue).
+   own step: the audio focus and MediaSession (Android), and Windows, Linux
+   and the web, which need a machine or a design decision (see the queue).
+
+   **AAC on Android (2026-11-12), `packages/audio` 0.9.1:**
+   `audio/AacPlatform` puts the platform's AAC decoder behind
+   `audio/AacDecoder`: AudioConverter on Apple (the esds payload as its
+   cookie), the NDK's AMediaCodec on Android (loaded with dlopen, configured
+   with the AudioSpecificConfig as csd-0; a packet queued, every ready output
+   taken as 16-bit PCM and turned into Float in Rae; at the end an
+   end-of-stream packet and more asking until the last frames come, as
+   AMediaCodec holds frames back). `checks/audioAac` on the Android 35
+   emulator: fixture 1414's two M4A files give 22050 frames, no delay, within
+   6e-5 of afconvert's own decodes (one 16-bit step), seeks within -40 dB of
+   the whole decode, a stream equal to its decode; the same check passes on
+   the Mac.
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.

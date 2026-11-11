@@ -9,6 +9,7 @@
 # Like every decoder it reads the disk: opened and read on the streaming
 # thread or a loading worker, never on the audio thread.
 import Math
+open audio/AacPlatform
 open audio/AudioGlue
 open audio/Sound
 open media/Mp4
@@ -23,7 +24,9 @@ const aacMaxPacketFrames: Int = 4096
 const aacPrerollPackets: Int = 2
 
 type AacDecoder {
-  # 0 when the file is not AAC in MP4, or the platform cannot decode it
+  # the platform's decoder (audio/AacPlatform); `converter` is its handle, 0
+  # when the file is not AAC in MP4 or the platform cannot decode it
+  codec: AacCodec
   converter: Int
   file: Int
   channels: Int
@@ -45,10 +48,14 @@ type AacDecoder {
   packet: List(UInt8)
   decoded: List(Float)
   drained: Bool
+  # calls that asked for the end of the stream (a codec with latency gives
+  # its last frames over several)
+  endTries: Int
 }
 
 func closedAacDecoder(error: view String) ret AacDecoder {
   ret AacDecoder {
+    codec: noAacCodec()
     converter: 0
     file: -1
     channels: 0
@@ -64,6 +71,7 @@ func closedAacDecoder(error: view String) ret AacDecoder {
     packet: List.create(UInt8, cap: 0)
     decoded: List.create(Float, cap: 0)
     drained: true
+    endTries: 0
   }
 }
 
@@ -161,16 +169,8 @@ func openAacDecoder(pathZ: view Buffer(UInt8)) ret AacDecoder {
       if sampleRate <= 0 {
         sampleRate = track.timescale
       }
-      unsafe {
-        decoder.converter = rae_audio_aac_open(sampleRate: sampleRate, channels: track.channels)
-        if decoder.converter is not 0 and track.elementaryStream.length() > 0 {
-          let cookie: Int = rae_audio_aac_set_cookie(
-            converter: decoder.converter
-            cookie: track.elementaryStream.data
-            size: track.elementaryStream.length()
-          )
-        }
-      }
+      decoder.codec = openAacCodec(track: track, sampleRate: sampleRate)
+      decoder.converter = decoder.codec.handle
       if decoder.converter is 0 {
         decoder.error = "AAC is not supported on this platform"
       } else {
@@ -194,7 +194,6 @@ func openAacDecoder(pathZ: view Buffer(UInt8)) ret AacDecoder {
   )
   decoder.packet = List.create(UInt8, cap: 8192)
   decoder.decoded = List.create(Float, cap: aacMaxPacketFrames * decoder.channels)
-  decoder.decoded.addDefaults(count: aacMaxPacketFrames * decoder.channels)
   decoder.pending = List.create(Float, cap: aacMaxPacketFrames * decoder.channels * 2)
   decoder.startAt(frame: 0)
   ret decoder
@@ -232,9 +231,8 @@ func startAt(this: mod AacDecoder, frame: view Int) {
   this.pending.clear()
   this.pendingAt = 0
   this.drained = false
-  unsafe {
-    rae_audio_aac_reset(converter: this.converter)
-  }
+  this.endTries = 0
+  this.codec.resetAacCodec()
 }
 
 # Decode the next packet (or, after the last, what the decoder still holds)
@@ -257,25 +255,36 @@ func decodeNextPacket(this: mod AacDecoder) ret Bool {
       ret false
     }
     this.nextPacket = this.nextPacket + 1
-  } else {
-    # the end: what is still inside the decoder
-    this.drained = true
   }
-  var got: Int = 0
-  unsafe {
-    got = rae_audio_aac_decode(
-      converter: this.converter
-      packet: this.packet.data
-      size: size
-      out: this.decoded.data
-      maxFrames: aacMaxPacketFrames
-      channels: this.channels
-    )
+  var timeMicroseconds: Int = 0
+  if this.track.timescale > 0 {
+    timeMicroseconds = this.track.sampleTimes.copyAtFallback(
+      index: max(a: 0, b: this.nextPacket - 1)
+      fallback: 0
+    ) * 1000000 / this.track.timescale
   }
-  if got < 0 {
+  this.decoded.clear()
+  let result: AacDecoded = this.codec.decodeAacPacket(
+    packet: this.packet
+    size: size
+    timeMicroseconds: timeMicroseconds
+    into: this.decoded
+  )
+  if result.failed {
     this.drained = true
     ret false
   }
+  if result.ended {
+    this.drained = true
+  } else if size is 0 {
+    # the end is asked for and has not come out yet: ask again next time, a
+    # bounded number of times
+    this.endTries = this.endTries + 1
+    if this.endTries > 200 {
+      this.drained = true
+    }
+  }
+  let got: Int = result.frames
   var first: Int = 0
   if this.skipFrames > 0 {
     first = min(a: got, b: this.skipFrames)
@@ -320,10 +329,8 @@ func readAacFrames(this: mod AacDecoder, into: view Buffer(Float), frames: view 
 }
 
 func closeAacDecoder(this: view AacDecoder) {
+  closeAacCodec(this: this.codec)
   unsafe {
-    if this.converter is not 0 {
-      rae_audio_aac_close(converter: this.converter)
-    }
     if this.file >= 0 {
       rae_audio_file_close(file: this.file)
     }

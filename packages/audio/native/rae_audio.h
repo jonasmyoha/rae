@@ -134,6 +134,32 @@ int64_t rae_audio_device_backend_name(int64_t device, uint8_t* into, int64_t cap
 int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property);
 int64_t rae_audio_session_output_latency_ns(void);
 
+/* AAC on Android: the NDK's AMediaCodec, one codec call each (loaded at run
+ * time; elsewhere create answers 0). create: a decoder for `mime_z`. format:
+ * an AMediaFormat to configure it with (keys and values as the NDK names
+ * them: "mime", "sample-rate", "channel-count", "csd-0", "pcm-encoding").
+ * dequeue_input / queue_input: an input buffer, filled with a packet (flags 4
+ * ends the stream). dequeue_output: an output buffer's index (-1 none yet, -2
+ * the format changed, -3 the buffers changed) with offset, size and flags in
+ * info[0..2]; take_output copies it out and gives it back. output_int: an int
+ * of the output format. */
+int64_t rae_audio_codec_create(uint8_t* mime_z);
+int64_t rae_audio_codec_format_new(void);
+void rae_audio_codec_format_delete(int64_t format);
+void rae_audio_codec_format_set_string(int64_t format, uint8_t* key_z, uint8_t* value_z);
+void rae_audio_codec_format_set_int(int64_t format, uint8_t* key_z, int64_t value);
+void rae_audio_codec_format_set_bytes(int64_t format, uint8_t* key_z, uint8_t* bytes, int64_t count);
+int64_t rae_audio_codec_configure(int64_t codec, int64_t format);
+int64_t rae_audio_codec_start(int64_t codec);
+int64_t rae_audio_codec_flush(int64_t codec);
+void rae_audio_codec_close(int64_t codec);
+int64_t rae_audio_codec_dequeue_input(int64_t codec, int64_t timeout_us);
+int64_t rae_audio_codec_queue_input(int64_t codec, int64_t index, uint8_t* bytes, int64_t count, int64_t time_us,
+                                    int64_t flags);
+int64_t rae_audio_codec_dequeue_output(int64_t codec, int64_t* info, int64_t timeout_us);
+int64_t rae_audio_codec_take_output(int64_t codec, int64_t index, int64_t offset, uint8_t* into, int64_t count);
+int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallback);
+
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at
  * reads up to `count` bytes at `offset` (pread), the count read or -errno. */

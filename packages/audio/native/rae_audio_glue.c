@@ -892,3 +892,209 @@ int64_t rae_audio_remote_enable(int64_t mask) {
 }
 void rae_audio_run_loop_pump(void) {}
 #endif
+
+/* ---- AAC through Android's AMediaCodec ------------------------------------
+ * Platform reason: AAC is the platform's to decode (docs/audio-design.md
+ * §7.3). libmediandk is loaded at run time, as AudioToolbox is on Apple. Each
+ * function makes one codec call (a buffer the codec lends is filled or read
+ * in the same one); which packet goes in, how long to wait, the 16-bit to
+ * Float conversion and the end of the stream are Rae (audio/AacDecoder). */
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#include <pthread.h>
+#include <sys/types.h>
+
+typedef struct {
+  int32_t offset;
+  int32_t size;
+  int64_t presentationTimeUs;
+  uint32_t flags;
+} RaeMediaCodecBufferInfo;
+
+static struct {
+  void* (*createDecoderByType)(const char*);
+  void* (*formatNew)(void);
+  void (*formatDelete)(void*);
+  void (*formatSetString)(void*, const char*, const char*);
+  void (*formatSetInt32)(void*, const char*, int32_t);
+  void (*formatSetBuffer)(void*, const char*, const void*, size_t);
+  int (*formatGetInt32)(void*, const char*, int32_t*);
+  int (*configure)(void*, const void*, void*, void*, uint32_t);
+  int (*start)(void*);
+  int (*stop)(void*);
+  int (*flush)(void*);
+  int (*remove)(void*);
+  ssize_t (*dequeueInputBuffer)(void*, int64_t);
+  uint8_t* (*getInputBuffer)(void*, size_t, size_t*);
+  int (*queueInputBuffer)(void*, size_t, long, size_t, uint64_t, uint32_t);
+  ssize_t (*dequeueOutputBuffer)(void*, RaeMediaCodecBufferInfo*, int64_t);
+  uint8_t* (*getOutputBuffer)(void*, size_t, size_t*);
+  int (*releaseOutputBuffer)(void*, size_t, int);
+  void* (*getOutputFormat)(void*);
+} g_rae_codec;
+static pthread_once_t g_rae_codec_once = PTHREAD_ONCE_INIT;
+
+static void rae_codec_load(void) {
+  void* media = dlopen("libmediandk.so", RTLD_NOW);
+  if (!media) return;
+  g_rae_codec.createDecoderByType = dlsym(media, "AMediaCodec_createDecoderByType");
+  g_rae_codec.formatNew = dlsym(media, "AMediaFormat_new");
+  g_rae_codec.formatDelete = dlsym(media, "AMediaFormat_delete");
+  g_rae_codec.formatSetString = dlsym(media, "AMediaFormat_setString");
+  g_rae_codec.formatSetInt32 = dlsym(media, "AMediaFormat_setInt32");
+  g_rae_codec.formatSetBuffer = dlsym(media, "AMediaFormat_setBuffer");
+  g_rae_codec.formatGetInt32 = dlsym(media, "AMediaFormat_getInt32");
+  g_rae_codec.configure = dlsym(media, "AMediaCodec_configure");
+  g_rae_codec.start = dlsym(media, "AMediaCodec_start");
+  g_rae_codec.stop = dlsym(media, "AMediaCodec_stop");
+  g_rae_codec.flush = dlsym(media, "AMediaCodec_flush");
+  g_rae_codec.remove = dlsym(media, "AMediaCodec_delete");
+  g_rae_codec.dequeueInputBuffer = dlsym(media, "AMediaCodec_dequeueInputBuffer");
+  g_rae_codec.getInputBuffer = dlsym(media, "AMediaCodec_getInputBuffer");
+  g_rae_codec.queueInputBuffer = dlsym(media, "AMediaCodec_queueInputBuffer");
+  g_rae_codec.dequeueOutputBuffer = dlsym(media, "AMediaCodec_dequeueOutputBuffer");
+  g_rae_codec.getOutputBuffer = dlsym(media, "AMediaCodec_getOutputBuffer");
+  g_rae_codec.releaseOutputBuffer = dlsym(media, "AMediaCodec_releaseOutputBuffer");
+  g_rae_codec.getOutputFormat = dlsym(media, "AMediaCodec_getOutputFormat");
+}
+
+static int rae_codec_ready(void) {
+  pthread_once(&g_rae_codec_once, rae_codec_load);
+  return g_rae_codec.createDecoderByType && g_rae_codec.dequeueOutputBuffer && g_rae_codec.getOutputFormat;
+}
+
+int64_t rae_audio_codec_create(uint8_t* mime_z) {
+  if (!rae_codec_ready()) return 0;
+  return (int64_t)(intptr_t)g_rae_codec.createDecoderByType((const char*)mime_z);
+}
+
+int64_t rae_audio_codec_format_new(void) {
+  if (!rae_codec_ready()) return 0;
+  return (int64_t)(intptr_t)g_rae_codec.formatNew();
+}
+
+void rae_audio_codec_format_delete(int64_t format) {
+  if (format) g_rae_codec.formatDelete((void*)(intptr_t)format);
+}
+
+void rae_audio_codec_format_set_string(int64_t format, uint8_t* key_z, uint8_t* value_z) {
+  g_rae_codec.formatSetString((void*)(intptr_t)format, (const char*)key_z, (const char*)value_z);
+}
+
+void rae_audio_codec_format_set_int(int64_t format, uint8_t* key_z, int64_t value) {
+  g_rae_codec.formatSetInt32((void*)(intptr_t)format, (const char*)key_z, (int32_t)value);
+}
+
+void rae_audio_codec_format_set_bytes(int64_t format, uint8_t* key_z, uint8_t* bytes, int64_t count) {
+  g_rae_codec.formatSetBuffer((void*)(intptr_t)format, (const char*)key_z, bytes, (size_t)count);
+}
+
+/* configure as a decoder with `format`; 0 on success, else the media_status_t */
+int64_t rae_audio_codec_configure(int64_t codec, int64_t format) {
+  return g_rae_codec.configure((void*)(intptr_t)codec, (const void*)(intptr_t)format, NULL, NULL, 0);
+}
+
+int64_t rae_audio_codec_start(int64_t codec) {
+  return g_rae_codec.start((void*)(intptr_t)codec);
+}
+
+int64_t rae_audio_codec_flush(int64_t codec) {
+  return codec ? g_rae_codec.flush((void*)(intptr_t)codec) : -1;
+}
+
+void rae_audio_codec_close(int64_t codec) {
+  if (!codec) return;
+  g_rae_codec.stop((void*)(intptr_t)codec);
+  g_rae_codec.remove((void*)(intptr_t)codec);
+}
+
+/* An input buffer's index, waiting up to `timeout_us`; negative when none */
+int64_t rae_audio_codec_dequeue_input(int64_t codec, int64_t timeout_us) {
+  return (int64_t)g_rae_codec.dequeueInputBuffer((void*)(intptr_t)codec, timeout_us);
+}
+
+/* Fill input buffer `index` with `count` bytes and queue it (flags 4: the end
+ * of the stream); 0 on success, -1 when the buffer is too small */
+int64_t rae_audio_codec_queue_input(int64_t codec, int64_t index, uint8_t* bytes, int64_t count, int64_t time_us,
+                                    int64_t flags) {
+  size_t capacity = 0;
+  uint8_t* buffer = g_rae_codec.getInputBuffer((void*)(intptr_t)codec, (size_t)index, &capacity);
+  if (!buffer || (size_t)count > capacity) return -1;
+  if (count > 0) memcpy(buffer, bytes, (size_t)count);
+  return g_rae_codec.queueInputBuffer((void*)(intptr_t)codec, (size_t)index, 0, (size_t)count, (uint64_t)time_us,
+                                      (uint32_t)flags);
+}
+
+/* An output buffer's index, waiting up to `timeout_us`, with its offset, size
+ * and flags in info[0..2]; -1 none yet, -2 the format changed, -3 the
+ * buffers changed */
+int64_t rae_audio_codec_dequeue_output(int64_t codec, int64_t* info, int64_t timeout_us) {
+  RaeMediaCodecBufferInfo buffer = {0, 0, 0, 0};
+  ssize_t index = g_rae_codec.dequeueOutputBuffer((void*)(intptr_t)codec, &buffer, timeout_us);
+  info[0] = buffer.offset;
+  info[1] = buffer.size;
+  info[2] = buffer.flags;
+  return (int64_t)index;
+}
+
+/* Copy `count` bytes from `offset` of output buffer `index` into `into` and
+ * give the buffer back; the bytes copied */
+int64_t rae_audio_codec_take_output(int64_t codec, int64_t index, int64_t offset, uint8_t* into, int64_t count) {
+  size_t capacity = 0;
+  uint8_t* buffer = g_rae_codec.getOutputBuffer((void*)(intptr_t)codec, (size_t)index, &capacity);
+  int64_t copied = 0;
+  if (buffer && offset >= 0 && (size_t)(offset + count) <= capacity) {
+    memcpy(into, buffer + offset, (size_t)count);
+    copied = count;
+  }
+  g_rae_codec.releaseOutputBuffer((void*)(intptr_t)codec, (size_t)index, 0);
+  return copied;
+}
+
+/* An int of the codec's output format (pcm-encoding, channel-count,
+ * sample-rate), or `fallback` */
+int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallback) {
+  void* format = g_rae_codec.getOutputFormat((void*)(intptr_t)codec);
+  int32_t value = (int32_t)fallback;
+  if (format) {
+    if (!g_rae_codec.formatGetInt32(format, (const char*)key_z, &value)) value = (int32_t)fallback;
+    g_rae_codec.formatDelete(format);
+  }
+  return value;
+}
+#else
+int64_t rae_audio_codec_create(uint8_t* mime_z) { (void)mime_z; return 0; }
+int64_t rae_audio_codec_format_new(void) { return 0; }
+void rae_audio_codec_format_delete(int64_t format) { (void)format; }
+void rae_audio_codec_format_set_string(int64_t format, uint8_t* key_z, uint8_t* value_z) {
+  (void)format; (void)key_z; (void)value_z;
+}
+void rae_audio_codec_format_set_int(int64_t format, uint8_t* key_z, int64_t value) {
+  (void)format; (void)key_z; (void)value;
+}
+void rae_audio_codec_format_set_bytes(int64_t format, uint8_t* key_z, uint8_t* bytes, int64_t count) {
+  (void)format; (void)key_z; (void)bytes; (void)count;
+}
+int64_t rae_audio_codec_configure(int64_t codec, int64_t format) { (void)codec; (void)format; return -1; }
+int64_t rae_audio_codec_start(int64_t codec) { (void)codec; return -1; }
+int64_t rae_audio_codec_flush(int64_t codec) { (void)codec; return -1; }
+void rae_audio_codec_close(int64_t codec) { (void)codec; }
+int64_t rae_audio_codec_dequeue_input(int64_t codec, int64_t timeout_us) { (void)codec; (void)timeout_us; return -1; }
+int64_t rae_audio_codec_queue_input(int64_t codec, int64_t index, uint8_t* bytes, int64_t count, int64_t time_us,
+                                    int64_t flags) {
+  (void)codec; (void)index; (void)bytes; (void)count; (void)time_us; (void)flags;
+  return -1;
+}
+int64_t rae_audio_codec_dequeue_output(int64_t codec, int64_t* info, int64_t timeout_us) {
+  (void)codec; (void)info; (void)timeout_us;
+  return -1;
+}
+int64_t rae_audio_codec_take_output(int64_t codec, int64_t index, int64_t offset, uint8_t* into, int64_t count) {
+  (void)codec; (void)index; (void)offset; (void)into; (void)count;
+  return 0;
+}
+int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallback) {
+  (void)codec; (void)key_z;
+  return fallback;
+}
+#endif

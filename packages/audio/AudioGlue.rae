@@ -184,3 +184,73 @@ func rae_audio_device_backend_name(
   into: Buffer(UInt8)
   capacity: Int
 ) unsafe extern("rae_audio_device_backend_name") ret Int
+
+func rae_audio_codec_create(mimeZ: Buffer(UInt8)) unsafe extern("rae_audio_codec_create") ret Int
+
+func rae_audio_codec_format_new() unsafe extern("rae_audio_codec_format_new") ret Int
+
+func rae_audio_codec_format_delete(format: Int) unsafe extern("rae_audio_codec_format_delete")
+
+func rae_audio_codec_format_set_string(
+  format: Int
+  keyZ: Buffer(UInt8)
+  valueZ: Buffer(UInt8)
+) unsafe extern("rae_audio_codec_format_set_string")
+
+func rae_audio_codec_format_set_int(
+  format: Int
+  keyZ: Buffer(UInt8)
+  value: Int
+) unsafe extern("rae_audio_codec_format_set_int")
+
+func rae_audio_codec_format_set_bytes(
+  format: Int
+  keyZ: Buffer(UInt8)
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_codec_format_set_bytes")
+
+func rae_audio_codec_configure(
+  codec: Int
+  format: Int
+) unsafe extern("rae_audio_codec_configure") ret Int
+
+func rae_audio_codec_start(codec: Int) unsafe extern("rae_audio_codec_start") ret Int
+
+func rae_audio_codec_flush(codec: Int) unsafe extern("rae_audio_codec_flush") ret Int
+
+func rae_audio_codec_close(codec: Int) unsafe extern("rae_audio_codec_close")
+
+func rae_audio_codec_dequeue_input(
+  codec: Int
+  timeoutUs: Int
+) unsafe extern("rae_audio_codec_dequeue_input") ret Int
+
+func rae_audio_codec_queue_input(
+  codec: Int
+  index: Int
+  bytes: Buffer(UInt8)
+  count: Int
+  timeUs: Int
+  flags: Int
+) unsafe extern("rae_audio_codec_queue_input") ret Int
+
+func rae_audio_codec_dequeue_output(
+  codec: Int
+  info: Buffer(Int)
+  timeoutUs: Int
+) unsafe extern("rae_audio_codec_dequeue_output") ret Int
+
+func rae_audio_codec_take_output(
+  codec: Int
+  index: Int
+  offset: Int
+  into: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_codec_take_output") ret Int
+
+func rae_audio_codec_output_int(
+  codec: Int
+  keyZ: Buffer(UInt8)
+  fallback: Int
+) unsafe extern("rae_audio_codec_output_int") ret Int
