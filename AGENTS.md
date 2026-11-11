@@ -180,8 +180,9 @@ These instructions define **how Codex should work**, communicate progress, and i
   Keywords are a small fixed vocabulary that every reader learns once, and Rae
   already has short ones (`ret`, `mod`, `func`, `opt`, `var`, `const`, `enum`,
   `priv`, `pub`, `shl`, `shr`), so a new keyword may be short too. A keyword of
-  more than one word is camelCase (`taskScope`, `parallelLoop`, `mainLoop`),
-  never all lowercase (`taskscope`) or `snake_case`.
+  more than one word is camelCase (`taskScope`, `parallelLoop`, `mainLoop`,
+  `cExport`), never all lowercase or `snake_case` (`cheader` is an older
+  lowercase one; do not copy its form).
 
 ### NO type inference — every binding is written with its type (by design):
 - Rae has **no type inference and it is strictly FORBIDDEN to add it.** Types are
