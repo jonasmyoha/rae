@@ -104,6 +104,25 @@ int64_t rae_audio_read_file(uint8_t* path_z, uint8_t* into, int64_t count);
 /* Write `count` bytes to a file (the capture WAV). 1 on success. */
 int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count);
 
+/* Now Playing (MPNowPlayingInfoCenter) and the remote commands
+ * (MPRemoteCommandCenter), on macOS and iOS; elsewhere set / enable answer 0.
+ * set: title, artist, album and an artwork image file (empty: left out),
+ * duration (negative: left out) and position in seconds, rate 0 paused or 1
+ * playing. describe: "title|artist|position|rate" of what is shown. enable:
+ * the commands in `mask` (1 play, 2 pause, 4 toggle, 8 next, 16 previous,
+ * 32 change position). poll: the next command as value * 16 + kind (kind as
+ * the mask bit's index + 1; value the position in milliseconds for a change of
+ * position), or -1. inject: put one in the queue (tests). run_loop_pump: run
+ * the main run loop once without waiting (a program with no UI loop). */
+int64_t rae_audio_now_playing_set(uint8_t* title_z, uint8_t* artist_z, uint8_t* album_z,
+                                  uint8_t* artwork_path_z, double duration, double position, double rate);
+int64_t rae_audio_now_playing_describe(uint8_t* into, int64_t capacity);
+void rae_audio_now_playing_clear(void);
+int64_t rae_audio_remote_enable(int64_t mask);
+int64_t rae_audio_remote_poll(void);
+void rae_audio_remote_inject(int64_t kind, int64_t value);
+void rae_audio_run_loop_pump(void);
+
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at
  * reads up to `count` bytes at `offset` (pread), the count read or -errno. */

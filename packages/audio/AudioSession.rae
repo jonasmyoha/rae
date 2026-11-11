@@ -84,6 +84,11 @@ enum AudioSessionEventKind {
   routeChanged
   # the system's media services restarted
   mediaServicesReset
+  # the app went to the background (iOS); its sound goes on with the `audio`
+  # background mode and a playing session (audio/NowPlaying)
+  enteredBackground
+  # it comes back to the foreground
+  enteredForeground
 }
 
 type AudioSessionEvent {
@@ -105,6 +110,10 @@ func decodeSessionEvent(code: view Int) ret AudioSessionEvent {
     kind = AudioSessionEventKind.routeLost
   } else if kindNumber is 4 {
     kind = AudioSessionEventKind.routeChanged
+  } else if kindNumber is 6 {
+    kind = AudioSessionEventKind.enteredBackground
+  } else if kindNumber is 7 {
+    kind = AudioSessionEventKind.enteredForeground
   }
   ret AudioSessionEvent { kind: kind, shouldResume: kindNumber is 2 and value is 1, reason: value }
 }
@@ -122,6 +131,12 @@ func sessionEventCode(kind: view AudioSessionEventKind, value: view Int) ret Int
   }
   if kind is AudioSessionEventKind.routeChanged {
     ret 64 + value
+  }
+  if kind is AudioSessionEventKind.enteredBackground {
+    ret 96 + value
+  }
+  if kind is AudioSessionEventKind.enteredForeground {
+    ret 112 + value
   }
   ret 80 + value
 }

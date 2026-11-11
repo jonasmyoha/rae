@@ -205,6 +205,14 @@ if [ -n "$focus_usage" ]; then
   extra_plist="$extra_plist<key>NSFocusStatusUsageDescription</key><string>$focus_usage</string>"
 fi
 
+# Sound that goes on in the background (packages/audio's streams with the
+# `music` intent, Now Playing and the lock screen's buttons, docs/audio-design.md
+# §9.1): RAE_IOS_BACKGROUND_AUDIO=1 adds the `audio` background mode. Without
+# it iOS stops the app's sound when it leaves the foreground.
+if [ "${RAE_IOS_BACKGROUND_AUDIO:-}" = "1" ]; then
+  extra_plist="$extra_plist<key>UIBackgroundModes</key><array><string>audio</string></array>"
+fi
+
 # Notifications at a later time (lib/LocalNotification): an app whose C includes the shim
 # links UserNotifications. iOS needs no purpose string for them.
 notification_link=""

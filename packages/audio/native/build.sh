@@ -7,8 +7,9 @@
 #   - miniaudio (native/miniaudio/, public domain or MIT-0, its LICENSE beside it) is in this
 #     repository; only its device layer is built (rae_audio_glue.c turns the rest off).
 #   - Compiles rae_audio_glue.c, which includes miniaudio's implementation:
-#       lib/libraeaudio.a   native (macOS: miniaudio loads Core Audio at run time, so a
-#                           program links no framework for it)
+#       lib/libraeaudio.a   native (macOS: miniaudio loads Core Audio at run time, and the
+#                           glue AudioToolbox and MediaPlayer, so a program links no
+#                           framework for them)
 #     plus include/rae_audio.h, src/ (the sources a device build compiles into an app),
 #     DEVICE_DEFINES (their options) and VERSION.
 set -euo pipefail
@@ -27,7 +28,11 @@ cp "$HERE/miniaudio/miniaudio.h" "$HERE/miniaudio/stb_vorbis.c" "$INSTALL/src/mi
 echo "" > "$INSTALL/DEVICE_DEFINES"
 
 objs="$(mktemp -d)"
-cc -O2 -DNDEBUG -I"$HERE" -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_glue.o"
+# macOS: Objective-C too, for Now Playing and the remote commands (MediaPlayer,
+# loaded at run time; Foundation, which every Rae program on macOS links)
+language=""
+if [ "$(uname -s)" = "Darwin" ]; then language="-x objective-c"; fi
+cc $language -O2 -DNDEBUG -I"$HERE" -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_glue.o"
 ar rcs "$INSTALL/lib/libraeaudio.a" "$objs"/*.o
 rm -rf "${objs:?}"
 grep -m1 'MA_VERSION_MINOR\|miniaudio - v' "$HERE/miniaudio/miniaudio.h" > "$INSTALL/VERSION" || true

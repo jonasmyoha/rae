@@ -372,6 +372,18 @@ int64_t rae_audio_session_observe(void) {
       (void)note;
       rae_audio_session_inject(5, 0);
     }];
+    /* the app went to the background / came back (UIKit's notifications,
+     * named by their values so the glue needs no UIKit symbol) */
+    [center addObserverForName:@"UIApplicationDidEnterBackgroundNotification" object:nil queue:main
+                    usingBlock:^(NSNotification* note) {
+      (void)note;
+      rae_audio_session_inject(6, 0);
+    }];
+    [center addObserverForName:@"UIApplicationWillEnterForegroundNotification" object:nil queue:main
+                    usingBlock:^(NSNotification* note) {
+      (void)note;
+      rae_audio_session_inject(7, 0);
+    }];
   }
   return 1;
 }
@@ -614,4 +626,211 @@ int64_t rae_audio_aac_decode(int64_t converter, uint8_t* packet, int64_t size, f
 }
 void rae_audio_aac_reset(int64_t converter) { (void)converter; }
 void rae_audio_aac_close(int64_t converter) { (void)converter; }
+#endif
+
+/* ---- Now Playing and the remote commands (docs/audio-design.md §9.1) -------
+ * Platform reason: MPNowPlayingInfoCenter (what the lock screen, Control
+ * Center and the media keys show) and MPRemoteCommandCenter (their buttons).
+ * MediaPlayer is loaded at run time and its classes found by name, its key
+ * constants by dlsym, so a program that never shows Now Playing links nothing
+ * new. The commands go into a queue of their own, like the session's events:
+ * the handlers run on the main queue, and the main thread reads them. Which
+ * command does what (pause the stream, go to the next song) is the program's,
+ * in Rae (audio/NowPlaying). */
+#define RAE_AUDIO_REMOTE_CAPACITY 64
+static int64_t g_rae_audio_remote[RAE_AUDIO_REMOTE_CAPACITY];
+static int64_t g_rae_audio_remote_written;
+static int64_t g_rae_audio_remote_read;
+
+/* kind: 1 play, 2 pause, 3 toggle, 4 next, 5 previous, 6 change position;
+ * value: the position in milliseconds for 6 */
+void rae_audio_remote_inject(int64_t kind, int64_t value) {
+  int64_t written = __atomic_load_n(&g_rae_audio_remote_written, __ATOMIC_RELAXED);
+  int64_t read = __atomic_load_n(&g_rae_audio_remote_read, __ATOMIC_ACQUIRE);
+  if (written - read >= RAE_AUDIO_REMOTE_CAPACITY) return;
+  g_rae_audio_remote[written % RAE_AUDIO_REMOTE_CAPACITY] = value * 16 + kind;
+  __atomic_store_n(&g_rae_audio_remote_written, written + 1, __ATOMIC_RELEASE);
+}
+
+int64_t rae_audio_remote_poll(void) {
+  int64_t read = __atomic_load_n(&g_rae_audio_remote_read, __ATOMIC_RELAXED);
+  int64_t written = __atomic_load_n(&g_rae_audio_remote_written, __ATOMIC_ACQUIRE);
+  if (read == written) return -1;
+  int64_t event = g_rae_audio_remote[read % RAE_AUDIO_REMOTE_CAPACITY];
+  __atomic_store_n(&g_rae_audio_remote_read, read + 1, __ATOMIC_RELEASE);
+  return event;
+}
+
+#if defined(__APPLE__) && defined(__OBJC__)
+#include <dlfcn.h>
+#include <objc/message.h>
+#import <Foundation/Foundation.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+static void* rae_audio_media_player(void) {
+  static void* media = NULL;
+  if (!media) media = dlopen("/System/Library/Frameworks/MediaPlayer.framework/MediaPlayer", RTLD_LAZY);
+  return media;
+}
+
+/* A MediaPlayer key constant by name (MPMediaItemPropertyTitle, ...) */
+static NSString* rae_audio_media_key(const char* name) {
+  void* media = rae_audio_media_player();
+  NSString* __unsafe_unretained* key = media ? (NSString* __unsafe_unretained*)dlsym(media, name) : NULL;
+  return key ? *key : nil;
+}
+
+static id rae_audio_now_playing_center(void) {
+  if (!rae_audio_media_player()) return nil;
+  Class center = NSClassFromString(@"MPNowPlayingInfoCenter");
+  return center ? ((id (*)(id, SEL))objc_msgSend)(center, sel_registerName("defaultCenter")) : nil;
+}
+
+/* An image from a file, as the platform's image type (UIImage / NSImage) */
+static id rae_audio_image_from_file(NSString* path) {
+#if defined(MA_APPLE_MOBILE)
+  Class image = NSClassFromString(@"UIImage");
+  return image ? ((id (*)(id, SEL, id))objc_msgSend)(image, sel_registerName("imageWithContentsOfFile:"), path)
+               : nil;
+#else
+  static void* appKit = NULL;
+  if (!appKit) appKit = dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", RTLD_LAZY);
+  Class image = NSClassFromString(@"NSImage");
+  if (!image) return nil;
+  id made = ((id (*)(id, SEL))objc_msgSend)(image, sel_registerName("alloc"));
+  made = ((id (*)(id, SEL, id))objc_msgSend)(made, sel_registerName("initWithContentsOfFile:"), path);
+  return made ? [made autorelease] : nil;
+#endif
+}
+
+/* Show what plays: rate 0 paused, 1 playing; duration and position in
+ * seconds (a negative duration is left out); empty strings are left out.
+ * One call: setNowPlayingInfo (and playbackState on macOS, which shows that
+ * instead of the rate). 1 when MediaPlayer is there. */
+int64_t rae_audio_now_playing_set(uint8_t* title_z, uint8_t* artist_z, uint8_t* album_z,
+                                  uint8_t* artwork_path_z, double duration, double position, double rate) {
+  @autoreleasepool {
+    id center = rae_audio_now_playing_center();
+    if (!center) return 0;
+    NSMutableDictionary* info = [NSMutableDictionary dictionary];
+    NSString* title = [NSString stringWithUTF8String:(const char*)title_z];
+    NSString* artist = [NSString stringWithUTF8String:(const char*)artist_z];
+    NSString* album = [NSString stringWithUTF8String:(const char*)album_z];
+    NSString* artworkPath = [NSString stringWithUTF8String:(const char*)artwork_path_z];
+    NSString* key = nil;
+    if (title.length && (key = rae_audio_media_key("MPMediaItemPropertyTitle"))) info[key] = title;
+    if (artist.length && (key = rae_audio_media_key("MPMediaItemPropertyArtist"))) info[key] = artist;
+    if (album.length && (key = rae_audio_media_key("MPMediaItemPropertyAlbumTitle"))) info[key] = album;
+    if (duration >= 0 && (key = rae_audio_media_key("MPMediaItemPropertyPlaybackDuration"))) info[key] = @(duration);
+    if ((key = rae_audio_media_key("MPNowPlayingInfoPropertyElapsedPlaybackTime"))) info[key] = @(position);
+    if ((key = rae_audio_media_key("MPNowPlayingInfoPropertyPlaybackRate"))) info[key] = @(rate);
+    if ((key = rae_audio_media_key("MPNowPlayingInfoPropertyDefaultPlaybackRate"))) info[key] = @(1.0);
+    if ((key = rae_audio_media_key("MPNowPlayingInfoPropertyMediaType"))) info[key] = @(1); /* audio */
+    id image = artworkPath.length ? rae_audio_image_from_file(artworkPath) : nil;
+    Class artworkClass = NSClassFromString(@"MPMediaItemArtwork");
+    if (image && artworkClass && (key = rae_audio_media_key("MPMediaItemPropertyArtwork"))) {
+      CGSize size = ((CGSize (*)(id, SEL))objc_msgSend)(image, sel_registerName("size"));
+      id (^handler)(CGSize) = ^id(CGSize asked) { (void)asked; return image; };
+      id artwork = ((id (*)(id, SEL))objc_msgSend)(artworkClass, sel_registerName("alloc"));
+      artwork = ((id (*)(id, SEL, CGSize, id))objc_msgSend)(artwork, sel_registerName("initWithBoundsSize:requestHandler:"),
+                                                            size, handler);
+      if (artwork) info[key] = [artwork autorelease];
+    }
+    ((void (*)(id, SEL, id))objc_msgSend)(center, sel_registerName("setNowPlayingInfo:"), info);
+#if !defined(MA_APPLE_MOBILE)
+    /* macOS shows the playback state, not the rate: 1 playing, 2 paused */
+    ((void (*)(id, SEL, NSUInteger))objc_msgSend)(center, sel_registerName("setPlaybackState:"),
+                                                 (NSUInteger)(rate > 0 ? 1 : 2));
+#endif
+    return 1;
+  }
+}
+
+/* What Now Playing shows now, as text (for checks): "title|artist|position|rate" */
+int64_t rae_audio_now_playing_describe(uint8_t* into, int64_t capacity) {
+  @autoreleasepool {
+    id center = rae_audio_now_playing_center();
+    if (!center) return 0;
+    NSDictionary* info = ((id (*)(id, SEL))objc_msgSend)(center, sel_registerName("nowPlayingInfo"));
+    NSString* text = [NSString stringWithFormat:@"%@|%@|%.2f|%.1f",
+        info[rae_audio_media_key("MPMediaItemPropertyTitle")] ?: @"",
+        info[rae_audio_media_key("MPMediaItemPropertyArtist")] ?: @"",
+        [info[rae_audio_media_key("MPNowPlayingInfoPropertyElapsedPlaybackTime")] doubleValue],
+        [info[rae_audio_media_key("MPNowPlayingInfoPropertyPlaybackRate")] doubleValue]];
+    const char* utf8 = [text UTF8String];
+    int64_t length = (int64_t)strlen(utf8);
+    if (length > capacity) length = capacity;
+    memcpy(into, utf8, (size_t)length);
+    return length;
+  }
+}
+
+void rae_audio_now_playing_clear(void) {
+  @autoreleasepool {
+    id center = rae_audio_now_playing_center();
+    if (center) ((void (*)(id, SEL, id))objc_msgSend)(center, sel_registerName("setNowPlayingInfo:"), nil);
+  }
+}
+
+static void rae_audio_remote_target(id command, int64_t kind) {
+  ((void (*)(id, SEL, BOOL))objc_msgSend)(command, sel_registerName("setEnabled:"), YES);
+  NSInteger (^handler)(id) = ^NSInteger(id event) {
+    int64_t value = 0;
+    if (kind == 6) {
+      double position = ((double (*)(id, SEL))objc_msgSend)(event, sel_registerName("positionTime"));
+      value = (int64_t)(position * 1000.0 + 0.5);
+    }
+    rae_audio_remote_inject(kind, value);
+    return 0; /* MPRemoteCommandHandlerStatusSuccess */
+  };
+  ((id (*)(id, SEL, id))objc_msgSend)(command, sel_registerName("addTargetWithHandler:"), handler);
+}
+
+static int g_rae_audio_remote_enabled;
+
+/* Turn on the commands in `mask` (1 play, 2 pause, 4 toggle, 8 next,
+ * 16 previous, 32 change position); once per program. 1 when MediaPlayer is
+ * there. */
+int64_t rae_audio_remote_enable(int64_t mask) {
+  @autoreleasepool {
+    if (!rae_audio_media_player()) return 0;
+    Class centerClass = NSClassFromString(@"MPRemoteCommandCenter");
+    if (!centerClass) return 0;
+    if (g_rae_audio_remote_enabled) return 1;
+    g_rae_audio_remote_enabled = 1;
+    id center = ((id (*)(id, SEL))objc_msgSend)(centerClass, sel_registerName("sharedCommandCenter"));
+    const char* names[6] = {"playCommand", "pauseCommand", "togglePlayPauseCommand", "nextTrackCommand",
+                            "previousTrackCommand", "changePlaybackPositionCommand"};
+    for (int64_t i = 0; i < 6; i++) {
+      if (!(mask & (1 << i))) continue;
+      id command = ((id (*)(id, SEL))objc_msgSend)(center, sel_registerName(names[i]));
+      if (command) rae_audio_remote_target(command, i + 1);
+    }
+    return 1;
+  }
+}
+
+/* Run the main thread's run loop once without waiting, so the remote
+ * commands' handlers (on the main queue) run in a program with no UI loop
+ * of its own (a command-line player, a check). An app's loop does this. */
+void rae_audio_run_loop_pump(void) {
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true);
+}
+#else
+int64_t rae_audio_now_playing_set(uint8_t* title_z, uint8_t* artist_z, uint8_t* album_z,
+                                  uint8_t* artwork_path_z, double duration, double position, double rate) {
+  (void)title_z; (void)artist_z; (void)album_z; (void)artwork_path_z; (void)duration; (void)position;
+  (void)rate;
+  return 0;
+}
+int64_t rae_audio_now_playing_describe(uint8_t* into, int64_t capacity) {
+  (void)into; (void)capacity;
+  return 0;
+}
+void rae_audio_now_playing_clear(void) {}
+int64_t rae_audio_remote_enable(int64_t mask) {
+  (void)mask;
+  return 0;
+}
+void rae_audio_run_loop_pump(void) {}
 #endif

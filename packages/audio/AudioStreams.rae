@@ -170,10 +170,75 @@ func queueNext(this: mod AudioEngine, voiceId: view VoiceId, path: view String) 
 
 func pauseVoice(this: mod AudioEngine, voiceId: view VoiceId) {
   this.sendVoiceCommand(kind: AudioCommandKind.pauseVoice, voiceId: voiceId, value: 0.0)
+  this.markStreamPaused(voiceId: voiceId, paused: true)
 }
 
 func resumeVoice(this: mod AudioEngine, voiceId: view VoiceId) {
   this.sendVoiceCommand(kind: AudioCommandKind.resumeVoice, voiceId: voiceId, value: 0.0)
+  this.markStreamPaused(voiceId: voiceId, paused: false)
+}
+
+func markStreamPaused(this: mod AudioEngine, voiceId: view VoiceId, paused: view Bool) {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: mod StreamRecord = this.streams.modAt(index: index) {
+    record.paused = paused
+  }
+}
+
+# Whether the stream is paused (pauseVoice, not yet resumeVoice)
+func streamIsPaused(this: view AudioEngine, voiceId: view VoiceId) ret Bool {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
+    ret record.paused
+  }
+  ret false
+}
+
+# Which file of the stream is heard now: 0 the first, 1 the one queued after
+# it, ...; from the seconds played and each file's length (a file whose
+# length is unknown is taken to last to the end)
+func streamFileIndex(this: view AudioEngine, voiceId: view VoiceId) ret Int {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
+    var left: Float64 = this.positionSeconds(voiceId: voiceId)
+    loop var file: Int = 0, file + 1 < record.fileSeconds.length(), ++file {
+      let length: Float64 = record.fileSeconds.copyAtFallback(index: file, fallback: -1.0)
+      if length < 0.0 or left < length {
+        ret file
+      }
+      left = left - length
+    }
+    ret max(a: 0, b: record.fileSeconds.length() - 1)
+  }
+  ret 0
+}
+
+# Seconds into the file that is heard now (streamFileIndex)
+func streamFilePositionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  var position: Float64 = this.positionSeconds(voiceId: voiceId)
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
+    let file: Int = this.streamFileIndex(voiceId: voiceId)
+    loop var i: Int = 0, i < file, ++i {
+      position = position - record.fileSeconds.copyAtFallback(index: i, fallback: 0.0)
+    }
+  }
+  if position < 0.0 {
+    ret 0.0
+  }
+  ret position
+}
+
+# The length of the file heard now, or -1 when its format does not say
+func streamFileDurationSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
+  let index: Int = this.streamIndexOf(voiceId: voiceId)
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
+    ret record.fileSeconds.copyAtFallback(
+      index: this.streamFileIndex(voiceId: voiceId)
+      fallback: -1.0
+    )
+  }
+  ret -1.0
 }
 
 # Seconds played since the stream started (through the files queued after the
