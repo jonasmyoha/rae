@@ -56,4 +56,9 @@ void rae_ext_rae_signal_wait(int64_t signal);
 rae_Bool rae_ext_rae_signal_try_wait(int64_t signal);
 void rae_ext_rae_signal_free(int64_t signal);
 
+/* The real-time check and mark (runtime_realtime.c, lib/Realtime.rae). */
+void rae_ext_Realtime_markThread(rae_Bool realtime);
+rae_Bool rae_ext_Realtime_threadIsMarked(void);
+rae_Bool rae_ext_Realtime_reportWanted(void);
+
 #endif

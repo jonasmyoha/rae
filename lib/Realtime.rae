@@ -1,0 +1,198 @@
+# Realtime — mark a real-time thread, and record how long its calls take
+# (docs/realtime-language-design.md §5.3, §7).
+#
+#     markRealtimeThread()                    # on the real-time thread, before its work
+#     var recorder: RealtimeRecorder = createRealtimeRecorder(name: "audio", periodNanoseconds:
+#     2666667)
+#     loop running {
+#       recorder.callStarted()
+#       renderBlock(...)                       # the real-time work
+#       recorder.callEnded()
+#     }
+#     unmarkRealtimeThread()
+#     recorder.report()                       # prints only with RAE_REALTIME_REPORT=1
+#
+# The check. With RAE_REALTIME_CHECK=1, every allocation, free, lock, log, task
+# start or join that the runtime sees on a marked thread is counted, and at exit
+# the program prints one line per runtime entry point and exits with code 70, so
+# the test that ran it fails. Without the variable a mark costs nothing but one
+# thread-local store, and the runtime's guards one thread-local load. The mark
+# belongs to the thread: mark a thread from its own code, and unmark it before
+# it does ordinary work again. It does not see C that bypasses the runtime (a
+# library's own malloc); RealtimeSanitizer does (§5.2).
+#
+# The recorder. One per real-time loop, owned by the code that runs it (no
+# global table): `callStarted` and `callEnded` read the monotonic clock and add
+# the call's time to a fixed histogram, the maximum and the total. Neither
+# allocates, so both may run on the marked thread. Times are wall-clock time of
+# the call, which is what a deadline cares about: time the thread was
+# preempted counts too. `recordCall` adds a duration measured elsewhere (and
+# lets a test feed known durations). The histogram has four steps per doubling,
+# so a percentile is exact to within 25 %: the report gives the upper edge of
+# its step.
+import Math
+
+func rae_ext_Realtime_markThread(realtime: Bool) unsafe extern
+
+func rae_ext_Realtime_threadIsMarked() unsafe extern ret Bool
+
+func rae_ext_Realtime_reportWanted() unsafe extern ret Bool
+
+# Whether RAE_REALTIME_REPORT asks for the recorders' reports.
+func realtimeReportWanted() ret Bool {
+  unsafe {
+    ret rae_ext_Realtime_reportWanted()
+  }
+}
+
+# Four steps per doubling up to 2^63 ns.
+const realtimeBucketCount: Int = 248
+
+func markRealtimeThread() {
+  unsafe {
+    rae_ext_Realtime_markThread(realtime: true)
+  }
+}
+
+func unmarkRealtimeThread() {
+  unsafe {
+    rae_ext_Realtime_markThread(realtime: false)
+  }
+}
+
+func realtimeThreadIsMarked() ret Bool {
+  unsafe {
+    ret rae_ext_Realtime_threadIsMarked()
+  }
+}
+
+type RealtimeRecorder {
+  name: String
+  # The time the calls must fit in (an audio block's length); 0 for none.
+  periodNanoseconds: Int
+  buckets: List(Int)
+  calls: Int
+  totalNanoseconds: Int
+  maximumNanoseconds: Int
+  startedAt: Int
+}
+
+func createRealtimeRecorder(name: own String, periodNanoseconds: view Int) ret RealtimeRecorder {
+  var buckets: List(Int) = createList(Int, cap: realtimeBucketCount)
+  buckets.addDefaults(count: realtimeBucketCount)
+  ret RealtimeRecorder {
+    name: name
+    periodNanoseconds: periodNanoseconds
+    buckets: buckets
+    calls: 0
+    totalNanoseconds: 0
+    maximumNanoseconds: 0
+    startedAt: 0
+  }
+}
+
+func callStarted(this: mod RealtimeRecorder) {
+  this.startedAt = nowNs()
+}
+
+func callEnded(this: mod RealtimeRecorder) {
+  this.recordCall(nanoseconds: nowNs() - this.startedAt)
+}
+
+func recordCall(this: mod RealtimeRecorder, nanoseconds: view Int) {
+  var duration: Int = nanoseconds
+  if duration < 0 {
+    duration = 0
+  }
+  let bucket: Int = realtimeBucketOf(nanoseconds: duration)
+  this.buckets.set(
+    index: bucket
+    value: this.buckets.copyAtFallback(index: bucket, fallback: 0) + 1
+  )
+  this.calls = this.calls + 1
+  this.totalNanoseconds = this.totalNanoseconds + duration
+  if duration > this.maximumNanoseconds {
+    this.maximumNanoseconds = duration
+  }
+}
+
+# The step a duration falls in: 0-3 ns one step each, then four per doubling.
+func realtimeBucketOf(nanoseconds: view Int) ret Int {
+  if nanoseconds < 4 {
+    ret nanoseconds
+  }
+  let octave: Int = 63 - leadingZeros(x: nanoseconds)
+  ret 4 * (octave - 1) + (nanoseconds shr (octave - 2)) - 4
+}
+
+# The largest duration in a step.
+func realtimeBucketUpperEdge(bucket: view Int) ret Int {
+  if bucket < 4 {
+    ret bucket
+  }
+  let octave: Int = bucket / 4 + 1
+  let step: Int = bucket % 4
+  ret ((5 + step) shl (octave - 2)) - 1
+}
+
+# The upper edge of the step holding the call at `fraction` (perMille / 1000)
+# of all calls, slowest last: 999 gives the 99.9th percentile.
+func percentileNanoseconds(this: view RealtimeRecorder, perMille: view Int) ret Int {
+  if this.calls is 0 {
+    ret 0
+  }
+  let wanted: Int = (this.calls * perMille + 999) / 1000
+  var seen: Int = 0
+  var bucket: Int = 0
+  loop bucket < realtimeBucketCount {
+    seen = seen + this.buckets.copyAtFallback(index: bucket, fallback: 0)
+    if seen >= wanted {
+      ret min(a: realtimeBucketUpperEdge(bucket: bucket), b: this.maximumNanoseconds)
+    }
+    bucket = bucket + 1
+  }
+  ret this.maximumNanoseconds
+}
+
+# "12.3 µs" from nanoseconds, one decimal, rounded down.
+func realtimeMicroseconds(nanoseconds: view Int) ret String {
+  ret "{nanoseconds / 1000}.{nanoseconds % 1000 / 100} µs"
+}
+
+# Print the report when RAE_REALTIME_REPORT=1. Call it off the real-time thread
+# (it builds text), for example when the loop has ended.
+func report(this: view RealtimeRecorder) {
+  if not realtimeReportWanted() {
+    ret
+  }
+  if this.calls is 0 {
+    log("[realtime] {this.name}: no calls")
+    ret
+  }
+  let mean: Int = this.totalNanoseconds / this.calls
+  let slowest: String = realtimeMicroseconds(nanoseconds: this.maximumNanoseconds)
+  let percentile: String = realtimeMicroseconds(
+    nanoseconds: this.percentileNanoseconds(perMille: 999)
+  )
+  log(
+    "[realtime] {this.name}: {this.calls} calls, mean {realtimeMicroseconds(nanoseconds: mean)}, p99.9 <= {percentile}, max {slowest}"
+  )
+  if this.periodNanoseconds > 0 {
+    let share: Int = this.maximumNanoseconds * 1000 / this.periodNanoseconds
+    log(
+      "[realtime] {this.name}: period {realtimeMicroseconds(nanoseconds: this.periodNanoseconds)}, the slowest call used {share / 10}.{share % 10}% of it"
+    )
+  }
+  var bucket: Int = 0
+  loop bucket < realtimeBucketCount {
+    let count: Int = this.buckets.copyAtFallback(index: bucket, fallback: 0)
+    if count > 0 {
+      log(
+        "[realtime] {this.name}: up to {realtimeMicroseconds(
+          nanoseconds: realtimeBucketUpperEdge(bucket: bucket)
+        )}: {count}"
+      )
+    }
+    bucket = bucket + 1
+  }
+}

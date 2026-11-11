@@ -295,6 +295,22 @@ lock and `log` entry points). It works with any compiler and in release builds,
 and covers the paths RTSan does not see (Rae's own string pool, buffer
 allocator). It is the first step because it needs no language change.
 
+**Landed (2026-11-11):** `lib/Realtime.rae` (`markRealtimeThread`,
+`unmarkRealtimeThread`, `realtimeThreadIsMarked`) over
+`compiler/runtime/runtime_realtime.c`. The mark is a `_Thread_local` flag. The
+guard `RAE_REALTIME_GUARD` sits in `rae_ext_rae_buf_alloc` / `free` /
+`resize`, `rae_mem_str_tag` / `untag` (every String body, named by its site:
+`interp`, `int_to_str`, ...), the `RAE_LOCK` macro, a Channel's lock,
+`rae_ext_rae_log_write`, and the task entry points (`rae_task_new`,
+`rae_task_await`, `rae_task_drop`, `rae_parallel_for`). A hit claims a slot of
+a fixed table with a compare-and-swap, so recording never allocates or locks.
+The first mark arms an exit handler that prints one line per entry point
+(`rae_ext_rae_buf_alloc (a Buffer allocation): 3`) and ends the process with
+code 70; `rae run` reports that as a failed run. The bookkeeping locks of
+`RAE_MEM_STATS` and the buffer records are not counted: the allocation they
+belong to is. Fixtures 1398 (caught), 1399 (a clean real-time loop with the
+ring, atomics, signal and recorder).
+
 | check | sees | when | needs |
 |---|---|---|---|
 | Rae `realtime` analysis | all Rae code | build | the keyword |
@@ -424,6 +440,20 @@ enough. The runtime records, per real-time root:
 scene's worst block uses more than a set share (for example 50 %) of its period
 on the test machine. The devtools page can show the live histogram. Video's
 frame path uses the same recorder against a 16.7 ms period.
+
+**Landed (2026-11-11), differing in two points:** the recorder is a Rae value,
+`RealtimeRecorder` in `lib/Realtime.rae`, owned by the loop that runs the
+real-time code (no runtime table of recorders, no global), and it reads
+`nowNs()` (the monotonic clock; on Apple and Linux a user-space read) rather
+than CPU cycles, so a preempted call counts its full wall time, which is what a
+deadline sees. `callStarted` / `callEnded` time a call, `recordCall` adds a
+duration measured elsewhere, and none of them allocates. The histogram has
+four steps per doubling (248 steps up to 2^63 ns), so `percentileNanoseconds`
+answers the upper edge of a step, within 25 %. `report()` prints the calls, the
+mean, p99.9, the maximum, the share of the period the slowest call used and the
+non-empty steps when `RAE_REALTIME_REPORT=1`; the program calls it when the loop
+ends. Failing a test on the period share is left to the audio tests that set
+the period. Fixture 1400.
 
 ---
 

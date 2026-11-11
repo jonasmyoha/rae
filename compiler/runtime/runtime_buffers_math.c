@@ -94,7 +94,7 @@ static int rae_buf_record_lookup(void* ptr, int64_t* count_out, int64_t* elem_si
 static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem_size) {
   int64_t count = 0;
   int64_t recorded_elem = 0;
-  RAE_LOCK(&g_buf_records_lock);
+  RAE_LOCK_UNCHECKED(&g_buf_records_lock);
   int found = rae_buf_record_lookup(buf, &count, &recorded_elem);
   RAE_UNLOCK(&g_buf_records_lock);
   if (!found) {
@@ -117,8 +117,8 @@ static void rae_buf_check(const char* fn, void* buf, int64_t index, int64_t elem
   }
 }
 
-#define RAE_BR_REGISTER(ptr, count, elem_size) do { RAE_LOCK(&g_buf_records_lock); rae_buf_record_set((ptr), (count), (elem_size)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
-#define RAE_BR_UNREGISTER(ptr)                 do { RAE_LOCK(&g_buf_records_lock); rae_buf_record_clear((ptr)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
+#define RAE_BR_REGISTER(ptr, count, elem_size) do { RAE_LOCK_UNCHECKED(&g_buf_records_lock); rae_buf_record_set((ptr), (count), (elem_size)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
+#define RAE_BR_UNREGISTER(ptr)                 do { RAE_LOCK_UNCHECKED(&g_buf_records_lock); rae_buf_record_clear((ptr)); RAE_UNLOCK(&g_buf_records_lock); } while (0)
 #define RAE_BR_CHECK(fn, buf, index, elem_size) rae_buf_check((fn), (buf), (index), (elem_size))
 #define RAE_BR_CHECK_ANY(fn, buf, index)        rae_buf_check((fn), (buf), (index), (int64_t)sizeof(RaeAny))
 
@@ -140,6 +140,7 @@ static inline int64_t rae_mem_buf_bytes(void* ptr, int64_t hint) {
 }
 
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
+  RAE_REALTIME_GUARD("rae_ext_rae_buf_alloc", "a Buffer allocation");
   if (count <= 0) return NULL;
   void* p = calloc((size_t)count, (size_t)elem_size);
   if (p) { RAE_STAT_ADD(RAE_MC_BUF_ALLOC_N, 1); RAE_STAT_ADD(RAE_MC_BUF_ALLOC_B, rae_mem_buf_bytes(p, count * elem_size)); }
@@ -148,6 +149,7 @@ void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
 }
 
 void rae_ext_rae_buf_free(void* buf) {
+  RAE_REALTIME_GUARD("rae_ext_rae_buf_free", "a Buffer free");
   if (buf) {
     RAE_STAT_ADD(RAE_MC_BUF_FREE_N, 1); RAE_STAT_ADD(RAE_MC_BUF_FREE_B, rae_mem_buf_bytes(buf, 0));
     RAE_BR_UNREGISTER(buf);
@@ -156,6 +158,7 @@ void rae_ext_rae_buf_free(void* buf) {
 }
 
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
+  RAE_REALTIME_GUARD("rae_ext_rae_buf_resize", "a Buffer reallocation");
   if (new_count <= 0) {
     if (buf) {
       RAE_STAT_ADD(RAE_MC_BUF_FREE_N, 1); RAE_STAT_ADD(RAE_MC_BUF_FREE_B, rae_mem_buf_bytes(buf, 0));
