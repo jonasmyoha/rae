@@ -2076,8 +2076,25 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             ctx->local_is_ptr[local_index] = binding_is_ref;
             ctx->local_is_mod[local_index] = binding_type->is_mod;
             ctx->local_moved[local_index] = false;
-    ctx->local_drop_flag[local_index] = false;
+            ctx->local_drop_flag[local_index] = false;
             ctx->local_struct_owns_heap[local_index] = !binding_is_ref;
+            // #14300186: the element copy moved into a call on SOME paths only
+            // (`if keep { kept.add(value: record) }`) is still dropped at the
+            // end of the iteration on the others, like a `let` (#55453128):
+            // the move clears the flag, the per-iteration drop is guarded by it.
+            if (!binding_is_ref && stmt->as.loop_stmt.body) {
+                const AstTypeRef* element_type = binding_type;
+                if (ctx->generic_params && ctx->generic_args)
+                    element_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                       ctx->generic_args, (AstTypeRef*)element_type);
+                Str name = binding->as.let_stmt.name;
+                if (element_type
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element_type, 0)
+                    && rest_moves_name_conditionally(stmt->as.loop_stmt.body->first, name)) {
+                    ctx->local_drop_flag[local_index] = true;
+                    fprintf(out, "      int __rae_live_%.*s = 1;\n", (int)name.len, name.data);
+                }
+            }
         }
         // break/continue drop back to here (before the element binding), so a
         // non-local exit drops the current element too, matching the per-
