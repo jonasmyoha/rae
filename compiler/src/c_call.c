@@ -452,6 +452,31 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         return true;
     }
 
+    /* `rae_ext_rae_require_plain(T)` (lib/collections/SpscRing.rae): T must own
+     * no heap, because a value that crosses to a real-time thread may not be
+     * freed there (docs/realtime-language-design.md §4.1). Checked here, where
+     * the specialization binds T; it emits nothing. */
+    if (str_eq_cstr(name, "rae_ext_rae_require_plain")) {
+        const AstTypeRef* tr = expr->as.call.generic_args;
+        if (tr && ctx->generic_params && ctx->generic_args)
+            tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+        char where[512];
+        if (tr && type_heap_part(ctx->compiler_ctx, ctx->module, tr, where, sizeof where, 0)) {
+            Str base = get_base_type_name(tr);
+            char message[1024];
+            char detail[600] = "";
+            if (strncmp(where, "its field", 9) == 0) snprintf(detail, sizeof detail, " (%s)", where);
+            snprintf(message, sizeof message,
+                "a SpscRing of `%.*s` is not allowed: `%.*s` owns heap%s. A value "
+                "that crosses to a real-time thread must not need freeing there; send "
+                "an index or a handle instead (docs/realtime-language-design.md §4.1)",
+                (int)base.len, base.data, (int)base.len, base.data, detail);
+            diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+        }
+        fprintf(out, "((void)0)");
+        return true;
+    }
+
     // Buffer Operations (Intrinsics)
     bool is_buf_get = str_eq_cstr(name, "rae_ext___buf_get") || str_eq_cstr(name, "__buf_get") || str_eq_cstr(name, "rae_ext_rae_buf_get");
     bool is_buf_set = str_eq_cstr(name, "rae_ext___buf_set") || str_eq_cstr(name, "__buf_set") || str_eq_cstr(name, "rae_ext_rae_buf_set");

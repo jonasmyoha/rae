@@ -191,6 +191,16 @@ Larger things (a new render plan, a decoded sound) cross as a **handle**: an
 index into a table the main thread owns, plus the reclaim ring for giving it
 back.
 
+**Landed (2026-11-11):** `lib/collections/SpscRing.rae`. `createSpscRing` calls
+the intrinsic `rae_ext_rae_require_plain(T)`, which the C backend checks where
+the specialization binds `T` (`c_call.c`, with `type_heap_part` in
+`ownership.c`) and emits nothing for. The error names the path to the heap:
+"a SpscRing of `Envelope` is not allowed: `Envelope` owns heap (its field
+`Envelope.message`: its field `Message.text`: it is a `String`)". It points at
+the line in `SpscRing.rae`, not at the caller's `createSpscRing`, because the
+check runs per specialization; the type named in it says which call it was.
+Fixture 1397.
+
 ### 4.2 Ownership out of real-time code
 
 "Objects the audio thread drops go back to another thread" becomes a compile
@@ -348,6 +358,15 @@ load and release on store by default and a `relaxed` form for counters only.
 The orders stay few on purpose; sequential consistency is not offered as a
 default because it hides cost. All atomic operations are `realtime`.
 
+**Landed (2026-11-11):** `lib/Atomic.rae`: `Atomic(T)` for `Int`, `Int32` and
+`Bool` with `load`, `loadRelaxed`, `store`, `storeRelaxed`, `exchange`,
+`compareExchange` (answers whether it wrote), `fetchAdd`, `fetchAddRelaxed`,
+`freeAtomic`. The value is one cell of a `Buffer(Int)` that every copy shares
+(so `spawn` shares it and the leak check sees a forgotten free); the shims are
+`static inline` one-instruction functions in `compiler/runtime/runtime_atomics.h`
+over the `__atomic` builtins. `SpscRing` uses the same shims on its two
+counters. Fixture 1395.
+
 ### 6.5 Signaling a waiting thread
 
 The audio thread wakes the streaming thread and the render thread of stage A
@@ -355,6 +374,18 @@ The audio thread wakes the streaming thread and the render thread of stage A
 does not wait). A `Signal` type in `lib/` (post: `realtime`; wait: `blocking`)
 over one-call shims (`dispatch_semaphore` / mach semaphore on Apple, futex on
 Linux, `WaitOnAddress` on Windows).
+
+**Landed (2026-11-11):** `lib/Signal.rae` (`createSignal`, `post`, `wait`,
+`tryWait`, `freeSignal`) over `compiler/runtime/runtime_signal.c`:
+`dispatch_semaphore` on Apple, a POSIX `sem_t` on Linux and Android (glibc and
+bionic build it on a futex, so it is the futex without our own wait loop in
+C), and a plain counter in a browser build without threads. There is no
+Windows branch: the runtime has no Windows target yet, and `WaitOnAddress`
+comes with it. `wait` is a `blocking` extern, so a lightweight task that waits
+gives its worker back meanwhile; a dedicated real-time thread (§6.6) must not
+be such a task. Only the macOS branch has run so far (fixtures 1395, 1396, the
+TSan gate); the POSIX and browser branches are compiled the first time a Linux
+or browser build includes them.
 
 ### 6.6 Real-time threads and teams
 

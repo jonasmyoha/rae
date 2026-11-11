@@ -23,6 +23,7 @@ That difference is the whole rule of thumb:
 |---|---|---|
 | `collections/StringMap` | `StringMap(V)` | open-addressing, `String` keys |
 | `collections/IntMap`    | `IntMap(V)`    | open-addressing, `Int` keys |
+| `collections/SpscRing`  | `SpscRing(T)`  | fixed-size, lock-free, one producer thread to one consumer thread; `T` owns no heap (docs/realtime-language-design.md §4.1) |
 
 More will land here as they are written — `Set`, `Queue`, `RingBuffer`,
 `SparseSet` and friends — without any compiler change, because a collection is

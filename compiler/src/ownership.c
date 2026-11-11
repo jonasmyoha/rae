@@ -13,6 +13,7 @@
  * `substitute_type_ref` is in sema.h. */
 #include "c_backend_internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 
@@ -169,4 +170,31 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
     if (type_needs_deep_copy(cctx, module, concrete, depth + 1)) return true;
   }
   return false;
+}
+
+bool type_heap_part(CompilerContext* cctx, const AstModule* module, const AstTypeRef* type,
+                    char* out, size_t out_cap, int depth) {
+  if (!type || depth > 32) return false;
+  if (!type_needs_cascade_drop(cctx, module, type, depth)) return false;
+  Str base = get_base_type_name(type);
+  const AstDecl* d = find_type_decl(NULL, module, base);
+  if (type->is_opt || !d || d->kind != AST_DECL_TYPE || is_drop_target_type(type)
+      || type_has_user_drop(cctx, type)) {
+    snprintf(out, out_cap, "it is a `%.*s`", (int)base.len, base.data);
+    return true;
+  }
+  const AstIdentifierPart* gp = d->as.type_decl.generic_params;
+  const AstTypeRef* ga = type->generic_args;
+  for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+    AstTypeRef* concrete = f->type;
+    if (gp && ga) concrete = substitute_type_ref(cctx, gp, ga, f->type);
+    char inner[256];
+    if (type_heap_part(cctx, module, concrete, inner, sizeof inner, depth + 1)) {
+      snprintf(out, out_cap, "its field `%.*s.%.*s`: %s", (int)base.len, base.data,
+               (int)f->name.len, f->name.data, inner);
+      return true;
+    }
+  }
+  snprintf(out, out_cap, "it is a `%.*s`", (int)base.len, base.data);
+  return true;
 }
