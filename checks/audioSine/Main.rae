@@ -8,8 +8,10 @@
 # fails it if the rendering allocated or locked. It prints the stage and the
 # frames of latency the engine adds beyond the device. With no output device it
 # says so and passes, as a machine without one has nothing to test.
+import Math
 import Sys
 open audio/Audio
+open audio/AudioClock
 open audio/AudioMixer
 open audio/Sound
 
@@ -22,6 +24,9 @@ func main() {
   }
   log(
     "audioSine: {audio.sampleRate} Hz, {audio.channels} channels, a period of {audio.periodFrames} frames, the callback renders {audio.deviceRenders}, {audio.latencyFrames()} frames of latency beyond the device"
+  )
+  log(
+    "audioSine: on {deviceBackendName(device: audio.device)}, the output's latency {audio.clock.latencyFrames} frames"
   )
   let tone: Sound = audio.addSound(data: sineSoundData(
     frequency: 440.0
@@ -44,6 +49,9 @@ func main() {
   audio.setVoicePan(voiceId: left, pan: 1.0)
   sleep(ms: 700)
   audio.update()
+  log(
+    "audioSine: the clock measured {floor(x: audio.clock.measuredSampleRate() as Float + 0.5)} Hz over {audio.clock.stamps} renders"
+  )
   let callbacks: Int = audio.deviceCallbacks()
   let underrun: Int = audio.underrunFrames()
   let ended: Int = audio.voicesEnded
