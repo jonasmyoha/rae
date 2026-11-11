@@ -1,3 +1,12 @@
+# The tree lab, interactive: the shared editor chrome of the 3D examples (LabEditor: the camera bar
+# with orbit and the free WASD camera, the "..." menu, the debug readout, the side panel with the
+# shared sky, time of day and date, shadows and TAA) and in its side panel the scenes (LabScenes:
+# Forest, the default; One tree; Reference T02; Studies) and the Reference scene's fixed framings as
+# camera buttons. A scene is built the first time it is picked and kept. A scripted run (headless,
+# a screenshot or the dolly) has no editor and starts as below, so its pictures do not change;
+# RAE_TREELAB_EDITOR=1 keeps the editor in one (a picture of the panel; RAE_SETTINGS_OPEN=1 opens
+# it).
+#
 # The tree lab (docs/reference-tree-plan.md step 1): the scene the new tree
 # generator is built and judged in, against ONE reference tree, crop T02 of
 # the private reference study. The tree is lib/treeGen's (LabTree.rae); the
@@ -96,14 +105,8 @@ open LabForest
 open RendererQuality
 open MeshStore
 open LabSeason
-
-# A fixed late-morning sun from the camera's front left, as in T02 (the
-# trunk is lit on its left): the direction the light TRAVELS
-const labSunX: Float = 0.5
-
-const labSunY: Float = 0.55
-
-const labSunZ: Float = -0.62
+open LabScenes
+open LabEditor
 
 # The dolly's length in frames, and its nearest and farthest distance (m)
 const labDollyFrames: Int = 240
@@ -115,6 +118,13 @@ const labDollyFar: Float = 170.0
 const labStatsFrames: Int = 120
 
 type LabState {
+  # the lab's primitive meshes, uploaded once and shared by every scene
+  meshes: LabMeshes
+  # the scene shown (LabScenes), and the other scenes built so far, kept to come back to
+  scene: Int
+  stash: List(LabSceneContent) = List.create(LabSceneContent, cap: 4)
+  # the editor chrome and its camera (none in a scripted run: LabScenes labScripted)
+  editor: opt LabEditor = none
   # the date and the place the seasons run on, and its day slider
   # (LabSeason; the renderer's UI overlay draws it)
   season: LabSeason = createLabSeason()
@@ -158,207 +168,155 @@ type LabState {
   lastTime: Float64
 }
 
-# The camera RAE_TREELAB_CAMERA names. The near one is T02's own framing,
-# solved from the hand-drawn trace (examples/146_treeLab/traceTree.py):
-# seen from 1.6 m with a 50 degree vertical field, a 12.5 m tree's foot
-# lands on the trace's base dot (98% down the picture) and its top on the
-# trace's top dot, so the trace maps onto the tree one to one: 15.2 m away,
-# looking 18 degrees up, shifted 0.69 m so the trunk stands left of the
-# middle as T02's does.
-func labCamera(name: view String) ret Camera3d {
-  var camera: Camera3d = defaultCamera3d()
-  camera.fovYDeg = 50
-  camera.nearZ = 0.1
-  camera.farZ = 900
-  if name is "mid" {
-    camera.position = Vec3.create(x: 0.0, y: -40.0, z: 1.6)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
-    ret camera
-  }
-  if name is "row" {
-    # the traced tree and the three grown ones beside it (LabTree's row,
-    # 11 m apart along x), all in one frame from 32 m
-    camera.position = Vec3.create(x: 16.5, y: -32.0, z: 1.6)
-    camera.target = Vec3.create(x: 16.5, y: 0.0, z: 6.0)
-    ret camera
-  }
-  if name is "tracedFork" {
-    camera.position = Vec3.create(x: 1.0, y: -5.5, z: 6.5)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 9.5)
-    ret camera
-  }
-  if name is "fork" {
-    # the first grown tree of the row (x 11), its fork and the joints of
-    # its upper branches
-    camera.position = Vec3.create(x: 12.0, y: -5.5, z: 6.5)
-    camera.target = Vec3.create(x: 11.0, y: 0.0, z: 9.5)
-    ret camera
-  }
-  if name is "bark" {
-    # the trunk up close, at eye height, for its color and streaks
-    camera.position = Vec3.create(x: 0.6, y: -4.0, z: 1.7)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.6)
-    ret camera
-  }
-  if name is "bush" {
-    camera.position = Vec3.create(x: 0.0, y: -3.0, z: 0.9)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.3)
-    ret camera
-  }
-  if name is "small" {
-    camera.position = Vec3.create(x: 0.0, y: -13.0, z: 1.6)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 3.4)
-    ret camera
-  }
-  if name is "far" {
-    camera.position = Vec3.create(x: 0.0, y: -120.0, z: 1.6)
-    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
-    ret camera
-  }
-  let pitch: Float = 18.0 * 3.141592653589793 / 180.0
-  camera.position = Vec3.create(x: 0.69, y: -15.2, z: 1.6)
-  camera.target = Vec3.create(
-    x: 0.69
-    y: -15.2 + 10.0 * Math.cos(x: pitch)
-    z: 1.6 + 10.0 * Math.sin(x: pitch)
-  )
-  ret camera
-}
-
-# One of the studies (RAE_TREELAB_STUDY): its world, light and camera
-func createStudyLab(studyView: view String) ret LabState {
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
-  setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
-  let meshes: LabMeshes = createLabMeshes(renderer: renderer)
-  var obstacles: List(StudyObstacle) = List.create(StudyObstacle, cap: 64)
-  var world: World3d = buildStudyWorld(meshes: meshes, renderer: renderer, obstacles: obstacles)
-  var light: Light3d = defaultLight3d()
-  applyStudyLight(renderer: renderer, light: light, studyView: studyView)
-  var camera: Camera3d = studyCamera()
-  let rig: CameraRig = studyCameraRig(camera: camera, studyView: studyView)
-  var idIssuer: IdIssuer = IdIssuer.create()
-  let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
-  unsafe {
-    ret LabState {
-      renderer: own renderer
-      world: own world
-      light: light
-      camera: camera
-      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
-      grass: createLabGrass(obstacles: studyObstacleField(obstacles: obstacles))
-      grassCenterX: studyGrassCenterX
-      grassCenterY: studyGrassCenterY
-      studyView: studyView
-      cameraRig: rig
-      tree: none
-      windSettings: windSettings
-      wind: createWindState(settings: windSettings)
-      lastTime: Gpu2d.nowSeconds()
-    }
-  }
-}
-
-# The forest scene (RAE_TREELAB_SCENE=forest): both sets' forests, the
-# lab's sun and look
-func createForestLab() ret LabState {
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
-  setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
-  let meshes: LabMeshes = createLabMeshes(renderer: renderer)
-  var world: World3d = buildLabForestWorld(meshes: meshes, renderer: renderer)
-  var forests: List(TreeForest) = buildLabForests(renderer: renderer)
-  var light: Light3d = defaultLight3d()
-  light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
-  applyLabLook(renderer: renderer, light: light)
-  let camera: Camera3d = labForestCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
-  var idIssuer: IdIssuer = IdIssuer.create()
-  let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
-  # made before the renderer moves into the state
-  var precipitation: opt Precipitation = createPrecipitation(renderer: renderer)
-  unsafe {
-    ret LabState {
-      renderer: own renderer
-      world: own world
-      light: light
-      camera: camera
-      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
-      # grass round the camera, no obstacles
-      grass: createLabGrass(obstacles: List(Float) { 0.0 })
-      grassCenterX: 0.0
-      grassCenterY: 30.0
-      cameraRig: createCameraRig(camera: camera)
-      forests: own forests
-      forestShown: labForestFirstSet()
-      precipitation: own precipitation
-      leafParticles: createLeafParticles(
-        capacity: leafDefaultCapacity()
-        constants: List.create(ShaderConstant, cap: 0)
-      )
-      tree: none
-      windSettings: windSettings
-      wind: createWindState(settings: windSettings)
-      lastTime: Gpu2d.nowSeconds()
-    }
-  }
-}
-
+# The lab: one renderer and the start scene (LabScenes labStartScene); an interactive run also gets
+# the editor chrome
 func createLab() ret LabState {
-  if labForestRequested() {
-    Gpu2d.initWindow(
-      width: 1280
-      height: 800
-      title: "146: Tree lab | forest: RAE_TREE_SET=lowPoly|stylized, T switches"
-    )
-    ret createForestLab()
-  }
-  let studyView: String = labStudyName()
-  if studyView.length() > 0 {
-    Gpu2d.initWindow(width: 1280, height: 800, title: "146: Tree lab | study: {studyView}")
-    ret createStudyLab(studyView: studyView)
-  }
-  Gpu2d.initWindow(
-    width: 1280
-    height: 800
-    title: "146: Tree lab | camera: RAE_TREELAB_CAMERA=near|mid|far"
-  )
+  Gpu2d.initWindow(width: 1280, height: 800, title: "146: Tree lab")
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   # RAE_QUALITY=ultra: full resolution, as the settings panel's Ultra
   setRendererFullResolution(renderer: renderer, on: Sys.getEnv(name: "RAE_QUALITY") is "ultra")
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
-  let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
-  var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
-  # RAE_TREELAB_TREE=levels: the same tree drawn as a forest kind (its near,
-  # middle and impostor levels, LabForest's labLevelsForest) in place of
-  # the leaf pass
-  let levels: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "levels"
-  var forests: List(TreeForest) = List.create(TreeForest, cap: 1)
-  var tree: opt LabTree = none
-  if levels {
-    forests.add(value: own labLevelsForest(renderer: renderer))
-  } else if not placeholder {
-    tree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
-  }
-  var light: Light3d = defaultLight3d()
-  light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
-  applyLabLook(renderer: renderer, light: light)
+  let scene: Int = labStartScene()
+  var content: LabSceneContent = buildLabScene(renderer: renderer, meshes: meshes, scene: scene)
   var idIssuer: IdIssuer = IdIssuer.create()
   let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
-  let camera: Camera3d = labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+  var editor: opt LabEditor = none
+  # RAE_TREELAB_EDITOR=1: the editor in a scripted run too (a picture of the panel)
+  if not labScripted() or Sys.getEnv(name: "RAE_TREELAB_EDITOR") is "1" {
+    editor = createLabEditor(startScene: scene)
+  }
   unsafe {
-    ret LabState {
+    var state: LabState = {
+      meshes: meshes
+      scene: scene
+      editor: own editor
       renderer: own renderer
-      world: own world
-      light: light
-      camera: camera
+      world: own content.world
+      light: content.light
+      camera: content.camera
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
-      grass: createLabGrass(obstacles: labTrunkField())
-      cameraRig: createCameraRig(camera: camera)
-      forests: own forests
-      tree: own tree
+      grass: own content.grass
+      grassCenterX: content.grassCenterX
+      grassCenterY: content.grassCenterY
+      studyView: content.studyView
+      cameraRig: createCameraRig(camera: content.camera)
+      forests: own content.forests
+      forestShown: content.forestShown
+      precipitation: own content.precipitation
+      leafParticles: own content.leafParticles
+      tree: own content.tree
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
       lastTime: Gpu2d.nowSeconds()
+    }
+    labCameraHome(state: state)
+    ret state
+  }
+}
+
+# The camera rig starts from the lab's camera, and Orbit comes back round its target
+func labCameraHome(state: mod LabState) {
+  if let editor: mod LabEditor = state.editor {
+    labEditorCameraHome(editor: editor, rig: state.cameraRig, camera: state.camera)
+  }
+}
+
+# Show `scene`: the one shown now is kept in the stash, the picked one comes out of it, or is built
+# the first time; its light and its camera come with it
+func labShowScene(state: mod LabState, scene: view Int) {
+  if scene is state.scene or scene < 1 or scene > labSceneLabels().length {
+    ret
+  }
+  let kept: LabSceneContent = {
+    scene: state.scene
+    world: own state.world
+    forests: own state.forests
+    forestShown: state.forestShown
+    tree: own state.tree
+    grass: own state.grass
+    grassCenterX: state.grassCenterX
+    grassCenterY: state.grassCenterY
+    studyView: state.studyView
+    precipitation: own state.precipitation
+    leafParticles: own state.leafParticles
+    light: state.light
+    camera: state.camera
+  }
+  state.stash.add(value: own kept)
+  var found: Int = -1
+  loop var i: Int = 0, i < state.stash.length, ++i {
+    if let stored: view LabSceneContent = state.stash.viewAt(index: i) {
+      if stored.scene is scene {
+        found = i
+      }
+    }
+  }
+  var content: LabSceneContent = buildLabSceneOrTake(state: state, scene: scene, found: found)
+  applyLabSceneLight(renderer: state.renderer, content: content)
+  state.scene = scene
+  state.world = own content.world
+  state.forests = own content.forests
+  state.forestShown = content.forestShown
+  state.tree = own content.tree
+  state.grass = own content.grass
+  state.grassCenterX = content.grassCenterX
+  state.grassCenterY = content.grassCenterY
+  state.studyView = content.studyView
+  state.precipitation = own content.precipitation
+  state.leafParticles = own content.leafParticles
+  state.light = content.light
+  state.camera = content.camera
+  labCameraHome(state: state)
+  log("[treelab] scene {labSceneLabels().copyAtDefault(index: scene - 1)}")
+}
+
+# A scene out of the stash (moved, not copied: swapped to the end and popped), or built new
+func buildLabSceneOrTake(
+  state: mod LabState
+  scene: view Int
+  found: view Int
+) ret LabSceneContent {
+  if found >= 0 {
+    state.stash.swap(i: found, j: state.stash.length - 1)
+    ret state.stash.pop()
+  }
+  ret buildLabScene(renderer: state.renderer, meshes: state.meshes, scene: scene)
+}
+
+# The editor's frame: the camera bar and rig, the scene chooser, the Reference framings, the
+# shared settings once changed
+func labEditorStep(
+  state: mod LabState
+  now: view Float64
+  deltaTime: view Float
+  rendered: view Bool
+) {
+  var picked: LabEditorFrame = { scene: 0, framing: "", settingsChanged: false }
+  if let editor: mod LabEditor = state.editor {
+    picked = labEditorFrame(
+      editor: editor
+      rig: state.cameraRig
+      camera: state.camera
+      now: now
+      deltaTime: deltaTime
+      resized: Gpu2d.windowResized()
+      rendered: rendered
+    )
+  }
+  if picked.scene > 0 {
+    labShowScene(state: state, scene: picked.scene)
+  }
+  if picked.framing.length() > 0 {
+    labShowScene(state: state, scene: labSceneReference)
+    if let editor: mod LabEditor = state.editor {
+      labEditorShowScene(editor: editor, scene: labSceneReference)
+    }
+    state.camera = labCamera(name: picked.framing)
+    labCameraHome(state: state)
+  }
+  if picked.settingsChanged {
+    if let editor: view LabEditor = state.editor {
+      labEditorApplySettings(editor: editor, renderer: state.renderer, light: state.light)
     }
   }
 }
@@ -514,7 +472,16 @@ func runLabFrame(state: mod LabState) {
     )
     state.dollyFrame = state.dollyFrame + 1
   }
-  if not Gpu2d.renderGate() {
+  let renderFrame: Bool = Gpu2d.renderGate()
+  if state.editor is not none {
+    labEditorStep(
+      state: state
+      now: now
+      deltaTime: deltaTime
+      rendered: renderFrame
+    )
+  }
+  if not renderFrame {
     ret
   }
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
@@ -589,6 +556,9 @@ func runLabFrame(state: mod LabState) {
       renderLabGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
     } else if tag is RenderTag.uiOverlay {
       drawLabSeason(season: state.season, canvas: state.renderer.canvas)
+      if let editor: mod LabEditor = state.editor {
+        drawLabEditor(editor: editor, canvas: state.renderer.canvas)
+      }
     } else {
       renderDeferredPassWorld(
         renderer: state.renderer
@@ -670,7 +640,32 @@ func logLabStats(state: mod LabState) {
   state.statsFrames = 0
 }
 
+# Release a kept scene's GPU parts (its grass, its tree's leaves, its forests, its leaves in the
+# air)
+func releaseLabScene(state: mod LabState, content: mod LabSceneContent) {
+  if let resources: mod GpuResources = state.gpuResources {
+    grassShutdown(grass: content.grass, resources: resources)
+    if let tree: mod LabTree = content.tree {
+      loop let leaves: mod LeafPass in tree.leaves {
+        releaseLeafPass(leaves: leaves, resources: resources)
+      }
+    }
+  }
+  if let rendererResources: mod GpuResources = state.renderer.gpuResources {
+    if let leafParticles: mod LeafParticles = content.leafParticles {
+      releaseLeafParticles(leafParticles: leafParticles, resources: rendererResources)
+    }
+    loop let forest: mod TreeForest in content.forests {
+      treeForestShutdown(forest: forest, resources: rendererResources)
+    }
+  }
+}
+
 func endLab(state: mod LabState) {
+  loop state.stash.length > 0 {
+    var content: LabSceneContent = state.stash.pop()
+    releaseLabScene(state: state, content: content)
+  }
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
     if let tree: mod LabTree = state.tree {
