@@ -1,0 +1,28 @@
+# `cExport("cName")` (docs/realtime-language-design.md §6.1, §6.2): C calls
+# Rae functions by the names they export. driver.c calls them from this
+# thread, and from a thread it starts itself, which calls rae_thread_attach()
+# first and then runs Rae code that allocates a String and logs it.
+# `mix` is realtime too: its C carries clang's nonblocking attribute.
+import Math
+
+func scale(value: view Int, factor: view Float64) cExport("rae_test_scale") ret Int {
+  ret ((value as Float64) * factor) as Int
+}
+
+func mix(left: view Float, right: view Float) realtime cExport("rae_test_mix") ret Float {
+  ret sqrt(x: left * left + right * right)
+}
+
+func describe(number: view Int) cExport("rae_test_describe") ret Int {
+  let text: String = "a thread C started calls Rae with {number}"
+  log(text)
+  ret text.length()
+}
+
+func driveExports(rounds: Int) unsafe extern ret Int
+
+func main() {
+  unsafe {
+    log("C called back and summed {driveExports(rounds: 4)}")
+  }
+}

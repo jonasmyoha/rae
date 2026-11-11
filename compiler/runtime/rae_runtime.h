@@ -189,6 +189,20 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
 #define RAE_COLD_PATH_END _Pragma("clang diagnostic pop")
 #endif
 #endif
+/* A Rae function C calls by name (`cExport`): visible to the linker even in
+ * a build that hides symbols, and kept when nothing in the program calls it */
+#if defined(__GNUC__) || defined(__clang__)
+#define RAE_EXPORTED __attribute__((visibility("default"), used))
+#else
+#define RAE_EXPORTED
+#endif
+/* A thread C made (an audio device's, a decoder's callback thread) calls this
+ * once, before it calls Rae code, and before any real-time work: it installs
+ * the crash handler's stack and sets up what the runtime keeps per thread, so
+ * the first Rae call allocates nothing (docs/realtime-language-design.md
+ * §6.2). A thread Rae starts (spawn, the pool) needs none. Safe to call twice. */
+void rae_thread_attach(void);
+
 #ifndef RAE_NONBLOCKING
 #define RAE_NONBLOCKING
 #define RAE_NONALLOCATING

@@ -1,0 +1,21 @@
+tests/cases/1409_reject_c_export/Main.rae:9:6: cExport parameter 'text' must be a C value: a number, Bool, Ptr or Buffer(T), not mod, opt, String or a struct
+     9 | func named(text: view String) cExport("rae_named") ret Int {
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:13:6: cExport parameter 'point' must be a C value: a number, Bool, Ptr or Buffer(T), not mod, opt, String or a struct
+    13 | func structural(point: view Point) cExport("rae_structural") ret Int {
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:17:6: cExport parameter 'count' must be a C value: a number, Bool, Ptr or Buffer(T), not mod, opt, String or a struct
+    17 | func changes(count: mod Int) cExport("rae_changes") {
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:21:6: a cExport function returns nothing or one C value (a number, Bool, Ptr or Buffer(T))
+    21 | func answersText() cExport("rae_text") ret String {
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:25:6: a cExport function cannot be generic: C calls one function by one name
+    25 | func generic(T: type, value: view Int) cExport("rae_generic") ret Int {
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:29:6: 'cExport' is for a Rae function with a body that C calls; 'extern' is the other way
+    29 | func foreign(value: Int) cExport("rae_foreign") unsafe extern ret Int
+       |      ^~~~
+tests/cases/1409_reject_c_export/Main.rae:31:39: a cExport name is a C identifier: letters, digits and _
+    31 | func badName(value: view Int) cExport("not a name") ret Int {
+       |                                       ^~~~

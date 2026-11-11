@@ -1,0 +1,37 @@
+# What cExport refuses (docs/realtime-language-design.md §6.1): C passes C
+# values, so no String, no struct, no `mod`, no generic function, no extern,
+# and a C identifier as the name (one function per C name: 1410).
+type Point {
+  x: Int
+  y: Int
+}
+
+func named(text: view String) cExport("rae_named") ret Int {
+  ret text.length()
+}
+
+func structural(point: view Point) cExport("rae_structural") ret Int {
+  ret point.x
+}
+
+func changes(count: mod Int) cExport("rae_changes") {
+  count = count + 1
+}
+
+func answersText() cExport("rae_text") ret String {
+  ret "no"
+}
+
+func generic(T: type, value: view Int) cExport("rae_generic") ret Int {
+  ret value
+}
+
+func foreign(value: Int) cExport("rae_foreign") unsafe extern ret Int
+
+func badName(value: view Int) cExport("not a name") ret Int {
+  ret value
+}
+
+func main() {
+  log("{named(text: "x")}")
+}
