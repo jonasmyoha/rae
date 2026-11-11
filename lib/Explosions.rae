@@ -12,7 +12,8 @@
 #   their flight;
 # - debris: dark tumbling chunks thrown up, glowing at first, that bounce on
 #   the ground and lie there a while.
-# A rocket's smoke trail is explosionPuff().
+# A rocket's smoke trail is explosionPuff(); a bullet's hit is explosionImpact() (a small flash,
+# sparks off the surface, a wisp of dust) and a muzzle's flash explosionFlash().
 #
 # The puffs, the flash and the sparks are spheres in the transparent forward
 # pass (lib/TransparentForward): unlit, so their colors are the light they give
@@ -313,6 +314,119 @@ func explode(
       }
     )
   }
+}
+
+# A bullet's hit at (x, y, z) on a surface facing (normalX, normalY, normalZ) (length 1; the way
+# back along the shot for a body): a quick small flash, a few sparks thrown back off the surface
+# and a wisp of dust. A small blast with no fire, smoke or debris, about 0.4 m across at `size`
+# 1, so a machine gun's stream of hits stays well inside the particle cap.
+func explosionImpact(
+  explosions: mod Explosions
+  x: view Float
+  y: view Float
+  z: view Float
+  normalX: view Float
+  normalY: view Float
+  normalZ: view Float
+  size: view Float
+) {
+  explosions.counter = explosions.counter + 1
+  let seed: Int = explosions.counter
+  explosionAddPuff(
+    explosions: explosions
+    puff: ExplosionPuff {
+      kind: ExplosionPuffKind.flash
+      x: x + normalX * 0.05
+      y: y + normalY * 0.05
+      z: z + normalZ * 0.05
+      velocityX: 0.0
+      velocityY: 0.0
+      velocityZ: 0.0
+      age: 0.0
+      life: 0.09
+      startRadius: 0.06 * size
+      endRadius: 0.32 * size
+      shade: 0.5
+    }
+  )
+  # The sparks: off the surface in a cone round its normal, fast, short-lived, falling
+  loop var i: Int = 0, i < 9, ++i {
+    let scatter: Vec3 = explosionDirection(
+      around: explosionRandom(seed: seed, index: i, salt: 51)
+      up: explosionRandom(seed: seed, index: i, salt: 52)
+      lowest: -1.0
+    )
+    let wayX: Float = scatter.x * 0.8 + normalX
+    let wayY: Float = scatter.y * 0.8 + normalY
+    let wayZ: Float = scatter.z * 0.8 + normalZ
+    let length: Float = Math.max(a: 0.001, b: Math.sqrt(x: wayX * wayX + wayY * wayY + wayZ * wayZ))
+    let speed: Float = (4.0 + 7.0 * explosionRandom(seed: seed, index: i, salt: 53)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.spark
+        x: x
+        y: y
+        z: z
+        velocityX: wayX / length * speed
+        velocityY: wayY / length * speed
+        velocityZ: wayZ / length * speed
+        age: 0.0
+        life: 0.15 + 0.3 * explosionRandom(seed: seed, index: i, salt: 54)
+        startRadius: 0.022 * size
+        endRadius: 0.01 * size
+        shade: explosionRandom(seed: seed, index: i, salt: 55)
+      }
+    )
+  }
+  # A wisp of dust off the surface
+  loop var i: Int = 0, i < 3, ++i {
+    let speed: Float = (0.6 + 0.8 * explosionRandom(seed: seed, index: i, salt: 61)) * size
+    explosionAddPuff(
+      explosions: explosions
+      puff: ExplosionPuff {
+        kind: ExplosionPuffKind.dust
+        x: x + normalX * 0.08
+        y: y + normalY * 0.08
+        z: z + normalZ * 0.08
+        velocityX: normalX * speed + (explosionRandom(seed: seed, index: i, salt: 62) - 0.5) * size
+        velocityY: normalY * speed + (explosionRandom(seed: seed, index: i, salt: 63) - 0.5) * size
+        velocityZ: normalZ * speed + 0.4 * size
+        age: 0.0 - 0.02 * explosionRandom(seed: seed, index: i, salt: 64)
+        life: 0.5 + 0.4 * explosionRandom(seed: seed, index: i, salt: 65)
+        startRadius: 0.08 * size
+        endRadius: (0.35 + 0.2 * explosionRandom(seed: seed, index: i, salt: 66)) * size
+        shade: explosionRandom(seed: seed, index: i, salt: 67)
+      }
+    )
+  }
+}
+
+# A muzzle's flash at (x, y, z): one quick small ball of light
+func explosionFlash(
+  explosions: mod Explosions
+  x: view Float
+  y: view Float
+  z: view Float
+  size: view Float
+) {
+  explosionAddPuff(
+    explosions: explosions
+    puff: ExplosionPuff {
+      kind: ExplosionPuffKind.flash
+      x: x
+      y: y
+      z: z
+      velocityX: 0.0
+      velocityY: 0.0
+      velocityZ: 0.0
+      age: 0.0
+      life: 0.06
+      startRadius: 0.05 * size
+      endRadius: 0.22 * size
+      shade: 0.5
+    }
+  )
 }
 
 # A puff of a rocket's trail at (x, y, z): a fiery start, then gray smoke
