@@ -780,13 +780,7 @@ func applySession(this: mod AudioEngine) {
         "[audio-session] category {sessionCategoryName(category: plan.category)} mode {plan.mode} options {plan.options}"
       )
     } else {
-      unsafe {
-        let configured: Int = rae_audio_session_configure(
-          category: plan.category
-          mode: plan.mode
-          options: plan.options
-        )
-      }
+      platformSessionConfigure(plan: plan, active: this.sessionActive)
     }
   }
   if not this.sessionActive {
@@ -794,9 +788,7 @@ func applySession(this: mod AudioEngine) {
     if this.fakeSession {
       log("[audio-session] active")
     } else {
-      unsafe {
-        let activated: Int = rae_audio_session_set_active(active: 1)
-      }
+      platformSessionActivate(plan: plan, active: true)
     }
   }
   # iOS stops the audio unit with the session; it does not start by itself
@@ -835,9 +827,7 @@ func deactivateSession(this: mod AudioEngine) {
   if this.fakeSession {
     log("[audio-session] inactive, other apps may resume")
   } else {
-    unsafe {
-      let deactivated: Int = rae_audio_session_set_active(active: 0)
-    }
+    platformSessionActivate(plan: sessionPlan(kind: this.wantedSessionKind()), active: false)
   }
 }
 

@@ -100,7 +100,9 @@ if grep -q 'box3d/box3d.h' "$gen/app.c"; then
   sources="$sources $(ls "$box3d_src"/src/*.c | tr '\n' ' ') $root/tools/box3d/rae_glue.c"
 fi
 # The packages with C (a `native` block, docs/toolchain-and-packages-decision.md): an app whose C
-# includes a package's header compiles its sources into the app, with its options.
+# includes a package's header compiles its sources into the app, with its options. A package's
+# `.java` sources (its Android half, as packages/audio's session) go with the app's Java instead.
+package_java=""
 package_lines=$(cd "$ex_dir" && "$rae" tree --native-android 2>/dev/null || true)
 if [ -n "$package_lines" ]; then
   tab=$(printf '\t')
@@ -113,7 +115,10 @@ if [ -n "$package_lines" ]; then
     echo "gen-android: compiling package $package_name from source into the app"
     cflags="$cflags -I$package_install/include"
     for package_source in $package_sources; do
-      sources="$sources $package_install/$package_source"
+      case "$package_source" in
+        *.java) package_java="$package_java $package_install/$package_source" ;;
+        *) sources="$sources $package_install/$package_source" ;;
+      esac
     done
     if [ -n "$package_defines" ]; then
       cflags="$cflags $(cat "$package_install/$package_defines")"
@@ -143,7 +148,8 @@ mv "$gen/apk/lib/arm64-v8a/libmain.so.stripped" "$gen/apk/lib/arm64-v8a/libmain.
 #    the app, lib/AppLinks), compiled against the platform and
 #    turned into classes.dex
 echo "gen-android: compiling SDL's Java half..."
-{ find "$deps/sdl3/java" -name '*.java'; find "$here/java" -name '*.java'; } > "$gen/javaSources.txt"
+{ find "$deps/sdl3/java" -name '*.java'; find "$here/java" -name '*.java'; printf '%s\n' $package_java; } \
+  | grep -v '^$' > "$gen/javaSources.txt"
 javac -nowarn -Xlint:none --release 11 -cp "$platform/android.jar" -d "$gen/classes" @"$gen/javaSources.txt" 2>&1 \
   | grep -v '^Note:' || true
 "$build_tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$gen/apk" \
