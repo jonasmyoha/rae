@@ -120,7 +120,8 @@ func seekAndPause(source: view SoundData) {
   let first: List(Float) = audio.renderOffline(frames: 4410)
   log("position after 0.1 s: {audio.positionSeconds(voiceId: song)}")
   let moved: Bool = audio.seek(voiceId: song, seconds: 0.25)
-  # the old voice fades for 5 ms (220 frames); the new one starts in the next block
+  # the old voice fades for 5 ms (220 frames) while the new one starts; the
+  # sine's period divides 441, so this cannot tell 11025 from 11466 (1414 can)
   let fade: List(Float) = audio.renderOffline(frames: 441)
   let after: List(Float) = audio.renderOffline(frames: 2205)
   log("seek: {moved}, plays on from frame 11025: {worstAgainst(
