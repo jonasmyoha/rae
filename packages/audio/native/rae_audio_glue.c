@@ -48,6 +48,12 @@ __attribute__((weak)) void rae_audio_render(void* state, float* output, int64_t 
   (void)state; (void)output; (void)frames; (void)channels;
 }
 
+/* audio/AudioDevice's `realtime cExport("rae_audio_capture")`: a duplex
+ * device's input of this period, before it renders (weak, as above) */
+__attribute__((weak)) void rae_audio_capture(void* state, float* input, int64_t frames, int64_t channels) {
+  (void)state; (void)input; (void)frames; (void)channels;
+}
+
 typedef struct {
   ma_context context;
   ma_device device;
@@ -64,7 +70,6 @@ typedef struct {
 static __thread int g_rae_audio_thread_ready;
 
 static void rae_audio_callback(ma_device* device, void* output, const void* input, ma_uint32 frames) {
-  (void)input;
   RaeAudioDevice* audio = (RaeAudioDevice*)device->pUserData;
   float* out = (float*)output;
   int64_t channels = (int64_t)device->playback.channels;
@@ -76,6 +81,8 @@ static void rae_audio_callback(ma_device* device, void* output, const void* inpu
       rae_ext_Realtime_markThread(true);
       g_rae_audio_thread_ready = 1;
     }
+    if (input && device->type == ma_device_type_duplex)
+      rae_audio_capture(audio->render_state, (float*)input, (int64_t)frames, (int64_t)device->capture.channels);
     rae_audio_render(audio->render_state, out, (int64_t)frames, channels);
     __atomic_fetch_add(&audio->callbacks, 1, __ATOMIC_RELAXED);
     return;
@@ -98,12 +105,16 @@ static void rae_audio_callback(ma_device* device, void* output, const void* inpu
   if (audio->signal) rae_ext_rae_signal_post(audio->signal);
 }
 
-int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t period_frames) {
+/* input_channels > 0: a duplex device (the default input too, in the same
+ * callback, so input and output share one sample clock) */
+int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t period_frames, int64_t input_channels) {
   RaeAudioDevice* audio = (RaeAudioDevice*)calloc(1, sizeof(RaeAudioDevice));
   if (!audio) return 0;
-  ma_device_config config = ma_device_config_init(ma_device_type_playback);
+  ma_device_config config = ma_device_config_init(input_channels > 0 ? ma_device_type_duplex : ma_device_type_playback);
   config.playback.format = ma_format_f32;
   config.playback.channels = (ma_uint32)channels;
+  config.capture.format = ma_format_f32;
+  config.capture.channels = (ma_uint32)(input_channels > 0 ? input_channels : 1);
   config.sampleRate = (ma_uint32)sample_rate;
   config.periodSizeInFrames = (ma_uint32)period_frames;
   config.performanceProfile = ma_performance_profile_low_latency;
@@ -131,6 +142,13 @@ int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t per
 
 int64_t rae_audio_device_sample_rate(int64_t device) {
   return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.sampleRate : 0;
+}
+
+/* The input's channels on a duplex device, 0 on an output-only one */
+int64_t rae_audio_device_input_channels(int64_t device) {
+  if (!device) return 0;
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  return audio->device.type == ma_device_type_duplex ? (int64_t)audio->device.capture.channels : 0;
 }
 
 int64_t rae_audio_device_channels(int64_t device) {
@@ -173,13 +191,18 @@ int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
   if (!get) return -1;
   AudioObjectPropertySelector selectors[3] = {kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset,
                                               kAudioDevicePropertyBufferFrameSize};
-  if (property < 0 || property > 2) return -1;
-  AudioObjectPropertyAddress address = {selectors[property], kAudioObjectPropertyScopeOutput,
+  if (property < 0 || property > 5) return -1;
+  /* 3..5: the same of the input device (a duplex device's) */
+  int input = property >= 3;
+  if (input && audio->device.type != ma_device_type_duplex) return -1;
+  AudioObjectPropertyAddress address = {selectors[property % 3],
+                                        input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput,
                                         kAudioObjectPropertyElementMain};
   UInt32 value = 0;
   UInt32 size = sizeof(value);
-  if (get((AudioObjectID)audio->device.coreaudio.deviceObjectIDPlayback, &address, 0, NULL, &size, &value) != 0)
-    return -1;
+  AudioObjectID object = (AudioObjectID)(input ? audio->device.coreaudio.deviceObjectIDCapture
+                                               : audio->device.coreaudio.deviceObjectIDPlayback);
+  if (get(object, &address, 0, NULL, &size, &value) != 0) return -1;
   return (int64_t)value;
 #else
   (void)device; (void)property;
@@ -334,6 +357,13 @@ int64_t rae_audio_session_output_latency_ns(void) {
   }
 }
 
+/* AVAudioSession's input latency in nanoseconds (the microphone's route) */
+int64_t rae_audio_session_input_latency_ns(void) {
+  @autoreleasepool {
+    return (int64_t)([[AVAudioSession sharedInstance] inputLatency] * 1e9);
+  }
+}
+
 int64_t rae_audio_session_describe(uint8_t* into, int64_t capacity) {
   @autoreleasepool {
     AVAudioSession* session = [AVAudioSession sharedInstance];
@@ -443,6 +473,10 @@ int64_t rae_audio_session_observe(void) {
 }
 #else
 int64_t rae_audio_session_output_latency_ns(void) {
+  return -1;
+}
+
+int64_t rae_audio_session_input_latency_ns(void) {
   return -1;
 }
 
@@ -1249,5 +1283,291 @@ int64_t rae_audio_codec_take_output(int64_t codec, int64_t index, int64_t offset
 int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallback) {
   (void)codec; (void)key_z;
   return fallback;
+}
+#endif
+
+/* ---- MIDI through CoreMIDI (docs/audio-design.md §8.2) ---------------------
+ * Platform reason: CoreMIDI, loaded at run time so a program that never uses
+ * MIDI links nothing new. Each function makes one CoreMIDI call. The read
+ * callback runs on CoreMIDI's own thread and only queues each packet as
+ * [length, host time in ns, bytes...]; the parsing (running status, system
+ * exclusive) is Rae (audio/Midi). One producer (CoreMIDI's thread), one
+ * consumer (the thread that polls). */
+#define RAE_AUDIO_MIDI_CAPACITY 8192
+static int64_t g_rae_midi[RAE_AUDIO_MIDI_CAPACITY];
+static int64_t g_rae_midi_written;
+static int64_t g_rae_midi_read;
+static int64_t g_rae_midi_dropped;
+
+int64_t rae_audio_midi_poll(void) {
+  int64_t read = __atomic_load_n(&g_rae_midi_read, __ATOMIC_RELAXED);
+  int64_t written = __atomic_load_n(&g_rae_midi_written, __ATOMIC_ACQUIRE);
+  if (read == written) return -1;
+  int64_t value = g_rae_midi[read % RAE_AUDIO_MIDI_CAPACITY];
+  __atomic_store_n(&g_rae_midi_read, read + 1, __ATOMIC_RELEASE);
+  return value;
+}
+
+int64_t rae_audio_midi_dropped(void) {
+  return __atomic_load_n(&g_rae_midi_dropped, __ATOMIC_RELAXED);
+}
+
+/* One packet into the queue, whole or not at all */
+static void rae_midi_queue(const uint8_t* bytes, int64_t length, int64_t host_ns) {
+  int64_t written = __atomic_load_n(&g_rae_midi_written, __ATOMIC_RELAXED);
+  int64_t read = __atomic_load_n(&g_rae_midi_read, __ATOMIC_ACQUIRE);
+  if (written - read + length + 2 > RAE_AUDIO_MIDI_CAPACITY) {
+    __atomic_fetch_add(&g_rae_midi_dropped, 1, __ATOMIC_RELAXED);
+    return;
+  }
+  g_rae_midi[written % RAE_AUDIO_MIDI_CAPACITY] = length;
+  g_rae_midi[(written + 1) % RAE_AUDIO_MIDI_CAPACITY] = host_ns;
+  for (int64_t i = 0; i < length; i++) g_rae_midi[(written + 2 + i) % RAE_AUDIO_MIDI_CAPACITY] = bytes[i];
+  __atomic_store_n(&g_rae_midi_written, written + 2 + length, __ATOMIC_RELEASE);
+}
+
+#if defined(__APPLE__)
+#include <CoreMIDI/CoreMIDI.h>
+#include <dlfcn.h>
+#include <mach/mach_time.h>
+#include <pthread.h>
+
+static struct {
+  OSStatus (*clientCreate)(CFStringRef, MIDINotifyProc, void*, MIDIClientRef*);
+  OSStatus (*clientDispose)(MIDIClientRef);
+  OSStatus (*inputPortCreate)(MIDIClientRef, CFStringRef, MIDIReadProc, void*, MIDIPortRef*);
+  OSStatus (*outputPortCreate)(MIDIClientRef, CFStringRef, MIDIPortRef*);
+  OSStatus (*destinationCreate)(MIDIClientRef, CFStringRef, MIDIReadProc, void*, MIDIEndpointRef*);
+  OSStatus (*sourceCreate)(MIDIClientRef, CFStringRef, MIDIEndpointRef*);
+  ItemCount (*numberOfSources)(void);
+  MIDIEndpointRef (*getSource)(ItemCount);
+  ItemCount (*numberOfDestinations)(void);
+  MIDIEndpointRef (*getDestination)(ItemCount);
+  OSStatus (*connectSource)(MIDIPortRef, MIDIEndpointRef, void*);
+  OSStatus (*getStringProperty)(MIDIObjectRef, CFStringRef, CFStringRef*);
+  MIDIPacket* (*packetListInit)(MIDIPacketList*);
+  MIDIPacket* (*packetListAdd)(MIDIPacketList*, ByteCount, MIDIPacket*, MIDITimeStamp, ByteCount, const Byte*);
+  OSStatus (*send)(MIDIPortRef, MIDIEndpointRef, const MIDIPacketList*);
+  OSStatus (*received)(MIDIEndpointRef, const MIDIPacketList*);
+  /* the property keys: CoreMIDI fills these constants in once a client
+   * exists, so they are read when used, not when the library is loaded */
+  CFStringRef* displayName;
+  CFStringRef* name;
+} g_rae_midi_api;
+static pthread_once_t g_rae_midi_once = PTHREAD_ONCE_INIT;
+static mach_timebase_info_data_t g_rae_midi_timebase;
+
+static void rae_midi_load(void) {
+  void* midi = dlopen("/System/Library/Frameworks/CoreMIDI.framework/CoreMIDI", RTLD_LAZY);
+  if (!midi) return;
+  mach_timebase_info(&g_rae_midi_timebase);
+  g_rae_midi_api.clientCreate = dlsym(midi, "MIDIClientCreate");
+  g_rae_midi_api.clientDispose = dlsym(midi, "MIDIClientDispose");
+  g_rae_midi_api.inputPortCreate = dlsym(midi, "MIDIInputPortCreate");
+  g_rae_midi_api.outputPortCreate = dlsym(midi, "MIDIOutputPortCreate");
+  g_rae_midi_api.destinationCreate = dlsym(midi, "MIDIDestinationCreate");
+  g_rae_midi_api.sourceCreate = dlsym(midi, "MIDISourceCreate");
+  g_rae_midi_api.numberOfSources = dlsym(midi, "MIDIGetNumberOfSources");
+  g_rae_midi_api.getSource = dlsym(midi, "MIDIGetSource");
+  g_rae_midi_api.numberOfDestinations = dlsym(midi, "MIDIGetNumberOfDestinations");
+  g_rae_midi_api.getDestination = dlsym(midi, "MIDIGetDestination");
+  g_rae_midi_api.connectSource = dlsym(midi, "MIDIPortConnectSource");
+  g_rae_midi_api.getStringProperty = dlsym(midi, "MIDIObjectGetStringProperty");
+  g_rae_midi_api.packetListInit = dlsym(midi, "MIDIPacketListInit");
+  g_rae_midi_api.packetListAdd = dlsym(midi, "MIDIPacketListAdd");
+  g_rae_midi_api.send = dlsym(midi, "MIDISend");
+  g_rae_midi_api.received = dlsym(midi, "MIDIReceived");
+  g_rae_midi_api.displayName = (CFStringRef*)dlsym(midi, "kMIDIPropertyDisplayName");
+  g_rae_midi_api.name = (CFStringRef*)dlsym(midi, "kMIDIPropertyName");
+}
+
+static int rae_midi_ready(void) {
+  pthread_once(&g_rae_midi_once, rae_midi_load);
+  return g_rae_midi_api.clientCreate && g_rae_midi_api.send && g_rae_midi_api.packetListAdd;
+}
+
+static int64_t rae_midi_ns(MIDITimeStamp stamp) {
+  uint64_t ticks = stamp ? stamp : mach_absolute_time();
+  return (int64_t)(ticks * g_rae_midi_timebase.numer / g_rae_midi_timebase.denom);
+}
+
+/* CoreMIDI's thread: each packet into the queue */
+static void rae_midi_read(const MIDIPacketList* list, void* port, void* source) {
+  (void)port; (void)source;
+  const MIDIPacket* packet = &list->packet[0];
+  for (UInt32 i = 0; i < list->numPackets; i++) {
+    rae_midi_queue(packet->data, (int64_t)packet->length, rae_midi_ns(packet->timeStamp));
+    packet = MIDIPacketNext(packet);
+  }
+}
+
+static CFStringRef rae_midi_name(uint8_t* name_z) {
+  return CFStringCreateWithCString(NULL, (const char*)name_z, kCFStringEncodingUTF8);
+}
+
+/* A client, the owner of the ports below; 0 when there is no CoreMIDI */
+int64_t rae_audio_midi_client(uint8_t* name_z) {
+  if (!rae_midi_ready()) return 0;
+  CFStringRef name = rae_midi_name(name_z);
+  MIDIClientRef client = 0;
+  OSStatus status = g_rae_midi_api.clientCreate(name, NULL, NULL, &client);
+  CFRelease(name);
+  return status == noErr ? (int64_t)client : 0;
+}
+
+void rae_audio_midi_client_dispose(int64_t client) {
+  if (client && g_rae_midi_api.clientDispose) g_rae_midi_api.clientDispose((MIDIClientRef)client);
+}
+
+/* A port that receives from the sources connected to it, into the queue */
+int64_t rae_audio_midi_input_port(int64_t client, uint8_t* name_z) {
+  CFStringRef name = rae_midi_name(name_z);
+  MIDIPortRef port = 0;
+  OSStatus status = g_rae_midi_api.inputPortCreate((MIDIClientRef)client, name, rae_midi_read, NULL, &port);
+  CFRelease(name);
+  return status == noErr ? (int64_t)port : 0;
+}
+
+int64_t rae_audio_midi_output_port(int64_t client, uint8_t* name_z) {
+  CFStringRef name = rae_midi_name(name_z);
+  MIDIPortRef port = 0;
+  OSStatus status = g_rae_midi_api.outputPortCreate((MIDIClientRef)client, name, &port);
+  CFRelease(name);
+  return status == noErr ? (int64_t)port : 0;
+}
+
+/* A virtual destination other programs see and send to; what they send
+ * arrives in the queue */
+int64_t rae_audio_midi_virtual_destination(int64_t client, uint8_t* name_z) {
+  CFStringRef name = rae_midi_name(name_z);
+  MIDIEndpointRef endpoint = 0;
+  OSStatus status = g_rae_midi_api.destinationCreate((MIDIClientRef)client, name, rae_midi_read, NULL, &endpoint);
+  CFRelease(name);
+  return status == noErr ? (int64_t)endpoint : 0;
+}
+
+/* A virtual source other programs see and receive from (rae_audio_midi_emit) */
+int64_t rae_audio_midi_virtual_source(int64_t client, uint8_t* name_z) {
+  CFStringRef name = rae_midi_name(name_z);
+  MIDIEndpointRef endpoint = 0;
+  OSStatus status = g_rae_midi_api.sourceCreate((MIDIClientRef)client, name, &endpoint);
+  CFRelease(name);
+  return status == noErr ? (int64_t)endpoint : 0;
+}
+
+int64_t rae_audio_midi_source_count(void) {
+  return rae_midi_ready() ? (int64_t)g_rae_midi_api.numberOfSources() : 0;
+}
+
+int64_t rae_audio_midi_source(int64_t index) {
+  return (int64_t)g_rae_midi_api.getSource((ItemCount)index);
+}
+
+int64_t rae_audio_midi_destination_count(void) {
+  return rae_midi_ready() ? (int64_t)g_rae_midi_api.numberOfDestinations() : 0;
+}
+
+int64_t rae_audio_midi_destination(int64_t index) {
+  return (int64_t)g_rae_midi_api.getDestination((ItemCount)index);
+}
+
+/* An endpoint's display name (a device's, with its entity), or its plain name
+ * (a virtual endpoint has only that), into `into`; its length */
+int64_t rae_audio_midi_endpoint_name(int64_t endpoint, uint8_t* into, int64_t capacity) {
+  CFStringRef name = NULL;
+  if (g_rae_midi_api.displayName && *g_rae_midi_api.displayName)
+    g_rae_midi_api.getStringProperty((MIDIObjectRef)endpoint, *g_rae_midi_api.displayName, &name);
+  if (!name && g_rae_midi_api.name && *g_rae_midi_api.name)
+    g_rae_midi_api.getStringProperty((MIDIObjectRef)endpoint, *g_rae_midi_api.name, &name);
+  if (!name) return 0;
+  char buffer[256];
+  int64_t length = 0;
+  if (CFStringGetCString(name, buffer, sizeof(buffer), kCFStringEncodingUTF8)) {
+    length = (int64_t)strlen(buffer);
+    if (length > capacity) length = capacity;
+    memcpy(into, buffer, (size_t)length);
+  }
+  CFRelease(name);
+  return length;
+}
+
+int64_t rae_audio_midi_connect(int64_t port, int64_t source) {
+  return g_rae_midi_api.connectSource((MIDIPortRef)port, (MIDIEndpointRef)source, NULL) == noErr;
+}
+
+/* `count` bytes (whole messages) as one packet, now: to a destination through
+ * an output port, or (port 0) out of one of our virtual sources */
+int64_t rae_audio_midi_send(int64_t port, int64_t endpoint, uint8_t* bytes, int64_t count) {
+  Byte storage[1024];
+  if (count <= 0 || count > 512) return 0;
+  MIDIPacketList* list = (MIDIPacketList*)storage;
+  MIDIPacket* packet = g_rae_midi_api.packetListInit(list);
+  packet = g_rae_midi_api.packetListAdd(list, sizeof(storage), packet, 0, (ByteCount)count, bytes);
+  if (!packet) return 0;
+  OSStatus status = port ? g_rae_midi_api.send((MIDIPortRef)port, (MIDIEndpointRef)endpoint, list)
+                         : g_rae_midi_api.received((MIDIEndpointRef)endpoint, list);
+  return status == noErr;
+}
+#else
+int64_t rae_audio_midi_client(uint8_t* name_z) { (void)name_z; return 0; }
+void rae_audio_midi_client_dispose(int64_t client) { (void)client; }
+int64_t rae_audio_midi_input_port(int64_t client, uint8_t* name_z) { (void)client; (void)name_z; return 0; }
+int64_t rae_audio_midi_output_port(int64_t client, uint8_t* name_z) { (void)client; (void)name_z; return 0; }
+int64_t rae_audio_midi_virtual_destination(int64_t client, uint8_t* name_z) { (void)client; (void)name_z; return 0; }
+int64_t rae_audio_midi_virtual_source(int64_t client, uint8_t* name_z) { (void)client; (void)name_z; return 0; }
+int64_t rae_audio_midi_source_count(void) { return 0; }
+int64_t rae_audio_midi_source(int64_t index) { (void)index; return 0; }
+int64_t rae_audio_midi_destination_count(void) { return 0; }
+int64_t rae_audio_midi_destination(int64_t index) { (void)index; return 0; }
+int64_t rae_audio_midi_endpoint_name(int64_t endpoint, uint8_t* into, int64_t capacity) {
+  (void)endpoint; (void)into; (void)capacity;
+  return 0;
+}
+int64_t rae_audio_midi_connect(int64_t port, int64_t source) { (void)port; (void)source; return 0; }
+int64_t rae_audio_midi_send(int64_t port, int64_t endpoint, uint8_t* bytes, int64_t count) {
+  (void)port; (void)endpoint; (void)bytes; (void)count;
+  return 0;
+}
+#endif
+
+/* ---- the microphone's permission (docs/audio-design.md §8.1) ---------------
+ * Platform reason: AVCaptureDevice's authorization (macOS and iOS), through the
+ * Objective-C runtime so a program that never records links nothing new. One
+ * call each. Android's RECORD_AUDIO comes with its input step. */
+#if defined(__APPLE__) && defined(__OBJC__)
+static Class rae_audio_capture_device_class(void) {
+  static void* avFoundation = NULL;
+  if (!avFoundation) avFoundation = dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_LAZY);
+  return NSClassFromString(@"AVCaptureDevice");
+}
+
+/* 0 not asked yet, 1 restricted, 2 denied, 3 allowed; -1 where it cannot be asked */
+int64_t rae_audio_microphone_permission(void) {
+  @autoreleasepool {
+    Class device = rae_audio_capture_device_class();
+    if (!device) return -1;
+    return (int64_t)((NSInteger (*)(id, SEL, id))objc_msgSend)(
+        device, sel_registerName("authorizationStatusForMediaType:"), @"soun");
+  }
+}
+
+/* Ask the person (the system shows its prompt once; the answer is read later
+ * with rae_audio_microphone_permission). 1 when asked. */
+int64_t rae_audio_microphone_request(void) {
+  @autoreleasepool {
+    Class device = rae_audio_capture_device_class();
+    if (!device) return 0;
+    void (^done)(BOOL) = ^(BOOL granted) { (void)granted; };
+    ((void (*)(id, SEL, id, id))objc_msgSend)(device, sel_registerName("requestAccessForMediaType:completionHandler:"),
+                                              @"soun", done);
+    return 1;
+  }
+}
+#else
+int64_t rae_audio_microphone_permission(void) {
+  return -1;
+}
+int64_t rae_audio_microphone_request(void) {
+  return 0;
 }
 #endif

@@ -8,7 +8,19 @@ func rae_audio_device_open(
   sampleRate: Int
   channels: Int
   periodFrames: Int
+  inputChannels: Int
 ) unsafe extern("rae_audio_device_open") ret Int
+
+func rae_audio_device_input_channels(
+  device: Int
+) unsafe extern("rae_audio_device_input_channels") ret Int
+
+func rae_audio_session_input_latency_ns() unsafe extern("rae_audio_session_input_latency_ns") ret
+  Int
+
+func rae_audio_microphone_permission() unsafe extern("rae_audio_microphone_permission") ret Int
+
+func rae_audio_microphone_request() unsafe extern("rae_audio_microphone_request") ret Int
 
 func rae_audio_device_sample_rate(device: Int) unsafe extern("rae_audio_device_sample_rate") ret Int
 
@@ -262,3 +274,54 @@ func rae_audio_android_focus_request(
 ) unsafe extern("rae_audio_android_focus_request") ret Int
 
 func rae_audio_android_focus_abandon() unsafe extern("rae_audio_android_focus_abandon") ret Int
+
+func rae_audio_midi_client(nameZ: Buffer(UInt8)) unsafe extern("rae_audio_midi_client") ret Int
+
+func rae_audio_midi_client_dispose(client: Int) unsafe extern("rae_audio_midi_client_dispose")
+
+func rae_audio_midi_input_port(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_input_port") ret Int
+
+func rae_audio_midi_output_port(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_output_port") ret Int
+
+func rae_audio_midi_virtual_destination(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_virtual_destination") ret Int
+
+func rae_audio_midi_virtual_source(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_virtual_source") ret Int
+
+func rae_audio_midi_source_count() unsafe extern("rae_audio_midi_source_count") ret Int
+
+func rae_audio_midi_source(index: Int) unsafe extern("rae_audio_midi_source") ret Int
+
+func rae_audio_midi_destination_count() unsafe extern("rae_audio_midi_destination_count") ret Int
+
+func rae_audio_midi_destination(index: Int) unsafe extern("rae_audio_midi_destination") ret Int
+
+func rae_audio_midi_endpoint_name(
+  endpoint: Int
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_midi_endpoint_name") ret Int
+
+func rae_audio_midi_connect(port: Int, source: Int) unsafe extern("rae_audio_midi_connect") ret Int
+
+func rae_audio_midi_send(
+  port: Int
+  endpoint: Int
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_midi_send") ret Int
+
+func rae_audio_midi_poll() unsafe extern("rae_audio_midi_poll") ret Int
+
+func rae_audio_midi_dropped() unsafe extern("rae_audio_midi_dropped") ret Int

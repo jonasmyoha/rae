@@ -17,7 +17,8 @@
 
 /* A playback device with float samples at this rate, channel count and
  * period (0 for the device's own); 0 when none could be opened. */
-int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t period_frames);
+int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t period_frames, int64_t input_channels);
+int64_t rae_audio_device_input_channels(int64_t device);
 /* What the device really uses */
 int64_t rae_audio_device_sample_rate(int64_t device);
 int64_t rae_audio_device_channels(int64_t device);
@@ -133,6 +134,11 @@ int64_t rae_audio_device_buffer_frames(int64_t device);
 int64_t rae_audio_device_backend_name(int64_t device, uint8_t* into, int64_t capacity);
 int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property);
 int64_t rae_audio_session_output_latency_ns(void);
+int64_t rae_audio_session_input_latency_ns(void);
+/* The microphone's permission: 0 not asked, 1 restricted, 2 denied, 3
+ * allowed, -1 cannot be asked here; request asks (1 when asked) */
+int64_t rae_audio_microphone_permission(void);
+int64_t rae_audio_microphone_request(void);
 
 /* AAC on Android: the NDK's AMediaCodec, one codec call each (loaded at run
  * time; elsewhere create answers 0). create: a decoder for `mime_z`. format:
@@ -165,6 +171,27 @@ int64_t rae_audio_codec_output_int(int64_t codec, uint8_t* key_z, int64_t fallba
  * content type (1 granted, 2 delayed, 0 refused or not Android); abandon it. */
 int64_t rae_audio_android_focus_request(int64_t gain, int64_t usage, int64_t content);
 int64_t rae_audio_android_focus_abandon(void);
+
+/* MIDI through CoreMIDI (Apple; elsewhere client answers 0). A client owns
+ * ports and virtual endpoints. What an input port's sources or a virtual
+ * destination receive is queued as [length, host time in ns, bytes...] and
+ * read one value at a time with poll (-1: empty). send: one packet now, to a
+ * destination through an output port, or out of our virtual source (port 0). */
+int64_t rae_audio_midi_client(uint8_t* name_z);
+void rae_audio_midi_client_dispose(int64_t client);
+int64_t rae_audio_midi_input_port(int64_t client, uint8_t* name_z);
+int64_t rae_audio_midi_output_port(int64_t client, uint8_t* name_z);
+int64_t rae_audio_midi_virtual_destination(int64_t client, uint8_t* name_z);
+int64_t rae_audio_midi_virtual_source(int64_t client, uint8_t* name_z);
+int64_t rae_audio_midi_source_count(void);
+int64_t rae_audio_midi_source(int64_t index);
+int64_t rae_audio_midi_destination_count(void);
+int64_t rae_audio_midi_destination(int64_t index);
+int64_t rae_audio_midi_endpoint_name(int64_t endpoint, uint8_t* into, int64_t capacity);
+int64_t rae_audio_midi_connect(int64_t port, int64_t source);
+int64_t rae_audio_midi_send(int64_t port, int64_t endpoint, uint8_t* bytes, int64_t count);
+int64_t rae_audio_midi_poll(void);
+int64_t rae_audio_midi_dropped(void);
 
 /* A file read in pieces (audio/AacDecoder reads an MP4's samples where its
  * sample table says): open answers a descriptor (>= 0) or -errno; read_at

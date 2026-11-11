@@ -911,6 +911,36 @@ green.
 5. **Input and MIDI.** Duplex devices, recording to file with latency
    correction, permissions; MIDI in/out on CoreMIDI first, then the others; a
    small synth node to play.
+
+   **Landed, macOS first (2026-11-12), `packages/audio` 0.11.0:**
+   - Input: `AudioSettings.inputChannels` opens the device as duplex (the
+     default input in the same callback, one sample clock); the callback hands
+     each period's input to Rae (`realtime cExport("rae_audio_capture")`,
+     `captureInput`) into a ring with the output sample time of its first
+     frame. `audio/AudioInput`: `beginRecording` / `recordInto` /
+     `finishRecording`; the round trip (output latency plus input latency,
+     from Core Audio's input scope on macOS, AVAudioSession's inputLatency on
+     iOS) is cut, so frame i of a take lines up with output sample
+     `alignedStart + i`. `microphonePermission` / `requestMicrophone`
+     (AVCaptureDevice; a check never asks by itself).
+   - MIDI: `audio/Midi` parses bytes in Rae (running status, real-time bytes
+     inside a message, system exclusive, a note on at velocity 0 as a note
+     off, pitch bend); `audio/MidiPorts` is CoreMIDI (loaded at run time):
+     sources and destinations by name, input ports, virtual source and
+     destination, send; the read callback only queues packets with their host
+     time.
+   - `audio/AudioSynth`: a 32-voice synth inside the mixer (sine and octave,
+     attack / decay / sustain / release), its notes mixer commands through the
+     event list, so they start on their sample (`playNoteAt`,
+     `releaseNoteAt`, `playMidi`).
+   - Fixture 1417 (the parser, the synth on its sample and in blocks of 1, 17,
+     64, 512 and changing sizes, playMidi, a recording's alignment and lost
+     samples), clean under RealtimeSanitizer. `checks/audioMidi` (a loopback
+     through the system's MIDI server) and `checks/audioInput` (2 s of the
+     built-in microphone: none lost, round trip 725 frames on a MacBook's
+     speakers and microphone) pass on the Mac. Not yet: Android, Windows,
+     Linux and the web's input and MIDI, and the Apogee Duet (not plugged in),
+     each queued.
 6. **The DAW engine.** The ECS layer (§10.2) in full, plan compilation with
    delay compensation, EQ / compressor / reverb nodes, parallel audio workers
    with workgroups/MMCSS, stage B (once the FFI callback exists), CLAP hosting,
