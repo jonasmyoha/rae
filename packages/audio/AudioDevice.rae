@@ -21,6 +21,92 @@ open collections/SpscRing
 type AudioRenderState {
   mixer: AudioMixer
   commands: SpscRing(AudioCommand)
+  input: AudioInputShared
+}
+
+# A duplex device's input (audio/AudioInput), shared by the callback (which
+# fills it) and the main thread (which records from it); plain handles
+type AudioInputShared {
+  # 0 when the device has no input
+  channels: Int
+  # the input's samples, interleaved
+  ring: SpscRing(Float)
+  # the sample time (the output's) of the first frame ever captured; -1 before
+  start: Atomic(Int)
+  # samples the full ring had no room for
+  dropped: Atomic(Int)
+}
+
+# The input channels the device opened with (0: output only)
+func deviceInputChannels(device: view Int) ret Int {
+  if device is 0 {
+    ret 0
+  }
+  unsafe {
+    ret rae_audio_device_input_channels(device: device)
+  }
+}
+
+# Two seconds of input
+func createAudioInputShared(channels: view Int, sampleRate: view Int) ret AudioInputShared {
+  ret AudioInputShared {
+    channels: channels
+    ring: createSpscRing(Float, capacity: max(a: 1, b: 2 * sampleRate * channels))
+    start: createAtomic(Int, value: -1)
+    dropped: createAtomic(Int, value: 0)
+  }
+}
+
+func freeAudioInputShared(input: view AudioInputShared) {
+  freeSpscRing(this: input.ring)
+  freeAtomic(this: input.start)
+  freeAtomic(this: input.dropped)
+}
+
+# One period of input, captured in the period whose output starts at sample
+# `blockStart`: into the ring (what does not fit is counted, not waited for)
+func captureInput(
+  input: view AudioInputShared
+  samples: view Buffer(Float)
+  frames: view Int
+  channels: view Int
+  blockStart: view Int
+) realtime {
+  if input.channels is 0 {
+    ret
+  }
+  if input.start.load() < 0 {
+    input.start.store(value: blockStart)
+  }
+  var dropped: Int = 0
+  loop var i: Int = 0, i < frames * channels, ++i {
+    unsafe {
+      if not input.ring.push(value: rae_ext_rae_buf_get(buf: samples, index: i)) {
+        dropped = dropped + 1
+      }
+    }
+  }
+  if dropped > 0 {
+    input.dropped.fetchAdd(amount: dropped)
+  }
+}
+
+# The device's input of this period, before it renders the output (a duplex
+# device's callback, native/rae_audio_glue.c)
+func audioDeviceCapture(
+  states: copy Buffer(AudioRenderState)
+  input: copy Buffer(Float)
+  frames: copy Int
+  channels: copy Int
+) realtime cExport("rae_audio_capture") {
+  let render: mod AudioRenderState = renderStateOf(states: states)
+  captureInput(
+    input: render.input
+    samples: input
+    frames: frames
+    channels: channels
+    blockStart: render.mixer.sampleTime
+  )
 }
 
 # The state behind the pointer the callback passes (the List's element)

@@ -15,6 +15,7 @@ open audio/Audio
 open audio/AudioButler
 open audio/AudioClock
 open audio/AudioMixer
+open audio/Midi
 open media/MediaTime
 
 func sendVoiceCommandAt(
@@ -137,4 +138,59 @@ func heardSampleTimeAt(this: view AudioEngine, hostNs: view Int) ret Int {
 # nextSafeSampleTime); offline, where the audio thread's mixer is this one
 func lateCommandCount(this: view AudioEngine) ret Int {
   ret this.mixer.lateCommands
+}
+
+# The synth (audio/AudioSynth): `note` (MIDI, 60 = middle C) at `velocity`
+# (0..1) from sample `atSample`, on `bus`
+func playNoteAt(
+  this: view AudioEngine
+  note: view Int
+  velocity: view Float
+  bus: view AudioBusKind
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOn)
+  command.voiceId = note
+  command.value = velocity
+  command.bus = busIndex(bus: bus)
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# The note's release starts at `atSample`
+func releaseNoteAt(this: view AudioEngine, note: view Int, atSample: view Int) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOff)
+  command.voiceId = note
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+func releaseAllNotesAt(this: view AudioEngine, atSample: view Int) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.allNotesOff)
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Play a MIDI message on the synth as soon as it can be heard (note on, note
+# off, all notes off on controller 123); false for any other message
+func playMidi(this: view AudioEngine, message: view MidiMessage, bus: view AudioBusKind) ret Bool {
+  let at: Int = this.nextSafeSampleTime()
+  if message.kind is MidiKind.noteOn {
+    this.playNoteAt(
+      note: message.data1
+      velocity: (message.data2 as Float) / 127.0
+      bus: bus
+      atSample: at
+    )
+    ret true
+  }
+  if message.kind is MidiKind.noteOff {
+    this.releaseNoteAt(note: message.data1, atSample: at)
+    ret true
+  }
+  if message.kind is MidiKind.controlChange and message.data1 is 123 {
+    this.releaseAllNotesAt(atSample: at)
+    ret true
+  }
+  ret false
 }

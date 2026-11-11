@@ -13,6 +13,7 @@
 # Every command carries the sample time it takes effect at (0: at once), and a
 # voice starts at exactly that sample, whatever the block size (§6.2).
 import Math
+open audio/AudioSynth
 open Atomic
 open audio/Sound
 open collections/SpscRing
@@ -41,6 +42,11 @@ enum AudioCommandKind {
   stopBus
   pauseVoice
   resumeVoice
+  # the synth (audio/AudioSynth): `voiceId` is the note, `value` the
+  # velocity (0..1), `bus` its bus
+  noteOn
+  noteOff
+  allNotesOff
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -186,6 +192,7 @@ type AudioMixer {
   feedback: SpscRing(AudioFeedback)
   reclaim: SpscRing(Int)
   clockStamps: SpscRing(ClockStamp)
+  synth: SynthState
 }
 
 func createAudioMixer(
@@ -232,6 +239,7 @@ func createAudioMixer(
     feedback: feedback
     reclaim: reclaim
     clockStamps: clockStamps
+    synth: createSynthState(sampleRate: sampleRate, bus: 0)
   }
 }
 
@@ -384,6 +392,19 @@ func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
 func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   if command.kind is AudioCommandKind.play {
     startVoice(mixer: mixer, command: command)
+    ret
+  }
+  if command.kind is AudioCommandKind.noteOn {
+    mixer.synth.bus = command.bus
+    synthNoteOn(synth: mixer.synth, note: command.voiceId, velocity: command.value)
+    ret
+  }
+  if command.kind is AudioCommandKind.noteOff {
+    synthNoteOff(synth: mixer.synth, note: command.voiceId)
+    ret
+  }
+  if command.kind is AudioCommandKind.allNotesOff {
+    synthAllNotesOff(synth: mixer.synth)
     ret
   }
   if command.kind is AudioCommandKind.setBusGain {
@@ -749,6 +770,14 @@ func renderPart(
       reportVoiceEnded(mixer: mixer, voiceId: endedVoiceId)
     }
   }
+  synthRender(
+    synth: mixer.synth
+    busLeft: busLeft
+    busRight: busRight
+    maxFrames: maxFrames
+    from: from
+    frames: frames
+  )
   loop var frame: Int = from, frame < from + frames, ++frame {
     if mixer.duckOn {
       if sampleAt(samples: activity, index: frame) > 0.0 {

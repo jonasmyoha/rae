@@ -1,0 +1,274 @@
+# audio/Midi — MIDI 1.0 messages from bytes, and back (docs/audio-design.md
+# §8.2). The platform's MIDI (audio/MidiPorts: CoreMIDI) hands bytes with the
+# host time they arrived at; this turns them into messages. Running status (a
+# status byte left out when it repeats), real-time bytes (clock, start, stop)
+# that may come in the middle of another message, and system exclusive
+# messages of any length are handled here, in Rae.
+#
+#     var parser: MidiParser = createMidiParser()
+#     parser.feedMidi(byte: 0x90, hostNs: t)   ... one byte at a time
+#     loop let message: MidiMessage in parser.takeMidi() { ... }
+import Math
+
+enum MidiKind {
+  noteOff
+  noteOn
+  polyPressure
+  controlChange
+  programChange
+  channelPressure
+  pitchBend
+  # system exclusive: `data` holds the bytes between F0 and F7
+  systemExclusive
+  # system common and real time (clock, start, continue, stop, ...): `status`
+  # says which
+  system
+}
+
+type MidiMessage {
+  kind: MidiKind
+  # 0-15 for a channel message
+  channel: Int
+  status: Int
+  # the first and second data bytes (a note and its velocity, a controller and
+  # its value); a pitch bend's 14 bits are in `bend` (-8192 .. 8191)
+  data1: Int
+  data2: Int
+  bend: Int
+  data: List(UInt8)
+  # when it arrived (the host's monotonic clock, ns)
+  hostNs: Int
+}
+
+type MidiParser {
+  # the status a running message uses, 0 for none
+  runningStatus: Int
+  dataBytes: List(Int)
+  inSystemExclusive: Bool
+  # a status byte just came: the message's time is its time, not its first
+  # data byte's (with running status there is no status byte)
+  statusFresh: Bool
+  systemExclusive: List(UInt8)
+  messageNs: Int
+  ready: List(MidiMessage)
+}
+
+func createMidiParser() ret MidiParser {
+  ret MidiParser {
+    runningStatus: 0
+    dataBytes: List.create(Int, cap: 2)
+    inSystemExclusive: false
+    statusFresh: false
+    systemExclusive: List.create(UInt8, cap: 64)
+    messageNs: 0
+    ready: List.create(MidiMessage, cap: 16)
+  }
+}
+
+# How many data bytes follow a status byte (-1: system exclusive, any number)
+func midiDataLength(status: view Int) ret Int {
+  let high: Int = status bitand 240
+  if high is 192 or high is 208 {
+    ret 1
+  }
+  if high >= 128 and high < 240 {
+    ret 2
+  }
+  if status is 240 {
+    ret -1
+  }
+  if status is 241 or status is 243 {
+    ret 1
+  }
+  if status is 242 {
+    ret 2
+  }
+  ret 0
+}
+
+func midiKindOf(status: view Int) ret MidiKind {
+  let high: Int = status bitand 240
+  if high is 128 {
+    ret MidiKind.noteOff
+  }
+  if high is 144 {
+    ret MidiKind.noteOn
+  }
+  if high is 160 {
+    ret MidiKind.polyPressure
+  }
+  if high is 176 {
+    ret MidiKind.controlChange
+  }
+  if high is 192 {
+    ret MidiKind.programChange
+  }
+  if high is 208 {
+    ret MidiKind.channelPressure
+  }
+  if high is 224 {
+    ret MidiKind.pitchBend
+  }
+  if status is 240 {
+    ret MidiKind.systemExclusive
+  }
+  ret MidiKind.system
+}
+
+func midiMessage(
+  status: view Int
+  data1: view Int
+  data2: view Int
+  hostNs: view Int
+) ret MidiMessage {
+  var kind: MidiKind = midiKindOf(status: status)
+  # a note on with velocity 0 is a note off (MIDI 1.0)
+  if kind is MidiKind.noteOn and data2 is 0 {
+    kind = MidiKind.noteOff
+  }
+  var channel: Int = 0
+  if status < 240 {
+    channel = status bitand 15
+  }
+  var bend: Int = 0
+  if kind is MidiKind.pitchBend {
+    bend = (data1 bitor (data2 shl 7)) - 8192
+  }
+  ret MidiMessage {
+    kind: kind
+    channel: channel
+    status: status
+    data1: data1
+    data2: data2
+    bend: bend
+    data: List.create(UInt8, cap: 0)
+    hostNs: hostNs
+  }
+}
+
+# One byte of the stream, arrived at `hostNs`
+func feedMidi(this: mod MidiParser, byte: view Int, hostNs: view Int) {
+  let value: Int = byte bitand 255
+  if value >= 248 {
+    # real time: a message by itself, even inside another one
+    this.ready.add(value: midiMessage(
+      status: value
+      data1: 0
+      data2: 0
+      hostNs: hostNs
+    ))
+    ret
+  }
+  if value >= 128 {
+    if value is 247 {
+      if this.inSystemExclusive {
+        var message: MidiMessage = midiMessage(
+          status: 240
+          data1: 0
+          data2: 0
+          hostNs: this.messageNs
+        )
+        message.data = this.systemExclusive
+        this.ready.add(value: message)
+        this.systemExclusive = List.create(UInt8, cap: 64)
+      }
+      this.inSystemExclusive = false
+      ret
+    }
+    # a new status ends a system exclusive message that lost its F7
+    this.inSystemExclusive = false
+    this.dataBytes.clear()
+    this.messageNs = hostNs
+    if value is 240 {
+      this.inSystemExclusive = true
+      this.systemExclusive.clear()
+      this.runningStatus = 0
+      ret
+    }
+    if midiDataLength(status: value) is 0 {
+      this.ready.add(value: midiMessage(
+        status: value
+        data1: 0
+        data2: 0
+        hostNs: hostNs
+      ))
+      if value < 248 {
+        this.runningStatus = 0
+      }
+      ret
+    }
+    this.runningStatus = value
+    this.statusFresh = true
+    ret
+  }
+  # a data byte
+  if this.inSystemExclusive {
+    this.systemExclusive.add(value: value as UInt8)
+    ret
+  }
+  if this.runningStatus is 0 {
+    # data with no status to belong to: dropped
+    ret
+  }
+  if this.dataBytes.length() is 0 and not this.statusFresh {
+    this.messageNs = hostNs
+  }
+  this.statusFresh = false
+  this.dataBytes.add(value: value)
+  let length: Int = midiDataLength(status: this.runningStatus)
+  if this.dataBytes.length() >= length {
+    this.ready.add(value: midiMessage(
+      status: this.runningStatus
+      data1: this.dataBytes.copyAtFallback(index: 0, fallback: 0)
+      data2: this.dataBytes.copyAtFallback(index: 1, fallback: 0)
+      hostNs: this.messageNs
+    ))
+    this.dataBytes.clear()
+    # system common messages do not run
+    if this.runningStatus >= 240 {
+      this.runningStatus = 0
+    }
+  }
+}
+
+# The messages completed so far, oldest first
+func takeMidi(this: mod MidiParser) ret List(MidiMessage) {
+  let taken: List(MidiMessage) = this.ready
+  this.ready = List.create(MidiMessage, cap: 16)
+  ret taken
+}
+
+# The bytes of a channel message (to send)
+func midiBytes(
+  kind: view MidiKind
+  channel: view Int
+  data1: view Int
+  data2: view Int
+) ret List(UInt8) {
+  var status: Int = 144
+  if kind is MidiKind.noteOff {
+    status = 128
+  } else if kind is MidiKind.polyPressure {
+    status = 160
+  } else if kind is MidiKind.controlChange {
+    status = 176
+  } else if kind is MidiKind.programChange {
+    status = 192
+  } else if kind is MidiKind.channelPressure {
+    status = 208
+  } else if kind is MidiKind.pitchBend {
+    status = 224
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: 3)
+  bytes.add(value: (status bitor (channel bitand 15)) as UInt8)
+  bytes.add(value: (data1 bitand 127) as UInt8)
+  if midiDataLength(status: status) is 2 {
+    bytes.add(value: (data2 bitand 127) as UInt8)
+  }
+  ret bytes
+}
+
+# A note's frequency in Hz (A4 = note 69 = 440 Hz, equal temperament)
+func midiNoteFrequency(note: view Int) ret Float {
+  ret pow(base: 2.0, exp: ((note - 69) as Float) / 12.0) * 440.0
+}

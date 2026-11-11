@@ -59,6 +59,8 @@ type AudioSettings {
   offline: Bool
   # what the program's sound is for (audio/AudioSession)
   session: AudioSessionKind
+  # input channels to record (audio/AudioInput), 0 for none: a duplex device
+  inputChannels: Int
 }
 
 func defaultAudioSettings() ret AudioSettings {
@@ -68,6 +70,7 @@ func defaultAudioSettings() ret AudioSettings {
     periodFrames: 256
     offline: false
     session: AudioSessionKind.ambient
+    inputChannels: 0
   }
 }
 
@@ -112,6 +115,7 @@ type AudioEngine {
   # the renders' (sample time, host time) and the clock they feed (§6.1)
   clockStamps: SpscRing(ClockStamp)
   clock: AudioClock
+  input: AudioInputShared
   output: SpscRing(Float)
   wake: Signal
   running: Atomic(Bool)
@@ -186,6 +190,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         sampleRate: sampleRate
         channels: channels
         periodFrames: periodFrames
+        inputChannels: settings.inputChannels
       )
       if device is not 0 {
         sampleRate = rae_audio_device_sample_rate(device: device)
@@ -222,6 +227,10 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     )
     butlerTask = spawn butlerThread(butler: threadButler, running: butlerRunning)
   }
+  let input: AudioInputShared = createAudioInputShared(
+    channels: deviceInputChannels(device: device)
+    sampleRate: sampleRate
+  )
   var renderStates: List(AudioRenderState) = {}
   let deviceRenders: Bool = device is not 0 and getEnv(name: "RAE_AUDIO_STAGE") is not "A"
   if deviceRenders {
@@ -234,6 +243,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         clockStamps: clockStamps
       )
       commands: commands
+      input: input
     })
     unsafe {
       rae_audio_device_attach_render(device: device, state: renderStates.data as Ptr)
@@ -292,6 +302,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     feedback: feedback
     reclaim: reclaim
     clockStamps: clockStamps
+    input: input
     clock: createAudioClock(
       sampleRate: sampleRate
       offline: device is 0
@@ -719,6 +730,7 @@ func stopAudio(this: mod AudioEngine) ret Int {
   freeSpscRing(this: this.feedback)
   freeSpscRing(this: this.reclaim)
   freeSpscRing(this: this.clockStamps)
+  freeAudioInputShared(input: this.input)
   freeSpscRing(this: this.output)
   freeSpscRing(this: this.butlerCommands)
   freeSpscRing(this: this.butlerClosed)
