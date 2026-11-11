@@ -1,7 +1,8 @@
 # Real-time code in Rae: what the language needs
 
 Status: **proposal, nothing implemented** (2026-11-11). New syntax needs
-approval (AGENTS.md "Scope boundaries"); §9 lists the decisions.
+approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. R1 and R2
+are decided: the keywords are `realtime` and `noAlloc`.
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -86,8 +87,7 @@ func renderBlock(engine: mod AudioEngineState, block: mod AudioBlock) realtime {
 - **`realtime`** on a function: it and everything it can reach neither
   allocate, free, lock nor wait. It is the strict set, for the audio thread, MIDI
   timing, an audio worker, a control loop.
-- **`noAlloc`** on a function (a second step, only if games or the video
-  frame path ask for it): it and everything it reaches neither allocate nor
+- **`noAlloc`** on a function (built together with `realtime`): it and everything it reaches neither allocate nor
   free. Locks and waits are allowed. For "no garbage per frame" in a game's
   update or a renderer's per-frame record. `realtime` includes it.
 
@@ -277,7 +277,7 @@ setup` installs), or runs on Linux.
 
 ### 5.3 Rae's own runtime check
 
-The runtime check of `audio-design.md` §4.3 (`RAE_AUDIO_RT_CHECK=1`: a
+The runtime check of `audio-design.md` §4.3 (`RAE_REALTIME_CHECK=1`: a
 thread-local flag set on the audio thread, checked in Rae's allocation, free,
 lock and `log` entry points). It works with any compiler and in release builds,
 and covers the paths RTSan does not see (Rae's own string pool, buffer
@@ -392,10 +392,13 @@ frame path uses the same recorder against a 16.7 ms period.
 
 ## 8. Order of work
 
-1. **Runtime flag** (§5.3) and the **time recorder** (§7): no language change;
-   lands with `audio 1/6`.
-2. **`Atomic(T)`** (§6.4) and **`Signal`** (§6.5), with `SpscRing(T)` in `lib/`.
-3. **`realtime` keyword and analysis** (§3): reuse `may_wait.c`'s graph with an
+The queue holds these as `[realtime 1/6]` to `[realtime 6/6]`, between the audio
+steps that need them.
+
+1. **`Atomic(T)`** (§6.4) and **`Signal`** (§6.5), with `SpscRing(T)` in `lib/`.
+2. **Runtime flag** (§5.3) and the **time recorder** (§7): no language change;
+   before `audio 1/7`.
+3. **`realtime` and `noAlloc` keywords and analysis** (§3): reuse `may_wait.c`'s graph with an
    effect set instead of one flag; `--report-realtime`; the errors of §3.5;
    the plain-value rule for `SpscRing(T)` (§4.1).
 4. **clang attributes** in the generated C and `-Wfunction-effects` in the test
@@ -404,17 +407,17 @@ frame path uses the same recorder against a 16.7 ms period.
 5. **`export`** and foreign threads (§6.1, §6.2): unlocks rendering inside the
    device callback (audio stage B), the VideoToolbox and CoreMIDI callbacks, and
    Box3D's scheduler.
-6. **`noAlloc`** if games or the video frame path ask for it; `restrict`
-   emission (§4.6); `mainThread` (§4.3); the real-time team (§6.6).
+6. `restrict` emission (§4.6); `mainThread` (§4.3); the real-time team (§6.6).
 
 ---
 
 ## 9. Decisions needed
 
 - **R1 — the keyword `realtime`** on functions and externs, in the modifier
-  position (§3.1).
+  position (§3.1). **Decided 2026-11-11: yes.**
 - **R2 — `noAlloc`** (or the spelled-out `noAllocation`) as the second, weaker
-  keyword, or not yet (§3.1).
+  keyword, or not yet (§3.1). **Decided 2026-11-11: `noAlloc`, built together
+  with `realtime`.**
 - **R3 — root-only marking plus required marks on promising `lib/` functions**
   (§3.3), versus marking every function on the path (more noise, no gain with a
   complete call graph).

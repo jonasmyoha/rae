@@ -223,7 +223,7 @@ How the rules are held:
 
 - **At run time, first.** Every real-time thread sets a thread-local flag through
   the shim. The runtime's allocation, free, lock and `log` entry points check the
-  flag; with `RAE_AUDIO_RT_CHECK=1` (on in the test suite) a hit is counted and
+  flag; with `RAE_REALTIME_CHECK=1` (on in the test suite) a hit is counted and
   reported with the function name, and the test fails. Off, the check is one
   thread-local load. This needs no language change and catches the libraries
   too.
@@ -714,7 +714,7 @@ without a device.
 - **Block-size invariance.** The same scene at block sizes 1, 17, 64, 512 and a
   random varying size: the outputs must be equal within the null-test threshold.
   This is the test of sample-accurate scheduling (§6.2).
-- **Real-time safety.** Every audio fixture runs with `RAE_AUDIO_RT_CHECK=1`:
+- **Real-time safety.** Every audio fixture runs with `RAE_REALTIME_CHECK=1`:
   zero allocations, frees, locks and `log` calls on the audio thread, or the case
   fails (§4.3). The normal leak check at exit also applies.
 - **Decoders.** Each against reference PCM: the FLAC test vectors bit-exact, MP3
