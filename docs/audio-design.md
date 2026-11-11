@@ -666,6 +666,25 @@ green.
    `AudioSessionKind` on iOS (category, options, interruptions, route loss).
    First users: SUMU's alarm sound, then game proto1 (its own queue), then delete
    `runtime_audio_sdl3.c`.
+   **Landed, the macOS half (2026-11-11), `packages/audio` 0.1.0:** miniaudio
+   0.11.26's device layer (`native/miniaudio/`, its LICENSE beside it), the C
+   glue `native/rae_audio_glue.c` (device, the stage-A callback, the thread's
+   time-constraint policy, file read and write), and in Rae `audio/AudioMixer`
+   (voices, four buses, 5 ms ramps, equal-power pan, the in-mix duck,
+   sample-accurate starts, the command / feedback / reclaim rings),
+   `audio/Sound` (WAV decode of 8/16/24/32-bit PCM and float, float WAV
+   encode, sounds made in code) and `audio/Audio` (the API of §10.1, the
+   stage-A render thread, the offline driver with `RAE_AUDIO_DEVICE=offline`
+   and `RAE_AUDIO_CAPTURE`). Measured on a Mac: rendering a 256-frame block
+   takes about 4 µs of its 5.3 ms; a ring of two periods ran short, because
+   Core Audio takes bursts of more than one period, so stage A keeps four
+   (up to 21 ms). Fixtures 1401 (null test, block sizes, exact start, stop
+   fade, duck, reclaim) and 1402 (WAV files written by Python, a worker load,
+   the capture), both under `RAE_REALTIME_CHECK=1`; `checks/audioSine` plays
+   on the real output with no underrun. Not yet: the iOS session (step 1's
+   second half), `nextSafeSampleTime` with a device, and moving
+   `compiler/runtime/runtime_audio_sdl3.c`'s user to this package.
+
 2. **Streams and the music player.** The butler; dr_mp3, dr_flac, stb_vorbis;
    AAC through AudioToolbox; the Rae resampler (`good`); seek, gapless next;
    Now Playing and remote commands; background play on iOS. SUMU's music player.

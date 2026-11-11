@@ -1,0 +1,170 @@
+/* The audio package's C glue (rae_audio.h). Platform reason: opening and
+ * running the sound device (miniaudio's device layer over Core Audio, WASAPI,
+ * ALSA/PulseAudio/JACK, AAudio, Web Audio), the thread's real-time policy, and
+ * writing a file. The one place with more than one call is the device
+ * callback, which must be C until Rae functions can be called from C
+ * (docs/audio-design.md §4.2 stage A): it copies a period out of the Rae ring
+ * and posts the Rae Signal, nothing more. */
+#define MA_NO_DECODING
+#define MA_NO_ENCODING
+#define MA_NO_RESOURCE_MANAGER
+#define MA_NO_NODE_GRAPH
+#define MA_NO_ENGINE
+#define MA_NO_GENERATION
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio/miniaudio.h"
+
+#include "rae_audio.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#endif
+
+/* lib/Signal.rae's post, from the Rae runtime the program links */
+void rae_ext_rae_signal_post(int64_t signal);
+
+typedef struct {
+  ma_device device;
+  float* slots;
+  int64_t* counters;      /* [0] read (ours), [8] written (Rae's) */
+  int64_t capacity;       /* in samples */
+  int64_t signal;
+  int64_t underrun_frames;
+  int64_t callbacks;
+} RaeAudioDevice;
+
+static void rae_audio_callback(ma_device* device, void* output, const void* input, ma_uint32 frames) {
+  (void)input;
+  RaeAudioDevice* audio = (RaeAudioDevice*)device->pUserData;
+  float* out = (float*)output;
+  int64_t channels = (int64_t)device->playback.channels;
+  int64_t wanted = (int64_t)frames * channels;
+  int64_t taken = 0;
+  if (audio->slots) {
+    int64_t read = __atomic_load_n(&audio->counters[0], __ATOMIC_RELAXED);
+    int64_t written = __atomic_load_n(&audio->counters[8], __ATOMIC_ACQUIRE);
+    int64_t available = written - read;
+    taken = available < wanted ? available : wanted;
+    for (int64_t i = 0; i < taken; i++) out[i] = audio->slots[(read + i) % audio->capacity];
+    __atomic_store_n(&audio->counters[0], read + taken, __ATOMIC_RELEASE);
+  }
+  if (taken < wanted) {
+    memset(out + taken, 0, (size_t)(wanted - taken) * sizeof(float));
+    __atomic_fetch_add(&audio->underrun_frames, (wanted - taken) / channels, __ATOMIC_RELAXED);
+  }
+  __atomic_fetch_add(&audio->callbacks, 1, __ATOMIC_RELAXED);
+  if (audio->signal) rae_ext_rae_signal_post(audio->signal);
+}
+
+int64_t rae_audio_device_open(int64_t sample_rate, int64_t channels, int64_t period_frames) {
+  RaeAudioDevice* audio = (RaeAudioDevice*)calloc(1, sizeof(RaeAudioDevice));
+  if (!audio) return 0;
+  ma_device_config config = ma_device_config_init(ma_device_type_playback);
+  config.playback.format = ma_format_f32;
+  config.playback.channels = (ma_uint32)channels;
+  config.sampleRate = (ma_uint32)sample_rate;
+  config.periodSizeInFrames = (ma_uint32)period_frames;
+  config.performanceProfile = ma_performance_profile_low_latency;
+  config.noFixedSizedCallback = MA_TRUE;
+  config.dataCallback = rae_audio_callback;
+  config.pUserData = audio;
+  if (ma_device_init(NULL, &config, &audio->device) != MA_SUCCESS) {
+    free(audio);
+    return 0;
+  }
+  return (int64_t)(intptr_t)audio;
+}
+
+int64_t rae_audio_device_sample_rate(int64_t device) {
+  return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.sampleRate : 0;
+}
+
+int64_t rae_audio_device_channels(int64_t device) {
+  return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.playback.channels : 0;
+}
+
+int64_t rae_audio_device_period_frames(int64_t device) {
+  return device ? (int64_t)((RaeAudioDevice*)(intptr_t)device)->device.playback.internalPeriodSizeInFrames : 0;
+}
+
+void rae_audio_device_attach(int64_t device, float* slots, int64_t* counters, int64_t capacity,
+                             int64_t signal) {
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  if (!audio) return;
+  audio->slots = slots;
+  audio->counters = counters;
+  audio->capacity = capacity;
+  audio->signal = signal;
+}
+
+int64_t rae_audio_device_start(int64_t device) {
+  return device && ma_device_start(&((RaeAudioDevice*)(intptr_t)device)->device) == MA_SUCCESS;
+}
+
+int64_t rae_audio_device_stop(int64_t device) {
+  return device && ma_device_stop(&((RaeAudioDevice*)(intptr_t)device)->device) == MA_SUCCESS;
+}
+
+void rae_audio_device_close(int64_t device) {
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  if (!audio) return;
+  ma_device_uninit(&audio->device);
+  free(audio);
+}
+
+int64_t rae_audio_device_underrun_frames(int64_t device) {
+  return device ? __atomic_load_n(&((RaeAudioDevice*)(intptr_t)device)->underrun_frames, __ATOMIC_RELAXED) : 0;
+}
+
+int64_t rae_audio_device_callbacks(int64_t device) {
+  return device ? __atomic_load_n(&((RaeAudioDevice*)(intptr_t)device)->callbacks, __ATOMIC_RELAXED) : 0;
+}
+
+int64_t rae_audio_thread_set_realtime(int64_t period_ns, int64_t compute_ns) {
+#if defined(__APPLE__)
+  mach_timebase_info_data_t timebase;
+  mach_timebase_info(&timebase);
+  double ticks_per_ns = (double)timebase.denom / (double)timebase.numer;
+  thread_time_constraint_policy_data_t policy;
+  policy.period = (uint32_t)((double)period_ns * ticks_per_ns);
+  policy.computation = (uint32_t)((double)compute_ns * ticks_per_ns);
+  policy.constraint = policy.period;
+  policy.preemptible = 1;
+  return thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+                           (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
+#else
+  (void)period_ns; (void)compute_ns;
+  return 0;
+#endif
+}
+
+int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count) {
+  FILE* file = fopen((const char*)path_z, "wb");
+  if (!file) return 0;
+  size_t wrote = fwrite(bytes, 1, (size_t)count, file);
+  return (fclose(file) == 0 && wrote == (size_t)count) ? 1 : 0;
+}
+
+int64_t rae_audio_file_size(uint8_t* path_z) {
+  FILE* file = fopen((const char*)path_z, "rb");
+  if (!file) return -1;
+  int64_t size = -1;
+  if (fseek(file, 0, SEEK_END) == 0) size = (int64_t)ftell(file);
+  fclose(file);
+  return size;
+}
+
+int64_t rae_audio_read_file(uint8_t* path_z, uint8_t* into, int64_t count) {
+  FILE* file = fopen((const char*)path_z, "rb");
+  if (!file) return -1;
+  size_t got = fread(into, 1, (size_t)count, file);
+  fclose(file);
+  return (int64_t)got;
+}

@@ -1,0 +1,58 @@
+cheader "rae_audio.h"
+
+# The bindings to native/rae_audio_glue.c (docs/audio-design.md §3 L1): the
+# device through miniaudio's device layer, the thread's real-time policy and a
+# file write, one call each. The engine is audio/AudioMixer and audio/Audio. A
+# program that imports this links the package's C (native/build.sh builds it).
+func rae_audio_device_open(
+  sampleRate: Int
+  channels: Int
+  periodFrames: Int
+) unsafe extern("rae_audio_device_open") ret Int
+
+func rae_audio_device_sample_rate(device: Int) unsafe extern("rae_audio_device_sample_rate") ret Int
+
+func rae_audio_device_channels(device: Int) unsafe extern("rae_audio_device_channels") ret Int
+
+func rae_audio_device_period_frames(
+  device: Int
+) unsafe extern("rae_audio_device_period_frames") ret Int
+
+func rae_audio_device_attach(
+  device: Int
+  slots: Buffer(Float)
+  counters: Buffer(Int)
+  capacity: Int
+  signal: Int
+) unsafe extern("rae_audio_device_attach")
+
+func rae_audio_device_start(device: Int) unsafe extern("rae_audio_device_start") ret Int
+
+func rae_audio_device_stop(device: Int) unsafe extern("rae_audio_device_stop") ret Int
+
+func rae_audio_device_close(device: Int) unsafe extern("rae_audio_device_close")
+
+func rae_audio_device_underrun_frames(
+  device: Int
+) unsafe extern("rae_audio_device_underrun_frames") ret Int
+
+func rae_audio_device_callbacks(device: Int) unsafe extern("rae_audio_device_callbacks") ret Int
+
+func rae_audio_thread_set_realtime(
+  periodNs: Int
+  computeNs: Int
+) unsafe extern("rae_audio_thread_set_realtime") ret Int
+
+func rae_audio_file_size(pathZ: Buffer(UInt8)) unsafe extern("rae_audio_file_size") ret Int
+
+func rae_audio_read_file(
+  pathZ: Buffer(UInt8)
+  into: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_read_file") ret Int
+
+func rae_audio_write_file(
+  pathZ: Buffer(UInt8)
+  bytes: Buffer(UInt8)
+  count: Int
+) blocking unsafe extern("rae_audio_write_file") ret Int
