@@ -1,0 +1,38 @@
+# The painted grass's recipe and its rings (GrassConfig grassPaintedSettings, grassPaintedMidRing,
+# grassPaintedFarRing; lib/GrassTiers draws them): the colors and the root lift taken as given, the
+# recipe's look values, and each ring starting where the one inside it shrinks out.
+import GrassConfig
+import Vec3
+
+func describe(name: view String, settings: view GrassConfig.GrassViewSettings) {
+  log(
+    "{name}: reach {settings.extent * 0.5} m, inner {settings.innerRadius} m, width {settings.bladeWidthScale}, height {settings.bladeHeightScale}, density {settings.densityScale}"
+  )
+}
+
+func main() {
+  let green: Vec3 = Vec3.create(x: 0.075, y: 0.145, z: 0.065)
+  let straw: Vec3 = Vec3.create(x: 0.3, y: 0.24, z: 0.09)
+  let near: GrassConfig.GrassViewSettings = GrassConfig.grassPaintedSettings(
+    groundColor: green
+    dryColor: straw
+    rootLift: 0.3
+  )
+  log(
+    "painted: {near.shape}, gradient {near.paintGradient}, warmth {near.paintWarmth}, root lift {near.paintRootLift}, tilt {near.cameraTilt}, wind {near.windStrength}, tips {near.tipLighten}"
+  )
+  log(
+    "its colors as given: ground {near.groundColor.x} {near.groundColor.y} {near.groundColor.z}, dry {near.dryColor.x} {near.dryColor.y} {near.dryColor.z}"
+  )
+  let mid: GrassConfig.GrassViewSettings = GrassConfig.grassPaintedMidRing(
+    near: near
+    reach: GrassConfig.grassPaintedMidReach
+  )
+  let far: GrassConfig.GrassViewSettings = GrassConfig.grassPaintedFarRing(
+    mid: mid
+    reach: GrassConfig.grassPaintedFarReach
+  )
+  describe(name: "near", settings: near)
+  describe(name: "mid", settings: mid)
+  describe(name: "far", settings: far)
+}

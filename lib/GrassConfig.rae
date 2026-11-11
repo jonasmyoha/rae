@@ -220,3 +220,60 @@ func grassMeadowSettings(groundColor: copy Vec3) ret GrassViewSettings {
   settings.farWidthScale = 1.25
   ret settings
 }
+
+# The painted grass (game proto1's, docs in its grass plan): GrassShape.painted blades, one opaque
+# triangle each, lit as the ground, each one color, the ground's where it stands (no gradient), so
+# the grass and the ground between its blades read alike at every distance. `groundColor` is the
+# blades' and the ground's green, `dryColor` the dry grass's (the moisture field's 0), `rootLift`
+# how far the roots and the ground painted as grass are lifted toward the blades' middle (0 to 1:
+# a far ring's thin blades then stand on ground that reads as grass). Short, chunky blades that
+# turn toward a camera looking down, with a strong steady lean in the wind.
+func grassPaintedSettings(
+  groundColor: copy Vec3
+  dryColor: copy Vec3
+  rootLift: copy Float
+) ret GrassViewSettings {
+  var settings: GrassViewSettings = grassMeadowSettings(groundColor: groundColor)
+  settings.shape = GrassShape.painted
+  settings.tipLighten = 1.35
+  settings.paintGradient = 0.0
+  settings.dryColor = dryColor
+  settings.dryAmount = 1.0
+  # Little of the yellow-white in the tips and light patches, so a dark green stays green in sun
+  settings.paintWarmth = 0.25
+  settings.paintRootLift = rootLift
+  settings.bladeHeightScale = 0.95
+  settings.bladeWidthScale = 0.85
+  settings.windStrength = 3.6
+  settings.densityScale = 1.0
+  settings.cameraTilt = 0.8
+  ret settings
+}
+
+# How far the painted grass's middle and far rings reach (m, their outer radius)
+const grassPaintedMidReach: Float = 120.0
+
+const grassPaintedFarReach: Float = 300.0
+
+# The painted grass's middle ring to `reach` round the near field: blades twice as wide, 0.7 as many
+func grassPaintedMidRing(near: view GrassViewSettings, reach: view Float) ret GrassViewSettings {
+  ret grassNextRing(
+    inner: near
+    reach: reach
+    widthScale: 2.0
+    heightScale: 1.0
+    densityScale: 0.7
+  )
+}
+
+# The far ring beyond the middle one to `reach`: blades 1.8 times as wide, as many again, as seen
+# from 100 m and more they must be big to read as grass
+func grassPaintedFarRing(mid: view GrassViewSettings, reach: view Float) ret GrassViewSettings {
+  ret grassNextRing(
+    inner: mid
+    reach: reach
+    widthScale: 1.8
+    heightScale: 1.0
+    densityScale: 1.0
+  )
+}
