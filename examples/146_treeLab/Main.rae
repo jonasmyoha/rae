@@ -108,6 +108,7 @@ open MeshStore
 open LabSeason
 open LabScenes
 open LabEditor
+open Cities
 
 # The dolly's length in frames, and its nearest and farthest distance (m)
 const labDollyFrames: Int = 240
@@ -124,6 +125,19 @@ type LabState {
   # the scene shown (LabScenes), and the other scenes built so far, kept to come back to
   scene: Int
   stash: List(LabSceneContent) = List.create(LabSceneContent, cap: 4)
+  # the meshes the shown scene's build uploaded (LabSceneContent meshFirst, meshEnd)
+  meshFirst: Int = 0
+  meshEnd: Int = 0
+  # the panel readout's parts that are slow to find: the nearest city (and the latitude and
+  # longitude it was found for), One tree's kind
+  readoutCity: String = ""
+  readoutLatitude: Float = -1000.0
+  readoutLongitude: Float = -1000.0
+  readoutKind: String = ""
+  # RAE_TREELAB_CONTROLS: control ids (LabEditor labControlButtons, comma separated) clicked once
+  # at frame 20, to check a rebuild with no panel; and the frames run so far
+  scriptedControls: String = ""
+  framesRun: Int = 0
   # the editor chrome and its camera (none in a scripted run: LabScenes labScripted)
   editor: opt LabEditor = none
   # the date and the place the seasons run on, and its day slider
@@ -154,7 +168,7 @@ type LabState {
   leafParticles: opt LeafParticles = none
   leafFrame: Int = 0
   # the dolly (RAE_TREELAB_DOLLY): its folder and the frame it is at
-  dollyFolder: String = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
+  dollyFolder: String = ""
   dollyFrame: Int = 0
   # RAE_TREELAB_STATS=1: every labStatsFrames frames a line of the leaves released, what the
   # shown forest drew and how long the gather and the frames took
@@ -206,10 +220,17 @@ func createLab() ret LabState {
       precipitation: own content.precipitation
       leafParticles: own content.leafParticles
       tree: own content.tree
+      meshFirst: content.meshFirst
+      meshEnd: content.meshEnd
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
       lastTime: Gpu2d.nowSeconds()
     }
+    # set here, not as the fields' defaults: a default's String built by a call is freed when this
+    # function returns (a compiler bug, queued)
+    state.readoutKind = labTreeKindName()
+    state.dollyFolder = Sys.getEnv(name: "RAE_TREELAB_DOLLY")
+    state.scriptedControls = Sys.getEnv(name: "RAE_TREELAB_CONTROLS")
     labCameraHome(state: state)
     # the panel's date replaces the season's own bottom slider, and starts at the season's date
     # (RAE_DAY_OF_YEAR), not the panel's own
@@ -238,7 +259,31 @@ func labShowScene(state: mod LabState, scene: view Int) {
   if scene is state.scene or scene < 1 or scene > labSceneLabels().length {
     ret
   }
-  let kept: LabSceneContent = {
+  state.stash.add(value: own labTakeScene(state: state))
+  let found: Int = labStashIndex(state: state, scene: scene)
+  var content: LabSceneContent = buildLabSceneOrTake(state: state, scene: scene, found: found)
+  applyLabSceneLight(renderer: state.renderer, content: content)
+  labPutScene(state: state, content: content)
+  labCameraHome(state: state)
+  log("[treelab] scene {labSceneLabels().copyAtDefault(index: scene - 1)}")
+}
+
+# The stash's copy of `scene` (-1: none)
+func labStashIndex(state: view LabState, scene: view Int) ret Int {
+  var found: Int = -1
+  loop var i: Int = 0, i < state.stash.length, ++i {
+    if let stored: view LabSceneContent = state.stash.viewAt(index: i) {
+      if stored.scene is scene {
+        found = i
+      }
+    }
+  }
+  ret found
+}
+
+# The shown scene's parts, moved out of the state (labPutScene puts a scene's in)
+func labTakeScene(state: mod LabState) ret LabSceneContent {
+  ret LabSceneContent {
     scene: state.scene
     world: own state.world
     forests: own state.forests
@@ -252,19 +297,13 @@ func labShowScene(state: mod LabState, scene: view Int) {
     leafParticles: own state.leafParticles
     light: state.light
     camera: state.camera
+    meshFirst: state.meshFirst
+    meshEnd: state.meshEnd
   }
-  state.stash.add(value: own kept)
-  var found: Int = -1
-  loop var i: Int = 0, i < state.stash.length, ++i {
-    if let stored: view LabSceneContent = state.stash.viewAt(index: i) {
-      if stored.scene is scene {
-        found = i
-      }
-    }
-  }
-  var content: LabSceneContent = buildLabSceneOrTake(state: state, scene: scene, found: found)
-  applyLabSceneLight(renderer: state.renderer, content: content)
-  state.scene = scene
+}
+
+func labPutScene(state: mod LabState, content: mod LabSceneContent) {
+  state.scene = content.scene
   state.world = own content.world
   state.forests = own content.forests
   state.forestShown = content.forestShown
@@ -277,8 +316,38 @@ func labShowScene(state: mod LabState, scene: view Int) {
   state.leafParticles = own content.leafParticles
   state.light = content.light
   state.camera = content.camera
-  labCameraHome(state: state)
-  log("[treelab] scene {labSceneLabels().copyAtDefault(index: scene - 1)}")
+  state.meshFirst = content.meshFirst
+  state.meshEnd = content.meshEnd
+}
+
+# Build `scenes` again after a control changed what they are built from: the shown one is released
+# and built anew, keeping the camera where it is, its light and the forest shown; a kept one is
+# released and dropped from the stash, so it is built anew when it is next shown
+func labRebuildScenes(state: mod LabState, scenes: view List(Int)) {
+  loop let scene: view Int in scenes {
+    let found: Int = labStashIndex(state: state, scene: scene)
+    if found >= 0 {
+      state.stash.swap(i: found, j: state.stash.length - 1)
+      var dropped: LabSceneContent = state.stash.pop()
+      releaseLabScene(state: state, content: dropped)
+    }
+    if scene is state.scene {
+      var old: LabSceneContent = labTakeScene(state: state)
+      releaseLabScene(state: state, content: old)
+      var content: LabSceneContent = buildLabScene(
+        renderer: state.renderer
+        meshes: state.meshes
+        scene: scene
+      )
+      content.camera = old.camera
+      content.light = old.light
+      if old.forestShown < content.forests.length {
+        content.forestShown = old.forestShown
+      }
+      labPutScene(state: state, content: content)
+      log("[treelab] rebuilt {labSceneLabels().copyAtDefault(index: scene - 1)}")
+    }
+  }
 }
 
 # A scene out of the stash (moved, not copied: swapped to the end and popped), or built new
@@ -345,19 +414,41 @@ func labEditorStep(
       dayOfYear: state.season.clock.dayOfYear
     )
     labEditorShowChoices(editor: editor, ids: choices)
+    labFindReadoutCity(state: state)
     labEditorSetReadout(editor: editor, text: labShortReadout(state: state))
   }
 }
 
-# The panel's readout: the latitude, then the temperature, the season and the weather (the first
-# three parts of LabSeason labSeasonClimateText), short enough for the side panel
+# The panel's readout: the nearest city, the temperature, the season and the weather (the first
+# parts of LabSeason labSeasonClimateText), short enough for the side panel; in a tree's scene the
+# tree (One tree's kind, Reference's seed), the city and the season. The latitude shows as its
+# selected button
 func labShortReadout(state: view LabState) ret String {
   let parts: List(String) = labSeasonClimateText(season: state.season).split(sep: ", ")
-  var text: String = "lat {state.season.latitude.toInt()}"
+  if state.scene is labSceneOneTree {
+    ret "{state.readoutKind}, near {state.readoutCity}, {parts.copyAtDefault(index: 1)}"
+  }
+  if state.scene is labSceneReference {
+    ret "seed {labTreeSeed()}, near {state.readoutCity}, {parts.copyAtDefault(index: 1)}"
+  }
+  var text: String = "near {state.readoutCity}"
   loop var i: Int = 0, i < Math.min(a: 3, b: parts.length), ++i {
     text = "{text}, {parts.copyAtDefault(index: i)}"
   }
   ret text
+}
+
+# The city nearest the lab's place, found again only when the place moved
+func labFindReadoutCity(state: mod LabState) {
+  if state.readoutLatitude is state.season.latitude and state.readoutLongitude is state.season.longitude {
+    ret
+  }
+  state.readoutLatitude = state.season.latitude
+  state.readoutLongitude = state.season.longitude
+  state.readoutCity = nearestCity(
+    latitude: state.season.latitude
+    longitude: state.season.longitude
+  ).city.name
 }
 
 # A lab control (LabEditor labControlButtons): its group letter, then its value
@@ -380,8 +471,57 @@ func applyLabControl(state: mod LabState, id: view String) {
     if set < state.forests.length {
       state.forestShown = set
     }
+  } else {
+    applyLabBuildControl(state: state, group: group, value: value)
   }
   log("[treelab] control {id}")
+}
+
+# A control that changes what a scene is built from (LabEditor labControlButtons' groups 9 to 14):
+# its variable is set and the scenes built from it are built again
+func applyLabBuildControl(state: mod LabState, group: view String, value: view String) {
+  var scenes: List(Int) = List.create(Int, cap: 2)
+  if group is "t" {
+    var kind: Int = labTreeKind() + value.toInt()
+    let count: Int = labTreeKindCount()
+    # -1 (the reference tree) to count - 1, round
+    if kind < -1 {
+      kind = count - 1
+    } else if kind >= count {
+      kind = -1
+    }
+    var name: String = ""
+    if kind >= 0 {
+      name = "{kind}"
+    }
+    Sys.setEnv(name: "RAE_TREELAB_SPECIES", value: name)
+    state.readoutKind = labTreeKindName()
+    scenes.add(value: labSceneOneTree)
+  } else if group is "s" {
+    Sys.setEnv(
+      name: "RAE_TREELAB_SEED"
+      value: "{Math.max(a: 1, b: labTreeSeed() + value.toInt())}"
+    )
+    scenes.add(value: labSceneReference)
+  } else if group is "v" {
+    var level: String = value
+    if value is "all" {
+      level = ""
+    }
+    Sys.setEnv(name: "RAE_TREE_LEVEL", value: level)
+    scenes.add(value: labSceneOneTree)
+    scenes.add(value: labSceneForest)
+  } else if group is "o" {
+    Sys.setEnv(name: "RAE_TREELAB_FOREST", value: value)
+    scenes.add(value: labSceneForest)
+  } else if group is "d" {
+    Sys.setEnv(name: "RAE_TREELAB_FOREST_FAR", value: value)
+    scenes.add(value: labSceneForest)
+  } else if group is "p" {
+    Sys.setEnv(name: "RAE_TREELAB_FOREST_SPACING", value: value)
+    scenes.add(value: labSceneForest)
+  }
+  labRebuildScenes(state: state, scenes: scenes)
 }
 
 # The scene's own light and sky again (after the look was switched)
@@ -406,43 +546,11 @@ func labChoiceIds(state: view LabState) ret List(String) {
     "l:{state.season.latitude.toInt()}"
     look
     "f:{state.forestShown}"
+    "v:{labLevelValue()}"
+    "o:{labForestOnValue()}"
+    "d:{labForestFarHere().toInt()}"
+    "p:{labForestSpacingHere().toInt()}"
   }
-}
-
-# The weather's and the wind's control values (LabEditor labControlButtons)
-func labWeatherValue(weather: view SettingsWeather) ret String {
-  if weather is SettingsWeather.clear {
-    ret "clear"
-  }
-  if weather is SettingsWeather.cloudy {
-    ret "cloudy"
-  }
-  if weather is SettingsWeather.rain {
-    ret "rain"
-  }
-  if weather is SettingsWeather.snow {
-    ret "snow"
-  }
-  if weather is SettingsWeather.mist {
-    ret "mist"
-  }
-  ret "auto"
-}
-
-func labWindValue(wind: view SettingsWind) ret String {
-  if wind is SettingsWind.calm {
-    ret "calm"
-  }
-  if wind is SettingsWind.breeze {
-    ret "breeze"
-  }
-  if wind is SettingsWind.strong {
-    ret "strong"
-  }
-  if wind is SettingsWind.gale {
-    ret "gale"
-  }
-  ret "auto"
 }
 
 # The date and the weather reach every scene of an interactive lab; a scripted run keeps them to
@@ -588,6 +696,13 @@ func runLabFrame(state: mod LabState) {
   )
   if updateLabSeason(season: state.season, deltaTime: deltaTime) {
     log("[treelab] day {state.season.clock.dayOfYear} of {state.season.clock.year}")
+  }
+  state.framesRun = state.framesRun + 1
+  if state.framesRun is 20 and state.scriptedControls.length() > 0 {
+    let ids: List(String) = state.scriptedControls.split(sep: ",")
+    loop let id: view String in ids {
+      applyLabControl(state: state, id: id)
+    }
   }
   if state.forests.length > 0 and Sdl3.isKeyPressed(key: Keys.keyT) {
     state.forestShown = (state.forestShown + 1) % state.forests.length
@@ -776,7 +891,7 @@ func logLabStats(state: mod LabState) {
 }
 
 # Release a kept scene's GPU parts (its grass, its tree's leaves, its forests, its leaves in the
-# air)
+# air, the meshes its build uploaded)
 func releaseLabScene(state: mod LabState, content: mod LabSceneContent) {
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: content.grass, resources: resources)
@@ -792,6 +907,13 @@ func releaseLabScene(state: mod LabState, content: mod LabSceneContent) {
     }
     loop let forest: mod TreeForest in content.forests {
       treeForestShutdown(forest: forest, resources: rendererResources)
+    }
+    loop var mesh: Int = content.meshFirst, mesh < content.meshEnd, ++mesh {
+      meshStoreRelease(
+        store: state.renderer.passes.gbuffer.meshes
+        resources: rendererResources
+        mesh: mesh
+      )
     }
   }
 }

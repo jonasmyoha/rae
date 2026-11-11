@@ -307,6 +307,20 @@ func meshStoreIbufHandle(
   }
 }
 
+# Release one mesh (an app that builds a scene again): its buffers are retired and its handle
+# stays taken, empty, so no other handle moves; drawing it draws nothing (meshStoreReady is false)
+func meshStoreRelease(store: mod MeshStore, resources: mod GpuResources, mesh: view Int) {
+  if let entry: mod MeshEntry = store.entries.modAt(index: mesh - 1) {
+    retireBuffer(resources: resources, id: entry.vbuf)
+    retireBuffer(resources: resources, id: entry.ibuf)
+    entry.vbuf = noBufferId()
+    entry.ibuf = noBufferId()
+    entry.indexCount = 0
+    entry.vertexCount = 0
+    entry.indexCapacity = 0
+  }
+}
+
 # Retire every mesh (renderer shutdown, before the manager itself shuts down).
 func meshStoreShutdown(store: mod MeshStore, resources: mod GpuResources) {
   loop var i: Int = 0, i < store.entries.length, ++i {
