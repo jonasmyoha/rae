@@ -1,0 +1,23 @@
+# `rae build --report-realtime` (docs/realtime-language-design.md §3.5): each
+# marked function, clean or what it reaches, and the C it trusts.
+import Math
+open Atomic
+
+func level(value: view Float) realtime ret Float {
+  ret sqrt(x: value * value + 1.0)
+}
+
+func block(counter: view Atomic(Int)) realtime ret Float {
+  counter.fetchAddRelaxed(amount: 1)
+  ret level(value: sin(x: 0.5))
+}
+
+func label(value: view Int) noAlloc ret Int {
+  ret "{value}".length()
+}
+
+func main() {
+  let counter: Atomic(Int) = createAtomic(Int, value: 0)
+  log("{block(counter: counter)} {label(value: 2)}")
+  freeAtomic(this: counter)
+}

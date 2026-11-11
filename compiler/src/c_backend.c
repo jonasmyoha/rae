@@ -6,6 +6,7 @@
 #include "mangler.h"
 #include "sema.h"
 #include "may_wait.h"
+#include "realtime_check.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -3934,6 +3935,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
    * spawns run as tasks on the scheduler (c_spawn_on_pool) */
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = may_wait_build(ctx, module);
+  /* The same graph holds each function's realtime effects: check every
+   * function marked `realtime` / `noAlloc` (realtime_check.c) */
+  realtime_check(ctx, module, ctx->wait_graph);
   /* ... and which may-wait functions get a resumable twin (c_twin.c) */
   c_twins_plan(ctx, module);
   // Bodies — reverse field order so LIFO drop matches construction.

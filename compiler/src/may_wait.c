@@ -33,65 +33,9 @@
 #include <string.h>
 
 #include "type.h"
-
-typedef enum {
-  WAIT_NONE = 0,
-  WAIT_TASK_GET,
-  WAIT_SLEEP,
-  WAIT_SOCKET,
-  WAIT_JOIN,
-  WAIT_BLOCKING,
-  WAIT_KIND_COUNT
-} WaitKind;
-
-static const char* wait_kind_name(WaitKind kind) {
-  switch (kind) {
-    case WAIT_TASK_GET: return "Task.get";
-    case WAIT_SLEEP: return "sleep extern";
-    case WAIT_SOCKET: return "socket/poller extern";
-    case WAIT_JOIN: return "task join";
-    case WAIT_BLOCKING: return "blocking extern";
-    default: return "none";
-  }
-}
-
-typedef struct {
-  const AstDecl* decl;
-  /* A specialization: the template's concrete arguments (NULL otherwise),
-   * and their key ("BenchRouter", "List(Int)") */
-  const AstTypeRef* concrete_args;
-  char* key;
-  int next_same_decl;   /* the next node of the same decl, -1 at the end */
-  int* callees;
-  size_t callee_count;
-  size_t callee_cap;
-  WaitKind direct;      /* the first primitive used directly, or WAIT_NONE */
-  bool may_wait;
-  int via;              /* the callee that made it may-wait; -1 when direct */
-  bool spawned;         /* the target of some `spawn` */
-  bool reachable;       /* reachable from a spawn */
-  bool walked;
-  signed char pool_safe; /* may_wait_spawn_on_pool's answer: -1 not asked, 0, 1 */
-} WaitNode;
-
-typedef struct {
-  const AstDecl* decl;
-  int first;            /* first node of this decl */
-} DeclSlot;
-
-typedef struct WaitGraph {
-  CompilerContext* ctx;
-  const AstModule* merged;
-  WaitNode* nodes;
-  size_t count;
-  size_t cap;
-  DeclSlot* table;      /* decl -> its first node, open addressing */
-  size_t table_cap;
-  /* [0] in the program, [1] in lib/ */
-  size_t primitive_sites[2][WAIT_KIND_COUNT];
-  size_t spawn_sites[2];
-  size_t approximate_calls[2];
-} WaitGraph;
+#include "wait_graph.h"
+#include "ownership.h"
+#include "sema.h"
 
 static size_t hash_pointer(const void* pointer, size_t cap) {
   uintptr_t value = (uintptr_t)pointer;
@@ -268,10 +212,38 @@ typedef struct {
   int scope;                 /* 0: the program, 1: lib/ */
   const AstFuncDecl* func;   /* the function being walked (its params) */
   Bindings bindings;         /* its type parameters, for a specialization */
+  bool cold;                 /* inside a misuse report's arguments: no effects */
 } WalkContext;
+
+/* A realtime effect this function itself has, at (line, column): the first
+ * site of each kind is kept (realtime_check.c names it in its error) */
+static void note_effect(WalkContext* walk, int effects, size_t line, size_t column, const char* what) {
+  if (walk->cold) return;
+  WaitNode* node = &walk->graph->nodes[walk->node];
+  for (int bit = 0; bit < 4; bit++) {
+    if (!(effects & (1 << bit)) || (node->effects & (1 << bit))) continue;
+    node->effects |= (unsigned char)(1 << bit);
+    node->effect_line[bit] = (int)line;
+    node->effect_column[bit] = (int)column;
+    node->effect_what[bit] = what;
+  }
+}
+
+/* lib/core's misuse reports (an index out of range): the crash path of
+ * docs/realtime-language-design.md §3.6, where real-time rules do not apply,
+ * as the program is already wrong there. Calls to them add no edge and no
+ * effect. */
+static bool is_misuse_report(const WaitGraph* graph, const AstDecl* target) {
+  if (!target || target->kind != AST_DECL_FUNC || !target->origin_file) return false;
+  Str name = target->as.func_decl.name;
+  if (!str_eq_cstr(name, "runtimeWarning") && !str_eq_cstr(name, "indexOutOfRangeWarning")) return false;
+  (void)graph;
+  return strstr(target->origin_file, "lib/core/") != NULL;
+}
 
 static void note_wait(WalkContext* walk, WaitKind kind) {
   walk->graph->primitive_sites[walk->scope][kind]++;
+  if (walk->cold) return;
   WaitNode* node = &walk->graph->nodes[walk->node];
   if (node->direct == WAIT_NONE) node->direct = kind;
 }
@@ -477,6 +449,34 @@ static void edge_by_name(WalkContext* walk, Str name, const AstCallArg* args, co
 static void walk_block(WalkContext* walk, const AstBlock* block);
 static void walk_stmt(WalkContext* walk, const AstStmt* stmt);
 
+/* A method call sema left to the backend, outside a generic body: its
+ * targets by name, as effect-only edges (wait_graph.h). The may-wait edges
+ * and counters are put back as they were. */
+static void effect_edges_by_name(WalkContext* walk, const AstExpr* expr) {
+  WaitGraph* graph = walk->graph;
+  size_t saved_sites[2][WAIT_KIND_COUNT];
+  size_t saved_approximate[2] = { graph->approximate_calls[0], graph->approximate_calls[1] };
+  memcpy(saved_sites, graph->primitive_sites, sizeof saved_sites);
+  WaitNode* holder = &graph->nodes[walk->node];
+  int* saved = holder->callees;
+  size_t saved_count = holder->callee_count, saved_cap = holder->callee_cap;
+  holder->callees = holder->effect_callees;
+  holder->callee_count = holder->effect_callee_count;
+  holder->callee_cap = holder->effect_callee_cap;
+  edge_by_name(walk, expr->as.method_call.method_name, expr->as.method_call.args, expr->as.method_call.generic_args,
+               expr->as.method_call.object);
+  holder = &graph->nodes[walk->node];
+  holder->effect_callees = holder->callees;
+  holder->effect_callee_count = holder->callee_count;
+  holder->effect_callee_cap = holder->callee_cap;
+  holder->callees = saved;
+  holder->callee_count = saved_count;
+  holder->callee_cap = saved_cap;
+  memcpy(graph->primitive_sites, saved_sites, sizeof saved_sites);
+  graph->approximate_calls[0] = saved_approximate[0];
+  graph->approximate_calls[1] = saved_approximate[1];
+}
+
 static void walk_expr(WalkContext* walk, const AstExpr* expr) {
   if (!expr) return;
   switch (expr->kind) {
@@ -488,6 +488,7 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       if (expr->as.unary.op == AST_UNARY_SPAWN) {
         const AstExpr* call = expr->as.unary.operand;
         walk->graph->spawn_sites[walk->scope]++;
+        note_effect(walk, EFFECT_ALLOCATES | EFFECT_WAITS, expr->line, expr->column, "a spawn (it starts a task)");
         if (call && call->kind == AST_EXPR_CALL) {
           /* The call runs in the task: its target is marked spawned and is
            * not an edge of this function. Its arguments are evaluated here. */
@@ -523,6 +524,13 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       break;
     case AST_EXPR_CALL: {
       const AstDecl* target = expr->decl_link ? expr->decl_link : (expr->as.call.callee ? expr->as.call.callee->decl_link : NULL);
+      if (is_misuse_report(walk->graph, target)) {
+        bool was_cold = walk->cold;
+        walk->cold = true;
+        for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) walk_expr(walk, arg->value);
+        walk->cold = was_cold;
+        break;
+      }
       if (target) {
         edge_to_decl(walk, target, expr->as.call.args, expr->as.call.generic_args, NULL);
       } else if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
@@ -535,12 +543,15 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       if (expr->as.method_call.object && type_is_task(expr->as.method_call.object->resolved_type) &&
           expr->as.method_call.method_name.len == 3 && memcmp(expr->as.method_call.method_name.data, "get", 3) == 0) {
         note_wait(walk, WAIT_TASK_GET);
+        note_effect(walk, EFFECT_WAITS, expr->line, expr->column, "Task.get (it waits for the task)");
       } else if (expr->decl_link) {
         edge_to_decl(walk, expr->decl_link, expr->as.method_call.args, expr->as.method_call.generic_args,
                      expr->as.method_call.object);
       } else if (walk->bindings.params) {
         edge_by_name(walk, expr->as.method_call.method_name, expr->as.method_call.args, expr->as.method_call.generic_args,
                      expr->as.method_call.object);
+      } else {
+        effect_edges_by_name(walk, expr);
       }
       walk_expr(walk, expr->as.method_call.object);
       for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) walk_expr(walk, arg->value);
@@ -559,6 +570,7 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       }
       break;
     case AST_EXPR_LIST:
+      note_effect(walk, EFFECT_ALLOCATES, expr->line, expr->column, "a list literal");
       for (const AstExprList* item = expr->as.list; item; item = item->next) walk_expr(walk, item->value);
       break;
     case AST_EXPR_INDEX:
@@ -566,13 +578,34 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       walk_expr(walk, expr->as.index.index);
       break;
     case AST_EXPR_COLLECTION_LITERAL:
+      note_effect(walk, EFFECT_ALLOCATES, expr->line, expr->column, "a collection literal");
       for (const AstCollectionElement* element = expr->as.collection.elements; element; element = element->next) walk_expr(walk, element->value);
       break;
     case AST_EXPR_INTERP:
+      note_effect(walk, EFFECT_ALLOCATES | EFFECT_FREES, expr->line, expr->column, "a String interpolation (made, and freed after its use)");
       for (const AstInterpPart* part = expr->as.interp.parts; part; part = part->next) walk_expr(walk, part->value);
       break;
     default:
       break;
+  }
+}
+
+/* A `let` / `var` of a type that owns heap: it is freed at the end of its
+ * scope, and when it is set from a place (not a call or an `own`), that is a
+ * deep copy. An alias (view / mod) owns nothing. */
+static void note_let_effects(WalkContext* walk, const AstStmt* stmt) {
+  const AstTypeRef* type = stmt->as.let_stmt.type;
+  if (!type || type->is_view || type->is_mod || stmt->as.let_stmt.is_bind) return;
+  const AstTypeRef* concrete = type;
+  if (walk->bindings.params && walk->bindings.args) {
+    concrete = substitute_type_ref(walk->graph->ctx, walk->bindings.params, walk->bindings.args, type);
+  }
+  if (!type_needs_cascade_drop(walk->graph->ctx, walk->graph->merged, concrete, 0)) return;
+  note_effect(walk, EFFECT_FREES, stmt->line, stmt->column, "a local that owns heap, freed at the end of its scope");
+  const AstExpr* value = stmt->as.let_stmt.value;
+  if (value && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER)) {
+    note_effect(walk, EFFECT_ALLOCATES, stmt->line, stmt->column,
+                "a deep copy of a place (bind a view instead: `let x: view T = place`)");
   }
 }
 
@@ -585,7 +618,9 @@ static void walk_stmt(WalkContext* walk, const AstStmt* stmt) {
       if (value && (type_is_task(value->resolved_type) ||
                     (value->kind == AST_EXPR_UNARY && value->as.unary.op == AST_UNARY_SPAWN))) {
         note_wait(walk, WAIT_JOIN);
+        note_effect(walk, EFFECT_WAITS, stmt->line, stmt->column, "a Task joined at the end of its scope");
       }
+      note_let_effects(walk, stmt);
       break;
     }
     case AST_STMT_DESTRUCT:
@@ -657,7 +692,15 @@ static void graph_walk_all(WaitGraph* graph) {
     const AstFuncDecl* func = &graph->nodes[i].decl->as.func_decl;
     WaitKind primitive = extern_wait_kind(func);
     if (primitive != WAIT_NONE) graph->nodes[i].direct = primitive;
-    WalkContext walk = { graph, (int)i, is_stdlib(graph, graph->nodes[i].decl) ? 1 : 0, func, { NULL, NULL } };
+    for (int bit = 0; bit < 4; bit++) graph->nodes[i].effect_via[bit] = -1;
+    if (func->is_extern) {
+      /* C: what it promises, or all four (docs/realtime-language-design.md §3.4) */
+      int effects = func->is_realtime ? 0 : func->is_no_alloc ? (EFFECT_LOCKS | EFFECT_WAITS) : EFFECT_ALL;
+      WalkContext extern_walk = { graph, (int)i, 0, func, { NULL, NULL }, false };
+      note_effect(&extern_walk, effects, graph->nodes[i].decl->line, graph->nodes[i].decl->column,
+                  func->is_no_alloc ? "C marked noAlloc, which may still lock or wait" : "C not marked realtime");
+    }
+    WalkContext walk = { graph, (int)i, is_stdlib(graph, graph->nodes[i].decl) ? 1 : 0, func, { NULL, NULL }, false };
     if (graph->nodes[i].key) {
       walk.bindings.params = func->generic_params;
       walk.bindings.args = graph->nodes[i].concrete_args;
@@ -713,12 +756,6 @@ static void graph_solve(WaitGraph* graph) {
 
 /* ----- the report -------------------------------------------------------- */
 
-static void print_function_name(FILE* out, const WaitNode* node) {
-  const AstFuncDecl* func = &node->decl->as.func_decl;
-  fprintf(out, "%.*s", (int)func->name.len, func->name.data);
-  if (node->key) fprintf(out, "(%s)", node->key);
-}
-
 /* lib/net/Poller.rae, from wherever the toolchain's lib/ is */
 static const char* short_lib_path(const char* path) {
   if (!path) return "?";
@@ -730,21 +767,6 @@ static const char* file_name(const char* path) {
   if (!path) return "?";
   const char* slash = strrchr(path, '/');
   return slash ? slash + 1 : path;
-}
-
-/* f -> g -> h -> sleep */
-static void print_chain(FILE* out, const WaitGraph* graph, int index) {
-  for (int hops = 0; index >= 0 && hops < 10; hops++) {
-    const WaitNode* node = &graph->nodes[index];
-    if (hops > 0) fprintf(out, " -> ");
-    print_function_name(out, node);
-    if (node->via < 0) {
-      fprintf(out, " [%s]", wait_kind_name(node->direct));
-      return;
-    }
-    index = node->via;
-  }
-  fprintf(out, " -> ...");
 }
 
 static const AstDecl* decl_of_func(const AstFuncDecl* func) {
@@ -783,6 +805,7 @@ static void graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule*
 
 static void graph_release(WaitGraph* graph) {
   for (size_t i = 0; i < graph->count; i++) {
+    free(graph->nodes[i].effect_callees);
     free(graph->nodes[i].callees);
     free(graph->nodes[i].key);
   }
@@ -929,65 +952,24 @@ bool may_wait_spawn_on_pool(WaitGraph* graph, const AstDecl* decl, bool allow_sl
   return safe;
 }
 
-bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* entry, bool with_lib, FILE* out) {
-  WaitGraph graph;
-  graph_build(&graph, ctx, merged);
+/* ----- shared with may_wait_report.c and realtime_check.c ---------------- */
 
-  /* Every count is split: [0] the program, [1] lib/. The default report
-   * prints the program's (lib/ grows; a report on a program should not move
-   * with it) and names the lib/ twins; `with_lib` adds the lib/ side. */
-  size_t functions[2] = { 0, 0 }, specializations[2] = { 0, 0 }, may_wait[2] = { 0, 0 };
-  size_t spawned[2] = { 0, 0 }, reachable[2] = { 0, 0 }, twins[2] = { 0, 0 };
-  for (size_t i = 0; i < graph.count; i++) {
-    const WaitNode* node = &graph.nodes[i];
-    int scope = is_stdlib(&graph, node->decl) ? 1 : 0;
-    functions[scope]++;
-    if (node->key) specializations[scope]++;
-    if (node->may_wait) may_wait[scope]++;
-    if (node->spawned) spawned[scope]++;
-    if (node->reachable) reachable[scope]++;
-    if (node->may_wait && node->reachable) twins[scope]++;
-  }
-  int scopes = with_lib ? 2 : 1;
-  fprintf(out, "may-wait report: %s\n", file_name(entry));
-  for (int scope = 0; scope < scopes; scope++) {
-    fprintf(out, "  %s\n", scope == 0 ? "the program:" : "lib/:");
-    fprintf(out, "    functions: %zu (%zu generic specializations)\n", functions[scope], specializations[scope]);
-    fprintf(out, "    wait primitive sites: Task.get %zu, sleep extern %zu, socket/poller extern %zu, task join %zu, "
-                 "blocking extern %zu\n",
-            graph.primitive_sites[scope][WAIT_TASK_GET], graph.primitive_sites[scope][WAIT_SLEEP],
-            graph.primitive_sites[scope][WAIT_SOCKET], graph.primitive_sites[scope][WAIT_JOIN],
-            graph.primitive_sites[scope][WAIT_BLOCKING]);
-    fprintf(out, "    calls resolved conservatively (to every candidate): %zu\n", graph.approximate_calls[scope]);
-    fprintf(out, "    may wait: %zu functions\n", may_wait[scope]);
-    fprintf(out, "    spawn sites: %zu, spawned functions: %zu, reachable from a spawn: %zu\n", graph.spawn_sites[scope],
-            spawned[scope], reachable[scope]);
-  }
-  fprintf(out, "  resumable twins (may wait and reachable from a spawn): %zu in the program, %zu in lib/\n", twins[0],
-          twins[1]);
-  for (int scope = 0; scope < 2; scope++) {
-    if (scope == 1 && !with_lib) break;
-    for (size_t i = 0; i < graph.count; i++) {
-      const WaitNode* node = &graph.nodes[i];
-      if (!(node->may_wait && node->reachable) || (is_stdlib(&graph, node->decl) ? 1 : 0) != scope) continue;
-      fprintf(out, "    ");
-      print_function_name(out, node);
-      fprintf(out, "  %s:%zu%s\n      ", scope ? short_lib_path(node->decl->origin_file) : file_name(node->decl->origin_file),
-              node->decl->line, node->spawned ? "  spawned" : "");
-      print_chain(out, &graph, (int)i);
-      fprintf(out, "\n");
-    }
-  }
-  if (twins[1] && !with_lib) {
-    fprintf(out, "    lib/:");
-    for (size_t i = 0; i < graph.count; i++) {
-      const WaitNode* node = &graph.nodes[i];
-      if (!(node->may_wait && node->reachable) || !is_stdlib(&graph, node->decl)) continue;
-      fprintf(out, " ");
-      print_function_name(out, node);
-    }
-    fprintf(out, "\n");
-  }
-  graph_release(&graph);
-  return true;
+bool wait_graph_is_stdlib(const WaitGraph* graph, const AstDecl* decl) {
+  return is_stdlib(graph, decl);
+}
+
+void wait_graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule* merged) {
+  graph_build(graph, ctx, merged);
+}
+
+void wait_graph_release(WaitGraph* graph) {
+  graph_release(graph);
+}
+
+const char* wait_graph_short_lib_path(const char* path) {
+  return short_lib_path(path);
+}
+
+const char* wait_graph_file_name(const char* path) {
+  return file_name(path);
 }

@@ -165,6 +165,42 @@ Every error names the chain from the root, as `--report-waits` does, and the
 fix. `rae build --report-realtime` prints the whole set: each root, what it
 reaches, and the externs it trusts.
 
+### 3.5a Landed (2026-11-11, compiler 0.3.85)
+
+`realtime` and `noAlloc` parse as modifier words where `blocking` does. The
+may-wait walk (`compiler/src/may_wait.c`) records each function's own effects
+with the first site of each; `compiler/src/realtime_check.c` carries them up
+the call graph to a fixed point and checks every marked function as a root
+(a marked helper is a root too), in the backend right after the graph is
+built. What counts:
+
+- allocates: a String interpolation (it also frees its temporary), a list or
+  collection literal, a deep copy into a `let` from a place, a spawn, and C
+  not marked `realtime` / `noAlloc`;
+- frees: a `let` / `var` whose type owns heap (freed at the end of its scope;
+  a value moved out is still counted, see below), an interpolation, unmarked C;
+- locks and waits: `Task.get`, a task joined at scope end, a spawn, and
+  unmarked C (a Channel's send is C, so it counts).
+
+Method calls that sema leaves to the backend (a generic container's
+`list.add(...)`) are resolved by name as effect-only edges, which the
+may-wait answers do not follow. Errors with the same cause are one message
+(`this allocates, frees, locks and waits: it calls rae_ext_rae_buf_alloc`).
+`lib/core`'s `runtimeWarning` / `indexOutOfRangeWarning` are the crash path
+(§3.6). Marked in `lib/`: the math, clock, `buf_zero` / `buf_prefetch`,
+`rae_str_len`, atomic, signal-post and real-time-mark externs (`realtime`),
+`rae_ext_rae_signal_wait` and `Signal.wait` (`noAlloc`), and the Rae
+functions that promise it (`Atomic`'s operations, `Signal.post` / `tryWait`,
+`SpscRing.push` / `pop` / `count`, the `Realtime` mark and recorder calls).
+Fixtures 1405 (accepted), 1406 (each rule broken), 1407 (the report).
+
+Known gaps, conservative or open: a heap value moved out of a `let` is still
+counted as freed; generic C intrinsics (`rae_ext_rae_buf_get/set/drop_at`)
+are not nodes, so a `drop_at` of a heap element is not seen; assignments of
+heap values (`x = y`) are not counted yet; the error points at the site
+(sometimes in `lib/`), with the chain from the marked function in the
+message.
+
 ### 3.6 Cases that are allowed on purpose
 
 - **The crash path.** A failed bounds check or `unreachable` ends the program;

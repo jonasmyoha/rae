@@ -3263,6 +3263,17 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
       }
       decl->as.func_decl.is_blocking = true;
     }
+    // `realtime` / `noAlloc`: what the function and everything it reaches may
+    // not do (docs/realtime-language-design.md §3). Modifier words, like
+    // `blocking`; on an extern they are a promise about the C.
+    if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "realtime")) {
+      if (decl->as.func_decl.is_realtime) parser_error(parser, mod_token, "duplicate 'realtime' function modifier");
+      decl->as.func_decl.is_realtime = true;
+    }
+    if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "noAlloc")) {
+      if (decl->as.func_decl.is_no_alloc) parser_error(parser, mod_token, "duplicate 'noAlloc' function modifier");
+      decl->as.func_decl.is_no_alloc = true;
+    }
     if (mod_token->kind == TOK_KW_UNSAFE) {
       if (is_unsafe) parser_error(parser, mod_token, "duplicate 'unsafe' function modifier");
       if (saw_extern_modifier) decl->as.func_decl.invalid_unsafe_extern_order = true;

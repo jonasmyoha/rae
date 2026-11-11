@@ -22,11 +22,11 @@
 # if there is one and returns at once either way.
 func rae_ext_rae_signal_new() unsafe extern ret Int
 
-func rae_ext_rae_signal_post(signal: Int) unsafe extern
+func rae_ext_rae_signal_post(signal: Int) realtime unsafe extern
 
-func rae_ext_rae_signal_wait(signal: Int) blocking unsafe extern
+func rae_ext_rae_signal_wait(signal: Int) blocking noAlloc unsafe extern
 
-func rae_ext_rae_signal_try_wait(signal: Int) unsafe extern ret Bool
+func rae_ext_rae_signal_try_wait(signal: Int) realtime unsafe extern ret Bool
 
 func rae_ext_rae_signal_free(signal: Int) unsafe extern
 
@@ -41,21 +41,21 @@ func createSignal() ret Signal {
 }
 
 # Let one waiter through (now, or the next one that waits). Never waits.
-func post(this: view Signal) {
+func post(this: view Signal) realtime {
   unsafe {
     rae_ext_rae_signal_post(signal: this.handle)
   }
 }
 
 # Wait until a post comes, then take it.
-func wait(this: view Signal) {
+func wait(this: view Signal) noAlloc {
   unsafe {
     rae_ext_rae_signal_wait(signal: this.handle)
   }
 }
 
 # Take a post if one is there; answers whether it did. Never waits.
-func tryWait(this: view Signal) ret Bool {
+func tryWait(this: view Signal) realtime ret Bool {
   unsafe {
     ret rae_ext_rae_signal_try_wait(signal: this.handle)
   }

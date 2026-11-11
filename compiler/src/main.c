@@ -59,6 +59,7 @@
 #include "sys_thread.h"
 #include "progress.h"
 #include "may_wait.h"
+#include "realtime_check.h"
 #include "when_resolve.h"
 #include "../runtime/rae_runtime.h"
 
@@ -250,6 +251,9 @@ static bool g_float4_scalar = false;
  * (docs/lightweight-spawn-design.md §4.1) and stop before emitting C. */
 static bool g_report_waits = false;
 static bool g_report_waits_lib = false;  /* --report-waits-lib: lib/'s counts too */
+/* `rae build --report-realtime`: every function marked realtime / noAlloc,
+ * clean or what it reaches, and the C it trusts (realtime_check.c) */
+static bool g_report_realtime = false;
 
 /* The target the program is built for (lib/Target.rae,
  * docs/platform-conditional-code.md §3.1): the host for a native build,
@@ -648,6 +652,12 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--print-target") == 0) {
       g_print_target = true;
+      opts->emit_c = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--report-realtime") == 0) {
+      g_report_realtime = true;
       opts->emit_c = true;
       i += 1;
       continue;
@@ -2354,7 +2364,9 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                           --report-waits (print which functions may wait and\n"
           "                           would get a resumable twin; emits nothing;\n"
-          "                           --report-waits-lib adds lib/'s counts)\n");
+          "                           --report-waits-lib adds lib/'s counts)\n"
+          "                           --report-realtime (print each function marked realtime\n"
+          "                           or noAlloc, what it reaches, and the C it trusts)\n");
   fprintf(stderr,
           "                           --target-os <os> --target-arch <arch> (type-check\n"
           "                           for another target, lib/Target.rae; emits nothing,\n"
@@ -2714,6 +2726,16 @@ static bool build_c_backend_output(const char* entry_file,
       arena_destroy(arena);
       progress_end(false);
       return false;
+  }
+  if (g_report_realtime) {
+    /* As for --report-waits: the discovery pass finds the specializations
+     * (and runs the check, so its errors print too) */
+    bool emitted = c_backend_emit_module(&ctx, &merged, "/dev/null");
+    bool reported = realtime_report(&ctx, &merged, entry_file, stdout) && emitted;
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    progress_end(reported);
+    return reported;
   }
   if (g_report_waits) {
     /* The backend's discovery pass instantiates the generics; its output is
