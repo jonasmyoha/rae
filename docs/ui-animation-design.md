@@ -199,6 +199,22 @@ Case 1384, `checks/uiFocusField`.
 "FocusStyle": { "stroke": "accent", "strokeWidth": 2.5, "motion": "quick" }
 ```
 
+**`Loop`** (built in 0.3.98): a motion that repeats for a while, then rests: rain falling from a
+cloud for a few seconds after a weather tile is shown (SUMU's WeatherNow). Keyframes of the pose's
+offsets over one period, repeated from when the node is shown (when `Appear` would start) for
+`forSec` seconds (0: while shown), then a glide to the laid-out pose on `motion`, and nothing more
+runs. `delaySeconds` shifts one node's phase against its siblings'. Reduced motion: no loop. A
+running loop is a `LoopRun` in `uiSystems.animation.loopRuns` (it counts for `animationInFlight`)
+and writes its pose after the tracks, so its pose wins while it runs; at its end it hands the node
+to an ordinary track (`animationTo` the laid-out pose) and its run goes. The steps are
+lib/ui/animationSystem/LoopMotion; the trigger is animationTriggers' loopTriggers. Case 1398;
+the scene grammar is docs/ui-scene-format.md section 21.
+
+```json
+"Loop": { "keys": [ { "t": 0.0, "y": -10, "opacity": 0.0 }, { "t": 0.3, "y": -4, "opacity": 1.0 },
+  { "t": 1.0, "y": 10, "opacity": 0.0 } ], "periodSec": 0.9, "forSec": 4.0, "delaySeconds": 0.15 }
+```
+
 ### Bundles
 
 Built into lib/ui (`ui/BuiltInBundles`), so a node gets them by name, and any theme may

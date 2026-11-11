@@ -16,6 +16,7 @@ import ui/Spacing
 import ui/ThemeResolved
 open ecs/ComponentTable
 open ui/Registry
+open ui/AnimationComponents
 
 # The authored enum vocabulary is PascalCase ("Horizontal"); each parser is
 # the compile-time member lookup `enumFromName` (#960) over the camelCase
@@ -486,4 +487,63 @@ func deserListViewBindings(doc: view JsonDoc, val: view JsonValue) ret List(List
     i = i + 1
   }
   ret bindings
+}
+
+# `Loop.keys`: an array of {t, opacity, scale, x, y, rotation} keyframes; a field not written takes
+# LoopKey's default (its laid-out pose). Kept in `t` order, as the loop reads them.
+func deserLoopKeys(doc: view JsonDoc, val: view JsonValue) ret List(LoopKey) {
+  var keys: List(LoopKey) = List.create(LoopKey, cap: 4)
+  let keysIdx: Int = Json.field(doc: doc, this: val, key: "keys")
+  if keysIdx < 0 {
+    ret keys
+  }
+  let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: keysIdx)
+  let n: Int = Json.arrayLen(this: arr)
+  loop var i: Int = 0, i < n, ++i {
+    let elem: JsonValue = Json.arrayAt(doc: doc, this: arr, idx: i)
+    let key: LoopKey = {
+      t: optFloat(
+        doc: doc
+        container: elem
+        key: "t"
+        fallback: 0.0
+      )
+      opacity: optFloat(
+        doc: doc
+        container: elem
+        key: "opacity"
+        fallback: 1.0
+      )
+      scale: optFloat(
+        doc: doc
+        container: elem
+        key: "scale"
+        fallback: 1.0
+      )
+      x: optFloat(
+        doc: doc
+        container: elem
+        key: "x"
+        fallback: 0.0
+      )
+      y: optFloat(
+        doc: doc
+        container: elem
+        key: "y"
+        fallback: 0.0
+      )
+      rotation: optFloat(
+        doc: doc
+        container: elem
+        key: "rotation"
+        fallback: 0.0
+      )
+    }
+    var at: Int = keys.length
+    loop at > 0 and keys.copyAtDefault(index: at - 1).t > key.t {
+      at = at - 1
+    }
+    keys.insert(index: at, value: key)
+  }
+  ret keys
 }

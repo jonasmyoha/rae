@@ -18,6 +18,7 @@ open ui/UiSystems
 open ui/animationSystem/AnimationRules
 open ui/animationSystem/AnimationTracks
 open ui/animationSystem/SharedElements
+open ui/animationSystem/LoopMotion
 
 func isLeaving(world: view UiWorld, entityId: view EntityId) ret Bool {
   ret componentHas(this: world.leavings, entityId: entityId)
@@ -652,27 +653,29 @@ func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
   uiSystems.animation.triggerGeneration = generation
   sharedMovesInWorld(world: world, uiSystems: uiSystems)
   var arrivals: List(EntityId) = List.create(EntityId, cap: 8)
+  # every node just come to be shown, for its Loop
+  var shownNow: List(EntityId) = List.create(EntityId, cap: 8)
   loop var i: Int = 0, i < componentCount(this: world.appears), ++i {
     let entityId: EntityId = componentEntityAt(this: world.appears, i: i)
     if noteShown(world: world, uiSystems: uiSystems, entityId: entityId) {
       componentMod(this: world.appearSeens, entityId: entityId).arrived = true
       arrivals.add(value: entityId)
+      shownNow.add(value: entityId)
     }
   }
   loop var i: Int = 0, i < componentCount(this: world.disappears), ++i {
-    let shown: Bool = noteShown(
-      world: world
-      uiSystems: uiSystems
-      entityId: componentEntityAt(this: world.disappears, i: i)
-    )
+    let entityId: EntityId = componentEntityAt(this: world.disappears, i: i)
+    if noteShown(world: world, uiSystems: uiSystems, entityId: entityId) {
+      shownNow.add(value: entityId)
+    }
   }
   loop var i: Int = 0, i < componentCount(this: world.staggers), ++i {
-    let shown: Bool = noteShown(
-      world: world
-      uiSystems: uiSystems
-      entityId: componentEntityAt(this: world.staggers, i: i)
-    )
+    let entityId: EntityId = componentEntityAt(this: world.staggers, i: i)
+    if noteShown(world: world, uiSystems: uiSystems, entityId: entityId) {
+      shownNow.add(value: entityId)
+    }
   }
+  loopTriggers(world: world, uiSystems: uiSystems, shownNow: shownNow)
   loop let entityId: view EntityId in arrivals {
     let parent: EntityId = parentOf(uiSystems: uiSystems, entityId: entityId)
     if isNone(this: parent) is false and componentHas(this: world.staggers, entityId: parent) {
@@ -693,5 +696,35 @@ func animationTriggers(world: mod UiWorld, uiSystems: mod UiSystems) {
       entityId: entityId
       extraDelay: extraDelay
     )
+  }
+}
+
+# Loop: a node just shown starts its loop (one already noted above by its Appear, Disappear or
+# Stagger is in `shownNow`); a running one whose node is hidden now stops
+func loopTriggers(world: mod UiWorld, uiSystems: mod UiSystems, shownNow: view List(EntityId)) {
+  loop var i: Int = 0, i < componentCount(this: world.loops), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.loops, i: i)
+    var arrived: Bool = false
+    if componentHas(this: world.appears, entityId: entityId) or componentHas(
+      this: world.disappears
+      entityId: entityId
+    ) or componentHas(this: world.staggers, entityId: entityId) {
+      loop let shownEntityId: view EntityId in shownNow {
+        if shownEntityId is entityId {
+          arrived = true
+        }
+      }
+    } else {
+      arrived = noteShown(world: world, uiSystems: uiSystems, entityId: entityId)
+    }
+    if arrived {
+      loopStart(world: world, uiSystems: uiSystems, entityId: entityId)
+    } else if componentHas(this: uiSystems.animation.loopRuns, entityId: entityId) and shownInTree(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+    ) is false {
+      loopStop(uiSystems: uiSystems, entityId: entityId)
+    }
   }
 }
