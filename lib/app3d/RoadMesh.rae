@@ -1,0 +1,438 @@
+# app3d/RoadMesh — a road as a real surface (docs/open-world-tiles.md (e)): a carriageway mesh
+# along a line, lying on the ground under it, with painted edge lines and a dashed center line.
+# Pure: the app lays it out and builds the meshes, then draws them as static meshes and gives the
+# carriageway a collider (box3d/ecs/VenueMesh addVenueMesh), so cars drive on the road itself.
+#
+#   let line: List(Vec2) = roadLine(points: through, closed: false, sectionLength:
+#   style.sectionLength)
+#   ...the app answers the ground under it: for every point of roadGroundPoints(...) its height
+#   let heights: List(Float) = roadSectionHeights(ground: answers, lift: style.lift)
+#   let asphalt: MeshData = roadCarriageway(line: line, heights: heights, style: style, closed:
+#   false)
+#   let paint: MeshData = roadPaint(line: line, heights: heights, style: style, closed: false)
+#
+# The line is a Catmull-Rom curve through the app's points, then points every sectionLength m
+# along it, so the road bends smoothly whatever the points' spacing. Each section lies level across,
+# on the highest ground under its middle and its edges, `lift` over it, so it never sinks into a
+# slope. Rae has no function values, so the ground is asked as data (roadGroundPoints). Tested by a
+# case.
+import Math
+import Vec3
+open Vec2
+open Mesh3d
+
+type RoadStyle {
+  # The carriageway's width (m), how far over the ground it lies and the paint over it (m)
+  width: Float = 8.0
+  lift: Float = 0.06
+  paintLift: Float = 0.007
+  # The lines: their width, the edge lines' middles from the road's middle, the center line's
+  # dashes this long with gaps as long (m); no center line when `centerLine` is false, no edge
+  # lines when `edgeLines` is
+  lineWidth: Float = 0.15
+  edgeLineOffset: Float = 3.65
+  dashLength: Float = 3.0
+  centerLine: Bool = true
+  edgeLines: Bool = true
+  # The points along the line (m apart)
+  sectionLength: Float = 2.0
+}
+
+# A point of the Catmull-Rom curve through `points`, in segment `segment` at `t` (0 .. 1); a
+# closed curve wraps round, an open one repeats its end points
+func roadCurvePoint(
+  points: view List(Vec2)
+  segment: view Int
+  t: view Float
+  closed: view Bool
+) ret Vec2 {
+  let n: Int = points.length
+  let p0: Vec2 = points.copyAtDefault(
+    index: roadCurveIndex(index: segment - 1, count: n, closed: closed)
+  )
+  let p1: Vec2 = points.copyAtDefault(
+    index: roadCurveIndex(index: segment, count: n, closed: closed)
+  )
+  let p2: Vec2 = points.copyAtDefault(
+    index: roadCurveIndex(index: segment + 1, count: n, closed: closed)
+  )
+  let p3: Vec2 = points.copyAtDefault(
+    index: roadCurveIndex(index: segment + 2, count: n, closed: closed)
+  )
+  let t2: Float = t * t
+  let t3: Float = t2 * t
+  ret Vec2 {
+    x: 0.5 * (2.0 * p1.x + (p2.x - p0.x) * t + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2 + (3.0 * p1.x - p0.x - 3.0 * p2.x + p3.x) * t3)
+    y: 0.5 * (2.0 * p1.y + (p2.y - p0.y) * t + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2 + (3.0 * p1.y - p0.y - 3.0 * p2.y + p3.y) * t3)
+  }
+}
+
+func roadCurveIndex(index: view Int, count: view Int, closed: view Bool) ret Int {
+  if closed {
+    ret ((index % count) + count) % count
+  }
+  ret Math.clamp(val: index, low: 0, high: count - 1)
+}
+
+# The road's center line: the curve through `points`, then a point every `sectionLength` m along
+# it (an open line keeps both ends)
+func roadLine(
+  points: view List(Vec2)
+  closed: view Bool
+  sectionLength: view Float
+) ret List(Vec2) {
+  let n: Int = points.length
+  if n < 2 {
+    ret points
+  }
+  var segments: Int = n - 1
+  if closed {
+    segments = n
+  }
+  var dense: List(Vec2) = List.create(Vec2, cap: segments * 24 + 1)
+  loop var segment: Int = 0, segment < segments, ++segment {
+    loop var k: Int = 0, k < 24, ++k {
+      dense.add(value: roadCurvePoint(
+        points: points
+        segment: segment
+        t: k.toFloat() / 24.0
+        closed: closed
+      ))
+    }
+  }
+  if not closed {
+    dense.add(value: points.copyAtDefault(index: n - 1))
+  }
+  var lengths: List(Float) = List.create(Float, cap: dense.length + 1)
+  var total: Float = 0.0
+  lengths.add(value: 0.0)
+  var spans: Int = dense.length - 1
+  if closed {
+    spans = dense.length
+  }
+  loop var i: Int = 0, i < spans, ++i {
+    let a: Vec2 = dense.copyAtDefault(index: i)
+    let b: Vec2 = dense.copyAtDefault(index: (i + 1) % dense.length)
+    total = total + Math.sqrt(x: (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))
+    lengths.add(value: total)
+  }
+  var count: Int = Math.max(a: (total / sectionLength + 0.5).toInt(), b: 2)
+  if not closed {
+    count = count + 1
+  }
+  var step: Float = total / count.toFloat()
+  if not closed {
+    step = total / (count - 1).toFloat()
+  }
+  var line: List(Vec2) = List.create(Vec2, cap: count)
+  var j: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let wanted: Float = i.toFloat() * step
+    loop j < spans - 1 and lengths.copyAtFallback(index: j + 1, fallback: total) < wanted {
+      j = j + 1
+    }
+    let from: Float = lengths.copyAtFallback(index: j, fallback: 0.0)
+    let to: Float = lengths.copyAtFallback(index: j + 1, fallback: total)
+    var t: Float = 0.0
+    if to - from > 0.0001 {
+      t = Math.clamp(val: (wanted - from) / (to - from), low: 0.0, high: 1.0)
+    }
+    let a: Vec2 = dense.copyAtDefault(index: j)
+    let b: Vec2 = dense.copyAtDefault(index: (j + 1) % dense.length)
+    line.add(value: Vec2 { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+  }
+  ret line
+}
+
+# The unit direction the line runs at point `index`
+func roadTangent(line: view List(Vec2), index: view Int, closed: view Bool) ret Vec2 {
+  let n: Int = line.length
+  let before: Vec2 = line.copyAtDefault(
+    index: roadCurveIndex(index: index - 1, count: n, closed: closed)
+  )
+  let after: Vec2 = line.copyAtDefault(
+    index: roadCurveIndex(index: index + 1, count: n, closed: closed)
+  )
+  let dx: Float = after.x - before.x
+  let dy: Float = after.y - before.y
+  let length: Float = Math.max(a: Math.sqrt(x: dx * dx + dy * dy), b: 0.0001)
+  ret Vec2 { x: dx / length, y: dy / length }
+}
+
+# The point `offset` m left of the line's middle at point `index` (right of it when negative)
+func roadSidePoint(
+  line: view List(Vec2)
+  index: view Int
+  offset: view Float
+  closed: view Bool
+) ret Vec2 {
+  let point: Vec2 = line.copyAtDefault(index: index)
+  let tangent: Vec2 = roadTangent(line: line, index: index, closed: closed)
+  ret Vec2 { x: point.x - tangent.y * offset, y: point.y + tangent.x * offset }
+}
+
+# Where the app is asked the ground's height: for each point of the line its middle, its left
+# edge and its right edge (three a point, in that order)
+func roadGroundPoints(line: view List(Vec2), width: view Float, closed: view Bool) ret List(Vec2) {
+  var points: List(Vec2) = List.create(Vec2, cap: line.length * 3)
+  loop var i: Int = 0, i < line.length, ++i {
+    points.add(value: line.copyAtDefault(index: i))
+    points.add(value: roadSidePoint(
+      line: line
+      index: i
+      offset: width * 0.5
+      closed: closed
+    ))
+    points.add(value: roadSidePoint(
+      line: line
+      index: i
+      offset: 0.0 - width * 0.5
+      closed: closed
+    ))
+  }
+  ret points
+}
+
+# Each section's surface height from the app's answers (three a point, roadGroundPoints): over
+# the highest ground under it, by `lift`
+func roadSectionHeights(ground: view List(Float), lift: view Float) ret List(Float) {
+  var heights: List(Float) = List.create(Float, cap: ground.length / 3)
+  loop var point: Int = 0, point < ground.length / 3, ++point {
+    let i: Int = point * 3
+    let highest: Float = Math.max(
+      a: ground.copyAtDefault(index: i)
+      b: Math.max(a: ground.copyAtDefault(index: i + 1), b: ground.copyAtDefault(index: i + 2))
+    )
+    heights.add(value: highest + lift)
+  }
+  ret heights
+}
+
+func roadEmptyMesh(capacity: view Int) ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: capacity * 8)
+    indices: List.create(Int, cap: capacity * 3)
+    vertCount: 0
+  }
+}
+
+func roadPushVertex(
+  mesh: mod MeshData
+  x: view Float
+  y: view Float
+  z: view Float
+) {
+  pushVert(
+    verts: mesh.verts
+    px: x
+    py: y
+    pz: z
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 0.0
+  )
+  mesh.vertCount = mesh.vertCount + 1
+}
+
+# Two triangles facing up between the edge pairs starting at vertices `here` and `next` (left,
+# then right)
+func roadQuad(mesh: mod MeshData, here: view Int, next: view Int) {
+  mesh.indices.add(value: here + 1)
+  mesh.indices.add(value: next + 1)
+  mesh.indices.add(value: next)
+  mesh.indices.add(value: here + 1)
+  mesh.indices.add(value: next)
+  mesh.indices.add(value: here)
+}
+
+# A strip along the line between `left` and `right` m left of its middle (right of it when
+# negative), `lift` over the section heights
+func roadStrip(
+  mesh: mod MeshData
+  line: view List(Vec2)
+  heights: view List(Float)
+  left: view Float
+  right: view Float
+  lift: view Float
+  closed: view Bool
+) {
+  let first: Int = mesh.vertCount
+  loop var i: Int = 0, i < line.length, ++i {
+    let z: Float = heights.copyAtFallback(index: i, fallback: 0.0) + lift
+    let a: Vec2 = roadSidePoint(
+      line: line
+      index: i
+      offset: left
+      closed: closed
+    )
+    let b: Vec2 = roadSidePoint(
+      line: line
+      index: i
+      offset: right
+      closed: closed
+    )
+    roadPushVertex(
+      mesh: mesh
+      x: a.x
+      y: a.y
+      z: z
+    )
+    roadPushVertex(
+      mesh: mesh
+      x: b.x
+      y: b.y
+      z: z
+    )
+  }
+  var quads: Int = line.length - 1
+  if closed {
+    quads = line.length
+  }
+  loop var i: Int = 0, i < quads, ++i {
+    roadQuad(mesh: mesh, here: first + i * 2, next: first + ((i + 1) % line.length) * 2)
+  }
+}
+
+# The carriageway: one ribbon `style.width` wide
+func roadCarriageway(
+  line: view List(Vec2)
+  heights: view List(Float)
+  style: view RoadStyle
+  closed: view Bool
+) ret MeshData {
+  var mesh: MeshData = roadEmptyMesh(capacity: line.length * 2)
+  roadStrip(
+    mesh: mesh
+    line: line
+    heights: heights
+    left: style.width * 0.5
+    right: 0.0 - style.width * 0.5
+    lift: 0.0
+    closed: closed
+  )
+  ret mesh
+}
+
+# Is the center line painted between points `index` and the next? Dashes `dashLength` long
+# with gaps as long, by the distance along the road
+func roadDashAt(index: view Int, style: view RoadStyle) ret Bool {
+  let along: Float = index.toFloat() * style.sectionLength
+  ret Math.floor(x: along / style.dashLength).toInt() % 2 is 0
+}
+
+# The paint: both edge lines whole, the center line in dashes (as the style asks)
+func roadPaint(
+  line: view List(Vec2)
+  heights: view List(Float)
+  style: view RoadStyle
+  closed: view Bool
+) ret MeshData {
+  var mesh: MeshData = roadEmptyMesh(capacity: line.length * 8)
+  let half: Float = style.lineWidth * 0.5
+  if style.edgeLines {
+    roadStrip(
+      mesh: mesh
+      line: line
+      heights: heights
+      left: style.edgeLineOffset + half
+      right: style.edgeLineOffset - half
+      lift: style.paintLift
+      closed: closed
+    )
+    roadStrip(
+      mesh: mesh
+      line: line
+      heights: heights
+      left: 0.0 - style.edgeLineOffset + half
+      right: 0.0 - style.edgeLineOffset - half
+      lift: style.paintLift
+      closed: closed
+    )
+  }
+  if not style.centerLine {
+    ret mesh
+  }
+  var steps: Int = line.length - 1
+  if closed {
+    steps = line.length
+  }
+  loop var i: Int = 0, i < steps, ++i {
+    if not roadDashAt(index: i, style: style) {
+      continue
+    }
+    let first: Int = mesh.vertCount
+    loop var k: Int = 0, k < 2, ++k {
+      let index: Int = (i + k) % line.length
+      let z: Float = heights.copyAtFallback(index: index, fallback: 0.0) + style.paintLift
+      let a: Vec2 = roadSidePoint(
+        line: line
+        index: index
+        offset: half
+        closed: closed
+      )
+      let b: Vec2 = roadSidePoint(
+        line: line
+        index: index
+        offset: 0.0 - half
+        closed: closed
+      )
+      roadPushVertex(
+        mesh: mesh
+        x: a.x
+        y: a.y
+        z: z
+      )
+      roadPushVertex(
+        mesh: mesh
+        x: b.x
+        y: b.y
+        z: z
+      )
+    }
+    roadQuad(mesh: mesh, here: first, next: first + 2)
+  }
+  ret mesh
+}
+
+# The line's length (m)
+func roadLength(line: view List(Vec2), closed: view Bool) ret Float {
+  var total: Float = 0.0
+  var spans: Int = line.length - 1
+  if closed {
+    spans = line.length
+  }
+  loop var i: Int = 0, i < spans, ++i {
+    let a: Vec2 = line.copyAtDefault(index: i)
+    let b: Vec2 = line.copyAtDefault(index: (i + 1) % line.length)
+    total = total + Math.sqrt(x: (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))
+  }
+  ret total
+}
+
+# The tightest bend (m): the smallest circle through any three points `gap` points apart
+func roadTightestBend(line: view List(Vec2), gap: view Int, closed: view Bool) ret Float {
+  let n: Int = line.length
+  var tightest: Float = 100000.0
+  loop var i: Int = 0, i < n, ++i {
+    if not closed and (i - gap < 0 or i + gap >= n) {
+      continue
+    }
+    let a: Vec2 = line.copyAtDefault(
+      index: roadCurveIndex(index: i - gap, count: n, closed: closed)
+    )
+    let b: Vec2 = line.copyAtDefault(index: i)
+    let c: Vec2 = line.copyAtDefault(
+      index: roadCurveIndex(index: i + gap, count: n, closed: closed)
+    )
+    let ab: Float = Math.sqrt(x: (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y))
+    let bc: Float = Math.sqrt(x: (c.x - b.x) * (c.x - b.x) + (c.y - b.y) * (c.y - b.y))
+    let ca: Float = Math.sqrt(x: (a.x - c.x) * (a.x - c.x) + (a.y - c.y) * (a.y - c.y))
+    let twiceArea: Float = Math.abs(value: (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))
+    if twiceArea > 0.000001 {
+      tightest = Math.min(a: tightest, b: ab * bc * ca / (2.0 * twiceArea))
+    }
+  }
+  ret tightest
+}

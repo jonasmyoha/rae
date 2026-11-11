@@ -133,6 +133,13 @@ A road is a line (points, a width, shoulders), not a ground kind in texels:
 The rules (a line through points, its sections, the strips, the dashes) come from a road-building
 module of a downstream game, made generic; the road network is the app's.
 
+**Built (step 5):** app3d/RoadMesh: a road line through an app's points (open or closed; a
+Catmull-Rom curve, then a point every `sectionLength` m), the ground asked as data
+(roadGroundPoints: each point's middle and edges; roadSectionHeights: the highest plus the lift),
+the carriageway and the paint (edge lines, a dashed center line; RoadStyle), its length and
+tightest bend; case 1398. An app draws the meshes as static meshes and collides the carriageway
+(VenueMesh addVenueMesh). Cutting a road at content-tile edges waits for step 6 (content in tiles).
+
 ## (f) Budgets and how a big world is checked
 
 - Desktop (Mac): 60 fps; a frame with a stream (a ground row and a content tile) at most 2 ms over

@@ -1,0 +1,96 @@
+# A road as a real surface (lib/app3d/RoadMesh): an open line through three points, resampled
+# every 2 m with both ends kept; the app's ground answers (three a point: the middle and both
+# edges) give each section the highest of them plus the lift; the carriageway is one quad a step,
+# two vertices a point; the dashed center line paints every other 3 m; a closed ring wraps round.
+import Math
+import Vec3
+open Vec2
+open Mesh3d
+open app3d/RoadMesh
+
+func round2(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+func main() {
+  let style: RoadStyle = {}
+  let through: List(Vec2) = {
+    Vec2 { x: 0.0, y: 0.0 }
+    Vec2 { x: 60.0, y: 0.0 }
+    Vec2 { x: 100.0, y: 30.0 }
+  }
+  let line: List(Vec2) = roadLine(
+    points: through
+    closed: false
+    sectionLength: style.sectionLength
+  )
+  let first: Vec2 = line.copyAtDefault(index: 0)
+  let last: Vec2 = line.copyAtDefault(index: line.length - 1)
+  log(
+    "open line: {line.length} points, from ({first.x}, {first.y}) to ({round2(value: last.x)}, {round2(
+      value: last.y
+    )})"
+  )
+  let length: Float = roadLength(line: line, closed: false)
+  let step: Float = length / (line.length - 1).toFloat()
+  log("its steps: {round2(value: step)} m, the line {Math.round(x: length)} m")
+  let tangent: Vec2 = roadTangent(line: line, index: 0, closed: false)
+  log("at its start it runs east: ({round2(value: tangent.x)}, {round2(value: tangent.y)})")
+  # the ground: a slope rising 0.1 m a meter to the north
+  let asked: List(Vec2) = roadGroundPoints(line: line, width: style.width, closed: false)
+  var ground: List(Float) = List.create(Float, cap: asked.length)
+  loop let point: view Vec2 in asked {
+    ground.add(value: point.y * 0.1)
+  }
+  let heights: List(Float) = roadSectionHeights(ground: ground, lift: style.lift)
+  log(
+    "ground asked at {asked.length} points; the first section at {round2(
+      value: heights.copyAtDefault(index: 0)
+    )} m (the north edge 0.4 + the lift)"
+  )
+  let asphalt: MeshData = roadCarriageway(
+    line: line
+    heights: heights
+    style: style
+    closed: false
+  )
+  log("carriageway: {asphalt.vertCount} vertices, {asphalt.indices.length / 6} quads")
+  let paint: MeshData = roadPaint(
+    line: line
+    heights: heights
+    style: style
+    closed: false
+  )
+  var dashes: Int = 0
+  loop var i: Int = 0, i < line.length - 1, ++i {
+    if roadDashAt(index: i, style: style) {
+      dashes = dashes + 1
+    }
+  }
+  log("paint: two edge lines and {dashes} dash steps, {paint.indices.length / 6} quads")
+  log(
+    "its bend: tighter than 60 m somewhere: {roadTightestBend(line: line, gap: 5, closed: false) < 60.0}"
+  )
+  # a closed ring of radius 50
+  var ring: List(Vec2) = {}
+  loop var i: Int = 0, i < 12, ++i {
+    let angle: Float = i.toFloat() / 12.0 * 6.2831853
+    ring.add(value: Vec2 { x: Math.cos(x: angle) * 50.0, y: Math.sin(x: angle) * 50.0 })
+  }
+  let closedLine: List(Vec2) = roadLine(points: ring, closed: true, sectionLength: 2.0)
+  let ringHeights: List(Float) = roadSectionHeights(ground: List.create(Float, cap: 0), lift: 0.0)
+  var flat: List(Float) = {}
+  loop var i: Int = 0, i < closedLine.length, ++i {
+    flat.add(value: 0.0)
+  }
+  let ringMesh: MeshData = roadCarriageway(
+    line: closedLine
+    heights: flat
+    style: style
+    closed: true
+  )
+  log(
+    "ring: about {Math.round(x: roadLength(line: closedLine, closed: true))} m round, {closedLine.length} points, {ringMesh.indices.length / 6} quads (one a point: it closes)"
+  )
+  log("no ground, no sections: {ringHeights.length}")
+}
