@@ -1,0 +1,184 @@
+# Which finger turns the camera (app3d/CameraRig cameraTouchPick): a finger that goes down outside
+# the joystick's zone, held for its whole drag; not the joystick's, not one on the app's buttons;
+# and a finger the app gives it (a fire button's) before its own, while that one is down.
+open app3d/CameraRig
+
+func touch(
+  id: view Int
+  x: view Float
+  y: view Float
+  pressed: view Bool
+) ret CameraTouch {
+  ret CameraTouch { id: id, x: x, y: y, pressed: pressed }
+}
+
+func pick(
+  touches: view List(CameraTouch)
+  grabId: view Int
+  giveId: view Int
+  blockedIds: view List(Int)
+) ret CameraTouchPick {
+  ret cameraTouchPick(
+    touches: touches
+    grabId: grabId
+    giveId: giveId
+    excludeId: 7
+    blockedIds: blockedIds
+    zoneX: 100.0
+    zoneY: 300.0
+    zoneR: 80.0
+  )
+}
+
+func main() ret Int {
+  let noBlocks: List(Int) = {}
+  # A finger down on the screen's right turns the camera; one in the stick's zone does not
+  let right: List(CameraTouch) = { touch(
+    id: 1
+    x: 600.0
+    y: 200.0
+    pressed: true
+  ) }
+  log(pick(
+    touches: right
+    grabId: -1
+    giveId: -1
+    blockedIds: noBlocks
+  ).sourceId)
+  let inZone: List(CameraTouch) = { touch(
+    id: 2
+    x: 110.0
+    y: 310.0
+    pressed: true
+  ) }
+  log(pick(
+    touches: inZone
+    grabId: -1
+    giveId: -1
+    blockedIds: noBlocks
+  ).sourceId)
+  # The stick's own finger, and one the app blocked (on its button), are never grabbed
+  let stickFinger: List(CameraTouch) = { touch(
+    id: 7
+    x: 600.0
+    y: 200.0
+    pressed: true
+  ) }
+  log(pick(
+    touches: stickFinger
+    grabId: -1
+    giveId: -1
+    blockedIds: noBlocks
+  ).sourceId)
+  let blocked: List(Int) = { 3 }
+  let onButton: List(CameraTouch) = { touch(
+    id: 3
+    x: 600.0
+    y: 200.0
+    pressed: true
+  ) }
+  log(pick(
+    touches: onButton
+    grabId: -1
+    giveId: -1
+    blockedIds: blocked
+  ).sourceId)
+  # A finger already down that wanders in is not grabbed: only a press is
+  let wandered: List(CameraTouch) = { touch(
+    id: 4
+    x: 600.0
+    y: 200.0
+    pressed: false
+  ) }
+  log(pick(
+    touches: wandered
+    grabId: -1
+    giveId: -1
+    blockedIds: noBlocks
+  ).sourceId)
+  # The held finger is kept wherever it goes, even into the stick's zone
+  let heldInZone: List(CameraTouch) = { touch(
+    id: 1
+    x: 110.0
+    y: 300.0
+    pressed: false
+  ) }
+  let held: CameraTouchPick = pick(
+    touches: heldInZone
+    grabId: 1
+    giveId: -1
+    blockedIds: noBlocks
+  )
+  log(held.sourceId is 1 and held.grabId is 1 and held.x is 110.0)
+  # A fresh press with the held id is a new finger (SDL reuses ids): grabbed again by region
+  let reused: List(CameraTouch) = { touch(
+    id: 1
+    x: 110.0
+    y: 300.0
+    pressed: true
+  ) }
+  log(pick(
+    touches: reused
+    grabId: 1
+    giveId: -1
+    blockedIds: noBlocks
+  ).sourceId)
+  # The given finger (on a fire button) turns the camera before the held one; the held one is
+  # still held, and the camera goes back to it when the given one lifts
+  let both: List(CameraTouch) = {
+    touch(
+      id: 1
+      x: 600.0
+      y: 200.0
+      pressed: false
+    )
+    touch(
+      id: 5
+      x: 650.0
+      y: 330.0
+      pressed: true
+    )
+  }
+  let given: CameraTouchPick = pick(
+    touches: both
+    grabId: 1
+    giveId: 5
+    blockedIds: noBlocks
+  )
+  log(given.sourceId is 5 and given.grabId is 1 and given.x is 650.0)
+  let lifted: List(CameraTouch) = { touch(
+    id: 1
+    x: 605.0
+    y: 200.0
+    pressed: false
+  ) }
+  log(pick(
+    touches: lifted
+    grabId: 1
+    giveId: 5
+    blockedIds: noBlocks
+  ).sourceId)
+  # The given finger is not also grabbed by region
+  let onlyGiven: List(CameraTouch) = { touch(
+    id: 5
+    x: 650.0
+    y: 330.0
+    pressed: true
+  ) }
+  let alone: CameraTouchPick = pick(
+    touches: onlyGiven
+    grabId: -1
+    giveId: 5
+    blockedIds: noBlocks
+  )
+  log(alone.sourceId is 5 and alone.grabId is -1)
+  # No fingers: nothing
+  let empty: List(CameraTouch) = {}
+  log(pick(
+    touches: empty
+    grabId: 1
+    giveId: 5
+    blockedIds: noBlocks
+  ).sourceId)
+  ret 0
+}
