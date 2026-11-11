@@ -235,22 +235,16 @@ func butlerStep(butler: mod Butler) {
     }
   }
   # streams closed and acknowledged are dropped from the table
-  var kept: List(ButlerStream) = {}
-  var dropped: Bool = false
-  loop var i: Int = 0, i < butler.streams.length(), ++i {
-    if let stream: mod ButlerStream = butler.streams.modAt(index: i) {
-      if stream.streamId < 0 {
-        dropped = true
-      }
+  var index: Int = butler.streams.length() - 1
+  loop index >= 0 {
+    var closed: Bool = false
+    if let stream: view ButlerStream = butler.streams.viewAt(index: index) {
+      closed = stream.streamId < 0
     }
-  }
-  if dropped {
-    loop let stream: ButlerStream in butler.streams {
-      if stream.streamId >= 0 {
-        kept.add(value: stream)
-      }
+    if closed {
+      butler.streams.removeAt(index: index)
     }
-    butler.streams = kept
+    index = index - 1
   }
   let chunk: Buffer(Float) = butler.chunk
   let outputRate: Int = butler.outputRate
@@ -351,13 +345,18 @@ func freeStreamShared(shared: view StreamShared) {
 # The butler closed a stream: its ring and flags are freed and the record goes
 # (its voice had ended: a seek or a stop waits for that before it closes)
 func streamClosed(streams: mod List(StreamRecord), streamId: view Int) {
-  var kept: List(StreamRecord) = {}
-  loop let record: StreamRecord in streams {
-    if record.streamId is streamId {
-      freeStreamShared(shared: record.shared)
-    } else {
-      kept.add(value: record)
+  var index: Int = streams.length() - 1
+  loop index >= 0 {
+    var matches: Bool = false
+    if let record: view StreamRecord = streams.viewAt(index: index) {
+      if record.streamId is streamId {
+        freeStreamShared(shared: record.shared)
+        matches = true
+      }
     }
+    if matches {
+      streams.removeAt(index: index)
+    }
+    index = index - 1
   }
-  streams = kept
 }

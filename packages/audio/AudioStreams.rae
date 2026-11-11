@@ -128,7 +128,7 @@ func playStream(
 
 func streamIndexOf(this: view AudioEngine, voiceId: view VoiceId) ret Int {
   loop var i: Int = 0, i < this.streams.length(), ++i {
-    if let record: StreamRecord = this.streams.copyAt(index: i) {
+    if let record: view StreamRecord = this.streams.viewAt(index: i) {
       if record.voiceId is voiceId.value {
         ret i
       }
@@ -181,7 +181,7 @@ func resumeVoice(this: mod AudioEngine, voiceId: view VoiceId) {
 # first), counting a seek
 func positionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
-  if let record: StreamRecord = this.streams.copyAt(index: index) {
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
     let played: Int = record.shared.ring.popped() / max(a: 1, b: record.channels)
     ret record.startSeconds + (played as Float64) / (this.sampleRate as Float64)
   }
@@ -191,7 +191,7 @@ func positionSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 
 # The first file's length in seconds, or -1 when the format does not say
 func durationSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
-  if let record: StreamRecord = this.streams.copyAt(index: index) {
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
     ret record.fileSeconds.copyAtFallback(index: 0, fallback: -1.0)
   }
   ret -1.0
@@ -200,7 +200,7 @@ func durationSeconds(this: view AudioEngine, voiceId: view VoiceId) ret Float64 
 # Whether the stream still plays (or is paused): false once it has ended
 func streamIsPlaying(this: view AudioEngine, voiceId: view VoiceId) ret Bool {
   let index: Int = this.streamIndexOf(voiceId: voiceId)
-  if let record: StreamRecord = this.streams.copyAt(index: index) {
+  if let record: view StreamRecord = this.streams.viewAt(index: index) {
     ret not record.voiceEnded
   }
   ret false
@@ -214,7 +214,7 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
     ret false
   }
   var path: String = ""
-  if let found: StreamRecord = this.streams.copyAt(index: index) {
+  if let found: view StreamRecord = this.streams.viewAt(index: index) {
     path = "{found.path}"
   }
   let decoder: AudioDecoder = openAudioDecoder(path: path)
