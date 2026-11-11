@@ -338,9 +338,11 @@ EOF
 fi
 
 # 3. Emit CMakeLists.
+# OBJC as well as C: a package's device sources may be Objective-C (.m), as
+# the audio package's are (miniaudio's iOS code and AVAudioSession).
 cat > "$gen/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.28)
-project(RaeApp C)
+project(RaeApp C OBJC)
 
 set(APP RaeApp)
 set(RAE_IOS_PHONE_ORIENTATIONS "$phone_orientations")

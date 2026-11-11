@@ -114,8 +114,7 @@ func pathBytesZ(path: view String) ret List(UInt8) {
 }
 
 # A file's bytes, or none when it cannot be read. Through the package's own C
-# rather than Sys.readFileBytes: one byte per UInt8, and it works inside a
-# spawned task (readFileBytes answers nothing there today).
+# rather than Sys.readFileBytes: one byte per UInt8 instead of one per Int.
 func readAudioFileBytes(path: view String) ret List(UInt8) {
   var pathZ: List(UInt8) = pathBytesZ(path: path)
   var bytes: List(UInt8) = {}

@@ -23,6 +23,17 @@
 #   at `stopAudio`. Offline, each `play` logs `[audio] play ...`.
 #
 # A VoiceId stays valid after its voice ends; calls on it then do nothing.
+#
+# The session (audio/AudioSession, iOS): `settings.session` is the program's
+# intent; the engine applies the strongest intent of what plays (an alert
+# voice makes it an alert), activates the session before the first sound and
+# deactivates it a second after the last. The host's events are read in
+# `update` into `sessionEvents` (audio/sessionSystem/SessionSystem hands them
+# to an ECS EventQueue): an interruption pauses music and cuts alerts, and its
+# end resumes music when the system says so; a lost route pauses music until
+# the program calls `resumeMusic`. RAE_AUDIO_FAKE_SESSION=1 is the headless
+# mode: the session calls are logged as `[audio-session] ...` instead of made,
+# and `injectSessionEvent` plays the host's part.
 import Math
 import Sys
 open Atomic
@@ -30,6 +41,7 @@ open Realtime
 open Signal
 open audio/AudioGlue
 open audio/AudioMixer
+open audio/AudioSession
 open audio/Sound
 open collections/SpscRing
 
@@ -40,10 +52,18 @@ type AudioSettings {
   periodFrames: Int
   # no device: render only through renderOffline
   offline: Bool
+  # what the program's sound is for (audio/AudioSession)
+  session: AudioSessionKind
 }
 
 func defaultAudioSettings() ret AudioSettings {
-  ret AudioSettings { sampleRate: 48000, channels: 2, periodFrames: 256, offline: false }
+  ret AudioSettings {
+    sampleRate: 48000
+    channels: 2
+    periodFrames: 256
+    offline: false
+    session: AudioSessionKind.ambient
+  }
 }
 
 type VoiceId {
@@ -69,6 +89,12 @@ type SoundSlot {
   releasing: Bool
 }
 
+# A voice the main thread knows is playing, and on which bus
+type LiveVoice {
+  voiceId: Int
+  bus: Int
+}
+
 type AudioEngine {
   offline: Bool
   device: Int
@@ -92,6 +118,19 @@ type AudioEngine {
   capture: List(Float)
   # sound sample time of the offline driver
   renderedFrames: Int
+  liveVoices: List(LiveVoice)
+  sessionKind: AudioSessionKind
+  fakeSession: Bool
+  sessionActive: Bool
+  # the plan last applied (sessionPlanCode), or -1
+  sessionApplied: Int
+  # when a voice last played, in ms of audioNowMs
+  lastSoundMs: Int
+  # music paused by an interruption / by a lost route
+  musicPausedByInterruption: Bool
+  musicPausedByRoute: Bool
+  # the host's events since the program last took them
+  sessionEvents: List(AudioSessionEvent)
 }
 
 func audioOfflineWanted() ret Bool {
@@ -163,6 +202,12 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
   var channels: Int = settings.channels
   var periodFrames: Int = settings.periodFrames
   let offline: Bool = settings.offline or audioOfflineWanted()
+  let fakeSession: Bool = getEnv(name: "RAE_AUDIO_FAKE_SESSION") is "1"
+  if not fakeSession {
+    unsafe {
+      let observing: Int = rae_audio_session_observe()
+    }
+  }
   if not offline {
     unsafe {
       device = rae_audio_device_open(
@@ -253,6 +298,15 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     capturePath: getEnv(name: "RAE_AUDIO_CAPTURE")
     capture: {}
     renderedFrames: 0
+    liveVoices: {}
+    sessionKind: settings.session
+    fakeSession: fakeSession
+    sessionActive: false
+    sessionApplied: -1
+    lastSoundMs: 0
+    musicPausedByInterruption: false
+    musicPausedByRoute: false
+    sessionEvents: {}
   }
 }
 
@@ -267,6 +321,7 @@ func audioStartOffline(
     channels: channels
     periodFrames: blockFrames
     offline: true
+    session: AudioSessionKind.ambient
   }
   ret audioStart(settings: settings)
 }
@@ -355,6 +410,9 @@ func playAt(
   if this.offline {
     log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
   }
+  this.liveVoices.add(value: { voiceId: voiceId, bus: command.bus })
+  this.lastSoundMs = this.audioNowMs()
+  this.applySession()
   let sent: Bool = this.sendCommand(command: command)
   ret VoiceId { value: voiceId }
 }
@@ -467,6 +525,7 @@ func update(this: mod AudioEngine) {
     if let report: AudioFeedback = this.feedback.pop() {
       if report.kind is AudioFeedbackKind.voiceEnded {
         this.voicesEnded = this.voicesEnded + 1
+        this.forgetVoice(voiceId: report.voiceId)
       }
     }
   }
@@ -475,6 +534,7 @@ func update(this: mod AudioEngine) {
       this.freeSoundSamples(soundId: soundId)
     }
   }
+  this.updateSession()
 }
 
 # Offline only: render `frames` frames on this thread (marked real-time while
@@ -608,4 +668,187 @@ func stopAudio(this: mod AudioEngine) ret Int {
   freeSignal(this: this.wake)
   freeAtomic(this: this.running)
   ret blocks
+}
+
+# The engine's clock in milliseconds: rendered frames offline (so a test is
+# repeatable), the monotonic clock with a device
+func audioNowMs(this: view AudioEngine) ret Int {
+  if this.offline {
+    ret this.renderedFrames * 1000 / this.sampleRate
+  }
+  ret nowNs() / 1000000
+}
+
+func forgetVoice(this: mod AudioEngine, voiceId: view Int) {
+  loop var i: Int = 0, i < this.liveVoices.length(), ++i {
+    if let live: LiveVoice = this.liveVoices.copyAt(index: i) {
+      if live.voiceId is voiceId {
+        this.liveVoices.removeAt(index: i)
+        ret
+      }
+    }
+  }
+}
+
+func busIsPlaying(this: view AudioEngine, bus: view AudioBusKind) ret Bool {
+  loop let live: LiveVoice in this.liveVoices {
+    if live.bus is busIndex(bus: bus) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The intent of what plays now: an alert while one sounds, spoken text while
+# the voice bus speaks, else the program's own
+func wantedSessionKind(this: view AudioEngine) ret AudioSessionKind {
+  if this.busIsPlaying(bus: AudioBusKind.alerts) {
+    ret AudioSessionKind.alert
+  }
+  if this.busIsPlaying(bus: AudioBusKind.voice) and this.sessionKind is not AudioSessionKind.recording {
+    ret AudioSessionKind.spokenText
+  }
+  ret this.sessionKind
+}
+
+# Set the category for what plays, and activate the session
+func applySession(this: mod AudioEngine) {
+  let plan: AudioSessionPlan = sessionPlan(kind: this.wantedSessionKind())
+  let code: Int = sessionPlanCode(plan: plan)
+  if code is not this.sessionApplied {
+    this.sessionApplied = code
+    if this.fakeSession {
+      log(
+        "[audio-session] category {sessionCategoryName(category: plan.category)} mode {plan.mode} options {plan.options}"
+      )
+    } else {
+      unsafe {
+        let configured: Int = rae_audio_session_configure(
+          category: plan.category
+          mode: plan.mode
+          options: plan.options
+        )
+      }
+    }
+  }
+  if not this.sessionActive {
+    this.sessionActive = true
+    if this.fakeSession {
+      log("[audio-session] active")
+    } else {
+      unsafe {
+        let activated: Int = rae_audio_session_set_active(active: 1)
+      }
+    }
+  }
+}
+
+func deactivateSession(this: mod AudioEngine) {
+  if not this.sessionActive {
+    ret
+  }
+  this.sessionActive = false
+  if this.fakeSession {
+    log("[audio-session] inactive, other apps may resume")
+  } else {
+    unsafe {
+      let deactivated: Int = rae_audio_session_set_active(active: 0)
+    }
+  }
+}
+
+func sendBusCommand(this: view AudioEngine, kind: view AudioCommandKind, bus: view AudioBusKind) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.bus = busIndex(bus: bus)
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Continue music that a lost route (or an interruption that said not to
+# resume) paused: the program calls it, for example on the user's play
+func resumeMusic(this: mod AudioEngine) {
+  this.musicPausedByRoute = false
+  this.musicPausedByInterruption = false
+  this.applySession()
+  this.sendBusCommand(kind: AudioCommandKind.resumeBus, bus: AudioBusKind.music)
+}
+
+func musicIsPaused(this: view AudioEngine) ret Bool {
+  ret this.musicPausedByRoute or this.musicPausedByInterruption
+}
+
+# The fake mode's stand-in for the host: as if the system had sent this event
+func injectSessionEvent(this: view AudioEngine, kind: view AudioSessionEventKind, value: view Int) {
+  let code: Int = sessionEventCode(kind: kind, value: value)
+  unsafe {
+    rae_audio_session_inject(kind: code / 16, value: code % 16)
+  }
+}
+
+# Take the host's events since the last call
+func takeSessionEvents(this: mod AudioEngine) ret List(AudioSessionEvent) {
+  var taken: List(AudioSessionEvent) = {}
+  loop let event: AudioSessionEvent in this.sessionEvents {
+    taken.add(value: event)
+  }
+  this.sessionEvents.clear()
+  ret taken
+}
+
+func handleSessionEvent(this: mod AudioEngine, event: view AudioSessionEvent) {
+  if event.kind is AudioSessionEventKind.interruptionBegan {
+    # the system has stopped the session; music waits, alerts are cut
+    this.sessionActive = false
+    this.musicPausedByInterruption = true
+    this.sendBusCommand(kind: AudioCommandKind.pauseBus, bus: AudioBusKind.music)
+    this.sendBusCommand(kind: AudioCommandKind.stopBus, bus: AudioBusKind.alerts)
+  } else if event.kind is AudioSessionEventKind.interruptionEnded {
+    if event.shouldResume and this.musicPausedByInterruption {
+      this.musicPausedByInterruption = false
+      if not this.musicPausedByRoute {
+        this.applySession()
+        this.sendBusCommand(kind: AudioCommandKind.resumeBus, bus: AudioBusKind.music)
+      }
+    }
+  } else if event.kind is AudioSessionEventKind.routeLost {
+    this.musicPausedByRoute = true
+    this.sendBusCommand(kind: AudioCommandKind.pauseBus, bus: AudioBusKind.music)
+  } else if event.kind is AudioSessionEventKind.mediaServicesReset {
+    # everything the session had is gone: set it up again on the next sound
+    this.sessionActive = false
+    this.sessionApplied = -1
+  }
+}
+
+func pollSessionCode() ret Int {
+  unsafe {
+    ret rae_audio_session_poll()
+  }
+}
+
+# The session part of update: the host's events, the intent of what plays,
+# and deactivation a second after the last sound
+func updateSession(this: mod AudioEngine) {
+  var polling: Bool = true
+  loop polling {
+    let code: Int = pollSessionCode()
+    if code < 0 {
+      polling = false
+    } else {
+      let event: AudioSessionEvent = decodeSessionEvent(code: code)
+      if this.fakeSession {
+        log("[audio-session] event {event.kind} shouldResume {event.shouldResume}")
+      }
+      this.handleSessionEvent(event: event)
+      this.sessionEvents.add(value: event)
+    }
+  }
+  let now: Int = this.audioNowMs()
+  if this.liveVoices.length() > 0 {
+    this.lastSoundMs = now
+    if this.sessionActive {
+      this.applySession()
+    }
+  } else if this.sessionActive and now - this.lastSoundMs >= 1000 {
+    this.deactivateSession()
+  }
 }

@@ -1,0 +1,127 @@
+# audio/AudioSession — what a program's sound is for, and the host's session
+# events (docs/audio-design.md §9.1). A program states an intent; the engine
+# (audio/Audio) picks the iOS AVAudioSession category and options from it,
+# activates the session just before a sound plays and deactivates it a second
+# after the last one ends, so other apps' sound comes back. The strongest
+# intent of what is playing wins: an alert voice makes the session an alert
+# while it sounds, then it returns to the program's own intent.
+#
+# | intent      | category      | options                                   | silent switch | other
+# apps |
+# |-------------|---------------|-------------------------------------------|---------------|------------|
+# | ambient     | ambient       | -                                         | silenced      | mixes
+# |
+# | music       | playback      | -                                         | plays         | stops
+# |
+# | alert       | playback      | mixWithOthers, duckOthers                 | plays         |
+# ducked     |
+# | spokenText  | playback, mode spokenAudio | duckOthers, interruptSpokenAudio | plays     |
+# ducked     |
+# | recording   | playAndRecord | defaultToSpeaker, allowBluetoothA2DP      | plays         | stops
+# |
+#
+# Off iOS there is no session: the intents only matter there (the plan is
+# still computed, and the fake mode logs it).
+enum AudioSessionKind {
+  ambient
+  music
+  alert
+  spokenText
+  recording
+}
+
+# category 0 ambient, 1 soloAmbient, 2 playback, 3 playAndRecord; mode 0
+# default, 1 spokenAudio; options as rae_audio.h numbers them
+type AudioSessionPlan {
+  category: Int
+  mode: Int
+  options: Int
+}
+
+func sessionPlan(kind: view AudioSessionKind) ret AudioSessionPlan {
+  if kind is AudioSessionKind.music {
+    ret AudioSessionPlan { category: 2, mode: 0, options: 0 }
+  }
+  if kind is AudioSessionKind.alert {
+    ret AudioSessionPlan { category: 2, mode: 0, options: 1 bitor 2 }
+  }
+  if kind is AudioSessionKind.spokenText {
+    ret AudioSessionPlan { category: 2, mode: 1, options: 2 bitor 4 }
+  }
+  if kind is AudioSessionKind.recording {
+    ret AudioSessionPlan { category: 3, mode: 0, options: 8 bitor 16 }
+  }
+  ret AudioSessionPlan { category: 0, mode: 0, options: 0 }
+}
+
+# One number for a plan, to see whether it changed
+func sessionPlanCode(plan: view AudioSessionPlan) ret Int {
+  ret plan.category * 1000 + plan.mode * 100 + plan.options
+}
+
+func sessionCategoryName(category: view Int) ret String {
+  if category is 1 {
+    ret "soloAmbient"
+  }
+  if category is 2 {
+    ret "playback"
+  }
+  if category is 3 {
+    ret "playAndRecord"
+  }
+  ret "ambient"
+}
+
+enum AudioSessionEventKind {
+  # a phone call, Siri, another app's alarm: the system stopped the sound
+  interruptionBegan
+  # it is over; `shouldResume` says whether music should continue
+  interruptionEnded
+  # the device the sound went to is gone (headphones out, Bluetooth lost);
+  # music is paused, as the sound must not move to the speaker by itself
+  routeLost
+  # another route change (a new device): `reason` is AVAudioSession's
+  routeChanged
+  # the system's media services restarted
+  mediaServicesReset
+}
+
+type AudioSessionEvent {
+  kind: AudioSessionEventKind
+  shouldResume: Bool
+  reason: Int
+}
+
+# An event as rae_audio_session_poll encodes it (kind * 16 + value)
+func decodeSessionEvent(code: view Int) ret AudioSessionEvent {
+  let kindNumber: Int = code / 16
+  let value: Int = code % 16
+  var kind: AudioSessionEventKind = AudioSessionEventKind.mediaServicesReset
+  if kindNumber is 1 {
+    kind = AudioSessionEventKind.interruptionBegan
+  } else if kindNumber is 2 {
+    kind = AudioSessionEventKind.interruptionEnded
+  } else if kindNumber is 3 {
+    kind = AudioSessionEventKind.routeLost
+  } else if kindNumber is 4 {
+    kind = AudioSessionEventKind.routeChanged
+  }
+  ret AudioSessionEvent { kind: kind, shouldResume: kindNumber is 2 and value is 1, reason: value }
+}
+
+# The encoding back, for the fake mode
+func sessionEventCode(kind: view AudioSessionEventKind, value: view Int) ret Int {
+  if kind is AudioSessionEventKind.interruptionBegan {
+    ret 16 + value
+  }
+  if kind is AudioSessionEventKind.interruptionEnded {
+    ret 32 + value
+  }
+  if kind is AudioSessionEventKind.routeLost {
+    ret 48 + value
+  }
+  if kind is AudioSessionEventKind.routeChanged {
+    ret 64 + value
+  }
+  ret 80 + value
+}

@@ -567,6 +567,8 @@ during Do Not Disturb or a Focus.
   the capability it answers false even during a Focus. If SUMU cannot get that
   capability for its kind of app, the fallback is to treat "unknown" as "play".
   This is the one item to settle with an experiment on the phone (§13 D7).
+  (2026-11-11: not yet tried. The session part of the package exists; the
+  experiment needs an app on the phone, queued as `[audio 2b/7]`.)
 - SUMU not running: the sound is the local notification's sound
   (`local-notifications.md`). The system already silences it on silent and during
   a Focus, which is the wanted behavior except for "heard on silent". Making a
@@ -689,6 +691,25 @@ green.
    writes is `project(RaeApp C)`, so a `.m` in `sourcesDevice` would not
    compile for a device; that step adds `OBJC` there (and checks an iOS
    build), or calls Objective-C through C as the runtime's Apple code does.
+
+   **Landed, the session half (2026-11-11), `packages/audio` 0.2.0:**
+   `audio/AudioSession` (the intents and the plan of §9.1), the policy in
+   `audio/Audio` (the strongest intent of what plays, activation before the
+   first sound, deactivation a second after the last, a lost route and an
+   interruption pause music, an interruption cuts alerts, its end resumes
+   music when the system says so, `resumeMusic`), the events as ECS events
+   through `audio/sessionSystem/SessionSystem`, and the headless fake mode
+   (`RAE_AUDIO_FAKE_SESSION=1`: the calls are logged, `injectSessionEvent`
+   plays the host). The iOS side is Objective-C in the same glue file
+   (AVAudioSession's category, mode, options, activation, and the
+   interruption, route-change and media-services-reset notifications into an
+   event ring Rae polls); a device build compiles it as `src/rae_audio_glue.m`,
+   and `tools/ios/gen-ios.sh` now declares `project(RaeApp C OBJC)`.
+   miniaudio is told to leave the session alone (category none, no activate
+   or deactivate). Checked here: the glue compiles for the iPhone and its
+   simulator, a `C OBJC` Xcode project builds for the simulator, fixture 1404
+   runs the policy headless, and `checks/audioSine` still plays on a Mac. Not
+   yet run on an iPhone: queued as `[audio 2b/7]`, with the Focus experiment.
 
 2. **Streams and the music player.** The butler; dr_mp3, dr_flac, stb_vorbis;
    AAC through AudioToolbox; the Rae resampler (`good`); seek, gapless next;
