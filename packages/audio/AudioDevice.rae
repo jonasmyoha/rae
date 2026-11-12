@@ -154,9 +154,10 @@ func audioRenderThread(
 ) ret Int {
   let block: Buffer(Float) = createSampleBuffer(count: periodFrames * channels)
   let periodNs: Int = periodFrames * 1000000000 / sampleRate
-  unsafe {
-    rae_audio_thread_set_realtime(periodNs: periodNs, computeNs: periodNs / 2)
-  }
+  let promotion: RealtimePromotion = promoteToRealtime(
+    periodNanoseconds: periodNs
+    computeNanoseconds: periodNs / 2
+  )
   var blocks: Int = 0
   var recorder: RealtimeRecorder = createRealtimeRecorder(
     name: "audio render"
@@ -183,6 +184,7 @@ func audioRenderThread(
     wake.wait()
   }
   unmarkRealtimeThread()
+  demoteFromRealtime(promotion: promotion)
   recorder.report()
   freeAudioMixer(mixer: mixer)
   unsafe {

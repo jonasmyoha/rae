@@ -1,0 +1,15 @@
+tests/cases/1427_reject_promote_off_spawn_thread/Main.rae:20:28: `renderLoop` runs as a pool task (spawned at Main.rae:20 without `thread`), but it reaches `promoteToRealtime`, which only the thread of a `spawn thread` may call.
+    renderLoop (Main.rae:6) -> promoteToRealtime (lib/Realtime.rae:263)
+  Raised to real-time priority, this thread would starve everything else that runs on it. Start the work with `spawn thread` and promote it there.
+    20 |   let pooled: Task(Bool) = spawn renderLoop(periodNs: 5333333)
+       |                            ^~~~
+tests/cases/1427_reject_promote_off_spawn_thread/Main.rae:21:3: `promoteOnce` runs on a parallelLoop worker (the loop at Main.rae:21), but it reaches `promoteToRealtime`, which only the thread of a `spawn thread` may call.
+    promoteOnce (Main.rae:15) -> renderLoop (Main.rae:6) -> promoteToRealtime (lib/Realtime.rae:263)
+  Raised to real-time priority, this thread would starve everything else that runs on it. Start the work with `spawn thread` and promote it there.
+    21 |   parallelLoop var i: Int = 0, i < 2, ++i {
+       |   ^~~~
+tests/cases/1427_reject_promote_off_spawn_thread/Main.rae:19:1: `main` runs on the main thread, but it reaches `promoteToRealtime`, which only the thread of a `spawn thread` may call.
+    main (Main.rae:19) -> promoteOnce (Main.rae:15) -> renderLoop (Main.rae:6) -> promoteToRealtime (lib/Realtime.rae:263)
+  Raised to real-time priority, this thread would starve everything else that runs on it. Start the work with `spawn thread` and promote it there.
+    19 | func main() {
+       | ^~~~

@@ -59,6 +59,22 @@ void rae_ext_rae_signal_free(int64_t signal);
 /* The real-time check and mark (runtime_realtime.c, lib/Realtime.rae). */
 void rae_ext_Realtime_markThread(rae_Bool realtime) RAE_NONBLOCKING;
 rae_Bool rae_ext_Realtime_threadIsMarked(void) RAE_NONBLOCKING;
+/* Real-time priority for a `spawn thread` (lib/Realtime promoteToRealtime,
+ * runtime_realtime.c): one scheduler call each, per platform */
+#if defined(__APPLE__)
+int64_t rae_ext_Realtime_timebaseNumerator(void);
+int64_t rae_ext_Realtime_timebaseDenominator(void);
+int64_t rae_ext_Realtime_setTimeConstraint(int64_t periodTicks, int64_t computationTicks, int64_t constraintTicks);
+int64_t rae_ext_Realtime_setStandardPolicy(void);
+#elif defined(_WIN32)
+int64_t rae_ext_Realtime_mmcssBegin(void);
+int64_t rae_ext_Realtime_mmcssEnd(int64_t handle);
+#elif defined(__ANDROID__)
+int64_t rae_ext_Realtime_setNice(int64_t value);
+#elif defined(__linux__)
+int64_t rae_ext_Realtime_setFifo(int64_t priority);
+int64_t rae_ext_Realtime_setOther(void);
+#endif
 rae_Bool rae_ext_Realtime_reportWanted(void);
 
 #endif

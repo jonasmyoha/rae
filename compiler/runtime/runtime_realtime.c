@@ -105,3 +105,87 @@ rae_Bool rae_ext_Realtime_reportWanted(void) {
   const char* value = getenv("RAE_REALTIME_REPORT");
   return value && value[0] && value[0] != '0';
 }
+
+/* ---- real-time priority for a `spawn thread` (lib/Realtime.rae
+ * promoteToRealtime, docs/realtime-language-design.md §6.6.1) -------------
+ * Platform reason: the scheduler calls themselves. Each function makes ONE
+ * call on the calling thread and answers its result; which call, the values
+ * and what a failure means are Rae's. */
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+
+/* The Mach timebase: ticks = nanoseconds * denominator / numerator */
+int64_t rae_ext_Realtime_timebaseNumerator(void) {
+  mach_timebase_info_data_t timebase;
+  return mach_timebase_info(&timebase) == KERN_SUCCESS ? (int64_t)timebase.numer : 0;
+}
+
+int64_t rae_ext_Realtime_timebaseDenominator(void) {
+  mach_timebase_info_data_t timebase;
+  return mach_timebase_info(&timebase) == KERN_SUCCESS ? (int64_t)timebase.denom : 0;
+}
+
+/* THREAD_TIME_CONSTRAINT_POLICY for the calling thread; 1 when it took */
+int64_t rae_ext_Realtime_setTimeConstraint(int64_t periodTicks, int64_t computationTicks,
+                                           int64_t constraintTicks) {
+  thread_time_constraint_policy_data_t policy;
+  policy.period = (uint32_t)periodTicks;
+  policy.computation = (uint32_t)computationTicks;
+  policy.constraint = (uint32_t)constraintTicks;
+  policy.preemptible = 1;
+  return thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+                           (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
+}
+
+/* Back to THREAD_STANDARD_POLICY; 1 when it took */
+int64_t rae_ext_Realtime_setStandardPolicy(void) {
+  thread_standard_policy_data_t policy;
+  return thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_STANDARD_POLICY,
+                           (thread_policy_t)&policy, THREAD_STANDARD_POLICY_COUNT) == KERN_SUCCESS;
+}
+#elif defined(_WIN32)
+#include <windows.h>
+#include <avrt.h>
+#if defined(_MSC_VER)
+#pragma comment(lib, "avrt")
+#endif
+
+/* MMCSS "Pro Audio" for the calling thread: its handle, 0 when it failed */
+int64_t rae_ext_Realtime_mmcssBegin(void) {
+  DWORD taskIndex = 0;
+  return (int64_t)(intptr_t)AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
+}
+
+int64_t rae_ext_Realtime_mmcssEnd(int64_t handle) {
+  return AvRevertMmThreadCharacteristics((HANDLE)(intptr_t)handle) ? 1 : 0;
+}
+#elif defined(__ANDROID__)
+#include <sys/resource.h>
+#include <unistd.h>
+
+/* The calling thread's nice value (an app cannot get SCHED_FIFO); 1 when it took */
+int64_t rae_ext_Realtime_setNice(int64_t value) {
+  return setpriority(PRIO_PROCESS, (id_t)gettid(), (int)value) == 0;
+}
+#elif defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+
+/* SCHED_FIFO at `priority` for the calling thread (needs RLIMIT_RTPRIO); 0 or
+ * the error number */
+int64_t rae_ext_Realtime_setFifo(int64_t priority) {
+  struct sched_param parameter;
+  parameter.sched_priority = (int)priority;
+  return pthread_setschedparam(pthread_self(), SCHED_FIFO, &parameter);
+}
+
+/* Back to SCHED_OTHER; 0 or the error number */
+int64_t rae_ext_Realtime_setOther(void) {
+  struct sched_param parameter;
+  parameter.sched_priority = 0;
+  return pthread_setschedparam(pthread_self(), SCHED_OTHER, &parameter);
+}
+#endif

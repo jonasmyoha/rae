@@ -226,7 +226,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
       commands: butlerCommands
       closed: butlerClosed
     )
-    butlerTask = spawn butlerThread(butler: threadButler, running: butlerRunning)
+    butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
   }
   let input: AudioInputShared = createAudioInputShared(
     channels: deviceInputChannels(device: device)
@@ -260,7 +260,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
       reclaim: reclaim
       clockStamps: clockStamps
     )
-    renderTask = spawn audioRenderThread(
+    renderTask = spawn thread audioRenderThread(
       mixer: threadMixer
       commands: commands
       output: output

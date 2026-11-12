@@ -1,0 +1,20 @@
+# --report-waits lists each `spawn thread` target as "thread (spawn thread)"
+# (docs/realtime-language-design.md §6.6.1)
+func sumTo(count: view Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = 1, i <= count, ++i {
+    total = total + i
+  }
+  ret total
+}
+
+func waitThenSum(count: view Int) ret Int {
+  sleep(ms: 1)
+  ret sumTo(count: count)
+}
+
+func main() {
+  let pooled: Task(Int) = spawn sumTo(count: 4)
+  let dedicated: Task(Int) = spawn thread waitThenSum(count: 10)
+  log("{pooled.get()} {dedicated.get()}")
+}

@@ -30,7 +30,6 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_time.h>
-#include <mach/thread_policy.h>
 #include <pthread.h>
 #endif
 
@@ -247,24 +246,6 @@ int64_t rae_audio_device_underrun_frames(int64_t device) {
 
 int64_t rae_audio_device_callbacks(int64_t device) {
   return device ? __atomic_load_n(&((RaeAudioDevice*)(intptr_t)device)->callbacks, __ATOMIC_RELAXED) : 0;
-}
-
-int64_t rae_audio_thread_set_realtime(int64_t period_ns, int64_t compute_ns) {
-#if defined(__APPLE__)
-  mach_timebase_info_data_t timebase;
-  mach_timebase_info(&timebase);
-  double ticks_per_ns = (double)timebase.denom / (double)timebase.numer;
-  thread_time_constraint_policy_data_t policy;
-  policy.period = (uint32_t)((double)period_ns * ticks_per_ns);
-  policy.computation = (uint32_t)((double)compute_ns * ticks_per_ns);
-  policy.constraint = policy.period;
-  policy.preemptible = 1;
-  return thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
-                           (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
-#else
-  (void)period_ns; (void)compute_ns;
-  return 0;
-#endif
 }
 
 int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count) {

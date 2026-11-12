@@ -36,7 +36,7 @@ static void solve_effects(WaitGraph* graph) {
   for (size_t i = 0; i < graph->count; i++) {
     WaitNode* node = &graph->nodes[i];
     node->reached = node->effects;
-    for (int bit = 0; bit < 5; bit++) node->effect_via[bit] = -1;
+    for (int bit = 0; bit < 6; bit++) node->effect_via[bit] = -1;
   }
   bool changed = true;
   while (changed) {
@@ -49,7 +49,7 @@ static void solve_effects(WaitGraph* graph) {
         const WaitNode* callee = &graph->nodes[target];
         unsigned char gained = (unsigned char)(callee->reached & ~node->reached);
         if (!gained) continue;
-        for (int bit = 0; bit < 5; bit++) {
+        for (int bit = 0; bit < 6; bit++) {
           if (gained & (1 << bit)) node->effect_via[bit] = target;
         }
         node->reached |= gained;
@@ -121,13 +121,14 @@ static const char* off_main_reason(const WaitGraph* graph, const WaitNode* node,
   *file = node->decl->origin_file;
   *line = (int)node->decl->line;
   *column = (int)node->decl->column;
-  if (node->spawned || node->parallel_called) {
+  if (node->spawned || node->parallel_called || node->thread_spawned) {
     const char* site = node->off_main_file ? node->off_main_file : node->decl->origin_file;
     *file = site;
     *line = node->off_main_line;
     *column = node->off_main_column > 0 ? node->off_main_column : 1;
-    snprintf(text, cap, node->spawned ? "runs on another thread (spawned at %s:%d)"
-                                      : "runs on a worker thread (called in the parallelLoop at %s:%d)",
+    snprintf(text, cap, node->thread_spawned && !node->spawned ? "runs on its own thread (spawn thread at %s:%d)"
+                        : node->spawned ? "runs on another thread (spawned at %s:%d)"
+                                        : "runs on a worker thread (called in the parallelLoop at %s:%d)",
              site ? (wait_graph_is_stdlib(graph, node->decl) ? wait_graph_short_lib_path(site)
                                                               : wait_graph_file_name(site))
                   : "?",
@@ -204,18 +205,77 @@ static bool main_thread_check(const WaitGraph* graph) {
   return clean;
 }
 
+/* promoteToRealtime (§6.6.1) only on the thread of a `spawn thread`: the
+ * main thread, a pool task, a parallelLoop body, a realtime function or a C
+ * callback that reaches it is refused (a raised priority there starves
+ * everything else that runs on that thread) */
+static bool own_thread_check(const WaitGraph* graph) {
+  const AstDecl** reported = NULL;
+  size_t reported_count = 0, reported_cap = 0;
+  bool clean = true;
+  for (size_t i = 0; i < graph->count; i++) {
+    const WaitNode* node = &graph->nodes[i];
+    if (!(node->reached & EFFECT_OWN_THREAD)) continue;
+    const AstFuncDecl* func = &node->decl->as.func_decl;
+    char reason[512];
+    const char* file = node->decl->origin_file;
+    int line = (int)node->decl->line, column = (int)node->decl->column;
+    bool is_main = str_eq_cstr(func->name, "main") && !wait_graph_is_stdlib(graph, node->decl) && !func->params;
+    if (is_main) {
+      snprintf(reason, sizeof reason, "runs on the main thread");
+    } else if (node->spawned || node->parallel_called) {
+      file = node->off_main_file ? node->off_main_file : file;
+      line = node->off_main_line;
+      column = node->off_main_column > 0 ? node->off_main_column : 1;
+      snprintf(reason, sizeof reason, node->spawned ? "runs as a pool task (spawned at %s:%d without `thread`)"
+                                                    : "runs on a parallelLoop worker (the loop at %s:%d)",
+               wait_graph_file_name(file), line);
+    } else if (!func->is_extern && func->is_realtime) {
+      snprintf(reason, sizeof reason, "is realtime (it runs on a thread someone else started)");
+    } else if (!func->is_extern && func->c_export_symbol) {
+      snprintf(reason, sizeof reason, "is exported to C as `%s` (it runs on the caller's thread)",
+               func->c_export_symbol);
+    } else {
+      continue;
+    }
+    const AstDecl* root_decl = func->generic_template ? func->generic_template : node->decl;
+    bool seen = false;
+    for (size_t r = 0; r < reported_count && !seen; r++) seen = reported[r] == root_decl;
+    if (seen) continue;
+    if (reported_count == reported_cap) {
+      reported_cap = reported_cap ? reported_cap * 2 : 16;
+      reported = realloc(reported, reported_cap * sizeof(const AstDecl*));
+    }
+    reported[reported_count++] = root_decl;
+    char chain[2048];
+    chain_of(graph, (int)i, EFFECT_OWN_THREAD_BIT, chain, sizeof chain);
+    char message[4096];
+    snprintf(message, sizeof message,
+             "`%.*s` %s, but it reaches `promoteToRealtime`, which only the thread of a `spawn thread` may "
+             "call.\n    %s\n  Raised to real-time priority, this thread would starve everything else that runs "
+             "on it. Start the work with `spawn thread` and promote it there.",
+             (int)func->name.len, func->name.data, reason, chain);
+    diag_error(file, line, column, message);
+    clean = false;
+  }
+  free(reported);
+  return clean;
+}
+
 bool realtime_check(CompilerContext* ctx, const AstModule* merged, struct WaitGraph* graph) {
   (void)ctx;
   (void)merged;
   if (!graph) return true;
-  bool any = false, any_main_thread = false;
+  bool any = false, any_main_thread = false, any_own_thread = false;
   for (size_t i = 0; i < graph->count; i++) {
     any = any || is_root(&graph->nodes[i]);
     any_main_thread = any_main_thread || (graph->nodes[i].effects & EFFECT_MAIN_THREAD);
+    any_own_thread = any_own_thread || (graph->nodes[i].effects & EFFECT_OWN_THREAD);
   }
-  if (!any && !any_main_thread) return true;
+  if (!any && !any_main_thread && !any_own_thread) return true;
   solve_effects(graph);
   bool main_thread_clean = any_main_thread ? main_thread_check(graph) : true;
+  if (any_own_thread && !own_thread_check(graph)) main_thread_clean = false;
   if (!any) return main_thread_clean;
   Reported* reported = NULL;
   size_t reported_count = 0, reported_cap = 0;

@@ -1,0 +1,5 @@
+tests/cases/1430_main_thread_spawn_thread/Main.rae:16:27: `pollLoop` runs on its own thread (spawn thread at Main.rae:16), but it reaches `showOnScreen`, which only the main thread may call.
+    pollLoop (Main.rae:8) -> showOnScreen (Main.rae:4)
+  Send the request to the main loop instead (a Channel or an event the main loop reads) and make the call there.
+    16 |   let poller: Task(Int) = spawn thread pollLoop(rounds: 3)
+       |                           ^~~~

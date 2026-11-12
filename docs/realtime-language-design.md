@@ -772,9 +772,10 @@ or browser build includes them.
 
 #### 6.6.1 `spawn thread`, and the priority in `lib/Realtime` (R6)
 
-**Decided 2026-11-13; to be built** (QUEUE: "[realtime 6c build]"). First
-proposed 2026-11-12 as a function modifier `dedicatedThread`; the spawn-site
-form was chosen instead, for the reasons below.
+**Decided 2026-11-13 and built (compiler 0.3.111, audio 0.12.5); "Landed"
+at the end of this section.** First proposed 2026-11-12 as a function
+modifier `dedicatedThread`; the spawn-site form was chosen instead, for the
+reasons below.
 
 What exists today:
 - **Which thread.** `packages/audio` spawns `butlerThread` and (stage A)
@@ -831,10 +832,17 @@ The decision, in three parts:
    rate and the buffer size):
 
    ```rae
-   let promoted: Bool = promoteToRealtime(periodNanoseconds: periodNs, computeNanoseconds: periodNs / 2)
+   let promotion: RealtimePromotion = promoteToRealtime(
+     periodNanoseconds: periodNs
+     computeNanoseconds: periodNs / 2
+   )
    ...
-   demoteFromRealtime()   # at the end, where the platform needs it
+   demoteFromRealtime(promotion: promotion)   # at the end
    ```
+
+   `RealtimePromotion` holds `promoted` (did the thread get real-time
+   scheduling) and, on Windows, the MMCSS handle that `demoteFromRealtime`
+   gives back, so no C keeps that state.
 
    One C call per platform, behind `when` in `lib/Realtime.rae`:
 
@@ -846,8 +854,8 @@ The decision, in three parts:
    | Android | `setpriority` to `-19` (`THREAD_PRIORITY_URGENT_AUDIO`) | an app cannot get `SCHED_FIFO`; AAudio's own callback thread already is; returns false |
    | browser | none | the build has no threads; returns false |
 
-   It answers whether the thread got real-time priority; the caller logs it
-   and carries on, as the audio shim does today. A thread that is not started
+   `promoted` says whether the thread got real-time priority; the caller logs
+   it and carries on. A thread that is not started
    with `spawn thread` (the main thread, a pool task) may not call it: a pool
    worker raised to real time would starve every other task. The compiler
    refuses `promoteToRealtime` reached from anything but a `spawn thread`
@@ -877,6 +885,32 @@ Migration: `packages/audio`'s two loops are spawned with `spawn thread`, and
 release). None of the other 20 spawns in `lib/`, `packages/` or `examples/`
 is a loop that runs until shutdown (the raytracers' tiles and similar work
 items), so nothing else changes.
+
+Landed (2026-11-13, compiler 0.3.111):
+- `spawn thread` parses (`parser.c`, `spawn_thread` on the spawn), prints
+  (`pretty_expr.c`), always emits `rae_task_start` (`c_expr.c`, `c_lend.c`);
+  a call that cannot move to a thread (a `mod` argument, a `view` of heap
+  data, a generic function) is an error at that spawn instead of running in
+  place; sema refuses it in the browser build.
+- `may_wait.c` marks the target `thread_spawned` (not `spawned`), so it is
+  never asked about the pool and starts no resumable twins; `--report-waits`
+  prints "thread (spawn thread): f  File.rae:N"; the mainThread reason is
+  "runs on its own thread (spawn thread at ...)".
+- `lib/Realtime.rae` `promoteToRealtime` / `demoteFromRealtime` and
+  `RealtimePromotion`, the shims in `runtime_realtime.c` (Apple, Windows,
+  Android, Linux; checked: the Mac runs it, the Android and Linux C compile
+  with the NDK, Windows is type-checked only), `lib/Realtime` in
+  `compiler/tests/checkTargets`. `realtime_check.c` refuses
+  `promoteToRealtime` reached from `main`, a pool spawn, a `parallelLoop`
+  body, a `realtime` function or a `cExport` function (effect bit 5).
+- `packages/audio` 0.12.5: `spawn thread` for the butler and the stage-A
+  render loop, which calls `promoteToRealtime`; its own
+  `rae_audio_thread_set_realtime` is gone. `checks/audioSine` passes in both
+  stages.
+- Fixtures 1426 (32 `spawn thread` tasks that spin until all have started:
+  true; with a plain `spawn` the same program prints false), 1427 (the
+  refused promote: pool, parallelLoop, main), 1428 (the browser), 1429 (the
+  report), 1430 (the mainThread reason).
 
 ### 6.7 `Channel(T)` stays off the real-time thread
 

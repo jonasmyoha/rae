@@ -223,7 +223,7 @@ typedef struct {
 static void note_effect(WalkContext* walk, int effects, size_t line, size_t column, const char* what) {
   if (walk->cold) return;
   WaitNode* node = &walk->graph->nodes[walk->node];
-  for (int bit = 0; bit < 5; bit++) {
+  for (int bit = 0; bit < 6; bit++) {
     if (!(effects & (1 << bit)) || (node->effects & (1 << bit))) continue;
     node->effects |= (unsigned char)(1 << bit);
     node->effect_line[bit] = (int)line;
@@ -257,7 +257,7 @@ static void add_edge(WalkContext* walk, int callee) {
   if (walk->parallel_depth > 0) {
     /* a call in a parallelLoop body runs on a worker (§4.3) */
     WaitNode* target = &walk->graph->nodes[callee];
-    if (!target->parallel_called && !target->spawned) {
+    if (!target->parallel_called && !target->spawned && !target->thread_spawned) {
       target->off_main_file = walk->func ? walk->func->origin_file : NULL;
       target->off_main_line = (int)walk->parallel_line;
       target->off_main_column = (int)walk->parallel_column;
@@ -517,12 +517,14 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
           holder = &walk->graph->nodes[walk->node];
           for (size_t i = 0; i < holder->callee_count; i++) {
             WaitNode* spawned = &walk->graph->nodes[holder->callees[i]];
-            if (!spawned->spawned && !spawned->parallel_called) {
+            if (!spawned->spawned && !spawned->parallel_called && !spawned->thread_spawned) {
               spawned->off_main_file = walk->func ? walk->func->origin_file : NULL;
               spawned->off_main_line = (int)expr->line;
               spawned->off_main_column = (int)expr->column;
             }
-            spawned->spawned = true;
+            /* `spawn thread`: its own OS thread, never the pool (§6.6.1) */
+            if (expr->as.unary.spawn_thread) spawned->thread_spawned = true;
+            else spawned->spawned = true;
           }
           free(holder->callees);
           holder->callees = saved;
@@ -723,13 +725,21 @@ static void graph_walk_all(WaitGraph* graph) {
     const AstFuncDecl* func = &graph->nodes[i].decl->as.func_decl;
     WaitKind primitive = extern_wait_kind(func);
     if (primitive != WAIT_NONE) graph->nodes[i].direct = primitive;
-    for (int bit = 0; bit < 5; bit++) graph->nodes[i].effect_via[bit] = -1;
+    for (int bit = 0; bit < 6; bit++) graph->nodes[i].effect_via[bit] = -1;
     if (func->is_extern) {
       /* C: what it promises, or all four (docs/realtime-language-design.md §3.4) */
       int effects = func->is_realtime ? 0 : func->is_no_alloc ? (EFFECT_LOCKS | EFFECT_WAITS) : EFFECT_ALL;
       WalkContext extern_walk = { graph, (int)i, 0, func, { NULL, NULL }, false, 0, 0, 0 };
       note_effect(&extern_walk, effects, graph->nodes[i].decl->line, graph->nodes[i].decl->column,
                   func->is_no_alloc ? "C marked noAlloc, which may still lock or wait" : "C not marked realtime");
+    }
+    if (!func->is_extern && str_eq_cstr(func->name, "promoteToRealtime") && graph->nodes[i].decl->origin_file &&
+        is_stdlib(graph, graph->nodes[i].decl) && strstr(graph->nodes[i].decl->origin_file, "Realtime.rae")) {
+      /* lib/Realtime's promoteToRealtime: only a `spawn thread`'s thread
+       * may raise itself to real-time priority (§6.6.1) */
+      WalkContext mark_walk = { graph, (int)i, 0, func, { NULL, NULL }, false, 0, 0, 0 };
+      note_effect(&mark_walk, EFFECT_OWN_THREAD, graph->nodes[i].decl->line, graph->nodes[i].decl->column,
+                  "real-time priority for the calling thread");
     }
     if (func->is_main_thread) {
       /* a call only the main thread may make: the extern, or a Rae function

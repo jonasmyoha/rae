@@ -526,6 +526,7 @@ static void pp_expr_inner(PrettyPrinter* pp, const AstExpr* expr, int parent_pre
       if (need_paren) pp_write_char(pp, '(');
       bool is_post = expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC;
       if (!is_post) pp_write(pp, unary_op_text(expr->as.unary.op));
+      if (expr->as.unary.op == AST_UNARY_SPAWN && expr->as.unary.spawn_thread) pp_write(pp, "thread ");
       pp_expr_prec(pp, expr->as.unary.operand, PREC_UNARY);
       if (is_post) pp_write(pp, unary_op_text(expr->as.unary.op));
       if (need_paren) pp_write_char(pp, ')');

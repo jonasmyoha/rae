@@ -247,6 +247,9 @@ struct AstExpr {
        * froze the lent places until the scope ends, and the scope waits for
        * the task */
       bool spawn_lends;
+      // `spawn thread f(...)` (docs/realtime-language-design.md §6.6.1): this
+      // spawn always starts its own OS thread, never a pool task
+      bool spawn_thread;
     } unary;
     /* `value as Type`. Rae has NO implicit numeric conversions, so every
      * change of numeric representation is one of these nodes. */

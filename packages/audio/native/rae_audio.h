@@ -37,11 +37,6 @@ int64_t rae_audio_device_underrun_frames(int64_t device);
 /* Device callbacks so far */
 int64_t rae_audio_device_callbacks(int64_t device);
 
-/* Ask the scheduler to treat the calling thread as real-time: a time
- * constraint of `period_ns` with `compute_ns` of work on Apple; nothing
- * elsewhere yet. 1 when the request was taken. */
-int64_t rae_audio_thread_set_realtime(int64_t period_ns, int64_t compute_ns);
-
 /* The host's audio session (docs/audio-design.md §9.1). On iOS this is
  * AVAudioSession; elsewhere every call answers 0 and does nothing. The Rae
  * policy (audio/AudioSession) decides; these only make the call.

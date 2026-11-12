@@ -233,7 +233,7 @@ bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
   const char* submit = core_function_mangled(compiler, "schedulerSubmit");
   const char* forced = getenv("RAE_SPAWN_THREADS");
   bool on_pool = submit && compiler->wait_graph && !(forced && forced[0] && strcmp(forced, "0") != 0) &&
-      may_wait_spawn_on_pool(compiler->wait_graph, decl, false);
+      may_wait_spawn_on_pool(compiler->wait_graph, decl, false) && !spawn->as.unary.spawn_thread;
   if (on_pool) {
     fprintf(out, "rae_task_prepare(__t, __raelend_thunk_%s, __s); %s((int64_t)(intptr_t)__t); __t; })", mangled, submit);
   } else {

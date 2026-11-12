@@ -62,14 +62,18 @@ typedef struct {
   int* effect_callees;
   size_t effect_callee_count;
   size_t effect_callee_cap;
-  int effect_line[5];
-  int effect_column[5];
-  const char* effect_what[5];
-  int effect_via[5];
+  int effect_line[6];
+  int effect_column[6];
+  const char* effect_what[6];
+  int effect_via[6];
   /* Runs off the main thread (docs/realtime-language-design.md §4.3): called
    * in a parallelLoop body (`parallel_called`; `spawned` above is the other
    * way), and where it was first spawned or called so */
   bool parallel_called;
+  /* the target of a `spawn thread` (its own OS thread, §6.6.1): off the main
+   * thread, but not a start for resumable twins, since a wait there blocks
+   * only that thread */
+  bool thread_spawned;
   const char* off_main_file;
   int off_main_line;
   int off_main_column;
@@ -80,6 +84,9 @@ enum { EFFECT_ALLOCATES = 1, EFFECT_FREES = 2, EFFECT_LOCKS = 4, EFFECT_WAITS = 
 /* Not a real-time effect: it reaches a call that only the main thread may
  * make (an extern or function marked `mainThread`, §4.3); bit 4 of the arrays */
 enum { EFFECT_MAIN_THREAD = 16, EFFECT_MAIN_THREAD_BIT = 4 };
+/* Not a real-time effect either: it reaches lib/Realtime's promoteToRealtime,
+ * which only the thread of a `spawn thread` may call (§6.6.1); bit 5 */
+enum { EFFECT_OWN_THREAD = 32, EFFECT_OWN_THREAD_BIT = 5 };
 
 typedef struct {
   const AstDecl* decl;
