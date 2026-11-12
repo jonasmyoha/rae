@@ -496,6 +496,12 @@ typedef struct {
   // §3). Checked by realtime_check.c; on an extern, a promise about the C.
   bool is_realtime;
   bool is_no_alloc;
+  // `mainThread`: call it only on the thread that runs `main` (window, input,
+  // UIKit; docs/realtime-language-design.md §4.3). On an extern a promise about
+  // the C; on a Rae function a checked one. realtime_check.c refuses a spawned
+  // function, a parallelLoop body, a realtime function or a cExport function
+  // not marked mainThread that reaches one.
+  bool is_main_thread;
   // `cExport("cName")`: C may call this Rae function by that name, from any
   // thread (docs/realtime-language-design.md §6.1). The backend writes a
   // non-static C function of that name that calls it; its parameters and

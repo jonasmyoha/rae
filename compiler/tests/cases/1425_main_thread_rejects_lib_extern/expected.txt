@@ -1,0 +1,5 @@
+tests/cases/1425_main_thread_rejects_lib_extern/Main.rae:11:26: `probeInput` runs on another thread (spawned at Main.rae:11), but it reaches `touchDeviceCount`, which only the main thread may call.
+    probeInput (Main.rae:6) -> hasTouch (lib/Device.rae:40) -> currentFacts (lib/Device.rae:55) -> touchDeviceCount (lib/Device.rae:34)
+  Send the request to the main loop instead (a Channel or an event the main loop reads) and make the call there.
+    11 |   let task: Task(Bool) = spawn probeInput()
+       |                          ^~~~

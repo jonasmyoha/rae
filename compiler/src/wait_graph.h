@@ -62,14 +62,24 @@ typedef struct {
   int* effect_callees;
   size_t effect_callee_count;
   size_t effect_callee_cap;
-  int effect_line[4];
-  int effect_column[4];
-  const char* effect_what[4];
-  int effect_via[4];
+  int effect_line[5];
+  int effect_column[5];
+  const char* effect_what[5];
+  int effect_via[5];
+  /* Runs off the main thread (docs/realtime-language-design.md §4.3): called
+   * in a parallelLoop body (`parallel_called`; `spawned` above is the other
+   * way), and where it was first spawned or called so */
+  bool parallel_called;
+  const char* off_main_file;
+  int off_main_line;
+  int off_main_column;
 } WaitNode;
 
 /* The effects real-time code may not have (docs/realtime-language-design.md §2) */
 enum { EFFECT_ALLOCATES = 1, EFFECT_FREES = 2, EFFECT_LOCKS = 4, EFFECT_WAITS = 8, EFFECT_ALL = 15 };
+/* Not a real-time effect: it reaches a call that only the main thread may
+ * make (an extern or function marked `mainThread`, §4.3); bit 4 of the arrays */
+enum { EFFECT_MAIN_THREAD = 16, EFFECT_MAIN_THREAD_BIT = 4 };
 
 typedef struct {
   const AstDecl* decl;

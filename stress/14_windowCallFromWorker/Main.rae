@@ -1,0 +1,17 @@
+# Foot gun: asking the window system something from a worker thread.
+#
+# `Device.hasTouch` asks SDL how many touch devices there are. SDL's window
+# and event functions, and AppKit / UIKit under them, may only be called on
+# the main thread; from a spawned task the call races the event pump, or
+# AppKit stops the program. Rae refuses the spawn (docs/realtime-language-
+# design.md §4.3): the extern under it is marked mainThread.
+import Device
+
+func probeInput() ret Bool {
+  ret Device.hasTouch()
+}
+
+func main() {
+  let task: Task(Bool) = spawn probeInput()
+  log("touch {task.get()}")
+}

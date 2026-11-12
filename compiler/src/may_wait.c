@@ -213,6 +213,9 @@ typedef struct {
   const AstFuncDecl* func;   /* the function being walked (its params) */
   Bindings bindings;         /* its type parameters, for a specialization */
   bool cold;                 /* inside a misuse report's arguments: no effects */
+  int parallel_depth;        /* inside a parallelLoop body: its calls run on workers */
+  size_t parallel_line;      /* the outermost such loop's line and column */
+  size_t parallel_column;
 } WalkContext;
 
 /* A realtime effect this function itself has, at (line, column): the first
@@ -220,7 +223,7 @@ typedef struct {
 static void note_effect(WalkContext* walk, int effects, size_t line, size_t column, const char* what) {
   if (walk->cold) return;
   WaitNode* node = &walk->graph->nodes[walk->node];
-  for (int bit = 0; bit < 4; bit++) {
+  for (int bit = 0; bit < 5; bit++) {
     if (!(effects & (1 << bit)) || (node->effects & (1 << bit))) continue;
     node->effects |= (unsigned char)(1 << bit);
     node->effect_line[bit] = (int)line;
@@ -249,7 +252,18 @@ static void note_wait(WalkContext* walk, WaitKind kind) {
 }
 
 static void add_edge(WalkContext* walk, int callee) {
-  if (callee >= 0) node_add_callee(&walk->graph->nodes[walk->node], callee);
+  if (callee < 0) return;
+  node_add_callee(&walk->graph->nodes[walk->node], callee);
+  if (walk->parallel_depth > 0) {
+    /* a call in a parallelLoop body runs on a worker (§4.3) */
+    WaitNode* target = &walk->graph->nodes[callee];
+    if (!target->parallel_called && !target->spawned) {
+      target->off_main_file = walk->func ? walk->func->origin_file : NULL;
+      target->off_main_line = (int)walk->parallel_line;
+      target->off_main_column = (int)walk->parallel_column;
+    }
+    target->parallel_called = true;
+  }
 }
 
 /* Every specialization of a generic template: the conservative edge */
@@ -501,7 +515,15 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
           const AstDecl* target = call->decl_link ? call->decl_link : (call->as.call.callee ? call->as.call.callee->decl_link : NULL);
           edge_to_decl(walk, target, call->as.call.args, call->as.call.generic_args, NULL);
           holder = &walk->graph->nodes[walk->node];
-          for (size_t i = 0; i < holder->callee_count; i++) walk->graph->nodes[holder->callees[i]].spawned = true;
+          for (size_t i = 0; i < holder->callee_count; i++) {
+            WaitNode* spawned = &walk->graph->nodes[holder->callees[i]];
+            if (!spawned->spawned && !spawned->parallel_called) {
+              spawned->off_main_file = walk->func ? walk->func->origin_file : NULL;
+              spawned->off_main_line = (int)expr->line;
+              spawned->off_main_column = (int)expr->column;
+            }
+            spawned->spawned = true;
+          }
           free(holder->callees);
           holder->callees = saved;
           holder->callee_count = saved_count;
@@ -647,7 +669,16 @@ static void walk_stmt(WalkContext* walk, const AstStmt* stmt) {
       if (stmt->as.loop_stmt.init) walk_stmt(walk, stmt->as.loop_stmt.init);
       walk_expr(walk, stmt->as.loop_stmt.condition);
       walk_expr(walk, stmt->as.loop_stmt.increment);
-      walk_block(walk, stmt->as.loop_stmt.body);
+      if (stmt->as.loop_stmt.is_parallel) {
+        if (walk->parallel_depth++ == 0) {
+          walk->parallel_line = stmt->line;
+          walk->parallel_column = stmt->column;
+        }
+        walk_block(walk, stmt->as.loop_stmt.body);
+        walk->parallel_depth--;
+      } else {
+        walk_block(walk, stmt->as.loop_stmt.body);
+      }
       break;
     case AST_STMT_MATCH:
       if (stmt->as.match_stmt.binding) walk_stmt(walk, stmt->as.match_stmt.binding);
@@ -692,15 +723,22 @@ static void graph_walk_all(WaitGraph* graph) {
     const AstFuncDecl* func = &graph->nodes[i].decl->as.func_decl;
     WaitKind primitive = extern_wait_kind(func);
     if (primitive != WAIT_NONE) graph->nodes[i].direct = primitive;
-    for (int bit = 0; bit < 4; bit++) graph->nodes[i].effect_via[bit] = -1;
+    for (int bit = 0; bit < 5; bit++) graph->nodes[i].effect_via[bit] = -1;
     if (func->is_extern) {
       /* C: what it promises, or all four (docs/realtime-language-design.md §3.4) */
       int effects = func->is_realtime ? 0 : func->is_no_alloc ? (EFFECT_LOCKS | EFFECT_WAITS) : EFFECT_ALL;
-      WalkContext extern_walk = { graph, (int)i, 0, func, { NULL, NULL }, false };
+      WalkContext extern_walk = { graph, (int)i, 0, func, { NULL, NULL }, false, 0, 0, 0 };
       note_effect(&extern_walk, effects, graph->nodes[i].decl->line, graph->nodes[i].decl->column,
                   func->is_no_alloc ? "C marked noAlloc, which may still lock or wait" : "C not marked realtime");
     }
-    WalkContext walk = { graph, (int)i, is_stdlib(graph, graph->nodes[i].decl) ? 1 : 0, func, { NULL, NULL }, false };
+    if (func->is_main_thread) {
+      /* a call only the main thread may make: the extern, or a Rae function
+       * that promises it (§4.3) */
+      WalkContext mark_walk = { graph, (int)i, 0, func, { NULL, NULL }, false, 0, 0, 0 };
+      note_effect(&mark_walk, EFFECT_MAIN_THREAD, graph->nodes[i].decl->line, graph->nodes[i].decl->column,
+                  func->is_extern ? "C that only the main thread may call" : "a function marked mainThread");
+    }
+    WalkContext walk = { graph, (int)i, is_stdlib(graph, graph->nodes[i].decl) ? 1 : 0, func, { NULL, NULL }, false, 0, 0, 0 };
     if (graph->nodes[i].key) {
       walk.bindings.params = func->generic_params;
       walk.bindings.args = graph->nodes[i].concrete_args;

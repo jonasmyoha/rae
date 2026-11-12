@@ -1,0 +1,13 @@
+realtime report: Main.rae
+  realtime renderBlock  Main.rae:17
+      clean
+  off the main thread, reaching a mainThread call:
+    showOnScreen runs on a worker thread (called in the parallelLoop at Main.rae:28)
+      showOnScreen (Main.rae:4)
+    loadInBackground runs on another thread (spawned at Main.rae:27)
+      loadInBackground (Main.rae:12) -> paintStatus (Main.rae:8) -> showOnScreen (Main.rae:4)
+    renderBlock is realtime (it runs on a real-time thread, never the main one)
+      renderBlock (Main.rae:17) -> showOnScreen (Main.rae:4)
+    onDeviceChanged is exported to C as `rae_test_main_thread_report_device`, and C may call it from any thread
+      onDeviceChanged (Main.rae:21) -> paintStatus (Main.rae:8) -> showOnScreen (Main.rae:4)
+  mainThread: 1 function or C marked, 4 off-main functions reaching one

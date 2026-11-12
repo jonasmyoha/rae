@@ -2405,7 +2405,9 @@ static void print_usage(const char* prog) {
           "                           would get a resumable twin; emits nothing;\n"
           "                           --report-waits-lib adds lib/'s counts)\n"
           "                           --report-realtime (print each function marked realtime\n"
-          "                           or noAlloc, what it reaches, and the C it trusts)\n");
+          "                           or noAlloc, what it reaches, and the C it trusts; and\n"
+          "                           each function off the main thread that reaches a\n"
+          "                           mainThread call)\n");
   fprintf(stderr,
           "                           --target-os <os> --target-arch <arch> (type-check\n"
           "                           for another target, lib/Target.rae; emits nothing,\n"

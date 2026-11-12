@@ -1,0 +1,33 @@
+# `mainThread` (docs/realtime-language-design.md §4.3): each of the four
+# kinds of function that run off the main thread is refused when it reaches a
+# main-thread call: a spawned function, a call in a parallelLoop body, a
+# realtime function and a cExport function not marked mainThread.
+func showOnScreen(value: view Int) mainThread {
+  let shown: Int = value
+}
+
+func paintStatus(value: view Int) {
+  showOnScreen(value: value)
+}
+
+func loadInBackground(value: view Int) ret Int {
+  paintStatus(value: value)
+  ret value
+}
+
+func renderBlock(frames: view Int) realtime {
+  showOnScreen(value: frames)
+}
+
+func onDeviceChanged(code: view Int) cExport("rae_test_main_thread_on_device_changed") {
+  paintStatus(value: code)
+}
+
+func main() {
+  paintStatus(value: 1)
+  let task: Task(Int) = spawn loadInBackground(value: 2)
+  parallelLoop var i: Int = 0, i < 3, ++i {
+    showOnScreen(value: i)
+  }
+  let value: Int = task.get()
+}
