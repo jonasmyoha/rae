@@ -523,12 +523,13 @@ Horner polynomial over 1 048 576 Floats, best of 20 rounds.
 `Float4` and `Float8` have `sin`, `cos`, `exp`, `naturalLog` and `tanh`,
 written in Rae over the operations above. A synth or DSP loop calls one of them
 for four or eight values at once. The polynomials are the single-precision ones
-of the Cephes library. The module has no lane-integer or bit operation, so:
+of the Cephes library.
 
-- a whole number is found by adding and subtracting 1.5 * 2^23;
-- 2^n is a product of the factors 2^64, 2^32, ... 2^1, chosen per lane by a
-  select, and a negative n takes the reciprocal (exact, a power of two);
-- a logarithm's exponent is found by scaling by powers of two, in the same way.
+- A whole number is found by adding and subtracting 1.5 * 2^23.
+- 2^n and a logarithm's exponent and significand come from the bit operations
+  of §12 (`powerOfTwo`, `exponentOf`, `significandOf`). Before §12 they were
+  built from seven select-and-multiply steps; §12 gives the same values, so
+  the same bits.
 
 Every step is exact IEEE arithmetic or an operation that is already bit-exact,
 so a lane gives the same bits on NEON, SSE2, AVX2, wasm and the scalar lowering.
@@ -547,24 +548,50 @@ Maximum error against the Float64 result rounded to Float (measured on NEON,
 | naturalLog | 0.000001 .. 1,000,000 | 1 ulp |
 | tanh | -10 .. 10 | 1 ulp |
 
-Speed (`benchmarks/simdMath`, 1M values, best of five, Apple M-series, in µs):
+Speed (`benchmarks/simdMath`, 1M values, best of five, Apple M-series, NEON,
+in µs; "before §12" is the select-step version):
 
-| | Math (libm) loop | Float4 | Float8 |
-|---|---|---|---|
-| sin, NEON | 2578 | 1617 | 1329 |
-| exp, NEON | 2102 | 2736 | 2318 |
-| tanh, NEON | 2427 | 3967 | 3150 |
-| sin, `--float4-scalar` | 2488 | 1533 | 1334 |
-| exp, `--float4-scalar` | 2011 | 4209 | 2808 |
+| | Math (libm) loop | Float4 | Float8 | Float4 before §12 | Float8 before §12 |
+|---|---|---|---|---|---|
+| sin | 2613 | 1511 | 1303 | 1580 | 1326 |
+| exp | 1979 | 1638 | 1300 | 2686 | 2334 |
+| tanh | 2592 | 2839 | 2307 | 3837 | 3050 |
+| naturalLog | 2655 | 2183 | 1721 | 6961 | 4716 |
 
-`sin` and `cos` are 1.6-1.9x faster than looping `Math.sin`. `exp` and `tanh`
-are slower than macOS's `expf`: about half of their time is the seven
-select-and-multiply steps that build 2^n. With a per-lane bit cast
-(`(n + 127) << 23` as the float's bits) that would be two operations; that is a
-follow-up in QUEUE.md, together with the same for `naturalLog`'s exponent.
+`sin` and `cos` are 1.7-2x faster than looping `Math.sin`, `exp` 1.2-1.5x
+faster than `expf`, `naturalLog` 1.2-1.5x faster than `logf`. `tanh` is as fast
+as the plain formula over `expf` (its division and both branches cost it).
 
 The audio package's synth (audio/AudioSynth, 0.12.3) uses `Float4.sin` for two
 frames at a time: each frame's note and its octave. 32 voices for 10 s at
 48 kHz took 111 ms with `Math.sin` and take 75 ms with `Float4.sin` (1.48x),
 and fixture 1417's output is unchanged. The Float4 and Float8 externs are
 marked `realtime`: they are inline SIMD with no allocation, lock or wait.
+
+## 12. Bit operations: powerOfTwo, exponentOf, significandOf (2026-11-12)
+
+Three lane operations work on a lane's bits with integer instructions only:
+
+| operation | definition (per lane, on the 32 bits) |
+|---|---|
+| `powerOfTwo(n)` | n clamped to -126 .. 127 by compare-and-select (NaN gives 127), rounded to whole by adding 1.5 * 2^23; then `(bits - 0x4B400000 + 127) << 23` |
+| `exponentOf(value)` | `float((bits >> 23) & 255 + 0x4B400000) - 12583039`: the exponent field minus 127, exactly (-127 for 0 and denormals, 128 for inf and NaN) |
+| `significandOf(value)` | `bits & 0x807FFFFF | 0x3F800000`: the sign, and a magnitude in [1, 2) |
+
+None of them converts a float to an integer. That conversion is where the
+instruction sets differ (a NaN or an out-of-range value gives 0 on NEON and
+0x80000000 on SSE2), so the clamp and the rounding are float operations whose
+bits are already fixed, and the rest is integer adds, shifts, ands and ors,
+which are the same everywhere. Each lowering has them: NEON
+`vreinterpretq`/`vshlq_n_u32`/`vshrq_n_u32`, SSE2 `_mm_slli_epi32`/
+`_mm_srli_epi32`, wasm `i32x4.shl`/`u32x4.shr`, AVX2 `_mm256_slli_epi32`, and
+the scalar definitions. Fixtures 967/968 (Float4) and 1088/1089 (Float8) check
+them bit for bit against a Rae definition (777 and 993 lanes: every special
+value, and n from -140 to 140 in halves). A small C program gave the same
+values on NEON, scalar, SSE2 and AVX2 (under Rosetta) and wasm SIMD128 (emcc,
+node).
+
+There is no fast reciprocal square root. The bit guess `0x5F375A86 - bits / 2`
+with three Newton steps (3 ulp) took 1087 µs per 1M values on NEON, against
+277 µs for `div(1, sqrt(x))` (1 ulp): Apple's hardware square root and divide
+are faster and more exact. So `1 / sqrt` stays the way to write it.

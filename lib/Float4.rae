@@ -63,6 +63,14 @@ func nativeNegate(value: view Float4) realtime unsafe extern("rae_f4_negate") re
 
 func nativeAbs(value: view Float4) realtime unsafe extern("rae_f4_abs") ret Float4
 
+func nativePowerOfTwo(n: view Float4) realtime unsafe extern("rae_f4_power_of_two") ret Float4
+
+func nativeExponentOf(value: view Float4) realtime unsafe extern("rae_f4_exponent_of") ret Float4
+
+func nativeSignificandOf(
+  value: view Float4
+) realtime unsafe extern("rae_f4_significand_of") ret Float4
+
 func nativeMin(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_min") ret Float4
 
 func nativeMax(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_max") ret Float4
@@ -235,6 +243,34 @@ func negate(value: view Float4) ret Float4 {
 func abs(value: view Float4) ret Float4 {
   unsafe {
     ret nativeAbs(value: value)
+  }
+}
+
+# ---- bit operations: integer arithmetic on each lane's bits, for the vector
+# math below (no float-to-int conversion, so the same bits everywhere)
+
+# 2^n, exactly: n is clamped to -126 .. 127 (a NaN gives 127) and rounded to
+# whole, ties to even
+func powerOfTwo(n: view Float4) ret Float4 {
+  unsafe {
+    ret nativePowerOfTwo(n: n)
+  }
+}
+
+# The exponent of each lane, e with |value| = m * 2^e, m in [1, 2), for a
+# normal value: its exponent field minus 127 (-127 for 0 and denormals, 128
+# for inf and NaN)
+func exponentOf(value: view Float4) ret Float4 {
+  unsafe {
+    ret nativeExponentOf(value: value)
+  }
+}
+
+# Each lane with its exponent set to 0: the same sign, a magnitude in [1, 2)
+# that keeps the fraction bits (value / 2^exponentOf(value) for a normal value)
+func significandOf(value: view Float4) ret Float4 {
+  unsafe {
+    ret nativeSignificandOf(value: value)
   }
 }
 
@@ -523,12 +559,10 @@ func firstLanes(count: view Int) ret Mask4 {
 # ---- vector math: sin, cos, exp, naturalLog, tanh ---------------------------
 # For a synth and DSP. The polynomials are Cephes' single-precision ones
 # (Stephen L. Moshier, Cephes Math Library: sinf.c, cosf.c, expf.c, logf.c,
-# tanhf.c). The range reduction is written with the operations above only:
-# there is no lane-integer or bit operation, so a whole number is found by the
-# 1.5 * 2^23 rounding trick, 2^n is a product of power-of-two factors and a
-# logarithm's exponent is found by scaling by powers of two. Every step is
-# exact IEEE arithmetic or one of the bit-exact operations above, so each lane
-# gives the same bits on every lowering as the scalar definition
+# tanhf.c). A whole number is found by the 1.5 * 2^23 rounding trick, 2^n and
+# a logarithm's exponent and significand by the bit operations above. Every
+# step is exact IEEE arithmetic or one of the bit-exact operations above, so
+# each lane gives the same bits on every lowering as the scalar definition
 # (`--float4-scalar`), as the rest of this module does.
 #
 # Maximum error against the Float64 functions rounded to Float, measured by
@@ -648,31 +682,6 @@ func cos(value: view Float4) ret Float4 {
   ret quadrantSin(r: reduced.r, quadrant: reduced.quadrant)
 }
 
-# 2^n for whole n in -126 .. 127: 2^|n| as a product of power-of-two
-# factors, and for a negative n its reciprocal (exact: a power of two)
-func powerOfTwo(n: view Float4) ret Float4 {
-  let zero: Float4 = Float4.splat(value: 0.0)
-  let one: Float4 = Float4.splat(value: 1.0)
-  var left: Float4 = Float4.abs(value: n)
-  var result: Float4 = one
-  var step: Float = 64.0
-  loop step >= 1.0 {
-    let has: Mask4 = Float4.greaterOrEqual(a: left, b: Float4.splat(value: step))
-    left = Float4.sub(
-      a: left
-      b: Float4.select(mask: has, ifTrue: Float4.splat(value: step), ifFalse: zero)
-    )
-    let factor: Float4 = Float4.splat(value: twoToThe(power: step as Int))
-    result = Float4.mul(a: result, b: Float4.select(mask: has, ifTrue: factor, ifFalse: one))
-    step = step * 0.5
-  }
-  ret Float4.select(
-    mask: Float4.less(a: n, b: zero)
-    ifTrue: Float4.div(a: one, b: result)
-    ifFalse: result
-  )
-}
-
 # Each lane's e^x (Cephes expf)
 func exp(value: view Float4) ret Float4 {
   let x: Float4 = Float4.min(
@@ -732,50 +741,21 @@ func exp(value: view Float4) ret Float4 {
 }
 
 # Each lane's natural logarithm (Cephes logf): x = m * 2^e with m in
-# [sqrt(1/2), sqrt(2)), found by scaling by powers of two
+# [sqrt(1/2), sqrt(2)), from the exponent and significand bits
 func naturalLog(value: view Float4) ret Float4 {
   let zero: Float4 = Float4.splat(value: 0.0)
-  var m: Float4 = value
-  var e: Float4 = zero
-  var step: Float = 64.0
-  loop step >= 1.0 {
-    let big: Mask4 = Float4.greaterOrEqual(
-      a: m
-      b: Float4.splat(value: twoToThe(power: step as Int))
-    )
-    m = Float4.select(
-      mask: big
-      ifTrue: Float4.mul(a: m, b: Float4.splat(value: twoToThe(power: -(step as Int))))
-      ifFalse: m
-    )
-    e = Float4.add(
-      a: e
-      b: Float4.select(mask: big, ifTrue: Float4.splat(value: step), ifFalse: zero)
-    )
-    step = step * 0.5
-  }
-  # small values, denormals too (down to 2^-149): 64 twice, then halving
-  var down: Float = 64.0
-  var rounds: Int = 0
-  loop down >= 1.0 {
-    let small: Mask4 = Float4.both(
-      a: Float4.less(a: m, b: Float4.splat(value: twoToThe(power: 1 - (down as Int))))
-      b: Float4.greater(a: m, b: zero)
-    )
-    m = Float4.select(
-      mask: small
-      ifTrue: Float4.mul(a: m, b: Float4.splat(value: twoToThe(power: down as Int)))
-      ifFalse: m
-    )
-    e = Float4.sub(
-      a: e
-      b: Float4.select(mask: small, ifTrue: Float4.splat(value: down), ifFalse: zero)
-    )
-    rounds = rounds + 1
-    if rounds is not 1 {
-      down = down * 0.5
-    }
-  }
+  # a denormal is scaled by 2^64 first, so its bits have an exponent
+  let tiny: Mask4 = Float4.less(a: value, b: Float4.splat(value: twoToThe(power: -126)))
+  let scaled: Float4 = Float4.select(
+    mask: tiny
+    ifTrue: Float4.mul(a: value, b: Float4.splat(value: twoToThe(power: 64)))
+    ifFalse: value
+  )
+  var e: Float4 = Float4.sub(
+    a: Float4.exponentOf(value: scaled)
+    b: Float4.select(mask: tiny, ifTrue: Float4.splat(value: 64.0), ifFalse: zero)
+  )
+  var m: Float4 = Float4.significandOf(value: scaled)
   # m is in [1, 2) now; to [sqrt(1/2), sqrt(2)) around 1
   let high: Mask4 = Float4.greater(a: m, b: Float4.splat(value: 1.41421356))
   m = Float4.select(mask: high, ifTrue: Float4.mul(a: m, b: Float4.splat(value: 0.5)), ifFalse: m)

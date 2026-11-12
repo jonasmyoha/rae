@@ -1,4 +1,4 @@
-# benchmarks/simdMath: lib/Float4's and Float8's sin, exp and tanh against a
+# benchmarks/simdMath: lib/Float4's and Float8's sin, exp, tanh and naturalLog against a
 # loop of the scalar Math ones over the same 1M inputs, best of five after a
 # warm-up (run.sh runs it with SIMD and with --float4-scalar).
 import Math
@@ -7,7 +7,7 @@ import Float8
 
 const valueCount: Int = 1048576
 
-# kind: 0 sin, 1 exp, 2 tanh; x in -4 .. 4
+# kind: 0 sin, 1 exp, 2 tanh, 3 naturalLog (of x + 4.001); x in -4 .. 4
 func scalarPass(kind: view Int) ret Float {
   var sum: Float = 0.0
   loop var i: Int = 0, i < valueCount, ++i {
@@ -16,6 +16,8 @@ func scalarPass(kind: view Int) ret Float {
       sum = sum + Math.sin(x: x)
     } else if kind is 1 {
       sum = sum + Math.exp(x: x)
+    } else if kind is 3 {
+      sum = sum + Math.naturalLog(x: x + 4.001)
     } else {
       # Math has no tanh: the plain formula over exp
       let twice: Float = Math.exp(x: x * 2.0)
@@ -39,6 +41,11 @@ func float4Pass(kind: view Int) ret Float {
       sum = Float4.add(a: sum, b: Float4.sin(value: x))
     } else if kind is 1 {
       sum = Float4.add(a: sum, b: Float4.exp(value: x))
+    } else if kind is 3 {
+      sum = Float4.add(
+        a: sum
+        b: Float4.naturalLog(value: Float4.add(a: x, b: Float4.splat(value: 4.001)))
+      )
     } else {
       sum = Float4.add(a: sum, b: Float4.tanh(value: x))
     }
@@ -64,6 +71,11 @@ func float8Pass(kind: view Int) ret Float {
       sum = Float8.add(a: sum, b: Float8.sin(value: x))
     } else if kind is 1 {
       sum = Float8.add(a: sum, b: Float8.exp(value: x))
+    } else if kind is 3 {
+      sum = Float8.add(
+        a: sum
+        b: Float8.naturalLog(value: Float8.add(a: x, b: Float8.splat(value: 4.001)))
+      )
     } else {
       sum = Float8.add(a: sum, b: Float8.tanh(value: x))
     }
@@ -97,8 +109,8 @@ func bestMicroseconds(kind: view Int, width: view Int) ret Int {
 }
 
 func main() {
-  let names: List(String) = List(String) { "sin", "exp", "tanh" }
-  loop var kind: Int = 0, kind < 3, ++kind {
+  let names: List(String) = List(String) { "sin", "exp", "tanh", "naturalLog" }
+  loop var kind: Int = 0, kind < 4, ++kind {
     let scalar: Int = bestMicroseconds(kind: kind, width: 1)
     let four: Int = bestMicroseconds(kind: kind, width: 4)
     let eight: Int = bestMicroseconds(kind: kind, width: 8)
