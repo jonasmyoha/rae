@@ -379,6 +379,34 @@ call site in the program (Rae compiles the whole program into one C file),
 adding it only where no call passes overlapping arguments. Nothing is refused;
 the language does not change.
 
+**Measured (2026-11-12): `restrict` would not pay; nothing was emitted.**
+`benchmarks/audioKernels` (`run.sh`, `RAE_BENCH_REMARKS=1` for clang's
+vectorizer remarks) runs audio kernels as Rae writes them against the same
+loops in C, clang -O2 -ffp-contract=off as Rae's release build, Apple M-series,
+best of five after a warm-up:
+
+| kernel | Rae | C | C with `restrict` | vectorized (Rae) |
+|---|---|---|---|---|
+| gain-and-sum of two Lists into a third, 2000 x 4096 floats (`copyAtFallback`, `set`) | 540 us | 539 us | 537 us | yes, 4 wide, 4 interleaved |
+| the same over Buffers (`sampleAt` / `setSampleAt`, the mixer's way) | 538 us | | | yes, 4 x 4 |
+| the resampler's 32-tap interpolated product, 6.1 M outputs | 63.0 ms | 62.3 ms | | yes, 4 x 4 |
+| 64 voices mixed through packages/audio's engine, 2 s at 48 kHz | 52 ms (2.6 % of one core) | | | no: "control flow cannot be substituted for a select" |
+
+- Rae's loops run as fast as hand-written C. The counted-loop versioning
+  (`c_loop_versioning.c`) takes the List bounds checks out of the loop and
+  reads the data pointers once; clang then vectorizes, guarding the loop with
+  one run-time overlap check per call, which costs nothing measurable
+  (537 against 539 us in C).
+- `restrict` changed the C version by 0.4 %, within noise. So the per-function
+  proof was not built: it would add compiler code for no gain on these
+  kernels.
+- The mixer's per-voice loop is not vectorized, and aliasing is not why: each
+  frame branches (the voice's start delay, stream or sound, the end of the
+  sound or a loop's wrap, a fade ending). Making it vectorize means a
+  branch-free inner loop over the stretch of frames where none of those
+  happens; at 2.6 % of one core for 64 voices it is not needed now, and it is
+  a mixer change, not a language one.
+
 ---
 
 ## 5. Checking the C that Rae links
