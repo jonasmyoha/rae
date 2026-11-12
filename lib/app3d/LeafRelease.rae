@@ -33,6 +33,7 @@ open Wind
 open WindGust
 open WorldBiome
 open app3d/PropField
+open app3d/PropFieldQuery
 open app3d/PropSeason
 open app3d/PropFade
 open LeafParticles
@@ -159,56 +160,46 @@ func releaseFieldLeaves(
   if field.seasonsOn is false or field.cellStart.length is 0 or deltaTime <= 0.0 {
     ret
   }
-  let first: Int = propCellOf(field: field, x: eye.x - reach, y: eye.y - reach)
-  let last: Int = propCellOf(field: field, x: eye.x + reach, y: eye.y + reach)
-  let firstColumn: Int = first % field.columns
-  let firstRow: Int = first / field.columns
-  let lastColumn: Int = last % field.columns
-  let lastRow: Int = last / field.columns
-  loop var row: Int = firstRow, row <= lastRow, ++row {
-    loop var column: Int = firstColumn, column <= lastColumn, ++column {
-      let cell: Int = row * field.columns + column
-      let start: Int = field.cellStart.copyAtFallback(index: cell, fallback: 0)
-      let end: Int = field.cellStart.copyAtFallback(index: cell + 1, fallback: start)
-      loop var index: Int = start, index < end, ++index {
-        let placement: PropPlacement = field.placements.copyAtDefault(index: index)
-        let dx: Float = placement.position.x - eye.x
-        let dy: Float = placement.position.y - eye.y
-        if dx * dx + dy * dy > reach * reach {
-          continue
-        }
-        if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
-          if kind.season.deciduous {
-            let slow: Float = field.seasonSlow + propSeasonShift(
-              seed: propFadeSeed(x: placement.position.x, y: placement.position.y)
-            )
-            let crown: Vec3 = propCenter(kind: kind, placement: placement)
-            let rate: Float = leafReleaseRate(
-              season: kind.season
-              slow: slow
-              warming: field.seasonWarming
-              gust: windGustAt(x: placement.position.x, y: placement.position.y, wind: wind)
-              drop: crown.z - placement.position.z
-            )
-            let count: Int = leafReleaseCount(
-              rate: rate
-              deltaTime: deltaTime
-              chance: leafReleaseHash(index: index, seed: frame)
-            )
-            if count > 0 and not leafEmit(
-              leafParticles: leafParticles
-              crown: crown
-              radius: propRadius(kind: kind, placement: placement) * 0.6
-              color: leafReleaseColor(season: kind.season, slow: slow, warming: field.seasonWarming)
-              size: fallingLeafSize
-              count: count
-              seed: index * 7919 + frame
-              shape: kind.season.leafShape
-              lift: false
-            ) {
-              ret
-            }
-          }
+  # the field's own trees and every group's (a world streamed in tiles: app3d/TileStreaming)
+  let near: List(PropNear) = propsNear(
+    field: field
+    x: eye.x
+    y: eye.y
+    reach: reach
+  )
+  loop var index: Int = 0, index < near.length, ++index {
+    let found: PropNear = near.copyAtDefault(index: index)
+    let placement: PropPlacement = found.placement
+    if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+      if kind.season.deciduous {
+        let fadeSeed: Float = propFadeSeed(x: placement.position.x, y: placement.position.y)
+        let treeSeed: Int = (fadeSeed * 1000003.0) as Int
+        let slow: Float = field.seasonSlow + propSeasonShift(seed: fadeSeed)
+        let crown: Vec3 = propCenter(kind: kind, placement: placement)
+        let rate: Float = leafReleaseRate(
+          season: kind.season
+          slow: slow
+          warming: field.seasonWarming
+          gust: windGustAt(x: placement.position.x, y: placement.position.y, wind: wind)
+          drop: crown.z - placement.position.z
+        )
+        let count: Int = leafReleaseCount(
+          rate: rate
+          deltaTime: deltaTime
+          chance: leafReleaseHash(index: treeSeed, seed: frame)
+        )
+        if count > 0 and not leafEmit(
+          leafParticles: leafParticles
+          crown: crown
+          radius: propRadius(kind: kind, placement: placement) * 0.6
+          color: leafReleaseColor(season: kind.season, slow: slow, warming: field.seasonWarming)
+          size: fallingLeafSize
+          count: count
+          seed: treeSeed * 7919 + frame
+          shape: kind.season.leafShape
+          lift: false
+        ) {
+          ret
         }
       }
     }
