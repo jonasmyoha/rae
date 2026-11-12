@@ -1,0 +1,13 @@
+# A worker that reaches a lib extern marked mainThread (lib/Device's SDL
+# queries, docs/realtime-language-design.md §4.3) is refused, through the lib
+# functions between, none of which carries a mark.
+import Device
+
+func probeInput() ret Bool {
+  ret Device.hasTouch()
+}
+
+func main() {
+  let task: Task(Bool) = spawn probeInput()
+  log("{task.get()}")
+}

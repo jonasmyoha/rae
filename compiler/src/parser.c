@@ -3333,6 +3333,11 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
         parser_consume(parser, TOK_RPAREN, "expected ')' after the cExport name");
       }
     }
+    // `mainThread`: only the thread that runs `main` may call it (§4.3)
+    if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "mainThread")) {
+      if (decl->as.func_decl.is_main_thread) parser_error(parser, mod_token, "duplicate 'mainThread' function modifier");
+      decl->as.func_decl.is_main_thread = true;
+    }
     if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "noAlloc")) {
       if (decl->as.func_decl.is_no_alloc) parser_error(parser, mod_token, "duplicate 'noAlloc' function modifier");
       decl->as.func_decl.is_no_alloc = true;
@@ -3367,6 +3372,11 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   }
   decl->as.func_decl.properties = props_head;
   decl->as.func_decl.is_extern = is_extern;
+  if (decl->as.func_decl.is_main_thread && decl->as.func_decl.is_realtime) {
+    parser_error(parser, name_token,
+                 "a function cannot be both 'realtime' and 'mainThread': real-time code runs on its own thread, "
+                 "never on the main one");
+  }
   if (decl->as.func_decl.is_blocking && !is_extern) {
     parser_error(parser, name_token,
                  "'blocking' is valid only on an extern declaration: it marks a C call that may wait");

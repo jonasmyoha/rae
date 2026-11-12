@@ -1,0 +1,32 @@
+# --report-realtime lists each function that runs off the main thread and
+# reaches a mainThread call, with its chain (docs/realtime-language-design.md
+# §4.3)
+func showOnScreen(value: view Int) mainThread {
+  let shown: Int = value
+}
+
+func paintStatus(value: view Int) {
+  showOnScreen(value: value)
+}
+
+func loadInBackground(value: view Int) ret Int {
+  paintStatus(value: value)
+  ret value
+}
+
+func renderBlock(frames: view Int) realtime {
+  showOnScreen(value: frames)
+}
+
+func onDeviceChanged(code: view Int) cExport("rae_test_main_thread_report_device") {
+  paintStatus(value: code)
+}
+
+func main() {
+  paintStatus(value: 1)
+  let task: Task(Int) = spawn loadInBackground(value: 2)
+  parallelLoop var i: Int = 0, i < 3, ++i {
+    showOnScreen(value: i)
+  }
+  let value: Int = task.get()
+}

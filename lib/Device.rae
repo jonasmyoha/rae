@@ -28,12 +28,12 @@ type DeviceWatch {
 
 when Target.os is Os.web {
   # A CSS media query, matched now (compiler/runtime/runtime_device.c)
-  func mediaMatches(query: String) unsafe extern("rae_ext_Device_mediaMatches") ret Bool
+  func mediaMatches(query: String) mainThread unsafe extern("rae_ext_Device_mediaMatches") ret Bool
 } else {
   # SDL3: how many touch devices exist, and whether a mouse or trackpad does
-  func touchDeviceCount() unsafe extern("rae_ext_Device_touchDeviceCount") ret Int
+  func touchDeviceCount() mainThread unsafe extern("rae_ext_Device_touchDeviceCount") ret Int
 
-  func mousePresent() unsafe extern("rae_ext_Device_hasMouse") ret Bool
+  func mousePresent() mainThread unsafe extern("rae_ext_Device_hasMouse") ret Bool
 }
 
 # Any touch input present (the touch MacBook: true)

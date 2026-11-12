@@ -1,17 +1,10 @@
-# GPU 2D renderer — WebGPU render path (QUEUE #109, docs/webgpu-2d-ui-renderer.md).
-#
-# Unlike lib/gpu.rae (compute → readback) this OWNS the window surface and
-# presents on the GPU: SDL3 creates the window + Metal layer, wgpu-native wraps
-# it as a surface, and frames are rendered + presented directly (no CPU
-# framebuffer round-trip). The SAME WGSL/API target the browser later
-# (WebGPU-everywhere); this is the native (wgpu-native) side.
-#
-# Pipelines/instanced quads (#110) and text (#111) build on this surface.
-#
-# Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3 block of
-# compiler/runtime/rae_runtime.c. Compiled-target only; needs wgpu-native + SDL3.
-# Importing this module links both. Window globals are shared with lib/sdl3.rae,
-# so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
+# GPU 2D renderer, WebGPU render path (docs/webgpu-2d-ui-renderer.md). It OWNS
+# the window surface: SDL3 makes the window and Metal layer, wgpu-native wraps
+# it as a surface, and frames are rendered and presented on the GPU (the same
+# WGSL and API as the browser). Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3
+# block of compiler/runtime/rae_runtime.c. The window is shared with lib/Sdl3,
+# so its input functions work against this window. The window, input and
+# present calls are `mainThread` (docs/realtime-language-design.md §4.3).
 open Gpu2dCanvas
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
@@ -31,7 +24,7 @@ func nativeInitWindow(
   width: Int
   height: Int
   title: String
-) unsafe extern("rae_ext_Gpu2d_initWindow")
+) mainThread unsafe extern("rae_ext_Gpu2d_initWindow")
 
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
   chooseDeviceFeatures()  # before the device exists (gpu/DeviceFeatures)
@@ -43,7 +36,7 @@ func initWindow(width: copy Int, height: copy Int, title: copy String) {
 
 # Pump the OS event queue; returns true once the user has asked to close the
 # window (or a headless time budget elapsed). Call once per frame.
-func nativePollClose() unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
+func nativePollClose() mainThread unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
 
 func pollClose() ret Bool {
   unsafe {
@@ -52,7 +45,7 @@ func pollClose() ret Bool {
 }
 
 # Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).
-func nativeWindowWidth() unsafe extern("rae_ext_Gpu2d_windowWidth") ret Int
+func nativeWindowWidth() mainThread unsafe extern("rae_ext_Gpu2d_windowWidth") ret Int
 
 func windowWidth() ret Int {
   unsafe {
@@ -60,7 +53,7 @@ func windowWidth() ret Int {
   }
 }
 
-func nativeWindowHeight() unsafe extern("rae_ext_Gpu2d_windowHeight") ret Int
+func nativeWindowHeight() mainThread unsafe extern("rae_ext_Gpu2d_windowHeight") ret Int
 
 func windowHeight() ret Int {
   unsafe {
@@ -68,7 +61,10 @@ func windowHeight() ret Int {
   }
 }
 
-func nativeSetWindowPosition(x: Int, y: Int) unsafe extern("rae_ext_Gpu2d_setWindowPosition")
+func nativeSetWindowPosition(
+  x: Int
+  y: Int
+) mainThread unsafe extern("rae_ext_Gpu2d_setWindowPosition")
 
 func setWindowPosition(x: copy Int, y: copy Int) {
   unsafe {
@@ -76,7 +72,7 @@ func setWindowPosition(x: copy Int, y: copy Int) {
   }
 }
 
-func nativeSetWindowSize(w: Int, h: Int) unsafe extern("rae_ext_Gpu2d_setWindowSize")
+func nativeSetWindowSize(w: Int, h: Int) mainThread unsafe extern("rae_ext_Gpu2d_setWindowSize")
 
 func setWindowSize(w: copy Int, h: copy Int) {
   unsafe {
@@ -84,7 +80,7 @@ func setWindowSize(w: copy Int, h: copy Int) {
   }
 }
 
-func nativeWindowPositionX() unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
+func nativeWindowPositionX() mainThread unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
 
 func windowPositionX() ret Int {
   unsafe {
@@ -92,7 +88,7 @@ func windowPositionX() ret Int {
   }
 }
 
-func nativeWindowPositionY() unsafe extern("rae_ext_Gpu2d_windowPositionY") ret Int
+func nativeWindowPositionY() mainThread unsafe extern("rae_ext_Gpu2d_windowPositionY") ret Int
 
 func windowPositionY() ret Int {
   unsafe {
@@ -102,7 +98,7 @@ func windowPositionY() ret Int {
 
 # True once after the OS reports a window resize (edge-triggered; the flag
 # is cleared on read). The app recomputes its viewport/extent and rebuilds.
-func nativeWindowResized() unsafe extern("rae_ext_Gpu2d_windowResized") ret Bool
+func nativeWindowResized() mainThread unsafe extern("rae_ext_Gpu2d_windowResized") ret Bool
 
 func windowResized() ret Bool {
   unsafe {
@@ -113,7 +109,7 @@ func windowResized() ret Bool {
 # One-shot, like windowResized: reading it clears it. Persisting where the user
 # put the window is built ON these in Rae (lib/ui/WindowGeometry.rae), not down
 # in the runtime.
-func nativeWindowMoved() unsafe extern("rae_ext_Gpu2d_windowMoved") ret Bool
+func nativeWindowMoved() mainThread unsafe extern("rae_ext_Gpu2d_windowMoved") ret Bool
 
 func windowMoved() ret Bool {
   unsafe {
@@ -126,7 +122,7 @@ func windowMoved() ret Bool {
 # is false: rendering while dark wastes power and, on macOS, leaks GPU memory
 # (the Metal layer stops recycling drawables while backgrounded). Not edge-
 # triggered — reflects the current state every call.
-func nativeWindowVisible() unsafe extern("rae_g2d_window_visible") ret Bool
+func nativeWindowVisible() mainThread unsafe extern("rae_g2d_window_visible") ret Bool
 
 func windowVisible() ret Bool {
   unsafe {
@@ -229,7 +225,7 @@ func designHeight() ret Float {
 }
 
 # Device pixel ratio: physical pixels per logical point (2.0 on retina).
-func nativeDpr() unsafe extern("rae_ext_Gpu2d_dpr") ret Float
+func nativeDpr() mainThread unsafe extern("rae_ext_Gpu2d_dpr") ret Float
 
 func dpr() ret Float {
   unsafe {
@@ -241,7 +237,7 @@ func dpr() ret Float {
 # pollClose records mouse/keyboard/wheel state while it pumps the event queue,
 # so these read this frame's input. Coordinates are in DESIGN units (the same
 # space drawRect etc. take), so hit-testing lines up with what was drawn.
-func nativePointerX() unsafe extern("rae_ext_Gpu2d_pointerX") ret Float
+func nativePointerX() mainThread unsafe extern("rae_ext_Gpu2d_pointerX") ret Float
 
 func pointerX() ret Float {
   unsafe {
@@ -249,7 +245,7 @@ func pointerX() ret Float {
   }
 }
 
-func nativePointerY() unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
+func nativePointerY() mainThread unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
 
 func pointerY() ret Float {
   unsafe {
@@ -260,7 +256,7 @@ func pointerY() ret Float {
 # Multitouch (#526): active finger count + per-finger position in design units.
 # On desktop this is 0 (use the mouse pointer); on iOS every touch is reported so
 # a UI can drive a joystick with one finger and the camera with another.
-func nativeTouchCount() unsafe extern("rae_ext_Gpu2d_touchCount") ret Int
+func nativeTouchCount() mainThread unsafe extern("rae_ext_Gpu2d_touchCount") ret Int
 
 func touchCount() ret Int {
   unsafe {
@@ -268,7 +264,7 @@ func touchCount() ret Int {
   }
 }
 
-func nativeTouchX(index: Int) unsafe extern("rae_ext_Gpu2d_touchX") ret Float
+func nativeTouchX(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchX") ret Float
 
 func touchX(index: copy Int) ret Float {
   unsafe {
@@ -276,7 +272,7 @@ func touchX(index: copy Int) ret Float {
   }
 }
 
-func nativeTouchY(index: Int) unsafe extern("rae_ext_Gpu2d_touchY") ret Float
+func nativeTouchY(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchY") ret Float
 
 func touchY(index: copy Int) ret Float {
   unsafe {
@@ -286,7 +282,7 @@ func touchY(index: copy Int) ret Float {
 
 # Stable finger id (grab a finger at press, hold it for the whole drag) + whether
 # it went down this frame (edge). id is -1 out of range.
-func nativeTouchId(index: Int) unsafe extern("rae_ext_Gpu2d_touchId") ret Int
+func nativeTouchId(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchId") ret Int
 
 func touchId(index: copy Int) ret Int {
   unsafe {
@@ -294,7 +290,7 @@ func touchId(index: copy Int) ret Int {
   }
 }
 
-func nativeTouchPressed(index: Int) unsafe extern("rae_ext_Gpu2d_touchPressed") ret Bool
+func nativeTouchPressed(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchPressed") ret Bool
 
 func touchPressed(index: copy Int) ret Bool {
   unsafe {
@@ -304,7 +300,7 @@ func touchPressed(index: copy Int) ret Bool {
 
 # OS safe-area insets (notch / home indicator / rounded corners) in design units.
 # 0 on platforms without insets. Lay HUD + UI chrome inside these.
-func nativeSafeTop() unsafe extern("rae_ext_Gpu2d_safeTop") ret Float
+func nativeSafeTop() mainThread unsafe extern("rae_ext_Gpu2d_safeTop") ret Float
 
 func safeTop() ret Float {
   unsafe {
@@ -312,7 +308,7 @@ func safeTop() ret Float {
   }
 }
 
-func nativeSafeBottom() unsafe extern("rae_ext_Gpu2d_safeBottom") ret Float
+func nativeSafeBottom() mainThread unsafe extern("rae_ext_Gpu2d_safeBottom") ret Float
 
 func safeBottom() ret Float {
   unsafe {
@@ -320,7 +316,7 @@ func safeBottom() ret Float {
   }
 }
 
-func nativeSafeLeft() unsafe extern("rae_ext_Gpu2d_safeLeft") ret Float
+func nativeSafeLeft() mainThread unsafe extern("rae_ext_Gpu2d_safeLeft") ret Float
 
 func safeLeft() ret Float {
   unsafe {
@@ -328,7 +324,7 @@ func safeLeft() ret Float {
   }
 }
 
-func nativeSafeRight() unsafe extern("rae_ext_Gpu2d_safeRight") ret Float
+func nativeSafeRight() mainThread unsafe extern("rae_ext_Gpu2d_safeRight") ret Float
 
 func safeRight() ret Float {
   unsafe {
@@ -337,7 +333,7 @@ func safeRight() ret Float {
 }
 
 # Left mouse button held this frame.
-func nativePointerDown() unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
+func nativePointerDown() mainThread unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
 
 func pointerDown() ret Bool {
   unsafe {
@@ -345,7 +341,7 @@ func pointerDown() ret Bool {
   }
 }
 
-func nativePointerPressed() unsafe extern("rae_ext_Gpu2d_pointerPressed") ret Bool
+func nativePointerPressed() mainThread unsafe extern("rae_ext_Gpu2d_pointerPressed") ret Bool
 
 func pointerPressed() ret Bool {
   unsafe {
@@ -353,7 +349,7 @@ func pointerPressed() ret Bool {
   }
 }
 
-func nativePointerReleased() unsafe extern("rae_ext_Gpu2d_pointerReleased") ret Bool
+func nativePointerReleased() mainThread unsafe extern("rae_ext_Gpu2d_pointerReleased") ret Bool
 
 func pointerReleased() ret Bool {
   unsafe {
@@ -363,7 +359,7 @@ func pointerReleased() ret Bool {
 
 # Per-frame mouse-wheel / trackpad delta (positive = scrolled up), matching
 # raylib's getMouseWheelMove semantics.
-func nativeWheelMove() unsafe extern("rae_ext_Gpu2d_wheelMove") ret Float
+func nativeWheelMove() mainThread unsafe extern("rae_ext_Gpu2d_wheelMove") ret Float
 
 func wheelMove() ret Float {
   unsafe {
@@ -373,7 +369,7 @@ func wheelMove() ret Float {
 
 # Desktop cursor kind. 0=arrow, 1=pointer/hand, 2=text, 3=horizontal resize,
 # 4=vertical resize, 5=crosshair, 6=not-allowed.
-func nativeSetMouseCursor(kind: Int) unsafe extern("rae_ext_Gpu2d_setMouseCursor")
+func nativeSetMouseCursor(kind: Int) mainThread unsafe extern("rae_ext_Gpu2d_setMouseCursor")
 
 func setMouseCursor(kind: copy Int) {
   unsafe {
@@ -398,7 +394,7 @@ func nowSeconds() ret Float64 {
 # already queued), without dequeuing it — the following pollClose drains it.
 # Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
 # animating. See docs/ui-render-loop-performance.md.
-func nativeWaitEvents(timeoutSec: Float) unsafe extern("rae_ext_Gpu2d_waitEvents")
+func nativeWaitEvents(timeoutSec: Float) mainThread unsafe extern("rae_ext_Gpu2d_waitEvents")
 
 func waitEvents(timeoutSec: copy Float) {
   unsafe {
@@ -407,7 +403,7 @@ func waitEvents(timeoutSec: copy Float) {
 }
 
 # Release the surface + window. The wgpu device stays cached for reuse.
-func nativeCloseWindow() unsafe extern("rae_ext_Gpu2d_closeWindow")
+func nativeCloseWindow() mainThread unsafe extern("rae_ext_Gpu2d_closeWindow")
 
 func closeWindow() {
   unsafe {
@@ -421,7 +417,7 @@ func closeWindow() {
 # flushes the batches, submits it tracked and hands the platform present /
 # screenshot tail back to C. C keeps the present-flag reset (g2dFrameReset),
 # owns the persistent offscreen color target and does the present tail.
-func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
+func nativeG2dFrameReset() mainThread unsafe extern("rae_g2d_frame_reset")
 
 func g2dFrameReset() {
   unsafe {
@@ -434,7 +430,11 @@ func g2dFrameReset() {
 # acquired; the wait for the GPU is gpu/FramePacer's, run after it), and in a headless run reads
 # the texture back for the
 # RAE_GPU2D_SCREENSHOT capture. The texture is the canvas's; C only borrows it.
-func nativeG2dPresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_g2d_present")
+func nativeG2dPresent(
+  texture: Ptr
+  width: Int
+  height: Int
+) mainThread unsafe extern("rae_g2d_present")
 
 func g2dPresent(canvas: mod Gpu2dCanvas) {
   unsafe {
@@ -447,7 +447,7 @@ func g2dPresent(canvas: mod Gpu2dCanvas) {
   }
 }
 
-func nativeG2dTick() unsafe extern("rae_g2d_tick")
+func nativeG2dTick() mainThread unsafe extern("rae_g2d_tick")
 
 func g2dTick() {
   unsafe {

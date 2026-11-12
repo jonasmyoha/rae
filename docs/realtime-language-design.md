@@ -4,7 +4,8 @@ Status: **proposal, nothing implemented** (2026-11-11). New syntax needs
 approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
 2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
 function with optional marks on helpers (R3), `cExport("cName")` (R4), and
-Homebrew LLVM for RealtimeSanitizer (R7). R5 is proposed (§4.3, 2026-11-12); R6 waits.
+Homebrew LLVM for RealtimeSanitizer (R7). Decided and built 2026-11-12:
+`mainThread` (R5, §4.3). R6 waits.
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -250,7 +251,8 @@ Two roles beyond `realtime` already exist in practice: platform UI and window
 APIs are main-thread only (`concurrency-model.md` §3), and some iOS calls are
 kept there too. Today that is a comment. A `mainThread` mark on externs would
 let the same analysis reject a `spawn`ed, `parallelLoop` or `realtime` function
-that reaches one. §9 R5. **Proposal (2026-11-12), nothing built:**
+that reaches one. §9 R5. **Decided and built 2026-11-12 (compiler 0.3.110);
+§4.3.6 records what landed.**
 
 #### 4.3.1 Which externs are main-thread only today
 
@@ -264,20 +266,25 @@ from any thread and is not marked.
 | module | externs | why main-thread only |
 |---|---|---|
 | `lib/Sdl3` | all 17 (window, present, input, file dialog) | SDL's video and event functions; AppKit/UIKit under them |
-| `lib/Gpu2d`, `Gpu2dTextInput`, `Gpu2dWindowIcon`, `Gpu2dSimulatedInput` | the window, pointer, touch, keyboard, text input, clipboard and edit-menu calls (about 50) | SDL window and event state, read after the event pump |
+| `lib/Gpu2d`, `Gpu2dTextInput`, `Gpu2dWindowIcon`, `Gpu2dSimulatedInput` | the window, pointer, touch, keyboard, text input, clipboard and edit-menu calls (45) | SDL window and event state, read after the event pump |
 | `lib/Display`, `lib/Device` | window scale, panel modes; touch devices, media queries | SDL window / display queries; the browser's DOM |
 | `lib/Haptics` | 4 | UIKit's feedback generators |
 | `lib/Location` | 11 | `CLLocationManager` delivers to the run loop of the thread that made it, which is the main one |
-| `lib/Battery`, `lib/ReduceMotion`, `lib/AppLinks` | 3, 1, 2 | `UIDevice`, `UIAccessibility`; links come from the app delegate on the main queue |
-| `packages/audio` | `session_observe`, `session_poll`, `remote_enable`, `remote_poll`, `run_loop_pump`, `midi_client`, `midi_poll` | the observers and command handlers run on the main queue and write a one-reader queue the main thread reads; `run_loop_pump` runs the CALLING thread's run loop, so off the main thread it does nothing useful; a CoreMIDI client notifies on its creating thread's run loop |
+| `lib/ui/InputKind` | 1 (the pointer's kind) | SDL's mouse and touch state |
+| `packages/audio` | `run_loop_pump` | it runs the CALLING thread's run loop, so off the main thread it does nothing useful |
 
 Not marked, on purpose: the WebGPU bindings (`wgpu-native` is thread-safe, and
 encoding on a worker is a future feature); `EventLoop.wake` (made to be called
-from a worker); `FileNotify`, `Keychain`, `LocalNotification`, the sockets and
-the audio device, decoder and file calls; `AVAudioSession` configure and
-activate (Apple advises against the main thread, as activation can block). Each
-row is checked against the platform's documentation before its mark lands; a
-wrong mark refuses good code, a missing one only leaves today's behavior.
+from a worker); `FileNotify`, `Keychain`, `LocalNotification`, `AppLinks` (a
+mutex guards its list), the sockets and the audio device, decoder and file
+calls; `AVAudioSession` configure and activate (Apple advises against the main
+thread, as activation can block); the audio session's and remote commands'
+polls and CoreMIDI's poll (one reader each, but any one thread may be that
+reader); `Battery` and `ReduceMotion` (UIKit / AppKit reads whose threading
+Apple does not state); in `Gpu2d`, the clock, the design resolution, the
+headless flag and the image probe. Each marked row was checked against what
+its C calls; a wrong mark refuses good code, a missing one only leaves
+today's behavior.
 
 #### 4.3.2 The keyword
 
@@ -315,14 +322,20 @@ roots that run **off** the main thread are:
 A root that reaches the bit is an error, with the chain, as in §3.5:
 
 ```
-Loader.rae:31:5: error: `decodeThumbnail` runs on another thread (spawned at
-  Gallery.rae:88), but it reaches `setClipboardText`, which is main-thread only:
-    decodeThumbnail (Loader.rae:12) -> copyName (Loader.rae:30) -> here
-  Send the request to the main loop instead (a Channel or an event the main
-  loop reads), and call it there.
+Gallery.rae:88:25: error: `decodeThumbnail` runs on another thread (spawned at
+  Gallery.rae:88), but it reaches `setClipboardText`, which only the main thread
+  may call.
+    decodeThumbnail (Loader.rae:12) -> copyName (Loader.rae:30) -> setClipboardText (lib/Gpu2dTextInput.rae:41)
+  Send the request to the main loop instead (a Channel or an event the main loop
+  reads) and make the call there.
 ```
 
-`rae build --report-realtime` lists the main-thread externs each root reaches.
+The error is at the site that moves the work off the main thread: the
+`spawn`, the `parallelLoop`, or the declaration of the `realtime` or `cExport`
+function. A worker that calls a marked function directly gets "`f` may be
+called only on the main thread, but here it runs on a worker thread".
+
+`rae build --report-realtime` lists each off-main function that reaches a main-thread call, with its chain.
 The browser build without threads runs a `spawn` on the main thread, but the
 rule is the same everywhere, so code that passes there also passes natively.
 
@@ -347,6 +360,31 @@ promise: a marked function reached from a worker root is the same error).
    method), so a wrong mark shows before it is an error.
 3. The error; fixtures for each root and for an allowed `cExport mainThread`
    callback; a stress case for the bug it prevents.
+
+#### 4.3.6 Landed (2026-11-12, compiler 0.3.110)
+
+- `mainThread` parses in the modifier position (`compiler/src/parser.c`); with
+  `realtime` on the same function it is an error. The formatter keeps it like
+  any modifier word; the VS Code grammar colors it.
+- `compiler/src/may_wait.c` sets one more effect bit, `EFFECT_MAIN_THREAD`, on
+  an extern or function marked `mainThread`, marks a function called in a
+  `parallelLoop` body, and records where each function was first spawned or
+  called so. `compiler/src/realtime_check.c` carries the bit up with the
+  realtime effects and checks the four kinds of off-main function.
+  `RAE_MAIN_THREAD_CHECK=warn` warns instead, `off` skips it.
+- 88 externs marked: `lib/Sdl3` (17), `lib/Gpu2d` (33), `Gpu2dTextInput` (8),
+  `Gpu2dSimulatedInput` (3), `Gpu2dWindowIcon` (1), `Display` (6), `Device`
+  (3), `Haptics` (4), `Location` (11), `ui/InputKind` (1), and
+  `packages/audio`'s `run_loop_pump` (audio 0.12.4).
+- The warn-only count (`compiler/tools/main-thread-count.sh`) over every
+  example, test case and check, 1229 programs: **nothing refused**. No program
+  in the tree reaches a main-thread call from a worker, a real-time function or
+  a C callback today, so the rule is an error from the start.
+- Fixtures 1421 (allowed: main-thread code with no mark, a clean worker and
+  parallelLoop, a `mainThread cExport` callback), 1422 (each of the four
+  refused), 1423 (`realtime` with `mainThread`), 1424 (the report), 1425 (a
+  worker reaching a marked lib extern through unmarked lib functions); stress
+  case 14 (`handles`).
 
 ### 4.4 Unbounded work
 
@@ -805,13 +843,13 @@ steps that need them.
   for their callers carry it always (§3.3).
 - **R4 — calling Rae from C. Decided 2026-11-11:** the modifier
   `cExport("cName")` (§6.1).
-- **R5 — `mainThread`** (§4.3). **Proposed 2026-11-12, waiting for a yes:**
-  the modifier `mainThread` on externs and on Rae functions; inferred upward
-  like `realtime`, so nothing between is marked; an error when a `spawn`ed
+- **R5 — `mainThread`** (§4.3). **Decided and built 2026-11-12:** the
+  modifier `mainThread` on externs and on Rae functions; inferred upward like
+  `realtime`, so nothing between is marked; an error when a `spawn`ed
   function, a `parallelLoop` body, a `realtime` function or an unmarked
   `cExport` function reaches one; code that `main` calls (a game's update)
-  needs no mark. About 100 externs marked (§4.3.1); built warn-only first,
-  counting refusals over the tree, then as an error.
+  needs no mark. 88 externs marked; the warn-only count over the tree found
+  nothing to refuse (§4.3.6).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
   the may-wait rule (§6.6).
 - **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:

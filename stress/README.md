@@ -104,3 +104,8 @@ Case `13_modAndViewOfOnePlace` passes one list to a call as `mod` and as
 `view`, and as two `mod`s (`footgun`: it compiles, and the `view` sees the
 change; no rule refuses overlapping arguments of one call yet, which also
 keeps C's `restrict` out of reach).
+
+Case `14_windowCallFromWorker` spawns a task that asks SDL about the input
+devices (`handles` since 0.3.110: a compile error; SDL's window functions run
+only on the main thread, and the extern under `Device.hasTouch` is marked
+`mainThread`).

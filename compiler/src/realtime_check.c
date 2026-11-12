@@ -1,5 +1,5 @@
 /* The `realtime` and `noAlloc` checks (docs/realtime-language-design.md §2,
- * §3). The may-wait walk (may_wait.c) records, per function, the realtime
+ * §3), and `mainThread` (§4.3, below). The may-wait walk (may_wait.c) records, per function, the realtime
  * effects it has itself: allocates, frees, locks, waits, each with its first
  * site. Here they flow up the call graph to a fixed point, and every function
  * marked `realtime` (forbids all four) or `noAlloc` (forbids allocates and
@@ -36,7 +36,7 @@ static void solve_effects(WaitGraph* graph) {
   for (size_t i = 0; i < graph->count; i++) {
     WaitNode* node = &graph->nodes[i];
     node->reached = node->effects;
-    for (int bit = 0; bit < 4; bit++) node->effect_via[bit] = -1;
+    for (int bit = 0; bit < 5; bit++) node->effect_via[bit] = -1;
   }
   bool changed = true;
   while (changed) {
@@ -49,7 +49,7 @@ static void solve_effects(WaitGraph* graph) {
         const WaitNode* callee = &graph->nodes[target];
         unsigned char gained = (unsigned char)(callee->reached & ~node->reached);
         if (!gained) continue;
-        for (int bit = 0; bit < 4; bit++) {
+        for (int bit = 0; bit < 5; bit++) {
           if (gained & (1 << bit)) node->effect_via[bit] = target;
         }
         node->reached |= gained;
@@ -106,14 +106,117 @@ typedef struct {
   int bit;
 } Reported;
 
+/* ---- mainThread (docs/realtime-language-design.md §4.3) ------------------
+ * A function that runs off the main thread may not reach a call marked
+ * `mainThread`. Four kinds run off it: the target of a `spawn`, a function
+ * called in a `parallelLoop` body, a `realtime` function, and a `cExport`
+ * function not marked `mainThread` (C may call it from any thread). What
+ * `main` calls is the main thread's and needs no mark. */
+
+/* Why `node` runs off the main thread, as text; NULL when it does not. The
+ * site to report at goes into *file / *line. */
+static const char* off_main_reason(const WaitGraph* graph, const WaitNode* node, char* text, size_t cap,
+                                   const char** file, int* line, int* column) {
+  const AstFuncDecl* func = &node->decl->as.func_decl;
+  *file = node->decl->origin_file;
+  *line = (int)node->decl->line;
+  *column = (int)node->decl->column;
+  if (node->spawned || node->parallel_called) {
+    const char* site = node->off_main_file ? node->off_main_file : node->decl->origin_file;
+    *file = site;
+    *line = node->off_main_line;
+    *column = node->off_main_column > 0 ? node->off_main_column : 1;
+    snprintf(text, cap, node->spawned ? "runs on another thread (spawned at %s:%d)"
+                                      : "runs on a worker thread (called in the parallelLoop at %s:%d)",
+             site ? (wait_graph_is_stdlib(graph, node->decl) ? wait_graph_short_lib_path(site)
+                                                              : wait_graph_file_name(site))
+                  : "?",
+             node->off_main_line);
+    return text;
+  }
+  if (func->is_extern) return NULL;
+  if (func->is_realtime) {
+    snprintf(text, cap, "is realtime (it runs on a real-time thread, never the main one)");
+    return text;
+  }
+  if (func->c_export_symbol && !func->is_main_thread) {
+    snprintf(text, cap, "is exported to C as `%s`, and C may call it from any thread", func->c_export_symbol);
+    return text;
+  }
+  return NULL;
+}
+
+/* RAE_MAIN_THREAD_CHECK: unset or `error` refuses, `warn` warns (counting
+ * what the rule would refuse), `off` skips it */
+static int main_thread_mode(void) {
+  const char* mode = getenv("RAE_MAIN_THREAD_CHECK");
+  if (mode && strcmp(mode, "off") == 0) return 0;
+  if (mode && strcmp(mode, "warn") == 0) return 1;
+  return 2;
+}
+
+static bool main_thread_check(const WaitGraph* graph) {
+  int mode = main_thread_mode();
+  if (mode == 0) return true;
+  const AstDecl** reported = NULL;
+  size_t reported_count = 0, reported_cap = 0;
+  bool clean = true;
+  for (size_t i = 0; i < graph->count; i++) {
+    const WaitNode* node = &graph->nodes[i];
+    if (!(node->reached & EFFECT_MAIN_THREAD)) continue;
+    char reason[512];
+    const char* file = NULL;
+    int line = 0, column = 1;
+    if (!off_main_reason(graph, node, reason, sizeof reason, &file, &line, &column)) continue;
+    const AstDecl* root_decl = node->decl->as.func_decl.generic_template ? node->decl->as.func_decl.generic_template
+                                                                         : node->decl;
+    bool seen = false;
+    for (size_t r = 0; r < reported_count && !seen; r++) seen = reported[r] == root_decl;
+    if (seen) continue;
+    if (reported_count == reported_cap) {
+      reported_cap = reported_cap ? reported_cap * 2 : 16;
+      reported = realloc(reported, reported_cap * sizeof(const AstDecl*));
+    }
+    reported[reported_count++] = root_decl;
+    char chain[2048];
+    int leaf_index = chain_of(graph, (int)i, EFFECT_MAIN_THREAD_BIT, chain, sizeof chain);
+    const AstFuncDecl* root_func = &node->decl->as.func_decl;
+    const AstFuncDecl* leaf_func = &graph->nodes[leaf_index].decl->as.func_decl;
+    const char* fix = "  Send the request to the main loop instead (a Channel or an event the main loop reads) and make "
+                      "the call there.";
+    char message[4096];
+    if (leaf_index == (int)i) {
+      snprintf(message, sizeof message, "`%.*s` may be called only on the main thread, but here it %s.\n%s",
+               (int)root_func->name.len, root_func->name.data, reason, fix);
+    } else {
+      snprintf(message, sizeof message, "`%.*s` %s, but it reaches `%.*s`, which only the main thread may call.\n    %s\n%s",
+               (int)root_func->name.len, root_func->name.data, reason, (int)leaf_func->name.len,
+               leaf_func->name.data, chain, fix);
+    }
+    if (mode == 1) {
+      diag_warn(file, line, column, message);
+    } else {
+      diag_error(file, line, column, message);
+      clean = false;
+    }
+  }
+  free(reported);
+  return clean;
+}
+
 bool realtime_check(CompilerContext* ctx, const AstModule* merged, struct WaitGraph* graph) {
   (void)ctx;
   (void)merged;
   if (!graph) return true;
-  bool any = false;
-  for (size_t i = 0; i < graph->count && !any; i++) any = is_root(&graph->nodes[i]);
-  if (!any) return true;
+  bool any = false, any_main_thread = false;
+  for (size_t i = 0; i < graph->count; i++) {
+    any = any || is_root(&graph->nodes[i]);
+    any_main_thread = any_main_thread || (graph->nodes[i].effects & EFFECT_MAIN_THREAD);
+  }
+  if (!any && !any_main_thread) return true;
   solve_effects(graph);
+  bool main_thread_clean = any_main_thread ? main_thread_check(graph) : true;
+  if (!any) return main_thread_clean;
   Reported* reported = NULL;
   size_t reported_count = 0, reported_cap = 0;
   bool clean = true;
@@ -186,7 +289,7 @@ bool realtime_check(CompilerContext* ctx, const AstModule* merged, struct WaitGr
     }
   }
   free(reported);
-  return clean;
+  return clean && main_thread_clean;
 }
 
 /* The C a root reaches and trusts: externs marked realtime or noAlloc */
@@ -246,6 +349,26 @@ bool realtime_report(CompilerContext* ctx, const AstModule* merged, const char* 
     }
   }
   if (roots == 0) fprintf(out, "  no function is marked realtime or noAlloc\n");
+  /* mainThread (§4.3): the functions that run off the main thread and reach
+   * a main-thread call, and how many such calls the program has */
+  size_t marked = 0, refused = 0;
+  for (size_t i = 0; i < graph.count; i++) {
+    const WaitNode* node = &graph.nodes[i];
+    if (node->effects & EFFECT_MAIN_THREAD) marked++;
+    char reason[512];
+    const char* file = NULL;
+    int line = 0, column = 1;
+    if (!(node->reached & EFFECT_MAIN_THREAD) ||
+        !off_main_reason(&graph, node, reason, sizeof reason, &file, &line, &column))
+      continue;
+    if (refused++ == 0) fprintf(out, "  off the main thread, reaching a mainThread call:\n");
+    char chain[2048];
+    chain_of(&graph, (int)i, EFFECT_MAIN_THREAD_BIT, chain, sizeof chain);
+    const AstFuncDecl* func = &node->decl->as.func_decl;
+    fprintf(out, "    %.*s %s\n      %s\n", (int)func->name.len, func->name.data, reason, chain);
+  }
+  fprintf(out, "  mainThread: %zu function%s or C marked, %zu off-main function%s reaching one\n", marked,
+          marked == 1 ? "" : "s", refused, refused == 1 ? "" : "s");
   wait_graph_release(&graph);
   return true;
 }

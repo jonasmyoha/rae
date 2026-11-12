@@ -733,6 +733,12 @@ This generalizes the renderer C-surface gate above to the whole runtime.
 
   Logic inside these can still move to Rae when the codegen calls Rae
   instead (see the audit).
+- **An extern that only the main thread may call carries `mainThread`**
+  (window, input, clipboard, UIKit, a run-loop pump): `func f(...) mainThread
+  unsafe extern("...")`. The compiler then refuses a spawned function, a
+  `parallelLoop` body, a `realtime` function or a `cExport` function that
+  reaches it (docs/realtime-language-design.md §4.3). Do not mark C that is
+  merely called from the main thread today; mark what MUST be.
 - **Before adding a `runtime_*.c` function, name its platform reason** in the
   commit message: one of the reasons above, or a faster platform
   implementation, with the measurement. "It was quicker to write in C" is not
