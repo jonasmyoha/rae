@@ -139,7 +139,8 @@ These instructions define **how Codex should work**, communicate progress, and i
   initialisms (`gpu`, `cpu`, `api`, `json`, `html`, `css`, `url`, `uri`, `http`,
   `png`, `wgsl`, `sdf`), the color initialisms tied to the already-allowed
   `r`/`g`/`b`/`a` (`rgb`, `rgba`, `hsl`), and the dimensional tags `2d`/`3d`
-  (`World3d`, `Gpu2d`). Plus the maths coordinates already blessed above
+  (`World3d`, `Gpu2d`), and `ms` for milliseconds, the unit's own SI symbol
+  (`timeoutMs`, `frameMs`). Plus the maths coordinates already blessed above
   (`x`/`y`/`z`/`w`, `r`/`g`/`b`/`a`) and loop counters `i`/`j`.
   - **Case an initialism as an ordinary word** (the PascalCase/camelCase rule
     still applies): `Ui`, `Id`, `Gpu`, `Json`, `Html`, `Url` — NEVER `UI`, `ID`,
@@ -150,7 +151,10 @@ These instructions define **how Codex should work**, communicate progress, and i
     the thing's name. Two specific bans worth calling out: `io` (spell the intent
     — `input`/`output`; `io` reads as stream I/O AND was misused for an
     input-system state) and `dt` (spell it `deltaTime`; it abbreviates the two
-    words "delta time", it is not an initialism-name).
+    words "delta time", it is not an initialism-name). And `Sec` for seconds is
+    banned too (decision 2026-11-12): it shortens the word, it is not the unit's
+    symbol (that is `s`), so write `Seconds` — `delaySeconds`, `periodSeconds`,
+    `timeoutSeconds`, also in `.raescene` data keys. `Ms` stays allowed.
   - **The allowed set and its EXACT spelling** (casing follows the
     PascalCase-type / camelCase-everything-else rule — the initialism is one
     word, only its first letter capitalizes in a type):
@@ -170,6 +174,7 @@ These instructions define **how Codex should work**, communicate progress, and i
     | WGSL | `wgsl` | `Wgsl` |
     | SDF | `sdf` | `Sdf` |
     | RGB / RGBA / HSL | `rgb`, `rgba`, `hsl` | `Rgb`, `Rgba`, `Hsl` |
+    | milliseconds (a unit suffix) | `ms`, `timeoutMs`, `frameMs` | `Ms`, `FrameMs` |
 
     Maths coordinates `x`/`y`/`z`/`w`, color channels `r`/`g`/`b`/`a`, and loop
     counters `i`/`j` stay single-letter (those letters ARE the meaning).
