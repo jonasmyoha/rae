@@ -24,9 +24,10 @@ tests/cases/1406_realtime_keyword_rejects/Main.rae:25:3: `renderScratch` is real
   Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
     25 |   var scratch: List(Int) = List.create(Int, cap: 4)
        |   ^~~~
-tests/cases/1406_realtime_keyword_rejects/Main.rae:35:25: `renderJoin` is realtime, but this allocates and waits: a spawn (it starts a task).
+tests/cases/1406_realtime_keyword_rejects/Main.rae:35:25: `renderJoin` is realtime, but this allocates, frees and waits: a spawn (it starts a task).
     renderJoin (Main.rae:34)
   Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
   Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
     35 |   let task: Task(Int) = spawn work(value: 1)
        |                         ^~~~
