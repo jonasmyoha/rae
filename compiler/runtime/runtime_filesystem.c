@@ -164,23 +164,111 @@ rae_String rae_ext_rae_sys_read_file_text(rae_String path, int64_t offset, int64
   return out;
 }
 
+/* Why the last file operation on this thread failed (lib/Sys.rae
+ * lastFileError): the errno it ended with, 0 when it succeeded. Each file
+ * shim below stores it as it returns; Rae maps it to a FileError. Platform
+ * reason: errno, which the Rae runtime's own allocations between the call
+ * and the read could change. */
+static __thread int g_rae_file_errno = 0;
+
+static void rae_file_errno_set(int code) { g_rae_file_errno = code; }
+
+int64_t rae_ext_rae_sys_file_errno(void) { return (int64_t)g_rae_file_errno; }
+
+/* The per-OS errno values lib/Sys.rae maps (FileError): 0 ENOSPC, 1 EDQUOT,
+ * 2 ENOENT, 3 EACCES, 4 EPERM, 5 EROFS, 6 ENOTDIR; -1 for one this OS does
+ * not have. Platform reason: per-OS constants. */
+int64_t rae_ext_rae_sys_errno_constant(int64_t which) {
+    switch (which) {
+    case 0: return ENOSPC;
+#ifdef EDQUOT
+    case 1: return EDQUOT;
+#endif
+    case 2: return ENOENT;
+    case 3: return EACCES;
+    case 4: return EPERM;
+#ifdef EROFS
+    case 5: return EROFS;
+#endif
+    case 6: return ENOTDIR;
+    default: return -1;
+    }
+}
+
+/* The whole content, closed: false on any failure, the errno kept. fclose is
+ * checked too: a full disk often shows only when the buffered bytes are
+ * flushed there. */
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
-  if (!path.data || !content.data) return false;
+  if (!path.data || !content.data) { rae_file_errno_set(EINVAL); return false; }
   FILE* f = fopen((const char*)path.data, "wb");
-  if (!f) return false;
+  if (!f) { rae_file_errno_set(errno); return false; }
   size_t written = fwrite(content.data, 1, (size_t)content.len, f);
-  fclose(f);
-  return written == (size_t)content.len;
+  int writeErrno = written == (size_t)content.len ? 0 : (errno ? errno : EIO);
+  int closed = fclose(f);
+  int closeErrno = closed == 0 ? 0 : errno;
+  rae_file_errno_set(writeErrno ? writeErrno : closeErrno);
+  return writeErrno == 0 && closed == 0;
 }
 
 rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
-    if (!oldPath.data || !newPath.data) return false;
-    return rename((const char*)oldPath.data, (const char*)newPath.data) == 0;
+    if (!oldPath.data || !newPath.data) { rae_file_errno_set(EINVAL); return false; }
+    int ok = rename((const char*)oldPath.data, (const char*)newPath.data) == 0;
+    rae_file_errno_set(ok ? 0 : errno);
+    return ok;
 }
 
 rae_Bool rae_ext_rae_sys_delete(rae_String path) {
-    if (!path.data) return false;
-    return remove((const char*)path.data) == 0;
+    if (!path.data) { rae_file_errno_set(EINVAL); return false; }
+    int ok = remove((const char*)path.data) == 0;
+    rae_file_errno_set(ok ? 0 : errno);
+    return ok;
+}
+
+#if defined(__wasm__) || defined(__EMSCRIPTEN__) || defined(_WIN32)
+#elif defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#else
+#include <sys/statvfs.h>
+#endif
+
+/* The bytes free for this program on the volume `path` is on, or -1 when it
+ * cannot be read. Platform reason: one OS call per platform. Apple: the
+ * capacity for important use (NSURLVolumeAvailableCapacityForImportantUsageKey,
+ * which counts what the OS would purge for it, as Settings' "available" does);
+ * Windows: GetDiskFreeSpaceExW's bytes free to the caller; other POSIX:
+ * statvfs f_bavail * f_frsize; the web: -1. */
+int64_t rae_ext_rae_sys_free_space(rae_String path) {
+    if (!path.data) return -1;
+#if defined(__wasm__) || defined(__EMSCRIPTEN__)
+    return -1;
+#elif defined(__APPLE__)
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+        NULL, (const UInt8*)path.data, (CFIndex)path.len, true);
+    if (!url) return -1;
+    int64_t bytes = -1;
+    CFNumberRef number = NULL;
+    if (CFURLCopyResourcePropertyForKey(url, kCFURLVolumeAvailableCapacityForImportantUsageKey,
+                                        &number, NULL) && number) {
+        if (!CFNumberGetValue(number, kCFNumberSInt64Type, &bytes)) bytes = -1;
+    }
+    if (number) CFRelease(number);
+    CFRelease(url);
+    return bytes;
+#elif defined(_WIN32)
+    int wide = MultiByteToWideChar(CP_UTF8, 0, (const char*)path.data, (int)path.len, NULL, 0);
+    if (wide <= 0) return -1;
+    wchar_t* widePath = (wchar_t*)calloc((size_t)wide + 1, sizeof(wchar_t));
+    if (!widePath) return -1;
+    MultiByteToWideChar(CP_UTF8, 0, (const char*)path.data, (int)path.len, widePath, wide);
+    ULARGE_INTEGER available;
+    BOOL ok = GetDiskFreeSpaceExW(widePath, &available, NULL, NULL);
+    free(widePath);
+    return ok ? (int64_t)available.QuadPart : -1;
+#else
+    struct statvfs volume;
+    if (statvfs((const char*)path.data, &volume) != 0) return -1;
+    return (int64_t)volume.f_bavail * (int64_t)volume.f_frsize;
+#endif
 }
 
 /* Private files (lib/Sys.rae writeFilePrivate, setFileMode, fileMode). Each
@@ -194,6 +282,7 @@ rae_Bool rae_ext_rae_sys_delete(rae_String path) {
 int64_t rae_ext_rae_sys_open_private(rae_String path) {
     if (!path.data) return -EINVAL;
     int fd = open((const char*)path.data, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    rae_file_errno_set(fd >= 0 ? 0 : errno);
     return fd >= 0 ? (int64_t)fd : -(int64_t)errno;
 }
 
@@ -202,17 +291,22 @@ int64_t rae_ext_rae_sys_write_fd(int64_t fd, rae_String text, int64_t offset, in
     if (count <= 0) return 0;
     if (!text.data || offset < 0 || offset + count > text.len) return -EINVAL;
     ssize_t n = write((int)fd, text.data + offset, (size_t)count);
+    rae_file_errno_set(n >= 0 ? 0 : errno);
     return n >= 0 ? (int64_t)n : -(int64_t)errno;
 }
 
 /* fsync(fd): 0 or -errno */
 int64_t rae_ext_rae_sys_fsync(int64_t fd) {
-    return fsync((int)fd) == 0 ? 0 : -(int64_t)errno;
+    int ok = fsync((int)fd) == 0;
+    rae_file_errno_set(ok ? 0 : errno);
+    return ok ? 0 : -(int64_t)errno;
 }
 
 /* close(fd): 0 or -errno */
 int64_t rae_ext_rae_sys_close_fd(int64_t fd) {
-    return close((int)fd) == 0 ? 0 : -(int64_t)errno;
+    int ok = close((int)fd) == 0;
+    rae_file_errno_set(ok ? 0 : errno);
+    return ok ? 0 : -(int64_t)errno;
 }
 
 /* chmod(path, mode): 0 or -errno */
@@ -238,8 +332,12 @@ rae_Bool rae_ext_rae_sys_make_dir(rae_String path) {
     if (!path.data) return false;
     // mkdir(2) returns -1 with EEXIST when the dir already exists; we
     // treat that as success so callers can use this idempotently.
-    if (mkdir((const char*)path.data, 0755) == 0) return true;
-    return errno == EEXIST;
+    if (mkdir((const char*)path.data, 0755) == 0 || errno == EEXIST) {
+        rae_file_errno_set(0);
+        return true;
+    }
+    rae_file_errno_set(errno);
+    return false;
 }
 
 #ifndef __wasm__

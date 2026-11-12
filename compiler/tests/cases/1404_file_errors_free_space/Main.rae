@@ -1,0 +1,39 @@
+# Sys.freeSpace and Sys.lastFileError: the free space of the volume the temp folder is on is above
+# 0 and below a petabyte, and a path on no volume is -1. A write to a missing folder, a rename of a
+# missing file and a folder made under a file report notFound; a write that works, none. The errno
+# values of this OS map as FileError says (ENOSPC and EDQUOT noSpace ...). A write to a really full
+# volume is checked on a Mac by compiler/tools/full-disk-check.sh (a 1 MB disk image).
+import Sys
+
+func folder() ret String {
+  var base: String = Sys.getEnv(name: "TMPDIR")
+  if base.length() is 0 {
+    base = "/tmp"
+  }
+  ret "{base}/raeCase1404-{nowNs()}"
+}
+
+func main() {
+  let here: String = folder()
+  let made: Bool = Sys.makeDir(path: here)
+  log("made the folder: {made} {Sys.lastFileError()}")
+  let free: Int = Sys.freeSpace(path: here)
+  log("free space above 0: {free > 0}, below a petabyte: {free < 1000000000000000}")
+  log("a path on no volume: {Sys.freeSpace(path: "/no/such/volume/here")}")
+  let wrote: Bool = Sys.writeFile(path: "{here}/a.txt", content: "rain")
+  log("write: {wrote} {Sys.lastFileError()}")
+  let missing: Bool = Sys.writeFile(path: "{here}/missing/a.txt", content: "rain")
+  log("write into a missing folder: {missing} {Sys.lastFileError()}")
+  let moved: Bool = Sys.rename(oldPath: "{here}/nothing.txt", newPath: "{here}/b.txt")
+  log("rename of a missing file: {moved} {Sys.lastFileError()}")
+  let under: Bool = Sys.makeDir(path: "{here}/a.txt/inner")
+  log("a folder under a file: {under} {Sys.lastFileError()}")
+  log("ENOSPC: {Sys.fileErrorOf(errnoCode: Sys.errnoConstant(which: 0))}")
+  log("EDQUOT: {Sys.fileErrorOf(errnoCode: Sys.errnoConstant(which: 1))}")
+  log("ENOENT: {Sys.fileErrorOf(errnoCode: Sys.errnoConstant(which: 2))}")
+  log("EACCES: {Sys.fileErrorOf(errnoCode: Sys.errnoConstant(which: 3))}")
+  log("EROFS: {Sys.fileErrorOf(errnoCode: Sys.errnoConstant(which: 5))}")
+  log("0: {Sys.fileErrorOf(errnoCode: 0)}, another: {Sys.fileErrorOf(errnoCode: 99999)}")
+  let removed: Bool = Sys.delete(path: "{here}/a.txt") and Sys.delete(path: here)
+  log("cleaned up: {removed} {Sys.lastFileError()}")
+}
