@@ -1,0 +1,109 @@
+# benchmarks/simdMath: lib/Float4's and Float8's sin, exp and tanh against a
+# loop of the scalar Math ones over the same 1M inputs, best of five after a
+# warm-up (run.sh runs it with SIMD and with --float4-scalar).
+import Math
+import Float4
+import Float8
+
+const valueCount: Int = 1048576
+
+# kind: 0 sin, 1 exp, 2 tanh; x in -4 .. 4
+func scalarPass(kind: view Int) ret Float {
+  var sum: Float = 0.0
+  loop var i: Int = 0, i < valueCount, ++i {
+    let x: Float = ((i bitand 8191) as Float) * 0.0009765625 - 4.0
+    if kind is 0 {
+      sum = sum + Math.sin(x: x)
+    } else if kind is 1 {
+      sum = sum + Math.exp(x: x)
+    } else {
+      # Math has no tanh: the plain formula over exp
+      let twice: Float = Math.exp(x: x * 2.0)
+      sum = sum + (twice - 1.0) / (twice + 1.0)
+    }
+  }
+  ret sum
+}
+
+func float4Pass(kind: view Int) ret Float {
+  var sum: Float4 = Float4.splat(value: 0.0)
+  loop var step: Int = 0, step < valueCount / 4, ++step {
+    let base: Float = (((step * 4) bitand 8191) as Float) * 0.0009765625 - 4.0
+    let x: Float4 = {
+      x: base
+      y: base + 0.0009765625
+      z: base + 0.001953125
+      w: base + 0.0029296875
+    }
+    if kind is 0 {
+      sum = Float4.add(a: sum, b: Float4.sin(value: x))
+    } else if kind is 1 {
+      sum = Float4.add(a: sum, b: Float4.exp(value: x))
+    } else {
+      sum = Float4.add(a: sum, b: Float4.tanh(value: x))
+    }
+  }
+  ret Float4.sum(value: sum)
+}
+
+func float8Pass(kind: view Int) ret Float {
+  var sum: Float8 = Float8.splat(value: 0.0)
+  loop var step: Int = 0, step < valueCount / 8, ++step {
+    let base: Float = (((step * 8) bitand 8191) as Float) * 0.0009765625 - 4.0
+    let x: Float8 = {
+      lane0: base
+      lane1: base + 0.0009765625
+      lane2: base + 0.001953125
+      lane3: base + 0.0029296875
+      lane4: base + 0.00390625
+      lane5: base + 0.0048828125
+      lane6: base + 0.005859375
+      lane7: base + 0.0068359375
+    }
+    if kind is 0 {
+      sum = Float8.add(a: sum, b: Float8.sin(value: x))
+    } else if kind is 1 {
+      sum = Float8.add(a: sum, b: Float8.exp(value: x))
+    } else {
+      sum = Float8.add(a: sum, b: Float8.tanh(value: x))
+    }
+  }
+  ret Float8.sum(value: sum)
+}
+
+# width: 1 scalar Math, 4 Float4, 8 Float8; the best of five, in microseconds
+func bestMicroseconds(kind: view Int, width: view Int) ret Int {
+  var best: Int = -1
+  var sink: Float = 0.0
+  loop var round: Int = 0, round < 6, ++round {
+    let start: Int = nowNs()
+    if width is 1 {
+      sink = sink + scalarPass(kind: kind)
+    } else if width is 4 {
+      sink = sink + float4Pass(kind: kind)
+    } else {
+      sink = sink + float8Pass(kind: kind)
+    }
+    let took: Int = (nowNs() - start) / 1000
+    # round 0 is the warm-up
+    if round > 0 and (best < 0 or took < best) {
+      best = took
+    }
+  }
+  if sink is 12345.0 {
+    log("")
+  }
+  ret best
+}
+
+func main() {
+  let names: List(String) = List(String) { "sin", "exp", "tanh" }
+  loop var kind: Int = 0, kind < 3, ++kind {
+    let scalar: Int = bestMicroseconds(kind: kind, width: 1)
+    let four: Int = bestMicroseconds(kind: kind, width: 4)
+    let eight: Int = bestMicroseconds(kind: kind, width: 8)
+    log(
+      "{names.copyAtFallback(index: kind, fallback: "")} ({Float4.lowering()}), 1M values: Math {scalar} us, Float4 {four} us, Float8 {eight} us"
+    )
+  }
+}

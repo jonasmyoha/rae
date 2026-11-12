@@ -517,3 +517,54 @@ Horner polynomial over 1 048 576 Floats, best of 20 rounds.
   not a language feature. No kernel needs it today: the x86 measurement
   above decides whether any will.
 
+
+## 11. Vector math: sin, cos, exp, naturalLog, tanh (2026-11-12)
+
+`Float4` and `Float8` have `sin`, `cos`, `exp`, `naturalLog` and `tanh`,
+written in Rae over the operations above. A synth or DSP loop calls one of them
+for four or eight values at once. The polynomials are the single-precision ones
+of the Cephes library. The module has no lane-integer or bit operation, so:
+
+- a whole number is found by adding and subtracting 1.5 * 2^23;
+- 2^n is a product of the factors 2^64, 2^32, ... 2^1, chosen per lane by a
+  select, and a negative n takes the reciprocal (exact, a power of two);
+- a logarithm's exponent is found by scaling by powers of two, in the same way.
+
+Every step is exact IEEE arithmetic or an operation that is already bit-exact,
+so a lane gives the same bits on NEON, SSE2, AVX2, wasm and the scalar lowering.
+Fixture 1418 checks the error over a sweep, the special values (NaN, +-inf, -0,
+denormals) and a checksum of 100,000 results. 1419 runs the same file with
+`--float4-scalar` and expects the same output.
+
+Maximum error against the Float64 result rounded to Float (measured on NEON,
+40,000-200,000 points per range):
+
+| function | range | error |
+|---|---|---|
+| sin, cos | abs(x) <= 2 pi | 2 ulp (sin 1) |
+| sin, cos | abs(x) <= 8192 | absolute 0.00000012 |
+| exp | -87 .. 88 | 1 ulp |
+| naturalLog | 0.000001 .. 1,000,000 | 1 ulp |
+| tanh | -10 .. 10 | 1 ulp |
+
+Speed (`benchmarks/simdMath`, 1M values, best of five, Apple M-series, in µs):
+
+| | Math (libm) loop | Float4 | Float8 |
+|---|---|---|---|
+| sin, NEON | 2578 | 1617 | 1329 |
+| exp, NEON | 2102 | 2736 | 2318 |
+| tanh, NEON | 2427 | 3967 | 3150 |
+| sin, `--float4-scalar` | 2488 | 1533 | 1334 |
+| exp, `--float4-scalar` | 2011 | 4209 | 2808 |
+
+`sin` and `cos` are 1.6-1.9x faster than looping `Math.sin`. `exp` and `tanh`
+are slower than macOS's `expf`: about half of their time is the seven
+select-and-multiply steps that build 2^n. With a per-lane bit cast
+(`(n + 127) << 23` as the float's bits) that would be two operations; that is a
+follow-up in QUEUE.md, together with the same for `naturalLog`'s exponent.
+
+The audio package's synth (audio/AudioSynth, 0.12.3) uses `Float4.sin` for two
+frames at a time: each frame's note and its octave. 32 voices for 10 s at
+48 kHz took 111 ms with `Math.sin` and take 75 ms with `Float4.sin` (1.48x),
+and fixture 1417's output is unchanged. The Float4 and Float8 externs are
+marked `realtime`: they are inline SIMD with no allocation, lock or wait.

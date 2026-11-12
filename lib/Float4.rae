@@ -25,6 +25,8 @@
 # only because Rae has no private fields.
 #
 # Not in the prelude: only SIMD kernels need it.
+import Math
+
 type Float4 {
   x: Float
   y: Float
@@ -39,102 +41,113 @@ type Mask4 {
   bitsW: UInt32
 }
 
-func nativeSplat(value: Float) unsafe extern("rae_f4_splat") ret Float4
+func nativeSplat(value: Float) realtime unsafe extern("rae_f4_splat") ret Float4
 
-func nativeAdd(a: view Float4, b: view Float4) unsafe extern("rae_f4_add") ret Float4
+func nativeAdd(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_add") ret Float4
 
-func nativeSub(a: view Float4, b: view Float4) unsafe extern("rae_f4_sub") ret Float4
+func nativeSub(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_sub") ret Float4
 
-func nativeMul(a: view Float4, b: view Float4) unsafe extern("rae_f4_mul") ret Float4
+func nativeMul(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_mul") ret Float4
 
-func nativeDiv(a: view Float4, b: view Float4) unsafe extern("rae_f4_div") ret Float4
+func nativeDiv(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_div") ret Float4
 
 func nativeMulAdd(
   a: view Float4
   b: view Float4
   c: view Float4
-) unsafe extern("rae_f4_mul_add") ret Float4
+) realtime unsafe extern("rae_f4_mul_add") ret Float4
 
-func nativeSqrt(value: view Float4) unsafe extern("rae_f4_sqrt") ret Float4
+func nativeSqrt(value: view Float4) realtime unsafe extern("rae_f4_sqrt") ret Float4
 
-func nativeNegate(value: view Float4) unsafe extern("rae_f4_negate") ret Float4
+func nativeNegate(value: view Float4) realtime unsafe extern("rae_f4_negate") ret Float4
 
-func nativeAbs(value: view Float4) unsafe extern("rae_f4_abs") ret Float4
+func nativeAbs(value: view Float4) realtime unsafe extern("rae_f4_abs") ret Float4
 
-func nativeMin(a: view Float4, b: view Float4) unsafe extern("rae_f4_min") ret Float4
+func nativeMin(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_min") ret Float4
 
-func nativeMax(a: view Float4, b: view Float4) unsafe extern("rae_f4_max") ret Float4
+func nativeMax(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_max") ret Float4
 
 func nativeClampSymmetric(
   value: view Float4
   limit: view Float4
-) unsafe extern("rae_f4_clamp_symmetric") ret Float4
+) realtime unsafe extern("rae_f4_clamp_symmetric") ret Float4
 
-func nativeLess(a: view Float4, b: view Float4) unsafe extern("rae_f4_less") ret Mask4
+func nativeLess(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_less") ret Mask4
 
-func nativeGreater(a: view Float4, b: view Float4) unsafe extern("rae_f4_greater") ret Mask4
+func nativeGreater(
+  a: view Float4
+  b: view Float4
+) realtime unsafe extern("rae_f4_greater") ret Mask4
 
 func nativeLessOrEqual(
   a: view Float4
   b: view Float4
-) unsafe extern("rae_f4_less_or_equal") ret Mask4
+) realtime unsafe extern("rae_f4_less_or_equal") ret Mask4
 
 func nativeGreaterOrEqual(
   a: view Float4
   b: view Float4
-) unsafe extern("rae_f4_greater_or_equal") ret Mask4
+) realtime unsafe extern("rae_f4_greater_or_equal") ret Mask4
 
-func nativeEqual(a: view Float4, b: view Float4) unsafe extern("rae_f4_equal") ret Mask4
+func nativeEqual(a: view Float4, b: view Float4) realtime unsafe extern("rae_f4_equal") ret Mask4
 
 func nativeSelect(
   mask: view Mask4
   ifTrue: view Float4
   ifFalse: view Float4
-) unsafe extern("rae_f4_select") ret Float4
+) realtime unsafe extern("rae_f4_select") ret Float4
 
-func nativeBoth(a: view Mask4, b: view Mask4) unsafe extern("rae_m4_both") ret Mask4
+func nativeBoth(a: view Mask4, b: view Mask4) realtime unsafe extern("rae_m4_both") ret Mask4
 
-func nativeEither(a: view Mask4, b: view Mask4) unsafe extern("rae_m4_either") ret Mask4
+func nativeEither(a: view Mask4, b: view Mask4) realtime unsafe extern("rae_m4_either") ret Mask4
 
-func nativeInvert(mask: view Mask4) unsafe extern("rae_m4_invert") ret Mask4
+func nativeInvert(mask: view Mask4) realtime unsafe extern("rae_m4_invert") ret Mask4
 
-func nativeAnyLane(mask: view Mask4) unsafe extern("rae_m4_any_lane") ret Bool
+func nativeAnyLane(mask: view Mask4) realtime unsafe extern("rae_m4_any_lane") ret Bool
 
-func nativeAllLanes(mask: view Mask4) unsafe extern("rae_m4_all_lanes") ret Bool
+func nativeAllLanes(mask: view Mask4) realtime unsafe extern("rae_m4_all_lanes") ret Bool
 
-func nativeSum(value: view Float4) unsafe extern("rae_f4_sum") ret Float
+func nativeSum(value: view Float4) realtime unsafe extern("rae_f4_sum") ret Float
 
-func nativeHorizontalMin(value: view Float4) unsafe extern("rae_f4_horizontal_min") ret Float
+func nativeHorizontalMin(
+  value: view Float4
+) realtime unsafe extern("rae_f4_horizontal_min") ret Float
 
-func nativeHorizontalMax(value: view Float4) unsafe extern("rae_f4_horizontal_max") ret Float
+func nativeHorizontalMax(
+  value: view Float4
+) realtime unsafe extern("rae_f4_horizontal_max") ret Float
 
 func nativeEmbedIndex(
   value: view Float4
   baseIndex: Int
   bitCount: Int
-) unsafe extern("rae_f4_embed_index") ret Float4
+) realtime unsafe extern("rae_f4_embed_index") ret Float4
 
 func nativeMinLaneIndex(
   value: view Float4
   bitCount: Int
-) unsafe extern("rae_f4_min_lane_index") ret Int
+) realtime unsafe extern("rae_f4_min_lane_index") ret Int
 
-func nativeLoad(data: Buffer(Float), index: Int) unsafe extern("rae_f4_load") ret Float4
+func nativeLoad(data: Buffer(Float), index: Int) realtime unsafe extern("rae_f4_load") ret Float4
 
-func nativeStore(data: Buffer(Float), index: Int, value: view Float4) unsafe extern("rae_f4_store")
+func nativeStore(
+  data: Buffer(Float)
+  index: Int
+  value: view Float4
+) realtime unsafe extern("rae_f4_store")
 
 func nativeLoadPartial(
   data: Buffer(Float)
   index: Int
   count: Int
-) unsafe extern("rae_f4_load_partial") ret Float4
+) realtime unsafe extern("rae_f4_load_partial") ret Float4
 
 func nativeStorePartial(
   data: Buffer(Float)
   index: Int
   value: view Float4
   count: Int
-) unsafe extern("rae_f4_store_partial")
+) realtime unsafe extern("rae_f4_store_partial")
 
 func nativeStoreMasked(
   data: Buffer(Float)
@@ -142,9 +155,9 @@ func nativeStoreMasked(
   value: view Float4
   mask: view Mask4
   count: Int
-) unsafe extern("rae_f4_store_masked")
+) realtime unsafe extern("rae_f4_store_masked")
 
-func nativeLowering() unsafe extern("rae_f4_lowering") ret Int
+func nativeLowering() realtime unsafe extern("rae_f4_lowering") ret Int
 
 # The lowering this program was compiled with: "neon", "sse2", "wasm" or
 # "scalar" (`rae run --float4-scalar` forces "scalar").
@@ -505,4 +518,348 @@ func firstLanes(count: view Int) ret Mask4 {
     mask.bitsW = allBits
   }
   ret mask
+}
+
+# ---- vector math: sin, cos, exp, naturalLog, tanh ---------------------------
+# For a synth and DSP. The polynomials are Cephes' single-precision ones
+# (Stephen L. Moshier, Cephes Math Library: sinf.c, cosf.c, expf.c, logf.c,
+# tanhf.c). The range reduction is written with the operations above only:
+# there is no lane-integer or bit operation, so a whole number is found by the
+# 1.5 * 2^23 rounding trick, 2^n is a product of power-of-two factors and a
+# logarithm's exponent is found by scaling by powers of two. Every step is
+# exact IEEE arithmetic or one of the bit-exact operations above, so each lane
+# gives the same bits on every lowering as the scalar definition
+# (`--float4-scalar`), as the rest of this module does.
+#
+# Maximum error against the Float64 functions rounded to Float, measured by
+# fixture 1418_float_simd_math over a sweep of each range:
+#   sin, cos     |x| <= 2 pi      2 ulp
+#   sin, cos     |x| <= 8192      absolute 0.00000012 (ulp grows near zeros)
+#   exp          -87 .. 88        1 ulp
+#   naturalLog   x > 0            1 ulp
+#   tanh         all x            1 ulp
+# Beyond |x| = 8192 sin and cos lose accuracy (the reduction keeps about 24
+# bits of x / (pi / 2)); exp gives +inf above 88.72 and 0 below -103.97;
+# naturalLog gives -inf at 0 and NaN below it. NaN stays NaN in every one.
+
+# The nearest whole number (ties to even) for |value| < 2^22, exactly:
+# adding 1.5 * 2^23 leaves no fraction bits, subtracting it gives the rounded
+# value back
+func roundToWhole(value: view Float4) ret Float4 {
+  let magic: Float4 = Float4.splat(value: 12582912.0)
+  ret Float4.sub(a: Float4.add(a: value, b: magic), b: magic)
+}
+
+# The largest whole number not above `value` (|value| < 2^22)
+func floorToWhole(value: view Float4) ret Float4 {
+  let rounded: Float4 = roundToWhole(value: value)
+  let above: Mask4 = Float4.greater(a: rounded, b: value)
+  ret Float4.select(
+    mask: above
+    ifTrue: Float4.sub(a: rounded, b: Float4.splat(value: 1.0))
+    ifFalse: rounded
+  )
+}
+
+# 2^power exactly, for power in -126 .. 127 (its bits)
+func twoToThe(power: view Int) ret Float {
+  ret Math.floatFromBits(bits: (127 + power) * 8388608)
+}
+
+# a * b + c as two operations (no fused multiply-add: same bits everywhere)
+func madd(a: view Float4, b: view Float4, c: view Float) ret Float4 {
+  ret Float4.add(a: Float4.mul(a: a, b: b), b: Float4.splat(value: c))
+}
+
+# sin and cos of r in [-pi/4, pi/4] (Cephes sinf / cosf polynomials)
+func sinKernel(r: view Float4) ret Float4 {
+  let z: Float4 = Float4.mul(a: r, b: r)
+  var p: Float4 = madd(a: Float4.splat(value: -0.00019515295891), b: z, c: 0.0083321608736)
+  p = madd(a: p, b: z, c: -0.16666654611)
+  ret Float4.add(a: Float4.mul(a: Float4.mul(a: p, b: z), b: r), b: r)
+}
+
+func cosKernel(r: view Float4) ret Float4 {
+  let z: Float4 = Float4.mul(a: r, b: r)
+  var p: Float4 = madd(
+    a: Float4.splat(value: 0.00002443315711809948)
+    b: z
+    c: -0.001388731625493765
+  )
+  p = madd(a: p, b: z, c: 0.04166664568298827)
+  let tail: Float4 = Float4.mul(a: Float4.mul(a: p, b: z), b: z)
+  ret Float4.add(
+    a: Float4.sub(a: Float4.splat(value: 1.0), b: Float4.mul(a: z, b: Float4.splat(value: 0.5)))
+    b: tail
+  )
+}
+
+# x = k * pi/2 + r with r in [-pi/4, pi/4] (Cody and Waite: pi/2 in three
+# parts, each product exact), and the quadrant (k + shift) mod 4
+type QuarterTurns4 {
+  r: Float4
+  quadrant: Float4
+}
+
+func reduceQuarterTurns(value: view Float4, shift: view Float) ret QuarterTurns4 {
+  let turns: Float4 = roundToWhole(
+    value: Float4.mul(a: value, b: Float4.splat(value: 0.636619772367581))
+  )
+  var r: Float4 = Float4.sub(a: value, b: Float4.mul(a: turns, b: Float4.splat(value: 1.5703125)))
+  r = Float4.sub(a: r, b: Float4.mul(a: turns, b: Float4.splat(value: 0.0004837512969970703125)))
+  r = Float4.sub(a: r, b: Float4.mul(a: turns, b: Float4.splat(value: 0.0000000754978995489188216)))
+  let shifted: Float4 = Float4.add(a: turns, b: Float4.splat(value: shift))
+  let quarter: Float4 = Float4.mul(a: shifted, b: Float4.splat(value: 0.25))
+  let quadrant: Float4 = Float4.sub(
+    a: shifted
+    b: Float4.mul(a: floorToWhole(value: quarter), b: Float4.splat(value: 4.0))
+  )
+  ret QuarterTurns4 { r: r, quadrant: quadrant }
+}
+
+# sin by quadrant: 0 sin r, 1 cos r, 2 -sin r, 3 -cos r
+func quadrantSin(r: view Float4, quadrant: view Float4) ret Float4 {
+  let sine: Float4 = sinKernel(r: r)
+  let cosine: Float4 = cosKernel(r: r)
+  let odd: Mask4 = Float4.either(
+    a: Float4.equal(a: quadrant, b: Float4.splat(value: 1.0))
+    b: Float4.equal(a: quadrant, b: Float4.splat(value: 3.0))
+  )
+  let value: Float4 = Float4.select(mask: odd, ifTrue: cosine, ifFalse: sine)
+  let negative: Mask4 = Float4.greaterOrEqual(a: quadrant, b: Float4.splat(value: 2.0))
+  ret Float4.select(mask: negative, ifTrue: Float4.negate(value: value), ifFalse: value)
+}
+
+# Each lane's sine (radians)
+func sin(value: view Float4) ret Float4 {
+  let reduced: QuarterTurns4 = reduceQuarterTurns(value: value, shift: 0.0)
+  let result: Float4 = quadrantSin(r: reduced.r, quadrant: reduced.quadrant)
+  # sin(-0) is -0
+  ret Float4.select(
+    mask: Float4.equal(a: value, b: Float4.splat(value: 0.0))
+    ifTrue: value
+    ifFalse: result
+  )
+}
+
+# Each lane's cosine (radians): sin a quarter turn on
+func cos(value: view Float4) ret Float4 {
+  let reduced: QuarterTurns4 = reduceQuarterTurns(value: value, shift: 1.0)
+  ret quadrantSin(r: reduced.r, quadrant: reduced.quadrant)
+}
+
+# 2^n for whole n in -126 .. 127: 2^|n| as a product of power-of-two
+# factors, and for a negative n its reciprocal (exact: a power of two)
+func powerOfTwo(n: view Float4) ret Float4 {
+  let zero: Float4 = Float4.splat(value: 0.0)
+  let one: Float4 = Float4.splat(value: 1.0)
+  var left: Float4 = Float4.abs(value: n)
+  var result: Float4 = one
+  var step: Float = 64.0
+  loop step >= 1.0 {
+    let has: Mask4 = Float4.greaterOrEqual(a: left, b: Float4.splat(value: step))
+    left = Float4.sub(
+      a: left
+      b: Float4.select(mask: has, ifTrue: Float4.splat(value: step), ifFalse: zero)
+    )
+    let factor: Float4 = Float4.splat(value: twoToThe(power: step as Int))
+    result = Float4.mul(a: result, b: Float4.select(mask: has, ifTrue: factor, ifFalse: one))
+    step = step * 0.5
+  }
+  ret Float4.select(
+    mask: Float4.less(a: n, b: zero)
+    ifTrue: Float4.div(a: one, b: result)
+    ifFalse: result
+  )
+}
+
+# Each lane's e^x (Cephes expf)
+func exp(value: view Float4) ret Float4 {
+  let x: Float4 = Float4.min(
+    a: Float4.max(a: value, b: Float4.splat(value: -103.97))
+    b: Float4.splat(value: 88.73)
+  )
+  let n: Float4 = roundToWhole(value: Float4.mul(a: x, b: Float4.splat(value: 1.44269504088896341)))
+  var r: Float4 = Float4.sub(a: x, b: Float4.mul(a: n, b: Float4.splat(value: 0.693359375)))
+  r = Float4.sub(a: r, b: Float4.mul(a: n, b: Float4.splat(value: -0.000212194440)))
+  let z: Float4 = Float4.mul(a: r, b: r)
+  var p: Float4 = madd(a: Float4.splat(value: 0.00019875691500), b: r, c: 0.0013981999507)
+  p = madd(a: p, b: r, c: 0.0083334519073)
+  p = madd(a: p, b: r, c: 0.041665795894)
+  p = madd(a: p, b: r, c: 0.16666665459)
+  p = madd(a: p, b: r, c: 0.50000001201)
+  let er: Float4 = Float4.add(
+    a: Float4.add(a: Float4.mul(a: p, b: z), b: r)
+    b: Float4.splat(value: 1.0)
+  )
+  # n runs from -150 to 128: below -100 apply 2^(n + 64) and then 2^-64, at
+  # 128 apply 2^127 and then 2, so the one rounding is the last product
+  let low: Mask4 = Float4.less(a: n, b: Float4.splat(value: -100.0))
+  let high: Mask4 = Float4.greater(a: n, b: Float4.splat(value: 127.0))
+  let shift: Float4 = Float4.select(
+    mask: low
+    ifTrue: Float4.splat(value: 64.0)
+    ifFalse: Float4.select(
+      mask: high
+      ifTrue: Float4.splat(value: -1.0)
+      ifFalse: Float4.splat(value: 0.0)
+    )
+  )
+  let last: Float4 = Float4.select(
+    mask: low
+    ifTrue: Float4.splat(value: twoToThe(power: -64))
+    ifFalse: Float4.select(
+      mask: high
+      ifTrue: Float4.splat(value: 2.0)
+      ifFalse: Float4.splat(value: 1.0)
+    )
+  )
+  let scaled: Float4 = Float4.mul(
+    a: Float4.mul(a: er, b: powerOfTwo(n: Float4.add(a: n, b: shift)))
+    b: last
+  )
+  let over: Mask4 = Float4.greater(a: value, b: Float4.splat(value: 88.7228))
+  let under: Mask4 = Float4.less(a: value, b: Float4.splat(value: -103.972))
+  let infinity: Float4 = Float4.splat(value: Math.floatFromBits(bits: 0x7F800000))
+  let bounded: Float4 = Float4.select(mask: over, ifTrue: infinity, ifFalse: scaled)
+  # a NaN lane stays NaN
+  let finite: Float4 = Float4.select(
+    mask: under
+    ifTrue: Float4.splat(value: 0.0)
+    ifFalse: bounded
+  )
+  ret Float4.select(mask: Float4.equal(a: value, b: value), ifTrue: finite, ifFalse: value)
+}
+
+# Each lane's natural logarithm (Cephes logf): x = m * 2^e with m in
+# [sqrt(1/2), sqrt(2)), found by scaling by powers of two
+func naturalLog(value: view Float4) ret Float4 {
+  let zero: Float4 = Float4.splat(value: 0.0)
+  var m: Float4 = value
+  var e: Float4 = zero
+  var step: Float = 64.0
+  loop step >= 1.0 {
+    let big: Mask4 = Float4.greaterOrEqual(
+      a: m
+      b: Float4.splat(value: twoToThe(power: step as Int))
+    )
+    m = Float4.select(
+      mask: big
+      ifTrue: Float4.mul(a: m, b: Float4.splat(value: twoToThe(power: -(step as Int))))
+      ifFalse: m
+    )
+    e = Float4.add(
+      a: e
+      b: Float4.select(mask: big, ifTrue: Float4.splat(value: step), ifFalse: zero)
+    )
+    step = step * 0.5
+  }
+  # small values, denormals too (down to 2^-149): 64 twice, then halving
+  var down: Float = 64.0
+  var rounds: Int = 0
+  loop down >= 1.0 {
+    let small: Mask4 = Float4.both(
+      a: Float4.less(a: m, b: Float4.splat(value: twoToThe(power: 1 - (down as Int))))
+      b: Float4.greater(a: m, b: zero)
+    )
+    m = Float4.select(
+      mask: small
+      ifTrue: Float4.mul(a: m, b: Float4.splat(value: twoToThe(power: down as Int)))
+      ifFalse: m
+    )
+    e = Float4.sub(
+      a: e
+      b: Float4.select(mask: small, ifTrue: Float4.splat(value: down), ifFalse: zero)
+    )
+    rounds = rounds + 1
+    if rounds is not 1 {
+      down = down * 0.5
+    }
+  }
+  # m is in [1, 2) now; to [sqrt(1/2), sqrt(2)) around 1
+  let high: Mask4 = Float4.greater(a: m, b: Float4.splat(value: 1.41421356))
+  m = Float4.select(mask: high, ifTrue: Float4.mul(a: m, b: Float4.splat(value: 0.5)), ifFalse: m)
+  e = Float4.add(
+    a: e
+    b: Float4.select(mask: high, ifTrue: Float4.splat(value: 1.0), ifFalse: zero)
+  )
+  let f: Float4 = Float4.sub(a: m, b: Float4.splat(value: 1.0))
+  let z: Float4 = Float4.mul(a: f, b: f)
+  var p: Float4 = madd(a: Float4.splat(value: 0.070376836292), b: f, c: -0.11514610310)
+  p = madd(a: p, b: f, c: 0.11676998740)
+  p = madd(a: p, b: f, c: -0.12420140846)
+  p = madd(a: p, b: f, c: 0.14249322787)
+  p = madd(a: p, b: f, c: -0.16668057665)
+  p = madd(a: p, b: f, c: 0.20000714765)
+  p = madd(a: p, b: f, c: -0.24999993993)
+  p = madd(a: p, b: f, c: 0.33333331174)
+  var y: Float4 = Float4.mul(a: Float4.mul(a: p, b: z), b: f)
+  y = Float4.add(a: y, b: Float4.mul(a: e, b: Float4.splat(value: -0.000212194440)))
+  y = Float4.sub(a: y, b: Float4.mul(a: z, b: Float4.splat(value: 0.5)))
+  var result: Float4 = Float4.add(
+    a: Float4.add(a: f, b: y)
+    b: Float4.mul(a: e, b: Float4.splat(value: 0.693359375))
+  )
+  # 0 gives -inf, a negative value NaN, +inf stays +inf, NaN stays NaN
+  let infinity: Float4 = Float4.splat(value: Math.floatFromBits(bits: 0x7F800000))
+  result = Float4.select(
+    mask: Float4.equal(a: value, b: zero)
+    ifTrue: Float4.negate(value: infinity)
+    ifFalse: result
+  )
+  result = Float4.select(
+    mask: Float4.less(a: value, b: zero)
+    ifTrue: Float4.splat(value: Math.floatFromBits(bits: 0x7FC00000))
+    ifFalse: result
+  )
+  result = Float4.select(
+    mask: Float4.equal(a: value, b: infinity)
+    ifTrue: infinity
+    ifFalse: result
+  )
+  ret Float4.select(mask: Float4.equal(a: value, b: value), ifTrue: result, ifFalse: value)
+}
+
+# Each lane's tanh (Cephes tanhf): a polynomial below 0.625, 1 - 2 / (e^2x + 1)
+# above (x at most 10, where it rounds to +-1)
+func tanh(value: view Float4) ret Float4 {
+  let x: Float4 = Float4.abs(value: value)
+  let z: Float4 = Float4.mul(a: value, b: value)
+  var p: Float4 = madd(a: Float4.splat(value: -0.00570498872745), b: z, c: 0.0206390887954)
+  p = madd(a: p, b: z, c: -0.0537397155531)
+  p = madd(a: p, b: z, c: 0.133314422036)
+  p = madd(a: p, b: z, c: -0.333332819422)
+  let near: Float4 = Float4.add(a: Float4.mul(a: Float4.mul(a: p, b: z), b: value), b: value)
+  let e2: Float4 = exp(
+    value: Float4.mul(
+      a: Float4.min(a: x, b: Float4.splat(value: 10.0))
+      b: Float4.splat(value: 2.0)
+    )
+  )
+  let one: Float4 = Float4.splat(value: 1.0)
+  let far: Float4 = Float4.sub(
+    a: one
+    b: Float4.div(a: Float4.splat(value: 2.0), b: Float4.add(a: e2, b: one))
+  )
+  let signedFar: Float4 = Float4.select(
+    mask: Float4.less(a: value, b: Float4.splat(value: 0.0))
+    ifTrue: Float4.negate(value: far)
+    ifFalse: far
+  )
+  let result: Float4 = Float4.select(
+    mask: Float4.less(a: x, b: Float4.splat(value: 0.625))
+    ifTrue: near
+    ifFalse: signedFar
+  )
+  # NaN stays NaN and tanh(-0) is -0
+  let number: Float4 = Float4.select(
+    mask: Float4.equal(a: value, b: value)
+    ifTrue: result
+    ifFalse: value
+  )
+  ret Float4.select(
+    mask: Float4.equal(a: value, b: Float4.splat(value: 0.0))
+    ifTrue: value
+    ifFalse: number
+  )
 }

@@ -7,7 +7,9 @@
 #
 # It runs on the audio thread and allocates nothing: its voices are a list made
 # once. A note on while all 32 sound takes the quietest releasing voice, else
-# the oldest.
+# the oldest. A voice renders two frames at a time, their four sines in one
+# Float4.sin (docs/float4-design.md §11: 1.5x faster than Math.sin).
+import Float4
 import Math
 
 const synthVoiceCount: Int = 32
@@ -126,8 +128,8 @@ func synthAllNotesOff(synth: mod SynthState) realtime {
   }
 }
 
-# One frame of a voice, its envelope moved on
-func synthVoiceFrame(
+# A voice's envelope moved on one frame (at the release's end the voice stops)
+func synthEnvelopeStep(
   voice: mod SynthVoice
   attackStep: view Float
   decayStep: view Float
@@ -153,13 +155,50 @@ func synthVoiceFrame(
       voice.active = false
     }
   }
+  ret voice.envelope
+}
+
+# The voice's angle now (radians), its phase moved on one frame
+func synthAngleStep(voice: mod SynthVoice) ret Float realtime {
   let angle: Float = (voice.phase * 6.283185307179586) as Float
-  let tone: Float = sin(x: angle) + sin(x: angle * 2.0) * 0.3
   voice.phase = voice.phase + voice.step
   if voice.phase >= 1.0 {
     voice.phase = voice.phase - 1.0
   }
-  ret tone * voice.envelope * voice.level * 0.25
+  ret angle
+}
+
+# A frame's sample from its tone's two sines (the note and its octave)
+func synthSample(
+  sine: view Float
+  octave: view Float
+  envelope: view Float
+  level: view Float
+) ret Float realtime {
+  ret (sine + octave * 0.3) * envelope * level * 0.25 * 0.7071
+}
+
+# Add `value` to frame `index` of both bus buffers
+func synthAddToBus(
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  index: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var left: Buffer(Float) = busLeft
+    var right: Buffer(Float) = busRight
+    rae_ext_rae_buf_set(
+      buf: left
+      index: index
+      value: rae_ext_rae_buf_get(buf: left, index: index) + value
+    )
+    rae_ext_rae_buf_set(
+      buf: right
+      index: index
+      value: rae_ext_rae_buf_get(buf: right, index: index) + value
+    )
+  }
 }
 
 # Frames [from, from + frames) of every sounding voice, added to the synth's
@@ -180,29 +219,58 @@ func synthRender(
   loop var i: Int = 0, i < synthVoiceCount, ++i {
     if let voice: mod SynthVoice = synth.voices.modAt(index: i) {
       if voice.active {
-        loop var frame: Int = from, frame < from + frames and voice.active, ++frame {
-          let value: Float = synthVoiceFrame(
+        # two frames at a time: their four sines (each frame's note and
+        # octave) in one Float4.sin, each lane the same as alone
+        var frame: Int = from
+        loop frame < from + frames and voice.active {
+          let envelope: Float = synthEnvelopeStep(
             voice: voice
             attackStep: attackStep
             decayStep: decayStep
             sustain: sustain
             releaseStep: releaseStep
-          ) * 0.7071
-          let index: Int = base + frame
-          unsafe {
-            var left: Buffer(Float) = busLeft
-            var right: Buffer(Float) = busRight
-            rae_ext_rae_buf_set(
-              buf: left
-              index: index
-              value: rae_ext_rae_buf_get(buf: left, index: index) + value
+          )
+          let angle: Float = synthAngleStep(voice: voice)
+          let hasNext: Bool = frame + 1 < from + frames and voice.active
+          var nextEnvelope: Float = 0.0
+          var nextAngle: Float = 0.0
+          if hasNext {
+            nextEnvelope = synthEnvelopeStep(
+              voice: voice
+              attackStep: attackStep
+              decayStep: decayStep
+              sustain: sustain
+              releaseStep: releaseStep
             )
-            rae_ext_rae_buf_set(
-              buf: right
-              index: index
-              value: rae_ext_rae_buf_get(buf: right, index: index) + value
+            nextAngle = synthAngleStep(voice: voice)
+          }
+          let angles: Float4 = { x: angle, y: angle * 2.0, z: nextAngle, w: nextAngle * 2.0 }
+          let sines: Float4 = Float4.sin(value: angles)
+          synthAddToBus(
+            busLeft: busLeft
+            busRight: busRight
+            index: base + frame
+            value: synthSample(
+              sine: sines.x
+              octave: sines.y
+              envelope: envelope
+              level: voice.level
+            )
+          )
+          if hasNext {
+            synthAddToBus(
+              busLeft: busLeft
+              busRight: busRight
+              index: base + frame + 1
+              value: synthSample(
+                sine: sines.z
+                octave: sines.w
+                envelope: nextEnvelope
+                level: voice.level
+              )
             )
           }
+          frame = frame + 2
         }
       }
     }
