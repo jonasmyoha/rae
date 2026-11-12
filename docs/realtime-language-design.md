@@ -5,7 +5,7 @@ approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
 2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
 function with optional marks on helpers (R3), `cExport("cName")` (R4), and
 Homebrew LLVM for RealtimeSanitizer (R7). Decided and built 2026-11-12:
-`mainThread` (R5, §4.3). R6 is proposed (§6.6.1, 2026-11-12).
+`mainThread` (R5, §4.3). Decided 2026-11-13: `spawn thread` (R6, §6.6.1).
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -761,7 +761,7 @@ or browser build includes them.
   (`thread_policy_set` time-constraint on Apple, MMCSS on Windows, rtkit on
   Linux) and joins the device's audio workgroup on Apple. No language change,
   but it relies on a rule of the scheduler that is not visible in the code. The
-  explicit form is proposed in §6.6.1 (§9 R6).
+  explicit form, `spawn thread f(...)`, is decided in §6.6.1 (§9 R6).
 - **Parallel work inside one block** (the DAW's graph on several cores): the
   worker pool behind `parallelLoop` is not real-time, and its threads are shared
   with everything else. Needed: a separate **real-time team** of threads, joined
@@ -770,9 +770,11 @@ or browser build includes them.
   `parallel-stages-design.md`'s team construct (Option A) is the natural base;
   this is the last feature needed and the largest.
 
-#### 6.6.1 Proposal: `dedicatedThread`, and the priority in `lib/Realtime` (R6, 2026-11-12)
+#### 6.6.1 `spawn thread`, and the priority in `lib/Realtime` (R6)
 
-**Nothing built; waiting for a decision.**
+**Decided 2026-11-13; to be built** (QUEUE: "[realtime 6c build]"). First
+proposed 2026-11-12 as a function modifier `dedicatedThread`; the spawn-site
+form was chosen instead, for the reasons below.
 
 What exists today:
 - **Which thread.** `packages/audio` spawns `butlerThread` and (stage A)
@@ -791,31 +793,38 @@ What exists today:
 - **Workgroup.** Nothing joins the audio device's workgroup yet; only the
   real-time team (§6.6, R9) needs it.
 
-Proposal, in three parts:
+The decision, in three parts:
 
-1. **A modifier `dedicatedThread` on the FUNCTION** (the position of
-   `realtime` and `mainThread`):
+1. **`spawn thread f(...)`: the choice is made where the work starts.**
 
    ```rae
-   func butlerThread(butler: own Butler, running: own Atomic(Bool)) ret Int dedicatedThread {
-     ...
-   }
+   butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
    ```
 
-   - Every `spawn` of it starts a new OS thread, never a pool task, whatever
-     its body does. It is joined like any `Task` (its `get`, or the end of the
-     owner's scope).
-   - It is the function's property and not the call's, because "this loops
-     until shutdown" is a fact of the body, and the reader of the body is the
-     one who needs to see it. No new `spawn` syntax.
-   - Calling it directly, not through `spawn`, is a compile error ("a
-     `dedicatedThread` function runs on its own thread: start it with
-     `spawn`"). That keeps a loop that never ends off the main thread.
-   - Together with `mainThread` on one function: an error (the same check as
-     `realtime` with `mainThread`). Together with `realtime`: an error too. The
-     loop itself waits between rounds (its `Signal.wait`), which `realtime`
-     forbids; the real-time part is the function it calls once per round, which
-     is marked `realtime` and checked as today.
+   - That spawn starts a new OS thread, never a pool task, whatever the body
+     of `f` does now or after a later edit. It returns a `Task(T)` and is
+     joined like any other (its `get`, or the end of the owner's scope).
+   - `thread` is a modifier word after `spawn`, not a reserved word: it is
+     the modifier only when another name follows it (`spawn thread f(...)`);
+     `spawn thread(...)` still calls a function named `thread`.
+   - `f` stays an ordinary function. A test can call it directly and run a
+     few rounds in place, an offline render can use it with no device, and
+     another caller can spawn it as a pool task. The function says what it
+     does; the caller says where it runs.
+   - Why not a mark on the function (`func f(...) dedicatedThread`, the first
+     proposal): Rae's function marks are rules about the body that are checked
+     through everything it calls (`realtime`: it never allocates, locks or
+     waits; `mainThread`: only the main thread may call it), true whoever the
+     caller is. "Its own OS thread" is not such a rule; it is the starter's
+     choice of where to run it, next to the `Task` the starter holds and
+     joins, like the planned `detach spawn` (`concurrency-model.md` §3). With
+     the mark on the spawn, the program's threads are all visible where they
+     start (for the audio package, in `Audio.rae`'s start-up), instead of
+     behind each function's declaration. And the function mark had to forbid
+     direct calls, which blocked reusing the function.
+   - The browser build has no threads: there `spawn thread` is a compile
+     error at that spawn ("the browser build has no threads; this needs its
+     own thread"), which a program avoids with `when Target.isNative`.
 
 2. **The priority is a `lib/Realtime` call**, made at the start of the
    thread, because the period and the budget are run-time values (the sample
@@ -838,7 +847,11 @@ Proposal, in three parts:
    | browser | none | the build has no threads; returns false |
 
    It answers whether the thread got real-time priority; the caller logs it
-   and carries on, as the audio shim does today.
+   and carries on, as the audio shim does today. A thread that is not started
+   with `spawn thread` (the main thread, a pool task) may not call it: a pool
+   worker raised to real time would starve every other task. The compiler
+   refuses `promoteToRealtime` reached from anything but a `spawn thread`
+   target (one more case of the off-main roots of §4.3.3).
 
 3. **Joining the device's workgroup** (Apple's `os_workgroup`, macOS 11 and
    iOS 14) is a `lib/Realtime` call too, `joinWorkgroup(workgroup:)` /
@@ -848,25 +861,22 @@ Proposal, in three parts:
    real-time team (R9), so it is built with that task, not here.
 
 How it shows in the analyses:
-- **may-wait** (`may_wait.c`): a spawn of a `dedicatedThread` function is
-  never a pool task (`may_wait_spawn_on_pool` answers false for it first), and
-  what only such a function reaches gets no resumable twin (`c_twins_plan`): a
-  wait there blocks its own thread, which is what that thread is for.
-  `rae build --report-waits` lists each `dedicatedThread` spawn as "thread
-  (dedicatedThread)" instead of "thread (it may wait)".
-- **mainThread** (`realtime_check.c off_main_reason`): it is already a spawned
-  function, so it is refused when it reaches a main-thread call; the reason
-  reads "runs on its own thread (dedicatedThread, spawned at ...)".
-- **realtime**: unchanged. The loop is not `realtime`; the function it calls per
-  round is, and is checked as a root.
+- **may-wait** (`may_wait.c`): a `spawn thread` is never a pool task
+  (`may_wait_spawn_on_pool` is not asked for it), and what only such spawns
+  reach gets no resumable twin (`c_twins_plan`): a wait there blocks its own
+  thread, which is what that thread is for. `rae build --report-waits` lists
+  each as "thread (spawn thread)" instead of "thread (it may wait)".
+- **mainThread** (`realtime_check.c off_main_reason`): the target of a
+  `spawn thread` is a spawned function as before; the reason reads "runs on
+  its own thread (spawn thread at ...)".
+- **realtime**: unchanged. The loop is not `realtime` (it waits between
+  rounds); the function it calls per round is, and is checked as a root.
 
-Migration: `packages/audio`'s `butlerThread` and `audioRenderThread` get the
-mark, and `rae_audio_thread_set_realtime` is replaced by `promoteToRealtime`
-(an audio release). No other spawn in `lib/`, `packages/` or `examples/` is a
-loop that runs until shutdown (the 20 spawns there are the audio ones and
-work items such as the raytracers' tiles), so nothing else changes. A later
-warning for a spawned function that loops on a condition and waits, without
-the mark, is possible but not proposed.
+Migration: `packages/audio`'s two loops are spawned with `spawn thread`, and
+`rae_audio_thread_set_realtime` is replaced by `promoteToRealtime` (an audio
+release). None of the other 20 spawns in `lib/`, `packages/` or `examples/`
+is a loop that runs until shutdown (the raytracers' tiles and similar work
+items), so nothing else changes.
 
 ### 6.7 `Channel(T)` stays off the real-time thread
 
@@ -949,13 +959,14 @@ steps that need them.
   needs no mark. 88 externs marked; the warn-only count over the tree found
   nothing to refuse (§4.3.6).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
-  the may-wait rule (§6.6). **Proposed 2026-11-12 (§6.6.1), waiting for a
-  decision:** a function modifier `dedicatedThread` (every `spawn` of it is a
-  new OS thread, never a pool task; a direct call is an error; not together
-  with `realtime` or `mainThread`), and the priority as `lib/Realtime` calls
-  (`promoteToRealtime(periodNanoseconds:, computeNanoseconds:)`: Mach
-  time-constraint, MMCSS, SCHED_FIFO then rtkit, Android's urgent-audio nice
-  value); the workgroup join comes with R9.
+  the may-wait rule (§6.6). **Decided 2026-11-13 (§6.6.1):** `spawn thread
+  f(...)` at the call (not a mark on the function, which first was proposed
+  as `dedicatedThread`): that spawn is always a new OS thread, and `f` stays
+  an ordinary function others can call or spawn on the pool. Priority as
+  `lib/Realtime` calls (`promoteToRealtime(periodNanoseconds:,
+  computeNanoseconds:)`: Mach time-constraint, MMCSS, SCHED_FIFO then rtkit,
+  Android's urgent-audio priority), allowed only on a `spawn thread`'s
+  thread; the workgroup join comes with R9.
 - **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:
   no rule for now**; `restrict` only where the compiler proves it from every
   call site, and only if a measurement shows it pays. The proposal was: refuse a call that
@@ -966,10 +977,11 @@ steps that need them.
   measured first).
 - **R9 — the real-time team's base** (§6.6): `parallel-stages-design.md`
   chose Option C for `parallelLoop` and did not recommend Option A (unchecked
-  atomics and barriers for every program). A team for one `realtime` function
-  may still want A's shape (a leader publishing stages, helpers spinning,
-  then waiting on a `Signal`) inside a library type rather than a language
-  construct. To decide before building it.
+  atomics and barriers for every program). **Decided 2026-11-13: a library
+  type in `lib/`** (a leader publishing stages, helpers on `spawn thread`
+  spinning briefly, then waiting on a `Signal`, a completion count in an
+  `Atomic`), not a language construct; the measured spin/wait cost goes here
+  when it is built.
 - **R7 — the RTSan gate's compiler. Decided 2026-11-11:** Homebrew LLVM
   (`brew install llvm`), a test dependency on macOS installed by `make setup`,
   like `naga`; the gate SKIPs with a message when it is missing.
