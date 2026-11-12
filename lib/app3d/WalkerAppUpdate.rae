@@ -764,6 +764,13 @@ func updateWalkerApp(app: mod WalkerApp) {
       transforms: app.world.transforms
     )
   }
+  # The forest's trees in tiles round the camera's focus and the walker (app3d/PropTiles)
+  let forestChanged: Bool = streamWalkerForest(
+    terrainSystem: app.terrainSystem
+    allocator: app.world.allocator
+    focus: app.cameraSystem.camera.target
+    walker: followPos
+  )
   # The wide forest is far bigger than one physics ground: it follows the
   # walker, and the trunk pool stands on the trees nearest it
   if app.settings.land is WalkerLand.forest {
@@ -778,7 +785,7 @@ func updateWalkerApp(app: mod WalkerApp) {
       transforms: app.world.transforms
       forest: app.terrainSystem.forest.field
       focus: feet
-      force: false
+      force: forestChanged
     )
   }
 
