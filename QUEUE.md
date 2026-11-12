@@ -22,9 +22,12 @@ outcome, in the same commit as the work: `[x]` done, `[postponed]`, or
 File a new task as `- [ ] the task text`; SUMU mints the `#id`, so never
 guess one. Line order is the queue order.
 
-The difficulty picks the model: `{difficulty:4}` is Opus 5.5, `{difficulty:5}` is
-Astra. Those are the defaults (2026-10-26); the reference-tree
-tasks are difficulty 4.
+A task may name the model it runs on with a group near the head of its text,
+after any leading `[tag]`: `- [ ] [a tag] {model:gpt-6-astra} the task text`.
+The model picks the agent too (`gpt-6-astra`, `gpt-5.6-sol` run on Codex;
+`claude-opus-5-5`, `claude-fable-5-1` and the like on Claude); a task with no
+group runs on the chat's current model. `{difficulty:N}` is no longer read
+(since 2026-11-02): do not write it; old lines keep it until SUMU rewrites them.
 Split large tasks without lowering their model requirement. Completed task
 levels remain historical records; a checked task is not proof of visual approval.
 
