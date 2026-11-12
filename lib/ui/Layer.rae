@@ -10,6 +10,12 @@ open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
 
+# The layer dialogs and popovers go on (ui/dialogSystem, app3d/ModeMenu's menu):
+# over the page content, the dock and the back button, under the debug layer
+const layerDialogId: String = "dialog"
+
+const layerDialogOrder: Int = 300
+
 # Layer-root entity factory. Creates a parentless entity with a
 # `LayerRoot { id, order }` component — no Rect / Layout / Sprite,
 # just the label that `setLayerById` / `renderSystem` look up. Apps
@@ -93,9 +99,62 @@ func entityLayerOrder(world: view UiWorld, entityId: view EntityId) pub ret Int 
   ret 0
 }
 
-# Collect every parentless root with a WorldTransform2D, in ascending
-# Layer order. Used by both `renderSystem` (painter's algorithm) and
-# the input hit-test (which walks the result in reverse).
+# A raised node: one inside a scene (it has a parent) with a LayerRef of its
+# own, such as a menu or a popover that must show over every other root (the
+# game's HUD scenes mounted after the scene that holds it). It is laid out and
+# placed under its parent as before, but painted and hit-tested with its
+# layer's roots (collectPaintableRoots), not inside its parent's subtree
+# (renderSystem and the hit test skip it there). Its parent's clip does not
+# cut it. Raise one with `raiseNodeToLayer`.
+func isRaisedNode(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) pub ret Bool {
+  ret componentHas(this: world.layerRefs, entityId: entityId) and componentHas(
+    this: uiSystems.hierarchy.parents
+    entityId: entityId
+  )
+}
+
+# Is a raised node shown? Painted and hit alone, it takes its ancestors'
+# visibility from the transform pass (an inactive ancestor hides it)
+func raisedNodeShown(uiSystems: view UiSystems, entityId: view EntityId) pub ret Bool {
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: entityId) is false {
+    ret true
+  }
+  ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: entityId).visible
+}
+
+# Put the node `entityId` (inside a scene) on the layer `layerId`, made with
+# `order` if the app has none: it paints over every root of a lower layer, and
+# takes taps first. A no-op when it is there already.
+func raiseNodeToLayer(
+  world: mod UiWorld
+  entityId: view EntityId
+  layerId: view String
+  order: view Int
+) pub {
+  if isNone(this: entityId) {
+    ret
+  }
+  var layer: EntityId = findLayerEntity(world: world, id: layerId)
+  if isNone(this: layer) {
+    layer = createLayerEntity(world: world, id: "{layerId}", order: order)
+  }
+  if componentHas(this: world.layerRefs, entityId: entityId) and componentView(
+    this: world.layerRefs
+    entityId: entityId
+  ).layer is layer {
+    ret
+  }
+  componentSet(this: world.layerRefs, entityId: entityId, data: LayerRef { layer: layer })
+}
+
+# Collect every parentless root with a WorldTransform2D, and every raised node
+# (isRaisedNode), in ascending Layer order. Used by both `renderSystem`
+# (painter's algorithm) and the input hit-test (which walks the result in
+# reverse).
 func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub ret List(EntityId) {
   unsafe {
     var roots: List(EntityId) = List.create(EntityId, cap: 16)
@@ -110,6 +169,15 @@ func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub r
         }
       }
       i = i + 1
+    }
+    loop var r: Int = 0, r < componentCount(this: world.layerRefs), ++r {
+      let raised: EntityId = componentEntityAt(this: world.layerRefs, i: r)
+      if isRaisedNode(world: world, uiSystems: uiSystems, entityId: raised) and componentHas(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: raised
+      ) {
+        roots.add(value: raised)
+      }
     }
     let m: Int = roots.length
     var outer: Int = 0

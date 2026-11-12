@@ -50,10 +50,6 @@ open ecs/Query
 open ecs/Event
 open ecs/hierarchySystem/HierarchySystem
 
-const dialogLayerId: String = "dialog"
-
-const dialogLayerOrder: Int = 300
-
 # The scrim's dimming, black at this opacity (0..255)
 const dialogScrimAlpha: Int = 140
 
@@ -79,9 +75,9 @@ func presentMountedPage(
   pageId: view String
   overrides: view List(SceneOverride)
 ) ret EntityId {
-  var layer: EntityId = findLayerEntity(world: world, id: dialogLayerId)
+  var layer: EntityId = findLayerEntity(world: world, id: layerDialogId)
   if isNone(this: layer) {
-    layer = createLayerEntity(world: world, id: "{dialogLayerId}", order: dialogLayerOrder)
+    layer = createLayerEntity(world: world, id: "{layerDialogId}", order: layerDialogOrder)
   }
   var presentation: PagePresentation = PagePresentation.page
   if componentHas(this: world.pageRoots, entityId: pageRoot) {

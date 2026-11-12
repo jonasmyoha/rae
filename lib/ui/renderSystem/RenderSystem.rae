@@ -670,10 +670,11 @@ func paintSubtreeG(
       var i: Int = 0
       loop i < n {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        # a raised node (ui/Layer isRaisedNode) is painted with its layer's roots instead
         if subtreeHoverPaintRank(world: world, entityId: cid) is pass and componentHas(
           this: uiSystems.animation.sharedNodes
           entityId: cid
-        ) is false {
+        ) is false and isRaisedNode(world: world, uiSystems: uiSystems, entityId: cid) is false {
           paintSubtreeG(
             world: world
             uiSystems: uiSystems
@@ -709,7 +710,11 @@ func gpu2dLayerRange(
     var p: Int = 0
     loop p < m {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
-      if componentHas(this: world.layerRoots, entityId: root) is false {
+      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+        uiSystems: uiSystems
+        entityId: root
+      )
+      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
         let ord: Int = entityLayerOrder(world: world, entityId: root)
         if ord >= minOrder {
           if ord < maxOrder {

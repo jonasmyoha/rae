@@ -1,0 +1,129 @@
+# A node inside a scene raised onto a layer (ui/Layer raiseNodeToLayer), headless:
+#   A. two scenes mounted one after the other, both on the content layer: the
+#      later one's button covers the first one's menu, so a tap there lands on
+#      the later one (it paints over it);
+#   B. the menu raised onto the dialog layer: it paints after every root, and
+#      a tap there lands on it, though it stays laid out inside its scene;
+#   C. its scene hidden (inactive): the raised menu is hidden with it, and the
+#      tap lands on the later scene again.
+import ui/Components
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+func hudScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Hud\",\"nodes\":\{\"Hud\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Menu\"]\},\"Menu\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\},\"OnClick\":\{\"actionId\":\"menu.item\",\"label\":\"Item\"\}\}\}\}"
+}
+
+func laterScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Later\",\"nodes\":\{\"Later\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Cover\"]\},\"Cover\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"OnClick\":\{\"actionId\":\"cover\",\"label\":\"Cover\"\}\}\}\}"
+}
+
+func layOut(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameOf(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Hud", "Menu", "Later", "Cover" } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "nothing"
+}
+
+func order(world: view UiWorld, uiSystems: view UiSystems) ret String {
+  var text: String = ""
+  loop let root: view EntityId in collectPaintableRoots(world: world, uiSystems: uiSystems) {
+    if componentHas(this: world.layerRoots, entityId: root) is false {
+      text = "{text} {nameOf(world: world, entityId: root)}"
+    }
+  }
+  ret text
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let hud: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: hudScene())
+  )
+  let later: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: laterScene())
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  # A
+  log("A. painted:{order(world: world, uiSystems: uiSystems)}; a tap on the menu lands on {nameOf(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 50.0
+      y: 50.0
+    )
+  )}")
+  # B
+  let menu: EntityId = nodeOf(world: world, nodeId: "Menu")
+  raiseNodeToLayer(
+    world: world
+    entityId: menu
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
+  raiseNodeToLayer(
+    world: world
+    entityId: menu
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
+  layOut(world: world, uiSystems: uiSystems)
+  log("B. raised: {isRaisedNode(world: world, uiSystems: uiSystems, entityId: menu)}, painted:{order(
+    world: world
+    uiSystems: uiSystems
+  )}; a tap there lands on {nameOf(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 50.0
+      y: 50.0
+    )
+  )}; the menu still at {componentView(this: uiSystems.transform2d.worldTransforms, entityId: menu).position.x.toInt()},{componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: menu
+  ).position.y.toInt()}")
+  # C
+  componentSet(this: world.actives, entityId: hud, data: Active { value: false })
+  layOut(world: world, uiSystems: uiSystems)
+  log("C. its scene hidden: the menu shown {raisedNodeShown(uiSystems: uiSystems, entityId: menu)}; a tap there lands on {nameOf(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 50.0
+      y: 50.0
+    )
+  )}")
+  log("later root kept: {isNone(this: later) is false}")
+}
