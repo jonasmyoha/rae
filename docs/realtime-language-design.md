@@ -5,7 +5,7 @@ approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
 2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
 function with optional marks on helpers (R3), `cExport("cName")` (R4), and
 Homebrew LLVM for RealtimeSanitizer (R7). Decided and built 2026-11-12:
-`mainThread` (R5, §4.3). R6 waits.
+`mainThread` (R5, §4.3). R6 is proposed (§6.6.1, 2026-11-12).
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -760,8 +760,8 @@ or browser build includes them.
   waiting tasks off the pool). A shim then raises its priority
   (`thread_policy_set` time-constraint on Apple, MMCSS on Windows, rtkit on
   Linux) and joins the device's audio workgroup on Apple. No language change,
-  but it relies on a rule of the scheduler that is not visible in the code. An
-  explicit form (§9 R6) would be clearer later.
+  but it relies on a rule of the scheduler that is not visible in the code. The
+  explicit form is proposed in §6.6.1 (§9 R6).
 - **Parallel work inside one block** (the DAW's graph on several cores): the
   worker pool behind `parallelLoop` is not real-time, and its threads are shared
   with everything else. Needed: a separate **real-time team** of threads, joined
@@ -769,6 +769,104 @@ or browser build includes them.
   within the same block, spinning briefly, then waiting on a `Signal`.
   `parallel-stages-design.md`'s team construct (Option A) is the natural base;
   this is the last feature needed and the largest.
+
+#### 6.6.1 Proposal: `dedicatedThread`, and the priority in `lib/Realtime` (R6, 2026-11-12)
+
+**Nothing built; waiting for a decision.**
+
+What exists today:
+- **Which thread.** `packages/audio` spawns `butlerThread` and (stage A)
+  `audioRenderThread`. Each loops until shutdown and sleeps on a `Signal`
+  between rounds. They get their own OS thread only because the may-wait
+  analysis sees `Signal.wait` (C not marked as pool-safe), so
+  `may_wait_spawn_on_pool` says no. Nothing on the page says "this is a
+  thread". If a later change made the loop poll instead of wait, the same
+  `spawn` would quietly move onto the worker pool, and a loop that never ends
+  would hold one pool worker forever.
+- **What priority.** `audioRenderThread` calls the package's own shim
+  `rae_audio_thread_set_realtime(periodNs:, computeNs:)`
+  (`thread_policy_set` with `THREAD_TIME_CONSTRAINT_POLICY` on Apple, nothing
+  elsewhere). A video decoder or a MIDI clock would need the same shim and
+  would copy it.
+- **Workgroup.** Nothing joins the audio device's workgroup yet; only the
+  real-time team (§6.6, R9) needs it.
+
+Proposal, in three parts:
+
+1. **A modifier `dedicatedThread` on the FUNCTION** (the position of
+   `realtime` and `mainThread`):
+
+   ```rae
+   func butlerThread(butler: own Butler, running: own Atomic(Bool)) ret Int dedicatedThread {
+     ...
+   }
+   ```
+
+   - Every `spawn` of it starts a new OS thread, never a pool task, whatever
+     its body does. It is joined like any `Task` (its `get`, or the end of the
+     owner's scope).
+   - It is the function's property and not the call's, because "this loops
+     until shutdown" is a fact of the body, and the reader of the body is the
+     one who needs to see it. No new `spawn` syntax.
+   - Calling it directly, not through `spawn`, is a compile error ("a
+     `dedicatedThread` function runs on its own thread: start it with
+     `spawn`"). That keeps a loop that never ends off the main thread.
+   - Together with `mainThread` on one function: an error (the same check as
+     `realtime` with `mainThread`). Together with `realtime`: an error too. The
+     loop itself waits between rounds (its `Signal.wait`), which `realtime`
+     forbids; the real-time part is the function it calls once per round, which
+     is marked `realtime` and checked as today.
+
+2. **The priority is a `lib/Realtime` call**, made at the start of the
+   thread, because the period and the budget are run-time values (the sample
+   rate and the buffer size):
+
+   ```rae
+   let promoted: Bool = promoteToRealtime(periodNanoseconds: periodNs, computeNanoseconds: periodNs / 2)
+   ...
+   demoteFromRealtime()   # at the end, where the platform needs it
+   ```
+
+   One C call per platform, behind `when` in `lib/Realtime.rae`:
+
+   | platform | call | notes |
+   |---|---|---|
+   | macOS, iOS | `thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY)` with period, computation, constraint in Mach ticks | what the audio shim does today; it moves here |
+   | Windows | `AvSetMmThreadCharacteristicsW(L"Pro Audio")`, `AvRevertMmThreadCharacteristics` at the end | MMCSS; links `Avrt` |
+   | Linux | `pthread_setschedparam(SCHED_FIFO)`; if that fails (no `RLIMIT_RTPRIO`), rtkit over D-Bus (`org.freedesktop.RealtimeKit1.MakeThreadRealtime`) | the fallback order is Rae; rtkit needs D-Bus, so it waits for the Linux audio step |
+   | Android | `setpriority` to `-19` (`THREAD_PRIORITY_URGENT_AUDIO`) | an app cannot get `SCHED_FIFO`; AAudio's own callback thread already is; returns false |
+   | browser | none | the build has no threads; returns false |
+
+   It answers whether the thread got real-time priority; the caller logs it
+   and carries on, as the audio shim does today.
+
+3. **Joining the device's workgroup** (Apple's `os_workgroup`, macOS 11 and
+   iOS 14) is a `lib/Realtime` call too, `joinWorkgroup(workgroup:)` /
+   `leaveWorkgroup(...)` around the thread's loop, with the workgroup handle
+   from the audio package (`kAudioDevicePropertyIOThreadOSWorkgroup` on macOS,
+   `kAudioOutputUnitProperty_OSWorkgroup` on iOS). It is needed only by the
+   real-time team (R9), so it is built with that task, not here.
+
+How it shows in the analyses:
+- **may-wait** (`may_wait.c`): a spawn of a `dedicatedThread` function is
+  never a pool task (`may_wait_spawn_on_pool` answers false for it first), and
+  what only such a function reaches gets no resumable twin (`c_twins_plan`): a
+  wait there blocks its own thread, which is what that thread is for.
+  `rae build --report-waits` lists each `dedicatedThread` spawn as "thread
+  (dedicatedThread)" instead of "thread (it may wait)".
+- **mainThread** (`realtime_check.c off_main_reason`): it is already a spawned
+  function, so it is refused when it reaches a main-thread call; the reason
+  reads "runs on its own thread (dedicatedThread, spawned at ...)".
+- **realtime**: unchanged. The loop is not `realtime`; the function it calls per
+  round is, and is checked as a root.
+
+Migration: `packages/audio`'s `butlerThread` and `audioRenderThread` get the
+mark, and `rae_audio_thread_set_realtime` is replaced by `promoteToRealtime`
+(an audio release). No other spawn in `lib/`, `packages/` or `examples/` is a
+loop that runs until shutdown (the 20 spawns there are the audio ones and
+work items such as the raytracers' tiles), so nothing else changes. A later
+warning for a spawned function that loops on a condition and waits, without
+the mark, is possible but not proposed.
 
 ### 6.7 `Channel(T)` stays off the real-time thread
 
@@ -851,7 +949,13 @@ steps that need them.
   needs no mark. 88 externs marked; the warn-only count over the tree found
   nothing to refuse (§4.3.6).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
-  the may-wait rule (§6.6).
+  the may-wait rule (§6.6). **Proposed 2026-11-12 (§6.6.1), waiting for a
+  decision:** a function modifier `dedicatedThread` (every `spawn` of it is a
+  new OS thread, never a pool task; a direct call is an error; not together
+  with `realtime` or `mainThread`), and the priority as `lib/Realtime` calls
+  (`promoteToRealtime(periodNanoseconds:, computeNanoseconds:)`: Mach
+  time-constraint, MMCSS, SCHED_FIFO then rtkit, Android's urgent-audio nice
+  value); the workgroup join comes with R9.
 - **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:
   no rule for now**; `restrict` only where the compiler proves it from every
   call site, and only if a measurement shows it pays. The proposal was: refuse a call that
