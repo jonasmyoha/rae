@@ -308,6 +308,62 @@ the List data pointers of a counted loop over arguments the rule proves
 apart. Buffers stay out (they are the `unsafe` handle layer), unless a
 program states it with a future, explicit, checked-at-run-time promise.
 
+**Measured (2026-11-12): what the rule would meet.** The code generator has a
+measuring mode, `RAE_EXCLUSIVE_ACCESS=warn` (off by default: it changes
+nothing), that warns at every call passing one place as `mod` together with an
+overlapping `mod` or `view` argument; `compiler/tools/exclusive-access-count.sh`
+runs it over every example, test case and check (1226 programs). A place here
+is a name and a chain of fields (`world`, `world.rows`); a call result, a list
+element or a literal is not a place and is not compared. Each warning is sorted
+by what the `view` side is:
+
+| kind | what | count |
+|---|---|---|
+| copy | the `view` is a number or a `Bool`: the generated C passes it by value (`int64_t a`), so the callee holds a copy from the call; harmless, in C and in Rae's meaning | 38 (lib 23, examples 15) |
+| handle | a `Buffer`, `Ptr`, `Atomic`, ring or `Signal`: a handle, not a place | 0 |
+| place | a real overlap through pointers (a struct, a list, an enum, a String) | 48 warnings, 46 call sites: lib 30, examples 8, tests 10, packages 1 (physicsScenes) |
+
+The 46 place sites, by shape:
+
+- **42: a whole as `mod` and its part as `view`**, almost all of them an id or
+  a setting read out of the struct that is changed: `addBox(world: world,
+  entityId: world.platformId)`, `saveDocumentTo(app: app, path:
+  app.document.path)`, `chance(network: network, percent:
+  network.settings.lossPercent)`, `channelRetarget(channel: track.x, target:
+  track.x.target)`.
+- **2: one place as `mod` and `view`**: `assignString(destination: keep,
+  source: keep)` (fixture 907, on purpose).
+- **4: a whole and its part, both as `mod`**: `uiUpdate(uiSystems:
+  app.inputSystem.uiSystems, inputSystem: app.inputSystem)` (lib/app3d twice),
+  `frameUpdateSystem(app: run.app, uiSystems: run.app.uiSystems)` (106),
+  `switchSystem(world: world, actions: world.uiActions)` (fixture 1354).
+
+**The rule (the scope proposed).** At a call, a `mod` argument may not overlap
+another `mod` or `view` argument: the same place, or a whole and a field
+reached through it. Exempt: a `view` of a number or a `Bool` (a copy); handles
+(`Buffer`, `Ptr`, `Atomic`, rings, `Signal`), whose sharing is the point and
+which `unsafe` code manages; arguments that are not places (call results,
+elements, literals: a list element as `mod` goes through `modAt` and its
+binding, which the held-borrow rules of stress 11 and 12 already cover).
+`unsafe { }` does not lift it (it is about meaning, not memory safety). Two
+ways to meet the 44 mod-and-view sites:
+
+- **A: refuse them all.** Each call is rewritten to read the part into a local
+  first (`let id: EntityId = world.platformId` then `addBox(world: world,
+  entityId: id)`) or to pass narrower parts. 46 edits (lib 30, examples 8,
+  tests 10 with their expectations, the physicsScenes package and a release),
+  and every program from then on.
+- **B: refuse `mod` + `mod` (4 sites), and give an overlapping `view` a copy
+  taken at the call.** The compiler copies the view argument when it overlaps
+  a `mod` one (known at compile time, as above), so the callee sees the value
+  from the call, the way a `view Int` already behaves; no source changes for
+  the 44. The cost is a copy at those calls: small for an id or a setting, a
+  deep copy for a list or a large struct (`run.app.uiSystems` in 106 is
+  `mod` + `mod`, refused, not copied).
+
+Either makes `restrict` on the arguments' list data sound for the loop
+step that follows.
+
 ---
 
 ## 5. Checking the C that Rae links
