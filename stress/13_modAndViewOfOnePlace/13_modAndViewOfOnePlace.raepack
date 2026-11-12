@@ -1,0 +1,35 @@
+pack ModAndViewOfOnePlace {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "One place as mod and as view in one call"
+  description: "The same list passed to one call as mod and as view, and as two mods; the function changes it through one and reads it through the other."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      stdout: "the view read 1 items, then 101\none list as two mods: 2 items"
+    }
+    elsewhere: {
+      python: "runs; both names are the same list, so the read sees the change (no promise was made)"
+      javascript: "runs; the same array behind both, the read sees the change"
+      java: "runs; the same object behind both"
+      go: "runs; the same slice header copy, the read may or may not see an append (capacity decides)"
+      rust: "compile error: cannot borrow `numbers` as immutable because it is also borrowed as mutable"
+      c: "runs; with `restrict` on the parameters it is undefined behavior"
+    }
+  }
+}
