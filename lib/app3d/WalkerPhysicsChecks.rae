@@ -23,6 +23,7 @@ open app3d/CharacterController
 open app3d/WalkerPhysics
 open app3d/PropBodyPool
 open app3d/PropField
+open app3d/PropFieldQuery
 open box3d/ecs/Physics
 open box3d/ecs/PhysicsTypes
 open box3d/ecs/PhysicsComponents
@@ -485,8 +486,6 @@ func poolFollows(
   forest: view PropField
   heroFeet: view Vec3
 ) ret Bool {
-  var indices: List(Int) = List.create(Int, cap: 256)
-  var distances: List(Float) = List.create(Float, cap: 256)
   var follows: Bool = false
   loop var attempt: Int = 0, attempt < 8, ++attempt {
     let reach: Float = 60.0 * (1 + attempt / 4).toFloat()
@@ -496,26 +495,21 @@ func poolFollows(
       y: heroFeet.y + Math.sin(x: turn) * reach
       z: heroFeet.z
     )
-    treesNear(
-      forest: forest
+    # the forest's trees near the spot, its own and every group's (a forest in tiles)
+    let near: List(PropNear) = propsNear(
+      field: forest
       x: spot.x
       y: spot.y
-      indices: indices
-      distances: distances
+      reach: trunkPoolReach
     )
-    if indices.length > 0 {
+    if near.length > 0 {
       var nearest: Int = 0
-      loop var i: Int = 1, i < distances.length, ++i {
-        if distances.copyAtFallback(index: i, fallback: 0.0) < distances.copyAtFallback(
-          index: nearest
-          fallback: 0.0
-        ) {
+      loop var i: Int = 1, i < near.length, ++i {
+        if near.copyAtDefault(index: i).distance < near.copyAtDefault(index: nearest).distance {
           nearest = i
         }
       }
-      let tree: Vec3 = forest.placements.copyAtDefault(
-        index: indices.copyAtFallback(index: nearest, fallback: 0)
-      ).position
+      let tree: Vec3 = near.copyAtDefault(index: nearest).placement.position
       let placed: Bool = updateTrunkPool(
         physicsSystem: physicsSystem
         transforms: transforms

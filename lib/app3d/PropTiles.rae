@@ -1,0 +1,156 @@
+# app3d/PropTiles — a PropField's props streamed in tiles (docs/open-world-tiles.md (c)): the
+# placements are sorted once into square tiles (app3d/TileStreaming's grid); only the tiles near
+# the centers are in the field, each tile one group in its slot (PropField setPropGroup when it
+# loads, clearPropGroup when it goes), one tile a frame, so the field's memory and its sort are the
+# slots', however many props the world has. The walkers' forests (app3d/WalkerTerrain) and a game's
+# own level use it the same way.
+#
+#   var tiles: PropTiles = createPropTiles(settings: grid, halfExtent: 1200.0, groupBase: 0)
+#   ...for every prop: addPropTilePlacement(tiles: tiles, placement: p)
+#   finishPropField(field: field)          (its own placements: none, or the always-there ones)
+#   let loaded: Int = fillPropTiles(...)    (every tile wanted at the start, at once)
+#   ...each frame: let changed: Bool = streamPropTiles(tiles:, field:, allocator:, centers:)
+#
+# A world's far billboards are made from every tile's props (propTilesPlacements), not the field's.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open app3d/PropField
+open app3d/TileStreaming
+
+type PropTiles {
+  streamer: TileStreamer
+  # The tiles from -span to span each way round the origin, row by row, each its props
+  span: Int
+  tiles: List(List(PropPlacement))
+  # How many tiles have loaded so far, and the field group of slot 0 (the field's groups below it
+  # are the app's own)
+  loads: Int = 0
+  groupBase: Int = 0
+}
+
+# The tiles over a world `halfExtent` m from the origin each way
+func createPropTiles(
+  settings: view TileGridSettings
+  halfExtent: view Float
+  groupBase: view Int
+) ret PropTiles {
+  let span: Int = (halfExtent / settings.tileSize).toInt() + 1
+  let side: Int = span * 2 + 1
+  var tiles: List(List(PropPlacement)) = List.create(List(PropPlacement), cap: side * side)
+  loop var i: Int = 0, i < side * side, ++i {
+    tiles.add(value: List.create(PropPlacement, cap: 0))
+  }
+  ret PropTiles {
+    streamer: createTileStreamer(settings: settings)
+    span: span
+    tiles: own tiles
+    groupBase: groupBase
+  }
+}
+
+# A tile's place in `tiles` (-1: past the world)
+func propTileIndex(tiles: view PropTiles, tile: view GridTile) ret Int {
+  if Math.abs(value: tile.x) > tiles.span or Math.abs(value: tile.y) > tiles.span {
+    ret -1
+  }
+  ret (tile.y + tiles.span) * (tiles.span * 2 + 1) + tile.x + tiles.span
+}
+
+# One prop into its tile (dropped past the world)
+func addPropTilePlacement(tiles: mod PropTiles, placement: view PropPlacement) {
+  let tile: GridTile = tileOfPoint(
+    settings: tiles.streamer.settings
+    x: placement.position.x
+    y: placement.position.y
+  )
+  if let held: mod List(PropPlacement) = tiles.tiles.modAt(
+    index: propTileIndex(tiles: tiles, tile: tile)
+  ) {
+    held.add(value: placement)
+  }
+}
+
+# Every tile's props, in the tiles' order (for far billboards of the whole world)
+func propTilesPlacements(tiles: view PropTiles) ret List(PropPlacement) {
+  var count: Int = 0
+  loop let held: view List(PropPlacement) in tiles.tiles {
+    count = count + held.length
+  }
+  var all: List(PropPlacement) = List.create(PropPlacement, cap: count)
+  loop let held: view List(PropPlacement) in tiles.tiles {
+    loop let placement: view PropPlacement in held {
+      all.add(value: placement)
+    }
+  }
+  ret all
+}
+
+# One frame round `centers`: a tile let go clears its slot's group, a tile loaded puts its props in
+# its slot's group. True when the field changed (a body pool near the props places again).
+func streamPropTiles(
+  tiles: mod PropTiles
+  field: mod PropField
+  allocator: mod EntityAllocator
+  centers: view List(TileCenter)
+) ret Bool {
+  streamTilesAround(streamer: tiles.streamer, allocator: allocator, centers: centers)
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(TileGone, this: tiles.streamer.gone), ++i {
+    clearPropGroup(
+      field: field
+      group: tiles.groupBase + eventAt(TileGone, this: tiles.streamer.gone, i: i).slot
+    )
+    changed = true
+  }
+  loop var i: Int = 0, i < eventCount(TileLoaded, this: tiles.streamer.loaded), ++i {
+    let loaded: TileLoaded = eventAt(TileLoaded, this: tiles.streamer.loaded, i: i)
+    let empty: List(PropPlacement) = {}
+    var props: List(PropPlacement) = empty
+    if let held: view List(PropPlacement) = tiles.tiles.viewAt(
+      index: propTileIndex(tiles: tiles, tile: loaded.tile)
+    ) {
+      props = held
+    }
+    setPropGroup(field: field, group: tiles.groupBase + loaded.slot, placements: props)
+    tiles.loads = tiles.loads + 1
+    changed = true
+  }
+  ret changed
+}
+
+# Every tile wanted round `centers` loaded now (at the start, so the first frame has its props):
+# how many loaded
+func fillPropTiles(
+  tiles: mod PropTiles
+  field: mod PropField
+  allocator: mod EntityAllocator
+  centers: view List(TileCenter)
+) ret Int {
+  let before: Int = tiles.loads
+  loop var step: Int = 0, step <= tiles.streamer.settings.slotCount, ++step {
+    let changed: Bool = streamPropTiles(
+      tiles: tiles
+      field: field
+      allocator: allocator
+      centers: centers
+    )
+    if not changed {
+      break
+    }
+  }
+  ret tiles.loads - before
+}
+
+# Is the tile at (x, y) loaded?
+func propTileLoaded(tiles: view PropTiles, x: view Float, y: view Float) ret Bool {
+  let wanted: GridTile = tileOfPoint(settings: tiles.streamer.settings, x: x, y: y)
+  loop let tile: view GridTile in streamedTiles(streamer: tiles.streamer) {
+    if sameTile(a: tile, b: wanted) {
+      ret true
+    }
+  }
+  ret false
+}

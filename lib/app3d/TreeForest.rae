@@ -206,13 +206,16 @@ func plantTreeForestBand(
 # billboards (in 64 m blocks) and the plan of the far canopy. The number of
 # blocks; nothing without far billboards.
 func addTreeForestFarTrees(forest: mod TreeForest) ret Int {
+  ret addTreeForestFarTreesOf(forest: forest, placements: forest.field.placements)
+}
+
+# The same from `placements` (a forest streamed in tiles: every tile's trees, app3d/PropTiles
+# propTilesPlacements, not only those loaded)
+func addTreeForestFarTreesOf(forest: mod TreeForest, placements: view List(PropPlacement)) ret Int {
   if forest.hasFar is false {
     ret 0
   }
-  var trees: List(FarSprite) = farSpritesOf(
-    field: forest.field
-    placements: forest.field.placements
-  )
+  var trees: List(FarSprite) = farSpritesOf(field: forest.field, placements: placements)
   planFarCanopy(canopy: forest.canopy, field: forest.field, trees: trees)
   ret addFarSpritesInCells(farSprites: forest.farTrees, sprites: trees, cellSize: 64.0)
 }

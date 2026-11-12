@@ -126,6 +126,13 @@ streamTiles is its one-center case; case 1399), and app3d/LeafRelease reads a fi
 with several centers on its host (its camera and every walker it runs or knows) in place of the
 two streamers above; its static colliders (rocks, buildings) stay for its whole level.
 
+**Built (step 8):** app3d/PropTiles, a PropField's props sorted once into tiles and streamed into
+its groups (createPropTiles, addPropTilePlacement, streamPropTiles, fillPropTiles, its far
+billboards from propTilesPlacements; case 1400). The walker examples' forests, bushes and rocks
+(136, 137, 143, WideForest and IslandForest) go through it round the camera and the walker, groups
+above the bushes' own; game proto2's level uses the same path. The trunk check reads the field's
+groups (propsNear).
+
 ## (e) Roads as meshes
 
 A road is a line (points, a width, shoulders), not a ground kind in texels:

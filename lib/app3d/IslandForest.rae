@@ -17,6 +17,7 @@ import Noise
 import Vec3
 import Quat
 open WorldBiome
+open app3d/PropTiles
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -126,8 +127,8 @@ func plantIslandForest(
     )
     let scale: Float = treeScaleAt(treeSet: terrainSystem.treeSet, species: species, number: number)
     let yaw: Float = Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
-    addPropPlacement(
-      field: terrainSystem.forest.field
+    addPropTilePlacement(
+      tiles: terrainSystem.forestTiles
       placement: { kind: species, position: position, yaw: yaw, scale: scale }
     )
     let treeEntityId: EntityId = spawnProp(
@@ -151,5 +152,11 @@ func plantIslandForest(
     prop.active = true
   }
   finishPropField(field: terrainSystem.forest.field)
+  let loaded: Int = fillWalkerForest(
+    terrainSystem: terrainSystem
+    allocator: allocator
+    x: spawnX
+    y: spawnY
+  )
   ret planted.length
 }

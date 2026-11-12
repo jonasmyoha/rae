@@ -1,0 +1,36 @@
+# A field's props in tiles (lib/app3d/PropTiles): props sorted into the tiles they stand in (a
+# prop past the world dropped), the tiles' places in the list, and every tile's props together for
+# far billboards of the whole world.
+import Vec3
+open app3d/PropField
+open app3d/PropTiles
+open app3d/TileStreaming
+
+func prop(x: view Float, y: view Float) ret PropPlacement {
+  ret PropPlacement { kind: 0, position: Vec3.create(x: x, y: y, z: 0.0), yaw: 0.0, scale: 1.0 }
+}
+
+func main() {
+  let grid: TileGridSettings = {
+    tileSize: 100.0
+    loadDistance: 150.0
+    unloadDistance: 200.0
+    slotCount: 16
+  }
+  var tiles: PropTiles = createPropTiles(settings: grid, halfExtent: 250.0, groupBase: 1)
+  log("span {tiles.span}: {tiles.tiles.length} tiles, groups from {tiles.groupBase}")
+  addPropTilePlacement(tiles: tiles, placement: prop(x: 10.0, y: 10.0))
+  addPropTilePlacement(tiles: tiles, placement: prop(x: 40.0, y: -30.0))
+  addPropTilePlacement(tiles: tiles, placement: prop(x: 160.0, y: 10.0))
+  addPropTilePlacement(tiles: tiles, placement: prop(x: -240.0, y: 230.0))
+  addPropTilePlacement(tiles: tiles, placement: prop(x: 900.0, y: 0.0))
+  let middle: Int = propTileIndex(tiles: tiles, tile: GridTile { x: 0, y: 0 })
+  let east: Int = propTileIndex(tiles: tiles, tile: GridTile { x: 2, y: 0 })
+  log(
+    "the middle tile holds {tiles.tiles.copyAtDefault(index: middle).length}, the one east of it {tiles.tiles.copyAtDefault(
+      index: east
+    ).length}"
+  )
+  log("past the world: index {propTileIndex(tiles: tiles, tile: GridTile { x: 9, y: 0 })}")
+  log("every tile's props: {propTilesPlacements(tiles: tiles).length} (one dropped past the world)")
+}

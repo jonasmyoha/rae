@@ -19,6 +19,9 @@ import Noise
 import Vec3
 open Scene3d
 open WorldBiome
+open app3d/PropTiles
+open ecs/Entity
+open ecs/World
 open treeSets/TreeSet
 open app3d/PropField
 open app3d/WalkerTerrain
@@ -81,6 +84,7 @@ func wideForestDensity(x: view Float, y: view Float) ret Float {
 # Plant the forest around a spawn at (spawnX, spawnY). The number of trees.
 func plantWideForest(
   terrainSystem: mod WalkerTerrain
+  allocator: mod EntityAllocator
   spawnX: view Float
   spawnY: view Float
 ) ret Int {
@@ -140,8 +144,8 @@ func plantWideForest(
         y: y
         number: planted
       )
-      addPropPlacement(
-        field: terrainSystem.forest.field
+      addPropTilePlacement(
+        tiles: terrainSystem.forestTiles
         placement: {
           kind: species
           position: Vec3.create(
@@ -157,6 +161,12 @@ func plantWideForest(
     }
   }
   finishPropField(field: terrainSystem.forest.field)
+  let loaded: Int = fillWalkerForest(
+    terrainSystem: terrainSystem
+    allocator: allocator
+    x: spawnX
+    y: spawnY
+  )
   fillFarTrees(terrainSystem: terrainSystem)
   ret planted
 }

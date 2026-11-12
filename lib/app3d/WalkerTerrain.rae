@@ -25,6 +25,7 @@
 import RendererDeferred
 import RendererDeferredShadow
 import Math
+import Target
 import Noise
 import Vec3
 import Quat
@@ -51,6 +52,8 @@ open app3d/AbTest
 open app3d/PropField
 open app3d/PropFieldFrame
 open app3d/TreeForest
+open app3d/PropTiles
+open app3d/TileStreaming
 open app3d/GroundPalette
 open app3d/SnowField
 open app3d/TerrainTiles
@@ -182,6 +185,9 @@ type WalkerTerrain {
   # billboards, far billboards standing on the far ground and past those
   # the far canopy (when the forest has a farReach)
   forest: TreeForest
+  # The forest's trees in tiles (app3d/PropTiles): only the tiles near the camera and the walker
+  # are in forest.field, each a group after walkerBushGroup (streamWalkerForest each frame)
+  forestTiles: PropTiles
   farGround: TerrainTiles
   hasFarGround: Bool
   # The bush's three leaf tones
@@ -663,9 +669,65 @@ func fillFarTrees(terrainSystem: mod WalkerTerrain) {
   if terrainSystem.hasFarGround is false {
     ret
   }
-  let added: Int = addTreeForestFarTrees(forest: terrainSystem.forest)
+  let trees: List(PropPlacement) = propTilesPlacements(tiles: terrainSystem.forestTiles)
+  let added: Int = addTreeForestFarTreesOf(forest: terrainSystem.forest, placements: trees)
   log(
-    "[terrain] far trees: {terrainSystem.forest.field.placements.length} trees in {added} blocks, to {terrainSystem.forest.farTrees.settings.farDistance} m"
+    "[terrain] far trees: {trees.length} trees in {added} blocks, to {terrainSystem.forest.farTrees.settings.farDistance} m"
+  )
+}
+
+# The forest's tiles: 144 m, loaded within 400 m and let go past 480 m, 64 at most (300 m, 360 m
+# and 40 on a phone), as a game's world in tiles (docs/open-world-tiles.md (a))
+func walkerForestTileSettings() ret TileGridSettings {
+  if Target.isMobileOs {
+    ret TileGridSettings {
+      tileSize: 144.0
+      loadDistance: 300.0
+      unloadDistance: 360.0
+      slotCount: 40
+    }
+  }
+  ret TileGridSettings {
+    tileSize: 144.0
+    loadDistance: 400.0
+    unloadDistance: 480.0
+    slotCount: 64
+  }
+}
+
+# The forest's tiles round the camera's focus and the walker, one tile a frame; true when the
+# forest changed (the trunk pool places again)
+func streamWalkerForest(
+  terrainSystem: mod WalkerTerrain
+  allocator: mod EntityAllocator
+  focus: view Vec3
+  walker: view Vec3
+) ret Bool {
+  var centers: List(TileCenter) = {
+    TileCenter { x: focus.x, y: focus.y }
+    TileCenter { x: walker.x, y: walker.y }
+  }
+  ret streamPropTiles(
+    tiles: terrainSystem.forestTiles
+    field: terrainSystem.forest.field
+    allocator: allocator
+    centers: centers
+  )
+}
+
+# Every tile round (x, y) loaded at once, after planting: the first frame has its trees
+func fillWalkerForest(
+  terrainSystem: mod WalkerTerrain
+  allocator: mod EntityAllocator
+  x: view Float
+  y: view Float
+) ret Int {
+  var centers: List(TileCenter) = { TileCenter { x: x, y: y } }
+  ret fillPropTiles(
+    tiles: terrainSystem.forestTiles
+    field: terrainSystem.forest.field
+    allocator: allocator
+    centers: centers
   )
 }
 
@@ -865,6 +927,11 @@ func createWalkerTerrain(
     )
     treeSet: treeSet
     forest: own treeForest
+    forestTiles: createPropTiles(
+      settings: walkerForestTileSettings()
+      halfExtent: forest.extent * 0.5
+      groupBase: walkerBushGroup + 1
+    )
     farGround: own farGround
     hasFarGround: hasFarGround
     bushParts: own createTreeSetBushParts(treeSet: treeSet, renderer: renderer, capacity: cellCount)
