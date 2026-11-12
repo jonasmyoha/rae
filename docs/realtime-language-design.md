@@ -284,6 +284,30 @@ C's `restrict` on such `Buffer` pointers would let clang vectorize the loop
 without a run-time overlap check. A code generation change, no syntax; it needs
 the aliasing rule audited first.
 
+**The audit (2026-11-12): the rule does not exist yet, so no `restrict`.**
+Probed against compiler 0.3.102 (`stress/13_modAndViewOfOnePlace`):
+
+- One place may be passed to a call as `mod` and as `view` (the callee grows
+  the list through the `mod`; the `view` reads 1 item, then 101), as two
+  `mod`s, and a field as `mod` with its whole struct as `view`. The borrow
+  rules refuse overlap with a *held* borrow (a `viewAt` binding, a collection
+  loop: stress cases 11 and 12), not between two arguments of one call.
+- `Buffer(T)` is a plain handle: copies of it point at the same memory and
+  nothing tracks them, so two Buffer parameters can never be proved apart.
+- Even for Lists, `restrict` on the parameter (a pointer to the List's header)
+  would not reach the loop that matters: the elements are another object,
+  reached through `data`. The useful form is a `restrict` copy of each data
+  pointer in a counted loop (`c_loop_versioning.c` already makes the
+  check-free copy), sound only once two arguments cannot overlap.
+
+So the order is: first a rule that a `mod` argument may not overlap any other
+argument of the same call (Swift's exclusive access, Rust's borrow rule;
+refused at compile time where the places are known, as a local, a field or a
+whole versus its part), which is a language change (§9 R8); then `restrict` on
+the List data pointers of a counted loop over arguments the rule proves
+apart. Buffers stay out (they are the `unsafe` handle layer), unless a
+program states it with a future, explicit, checked-at-run-time promise.
+
 ---
 
 ## 5. Checking the C that Rae links
@@ -589,6 +613,18 @@ steps that need them.
 - **R5 — `mainThread`** for externs, later (§4.3).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
   the may-wait rule (§6.6).
+- **R8 — exclusive access for `mod` arguments** (§4.6): refuse a call that
+  passes one place, or a place and a part of it, as `mod` together with
+  another `mod` or `view` argument. It fixes a foot gun on its own
+  (`stress/13_modAndViewOfOnePlace`) and is what makes `restrict` sound. A
+  language change: it may refuse existing code (lib/ and examples to be
+  measured first).
+- **R9 — the real-time team's base** (§6.6): `parallel-stages-design.md`
+  chose Option C for `parallelLoop` and did not recommend Option A (unchecked
+  atomics and barriers for every program). A team for one `realtime` function
+  may still want A's shape (a leader publishing stages, helpers spinning,
+  then waiting on a `Signal`) inside a library type rather than a language
+  construct. To decide before building it.
 - **R7 — the RTSan gate's compiler. Decided 2026-11-11:** Homebrew LLVM
   (`brew install llvm`), a test dependency on macOS installed by `make setup`,
   like `naga`; the gate SKIPs with a message when it is missing.
