@@ -1,0 +1,12 @@
+tests/cases/1432_reject_task_copy/Main.rae:14:3: cannot copy 'Task(Int)' into a new binding: it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    14 |   let second: Task(Int) = first
+       |   ^~~~
+tests/cases/1432_reject_task_copy/Main.rae:17:3: cannot copy 'List(Task(Int))' into a new binding: it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    17 |   let copied: List(Task(Int)) = tasks
+       |   ^~~~
+tests/cases/1432_reject_task_copy/Main.rae:18:29: cannot copy 'List(Task(Int))' into a struct literal field (write 'field: own <expr>'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    18 |   let crew: Crew = { tasks: tasks }
+       |                             ^~~~
+tests/cases/1432_reject_task_copy/Main.rae:20:9: cannot copy this value into another place: it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    20 |   other = tasks
+       |         ^~~~

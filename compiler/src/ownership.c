@@ -120,6 +120,8 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
   if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
+  /* a Task is joined and freed when dropped (docs/concurrency-model.md §3) */
+  if (str_eq_cstr(base, "Task")) return true;
   const AstDecl* d = find_type_decl(NULL, module, base);
   if (!d || d->kind != AST_DECL_TYPE) return false;
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;

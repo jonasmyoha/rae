@@ -85,11 +85,11 @@ func runOneShotModes(app: mod App) ret Bool {
 # run under `unsafe`, never copied
 func createAppRun(app: own App) ret AppRun {
   unsafe {
-    var running: App = app
+    var running: App = own app
     var session: AppSession = createAppSession(app: running)
     var world: UiWorld = startWorld(app: running, session: session)
     let frame: WorldFrame = createWorldFrame(world: world, uiSystems: running.uiSystems)
-    ret AppRun { app: running, session: session, world: world, frame: frame }
+    ret AppRun { app: own running, session: session, world: world, frame: frame }
   }
 }
 

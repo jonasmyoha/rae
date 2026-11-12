@@ -1268,10 +1268,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_METHOD_CALL: {
         // Built-in Task(T).get(): join (no-op for a sequential task) and
         // read the result buffer, cast back to T.
+        // A `view`/`mod` Task (a viewAt binding, a parameter) is the same
+        // RaeTask*, read as `(*task)`, as isDone/tryGet below unwrap it: a
+        // Task in a List is read with viewAt + get, never copied out
+        const TypeInfo* get_task_type = expr->as.method_call.object->resolved_type;
+        if (get_task_type && get_task_type->kind == TYPE_REF) get_task_type = get_task_type->as.ref.base;
         if (str_eq_cstr(expr->as.method_call.method_name, "get") &&
-            expr->as.method_call.object->resolved_type &&
-            expr->as.method_call.object->resolved_type->kind == TYPE_TASK) {
-            TypeInfo* resT = expr->as.method_call.object->resolved_type->as.task.base;
+            get_task_type && get_task_type->kind == TYPE_TASK) {
+            TypeInfo* resT = get_task_type->as.task.base;
             if (!resT || resT->kind == TYPE_VOID) {
                 fprintf(out, "(rae_task_await(");
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);

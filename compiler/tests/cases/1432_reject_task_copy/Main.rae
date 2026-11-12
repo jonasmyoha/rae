@@ -1,0 +1,22 @@
+# A Task is a unique handle that is joined and freed when dropped, so copying
+# one, or a List or struct that holds one, from a place is refused: two
+# copies would join and free it twice. `own` moves it.
+type Crew {
+  tasks: List(Task(Int))
+}
+
+func one() ret Int {
+  ret 1
+}
+
+func main() {
+  let first: Task(Int) = spawn one()
+  let second: Task(Int) = first
+  var tasks: List(Task(Int)) = {}
+  tasks.add(value: spawn one())
+  let copied: List(Task(Int)) = tasks
+  let crew: Crew = { tasks: tasks }
+  var other: List(Task(Int)) = {}
+  other = tasks
+  let moved: List(Task(Int)) = own tasks
+}

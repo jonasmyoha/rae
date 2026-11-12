@@ -735,6 +735,81 @@ static void sema_report_uncopyable(AstModule* module, const char* file, size_t l
     if (module) module->had_error = true;
 }
 
+/* A Task(T) is a unique handle: dropping it joins the task and frees it, so
+ * two copies would join and free it twice (docs/concurrency-model.md §3).
+ * Does a value of this type hold one: a Task, an opt Task, a List(Task(T)) or
+ * other generic of one, or a struct with such a field? */
+static bool sema_typeref_holds_task(SymbolTable* symbols, const AstTypeRef* type, int depth) {
+    if (!type || depth > 6 || type->is_view || type->is_mod) return false;
+    Str base = get_base_type_name(type);
+    if (str_eq_cstr(base, "Task")) return true;
+    for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next)
+        if (sema_typeref_holds_task(symbols, arg, depth + 1)) return true;
+    const AstDecl* td = symbols ? sema_user_struct_decl(symbols, base) : NULL;
+    if (!td || td->kind != AST_DECL_TYPE) return false;
+    for (const AstTypeField* field = td->as.type_decl.fields; field; field = field->next)
+        if (sema_typeref_holds_task(symbols, field->type, depth + 1)) return true;
+    return false;
+}
+
+static bool sema_typeinfo_holds_task(SymbolTable* symbols, const TypeInfo* t, int depth) {
+    if (!t || depth > 6) return false;
+    if (t->kind == TYPE_TASK) return true;
+    if (t->kind == TYPE_OPT) return sema_typeinfo_holds_task(symbols, t->as.opt.base, depth + 1);
+    if (t->kind != TYPE_STRUCT) return false;
+    for (size_t i = 0; i < t->as.structure.generic_count; i++)
+        if (sema_typeinfo_holds_task(symbols, t->as.structure.generic_args[i], depth + 1)) return true;
+    const AstDecl* td = t->as.structure.decl;
+    if (!td || td->kind != AST_DECL_TYPE) return false;
+    for (const AstTypeField* field = td->as.type_decl.fields; field; field = field->next)
+        if (sema_typeref_holds_task(symbols, field->type, depth + 1)) return true;
+    return false;
+}
+
+/* A type as it is written: `List(Task(Int))`, `opt Task(Bool)` */
+static void sema_type_text(const AstTypeRef* type, char* out, size_t cap, size_t* pos) {
+    if (!type || *pos >= cap) return;
+    int wrote = snprintf(out + *pos, cap - *pos, "%s", type->is_opt ? "opt " : "");
+    if (wrote > 0) *pos += (size_t)wrote;
+    for (const AstIdentifierPart* part = type->parts; part && *pos < cap; part = part->next) {
+        wrote = snprintf(out + *pos, cap - *pos, "%s%.*s", part == type->parts ? "" : "/", (int)part->text.len,
+                         part->text.data);
+        if (wrote > 0) *pos += (size_t)wrote;
+    }
+    if (!type->generic_args || *pos >= cap) return;
+    wrote = snprintf(out + *pos, cap - *pos, "(");
+    if (wrote > 0) *pos += (size_t)wrote;
+    for (const AstTypeRef* arg = type->generic_args; arg && *pos < cap; arg = arg->next) {
+        if (arg != type->generic_args) {
+            wrote = snprintf(out + *pos, cap - *pos, ", ");
+            if (wrote > 0) *pos += (size_t)wrote;
+        }
+        sema_type_text(arg, out, cap, pos);
+    }
+    if (*pos < cap) {
+        wrote = snprintf(out + *pos, cap - *pos, ")");
+        if (wrote > 0) *pos += (size_t)wrote;
+    }
+}
+
+static void sema_report_task_copy(AstModule* module, const char* file, size_t line, size_t col,
+                                  const AstTypeRef* type, const char* how) {
+    char type_text[160] = "this value";
+    if (type) {
+        size_t pos = 0;
+        type_text[0] = '\0';
+        sema_type_text(type, type_text, sizeof type_text, &pos);
+    }
+    char buf[600];
+    snprintf(buf, sizeof buf,
+             "cannot copy %s%s%s %s: it holds a Task, which is joined and freed when it is dropped, so two "
+             "copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' "
+             "reference",
+             type ? "'" : "", type_text, type ? "'" : "", how);
+    diag_error(file, (int)line, (int)col, buf);
+    if (module) module->had_error = true;
+}
+
 /* The reserved shapes. Called for every non-extern function declaration. */
 static void sema_check_lifecycle_decl(CompilerContext* ctx, AstModule* module,
                                       SymbolTable* symbols, const AstDecl* decl) {
@@ -2937,6 +3012,10 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                         continue;
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
+                    if (pt->is_copy && sema_typeref_holds_task(symbols, pt, 0)) {
+                        sema_report_task_copy(module, err_file, pt->line, pt->column, pt,
+                                              "through a 'copy' parameter");
+                    }
                     if (pt->is_copy && !pt->is_opt && !pt->generic_args) {
                         Str cbase = get_base_type_name(pt);
                         if (find_user_drop_for(ctx, cbase) && !find_user_copy_for(ctx, cbase)) {
@@ -5145,6 +5224,10 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
                                                payload->name, "out of a List with 'copyAt' (use 'viewAt'/'modAt')");
                     }
+                    if (sema_typeinfo_holds_task(symbols, payload, 0)) {
+                        sema_report_task_copy(module, sema_diag_file(module), stmt->line, stmt->column,
+                                              stmt->as.let_stmt.type, "out of a List with 'copyAt' (use 'viewAt'/'modAt')");
+                    }
                 }
                 // #881: an owning binding from a place copies the value.
                 if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
@@ -5153,6 +5236,15 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     && sema_expr_copies_place(stmt->as.let_stmt.value)) {
                     sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
                                            t->name, "into a new binding");
+                }
+                // A Task is a unique handle: a binding from a place would be a
+                // second owner that joins and frees it again
+                if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
+                    && sema_expr_copies_place(stmt->as.let_stmt.value)
+                    && sema_typeref_holds_task(symbols, stmt->as.let_stmt.type, 0)) {
+                    sema_report_task_copy(module, sema_diag_file(module), stmt->line, stmt->column,
+                                          stmt->as.let_stmt.type, "into a new binding");
                 }
                 // #898: an owning COPY of a raw-Ptr aggregate that has no
                 // lifecycle (no `drop`, no `copy`) duplicates its pointer
@@ -5850,6 +5942,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             if (stmt->as.assign_stmt.target->resolved_type) ensure_type_match(ctx, stmt->as.assign_stmt.target->resolved_type, &stmt->as.assign_stmt.value);
+            if (sema_expr_copies_place(stmt->as.assign_stmt.value)
+                && sema_typeinfo_holds_task(symbols, stmt->as.assign_stmt.target->resolved_type, 0)) {
+                sema_report_task_copy(module, sema_diag_file(module), stmt->line, stmt->column, NULL,
+                                      "into another place");
+            }
             // View restriction checks
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
                 // Rebinding the local itself: legal only for `var`.
@@ -6620,6 +6717,12 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 if (ft) sema_check_object_literal_fields(ft, f->value->as.object_literal.fields,
                                                          f->value->line, f->value->column, errFile);
+            }
+            if (tf && tf->type && s_lifecycle_symbols && sema_expr_copies_place(f->value)
+                && sema_typeref_holds_task(s_lifecycle_symbols, tf->type, 0)) {
+                sema_report_task_copy(s_current_module, errFile, f->value ? f->value->line : litLine,
+                                      f->value ? f->value->column : litCol, tf->type,
+                                      "into a struct literal field (write 'field: own <expr>')");
             }
             if (tf && tf->type && !tf->type->is_opt && !tf->type->generic_args
                 && s_lifecycle_ctx && sema_expr_copies_place(f->value)) {
