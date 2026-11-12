@@ -1218,7 +1218,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     fprintf(out, "RaeTask* __t = rae_task_new(");
                     if (is_void) fprintf(out, "0");
                     else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
-                    if (c_spawn_on_pool(ctx, callexpr->decl_link)) {
+                    // `spawn thread`: always its own OS thread (§6.6.1)
+                    if (!expr->as.unary.spawn_thread && c_spawn_on_pool(ctx, callexpr->decl_link)) {
                         // A task on the scheduler's worker pool: Scheduler.rae
                         // queues it (docs/lightweight-spawn-design.md §4.3).
                         // A function with a resumable twin runs as one, so
@@ -1239,6 +1240,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     }
                     break;
+                }
+                if (expr->as.unary.spawn_thread) {
+                    // a `spawn thread` that cannot move to another thread
+                    // must not quietly run in place
+                    diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column,
+                               "`spawn thread` cannot start this call on its own thread: a `mod` argument, a `view` "
+                               "of a String, List or struct, or a generic function would point into this thread's "
+                               "data; pass those as `own` or `copy`");
                 }
                 // Sequential fallback (heap/mod/view-enum args, or an
                 // unresolved callee): run synchronously into a completed task.

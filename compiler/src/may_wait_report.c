@@ -64,6 +64,18 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
   }
   fprintf(out, "  resumable twins (may wait and reachable from a spawn): %zu in the program, %zu in lib/\n", twins[0],
           twins[1]);
+  /* `spawn thread` targets (§6.6.1 of docs/realtime-language-design.md):
+   * always their own OS thread, never the pool, so no twins */
+  for (size_t i = 0; i < graph.count; i++) {
+    const WaitNode* node = &graph.nodes[i];
+    if (!node->thread_spawned || (wait_graph_is_stdlib(&graph, node->decl) && !with_lib)) continue;
+    fprintf(out, "  thread (spawn thread): ");
+    print_function_name(out, node);
+    fprintf(out, "  %s:%zu\n",
+            wait_graph_is_stdlib(&graph, node->decl) ? wait_graph_short_lib_path(node->decl->origin_file)
+                                                     : wait_graph_file_name(node->decl->origin_file),
+            node->decl->line);
+  }
   for (int scope = 0; scope < 2; scope++) {
     if (scope == 1 && !with_lib) break;
     for (size_t i = 0; i < graph.count; i++) {

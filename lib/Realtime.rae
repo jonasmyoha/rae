@@ -196,3 +196,141 @@ func report(this: view RealtimeRecorder) {
     bucket = bucket + 1
   }
 }
+
+# ---- real-time priority for a `spawn thread` (docs/realtime-language-design.md
+# §6.6.1) ------------------------------------------------------------------------
+# A thread that must keep a deadline (an audio render loop, a MIDI clock) asks
+# the system to schedule it on time, at its start:
+#
+#     let promotion: RealtimePromotion = promoteToRealtime(
+#       periodNanoseconds: periodNs
+#       computeNanoseconds: periodNs / 2
+#     )
+#     ... the loop ...
+#     demoteFromRealtime(promotion: promotion)
+#
+# Only the thread of a `spawn thread` may do this: the compiler refuses it on
+# the main thread, a pool task, a parallelLoop body or a C callback, where a
+# raised priority would starve everything else that runs there. Per platform:
+# Apple, the Mach time-constraint policy (period, computation, constraint);
+# Windows, MMCSS "Pro Audio"; Linux, SCHED_FIFO (it needs RLIMIT_RTPRIO, the
+# audio group; the rtkit fallback comes with the Linux audio step); Android,
+# the urgent-audio nice value, which is not real-time scheduling (an app
+# cannot get SCHED_FIFO), so `promoted` is false; the browser has no threads.
+type RealtimePromotion {
+  # the thread got real-time scheduling
+  promoted: Bool
+  # Windows: the MMCSS handle to give back; 0 elsewhere
+  handle: Int
+}
+
+# SCHED_FIFO's priority on Linux (JACK and PipeWire use 70-95)
+const realtimeFifoPriority: Int = 70
+
+# Android's THREAD_PRIORITY_URGENT_AUDIO
+const urgentAudioNice: Int = -19
+
+when Target.isApple {
+  func rae_ext_Realtime_timebaseNumerator() unsafe extern ret Int
+
+  func rae_ext_Realtime_timebaseDenominator() unsafe extern ret Int
+
+  func rae_ext_Realtime_setTimeConstraint(
+    periodTicks: Int
+    computationTicks: Int
+    constraintTicks: Int
+  ) unsafe extern ret Int
+
+  func rae_ext_Realtime_setStandardPolicy() unsafe extern ret Int
+} else when Target.os is Os.windows {
+  func rae_ext_Realtime_mmcssBegin() unsafe extern ret Int
+
+  func rae_ext_Realtime_mmcssEnd(handle: Int) unsafe extern ret Int
+} else when Target.os is Os.android {
+  func rae_ext_Realtime_setNice(value: Int) unsafe extern ret Int
+} else when Target.isLinuxKernel {
+  func rae_ext_Realtime_setFifo(priority: Int) unsafe extern ret Int
+
+  func rae_ext_Realtime_setOther() unsafe extern ret Int
+}
+
+func notPromoted() ret RealtimePromotion {
+  ret RealtimePromotion { promoted: false, handle: 0 }
+}
+
+# Ask for real-time scheduling of the calling thread: a deadline every
+# `periodNanoseconds`, of which it needs about `computeNanoseconds`
+func promoteToRealtime(
+  periodNanoseconds: view Int
+  computeNanoseconds: view Int
+) ret RealtimePromotion {
+  when Target.isApple {
+    var numerator: Int = 0
+    var denominator: Int = 0
+    unsafe {
+      numerator = rae_ext_Realtime_timebaseNumerator()
+      denominator = rae_ext_Realtime_timebaseDenominator()
+    }
+    if numerator <= 0 or denominator <= 0 {
+      ret notPromoted()
+    }
+    let periodTicks: Int = periodNanoseconds * denominator / numerator
+    let computationTicks: Int = computeNanoseconds * denominator / numerator
+    var took: Int = 0
+    unsafe {
+      took = rae_ext_Realtime_setTimeConstraint(
+        periodTicks: periodTicks
+        computationTicks: computationTicks
+        constraintTicks: periodTicks
+      )
+    }
+    ret RealtimePromotion { promoted: took is 1, handle: 0 }
+  } else when Target.os is Os.windows {
+    var handle: Int = 0
+    unsafe {
+      handle = rae_ext_Realtime_mmcssBegin()
+    }
+    ret RealtimePromotion { promoted: handle is not 0, handle: handle }
+  } else when Target.os is Os.android {
+    unsafe {
+      let took: Int = rae_ext_Realtime_setNice(value: urgentAudioNice)
+    }
+    ret notPromoted()
+  } else when Target.isLinuxKernel {
+    var error: Int = 0
+    unsafe {
+      error = rae_ext_Realtime_setFifo(priority: realtimeFifoPriority)
+    }
+    ret RealtimePromotion { promoted: error is 0, handle: 0 }
+  } else {
+    ret notPromoted()
+  }
+}
+
+# Back to ordinary scheduling, on the same thread, before it ends or does
+# other work
+func demoteFromRealtime(promotion: view RealtimePromotion) {
+  when Target.isApple {
+    if promotion.promoted {
+      unsafe {
+        let took: Int = rae_ext_Realtime_setStandardPolicy()
+      }
+    }
+  } else when Target.os is Os.windows {
+    if promotion.handle is not 0 {
+      unsafe {
+        let took: Int = rae_ext_Realtime_mmcssEnd(handle: promotion.handle)
+      }
+    }
+  } else when Target.os is Os.android {
+    unsafe {
+      let took: Int = rae_ext_Realtime_setNice(value: 0)
+    }
+  } else when Target.isLinuxKernel {
+    if promotion.promoted {
+      unsafe {
+        let error: Int = rae_ext_Realtime_setOther()
+      }
+    }
+  }
+}

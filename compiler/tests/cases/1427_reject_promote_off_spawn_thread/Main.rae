@@ -1,0 +1,26 @@
+# promoteToRealtime (lib/Realtime, docs/realtime-language-design.md §6.6.1)
+# is only for the thread of a `spawn thread`: reached from main, from a pool
+# spawn or from a parallelLoop body it is refused, with the chain.
+open Realtime
+
+func renderLoop(periodNs: own Int) ret Bool {
+  let promotion: RealtimePromotion = promoteToRealtime(
+    periodNanoseconds: periodNs
+    computeNanoseconds: periodNs / 2
+  )
+  demoteFromRealtime(promotion: promotion)
+  ret promotion.promoted
+}
+
+func promoteOnce(index: view Int) {
+  let promoted: Bool = renderLoop(periodNs: 1000000 + index)
+}
+
+func main() {
+  let pooled: Task(Bool) = spawn renderLoop(periodNs: 5333333)
+  parallelLoop var i: Int = 0, i < 2, ++i {
+    promoteOnce(index: i)
+  }
+  let fine: Task(Bool) = spawn thread renderLoop(periodNs: 5333333)
+  log("{renderLoop(periodNs: 1000000)} {pooled.get()} {fine.get()}")
+}

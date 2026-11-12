@@ -606,6 +606,7 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 // its old behavior). With a NULL module the ambiguity is not reported (const
 // folding; the read itself reports it).
 static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b);
+static bool sema_build_target_os_is(const AstModule* module, const char* os);
 static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const char* file,
                                         AstModule* module, size_t line, size_t column) {
     /* The project's modules are all visible to each other; an explicit
@@ -7560,6 +7561,14 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 TypeInfo* inner = expr->as.unary.operand->resolved_type;
                 if (!inner) inner = type_get_void(ctx->type_registry);
                 expr->resolved_type = type_get_task(ctx->type_registry, inner);
+                // `spawn thread` needs threads: the browser build has none
+                // (docs/realtime-language-design.md §6.6.1)
+                if (expr->as.unary.spawn_thread && sema_build_target_os_is(module, "web")) {
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                               "the browser build has no threads, and `spawn thread` starts one; "
+                               "keep this spawn out of the browser build with `when Target.isNative`");
+                    if (module) module->had_error = true;
+                }
                 // Spawn-boundary capture safety. OP_SPAWN shallow-moves each
                 // argument onto the new thread, so a borrow (view/mod) of
                 // heap data would alias the parent across threads. Borrowed
@@ -10375,6 +10384,19 @@ static bool sema_is_named_type_decl(const AstDecl* d) {
     if (d->kind == AST_DECL_ENUM) return true;
     if (d->kind != AST_DECL_TYPE) return false;
     return !d->as.type_decl.specialization_args && !d->as.type_decl.generic_template;
+}
+
+/* Whether lib/Target's `os` (written per build, main.c apply_build_target)
+ * names `os` */
+static bool sema_build_target_os_is(const AstModule* module, const char* os) {
+    if (!module) return false;
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_GLOBAL_LET || !d->module_name || strcmp(d->module_name, "Target") != 0) continue;
+        if (!str_eq_cstr(d->as.let_decl.name, "os")) continue;
+        const AstExpr* value = d->as.let_decl.value;
+        return value && value->kind == AST_EXPR_MEMBER && str_eq_cstr(value->as.member.member, os);
+    }
+    return false;
 }
 
 static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, const AstDecl* second, Str name) {

@@ -739,6 +739,11 @@ This generalizes the renderer C-surface gate above to the whole runtime.
   `parallelLoop` body, a `realtime` function or a `cExport` function that
   reaches it (docs/realtime-language-design.md §4.3). Do not mark C that is
   merely called from the main thread today; mark what MUST be.
+- **A loop that runs until shutdown is started with `spawn thread f(...)`**
+  (its own OS thread, never a pool task), and a thread with a deadline
+  raises itself with `lib/Realtime`'s `promoteToRealtime` there; the
+  compiler refuses that call anywhere else (docs/realtime-language-design.md
+  §6.6.1).
 - **Before adding a `runtime_*.c` function, name its platform reason** in the
   commit message: one of the reasons above, or a faster platform
   implementation, with the measurement. "It was quicker to write in C" is not

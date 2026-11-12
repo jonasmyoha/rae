@@ -1740,9 +1740,18 @@ static AstExpr* parse_unary(Parser* parser) {
       expr->as.unary.operand = operand;
       return expr;
     }
+    // `spawn thread f(...)`: `thread` is a modifier word only when a name
+    // follows it, so `spawn thread(...)` still calls a function named thread
+    bool spawn_thread = false;
+    if (op_token->kind == TOK_KW_SPAWN && parser_peek(parser)->kind == TOK_IDENT &&
+        str_eq_cstr(parser_peek(parser)->lexeme, "thread") && parser_peek_at(parser, 1)->kind == TOK_IDENT) {
+      parser_advance(parser);
+      spawn_thread = true;
+    }
     AstExpr* operand = parse_unary(parser);
     AstExpr* expr = new_expr(parser, AST_EXPR_UNARY, op_token);
     expr->as.unary.operand = operand;
+    expr->as.unary.spawn_thread = spawn_thread;
     switch (op_token->kind) {
       case TOK_MINUS:
         expr->as.unary.op = AST_UNARY_NEG;
