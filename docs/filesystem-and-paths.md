@@ -89,6 +89,49 @@ see `module-namespacing.md`.)
 
 ---
 
+## Free space, and why a write failed (`lib/Sys.rae`, 0.3.112)
+
+A write that answers `false` used to say nothing more, so a full disk looked like any other
+failure, and nothing told how much room was left. For an app that must warn before the phone
+is full (SUMU), `Sys` has:
+
+```rae
+let free: Int = Sys.freeSpace(path: documentsFolder)    # bytes, or -1 when it cannot be read
+if not Sys.writeFile(path: path, content: text) {
+  if Sys.lastFileError() is Sys.FileError.noSpace {
+    # the disk (or the user's quota) is full
+  }
+}
+```
+
+- **`freeSpace(path)`**: the bytes free for this program on the volume `path` is on.
+  - Apple (iOS, macOS): the capacity for important use,
+    `NSURLVolumeAvailableCapacityForImportantUsageKey`. It counts what the OS would clear to
+    make room, as Settings' "available" does, so it is a little more than `df`'s free space.
+  - Linux, Android and the BSDs: `statvfs`, `f_bavail * f_frsize`.
+  - Windows: `GetDiskFreeSpaceExW`'s bytes free to the caller. The runtime does not build for
+    Windows yet, so this branch is written but not compiled.
+  - The web: -1, and -1 for a path on no volume.
+- **`lastFileError()`**: why the last file operation of this thread failed, `none` when it
+  succeeded. `writeFile`, `writeFilePrivate`, `rename`, `delete`, `makeDir` and `setFileMode`
+  set it (each C shim stores its errno as it returns; the next file operation replaces it). The
+  values:
+
+  | `FileError` | errno |
+  | --- | --- |
+  | `noSpace` | `ENOSPC`, `EDQUOT` |
+  | `notFound` | `ENOENT`, `ENOTDIR` |
+  | `noPermission` | `EACCES`, `EPERM`, `EROFS` |
+  | `other` | any other |
+
+- **`fileErrorOf(errnoCode)`** is the mapping alone, and `errnoConstant(which)` gives this OS's
+  values, so a test checks it without a full disk.
+- `writeFile` checks `fclose` as well as `fwrite`: a full disk often shows only when the
+  buffered bytes are flushed at close. Before 0.3.112 such a write answered `true`.
+- Case 1404 covers the free space, real failures (a missing folder, a rename of a missing file,
+  a folder under a file) and the mapping. `compiler/tools/full-disk-check.sh` (macOS, not in
+  the suite) writes 2 MB onto a mounted 1 MB disk image and expects `noSpace`.
+
 ## Locked decisions (PNG save policy)
 
 1. **Desktop, directly** (no subfolder) — this is a demo capture.

@@ -19,6 +19,12 @@ func rae_sys_write_file(path: String, content: String) blocking unsafe extern re
 
 func rae_sys_rename(oldPath: String, newPath: String) unsafe extern ret Bool
 
+func rae_sys_file_errno() unsafe extern ret Int
+
+func rae_sys_errno_constant(which: Int) unsafe extern ret Int
+
+func rae_sys_free_space(path: String) blocking unsafe extern ret Int
+
 func rae_sys_open_private(path: String) blocking unsafe extern ret Int
 
 func rae_sys_write_fd(
@@ -419,6 +425,66 @@ func makeDir(path: view String) ret Bool {
   }
   unsafe {
     ret rae_sys_make_dir(path: path)
+  }
+}
+
+# Why a file operation failed: the disk (or the user's quota) is full, a folder on the path is
+# missing, the program may not write there, or something else. `none` when it succeeded.
+enum FileError {
+  none
+  noSpace
+  notFound
+  noPermission
+  other
+}
+
+# Why the last file operation of this thread failed (writeFile, writeFilePrivate, rename, delete,
+# makeDir, setFileMode), `none` when it succeeded: so a program can tell "the disk is full" from
+# other failures. Read it right after the call that answered false; the next file operation
+# replaces it.
+func lastFileError() ret FileError {
+  var code: Int = 0
+  unsafe {
+    code = rae_sys_file_errno()
+  }
+  ret fileErrorOf(errnoCode: code)
+}
+
+# The FileError an errno value (of this OS) stands for: ENOSPC and EDQUOT are noSpace, ENOENT and
+# ENOTDIR notFound, EACCES, EPERM and EROFS noPermission, 0 none, the rest other
+func fileErrorOf(errnoCode: view Int) ret FileError {
+  if errnoCode is 0 {
+    ret FileError.none
+  }
+  if errnoCode is errnoConstant(which: 0) or errnoCode is errnoConstant(which: 1) {
+    ret FileError.noSpace
+  }
+  if errnoCode is errnoConstant(which: 2) or errnoCode is errnoConstant(which: 6) {
+    ret FileError.notFound
+  }
+  if errnoCode is errnoConstant(which: 3) or errnoCode is errnoConstant(which: 4) or errnoCode is errnoConstant(
+    which: 5
+  ) {
+    ret FileError.noPermission
+  }
+  ret FileError.other
+}
+
+# This OS's errno values that fileErrorOf maps: 0 ENOSPC, 1 EDQUOT, 2 ENOENT, 3 EACCES, 4 EPERM,
+# 5 EROFS, 6 ENOTDIR; -1 for one the OS does not have (never 0, so it matches nothing)
+func errnoConstant(which: view Int) ret Int {
+  unsafe {
+    ret rae_sys_errno_constant(which: which)
+  }
+}
+
+# The bytes free for this program on the volume `path` is on (a file or a folder on it), or -1
+# when it cannot be read (the web; a path on no volume). On Apple systems it is the space free for
+# important use, which counts what the OS would clear to make room, as Settings' "available" does
+# (so a little more than the disk's raw free space); elsewhere the blocks free to a normal user.
+func freeSpace(path: view String) ret Int {
+  unsafe {
+    ret rae_sys_free_space(path: path)
   }
 }
 

@@ -849,6 +849,9 @@ void rae_ext_disableAppNap(void);
 int64_t rae_ext_thermalState(void);  /* #530: 0 nominal..3 critical (Apple), 0 else */
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content);
 rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath);
+int64_t rae_ext_rae_sys_file_errno(void);
+int64_t rae_ext_rae_sys_errno_constant(int64_t which);
+int64_t rae_ext_rae_sys_free_space(rae_String path);
 int64_t rae_ext_rae_sys_open_private(rae_String path);
 int64_t rae_ext_rae_sys_write_fd(int64_t fd, rae_String text, int64_t offset, int64_t count);
 int64_t rae_ext_rae_sys_fsync(int64_t fd);
