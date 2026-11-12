@@ -1,0 +1,156 @@
+# benchmarks/audioKernels: audio kernels as Rae writes them, against the same
+# loops in C (../c/reference.c), for docs/realtime-language-design.md §4.6:
+# a gain-and-sum over two Lists (copyAtFallback, set), the same over Buffers
+# (the mixer's sampleAt / setSampleAt), the resampler's 32-tap product, and a
+# 64-voice mix through packages/audio's offline engine. Best of five after a
+# warm-up. Run ../run.sh.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+const frames: Int = 4096
+
+const rounds: Int = 2000
+
+func sumLists(output: mod List(Float), left: view List(Float), right: view List(Float)) {
+  loop var i: Int = 0, i < output.length(), ++i {
+    output.set(
+      index: i
+      value: left.copyAtFallback(index: i, fallback: 0.0) * 0.5 + right.copyAtFallback(
+        index: i
+        fallback: 0.0
+      ) * 0.5
+    )
+  }
+}
+
+func sumBuffers(
+  output: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  count: view Int
+) {
+  loop var i: Int = 0, i < count, ++i {
+    setSampleAt(
+      samples: output
+      index: i
+      value: sampleAt(samples: left, index: i) * 0.5 + sampleAt(samples: right, index: i) * 0.5
+    )
+  }
+}
+
+func sincDot(
+  table: view List(Float)
+  pending: view List(Float)
+  rowA: view Int
+  rowB: view Int
+  first: view Int
+  blend: view Float
+) ret Float {
+  var sum: Float = 0.0
+  loop var k: Int = 0, k < 32, ++k {
+    let a: Float = table.copyAtFallback(index: rowA + k, fallback: 0.0)
+    let b: Float = table.copyAtFallback(index: rowB + k, fallback: 0.0)
+    let sample: Float = pending.copyAtFallback(index: first + k, fallback: 0.0)
+    sum = sum + sample * (a + (b - a) * blend)
+  }
+  ret sum
+}
+
+func main() {
+  var output: List(Float) = List.create(Float, cap: frames)
+  var left: List(Float) = List.create(Float, cap: frames)
+  var right: List(Float) = List.create(Float, cap: frames)
+  loop var i: Int = 0, i < frames, ++i {
+    output.add(value: 0.0)
+    left.add(value: (i % 97) as Float * 0.01)
+    right.add(value: (i % 89) as Float * 0.02)
+  }
+  let outBuffer: Buffer(Float) = createSampleBuffer(count: frames)
+  let leftBuffer: Buffer(Float) = createSampleBuffer(count: frames)
+  let rightBuffer: Buffer(Float) = createSampleBuffer(count: frames)
+  loop var i: Int = 0, i < frames, ++i {
+    setSampleAt(samples: leftBuffer, index: i, value: (i % 97) as Float * 0.01)
+    setSampleAt(samples: rightBuffer, index: i, value: (i % 89) as Float * 0.02)
+  }
+  var table: List(Float) = List.create(Float, cap: 257 * 32)
+  loop var i: Int = 0, i < 257 * 32, ++i {
+    table.add(value: (i % 13) as Float * 0.001)
+  }
+  var bestLists: Int = 999999999
+  var bestBuffers: Int = 999999999
+  var bestSinc: Int = 999999999
+  var total: Float = 0.0
+  # one warm-up pass, then five measured; the best of each
+  loop var pass: Int = 0, pass < 6, ++pass {
+    var start: Int = nowNs()
+    loop var r: Int = 0, r < rounds, ++r {
+      sumLists(output: output, left: left, right: right)
+    }
+    let lists: Int = (nowNs() - start) / 1000
+    start = nowNs()
+    loop var r: Int = 0, r < rounds, ++r {
+      sumBuffers(
+        output: outBuffer
+        left: leftBuffer
+        right: rightBuffer
+        count: frames
+      )
+    }
+    let buffers: Int = (nowNs() - start) / 1000
+    start = nowNs()
+    loop var r: Int = 0, r < rounds * 48, ++r {
+      loop var f: Int = 0, f < 64, ++f {
+        total = total + sincDot(
+          table: table
+          pending: left
+          rowA: (f % 200) * 32
+          rowB: (f % 200 + 1) * 32
+          first: f * 8
+          blend: 0.25
+        )
+      }
+    }
+    let sinc: Int = (nowNs() - start) / 1000
+    if pass > 0 {
+      bestLists = min(a: bestLists, b: lists)
+      bestBuffers = min(a: bestBuffers, b: buffers)
+      bestSinc = min(a: bestSinc, b: sinc)
+    }
+  }
+  log(
+    "Rae lists {bestLists} us, buffers {bestBuffers} us, sinc {bestSinc} us (check {output.copyAtFallback(
+      index: 100
+      fallback: 0.0
+    )} {sampleAt(samples: outBuffer, index: 100)} {total > 0.0})"
+  )
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 512)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 440.0
+    amplitude: 0.01
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  loop var v: Int = 0, v < 64, ++v {
+    let voice: VoiceId = audio.playAt(
+      sound: tone
+      bus: AudioBusKind.effects
+      gainDecibels: 0.0
+      pan: 0.0
+      looping: true
+      atSample: 0
+    )
+  }
+  var bestMix: Int = 999999999
+  loop var pass: Int = 0, pass < 4, ++pass {
+    let start: Int = nowNs()
+    let mixed: List(Float) = audio.renderOffline(frames: 48000 * 2)
+    if pass > 0 {
+      bestMix = min(a: bestMix, b: (nowNs() - start) / 1000)
+    }
+  }
+  log("Rae mix: {bestMix} us for 2 s of 64 voices at 48 kHz")
+  let blocks: Int = audio.stopAudio()
+}
