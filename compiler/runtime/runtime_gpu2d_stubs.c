@@ -34,6 +34,7 @@ int64_t rae_ext_Gpu2d_pointerKind(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return 0; }
 float rae_ext_Gpu2d_wheelMove(void){ return 0.0; }
+int64_t rae_ext_Gpu2d_wheelKind(void){ return 0; }
 void rae_ext_Gpu2d_setMouseCursor(int64_t kind) { (void)kind; }
 double rae_ext_Gpu2d_nowSeconds(void){ return 0.0; }
 int64_t rae_ext_Gpu2d_windowWidth(void) { return 0; }

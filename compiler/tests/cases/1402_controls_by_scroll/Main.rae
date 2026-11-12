@@ -1,0 +1,42 @@
+# The mode menu's Controls item (app3d/ModeMenu): whether the camera rig looks with a mouse's right
+# button or with any button (a trackpad). Until the player chooses, a scroll decides it: a wheel's
+# whole steps say a mouse, fractions a trackpad (Gpu2dWheel.wheelKind); no scroll keeps it; once
+# chosen, scrolls change nothing.
+import Gpu2dWheel
+open app3d/ModeMenu
+
+func main() {
+  log(
+    "no scroll keeps it: {lookWithRightAfter(
+      lookWithRight: false
+      wheelKind: Gpu2dWheel.wheelKindNone
+      chosen: false
+    )} {lookWithRightAfter(lookWithRight: true, wheelKind: Gpu2dWheel.wheelKindNone, chosen: false)}"
+  )
+  log(
+    "a wheel's steps: the mouse's right button looks: {lookWithRightAfter(
+      lookWithRight: false
+      wheelKind: Gpu2dWheel.wheelKindStepped
+      chosen: false
+    )}"
+  )
+  log(
+    "a trackpad's fractions: any button looks: {lookWithRightAfter(
+      lookWithRight: true
+      wheelKind: Gpu2dWheel.wheelKindPrecise
+      chosen: false
+    ) is false}"
+  )
+  log(
+    "chosen, a scroll changes nothing: {lookWithRightAfter(
+      lookWithRight: false
+      wheelKind: Gpu2dWheel.wheelKindStepped
+      chosen: true
+    ) is false} {lookWithRightAfter(
+      lookWithRight: true
+      wheelKind: Gpu2dWheel.wheelKindPrecise
+      chosen: true
+    )}"
+  )
+  log("{controlsItemText(mouse: true)}; {controlsItemText(mouse: false)}")
+}

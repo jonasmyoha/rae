@@ -96,6 +96,11 @@ static int g_g2d_touch_n = 0;
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
 static float  g_g2d_wheel = 0.0f;
+/* What kind of scrolling came this frame (gpu2d.wheelKind): 0 none, 1 whole
+ * steps only (a wheel's notches), 2 some in fractions (a precise surface: a
+ * trackpad, or a mouse whose top is a touch surface; macOS gives their
+ * precise deltas, which SDL scales down to fractions of a step). */
+static int    g_g2d_wheel_kind = 0;
 /* #976: UTF-8 text typed since the last poll (SDL_EVENT_TEXT_INPUT), drained
  * once per frame by rae_ext_Gpu2d_textInput. Backspace/enter arrive as key
  * edges (Sdl3.isKeyPressed) — this carries only the characters. */
@@ -574,6 +579,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
     for (int ti = 0; ti < g_g2d_touch_n; ti++) g_g2d_touch[ti].pressed = 0;   /* clear edge */
     g_g2d_wheel = 0.0f;
+    g_g2d_wheel_kind = 0;
     g_g2d_text_input_len = 0; g_g2d_text_input[0] = 0;
     SDL_Event e;
     rae_Bool quit = 0;
@@ -674,6 +680,11 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             }
             case SDL_EVENT_MOUSE_WHEEL:
                 g_g2d_wheel += e.wheel.y;
+                if (e.wheel.y != 0.0f || e.wheel.x != 0.0f) {
+                    int fractional = e.wheel.y != (float)(int)e.wheel.y || e.wheel.x != (float)(int)e.wheel.x;
+                    if (fractional) g_g2d_wheel_kind = 2;
+                    else if (g_g2d_wheel_kind == 0) g_g2d_wheel_kind = 1;
+                }
                 break;
             /* Going to the background: rae_g2d_lifecycle_watch (SDL does
              * not queue the app lifecycle events) */
@@ -1095,6 +1106,7 @@ rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUT
 rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
 float rae_ext_Gpu2d_wheelMove(void){ return (double)g_g2d_wheel; }
+int64_t rae_ext_Gpu2d_wheelKind(void){ return (int64_t)g_g2d_wheel_kind; }
 
 void rae_ext_Gpu2d_setMouseCursor(int64_t kind) {
     if (!g_sdl_win) return;

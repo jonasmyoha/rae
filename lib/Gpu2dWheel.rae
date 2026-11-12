@@ -1,0 +1,18 @@
+# Gpu2dWheel — what kind of scrolling came this frame, beside Gpu2d's wheelMove.
+# What kind of scrolling came this frame: wheelKindNone, wheelKindStepped (whole
+# steps only: a mouse wheel's notches) or wheelKindPrecise (some in fractions: a
+# precise surface such as a laptop's trackpad, or a mouse whose top is a touch
+# surface). An app may tell a trackpad from a wheel mouse by it, once one scrolls.
+const wheelKindNone: Int = 0
+
+const wheelKindStepped: Int = 1
+
+const wheelKindPrecise: Int = 2
+
+func nativeWheelKind() unsafe extern("rae_ext_Gpu2d_wheelKind") ret Int
+
+func wheelKind() ret Int {
+  unsafe {
+    ret nativeWheelKind()
+  }
+}
