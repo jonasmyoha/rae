@@ -181,16 +181,19 @@ func uiHitTestEntity(
       var i: Int = children.ids.length - 1
       loop i >= 0 {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
-        let hit: EntityId = uiHitTestEntity(
-          world: world
-          uiSystems: uiSystems
-          entityId: child
-          x: x
-          y: y
-          targetSize: targetSize
-        )
-        if isNone(this: hit) is false {
-          ret hit
+        # a raised node (ui/Layer isRaisedNode) is tested with its layer's roots instead
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+          let hit: EntityId = uiHitTestEntity(
+            world: world
+            uiSystems: uiSystems
+            entityId: child
+            x: x
+            y: y
+            targetSize: targetSize
+          )
+          if isNone(this: hit) is false {
+            ret hit
+          }
         }
         i = i - 1
       }
@@ -240,7 +243,11 @@ func uiHitTestTarget(
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entityId: root) is false {
+      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+        uiSystems: uiSystems
+        entityId: root
+      )
+      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
         let hit: EntityId = uiHitTestEntity(
           world: world
           uiSystems: uiSystems
@@ -359,13 +366,15 @@ func uiWheelRouteEntity(
       var i: Int = children.ids.length - 1
       loop i >= 0 and route.blocked is false and isNone(this: route.target) {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
-        route = uiWheelRouteEntity(
-          world: world
-          uiSystems: uiSystems
-          entityId: child
-          x: x
-          y: y
-        )
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+          route = uiWheelRouteEntity(
+            world: world
+            uiSystems: uiSystems
+            entityId: child
+            x: x
+            y: y
+          )
+        }
         i = i - 1
       }
     }
@@ -406,7 +415,11 @@ func uiWheelRoute(
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-      if componentHas(this: world.layerRoots, entityId: root) is false {
+      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+        uiSystems: uiSystems
+        entityId: root
+      )
+      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
         let route: UiWheelRoute = uiWheelRouteEntity(
           world: world
           uiSystems: uiSystems

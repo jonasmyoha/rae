@@ -35,6 +35,7 @@ open app3d/UiModes
 open app3d/UiShell
 open app3d/CameraRig
 open ui/Ecs
+open ui/Layer
 open ui/nodeBindingSystem/NodeBindingSystem
 open ui/UiSystems
 open ui/inputSystem/InputSystem
@@ -254,6 +255,20 @@ func updateModeMenuItems(
   input: view UiInput
   rig: mod CameraRig
 ) ret Bool {
+  # The menu opens over every other root, an app's HUD scenes mounted after its own included: it
+  # is raised onto the dialog layer (ui/Layer raiseNodeToLayer), and so is the window presets'
+  raiseNodeToLayer(
+    world: world
+    entityId: nodeEntityFor(world: world, nodeId: modeMenuNodeId)
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
+  raiseNodeToLayer(
+    world: world
+    entityId: nodeEntityFor(world: world, nodeId: windowPresetMenuNodeId)
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
   let cameraTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuCameraRotationActionId)
   let pressedElsewhere: Bool = input.pointer.pressed and isModeMenuPressNode(
     world: world
