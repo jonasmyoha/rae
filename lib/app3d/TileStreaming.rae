@@ -19,6 +19,9 @@
 #               streamTiles frees on its next call
 #   TileLoaded  a tile came into a free slot: the app builds its content there
 #
+# streamTilesAround does the same round several centers (a host keeping the
+# world loaded round every player): a tile is kept while any center wants it.
+#
 # What a tile holds is the app's; this is only which tiles, when, where.
 import Math
 open ecs/Entity
@@ -212,6 +215,66 @@ func nextTileToLoad(
   ret none
 }
 
+# A point the tiles are loaded round (a player, a camera)
+type TileCenter {
+  x: Float
+  y: Float
+}
+
+# Is `tile` within the unload distance of any of `centers`?
+func tileKeptAround(
+  settings: view TileGridSettings
+  tile: view GridTile
+  centers: view List(TileCenter)
+) ret Bool {
+  loop let center: view TileCenter in centers {
+    if tileKept(
+      settings: settings
+      tile: tile
+      x: center.x
+      y: center.y
+    ) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The wanted tile not among `loaded` nearest to any of `centers`, if there is one and a slot for it
+func nextTileToLoadAround(
+  settings: view TileGridSettings
+  loaded: view List(GridTile)
+  centers: view List(TileCenter)
+) ret opt GridTile {
+  var best: GridTile = { x: 0, y: 0 }
+  var bestDistance: Float = 1000000.0
+  var found: Bool = false
+  loop let center: view TileCenter in centers {
+    if let tile: GridTile = nextTileToLoad(
+      settings: settings
+      loaded: loaded
+      x: center.x
+      y: center.y
+    ) {
+      let distance: Float = tileDistance(
+        settings: settings
+        tile: tile
+        x: center.x
+        y: center.y
+      )
+      if distance < bestDistance {
+        best = tile
+        bestDistance = distance
+        found = true
+      }
+    }
+  }
+  if found {
+    ret best
+  }
+  ret none
+}
+
 # ----- the streaming system ----------------------------------------------------
 # The loaded tiles, in slot order
 func streamedTiles(streamer: view TileStreamer) ret List(GridTile) {
@@ -248,6 +311,20 @@ func streamTiles(
   x: view Float
   y: view Float
 ) {
+  var centers: List(TileCenter) = List.create(TileCenter, cap: 1)
+  centers.add(value: TileCenter { x: x, y: y })
+  streamTilesAround(streamer: streamer, allocator: allocator, centers: centers)
+}
+
+# One frame round several centers (docs/open-world-tiles.md (d): a host keeps
+# the world loaded round every player): a tile is wanted within the load
+# distance of any center and kept until it is past the unload distance of all;
+# the nearest wanted one to any center loads first. With one center, streamTiles.
+func streamTilesAround(
+  streamer: mod TileStreamer
+  allocator: mod EntityAllocator
+  centers: view List(TileCenter)
+) {
   loop let entityId: view EntityId in streamer.toFree {
     componentRemove(this: streamer.tiles, entityId: entityId)
     freeEntity(this: allocator, entityId: entityId)
@@ -262,12 +339,7 @@ func streamTiles(
       continue
     }
     let streamed: mod StreamedTile = componentMod(this: streamer.tiles, entityId: entityId)
-    if tileKept(
-      settings: settings
-      tile: streamed.tile
-      x: x
-      y: y
-    ) {
+    if tileKeptAround(settings: settings, tile: streamed.tile, centers: centers) {
       continue
     }
     streamed.state = TileState.gone
@@ -281,11 +353,10 @@ func streamTiles(
     streamer.toFree.add(value: entityId)
     streamer.unloads = streamer.unloads + 1
   }
-  if let next: GridTile = nextTileToLoad(
+  if let next: GridTile = nextTileToLoadAround(
     settings: settings
     loaded: streamedTiles(streamer: streamer)
-    x: x
-    y: y
+    centers: centers
   ) {
     var free: Int = -1
     loop var s: Int = 0, s < settings.slotCount and free < 0, ++s {

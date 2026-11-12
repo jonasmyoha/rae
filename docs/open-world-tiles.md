@@ -119,6 +119,13 @@ bodies. They live near players, and the players can be far apart.
 - A dynamic body whose tile is not loaded on the host sleeps (made kinematic where it is) until
   its tile comes back.
 
+**Built (step 6):** TileStreaming streamTilesAround (several centers: a tile is wanted within the
+load distance of any center, kept until past the unload distance of all, the nearest to any first;
+streamTiles is its one-center case; case 1399), and app3d/LeafRelease reads a field's groups too
+(propsNear), so a forest streamed in tiles still lets its leaves go. game proto2 uses one streamer
+with several centers on its host (its camera and every walker it runs or knows) in place of the
+two streamers above; its static colliders (rocks, buildings) stay for its whole level.
+
 ## (e) Roads as meshes
 
 A road is a line (points, a width, shoulders), not a ground kind in texels:

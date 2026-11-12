@@ -1,0 +1,66 @@
+# Tile streaming round several centers (app3d/TileStreaming streamTilesAround; a host keeping
+# the world loaded round every player): two centers 1 km apart both get their tiles, one a
+# frame, never more than the slots; a tile is kept while any center wants it; when one center
+# moves away its tiles go and the other's stay.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open app3d/TileStreaming
+
+func heldNear(streamer: view TileStreamer, x: view Float, y: view Float) ret Int {
+  var count: Int = 0
+  loop let tile: view GridTile in streamedTiles(streamer: streamer) {
+    if tileDistance(
+      settings: streamer.settings
+      tile: tile
+      x: x
+      y: y
+    ) <= streamer.settings.loadDistance {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() {
+  let settings: TileGridSettings = {
+    tileSize: 100.0
+    loadDistance: 150.0
+    unloadDistance: 200.0
+    slotCount: 30
+  }
+  var streamer: TileStreamer = createTileStreamer(settings: settings)
+  var allocator: EntityAllocator = createEntityAllocator()
+  let wantedOne: Int = tilesToLoad(settings: settings, x: 0.0, y: 0.0).length
+  var centers: List(TileCenter) = {
+    TileCenter { x: 0.0, y: 0.0 }
+    TileCenter { x: 1000.0, y: 0.0 }
+  }
+  var most: Int = 0
+  loop var frame: Int = 0, frame < 40, ++frame {
+    streamTilesAround(streamer: streamer, allocator: allocator, centers: centers)
+    most = Math.max(a: most, b: usedTileSlots(streamer: streamer))
+  }
+  log(
+    "each center wants {wantedOne} tiles; held near the first {heldNear(
+      streamer: streamer
+      x: 0.0
+      y: 0.0
+    )}, near the second {heldNear(streamer: streamer, x: 1000.0, y: 0.0)}"
+  )
+  log("loads {streamer.loads}, at most {most} slots used of {settings.slotCount}")
+  # the second center flies far away: its tiles go, the first's stay
+  centers.set(index: 1, value: TileCenter { x: 5000.0, y: 5000.0 })
+  loop var frame: Int = 0, frame < 40, ++frame {
+    streamTilesAround(streamer: streamer, allocator: allocator, centers: centers)
+  }
+  log(
+    "after the second moved: near the first {heldNear(streamer: streamer, x: 0.0, y: 0.0)}, near where it was {heldNear(
+      streamer: streamer
+      x: 1000.0
+      y: 0.0
+    )}, near where it is {heldNear(streamer: streamer, x: 5000.0, y: 5000.0)}, let go {streamer.unloads}"
+  )
+}
