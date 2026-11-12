@@ -1,0 +1,499 @@
+# app3d/UtilityLines — telephone or power lines along a road: wooden poles on one side of the
+# road's line, a crossarm with insulators atop each, and wires sagging from pole to pole. All
+# made in code, low-poly, for a stylized world; pure functions over the app's own data:
+#
+#   utilityPolesAlong   the poles' places along a line (app3d/RoadMesh roadLine's, or any),
+#                       `spacing` apart, `offset` to one side, each facing along the line
+#   utilityPoleNear     the pole near: a tapered eight-sided pole, the crossarm, insulators
+#   utilityPoleMid      farther: the pole and the crossarm as boxes (a few dozen triangles)
+#   utilityPoleFar      far: the pole and the crossarm as two flat quads, for a level that
+#                       turns to the eye (app3d/PropField PropLod facesCamera): a billboard
+#   utilityWireChunks   the wires between consecutive poles (a gap ends a run), as meshes of a
+#                       few spans each with the sphere round them, so an app draws only those
+#                       near the eye (thin wires far away only shimmer)
+#
+# An app puts the poles in a PropField as one kind with the three levels (near, mid, far), so
+# they stream, cull and fade as its trees do; each pole's foot at its ground height (z). The
+# wires take the poles with their ground heights.
+import Math
+import Vec3
+open Vec2
+open Mesh3d
+
+type UtilityPoleStyle {
+  # The pole: its height over the ground, its radius at the foot and the top (m)
+  height: Float = 8.5
+  footRadius: Float = 0.15
+  topRadius: Float = 0.1
+  # The crossarm: how far below the top, its half length across the road's way, its thickness
+  crossarmDrop: Float = 0.45
+  crossarmHalf: Float = 0.95
+  crossarmThickness: Float = 0.11
+  # The wires: how many (on insulators spread along the crossarm), their radius, how far they sag
+  # at a span's middle (m), and the segments each span's curve has
+  wireCount: Int = 3
+  wireRadius: Float = 0.018
+  wireSag: Float = 0.7
+  wireSegments: Int = 8
+}
+
+# A pole: its foot (z the ground's height there), and the way the line runs at it (radians about
+# +z from +x); `run` counts the runs of poles a gap broke the line into
+type UtilityPole {
+  x: Float
+  y: Float
+  z: Float
+  heading: Float
+  run: Int
+}
+
+# A chunk of wires: its mesh, and the sphere round it
+type UtilityWireChunk {
+  mesh: MeshData
+  x: Float
+  y: Float
+  z: Float
+  radius: Float
+}
+
+# ----- the mesh builders ----------------------------------------------------------------
+func utilityPushVert(
+  mesh: mod MeshData
+  at: view Vec3
+  normal: view Vec3
+  u: view Float
+  v: view Float
+) {
+  mesh.verts.add(value: at.x)
+  mesh.verts.add(value: at.y)
+  mesh.verts.add(value: at.z)
+  mesh.verts.add(value: normal.x)
+  mesh.verts.add(value: normal.y)
+  mesh.verts.add(value: normal.z)
+  mesh.verts.add(value: u)
+  mesh.verts.add(value: v)
+  mesh.vertCount = mesh.vertCount + 1
+}
+
+# One flat quad: its four corners counter-clockwise seen along `normal`
+func utilityAddQuad(
+  mesh: mod MeshData
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  d: view Vec3
+  normal: view Vec3
+) {
+  let first: Int = mesh.vertCount
+  utilityPushVert(
+    mesh: mesh
+    at: a
+    normal: normal
+    u: 0.0
+    v: 0.0
+  )
+  utilityPushVert(
+    mesh: mesh
+    at: b
+    normal: normal
+    u: 1.0
+    v: 0.0
+  )
+  utilityPushVert(
+    mesh: mesh
+    at: c
+    normal: normal
+    u: 1.0
+    v: 1.0
+  )
+  utilityPushVert(
+    mesh: mesh
+    at: d
+    normal: normal
+    u: 0.0
+    v: 1.0
+  )
+  mesh.indices.add(value: first)
+  mesh.indices.add(value: first + 1)
+  mesh.indices.add(value: first + 2)
+  mesh.indices.add(value: first)
+  mesh.indices.add(value: first + 2)
+  mesh.indices.add(value: first + 3)
+}
+
+# A box round `center` along three axes (unit, at right angles), half `size` along each
+func utilityAddBox(
+  mesh: mod MeshData
+  center: view Vec3
+  axisX: view Vec3
+  axisY: view Vec3
+  axisZ: view Vec3
+  size: view Vec3
+) {
+  let x: Vec3 = Vec3.vscale(a: axisX, s: size.x)
+  let y: Vec3 = Vec3.vscale(a: axisY, s: size.y)
+  let z: Vec3 = Vec3.vscale(a: axisZ, s: size.z)
+  # each face: its normal, then its corners counter-clockwise seen from outside
+  loop var face: Int = 0, face < 6, ++face {
+    var normal: Vec3 = axisX
+    var u: Vec3 = y
+    var v: Vec3 = z
+    var out: Vec3 = x
+    if face is 1 {
+      normal = Vec3.vscale(a: axisX, s: -1.0)
+      u = z
+      v = y
+      out = Vec3.vscale(a: x, s: -1.0)
+    } else if face is 2 {
+      normal = axisY
+      u = z
+      v = x
+      out = y
+    } else if face is 3 {
+      normal = Vec3.vscale(a: axisY, s: -1.0)
+      u = x
+      v = z
+      out = Vec3.vscale(a: y, s: -1.0)
+    } else if face is 4 {
+      normal = axisZ
+      u = x
+      v = y
+      out = z
+    } else if face is 5 {
+      normal = Vec3.vscale(a: axisZ, s: -1.0)
+      u = y
+      v = x
+      out = Vec3.vscale(a: z, s: -1.0)
+    }
+    let middle: Vec3 = Vec3.vadd(a: center, b: out)
+    utilityAddQuad(
+      mesh: mesh
+      a: Vec3.vsub(a: Vec3.vsub(a: middle, b: u), b: v)
+      b: Vec3.vsub(a: Vec3.vadd(a: middle, b: u), b: v)
+      c: Vec3.vadd(a: Vec3.vadd(a: middle, b: u), b: v)
+      d: Vec3.vadd(a: Vec3.vsub(a: middle, b: u), b: v)
+      normal: normal
+    )
+  }
+}
+
+func utilityEmptyMesh() ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: 0)
+    indices: List.create(Int, cap: 0)
+    vertCount: 0
+  }
+}
+
+func utilityUp() ret Vec3 {
+  ret Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+}
+
+# ----- the poles ------------------------------------------------------------------------
+# The crossarm's height over the foot
+func utilityCrossarmHeight(style: view UtilityPoleStyle) ret Float {
+  ret style.height - style.crossarmDrop
+}
+
+# Where wire `index` hangs on the crossarm, from the pole's middle across the line (m)
+func utilityWireAcross(style: view UtilityPoleStyle, index: view Int) ret Float {
+  if style.wireCount <= 1 {
+    ret 0.0
+  }
+  let reach: Float = style.crossarmHalf * 0.85
+  ret 0.0 - reach + 2.0 * reach * index.toFloat() / (style.wireCount - 1).toFloat()
+}
+
+# The pole near, in its own frame (foot at the origin, +x along the line, +y across it, +z up):
+# an eight-sided pole narrowing to its top, the crossarm across the line, an insulator per wire
+func utilityPoleNear(style: view UtilityPoleStyle) ret MeshData {
+  var mesh: MeshData = utilityEmptyMesh()
+  let sides: Int = 8
+  loop var i: Int = 0, i < sides, ++i {
+    let a0: Float = 6.2831855 * i.toFloat() / sides.toFloat()
+    let a1: Float = 6.2831855 * (i + 1).toFloat() / sides.toFloat()
+    let mid: Float = (a0 + a1) * 0.5
+    let normal: Vec3 = Vec3.create(x: Math.cos(x: mid), y: Math.sin(x: mid), z: 0.0)
+    utilityAddQuad(
+      mesh: mesh
+      a: Vec3.create(
+        x: Math.cos(x: a0) * style.footRadius
+        y: Math.sin(x: a0) * style.footRadius
+        z: 0.0
+      )
+      b: Vec3.create(
+        x: Math.cos(x: a1) * style.footRadius
+        y: Math.sin(x: a1) * style.footRadius
+        z: 0.0
+      )
+      c: Vec3.create(
+        x: Math.cos(x: a1) * style.topRadius
+        y: Math.sin(x: a1) * style.topRadius
+        z: style.height
+      )
+      d: Vec3.create(
+        x: Math.cos(x: a0) * style.topRadius
+        y: Math.sin(x: a0) * style.topRadius
+        z: style.height
+      )
+      normal: normal
+    )
+  }
+  # its top, a flat cap
+  utilityAddBox(
+    mesh: mesh
+    center: Vec3.create(x: 0.0, y: 0.0, z: style.height)
+    axisX: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    axisY: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    axisZ: utilityUp()
+    size: Vec3.create(x: style.topRadius, y: style.topRadius, z: 0.02)
+  )
+  utilityAddCrossarm(mesh: mesh, style: style)
+  # the insulators: short posts on the crossarm, one per wire
+  loop var wire: Int = 0, wire < style.wireCount, ++wire {
+    utilityAddBox(
+      mesh: mesh
+      center: Vec3.create(
+        x: 0.0
+        y: utilityWireAcross(style: style, index: wire)
+        z: utilityCrossarmHeight(style: style) + style.crossarmThickness * 0.5 + 0.09
+      )
+      axisX: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+      axisY: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+      axisZ: utilityUp()
+      size: Vec3.create(x: 0.035, y: 0.035, z: 0.09)
+    )
+  }
+  ret mesh
+}
+
+func utilityAddCrossarm(mesh: mod MeshData, style: view UtilityPoleStyle) {
+  utilityAddBox(
+    mesh: mesh
+    center: Vec3.create(x: 0.0, y: 0.0, z: utilityCrossarmHeight(style: style))
+    axisX: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    axisY: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    axisZ: utilityUp()
+    size: Vec3.create(
+      x: style.crossarmThickness * 0.5
+      y: style.crossarmHalf
+      z: style.crossarmThickness * 0.5
+    )
+  )
+}
+
+# The pole farther: a square pole and the crossarm, two boxes
+func utilityPoleMid(style: view UtilityPoleStyle) ret MeshData {
+  var mesh: MeshData = utilityEmptyMesh()
+  let radius: Float = (style.footRadius + style.topRadius) * 0.5
+  utilityAddBox(
+    mesh: mesh
+    center: Vec3.create(x: 0.0, y: 0.0, z: style.height * 0.5)
+    axisX: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    axisY: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    axisZ: utilityUp()
+    size: Vec3.create(x: radius, y: radius, z: style.height * 0.5)
+  )
+  utilityAddCrossarm(mesh: mesh, style: style)
+  ret mesh
+}
+
+# The pole far: the pole and the crossarm as two flat quads in the x = 0 plane, facing +x; a
+# level with facesCamera turns it to the eye about +z (a billboard)
+func utilityPoleFar(style: view UtilityPoleStyle) ret MeshData {
+  var mesh: MeshData = utilityEmptyMesh()
+  let facing: Vec3 = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  let half: Float = (style.footRadius + style.topRadius) * 0.5
+  utilityAddQuad(
+    mesh: mesh
+    a: Vec3.create(x: 0.0, y: half, z: 0.0)
+    b: Vec3.create(x: 0.0, y: 0.0 - half, z: 0.0)
+    c: Vec3.create(x: 0.0, y: 0.0 - half, z: style.height)
+    d: Vec3.create(x: 0.0, y: half, z: style.height)
+    normal: facing
+  )
+  let arm: Float = utilityCrossarmHeight(style: style)
+  let thick: Float = style.crossarmThickness * 0.5
+  utilityAddQuad(
+    mesh: mesh
+    a: Vec3.create(x: 0.0, y: style.crossarmHalf, z: arm - thick)
+    b: Vec3.create(x: 0.0, y: 0.0 - style.crossarmHalf, z: arm - thick)
+    c: Vec3.create(x: 0.0, y: 0.0 - style.crossarmHalf, z: arm + thick)
+    d: Vec3.create(x: 0.0, y: style.crossarmHalf, z: arm + thick)
+    normal: facing
+  )
+  ret mesh
+}
+
+# ----- along a line ---------------------------------------------------------------------
+# The poles along `line` (closed: back to its first point), one each `spacing` m of its length
+# from `start` m in, `offset` m to its left (negative: its right), each facing along the line
+# there; z 0 (the app sets each foot's ground height)
+func utilityPolesAlong(
+  line: view List(Vec2)
+  closed: view Bool
+  spacing: view Float
+  start: view Float
+  offset: view Float
+) ret List(UtilityPole) {
+  var poles: List(UtilityPole) = {}
+  var stretches: Int = line.length - 1
+  if closed {
+    stretches = line.length
+  }
+  var next: Float = start
+  var walked: Float = 0.0
+  loop var i: Int = 0, i < stretches, ++i {
+    let from: Vec2 = line.copyAtDefault(index: i)
+    let to: Vec2 = line.copyAtDefault(index: (i + 1) % line.length)
+    let dx: Float = to.x - from.x
+    let dy: Float = to.y - from.y
+    let length: Float = Math.sqrt(x: dx * dx + dy * dy)
+    if length > 0.0001 {
+      loop next <= walked + length {
+        let share: Float = (next - walked) / length
+        poles.add(value: UtilityPole {
+          x: from.x + dx * share - dy / length * offset
+          y: from.y + dy * share + dx / length * offset
+          z: 0.0
+          heading: Math.atan2(y: dy, x: dx)
+          run: 0
+        })
+        next = next + spacing
+      }
+    }
+    walked = walked + length
+  }
+  ret poles
+}
+
+# Where wire `index` leaves pole `pole` (on its insulator, in the world)
+func utilityWirePoint(
+  pole: view UtilityPole
+  style: view UtilityPoleStyle
+  index: view Int
+) ret Vec3 {
+  let across: Float = utilityWireAcross(style: style, index: index)
+  ret Vec3.create(
+    x: pole.x - Math.sin(x: pole.heading) * across
+    y: pole.y + Math.cos(x: pole.heading) * across
+    z: pole.z + utilityCrossarmHeight(style: style) + style.crossarmThickness * 0.5 + 0.17
+  )
+}
+
+# The point `share` (0..1) along a wire from `from` to `to`, sagging `sag` m at its middle
+func utilityWireAt(
+  from: view Vec3
+  to: view Vec3
+  share: view Float
+  sag: view Float
+) ret Vec3 {
+  ret Vec3.create(
+    x: from.x + (to.x - from.x) * share
+    y: from.y + (to.y - from.y) * share
+    z: from.z + (to.z - from.z) * share - 4.0 * sag * share * (1.0 - share)
+  )
+}
+
+# One span's wires into `mesh`: each a chain of thin boxes along its curve
+func utilityAddSpan(
+  mesh: mod MeshData
+  from: view UtilityPole
+  to: view UtilityPole
+  style: view UtilityPoleStyle
+) {
+  loop var wire: Int = 0, wire < style.wireCount, ++wire {
+    let start: Vec3 = utilityWirePoint(pole: from, style: style, index: wire)
+    let end: Vec3 = utilityWirePoint(pole: to, style: style, index: wire)
+    loop var segment: Int = 0, segment < style.wireSegments, ++segment {
+      let a: Vec3 = utilityWireAt(
+        from: start
+        to: end
+        share: segment.toFloat() / style.wireSegments.toFloat()
+        sag: style.wireSag
+      )
+      let b: Vec3 = utilityWireAt(
+        from: start
+        to: end
+        share: (segment + 1).toFloat() / style.wireSegments.toFloat()
+        sag: style.wireSag
+      )
+      let along: Vec3 = Vec3.vsub(a: b, b: a)
+      let length: Float = Vec3.vlen(a: along)
+      if length > 0.0001 {
+        let axisX: Vec3 = Vec3.vscale(a: along, s: 1.0 / length)
+        var side: Vec3 = Vec3.vcross(a: axisX, b: utilityUp())
+        let sideLength: Float = Vec3.vlen(a: side)
+        if sideLength < 0.0001 {
+          side = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+        } else {
+          side = Vec3.vscale(a: side, s: 1.0 / sideLength)
+        }
+        let axisZ: Vec3 = Vec3.vcross(a: side, b: axisX)
+        utilityAddBox(
+          mesh: mesh
+          center: Vec3.vscale(a: Vec3.vadd(a: a, b: b), s: 0.5)
+          axisX: axisX
+          axisY: side
+          axisZ: axisZ
+          size: Vec3.create(x: length * 0.5, y: style.wireRadius, z: style.wireRadius)
+        )
+      }
+    }
+  }
+}
+
+# The wires between consecutive poles of the same run, `spans` spans a chunk, each chunk with the
+# sphere round its poles
+func utilityWireChunks(
+  poles: view List(UtilityPole)
+  style: view UtilityPoleStyle
+  spans: view Int
+) ret List(UtilityWireChunk) {
+  var chunks: List(UtilityWireChunk) = {}
+  var mesh: MeshData = utilityEmptyMesh()
+  var count: Int = 0
+  var lowX: Float = 0.0
+  var lowY: Float = 0.0
+  var highX: Float = 0.0
+  var highY: Float = 0.0
+  var sumZ: Float = 0.0
+  loop var i: Int = 0, i + 1 < poles.length, ++i {
+    let from: UtilityPole = poles.copyAtDefault(index: i)
+    let to: UtilityPole = poles.copyAtDefault(index: i + 1)
+    if from.run is to.run {
+      if count is 0 {
+        lowX = Math.min(a: from.x, b: to.x)
+        lowY = Math.min(a: from.y, b: to.y)
+        highX = Math.max(a: from.x, b: to.x)
+        highY = Math.max(a: from.y, b: to.y)
+        sumZ = 0.0
+      }
+      utilityAddSpan(
+        mesh: mesh
+        from: from
+        to: to
+        style: style
+      )
+      lowX = Math.min(a: lowX, b: Math.min(a: from.x, b: to.x))
+      lowY = Math.min(a: lowY, b: Math.min(a: from.y, b: to.y))
+      highX = Math.max(a: highX, b: Math.max(a: from.x, b: to.x))
+      highY = Math.max(a: highY, b: Math.max(a: from.y, b: to.y))
+      sumZ = sumZ + from.z + to.z
+      count = count + 1
+    }
+    let last: Bool = i + 2 >= poles.length
+    if count > 0 and (count >= spans or last or from.run is not to.run) {
+      chunks.add(value: UtilityWireChunk {
+        mesh: own mesh
+        x: (lowX + highX) * 0.5
+        y: (lowY + highY) * 0.5
+        z: sumZ / (count * 2).toFloat() + style.height
+        radius: Math.sqrt(x: (highX - lowX) * (highX - lowX) + (highY - lowY) * (highY - lowY)) * 0.5 + style.crossarmHalf
+      })
+      mesh = utilityEmptyMesh()
+      count = 0
+    }
+  }
+  ret chunks
+}

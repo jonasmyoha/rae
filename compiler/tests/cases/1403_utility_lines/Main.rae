@@ -1,0 +1,67 @@
+# Telephone lines along a road (app3d/UtilityLines): the poles every `spacing` m from `start`, to
+# the line's left at `offset`, facing along it; the three pole levels small (near, mid, a flat
+# billboard far); the wires sagging between the poles of a run, in chunks, none across a gap.
+import Math
+import Vec3
+open Vec2
+open Mesh3d
+open app3d/UtilityLines
+
+func triangles(mesh: view MeshData) ret Int {
+  ret mesh.indices.length / 3
+}
+
+func main() {
+  let line: List(Vec2) = { Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 100.0, y: 0.0 } }
+  let poles: List(UtilityPole) = utilityPolesAlong(
+    line: line
+    closed: false
+    spacing: 40.0
+    start: 10.0
+    offset: 5.0
+  )
+  var places: String = ""
+  loop let pole: view UtilityPole in poles {
+    places = "{places} ({pole.x.toInt()}, {pole.y.toInt()})"
+  }
+  log(
+    "{poles.length} poles:{places}, heading {(poles.copyAtDefault(index: 0).heading * 1000.0).toInt()}"
+  )
+  let right: List(UtilityPole) = utilityPolesAlong(
+    line: line
+    closed: false
+    spacing: 40.0
+    start: 10.0
+    offset: -5.0
+  )
+  log("on its right: y {right.copyAtDefault(index: 0).y.toInt()}")
+  let style: UtilityPoleStyle = {}
+  log(
+    "triangles near {triangles(mesh: utilityPoleNear(style: style))}, mid {triangles(
+      mesh: utilityPoleMid(style: style)
+    )}, far {triangles(mesh: utilityPoleFar(style: style))}"
+  )
+  let middle: Vec3 = utilityWireAt(
+    from: Vec3.create(x: 0.0, y: 0.0, z: 8.0)
+    to: Vec3.create(x: 40.0, y: 0.0, z: 8.0)
+    share: 0.5
+    sag: style.wireSag
+  )
+  log("a wire's middle sags to {(middle.z * 10.0 + 0.5).toInt()} dm")
+  let chunks: List(UtilityWireChunk) = utilityWireChunks(poles: poles, style: style, spans: 6)
+  log(
+    "one run of 3 poles: {chunks.length} chunk, {triangles(
+      mesh: chunks.copyAtDefault(index: 0).mesh
+    )} triangles, round ({chunks.copyAtDefault(index: 0).x.toInt()}, {chunks.copyAtDefault(index: 0).y.toInt()})"
+  )
+  var broken: List(UtilityPole) = poles
+  if let last: mod UtilityPole = broken.modAt(index: 2) {
+    last.run = 1
+  }
+  log(
+    "a gap before the third: {utilityWireChunks(poles: broken, style: style, spans: 6).length} chunk, {triangles(
+      mesh: utilityWireChunks(poles: broken, style: style, spans: 6).copyAtDefault(index: 0).mesh
+    )} triangles"
+  )
+  log("one span a chunk: {utilityWireChunks(poles: poles, style: style, spans: 1).length} chunks")
+}
