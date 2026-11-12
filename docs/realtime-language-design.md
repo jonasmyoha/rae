@@ -4,7 +4,7 @@ Status: **proposal, nothing implemented** (2026-11-11). New syntax needs
 approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
 2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
 function with optional marks on helpers (R3), `cExport("cName")` (R4), and
-Homebrew LLVM for RealtimeSanitizer (R7). R5 and R6 wait.
+Homebrew LLVM for RealtimeSanitizer (R7). R5 is proposed (§4.3, 2026-11-12); R6 waits.
 
 `audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
 real-time thread: no allocation, no locks, no system calls that can wait, no
@@ -247,10 +247,106 @@ so the error of §3.5 already enforces it.
 ### 4.3 Threads may only call what their role allows
 
 Two roles beyond `realtime` already exist in practice: platform UI and window
-APIs are main-thread only (`concurrency-model.md` §3), and some iOS calls
-(`AVAudioSession` changes) are best kept there too. A later `mainThread` mark on
-externs would let the same analysis reject a `spawn`ed or `realtime` function
-that reaches one. Not needed for the first audio step; listed as §9 R5.
+APIs are main-thread only (`concurrency-model.md` §3), and some iOS calls are
+kept there too. Today that is a comment. A `mainThread` mark on externs would
+let the same analysis reject a `spawn`ed, `parallelLoop` or `realtime` function
+that reaches one. §9 R5. **Proposal (2026-11-12), nothing built:**
+
+#### 4.3.1 Which externs are main-thread only today
+
+Surveyed in `lib/` and `packages/` (2026-11-12). "Main thread" means **the
+thread that runs Rae's `main`**: the process's main thread on macOS, iOS,
+Linux, Windows and the browser. On Android it is SDL's thread, not Java's UI
+thread; the Java glue that needs the UI thread already moves the work itself
+(`RaeAudioSession.requestPermissions` uses `runOnUiThread`), so it can be called
+from any thread and is not marked.
+
+| module | externs | why main-thread only |
+|---|---|---|
+| `lib/Sdl3` | all 17 (window, present, input, file dialog) | SDL's video and event functions; AppKit/UIKit under them |
+| `lib/Gpu2d`, `Gpu2dTextInput`, `Gpu2dWindowIcon`, `Gpu2dSimulatedInput` | the window, pointer, touch, keyboard, text input, clipboard and edit-menu calls (about 50) | SDL window and event state, read after the event pump |
+| `lib/Display`, `lib/Device` | window scale, panel modes; touch devices, media queries | SDL window / display queries; the browser's DOM |
+| `lib/Haptics` | 4 | UIKit's feedback generators |
+| `lib/Location` | 11 | `CLLocationManager` delivers to the run loop of the thread that made it, which is the main one |
+| `lib/Battery`, `lib/ReduceMotion`, `lib/AppLinks` | 3, 1, 2 | `UIDevice`, `UIAccessibility`; links come from the app delegate on the main queue |
+| `packages/audio` | `session_observe`, `session_poll`, `remote_enable`, `remote_poll`, `run_loop_pump`, `midi_client`, `midi_poll` | the observers and command handlers run on the main queue and write a one-reader queue the main thread reads; `run_loop_pump` runs the CALLING thread's run loop, so off the main thread it does nothing useful; a CoreMIDI client notifies on its creating thread's run loop |
+
+Not marked, on purpose: the WebGPU bindings (`wgpu-native` is thread-safe, and
+encoding on a worker is a future feature); `EventLoop.wake` (made to be called
+from a worker); `FileNotify`, `Keychain`, `LocalNotification`, the sockets and
+the audio device, decoder and file calls; `AVAudioSession` configure and
+activate (Apple advises against the main thread, as activation can block). Each
+row is checked against the platform's documentation before its mark lands; a
+wrong mark refuses good code, a missing one only leaves today's behavior.
+
+#### 4.3.2 The keyword
+
+`mainThread`, in the modifier position, where `realtime` and `blocking` sit:
+
+```rae
+func nativeSetClipboardText(text: view String) mainThread unsafe extern("rae_ext_Gpu2d_setClipboardText")
+func pollRemoteCommands(this: mod NowPlaying) mainThread { ... }
+```
+
+- On an **extern** it is a promise about the C, like `realtime`: "call this
+  only from the main thread".
+- On a **Rae function** it says the same and is checked: a function marked
+  `mainThread` counts as a main-thread call for its callers. Two uses: a `lib/`
+  wrapper that promises it (R3's rule: a lib function keeps its promise
+  visible), and a `cExport` callback the platform runs on the main queue
+  (§6.1), which may then call main-thread externs.
+- Names not chosen: `uiThread` (on Android that is a different thread from
+  Rae's main), `main` (the entry function's name), `mainOnly` (less plain).
+
+#### 4.3.3 What the analysis checks
+
+The same graph and fixed point as `realtime` (`realtime_check.c`): "reaches a
+main-thread call" is one more effect bit, set by a `mainThread` extern or
+function and carried up to every caller. Nothing in between is marked. The
+roots that run **off** the main thread are:
+
+1. the function a `spawn` starts (its call graph node, as the may-wait rule
+   already finds it);
+2. the body of a `parallelLoop` (its calls, as one more root per loop);
+3. a `realtime` function (the audio thread, a MIDI or video callback);
+4. a `cExport` function that is not marked `mainThread` (C calls it from a
+   thread Rae does not know).
+
+A root that reaches the bit is an error, with the chain, as in §3.5:
+
+```
+Loader.rae:31:5: error: `decodeThumbnail` runs on another thread (spawned at
+  Gallery.rae:88), but it reaches `setClipboardText`, which is main-thread only:
+    decodeThumbnail (Loader.rae:12) -> copyName (Loader.rae:30) -> here
+  Send the request to the main loop instead (a Channel or an event the main
+  loop reads), and call it there.
+```
+
+`rae build --report-realtime` lists the main-thread externs each root reaches.
+The browser build without threads runs a `spawn` on the main thread, but the
+rule is the same everywhere, so code that passes there also passes natively.
+
+#### 4.3.4 Code that is main-thread by convention
+
+A game's `update`, a UI's systems, the audio engine's `Audio.update` and
+`AudioSession`'s polling are main-thread code by convention: `main` calls them
+from its loop (or `mainLoop`). They need **no mark**: being called from `main`
+is allowed, and the analysis only looks at the four roots above. They become an
+error only on the day someone moves one onto a worker (spawns it, or calls it
+from a `parallelLoop`), which is the mistake the rule exists to catch: today it
+crashes inside AppKit or reads a one-reader queue from two threads. Marking
+them is optional, for a reader (and turns the convention into a checked
+promise: a marked function reached from a worker root is the same error).
+
+#### 4.3.5 Order of building (after a yes)
+
+1. The effect bit and the four roots in `realtime_check.c`; `mainThread` parses
+   and formats in the modifier position (`blocking`'s code path).
+2. A **warn-only** first run (`RAE_MAIN_THREAD_CHECK=warn`), with the marks of
+   4.3.1, over every program in the tree, counting what it would refuse (R8's
+   method), so a wrong mark shows before it is an error.
+3. The error; fixtures for each root and for an allowed `cExport mainThread`
+   callback; a stress case for the bug it prevents.
 
 ### 4.4 Unbounded work
 
@@ -709,7 +805,13 @@ steps that need them.
   for their callers carry it always (§3.3).
 - **R4 — calling Rae from C. Decided 2026-11-11:** the modifier
   `cExport("cName")` (§6.1).
-- **R5 — `mainThread`** for externs, later (§4.3).
+- **R5 — `mainThread`** (§4.3). **Proposed 2026-11-12, waiting for a yes:**
+  the modifier `mainThread` on externs and on Rae functions; inferred upward
+  like `realtime`, so nothing between is marked; an error when a `spawn`ed
+  function, a `parallelLoop` body, a `realtime` function or an unmarked
+  `cExport` function reaches one; code that `main` calls (a game's update)
+  needs no mark. About 100 externs marked (§4.3.1); built warn-only first,
+  counting refusals over the tree, then as an error.
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
   the may-wait rule (§6.6).
 - **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:
