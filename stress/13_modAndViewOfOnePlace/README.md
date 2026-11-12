@@ -32,6 +32,15 @@ without run-time overlap checks (docs/realtime-language-design.md §4.6, the
 audit of 2026-11-12). Until it exists, emitting `restrict` would be wrong:
 the compiler could cache `input.length()` across the writes above.
 
+## Decided (2026-11-12): no rule for now
+
+A rule against overlapping arguments was measured (46 call sites in the tree
+would be refused) and not adopted: a whole and its part passed together, even
+both as `mod`, is a legitimate pattern, as in C, C++, Java and Go. This case
+stays as the record of what Rae does; `restrict` will only come where the
+compiler proves no overlap from every call site (docs/realtime-language-design.md
+§4.6).
+
 ## Elsewhere
 
 Rust refuses it at compile time; Swift checks "exclusive access" (at compile

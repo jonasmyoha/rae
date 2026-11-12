@@ -364,6 +364,21 @@ ways to meet the 44 mod-and-view sites:
 Either makes `restrict` on the arguments' list data sound for the loop
 step that follows.
 
+**Decided (2026-11-12): no rule for now (option C).** Passing a whole and
+its part, even both as `mod` (`uiUpdate(uiSystems: app.inputSystem.uiSystems,
+inputSystem: app.inputSystem)`), is a legitimate pattern: a struct's field
+never moves, so both references stay valid, and a write through one is seen
+through the other, as in C, C++, Java, Go and Swift classes. An exclusive-access
+rule (Rust's, Swift's) costs every program a rule to learn for a speed-up not
+measured yet. What stays: the measuring mode (`RAE_EXCLUSIVE_ACCESS=warn`, off
+by default) and `stress/13_modAndViewOfOnePlace`, which records the behavior.
+What comes instead: measure what clang already vectorizes in a real DSP loop
+(it guards a loop over two pointers with a cheap run-time overlap check), and
+only if `restrict` pays, have the compiler prove it per function, from every
+call site in the program (Rae compiles the whole program into one C file),
+adding it only where no call passes overlapping arguments. Nothing is refused;
+the language does not change.
+
 ---
 
 ## 5. Checking the C that Rae links
@@ -669,7 +684,9 @@ steps that need them.
 - **R5 — `mainThread`** for externs, later (§4.3).
 - **R6 — an explicit way to start a dedicated thread** instead of relying on
   the may-wait rule (§6.6).
-- **R8 — exclusive access for `mod` arguments** (§4.6): refuse a call that
+- **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:
+  no rule for now**; `restrict` only where the compiler proves it from every
+  call site, and only if a measurement shows it pays. The proposal was: refuse a call that
   passes one place, or a place and a part of it, as `mod` together with
   another `mod` or `view` argument. It fixes a foot gun on its own
   (`stress/13_modAndViewOfOnePlace`) and is what makes `restrict` sound. A
