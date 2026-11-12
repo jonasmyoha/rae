@@ -45,6 +45,7 @@ open ecs/Event
 open HotReload
 open app3d/WindowPresetMenu
 import Gpu2d
+import Gpu2dWheel
 import Math
 
 # The button's and the items' action ids
@@ -60,6 +61,12 @@ const modeMenuCameraRotationActionId: String = "menu.cameraRotation"
 const modeMenuResetActionId: String = "menu.reset"
 
 const modeMenuMobileActionId: String = "menu.simulateMobile"
+
+const modeMenuControlsActionId: String = "menu.controls"
+
+const modeMenuControlsItemNodeId: String = "MenuControlsItem"
+
+const modeMenuControlsLabelNodeId: String = "MenuControlsLabel"
 
 # The nodes: the "..." button, the menu, its items and the camera item's label
 const modeMenuButtonNodeId: String = "ModeButton"
@@ -119,6 +126,30 @@ func cameraRotationItemText(reversed: view Bool) ret String {
     ret "Reverse camera rotation: on"
   }
   ret "Reverse camera rotation: off"
+}
+
+# The controls item's text: a mouse (its right button looks) or a trackpad (any drag looks)
+func controlsItemText(mouse: view Bool) ret String {
+  if mouse {
+    ret "Controls: mouse"
+  }
+  ret "Controls: trackpad"
+}
+
+# Does the camera rig look with the right button (a mouse) after this frame? Once the player has
+# chosen (`chosen`) it stays; until then a scroll this frame decides it: whole steps a wheel mouse,
+# fractions a trackpad (Gpu2dWheel.wheelKind)
+func lookWithRightAfter(lookWithRight: view Bool, wheelKind: view Int, chosen: view Bool) ret Bool {
+  if chosen {
+    ret lookWithRight
+  }
+  if wheelKind is Gpu2dWheel.wheelKindStepped {
+    ret true
+  }
+  if wheelKind is Gpu2dWheel.wheelKindPrecise {
+    ret false
+  }
+  ret lookWithRight
 }
 
 # The mobile item's text for the menu's simulateMobile
@@ -301,6 +332,32 @@ func updateModeMenuItems(
       nodeId: modeMenuCameraLabelNodeId
       value: cameraRotationItemText(reversed: rig.reverseDrag)
     )
+    changed = true
+  }
+  # The controls item, in an app that has it: a choice there stays; until then a scroll decides
+  if menu.controlsItem {
+    if modeMenuTapped(world: world, actionId: modeMenuControlsActionId) {
+      rig.lookWithRightButton = rig.lookWithRightButton is false
+      menu.controlsChosen = true
+    }
+    rig.lookWithRightButton = lookWithRightAfter(
+      lookWithRight: rig.lookWithRightButton
+      wheelKind: Gpu2dWheel.wheelKind()
+      chosen: menu.controlsChosen
+    )
+  }
+  # Shown in an app that has it, and not on a phone (fingers, no mouse)
+  let controlsShown: Bool = menu.controlsItem and not menu.simulateMobile
+  if menu.controlsLabelMouse is not rig.lookWithRightButton or menu.controlsShown is not controlsShown or menu.controlsLabelWritten is false {
+    menu.controlsLabelMouse = rig.lookWithRightButton
+    menu.controlsShown = controlsShown
+    menu.controlsLabelWritten = true
+    bindNodeText(
+      world: world
+      nodeId: modeMenuControlsLabelNodeId
+      value: controlsItemText(mouse: rig.lookWithRightButton)
+    )
+    bindNodeActive(world: world, nodeId: modeMenuControlsItemNodeId, value: controlsShown)
     changed = true
   }
   # The mobile item says what the menu does; a phone build has nothing to
