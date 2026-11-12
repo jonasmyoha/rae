@@ -82,6 +82,14 @@ typedef uint32x4_t rae_m4_v;
 #define RAE_M4_NOT(a) vmvnq_u32(a)
 #define RAE_M4_ANY(m) (vmaxvq_u32(m) != 0)
 #define RAE_M4_ALL(m) (vminvq_u32(m) != 0)
+/* a lane's bits as an integer and back, and integer lane arithmetic (the
+ * bit operations: powerOfTwo, exponentOf, significandOf) */
+#define RAE_F4_BITS(a) vreinterpretq_u32_f32(a)
+#define RAE_F4_FROM_BITS(m) vreinterpretq_f32_u32(m)
+#define RAE_U4_SPLAT(c) vdupq_n_u32(c)
+#define RAE_U4_ADD(a, b) vaddq_u32(a, b)
+#define RAE_U4_SHL(a, n) vshlq_n_u32((a), (n))
+#define RAE_U4_SHR(a, n) vshrq_n_u32((a), (n))
 #elif defined(RAE_F4_PATH_SSE2)
 typedef __m128 rae_f4_v;
 typedef __m128i rae_m4_v;
@@ -109,6 +117,12 @@ typedef __m128i rae_m4_v;
 /* A lane is true when any bit is set: compare each 32-bit lane with zero. */
 #define RAE_M4_ANY(m) (_mm_movemask_epi8(_mm_cmpeq_epi32((m), _mm_setzero_si128())) != 0xFFFF)
 #define RAE_M4_ALL(m) (_mm_movemask_epi8(_mm_cmpeq_epi32((m), _mm_setzero_si128())) == 0)
+#define RAE_F4_BITS(a) _mm_castps_si128(a)
+#define RAE_F4_FROM_BITS(m) _mm_castsi128_ps(m)
+#define RAE_U4_SPLAT(c) _mm_set1_epi32((int)(c))
+#define RAE_U4_ADD(a, b) _mm_add_epi32(a, b)
+#define RAE_U4_SHL(a, n) _mm_slli_epi32((a), (n))
+#define RAE_U4_SHR(a, n) _mm_srli_epi32((a), (n))
 #elif defined(RAE_F4_PATH_WASM)
 typedef v128_t rae_f4_v;
 typedef v128_t rae_m4_v;
@@ -135,6 +149,12 @@ typedef v128_t rae_m4_v;
 #define RAE_M4_NOT(a) wasm_v128_not(a)
 #define RAE_M4_ANY(m) wasm_v128_any_true(m)
 #define RAE_M4_ALL(m) wasm_i32x4_all_true(m)
+#define RAE_F4_BITS(a) (a)
+#define RAE_F4_FROM_BITS(m) (m)
+#define RAE_U4_SPLAT(c) wasm_i32x4_splat((int32_t)(c))
+#define RAE_U4_ADD(a, b) wasm_i32x4_add(a, b)
+#define RAE_U4_SHL(a, n) wasm_i32x4_shl((a), (n))
+#define RAE_U4_SHR(a, n) wasm_u32x4_shr((a), (n))
 #endif
 
 /* ---- Lane-wise operations --------------------------------------------- */
@@ -206,6 +226,34 @@ RAE_F4_INLINE void rae_m4_either_impl(uint32_t* out, const void* a, const void* 
 RAE_F4_INLINE void rae_m4_invert_impl(uint32_t* out, const void* a) { RAE_M4_STORE(out, RAE_M4_NOT(RAE_M4_LOAD(a))); }
 RAE_F4_INLINE bool rae_m4_any_lane(const void* mask) { return RAE_M4_ANY(RAE_M4_LOAD(mask)); }
 RAE_F4_INLINE bool rae_m4_all_lanes(const void* mask) { return RAE_M4_ALL(RAE_M4_LOAD(mask)); }
+/* The bit operations: integer arithmetic on a lane's bits, the same bits on
+ * every lowering (no float-to-int conversion, whose NaN and overflow results
+ * differ between instruction sets). 2^n: n clamped to -126 .. 127 by
+ * compare-and-select (NaN gives 127), rounded to whole (ties to even) by
+ * adding 1.5 * 2^23, whose low bits then hold it, and moved into the exponent
+ * field. */
+RAE_F4_INLINE void rae_f4_power_of_two_impl(float* out, const void* n) {
+  rae_f4_v x = RAE_F4_LOAD(n);
+  rae_f4_v high = RAE_F4_SPLAT(127.0f), low = RAE_F4_SPLAT(-126.0f);
+  rae_f4_v clamped = RAE_F4_SELECT(RAE_F4_LE(x, high), x, high);
+  clamped = RAE_F4_SELECT(RAE_F4_GE(clamped, low), clamped, low);
+  rae_m4_v whole = RAE_F4_BITS(RAE_F4_ADD(clamped, RAE_F4_SPLAT(12582912.0f)));
+  rae_m4_v biased = RAE_U4_ADD(whole, RAE_U4_SPLAT(127u - 0x4B400000u));
+  RAE_F4_STORE(out, RAE_F4_FROM_BITS(RAE_U4_SHL(biased, 23)));
+}
+/* The exponent field minus 127, as a Float (-127 for 0 and denormals, 128
+ * for inf and NaN): 1.5 * 2^23 + field, minus 1.5 * 2^23 + 127, exact */
+RAE_F4_INLINE void rae_f4_exponent_of_impl(float* out, const void* a) {
+  rae_m4_v field = RAE_M4_AND(RAE_U4_SHR(RAE_F4_BITS(RAE_F4_LOAD(a)), 23), RAE_U4_SPLAT(255u));
+  rae_f4_v shifted = RAE_F4_FROM_BITS(RAE_U4_ADD(field, RAE_U4_SPLAT(0x4B400000u)));
+  RAE_F4_STORE(out, RAE_F4_SUB(shifted, RAE_F4_SPLAT(12583039.0f)));
+}
+/* The value with its exponent field set to 127: its sign, and a magnitude in
+ * [1, 2) holding the fraction bits */
+RAE_F4_INLINE void rae_f4_significand_of_impl(float* out, const void* a) {
+  rae_m4_v bits = RAE_M4_AND(RAE_F4_BITS(RAE_F4_LOAD(a)), RAE_U4_SPLAT(0x807FFFFFu));
+  RAE_F4_STORE(out, RAE_F4_FROM_BITS(RAE_M4_OR(bits, RAE_U4_SPLAT(0x3F800000u))));
+}
 
 #else /* the scalar definitions: the reference every lowering above matches */
 
@@ -273,6 +321,22 @@ RAE_F4_INLINE bool rae_m4_any_lane(const void* mask) {
 }
 RAE_F4_INLINE bool rae_m4_all_lanes(const void* mask) {
   const uint32_t* m = mask; return m[0] != 0 && m[1] != 0 && m[2] != 0 && m[3] != 0;
+}
+RAE_F4_INLINE void rae_f4_power_of_two_impl(float* out, const void* n) {
+  const float* x = n;
+  for (int lane = 0; lane < 4; ++lane) {
+    float clamped = x[lane] <= 127.0f ? x[lane] : 127.0f;
+    clamped = clamped >= -126.0f ? clamped : -126.0f;
+    uint32_t whole = rae_f4_bits_of(clamped + 12582912.0f);
+    out[lane] = rae_f4_float_of((whole + (127u - 0x4B400000u)) << 23);
+  }
+}
+RAE_F4_INLINE void rae_f4_exponent_of_impl(float* out, const void* a) {
+  const float* x = a;
+  RAE_F4_LANES(out, rae_f4_float_of(((rae_f4_bits_of(x[lane]) >> 23) & 255u) + 0x4B400000u) - 12583039.0f);
+}
+RAE_F4_INLINE void rae_f4_significand_of_impl(float* out, const void* a) {
+  const float* x = a; RAE_F4_LANES(out, rae_f4_float_of((rae_f4_bits_of(x[lane]) & 0x807FFFFFu) | 0x3F800000u));
 }
 
 #endif
@@ -378,6 +442,9 @@ RAE_F4_INLINE void rae_f4_store_masked(void* data, int64_t index, const void* va
 #define rae_f4_sqrt(a) RAE_F4_RESULT(rae_f4_sqrt_impl((float*)&rae_f4_result__, (a)))
 #define rae_f4_negate(a) RAE_F4_RESULT(rae_f4_negate_impl((float*)&rae_f4_result__, (a)))
 #define rae_f4_abs(a) RAE_F4_RESULT(rae_f4_abs_impl((float*)&rae_f4_result__, (a)))
+#define rae_f4_power_of_two(n) RAE_F4_RESULT(rae_f4_power_of_two_impl((float*)&rae_f4_result__, (n)))
+#define rae_f4_exponent_of(a) RAE_F4_RESULT(rae_f4_exponent_of_impl((float*)&rae_f4_result__, (a)))
+#define rae_f4_significand_of(a) RAE_F4_RESULT(rae_f4_significand_of_impl((float*)&rae_f4_result__, (a)))
 #define rae_f4_min(a, b) RAE_F4_RESULT(rae_f4_min_impl((float*)&rae_f4_result__, (a), (b)))
 #define rae_f4_max(a, b) RAE_F4_RESULT(rae_f4_max_impl((float*)&rae_f4_result__, (a), (b)))
 #define rae_f4_clamp_symmetric(value, limit) \
