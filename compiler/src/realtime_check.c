@@ -367,8 +367,10 @@ bool realtime_report(CompilerContext* ctx, const AstModule* merged, const char* 
     const AstFuncDecl* func = &node->decl->as.func_decl;
     fprintf(out, "    %.*s %s\n      %s\n", (int)func->name.len, func->name.data, reason, chain);
   }
-  fprintf(out, "  mainThread: %zu function%s or C marked, %zu off-main function%s reaching one\n", marked,
-          marked == 1 ? "" : "s", refused, refused == 1 ? "" : "s");
+  if (marked) {
+    fprintf(out, "  mainThread: %zu function%s or C marked, %zu off-main function%s reaching one\n", marked,
+            marked == 1 ? "" : "s", refused, refused == 1 ? "" : "s");
+  }
   wait_graph_release(&graph);
   return true;
 }
