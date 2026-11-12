@@ -1,0 +1,33 @@
+# Two functions of one file with the same name, labels, modes and types are
+# refused at the second, naming the first. The other `twice` and `bump`
+# functions differ in a label, a type or a mode, so they are overloads and
+# are not refused.
+func twice(value: view Int) ret Int {
+  ret value * 2
+}
+
+func twice(count: view Int) ret Int {
+  ret count + count
+}
+
+func twice(value: view Float) ret Float {
+  ret value * 2.0
+}
+
+func bump(value: view Int) ret Int {
+  ret value + 1
+}
+
+func bump(value: mod Int) ret Int {
+  value = value + 1
+  ret value
+}
+
+func twice(value: view Int) ret Int {
+  ret value + value
+}
+
+func main() {
+  var count: Int = 1
+  log("{twice(value: 3)} {bump(value: count)}")
+}
