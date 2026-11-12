@@ -10390,6 +10390,52 @@ static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, 
     module->had_error = true;
 }
 
+/* Two functions of one file with the same name, parameter labels, modes
+ * and types: every call would mean either, and the C backend emits
+ * both under one name, so clang failed far from the cause ("redefinition of
+ * 'rae_Float8_powerOfTwo_rae_Float8_'"). Reported at the later one, naming
+ * the earlier one's line. Functions of different files may share a
+ * signature (a project's override of a lib function, two packages); a
+ * `when` branch that is not selected is gone before sema. */
+static void sema_report_duplicate_functions(CompilerContext* ctx, AstModule* module, SymbolTable* symbols) {
+    const char* fallback = module && module->file_path ? module->file_path : "<input>";
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+        const char* file = d->origin_file ? d->origin_file : fallback;
+        Str name = d->as.func_decl.name;
+        for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
+            const AstDecl* earlier = curr->decl;
+            if (!earlier || earlier == d || earlier->kind != AST_DECL_FUNC) continue;
+            if (earlier->as.func_decl.specialization_args) continue;
+            const char* earlier_file = earlier->origin_file ? earlier->origin_file : fallback;
+            if (strcmp(file, earlier_file) != 0) continue;
+            if (earlier->line > d->line || (earlier->line == d->line && earlier->column >= d->column)) continue;
+            const AstParam* a = d->as.func_decl.params;
+            const AstParam* b = earlier->as.func_decl.params;
+            /* the same labels and the same modes: `view` and `mod` of one
+             * type are two overloads (the C names differ) */
+            bool same_labels = true;
+            for (; a && b; a = a->next, b = b->next) {
+                if (!str_eq(a->name, b->name)) same_labels = false;
+                const AstTypeRef* ta = a->type; const AstTypeRef* tb = b->type;
+                if (!ta || !tb) { if (ta != tb) same_labels = false; continue; }
+                if (ta->is_view != tb->is_view || ta->is_mod != tb->is_mod || ta->is_own != tb->is_own
+                    || ta->is_copy != tb->is_copy) same_labels = false;
+            }
+            if (!same_labels || a || b) continue;
+            if (!sema_same_param_types(ctx, module, symbols, d, earlier)) continue;
+            char message[1024];
+            snprintf(message, sizeof(message),
+                "function '%.*s' is declared twice with the same parameters: here and at %s:%zu:%zu; "
+                "rename one of them or delete one",
+                (int)name.len, name.data, diag_simplify_path(earlier_file), earlier->line, earlier->column);
+            diag_error(file, (int)d->line, (int)d->column, message);
+            module->had_error = true;
+            break;
+        }
+    }
+}
+
 /* A project function or const with the same name and parameters as one in a
  * lib module the program loads. It is legal (a bare name in a file that
  * only imports the module is the project's, `Module.name` the lib's), but in
@@ -10538,6 +10584,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         }
         d = d->next;
     }
+    sema_report_duplicate_functions(ctx, module, &symbols);
     /* Check each original generic body once, including bodies reached only
      * through ComponentTable(any) field bindings. Stop before specialization
      * so the same lexical error is not repeated for every concrete type. */
