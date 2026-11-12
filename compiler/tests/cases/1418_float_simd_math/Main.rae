@@ -1,0 +1,285 @@
+# Float4 / Float8 sin, cos, exp, naturalLog and tanh (lib/Float4.rae): each is
+# within its stated error of the Float64 result over a sweep, keeps NaN, inf and
+# -0 right, and gives the same bits on every lowering. 1419 runs this same file
+# with --float4-scalar and expects the same output, checksums included.
+import Math
+import Float4
+import Float8
+
+func ulps(a: view Float, b: view Float) ret Int {
+  if a is b {
+    ret 0
+  }
+  var x: Int = Math.floatBits(value: a)
+  var y: Int = Math.floatBits(value: b)
+  if x >= 2147483648 {
+    x = 2147483648 - x
+  }
+  if y >= 2147483648 {
+    y = 2147483648 - y
+  }
+  let difference: Int = x - y
+  if difference < 0 {
+    ret -difference
+  }
+  ret difference
+}
+
+func expDouble(x: view Float64) ret Float64 {
+  let y: Float64 = x / 256.0
+  var term: Float64 = 1.0
+  var sum: Float64 = 1.0
+  loop var k: Int = 1, k < 20, ++k {
+    term = term * y / (k as Float64)
+    sum = sum + term
+  }
+  loop var k: Int = 0, k < 8, ++k {
+    sum = sum * sum
+  }
+  ret sum
+}
+
+func tanhReference(x: view Float) ret Float {
+  let twice: Float64 = expDouble(x: (x as Float64) * 2.0)
+  ret ((twice - 1.0) / (twice + 1.0)) as Float
+}
+
+# kind: 0 sin, 1 cos, 2 exp, 3 log, 4 tanh
+func reference(kind: view Int, x: view Float) ret Float {
+  if kind is 0 {
+    ret Math.sin(x: x)
+  }
+  if kind is 1 {
+    ret Math.cos(x: x)
+  }
+  if kind is 2 {
+    ret Math.exp(x: x)
+  }
+  if kind is 3 {
+    ret Math.naturalLog(x: x)
+  }
+  ret tanhReference(x: x)
+}
+
+func vector(kind: view Int, x: view Float4) ret Float4 {
+  if kind is 0 {
+    ret Float4.sin(value: x)
+  }
+  if kind is 1 {
+    ret Float4.cos(value: x)
+  }
+  if kind is 2 {
+    ret Float4.exp(value: x)
+  }
+  if kind is 3 {
+    ret Float4.naturalLog(value: x)
+  }
+  ret Float4.tanh(value: x)
+}
+
+# The worst error of `kind` over `count` evenly spaced points of [low, high],
+# checked against the bounds lib/Float4.rae states
+func sweep(
+  kind: view Int
+  name: view String
+  low: view Float
+  high: view Float
+  count: view Int
+  maxUlps: view Int
+  maxAbsolute: view Float
+) {
+  var worstUlps: Int = 0
+  var worstAbsolute: Float = 0.0
+  loop var step: Int = 0, step < count / 4, ++step {
+    let i: Int = step * 4
+    let input: Float4 = {
+      x: low + (high - low) * ((i as Float) / (count as Float))
+      y: low + (high - low) * (((i + 1) as Float) / (count as Float))
+      z: low + (high - low) * (((i + 2) as Float) / (count as Float))
+      w: low + (high - low) * (((i + 3) as Float) / (count as Float))
+    }
+    let output: Float4 = vector(kind: kind, x: input)
+    let inputs: List(Float) = List(Float) { input.x, input.y, input.z, input.w }
+    let outputs: List(Float) = List(Float) { output.x, output.y, output.z, output.w }
+    loop var lane: Int = 0, lane < 4, ++lane {
+      let x: Float = inputs.copyAtFallback(index: lane, fallback: 0.0)
+      let got: Float = outputs.copyAtFallback(index: lane, fallback: 0.0)
+      let want: Float = reference(kind: kind, x: x)
+      worstUlps = max(a: worstUlps, b: ulps(a: got, b: want))
+      worstAbsolute = max(a: worstAbsolute, b: Math.abs(value: got - want))
+    }
+  }
+  let ulpsHold: Bool = maxUlps < 0 or worstUlps <= maxUlps
+  let absoluteHolds: Bool = maxAbsolute < 0.0 or worstAbsolute <= maxAbsolute
+  log("{name} on [{low}, {high}]: within the stated error {ulpsHold and absoluteHolds}")
+}
+
+func mixBits(hash: view Int, value: view Float) ret Int {
+  ret (hash * 31 + Math.floatBits(value: value)) % 1000000007
+}
+
+func lanes4(value: view Float4) ret List(Float) {
+  ret List(Float) { value.x, value.y, value.z, value.w }
+}
+
+func show(name: view String, value: view Float4) {
+  log(
+    "{name}: {Math.floatBits(value: value.x)} {Math.floatBits(value: value.y)} {Math.floatBits(
+      value: value.z
+    )} {Math.floatBits(value: value.w)}"
+  )
+}
+
+func checksum() {
+  var hash4: Int = 0
+  var hash8: Int = 0
+  var same: Bool = true
+  loop var i: Int = 0, i < 20000, ++i {
+    let base: Float = ((i as Float) - 10000.0) * 0.0123
+    let x4: Float4 = { x: base, y: base * 0.37, z: base * -1.9, w: base * 0.001 }
+    let x8: Float8 = {
+      lane0: x4.x
+      lane1: x4.y
+      lane2: x4.z
+      lane3: x4.w
+      lane4: x4.x
+      lane5: x4.y
+      lane6: x4.z
+      lane7: x4.w
+    }
+    let positive: Float4 = Float4.abs(value: x4)
+    let positive8: Float8 = Float8.abs(value: x8)
+    let results: List(Float4) = List(Float4) {
+      Float4.sin(value: x4)
+      Float4.cos(value: x4)
+      Float4.exp(value: Float4.mul(a: x4, b: Float4.splat(value: 0.7)))
+      Float4.naturalLog(value: positive)
+      Float4.tanh(value: x4)
+    }
+    let results8: List(Float8) = List(Float8) {
+      Float8.sin(value: x8)
+      Float8.cos(value: x8)
+      Float8.exp(value: Float8.mul(a: x8, b: Float8.splat(value: 0.7)))
+      Float8.naturalLog(value: positive8)
+      Float8.tanh(value: x8)
+    }
+    loop var kind: Int = 0, kind < 5, ++kind {
+      if let result4: Float4 = results.copyAt(index: kind) {
+        loop let lane: Float in lanes4(value: result4) {
+          hash4 = mixBits(hash: hash4, value: lane)
+        }
+        if let result8: Float8 = results8.copyAt(index: kind) {
+          if Math.floatBits(value: result8.lane0) is not Math.floatBits(value: result4.x) or Math.floatBits(
+            value: result8.lane7
+          ) is not Math.floatBits(value: result4.w) {
+            same = false
+          }
+          loop let lane: Float in List(Float) {
+            result8.lane0
+            result8.lane1
+            result8.lane2
+            result8.lane3
+            result8.lane4
+            result8.lane5
+            result8.lane6
+            result8.lane7
+          } {
+            hash8 = mixBits(hash: hash8, value: lane)
+          }
+        }
+      }
+    }
+  }
+  log("checksums: Float4 {hash4}, Float8 {hash8}, Float8 lanes equal Float4's {same}")
+}
+
+func specials() {
+  let infinity: Float = Math.floatFromBits(bits: 0x7F800000)
+  let nan: Float = Math.floatFromBits(bits: 0x7FC00000)
+  let zeros: Float4 = { x: 0.0, y: -0.0, z: infinity, w: nan }
+  let edges: Float4 = { x: -1.0, y: Math.floatFromBits(bits: 1), z: -infinity, w: 100.0 }
+  show(name: "sin(0, -0, inf, nan)", value: Float4.sin(value: zeros))
+  show(name: "exp(0, -0, inf, nan)", value: Float4.exp(value: zeros))
+  show(name: "exp(-1, denormal, -inf, 100)", value: Float4.exp(value: edges))
+  show(name: "naturalLog(0, -0, inf, nan)", value: Float4.naturalLog(value: zeros))
+  show(name: "naturalLog(-1, denormal, -inf, 100)", value: Float4.naturalLog(value: edges))
+  show(name: "tanh(0, -0, inf, nan)", value: Float4.tanh(value: zeros))
+  show(name: "tanh(-1, denormal, -inf, 100)", value: Float4.tanh(value: edges))
+}
+
+func main() {
+  sweep(
+    kind: 0
+    name: "sin"
+    low: -6.3
+    high: 6.3
+    count: 40000
+    maxUlps: 2
+    maxAbsolute: -1.0
+  )
+  sweep(
+    kind: 0
+    name: "sin"
+    low: -8192.0
+    high: 8192.0
+    count: 40000
+    maxUlps: -1
+    maxAbsolute: 0.00000012
+  )
+  sweep(
+    kind: 1
+    name: "cos"
+    low: -6.3
+    high: 6.3
+    count: 40000
+    maxUlps: 2
+    maxAbsolute: -1.0
+  )
+  sweep(
+    kind: 1
+    name: "cos"
+    low: -8192.0
+    high: 8192.0
+    count: 40000
+    maxUlps: -1
+    maxAbsolute: 0.00000012
+  )
+  sweep(
+    kind: 2
+    name: "exp"
+    low: -87.0
+    high: 88.0
+    count: 40000
+    maxUlps: 1
+    maxAbsolute: -1.0
+  )
+  sweep(
+    kind: 3
+    name: "naturalLog"
+    low: 0.000001
+    high: 10.0
+    count: 40000
+    maxUlps: 1
+    maxAbsolute: -1.0
+  )
+  sweep(
+    kind: 3
+    name: "naturalLog"
+    low: 1.0
+    high: 1000000.0
+    count: 40000
+    maxUlps: 1
+    maxAbsolute: -1.0
+  )
+  sweep(
+    kind: 4
+    name: "tanh"
+    low: -10.0
+    high: 10.0
+    count: 40000
+    maxUlps: 1
+    maxAbsolute: -1.0
+  )
+  checksum()
+  specials()
+}

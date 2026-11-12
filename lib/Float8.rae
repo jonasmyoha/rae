@@ -16,6 +16,8 @@
 #
 # Lanes read like fields (`values.lane3`). Mask8 is a comparison's result: a
 # lane is true when any of its bits is set. Not in the prelude.
+import Math
+
 type Float8 {
   lane0: Float
   lane1: Float
@@ -38,91 +40,102 @@ type Mask8 {
   bits7: UInt32
 }
 
-func nativeSplat(value: Float) unsafe extern("rae_f8_splat") ret Float8
+func nativeSplat(value: Float) realtime unsafe extern("rae_f8_splat") ret Float8
 
-func nativeAdd(a: view Float8, b: view Float8) unsafe extern("rae_f8_add") ret Float8
+func nativeAdd(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_add") ret Float8
 
-func nativeSub(a: view Float8, b: view Float8) unsafe extern("rae_f8_sub") ret Float8
+func nativeSub(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_sub") ret Float8
 
-func nativeMul(a: view Float8, b: view Float8) unsafe extern("rae_f8_mul") ret Float8
+func nativeMul(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_mul") ret Float8
 
-func nativeDiv(a: view Float8, b: view Float8) unsafe extern("rae_f8_div") ret Float8
+func nativeDiv(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_div") ret Float8
 
-func nativeMin(a: view Float8, b: view Float8) unsafe extern("rae_f8_min") ret Float8
+func nativeMin(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_min") ret Float8
 
-func nativeMax(a: view Float8, b: view Float8) unsafe extern("rae_f8_max") ret Float8
+func nativeMax(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_max") ret Float8
 
 func nativeMulAdd(
   a: view Float8
   b: view Float8
   c: view Float8
-) unsafe extern("rae_f8_mul_add") ret Float8
+) realtime unsafe extern("rae_f8_mul_add") ret Float8
 
-func nativeSqrt(value: view Float8) unsafe extern("rae_f8_sqrt") ret Float8
+func nativeSqrt(value: view Float8) realtime unsafe extern("rae_f8_sqrt") ret Float8
 
-func nativeNegate(value: view Float8) unsafe extern("rae_f8_negate") ret Float8
+func nativeNegate(value: view Float8) realtime unsafe extern("rae_f8_negate") ret Float8
 
-func nativeAbs(value: view Float8) unsafe extern("rae_f8_abs") ret Float8
+func nativeAbs(value: view Float8) realtime unsafe extern("rae_f8_abs") ret Float8
 
 func nativeClampSymmetric(
   value: view Float8
   limit: view Float8
-) unsafe extern("rae_f8_clamp_symmetric") ret Float8
+) realtime unsafe extern("rae_f8_clamp_symmetric") ret Float8
 
-func nativeLess(a: view Float8, b: view Float8) unsafe extern("rae_f8_less") ret Mask8
+func nativeLess(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_less") ret Mask8
 
-func nativeGreater(a: view Float8, b: view Float8) unsafe extern("rae_f8_greater") ret Mask8
+func nativeGreater(
+  a: view Float8
+  b: view Float8
+) realtime unsafe extern("rae_f8_greater") ret Mask8
 
 func nativeLessOrEqual(
   a: view Float8
   b: view Float8
-) unsafe extern("rae_f8_less_or_equal") ret Mask8
+) realtime unsafe extern("rae_f8_less_or_equal") ret Mask8
 
 func nativeGreaterOrEqual(
   a: view Float8
   b: view Float8
-) unsafe extern("rae_f8_greater_or_equal") ret Mask8
+) realtime unsafe extern("rae_f8_greater_or_equal") ret Mask8
 
-func nativeEqual(a: view Float8, b: view Float8) unsafe extern("rae_f8_equal") ret Mask8
+func nativeEqual(a: view Float8, b: view Float8) realtime unsafe extern("rae_f8_equal") ret Mask8
 
 func nativeSelect(
   mask: view Mask8
   ifTrue: view Float8
   ifFalse: view Float8
-) unsafe extern("rae_f8_select") ret Float8
+) realtime unsafe extern("rae_f8_select") ret Float8
 
-func nativeBoth(a: view Mask8, b: view Mask8) unsafe extern("rae_m8_both") ret Mask8
+func nativeBoth(a: view Mask8, b: view Mask8) realtime unsafe extern("rae_m8_both") ret Mask8
 
-func nativeEither(a: view Mask8, b: view Mask8) unsafe extern("rae_m8_either") ret Mask8
+func nativeEither(a: view Mask8, b: view Mask8) realtime unsafe extern("rae_m8_either") ret Mask8
 
-func nativeInvert(mask: view Mask8) unsafe extern("rae_m8_invert") ret Mask8
+func nativeInvert(mask: view Mask8) realtime unsafe extern("rae_m8_invert") ret Mask8
 
-func nativeAnyLane(mask: view Mask8) unsafe extern("rae_m8_any_lane") ret Bool
+func nativeAnyLane(mask: view Mask8) realtime unsafe extern("rae_m8_any_lane") ret Bool
 
-func nativeAllLanes(mask: view Mask8) unsafe extern("rae_m8_all_lanes") ret Bool
+func nativeAllLanes(mask: view Mask8) realtime unsafe extern("rae_m8_all_lanes") ret Bool
 
-func nativeSum(value: view Float8) unsafe extern("rae_f8_sum") ret Float
+func nativeSum(value: view Float8) realtime unsafe extern("rae_f8_sum") ret Float
 
-func nativeHorizontalMin(value: view Float8) unsafe extern("rae_f8_horizontal_min") ret Float
+func nativeHorizontalMin(
+  value: view Float8
+) realtime unsafe extern("rae_f8_horizontal_min") ret Float
 
-func nativeHorizontalMax(value: view Float8) unsafe extern("rae_f8_horizontal_max") ret Float
+func nativeHorizontalMax(
+  value: view Float8
+) realtime unsafe extern("rae_f8_horizontal_max") ret Float
 
-func nativeLoad(data: Buffer(Float), index: Int) unsafe extern("rae_f8_load") ret Float8
+func nativeLoad(data: Buffer(Float), index: Int) realtime unsafe extern("rae_f8_load") ret Float8
 
-func nativeStore(data: Buffer(Float), index: Int, value: view Float8) unsafe extern("rae_f8_store")
+func nativeStore(
+  data: Buffer(Float)
+  index: Int
+  value: view Float8
+) realtime unsafe extern("rae_f8_store")
 
 func nativeLoadPartial(
   data: Buffer(Float)
   index: Int
   count: Int
-) unsafe extern("rae_f8_load_partial") ret Float8
+) realtime unsafe extern("rae_f8_load_partial") ret Float8
 
 func nativeStorePartial(
   data: Buffer(Float)
   index: Int
   value: view Float8
   count: Int
-) unsafe extern("rae_f8_store_partial")
+) realtime unsafe extern("rae_f8_store_partial")
 
 func nativeStoreMasked(
   data: Buffer(Float)
@@ -130,9 +143,9 @@ func nativeStoreMasked(
   value: view Float8
   mask: view Mask8
   count: Int
-) unsafe extern("rae_f8_store_masked")
+) realtime unsafe extern("rae_f8_store_masked")
 
-func nativeLowering() unsafe extern("rae_f8_lowering") ret Int
+func nativeLowering() realtime unsafe extern("rae_f8_lowering") ret Int
 
 # The lowering this program was compiled with: "avx2", "neon", "sse2",
 # "wasm" (the last three: two Float4 registers) or "scalar"
@@ -508,4 +521,349 @@ func firstLanes(count: view Int) ret Mask8 {
     mask.bits7 = allBits
   }
   ret mask
+}
+
+# ---- vector math: sin, cos, exp, naturalLog, tanh ---------------------------
+# For a synth and DSP. The polynomials are Cephes' single-precision ones
+# (Stephen L. Moshier, Cephes Math Library: sinf.c, cosf.c, expf.c, logf.c,
+# tanhf.c). The range reduction is written with the operations above only:
+# there is no lane-integer or bit operation, so a whole number is found by the
+# 1.5 * 2^23 rounding trick, 2^n is a product of power-of-two factors and a
+# logarithm's exponent is found by scaling by powers of two. Every step is
+# exact IEEE arithmetic or one of the bit-exact operations above, so each lane
+# gives the same bits on every lowering as the scalar definition
+# (`--float4-scalar`, which forces Float8 to its scalar definitions too), as the rest of this
+# module does.
+#
+# Maximum error against the Float64 functions rounded to Float, measured by
+# fixture 1418_float_simd_math over a sweep of each range:
+#   sin, cos     |x| <= 2 pi      2 ulp
+#   sin, cos     |x| <= 8192      absolute 0.00000012 (ulp grows near zeros)
+#   exp          -87 .. 88        1 ulp
+#   naturalLog   x > 0            1 ulp
+#   tanh         all x            1 ulp
+# Beyond |x| = 8192 sin and cos lose accuracy (the reduction keeps about 24
+# bits of x / (pi / 2)); exp gives +inf above 88.72 and 0 below -103.97;
+# naturalLog gives -inf at 0 and NaN below it. NaN stays NaN in every one.
+
+# The nearest whole number (ties to even) for |value| < 2^22, exactly:
+# adding 1.5 * 2^23 leaves no fraction bits, subtracting it gives the rounded
+# value back
+func roundToWhole(value: view Float8) ret Float8 {
+  let magic: Float8 = Float8.splat(value: 12582912.0)
+  ret Float8.sub(a: Float8.add(a: value, b: magic), b: magic)
+}
+
+# The largest whole number not above `value` (|value| < 2^22)
+func floorToWhole(value: view Float8) ret Float8 {
+  let rounded: Float8 = roundToWhole(value: value)
+  let above: Mask8 = Float8.greater(a: rounded, b: value)
+  ret Float8.select(
+    mask: above
+    ifTrue: Float8.sub(a: rounded, b: Float8.splat(value: 1.0))
+    ifFalse: rounded
+  )
+}
+
+# 2^power exactly, for power in -126 .. 127 (its bits)
+func twoToThe(power: view Int) ret Float {
+  ret Math.floatFromBits(bits: (127 + power) * 8388608)
+}
+
+# a * b + c as two operations (no fused multiply-add: same bits everywhere)
+func madd(a: view Float8, b: view Float8, c: view Float) ret Float8 {
+  ret Float8.add(a: Float8.mul(a: a, b: b), b: Float8.splat(value: c))
+}
+
+# sin and cos of r in [-pi/4, pi/4] (Cephes sinf / cosf polynomials)
+func sinKernel(r: view Float8) ret Float8 {
+  let z: Float8 = Float8.mul(a: r, b: r)
+  var p: Float8 = madd(a: Float8.splat(value: -0.00019515295891), b: z, c: 0.0083321608736)
+  p = madd(a: p, b: z, c: -0.16666654611)
+  ret Float8.add(a: Float8.mul(a: Float8.mul(a: p, b: z), b: r), b: r)
+}
+
+func cosKernel(r: view Float8) ret Float8 {
+  let z: Float8 = Float8.mul(a: r, b: r)
+  var p: Float8 = madd(
+    a: Float8.splat(value: 0.00002443315711809948)
+    b: z
+    c: -0.001388731625493765
+  )
+  p = madd(a: p, b: z, c: 0.04166664568298827)
+  let tail: Float8 = Float8.mul(a: Float8.mul(a: p, b: z), b: z)
+  ret Float8.add(
+    a: Float8.sub(a: Float8.splat(value: 1.0), b: Float8.mul(a: z, b: Float8.splat(value: 0.5)))
+    b: tail
+  )
+}
+
+# x = k * pi/2 + r with r in [-pi/4, pi/4] (Cody and Waite: pi/2 in three
+# parts, each product exact), and the quadrant (k + shift) mod 4
+type QuarterTurns8 {
+  r: Float8
+  quadrant: Float8
+}
+
+func reduceQuarterTurns(value: view Float8, shift: view Float) ret QuarterTurns8 {
+  let turns: Float8 = roundToWhole(
+    value: Float8.mul(a: value, b: Float8.splat(value: 0.636619772367581))
+  )
+  var r: Float8 = Float8.sub(a: value, b: Float8.mul(a: turns, b: Float8.splat(value: 1.5703125)))
+  r = Float8.sub(a: r, b: Float8.mul(a: turns, b: Float8.splat(value: 0.0004837512969970703125)))
+  r = Float8.sub(a: r, b: Float8.mul(a: turns, b: Float8.splat(value: 0.0000000754978995489188216)))
+  let shifted: Float8 = Float8.add(a: turns, b: Float8.splat(value: shift))
+  let quarter: Float8 = Float8.mul(a: shifted, b: Float8.splat(value: 0.25))
+  let quadrant: Float8 = Float8.sub(
+    a: shifted
+    b: Float8.mul(a: floorToWhole(value: quarter), b: Float8.splat(value: 4.0))
+  )
+  ret QuarterTurns8 { r: r, quadrant: quadrant }
+}
+
+# sin by quadrant: 0 sin r, 1 cos r, 2 -sin r, 3 -cos r
+func quadrantSin(r: view Float8, quadrant: view Float8) ret Float8 {
+  let sine: Float8 = sinKernel(r: r)
+  let cosine: Float8 = cosKernel(r: r)
+  let odd: Mask8 = Float8.either(
+    a: Float8.equal(a: quadrant, b: Float8.splat(value: 1.0))
+    b: Float8.equal(a: quadrant, b: Float8.splat(value: 3.0))
+  )
+  let value: Float8 = Float8.select(mask: odd, ifTrue: cosine, ifFalse: sine)
+  let negative: Mask8 = Float8.greaterOrEqual(a: quadrant, b: Float8.splat(value: 2.0))
+  ret Float8.select(mask: negative, ifTrue: Float8.negate(value: value), ifFalse: value)
+}
+
+# Each lane's sine (radians)
+func sin(value: view Float8) ret Float8 {
+  let reduced: QuarterTurns8 = reduceQuarterTurns(value: value, shift: 0.0)
+  let result: Float8 = quadrantSin(r: reduced.r, quadrant: reduced.quadrant)
+  # sin(-0) is -0
+  ret Float8.select(
+    mask: Float8.equal(a: value, b: Float8.splat(value: 0.0))
+    ifTrue: value
+    ifFalse: result
+  )
+}
+
+# Each lane's cosine (radians): sin a quarter turn on
+func cos(value: view Float8) ret Float8 {
+  let reduced: QuarterTurns8 = reduceQuarterTurns(value: value, shift: 1.0)
+  ret quadrantSin(r: reduced.r, quadrant: reduced.quadrant)
+}
+
+# 2^n for whole n in -126 .. 127: 2^|n| as a product of power-of-two
+# factors, and for a negative n its reciprocal (exact: a power of two)
+func powerOfTwo(n: view Float8) ret Float8 {
+  let zero: Float8 = Float8.splat(value: 0.0)
+  let one: Float8 = Float8.splat(value: 1.0)
+  var left: Float8 = Float8.abs(value: n)
+  var result: Float8 = one
+  var step: Float = 64.0
+  loop step >= 1.0 {
+    let has: Mask8 = Float8.greaterOrEqual(a: left, b: Float8.splat(value: step))
+    left = Float8.sub(
+      a: left
+      b: Float8.select(mask: has, ifTrue: Float8.splat(value: step), ifFalse: zero)
+    )
+    let factor: Float8 = Float8.splat(value: twoToThe(power: step as Int))
+    result = Float8.mul(a: result, b: Float8.select(mask: has, ifTrue: factor, ifFalse: one))
+    step = step * 0.5
+  }
+  ret Float8.select(
+    mask: Float8.less(a: n, b: zero)
+    ifTrue: Float8.div(a: one, b: result)
+    ifFalse: result
+  )
+}
+
+# Each lane's e^x (Cephes expf)
+func exp(value: view Float8) ret Float8 {
+  let x: Float8 = Float8.min(
+    a: Float8.max(a: value, b: Float8.splat(value: -103.97))
+    b: Float8.splat(value: 88.73)
+  )
+  let n: Float8 = roundToWhole(value: Float8.mul(a: x, b: Float8.splat(value: 1.44269504088896341)))
+  var r: Float8 = Float8.sub(a: x, b: Float8.mul(a: n, b: Float8.splat(value: 0.693359375)))
+  r = Float8.sub(a: r, b: Float8.mul(a: n, b: Float8.splat(value: -0.000212194440)))
+  let z: Float8 = Float8.mul(a: r, b: r)
+  var p: Float8 = madd(a: Float8.splat(value: 0.00019875691500), b: r, c: 0.0013981999507)
+  p = madd(a: p, b: r, c: 0.0083334519073)
+  p = madd(a: p, b: r, c: 0.041665795894)
+  p = madd(a: p, b: r, c: 0.16666665459)
+  p = madd(a: p, b: r, c: 0.50000001201)
+  let er: Float8 = Float8.add(
+    a: Float8.add(a: Float8.mul(a: p, b: z), b: r)
+    b: Float8.splat(value: 1.0)
+  )
+  # n runs from -150 to 128: below -100 apply 2^(n + 64) and then 2^-64, at
+  # 128 apply 2^127 and then 2, so the one rounding is the last product
+  let low: Mask8 = Float8.less(a: n, b: Float8.splat(value: -100.0))
+  let high: Mask8 = Float8.greater(a: n, b: Float8.splat(value: 127.0))
+  let shift: Float8 = Float8.select(
+    mask: low
+    ifTrue: Float8.splat(value: 64.0)
+    ifFalse: Float8.select(
+      mask: high
+      ifTrue: Float8.splat(value: -1.0)
+      ifFalse: Float8.splat(value: 0.0)
+    )
+  )
+  let last: Float8 = Float8.select(
+    mask: low
+    ifTrue: Float8.splat(value: twoToThe(power: -64))
+    ifFalse: Float8.select(
+      mask: high
+      ifTrue: Float8.splat(value: 2.0)
+      ifFalse: Float8.splat(value: 1.0)
+    )
+  )
+  let scaled: Float8 = Float8.mul(
+    a: Float8.mul(a: er, b: powerOfTwo(n: Float8.add(a: n, b: shift)))
+    b: last
+  )
+  let over: Mask8 = Float8.greater(a: value, b: Float8.splat(value: 88.7228))
+  let under: Mask8 = Float8.less(a: value, b: Float8.splat(value: -103.972))
+  let infinity: Float8 = Float8.splat(value: Math.floatFromBits(bits: 0x7F800000))
+  let bounded: Float8 = Float8.select(mask: over, ifTrue: infinity, ifFalse: scaled)
+  # a NaN lane stays NaN
+  let finite: Float8 = Float8.select(
+    mask: under
+    ifTrue: Float8.splat(value: 0.0)
+    ifFalse: bounded
+  )
+  ret Float8.select(mask: Float8.equal(a: value, b: value), ifTrue: finite, ifFalse: value)
+}
+
+# Each lane's natural logarithm (Cephes logf): x = m * 2^e with m in
+# [sqrt(1/2), sqrt(2)), found by scaling by powers of two
+func naturalLog(value: view Float8) ret Float8 {
+  let zero: Float8 = Float8.splat(value: 0.0)
+  var m: Float8 = value
+  var e: Float8 = zero
+  var step: Float = 64.0
+  loop step >= 1.0 {
+    let big: Mask8 = Float8.greaterOrEqual(
+      a: m
+      b: Float8.splat(value: twoToThe(power: step as Int))
+    )
+    m = Float8.select(
+      mask: big
+      ifTrue: Float8.mul(a: m, b: Float8.splat(value: twoToThe(power: -(step as Int))))
+      ifFalse: m
+    )
+    e = Float8.add(
+      a: e
+      b: Float8.select(mask: big, ifTrue: Float8.splat(value: step), ifFalse: zero)
+    )
+    step = step * 0.5
+  }
+  # small values, denormals too (down to 2^-149): 64 twice, then halving
+  var down: Float = 64.0
+  var rounds: Int = 0
+  loop down >= 1.0 {
+    let small: Mask8 = Float8.both(
+      a: Float8.less(a: m, b: Float8.splat(value: twoToThe(power: 1 - (down as Int))))
+      b: Float8.greater(a: m, b: zero)
+    )
+    m = Float8.select(
+      mask: small
+      ifTrue: Float8.mul(a: m, b: Float8.splat(value: twoToThe(power: down as Int)))
+      ifFalse: m
+    )
+    e = Float8.sub(
+      a: e
+      b: Float8.select(mask: small, ifTrue: Float8.splat(value: down), ifFalse: zero)
+    )
+    rounds = rounds + 1
+    if rounds is not 1 {
+      down = down * 0.5
+    }
+  }
+  # m is in [1, 2) now; to [sqrt(1/2), sqrt(2)) around 1
+  let high: Mask8 = Float8.greater(a: m, b: Float8.splat(value: 1.41421356))
+  m = Float8.select(mask: high, ifTrue: Float8.mul(a: m, b: Float8.splat(value: 0.5)), ifFalse: m)
+  e = Float8.add(
+    a: e
+    b: Float8.select(mask: high, ifTrue: Float8.splat(value: 1.0), ifFalse: zero)
+  )
+  let f: Float8 = Float8.sub(a: m, b: Float8.splat(value: 1.0))
+  let z: Float8 = Float8.mul(a: f, b: f)
+  var p: Float8 = madd(a: Float8.splat(value: 0.070376836292), b: f, c: -0.11514610310)
+  p = madd(a: p, b: f, c: 0.11676998740)
+  p = madd(a: p, b: f, c: -0.12420140846)
+  p = madd(a: p, b: f, c: 0.14249322787)
+  p = madd(a: p, b: f, c: -0.16668057665)
+  p = madd(a: p, b: f, c: 0.20000714765)
+  p = madd(a: p, b: f, c: -0.24999993993)
+  p = madd(a: p, b: f, c: 0.33333331174)
+  var y: Float8 = Float8.mul(a: Float8.mul(a: p, b: z), b: f)
+  y = Float8.add(a: y, b: Float8.mul(a: e, b: Float8.splat(value: -0.000212194440)))
+  y = Float8.sub(a: y, b: Float8.mul(a: z, b: Float8.splat(value: 0.5)))
+  var result: Float8 = Float8.add(
+    a: Float8.add(a: f, b: y)
+    b: Float8.mul(a: e, b: Float8.splat(value: 0.693359375))
+  )
+  # 0 gives -inf, a negative value NaN, +inf stays +inf, NaN stays NaN
+  let infinity: Float8 = Float8.splat(value: Math.floatFromBits(bits: 0x7F800000))
+  result = Float8.select(
+    mask: Float8.equal(a: value, b: zero)
+    ifTrue: Float8.negate(value: infinity)
+    ifFalse: result
+  )
+  result = Float8.select(
+    mask: Float8.less(a: value, b: zero)
+    ifTrue: Float8.splat(value: Math.floatFromBits(bits: 0x7FC00000))
+    ifFalse: result
+  )
+  result = Float8.select(
+    mask: Float8.equal(a: value, b: infinity)
+    ifTrue: infinity
+    ifFalse: result
+  )
+  ret Float8.select(mask: Float8.equal(a: value, b: value), ifTrue: result, ifFalse: value)
+}
+
+# Each lane's tanh (Cephes tanhf): a polynomial below 0.625, 1 - 2 / (e^2x + 1)
+# above (x at most 10, where it rounds to +-1)
+func tanh(value: view Float8) ret Float8 {
+  let x: Float8 = Float8.abs(value: value)
+  let z: Float8 = Float8.mul(a: value, b: value)
+  var p: Float8 = madd(a: Float8.splat(value: -0.00570498872745), b: z, c: 0.0206390887954)
+  p = madd(a: p, b: z, c: -0.0537397155531)
+  p = madd(a: p, b: z, c: 0.133314422036)
+  p = madd(a: p, b: z, c: -0.333332819422)
+  let near: Float8 = Float8.add(a: Float8.mul(a: Float8.mul(a: p, b: z), b: value), b: value)
+  let e2: Float8 = exp(
+    value: Float8.mul(
+      a: Float8.min(a: x, b: Float8.splat(value: 10.0))
+      b: Float8.splat(value: 2.0)
+    )
+  )
+  let one: Float8 = Float8.splat(value: 1.0)
+  let far: Float8 = Float8.sub(
+    a: one
+    b: Float8.div(a: Float8.splat(value: 2.0), b: Float8.add(a: e2, b: one))
+  )
+  let signedFar: Float8 = Float8.select(
+    mask: Float8.less(a: value, b: Float8.splat(value: 0.0))
+    ifTrue: Float8.negate(value: far)
+    ifFalse: far
+  )
+  let result: Float8 = Float8.select(
+    mask: Float8.less(a: x, b: Float8.splat(value: 0.625))
+    ifTrue: near
+    ifFalse: signedFar
+  )
+  # NaN stays NaN and tanh(-0) is -0
+  let number: Float8 = Float8.select(
+    mask: Float8.equal(a: value, b: value)
+    ifTrue: result
+    ifFalse: value
+  )
+  ret Float8.select(
+    mask: Float8.equal(a: value, b: Float8.splat(value: 0.0))
+    ifTrue: value
+    ifFalse: number
+  )
 }
