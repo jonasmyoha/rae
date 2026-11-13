@@ -2052,6 +2052,120 @@ static void sema_report_arity_mismatch(AstModule* module, Str name, size_t arg_c
     if (module) module->had_error = true;
 }
 
+// Does the method call's argument list fit `fd` (receiver first): the same
+// number of value arguments as parameters after `this`, and each named
+// argument naming the parameter at its place? Type parameters (`T: type`) and
+// bare type arguments of a generic function are not counted.
+static bool sema_method_args_fit(SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args) {
+    const AstParam* p = fd->params;
+    while (p && str_eq_cstr(get_base_type_name(p->type), "type")) p = p->next;
+    if (!p) return false;
+    p = p->next;
+    for (AstCallArg* a = args; a; a = a->next) {
+        if (fd->generic_params && !a->name.len && sema_arg_is_type_name(symbols, a->value)) continue;
+        while (p && str_eq_cstr(get_base_type_name(p->type), "type")) p = p->next;
+        if (!p) return false;
+        if (a->name.len && !str_eq(a->name, p->name)) return false;
+        p = p->next;
+    }
+    while (p && str_eq_cstr(get_base_type_name(p->type), "type")) p = p->next;
+    return p == NULL;
+}
+
+// A method call `value.f(args)` bound to `bound`: a missing or extra
+// argument, or a named argument that is not the parameter at its place, is
+// refused here, at the call, instead of reaching the C compiler (which saw
+// "too few arguments" while an argument filled the wrong parameter). The
+// binding picks a function by its receiver, so before reporting, every
+// function of that name for the same receiver type is tried: any that fits
+// is the one the backend binds, and the call stands.
+static void sema_check_method_call_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                        const AstDecl* bound, AstExpr* expr) {
+    const AstFuncDecl* bfd = &bound->as.func_decl;
+    if (bfd->generic_template) bfd = &bfd->generic_template->as.func_decl;
+    AstCallArg* args = expr->as.method_call.args;
+    if (sema_method_args_fit(symbols, bfd, args)) return;
+    const AstParam* brecv = bfd->params;
+    while (brecv && str_eq_cstr(get_base_type_name(brecv->type), "type")) brecv = brecv->next;
+    if (!brecv) return;
+    Str recv_base = get_base_type_name(brecv->type);
+    Str name = expr->as.method_call.method_name;
+    const AstDecl* cands[8]; size_t cand_count = 0;
+    for (size_t di = 0; di < ctx->all_decl_count; di++) {
+        const AstDecl* d = ctx->all_decls[di];
+        if (d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+        if (!str_eq(d->as.func_decl.name, name)) continue;
+        const AstParam* recv = d->as.func_decl.params;
+        while (recv && str_eq_cstr(get_base_type_name(recv->type), "type")) recv = recv->next;
+        if (!recv || !str_eq(get_base_type_name(recv->type), recv_base)) continue;
+        if (sema_method_args_fit(symbols, &d->as.func_decl, args)) {
+            // an overload of the same receiver fits: bind the call to it (a
+            // non-generic one; a generic one is specialized by the backend)
+            if (!d->as.func_decl.generic_params && !bfd->generic_params && d != bound) {
+                expr->decl_link = (AstDecl*)d;
+                expr->resolved_type = d->as.func_decl.returns
+                    ? sema_resolve_type_internal(ctx, module, symbols, d->as.func_decl.returns->type) : NULL;
+                const AstParam* p = d->as.func_decl.params; if (p) p = p->next;
+                for (AstCallArg* a = args; p && a; a = a->next, p = p->next)
+                    ensure_type_match(ctx, sema_resolve_type_internal(ctx, module, symbols, p->type), &a->value);
+            }
+            return;
+        }
+        if (cand_count < 8) cands[cand_count++] = d;
+    }
+    if (cand_count == 0) { cands[0] = bound; cand_count = 1; }
+    size_t arg_count = 0;
+    for (AstCallArg* a = args; a; a = a->next) arg_count++;
+    // the one candidate with this many arguments, if there is exactly one
+    const AstDecl* same_count = NULL; size_t same_count_n = 0;
+    for (size_t i = 0; i < cand_count; i++) {
+        size_t pc = 0;
+        for (const AstParam* p = cands[i]->as.func_decl.params; p; p = p->next)
+            if (!str_eq_cstr(get_base_type_name(p->type), "type")) pc++;
+        if (pc == arg_count + 1) { same_count = cands[i]; same_count_n++; }
+    }
+    if (cand_count == 1 || same_count_n == 1) {
+        const AstFuncDecl* fd = same_count_n == 1 ? &same_count->as.func_decl : &cands[0]->as.func_decl;
+        const AstParam* p = fd->params;
+        while (p && str_eq_cstr(get_base_type_name(p->type), "type")) p = p->next;
+        if (p) p = p->next;
+        for (AstCallArg* a = args; a && p; a = a->next) {
+            if (fd->generic_params && !a->name.len && sema_arg_is_type_name(symbols, a->value)) continue;
+            while (p && str_eq_cstr(get_base_type_name(p->type), "type")) p = p->next;
+            if (!p) break;
+            if (a->name.len && !str_eq(a->name, p->name)) {
+                char sig[512]; sema_render_signature(fd, sig, sizeof sig);
+                bool named_later = false;
+                for (const AstParam* q = p->next; q; q = q->next)
+                    if (str_eq(q->name, a->name)) named_later = true;
+                bool given_later = false;
+                for (AstCallArg* b = a->next; b; b = b->next)
+                    if (str_eq(b->name, p->name)) given_later = true;
+                char buf[900];
+                if (named_later && given_later)
+                    snprintf(buf, sizeof buf,
+                        "argument '%.*s' is given where parameter '%.*s' comes: the arguments of the call to %s are not in the parameters' order (arguments are positional and their names must match the parameters)",
+                        (int)a->name.len, a->name.data, (int)p->name.len, p->name.data, sig);
+                else if (named_later)
+                    snprintf(buf, sizeof buf,
+                        "argument '%.*s' is given where parameter '%.*s' comes: the call to %s is missing '%.*s' (arguments are positional and their names must match the parameters)",
+                        (int)a->name.len, a->name.data, (int)p->name.len, p->name.data, sig,
+                        (int)p->name.len, p->name.data);
+                else
+                    snprintf(buf, sizeof buf,
+                        "argument '%.*s' does not match parameter '%.*s' of %s — arguments are positional and their names must match the parameters",
+                        (int)a->name.len, a->name.data, (int)p->name.len, p->name.data, sig);
+                diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, buf);
+                if (module) module->had_error = true;
+                return;
+            }
+            p = p->next;
+        }
+    }
+    // the receiver is the first parameter: count it, as the signature shows it
+    sema_report_arity_mismatch(module, name, arg_count + 1, cands, cand_count, expr->line, expr->column);
+}
+
 // Are `a` and `b` in the same module for the bare-name ambiguity rule? Every
 // project file counts as one module (the folder rule covers project folders).
 static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b) {
@@ -9026,6 +9140,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                                         expr->as.method_call.args, true);
             }
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
+                sema_check_method_call_args(ctx, module, symbols, expr->decl_link, expr);
                 sema_check_own_args(ctx, module, symbols, &expr->decl_link->as.func_decl,
                                     expr->as.method_call.args, true);
                 // The receiver is the first parameter: `view.method()` with
