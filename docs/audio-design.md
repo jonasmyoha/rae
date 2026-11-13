@@ -740,8 +740,23 @@ deviceChanged, interrupted, resumed, routeLost, underrun, midiDeviceAdded,
 midiDeviceRemoved, voiceEnded: one event type with a kind, like
 AudioSessionEvent, rather than eight types). Fixture 1438: a session of
 entities null-tested against the formula with a mute inside a block and a
-track added mid-run; blocks of 37 equal blocks of 128 bit for bit. Not yet:
-the simple API running on this graph (queued as "[audio 7c2/7]").
+track added mid-run; blocks of 37 equal blocks of 128 bit for bit.
+
+**Landed, the simple API on the graph (2026-11-13, `packages/audio`
+0.12.11):** the engine's mixer renders a RenderPlan instead of its fixed bus
+sum. Each bus is a `source` node (the voices render into one slot per bus) into
+a new `duck` node kind, and the four duck nodes sum into the output. A duck node
+is a bus fader with the mixer's 5 ms ramp and its in-mix duck in one product
+(gain times duck level), in the old frame order, so the output is the same bit
+for bit: an offline scene with a duck, `setBusGain`, `setBusGainAt`, a synth
+note and mono output gives the same samples on 0.12.10 and 0.12.11 at blocks of
+256, 37 and 64. `setBusGain` is now a ramp on the bus's duck node, applied at
+its sample through the mixer's command ring (the ring that already cuts the
+block); `duckWhilePlaying` sets the target node's duck rule and reads the
+source bus's activity marks. The plan is built directly in `createAudioMixer`
+rather than through the ECS layer, because the ECS chain adds a pan and a meter
+node per track that the simple API does not have. The §10.1 calls and their
+behavior are unchanged (fixtures 1401-1417).
 
 ### 10.3 Writing DSP
 
