@@ -16,12 +16,12 @@ import Gpu2d
 open Sys
 open FileNotify
 
-const watchPollSec: Float64 = 0.25
+const watchPollSeconds: Float64 = 0.25
 
 type FileWatch {
   mtimes: List(Float64)
   lastPollAt: Float64
-  rewriteAtSec: Float64  # < 0 = no test rewrite
+  rewriteAtSeconds: Float64  # < 0 = no test rewrite
   rewriteDone: Bool
   changes: Int
   notify: FileNotify
@@ -36,7 +36,7 @@ func createFileWatch(now: view Float64) ret FileWatch {
   ret FileWatch {
     mtimes: List.create(Float64, cap: 8)
     lastPollAt: now
-    rewriteAtSec: rewriteAt
+    rewriteAtSeconds: rewriteAt
     rewriteDone: false
     changes: 0
     notify: createFileNotify()
@@ -74,7 +74,7 @@ func watchDue(watch: view FileWatch, now: view Float64) ret Bool {
   if fileNotifyTakeChanged(fileNotify: watch.notify) {
     ret true
   }
-  ret now - watch.lastPollAt >= watchPollSec
+  ret now - watch.lastPollAt >= watchPollSeconds
 }
 
 # Poll the watched files; true when any mtime moved since the last remember.
@@ -102,7 +102,7 @@ func fileWatchSystem(watch: mod FileWatch, paths: view List(String), now: view F
 # The test hook: copy the `.rewrite.raescene` twin over the open scene once
 # the deadline passes. Returns whether the copy happened this call.
 func testRewriteSystem(watch: mod FileWatch, path: view String, now: view Float64) ret Bool {
-  if watch.rewriteDone or watch.rewriteAtSec < 0.0 or now < watch.rewriteAtSec {
+  if watch.rewriteDone or watch.rewriteAtSeconds < 0.0 or now < watch.rewriteAtSeconds {
     ret false
   }
   watch.rewriteDone = true

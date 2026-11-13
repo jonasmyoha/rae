@@ -154,9 +154,9 @@ func postEmptyEvent() extern
 # Common timeout values. Apps that want a non-default cadence can
 # import these as named constants or compute their own Float
 # directly — the helper below is purely a convenience.
-let frameTimeoutSec: Float pub = 0.016     # one 60 Hz frame
-let watcherPollSec:  Float pub = 0.5       # file-watch poll cadence
-let idleCapSec:      Float pub = 30.0      # safety wake (longer ok)
+let frameTimeoutSeconds: Float pub = 0.016     # one 60 Hz frame
+let watcherPollSeconds:  Float pub = 0.5       # file-watch poll cadence
+let idleCapSeconds:      Float pub = 30.0      # safety wake (longer ok)
 
 # Pick the smallest of the four named signals — the smallest timeout
 # wins because the loop should wake on whichever fires first.
@@ -164,20 +164,20 @@ let idleCapSec:      Float pub = 30.0      # safety wake (longer ok)
 #   animating   → a transition / playback / etc. needs a frame soon.
 #   mouseDown   → user is holding the mouse button; we want to catch
 #                 release smoothly without depending on the OS event.
-#   pollWatcher → the file-watch needs a poll within `watcherPollSec`.
-#   else        → truly idle; wake at `idleCapSec` as a safety net.
+#   pollWatcher → the file-watch needs a poll within `watcherPollSeconds`.
+#   else        → truly idle; wake at `idleCapSeconds` as a safety net.
 #
 # Returns seconds-to-wait. Caller passes the result to
 # `waitEventsTimeout`.
-func nextWaitTimeoutSec(
+func nextWaitTimeoutSeconds(
   animating:   view Bool
   mouseDown:   view Bool
   pollWatcher: view Bool
 ) pub ret Float {
-  if animating   { ret frameTimeoutSec }
-  if mouseDown   { ret frameTimeoutSec }
-  if pollWatcher { ret watcherPollSec  }
-  ret idleCapSec
+  if animating   { ret frameTimeoutSeconds }
+  if mouseDown   { ret frameTimeoutSeconds }
+  if pollWatcher { ret watcherPollSeconds  }
+  ret idleCapSeconds
 }
 ```
 
@@ -195,7 +195,7 @@ change it shrinks slightly and changes shape.
 ```rae
 loop running and switching is false {
   # NEW: block until something happens.
-  let timeout: Float = nextWaitTimeoutSec(
+  let timeout: Float = nextWaitTimeoutSeconds(
     animating:   playback.isPlaying or heroIsAnimating(anim)
     mouseDown:   isMouseButtonDown(button: mouseButtonLeft)
     pollWatcher: true
@@ -244,7 +244,7 @@ waiting, ends by deciding whether to draw, never busy-loops.
 
 ## 4. Wait-timeout policy in detail
 
-The `nextWaitTimeoutSec` helper covers the common case. Apps with unusual
+The `nextWaitTimeoutSeconds` helper covers the common case. Apps with unusual
 needs (debug heartbeat that wants to advance even when nothing else is
 happening, network polling, etc.) can compute their own `Float` and call
 `waitEventsTimeout` directly.
@@ -256,28 +256,28 @@ Animations are the trickiest part of event-driven loops. The pattern is:
 1. Animation **starts** (e.g. user taps play): `dispatchActions` flips
    `playback.isPlaying = true`. *The current iteration is already past the
    wait;* it processes the event, sees `animating=true`, renders, loops back.
-2. **Next iteration:** `nextWaitTimeoutSec(animating: true, …)` returns
-   `frameTimeoutSec = 0.016`. The loop waits at most 16 ms.
+2. **Next iteration:** `nextWaitTimeoutSeconds(animating: true, …)` returns
+   `frameTimeoutSeconds = 0.016`. The loop waits at most 16 ms.
 3. Animation runs at ~60 Hz this way — same effective rate as the current
    throttle, but the loop wakes on input MID-frame too.
 4. Animation **ends:** `playback.isPlaying = false`. Next iteration:
-   `nextWaitTimeoutSec(animating: false, …) = idleCapSec = 30.0`. Loop
+   `nextWaitTimeoutSeconds(animating: false, …) = idleCapSeconds = 30.0`. Loop
    blocks for up to 30 s.
 
-The `frameTimeoutSec` is a *maximum*. If input arrives at, say, 5 ms in, the
+The `frameTimeoutSeconds` is a *maximum*. If input arrives at, say, 5 ms in, the
 wait returns early and we get a 5 ms frame. That's fine — the animation
 advance is timestamp-based (`getTime() - prevTime`), not frame-count-based.
 
 ### `mouseDown` as a force-active signal
 
 While the mouse button is held, we want to be at 60 Hz so the release edge is
-caught immediately. `nextWaitTimeoutSec` reads `isMouseButtonDown` and
-returns `frameTimeoutSec`. After release, the next iteration sees down=false
+caught immediately. `nextWaitTimeoutSeconds` reads `isMouseButtonDown` and
+returns `frameTimeoutSeconds`. After release, the next iteration sees down=false
 and falls back to whatever else is happening.
 
 This is the same belt-and-suspenders we already have for clicks.
 
-### `idleCapSec` justification
+### `idleCapSeconds` justification
 
 Why 30 s and not "wait forever"? Two reasons:
 1. **File-watch polling.** The 30 s cap means the file watcher checks at
@@ -288,7 +288,7 @@ Why 30 s and not "wait forever"? Two reasons:
    stop firing, the 30 s wake guarantees the app at least repaints
    periodically rather than appearing frozen forever.
 
-For an app with hot-reload disabled and no diagnostic concerns, `idleCapSec`
+For an app with hot-reload disabled and no diagnostic concerns, `idleCapSeconds`
 can be set to any large value (e.g. 600.0). The stdlib default is the safe
 choice.
 
@@ -303,9 +303,9 @@ the cache as clean.
 
 ### 5b. `RAE_AUTO_EXIT_SEC`
 The test-mode auto-exit currently fires inside the inner loop. With the new
-wait, an iteration could be sleeping for `idleCapSec` (30 s) when the
-auto-exit deadline arrives. Fix: clamp `timeout` to `(autoExitSec -
-elapsedSec)` when auto-exit is active. Simple Float min at the call site.
+wait, an iteration could be sleeping for `idleCapSeconds` (30 s) when the
+auto-exit deadline arrives. Fix: clamp `timeout` to `(autoExitSeconds -
+elapsedSeconds)` when auto-exit is active. Simple Float min at the call site.
 
 ### 5c. `RAE_UI_STRESS_REBUILDS`
 The stress mode runs its own loop that doesn't render at all — it just
@@ -364,7 +364,7 @@ Each phase is one commit, with a separate submodule + outer-repo bump pair.
 
 ### Phase 2 — Add stdlib helper
 - `lib/ui/loop.rae` (new file): the timeout constants and
-  `nextWaitTimeoutSec` helper.
+  `nextWaitTimeoutSeconds` helper.
 - No tests needed beyond a one-shot check that the file compiles
   (it'll be exercised by Phase 3's example migration).
 
@@ -409,7 +409,7 @@ performance acceptance:
 | Playback animation | interactive | smooth, no stutter | smooth |
 | Hero transition | interactive | smooth | smooth |
 | Theme toggle (T key) | interactive | works first try | works |
-| Hot-reload (.raescene edit) | edit + observe | updates within 1 s | within `watcherPollSec` (0.5 s) |
+| Hot-reload (.raescene edit) | edit + observe | updates within 1 s | within `watcherPollSeconds` (0.5 s) |
 | 20k stress | `RAE_UI_STRESS_REBUILDS=1 RAE_UI_STRESS_N=20000` | same plateau as before | unchanged (stress path doesn't use the loop) |
 | Full suite | `make test` | 327 unit + 50 example green | **329 unit + 50 example green** (+ 491_wait_events_smoke) |
 
@@ -421,7 +421,7 @@ better than the previous 30 fps poll-throttle baseline.
 
 If any of the perf targets isn't hit on the first try, the most likely
 culprit is the timeout policy (too low an idle cap, or `mouseDown` not
-gating correctly). Tune `nextWaitTimeoutSec`, not the underlying mechanism.
+gating correctly). Tune `nextWaitTimeoutSeconds`, not the underlying mechanism.
 
 ## 9. Out of scope (for now)
 

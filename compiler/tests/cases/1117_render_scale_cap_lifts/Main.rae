@@ -20,14 +20,14 @@ const nominal: Int = 0
 const critical: Int = 3
 
 # One frame: the work it took, and the dt the loop saw (padded under the cap)
-func frame(drs: mod RenderScaleController, workSec: view Float, therm: view Int) {
-  var deltaTime: Float = workSec
+func frame(drs: mod RenderScaleController, workSeconds: view Float, therm: view Int) {
+  var deltaTime: Float = workSeconds
   if drs.capFps < 60.0 {
     deltaTime = 1.0 / drs.capFps
-    if workSec > deltaTime {
-      deltaTime = workSec
+    if workSeconds > deltaTime {
+      deltaTime = workSeconds
     }
-    recordFrameWork(drs: drs, workSec: workSec)
+    recordFrameWork(drs: drs, workSeconds: workSeconds)
   }
   stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
 }
@@ -35,22 +35,22 @@ func frame(drs: mod RenderScaleController, workSec: view Float, therm: view Int)
 func frames(
   drs: mod RenderScaleController
   count: view Int
-  workSec: view Float
+  workSeconds: view Float
   therm: view Int
 ) {
   loop var i: Int = 0, i < count, ++i {
-    frame(drs: drs, workSec: workSec, therm: therm)
+    frame(drs: drs, workSeconds: workSeconds, therm: therm)
   }
 }
 
 # `count` frames where every `every`-th one takes 33 ms and the rest 16.7 ms
 func scattered(drs: mod RenderScaleController, count: view Int, every: view Int) {
   loop var i: Int = 1, i <= count, ++i {
-    var workSec: Float = 0.0167
+    var workSeconds: Float = 0.0167
     if i % every is 0 {
-      workSec = 0.033
+      workSeconds = 0.033
     }
-    frame(drs: drs, workSec: workSec, therm: nominal)
+    frame(drs: drs, workSeconds: workSeconds, therm: nominal)
   }
 }
 
@@ -60,11 +60,11 @@ func missesAtFullScale(drs: mod RenderScaleController) ret Int {
   var raises: Int = 0
   loop var i: Int = 1, i <= 3600, ++i {
     let before: Float = drs.scale
-    var workSec: Float = 0.0167
+    var workSeconds: Float = 0.0167
     if drs.scale > 0.95 and i % 6 is 0 {
-      workSec = 0.033
+      workSeconds = 0.033
     }
-    frame(drs: drs, workSec: workSec, therm: nominal)
+    frame(drs: drs, workSeconds: workSeconds, therm: nominal)
     if drs.scale > 0.95 and before < 0.95 {
       raises = raises + 1
     }
@@ -82,7 +82,7 @@ func driveToCap(drs: mod RenderScaleController) {
   frames(
     drs: drs
     count: 400
-    workSec: 0.040
+    workSeconds: 0.040
     therm: nominal
   )
 }
@@ -95,14 +95,14 @@ func main() {
   frames(
     drs: recovering
     count: 179
-    workSec: 0.010
+    workSeconds: 0.010
     therm: nominal
   )
   show(label: "179 light frames", drs: recovering)
   frames(
     drs: recovering
     count: 1
-    workSec: 0.010
+    workSeconds: 0.010
     therm: nominal
   )
   show(label: "180 light frames", drs: recovering)
@@ -110,7 +110,7 @@ func main() {
   frames(
     drs: recovering
     count: 30 + 180
-    workSec: 0.010
+    workSeconds: 0.010
     therm: nominal
   )
   show(label: "3 s later", drs: recovering)
@@ -121,7 +121,7 @@ func main() {
   frames(
     drs: slow
     count: 600
-    workSec: 0.030
+    workSeconds: 0.030
     therm: nominal
   )
   show(label: "slow work, 10 s later", drs: slow)
@@ -131,21 +131,21 @@ func main() {
   frames(
     drs: hot
     count: 10
-    workSec: 0.010
+    workSeconds: 0.010
     therm: critical
   )
   show(label: "critical", drs: hot)
   frames(
     drs: hot
     count: 600
-    workSec: 0.010
+    workSeconds: 0.010
     therm: critical
   )
   show(label: "still critical, 10 s later", drs: hot)
   frames(
     drs: hot
     count: 31
-    workSec: 0.010
+    workSeconds: 0.010
     therm: nominal
   )
   show(label: "cooled down", drs: hot)
@@ -172,7 +172,7 @@ func main() {
   frames(
     drs: steady
     count: 600
-    workSec: 0.0167
+    workSeconds: 0.0167
     therm: nominal
   )
   show(label: "steady 16.7 ms, 10 s", drs: steady)

@@ -59,7 +59,7 @@ const reorderLiftRate: Float = 18.0
 
 # How long a drop waits for the app to reorder its data before the rows ease
 # back into their old places
-const reorderDropWaitSec: Float = 0.5
+const reorderDropWaitSeconds: Float = 0.5
 
 # A press or a drag to look at this frame
 func listReorderNeedsRun(world: view UiWorld, input: view UiInput) ret Bool {
@@ -84,7 +84,7 @@ func listReorderSystem(
   world: mod UiWorld
   uiSystems: mod UiSystems
   input: mod UiInput
-  nowSec: view Float64
+  nowSeconds: view Float64
 ) ret Bool {
   var lists: List(EntityId) = List.create(EntityId, cap: 2)
   loop var i: Int = 0, i < componentCount(this: world.listReorders), ++i {
@@ -98,7 +98,7 @@ func listReorderSystem(
         uiSystems: uiSystems
         input: input
         listEntity: listEntity
-        nowSec: nowSec
+        nowSeconds: nowSeconds
       ) {
         moving = true
       }
@@ -114,9 +114,9 @@ func idleReorderDrag() ret ListReorderDrag {
     toIndex: 0
     pressX: 0.0
     pressY: 0.0
-    pressSec: 0.0
-    lastSec: 0.0
-    dropSec: 0.0
+    pressSeconds: 0.0
+    lastSeconds: 0.0
+    dropSeconds: 0.0
     grabY: 0.0
     rowY: 0.0
     lift: 0.0
@@ -287,7 +287,7 @@ func listReorderStep(
   uiSystems: mod UiSystems
   input: mod UiInput
   listEntity: view EntityId
-  nowSec: view Float64
+  nowSeconds: view Float64
 ) ret Bool {
   var reorder: ListReorder = { actionId: "" }
   if let authored: ListReorder = componentCopy(this: world.listReorders, entityId: listEntity) {
@@ -303,11 +303,11 @@ func listReorderStep(
   }
   let count: Int = listReorderRowCount(world: world, listEntity: listEntity)
   let pitch: Float = listView.itemHeight + listView.itemGap
-  var seconds: Float = (nowSec - drag.lastSec) as Float
+  var seconds: Float = (nowSeconds - drag.lastSeconds) as Float
   if seconds < 0.0 or seconds > 0.05 {
     seconds = 1.0 / 60.0
   }
-  drag.lastSec = nowSec
+  drag.lastSeconds = nowSeconds
   var top: Float = listReorderTop(uiSystems: uiSystems, listEntity: listEntity)
   let pointer: view UiPointerState = input.pointer
   let wasIdle: Bool = drag.phase is ListReorderPhase.idle
@@ -362,7 +362,7 @@ func listReorderStep(
           drag.highIndex = span.high
           drag.pressX = pointer.x
           drag.pressY = pointer.y
-          drag.pressSec = nowSec
+          drag.pressSeconds = nowSeconds
           if reorder.haptics {
             # warm the Taptic Engine now, so the lift and the first tick
             # have no lag
@@ -380,7 +380,7 @@ func listReorderStep(
   } else if drag.phase is ListReorderPhase.pressing {
     let movedX: Float = Math.abs(value: pointer.x - drag.pressX)
     let movedY: Float = Math.abs(value: pointer.y - drag.pressY)
-    let held: Bool = (nowSec - drag.pressSec) as Float * 1000.0 >= reorder.holdMs.toFloat()
+    let held: Bool = (nowSeconds - drag.pressSeconds) as Float * 1000.0 >= reorder.holdMs.toFloat()
     if pointer.down is false or count <= drag.fromIndex {
       drag.phase = ListReorderPhase.idle
     } else if reorder.handleNodeId.length() > 0 or held {
@@ -516,7 +516,7 @@ func listReorderStep(
         listEntity: listEntity
         keyField: listView.itemKeyField
       )
-      drag.dropSec = nowSec
+      drag.dropSeconds = nowSeconds
       drag.dataGeneration = componentTableGeneration(ListViewData, this: world.listViewDatas)
       drag.settled = 0
     }
@@ -526,7 +526,7 @@ func listReorderStep(
       world: world
       count: count
       pitch: pitch
-      nowSec: nowSec
+      nowSeconds: nowSeconds
       seconds: seconds
     )
   }
@@ -548,13 +548,13 @@ func listReorderSettle(
   world: view UiWorld
   count: view Int
   pitch: view Float
-  nowSec: view Float64
+  nowSeconds: view Float64
   seconds: view Float
 ) {
   if drag.settled is 0 {
     # The new order is taken by listReorderPoseSystem, in the frame it comes
     let moved: Bool = drag.toIndex is not drag.fromIndex
-    if moved is false or (nowSec - drag.dropSec) as Float >= reorderDropWaitSec or (count is not drag.shifts.length and drag.keys.length is 0) {
+    if moved is false or (nowSeconds - drag.dropSeconds) as Float >= reorderDropWaitSeconds or (count is not drag.shifts.length and drag.keys.length is 0) {
       # Back home in the old order: the lifted row from where it was dropped
       if drag.fromIndex < drag.shifts.length {
         drag.shifts.set(index: drag.fromIndex, value: drag.rowY - drag.fromIndex.toFloat() * pitch)

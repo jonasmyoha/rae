@@ -1,6 +1,6 @@
 # Loop (docs/ui-animation-design.md): a motion that repeats for a while, then rests. A node's Loop
 # starts when the node is shown, as Appear does (animationTriggers calls loopStart); each frame
-# loopStep sets its pose from the keyframes at the time into its period, and when `forSec` has
+# loopStep sets its pose from the keyframes at the time into its period, and when `forSeconds` has
 # passed hands the node to a glide to its laid-out pose (animationTo) and drops its run, so a loop
 # that has ended runs no code and leaves no pose. Reduced motion, or animation off: no loop.
 import Math
@@ -25,7 +25,7 @@ func loopStart(world: view UiWorld, uiSystems: mod UiSystems, entityId: view Ent
     ret
   }
   let nodeLoop: view Loop = componentView(this: world.loops, entityId: entityId)
-  if nodeLoop.keys.length is 0 or nodeLoop.periodSec <= 0.0 {
+  if nodeLoop.keys.length is 0 or nodeLoop.periodSeconds <= 0.0 {
     ret
   }
   componentSet(
@@ -75,7 +75,8 @@ func loopPoseAt(keys: view List(LoopKey), phase: view Float) ret AnimationPose {
   }
 }
 
-# One frame of every running loop, `step` seconds on: its pose now; one past its `forSec` glides to
+# One frame of every running loop, `step` seconds on: its pose now; one past its `forSeconds`
+# glides to
 # its place on its motion and its run ends (the glide's track then owns the pose)
 func loopStep(world: view UiWorld, uiSystems: mod UiSystems, step: view Float) {
   var ended: List(EntityId) = List.create(EntityId, cap: 4)
@@ -91,13 +92,13 @@ func loopStep(world: view UiWorld, uiSystems: mod UiSystems, step: view Float) {
     let nodeLoop: view Loop = componentView(this: world.loops, entityId: entityId)
     let run: mod LoopRun = componentMod(this: uiSystems.animation.loopRuns, entityId: entityId)
     run.elapsed = run.elapsed + step
-    if nodeLoop.forSec > 0.0 and run.elapsed >= nodeLoop.forSec {
+    if nodeLoop.forSeconds > 0.0 and run.elapsed >= nodeLoop.forSeconds {
       ended.add(value: entityId)
       continue
     }
     var phase: Float = 0.0
     if run.elapsed > 0.0 {
-      let periods: Float = run.elapsed / nodeLoop.periodSec
+      let periods: Float = run.elapsed / nodeLoop.periodSeconds
       phase = periods - Math.floor(x: periods)
     }
     componentSet(

@@ -9,11 +9,11 @@ open ui/Ecs
 #
 # Time advance is driven by the inner loop sampling the platform clock and
 # computing a delta against the previous frame's sample. When `isPlaying` is true the
-# delta accumulates into `elapsedSec`; when paused, we still update
+# delta accumulates into `elapsedSeconds`; when paused, we still update
 # the `prevTime` floor (so the next resume doesn't replay the entire
-# pause interval in one tick) but leave `elapsedSec` alone.
+# pause interval in one tick) but leave `elapsedSeconds` alone.
 #
-# At `elapsedSec >= durationSec` we wrap back to 0 and keep playing —
+# At `elapsedSeconds >= durationSeconds` we wrap back to 0 and keep playing —
 # auto-loop is the demo-friendly choice. A future pass could expose a
 # `loopMode` enum (Once / Loop) if a real player wires this up.
 import ui/Components
@@ -64,8 +64,8 @@ type PlaybackSystem {
   # value and refreshes dependent icon bindings instead of waiting for a
   # delayed per-frame sprite patch.
   revision: Int
-  elapsedSec: Float
-  durationSec: Float
+  elapsedSeconds: Float
+  durationSeconds: Float
   # `prevTime` is the `getTime()` reading the previous frame produced.
   # `< 0.0` means "first frame" — the inner loop primes it before the
   # first advance call. Storing the previous frame sample here rather
@@ -112,8 +112,8 @@ func createPlaybackSystem() pub ret PlaybackSystem {
     playbackTimes: ComponentTable.create(PlaybackTime)
     isPlaying: false
     revision: 0
-    elapsedSec: 0.0
-    durationSec: 20.0
+    elapsedSeconds: 0.0
+    durationSeconds: 20.0
     prevTime: -1.0
     playingAlbumStem: ""
     playingTrackIndex: -1
@@ -233,11 +233,11 @@ func processCommands(this: mod PlaybackSystem) pub {
   clearQueue(this: this.inbox)
 }
 
-# Advance `elapsedSec` by the delta against the last sampled frame.
+# Advance `elapsedSeconds` by the delta against the last sampled frame.
 # Called every frame in the inner loop, regardless of play state, so
 # `prevTime` always tracks the most recent sample (this avoids a giant
-# jump on the first resume after a long pause). When `elapsedSec`
-# reaches `durationSec` we wrap back to 0 and keep playing — the
+# jump on the first resume after a long pause). When `elapsedSeconds`
+# reaches `durationSeconds` we wrap back to 0 and keep playing — the
 # demo-friendly choice, see file-header note.
 func advancePlayback(playbackSystem: mod PlaybackSystem, now: view Float64) pub {
   var deltaTime: Float = 0.0
@@ -246,26 +246,26 @@ func advancePlayback(playbackSystem: mod PlaybackSystem, now: view Float64) pub 
   }
   playbackSystem.prevTime = now
   if playbackSystem.isPlaying {
-    playbackSystem.elapsedSec = playbackSystem.elapsedSec + deltaTime
-    if playbackSystem.elapsedSec >= playbackSystem.durationSec {
+    playbackSystem.elapsedSeconds = playbackSystem.elapsedSeconds + deltaTime
+    if playbackSystem.elapsedSeconds >= playbackSystem.durationSeconds {
       # Wrap. Subtract instead of zero so a very large `dt` doesn't
       # lose the carry — though in practice dt is well under 1s.
-      playbackSystem.elapsedSec = playbackSystem.elapsedSec - playbackSystem.durationSec
-      if playbackSystem.elapsedSec < 0.0 {
-        playbackSystem.elapsedSec = 0.0
+      playbackSystem.elapsedSeconds = playbackSystem.elapsedSeconds - playbackSystem.durationSeconds
+      if playbackSystem.elapsedSeconds < 0.0 {
+        playbackSystem.elapsedSeconds = 0.0
       }
     }
   }
 }
 
 # Progress in [0, 1]. Clamped so the rendered fill width can never
-# overshoot the track width when `dt` momentarily pushes elapsedSec
-# past durationSec before the wrap check kicks in.
+# overshoot the track width when `dt` momentarily pushes elapsedSeconds
+# past durationSeconds before the wrap check kicks in.
 func playbackProgress(playbackSystem: view PlaybackSystem) pub ret Float {
-  if playbackSystem.durationSec <= 0.0 {
+  if playbackSystem.durationSeconds <= 0.0 {
     ret 0.0
   }
-  let p: Float = playbackSystem.elapsedSec / playbackSystem.durationSec
+  let p: Float = playbackSystem.elapsedSeconds / playbackSystem.durationSeconds
   if p < 0.0 {
     ret 0.0
   }

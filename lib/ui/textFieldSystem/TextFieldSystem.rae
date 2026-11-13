@@ -12,8 +12,8 @@
 # - Each field's first Text child shows its text, or its placeholder while it
 #   is empty and has no focus. The caret is not a character in that text: the
 #   renderer draws it after the text (ui/renderSystem/RenderCaret) while
-#   `caretVisible`, which blinks every `caretBlinkSec` from the last edit or
-#   focus change. `textFieldDeadlineSec` is when it next changes, for the
+#   `caretVisible`, which blinks every `caretBlinkSeconds` from the last edit or
+#   focus change. `textFieldDeadlineSeconds` is when it next changes, for the
 #   event loop's wait.
 # - `keyboardHeight` is the on-screen keyboard's height in points (0 when none
 #   is shown, always 0 on a desktop), so a layout can keep a field above it.
@@ -39,7 +39,7 @@ open ecs/Event
 open ecs/ComponentTable
 
 # Half a blink: the caret shows for this long, then hides for as long
-const caretBlinkSec: Float64 = 0.53
+const caretBlinkSeconds: Float64 = 0.53
 
 # What the keyboard and the pointer did this frame
 type TextInputFrame {
@@ -292,7 +292,7 @@ func updateCaretBlink(
 ) ret Bool {
   var visible: Bool = false
   if isNone(this: textFieldSystem.caretLineEntityId) is false {
-    let phase: Int = ((now - textFieldSystem.caretEpoch) / caretBlinkSec) as Int
+    let phase: Int = ((now - textFieldSystem.caretEpoch) / caretBlinkSeconds) as Int
     visible = phase % 2 is 0
   }
   if visible is textFieldSystem.caretVisible {
@@ -303,15 +303,15 @@ func updateCaretBlink(
 }
 
 # Seconds until the caret next blinks, 0 when no field has focus (the
-# heartbeat convention of ui/EventLoop.nextWaitTimeoutSec): the longest an
+# heartbeat convention of ui/EventLoop.nextWaitTimeoutSeconds): the longest an
 # event loop may wait while a field has focus
-func textFieldDeadlineSec(textFieldSystem: view TextFieldSystem, now: view Float64) ret Float {
+func textFieldDeadlineSeconds(textFieldSystem: view TextFieldSystem, now: view Float64) ret Float {
   if isNone(this: textFieldSystem.caretLineEntityId) {
     ret 0.0
   }
   let elapsed: Float64 = now - textFieldSystem.caretEpoch
-  let phase: Int = (elapsed / caretBlinkSec) as Int
-  let remaining: Float = ((phase + 1) as Float64 * caretBlinkSec - elapsed) as Float
+  let phase: Int = (elapsed / caretBlinkSeconds) as Int
+  let remaining: Float = ((phase + 1) as Float64 * caretBlinkSeconds - elapsed) as Float
   if remaining < 0.001 {
     ret 0.001
   }

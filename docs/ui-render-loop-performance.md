@@ -35,7 +35,7 @@ nothing moves.
 
 The render loop is **owned by each app**, not by `lib/ui`. `lib/ui`
 provides the *systems* (`layoutSystem`, `transformSystem`, `renderSystem`)
-and a timeout *policy* helper (`nextWaitTimeoutSec` in
+and a timeout *policy* helper (`nextWaitTimeoutSeconds` in
 `lib/ui/event_loop.rae`), but every app writes its own loop because each
 has different structure (screenshot mode, hot-reload, navigation, …).
 
@@ -163,7 +163,7 @@ Two layers enforce it so it is not a per-app footgun:
   free. Pattern:
 
       if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
-        gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(
           visible: Gpu2d.renderableNow(), animating: animating, ...))
       } else {
         ... render + present ...
@@ -197,14 +197,14 @@ Where the wakeups came from, and the shared rule that removed each:
   (`fileWatcherNeedsPolling`, `reloadSignalNeedsPolling`), and then it is a 1 s
   poll.
 - **An effect kept a one-frame wait while hidden**: `animating` made the wait
-  16.7 ms although nothing was drawn. `nextWaitTimeoutSec` now takes `visible`
+  16.7 ms although nothing was drawn. `nextWaitTimeoutSeconds` now takes `visible`
   (`Gpu2d.renderableNow()`) and, hidden, ignores animating / mouseDown /
   pollWatcher: it sleeps until the window is shown (an OS event) or its
   heartbeat is due, at most once a second. A busy render loop is `animating`
-  with `frameSec: 0.0`, so a hidden one cannot spin either.
-- **A fixed heartbeat for something slow**: `heartbeatSec` is a DEADLINE — pass
+  with `frameSeconds: 0.0`, so a hidden one cannot spin either.
+- **A fixed heartbeat for something slow**: `heartbeatSeconds` is a DEADLINE — pass
   the time until the next change of a slow periodic thing (a caret blink, a
-  clock label, `windowGeometryDeadlineSec` for a settling window move), never
+  clock label, `windowGeometryDeadlineSeconds` for a settling window move), never
   `animating`. Wait for the next blink, not the next frame.
 - **An app that rendered while hidden** (104 drew on every wake): use
   `Gpu2d.shouldRenderFrame`.

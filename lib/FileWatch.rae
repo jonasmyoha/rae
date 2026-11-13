@@ -9,11 +9,11 @@
 #
 # How callers wire it in:
 #   1. Build a `List(String)` of paths to watch.
-#   2. Call `fileWatch.createFileWatcher(paths, enabled, intervalSec)` once after
+#   2. Call `fileWatch.createFileWatcher(paths, enabled, intervalSeconds)` once after
 #      the paths are known. The snapshot records each file's mtime so
 #      the first check is quiet.
 #   3. Once per frame, call `fileWatch.checkForChanges(watcher, getTime())`.
-#      It is throttled by `intervalSec`, so calling every frame is cheap —
+#      It is throttled by `intervalSeconds`, so calling every frame is cheap —
 #      most calls early-return. Where the OS delivers file notifications
 #      (lib/FileNotify.rae) a notification also makes it look at once, and
 #      wakes a blocked event loop to do so: an idle app needs no timer.
@@ -35,7 +35,7 @@ type WatchEntry {
 type FileWatcher {
   enabled: Bool
   entries: List(WatchEntry)
-  intervalSec: Float
+  intervalSeconds: Float
   lastCheck: Float64
   notify: FileNotify
 }
@@ -46,7 +46,7 @@ type FileWatcher {
 func createFileWatcher(
   paths: view List(String)
   enabled: view Bool
-  intervalSec: view Float
+  intervalSeconds: view Float
 ) ret FileWatcher {
   var entries: List(WatchEntry) = List.create(WatchEntry, cap: paths.length)
   var i: Int = 0
@@ -65,8 +65,8 @@ func createFileWatcher(
   ret FileWatcher {
     enabled: enabled
     entries: entries
-    intervalSec: intervalSec
-    lastCheck: -intervalSec
+    intervalSeconds: intervalSeconds
+    lastCheck: -intervalSeconds
     notify: notify
   }
 }
@@ -86,7 +86,7 @@ func fileWatcherNeedsPolling(watcher: view FileWatcher) ret Bool {
 }
 
 # Returns true if any watched file's mtime changed since the previous
-# check. Throttled — calls within `intervalSec` of the last check are free
+# check. Throttled — calls within `intervalSeconds` of the last check are free
 # (return false) unless an OS notification arrived since. On
 # `true`, the stored mtimes are refreshed (and the notifications re-armed,
 # since the file there now may be a new inode) so the next call is quiet
@@ -96,7 +96,7 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
     ret false
   }
   let notified: Bool = fileNotifyTakeChanged(fileNotify: watcher.notify)
-  if notified is false and now - watcher.lastCheck < watcher.intervalSec {
+  if notified is false and now - watcher.lastCheck < watcher.intervalSeconds {
     ret false
   }
   watcher.lastCheck = now

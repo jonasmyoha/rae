@@ -262,9 +262,9 @@ func trackTextSystem(
 # rewritten once per second while playing and never at rest.
 func playbackTimeSecond(kind: view PlaybackTimeKind, playbackSystem: view PlaybackSystem) ret Int {
   if kind is PlaybackTimeKind.elapsed {
-    ret playbackSystem.elapsedSec.toInt()
+    ret playbackSystem.elapsedSeconds.toInt()
   }
-  ret playbackSystem.durationSec.toInt()
+  ret playbackSystem.durationSeconds.toInt()
 }
 
 # Every `PlaybackTime`: the M:SS position (`elapsed`) or duration (`total`)
@@ -278,9 +278,9 @@ func playbackTimeSystem(world: mod UiWorld, playbackSystem: mod PlaybackSystem) 
     let kind: PlaybackTimeKind = queryViewAt(table: playbackSystem.playbackTimes, denseIndex: i).kind
     let second: Int = playbackTimeSecond(kind: kind, playbackSystem: playbackSystem)
     if queryViewAt(table: playbackSystem.playbackTimes, denseIndex: i).builtSecond is not second {
-      var seconds: Float = playbackSystem.durationSec
+      var seconds: Float = playbackSystem.durationSeconds
       if kind is PlaybackTimeKind.elapsed {
-        seconds = playbackSystem.elapsedSec
+        seconds = playbackSystem.elapsedSeconds
       }
       let label: String = formatDurationMs(ms: (seconds * 1000.0).toInt())
       writeTrackText(world: world, entityId: entityId, value: label)

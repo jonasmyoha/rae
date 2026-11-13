@@ -229,7 +229,7 @@ disk), but every game also waits (asset streaming, netcode, save/load) and
 every app also computes (image decode, text shaping, search). The same
 schedule, the same modes, the same two primitives; only the mix differs. What
 must *not* differ is the loop policy: the wait-based idle loop
-(`nextWaitTimeoutSec` + `wake()`) for apps, the busy loop for games, and the
+(`nextWaitTimeoutSeconds` + `wake()`) for apps, the busy loop for games, and the
 hybrid the UI-render-loop postmortem already prescribes — the concurrency
 primitives plug into whichever loop the program owns.
 

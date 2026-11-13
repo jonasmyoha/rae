@@ -143,7 +143,7 @@ nothing, and the wheel waits for a trackpad's momentum before the spring.
 
 ```
 waitEvents(timeout)          hybrid loop: 0 while animating/interacting,
-                             nextWaitTimeoutSec(...) when idle (§5)
+                             nextWaitTimeoutSeconds(...) when idle (§5)
 pollClose + gather input     lib/ui inputSystem over the world (UiInput)
 updateScrollRoot             lib scroll physics on the page's ScrollRoot
 1. runFrameInputDispatch     hit-test; each fired id -> the action table ->
@@ -204,7 +204,7 @@ body. Two design points:
 ## 5. The event loop
 
 Idle at ~0 % CPU, smooth while moving: `waitEvents` blocks for a policy
-timeout (`lib/ui/EventLoop.nextWaitTimeoutSec`: a frame while animating or
+timeout (`lib/ui/EventLoop.nextWaitTimeoutSeconds`: a frame while animating or
 with the mouse down, the watcher poll cadence otherwise, a 30 s cap), and
 busy-renders (timeout 0) during interaction, transitions and scroll
 momentum. Every continuous-motion source must feed the "animating" flag or

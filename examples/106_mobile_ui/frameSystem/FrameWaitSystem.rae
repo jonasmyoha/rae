@@ -65,21 +65,21 @@ func frameWaitSystem(
   # sleeps until it is shown again. The watchers wake the loop themselves
   # (OS file notifications) and are polled only where the OS has none; a
   # window move that is still settling asks to be woken when it is due.
-  var frameSec: Float = session.targetFrameSec
+  var frameSeconds: Float = session.targetFrameSeconds
   if tick.busyAnimating {
-    frameSec = 0.0
+    frameSeconds = 0.0
   }
-  tick.timeout = nextWaitTimeoutSec(
+  tick.timeout = nextWaitTimeoutSeconds(
     visible: Gpu2d.renderableNow()
     animating: tick.busyAnimating or tick.playbackAnimating or uiNowSeconds() < session.renderUntil
     mouseDown: false
     pollWatcher: fileWatcherNeedsPolling(watcher: session.watcher) or reloadSignalNeedsPolling(
       w: session.reloadWatcher
     )
-    frameSec: frameSec
-    heartbeatSec: earliestDeadlineSec(
-      first: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: uiNowSeconds())
-      second: textFieldDeadlineSec(textFieldSystem: uiSystems.textField, now: uiNowSeconds())
+    frameSeconds: frameSeconds
+    heartbeatSeconds: earliestDeadlineSeconds(
+      first: windowGeometryDeadlineSeconds(windowGeometry: app.windowGeometry, now: uiNowSeconds())
+      second: textFieldDeadlineSeconds(textFieldSystem: uiSystems.textField, now: uiNowSeconds())
     )
   )
   # Heartbeat: prints once per frame BEFORE the wait. If this line stops
@@ -99,9 +99,9 @@ func frameWaitSystem(
   # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline actually
   # fires on time — otherwise an idle iteration could sleep for the idle cap
   # (30 s) past the requested exit time.
-  if app.autoExitSec > 0.0 {
+  if app.autoExitSeconds > 0.0 {
     let elapsed: Float = (uiNowSeconds() - app.bootTime) as Float
-    let remaining: Float = app.autoExitSec - elapsed
+    let remaining: Float = app.autoExitSeconds - elapsed
     if remaining < tick.timeout {
       tick.timeout = remaining
     }
@@ -115,7 +115,7 @@ func frameWaitSystem(
     resized: uiIsWindowResized()
   )
   let preWait: Float64 = uiNowSeconds()
-  uiWaitEvents(timeoutSec: tick.timeout)
+  uiWaitEvents(timeoutSeconds: tick.timeout)
   let waitDt: Float = (uiNowSeconds() - preWait) as Float
   if app.waitTraceEnabled {
     if waitDt > 0.005 {
@@ -129,11 +129,11 @@ func frameWaitSystem(
   }
   if uiWindowShouldClose() {
     session.running = false
-  } else if app.autoExitSec > 0.0 and uiNowSeconds() - app.bootTime > app.autoExitSec {
+  } else if app.autoExitSeconds > 0.0 and uiNowSeconds() - app.bootTime > app.autoExitSeconds {
     # RAE_AUTO_EXIT_SEC fired — clean self-shutdown so test harnesses don't
     # leave orphaned binaries owning the GPU context. Falls through to the
     # teardown at the end of runApp.
-    log("[auto-exit] reached {app.autoExitSec}s wall-clock; shutting down")
+    log("[auto-exit] reached {app.autoExitSeconds}s wall-clock; shutting down")
     session.running = false
   }
 }

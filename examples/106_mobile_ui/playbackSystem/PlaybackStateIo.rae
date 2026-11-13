@@ -14,7 +14,7 @@
 #     }
 #
 # The file lives at `stateFilePath` (see `config.rae`). We write
-# `elapsedMs` rather than `elapsedSec` so the playback position
+# `elapsedMs` rather than `elapsedSeconds` so the playback position
 # stays integer-precise across save/load — `Float -> String ->
 # Float` round-tripping was dropping milliseconds in the smoke
 # test.
@@ -42,7 +42,7 @@ func saveAppState(
   playbackSystem: view PlaybackSystem
 ) pub {
   unsafe {
-    let elapsedMs: Int = (playbackSystem.elapsedSec * 1000.0).toInt()
+    let elapsedMs: Int = (playbackSystem.elapsedSeconds * 1000.0).toInt()
     let playingStr: String = boolStr(b: playbackSystem.isPlaying)
     # Session route: which top-level tab, plus SDL desktop window position.
     # Sub-page state (Album / Player / History on top of the stack)
@@ -123,7 +123,7 @@ func saveAppState(
 # ----- restore ------------------------------------------------------
 
 # Read `path`; if present, overwrite `state.currentAlbumStem`,
-# `state.currentTrackIndex`, `playback.elapsedSec`, and
+# `state.currentTrackIndex`, `playback.elapsedSeconds`, and
 # `playback.isPlaying` with the saved values. Missing fields are
 # left at their in-memory defaults — restored state is best-effort,
 # never an error.
@@ -197,7 +197,7 @@ func restoreAppState(
       if ms < 0 {
         ms = 0
       }
-      playbackSystem.elapsedSec = ms.toFloat() / 1000.0
+      playbackSystem.elapsedSeconds = ms.toFloat() / 1000.0
     }
 
     # Play / pause flag.
@@ -243,7 +243,7 @@ func restoreAppState(
     # runtime now (runtime_gpu2d_platform.c), which persists it for every app.
     # Older state files still carry the keys; ignoring them is the migration.
     log(
-      "[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playbackSystem.elapsedSec * 1000.0).toInt()} playing={playbackSystem.isPlaying}"
+      "[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playbackSystem.elapsedSeconds * 1000.0).toInt()} playing={playbackSystem.isPlaying}"
     )
   }
 }

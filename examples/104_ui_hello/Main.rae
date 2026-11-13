@@ -107,7 +107,7 @@ func main() ret Int {
   var renderedOnce: Bool = false
   var wokeUp: Bool = false
 
-  var lastFrameSec: Float64 = Gpu2d.nowSeconds()
+  var lastFrameSeconds: Float64 = Gpu2d.nowSeconds()
   loop not Gpu2d.pollClose() {
     var changed: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
 
@@ -127,9 +127,9 @@ func main() ret Int {
       world: world
       uiSystems: uiSystems
       hovered: input.hoveredEntityId
-      deltaTime: (now - lastFrameSec) as Float
+      deltaTime: (now - lastFrameSeconds) as Float
     )
-    lastFrameSec = now
+    lastFrameSeconds = now
     let moving: Bool = pressing or animationInFlight(world: world, uiSystems: uiSystems)
     if hadEvents or changed or moving {
       runScheduledUiSystems(
@@ -165,13 +165,13 @@ func main() ret Int {
     } else {
       # Idle at ~0% CPU: block until the OS has something to say. The timeout is
       # the shared policy from lib/ui/eventLoop.rae.
-      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      Gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(
         visible: Gpu2d.renderableNow()
         animating: moving
         mouseDown: false
         pollWatcher: false
-        frameSec: 0.016667
-        heartbeatSec: 0.5
+        frameSeconds: 0.016667
+        heartbeatSeconds: 0.5
       ))
       wokeUp = true
     }

@@ -201,6 +201,36 @@ func decodeField(
 
 # Decode one authored component object into `table` for `entityId`: start from
 # the type's declared defaults, fill every field the object names, store.
+# The key a field is read from: its own name; or, for a field ending in `Seconds` that the scene
+# does not write, the old `...Sec` spelling when the scene still has it (renamed 2026-11-13,
+# AGENTS.md:
+# `Sec` is an abbreviation). Reading the old key is a `renamedKey` diagnostic naming the new one,
+# until every scene is moved over.
+func authoredKeyOf(
+  doc: view JsonDoc
+  val: view JsonValue
+  key: view String
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) ret String {
+  if key.endsWith(suffix: "Seconds") is false or Json.field(doc: doc, this: val, key: key) >= 0 {
+    ret key
+  }
+  let oldKey: String = "{key.sub(start: 0, len: key.length() - 7)}Sec"
+  if Json.field(doc: doc, this: val, key: oldKey) < 0 {
+    ret key
+  }
+  diagnostics.add(value: SceneDiagnostic {
+    sceneId: sceneId
+    nodeId: nodeId
+    kind: SceneDiagnosticKind.renamedKey
+    name: oldKey
+    message: "\"{oldKey}\" is now \"{key}\"; the old key still works for now"
+  })
+  ret oldKey
+}
+
 func decodeComponent(
   T: type
   table: mod ComponentTable(T)
@@ -218,7 +248,14 @@ func decodeComponent(
       fallback: f
       doc: doc
       val: val
-      key: fieldName(f)
+      key: authoredKeyOf(
+        doc: doc
+        val: val
+        key: fieldName(f)
+        diagnostics: diagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+      )
       theme: theme
       diagnostics: diagnostics
       sceneId: sceneId

@@ -98,7 +98,7 @@ func createApp() ret App {
   # Mock playback state — survives world rebuilds; both the album
   # mini-player and the now-playing screen mutate it through the
   # playback command system (actionSystem/). Created here so `restoreAppState` below can
-  # populate `elapsedSec` + `isPlaying` from `state.json` before
+  # populate `elapsedSeconds` + `isPlaying` from `state.json` before
   # the screenshot / stress / main loop branches.
   var playbackSystem: PlaybackSystem = createPlaybackSystem()
   # Hydrate album/track/position from `state.json` if present.
@@ -182,7 +182,7 @@ func createApp() ret App {
   let spotifySystem: SpotifySystem = setupSpotify(isHeadless: isHeadless)
   let spotifyPoller: SpotifyPoller = startSpotifyPoller(enabled: spotifySystem.enabled)
 
-  let autoExitSec: Float = autoExitSeconds(isHeadless: isHeadless)
+  let autoExitSeconds: Float = autoExitSecondsAtStart(isHeadless: isHeadless)
   let bootTime: Float64 = uiNowSeconds()
 
   let waitTraceEnabled: Bool = waitTraceIsEnabled()
@@ -204,7 +204,7 @@ func createApp() ret App {
       logOverlay: own logOverlay
       spotifySystem: own spotifySystem
       spotifyPoller: own spotifyPoller
-      autoExitSec: autoExitSec
+      autoExitSeconds: autoExitSeconds
       bootTime: bootTime
       waitTraceEnabled: waitTraceEnabled
       loopDebugEnabled: loopDebugEnabled

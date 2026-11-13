@@ -395,7 +395,7 @@ func installWindowCloseWaker() unsafe extern
 # `isMouseButtonPressed` / `isMouseButtonReleased` compare the previous
 # poll's state to the current poll's, so a press+release pair that
 # arrives between two polls (common on macOS, where mouse-button events
-# don't reliably wake `waitEventsTimeout` — the `watcherPollSec` cadence
+# don't reliably wake `waitEventsTimeout` — the `watcherPollSeconds` cadence
 # is a partial workaround) is collapsed to up→up with no edges and the
 # click is lost. The hook sees each transition per-event on the main
 # thread, independent of render/poll cadence, so it never misses an
