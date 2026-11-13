@@ -1,0 +1,691 @@
+# audio/AudioGraph — the node graph and its render plan (docs/audio-design.md
+# §5.2, §5.3). The graph is edited on the main thread: nodes (a kind and its
+# parameters) and edges. compileGraph turns it into a RenderPlan:
+#
+#   1. sort the nodes so every node runs after its inputs; a cycle is refused
+#      with a message naming its nodes;
+#   2. give each node's output a scratch buffer from a pool, reusing a buffer
+#      once its last reader has run (liveness), so a 200-node session needs
+#      a few buffers, not 200;
+#   5. prepare each node: its state in the table of its kind, delay lines
+#      allocated (the only allocation; the audio thread never allocates).
+#
+# (Steps 3 and 4 of §5.2, delay compensation and parallel branches, are later
+# steps.) The node contract is CLAP-shaped: prepare here, process and reset on
+# the audio thread (audio/GraphRender), latencyFrames and tailFrames read by
+# the compiler. Rae has no function values, so each kind's state lives in one
+# dense typed table and the renderer dispatches with a `match` on the kind.
+#
+# A RenderPlan is made only of Buffer handles and numbers, so it crosses to
+# the audio thread on a SpscRing in one command and comes back on the reclaim
+# ring to be freed here (freeRenderPlan).
+#
+#     var graph: AudioGraph = createAudioGraph()
+#     let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+#     let gain: Int = graph.addNode(node: gainNode(decibels: -6.0))
+#     let out: Int = graph.addNode(node: outputNode())
+#     graph.connect(from: source, to: gain)
+#     graph.connect(from: gain, to: out)
+#     let compiled: CompiledPlan = compileGraph(graph: graph, sampleRate: 48000, maxFrames: 512)
+import Math
+import String
+open audio/Sound
+
+enum NodeKind {
+  # adapters: a source the engine fills before the graph runs (the voice set's
+  # output, a stream voice, the input), read from a slot of the sources pool
+  voices
+  stream
+  input
+  gain
+  # equal-power pan of both channels
+  pan
+  sum
+  # a gain on a send's path; preFader says where the ECS layer takes its
+  # input from (before or after the track's fader)
+  send
+  delay
+  # passes its input on and keeps the peak of each channel
+  meter
+  # a peak limiter with no look-ahead: the output never passes the ceiling
+  limiter
+  # the graph's one output
+  output
+}
+
+type GraphNode {
+  kind: NodeKind
+  decibels: Float
+  pan: Float
+  delayFrames: Int
+  ceiling: Float
+  releaseSeconds: Float
+  sourceSlot: Int
+  preFader: Bool
+}
+
+type GraphEdge {
+  from: Int
+  to: Int
+}
+
+type AudioGraph {
+  nodes: List(GraphNode)
+  edges: List(GraphEdge)
+}
+
+# ---- the node states (one dense table per kind) ------------------------------
+type GainState {
+  # linear gains: where it is going, where it is, and the per-frame step of the
+  # 5 ms ramp
+  target: Float
+  current: Float
+  step: Float
+  rampFrames: Int
+}
+
+type PanState {
+  left: Float
+  right: Float
+}
+
+type DelayState {
+  frames: Int
+  writeIndex: Int
+  # 2 * frames samples: the left line, then the right
+  line: Buffer(Float)
+}
+
+type MeterState {
+  peakLeft: Float
+  peakRight: Float
+}
+
+type LimiterState {
+  ceiling: Float
+  gain: Float
+  # per frame, the share of the way back to 1 the gain recovers
+  release: Float
+}
+
+type SourceState {
+  slot: Int
+}
+
+# What the audio thread runs. Node i (in run order) is kinds[i], with its state
+# at stateIndex[i] of its kind's table, its output in scratch buffer
+# outputBuffer[i], and its inputs' buffers at inputs[inputStart[i] ..
+# inputStart[i] + inputCount[i]).
+type RenderPlan {
+  nodeCount: Int
+  maxFrames: Int
+  sampleRate: Int
+  bufferCount: Int
+  # the buffer the output node writes
+  outputBuffer: Int
+  kinds: Buffer(NodeKind)
+  stateIndex: Buffer(Int)
+  outputBuffers: Buffer(Int)
+  inputStart: Buffer(Int)
+  inputCount: Buffer(Int)
+  inputs: Buffer(Int)
+  # each node's index in the graph, to find it again (setGainTarget, meters)
+  graphIndex: Buffer(Int)
+  # bufferCount * 2 channels * maxFrames samples
+  scratch: Buffer(Float)
+  gains: Buffer(GainState)
+  pans: Buffer(PanState)
+  delays: Buffer(DelayState)
+  delayCount: Int
+  meters: Buffer(MeterState)
+  limiters: Buffer(LimiterState)
+  sources: Buffer(SourceState)
+}
+
+type CompiledPlan {
+  plan: RenderPlan
+  # "" when it compiled
+  error: String
+}
+
+# ---- building a graph ---------------------------------------------------------
+func createAudioGraph() ret AudioGraph {
+  ret AudioGraph { nodes: {}, edges: {} }
+}
+
+func plainNode(kind: view NodeKind) ret GraphNode {
+  ret GraphNode {
+    kind: kind
+    decibels: 0.0
+    pan: 0.0
+    delayFrames: 0
+    ceiling: 1.0
+    releaseSeconds: 0.05
+    sourceSlot: 0
+    preFader: false
+  }
+}
+
+func sourceNode(kind: view NodeKind, slot: view Int) ret GraphNode {
+  var node: GraphNode = plainNode(kind: kind)
+  node.sourceSlot = slot
+  ret node
+}
+
+func gainNode(decibels: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.gain)
+  node.decibels = decibels
+  ret node
+}
+
+# -1 is all left, 0 the middle, 1 all right
+func panNode(pan: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.pan)
+  node.pan = pan
+  ret node
+}
+
+func sumNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.sum)
+}
+
+func sendNode(decibels: view Float, preFader: view Bool) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.send)
+  node.decibels = decibels
+  node.preFader = preFader
+  ret node
+}
+
+func delayNode(frames: view Int) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.delay)
+  node.delayFrames = frames
+  ret node
+}
+
+func meterNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.meter)
+}
+
+func limiterNode(ceilingDecibels: view Float, releaseSeconds: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.limiter)
+  node.ceiling = decibelsToLinear(decibels: ceilingDecibels)
+  node.releaseSeconds = releaseSeconds
+  ret node
+}
+
+func outputNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.output)
+}
+
+# The node's index in the graph
+func addNode(this: mod AudioGraph, node: view GraphNode) ret Int {
+  this.nodes.add(value: node)
+  ret this.nodes.length() - 1
+}
+
+func connect(this: mod AudioGraph, from: view Int, to: view Int) {
+  this.edges.add(value: GraphEdge { from: from, to: to })
+}
+
+func decibelsToLinear(decibels: view Float) ret Float {
+  ret pow(base: 10.0, exp: decibels / 20.0)
+}
+
+# Frames a node delays its input by (read by the delay compensation, a later
+# step) and frames it keeps sounding after its input stops
+func latencyFrames(node: view GraphNode) ret Int {
+  if node.kind is NodeKind.delay {
+    ret node.delayFrames
+  }
+  ret 0
+}
+
+func tailFrames(node: view GraphNode) ret Int {
+  if node.kind is NodeKind.delay {
+    ret node.delayFrames
+  }
+  ret 0
+}
+
+# ---- compiling ----------------------------------------------------------------
+func isSourceKind(kind: view NodeKind) ret Bool {
+  ret kind is NodeKind.voices or kind is NodeKind.stream or kind is NodeKind.input
+}
+
+func failedPlan(error: view String) ret CompiledPlan {
+  ret CompiledPlan { plan: emptyRenderPlan(), error: error }
+}
+
+# Visit `node` after its inputs (depth first): 0 not seen, 1 on the current
+# path, 2 placed. A node met again while on the path closes a cycle; `path`
+# holds the nodes on it.
+func visitNode(
+  graph: view AudioGraph
+  node: view Int
+  marks: mod List(Int)
+  path: mod List(Int)
+  order: mod List(Int)
+) ret Bool {
+  let mark: Int = marks.copyAtFallback(index: node, fallback: 2)
+  if mark is 2 {
+    ret true
+  }
+  if mark is 1 {
+    path.add(value: node)
+    ret false
+  }
+  marks.set(index: node, value: 1)
+  path.add(value: node)
+  loop let edge: GraphEdge in graph.edges {
+    if edge.to is node {
+      if not visitNode(
+        graph: graph
+        node: edge.from
+        marks: marks
+        path: path
+        order: order
+      ) {
+        ret false
+      }
+    }
+  }
+  path.removeLast()
+  marks.set(index: node, value: 2)
+  order.add(value: node)
+  ret true
+}
+
+# The nodes' run order, every node after its inputs: depth first from the
+# output, so each track (and each bus's group) runs to its end before the
+# next starts and only a few buffers are alive at a time; then any node the
+# output does not reach. Or an error naming the nodes on a cycle.
+func sortGraph(graph: view AudioGraph, order: mod List(Int)) ret String {
+  let count: Int = graph.nodes.length()
+  var marks: List(Int) = {}
+  marks.addDefaults(count: count)
+  var path: List(Int) = {}
+  var starts: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    if graph.nodes.copyAtFallback(index: i, fallback: plainNode(kind: NodeKind.sum)).kind is NodeKind.output {
+      starts.add(value: i)
+    }
+  }
+  loop var i: Int = 0, i < count, ++i {
+    starts.add(value: i)
+  }
+  loop let start: Int in starts {
+    if not visitNode(
+      graph: graph
+      node: start
+      marks: marks
+      path: path
+      order: order
+    ) {
+      # the cycle is the part of the path from the node met again
+      let closing: Int = path.copyAtFallback(index: path.length() - 1, fallback: 0)
+      var names: String = ""
+      var inCycle: Bool = false
+      loop var k: Int = 0, k < path.length() - 1, ++k {
+        let node: Int = path.copyAtFallback(index: k, fallback: 0)
+        if node is closing {
+          inCycle = true
+        }
+        if inCycle {
+          if names.length() > 0 {
+            names = "{names} <- "
+          }
+          names = "{names}{node}"
+        }
+      }
+      ret "the audio graph has a cycle: node {names} <- {closing} (each takes the next one's output)"
+    }
+  }
+  ret ""
+}
+
+func compileGraph(
+  graph: view AudioGraph
+  sampleRate: view Int
+  maxFrames: view Int
+) ret CompiledPlan {
+  let count: Int = graph.nodes.length()
+  loop let edge: GraphEdge in graph.edges {
+    if edge.from < 0 or edge.from >= count or edge.to < 0 or edge.to >= count {
+      ret failedPlan(
+        error: "an edge names node {edge.from} -> {edge.to}, but the graph has {count} nodes"
+      )
+    }
+  }
+  var order: List(Int) = {}
+  let cycle: String = sortGraph(graph: graph, order: order)
+  if cycle.length() > 0 {
+    ret failedPlan(error: cycle)
+  }
+  # each node's inputs (in edge order), and how many read it
+  var outputs: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let node: GraphNode = graph.nodes.copyAtFallback(index: i, fallback: outputNode())
+    var inputs: Int = 0
+    loop let edge: GraphEdge in graph.edges {
+      if edge.to is i {
+        inputs = inputs + 1
+      }
+    }
+    if isSourceKind(kind: node.kind) and inputs is not 0 {
+      ret failedPlan(error: "node {i} is a source and takes no input, but has {inputs}")
+    }
+    if not isSourceKind(kind: node.kind) and node.kind is not NodeKind.sum and inputs is not 1 {
+      ret failedPlan(error: "node {i} takes one input (add a sum node before it), but has {inputs}")
+    }
+    if node.kind is NodeKind.sum and inputs is 0 {
+      ret failedPlan(error: "node {i} is a sum with no input")
+    }
+    if node.kind is NodeKind.output {
+      outputs = outputs + 1
+    }
+  }
+  if outputs is not 1 {
+    ret failedPlan(error: "the audio graph needs exactly one output node, it has {outputs}")
+  }
+  # position of each node in the run order, and its last reader's position
+  var position: List(Int) = {}
+  position.addDefaults(count: count)
+  loop var k: Int = 0, k < count, ++k {
+    position.set(index: order.copyAtFallback(index: k, fallback: 0), value: k)
+  }
+  var lastReader: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    lastReader.add(value: position.copyAtFallback(index: i, fallback: 0))
+  }
+  loop let edge: GraphEdge in graph.edges {
+    let reader: Int = position.copyAtFallback(index: edge.to, fallback: 0)
+    if reader > lastReader.copyAtFallback(index: edge.from, fallback: 0) {
+      lastReader.set(index: edge.from, value: reader)
+    }
+  }
+  # buffers by liveness: a node's output takes a free buffer (or a new one);
+  # a buffer goes back to the pool once its last reader has run
+  var bufferOf: List(Int) = {}
+  bufferOf.addDefaults(count: count)
+  var free: List(Int) = {}
+  var bufferCount: Int = 0
+  loop var k: Int = 0, k < count, ++k {
+    let node: Int = order.copyAtFallback(index: k, fallback: 0)
+    var buffer: Int = bufferCount
+    if free.length() > 0 {
+      buffer = free.copyAtFallback(index: free.length() - 1, fallback: 0)
+      free.removeLast()
+    } else {
+      bufferCount = bufferCount + 1
+    }
+    bufferOf.set(index: node, value: buffer)
+    loop let edge: GraphEdge in graph.edges {
+      if edge.to is node and lastReader.copyAtFallback(index: edge.from, fallback: 0) is k {
+        free.add(value: bufferOf.copyAtFallback(index: edge.from, fallback: 0))
+      }
+    }
+    # an output nobody reads (and not the graph's output) is free at once
+    if lastReader.copyAtFallback(index: node, fallback: 0) is k and graph.nodes.copyAtFallback(
+      index: node
+      fallback: outputNode()
+    ).kind is not NodeKind.output {
+      free.add(value: buffer)
+    }
+  }
+  ret CompiledPlan {
+    plan: prepareRenderPlan(
+      graph: graph
+      order: order
+      bufferOf: bufferOf
+      bufferCount: bufferCount
+      sampleRate: sampleRate
+      maxFrames: maxFrames
+    )
+    error: ""
+  }
+}
+
+# ---- preparing (§5.2 step 5: the only allocation) ----------------------------
+func intBuffer(count: view Int) ret Buffer(Int) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: max(a: 1, b: count), elemSize: sizeof(Int))
+  }
+}
+
+func setIntAt(buffer: view Buffer(Int), index: view Int, value: view Int) {
+  unsafe {
+    var target: Buffer(Int) = buffer
+    rae_ext_rae_buf_set(buf: target, index: index, value: value)
+  }
+}
+
+func countKind(graph: view AudioGraph, kind: view NodeKind) ret Int {
+  var count: Int = 0
+  loop let node: GraphNode in graph.nodes {
+    if node.kind is kind {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func gainStateFor(node: view GraphNode, sampleRate: view Int) ret GainState {
+  let linear: Float = decibelsToLinear(decibels: node.decibels)
+  ret GainState {
+    target: linear
+    current: linear
+    step: 0.0
+    rampFrames: max(a: 1, b: sampleRate * 5 / 1000)
+  }
+}
+
+func emptyRenderPlan() ret RenderPlan {
+  unsafe {
+    ret RenderPlan {
+      nodeCount: 0
+      maxFrames: 0
+      sampleRate: 0
+      bufferCount: 0
+      outputBuffer: 0
+      kinds: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(NodeKind))
+      stateIndex: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      outputBuffers: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputStart: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputCount: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      graphIndex: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      scratch: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      gains: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(GainState))
+      pans: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(PanState))
+      delays: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(DelayState))
+      delayCount: 0
+      meters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(MeterState))
+      limiters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(LimiterState))
+      sources: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(SourceState))
+    }
+  }
+}
+
+func prepareRenderPlan(
+  graph: view AudioGraph
+  order: view List(Int)
+  bufferOf: view List(Int)
+  bufferCount: view Int
+  sampleRate: view Int
+  maxFrames: view Int
+) ret RenderPlan {
+  let count: Int = graph.nodes.length()
+  let gainCount: Int = countKind(graph: graph, kind: NodeKind.gain) + countKind(
+    graph: graph
+    kind: NodeKind.send
+  )
+  let delayCount: Int = countKind(graph: graph, kind: NodeKind.delay)
+  let sourceCount: Int = countKind(graph: graph, kind: NodeKind.voices) + countKind(
+    graph: graph
+    kind: NodeKind.stream
+  ) + countKind(graph: graph, kind: NodeKind.input)
+  let panCount: Int = countKind(graph: graph, kind: NodeKind.pan)
+  let meterCount: Int = countKind(graph: graph, kind: NodeKind.meter)
+  let limiterCount: Int = countKind(graph: graph, kind: NodeKind.limiter)
+  let stateIndex: Buffer(Int) = intBuffer(count: count)
+  let outputBuffers: Buffer(Int) = intBuffer(count: count)
+  let inputStart: Buffer(Int) = intBuffer(count: count)
+  let inputCount: Buffer(Int) = intBuffer(count: count)
+  let inputs: Buffer(Int) = intBuffer(count: graph.edges.length())
+  let graphIndex: Buffer(Int) = intBuffer(count: count)
+  var plan: RenderPlan = emptyRenderPlan()
+  unsafe {
+    # the empty plan's zero-size buffers are null: nothing to free
+    plan.kinds = rae_ext_rae_buf_alloc(size: max(a: 1, b: count), elemSize: sizeof(NodeKind))
+    plan.gains = rae_ext_rae_buf_alloc(size: max(a: 1, b: gainCount), elemSize: sizeof(GainState))
+    plan.pans = rae_ext_rae_buf_alloc(size: max(a: 1, b: panCount), elemSize: sizeof(PanState))
+    plan.delays = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: delayCount)
+      elemSize: sizeof(DelayState)
+    )
+    plan.meters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: meterCount)
+      elemSize: sizeof(MeterState)
+    )
+    plan.limiters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: limiterCount)
+      elemSize: sizeof(LimiterState)
+    )
+    plan.sources = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: sourceCount)
+      elemSize: sizeof(SourceState)
+    )
+  }
+  var gainUsed: Int = 0
+  var panUsed: Int = 0
+  var delayUsed: Int = 0
+  var meterUsed: Int = 0
+  var limiterUsed: Int = 0
+  var sourceUsed: Int = 0
+  var inputUsed: Int = 0
+  var outputBuffer: Int = 0
+  loop var k: Int = 0, k < count, ++k {
+    let index: Int = order.copyAtFallback(index: k, fallback: 0)
+    let node: GraphNode = graph.nodes.copyAtFallback(index: index, fallback: outputNode())
+    var state: Int = 0
+    let kind: NodeKind = node.kind
+    unsafe {
+      if kind is NodeKind.gain or kind is NodeKind.send {
+        state = gainUsed
+        rae_ext_rae_buf_set(
+          buf: plan.gains
+          index: gainUsed
+          value: gainStateFor(node: node, sampleRate: sampleRate)
+        )
+        gainUsed = gainUsed + 1
+      } else if kind is NodeKind.pan {
+        state = panUsed
+        let angle: Float = (min(a: 1.0, b: max(a: -1.0, b: node.pan)) + 1.0) * 0.7853981633974483
+        rae_ext_rae_buf_set(
+          buf: plan.pans
+          index: panUsed
+          value: PanState { left: cos(x: angle), right: sin(x: angle) }
+        )
+        panUsed = panUsed + 1
+      } else if kind is NodeKind.delay {
+        state = delayUsed
+        let frames: Int = max(a: 0, b: node.delayFrames)
+        let line: Buffer(Float) = createSampleBuffer(count: 2 * max(a: 1, b: frames))
+        rae_ext_rae_buf_set(
+          buf: plan.delays
+          index: delayUsed
+          value: DelayState { frames: frames, writeIndex: 0, line: line }
+        )
+        delayUsed = delayUsed + 1
+      } else if kind is NodeKind.meter {
+        state = meterUsed
+        rae_ext_rae_buf_set(
+          buf: plan.meters
+          index: meterUsed
+          value: MeterState { peakLeft: 0.0, peakRight: 0.0 }
+        )
+        meterUsed = meterUsed + 1
+      } else if kind is NodeKind.limiter {
+        state = limiterUsed
+        let releaseFrames: Float = max(a: 1.0, b: node.releaseSeconds * (sampleRate as Float))
+        rae_ext_rae_buf_set(
+          buf: plan.limiters
+          index: limiterUsed
+          value: LimiterState { ceiling: node.ceiling, gain: 1.0, release: 1.0 / releaseFrames }
+        )
+        limiterUsed = limiterUsed + 1
+      } else if isSourceKind(kind: kind) {
+        state = sourceUsed
+        rae_ext_rae_buf_set(
+          buf: plan.sources
+          index: sourceUsed
+          value: SourceState { slot: node.sourceSlot }
+        )
+        sourceUsed = sourceUsed + 1
+      } else if kind is NodeKind.output {
+        outputBuffer = bufferOf.copyAtFallback(index: index, fallback: 0)
+      }
+      rae_ext_rae_buf_set(buf: plan.kinds, index: k, value: kind)
+    }
+    setIntAt(buffer: stateIndex, index: k, value: state)
+    setIntAt(
+      buffer: outputBuffers
+      index: k
+      value: bufferOf.copyAtFallback(index: index, fallback: 0)
+    )
+    setIntAt(buffer: graphIndex, index: k, value: index)
+    setIntAt(buffer: inputStart, index: k, value: inputUsed)
+    var nodeInputs: Int = 0
+    loop let edge: GraphEdge in graph.edges {
+      if edge.to is index {
+        setIntAt(
+          buffer: inputs
+          index: inputUsed
+          value: bufferOf.copyAtFallback(index: edge.from, fallback: 0)
+        )
+        inputUsed = inputUsed + 1
+        nodeInputs = nodeInputs + 1
+      }
+    }
+    setIntAt(buffer: inputCount, index: k, value: nodeInputs)
+  }
+  plan.nodeCount = count
+  plan.maxFrames = maxFrames
+  plan.sampleRate = sampleRate
+  plan.bufferCount = bufferCount
+  plan.outputBuffer = outputBuffer
+  plan.stateIndex = stateIndex
+  plan.outputBuffers = outputBuffers
+  plan.inputStart = inputStart
+  plan.inputCount = inputCount
+  plan.inputs = inputs
+  plan.graphIndex = graphIndex
+  plan.scratch = createSampleBuffer(count: max(a: 1, b: bufferCount) * 2 * maxFrames)
+  plan.delayCount = delayCount
+  ret plan
+}
+
+# On the main thread, for a plan that came back on the reclaim ring (or was
+# never sent)
+func freeRenderPlan(plan: view RenderPlan) {
+  unsafe {
+    loop var i: Int = 0, i < plan.delayCount, ++i {
+      let delay: DelayState = rae_ext_rae_buf_get(buf: plan.delays, index: i)
+      rae_ext_rae_buf_free(buf: delay.line)
+    }
+    rae_ext_rae_buf_free(buf: plan.kinds)
+    rae_ext_rae_buf_free(buf: plan.stateIndex)
+    rae_ext_rae_buf_free(buf: plan.outputBuffers)
+    rae_ext_rae_buf_free(buf: plan.inputStart)
+    rae_ext_rae_buf_free(buf: plan.inputCount)
+    rae_ext_rae_buf_free(buf: plan.inputs)
+    rae_ext_rae_buf_free(buf: plan.graphIndex)
+    rae_ext_rae_buf_free(buf: plan.scratch)
+    rae_ext_rae_buf_free(buf: plan.gains)
+    rae_ext_rae_buf_free(buf: plan.pans)
+    rae_ext_rae_buf_free(buf: plan.delays)
+    rae_ext_rae_buf_free(buf: plan.meters)
+    rae_ext_rae_buf_free(buf: plan.limiters)
+    rae_ext_rae_buf_free(buf: plan.sources)
+  }
+}
