@@ -52,6 +52,12 @@ enum NodeKind {
   limiter
   # the graph's one output
   output
+  # a bus's fader for the simple API (audio/Audio): its gain moves over a set
+  # number of frames (the mixer's ramp: the current value is used, then
+  # advanced), and when it is the in-mix duck's target (§6.4) the gain is
+  # also scaled by the duck level, which falls while a voice on the duck's
+  # source bus sounds (the sources' activity marks) and comes back after
+  duck
 }
 
 type GraphNode {
@@ -121,6 +127,19 @@ type SourceState {
   slot: Int
 }
 
+type DuckState {
+  current: Float
+  target: Float
+  step: Float
+  framesLeft: Int
+  # this bus is the duck's target
+  ducked: Bool
+  level: Float
+  depth: Float
+  attackStep: Float
+  releaseStep: Float
+}
+
 # What the audio thread runs. Node i (in run order) is kinds[i], with its state
 # at stateIndex[i] of its kind's table, its output in scratch buffer
 # outputBuffer[i], and its inputs' buffers at inputs[inputStart[i] ..
@@ -159,6 +178,7 @@ type RenderPlan {
   meters: Buffer(MeterState)
   limiters: Buffer(LimiterState)
   sources: Buffer(SourceState)
+  ducks: Buffer(DuckState)
 }
 
 type CompiledPlan {
@@ -247,6 +267,11 @@ func identified(node: view GraphNode, entityId: view Int) ret GraphNode {
   var named: GraphNode = node
   named.entityId = entityId
   ret named
+}
+
+# A bus fader with the in-mix duck (audio/Audio's fixed graph)
+func duckNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.duck)
 }
 
 func outputNode() ret GraphNode {
@@ -349,6 +374,7 @@ func emptyRenderPlan() ret RenderPlan {
       meters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(MeterState))
       limiters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(LimiterState))
       sources: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(SourceState))
+      ducks: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(DuckState))
     }
   }
 }
@@ -377,6 +403,7 @@ func prepareRenderPlan(
   let panCount: Int = countKind(graph: graph, kind: NodeKind.pan)
   let meterCount: Int = countKind(graph: graph, kind: NodeKind.meter)
   let limiterCount: Int = countKind(graph: graph, kind: NodeKind.limiter)
+  let duckCount: Int = countKind(graph: graph, kind: NodeKind.duck)
   let stateIndex: Buffer(Int) = intBuffer(count: count)
   let outputBuffers: Buffer(Int) = intBuffer(count: count)
   let inputStart: Buffer(Int) = intBuffer(count: count)
@@ -407,6 +434,7 @@ func prepareRenderPlan(
       size: max(a: 1, b: sourceCount)
       elemSize: sizeof(SourceState)
     )
+    plan.ducks = rae_ext_rae_buf_alloc(size: max(a: 1, b: duckCount), elemSize: sizeof(DuckState))
   }
   var gainUsed: Int = 0
   var panUsed: Int = 0
@@ -414,6 +442,7 @@ func prepareRenderPlan(
   var meterUsed: Int = 0
   var limiterUsed: Int = 0
   var sourceUsed: Int = 0
+  var duckUsed: Int = 0
   var inputUsed: Int = 0
   var outputBuffer: Int = 0
   loop var k: Int = 0, k < count, ++k {
@@ -474,6 +503,25 @@ func prepareRenderPlan(
           value: SourceState { slot: node.sourceSlot }
         )
         sourceUsed = sourceUsed + 1
+      } else if kind is NodeKind.duck {
+        state = duckUsed
+        let gain: Float = decibelsToLinear(decibels: node.decibels)
+        rae_ext_rae_buf_set(
+          buf: plan.ducks
+          index: duckUsed
+          value: DuckState {
+            current: gain
+            target: gain
+            step: 0.0
+            framesLeft: 0
+            ducked: false
+            level: 1.0
+            depth: 1.0
+            attackStep: 1.0
+            releaseStep: 1.0
+          }
+        )
+        duckUsed = duckUsed + 1
       } else if kind is NodeKind.output {
         outputBuffer = bufferOf.copyAtFallback(index: index, fallback: 0)
       }
@@ -562,5 +610,6 @@ func freeRenderPlan(plan: view RenderPlan) {
     rae_ext_rae_buf_free(buf: plan.meters)
     rae_ext_rae_buf_free(buf: plan.limiters)
     rae_ext_rae_buf_free(buf: plan.sources)
+    rae_ext_rae_buf_free(buf: plan.ducks)
   }
 }

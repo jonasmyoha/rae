@@ -13,7 +13,10 @@
 # Every command carries the sample time it takes effect at (0: at once), and a
 # voice starts at exactly that sample, whatever the block size (§6.2).
 import Math
+open audio/AudioGraph
 open audio/AudioSynth
+open audio/GraphCompile
+open audio/GraphNodes
 open Atomic
 open audio/Sound
 open collections/SpscRing
@@ -160,17 +163,15 @@ type AudioMixer {
   maxFrames: Int
   smoothingFrames: Int
   voices: List(AudioVoice)
-  busGains: List(AudioRamp)
+  # the buses' mix as a render plan (docs/audio-design.md §10.1: the simple
+  # API is a fixed small graph): bus b's voices -> a duck node (its fader and
+  # the in-mix duck, entity b) -> the sum -> the output
+  busPlan: RenderPlan
   # bus b's left samples at [b * maxFrames ...], right likewise
   busLeft: Buffer(Float)
   busRight: Buffer(Float)
   duckOn: Bool
   duckSource: Int
-  duckTarget: Int
-  duckDepth: Float
-  duckAttackStep: Float
-  duckReleaseStep: Float
-  duckLevel: Float
   # bit b set: bus b is paused (its voices keep their place and play nothing)
   pausedBuses: Int
   sampleTime: Int
@@ -208,25 +209,27 @@ func createAudioMixer(
   loop var i: Int = 0, i < audioMaxEvents, ++i {
     events.add(value: noEvent())
   }
-  var busGains: List(AudioRamp) = List.create(AudioRamp, cap: audioBusCount)
+  var graph: AudioGraph = createAudioGraph()
+  let sum: Int = graph.addNode(node: sumNode())
   loop var bus: Int = 0, bus < audioBusCount, ++bus {
-    busGains.add(value: steadyRamp(value: 1.0))
+    let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: bus))
+    let fader: Int = graph.addNode(node: identified(node: duckNode(), entityId: bus))
+    graph.connect(from: source, to: fader)
+    graph.connect(from: fader, to: sum)
   }
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: sum, to: out)
+  let busPlan: RenderPlan = compileGraph(graph: graph, sampleRate: sampleRate, maxFrames: maxFrames).plan
   ret AudioMixer {
     sampleRate: sampleRate
     maxFrames: maxFrames
     smoothingFrames: sampleRate * 5 / 1000
     voices: voices
-    busGains: busGains
+    busPlan: busPlan
     busLeft: createSampleBuffer(count: audioBusCount * maxFrames)
     busRight: createSampleBuffer(count: audioBusCount * maxFrames)
     duckOn: false
     duckSource: 0
-    duckTarget: 0
-    duckDepth: 1.0
-    duckAttackStep: 1.0
-    duckReleaseStep: 1.0
-    duckLevel: 1.0
     pausedBuses: 0
     sampleTime: 0
     events: events
@@ -249,6 +252,7 @@ func freeAudioMixer(mixer: view AudioMixer) {
     rae_ext_rae_buf_free(buf: mixer.busRight)
     rae_ext_rae_buf_free(buf: mixer.duckActivity)
   }
+  freeRenderPlan(plan: mixer.busPlan)
 }
 
 # An empty slot of the event list: handles to nothing
@@ -408,9 +412,12 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
     ret
   }
   if command.kind is AudioCommandKind.setBusGain {
-    if let ramp: mod AudioRamp = mixer.busGains.modAt(index: command.bus) {
-      rampTo(ramp: ramp, target: command.value, frames: mixer.smoothingFrames)
-    }
+    rampDuckGain(
+      plan: mixer.busPlan
+      key: command.bus
+      target: command.value
+      frames: mixer.smoothingFrames
+    )
     ret
   }
   if command.kind is AudioCommandKind.pauseBus {
@@ -424,15 +431,15 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   if command.kind is AudioCommandKind.setDuck {
     mixer.duckOn = true
     mixer.duckSource = command.bus
-    mixer.duckTarget = command.targetBus
-    mixer.duckDepth = command.value
-    mixer.duckAttackStep = (1.0 - command.value) / max(
-      a: 1.0
-      b: (mixer.smoothingFrames * 10) as Float
-    )
-    mixer.duckReleaseStep = (1.0 - command.value) / max(
-      a: 1.0
-      b: secondsToFrames(mixer: mixer, seconds: command.other) as Float
+    setDuckRule(
+      plan: mixer.busPlan
+      targetKey: command.targetBus
+      depth: command.value
+      attackStep: (1.0 - command.value) / max(a: 1.0, b: (mixer.smoothingFrames * 10) as Float)
+      releaseStep: (1.0 - command.value) / max(
+        a: 1.0
+        b: secondsToFrames(mixer: mixer, seconds: command.other) as Float
+      )
     )
     ret
   }
@@ -778,31 +785,36 @@ func renderPart(
     from: from
     frames: frames
   )
-  loop var frame: Int = from, frame < from + frames, ++frame {
-    if mixer.duckOn {
-      if sampleAt(samples: activity, index: frame) > 0.0 {
-        mixer.duckLevel = max(a: mixer.duckDepth, b: mixer.duckLevel - mixer.duckAttackStep)
-      } else {
-        mixer.duckLevel = min(a: 1.0, b: mixer.duckLevel + mixer.duckReleaseStep)
-      }
-    }
-    var left: Float = 0.0
-    var right: Float = 0.0
-    let duckTarget: Int = mixer.duckTarget
-    let duckLevel: Float = mixer.duckLevel
-    loop var bus: Int = 0, bus < audioBusCount, ++bus {
-      if let ramp: mod AudioRamp = mixer.busGains.modAt(index: bus) {
-        var gain: Float = ramp.current
-        if duckOn and bus is duckTarget {
-          gain = gain * duckLevel
-        }
-        let index: Int = bus * maxFrames + frame
-        left = left + sampleAt(samples: busLeft, index: index) * gain
-        right = right + sampleAt(samples: busRight, index: index) * gain
-        rampAdvance(ramp: ramp)
-      }
-    }
-    let at: Int = firstFrame + frame
+  # the buses' mix: the plan (bus faders with the duck, the sum)
+  let sources: GraphSources = {
+    left: busLeft
+    right: busRight
+    slotStride: maxFrames
+    rightOffset: 0
+    activity: activity
+    hasActivity: true
+  }
+  renderPlanPart(
+    plan: mixer.busPlan
+    sources: sources
+    sourceOffset: from
+    frames: frames
+  )
+  let plan: RenderPlan = mixer.busPlan
+  loop var i: Int = 0, i < frames, ++i {
+    let left: Float = scratchAt(
+      plan: plan
+      buffer: plan.outputBuffer
+      channel: 0
+      frame: i
+    )
+    let right: Float = scratchAt(
+      plan: plan
+      buffer: plan.outputBuffer
+      channel: 1
+      frame: i
+    )
+    let at: Int = firstFrame + from + i
     if channels is 1 {
       setSampleAt(samples: output, index: at, value: (left + right) * 0.5)
     } else {
