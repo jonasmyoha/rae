@@ -132,6 +132,17 @@ func processSource(
     )
     loop var channel: Int = 0, channel < 2, ++channel {
       loop var i: Int = 0, i < frames, ++i {
+        if state.slot < 0 {
+          # slot -1: silence (a removed node playing out its tail)
+          setScratchAt(
+            plan: plan
+            buffer: out
+            channel: channel
+            frame: i
+            value: 0.0
+          )
+          continue
+        }
         let value: Float = rae_ext_rae_buf_get(
           buf: sources
           index: (state.slot * 2 + channel) * plan.maxFrames + i
@@ -559,6 +570,62 @@ func processNode(
   }
 }
 
+# ---- carrying node state across a plan swap (§5.2) ----------------------------
+
+# The state of each node of `to` that continues a node of `from` (same entity
+# and kind, found by the compiler) is carried over: a gain's current level
+# (it then ramps to its new target), a meter's peaks, a limiter's gain, and a
+# delay line's contents with its position, by exchanging the two plans' line
+# buffers (each plan still owns one, freed with it), so nothing is copied or
+# allocated here
+func carryState(from: view RenderPlan, to: view RenderPlan) realtime {
+  loop var node: Int = 0, node < to.nodeCount, ++node {
+    let old: Int = intAt(buffer: to.carryFrom, index: node)
+    if old < 0 or old >= from.nodeCount {
+      continue
+    }
+    let newAt: Int = intAt(buffer: to.stateIndex, index: node)
+    let oldAt: Int = intAt(buffer: from.stateIndex, index: old)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: to.kinds, index: node)
+      if kind is NodeKind.gain or kind is NodeKind.send {
+        var gains: Buffer(GainState) = to.gains
+        var state: GainState = rae_ext_rae_buf_get(buf: gains, index: newAt)
+        let before: GainState = rae_ext_rae_buf_get(buf: from.gains, index: oldAt)
+        state.current = before.current
+        state.step = (state.target - state.current) / (state.rampFrames as Float)
+        rae_ext_rae_buf_set(buf: gains, index: newAt, value: state)
+      } else if kind is NodeKind.meter {
+        var meters: Buffer(MeterState) = to.meters
+        rae_ext_rae_buf_set(
+          buf: meters
+          index: newAt
+          value: rae_ext_rae_buf_get(buf: from.meters, index: oldAt)
+        )
+      } else if kind is NodeKind.limiter {
+        var limiters: Buffer(LimiterState) = to.limiters
+        var state: LimiterState = rae_ext_rae_buf_get(buf: limiters, index: newAt)
+        let before: LimiterState = rae_ext_rae_buf_get(buf: from.limiters, index: oldAt)
+        state.gain = before.gain
+        rae_ext_rae_buf_set(buf: limiters, index: newAt, value: state)
+      } else if kind is NodeKind.delay {
+        var newDelays: Buffer(DelayState) = to.delays
+        var oldDelays: Buffer(DelayState) = from.delays
+        var state: DelayState = rae_ext_rae_buf_get(buf: newDelays, index: newAt)
+        var before: DelayState = rae_ext_rae_buf_get(buf: oldDelays, index: oldAt)
+        if state.frames is before.frames {
+          let freshLine: Buffer(Float) = state.line
+          state.line = before.line
+          state.writeIndex = before.writeIndex
+          before.line = freshLine
+          rae_ext_rae_buf_set(buf: newDelays, index: newAt, value: state)
+          rae_ext_rae_buf_set(buf: oldDelays, index: oldAt, value: before)
+        }
+      }
+    }
+  }
+}
+
 # ---- the audio thread's entry points ------------------------------------------
 
 # At a block's start: take a new plan if one came, the old one to the reclaim
@@ -567,6 +634,9 @@ func takeNewPlan(this: mod GraphRenderer) realtime {
   loop this.plans.count() > 0 and this.reclaim.count() < graphPlanSlots {
     if let plan: RenderPlan = this.plans.pop() {
       if this.hasPlan {
+        if plan.previousSerial is this.current.serial {
+          carryState(from: this.current, to: plan)
+        }
         let given: Bool = this.reclaim.push(value: this.current)
       }
       this.current = plan
