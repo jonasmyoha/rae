@@ -328,6 +328,22 @@ mixer is still the one node; the simple API moves onto the graph in step 6's
 ECS part), parameter changes at a sample time (events), delay compensation
 and plan swaps that keep node state. Fixture 1436.
 
+**Landed, step 3 and the swap (2026-11-13, `packages/audio` 0.12.9,
+`audio/GraphCompile`):** a node that reports latency (`latentNode`, standing
+for a look-ahead limiter or a plugin) delays its path, and the compiler adds a
+delay of the difference on every earlier input of the same node, so the paths
+line up sample for sample; the plan records its total `latencyFrames`.
+`compileGraphAfter(graph:, previousGraph:, previousPlan:)` matches nodes by
+`entityId` and kind; at the swap the audio thread carries each matched node's
+state (a gain's current level, a meter, a limiter's gain, a delay line's
+contents by exchanging the two plans' line buffers, so nothing is copied or
+allocated), only when the new plan was compiled against the plan it replaces
+(a serial). A node of the previous graph that is gone but has a tail stays,
+fed silence, feeding the nodes it fed, until a later compile drops it.
+Fixture 1437: the compensated sum is exactly 2 x(t - 64); a track added
+mid-echo and the echo's delay removed mid-echo both leave the output equal,
+bit for bit, to never swapping (and without the carry both differ).
+
 ### 5.3 Nodes
 
 A node is a kind and a state. The contract is CLAP-shaped:
