@@ -309,6 +309,25 @@ A plan swap keeps the running state of nodes that exist in both plans (a reverb
 tail does not cut off when a track is added). Nodes are matched by their entity
 id.
 
+**Landed, steps 1, 2 and 5 (2026-11-13, `packages/audio` 0.12.8,
+`audio/AudioGraph` and `audio/GraphRender`):** the graph (nodes and edges,
+main thread), `compileGraph` (a depth-first order from the output, so each
+track and each bus group runs to its end before the next and few buffers are
+alive at once; a cycle refused with its nodes, "node 2 <- 1 <- 3 <- 2";
+scratch buffers reused once their last reader has run; prepare), and a
+`RenderPlan` made only of `Buffer` handles and numbers, so it crosses on a
+`SpscRing` in one command and comes back on the reclaim ring
+(`GraphRenderer.submitPlan` / `takeReclaimedPlans`). Node kinds, each with one
+dense typed state table and run by a `match` on the kind: the source adapters
+(`voices`, `stream`, `input`: a slot of a sources pool the engine fills before
+the graph runs), `gain` and `send` (a 5 ms linear ramp to a new target),
+equal-power `pan`, `sum`, `delay`, `meter`, a peak `limiter` with no look-ahead,
+and the `output`. A 200-node session (40 tracks in groups of four into ten
+buses) needs 14 scratch buffers. Not yet: the engine does not run a plan (the
+mixer is still the one node; the simple API moves onto the graph in step 6's
+ECS part), parameter changes at a sample time (events), delay compensation
+and plan swaps that keep node state. Fixture 1436.
+
 ### 5.3 Nodes
 
 A node is a kind and a state. The contract is CLAP-shaped:
