@@ -384,6 +384,7 @@ func emptyCommand(kind: view AudioCommandKind) ret AudioCommand {
     isStream: false
     stream: emptyStreamRing()
     streamFinished: emptyAtomicBool()
+    startFrame: 0
   }
 }
 
@@ -429,6 +430,28 @@ func playAt(
   looping: view Bool
   atSample: view Int
 ) ret VoiceId {
+  ret this.playFromAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainDecibels
+    pan: pan
+    looping: looping
+    startFrame: 0
+    atSample: atSample
+  )
+}
+
+# Like playAt, from the sound's frame `startFrame` (a clip entered part-way)
+func playFromAt(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  startFrame: view Int
+  atSample: view Int
+) ret VoiceId {
   let voiceId: Int = this.nextVoiceId
   this.nextVoiceId = this.nextVoiceId + 1
   if sound.frameCount is 0 {
@@ -446,6 +469,7 @@ func playAt(
   command.other = pan
   command.looping = looping
   command.atSample = atSample
+  command.startFrame = startFrame
   if this.offline {
     log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
   }

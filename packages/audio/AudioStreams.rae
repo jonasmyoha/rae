@@ -43,6 +43,7 @@ func startStream(
   bus: view Int
   gain: view Float
   startFrame: view Int
+  atSample: view Int
 ) ret StreamRecord {
   let streamId: Int = this.nextStreamId
   this.nextStreamId = this.nextStreamId + 1
@@ -70,6 +71,7 @@ func startStream(
   command.sampleRate = this.sampleRate
   command.bus = bus
   command.value = gain
+  command.atSample = atSample
   command.isStream = true
   command.stream = shared.ring
   command.streamFinished = shared.finished
@@ -107,6 +109,28 @@ func playStream(
   bus: view AudioBusKind
   gainDecibels: view Float
 ) ret VoiceId {
+  ret this.playStreamFromAt(
+    path: path
+    bus: bus
+    gainDecibels: gainDecibels
+    skipFrames: 0
+    atSample: 0
+  )
+}
+
+# Like playStream, skipping the file's first `skipFrames` frames (counted at
+# the engine's rate), heard from the sample time `atSample`. The streaming
+# thread starts reading at once, so a start later than now is pre-rolled: the
+# ring is full when the first sample is due (a timeline opens a clip this way
+# ahead of its start, §7.2).
+func playStreamFromAt(
+  this: mod AudioEngine
+  path: view String
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  skipFrames: view Int
+  atSample: view Int
+) ret VoiceId {
   let voiceId: Int = this.nextVoiceId
   this.nextVoiceId = this.nextVoiceId + 1
   let decoder: AudioDecoder = openAudioDecoder(path: path)
@@ -123,7 +147,8 @@ func playStream(
     voiceId: voiceId
     bus: busIndex(bus: bus)
     gain: decibelsToGain(decibels: gainDecibels)
-    startFrame: 0
+    startFrame: skipFrames * decoder.sampleRate / max(a: 1, b: this.sampleRate)
+    atSample: atSample
   )
   closeAudioDecoder(this: decoder)
   this.streams.add(value: record)
@@ -349,6 +374,7 @@ func seek(this: mod AudioEngine, voiceId: view VoiceId, seconds: view Float64) r
     bus: bus
     gain: gain
     startFrame: frame
+    atSample: 0
   )
   closeAudioDecoder(this: decoder)
   record.paths = paths

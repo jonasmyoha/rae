@@ -422,6 +422,24 @@ thread (one block of look-ahead is enough for events; streamed clips start their
 pre-roll earlier, §7.2). Loops are handled by the timeline, which schedules the
 next pass, not by the audio thread.
 
+**Landed, what a timeline needs from the engine (2026-11-13, `packages/audio`
+0.12.13):** `playFromAt` (a sound from one of its frames, at a sample: the
+command's `startFrame`), `playStreamFromAt` (a stream skipping its first frames,
+heard from a sample; the butler starts reading at once, so a later start is
+pre-rolled, §7.2), `rampBusGainAt` / `rampBusLinearGainAt` (a bus's gain in a
+straight line over a given number of frames: a setBusGain command's
+`frameCount`), a stop that reaches a voice before its first sample ends it
+unheard, and a command due on a block's first sample joins the event list
+behind those already due there, so commands of one sample apply in the order
+they were sent at every block size (a note released and started again on one
+sample lost its order in blocks of 512). Fixture 1442.
+
+**The timeline itself is not in this package.** Clips, notes, automation, loops
+and seeking over a TempoMap (the `timelineSystem` of §10.2) are an editor's
+feature, so they live in the media editor's own repository
+(`mediaeditor`, its `packages/timeline`), built on the calls above, with
+`MusicalTime` and the exact-sample commands of §6.2 that games use too.
+
 ### 6.4 Ducking
 
 Two different things share the word:
@@ -715,7 +733,8 @@ Tracks, buses and sends are entities on the program's World:
   `graphSystem` (structure changed → compile and send a plan, §5.2),
   `parameterSystem` (values changed → timestamped events), `feedbackSystem`
   (meters into `AudioMeter`, voice-ended and device events into ECS events),
-  `timelineSystem` (clips, notes and automation → events and pre-roll, §6.3);
+  `timelineSystem` (clips, notes and automation → events and pre-roll, §6.3;
+  in the media editor's repository, see §6.3);
 - events: `AudioDeviceChanged`, `AudioInterrupted`, `AudioResumed`,
   `AudioRouteLost`, `AudioUnderrun`, `MidiDeviceAdded`, `MidiDeviceRemoved`,
   `VoiceEnded`.
@@ -771,6 +790,16 @@ tested offline like any function. How a program's own kind joins the engine is
 
 Each step is one or more queue tasks; each ends with its headless tests (§12)
 green.
+
+**Where the DAW and video-editor work goes (2026-11-13).** This package holds
+what many programs use: the device and the session, sounds and streams, the
+mixer and its exact-sample commands, MusicalTime, the render graph and its ECS
+mixer layer, a small set of built-in effects, and the interface through which a
+program adds its own node kinds. What only an editor needs (the timeline,
+hosting third-party plugins: CLAP, VST3, AUv3, and Rae plugins as WASM
+modules) lives in the media editor's repository (`mediaeditor`) with its own
+queue, built on this package. Steps below that name those parts are history
+or now that repository's.
 
 1. **Output and the simple API.** `packages/audio`: miniaudio device layer (macOS,
    iOS first; the other desktops build and get a manual check), stage A render
