@@ -22,15 +22,12 @@ type GraphSources {
 
 # The one-buffer pool of `maxFrames` frames per channel and slot
 func pooledSources(pool: view Buffer(Float), maxFrames: view Int) ret GraphSources realtime {
-  # the handle into a local first: a `view Buffer` parameter in a struct
-  # literal field is emitted as a dereference (queued as a compiler bug)
-  let handle: Buffer(Float) = pool
   ret GraphSources {
-    left: handle
-    right: handle
+    left: pool
+    right: pool
     slotStride: 2 * maxFrames
     rightOffset: maxFrames
-    activity: handle
+    activity: pool
     hasActivity: false
   }
 }
