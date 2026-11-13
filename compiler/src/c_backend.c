@@ -2991,25 +2991,33 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // lowers to the opaque RaeTask*, but a specialized signature spells its
   // mangled name (`viewAt`'s `const rae_Task_int64_t*`), so alias it
   {
-    char* task_aliases[256];
-    size_t task_alias_count = 0;
-    const AstTypeRef* stack[512];
-    size_t depth = 0;
-    for (size_t i = 0; i < ctx->generic_type_count && depth < 512; i++) stack[depth++] = ctx->generic_types[i];
-    while (depth > 0) {
-      const AstTypeRef* type = stack[--depth];
-      if (!type) continue;
-      for (const AstTypeRef* arg = type->generic_args; arg && depth < 512; arg = arg->next) stack[depth++] = arg;
-      if (!str_eq_cstr(get_base_type_name(type), "Task") || type->is_opt || type->is_view || type->is_mod) continue;
-      AstTypeRef plain = *type;
-      plain.next = NULL;
-      const char* name = rae_mangle_type_specialized(ctx, NULL, NULL, &plain);
-      bool seen = false;
-      for (size_t k = 0; k < task_alias_count && !seen; k++) seen = strcmp(task_aliases[k], name) == 0;
-      if (seen || task_alias_count >= 256) continue;
-      task_aliases[task_alias_count++] = (char*)name;
-      fprintf(out, "typedef RaeTask* %s;\n", name);
+    const char** task_aliases = NULL;
+    size_t task_alias_count = 0, task_alias_cap = 0;
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      /* each generic type's arguments, recursively (List(List(Task(Int)))) */
+      const AstTypeRef* pending[64];
+      size_t depth = 0;
+      pending[depth++] = ctx->generic_types[i];
+      while (depth > 0) {
+        const AstTypeRef* type = pending[--depth];
+        if (!type) continue;
+        for (const AstTypeRef* arg = type->generic_args; arg && depth < 64; arg = arg->next) pending[depth++] = arg;
+        if (!str_eq_cstr(get_base_type_name(type), "Task") || type->is_opt || type->is_view || type->is_mod) continue;
+        AstTypeRef plain = *type;
+        plain.next = NULL;
+        const char* name = rae_mangle_type_specialized(ctx, NULL, NULL, &plain);
+        bool seen = false;
+        for (size_t k = 0; k < task_alias_count && !seen; k++) seen = strcmp(task_aliases[k], name) == 0;
+        if (seen) continue;
+        if (task_alias_count == task_alias_cap) {
+          task_alias_cap = task_alias_cap ? task_alias_cap * 2 : 16;
+          task_aliases = realloc(task_aliases, task_alias_cap * sizeof(const char*));
+        }
+        task_aliases[task_alias_count++] = name;
+        fprintf(out, "typedef RaeTask* %s;\n", name);
+      }
     }
+    free(task_aliases);
   }
   fprintf(out, "\n");
   for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting);
