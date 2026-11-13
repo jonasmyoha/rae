@@ -722,6 +722,27 @@ Tracks, buses and sends are entities on the program's World:
 
 The simple API of §10.1 is itself a fixed small graph built with this layer.
 
+**Landed, the ECS layer (2026-11-13, `packages/audio` 0.12.10):**
+`audio/AudioComponents` (AudioTrack with kind audio / bus / master, AudioGain,
+AudioPan, AudioMute, AudioSolo, AudioOutput, AudioSend, AudioInserts,
+AudioMeter; one `AudioEntities` holds the tables, the program makes the
+entities with its own allocator) and three systems, each in its folder:
+`graphSystem` (when the tracks, outputs, sends or inserts tables change: build
+the graph, each node keyed `entityIndex * 64 + role`, compile it against the
+running plan so state carries over, send it; free the plans given back),
+`parameterSystem` (a fader's effective level with mute and solo, and pan, as
+events for a sample time; the renderer cuts its block at that sample, so a
+change lands exactly there at any block size, and a gain ramps over 5 ms) and
+`feedbackSystem` (meter readings, pushed by the renderer after each call, into
+AudioMeter; and `audioEventSystem`: the session's interruptions and routes,
+underruns, ended voices and MIDI sources as `AudioEvent`s of kind
+deviceChanged, interrupted, resumed, routeLost, underrun, midiDeviceAdded,
+midiDeviceRemoved, voiceEnded: one event type with a kind, like
+AudioSessionEvent, rather than eight types). Fixture 1438: a session of
+entities null-tested against the formula with a mute inside a block and a
+track added mid-run; blocks of 37 equal blocks of 128 bit for bit. Not yet:
+the simple API running on this graph (queued as "[audio 7c2/7]").
+
 ### 10.3 Writing DSP
 
 A node kind is a state struct plus its `prepare` / `process` / `reset`

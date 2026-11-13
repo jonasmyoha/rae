@@ -1,0 +1,507 @@
+# audio/GraphNodes — the node kinds' process functions (docs/audio-design.md
+# §5.3), run by audio/GraphRender on the audio thread: each works on the plan's
+# scratch buffers (two channels of maxFrames samples per buffer) and its state
+# in its kind's table, and is `realtime`.
+import Math
+open audio/AudioGraph
+
+# ---- sample access ------------------------------------------------------------
+func scratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+) ret Float realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(
+      buf: plan.scratch
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+    )
+  }
+}
+
+func setScratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var target: Buffer(Float) = plan.scratch
+    rae_ext_rae_buf_set(
+      buf: target
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+      value: value
+    )
+  }
+}
+
+func intAt(buffer: view Buffer(Int), index: view Int) ret Int realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: buffer, index: index)
+  }
+}
+
+func firstInputOf(plan: view RenderPlan, node: view Int) ret Int realtime {
+  ret intAt(buffer: plan.inputs, index: intAt(buffer: plan.inputStart, index: node))
+}
+
+# ---- the node kinds' process functions ----------------------------------------
+func processSource(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  sources: view Buffer(Float)
+  sourceOffset: view Int
+  frames: view Int
+) realtime {
+  unsafe {
+    let state: SourceState = rae_ext_rae_buf_get(
+      buf: plan.sources
+      index: intAt(buffer: plan.stateIndex, index: node)
+    )
+    loop var channel: Int = 0, channel < 2, ++channel {
+      loop var i: Int = 0, i < frames, ++i {
+        if state.slot < 0 {
+          # slot -1: silence (a removed node playing out its tail)
+          setScratchAt(
+            plan: plan
+            buffer: out
+            channel: channel
+            frame: i
+            value: 0.0
+          )
+          continue
+        }
+        let value: Float = rae_ext_rae_buf_get(
+          buf: sources
+          index: (state.slot * 2 + channel) * plan.maxFrames + sourceOffset + i
+        )
+        setScratchAt(
+          plan: plan
+          buffer: out
+          channel: channel
+          frame: i
+          value: value
+        )
+      }
+    }
+  }
+}
+
+# gain and send: the 5 ms linear ramp toward the target, per frame
+func processGain(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  unsafe {
+    var state: GainState = rae_ext_rae_buf_get(buf: plan.gains, index: stateAt)
+    loop var i: Int = 0, i < frames, ++i {
+      if state.current is not state.target {
+        state.current = state.current + state.step
+        if (state.step > 0.0 and state.current > state.target) or (state.step < 0.0 and state.current < state.target) or state.step is 0.0 {
+          state.current = state.target
+        }
+      }
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 0
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: input
+          channel: 0
+          frame: i
+        ) * state.current
+      )
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 1
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: input
+          channel: 1
+          frame: i
+        ) * state.current
+      )
+    }
+    var gains: Buffer(GainState) = plan.gains
+    rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+  }
+}
+
+func processPan(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  unsafe {
+    let state: PanState = rae_ext_rae_buf_get(
+      buf: plan.pans
+      index: intAt(buffer: plan.stateIndex, index: node)
+    )
+    loop var i: Int = 0, i < frames, ++i {
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 0
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: input
+          channel: 0
+          frame: i
+        ) * state.left
+      )
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 1
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: input
+          channel: 1
+          frame: i
+        ) * state.right
+      )
+    }
+  }
+}
+
+func processSum(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let start: Int = intAt(buffer: plan.inputStart, index: node)
+  let count: Int = intAt(buffer: plan.inputCount, index: node)
+  loop var channel: Int = 0, channel < 2, ++channel {
+    loop var i: Int = 0, i < frames, ++i {
+      var total: Float = 0.0
+      loop var k: Int = 0, k < count, ++k {
+        total = total + scratchAt(
+          plan: plan
+          buffer: intAt(buffer: plan.inputs, index: start + k)
+          channel: channel
+          frame: i
+        )
+      }
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: channel
+        frame: i
+        value: total
+      )
+    }
+  }
+}
+
+func processDelay(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  unsafe {
+    var state: DelayState = rae_ext_rae_buf_get(buf: plan.delays, index: stateAt)
+    if state.frames is 0 {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        loop var i: Int = 0, i < frames, ++i {
+          setScratchAt(
+            plan: plan
+            buffer: out
+            channel: channel
+            frame: i
+            value: scratchAt(
+              plan: plan
+              buffer: input
+              channel: channel
+              frame: i
+            )
+          )
+        }
+      }
+      ret
+    }
+    var line: Buffer(Float) = state.line
+    loop var i: Int = 0, i < frames, ++i {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        let at: Int = channel * state.frames + state.writeIndex
+        let delayed: Float = rae_ext_rae_buf_get(buf: line, index: at)
+        rae_ext_rae_buf_set(
+          buf: line
+          index: at
+          value: scratchAt(
+            plan: plan
+            buffer: input
+            channel: channel
+            frame: i
+          )
+        )
+        setScratchAt(
+          plan: plan
+          buffer: out
+          channel: channel
+          frame: i
+          value: delayed
+        )
+      }
+      state.writeIndex = state.writeIndex + 1
+      if state.writeIndex >= state.frames {
+        state.writeIndex = 0
+      }
+    }
+    var delays: Buffer(DelayState) = plan.delays
+    rae_ext_rae_buf_set(buf: delays, index: stateAt, value: state)
+  }
+}
+
+func processMeter(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  unsafe {
+    var state: MeterState = rae_ext_rae_buf_get(buf: plan.meters, index: stateAt)
+    loop var i: Int = 0, i < frames, ++i {
+      let left: Float = scratchAt(
+        plan: plan
+        buffer: input
+        channel: 0
+        frame: i
+      )
+      let right: Float = scratchAt(
+        plan: plan
+        buffer: input
+        channel: 1
+        frame: i
+      )
+      state.peakLeft = max(a: state.peakLeft, b: abs(value: left))
+      state.peakRight = max(a: state.peakRight, b: abs(value: right))
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 0
+        frame: i
+        value: left
+      )
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 1
+        frame: i
+        value: right
+      )
+    }
+    var meters: Buffer(MeterState) = plan.meters
+    rae_ext_rae_buf_set(buf: meters, index: stateAt, value: state)
+  }
+}
+
+# Instant attack, linear release toward 1: the output never passes the ceiling
+func processLimiter(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  unsafe {
+    var state: LimiterState = rae_ext_rae_buf_get(buf: plan.limiters, index: stateAt)
+    loop var i: Int = 0, i < frames, ++i {
+      let left: Float = scratchAt(
+        plan: plan
+        buffer: input
+        channel: 0
+        frame: i
+      )
+      let right: Float = scratchAt(
+        plan: plan
+        buffer: input
+        channel: 1
+        frame: i
+      )
+      let peak: Float = max(a: abs(value: left), b: abs(value: right))
+      var wanted: Float = 1.0
+      if peak > state.ceiling {
+        wanted = state.ceiling / peak
+      }
+      if wanted < state.gain {
+        state.gain = wanted
+      } else {
+        state.gain = min(a: wanted, b: state.gain + state.release)
+      }
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 0
+        frame: i
+        value: left * state.gain
+      )
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: 1
+        frame: i
+        value: right * state.gain
+      )
+    }
+    var limiters: Buffer(LimiterState) = plan.limiters
+    rae_ext_rae_buf_set(buf: limiters, index: stateAt, value: state)
+  }
+}
+
+func processOutput(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  loop var channel: Int = 0, channel < 2, ++channel {
+    loop var i: Int = 0, i < frames, ++i {
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: channel
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: input
+          channel: channel
+          frame: i
+        )
+      )
+    }
+  }
+}
+
+# `sourceOffset`: where in the sources pool this piece of the block starts
+func processNode(
+  plan: view RenderPlan
+  node: view Int
+  sources: view Buffer(Float)
+  sourceOffset: view Int
+  frames: view Int
+) realtime {
+  let out: Int = intAt(buffer: plan.outputBuffers, index: node)
+  var kind: NodeKind = NodeKind.output
+  unsafe {
+    kind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+  }
+  match kind {
+    case NodeKind.voices {
+      processSource(
+        plan: plan
+        node: node
+        out: out
+        sources: sources
+        sourceOffset: sourceOffset
+        frames: frames
+      )
+    }
+    case NodeKind.stream {
+      processSource(
+        plan: plan
+        node: node
+        out: out
+        sources: sources
+        sourceOffset: sourceOffset
+        frames: frames
+      )
+    }
+    case NodeKind.input {
+      processSource(
+        plan: plan
+        node: node
+        out: out
+        sources: sources
+        sourceOffset: sourceOffset
+        frames: frames
+      )
+    }
+    case NodeKind.gain {
+      processGain(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.send {
+      processGain(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.pan {
+      processPan(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.sum {
+      processSum(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.delay {
+      processDelay(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.meter {
+      processMeter(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.limiter {
+      processLimiter(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.output {
+      processOutput(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+  }
+}

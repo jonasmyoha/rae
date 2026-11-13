@@ -1,0 +1,355 @@
+# audio/graphSystem/GraphSystem — the mixer's entities into a render plan
+# (docs/audio-design.md §10.2, §5.2). When the structure changed (a track,
+# output, send or insert added, removed or changed), it builds the AudioGraph,
+# compiles it against the plan the audio thread runs (so every node keeps its
+# state: audio/GraphCompile) and sends it; it also frees the plans the audio
+# thread gave back. Parameters (gain, pan, mute, solo) do not rebuild the plan:
+# audio/parameterSystem sends them as events.
+#
+# The graph per entity, each node keyed `entityIndex * 64 + role`:
+#   audio track  source(slot) -> inserts -> fader -> pan -> meter -> its bus
+#   bus          sum           -> inserts -> fader -> pan -> meter -> its bus
+#   master       sum           -> inserts -> fader -> meter -> output
+#   send         a gain from its track's point before the fader (or after the
+#                meter) into its bus
+open audio/AudioComponents
+open audio/AudioGraph
+open audio/GraphCompile
+open audio/GraphRender
+open ecs/ComponentTable
+open ecs/Entity
+
+const roleSum: Int = 0
+
+const roleSource: Int = 1
+
+const roleFader: Int = 2
+
+const rolePan: Int = 3
+
+const roleMeter: Int = 4
+
+const roleSend: Int = 5
+
+const roleSilence: Int = 6
+
+const roleInsert: Int = 8
+
+# The resource the three systems share (a field of the program's World)
+type AudioGraphState {
+  renderer: GraphRenderer
+  sampleRate: Int
+  maxFrames: Int
+  graph: AudioGraph
+  plan: RenderPlan
+  hasPlan: Bool
+  # the generations of the structural tables at the last compile
+  seenTracks: Int
+  seenOutputs: Int
+  seenSends: Int
+  seenInserts: Int
+  # "" or why the last compile failed (the old plan keeps playing)
+  error: String
+  # by entity index: the entity, and the fader gain (linear), pan and send
+  # gain last given to the audio thread (audio/parameterSystem)
+  entityOfIndex: List(EntityId)
+  sentFader: List(Float)
+  sentPan: List(Float)
+  sentSend: List(Float)
+}
+
+func createAudioGraphState(sampleRate: view Int, maxFrames: view Int) ret AudioGraphState {
+  ret AudioGraphState {
+    renderer: createGraphRenderer()
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+    graph: createAudioGraph()
+    plan: emptyRenderPlan()
+    hasPlan: false
+    seenTracks: -1
+    seenOutputs: -1
+    seenSends: -1
+    seenInserts: -1
+    error: ""
+    entityOfIndex: {}
+    sentFader: {}
+    sentPan: {}
+    sentSend: {}
+  }
+}
+
+func freeAudioGraphState(this: view AudioGraphState) {
+  this.renderer.freeGraphRenderer()
+}
+
+func audioNodeKey(entityId: view EntityId, role: view Int) ret Int {
+  ret entityId.index * 64 + role
+}
+
+# A track's effective fader gain (linear): 0 when muted, or when some audio
+# track is soloed and this audio track is not
+func effectiveFader(
+  entities: view AudioEntities
+  entityId: view EntityId
+  kind: view AudioTrackKind
+  soloActive: view Bool
+) ret Float {
+  if let mute: AudioMute = entities.mutes.componentCopy(entityId: entityId) {
+    if mute.muted {
+      ret 0.0
+    }
+  }
+  if soloActive and kind is AudioTrackKind.audio {
+    var soloed: Bool = false
+    if let solo: AudioSolo = entities.solos.componentCopy(entityId: entityId) {
+      soloed = solo.soloed
+    }
+    if not soloed {
+      ret 0.0
+    }
+  }
+  var decibels: Float = 0.0
+  if let gain: AudioGain = entities.gains.componentCopy(entityId: entityId) {
+    decibels = gain.decibels
+  }
+  ret decibelsToLinear(decibels: decibels)
+}
+
+func soloIsActive(entities: view AudioEntities) ret Bool {
+  loop var i: Int = 0, i < entities.solos.componentCount(), ++i {
+    if let solo: AudioSolo = entities.solos.componentCopyAt(i: i) {
+      if solo.soloed {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+func panOf(entities: view AudioEntities, entityId: view EntityId) ret Float {
+  if let pan: AudioPan = entities.pans.componentCopy(entityId: entityId) {
+    ret pan.pan
+  }
+  ret 0.0
+}
+
+# A gain node at a linear gain (the graph stores decibels; 0 is silence)
+func linearGainNode(linear: view Float, key: view Int) ret GraphNode {
+  var decibels: Float = -1000.0
+  if linear > 0.0 {
+    decibels = 20.0 * log10Of(value: linear)
+  }
+  ret identified(node: gainNode(decibels: decibels), entityId: key)
+}
+
+func log10Of(value: view Float) ret Float {
+  ret naturalLog(x: value) / 2.302585092994046
+}
+
+func growTo(list: mod List(Int), count: view Int) {
+  loop list.length() < count {
+    list.add(value: -1)
+  }
+}
+
+# Build the graph of the entities (and remember what was given to the audio
+# thread, for parameterSystem)
+func buildAudioGraph(entities: view AudioEntities, state: mod AudioGraphState) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let soloActive: Bool = soloIsActive(entities: entities)
+  var preFader: List(Int) = {}
+  var postMeter: List(Int) = {}
+  var busSum: List(Int) = {}
+  var master: Int = -1
+  var masterEntity: EntityId = noEntity()
+  let count: Int = entities.tracks.componentCount()
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = entities.tracks.componentEntityAt(i: i)
+    let track: AudioTrack = entities.tracks.componentCopyAtDefault(i: i)
+    let index: Int = entityId.index
+    growTo(list: preFader, count: index + 1)
+    growTo(list: postMeter, count: index + 1)
+    growTo(list: busSum, count: index + 1)
+    loop state.entityOfIndex.length() <= index {
+      state.entityOfIndex.add(value: noEntity())
+      state.sentFader.add(value: -1.0)
+      state.sentPan.add(value: -9.0)
+      state.sentSend.add(value: -1.0)
+    }
+    state.entityOfIndex.set(index: index, value: entityId)
+    var head: Int = -1
+    if track.kind is AudioTrackKind.audio {
+      head = graph.addNode(
+        node: identified(
+          node: sourceNode(kind: NodeKind.voices, slot: track.sourceSlot)
+          entityId: audioNodeKey(entityId: entityId, role: roleSource)
+        )
+      )
+    } else {
+      head = graph.addNode(
+        node: identified(node: sumNode(), entityId: audioNodeKey(entityId: entityId, role: roleSum))
+      )
+      busSum.set(index: index, value: head)
+    }
+    var last: Int = head
+    if let inserts: AudioInserts = entities.inserts.componentCopy(entityId: entityId) {
+      var role: Int = roleInsert
+      loop let insert: AudioInsert in inserts.inserts {
+        var node: GraphNode = plainNode(kind: insert.kind)
+        node.decibels = insert.decibels
+        node.delayFrames = insert.delayFrames
+        node.ceiling = decibelsToLinear(decibels: insert.ceilingDecibels)
+        node.reportsLatency = insert.reportsLatency
+        let added: Int = graph.addNode(
+          node: identified(node: node, entityId: audioNodeKey(entityId: entityId, role: role))
+        )
+        graph.connect(from: last, to: added)
+        last = added
+        role = role + 1
+      }
+    }
+    preFader.set(index: index, value: last)
+    let fader: Float = effectiveFader(
+      entities: entities
+      entityId: entityId
+      kind: track.kind
+      soloActive: soloActive
+    )
+    state.sentFader.set(index: index, value: fader)
+    let faderNode: Int = graph.addNode(
+      node: linearGainNode(linear: fader, key: audioNodeKey(entityId: entityId, role: roleFader))
+    )
+    graph.connect(from: last, to: faderNode)
+    last = faderNode
+    if track.kind is not AudioTrackKind.master {
+      let pan: Float = panOf(entities: entities, entityId: entityId)
+      state.sentPan.set(index: index, value: pan)
+      let panNodeIndex: Int = graph.addNode(
+        node: identified(
+          node: panNode(pan: pan)
+          entityId: audioNodeKey(entityId: entityId, role: rolePan)
+        )
+      )
+      graph.connect(from: last, to: panNodeIndex)
+      last = panNodeIndex
+    }
+    let meter: Int = graph.addNode(
+      node: identified(
+        node: meterNode()
+        entityId: audioNodeKey(entityId: entityId, role: roleMeter)
+      )
+    )
+    graph.connect(from: last, to: meter)
+    postMeter.set(index: index, value: meter)
+    if track.kind is AudioTrackKind.master {
+      master = head
+      masterEntity = entityId
+      let out: Int = graph.addNode(node: outputNode())
+      graph.connect(from: meter, to: out)
+    }
+  }
+  # each track and bus into its bus (the master when it names none)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = entities.tracks.componentEntityAt(i: i)
+    let track: AudioTrack = entities.tracks.componentCopyAtDefault(i: i)
+    if track.kind is AudioTrackKind.master {
+      continue
+    }
+    var target: Int = master
+    if let output: AudioOutput = entities.outputs.componentCopy(entityId: entityId) {
+      target = busSum.copyAtFallback(index: output.busEntityId.index, fallback: -1)
+    }
+    if target >= 0 {
+      graph.connect(from: postMeter.copyAtFallback(index: entityId.index, fallback: 0), to: target)
+    }
+  }
+  # the sends
+  loop var i: Int = 0, i < entities.sends.componentCount(), ++i {
+    let sendEntity: EntityId = entities.sends.componentEntityAt(i: i)
+    let send: AudioSend = entities.sends.componentCopyAtDefault(i: i)
+    var from: Int = postMeter.copyAtFallback(index: send.sourceEntityId.index, fallback: -1)
+    if send.preFader {
+      from = preFader.copyAtFallback(index: send.sourceEntityId.index, fallback: -1)
+    }
+    let target: Int = busSum.copyAtFallback(index: send.targetEntityId.index, fallback: -1)
+    if from < 0 or target < 0 {
+      continue
+    }
+    loop state.sentSend.length() <= sendEntity.index {
+      state.entityOfIndex.add(value: noEntity())
+      state.sentFader.add(value: -1.0)
+      state.sentPan.add(value: -9.0)
+      state.sentSend.add(value: -1.0)
+    }
+    let level: Float = decibelsToLinear(decibels: send.decibels)
+    state.sentSend.set(index: sendEntity.index, value: level)
+    var node: GraphNode = sendNode(decibels: send.decibels, preFader: send.preFader)
+    let added: Int = graph.addNode(
+      node: identified(node: node, entityId: audioNodeKey(entityId: sendEntity, role: roleSend))
+    )
+    graph.connect(from: from, to: added)
+    graph.connect(from: added, to: target)
+  }
+  # a bus nothing is routed to sums silence
+  loop var i: Int = 0, i < busSum.length(), ++i {
+    let sum: Int = busSum.copyAtFallback(index: i, fallback: -1)
+    if sum < 0 {
+      continue
+    }
+    var fed: Bool = false
+    loop let edge: GraphEdge in graph.edges {
+      if edge.to is sum {
+        fed = true
+      }
+    }
+    if not fed {
+      let silence: Int = graph.addNode(
+        node: identified(
+          node: sourceNode(kind: NodeKind.input, slot: -1)
+          entityId: i * 64 + roleSilence
+        )
+      )
+      graph.connect(from: silence, to: sum)
+    }
+  }
+  ret graph
+}
+
+func audioGraphSystem(entities: view AudioEntities, state: mod AudioGraphState) {
+  loop let old: RenderPlan in state.renderer.takeReclaimedPlans() {
+    freeRenderPlan(plan: old)
+  }
+  let tracks: Int = entities.tracks.componentTableGeneration()
+  let outputs: Int = entities.outputs.componentTableGeneration()
+  let sends: Int = entities.sends.componentTableGeneration()
+  let inserts: Int = entities.inserts.componentTableGeneration()
+  if state.hasPlan and tracks is state.seenTracks and outputs is state.seenOutputs and sends is state.seenSends and inserts is state.seenInserts {
+    ret
+  }
+  state.seenTracks = tracks
+  state.seenOutputs = outputs
+  state.seenSends = sends
+  state.seenInserts = inserts
+  let graph: AudioGraph = buildAudioGraph(entities: entities, state: state)
+  let compiled: CompiledPlan = compileGraphAfter(
+    graph: graph
+    previousGraph: state.graph
+    previousPlan: state.plan
+    sampleRate: state.sampleRate
+    maxFrames: state.maxFrames
+  )
+  if compiled.error.length() > 0 {
+    state.error = compiled.error
+    ret
+  }
+  if not state.renderer.submitPlan(plan: compiled.plan) {
+    state.error = "the plan ring is full; the change waits for the next frame"
+    freeRenderPlan(plan: compiled.plan)
+    state.seenTracks = -1
+    ret
+  }
+  state.error = ""
+  state.graph = graph
+  state.plan = compiled.plan
+  state.hasPlan = true
+}
