@@ -80,6 +80,9 @@ type AudioCommand {
   isStream: Bool
   stream: SpscRing(Float)
   streamFinished: Atomic(Bool)
+  # a sound starts this many of its own frames in (a timeline clip entered
+  # part-way, after a seek or at a loop's start)
+  startFrame: Int
 }
 
 enum AudioFeedbackKind { voiceEnded }
@@ -279,6 +282,7 @@ func noEvent() ret AudioCommand {
         capacity: 0
       }
       streamFinished: Atomic(Bool) { cell: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int)) }
+      startFrame: 0
     }
   }
 }
@@ -370,7 +374,7 @@ func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
         voice.samples = command.samples
         voice.frameCount = command.frameCount
         voice.channels = command.channels
-        voice.position = 0.0
+        voice.position = command.startFrame as Float64
         voice.step = step
         voice.bus = command.bus
         voice.gain = steadyRamp(value: command.value)
@@ -412,11 +416,19 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
     ret
   }
   if command.kind is AudioCommandKind.setBusGain {
+    # `frameCount`: 0 the 5 ms ramp, more a ramp over that many frames (a
+    # timeline's automation), less than 0 at once
+    var frames: Int = mixer.smoothingFrames
+    if command.frameCount > 0 {
+      frames = command.frameCount
+    } else if command.frameCount < 0 {
+      frames = 0
+    }
     rampDuckGain(
       plan: mixer.busPlan
       key: command.bus
       target: command.value
-      frames: mixer.smoothingFrames
+      frames: frames
     )
     ret
   }
@@ -460,7 +472,12 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
             rampTo(ramp: voice.gain, target: 0.0, frames: smoothing)
           }
         } else if voice.voiceId is command.voiceId {
-          if command.kind is AudioCommandKind.stop {
+          if command.kind is AudioCommandKind.stop and voice.delayFrames > 0 {
+            # stopped before its first sample (a pre-rolled clip after a
+            # seek): it ends at once, never heard
+            voice.active = false
+            endedVoiceId = voice.voiceId
+          } else if command.kind is AudioCommandKind.stop {
             voice.stopping = true
             rampTo(ramp: voice.gain, target: 0.0, frames: smoothing)
           } else if command.kind is AudioCommandKind.fadeOut {
@@ -687,8 +704,12 @@ func mixerRender(
       if command.atSample > 0 and command.atSample < blockStart {
         mixer.lateCommands = mixer.lateCommands + 1
       }
-      if command.kind is AudioCommandKind.play or command.atSample <= blockStart {
-        # a sound waits for its sample itself (its delay), to the frame
+      # a sound waits for its sample itself (its delay), to the frame; a late
+      # command (or one for "the next block", 0) applies now; one due on the
+      # block's first sample joins the events, after those already due there,
+      # so commands of one sample apply in the order they were sent (a note
+      # released and started again there)
+      if command.kind is AudioCommandKind.play or command.atSample < blockStart {
         applyCommand(mixer: mixer, command: command)
       } else {
         scheduleEvent(mixer: mixer, command: command)

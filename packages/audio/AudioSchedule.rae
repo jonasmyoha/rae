@@ -118,6 +118,43 @@ func setBusGainAt(
   let sent: Bool = this.sendCommand(command: command)
 }
 
+# The bus's gain moves from `atSample` to `gainDecibels` in a straight line
+# (of the linear gain) over `frames` frames; at once when `frames` is 0 (a
+# timeline's automation)
+func rampBusGainAt(
+  this: view AudioEngine
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  frames: view Int
+  atSample: view Int
+) {
+  this.rampBusLinearGainAt(
+    bus: bus
+    gain: decibelsToGain(decibels: gainDecibels)
+    frames: frames
+    atSample: atSample
+  )
+}
+
+# rampBusGainAt with the gain as a factor (1 unchanged, 0 silent)
+func rampBusLinearGainAt(
+  this: view AudioEngine
+  bus: view AudioBusKind
+  gain: view Float
+  frames: view Int
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setBusGain)
+  command.bus = busIndex(bus: bus)
+  command.value = gain
+  command.frameCount = frames
+  if frames <= 0 {
+    command.frameCount = -1
+  }
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
 # A time in any timebase as the engine's sample time (rounded once)
 func toEngineSamples(this: view AudioEngine, time: view MediaTime) ret Int {
   ret time.toSamples(sampleRate: this.sampleRate)
