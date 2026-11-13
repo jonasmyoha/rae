@@ -734,13 +734,16 @@ func runApp(app: mod App) ret Int {
       # whatever animates; a visible idle one blocks until an event — a file
       # change is one (watchSystem) — or until a settling window move is due
       # to be written.
-      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      Gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(
         visible: Gpu2d.renderableNow()
         animating: animating
         mouseDown: false
         pollWatcher: fileWatchNeedsPolling(watch: app.watch)
-        frameSec: 0.016667
-        heartbeatSec: windowGeometryDeadlineSec(windowGeometry: app.windowGeometry, now: now)
+        frameSeconds: 0.016667
+        heartbeatSeconds: windowGeometryDeadlineSeconds(
+          windowGeometry: app.windowGeometry
+          now: now
+        )
       ))
     }
   }

@@ -17,7 +17,7 @@
 # Storage is a fixed-capacity ring buffer because Rae's List has no
 # removeLast/truncate: trimming from the front would mean rebuilding the
 # list every frame, on the hot path.
-const fpsWindowSec: Float = 1.0
+const fpsWindowSeconds: Float = 1.0
 
 const fpsSlots: Int = 256
 
@@ -58,7 +58,7 @@ func recordFrame(stats: mod FrameStats, now: view Float64, didRender: view Bool)
       let age64: Float64 = now - sampleTime
       let age: Float = age64 as Float
       if age >= 0.0 {
-        if age <= fpsWindowSec {
+        if age <= fpsWindowSeconds {
           inWindow = inWindow + 1
         }
       }

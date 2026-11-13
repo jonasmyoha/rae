@@ -343,9 +343,9 @@ func pollSpotify(
   let playingKey: String = "playing"
   let nowPlaying: Bool = track.state is playingKey
   setPlaybackPlaying(playbackSystem: playbackSystem, value: nowPlaying)
-  playbackSystem.elapsedSec = pos
+  playbackSystem.elapsedSeconds = pos
   if dur > 0.0 {
-    playbackSystem.durationSec = dur
+    playbackSystem.durationSeconds = dur
   }
   # Publish the live snapshot the bindings read, bumping `revision` only when
   # a field changed so `spotifyBindingSystem` (and it alone) rewrites the
@@ -399,7 +399,7 @@ func pollSpotify(
         albumStem: own stem
         artworkUrl: "{track.artworkUrl}"
         textureKey: own texKey
-        durationSec: dur
+        durationSeconds: dur
         # PlayHistoryEntry stays on Float64: it is serialized to JSON, and
         # migrating it belongs with the rest of the fields (#413).
         playedAt: now.epochSeconds()

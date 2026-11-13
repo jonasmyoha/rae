@@ -29,7 +29,7 @@ func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 # A move fires an event per frame of the drag, and the value that matters is the
 # one it ends on. Waiting for the drag to settle turns a drag into one write
 # rather than sixty.
-const windowGeometrySettleSec: Float = 0.25
+const windowGeometrySettleSeconds: Float = 0.25
 
 type WindowGeometry {
   # Split so the directory can be created before writing into it, without this
@@ -185,7 +185,7 @@ func updateWindowGeometry(
   if windowGeometry.dirty is false {
     ret
   }
-  if (now - windowGeometry.dirtyAt) as Float < windowGeometrySettleSec {
+  if (now - windowGeometry.dirtyAt) as Float < windowGeometrySettleSeconds {
     ret
   }
   windowGeometry.dirty = false
@@ -193,14 +193,17 @@ func updateWindowGeometry(
 }
 
 # Seconds until a pending write is due, for the loop's wait deadline
-# (EventLoop.nextWaitTimeoutSec `heartbeatSec`): a drag that ends while the
+# (EventLoop.nextWaitTimeoutSeconds `heartbeatSeconds`): a drag that ends while the
 # app sits idle is still written, without a periodic wake to notice the
 # settle. 0 when nothing is pending.
-func windowGeometryDeadlineSec(windowGeometry: view WindowGeometry, now: view Float64) ret Float {
+func windowGeometryDeadlineSeconds(
+  windowGeometry: view WindowGeometry
+  now: view Float64
+) ret Float {
   if windowGeometry.dirty is false {
     ret 0.0
   }
-  let remaining: Float = windowGeometrySettleSec - (now - windowGeometry.dirtyAt) as Float
+  let remaining: Float = windowGeometrySettleSeconds - (now - windowGeometry.dirtyAt) as Float
   if remaining < 0.001 {
     ret 0.001
   }

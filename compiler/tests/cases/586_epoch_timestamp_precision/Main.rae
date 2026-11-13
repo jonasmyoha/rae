@@ -23,9 +23,9 @@ open Math
 # whole problem. Real clock readings are not so considerate.
 const epochNow: Float64 = 1750000037.0
 
-const frameSec: Float64 = 0.0166666
+const frameSeconds: Float64 = 0.0166666
 
-const pollIntervalSec: Float64 = 1.0
+const pollIntervalSeconds: Float64 = 1.0
 
 func absF64(x: view Float64) ret Float64 {
   if x < 0.0 {
@@ -45,12 +45,12 @@ func check(label: view String, ok: view Bool) {
 # Count how many times a 1 Hz throttle fires over `frames` frames when the
 # last-fire timestamp is kept at f32 precision (`narrow: true`) or f64.
 func countPolls(frames: view Int, narrow: view Bool) ret Int {
-  var last: Float64 = epochNow - pollIntervalSec
+  var last: Float64 = epochNow - pollIntervalSeconds
   var fired: Int = 0
   var i: Int = 0
   loop i < frames {
-    let now: Float64 = epochNow + (i.toFloat() as Float64) * frameSec
-    if now - last >= pollIntervalSec {
+    let now: Float64 = epochNow + (i.toFloat() as Float64) * frameSeconds
+    if now - last >= pollIntervalSeconds {
       fired = fired + 1
       if narrow {
         # What the buggy field did: store through an f32.

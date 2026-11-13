@@ -194,6 +194,14 @@ a convention, it is a path the app passes. New app code should use
 `mountSceneWithImports`; `loadUiAssets` remains the compatibility path for apps
 that have not yet migrated their scene packages.
 
+### Renamed keys: `...Sec` is `...Seconds` (2026-11-13)
+
+`Sec` is an abbreviation (AGENTS.md naming rules), so every key that ended in it now ends in
+`Seconds`: `Carousel.autoAdvanceSeconds`, `Loop.periodSeconds` and `forSeconds`. A scene that still writes the old key
+loads as before: the loader reads `fooSec` when `fooSeconds` is missing and adds a `renamedKey`
+diagnostic naming the new key (lib/ui/RegistryGeneric `authoredKeyOf`; case 1398). The old
+spelling will go once the scenes outside this repo are moved over.
+
 ## 8. `Camera2D`: zoom and pan a page by writing one component
 
 A page or layer ROOT may carry `"Camera2D": { "zoom": 1, "offsetX": 0, "offsetY": 0 }`
@@ -397,9 +405,9 @@ and that every `OnClick` id has a label.
   frame's `paste` / `copy` / `cut`. Elsewhere the menu is a no-op (case 1311
   checks when it is shown). A double tap does not open it.
 - The caret is drawn by the renderer after the text, not written into it;
-  it blinks every 0.53 s from the last edit, and `textFieldDeadlineSec` is
+  it blinks every 0.53 s from the last edit, and `textFieldDeadlineSeconds` is
   when it next changes, for the event loop's heartbeat
-  (`earliestDeadlineSec` combines it with another deadline).
+  (`earliestDeadlineSeconds` combines it with another deadline).
 
 ## 12. `ListReorder`: drag to reorder a list's rows
 
@@ -446,7 +454,7 @@ taken by key, so an answer that also adds or removes a row (a heading that
 goes once its last task moved out from under it) still moves every row
 smoothly from where it was drawn.
 
-The app runs `listReorderSystem(world, uiSystems, input, nowSec)` each frame
+The app runs `listReorderSystem(world, uiSystems, input, nowSeconds)` each frame
 `listReorderNeedsRun` says so, after `updateUiInput` and before
 `updateScrollRoot`, and `listReorderPoseSystem(world, uiSystems)` after the
 list system and before the layout. The first steps the gesture and fires the
@@ -764,7 +772,7 @@ The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `di
       { "t": 0.3, "y": -4, "opacity": 1.0 },
       { "t": 1.0, "y": 10, "opacity": 0.0 }
     ],
-    "periodSec": 0.9, "forSec": 4.0, "delaySeconds": 0.15
+    "periodSeconds": 0.9, "forSeconds": 4.0, "delaySeconds": 0.15
   }
 }
 ```
@@ -772,14 +780,14 @@ The built-in bundles: `appearFade`, `appearRise`, `appearPop`, `appearDrop`, `di
 | field | default | meaning |
 | --- | --- | --- |
 | `keys` | none | keyframes over one period: `t` (0 to 1 of the period) and the pose's offsets `x`, `y` (points), `scale`, `rotation` (radians), `opacity`; a field a key does not write is the laid-out pose's (0, 0, 1, 0, 1). Read in `t` order; between keys the pose moves in a straight line |
-| `periodSec` | 1 | seconds per period |
-| `forSec` | 0 | how long it runs; 0: as long as the node is shown |
+| `periodSeconds` | 1 | seconds per period |
+| `forSeconds` | 0 | how long it runs; 0: as long as the node is shown |
 | `delaySeconds` | 0 | it starts this much later (the first key's pose meanwhile): siblings with different delays run out of phase |
 | `motion` | smooth | the glide home at the end |
 
 - It starts when the node is shown, as `Appear` does: on mount, and when it or a parent comes to be shown
   again (which starts it over). Its first key's pose is on before the first paint.
-- When `forSec` has passed it glides from where it is to its laid-out place on `motion`, and stops: no
+- When `forSeconds` has passed it glides from where it is to its laid-out place on `motion`, and stops: no
   code runs and nothing is drawn for it any more. A node hidden while it runs stops where it is.
 - While it runs its pose is the loop's, over any other motion's on the node.
 - With reduced motion (or `RAE_ANIMATION=off`) it does not run: the node stays at its place.

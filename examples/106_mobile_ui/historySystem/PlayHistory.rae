@@ -27,7 +27,7 @@ type PlayHistoryEntry {
   # it, and stores the key here. Restored entries are normalized so duplicate
   # songs share any known artwork metadata.
   textureKey: String
-  durationSec: Float
+  durationSeconds: Float
   # `getTime()` reading at record time. Empty / 0.0 marks "boot
   # default"; main.rae stamps real wall times via the `now` floats
   # it already threads through `pollSpotify` etc.
@@ -64,7 +64,7 @@ func copyHistoryEntryWithArt(
       albumStem: rae_ext_rae_string_copy(string: entry.albumStem)
       artworkUrl: rae_ext_rae_string_copy(string: artworkUrl)
       textureKey: rae_ext_rae_string_copy(string: textureKey)
-      durationSec: entry.durationSec
+      durationSeconds: entry.durationSeconds
       playedAt: entry.playedAt
     }
   }
@@ -225,7 +225,7 @@ func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
       albumStem: rae_ext_rae_string_copy(string: entry.albumStem)
       artworkUrl: rae_ext_rae_string_copy(string: entry.artworkUrl)
       textureKey: rae_ext_rae_string_copy(string: entryTextureKey)
-      durationSec: entry.durationSec
+      durationSeconds: entry.durationSeconds
       playedAt: entry.playedAt
     }
     history.entries.add(value: own owned)

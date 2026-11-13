@@ -14,13 +14,13 @@ open ecs/ComponentTable
 
 # How long a press must stay on the focused field, and how little it may move
 # (design units), before the edit menu shows: UIKit's long press
-const textFieldMenuHoldSec: Float64 = 0.5
+const textFieldMenuHoldSeconds: Float64 = 0.5
 
 const textFieldMenuSlop: Float = 10.0
 
 # The edit menu on a long press (iOS; the keys copy and paste elsewhere): a
 # press that begins on the focused field (the field is the topmost clickable
-# node under it) and stays within textFieldMenuSlop for textFieldMenuHoldSec
+# node under it) and stays within textFieldMenuSlop for textFieldMenuHoldSeconds
 # shows the system menu there once, with Paste when the clipboard has text and
 # Copy and Cut when the field has some. Run it after textFieldSystem with the
 # frame's pointer (the app's UiInput.pointer: a finger on a phone, in design
@@ -48,7 +48,7 @@ func textFieldMenuSystem(
       ret false
     }
     uiSystems.textField.pressTracking = true
-    uiSystems.textField.pressStartSec = now
+    uiSystems.textField.pressStartSeconds = now
     uiSystems.textField.pressX = pointer.x
     uiSystems.textField.pressY = pointer.y
     uiSystems.textField.pressMenuShown = false
@@ -61,7 +61,7 @@ func textFieldMenuSystem(
     uiSystems.textField.pressMenuShown = true
     ret false
   }
-  if uiSystems.textField.pressMenuShown or now - uiSystems.textField.pressStartSec < textFieldMenuHoldSec {
+  if uiSystems.textField.pressMenuShown or now - uiSystems.textField.pressStartSeconds < textFieldMenuHoldSeconds {
     ret false
   }
   uiSystems.textField.pressMenuShown = true

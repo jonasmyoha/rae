@@ -16,7 +16,7 @@ open ui/Ecs
 #           "albumStem":   "...",
 #           "artworkUrl":  "...",
 #           "textureKey":  "...",
-#           "durationSec": 123.4,
+#           "durationSeconds": 123.4,
 #           "playedAt":    1234567.0
 #         },
 #         ...
@@ -91,7 +91,7 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
       let stem: String = Json.escape(text: e.albumStem)
       let url: String = Json.escape(text: e.artworkUrl)
       let tk: String = Json.escape(text: e.textureKey)
-      let durStr: String = "{e.durationSec}"
+      let durStr: String = "{e.durationSeconds}"
       let atStr: String = "{e.playedAt}"
 
       content = content.concat(other: "    ").concat(other: openBrace).concat(other: nl)
@@ -125,7 +125,7 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
       ).concat(other: colon).concat(other: " ").concat(other: q).concat(other: tk).concat(other: q).concat(
         other: comma
       ).concat(other: nl)
-      content = content.concat(other: "      ").concat(other: q).concat(other: "durationSec").concat(
+      content = content.concat(other: "      ").concat(other: q).concat(other: "durationSeconds").concat(
         other: q
       ).concat(other: colon).concat(other: " ").concat(other: durStr).concat(other: comma).concat(
         other: nl
@@ -179,7 +179,11 @@ func restoreHistoryFromSource(
     let stemIdx: Int = Json.field(doc: doc, this: v, key: "albumStem")
     let urlIdx: Int = Json.field(doc: doc, this: v, key: "artworkUrl")
     let texIdx: Int = Json.field(doc: doc, this: v, key: "textureKey")
-    let durIdx: Int = Json.field(doc: doc, this: v, key: "durationSec")
+    var durIdx: Int = Json.field(doc: doc, this: v, key: "durationSeconds")
+    if durIdx < 0 {
+      # a history saved before the key was spelled out (2026-11-13)
+      durIdx = Json.field(doc: doc, this: v, key: "durationSec")
+    }
     let atIdx: Int = Json.field(doc: doc, this: v, key: "playedAt")
     let tn: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
     let an: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
@@ -208,7 +212,7 @@ func restoreHistoryFromSource(
       albumStem: own stem
       artworkUrl: own url
       textureKey: own tex
-      durationSec: dur
+      durationSeconds: dur
       playedAt: at
     }
     history.entries.add(value: own entry)

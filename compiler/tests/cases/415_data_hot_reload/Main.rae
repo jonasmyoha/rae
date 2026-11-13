@@ -16,7 +16,7 @@
 #   - enabled=false                         -> never fires, even after a real edit
 #
 # `now` is supplied manually so the example is deterministic and the
-# `intervalSec` throttle never kicks in.
+# `intervalSeconds` throttle never kicks in.
 import String
 import Sys
 open FileWatch
@@ -44,7 +44,7 @@ func main() {
 
   var paths: List(String) = List.create(String, cap: 1)
   paths.add(value: "{path}")  # a copy: add() takes its value over, and path is used below
-  var watcher: FileWatcher = createFileWatcher(paths: paths, enabled: true, intervalSec: 0.0)
+  var watcher: FileWatcher = createFileWatcher(paths: paths, enabled: true, intervalSeconds: 0.0)
 
   let r1: Bool = checkForChanges(watcher: watcher, now: 100.0)
   log("no-change: changed={r1} content={readContent(path: path)}")
@@ -57,7 +57,7 @@ func main() {
   let r3: Bool = checkForChanges(watcher: watcher, now: 102.0)
   log("after-refresh: changed={r3} content={readContent(path: path)}")
 
-  var off: FileWatcher = createFileWatcher(paths: paths, enabled: false, intervalSec: 0.0)
+  var off: FileWatcher = createFileWatcher(paths: paths, enabled: false, intervalSeconds: 0.0)
   writeFile(path: path, content: "v3-different-again")
   let r4: Bool = checkForChanges(watcher: off, now: 103.0)
   log("disabled: changed={r4} content={readContent(path: path)}")

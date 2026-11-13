@@ -26,7 +26,7 @@
 #   var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 #   updateRenderScale(drs: drs, deltaTime: deltaTime, profiler: profiler)
 #   ...render...
-#   capFrameSleep(drs: drs, frameStartSec: frameStart)        # end of the frame
+#   capFrameSleep(drs: drs, frameStartSeconds: frameStart)        # end of the frame
 #   setDynamicRenderScale(renderer: renderer, scale: drs.scale)   # the renderer draws at it
 import Gpu2d
 import Profile
@@ -91,7 +91,7 @@ type RenderScaleController {
   minScale: Float
   step: Float
   capFps: Float  # 60 normally; 30 = bottom rung frame cap
-  overBudgetSec: Float  # a frame slower than this counts as "missed"
+  overBudgetSeconds: Float  # a frame slower than this counts as "missed"
   overFrames: Int  # consecutive missed frames
   goodFrames: Int  # consecutive good frames
   missBits: Int  # bit i set = the frame i frames ago missed (the last missWindow frames)
@@ -100,8 +100,8 @@ type RenderScaleController {
   raiseFrames: Int  # good frames in a row the next raise needs (backs off)
   sinceRaise: Int  # frames since the last raise, up to raiseHoldFrames
   cooldown: Int  # frames to wait after a change (anti-oscillation)
-  workSec: Float  # the last capped frame's work time, before the cap's padding
-  workMeasured: Bool  # capFrameSleep measured workSec and no update used it yet
+  workSeconds: Float  # the last capped frame's work time, before the cap's padding
+  workMeasured: Bool  # capFrameSleep measured workSeconds and no update used it yet
   thermalCap: Bool  # the 30 fps cap was forced by a critical thermal state
   # RAE_DRS=off: the ladder never moves (the scale stays at its maximum, 60
   # fps), so two runs compare at the same resolution whatever their frames do
@@ -123,7 +123,7 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
     minScale: 0.5
     step: 0.1
     capFps: 60.0
-    overBudgetSec: 1.25 / fps
+    overBudgetSeconds: 1.25 / fps
     overFrames: 0
     goodFrames: 0
     missBits: 0
@@ -132,7 +132,7 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
     raiseFrames: baseRaiseFrames
     sinceRaise: raiseHoldFrames
     cooldown: 0
-    workSec: 0.0
+    workSeconds: 0.0
     workMeasured: false
     thermalCap: false
     fixed: Sys.getEnv(name: "RAE_DRS") is "off"
@@ -206,12 +206,12 @@ func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, ther
   }
 
   # Under the cap, judge the frame by its work time, not by the padded dt
-  var frameSec: Float = deltaTime
+  var frameSeconds: Float = deltaTime
   if drs.capFps < 60.0 and drs.workMeasured {
-    frameSec = drs.workSec
+    frameSeconds = drs.workSeconds
   }
   drs.workMeasured = false
-  let missed: Bool = frameSec > drs.overBudgetSec
+  let missed: Bool = frameSeconds > drs.overBudgetSeconds
   if missed {
     drs.overFrames = drs.overFrames + 1
     drs.goodFrames = 0
@@ -342,14 +342,14 @@ func drsShadowRes(drs: view RenderScaleController) pub ret Int {
 # at the 30fps rung; a no-op at 60 since vsync already paces there). Call at the
 # end of the render branch with the frame's start time. The frame's work time —
 # start to here, before the sleep — is recorded for the next updateRenderScale.
-func capFrameSleep(drs: mod RenderScaleController, frameStartSec: copy Float64) {
+func capFrameSleep(drs: mod RenderScaleController, frameStartSeconds: copy Float64) {
   unsafe {
     if drs.capFps >= 60.0 {
       ret
     }
     let period: Float = 1.0 / drs.capFps
-    let elapsed: Float = (Gpu2d.nowSeconds() - frameStartSec) as Float
-    recordFrameWork(drs: drs, workSec: elapsed)
+    let elapsed: Float = (Gpu2d.nowSeconds() - frameStartSeconds) as Float
+    recordFrameWork(drs: drs, workSeconds: elapsed)
     if elapsed < period {
       sleep(ms: rae_float_to_int(f: (period - elapsed) * 1000.0))
     }
@@ -357,7 +357,7 @@ func capFrameSleep(drs: mod RenderScaleController, frameStartSec: copy Float64) 
 }
 
 # The frame's work time, start to just before the cap's padding sleep
-func recordFrameWork(drs: mod RenderScaleController, workSec: view Float) {
-  drs.workSec = workSec
+func recordFrameWork(drs: mod RenderScaleController, workSeconds: view Float) {
+  drs.workSeconds = workSeconds
   drs.workMeasured = true
 }

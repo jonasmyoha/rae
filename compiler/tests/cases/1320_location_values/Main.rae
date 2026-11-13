@@ -55,7 +55,7 @@ func main() {
 
   # a headless run
   let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
-  var request: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+  var request: LocationRequest = createLocationRequest(timeoutSeconds: 15.0)
   log(
     "before start: pending {locationPending(request: request)}, answer {pollLocation(
       request: request
@@ -69,9 +69,9 @@ func main() {
   log("asked again: no answer {pollLocation(request: request, now: 101.0) is none}")
 
   # the timeout, for a request that is locating
-  var slow: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+  var slow: LocationRequest = createLocationRequest(timeoutSeconds: 15.0)
   slow.phase = LocationPhase.locating
-  slow.startedSec = 200.0
+  slow.startedSeconds = 200.0
   log(
     "after 10 s: no answer {pollLocation(request: slow, now: 210.0) is none}, pending {locationPending(
       request: slow

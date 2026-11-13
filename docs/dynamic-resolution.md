@@ -27,7 +27,7 @@ step at a time, never above the current thermal ceiling.
 ## The controller
 
 `createRenderScaleController(targetFps:)` once; `updateRenderScale(drs:,
-deltaTime:, profiler:)` each frame; `capFrameSleep(drs:, frameStartSec:)` at the
+deltaTime:, profiler:)` each frame; `capFrameSleep(drs:, frameStartSeconds:)` at the
 end of the render branch; `drsShadowRes(drs:)` feeds
 `fitShadowCascades(resolution:)`. The decisions are one pure function,
 `stepRenderScale(drs:, deltaTime:, therm:)`, which `updateRenderScale` calls with
@@ -128,7 +128,7 @@ var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)   
 updateRenderScale(drs: drs, deltaTime: deltaTime, profiler: profiler)
 # feed drsShadowRes(drs: drs) to fitShadowCascades(resolution:) if you cast shadows
 # at the end of the render branch:
-capFrameSleep(drs: drs, frameStartSec: frameStart)
+capFrameSleep(drs: drs, frameStartSeconds: frameStart)
 ```
 
 ## Not yet done (roadmap)

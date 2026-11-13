@@ -66,8 +66,8 @@ func uiLastPresentOk() pub ret Bool {
   ret Gpu2d.lastPresentOk()
 }
 
-func uiWaitEvents(timeoutSec: view Float) pub {
-  Gpu2d.waitEvents(timeoutSec: timeoutSec)
+func uiWaitEvents(timeoutSeconds: view Float) pub {
+  Gpu2d.waitEvents(timeoutSeconds: timeoutSeconds)
 }
 
 # Epoch seconds — Float64: an f32 epoch (~1.7e9) quantises to ~128s, so
@@ -180,7 +180,7 @@ func uiMonitorRefreshRate(monitor: view Int) pub ret Int {
 # Monitor-derived frame budget for the wait-based loop. Lives here rather
 # than in lib/ui/eventLoop.rae because it needs this module's monitor
 # accessors; the shared module stays dependency-free.
-func displayFrameSec() pub ret Float {
+func displayFrameSeconds() pub ret Float {
   let hz: Int = uiMonitorRefreshRate(monitor: uiCurrentMonitor())
   if hz < 30 or hz > 360 {
     ret 0.016667

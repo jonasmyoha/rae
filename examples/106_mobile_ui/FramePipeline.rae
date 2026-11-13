@@ -260,7 +260,7 @@ func renderGpu2dFrame(
   renderCache: mod RenderCache
   bg: view RgbaColor
   now: view Float64
-  targetFrameSec: view Float
+  targetFrameSeconds: view Float
   lastRenderTime: view Float64
   busyAnimating: view Bool
   active: view Bool
@@ -268,7 +268,7 @@ func renderGpu2dFrame(
   renderUntil: view Float64
   switching: view Bool
 ) pub ret FrameRenderResult {
-  let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
+  let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSeconds * 0.85
   if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
     uiBeginFrame(canvas: canvas, clear: bg)
     renderSystemGpu2d(

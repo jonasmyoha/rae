@@ -63,7 +63,7 @@ loop not gpu2d.pollClose() {
   if gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) {
     renderApp(app: app)
   } else {
-    gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(...))
+    gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(...))
   }
 }
 ```

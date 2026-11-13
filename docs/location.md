@@ -16,14 +16,14 @@ then asks for one fix, and gives the answer as a value.
   - `denied`: the person said no, now or before (or a parental control
     forbids it);
   - `off`: Location Services are off for the whole device;
-  - `timedOut`: no answer within the request's `timeoutSec`;
+  - `timedOut`: no answer within the request's `timeoutSeconds`;
   - `notAvailable`: no Core Location on this platform, or a headless run;
   - `failed`: Core Location could not tell (no signal) or another error.
 
 ## Asking
 
 ```rae
-var request: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+var request: LocationRequest = createLocationRequest(timeoutSeconds: 15.0)
 startLocation(request: request, now: Time.now().epochSeconds())
 # each frame, on the app's own state:
 if let answer: LocationAnswer = pollLocation(request: request, now: Time.now().epochSeconds()) {

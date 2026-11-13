@@ -96,7 +96,7 @@ type DebugOverlay {
   # two consecutive frames round to the same value (~128 s apart), the window
   # spans zero and the readout sits at 0 fps forever.
   frameTimes: List(Float64)
-  fpsWindowSec: Float
+  fpsWindowSeconds: Float
   lastFps: Float
   lastRssKb: Int
   # Resident size is a syscall; sampling it every frame to move a label that
@@ -144,7 +144,7 @@ func createDebugOverlay(
     anchorTop: 0.0
     customLine: ""
     frameTimes: List.create(Float64, cap: 256)
-    fpsWindowSec: 2.0
+    fpsWindowSeconds: 2.0
     lastFps: 0.0
     lastRssKb: 0
     rssSampledAt: 0.0
@@ -238,7 +238,7 @@ func debugPruneFrames(debugOverlay: mod DebugOverlay, now: view Float64) {
   let times: mod List(Float64) = debugOverlay.frameTimes
   loop times.length > 1 {
     let cutoff: Float = (now - times.copyAt(index: 0)) as Float
-    if cutoff <= debugOverlay.fpsWindowSec {
+    if cutoff <= debugOverlay.fpsWindowSeconds {
       ret
     }
     times.remove(index: 0)

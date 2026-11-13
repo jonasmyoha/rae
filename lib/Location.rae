@@ -1,6 +1,6 @@
 # Location — where the device is, once: for local weather, a nearby list.
 #
-#     var request: LocationRequest = createLocationRequest(timeoutSec: 15.0)
+#     var request: LocationRequest = createLocationRequest(timeoutSeconds: 15.0)
 #     startLocation(request: request, now: Time.now().epochSeconds())  # asks first
 #     ...                                                 # each frame:
 #     if let answer: LocationAnswer = pollLocation(request: request, now:
@@ -97,9 +97,9 @@ enum LocationPhase { idle, asking, locating, answered }
 # `accuracyMeters` is what to ask for; a weather lookup needs a kilometer.
 type LocationRequest {
   phase: LocationPhase
-  timeoutSec: Float64
+  timeoutSeconds: Float64
   accuracyMeters: Float64
-  startedSec: Float64
+  startedSeconds: Float64
   # the answer once it is known, handed over by pollLocation
   answer: LocationAnswer
   handedOver: Bool
@@ -123,12 +123,12 @@ func locationFound(fix: view LocationFix) ret LocationAnswer {
   ret LocationAnswer { fix: fix, failure: LocationFailure.none, message: "" }
 }
 
-func createLocationRequest(timeoutSec: view Float64) ret LocationRequest {
+func createLocationRequest(timeoutSeconds: view Float64) ret LocationRequest {
   ret LocationRequest {
     phase: LocationPhase.idle
-    timeoutSec: timeoutSec
+    timeoutSeconds: timeoutSeconds
     accuracyMeters: 1000.0
-    startedSec: 0.0
+    startedSeconds: 0.0
     answer: locationFailed(failure: LocationFailure.none, message: "")
     handedOver: false
   }
@@ -206,7 +206,7 @@ func answerLocationFailure(request: mod LocationRequest, failure: view LocationF
 # Start finding the place: ask for permission when it was never asked, else
 # ask Core Location for one fix. The answer comes from pollLocation.
 func startLocation(request: mod LocationRequest, now: view Float64) {
-  request.startedSec = now
+  request.startedSeconds = now
   if locationHeadless() {
     answerLocationFailure(request: request, failure: LocationFailure.notAvailable)
     ret
@@ -305,7 +305,7 @@ func pollLocation(request: mod LocationRequest, now: view Float64) ret opt Locat
       }
     }
   }
-  if request.phase is not LocationPhase.answered and now - request.startedSec > request.timeoutSec {
+  if request.phase is not LocationPhase.answered and now - request.startedSeconds > request.timeoutSeconds {
     when hasCoreLocation {
       unsafe {
         if native {

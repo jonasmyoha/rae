@@ -36,7 +36,7 @@ func mount(world: mod UiWorld, uiSystems: mod UiSystems, settings: view Animatio
     world: world
     uiSystems: uiSystems
     scene: parseScene(
-      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Cloud\",\"Shut\",\"Panel\"]\},\"Cloud\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"Children\":[\"Drop\"]\},\"Drop\":\{\"Rect\":\{\"x\":20,\"y\":80,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":1.0,\"y\":10,\"opacity\":0.0\},\{\"t\":0.0,\"y\":-10,\"opacity\":0.0\},\{\"t\":0.3,\"y\":-4,\"opacity\":1.0\}],\"periodSec\":0.9,\"forSec\":4.0,\"delaySeconds\":0.15\}\},\"Shut\":\{\"Rect\":\{\"x\":400,\"y\":100,\"w\":100,\"h\":100\},\"Active\":\{\"value\":false\},\"Children\":[\"Later\"]\},\"Later\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"x\":0\},\{\"t\":0.5,\"x\":6\},\{\"t\":1.0,\"x\":0\}],\"periodSec\":1.0,\"forSec\":1.0\}\},\"Panel\":\{\"Rect\":\{\"x\":600,\"y\":100,\"w\":100,\"h\":100\},\"Children\":[\"Always\"]\},\"Always\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"scale\":1.0\},\{\"t\":0.5,\"scale\":1.5\},\{\"t\":1.0,\"scale\":1.0\}],\"periodSec\":0.5\}\}\}\}"
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Cloud\",\"Shut\",\"Panel\"]\},\"Cloud\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":200,\"h\":100\},\"Children\":[\"Drop\"]\},\"Drop\":\{\"Rect\":\{\"x\":20,\"y\":80,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":1.0,\"y\":10,\"opacity\":0.0\},\{\"t\":0.0,\"y\":-10,\"opacity\":0.0\},\{\"t\":0.3,\"y\":-4,\"opacity\":1.0\}],\"periodSeconds\":0.9,\"forSeconds\":4.0,\"delaySeconds\":0.15\}\},\"Shut\":\{\"Rect\":\{\"x\":400,\"y\":100,\"w\":100,\"h\":100\},\"Active\":\{\"value\":false\},\"Children\":[\"Later\"]\},\"Later\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"x\":0\},\{\"t\":0.5,\"x\":6\},\{\"t\":1.0,\"x\":0\}],\"periodSeconds\":1.0,\"forSeconds\":1.0\}\},\"Panel\":\{\"Rect\":\{\"x\":600,\"y\":100,\"w\":100,\"h\":100\},\"Children\":[\"Always\"]\},\"Always\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0.0,\"scale\":1.0\},\{\"t\":0.5,\"scale\":1.5\},\{\"t\":1.0,\"scale\":1.0\}],\"periodSeconds\":0.5\}\}\}\}"
     )
   )
   layoutSystem(world: world, uiSystems: uiSystems)
@@ -201,7 +201,33 @@ func reducedMotion() {
   )
 }
 
+# A scene written before `periodSec`/`forSec` were spelled out still loads: the old keys are read,
+# each with a renamedKey diagnostic naming the new one
+func oldKeys() {
+  log("--- the old keys periodSec and forSec")
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Old\",\"nodes\":\{\"Old\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":4,\"h\":10\},\"Loop\":\{\"keys\":[\{\"t\":0,\"y\":-10\}],\"periodSec\":0.9,\"forSec\":4\}\}\}\}"
+    )
+  )
+  let oldLoop: view Loop = componentView(
+    this: world.loops
+    entityId: nodeOf(world: world, nodeId: "Old")
+  )
+  log("periodSeconds {oldLoop.periodSeconds}, forSeconds {oldLoop.forSeconds}")
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("{diagnostic.kind} {diagnostic.name}: {diagnostic.message}")
+  }
+}
+
 func main() {
   rainFalls()
   reducedMotion()
+  oldKeys()
 }

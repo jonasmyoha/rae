@@ -88,14 +88,14 @@ func setupSpotify(isHeadless: view Bool) ret SpotifySystem {
 # by automated test runs (and agents) so the binary exits cleanly on its own
 # instead of needing an external SIGKILL that GUI apps don't observe through
 # the windowing event loop. Empty / unset / <= 0 means "run forever".
-func autoExitSeconds(isHeadless: view Bool) ret Float {
+func autoExitSecondsAtStart(isHeadless: view Bool) ret Float {
   let autoExitEnv: String = getEnv(name: "RAE_AUTO_EXIT_SEC")
-  var autoExitSec: Float = 0.0
+  var autoExitSeconds: Float = 0.0
   if autoExitEnv.length() > 0 {
-    autoExitSec = autoExitEnv.toFloat()
+    autoExitSeconds = autoExitEnv.toFloat()
   }
-  autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
-  ret autoExitSec
+  autoExitSeconds = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSeconds)
+  ret autoExitSeconds
 }
 
 # RAE_UI_SCREEN picks the start screen; then the phase 3-6 hot-reload restore:
@@ -163,7 +163,7 @@ func createSceneWatcher() ret FileWatcher {
   ret FileWatch.createFileWatcher(
     paths: watchedPaths
     enabled: dataHotReloadEnabled
-    intervalSec: 0.25
+    intervalSeconds: 0.25
   )
 }
 

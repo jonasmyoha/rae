@@ -16,13 +16,13 @@
 # How often an event loop wakes on a timer for a file watcher the OS cannot
 # notify about (lib/FileNotify.rae). Where notifications work no watcher
 # asks for this: the change itself wakes the loop.
-const watcherPollSec: Float = 1.0
+const watcherPollSeconds: Float = 1.0
 
 # A hidden window wakes at most this often, whatever it asks for: nothing it
 # does is seen until it is shown again.
-const hiddenMinWakeSec: Float = 1.0
+const hiddenMinWakeSeconds: Float = 1.0
 
-const idleCapSec: Float = 30.0
+const idleCapSeconds: Float = 30.0
 
 # How long to block in waitEvents before waking on our own.
 #
@@ -35,50 +35,50 @@ const idleCapSec: Float = 30.0
 #
 # `animating` MUST be true for every continuous motion source in the app —
 # a new animation that forgets to feed this flag silently degrades to the
-# idle wait instead of failing loudly. Pass `frameSec: 0.0` with it for a
+# idle wait instead of failing loudly. Pass `frameSeconds: 0.0` with it for a
 # busy render loop (poll, paint as fast as the machine allows).
 #
 # `pollWatcher` is for a file watcher that must be polled because the OS
 # gives no notifications (FileWatch.fileWatcherNeedsPolling,
 # HotReload.reloadSignalNeedsPolling) — not for every watcher.
 #
-# `heartbeatSec > 0` is a DEADLINE: wake no later than this. Something that
+# `heartbeatSeconds > 0` is a DEADLINE: wake no later than this. Something that
 # changes periodically but slowly (a caret blink, a clock label, a debounced
 # write) passes the time until its NEXT change, not `animating` — wait for
 # the next blink, not the next frame. Pass 0 to sleep as long as possible.
-func nextWaitTimeoutSec(
+func nextWaitTimeoutSeconds(
   visible: view Bool
   animating: view Bool
   mouseDown: view Bool
   pollWatcher: view Bool
-  frameSec: view Float
-  heartbeatSec: view Float
+  frameSeconds: view Float
+  heartbeatSeconds: view Float
 ) ret Float {
   if visible is false {
-    if heartbeatSec <= 0.0 {
-      ret idleCapSec
+    if heartbeatSeconds <= 0.0 {
+      ret idleCapSeconds
     }
-    if heartbeatSec < hiddenMinWakeSec {
-      ret hiddenMinWakeSec
+    if heartbeatSeconds < hiddenMinWakeSeconds {
+      ret hiddenMinWakeSeconds
     }
-    ret heartbeatSec
+    ret heartbeatSeconds
   }
   if animating or mouseDown {
-    ret frameSec
+    ret frameSeconds
   }
-  var timeout: Float = idleCapSec
+  var timeout: Float = idleCapSeconds
   if pollWatcher {
-    timeout = watcherPollSec
+    timeout = watcherPollSeconds
   }
-  if heartbeatSec > 0.0 and heartbeatSec < timeout {
-    timeout = heartbeatSec
+  if heartbeatSeconds > 0.0 and heartbeatSeconds < timeout {
+    timeout = heartbeatSeconds
   }
   ret timeout
 }
 
 # The sooner of two heartbeat deadlines (seconds, 0 = none), for an app with
 # more than one thing that must wake the loop on time
-func earliestDeadlineSec(first: view Float, second: view Float) ret Float {
+func earliestDeadlineSeconds(first: view Float, second: view Float) ret Float {
   if first <= 0.0 {
     ret second
   }

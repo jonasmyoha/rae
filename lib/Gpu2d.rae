@@ -185,7 +185,7 @@ func renderGate() ret Bool {
   if renderableNow() {
     ret true
   }
-  waitEvents(timeoutSec: 0.25)
+  waitEvents(timeoutSeconds: 0.25)
   ret false
 }
 
@@ -394,15 +394,15 @@ func nowSeconds() ret Float64 {
 }
 
 # --- Idle wait (hybrid loop) ---------------------------------------------
-# Block up to `timeoutSec` for the next OS event (returns immediately if one is
+# Block up to `timeoutSeconds` for the next OS event (returns immediately if one is
 # already queued), without dequeuing it — the following pollClose drains it.
 # Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
 # animating. See docs/ui-render-loop-performance.md.
-func nativeWaitEvents(timeoutSec: Float) unsafe extern("rae_ext_Gpu2d_waitEvents")
+func nativeWaitEvents(timeoutSeconds: Float) unsafe extern("rae_ext_Gpu2d_waitEvents")
 
-func waitEvents(timeoutSec: copy Float) {
+func waitEvents(timeoutSeconds: copy Float) {
   unsafe {
-    nativeWaitEvents(timeoutSec: timeoutSec)
+    nativeWaitEvents(timeoutSeconds: timeoutSeconds)
   }
 }
 

@@ -391,7 +391,7 @@ func childStrideX(
 # page in transitionDuration seconds, by a spring that starts at the finger's
 # speed. It is not a track, as a finger writes this offset directly and a track
 # would be fighting it, and it moves the pages by a runtime offset, not a pose.
-# autoAdvanceSec > 0 turns the pages on a
+# autoAdvanceSeconds > 0 turns the pages on a
 # timer. Non-current children are scaled to previewScale (their TransformFx
 # scale — an authored TransformFx on a page keeps its other fields).
 func carouselSystem(
@@ -421,7 +421,7 @@ func carouselSystem(
           dragging: false
           dragStartX: 0.0
           dragStartOffset: 0.0
-          autoTimerSec: 0.0
+          autoTimerSeconds: 0.0
         }
       )
     }
@@ -461,10 +461,10 @@ func carouselSystem(
           state.page = state.page - 1
         }
       }
-      if carousel.autoAdvanceSec > 0.0 and kids.length > 1 {
-        state.autoTimerSec = state.autoTimerSec + deltaTime
-        if state.autoTimerSec >= carousel.autoAdvanceSec {
-          state.autoTimerSec = 0.0
+      if carousel.autoAdvanceSeconds > 0.0 and kids.length > 1 {
+        state.autoTimerSeconds = state.autoTimerSeconds + deltaTime
+        if state.autoTimerSeconds >= carousel.autoAdvanceSeconds {
+          state.autoTimerSeconds = 0.0
           state.page = (state.page + 1) % kids.length
         }
         live = true
