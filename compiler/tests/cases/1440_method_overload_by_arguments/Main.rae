@@ -1,0 +1,35 @@
+# Two methods of one name on one receiver type, told apart by their
+# arguments: each call binds the one its arguments fit. Before, a method
+# call bound the first one by its receiver, and the C compiler refused the
+# call to the other ("too many arguments").
+enum Kind { first, second }
+
+type Engine {
+  count: Int
+}
+
+func play(
+  this: view Engine
+  note: view Int
+  velocity: view Float
+  kind: view Kind
+  atSample: view Int
+) ret Int {
+  ret note + atSample
+}
+
+func play(this: view Engine, note: view Int) ret Int {
+  ret note
+}
+
+func main() {
+  let engine: Engine = { count: 0 }
+  let short: Int = engine.play(note: 60)
+  let long: Int = engine.play(
+    note: 60
+    velocity: 0.8
+    kind: Kind.first
+    atSample: 5000
+  )
+  log("{short} {long}")
+}
