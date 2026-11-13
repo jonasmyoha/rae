@@ -1,0 +1,49 @@
+# A `view Buffer(T)` (or `mod Buffer(T)`) parameter put into a Buffer field of
+# a struct literal, in a `ret` and in a `let`. The parameter is the buffer's
+# handle itself, so the field takes it as it is; it was emitted as `(*pool)`,
+# which clang refused.
+type Holder {
+  data: Buffer(Float)
+  count: Int
+}
+
+func wrap(pool: view Buffer(Float), count: view Int) ret Holder {
+  ret Holder { data: pool, count: count }
+}
+
+func secondOf(pool: view Buffer(Float), count: view Int) ret Float {
+  let holder: Holder = { data: pool, count: count }
+  unsafe {
+    ret rae_ext_rae_buf_get(Float, buf: holder.data, index: 1)
+  }
+}
+
+func writeThrough(pool: mod Buffer(Float)) {
+  var holder: Holder = { data: pool, count: 4 }
+  unsafe {
+    rae_ext_rae_buf_set(
+      Float
+      buf: holder.data
+      index: 2
+      value: 7.5
+    )
+  }
+}
+
+func main() {
+  unsafe {
+    var buffer: Buffer(Float) = rae_ext_rae_buf_alloc(size: 4, elemSize: sizeof(Float))
+    rae_ext_rae_buf_set(
+      Float
+      buf: buffer
+      index: 1
+      value: 2.5
+    )
+    let holder: Holder = wrap(pool: buffer, count: 4)
+    writeThrough(pool: buffer)
+    log("ret: {rae_ext_rae_buf_get(Float, buf: holder.data, index: 1)} count {holder.count}")
+    log("let: {secondOf(pool: buffer, count: 4)}")
+    log("mod: {rae_ext_rae_buf_get(Float, buf: buffer, index: 2)}")
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+}

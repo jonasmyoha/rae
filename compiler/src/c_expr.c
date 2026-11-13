@@ -2232,7 +2232,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         // the C level, not a pointer — no deref needed.
                         Str rhs_base = get_base_type_name(rhs_tr);
                         bool rhs_is_num_prim = is_scalar_primitive_type(rhs_base);
-                        if (!rhs_is_num_prim) needs_view_deref = true;
+                        // A `view`/`mod Buffer(T)` parameter is the buffer's
+                        // handle itself (`const float* pool`), not a pointer
+                        // to one: it fills a Buffer field as it is.
+                        bool rhs_is_handle = str_eq_cstr(rhs_base, "Buffer");
+                        if (!rhs_is_num_prim && !rhs_is_handle) needs_view_deref = true;
                     }
                 }
                 if (needs_view_deref) fprintf(out, "(*");
