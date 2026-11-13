@@ -1597,12 +1597,15 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
     AstTypeRef* args_tr = NULL; AstTypeRef* last_tr = NULL;
     for (size_t i = 0; i < arg_count; i++) {
         AstTypeRef* tr = NULL;
-        if (args[i] && args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
-            && args[i]->as.structure.generic_count > 0) {
+        if (args[i] && ((args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
+                         && args[i]->as.structure.generic_count > 0)
+                        || args[i]->kind == TYPE_TASK)) {
             // A generic instantiation argument (`decodeField` over a
             // `List(String)` field): spell the template name with its args,
             // not the mangled TypeInfo name `List_String`, so the
             // specialization's params/returns substitute to a real type (#1007).
+            // A Task(T) has no TypeInfo name at all: its spelling came out
+            // empty, and `List(Task(Int))` became the C type `rae_List_rae_`.
             tr = sema_type_ref_of(ctx, args[i]);
         } else {
             tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
@@ -6424,6 +6427,13 @@ AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     memset(tr->parts, 0, sizeof(*tr->parts));
     tr->parts->text = t->name;
     tr->resolved_type = t;
+    /* A Task(T) TypeInfo has no name: spell it `Task` with its T, or a
+     * `List(Task(Int))` came out as an unnamed element (`rae_List_rae_`) */
+    if (t->kind == TYPE_TASK) {
+        tr->parts->text = str_from_cstr("Task");
+        if (t->as.task.base) tr->generic_args = sema_type_ref_of(ctx, t->as.task.base);
+        return tr;
+    }
     if ((t->kind == TYPE_STRUCT || t->kind == TYPE_GENERIC_INST) && t->as.structure.decl) {
         const AstDecl* d = t->as.structure.decl;
         if (d->as.type_decl.generic_template) d = d->as.type_decl.generic_template;
