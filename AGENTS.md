@@ -582,7 +582,7 @@ Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
   Games already do this — classic `setTargetFPS(n)` + busy
   `loop not windowShouldClose()`.
 - Each app **owns its render loop** (`lib/ui` provides systems + the
-  `nextWaitTimeoutSec` policy, not the loop). An app that must run well in
+  `nextWaitTimeoutSeconds` policy, not the loop). An app that must run well in
   the browser ends `main` with `mainLoop state { ... }` instead of its own
   `loop` (docs/web-frame-loop.md §5): natively the same loop, in the browser
   a frame callback with no per-frame Asyncify yield. If you add a new animation
