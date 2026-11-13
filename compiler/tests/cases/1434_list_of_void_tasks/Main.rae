@@ -1,0 +1,28 @@
+# A List(Task(void)): filled, one task joined with viewAt + get, and the list
+# dropped, which joins the rest. The C used to name the list two ways
+# (`rae_List_rae_Task_void` and `rae_List_rae_Task_rae_void`): the mangler
+# mapped `Void` to C's void but not the `void` written here.
+open Atomic
+
+func work(finished: own Atomic(Int)) {
+  sleep(ms: 50)
+  let count: Int = finished.fetchAdd(amount: 1)
+}
+
+func runAll(finished: view Atomic(Int)) {
+  var tasks: List(Task(void)) = {}
+  loop var i: Int = 0, i < 3, ++i {
+    tasks.add(value: spawn work(finished: finished))
+  }
+  if let first: view Task(void) = tasks.viewAt(index: 0) {
+    first.get()
+  }
+  log("{tasks.length()} tasks started, the first one joined")
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  runAll(finished: finished)
+  log("after the list is dropped: {finished.load()} of 3 finished")
+  finished.freeAtomic()
+}
