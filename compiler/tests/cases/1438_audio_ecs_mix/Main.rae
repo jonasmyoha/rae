@@ -1,0 +1,267 @@
+# The mixer as entities (docs/audio-design.md §10.2): tracks, a bus, the
+# master and a pre-fader send as components; audio/graphSystem builds and
+# compiles the plan, audio/parameterSystem sends a mute as an event that lands
+# on its exact sample (inside a block), audio/feedbackSystem writes the meters
+# back. The mix is null-tested against the formula, a silent track added mid-run
+# recompiles without a change, and blocks of 37 equal blocks of 128 bit for bit.
+import Math
+open Realtime
+open audio/AudioComponents
+open audio/AudioGraph
+open audio/GraphRender
+open audio/Sound
+open audio/feedbackSystem/FeedbackSystem
+open audio/graphSystem/GraphSystem
+open audio/parameterSystem/ParameterSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/World
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 256
+
+const total: Int = 4800
+
+const muteAt: Int = 2450
+
+# slot 0 and slot 1: sines; slot 2: silence
+func sourceValue(slot: view Int, channel: view Int, frame: view Int) ret Float {
+  if slot is 2 {
+    ret 0.0
+  }
+  let frequency: Float = 300.0 + 170.0 * (slot as Float) + 40.0 * (channel as Float)
+  ret Math.sin(x: 6.283185307179586 * frequency * (frame as Float) / (sampleRate as Float)) * 0.6
+}
+
+type Session {
+  allocator: EntityAllocator
+  audio: AudioEntities
+  trackA: EntityId
+  trackB: EntityId
+  bus: EntityId
+  master: EntityId
+}
+
+func createSession() ret Session {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var audio: AudioEntities = createAudioEntities()
+  let master: EntityId = allocator.allocEntity()
+  let bus: EntityId = allocator.allocEntity()
+  let trackA: EntityId = allocator.allocEntity()
+  let trackB: EntityId = allocator.allocEntity()
+  let send: EntityId = allocator.allocEntity()
+  audio.tracks.componentSet(
+    entityId: master
+    data: AudioTrack { kind: AudioTrackKind.master, sourceSlot: 0 }
+  )
+  audio.tracks.componentSet(
+    entityId: bus
+    data: AudioTrack { kind: AudioTrackKind.bus, sourceSlot: 0 }
+  )
+  audio.gains.componentSet(entityId: bus, data: AudioGain { decibels: -3.0 })
+  audio.tracks.componentSet(
+    entityId: trackA
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 0 }
+  )
+  audio.gains.componentSet(entityId: trackA, data: AudioGain { decibels: -6.0 })
+  audio.pans.componentSet(entityId: trackA, data: AudioPan { pan: -0.5 })
+  audio.tracks.componentSet(
+    entityId: trackB
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 1 }
+  )
+  audio.pans.componentSet(entityId: trackB, data: AudioPan { pan: 0.3 })
+  audio.outputs.componentSet(entityId: trackB, data: AudioOutput { busEntityId: bus })
+  audio.sends.componentSet(
+    entityId: send
+    data: AudioSend { sourceEntityId: trackA, targetEntityId: bus, decibels: -10.0, preFader: true }
+  )
+  ret Session {
+    allocator: allocator
+    audio: audio
+    trackA: trackA
+    trackB: trackB
+    bus: bus
+    master: master
+  }
+}
+
+func panLeft(pan: view Float) ret Float64 {
+  ret Math.cos(x: (pan + 1.0) * 0.7853981633974483) as Float64
+}
+
+func panRight(pan: view Float) ret Float64 {
+  ret Math.sin(x: (pan + 1.0) * 0.7853981633974483) as Float64
+}
+
+func decibels(value: view Float) ret Float64 {
+  ret Math.pow(base: 10.0, exp: value / 20.0) as Float64
+}
+
+# The mix by formula: master = A (fader, pan) + bus(-3 dB, centre) of
+# (B (fader, pan; muted at muteAt with the 5 ms ramp) + A before its fader at -10 dB)
+func expected(channel: view Int, frame: view Int) ret Float64 {
+  let a: Float64 = sourceValue(slot: 0, channel: channel, frame: frame) as Float64
+  let b: Float64 = sourceValue(slot: 1, channel: channel, frame: frame) as Float64
+  var aPan: Float64 = panLeft(pan: -0.5)
+  var bPan: Float64 = panLeft(pan: 0.3)
+  var busPan: Float64 = panLeft(pan: 0.0)
+  if channel is 1 {
+    aPan = panRight(pan: -0.5)
+    bPan = panRight(pan: 0.3)
+    busPan = panRight(pan: 0.0)
+  }
+  var bGain: Float64 = 1.0
+  if frame >= muteAt {
+    let ramp: Float64 = ((frame - muteAt + 1) as Float64) / 240.0
+    bGain = (1.0 as Float64) - ramp
+    if bGain < 0.0 {
+      bGain = 0.0
+    }
+  }
+  let bus: Float64 = (b * bGain * bPan + a * decibels(value: -10.0)) * decibels(value: -3.0) * busPan
+  ret a * decibels(value: -6.0) * aPan + bus
+}
+
+func renderStep(
+  state: mod AudioGraphState
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  state.renderer.renderGraph(
+    sources: sources
+    left: left
+    right: right
+    offset: offset
+    frames: frames
+  )
+}
+
+# Run the session in blocks of `block`: the systems each block (as a
+# program's frame), B muted before the block that holds muteAt (the event
+# lands at muteAt exactly), a silent track C added at frame 3000
+func run(block: view Int, left: view Buffer(Float), right: view Buffer(Float)) ret String {
+  var session: Session = createSession()
+  var state: AudioGraphState = createAudioGraphState(sampleRate: sampleRate, maxFrames: maxFrames)
+  let sources: Buffer(Float) = createSampleBuffer(count: 3 * 2 * maxFrames)
+  var done: Int = 0
+  var muted: Bool = false
+  var added: Bool = false
+  var aMeter: Float = 0.0
+  var compiles: Int = 0
+  loop done < total {
+    let frames: Int = min(a: block, b: total - done)
+    if not muted and done + frames > muteAt {
+      session.audio.mutes.componentSet(entityId: session.trackB, data: AudioMute { muted: true })
+      muted = true
+    }
+    if not added and done >= 3000 {
+      let trackC: EntityId = session.allocator.allocEntity()
+      session.audio.tracks.componentSet(
+        entityId: trackC
+        data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 2 }
+      )
+      session.audio.outputs.componentSet(
+        entityId: trackC
+        data: AudioOutput { busEntityId: session.bus }
+      )
+      added = true
+    }
+    let hadPlan: Int = state.plan.serial
+    audioGraphSystem(entities: session.audio, state: state)
+    if state.plan.serial is not hadPlan {
+      compiles = compiles + 1
+    }
+    audioParameterSystem(entities: session.audio, state: state, sampleTime: muteAt)
+    loop var slot: Int = 0, slot < 3, ++slot {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        loop var i: Int = 0, i < frames, ++i {
+          setSampleAt(
+            samples: sources
+            index: (slot * 2 + channel) * maxFrames + i
+            value: sourceValue(slot: slot, channel: channel, frame: done + i)
+          )
+        }
+      }
+    }
+    markRealtimeThread()
+    renderStep(
+      state: state
+      sources: sources
+      left: left
+      right: right
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    audioFeedbackSystem(entities: session.audio, state: state)
+    if let meter: AudioMeter = session.audio.meters.componentCopy(entityId: session.trackA) {
+      aMeter = max(a: aMeter, b: meter.peak)
+    }
+    done = done + frames
+  }
+  var bMeter: Float = -1.0
+  if let meter: AudioMeter = session.audio.meters.componentCopy(entityId: session.trackB) {
+    bMeter = meter.peak
+  }
+  state.freeAudioGraphState()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+  ret "plans compiled {compiles} (the session, then track C), error '{state.error}'; track A's meter peaked at {aMeter}, track B's meter silent after its mute {bMeter <= 0.0 and bMeter > -1.0}"
+}
+
+func main() {
+  let left: Buffer(Float) = createSampleBuffer(count: total)
+  let right: Buffer(Float) = createSampleBuffer(count: total)
+  let report: String = run(block: 128, left: left, right: right)
+  var peak: Float64 = 0.0
+  loop var i: Int = 0, i < total, ++i {
+    var errorLeft: Float64 = (sampleAt(samples: left, index: i) as Float64) - expected(
+      channel: 0
+      frame: i
+    )
+    var errorRight: Float64 = (sampleAt(samples: right, index: i) as Float64) - expected(
+      channel: 1
+      frame: i
+    )
+    if errorLeft < 0.0 {
+      errorLeft = -errorLeft
+    }
+    if errorRight < 0.0 {
+      errorRight = -errorRight
+    }
+    if errorLeft > peak {
+      peak = errorLeft
+    }
+    if errorRight > peak {
+      peak = errorRight
+    }
+  }
+  log(
+    "a session of entities (tracks A and B, a bus, the master, a pre-fader send; B muted at sample {muteAt}; a silent track C added at 3000) against the mix by formula: below -100 dBFS {peak < 0.00001}"
+  )
+  log(report)
+  let otherLeft: Buffer(Float) = createSampleBuffer(count: total)
+  let otherRight: Buffer(Float) = createSampleBuffer(count: total)
+  let otherReport: String = run(block: 37, left: otherLeft, right: otherRight)
+  var same: Bool = true
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: left, index: i) is not sampleAt(samples: otherLeft, index: i) or sampleAt(
+      samples: right
+      index: i
+    ) is not sampleAt(samples: otherRight, index: i) {
+      same = false
+    }
+  }
+  log("the same session in blocks of 37 instead of 128: equal bit for bit {same}")
+  unsafe {
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+    rae_ext_rae_buf_free(buf: otherLeft)
+    rae_ext_rae_buf_free(buf: otherRight)
+  }
+}

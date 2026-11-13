@@ -127,6 +127,8 @@ type AudioEngine {
   nextVoiceId: Int
   nextSoundId: Int
   voicesEnded: Int
+  # the voices that ended since takeEndedVoices last ran (audio/feedbackSystem)
+  endedVoices: List(VoiceId)
   capturePath: String
   capture: List(Float)
   # sound sample time of the offline driver
@@ -318,6 +320,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     nextVoiceId: 1
     nextSoundId: 1
     voicesEnded: 0
+    endedVoices: {}
     capturePath: getEnv(name: "RAE_AUDIO_CAPTURE")
     capture: {}
     renderedFrames: 0
@@ -561,6 +564,9 @@ func update(this: mod AudioEngine) {
     if let report: AudioFeedback = this.feedback.pop() {
       if report.kind is AudioFeedbackKind.voiceEnded {
         this.voicesEnded = this.voicesEnded + 1
+        if this.endedVoices.length() < 4096 {
+          this.endedVoices.add(value: VoiceId { value: report.voiceId })
+        }
         this.forgetVoice(voiceId: report.voiceId)
         streamVoiceEnded(
           streams: this.streams
@@ -648,6 +654,14 @@ func nextSafeSampleTime(this: view AudioEngine) ret Int {
     ret this.renderedFrames
   }
   ret this.clock.lastRenderSample + 2 * this.periodFrames
+}
+
+# The voices that ended since the last call (audio/feedbackSystem's
+# voiceEnded events)
+func takeEndedVoices(this: mod AudioEngine) ret List(VoiceId) {
+  let taken: List(VoiceId) = this.endedVoices
+  this.endedVoices = {}
+  ret taken
 }
 
 # Frames of silence the device played because the render thread was late

@@ -1,0 +1,124 @@
+# audio/feedbackSystem/FeedbackSystem — what the audio side reports, back into
+# the World (docs/audio-design.md §10.2): the meters' peaks into AudioMeter
+# components, and the engine's happenings as AudioEvent events: the session's
+# interruptions and route changes (the events audio/sessionSystem sends as
+# AudioSessionEvent), underruns, voices that ended, and MIDI sources that came
+# or went. Run it once per frame, after the engine's update.
+open audio/Audio
+open audio/AudioComponents
+open audio/AudioSession
+open audio/GraphRender
+open audio/MidiPorts
+open audio/graphSystem/GraphSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+
+# What the event system remembers between frames
+type AudioEventState {
+  underrunFrames: Int
+  # the MIDI sources seen last frame (watched only when watchMidi)
+  watchMidi: Bool
+  midiSources: List(Int)
+}
+
+func createAudioEventState(watchMidi: view Bool) ret AudioEventState {
+  ret AudioEventState { underrunFrames: 0, watchMidi: watchMidi, midiSources: {} }
+}
+
+# The meters' readings since the last frame: each meter entity's AudioMeter
+# holds the highest of them
+func audioFeedbackSystem(entities: mod AudioEntities, state: mod AudioGraphState) {
+  var peaks: List(Float) = {}
+  loop let reading: MeterReading in state.renderer.takeMeterReadings() {
+    if reading.key % 64 is not roleMeter {
+      continue
+    }
+    let index: Int = reading.key / 64
+    loop peaks.length() <= index {
+      peaks.add(value: -1.0)
+    }
+    if reading.peak > peaks.copyAtFallback(index: index, fallback: -1.0) {
+      peaks.set(index: index, value: reading.peak)
+    }
+  }
+  loop var index: Int = 0, index < peaks.length(), ++index {
+    let peak: Float = peaks.copyAtFallback(index: index, fallback: -1.0)
+    if peak < 0.0 {
+      continue
+    }
+    let entityId: EntityId = state.entityOfIndex.copyAtFallback(index: index, fallback: noEntity())
+    entities.meters.componentSet(entityId: entityId, data: AudioMeter { peak: peak })
+  }
+}
+
+func sendAudioEvent(
+  events: mod EventQueue(AudioEvent)
+  kind: view AudioEventKind
+  value: view Int
+) {
+  eventSend(this: events, value: AudioEvent { kind: kind, value: value })
+}
+
+# The engine's happenings of this frame as events. Call it after the engine's
+# update (audio.update(), or audio/sessionSystem): it takes the session events
+# itself, so do not also run audioSessionSystem.
+func audioEventSystem(
+  audio: mod AudioEngine
+  state: mod AudioEventState
+  events: mod EventQueue(AudioEvent)
+) {
+  loop let session: AudioSessionEvent in audio.takeSessionEvents() {
+    if session.kind is AudioSessionEventKind.interruptionBegan {
+      sendAudioEvent(events: events, kind: AudioEventKind.interrupted, value: 0)
+    } else if session.kind is AudioSessionEventKind.interruptionEnded {
+      var resume: Int = 0
+      if session.shouldResume {
+        resume = 1
+      }
+      sendAudioEvent(events: events, kind: AudioEventKind.resumed, value: resume)
+    } else if session.kind is AudioSessionEventKind.routeLost {
+      sendAudioEvent(events: events, kind: AudioEventKind.routeLost, value: 0)
+    } else if session.kind is AudioSessionEventKind.routeChanged {
+      sendAudioEvent(events: events, kind: AudioEventKind.deviceChanged, value: session.reason)
+    }
+  }
+  let underrun: Int = audio.underrunFrames()
+  if underrun > state.underrunFrames {
+    sendAudioEvent(
+      events: events
+      kind: AudioEventKind.underrun
+      value: underrun - state.underrunFrames
+    )
+  }
+  state.underrunFrames = underrun
+  loop let voice: VoiceId in audio.takeEndedVoices() {
+    sendAudioEvent(events: events, kind: AudioEventKind.voiceEnded, value: voice.value)
+  }
+  if state.watchMidi {
+    var now: List(Int) = {}
+    loop let source: MidiEndpoint in midiSources() {
+      now.add(value: source.id)
+    }
+    loop let id: Int in now {
+      if not listHasInt(list: state.midiSources, value: id) {
+        sendAudioEvent(events: events, kind: AudioEventKind.midiDeviceAdded, value: id)
+      }
+    }
+    loop let id: Int in state.midiSources {
+      if not listHasInt(list: now, value: id) {
+        sendAudioEvent(events: events, kind: AudioEventKind.midiDeviceRemoved, value: id)
+      }
+    }
+    state.midiSources = now
+  }
+}
+
+func listHasInt(list: view List(Int), value: view Int) ret Bool {
+  loop let item: Int in list {
+    if item is value {
+      ret true
+    }
+  }
+  ret false
+}

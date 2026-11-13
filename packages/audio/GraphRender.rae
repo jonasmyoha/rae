@@ -20,16 +20,44 @@
 #     main
 import Math
 open audio/AudioGraph
+open audio/GraphNodes
 open collections/SpscRing
 
 const graphPlanSlots: Int = 8
+
+# A parameter change at a sample time (audio/parameterSystem): `key` is the
+# node's entity key in the plan, `kind` 0 a gain or send's linear target
+# (reached over its 5 ms ramp), 1 a pan position (-1 .. 1, at once)
+type GraphParameterEvent {
+  key: Int
+  kind: Int
+  value: Float
+  sampleTime: Int
+}
+
+# A meter's peak since the last reading, pushed after each rendered call
+type MeterReading {
+  key: Int
+  peak: Float
+}
 
 type GraphRenderer {
   plans: SpscRing(RenderPlan)
   reclaim: SpscRing(RenderPlan)
   current: RenderPlan
   hasPlan: Bool
+  # the sample time of the next frame rendered
+  sampleTime: Int
+  events: SpscRing(GraphParameterEvent)
+  # an event taken from the ring whose time has not come
+  pending: GraphParameterEvent
+  hasPending: Bool
+  meters: SpscRing(MeterReading)
 }
+
+const graphEventSlots: Int = 1024
+
+const graphMeterSlots: Int = 1024
 
 func createGraphRenderer() ret GraphRenderer {
   ret GraphRenderer {
@@ -37,7 +65,28 @@ func createGraphRenderer() ret GraphRenderer {
     reclaim: createSpscRing(RenderPlan, capacity: graphPlanSlots)
     current: emptyRenderPlan()
     hasPlan: false
+    sampleTime: 0
+    events: createSpscRing(GraphParameterEvent, capacity: graphEventSlots)
+    pending: GraphParameterEvent { key: -1, kind: 0, value: 0.0, sampleTime: 0 }
+    hasPending: false
+    meters: createSpscRing(MeterReading, capacity: graphMeterSlots)
   }
+}
+
+# Main thread: a parameter change at `sampleTime` (false: the ring is full)
+func sendParameter(this: view GraphRenderer, event: view GraphParameterEvent) ret Bool {
+  ret this.events.push(value: event)
+}
+
+# Main thread: the meters' readings since the last call, oldest first
+func takeMeterReadings(this: view GraphRenderer) ret List(MeterReading) {
+  var taken: List(MeterReading) = {}
+  loop this.meters.count() > 0 {
+    if let reading: MeterReading = this.meters.pop() {
+      taken.add(value: reading)
+    }
+  }
+  ret taken
 }
 
 # Main thread: hand a compiled plan to the audio thread (false: the ring is
@@ -73,501 +122,8 @@ func freeGraphRenderer(this: view GraphRenderer) {
   }
   this.plans.freeSpscRing()
   this.reclaim.freeSpscRing()
-}
-
-# ---- sample access ------------------------------------------------------------
-func scratchAt(
-  plan: view RenderPlan
-  buffer: view Int
-  channel: view Int
-  frame: view Int
-) ret Float realtime {
-  unsafe {
-    ret rae_ext_rae_buf_get(
-      buf: plan.scratch
-      index: (buffer * 2 + channel) * plan.maxFrames + frame
-    )
-  }
-}
-
-func setScratchAt(
-  plan: view RenderPlan
-  buffer: view Int
-  channel: view Int
-  frame: view Int
-  value: view Float
-) realtime {
-  unsafe {
-    var target: Buffer(Float) = plan.scratch
-    rae_ext_rae_buf_set(
-      buf: target
-      index: (buffer * 2 + channel) * plan.maxFrames + frame
-      value: value
-    )
-  }
-}
-
-func intAt(buffer: view Buffer(Int), index: view Int) ret Int realtime {
-  unsafe {
-    ret rae_ext_rae_buf_get(buf: buffer, index: index)
-  }
-}
-
-func firstInputOf(plan: view RenderPlan, node: view Int) ret Int realtime {
-  ret intAt(buffer: plan.inputs, index: intAt(buffer: plan.inputStart, index: node))
-}
-
-# ---- the node kinds' process functions ----------------------------------------
-func processSource(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  sources: view Buffer(Float)
-  frames: view Int
-) realtime {
-  unsafe {
-    let state: SourceState = rae_ext_rae_buf_get(
-      buf: plan.sources
-      index: intAt(buffer: plan.stateIndex, index: node)
-    )
-    loop var channel: Int = 0, channel < 2, ++channel {
-      loop var i: Int = 0, i < frames, ++i {
-        if state.slot < 0 {
-          # slot -1: silence (a removed node playing out its tail)
-          setScratchAt(
-            plan: plan
-            buffer: out
-            channel: channel
-            frame: i
-            value: 0.0
-          )
-          continue
-        }
-        let value: Float = rae_ext_rae_buf_get(
-          buf: sources
-          index: (state.slot * 2 + channel) * plan.maxFrames + i
-        )
-        setScratchAt(
-          plan: plan
-          buffer: out
-          channel: channel
-          frame: i
-          value: value
-        )
-      }
-    }
-  }
-}
-
-# gain and send: the 5 ms linear ramp toward the target, per frame
-func processGain(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
-  unsafe {
-    var state: GainState = rae_ext_rae_buf_get(buf: plan.gains, index: stateAt)
-    loop var i: Int = 0, i < frames, ++i {
-      if state.current is not state.target {
-        state.current = state.current + state.step
-        if (state.step > 0.0 and state.current > state.target) or (state.step < 0.0 and state.current < state.target) or state.step is 0.0 {
-          state.current = state.target
-        }
-      }
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 0
-        frame: i
-        value: scratchAt(
-          plan: plan
-          buffer: input
-          channel: 0
-          frame: i
-        ) * state.current
-      )
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 1
-        frame: i
-        value: scratchAt(
-          plan: plan
-          buffer: input
-          channel: 1
-          frame: i
-        ) * state.current
-      )
-    }
-    var gains: Buffer(GainState) = plan.gains
-    rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
-  }
-}
-
-func processPan(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  unsafe {
-    let state: PanState = rae_ext_rae_buf_get(
-      buf: plan.pans
-      index: intAt(buffer: plan.stateIndex, index: node)
-    )
-    loop var i: Int = 0, i < frames, ++i {
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 0
-        frame: i
-        value: scratchAt(
-          plan: plan
-          buffer: input
-          channel: 0
-          frame: i
-        ) * state.left
-      )
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 1
-        frame: i
-        value: scratchAt(
-          plan: plan
-          buffer: input
-          channel: 1
-          frame: i
-        ) * state.right
-      )
-    }
-  }
-}
-
-func processSum(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let start: Int = intAt(buffer: plan.inputStart, index: node)
-  let count: Int = intAt(buffer: plan.inputCount, index: node)
-  loop var channel: Int = 0, channel < 2, ++channel {
-    loop var i: Int = 0, i < frames, ++i {
-      var total: Float = 0.0
-      loop var k: Int = 0, k < count, ++k {
-        total = total + scratchAt(
-          plan: plan
-          buffer: intAt(buffer: plan.inputs, index: start + k)
-          channel: channel
-          frame: i
-        )
-      }
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: channel
-        frame: i
-        value: total
-      )
-    }
-  }
-}
-
-func processDelay(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
-  unsafe {
-    var state: DelayState = rae_ext_rae_buf_get(buf: plan.delays, index: stateAt)
-    if state.frames is 0 {
-      loop var channel: Int = 0, channel < 2, ++channel {
-        loop var i: Int = 0, i < frames, ++i {
-          setScratchAt(
-            plan: plan
-            buffer: out
-            channel: channel
-            frame: i
-            value: scratchAt(
-              plan: plan
-              buffer: input
-              channel: channel
-              frame: i
-            )
-          )
-        }
-      }
-      ret
-    }
-    var line: Buffer(Float) = state.line
-    loop var i: Int = 0, i < frames, ++i {
-      loop var channel: Int = 0, channel < 2, ++channel {
-        let at: Int = channel * state.frames + state.writeIndex
-        let delayed: Float = rae_ext_rae_buf_get(buf: line, index: at)
-        rae_ext_rae_buf_set(
-          buf: line
-          index: at
-          value: scratchAt(
-            plan: plan
-            buffer: input
-            channel: channel
-            frame: i
-          )
-        )
-        setScratchAt(
-          plan: plan
-          buffer: out
-          channel: channel
-          frame: i
-          value: delayed
-        )
-      }
-      state.writeIndex = state.writeIndex + 1
-      if state.writeIndex >= state.frames {
-        state.writeIndex = 0
-      }
-    }
-    var delays: Buffer(DelayState) = plan.delays
-    rae_ext_rae_buf_set(buf: delays, index: stateAt, value: state)
-  }
-}
-
-func processMeter(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
-  unsafe {
-    var state: MeterState = rae_ext_rae_buf_get(buf: plan.meters, index: stateAt)
-    loop var i: Int = 0, i < frames, ++i {
-      let left: Float = scratchAt(
-        plan: plan
-        buffer: input
-        channel: 0
-        frame: i
-      )
-      let right: Float = scratchAt(
-        plan: plan
-        buffer: input
-        channel: 1
-        frame: i
-      )
-      state.peakLeft = max(a: state.peakLeft, b: abs(value: left))
-      state.peakRight = max(a: state.peakRight, b: abs(value: right))
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 0
-        frame: i
-        value: left
-      )
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 1
-        frame: i
-        value: right
-      )
-    }
-    var meters: Buffer(MeterState) = plan.meters
-    rae_ext_rae_buf_set(buf: meters, index: stateAt, value: state)
-  }
-}
-
-# Instant attack, linear release toward 1: the output never passes the ceiling
-func processLimiter(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
-  unsafe {
-    var state: LimiterState = rae_ext_rae_buf_get(buf: plan.limiters, index: stateAt)
-    loop var i: Int = 0, i < frames, ++i {
-      let left: Float = scratchAt(
-        plan: plan
-        buffer: input
-        channel: 0
-        frame: i
-      )
-      let right: Float = scratchAt(
-        plan: plan
-        buffer: input
-        channel: 1
-        frame: i
-      )
-      let peak: Float = max(a: abs(value: left), b: abs(value: right))
-      var wanted: Float = 1.0
-      if peak > state.ceiling {
-        wanted = state.ceiling / peak
-      }
-      if wanted < state.gain {
-        state.gain = wanted
-      } else {
-        state.gain = min(a: wanted, b: state.gain + state.release)
-      }
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 0
-        frame: i
-        value: left * state.gain
-      )
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: 1
-        frame: i
-        value: right * state.gain
-      )
-    }
-    var limiters: Buffer(LimiterState) = plan.limiters
-    rae_ext_rae_buf_set(buf: limiters, index: stateAt, value: state)
-  }
-}
-
-func processOutput(
-  plan: view RenderPlan
-  node: view Int
-  out: view Int
-  frames: view Int
-) realtime {
-  let input: Int = firstInputOf(plan: plan, node: node)
-  loop var channel: Int = 0, channel < 2, ++channel {
-    loop var i: Int = 0, i < frames, ++i {
-      setScratchAt(
-        plan: plan
-        buffer: out
-        channel: channel
-        frame: i
-        value: scratchAt(
-          plan: plan
-          buffer: input
-          channel: channel
-          frame: i
-        )
-      )
-    }
-  }
-}
-
-func processNode(
-  plan: view RenderPlan
-  node: view Int
-  sources: view Buffer(Float)
-  frames: view Int
-) realtime {
-  let out: Int = intAt(buffer: plan.outputBuffers, index: node)
-  var kind: NodeKind = NodeKind.output
-  unsafe {
-    kind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
-  }
-  match kind {
-    case NodeKind.voices {
-      processSource(
-        plan: plan
-        node: node
-        out: out
-        sources: sources
-        frames: frames
-      )
-    }
-    case NodeKind.stream {
-      processSource(
-        plan: plan
-        node: node
-        out: out
-        sources: sources
-        frames: frames
-      )
-    }
-    case NodeKind.input {
-      processSource(
-        plan: plan
-        node: node
-        out: out
-        sources: sources
-        frames: frames
-      )
-    }
-    case NodeKind.gain {
-      processGain(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.send {
-      processGain(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.pan {
-      processPan(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.sum {
-      processSum(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.delay {
-      processDelay(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.meter {
-      processMeter(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.limiter {
-      processLimiter(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-    case NodeKind.output {
-      processOutput(
-        plan: plan
-        node: node
-        out: out
-        frames: frames
-      )
-    }
-  }
+  this.events.freeSpscRing()
+  this.meters.freeSpscRing()
 }
 
 # ---- carrying node state across a plan swap (§5.2) ----------------------------
@@ -658,9 +214,15 @@ func renderGraph(
   this.takeNewPlan()
   var done: Int = 0
   loop done < frames {
+    this.applyDueEvents()
     var piece: Int = frames - done
     if this.hasPlan and piece > this.current.maxFrames {
       piece = this.current.maxFrames
+    }
+    # a change waiting for a sample inside this piece cuts it there, so it
+    # lands on its exact sample at any block size
+    if this.hasPending and this.pending.sampleTime < this.sampleTime + piece {
+      piece = this.pending.sampleTime - this.sampleTime
     }
     unsafe {
       var leftTarget: Buffer(Float) = left
@@ -676,6 +238,7 @@ func renderGraph(
             plan: this.current
             node: node
             sources: sources
+            sourceOffset: done
             frames: piece
           )
         }
@@ -704,6 +267,90 @@ func renderGraph(
       }
     }
     done = done + piece
+    this.sampleTime = this.sampleTime + piece
+  }
+  this.pushMeterReadings()
+}
+
+# Apply every parameter change whose sample time has come
+func applyDueEvents(this: mod GraphRenderer) realtime {
+  loop true {
+    if not this.hasPending {
+      if let event: GraphParameterEvent = this.events.pop() {
+        this.pending = event
+        this.hasPending = true
+      } else {
+        ret
+      }
+    }
+    if this.pending.sampleTime > this.sampleTime {
+      ret
+    }
+    this.applyParameter(event: this.pending)
+    this.hasPending = false
+  }
+}
+
+# Find the node with the event's entity key and set it
+func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  let plan: RenderPlan = this.current
+  loop var node: Int = 0, node < plan.nodeCount, ++node {
+    if intAt(buffer: plan.entityIds, index: node) is not event.key {
+      continue
+    }
+    let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      if event.kind is 0 and (kind is NodeKind.gain or kind is NodeKind.send) {
+        var gains: Buffer(GainState) = plan.gains
+        var state: GainState = rae_ext_rae_buf_get(buf: gains, index: stateAt)
+        state.target = event.value
+        state.step = (state.target - state.current) / (state.rampFrames as Float)
+        rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+      } else if event.kind is 1 and kind is NodeKind.pan {
+        var pans: Buffer(PanState) = plan.pans
+        let angle: Float = (min(a: 1.0, b: max(a: -1.0, b: event.value)) + 1.0) * 0.7853981633974483
+        rae_ext_rae_buf_set(
+          buf: pans
+          index: stateAt
+          value: PanState { left: cos(x: angle), right: sin(x: angle) }
+        )
+      }
+    }
+  }
+}
+
+# Each meter that stands for an entity: its peak since the last reading, onto
+# the meters ring (dropped when the ring is full), then cleared
+func pushMeterReadings(this: view GraphRenderer) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  let plan: RenderPlan = this.current
+  loop var node: Int = 0, node < plan.nodeCount, ++node {
+    let key: Int = intAt(buffer: plan.entityIds, index: node)
+    if key < 0 {
+      continue
+    }
+    let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      if kind is NodeKind.meter {
+        var meters: Buffer(MeterState) = plan.meters
+        let state: MeterState = rae_ext_rae_buf_get(buf: meters, index: stateAt)
+        let pushed: Bool = this.meters.push(
+          value: MeterReading { key: key, peak: max(a: state.peakLeft, b: state.peakRight) }
+        )
+        rae_ext_rae_buf_set(
+          buf: meters
+          index: stateAt
+          value: MeterState { peakLeft: 0.0, peakRight: 0.0 }
+        )
+      }
+    }
   }
 }
 
