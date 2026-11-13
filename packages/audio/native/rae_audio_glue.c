@@ -30,6 +30,7 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <os/workgroup.h>
 #include <pthread.h>
 #endif
 
@@ -206,6 +207,49 @@ int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
 #else
   (void)device; (void)property;
   return -1;
+#endif
+}
+
+/* The device's audio workgroup (Apple's os_workgroup, macOS 11 and iOS 14):
+ * the threads that help render a block join it (lib/Realtime joinWorkgroup),
+ * so the system schedules them with the device's IO thread. Platform reason:
+ * one Core Audio property read (macOS: the device's
+ * kAudioDevicePropertyIOThreadOSWorkgroup; iOS: the output unit's
+ * kAudioOutputUnitProperty_OSWorkgroup). The answer is retained: give it back
+ * with rae_audio_workgroup_release. 0 where there is none. */
+int64_t rae_audio_device_workgroup(int64_t device) {
+#if defined(__APPLE__) && (defined(MA_APPLE_DESKTOP) || defined(MA_APPLE_MOBILE))
+  if (!device) return 0;
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  os_workgroup_t workgroup = NULL;
+  UInt32 size = sizeof(workgroup);
+#if defined(MA_APPLE_DESKTOP)
+  typedef OSStatus (*GetPropertyData)(AudioObjectID, const AudioObjectPropertyAddress*, UInt32, const void*,
+                                      UInt32*, void*);
+  GetPropertyData get = (GetPropertyData)audio->context.coreaudio.AudioObjectGetPropertyData;
+  AudioObjectPropertyAddress address = {kAudioDevicePropertyIOThreadOSWorkgroup, kAudioObjectPropertyScopeGlobal,
+                                        kAudioObjectPropertyElementMain};
+  if (!get || get((AudioObjectID)audio->device.coreaudio.deviceObjectIDPlayback, &address, 0, NULL, &size,
+                  &workgroup) != 0) return 0;
+#else
+  typedef OSStatus (*GetUnitProperty)(AudioUnit, AudioUnitPropertyID, AudioUnitScope, AudioUnitElement, void*,
+                                      UInt32*);
+  GetUnitProperty get = (GetUnitProperty)audio->context.coreaudio.AudioUnitGetProperty;
+  if (!get || get((AudioUnit)audio->device.coreaudio.audioUnitPlayback, kAudioOutputUnitProperty_OSWorkgroup,
+                  kAudioUnitScope_Global, 0, &workgroup, &size) != 0) return 0;
+#endif
+  return (int64_t)(intptr_t)workgroup;
+#else
+  (void)device;
+  return 0;
+#endif
+}
+
+void rae_audio_workgroup_release(int64_t workgroup) {
+#if defined(__APPLE__)
+  if (workgroup) os_release((os_workgroup_t)(intptr_t)workgroup);
+#else
+  (void)workgroup;
 #endif
 }
 

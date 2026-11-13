@@ -66,6 +66,9 @@ int64_t rae_ext_Realtime_timebaseNumerator(void);
 int64_t rae_ext_Realtime_timebaseDenominator(void);
 int64_t rae_ext_Realtime_setTimeConstraint(int64_t periodTicks, int64_t computationTicks, int64_t constraintTicks);
 int64_t rae_ext_Realtime_setStandardPolicy(void);
+int64_t rae_ext_Realtime_workgroupTokenSize(void);
+int64_t rae_ext_Realtime_workgroupJoin(int64_t workgroup, uint8_t* token);
+void rae_ext_Realtime_workgroupLeave(int64_t workgroup, uint8_t* token);
 #elif defined(_WIN32)
 int64_t rae_ext_Realtime_mmcssBegin(void);
 int64_t rae_ext_Realtime_mmcssEnd(int64_t handle);

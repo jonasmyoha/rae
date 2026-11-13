@@ -663,6 +663,23 @@ func deviceCallbacks(this: view AudioEngine) ret Int {
   }
 }
 
+# The device's audio workgroup (Apple's os_workgroup; 0 elsewhere and with no
+# device). The helper threads of a lib/RealtimeTeam that render part of each
+# block join it with lib/Realtime's joinWorkgroup, so the system schedules
+# them together with the device's own thread. It is retained: give it back
+# with releaseAudioWorkgroup after the helpers have left it.
+func audioWorkgroup(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_workgroup(device: this.device)
+  }
+}
+
+func releaseAudioWorkgroup(workgroup: view Int) {
+  unsafe {
+    rae_audio_workgroup_release(workgroup: workgroup)
+  }
+}
+
 # Stop the device and the render thread, write the capture, free every sound
 func stopAudio(this: mod AudioEngine) ret Int {
   # the device first, so it never reads a ring nobody fills any more

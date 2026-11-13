@@ -1,0 +1,159 @@
+# RealtimeTeam — a team of real-time threads that one real-time function fans
+# work out to and joins within one block: a DAW's graph on several cores
+# (docs/realtime-language-design.md §6.6, R9: a library type, no new syntax).
+#
+# Rae has no function values, so the team holds only the synchronization: the
+# program writes its helper loop (a plain function, started with `spawn
+# thread`) and its leader's stage, and calls the team around its own work:
+#
+#     # each helper, started with `spawn thread helperLoop(team: team, helper: i)`:
+#     func helperLoop(team: own RealtimeTeam, helper: own Int) ret Int {
+#       let promotion: RealtimePromotion = promoteToRealtime(...)
+#       var seen: Int = 0
+#       loop team.awaitStage(helper: helper, seen: seen) {
+#         ... this helper's part of the stage ...
+#         team.finishPart()
+#       }
+#       demoteFromRealtime(promotion: promotion)
+#       ret 0
+#     }
+#     # the leader, once per block on the audio thread (all `realtime`):
+#     team.beginStage()
+#     ... the leader's own part ...
+#     team.endStage()            # returns when every helper has finished
+#     # at the end: team.stopTeam(), join the helper tasks, team.freeTeam()
+#
+# A helper that has no stage spins for `spinRounds` checks (a stage that comes
+# soon is picked up in well under a microsecond), then sleeps on its own
+# Signal; the leader posts only to a helper that sleeps, so a block where every
+# helper is spinning makes no system call.
+#
+# The handshake uses ONE atomic word per helper, so it needs no ordering
+# between two locations (with the release/acquire atomics, a "sleeping" flag
+# beside a separate stage counter could lose a wake-up on ARM: each side's
+# store can pass its following load). The word holds the stage the helper
+# should run, -1 while it sleeps, -2 to stop. The leader `exchange`s the new
+# stage in and posts when the old value was -1; a helper goes to sleep only
+# by `compareExchange` from the stage it has already run to -1, so if the
+# leader got there first the exchange fails and it runs the new stage.
+open Atomic
+open Signal
+
+type RealtimeTeam {
+  helperCount: Int
+  # checks a helper makes before it sleeps
+  spinRounds: Int
+  # the leader's stage number, bumped for each stage
+  generation: Atomic(Int)
+  # helpers that finished the current stage
+  finished: Atomic(Int)
+  # per helper: the stage to run, -1 while it sleeps, -2 to stop; and its Signal
+  slots: List(Atomic(Int))
+  wakes: List(Signal)
+}
+
+func createRealtimeTeam(helperCount: view Int, spinRounds: view Int) ret RealtimeTeam {
+  var slots: List(Atomic(Int)) = List.create(Atomic(Int), cap: helperCount)
+  var wakes: List(Signal) = List.create(Signal, cap: helperCount)
+  loop var i: Int = 0, i < helperCount, ++i {
+    slots.add(value: createAtomic(Int, value: 0))
+    wakes.add(value: createSignal())
+  }
+  ret RealtimeTeam {
+    helperCount: helperCount
+    spinRounds: spinRounds
+    generation: createAtomic(Int, value: 0)
+    finished: createAtomic(Int, value: 0)
+    slots: own slots
+    wakes: own wakes
+  }
+}
+
+const teamHelperSleeping: Int = -1
+
+const teamHelperStop: Int = -2
+
+# Give helper `helper` the value `next` (a stage, or stop), waking it when it
+# sleeps
+func sendToHelper(this: view RealtimeTeam, helper: view Int, next: view Int) realtime {
+  if let slot: view Atomic(Int) = this.slots.viewAt(index: helper) {
+    if slot.exchange(value: next) is teamHelperSleeping {
+      if let wake: view Signal = this.wakes.viewAt(index: helper) {
+        wake.post()
+      }
+    }
+  }
+}
+
+# The leader: start a stage (every helper's awaitStage returns true)
+func beginStage(this: view RealtimeTeam) realtime {
+  this.finished.store(value: 0)
+  let stage: Int = this.generation.fetchAdd(amount: 1) + 1
+  loop var i: Int = 0, i < this.helperCount, ++i {
+    this.sendToHelper(helper: i, next: stage)
+  }
+}
+
+# The leader: wait (spinning) until every helper has finished the stage
+func endStage(this: view RealtimeTeam) realtime {
+  loop this.finished.load() < this.helperCount {
+    let seen: Int = this.finished.load()
+  }
+}
+
+# A helper: one part done
+func finishPart(this: view RealtimeTeam) realtime {
+  let previous: Int = this.finished.fetchAdd(amount: 1)
+}
+
+# A helper: wait for the next stage after `seen` (spinning, then sleeping);
+# true with `seen` moved on, false when the team stops
+func awaitStage(this: view RealtimeTeam, helper: view Int, seen: mod Int) ret Bool noAlloc {
+  var spins: Int = 0
+  if let slot: view Atomic(Int) = this.slots.viewAt(index: helper) {
+    loop true {
+      let value: Int = slot.load()
+      if value is teamHelperStop {
+        ret false
+      }
+      if value is not seen and value is not teamHelperSleeping {
+        seen = value
+        ret true
+      }
+      if spins < this.spinRounds {
+        spins = spins + 1
+      } else {
+        # sleep only if no new stage came: the leader's exchange then sees -1
+        # and posts
+        if slot.compareExchange(expected: seen, desired: teamHelperSleeping) {
+          if let wake: view Signal = this.wakes.viewAt(index: helper) {
+            wake.wait()
+          }
+        }
+        spins = 0
+      }
+    }
+  }
+  ret false
+}
+
+# Ask every helper to leave its loop (then join their tasks)
+func stopTeam(this: view RealtimeTeam) {
+  loop var i: Int = 0, i < this.helperCount, ++i {
+    this.sendToHelper(helper: i, next: teamHelperStop)
+  }
+}
+
+# After the helpers are joined
+func freeTeam(this: view RealtimeTeam) {
+  this.generation.freeAtomic()
+  this.finished.freeAtomic()
+  loop var i: Int = 0, i < this.helperCount, ++i {
+    if let slot: view Atomic(Int) = this.slots.viewAt(index: i) {
+      slot.freeAtomic()
+    }
+    if let wake: view Signal = this.wakes.viewAt(index: i) {
+      wake.freeSignal()
+    }
+  }
+}
