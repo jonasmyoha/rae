@@ -140,6 +140,28 @@ int64_t rae_ext_Realtime_setTimeConstraint(int64_t periodTicks, int64_t computat
                            (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
 }
 
+/* Joining an audio device's workgroup (os_workgroup, macOS 11 / iOS 14),
+ * lib/Realtime joinWorkgroup: the size of a join token, which the caller
+ * keeps, then one call to join (0, or an errno) and one to leave */
+#include <os/workgroup.h>
+
+int64_t rae_ext_Realtime_workgroupTokenSize(void) {
+  return (int64_t)sizeof(os_workgroup_join_token_s);
+}
+
+int64_t rae_ext_Realtime_workgroupJoin(int64_t workgroup, uint8_t* token) {
+  if (__builtin_available(macOS 11.0, iOS 14.0, tvOS 14.0, *)) {
+    return os_workgroup_join((os_workgroup_t)(intptr_t)workgroup, (os_workgroup_join_token_t)token);
+  }
+  return -1;
+}
+
+void rae_ext_Realtime_workgroupLeave(int64_t workgroup, uint8_t* token) {
+  if (__builtin_available(macOS 11.0, iOS 14.0, tvOS 14.0, *)) {
+    os_workgroup_leave((os_workgroup_t)(intptr_t)workgroup, (os_workgroup_join_token_t)token);
+  }
+}
+
 /* Back to THREAD_STANDARD_POLICY; 1 when it took */
 int64_t rae_ext_Realtime_setStandardPolicy(void) {
   thread_standard_policy_data_t policy;

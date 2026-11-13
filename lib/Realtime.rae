@@ -242,6 +242,12 @@ when Target.isApple {
   ) unsafe extern ret Int
 
   func rae_ext_Realtime_setStandardPolicy() unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupTokenSize() unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupJoin(workgroup: Int, token: Buffer(UInt8)) unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupLeave(workgroup: Int, token: Buffer(UInt8)) unsafe extern
 } else when Target.os is Os.windows {
   func rae_ext_Realtime_mmcssBegin() unsafe extern ret Int
 
@@ -330,6 +336,49 @@ func demoteFromRealtime(promotion: view RealtimePromotion) {
     if promotion.promoted {
       unsafe {
         let error: Int = rae_ext_Realtime_setOther()
+      }
+    }
+  }
+}
+
+# ---- joining an audio device's workgroup (Apple os_workgroup, docs/realtime-
+# language-design.md §6.6) -------------------------------------------------------
+# A thread that renders part of each audio block (a lib/RealtimeTeam helper)
+# joins the device's workgroup (packages/audio: audioWorkgroup), so the system
+# schedules it together with the device's own thread and counts its work in
+# the device's deadline. Join at the thread's start, leave before it ends, on
+# the same thread. Elsewhere (and with workgroup 0) nothing is joined.
+type RealtimeWorkgroupJoin {
+  joined: Bool
+  workgroup: Int
+  # the join token the system fills and reads back when leaving
+  token: List(UInt8)
+}
+
+func joinWorkgroup(workgroup: view Int) ret RealtimeWorkgroupJoin {
+  var token: List(UInt8) = {}
+  when Target.isApple {
+    if workgroup is not 0 {
+      var size: Int = 0
+      unsafe {
+        size = rae_ext_Realtime_workgroupTokenSize()
+      }
+      token.addDefaults(count: size)
+      var error: Int = -1
+      unsafe {
+        error = rae_ext_Realtime_workgroupJoin(workgroup: workgroup, token: token.data)
+      }
+      ret RealtimeWorkgroupJoin { joined: error is 0, workgroup: workgroup, token: own token }
+    }
+  }
+  ret RealtimeWorkgroupJoin { joined: false, workgroup: workgroup, token: own token }
+}
+
+func leaveWorkgroup(join: view RealtimeWorkgroupJoin) {
+  when Target.isApple {
+    if join.joined {
+      unsafe {
+        rae_ext_Realtime_workgroupLeave(workgroup: join.workgroup, token: join.token.data)
       }
     }
   }

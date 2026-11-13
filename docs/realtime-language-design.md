@@ -912,6 +912,70 @@ Landed (2026-11-13, compiler 0.3.111):
   refused promote: pool, parallelLoop, main), 1428 (the browser), 1429 (the
   report), 1430 (the mainThread reason).
 
+#### 6.6.2 The real-time team: `lib/RealtimeTeam` (R9, built 2026-11-13)
+
+A library type, no syntax (R9). Rae has no function values and a `spawn` of a
+generic function is not threadable, so the team cannot run the program's work
+itself: it holds the synchronization, and the program writes its helper loop
+(a plain function, started with `spawn thread`) around it:
+
+```rae
+func helperLoop(team: own RealtimeTeam, helper: own Int, workgroup: own Int) ret Int {
+  let promotion: RealtimePromotion = promoteToRealtime(periodNanoseconds: period, computeNanoseconds: period / 4)
+  let join: RealtimeWorkgroupJoin = joinWorkgroup(workgroup: workgroup)
+  var seen: Int = 0
+  loop team.awaitStage(helper: helper, seen: seen) {
+    ... this helper's part of the block ...
+    team.finishPart()
+  }
+  leaveWorkgroup(join: join)
+  demoteFromRealtime(promotion: promotion)
+  ret 0
+}
+
+# the leader, per block, all `realtime`:
+team.beginStage()
+... the leader's own part ...
+team.endStage()          # spins until every helper finished
+```
+
+- A helper with no stage spins `spinRounds` checks, then sleeps on its own
+  `Signal`; the leader posts only to sleeping helpers, so a block where every
+  helper spins makes no system call.
+- The handshake is ONE atomic word per helper (the stage to run, -1
+  sleeping, -2 stop): the leader `exchange`s the new stage in and posts when
+  the old value was -1; a helper sleeps only by `compareExchange` from the
+  stage it ran to -1. The first version had a "sleeping" flag beside a shared
+  stage counter: with Rae's release/acquire atomics each side's store could
+  pass its next load on ARM, and with 8 helpers a wake-up was lost and the
+  leader spun forever. Read-modify-writes on one word are always ordered.
+- The audio device's workgroup: `packages/audio` `audioWorkgroup()` (macOS:
+  the device's `kAudioDevicePropertyIOThreadOSWorkgroup`; iOS: the output
+  unit's `kAudioOutputUnitProperty_OSWorkgroup`, retained, given back with
+  `releaseAudioWorkgroup`), joined per helper with `lib/Realtime`
+  `joinWorkgroup` / `leaveWorkgroup` (`os_workgroup_join`, the token kept in
+  Rae). On this Mac both helpers of a test team joined the built-in output's
+  workgroup.
+
+Measured (`benchmarks/realtimeTeam`, Apple M-series, 8 performance and 2
+efficiency cores, leader and helpers promoted with `promoteToRealtime`, an
+empty stage = `beginStage` + `endStage`, two runs):
+
+| helpers | spinning (stages back to back) median / 99 % / max | asleep (one stage per 2.67 ms) median / 99 % / max |
+|---|---|---|
+| 2 | 0.1-0.6 / 0.8-1.0 / 3-13 µs | 12-14 / 46-49 / 46-50 µs |
+| 4 | 0.7 / 1.7-16 / 45 µs | 20 / 49 / 50 µs |
+| 8 | 33 / 57-66 / 97-99 µs | 49 / 57 / 64 µs |
+
+So a stage whose helpers are still spinning costs under a microsecond, and
+waking sleeping helpers costs 12-49 µs (0.5-2 % of a 2.67 ms block at 128
+frames). With 8 helpers plus the leader, nine spinning threads share 8
+performance cores and even the hot stage costs 33 µs: a team should have at
+most one helper fewer than the machine's performance cores, and a DAW should
+set `spinRounds` so that helpers keep spinning through the gap between
+stages of one block and sleep between blocks. Fixture 1435 (on the TSan
+gate's list).
+
 ### 6.7 `Channel(T)` stays off the real-time thread
 
 `Channel` is a mutex-guarded MPSC queue; that is right for ordinary workers. The
@@ -1011,11 +1075,11 @@ steps that need them.
   measured first).
 - **R9 — the real-time team's base** (§6.6): `parallel-stages-design.md`
   chose Option C for `parallelLoop` and did not recommend Option A (unchecked
-  atomics and barriers for every program). **Decided 2026-11-13: a library
-  type in `lib/`** (a leader publishing stages, helpers on `spawn thread`
-  spinning briefly, then waiting on a `Signal`, a completion count in an
-  `Atomic`), not a language construct; the measured spin/wait cost goes here
-  when it is built.
+  atomics and barriers for every program). **Decided 2026-11-13 and built: a
+  library type, `lib/RealtimeTeam`** (§6.6.2): the program's helper loops on
+  `spawn thread`, spinning then sleeping on a `Signal`, one atomic word per
+  helper, the audio workgroup joined through `lib/Realtime`. A stage costs
+  under 1 µs while the helpers spin and 12-49 µs to wake sleeping ones.
 - **R7 — the RTSan gate's compiler. Decided 2026-11-11:** Homebrew LLVM
   (`brew install llvm`), a test dependency on macOS installed by `make setup`,
   like `naga`; the gate SKIPs with a message when it is missing.
