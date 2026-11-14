@@ -64,8 +64,9 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
     its start sample plus i. The clicks the microphone heard are found in the take and
     compared with when they were played: what is left is the air between speaker and
     microphone and any latency the platform does not report. On a MacBook Pro's own speakers
-    that is about 60 ms (Core Audio reports a round trip of 725 frames, 15 ms; the clicks
-    arrive 61 ms later than that).
+    and microphone that is 7-8 ms (the round trip is 3890 frames there, most of it the
+    speakers' and the microphone's own processing, which Core Audio reports as their streams'
+    latency).
   - **Play back** plays the take and the same clicks from one sample, the take started that
     measured offset earlier, so the recorded clicks land on the played ones.
   - **Save WAV** writes the take as a 32-bit float WAV in the app's documents (the Mac:

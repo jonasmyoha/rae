@@ -4,9 +4,10 @@
 # the output and input latencies and their round trip, then records 2 s and
 # checks that every frame arrived (none lost, the frame count right) and
 # reports the level. Nothing is played unless RAE_AUDIO_ECHO_TEST=1: then four
-# quiet clicks are played and found again in the recording, which after the
-# round-trip cut should sit within a few milliseconds of their output sample
-# (the air between speaker and microphone).
+# quiet clicks are played and their onsets found again in the recording (up to
+# 200 ms after), which after the round-trip cut must sit within 10 ms of their
+# output sample (the air between speaker and microphone): more means the round
+# trip misses latency, and the check fails.
 #
 # It never asks for the permission by itself (the system's prompt would wait
 # for a person): RAE_AUDIO_ASK_MICROPHONE=1 asks. Without the permission, or
@@ -104,20 +105,49 @@ func main() {
       x: decibelsOf(level: rms) + 0.5
     )} dBFS, peak {floor(x: decibelsOf(level: peak) + 0.5)} dBFS"
   )
+  # each click's onset: the first frame over four times the quiet before it, from 10 ms before
+  # the click's output sample to 200 ms after (a missing latency of tens of ms is found, not
+  # passed over for the loudest noise near the sample)
+  var heard: Int = 0
+  var offsetSum: Int = 0
   loop let at: Int in clickTimes {
-    # the loudest frame within 50 ms after the click's output sample
     let from: Int = at - alignedStart(recording: take)
-    var best: Int = -1
-    var bestValue: Float = 0.0
-    loop var frame: Int = max(a: 0, b: from - 480), frame < min(a: data.frameCount, b: from + 2400), ++frame {
-      let value: Float = abs(value: sampleAt(samples: data.samples, index: frame * data.channels))
-      if value > bestValue {
-        bestValue = value
-        best = frame
+    var quiet: Float = 0.0
+    loop var frame: Int = max(a: 0, b: from - audio.sampleRate / 20), frame < max(
+      a: 0
+      b: from - audio.sampleRate / 100
+    ), ++frame {
+      quiet = max(
+        a: quiet
+        b: abs(value: sampleAt(samples: data.samples, index: frame * data.channels))
+      )
+    }
+    let threshold: Float = max(a: quiet * 4.0, b: 0.005)
+    var onset: Int = -1
+    loop var frame: Int = max(a: 0, b: from - audio.sampleRate / 100), frame < min(
+      a: data.frameCount
+      b: from + audio.sampleRate / 5
+    ) and onset < 0, ++frame {
+      if abs(value: sampleAt(samples: data.samples, index: frame * data.channels)) > threshold {
+        onset = frame
       }
     }
+    if onset < 0 {
+      log("audioInput: the click at {at}: not heard within 200 ms")
+    } else {
+      heard = heard + 1
+      offsetSum = offsetSum + onset - from
+      log(
+        "audioInput: the click at {at}: heard {onset - from} frames ({(onset - from) * 1000 / audio.sampleRate} ms) after it (the air, and any latency not reported)"
+      )
+    }
+  }
+  var echoOff: Bool = false
+  if heard > 0 {
+    let meanMs: Int = offsetSum * 1000 / heard / audio.sampleRate
+    echoOff = meanMs > 10 or meanMs < -10
     log(
-      "audioInput: the click at {at}: loudest {best - from} frames after it (the air and the speaker's own delay)"
+      "audioInput: the clicks heard {heard} of {clickTimes.length}, {meanMs} ms after their samples on average"
     )
   }
   let callbacks: Int = audio.deviceCallbacks()
@@ -126,6 +156,10 @@ func main() {
   let expected: Int = audio.sampleRate * 2 - audio.roundTripFrames()
   # at least a second of callbacks, whatever the period (the Android emulator's
   # is 4360 frames)
+  if echoOff {
+    log("audioInput: FAILED (the clicks are more than 10 ms off: the round trip misses latency)")
+    exit(code: 1)
+  }
   if data.frameCount < expected * 9 / 10 or take.lostSamples > 0 or callbacks * audio.periodFrames < audio.sampleRate {
     log("audioInput: FAILED (expected about {expected} frames)")
     exit(code: 1)
