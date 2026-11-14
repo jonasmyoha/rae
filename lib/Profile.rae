@@ -31,6 +31,7 @@ import Sys
 import String
 open collections/StringMap
 open perf/Perf
+open perf/GpuClock
 
 # Cap the event window so a runaway capture can't exhaust memory. 300k events is
 # ~30s at 60fps with ~160 zones/frame; past it the oldest events are let go
@@ -56,6 +57,10 @@ type Profiler {
   nameIds: StringMap(Int)
   # the hub's first name the program registered (the runtime's come before it)
   firstOwnName: Int = 0
+  # the GPU's timestamps on the CPU's clock (perf/GpuClock), and the last GPU sample written for
+  # each timing (its first pass's name -> that sample's last end)
+  gpuClock: PerfGpuClock = PerfGpuClock {}
+  gpuSamplesWritten: StringMap(Int)
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -73,6 +78,7 @@ func createProfiler() ret Profiler {
       hub: createPerfHub(settings: idlePerfSettings())
       mainRing: none
       nameIds: StringMap.create(Int, cap: 8)
+      gpuSamplesWritten: StringMap.create(Int, cap: 4)
     }
   }
 }
@@ -212,6 +218,77 @@ func counter(profiler: mod Profiler, name: view String, value: view Int) {
   )
 }
 
+# A moment on the CPU main-loop lane (an instant in the trace), with a number of its own
+func mark(profiler: mod Profiler, name: view String, extra: view Int) {
+  if profiler.capturing is false {
+    ret
+  }
+  let perfName: PerfName = profNameId(profiler: profiler, name: name)
+  if let ring: view PerfRing = profiler.mainRing {
+    perfMark(ring: ring, name: perfName, extra: extra)
+  }
+}
+
+# A GPU sample's passes as spans on the GPU's lane: `beginNs` / `endNs` on the GPU's clock, put on
+# the CPU's by the capture's PerfGpuClock from the sample's bounds (`cpuBeforeNs` when its frame
+# began, `cpuSeenNs` when it was read); and the clock's offset and drift as counters. A sample is
+# written once, however often it is handed in. A slot is not a cost on a tile GPU
+# (docs/profiling.md): the span says when the GPU stamped, not what the pass took.
+func gpuSpans(
+  profiler: mod Profiler
+  names: view List(String)
+  beginNs: view List(Int)
+  endNs: view List(Int)
+  cpuBeforeNs: view Int
+  cpuSeenNs: view Int
+) {
+  if profiler.capturing is false or names.length is 0 or beginNs.length is not names.length {
+    ret
+  }
+  var lastEnd: Int = 0
+  loop let end: Int in endNs {
+    if end > lastEnd {
+      lastEnd = end
+    }
+  }
+  let key: String = names.copyAtDefault(index: 0)
+  if let written: Int = profiler.gpuSamplesWritten.get(k: key) {
+    if written is lastEnd {
+      ret
+    }
+  }
+  profiler.gpuSamplesWritten.set(k: key, value: lastEnd)
+  if cpuBeforeNs <= 0 or cpuSeenNs <= 0 {
+    ret
+  }
+  gpuClockSample(
+    clock: profiler.gpuClock
+    cpuBeforeNs: cpuBeforeNs
+    gpuBeginNs: beginNs.copyAtDefault(index: 0)
+    gpuEndNs: lastEnd
+    cpuSeenNs: cpuSeenNs
+  )
+  loop var i: Int = 0, i < names.length, ++i {
+    let begin: Int = beginNs.copyAtDefault(index: i)
+    let end: Int = endNs.copyAtDefault(index: i)
+    if end > begin and begin > 0 {
+      let perfName: PerfName = profNameId(profiler: profiler, name: names.copyAtDefault(index: i))
+      if let ring: view PerfRing = profiler.mainRing {
+        perfWriteAt(
+          ring: ring
+          kind: PerfKind.gpuSpan
+          name: perfName
+          time: gpuClockToCpu(clock: profiler.gpuClock, gpuNs: begin)
+          value: gpuClockToCpu(clock: profiler.gpuClock, gpuNs: end)
+          extra: i
+        )
+      }
+    }
+  }
+  counter(profiler: profiler, name: "gpu.clock offset us", value: profiler.gpuClock.offsetNs / 1000)
+  counter(profiler: profiler, name: "gpu.clock drift ns per s", value: profiler.gpuClock.driftNs)
+}
+
 # Call once per frame. Collects the rings into the capture's window, and auto-stops
 # and writes the trace when the capture window elapses. Returns true on the frame
 # it wrote the file.
@@ -314,7 +391,7 @@ func profFragment(
   }
   if event.kind is PerfKind.gpuSpan {
     let duration: String = traceMicroseconds(nanoseconds: event.value - event.time)
-    ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":0\}"
+    ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"note\":\"a slot, not a cost on a tile GPU\"\}\}"
   }
   ret ""
 }

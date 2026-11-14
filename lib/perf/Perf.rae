@@ -253,6 +253,31 @@ func perfWrite(
   }
 }
 
+# An event at a time of its own (a GPU span: `time` its begin, `value` its end, both on nowNs's
+# clock, perf/GpuClock)
+func perfWriteAt(
+  ring: view PerfRing
+  kind: view PerfKind
+  name: view PerfName
+  time: view Int
+  value: view Int
+  extra: view Int
+) realtime {
+  if not ring.on.loadRelaxed() {
+    ret
+  }
+  let event: PerfEvent = {
+    time: time
+    kind: kind
+    nameId: name.id as Int32
+    value: value
+    extra: extra as Int32
+  }
+  if not ring.events.push(value: event) {
+    let unusedDropped: Int = ring.dropped.fetchAddRelaxed(amount: 1)
+  }
+}
+
 func perfZoneBegin(ring: view PerfRing, name: view PerfName) realtime {
   perfWrite(
     ring: ring

@@ -3,12 +3,15 @@
 # passes per frame (the first unnamed, "pass0", the second named "heavy"),
 # resolves, submits, and reads the timestamps back through a manager-owned
 # ReadbackId WITHOUT blocking — repeated across several frames (continuous
-# timing). Then the last sample goes into a profiler capture
-# (publishTimingCounters): counters gpu.pass0, gpu.heavy and gpu.total. Exit
-# code 0 = every check passed. The unavailable-timestamps fallback is
+# timing). Each sample goes into a profiler capture (publishTimingCounters):
+# counters gpu.pass0, gpu.heavy and gpu.total, and the passes as spans on the
+# GPU's lane, put on the CPU's clock by perf/GpuClock; every span must fall
+# inside its own frame (from before the frame's work was recorded to after its
+# timestamps were read). Exit code 0 = every check passed. The unavailable-timestamps fallback is
 # exercised by the code path even where hardware has timestamps.
 import Sdl3
 import Profile
+open perf/Perf
 open webgpu/Context
 open webgpu/WebgpuEnums
 open gpu/GpuResources
@@ -25,6 +28,36 @@ func checkWaitForGpu() {
   unsafe {
     webgpuPoll(wait: 1)
   }
+}
+
+# The GPU spans in the capture that fall inside one of the frames' CPU windows (start, end pairs)
+func spansInsideFrames(profiler: view Profiler, windows: view List(Int)) ret Int {
+  var inside: Int = 0
+  let hub: view PerfHub = profiler.hub
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if event.kind is PerfKind.gpuSpan {
+      loop var w: Int = 0, w * 2 + 1 < windows.length, ++w {
+        let start: Int = windows.copyAtDefault(index: w * 2)
+        let end: Int = windows.copyAtDefault(index: w * 2 + 1)
+        if event.time >= start and event.value <= end {
+          inside = inside + 1
+        }
+      }
+    }
+  }
+  ret inside
+}
+
+func countSpans(profiler: view Profiler) ret Int {
+  var spans: Int = 0
+  let hub: view PerfHub = profiler.hub
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    if hub.perfEventAt(number: number).kind is PerfKind.gpuSpan {
+      spans = spans + 1
+    }
+  }
+  ret spans
 }
 
 func fail(message: view String) ret Bool {
@@ -192,9 +225,19 @@ func main() ret Int {
             textureViews: noViews
             samplers: noSamplers
           ) {
+            # Each sample into a capture: a counter per named pass and the total, and the
+            # passes as spans on the GPU's lane
+            var profiler: Profiler = Profile.createProfiler()
+            Profile.startCapture(
+              profiler: profiler
+              seconds: 3600.0
+              outPath: "/tmp/rae_gpu_timing_check.json"
+            )
             var frame: Int = 0
             var totalAcrossFrames: Int = 0
+            var windows: List(Int) = {}
             loop frame < 5 {
+              let frameStart: Int = nowNs()
               if runFrame(
                 resources: resources
                 timing: timing
@@ -203,28 +246,33 @@ func main() ret Int {
               ) is false {
                 ret 1
               }
+              windows.add(value: frameStart)
+              windows.add(value: nowNs())
+              publishTimingCounters(timing: timing, profiler: profiler)
               totalAcrossFrames = totalAcrossFrames + lastTotalUs(timing: timing)
               frame = frame + 1
             }
             log("5 frames of nonblocking 2-pass timing OK (summed total {totalAcrossFrames} us)")
-            # The last sample into a capture: one counter per named pass and the total
-            var profiler: Profiler = Profile.createProfiler()
-            Profile.startCapture(
-              profiler: profiler
-              seconds: 3600.0
-              outPath: "/tmp/rae_gpu_timing_check.json"
-            )
-            publishTimingCounters(timing: timing, profiler: profiler)
+            let unusedWritten: Bool = Profile.tick(profiler: profiler)
             var countersSeen: String = ""
-            loop let counterName: String in Profile.capturedNames(profiler: profiler) {
-              countersSeen = "{countersSeen} {counterName}"
+            let names: List(String) = Profile.capturedNames(profiler: profiler)
+            loop var i: Int = 0, i < 3, ++i {
+              countersSeen = "{countersSeen} {names.copyAtDefault(index: i)}"
             }
+            let spans: Int = countSpans(profiler: profiler)
+            let inside: Int = spansInsideFrames(profiler: profiler, windows: windows)
+            let offsetUs: Int = profiler.gpuClock.offsetNs / 1000
             Profile.profileDiscard(profiler: profiler)
             if countersSeen is not " gpu.pass0 gpu.heavy gpu.total" {
               log("FAIL: profiler counters were{countersSeen}")
               ret 1
             }
             log("profiler counters:{countersSeen}")
+            if spans is not 10 or inside is not spans {
+              log("FAIL: {spans} GPU spans (10 expected), {inside} inside their frame")
+              ret 1
+            }
+            log("GPU spans: {spans}, each inside its frame (the GPU clock's offset {offsetUs} us)")
             shutdownTiming(timing: timing, resources: resources)
             if liveReadbackCount(resources: resources) is not 0 {
               log("FAIL: readback leaked")

@@ -1,0 +1,76 @@
+# perf/GpuClock — the GPU's timestamps on the CPU's clock (docs/perf-tools-design.md §7). A GPU
+# timestamp is on the GPU's own clock; the recorder's events are on nowNs(). Each timed sample
+# gives two bounds on the offset between them (cpu = gpu + offset):
+#   - its work was submitted after `cpuBeforeNs` (the timed frame's start), so the first pass began
+#     after it: offset >= cpuBeforeNs - gpuBeginNs;
+#   - its numbers were read at `cpuSeenNs`, so the last pass had ended: offset <= cpuSeenNs -
+#     gpuEndNs.
+# The offset is the largest lower bound of this second and the last (so every converted span
+# begins after its frame did), held at or below the smallest upper bound. Each second the window
+# moves on, and the change of the fitted offset from the second before is the drift.
+type PerfGpuClock {
+  offsetNs: Int = 0
+  fitted: Bool = false
+  # the bounds of this second and of the second before
+  low: Int = 0
+  high: Int = 0
+  previousLow: Int = 0
+  hasPrevious: Bool = false
+  windowStartNs: Int = 0
+  windowSamples: Int = 0
+  # the offset's change over the last second, and how many seconds were fitted
+  driftNs: Int = 0
+  refits: Int = 0
+}
+
+func createPerfGpuClock() ret PerfGpuClock {
+  ret PerfGpuClock {}
+}
+
+func gpuClockSample(
+  clock: mod PerfGpuClock
+  cpuBeforeNs: view Int
+  gpuBeginNs: view Int
+  gpuEndNs: view Int
+  cpuSeenNs: view Int
+) {
+  let low: Int = cpuBeforeNs - gpuBeginNs
+  let high: Int = cpuSeenNs - gpuEndNs
+  if clock.windowSamples is 0 {
+    clock.low = low
+    clock.high = high
+    clock.windowStartNs = cpuSeenNs
+  } else {
+    if low > clock.low {
+      clock.low = low
+    }
+    if high < clock.high {
+      clock.high = high
+    }
+  }
+  clock.windowSamples = clock.windowSamples + 1
+  var best: Int = clock.low
+  if clock.hasPrevious and clock.previousLow > best {
+    best = clock.previousLow
+  }
+  if best > clock.high {
+    best = (clock.low + clock.high) / 2
+  }
+  clock.offsetNs = best
+  clock.fitted = true
+  # a second fitted: the window moves on, and the drift is its change
+  if cpuSeenNs - clock.windowStartNs >= 1000000000 {
+    if clock.hasPrevious {
+      clock.driftNs = clock.low - clock.previousLow
+    }
+    clock.previousLow = clock.low
+    clock.hasPrevious = true
+    clock.windowSamples = 0
+    clock.refits = clock.refits + 1
+  }
+}
+
+# A GPU time on the CPU's clock (nowNs)
+func gpuClockToCpu(clock: view PerfGpuClock, gpuNs: view Int) ret Int {
+  ret gpuNs + clock.offsetNs
+}

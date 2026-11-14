@@ -32,6 +32,9 @@
 # it, the drawable acquire, which waits for vsync) and the wait for the GPU here,
 # and logs each frame over 22 ms on its own line, split the same way;
 # RAE_FRAME_TIMING=all logs every frame so (a "[frame] slow:" line each).
+# Under RAE_PROFILE the same split is measured without the lines, and the last
+# frame's is kept (lastFrameSeconds and the others) for a capture's counters and
+# its "bound by" mark (lib/app3d/FrameLog frameLogCounters).
 import Sys
 open gpu/PipelineWatch
 open webgpu/Webgpu
@@ -42,6 +45,14 @@ type FramePacer {
   previousEnd: opt UInt64  # the end mark of the frame before this one
   timing: Bool  # RAE_FRAME_TIMING: print frame / CPU / present / GPU-wait averages
   timingAll: Bool  # RAE_FRAME_TIMING=all: and every frame's split, not only the slow ones
+  measure: Bool  # the split is measured: RAE_FRAME_TIMING or RAE_PROFILE
+  # the last frame's split (while measuring): its time, the CPU's own work, the drawable acquire,
+  # the present and the wait for the GPU, in seconds
+  lastFrameSeconds: Float64 = 0.0
+  lastCpuSeconds: Float64 = 0.0
+  lastAcquireSeconds: Float64 = 0.0
+  lastPresentSeconds: Float64 = 0.0
+  lastWaitSeconds: Float64 = 0.0
   frameStart: Float64  # when the previous pace returned: this frame's start
   presentStart: Float64  # when this frame's present began (notePresentStart)
   timedFrames: Int
@@ -81,6 +92,7 @@ func createFramePacer() ret FramePacer {
     previousEnd: none
     timing: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
     timingAll: Sys.getEnv(name: "RAE_FRAME_TIMING") is "all"
+    measure: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0 or Sys.getEnv(name: "RAE_PROFILE").length() > 0
     frameStart: 0.0
     presentStart: 0.0
     timedFrames: 0
@@ -97,7 +109,7 @@ func createFramePacer() ret FramePacer {
 # Call right before the frame's present, so the timing print can tell the
 # present's vsync wait apart from the CPU's own work.
 func notePresentStart(pacer: mod FramePacer) {
-  if pacer.timing {
+  if pacer.measure {
     pacer.presentStart = frameClock()
   }
 }
@@ -106,7 +118,7 @@ func notePresentStart(pacer: mod FramePacer) {
 # began: inside the present (the copy fallback) or before it (a frame drawn
 # straight into the drawable).
 func noteAcquireTime(pacer: mod FramePacer, seconds: view Float64, startedAt: view Float64) {
-  if pacer.timing {
+  if pacer.measure {
     pacer.acquireThisFrame = seconds
     pacer.acquireStartedAt = startedAt
   }
@@ -144,7 +156,7 @@ func paceFrame(pacer: mod FramePacer) {
   }
   pacer.previousEnd = frameEnd
   let waitEnd: Float64 = frameClock()
-  if pacer.timing {
+  if pacer.measure {
     recordFrameTiming(pacer: pacer, waitStart: waitStart, waitEnd: waitEnd)
   }
   pacer.frameStart = waitEnd
@@ -161,6 +173,16 @@ func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: 
         present = present - pacer.acquireThisFrame  # the acquire is reported apart
       }
     }
+    pacer.lastFrameSeconds = frame
+    pacer.lastCpuSeconds = frame - present - wait - pacer.acquireThisFrame
+    pacer.lastAcquireSeconds = pacer.acquireThisFrame
+    pacer.lastPresentSeconds = present
+    pacer.lastWaitSeconds = wait
+  }
+  if pacer.frameStart > 0.0 and pacer.timing {
+    let frame: Float64 = pacer.lastFrameSeconds
+    let wait: Float64 = pacer.lastWaitSeconds
+    let present: Float64 = pacer.lastPresentSeconds
     pacer.timedFrames = pacer.timedFrames + 1
     pacer.frameSeconds = pacer.frameSeconds + frame
     pacer.waitSeconds = pacer.waitSeconds + wait

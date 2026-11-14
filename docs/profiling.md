@@ -39,6 +39,10 @@ frames it measures.
   zone named after it, and each one skipped because nothing it reads changed as a mark
   `<name> (skipped)`; a runner closes the zone with `systemDone`. 106 shows its UI systems and
   observers this way, and the walkers (143) show their update's systems as zones.
+- GPU spans (perf step 5, Rae 0.3.134): the timed passes are spans on the `GPU` lane, on the CPU's
+  clock (`perf/GpuClock`, its offset and drift as `gpu.clock` counters). A span is when the GPU
+  stamped, not what the pass costs on a tile GPU (see "What to trust" above). Each frame also has
+  `frame.cpu.us`, `frame.drawable.us`, `frame.gpuWait.us`, `gpu.busy.us` and a `bound by …` mark.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

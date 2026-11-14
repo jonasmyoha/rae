@@ -330,6 +330,23 @@ profiler can use `LineGraph` and `Histogram` too.
 - **Bound by CPU or GPU:** the frame view shows, per frame, the CPU's frame time, the GPU's busy
   time and the time spent waiting for a drawable. It names which one bounds the frame.
 
+Done in Rae 0.3.134 (perf step 5), on the Mac: `GpuTiming` keeps each sample's passes on the
+GPU's clock (`lastBeginNs`, `lastEndNs`) and its CPU bounds (`nowNs` when the timed frame began,
+and when the sample was read). `Profile.gpuSpans` (called by `publishTimingCounters` and the
+clouds' `publishCloudTimingCounters`) writes each pass once as a `gpuSpan` on the trace's `GPU`
+lane, with the note "a slot, not a cost on a tile GPU". `perf/GpuClock` fits the offset: the
+largest lower bound (the frame's start minus the first pass's GPU begin) of this second and the
+last, held at or below the smallest upper bound (the read time minus the last pass's GPU end), so
+every span begins after its frame; the change per second is the drift (counters
+`gpu.clock offset us`, `gpu.clock drift ns per s`). On this Mac wgpu's Metal timestamps are on
+`nowNs`'s clock already (offset about -0.2 ms, drift a few µs per second). Per frame, under
+`RAE_PROFILE` `gpu/FramePacer` measures its split without logging and `app3d/FrameLog` writes
+`frame.cpu.us`, `frame.drawable.us`, `frame.gpuWait.us`, `gpu.busy.us` and a mark
+`bound by the CPU` / `the GPU` / `the drawable` (the largest of the CPU's work, the GPU's busy
+time and the drawable acquire). `checks/gpuManagerTiming` requires each of its 10 spans inside its
+own frame. Not yet: the Metal command buffers as per-buffer spans (they are counters,
+`Gpu2dCanvasTiming`), the resource tables' sizes, and the iPhone capture.
+
 ## 8. The tools
 
 ### 8.1 The perf HUD (in any app)

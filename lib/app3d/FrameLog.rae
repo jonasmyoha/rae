@@ -13,6 +13,8 @@
 import Math
 import Profile
 open DrawStats
+open gpu/FramePacer
+open gpu/GpuTiming
 open RendererDeferred
 open app3d/RenderScale
 
@@ -175,6 +177,7 @@ func frameLogCounters(
     ret
   }
   Profile.counter(profiler: profiler, name: "frame.us", value: (deltaTime * 1000000.0).toInt())
+  frameBoundCounters(profiler: profiler, renderer: renderer)
   Profile.counter(
     profiler: profiler
     name: "scene.width"
@@ -219,4 +222,38 @@ func frameLogCounters(
   }
   Profile.counter(profiler: profiler, name: "draws.shadow.instances", value: shadowInstances)
   Profile.counter(profiler: profiler, name: "draws.shadow.triangles", value: shadowTriangles)
+}
+
+# The last frame's split (gpu/FramePacer: the CPU's own work, the drawable acquire, the wait for
+# the GPU) and the GPU's busy time (the pass timing's last sample, RAE_GPU_PASS_TIMING) as
+# counters, and a mark naming which of the CPU, the GPU and the drawable bounds the frame: the
+# largest of the three
+func frameBoundCounters(profiler: mod Profiler, renderer: view DeferredRenderer) {
+  let pacer: view FramePacer = renderer.canvas.framePacer
+  if pacer.lastFrameSeconds <= 0.0 {
+    ret
+  }
+  let cpuUs: Int = (pacer.lastCpuSeconds * 1000000.0) as Int
+  let drawableUs: Int = (pacer.lastAcquireSeconds * 1000000.0) as Int
+  Profile.counter(profiler: profiler, name: "frame.cpu.us", value: cpuUs)
+  Profile.counter(profiler: profiler, name: "frame.drawable.us", value: drawableUs)
+  Profile.counter(
+    profiler: profiler
+    name: "frame.gpuWait.us"
+    value: (pacer.lastWaitSeconds * 1000000.0) as Int
+  )
+  var gpuUs: Int = -1
+  if let timing: view GpuTiming = renderer.passTiming.timing {
+    gpuUs = lastTotalUs(timing: timing)
+  }
+  if gpuUs >= 0 {
+    Profile.counter(profiler: profiler, name: "gpu.busy.us", value: gpuUs)
+  }
+  var bound: String = "bound by the CPU"
+  if gpuUs > cpuUs and gpuUs >= drawableUs {
+    bound = "bound by the GPU"
+  } else if drawableUs > cpuUs and drawableUs > gpuUs {
+    bound = "bound by the drawable"
+  }
+  Profile.mark(profiler: profiler, name: bound, extra: 0)
 }

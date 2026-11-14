@@ -152,6 +152,17 @@ func publishCloudTimingCounters(cloudTiming: view CloudTiming, profiler: mod Pro
     ret
   }
   Profile.counter(profiler: profiler, name: "gpu.clouds", value: cloudTiming.lastMicroseconds)
+  # and its passes as spans on the GPU's lane (once per sample)
+  if let timing: view GpuTiming = cloudTiming.timing {
+    Profile.gpuSpans(
+      profiler: profiler
+      names: timing.lastNames
+      beginNs: timing.lastBeginNs
+      endNs: timing.lastEndNs
+      cpuBeforeNs: timing.lastBeginCpuNs
+      cpuSeenNs: timing.lastSeenCpuNs
+    )
+  }
   loop var i: Int = 0, i < cloudTiming.cloudPassTimes.length, ++i {
     Profile.counter(
       profiler: profiler

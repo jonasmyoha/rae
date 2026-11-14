@@ -52,6 +52,17 @@ type GpuTiming {
   # stamped when its vertex stage starts, before it waits for the work
   # ahead of it, so the time between two passes' ends is the later one's
   lastEndMicroseconds: List(Int)
+  # the last sample's passes on the GPU's clock, in nanoseconds (timestamp ticks times the
+  # period): each pass's (or mark's) beginning and end, for the recorder's GPU lane (lib/perf
+  # PerfGpuClock turns them into nowNs)
+  lastBeginNs: List(Int) = {}
+  lastEndNs: List(Int) = {}
+  # the CPU's bounds around a sample (perf/GpuClock): nowNs when its frame began (its work was
+  # submitted after), carried with the sample in flight, and when its numbers were read
+  frameBeginCpuNs: Int = 0
+  sampleBeginCpuNs: Int = 0
+  lastBeginCpuNs: Int = 0
+  lastSeenCpuNs: Int = 0
 }
 
 # 8 bytes per timestamp, 2 timestamps per pass.
@@ -172,6 +183,7 @@ func timingAvailable(timing: view GpuTiming) ret Bool {
 func beginTimingFrame(timing: mod GpuTiming) {
   timing.passCount = 0
   timing.passNames.clear()
+  timing.frameBeginCpuNs = nowNs()
 }
 
 # Claims a pass slot and points the shared timestampWrites at its two query
@@ -271,6 +283,7 @@ func startTimingSample(timing: mod GpuTiming, resources: mod GpuResources) ret B
   ) {
     timing.current = id
     timing.sampling = true
+    timing.sampleBeginCpuNs = timing.frameBeginCpuNs
     timing.sampleNames.clear()
     loop let name: view String in timing.passNames {
       timing.sampleNames.add(value: "{name}")
@@ -321,6 +334,8 @@ func collectTiming(
   }
   out.clear()
   timing.lastEndMicroseconds.clear()
+  timing.lastBeginNs.clear()
+  timing.lastEndNs.clear()
   let first: Int = readU64(bytes: bytes, offset: 0)
   var total: Int = 0
   var pass: Int = 0
@@ -337,12 +352,20 @@ func collectTiming(
     }
     out.add(value: microseconds)
     timing.lastEndMicroseconds.add(value: ended)
+    timing.lastBeginNs.add(value: timingNs(timing: timing, ticks: begin))
+    timing.lastEndNs.add(value: timingNs(timing: timing, ticks: endTick))
     total = total + microseconds
     pass = pass + 1
   }
   timing.lastTotalUs = total
   keepLastSample(timing: timing, microseconds: out)
   ret true
+}
+
+# The sample just read: its CPU bounds (perf/GpuClock)
+func keepSampleBounds(timing: mod GpuTiming) {
+  timing.lastBeginCpuNs = timing.sampleBeginCpuNs
+  timing.lastSeenCpuNs = nowNs()
 }
 
 # A timestamp mark (the deferred renderer's per-pass timing,
@@ -430,10 +453,14 @@ func collectTimingMarks(
     ret false
   }
   out.clear()
+  timing.lastBeginNs.clear()
+  timing.lastEndNs.clear()
   var total: Int = 0
   loop var mark: Int = 0, mark + 1 < count, ++mark {
     let begin: Int = readU64(bytes: bytes, offset: mark * 16)
     let next: Int = readU64(bytes: bytes, offset: (mark + 1) * 16)
+    timing.lastBeginNs.add(value: timingNs(timing: timing, ticks: begin))
+    timing.lastEndNs.add(value: timingNs(timing: timing, ticks: next))
     var microseconds: Int = 0
     if next > begin {
       microseconds = ((next - begin) as Float * timing.periodNs / 1000.0).toInt()
@@ -450,6 +477,7 @@ func collectTimingMarks(
 # publishTimingCounters (a span between two marks has the name of the mark
 # it starts at)
 func keepLastSample(timing: mod GpuTiming, microseconds: view List(Int)) {
+  keepSampleBounds(timing: timing)
   timing.lastNames.clear()
   timing.lastMicroseconds.clear()
   loop var i: Int = 0, i < microseconds.length, ++i {
@@ -474,6 +502,23 @@ func publishTimingCounters(timing: view GpuTiming, profiler: mod Profiler) {
     )
   }
   Profile.counter(profiler: profiler, name: "gpu.total", value: timing.lastTotalUs)
+  # and the passes as spans on the GPU's lane, on the CPU's clock (once per sample)
+  Profile.gpuSpans(
+    profiler: profiler
+    names: timing.lastNames
+    beginNs: timing.lastBeginNs
+    endNs: timing.lastEndNs
+    cpuBeforeNs: timing.lastBeginCpuNs
+    cpuSeenNs: timing.lastSeenCpuNs
+  )
+}
+
+# Timestamp ticks as nanoseconds on the GPU's clock
+func timingNs(timing: view GpuTiming, ticks: view Int) ret Int {
+  if timing.periodNs is 1.0 {
+    ret ticks
+  }
+  ret ((ticks as Float64) * (timing.periodNs as Float64)) as Int
 }
 
 # Little-endian u64 from 8 bytes (values fit comfortably in Int for GPU ticks).
