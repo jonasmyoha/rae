@@ -81,6 +81,8 @@ typedef struct {
   Str native_include;
   Str native_link;
   Str native_link_browser;
+  /* the browser library of a shared-memory build (`web: { sharedMemory: true }`) */
+  Str native_link_browser_shared;
   Str native_link_linux;
   Str native_sources_device;
   Str native_defines_device;
@@ -90,6 +92,9 @@ typedef struct {
   /* Optional `meta: { name: "...", version: "..." }`: what the program is
    * called and its release (the App Store's version); the program reads
    * them as Pack.name / Pack.version. Empty (len 0) when absent. */
+  /* `web: { sharedMemory: true }`: the browser build has shared memory (wasm
+   * workers, an AudioWorklet that runs Wasm), opt-in; its page needs COOP/COEP */
+  bool web_shared_memory;
   Str meta_name;
   Str meta_version;
   /* Optional `dependencies` block (#933), in declaration order. */
