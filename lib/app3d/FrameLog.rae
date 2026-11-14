@@ -8,7 +8,10 @@
 # device profile (tools/ios/profile-ios.sh) reads it. The line's rules are
 # pure. After it, one "[draws]" line a pass (lib/DrawStats): what the last frame's
 # G-buffer or pre-pass, forward pass and each shadow cascade drew, by kind.
+# Under a profiler capture (RAE_PROFILE) frameLogCounters puts the same numbers in
+# the trace once a frame: frame.us, scene.width/height and the draws by pass.
 import Math
+import Profile
 open DrawStats
 open RendererDeferred
 open app3d/RenderScale
@@ -158,4 +161,62 @@ func frameLogDraws(
       log(drawStatsLine(name: "shadow cascade {cascade}", stats: stats))
     }
   }
+}
+
+# This frame's numbers into a profiler capture (lib/Profile): its time (frame.us), the
+# scene's size, and what the last frame drew (draws.<pass>.instances / .triangles, the
+# shadow cascades summed). Nothing while the profiler is not capturing.
+func frameLogCounters(
+  profiler: mod Profiler
+  deltaTime: view Float
+  renderer: view DeferredRenderer
+) {
+  if not Profile.capturing(profiler: profiler) {
+    ret
+  }
+  Profile.counter(profiler: profiler, name: "frame.us", value: (deltaTime * 1000000.0).toInt())
+  Profile.counter(
+    profiler: profiler
+    name: "scene.width"
+    value: renderer.passes.gbuffer.targetWidth
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "scene.height"
+    value: renderer.passes.gbuffer.targetHeight
+  )
+  let gbuffer: view DrawStats = renderer.passes.gbuffer.drawStats
+  Profile.counter(
+    profiler: profiler
+    name: "draws.gbuffer.instances"
+    value: drawStatsTotalInstances(stats: gbuffer)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "draws.gbuffer.triangles"
+    value: drawStatsTotalTriangles(stats: gbuffer)
+  )
+  let forward: view DrawStats = renderer.passes.gbuffer.forwardDrawStats
+  if drawStatsTotalInstances(stats: forward) > 0 {
+    Profile.counter(
+      profiler: profiler
+      name: "draws.forward.instances"
+      value: drawStatsTotalInstances(stats: forward)
+    )
+    Profile.counter(
+      profiler: profiler
+      name: "draws.forward.triangles"
+      value: drawStatsTotalTriangles(stats: forward)
+    )
+  }
+  var shadowInstances: Int = 0
+  var shadowTriangles: Int = 0
+  loop var cascade: Int = 0, cascade < renderer.passes.shadow.cascadeCount, ++cascade {
+    if let stats: view DrawStats = renderer.passes.shadow.drawStats.viewAt(index: cascade) {
+      shadowInstances = shadowInstances + drawStatsTotalInstances(stats: stats)
+      shadowTriangles = shadowTriangles + drawStatsTotalTriangles(stats: stats)
+    }
+  }
+  Profile.counter(profiler: profiler, name: "draws.shadow.instances", value: shadowInstances)
+  Profile.counter(profiler: profiler, name: "draws.shadow.triangles", value: shadowTriangles)
 }

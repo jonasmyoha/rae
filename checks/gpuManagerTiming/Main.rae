@@ -216,9 +216,10 @@ func main() ret Int {
             )
             publishTimingCounters(timing: timing, profiler: profiler)
             var countersSeen: String = ""
-            loop let counterName: view String in profiler.names {
+            loop let counterName: String in Profile.capturedNames(profiler: profiler) {
               countersSeen = "{countersSeen} {counterName}"
             }
+            Profile.profileDiscard(profiler: profiler)
             if countersSeen is not " gpu.pass0 gpu.heavy gpu.total" {
               log("FAIL: profiler counters were{countersSeen}")
               ret 1

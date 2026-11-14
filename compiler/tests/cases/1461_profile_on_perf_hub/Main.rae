@@ -1,0 +1,56 @@
+# lib/Profile on the event recorder (lib/perf/Perf): a capture's zones and counters
+# go into the hub's window, the trace has a lane per thread and the GPU's counters in
+# a process of their own, and ending a capture frees its rings
+import Sys
+import String
+import Profile
+open perf/Perf
+
+func main() ret Int {
+  var profiler: Profiler = Profile.createProfiler()
+  # not capturing: nothing recorded
+  Profile.zoneBegin(profiler: profiler, name: "ignored")
+  Profile.zoneEnd(profiler: profiler, name: "ignored")
+  log("names before a capture: {Profile.capturedNames(profiler: profiler).length}")
+  let path: String = "/tmp/rae_case_1461_profile.json"
+  Profile.startCapture(profiler: profiler, seconds: 60.0, outPath: path)
+  if let ring: PerfRing = Profile.profileThreadRing(profiler: profiler, name: "worker") {
+    let job: PerfName = Profile.profileName(profiler: profiler, name: "job")
+    perfZoneBegin(ring: ring, name: job)
+    perfZoneEnd(ring: ring, name: job)
+  }
+  loop var frame: Int = 0, frame < 3, ++frame {
+    Profile.zoneBegin(profiler: profiler, name: "frame")
+    Profile.zoneBegin(profiler: profiler, name: "update")
+    Profile.zoneEnd(profiler: profiler, name: "update")
+    Profile.counter(profiler: profiler, name: "fps", value: 60)
+    Profile.counter(profiler: profiler, name: "gpu.total", value: 1200 + frame)
+    Profile.zoneEnd(profiler: profiler, name: "frame")
+    let unusedWritten: Bool = Profile.tick(profiler: profiler)
+  }
+  var names: String = ""
+  loop let name: String in Profile.capturedNames(profiler: profiler) {
+    names = "{names} {name}"
+  }
+  log("names:{names}")
+  log(
+    "written: {Profile.profileStop(profiler: profiler)}, capturing after: {Profile.capturing(
+      profiler: profiler
+    )}"
+  )
+  var trace: String = ""
+  if let text: String = Sys.readFile(path: path) {
+    trace = text
+  }
+  log(
+    "lanes: CPU {trace.contains(sub: "\"name\":\"CPU main loop\"")}, worker {trace.contains(
+      sub: "\"tid\":1,\"args\":\{\"name\":\"worker\""
+    )}, GPU {trace.contains(sub: "\"pid\":2,\"args\":\{\"name\":\"GPU\"")}"
+  )
+  log(
+    "gpu counter on the GPU: {trace.contains(sub: "\"name\":\"gpu.total\",\"ph\":\"C\"")} {trace.contains(
+      sub: "\"pid\":2,\"tid\":0,\"args\":\{\"v\":1202\}"
+    )}, fps on the CPU: {trace.contains(sub: "\"name\":\"fps\",\"ph\":\"C\"")}"
+  )
+  ret 0
+}

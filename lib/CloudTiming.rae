@@ -16,6 +16,7 @@
 # a GPU without timestamps every answer is -1 and only the thermal state
 # moves the tier.
 import Math
+import Profile
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuTiming
@@ -141,4 +142,21 @@ func releaseCloudTiming(cloudTiming: mod CloudTiming, resources: mod GpuResource
   }
   cloudTiming.timing = none
   cloudTiming.made = false
+}
+
+# The last sample into a profiler capture: gpu.clouds (the cloud passes, microseconds)
+# and gpu.cloud pass <n> for each pass. Call once a frame; nothing while the profiler
+# is not capturing or no sample has been read back.
+func publishCloudTimingCounters(cloudTiming: view CloudTiming, profiler: mod Profiler) {
+  if not Profile.capturing(profiler: profiler) or cloudTiming.lastMicroseconds < 0 {
+    ret
+  }
+  Profile.counter(profiler: profiler, name: "gpu.clouds", value: cloudTiming.lastMicroseconds)
+  loop var i: Int = 0, i < cloudTiming.cloudPassTimes.length, ++i {
+    Profile.counter(
+      profiler: profiler
+      name: "gpu.cloud pass {i}"
+      value: cloudTiming.cloudPassTimes.copyAtDefault(index: i)
+    )
+  }
 }

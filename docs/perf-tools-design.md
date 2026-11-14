@@ -134,8 +134,9 @@ perfFrame(hub: app.perf)                                # once a frame, main thr
   in fixed blocks, so memory stays flat, plus the frame index (a frame's start and end per
   thread).
 - Clock: `nowNs()` everywhere. GPU times are converted to it (section 7).
-- `lib/Profile.rae`'s functions become thin calls into the hub, and its Chrome trace writer
-  reads the hub (step 2). Existing call sites keep working.
+- `lib/Profile.rae`'s functions are thin calls into the hub, and its Chrome trace writer
+  reads the hub (step 2, done in 0.3.129: a lane per ring, the `gpu.*` counters in a `GPU`
+  process; docs/profiling.md says what moved). Existing call sites keep working.
 
 ### 3.5 Cost
 

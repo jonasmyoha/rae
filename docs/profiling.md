@@ -9,9 +9,39 @@ full SQL query engine** over the trace, which is exactly the "capture, then run
 queries to see where the time goes" workflow — and it is far better than
 anything we would build.
 
-The capture layer is `lib/profile.rae`. Overhead when not capturing is a single
-bool test per zone; all string/file work is deferred to the end of the capture,
-so it never skews the frames it measures.
+The capture layer is `lib/Profile.rae`, over the event recorder `lib/perf/Perf.rae`
+(docs/perf-tools-design.md §3). Overhead when not capturing is a single bool test per
+zone; while capturing a zone is a name lookup and one 32-byte event pushed into a ring,
+and all string/file work is deferred to the end of the capture, so it never skews the
+frames it measures.
+
+### What moved to the recorder (perf step 2, Rae 0.3.129)
+
+- `zoneBegin`, `zoneEnd`, `counter` and `tick` keep their signatures; call sites did not
+  change. A capture now owns a `PerfHub`: the main loop writes into its ring, `tick`
+  collects the rings into the hub's window once a frame, and the trace is written from
+  that window. The window holds 300 000 events; past it the oldest go (the log says how
+  many), where the old buffer dropped the newest.
+- The trace has lanes. Process `CPU` has one thread per ring, named after its thread
+  (`CPU main loop` first). Another thread gets a lane of its own with
+  `profileThreadRing(profiler:, name:)` and writes with `perfZoneBegin`/`perfCounter`
+  (lib/perf/Perf) and names from `profileName`. Process `GPU` holds every counter whose
+  name starts with `gpu.` and, once a step writes them, GPU spans.
+- Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
+- New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
+  draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
+  path draws, `draws.shadow.*` summed over the cascades), from `app3d/FrameLog`
+  `frameLogCounters`; `gpu.clouds` and `gpu.cloud pass <n>` from `CloudTiming`
+  `publishCloudTimingCounters`, called with the renderer's pass counters. The
+  `RendererPassTiming`/`GpuTiming` counters (`gpu.<pass>`, `gpu.total`), `render.scale`,
+  `render.capFps`, `thermal.state` and the grass counters reach the hub through
+  `Profile.counter` as before.
+- Unchanged: the `[frames]`, `[draws]` and `[clouds gpu]` log lines, so
+  `tools/profile-desktop.sh`, `tools/ios/profile-ios.sh` and `tools/profile-summary.py`
+  read the same thing (143's summary measured before and after: the same median frame,
+  the CPU time within noise).
+- Not yet on the hub: the 2D canvas's timing (`lib/Gpu2dCanvasTiming`), whose apps own no
+  profiler.
 
 ## Capturing on desktop
 

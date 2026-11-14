@@ -22,6 +22,7 @@ open gpu/GpuTiming
 open gpu/GpuIds
 open GbufferTargets
 open RendererDeferred
+open CloudTiming
 
 # The mark between the UI frame's 2D submit and its copy into the drawable
 # (RendererDeferred.endUiFrameTimed): not a graph pass, so outside RenderTag
@@ -360,7 +361,12 @@ func publishPassTimingCounters(passTiming: view DeferredPassTiming, profiler: mo
 }
 
 # The last frame's per-pass GPU times into a profiler capture (counters
-# gpu.<pass>, gpu.total; RendererPassTiming). Call once a frame.
+# gpu.<pass>, gpu.total; RendererPassTiming) and the clouds' (gpu.clouds; CloudTiming).
+# Call once a frame.
 func publishGpuPassCounters(renderer: view DeferredRenderer, profiler: mod Profiler) {
   publishPassTimingCounters(passTiming: renderer.passTiming, profiler: profiler)
+  publishCloudTimingCounters(
+    cloudTiming: renderer.passes.targets.cloudShadow.timing
+    profiler: profiler
+  )
 }
