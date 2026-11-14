@@ -41,6 +41,7 @@ typedef struct {
   const char* include;
   const char* link;
   const char* link_browser;
+  const char* link_browser_shared;
   const char* link_linux;
   const char* sources_device;
   const char* defines_device;

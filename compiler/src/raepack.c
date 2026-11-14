@@ -749,6 +749,7 @@ static bool parse_native(RaePackParser* parser, RaePack* pack, RaePackBlock* blo
     else if (str_eq_cstr(field->key, "include")) slot = &pack->native_include;
     else if (str_eq_cstr(field->key, "link")) slot = &pack->native_link;
     else if (str_eq_cstr(field->key, "linkBrowser")) slot = &pack->native_link_browser;
+    else if (str_eq_cstr(field->key, "linkBrowserShared")) slot = &pack->native_link_browser_shared;
     else if (str_eq_cstr(field->key, "linkLinux")) slot = &pack->native_link_linux;
     else if (str_eq_cstr(field->key, "sourcesDevice")) slot = &pack->native_sources_device;
     else if (str_eq_cstr(field->key, "definesDevice")) slot = &pack->native_defines_device;
@@ -756,7 +757,7 @@ static bool parse_native(RaePackParser* parser, RaePack* pack, RaePackBlock* blo
     else if (str_eq_cstr(field->key, "definesAndroid")) slot = &pack->native_defines_android;
     if (!slot || field->value.kind != RAEPACK_VALUE_STRING) {
       diag_error(parser->file_path, (int)field->line, (int)field->column,
-                 "a native field is a string: build, header, include, link, linkBrowser, linkLinux, "
+                 "a native field is a string: build, header, include, link, linkBrowser, linkBrowserShared, linkLinux, "
                  "sourcesDevice, definesDevice, sourcesAndroid or definesAndroid");
       parser->had_error = true;
       return false;
@@ -857,6 +858,25 @@ static bool parse_required_fields(RaePackParser* parser, RaePack* pack) {
         return false;
       }
       pack->assets = field->value.as.string;
+    } else if (str_eq_cstr(field->key, "web")) {
+      /* `web: { sharedMemory: true }` (docs/audio-design.md §11 step 3) */
+      if (field->value.kind != RAEPACK_VALUE_BLOCK) {
+        diag_error(parser->file_path, (int)field->line, (int)field->column,
+                   "web must be a block: { sharedMemory: true }");
+        parser->had_error = true;
+        return false;
+      }
+      for (const RaePackField* setting = field->value.as.block->fields; setting; setting = setting->next) {
+        bool is_bool = setting->value.kind == RAEPACK_VALUE_IDENT &&
+                       (str_eq_cstr(setting->value.as.ident, "true") || str_eq_cstr(setting->value.as.ident, "false"));
+        if (!str_eq_cstr(setting->key, "sharedMemory") || !is_bool) {
+          diag_error(parser->file_path, (int)setting->line, (int)setting->column,
+                     "web takes sharedMemory: true or false (a browser build with shared memory, for an AudioWorklet that runs the engine)");
+          parser->had_error = true;
+          return false;
+        }
+        pack->web_shared_memory = str_eq_cstr(setting->value.as.ident, "true");
+      }
     } else if (str_eq_cstr(field->key, "native")) {
       if (field->value.kind != RAEPACK_VALUE_BLOCK) {
         diag_error(parser->file_path, (int)field->line, (int)field->column,
