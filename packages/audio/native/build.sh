@@ -12,6 +12,8 @@
 #                           framework for them)
 #       lib/emscripten/libraeaudio.a   the browser (when emcc is found): rae_audio_web.c's
 #                           AudioWorklet output and WebCodecs AAC instead of miniaudio's device
+#       lib/emscripten-shared/libraeaudio.a   the same for a program with shared memory
+#                           (`web: { sharedMemory: true }`): the engine inside the AudioWorklet
 #     plus include/rae_audio.h, src/ (the sources a device build compiles into an app),
 #     DEVICE_DEFINES (their options) and VERSION.
 set -euo pipefail
@@ -50,6 +52,12 @@ if command -v emcc >/dev/null 2>&1; then
   mkdir -p "$INSTALL/lib/emscripten"
   emcc -std=gnu11 -O2 -DNDEBUG -I"$HERE" -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_web.o"
   emar rcs "$INSTALL/lib/emscripten/libraeaudio.a" "$objs/rae_audio_web.o"
+  # a program's `web: { sharedMemory: true }` build: atomics and the engine
+  # inside the AudioWorklet (rae_audio_web_shared.c)
+  mkdir -p "$INSTALL/lib/emscripten-shared"
+  emcc -std=gnu11 -O2 -DNDEBUG -sWASM_WORKERS -DRAE_AUDIO_WEB_SHARED -I"$HERE" \
+    -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_web_shared.o"
+  emar rcs "$INSTALL/lib/emscripten-shared/libraeaudio.a" "$objs/rae_audio_web_shared.o"
 else
   echo "audio: emcc not found; skipped the browser library"
 fi

@@ -1016,6 +1016,35 @@ or now that repository's.
    files 22050 frames, no delay, within 1e-5 of afconvert's decodes; seeks;
    a stream. `compiler/tools/wasm_audio_check.sh` (`make -C compiler
    wasm-audio-check`, not in the full run) builds and runs both checks.
+
+   **The shared-memory build, opt-in per program (2026-11-14, Rae 0.3.120,
+   `packages/audio` 0.12.15).** A program's pack says `web: { sharedMemory:
+   true }`; no other program's web build changes. Its browser build links with
+   `-sAUDIO_WORKLET -sWASM_WORKERS -pthread` (shared memory; `-pthread` only
+   for libc's pthread calls, the runtime keeps its single-thread kernel, which
+   `RAE_WASM_THREADS` selects) and each package's `linkBrowserShared` library:
+   the audio package's is built with atomics and `RAE_AUDIO_WEB_SHARED`, and
+   its device (`native/rae_audio_web_shared.c`) runs the engine inside the
+   AudioWorklet, on the worklet's own Wasm thread: each 128-frame quantum is
+   rendered with `rae_audio_render`, as the native callback does, and the
+   commands reach it through the SpscRing as natively. The engine's period is
+   the quantum. Shared memory needs a cross-origin isolated page (COOP/COEP
+   headers), which static servers rarely send: the build writes `rae-coi.js`
+   beside the page, a service worker that adds the headers to every response,
+   and the shell loads the program only once the page is isolated (the first
+   visit registers the worker and reloads once; over plain http on a LAN
+   address there is no service worker and the page says so).
+
+   **Measured** (headless Chrome 157, muted, 48 kHz): 1943 frames, about
+   **40 ms**, from a rendered frame to the speaker: the 128-frame quantum plus
+   the 1815 frames the context reports, against 3863 (80 ms) for the queue
+   path; the context's own 38 ms is now most of it. The clock measures 48000
+   Hz exactly (a render per quantum). No underrun can be seen from the page
+   (a late quantum is silence the browser does not report); 835-848 quanta of
+   the about 860 in 2.3 s rendered, the rest before the worklet had loaded.
+   `wasm_audio_check.sh` builds a copy of `checks/audioSine` that opts in and
+   runs it under a plain server, so the service worker's isolation is tested
+   too.
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.
