@@ -2,8 +2,9 @@
 # loops in C (../c/reference.c), for docs/realtime-language-design.md §4.6:
 # a gain-and-sum over two Lists (copyAtFallback, set), the same over Buffers
 # (the mixer's sampleAt / setSampleAt), the resampler's 32-tap product, and a
-# 64-voice mix through packages/audio's offline engine. Best of five after a
-# warm-up. Run ../run.sh.
+# 64-voice mix through packages/audio's offline engine, and the effect nodes
+# scalar against lib/Float4 (EffectBench.rae). Best of five after a warm-up.
+# Run ../run.sh.
 import Math
 open audio/Audio
 open audio/AudioMixer
@@ -153,4 +154,5 @@ func main() {
   }
   log("Rae mix: {bestMix} us for 2 s of 64 voices at 48 kHz")
   let blocks: Int = audio.stopAudio()
+  effectBenchmark()
 }
