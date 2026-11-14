@@ -1,0 +1,136 @@
+# perf/VideoEvents — the video source's events (docs/perf-tools-design.md §4.5), for a video
+# player (the raeVideo packages, docs/video-design.md) to write into the recorder. Names are
+# registered once at setup (perfVideoNames, on the thread that owns the hub); each write is
+# realtime and goes to the writing thread's own ring:
+#   - per frame: its decode (on the decoder's thread), its upload to a texture and its color
+#     pass (on the thread that does them), each a zone whose number is the frame;
+#   - the decoded frames waiting in the queue (a counter, video.queue frames);
+#   - a frame shown against the time it was due: a mark "video frame shown" at the moment it was
+#     shown, its number the frame, and how late it was (video.late us, negative when early);
+#   - the audio and video offset from the shared clock (video.av offset us: the video's time minus
+#     the audio's at the same moment).
+open perf/Perf
+
+type PerfVideoNames {
+  decode: PerfName
+  upload: PerfName
+  colorPass: PerfName
+  queue: PerfName
+  shown: PerfName
+  late: PerfName
+  avOffset: PerfName
+}
+
+func perfVideoNames(hub: mod PerfHub) ret PerfVideoNames {
+  ret PerfVideoNames {
+    decode: hub.perfName(name: "video decode")
+    upload: hub.perfName(name: "video upload")
+    colorPass: hub.perfName(name: "video color pass")
+    queue: hub.perfName(name: "video.queue frames")
+    shown: hub.perfName(name: "video frame shown")
+    late: hub.perfName(name: "video.late us")
+    avOffset: hub.perfName(name: "video.av offset us")
+  }
+}
+
+func videoZone(
+  ring: view PerfRing
+  name: view PerfName
+  kind: view PerfKind
+  frame: view Int
+) realtime {
+  perfWrite(
+    ring: ring
+    kind: kind
+    name: name
+    value: 0
+    extra: frame
+  )
+}
+
+func videoDecodeBegin(ring: view PerfRing, names: view PerfVideoNames, frame: view Int) realtime {
+  videoZone(
+    ring: ring
+    name: names.decode
+    kind: PerfKind.zoneBegin
+    frame: frame
+  )
+}
+
+func videoDecodeEnd(ring: view PerfRing, names: view PerfVideoNames, frame: view Int) realtime {
+  videoZone(
+    ring: ring
+    name: names.decode
+    kind: PerfKind.zoneEnd
+    frame: frame
+  )
+}
+
+func videoUploadBegin(ring: view PerfRing, names: view PerfVideoNames, frame: view Int) realtime {
+  videoZone(
+    ring: ring
+    name: names.upload
+    kind: PerfKind.zoneBegin
+    frame: frame
+  )
+}
+
+func videoUploadEnd(ring: view PerfRing, names: view PerfVideoNames, frame: view Int) realtime {
+  videoZone(
+    ring: ring
+    name: names.upload
+    kind: PerfKind.zoneEnd
+    frame: frame
+  )
+}
+
+func videoColorPassBegin(
+  ring: view PerfRing
+  names: view PerfVideoNames
+  frame: view Int
+) realtime {
+  videoZone(
+    ring: ring
+    name: names.colorPass
+    kind: PerfKind.zoneBegin
+    frame: frame
+  )
+}
+
+func videoColorPassEnd(ring: view PerfRing, names: view PerfVideoNames, frame: view Int) realtime {
+  videoZone(
+    ring: ring
+    name: names.colorPass
+    kind: PerfKind.zoneEnd
+    frame: frame
+  )
+}
+
+# The decoded frames waiting to be shown
+func videoQueueDepth(ring: view PerfRing, names: view PerfVideoNames, frames: view Int) realtime {
+  perfCounter(ring: ring, name: names.queue, value: frames)
+}
+
+# Frame `frame` shown at `shownNs`, due at `dueNs` (both nowNs's clock)
+func videoFrameShown(
+  ring: view PerfRing
+  names: view PerfVideoNames
+  frame: view Int
+  dueNs: view Int
+  shownNs: view Int
+) realtime {
+  perfWriteAt(
+    ring: ring
+    kind: PerfKind.mark
+    name: names.shown
+    time: shownNs
+    value: shownNs - dueNs
+    extra: frame
+  )
+  perfCounter(ring: ring, name: names.late, value: (shownNs - dueNs) / 1000)
+}
+
+# The video's time minus the audio's at the same moment (ns)
+func videoAvOffset(ring: view PerfRing, names: view PerfVideoNames, offsetNs: view Int) realtime {
+  perfCounter(ring: ring, name: names.avOffset, value: offsetNs / 1000)
+}

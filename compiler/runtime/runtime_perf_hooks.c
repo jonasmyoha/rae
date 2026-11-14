@@ -190,6 +190,17 @@ void* rae_perf_name_box(void) {
   return atomic_load_explicit(&g_rae_perf_name_box, memory_order_acquire);
 }
 
+/* An event named by a name id at a time of its own (`time` on nowNs's clock) on the calling
+ * thread's lane */
+void rae_perf_named_event_at(int64_t kind, int64_t name_id, int64_t time, int64_t value, int64_t extra) {
+  void* rings = atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire);
+  if (rings == NULL) return;
+  int64_t slot = g_rae_perf_thread_name ? rae_perf_claim_slot() : g_rae_perf_slot;
+  if (slot < 0) return;
+  rae_perf_runtime_write_at(rings, atomic_load_explicit(&g_rae_perf_names, memory_order_acquire), slot, kind,
+                            -1 - name_id, time, value, extra);
+}
+
 rae_Bool rae_perf_name_box_ready(void) {
   return rae_perf_name_box() != NULL;
 }

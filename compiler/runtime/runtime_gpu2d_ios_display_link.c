@@ -43,6 +43,10 @@ typedef struct { float minimum, maximum, preferred; } RaeDisplayLinkRange;
 
 static void* g_g2d_display_link = NULL;
 static void* g_g2d_display_link_drawable = NULL;
+/* when the kept drawable is shown (its update's targetPresentationTimestamp, host time in s), and
+ * that of the last drawable handed out, on nowNs's clock (rae_ext_Gpu2d_presentTargetNs) */
+static double g_g2d_display_link_drawable_target = 0.0;
+static int64_t g_g2d_present_target_ns = 0;
 static int g_g2d_display_link_unused = 0;
 /* For the slow-app check: the screen's interval (s), the last request's time,
  * the requests and their summed gaps since the last check, and whether the
@@ -77,7 +81,11 @@ static void rae_g2d_display_link_update(void* self, SEL cmd, void* link, void* u
         g_g2d_display_link_unused = 0;
     }
     void* drawable = rae_g2d_send(update, "drawable");
-    if (drawable) g_g2d_display_link_drawable = rae_g2d_send(drawable, "retain");
+    if (drawable) {
+        g_g2d_display_link_drawable = rae_g2d_send(drawable, "retain");
+        g_g2d_display_link_drawable_target =
+            ((double (*)(void*, SEL))objc_msgSend)(update, sel_registerName("targetPresentationTimestamp"));
+    }
 }
 
 static void rae_g2d_display_link_stop(void);
@@ -118,6 +126,9 @@ static void* rae_g2d_linked_next_drawable(void* self, SEL cmd) {
         void* drawable = g_g2d_display_link_drawable;
         g_g2d_display_link_drawable = NULL;
         if (drawable) {
+            /* host time (CLOCK_UPTIME_RAW) to nowNs's clock, the two read together */
+            int64_t offset = rae_ext_nowNs() - (int64_t)clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+            g_g2d_present_target_ns = (int64_t)(g_g2d_display_link_drawable_target * 1e9) + offset;
             return rae_g2d_send(drawable, "autorelease");
         }
         /* never the layer's own while the link is attached */
@@ -177,3 +188,14 @@ static void rae_g2d_display_link_start(void* layer) {
     g_g2d_display_link = link;
 }
 #endif
+
+/* The time the last drawable the display link handed out is shown (its target presentation
+ * time, on nowNs's clock), for the frame pacer's "presented" mark (lib/gpu/FramePacer); 0 where
+ * there is no display link, or it handed none out */
+int64_t rae_ext_Gpu2d_presentTargetNs(void) {
+#if defined(__APPLE__) && TARGET_OS_IOS && defined(__arm64__)
+    return g_g2d_display_link ? g_g2d_present_target_ns : 0;
+#else
+    return 0;
+#endif
+}

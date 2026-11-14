@@ -52,6 +52,10 @@ frames it measures.
   spans on an "audio render" lane and the engine's underruns, latency and clock drift, and (audio
   0.21.0) each node of the buses' plan as a zone; a recorder's calls are zones (sampled one in 16
   after the first 1 000).
+- Frame pacing (perf step 7, Rae 0.3.138): every Gpu2d frame has "frame start", a "present" zone
+  and "presented" (the display link's target time on iOS), with `frame.interval us`,
+  `frame.jitter us`, `frame.missed refreshes` and `thermal.state`. The video source's events are
+  defined in `lib/perf/VideoEvents` for a player to write.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

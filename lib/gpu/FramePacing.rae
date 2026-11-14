@@ -1,0 +1,188 @@
+# gpu/FramePacing — the frame loop in the event recorder (docs/perf-tools-design.md §4.1). Every
+# frame that presents through Gpu2d (EventLoop, mainLoop, the walker and the UI loops) is recorded
+# while a capture has its runtime table installed, with no code in the app:
+#   - a mark "frame start" when the frame begins (the pacer returned), a zone "present" around
+#     the present call, and a mark "presented" when the frame is shown: the iOS display link's
+#     target presentation time for the drawable it handed out, else the time the present
+#     returned;
+#   - counters of the pacing: the time between two "presented" (frame.interval us), its change
+#     from the interval before (frame.jitter us), the refreshes it missed (frame.missed refreshes:
+#     whole screen periods past the first, from the screen's refresh rate), and the OS thermal
+#     state (thermal.state). The walkers' dynamic-resolution scale and frame cap are counters of
+#     app3d/RenderScale.
+# Names are registered once per capture (lib/perf perfRuntimeName); outside a capture each call
+# reads the table's generation and returns.
+open perf/Perf
+
+when Target.isApple {
+  func nativePacingThermalState() unsafe extern("rae_ext_thermalState") ret Int
+}
+
+func nativeRefreshMilliHz() unsafe extern("rae_ext_Gpu2d_refreshMilliHz") ret Int
+
+func nativePresentTargetNs() unsafe extern("rae_ext_Gpu2d_presentTargetNs") ret Int
+
+type FramePacing {
+  # the recorder table these ids belong to (0: none yet)
+  generation: Int = 0
+  frameStartId: Int = -1
+  presentId: Int = -1
+  presentedId: Int = -1
+  intervalId: Int = -1
+  jitterId: Int = -1
+  missedId: Int = -1
+  thermalId: Int = -1
+  presentOpen: Bool = false
+  # the last frame shown (nowNs) and the interval before it (0: none yet)
+  lastPresentedNs: Int = 0
+  lastIntervalNs: Int = 0
+}
+
+func createFramePacing() ret FramePacing {
+  ret FramePacing {}
+}
+
+# The ids for the installed table, registered on its first frame; false when nothing records
+func pacingNames(pacing: mod FramePacing) ret Bool {
+  let generation: Int = perfRuntimeGeneration()
+  if generation is 0 {
+    ret false
+  }
+  if pacing.generation is not generation {
+    pacing.generation = generation
+    pacing.frameStartId = perfRuntimeName(name: "frame start")
+    pacing.presentId = perfRuntimeName(name: "present")
+    pacing.presentedId = perfRuntimeName(name: "presented")
+    pacing.intervalId = perfRuntimeName(name: "frame.interval us")
+    pacing.jitterId = perfRuntimeName(name: "frame.jitter us")
+    pacing.missedId = perfRuntimeName(name: "frame.missed refreshes")
+    pacing.thermalId = perfRuntimeName(name: "thermal.state")
+    pacing.lastPresentedNs = 0
+    pacing.lastIntervalNs = 0
+  }
+  ret pacing.frameStartId >= 0
+}
+
+# The frame begins (the pacer let it go)
+func pacingFrameStart(pacing: mod FramePacing) {
+  if not pacingNames(pacing: pacing) {
+    ret
+  }
+  perfRuntimeNamedEvent(
+    kind: PerfKind.mark
+    nameId: pacing.frameStartId
+    value: 0
+    extra: 0
+  )
+}
+
+# Right before the present call
+func pacingPresentStart(pacing: mod FramePacing) {
+  if not pacingNames(pacing: pacing) {
+    ret
+  }
+  perfRuntimeNamedEvent(
+    kind: PerfKind.zoneBegin
+    nameId: pacing.presentId
+    value: 0
+    extra: 0
+  )
+  pacing.presentOpen = true
+}
+
+# The present returned: its zone closes, the frame's "presented" moment is marked and the
+# pacing counters are written
+func pacingPresented(pacing: mod FramePacing) {
+  if not pacingNames(pacing: pacing) {
+    pacing.presentOpen = false
+    ret
+  }
+  if pacing.presentOpen {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.zoneEnd
+      nameId: pacing.presentId
+      value: 0
+      extra: 0
+    )
+    pacing.presentOpen = false
+  }
+  var presented: Int = nowNs()
+  var periodNs: Int = 0
+  unsafe {
+    let target: Int = nativePresentTargetNs()
+    if target > 0 {
+      presented = target
+    }
+    let milliHz: Int = nativeRefreshMilliHz()
+    if milliHz > 0 {
+      periodNs = 1000000000000 / milliHz
+    }
+  }
+  perfRuntimeNamedEventAt(
+    kind: PerfKind.mark
+    nameId: pacing.presentedId
+    time: presented
+    value: 0
+    extra: 0
+  )
+  if pacing.lastPresentedNs > 0 and presented > pacing.lastPresentedNs {
+    let interval: Int = presented - pacing.lastPresentedNs
+    perfRuntimeNamedEvent(
+      kind: PerfKind.counter
+      nameId: pacing.intervalId
+      value: interval / 1000
+      extra: 0
+    )
+    if pacing.lastIntervalNs > 0 {
+      var jitter: Int = interval - pacing.lastIntervalNs
+      if jitter < 0 {
+        jitter = -jitter
+      }
+      perfRuntimeNamedEvent(
+        kind: PerfKind.counter
+        nameId: pacing.jitterId
+        value: jitter / 1000
+        extra: 0
+      )
+    }
+    if periodNs > 0 {
+      perfRuntimeNamedEvent(
+        kind: PerfKind.counter
+        nameId: pacing.missedId
+        value: missedRefreshes(intervalNs: interval, periodNs: periodNs)
+        extra: 0
+      )
+    }
+    pacing.lastIntervalNs = interval
+  }
+  pacing.lastPresentedNs = presented
+  perfRuntimeNamedEvent(
+    kind: PerfKind.counter
+    nameId: pacing.thermalId
+    value: pacingThermalState()
+    extra: 0
+  )
+}
+
+# The screen periods an interval missed: whole periods past the first, rounded to the nearest
+# (a 33 ms interval on a 60 Hz screen missed 1)
+func missedRefreshes(intervalNs: view Int, periodNs: view Int) ret Int {
+  if periodNs <= 0 {
+    ret 0
+  }
+  let periods: Int = (intervalNs + periodNs / 2) / periodNs
+  if periods <= 1 {
+    ret 0
+  }
+  ret periods - 1
+}
+
+func pacingThermalState() ret Int {
+  when Target.isApple {
+    unsafe {
+      ret nativePacingThermalState()
+    }
+  } else {
+    ret 0
+  }
+}

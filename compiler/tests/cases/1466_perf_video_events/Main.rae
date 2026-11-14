@@ -1,0 +1,143 @@
+# The video source's events (lib/perf/VideoEvents, docs/perf-tools-design.md §4.5) fed by a fake
+# decoder: a `spawn thread` decodes 30 frames into a queue (a decode zone each, the queue's depth
+# as a counter) on its own ring; the main thread takes each frame, uploads it and runs its color
+# pass (two zones), and shows it against the time it was due (a mark and video.late us), with
+# the audio and video offset. Every write is realtime (RAE_REALTIME_CHECK=1, config.env).
+open Atomic
+open collections/SpscRing
+open perf/Perf
+open perf/VideoEvents
+
+const frameCount: Int = 30
+
+func work(rounds: copy Int) ret Int {
+  var value: Int = 1
+  loop var i: Int = 0, i < rounds, ++i {
+    value = (value * 31 + i) % 1000003
+  }
+  ret value
+}
+
+# The fake decoder: each frame decoded (some work) and queued, the queue's depth counted
+func decoder(ring: copy PerfRing, names: copy PerfVideoNames, queue: copy SpscRing(Int)) ret Int {
+  var checksum: Int = 0
+  loop var frame: Int = 0, frame < frameCount, ++frame {
+    videoDecodeBegin(ring: ring, names: names, frame: frame)
+    checksum = checksum + work(rounds: 20000 + frame)
+    videoDecodeEnd(ring: ring, names: names, frame: frame)
+    loop not queue.push(value: frame) {
+      sleep(ms: 1)
+    }
+    videoQueueDepth(ring: ring, names: names, frames: queue.count())
+  }
+  ret checksum
+}
+
+func countOf(
+  hub: view PerfHub
+  lane: view Int
+  kind: view PerfKind
+  name: view String
+) ret Int {
+  var count: Int = 0
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if hub.perfEventRing(number: number) is lane and event.kind is kind and hub.perfNameText(
+      nameId: event.nameId as Int
+    ) is name {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() ret Int {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 600, windowEvents: 4000, ringEvents: 1000 }
+  )
+  let mainRing: PerfRing = hub.perfThreadRing(name: "player")
+  let decoderRing: PerfRing = hub.perfThreadRing(name: "decoder")
+  let names: PerfVideoNames = perfVideoNames(hub: hub)
+  let queue: SpscRing(Int) = createSpscRing(Int, capacity: 4)
+  let decoding: Task(Int) = spawn thread decoder(ring: decoderRing, names: names, queue: queue)
+  # the frames are due 10 ms apart from the first one shown; this fake shows each 2 ms late
+  let start: Int = nowNs()
+  var shown: Int = 0
+  loop shown < frameCount {
+    if let frame: Int = queue.pop() {
+      videoUploadBegin(ring: mainRing, names: names, frame: frame)
+      let unusedUpload: Int = work(rounds: 5000)
+      videoUploadEnd(ring: mainRing, names: names, frame: frame)
+      videoColorPassBegin(ring: mainRing, names: names, frame: frame)
+      let unusedColor: Int = work(rounds: 5000)
+      videoColorPassEnd(ring: mainRing, names: names, frame: frame)
+      let due: Int = start + frame * 10000000
+      videoFrameShown(
+        ring: mainRing
+        names: names
+        frame: frame
+        dueNs: due
+        shownNs: due + 2000000
+      )
+      videoAvOffset(ring: mainRing, names: names, offsetNs: 1500000)
+      shown = shown + 1
+    } else {
+      sleep(ms: 1)
+    }
+    hub.perfFrame()
+  }
+  let checksum: Int = decoding.get()
+  hub.perfFrame()
+  let player: Int = mainRing.index
+  let decoderLane: Int = decoderRing.index
+  log("decoded {checksum > 0}: decode zones on the decoder's lane {countOf(
+    hub: hub
+    lane: decoderLane
+    kind: PerfKind.zoneBegin
+    name: "video decode"
+  )}, queue depths {countOf(
+    hub: hub
+    lane: decoderLane
+    kind: PerfKind.counter
+    name: "video.queue frames"
+  )}")
+  log("player: uploads {countOf(
+    hub: hub
+    lane: player
+    kind: PerfKind.zoneBegin
+    name: "video upload"
+  )}, color passes {countOf(
+    hub: hub
+    lane: player
+    kind: PerfKind.zoneEnd
+    name: "video color pass"
+  )}, frames shown {countOf(
+    hub: hub
+    lane: player
+    kind: PerfKind.mark
+    name: "video frame shown"
+  )}")
+  # the last frame shown: 2 ms late, at its due time plus 2 ms
+  var late: Int = 0
+  var offset: Int = 0
+  var shownAt: Int = 0
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    let name: String = hub.perfNameText(nameId: event.nameId as Int)
+    if name is "video.late us" {
+      late = event.value
+    }
+    if name is "video.av offset us" {
+      offset = event.value
+    }
+    if name is "video frame shown" and event.extra is 29 {
+      shownAt = event.time - start
+    }
+  }
+  log(
+    "late {late} us, av offset {offset} us, frame 29 shown {shownAt / 1000000} ms after the start"
+  )
+  queue.freeSpscRing()
+  hub.freePerfHub()
+  ret 0
+}

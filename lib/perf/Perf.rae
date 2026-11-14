@@ -454,6 +454,14 @@ func nativePerfNameBox() unsafe extern("rae_perf_name_box") ret Buffer(List(Stri
 
 func nativePerfNameBoxReady() unsafe extern("rae_perf_name_box_ready") ret Bool
 
+func nativePerfNamedEventAt(
+  kind: Int
+  nameId: Int
+  time: Int
+  value: Int
+  extra: Int
+) unsafe extern("rae_perf_named_event_at")
+
 func nativePerfNamedEvent(
   kind: Int
   nameId: Int
@@ -719,6 +727,29 @@ func perfRuntimeWriteAt(
       ring: ring
       kind: perfKindOfCode(kind: kind)
       name: PerfName { id: nameId }
+      time: time
+      value: value
+      extra: extra
+    )
+  }
+}
+
+# perfRuntimeNamedEvent at a time of its own (`time` on nowNs's clock): a moment measured
+# elsewhere (when a frame is shown)
+func perfRuntimeNamedEventAt(
+  kind: view PerfKind
+  nameId: view Int
+  time: view Int
+  value: view Int
+  extra: view Int
+) {
+  if nameId < 0 {
+    ret
+  }
+  unsafe {
+    nativePerfNamedEventAt(
+      kind: perfKindCode(kind: kind)
+      nameId: nameId
       time: time
       value: value
       extra: extra

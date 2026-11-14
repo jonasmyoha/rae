@@ -170,6 +170,16 @@ the path that allocates (fixture 1459).
 - **What frame pacing shows:** the time between presents, its jitter, and the frames that
   missed their refresh.
 
+Done in Rae 0.3.138 (perf step 7): `gpu/FramePacing`, kept by `gpu/FramePacer`, records every
+frame that presents through Gpu2d while a capture's runtime table is installed, so every loop has
+it with no code: a mark "frame start", a zone "present" around the present call, a mark
+"presented" (the iOS display link's `targetPresentationTimestamp` for the drawable it handed out,
+converted to `nowNs`; elsewhere the time the present returned), and counters `frame.interval us`,
+`frame.jitter us`, `frame.missed refreshes` (whole screen periods past the first, from the
+screen's refresh rate, `rae_ext_Gpu2d_refreshMilliHz`) and `thermal.state`. The walkers' scale
+and frame cap stay `app3d/RenderScale`'s counters. An app that draws only when something changed
+(106) shows its idle gaps as long intervals and missed refreshes; read those against its input.
+
 ### 4.2 The ECS schedule
 
 `lib/ecs/Schedule` already knows each system's name and whether it ran. It records a zone per
@@ -277,6 +287,12 @@ This source is for when video lands (docs/video-design.md). It records:
 - the frame shown against the frame due, and the audio and video offset from the shared clock.
 
 The views are the same frame-pacing views as for games, with the video's own period.
+
+Defined in Rae 0.3.138: `lib/perf/VideoEvents` (`perfVideoNames` at setup; realtime writes on the
+writing thread's ring): `video decode`, `video upload` and `video color pass` zones numbered by
+the frame, `video.queue frames`, a mark `video frame shown` at the moment shown with
+`video.late us` against the due time, and `video.av offset us`. Case 1466 feeds them from a fake
+decoder thread.
 
 ### 4.6 GPU
 

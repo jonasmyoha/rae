@@ -226,6 +226,10 @@ int64_t rae_perf_thread_slot_count(void);
 /* The event recorder's hooks lib/perf calls from real-time code (perfRuntimeNamedEvent) */
 int64_t rae_perf_generation(void) RAE_NONBLOCKING;
 void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra) RAE_NONBLOCKING;
+void rae_perf_named_event_at(int64_t kind, int64_t name_id, int64_t time, int64_t value, int64_t extra);
+/* The frame pacer's display numbers (runtime_gpu2d_platform.c, runtime_gpu2d_ios_display_link.c) */
+int64_t rae_ext_Gpu2d_refreshMilliHz(void);
+int64_t rae_ext_Gpu2d_presentTargetNs(void);
 
 /* ---- Int arithmetic (docs/integer-semantics.md) ----
  *

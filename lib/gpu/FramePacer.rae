@@ -37,6 +37,7 @@
 # its "bound by" mark (lib/app3d/FrameLog frameLogCounters).
 import Sys
 open gpu/PipelineWatch
+open gpu/FramePacing
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -63,6 +64,8 @@ type FramePacer {
   acquireStartedAt: Float64
   waitSeconds: Float64  # in paceFrame, waiting for the GPU
   cPipelines: CPipelineWatch  # a C pipeline created mid-game is logged (render-perf-13)
+  # the frame's marks and pacing in the event recorder (gpu/FramePacing)
+  pacing: FramePacing = FramePacing {}
 }
 
 const timingWindow: Int = 120
@@ -109,6 +112,7 @@ func createFramePacer() ret FramePacer {
 # Call right before the frame's present, so the timing print can tell the
 # present's vsync wait apart from the CPU's own work.
 func notePresentStart(pacer: mod FramePacer) {
+  pacingPresentStart(pacing: pacer.pacing)
   if pacer.measure {
     pacer.presentStart = frameClock()
   }
@@ -140,6 +144,7 @@ func paceFrame(pacer: mod FramePacer) {
       commands: webgpuNull()
     )
   }
+  pacingPresented(pacing: pacer.pacing)
   let waitStart: Float64 = frameClock()
   if pacer.framesInFlight <= 1 {
     unsafe {
@@ -160,6 +165,7 @@ func paceFrame(pacer: mod FramePacer) {
     recordFrameTiming(pacer: pacer, waitStart: waitStart, waitEnd: waitEnd)
   }
   pacer.frameStart = waitEnd
+  pacingFrameStart(pacing: pacer.pacing)
 }
 
 func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: view Float64) {

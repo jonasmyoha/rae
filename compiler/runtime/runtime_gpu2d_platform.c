@@ -1173,6 +1173,13 @@ double rae_ext_Gpu2d_nowSeconds(void){
 }
 
 int64_t rae_ext_Gpu2d_windowWidth(void) { return g_sdl_w; }
+/* The window's screen's refresh rate in thousandths of a hertz (0: unknown, or no window), for
+ * the frame pacer's missed refreshes (lib/gpu/FramePacer) */
+int64_t rae_ext_Gpu2d_refreshMilliHz(void) {
+    if (!g_sdl_win) return 0;
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g_sdl_win));
+    return mode ? (int64_t)(mode->refresh_rate * 1000.0f) : 0;
+}
 int64_t rae_ext_Gpu2d_windowHeight(void) { return g_sdl_h; }
 void rae_ext_Gpu2d_setWindowPosition(int64_t x, int64_t y) {
     if (g_sdl_win) SDL_SetWindowPosition(g_sdl_win, (int)x, (int)y);
