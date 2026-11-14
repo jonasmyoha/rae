@@ -42,7 +42,7 @@ static bool rae_web_shared_process(int input_count, const AudioSampleFrame* inpu
   int channels = (int)audio->channels;
   if (frames > RAE_WEB_MAX_QUANTUM) frames = RAE_WEB_MAX_QUANTUM;
   if (!audio->attached) {
-    rae_thread_attach();
+    rae_thread_attach_named("audio");
     rae_ext_Realtime_markThread(true);
     audio->attached = 1;
   }

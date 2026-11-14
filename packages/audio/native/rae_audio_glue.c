@@ -40,10 +40,10 @@
 #include <pthread.h>
 #endif
 
-/* lib/Signal.rae's post, and the runtime's thread attach and real-time mark,
- * from the Rae runtime the program links */
+/* lib/Signal.rae's post, and the runtime's thread attach (its event-recorder lane
+ * named) and real-time mark, from the Rae runtime the program links */
 void rae_ext_rae_signal_post(int64_t signal);
-void rae_thread_attach(void);
+void rae_thread_attach_named(const char* name);
 void rae_ext_Realtime_markThread(bool realtime);
 
 /* Stage B: audio/AudioDevice's `realtime cExport("rae_audio_render")`. A
@@ -117,7 +117,7 @@ static void rae_audio_callback(ma_device* device, void* output, const void* inpu
     /* Stage B: Rae renders straight into the device's buffer. The thread is
      * attached and marked on its first callback (a device may change it). */
     if (!g_rae_audio_thread_ready) {
-      rae_thread_attach();
+      rae_thread_attach_named("audio");
       rae_ext_Realtime_markThread(true);
       g_rae_audio_thread_ready = 1;
     }
