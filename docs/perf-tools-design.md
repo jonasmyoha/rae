@@ -146,6 +146,16 @@ The design targets are:
 
 Step 1 measures this and puts the numbers in this document.
 
+**Measured (2026-11-14, step 1, Apple M1 Max, `lib/perf/Perf.rae`):** one million zones (a begin
+and an end each) in batches of 8000, each batch drained by `perfFrame` outside the timing: 27-29
+ns a zone while recording (about 14 ns an event: a relaxed load of the ring's `on` flag, a
+`nowNs`, one push), so the target holds. Off: 0.62-0.68 ns a zone, one load and a branch for each
+of its two calls. An event is 32 bytes (`time` and `value` first, then the 4-byte `kind`, `nameId`
+and `extra`, with no padding). Zero allocations: the fixture's writer thread marks itself
+real-time and runs under `RAE_REALTIME_CHECK=1`, and the TSan gate runs it too (fixture 1458;
+`RAE_PERF_COST=1` prints the cost). Registering a name in a `realtime` function is rejected with
+the path that allocates (fixture 1459).
+
 ## 4. Sources
 
 ### 4.1 Frames and the frame loop

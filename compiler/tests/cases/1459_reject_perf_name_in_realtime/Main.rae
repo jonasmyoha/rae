@@ -1,0 +1,17 @@
+# A perf name is registered at setup (perf/Perf, docs/perf-tools-design.md §3.3): it allocates,
+# so registering one in real-time code is a compile error. The render function here asks for a
+# name on each call instead of using one made before.
+open perf/Perf
+
+func render(hub: mod PerfHub, ring: view PerfRing) realtime {
+  let zone: PerfName = hub.perfName(name: "render")
+  perfZoneBegin(ring: ring, name: zone)
+  perfZoneEnd(ring: ring, name: zone)
+}
+
+func main() {
+  var hub: PerfHub = createPerfHub(settings: PerfSettings { windowEvents: 16, ringEvents: 16 })
+  let ring: PerfRing = hub.perfThreadRing(name: "main")
+  render(hub: hub, ring: ring)
+  hub.freePerfHub()
+}

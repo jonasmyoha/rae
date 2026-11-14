@@ -1,0 +1,322 @@
+# perf/Perf — the event recorder (docs/perf-tools-design.md §3). Every thread that is measured
+# writes small fixed-size events (a zone's begin and end, a counter's value, a mark) into a ring
+# of its own; once a frame the main thread drains every ring into the hub's window, which keeps
+# the last seconds of events in memory allocated once, with an index of the frames.
+#
+# The PerfHub is a resource on the App (no globals). A thread is handed its PerfRing, a value
+# made at setup on the main thread (perfThreadRing) and passed to the thread like any other
+# argument. Names are registered at setup too (perfName) and passed as ids: registering one
+# allocates, so doing it in real-time code is the compile error it already is.
+#
+#     var perf: PerfHub = createPerfHub(settings: defaultPerfSettings())
+#     let physicsZone: PerfName = perf.perfName(name: "physics")
+#     let mainRing: PerfRing = perf.perfThreadRing(name: "main")
+#     ...
+#     perfZoneBegin(ring: mainRing, name: physicsZone)      # realtime: no allocation, no lock
+#     stepPhysics(...)
+#     perfZoneEnd(ring: mainRing, name: physicsZone)
+#     perf.perfFrame()                                        # once a frame, on the main thread
+#
+# A write is one relaxed load of the ring's `on` flag (and nothing more when recording is off),
+# a nowNs and one push. A full ring drops the event and counts it; the writer never waits.
+open Atomic
+open collections/SpscRing
+
+enum PerfKind {
+  zoneBegin
+  zoneEnd
+  counter
+  mark
+  waitBegin
+  waitEnd
+  gpuSpan
+  flow
+}
+
+# One event: 32 bytes, so a ring is a plain array (the two 8-byte fields first, so the three
+# small ones pack after them with no padding between)
+type PerfEvent {
+  # nowNs(), the monotonic clock
+  time: Int
+  # a counter's value, a GPU span's end, a flow's id, a byte count
+  value: Int
+  kind: PerfKind
+  # an id from the hub's name table
+  nameId: Int32
+  # a frame number, a node index, a chunk index
+  extra: Int32
+}
+
+# A name, registered once (perfName); what a hot path passes
+type PerfName {
+  id: Int
+}
+
+# A thread's ring: handles only, so it is passed to its thread by value. The thread is its one
+# writer; the hub's perfFrame on the main thread is its one reader.
+type PerfRing {
+  events: SpscRing(PerfEvent)
+  on: Atomic(Bool)
+  # events the full ring had no room for
+  dropped: Atomic(Int)
+  # its index in the hub
+  index: Int
+}
+
+type PerfSettings {
+  # how many seconds of events the window keeps
+  windowSeconds: Int = 10
+  # the window's room, in events (memory: 40 bytes each, allocated once)
+  windowEvents: Int = 262144
+  # each thread's ring, in events (drained once a frame)
+  ringEvents: Int = 16384
+  # the frames the index keeps
+  frameRecords: Int = 4096
+}
+
+func defaultPerfSettings() ret PerfSettings {
+  ret PerfSettings {}
+}
+
+# A frame in the window: its number, when it started and ended, and its events' range (the
+# window's event numbers, counted from the first event ever kept)
+type PerfFrameRecord {
+  frame: Int
+  startNs: Int
+  endNs: Int
+  firstEvent: Int
+  endEvent: Int
+}
+
+type PerfHub {
+  settings: PerfSettings
+  recording: Bool
+  names: List(String)
+  rings: List(PerfRing)
+  ringNames: List(String)
+  # the window: a ring of events with the thread each came from; `written` counts every event
+  # ever kept, so event n is at n % windowEvents while it is in the window
+  window: List(PerfEvent)
+  windowRing: List(Int)
+  written: Int
+  # the oldest event still in the window (by room and by age)
+  oldest: Int
+  frames: List(PerfFrameRecord)
+  frameCount: Int
+  frameStartNs: Int
+  frameFirstEvent: Int
+}
+
+func createPerfHub(settings: view PerfSettings) ret PerfHub {
+  var window: List(PerfEvent) = List.create(PerfEvent, cap: settings.windowEvents)
+  window.addDefaults(count: settings.windowEvents)
+  var windowRing: List(Int) = List.create(Int, cap: settings.windowEvents)
+  windowRing.addDefaults(count: settings.windowEvents)
+  var frames: List(PerfFrameRecord) = List.create(PerfFrameRecord, cap: settings.frameRecords)
+  frames.addDefaults(count: settings.frameRecords)
+  ret PerfHub {
+    settings: settings
+    recording: true
+    names: {}
+    rings: {}
+    ringNames: {}
+    window: window
+    windowRing: windowRing
+    written: 0
+    oldest: 0
+    frames: frames
+    frameCount: 0
+    frameStartNs: nowNs()
+    frameFirstEvent: 0
+  }
+}
+
+func freePerfHub(hub: view PerfHub) {
+  loop var i: Int = 0, i < hub.rings.length(), ++i {
+    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
+    freeSpscRing(this: ring.events)
+    freeAtomic(this: ring.on)
+    freeAtomic(this: ring.dropped)
+  }
+}
+
+# A name's id (the same id for the same name); on the main thread, at setup
+func perfName(hub: mod PerfHub, name: view String) ret PerfName {
+  loop var i: Int = 0, i < hub.names.length(), ++i {
+    if hub.names.copyAtDefault(index: i) is name {
+      ret PerfName { id: i }
+    }
+  }
+  hub.names.add(value: name)
+  ret PerfName { id: hub.names.length() - 1 }
+}
+
+# The name of an id ("" for none)
+func perfNameText(hub: view PerfHub, nameId: view Int) ret String {
+  ret hub.names.copyAtDefault(index: nameId)
+}
+
+# A ring for the thread called `name`; on the main thread, at setup, then handed to the thread
+func perfThreadRing(hub: mod PerfHub, name: view String) ret PerfRing {
+  let ring: PerfRing = {
+    events: createSpscRing(PerfEvent, capacity: hub.settings.ringEvents)
+    on: createAtomic(Bool, value: hub.recording)
+    dropped: createAtomic(Int, value: 0)
+    index: hub.rings.length()
+  }
+  hub.rings.add(value: ring)
+  hub.ringNames.add(value: name)
+  ret ring
+}
+
+# Recording on or off for every ring (a write while off is one load and a return)
+func perfSetRecording(hub: mod PerfHub, on: view Bool) {
+  hub.recording = on
+  # an index loop: a generic call on a `loop let` variable is not instantiated (queued bug)
+  loop var i: Int = 0, i < hub.rings.length(), ++i {
+    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
+    ring.on.store(value: on)
+  }
+}
+
+# ---- the writes: realtime, any thread, to its own ring ---------------------------------
+func perfWrite(
+  ring: view PerfRing
+  kind: view PerfKind
+  name: view PerfName
+  value: view Int
+  extra: view Int
+) realtime {
+  if not ring.on.loadRelaxed() {
+    ret
+  }
+  let event: PerfEvent = {
+    time: nowNs()
+    kind: kind
+    nameId: name.id as Int32
+    value: value
+    extra: extra as Int32
+  }
+  if not ring.events.push(value: event) {
+    let unusedDropped: Int = ring.dropped.fetchAddRelaxed(amount: 1)
+  }
+}
+
+func perfZoneBegin(ring: view PerfRing, name: view PerfName) realtime {
+  perfWrite(
+    ring: ring
+    kind: PerfKind.zoneBegin
+    name: name
+    value: 0
+    extra: 0
+  )
+}
+
+func perfZoneEnd(ring: view PerfRing, name: view PerfName) realtime {
+  perfWrite(
+    ring: ring
+    kind: PerfKind.zoneEnd
+    name: name
+    value: 0
+    extra: 0
+  )
+}
+
+func perfCounter(ring: view PerfRing, name: view PerfName, value: view Int) realtime {
+  perfWrite(
+    ring: ring
+    kind: PerfKind.counter
+    name: name
+    value: value
+    extra: 0
+  )
+}
+
+func perfMark(ring: view PerfRing, name: view PerfName, extra: view Int) realtime {
+  perfWrite(
+    ring: ring
+    kind: PerfKind.mark
+    name: name
+    value: 0
+    extra: extra
+  )
+}
+
+# ---- the collector: the main thread, once a frame ----------------------------------------
+func keepEvent(hub: mod PerfHub, event: view PerfEvent, ringIndex: view Int) {
+  let at: Int = hub.written % hub.settings.windowEvents
+  hub.window.set(index: at, value: event)
+  hub.windowRing.set(index: at, value: ringIndex)
+  hub.written = hub.written + 1
+  if hub.written - hub.oldest > hub.settings.windowEvents {
+    hub.oldest = hub.written - hub.settings.windowEvents
+  }
+}
+
+# Every ring drained into the window, the frame's record kept, and the events older than the
+# window's seconds let go
+func perfFrame(hub: mod PerfHub) {
+  loop var r: Int = 0, r < hub.rings.length(), ++r {
+    let ring: PerfRing = hub.rings.copyAtDefault(index: r)
+    loop ring.events.count() > 0 {
+      if let event: PerfEvent = ring.events.pop() {
+        hub.keepEvent(event: event, ringIndex: r)
+      }
+    }
+  }
+  let now: Int = nowNs()
+  let record: PerfFrameRecord = {
+    frame: hub.frameCount
+    startNs: hub.frameStartNs
+    endNs: now
+    firstEvent: hub.frameFirstEvent
+    endEvent: hub.written
+  }
+  hub.frames.set(index: hub.frameCount % hub.settings.frameRecords, value: record)
+  hub.frameCount = hub.frameCount + 1
+  hub.frameStartNs = now
+  hub.frameFirstEvent = hub.written
+  # older than the window's seconds: let go
+  let horizon: Int = now - hub.settings.windowSeconds * 1000000000
+  loop hub.oldest < hub.written and hub.perfEventAt(number: hub.oldest).time < horizon {
+    hub.oldest = hub.oldest + 1
+  }
+}
+
+# ---- reading the window ---------------------------------------------------------------------
+
+# The events in the window: numbers perfOldest .. perfWritten - 1
+func perfOldest(hub: view PerfHub) ret Int {
+  ret hub.oldest
+}
+
+func perfWritten(hub: view PerfHub) ret Int {
+  ret hub.written
+}
+
+func perfEventAt(hub: view PerfHub, number: view Int) ret PerfEvent {
+  ret hub.window.copyAtDefault(index: number % hub.settings.windowEvents)
+}
+
+# The thread (its ring's index) an event came from
+func perfEventRing(hub: view PerfHub, number: view Int) ret Int {
+  ret hub.windowRing.copyAtDefault(index: number % hub.settings.windowEvents)
+}
+
+# Frame `frame`'s record, while the index keeps it
+func perfFrameRecord(hub: view PerfHub, frame: view Int) ret opt PerfFrameRecord {
+  if frame < 0 or frame >= hub.frameCount or frame < hub.frameCount - hub.settings.frameRecords {
+    ret none
+  }
+  ret hub.frames.copyAtDefault(index: frame % hub.settings.frameRecords)
+}
+
+# Every ring's dropped events so far
+func perfDropped(hub: view PerfHub) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < hub.rings.length(), ++i {
+    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
+    total = total + ring.dropped.load()
+  }
+  ret total
+}

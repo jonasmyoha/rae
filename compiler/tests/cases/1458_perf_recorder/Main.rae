@@ -1,0 +1,201 @@
+# The event recorder (perf/Perf, docs/perf-tools-design.md §3), with RAE_REALTIME_CHECK=1
+# (config.env): the writer thread marks itself real-time, so a write that allocated, freed,
+# locked or logged would fail the run.
+# 1. Names: an id each, the same id for the same name, and its text back.
+# 2. A writer thread and the collector, in step (the writer waits for each drain): 50 batches of
+#    1000 zones, 100 000 events, every one kept in order, none dropped.
+# 3. Over capacity: a ring of 1000 written 5000 times before a drain keeps 1000 and counts 4000
+#    dropped.
+# 4. The window: 3000 events into a window of 1000 keep the newest 1000; the frame index has
+#    each frame's events; with a window of one second, events two seconds old are let go.
+# 5. Off: a write is ignored. The cost of one million zones on and off is checked loosely here
+#    (RAE_PERF_COST=1 prints it; docs/perf-tools-design.md §3.5 records it).
+import Realtime
+open Atomic
+open Signal
+open perf/Perf
+
+func names() {
+  var hub: PerfHub = createPerfHub(settings: PerfSettings { windowEvents: 64, ringEvents: 64 })
+  let physics: PerfName = hub.perfName(name: "physics")
+  let render: PerfName = hub.perfName(name: "render")
+  let again: PerfName = hub.perfName(name: "physics")
+  log(
+    "names: physics {physics.id}, render {render.id}, physics again {again.id}; id 1 is {hub.perfNameText(
+      nameId: 1
+    )}"
+  )
+  var size: Int = 0
+  unsafe {
+    size = sizeof(PerfEvent)
+  }
+  log("an event is {size} bytes")
+  hub.freePerfHub()
+}
+
+# The writer: `batches` batches of `zones` zones, each batch after the collector says it drained
+func writer(
+  ring: own PerfRing
+  zone: own PerfName
+  batches: own Int
+  zones: own Int
+  drained: own Signal
+  written: own Signal
+) ret Int {
+  Realtime.markRealtimeThread()
+  loop var batch: Int = 0, batch < batches, ++batch {
+    drained.wait()
+    loop var i: Int = 0, i < zones, ++i {
+      perfZoneBegin(ring: ring, name: zone)
+      perfZoneEnd(ring: ring, name: zone)
+    }
+    written.post()
+  }
+  Realtime.unmarkRealtimeThread()
+  ret batches * zones * 2
+}
+
+func inStep() {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowEvents: 200000, ringEvents: 4096 }
+  )
+  let zone: PerfName = hub.perfName(name: "work")
+  let ring: PerfRing = hub.perfThreadRing(name: "writer")
+  let drained: Signal = createSignal()
+  let written: Signal = createSignal()
+  let task: Task(Int) = spawn thread writer(
+    ring: ring
+    zone: zone
+    batches: 50
+    zones: 1000
+    drained: drained
+    written: written
+  )
+  loop var batch: Int = 0, batch < 50, ++batch {
+    drained.post()
+    written.wait()
+    hub.perfFrame()
+  }
+  let sent: Int = task.get()
+  var inOrder: Bool = true
+  var previous: Int = 0
+  var begins: Int = 0
+  loop var n: Int = hub.perfOldest(), n < hub.perfWritten(), ++n {
+    let event: PerfEvent = hub.perfEventAt(number: n)
+    if event.time < previous {
+      inOrder = false
+    }
+    previous = event.time
+    if event.kind is PerfKind.zoneBegin {
+      begins = begins + 1
+    }
+  }
+  log(
+    "in step: sent {sent}, kept {hub.perfWritten() - hub.perfOldest()}, dropped {hub.perfDropped()}, zones {begins}, in time order {inOrder}, from the writer's ring {hub.perfEventRing(
+      number: 0
+    ) is ring.index}"
+  )
+  drained.freeSignal()
+  written.freeSignal()
+  hub.freePerfHub()
+}
+
+func overCapacity() {
+  var hub: PerfHub = createPerfHub(settings: PerfSettings { windowEvents: 10000, ringEvents: 1000 })
+  let mark: PerfName = hub.perfName(name: "mark")
+  let ring: PerfRing = hub.perfThreadRing(name: "main")
+  loop var i: Int = 0, i < 5000, ++i {
+    perfMark(ring: ring, name: mark, extra: i)
+  }
+  hub.perfFrame()
+  log(
+    "over capacity: kept {hub.perfWritten()}, dropped {hub.perfDropped()}, the first kept is mark {hub.perfEventAt(
+      number: 0
+    ).extra}"
+  )
+  hub.freePerfHub()
+}
+
+func window() {
+  var hub: PerfHub = createPerfHub(settings: PerfSettings { windowEvents: 1000, ringEvents: 4096 })
+  let count: PerfName = hub.perfName(name: "count")
+  let ring: PerfRing = hub.perfThreadRing(name: "main")
+  loop var frame: Int = 0, frame < 3, ++frame {
+    loop var i: Int = 0, i < 1000, ++i {
+      perfCounter(ring: ring, name: count, value: frame * 1000 + i)
+    }
+    hub.perfFrame()
+  }
+  var frameText: String = ""
+  if let record: PerfFrameRecord = hub.perfFrameRecord(frame: 1) {
+    frameText = "frame 1 has events {record.firstEvent} .. {record.endEvent}"
+  }
+  log(
+    "window of 1000: written {hub.perfWritten()}, oldest {hub.perfOldest()}, its value {hub.perfEventAt(
+      number: hub.perfOldest()
+    ).value}; {frameText}"
+  )
+  hub.freePerfHub()
+  var short: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 1, windowEvents: 1000, ringEvents: 1000 }
+  )
+  let ticks: PerfName = short.perfName(name: "tick")
+  let shortRing: PerfRing = short.perfThreadRing(name: "main")
+  loop var i: Int = 0, i < 10, ++i {
+    perfMark(ring: shortRing, name: ticks, extra: i)
+  }
+  short.perfFrame()
+  let before: Int = short.perfWritten() - short.perfOldest()
+  sleep(ms: 1200)
+  short.perfFrame()
+  log(
+    "a window of one second: {before} events, {short.perfWritten() - short.perfOldest()} after 1.2 s"
+  )
+  short.freePerfHub()
+}
+
+func cost() {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowEvents: 16384, ringEvents: 16384 }
+  )
+  let zone: PerfName = hub.perfName(name: "zone")
+  let ring: PerfRing = hub.perfThreadRing(name: "main")
+  var spent: Int = 0
+  loop var batch: Int = 0, batch < 125, ++batch {
+    let started: Int = nowNs()
+    loop var i: Int = 0, i < 8000, ++i {
+      perfZoneBegin(ring: ring, name: zone)
+      perfZoneEnd(ring: ring, name: zone)
+    }
+    spent = spent + nowNs() - started
+    hub.perfFrame()
+  }
+  let onNs: Int = spent / 1000000
+  hub.perfSetRecording(on: false)
+  let offStarted: Int = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    perfZoneBegin(ring: ring, name: zone)
+    perfZoneEnd(ring: ring, name: zone)
+  }
+  let offTotal: Int = nowNs() - offStarted
+  let offNs: Int = offTotal / 1000000
+  let writtenOff: Int = hub.perfWritten()
+  hub.perfFrame()
+  if getEnv(name: "RAE_PERF_COST") is "1" {
+    log(
+      "cost: one million zones, {spent / 1000} us on ({spent / 1000000} ns a zone), {offTotal / 1000} us off ({offTotal / 1000} ps a zone)"
+    )
+  }
+  log(
+    "off: nothing written {hub.perfWritten() is writtenOff}; a zone under 1000 ns on {onNs < 1000}, under 100 ns off {offNs < 100}"
+  )
+  hub.freePerfHub()
+}
+
+func main() {
+  names()
+  inStep()
+  overCapacity()
+  window()
+  cost()
+}
