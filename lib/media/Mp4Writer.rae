@@ -1,0 +1,647 @@
+# media/Mp4Writer — the ISO base media file format (MP4) and QuickTime (MOV)
+# written in Rae, beside the reader (media/Mp4, docs/video-design.md §3.4):
+# boxes, sample entries and sample tables, as pure functions over bytes. The
+# caller writes the file (raeVideo's video/MediaWriter: ftyp, mdat, then the
+# moov these build).
+#
+#     var table: SampleTable = createSampleTable()
+#     ... per packet: table.chunkOffsets.add(...), table.sizes.add(...), ...
+#     let entry: List(UInt8) = visualSampleEntry(container: .mp4, codec: "avc1", ...)
+#     let trak: List(UInt8) = trakBox(container: .mp4, header: header,
+#     sampleEntry: entry, table: table)
+#     var movie: List(UInt8) = mvhdBox(timescale: 48000, duration: length, nextTrackId: 2)
+#     putBytes(bytes: movie, more: trak)
+#     let moov: List(UInt8) = box(kind: "moov", body: movie)
+#
+# What it writes: ftyp; a movie box (moov) with mvhd and, per track, tkhd, an
+# edit (edts/elst) when the track has one, mdia (mdhd, hdlr, minf with
+# vmhd/smhd, dinf, and stbl: stsd, stts, stss, ctts, stsc, stsz, co64). Sample
+# entries: H.264 (avc1 + avcC), HEVC (hvc1 + hvcC), ProRes (apco ... ap4h),
+# DNxHD (AVdn), FFV1 (with its glbl), each with a colr box (BT.709); AAC (mp4a
+# + esds, and its pre-roll as a roll sample group); 16-bit PCM (MOV's sowt).
+import Math
+
+enum ContainerKind { mov, mp4 }
+
+# One track's sample table: each chunk is what one write gave (a packet, or a
+# block of PCM frames), its samples one after another in the file
+type SampleTable {
+  chunkOffsets: List(Int)
+  chunkSamples: List(Int)
+  # a size per sample, or every sample `constantSize` (PCM) when it is > 0
+  sizes: List(Int)
+  constantSize: Int
+  sampleCount: Int
+  # a duration per sample (track units), and its composition offset (shown at
+  # decode time + offset)
+  durations: List(Int)
+  compositionOffsets: List(Int)
+  # 1-based sync samples; all are when `allSync`
+  syncSamples: List(Int)
+  allSync: Bool
+}
+
+func createSampleTable() ret SampleTable {
+  ret SampleTable {
+    chunkOffsets: {}
+    chunkSamples: {}
+    sizes: {}
+    constantSize: 0
+    sampleCount: 0
+    durations: {}
+    compositionOffsets: {}
+    syncSamples: {}
+    allSync: true
+  }
+}
+
+# ----- bytes, big-endian -----
+func putU8(bytes: mod List(UInt8), value: view Int) {
+  bytes.add(value: (value bitand 255) as UInt8)
+}
+
+func putU16(bytes: mod List(UInt8), value: view Int) {
+  putU8(bytes: bytes, value: value shr 8)
+  putU8(bytes: bytes, value: value)
+}
+
+func putU32(bytes: mod List(UInt8), value: view Int) {
+  putU8(bytes: bytes, value: value shr 24)
+  putU8(bytes: bytes, value: value shr 16)
+  putU8(bytes: bytes, value: value shr 8)
+  putU8(bytes: bytes, value: value)
+}
+
+func putU64(bytes: mod List(UInt8), value: view Int) {
+  putU32(bytes: bytes, value: value shr 32)
+  putU32(bytes: bytes, value: value)
+}
+
+func putText(bytes: mod List(UInt8), text: view String) {
+  loop var i: Int = 0, i < text.length(), ++i {
+    putU8(bytes: bytes, value: text.byteAt(index: i))
+  }
+}
+
+func putZeros(bytes: mod List(UInt8), count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: 0 as UInt8)
+  }
+}
+
+func putBytes(bytes: mod List(UInt8), more: view List(UInt8)) {
+  loop let byte: UInt8 in more {
+    bytes.add(value: byte)
+  }
+}
+
+# A box: its size, its four characters, its body
+func box(kind: view String, body: view List(UInt8)) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: body.length() + 8)
+  putU32(bytes: bytes, value: body.length() + 8)
+  putText(bytes: bytes, text: kind)
+  putBytes(bytes: bytes, more: body)
+  ret bytes
+}
+
+# A full box: version and flags before the body
+func fullBox(
+  kind: view String
+  version: view Int
+  flags: view Int
+  body: view List(UInt8)
+) ret List(UInt8) {
+  var head: List(UInt8) = List.create(UInt8, cap: body.length() + 4)
+  putU8(bytes: head, value: version)
+  putU8(bytes: head, value: flags shr 16)
+  putU16(bytes: head, value: flags)
+  putBytes(bytes: head, more: body)
+  ret box(kind: kind, body: head)
+}
+
+func putMatrix(bytes: mod List(UInt8)) {
+  putU32(bytes: bytes, value: 65536)
+  putZeros(bytes: bytes, count: 12)
+  putU32(bytes: bytes, value: 65536)
+  putZeros(bytes: bytes, count: 12)
+  putU32(bytes: bytes, value: 1073741824)
+}
+
+# ----- the file's first box -----
+func ftypBox(container: view ContainerKind) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  if container is ContainerKind.mov {
+    putText(bytes: body, text: "qt  ")
+    putU32(bytes: body, value: 0)
+    putText(bytes: body, text: "qt  ")
+  } else {
+    putText(bytes: body, text: "isom")
+    putU32(bytes: body, value: 512)
+    putText(bytes: body, text: "isom")
+    putText(bytes: body, text: "iso2")
+    putText(bytes: body, text: "mp41")
+  }
+  ret box(kind: "ftyp", body: body)
+}
+
+# ----- sample entries -----
+
+# A visual sample entry with its configuration box (when `configKind` is not
+# "") and a colr box: BT.709 primaries, transfer and matrix, limited range
+func visualSampleEntry(
+  container: view ContainerKind
+  codec: view String
+  width: view Int
+  height: view Int
+  config: view List(UInt8)
+  configKind: view String
+) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  putZeros(bytes: body, count: 6)
+  putU16(bytes: body, value: 1)
+  putZeros(bytes: body, count: 16)
+  putU16(bytes: body, value: width)
+  putU16(bytes: body, value: height)
+  putU32(bytes: body, value: 4718592)
+  putU32(bytes: body, value: 4718592)
+  putU32(bytes: body, value: 0)
+  putU16(bytes: body, value: 1)
+  # the compressor name: a Pascal string in 32 bytes
+  let name: String = "Rae video"
+  putU8(bytes: body, value: name.length())
+  putText(bytes: body, text: name)
+  putZeros(bytes: body, count: 31 - name.length())
+  putU16(bytes: body, value: 24)
+  putU16(bytes: body, value: 65535)
+  if configKind.length() > 0 and config.length() > 0 {
+    putBytes(bytes: body, more: box(kind: configKind, body: config))
+  }
+  var colr: List(UInt8) = {}
+  if container is ContainerKind.mov {
+    putText(bytes: colr, text: "nclc")
+    putU16(bytes: colr, value: 1)
+    putU16(bytes: colr, value: 1)
+    putU16(bytes: colr, value: 1)
+  } else {
+    putText(bytes: colr, text: "nclx")
+    putU16(bytes: colr, value: 1)
+    putU16(bytes: colr, value: 1)
+    putU16(bytes: colr, value: 1)
+    putU8(bytes: colr, value: 0)
+  }
+  putBytes(bytes: body, more: box(kind: "colr", body: colr))
+  ret box(kind: codec, body: body)
+}
+
+# A descriptor of the MPEG-4 systems layer: its tag and a one-byte length
+func descriptor(tag: view Int, body: view List(UInt8)) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: body.length() + 2)
+  putU8(bytes: bytes, value: tag)
+  putU8(bytes: bytes, value: body.length())
+  putBytes(bytes: bytes, more: body)
+  ret bytes
+}
+
+# The esds box of an AAC track: the elementary stream descriptor around its
+# AudioSpecificConfig
+func esdsBox(audioSpecificConfig: view List(UInt8)) ret List(UInt8) {
+  var decoderConfig: List(UInt8) = {}
+  putU8(bytes: decoderConfig, value: 64)
+  putU8(bytes: decoderConfig, value: 21)
+  putZeros(bytes: decoderConfig, count: 3)
+  putU32(bytes: decoderConfig, value: 0)
+  putU32(bytes: decoderConfig, value: 0)
+  putBytes(bytes: decoderConfig, more: descriptor(tag: 5, body: audioSpecificConfig))
+  var elementary: List(UInt8) = {}
+  putU16(bytes: elementary, value: 0)
+  putU8(bytes: elementary, value: 0)
+  putBytes(bytes: elementary, more: descriptor(tag: 4, body: decoderConfig))
+  var sync: List(UInt8) = {}
+  putU8(bytes: sync, value: 2)
+  putBytes(bytes: elementary, more: descriptor(tag: 6, body: sync))
+  ret fullBox(
+    kind: "esds"
+    version: 0
+    flags: 0
+    body: descriptor(tag: 3, body: elementary)
+  )
+}
+
+# A sound sample entry (version 0): AAC (mp4a, with its esds) or 16-bit PCM
+# (sowt, little-endian)
+func soundSampleEntry(
+  codec: view String
+  channels: view Int
+  sampleRate: view Int
+  config: view List(UInt8)
+) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  putZeros(bytes: body, count: 6)
+  putU16(bytes: body, value: 1)
+  putZeros(bytes: body, count: 8)
+  putU16(bytes: body, value: channels)
+  putU16(bytes: body, value: 16)
+  putU16(bytes: body, value: 0)
+  putU16(bytes: body, value: 0)
+  putU32(bytes: body, value: sampleRate * 65536)
+  if codec is "mp4a" {
+    putBytes(bytes: body, more: esdsBox(audioSpecificConfig: config))
+  }
+  ret box(kind: codec, body: body)
+}
+
+# ----- sample tables -----
+
+# stts: runs of equal durations
+func sttsBox(table: view SampleTable) ret List(UInt8) {
+  var entries: List(UInt8) = {}
+  var runs: Int = 0
+  var i: Int = 0
+  loop i < table.durations.length() {
+    let duration: Int = table.durations.copyAtDefault(index: i)
+    var run: Int = 1
+    loop i + run < table.durations.length() and table.durations.copyAtDefault(index: i + run) is duration {
+      run = run + 1
+    }
+    putU32(bytes: entries, value: run)
+    putU32(bytes: entries, value: duration)
+    runs = runs + 1
+    i = i + run
+  }
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: runs)
+  putBytes(bytes: body, more: entries)
+  ret fullBox(
+    kind: "stts"
+    version: 0
+    flags: 0
+    body: body
+  )
+}
+
+func stssBox(table: view SampleTable) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: table.syncSamples.length())
+  loop let sample: Int in table.syncSamples {
+    putU32(bytes: body, value: sample)
+  }
+  ret fullBox(
+    kind: "stss"
+    version: 0
+    flags: 0
+    body: body
+  )
+}
+
+# ctts (version 1, signed offsets): runs of equal composition offsets; none
+# when every offset is 0
+func cttsBox(table: view SampleTable) ret List(UInt8) {
+  var shifted: Bool = false
+  loop let offset: Int in table.compositionOffsets {
+    if offset is not 0 {
+      shifted = true
+    }
+  }
+  if not shifted {
+    ret List(UInt8) {}
+  }
+  var entries: List(UInt8) = {}
+  var runs: Int = 0
+  var i: Int = 0
+  loop i < table.compositionOffsets.length() {
+    let offset: Int = table.compositionOffsets.copyAtDefault(index: i)
+    var run: Int = 1
+    loop i + run < table.compositionOffsets.length() and table.compositionOffsets.copyAtDefault(
+      index: i + run
+    ) is offset {
+      run = run + 1
+    }
+    putU32(bytes: entries, value: run)
+    putU32(bytes: entries, value: offset)
+    runs = runs + 1
+    i = i + run
+  }
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: runs)
+  putBytes(bytes: body, more: entries)
+  ret fullBox(
+    kind: "ctts"
+    version: 1
+    flags: 0
+    body: body
+  )
+}
+
+# stsc: where the number of samples per chunk changes
+func stscBox(table: view SampleTable) ret List(UInt8) {
+  var entries: List(UInt8) = {}
+  var runs: Int = 0
+  var previous: Int = -1
+  loop var chunk: Int = 0, chunk < table.chunkSamples.length(), ++chunk {
+    let samples: Int = table.chunkSamples.copyAtDefault(index: chunk)
+    if samples is not previous {
+      putU32(bytes: entries, value: chunk + 1)
+      putU32(bytes: entries, value: samples)
+      putU32(bytes: entries, value: 1)
+      runs = runs + 1
+      previous = samples
+    }
+  }
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: runs)
+  putBytes(bytes: body, more: entries)
+  ret fullBox(
+    kind: "stsc"
+    version: 0
+    flags: 0
+    body: body
+  )
+}
+
+func stszBox(table: view SampleTable) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  if table.constantSize > 0 {
+    putU32(bytes: body, value: table.constantSize)
+    putU32(bytes: body, value: table.sampleCount)
+  } else {
+    putU32(bytes: body, value: 0)
+    putU32(bytes: body, value: table.sizes.length())
+    loop let size: Int in table.sizes {
+      putU32(bytes: body, value: size)
+    }
+  }
+  ret fullBox(
+    kind: "stsz"
+    version: 0
+    flags: 0
+    body: body
+  )
+}
+
+func co64Box(table: view SampleTable) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: table.chunkOffsets.length())
+  loop let offset: Int in table.chunkOffsets {
+    putU64(bytes: body, value: offset)
+  }
+  ret fullBox(
+    kind: "co64"
+    version: 0
+    flags: 0
+    body: body
+  )
+}
+
+# AAC's pre-roll as a sample group (sgpd + sbgp, group type roll): every
+# sample needs the one before it to decode right (roll distance -1), as
+# Apple writes it; AVFoundation reads an AAC track's edit right only with it
+func rollGroupBoxes(table: view SampleTable) ret List(UInt8) {
+  var description: List(UInt8) = {}
+  putText(bytes: description, text: "roll")
+  putU32(bytes: description, value: 2)
+  putU32(bytes: description, value: 1)
+  putU16(bytes: description, value: 65535)
+  var mapping: List(UInt8) = {}
+  putText(bytes: mapping, text: "roll")
+  putU32(bytes: mapping, value: 1)
+  putU32(bytes: mapping, value: table.sampleCount)
+  putU32(bytes: mapping, value: 1)
+  var bytes: List(UInt8) = fullBox(
+    kind: "sgpd"
+    version: 1
+    flags: 0
+    body: description
+  )
+  putBytes(
+    bytes: bytes
+    more: fullBox(
+      kind: "sbgp"
+      version: 0
+      flags: 0
+      body: mapping
+    )
+  )
+  ret bytes
+}
+
+func stblBox(
+  sampleEntry: view List(UInt8)
+  table: view SampleTable
+  preRoll: view Bool
+) ret List(UInt8) {
+  var stsdBody: List(UInt8) = {}
+  putU32(bytes: stsdBody, value: 1)
+  putBytes(bytes: stsdBody, more: sampleEntry)
+  var body: List(UInt8) = {}
+  putBytes(
+    bytes: body
+    more: fullBox(
+      kind: "stsd"
+      version: 0
+      flags: 0
+      body: stsdBody
+    )
+  )
+  putBytes(bytes: body, more: sttsBox(table: table))
+  if not table.allSync {
+    putBytes(bytes: body, more: stssBox(table: table))
+  }
+  putBytes(bytes: body, more: cttsBox(table: table))
+  putBytes(bytes: body, more: stscBox(table: table))
+  putBytes(bytes: body, more: stszBox(table: table))
+  putBytes(bytes: body, more: co64Box(table: table))
+  if preRoll {
+    putBytes(bytes: body, more: rollGroupBoxes(table: table))
+  }
+  ret box(kind: "stbl", body: body)
+}
+
+# ----- a track, and the movie -----
+type TrackHeader {
+  trackId: Int
+  sound: Bool
+  width: Int
+  height: Int
+  # the track's units per second, its length in them, and in the movie's
+  timescale: Int
+  duration: Int
+  movieDuration: Int
+  # the edit: the part of the media shown, from `editStart` (track units), -1
+  # for none
+  editStart: Int
+  # AAC: each sample needs the one before (the roll group)
+  preRoll: Bool
+}
+
+func trakBox(
+  container: view ContainerKind
+  header: view TrackHeader
+  sampleEntry: view List(UInt8)
+  table: view SampleTable
+) ret List(UInt8) {
+  var tkhd: List(UInt8) = {}
+  putU32(bytes: tkhd, value: 0)
+  putU32(bytes: tkhd, value: 0)
+  putU32(bytes: tkhd, value: header.trackId)
+  putU32(bytes: tkhd, value: 0)
+  putU32(bytes: tkhd, value: header.movieDuration)
+  putZeros(bytes: tkhd, count: 8)
+  putU16(bytes: tkhd, value: 0)
+  putU16(bytes: tkhd, value: 0)
+  if header.sound {
+    putU16(bytes: tkhd, value: 256)
+  } else {
+    putU16(bytes: tkhd, value: 0)
+  }
+  putU16(bytes: tkhd, value: 0)
+  putMatrix(bytes: tkhd)
+  putU32(bytes: tkhd, value: header.width * 65536)
+  putU32(bytes: tkhd, value: header.height * 65536)
+  var body: List(UInt8) = {}
+  putBytes(
+    bytes: body
+    more: fullBox(
+      kind: "tkhd"
+      version: 0
+      flags: 3
+      body: tkhd
+    )
+  )
+  if header.editStart >= 0 {
+    var elst: List(UInt8) = {}
+    putU32(bytes: elst, value: 1)
+    putU32(bytes: elst, value: header.movieDuration)
+    putU32(bytes: elst, value: header.editStart)
+    putU32(bytes: elst, value: 65536)
+    putBytes(
+      bytes: body
+      more: box(
+        kind: "edts"
+        body: fullBox(
+          kind: "elst"
+          version: 0
+          flags: 0
+          body: elst
+        )
+      )
+    )
+  }
+  var mdhd: List(UInt8) = {}
+  putU32(bytes: mdhd, value: 0)
+  putU32(bytes: mdhd, value: 0)
+  putU32(bytes: mdhd, value: header.timescale)
+  putU32(bytes: mdhd, value: header.duration)
+  putU16(bytes: mdhd, value: 21956)
+  putU16(bytes: mdhd, value: 0)
+  var hdlr: List(UInt8) = {}
+  if container is ContainerKind.mov {
+    putText(bytes: hdlr, text: "mhlr")
+  } else {
+    putU32(bytes: hdlr, value: 0)
+  }
+  var handlerName: String = "VideoHandler"
+  if header.sound {
+    putText(bytes: hdlr, text: "soun")
+    handlerName = "SoundHandler"
+  } else {
+    putText(bytes: hdlr, text: "vide")
+  }
+  putZeros(bytes: hdlr, count: 12)
+  putText(bytes: hdlr, text: handlerName)
+  putU8(bytes: hdlr, value: 0)
+  var minf: List(UInt8) = {}
+  if header.sound {
+    var smhd: List(UInt8) = {}
+    putU32(bytes: smhd, value: 0)
+    putBytes(
+      bytes: minf
+      more: fullBox(
+        kind: "smhd"
+        version: 0
+        flags: 0
+        body: smhd
+      )
+    )
+  } else {
+    var vmhd: List(UInt8) = {}
+    putZeros(bytes: vmhd, count: 8)
+    putBytes(
+      bytes: minf
+      more: fullBox(
+        kind: "vmhd"
+        version: 0
+        flags: 1
+        body: vmhd
+      )
+    )
+  }
+  var dref: List(UInt8) = {}
+  putU32(bytes: dref, value: 1)
+  putBytes(
+    bytes: dref
+    more: fullBox(
+      kind: "url "
+      version: 0
+      flags: 1
+      body: List(UInt8) {}
+    )
+  )
+  putBytes(
+    bytes: minf
+    more: box(
+      kind: "dinf"
+      body: fullBox(
+        kind: "dref"
+        version: 0
+        flags: 0
+        body: dref
+      )
+    )
+  )
+  putBytes(
+    bytes: minf
+    more: stblBox(sampleEntry: sampleEntry, table: table, preRoll: header.preRoll)
+  )
+  var mdia: List(UInt8) = {}
+  putBytes(
+    bytes: mdia
+    more: fullBox(
+      kind: "mdhd"
+      version: 0
+      flags: 0
+      body: mdhd
+    )
+  )
+  putBytes(
+    bytes: mdia
+    more: fullBox(
+      kind: "hdlr"
+      version: 0
+      flags: 0
+      body: hdlr
+    )
+  )
+  putBytes(bytes: mdia, more: box(kind: "minf", body: minf))
+  putBytes(bytes: body, more: box(kind: "mdia", body: mdia))
+  ret box(kind: "trak", body: body)
+}
+
+func mvhdBox(timescale: view Int, duration: view Int, nextTrackId: view Int) ret List(UInt8) {
+  var body: List(UInt8) = {}
+  putU32(bytes: body, value: 0)
+  putU32(bytes: body, value: 0)
+  putU32(bytes: body, value: timescale)
+  putU32(bytes: body, value: duration)
+  putU32(bytes: body, value: 65536)
+  putU16(bytes: body, value: 256)
+  putZeros(bytes: body, count: 10)
+  putMatrix(bytes: body)
+  putZeros(bytes: body, count: 24)
+  putU32(bytes: body, value: nextTrackId)
+  ret fullBox(
+    kind: "mvhd"
+    version: 0
+    flags: 0
+    body: body
+  )
+}

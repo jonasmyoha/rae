@@ -1,0 +1,265 @@
+# media/Mp4Writer: files built in memory with its boxes and read back with
+# media/Mp4.
+#
+# 1. An MP4 with an H.264 track (avcC, a keyframe and two others, composition
+#    offsets) and an AAC track (esds, an edit trimming 2112 frames of
+#    priming, the roll group), each packet its own chunk in the mdat.
+# 2. A MOV with 16-bit PCM (sowt): constant-size samples, chunks of many.
+open Sys
+open media/Mp4
+open media/Mp4Writer
+
+func showList(name: view String, values: view List(Int)) {
+  var text: String = ""
+  loop let value: Int in values {
+    if text.length() > 0 {
+      text = "{text} "
+    }
+    text = "{text}{value}"
+  }
+  if text.length() is 0 {
+    text = "none"
+  }
+  log("  {name}: {text}")
+}
+
+func showBytes(name: view String, values: view List(UInt8)) {
+  var numbers: List(Int) = {}
+  loop let value: UInt8 in values {
+    numbers.add(value: value as Int)
+  }
+  showList(name: name, values: numbers)
+}
+
+func showTrack(movie: view Mp4Movie, index: view Int) {
+  if let track: view Mp4Track = movie.tracks.viewAt(index: index) {
+    log(
+      "track {track.trackId}: {track.handler} {track.codec}, timescale {track.timescale}, duration {track.duration}"
+    )
+    if track.handler is "vide" {
+      log("  {track.width}x{track.height}")
+    } else {
+      log("  {track.channels} channels at {track.sampleRate} Hz, object type {track.objectType}")
+    }
+    showBytes(name: "config", values: track.codecConfig)
+    showList(name: "sizes", values: track.sampleSizes)
+    showList(name: "offsets", values: track.sampleOffsets)
+    showList(name: "times", values: track.sampleTimes)
+    showList(name: "composition", values: track.compositionOffsets)
+    showList(name: "sync", values: track.syncSamples)
+    log("  shown: {track.presentationLength} from {track.presentationStart}")
+  }
+}
+
+# Adds a packet of `size` bytes (each its own chunk at the file's end) to a table
+func addPacket(
+  file: mod List(UInt8)
+  table: mod SampleTable
+  size: view Int
+  duration: view Int
+  compositionOffset: view Int
+  keyframe: view Bool
+) {
+  table.chunkOffsets.add(value: file.length())
+  table.chunkSamples.add(value: 1)
+  loop var i: Int = 0, i < size, ++i {
+    putU8(bytes: file, value: table.sampleCount * 16 + i)
+  }
+  table.sizes.add(value: size)
+  table.durations.add(value: duration)
+  table.compositionOffsets.add(value: compositionOffset)
+  table.sampleCount = table.sampleCount + 1
+  if keyframe {
+    table.syncSamples.add(value: table.sampleCount)
+  } else {
+    table.allSync = false
+  }
+}
+
+func writeMp4() ret List(UInt8) {
+  var file: List(UInt8) = ftypBox(container: ContainerKind.mp4)
+  var mdat: List(UInt8) = {}
+  putU32(bytes: mdat, value: 0)
+  putText(bytes: mdat, text: "mdat")
+  putBytes(bytes: file, more: mdat)
+  let mdatStart: Int = file.length() - 8
+  var video: SampleTable = createSampleTable()
+  var sound: SampleTable = createSampleTable()
+  addPacket(
+    file: file
+    table: video
+    size: 10
+    duration: 512
+    compositionOffset: 512
+    keyframe: true
+  )
+  addPacket(
+    file: file
+    table: sound
+    size: 5
+    duration: 1024
+    compositionOffset: 0
+    keyframe: true
+  )
+  addPacket(
+    file: file
+    table: video
+    size: 4
+    duration: 512
+    compositionOffset: 1024
+    keyframe: false
+  )
+  addPacket(
+    file: file
+    table: video
+    size: 6
+    duration: 512
+    compositionOffset: 0
+    keyframe: false
+  )
+  loop var i: Int = 0, i < 3, ++i {
+    addPacket(
+      file: file
+      table: sound
+      size: 7
+      duration: 1024
+      compositionOffset: 0
+      keyframe: true
+    )
+  }
+  let mdatSize: Int = file.length() - mdatStart
+  file.set(index: mdatStart, value: ((mdatSize shr 24) bitand 255) as UInt8)
+  file.set(index: mdatStart + 1, value: ((mdatSize shr 16) bitand 255) as UInt8)
+  file.set(index: mdatStart + 2, value: ((mdatSize shr 8) bitand 255) as UInt8)
+  file.set(index: mdatStart + 3, value: (mdatSize bitand 255) as UInt8)
+  # avcC's first bytes (version 1, High profile, level 4.0, 4-byte lengths, no
+  # parameter sets) and AAC-LC at 48 kHz in stereo
+  let avcC: List(UInt8) = List(UInt8) {
+    1
+    100
+    0
+    40
+    255
+    224
+    0
+  }
+  let audioSpecificConfig: List(UInt8) = List(UInt8) { 17, 144 }
+  var movie: List(UInt8) = mvhdBox(timescale: 48000, duration: 1984, nextTrackId: 3)
+  putBytes(
+    bytes: movie
+    more: trakBox(
+      container: ContainerKind.mp4
+      header: TrackHeader {
+        trackId: 1
+        sound: false
+        width: 320
+        height: 240
+        timescale: 12800
+        duration: 1536
+        movieDuration: 5760
+        editStart: -1
+        preRoll: false
+      }
+      sampleEntry: visualSampleEntry(
+        container: ContainerKind.mp4
+        codec: "avc1"
+        width: 320
+        height: 240
+        config: avcC
+        configKind: "avcC"
+      )
+      table: video
+    )
+  )
+  putBytes(
+    bytes: movie
+    more: trakBox(
+      container: ContainerKind.mp4
+      header: TrackHeader {
+        trackId: 2
+        sound: true
+        width: 0
+        height: 0
+        timescale: 48000
+        duration: 4096
+        movieDuration: 1984
+        editStart: 2112
+        preRoll: true
+      }
+      sampleEntry: soundSampleEntry(
+        codec: "mp4a"
+        channels: 2
+        sampleRate: 48000
+        config: audioSpecificConfig
+      )
+      table: sound
+    )
+  )
+  putBytes(bytes: file, more: box(kind: "moov", body: movie))
+  ret file
+}
+
+func writeMov() ret List(UInt8) {
+  var file: List(UInt8) = ftypBox(container: ContainerKind.mov)
+  var mdat: List(UInt8) = {}
+  putU32(bytes: mdat, value: 8 + 4 * 10)
+  putText(bytes: mdat, text: "mdat")
+  putBytes(bytes: file, more: mdat)
+  var table: SampleTable = createSampleTable()
+  table.constantSize = 4
+  # two chunks: 6 frames, then 4 (stereo, 16 bits)
+  table.chunkOffsets.add(value: file.length())
+  table.chunkSamples.add(value: 6)
+  putZeros(bytes: file, count: 24)
+  table.chunkOffsets.add(value: file.length())
+  table.chunkSamples.add(value: 4)
+  putZeros(bytes: file, count: 16)
+  loop var i: Int = 0, i < 10, ++i {
+    table.durations.add(value: 1)
+    table.compositionOffsets.add(value: 0)
+  }
+  table.sampleCount = 10
+  var movie: List(UInt8) = mvhdBox(timescale: 44100, duration: 10, nextTrackId: 2)
+  putBytes(
+    bytes: movie
+    more: trakBox(
+      container: ContainerKind.mov
+      header: TrackHeader {
+        trackId: 1
+        sound: true
+        width: 0
+        height: 0
+        timescale: 44100
+        duration: 10
+        movieDuration: 10
+        editStart: -1
+        preRoll: false
+      }
+      sampleEntry: soundSampleEntry(
+        codec: "sowt"
+        channels: 2
+        sampleRate: 44100
+        config: List(UInt8) {}
+      )
+      table: table
+    )
+  )
+  putBytes(bytes: file, more: box(kind: "moov", body: movie))
+  ret file
+}
+
+func main() {
+  let mp4: List(UInt8) = writeMp4()
+  let first: Mp4Movie = readMp4Movie(bytes: mp4)
+  log(
+    "mp4: {mp4.length()} bytes, '{first.error}', timescale {first.timescale}, duration {first.duration}, {first.tracks.length()} tracks"
+  )
+  showTrack(movie: first, index: 0)
+  showTrack(movie: first, index: 1)
+  let mov: List(UInt8) = writeMov()
+  let second: Mp4Movie = readMp4Movie(bytes: mov)
+  log(
+    "mov: {mov.length()} bytes, '{second.error}', timescale {second.timescale}, {second.tracks.length()} tracks"
+  )
+  showTrack(movie: second, index: 0)
+}
