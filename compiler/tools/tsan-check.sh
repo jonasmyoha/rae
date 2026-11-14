@@ -33,7 +33,8 @@ CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_cop
 1073_spawn_pool_fork_join 1074_spawn_pool_many 1075_spawn_resumable 1076_spawn_resumable_one_worker \
 1077_spawn_lend_view 1080_spawn_socket_waits \
 1081_spawn_blocking_extern 1083_spawn_file_wrappers 1288_sql_sqlite 1289_net_poller_wake 1290_network_connection 1292_wasm_embed 1302_wasm_capabilities 1396_spsc_ring_threads 1399_realtime_check_clean 1408_c_export_calls \
-1426_spawn_thread 1431_list_of_tasks_joined 1433_view_list_of_tasks 1434_list_of_void_tasks 1435_realtime_team"
+1426_spawn_thread 1431_list_of_tasks_joined 1433_view_list_of_tasks 1434_list_of_void_tasks 1435_realtime_team \
+1447_audio_parallel_render"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.
@@ -72,6 +73,16 @@ tsan_case() {
   # lib/wasm: WAMR (tools/wamr/build.sh), as `rae run` links it
   if grep -q 'runtime_wasm_embed.h' "$work/out.c"; then
     case_c+=("${RAE_WAMR:-$HOME/.cache/rae/wamr/install}/lib/librae_wamr.a")
+  fi
+  # packages/audio (a case's git dependency, fetched by the emit): its C glue,
+  # built here with TSan too (Objective-C on Apple, as its native build does)
+  if grep -q 'rae_audio.h' "$work/out.c"; then
+    audio_native="$dir/.rae/deps/audio/packages/audio/native"
+    if [ "$(uname)" = "Darwin" ]; then
+      case_c+=("-I$audio_native" "-x" "objective-c" "$audio_native/rae_audio_glue.c" "-x" "none")
+    else
+      case_c+=("-I$audio_native" "$audio_native/rae_audio_glue.c" "-ldl")
+    fi
   fi
   # lib/net/NetworkConnection: Network.framework, as `rae run` links it
   if grep -q 'runtime_network_apple.h' "$work/out.c"; then
