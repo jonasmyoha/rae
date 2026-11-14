@@ -8,12 +8,88 @@
 # fails it if the rendering allocated or locked. It prints the stage and the
 # frames of latency the engine adds beyond the device. With no output device it
 # says so and passes, as a machine without one has nothing to test.
+#
+# It runs in a mainLoop, so the same program runs in a browser
+# (compiler/tools/wasm_audio_check.sh, headless Chrome): there the device is
+# Web Audio's AudioWorklet, which asks the page for blocks between frames, and
+# a sleep would hold the page. Natively the loop sleeps 2 ms a turn.
 import Math
 import Sys
 open audio/Audio
 open audio/AudioClock
 open audio/AudioMixer
 open audio/Sound
+
+# The check's state: the engine, the tone, and where in its 2.3 s it is
+type SineCheck {
+  audio: AudioEngine
+  tone: Sound
+  left: VoiceId
+  startedNs: Int
+  # 0 the middle tone plays, 1 the left one too, 2 panned right
+  step: Int
+}
+
+func elapsedMs(check: view SineCheck) ret Int {
+  ret (nowNs() - check.startedNs) / 1000000
+}
+
+# One turn of the loop: false once the check is done (it has logged its
+# verdict and stopped the engine)
+func sineFrame(check: mod SineCheck) ret Bool {
+  when Target.isNative {
+    sleep(ms: 2)
+  }
+  check.audio.update()
+  let elapsed: Int = elapsedMs(check: check)
+  if check.step is 0 and elapsed >= 1100 {
+    check.left = check.audio.playAt(
+      sound: check.tone
+      bus: AudioBusKind.effects
+      gainDecibels: -3.0
+      pan: -1.0
+      looping: false
+      atSample: 0
+    )
+    check.step = 1
+  }
+  if check.step is 1 and elapsed >= 1600 {
+    check.audio.setVoicePan(voiceId: check.left, pan: 1.0)
+    check.step = 2
+  }
+  if elapsed < 2300 {
+    ret true
+  }
+  finishSineCheck(check: check)
+  ret false
+}
+
+func finishSineCheck(check: mod SineCheck) {
+  check.audio.update()
+  log(
+    "audioSine: the clock measured {floor(x: check.audio.clock.measuredSampleRate() as Float + 0.5)} Hz over {check.audio.clock.stamps} renders"
+  )
+  log(
+    "audioSine: on {deviceBackendName(device: check.audio.device)}, the output's latency at the end {deviceOutputLatencyFrames(
+      device: check.audio.device
+      sampleRate: check.audio.sampleRate
+    )} frames"
+  )
+  let callbacks: Int = check.audio.deviceCallbacks()
+  let underrun: Int = check.audio.underrunFrames()
+  let ended: Int = check.audio.voicesEnded
+  let deviceRenders: Bool = check.audio.deviceRenders
+  let blocks: Int = check.audio.stopAudio()
+  log(
+    "audioSine: {callbacks} callbacks, {blocks} blocks rendered, {ended} voices ended, {underrun} frames of underrun"
+  )
+  let threadRendered: Bool = deviceRenders or blocks >= 100
+  if callbacks < 100 or not threadRendered or ended is not 2 or underrun > 0 {
+    log("audioSine: FAILED")
+    exit(code: 1)
+  }
+  log("audioSine: passed")
+}
 
 func main() {
   var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
@@ -36,33 +112,16 @@ func main() {
     sampleRate: 48000
   ))
   let middle: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: 0.0)
-  sleep(ms: 1100)
-  let left: VoiceId = audio.playAt(
-    sound: tone
-    bus: AudioBusKind.effects
-    gainDecibels: -3.0
-    pan: -1.0
-    looping: false
-    atSample: 0
-  )
-  sleep(ms: 500)
-  audio.setVoicePan(voiceId: left, pan: 1.0)
-  sleep(ms: 700)
-  audio.update()
-  log(
-    "audioSine: the clock measured {floor(x: audio.clock.measuredSampleRate() as Float + 0.5)} Hz over {audio.clock.stamps} renders"
-  )
-  let callbacks: Int = audio.deviceCallbacks()
-  let underrun: Int = audio.underrunFrames()
-  let ended: Int = audio.voicesEnded
-  let blocks: Int = audio.stopAudio()
-  log(
-    "audioSine: {callbacks} callbacks, {blocks} blocks rendered, {ended} voices ended, {underrun} frames of underrun"
-  )
-  let threadRendered: Bool = audio.deviceRenders or blocks >= 100
-  if callbacks < 100 or not threadRendered or ended is not 2 or underrun > 0 {
-    log("audioSine: FAILED")
-    exit(code: 1)
+  var check: SineCheck = {
+    audio: own audio
+    tone: tone
+    left: { value: 0 }
+    startedNs: nowNs()
+    step: 0
   }
-  log("audioSine: passed")
+  mainLoop check {
+    if sineFrame(check: check) is false {
+      break
+    }
+  }
 }

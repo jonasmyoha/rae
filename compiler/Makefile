@@ -122,7 +122,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: realtime-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -219,6 +219,11 @@ tsan: build
 # (LLVM's clang; SKIP without it). `make test` runs it as a pre-suite case too.
 realtime-check: build
 	@bash tools/realtime-sanitize-check.sh
+
+# The audio package in the browser (docs/audio-design.md §11 step 3): its checks in headless
+# Chrome, muted. About a minute; not part of the full run.
+wasm-audio-check: build
+	@bash tools/wasm_audio_check.sh
 
 # The toolchain store and ./rae, from a fresh clone with an empty RAE_HOME. About two minutes,
 # which the full run cannot spare, so it is not part of it: run it when they change.
