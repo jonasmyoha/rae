@@ -1,0 +1,121 @@
+# audio/VoiceControls — what a game does with its sounds beyond play and stop
+# (docs/audio-design.md §10.5):
+#
+# - the playback rate of a voice, set while it plays and smoothed: a car's engine loop whose
+#   pitch rises with its speed (a loop's seam stays seamless, as the voice reads its first
+#   frame again after its last at any rate);
+# - a sound played with a small random spread of rate and gain, so a repeated shot or step does
+#   not sound the same each time. The spread comes from the caller's own Random (Math), made
+#   from a seed it chooses, so a run with the same seed plays the same;
+# - a cap per sound on its overlapping voices: past it the oldest (or the quietest) of that
+#   sound's voices fades out in 10 ms. audioMaxVoices (64) stays the hard limit of the mix; when
+#   all are busy a new voice takes the place of one already fading out, else the quietest, else
+#   the oldest, and never a stream.
+#
+#     audio.setVoiceRate(voiceId: engineVoice, rate: 1.0 + speed / 40.0, seconds: deltaTime)
+#     var random: Random = createRandom(seed: 7)
+#     let step: VoiceId = audio.playVaried(sound: footstep, bus: AudioBusKind.effects,
+#       gainDecibels: -6.0, variation: footstepVariation, random: random)
+#     audio.setSoundVoiceLimit(sound: gunshot, voiceLimit: 3, rule: AudioStealRule.oldest)
+import Math
+open audio/Audio
+open audio/AudioButler
+open audio/AudioMixer
+
+# Which of a sound's voices goes when it has too many
+enum AudioStealRule {
+  # the one that started first
+  oldest
+  # the one playing quietest now (the oldest of equals)
+  quietest
+}
+
+# How far a varied play may stray: a rate of 1 ± rateSpread (0.03 is 3 %, half a semitone) and a
+# gain of ± gainSpreadDecibels
+type SoundVariation {
+  rateSpread: Float
+  gainSpreadDecibels: Float
+}
+
+# The rate and gain one varied play gets
+type VariedPlay {
+  rate: Float
+  gainDecibels: Float
+}
+
+# A rate for a pitch `semitones` above the sound's own (12 is twice the rate)
+func semitonesToRate(semitones: view Float) ret Float {
+  ret Math.pow(base: 2.0, exp: semitones / 12.0)
+}
+
+# Set a sound voice's playback rate (1 its own pitch, 2 an octave up; held to 0.125 .. 8),
+# moving there over `seconds` (never quicker than 5 ms). A stream keeps its own rate.
+func setVoiceRate(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  rate: view Float
+  seconds: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setVoiceRate)
+  command.voiceId = mixerVoiceIdOf(streams: this.streams, voiceId: voiceId.value)
+  command.value = rate
+  command.other = Math.max(a: 0.0, b: seconds)
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# The next varied rate and gain from `random`: each spread evenly over its range
+func nextVariation(
+  variation: view SoundVariation
+  gainDecibels: view Float
+  random: mod Random
+) ret VariedPlay {
+  let rateShare: Float = random.nextFloat() * 2.0 - 1.0
+  let gainShare: Float = random.nextFloat() * 2.0 - 1.0
+  ret VariedPlay {
+    rate: 1.0 + variation.rateSpread * rateShare
+    gainDecibels: gainDecibels + variation.gainSpreadDecibels * gainShare
+  }
+}
+
+# Play `sound` once, centered, with its rate and gain varied by `variation` from `random`
+# (the caller's, from its own seed). The voice starts at that rate.
+func playVaried(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  variation: view SoundVariation
+  random: mod Random
+) ret VoiceId {
+  let varied: VariedPlay = nextVariation(
+    variation: variation
+    gainDecibels: gainDecibels
+    random: random
+  )
+  let voiceId: VoiceId = this.play(sound: sound, bus: bus, gainDecibels: varied.gainDecibels)
+  # right behind the play in the ring, so the voice starts at this rate (below zero: at once)
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setVoiceRate)
+  command.voiceId = voiceId.value
+  command.value = varied.rate
+  command.other = -1.0
+  let sent: Bool = this.sendCommand(command: command)
+  ret voiceId
+}
+
+# At most `voiceLimit` voices of `sound` at once (0: no cap); a play past it fades the oldest
+# or the quietest of them out in 10 ms, as `rule` says. Applies to the plays after this call.
+func setSoundVoiceLimit(
+  this: mod AudioEngine
+  sound: view Sound
+  voiceLimit: view Int
+  rule: view AudioStealRule
+) {
+  loop var i: Int = 0, i < this.sounds.length, ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.soundId is sound.soundId {
+        slot.voiceLimit = Math.max(a: 0, b: voiceLimit)
+        slot.stealQuietest = rule is AudioStealRule.quietest
+      }
+    }
+  }
+}

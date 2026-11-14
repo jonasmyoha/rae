@@ -97,6 +97,9 @@ type SoundSlot {
   live: Bool
   # freeSound asked; the samples go once the audio thread lets them go
   releasing: Bool
+  # at most this many of its voices at once, 0 for no cap (audio/VoiceControls)
+  voiceLimit: Int = 0
+  stealQuietest: Bool = false
 }
 
 # A voice the main thread knows is playing, and on which bus
@@ -513,6 +516,12 @@ func playFromAt(
   command.looping = looping
   command.atSample = atSample
   command.startFrame = startFrame
+  loop let slot: view SoundSlot in this.sounds {
+    if slot.soundId is sound.soundId {
+      command.voiceLimit = slot.voiceLimit
+      command.stealQuietest = slot.stealQuietest
+    }
+  }
   if this.offline {
     log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
   }

@@ -15,6 +15,7 @@
 import Math
 open audio/AudioGraph
 open audio/AudioSynth
+open audio/AudioVoice
 open audio/GraphCompile
 open audio/GraphNodes
 open audio/GraphTeam
@@ -25,8 +26,6 @@ open collections/SpscRing
 enum AudioBusKind { music, effects, alerts, voice }
 
 const audioBusCount: Int = 4
-
-const audioMaxVoices: Int = 64
 
 # Commands waiting for a later sample time (the event list, §6.2); more are
 # applied at once and counted in droppedEvents
@@ -46,6 +45,9 @@ enum AudioCommandKind {
   stopBus
   pauseVoice
   resumeVoice
+  # a sound voice's playback rate (`value`, 1 its own pitch), spread over `other` seconds; a
+  # stream plays at its own rate
+  setVoiceRate
   # the synth (audio/AudioSynth): `voiceId` is the note, `value` the
   # velocity (0..1), `bus` its bus
   noteOn
@@ -85,6 +87,12 @@ type AudioCommand {
   # a sound starts this many of its own frames in (a timeline clip entered
   # part-way, after a seek or at a loop's start)
   startFrame: Int
+  # a new voice's playback rate
+  rate: Float = 1.0
+  # at most this many voices of the sound at once (0: no cap); past it the oldest, or with
+  # `stealQuietest` the quietest, of them fades out in 10 ms
+  voiceLimit: Int = 0
+  stealQuietest: Bool = false
 }
 
 enum AudioFeedbackKind { voiceEnded }
@@ -100,67 +108,6 @@ type AudioFeedback {
   kind: AudioFeedbackKind
   voiceId: Int
   atSample: Int
-}
-
-# A value that moves linearly to its target over a number of frames, so a
-# change never clicks.
-type AudioRamp {
-  current: Float
-  target: Float
-  step: Float
-  framesLeft: Int
-}
-
-func steadyRamp(value: view Float) ret AudioRamp {
-  ret AudioRamp { current: value, target: value, step: 0.0, framesLeft: 0 }
-}
-
-func rampTo(ramp: mod AudioRamp, target: view Float, frames: view Int) {
-  ramp.target = target
-  if frames <= 0 {
-    ramp.current = target
-    ramp.framesLeft = 0
-    ret
-  }
-  ramp.step = (target - ramp.current) / (frames as Float)
-  ramp.framesLeft = frames
-}
-
-func rampAdvance(ramp: mod AudioRamp) {
-  if ramp.framesLeft > 0 {
-    ramp.framesLeft = ramp.framesLeft - 1
-    if ramp.framesLeft is 0 {
-      ramp.current = ramp.target
-    } else {
-      ramp.current = ramp.current + ramp.step
-    }
-  }
-}
-
-type AudioVoice {
-  active: Bool
-  voiceId: Int
-  soundId: Int
-  samples: Buffer(Float)
-  frameCount: Int
-  channels: Int
-  # where in the sound, in its frames, and how far one output frame moves
-  position: Float64
-  step: Float64
-  bus: Int
-  gain: AudioRamp
-  pan: AudioRamp
-  looping: Bool
-  # output frames to wait before the first sample
-  delayFrames: Int
-  # ends when the gain reaches 0
-  stopping: Bool
-  paused: Bool
-  isStream: Bool
-  stream: SpscRing(Float)
-  streamFinished: Atomic(Bool)
-  # frames a stream voice played as silence because its ring was empty
-  underrunFrames: Int
 }
 
 type AudioMixer {
@@ -180,6 +127,8 @@ type AudioMixer {
   # bit b set: bus b is paused (its voices keep their place and play nothing)
   pausedBuses: Int
   sampleTime: Int
+  # the sample time the part being rendered starts at (a block is cut at each event)
+  partStart: Int = 0
   # commands waiting for their sample time, in time order: the first
   # `eventCount` of a list made `audioMaxEvents` long once (no allocation on
   # the audio thread)
@@ -190,9 +139,11 @@ type AudioMixer {
   duckActivity: Buffer(Float)
   # commands that came after their sample time (applied at the next block)
   lateCommands: Int
-  # voices that could not start (all were busy), feedback the ring refused,
-  # and commands the full event list applied at once
+  # voices that could not start (all were busy, and none could be stolen), voices
+  # taken for a new one when all were busy, feedback the ring refused, and commands the
+  # full event list applied at once
   droppedVoices: Int
+  stolenVoices: Int = 0
   droppedFeedback: Int
   droppedEvents: Int
   feedback: SpscRing(AudioFeedback)
@@ -399,38 +350,61 @@ func reportVoiceEnded(mixer: mod AudioMixer, voiceId: view Int) {
 }
 
 func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
-  let sampleTime: Int = mixer.sampleTime
-  let step: Float64 = (command.sampleRate as Float64) / (mixer.sampleRate as Float64)
-  loop var index: Int = 0, index < audioMaxVoices, ++index {
-    if let voice: mod AudioVoice = mixer.voices.modAt(index: index) {
-      if not voice.active {
-        voice.active = true
-        voice.voiceId = command.voiceId
-        voice.soundId = command.soundId
-        voice.samples = command.samples
-        voice.frameCount = command.frameCount
-        voice.channels = command.channels
-        voice.position = command.startFrame as Float64
-        voice.step = step
-        voice.bus = command.bus
-        voice.gain = steadyRamp(value: command.value)
-        voice.pan = steadyRamp(value: command.other)
-        voice.looping = command.looping
-        voice.delayFrames = 0
-        if command.atSample > sampleTime {
-          voice.delayFrames = command.atSample - sampleTime
-        }
-        voice.stopping = false
-        voice.paused = false
-        voice.isStream = command.isStream
-        voice.stream = command.stream
-        voice.streamFinished = command.streamFinished
-        voice.underrunFrames = 0
-        ret
-      }
+  if command.voiceLimit > 0 {
+    limitSoundVoices(
+      voices: mixer.voices
+      soundId: command.soundId
+      voiceLimit: command.voiceLimit
+      byGain: command.stealQuietest
+      fadeFrames: mixer.smoothingFrames * 2
+    )
+  }
+  let slot: Int = voiceSlot(voices: mixer.voices)
+  if slot < 0 {
+    mixer.droppedVoices = mixer.droppedVoices + 1
+    ret
+  }
+  # all were busy: the slot's voice is taken for the new one, and ends here
+  var stolenVoiceId: Int = -1
+  if let taken: view AudioVoice = mixer.voices.viewAt(index: slot) {
+    if taken.active {
+      stolenVoiceId = taken.voiceId
     }
   }
-  mixer.droppedVoices = mixer.droppedVoices + 1
+  if stolenVoiceId >= 0 {
+    mixer.stolenVoices = mixer.stolenVoices + 1
+    reportVoiceEnded(mixer: mixer, voiceId: stolenVoiceId)
+  }
+  # a voice due inside the block starts in the part that begins at its sample
+  let sampleTime: Int = mixer.partStart
+  let step: Float64 = (command.sampleRate as Float64) / (mixer.sampleRate as Float64)
+  if let voice: mod AudioVoice = mixer.voices.modAt(index: slot) {
+    voice.active = true
+    voice.voiceId = command.voiceId
+    voice.soundId = command.soundId
+    voice.samples = command.samples
+    voice.frameCount = command.frameCount
+    voice.channels = command.channels
+    voice.position = command.startFrame as Float64
+    voice.step = step
+    voice.rate = steadyRamp(value: command.rate)
+    voice.startedAt = sampleTime
+    voice.bus = command.bus
+    voice.gain = steadyRamp(value: command.value)
+    voice.pan = steadyRamp(value: command.other)
+    voice.looping = command.looping
+    voice.delayFrames = 0
+    if command.atSample > sampleTime {
+      voice.delayFrames = command.atSample - sampleTime
+      voice.startedAt = command.atSample
+    }
+    voice.stopping = false
+    voice.paused = false
+    voice.isStream = command.isStream
+    voice.stream = command.stream
+    voice.streamFinished = command.streamFinished
+    voice.underrunFrames = 0
+  }
 }
 
 func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
@@ -528,6 +502,14 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
             rampTo(ramp: voice.gain, target: command.value, frames: changeFrames)
           } else if command.kind is AudioCommandKind.setVoicePan {
             rampTo(ramp: voice.pan, target: command.value, frames: changeFrames)
+          } else if command.kind is AudioCommandKind.setVoiceRate {
+            let rate: Float = clamp(val: command.value, low: 0.125, high: 8.0)
+            # `other` below zero: at once (a voice just started at its rate)
+            if command.other < 0.0 {
+              voice.rate = steadyRamp(value: rate)
+            } else {
+              rampTo(ramp: voice.rate, target: rate, frames: changeFrames)
+            }
           } else if command.kind is AudioCommandKind.pauseVoice {
             voice.paused = true
           } else if command.kind is AudioCommandKind.resumeVoice {
@@ -707,7 +689,8 @@ func renderVoice(
       )
       rampAdvance(ramp: voice.gain)
       rampAdvance(ramp: voice.pan)
-      voice.position = voice.position + voice.step
+      voice.position = voice.position + voice.step * (voice.rate.current as Float64)
+      rampAdvance(ramp: voice.rate)
       if voice.position >= (voice.frameCount as Float64) {
         if voice.looping and voice.frameCount > 0 {
           voice.position = voice.position - (voice.frameCount as Float64)
@@ -736,6 +719,7 @@ func mixerRender(
   channels: view Int
 ) {
   let blockStart: Int = mixer.sampleTime
+  mixer.partStart = blockStart
   if firstFrame is 0 {
     # one stamp per render (the device's callback renders in parts after it)
     let stamped: Bool = mixer.clockStamps.push(value: { sampleTime: blockStart, hostNs: nowNs() })
@@ -749,8 +733,10 @@ func mixerRender(
       # command (or one for "the next block", 0) applies now; one due on the
       # block's first sample joins the events, after those already due there,
       # so commands of one sample apply in the order they were sent (a note
-      # released and started again there)
-      if command.kind is AudioCommandKind.play or command.atSample < blockStart {
+      # released and started again there). A sound with a voice cap joins the
+      # events too: its cap is judged when it starts, not when it was sent.
+      let waitsItself: Bool = command.kind is AudioCommandKind.play and command.voiceLimit is 0
+      if waitsItself or command.atSample < blockStart {
         applyCommand(mixer: mixer, command: command)
       } else {
         scheduleEvent(mixer: mixer, command: command)
@@ -759,6 +745,7 @@ func mixerRender(
   }
   var cursor: Int = 0
   loop cursor < frames {
+    mixer.partStart = blockStart + cursor
     applyDueEvents(mixer: mixer, sampleTime: blockStart + cursor)
     var next: Int = frames
     if mixer.eventCount > 0 {

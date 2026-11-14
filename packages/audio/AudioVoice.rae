@@ -1,0 +1,155 @@
+# audio/AudioVoice — a voice of the mixer (audio/AudioMixer) and the rules for which voice goes
+# when there are too many (docs/audio-design.md §10.5): a sound's cap on its own voices, and the
+# hard limit of audioMaxVoices. Runs on the audio thread: no allocation, no lock.
+import Math
+open Atomic
+open collections/SpscRing
+
+const audioMaxVoices: Int = 64
+
+# A value that moves linearly to its target over a number of frames, so a
+# change never clicks.
+type AudioRamp {
+  current: Float
+  target: Float
+  step: Float
+  framesLeft: Int
+}
+
+func steadyRamp(value: view Float) ret AudioRamp {
+  ret AudioRamp { current: value, target: value, step: 0.0, framesLeft: 0 }
+}
+
+func rampTo(ramp: mod AudioRamp, target: view Float, frames: view Int) {
+  ramp.target = target
+  if frames <= 0 {
+    ramp.current = target
+    ramp.framesLeft = 0
+    ret
+  }
+  ramp.step = (target - ramp.current) / (frames as Float)
+  ramp.framesLeft = frames
+}
+
+func rampAdvance(ramp: mod AudioRamp) {
+  if ramp.framesLeft > 0 {
+    ramp.framesLeft = ramp.framesLeft - 1
+    if ramp.framesLeft is 0 {
+      ramp.current = ramp.target
+    } else {
+      ramp.current = ramp.current + ramp.step
+    }
+  }
+}
+
+type AudioVoice {
+  active: Bool
+  voiceId: Int
+  soundId: Int
+  samples: Buffer(Float)
+  frameCount: Int
+  channels: Int
+  # where in the sound, in its frames, and how far one output frame moves at rate 1
+  position: Float64
+  step: Float64
+  # the playback rate (1 the sound's own pitch, 2 an octave up), smoothed like the gain
+  rate: AudioRamp
+  # the sample time it started at (the oldest is the first to go, §10.5)
+  startedAt: Int
+  bus: Int
+  gain: AudioRamp
+  pan: AudioRamp
+  looping: Bool
+  # output frames to wait before the first sample
+  delayFrames: Int
+  # ends when the gain reaches 0
+  stopping: Bool
+  paused: Bool
+  isStream: Bool
+  stream: SpscRing(Float)
+  streamFinished: Atomic(Bool)
+  # frames a stream voice played as silence because its ring was empty
+  underrunFrames: Int
+}
+
+# What decides which voice goes first: one already fading out, then (when the rule says so)
+# the quieter, then the older
+type VoiceRank {
+  stopping: Bool
+  gain: Float
+  startedAt: Int
+}
+
+func voiceRank(voice: view AudioVoice) ret VoiceRank {
+  ret VoiceRank { stopping: voice.stopping, gain: voice.gain.current, startedAt: voice.startedAt }
+}
+
+# Whether `a` goes before `b`
+func goesFirst(a: view VoiceRank, b: view VoiceRank, byGain: view Bool) ret Bool {
+  if a.stopping is not b.stopping {
+    ret a.stopping
+  }
+  if byGain and a.gain is not b.gain {
+    ret a.gain < b.gain
+  }
+  ret a.startedAt < b.startedAt
+}
+
+# A sound's cap: while `voiceLimit` or more of its voices play (not fading out), the oldest (or
+# with `byGain` the quietest) of them fades out over `fadeFrames`, so a new voice is the cap's
+# last. Never the whole mix: only that sound's voices.
+func limitSoundVoices(
+  voices: mod List(AudioVoice)
+  soundId: view Int
+  voiceLimit: view Int
+  byGain: view Bool
+  fadeFrames: view Int
+) {
+  loop var round: Int = 0, round < audioMaxVoices, ++round {
+    var playing: Int = 0
+    var chosen: Int = -1
+    var chosenRank: VoiceRank = { stopping: false, gain: 0.0, startedAt: 0 }
+    loop var index: Int = 0, index < voices.length, ++index {
+      if let voice: view AudioVoice = voices.viewAt(index: index) {
+        if voice.active and not voice.stopping and not voice.isStream and voice.soundId is soundId {
+          playing = playing + 1
+          let rank: VoiceRank = voiceRank(voice: voice)
+          if chosen < 0 or goesFirst(a: rank, b: chosenRank, byGain: byGain) {
+            chosen = index
+            chosenRank = rank
+          }
+        }
+      }
+    }
+    if playing < voiceLimit or chosen < 0 {
+      ret
+    }
+    if let voice: mod AudioVoice = voices.modAt(index: chosen) {
+      voice.stopping = true
+      rampTo(ramp: voice.gain, target: 0.0, frames: fadeFrames)
+    }
+  }
+}
+
+# The slot for a new voice: a free one, or when all are busy the one to take (a voice already
+# fading out, else the quietest, else the oldest; never a stream, which is the music). The
+# caller ends a taken voice. -1 when only streams play.
+func voiceSlot(voices: view List(AudioVoice)) ret Int {
+  var chosen: Int = -1
+  var chosenRank: VoiceRank = { stopping: false, gain: 0.0, startedAt: 0 }
+  loop var index: Int = 0, index < voices.length, ++index {
+    if let voice: view AudioVoice = voices.viewAt(index: index) {
+      if not voice.active {
+        ret index
+      }
+      if not voice.isStream {
+        let rank: VoiceRank = voiceRank(voice: voice)
+        if chosen < 0 or goesFirst(a: rank, b: chosenRank, byGain: true) {
+          chosen = index
+          chosenRank = rank
+        }
+      }
+    }
+  }
+  ret chosen
+}

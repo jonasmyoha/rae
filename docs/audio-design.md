@@ -934,6 +934,48 @@ stays within the tone's own, the pause past far and the resume, and the one-shot
 playground (examples/150_audioPlayground) has a Placed in 3D section: a looping buzz going round
 the listener at a distance its slider sets.
 
+### 10.5 Game sounds: pitch, variation and voice limits
+
+Three things a game does with its sounds beyond play and stop (`audio/VoiceControls`):
+
+- **The playback rate of a voice**, set while it plays: `setVoiceRate(voiceId:, rate:,
+  seconds:)`, 1 its own pitch, 2 an octave up, held to 0.125 .. 8, and moved there over
+  `seconds` (never quicker than the 5 ms smoothing), so a car's engine loop rises with its speed
+  without a step. The voice reads its sound with linear interpolation; at the end of a loop it
+  reads the first frame again, so the seam stays seamless at any rate. `semitonesToRate` turns a
+  pitch into a rate. A stream plays at its own rate.
+- **A small random spread of rate and gain**, so a repeated shot or step does not sound the
+  same each time: `playVaried(sound:, bus:, gainDecibels:, variation:, random:)` with a
+  `SoundVariation { rateSpread, gainSpreadDecibels }` (0.03 and 1.5: 3 % and 1.5 dB either way,
+  evenly). The spread comes from the caller's own `Random` (Math), made from a seed it chooses,
+  so the same seed plays the same: a test is repeatable. `nextVariation` is the rule alone. The
+  voice starts at its rate (the rate command follows the play in the ring, applied at once).
+- **A cap per sound on its overlapping voices**: `setSoundVoiceLimit(sound:, voiceLimit:,
+  rule:)`. A machine gun fires faster than its sound ends; when a new voice of the sound starts
+  with `voiceLimit` of them already playing, the oldest (`AudioStealRule.oldest`) or the quietest
+  (`quietest`, the oldest of equals) of them fades out in 10 ms. Only that sound's voices are
+  touched, never the rest of the mix. The cap is judged when the new voice starts: a capped
+  play for a later sample waits in the event list, so the voices it fades are those playing at
+  its sample.
+- **The hard limit** stays `audioMaxVoices` (64, `audio/AudioVoice`). When all 64 are busy, a
+  new voice takes the place of one already fading out, else of the quietest, else of the
+  oldest, never of a stream (the music); the taken voice ends at once and is reported ended,
+  and `stolenVoices` counts them. A voice is dropped (`droppedVoices`) only when all 64 are
+  streams.
+
+**Landed (2026-11-14, `packages/audio` 0.14.0):** the mixer's voice (`audio/AudioVoice`, moved
+out of `audio/AudioMixer` with its ramp and the rules for which voice goes) has a smoothed
+`rate` and its start time; `setVoiceRate`, `playVaried`, `nextVariation`, `semitonesToRate` and
+`setSoundVoiceLimit` are in `audio/VoiceControls`. At rate 1 the output is unchanged bit for
+bit (fixtures 1401-1450 pass as they were). Fixture 1451: a 500 Hz loop measured at 1000 Hz at
+rate 2, a change spread over 0.1 s still between the two in its middle, the seam at rate 1.37
+no steeper than the tone, a rate of 100 held to 8. Fixture 1452: 200 draws inside their spread
+and reaching near both ends, the same seed the same, two varied shots that differ, and two
+engines with one seed rendering the same samples. Fixture 1453: a cap of 3 keeping the newest
+three (the faded one still fading 100 frames on, gone 600 on), a cap of 2 by gain, and 70
+voices on 64 places taking the fading one and then the quietest, none dropped. All three run
+with `RAE_REALTIME_CHECK=1`. The audio playground has a Game sounds section.
+
 ---
 
 ## 11. What lands first
