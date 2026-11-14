@@ -6,6 +6,7 @@
 # parameters, a compressor's gain reduction, a reverb's lines).
 import Math
 open audio/AudioGraph
+open audio/CustomNodes
 open audio/EffectStates
 
 # Parameter event kinds of an EQ band (GraphParameterEvent.kind; 0 is a
@@ -396,5 +397,160 @@ func compressorAt(plan: view RenderPlan, stateAt: view Int) ret CompressorState 
 func reverbAt(plan: view RenderPlan, stateAt: view Int) ret ReverbState realtime {
   unsafe {
     ret rae_ext_rae_buf_get(buf: plan.reverbs, index: stateAt)
+  }
+}
+
+# ---- a program's own node kinds (audio/CustomNodes) -------------------------------------
+func customAt(plan: view RenderPlan, stateAt: view Int) ret CustomState realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.customs, index: stateAt)
+  }
+}
+
+# The block's events for plan node `node`, in time order, handed to the
+# program's process call with its input and output in the scratch
+func processCustom(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let custom: CustomState = customAt(
+    plan: plan
+    stateAt: intAt(buffer: plan.stateIndex, index: node)
+  )
+  let pending: Int = intAt(buffer: plan.customEventCount, index: 0)
+  var count: Int = 0
+  unsafe {
+    var scratch: Buffer(Float) = plan.customEventScratch
+    loop var i: Int = 0, i < pending, ++i {
+      if rae_ext_rae_buf_get(buf: plan.customEvents, index: 4 * i) as Int is node {
+        loop var part: Int = 0, part < 3, ++part {
+          rae_ext_rae_buf_set(
+            buf: scratch
+            index: 3 * count + part
+            value: rae_ext_rae_buf_get(buf: plan.customEvents, index: 4 * i + 1 + part)
+          )
+        }
+        count = count + 1
+      }
+    }
+    callNodeProcess(
+      kind: custom.kind
+      state: custom.state
+      stateSize: custom.stateSize
+      scratch: plan.scratch
+      inputBase: input * 2 * plan.maxFrames
+      outputBase: out * 2 * plan.maxFrames
+      channelStride: plan.maxFrames
+      frames: frames
+      events: plan.customEventScratch
+      eventCount: count
+    )
+  }
+}
+
+# A parameter event for a custom node (kind customParameterBase + n): kept
+# for the node's next process call, at offset 0 (the renderer cuts its block
+# at each event's sample, so the block starts there)
+func addCustomEvent(
+  plan: view RenderPlan
+  node: view Int
+  parameter: view Int
+  value: view Float
+) realtime {
+  let count: Int = intAt(buffer: plan.customEventCount, index: 0)
+  if count >= customEventSlots {
+    ret
+  }
+  unsafe {
+    var events: Buffer(Float) = plan.customEvents
+    rae_ext_rae_buf_set(buf: events, index: 4 * count, value: node as Float)
+    rae_ext_rae_buf_set(buf: events, index: 4 * count + 1, value: 0.0)
+    rae_ext_rae_buf_set(buf: events, index: 4 * count + 2, value: parameter as Float)
+    rae_ext_rae_buf_set(buf: events, index: 4 * count + 3, value: value)
+    var counter: Buffer(Int) = plan.customEventCount
+    rae_ext_rae_buf_set(buf: counter, index: 0, value: count + 1)
+  }
+}
+
+# After a block's nodes have run: its events have been delivered
+func clearCustomEvents(plan: view RenderPlan) realtime {
+  unsafe {
+    var counter: Buffer(Int) = plan.customEventCount
+    rae_ext_rae_buf_set(buf: counter, index: 0, value: 0)
+  }
+}
+
+# A plan swap: a custom node of the same kind and state size continues with
+# the old one's state (the Floats are copied; each plan keeps its own)
+func carryCustomState(
+  from: view RenderPlan
+  oldAt: view Int
+  to: view RenderPlan
+  newAt: view Int
+) realtime {
+  let before: CustomState = customAt(plan: from, stateAt: oldAt)
+  let state: CustomState = customAt(plan: to, stateAt: newAt)
+  if before.kind is not state.kind or before.stateSize is not state.stateSize {
+    ret
+  }
+  unsafe {
+    var target: Buffer(Float) = state.state
+    loop var i: Int = 0, i < state.stateSize, ++i {
+      rae_ext_rae_buf_set(
+        buf: target
+        index: i
+        value: rae_ext_rae_buf_get(buf: before.state, index: i)
+      )
+    }
+  }
+}
+
+# A custom node forgets what it was playing (the program's reset)
+func resetCustom(plan: view RenderPlan, stateAt: view Int) realtime {
+  let custom: CustomState = customAt(plan: plan, stateAt: stateAt)
+  unsafe {
+    callNodeReset(kind: custom.kind, state: custom.state, stateSize: custom.stateSize)
+  }
+}
+
+# A seek: every band's filter memory, every compressor's reduction and every
+# reverb's lines back to silence
+func resetEffects(plan: view RenderPlan) realtime {
+  unsafe {
+    loop var node: Int = 0, node < plan.nodeCount, ++node {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+      if kind is NodeKind.eq {
+        var state: FilterState = filterAt(plan: plan, stateAt: stateAt)
+        state.z1Left = 0.0
+        state.z2Left = 0.0
+        state.z1Right = 0.0
+        state.z2Right = 0.0
+        setFilterAt(plan: plan, stateAt: stateAt, state: state)
+      } else if kind is NodeKind.compressor {
+        var compressors: Buffer(CompressorState) = plan.compressors
+        var state: CompressorState = rae_ext_rae_buf_get(buf: compressors, index: stateAt)
+        state.reductionDecibels = 0.0
+        rae_ext_rae_buf_set(buf: compressors, index: stateAt, value: state)
+      } else if kind is NodeKind.reverb {
+        let state: ReverbState = reverbAt(plan: plan, stateAt: stateAt)
+        var lines: Buffer(Float) = state.lines
+        var positions: Buffer(Int) = state.positions
+        var stores: Buffer(Float) = state.stores
+        loop var line: Int = 0, line < state.lineCount, ++line {
+          let start: Int = rae_ext_rae_buf_get(buf: state.starts, index: line)
+          loop var i: Int = 0, i < rae_ext_rae_buf_get(buf: state.lengths, index: line), ++i {
+            rae_ext_rae_buf_set(buf: lines, index: start + i, value: 0.0)
+          }
+          rae_ext_rae_buf_set(buf: positions, index: line, value: 0)
+        }
+        loop var comb: Int = 0, comb < 2 * reverbCombs, ++comb {
+          rae_ext_rae_buf_set(buf: stores, index: comb, value: 0.0)
+        }
+      }
+    }
   }
 }

@@ -25,6 +25,7 @@
 #       maxFrames: 512)
 import String
 open audio/AudioGraph
+open audio/CustomNodes
 
 func failedPlan(error: view String) ret CompiledPlan {
   ret CompiledPlan { plan: emptyRenderPlan(), error: error }
@@ -150,6 +151,18 @@ func compileGraphAfter(
   }
   var working: AudioGraph = graph
   keepTails(working: working, previousGraph: previousGraph)
+  # a custom node's latency is the program's to say (audio/CustomNodes)
+  loop var i: Int = 0, i < working.nodes.length(), ++i {
+    var node: GraphNode = working.nodes.copyAtFallback(index: i, fallback: outputNode())
+    if node.kind is NodeKind.custom {
+      node.customLatency = customLatency(
+        kind: node.customKind
+        settings: node.customSettings
+        sampleRate: sampleRate
+      )
+      working.nodes.set(index: i, value: node)
+    }
+  }
   var order: List(Int) = {}
   let cycle: String = sortGraph(graph: working, order: order)
   if cycle.length() > 0 {
