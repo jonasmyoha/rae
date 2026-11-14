@@ -344,8 +344,19 @@ every span begins after its frame; the change per second is the drift (counters
 `frame.cpu.us`, `frame.drawable.us`, `frame.gpuWait.us`, `gpu.busy.us` and a mark
 `bound by the CPU` / `the GPU` / `the drawable` (the largest of the CPU's work, the GPU's busy
 time and the drawable acquire). `checks/gpuManagerTiming` requires each of its 10 spans inside its
-own frame. Not yet: the Metal command buffers as per-buffer spans (they are counters,
-`Gpu2dCanvasTiming`), the resource tables' sizes, and the iPhone capture.
+own frame.
+
+Rae 0.3.135 (perf step 5b): every Metal command buffer is a span on the trace's GPU process, on a
+lane of its own ("Metal command buffers", beside "GPU passes"), while a capture runs (a capture
+turns the swizzled -commit of `runtime_gpu_metal_timing.c` on, as `RAE_GPU2D_TIMING` does). The
+completion handler reads `nowNs` and the host clock (`CLOCK_UPTIME_RAW`, which `GPUStartTime` /
+`GPUEndTime` use) together and converts with their difference. The handlers run on any of GCD's
+threads, so they write one shared lane under a lock (`rae_perf_shared_span`) through a timed hook
+(`perfRuntimeWriteAt`); uninstalling a table takes the same lock. 143 on the Mac: about 6 000
+command buffers a second (wgpu submits small ones, a timestamp mark is its own), median 5 µs. The
+walker writes its two GPU managers' table sizes as counters (`gpu.buffers`, `gpu.textures`, …,
+and `gpu.app.*` for its own). The iPhone capture is still unchecked: the build installs, but the
+locked phone refuses the launch.
 
 ## 8. The tools
 

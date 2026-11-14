@@ -391,6 +391,10 @@ func profFragment(
   }
   if event.kind is PerfKind.gpuSpan {
     let duration: String = traceMicroseconds(nanoseconds: event.value - event.time)
+    # a Metal command buffer is the GPU's own busy time, on a lane of its own
+    if name is "command buffer" {
+      ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":1\}"
+    }
     ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"note\":\"a slot, not a cost on a tile GPU\"\}\}"
   }
   ret ""
@@ -428,7 +432,10 @@ func profLaneNames(profiler: view Profiler, frags: mod List(String)) {
     value: "\{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"args\":\{\"name\":\"GPU\"\}\}"
   )
   frags.add(
-    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"name\":\"GPU\"\}\}"
+    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"name\":\"GPU passes\"\}\}"
+  )
+  frags.add(
+    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"tid\":1,\"args\":\{\"name\":\"Metal command buffers\"\}\}"
   )
   loop var ring: Int = 0, ring < profiler.hub.ringNames.length, ++ring {
     let threadName: String = profiler.hub.ringNames.copyAtDefault(index: ring)

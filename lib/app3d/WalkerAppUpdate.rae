@@ -410,6 +410,12 @@ func beginWalkerFrame(app: mod WalkerApp) {
     deltaTime: deltaTime
     renderer: app.renderSystem.renderer
   )
+  if let resources: view GpuResources = app.renderSystem.renderer.gpuResources {
+    gpuResourceCounters(profiler: app.profiler, resources: resources, prefix: "gpu.")
+  }
+  if let resources: view GpuResources = app.gpuResources {
+    gpuResourceCounters(profiler: app.profiler, resources: resources, prefix: "gpu.app.")
+  }
   if app.renderSystem.frameLogOn {
     if frameLogUpdate(
       frameLog: app.renderSystem.frameLog

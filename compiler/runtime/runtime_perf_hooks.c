@@ -32,7 +32,8 @@ enum {
   RAE_PERF_CHANNEL_LOCK = 7,  /* a Channel send or receive waiting for the channel */
   RAE_PERF_LOCK = 8,          /* a contended runtime lock (RAE_LOCK) */
   RAE_PERF_SIGNAL_WAIT = 9,   /* a Signal wait */
-  RAE_PERF_SIGNAL_POST = 10   /* a Signal post (a wake) */
+  RAE_PERF_SIGNAL_POST = 10,  /* a Signal post (a wake) */
+  RAE_PERF_COMMAND_BUFFER = 11 /* a Metal command buffer's GPU time (runtime_gpu_metal_timing.c) */
 };
 
 /* The kinds, in lib/perf/Perf's PerfKind order */
@@ -42,6 +43,7 @@ enum {
   RAE_PERF_MARK = 3,
   RAE_PERF_WAIT_BEGIN = 4,
   RAE_PERF_WAIT_END = 5,
+  RAE_PERF_GPU_SPAN = 6,
   RAE_PERF_FLOW = 7
 };
 
@@ -87,6 +89,12 @@ __attribute__((weak)) void rae_perf_runtime_write(void* rings, void* names, int6
   (void)rings; (void)names; (void)slot; (void)kind; (void)code; (void)value; (void)extra;
 }
 
+/* lib/perf/Perf's perfRuntimeWriteAt (`cExport`): an event at a time of its own */
+__attribute__((weak)) void rae_perf_runtime_write_at(void* rings, void* names, int64_t slot, int64_t kind,
+                                                     int64_t code, int64_t time, int64_t value, int64_t extra) {
+  (void)rings; (void)names; (void)slot; (void)kind; (void)code; (void)time; (void)value; (void)extra;
+}
+
 static inline void rae_perf_event(int64_t kind, int64_t code, int64_t value, int64_t extra) {
   void* rings = atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire);
   if (__builtin_expect(rings == NULL, 1)) return;
@@ -95,6 +103,38 @@ static inline void rae_perf_event(int64_t kind, int64_t code, int64_t value, int
   rae_perf_runtime_write(rings, atomic_load_explicit(&g_rae_perf_names, memory_order_acquire), slot, kind, code,
                          value, extra);
 }
+
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+/* One lane shared by threads that come and go (Metal's completion handlers run on any of GCD's
+ * threads, so a slot per thread would use them all up): its writers take turns under a lock, and
+ * uninstalling a table takes it too, so no writer holds a table's rings after it is gone */
+static pthread_mutex_t g_rae_perf_shared_lock = PTHREAD_MUTEX_INITIALIZER;
+static int64_t g_rae_perf_shared_slot = -1;        /* guarded by the lock */
+static int64_t g_rae_perf_shared_generation = -1;  /* guarded by the lock */
+
+/* A span with times of its own (`begin_ns` .. `end_ns` on nowNs's clock) on the shared lane named
+ * `name` (a string that lives as long as the program) */
+__attribute__((unused)) static void rae_perf_shared_span(const char* name, int64_t code, int64_t begin_ns,
+                                                         int64_t end_ns) {
+  if (atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire) == NULL) return;
+  pthread_mutex_lock(&g_rae_perf_shared_lock);
+  void* rings = atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire);
+  int64_t generation = atomic_load_explicit(&g_rae_perf_generation, memory_order_acquire);
+  if (rings && g_rae_perf_shared_generation != generation) {
+    g_rae_perf_shared_generation = generation;
+    g_rae_perf_shared_slot = -1;
+    int64_t index = atomic_fetch_add_explicit(&g_rae_perf_threads_claimed, 1, memory_order_relaxed);
+    if (index < RAE_PERF_THREAD_SLOTS) {
+      atomic_store_explicit(&g_rae_perf_thread_names[index], name, memory_order_release);
+      g_rae_perf_shared_slot = RAE_PERF_SLOTS + index;
+    }
+  }
+  if (rings && g_rae_perf_shared_slot >= 0)
+    rae_perf_runtime_write_at(rings, atomic_load_explicit(&g_rae_perf_names, memory_order_acquire),
+                              g_rae_perf_shared_slot, RAE_PERF_GPU_SPAN, code, begin_ns, end_ns, 0);
+  pthread_mutex_unlock(&g_rae_perf_shared_lock);
+}
+#endif
 
 /* A pool worker's slot is its worker index */
 static inline void rae_perf_set_worker_slot(int64_t worker) {
@@ -120,10 +160,17 @@ void rae_perf_install(void* rings, void* names, void* name_box) {
 /* Remove `rings` if they are the installed table (a later hub's stays) */
 void rae_perf_uninstall(void* rings) {
   void* expected = rings;
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+  /* under the shared lane's lock: its writer loads the rings under it, so none holds them after */
+  pthread_mutex_lock(&g_rae_perf_shared_lock);
+#endif
   if (atomic_compare_exchange_strong(&g_rae_perf_rings, &expected, NULL)) {
     atomic_store_explicit(&g_rae_perf_name_box, NULL, memory_order_release);
     atomic_fetch_add_explicit(&g_rae_perf_table_generation, 1, memory_order_acq_rel);
   }
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+  pthread_mutex_unlock(&g_rae_perf_shared_lock);
+#endif
 }
 
 /* The installed table's generation, 0 when none is installed: code that caches name ids (lib/ecs's

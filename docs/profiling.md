@@ -43,6 +43,9 @@ frames it measures.
   clock (`perf/GpuClock`, its offset and drift as `gpu.clock` counters). A span is when the GPU
   stamped, not what the pass costs on a tile GPU (see "What to trust" above). Each frame also has
   `frame.cpu.us`, `frame.drawable.us`, `frame.gpuWait.us`, `gpu.busy.us` and a `bound by …` mark.
+  On Apple each Metal command buffer is a span on its own GPU lane (the GPU's real busy time, the
+  truth a pass slot is checked against), and the walkers write their GPU resource tables' sizes
+  (`gpu.buffers`, `gpu.textures`, …) (0.3.135).
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

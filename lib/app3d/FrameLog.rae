@@ -15,6 +15,10 @@ import Profile
 open DrawStats
 open gpu/FramePacer
 open gpu/GpuTiming
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRender
 open RendererDeferred
 open app3d/RenderScale
 
@@ -256,4 +260,57 @@ func frameBoundCounters(profiler: mod Profiler, renderer: view DeferredRenderer)
     bound = "bound by the drawable"
   }
   Profile.mark(profiler: profiler, name: bound, extra: 0)
+}
+
+# The GPU resource tables' sizes (gpu/GpuResources: the live buffers, textures, views, samplers,
+# pipelines, bind groups, readbacks and the releases still pending) as counters of a capture,
+# named `prefix` and the table ("gpu." for the renderer's)
+func gpuResourceCounters(
+  profiler: mod Profiler
+  resources: view GpuResources
+  prefix: view String
+) {
+  if not Profile.capturing(profiler: profiler) {
+    ret
+  }
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}buffers"
+    value: liveBufferCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}textures"
+    value: liveTextureCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}textureViews"
+    value: liveTextureViewCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}samplers"
+    value: liveSamplerCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}pipelines"
+    value: livePipelineCount(resources: resources) + liveRenderPipelineCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}bindGroups"
+    value: liveBindGroupCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}readbacks"
+    value: liveReadbackCount(resources: resources)
+  )
+  Profile.counter(
+    profiler: profiler
+    name: "{prefix}pendingReleases"
+    value: pendingReleaseCount(resources: resources)
+  )
 }

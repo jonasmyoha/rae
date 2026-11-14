@@ -11,14 +11,20 @@
  * by rae_gpu_metal_timing_start, which RAE_GPU2D_TIMING alone calls.
  *
  * The handler adds each buffer's GPU time to counters; Rae takes them once a
- * second (take, then taken(0..2): buffers, total ns, longest ns). */
+ * second (take, then taken(0..2): buffers, total ns, longest ns). While the
+ * event recorder has a table installed (lib/perf, docs/perf-tools-design.md §7)
+ * each buffer is also a span on the trace's GPU lane: its host times are put on
+ * nowNs's clock by the two clocks read together in the handler, and the
+ * handlers (on any of GCD's threads) write it on one shared lane. */
 #include <stdint.h>
 #if defined(__APPLE__) && defined(RAE_HAS_WEBGPU)
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <stdatomic.h>
+#include <time.h>
 
 extern void* MTLCreateSystemDefaultDevice(void);
+int64_t rae_ext_nowNs(void);
 
 static IMP g_metal_commit = NULL;
 static _Atomic int64_t g_metal_buffers = 0;
@@ -32,6 +38,10 @@ static void rae_metal_commit_timed(void* self, SEL cmd) {
         double end = ((double (*)(void*, SEL))objc_msgSend)(buffer, sel_registerName("GPUEndTime"));
         if (start <= 0.0 || end <= start) return;
         int64_t ns = (int64_t)((end - start) * 1e9);
+        /* host time (mach_absolute_time, CLOCK_UPTIME_RAW) to nowNs's clock */
+        int64_t offset = rae_ext_nowNs() - (int64_t)clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        rae_perf_shared_span("Metal command buffers", RAE_PERF_COMMAND_BUFFER, (int64_t)(start * 1e9) + offset,
+                             (int64_t)(end * 1e9) + offset);
         atomic_fetch_add(&g_metal_buffers, 1);
         atomic_fetch_add(&g_metal_total_ns, ns);
         int64_t longest = atomic_load(&g_metal_longest_ns);

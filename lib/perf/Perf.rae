@@ -400,7 +400,7 @@ func perfDropped(hub: view PerfHub) ret Int {
 # ---- the runtime's work (§4.3) ------------------------------------------------------------------
 
 # The runtime's event codes (runtime_perf_hooks.c), and their names
-const perfRuntimeCodes: Int = 11
+const perfRuntimeCodes: Int = 12
 
 func perfRuntimeCodeName(code: view Int) ret String {
   if code is 0 {
@@ -433,7 +433,10 @@ func perfRuntimeCodeName(code: view Int) ret String {
   if code is 9 {
     ret "Signal wait"
   }
-  ret "Signal post"
+  if code is 10 {
+    ret "Signal post"
+  }
+  ret "command buffer"
 }
 
 func nativePerfInstall(
@@ -682,6 +685,38 @@ func perfRuntimeNamedEvent(
     nativePerfNamedEvent(
       kind: perfKindCode(kind: kind)
       nameId: nameId
+      value: value
+      extra: extra
+    )
+  }
+}
+
+# The runtime's hook for an event at a time of its own (runtime_perf_hooks.c rae_perf_span: a Metal
+# command buffer's GPU time, `time` its begin and `value` its end on nowNs's clock)
+func perfRuntimeWriteAt(
+  rings: copy Buffer(PerfRing)
+  names: copy Buffer(Int)
+  slot: copy Int
+  kind: copy Int
+  code: copy Int
+  time: copy Int
+  value: copy Int
+  extra: copy Int
+) realtime cExport("rae_perf_runtime_write_at") {
+  unsafe {
+    let ring: PerfRing = rae_ext_rae_buf_get(buf: rings, index: slot)
+    if ring.events.capacity is 0 {
+      ret
+    }
+    var nameId: Int = -1 - code
+    if code >= 0 {
+      nameId = rae_ext_rae_buf_get(buf: names, index: code)
+    }
+    perfWriteAt(
+      ring: ring
+      kind: perfKindOfCode(kind: kind)
+      name: PerfName { id: nameId }
+      time: time
       value: value
       extra: extra
     )
