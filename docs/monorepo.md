@@ -50,6 +50,11 @@ old-to-new hashes produced by
 - `docs/history/rae-lang-dev-commit-map.txt`
 - `docs/history/rae-devtools-web-commit-map.txt`
 
+The whole history was rewritten again on 2026-11-14 to move the binary files into Git LFS
+(`git lfs migrate import --everything`). Its old-to-new commit hashes are in
+`docs/history/rae-lfs-migrate-commit-map.txt`. The two maps above were already out of date
+before that rewrite: their new hashes are from before the later history rewrites.
+
 For example, inspect a rewritten historical commit with:
 
 ```sh

@@ -29,6 +29,15 @@ stop:
 # (lib/wasm links it; rebuilt when its pin or Rae's glue moved). A package's C builds
 # when a program first needs it.
 setup:
+	@if command -v git-lfs >/dev/null 2>&1; then \
+	  echo "git-lfs found: the binary files (images, fonts, sounds) come from Git LFS"; \
+	elif [ "$$(uname)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then \
+	  echo "Installing git-lfs (the binary files are in Git LFS)..."; \
+	  brew install git-lfs; \
+	else \
+	  echo "warning: git-lfs is not installed; the images, fonts and sounds stay LFS pointers (install git-lfs, then: make install-hooks)" >&2; \
+	fi
+	@$(MAKE) install-hooks
 	@if command -v bun >/dev/null 2>&1; then \
 	  echo "Installing Devtools Web dependencies..."; \
 	  (cd tools/devtools-web && bun install --frozen-lockfile); \
@@ -110,7 +119,14 @@ install-hooks:
 	@ln -sfn "$(CURDIR)/tools/git-hooks/post-commit" .git/hooks/post-commit
 	@ln -sfn "$(CURDIR)/tools/git-hooks/post-merge" .git/hooks/post-merge
 	@ln -sfn "$(CURDIR)/tools/git-hooks/post-rewrite" .git/hooks/post-rewrite
-	@echo "installed the hooks -> tools/git-hooks/ (banned-terms gate, a tag on every version bump)"
+	@ln -sfn "$(CURDIR)/tools/git-hooks/pre-push" .git/hooks/pre-push
+	@ln -sfn "$(CURDIR)/tools/git-hooks/post-checkout" .git/hooks/post-checkout
+	@if command -v git-lfs >/dev/null 2>&1; then \
+	  git lfs install --local --skip-repo >/dev/null && git lfs pull; \
+	else \
+	  echo "warning: git-lfs is not installed; the binary files (images, fonts, sounds) are LFS pointers until it is (brew install git-lfs, then make install-hooks)" >&2; \
+	fi
+	@echo "installed the hooks -> tools/git-hooks/ (banned-terms gate, a tag on every version bump, Git LFS)"
 
 devtools-install:
 	@cd tools/devtools-web && bun install --frozen-lockfile

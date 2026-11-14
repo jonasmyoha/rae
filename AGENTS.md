@@ -816,7 +816,7 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   own `rae` is the lowest compiler it needs, checked against the project's pin.
 - **The store and `./rae` (docs/toolchain-and-packages-decision.md).** There is no
   `rae` on PATH. A project commits a generated `./rae`, written by `rae init` and
-  `rae toolchain pin`, which needs only git, make and a C compiler and runs the pinned
+  `rae toolchain pin`, which needs only git (with git-lfs), make and a C compiler and runs the pinned
   compiler. `~/.rae` (`RAE_HOME`) holds `repo/` (one clone), `toolchains/<version>` or
   `<version>-<commit>` (sparse checkouts of `compiler lib tools third_party` and the UI editor `examples/121_ui_editor`,
   each with a
@@ -931,6 +931,12 @@ license text lives once, beside the code:
   math (`examples/150_audioPlayground/makeSounds.py` is the model), at a low rate (mono, 22 050 Hz,
   a low bit rate for MP3/AAC), so the committed result stays at tens of KB per file. Commit the
   output only so the example runs from a fresh checkout without the encoders.
+- **Binary files are in Git LFS** (`.gitattributes`, since 0.3.123): images, `.raw` atlases,
+  `.glb`, sounds, fonts and video. A new binary type gets its line there in the same commit as
+  the first file. `make setup` / `make install-hooks` set a clone up (the `pre-push` hook uploads
+  the LFS files; without git-lfs it refuses the push). The whole history was moved into LFS on
+  2026-11-14 (`git lfs migrate`; old to new commit hashes in
+  `docs/history/rae-lfs-migrate-commit-map.txt`), so a clone is about 26 MB of history.
 
 ---
 ## Interaction rules

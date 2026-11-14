@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Git LFS (.gitattributes): uploads the LFS files of the commits being pushed, before the push.
+# Installed by `make install-hooks`. Without git-lfs a push of LFS files would leave the remote
+# with pointers to files it never got, so this refuses then.
+command -v git-lfs >/dev/null 2>&1 || {
+  echo "This repository keeps binary files in Git LFS, and git-lfs is not installed (brew install git-lfs)." >&2
+  exit 2
+}
+exec git lfs pre-push "$@"

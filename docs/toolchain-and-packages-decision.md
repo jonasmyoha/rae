@@ -52,7 +52,8 @@ build`, and a Makefile calls `./rae` too.
 
 Why this is better than PATH, and not only different:
 
-- A fresh clone builds with one command and no install step. It needs only git, make and a C compiler.
+- A fresh clone builds with one command and no install step. It needs only git (with git-lfs, as
+  the fonts and images are in Git LFS since 0.3.123), make and a C compiler.
 - Nothing global chooses a version. The project chooses.
 
 **Criticism of this choice:** it puts a script back in each project, which is the problem this task

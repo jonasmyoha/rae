@@ -6,7 +6,8 @@
 # <home>/repo is one clone, fetched from <source>. With a name, <home>/toolchains/<name>
 # becomes a sparse checkout of that version's tag, or that commit, with its compiler built
 # and a .ready marker. A project's ./rae runs this from the Rae repo itself, and so does
-# `rae toolchain`. Needs only git, make and a C compiler. A failed build leaves nothing
+# `rae toolchain`. Needs git (with git-lfs for a version whose images and fonts are in Git LFS),
+# make and a C compiler. A failed build leaves nothing
 # behind but its log.
 #
 #   tools/toolchain-prepare.sh --deps <home> <name> [box3d sqlite wamr ios android]
@@ -191,7 +192,29 @@ git -C "$repo" worktree prune
 git -C "$repo" worktree add --quiet --no-checkout --detach "$dir" "$found"
 # The UI editor is a tool a project runs (its headless scene check), though it lives in examples
 git -C "$dir" sparse-checkout set --cone compiler lib tools third_party examples/121_ui_editor
-git -C "$dir" checkout --quiet --detach "$found"
+# The binary files (fonts, images) of a version that keeps them in Git LFS are pulled after the
+# checkout, for the sparse folders only; without git-lfs they would be pointer files, and every
+# UI program would fail on its font, so that stops here
+uses_lfs=
+if git -C "$repo" show "$found:.gitattributes" 2>/dev/null | grep -q 'filter=lfs'; then
+  uses_lfs=1
+fi
+if [ -n "$uses_lfs" ] && ! command -v git-lfs >/dev/null 2>&1; then
+  git -C "$repo" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
+  git -C "$repo" worktree prune
+  echo "rae: Rae $name keeps its fonts and images in Git LFS, and git-lfs is not installed (brew install git-lfs, or your system's git-lfs package)" >&2
+  exit 1
+fi
+GIT_LFS_SKIP_SMUDGE=1 git -C "$dir" checkout --quiet --detach "$found"
+if [ -n "$uses_lfs" ]; then
+  if ! git -C "$dir" lfs pull --include "compiler,lib,tools,third_party,examples/121_ui_editor" >"$home/toolchains/$name.lfs.log" 2>&1; then
+    tail -5 "$home/toolchains/$name.lfs.log" >&2
+    git -C "$repo" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
+    git -C "$repo" worktree prune
+    echo "rae: could not fetch the Git LFS files of Rae $name from $source" >&2
+    exit 1
+  fi
+fi
 if ! make -j8 -C "$dir/compiler" build >"$log" 2>&1 || [ ! -x "$dir/compiler/bin/rae" ]; then
   tail -20 "$log" >&2
   git -C "$repo" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"

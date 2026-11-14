@@ -2,6 +2,11 @@
 # A tag on every version bump (tools/version-tags.sh). Installed by
 # `make install-hooks` (git does not version hooks). It never fails.
 script="$(git rev-parse --show-toplevel)/tools/version-tags.sh"
-[ -f "$script" ] || exit 0
-bash "$script" --head || true
+if [ -f "$script" ]; then
+  bash "$script" --head || true
+fi
+# Git LFS (.gitattributes): what `git lfs install` would put in this hook
+if command -v git-lfs >/dev/null 2>&1; then
+  git lfs post-commit "$@" || true
+fi
 exit 0
