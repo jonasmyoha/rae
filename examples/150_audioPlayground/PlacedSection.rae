@@ -1,0 +1,157 @@
+# The Placed in 3D section: a looping buzz placed in the world (audio/AudioSpatial), going round
+# the listener at the distance its slider sets. Its source follows its entity's WorldTransform3D,
+# which this section moves a little every frame; audio/spatialSystem then gives the voice the
+# gain of its distance (full inside 2 m, silent past 25 m) and the pan from the listener's right.
+# Past 25 m the voice is paused, so it costs nothing, and goes on when it comes back.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSpatial
+open audio/spatialSystem/SpatialSystem
+open ecs/ComponentTable
+open ecs/Transform
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open Math3d
+open Vec3
+open Playground
+
+const orbitNear: Float = 2.0
+
+const orbitFar: Float = 25.0
+
+# Radians a second: a turn in about eight seconds
+const orbitSpeed: Float = 0.8
+
+func setPlacedDefaults(values: mod UiValues) {
+  let unusedDistance: Bool = setUiValue(values: values, key: "orbit.distance", value: 6.0)
+}
+
+# Where the buzz is now: `distance` meters from the listener at the orbit's angle
+func orbitPosition(playground: view Playground, distance: view Float) ret Vec3 {
+  ret Vec3 {
+    x: distance * Math.sin(x: playground.orbitAngle)
+    y: distance * Math.cos(x: playground.orbitAngle)
+    z: 0.0
+  }
+}
+
+func moveOrbit(playground: mod Playground, distance: view Float) {
+  let position: Vec3 = orbitPosition(playground: playground, distance: distance)
+  playground.transforms.componentSet(
+    entityId: playground.orbitEntityId
+    data: WorldTransform3D { matrix: mat4Translate(x: position.x, y: position.y, z: position.z) }
+  )
+}
+
+func startOrbit(playground: mod Playground, distance: view Float) {
+  moveOrbit(playground: playground, distance: distance)
+  var source: AudioSource = placedSource(
+    position: orbitPosition(playground: playground, distance: distance)
+    nearDistance: orbitNear
+    farDistance: orbitFar
+    rolloff: AudioRolloff.inverse
+  )
+  source.gainDecibels = -6.0
+  source.looping = true
+  source.followsTransform = true
+  let unusedVoice: VoiceId = playground.audio.playPlaced(
+    placement: playground.placement
+    entityId: playground.orbitEntityId
+    sound: playground.buzz
+    bus: AudioBusKind.effects
+    source: source
+  )
+  playground.orbitOn = true
+}
+
+func stopOrbit(playground: mod Playground) {
+  if let source: AudioSource = playground.placement.sources.componentCopy(
+    entityId: playground.orbitEntityId
+  ) {
+    playground.audio.stopVoice(voiceId: source.voiceId)
+    playground.placement.sources.componentRemove(entityId: playground.orbitEntityId)
+  }
+  playground.orbitOn = false
+}
+
+# What the listener hears of the buzz now
+func orbitReadout(playground: view Playground, distance: view Float) ret String {
+  if not playground.orbitOn {
+    ret "Not playing"
+  }
+  if let source: AudioSource = playground.placement.sources.componentCopy(
+    entityId: playground.orbitEntityId
+  ) {
+    if source.parked {
+      ret "Past 25 m: silent, and its voice is paused, so it costs nothing"
+    }
+    let listener: AudioListener = currentListener(placement: playground.placement)
+    let pan: Float = listenerPan(listener: listener, position: source.position)
+    let decibels: Int = Math.round(
+      x: gainToDecibels(gain: placedGain(source: source, listener: listener))
+    ).toInt()
+    let degrees: Int = Math.round(x: playground.orbitAngle * 57.29578).toInt()
+    ret "At {degrees}° (0 ahead, 90 right): pan {Math.round(x: pan * 100.0).toInt()} %, gain {decibels} dB"
+  }
+  ret "Not playing"
+}
+
+# The section's button and slider, the orbit's move and the placed voices, once a frame;
+# `deltaTime` is the frame's time. True when what it shows changed.
+func placedSection(
+  playground: mod Playground
+  world: mod UiWorld
+  values: view UiValues
+  deltaTime: view Float
+) ret Bool {
+  var changed: Bool = false
+  let distance: Float = uiValue(values: values, key: "orbit.distance", fallback: 6.0)
+  if uiActionFired(world: world, actionId: "orbit.toggle") {
+    if playground.orbitOn {
+      stopOrbit(playground: playground)
+    } else {
+      startOrbit(playground: playground, distance: distance)
+    }
+    changed = true
+  }
+  if playground.orbitOn {
+    playground.orbitAngle = playground.orbitAngle + deltaTime * orbitSpeed
+    if playground.orbitAngle >= 6.2831853 {
+      playground.orbitAngle = playground.orbitAngle - 6.2831853
+    }
+    moveOrbit(playground: playground, distance: distance)
+  }
+  spatialSystem(
+    audio: playground.audio
+    placement: playground.placement
+    worldTransforms: playground.transforms
+    deltaTime: deltaTime
+  )
+  if changed or playground.frames % 6 is 0 {
+    var label: String = "Start the orbit"
+    if playground.orbitOn {
+      label = "Stop the orbit"
+    }
+    setNodeText(world: world, nodeId: "OrbitToggleLabel", value: label)
+    setNodeText(
+      world: world
+      nodeId: "OrbitReadout"
+      value: orbitReadout(playground: playground, distance: distance)
+    )
+    changed = changed or playground.orbitOn
+  }
+  ret changed
+}
+
+# For the demo's summary line: whether the orbit plays, and whether its voice is paused
+func orbitSummary(playground: view Playground) ret String {
+  var parked: Bool = false
+  if let source: AudioSource = playground.placement.sources.componentCopy(
+    entityId: playground.orbitEntityId
+  ) {
+    parked = source.parked
+  }
+  ret "on {playground.orbitOn}, parked {parked}"
+}

@@ -1,0 +1,95 @@
+# The rules of sounds placed in the world (audio/AudioSpatial, docs/audio-design.md §10.4):
+# 1. distanceGain: full inside near, silent at far and beyond, and each rolloff between them
+#    (linear, inverse, smooth), falling all the way.
+# 2. listenerPan: right of the listener is +1, left -1, ahead, behind, above and at the
+#    listener 0, half way round between; a listener turned to face +X hears +Y on its left.
+# 3. placedGain: the source's own level times its distance gain; gainToDecibels.
+import Math
+open Vec3
+open audio/AudioSpatial
+
+# A number to two places, for the expected output
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+func gainsOf(rolloff: view AudioRolloff, name: view String) {
+  var line: String = "{name}:"
+  var falling: Bool = true
+  var previous: Float = 2.0
+  loop let distance: Float in List(Float) {
+    0.0
+    2.0
+    3.0
+    6.0
+    10.0
+    15.0
+    20.0
+    30.0
+  } {
+    let gain: Float = distanceGain(
+      distance: distance
+      nearDistance: 2.0
+      farDistance: 20.0
+      rolloff: rolloff
+    )
+    line = "{line} {hundredths(value: gain)}"
+    if gain > previous {
+      falling = false
+    }
+    previous = gain
+  }
+  log("{line}; never rises: {falling}")
+}
+
+func panOf(listener: view AudioListener, position: view Vec3) ret Int {
+  ret hundredths(value: listenerPan(listener: listener, position: position))
+}
+
+func at(x: view Float, y: view Float, z: view Float) ret Vec3 {
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func main() {
+  # 1. gains at 0, 2 (near), 3, 6, 10, 15, 20 (far) and 30 m, in hundredths
+  gainsOf(rolloff: AudioRolloff.linear, name: "linear")
+  gainsOf(rolloff: AudioRolloff.inverse, name: "inverse")
+  gainsOf(rolloff: AudioRolloff.smooth, name: "smooth")
+  # 2. pans for the default listener (at the origin, looking along +Y, Z up)
+  let listener: AudioListener = defaultListener()
+  let right: Int = panOf(listener: listener, position: at(x: 5.0, y: 0.0, z: 0.0))
+  let left: Int = panOf(listener: listener, position: at(x: -5.0, y: 0.0, z: 0.0))
+  let ahead: Int = panOf(listener: listener, position: at(x: 0.0, y: 5.0, z: 0.0))
+  let behind: Int = panOf(listener: listener, position: at(x: 0.0, y: -5.0, z: 0.0))
+  let above: Int = panOf(listener: listener, position: at(x: 0.0, y: 0.0, z: 5.0))
+  let atIt: Int = panOf(listener: listener, position: at(x: 0.0, y: 0.0, z: 0.0))
+  log("pan right {right}, left {left}, ahead {ahead}, behind {behind}, above {above}, at it {atIt}")
+  let aheadRight: Int = panOf(listener: listener, position: at(x: 5.0, y: 5.0, z: 0.0))
+  let behindLeft: Int = panOf(listener: listener, position: at(x: -5.0, y: -5.0, z: 0.0))
+  log("pan ahead-right {aheadRight}, behind-left {behindLeft}")
+  # a listener elsewhere, turned to face +X: +Y is now on its left
+  let turned: AudioListener = {
+    position: Vec3 { x: 10.0, y: 10.0, z: 0.0 }
+    forward: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+    up: Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  }
+  let turnedPlusY: Int = panOf(listener: turned, position: at(x: 10.0, y: 15.0, z: 0.0))
+  let turnedMinusY: Int = panOf(listener: turned, position: at(x: 10.0, y: 5.0, z: 0.0))
+  let turnedAhead: Int = panOf(listener: turned, position: at(x: 20.0, y: 10.0, z: 0.0))
+  log("turned: +Y {turnedPlusY}, -Y {turnedMinusY}, ahead {turnedAhead}")
+  # 3. a source at -6 dB, 11 m away (half way, linear): 0.5 * 0.5
+  var source: AudioSource = placedSource(
+    position: Vec3 { x: 0.0, y: 11.0, z: 0.0 }
+    nearDistance: 2.0
+    farDistance: 20.0
+    rolloff: AudioRolloff.linear
+  )
+  source.gainDecibels = -6.0206
+  let gain: Float = placedGain(source: source, listener: listener)
+  let decibels: Int = Math.round(x: gainToDecibels(gain: gain)).toInt()
+  log(
+    "placed gain {hundredths(value: gain)}, in decibels {decibels}, silence {gainToDecibels(
+      gain: 0.0
+    ).toInt()}"
+  )
+}

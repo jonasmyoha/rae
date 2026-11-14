@@ -1,0 +1,282 @@
+# Sounds placed in the world, rendered by the offline engine (audio/spatialSystem,
+# docs/audio-design.md §10.4), with RAE_REALTIME_CHECK=1 (config.env). A looping 500 Hz tone is
+# a car's engine: its source follows the car's WorldTransform3D, frame by frame (800 samples
+# at 48 kHz, a 60th of a second).
+# 1. The pan: the car on the listener's right is heard on the right only (equal power), and
+#    on the left once it moves there.
+# 2. The gain: ahead at 8 m and at 16 m (linear, near 2 m, far 30 m) it is played at the
+#    distance gain, 0.79 and 0.5.
+# 3. The smoothing: a jump from 8 m to 16 m is spread over the frame, so in the frame's middle
+#    the level is still between the two (a 5 ms ramp would be done by then), and no sample
+#    steps further than the tone itself does.
+# 4. Past far, the car fades to silence, its voice is paused on the next frame (parked), and
+#    the output is silent; back near, it goes on.
+# 5. A one-shot placed past far is not started; one placed near plays, ends, and its source is
+#    removed (forgetEndedSources).
+import Math
+open audio/Audio
+open audio/AudioSpatial
+open audio/Sound
+open audio/spatialSystem/SpatialSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open ecs/World
+open Math3d
+open Vec3
+
+const rate: Int = 48000
+
+const frameSamples: Int = 800
+
+# The largest sample of `channel` (0 left, 1 right) in frames from..to of interleaved stereo
+func peakOf(
+  samples: view List(Float)
+  channel: view Int
+  from: view Int
+  to: view Int
+) ret Float {
+  var peak: Float = 0.0
+  loop var frame: Int = from, frame < to, ++frame {
+    peak = Math.max(
+      a: peak
+      b: Math.abs(value: samples.copyAtFallback(index: frame * 2 + channel, fallback: 0.0))
+    )
+  }
+  ret peak
+}
+
+# The largest step between two samples of one channel
+func largestStep(samples: view List(Float)) ret Float {
+  var largest: Float = 0.0
+  loop var index: Int = 2, index < samples.length, ++index {
+    let step: Float = Math.abs(
+      value: samples.copyAtFallback(index: index, fallback: 0.0) - samples.copyAtFallback(
+        index: index - 2
+        fallback: 0.0
+      )
+    )
+    largest = Math.max(a: largest, b: step)
+  }
+  ret largest
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: value * 100.0).toInt()
+}
+
+type Scene {
+  audio: AudioEngine
+  placement: AudioPlacement
+  transforms: ComponentTable(WorldTransform3D)
+  allocator: EntityAllocator
+  carEntityId: EntityId
+}
+
+func moveCar(scene: mod Scene, x: view Float, y: view Float) {
+  scene.transforms.componentSet(
+    entityId: scene.carEntityId
+    data: WorldTransform3D { matrix: mat4Translate(x: x, y: y, z: 0.0) }
+  )
+}
+
+# One frame: the system, then a 60th of a second of samples
+func frame(scene: mod Scene) ret List(Float) {
+  spatialSystem(
+    audio: scene.audio
+    placement: scene.placement
+    worldTransforms: scene.transforms
+    deltaTime: 1.0 / 60.0
+  )
+  ret scene.audio.renderOffline(frames: frameSamples)
+}
+
+# A few frames at one place; the last one's samples
+func settle(scene: mod Scene) ret List(Float) {
+  let first: List(Float) = frame(scene: scene)
+  let second: List(Float) = frame(scene: scene)
+  ret frame(scene: scene)
+}
+
+func carSource(scene: view Scene) ret AudioSource {
+  if let source: AudioSource = scene.placement.sources.componentCopy(entityId: scene.carEntityId) {
+    ret source
+  }
+  ret placedSource(
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    nearDistance: 0.0
+    farDistance: 0.0
+    rolloff: AudioRolloff.linear
+  )
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  let carEntityId: EntityId = allocator.allocEntity()
+  var scene: Scene = {
+    audio: audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+    placement: createAudioPlacement()
+    transforms: createComponentTable(WorldTransform3D)
+    allocator: allocator
+    carEntityId: carEntityId
+  }
+  let listenerEntityId: EntityId = scene.allocator.allocEntity()
+  scene.placement.listeners.componentSet(entityId: listenerEntityId, data: defaultListener())
+  let engine: Sound = scene.audio.addSound(data: sineSoundData(
+    frequency: 500.0
+    amplitude: 0.5
+    frameCount: rate
+    channels: 1
+    sampleRate: rate
+  ))
+  moveCar(scene: scene, x: 5.0, y: 0.0)
+  var car: AudioSource = placedSource(
+    position: Vec3 { x: 5.0, y: 0.0, z: 0.0 }
+    nearDistance: 2.0
+    farDistance: 30.0
+    rolloff: AudioRolloff.linear
+  )
+  car.looping = true
+  car.followsTransform = true
+  let carVoice: VoiceId = scene.audio.playPlaced(
+    placement: scene.placement
+    entityId: carEntityId
+    sound: engine
+    bus: AudioBusKind.effects
+    source: car
+  )
+  # 1. the pan, right then left (the full tone is 0.5; a centered one 0.35 a side)
+  let onRight: List(Float) = settle(scene: scene)
+  moveCar(scene: scene, x: -5.0, y: 0.0)
+  let onLeft: List(Float) = settle(scene: scene)
+  log("on the right: left {hundredths(value: peakOf(
+    samples: onRight
+    channel: 0
+    from: 0
+    to: frameSamples
+  ))}, right {hundredths(value: peakOf(
+    samples: onRight
+    channel: 1
+    from: 0
+    to: frameSamples
+  ))}; on the left: left {hundredths(value: peakOf(
+    samples: onLeft
+    channel: 0
+    from: 0
+    to: frameSamples
+  ))}, right {hundredths(value: peakOf(
+    samples: onLeft
+    channel: 1
+    from: 0
+    to: frameSamples
+  ))}")
+  # 2. the gain ahead at 8 m and 16 m, against a centered full tone (0.5 * cos 45°)
+  let centered: Float = 0.5 * Math.cos(x: 0.78539816)
+  moveCar(scene: scene, x: 0.0, y: 8.0)
+  let at8: List(Float) = settle(scene: scene)
+  let gainAt8: Float = peakOf(
+    samples: at8
+    channel: 0
+    from: 0
+    to: frameSamples
+  ) / centered
+  # 3. the jump to 16 m, spread over the frame
+  moveCar(scene: scene, x: 0.0, y: 16.0)
+  let jump: List(Float) = frame(scene: scene)
+  let middle: Float = peakOf(
+    samples: jump
+    channel: 0
+    from: 360
+    to: 440
+  ) / centered
+  let at16: List(Float) = settle(scene: scene)
+  let gainAt16: Float = peakOf(
+    samples: at16
+    channel: 0
+    from: 0
+    to: frameSamples
+  ) / centered
+  log("ahead: at 8 m {hundredths(value: gainAt8)}, at 16 m {hundredths(value: gainAt16)}")
+  log(
+    "the jump: in the frame's middle {hundredths(value: middle)}, between the two: {middle < gainAt8 - 0.05 and middle > gainAt16 + 0.05}"
+  )
+  # a fast orbit at 3 m, four turns a second: no sample steps further than the tone does
+  var steps: Float = 0.0
+  loop var turn: Int = 0, turn < 30, ++turn {
+    let angle: Float = (turn as Float) * 6.2831853 * 4.0 / 60.0
+    moveCar(scene: scene, x: 3.0 * Math.cos(x: angle), y: 3.0 * Math.sin(x: angle))
+    steps = Math.max(a: steps, b: largestStep(samples: frame(scene: scene)))
+  }
+  let toneStep: Float = 0.5 * 6.2831853 * 500.0 / (rate as Float)
+  log(
+    "the orbit: the largest step is within the tone's own: {steps <= toneStep * 1.05} ({hundredths(
+      value: steps / toneStep
+    )})"
+  )
+  # 4. past far: silent, then paused; back near: it goes on
+  moveCar(scene: scene, x: 0.0, y: 40.0)
+  let fading: List(Float) = frame(scene: scene)
+  let pausing: List(Float) = frame(scene: scene)
+  let farAway: List(Float) = frame(scene: scene)
+  log("past far: parked {carSource(scene: scene).parked}, silent {peakOf(
+    samples: farAway
+    channel: 0
+    from: 0
+    to: frameSamples
+  ) is 0.0}")
+  moveCar(scene: scene, x: 0.0, y: 4.0)
+  let back: List(Float) = settle(scene: scene)
+  log("back near: parked {carSource(scene: scene).parked}, heard {peakOf(
+    samples: back
+    channel: 0
+    from: 0
+    to: frameSamples
+  ) > 0.2}")
+  # 5. one-shots: past far it never starts; near, it plays, ends and is forgotten
+  let shot: Sound = scene.audio.addSound(data: sineSoundData(
+    frequency: 900.0
+    amplitude: 0.5
+    frameCount: 2400
+    channels: 1
+    sampleRate: rate
+  ))
+  let farShotEntityId: EntityId = scene.allocator.allocEntity()
+  let farShot: VoiceId = scene.audio.playPlaced(
+    placement: scene.placement
+    entityId: farShotEntityId
+    sound: shot
+    bus: AudioBusKind.effects
+    source: placedSource(
+      position: Vec3 { x: 50.0, y: 0.0, z: 0.0 }
+      nearDistance: 2.0
+      farDistance: 30.0
+      rolloff: AudioRolloff.inverse
+    )
+  )
+  let nearShotEntityId: EntityId = scene.allocator.allocEntity()
+  let nearShot: VoiceId = scene.audio.playPlaced(
+    placement: scene.placement
+    entityId: nearShotEntityId
+    sound: shot
+    bus: AudioBusKind.effects
+    source: placedSource(
+      position: Vec3 { x: 3.0, y: 3.0, z: 0.0 }
+      nearDistance: 2.0
+      farDistance: 30.0
+      rolloff: AudioRolloff.inverse
+    )
+  )
+  log(
+    "one-shots: the far one started {farShot.value >= 0}, the near one {nearShot.value >= 0}; sources {scene.placement.sources.componentCount()}"
+  )
+  let shotFrames: List(Float) = settle(scene: scene)
+  scene.audio.update()
+  let ended: List(VoiceId) = scene.audio.takeEndedVoices()
+  forgetEndedSources(placement: scene.placement, ended: ended)
+  log(
+    "after the shot: sources {scene.placement.sources.componentCount()}, the car's voice {carSource(
+      scene: scene
+    ).voiceId.value is carVoice.value}"
+  )
+  let blocks: Int = scene.audio.stopAudio()
+}

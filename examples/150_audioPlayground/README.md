@@ -22,6 +22,11 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   again. Drag the position slider to seek; it follows the stream while you do not hold it.
 - **Mix:** a volume per bus (music, effects, alerts; 100 % is 0 dB, 0 % is silent), and the pan
   of the stream and of every sound started after you move it.
+- **Placed in 3D:** a looping buzz placed in the world (`audio/AudioSpatial`, docs/audio-design.md
+  §10.4) goes round you, the listener, who looks ahead. Use headphones: it moves from ear to ear
+  as it passes (0° is ahead, 90° on your right). The slider sets its distance: it is full inside
+  2 m, quieter further out, and silent past 25 m, where its voice is paused so it costs nothing;
+  bring it back and it goes on. The readout shows its angle, pan and gain.
 - **Status:** the device the engine plays on, its sample rate and period, the latency the device
   and the engine add, the frames of silence played because samples were late (underruns), and
   how many sounds played and ended.
@@ -32,7 +37,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   shared one in `lib/assets/walker/`.
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
-  `StatusSection`), run once a frame from `Main.rae`.
+  `PlacedSection`, `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -45,7 +50,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 |---|---|
 | `RAE_SDL_HEADLESS_MS=N` | a headless run of N ms; the engine renders offline (no device) |
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
-| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left) and logs a summary line at the end; with the offline engine it ends after 120 frames (2 s of audio), so its result does not depend on the machine's speed |
+| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, the orbit at 6 m and then past its far distance) and logs a summary line at the end; with the offline engine it ends after 120 frames (2 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
 

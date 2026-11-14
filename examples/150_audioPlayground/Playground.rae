@@ -1,11 +1,16 @@
 # The playground's state: the audio engine (a resource of the app, docs/audio-design.md §10.1),
 # the sounds loaded once, the music stream's voice, and the mix settings the panel set. Each panel
-# section (SoundsSection, MusicSection, MixSection, StatusSection; later steps add the synth, the
-# microphone, the effects and the real-time view) reads and changes it once a frame.
+# section (SoundsSection, MusicSection, MixSection, PlacedSection, StatusSection; later steps add
+# the synth, the microphone, the effects and the real-time view) reads and changes it once a frame.
 import Sys
 open audio/Audio
 open audio/AudioMixer
+open audio/AudioSpatial
 open audio/Sound
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open ecs/World
 
 # Where the example's files are, from the repository root (the iOS bundle keeps the same paths)
 const playgroundAssets: String = "examples/150_audioPlayground/assets/"
@@ -30,6 +35,16 @@ type Playground {
   # itself each frame, so the engine moves on as it would with a device
   rendersItself: Bool = false
   frames: Int = 0
+  # sounds placed in 3D (audio/AudioSpatial): the listener and source tables, the transforms the
+  # placed sources follow, the app's entities, and the buzz going round the listener
+  placement: AudioPlacement
+  transforms: ComponentTable(WorldTransform3D)
+  entities: EntityAllocator
+  buzz: Sound
+  orbitEntityId: EntityId
+  orbitOn: Bool = false
+  # radians round the listener: 0 ahead, a quarter turn on its right
+  orbitAngle: Float = 0.0
 }
 
 # A headless run (the visual gate) has no device to depend on, so it renders offline
@@ -46,6 +61,7 @@ func createPlayground() ret Playground {
   let whoosh: Sound = audio.loadSound(path: "{playgroundAssets}whoosh.wav")
   let chime: Sound = audio.loadSound(path: "{playgroundAssets}chime.m4a")
   let alert: Sound = audio.loadSound(path: "{playgroundAssets}alert.wav")
+  let buzz: Sound = audio.loadSound(path: "{playgroundAssets}buzzLoop.wav")
   # an alert takes the music down 14 dB while it plays (on the audio thread, §6.4)
   audio.duckWhilePlaying(
     source: AudioBusKind.alerts
@@ -53,6 +69,12 @@ func createPlayground() ret Playground {
     gainDecibels: -14.0
   )
   let rendersItself: Bool = audio.offline
+  # the listener stands at the origin looking along +Y; the orbiting source is its own entity
+  var entities: EntityAllocator = createEntityAllocator()
+  var placement: AudioPlacement = createAudioPlacement()
+  let listenerEntityId: EntityId = entities.allocEntity()
+  placement.listeners.componentSet(entityId: listenerEntityId, data: defaultListener())
+  let orbitEntityId: EntityId = entities.allocEntity()
   ret Playground {
     audio: own audio
     click: click
@@ -61,6 +83,11 @@ func createPlayground() ret Playground {
     chime: chime
     alert: alert
     rendersItself: rendersItself
+    placement: placement
+    transforms: createComponentTable(WorldTransform3D)
+    entities: entities
+    buzz: buzz
+    orbitEntityId: orbitEntityId
   }
 }
 

@@ -1277,7 +1277,8 @@
    },
    "Children": [
     "SoundsCard",
-    "MusicCard"
+    "MusicCard",
+    "PlacedCard"
    ]
   },
   "RightColumn": {
@@ -1346,7 +1347,7 @@
     "h": 20
    },
    "Text": {
-    "text": "The audio package: sounds, a streamed track, the mix. Later steps add the synth, the microphone, effects and the real-time view.",
+    "text": "The audio package: sounds, a streamed track, the mix, a sound placed in 3D. Later steps add the synth, the microphone, effects and the real-time view.",
     "styleId": "muted"
    },
    "Size": {
@@ -1380,6 +1381,208 @@
     "Title",
     "Subtitle",
     "Columns"
+   ]
+  },
+  "PlacedCardTitle": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 24
+   },
+   "Text": {
+    "text": "Placed in 3D (a looping buzz going round you)",
+    "styleId": "section"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   }
+  },
+  "OrbitToggleLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 44
+   },
+   "Text": {
+    "text": "Start the orbit",
+    "styleId": "button"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fill"
+    }
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "OrbitToggle": {
+   "bundles": [
+    "pressable"
+   ],
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 110,
+    "h": 44
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surfaceAlt",
+    "radius": "radiusPill"
+   },
+   "OnClick": {
+    "actionId": "orbit.toggle",
+    "label": "Start or stop the sound going round the listener"
+   },
+   "Children": [
+    "OrbitToggleLabel"
+   ],
+   "Layout": {
+    "type": "Vertical",
+    "alignCross": "Stretch"
+   }
+  },
+  "OrbitDistanceLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 20
+   },
+   "Text": {
+    "text": "",
+    "styleId": "muted"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "ValueText": {
+    "key": "orbit.distance",
+    "prefix": "Distance ",
+    "suffix": " m (full inside 2 m, silent past 25 m)",
+    "scale": 1,
+    "decimals": 0
+   }
+  },
+  "OrbitDistanceFill": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 26
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "accent",
+    "radius": "radiusPill"
+   }
+  },
+  "OrbitDistance": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 400,
+    "h": 26
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surfaceAlt",
+    "radius": "radiusPill"
+   },
+   "ValueSlider": {
+    "key": "orbit.distance",
+    "min": 1.0,
+    "max": 35.0,
+    "actionId": "orbit.distance"
+   },
+   "Children": [
+    "OrbitDistanceFill"
+   ]
+  },
+  "OrbitReadout": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 20
+   },
+   "Text": {
+    "text": "Not playing",
+    "styleId": "muted"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   }
+  },
+  "PlacedCard": {
+   "Layout": {
+    "type": "Vertical",
+    "gap": "spaceS",
+    "alignCross": "Stretch"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Hug"
+    }
+   },
+   "Padding": {
+    "l": "spaceM",
+    "t": "spaceM",
+    "r": "spaceM",
+    "b": "spaceM"
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surface",
+    "radius": "radiusCard"
+   },
+   "Children": [
+    "PlacedCardTitle",
+    "OrbitToggle",
+    "OrbitDistanceLabel",
+    "OrbitDistance",
+    "OrbitReadout"
    ]
   }
  }

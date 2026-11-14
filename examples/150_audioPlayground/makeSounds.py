@@ -84,6 +84,18 @@ def alert():
     return out
 
 
+def buzz_loop():
+    # The placed sound that goes round the listener: a 110 Hz buzz (harmonics 1 to 8 at 1/n, a
+    # band-limited sawtooth), 0.5 s, exactly 55 cycles, so it loops without a seam. Bright
+    # enough that its pan and distance are easy to hear.
+    out = []
+    for i in range(seconds(0.5)):
+        t = i / RATE
+        value = sum(math.sin(2 * math.pi * 110 * n * t) / n for n in range(1, 9))
+        out.append(0.3 * value)
+    return out
+
+
 def position_tones():
     # The stream's test signal, 30 s: at the start of every second a 0.15 s tone whose pitch
     # tells the second (300 Hz + 40 Hz per second: 300 Hz at 0 s, 1460 Hz at 29 s), silence
@@ -105,6 +117,7 @@ def main():
     write_wav("bell.wav", bell())
     write_wav("whoosh.wav", whoosh())
     write_wav("alert.wav", alert())
+    write_wav("buzzLoop.wav", buzz_loop())
     chime_wav = write_wav("chime-source.wav", chime())
     subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "32000", chime_wav,
                     os.path.join(ASSETS, "chime.m4a")], check=True)

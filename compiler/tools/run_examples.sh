@@ -1942,16 +1942,18 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
         elif [ "$EXAMPLE_NAME" = "150_audioPlayground" ]; then
           # The audio playground headless: the engine renders offline (no device), the demo
           # presses the controls (two sounds, the stream, an alert and the AAC chime, a seek, a
-          # pan), and the summary line says the four sounds played and ended, the stream
+          # pan, the placed buzz's orbit and its move past far), and the summary line says the four
+          # sounds played and ended, the placed voice was paused past far, the stream
           # streamed, and nothing underran
           SCREENSHOT="$TMP_OUT/audio-playground.bmp"
           if (cd .. && RAE_AUDIO_PLAYGROUND_DEMO=1 RAE_SDL_HEADLESS_MS=6000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -q 'sounds played 4, voices ended 4; music started true' "$TMP_OUT/render.log" \
+             && grep -q 'orbit on true, parked true' "$TMP_OUT/render.log" \
              && grep -q 'underrun frames 0' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (offline engine: four sounds played and ended, the music streamed and sought, no underrun)"
+            echo "PASS: $EXAMPLE_NAME (offline engine: four sounds played and ended, the music streamed and sought, the placed sound paused past far, no underrun)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (audio playground demo)"
