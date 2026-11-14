@@ -11,8 +11,14 @@
  * one relaxed atomic load.
  *
  * Slots: 0 is the thread that installed the table (the main thread), 1..63 are
- * the worker pool's threads by their worker index. Other threads (a `spawn
- * thread`, an attached foreign thread) have none yet and record nothing. */
+ * the worker pool's threads by their worker index, and 64..71 are claimed at
+ * run time by named threads: a `spawn thread` (named by its function, the C
+ * backend passes it to rae_task_start_thread) and a foreign thread
+ * (rae_thread_attach_named, or "attached thread" for rae_thread_attach). A
+ * named thread claims its slot at its first event while a table is installed,
+ * once per table; the Rae collector reads the slot's name
+ * (rae_perf_thread_name) and names the lane. A thread with no slot, or past
+ * the eighth, records nothing. */
 
 /* The event codes; lib/perf/Perf's perfRuntimeCode* constants are the same */
 enum {
@@ -40,10 +46,37 @@ enum {
 };
 
 #define RAE_PERF_SLOTS 64
+#define RAE_PERF_THREAD_SLOTS 8
 
 static _Atomic(void*) g_rae_perf_rings = NULL;   /* the hub's Buffer(PerfRing), one per slot */
 static _Atomic(void*) g_rae_perf_names = NULL;   /* its Buffer(Int): event code -> name id */
 static _Thread_local int64_t g_rae_perf_slot = -1;
+
+/* The named threads' slots: each table (a generation) hands them out anew */
+static _Atomic(const char*) g_rae_perf_thread_names[RAE_PERF_THREAD_SLOTS];
+static _Atomic int64_t g_rae_perf_threads_claimed = 0;
+static _Atomic int64_t g_rae_perf_generation = 0;
+static _Thread_local const char* g_rae_perf_thread_name = NULL;
+static _Thread_local int64_t g_rae_perf_thread_generation = -1;
+
+/* A named thread's slot in the installed table, claimed on its first event */
+static int64_t rae_perf_claim_slot(void) {
+  int64_t generation = atomic_load_explicit(&g_rae_perf_generation, memory_order_acquire);
+  if (g_rae_perf_thread_generation == generation) return g_rae_perf_slot;
+  g_rae_perf_thread_generation = generation;
+  g_rae_perf_slot = -1;
+  int64_t index = atomic_fetch_add_explicit(&g_rae_perf_threads_claimed, 1, memory_order_relaxed);
+  if (index >= RAE_PERF_THREAD_SLOTS) return -1;
+  atomic_store_explicit(&g_rae_perf_thread_names[index], g_rae_perf_thread_name, memory_order_release);
+  g_rae_perf_slot = RAE_PERF_SLOTS + index;
+  return g_rae_perf_slot;
+}
+
+/* Name the calling thread for the recorder (a string that lives as long as the program) */
+static void rae_perf_name_thread(const char* name) {
+  g_rae_perf_thread_name = name;
+  g_rae_perf_thread_generation = -1;
+}
 
 /* lib/perf/Perf's perfRuntimeWrite (`cExport`); a program that does not use
  * the recorder links this empty one */
@@ -54,9 +87,11 @@ __attribute__((weak)) void rae_perf_runtime_write(void* rings, void* names, int6
 
 static inline void rae_perf_event(int64_t kind, int64_t code, int64_t value, int64_t extra) {
   void* rings = atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire);
-  if (__builtin_expect(rings == NULL, 1) || g_rae_perf_slot < 0) return;
-  rae_perf_runtime_write(rings, atomic_load_explicit(&g_rae_perf_names, memory_order_acquire), g_rae_perf_slot,
-                         kind, code, value, extra);
+  if (__builtin_expect(rings == NULL, 1)) return;
+  int64_t slot = g_rae_perf_thread_name ? rae_perf_claim_slot() : g_rae_perf_slot;
+  if (slot < 0) return;
+  rae_perf_runtime_write(rings, atomic_load_explicit(&g_rae_perf_names, memory_order_acquire), slot, kind, code,
+                         value, extra);
 }
 
 /* A pool worker's slot is its worker index */
@@ -69,6 +104,11 @@ static inline void rae_perf_set_worker_slot(int64_t worker) {
  * parallel jobs. */
 void rae_perf_install(void* rings, void* names) {
   g_rae_perf_slot = 0;
+  g_rae_perf_thread_name = NULL;
+  for (int i = 0; i < RAE_PERF_THREAD_SLOTS; i++)
+    atomic_store_explicit(&g_rae_perf_thread_names[i], NULL, memory_order_relaxed);
+  atomic_store_explicit(&g_rae_perf_threads_claimed, 0, memory_order_relaxed);
+  atomic_fetch_add_explicit(&g_rae_perf_generation, 1, memory_order_release);
   atomic_store_explicit(&g_rae_perf_names, names, memory_order_release);
   atomic_store_explicit(&g_rae_perf_rings, rings, memory_order_release);
 }
@@ -80,7 +120,24 @@ void rae_perf_uninstall(void* rings) {
 }
 
 int64_t rae_perf_slot_count(void) {
+  return RAE_PERF_SLOTS + RAE_PERF_THREAD_SLOTS;
+}
+
+/* The first slot a named thread claims, and how many there are */
+int64_t rae_perf_thread_slot_first(void) {
   return RAE_PERF_SLOTS;
+}
+
+int64_t rae_perf_thread_slot_count(void) {
+  return RAE_PERF_THREAD_SLOTS;
+}
+
+/* The name of the thread that claimed named slot `index` ("" while none has) */
+rae_String rae_perf_thread_name(int64_t index) {
+  const char* name = index >= 0 && index < RAE_PERF_THREAD_SLOTS
+                         ? atomic_load_explicit(&g_rae_perf_thread_names[index], memory_order_acquire)
+                         : NULL;
+  return rae_ext_rae_str_from_cstr(name ? name : "");
 }
 
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)

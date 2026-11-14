@@ -1,0 +1,99 @@
+# Named threads in the event recorder (lib/perf/Perf, docs/perf-tools-design.md §4.3): a
+# `spawn thread` gets a lane named by its function, and a thread C made gets one named at
+# rae_thread_attach_named (driver.c); each claims a slot at its first event, and perfFrame names
+# the lane. The spawned thread's Signal wait is a span on its lane, the decoder's post a mark on
+# its own.
+import Signal
+open perf/Perf
+
+func listenLoop(signal: copy Signal.Signal) ret Int {
+  signal.wait()
+  ret 1
+}
+
+# Called by driver.c's thread after it attached as "decoder"
+func decodeStep() cExport("rae_test_decode_step") {
+  let signal: Signal.Signal = Signal.createSignal()
+  signal.post()
+  let unusedTaken: Bool = signal.tryWait()
+  signal.freeSignal()
+}
+
+func runDecoder() unsafe extern ret Int
+
+# The lane named `name`, or -1
+func laneOf(hub: view PerfHub, name: view String) ret Int {
+  loop var ring: Int = 0, ring < hub.ringNames.length, ++ring {
+    if hub.ringNames.copyAtDefault(index: ring) is name {
+      ret ring
+    }
+  }
+  ret -1
+}
+
+# The events of kind `kind` named `name` on lane `lane`
+func countOn(
+  hub: view PerfHub
+  lane: view Int
+  kind: view PerfKind
+  name: view String
+) ret Int {
+  var count: Int = 0
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if hub.perfEventRing(number: number) is lane and event.kind is kind and hub.perfNameText(
+      nameId: event.nameId as Int
+    ) is name {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() ret Int {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 600, windowEvents: 10000, ringEvents: 1000 }
+  )
+  let mainRing: PerfRing = hub.perfThreadRing(name: "main")
+  hub.perfInstallRuntime(mainRing: mainRing)
+  let signal: Signal.Signal = Signal.createSignal()
+  let listener: Task(Int) = spawn thread listenLoop(signal: signal)
+  # the listener waits until this post (a short sleep lets it reach its wait first)
+  sleep(ms: 50)
+  signal.post()
+  let listened: Int = listener.get()
+  unsafe {
+    let decoded: Int = runDecoder()
+    log("listened {listened}, decoded {decoded}")
+  }
+  hub.perfFrame()
+  let listenLane: Int = laneOf(hub: hub, name: "listenLoop")
+  let decoderLane: Int = laneOf(hub: hub, name: "decoder")
+  log("lanes named: listenLoop {listenLane > 0}, decoder {decoderLane > 0}")
+  log("listenLoop's Signal wait: {countOn(
+    hub: hub
+    lane: listenLane
+    kind: PerfKind.waitBegin
+    name: "Signal wait"
+  )} begin, {countOn(
+    hub: hub
+    lane: listenLane
+    kind: PerfKind.waitEnd
+    name: "Signal wait"
+  )} end")
+  log("decoder's Signal post: {countOn(
+    hub: hub
+    lane: decoderLane
+    kind: PerfKind.mark
+    name: "Signal post"
+  )}")
+  log("main's Task.get wait: {countOn(
+    hub: hub
+    lane: 0
+    kind: PerfKind.waitBegin
+    name: "Task.get"
+  )}")
+  signal.freeSignal()
+  hub.freePerfHub()
+  ret 0
+}

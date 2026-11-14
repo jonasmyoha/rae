@@ -119,11 +119,16 @@ type PerfHub {
 }
 
 # What the runtime's hooks write through: a ring per thread slot (0 the main thread, 1.. the pool's
-# workers; an unused slot is zero) and the name of each event code. Buffers, so the runtime holds
+# workers, then the slots named threads claim at run time; an unused slot is zero) and the name of
+# each event code. Buffers, so the runtime holds
 # their addresses.
 type PerfRuntimeTable {
   rings: Buffer(PerfRing)
   names: Buffer(Int)
+  # the hub's ring of each named thread's slot (a `spawn thread`, an attached thread), and
+  # whether its lane has the thread's name yet
+  threadRings: List(Int)
+  threadNamed: List(Bool)
 }
 
 func createPerfHub(settings: view PerfSettings) ret PerfHub {
@@ -294,6 +299,7 @@ func perfFrame(hub: mod PerfHub) {
   hub.frameCount = hub.frameCount + 1
   hub.frameStartNs = now
   hub.frameFirstEvent = hub.written
+  perfNameThreadLanes(hub: hub)
   # older than the window's seconds: let go
   let horizon: Int = now - hub.settings.windowSeconds * 1000000000
   loop hub.oldest < hub.written and hub.perfEventAt(number: hub.oldest).time < horizon {
@@ -388,8 +394,16 @@ func nativePerfSlotCount() unsafe extern("rae_perf_slot_count") ret Int
 
 func nativePerfWorkerCount() unsafe extern("rae_perf_worker_count") ret Int
 
-# Record the runtime's work into this hub: `mainRing` (this thread's) is slot 0, and each worker of
-# the pool gets a ring of its own, its lane named "worker <n>". On the main thread, at setup.
+func nativePerfThreadSlotFirst() unsafe extern("rae_perf_thread_slot_first") ret Int
+
+func nativePerfThreadSlotCount() unsafe extern("rae_perf_thread_slot_count") ret Int
+
+func nativePerfThreadName(index: Int) unsafe extern("rae_perf_thread_name") ret String
+
+# Record the runtime's work into this hub: `mainRing` (this thread's) is slot 0, each worker of
+# the pool gets a ring of its own, its lane named "worker <n>", and a few rings wait for named
+# threads (a `spawn thread`, named by its function; a thread C attached), whose lanes perfFrame
+# names when one claims them. On the main thread, at setup.
 func perfInstallRuntime(hub: mod PerfHub, mainRing: view PerfRing) {
   perfUninstallRuntime(hub: hub)
   unsafe {
@@ -407,13 +421,46 @@ func perfInstallRuntime(hub: mod PerfHub, mainRing: view PerfRing) {
       let ring: PerfRing = hub.perfThreadRing(name: "worker {worker}")
       rae_ext_rae_buf_set(buf: rings, index: worker, value: ring)
     }
+    var threadRings: List(Int) = {}
+    var threadNamed: List(Bool) = {}
+    let firstThreadSlot: Int = nativePerfThreadSlotFirst()
+    loop var thread: Int = 0, thread < nativePerfThreadSlotCount(), ++thread {
+      if firstThreadSlot + thread < slots {
+        let ring: PerfRing = hub.perfThreadRing(name: "thread {thread + 1}")
+        rae_ext_rae_buf_set(buf: rings, index: firstThreadSlot + thread, value: ring)
+        threadRings.add(value: ring.index)
+        threadNamed.add(value: false)
+      }
+    }
     var names: Buffer(Int) = rae_ext_rae_buf_alloc(size: perfRuntimeCodes, elemSize: sizeof(Int))
     loop var code: Int = 0, code < perfRuntimeCodes, ++code {
       let name: PerfName = hub.perfName(name: perfRuntimeCodeName(code: code))
       rae_ext_rae_buf_set(buf: names, index: code, value: name.id)
     }
-    hub.runtime = PerfRuntimeTable { rings: rings, names: names }
+    hub.runtime = PerfRuntimeTable {
+      rings: rings
+      names: names
+      threadRings: threadRings
+      threadNamed: threadNamed
+    }
     nativePerfInstall(rings: rings, names: names)
+  }
+}
+
+# The lanes of the named threads that claimed a slot since the last frame get their names
+func perfNameThreadLanes(hub: mod PerfHub) {
+  if let table: mod PerfRuntimeTable = hub.runtime {
+    loop var thread: Int = 0, thread < table.threadRings.length, ++thread {
+      if not table.threadNamed.copyAtDefault(index: thread) {
+        unsafe {
+          let name: String = nativePerfThreadName(index: thread)
+          if name.length() > 0 {
+            hub.ringNames.set(index: table.threadRings.copyAtDefault(index: thread), value: name)
+            table.threadNamed.set(index: thread, value: true)
+          }
+        }
+      }
+    }
   }
 }
 

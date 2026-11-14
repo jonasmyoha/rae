@@ -197,11 +197,17 @@ a table, or on a thread with no slot, a hook is one atomic load. Recorded now: t
 zone and its `chunk` zones (iterations and chunk index as arguments), `task` runs on the pool
 with a `spawn` flow from each spawn, the `Task.get`, `Task join` and `taskScope` waits, a Channel
 send or receive waiting for the channel's lock (`Channel`; there is no blocking receive), a
-contended `RAE_LOCK` (`lock`), and `Signal wait` spans and `Signal post` marks. Not yet: lanes for
-`spawn thread` and for foreign threads (`rae_thread_attach`), which have no slot and record
-nothing (they need a name from the spawn or the attach call, and slots claimed at run time).
-Case 1462 checks a 4-worker `parallelLoop`, the waits and a contended channel, and the TSan gate
-runs it.
+contended `RAE_LOCK` (`lock`), and `Signal wait` spans and `Signal post` marks. Case 1462 checks
+a 4-worker `parallelLoop`, the waits and a contended channel, and the TSan gate runs it.
+
+Named threads (Rae 0.3.132, perf step 3b): a `spawn thread f(...)` starts through
+`rae_task_start_thread`, which the C backend hands `f`'s name, and a thread C made attaches with
+`rae_thread_attach_named(name)` (plain `rae_thread_attach()` names it "attached thread"). Such a
+thread claims one of 8 extra slots at its first event while a table is installed, once per table
+(a new table hands them out anew); `perfInstallRuntime` makes their rings ("thread <n>"), and
+`perfFrame` renames each lane to its thread's name once claimed. A ninth named thread records
+nothing. Case 1463 checks a `spawn thread`'s Signal wait on its lane and a C thread attached as
+"decoder" posting a Signal on its own.
 
 The views of this (section 9):
 - each thread's lane;

@@ -53,6 +53,7 @@ static void rae_sched_wait(RaeTask* t);
 typedef struct {
   void* (*thunk)(void*);
   void* args;
+  const char* name;   /* a `spawn thread`'s function, for the recorder's lane; NULL for a plain spawn */
 } RaeTaskLaunch;
 
 static _Atomic int64_t g_rae_live_task_threads = 0;
@@ -62,6 +63,7 @@ static _Atomic int g_rae_spawn_fallback_reported = 0;
 static void* rae_task_trampoline(void* launch_pointer) {
   RaeTaskLaunch launch = *(RaeTaskLaunch*)launch_pointer;
   free(launch_pointer);
+  if (launch.name) rae_perf_name_thread(launch.name);
   void* answer = launch.thunk(launch.args);
   atomic_fetch_sub_explicit(&g_rae_live_task_threads, 1, memory_order_relaxed);
   return answer;
@@ -78,7 +80,18 @@ static int64_t rae_spawn_thread_cap(void) {
 }
 #endif
 
+static void rae_task_start_named(RaeTask* t, void* (*thunk)(void*), void* args, const char* name);
+
 void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args) {
+  rae_task_start_named(t, thunk, args, NULL);
+}
+
+/* `spawn thread f(...)`: a thread of its own, its recorder lane named `name` (f's name) */
+void rae_task_start_thread(RaeTask* t, void* (*thunk)(void*), void* args, const char* name) {
+  rae_task_start_named(t, thunk, args, name);
+}
+
+static void rae_task_start_named(RaeTask* t, void* (*thunk)(void*), void* args, const char* name) {
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
   int64_t cap = rae_spawn_thread_cap();
   int64_t live = atomic_fetch_add_explicit(&g_rae_live_task_threads, 1, memory_order_relaxed);
@@ -90,6 +103,7 @@ void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args) {
     if (launch) {
       launch->thunk = thunk;
       launch->args = args;
+      launch->name = name;
       error = pthread_create(&t->thread, NULL, rae_task_trampoline, launch);
       if (error == 0) return;
       free(launch);

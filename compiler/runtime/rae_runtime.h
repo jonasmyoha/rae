@@ -89,6 +89,7 @@ RaeTask* rae_task_new(size_t result_size);
 /* Start a spawned task's thunk on a thread, or on the caller when no thread
  * can be had (runtime_threads.c) */
 void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args);
+void rae_task_start_thread(RaeTask* t, void* (*thunk)(void*), void* args, const char* name);
 /* Make `t` a scheduler task: the generated spawn site then hands it to
  * lib/core/Scheduler.rae's schedulerSubmit (runtime_threads.c) */
 void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args);
@@ -202,12 +203,17 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
  * the first Rae call allocates nothing (docs/realtime-language-design.md
  * §6.2). A thread Rae starts (spawn, the pool) needs none. Safe to call twice. */
 void rae_thread_attach(void);
+/* The same, the event recorder's lane for the thread named `name` (a string that lives as long as
+ * the program) */
+void rae_thread_attach_named(const char* name);
 
 /* The event recorder's runtime table (runtime_perf_hooks.c, lib/perf/Perf perfInstallRuntime) */
 void rae_perf_install(void* rings, void* names);
 void rae_perf_uninstall(void* rings);
 int64_t rae_perf_slot_count(void);
 int64_t rae_perf_worker_count(void);
+int64_t rae_perf_thread_slot_first(void);
+int64_t rae_perf_thread_slot_count(void);
 
 #ifndef RAE_NONBLOCKING
 #define RAE_NONBLOCKING
@@ -598,6 +604,8 @@ void rae_ext_rae_log_write(rae_String text, rae_Bool newline);
 
 
 rae_String rae_ext_rae_str_from_cstr(const void* s);
+/* The event recorder: the name of the thread that claimed named slot `index` (runtime_perf_hooks.c) */
+rae_String rae_perf_thread_name(int64_t index);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 // Free `s.data` only when `s.is_owned`. Safe to call on borrowed

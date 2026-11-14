@@ -1236,6 +1236,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         fprintf(out, "%s((int64_t)(intptr_t)__t); ", core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
                         if (socket) fprintf(out, "} else { rae_task_start(__t, __raespawn_thunk_%s, __s); } ", mangled);
                         fprintf(out, "__t; })");
+                    } else if (expr->as.unary.spawn_thread) {
+                        // its own thread, its event-recorder lane named by the
+                        // function (runtime_perf_hooks.c)
+                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start_thread(__t, __raespawn_thunk_%s, __s, \"%.*s\"); __t; })",
+                                mangled, (int)callee->name.len, callee->name.data);
                     } else {
                         fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     }

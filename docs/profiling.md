@@ -32,7 +32,9 @@ frames it measures.
   its caller's lane, tasks run as `task` zones with a flow arrow from their `spawn`, and
   `Task.get`, `Task join`, `taskScope`, `Channel` (waiting for the channel's lock), `lock` (a
   contended runtime lock) and `Signal wait` are spans of the category `wait`
-  (docs/perf-tools-design.md §4.3). `capturedNames` leaves these names out.
+  (docs/perf-tools-design.md §4.3). `capturedNames` leaves these names out. A `spawn thread`
+  has a lane named by its function, and a thread C made one named at `rae_thread_attach_named`
+  ("attached thread" for plain `rae_thread_attach`), up to 8 such threads (0.3.132).
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
