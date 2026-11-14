@@ -869,6 +869,71 @@ tested offline like any function. How a program's own kind joins the engine is
 §13 D5: its five `cExport` calls, over the state, the scratch and the events
 the engine hands it (`audio/CustomNodes`'s `CustomBlock`).
 
+### 10.4 Sounds placed in the world (games)
+
+A game hears its world from the camera: a car's engine gets louder as it comes near and moves
+from ear to ear as it passes, a gunshot behind a wall far away is not heard at all. That is ECS
+data too, on the program's own entities, next to the mixer's (§10.2):
+
+- `AudioListener` (`audio/AudioSpatial`): the camera's `position`, `forward` and `up`. One per
+  program; the first entity with one is used, and without one the listener is at the origin
+  looking along +Y (Z up, docs/coordinate-system.md).
+- `AudioSource`: the placed voice (`voiceId`), its `position`, its own `gainDecibels`, a
+  `nearDistance` (full inside) and a `farDistance` (silent beyond), a `rolloff` (`linear`;
+  `inverse`, near over distance bent to reach silence at far, the way sound falls off in the
+  open; `smooth`, an S-curve for a wide ambience), whether it is `looping` and whether it
+  `followsTransform`.
+- `AudioPlacement` holds the two tables, as `AudioEntities` holds the mixer's.
+
+```rae
+var placement: AudioPlacement = createAudioPlacement()
+placement.listeners.componentSet(entityId: cameraEntityId, data: cameraListener)
+var engine: AudioSource = placedSource(
+  position: carPosition
+  nearDistance: 3.0
+  farDistance: 80.0
+  rolloff: AudioRolloff.inverse
+)
+engine.looping = true
+engine.followsTransform = true
+let engineVoice: VoiceId = audio.playPlaced(
+  placement: placement
+  entityId: carEntityId
+  sound: engineSound
+  bus: AudioBusKind.effects
+  source: engine
+)
+# once a frame, after the transforms:
+spatialSystem(audio: audio, placement: placement, worldTransforms: transforms, deltaTime: deltaTime)
+forgetEndedSources(placement: placement, ended: audio.takeEndedVoices())
+```
+
+`playPlaced` starts the sound with the gain and pan it has where it is, from its first sample,
+so a one-shot (a gunshot, an explosion: placed where it starts, not following anything) is
+right at once. A one-shot already past its far distance is not started at all.
+`spatialSystem` (`packages/audio/spatialSystem/SpatialSystem.rae`), once a frame, gives every
+source that follows its entity the position of its `WorldTransform3D`, then sends its voice
+the gain of its distance (`distanceGain` times its own level) and its pan: the share of its
+direction along the listener's right (`forward × up`), which the mixer turns into equal-power
+gains for a mono voice. Ahead, behind and above are all in the middle: there is no front/back
+or height cue yet. Both changes are spread over the frame's time (a command's `other` field,
+no shorter than the mixer's 5 ms smoothing), so the steps of a fast source join into one ramp
+and do not click. A source past its far distance goes to silence over one frame; on the next,
+a looping voice is paused (it keeps its place and costs nothing in the mix, and goes on when
+it comes back) and a one-shot is stopped and its source removed. Placed sounds should be mono;
+a stereo voice is panned by balance.
+
+**Landed (2026-11-14, `packages/audio` 0.13.0):** `audio/AudioSpatial` (the components, the
+rules `distanceGain`, `listenerPan`, `placedGain`, `gainToDecibels`) and `audio/spatialSystem`
+(`playPlaced`, `spatialSystem`, `forgetEndedSources`); `setVoiceGain`/`setVoicePan` commands
+may now carry the seconds to spread over. Fixture 1449 holds the falloff of each rolloff and the
+pan on every side of a listener, also a turned one; fixture 1450 renders offline with
+`RAE_REALTIME_CHECK=1`: the pan from each side, the gain at two distances, a jump spread over
+the frame (still between the two levels at its middle), a fast orbit whose largest sample step
+stays within the tone's own, the pause past far and the resume, and the one-shots. The audio
+playground (examples/150_audioPlayground) has a Placed in 3D section: a looping buzz going round
+the listener at a distance its slider sets.
+
 ---
 
 ## 11. What lands first

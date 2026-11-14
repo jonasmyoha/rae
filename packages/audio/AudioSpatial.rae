@@ -1,0 +1,175 @@
+# audio/AudioSpatial — sounds placed in the world (docs/audio-design.md §10.4). Like the mixer's
+# entities (audio/AudioComponents), they are components on the program's entities: one
+# AudioListener (the camera's place and look) and an AudioSource per placed sound. Each frame
+# audio/spatialSystem sets every placed voice's gain by its distance and its pan from the
+# listener's right, and pauses or stops the voices too far away to hear, so they cost nothing.
+#
+#     var placement: AudioPlacement = createAudioPlacement()
+#     placement.listeners.componentSet(entityId: cameraEntityId, data: AudioListener {
+#       position: cameraPosition, forward: cameraForward, up: cameraUp })
+#     let engineVoice: VoiceId = audio.playPlaced(placement: placement, entityId: carEntityId,
+#       sound: engineSound, bus: AudioBusKind.effects, source: placedSource(...))
+#     spatialSystem(audio: audio, placement: placement, worldTransforms: transforms,
+#       deltaTime: deltaTime)    # every frame
+#
+# The rules here are plain functions over numbers: distanceGain (how loud at a distance) and
+# listenerPan (how far to the right). World coordinates are Z up, +Y forward
+# (docs/coordinate-system.md); the listener's right is forward × up. A placed sound should be
+# mono: the mixer pans a mono voice with equal power, a stereo one by balance.
+import Math
+open Vec3
+open audio/Audio
+open ecs/ComponentTable
+
+# How a placed sound gets quieter between its near distance (full) and its far one (silent)
+enum AudioRolloff {
+  # straight down from full at near to silent at far
+  linear
+  # near / distance, the way sound falls off in the open, bent so it reaches silence at far
+  inverse
+  # an S-curve: stays nearly full past near and fades late (a wide ambience, a crowd)
+  smooth
+}
+
+# Where the world is heard from: the camera's place and look. One per program (the first
+# entity with one is used).
+type AudioListener {
+  position: Vec3
+  forward: Vec3
+  up: Vec3
+}
+
+# A sound placed in the world: its voice, where it is, and how it falls off
+type AudioSource {
+  voiceId: VoiceId
+  position: Vec3
+  # its own level, before the distance
+  gainDecibels: Float
+  # full inside near, silent past far (meters)
+  nearDistance: Float
+  farDistance: Float
+  rolloff: AudioRolloff
+  # a looping sound (a car's engine) is paused past far and goes on when it comes back; a
+  # one-shot (a gunshot) is stopped
+  looping: Bool
+  # takes its position from its entity's WorldTransform3D every frame (a moving car); without
+  # it, it stays where it was placed (an explosion)
+  followsTransform: Bool
+  # set by the system: paused for being past far
+  parked: Bool
+  # set by the system: frames it has been silent. A voice is paused or stopped on its second
+  # silent frame, once its gain has ramped to zero, so the fade is never cut.
+  silentFrames: Int
+}
+
+# The program's tables of placed sound (a field of its World, like AudioEntities)
+type AudioPlacement {
+  listeners: ComponentTable(AudioListener)
+  sources: ComponentTable(AudioSource)
+}
+
+func createAudioPlacement() ret AudioPlacement {
+  ret AudioPlacement {
+    listeners: createComponentTable(AudioListener)
+    sources: createComponentTable(AudioSource)
+  }
+}
+
+# A source to hand to playPlaced: at `position`, full inside `nearDistance`, silent past
+# `farDistance`
+func placedSource(
+  position: view Vec3
+  nearDistance: view Float
+  farDistance: view Float
+  rolloff: view AudioRolloff
+) ret AudioSource {
+  ret AudioSource {
+    voiceId: VoiceId { value: -1 }
+    position: position
+    gainDecibels: 0.0
+    nearDistance: nearDistance
+    farDistance: farDistance
+    rolloff: rolloff
+    looping: false
+    followsTransform: false
+    parked: false
+    silentFrames: 0
+  }
+}
+
+# A listener at the origin, looking along +Y with +Z up (used while a program has none)
+func defaultListener() ret AudioListener {
+  ret AudioListener {
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    forward: Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+    up: Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  }
+}
+
+# The gain (0..1) at `distance`: 1 inside near, 0 at far and beyond, the rolloff between
+func distanceGain(
+  distance: view Float
+  nearDistance: view Float
+  farDistance: view Float
+  rolloff: view AudioRolloff
+) ret Float {
+  if distance <= nearDistance {
+    ret 1.0
+  }
+  if distance >= farDistance {
+    ret 0.0
+  }
+  let share: Float = (distance - nearDistance) / (farDistance - nearDistance)
+  if rolloff is AudioRolloff.linear {
+    ret 1.0 - share
+  }
+  if rolloff is AudioRolloff.smooth {
+    let rest: Float = 1.0 - share
+    ret rest * rest * (3.0 - 2.0 * rest)
+  }
+  # inverse: near / distance, less its value at far, scaled back to 1 at near
+  let near: Float = Math.max(a: nearDistance, b: 0.01)
+  let atFar: Float = near / farDistance
+  ret Math.max(a: 0.0, b: (near / distance - atFar) / (1.0 - atFar))
+}
+
+# The pan (-1 left .. 1 right) of a sound at `position` for `listener`: the share of its
+# direction along the listener's right. Ahead, behind, above and at the listener it is 0.
+func listenerPan(listener: view AudioListener, position: view Vec3) ret Float {
+  let toSource: Vec3 = vsub(a: position, b: listener.position)
+  let distance: Float = vlen(a: toSource)
+  let right: Vec3 = vcross(a: listener.forward, b: listener.up)
+  let rightLength: Float = vlen(a: right)
+  if distance < 0.0001 or rightLength < 0.0001 {
+    ret 0.0
+  }
+  ret Math.clamp(val: vdot(a: toSource, b: right) / (distance * rightLength), low: -1.0, high: 1.0)
+}
+
+# The linear gain of a source for a listener: its distance gain times its own level
+func placedGain(source: view AudioSource, listener: view AudioListener) ret Float {
+  let distance: Float = vlen(a: vsub(a: source.position, b: listener.position))
+  let level: Float = Math.pow(base: 10.0, exp: source.gainDecibels / 20.0)
+  ret level * distanceGain(
+    distance: distance
+    nearDistance: source.nearDistance
+    farDistance: source.farDistance
+    rolloff: source.rolloff
+  )
+}
+
+# A linear gain in decibels (-200 for silence)
+func gainToDecibels(gain: view Float) ret Float {
+  if gain <= 0.0000000001 {
+    ret -200.0
+  }
+  ret 20.0 * Math.naturalLog(x: gain) / 2.302585093
+}
+
+# The listener: the first entity's AudioListener, else defaultListener()
+func currentListener(placement: view AudioPlacement) ret AudioListener {
+  if placement.listeners.componentCount() > 0 {
+    ret placement.listeners.componentCopyAtDefault(i: 0)
+  }
+  ret defaultListener()
+}

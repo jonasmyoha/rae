@@ -68,7 +68,8 @@ type AudioCommand {
   targetBus: Int
   # a gain (linear), a pan (-1 left .. 1 right), or seconds
   value: Float
-  # a new voice's pan, or the duck's release in seconds
+  # a new voice's pan, the duck's release in seconds, or the seconds a voice's
+  # gain or pan change is spread over (0: the 5 ms smoothing)
   other: Float
   looping: Bool
   # the sample time it takes effect at, to the frame (a sound starts, a gain
@@ -492,6 +493,11 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   }
   let smoothing: Int = mixer.smoothingFrames
   let fadeFrames: Int = secondsToFrames(mixer: mixer, seconds: command.value)
+  # a gain or pan change spread over `other` seconds, never shorter than the smoothing
+  let changeFrames: Int = max(
+    a: smoothing
+    b: secondsToFrames(mixer: mixer, seconds: command.other)
+  )
   loop var index: Int = 0, index < audioMaxVoices, ++index {
     var endedVoiceId: Int = -1
     if let voice: mod AudioVoice = mixer.voices.modAt(index: index) {
@@ -519,9 +525,9 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
             voice.stopping = true
             rampTo(ramp: voice.gain, target: 0.0, frames: fadeFrames)
           } else if command.kind is AudioCommandKind.setVoiceGain {
-            rampTo(ramp: voice.gain, target: command.value, frames: smoothing)
+            rampTo(ramp: voice.gain, target: command.value, frames: changeFrames)
           } else if command.kind is AudioCommandKind.setVoicePan {
-            rampTo(ramp: voice.pan, target: command.value, frames: smoothing)
+            rampTo(ramp: voice.pan, target: command.value, frames: changeFrames)
           } else if command.kind is AudioCommandKind.pauseVoice {
             voice.paused = true
           } else if command.kind is AudioCommandKind.resumeVoice {

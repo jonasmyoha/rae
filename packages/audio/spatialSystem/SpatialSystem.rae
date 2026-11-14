@@ -1,0 +1,170 @@
+# audio/spatialSystem — sounds placed in the world (audio/AudioSpatial, docs/audio-design.md
+# §10.4). playPlaced starts a sound with the gain and pan it has where it is, from its first
+# sample. spatialSystem, once a frame, moves every placed voice to its source's place: a
+# source that follows its entity takes the position of its WorldTransform3D, every source gets
+# the gain of its distance and the pan from the listener's right, each change spread over the
+# frame's time so a fast source does not click. A source past its far distance is silent; on
+# its second silent frame (its gain has ramped to zero) a looping voice is paused, so it costs
+# nothing in the mix and goes on from its place when it comes back, and a one-shot is stopped
+# and its source removed.
+import Math
+open audio/Audio
+open audio/AudioButler
+open audio/AudioMixer
+open audio/AudioSpatial
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open Math3d
+open Vec3
+
+# The longest time a gain or pan change is spread over (a long frame does not make a slow fade)
+const placedChangeSecondsMax: Float = 0.1
+
+# Play `sound` placed as `source` says (its position, distances, rolloff, own level, looping and
+# whether it follows its entity), with the gain and pan it has there from its first sample, and
+# add the source to `entityId`. A one-shot already past its far distance is not started at all:
+# the returned VoiceId is -1. A looping one past far starts paused (parked).
+func playPlaced(
+  this: mod AudioEngine
+  placement: mod AudioPlacement
+  entityId: view EntityId
+  sound: view Sound
+  bus: view AudioBusKind
+  source: view AudioSource
+) ret VoiceId {
+  let listener: AudioListener = currentListener(placement: placement)
+  let gain: Float = placedGain(source: source, listener: listener)
+  if gain <= 0.0 and not source.looping {
+    ret VoiceId { value: -1 }
+  }
+  var placed: AudioSource = source
+  placed.voiceId = this.playAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainToDecibels(gain: gain)
+    pan: listenerPan(listener: listener, position: source.position)
+    looping: source.looping
+    atSample: 0
+  )
+  placed.parked = false
+  placed.silentFrames = 0
+  if gain <= 0.0 {
+    this.sendVoiceCommand(kind: AudioCommandKind.pauseVoice, voiceId: placed.voiceId, value: 0.0)
+    placed.parked = true
+    placed.silentFrames = 2
+  }
+  let voiceId: VoiceId = placed.voiceId
+  placement.sources.componentSet(entityId: entityId, data: placed)
+  ret voiceId
+}
+
+# A voice's gain (linear) and pan, each spread over `seconds`
+func sendPlacedChange(
+  audio: view AudioEngine
+  voiceId: view VoiceId
+  gain: view Float
+  pan: view Float
+  seconds: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setVoiceGain)
+  command.voiceId = mixerVoiceIdOf(streams: audio.streams, voiceId: voiceId.value)
+  command.value = gain
+  command.other = seconds
+  let gainSent: Bool = audio.sendCommand(command: command)
+  command.kind = AudioCommandKind.setVoicePan
+  command.value = pan
+  let panSent: Bool = audio.sendCommand(command: command)
+}
+
+# Every placed voice to its source's place, once a frame. `worldTransforms` holds the
+# positions of the sources that follow their entity (an empty table when none do).
+func spatialSystem(
+  audio: view AudioEngine
+  placement: mod AudioPlacement
+  worldTransforms: view ComponentTable(WorldTransform3D)
+  deltaTime: view Float
+) {
+  let listener: AudioListener = currentListener(placement: placement)
+  let seconds: Float = Math.clamp(val: deltaTime, low: 0.0, high: placedChangeSecondsMax)
+  var stopped: List(EntityId) = {}
+  let count: Int = placement.sources.componentCount()
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = placement.sources.componentEntityAt(i: i)
+    let source: mod AudioSource = placement.sources.componentMod(entityId: entityId)
+    if source.followsTransform and worldTransforms.componentHas(entityId: entityId) {
+      let transform: view WorldTransform3D = worldTransforms.componentView(entityId: entityId)
+      source.position = Vec3 {
+        x: mat4Get(m: transform.matrix, i: 12)
+        y: mat4Get(m: transform.matrix, i: 13)
+        z: mat4Get(m: transform.matrix, i: 14)
+      }
+    }
+    let gain: Float = placedGain(source: source, listener: listener)
+    let pan: Float = listenerPan(listener: listener, position: source.position)
+    if gain > 0.0 {
+      if source.parked {
+        audio.sendVoiceCommand(
+          kind: AudioCommandKind.resumeVoice
+          voiceId: source.voiceId
+          value: 0.0
+        )
+        source.parked = false
+      }
+      source.silentFrames = 0
+      sendPlacedChange(
+        audio: audio
+        voiceId: source.voiceId
+        gain: gain
+        pan: pan
+        seconds: seconds
+      )
+    } else if source.silentFrames is 0 {
+      # the first silent frame: down to zero over the frame
+      source.silentFrames = 1
+      sendPlacedChange(
+        audio: audio
+        voiceId: source.voiceId
+        gain: 0.0
+        pan: pan
+        seconds: seconds
+      )
+    } else if not source.parked {
+      # the second: the fade is done, so it is paused (looping) or stopped (a one-shot)
+      source.silentFrames = 2
+      if source.looping {
+        audio.sendVoiceCommand(
+          kind: AudioCommandKind.pauseVoice
+          voiceId: source.voiceId
+          value: 0.0
+        )
+        source.parked = true
+      } else {
+        audio.stopVoice(voiceId: source.voiceId)
+        stopped.add(value: entityId)
+      }
+    }
+  }
+  loop let entityId: EntityId in stopped {
+    placement.sources.componentRemove(entityId: entityId)
+  }
+}
+
+# Remove the sources whose voices ended (the engine's takeEndedVoices of this frame), such as
+# a one-shot that played to its end
+func forgetEndedSources(placement: mod AudioPlacement, ended: view List(VoiceId)) {
+  var gone: List(EntityId) = {}
+  let count: Int = placement.sources.componentCount()
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = placement.sources.componentEntityAt(i: i)
+    let voiceId: Int = placement.sources.componentView(entityId: entityId).voiceId.value
+    loop let endedVoiceId: VoiceId in ended {
+      if endedVoiceId.value is voiceId {
+        gone.add(value: entityId)
+      }
+    }
+  }
+  loop let entityId: EntityId in gone {
+    placement.sources.componentRemove(entityId: entityId)
+  }
+}
