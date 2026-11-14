@@ -1473,12 +1473,22 @@ static CFStringRef rae_midi_name(uint8_t* name_z) {
   return CFStringCreateWithCString(NULL, (const char*)name_z, kCFStringEncodingUTF8);
 }
 
+/* CoreMIDI keeps a process's list of sources and destinations current only for
+ * a client with a notify procedure (its notifications arrive on the run loop of
+ * the thread that made the client: an app's main loop runs it). Without one, a
+ * keyboard plugged in after the client opened is never listed. Nothing else is
+ * done with the notification here: midiSources() reads the list. */
+static void rae_midi_notify(const MIDINotification* message, void* context) {
+  (void)message;
+  (void)context;
+}
+
 /* A client, the owner of the ports below; 0 when there is no CoreMIDI */
 int64_t rae_audio_midi_client(uint8_t* name_z) {
   if (!rae_midi_ready()) return 0;
   CFStringRef name = rae_midi_name(name_z);
   MIDIClientRef client = 0;
-  OSStatus status = g_rae_midi_api.clientCreate(name, NULL, NULL, &client);
+  OSStatus status = g_rae_midi_api.clientCreate(name, rae_midi_notify, NULL, &client);
   CFRelease(name);
   return status == noErr ? (int64_t)client : 0;
 }
