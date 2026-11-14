@@ -27,6 +27,7 @@
 # name is known); all string and file work is deferred to stop time so it never
 # skews the frames it measures.
 import Math
+import Realtime
 import Sys
 import String
 open collections/StringMap
@@ -61,6 +62,8 @@ type Profiler {
   # each timing (its first pass's name -> that sample's last end)
   gpuClock: PerfGpuClock = PerfGpuClock {}
   gpuSamplesWritten: StringMap(Int)
+  # the lanes laneSpan made, by name -> their ring's index in the hub
+  laneRings: StringMap(Int)
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -79,6 +82,7 @@ func createProfiler() ret Profiler {
       mainRing: none
       nameIds: StringMap.create(Int, cap: 8)
       gpuSamplesWritten: StringMap.create(Int, cap: 4)
+      laneRings: StringMap.create(Int, cap: 4)
     }
   }
 }
@@ -101,6 +105,7 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
     }
     profiler.hub = createPerfHub(settings: settings)
     profiler.nameIds = StringMap.create(Int, cap: 64)
+    profiler.laneRings = StringMap.create(Int, cap: 4)
     let mainRing: PerfRing = profiler.hub.perfThreadRing(name: profMainThreadName)
     # the runtime's work too: the pool's workers on lanes of their own, the waits as spans
     profiler.hub.perfInstallRuntime(mainRing: mainRing)
@@ -215,6 +220,76 @@ func counter(profiler: mod Profiler, name: view String, value: view Int) {
     kind: PerfKind.counter
     name: name
     value: value
+  )
+}
+
+func nativeRealtimeSlotEntry(index: Int) unsafe extern("rae_realtime_slot_entry") ret String
+
+func nativeRealtimeSlotDetail(index: Int) unsafe extern("rae_realtime_slot_detail") ret String
+
+# A lib/Realtime recorder into the capture (on the thread that owns it, once a frame or so): its
+# p99.9 and maximum in microseconds, the maximum's share of the period in percent, and its calls,
+# as counters named after it
+func realtimeRecorder(profiler: mod Profiler, recorder: view Realtime.RealtimeRecorder) {
+  if profiler.capturing is false or recorder.calls is 0 {
+    ret
+  }
+  let name: String = recorder.name
+  counter(
+    profiler: profiler
+    name: "{name} p99.9 us"
+    value: recorder.percentileNanoseconds(perMille: 999) / 1000
+  )
+  counter(profiler: profiler, name: "{name} max us", value: recorder.maximumNanoseconds / 1000)
+  if recorder.periodNanoseconds > 0 {
+    counter(
+      profiler: profiler
+      name: "{name} max share %"
+      value: recorder.maximumNanoseconds * 100 / recorder.periodNanoseconds
+    )
+  }
+  counter(profiler: profiler, name: "{name} calls", value: recorder.calls)
+}
+
+# A span from `beginNs` to `endNs` (nowNs's clock) on a lane of its own named `lane` (made on its
+# first use), written by this thread: what another thread did, read here afterwards (an audio
+# render's time, from its stamp). The writer is the thread that calls tick, so only it may call
+# this.
+func laneSpan(
+  profiler: mod Profiler
+  lane: view String
+  name: view String
+  beginNs: view Int
+  endNs: view Int
+) {
+  if profiler.capturing is false {
+    ret
+  }
+  var ringIndex: Int = -1
+  if let index: Int = profiler.laneRings.get(k: lane) {
+    ringIndex = index
+  } else {
+    let ring: PerfRing = profiler.hub.perfThreadRing(name: lane)
+    ringIndex = ring.index
+    profiler.laneRings.set(k: lane, value: ringIndex)
+  }
+  let perfName: PerfName = profNameId(profiler: profiler, name: name)
+  let ring: PerfRing = profiler.hub.rings.copyAtDefault(index: ringIndex)
+  perfWriteAt(
+    ring: ring
+    kind: PerfKind.zoneBegin
+    name: perfName
+    time: beginNs
+    value: 0
+    extra: 0
+  )
+  perfWriteAt(
+    ring: ring
+    kind: PerfKind.zoneEnd
+    name: perfName
+    time: endNs
+    value: 0
+    extra: 0
   )
 }
 
@@ -385,6 +460,18 @@ func profFragment(
       ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"s\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
     }
     ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"f\",\"bp\":\"e\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  }
+  if event.kind is PerfKind.mark and name is "realtime rule break" {
+    # the runtime guard's slot names the entry point and what it was for
+    var entry: String = "past the guard's table"
+    var detail: String = ""
+    if event.extra >= 0 {
+      unsafe {
+        entry = nativeRealtimeSlotEntry(index: event.extra as Int)
+        detail = nativeRealtimeSlotDetail(index: event.extra as Int)
+      }
+    }
+    ret "\{\"name\":\"{name}: {entry}\",\"cat\":\"rule break\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"entry\":\"{entry}\",\"detail\":\"{detail}\"\}\}"
   }
   if event.kind is PerfKind.mark {
     ret "\{\"name\":\"{name}\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"extra\":{event.extra}\}\}"

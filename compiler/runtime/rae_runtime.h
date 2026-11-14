@@ -610,6 +610,8 @@ rae_String rae_ext_rae_str_from_cstr(const void* s);
 /* The event recorder: the name of the thread that claimed named slot `index` (runtime_perf_hooks.c) */
 rae_String rae_perf_thread_name(int64_t index);
 rae_Bool rae_perf_name_box_ready(void);
+rae_String rae_realtime_slot_entry(int64_t index);
+rae_String rae_realtime_slot_detail(int64_t index);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 // Free `s.data` only when `s.is_owned`. Safe to call on borrowed

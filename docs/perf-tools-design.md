@@ -244,6 +244,24 @@ The views of this (section 9):
 - **The offline driver** renders a scene with no device. Its block times are the numbers a
   headless test checks (section 10).
 
+Done in Rae 0.3.136 and audio 0.20.0 (perf step 6):
+- The guard's hits (`RAE_REALTIME_CHECK=1`) are marks "realtime rule break" on the thread's lane,
+  whose number is the guard's slot; the trace names the entry point and its detail from the slot
+  (`realtime rule break: rae_mem_str_tag`, category `rule break`).
+- `Profile.realtimeRecorder(profiler:, recorder:)` writes a recorder's p99.9 and maximum (µs), the
+  maximum's share of the period (%) and its calls as counters named after it, on the thread that
+  owns it.
+- `audio/AudioCapture`'s `recordAudioCapture(profiler:)`, called once a frame after `update`,
+  writes each render as a span "block" on a lane "audio render" (from its stamp: when it started
+  and how long it took, wherever it ran, the offline driver included) with `audio.render us` and
+  `audio.render share %`, and `audio.underrun frames`, `audio.callbacks`, `audio.queued blocks`,
+  the input and output latency in frames and `audio.clock drift ppm` (the clock's measured rate
+  against the nominal one). `Profile.laneSpan` is the general form: a span on a named lane,
+  written afterwards by the thread that collects.
+- Case 1465 checks an offline scene's blocks and counters and a deliberate allocation's mark.
+- Not yet: a zone per render-plan node (the render thread needs the nodes' name ids, handed over
+  from the main thread), and the recorder's own calls as sampled zones.
+
 ### 4.5 Video
 
 This source is for when video lands (docs/video-design.md). It records:

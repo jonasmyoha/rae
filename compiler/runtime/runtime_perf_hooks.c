@@ -33,7 +33,9 @@ enum {
   RAE_PERF_LOCK = 8,          /* a contended runtime lock (RAE_LOCK) */
   RAE_PERF_SIGNAL_WAIT = 9,   /* a Signal wait */
   RAE_PERF_SIGNAL_POST = 10,  /* a Signal post (a wake) */
-  RAE_PERF_COMMAND_BUFFER = 11 /* a Metal command buffer's GPU time (runtime_gpu_metal_timing.c) */
+  RAE_PERF_COMMAND_BUFFER = 11, /* a Metal command buffer's GPU time (runtime_gpu_metal_timing.c) */
+  RAE_PERF_RULE_BREAK = 12      /* RAE_REALTIME_CHECK: a real-time thread allocated, freed, locked or
+                                   logged; extra = its slot in runtime_realtime.c (-1: past them) */
 };
 
 /* The kinds, in lib/perf/Perf's PerfKind order */

@@ -400,7 +400,7 @@ func perfDropped(hub: view PerfHub) ret Int {
 # ---- the runtime's work (§4.3) ------------------------------------------------------------------
 
 # The runtime's event codes (runtime_perf_hooks.c), and their names
-const perfRuntimeCodes: Int = 12
+const perfRuntimeCodes: Int = 13
 
 func perfRuntimeCodeName(code: view Int) ret String {
   if code is 0 {
@@ -436,7 +436,10 @@ func perfRuntimeCodeName(code: view Int) ret String {
   if code is 10 {
     ret "Signal post"
   }
-  ret "command buffer"
+  if code is 11 {
+    ret "command buffer"
+  }
+  ret "realtime rule break"
 }
 
 func nativePerfInstall(

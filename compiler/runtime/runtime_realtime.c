@@ -13,6 +13,10 @@
  * table with a compare-and-swap; further calls add to its counter. Past the
  * table's size, calls are counted in `overflow`.
  *
+ * Each call is also a mark on the thread's lane in the event recorder
+ * (runtime_perf_hooks.c, docs/perf-tools-design.md §4.4) whose number is the
+ * slot; the trace names its entry point from the slot (rae_realtime_slot_entry).
+ *
  * Platform reason for C: the check sits inside the runtime's own allocator and
  * lock wrappers, which are C, and the mark is a thread-local variable. */
 #define RAE_REALTIME_SLOTS 32
@@ -39,16 +43,34 @@ static void rae_realtime_violation(const char* entry, const char* detail) {
                                                   memory_order_acq_rel, memory_order_acquire)) {
         atomic_store_explicit(&slot->detail, detail, memory_order_release);
         atomic_fetch_add_explicit(&slot->count, 1, memory_order_relaxed);
+        rae_perf_event(RAE_PERF_MARK, RAE_PERF_RULE_BREAK, 0, i);
         return;
       }
       held = expected;
     }
     if (held == entry && atomic_load_explicit(&slot->detail, memory_order_acquire) == detail) {
       atomic_fetch_add_explicit(&slot->count, 1, memory_order_relaxed);
+      rae_perf_event(RAE_PERF_MARK, RAE_PERF_RULE_BREAK, 0, i);
       return;
     }
   }
   atomic_fetch_add_explicit(&g_rae_realtime_overflow, 1, memory_order_relaxed);
+  rae_perf_event(RAE_PERF_MARK, RAE_PERF_RULE_BREAK, 0, -1);
+}
+
+/* A rule break's entry point and detail by its slot ("" when the slot is free), for the trace */
+rae_String rae_realtime_slot_entry(int64_t index) {
+  const char* entry = index >= 0 && index < RAE_REALTIME_SLOTS
+                          ? atomic_load_explicit(&g_rae_realtime_slots[index].entry, memory_order_acquire)
+                          : NULL;
+  return rae_ext_rae_str_from_cstr(entry ? entry : "");
+}
+
+rae_String rae_realtime_slot_detail(int64_t index) {
+  const char* detail = index >= 0 && index < RAE_REALTIME_SLOTS
+                           ? atomic_load_explicit(&g_rae_realtime_slots[index].detail, memory_order_acquire)
+                           : NULL;
+  return rae_ext_rae_str_from_cstr(detail ? detail : "");
 }
 
 static void rae_realtime_check_report(void) {

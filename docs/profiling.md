@@ -46,6 +46,10 @@ frames it measures.
   On Apple each Metal command buffer is a span on its own GPU lane (the GPU's real busy time, the
   truth a pass slot is checked against), and the walkers write their GPU resource tables' sizes
   (`gpu.buffers`, `gpu.textures`, …) (0.3.135).
+- Real time and audio (perf step 6, Rae 0.3.136, audio 0.20.0): under `RAE_REALTIME_CHECK=1` each
+  rule break is a mark naming its entry point; `Profile.realtimeRecorder` writes a recorder's
+  p99.9, maximum and share; `audio/AudioCapture.recordAudioCapture` writes the audio renders as
+  spans on an "audio render" lane and the engine's underruns, latency and clock drift.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
