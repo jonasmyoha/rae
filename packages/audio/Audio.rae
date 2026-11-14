@@ -48,6 +48,7 @@ open audio/AudioMixer
 open audio/AudioSession
 open audio/Decoder
 open audio/EngineSession
+open audio/GraphTeam
 open audio/Sound
 open collections/SpscRing
 
@@ -161,6 +162,12 @@ type AudioEngine {
   butlerTask: Task(Int)
   # the butler itself when offline (stepped before every block)
   butler: Butler
+  # helpers rendering the bus graph with the device's callback
+  # (RAE_AUDIO_RENDER_HELPERS, audio/GraphTeam): their team, tasks and the
+  # device's workgroup they joined
+  renderTeam: GraphTeam
+  renderTeamTasks: List(Task(Int))
+  renderWorkgroup: Int
   streams: List(StreamRecord)
   nextStreamId: Int
 }
@@ -239,6 +246,9 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     sampleRate: sampleRate
   )
   var renderStates: List(AudioRenderState) = {}
+  var renderTeam: GraphTeam = noGraphTeam()
+  var renderTeamTasks: List(Task(Int)) = {}
+  var renderWorkgroup: Int = 0
   # the browser has no stage A (no threads): its device always renders in
   # its callback (the AudioWorklet's requests, audio/AudioDevice)
   let deviceRenders: Bool = device is not 0 and (not Target.isNative or getEnv(
@@ -256,6 +266,26 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
       commands: commands
       input: input
     })
+    # RAE_AUDIO_RENDER_HELPERS=n: n helpers render the bus graph's stages with
+    # the callback, joined to the device's workgroup (native only: threads)
+    when Target.isNative {
+      let wanted: Int = getEnv(name: "RAE_AUDIO_RENDER_HELPERS").toInt()
+      if wanted > 0 {
+        unsafe {
+          renderWorkgroup = rae_audio_device_workgroup(device: device)
+        }
+        renderTeam = startGraphTeam(
+          helperCount: wanted
+          workgroup: renderWorkgroup
+          periodNanoseconds: periodFrames * 1000000000 / max(a: 1, b: sampleRate)
+          tasks: renderTeamTasks
+        )
+        if let render: mod AudioRenderState = renderStates.modAt(index: 0) {
+          useMixerTeam(mixer: render.mixer, team: renderTeam)
+        }
+        log("[audio] {renderTeam.helperCount} render helpers with the device's callback")
+      }
+    }
     unsafe {
       rae_audio_device_attach_render(device: device, state: renderStates.data as Ptr)
       if rae_audio_device_start(device: device) is 0 {
@@ -351,6 +381,9 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     butlerRunning: butlerRunning
     butlerTask: own butlerTask
     butler: createButler(outputRate: sampleRate, commands: butlerCommands, closed: butlerClosed)
+    renderTeam: renderTeam
+    renderTeamTasks: own renderTeamTasks
+    renderWorkgroup: renderWorkgroup
     streams: {}
     nextStreamId: 1
   }
@@ -756,6 +789,13 @@ func stopAudio(this: mod AudioEngine) ret Int {
     unsafe {
       rae_audio_device_close(device: this.device)
     }
+  }
+  # the render team: after the device stopped, before the mixer it rendered
+  if this.renderTeam.helperCount > 0 {
+    stopGraphTeam(team: this.renderTeam, tasks: this.renderTeamTasks)
+    releaseAudioWorkgroup(workgroup: this.renderWorkgroup)
+  } else {
+    freeGraphTeam(team: this.renderTeam)
   }
   # the callback's state: its mixer's buffers (the List drops the rest)
   loop var i: Int = 0, i < this.renderStates.length(), ++i {

@@ -1,0 +1,250 @@
+# audio/GraphTeam — a render plan on several cores (docs/audio-design.md §5.2
+# step 4, docs/realtime-language-design.md §6.6.2). A plan compiled for a team
+# (AudioGraph.forTeam, audio/GraphCompile's teamLayout) runs in stages of
+# independent chains. The thread that renders the block (the device's
+# callback, stage B) leads: for each stage it publishes the job, starts the
+# stage on lib/RealtimeTeam, renders its own share of the chains, and waits
+# for the helpers; a stage of one chain it runs alone. The helpers are
+# `spawn thread` loops, raised to real-time with the device's period and
+# joined to its audio workgroup (lib/Realtime), spinning through a block's
+# stages and sleeping between blocks. Chain c of a stage is rendered by worker
+# c % (helpers + 1) (worker 0 is the leader); a node's work does not depend on
+# which thread runs it, so the output is the single-thread render's, bit for
+# bit.
+#
+#     var helperTasks: List(Task(Int)) = {}
+#     let team: GraphTeam = startGraphTeam(helperCount: 2, workgroup: audio.audioWorkgroup(),
+#       periodNanoseconds: 5333333, tasks: helperTasks)
+#     renderer.setRendererTeam(team: team)       # plans must be compiled forTeam
+#     ...
+#     stopGraphTeam(team: team, tasks: helperTasks)
+import Math
+open Realtime
+open RealtimeTeam
+open audio/AudioGraph
+open audio/GraphNodes
+
+# What the leader hands the helpers for one stage
+type GraphTeamJob {
+  plan: RenderPlan
+  sources: GraphSources
+  sourceOffset: Int
+  frames: Int
+  stage: Int
+}
+
+# The team's shared parts (handles: a copy is the same team)
+type GraphTeam {
+  helperCount: Int
+  team: RealtimeTeam
+  # one GraphTeamJob, written by the leader before each stage
+  job: Buffer(GraphTeamJob)
+}
+
+# Checks a helper makes before it sleeps (a stage that comes soon is picked up
+# without a system call)
+const graphTeamSpinRounds: Int = 20000
+
+# The most helpers worth having here: one fewer than the performance cores
+# (the leader takes one; efficiency cores would set every stage's pace)
+func graphTeamHelperLimit() ret Int {
+  var cores: Int = 1
+  unsafe {
+    cores = nativeSchedulerPerformanceCores()
+  }
+  ret max(a: 0, b: cores - 1)
+}
+
+func graphTeamOf(helperCount: view Int) ret GraphTeam {
+  unsafe {
+    ret GraphTeam {
+      helperCount: helperCount
+      team: createRealtimeTeam(helperCount: helperCount, spinRounds: graphTeamSpinRounds)
+      job: rae_ext_rae_buf_alloc(size: 1, elemSize: sizeof(GraphTeamJob))
+    }
+  }
+}
+
+# No helpers: the plan runs on the rendering thread alone
+func noGraphTeam() ret GraphTeam {
+  ret graphTeamOf(helperCount: 0)
+}
+
+# Start `helperCount` helpers (at most graphTeamHelperLimit), each raised to
+# real-time for a block every `periodNanoseconds` and joined to `workgroup`
+# (0: none); their tasks go into `tasks`, which stopGraphTeam joins
+func startGraphTeam(
+  helperCount: view Int
+  workgroup: view Int
+  periodNanoseconds: view Int
+  tasks: mod List(Task(Int))
+) ret GraphTeam {
+  let helpers: Int = max(a: 0, b: min(a: helperCount, b: graphTeamHelperLimit()))
+  let team: GraphTeam = graphTeamOf(helperCount: helpers)
+  when Target.isNative {
+    loop var i: Int = 0, i < helpers, ++i {
+      tasks.add(value: spawn thread graphTeamHelper(
+        team: team
+        helper: i
+        workgroup: workgroup
+        periodNanoseconds: periodNanoseconds
+      ))
+    }
+  }
+  ret team
+}
+
+# Stop the helpers, join them, free the team (after the last render)
+func stopGraphTeam(team: view GraphTeam, tasks: mod List(Task(Int))) {
+  team.team.stopTeam()
+  loop var i: Int = 0, i < tasks.length(), ++i {
+    if let helper: view Task(Int) = tasks.viewAt(index: i) {
+      let stages: Int = helper.get()
+    }
+  }
+  tasks.clear()
+  freeGraphTeam(team: team)
+}
+
+func freeGraphTeam(team: view GraphTeam) {
+  team.team.freeTeam()
+  unsafe {
+    rae_ext_rae_buf_free(buf: team.job)
+  }
+}
+
+# A helper's loop: its share of each stage until the team stops; the stages
+# it ran
+func graphTeamHelper(
+  team: own GraphTeam
+  helper: own Int
+  workgroup: own Int
+  periodNanoseconds: own Int
+) ret Int {
+  var promotion: RealtimePromotion = notPromoted()
+  if periodNanoseconds > 0 {
+    promotion = promoteToRealtime(
+      periodNanoseconds: periodNanoseconds
+      computeNanoseconds: periodNanoseconds / 2
+    )
+  }
+  let join: RealtimeWorkgroupJoin = joinWorkgroup(workgroup: workgroup)
+  markRealtimeThread()
+  var seen: Int = 0
+  var stages: Int = 0
+  loop team.team.awaitStage(helper: helper, seen: seen) {
+    runStageShare(team: team, worker: helper + 1)
+    stages = stages + 1
+    team.team.finishPart()
+  }
+  unmarkRealtimeThread()
+  leaveWorkgroup(join: join)
+  demoteFromRealtime(promotion: promotion)
+  ret stages
+}
+
+func chainStartAt(plan: view RenderPlan, chain: view Int) ret Int realtime {
+  ret intAt(buffer: plan.chainStarts, index: chain)
+}
+
+func runChain(
+  plan: view RenderPlan
+  chain: view Int
+  sources: view GraphSources
+  sourceOffset: view Int
+  frames: view Int
+) realtime {
+  loop var node: Int = chainStartAt(plan: plan, chain: chain), node < chainStartAt(
+    plan: plan
+    chain: chain + 1
+  ), ++node {
+    processNode(
+      plan: plan
+      node: node
+      sources: sources
+      sourceOffset: sourceOffset
+      frames: frames
+    )
+  }
+}
+
+func teamJobOf(team: view GraphTeam) ret GraphTeamJob realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: team.job, index: 0)
+  }
+}
+
+# Worker `worker`'s chains of the job's stage
+func runStageShare(team: view GraphTeam, worker: view Int) realtime {
+  let job: GraphTeamJob = teamJobOf(team: team)
+  let workers: Int = team.helperCount + 1
+  let first: Int = intAt(buffer: job.plan.stageStarts, index: job.stage)
+  let end: Int = intAt(buffer: job.plan.stageStarts, index: job.stage + 1)
+  var chain: Int = first + worker
+  loop chain < end {
+    runChain(
+      plan: job.plan
+      chain: chain
+      sources: job.sources
+      sourceOffset: job.sourceOffset
+      frames: job.frames
+    )
+    chain = chain + workers
+  }
+}
+
+# The plan's nodes for one piece of a block: alone (a plan not compiled for a
+# team, or no helpers), or stage by stage with the team
+func renderPlanNodes(
+  plan: view RenderPlan
+  sources: view GraphSources
+  sourceOffset: view Int
+  frames: view Int
+  team: view GraphTeam
+) realtime {
+  if plan.stageCount is 0 or team.helperCount is 0 {
+    loop var node: Int = 0, node < plan.nodeCount, ++node {
+      processNode(
+        plan: plan
+        node: node
+        sources: sources
+        sourceOffset: sourceOffset
+        frames: frames
+      )
+    }
+    ret
+  }
+  loop var stage: Int = 0, stage < plan.stageCount, ++stage {
+    let first: Int = intAt(buffer: plan.stageStarts, index: stage)
+    let end: Int = intAt(buffer: plan.stageStarts, index: stage + 1)
+    if end - first < 2 {
+      loop var chain: Int = first, chain < end, ++chain {
+        runChain(
+          plan: plan
+          chain: chain
+          sources: sources
+          sourceOffset: sourceOffset
+          frames: frames
+        )
+      }
+      continue
+    }
+    unsafe {
+      var job: Buffer(GraphTeamJob) = team.job
+      rae_ext_rae_buf_set(
+        buf: job
+        index: 0
+        value: GraphTeamJob {
+          plan: plan
+          sources: sources
+          sourceOffset: sourceOffset
+          frames: frames
+          stage: stage
+        }
+      )
+    }
+    team.team.beginStage()
+    runStageShare(team: team, worker: 0)
+    team.team.endStage()
+  }
+}

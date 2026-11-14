@@ -107,6 +107,9 @@ type GraphEdge {
 type AudioGraph {
   nodes: List(GraphNode)
   edges: List(GraphEdge)
+  # compiled for a renderer with helper threads (audio/GraphTeam): its plan
+  # runs in stages of independent chains, each chain with buffers of its own
+  forTeam: Bool
 }
 
 # ---- the node states (one dense table per kind) ------------------------------
@@ -211,6 +214,13 @@ type RenderPlan {
   customEventCount: Buffer(Int)
   # one node's events handed to its process call (three Floats each)
   customEventScratch: Buffer(Float)
+  # a plan for a team (AudioGraph.forTeam): its nodes in run order are
+  # chains (chainStarts: chainCount + 1 positions), and the chains in stages
+  # (stageStarts: stageCount + 1 chain indices); the chains of one stage share
+  # no buffer and can run at once. stageCount 0: one serial run.
+  stageCount: Int
+  chainStarts: Buffer(Int)
+  stageStarts: Buffer(Int)
 }
 
 type CompiledPlan {
@@ -221,7 +231,7 @@ type CompiledPlan {
 
 # ---- building a graph ---------------------------------------------------------
 func createAudioGraph() ret AudioGraph {
-  ret AudioGraph { nodes: {}, edges: {} }
+  ret AudioGraph { nodes: {}, edges: {}, forTeam: false }
 }
 
 func plainNode(kind: view NodeKind) ret GraphNode {
@@ -472,6 +482,9 @@ func emptyRenderPlan() ret RenderPlan {
       customEvents: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
       customEventCount: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       customEventScratch: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      stageCount: 0
+      chainStarts: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      stageStarts: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
     }
   }
 }
@@ -486,6 +499,8 @@ func prepareRenderPlan(
   carryFrom: view List(Int)
   previousSerial: view Int
   latencyFrames: view Int
+  chainStarts: view List(Int)
+  stageStarts: view List(Int)
 ) ret RenderPlan {
   let count: Int = graph.nodes.length()
   let gainCount: Int = countKind(graph: graph, kind: NodeKind.gain) + countKind(
@@ -740,6 +755,23 @@ func prepareRenderPlan(
   plan.delayCount = delayCount
   plan.reverbCount = reverbCount
   plan.customCount = customCount
+  plan.stageCount = max(a: 0, b: stageStarts.length() - 1)
+  plan.chainStarts = intBuffer(count: chainStarts.length())
+  loop var i: Int = 0, i < chainStarts.length(), ++i {
+    setIntAt(
+      buffer: plan.chainStarts
+      index: i
+      value: chainStarts.copyAtFallback(index: i, fallback: 0)
+    )
+  }
+  plan.stageStarts = intBuffer(count: stageStarts.length())
+  loop var i: Int = 0, i < stageStarts.length(), ++i {
+    setIntAt(
+      buffer: plan.stageStarts
+      index: i
+      value: stageStarts.copyAtFallback(index: i, fallback: 0)
+    )
+  }
   ret plan
 }
 
@@ -797,6 +829,8 @@ func freeRenderPlan(plan: view RenderPlan) {
     rae_ext_rae_buf_free(buf: plan.customEvents)
     rae_ext_rae_buf_free(buf: plan.customEventCount)
     rae_ext_rae_buf_free(buf: plan.customEventScratch)
+    rae_ext_rae_buf_free(buf: plan.chainStarts)
+    rae_ext_rae_buf_free(buf: plan.stageStarts)
   }
 }
 
