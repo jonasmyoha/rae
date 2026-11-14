@@ -1,0 +1,29 @@
+# A List of tasks passed to a function by view, each task read there with
+# viewAt + get. A `view List(Task(T))` used to produce the C type
+# `rae_List_rae_`: the specialization of List's methods spelled the Task(Int)
+# argument from its TypeInfo, which has no name.
+func double(value: view Int) ret Int {
+  ret value * 2
+}
+
+func countTasks(tasks: view List(Task(Int))) ret Int {
+  ret tasks.length()
+}
+
+func sumResults(tasks: view List(Task(Int))) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < tasks.length(), ++i {
+    if let task: view Task(Int) = tasks.viewAt(index: i) {
+      total = total + task.get()
+    }
+  }
+  ret total
+}
+
+func main() {
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 1, i <= 4, ++i {
+    tasks.add(value: spawn double(value: i))
+  }
+  log("{countTasks(tasks: tasks)} tasks, results sum to {sumResults(tasks: tasks)}")
+}

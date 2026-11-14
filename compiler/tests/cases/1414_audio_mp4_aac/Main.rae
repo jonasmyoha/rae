@@ -1,0 +1,241 @@
+# MP4 / M4A and AAC (docs/audio-design.md §7.3, docs/video-design.md §3.4),
+# offline, with RAE_REALTIME_CHECK=1 (config.env). source.wav is a stereo
+# sweep (no repeating period, so a delay cannot hide), 44.1 kHz, 0.5 s. It is
+# encoded to AAC by ffmpeg (tone.m4a, the moov after the samples;
+# toneFast.m4a, the moov first; both with -aac_pns 0, as noise substitution
+# decodes to random noise that no seek can repeat) and by Apple's afconvert
+# (toneApple.m4a: its gapless info is iTunSMPB, not an edit list).
+# toneDecoded.wav and toneAppleDecoded.wav are afconvert's own decodes of
+# them. clip.mp4 is ffmpeg's: 10 H.264 frames with B-frames, and mono AAC.
+#
+# 1. media/Mp4 reads each file's tracks; every sample's offset and size, and
+#    the video's composition times, were checked once against ffprobe.
+# 2. AAC through the platform decoder: 22050 frames, no delay (the priming is
+#    cut by the edit list or iTunSMPB), the same samples as the platform's own
+#    decode of the file, and near the source.
+# 3. A decoder seek gives the samples of a decode from the start.
+# 4. A stream plays the decoded file exactly, the Apple file queued after it
+#    goes on gapless, and a seek in a stream lands exactly.
+import Math
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open audio/Decoder
+open audio/Sound
+open media/Mp4
+
+const caseDir: String = "tests/cases/1414_audio_mp4_aac/"
+
+func fileBytes(path: view String) ret List(UInt8) {
+  let raw: List(Int) = Sys.readFileBytes(path: path)
+  var bytes: List(UInt8) = List.create(UInt8, cap: raw.length())
+  loop let value: Int in raw {
+    bytes.add(value: value as UInt8)
+  }
+  ret bytes
+}
+
+func lastOf(values: view List(Int)) ret Int {
+  ret values.copyAtFallback(index: values.length() - 1, fallback: -1)
+}
+
+func showMovie(name: view String) {
+  let movie: Mp4Movie = readMp4Movie(bytes: fileBytes(path: "{caseDir}{name}"))
+  log(
+    "{name}: movie {movie.duration}/{movie.timescale} s, {movie.tracks.length()} tracks{movie.error}"
+  )
+  loop let track: view Mp4Track in movie.tracks {
+    log(
+      "  track {track.trackId} {track.handler} {track.codec}: {track.timescale}/s, {track.channels} ch {track.sampleRate} Hz {track.width}x{track.height}, object type {track.objectType}, config {track.codecConfig.length()} bytes"
+    )
+    log(
+      "    {track.sampleSizes.length()} samples, first {track.sampleSizes.copyAtFallback(
+        index: 0
+        fallback: -1
+      )} bytes at {track.sampleOffsets.copyAtFallback(index: 0, fallback: -1)}, last {lastOf(
+        values: track.sampleSizes
+      )} bytes at {lastOf(values: track.sampleOffsets)} decoded at {lastOf(
+        values: track.sampleTimes
+      )}"
+    )
+    log(
+      "    sync {track.syncSamples.length()}, composition offsets {track.compositionOffsets.length()}, plays {track.presentationLength} from {track.presentationStart}"
+    )
+  }
+}
+
+# The worst difference between `data` from `dataFrame` and `reference` from
+# `referenceFrame`, over `frames` frames of `channels`
+func worstBetween(
+  data: view Buffer(Float)
+  dataFrame: view Int
+  reference: view Buffer(Float)
+  referenceFrame: view Int
+  frames: view Int
+) ret Float {
+  var worst: Float = 0.0
+  loop var i: Int = 0, i < frames * 2, ++i {
+    let a: Float = sampleAt(samples: data, index: dataFrame * 2 + i)
+    let b: Float = sampleAt(samples: reference, index: referenceFrame * 2 + i)
+    worst = max(a: worst, b: abs(value: a - b))
+  }
+  ret worst
+}
+
+func compareDecoded(name: view String, platformDecode: view String, source: view SoundData) {
+  let data: SoundData = readAnySoundFile(path: "{caseDir}{name}")
+  # the platform's own decode of the whole file (afconvert, as 16-bit WAV)
+  let platform: SoundData = readSoundFile(path: "{caseDir}{platformDecode}")
+  let platformWorst: Float = worstBetween(
+    data: data.samples
+    dataFrame: 0
+    reference: platform.samples
+    referenceFrame: 0
+    frames: min(a: data.frameCount, b: platform.frameCount)
+  )
+  var bestLag: Int = 0
+  var bestError: Float = 9.0
+  loop var lag: Int = -2200, lag <= 2200, ++lag {
+    var worst: Float = 0.0
+    loop var frame: Int = 3000, frame < 19000 and worst < bestError, ++frame {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        let a: Float = sampleAt(samples: data.samples, index: (frame + lag) * 2 + channel)
+        let b: Float = sampleAt(samples: source.samples, index: frame * 2 + channel)
+        worst = max(a: worst, b: abs(value: a - b))
+      }
+    }
+    if worst < bestError {
+      bestError = worst
+      bestLag = lag
+    }
+  }
+  log(
+    "{name}: {data.channels} channels, {data.sampleRate} Hz, {data.frameCount} frames, delay {bestLag}, within -26 dB of the source: {bestError < 0.05}"
+  )
+  log(
+    "  the platform's own decode: {platform.frameCount} frames, the same samples within 16-bit rounding: {platformWorst < 0.0001}"
+  )
+  freeSoundData(data: data)
+  freeSoundData(data: platform)
+}
+
+func seekDecoder(name: view String) {
+  let full: SoundData = readAnySoundFile(path: "{caseDir}{name}")
+  var worst: Float = 0.0
+  var frames: Int = 0
+  loop let target: Int in List(Int) {
+    1
+    1024
+    3000
+    11025
+    21000
+  } {
+    var decoder: AudioDecoder = openAudioDecoder(path: "{caseDir}{name}")
+    let moved: Bool = decoder.seekDecoder(frame: target)
+    let chunk: Buffer(Float) = createSampleBuffer(count: 2048 * 2)
+    let got: Int = decoder.readDecodedFrames(into: chunk, frames: 2048)
+    frames = frames + got
+    worst = max(
+      a: worst
+      b: worstBetween(
+        data: chunk
+        dataFrame: 0
+        reference: full.samples
+        referenceFrame: target
+        frames: got
+      )
+    )
+    closeAudioDecoder(this: decoder)
+    unsafe {
+      rae_ext_rae_buf_free(buf: chunk)
+    }
+  }
+  log("{name}: five seeks, {frames} frames, the samples of a decode from the start: {worst is 0.0}")
+  freeSoundData(data: full)
+}
+
+func listAsBuffer(values: view List(Float)) ret Buffer(Float) {
+  let samples: Buffer(Float) = createSampleBuffer(count: values.length())
+  loop var i: Int = 0, i < values.length(), ++i {
+    setSampleAt(samples: samples, index: i, value: values.copyAtFallback(index: i, fallback: 9.0))
+  }
+  ret samples
+}
+
+func streams() {
+  let first: SoundData = readAnySoundFile(path: "{caseDir}tone.m4a")
+  let second: SoundData = readAnySoundFile(path: "{caseDir}toneApple.m4a")
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 512)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  log("duration {audio.durationSeconds(voiceId: song)} s")
+  let queued: Bool = audio.queueNext(voiceId: song, path: "{caseDir}toneApple.m4a")
+  let rendered: Buffer(Float) = listAsBuffer(values: audio.renderOffline(frames: 44100 + 2000))
+  log("stream: the decoded samples: {worstBetween(
+    data: rendered
+    dataFrame: 0
+    reference: first.samples
+    referenceFrame: 0
+    frames: 22050
+  ) is 0.0}")
+  log("gapless: queued {queued}; the Apple file goes on at frame 22050 exactly: {worstBetween(
+    data: rendered
+    dataFrame: 22050
+    reference: second.samples
+    referenceFrame: 0
+    frames: 22050
+  ) is 0.0}")
+  log(
+    "after both: silence {sampleAt(samples: rendered, index: (44100 + 1000) * 2) is 0.0}, still playing {audio.streamIsPlaying(
+      voiceId: song
+    )}"
+  )
+  let blocks: Int = audio.stopAudio()
+  unsafe {
+    rae_ext_rae_buf_free(buf: rendered)
+  }
+  var seeking: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  let again: VoiceId = seeking.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let before: List(Float) = seeking.renderOffline(frames: 4410)
+  let moved: Bool = seeking.seek(voiceId: again, seconds: 0.25)
+  # the new voice starts at once, under the old one's 5 ms fade, so after that
+  # block of 441 frames it is at 11025 + 441
+  let fade: List(Float) = seeking.renderOffline(frames: 441)
+  let after: Buffer(Float) = listAsBuffer(values: seeking.renderOffline(frames: 2205))
+  log("seek: {moved}, plays on from frame 11466 exactly: {worstBetween(
+    data: after
+    dataFrame: 0
+    reference: first.samples
+    referenceFrame: 11466
+    frames: 2205
+  ) is 0.0}, position {floor(x: (seeking.positionSeconds(voiceId: again) * 1000.0) as Float)} ms")
+  let seekBlocks: Int = seeking.stopAudio()
+  unsafe {
+    rae_ext_rae_buf_free(buf: after)
+  }
+  freeSoundData(data: first)
+  freeSoundData(data: second)
+}
+
+func main() {
+  showMovie(name: "tone.m4a")
+  showMovie(name: "toneFast.m4a")
+  showMovie(name: "toneApple.m4a")
+  showMovie(name: "clip.mp4")
+  let source: SoundData = readSoundFile(path: "{caseDir}source.wav")
+  compareDecoded(name: "tone.m4a", platformDecode: "toneDecoded.wav", source: source)
+  compareDecoded(name: "toneFast.m4a", platformDecode: "toneDecoded.wav", source: source)
+  compareDecoded(name: "toneApple.m4a", platformDecode: "toneAppleDecoded.wav", source: source)
+  seekDecoder(name: "tone.m4a")
+  seekDecoder(name: "toneApple.m4a")
+  streams()
+  freeSoundData(data: source)
+}

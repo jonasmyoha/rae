@@ -1,0 +1,198 @@
+# audio/AudioDevice — the two ways the sound device gets its samples
+# (docs/audio-design.md §4.2). Stage B (the default): the device's callback
+# calls `audioDeviceRender`, a `realtime cExport` function, which renders
+# straight into the device's buffer. Stage A (RAE_AUDIO_STAGE=A, and the
+# fallback): a Rae render thread keeps a ring one step ahead, and the
+# callback copies from it. audio/Audio chooses and wires them.
+import Math
+open Atomic
+open Realtime
+open Signal
+open audio/AudioGlue
+open audio/AudioMixer
+open audio/Sound
+open collections/SpscRing
+
+# Stage B of docs/audio-design.md §4.2: the device's own callback renders.
+# The engine's state lives in a one-element List whose storage C holds; the
+# callback (native/rae_audio_glue.c) calls `audioDeviceRender` with it and the
+# device's buffer, on the device's real-time thread, which it has attached to
+# the runtime and marked real-time. No ring, no extra period of latency.
+type AudioRenderState {
+  mixer: AudioMixer
+  commands: SpscRing(AudioCommand)
+  input: AudioInputShared
+}
+
+# A duplex device's input (audio/AudioInput), shared by the callback (which
+# fills it) and the main thread (which records from it); plain handles
+type AudioInputShared {
+  # 0 when the device has no input
+  channels: Int
+  # the input's samples, interleaved
+  ring: SpscRing(Float)
+  # the sample time (the output's) of the first frame ever captured; -1 before
+  start: Atomic(Int)
+  # samples the full ring had no room for
+  dropped: Atomic(Int)
+}
+
+# The input channels the device opened with (0: output only)
+func deviceInputChannels(device: view Int) ret Int {
+  if device is 0 {
+    ret 0
+  }
+  unsafe {
+    ret rae_audio_device_input_channels(device: device)
+  }
+}
+
+# Two seconds of input
+func createAudioInputShared(channels: view Int, sampleRate: view Int) ret AudioInputShared {
+  ret AudioInputShared {
+    channels: channels
+    ring: createSpscRing(Float, capacity: max(a: 1, b: 2 * sampleRate * channels))
+    start: createAtomic(Int, value: -1)
+    dropped: createAtomic(Int, value: 0)
+  }
+}
+
+func freeAudioInputShared(input: view AudioInputShared) {
+  freeSpscRing(this: input.ring)
+  freeAtomic(this: input.start)
+  freeAtomic(this: input.dropped)
+}
+
+# One period of input, captured in the period whose output starts at sample
+# `blockStart`: into the ring (what does not fit is counted, not waited for)
+func captureInput(
+  input: view AudioInputShared
+  samples: view Buffer(Float)
+  frames: view Int
+  channels: view Int
+  blockStart: view Int
+) realtime {
+  if input.channels is 0 {
+    ret
+  }
+  if input.start.load() < 0 {
+    input.start.store(value: blockStart)
+  }
+  var dropped: Int = 0
+  loop var i: Int = 0, i < frames * channels, ++i {
+    unsafe {
+      if not input.ring.push(value: rae_ext_rae_buf_get(buf: samples, index: i)) {
+        dropped = dropped + 1
+      }
+    }
+  }
+  if dropped > 0 {
+    input.dropped.fetchAdd(amount: dropped)
+  }
+}
+
+# The device's input of this period, before it renders the output (a duplex
+# device's callback, native/rae_audio_glue.c)
+func audioDeviceCapture(
+  states: copy Buffer(AudioRenderState)
+  input: copy Buffer(Float)
+  frames: copy Int
+  channels: copy Int
+) realtime cExport("rae_audio_capture") {
+  let render: mod AudioRenderState = renderStateOf(states: states)
+  captureInput(
+    input: render.input
+    samples: input
+    frames: frames
+    channels: channels
+    blockStart: render.mixer.sampleTime
+  )
+}
+
+# The state behind the pointer the callback passes (the List's element)
+func renderStateOf(states: view Buffer(AudioRenderState)) ret mod AudioRenderState {
+  unsafe {
+    ret mod rae_ext_rae_buf_get(buf: states, index: 0)
+  }
+}
+
+# Fill `frames` frames of the device's buffer, a period at most at a time
+func audioDeviceRender(
+  states: copy Buffer(AudioRenderState)
+  output: copy Buffer(Float)
+  frames: copy Int
+  channels: copy Int
+) realtime cExport("rae_audio_render") {
+  let render: mod AudioRenderState = renderStateOf(states: states)
+  var done: Int = 0
+  loop done < frames {
+    let count: Int = min(a: frames - done, b: render.mixer.maxFrames)
+    mixerRender(
+      mixer: render.mixer
+      commands: render.commands
+      output: output
+      firstFrame: done
+      frames: count
+      channels: channels
+    )
+    done = done + count
+  }
+}
+
+# Stage A only where stage B is off (RAE_AUDIO_STAGE=A), kept to compare the
+# two and as the fallback. The render thread keeps the device's ring full,
+# one block at a time, and sleeps on the device's Signal between periods.
+func audioRenderThread(
+  mixer: own AudioMixer
+  commands: own SpscRing(AudioCommand)
+  output: own SpscRing(Float)
+  wake: own Signal
+  running: own Atomic(Bool)
+  channels: own Int
+  periodFrames: own Int
+  sampleRate: own Int
+) ret Int {
+  let block: Buffer(Float) = createSampleBuffer(count: periodFrames * channels)
+  let periodNs: Int = periodFrames * 1000000000 / sampleRate
+  let promotion: RealtimePromotion = promoteToRealtime(
+    periodNanoseconds: periodNs
+    computeNanoseconds: periodNs / 2
+  )
+  var blocks: Int = 0
+  var recorder: RealtimeRecorder = createRealtimeRecorder(
+    name: "audio render"
+    periodNanoseconds: periodNs
+  )
+  markRealtimeThread()
+  loop running.load() {
+    loop running.load() and output.capacity - output.count() >= periodFrames * channels {
+      recorder.callStarted()
+      mixerRender(
+        mixer: mixer
+        commands: commands
+        output: block
+        firstFrame: 0
+        frames: periodFrames
+        channels: channels
+      )
+      recorder.callEnded()
+      loop var i: Int = 0, i < periodFrames * channels, ++i {
+        let pushed: Bool = output.push(value: sampleAt(samples: block, index: i))
+      }
+      blocks = blocks + 1
+    }
+    wake.wait()
+  }
+  unmarkRealtimeThread()
+  demoteFromRealtime(promotion: promotion)
+  recorder.report()
+  freeAudioMixer(mixer: mixer)
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  ret blocks
+}
+
+func audioIdle() ret Int {
+  ret 0
+}

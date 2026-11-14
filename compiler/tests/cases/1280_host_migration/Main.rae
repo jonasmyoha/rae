@@ -588,7 +588,7 @@ func main() ret Int {
   config.interestRadius = 1000.0
   var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: relayConfig)
   let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
-  var scene: Scene = { relay: relay, machines: {}, startMs: nowMs() }
+  var scene: Scene = { relay: own relay, machines: {}, startMs: nowMs() }
   scene.machines.add(value: createMachine(
     name: "host"
     device: deviceDesktop

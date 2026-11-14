@@ -6,6 +6,7 @@
 #include "mangler.h"
 #include "sema.h"
 #include "may_wait.h"
+#include "realtime_check.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1084,6 +1085,16 @@ void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_
         if (is_view && !is_ptr && !str_eq_cstr(base, "String")) fprintf(out, "const ");
         CFuncContext p_ctx = *ctx; AstTypeRef p_type = *p->type; p_type.is_view = is_view; p_type.is_mod = is_mod;
         emit_type_ref_as_c_type(&p_ctx, &p_type, out, false);
+}
+
+/* `realtime` -> RAE_NONBLOCKING, `noAlloc` -> RAE_NONALLOCATING (rae_runtime.h):
+ * clang's function effects check the generated C against the same promise
+ * the Rae check made (docs/realtime-language-design.md §5.1) */
+const char* c_effect_attribute(const AstFuncDecl* func) {
+  if (!func) return "";
+  if (func->is_realtime) return " RAE_NONBLOCKING";
+  if (func->is_no_alloc) return " RAE_NONALLOCATING";
+  return "";
 }
 
 bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool is_extern) {
@@ -2252,7 +2263,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           }
       }
   } else {
-      fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
   }
 
   for (const AstParam* p = f->params; p; p = p->next) {
@@ -2391,7 +2402,7 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
     CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
     fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
     emit_param_list(&tctx, f->params, out, false);
-    fprintf(out, ");\n");
+    fprintf(out, ")%s;\n", c_effect_attribute(f));
   }
 }
 
@@ -2425,7 +2436,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
               rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)args));
     }
   }
-  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
+  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
   for (const AstParam* p = f->params; p; p = p->next) {
       if (tctx.local_count < 256) {
           tctx.locals[tctx.local_count] = p->name;
@@ -2489,6 +2500,15 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       // type is heap-owning (e.g. StringMap(Int) — keys like "AlbumRoot"
       // are heap-owned by the map after a JSON parse).
       bool needs_loop = elem_needs_drop || is_smap;
+      // List(Task(T)): a dropped Task joins (docs/concurrency-model.md §3),
+      // so a list of them joins each element before its buffer goes: its
+      // tasks never outlive the list that owns them
+      if (is_list && !elem_is_opt && str_eq_cstr(ebase, "Task")) {
+        fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
+        fprintf(out, "    rae_task_drop(*(RaeTask**)((char*)this->data + __i * sizeof(RaeTask*)));\n");
+        fprintf(out, "  }\n");
+        needs_loop = false;
+      }
       if (needs_loop) {
         bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(&tctx, elem);
         const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
@@ -2983,6 +3003,38 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (d->kind != AST_DECL_ENUM) continue;
       fprintf(out, "typedef int64_t rae_%.*s;\n",
           (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+  }
+  // The same for a Task(T) that is a generic element (List(Task(Int))): it
+  // lowers to the opaque RaeTask*, but a specialized signature spells its
+  // mangled name (`viewAt`'s `const rae_Task_int64_t*`), so alias it
+  {
+    const char** task_aliases = NULL;
+    size_t task_alias_count = 0, task_alias_cap = 0;
+    for (size_t i = 0; i < ctx->generic_type_count; i++) {
+      /* each generic type's arguments, recursively (List(List(Task(Int)))) */
+      const AstTypeRef* pending[64];
+      size_t depth = 0;
+      pending[depth++] = ctx->generic_types[i];
+      while (depth > 0) {
+        const AstTypeRef* type = pending[--depth];
+        if (!type) continue;
+        for (const AstTypeRef* arg = type->generic_args; arg && depth < 64; arg = arg->next) pending[depth++] = arg;
+        if (!str_eq_cstr(get_base_type_name(type), "Task") || type->is_opt || type->is_view || type->is_mod) continue;
+        AstTypeRef plain = *type;
+        plain.next = NULL;
+        const char* name = rae_mangle_type_specialized(ctx, NULL, NULL, &plain);
+        bool seen = false;
+        for (size_t k = 0; k < task_alias_count && !seen; k++) seen = strcmp(task_aliases[k], name) == 0;
+        if (seen) continue;
+        if (task_alias_count == task_alias_cap) {
+          task_alias_cap = task_alias_cap ? task_alias_cap * 2 : 16;
+          task_aliases = realloc(task_aliases, task_alias_cap * sizeof(const char*));
+        }
+        task_aliases[task_alias_count++] = name;
+        fprintf(out, "typedef RaeTask* %s;\n", name);
+      }
+    }
+    free(task_aliases);
   }
   fprintf(out, "\n");
   for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting);
@@ -3951,8 +4003,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
    * spawns run as tasks on the scheduler (c_spawn_on_pool) */
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = may_wait_build(ctx, module);
+  /* The same graph holds each function's realtime effects: check every
+   * function marked `realtime` / `noAlloc` (realtime_check.c) */
+  realtime_check(ctx, module, ctx->wait_graph);
   /* ... and which may-wait functions get a resumable twin (c_twin.c) */
   c_twins_plan(ctx, module);
+  /* In a browser build, a sleep a mainLoop body can reach holds the page */
+  may_wait_check_main_loop_sleeps(ctx->wait_graph, module);
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
   // `rae_drop_struct_<T>_alias` (skip String fields) in a single
@@ -3984,6 +4041,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       for (size_t j = field_count; j > 0; j--) {
         const AstTypeField* f = fields[j - 1];
         AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
+        // a Task field joins and frees its task (docs/concurrency-model.md
+        // §3); only the owning drop does, an alias does not own it
+        if (concrete && !concrete->is_opt && !concrete->is_view && !concrete->is_mod
+            && str_eq_cstr(get_base_type_name(concrete), "Task")) {
+          if (!is_alias) fprintf(out, "  rae_task_drop(this->%.*s);\n", (int)f->name.len, f->name.data);
+          continue;
+        }
         if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
         if (concrete && concrete->is_opt) {
           if (is_alias) continue;
@@ -4570,7 +4634,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "%s %s(", c_return_type(&tctx, &d->as.func_decl), mangled);
           emit_param_list(&tctx, d->as.func_decl.params, out, true);
-          fprintf(out, ");\n");
+          fprintf(out, ")%s;\n", c_effect_attribute(&d->as.func_decl));
       }
   }
 
@@ -4581,8 +4645,42 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, &d->as.func_decl), rae_mangle_function(ctx, &d->as.func_decl));
           emit_param_list(&tctx, d->as.func_decl.params, out, false);
-          fprintf(out, ");\n");
+          fprintf(out, ")%s;\n", c_effect_attribute(&d->as.func_decl));
       }
+  }
+
+  // `cExport("cName")` (docs/realtime-language-design.md §6.1): a C function
+  // of that name for each exported Rae function, which C calls, from any
+  // thread (a thread C made calls rae_thread_attach() first). The Rae
+  // function itself stays static; the wrapper passes the C values through.
+  {
+    const char* exported[256];
+    size_t exported_count = 0;
+    for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_FUNC) continue;
+      const AstFuncDecl* f = &d->as.func_decl;
+      if (!f->c_export_symbol || f->is_extern || f->generic_params || f->specialization_args) continue;
+      bool twice = false;
+      for (size_t k = 0; k < exported_count; k++) twice = twice || strcmp(exported[k], f->c_export_symbol) == 0;
+      if (twice) {
+        char message[256];
+        snprintf(message, sizeof message, "two functions export the C name `%s`", f->c_export_symbol);
+        diag_error(d->origin_file, (int)f->c_export_line, 1, message);
+        continue;
+      }
+      if (exported_count < 256) exported[exported_count++] = f->c_export_symbol;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f};
+      const char* rt = c_return_type(&tctx, f);
+      fprintf(out, "RAE_EXPORTED %s %s(", rt, f->c_export_symbol);
+      emit_param_list(&tctx, f->params, out, false);
+      fprintf(out, ")%s {\n  %s%s(", c_effect_attribute(f), strcmp(rt, "void") == 0 ? "" : "return ",
+              rae_mangle_function(ctx, f));
+      for (const AstParam* p = f->params; p; p = p->next) {
+        fprintf(out, "%.*s%s", (int)p->name.len, p->name.data, p->next ? ", " : "");
+      }
+      fprintf(out, ");\n}\n");
+    }
   }
 
   // Prototypes for specialized functions (skip externs — their call sites are inlined)
@@ -4593,7 +4691,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstIdentifierPart* gp = f->generic_params;
       if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
       CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(f));
   }
   
   // #961: the `T.default()` bodies, declared above; here, after the module
@@ -4736,7 +4834,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstIdentifierPart* pgp = pf->generic_params;
       if (!pgp && pf->generic_template && pf->generic_template->kind == AST_DECL_FUNC) pgp = pf->generic_template->as.func_decl.generic_params;
       CFuncContext ptctx = {.compiler_ctx = ctx, .module = module, .generic_params = pgp, .generic_args = pa};
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ");\n");
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(pf));
   }
   {
       size_t emitted_idx = 0;

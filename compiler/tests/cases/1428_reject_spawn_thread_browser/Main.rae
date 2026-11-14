@@ -1,0 +1,15 @@
+# The browser build has no threads, so `spawn thread` is refused there
+# (docs/realtime-language-design.md §6.6.1); a plain spawn is fine
+func sumTo(count: view Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = 1, i <= count, ++i {
+    total = total + i
+  }
+  ret total
+}
+
+func main() {
+  let pooled: Task(Int) = spawn sumTo(count: 4)
+  let dedicated: Task(Int) = spawn thread sumTo(count: 10)
+  log("{pooled.get()} {dedicated.get()}")
+}

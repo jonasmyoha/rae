@@ -21,7 +21,7 @@ func parallelSum(numbers: view List(Int), parts: copy Int) ret Int {
       tasks.add(value: spawn sumRange(numbers: numbers, start: i * size, end: (i + 1) * size))
     }
     loop var i: Int = 0, i < tasks.length, ++i {
-      if let task: Task(Int) = tasks.copyAt(index: i) {
+      if let task: view Task(Int) = tasks.viewAt(index: i) {
         total = total + task.get()
       }
     }

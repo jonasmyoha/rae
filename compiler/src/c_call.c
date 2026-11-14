@@ -290,6 +290,113 @@ static const AstFuncDecl* respecialize_overload(CFuncContext* ctx, const AstExpr
     return fd;
 }
 
+/* ---- exclusive access for `mod` arguments: a measuring mode ----------------
+ * docs/realtime-language-design.md §4.6 / §9 R8. Rae lets one place be passed
+ * to a call as `mod` together with itself, a part of it or a whole containing
+ * it as another `mod` or a `view` (stress/13_modAndViewOfOnePlace). Before
+ * deciding to refuse that, RAE_EXCLUSIVE_ACCESS=warn reports every such call
+ * the compiler emits, as a warning tagged [exclusive-access]; off by default,
+ * so nothing changes for anyone. Places are a name and a chain of fields
+ * (`world`, `world.rows`); anything else (a call, an element, a literal) is
+ * not a place and is not compared. */
+static const AstExpr* exclusive_place_of(const AstExpr* value) {
+    while (value && (value->kind == AST_EXPR_OWN
+                     || (value->kind == AST_EXPR_UNARY
+                         && (value->as.unary.op == AST_UNARY_MOD || value->as.unary.op == AST_UNARY_VIEW))))
+        value = value->as.unary.operand;
+    for (const AstExpr* e = value; e; e = e->kind == AST_EXPR_MEMBER ? e->as.member.object : NULL) {
+        if (e->kind == AST_EXPR_IDENT) return value;
+        if (e->kind != AST_EXPR_MEMBER) return NULL;
+    }
+    return NULL;
+}
+
+static bool exclusive_same_place(const AstExpr* left, const AstExpr* right) {
+    if (!left || !right || left->kind != right->kind) return false;
+    if (left->kind == AST_EXPR_IDENT) return str_eq(left->as.ident, right->as.ident);
+    return str_eq(left->as.member.member, right->as.member.member)
+        && exclusive_same_place(left->as.member.object, right->as.member.object);
+}
+
+/* `outer` is `inner`, or a whole that contains it (`shelf` contains
+ * `shelf.numbers`) */
+static bool exclusive_contains(const AstExpr* outer, const AstExpr* inner) {
+    for (const AstExpr* e = inner; e; e = e->kind == AST_EXPR_MEMBER ? e->as.member.object : NULL)
+        if (exclusive_same_place(outer, e)) return true;
+    return false;
+}
+
+static void exclusive_place_text(const AstExpr* place, char* into, size_t size) {
+    if (!place || size == 0) return;
+    if (place->kind == AST_EXPR_IDENT) {
+        snprintf(into, size, "%.*s", (int)place->as.ident.len, place->as.ident.data);
+        return;
+    }
+    char object[256] = "";
+    exclusive_place_text(place->as.member.object, object, sizeof object);
+    snprintf(into, size, "%s.%.*s", object, (int)place->as.member.member.len, place->as.member.member.data);
+}
+
+/* A parameter type that is a handle: copies of it point at the same thing,
+ * so overlap through it is not a place question */
+static bool exclusive_is_handle(const AstTypeRef* type) {
+    Str base = get_base_type_name(type);
+    return str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "Ptr") || str_eq_cstr(base, "Atomic")
+        || str_eq_cstr(base, "SpscRing") || str_eq_cstr(base, "Signal");
+}
+
+/* A `view` of a number or a Bool is passed by value (the generated C takes
+ * `int64_t a`), so the callee holds a copy taken at the call: a change made
+ * through a `mod` argument cannot reach it, in C or in Rae's meaning */
+static bool exclusive_view_is_copy(const AstTypeRef* type) {
+    if (!type || !type->is_view || type->is_opt) return false;
+    Str base = get_base_type_name(type);
+    static const char* const copied[] = {"Int", "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16",
+                                         "UInt32", "UInt64", "Float", "Float32", "Float64", "Bool"};
+    for (size_t i = 0; i < sizeof copied / sizeof copied[0]; i++)
+        if (str_eq_cstr(base, copied[i])) return true;
+    return false;
+}
+
+static void exclusive_access_check(CFuncContext* ctx, const AstExpr* expr, const AstFuncDecl* fd) {
+    static int mode = -1;
+    if (mode < 0) {
+        const char* wanted = getenv("RAE_EXCLUSIVE_ACCESS");
+        mode = wanted && strcmp(wanted, "warn") == 0;
+    }
+    if (!mode || !fd) return;
+    const AstExpr* places[32];
+    const AstParam* params[32];
+    size_t count = 0;
+    const AstCallArg* a = expr->as.call.args;
+    for (const AstParam* p = fd->params; p && a && count < 32; p = p->next, a = a->next) {
+        if (!p->type || !(p->type->is_mod || p->type->is_view)) continue;
+        const AstExpr* place = exclusive_place_of(a->value);
+        if (!place) continue;
+        places[count] = place;
+        params[count] = p;
+        count++;
+    }
+    for (size_t i = 0; i < count; i++) {
+        for (size_t j = i + 1; j < count; j++) {
+            if (!params[i]->type->is_mod && !params[j]->type->is_mod) continue;
+            if (!exclusive_contains(places[i], places[j]) && !exclusive_contains(places[j], places[i])) continue;
+            char first[256] = "", second[256] = "", message[768];
+            exclusive_place_text(places[i], first, sizeof first);
+            exclusive_place_text(places[j], second, sizeof second);
+            const char* kind = exclusive_view_is_copy(params[i]->type) || exclusive_view_is_copy(params[j]->type)
+                ? "copy"
+                : exclusive_is_handle(params[i]->type) || exclusive_is_handle(params[j]->type) ? "handle" : "place";
+            snprintf(message, sizeof message,
+                     "[exclusive-access] [%s] %.*s receives `%s` as %s %.*s and `%s` as %s %.*s, which overlap",
+                     kind, (int)fd->name.len, fd->name.data, first, params[i]->type->is_mod ? "mod" : "view",
+                     (int)params[i]->name.len, params[i]->name.data, second,
+                     params[j]->type->is_mod ? "mod" : "view", (int)params[j]->name.len, params[j]->name.data);
+            diag_warn(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+        }
+    }
+}
+
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
     // `s`. One statement-expression: look the name up through the enum's
@@ -449,6 +556,31 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     expr->line);
             fprintf(out, "sizeof(RaeAny)");
         }
+        return true;
+    }
+
+    /* `rae_ext_rae_require_plain(T)` (lib/collections/SpscRing.rae): T must own
+     * no heap, because a value that crosses to a real-time thread may not be
+     * freed there (docs/realtime-language-design.md §4.1). Checked here, where
+     * the specialization binds T; it emits nothing. */
+    if (str_eq_cstr(name, "rae_ext_rae_require_plain")) {
+        const AstTypeRef* tr = expr->as.call.generic_args;
+        if (tr && ctx->generic_params && ctx->generic_args)
+            tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+        char where[512];
+        if (tr && type_heap_part(ctx->compiler_ctx, ctx->module, tr, where, sizeof where, 0)) {
+            Str base = get_base_type_name(tr);
+            char message[1024];
+            char detail[600] = "";
+            if (strncmp(where, "its field", 9) == 0) snprintf(detail, sizeof detail, " (%s)", where);
+            snprintf(message, sizeof message,
+                "a SpscRing of `%.*s` is not allowed: `%.*s` owns heap%s. A value "
+                "that crosses to a real-time thread must not need freeing there; send "
+                "an index or a handle instead (docs/realtime-language-design.md §4.1)",
+                (int)base.len, base.data, (int)base.len, base.data, detail);
+            diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+        }
+        fprintf(out, "((void)0)");
         return true;
     }
 
@@ -1301,6 +1433,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // the call while the statement-expression still yields it.
             if (wb_capture) fprintf(out, "__auto_type __rae_callret = ");
         }
+        exclusive_access_check(ctx, expr, fd);
         fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
         int arg_index = 0;

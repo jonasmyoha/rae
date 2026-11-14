@@ -44,6 +44,14 @@ setup:
 	else \
 	  echo "warning: naga not installed and cargo is not available; declared shaders will not be validated at build time (install Rust, then: cargo install naga-cli)" >&2; \
 	fi
+	@if [ -x /opt/homebrew/opt/llvm/bin/clang ] || [ -x /usr/local/opt/llvm/bin/clang ] || [ -n "$${RAE_RTSAN_CC:-}" ]; then \
+	  echo "LLVM clang found: rae run --sanitize realtime and the RealtimeSanitizer gate can run"; \
+	elif [ "$$(uname)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then \
+	  echo "Installing LLVM (Apple's clang has no RealtimeSanitizer; docs/realtime-language-design.md 5.2)..."; \
+	  brew install llvm; \
+	else \
+	  echo "warning: no LLVM clang with -fsanitize=realtime; the RealtimeSanitizer gate will SKIP (install LLVM 20+, or set RAE_RTSAN_CC)" >&2; \
+	fi
 	@if [ -f "$${RAE_BOX3D:-$$HOME/.cache/rae/box3d/install}/include/box3d/rae_glue.h" ]; then \
 	  echo "box3d found: programs importing lib/box3d link upstream Box3D's C library"; \
 	else \

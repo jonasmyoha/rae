@@ -1,0 +1,132 @@
+# WAV in Rae (docs/audio-design.md §7.3, §12). The three files here were
+# written by Python's wave and struct modules (an independent writer), and each
+# is compared with the values that wrote it:
+#   pcm16Stereo.wav  16-bit, 2 channels, 48 kHz: left round(16384 sin(2 pi 1000 i / 48000)), right
+#   its negative
+#   pcm24Mono.wav    24-bit, 1 channel, 44.1 kHz: -8388608 + 335544 i
+#   float32Mono.wav  32-bit float, 1 channel, 22.05 kHz: 0.25 sin(2 pi 440 i / 22050)
+# Then the offline driver (config.env: RAE_AUDIO_DEVICE=offline,
+# RAE_AUDIO_CAPTURE=/tmp/rae-audio-case-1402.wav) captures a render to a float
+# WAV at stopAudio, which reads back equal to what was rendered.
+import Math
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+const caseDir: String = "tests/cases/1402_audio_wav/"
+
+func describe(name: view String, data: view SoundData) {
+  log(
+    "{name}: {data.frameCount} frames, {data.channels} channels, {data.sampleRate} Hz, error \"{data.error}\""
+  )
+}
+
+func pcm16() {
+  let data: SoundData = readSoundFile(path: "{caseDir}pcm16Stereo.wav")
+  describe(name: "pcm16Stereo", data: data)
+  var largest: Float = 0.0
+  loop var frame: Int = 0, frame < data.frameCount, ++frame {
+    let expected: Float = floor(
+      x: 16384.0 * sin(x: 6.2831855 * 1000.0 * (frame as Float) / 48000.0) + 0.5
+    ) / 32768.0
+    let left: Float = sampleAt(samples: data.samples, index: frame * 2)
+    let right: Float = sampleAt(samples: data.samples, index: frame * 2 + 1)
+    largest = max(
+      a: largest
+      b: max(a: abs(value: left - expected), b: abs(value: right + expected))
+    )
+  }
+  # a 16-bit step is 1/32768; Python rounded a double sine, Rae a 32-bit one
+  log("pcm16Stereo matches within one step: {largest <= 0.0000306}")
+  freeSoundData(data: data)
+}
+
+func pcm24() {
+  let data: SoundData = readSoundFile(path: "{caseDir}pcm24Mono.wav")
+  describe(name: "pcm24Mono", data: data)
+  var exact: Bool = true
+  loop var frame: Int = 0, frame < data.frameCount, ++frame {
+    let expected: Float = ((-8388608 + 335544 * frame) as Float) / 8388608.0
+    if sampleAt(samples: data.samples, index: frame) is not expected {
+      exact = false
+    }
+  }
+  log("pcm24Mono is exact: {exact}")
+  freeSoundData(data: data)
+}
+
+func float32() {
+  let data: SoundData = readSoundFile(path: "{caseDir}float32Mono.wav")
+  describe(name: "float32Mono", data: data)
+  var largest: Float = 0.0
+  loop var frame: Int = 0, frame < data.frameCount, ++frame {
+    let expected: Float = 0.25 * sin(x: 6.2831855 * 440.0 * (frame as Float) / 22050.0)
+    largest = max(
+      a: largest
+      b: abs(value: sampleAt(samples: data.samples, index: frame) - expected)
+    )
+  }
+  log("float32Mono matches within 1e-6: {largest < 0.000001}")
+  freeSoundData(data: data)
+}
+
+func notWav() {
+  let missing: SoundData = readSoundFile(path: "{caseDir}none.wav")
+  describe(name: "none", data: missing)
+  freeSoundData(data: missing)
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < 64, ++i {
+    bytes.add(value: i as UInt8)
+  }
+  let garbage: SoundData = decodeWav(bytes: bytes)
+  describe(name: "garbage", data: garbage)
+  freeSoundData(data: garbage)
+}
+
+func capture() {
+  var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
+  log("offline: {audio.offline}, capturing: {audio.capturePath.length() > 0}")
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 300.0
+    amplitude: 0.4
+    frameCount: 1000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let voiceId: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: 0.0)
+  let rendered: List(Float) = audio.renderOffline(frames: 1200)
+  let path: String = "{audio.capturePath}"
+  let blocks: Int = audio.stopAudio()
+  let captured: SoundData = readSoundFile(path: path)
+  describe(name: "capture", data: captured)
+  var same: Bool = captured.frameCount * captured.channels is rendered.length()
+  loop var i: Int = 0, i < rendered.length() and same, ++i {
+    if sampleAt(samples: captured.samples, index: i) is not rendered.copyAtFallback(
+      index: i
+      fallback: 9.0
+    ) {
+      same = false
+    }
+  }
+  log("the capture reads back equal to the render: {same}")
+  freeSoundData(data: captured)
+}
+
+# Loading on a worker: readSoundFile allocates and reads the disk, so a
+# program runs it off the main thread and the audio thread alike
+func loadInBackground() {
+  let loading: Task(SoundData) = spawn readSoundFile(path: "{caseDir}pcm16Stereo.wav")
+  let data: SoundData = loading.get()
+  describe(name: "loaded on a worker", data: data)
+  freeSoundData(data: data)
+}
+
+func main() {
+  loadInBackground()
+  pcm16()
+  pcm24()
+  float32()
+  notWav()
+  capture()
+}

@@ -1,0 +1,118 @@
+# benchmarks/realtimeTeam: what a stage of lib/RealtimeTeam costs
+# (docs/realtime-language-design.md §6.6, R9). The leader runs on a promoted
+# `spawn thread`, like an audio device's thread; the helpers are promoted
+# `spawn thread`s. An empty stage (beginStage + endStage, no work) is timed
+# with the helpers spinning (stages back to back) and with the helpers asleep
+# (one stage per 2.67 ms period, 128 frames at 48 kHz, longer than the spin),
+# for 2, 4 and 8 helpers. Percentiles from lib/Realtime's recorder (exact to
+# within 25 %).
+open Atomic
+open Realtime
+open RealtimeTeam
+
+const periodNanoseconds: Int = 2666667
+
+func helperLoop(team: own RealtimeTeam, helper: own Int) ret Int {
+  let promotion: RealtimePromotion = promoteToRealtime(
+    periodNanoseconds: periodNanoseconds
+    computeNanoseconds: periodNanoseconds / 4
+  )
+  var seen: Int = 0
+  var stages: Int = 0
+  loop team.awaitStage(helper: helper, seen: seen) {
+    stages = stages + 1
+    team.finishPart()
+  }
+  demoteFromRealtime(promotion: promotion)
+  ret stages
+}
+
+func timeStages(
+  team: view RealtimeTeam
+  recorder: mod RealtimeRecorder
+  count: view Int
+  gapNanoseconds: view Int
+) {
+  loop var i: Int = 0, i < count, ++i {
+    if gapNanoseconds > 0 {
+      let until: Int = nowNs() + gapNanoseconds
+      loop nowNs() < until {
+        sleep(ms: 1)
+      }
+    }
+    let start: Int = nowNs()
+    team.beginStage()
+    team.endStage()
+    recorder.recordCall(nanoseconds: nowNs() - start)
+  }
+}
+
+func line(name: view String, recorder: view RealtimeRecorder) ret String {
+  ret "{name}: median {realtimeMicroseconds(
+    nanoseconds: recorder.percentileNanoseconds(perMille: 500)
+  )}, 99 % {realtimeMicroseconds(nanoseconds: recorder.percentileNanoseconds(perMille: 990))}, max {realtimeMicroseconds(
+    nanoseconds: recorder.maximumNanoseconds
+  )}"
+}
+
+func leaderRun(helperCount: own Int) ret String {
+  let promotion: RealtimePromotion = promoteToRealtime(
+    periodNanoseconds: periodNanoseconds
+    computeNanoseconds: periodNanoseconds / 4
+  )
+  # spinning for about 200 us before sleeping
+  let team: RealtimeTeam = createRealtimeTeam(helperCount: helperCount, spinRounds: 20000)
+  var helpers: List(Task(Int)) = {}
+  loop var i: Int = 0, i < helperCount, ++i {
+    helpers.add(value: spawn thread helperLoop(team: team, helper: i))
+  }
+  var warm: RealtimeRecorder = createRealtimeRecorder(
+    name: "warm-up"
+    periodNanoseconds: periodNanoseconds
+  )
+  timeStages(
+    team: team
+    recorder: warm
+    count: 2000
+    gapNanoseconds: 0
+  )
+  var spinning: RealtimeRecorder = createRealtimeRecorder(
+    name: "spinning"
+    periodNanoseconds: periodNanoseconds
+  )
+  timeStages(
+    team: team
+    recorder: spinning
+    count: 20000
+    gapNanoseconds: 0
+  )
+  var asleep: RealtimeRecorder = createRealtimeRecorder(
+    name: "asleep"
+    periodNanoseconds: periodNanoseconds
+  )
+  timeStages(
+    team: team
+    recorder: asleep
+    count: 300
+    gapNanoseconds: periodNanoseconds
+  )
+  team.stopTeam()
+  loop var i: Int = 0, i < helperCount, ++i {
+    if let helper: view Task(Int) = helpers.viewAt(index: i) {
+      let stages: Int = helper.get()
+    }
+  }
+  team.freeTeam()
+  demoteFromRealtime(promotion: promotion)
+  ret "{helperCount} helpers (promoted {promotion.promoted}): {line(
+    name: "spinning"
+    recorder: spinning
+  )}; {line(name: "asleep, one stage per 2.67 ms", recorder: asleep)}"
+}
+
+func main() {
+  loop let helperCount: Int in List(Int) { 2, 4, 8 } {
+    let leader: Task(String) = spawn thread leaderRun(helperCount: helperCount)
+    log(leader.get())
+  }
+}

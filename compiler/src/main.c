@@ -59,6 +59,7 @@
 #include "sys_thread.h"
 #include "progress.h"
 #include "may_wait.h"
+#include "realtime_check.h"
 #include "when_resolve.h"
 #include "../runtime/rae_runtime.h"
 
@@ -246,10 +247,42 @@ static bool ensure_parent_directory(const char* file_path);
  * NEON / SSE2 / wasm SIMD128 (-DRAE_FLOAT4_SCALAR, runtime_float4.h), so the
  * bit-exactness fixture can run both lowerings. */
 static bool g_float4_scalar = false;
+/* `--sanitize realtime` (docs/realtime-language-design.md §5): the program is
+ * compiled by LLVM's clang with -fsanitize=realtime (RealtimeSanitizer: an
+ * allocation, lock or blocking call inside a `realtime` function stops the
+ * program with its stack), and its own C with -Wfunction-effects as an error
+ * (the `realtime` / `noAlloc` promises, checked again by clang). Apple's
+ * clang has no RealtimeSanitizer: RAE_RTSAN_CC, else Homebrew's LLVM. */
+static bool g_sanitize_realtime = false;
+
+/* The LLVM clang that builds a `--sanitize realtime` program, or NULL */
+static const char* rtsan_compiler(void) {
+  const char* chosen = getenv("RAE_RTSAN_CC");
+  if (chosen && *chosen) return chosen;
+  static const char* const candidates[] = { "/opt/homebrew/opt/llvm/bin/clang", "/usr/local/opt/llvm/bin/clang" };
+  for (size_t i = 0; i < sizeof candidates / sizeof candidates[0]; i++) {
+    if (access(candidates[i], X_OK) == 0) return candidates[i];
+  }
+  return NULL;
+}
+
+/* `--sanitize <what>`: only `realtime` exists */
+static bool parse_sanitize(int argc, char** argv, int* i) {
+  if (*i + 1 >= argc || strcmp(argv[*i + 1], "realtime") != 0) {
+    fprintf(stderr, "error: --sanitize expects `realtime` (RealtimeSanitizer)\n");
+    return false;
+  }
+  g_sanitize_realtime = true;
+  *i += 2;
+  return true;
+}
 /* `rae build --report-waits`: run sema, print the may-wait report
  * (docs/lightweight-spawn-design.md §4.1) and stop before emitting C. */
 static bool g_report_waits = false;
 static bool g_report_waits_lib = false;  /* --report-waits-lib: lib/'s counts too */
+/* `rae build --report-realtime`: every function marked realtime / noAlloc,
+ * clean or what it reaches, and the C it trusts (realtime_check.c) */
+static bool g_report_realtime = false;
 
 /* The target the program is built for (lib/Target.rae,
  * docs/platform-conditional-code.md §3.1): the host for a native build,
@@ -350,6 +383,10 @@ static void apply_build_target(AstModule* module) {
  * lib/Pack.rae's two consts for every build (apply_pack_meta) */
 static char g_pack_name[256] = "";
 static char g_pack_version[64] = "";
+/* The pack's `web: { sharedMemory: true }` (load_pack_meta): the browser build
+ * links with shared memory (wasm workers, an AudioWorklet that runs Wasm) and
+ * its page waits for cross-origin isolation (docs/audio-design.md §11 step 3) */
+static bool g_web_shared_memory = false;
 
 /* Write the project pack's meta into lib/Pack.rae's consts, in the parsed
  * AST (the file's own values are the "" a build without a pack keeps) */
@@ -444,6 +481,10 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     if (strcmp(arg, "--float4-scalar") == 0) {
       g_float4_scalar = true;
       i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--sanitize") == 0) {
+      if (!parse_sanitize(argc, argv, &i)) return false;
       continue;
     }
     if (strcmp(arg, "--check-toolchain") == 0) {
@@ -603,6 +644,10 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       i += 1;
       continue;
     }
+    if (strcmp(arg, "--sanitize") == 0) {
+      if (!parse_sanitize(argc, argv, &i)) return false;
+      continue;
+    }
     if (strcmp(arg, "--check-toolchain") == 0) {
       /* #931: consumed by toolchain_check (which rescans argv); recognized
        * here so the arg parser does not reject it as unknown. */
@@ -648,6 +693,12 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--print-target") == 0) {
       g_print_target = true;
+      opts->emit_c = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--report-realtime") == 0) {
+      g_report_realtime = true;
       opts->emit_c = true;
       i += 1;
       continue;
@@ -2341,6 +2392,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "                           --target compiled,\n");
   fprintf(stderr, "                           --profile <dev|release> (or --debug/--release;\n");
   fprintf(stderr, "                           compiled target: dev=-O0 -g, release=-O2 -DNDEBUG),\n");
+  fprintf(stderr, "                           --sanitize realtime (LLVM clang with RealtimeSanitizer, and\n"
+                  "                           -Wfunction-effects on the program's C: brew install llvm)\n");
   fprintf(stderr, "                           --float4-scalar (lib/Float4 on its scalar\n");
   fprintf(stderr, "                           definitions instead of NEON/SSE2/wasm SIMD)\n");
   fprintf(stderr, "  pack <file>     Validate and summarize a .raepack file\n");
@@ -2354,7 +2407,11 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                           --report-waits (print which functions may wait and\n"
           "                           would get a resumable twin; emits nothing;\n"
-          "                           --report-waits-lib adds lib/'s counts)\n");
+          "                           --report-waits-lib adds lib/'s counts)\n"
+          "                           --report-realtime (print each function marked realtime\n"
+          "                           or noAlloc, what it reaches, and the C it trusts; and\n"
+          "                           each function off the main thread that reaches a\n"
+          "                           mainThread call)\n");
   fprintf(stderr,
           "                           --target-os <os> --target-arch <arch> (type-check\n"
           "                           for another target, lib/Target.rae; emits nothing,\n"
@@ -2715,6 +2772,16 @@ static bool build_c_backend_output(const char* entry_file,
       progress_end(false);
       return false;
   }
+  if (g_report_realtime) {
+    /* As for --report-waits: the discovery pass finds the specializations
+     * (and runs the check, so its errors print too) */
+    bool emitted = c_backend_emit_module(&ctx, &merged, "/dev/null");
+    bool reported = realtime_report(&ctx, &merged, entry_file, stdout) && emitted;
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    progress_end(reported);
+    return reported;
+  }
   if (g_report_waits) {
     /* The backend's discovery pass instantiates the generics; its output is
      * thrown away, the report reads the specializations it found */
@@ -2730,6 +2797,15 @@ static bool build_c_backend_output(const char* entry_file,
      * run (every error is reported above); nothing is emitted */
     const char* os = g_target_os ? g_target_os : host_target_os();
     const char* arch = g_target_arch ? g_target_arch : host_target_arch();
+    /* The browser's checks that need the whole program (a sleep a mainLoop
+     * body can reach, docs/web-frame-loop.md §7) run in the backend: its
+     * discovery and the wait graph, the output thrown away */
+    if (g_target_check_only && strcmp(os, "web") == 0 && !c_backend_emit_module(&ctx, &merged, "/dev/null")) {
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      progress_end(false);
+      return false;
+    }
     if (g_print_target) {
       printf("target %s/%s\n", os, arch);
       for (const AstDecl* d = merged.decls; d; d = d->next) {
@@ -2872,7 +2948,7 @@ static void package_assets_export(void) {
 /* The packages with C (rae_package_native.h) this program uses: those whose header its C
  * includes. Adds their include flag and library, the browser's library when `browser`, to
  * `flags`; a build that needs one and has none builds it. False when one could not be had. */
-static bool package_native_flags(const char* c_path, bool browser, char* flags, size_t cap) {
+static bool package_native_flags(const char* c_path, bool browser, bool shared_memory, char* flags, size_t cap) {
   size_t at = 0;
   flags[0] = '\0';
   for (int i = 0; i < rae_deps_count(); ++i) {
@@ -2880,13 +2956,14 @@ static bool package_native_flags(const char* c_path, bool browser, char* flags, 
     if (!rae_deps_native_at(i, &native) || !c_output_includes(c_path, native.header)) continue;
     char install[3 * PATH_MAX];
     if (!rae_package_native_install(i, install, sizeof(install))) return false;
-    const char* relative = browser ? native.link_browser : native.link;
+    const char* relative = browser ? (shared_memory ? native.link_browser_shared : native.link_browser)
+                                   : native.link;
     char library[4 * PATH_MAX];
     snprintf(library, sizeof(library), "%s/%s", install, relative);
     struct stat st;
     if (!relative[0] || stat(library, &st) != 0) {
       fprintf(stderr, "error: package %s has no %s library (%s); its build may need a tool it did not find\n",
-              native.name, browser ? "browser" : "native", library);
+              native.name, browser ? (shared_memory ? "shared-memory browser" : "browser") : "native", library);
       return false;
     }
 #if defined(__linux__)
@@ -3012,7 +3089,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   char box3d_flags[PATH_MAX * 2 + 64];
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
   char package_flags[PATH_MAX * 8];
-  if (!package_native_flags(c_path, false, package_flags, sizeof(package_flags))) return false;
+  if (!package_native_flags(c_path, false, false, package_flags, sizeof(package_flags))) return false;
   char wamr_flags[PATH_MAX * 2 + 64];
   if (!wamr_link_flags(c_path, wamr_flags, sizeof(wamr_flags))) return false;
   /* lib/net/NetworkConnection: Apple's Network.framework, linked only for a
@@ -3050,10 +3127,26 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   // The C runtime is compiled once per set of flags and runtime content and
   // linked from a cache (runtime_cache.c): it was most of every program's C
   // compile. Its command carries every flag that reaches it.
+  /* `--sanitize realtime`: LLVM's clang, RealtimeSanitizer, and the program's
+   * own C checked with -Wfunction-effects instead of -w */
+  const char* c_compiler = "gcc";
+  const char* program_warnings = "-w";
+  const char* runtime_sanitize = "";
+  if (g_sanitize_realtime) {
+    c_compiler = rtsan_compiler();
+    if (!c_compiler) {
+      progress_end(false);
+      fprintf(stderr, "error: --sanitize realtime needs LLVM's clang (Apple's has no -fsanitize=realtime): "
+                      "brew install llvm, or set RAE_RTSAN_CC\n");
+      return false;
+    }
+    program_warnings = "-Wno-everything -Wfunction-effects -Werror=function-effects -fsanitize=realtime";
+    runtime_sanitize = " -fsanitize=realtime";
+  }
   char runtime_command[PATH_MAX * 4];
-  snprintf(runtime_command, sizeof(runtime_command), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags,
-           runtime_dir);
+  snprintf(runtime_command, sizeof(runtime_command), "%s -std=c11 %s%s%s %s -w%s %s %s -I%s -I/opt/homebrew/include",
+           c_compiler, opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags,
+           runtime_sanitize, sdl3_flags, wgpu_flags, runtime_dir);
   char runtime_object[PATH_MAX];
   if (!runtime_cached_object(runtime_command, runtime_dir, runtime_object, sizeof(runtime_object))) {
     progress_end(false);
@@ -3061,8 +3154,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "%s -std=c11 %s%s%s %s %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
+           c_compiler, opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, program_warnings, sdl3_flags, wgpu_flags, runtime_dir,
            network_flags, c_path, runtime_object, extra_c_files, box3d_flags, package_flags, wamr_flags, out_bin);
 
   int cc_rc = system(cmd);
@@ -3191,6 +3284,89 @@ static void choose_emscripten_python(void) {
       return;
     }
   }
+}
+
+/* A shared-memory page (`web: { sharedMemory: true }`) needs cross-origin
+ * isolation (COOP/COEP headers) for its SharedArrayBuffer. A static server
+ * rarely sends them, so the page gets them from a service worker of its own,
+ * rae-coi.js beside it, that adds them to every response: the shell loads
+ * the program only once the page is isolated, and the first visit registers
+ * the worker and reloads once. Writes the shell to a temporary file (its
+ * path in `out`) and the worker beside `out_path`. */
+static bool web_shell_shared(const char* shell_path, const char* out_path, char* out, size_t cap) {
+  FILE* in = fopen(shell_path, "rb");
+  if (!in) return false;
+  char text[16384];
+  size_t length = fread(text, 1, sizeof text - 1, in);
+  fclose(in);
+  text[length] = '\0';
+  const char* marker = strstr(text, "{{{ SCRIPT }}}");
+  if (!marker) return false;
+  static const char loader[] =
+    "<template id=\"rae-program\">{{{ SCRIPT }}}</template>\n"
+    "  <script>\n"
+    "    /* shared memory needs cross-origin isolation: rae-coi.js (a service\n"
+    "     * worker) adds the COOP/COEP headers; the program loads once the page\n"
+    "     * has them (docs/audio-design.md, the web) */\n"
+    "    (() => {\n"
+    "      const start = () => {\n"
+    "        sessionStorage.removeItem('raeIsolationReload');\n"
+    "        const original = document.getElementById('rae-program').content.querySelector('script');\n"
+    "        const script = document.createElement('script');\n"
+    "        script.src = original.getAttribute('src');\n"
+    "        document.body.appendChild(script);\n"
+    "      };\n"
+    "      if (window.crossOriginIsolated) { start(); return; }\n"
+    "      const say = (text) => { console.error(text); status.textContent = text; };\n"
+    "      if (!window.isSecureContext || !('serviceWorker' in navigator)) {\n"
+    "        say('This page needs shared memory: serve it over https or from localhost');\n"
+    "        return;\n"
+    "      }\n"
+    "      if (sessionStorage.getItem('raeIsolationReload')) {\n"
+    "        say('This page needs shared memory, and its service worker did not give it cross-origin isolation');\n"
+    "        return;\n"
+    "      }\n"
+    "      navigator.serviceWorker.register('rae-coi.js').then(() => {\n"
+    "        sessionStorage.setItem('raeIsolationReload', '1');\n"
+    "        if (navigator.serviceWorker.controller) location.reload();\n"
+    "        else navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());\n"
+    "      }, (error) => say('This page needs shared memory; its service worker failed: ' + error));\n"
+    "    })();\n"
+    "  </script>";
+  static const char worker[] =
+    "/* Cross-origin isolation for a Rae page with shared memory: the COOP/COEP\n"
+    " * headers on every response of its scope (written by rae build) */\n"
+    "self.addEventListener('install', () => self.skipWaiting());\n"
+    "self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));\n"
+    "self.addEventListener('fetch', (event) => {\n"
+    "  if (event.request.cache === 'only-if-cached' && event.request.mode !== 'same-origin') return;\n"
+    "  event.respondWith(fetch(event.request).then((response) => {\n"
+    "    if (response.status === 0) return response;\n"
+    "    const headers = new Headers(response.headers);\n"
+    "    headers.set('Cross-Origin-Opener-Policy', 'same-origin');\n"
+    "    headers.set('Cross-Origin-Embedder-Policy', 'require-corp');\n"
+    "    headers.set('Cross-Origin-Resource-Policy', 'cross-origin');\n"
+    "    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });\n"
+    "  }));\n"
+    "});\n";
+  char folder[PATH_MAX];
+  snprintf(folder, sizeof folder, "%s", out_path);
+  char* slash = strrchr(folder, '/');
+  if (slash) *slash = '\0'; else snprintf(folder, sizeof folder, ".");
+  char worker_path[PATH_MAX + 16];
+  snprintf(worker_path, sizeof worker_path, "%s/rae-coi.js", folder);
+  FILE* worker_file = fopen(worker_path, "wb");
+  if (!worker_file) return false;
+  fputs(worker, worker_file);
+  fclose(worker_file);
+  snprintf(out, cap, "%s/.rae-shell-shared.html", folder);
+  FILE* shell = fopen(out, "wb");
+  if (!shell) return false;
+  fwrite(text, 1, (size_t)(marker - text), shell);
+  fputs(loader, shell);
+  fputs(marker + strlen("{{{ SCRIPT }}}"), shell);
+  fclose(shell);
+  return true;
 }
 
 static bool emcc_link_c_to_web(const char* entry_rae_file,
@@ -3322,6 +3498,22 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * runs it (Chrome 91, Firefox 89, Safari 16.4). Without it the physics
    * playground's step was 1.7x slower in Chrome (docs/web-frame-loop.md). */
   args[n++] = "-msimd128";
+  /* `web: { sharedMemory: true }`: shared memory, wasm workers and an
+   * AudioWorklet that runs Wasm (packages/audio renders there); the page
+   * needs cross-origin isolation, which web_shell_shared waits for */
+  char shared_shell[PATH_MAX];
+  if (g_web_shared_memory) {
+    args[n++] = "-sAUDIO_WORKLET";
+    args[n++] = "-sWASM_WORKERS";
+    /* the libc with pthread's calls (the runtime's mutexes); the runtime
+     * keeps its single-thread kernel (that is RAE_WASM_THREADS) */
+    args[n++] = "-pthread";
+    args[n++] = "-DRAE_WEB_SHARED_MEMORY";
+    if (emits_html) {
+      if (!web_shell_shared(shell_html, out_path, shared_shell, sizeof shared_shell)) return false;
+      snprintf(shell_html, sizeof shell_html, "%s", shared_shell);
+    }
+  }
   if (emits_html) {
     args[n++] = "--shell-file";
     args[n++] = shell_html;
@@ -3407,7 +3599,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   }
   /* The packages with C, each its include folder and its browser library */
   char package_flags[PATH_MAX * 8];
-  if (!package_native_flags(c_path, true, package_flags, sizeof(package_flags))) return false;
+  if (!package_native_flags(c_path, true, g_web_shared_memory, package_flags, sizeof(package_flags))) return false;
   for (char* word = strtok(package_flags, " "); word && n < 90; word = strtok(NULL, " ")) {
     args[n++] = word;
   }
@@ -3431,7 +3623,9 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     _exit(127);
   }
   int status = 0;
-  if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+  bool built = waitpid(pid, &status, 0) >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  if (g_web_shared_memory && emits_html) unlink(shared_shell);
+  if (!built) {
     fprintf(stderr, "error: Emscripten browser build failed\n");
     return false;
   }
@@ -4403,12 +4597,14 @@ static bool find_project_pack(const char* entry_path, const char* project_root,
   return project_root && dir_has_raepack(project_root, out);
 }
 
+
 /* The project pack's meta into g_pack_name / g_pack_version (both "" when
  * there is no pack or it has no meta): the same pack the toolchain check
  * reads, parsed quietly */
 static void load_pack_meta(const char* entry_path, const char* project_root) {
   g_pack_name[0] = '\0';
   g_pack_version[0] = '\0';
+  g_web_shared_memory = false;
   char pack_path[PATH_MAX];
   if (!find_project_pack(entry_path, project_root, pack_path)) return;
   RaePack pack;
@@ -4420,6 +4616,7 @@ static void load_pack_meta(const char* entry_path, const char* project_root) {
            pack.meta_name.data ? pack.meta_name.data : "");
   snprintf(g_pack_version, sizeof g_pack_version, "%.*s", (int)pack.meta_version.len,
            pack.meta_version.data ? pack.meta_version.data : "");
+  g_web_shared_memory = pack.web_shared_memory;
   raepack_free(&pack);
 }
 
@@ -5734,8 +5931,8 @@ static int cmd_tree(const char* mode) {
   if (!packages_find_pack(pack_path, pack_dir)) return 1;
   RaePack pack;
   if (!packages_resolve(pack_path, pack_dir, &pack)) return 1;
-  if (mode && strcmp(mode, "--native") == 0) {
-    bool printed = rae_package_native_print();
+  if (mode && (strcmp(mode, "--native") == 0 || strcmp(mode, "--native-android") == 0)) {
+    bool printed = rae_package_native_print(strcmp(mode, "--native-android") == 0);
     raepack_free(&pack);
     return printed ? 0 : 1;
   }

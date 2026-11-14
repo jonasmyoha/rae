@@ -89,17 +89,61 @@ int64_t rae_ext_nowNs(void) {
 #endif
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/console.h>
+#include <emscripten/threading.h>
+/* The browser: Emscripten's usleep spins, so a sleep on the page's thread
+ * held the page (no event, timer or worklet message ran). On the main
+ * stack it yields through Asyncify instead (emscripten_sleep), and the page
+ * runs meanwhile. It cannot yield inside a mainLoop frame (a frame callback
+ * has no stack Asyncify can return through) or inside a task's body (run
+ * through an indirect call, which a mainLoop build does not instrument):
+ * the frame trampoline and the scheduler hold the sleep there, and it spins
+ * as before, with one warning. A worker thread of a threaded build blocks
+ * as natively. */
+static __thread int g_rae_web_sleep_holds = 0;
+static __thread int g_rae_web_sleep_warned = 0;
+
+void rae_web_sleep_hold(int delta) { g_rae_web_sleep_holds += delta; }
+
+static int rae_web_sleep_yields(void) {
+  if (!emscripten_is_main_runtime_thread()) return 0;
+  if (g_rae_web_sleep_holds == 0) return 1;
+  if (!g_rae_web_sleep_warned) {
+    g_rae_web_sleep_warned = 1;
+    emscripten_console_warn("[rae] sleep in a mainLoop frame (or a task) cannot let the page run: it holds "
+                            "the page until it ends; return from the frame and go on in a later one "
+                            "(docs/web-frame-loop.md)");
+  }
+  return 0;
+}
+#endif
+
 void rae_ext_rae_sleep(int64_t ms) {
   if (ms > 0) {
+#if defined(__EMSCRIPTEN__)
+    if (rae_web_sleep_yields()) {
+      emscripten_sleep((unsigned int)ms);
+      return;
+    }
+#endif
     usleep((useconds_t)ms * 1000);
   }
 }
 
 /* One nanosleep (lib/Time.rae waitUntil): 0, or -errno (EINTR when a signal
  * cut it short; the caller re-reads the clock). Platform reason: sleep(ms:)
- * takes whole milliseconds, and a 30 Hz tick (33.333 ms) needs finer. */
+ * takes whole milliseconds, and a 30 Hz tick (33.333 ms) needs finer. In
+ * the browser's main stack it yields in whole milliseconds (rounded up), as
+ * sleep does. */
 int64_t rae_ext_Time_sleepNs(int64_t ns) {
   if (ns <= 0) return 0;
+#if defined(__EMSCRIPTEN__)
+  if (rae_web_sleep_yields()) {
+    emscripten_sleep((unsigned int)((ns + 999999) / 1000000));
+    return 0;
+  }
+#endif
   struct timespec wait = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
   return nanosleep(&wait, NULL) == 0 ? 0 : -errno;
 }
@@ -144,6 +188,7 @@ void rae_spawn(void* (*func)(void*), void* data) {
  * text is Rae (lib/core/AnyText.rae, the generated formatters;
  * docs/runtime-c-audit.md row 12). Platform reason: writing to stdout. */
 void rae_ext_rae_log_write(rae_String text, rae_Bool newline) {
+  RAE_REALTIME_GUARD("rae_ext_rae_log_write", "log");
   if (text.data && text.len > 0) fwrite(text.data, 1, (size_t)text.len, stdout);
   if (newline) fputc('\n', stdout);
   rae_flush_stdout();

@@ -32,31 +32,35 @@ cheader "runtime_location_apple.h"
 const hasCoreLocation: Bool = Target.isApple
 
 when hasCoreLocation {
-  func rae_ext_Location_authorization() unsafe extern("rae_ext_Location_authorization") ret Int
-
-  func rae_ext_Location_authorizationChanges() unsafe extern("rae_ext_Location_authorizationChanges") ret
+  func rae_ext_Location_authorization() mainThread unsafe extern("rae_ext_Location_authorization") ret
     Int
 
-  func rae_ext_Location_servicesEnabled() unsafe extern("rae_ext_Location_servicesEnabled") ret Int
+  func rae_ext_Location_authorizationChanges() mainThread unsafe extern("rae_ext_Location_authorizationChanges") ret
+    Int
 
-  func rae_ext_Location_requestWhenInUse() unsafe extern("rae_ext_Location_requestWhenInUse") ret
+  func rae_ext_Location_servicesEnabled() mainThread unsafe extern("rae_ext_Location_servicesEnabled") ret
+    Int
+
+  func rae_ext_Location_requestWhenInUse() mainThread unsafe extern("rae_ext_Location_requestWhenInUse") ret
     Int
 
   func rae_ext_Location_setDesiredAccuracy(
     meters: Float64
-  ) unsafe extern("rae_ext_Location_setDesiredAccuracy") ret Int
+  ) mainThread unsafe extern("rae_ext_Location_setDesiredAccuracy") ret Int
 
-  func rae_ext_Location_requestOnce() unsafe extern("rae_ext_Location_requestOnce") ret Int
+  func rae_ext_Location_requestOnce() mainThread unsafe extern("rae_ext_Location_requestOnce") ret
+    Int
 
-  func rae_ext_Location_stop() unsafe extern("rae_ext_Location_stop") ret Int
+  func rae_ext_Location_stop() mainThread unsafe extern("rae_ext_Location_stop") ret Int
 
-  func rae_ext_Location_accuracyReduced() unsafe extern("rae_ext_Location_accuracyReduced") ret Int
+  func rae_ext_Location_accuracyReduced() mainThread unsafe extern("rae_ext_Location_accuracyReduced") ret
+    Int
 
-  func rae_ext_Location_state() unsafe extern("rae_ext_Location_state") ret Int
+  func rae_ext_Location_state() mainThread unsafe extern("rae_ext_Location_state") ret Int
 
-  func rae_ext_Location_fix(field: Int) unsafe extern("rae_ext_Location_fix") ret Float64
+  func rae_ext_Location_fix(field: Int) mainThread unsafe extern("rae_ext_Location_fix") ret Float64
 
-  func rae_ext_Location_errorCode() unsafe extern("rae_ext_Location_errorCode") ret Int
+  func rae_ext_Location_errorCode() mainThread unsafe extern("rae_ext_Location_errorCode") ret Int
 }
 
 # Why there is no fix:

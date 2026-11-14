@@ -119,7 +119,8 @@ void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   }
 }
 
-void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol) {
+void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char* extern_symbol,
+                         const char* c_export_symbol) {
   const AstProperty* current = prop;
   bool first = true;
   while (current) {
@@ -127,6 +128,10 @@ void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop, const char*
     if (extern_symbol && str_eq_cstr(current->name, "extern")) {
       pp_write(pp, "extern(\"");
       pp_write(pp, extern_symbol);
+      pp_write(pp, "\")");
+    } else if (c_export_symbol && str_eq_cstr(current->name, "cExport")) {
+      pp_write(pp, "cExport(\"");
+      pp_write(pp, c_export_symbol);
       pp_write(pp, "\")");
     } else {
       pp_write_str(pp, current->name);
@@ -521,6 +526,7 @@ static void pp_expr_inner(PrettyPrinter* pp, const AstExpr* expr, int parent_pre
       if (need_paren) pp_write_char(pp, '(');
       bool is_post = expr->as.unary.op == AST_UNARY_POST_INC || expr->as.unary.op == AST_UNARY_POST_DEC;
       if (!is_post) pp_write(pp, unary_op_text(expr->as.unary.op));
+      if (expr->as.unary.op == AST_UNARY_SPAWN && expr->as.unary.spawn_thread) pp_write(pp, "thread ");
       pp_expr_prec(pp, expr->as.unary.operand, PREC_UNARY);
       if (is_post) pp_write(pp, unary_op_text(expr->as.unary.op));
       if (need_paren) pp_write_char(pp, ')');

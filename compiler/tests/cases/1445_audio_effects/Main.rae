@@ -1,0 +1,899 @@
+# The effect nodes (docs/audio-design.md §5.3), offline, with the audio-thread
+# calls on a thread marked real-time (RAE_REALTIME_CHECK=1 in config.env):
+#
+# 1. An EQ band of each shape: its magnitude at chosen frequencies, by a
+#    Float64 DFT of its impulse response, against the Audio EQ Cookbook's
+#    formula computed in Float64, within 0.02 dB (the coefficients are Float:
+#    the high pass at 300 Hz is 0.011 dB off at 60 Hz, 28 dB down, where its
+#    numerator nearly cancels).
+# 2. A band's gain moved by a parameter event: no click in its 5 ms (no step
+#    bigger than the sine's own) and on the new gain after it.
+# 3. A compressor's static curve at seven levels around its knee, its attack
+#    time constant in frames, and a duck through its sidechain input.
+# 4. Freeverb against a reference written once by an independent Python
+#    implementation of the same structure in float32 (make_reference.py): a
+#    null test, and its impulse response's tail to -60 dB.
+# 5. A plan swap to the same graph in the middle (eq -> compressor -> reverb)
+#    changes nothing: each node's state is carried over.
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/Decoder
+open audio/EffectStates
+open audio/GraphCompile
+open audio/GraphEffects
+open audio/GraphRender
+open audio/Sound
+
+const maxFrames: Int = 512
+
+const caseDir: String = "tests/cases/1445_audio_effects/"
+
+const pi64: Float64 = 3.141592653589793
+
+const one64: Float64 = 1.0
+
+# ---- Float64 helpers (Math's are Float) -----------------------------------------
+func cos64(x: view Float64) ret Float64 {
+  var angle: Float64 = x
+  loop angle > pi64 {
+    angle = angle - pi64 * 2.0
+  }
+  loop angle < -pi64 {
+    angle = angle + pi64 * 2.0
+  }
+  var term: Float64 = 1.0
+  var sum: Float64 = 1.0
+  loop var n: Int = 1, n < 30, ++n {
+    term = -term * angle * angle / (((2 * n - 1) * (2 * n)) as Float64)
+    sum = sum + term
+  }
+  ret sum
+}
+
+func sin64(x: view Float64) ret Float64 {
+  ret cos64(x: x - pi64 / 2.0)
+}
+
+func exp64(x: view Float64) ret Float64 {
+  var reduced: Float64 = x / 1024.0
+  var term: Float64 = 1.0
+  var sum: Float64 = 1.0
+  loop var n: Int = 1, n < 25, ++n {
+    term = term * reduced / (n as Float64)
+    sum = sum + term
+  }
+  loop var i: Int = 0, i < 10, ++i {
+    sum = sum * sum
+  }
+  ret sum
+}
+
+func sqrt64(x: view Float64) ret Float64 {
+  var root: Float64 = Math.sqrt(x: x as Float) as Float64
+  loop var i: Int = 0, i < 3, ++i {
+    root = (root + x / root) * 0.5
+  }
+  ret root
+}
+
+func max64(a: view Float64, b: view Float64) ret Float64 {
+  if a > b {
+    ret a
+  }
+  ret b
+}
+
+func abs64(x: view Float64) ret Float64 {
+  if x < 0.0 {
+    ret -x
+  }
+  ret x
+}
+
+# ---- rendering a graph -------------------------------------------------------------
+type Rendered {
+  left: Buffer(Float)
+  right: Buffer(Float)
+}
+
+type Scene {
+  graph: AudioGraph
+  rate: Int
+  total: Int
+  slots: Int
+  hasEvent: Bool
+  event: GraphParameterEvent
+  # at this frame the renderer takes the same graph compiled again (-1: no)
+  swapAt: Int
+}
+
+func scene(
+  graph: view AudioGraph
+  rate: view Int
+  total: view Int
+  slots: view Int
+) ret Scene {
+  ret Scene {
+    graph: graph
+    rate: rate
+    total: total
+    slots: slots
+    hasEvent: false
+    event: { key: -1, kind: 0, value: 0.0, sampleTime: 0 }
+    swapAt: -1
+  }
+}
+
+func renderPiece(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  output: view Rendered
+  offset: view Int
+  frames: view Int
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: output.left
+    right: output.right
+    offset: offset
+    frames: frames
+  )
+}
+
+# `inputs`: slot s channel c frame f at (s * 2 + c) * total + f
+func renderScene(setup: view Scene, inputs: view Buffer(Float)) ret Rendered {
+  let compiled: CompiledPlan = compileGraph(
+    graph: setup.graph
+    sampleRate: setup.rate
+    maxFrames: maxFrames
+  )
+  if compiled.error.length() > 0 {
+    log("compile error: {compiled.error}")
+  }
+  var renderer: GraphRenderer = createGraphRenderer()
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  if setup.hasEvent {
+    let sent: Bool = renderer.sendParameter(event: setup.event)
+  }
+  let output: Rendered = {
+    left: createSampleBuffer(count: setup.total)
+    right: createSampleBuffer(count: setup.total)
+  }
+  let sources: Buffer(Float) = createSampleBuffer(count: max(a: 1, b: setup.slots) * 2 * maxFrames)
+  var done: Int = 0
+  loop done < setup.total {
+    var frames: Int = min(a: maxFrames, b: setup.total - done)
+    if setup.swapAt > done and setup.swapAt < done + frames {
+      frames = setup.swapAt - done
+    }
+    if setup.swapAt is done {
+      let again: CompiledPlan = compileGraphAfter(
+        graph: setup.graph
+        previousGraph: setup.graph
+        previousPlan: renderer.current
+        sampleRate: setup.rate
+        maxFrames: maxFrames
+      )
+      let swapped: Bool = renderer.submitPlan(plan: again.plan)
+    }
+    loop var slot: Int = 0, slot < setup.slots, ++slot {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        loop var i: Int = 0, i < frames, ++i {
+          setSampleAt(
+            samples: sources
+            index: (slot * 2 + channel) * maxFrames + i
+            value: sampleAt(samples: inputs, index: (slot * 2 + channel) * setup.total + done + i)
+          )
+        }
+      }
+    }
+    markRealtimeThread()
+    renderPiece(
+      renderer: renderer
+      sources: sources
+      output: output
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    loop let old: RenderPlan in renderer.takeReclaimedPlans() {
+      freeRenderPlan(plan: old)
+    }
+    done = done + frames
+  }
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+  ret output
+}
+
+func freeRendered(output: view Rendered) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: output.left)
+    rae_ext_rae_buf_free(buf: output.right)
+  }
+}
+
+# A graph of slot 0 (and slot 1, when `sidechain`) through `effect` to the output
+func effectGraph(effect: view GraphNode, sidechain: view Bool) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let node: Int = graph.addNode(node: identified(node: effect, entityId: 7))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: source, to: node)
+  if sidechain {
+    let side: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 1))
+    graph.connect(from: side, to: node)
+  }
+  graph.connect(from: node, to: out)
+  ret graph
+}
+
+func inputBuffer(slots: view Int, total: view Int) ret Buffer(Float) {
+  ret createSampleBuffer(count: slots * 2 * total)
+}
+
+func setInput(
+  inputs: view Buffer(Float)
+  total: view Int
+  slot: view Int
+  frame: view Int
+  value: view Float
+) {
+  setSampleAt(samples: inputs, index: (slot * 2) * total + frame, value: value)
+  setSampleAt(samples: inputs, index: (slot * 2 + 1) * total + frame, value: value)
+}
+
+func freeBuffer(buffer: view Buffer(Float)) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+}
+
+# ---- 1. the EQ shapes against the cookbook ---------------------------------------------
+type Biquad64 {
+  b0: Float64
+  b1: Float64
+  b2: Float64
+  a1: Float64
+  a2: Float64
+}
+
+# The Audio EQ Cookbook's coefficients, in Float64
+func cookbook64(
+  filter: view FilterShape
+  frequency: view Float64
+  gainDecibels: view Float64
+  quality: view Float64
+  rate: view Int
+) ret Biquad64 {
+  let omega: Float64 = pi64 * 2.0 * frequency / (rate as Float64)
+  let cosine: Float64 = cos64(x: omega)
+  let alpha: Float64 = sin64(x: omega) / (quality * 2.0)
+  let amplitude: Float64 = exp64(x: gainDecibels / 40.0 * 2.302585092994046)
+  let root: Float64 = sqrt64(x: amplitude)
+  var b0: Float64 = 1.0
+  var b1: Float64 = 0.0
+  var b2: Float64 = 0.0
+  var a0: Float64 = 1.0
+  var a1: Float64 = 0.0
+  var a2: Float64 = 0.0
+  match filter {
+    case FilterShape.peak {
+      b0 = one64 + alpha * amplitude
+      b1 = cosine * -2.0
+      b2 = one64 - alpha * amplitude
+      a0 = one64 + alpha / amplitude
+      a1 = cosine * -2.0
+      a2 = one64 - alpha / amplitude
+    }
+    case FilterShape.lowShelf {
+      b0 = amplitude * (amplitude + 1.0 - (amplitude - 1.0) * cosine + root * 2.0 * alpha)
+      b1 = amplitude * 2.0 * (amplitude - 1.0 - (amplitude + 1.0) * cosine)
+      b2 = amplitude * (amplitude + 1.0 - (amplitude - 1.0) * cosine - root * 2.0 * alpha)
+      a0 = amplitude + 1.0 + (amplitude - 1.0) * cosine + root * 2.0 * alpha
+      a1 = (amplitude - 1.0 + (amplitude + 1.0) * cosine) * -2.0
+      a2 = amplitude + 1.0 + (amplitude - 1.0) * cosine - root * 2.0 * alpha
+    }
+    case FilterShape.highShelf {
+      b0 = amplitude * (amplitude + 1.0 + (amplitude - 1.0) * cosine + root * 2.0 * alpha)
+      b1 = amplitude * -2.0 * (amplitude - 1.0 + (amplitude + 1.0) * cosine)
+      b2 = amplitude * (amplitude + 1.0 + (amplitude - 1.0) * cosine - root * 2.0 * alpha)
+      a0 = amplitude + 1.0 - (amplitude - 1.0) * cosine + root * 2.0 * alpha
+      a1 = (amplitude - 1.0 - (amplitude + 1.0) * cosine) * 2.0
+      a2 = amplitude + 1.0 - (amplitude - 1.0) * cosine - root * 2.0 * alpha
+    }
+    case FilterShape.lowPass {
+      b0 = (one64 - cosine) / 2.0
+      b1 = one64 - cosine
+      b2 = (one64 - cosine) / 2.0
+      a0 = one64 + alpha
+      a1 = cosine * -2.0
+      a2 = one64 - alpha
+    }
+    case FilterShape.highPass {
+      b0 = (one64 + cosine) / 2.0
+      b1 = -(one64 + cosine)
+      b2 = (one64 + cosine) / 2.0
+      a0 = one64 + alpha
+      a1 = cosine * -2.0
+      a2 = one64 - alpha
+    }
+  }
+  ret Biquad64 {
+    b0: b0 / a0
+    b1: b1 / a0
+    b2: b2 / a0
+    a1: a1 / a0
+    a2: a2 / a0
+  }
+}
+
+# |H(e^jw)| of the biquad at `frequency`
+func magnitude64(filter: view Biquad64, frequency: view Float64, rate: view Int) ret Float64 {
+  let omega: Float64 = pi64 * 2.0 * frequency / (rate as Float64)
+  let c1: Float64 = cos64(x: omega)
+  let s1: Float64 = sin64(x: omega)
+  let c2: Float64 = cos64(x: omega * 2.0)
+  let s2: Float64 = sin64(x: omega * 2.0)
+  let topReal: Float64 = filter.b0 + filter.b1 * c1 + filter.b2 * c2
+  let topImaginary: Float64 = -filter.b1 * s1 - filter.b2 * s2
+  let bottomReal: Float64 = one64 + filter.a1 * c1 + filter.a2 * c2
+  let bottomImaginary: Float64 = -filter.a1 * s1 - filter.a2 * s2
+  ret sqrt64(
+    x: (topReal * topReal + topImaginary * topImaginary) / (bottomReal * bottomReal + bottomImaginary * bottomImaginary)
+  )
+}
+
+# The magnitude of the impulse response's DFT at `frequency`, in Float64
+func measured64(
+  response: view Buffer(Float)
+  count: view Int
+  frequency: view Float64
+  rate: view Int
+) ret Float64 {
+  let omega: Float64 = pi64 * 2.0 * frequency / (rate as Float64)
+  let stepCos: Float64 = cos64(x: omega)
+  let stepSin: Float64 = sin64(x: omega)
+  var cosine: Float64 = 1.0
+  var sine: Float64 = 0.0
+  var real: Float64 = 0.0
+  var imaginary: Float64 = 0.0
+  loop var n: Int = 0, n < count, ++n {
+    let value: Float64 = sampleAt(samples: response, index: n) as Float64
+    real = real + value * cosine
+    imaginary = imaginary - value * sine
+    let nextCos: Float64 = cosine * stepCos - sine * stepSin
+    sine = sine * stepCos + cosine * stepSin
+    cosine = nextCos
+  }
+  ret sqrt64(x: real * real + imaginary * imaginary)
+}
+
+func decibelsOf(ratio: view Float64) ret Float64 {
+  ret (naturalLog(x: ratio as Float) as Float64) * 8.685889638065035
+}
+
+func checkShape(
+  name: view String
+  filter: view FilterShape
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) {
+  let rate: Int = 48000
+  let total: Int = 16384
+  let graph: AudioGraph = effectGraph(
+    effect: eqNode(
+      filter: filter
+      frequency: frequency
+      gainDecibels: gainDecibels
+      quality: quality
+    )
+    sidechain: false
+  )
+  let inputs: Buffer(Float) = inputBuffer(slots: 1, total: total)
+  setInput(
+    inputs: inputs
+    total: total
+    slot: 0
+    frame: 0
+    value: 1.0
+  )
+  let output: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: total
+      slots: 1
+    )
+    inputs: inputs
+  )
+  let formula: Biquad64 = cookbook64(
+    filter: filter
+    frequency: frequency as Float64
+    gainDecibels: gainDecibels as Float64
+    quality: quality as Float64
+    rate: rate
+  )
+  var worst: Float64 = 0.0
+  let probes: List(Float64) = {
+    60.0
+    250.0
+    1000.0
+    4000.0
+    12000.0
+  }
+  loop let probe: Float64 in probes {
+    let error: Float64 = abs64(x: decibelsOf(ratio: measured64(
+      response: output.left
+      count: total
+      frequency: probe
+      rate: rate
+    ) / magnitude64(filter: formula, frequency: probe, rate: rate)))
+    if error > worst {
+      worst = error
+    }
+  }
+  log(
+    "1. {name}: within 0.02 dB of the cookbook at 60, 250, 1000, 4000 and 12000 Hz: {worst < 0.02}"
+  )
+  freeRendered(output: output)
+  freeBuffer(buffer: inputs)
+}
+
+# ---- 2. a band's gain moved by an event ------------------------------------------------
+func checkEqRamp() {
+  let rate: Int = 48000
+  let total: Int = 9600
+  let amplitude: Float = 0.25
+  let graph: AudioGraph = effectGraph(
+    effect: eqNode(
+      filter: FilterShape.peak
+      frequency: 1000.0
+      gainDecibels: 0.0
+      quality: 1.0
+    )
+    sidechain: false
+  )
+  let inputs: Buffer(Float) = inputBuffer(slots: 1, total: total)
+  loop var i: Int = 0, i < total, ++i {
+    setInput(
+      inputs: inputs
+      total: total
+      slot: 0
+      frame: i
+      value: amplitude * Math.sin(x: (2.0 * pi64 * 1000.0 * (i as Float64) / 48000.0) as Float)
+    )
+  }
+  var setup: Scene = scene(
+    graph: graph
+    rate: rate
+    total: total
+    slots: 1
+  )
+  setup.hasEvent = true
+  setup.event = { key: 7, kind: parameterEqGain, value: 12.0, sampleTime: 4800 }
+  let output: Rendered = renderScene(setup: setup, inputs: inputs)
+  let final: Float = amplitude * Math.pow(base: 10.0, exp: 12.0 / 20.0)
+  var biggestStep: Float = 0.0
+  loop var i: Int = 4800, i < 5400, ++i {
+    biggestStep = max(
+      a: biggestStep
+      b: abs(
+        value: sampleAt(samples: output.left, index: i) - sampleAt(
+          samples: output.left
+          index: i - 1
+        )
+      )
+    )
+  }
+  var peak: Float = 0.0
+  loop var i: Int = total - 480, i < total, ++i {
+    peak = max(a: peak, b: abs(value: sampleAt(samples: output.left, index: i)))
+  }
+  let sineStep: Float = (2.0 * 3.1415927 * 1000.0 / 48000.0) * final
+  log(
+    "2. a band's gain 0 -> +12 dB at sample 4800: no step bigger than the sine's own {biggestStep <= sineStep * 1.05}, then +12 dB within 1% {abs(
+      value: peak / final - 1.0
+    ) < 0.01}"
+  )
+  freeRendered(output: output)
+  freeBuffer(buffer: inputs)
+}
+
+# ---- 3. the compressor -------------------------------------------------------------------
+func compressorSettings() ret EffectSettings {
+  var settings: EffectSettings = defaultEffectSettings()
+  settings.thresholdDecibels = -20.0
+  settings.ratio = 4.0
+  settings.kneeDecibels = 6.0
+  settings.attackSeconds = 0.01
+  settings.releaseSeconds = 0.1
+  ret settings
+}
+
+# The static curve with its soft knee, in Float64: the gain (dB) at `level` dB
+func curveGain64(level: view Float64) ret Float64 {
+  let threshold: Float64 = -20.0
+  let ratio: Float64 = 4.0
+  let knee: Float64 = 6.0
+  let over: Float64 = level - threshold
+  if over * 2.0 < -knee {
+    ret 0.0
+  }
+  if abs64(x: over) * 2.0 <= knee {
+    let into: Float64 = over + knee / 2.0
+    ret (one64 / ratio - 1.0) * into * into / (knee * 2.0)
+  }
+  ret threshold + over / ratio - level
+}
+
+func checkCompressorCurve() {
+  let rate: Int = 48000
+  let total: Int = 24000
+  let levels: List(Float) = {
+    -40.0
+    -24.0
+    -21.0
+    -20.0
+    -18.0
+    -10.0
+    0.0
+  }
+  var worst: Float64 = 0.0
+  loop let level: Float in levels {
+    let value: Float = Math.pow(base: 10.0, exp: level / 20.0)
+    let inputs: Buffer(Float) = inputBuffer(slots: 1, total: total)
+    loop var i: Int = 0, i < total, ++i {
+      setInput(
+        inputs: inputs
+        total: total
+        slot: 0
+        frame: i
+        value: value
+      )
+    }
+    let graph: AudioGraph = effectGraph(
+      effect: compressorNode(settings: compressorSettings(), makeupDecibels: 0.0)
+      sidechain: false
+    )
+    let output: Rendered = renderScene(
+      setup: scene(
+        graph: graph
+        rate: rate
+        total: total
+        slots: 1
+      )
+      inputs: inputs
+    )
+    let gain: Float64 = decibelsOf(
+      ratio: (sampleAt(samples: output.left, index: total - 1) / value) as Float64
+    )
+    worst = max64(a: worst, b: abs64(x: gain - curveGain64(level: level as Float64)))
+    freeRendered(output: output)
+    freeBuffer(buffer: inputs)
+  }
+  log(
+    "3. the compressor's static curve (-20 dB, 4:1, a 6 dB knee) at -40, -24, -21, -20, -18, -10 and 0 dBFS: within 0.01 dB {worst < 0.01}"
+  )
+}
+
+# A step from silence to 0 dBFS at frame 1000: the reduction (15 dB at the
+# end) passes 1 - 1/e of the way after the attack time, 480 frames
+func checkCompressorAttack() {
+  let rate: Int = 48000
+  let total: Int = 4000
+  let inputs: Buffer(Float) = inputBuffer(slots: 1, total: total)
+  loop var i: Int = 1000, i < total, ++i {
+    setInput(
+      inputs: inputs
+      total: total
+      slot: 0
+      frame: i
+      value: 1.0
+    )
+  }
+  let graph: AudioGraph = effectGraph(
+    effect: compressorNode(settings: compressorSettings(), makeupDecibels: 0.0)
+    sidechain: false
+  )
+  let output: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: total
+      slots: 1
+    )
+    inputs: inputs
+  )
+  let mark: Float64 = (one64 - exp64(x: -1.0)) * 15.0
+  var reached: Int = -1
+  loop var i: Int = 1000, i < total and reached < 0, ++i {
+    if -decibelsOf(ratio: sampleAt(samples: output.left, index: i) as Float64) >= mark {
+      reached = i - 1000 + 1
+    }
+  }
+  log(
+    "3. the attack: 63.2% of the 15 dB reduction after {reached} frames (10 ms is 480): {reached >= 479 and reached <= 481}"
+  )
+  freeRendered(output: output)
+  freeBuffer(buffer: inputs)
+}
+
+# A quiet sine (-40 dBFS) ducked by a loud sidechain (0 dBFS): the sine comes
+# out 15 dB lower, as the curve says for the sidechain's level
+func checkSidechain() {
+  let rate: Int = 48000
+  let total: Int = 24000
+  let inputs: Buffer(Float) = inputBuffer(slots: 2, total: total)
+  loop var i: Int = 0, i < total, ++i {
+    setInput(
+      inputs: inputs
+      total: total
+      slot: 0
+      frame: i
+      value: 0.01 * Math.sin(x: (2.0 * pi64 * 1000.0 * (i as Float64) / 48000.0) as Float)
+    )
+    setInput(
+      inputs: inputs
+      total: total
+      slot: 1
+      frame: i
+      value: 1.0
+    )
+  }
+  let graph: AudioGraph = effectGraph(
+    effect: compressorNode(settings: compressorSettings(), makeupDecibels: 0.0)
+    sidechain: true
+  )
+  let output: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: total
+      slots: 2
+    )
+    inputs: inputs
+  )
+  # a frame where the sine is near its crest (1000 Hz: every 48th frame)
+  let frame: Int = total - 48 + 12
+  let gain: Float64 = decibelsOf(
+    ratio: (sampleAt(samples: output.left, index: frame) / sampleAt(samples: inputs, index: frame)) as Float64
+  )
+  log(
+    "3. a -40 dBFS sine under a 0 dBFS sidechain: 15 dB lower, within 0.01 dB {abs64(x: gain + 15.0) < 0.01}"
+  )
+  freeRendered(output: output)
+  freeBuffer(buffer: inputs)
+}
+
+# ---- 4. Freeverb against the Python reference -------------------------------------------
+func reverbSettings() ret EffectSettings {
+  var settings: EffectSettings = defaultEffectSettings()
+  settings.roomSize = 0.5
+  settings.damping = 0.5
+  settings.wet = 1.0 / 3.0
+  settings.dry = 0.0
+  settings.width = 1.0
+  ret settings
+}
+
+# make_reference.py's test input: an impulse (1 left, 0.5 right) at frame 0,
+# then frames 100..1099 of a 31-bit LCG's noise
+func reverbInput(total: view Int) ret Buffer(Float) {
+  let inputs: Buffer(Float) = inputBuffer(slots: 1, total: total)
+  setSampleAt(samples: inputs, index: 0, value: 1.0)
+  setSampleAt(samples: inputs, index: total, value: 0.5)
+  var seed: Int = 12345
+  loop var i: Int = 100, i < 1100 and i < total, ++i {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    setSampleAt(
+      samples: inputs
+      index: i
+      value: (((seed / 65536) % 2001 - 1000) as Float) / 1000.0
+    )
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    setSampleAt(
+      samples: inputs
+      index: total + i
+      value: (((seed / 65536) % 2001 - 1000) as Float) / 1000.0
+    )
+  }
+  ret inputs
+}
+
+func checkReverb() {
+  let rate: Int = 44100
+  let total: Int = 13230
+  let inputs: Buffer(Float) = reverbInput(total: total)
+  let graph: AudioGraph = effectGraph(
+    effect: reverbNode(settings: reverbSettings())
+    sidechain: false
+  )
+  let output: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: total
+      slots: 1
+    )
+    inputs: inputs
+  )
+  let reference: SoundData = readAnySoundFile(path: "{caseDir}reverb_reference.wav")
+  var worst: Float = 0.0
+  var loud: Float = 0.0
+  loop var i: Int = 0, i < total, ++i {
+    let left: Float = sampleAt(samples: reference.samples, index: 2 * i)
+    let right: Float = sampleAt(samples: reference.samples, index: 2 * i + 1)
+    worst = max(a: worst, b: abs(value: sampleAt(samples: output.left, index: i) - left))
+    worst = max(a: worst, b: abs(value: sampleAt(samples: output.right, index: i) - right))
+    loud = max(a: loud, b: abs(value: left))
+  }
+  log(
+    "4. Freeverb against the Python reference ({reference.frameCount} frames, peak {loud > 0.05}): the same samples, bit for bit {worst is 0.0}"
+  )
+  freeSoundData(data: reference)
+  freeRendered(output: output)
+  freeBuffer(buffer: inputs)
+  # the tail: an impulse into both channels for 4 s
+  let tailTotal: Int = 4 * rate
+  let impulse: Buffer(Float) = inputBuffer(slots: 1, total: tailTotal)
+  setInput(
+    inputs: impulse
+    total: tailTotal
+    slot: 0
+    frame: 0
+    value: 1.0
+  )
+  let tail: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: tailTotal
+      slots: 1
+    )
+    inputs: impulse
+  )
+  var peak: Float64 = 0.0
+  loop var i: Int = 0, i < tailTotal, ++i {
+    peak = max64(
+      a: peak
+      b: max(
+        a: abs(value: sampleAt(samples: tail.left, index: i))
+        b: abs(value: sampleAt(samples: tail.right, index: i))
+      ) as Float64
+    )
+  }
+  var last: Int = 0
+  loop var i: Int = 0, i < tailTotal, ++i {
+    let level: Float64 = max(
+      a: abs(value: sampleAt(samples: tail.left, index: i))
+      b: abs(value: sampleAt(samples: tail.right, index: i))
+    ) as Float64
+    if level > peak * 0.001 {
+      last = i
+    }
+  }
+  # make_reference.py printed 47366 (1.074 s)
+  log(
+    "4. the tail (room 0.5, damping 0.5) falls 60 dB after {last} frames, as the reference's: {last is 47366}"
+  )
+  freeRendered(output: tail)
+  freeBuffer(buffer: impulse)
+}
+
+# ---- 5. a plan swap carries every effect's state ----------------------------------------
+func chainGraph() ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let eq: Int = graph.addNode(node: identified(
+    node: eqNode(
+      filter: FilterShape.peak
+      frequency: 1500.0
+      gainDecibels: 6.0
+      quality: 1.0
+    )
+    entityId: 1
+  ))
+  let compressor: Int = graph.addNode(
+    node: identified(
+      node: compressorNode(settings: compressorSettings(), makeupDecibels: 3.0)
+      entityId: 2
+    )
+  )
+  let reverb: Int = graph.addNode(
+    node: identified(node: reverbNode(settings: reverbSettings()), entityId: 3)
+  )
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: source, to: eq)
+  graph.connect(from: eq, to: compressor)
+  graph.connect(from: compressor, to: reverb)
+  graph.connect(from: reverb, to: out)
+  ret graph
+}
+
+func checkSwap() {
+  let rate: Int = 48000
+  let total: Int = 9600
+  let inputs: Buffer(Float) = reverbInput(total: total)
+  let graph: AudioGraph = chainGraph()
+  let whole: Rendered = renderScene(
+    setup: scene(
+      graph: graph
+      rate: rate
+      total: total
+      slots: 1
+    )
+    inputs: inputs
+  )
+  var setup: Scene = scene(
+    graph: graph
+    rate: rate
+    total: total
+    slots: 1
+  )
+  setup.swapAt = 4000
+  let swapped: Rendered = renderScene(setup: setup, inputs: inputs)
+  var same: Bool = true
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: whole.left, index: i) is not sampleAt(samples: swapped.left, index: i) or sampleAt(
+      samples: whole.right
+      index: i
+    ) is not sampleAt(samples: swapped.right, index: i) {
+      same = false
+    }
+  }
+  log(
+    "5. eq -> compressor -> reverb swapped to the same graph at frame 4000: the same samples {same}"
+  )
+  freeRendered(output: whole)
+  freeRendered(output: swapped)
+  freeBuffer(buffer: inputs)
+}
+
+func main() {
+  checkShape(
+    name: "peak +6 dB at 1 kHz, Q 1"
+    filter: FilterShape.peak
+    frequency: 1000.0
+    gainDecibels: 6.0
+    quality: 1.0
+  )
+  checkShape(
+    name: "low shelf -6 dB at 200 Hz"
+    filter: FilterShape.lowShelf
+    frequency: 200.0
+    gainDecibels: -6.0
+    quality: 0.7071
+  )
+  checkShape(
+    name: "high shelf +4 dB at 5 kHz"
+    filter: FilterShape.highShelf
+    frequency: 5000.0
+    gainDecibels: 4.0
+    quality: 0.7071
+  )
+  checkShape(
+    name: "low pass at 2 kHz"
+    filter: FilterShape.lowPass
+    frequency: 2000.0
+    gainDecibels: 0.0
+    quality: 0.7071
+  )
+  checkShape(
+    name: "high pass at 300 Hz"
+    filter: FilterShape.highPass
+    frequency: 300.0
+    gainDecibels: 0.0
+    quality: 0.7071
+  )
+  checkEqRamp()
+  checkCompressorCurve()
+  checkCompressorAttack()
+  checkSidechain()
+  checkReverb()
+  checkSwap()
+}

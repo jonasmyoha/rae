@@ -229,7 +229,16 @@ pack Sql {
 - A program links it only when its emitted C includes `header`, the rule before this, so importing a package you do not reach
   costs nothing.
 - `rae tree --native` lists each package's device sources and options, and `gen-ios.sh` reads that instead of naming a library.
-  So does `gen-android.sh`. `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
+  `gen-android.sh` reads `rae tree --native-android`: the same, with the pack's `sourcesAndroid` / `definesAndroid` where it
+  gives them. `packages/audio` does: its iOS glue is Objective-C (`.m`), the same text that Android compiles as C.
+  A `.java` among them is the package's Android Java (`packages/audio`'s session: the audio focus and a MediaSession):
+  `gen-android.sh` compiles it with SDL's and the app's Java, and the package's C reaches it through JNI. So a package
+  carries its own Android half, and no toolchain file names it. A package may also install Android parts,
+  `android/parts/<name>/manifest.xml` (lines put inside the app's `<application>`) and `android/parts/<name>/res/`
+  (compiled and linked): `gen-android.sh` adds one only when the build names it in `RAE_ANDROID_PARTS`, so a part
+  meant for tests (`packages/audio`'s `midiLoopback`, a MIDI device other apps would see) is in no normal app.
+  Files in the install folder, not a pack field: the build script already copies them, and the pack stays the
+  same for every package. `RAE_BOX3D` and `RAE_WAMR` stay for the stdlib's own until those libraries move.
 - A library that needs `cmake` or a network says so in its script's error. A fresh clone of a project with C needs those too.
 
 **Shaders: a path in a package's module is tried next to the file, then in that package's folder, then `lib/...` in the stdlib.**

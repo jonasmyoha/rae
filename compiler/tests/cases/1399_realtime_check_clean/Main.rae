@@ -1,0 +1,69 @@
+# A real-time loop that keeps the rules passes the run-time check
+# (docs/realtime-language-design.md §5.3). config.env sets RAE_REALTIME_CHECK=1.
+#
+# A marked thread runs 10 000 "blocks": it pops commands from a SpscRing, mixes
+# into a preallocated List with set (no growth), counts in an Atomic, posts a
+# Signal, and times each block with a RealtimeRecorder. Nothing it does may
+# allocate, free, lock or log, so the program ends normally with no
+# [realtime-check] lines. Everything that allocates (the setup, the logs) runs
+# before the mark or after the unmark.
+open Atomic
+open Realtime
+open Signal
+open collections/SpscRing
+
+const blocks: Int = 10000
+
+const frames: Int = 64
+
+type Command {
+  gainPercent: Int
+}
+
+func renderBlocks(
+  commands: own SpscRing(Command)
+  rendered: own Atomic(Int)
+  done: own Signal
+) ret Int {
+  var mix: List(Int) = createList(Int, cap: frames)
+  mix.addDefaults(count: frames)
+  var recorder: RealtimeRecorder = createRealtimeRecorder(name: "audio", periodNanoseconds: 1333333)
+  var gainPercent: Int = 100
+  var checksum: Int = 0
+  markRealtimeThread()
+  var block: Int = 0
+  loop block < blocks {
+    recorder.callStarted()
+    if let command: Command = commands.pop() {
+      gainPercent = command.gainPercent
+    }
+    var frame: Int = 0
+    loop frame < frames {
+      let sample: Int = (block + frame) % 200 - 100
+      mix.set(index: frame, value: sample * gainPercent / 100)
+      checksum = checksum + mix.copyAtFallback(index: frame, fallback: 0)
+      frame = frame + 1
+    }
+    rendered.fetchAddRelaxed(amount: 1)
+    recorder.callEnded()
+    block = block + 1
+  }
+  done.post()
+  unmarkRealtimeThread()
+  log("recorded {recorder.calls} blocks")
+  ret checksum
+}
+
+func main() {
+  let commands: SpscRing(Command) = createSpscRing(Command, capacity: 16)
+  let rendered: Atomic(Int) = createAtomic(Int, value: 0)
+  let done: Signal = createSignal()
+  let pushed: Bool = commands.push(value: { gainPercent: 50 })
+  let task: Task(Int) = spawn renderBlocks(commands: commands, rendered: rendered, done: done)
+  done.wait()
+  let checksum: Int = task.get()
+  log("pushed {pushed}, rendered {rendered.load()} blocks, checksum {checksum}")
+  freeSpscRing(this: commands)
+  freeAtomic(this: rendered)
+  freeSignal(this: done)
+}

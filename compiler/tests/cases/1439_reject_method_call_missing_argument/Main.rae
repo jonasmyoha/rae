@@ -1,0 +1,24 @@
+# A method call that leaves out a middle argument is refused at the call,
+# naming the missing parameter. Before, the checker accepted it and the C
+# compiler failed ("too few arguments"), with `atSample`'s value passed in
+# `kind`'s place.
+enum Kind { first, second }
+
+type Engine {
+  count: Int
+}
+
+func play(
+  this: view Engine
+  note: view Int
+  velocity: view Float
+  kind: view Kind
+  atSample: view Int
+) {
+  log("{note} {atSample}")
+}
+
+func main() {
+  let engine: Engine = { count: 0 }
+  engine.play(note: 60, velocity: 0.8, atSample: 5000)
+}

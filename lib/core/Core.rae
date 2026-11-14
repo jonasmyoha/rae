@@ -103,7 +103,7 @@ func nowMs() ret Int {
   }
 }
 
-func nativeNowNs() unsafe extern("rae_ext_nowNs") ret Int
+func nativeNowNs() realtime unsafe extern("rae_ext_nowNs") ret Int
 
 func nowNs() ret Int {
   unsafe {
@@ -151,7 +151,11 @@ func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) unsafe extern ret Buffer(An
 func rae_ext_rae_buf_free(buf: Buffer(Any)) unsafe extern
 
 # A cache prefetch of buf[index] (elemSize bytes); List.prefetch.
-func rae_ext_rae_buf_prefetch(buf: view Buffer(Any), index: Int, elemSize: Int) unsafe extern
+func rae_ext_rae_buf_prefetch(
+  buf: view Buffer(Any)
+  index: Int
+  elemSize: Int
+) realtime unsafe extern
 
 func rae_ext_rae_buf_copy(
   V: type
@@ -161,7 +165,7 @@ func rae_ext_rae_buf_copy(
   dst_off: Int
   len: Int
   elemSize: Int
-) unsafe extern
+) realtime unsafe extern
 
 # Zero `count` elements from `start` (memset): every type's default value is
 # its all-zero bytes, so this fills them with defaults (List.addDefaults)
@@ -170,14 +174,14 @@ func rae_ext_rae_buf_zero(
   start: Int
   count: Int
   elemSize: Int
-) unsafe extern
+) realtime unsafe extern
 
 func rae_ext_rae_buf_set(
   V: type
   buf: mod Buffer(V)
   index: Int
   value: V
-) unsafe extern
+) realtime unsafe extern
 
 # Drop the contents of `buf[index]` via the synthesised
 # rae_drop_struct_<V> (or rae_string_drop for V=String). The
@@ -189,7 +193,7 @@ func rae_ext_rae_buf_set(
 # old String fields.
 func rae_ext_rae_buf_drop_at(V: type, buf: mod Buffer(V), index: Int) unsafe extern
 
-func rae_ext_rae_buf_get(V: type, buf: view Buffer(V), index: Int) unsafe extern ret V
+func rae_ext_rae_buf_get(V: type, buf: view Buffer(V), index: Int) realtime unsafe extern ret V
 
 # -- General String externs (used by String.rae, StringMap, Json, …) --
 func rae_str_eq(a: String, b: String) unsafe extern ret Bool

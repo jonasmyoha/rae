@@ -1,0 +1,15 @@
+tone.flac: 2 channels, 44100 Hz, 22050 frames, the same samples: true
+tone.mp3: 2 channels, 44100 Hz, within -30 dB after its start delay: true
+tone.ogg: 2 channels, 44100 Hz, within -30 dB after its start delay: true
+[audio] stream voice 1 tests/cases/1411_audio_streams/tone.flac bus music
+stream: the samples of the file: true
+gapless: queued true; the second file goes on at frame 22050 exactly: true
+after both: silence true, still playing false
+[audio] stream voice 1 tests/cases/1411_audio_streams/tone.flac bus music
+duration 0.5 s
+position after 0.1 s: 0.1
+seek: true, plays on from frame 11025: true
+pause: silent true, resumes at frame 13230: true
+position: 330 ms
+[audio] stream voice 1 tests/cases/1411_audio_streams/tone.ogg bus music
+48 kHz from a 44.1 kHz Vorbis file: the left peak 0.51

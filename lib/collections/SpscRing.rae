@@ -1,0 +1,127 @@
+# collections/SpscRing.rae — SpscRing(T), a fixed-size queue from ONE producer
+# thread to ONE consumer thread, with no lock (docs/realtime-language-design.md
+# §4.1, §4.4). A collections-package module: `import collections/SpscRing`.
+#
+#     let ring: SpscRing(Command) = createSpscRing(Command, capacity: 256)
+#     let task: Task(Int) = spawn consumer(ring: ring)    # shares the one ring
+#     let sent: Bool = ring.push(value: command)           # producer; false when full
+#     if let next: Command = ring.pop() { ... }            # consumer; none when empty
+#     ...
+#     freeSpscRing(this: ring)                             # once, after the join
+#
+# It is how the main thread and a real-time thread talk (commands one way,
+# feedback the other): `push` and `pop` never allocate, never lock and never
+# wait, so both sides may be real-time. A full ring refuses the push (the caller
+# decides: drop it, count it, retry later); it never grows.
+#
+# T must own no heap: numbers, enums, Bool, and structs of those (`Ptr`,
+# `Buffer` and handles are fine; they are not freed by a copy). A `String`, a
+# `List` or a map would have to be freed by whichever side dropped it, and on a
+# real-time thread that free is not allowed. Making a ring of such a T is a
+# compile error that names the field. Send an index or a handle instead.
+#
+# Exactly one thread pushes and exactly one pops; two producers or two consumers
+# corrupt the ring (use Channel(T) for many producers). Copies share the ring,
+# like Channel, and the owner frees it once, after both sides are done.
+#
+# How it works: two counters that only grow, `written` (the producer's) and
+# `read` (the consumer's), each in its own 64-byte cache line so the two threads
+# do not slow each other down. The slot of the n-th value is n % capacity. The
+# producer writes the slot, then publishes `written` with a release store; the
+# consumer's acquire load of `written` therefore sees the slot's contents.
+# Symmetrically the consumer reads the slot before it releases `read`, so the
+# producer never overwrites a slot that is still being read.
+import Atomic
+
+# The compiler rejects a T that owns heap here, naming the field (c_call.c).
+func rae_ext_rae_require_plain(T: type) unsafe extern
+
+# The counters' places in `counters`: 64 bytes apart.
+const readIndex: Int = 0
+
+const writtenIndex: Int = 8
+
+const counterCells: Int = 16
+
+type SpscRing(T: type) {
+  slots: Buffer(T)
+  counters: Buffer(Int)
+  capacity: Int
+}
+
+func createSpscRing(T: type, capacity: Int) ret SpscRing(T) {
+  unsafe {
+    rae_ext_rae_require_plain(T)
+    var size: Int = capacity
+    if size < 1 {
+      size = 1
+    }
+    let counters: Buffer(Int) = rae_ext_rae_buf_alloc(size: counterCells, elemSize: sizeof(Int))
+    rae_ext_rae_buf_zero(
+      buf: counters
+      start: 0
+      count: counterCells
+      elemSize: sizeof(Int)
+    )
+    ret SpscRing(T) {
+      slots: rae_ext_rae_buf_alloc(size: size, elemSize: sizeof(T))
+      counters: counters
+      capacity: size
+    }
+  }
+}
+
+# Producer only. Add `value`; answers false (and drops nothing) when full.
+func push(T: type, this: view SpscRing(T), value: T) realtime ret Bool {
+  unsafe {
+    let written: Int = rae_ext_rae_atomic_load_relaxed(cell: this.counters, index: writtenIndex)
+    let read: Int = rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
+    if written - read >= this.capacity {
+      ret false
+    }
+    var slots: Buffer(T) = this.slots
+    rae_ext_rae_buf_set(buf: slots, index: written % this.capacity, value: value)
+    rae_ext_rae_atomic_store(cell: this.counters, index: writtenIndex, value: written + 1)
+    ret true
+  }
+}
+
+# Consumer only. The oldest value, or none when the ring is empty.
+func pop(T: type, this: view SpscRing(T)) realtime ret opt T {
+  unsafe {
+    let read: Int = rae_ext_rae_atomic_load_relaxed(cell: this.counters, index: readIndex)
+    let written: Int = rae_ext_rae_atomic_load(cell: this.counters, index: writtenIndex)
+    if read is written {
+      ret none
+    }
+    let value: T = rae_ext_rae_buf_get(buf: this.slots, index: read % this.capacity)
+    rae_ext_rae_atomic_store(cell: this.counters, index: readIndex, value: read + 1)
+    ret value
+  }
+}
+
+# How many values wait to be popped. Exact on the consumer's thread; from the
+# producer's thread it may be smaller than the truth (a pop may be under way).
+func count(T: type, this: view SpscRing(T)) realtime ret Int {
+  unsafe {
+    let read: Int = rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
+    let written: Int = rae_ext_rae_atomic_load(cell: this.counters, index: writtenIndex)
+    ret written - read
+  }
+}
+
+# How many values were ever popped: the consumer's position in the stream of
+# values (a streamed voice's place in its file). Any thread may read it.
+func popped(T: type, this: view SpscRing(T)) realtime ret Int {
+  unsafe {
+    ret rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)
+  }
+}
+
+# Owner only, once, after the producer and the consumer are done.
+func freeSpscRing(T: type, this: view SpscRing(T)) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: this.slots)
+    rae_ext_rae_buf_free(buf: this.counters)
+  }
+}

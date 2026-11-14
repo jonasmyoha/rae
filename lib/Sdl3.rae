@@ -20,7 +20,7 @@ func nativeInitWindow(
   width: Int
   height: Int
   title: String
-) unsafe extern("rae_ext_Sdl3_initWindow")
+) mainThread unsafe extern("rae_ext_Sdl3_initWindow")
 
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
   unsafe {
@@ -35,7 +35,7 @@ func nativeSetWindowIconPixels(
   pixels: view Buffer(Int)
   width: Int
   height: Int
-) unsafe extern("rae_ext_Sdl3_setWindowIconPixels") ret Int
+) mainThread unsafe extern("rae_ext_Sdl3_setWindowIconPixels") ret Int
 
 # The program's icon (Gpu2dWindowIcon.programIconPath) on this window
 func setSdl3ProgramIcon() {
@@ -61,7 +61,7 @@ func setSdl3ProgramIcon() {
 
 # Cap the present rate (frames/sec). 0 disables the cap. sdlPresent sleeps the
 # remainder of each frame so an idle/finished render doesn't spin at 100% CPU.
-func nativeSetTargetFPS(fps: Int) unsafe extern("rae_ext_Sdl3_setTargetFPS")
+func nativeSetTargetFPS(fps: Int) mainThread unsafe extern("rae_ext_Sdl3_setTargetFPS")
 
 func setTargetFPS(fps: copy Int) {
   unsafe {
@@ -71,7 +71,7 @@ func setTargetFPS(fps: copy Int) {
 
 # Pump the event queue; returns true once the user asks to close the window
 # (window close button, Escape, or Cmd-Q).
-func nativeShouldClose() unsafe extern("rae_ext_Sdl3_shouldClose") ret Bool
+func nativeShouldClose() mainThread unsafe extern("rae_ext_Sdl3_shouldClose") ret Bool
 
 func shouldClose() ret Bool {
   unsafe {
@@ -87,7 +87,7 @@ func nativeUpdatePixels(
   pixels: view Buffer(Int)
   w: Int
   h: Int
-) unsafe extern("rae_ext_Sdl3_updatePixels")
+) mainThread unsafe extern("rae_ext_Sdl3_updatePixels")
 
 func updatePixels(pixels: view Buffer(Int), w: copy Int, h: copy Int) {
   unsafe {
@@ -96,7 +96,7 @@ func updatePixels(pixels: view Buffer(Int), w: copy Int, h: copy Int) {
 }
 
 # Draw the texture to the window and present this frame.
-func nativePresent() unsafe extern("rae_ext_Sdl3_present")
+func nativePresent() mainThread unsafe extern("rae_ext_Sdl3_present")
 
 func present() {
   unsafe {
@@ -105,7 +105,7 @@ func present() {
 }
 
 # Update the window title bar (status text — there is no drawText here).
-func nativeSetTitle(title: String) unsafe extern("rae_ext_Sdl3_setTitle")
+func nativeSetTitle(title: String) mainThread unsafe extern("rae_ext_Sdl3_setTitle")
 
 func setTitle(title: copy String) {
   unsafe {
@@ -114,7 +114,7 @@ func setTitle(title: copy String) {
 }
 
 # Tear down the texture, renderer, window, and SDL.
-func nativeCloseWindow() unsafe extern("rae_ext_Sdl3_closeWindow")
+func nativeCloseWindow() mainThread unsafe extern("rae_ext_Sdl3_closeWindow")
 
 func closeWindow() {
   unsafe {
@@ -129,7 +129,7 @@ func closeWindow() {
 
 # Current window (renderer output) size in pixels. The window is resizable;
 # poll these to detect a resize and re-render at the new size.
-func nativeWindowWidth() unsafe extern("rae_ext_Sdl3_windowWidth") ret Int
+func nativeWindowWidth() mainThread unsafe extern("rae_ext_Sdl3_windowWidth") ret Int
 
 func windowWidth() ret Int {
   unsafe {
@@ -137,7 +137,7 @@ func windowWidth() ret Int {
   }
 }
 
-func nativeWindowHeight() unsafe extern("rae_ext_Sdl3_windowHeight") ret Int
+func nativeWindowHeight() mainThread unsafe extern("rae_ext_Sdl3_windowHeight") ret Int
 
 func windowHeight() ret Int {
   unsafe {
@@ -146,7 +146,7 @@ func windowHeight() ret Int {
 }
 
 # Mouse position in window pixels (top-left origin).
-func nativeGetMouseX() unsafe extern("rae_ext_Sdl3_getMouseX") ret Int
+func nativeGetMouseX() mainThread unsafe extern("rae_ext_Sdl3_getMouseX") ret Int
 
 func getMouseX() ret Int {
   unsafe {
@@ -154,7 +154,7 @@ func getMouseX() ret Int {
   }
 }
 
-func nativeGetMouseY() unsafe extern("rae_ext_Sdl3_getMouseY") ret Int
+func nativeGetMouseY() mainThread unsafe extern("rae_ext_Sdl3_getMouseY") ret Int
 
 func getMouseY() ret Int {
   unsafe {
@@ -163,7 +163,9 @@ func getMouseY() ret Int {
 }
 
 # Mouse button held this frame: 0 = left, 1 = right, 2 = middle.
-func nativeIsMouseButtonDown(button: Int) unsafe extern("rae_ext_Sdl3_isMouseButtonDown") ret Bool
+func nativeIsMouseButtonDown(
+  button: Int
+) mainThread unsafe extern("rae_ext_Sdl3_isMouseButtonDown") ret Bool
 
 func isMouseButtonDown(button: copy Int) ret Bool {
   unsafe {
@@ -173,7 +175,7 @@ func isMouseButtonDown(button: copy Int) ret Bool {
 
 # Keyboard: down = held this frame (level); pressed = went down on this frame
 # (edge, false on auto-repeat). Poll once per frame after sdl3.shouldClose().
-func nativeIsKeyDown(key: Int) unsafe extern("rae_ext_Sdl3_isKeyDown") ret Bool
+func nativeIsKeyDown(key: Int) mainThread unsafe extern("rae_ext_Sdl3_isKeyDown") ret Bool
 
 func isKeyDown(key: copy Int) ret Bool {
   unsafe {
@@ -181,7 +183,7 @@ func isKeyDown(key: copy Int) ret Bool {
   }
 }
 
-func nativeIsKeyPressed(key: Int) unsafe extern("rae_ext_Sdl3_isKeyPressed") ret Bool
+func nativeIsKeyPressed(key: Int) mainThread unsafe extern("rae_ext_Sdl3_isKeyPressed") ret Bool
 
 func isKeyPressed(key: copy Int) ret Bool {
   unsafe {
@@ -214,7 +216,7 @@ func isKeyPressed(key: copy Int) ret Bool {
 func nativeOpenFileDialog(
   patterns: String
   defaultLocation: String
-) unsafe extern("rae_ext_Sdl3_openFileDialog")
+) mainThread unsafe extern("rae_ext_Sdl3_openFileDialog")
 
 func openFileDialog(filters: view List(String), defaultLocation: view String) {
   # The C takes one string: the filter entries joined with '|' (each entry is
@@ -235,7 +237,8 @@ func openFileDialog(filters: view List(String), defaultLocation: view String) {
 
 # The chosen path, exactly once; "" while nothing is waiting (not chosen yet,
 # or the panel was canceled). Call once per frame after requesting a dialog.
-func nativePollFileDialogResult() unsafe extern("rae_ext_Sdl3_pollFileDialogResult") ret String
+func nativePollFileDialogResult() mainThread unsafe extern("rae_ext_Sdl3_pollFileDialogResult") ret
+  String
 
 func pollFileDialogResult() ret String {
   unsafe {

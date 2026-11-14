@@ -1,0 +1,243 @@
+# The effect nodes, scalar against lib/Float4 (docs/audio-design.md §5.3): a
+# 200-band EQ (200 bands in a row over one stereo block) and 16 Freeverbs (16
+# reverbs over one block each), 256 frames a block, best of five passes of
+# 200 blocks; each pair checked to give the same bits. Then the package's own
+# nodes the same way through a graph (audio/GraphRender), whichever form the
+# package uses.
+import Math
+open audio/AudioGraph
+open audio/EffectStates
+open audio/GraphCompile
+open audio/GraphRender
+open audio/Sound
+
+const effectFrames: Int = 256
+
+const effectBlocks: Int = 200
+
+const bandCount: Int = 200
+
+const verbCount: Int = 16
+
+func fillNoise(samples: view Buffer(Float), count: view Int) {
+  var seed: Int = 12345
+  loop var i: Int = 0, i < count, ++i {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    setSampleAt(
+      samples: samples
+      index: i
+      value: (((seed / 65536) % 2001 - 1000) as Float) / 4000.0
+    )
+  }
+}
+
+func sameBits(first: view Buffer(Float), second: view Buffer(Float), count: view Int) ret Bool {
+  loop var i: Int = 0, i < count, ++i {
+    if sampleAt(samples: first, index: i) is not sampleAt(samples: second, index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# The microseconds for `effectBlocks` blocks of the EQ chain, and its output
+func runBands(useFloat4: view Bool, input: view Buffer(Float), output: view Buffer(Float)) ret Int {
+  var bands: List(Band) = {}
+  loop var i: Int = 0, i < bandCount, ++i {
+    bands.add(value: benchBand(index: i))
+  }
+  let scratch: Buffer(Float) = createSampleBuffer(count: 2 * effectFrames)
+  let started: Int = nowNs()
+  loop var block: Int = 0, block < effectBlocks, ++block {
+    loop var i: Int = 0, i < bandCount, ++i {
+      # band 0 reads the input; then they alternate between the two buffers,
+      # the last (an odd one) writing `output`
+      var from: Buffer(Float) = scratch
+      var into: Buffer(Float) = output
+      if i is 0 {
+        from = input
+        into = scratch
+      } else if i % 2 is 0 {
+        from = output
+        into = scratch
+      }
+      if let band: mod Band = bands.modAt(index: i) {
+        if useFloat4 {
+          bandFloat4(
+            band: band
+            input: from
+            output: into
+            frames: effectFrames
+            stride: effectFrames
+          )
+        } else {
+          bandScalar(
+            band: band
+            input: from
+            output: into
+            frames: effectFrames
+            stride: effectFrames
+          )
+        }
+      }
+    }
+  }
+  let took: Int = (nowNs() - started) / 1000
+  freeBufferBench(buffer: scratch)
+  ret took
+}
+
+func runVerbs(useFloat4: view Bool, input: view Buffer(Float), output: view Buffer(Float)) ret Int {
+  var verbs: List(Verb) = {}
+  loop var i: Int = 0, i < verbCount, ++i {
+    verbs.add(value: createVerb())
+  }
+  let started: Int = nowNs()
+  loop var block: Int = 0, block < effectBlocks, ++block {
+    loop let verb: Verb in verbs {
+      if useFloat4 {
+        verbFloat4(
+          verb: verb
+          input: input
+          output: output
+          frames: effectFrames
+          stride: effectFrames
+        )
+      } else {
+        verbScalar(
+          verb: verb
+          input: input
+          output: output
+          frames: effectFrames
+          stride: effectFrames
+        )
+      }
+    }
+  }
+  let took: Int = (nowNs() - started) / 1000
+  loop let verb: Verb in verbs {
+    freeVerb(verb: verb)
+  }
+  ret took
+}
+
+func freeBufferBench(buffer: view Buffer(Float)) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+}
+
+# The package's nodes through a graph: microseconds for `effectBlocks` blocks
+func runGraph(graph: view AudioGraph) ret Int {
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: 48000
+    maxFrames: effectFrames
+  )
+  var renderer: GraphRenderer = createGraphRenderer()
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  let sources: Buffer(Float) = createSampleBuffer(count: 2 * effectFrames)
+  fillNoise(samples: sources, count: 2 * effectFrames)
+  let left: Buffer(Float) = createSampleBuffer(count: effectFrames)
+  let right: Buffer(Float) = createSampleBuffer(count: effectFrames)
+  let started: Int = nowNs()
+  loop var block: Int = 0, block < effectBlocks, ++block {
+    renderer.renderGraph(
+      sources: sources
+      left: left
+      right: right
+      offset: 0
+      frames: effectFrames
+    )
+  }
+  let took: Int = (nowNs() - started) / 1000
+  renderer.freeGraphRenderer()
+  freeBufferBench(buffer: sources)
+  freeBufferBench(buffer: left)
+  freeBufferBench(buffer: right)
+  ret took
+}
+
+func bandsGraph() ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  var last: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  loop var i: Int = 0, i < bandCount, ++i {
+    let band: Int = graph.addNode(node: eqNode(
+      filter: FilterShape.peak
+      frequency: (100 + 40 * i) as Float
+      gainDecibels: 1.0
+      quality: 1.0
+    ))
+    graph.connect(from: last, to: band)
+    last = band
+  }
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: last, to: out)
+  ret graph
+}
+
+func verbsGraph() ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let sum: Int = graph.addNode(node: sumNode())
+  loop var i: Int = 0, i < verbCount, ++i {
+    let verb: Int = graph.addNode(node: reverbNode(settings: defaultEffectSettings()))
+    graph.connect(from: source, to: verb)
+    graph.connect(from: verb, to: sum)
+  }
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: sum, to: out)
+  ret graph
+}
+
+func effectBenchmark() {
+  let input: Buffer(Float) = createSampleBuffer(count: 2 * effectFrames)
+  fillNoise(samples: input, count: 2 * effectFrames)
+  let scalarOut: Buffer(Float) = createSampleBuffer(count: 2 * effectFrames)
+  let lanesOut: Buffer(Float) = createSampleBuffer(count: 2 * effectFrames)
+  var bandsScalar: Int = 999999999
+  var bandsLanes: Int = 999999999
+  var verbsScalar: Int = 999999999
+  var verbsLanes: Int = 999999999
+  loop var pass: Int = 0, pass < 6, ++pass {
+    let first: Int = runBands(useFloat4: false, input: input, output: scalarOut)
+    let second: Int = runBands(useFloat4: true, input: input, output: lanesOut)
+    let third: Int = runVerbs(useFloat4: false, input: input, output: scalarOut)
+    let fourth: Int = runVerbs(useFloat4: true, input: input, output: lanesOut)
+    if pass > 0 {
+      bandsScalar = min(a: bandsScalar, b: first)
+      bandsLanes = min(a: bandsLanes, b: second)
+      verbsScalar = min(a: verbsScalar, b: third)
+      verbsLanes = min(a: verbsLanes, b: fourth)
+    }
+  }
+  let bandsSame: Bool = runBands(useFloat4: false, input: input, output: scalarOut) > -1 and runBands(
+    useFloat4: true
+    input: input
+    output: lanesOut
+  ) > -1 and sameBits(first: scalarOut, second: lanesOut, count: 2 * effectFrames)
+  let verbsSame: Bool = runVerbs(useFloat4: false, input: input, output: scalarOut) > -1 and runVerbs(
+    useFloat4: true
+    input: input
+    output: lanesOut
+  ) > -1 and sameBits(first: scalarOut, second: lanesOut, count: 2 * effectFrames)
+  log(
+    "Rae effects: {bandCount}-band EQ {bandsScalar / effectBlocks} us a block scalar, {bandsLanes / effectBlocks} us with Float4 (same bits {bandsSame}); {verbCount} reverbs {verbsScalar / effectBlocks} us scalar, {verbsLanes / effectBlocks} us with Float4 (same bits {verbsSame})"
+  )
+  var graphBands: Int = 999999999
+  var graphVerbs: Int = 999999999
+  loop var pass: Int = 0, pass < 4, ++pass {
+    let bands: Int = runGraph(graph: bandsGraph())
+    let verbs: Int = runGraph(graph: verbsGraph())
+    if pass > 0 {
+      graphBands = min(a: graphBands, b: bands)
+      graphVerbs = min(a: graphVerbs, b: verbs)
+    }
+  }
+  log(
+    "Rae effect nodes (packages/audio, through a graph): {bandCount} EQ bands {graphBands / effectBlocks} us a block, {verbCount} reverbs {graphVerbs / effectBlocks} us a block"
+  )
+  freeBufferBench(buffer: input)
+  freeBufferBench(buffer: scalarOut)
+  freeBufferBench(buffer: lanesOut)
+}

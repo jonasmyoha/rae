@@ -13,6 +13,7 @@
 #ifndef RAE_OWNERSHIP_H
 #define RAE_OWNERSHIP_H
 
+#include <stddef.h>
 #include <stdbool.h>
 
 #include "ast.h"
@@ -73,5 +74,12 @@ bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type);
 
 /* True iff `type` names a non-generic user type with `func copy(this: view T) ret T`. */
 bool type_has_user_copy(CompilerContext* cctx, const AstTypeRef* type);
+
+/* When `type` owns heap (type_needs_cascade_drop), write into `out` where:
+ * "it is a `String`", or "its field `Message.text`: it is a `String`"
+ * (one level of field path per struct). False when it owns no heap. Used by
+ * the plain-value check of a real-time ring (SpscRing, c_call.c). */
+bool type_heap_part(CompilerContext* cctx, const AstModule* module, const AstTypeRef* type,
+                    char* out, size_t out_cap, int depth);
 
 #endif /* RAE_OWNERSHIP_H */

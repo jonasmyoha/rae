@@ -1,0 +1,233 @@
+# audio/AudioSchedule — commands at an exact sample time (docs/audio-design.md
+# §6.2). Each takes effect on its sample, whatever the block size: the audio
+# thread keeps it in its event list and splits the block there. A time already
+# past is applied at the next block and counted (`lateCommandCount`); schedule
+# from `audio.nextSafeSampleTime()` to never be late.
+#
+#     let at: Int = audio.nextSafeSampleTime()
+#     let voice: VoiceId = audio.playAt(sound: kick, ..., atSample: at)
+#     audio.setVoiceGainAt(voiceId: voice, gainDecibels: -6.0, atSample: at + 24000)
+#     audio.stopVoiceAt(voiceId: voice, atSample: at + 48000)
+#
+# The times are the engine's sample time (Int frames at its rate);
+# `toEngineSamples` turns a MediaTime in any timebase into one.
+open audio/Audio
+open audio/AudioButler
+open audio/AudioClock
+open audio/AudioMixer
+open audio/Midi
+open media/MediaTime
+
+func sendVoiceCommandAt(
+  this: view AudioEngine
+  kind: view AudioCommandKind
+  voiceId: view VoiceId
+  value: view Float
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.voiceId = mixerVoiceIdOf(streams: this.streams, voiceId: voiceId.value)
+  command.value = value
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Stop with the 5 ms fade starting at `atSample`
+func stopVoiceAt(this: view AudioEngine, voiceId: view VoiceId, atSample: view Int) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.stop
+    voiceId: voiceId
+    value: 0.0
+    atSample: atSample
+  )
+}
+
+func fadeOutAt(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  seconds: view Float
+  atSample: view Int
+) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.fadeOut
+    voiceId: voiceId
+    value: seconds
+    atSample: atSample
+  )
+}
+
+# The gain moves there over 5 ms from `atSample`
+func setVoiceGainAt(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  gainDecibels: view Float
+  atSample: view Int
+) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.setVoiceGain
+    voiceId: voiceId
+    value: decibelsToGain(decibels: gainDecibels)
+    atSample: atSample
+  )
+}
+
+func setVoicePanAt(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  pan: view Float
+  atSample: view Int
+) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.setVoicePan
+    voiceId: voiceId
+    value: pan
+    atSample: atSample
+  )
+}
+
+# The voice holds its place from `atSample` (a stream's paused state is the
+# program's: audio/AudioStreams' pauseVoice tracks it for the immediate one)
+func pauseVoiceAt(this: view AudioEngine, voiceId: view VoiceId, atSample: view Int) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.pauseVoice
+    voiceId: voiceId
+    value: 0.0
+    atSample: atSample
+  )
+}
+
+func resumeVoiceAt(this: view AudioEngine, voiceId: view VoiceId, atSample: view Int) {
+  this.sendVoiceCommandAt(
+    kind: AudioCommandKind.resumeVoice
+    voiceId: voiceId
+    value: 0.0
+    atSample: atSample
+  )
+}
+
+func setBusGainAt(
+  this: view AudioEngine
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setBusGain)
+  command.bus = busIndex(bus: bus)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# The bus's gain moves from `atSample` to `gainDecibels` in a straight line
+# (of the linear gain) over `frames` frames; at once when `frames` is 0 (a
+# timeline's automation)
+func rampBusGainAt(
+  this: view AudioEngine
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  frames: view Int
+  atSample: view Int
+) {
+  this.rampBusLinearGainAt(
+    bus: bus
+    gain: decibelsToGain(decibels: gainDecibels)
+    frames: frames
+    atSample: atSample
+  )
+}
+
+# rampBusGainAt with the gain as a factor (1 unchanged, 0 silent)
+func rampBusLinearGainAt(
+  this: view AudioEngine
+  bus: view AudioBusKind
+  gain: view Float
+  frames: view Int
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setBusGain)
+  command.bus = busIndex(bus: bus)
+  command.value = gain
+  command.frameCount = frames
+  if frames <= 0 {
+    command.frameCount = -1
+  }
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# A time in any timebase as the engine's sample time (rounded once)
+func toEngineSamples(this: view AudioEngine, time: view MediaTime) ret Int {
+  ret time.toSamples(sampleRate: this.sampleRate)
+}
+
+# The engine's sample time as a MediaTime (timebase 1/sampleRate)
+func engineSampleTime(this: view AudioEngine, frames: view Int) ret MediaTime {
+  ret sampleTime(frames: frames, sampleRate: this.sampleRate)
+}
+
+# The sample heard at host time `hostNs` (the monotonic clock, ns): how video
+# (docs/video-design.md §6.3) picks the frame to show at a display refresh
+func heardSampleTimeAt(this: view AudioEngine, hostNs: view Int) ret Int {
+  ret this.clock.sampleTimeAtHost(hostNs: hostNs)
+}
+
+# Commands that came after their sample time, so far (0 when scheduled from
+# nextSafeSampleTime); offline, where the audio thread's mixer is this one
+func lateCommandCount(this: view AudioEngine) ret Int {
+  ret this.mixer.lateCommands
+}
+
+# The synth (audio/AudioSynth): `note` (MIDI, 60 = middle C) at `velocity`
+# (0..1) from sample `atSample`, on `bus`
+func playNoteAt(
+  this: view AudioEngine
+  note: view Int
+  velocity: view Float
+  bus: view AudioBusKind
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOn)
+  command.voiceId = note
+  command.value = velocity
+  command.bus = busIndex(bus: bus)
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# The note's release starts at `atSample`
+func releaseNoteAt(this: view AudioEngine, note: view Int, atSample: view Int) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOff)
+  command.voiceId = note
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+func releaseAllNotesAt(this: view AudioEngine, atSample: view Int) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.allNotesOff)
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Play a MIDI message on the synth as soon as it can be heard (note on, note
+# off, all notes off on controller 123); false for any other message
+func playMidi(this: view AudioEngine, message: view MidiMessage, bus: view AudioBusKind) ret Bool {
+  let at: Int = this.nextSafeSampleTime()
+  if message.kind is MidiKind.noteOn {
+    this.playNoteAt(
+      note: message.data1
+      velocity: (message.data2 as Float) / 127.0
+      bus: bus
+      atSample: at
+    )
+    ret true
+  }
+  if message.kind is MidiKind.noteOff {
+    this.releaseNoteAt(note: message.data1, atSample: at)
+    ret true
+  }
+  if message.kind is MidiKind.controlChange and message.data1 is 123 {
+    this.releaseAllNotesAt(atSample: at)
+    ret true
+  }
+  ret false
+}

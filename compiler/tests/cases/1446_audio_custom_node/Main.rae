@@ -1,0 +1,460 @@
+# A program's own node kind (audio/CustomNodes, docs/audio-design.md §13 D5),
+# offline, with the audio-thread calls on a thread marked real-time
+# (RAE_REALTIME_CHECK=1 in config.env). Kind 1 here is a gain that also
+# delays its signal by a latency it reports (settings: gain in dB, latency in
+# frames), written in this file as the five cExport functions.
+#
+# 1. Null test: source -> kind 1 (-6 dB, 32 frames) -> out equals, bit for
+#    bit, source -> the built-in gain (-6 dB) -> a 32-frame latent delay ->
+#    out; the plan reports 32 frames of latency.
+# 2. Delay compensation: kind 1 and a plain 0 dB path into one sum equal the
+#    same mix of built-in nodes with the delay after the sum.
+# 3. A parameter event (its gain to -12 dB at sample 2000) lands on its
+#    sample (the output's frame 2032), the same in blocks of 1, 17 and 512.
+# 4. resetGraph calls its reset: its delay line is silent after it.
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/CustomNodes
+open audio/GraphCompile
+open audio/GraphRender
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 512
+
+const delayedGain: Int = 1
+
+# ---- the program's node kind: the five calls ----------------------------------------
+# Settings: [gain dB, latency frames]. State: [linear gain, write position,
+# then the left line and the right line, `latency` frames each]
+func nodeStateSize(
+  kind: copy Int
+  settings: copy Buffer(Float)
+  settingCount: copy Int
+  sampleRate: copy Int
+) cExport("rae_audio_node_state_size") ret Int {
+  if kind is not delayedGain or settingCount < 2 {
+    ret 0
+  }
+  ret 2 + 2 * (sampleAt(samples: settings, index: 1) as Int)
+}
+
+func nodePrepare(
+  kind: copy Int
+  state: copy Buffer(Float)
+  stateSize: copy Int
+  settings: copy Buffer(Float)
+  settingCount: copy Int
+  sampleRate: copy Int
+) cExport("rae_audio_node_prepare") {
+  if kind is not delayedGain or stateSize < 2 {
+    ret
+  }
+  setSampleAt(
+    samples: state
+    index: 0
+    value: decibelsToLinear(decibels: sampleAt(samples: settings, index: 0))
+  )
+  loop var i: Int = 1, i < stateSize, ++i {
+    setSampleAt(samples: state, index: i, value: 0.0)
+  }
+}
+
+func nodeLatency(
+  kind: copy Int
+  settings: copy Buffer(Float)
+  settingCount: copy Int
+  sampleRate: copy Int
+) cExport("rae_audio_node_latency") ret Int {
+  if kind is not delayedGain or settingCount < 2 {
+    ret 0
+  }
+  ret sampleAt(samples: settings, index: 1) as Int
+}
+
+func nodeProcess(
+  kind: copy Int
+  state: copy Buffer(Float)
+  stateSize: copy Int
+  scratch: copy Buffer(Float)
+  inputBase: copy Int
+  outputBase: copy Int
+  channelStride: copy Int
+  frames: copy Int
+  events: copy Buffer(Float)
+  eventCount: copy Int
+) realtime cExport("rae_audio_node_process") {
+  let block: CustomBlock = customBlock(
+    state: state
+    stateSize: stateSize
+    scratch: scratch
+    inputBase: inputBase
+    outputBase: outputBase
+    channelStride: channelStride
+    frames: frames
+    events: events
+    eventCount: eventCount
+  )
+  match kind {
+    case delayedGain {
+      processDelayedGain(block: block)
+    }
+    default {
+      loop var i: Int = 0, i < frames, ++i {
+        setBlockOutput(
+          block: block
+          channel: 0
+          frame: i
+          value: 0.0
+        )
+        setBlockOutput(
+          block: block
+          channel: 1
+          frame: i
+          value: 0.0
+        )
+      }
+    }
+  }
+}
+
+func nodeReset(
+  kind: copy Int
+  state: copy Buffer(Float)
+  stateSize: copy Int
+) realtime cExport("rae_audio_node_reset") {
+  loop var i: Int = 1, i < stateSize, ++i {
+    unsafe {
+      var target: Buffer(Float) = state
+      rae_ext_rae_buf_set(buf: target, index: i, value: 0.0)
+    }
+  }
+}
+
+# Parameter 0 is the gain in dB (at the event's offset: the block's start)
+func processDelayedGain(block: view CustomBlock) realtime {
+  loop var e: Int = 0, e < block.eventCount, ++e {
+    let event: CustomEvent = blockEvent(block: block, index: e)
+    if event.parameter is 0 {
+      setBlockStateAt(block: block, index: 0, value: decibelsToLinear(decibels: event.value))
+    }
+  }
+  let gain: Float = blockStateAt(block: block, index: 0)
+  let latency: Int = (block.stateSize - 2) / 2
+  var position: Int = blockStateAt(block: block, index: 1) as Int
+  loop var i: Int = 0, i < block.frames, ++i {
+    loop var channel: Int = 0, channel < 2, ++channel {
+      let scaled: Float = blockInput(block: block, channel: channel, frame: i) * gain
+      if latency is 0 {
+        setBlockOutput(
+          block: block
+          channel: channel
+          frame: i
+          value: scaled
+        )
+      } else {
+        let at: Int = 2 + channel * latency + position
+        setBlockOutput(
+          block: block
+          channel: channel
+          frame: i
+          value: blockStateAt(block: block, index: at)
+        )
+        setBlockStateAt(block: block, index: at, value: scaled)
+      }
+    }
+    if latency > 0 {
+      position = (position + 1) % latency
+    }
+  }
+  setBlockStateAt(block: block, index: 1, value: position as Float)
+}
+
+# ---- rendering ---------------------------------------------------------------------------
+func sourceValue(channel: view Int, frame: view Int) ret Float {
+  let frequency: Float64 = ((330 + 70 * channel) as Float64)
+  ret (Math.sin(x: (2.0 * 3.141592653589793 * frequency * (frame as Float64) / 48000.0) as Float) * 0.8)
+}
+
+type Rendered {
+  left: Buffer(Float)
+  right: Buffer(Float)
+  latencyFrames: Int
+}
+
+func renderPiece(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  output: view Rendered
+  offset: view Int
+  frames: view Int
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: output.left
+    right: output.right
+    offset: offset
+    frames: frames
+  )
+}
+
+func resetPiece(renderer: view GraphRenderer) realtime {
+  renderer.resetGraph()
+}
+
+# `total` frames in blocks of `blockFrames`; an event when `event.key` is not
+# -1; at frame `resetAt` (when not -1) a reset, and silence in after it
+func renderGraphOf(
+  graph: view AudioGraph
+  blockFrames: view Int
+  total: view Int
+  event: view GraphParameterEvent
+  resetAt: view Int
+) ret Rendered {
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  if compiled.error.length() > 0 {
+    log("compile error: {compiled.error}")
+  }
+  var renderer: GraphRenderer = createGraphRenderer()
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  if event.key is not -1 {
+    let sent: Bool = renderer.sendParameter(event: event)
+  }
+  let output: Rendered = {
+    left: createSampleBuffer(count: total)
+    right: createSampleBuffer(count: total)
+    latencyFrames: compiled.plan.latencyFrames
+  }
+  let sources: Buffer(Float) = createSampleBuffer(count: 2 * maxFrames)
+  var done: Int = 0
+  loop done < total {
+    var frames: Int = min(a: blockFrames, b: total - done)
+    if resetAt > done and resetAt < done + frames {
+      frames = resetAt - done
+    }
+    if resetAt is done {
+      markRealtimeThread()
+      resetPiece(renderer: renderer)
+      unmarkRealtimeThread()
+    }
+    loop var channel: Int = 0, channel < 2, ++channel {
+      loop var i: Int = 0, i < frames, ++i {
+        var value: Float = sourceValue(channel: channel, frame: done + i)
+        if resetAt >= 0 and done + i >= resetAt {
+          value = 0.0
+        }
+        setSampleAt(samples: sources, index: channel * maxFrames + i, value: value)
+      }
+    }
+    markRealtimeThread()
+    renderPiece(
+      renderer: renderer
+      sources: sources
+      output: output
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    done = done + frames
+  }
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+  ret output
+}
+
+func noEvent() ret GraphParameterEvent {
+  ret GraphParameterEvent { key: -1, kind: 0, value: 0.0, sampleTime: 0 }
+}
+
+func freeRendered(output: view Rendered) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: output.left)
+    rae_ext_rae_buf_free(buf: output.right)
+  }
+}
+
+func sameSamples(first: view Rendered, second: view Rendered, total: view Int) ret Bool {
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: first.left, index: i) is not sampleAt(samples: second.left, index: i) {
+      ret false
+    }
+    if sampleAt(samples: first.right, index: i) is not sampleAt(samples: second.right, index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func delayedGainNode(gainDecibels: view Float, latency: view Int) ret GraphNode {
+  let settings: List(Float) = { gainDecibels, latency as Float }
+  ret identified(node: customNode(kind: delayedGain, settings: settings), entityId: 5)
+}
+
+# source -> `middle` -> out
+func chain(middle: view List(GraphNode)) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  var last: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  loop let node: GraphNode in middle {
+    let added: Int = graph.addNode(node: node)
+    graph.connect(from: last, to: added)
+    last = added
+  }
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: last, to: out)
+  ret graph
+}
+
+func main() {
+  let total: Int = 4800
+  # 1
+  let programKind: Rendered = renderGraphOf(
+    graph: chain(middle: { delayedGainNode(gainDecibels: -6.0, latency: 32) })
+    blockFrames: 256
+    total: total
+    event: noEvent()
+    resetAt: -1
+  )
+  let builtIn: Rendered = renderGraphOf(
+    graph: chain(middle: { gainNode(decibels: -6.0), latentNode(frames: 32) })
+    blockFrames: 256
+    total: total
+    event: noEvent()
+    resetAt: -1
+  )
+  log(
+    "1. kind 1 (-6 dB, 32 frames) against the built-in gain and a latent delay: the same samples {sameSamples(
+      first: programKind
+      second: builtIn
+      total: total
+    )}; latency reported {programKind.latencyFrames} and {builtIn.latencyFrames}"
+  )
+  freeRendered(output: programKind)
+  freeRendered(output: builtIn)
+  # 2
+  var mixed: AudioGraph = createAudioGraph()
+  let mixedSource: Int = mixed.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let custom: Int = mixed.addNode(node: delayedGainNode(gainDecibels: -6.0, latency: 32))
+  let plain: Int = mixed.addNode(node: gainNode(decibels: 0.0))
+  let mixedSum: Int = mixed.addNode(node: sumNode())
+  let mixedOut: Int = mixed.addNode(node: outputNode())
+  mixed.connect(from: mixedSource, to: custom)
+  mixed.connect(from: mixedSource, to: plain)
+  mixed.connect(from: custom, to: mixedSum)
+  mixed.connect(from: plain, to: mixedSum)
+  mixed.connect(from: mixedSum, to: mixedOut)
+  var reference: AudioGraph = createAudioGraph()
+  let referenceSource: Int = reference.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let lower: Int = reference.addNode(node: gainNode(decibels: -6.0))
+  let level: Int = reference.addNode(node: gainNode(decibels: 0.0))
+  let referenceSum: Int = reference.addNode(node: sumNode())
+  let after: Int = reference.addNode(node: delayNode(frames: 32))
+  let referenceOut: Int = reference.addNode(node: outputNode())
+  reference.connect(from: referenceSource, to: lower)
+  reference.connect(from: referenceSource, to: level)
+  reference.connect(from: lower, to: referenceSum)
+  reference.connect(from: level, to: referenceSum)
+  reference.connect(from: referenceSum, to: after)
+  reference.connect(from: after, to: referenceOut)
+  let compensated: Rendered = renderGraphOf(
+    graph: mixed
+    blockFrames: 256
+    total: total
+    event: noEvent()
+    resetAt: -1
+  )
+  let expected: Rendered = renderGraphOf(
+    graph: reference
+    blockFrames: 256
+    total: total
+    event: noEvent()
+    resetAt: -1
+  )
+  log(
+    "2. kind 1 and a plain path into one sum: the plain path delayed 32 frames to match, the same samples {sameSamples(
+      first: compensated
+      second: expected
+      total: total
+    )}"
+  )
+  freeRendered(output: compensated)
+  freeRendered(output: expected)
+  # 3
+  let change: GraphParameterEvent = {
+    key: 5
+    kind: customParameterBase + 0
+    value: -12.0
+    sampleTime: 2000
+  }
+  let graph: AudioGraph = chain(middle: { delayedGainNode(gainDecibels: -6.0, latency: 32) })
+  let ones: Rendered = renderGraphOf(
+    graph: graph
+    blockFrames: 1
+    total: total
+    event: change
+    resetAt: -1
+  )
+  let seventeens: Rendered = renderGraphOf(
+    graph: graph
+    blockFrames: 17
+    total: total
+    event: change
+    resetAt: -1
+  )
+  let large: Rendered = renderGraphOf(
+    graph: graph
+    blockFrames: 512
+    total: total
+    event: change
+    resetAt: -1
+  )
+  let before: Bool = sampleAt(samples: large.left, index: 2031) is sourceValue(
+    channel: 0
+    frame: 1999
+  ) * decibelsToLinear(decibels: -6.0)
+  let landed: Bool = sampleAt(samples: large.left, index: 2032) is sourceValue(
+    channel: 0
+    frame: 2000
+  ) * decibelsToLinear(decibels: -12.0)
+  log(
+    "3. its gain to -12 dB at sample 2000: -6 dB on output frame 2031 {before}, -12 dB from frame 2032 {landed}; blocks of 1, 17 and 512 the same {sameSamples(
+      first: ones
+      second: large
+      total: total
+    ) and sameSamples(first: seventeens, second: large, total: total)}"
+  )
+  freeRendered(output: ones)
+  freeRendered(output: seventeens)
+  freeRendered(output: large)
+  # 4
+  let reset: Rendered = renderGraphOf(
+    graph: graph
+    blockFrames: 256
+    total: 2000
+    event: noEvent()
+    resetAt: 1000
+  )
+  var silent: Bool = true
+  loop var i: Int = 1000, i < 1040, ++i {
+    if sampleAt(samples: reset.left, index: i) is not 0.0 or sampleAt(
+      samples: reset.right
+      index: i
+    ) is not 0.0 {
+      silent = false
+    }
+  }
+  log(
+    "4. resetGraph at frame 1000 (silence in after it): its delay line is cleared, the next 32 frames out are silent {silent}; it sounded before {sampleAt(
+      samples: reset.left
+      index: 999
+    ) is not 0.0}"
+  )
+  freeRendered(output: reset)
+}

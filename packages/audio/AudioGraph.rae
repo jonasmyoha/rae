@@ -1,0 +1,877 @@
+# audio/AudioGraph — the node graph and its render plan (docs/audio-design.md
+# §5.2, §5.3). The graph is edited on the main thread: nodes (a kind and its
+# parameters) and edges. compileGraph turns it into a RenderPlan:
+#
+#   1. sort the nodes so every node runs after its inputs; a cycle is refused
+#      with a message naming its nodes;
+#   2. give each node's output a scratch buffer from a pool, reusing a buffer
+#      once its last reader has run (liveness), so a 200-node session needs
+#      a few buffers, not 200;
+#   5. prepare each node: its state in the table of its kind, delay lines
+#      allocated (the only allocation; the audio thread never allocates).
+#
+# Step 3, delay compensation, and the plan swap that keeps node state are
+# audio/GraphCompile's; step 4, parallel branches, is a later step. The node contract is
+# CLAP-shaped: prepare here, process and reset on
+# the audio thread (audio/GraphRender), latencyFrames and tailFrames read by
+# the compiler. Rae has no function values, so each kind's state lives in one
+# dense typed table and the renderer dispatches with a `match` on the kind.
+#
+# A RenderPlan is made only of Buffer handles and numbers, so it crosses to
+# the audio thread on a SpscRing in one command and comes back on the reclaim
+# ring to be freed here (freeRenderPlan).
+#
+#     var graph: AudioGraph = createAudioGraph()
+#     let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+#     let gain: Int = graph.addNode(node: gainNode(decibels: -6.0))
+#     let out: Int = graph.addNode(node: outputNode())
+#     graph.connect(from: source, to: gain)
+#     graph.connect(from: gain, to: out)
+#     let compiled: CompiledPlan = compileGraph(graph: graph, sampleRate: 48000, maxFrames: 512)
+import Math
+import String
+open audio/CustomNodes
+open audio/EffectStates
+open audio/Sound
+
+enum NodeKind {
+  # adapters: a source the engine fills before the graph runs (the voice set's
+  # output, a stream voice, the input), read from a slot of the sources pool
+  voices
+  stream
+  input
+  gain
+  # equal-power pan of both channels
+  pan
+  sum
+  # a gain on a send's path; preFader says where the ECS layer takes its
+  # input from (before or after the track's fader)
+  send
+  delay
+  # passes its input on and keeps the peak of each channel
+  meter
+  # a peak limiter with no look-ahead: the output never passes the ceiling
+  limiter
+  # the graph's one output
+  output
+  # a bus's fader for the simple API (audio/Audio): its gain moves over a set
+  # number of frames (the mixer's ramp: the current value is used, then
+  # advanced), and when it is the in-mix duck's target (§6.4) the gain is
+  # also scaled by the duck level, which falls while a voice on the duck's
+  # source bus sounds (the sources' activity marks) and comes back after
+  duck
+  # an EQ band (audio/EffectStates): a cookbook biquad, its frequency, gain
+  # and Q moved over 5 ms by parameter events
+  eq
+  # a compressor: a soft knee, attack and release; a second input, when it has
+  # one, is the sidechain its level is measured on (a duck by another bus)
+  compressor
+  # Freeverb (Jezar's public domain structure)
+  reverb
+  # a program's own kind (audio/CustomNodes): its customKind number, its
+  # settings, its five cExport functions
+  custom
+}
+
+type GraphNode {
+  kind: NodeKind
+  decibels: Float
+  pan: Float
+  delayFrames: Int
+  ceiling: Float
+  releaseSeconds: Float
+  # a source's slot in the sources pool; -1 is silence
+  sourceSlot: Int
+  preFader: Bool
+  # the entity this node stands for (a track's fader, a bus's reverb), -1 for
+  # none: a plan swap carries the running state of a node to the node of the
+  # same entity and kind in the next plan (§5.2)
+  entityId: Int
+  # a delay that is a node's processing latency (a look-ahead limiter, a
+  # plugin), not an echo: the compiler lines up the other paths with it
+  reportsLatency: Bool
+  # an eq, compressor or reverb node's settings (audio/EffectStates)
+  effect: EffectSettings
+  # a custom node's kind number and settings (the program's), and its latency
+  # (asked of the program when the graph compiles)
+  customKind: Int
+  customSettings: List(Float)
+  customLatency: Int
+}
+
+type GraphEdge {
+  from: Int
+  to: Int
+}
+
+type AudioGraph {
+  nodes: List(GraphNode)
+  edges: List(GraphEdge)
+  # compiled for a renderer with helper threads (audio/GraphTeam): its plan
+  # runs in stages of independent chains, each chain with buffers of its own
+  forTeam: Bool
+}
+
+# ---- the node states (one dense table per kind) ------------------------------
+type GainState {
+  # linear gains: where it is going, where it is, and the per-frame step of the
+  # 5 ms ramp
+  target: Float
+  current: Float
+  step: Float
+  rampFrames: Int
+}
+
+type PanState {
+  left: Float
+  right: Float
+}
+
+type DelayState {
+  frames: Int
+  writeIndex: Int
+  # 2 * frames samples: the left line, then the right
+  line: Buffer(Float)
+}
+
+type MeterState {
+  peakLeft: Float
+  peakRight: Float
+}
+
+type LimiterState {
+  ceiling: Float
+  gain: Float
+  # per frame, the share of the way back to 1 the gain recovers
+  release: Float
+}
+
+type SourceState {
+  slot: Int
+}
+
+type DuckState {
+  current: Float
+  target: Float
+  step: Float
+  framesLeft: Int
+  # this bus is the duck's target
+  ducked: Bool
+  level: Float
+  depth: Float
+  attackStep: Float
+  releaseStep: Float
+}
+
+# What the audio thread runs. Node i (in run order) is kinds[i], with its state
+# at stateIndex[i] of its kind's table, its output in scratch buffer
+# outputBuffer[i], and its inputs' buffers at inputs[inputStart[i] ..
+# inputStart[i] + inputCount[i]).
+type RenderPlan {
+  # 1, 2, ... per compile against the previous plan; previousSerial is the plan
+  # this one continues (its node states are carried over only from it)
+  serial: Int
+  previousSerial: Int
+  # frames from the graph's sources to its output (delay compensation)
+  latencyFrames: Int
+  nodeCount: Int
+  maxFrames: Int
+  sampleRate: Int
+  bufferCount: Int
+  # the buffer the output node writes
+  outputBuffer: Int
+  kinds: Buffer(NodeKind)
+  stateIndex: Buffer(Int)
+  outputBuffers: Buffer(Int)
+  inputStart: Buffer(Int)
+  inputCount: Buffer(Int)
+  inputs: Buffer(Int)
+  # each node's index in the graph, to find it again (setGainTarget, meters)
+  graphIndex: Buffer(Int)
+  # each node's index in the previous plan whose state it continues, or -1
+  carryFrom: Buffer(Int)
+  # each node's entity (-1 for none), read when the next plan is compiled
+  entityIds: Buffer(Int)
+  # bufferCount * 2 channels * maxFrames samples
+  scratch: Buffer(Float)
+  gains: Buffer(GainState)
+  pans: Buffer(PanState)
+  delays: Buffer(DelayState)
+  delayCount: Int
+  meters: Buffer(MeterState)
+  limiters: Buffer(LimiterState)
+  sources: Buffer(SourceState)
+  ducks: Buffer(DuckState)
+  filters: Buffer(FilterState)
+  compressors: Buffer(CompressorState)
+  reverbs: Buffer(ReverbState)
+  reverbCount: Int
+  customs: Buffer(CustomState)
+  customCount: Int
+  # the custom nodes' events of the block being rendered: node, offset,
+  # parameter, value (four Floats each), and how many (one Int)
+  customEvents: Buffer(Float)
+  customEventCount: Buffer(Int)
+  # one node's events handed to its process call (three Floats each)
+  customEventScratch: Buffer(Float)
+  # a plan for a team (AudioGraph.forTeam): its nodes in run order are
+  # chains (chainStarts: chainCount + 1 positions), and the chains in stages
+  # (stageStarts: stageCount + 1 chain indices); the chains of one stage share
+  # no buffer and can run at once. stageCount 0: one serial run.
+  stageCount: Int
+  chainStarts: Buffer(Int)
+  stageStarts: Buffer(Int)
+}
+
+type CompiledPlan {
+  plan: RenderPlan
+  # "" when it compiled
+  error: String
+}
+
+# ---- building a graph ---------------------------------------------------------
+func createAudioGraph() ret AudioGraph {
+  ret AudioGraph { nodes: {}, edges: {}, forTeam: false }
+}
+
+func plainNode(kind: view NodeKind) ret GraphNode {
+  ret GraphNode {
+    kind: kind
+    decibels: 0.0
+    pan: 0.0
+    delayFrames: 0
+    ceiling: 1.0
+    releaseSeconds: 0.05
+    sourceSlot: 0
+    preFader: false
+    entityId: -1
+    reportsLatency: false
+    effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
+    customLatency: 0
+  }
+}
+
+func sourceNode(kind: view NodeKind, slot: view Int) ret GraphNode {
+  var node: GraphNode = plainNode(kind: kind)
+  node.sourceSlot = slot
+  ret node
+}
+
+func gainNode(decibels: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.gain)
+  node.decibels = decibels
+  ret node
+}
+
+# -1 is all left, 0 the middle, 1 all right
+func panNode(pan: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.pan)
+  node.pan = pan
+  ret node
+}
+
+func sumNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.sum)
+}
+
+func sendNode(decibels: view Float, preFader: view Bool) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.send)
+  node.decibels = decibels
+  node.preFader = preFader
+  ret node
+}
+
+func delayNode(frames: view Int) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.delay)
+  node.delayFrames = frames
+  ret node
+}
+
+func meterNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.meter)
+}
+
+func limiterNode(ceilingDecibels: view Float, releaseSeconds: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.limiter)
+  node.ceiling = decibelsToLinear(decibels: ceilingDecibels)
+  node.releaseSeconds = releaseSeconds
+  ret node
+}
+
+# A delay that stands for processing latency (what a look-ahead plugin
+# reports): the compiler delays the other paths into the same node by as much
+func latentNode(frames: view Int) ret GraphNode {
+  var node: GraphNode = delayNode(frames: frames)
+  node.reportsLatency = true
+  ret node
+}
+
+# `node`, standing for entity `entityId`
+func identified(node: view GraphNode, entityId: view Int) ret GraphNode {
+  var named: GraphNode = node
+  named.entityId = entityId
+  ret named
+}
+
+# A bus fader with the in-mix duck (audio/Audio's fixed graph)
+func duckNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.duck)
+}
+
+# An EQ band of shape `filter` at `frequency` Hz, `gainDecibels` (the peak and
+# the shelves) and Q `quality`
+func eqNode(
+  filter: view FilterShape
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.eq)
+  node.effect.filter = filter
+  node.effect.frequency = frequency
+  node.effect.quality = quality
+  node.decibels = gainDecibels
+  ret node
+}
+
+# A compressor: above `thresholdDecibels` the level grows 1 / `ratio` as fast,
+# with a soft knee `kneeDecibels` wide; the reduction moves with the attack
+# and release times; `makeupDecibels` after it
+func compressorNode(settings: view EffectSettings, makeupDecibels: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.compressor)
+  node.effect = settings
+  node.decibels = makeupDecibels
+  ret node
+}
+
+# Freeverb with the settings' roomSize, damping, wet, dry and width (0..1)
+func reverbNode(settings: view EffectSettings) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.reverb)
+  node.effect = settings
+  ret node
+}
+
+# A node of the program's own kind `kind` (audio/CustomNodes), with its
+# settings
+func customNode(kind: view Int, settings: view List(Float)) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.custom)
+  node.customKind = kind
+  node.customSettings = settings
+  ret node
+}
+
+func outputNode() ret GraphNode {
+  ret plainNode(kind: NodeKind.output)
+}
+
+# The node's index in the graph
+func addNode(this: mod AudioGraph, node: view GraphNode) ret Int {
+  this.nodes.add(value: node)
+  ret this.nodes.length() - 1
+}
+
+func connect(this: mod AudioGraph, from: view Int, to: view Int) {
+  this.edges.add(value: GraphEdge { from: from, to: to })
+}
+
+func decibelsToLinear(decibels: view Float) ret Float {
+  ret pow(base: 10.0, exp: decibels / 20.0)
+}
+
+# Frames a node delays its input by (read by the delay compensation, a later
+# step) and frames it keeps sounding after its input stops
+func latencyFrames(node: view GraphNode) ret Int {
+  if node.kind is NodeKind.delay and node.reportsLatency {
+    ret node.delayFrames
+  }
+  if node.kind is NodeKind.custom {
+    ret node.customLatency
+  }
+  ret 0
+}
+
+# A reverb's tail: four seconds at 48 kHz (Freeverb's largest room falls
+# 60 dB in less)
+const reverbTailFrames: Int = 192000
+
+func tailFrames(node: view GraphNode) ret Int {
+  if node.kind is NodeKind.delay {
+    ret node.delayFrames
+  }
+  if node.kind is NodeKind.reverb {
+    ret reverbTailFrames
+  }
+  ret 0
+}
+
+func isSourceKind(kind: view NodeKind) ret Bool {
+  ret kind is NodeKind.voices or kind is NodeKind.stream or kind is NodeKind.input
+}
+
+# ---- preparing (§5.2 step 5: the only allocation) ----------------------------
+func intBuffer(count: view Int) ret Buffer(Int) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: max(a: 1, b: count), elemSize: sizeof(Int))
+  }
+}
+
+func setIntAt(buffer: view Buffer(Int), index: view Int, value: view Int) {
+  unsafe {
+    var target: Buffer(Int) = buffer
+    rae_ext_rae_buf_set(buf: target, index: index, value: value)
+  }
+}
+
+func countKind(graph: view AudioGraph, kind: view NodeKind) ret Int {
+  var count: Int = 0
+  loop let node: GraphNode in graph.nodes {
+    if node.kind is kind {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func gainStateFor(node: view GraphNode, sampleRate: view Int) ret GainState {
+  let linear: Float = decibelsToLinear(decibels: node.decibels)
+  ret GainState {
+    target: linear
+    current: linear
+    step: 0.0
+    rampFrames: max(a: 1, b: sampleRate * 5 / 1000)
+  }
+}
+
+func emptyRenderPlan() ret RenderPlan {
+  unsafe {
+    ret RenderPlan {
+      serial: 0
+      previousSerial: 0
+      latencyFrames: 0
+      nodeCount: 0
+      maxFrames: 0
+      sampleRate: 0
+      bufferCount: 0
+      outputBuffer: 0
+      kinds: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(NodeKind))
+      stateIndex: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      outputBuffers: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputStart: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputCount: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      inputs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      graphIndex: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      carryFrom: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      entityIds: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      scratch: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      gains: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(GainState))
+      pans: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(PanState))
+      delays: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(DelayState))
+      delayCount: 0
+      meters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(MeterState))
+      limiters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(LimiterState))
+      sources: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(SourceState))
+      ducks: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(DuckState))
+      filters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(FilterState))
+      compressors: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(CompressorState))
+      reverbs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(ReverbState))
+      reverbCount: 0
+      customs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(CustomState))
+      customCount: 0
+      customEvents: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      customEventCount: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      customEventScratch: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      stageCount: 0
+      chainStarts: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      stageStarts: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+    }
+  }
+}
+
+func prepareRenderPlan(
+  graph: view AudioGraph
+  order: view List(Int)
+  bufferOf: view List(Int)
+  bufferCount: view Int
+  sampleRate: view Int
+  maxFrames: view Int
+  carryFrom: view List(Int)
+  previousSerial: view Int
+  latencyFrames: view Int
+  chainStarts: view List(Int)
+  stageStarts: view List(Int)
+) ret RenderPlan {
+  let count: Int = graph.nodes.length()
+  let gainCount: Int = countKind(graph: graph, kind: NodeKind.gain) + countKind(
+    graph: graph
+    kind: NodeKind.send
+  )
+  let delayCount: Int = countKind(graph: graph, kind: NodeKind.delay)
+  let sourceCount: Int = countKind(graph: graph, kind: NodeKind.voices) + countKind(
+    graph: graph
+    kind: NodeKind.stream
+  ) + countKind(graph: graph, kind: NodeKind.input)
+  let panCount: Int = countKind(graph: graph, kind: NodeKind.pan)
+  let meterCount: Int = countKind(graph: graph, kind: NodeKind.meter)
+  let limiterCount: Int = countKind(graph: graph, kind: NodeKind.limiter)
+  let duckCount: Int = countKind(graph: graph, kind: NodeKind.duck)
+  let filterCount: Int = countKind(graph: graph, kind: NodeKind.eq)
+  let compressorCount: Int = countKind(graph: graph, kind: NodeKind.compressor)
+  let reverbCount: Int = countKind(graph: graph, kind: NodeKind.reverb)
+  let customCount: Int = countKind(graph: graph, kind: NodeKind.custom)
+  let stateIndex: Buffer(Int) = intBuffer(count: count)
+  let outputBuffers: Buffer(Int) = intBuffer(count: count)
+  let inputStart: Buffer(Int) = intBuffer(count: count)
+  let inputCount: Buffer(Int) = intBuffer(count: count)
+  let inputs: Buffer(Int) = intBuffer(count: graph.edges.length())
+  let graphIndex: Buffer(Int) = intBuffer(count: count)
+  let carry: Buffer(Int) = intBuffer(count: count)
+  let entityIds: Buffer(Int) = intBuffer(count: count)
+  var plan: RenderPlan = emptyRenderPlan()
+  unsafe {
+    # the empty plan's zero-size buffers are null: nothing to free
+    plan.kinds = rae_ext_rae_buf_alloc(size: max(a: 1, b: count), elemSize: sizeof(NodeKind))
+    plan.gains = rae_ext_rae_buf_alloc(size: max(a: 1, b: gainCount), elemSize: sizeof(GainState))
+    plan.pans = rae_ext_rae_buf_alloc(size: max(a: 1, b: panCount), elemSize: sizeof(PanState))
+    plan.delays = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: delayCount)
+      elemSize: sizeof(DelayState)
+    )
+    plan.meters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: meterCount)
+      elemSize: sizeof(MeterState)
+    )
+    plan.limiters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: limiterCount)
+      elemSize: sizeof(LimiterState)
+    )
+    plan.sources = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: sourceCount)
+      elemSize: sizeof(SourceState)
+    )
+    plan.ducks = rae_ext_rae_buf_alloc(size: max(a: 1, b: duckCount), elemSize: sizeof(DuckState))
+    plan.filters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: filterCount)
+      elemSize: sizeof(FilterState)
+    )
+    plan.compressors = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: compressorCount)
+      elemSize: sizeof(CompressorState)
+    )
+    plan.reverbs = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: reverbCount)
+      elemSize: sizeof(ReverbState)
+    )
+    plan.customs = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: customCount)
+      elemSize: sizeof(CustomState)
+    )
+  }
+  plan.customEvents = createSampleBuffer(count: 4 * customEventSlots)
+  plan.customEventCount = intBuffer(count: 1)
+  setIntAt(buffer: plan.customEventCount, index: 0, value: 0)
+  plan.customEventScratch = createSampleBuffer(count: 3 * customEventSlots)
+  var gainUsed: Int = 0
+  var panUsed: Int = 0
+  var delayUsed: Int = 0
+  var meterUsed: Int = 0
+  var limiterUsed: Int = 0
+  var sourceUsed: Int = 0
+  var duckUsed: Int = 0
+  var filterUsed: Int = 0
+  var compressorUsed: Int = 0
+  var reverbUsed: Int = 0
+  var customUsed: Int = 0
+  var inputUsed: Int = 0
+  var outputBuffer: Int = 0
+  loop var k: Int = 0, k < count, ++k {
+    let index: Int = order.copyAtFallback(index: k, fallback: 0)
+    let node: GraphNode = graph.nodes.copyAtFallback(index: index, fallback: outputNode())
+    var state: Int = 0
+    let kind: NodeKind = node.kind
+    unsafe {
+      if kind is NodeKind.gain or kind is NodeKind.send {
+        state = gainUsed
+        rae_ext_rae_buf_set(
+          buf: plan.gains
+          index: gainUsed
+          value: gainStateFor(node: node, sampleRate: sampleRate)
+        )
+        gainUsed = gainUsed + 1
+      } else if kind is NodeKind.pan {
+        state = panUsed
+        let angle: Float = (min(a: 1.0, b: max(a: -1.0, b: node.pan)) + 1.0) * 0.7853981633974483
+        rae_ext_rae_buf_set(
+          buf: plan.pans
+          index: panUsed
+          value: PanState { left: cos(x: angle), right: sin(x: angle) }
+        )
+        panUsed = panUsed + 1
+      } else if kind is NodeKind.delay {
+        state = delayUsed
+        let frames: Int = max(a: 0, b: node.delayFrames)
+        let line: Buffer(Float) = createSampleBuffer(count: 2 * max(a: 1, b: frames))
+        rae_ext_rae_buf_set(
+          buf: plan.delays
+          index: delayUsed
+          value: DelayState { frames: frames, writeIndex: 0, line: line }
+        )
+        delayUsed = delayUsed + 1
+      } else if kind is NodeKind.meter {
+        state = meterUsed
+        rae_ext_rae_buf_set(
+          buf: plan.meters
+          index: meterUsed
+          value: MeterState { peakLeft: 0.0, peakRight: 0.0 }
+        )
+        meterUsed = meterUsed + 1
+      } else if kind is NodeKind.limiter {
+        state = limiterUsed
+        let releaseFrames: Float = max(a: 1.0, b: node.releaseSeconds * (sampleRate as Float))
+        rae_ext_rae_buf_set(
+          buf: plan.limiters
+          index: limiterUsed
+          value: LimiterState { ceiling: node.ceiling, gain: 1.0, release: 1.0 / releaseFrames }
+        )
+        limiterUsed = limiterUsed + 1
+      } else if isSourceKind(kind: kind) {
+        state = sourceUsed
+        rae_ext_rae_buf_set(
+          buf: plan.sources
+          index: sourceUsed
+          value: SourceState { slot: node.sourceSlot }
+        )
+        sourceUsed = sourceUsed + 1
+      } else if kind is NodeKind.duck {
+        state = duckUsed
+        let gain: Float = decibelsToLinear(decibels: node.decibels)
+        rae_ext_rae_buf_set(
+          buf: plan.ducks
+          index: duckUsed
+          value: DuckState {
+            current: gain
+            target: gain
+            step: 0.0
+            framesLeft: 0
+            ducked: false
+            level: 1.0
+            depth: 1.0
+            attackStep: 1.0
+            releaseStep: 1.0
+          }
+        )
+        duckUsed = duckUsed + 1
+      } else if kind is NodeKind.eq {
+        state = filterUsed
+        rae_ext_rae_buf_set(
+          buf: plan.filters
+          index: filterUsed
+          value: createFilterState(
+            settings: node.effect
+            gainDecibels: node.decibels
+            sampleRate: sampleRate
+          )
+        )
+        filterUsed = filterUsed + 1
+      } else if kind is NodeKind.compressor {
+        state = compressorUsed
+        rae_ext_rae_buf_set(
+          buf: plan.compressors
+          index: compressorUsed
+          value: createCompressorState(
+            settings: node.effect
+            makeupDecibels: node.decibels
+            sampleRate: sampleRate
+          )
+        )
+        compressorUsed = compressorUsed + 1
+      } else if kind is NodeKind.reverb {
+        state = reverbUsed
+        rae_ext_rae_buf_set(
+          buf: plan.reverbs
+          index: reverbUsed
+          value: createReverbState(settings: node.effect, sampleRate: sampleRate)
+        )
+        reverbUsed = reverbUsed + 1
+      } else if kind is NodeKind.custom {
+        state = customUsed
+        rae_ext_rae_buf_set(
+          buf: plan.customs
+          index: customUsed
+          value: createCustomState(
+            kind: node.customKind
+            settings: node.customSettings
+            sampleRate: sampleRate
+          )
+        )
+        customUsed = customUsed + 1
+      } else if kind is NodeKind.output {
+        outputBuffer = bufferOf.copyAtFallback(index: index, fallback: 0)
+      }
+      rae_ext_rae_buf_set(buf: plan.kinds, index: k, value: kind)
+    }
+    setIntAt(buffer: stateIndex, index: k, value: state)
+    setIntAt(
+      buffer: outputBuffers
+      index: k
+      value: bufferOf.copyAtFallback(index: index, fallback: 0)
+    )
+    setIntAt(buffer: graphIndex, index: k, value: index)
+    setIntAt(buffer: carry, index: k, value: carryFrom.copyAtFallback(index: index, fallback: -1))
+    setIntAt(buffer: entityIds, index: k, value: node.entityId)
+    setIntAt(buffer: inputStart, index: k, value: inputUsed)
+    var nodeInputs: Int = 0
+    loop let edge: GraphEdge in graph.edges {
+      if edge.to is index {
+        setIntAt(
+          buffer: inputs
+          index: inputUsed
+          value: bufferOf.copyAtFallback(index: edge.from, fallback: 0)
+        )
+        inputUsed = inputUsed + 1
+        nodeInputs = nodeInputs + 1
+      }
+    }
+    setIntAt(buffer: inputCount, index: k, value: nodeInputs)
+  }
+  plan.nodeCount = count
+  plan.maxFrames = maxFrames
+  plan.sampleRate = sampleRate
+  plan.bufferCount = bufferCount
+  plan.outputBuffer = outputBuffer
+  plan.stateIndex = stateIndex
+  plan.outputBuffers = outputBuffers
+  plan.inputStart = inputStart
+  plan.inputCount = inputCount
+  plan.inputs = inputs
+  plan.graphIndex = graphIndex
+  plan.carryFrom = carry
+  plan.entityIds = entityIds
+  plan.serial = previousSerial + 1
+  plan.previousSerial = previousSerial
+  plan.latencyFrames = latencyFrames
+  plan.scratch = createSampleBuffer(count: max(a: 1, b: bufferCount) * 2 * maxFrames)
+  plan.delayCount = delayCount
+  plan.reverbCount = reverbCount
+  plan.customCount = customCount
+  plan.stageCount = max(a: 0, b: stageStarts.length() - 1)
+  plan.chainStarts = intBuffer(count: chainStarts.length())
+  loop var i: Int = 0, i < chainStarts.length(), ++i {
+    setIntAt(
+      buffer: plan.chainStarts
+      index: i
+      value: chainStarts.copyAtFallback(index: i, fallback: 0)
+    )
+  }
+  plan.stageStarts = intBuffer(count: stageStarts.length())
+  loop var i: Int = 0, i < stageStarts.length(), ++i {
+    setIntAt(
+      buffer: plan.stageStarts
+      index: i
+      value: stageStarts.copyAtFallback(index: i, fallback: 0)
+    )
+  }
+  ret plan
+}
+
+# A plan's node `node` (in run order): its entity, and its kind. The main
+# thread reads these of the plan the audio thread runs: they never change.
+func planEntityAt(plan: view RenderPlan, node: view Int) ret Int {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.entityIds, index: node)
+  }
+}
+
+func planKindAt(plan: view RenderPlan, node: view Int) ret NodeKind {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+  }
+}
+
+# On the main thread, for a plan that came back on the reclaim ring (or was
+# never sent)
+func freeRenderPlan(plan: view RenderPlan) {
+  unsafe {
+    loop var i: Int = 0, i < plan.delayCount, ++i {
+      let delay: DelayState = rae_ext_rae_buf_get(buf: plan.delays, index: i)
+      rae_ext_rae_buf_free(buf: delay.line)
+    }
+    loop var i: Int = 0, i < plan.reverbCount, ++i {
+      let reverb: ReverbState = rae_ext_rae_buf_get(buf: plan.reverbs, index: i)
+      freeReverbState(state: reverb)
+    }
+    loop var i: Int = 0, i < plan.customCount, ++i {
+      let custom: CustomState = rae_ext_rae_buf_get(buf: plan.customs, index: i)
+      rae_ext_rae_buf_free(buf: custom.state)
+    }
+    rae_ext_rae_buf_free(buf: plan.kinds)
+    rae_ext_rae_buf_free(buf: plan.stateIndex)
+    rae_ext_rae_buf_free(buf: plan.outputBuffers)
+    rae_ext_rae_buf_free(buf: plan.inputStart)
+    rae_ext_rae_buf_free(buf: plan.inputCount)
+    rae_ext_rae_buf_free(buf: plan.inputs)
+    rae_ext_rae_buf_free(buf: plan.graphIndex)
+    rae_ext_rae_buf_free(buf: plan.carryFrom)
+    rae_ext_rae_buf_free(buf: plan.entityIds)
+    rae_ext_rae_buf_free(buf: plan.scratch)
+    rae_ext_rae_buf_free(buf: plan.gains)
+    rae_ext_rae_buf_free(buf: plan.pans)
+    rae_ext_rae_buf_free(buf: plan.delays)
+    rae_ext_rae_buf_free(buf: plan.meters)
+    rae_ext_rae_buf_free(buf: plan.limiters)
+    rae_ext_rae_buf_free(buf: plan.sources)
+    rae_ext_rae_buf_free(buf: plan.ducks)
+    rae_ext_rae_buf_free(buf: plan.filters)
+    rae_ext_rae_buf_free(buf: plan.compressors)
+    rae_ext_rae_buf_free(buf: plan.reverbs)
+    rae_ext_rae_buf_free(buf: plan.customs)
+    rae_ext_rae_buf_free(buf: plan.customEvents)
+    rae_ext_rae_buf_free(buf: plan.customEventCount)
+    rae_ext_rae_buf_free(buf: plan.customEventScratch)
+    rae_ext_rae_buf_free(buf: plan.chainStarts)
+    rae_ext_rae_buf_free(buf: plan.stageStarts)
+  }
+}
+
+# ---- sample access (the audio thread's node functions) ---------------------------
+func scratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+) ret Float realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(
+      buf: plan.scratch
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+    )
+  }
+}
+
+func setScratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var target: Buffer(Float) = plan.scratch
+    rae_ext_rae_buf_set(
+      buf: target
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+      value: value
+    )
+  }
+}
+
+func intAt(buffer: view Buffer(Int), index: view Int) ret Int realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: buffer, index: index)
+  }
+}
+
+func firstInputOf(plan: view RenderPlan, node: view Int) ret Int realtime {
+  ret intAt(buffer: plan.inputs, index: intAt(buffer: plan.inputStart, index: node))
+}

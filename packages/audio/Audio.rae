@@ -1,0 +1,971 @@
+# audio/Audio — what a program uses to play sound (docs/audio-design.md §10.1).
+#
+#     open audio/Audio
+#     var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
+#     audio.duckWhilePlaying(source: AudioBusKind.alerts, target: AudioBusKind.music, gainDecibels:
+#     -12.0)
+#     let alarm: Sound = audio.loadSound(path: "assets/alarm.wav")
+#     let voiceId: VoiceId = audio.play(sound: alarm, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+#     audio.fadeOut(voiceId: voiceId, seconds: 0.3)
+#     audio.update()                       # once per frame, on the main thread
+#     stopAudio(this: audio)               # at the end: frees every sound
+#
+# Two drivers, one engine (audio/AudioMixer):
+# - The device (stage A of §4.2): miniaudio's callback copies blocks out of a
+#   ring that a Rae render thread keeps one period ahead. The render thread
+#   marks itself real-time (lib/Realtime), so RAE_REALTIME_CHECK catches an
+#   allocation in the engine. A device that cannot open leaves the engine
+#   offline and silent, never a crash.
+# - Offline: no device and no thread. `renderOffline(frames:)` renders on the
+#   caller's thread and answers the samples; the tests compare them with a
+#   reference. RAE_AUDIO_DEVICE=offline makes `audioStart` choose it, and with
+#   RAE_AUDIO_CAPTURE=<file.wav> everything rendered is written to that file
+#   at `stopAudio`. Offline, each `play` logs `[audio] play ...`.
+#
+# A VoiceId stays valid after its voice ends; calls on it then do nothing.
+#
+# The session (audio/AudioSession, iOS): `settings.session` is the program's
+# intent; the engine applies the strongest intent of what plays (an alert
+# voice makes it an alert), activates the session before the first sound and
+# deactivates it a second after the last. The host's events are read in
+# `update` into `sessionEvents` (audio/sessionSystem/SessionSystem hands them
+# to an ECS EventQueue): an interruption pauses music and cuts alerts, and its
+# end resumes music when the system says so; a lost route pauses music until
+# the program calls `resumeMusic`. RAE_AUDIO_FAKE_SESSION=1 is the headless
+# mode: the session calls are logged as `[audio-session] ...` instead of made,
+# and `injectSessionEvent` plays the host's part.
+import Math
+import String
+import Sys
+open Atomic
+open Realtime
+open Signal
+open audio/AudioButler
+open audio/AudioClock
+open audio/AudioDevice
+open audio/AudioGlue
+open audio/AudioMixer
+open audio/AudioSession
+open audio/Decoder
+open audio/EngineSession
+open audio/GraphTeam
+open audio/Sound
+open collections/SpscRing
+
+type AudioSettings {
+  sampleRate: Int
+  channels: Int
+  # the device period asked for, in frames (the device may choose another)
+  periodFrames: Int
+  # no device: render only through renderOffline
+  offline: Bool
+  # what the program's sound is for (audio/AudioSession)
+  session: AudioSessionKind
+  # input channels to record (audio/AudioInput), 0 for none: a duplex device
+  inputChannels: Int
+}
+
+func defaultAudioSettings() ret AudioSettings {
+  ret AudioSettings {
+    sampleRate: 48000
+    channels: 2
+    periodFrames: 256
+    offline: false
+    session: AudioSessionKind.ambient
+    inputChannels: 0
+  }
+}
+
+type VoiceId {
+  value: Int
+}
+
+# A sound the engine knows (audio.addSound / audio.loadSound)
+type Sound {
+  soundId: Int
+  samples: Buffer(Float)
+  frameCount: Int
+  channels: Int
+  sampleRate: Int
+  # "" when it loaded, else what was wrong (it then plays nothing)
+  error: String
+}
+
+type SoundSlot {
+  soundId: Int
+  samples: Buffer(Float)
+  live: Bool
+  # freeSound asked; the samples go once the audio thread lets them go
+  releasing: Bool
+}
+
+# A voice the main thread knows is playing, and on which bus
+type LiveVoice {
+  voiceId: Int
+  bus: Int
+}
+
+type AudioEngine {
+  offline: Bool
+  device: Int
+  sampleRate: Int
+  channels: Int
+  periodFrames: Int
+  commands: SpscRing(AudioCommand)
+  feedback: SpscRing(AudioFeedback)
+  reclaim: SpscRing(Int)
+  # the renders' (sample time, host time) and the clock they feed (§6.1)
+  clockStamps: SpscRing(ClockStamp)
+  clock: AudioClock
+  input: AudioInputShared
+  output: SpscRing(Float)
+  wake: Signal
+  running: Atomic(Bool)
+  renderTask: Task(Int)
+  # the engine itself when offline; the render thread owns its own otherwise
+  mixer: AudioMixer
+  sounds: List(SoundSlot)
+  nextVoiceId: Int
+  nextSoundId: Int
+  voicesEnded: Int
+  # the voices that ended since takeEndedVoices last ran (audio/feedbackSystem)
+  endedVoices: List(VoiceId)
+  capturePath: String
+  capture: List(Float)
+  # sound sample time of the offline driver
+  renderedFrames: Int
+  liveVoices: List(LiveVoice)
+  sessionKind: AudioSessionKind
+  fakeSession: Bool
+  sessionActive: Bool
+  # the plan last applied (sessionPlanCode), or -1
+  sessionApplied: Int
+  # when a voice last played, in ms of audioNowMs
+  lastSoundMs: Int
+  # music paused by an interruption / by a lost route
+  musicPausedByInterruption: Bool
+  musicPausedByRoute: Bool
+  # the host's events since the program last took them
+  sessionEvents: List(AudioSessionEvent)
+  # iOS: the device was stopped with the session (deactivated, or interrupted)
+  # and starts again when the session does
+  deviceStopped: Bool
+  # stage B: the state the device callback renders with (one element, never
+  # grown, so the pointer C holds stays valid); empty in stage A and offline
+  renderStates: List(AudioRenderState)
+  # the device's callback renders (stage B) rather than a ring (stage A)
+  deviceRenders: Bool
+  # streams (audio/AudioStreams, audio/AudioButler)
+  butlerCommands: SpscRing(ButlerCommand)
+  butlerClosed: SpscRing(Int)
+  butlerRunning: Atomic(Bool)
+  butlerTask: Task(Int)
+  # the butler itself when offline (stepped before every block)
+  butler: Butler
+  # helpers rendering the bus graph with the device's callback
+  # (RAE_AUDIO_RENDER_HELPERS, audio/GraphTeam): their team, tasks and the
+  # device's workgroup they joined
+  renderTeam: GraphTeam
+  renderTeamTasks: List(Task(Int))
+  renderWorkgroup: Int
+  streams: List(StreamRecord)
+  nextStreamId: Int
+}
+
+func audioOfflineWanted() ret Bool {
+  ret getEnv(name: "RAE_AUDIO_DEVICE") is "offline"
+}
+
+func audioStart(settings: view AudioSettings) ret AudioEngine {
+  let feedback: SpscRing(AudioFeedback) = createSpscRing(AudioFeedback, capacity: 1024)
+  let reclaim: SpscRing(Int) = createSpscRing(Int, capacity: 1024)
+  let clockStamps: SpscRing(ClockStamp) = createSpscRing(ClockStamp, capacity: 512)
+  let commands: SpscRing(AudioCommand) = createSpscRing(AudioCommand, capacity: 1024)
+  let wake: Signal = createSignal()
+  let running: Atomic(Bool) = createAtomic(Bool, value: true)
+  var device: Int = 0
+  var sampleRate: Int = settings.sampleRate
+  var channels: Int = settings.channels
+  var periodFrames: Int = settings.periodFrames
+  let offline: Bool = settings.offline or audioOfflineWanted()
+  let fakeSession: Bool = getEnv(name: "RAE_AUDIO_FAKE_SESSION") is "1"
+  if not fakeSession {
+    unsafe {
+      let observing: Int = rae_audio_session_observe()
+    }
+  }
+  if not offline {
+    unsafe {
+      device = rae_audio_device_open(
+        sampleRate: sampleRate
+        channels: channels
+        periodFrames: periodFrames
+        inputChannels: settings.inputChannels
+      )
+      if device is not 0 {
+        sampleRate = rae_audio_device_sample_rate(device: device)
+        channels = rae_audio_device_channels(device: device)
+        let devicePeriod: Int = rae_audio_device_period_frames(device: device)
+        if devicePeriod > 0 {
+          periodFrames = devicePeriod
+        }
+      }
+    }
+  }
+  # four periods of ring, kept full by the render thread: on a Mac, Core Audio
+  # takes bursts of more than one period, and two periods ran short (about
+  # 0.5 % silence). It is up to 21 ms at 256 frames, the cost of stage A; stage
+  # B (rendering inside the callback, §4.2) removes it.
+  let output: SpscRing(Float) = createSpscRing(Float, capacity: 4 * periodFrames * channels)
+  let mixer: AudioMixer = createAudioMixer(
+    sampleRate: sampleRate
+    maxFrames: periodFrames
+    feedback: feedback
+    reclaim: reclaim
+    clockStamps: clockStamps
+  )
+  var renderTask: Task(Int) = spawn audioIdle()
+  let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
+  let butlerClosed: SpscRing(Int) = createSpscRing(Int, capacity: 256)
+  let butlerRunning: Atomic(Bool) = createAtomic(Bool, value: true)
+  var butlerTask: Task(Int) = spawn audioIdle()
+  # the streaming thread; in the browser (one thread) `update` steps the
+  # butler instead
+  when Target.isNative {
+    if device is not 0 {
+      let threadButler: Butler = createButler(
+        outputRate: sampleRate
+        commands: butlerCommands
+        closed: butlerClosed
+      )
+      butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
+    }
+  }
+  let input: AudioInputShared = createAudioInputShared(
+    channels: deviceInputChannels(device: device)
+    sampleRate: sampleRate
+  )
+  var renderStates: List(AudioRenderState) = {}
+  var renderTeam: GraphTeam = noGraphTeam()
+  var renderTeamTasks: List(Task(Int)) = {}
+  var renderWorkgroup: Int = 0
+  # the browser has no stage A (no threads): its device always renders in
+  # its callback (the AudioWorklet's requests, audio/AudioDevice)
+  let deviceRenders: Bool = device is not 0 and (not Target.isNative or getEnv(
+    name: "RAE_AUDIO_STAGE"
+  ) is not "A")
+  if deviceRenders {
+    renderStates.add(value: {
+      mixer: createAudioMixer(
+        sampleRate: sampleRate
+        maxFrames: periodFrames
+        feedback: feedback
+        reclaim: reclaim
+        clockStamps: clockStamps
+      )
+      commands: commands
+      input: input
+    })
+    # RAE_AUDIO_RENDER_HELPERS=n: n helpers render the bus graph's stages with
+    # the callback, joined to the device's workgroup (native only: threads)
+    when Target.isNative {
+      let wanted: Int = getEnv(name: "RAE_AUDIO_RENDER_HELPERS").toInt()
+      if wanted > 0 {
+        unsafe {
+          renderWorkgroup = rae_audio_device_workgroup(device: device)
+        }
+        renderTeam = startGraphTeam(
+          helperCount: wanted
+          workgroup: renderWorkgroup
+          periodNanoseconds: periodFrames * 1000000000 / max(a: 1, b: sampleRate)
+          tasks: renderTeamTasks
+        )
+        if let render: mod AudioRenderState = renderStates.modAt(index: 0) {
+          useMixerTeam(mixer: render.mixer, team: renderTeam)
+        }
+        log("[audio] {renderTeam.helperCount} render helpers with the device's callback")
+      }
+    }
+    unsafe {
+      rae_audio_device_attach_render(device: device, state: renderStates.data as Ptr)
+      if rae_audio_device_start(device: device) is 0 {
+        log("[audio] the device did not start")
+      }
+    }
+  } else if device is not 0 {
+    when Target.isNative {
+      let threadMixer: AudioMixer = createAudioMixer(
+        sampleRate: sampleRate
+        maxFrames: periodFrames
+        feedback: feedback
+        reclaim: reclaim
+        clockStamps: clockStamps
+      )
+      renderTask = spawn thread audioRenderThread(
+        mixer: threadMixer
+        commands: commands
+        output: output
+        wake: wake
+        running: running
+        channels: channels
+        periodFrames: periodFrames
+        sampleRate: sampleRate
+      )
+      unsafe {
+        rae_audio_device_attach(
+          device: device
+          slots: output.slots
+          counters: output.counters
+          capacity: output.capacity
+          signal: wake.handle
+        )
+        wake.post()
+      }
+      # let the render thread fill the ring before the device starts reading it
+      # (at most 200 ms), so the first period is not silence
+      var waited: Int = 0
+      loop waited < 200 and output.count() < output.capacity {
+        sleep(ms: 1)
+        waited = waited + 1
+      }
+      unsafe {
+        if rae_audio_device_start(device: device) is 0 {
+          log("[audio] the device did not start")
+        }
+      }
+    }
+  }
+  ret AudioEngine {
+    offline: device is 0
+    device: device
+    sampleRate: sampleRate
+    channels: channels
+    periodFrames: periodFrames
+    commands: commands
+    feedback: feedback
+    reclaim: reclaim
+    clockStamps: clockStamps
+    input: input
+    clock: createAudioClock(
+      sampleRate: sampleRate
+      offline: device is 0
+      latencyFrames: deviceOutputLatencyFrames(device: device, sampleRate: sampleRate)
+    )
+    output: output
+    wake: wake
+    running: running
+    renderTask: own renderTask
+    mixer: mixer
+    sounds: {}
+    nextVoiceId: 1
+    nextSoundId: 1
+    voicesEnded: 0
+    endedVoices: {}
+    capturePath: getEnv(name: "RAE_AUDIO_CAPTURE")
+    capture: {}
+    renderedFrames: 0
+    liveVoices: {}
+    sessionKind: settings.session
+    fakeSession: fakeSession
+    sessionActive: false
+    sessionApplied: -1
+    lastSoundMs: 0
+    musicPausedByInterruption: false
+    musicPausedByRoute: false
+    sessionEvents: {}
+    deviceStopped: false
+    renderStates: renderStates
+    deviceRenders: deviceRenders
+    butlerCommands: butlerCommands
+    butlerClosed: butlerClosed
+    butlerRunning: butlerRunning
+    butlerTask: own butlerTask
+    butler: createButler(outputRate: sampleRate, commands: butlerCommands, closed: butlerClosed)
+    renderTeam: renderTeam
+    renderTeamTasks: own renderTeamTasks
+    renderWorkgroup: renderWorkgroup
+    streams: {}
+    nextStreamId: 1
+  }
+}
+
+# An engine with no device, for tests and offline renders
+func audioStartOffline(
+  sampleRate: view Int
+  channels: view Int
+  blockFrames: view Int
+) ret AudioEngine {
+  let settings: AudioSettings = {
+    sampleRate: sampleRate
+    channels: channels
+    periodFrames: blockFrames
+    offline: true
+    session: AudioSessionKind.ambient
+  }
+  ret audioStart(settings: settings)
+}
+
+func sendCommand(this: view AudioEngine, command: view AudioCommand) ret Bool {
+  ret this.commands.push(value: command)
+}
+
+func emptyCommand(kind: view AudioCommandKind) ret AudioCommand {
+  ret AudioCommand {
+    kind: kind
+    voiceId: 0
+    soundId: 0
+    samples: createSampleBufferHandle()
+    frameCount: 0
+    channels: 1
+    sampleRate: 48000
+    bus: 0
+    targetBus: 0
+    value: 0.0
+    other: 0.0
+    looping: false
+    atSample: 0
+    isStream: false
+    stream: emptyStreamRing()
+    streamFinished: emptyAtomicBool()
+    startFrame: 0
+  }
+}
+
+# A command carries no sound unless it plays one: an empty handle, not a buffer
+func createSampleBufferHandle() ret Buffer(Float) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+  }
+}
+
+# Hand a decoded sound to the engine; the engine owns its samples from now on
+func addSound(this: mod AudioEngine, data: own SoundData) ret Sound {
+  let soundId: Int = this.nextSoundId
+  this.nextSoundId = this.nextSoundId + 1
+  this.sounds.add(value: { soundId: soundId, samples: data.samples, live: true, releasing: false })
+  ret Sound {
+    soundId: soundId
+    samples: data.samples
+    frameCount: data.frameCount
+    channels: data.channels
+    sampleRate: data.sampleRate
+    error: data.error
+  }
+}
+
+# Read a WAV file and add it (on the calling thread; for a long file, read it
+# with `spawn readSoundFile(path:)` and `addSound` the result)
+func loadSound(this: mod AudioEngine, path: view String) ret Sound {
+  ret this.addSound(data: readAnySoundFile(path: path))
+}
+
+func busIndex(bus: view AudioBusKind) ret Int {
+  ret bus as Int
+}
+
+# Play `sound` on `bus`, now or at the sample time `atSample`
+func playAt(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  atSample: view Int
+) ret VoiceId {
+  ret this.playFromAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainDecibels
+    pan: pan
+    looping: looping
+    startFrame: 0
+    atSample: atSample
+  )
+}
+
+# Like playAt, from the sound's frame `startFrame` (a clip entered part-way)
+func playFromAt(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  startFrame: view Int
+  atSample: view Int
+) ret VoiceId {
+  let voiceId: Int = this.nextVoiceId
+  this.nextVoiceId = this.nextVoiceId + 1
+  if sound.frameCount is 0 {
+    ret VoiceId { value: voiceId }
+  }
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.play)
+  command.voiceId = voiceId
+  command.soundId = sound.soundId
+  command.samples = sound.samples
+  command.frameCount = sound.frameCount
+  command.channels = sound.channels
+  command.sampleRate = sound.sampleRate
+  command.bus = busIndex(bus: bus)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  command.other = pan
+  command.looping = looping
+  command.atSample = atSample
+  command.startFrame = startFrame
+  if this.offline {
+    log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
+  }
+  this.liveVoices.add(value: { voiceId: voiceId, bus: command.bus })
+  this.lastSoundMs = this.audioNowMs()
+  this.applySession()
+  let sent: Bool = this.sendCommand(command: command)
+  ret VoiceId { value: voiceId }
+}
+
+func play(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+) ret VoiceId {
+  ret this.playAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainDecibels
+    pan: 0.0
+    looping: false
+    atSample: 0
+  )
+}
+
+func sendVoiceCommand(
+  this: view AudioEngine
+  kind: view AudioCommandKind
+  voiceId: view VoiceId
+  value: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.voiceId = mixerVoiceIdOf(streams: this.streams, voiceId: voiceId.value)
+  command.value = value
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Stop with a 5 ms fade, so it does not click
+func stopVoice(this: view AudioEngine, voiceId: view VoiceId) {
+  this.sendVoiceCommand(kind: AudioCommandKind.stop, voiceId: voiceId, value: 0.0)
+}
+
+func fadeOut(this: view AudioEngine, voiceId: view VoiceId, seconds: view Float) {
+  this.sendVoiceCommand(kind: AudioCommandKind.fadeOut, voiceId: voiceId, value: seconds)
+}
+
+func setVoiceGain(this: view AudioEngine, voiceId: view VoiceId, gainDecibels: view Float) {
+  this.sendVoiceCommand(
+    kind: AudioCommandKind.setVoiceGain
+    voiceId: voiceId
+    value: decibelsToGain(decibels: gainDecibels)
+  )
+}
+
+# -1 left, 0 middle, 1 right
+func setVoicePan(this: view AudioEngine, voiceId: view VoiceId, pan: view Float) {
+  this.sendVoiceCommand(kind: AudioCommandKind.setVoicePan, voiceId: voiceId, value: pan)
+}
+
+func setBusGain(this: view AudioEngine, bus: view AudioBusKind, gainDecibels: view Float) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setBusGain)
+  command.bus = busIndex(bus: bus)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# While any voice plays on `source`, `target` goes down by `gainDecibels`
+# (50 ms down, 400 ms back), on the audio thread (§6.4)
+func duckWhilePlaying(
+  this: view AudioEngine
+  source: view AudioBusKind
+  target: view AudioBusKind
+  gainDecibels: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setDuck)
+  command.bus = busIndex(bus: source)
+  command.targetBus = busIndex(bus: target)
+  command.value = decibelsToGain(decibels: gainDecibels)
+  command.other = 0.4
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Let go of a sound: its voices stop, and its samples are freed once the audio
+# thread has let them go (in a later update)
+func freeSound(this: mod AudioEngine, sound: view Sound) {
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.soundId is sound.soundId and slot.live and not slot.releasing {
+        slot.releasing = true
+      }
+    }
+  }
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.releaseSound)
+  command.soundId = sound.soundId
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+func freeSoundSamples(this: mod AudioEngine, soundId: view Int) {
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.soundId is soundId and slot.live {
+        slot.live = false
+        unsafe {
+          rae_ext_rae_buf_free(buf: slot.samples)
+        }
+      }
+    }
+  }
+}
+
+# Once per frame on the main thread: reads what the audio thread reported and
+# frees the sounds it let go of
+func update(this: mod AudioEngine) {
+  loop this.feedback.count() > 0 {
+    if let report: AudioFeedback = this.feedback.pop() {
+      if report.kind is AudioFeedbackKind.voiceEnded {
+        this.voicesEnded = this.voicesEnded + 1
+        if this.endedVoices.length() < 4096 {
+          this.endedVoices.add(value: VoiceId { value: report.voiceId })
+        }
+        this.forgetVoice(voiceId: report.voiceId)
+        streamVoiceEnded(
+          streams: this.streams
+          commands: this.butlerCommands
+          mixerVoiceId: report.voiceId
+        )
+      }
+    }
+  }
+  this.clock.clockTakeStamps(stamps: this.clockStamps)
+  loop this.reclaim.count() > 0 {
+    if let soundId: Int = this.reclaim.pop() {
+      this.freeSoundSamples(soundId: soundId)
+    }
+  }
+  # the browser has no streaming thread: the butler reads ahead here
+  when not Target.isNative {
+    if this.device is not 0 {
+      butlerStep(butler: this.butler)
+    }
+  }
+  loop this.butlerClosed.count() > 0 {
+    if let streamId: Int = this.butlerClosed.pop() {
+      streamClosed(streams: this.streams, streamId: streamId)
+    }
+  }
+  this.updateSession()
+}
+
+# Offline only: render `frames` frames on this thread (marked real-time while
+# the engine runs) and answer them, interleaved
+func renderOffline(this: mod AudioEngine, frames: view Int) ret List(Float) {
+  var rendered: List(Float) = List.create(Float, cap: frames * this.channels)
+  if not this.offline {
+    ret rendered
+  }
+  let block: Buffer(Float) = createSampleBuffer(count: this.periodFrames * this.channels)
+  var left: Int = frames
+  loop left > 0 {
+    let count: Int = min(a: left, b: this.periodFrames)
+    butlerStep(butler: this.butler)
+    markRealtimeThread()
+    mixerRender(
+      mixer: this.mixer
+      commands: this.commands
+      output: block
+      firstFrame: 0
+      frames: count
+      channels: this.channels
+    )
+    unmarkRealtimeThread()
+    loop var i: Int = 0, i < count * this.channels, ++i {
+      rendered.add(value: sampleAt(samples: block, index: i))
+      if this.capturePath.length() > 0 {
+        this.capture.add(value: sampleAt(samples: block, index: i))
+      }
+    }
+    left = left - count
+  }
+  this.renderedFrames = this.renderedFrames + frames
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  this.update()
+  ret rendered
+}
+
+# Like renderOffline, in blocks of `blockFrames` (tests of block-size invariance)
+func renderOfflineInBlocks(
+  this: mod AudioEngine
+  frames: view Int
+  blockFrames: view Int
+) ret List(Float) {
+  var rendered: List(Float) = List.create(Float, cap: frames * this.channels)
+  var left: Int = frames
+  loop left > 0 {
+    let part: List(Float) = this.renderOffline(frames: min(a: left, b: blockFrames))
+    loop let sample: Float in part {
+      rendered.add(value: sample)
+    }
+    left = left - blockFrames
+  }
+  ret rendered
+}
+
+# The earliest sample time a command sent now still reaches before it is due,
+# so it is never late (§6.2): offline, the next frame to render; with a
+# device, two periods after the newest render the clock has seen
+func nextSafeSampleTime(this: view AudioEngine) ret Int {
+  if this.device is 0 {
+    ret this.renderedFrames
+  }
+  ret this.clock.lastRenderSample + 2 * this.periodFrames
+}
+
+# The voices that ended since the last call (audio/feedbackSystem's
+# voiceEnded events)
+func takeEndedVoices(this: mod AudioEngine) ret List(VoiceId) {
+  let taken: List(VoiceId) = this.endedVoices
+  this.endedVoices = {}
+  ret taken
+}
+
+# Frames of silence the device played because the render thread was late
+func underrunFrames(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_underrun_frames(device: this.device)
+  }
+}
+
+func deviceCallbacks(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_callbacks(device: this.device)
+  }
+}
+
+# The device's audio workgroup (Apple's os_workgroup; 0 elsewhere and with no
+# device). The helper threads of a lib/RealtimeTeam that render part of each
+# block join it with lib/Realtime's joinWorkgroup, so the system schedules
+# them together with the device's own thread. It is retained: give it back
+# with releaseAudioWorkgroup after the helpers have left it.
+func audioWorkgroup(this: view AudioEngine) ret Int {
+  unsafe {
+    ret rae_audio_device_workgroup(device: this.device)
+  }
+}
+
+func releaseAudioWorkgroup(workgroup: view Int) {
+  unsafe {
+    rae_audio_workgroup_release(workgroup: workgroup)
+  }
+}
+
+# Stop the device and the render thread, write the capture, free every sound
+func stopAudio(this: mod AudioEngine) ret Int {
+  # the device first, so it never reads a ring nobody fills any more
+  if this.device is not 0 {
+    unsafe {
+      let stopped: Int = rae_audio_device_stop(device: this.device)
+    }
+  }
+  this.running.store(value: false)
+  this.wake.post()
+  let blocks: Int = this.renderTask.get()
+  this.butlerRunning.store(value: false)
+  let butlerRounds: Int = this.butlerTask.get()
+  freeButler(butler: this.butler)
+  loop let record: StreamRecord in this.streams {
+    freeStreamShared(shared: record.shared)
+  }
+  this.streams.clear()
+  if this.device is not 0 {
+    unsafe {
+      rae_audio_device_close(device: this.device)
+    }
+  }
+  # the render team: after the device stopped, before the mixer it rendered
+  if this.renderTeam.helperCount > 0 {
+    stopGraphTeam(team: this.renderTeam, tasks: this.renderTeamTasks)
+    releaseAudioWorkgroup(workgroup: this.renderWorkgroup)
+  } else {
+    freeGraphTeam(team: this.renderTeam)
+  }
+  # the callback's state: its mixer's buffers (the List drops the rest)
+  loop var i: Int = 0, i < this.renderStates.length(), ++i {
+    if let render: mod AudioRenderState = this.renderStates.modAt(index: i) {
+      freeAudioMixer(mixer: render.mixer)
+    }
+  }
+  this.update()
+  if this.capturePath.length() > 0 {
+    let frames: Int = this.capture.length() / this.channels
+    let samples: Buffer(Float) = createSampleBuffer(count: this.capture.length())
+    loop var i: Int = 0, i < this.capture.length(), ++i {
+      setSampleAt(
+        samples: samples
+        index: i
+        value: this.capture.copyAtFallback(index: i, fallback: 0.0)
+      )
+    }
+    if not writeWavFile(
+      path: this.capturePath
+      samples: samples
+      frameCount: frames
+      channels: this.channels
+      sampleRate: this.sampleRate
+    ) {
+      log("[audio] could not write the capture {this.capturePath}")
+    }
+    unsafe {
+      rae_ext_rae_buf_free(buf: samples)
+    }
+  }
+  loop var i: Int = 0, i < this.sounds.length(), ++i {
+    if let slot: mod SoundSlot = this.sounds.modAt(index: i) {
+      if slot.live {
+        slot.live = false
+        unsafe {
+          rae_ext_rae_buf_free(buf: slot.samples)
+        }
+      }
+    }
+  }
+  freeAudioMixer(mixer: this.mixer)
+  freeSpscRing(this: this.commands)
+  freeSpscRing(this: this.feedback)
+  freeSpscRing(this: this.reclaim)
+  freeSpscRing(this: this.clockStamps)
+  freeAudioInputShared(input: this.input)
+  freeSpscRing(this: this.output)
+  freeSpscRing(this: this.butlerCommands)
+  freeSpscRing(this: this.butlerClosed)
+  freeAtomic(this: this.butlerRunning)
+  freeSignal(this: this.wake)
+  freeAtomic(this: this.running)
+  ret blocks
+}
+
+# The engine's clock in milliseconds: rendered frames offline (so a test is
+# repeatable), the monotonic clock with a device
+func audioNowMs(this: view AudioEngine) ret Int {
+  if this.offline {
+    ret this.renderedFrames * 1000 / this.sampleRate
+  }
+  ret nowNs() / 1000000
+}
+
+func forgetVoice(this: mod AudioEngine, voiceId: view Int) {
+  loop var i: Int = 0, i < this.liveVoices.length(), ++i {
+    if let live: LiveVoice = this.liveVoices.copyAt(index: i) {
+      if live.voiceId is voiceId {
+        this.liveVoices.removeAt(index: i)
+        ret
+      }
+    }
+  }
+}
+
+func busIsPlaying(this: view AudioEngine, bus: view AudioBusKind) ret Bool {
+  loop let live: LiveVoice in this.liveVoices {
+    if live.bus is busIndex(bus: bus) {
+      ret true
+    }
+  }
+  ret false
+}
+
+func sendBusCommand(this: view AudioEngine, kind: view AudioCommandKind, bus: view AudioBusKind) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.bus = busIndex(bus: bus)
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Continue music that a lost route (or an interruption that said not to
+# resume) paused: the program calls it, for example on the user's play
+func resumeMusic(this: mod AudioEngine) {
+  this.musicPausedByRoute = false
+  this.musicPausedByInterruption = false
+  this.applySession()
+  this.sendBusCommand(kind: AudioCommandKind.resumeBus, bus: AudioBusKind.music)
+}
+
+func musicIsPaused(this: view AudioEngine) ret Bool {
+  ret this.musicPausedByRoute or this.musicPausedByInterruption
+}
+
+# The fake mode's stand-in for the host: as if the system had sent this event
+func injectSessionEvent(this: view AudioEngine, kind: view AudioSessionEventKind, value: view Int) {
+  let code: Int = sessionEventCode(kind: kind, value: value)
+  unsafe {
+    rae_audio_session_inject(kind: code / 16, value: code % 16)
+  }
+}
+
+# Take the host's events since the last call
+func takeSessionEvents(this: mod AudioEngine) ret List(AudioSessionEvent) {
+  var taken: List(AudioSessionEvent) = {}
+  loop let event: AudioSessionEvent in this.sessionEvents {
+    taken.add(value: event)
+  }
+  this.sessionEvents.clear()
+  ret taken
+}
+
+# What the host's session says now, as one line (iOS: category, mode, options,
+# route, whether another app plays, the silence hint, rate, IO buffer, volume);
+# "" where there is no session. For logs and probes; no decision reads it.
+func sessionDescription() ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 512)
+  bytes.addDefaults(count: 512)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_session_describe(into: bytes.data, capacity: 512)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# The Focus status (docs/audio-design.md §9.2)
+type AudioFocusStatus {
+  # false off iOS or before iOS 15
+  available: Bool
+  # 0 not asked, 1 restricted, 2 denied, 3 authorized
+  authorization: Int
+  # only when authorized (and, in practice, with the Communication
+  # Notifications capability): 0 no, 1 yes, 2 unknown
+  focused: Int
+}
+
+func focusStatus() ret AudioFocusStatus {
+  var code: Int = -1
+  unsafe {
+    code = rae_audio_focus_status()
+  }
+  if code < 0 {
+    ret AudioFocusStatus { available: false, authorization: 0, focused: 2 }
+  }
+  ret AudioFocusStatus { available: true, authorization: code / 10, focused: code % 10 }
+}
+
+# Ask for access to the Focus status; iOS shows its prompt once
+func requestFocusAccess() ret Bool {
+  unsafe {
+    ret rae_audio_focus_request() is 1
+  }
+}
+
+# Frames the engine holds between a sample's render and its playing, beyond
+# the device's own buffer: none in stage B (the callback renders that buffer
+# itself), the ring in stage A, none offline
+func latencyFrames(this: view AudioEngine) ret Int {
+  if this.device is 0 or this.deviceRenders {
+    ret 0
+  }
+  ret this.output.capacity / this.channels
+}

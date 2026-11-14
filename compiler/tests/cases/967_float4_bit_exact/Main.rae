@@ -219,6 +219,69 @@ func newTally() ret Tally {
   ret Tally { checked: 0, wrong: 0 }
 }
 
+# The bit operations' scalar definitions (runtime_float4.h): integer
+# arithmetic on the bits, no float-to-int conversion.
+func scalarPowerOfTwo(n: view Float) ret Float {
+  var clamped: Float = n
+  if not (clamped <= 127.0) {
+    clamped = 127.0
+  }
+  if not (clamped >= -126.0) {
+    clamped = -126.0
+  }
+  let whole: Int = bitsOf(value: clamped + 12582912.0)
+  ret Math.floatFromBits(bits: ((whole - 0x4B400000 + 127) * 8388608) bitand 0xFFFFFFFF)
+}
+
+func scalarExponentOf(value: view Float) ret Float {
+  let field: Int = (bitsOf(value: value) shr 23) bitand 255
+  ret Math.floatFromBits(bits: field + 0x4B400000) - 12583039.0
+}
+
+func scalarSignificandOf(value: view Float) ret Float {
+  ret Math.floatFromBits(bits: (bitsOf(value: value) bitand 0x807FFFFF) bitor 0x3F800000)
+}
+
+# Every special value through each bit operation, and n from -140 to 140 in
+# halves (whole, ties to even, both ends of the clamp) through powerOfTwo
+func checkBitOperations(bits: view List(Int)) ret Tally {
+  var tally: Tally = newTally()
+  loop var i: Int = 0, i < valueCount, ++i {
+    let value: Float4 = quad(bits: bits, first: i, stride: 1)
+    let powers: Float4 = Float4.powerOfTwo(n: value)
+    let exponents: Float4 = Float4.exponentOf(value: value)
+    let significands: Float4 = Float4.significandOf(value: value)
+    loop var k: Int = 0, k < 4, ++k {
+      let x: Float = lane(value: value, index: k)
+      checkFloat(
+        tally: tally
+        actual: lane(value: powers, index: k)
+        expected: scalarPowerOfTwo(n: x)
+      )
+      checkFloat(
+        tally: tally
+        actual: lane(value: exponents, index: k)
+        expected: scalarExponentOf(value: x)
+      )
+      checkFloat(
+        tally: tally
+        actual: lane(value: significands, index: k)
+        expected: scalarSignificandOf(value: x)
+      )
+    }
+  }
+  loop var step: Int = -280, step <= 280, ++step {
+    let n: Float = (step as Float) * 0.5
+    let powers: Float4 = Float4.powerOfTwo(n: Float4.splat(value: n))
+    checkFloat(
+      tally: tally
+      actual: lane(value: powers, index: 0)
+      expected: scalarPowerOfTwo(n: n)
+    )
+  }
+  ret tally
+}
+
 func main() {
   let bits: List(Int) = specialBits()
   var addTally: Tally = newTally()
@@ -457,6 +520,7 @@ func main() {
   report(name: "anyLane/allLanes", tally: laneTestTally)
   report(name: "sum/horizontalMin/horizontalMax", tally: horizontalTally)
   report(name: "embedIndex/minLaneIndex", tally: indexTally)
+  report(name: "powerOfTwo/exponentOf/significandOf", tally: checkBitOperations(bits: bits))
 
   # load / store: in range, at the last valid index, and just past it.
   let values: List(Float) = {

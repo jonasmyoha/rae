@@ -1,0 +1,64 @@
+# A `loop let` element copy moved into a call on some paths only
+# (`if keep { kept.add(value: record) }`) is dropped at the end of the
+# iteration on the other paths (#14300186). The runner's exit leak check is the
+# assertion: before the fix every skipped element leaked its String and List.
+type Record {
+  id: Int
+  name: String
+  sizes: List(Float64)
+}
+
+func dropOne(records: mod List(Record), id: view Int) {
+  var kept: List(Record) = List.create(Record, cap: 4)
+  loop let record: Record in records {
+    if record.id is not id {
+      kept.add(value: record)
+    }
+  }
+  records = kept
+}
+
+func keepLong(names: view List(String)) ret List(String) {
+  var kept: List(String) = List.create(String, cap: 4)
+  loop let name: String in names {
+    if name.length() > 3 {
+      kept.add(value: name)
+    }
+  }
+  ret kept
+}
+
+func firstBefore(records: view List(Record), id: view Int) ret List(Record) {
+  var kept: List(Record) = List.create(Record, cap: 4)
+  loop let record: Record in records {
+    if record.id is id {
+      break
+    }
+    if record.id > 0 {
+      kept.add(value: record)
+    }
+  }
+  ret kept
+}
+
+func main() {
+  var records: List(Record) = List.create(Record, cap: 4)
+  loop var i: Int = 1, i <= 4, ++i {
+    var sizes: List(Float64) = List.create(Float64, cap: 2)
+    sizes.add(value: i as Float64)
+    records.add(value: { id: i, name: "record {i}", sizes: sizes })
+  }
+  let before: List(Record) = firstBefore(records: records, id: 3)
+  log("before 3: {before.length()}")
+  dropOne(records: records, id: 2)
+  log("after dropping 2: {records.length()}")
+  loop let record: view Record in records {
+    log("{record.id} {record.name}")
+  }
+  var names: List(String) = List.create(String, cap: 4)
+  names.add(value: "one")
+  names.add(value: "three")
+  names.add(value: "four")
+  let long: List(String) = keepLong(names: names)
+  log("long names: {long.length()}")
+}

@@ -1,0 +1,69 @@
+# Signal — wake a waiting thread (docs/realtime-language-design.md §6.5).
+#
+#     let signal: Signal = createSignal()
+#     let task: Task(Int) = spawn worker(signal: signal)   # the worker calls wait()
+#     signal.post()                                        # wakes it; never waits
+#     ...
+#     freeSignal(this: signal)                             # once, after the join
+#
+# A counting semaphore: each `post` lets one `wait` (or `tryWait`) through, and
+# posts made before anyone waits are kept. `post` never waits, so a real-time
+# thread may call it (the audio thread wakes its helper threads this way);
+# `wait` holds the thread until a post comes, so it is a `blocking` call and
+# never belongs on a real-time thread. `tryWait` takes a post if one is there
+# and answers whether it did, without waiting.
+#
+# Like Channel, a Signal is a handle: copies share the one semaphore, and the
+# owner frees it once, after every thread that holds a copy is done.
+#
+# The shims are runtime_signal.c, one OS call each: dispatch_semaphore on Apple,
+# a POSIX sem_t (a futex underneath) on Linux and Android. In a browser build
+# without threads nothing else can post during a wait, so `wait` takes a post
+# if there is one and returns at once either way.
+func rae_ext_rae_signal_new() unsafe extern ret Int
+
+func rae_ext_rae_signal_post(signal: Int) realtime unsafe extern
+
+func rae_ext_rae_signal_wait(signal: Int) blocking noAlloc unsafe extern
+
+func rae_ext_rae_signal_try_wait(signal: Int) realtime unsafe extern ret Bool
+
+func rae_ext_rae_signal_free(signal: Int) unsafe extern
+
+type Signal {
+  handle: Int
+}
+
+func createSignal() ret Signal {
+  unsafe {
+    ret Signal { handle: rae_ext_rae_signal_new() }
+  }
+}
+
+# Let one waiter through (now, or the next one that waits). Never waits.
+func post(this: view Signal) realtime {
+  unsafe {
+    rae_ext_rae_signal_post(signal: this.handle)
+  }
+}
+
+# Wait until a post comes, then take it.
+func wait(this: view Signal) noAlloc {
+  unsafe {
+    rae_ext_rae_signal_wait(signal: this.handle)
+  }
+}
+
+# Take a post if one is there; answers whether it did. Never waits.
+func tryWait(this: view Signal) realtime ret Bool {
+  unsafe {
+    ret rae_ext_rae_signal_try_wait(signal: this.handle)
+  }
+}
+
+# Owner only, once, after every other thread that holds a copy is done.
+func freeSignal(this: view Signal) {
+  unsafe {
+    rae_ext_rae_signal_free(signal: this.handle)
+  }
+}

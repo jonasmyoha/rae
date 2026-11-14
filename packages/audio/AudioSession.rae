@@ -1,0 +1,234 @@
+# audio/AudioSession — what a program's sound is for, and the host's session
+# events (docs/audio-design.md §9.1). A program states an intent; the engine
+# (audio/Audio) picks the iOS AVAudioSession category and options from it,
+# activates the session just before a sound plays and deactivates it a second
+# after the last one ends, so other apps' sound comes back. The strongest
+# intent of what is playing wins: an alert voice makes the session an alert
+# while it sounds, then it returns to the program's own intent.
+#
+# | intent      | category      | options                                   | silent switch | other
+# apps |
+# |-------------|---------------|-------------------------------------------|---------------|------------|
+# | ambient     | ambient       | -                                         | silenced      | mixes
+# |
+# | music       | playback      | -                                         | plays         | stops
+# |
+# | alert       | playback      | mixWithOthers, duckOthers                 | plays         |
+# ducked     |
+# | spokenText  | playback, mode spokenAudio | duckOthers, interruptSpokenAudio | plays     |
+# ducked     |
+# | recording   | playAndRecord | defaultToSpeaker, allowBluetoothA2DP      | plays         | stops
+# |
+#
+# Off iOS there is no session: the intents only matter there (the plan is
+# still computed, and the fake mode logs it).
+open audio/AudioGlue
+
+enum AudioSessionKind {
+  ambient
+  music
+  alert
+  spokenText
+  recording
+}
+
+# category 0 ambient, 1 soloAmbient, 2 playback, 3 playAndRecord; mode 0
+# default, 1 spokenAudio; options as rae_audio.h numbers them
+type AudioSessionPlan {
+  category: Int
+  mode: Int
+  options: Int
+}
+
+func sessionPlan(kind: view AudioSessionKind) ret AudioSessionPlan {
+  if kind is AudioSessionKind.music {
+    ret AudioSessionPlan { category: 2, mode: 0, options: 0 }
+  }
+  if kind is AudioSessionKind.alert {
+    ret AudioSessionPlan { category: 2, mode: 0, options: 1 bitor 2 }
+  }
+  if kind is AudioSessionKind.spokenText {
+    ret AudioSessionPlan { category: 2, mode: 1, options: 2 bitor 4 }
+  }
+  if kind is AudioSessionKind.recording {
+    ret AudioSessionPlan { category: 3, mode: 0, options: 8 bitor 16 }
+  }
+  ret AudioSessionPlan { category: 0, mode: 0, options: 0 }
+}
+
+# One number for a plan, to see whether it changed
+func sessionPlanCode(plan: view AudioSessionPlan) ret Int {
+  ret plan.category * 1000 + plan.mode * 100 + plan.options
+}
+
+func sessionCategoryName(category: view Int) ret String {
+  if category is 1 {
+    ret "soloAmbient"
+  }
+  if category is 2 {
+    ret "playback"
+  }
+  if category is 3 {
+    ret "playAndRecord"
+  }
+  ret "ambient"
+}
+
+enum AudioSessionEventKind {
+  # a phone call, Siri, another app's alarm: the system stopped the sound
+  interruptionBegan
+  # it is over; `shouldResume` says whether music should continue
+  interruptionEnded
+  # the device the sound went to is gone (headphones out, Bluetooth lost);
+  # music is paused, as the sound must not move to the speaker by itself
+  routeLost
+  # another route change (a new device): `reason` is AVAudioSession's
+  routeChanged
+  # the system's media services restarted
+  mediaServicesReset
+  # the app went to the background (iOS); its sound goes on with the `audio`
+  # background mode and a playing session (audio/NowPlaying)
+  enteredBackground
+  # it comes back to the foreground
+  enteredForeground
+  # Android: another app's sound lowers ours for a while (the system ducks
+  # it); `shouldResume` false when it is over
+  ducked
+}
+
+type AudioSessionEvent {
+  kind: AudioSessionEventKind
+  shouldResume: Bool
+  reason: Int
+}
+
+# An event as rae_audio_session_poll encodes it (kind * 16 + value)
+func decodeSessionEvent(code: view Int) ret AudioSessionEvent {
+  let kindNumber: Int = code / 16
+  let value: Int = code % 16
+  var kind: AudioSessionEventKind = AudioSessionEventKind.mediaServicesReset
+  if kindNumber is 1 {
+    kind = AudioSessionEventKind.interruptionBegan
+  } else if kindNumber is 2 {
+    kind = AudioSessionEventKind.interruptionEnded
+  } else if kindNumber is 3 {
+    kind = AudioSessionEventKind.routeLost
+  } else if kindNumber is 4 {
+    kind = AudioSessionEventKind.routeChanged
+  } else if kindNumber is 6 {
+    kind = AudioSessionEventKind.enteredBackground
+  } else if kindNumber is 7 {
+    kind = AudioSessionEventKind.enteredForeground
+  } else if kindNumber is 8 {
+    kind = AudioSessionEventKind.ducked
+  }
+  ret AudioSessionEvent {
+    kind: kind
+    shouldResume: (kindNumber is 2 or kindNumber is 8) and value is 1
+    reason: value
+  }
+}
+
+# The encoding back, for the fake mode
+func sessionEventCode(kind: view AudioSessionEventKind, value: view Int) ret Int {
+  if kind is AudioSessionEventKind.interruptionBegan {
+    ret 16 + value
+  }
+  if kind is AudioSessionEventKind.interruptionEnded {
+    ret 32 + value
+  }
+  if kind is AudioSessionEventKind.routeLost {
+    ret 48 + value
+  }
+  if kind is AudioSessionEventKind.routeChanged {
+    ret 64 + value
+  }
+  if kind is AudioSessionEventKind.enteredBackground {
+    ret 96 + value
+  }
+  if kind is AudioSessionEventKind.enteredForeground {
+    ret 112 + value
+  }
+  if kind is AudioSessionEventKind.ducked {
+    ret 128 + value
+  }
+  ret 80 + value
+}
+
+# Android's audio focus for a plan (AudioManager and AudioAttributes values):
+# music takes the focus (others pause), an alert or spoken text takes it for a
+# while and lets others duck under it, ambient sound asks for none (it mixes).
+# [gain, usage, content]; gain 0 for none.
+func androidFocusOf(plan: view AudioSessionPlan) ret List(Int) {
+  # AUDIOFOCUS_GAIN 1, GAIN_TRANSIENT_MAY_DUCK 3; USAGE_MEDIA 1, USAGE_ALARM 4,
+  # USAGE_ASSISTANT 16, USAGE_VOICE_COMMUNICATION 2; CONTENT_TYPE_SPEECH 1,
+  # MUSIC 2, SONIFICATION 4
+  if plan.category is 3 {
+    ret List(Int) { 1, 2, 1 }
+  }
+  if plan.category is 2 and plan.mode is 1 {
+    ret List(Int) { 3, 16, 1 }
+  }
+  if plan.category is 2 and (plan.options bitand 2) is not 0 {
+    ret List(Int) { 3, 4, 4 }
+  }
+  if plan.category is 2 {
+    ret List(Int) { 1, 1, 2 }
+  }
+  ret List(Int) { 0, 1, 2 }
+}
+
+func requestAndroidFocus(plan: view AudioSessionPlan) {
+  let focus: List(Int) = androidFocusOf(plan: plan)
+  let gain: Int = focus.copyAtFallback(index: 0, fallback: 0)
+  unsafe {
+    if gain is 0 {
+      let released: Int = rae_audio_android_focus_abandon()
+    } else {
+      let granted: Int = rae_audio_android_focus_request(
+        gain: gain
+        usage: focus.copyAtFallback(index: 1, fallback: 1)
+        content: focus.copyAtFallback(index: 2, fallback: 2)
+      )
+    }
+  }
+}
+
+# Tell the host what the sound is for (iOS: the session's category; Android:
+# the focus to hold, asked again only while active)
+func platformSessionConfigure(plan: view AudioSessionPlan, active: view Bool) {
+  when Target.os is Os.android {
+    if active {
+      requestAndroidFocus(plan: plan)
+    }
+  } else {
+    unsafe {
+      let configured: Int = rae_audio_session_configure(
+        category: plan.category
+        mode: plan.mode
+        options: plan.options
+      )
+    }
+  }
+}
+
+# Take the session (iOS: activate it; Android: ask for the focus) or let it go
+func platformSessionActivate(plan: view AudioSessionPlan, active: view Bool) {
+  when Target.os is Os.android {
+    if active {
+      requestAndroidFocus(plan: plan)
+    } else {
+      unsafe {
+        let released: Int = rae_audio_android_focus_abandon()
+      }
+    }
+  } else {
+    unsafe {
+      var flag: Int = 0
+      if active {
+        flag = 1
+      }
+      let changed: Int = rae_audio_session_set_active(active: flag)
+    }
+  }
+}

@@ -1,0 +1,236 @@
+# A render plan on several cores (audio/GraphTeam, docs/audio-design.md §5.2
+# step 4), offline, under RAE_REALTIME_CHECK=1 (the leader and the helpers
+# mark their threads real-time). A session of 24 tracks (a source, an EQ
+# band, a compressor, a fader, a pan, a meter each) on two buses (one with a
+# reverb), into a master with a limiter, is rendered four ways: its plan for
+# one thread (the liveness buffers), its plan for a team with no helper, and
+# with 2 and up to 4 helpers (spawn thread, lib/RealtimeTeam; fewer where the
+# machine has fewer performance cores). All four give the same samples, bit
+# for bit, in blocks of 256 and of 37.
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/EffectStates
+open audio/GraphCompile
+open audio/GraphRender
+open audio/GraphTeam
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 512
+
+const trackCount: Int = 24
+
+func sourceValue(slot: view Int, channel: view Int, frame: view Int) ret Float {
+  let frequency: Float64 = ((180 * (slot + 1) + 40 * channel) as Float64)
+  ret (Math.sin(x: (2.0 * 3.141592653589793 * frequency * (frame as Float64) / 48000.0) as Float) * 0.6)
+}
+
+func session(forTeam: view Bool) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  graph.forTeam = forTeam
+  let master: Int = graph.addNode(node: sumNode())
+  let limiter: Int = graph.addNode(node: limiterNode(ceilingDecibels: -1.0, releaseSeconds: 0.05))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: master, to: limiter)
+  graph.connect(from: limiter, to: out)
+  var buses: List(Int) = {}
+  loop var bus: Int = 0, bus < 2, ++bus {
+    let sum: Int = graph.addNode(node: sumNode())
+    var last: Int = sum
+    if bus is 1 {
+      var settings: EffectSettings = defaultEffectSettings()
+      settings.dry = 0.5
+      let reverb: Int = graph.addNode(node: reverbNode(settings: settings))
+      graph.connect(from: sum, to: reverb)
+      last = reverb
+    }
+    let fader: Int = graph.addNode(node: gainNode(decibels: -3.0))
+    graph.connect(from: last, to: fader)
+    graph.connect(from: fader, to: master)
+    buses.add(value: sum)
+  }
+  loop var track: Int = 0, track < trackCount, ++track {
+    var settings: EffectSettings = defaultEffectSettings()
+    settings.thresholdDecibels = -18.0
+    let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: track % 4))
+    let eq: Int = graph.addNode(node: eqNode(
+      filter: FilterShape.peak
+      frequency: (300 + 100 * track) as Float
+      gainDecibels: 4.0
+      quality: 1.0
+    ))
+    let compressor: Int = graph.addNode(
+      node: compressorNode(settings: settings, makeupDecibels: 2.0)
+    )
+    let fader: Int = graph.addNode(node: gainNode(decibels: -12.0 - (track % 5) as Float))
+    let pan: Int = graph.addNode(node: panNode(pan: ((track % 7) as Float - 3.0) / 3.0))
+    let meter: Int = graph.addNode(node: meterNode())
+    graph.connect(from: source, to: eq)
+    graph.connect(from: eq, to: compressor)
+    graph.connect(from: compressor, to: fader)
+    graph.connect(from: fader, to: pan)
+    graph.connect(from: pan, to: meter)
+    graph.connect(from: meter, to: buses.copyAtFallback(index: track % 2, fallback: 0))
+  }
+  ret graph
+}
+
+type Rendered {
+  left: Buffer(Float)
+  right: Buffer(Float)
+  stages: Int
+  buffers: Int
+}
+
+func renderPiece(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  output: view Rendered
+  offset: view Int
+  frames: view Int
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: output.left
+    right: output.right
+    offset: offset
+    frames: frames
+  )
+}
+
+func renderWith(
+  forTeam: view Bool
+  helpers: view Int
+  blockFrames: view Int
+  total: view Int
+) ret Rendered {
+  let compiled: CompiledPlan = compileGraph(
+    graph: session(forTeam: forTeam)
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  var renderer: GraphRenderer = createGraphRenderer()
+  var tasks: List(Task(Int)) = {}
+  if helpers > 0 {
+    let team: GraphTeam = startGraphTeam(
+      helperCount: helpers
+      workgroup: 0
+      periodNanoseconds: 0
+      tasks: tasks
+    )
+    renderer.setRendererTeam(team: team)
+  }
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  let output: Rendered = {
+    left: createSampleBuffer(count: total)
+    right: createSampleBuffer(count: total)
+    stages: compiled.plan.stageCount
+    buffers: compiled.plan.bufferCount
+  }
+  let sources: Buffer(Float) = createSampleBuffer(count: 4 * 2 * maxFrames)
+  var done: Int = 0
+  loop done < total {
+    let frames: Int = min(a: blockFrames, b: total - done)
+    loop var slot: Int = 0, slot < 4, ++slot {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        loop var i: Int = 0, i < frames, ++i {
+          setSampleAt(
+            samples: sources
+            index: (slot * 2 + channel) * maxFrames + i
+            value: sourceValue(slot: slot, channel: channel, frame: done + i)
+          )
+        }
+      }
+    }
+    markRealtimeThread()
+    renderPiece(
+      renderer: renderer
+      sources: sources
+      output: output
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    done = done + frames
+  }
+  if helpers > 0 {
+    stopGraphTeam(team: renderer.team, tasks: tasks)
+  }
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+  ret output
+}
+
+func freeRendered(output: view Rendered) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: output.left)
+    rae_ext_rae_buf_free(buf: output.right)
+  }
+}
+
+func same(first: view Rendered, second: view Rendered, total: view Int) ret Bool {
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: first.left, index: i) is not sampleAt(samples: second.left, index: i) {
+      ret false
+    }
+    if sampleAt(samples: first.right, index: i) is not sampleAt(samples: second.right, index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() {
+  let total: Int = 9600
+  let helpersHere: Int = min(a: 4, b: graphTeamHelperLimit())
+  let sizes: List(Int) = { 256, 37 }
+  loop let blockFrames: Int in sizes {
+    let serial: Rendered = renderWith(
+      forTeam: false
+      helpers: 0
+      blockFrames: blockFrames
+      total: total
+    )
+    let teamAlone: Rendered = renderWith(
+      forTeam: true
+      helpers: 0
+      blockFrames: blockFrames
+      total: total
+    )
+    let two: Rendered = renderWith(
+      forTeam: true
+      helpers: 2
+      blockFrames: blockFrames
+      total: total
+    )
+    let four: Rendered = renderWith(
+      forTeam: true
+      helpers: helpersHere
+      blockFrames: blockFrames
+      total: total
+    )
+    var peak: Float = 0.0
+    loop var i: Int = 0, i < total, ++i {
+      peak = max(a: peak, b: abs(value: sampleAt(samples: serial.left, index: i)))
+    }
+    log(
+      "blocks of {blockFrames}: the one-thread plan ({serial.buffers} buffers) sounds {peak > 0.01}; the team plan ({teamAlone.stages} stages, {teamAlone.buffers} buffers) alone, with 2 and with up to 4 helpers (as many as this machine allows): the same samples {same(
+        first: serial
+        second: teamAlone
+        total: total
+      )} {same(first: serial, second: two, total: total)} {same(
+        first: serial
+        second: four
+        total: total
+      )}"
+    )
+    freeRendered(output: serial)
+    freeRendered(output: teamAlone)
+    freeRendered(output: two)
+    freeRendered(output: four)
+  }
+}

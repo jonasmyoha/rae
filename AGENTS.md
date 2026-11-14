@@ -180,6 +180,14 @@ These instructions define **how Codex should work**, communicate progress, and i
     counters `i`/`j` stay single-letter (those letters ARE the meaning).
 - Same phasing as the single-letter rule: fix it in files you are already
   editing; do not open a mass rename of unrelated code.
+- **This rule is for names in code, not for the language's keywords.** It covers
+  what a program names: bindings, parameters, fields, functions, types, modules.
+  Keywords are a small fixed vocabulary that every reader learns once, and Rae
+  already has short ones (`ret`, `mod`, `func`, `opt`, `var`, `const`, `enum`,
+  `priv`, `pub`, `shl`, `shr`), so a new keyword may be short too. A keyword of
+  more than one word is camelCase (`taskScope`, `parallelLoop`, `mainLoop`,
+  `cExport`), never all lowercase or `snake_case` (`cheader` is an older
+  lowercase one; do not copy its form).
 
 ### NO type inference — every binding is written with its type (by design):
 - Rae has **no type inference and it is strictly FORBIDDEN to add it.** Types are
@@ -730,6 +738,17 @@ This generalizes the renderer C-surface gate above to the whole runtime.
 
   Logic inside these can still move to Rae when the codegen calls Rae
   instead (see the audit).
+- **An extern that only the main thread may call carries `mainThread`**
+  (window, input, clipboard, UIKit, a run-loop pump): `func f(...) mainThread
+  unsafe extern("...")`. The compiler then refuses a spawned function, a
+  `parallelLoop` body, a `realtime` function or a `cExport` function that
+  reaches it (docs/realtime-language-design.md §4.3). Do not mark C that is
+  merely called from the main thread today; mark what MUST be.
+- **A loop that runs until shutdown is started with `spawn thread f(...)`**
+  (its own OS thread, never a pool task), and a thread with a deadline
+  raises itself with `lib/Realtime`'s `promoteToRealtime` there; the
+  compiler refuses that call anywhere else (docs/realtime-language-design.md
+  §6.6.1).
 - **Before adding a `runtime_*.c` function, name its platform reason** in the
   commit message: one of the reasons above, or a faster platform
   implementation, with the measurement. "It was quicker to write in C" is not
@@ -850,7 +869,11 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   tag. A package is also not in the sparse toolchain. Do not move a module to a package while a
   `lib/` module imports it. Pushing with `--follow-tags` publishes the tags.
 - **A package with its own C: the pack's `native` block** (`build`, `header`, `include`, `link`,
-  `linkBrowser`, `linkLinux`, `sourcesDevice`, `definesDevice`; `packages/sql` is the model). It builds
+  `linkBrowser`, `linkLinux`, `sourcesDevice`, `definesDevice`, and `sourcesAndroid`/`definesAndroid`
+  when Android needs other sources than iOS, as for an Objective-C `.m`; a `.java` there is the package's
+  Android Java, compiled with the app's; an Android part, `android/parts/<name>/` in the install folder
+  (manifest lines, resources), is added only when the build names it in `RAE_ANDROID_PARTS`;
+  `packages/sql` is the model). It builds
   on first need into `~/.rae/packages/<name>/<pin>/install`, and a program links it only when its C
   includes `header`. No compiler code names a library. `lib/box3d` cannot move this way yet: `lib/app3d`
   imports it.
@@ -1097,6 +1120,16 @@ Spotify poller) with `-fsanitize=thread` and fails on any ThreadSanitizer
 report; it runs as one pre-suite case of every full run. A new fixture that
 starts a thread goes on its CASES list. A new mutable static in the runtime
 needs a lock, an `_Atomic`, or `__thread` — the gate is what notices.
+
+**RealtimeSanitizer gate (docs/realtime-language-design.md §5).**
+`compiler/tools/realtime-sanitize-check.sh` (`make -C compiler realtime-check`)
+compiles the real-time fixtures' C with `-Werror=function-effects` (the
+`realtime` / `noAlloc` promises, as clang's `nonblocking` / `nonallocating`)
+and runs them under `rae run --sanitize realtime` (RealtimeSanitizer, LLVM's
+clang: Homebrew's, which `make setup` installs; Apple's has none, and the gate
+SKIPs that part without it). A new fixture with `realtime` functions goes on
+its CASES list. Runtime C that `lib/` marks `realtime` carries
+`RAE_NONBLOCKING` on its prototype in the runtime header.
 
 **Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
 foot-gun programs on two shelves: `handles` (Rae does the right thing) and

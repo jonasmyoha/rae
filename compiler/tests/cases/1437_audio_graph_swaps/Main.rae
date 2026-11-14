@@ -1,0 +1,304 @@
+# audio/GraphCompile (docs/audio-design.md §5.2): delay compensation (a
+# 64-frame look-ahead path and a direct path into one bus sum to exactly
+# 2 x(t - 64)); a plan swap that keeps node state (a track added during an
+# echo leaves the output bit for bit as if nothing was swapped); and a removed
+# node that plays out its tail (the echo delay removed mid-echo, same output).
+# The audio-thread calls run marked real-time under RAE_REALTIME_CHECK=1.
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/GraphCompile
+open audio/GraphRender
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 256
+
+const total: Int = 12000
+
+# slot 0: a 1000-frame burst of a sine, then silence; slot 1: silence
+func sourceValue(slot: view Int, channel: view Int, frame: view Int) ret Float {
+  if slot is not 0 or frame >= 1000 {
+    ret 0.0
+  }
+  ret Math.sin(x: (frame as Float) * 0.05 + (channel as Float)) * 0.5
+}
+
+func renderStep(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: left
+    right: right
+    offset: offset
+    frames: frames
+  )
+}
+
+# Render frames [from, to) in blocks of 100
+func renderRange(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  from: view Int
+  to: view Int
+) {
+  var done: Int = from
+  loop done < to {
+    let frames: Int = min(a: 100, b: to - done)
+    loop var slot: Int = 0, slot < 2, ++slot {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        loop var i: Int = 0, i < frames, ++i {
+          setSampleAt(
+            samples: sources
+            index: (slot * 2 + channel) * maxFrames + i
+            value: sourceValue(slot: slot, channel: channel, frame: done + i)
+          )
+        }
+      }
+    }
+    markRealtimeThread()
+    renderStep(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    done = done + frames
+  }
+}
+
+func freePlans(renderer: view GraphRenderer) {
+  loop let old: RenderPlan in renderer.takeReclaimedPlans() {
+    freeRenderPlan(plan: old)
+  }
+}
+
+# The source through an echo (delay 4800, entity 2) and through a fader
+# (entity 4) into a bus (entity 3) and the output
+func echoGraph(withEcho: view Bool, withNewTrack: view Bool) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(
+    node: identified(node: sourceNode(kind: NodeKind.voices, slot: 0), entityId: 1)
+  )
+  let bus: Int = graph.addNode(node: identified(node: sumNode(), entityId: 3))
+  let fader: Int = graph.addNode(node: identified(node: gainNode(decibels: -3.0), entityId: 4))
+  let out: Int = graph.addNode(node: outputNode())
+  if withEcho {
+    let echo: Int = graph.addNode(node: identified(node: delayNode(frames: 4800), entityId: 2))
+    graph.connect(from: source, to: echo)
+    graph.connect(from: echo, to: bus)
+  }
+  graph.connect(from: source, to: fader)
+  graph.connect(from: fader, to: bus)
+  if withNewTrack {
+    let track: Int = graph.addNode(
+      node: identified(node: sourceNode(kind: NodeKind.stream, slot: 1), entityId: 10)
+    )
+    let trackFader: Int = graph.addNode(
+      node: identified(node: gainNode(decibels: 0.0), entityId: 11)
+    )
+    graph.connect(from: track, to: trackFader)
+    graph.connect(from: trackFader, to: bus)
+  }
+  graph.connect(from: bus, to: out)
+  ret graph
+}
+
+# Render the whole range with `first`, or swap to `second` at frame 3000
+func renderEcho(
+  first: view AudioGraph
+  second: view AudioGraph
+  swap: view Bool
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+) {
+  var renderer: GraphRenderer = createGraphRenderer()
+  let sources: Buffer(Float) = createSampleBuffer(count: 2 * 2 * maxFrames)
+  let compiled: CompiledPlan = compileGraph(
+    graph: first
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  if swap {
+    renderRange(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+      from: 0
+      to: 3000
+    )
+    let next: CompiledPlan = compileGraphAfter(
+      graph: second
+      previousGraph: first
+      previousPlan: compiled.plan
+      sampleRate: sampleRate
+      maxFrames: maxFrames
+    )
+    let nextGiven: Bool = renderer.submitPlan(plan: next.plan)
+    renderRange(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+      from: 3000
+      to: total
+    )
+  } else {
+    renderRange(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+      from: 0
+      to: total
+    )
+  }
+  freePlans(renderer: renderer)
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+}
+
+func sameSamples(a: view Buffer(Float), b: view Buffer(Float)) ret Bool {
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: a, index: i) is not sampleAt(samples: b, index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func echoEnergy(samples: view Buffer(Float)) ret Float {
+  var peak: Float = 0.0
+  loop var i: Int = 4800, i < 5800, ++i {
+    peak = max(a: peak, b: Math.abs(value: sampleAt(samples: samples, index: i)))
+  }
+  ret peak
+}
+
+func compensation() {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let lookAhead: Int = graph.addNode(node: latentNode(frames: 64))
+  let direct: Int = graph.addNode(node: gainNode(decibels: 0.0))
+  let bus: Int = graph.addNode(node: sumNode())
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: source, to: lookAhead)
+  graph.connect(from: source, to: direct)
+  graph.connect(from: lookAhead, to: bus)
+  graph.connect(from: direct, to: bus)
+  graph.connect(from: bus, to: out)
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  var renderer: GraphRenderer = createGraphRenderer()
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  let sources: Buffer(Float) = createSampleBuffer(count: 2 * 2 * maxFrames)
+  let left: Buffer(Float) = createSampleBuffer(count: total)
+  let right: Buffer(Float) = createSampleBuffer(count: total)
+  renderRange(
+    renderer: renderer
+    sources: sources
+    left: left
+    right: right
+    from: 0
+    to: 2000
+  )
+  # both paths 64 frames late: exactly 2 x(t - 64)
+  var exact: Bool = true
+  loop var i: Int = 0, i < 2000, ++i {
+    var want: Float = 0.0
+    if i >= 64 {
+      want = sourceValue(slot: 0, channel: 0, frame: i - 64) + sourceValue(
+        slot: 0
+        channel: 0
+        frame: i - 64
+      )
+    }
+    if sampleAt(samples: left, index: i) is not want {
+      exact = false
+    }
+  }
+  log(
+    "delay compensation: a 64-frame look-ahead path and a direct path into one bus: the plan's latency {compiled.plan.latencyFrames} frames, {compiled.plan.nodeCount} nodes (one delay added), the sum is exactly 2 x(t - 64): {exact}"
+  )
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+  }
+}
+
+func swaps() {
+  let echo: AudioGraph = echoGraph(withEcho: true, withNewTrack: false)
+  let reference: Buffer(Float) = createSampleBuffer(count: total)
+  let referenceRight: Buffer(Float) = createSampleBuffer(count: total)
+  renderEcho(
+    first: echo
+    second: echo
+    swap: false
+    left: reference
+    right: referenceRight
+  )
+  let added: Buffer(Float) = createSampleBuffer(count: total)
+  let addedRight: Buffer(Float) = createSampleBuffer(count: total)
+  renderEcho(
+    first: echo
+    second: echoGraph(withEcho: true, withNewTrack: true)
+    swap: true
+    left: added
+    right: addedRight
+  )
+  let removed: Buffer(Float) = createSampleBuffer(count: total)
+  let removedRight: Buffer(Float) = createSampleBuffer(count: total)
+  renderEcho(
+    first: echo
+    second: echoGraph(withEcho: false, withNewTrack: false)
+    swap: true
+    left: removed
+    right: removedRight
+  )
+  log(
+    "the echo (frames 4800-5800) peaks at {echoEnergy(samples: reference)}; a track added at frame 3000, mid-echo: the output equals the unswapped one bit for bit {sameSamples(
+      a: added
+      b: reference
+    ) and sameSamples(a: addedRight, b: referenceRight)}"
+  )
+  log(
+    "the echo's delay removed at frame 3000: its tail still plays to its end, bit for bit {sameSamples(
+      a: removed
+      b: reference
+    ) and sameSamples(a: removedRight, b: referenceRight)}"
+  )
+  unsafe {
+    rae_ext_rae_buf_free(buf: reference)
+    rae_ext_rae_buf_free(buf: referenceRight)
+    rae_ext_rae_buf_free(buf: added)
+    rae_ext_rae_buf_free(buf: addedRight)
+    rae_ext_rae_buf_free(buf: removed)
+    rae_ext_rae_buf_free(buf: removedRight)
+  }
+}
+
+func main() {
+  compensation()
+  swaps()
+}

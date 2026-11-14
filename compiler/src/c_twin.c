@@ -579,7 +579,15 @@ static void emit_poll(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
 /* A call to a `blocking` extern (c_blocking.c): the arguments are packed by
  * the normal call's own argument text, the call goes to a blocking-call
  * thread (rae_sched_blocking_call) while the task suspends, and the call
- * reads as the result it stored. Where no thread can be had it runs here. */
+ * reads as the result it stored. Where no thread can be had it runs here.
+ *
+ * The locals are saved into their frame slots BEFORE the arguments are
+ * packed, and the arguments read the locals from those slots (as a child
+ * call's do): a `mod` argument such as Sys.readFileBytes's `outLen` then
+ * points at the slot, which outlives this step, and the restore after the
+ * call reads what the extern wrote. Packed from the step's C locals, the
+ * pointer named dead stack once the step returned to suspend, and the
+ * restore brought back the value from before the call. */
 static void emit_blocking(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
   int state = ++ctx->twin_state;
   const char* symbol = rae_mangle_function(ctx->compiler_ctx, &point->callee->as.func_decl);
@@ -596,10 +604,26 @@ static void emit_blocking(CFuncContext* ctx, const TwinPoint* point, FILE* out) 
     return;
   }
   size_t symbol_length = strlen(symbol);
-  fprintf(out, "  /* resumable: blocking call */\n  {\n  __rae_frame->blocking = __raeblock_pack_%s(", symbol);
-  fwrite(text + start + symbol_length + 1, 1, end - start - symbol_length - 1, out);
-  fprintf(out, ";\n");
+  char* frame_text = NULL;
+  size_t frame_length = 0;
+  FILE* frame_out = open_memstream(&frame_text, &frame_length);
+  ctx->twin_args_from_frame = true;
+  emit_expr(ctx, point->expr, frame_out, PREC_LOWEST, false, false);
+  ctx->twin_args_from_frame = false;
+  fclose(frame_out);
+  size_t frame_start = 0, frame_end = 0;
+  if (!frame_text || !c_blocking_find_call(frame_text, symbol, &frame_start, &frame_end)) {
+    ctx->twin_failed = true;
+    free(frame_text);
+    free(text);
+    return;
+  }
+  fprintf(out, "  /* resumable: blocking call */\n  {\n");
   emit_save_all(ctx, out);
+  fprintf(out, "  __rae_frame->blocking = __raeblock_pack_%s(", symbol);
+  fwrite(frame_text + frame_start + symbol_length + 1, 1, frame_end - frame_start - symbol_length - 1, out);
+  fprintf(out, ";\n");
+  free(frame_text);
   char call[512];
   snprintf(call, sizeof call, "rae_sched_blocking_call(__raeblock_run_%s, __rae_frame->blocking)", symbol);
   emit_register_and_suspend(out, state, call);

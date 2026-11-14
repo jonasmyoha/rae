@@ -1,0 +1,423 @@
+# audio/AudioGraph and audio/GraphRender (docs/audio-design.md §5.2, §5.3):
+# a small graph null-tested against the formula; a busier one (two sources,
+# gain, delay, send, meter, sum, limiter) equal at block sizes 1, 17, 64,
+# varying and 512; a cycle refused with its nodes; a 200-node session
+# compiled to a few scratch buffers; the 5 ms gain ramp, a meter, and a plan
+# swap whose old plan comes back on the reclaim ring. The audio-thread calls
+# run on a thread marked real-time under RAE_REALTIME_CHECK=1.
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/GraphCompile
+open audio/GraphRender
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 512
+
+# Source slot s at absolute frame f: two different sines per slot
+func sourceValue(slot: view Int, channel: view Int, frame: view Int) ret Float {
+  let frequency: Float64 = ((220 * (slot + 1) + 30 * channel) as Float64)
+  ret (Math.sin(
+    x: (2.0 * 3.141592653589793 * frequency * (frame as Float64) / (sampleRate as Float64)) as Float
+  ) * 0.9)
+}
+
+func fillSources(
+  sources: view Buffer(Float)
+  slots: view Int
+  first: view Int
+  frames: view Int
+) {
+  loop var slot: Int = 0, slot < slots, ++slot {
+    loop var channel: Int = 0, channel < 2, ++channel {
+      loop var i: Int = 0, i < frames, ++i {
+        setSampleAt(
+          samples: sources
+          index: (slot * 2 + channel) * maxFrames + i
+          value: sourceValue(slot: slot, channel: channel, frame: first + i)
+        )
+      }
+    }
+  }
+}
+
+func renderBlock(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: left
+    right: right
+    offset: offset
+    frames: frames
+  )
+}
+
+# Render `total` frames in blocks whose sizes cycle through `sizes`
+func renderAll(
+  graph: view AudioGraph
+  sizes: view List(Int)
+  total: view Int
+  slots: view Int
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+) {
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  var renderer: GraphRenderer = createGraphRenderer()
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  let sources: Buffer(Float) = createSampleBuffer(count: slots * 2 * maxFrames)
+  var done: Int = 0
+  var turn: Int = 0
+  loop done < total {
+    let frames: Int = min(
+      a: sizes.copyAtFallback(index: turn % sizes.length(), fallback: 64)
+      b: total - done
+    )
+    fillSources(
+      sources: sources
+      slots: slots
+      first: done
+      frames: frames
+    )
+    markRealtimeThread()
+    renderBlock(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+      offset: done
+      frames: frames
+    )
+    unmarkRealtimeThread()
+    done = done + frames
+    turn = turn + 1
+  }
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+  }
+}
+
+func nullTest() {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let gain: Int = graph.addNode(node: gainNode(decibels: -6.0))
+  let pan: Int = graph.addNode(node: panNode(pan: 0.5))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: source, to: gain)
+  graph.connect(from: gain, to: pan)
+  graph.connect(from: pan, to: out)
+  let total: Int = 4800
+  let left: Buffer(Float) = createSampleBuffer(count: total)
+  let right: Buffer(Float) = createSampleBuffer(count: total)
+  renderAll(
+    graph: graph
+    sizes: List(Int) { 256 }
+    total: total
+    slots: 1
+    left: left
+    right: right
+  )
+  # the reference, by formula in Float64
+  let gainLinear: Float64 = Math.pow(base: 10.0, exp: -6.0 / 20.0) as Float64
+  let angle: Float64 = (0.5 + 1.0) * 0.7853981633974483
+  var peak: Float64 = 0.0
+  loop var i: Int = 0, i < total, ++i {
+    let wantLeft: Float64 = (sourceValue(slot: 0, channel: 0, frame: i) as Float64) * gainLinear * (Math.cos(
+      x: angle as Float
+    ) as Float64)
+    let wantRight: Float64 = (sourceValue(slot: 0, channel: 1, frame: i) as Float64) * gainLinear * (Math.sin(
+      x: angle as Float
+    ) as Float64)
+    var leftError: Float64 = (sampleAt(samples: left, index: i) as Float64) - wantLeft
+    var rightError: Float64 = (sampleAt(samples: right, index: i) as Float64) - wantRight
+    if leftError < 0.0 {
+      leftError = -leftError
+    }
+    if rightError < 0.0 {
+      rightError = -rightError
+    }
+    if leftError > peak {
+      peak = leftError
+    }
+    if rightError > peak {
+      peak = rightError
+    }
+  }
+  # -100 dBFS is 0.00001 of full scale
+  log(
+    "null test (source -> gain -6 dB -> pan 0.5 -> out against the formula): below -100 dBFS {peak < 0.00001}"
+  )
+  unsafe {
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+  }
+}
+
+func busyGraph() ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  let first: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let second: Int = graph.addNode(node: sourceNode(kind: NodeKind.stream, slot: 1))
+  let gain: Int = graph.addNode(node: gainNode(decibels: 3.0))
+  let delay: Int = graph.addNode(node: delayNode(frames: 37))
+  let send: Int = graph.addNode(node: sendNode(decibels: -4.0, preFader: true))
+  let meter: Int = graph.addNode(node: meterNode())
+  let sum: Int = graph.addNode(node: sumNode())
+  let limiter: Int = graph.addNode(node: limiterNode(ceilingDecibels: -3.0, releaseSeconds: 0.02))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: first, to: gain)
+  graph.connect(from: gain, to: delay)
+  graph.connect(from: second, to: send)
+  graph.connect(from: send, to: meter)
+  graph.connect(from: delay, to: sum)
+  graph.connect(from: meter, to: sum)
+  graph.connect(from: sum, to: limiter)
+  graph.connect(from: limiter, to: out)
+  ret graph
+}
+
+func blockSizes() {
+  let total: Int = 6000
+  let graph: AudioGraph = busyGraph()
+  let refLeft: Buffer(Float) = createSampleBuffer(count: total)
+  let refRight: Buffer(Float) = createSampleBuffer(count: total)
+  renderAll(
+    graph: graph
+    sizes: List(Int) { 512 }
+    total: total
+    slots: 2
+    left: refLeft
+    right: refRight
+  )
+  var peak: Float = 0.0
+  loop var i: Int = 0, i < total, ++i {
+    peak = max(a: peak, b: Math.abs(value: sampleAt(samples: refLeft, index: i)))
+  }
+  var line: String = "block sizes (two sources, gain, delay 37, send, meter, sum, limiter -3 dB): peak within the ceiling {peak <= 0.7080}"
+  loop let sizes: List(Int) in List(List(Int)) {
+    List(Int) { 1 }
+    List(Int) { 17 }
+    List(Int) { 64 }
+    List(Int) {
+      3
+      100
+      7
+      256
+      1
+      33
+    }
+  } {
+    let left: Buffer(Float) = createSampleBuffer(count: total)
+    let right: Buffer(Float) = createSampleBuffer(count: total)
+    renderAll(
+      graph: graph
+      sizes: sizes
+      total: total
+      slots: 2
+      left: left
+      right: right
+    )
+    var same: Bool = true
+    loop var i: Int = 0, i < total, ++i {
+      if sampleAt(samples: left, index: i) is not sampleAt(samples: refLeft, index: i) or sampleAt(
+        samples: right
+        index: i
+      ) is not sampleAt(samples: refRight, index: i) {
+        same = false
+      }
+    }
+    var name: String = "{sizes.copyAtFallback(index: 0, fallback: 0)}"
+    if sizes.length() > 1 {
+      name = "varying"
+    }
+    line = "{line}, {name} equal {same}"
+    unsafe {
+      rae_ext_rae_buf_free(buf: left)
+      rae_ext_rae_buf_free(buf: right)
+    }
+  }
+  log(line)
+  unsafe {
+    rae_ext_rae_buf_free(buf: refLeft)
+    rae_ext_rae_buf_free(buf: refRight)
+  }
+}
+
+func cycle() {
+  var graph: AudioGraph = createAudioGraph()
+  let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let sum: Int = graph.addNode(node: sumNode())
+  let gain: Int = graph.addNode(node: gainNode(decibels: 0.0))
+  let delay: Int = graph.addNode(node: delayNode(frames: 10))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: source, to: sum)
+  graph.connect(from: sum, to: gain)
+  graph.connect(from: gain, to: delay)
+  graph.connect(from: delay, to: sum)
+  graph.connect(from: gain, to: out)
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  log("a feedback loop without a cut: {compiled.error}")
+}
+
+# 40 tracks (source -> gain -> pan -> meter) in groups of four into ten bus
+# sums, each bus through a gain and a meter into a master sum, the input
+# through six meters into it too, a limiter and the output: 200 nodes
+func session() {
+  var graph: AudioGraph = createAudioGraph()
+  var buses: List(Int) = {}
+  loop var group: Int = 0, group < 10, ++group {
+    let bus: Int = graph.addNode(node: sumNode())
+    buses.add(value: bus)
+    loop var track: Int = 0, track < 4, ++track {
+      let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+      let gain: Int = graph.addNode(node: gainNode(decibels: -12.0))
+      let pan: Int = graph.addNode(node: panNode(pan: -0.5))
+      let meter: Int = graph.addNode(node: meterNode())
+      graph.connect(from: source, to: gain)
+      graph.connect(from: gain, to: pan)
+      graph.connect(from: pan, to: meter)
+      graph.connect(from: meter, to: bus)
+    }
+  }
+  let master: Int = graph.addNode(node: sumNode())
+  loop let bus: Int in buses {
+    let busGain: Int = graph.addNode(node: gainNode(decibels: -3.0))
+    let busMeter: Int = graph.addNode(node: meterNode())
+    graph.connect(from: bus, to: busGain)
+    graph.connect(from: busGain, to: busMeter)
+    graph.connect(from: busMeter, to: master)
+  }
+  # the input through a chain of six meters into the master: 200 nodes in all
+  var previous: Int = graph.addNode(node: sourceNode(kind: NodeKind.input, slot: 0))
+  loop var i: Int = 0, i < 6, ++i {
+    let next: Int = graph.addNode(node: meterNode())
+    graph.connect(from: previous, to: next)
+    previous = next
+  }
+  graph.connect(from: previous, to: master)
+  let limiter: Int = graph.addNode(node: limiterNode(ceilingDecibels: -1.0, releaseSeconds: 0.05))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: master, to: limiter)
+  graph.connect(from: limiter, to: out)
+  let compiled: CompiledPlan = compileGraph(
+    graph: graph
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  )
+  log(
+    "a session of {graph.nodes.length()} nodes compiles ('{compiled.error}') to {compiled.plan.bufferCount} scratch buffers"
+  )
+  freeRenderPlan(plan: compiled.plan)
+}
+
+func swapRampMeter() {
+  var first: AudioGraph = createAudioGraph()
+  let source: Int = first.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let gain: Int = first.addNode(node: gainNode(decibels: 0.0))
+  let meter: Int = first.addNode(node: meterNode())
+  let out: Int = first.addNode(node: outputNode())
+  first.connect(from: source, to: gain)
+  first.connect(from: gain, to: meter)
+  first.connect(from: meter, to: out)
+  var renderer: GraphRenderer = createGraphRenderer()
+  let sources: Buffer(Float) = createSampleBuffer(count: 2 * maxFrames)
+  let left: Buffer(Float) = createSampleBuffer(count: 1024)
+  let right: Buffer(Float) = createSampleBuffer(count: 1024)
+  loop var i: Int = 0, i < maxFrames, ++i {
+    setSampleAt(samples: sources, index: i, value: 1.0)
+    setSampleAt(samples: sources, index: maxFrames + i, value: 1.0)
+  }
+  let firstGiven: Bool = renderer.submitPlan(
+    plan: compileGraph(graph: first, sampleRate: sampleRate, maxFrames: maxFrames).plan
+  )
+  markRealtimeThread()
+  renderBlock(
+    renderer: renderer
+    sources: sources
+    left: left
+    right: right
+    offset: 0
+    frames: 256
+  )
+  renderer.setGainTarget(graphNode: gain, decibels: -20.0)
+  renderBlock(
+    renderer: renderer
+    sources: sources
+    left: left
+    right: right
+    offset: 0
+    frames: 512
+  )
+  let peak: Float = renderer.takeMeterPeak(graphNode: meter)
+  unmarkRealtimeThread()
+  # 5 ms at 48 kHz is 240 frames: halfway at frame 120, at -20 dB (0.1) from 240
+  log(
+    "gain ramp: {sampleAt(samples: left, index: 0)} at the start, {sampleAt(
+      samples: left
+      index: 120
+    )} halfway, {sampleAt(samples: left, index: 240)} after 5 ms, {sampleAt(
+      samples: left
+      index: 511
+    )} at the end; meter peak {peak}"
+  )
+  var second: AudioGraph = createAudioGraph()
+  let quiet: Int = second.addNode(node: sourceNode(kind: NodeKind.voices, slot: 0))
+  let half: Int = second.addNode(node: gainNode(decibels: -6.0206))
+  let secondOut: Int = second.addNode(node: outputNode())
+  second.connect(from: quiet, to: half)
+  second.connect(from: half, to: secondOut)
+  let secondGiven: Bool = renderer.submitPlan(
+    plan: compileGraph(graph: second, sampleRate: sampleRate, maxFrames: maxFrames).plan
+  )
+  let waitingBefore: Int = renderer.takeReclaimedPlans().length()
+  markRealtimeThread()
+  renderBlock(
+    renderer: renderer
+    sources: sources
+    left: left
+    right: right
+    offset: 0
+    frames: 64
+  )
+  unmarkRealtimeThread()
+  var reclaimed: Int = 0
+  loop let old: RenderPlan in renderer.takeReclaimedPlans() {
+    reclaimed = reclaimed + 1
+    freeRenderPlan(plan: old)
+  }
+  log(
+    "plan swap: {waitingBefore} plans on the reclaim ring before the block, {reclaimed} after it; the new plan plays {sampleAt(
+      samples: left
+      index: 10
+    )}"
+  )
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+  }
+}
+
+func main() {
+  nullTest()
+  blockSizes()
+  cycle()
+  session()
+  swapRampMeter()
+}

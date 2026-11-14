@@ -1,0 +1,217 @@
+# audio/AudioComponents — the mixer as entities (docs/audio-design.md §10.2):
+# tracks, buses and sends are entities on the program's World, with these
+# components. The program keeps one AudioEntities (its tables) and makes the
+# entities with its own EntityAllocator; the systems turn them into the render
+# graph (audio/graphSystem), its parameters (audio/parameterSystem) and back
+# into meters and events (audio/feedbackSystem).
+#
+#     let drums: EntityId = world.entities.allocEntity()
+#     world.audio.tracks.componentSet(entityId: drums, data: AudioTrack { kind:
+#     AudioTrackKind.audio, sourceSlot: 0 })
+#     world.audio.gains.componentSet(entityId: drums, data: AudioGain { decibels: -6.0 })
+#     world.audio.outputs.componentSet(entityId: drums, data: AudioOutput { busEntityId: drumBus })
+open audio/AudioGraph
+open audio/EffectStates
+open ecs/ComponentTable
+open ecs/Entity
+
+enum AudioTrackKind {
+  # a source (a slot of the sources pool: the voice set, a stream, the input)
+  audio
+  # sums what is routed to it
+  bus
+  # the one bus that goes to the device
+  master
+}
+
+type AudioTrack {
+  kind: AudioTrackKind
+  # an audio track's slot in the sources pool
+  sourceSlot: Int
+}
+
+type AudioGain {
+  decibels: Float
+}
+
+# -1 all left, 0 the middle, 1 all right (equal power)
+type AudioPan {
+  pan: Float
+}
+
+type AudioMute {
+  muted: Bool
+}
+
+# When any audio track is soloed, only the soloed ones are heard
+type AudioSolo {
+  soloed: Bool
+}
+
+# The bus a track or bus sums into (the master when it has none)
+type AudioOutput {
+  busEntityId: EntityId
+}
+
+# A send is an entity of its own: a level from one track (before or after
+# its fader) into a bus
+type AudioSend {
+  sourceEntityId: EntityId
+  targetEntityId: EntityId
+  decibels: Float
+  preFader: Bool
+}
+
+# An effect on a track or bus, before its fader (built-in kinds for now): a
+# gain, a delay, a limiter, an EQ band, a compressor or a reverb
+type AudioInsert {
+  kind: NodeKind
+  # a gain's, an EQ band's gain, a compressor's makeup
+  decibels: Float
+  delayFrames: Int
+  ceilingDecibels: Float
+  reportsLatency: Bool
+  # an EQ band's, a compressor's or a reverb's settings (audio/EffectStates)
+  effect: EffectSettings
+  # a program's own kind (audio/CustomNodes): its number and settings
+  customKind: Int
+  customSettings: List(Float)
+}
+
+type AudioInserts {
+  inserts: List(AudioInsert)
+}
+
+# Written back from the audio thread: the peak since the last frame
+type AudioMeter {
+  peak: Float
+}
+
+type AudioEntities {
+  tracks: ComponentTable(AudioTrack)
+  gains: ComponentTable(AudioGain)
+  pans: ComponentTable(AudioPan)
+  mutes: ComponentTable(AudioMute)
+  solos: ComponentTable(AudioSolo)
+  outputs: ComponentTable(AudioOutput)
+  sends: ComponentTable(AudioSend)
+  inserts: ComponentTable(AudioInserts)
+  meters: ComponentTable(AudioMeter)
+}
+
+func createAudioEntities() ret AudioEntities {
+  ret AudioEntities {
+    tracks: createComponentTable(AudioTrack)
+    gains: createComponentTable(AudioGain)
+    pans: createComponentTable(AudioPan)
+    mutes: createComponentTable(AudioMute)
+    solos: createComponentTable(AudioSolo)
+    outputs: createComponentTable(AudioOutput)
+    sends: createComponentTable(AudioSend)
+    inserts: createComponentTable(AudioInserts)
+    meters: createComponentTable(AudioMeter)
+  }
+}
+
+func gainInsert(decibels: view Float) ret AudioInsert {
+  ret AudioInsert {
+    kind: NodeKind.gain
+    decibels: decibels
+    delayFrames: 0
+    ceilingDecibels: 0.0
+    reportsLatency: false
+    effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
+  }
+}
+
+func delayInsert(frames: view Int, reportsLatency: view Bool) ret AudioInsert {
+  ret AudioInsert {
+    kind: NodeKind.delay
+    decibels: 0.0
+    delayFrames: frames
+    ceilingDecibels: 0.0
+    reportsLatency: reportsLatency
+    effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
+  }
+}
+
+func limiterInsert(ceilingDecibels: view Float) ret AudioInsert {
+  ret AudioInsert {
+    kind: NodeKind.limiter
+    decibels: 0.0
+    delayFrames: 0
+    ceilingDecibels: ceilingDecibels
+    reportsLatency: false
+    effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
+  }
+}
+
+# An EQ band (audio/EffectStates' FilterShape) at `frequency` Hz
+func eqInsert(
+  filter: view FilterShape
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: gainDecibels)
+  insert.kind = NodeKind.eq
+  insert.effect.filter = filter
+  insert.effect.frequency = frequency
+  insert.effect.quality = quality
+  ret insert
+}
+
+# A compressor (its level measured on its own input)
+func compressorInsert(settings: view EffectSettings, makeupDecibels: view Float) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: makeupDecibels)
+  insert.kind = NodeKind.compressor
+  insert.effect = settings
+  ret insert
+}
+
+# Freeverb (roomSize, damping, wet, dry, width of the settings)
+func reverbInsert(settings: view EffectSettings) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: 0.0)
+  insert.kind = NodeKind.reverb
+  insert.effect = settings
+  ret insert
+}
+
+# A node of the program's own kind `kind` (audio/CustomNodes)
+func customInsert(kind: view Int, settings: view List(Float)) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: 0.0)
+  insert.kind = NodeKind.custom
+  insert.customKind = kind
+  insert.customSettings = settings
+  ret insert
+}
+
+# ---- events -------------------------------------------------------------------
+enum AudioEventKind {
+  # the output device changed (a new route: headphones in, another interface)
+  deviceChanged
+  # a call, Siri, another app's alarm stopped the sound
+  interrupted
+  # the interruption is over (value 1: music should resume)
+  resumed
+  # the output device went away (music paused)
+  routeLost
+  # the device played `value` frames of silence since the last frame
+  underrun
+  # a MIDI source appeared or went away (value: its id)
+  midiDeviceAdded
+  midiDeviceRemoved
+  # a voice finished (value: its VoiceId's value)
+  voiceEnded
+}
+
+type AudioEvent {
+  kind: AudioEventKind
+  value: Int
+}

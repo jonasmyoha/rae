@@ -1,0 +1,66 @@
+# `spawn thread f(...)` (docs/realtime-language-design.md §6.6.1) always
+# starts its own OS thread, even for a body that never waits, which a plain
+# `spawn` would put on the worker pool. 32 tasks each count themselves in and
+# then spin until all 32 are in: on a pool with fewer workers the late ones
+# could not start while the early ones spin, so every task seeing all 32 shows
+# that each had its own thread. The function stays ordinary: it is called
+# directly too. `spawn thread(...)` still spawns a function named `thread`.
+open Atomic
+
+const taskCount: Int = 32
+
+# Count in, then wait (spinning, not waiting) until every task is in, or 2 s
+func meetEveryone(started: own Atomic(Int)) ret Bool {
+  let count: Int = started.fetchAdd(amount: 1)
+  let deadline: Int = nowNs() + 2000000000
+  loop started.load() < taskCount and nowNs() < deadline {
+    let seen: Int = started.load()
+  }
+  ret started.load() >= taskCount
+}
+
+func meetAndCount(
+  started: own Atomic(Int)
+  met: own Atomic(Int)
+  finished: own Atomic(Int)
+) ret Bool {
+  let sawEveryone: Bool = meetEveryone(started: started)
+  if sawEveryone {
+    let count: Int = met.fetchAdd(amount: 1)
+  }
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret sawEveryone
+}
+
+# Start every task and wait (at most 4 s) until each has finished
+func startAll(started: view Atomic(Int), met: view Atomic(Int), finished: view Atomic(Int)) {
+  var tasks: List(Task(Bool)) = {}
+  loop var i: Int = 0, i < taskCount, ++i {
+    tasks.add(value: spawn thread meetAndCount(started: started, met: met, finished: finished))
+  }
+  let deadline: Int = nowNs() + 4000000000
+  loop finished.load() < taskCount and nowNs() < deadline {
+    sleep(ms: 1)
+  }
+}
+
+func thread(value: view Int) ret Int {
+  ret value + 1
+}
+
+func main() {
+  let started: Atomic(Int) = createAtomic(Int, value: 0)
+  let met: Atomic(Int) = createAtomic(Int, value: 0)
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  startAll(started: started, met: met, finished: finished)
+  let everyoneMet: Bool = met.load() is taskCount
+  log("{taskCount} spawn-thread tasks all saw each other start: {everyoneMet}")
+  let alone: Atomic(Int) = createAtomic(Int, value: taskCount - 1)
+  log("called directly: {meetEveryone(started: alone)}")
+  let named: Task(Int) = spawn thread(value: 41)
+  log("spawn thread(value: 41) calls the function named thread: {named.get()}")
+  started.freeAtomic()
+  met.freeAtomic()
+  finished.freeAtomic()
+  alone.freeAtomic()
+}

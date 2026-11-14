@@ -247,6 +247,9 @@ struct AstExpr {
        * froze the lent places until the scope ends, and the scope waits for
        * the task */
       bool spawn_lends;
+      // `spawn thread f(...)` (docs/realtime-language-design.md §6.6.1): this
+      // spawn always starts its own OS thread, never a pool task
+      bool spawn_thread;
     } unary;
     /* `value as Type`. Rae has NO implicit numeric conversions, so every
      * change of numeric representation is one of these nodes. */
@@ -491,6 +494,23 @@ typedef struct {
   bool extern_before_func;
   bool invalid_unsafe_extern_order;
   bool is_blocking;  // `blocking unsafe extern`: a C call that may wait long (lightweight-spawn-design §4.4)
+  // `realtime`: it and everything it reaches neither allocate, free, lock nor
+  // wait; `noAlloc`: neither allocate nor free (docs/realtime-language-design.md
+  // §3). Checked by realtime_check.c; on an extern, a promise about the C.
+  bool is_realtime;
+  bool is_no_alloc;
+  // `mainThread`: call it only on the thread that runs `main` (window, input,
+  // UIKit; docs/realtime-language-design.md §4.3). On an extern a promise about
+  // the C; on a Rae function a checked one. realtime_check.c refuses a spawned
+  // function, a parallelLoop body, a realtime function or a cExport function
+  // not marked mainThread that reaches one.
+  bool is_main_thread;
+  // `cExport("cName")`: C may call this Rae function by that name, from any
+  // thread (docs/realtime-language-design.md §6.1). The backend writes a
+  // non-static C function of that name that calls it; its parameters and
+  // result are C values (numbers, Bool, Ptr, Buffer), checked by the parser.
+  const char* c_export_symbol;
+  size_t c_export_line;
   const char* extern_symbol; // Explicit C ABI symbol from `extern("name")` (general FFI, #497). When set, the mangler binds this extern to exactly this C symbol — no rae_ext_ prefix, no shim. NULL = default mangling.
   const char* module_name; // Logical module (mirrors AstDecl.module_name); used by the mangler for namespace-qualified extern C symbols. NULL for entry/project.
   const char* origin_file; // Source file (mirrors AstDecl.origin_file); lets the mangler restrict namespace-qualified externs to stdlib (lib/) and not project FFI.

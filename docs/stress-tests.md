@@ -225,3 +225,14 @@ borrowed list counts as changing it. Before the fix it compiled and printed
 5196 where the list held 7. The rule moved the lib sites it caught to the narrowest
 parameter (a callee takes the field it changes, not the whole struct) or to
 moving a list out of its struct for the loop.
+
+## One place as `mod` and as `view` in one call (case 13)
+
+`13_modAndViewOfOnePlace` passes one list to a call as `mod` and as `view`
+(the function grows it through one and reads it through the other) and as
+two `mod`s. On the **footgun** shelf since it was added (2026-11-12, the
+`restrict` audit of docs/realtime-language-design.md §4.6): it compiles, the
+view reads 1 item and then 101. Rae has no rule against overlapping
+arguments of one call; cases 11 and 12 refuse overlap with a *held* borrow
+(a `viewAt` binding), not between two arguments. The fix is a language rule
+(exclusive access for `mod` arguments), queued as a decision.

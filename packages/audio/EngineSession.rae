@@ -1,0 +1,151 @@
+# audio/EngineSession — the engine's own handling of the host's audio session
+# (docs/audio-design.md §9): which intent wins while sounds play, taking the
+# session (iOS) or the audio focus (Android) just before a sound and letting it
+# go a second after the last one, and what the engine does with the host's
+# events (an interruption pauses music and cuts alerts, a lost route pauses
+# music, a media services reset sets the session up again). The policy is
+# audio/AudioSession; a program's calls (injectSessionEvent, takeSessionEvents,
+# resumeMusic, sessionDescription, focusStatus) stay in audio/Audio. Split from
+# audio/Audio, which calls applySession and updateSession.
+import Math
+open audio/Audio
+open audio/AudioGlue
+open audio/AudioMixer
+open audio/AudioSession
+
+# The intent of what plays now: an alert while one sounds, spoken text while
+# the voice bus speaks, else the program's own
+func wantedSessionKind(this: view AudioEngine) ret AudioSessionKind {
+  if this.busIsPlaying(bus: AudioBusKind.alerts) {
+    ret AudioSessionKind.alert
+  }
+  if this.busIsPlaying(bus: AudioBusKind.voice) and this.sessionKind is not AudioSessionKind.recording {
+    ret AudioSessionKind.spokenText
+  }
+  ret this.sessionKind
+}
+
+# Set the category for what plays, and activate the session
+func applySession(this: mod AudioEngine) {
+  let plan: AudioSessionPlan = sessionPlan(kind: this.wantedSessionKind())
+  let code: Int = sessionPlanCode(plan: plan)
+  if code is not this.sessionApplied {
+    this.sessionApplied = code
+    if this.fakeSession {
+      log(
+        "[audio-session] category {sessionCategoryName(category: plan.category)} mode {plan.mode} options {plan.options}"
+      )
+    } else {
+      platformSessionConfigure(plan: plan, active: this.sessionActive)
+    }
+  }
+  if not this.sessionActive {
+    this.sessionActive = true
+    if this.fakeSession {
+      log("[audio-session] active")
+    } else {
+      platformSessionActivate(plan: plan, active: true)
+    }
+  }
+  # iOS stops the audio unit with the session; it does not start by itself
+  # (an iPhone run of checks/audioSession: no callbacks after a deactivation)
+  if this.deviceStopped and this.device is not 0 {
+    this.deviceStopped = false
+    unsafe {
+      let started: Int = rae_audio_device_start(device: this.device)
+    }
+  }
+}
+
+# Whether the device stops and starts with the session: only where there is a
+# session (iOS); a Mac keeps its device running
+func deviceFollowsSession(this: view AudioEngine) ret Bool {
+  if this.device is 0 or this.fakeSession {
+    ret false
+  }
+  unsafe {
+    ret rae_audio_session_available() is 1
+  }
+}
+
+func deactivateSession(this: mod AudioEngine) {
+  if not this.sessionActive {
+    ret
+  }
+  this.sessionActive = false
+  # the session cannot be let go while its audio unit runs
+  if this.deviceFollowsSession() {
+    this.deviceStopped = true
+    unsafe {
+      let stopped: Int = rae_audio_device_stop(device: this.device)
+    }
+  }
+  if this.fakeSession {
+    log("[audio-session] inactive, other apps may resume")
+  } else {
+    platformSessionActivate(plan: sessionPlan(kind: this.wantedSessionKind()), active: false)
+  }
+}
+
+func handleSessionEvent(this: mod AudioEngine, event: view AudioSessionEvent) {
+  if event.kind is AudioSessionEventKind.interruptionBegan {
+    # the system has stopped the session and its audio unit; music waits,
+    # alerts are cut, and the device starts again with the session
+    this.sessionActive = false
+    if this.deviceFollowsSession() {
+      this.deviceStopped = true
+    }
+    this.musicPausedByInterruption = true
+    this.sendBusCommand(kind: AudioCommandKind.pauseBus, bus: AudioBusKind.music)
+    this.sendBusCommand(kind: AudioCommandKind.stopBus, bus: AudioBusKind.alerts)
+  } else if event.kind is AudioSessionEventKind.interruptionEnded {
+    if event.shouldResume and this.musicPausedByInterruption {
+      this.musicPausedByInterruption = false
+      if not this.musicPausedByRoute {
+        this.applySession()
+        this.sendBusCommand(kind: AudioCommandKind.resumeBus, bus: AudioBusKind.music)
+      }
+    }
+  } else if event.kind is AudioSessionEventKind.routeLost {
+    this.musicPausedByRoute = true
+    this.sendBusCommand(kind: AudioCommandKind.pauseBus, bus: AudioBusKind.music)
+  } else if event.kind is AudioSessionEventKind.mediaServicesReset {
+    # everything the session had is gone: set it up again on the next sound
+    this.sessionActive = false
+    this.sessionApplied = -1
+  }
+}
+
+func pollSessionCode() ret Int {
+  unsafe {
+    ret rae_audio_session_poll()
+  }
+}
+
+# The session part of update: the host's events, the intent of what plays,
+# and deactivation a second after the last sound
+func updateSession(this: mod AudioEngine) {
+  var polling: Bool = true
+  loop polling {
+    let code: Int = pollSessionCode()
+    if code < 0 {
+      polling = false
+    } else {
+      let event: AudioSessionEvent = decodeSessionEvent(code: code)
+      if this.fakeSession {
+        log("[audio-session] event {event.kind} shouldResume {event.shouldResume}")
+      }
+      this.handleSessionEvent(event: event)
+      this.sessionEvents.add(value: event)
+    }
+  }
+  let now: Int = this.audioNowMs()
+  if this.liveVoices.length() > 0 {
+    this.lastSoundMs = now
+    if this.sessionActive {
+      this.applySession()
+    }
+  } else if this.sessionActive and now - this.lastSoundMs >= 1000 {
+    this.deactivateSession()
+  }
+}

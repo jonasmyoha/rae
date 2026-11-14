@@ -1,0 +1,48 @@
+# lib/RealtimeTeam (docs/realtime-language-design.md §6.6, R9): three
+# `spawn thread` helpers and a leader whose stage loop is `realtime`. 1000
+# stages back to back (the helpers spin), then 10 after a pause long enough
+# for them to fall asleep on their Signals (the wake-up path); every part is
+# counted once, every helper ran every stage, and stopping wakes and ends them.
+open Atomic
+open Realtime
+open RealtimeTeam
+
+func helperLoop(team: own RealtimeTeam, helper: own Int, parts: own Atomic(Int)) ret Int {
+  var seen: Int = 0
+  var stages: Int = 0
+  loop team.awaitStage(helper: helper, seen: seen) {
+    let added: Int = parts.fetchAdd(amount: helper + 1)
+    stages = stages + 1
+    team.finishPart()
+  }
+  ret stages
+}
+
+func runStages(team: view RealtimeTeam, count: view Int) realtime {
+  loop var i: Int = 0, i < count, ++i {
+    team.beginStage()
+    team.endStage()
+  }
+}
+
+func main() {
+  let team: RealtimeTeam = createRealtimeTeam(helperCount: 3, spinRounds: 2000)
+  let parts: Atomic(Int) = createAtomic(Int, value: 0)
+  var helpers: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 3, ++i {
+    helpers.add(value: spawn thread helperLoop(team: team, helper: i, parts: parts))
+  }
+  runStages(team: team, count: 1000)
+  sleep(ms: 20)
+  runStages(team: team, count: 10)
+  team.stopTeam()
+  var stages: Int = 0
+  loop var i: Int = 0, i < 3, ++i {
+    if let helper: view Task(Int) = helpers.viewAt(index: i) {
+      stages = stages + helper.get()
+    }
+  }
+  log("parts {parts.load()} (expected {1010 * 6}), helper stages {stages} (expected 3030)")
+  team.freeTeam()
+  parts.freeAtomic()
+}

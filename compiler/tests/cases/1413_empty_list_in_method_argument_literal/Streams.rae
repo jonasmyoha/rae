@@ -1,0 +1,30 @@
+# The element and the struct live in other modules than the call, so nothing
+# else in the program names List(Decoder) before these literals do.
+open Decoder
+
+type Stream {
+  id: Int
+  decoder: Decoder
+  next: List(Decoder)
+  done: Bool
+}
+
+type Streams {
+  entries: List(Stream)
+}
+
+func openStream(streams: mod Streams, id: view Int) {
+  if id > 0 {
+    streams.entries.add(value: { id: id, decoder: makeDecoder(handle: id), next: {}, done: false })
+    ret
+  }
+}
+
+# A non-generic method whose parameter is a struct literal holding a list
+func insert(this: mod Streams, stream: own Stream) {
+  this.entries.add(value: stream)
+}
+
+func openTwo(streams: mod Streams) {
+  streams.insert(stream: { id: 7, decoder: makeDecoder(handle: 7), next: {}, done: true })
+}

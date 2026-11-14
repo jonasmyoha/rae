@@ -1,0 +1,99 @@
+# The audio session policy, headless (docs/audio-design.md §9.1). config.env
+# sets RAE_AUDIO_FAKE_SESSION=1: the AVAudioSession calls are logged as
+# `[audio-session] ...` instead of made, and the test plays the host's part
+# with injectSessionEvent. The events reach the program as ECS events through
+# audioSessionSystem. With RAE_REALTIME_CHECK=1 the renders must not allocate.
+#
+# A music program: music plays (playback, active); an alert sounds over it (the
+# session becomes an alert: mix with others and duck them) and afterwards
+# returns to music; the headphones go (music pauses until resumeMusic); a call
+# interrupts (music pauses, the alert is cut) and ends saying resume (music
+# continues); the music stops, and a second later the session is let go.
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSession
+open audio/Sound
+open audio/sessionSystem/SessionSystem
+open ecs/Event
+
+# Whether the left channel of the last block rendered is sounding
+func sounding(samples: view List(Float)) ret Bool {
+  let last: Int = samples.length() - 2
+  var loudest: Float = 0.0
+  loop var i: Int = 0, i < 200, ++i {
+    let value: Float = samples.copyAtFallback(index: last - 2 * i, fallback: 0.0)
+    if value > loudest {
+      loudest = value
+    } else if -value > loudest {
+      loudest = -value
+    }
+  }
+  ret loudest > 0.01
+}
+
+# A frame of the program: run the session system, render 100 ms, report
+func frame(audio: mod AudioEngine, events: mod EventQueue(AudioSessionEvent), label: view String) {
+  audioSessionSystem(audio: audio, events: events)
+  let samples: List(Float) = audio.renderOffline(frames: 4800)
+  var seen: String = ""
+  loop var i: Int = 0, i < eventCount(this: events), ++i {
+    let event: AudioSessionEvent = eventAt(this: events, i: i)
+    seen = "{seen} {event.kind}"
+  }
+  log(
+    "{label}: sounding {sounding(samples: samples)}, music paused {audio.musicIsPaused()}, events:{seen}"
+  )
+  frameAdvance(this: events)
+}
+
+func main() {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = true
+  settings.session = AudioSessionKind.music
+  var audio: AudioEngine = audioStart(settings: settings)
+  var events: EventQueue(AudioSessionEvent) = createEventQueue(AudioSessionEvent)
+  let song: Sound = audio.addSound(data: sineSoundData(
+    frequency: 220.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let chime: Sound = audio.addSound(data: sineSoundData(
+    frequency: 880.0
+    amplitude: 0.5
+    frameCount: 2400
+    channels: 1
+    sampleRate: 48000
+  ))
+  let music: VoiceId = audio.playAt(
+    sound: song
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  frame(audio: audio, events: events, label: "music")
+  let alert: VoiceId = audio.play(sound: chime, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+  frame(audio: audio, events: events, label: "an alert over it")
+  frame(audio: audio, events: events, label: "after the alert")
+  audio.injectSessionEvent(kind: AudioSessionEventKind.routeLost, value: 0)
+  frame(audio: audio, events: events, label: "headphones out")
+  frame(audio: audio, events: events, label: "still out")
+  audio.resumeMusic()
+  frame(audio: audio, events: events, label: "resumed by the program")
+  let second: VoiceId = audio.play(sound: chime, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+  audio.injectSessionEvent(kind: AudioSessionEventKind.interruptionBegan, value: 0)
+  frame(audio: audio, events: events, label: "a call")
+  audio.injectSessionEvent(kind: AudioSessionEventKind.interruptionEnded, value: 1)
+  frame(audio: audio, events: events, label: "the call ended, resume")
+  audio.stopVoice(voiceId: music)
+  frame(audio: audio, events: events, label: "music stopped")
+  loop var i: Int = 0, i < 11, ++i {
+    let quiet: List(Float) = audio.renderOffline(frames: 4800)
+  }
+  audio.update()
+  log("a second later the session is active: {audio.sessionActive}")
+  let blocks: Int = audio.stopAudio()
+}

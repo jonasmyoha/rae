@@ -1,0 +1,55 @@
+tests/cases/1406_realtime_keyword_rejects/Main.rae:10:7: `renderText` is realtime, but this allocates and frees: a String interpolation (made, and freed after its use).
+    renderText (Main.rae:14) -> describe (Main.rae:9)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+    10 |   ret "{count} frames"
+       |       ^~~~
+../lib/core/Core.rae:149:1: `renderGrowing` is realtime, but this allocates, frees, locks and waits: it calls `rae_ext_rae_buf_alloc`, C not marked realtime.
+    renderGrowing (Main.rae:19) -> add (lib/core/List.rae:43) -> grow (lib/core/List.rae:22) -> rae_ext_rae_buf_alloc (lib/core/Core.rae:149)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+  Real-time code may not lock: use a SpscRing or an Atomic instead of a Channel or a mutex.
+  Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
+   149 | func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) unsafe extern ret Buffer(Any)
+       | ^~~~
+../lib/core/Core.rae:149:1: `renderScratch` is realtime, but this allocates, locks and waits: it calls `rae_ext_rae_buf_alloc`, C not marked realtime.
+    renderScratch (Main.rae:24) -> createList (lib/core/List.rae:10) -> rae_ext_rae_buf_alloc (lib/core/Core.rae:149)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not lock: use a SpscRing or an Atomic instead of a Channel or a mutex.
+  Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
+   149 | func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) unsafe extern ret Buffer(Any)
+       | ^~~~
+tests/cases/1406_realtime_keyword_rejects/Main.rae:25:3: `renderScratch` is realtime, but this frees: a local that owns heap, freed at the end of its scope.
+    renderScratch (Main.rae:24)
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+    25 |   var scratch: List(Int) = List.create(Int, cap: 4)
+       |   ^~~~
+tests/cases/1406_realtime_keyword_rejects/Main.rae:35:25: `renderJoin` is realtime, but this allocates, frees and waits: a spawn (it starts a task).
+    renderJoin (Main.rae:34)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+  Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
+    35 |   let task: Task(Int) = spawn work(value: 1)
+       |                         ^~~~
+../lib/Channel.rae:45:1: `renderSend` is realtime, but this allocates, frees, locks and waits: it calls `rae_ext_rae_chan_reserve`, C not marked realtime.
+    renderSend (Main.rae:40) -> channelSend (lib/Channel.rae:75) -> rae_ext_rae_chan_reserve (lib/Channel.rae:45)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+  Real-time code may not lock: use a SpscRing or an Atomic instead of a Channel or a mutex.
+  Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
+    45 | func rae_ext_rae_chan_reserve(ch: Int) unsafe extern ret Int
+       | ^~~~
+tests/cases/1406_realtime_keyword_rejects/Main.rae:7:1: `renderC` is realtime, but this allocates, frees, locks and waits: it calls `cleverC`, C not marked realtime.
+    renderC (Main.rae:45) -> cleverC (Main.rae:7)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+  Real-time code may not lock: use a SpscRing or an Atomic instead of a Channel or a mutex.
+  Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
+     7 | func cleverC(x: Int) unsafe extern("abs") ret Int
+       | ^~~~
+tests/cases/1406_realtime_keyword_rejects/Main.rae:53:7: `prepare` is noAlloc, but this allocates and frees: a String interpolation (made, and freed after its use).
+    prepare (Main.rae:52)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+    53 |   ret "{count}".length()
+       |       ^~~~

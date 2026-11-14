@@ -1,0 +1,370 @@
+cheader "rae_audio.h"
+
+# The bindings to native/rae_audio_glue.c (docs/audio-design.md §3 L1): the
+# device through miniaudio's device layer, the thread's real-time policy and a
+# file write, one call each. The engine is audio/AudioMixer and audio/Audio. A
+# program that imports this links the package's C (native/build.sh builds it).
+func rae_audio_device_open(
+  sampleRate: Int
+  channels: Int
+  periodFrames: Int
+  inputChannels: Int
+) unsafe extern("rae_audio_device_open") ret Int
+
+func rae_audio_device_input_channels(
+  device: Int
+) unsafe extern("rae_audio_device_input_channels") ret Int
+
+func rae_audio_session_input_latency_ns() unsafe extern("rae_audio_session_input_latency_ns") ret
+  Int
+
+func rae_audio_microphone_permission() unsafe extern("rae_audio_microphone_permission") ret Int
+
+func rae_audio_microphone_request() unsafe extern("rae_audio_microphone_request") ret Int
+
+func rae_audio_device_sample_rate(device: Int) unsafe extern("rae_audio_device_sample_rate") ret Int
+
+func rae_audio_device_channels(device: Int) unsafe extern("rae_audio_device_channels") ret Int
+
+func rae_audio_device_period_frames(
+  device: Int
+) unsafe extern("rae_audio_device_period_frames") ret Int
+
+func rae_audio_device_attach(
+  device: Int
+  slots: Buffer(Float)
+  counters: Buffer(Int)
+  capacity: Int
+  signal: Int
+) unsafe extern("rae_audio_device_attach")
+
+func rae_audio_device_attach_render(
+  device: Int
+  state: Ptr
+) unsafe extern("rae_audio_device_attach_render")
+
+func rae_audio_device_start(device: Int) unsafe extern("rae_audio_device_start") ret Int
+
+func rae_audio_device_stop(device: Int) unsafe extern("rae_audio_device_stop") ret Int
+
+func rae_audio_device_close(device: Int) unsafe extern("rae_audio_device_close")
+
+func rae_audio_device_underrun_frames(
+  device: Int
+) unsafe extern("rae_audio_device_underrun_frames") ret Int
+
+func rae_audio_device_callbacks(device: Int) unsafe extern("rae_audio_device_callbacks") ret Int
+
+func rae_audio_file_size(pathZ: Buffer(UInt8)) unsafe extern("rae_audio_file_size") ret Int
+
+func rae_audio_read_file(
+  pathZ: Buffer(UInt8)
+  into: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_read_file") ret Int
+
+func rae_audio_write_file(
+  pathZ: Buffer(UInt8)
+  bytes: Buffer(UInt8)
+  count: Int
+) blocking unsafe extern("rae_audio_write_file") ret Int
+
+func rae_audio_session_available() unsafe extern("rae_audio_session_available") ret Int
+
+func rae_audio_session_configure(
+  category: Int
+  mode: Int
+  options: Int
+) unsafe extern("rae_audio_session_configure") ret Int
+
+func rae_audio_session_set_active(active: Int) unsafe extern("rae_audio_session_set_active") ret Int
+
+func rae_audio_session_observe() unsafe extern("rae_audio_session_observe") ret Int
+
+func rae_audio_session_poll() unsafe extern("rae_audio_session_poll") ret Int
+
+func rae_audio_session_inject(kind: Int, value: Int) unsafe extern("rae_audio_session_inject")
+
+func rae_audio_session_describe(
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_session_describe") ret Int
+
+func rae_audio_focus_status() unsafe extern("rae_audio_focus_status") ret Int
+
+func rae_audio_focus_request() unsafe extern("rae_audio_focus_request") ret Int
+
+func rae_audio_decoder_open(pathZ: Buffer(UInt8)) unsafe extern("rae_audio_decoder_open") ret Int
+
+func rae_audio_decoder_channels(decoder: Int) unsafe extern("rae_audio_decoder_channels") ret Int
+
+func rae_audio_decoder_sample_rate(
+  decoder: Int
+) unsafe extern("rae_audio_decoder_sample_rate") ret Int
+
+func rae_audio_decoder_length(decoder: Int) unsafe extern("rae_audio_decoder_length") ret Int
+
+func rae_audio_decoder_read(
+  decoder: Int
+  into: Buffer(Float)
+  frames: Int
+) unsafe extern("rae_audio_decoder_read") ret Int
+
+func rae_audio_decoder_seek(
+  decoder: Int
+  frame: Int
+) unsafe extern("rae_audio_decoder_seek") ret Int
+
+func rae_audio_decoder_close(decoder: Int) unsafe extern("rae_audio_decoder_close")
+
+func rae_audio_file_open(pathZ: Buffer(UInt8)) unsafe extern("rae_audio_file_open") ret Int
+
+func rae_audio_file_read_at(
+  file: Int
+  into: Buffer(UInt8)
+  count: Int
+  offset: Int
+) unsafe extern("rae_audio_file_read_at") ret Int
+
+func rae_audio_file_close(file: Int) unsafe extern("rae_audio_file_close")
+
+func rae_audio_aac_open(sampleRate: Int, channels: Int) unsafe extern("rae_audio_aac_open") ret Int
+
+func rae_audio_aac_set_cookie(
+  converter: Int
+  cookie: Buffer(UInt8)
+  size: Int
+) unsafe extern("rae_audio_aac_set_cookie") ret Int
+
+func rae_audio_aac_decode(
+  converter: Int
+  packet: Buffer(UInt8)
+  size: Int
+  out: Buffer(Float)
+  maxFrames: Int
+  channels: Int
+) unsafe extern("rae_audio_aac_decode") ret Int
+
+func rae_audio_aac_reset(converter: Int) unsafe extern("rae_audio_aac_reset")
+
+func rae_audio_aac_close(converter: Int) unsafe extern("rae_audio_aac_close")
+
+func rae_audio_now_playing_set(
+  titleZ: Buffer(UInt8)
+  artistZ: Buffer(UInt8)
+  albumZ: Buffer(UInt8)
+  artworkPathZ: Buffer(UInt8)
+  duration: Float64
+  position: Float64
+  rate: Float64
+) unsafe extern("rae_audio_now_playing_set") ret Int
+
+func rae_audio_now_playing_describe(
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_now_playing_describe") ret Int
+
+func rae_audio_now_playing_clear() unsafe extern("rae_audio_now_playing_clear")
+
+func rae_audio_remote_enable(mask: Int) unsafe extern("rae_audio_remote_enable") ret Int
+
+func rae_audio_remote_poll() unsafe extern("rae_audio_remote_poll") ret Int
+
+func rae_audio_remote_inject(kind: Int, value: Int) unsafe extern("rae_audio_remote_inject")
+
+func rae_audio_run_loop_pump() mainThread unsafe extern("rae_audio_run_loop_pump")
+
+func rae_audio_device_buffer_frames(
+  device: Int
+) unsafe extern("rae_audio_device_buffer_frames") ret Int
+
+func rae_audio_device_workgroup(device: Int) unsafe extern("rae_audio_device_workgroup") ret Int
+
+func rae_audio_workgroup_release(workgroup: Int) unsafe extern("rae_audio_workgroup_release")
+
+func rae_audio_device_core_audio_frames(
+  device: Int
+  property: Int
+) unsafe extern("rae_audio_device_core_audio_frames") ret Int
+
+func rae_audio_session_output_latency_ns() unsafe extern("rae_audio_session_output_latency_ns") ret
+  Int
+
+func rae_audio_device_backend_name(
+  device: Int
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_device_backend_name") ret Int
+
+func rae_audio_codec_create(mimeZ: Buffer(UInt8)) unsafe extern("rae_audio_codec_create") ret Int
+
+func rae_audio_codec_format_new() unsafe extern("rae_audio_codec_format_new") ret Int
+
+func rae_audio_codec_format_delete(format: Int) unsafe extern("rae_audio_codec_format_delete")
+
+func rae_audio_codec_format_set_string(
+  format: Int
+  keyZ: Buffer(UInt8)
+  valueZ: Buffer(UInt8)
+) unsafe extern("rae_audio_codec_format_set_string")
+
+func rae_audio_codec_format_set_int(
+  format: Int
+  keyZ: Buffer(UInt8)
+  value: Int
+) unsafe extern("rae_audio_codec_format_set_int")
+
+func rae_audio_codec_format_set_bytes(
+  format: Int
+  keyZ: Buffer(UInt8)
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_codec_format_set_bytes")
+
+func rae_audio_codec_configure(
+  codec: Int
+  format: Int
+) unsafe extern("rae_audio_codec_configure") ret Int
+
+func rae_audio_codec_start(codec: Int) unsafe extern("rae_audio_codec_start") ret Int
+
+func rae_audio_codec_flush(codec: Int) unsafe extern("rae_audio_codec_flush") ret Int
+
+func rae_audio_codec_close(codec: Int) unsafe extern("rae_audio_codec_close")
+
+func rae_audio_codec_dequeue_input(
+  codec: Int
+  timeoutUs: Int
+) unsafe extern("rae_audio_codec_dequeue_input") ret Int
+
+func rae_audio_codec_queue_input(
+  codec: Int
+  index: Int
+  bytes: Buffer(UInt8)
+  count: Int
+  timeUs: Int
+  flags: Int
+) unsafe extern("rae_audio_codec_queue_input") ret Int
+
+func rae_audio_codec_dequeue_output(
+  codec: Int
+  info: Buffer(Int)
+  timeoutUs: Int
+) unsafe extern("rae_audio_codec_dequeue_output") ret Int
+
+func rae_audio_codec_take_output(
+  codec: Int
+  index: Int
+  offset: Int
+  into: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_codec_take_output") ret Int
+
+func rae_audio_codec_output_int(
+  codec: Int
+  keyZ: Buffer(UInt8)
+  fallback: Int
+) unsafe extern("rae_audio_codec_output_int") ret Int
+
+func rae_audio_android_focus_request(
+  gain: Int
+  usage: Int
+  content: Int
+) unsafe extern("rae_audio_android_focus_request") ret Int
+
+func rae_audio_android_focus_abandon() unsafe extern("rae_audio_android_focus_abandon") ret Int
+
+func rae_audio_midi_client(nameZ: Buffer(UInt8)) unsafe extern("rae_audio_midi_client") ret Int
+
+func rae_audio_midi_client_dispose(client: Int) unsafe extern("rae_audio_midi_client_dispose")
+
+func rae_audio_midi_input_port(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_input_port") ret Int
+
+func rae_audio_midi_output_port(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_output_port") ret Int
+
+func rae_audio_midi_virtual_destination(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_virtual_destination") ret Int
+
+func rae_audio_midi_virtual_source(
+  client: Int
+  nameZ: Buffer(UInt8)
+) unsafe extern("rae_audio_midi_virtual_source") ret Int
+
+func rae_audio_midi_source_count() unsafe extern("rae_audio_midi_source_count") ret Int
+
+func rae_audio_midi_source(index: Int) unsafe extern("rae_audio_midi_source") ret Int
+
+func rae_audio_midi_destination_count() unsafe extern("rae_audio_midi_destination_count") ret Int
+
+func rae_audio_midi_destination(index: Int) unsafe extern("rae_audio_midi_destination") ret Int
+
+func rae_audio_midi_endpoint_name(
+  endpoint: Int
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_midi_endpoint_name") ret Int
+
+func rae_audio_midi_connect(port: Int, source: Int) unsafe extern("rae_audio_midi_connect") ret Int
+
+func rae_audio_midi_send(
+  port: Int
+  endpoint: Int
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_midi_send") ret Int
+
+func rae_audio_midi_poll() unsafe extern("rae_audio_midi_poll") ret Int
+
+func rae_audio_midi_dropped() unsafe extern("rae_audio_midi_dropped") ret Int
+
+func rae_audio_midi_android_available() unsafe extern("rae_audio_midi_android_available") ret Int
+
+func rae_audio_midi_android_refresh() unsafe extern("rae_audio_midi_android_refresh") ret Int
+
+func rae_audio_midi_android_device_id(
+  index: Int
+) unsafe extern("rae_audio_midi_android_device_id") ret Int
+
+func rae_audio_midi_android_device_name(
+  index: Int
+  into: Buffer(UInt8)
+  capacity: Int
+) unsafe extern("rae_audio_midi_android_device_name") ret Int
+
+func rae_audio_midi_android_outputs(
+  index: Int
+) unsafe extern("rae_audio_midi_android_outputs") ret Int
+
+func rae_audio_midi_android_inputs(
+  index: Int
+) unsafe extern("rae_audio_midi_android_inputs") ret Int
+
+func rae_audio_midi_android_open(id: Int) unsafe extern("rae_audio_midi_android_open") ret Int
+
+func rae_audio_midi_android_open_output(
+  id: Int
+  port: Int
+) unsafe extern("rae_audio_midi_android_open_output") ret Int
+
+func rae_audio_midi_android_open_input(
+  id: Int
+  port: Int
+) unsafe extern("rae_audio_midi_android_open_input") ret Int
+
+func rae_audio_midi_android_receive(
+  output: Int
+) unsafe extern("rae_audio_midi_android_receive") ret Int
+
+func rae_audio_midi_android_send(
+  input: Int
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_audio_midi_android_send") ret Int

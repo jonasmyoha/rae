@@ -1,0 +1,283 @@
+# MIDI and the synth (docs/audio-design.md §8.2), offline, with
+# RAE_REALTIME_CHECK=1 (config.env).
+#
+# 1. audio/Midi parses a byte stream: running status, a note on with velocity
+#    0 as a note off, a clock byte in the middle of a message, system exclusive
+#    (and one cut short by a new status), a pitch bend's 14 bits, data with no
+#    status (dropped), program changes with one data byte.
+# 2. The synth: a note starts on its exact sample and ends after its release;
+#    notes in blocks of 1, 17, 64, 512 and changing sizes give the same samples.
+# 3. playMidi turns parsed messages into notes.
+# 4. Recording: captured periods (here driven directly, as a duplex device's
+#    callback does) become a recording that knows its output sample time, and
+#    finishRecording cuts the round trip so frame 0 lines up with it; an
+#    undrained ring counts what it lost.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioDevice
+open audio/AudioInput
+open audio/AudioSchedule
+open audio/Sound
+open audio/Midi
+
+func describe(message: view MidiMessage) ret String {
+  if message.kind is MidiKind.systemExclusive {
+    ret "systemExclusive {message.data.length()} bytes"
+  }
+  if message.kind is MidiKind.system {
+    ret "system {message.status}"
+  }
+  if message.kind is MidiKind.pitchBend {
+    ret "pitchBend channel {message.channel} {message.bend}"
+  }
+  ret "{message.kind} channel {message.channel} {message.data1} {message.data2}"
+}
+
+func parse() {
+  var parser: MidiParser = createMidiParser()
+  # 0x90 3C 64 | running: 40 5A | 3C 00 (velocity 0: off) | clock F8 inside
+  # 0xB1 07 [F8] 64 | F0 43 10 F7 | F0 01 02 then 0xC2 05 (cut short) | E3 00 40 |
+  # 0x45 (no status after a system common: dropped) after F6
+  let bytes: List(Int) = List(Int) {
+    144
+    60
+    100
+    64
+    90
+    60
+    0
+    177
+    7
+    248
+    100
+    240
+    67
+    16
+    247
+    240
+    1
+    2
+    194
+    5
+    227
+    0
+    64
+    227
+    127
+    127
+    246
+    69
+    192
+    33
+  }
+  var time: Int = 1000
+  loop let byte: Int in bytes {
+    parser.feedMidi(byte: byte, hostNs: time)
+    time = time + 1
+  }
+  loop let message: MidiMessage in parser.takeMidi() {
+    log("midi: {describe(message: message)} at {message.hostNs}")
+  }
+  log("note 69 is {midiNoteFrequency(note: 69)} Hz; bytes of a note off: {midiBytes(
+    kind: MidiKind.noteOff
+    channel: 3
+    data1: 60
+    data2: 0
+  ).length()}")
+}
+
+func renderNotes(sizes: view List(Int)) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 512)
+  audio.playNoteAt(
+    note: 60
+    velocity: 0.8
+    bus: AudioBusKind.music
+    atSample: 1000
+  )
+  audio.playNoteAt(
+    note: 64
+    velocity: 0.6
+    bus: AudioBusKind.music
+    atSample: 2333
+  )
+  audio.releaseNoteAt(note: 60, atSample: 7000)
+  audio.playNoteAt(
+    note: 67
+    velocity: 1.0
+    bus: AudioBusKind.music
+    atSample: 7001
+  )
+  audio.releaseAllNotesAt(atSample: 12000)
+  var rendered: List(Float) = {}
+  var done: Int = 0
+  var part: Int = 0
+  loop done < 26000 {
+    let count: Int = min(
+      a: 26000 - done
+      b: sizes.copyAtFallback(index: part % sizes.length(), fallback: 512)
+    )
+    let block: List(Float) = audio.renderOffline(frames: count)
+    loop let sample: Float in block {
+      rendered.add(value: sample)
+    }
+    done = done + count
+    part = part + 1
+  }
+  let blocks: Int = audio.stopAudio()
+  ret rendered
+}
+
+func sameSamples(a: view List(Float), b: view List(Float)) ret Bool {
+  if a.length() is not b.length() {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length(), ++i {
+    if a.copyAtFallback(index: i, fallback: 0.0) is not b.copyAtFallback(index: i, fallback: 1.0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func synth() {
+  let reference: List(Float) = renderNotes(sizes: List(Int) { 512 })
+  var first: Int = -1
+  var last: Int = -1
+  loop var frame: Int = 0, frame < 26000, ++frame {
+    if reference.copyAtFallback(index: frame * 2, fallback: 0.0) is not 0.0 {
+      if first < 0 {
+        first = frame
+      }
+      last = frame
+    }
+  }
+  # the sine starts at 0 and the envelope at 0, so the first sound is the next frame
+  log(
+    "synth: heard from frame {first} (the note is at 1000), silent again after frame {last} (released at 12000, 250 ms)"
+  )
+  log("synth: blocks of 1, 17, 64 and changing sizes equal blocks of 512: {sameSamples(
+    a: renderNotes(sizes: List(Int) { 1 })
+    b: reference
+  )} {sameSamples(a: renderNotes(sizes: List(Int) { 17 }), b: reference)} {sameSamples(
+    a: renderNotes(sizes: List(Int) { 64 })
+    b: reference
+  )} {sameSamples(
+    a: renderNotes(sizes: List(Int) {
+      1
+      7
+      128
+      33
+      512
+      250
+      3
+    })
+    b: reference
+  )}")
+}
+
+func fromMidi() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 512)
+  var parser: MidiParser = createMidiParser()
+  var played: Int = 0
+  loop let byte: Int in List(Int) {
+    144
+    69
+    127
+    176
+    7
+    100
+  } {
+    parser.feedMidi(byte: byte, hostNs: 0)
+  }
+  loop let message: MidiMessage in parser.takeMidi() {
+    if audio.playMidi(message: message, bus: AudioBusKind.music) {
+      played = played + 1
+    }
+  }
+  let held: List(Float) = audio.renderOffline(frames: 2000)
+  var peak: Float = 0.0
+  loop var i: Int = 0, i < 2000 * 2, ++i {
+    peak = max(a: peak, b: abs(value: held.copyAtFallback(index: i, fallback: 0.0)))
+  }
+  loop let byte: Int in List(Int) { 128, 69, 0 } {
+    parser.feedMidi(byte: byte, hostNs: 0)
+  }
+  loop let message: MidiMessage in parser.takeMidi() {
+    if audio.playMidi(message: message, bus: AudioBusKind.music) {
+      played = played + 1
+    }
+  }
+  let released: List(Float) = audio.renderOffline(frames: 24000)
+  log(
+    "playMidi: {played} of 3 messages played (the controller is not a note), sounding {peak > 0.1}, silent after its release {released.copyAtFallback(
+      index: 23999 * 2
+      fallback: 1.0
+    ) is 0.0}"
+  )
+  let blocks: Int = audio.stopAudio()
+}
+
+# A period whose left samples are their own output sample times (and the
+# right ones the same, negated), as the callback would capture it at `start`
+func capturePeriod(input: view AudioInputShared, start: view Int, frames: view Int) {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames * 2)
+  loop var frame: Int = 0, frame < frames, ++frame {
+    setSampleAt(samples: samples, index: frame * 2, value: (start + frame) as Float)
+    setSampleAt(samples: samples, index: frame * 2 + 1, value: -((start + frame) as Float))
+  }
+  captureInput(
+    input: input
+    samples: samples
+    frames: frames
+    channels: 2
+    blockStart: start
+  )
+  unsafe {
+    rae_ext_rae_buf_free(buf: samples)
+  }
+}
+
+func recording() {
+  let input: AudioInputShared = createAudioInputShared(channels: 2, sampleRate: 48000)
+  capturePeriod(input: input, start: 0, frames: 256)
+  capturePeriod(input: input, start: 256, frames: 256)
+  var take: AudioRecording = beginInputRecording(
+    input: input
+    sampleRate: 48000
+    roundTripFrames: 100
+  )
+  capturePeriod(input: input, start: 512, frames: 256)
+  capturePeriod(input: input, start: 768, frames: 256)
+  recordInputInto(input: input, recording: take)
+  capturePeriod(input: input, start: 1024, frames: 256)
+  recordInputInto(input: input, recording: take)
+  let data: SoundData = finishRecording(recording: take)
+  log(
+    "recording: starts at output sample {alignedStart(recording: take)}, {data.frameCount} frames after a 100-frame round trip; frame 0 holds what was captured at {sampleAt(
+      samples: data.samples
+      index: 0
+    )}, right {sampleAt(samples: data.samples, index: 1)}; lost {take.lostSamples}"
+  )
+  freeSoundData(data: data)
+  var flooded: AudioRecording = beginInputRecording(
+    input: input
+    sampleRate: 48000
+    roundTripFrames: 0
+  )
+  loop var period: Int = 0, period < 400, ++period {
+    capturePeriod(input: input, start: 1280 + period * 256, frames: 256)
+  }
+  recordInputInto(input: input, recording: flooded)
+  log(
+    "a ring not drained for 2 s: kept {flooded.samples.length() / 2} frames, lost {flooded.lostSamples / 2} frames"
+  )
+  freeAudioInputShared(input: input)
+}
+
+func main() {
+  parse()
+  synth()
+  fromMidi()
+  recording()
+}
