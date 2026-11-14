@@ -1,0 +1,31 @@
+# audio/RenderTimes — how long the audio thread takes to render, read on the main thread
+# (docs/audio-design.md §10.8). Each render of the mixer (on the device's callback, on the stage
+# A thread, or offline) measures itself and hands the time over with its clock stamp; `update`
+# keeps them. A program takes them each frame and feeds its own lib/Realtime RealtimeRecorder,
+# which gives the p99.9, the maximum and the share of the period:
+#
+#     var recorder: RealtimeRecorder = createRealtimeRecorder(name: "render",
+#       periodNanoseconds: audio.renderPeriodNanoseconds())
+#     loop let nanoseconds: Int in audio.takeRenderNanoseconds() {
+#       recorder.recordCall(nanoseconds: nanoseconds)
+#     }
+open audio/Audio
+open audio/AudioClock
+
+# The render times (ns) since the last call, oldest first (at most 4096 are kept between calls)
+func takeRenderNanoseconds(this: mod AudioEngine) ret List(Int) {
+  let taken: List(Int) = this.clock.renderTimes
+  this.clock.renderTimes = {}
+  ret taken
+}
+
+# The time a render must fit in: one period
+func renderPeriodNanoseconds(this: view AudioEngine) ret Int {
+  ret this.periodFrames * 1000000000 / max(a: 1, b: this.sampleRate)
+}
+
+# The helper threads rendering the bus graph's stages with the device's callback
+# (RAE_AUDIO_RENDER_HELPERS); 0 when the audio thread renders alone
+func renderHelperCount(this: view AudioEngine) ret Int {
+  ret this.renderTeam.helperCount
+}

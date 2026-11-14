@@ -112,6 +112,8 @@ enum AudioFeedbackKind { voiceEnded }
 type ClockStamp {
   sampleTime: Int
   hostNs: Int
+  # how long the render took (ns): the stamp is pushed at its end (audio/RenderTimes)
+  renderNs: Int = 0
 }
 
 type AudioFeedback {
@@ -766,10 +768,7 @@ func mixerRender(
 ) {
   let blockStart: Int = mixer.sampleTime
   mixer.partStart = blockStart
-  if firstFrame is 0 {
-    # one stamp per render (the device's callback renders in parts after it)
-    let stamped: Bool = mixer.clockStamps.push(value: { sampleTime: blockStart, hostNs: nowNs() })
-  }
+  let startedNs: Int = nowNs()
   loop commands.count() > 0 {
     if let command: AudioCommand = commands.pop() {
       if command.atSample > 0 and command.atSample < blockStart {
@@ -808,6 +807,13 @@ func mixerRender(
     cursor = next
   }
   mixer.sampleTime = mixer.sampleTime + frames
+  if firstFrame is 0 {
+    # one stamp per render (the device's callback renders in parts after it): its start, for
+    # the clock, and how long it took
+    let stamped: Bool = mixer.clockStamps.push(
+      value: { sampleTime: blockStart, hostNs: startedNs, renderNs: nowNs() - startedNs }
+    )
+  }
 }
 
 # Frames [from, from + frames) of the block: the voices onto their buses, then

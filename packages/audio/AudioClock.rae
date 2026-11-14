@@ -40,6 +40,9 @@ type AudioClock {
   stamps: Int
   # the first sample of the newest render seen
   lastRenderSample: Int
+  # how long each render took (ns), since the program last took them (audio/RenderTimes); at
+  # most renderTimesKept
+  renderTimes: List(Int) = {}
 }
 
 func createAudioClock(
@@ -172,11 +175,17 @@ func clockObserve(this: mod AudioClock, sampleTime: view Int, hostNs: view Int) 
   this.baseSample = sampleTime
 }
 
+# The render times kept for a program that does not take them
+const renderTimesKept: Int = 4096
+
 # Take the renders' stamps from the ring (the main thread, in update)
 func clockTakeStamps(this: mod AudioClock, stamps: view SpscRing(ClockStamp)) {
   loop stamps.count() > 0 {
     if let stamp: ClockStamp = stamps.pop() {
       this.clockObserve(sampleTime: stamp.sampleTime, hostNs: stamp.hostNs + this.latencyNs)
+      if this.renderTimes.length() < renderTimesKept {
+        this.renderTimes.add(value: stamp.renderNs)
+      }
     }
   }
 }

@@ -1063,6 +1063,23 @@ turns the loop down by more than 6 dB; the reverb leaves a tail where the dry en
 The audio playground's Effects column uses it, and measures each effect on and off on the
 stream.
 
+### 10.8 How the audio thread keeps up, seen while it plays
+
+Each render of the mixer measures itself (`nowNs` at its start and end, on the device's callback,
+on the stage A thread or offline) and hands the time over with its clock stamp: the stamp is
+pushed at the end of the render with `renderNs`, and its start time stays what the clock uses.
+`update` keeps the times (at most 4096 between takes), and `audio/RenderTimes` gives them to the
+program: `takeRenderNanoseconds`, `renderPeriodNanoseconds` (the time a render must fit in) and
+`renderHelperCount` (`RAE_AUDIO_RENDER_HELPERS`). The program feeds its own lib/Realtime
+`RealtimeRecorder` with them, for the p99.9, the maximum and their share of the period; lib/Realtime
+`realtimeCheckCount` says whether `RAE_REALTIME_CHECK` is on and how many calls it has counted so
+far. Nothing is allocated, locked or printed on the audio thread for it.
+
+**Landed (2026-11-14, `packages/audio` 0.18.0, Rae 0.3.125):** the audio playground's Status
+section shows them, with a graph of the slowest render of each half second. Measured there: the
+Mac's device 56 us at most of a 5333 us period (108 us with two render helpers), the browser
+(wasm, AudioWorklet) 2.4 ms of 5.3 ms, offline 88 us; the real-time check on and clean.
+
 ---
 
 ## 11. What lands first
