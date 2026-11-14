@@ -82,10 +82,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       if grep -q 'box3d/box3d.h' "$TMP_OUT/out.c"; then
         BOX3D_FLAGS="-I$BOX3D_ROOT/include $BOX3D_ROOT/lib/libbox3d.a"
       fi
+      # A package with its own C (the pack's `native` block, packages/audio): its include folder
+      # and library, as the compiler's own link adds them (main.c package_native_flags), for each
+      # package whose header the generated C includes. `rae tree --native` builds a package's C
+      # on first need and prints: name, header, install folder, ...
+      PACKAGE_FLAGS=""
+      if [ -f "$(ls "$PROJECT_DIR"/*.raepack 2>/dev/null | head -1)" ]; then
+        while IFS="$(printf '\t')" read -r PACKAGE_NAME PACKAGE_HEADER PACKAGE_INSTALL PACKAGE_REST; do
+          [ -n "$PACKAGE_HEADER" ] || continue
+          grep -q "#include \"$PACKAGE_HEADER\"" "$TMP_OUT/out.c" || continue
+          PACKAGE_FLAGS="$PACKAGE_FLAGS -I$PACKAGE_INSTALL/include $(ls "$PACKAGE_INSTALL"/lib/lib*.a 2>/dev/null | head -1)"
+        done < <(BIN_PATH="$PWD/$BIN"; cd "$PROJECT_DIR" && "$BIN_PATH" tree --native 2>/dev/null)
+      fi
       if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
-         $BOX3D_FLAGS -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
+         $BOX3D_FLAGS $PACKAGE_FLAGS -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
         if [ "$EXAMPLE_NAME" = "91_pong" ]; then
           SCREENSHOT="$TMP_OUT/pong.bmp"
           if (cd .. && RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
@@ -1925,6 +1937,25 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (tree lab views)"
+            ((FAILED++))
+          fi
+        elif [ "$EXAMPLE_NAME" = "150_audioPlayground" ]; then
+          # The audio playground headless: the engine renders offline (no device), the demo
+          # presses the controls (two sounds, the stream, an alert and the AAC chime, a seek, a
+          # pan), and the summary line says the four sounds played and ended, the stream
+          # streamed, and nothing underran
+          SCREENSHOT="$TMP_OUT/audio-playground.bmp"
+          if (cd .. && RAE_AUDIO_PLAYGROUND_DEMO=1 RAE_SDL_HEADLESS_MS=6000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && grep -q 'sounds played 4, voices ended 4; music started true' "$TMP_OUT/render.log" \
+             && grep -q 'underrun frames 0' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (offline engine: four sounds played and ended, the music streamed and sought, no underrun)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (audio playground demo)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | tail -8 | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then

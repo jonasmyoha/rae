@@ -921,6 +921,18 @@ license text lives once, beside the code:
   naming the holder and the license, plus a `LICENSE-<project>.md` beside it.
 
 ---
+## No composed music, and audio files stay small
+
+- **No AI-composed music in this repository.** A sound an example, a check or a test needs is a
+  technical signal: tones, sweeps, clicks, decays, noise, a pitch that tells the second. Never a
+  melody, a chord progression or a beat written to sound like music. Creative audio belongs in
+  other repos.
+- **Audio files are generated and small.** A sound file is made by a script beside it from simple
+  math (`examples/150_audioPlayground/makeSounds.py` is the model), at a low rate (mono, 22 050 Hz,
+  a low bit rate for MP3/AAC), so the committed result stays at tens of KB per file. Commit the
+  output only so the example runs from a fresh checkout without the encoders.
+
+---
 ## Interaction rules
 
 - Assume the human may not be at the keyboard

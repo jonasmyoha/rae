@@ -363,6 +363,25 @@ static void edge_by_name(WalkContext* walk, Str name, const AstCallArg* args, co
       }
     }
     if (matched) return;
+    /* A generic candidate whose first parameter is the receiver's type with
+     * its own type parameters (`this: SpscRing(T)` for an SpscRing(Plan)):
+     * the same type by name, so it is the one called, and edge_to_decl infers
+     * its type arguments. Without this a call shared by two generic types
+     * (List.pop and SpscRing.pop, List.set and StringMap.set) reached both,
+     * and every specialization of the wrong one. */
+    size_t wanted_head = strcspn(wanted.text, "(");
+    for (size_t i = 0; i < candidate_count; i++) {
+      const AstFuncDecl* func = &candidates[i]->as.func_decl;
+      if (!func->generic_params || !func->params || !func->params->type) continue;
+      const AstTypeRef* first = func->params->type;
+      if (!first->parts || first->parts->next || !first->generic_args) continue;
+      Str head = first->parts->text;
+      if (head.len == wanted_head && strncmp(head.data, wanted.text, wanted_head) == 0) {
+        edge_to_decl(walk, candidates[i], args, generic_args, receiver);
+        matched++;
+      }
+    }
+    if (matched) return;
   }
   bool any_body = false;
   for (size_t i = 0; i < candidate_count; i++) {

@@ -1,0 +1,32 @@
+pack AudioPlayground {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Audio — playground"
+  description: "The audio package to try by ear: short sounds on the effects bus that overlap (WAV and AAC), a music file streamed from disk with play, pause and seek, a volume per bus, pan, an alert that ducks the music, and a readout of the device, its latency and underruns. Later parts add the synth and MIDI, the microphone, effects and the real-time view."
+  category: "Audio"
+  display: {
+    width: 1000
+    height: 720
+  }
+  dependencies: {
+    dep audio: {
+      git: "../.."
+      subdir: "packages/audio"
+      version: "0.12.19"
+      hash: "git-tree:a03949e8cbe1818f6a2e8f780d0c1cdf12d771f1"
+    }
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}

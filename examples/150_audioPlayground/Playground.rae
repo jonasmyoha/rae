@@ -1,0 +1,91 @@
+# The playground's state: the audio engine (a resource of the app, docs/audio-design.md §10.1),
+# the sounds loaded once, the music stream's voice, and the mix settings the panel set. Each panel
+# section (SoundsSection, MusicSection, MixSection, StatusSection; later steps add the synth, the
+# microphone, the effects and the real-time view) reads and changes it once a frame.
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+# Where the example's files are, from the repository root (the iOS bundle keeps the same paths)
+const playgroundAssets: String = "examples/150_audioPlayground/assets/"
+
+type Playground {
+  audio: AudioEngine
+  # the effects bus's sounds, in the order of their buttons, and the alert
+  click: Sound
+  bell: Sound
+  whoosh: Sound
+  chime: Sound
+  alert: Sound
+  soundsPlayed: Int = 0
+  # the music stream: its voice once started, and whether it plays
+  musicVoice: VoiceId = { value: 0 }
+  musicStarted: Bool = false
+  # the mix: pan of the voices started from now on and of the music (-1 left .. 1 right), and
+  # whether alerts duck the music
+  pan: Float = 0.0
+  ducking: Bool = true
+  # no device (RAE_AUDIO_DEVICE=offline, or a headless run): the app renders a frame's samples
+  # itself each frame, so the engine moves on as it would with a device
+  rendersItself: Bool = false
+  frames: Int = 0
+}
+
+# A headless run (the visual gate) has no device to depend on, so it renders offline
+func playgroundWantsOffline() ret Bool {
+  ret getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or audioOfflineWanted()
+}
+
+func createPlayground() ret Playground {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = playgroundWantsOffline()
+  var audio: AudioEngine = audioStart(settings: settings)
+  let click: Sound = audio.loadSound(path: "{playgroundAssets}click.wav")
+  let bell: Sound = audio.loadSound(path: "{playgroundAssets}bell.wav")
+  let whoosh: Sound = audio.loadSound(path: "{playgroundAssets}whoosh.wav")
+  let chime: Sound = audio.loadSound(path: "{playgroundAssets}chime.m4a")
+  let alert: Sound = audio.loadSound(path: "{playgroundAssets}alert.wav")
+  # an alert takes the music down 14 dB while it plays (on the audio thread, §6.4)
+  audio.duckWhilePlaying(
+    source: AudioBusKind.alerts
+    target: AudioBusKind.music
+    gainDecibels: -14.0
+  )
+  let rendersItself: Bool = audio.offline
+  ret Playground {
+    audio: own audio
+    click: click
+    bell: bell
+    whoosh: whoosh
+    chime: chime
+    alert: alert
+    rendersItself: rendersItself
+  }
+}
+
+# Once a frame, on the main thread: the engine's feedback, its ended voices, and with no device a
+# frame's worth of samples rendered here
+func playgroundFrame(playground: mod Playground) {
+  if playground.rendersItself {
+    let unusedSamples: List(Float) = playground.audio.renderOffline(
+      frames: playground.audio.sampleRate / 60
+    )
+  }
+  playground.audio.update()
+  let unusedEnded: List(VoiceId) = playground.audio.takeEndedVoices()
+  playground.frames = playground.frames + 1
+}
+
+# A volume slider's share (0 .. 1) as a gain: 0 dB at the top, 60 dB down at the bottom, and
+# silence at zero
+func shareToDecibels(share: view Float) ret Float {
+  if share <= 0.001 {
+    ret -100.0
+  }
+  ret 60.0 * (share - 1.0)
+}
+
+func endPlayground(playground: mod Playground) ret Int {
+  ret playground.audio.stopAudio()
+}

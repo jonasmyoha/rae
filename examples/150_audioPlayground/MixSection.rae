@@ -1,0 +1,63 @@
+# The Mix section: a volume slider per bus (music, effects, alerts), the pan of the music and of
+# every sound started from now on, and the alerts' ducking of the music on or off
+open audio/Audio
+open audio/AudioMixer
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open Playground
+
+# The sliders' starting places: every bus at 80 %, the pan in the middle
+func setMixDefaults(values: mod UiValues) {
+  let unusedMusic: Bool = setUiValue(values: values, key: "bus.music", value: 0.8)
+  let unusedEffects: Bool = setUiValue(values: values, key: "bus.effects", value: 0.8)
+  let unusedAlerts: Bool = setUiValue(values: values, key: "bus.alerts", value: 0.8)
+  let unusedPan: Bool = setUiValue(values: values, key: "pan", value: 0.0)
+}
+
+# Every bus's gain from its slider (at the start, and after a volume slider moved)
+func applyBusVolumes(playground: view Playground, values: view UiValues) {
+  playground.audio.setBusGain(
+    bus: AudioBusKind.music
+    gainDecibels: shareToDecibels(share: uiValue(values: values, key: "bus.music", fallback: 0.8))
+  )
+  playground.audio.setBusGain(
+    bus: AudioBusKind.effects
+    gainDecibels: shareToDecibels(share: uiValue(values: values, key: "bus.effects", fallback: 0.8))
+  )
+  playground.audio.setBusGain(
+    bus: AudioBusKind.alerts
+    gainDecibels: shareToDecibels(share: uiValue(values: values, key: "bus.alerts", fallback: 0.8))
+  )
+}
+
+# The section's sliders and button this frame; true when what it shows changed
+func mixSection(playground: mod Playground, world: mod UiWorld, values: view UiValues) ret Bool {
+  var changed: Bool = false
+  if uiActionFired(world: world, actionId: "bus.volume") {
+    applyBusVolumes(playground: playground, values: values)
+  }
+  if uiActionFired(world: world, actionId: "pan.changed") {
+    playground.pan = uiValue(values: values, key: "pan", fallback: 0.0)
+    if playground.musicStarted {
+      playground.audio.setVoicePan(voiceId: playground.musicVoice, pan: playground.pan)
+    }
+  }
+  if uiActionFired(world: world, actionId: "duck.toggle") {
+    playground.ducking = not playground.ducking
+    var duckDecibels: Float = 0.0
+    var label: String = "Ducking: off"
+    if playground.ducking {
+      duckDecibels = -14.0
+      label = "Ducking: on"
+    }
+    playground.audio.duckWhilePlaying(
+      source: AudioBusKind.alerts
+      target: AudioBusKind.music
+      gainDecibels: duckDecibels
+    )
+    setNodeText(world: world, nodeId: "DuckToggleLabel", value: label)
+    changed = true
+  }
+  ret changed
+}

@@ -1,0 +1,102 @@
+# The Music section: one MP3 streamed from disk on the music bus (audio/AudioStreams), a test signal
+# (a tone at the start of each second, its pitch telling the second; makeSounds.py), with play
+# and pause on one button, play from the start, and a seek slider that follows the music while
+# nobody holds it and moves the music while dragged.
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open Playground
+
+const musicFile: String = "positionTones.mp3"
+
+func startMusic(playground: mod Playground) {
+  playground.musicVoice = playground.audio.playStream(
+    path: "{playgroundAssets}{musicFile}"
+    bus: AudioBusKind.music
+    gainDecibels: -2.0
+  )
+  playground.audio.setVoicePan(voiceId: playground.musicVoice, pan: playground.pan)
+  playground.musicStarted = true
+}
+
+# Play, pause or go on, as the button says
+func toggleMusic(playground: mod Playground) {
+  if not playground.musicStarted {
+    startMusic(playground: playground)
+    ret
+  }
+  if playground.audio.streamIsPaused(voiceId: playground.musicVoice) {
+    playground.audio.resumeVoice(voiceId: playground.musicVoice)
+  } else {
+    playground.audio.pauseVoice(voiceId: playground.musicVoice)
+  }
+}
+
+func musicIsPlaying(playground: view Playground) ret Bool {
+  ret playground.musicStarted and playground.audio.streamIsPlaying(voiceId: playground.musicVoice) and not playground.audio.streamIsPaused(
+    voiceId: playground.musicVoice
+  )
+}
+
+# "1:05"
+func minutesAndSeconds(seconds: view Float64) ret String {
+  let whole: Int = Math.max(a: 0, b: (seconds as Float).toInt())
+  let second: Int = whole % 60
+  if second < 10 {
+    ret "{whole / 60}:0{second}"
+  }
+  ret "{whole / 60}:{second}"
+}
+
+# The section's buttons and slider this frame; true when what it shows changed
+func musicSection(playground: mod Playground, world: mod UiWorld, values: mod UiValues) ret Bool {
+  var changed: Bool = false
+  if uiActionFired(world: world, actionId: "music.play") {
+    toggleMusic(playground: playground)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "music.restart") {
+    if playground.musicStarted {
+      playground.audio.stopVoice(voiceId: playground.musicVoice)
+    }
+    startMusic(playground: playground)
+    changed = true
+  }
+  # the music ended by itself: the next Play starts it again
+  if playground.musicStarted and not playground.audio.streamIsPlaying(
+    voiceId: playground.musicVoice
+  ) and not playground.audio.streamIsPaused(voiceId: playground.musicVoice) {
+    playground.musicStarted = false
+    changed = true
+  }
+  var duration: Float64 = 0.0
+  var position: Float64 = 0.0
+  if playground.musicStarted {
+    duration = playground.audio.durationSeconds(voiceId: playground.musicVoice)
+    position = playground.audio.positionSeconds(voiceId: playground.musicVoice)
+  }
+  if uiActionFired(world: world, actionId: "music.seek") and playground.musicStarted and duration > 0.0 {
+    let share: Float = uiValue(values: values, key: "music.share", fallback: 0.0)
+    let unusedSought: Bool = playground.audio.seek(
+      voiceId: playground.musicVoice
+      seconds: (share as Float64) * duration
+    )
+  } else if duration > 0.0 {
+    let share: Float = (position / duration) as Float
+    changed = setUiValue(values: values, key: "music.share", value: share) or changed
+  }
+  var label: String = "Play"
+  if musicIsPlaying(playground: playground) {
+    label = "Pause"
+  }
+  setNodeText(world: world, nodeId: "MusicPlayLabel", value: label)
+  setNodeText(
+    world: world
+    nodeId: "MusicTime"
+    value: "{minutesAndSeconds(seconds: position)} / {minutesAndSeconds(seconds: duration)}"
+  )
+  ret changed
+}

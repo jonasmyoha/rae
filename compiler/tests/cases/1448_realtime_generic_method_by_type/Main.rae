@@ -1,0 +1,32 @@
+# A realtime function's method calls on a generic receiver reach only that
+# type's method. `samples.set` on a List(Int) must not reach StringMap.set (it
+# allocates), and `commands.pop` on a SpscRing(Int) must not reach List.pop
+# (it frees): both were false realtime errors once a program also loaded
+# StringMap, as every lib/ui program does.
+open collections/SpscRing
+open collections/StringMap
+
+func render(samples: mod List(Int), commands: view SpscRing(Int)) realtime ret Int {
+  var value: Int = 0
+  if let command: Int = commands.pop() {
+    value = command
+  }
+  loop var i: Int = 0, i < samples.length(), ++i {
+    samples.set(index: i, value: value + i)
+  }
+  ret samples.length()
+}
+
+func main() ret Int {
+  var names: StringMap(Int) = createStringMap(Int, cap: 4)
+  names.set(k: "one", value: 1)
+  let commands: SpscRing(Int) = createSpscRing(Int, capacity: 4)
+  let unusedPushed: Bool = commands.push(value: 5)
+  var samples: List(Int) = List.create(Int, cap: 4)
+  samples.add(value: 0)
+  samples.add(value: 0)
+  let count: Int = render(samples: samples, commands: commands)
+  log("rendered {count}, first {samples.copyAtFallback(index: 0, fallback: -1)}")
+  freeSpscRing(this: commands)
+  ret 0
+}

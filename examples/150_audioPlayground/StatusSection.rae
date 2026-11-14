@@ -1,0 +1,56 @@
+# The Status section: the device the engine plays on, its rate and period, the latency the device
+# and the engine add, the frames of silence played for lack of samples (underruns), and how many
+# sounds were played and have ended. Written a few times a second, and only when a line changed.
+open audio/Audio
+open audio/AudioClock
+open ui/Ecs
+open app3d/UiShell
+open Playground
+
+# The status lines as they read now
+func statusLines(playground: view Playground) ret List(String) {
+  let audio: view AudioEngine = playground.audio
+  var device: String = "none: rendered offline (RAE_AUDIO_DEVICE=offline or headless)"
+  var latencyFrames: Int = audio.latencyFrames()
+  if not audio.offline {
+    device = deviceBackendName(device: audio.device)
+    latencyFrames = latencyFrames + deviceOutputLatencyFrames(
+      device: audio.device
+      sampleRate: audio.sampleRate
+    )
+  }
+  let latencyMs: Float = latencyFrames.toFloat() * 1000.0 / Math.max(a: 1, b: audio.sampleRate).toFloat()
+  ret List(String) {
+    "Device: {device}"
+    "{audio.sampleRate} Hz, {audio.channels} channels, a period of {audio.periodFrames} frames"
+    "Latency: {latencyFrames} frames ({(latencyMs * 10.0 + 0.5).toInt() / 10} ms)"
+    "Underruns: {audio.underrunFrames()} frames of silence, {audio.deviceCallbacks()} callbacks"
+    "Sounds played: {playground.soundsPlayed}, voices ended: {audio.voicesEnded}"
+  }
+}
+
+# Every 15th frame; true when a line changed
+func statusSection(
+  playground: view Playground
+  world: mod UiWorld
+  shown: mod List(String)
+) ret Bool {
+  if playground.frames % 15 is not 1 {
+    ret false
+  }
+  var changed: Bool = false
+  let lines: List(String) = statusLines(playground: playground)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if shown.copyAtDefault(index: i) is not line {
+      setNodeText(world: world, nodeId: "Status{i}", value: line)
+      if i < shown.length {
+        shown.set(index: i, value: line)
+      } else {
+        shown.add(value: line)
+      }
+      changed = true
+    }
+  }
+  ret changed
+}

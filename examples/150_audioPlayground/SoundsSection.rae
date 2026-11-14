@@ -1,0 +1,46 @@
+# The Sounds section: a button per short sound on the effects bus (three WAV, one AAC), which
+# overlap when pressed fast, and the alert on the alerts bus, which ducks the music while it plays.
+# Each new voice takes the pan the Mix section set.
+open audio/Audio
+open audio/AudioMixer
+open ui/Ecs
+open app3d/UiShell
+open Playground
+
+func playSoundOn(playground: mod Playground, sound: view Sound, bus: view AudioBusKind) {
+  let unusedVoiceId: VoiceId = playground.audio.playAt(
+    sound: sound
+    bus: bus
+    gainDecibels: -3.0
+    pan: playground.pan
+    looping: false
+    atSample: 0
+  )
+  playground.soundsPlayed = playground.soundsPlayed + 1
+}
+
+# The section's buttons pressed this frame; true when one was
+func soundsSection(playground: mod Playground, world: view UiWorld) ret Bool {
+  var pressed: Bool = false
+  if uiActionFired(world: world, actionId: "sound.click") {
+    playSoundOn(playground: playground, sound: playground.click, bus: AudioBusKind.effects)
+    pressed = true
+  }
+  if uiActionFired(world: world, actionId: "sound.bell") {
+    playSoundOn(playground: playground, sound: playground.bell, bus: AudioBusKind.effects)
+    pressed = true
+  }
+  if uiActionFired(world: world, actionId: "sound.whoosh") {
+    playSoundOn(playground: playground, sound: playground.whoosh, bus: AudioBusKind.effects)
+    pressed = true
+  }
+  if uiActionFired(world: world, actionId: "sound.chime") {
+    playSoundOn(playground: playground, sound: playground.chime, bus: AudioBusKind.effects)
+    pressed = true
+  }
+  if uiActionFired(world: world, actionId: "sound.alert") {
+    playSoundOn(playground: playground, sound: playground.alert, bus: AudioBusKind.alerts)
+    pressed = true
+  }
+  ret pressed
+}

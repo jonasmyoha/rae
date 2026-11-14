@@ -1,0 +1,197 @@
+# 150: Audio playground — the audio package (packages/audio, docs/audio-design.md §10.1) to try by
+# ear. This first part has the basics a game or an app uses: short sounds on the effects bus that
+# overlap, a test-signal MP3 streamed from disk on the music bus with play, pause and seek, a
+# volume per bus, pan, the alerts' ducking of the music bus, and a readout of the device. Later
+# parts add a section each: the synth and MIDI, the microphone, effects on the buses, and the
+# real-time view.
+#
+# The layout is a .raescene (assets/Ui.raescene); each section is its own module (SoundsSection,
+# MusicSection, MixSection, StatusSection) run once a frame over the app's Playground, which holds
+# the audio engine as a resource. With no device (RAE_AUDIO_DEVICE=offline, or a headless run such
+# as the visual gate's) the engine renders offline and the app renders a frame's samples itself.
+#
+# RAE_AUDIO_PLAYGROUND_DEMO=1 presses the controls by itself on set frames (two sounds, the stream,
+# an alert, a seek, a pan) and logs what the engine did, for a headless check;
+# RAE_AUDIO_PLAYGROUND_SECONDS=N ends a run on the real device after N seconds.
+import Gpu2d
+open ui/EventLoop
+open ui/Registry
+open app3d/UiShell
+open ui/Ecs
+open ui/Pipeline
+open ui/UiValues
+open ui/valueSystem/ValueSystem
+open ui/animationSystem/AnimationTracks
+open ui/buttonSystem/ButtonHoverScale
+open ecs/Schedule
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open ui/SceneInstance
+open ecs/Entity
+open Gpu2dCanvas
+open ui/UiSystems
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open Playground
+open SoundsSection
+open MusicSection
+open MixSection
+open StatusSection
+
+const designW: Int = 1000
+
+const designH: Int = 720
+
+const idleHeartbeatSeconds: Float = 0.5
+
+# An offline demo ends after this many frames (2 s of audio at a 60th of a second a frame), so what
+# it played does not depend on how fast the machine draws: the sounds have ended, the stream plays
+const demoOfflineFrames: Int = 120
+
+# The demo's presses, frame by frame (RAE_AUDIO_PLAYGROUND_DEMO=1)
+func demoStep(playground: mod Playground, values: mod UiValues, frame: view Int) {
+  if frame is 3 {
+    playSoundOn(playground: playground, sound: playground.click, bus: AudioBusKind.effects)
+    playSoundOn(playground: playground, sound: playground.bell, bus: AudioBusKind.effects)
+  }
+  if frame is 6 {
+    toggleMusic(playground: playground)
+  }
+  if frame is 20 {
+    playSoundOn(playground: playground, sound: playground.alert, bus: AudioBusKind.alerts)
+    playSoundOn(playground: playground, sound: playground.chime, bus: AudioBusKind.effects)
+  }
+  if frame is 40 {
+    let unusedSought: Bool = playground.audio.seek(voiceId: playground.musicVoice, seconds: 16.0)
+  }
+  if frame is 45 {
+    playground.pan = -0.8
+    playground.audio.setVoicePan(voiceId: playground.musicVoice, pan: playground.pan)
+    let unusedPan: Bool = setUiValue(values: values, key: "pan", value: -0.8)
+  }
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "150: Audio playground")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var gpuUi: Gpu2dUi = loadUiFonts(
+    directory: "lib/assets/walker/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  var sceneRegistry: SceneRegistry = createSceneRegistry()
+  let root: EntityId = mountSceneWithImports(
+    world: world
+    uiSystems: uiSystems
+    root: playgroundAssets
+    sceneId: "Ui"
+    resources: gpuUi
+    canvas: canvas
+    registry: sceneRegistry
+  )
+  if isNone(this: root) {
+    log("[audioPlayground] the scene mounted no root")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  var playground: Playground = createPlayground()
+  log(
+    "[audioPlayground] {playground.audio.sampleRate} Hz, {playground.audio.channels} channels, offline {playground.audio.offline}"
+  )
+  var values: UiValues = createUiValues()
+  setMixDefaults(values: values)
+  applyBusVolumes(playground: playground, values: values)
+  var statusShown: List(String) = List.create(String, cap: 8)
+  let demo: Bool = getEnv(name: "RAE_AUDIO_PLAYGROUND_DEMO") is "1"
+  let runSeconds: Float = getEnv(name: "RAE_AUDIO_PLAYGROUND_SECONDS").toFloat()
+  let startedSeconds: Float64 = Gpu2d.nowSeconds()
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  var renderedOnce: Bool = false
+  var wokeUp: Bool = false
+  var animating: Bool = false
+  var lastFrameSeconds: Float64 = Gpu2d.nowSeconds()
+  var frame: Int = 0
+  loop not Gpu2d.pollClose() and not (runSeconds > 0.0 and Gpu2d.nowSeconds() - startedSeconds > runSeconds as Float64) and not (demo and playground.rendersItself and frame >= demoOfflineFrames) {
+    var changed: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
+    updateUiInput(input: input, world: world, uiSystems: uiSystems)
+    changed = valueSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      values: values
+    ) or changed
+    let hadEvents: Bool = uiActionCount(world: world) > 0
+    let now: Float64 = Gpu2d.nowSeconds()
+    let pressing: Bool = buttonHoverScaleUpdate(
+      world: world
+      uiSystems: uiSystems
+      hovered: input.hoveredEntityId
+      deltaTime: (now - lastFrameSeconds) as Float
+    )
+    lastFrameSeconds = now
+    frame = frame + 1
+    playgroundFrame(playground: playground)
+    if demo {
+      demoStep(playground: playground, values: values, frame: frame)
+    }
+    changed = soundsSection(playground: playground, world: world) or changed
+    changed = musicSection(playground: playground, world: world, values: values) or changed
+    changed = mixSection(playground: playground, world: world, values: values) or changed
+    changed = statusSection(playground: playground, world: world, shown: statusShown) or changed
+    if hadEvents or changed or animating or pressing or renderedOnce is false {
+      runScheduledUiSystems(
+        schedule: schedule
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+      )
+    }
+    # while the music plays its position moves, and the status a few times a second
+    let musicMoving: Bool = musicIsPlaying(playground: playground)
+    animating = animationInFlight(world: world, uiSystems: uiSystems) or pressing or musicMoving
+    let needsRender: Bool = hadEvents or changed or wokeUp or animating or renderedOnce is false
+    wokeUp = false
+    if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
+      Gpu2d.beginFrame(
+        canvas: canvas
+        r: 0.04
+        g: 0.05
+        b: 0.08
+        a: 1.0
+      )
+      renderSystemGpu2d(
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      )
+      Gpu2d.endFrame(canvas: canvas)
+      renderedOnce = true
+    } else {
+      # the engine's feedback is read each turn, so an idle app still wakes a few times a second
+      Gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(
+        visible: Gpu2d.renderableNow()
+        animating: animating
+        mouseDown: false
+        pollWatcher: true
+        frameSeconds: 0.016667
+        heartbeatSeconds: idleHeartbeatSeconds
+      ))
+      wokeUp = true
+    }
+  }
+  var position: Float64 = 0.0
+  if playground.musicStarted {
+    position = playground.audio.positionSeconds(voiceId: playground.musicVoice)
+  }
+  log(
+    "[audioPlayground] {frame} frames; sounds played {playground.soundsPlayed}, voices ended {playground.audio.voicesEnded}; music started {playground.musicStarted} at {((position * 10.0) as Float).toInt() / 10} s; pan {playground.pan}; underrun frames {playground.audio.underrunFrames()}"
+  )
+  let unusedBlocks: Int = endPlayground(playground: playground)
+  Gpu2d.closeWindow()
+  ret 0
+}
