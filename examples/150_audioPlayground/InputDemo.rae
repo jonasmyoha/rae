@@ -1,0 +1,56 @@
+# The state of the Input section: the microphone's permission as last read, a take being
+# recorded (its clicks' output samples, for the alignment check), the last finished take as a
+# sound, the level meter, and what the section says.
+open audio/Audio
+open audio/AudioInput
+open audio/Sound
+
+# How long a take is (s), and the clicks played while it records: one every half second from
+# 0.5 s, so the playback can be checked against them
+const takeSeconds: Float = 3.0
+
+const takeClickCount: Int = 5
+
+type InputDemo {
+  # the microphone's permission as last read (audio/AudioInput: 3 allowed)
+  permission: Int = 0
+  asked: Bool = false
+  # when the permission is read next (s, the window's clock)
+  nextPermissionSeconds: Float64 = 0.0
+  # what the input ring gives: a take while recording, else a short running capture for the meter
+  capture: AudioRecording
+  recording: Bool = false
+  takeEndsAtSample: Int = 0
+  clickSamples: List(Int)
+  # the last take, cut to its round trip and loaded as a sound
+  take: Sound
+  hasTake: Bool = false
+  takeAlignedStart: Int = 0
+  takeLostSamples: Int = 0
+  takeRoundTrip: Int = 0
+  # where the clicks were found in the take, against where they were played (ms; -1 when the
+  # microphone did not hear them)
+  clickOffsetMs: Float = -1.0
+  clicksHeard: Int = 0
+  levelDecibels: Float = -100.0
+  savedPath: String = ""
+  status: String = ""
+  takesRecorded: Int = 0
+  playbacks: Int = 0
+}
+
+func createInputDemo(audio: view AudioEngine) ret InputDemo {
+  ret InputDemo {
+    permission: microphonePermission()
+    capture: audio.beginRecording()
+    clickSamples: {}
+    take: Sound {
+      soundId: -1
+      samples: createSampleBufferHandle()
+      frameCount: 0
+      channels: 1
+      sampleRate: audio.sampleRate
+      error: "no take yet"
+    }
+  }
+}

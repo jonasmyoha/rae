@@ -1,0 +1,379 @@
+# The Input section (audio/AudioInput): the microphone's permission (asked with requestMicrophone,
+# and a clear message when it is refused), a live level meter, a take of three seconds recorded
+# while five clicks play, the take played back in time with the same clicks, and the take saved
+# as a WAV in the app's documents.
+#
+# Alignment: the take is cut by the round trip (output latency plus input latency), so its frame
+# i was heard when output sample alignedStart + i played. The clicks the microphone heard are
+# found in the take and compared with where they were played: the offset left is the air
+# between speaker and microphone (a few ms) and any latency the platform does not report (on a
+# MacBook Pro's own speakers about 60 ms). The playback starts the take, less that offset, and
+# the same clicks from one sample time, so they sound together.
+#
+# The engine opens with the input only once the microphone is allowed (Playground): when it is
+# allowed later, here, the engine is opened again with the input and every sound loaded again.
+import Filesystem
+import Gpu2d
+import Math
+open audio/Audio
+open audio/AudioInput
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/AudioSpatial
+open audio/Sound
+open audio/VoiceControls
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open InputDemo
+open MixSection
+open Playground
+open StepsDemo
+
+func decibelsOf(level: view Float) ret Float {
+  if level <= 0.000001 {
+    ret -100.0
+  }
+  ret 20.0 * Math.naturalLog(x: level) / 2.302585093
+}
+
+# The engine opened again, now with the microphone, and everything it held set up again (the
+# music, the orbit and the take were on the old engine: they stop)
+func reopenWithInput(playground: mod Playground, values: view UiValues) {
+  let unusedBlocks: Int = playground.audio.stopAudio()
+  playground.audio = audioStart(settings: playgroundAudioSettings(withInput: true))
+  playground.click = playground.audio.loadSound(path: "{playgroundAssets}click.wav")
+  playground.bell = playground.audio.loadSound(path: "{playgroundAssets}bell.wav")
+  playground.whoosh = playground.audio.loadSound(path: "{playgroundAssets}whoosh.wav")
+  playground.chime = playground.audio.loadSound(path: "{playgroundAssets}chime.m4a")
+  playground.alert = playground.audio.loadSound(path: "{playgroundAssets}alert.wav")
+  playground.buzz = playground.audio.loadSound(path: "{playgroundAssets}buzzLoop.wav")
+  playground.step = playground.audio.loadSound(path: "{playgroundAssets}step.wav")
+  playground.shot = playground.audio.loadSound(path: "{playgroundAssets}shot.wav")
+  playground.stepsDemo.sounds = loadStepSounds(audio: playground.audio, assets: playgroundAssets)
+  playground.audio.setSoundVoiceLimit(
+    sound: playground.shot
+    voiceLimit: 3
+    rule: AudioStealRule.oldest
+  )
+  var duckDecibels: Float = 0.0
+  if playground.ducking {
+    duckDecibels = -14.0
+  }
+  playground.audio.duckWhilePlaying(
+    source: AudioBusKind.alerts
+    target: AudioBusKind.music
+    gainDecibels: duckDecibels
+  )
+  applyBusVolumes(playground: playground, values: values)
+  playground.audio.setSynthSound(sound: playground.synthDemo.sound)
+  playground.musicStarted = false
+  playground.orbitOn = false
+  playground.placement.sources.componentRemove(entityId: playground.orbitEntityId)
+  playground.inputDemo.capture = playground.audio.beginRecording()
+  playground.inputDemo.hasTake = false
+  playground.inputDemo.recording = false
+}
+
+func permissionText(permission: view Int) ret String {
+  if permission is 3 {
+    ret "allowed"
+  }
+  if permission is 2 {
+    ret "refused"
+  }
+  if permission is 1 {
+    ret "restricted (by a device policy)"
+  }
+  if permission is 0 {
+    ret "not asked yet"
+  }
+  ret "nothing to ask on this platform"
+}
+
+# What the section says about the microphone now
+func inputStatus(playground: view Playground) ret String {
+  let demo: view InputDemo = playground.inputDemo
+  if playground.rendersItself {
+    ret "No microphone: rendered offline"
+  }
+  if demo.permission is 2 {
+    ret "Refused: allow it in Settings > Privacy & Security > Microphone"
+  }
+  if demo.permission is 1 {
+    ret "Restricted on this device: it cannot be allowed here"
+  }
+  if demo.permission is 0 and demo.asked {
+    ret "Asked: answer the system's question"
+  }
+  if demo.permission is 0 {
+    ret "Not allowed yet: press Allow"
+  }
+  if not playground.audio.inputAvailable() {
+    ret "{permissionText(permission: demo.permission)}, but there is no input device"
+  }
+  ret "Allowed: {playground.audio.input.channels} channel, {playground.audio.sampleRate} Hz, round trip {playground.audio.roundTripFrames()} frames"
+}
+
+# Start a take: from the next safe sample, with five clicks half a second apart from 0.5 s
+func startTake(playground: mod Playground) {
+  let rate: Int = playground.audio.sampleRate
+  playground.inputDemo.capture = playground.audio.beginRecording()
+  playground.inputDemo.recording = true
+  let start: Int = playground.audio.nextSafeSampleTime()
+  playground.inputDemo.clickSamples = {}
+  loop var click: Int = 0, click < takeClickCount, ++click {
+    let at: Int = start + rate / 2 + click * rate / 2
+    let unusedVoice: VoiceId = playground.audio.playAt(
+      sound: playground.click
+      bus: AudioBusKind.effects
+      gainDecibels: -6.0
+      pan: 0.0
+      looping: false
+      atSample: at
+    )
+    playground.inputDemo.clickSamples.add(value: at)
+  }
+  playground.inputDemo.takeEndsAtSample = start + ((takeSeconds * (rate as Float)).toInt())
+}
+
+# Where each click is in the take against where it was played: the first sample over four times
+# the quiet before it, within 100 ms after it; sets clicksHeard and clickOffsetMs
+func findClicks(demo: mod InputDemo, rate: view Int) {
+  var heard: Int = 0
+  var offsetSum: Float = 0.0
+  loop let played: Int in demo.clickSamples {
+    let expected: Int = played - demo.takeAlignedStart
+    var quiet: Float = 0.0
+    loop var i: Int = Math.max(a: 0, b: expected - rate / 20), i < Math.max(
+      a: 0
+      b: expected - rate / 200
+    ), ++i {
+      quiet = Math.max(
+        a: quiet
+        b: Math.abs(value: sampleAt(samples: demo.take.samples, index: i * demo.take.channels))
+      )
+    }
+    let threshold: Float = Math.max(a: quiet * 4.0, b: 0.01)
+    var found: Int = -1
+    loop var i: Int = Math.max(a: 0, b: expected - rate / 200), i < Math.min(
+      a: demo.take.frameCount
+      b: expected + rate / 10
+    ) and found < 0, ++i {
+      if Math.abs(value: sampleAt(samples: demo.take.samples, index: i * demo.take.channels)) > threshold {
+        found = i
+      }
+    }
+    if found >= 0 {
+      heard = heard + 1
+      offsetSum = offsetSum + ((found - expected) as Float) * 1000.0 / (rate as Float)
+    }
+  }
+  demo.clicksHeard = heard
+  demo.clickOffsetMs = -1.0
+  if heard > 0 {
+    demo.clickOffsetMs = offsetSum / (heard as Float)
+  }
+}
+
+# The take is over: cut, loaded as a sound, its clicks found; the meter goes on
+func finishTake(playground: mod Playground) {
+  let data: SoundData = finishRecording(recording: playground.inputDemo.capture)
+  if playground.inputDemo.hasTake {
+    playground.audio.freeSound(sound: playground.inputDemo.take)
+  }
+  playground.inputDemo.takeAlignedStart = alignedStart(recording: playground.inputDemo.capture)
+  playground.inputDemo.takeLostSamples = playground.inputDemo.capture.lostSamples
+  playground.inputDemo.takeRoundTrip = playground.inputDemo.capture.roundTripFrames
+  playground.inputDemo.take = playground.audio.addSound(data: data)
+  playground.inputDemo.hasTake = true
+  playground.inputDemo.recording = false
+  playground.inputDemo.takesRecorded = playground.inputDemo.takesRecorded + 1
+  findClicks(demo: playground.inputDemo, rate: playground.audio.sampleRate)
+  playground.inputDemo.capture = playground.audio.beginRecording()
+}
+
+# The take and its clicks again, from one sample: they sound together
+func playTake(playground: mod Playground) {
+  if not playground.inputDemo.hasTake {
+    ret
+  }
+  let rate: Int = playground.audio.sampleRate
+  let at: Int = playground.audio.nextSafeSampleTime() + rate / 10
+  # where the clicks were heard later than the platform's latency says, the take starts that
+  # much earlier, so its echoes land on the clicks played again
+  var correction: Int = 0
+  if playground.inputDemo.clicksHeard > 0 {
+    correction = Math.max(
+      a: 0
+      b: ((playground.inputDemo.clickOffsetMs * (rate as Float)) / 1000.0).toInt()
+    )
+  }
+  let unusedTake: VoiceId = playground.audio.playFromAt(
+    sound: playground.inputDemo.take
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: correction
+    atSample: at
+  )
+  loop let played: Int in playground.inputDemo.clickSamples {
+    let unusedClick: VoiceId = playground.audio.playAt(
+      sound: playground.click
+      bus: AudioBusKind.effects
+      gainDecibels: -6.0
+      pan: 0.0
+      looping: false
+      atSample: at + played - playground.inputDemo.takeAlignedStart
+    )
+  }
+  playground.inputDemo.playbacks = playground.inputDemo.playbacks + 1
+}
+
+# The take as a 32-bit float WAV in the app's documents
+func saveTake(playground: mod Playground) {
+  if not playground.inputDemo.hasTake {
+    ret
+  }
+  let folder: String = Filesystem.documentsDir()
+  let path: String = Filesystem.join(
+    a: folder
+    b: "Rae audio playground take {playground.inputDemo.takesRecorded}.wav"
+  )
+  let take: view Sound = playground.inputDemo.take
+  if writeWavFile(
+    path: path
+    samples: take.samples
+    frameCount: take.frameCount
+    channels: take.channels
+    sampleRate: take.sampleRate
+  ) {
+    playground.inputDemo.savedPath = path
+  } else {
+    playground.inputDemo.savedPath = "could not write {path}"
+  }
+}
+
+func takeText(demo: view InputDemo) ret String {
+  if demo.recording {
+    ret "Recording..."
+  }
+  if not demo.hasTake {
+    ret "No take yet"
+  }
+  let seconds: Float = (demo.take.frameCount as Float) / (Math.max(a: 1, b: demo.take.sampleRate) as Float)
+  ret "Take {demo.takesRecorded}: {Math.round(x: seconds * 10.0) / 10.0} s, {demo.takeRoundTrip} frames of round trip cut, {demo.takeLostSamples} lost"
+}
+
+# Where the take heard its clicks
+func clicksText(demo: view InputDemo) ret String {
+  if not demo.hasTake {
+    ret ""
+  }
+  if demo.clicksHeard is 0 {
+    ret "The microphone did not hear the clicks"
+  }
+  let late: Float = Math.round(x: demo.clickOffsetMs * 10.0) / 10.0
+  ret "Clicks heard {demo.clicksHeard} of {takeClickCount}, {late} ms late; playback takes it out"
+}
+
+# The level of what came in since the last frame, from `from` in the capture
+func newLevel(demo: view InputDemo, from: view Int) ret Float {
+  var peak: Float = 0.0
+  loop var i: Int = from, i < demo.capture.samples.length(), ++i {
+    peak = Math.max(
+      a: peak
+      b: Math.abs(value: demo.capture.samples.copyAtFallback(index: i, fallback: 0.0))
+    )
+  }
+  ret peak
+}
+
+# The section's buttons, meter and take this frame; true when what it shows changed
+func inputSection(playground: mod Playground, world: mod UiWorld, values: mod UiValues) ret Bool {
+  var changed: Bool = false
+  let now: Float64 = Gpu2d.nowSeconds()
+  if not playground.rendersItself and now >= playground.inputDemo.nextPermissionSeconds {
+    playground.inputDemo.nextPermissionSeconds = now + 0.5
+    let permission: Int = microphonePermission()
+    if permission is not playground.inputDemo.permission {
+      playground.inputDemo.permission = permission
+      changed = true
+    }
+    # allowed now, and the engine was opened without the input: open it again with it
+    if permission is 3 and not playground.audio.inputAvailable() {
+      reopenWithInput(playground: playground, values: values)
+      changed = true
+    }
+  }
+  if uiActionFired(world: world, actionId: "input.allow") and not playground.rendersItself {
+    if playground.inputDemo.permission is 0 {
+      let unusedAsked: Bool = requestMicrophone()
+      playground.inputDemo.asked = true
+    }
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "input.record") and playground.audio.inputAvailable() and not playground.inputDemo.recording {
+    startTake(playground: playground)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "input.play") {
+    playTake(playground: playground)
+  }
+  if uiActionFired(world: world, actionId: "input.save") {
+    saveTake(playground: playground)
+    changed = true
+  }
+  if playground.audio.inputAvailable() {
+    let before: Int = playground.inputDemo.capture.samples.length()
+    playground.audio.recordInto(recording: playground.inputDemo.capture)
+    let level: Float = newLevel(demo: playground.inputDemo, from: before)
+    playground.inputDemo.levelDecibels = decibelsOf(level: level)
+    if not playground.inputDemo.recording {
+      # the meter keeps only this frame's samples
+      playground.inputDemo.capture.samples.clear()
+    }
+    let share: Float = Math.clamp(
+      val: (playground.inputDemo.levelDecibels + 60.0) / 60.0
+      low: 0.0
+      high: 1.0
+    )
+    changed = setUiValue(values: values, key: "input.level", value: share) or changed
+    if playground.inputDemo.recording and playground.audio.nextSafeSampleTime() >= playground.inputDemo.takeEndsAtSample {
+      finishTake(playground: playground)
+      changed = true
+    }
+  }
+  if changed or playground.frames % 15 is 1 {
+    setNodeText(world: world, nodeId: "InputStatus", value: inputStatus(playground: playground))
+    setNodeText(world: world, nodeId: "InputTake", value: takeText(demo: playground.inputDemo))
+    setNodeText(world: world, nodeId: "InputClicks", value: clicksText(demo: playground.inputDemo))
+    var saved: String = ""
+    if playground.inputDemo.savedPath.length() > 0 {
+      saved = "Saved in Documents: {Filesystem.baseName(path: playground.inputDemo.savedPath)}"
+    }
+    setNodeText(world: world, nodeId: "InputSaved", value: saved)
+  }
+  ret changed or playground.inputDemo.recording
+}
+
+# A run that records by itself (RAE_AUDIO_PLAYGROUND_RECORD=1, with a device): a take at frame
+# 60, played back and saved as soon as it is done
+func inputDemoStep(playground: mod Playground, frame: view Int) {
+  if frame is 60 and playground.audio.inputAvailable() and not playground.inputDemo.recording {
+    startTake(playground: playground)
+  }
+  if playground.inputDemo.hasTake and playground.inputDemo.playbacks is 0 {
+    playTake(playground: playground)
+    saveTake(playground: playground)
+  }
+}
+
+# For the run's summary line
+func inputSummary(playground: view Playground) ret String {
+  let take: String = takeText(demo: playground.inputDemo)
+  let clicks: String = clicksText(demo: playground.inputDemo)
+  ret "permission {playground.inputDemo.permission}, input {playground.audio.inputAvailable()}; {take}; {clicks}; played back {playground.inputDemo.playbacks}; saved {playground.inputDemo.savedPath}"
+}

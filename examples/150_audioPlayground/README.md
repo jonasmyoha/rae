@@ -53,6 +53,23 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   - **MIDI**: every connected MIDI keyboard or controller plays the synth. The line under it
     names them, or says none is connected; one plugged in later is found within two seconds.
     The last note received is shown, and its key lights up.
+- **Microphone: record and play back** (under the synth; `audio/AudioInput`).
+  - **Allow** asks for the microphone. The engine opens with the input only once it is allowed
+    (opening it unasked would bring up the system's question at launch), so allowing it later
+    opens the engine again with the input and loads every sound again (the music and the orbit
+    stop). A refusal says where to allow it: Settings > Privacy & Security > Microphone.
+  - The **level** bar is what came in during the last frame (0 % is 60 dB down).
+  - **Record 3 s** records a take while five clicks play, half a second apart. The take is cut
+    by the round trip (output plus input latency), so its frame i lines up with what played at
+    its start sample plus i. The clicks the microphone heard are found in the take and
+    compared with when they were played: what is left is the air between speaker and
+    microphone and any latency the platform does not report. On a MacBook Pro's own speakers
+    that is about 60 ms (Core Audio reports a round trip of 725 frames, 15 ms; the clicks
+    arrive 61 ms later than that).
+  - **Play back** plays the take and the same clicks from one sample, the take started that
+    measured offset earlier, so the recorded clicks land on the played ones.
+  - **Save WAV** writes the take as a 32-bit float WAV in the app's documents (the Mac:
+    `~/Documents`; an iPhone: the app's own Documents, seen in the Files app).
 - **Status:** the device the engine plays on, its sample rate and period, the latency the device
   and the engine add, the frames of silence played because samples were late (underruns), and
   how many sounds played and ended.
@@ -64,7 +81,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
   `GameSection`, `PlacedSection`, `StepsSection` with its state in `StepsDemo`, `SynthSection` with its state in
-  `SynthDemo`, `StatusSection`), run once a frame from `Main.rae`.
+  `SynthDemo`, `InputSection` with its state in `InputDemo`, `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -79,6 +96,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
 | `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
+| `RAE_AUDIO_PLAYGROUND_RECORD=1` | with a device and the microphone allowed: records a take at frame 60, plays it back and saves it, and logs a line `[audioPlayground] input: ...` at the end (the clicks heard and their offset, the saved path) |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
 
 The visual example gate (`RAE_EXAMPLE_FILTER=150_audioPlayground make -C compiler test-examples`)

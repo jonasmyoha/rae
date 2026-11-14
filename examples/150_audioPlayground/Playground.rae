@@ -6,12 +6,15 @@
 import Math
 import Sys
 open audio/Audio
+open audio/AudioInput
 open audio/AudioMixer
+open audio/AudioSession
 open audio/AudioSpatial
 open audio/Sound
 open audio/VoiceControls
 open StepsDemo
 open SynthDemo
+open InputDemo
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Transform
@@ -64,6 +67,8 @@ type Playground {
   stepsDemo: StepsDemo
   # the synth's keyboard, sound, metronome and MIDI
   synthDemo: SynthDemo
+  # the microphone: its permission, the meter, a take and its playback
+  inputDemo: InputDemo
   engineRate: Float = 1.0
 }
 
@@ -72,10 +77,25 @@ func playgroundWantsOffline() ret Bool {
   ret getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or audioOfflineWanted()
 }
 
-func createPlayground() ret Playground {
+# The engine's settings: offline for a headless run; with one input channel (a duplex device, a
+# play-and-record session on iOS) when `withInput`
+func playgroundAudioSettings(withInput: view Bool) ret AudioSettings {
   var settings: AudioSettings = defaultAudioSettings()
   settings.offline = playgroundWantsOffline()
-  var audio: AudioEngine = audioStart(settings: settings)
+  if withInput and not settings.offline {
+    settings.inputChannels = 1
+    settings.session = AudioSessionKind.recording
+  }
+  ret settings
+}
+
+func createPlayground() ret Playground {
+  # the microphone opens with the engine only when it is already allowed: opening the input
+  # unasked would bring up the system's question at launch
+  let microphoneAllowed: Bool = microphonePermission() is 3
+  var audio: AudioEngine = audioStart(
+    settings: playgroundAudioSettings(withInput: microphoneAllowed)
+  )
   let click: Sound = audio.loadSound(path: "{playgroundAssets}click.wav")
   let bell: Sound = audio.loadSound(path: "{playgroundAssets}bell.wav")
   let whoosh: Sound = audio.loadSound(path: "{playgroundAssets}whoosh.wav")
@@ -118,6 +138,7 @@ func createPlayground() ret Playground {
     random: createRandom(seed: 150)
     stepsDemo: stepsDemo
     synthDemo: createSynthDemo(sampleRate: audio.sampleRate)
+    inputDemo: createInputDemo(audio: audio)
   }
 }
 

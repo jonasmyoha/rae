@@ -41,11 +41,12 @@ open GameSection
 open PlacedSection
 open StepsSection
 open SynthSection
+open InputSection
 open StatusSection
 
 const designW: Int = 1440
 
-const designH: Int = 880
+const designH: Int = 1040
 
 const idleHeartbeatSeconds: Float = 0.5
 
@@ -151,6 +152,7 @@ func main() ret Int {
   setSynthDefaults(values: values)
   var statusShown: List(String) = List.create(String, cap: 8)
   let demo: Bool = getEnv(name: "RAE_AUDIO_PLAYGROUND_DEMO") is "1"
+  let recordByItself: Bool = getEnv(name: "RAE_AUDIO_PLAYGROUND_RECORD") is "1"
   let runSeconds: Float = getEnv(name: "RAE_AUDIO_PLAYGROUND_SECONDS").toFloat()
   let startedSeconds: Float64 = Gpu2d.nowSeconds()
   var schedule: Schedule = createUiPipeline(world: world)
@@ -182,6 +184,9 @@ func main() ret Int {
     lastFrameSeconds = now
     frame = frame + 1
     playgroundFrame(playground: playground)
+    if recordByItself {
+      inputDemoStep(playground: playground, frame: frame)
+    }
     if demo {
       demoStep(playground: playground, values: values, frame: frame)
       synthDemoStep(
@@ -200,6 +205,7 @@ func main() ret Int {
     if playground.rendersItself {
       audioDeltaTime = 1.0 / 60.0
     }
+    changed = inputSection(playground: playground, world: world, values: values) or changed
     changed = synthSection(
       playground: playground
       world: world
@@ -275,6 +281,7 @@ func main() ret Int {
   log(
     "[audioPlayground] {playground.synthDemo.midiStatus}; MIDI notes played {playground.synthDemo.midiNotesPlayed}"
   )
+  log("[audioPlayground] input: {inputSummary(playground: playground)}")
   let unusedBlocks: Int = endPlayground(playground: playground)
   Gpu2d.closeWindow()
   ret 0
