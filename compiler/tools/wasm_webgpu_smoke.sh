@@ -93,6 +93,16 @@ build_quietly 240 \
   checks/webTask/Main.rae
 test -s "$TMP/task/index.wasm"
 
+# A sleep on main lets the page run (it yields through Asyncify), and one in
+# a mainLoop frame holds the frame with a warning (checks/webSleep). Built
+# always; run in headless Chrome when Chrome is installed.
+build_quietly 240 \
+  --target wasm --profile dev \
+  --project checks/webSleep \
+  --out "$TMP/sleep/index.html" \
+  checks/webSleep/Main.rae
+test -s "$TMP/sleep/index.wasm"
+
 # A package's shader and declared file reach a page: the file through the preloaded data, read at
 # packages/<name>/ (docs/toolchain-and-packages-decision.md, section 6).
 build_quietly 240 \
@@ -151,6 +161,18 @@ if [ "$have_chrome" = 1 ]; then
   fi
 fi
 
+sleep_note="sleep page built (no Chrome: not run)"
+if [ "$have_chrome" = 1 ]; then
+  console="$(page_console "$TMP/sleep" 3 'SLEEP (OK|FAIL)')"
+  if printf '%s' "$console" | grep -q 'SLEEP OK'; then
+    sleep_note="a sleep let the page run in headless Chrome"
+  else
+    echo "FAIL wasm_webgpu_smoke: a sleep held the page:"
+    printf '%s\n' "$console" | sed 's/.*CONSOLE:[0-9]*\] "//;s/", source.*//' | head -10
+    exit 1
+  fi
+fi
+
 readback_note="readback page built (no Chrome: not run)"
 if [ "$have_chrome" = 1 ]; then
   console="$(page_console "$TMP/readback" 2 'READBACK (OK|FAIL|TIMEOUT)')"
@@ -165,4 +187,4 @@ if [ "$have_chrome" = 1 ]; then
   fi
 fi
 
-echo "PASS wasm_webgpu_smoke: 132 and composed 134 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note"
+echo "PASS wasm_webgpu_smoke: 132 and composed 134 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note; $sleep_note"

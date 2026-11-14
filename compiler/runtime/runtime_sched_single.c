@@ -149,12 +149,18 @@ void rae_ext_Scheduler_runTask(int64_t task) {
   if (!t) return;
   RaeTask* saved_task = g_sched_current_task;
   int pool_mark = rae_string_pool_mark();
+#if defined(__EMSCRIPTEN__)
+  rae_web_sleep_hold(1);
+#endif
   if (t->step) {
     g_sched_current_task = t;
     t->step(t->args);
   } else {
     t->thunk(t->args);
   }
+#if defined(__EMSCRIPTEN__)
+  rae_web_sleep_hold(-1);
+#endif
   rae_string_pool_release(pool_mark);
   g_sched_current_task = saved_task;
 }
