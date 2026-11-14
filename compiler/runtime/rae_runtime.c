@@ -58,7 +58,9 @@ static void rae_realtime_violation(const char* entry, const char* detail);
      ? rae_realtime_violation((entry), (detail)) : (void)0)
 
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-#define RAE_LOCK(m)   (RAE_REALTIME_GUARD("RAE_LOCK", "a runtime mutex"), pthread_mutex_lock(m))
+/* A contended RAE_LOCK is a wait span in the event recorder (runtime_perf_hooks.c) */
+static inline void rae_perf_lock(pthread_mutex_t* mutex, int64_t code);
+#define RAE_LOCK(m)   (RAE_REALTIME_GUARD("RAE_LOCK", "a runtime mutex"), rae_perf_lock((m), 8))
 #define RAE_UNLOCK(m) pthread_mutex_unlock(m)
 /* The bookkeeping inside an allocation (the RAE_MEM_STATS tables, the buffer
  * records) locks too; the allocation itself is what the check reports. */
@@ -81,6 +83,7 @@ static void rae_realtime_violation(const char* entry, const char* detail);
 /* Runtime implementation modules. These are included into one translation
  * unit to preserve existing static helper visibility, linker behavior, and
  * emitted-app build mechanics. See docs/runtime-kernel-abi.md. */
+#include "runtime_perf_hooks.c"
 #include "runtime_realtime.c"
 #include "runtime_threads.c"
 #include "runtime_signal.c"

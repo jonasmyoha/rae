@@ -1,0 +1,162 @@
+# The runtime's work in the event recorder (lib/perf/Perf perfInstallRuntime,
+# docs/perf-tools-design.md §4.3): a parallelLoop is a zone on its caller's lane and each chunk
+# a zone on the lane of the worker that ran it; Task.get and taskScope waits are spans with a
+# flow from each spawn to its task's run; a Channel's lock, contended by the workers, is a wait.
+open Channel
+open perf/Perf
+
+func spin(rounds: copy Int) ret Int {
+  var value: Int = 1
+  loop var i: Int = 0, i < rounds, ++i {
+    value = (value * 31 + i) % 1000003
+  }
+  ret value
+}
+
+# The events of `name` per lane, and whether every lane's begins and ends of it pair up
+type NameCount {
+  lanes: List(Int)
+  balanced: Bool
+}
+
+func countName(hub: view PerfHub, name: view String) ret NameCount {
+  var lanes: List(Int) = {}
+  var depth: List(Int) = {}
+  loop var ring: Int = 0, ring < hub.rings.length, ++ring {
+    lanes.add(value: 0)
+    depth.add(value: 0)
+  }
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if hub.perfNameText(nameId: event.nameId as Int) is name {
+      let ring: Int = hub.perfEventRing(number: number)
+      let opens: Bool = event.kind is PerfKind.zoneBegin or event.kind is PerfKind.waitBegin
+      let closes: Bool = event.kind is PerfKind.zoneEnd or event.kind is PerfKind.waitEnd
+      if opens {
+        lanes.set(index: ring, value: lanes.copyAtDefault(index: ring) + 1)
+        depth.set(index: ring, value: depth.copyAtDefault(index: ring) + 1)
+      }
+      if closes {
+        depth.set(index: ring, value: depth.copyAtDefault(index: ring) - 1)
+      }
+    }
+  }
+  var balanced: Bool = true
+  loop let open: Int in depth {
+    balanced = balanced and open is 0
+  }
+  ret NameCount { lanes: lanes, balanced: balanced }
+}
+
+func total(counts: view List(Int)) ret Int {
+  var sum: Int = 0
+  loop let count: Int in counts {
+    sum = sum + count
+  }
+  ret sum
+}
+
+func busyLanes(counts: view List(Int)) ret Int {
+  var busy: Int = 0
+  loop let count: Int in counts {
+    if count > 0 {
+      busy = busy + 1
+    }
+  }
+  ret busy
+}
+
+func countKind(hub: view PerfHub, kind: view PerfKind) ret Int {
+  var count: Int = 0
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    if hub.perfEventAt(number: number).kind is kind {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() ret Int {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 600, windowEvents: 400000, ringEvents: 100000 }
+  )
+  # the pool started before recording (its threads wake in time for the measured loop)
+  var warm: List(Int) = List.create(Int, cap: 64)
+  warm.addDefaults(count: 64)
+  parallelLoop var i: Int = 0, i < 64, ++i {
+    warm.set(index: i, value: spin(rounds: 100000))
+  }
+  let mainRing: PerfRing = hub.perfThreadRing(name: "main")
+  hub.perfInstallRuntime(mainRing: mainRing)
+  log(
+    "lanes: {hub.rings.length} ({hub.ringNames.copyAtDefault(index: 0)}, {hub.ringNames.copyAtDefault(
+      index: 1
+    )}, ...)"
+  )
+
+  # chunks of real work (milliseconds each): the workers share them
+  let count: Int = 256
+  var results: List(Int) = List.create(Int, cap: count)
+  results.addDefaults(count: count)
+  parallelLoop var i: Int = 0, i < count, ++i {
+    results.set(index: i, value: spin(rounds: 200000 + i))
+  }
+  hub.perfFrame()
+  let loops: NameCount = countName(hub: hub, name: "parallelLoop")
+  let chunks: NameCount = countName(hub: hub, name: "chunk")
+  log(
+    "parallelLoop zones on the main lane: {loops.lanes.copyAtDefault(index: 0)}, in all {total(
+      counts: loops.lanes
+    )}"
+  )
+  log(
+    "chunk zones: {total(counts: chunks.lanes) > 1}, on more than one lane: {busyLanes(
+      counts: chunks.lanes
+    ) > 1}, paired: {chunks.balanced}"
+  )
+
+  # Task.get waiting for a task that is still working, and a taskScope
+  let task: Task(Int) = spawn spin(rounds: 3000000)
+  let answer: Int = task.get()
+  taskScope {
+    let first: Task(Int) = spawn spin(rounds: 2000000)
+    let second: Task(Int) = spawn spin(rounds: 2000000)
+  }
+  hub.perfFrame()
+  let gets: NameCount = countName(hub: hub, name: "Task.get")
+  let runs: NameCount = countName(hub: hub, name: "task")
+  log(
+    "Task.get waits on the main lane: {gets.lanes.copyAtDefault(index: 0)}, paired: {gets.balanced}"
+  )
+  log(
+    "task runs: {total(counts: runs.lanes) >= 3}, paired: {runs.balanced}; flows (a spawn and its run): {countKind(
+      hub: hub
+      kind: PerfKind.flow
+    ) >= 6}"
+  )
+
+  # The workers all asking one channel: its lock is contended, so some wait for it
+  let channel: Channel(Int) = createChannel(Int)
+  var rounds: Int = 0
+  var waits: Int = 0
+  loop rounds < 50 and waits is 0 {
+    parallelLoop var i: Int = 0, i < 40000, ++i {
+      let unusedPending: Int = channel.pending()
+    }
+    hub.perfFrame()
+    waits = total(counts: countName(hub: hub, name: "Channel").lanes)
+    rounds = rounds + 1
+  }
+  log(
+    "a channel wait recorded: {waits > 0}, paired: {countName(hub: hub, name: "Channel").balanced}"
+  )
+  channel.freeChannel()
+  log("dropped: {hub.perfDropped()}, answer {answer > 0}")
+  hub.freePerfHub()
+  # after it, the runtime records nothing (and has no rings to write to)
+  parallelLoop var i: Int = 0, i < count, ++i {
+    results.set(index: i, value: i)
+  }
+  log("done")
+  ret 0
+}

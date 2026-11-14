@@ -26,12 +26,14 @@ RaeTask* rae_task_new(size_t result_size) {
 }
 
 void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args) {
+  rae_perf_event(RAE_PERF_FLOW, RAE_PERF_SPAWN, (int64_t)(intptr_t)t, 0);
   t->on_pool = 1;
   t->thunk = thunk;
   t->args = args;
 }
 
 void rae_task_prepare_step(RaeTask* t, int (*step)(void* args), void* args) {
+  rae_perf_event(RAE_PERF_FLOW, RAE_PERF_SPAWN, (int64_t)(intptr_t)t, 0);
   t->on_pool = 1;
   t->step = step;
   t->args = args;
@@ -118,6 +120,7 @@ void* rae_task_await(RaeTask* t) {
   RAE_REALTIME_GUARD("rae_task_await", "waits for a task");
   if (!t) return NULL;
   if (!t->joined) {
+    rae_perf_event(RAE_PERF_WAIT_BEGIN, RAE_PERF_TASK_GET, 0, 0);
     if (t->on_pool) {
       rae_sched_wait(t);
     } else {
@@ -125,6 +128,7 @@ void* rae_task_await(RaeTask* t) {
       pthread_join(t->thread, NULL);
 #endif
     }
+    rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_TASK_GET, 0, 0);
     t->joined = 1;
   }
   return t->result;
@@ -139,6 +143,7 @@ void rae_task_drop(RaeTask* t) {
   RAE_REALTIME_GUARD("rae_task_drop", "joins and frees a task");
   if (!t) return;
   if (!t->joined) {
+    rae_perf_event(RAE_PERF_WAIT_BEGIN, RAE_PERF_TASK_JOIN, 0, 0);
     if (t->on_pool) {
       rae_sched_wait(t);
     } else {
@@ -146,6 +151,7 @@ void rae_task_drop(RaeTask* t) {
       pthread_join(t->thread, NULL);
 #endif
     }
+    rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_TASK_JOIN, 0, 0);
     t->joined = 1;
   }
   free(t->result);
@@ -184,7 +190,7 @@ typedef struct {
 } RaeChannel;
 
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-#define RAE_CHAN_LOCK(c)   (RAE_REALTIME_GUARD("RAE_CHAN_LOCK", "a Channel's mutex"), pthread_mutex_lock(&(c)->mu))
+#define RAE_CHAN_LOCK(c)   (RAE_REALTIME_GUARD("RAE_CHAN_LOCK", "a Channel's mutex"), rae_perf_lock(&(c)->mu, RAE_PERF_CHANNEL_LOCK))
 #define RAE_CHAN_UNLOCK(c) pthread_mutex_unlock(&(c)->mu)
 #else
 #define RAE_CHAN_LOCK(c)   ((void)0)
@@ -507,7 +513,9 @@ static int64_t rae_pool_drain_slot(uint32_t generation, int slot, int64_t chunk_
     int64_t first = g_pool.start + index * g_pool.chunk;
     int64_t last = first + g_pool.chunk;
     if (last > g_pool.end) last = g_pool.end;
+    rae_perf_event(RAE_PERF_ZONE_BEGIN, RAE_PERF_CHUNK, last - first, index);
     g_pool.body(g_pool.captures, first, last);
+    rae_perf_event(RAE_PERF_ZONE_END, RAE_PERF_CHUNK, 0, index);
     ran++;
   }
 }
@@ -771,12 +779,15 @@ void rae_ext_Scheduler_runTask(int64_t task) {
    * one in the middle of its own statement. A suspending step leaves nothing
    * there (its frames carry their temporaries). */
   int pool_mark = rae_string_pool_mark();
+  rae_perf_event(RAE_PERF_FLOW, RAE_PERF_SPAWN, (int64_t)(intptr_t)t, 1);
+  rae_perf_event(RAE_PERF_ZONE_BEGIN, RAE_PERF_TASK_RUN, 0, 0);
   if (t->step) {
     g_sched_current_task = t;
     t->step(t->args);
   } else {
     t->thunk(t->args);
   }
+  rae_perf_event(RAE_PERF_ZONE_END, RAE_PERF_TASK_RUN, 0, 0);
   rae_string_pool_release(pool_mark);
   g_sched_current_task = saved_task;
   g_pool_inside = saved_inside;
@@ -828,8 +839,10 @@ void rae_ext_Scheduler_waitGroup(int64_t group, int64_t timeout_ns) {
 
 void rae_group_wait(RaeTaskGroup* g) {
   if (atomic_load_explicit(&g->pending, memory_order_acquire) == 0) return;
+  rae_perf_event(RAE_PERF_WAIT_BEGIN, RAE_PERF_TASK_SCOPE, 0, 0);
   if (g_sched_hooks.group_wait) g_sched_hooks.group_wait((int64_t)(intptr_t)g);
   else rae_ext_Scheduler_waitGroup((int64_t)(intptr_t)g, -1);
+  rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_TASK_SCOPE, 0, 0);
 }
 
 int rae_sched_wait_task(RaeTask* t) {
@@ -957,6 +970,7 @@ static void rae_sched_wait(RaeTask* t) {
 static void* rae_pool_worker(void* arg) {
   g_pool_worker_index = (int)(intptr_t)arg;
   g_sched_worker = (int64_t)(intptr_t)arg;
+  rae_perf_set_worker_slot(g_sched_worker);
   rae_thread_install_altstack();
   if (g_sched_hooks.worker_loop) {
     /* The scheduler's Rae worker loop: tasks, and parallelLoop chunks */
@@ -1046,14 +1060,30 @@ static int rae_pool_start(void) {
   return count;
 }
 
+/* The pool's size, without starting it (the recorder makes a ring per worker) */
+int64_t rae_perf_worker_count(void) {
+  int ready = atomic_load_explicit(&g_pool_ready_count, memory_order_acquire);
+  return ready ? ready : rae_pool_default_workers();
+}
+
 int64_t rae_ext_Parallel_workerCount(void) {
   return (int64_t)rae_pool_start();
 }
 
+static void rae_parallel_for_launch(int64_t start, int64_t end, RaeParallelBody body, void* captures);
+
+/* A parallelLoop: on its caller's lane a zone (its iterations), the chunks on
+ * the lanes of the workers that ran them (rae_pool_drain_slot) */
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
   RAE_REALTIME_GUARD("rae_parallel_for", "parallelLoop");
   if (end <= start) return;
   if (g_pool_inside) { body(captures, start, end); return; }
+  rae_perf_event(RAE_PERF_ZONE_BEGIN, RAE_PERF_PARALLEL_LOOP, end - start, 0);
+  rae_parallel_for_launch(start, end, body, captures);
+  rae_perf_event(RAE_PERF_ZONE_END, RAE_PERF_PARALLEL_LOOP, 0, 0);
+}
+
+static void rae_parallel_for_launch(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
   rae_pcheck_on();
   rae_pcheck_new_launch();
   int workers = rae_pool_start();

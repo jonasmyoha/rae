@@ -14,7 +14,7 @@ func main() ret Int {
   log("names before a capture: {Profile.capturedNames(profiler: profiler).length}")
   let path: String = "/tmp/rae_case_1461_profile.json"
   Profile.startCapture(profiler: profiler, seconds: 60.0, outPath: path)
-  if let ring: PerfRing = Profile.profileThreadRing(profiler: profiler, name: "worker") {
+  if let ring: PerfRing = Profile.profileThreadRing(profiler: profiler, name: "audio") {
     let job: PerfName = Profile.profileName(profiler: profiler, name: "job")
     perfZoneBegin(ring: ring, name: job)
     perfZoneEnd(ring: ring, name: job)
@@ -43,8 +43,8 @@ func main() ret Int {
     trace = text
   }
   log(
-    "lanes: CPU {trace.contains(sub: "\"name\":\"CPU main loop\"")}, worker {trace.contains(
-      sub: "\"tid\":1,\"args\":\{\"name\":\"worker\""
+    "lanes: CPU {trace.contains(sub: "\"name\":\"CPU main loop\"")}, audio {trace.contains(
+      sub: "\"args\":\{\"name\":\"audio\""
     )}, GPU {trace.contains(sub: "\"pid\":2,\"args\":\{\"name\":\"GPU\"")}"
   )
   log(

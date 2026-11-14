@@ -185,3 +185,8 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
   rae_pcheck_new_launch();
   if (end > start) body(captures, start, end);
 }
+
+/* The recorder's worker count: the caller is the only worker */
+int64_t rae_perf_worker_count(void) {
+  return 1;
+}

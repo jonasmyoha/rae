@@ -19,6 +19,15 @@
 #
 # A write is one relaxed load of the ring's `on` flag (and nothing more when recording is off),
 # a nowNs and one push. A full ring drops the event and counts it; the writer never waits.
+#
+# The runtime's own work (§4.3) is recorded once a hub installs its runtime table
+# (perfInstallRuntime): a zone per parallelLoop on its caller's lane and a zone per chunk on the
+# lane of the pool worker that ran it, a task's run on the pool with a flow from its spawn, the
+# waits of Task.get, a Task joined at its scope's end and taskScope, a Channel send or receive
+# waiting for the channel, a contended runtime lock, and Signal waits and posts. The runtime's C
+# (runtime_perf_hooks.c) knows only the calling thread's slot and passes an event code to
+# perfRuntimeWrite; the rings and the names are here.
+import Math
 open Atomic
 open collections/SpscRing
 
@@ -105,6 +114,16 @@ type PerfHub {
   frameCount: Int
   frameStartNs: Int
   frameFirstEvent: Int
+  # the table the runtime writes through, while installed (perfInstallRuntime)
+  runtime: opt PerfRuntimeTable
+}
+
+# What the runtime's hooks write through: a ring per thread slot (0 the main thread, 1.. the pool's
+# workers; an unused slot is zero) and the name of each event code. Buffers, so the runtime holds
+# their addresses.
+type PerfRuntimeTable {
+  rings: Buffer(PerfRing)
+  names: Buffer(Int)
 }
 
 func createPerfHub(settings: view PerfSettings) ret PerfHub {
@@ -128,10 +147,12 @@ func createPerfHub(settings: view PerfSettings) ret PerfHub {
     frameCount: 0
     frameStartNs: nowNs()
     frameFirstEvent: 0
+    runtime: none
   }
 }
 
-func freePerfHub(hub: view PerfHub) {
+func freePerfHub(hub: mod PerfHub) {
+  perfUninstallRuntime(hub: hub)
   loop let ring: PerfRing in hub.rings {
     ring.events.freeSpscRing()
     ring.on.freeAtomic()
@@ -315,4 +336,147 @@ func perfDropped(hub: view PerfHub) ret Int {
     total = total + ring.dropped.load()
   }
   ret total
+}
+
+# ---- the runtime's work (§4.3) ------------------------------------------------------------------
+
+# The runtime's event codes (runtime_perf_hooks.c), and their names
+const perfRuntimeCodes: Int = 11
+
+func perfRuntimeCodeName(code: view Int) ret String {
+  if code is 0 {
+    ret "parallelLoop"
+  }
+  if code is 1 {
+    ret "chunk"
+  }
+  if code is 2 {
+    ret "Task.get"
+  }
+  if code is 3 {
+    ret "Task join"
+  }
+  if code is 4 {
+    ret "taskScope"
+  }
+  if code is 5 {
+    ret "task"
+  }
+  if code is 6 {
+    ret "spawn"
+  }
+  if code is 7 {
+    ret "Channel"
+  }
+  if code is 8 {
+    ret "lock"
+  }
+  if code is 9 {
+    ret "Signal wait"
+  }
+  ret "Signal post"
+}
+
+func nativePerfInstall(
+  rings: Buffer(PerfRing)
+  names: Buffer(Int)
+) unsafe extern("rae_perf_install")
+
+func nativePerfUninstall(rings: Buffer(PerfRing)) unsafe extern("rae_perf_uninstall")
+
+func nativePerfSlotCount() unsafe extern("rae_perf_slot_count") ret Int
+
+func nativePerfWorkerCount() unsafe extern("rae_perf_worker_count") ret Int
+
+# Record the runtime's work into this hub: `mainRing` (this thread's) is slot 0, and each worker of
+# the pool gets a ring of its own, its lane named "worker <n>". On the main thread, at setup.
+func perfInstallRuntime(hub: mod PerfHub, mainRing: view PerfRing) {
+  perfUninstallRuntime(hub: hub)
+  unsafe {
+    let slots: Int = nativePerfSlotCount()
+    var rings: Buffer(PerfRing) = rae_ext_rae_buf_alloc(size: slots, elemSize: sizeof(PerfRing))
+    rae_ext_rae_buf_zero(
+      buf: rings
+      start: 0
+      count: slots
+      elemSize: sizeof(PerfRing)
+    )
+    rae_ext_rae_buf_set(buf: rings, index: 0, value: mainRing)
+    let workers: Int = Math.min(a: nativePerfWorkerCount(), b: slots)
+    loop var worker: Int = 1, worker < workers, ++worker {
+      let ring: PerfRing = hub.perfThreadRing(name: "worker {worker}")
+      rae_ext_rae_buf_set(buf: rings, index: worker, value: ring)
+    }
+    var names: Buffer(Int) = rae_ext_rae_buf_alloc(size: perfRuntimeCodes, elemSize: sizeof(Int))
+    loop var code: Int = 0, code < perfRuntimeCodes, ++code {
+      let name: PerfName = hub.perfName(name: perfRuntimeCodeName(code: code))
+      rae_ext_rae_buf_set(buf: names, index: code, value: name.id)
+    }
+    hub.runtime = PerfRuntimeTable { rings: rings, names: names }
+    nativePerfInstall(rings: rings, names: names)
+  }
+}
+
+# The runtime records into this hub no more (its rings stay until freePerfHub)
+func perfUninstallRuntime(hub: mod PerfHub) {
+  if let table: view PerfRuntimeTable = hub.runtime {
+    unsafe {
+      nativePerfUninstall(rings: table.rings)
+      rae_ext_rae_buf_free(buf: table.rings)
+      rae_ext_rae_buf_free(buf: table.names)
+    }
+  }
+  hub.runtime = none
+}
+
+func perfKindOfCode(kind: view Int) realtime ret PerfKind {
+  if kind is 0 {
+    ret PerfKind.zoneBegin
+  }
+  if kind is 1 {
+    ret PerfKind.zoneEnd
+  }
+  if kind is 2 {
+    ret PerfKind.counter
+  }
+  if kind is 3 {
+    ret PerfKind.mark
+  }
+  if kind is 4 {
+    ret PerfKind.waitBegin
+  }
+  if kind is 5 {
+    ret PerfKind.waitEnd
+  }
+  if kind is 6 {
+    ret PerfKind.gpuSpan
+  }
+  ret PerfKind.flow
+}
+
+# The runtime's hook (runtime_perf_hooks.c rae_perf_event): an event of the thread in `slot`, on
+# that thread
+func perfRuntimeWrite(
+  rings: copy Buffer(PerfRing)
+  names: copy Buffer(Int)
+  slot: copy Int
+  kind: copy Int
+  code: copy Int
+  value: copy Int
+  extra: copy Int
+) realtime cExport("rae_perf_runtime_write") {
+  unsafe {
+    let ring: PerfRing = rae_ext_rae_buf_get(buf: rings, index: slot)
+    if ring.events.capacity is 0 {
+      ret
+    }
+    let nameId: Int = rae_ext_rae_buf_get(buf: names, index: code)
+    perfWrite(
+      ring: ring
+      kind: perfKindOfCode(kind: kind)
+      name: PerfName { id: nameId }
+      value: value
+      extra: extra
+    )
+  }
 }

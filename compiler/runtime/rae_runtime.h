@@ -203,6 +203,12 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
  * §6.2). A thread Rae starts (spawn, the pool) needs none. Safe to call twice. */
 void rae_thread_attach(void);
 
+/* The event recorder's runtime table (runtime_perf_hooks.c, lib/perf/Perf perfInstallRuntime) */
+void rae_perf_install(void* rings, void* names);
+void rae_perf_uninstall(void* rings);
+int64_t rae_perf_slot_count(void);
+int64_t rae_perf_worker_count(void);
+
 #ifndef RAE_NONBLOCKING
 #define RAE_NONBLOCKING
 #define RAE_NONALLOCATING

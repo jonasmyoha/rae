@@ -14,10 +14,13 @@ int64_t rae_ext_rae_signal_new(void) {
   return (int64_t)(intptr_t)dispatch_semaphore_create(0);
 }
 void rae_ext_rae_signal_post(int64_t signal) {
+  rae_perf_event(RAE_PERF_MARK, RAE_PERF_SIGNAL_POST, 0, 0);
   dispatch_semaphore_signal((dispatch_semaphore_t)(intptr_t)signal);
 }
 void rae_ext_rae_signal_wait(int64_t signal) {
+  rae_perf_event(RAE_PERF_WAIT_BEGIN, RAE_PERF_SIGNAL_WAIT, 0, 0);
   dispatch_semaphore_wait((dispatch_semaphore_t)(intptr_t)signal, DISPATCH_TIME_FOREVER);
+  rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_SIGNAL_WAIT, 0, 0);
 }
 rae_Bool rae_ext_rae_signal_try_wait(int64_t signal) {
   return dispatch_semaphore_wait((dispatch_semaphore_t)(intptr_t)signal, DISPATCH_TIME_NOW) == 0;
@@ -35,10 +38,13 @@ int64_t rae_ext_rae_signal_new(void) {
   return (int64_t)(intptr_t)semaphore;
 }
 void rae_ext_rae_signal_post(int64_t signal) {
+  rae_perf_event(RAE_PERF_MARK, RAE_PERF_SIGNAL_POST, 0, 0);
   sem_post((sem_t*)(intptr_t)signal);
 }
 void rae_ext_rae_signal_wait(int64_t signal) {
+  rae_perf_event(RAE_PERF_WAIT_BEGIN, RAE_PERF_SIGNAL_WAIT, 0, 0);
   sem_wait((sem_t*)(intptr_t)signal);
+  rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_SIGNAL_WAIT, 0, 0);
 }
 rae_Bool rae_ext_rae_signal_try_wait(int64_t signal) {
   return sem_trywait((sem_t*)(intptr_t)signal) == 0;

@@ -188,6 +188,21 @@ walkers show where a frame goes by system, with no code in the app.
 | `Signal` | the wait and the wake | `lib/Signal` |
 | foreign threads (`rae_thread_attach`) | a lane named by the attach call | the attach |
 
+Done in Rae 0.3.131 (perf step 3): a hub installs its runtime table with `perfInstallRuntime`
+(a `Profile` capture does it), which gives slot 0 to the main thread's ring and a ring to each
+pool worker, by its worker index. `compiler/runtime/runtime_perf_hooks.c` holds the hooks: each
+knows only the calling thread's slot and calls `lib/perf/Perf`'s `perfRuntimeWrite` (a
+`realtime cExport`, weak and empty in a program without the recorder) with an event code; without
+a table, or on a thread with no slot, a hook is one atomic load. Recorded now: the `parallelLoop`
+zone and its `chunk` zones (iterations and chunk index as arguments), `task` runs on the pool
+with a `spawn` flow from each spawn, the `Task.get`, `Task join` and `taskScope` waits, a Channel
+send or receive waiting for the channel's lock (`Channel`; there is no blocking receive), a
+contended `RAE_LOCK` (`lock`), and `Signal wait` spans and `Signal post` marks. Not yet: lanes for
+`spawn thread` and for foreign threads (`rae_thread_attach`), which have no slot and record
+nothing (they need a name from the spawn or the attach call, and slots claimed at run time).
+Case 1462 checks a 4-worker `parallelLoop`, the waits and a contended channel, and the TSan gate
+runs it.
+
 The views of this (section 9):
 - each thread's lane;
 - the pool's use over time: busy, waiting and idle shares per worker;

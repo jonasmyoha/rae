@@ -54,6 +54,8 @@ type Profiler {
   mainRing: opt PerfRing
   # a zone or counter name's id in the hub
   nameIds: StringMap(Int)
+  # the hub's first name the program registered (the runtime's come before it)
+  firstOwnName: Int = 0
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -93,7 +95,11 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
     }
     profiler.hub = createPerfHub(settings: settings)
     profiler.nameIds = StringMap.create(Int, cap: 64)
-    profiler.mainRing = profiler.hub.perfThreadRing(name: profMainThreadName)
+    let mainRing: PerfRing = profiler.hub.perfThreadRing(name: profMainThreadName)
+    # the runtime's work too: the pool's workers on lanes of their own, the waits as spans
+    profiler.hub.perfInstallRuntime(mainRing: mainRing)
+    profiler.firstOwnName = profiler.hub.names.length
+    profiler.mainRing = mainRing
     profiler.startNs = nowNs()
     profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
     profiler.outPath = "{outPath}"
@@ -237,13 +243,15 @@ func profileDiscard(profiler: mod Profiler) {
   profiler.hub.freePerfHub()
   profiler.hub = createPerfHub(settings: idlePerfSettings())
   profiler.mainRing = none
+  profiler.firstOwnName = 0
 }
 
-# The names the capture has seen, in the order of their first use
+# The names the program used in the capture, in the order of their first use (the runtime's own,
+# such as "chunk" and "Task.get", left out)
 func capturedNames(profiler: view Profiler) ret List(String) {
   var names: List(String) = {}
-  loop let name: view String in profiler.hub.names {
-    names.add(value: name)
+  loop var i: Int = profiler.firstOwnName, i < profiler.hub.names.length, ++i {
+    names.add(value: profiler.hub.names.copyAtDefault(index: i))
   }
   ret names
 }
@@ -280,11 +288,26 @@ func profFragment(
     }
     ret "\{\"name\":\"{name}\",\"ph\":\"C\",\"ts\":{ts},\"pid\":{pid},\"tid\":{tid},\"args\":\{\"v\":{event.value}\}\}"
   }
-  if event.kind is PerfKind.zoneBegin or event.kind is PerfKind.waitBegin {
-    ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  if event.kind is PerfKind.zoneBegin {
+    if event.value is 0 and event.extra is 0 {
+      ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+    }
+    # a chunk's iterations and index, a parallelLoop's iterations
+    ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"value\":{event.value},\"index\":{event.extra}\}\}"
+  }
+  # a wait is a span of its own category, so a view can color it
+  if event.kind is PerfKind.waitBegin {
+    ret "\{\"name\":\"{name}\",\"cat\":\"wait\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
   }
   if event.kind is PerfKind.zoneEnd or event.kind is PerfKind.waitEnd {
     ret "\{\"name\":\"{name}\",\"ph\":\"E\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  }
+  # a flow (a spawn to its task's run): its id is the value, extra 0 its start, 1 its end
+  if event.kind is PerfKind.flow {
+    if event.extra is 0 {
+      ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"s\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+    }
+    ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"f\",\"bp\":\"e\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
   }
   if event.kind is PerfKind.mark {
     ret "\{\"name\":\"{name}\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"extra\":{event.extra}\}\}"

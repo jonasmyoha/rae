@@ -27,6 +27,12 @@ frames it measures.
   `profileThreadRing(profiler:, name:)` and writes with `perfZoneBegin`/`perfCounter`
   (lib/perf/Perf) and names from `profileName`. Process `GPU` holds every counter whose
   name starts with `gpu.` and, once a step writes them, GPU spans.
+- The runtime's work (perf step 3, Rae 0.3.131): a capture installs the hub's runtime table, so
+  each pool worker has a lane (`worker <n>`) with its `parallelLoop` chunks, the loop is a zone on
+  its caller's lane, tasks run as `task` zones with a flow arrow from their `spawn`, and
+  `Task.get`, `Task join`, `taskScope`, `Channel` (waiting for the channel's lock), `lock` (a
+  contended runtime lock) and `Signal wait` are spans of the category `wait`
+  (docs/perf-tools-design.md §4.3). `capturedNames` leaves these names out.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
