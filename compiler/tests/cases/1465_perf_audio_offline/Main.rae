@@ -1,0 +1,84 @@
+# The audio engine and the real-time check in a lib/Profile capture (docs/perf-tools-design.md
+# §4.4). An offline scene renders 10 blocks; audio/AudioCapture writes each as a span "block" on
+# the lane "audio render", with its time, its share of the period, the underruns, latency and the
+# clock's drift as counters; a lib/Realtime recorder fed the render times writes its p99.9,
+# maximum and share. Then this thread marks itself real-time and allocates on purpose: with
+# RAE_REALTIME_CHECK=1 (config.env) the guard's hit is a mark in the trace naming its entry point,
+# as well as a line of the report at exit (which exits with code 70).
+import Sys
+import String
+import Profile
+import Realtime
+open audio/Audio
+open audio/AudioCapture
+open audio/RenderTimes
+open audio/Sound
+
+const rate: Int = 48000
+
+func countOf(trace: view String, piece: view String) ret Int {
+  ret trace.split(sep: piece).length - 1
+}
+
+func main() {
+  # the engine starts before the capture: its two idle tasks (and, with one worker, config.env,
+  # their runs at the end) stay out of the trace, so its events are the same every run
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 480)
+  var profiler: Profiler = Profile.createProfiler()
+  let path: String = "/tmp/rae_case_1465_profile.json"
+  Profile.startCapture(profiler: profiler, seconds: 60.0, outPath: path)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 1000.0
+    amplitude: 0.5
+    frameCount: 4800
+    channels: 1
+    sampleRate: rate
+  ))
+  let unusedVoice: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: -6.0)
+  var recorder: Realtime.RealtimeRecorder = Realtime.createRealtimeRecorder(
+    name: "render"
+    periodNanoseconds: audio.renderPeriodNanoseconds()
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: 4800)
+  audio.recordAudioCapture(profiler: profiler)
+  loop let nanoseconds: Int in audio.takeRenderNanoseconds() {
+    recorder.recordCall(nanoseconds: nanoseconds)
+  }
+  Profile.realtimeRecorder(profiler: profiler, recorder: recorder)
+  # an allocation on a real-time thread, on purpose
+  Realtime.markRealtimeThread()
+  let broken: String = "frames {rendered.length}"
+  Realtime.unmarkRealtimeThread()
+  let unusedTick: Bool = Profile.tick(profiler: profiler)
+  let unusedWritten: Bool = Profile.profileStop(profiler: profiler)
+  let unusedBlocks: Int = audio.stopAudio()
+  var trace: String = ""
+  if let text: String = Sys.readFile(path: path) {
+    trace = text
+  }
+  log(
+    "{broken}: blocks on the audio render lane {countOf(
+      trace: trace
+      piece: "\"name\":\"block\",\"ph\":\"B\""
+    )}, lane named {trace.contains(sub: "\"name\":\"audio render\"")}"
+  )
+  log(
+    "counters: render us {trace.contains(sub: "\"name\":\"audio.render us\"")}, share {trace.contains(
+      sub: "\"name\":\"audio.render share %\""
+    )}, underruns {trace.contains(sub: "\"name\":\"audio.underrun frames\"")}, latency {trace.contains(
+      sub: "\"name\":\"audio.output latency frames\""
+    )}, drift {trace.contains(sub: "\"name\":\"audio.clock drift ppm\"")}"
+  )
+  log(
+    "recorder: p99.9 {trace.contains(sub: "\"name\":\"render p99.9 us\"")}, max {trace.contains(
+      sub: "\"name\":\"render max us\""
+    )}, share {trace.contains(sub: "\"name\":\"render max share %\"")}, calls {trace.contains(
+      sub: "\"name\":\"render calls\",\"ph\":\"C\""
+    )}"
+  )
+  log(
+    "rule break in the trace: {trace.contains(
+      sub: "\"name\":\"realtime rule break: rae_mem_str_tag\""
+    )}"
+  )
+}
