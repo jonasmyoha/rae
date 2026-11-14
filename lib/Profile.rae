@@ -229,9 +229,22 @@ func nativeRealtimeSlotDetail(index: Int) unsafe extern("rae_realtime_slot_detai
 
 # A lib/Realtime recorder into the capture (on the thread that owns it, once a frame or so): its
 # p99.9 and maximum in microseconds, the maximum's share of the period in percent, and its calls,
-# as counters named after it
-func realtimeRecorder(profiler: mod Profiler, recorder: view Realtime.RealtimeRecorder) {
-  if profiler.capturing is false or recorder.calls is 0 {
+# as counters named after it. And its name in the capture, so its calls (callStarted /
+# callEnded) are zones on its thread's lane from then on (registering a name works on the thread
+# that started the capture only; elsewhere the calls stay counters)
+func realtimeRecorder(profiler: mod Profiler, recorder: mod Realtime.RealtimeRecorder) {
+  if profiler.capturing is false {
+    ret
+  }
+  let generation: Int = perfRuntimeGeneration()
+  if recorder.perfGeneration is not generation {
+    let nameId: Int = perfRuntimeName(name: recorder.name)
+    if nameId >= 0 {
+      recorder.perfNameId = nameId
+      recorder.perfGeneration = generation
+    }
+  }
+  if recorder.calls is 0 {
     ret
   }
   let name: String = recorder.name

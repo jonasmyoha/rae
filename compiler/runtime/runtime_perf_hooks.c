@@ -66,7 +66,7 @@ static _Thread_local const char* g_rae_perf_thread_name = NULL;
 static _Thread_local int64_t g_rae_perf_thread_generation = -1;
 
 /* A named thread's slot in the installed table, claimed on its first event */
-static int64_t rae_perf_claim_slot(void) {
+static int64_t rae_perf_claim_slot(void) RAE_NONBLOCKING {
   int64_t generation = atomic_load_explicit(&g_rae_perf_generation, memory_order_acquire);
   if (g_rae_perf_thread_generation == generation) return g_rae_perf_slot;
   g_rae_perf_thread_generation = generation;
@@ -87,17 +87,18 @@ static void rae_perf_name_thread(const char* name) {
 /* lib/perf/Perf's perfRuntimeWrite (`cExport`); a program that does not use
  * the recorder links this empty one */
 __attribute__((weak)) void rae_perf_runtime_write(void* rings, void* names, int64_t slot, int64_t kind,
-                                                  int64_t code, int64_t value, int64_t extra) {
+                                                  int64_t code, int64_t value, int64_t extra) RAE_NONBLOCKING {
   (void)rings; (void)names; (void)slot; (void)kind; (void)code; (void)value; (void)extra;
 }
 
 /* lib/perf/Perf's perfRuntimeWriteAt (`cExport`): an event at a time of its own */
 __attribute__((weak)) void rae_perf_runtime_write_at(void* rings, void* names, int64_t slot, int64_t kind,
-                                                     int64_t code, int64_t time, int64_t value, int64_t extra) {
+                                                     int64_t code, int64_t time, int64_t value, int64_t extra)
+    RAE_NONBLOCKING {
   (void)rings; (void)names; (void)slot; (void)kind; (void)code; (void)time; (void)value; (void)extra;
 }
 
-static inline void rae_perf_event(int64_t kind, int64_t code, int64_t value, int64_t extra) {
+static inline void rae_perf_event(int64_t kind, int64_t code, int64_t value, int64_t extra) RAE_NONBLOCKING {
   void* rings = atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire);
   if (__builtin_expect(rings == NULL, 1)) return;
   int64_t slot = g_rae_perf_thread_name ? rae_perf_claim_slot() : g_rae_perf_slot;
@@ -177,7 +178,7 @@ void rae_perf_uninstall(void* rings) {
 
 /* The installed table's generation, 0 when none is installed: code that caches name ids (lib/ecs's
  * schedule) knows from it when they are stale */
-int64_t rae_perf_generation(void) {
+int64_t rae_perf_generation(void) RAE_NONBLOCKING {
   if (atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire) == NULL) return 0;
   return atomic_load_explicit(&g_rae_perf_table_generation, memory_order_acquire);
 }
@@ -195,7 +196,7 @@ rae_Bool rae_perf_name_box_ready(void) {
 
 /* An event named by a name id of the installed hub (rae_perf_name_box), on the calling thread's
  * lane; the code passed on is -1 - id */
-void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra) {
+void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra) RAE_NONBLOCKING {
   rae_perf_event(kind, -1 - name_id, value, extra);
 }
 

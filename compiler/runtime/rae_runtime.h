@@ -209,9 +209,7 @@ void rae_thread_attach_named(const char* name);
 
 /* The event recorder's runtime table (runtime_perf_hooks.c, lib/perf/Perf perfInstallRuntime) */
 void rae_perf_install(void* rings, void* names, void* name_box);
-int64_t rae_perf_generation(void);
 void* rae_perf_name_box(void);
-void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra);
 void rae_perf_uninstall(void* rings);
 int64_t rae_perf_slot_count(void);
 int64_t rae_perf_worker_count(void);
@@ -224,6 +222,10 @@ int64_t rae_perf_thread_slot_count(void);
 #define RAE_COLD_PATH_BEGIN
 #define RAE_COLD_PATH_END
 #endif
+
+/* The event recorder's hooks lib/perf calls from real-time code (perfRuntimeNamedEvent) */
+int64_t rae_perf_generation(void) RAE_NONBLOCKING;
+void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra) RAE_NONBLOCKING;
 
 /* ---- Int arithmetic (docs/integer-semantics.md) ----
  *

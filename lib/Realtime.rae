@@ -31,6 +31,7 @@
 # so a percentile is exact to within 25 %: the report gives the upper edge of
 # its step.
 import Math
+open perf/Perf
 
 func rae_ext_Realtime_markThread(realtime: Bool) realtime unsafe extern
 
@@ -75,7 +76,18 @@ type RealtimeRecorder {
   totalNanoseconds: Int
   maximumNanoseconds: Int
   startedAt: Int
+  # its name's id in the event recorder and the recorder table it belongs to (Profile's
+  # realtimeRecorder sets them); while that table is installed, callStarted / callEnded are a zone
+  # on the thread's lane: every call for the first realtimeZoneCalls, then one in
+  # realtimeZoneSampling
+  perfNameId: Int = -1
+  perfGeneration: Int = 0
+  zoneOpen: Bool = false
 }
+
+const realtimeZoneCalls: Int = 1000
+
+const realtimeZoneSampling: Int = 16
 
 func createRealtimeRecorder(name: own String, periodNanoseconds: view Int) ret RealtimeRecorder {
   var buckets: List(Int) = createList(Int, cap: realtimeBucketCount)
@@ -92,11 +104,32 @@ func createRealtimeRecorder(name: own String, periodNanoseconds: view Int) ret R
 }
 
 func callStarted(this: mod RealtimeRecorder) realtime {
+  this.zoneOpen = false
+  if this.perfGeneration is not 0 and (this.calls < realtimeZoneCalls or this.calls % realtimeZoneSampling is 0) {
+    if this.perfGeneration is perfRuntimeGeneration() {
+      perfRuntimeNamedEvent(
+        kind: PerfKind.zoneBegin
+        nameId: this.perfNameId
+        value: 0
+        extra: this.calls
+      )
+      this.zoneOpen = true
+    }
+  }
   this.startedAt = nowNs()
 }
 
 func callEnded(this: mod RealtimeRecorder) realtime {
   this.recordCall(nanoseconds: nowNs() - this.startedAt)
+  if this.zoneOpen {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.zoneEnd
+      nameId: this.perfNameId
+      value: 0
+      extra: this.calls
+    )
+    this.zoneOpen = false
+  }
 }
 
 func recordCall(this: mod RealtimeRecorder, nanoseconds: view Int) realtime {

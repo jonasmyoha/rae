@@ -259,8 +259,15 @@ Done in Rae 0.3.136 and audio 0.20.0 (perf step 6):
   against the nominal one). `Profile.laneSpan` is the general form: a span on a named lane,
   written afterwards by the thread that collects.
 - Case 1465 checks an offline scene's blocks and counters and a deliberate allocation's mark.
-- Not yet: a zone per render-plan node (the render thread needs the nodes' name ids, handed over
-  from the main thread), and the recorder's own calls as sampled zones.
+- Rae 0.3.137 and audio 0.21.0: each node of the buses' render plan is a zone ("sum 0",
+  "duck 3", "reverb 7": its kind and its index in the graph) on the thread that renders it. The
+  first `recordAudioCapture` of a capture compiles the same bus graph on the main thread for the
+  nodes' order, registers their names (`perfRuntimeName`) and sends each id with the table's
+  generation as a `setPerfNodeName` command; the render thread writes them into the plan's
+  `perfIds`, and `processNode` writes a zone (`perfRuntimeNamedEvent`, now `realtime`) while
+  that table is installed. A recorder's `callStarted` / `callEnded` are a zone on its thread's
+  lane once `Profile.realtimeRecorder` gave it its name: every call for the first 1 000, then one
+  in 16.
 
 ### 4.5 Video
 

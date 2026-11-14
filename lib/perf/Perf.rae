@@ -448,7 +448,7 @@ func nativePerfInstall(
   nameBox: Buffer(List(String))
 ) unsafe extern("rae_perf_install")
 
-func nativePerfGeneration() unsafe extern("rae_perf_generation") ret Int
+func nativePerfGeneration() realtime unsafe extern("rae_perf_generation") ret Int
 
 func nativePerfNameBox() unsafe extern("rae_perf_name_box") ret Buffer(List(String))
 
@@ -459,7 +459,7 @@ func nativePerfNamedEvent(
   nameId: Int
   value: Int
   extra: Int
-) unsafe extern("rae_perf_named_event")
+) realtime unsafe extern("rae_perf_named_event")
 
 func nativePerfUninstall(rings: Buffer(PerfRing)) unsafe extern("rae_perf_uninstall")
 
@@ -571,7 +571,7 @@ func perfUninstallRuntime(hub: mod PerfHub) {
 }
 
 # A kind as the runtime's code (perfKindOfCode's inverse)
-func perfKindCode(kind: view PerfKind) ret Int {
+func perfKindCode(kind: view PerfKind) realtime ret Int {
   if kind is PerfKind.zoneBegin {
     ret 0
   }
@@ -656,7 +656,7 @@ func perfRuntimeWrite(
 
 # The installed table's generation, 0 when none is installed: a cached name id (perfRuntimeName) is
 # good while this has not moved
-func perfRuntimeGeneration() ret Int {
+func perfRuntimeGeneration() realtime ret Int {
   unsafe {
     ret nativePerfGeneration()
   }
@@ -680,7 +680,7 @@ func perfRuntimeNamedEvent(
   nameId: view Int
   value: view Int
   extra: view Int
-) {
+) realtime {
   if nameId < 0 {
     ret
   }

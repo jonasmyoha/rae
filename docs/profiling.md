@@ -49,7 +49,9 @@ frames it measures.
 - Real time and audio (perf step 6, Rae 0.3.136, audio 0.20.0): under `RAE_REALTIME_CHECK=1` each
   rule break is a mark naming its entry point; `Profile.realtimeRecorder` writes a recorder's
   p99.9, maximum and share; `audio/AudioCapture.recordAudioCapture` writes the audio renders as
-  spans on an "audio render" lane and the engine's underruns, latency and clock drift.
+  spans on an "audio render" lane and the engine's underruns, latency and clock drift, and (audio
+  0.21.0) each node of the buses' plan as a zone; a recorder's calls are zones (sampled one in 16
+  after the first 1 000).
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
