@@ -14,6 +14,21 @@ import Vec3
 open ecs/Entity
 open app3d/GroundParticles
 
+# What a foot or a tire lands on, as the ground knows it (a step sound, a footstep's look)
+enum GroundKind {
+  # the app did not say
+  unknown
+  grass
+  gravel
+  # a made way: a dirt road, a paved one
+  road
+  sand
+  rock
+  mud
+  # water a foot reaches the ground through (deeper, a character swims)
+  shallowWater
+}
+
 # What is under a touch, as the app answers it
 type GroundAnswer {
   # The color the ground is drawn in there (a mark is a shade of it)
@@ -30,6 +45,8 @@ type GroundAnswer {
   # In water: nothing is kicked up (the water splashes instead,
   # water/WadeSplash)
   inWater: Bool = false
+  # What it is, for whoever listens to the steps (app3d/StepEvents)
+  ground: GroundKind = GroundKind.unknown
 }
 
 func createGroundAnswer() ret GroundAnswer {
@@ -52,6 +69,8 @@ type GroundTouch {
   speed: Float
   distance: Float
   answer: GroundAnswer
+  # A foot: the left one (app3d/Footprints alternates them; a tire leaves it false)
+  left: Bool = false
 }
 
 # How many particles one step kicks up at `speed`: a few walking, more

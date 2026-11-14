@@ -39,6 +39,7 @@ open MusicSection
 open MixSection
 open GameSection
 open PlacedSection
+open StepsSection
 open StatusSection
 
 const designW: Int = 1000
@@ -47,9 +48,10 @@ const designH: Int = 880
 
 const idleHeartbeatSeconds: Float = 0.5
 
-# An offline demo ends after this many frames (2 s of audio at a 60th of a second a frame), so what
+# An offline demo ends after this many frames (5.3 s of audio at a 60th of a second a frame), so
+# what
 # it played does not depend on how fast the machine draws: the sounds have ended, the stream plays
-const demoOfflineFrames: Int = 120
+const demoOfflineFrames: Int = 320
 
 # The demo's presses, frame by frame (RAE_AUDIO_PLAYGROUND_DEMO=1)
 func demoStep(playground: mod Playground, values: mod UiValues, frame: view Int) {
@@ -87,6 +89,13 @@ func demoStep(playground: mod Playground, values: mod UiValues, frame: view Int)
     playground.engineRate = 1.5
     applyEngineRate(playground: playground)
     let unusedRate: Bool = setUiValue(values: values, key: "game.rate", value: 1.5)
+  }
+  # the walker and the mech cross the strip side by side
+  if frame is 50 {
+    startWalker(demo: playground.stepsDemo)
+  }
+  if frame is 60 {
+    startMech(demo: playground.stepsDemo)
   }
   if frame is 89 {
     log("[audioPlayground] orbit at 6 m: {orbitReadout(playground: playground, distance: 6.0)}")
@@ -174,6 +183,7 @@ func main() ret Int {
     if playground.rendersItself {
       audioDeltaTime = 1.0 / 60.0
     }
+    changed = stepsSection(playground: playground, world: world, deltaTime: audioDeltaTime) or changed
     changed = placedSection(
       playground: playground
       world: world
@@ -227,9 +237,10 @@ func main() ret Int {
   if playground.musicStarted {
     position = playground.audio.positionSeconds(voiceId: playground.musicVoice)
   }
+  let grounds: String = groundsHeardText(demo: playground.stepsDemo)
   let orbit: String = orbitSummary(playground: playground)
   log(
-    "[audioPlayground] {frame} frames; sounds played {playground.soundsPlayed}, voices ended {playground.audio.voicesEnded}; music started {playground.musicStarted} at {((position * 10.0) as Float).toInt() / 10} s; pan {playground.pan}; underrun frames {playground.audio.underrunFrames()}; orbit {orbit}; steps {playground.stepsPlayed}, bursts {playground.burstsFired}, shots at once at most {playground.shotsAtOnceMost}, engine rate {playground.engineRate}"
+    "[audioPlayground] {frame} frames; sounds played {playground.soundsPlayed}, voices ended {playground.audio.voicesEnded}; music started {playground.musicStarted} at {((position * 10.0) as Float).toInt() / 10} s; pan {playground.pan}; underrun frames {playground.audio.underrunFrames()}; orbit {orbit}; steps {playground.stepsPlayed}, bursts {playground.burstsFired}, shots at once at most {playground.shotsAtOnceMost}, engine rate {playground.engineRate}; step events walker {playground.stepsDemo.walkerSteps}, mech {playground.stepsDemo.mechSteps}, on{grounds}"
   )
   let unusedBlocks: Int = endPlayground(playground: playground)
   Gpu2d.closeWindow()

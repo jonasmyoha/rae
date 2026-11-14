@@ -1,0 +1,217 @@
+# The Steps section: a walker or a mech crosses a strip of grounds (grass, gravel, road, sand,
+# rock, shallow water), and every foot that lands is a step event (app3d/StepEvents) that this
+# section's step sound system plays: the sound of the ground it landed on, louder for a faster
+# walker, with a heavy stomp under a machine's (its weight), each play a little varied
+# (audio/VoiceControls). The walker kit has no sound code: the game reads the events.
+import Math
+import Vec3
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+open audio/VoiceControls
+open ecs/ComponentTable
+open ecs/Event
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/Footprints
+open app3d/GroundTouch
+open app3d/MechWalker
+open app3d/StepEvents
+open ui/Ecs
+open app3d/UiShell
+open Playground
+open StepsDemo
+
+const walkerSpeed: Float = 1.4
+
+const walkerWeight: Float = 75.0
+
+# A step's sound varies by 5 % of rate and 2 dB
+const stepVariationOfSound: SoundVariation = { rateSpread: 0.05, gainSpreadDecibels: 2.0 }
+
+func startWalker(demo: mod StepsDemo) {
+  var body: CharacterBody = createCharacterBody(position: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  body.grounded = true
+  body.mover.velocity.y = walkerSpeed
+  demo.characters.componentSet(entityId: demo.walkerEntityId, data: body)
+  demo.controllers.componentSet(entityId: demo.walkerEntityId, data: createThirdPersonController())
+  # a new crossing starts its trail again
+  demo.footprints.trails.componentRemove(entityId: demo.walkerEntityId)
+  demo.walkerCrossing = true
+}
+
+func startMech(demo: mod StepsDemo) {
+  demo.drive = createMechDrive(
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    heading: 1.5707963
+  )
+  demo.gait = createMechGait(drive: demo.drive, tuning: demo.mechTuning)
+  demo.mechCrossing = true
+}
+
+# The walks a frame on; their landed feet sent as this frame's step events
+func walkStrip(demo: mod StepsDemo, deltaTime: view Float) {
+  frameAdvance(this: demo.steps)
+  if demo.walkerCrossing {
+    let controller: mod ThirdPersonController = demo.controllers.componentMod(
+      entityId: demo.walkerEntityId
+    )
+    controller.position.y = controller.position.y + walkerSpeed * deltaTime
+    let walked: Float = controller.position.y
+    findFootsteps(
+      footprints: demo.footprints
+      characters: demo.characters
+      controllers: demo.controllers
+      parked: demo.parked
+      heights: demo.heights
+      fallbackHeight: 1.77
+      groundZ: 0.0
+      deltaTime: deltaTime
+    )
+    answerFromStrip(touches: demo.footprints.touches, meters: stripMeters)
+    sendStepEvents(touches: demo.footprints.touches, weight: walkerWeight, events: demo.steps)
+    demo.walkerCrossing = walked < stripMeters * (groundCount as Float)
+  }
+  if demo.mechCrossing {
+    mechDriveStep(
+      drive: demo.drive
+      tuning: demo.mechTuning
+      stickX: 0.0
+      stickY: 1.0
+      jump: false
+      groundZ: 0.0
+      deltaTime: deltaTime
+    )
+    mechGaitStep(
+      gait: demo.gait
+      drive: demo.drive
+      tuning: demo.mechTuning
+      groundZ: 0.0
+      deltaTime: deltaTime
+    )
+    mechStepTouches(
+      entityId: demo.mechEntityId
+      gait: demo.gait
+      drive: demo.drive
+      touches: demo.mechTouches
+    )
+    answerFromStrip(touches: demo.mechTouches, meters: stripMeters * 2.0)
+    sendStepEvents(touches: demo.mechTouches, weight: demo.mechTuning.weight, events: demo.steps)
+    demo.mechCrossing = demo.drive.y < stripMeters * 2.0 * (groundCount as Float)
+  }
+}
+
+func groundSound(sounds: view StepSounds, ground: view GroundKind) ret Sound {
+  if ground is GroundKind.gravel {
+    ret sounds.gravel
+  }
+  if ground is GroundKind.road or ground is GroundKind.rock {
+    ret sounds.hard
+  }
+  if ground is GroundKind.sand or ground is GroundKind.mud {
+    ret sounds.sand
+  }
+  if ground is GroundKind.shallowWater {
+    ret sounds.water
+  }
+  ret sounds.grass
+}
+
+func groundName(ground: view GroundKind) ret String {
+  if ground is GroundKind.shallowWater {
+    ret "shallow water"
+  }
+  ret "{ground}"
+}
+
+func footWord(foot: view StepFoot) ret String {
+  if foot is StepFoot.left {
+    ret "left"
+  }
+  ret "right"
+}
+
+# The game's step sound system: one sound for each step event of the frame
+func playSteps(playground: mod Playground) {
+  let count: Int = eventCount(this: playground.stepsDemo.steps)
+  loop var i: Int = 0, i < count, ++i {
+    let step: StepEvent = eventAt(this: playground.stepsDemo.steps, i: i)
+    # louder at speed: -14 dB standing still, about -8 dB at a run
+    var level: Float = -14.0 + Math.min(a: 6.0, b: step.speed * 1.5)
+    let heavy: Bool = step.weight > 1000.0
+    if heavy {
+      level = level + 4.0
+      let unusedStomp: VoiceId = playground.audio.playVaried(
+        sound: playground.stepsDemo.sounds.stomp
+        bus: AudioBusKind.effects
+        gainDecibels: -2.0
+        variation: stepVariationOfSound
+        random: playground.random
+      )
+    }
+    let unusedStep: VoiceId = playground.audio.playVaried(
+      sound: groundSound(sounds: playground.stepsDemo.sounds, ground: step.ground)
+      bus: AudioBusKind.effects
+      gainDecibels: level
+      variation: stepVariationOfSound
+      random: playground.random
+    )
+    var who: String = "Walker"
+    if heavy {
+      who = "Mech"
+      playground.stepsDemo.mechSteps = playground.stepsDemo.mechSteps + 1
+    } else {
+      playground.stepsDemo.walkerSteps = playground.stepsDemo.walkerSteps + 1
+    }
+    var known: Bool = false
+    loop let ground: GroundKind in playground.stepsDemo.groundsHeard {
+      if ground is step.ground {
+        known = true
+      }
+    }
+    if not known {
+      playground.stepsDemo.groundsHeard.add(value: step.ground)
+    }
+    let speed: Float = Math.round(x: step.speed * 10.0) / 10.0
+    let foot: String = footWord(foot: step.foot)
+    let ground: String = groundName(ground: step.ground)
+    playground.stepsDemo.lastHeard = "{who}: {foot} foot on {ground}, {step.weight.toInt()} kg at {speed} m/s"
+  }
+}
+
+# The grounds heard so far, for the demo's summary
+func groundsHeardText(demo: view StepsDemo) ret String {
+  var line: String = ""
+  loop let ground: GroundKind in demo.groundsHeard {
+    line = "{line} {ground}"
+  }
+  ret line
+}
+
+# The section's buttons, the walks and their sounds this frame; true when what it shows changed
+func stepsSection(playground: mod Playground, world: mod UiWorld, deltaTime: view Float) ret Bool {
+  var changed: Bool = false
+  if uiActionFired(world: world, actionId: "steps.walker") {
+    startWalker(demo: playground.stepsDemo)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "steps.mech") {
+    startMech(demo: playground.stepsDemo)
+    changed = true
+  }
+  walkStrip(demo: playground.stepsDemo, deltaTime: deltaTime)
+  let heard: Bool = eventCount(this: playground.stepsDemo.steps) > 0
+  playSteps(playground: playground)
+  if changed or heard or playground.frames % 15 is 1 {
+    setNodeText(world: world, nodeId: "StepsLast", value: playground.stepsDemo.lastHeard)
+    setNodeText(
+      world: world
+      nodeId: "StepsCount"
+      value: "Steps heard: walker {playground.stepsDemo.walkerSteps}, mech {playground.stepsDemo.mechSteps}"
+    )
+    changed = true
+  }
+  ret changed or playground.stepsDemo.walkerCrossing or playground.stepsDemo.mechCrossing
+}

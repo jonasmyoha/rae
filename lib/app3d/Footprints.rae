@@ -10,10 +10,12 @@
 #   findFootsteps   counts the way every character on its feet has come (not
 #                   parked: lying knocked down, seated; not in the air) and
 #                   lists a GroundTouch at its feet for each stride it
-#                   finished; no ray is cast, the feet are on the ground the
-#                   mover stands on
+#                   finished, the left and the right foot in turn; no ray is
+#                   cast, the feet are on the ground the mover stands on
 #   (the app)       answers each touch (GroundAnswer: color, mark lift,
-#                   grass or dust)
+#                   grass or dust, the ground's kind)
+#   sendStepEvents  (app3d/StepEvents) one StepEvent per touch, for a game's
+#                   step sounds
 #   layFootsteps    lays each touch's print and kicks up its particles
 #   drawFootprints  every live print into the G-buffer, one instanced draw
 import Math
@@ -262,6 +264,9 @@ func findFootsteps(
       continue
     }
     footsteps.traveled = 0.0
+    # the feet take turns, so the touch says which one it is
+    let left: Bool = footsteps.leftFootNext
+    footsteps.leftFootNext = left is false
     footprints.touches.add(value: GroundTouch {
       entityId: characterId
       point: feet
@@ -270,6 +275,7 @@ func findFootsteps(
       speed: speed
       distance: moved
       answer: createGroundAnswer()
+      left: left
     })
   }
 }
@@ -291,7 +297,7 @@ func layFootsteps(
       feet: touch.point
       directionX: touch.directionX
       directionY: touch.directionY
-      left: componentView(this: footprints.trails, entityId: touch.entityId).leftFootNext
+      left: touch.left
       laidAt: footprints.clock
       groundColor: touch.answer.color
       lift: touch.answer.lift
@@ -301,7 +307,6 @@ func layFootsteps(
       entityId: touch.entityId
     )
     markTrailAdd(trail: footsteps.trail, piece: piece)
-    footsteps.leftFootNext = footsteps.leftFootNext is false
     if touch.answer.inWater {
       continue
     }

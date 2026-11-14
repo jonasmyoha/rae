@@ -1,0 +1,140 @@
+# The state of the Steps section: a walker and a mech that each cross a strip of grounds (grass,
+# gravel, road, sand, rock, shallow water) when asked, the step events their walks send
+# (app3d/StepEvents), and the sounds a step plays on each ground. The walker is the kit's own
+# (app3d/Footprints over a character's body and controller, its tables made here as a game's
+# World would hold them); the mech is app3d/MechWalker.
+import Math
+import Vec3
+open GbufferInstanced
+open Scene3d
+open audio/Audio
+open audio/Sound
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/World
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterHeight
+open app3d/CharacterMovers
+open app3d/Footprints
+open app3d/GroundTouch
+open app3d/MechWalker
+open app3d/StepEvents
+
+# Each ground is this many meters of the strip, for the walker; the mech's strip is twice as wide
+const stripMeters: Float = 1.0
+
+const groundCount: Int = 6
+
+type StepSounds {
+  grass: Sound
+  gravel: Sound
+  hard: Sound
+  sand: Sound
+  water: Sound
+  stomp: Sound
+}
+
+type StepsDemo {
+  sounds: StepSounds
+  entities: EntityAllocator
+  steps: EventQueue(StepEvent)
+  # the walker: its body, controller and trail tables, and whether it is crossing now
+  footprints: Footprints
+  characters: ComponentTable(CharacterBody)
+  controllers: ComponentTable(ThirdPersonController)
+  parked: ComponentTable(MoverParked)
+  heights: ComponentTable(CharacterHeight)
+  walkerEntityId: EntityId
+  walkerCrossing: Bool = false
+  # the mech: its drive, its legs and its touches, and whether it is crossing now
+  mechTuning: MechTuning
+  drive: MechDrive
+  gait: MechGait
+  mechTouches: List(GroundTouch)
+  mechEntityId: EntityId
+  mechCrossing: Bool = false
+  # what was heard: steps of each, and the grounds the steps landed on (each kind once)
+  walkerSteps: Int = 0
+  mechSteps: Int = 0
+  groundsHeard: List(GroundKind)
+  lastHeard: String = "Nothing yet"
+}
+
+func loadStepSounds(audio: mod AudioEngine, assets: view String) ret StepSounds {
+  ret StepSounds {
+    grass: audio.loadSound(path: "{assets}stepGrass.wav")
+    gravel: audio.loadSound(path: "{assets}stepGravel.wav")
+    hard: audio.loadSound(path: "{assets}stepHard.wav")
+    sand: audio.loadSound(path: "{assets}stepSand.wav")
+    water: audio.loadSound(path: "{assets}stepWater.wav")
+    stomp: audio.loadSound(path: "{assets}mechStomp.wav")
+  }
+}
+
+func createStepsDemo(audio: mod AudioEngine, assets: view String) ret StepsDemo {
+  var entities: EntityAllocator = createEntityAllocator()
+  let walkerEntityId: EntityId = entities.allocEntity()
+  let mechEntityId: EntityId = entities.allocEntity()
+  let mechTuning: MechTuning = {}
+  let drive: MechDrive = createMechDrive(
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    heading: 1.5707963
+  )
+  ret StepsDemo {
+    sounds: loadStepSounds(audio: audio, assets: assets)
+    entities: entities
+    steps: createEventQueue(StepEvent)
+    footprints: {
+      trails: ComponentTable.create(FootprintTrail)
+      clock: 0.0
+      batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 8)
+      tuning: defaultFootprintTuning()
+      touches: List.create(GroundTouch, cap: 4)
+    }
+    characters: ComponentTable.create(CharacterBody)
+    controllers: ComponentTable.create(ThirdPersonController)
+    parked: ComponentTable.create(MoverParked)
+    heights: ComponentTable.create(CharacterHeight)
+    walkerEntityId: walkerEntityId
+    mechTuning: mechTuning
+    drive: drive
+    gait: createMechGait(drive: drive, tuning: mechTuning)
+    mechTouches: List.create(GroundTouch, cap: 2)
+    mechEntityId: mechEntityId
+    groundsHeard: {}
+  }
+}
+
+# The strip's ground at `y` on a strip whose grounds are `meters` wide
+func stripGround(y: view Float, meters: view Float) ret GroundKind {
+  let band: Int = Math.max(a: 0, b: (y / meters).toInt())
+  if band is 0 {
+    ret GroundKind.grass
+  }
+  if band is 1 {
+    ret GroundKind.gravel
+  }
+  if band is 2 {
+    ret GroundKind.road
+  }
+  if band is 3 {
+    ret GroundKind.sand
+  }
+  if band is 4 {
+    ret GroundKind.rock
+  }
+  ret GroundKind.shallowWater
+}
+
+# The game's answer to its walkers' touches: the strip's ground under each
+func answerFromStrip(touches: mod List(GroundTouch), meters: view Float) {
+  loop var i: Int = 0, i < touches.length, ++i {
+    if let touch: mod GroundTouch = touches.modAt(index: i) {
+      touch.answer.ground = stripGround(y: touch.point.y, meters: meters)
+    }
+  }
+}

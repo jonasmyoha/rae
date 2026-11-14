@@ -10,6 +10,7 @@ open audio/AudioMixer
 open audio/AudioSpatial
 open audio/Sound
 open audio/VoiceControls
+open StepsDemo
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Transform
@@ -58,6 +59,8 @@ type Playground {
   burstsFired: Int = 0
   # with no device, the most shot voices playing at once (not fading out), read from the mixer
   shotsAtOnceMost: Int = 0
+  # a walker and a mech crossing a strip of grounds, and the steps their events play
+  stepsDemo: StepsDemo
   engineRate: Float = 1.0
 }
 
@@ -87,6 +90,7 @@ func createPlayground() ret Playground {
     gainDecibels: -14.0
   )
   let rendersItself: Bool = audio.offline
+  let stepsDemo: StepsDemo = createStepsDemo(audio: audio, assets: playgroundAssets)
   # the listener stands at the origin looking along +Y; the orbiting source is its own entity
   var entities: EntityAllocator = createEntityAllocator()
   var placement: AudioPlacement = createAudioPlacement()
@@ -109,6 +113,7 @@ func createPlayground() ret Playground {
     step: step
     shot: shot
     random: createRandom(seed: 150)
+    stepsDemo: stepsDemo
   }
 }
 

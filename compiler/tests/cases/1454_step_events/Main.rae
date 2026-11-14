@@ -1,0 +1,260 @@
+# Step events (app3d/StepEvents): one event per landed foot, with whose it is, where, which foot,
+# how hard and what it lands on, from both walkers of the kit.
+# 1. A scripted walk: a character goes 6 m up +y at 1.4 m/s over a strip of grounds, a meter
+#    each (grass, gravel, road, sand, rock, shallow water); findFootsteps lists its strides, the
+#    test answers each from the strip, sendStepEvents sends them. The feet take turns, every
+#    ground is stepped on in order, and each event carries the walker's speed and weight.
+# 2. A mech walks the same strip, twice as wide, at a full stick: one event per foot that comes
+#    down, the feet in turn, its 12 t weight; then a jump, whose landing brings both feet down.
+# 3. The queue starts each frame empty (frameAdvance after the readers).
+import Math
+import Vec3
+open GbufferInstanced
+open Scene3d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/World
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterHeight
+open app3d/CharacterMovers
+open app3d/Footprints
+open app3d/GroundTouch
+open app3d/MechWalker
+open app3d/StepEvents
+
+# The strip: a meter of each ground along y, times `scale`
+func groundAt(y: view Float, scale: view Float) ret GroundKind {
+  let band: Int = (y / scale).toInt()
+  if band <= 0 {
+    ret GroundKind.grass
+  }
+  if band is 1 {
+    ret GroundKind.gravel
+  }
+  if band is 2 {
+    ret GroundKind.road
+  }
+  if band is 3 {
+    ret GroundKind.sand
+  }
+  if band is 4 {
+    ret GroundKind.rock
+  }
+  ret GroundKind.shallowWater
+}
+
+func answerTouches(touches: mod List(GroundTouch), scale: view Float) {
+  loop var i: Int = 0, i < touches.length, ++i {
+    if let touch: mod GroundTouch = touches.modAt(index: i) {
+      touch.answer.ground = groundAt(y: touch.point.y, scale: scale)
+    }
+  }
+}
+
+func footName(foot: view StepFoot) ret String {
+  if foot is StepFoot.left {
+    ret "L"
+  }
+  ret "R"
+}
+
+# What the steps of a walk said: the feet in order, the grounds as first stepped on, whether the
+# feet took turns, and the speed and weight of the last
+type Heard {
+  feet: String
+  grounds: List(GroundKind)
+  alternating: Bool
+  count: Int
+  speed: Float
+  weight: Float
+  lastFoot: StepFoot
+}
+
+func createHeard() ret Heard {
+  ret Heard {
+    feet: ""
+    grounds: {}
+    alternating: true
+    count: 0
+    speed: 0.0
+    weight: 0.0
+    lastFoot: StepFoot.right
+  }
+}
+
+# A step sound system's reading of the frame's events
+func hear(heard: mod Heard, steps: view EventQueue(StepEvent)) {
+  loop var i: Int = 0, i < eventCount(this: steps), ++i {
+    let step: StepEvent = eventAt(this: steps, i: i)
+    if heard.count > 0 and step.foot is heard.lastFoot {
+      heard.alternating = false
+    }
+    heard.lastFoot = step.foot
+    heard.feet = "{heard.feet}{footName(foot: step.foot)}"
+    if heard.grounds.length is 0 or heard.grounds.copyAtDefault(index: heard.grounds.length - 1) is not step.ground {
+      heard.grounds.add(value: step.ground)
+    }
+    heard.count = heard.count + 1
+    heard.speed = step.speed
+    heard.weight = step.weight
+  }
+}
+
+func groundsOf(heard: view Heard) ret String {
+  var line: String = ""
+  loop let ground: GroundKind in heard.grounds {
+    line = "{line} {ground}"
+  }
+  ret line
+}
+
+func scriptedWalk() {
+  var footprints: Footprints = {
+    trails: ComponentTable.create(FootprintTrail)
+    clock: 0.0
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 80)
+    tuning: defaultFootprintTuning()
+    touches: List.create(GroundTouch, cap: 4)
+  }
+  var allocator: EntityAllocator = createEntityAllocator()
+  let walkerEntityId: EntityId = allocEntity(this: allocator)
+  var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  let parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
+  let heights: ComponentTable(CharacterHeight) = ComponentTable.create(CharacterHeight)
+  var body: CharacterBody = createCharacterBody(position: Vec3.create(x: 0.0, y: 0.0, z: 1.4))
+  body.grounded = true
+  body.mover.velocity.y = 1.4
+  componentSet(this: characters, entityId: walkerEntityId, data: body)
+  componentSet(this: controllers, entityId: walkerEntityId, data: createThirdPersonController())
+  var steps: EventQueue(StepEvent) = createEventQueue(StepEvent)
+  var heard: Heard = createHeard()
+  var stillThere: Int = 0
+  # 6 m at 1.4 m/s, a 60th of a second a frame
+  loop var frame: Int = 0, frame < 257, ++frame {
+    let controller: mod ThirdPersonController = componentMod(
+      this: controllers
+      entityId: walkerEntityId
+    )
+    controller.position.y = (frame + 1).toFloat() * 1.4 / 60.0
+    findFootsteps(
+      footprints: footprints
+      characters: characters
+      controllers: controllers
+      parked: parked
+      heights: heights
+      fallbackHeight: 1.77
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    answerTouches(touches: footprints.touches, scale: 1.0)
+    sendStepEvents(touches: footprints.touches, weight: 75.0, events: steps)
+    hear(heard: heard, steps: steps)
+    frameAdvance(this: steps)
+    stillThere = stillThere + eventCount(this: steps)
+  }
+  log("walk: {heard.count} steps {heard.feet}; the feet take turns: {heard.alternating}")
+  log("walk: on{groundsOf(heard: heard)}")
+  log(
+    "walk: at {Math.round(x: heard.speed * 10.0).toInt()} dm/s, {heard.weight.toInt()} kg; events left after each frame: {stillThere}"
+  )
+}
+
+func mechWalk() {
+  let tuning: MechTuning = {}
+  var drive: MechDrive = createMechDrive(
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    heading: 1.5707963
+  )
+  var gait: MechGait = createMechGait(drive: drive, tuning: tuning)
+  var allocator: EntityAllocator = createEntityAllocator()
+  let mechEntityId: EntityId = allocEntity(this: allocator)
+  var touches: List(GroundTouch) = List.create(GroundTouch, cap: 2)
+  var steps: EventQueue(StepEvent) = createEventQueue(StepEvent)
+  var heard: Heard = createHeard()
+  var frame: Int = 0
+  # a full stick up the strip, until it is past its end (12 m)
+  loop drive.y < 12.0 and frame < 1200 {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 0.0
+      stickY: 1.0
+      jump: false
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechGaitStep(
+      gait: gait
+      drive: drive
+      tuning: tuning
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechStepTouches(
+      entityId: mechEntityId
+      gait: gait
+      drive: drive
+      touches: touches
+    )
+    answerTouches(touches: touches, scale: 2.0)
+    sendStepEvents(touches: touches, weight: tuning.weight, events: steps)
+    hear(heard: heard, steps: steps)
+    frameAdvance(this: steps)
+    frame = frame + 1
+  }
+  log(
+    "mech: {heard.count} steps (its gait counted {gait.steps} started) {heard.feet}; the feet take turns: {heard.alternating}"
+  )
+  log("mech: on{groundsOf(heard: heard)}; {(heard.weight / 1000.0).toInt()} t")
+  # a jump from standing: both feet come down together when it lands
+  var landing: Heard = createHeard()
+  var bothAtOnce: Bool = false
+  loop var jumpFrame: Int = 0, jumpFrame < 120, ++jumpFrame {
+    mechDriveStep(
+      drive: drive
+      tuning: tuning
+      stickX: 0.0
+      stickY: 0.0
+      jump: jumpFrame is 0
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechGaitStep(
+      gait: gait
+      drive: drive
+      tuning: tuning
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    mechStepTouches(
+      entityId: mechEntityId
+      gait: gait
+      drive: drive
+      touches: touches
+    )
+    answerTouches(touches: touches, scale: 2.0)
+    sendStepEvents(touches: touches, weight: tuning.weight, events: steps)
+    if eventCount(this: steps) is 2 {
+      bothAtOnce = true
+    }
+    hear(heard: landing, steps: steps)
+    frameAdvance(this: steps)
+  }
+  log(
+    "mech jump: {landing.count} feet came down, both in one frame: {bothAtOnce}, on{groundsOf(
+      heard: landing
+    )}"
+  )
+}
+
+func main() {
+  scriptedWalk()
+  mechWalk()
+}

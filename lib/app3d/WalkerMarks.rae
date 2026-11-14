@@ -3,13 +3,16 @@
 # leaves a print each stride, a shade of the ground there, and kicks up bits
 # of grass in the meadow or puffs of sand elsewhere. What is underfoot is the
 # world's terrain field (WorldBiome): its blended ground color, grass where
-# it is mostly meadow.
+# it is mostly meadow. Every step is also a StepEvent in `steps` (app3d/StepEvents), with
+# what the field says it lands on (a road, sand, rock, mud, grass, shallow water), for a game's
+# step sounds.
 open DrawStats
 import Math
 import Vec3
 open WorldBiome
 open Wind
 open ecs/ComponentTable
+open ecs/Event
 open RendererDeferred
 open Gbuffer
 open gpu/GpuResources
@@ -18,6 +21,7 @@ open app3d/GroundParticles
 open app3d/Footprints
 open app3d/GroundPalette
 open app3d/Precipitation
+open app3d/StepEvents
 open LeafParticles
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
@@ -42,6 +46,8 @@ type WalkerMarks {
   # GPU), released by the update (app3d/LeafRelease), and a frame count
   leafParticles: LeafParticles
   leafFrame: Int = 0
+  # This frame's steps, one event per landed foot (app3d/StepEvents)
+  steps: EventQueue(StepEvent)
 }
 
 # Room for `characterCount` characters' full trails
@@ -63,6 +69,7 @@ func createWalkerMarks(
       capacity: leafDefaultCapacity()
       constants: islandConstantsFor(cfg: biome)
     )
+    steps: createEventQueue(StepEvent)
   }
 }
 
@@ -73,6 +80,42 @@ const walkerLeafKeepShare: Float = 2.75
 # How deep the water over the ground may be before a step is in water (m):
 # a wet foot on the shore still kicks up its sand
 const walkerMarkWaterDepth: Float = 0.03
+
+# What a person weighs (kg), for how hard a walker's steps land
+const walkerStepWeight: Float = 75.0
+
+# How much of a dirt road's weight makes a step land on the road
+const walkerRoadShare: Float = 0.5
+
+# What a step at (`x`, `y`) lands on: shallow water `depth` over the ground, a dirt road, else
+# the field's main material there
+func walkerGroundKind(
+  x: view Float
+  y: view Float
+  biome: view BiomeConfig
+  depth: view Float
+) ret GroundKind {
+  if depth > walkerMarkWaterDepth {
+    ret GroundKind.shallowWater
+  }
+  if worldPath(x: x, y: y, cfg: biome) > walkerRoadShare {
+    ret GroundKind.road
+  }
+  let material: Int = sampleWorld(x: x, y: y, cfg: biome).material
+  if material is matSand {
+    ret GroundKind.sand
+  }
+  if material is matMud {
+    ret GroundKind.mud
+  }
+  if material is matRock {
+    ret GroundKind.rock
+  }
+  if material is matWater {
+    ret GroundKind.shallowWater
+  }
+  ret GroundKind.grass
+}
 
 # What is under (`x`, `y`) on the terrain field of `biome` at `groundZ`:
 # grass blades the color of the grass there (the ground palette's,
@@ -101,6 +144,12 @@ func walkerGroundAnswer(
       s: 1.3
     )
     inWater: depth > walkerMarkWaterDepth
+    ground: walkerGroundKind(
+      x: x
+      y: y
+      biome: biome
+      depth: depth
+    )
   }
 }
 
@@ -116,6 +165,8 @@ func walkerMarksUpdate(
   deltaTime: view Float
   palette: view GroundPalette
 ) {
+  # last frame's steps were read by now; this frame's start empty
+  frameAdvance(this: walkerMarks.steps)
   findFootsteps(
     footprints: walkerMarks.footprints
     characters: physicsSystem.characters
@@ -137,6 +188,11 @@ func walkerMarksUpdate(
       )
     }
   }
+  sendStepEvents(
+    touches: walkerMarks.footprints.touches
+    weight: walkerStepWeight
+    events: walkerMarks.steps
+  )
   layFootsteps(
     footprints: walkerMarks.footprints
     groundParticles: walkerMarks.groundParticles

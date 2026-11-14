@@ -40,6 +40,8 @@ type MechTuning {
   stepLift: Float = 0.45
   # How far the body dips mid-step (m)
   bodyDip: Float = 0.12
+  # What it weighs (kg): how hard its steps land (app3d/StepEvents)
+  weight: Float = 12000.0
 }
 
 type MechDrive {
@@ -127,6 +129,12 @@ type MechGait {
   right: MechFoot
   # How many steps it has taken, for a check
   steps: Int = 0
+  # The feet that came down in the last mechGaitStep: a step ended, or both at the end of a
+  # jump (app3d/StepEvents turns them into step events)
+  leftLanded: Bool = false
+  rightLanded: Bool = false
+  # In a jump at the last step: its end lands both feet
+  inAir: Bool = false
 }
 
 # Where a foot should stand under its hip (`side` +1 the left, -1 the right), a little ahead of
@@ -183,16 +191,17 @@ func horizontalDistance(a: view Vec3, b: view Vec3) ret Float {
   ret Math.sqrt(x: dx * dx + dy * dy)
 }
 
-# A foot `deltaTime` s further on its step (its ground height `groundZ`)
+# A foot `deltaTime` s further on its step (its ground height `groundZ`); true when it came
+# down now
 func mechFootStep(
   foot: mod MechFoot
   tuning: view MechTuning
   seconds: view Float
   groundZ: view Float
   deltaTime: view Float
-) {
+) ret Bool {
   if not foot.stepping {
-    ret
+    ret false
   }
   foot.progress = Math.min(a: 1.0, b: foot.progress + deltaTime / Math.max(a: seconds, b: 0.05))
   let t: Float = foot.progress
@@ -205,7 +214,9 @@ func mechFootStep(
   if foot.progress >= 1.0 {
     foot.stepping = false
     foot.at = Vec3.create(x: foot.to.x, y: foot.to.y, z: groundZ)
+    ret true
   }
+  ret false
 }
 
 # The legs `deltaTime` s on under `drive` (after its own step): a stepping foot goes on; when
@@ -231,26 +242,35 @@ func mechGaitStep(
     side: -1.0
     groundZ: groundZ
   )
+  gait.leftLanded = false
+  gait.rightLanded = false
   if not drive.grounded {
+    gait.inAir = true
     let hang: Float = drive.z - groundZ
     gait.left = standingFoot(at: Vec3.create(x: leftHome.x, y: leftHome.y, z: groundZ + hang))
     gait.right = standingFoot(at: Vec3.create(x: rightHome.x, y: rightHome.y, z: groundZ + hang))
     ret
   }
-  mechFootStep(
+  if gait.inAir {
+    # down from a jump: both feet land where they hung
+    gait.inAir = false
+    gait.leftLanded = true
+    gait.rightLanded = true
+  }
+  gait.leftLanded = mechFootStep(
     foot: gait.left
     tuning: tuning
     seconds: seconds
     groundZ: groundZ
     deltaTime: deltaTime
-  )
-  mechFootStep(
+  ) or gait.leftLanded
+  gait.rightLanded = mechFootStep(
     foot: gait.right
     tuning: tuning
     seconds: seconds
     groundZ: groundZ
     deltaTime: deltaTime
-  )
+  ) or gait.rightLanded
   if gait.left.stepping or gait.right.stepping {
     ret
   }

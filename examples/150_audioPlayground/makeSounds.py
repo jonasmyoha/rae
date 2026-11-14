@@ -116,6 +116,77 @@ def shot():
             for i in range(seconds(0.25))]
 
 
+def noise_burst(seed, length, decay, smoothing, gain):
+    # noise through a one-pole low-pass (`smoothing` 0..1: lower is duller), decaying
+    rng = random.Random(seed)
+    out, low = [], 0.0
+    for i in range(seconds(length)):
+        low += smoothing * (rng.uniform(-1, 1) - low)
+        out.append(gain * low * math.exp(-i / (decay * RATE)) * min(1.0, i / 30.0))
+    return out
+
+
+def step_grass():
+    # a soft, dull brush: low-passed noise, 0.14 s
+    return noise_burst(161, 0.14, 0.035, 0.06, 4.0)
+
+
+def step_gravel():
+    # a crunch: a quick run of small random clicks under a short noise bed, 0.2 s
+    rng = random.Random(162)
+    out = noise_burst(163, 0.2, 0.05, 0.5, 0.25)
+    for _ in range(26):
+        at = int(rng.uniform(0, 0.12) * RATE)
+        size = rng.uniform(0.2, 0.6)
+        for j in range(40):
+            if at + j < len(out):
+                out[at + j] += size * rng.uniform(-1, 1) * math.exp(-j / 6.0)
+    return out
+
+
+def step_hard():
+    # a hard tread (a road, rock): a 180 Hz knock with a 30 ms decay and a 3 ms click
+    rng = random.Random(164)
+    return [0.6 * math.sin(2 * math.pi * 180 * i / RATE) * math.exp(-i / (0.03 * RATE))
+            + (0.5 * rng.uniform(-1, 1) * math.exp(-i / (0.003 * RATE)))
+            for i in range(seconds(0.12))]
+
+
+def step_sand():
+    # a soft hiss that rises and falls, 0.2 s
+    rng = random.Random(165)
+    out, low = [], 0.0
+    total = seconds(0.2)
+    for i in range(total):
+        low += 0.2 * (rng.uniform(-1, 1) - low)
+        out.append(1.2 * low * math.sin(math.pi * i / total))
+    return out
+
+
+def step_water():
+    # a splash: noise whose level wobbles at 30 Hz as it fades, 0.3 s
+    rng = random.Random(166)
+    out, low = [], 0.0
+    for i in range(seconds(0.3)):
+        t = i / RATE
+        low += 0.35 * (rng.uniform(-1, 1) - low)
+        wobble = 0.6 + 0.4 * math.sin(2 * math.pi * 30 * t)
+        out.append(1.4 * low * wobble * math.exp(-t / 0.09) * min(1.0, i / 60.0))
+    return out
+
+
+def mech_stomp():
+    # a machine's foot: a 45 Hz thud falling to 35 Hz, 0.4 s, with a low rumble of noise
+    rng = random.Random(167)
+    out, low, phase = [], 0.0, 0.0
+    for i in range(seconds(0.4)):
+        t = i / RATE
+        phase += 2 * math.pi * (45 - 25 * t) / RATE
+        low += 0.03 * (rng.uniform(-1, 1) - low)
+        out.append((0.8 * math.sin(phase) + 2.0 * low) * math.exp(-t / 0.12) * min(1.0, i / 40.0))
+    return out
+
+
 def position_tones():
     # The stream's test signal, 30 s: at the start of every second a 0.15 s tone whose pitch
     # tells the second (300 Hz + 40 Hz per second: 300 Hz at 0 s, 1460 Hz at 29 s), silence
@@ -140,6 +211,12 @@ def main():
     write_wav("buzzLoop.wav", buzz_loop())
     write_wav("step.wav", step())
     write_wav("shot.wav", shot())
+    write_wav("stepGrass.wav", step_grass())
+    write_wav("stepGravel.wav", step_gravel())
+    write_wav("stepHard.wav", step_hard())
+    write_wav("stepSand.wav", step_sand())
+    write_wav("stepWater.wav", step_water())
+    write_wav("mechStomp.wav", mech_stomp())
     chime_wav = write_wav("chime-source.wav", chime())
     subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "32000", chime_wav,
                     os.path.join(ASSETS, "chime.m4a")], check=True)

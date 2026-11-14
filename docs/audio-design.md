@@ -976,6 +976,36 @@ three (the faded one still fading 100 frames on, gone 600 on), a cap of 2 by gai
 voices on 64 places taking the fading one and then the quietest, none dropped. All three run
 with `RAE_REALTIME_CHECK=1`. The audio playground has a Game sounds section.
 
+### 10.6 Step events: a game's footsteps from data
+
+The walker kit in `lib/app3d` knows when a foot lands; a game plays the sound. Between them is
+an ECS event, so the kit has no sound code and a game needs none in the kit:
+
+- `app3d/GroundTouch`: a touch says which foot (`left`), and the app's `GroundAnswer` says what
+  the ground is (`ground: GroundKind`: grass, gravel, road, sand, rock, mud, shallowWater, or
+  unknown when the app did not say).
+- `app3d/Footprints`: `findFootsteps` lists a touch for each stride of every character on its
+  feet, the feet in turn. `app3d/MechWalker`: `mechGaitStep` marks the feet that came down
+  (a step ended, or both at the end of a jump), and `MechTuning.weight` (12 t) says how heavy.
+- `app3d/StepEvents`: `mechStepTouches` lists the mech's landed feet as touches;
+  `sendStepEvents(touches:, weight:, events:)` sends one `StepEvent` per answered touch, with
+  the entity, the position, the foot, the speed, the weight and the ground, into an
+  `EventQueue(StepEvent)` (lib/ecs/Event) that the game's step sound system reads later in the
+  frame.
+- `app3d/WalkerMarks` does all of it for the walker examples: its `steps` queue has every
+  character's steps of the frame, answered from the terrain field (shallow water over 3 cm
+  deep, a dirt road where `worldPath` is over one half, else the field's main material).
+
+**Landed (2026-11-14, Rae 0.3.124):** fixture 1454 walks a character 6 m over a strip of six
+grounds and a mech 12 m over the same strip, twice as wide: one event per landed foot, the feet
+in turn, every ground in order, the speed and the weight; a jump's landing brings both feet
+down in one frame; the queue is empty after each frame. The audio playground's Steps section
+plays them (a self-made sound per ground, a stomp under the mech).
+
+**What a game pins to have all three of 10.4-10.6:** the audio package 0.14.0 (its git tag
+`audio/v0.14.0`, with the placed sounds of 0.13.0 and the game sounds of 0.14.0) and Rae
+0.3.124 (`rae: { version: "0.3.124" }`, for `app3d/StepEvents`).
+
 ---
 
 ## 11. What lands first

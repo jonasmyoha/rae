@@ -1,0 +1,114 @@
+# app3d/StepEvents — "a foot landed here", as ECS events a game reads to play its steps, with
+# no code of its own in the walker kit. One StepEvent per landed foot: whose (the entity), where,
+# which foot, how hard (the walker's speed and its weight) and what it landed on, as the ground
+# knows it (GroundKind: grass, gravel, road, sand, rock, mud, shallow water).
+#
+# Both walkers make touches (app3d/GroundTouch) the app answers from its own ground, then
+# sendStepEvents sends one event per answered touch:
+#
+#   app3d/Footprints  findFootsteps lists a touch for each stride of every character on its
+#                     feet, the feet in turn (app3d/WalkerMarks does all of it for the walkers)
+#   app3d/MechWalker  mechGaitStep marks the feet that came down; mechStepTouches lists them
+#
+#     findFootsteps(footprints: footprints, ...)            # or mechStepTouches(...)
+#     (answer each touch: its GroundAnswer, with .ground)
+#     sendStepEvents(touches: footprints.touches, weight: 75.0, events: world.steps)
+#     # a game's step sound system, later in the frame:
+#     loop var i: Int = 0, i < eventCount(this: world.steps), ++i {
+#       let step: StepEvent = eventAt(this: world.steps, i: i)
+#       ...
+#     }
+#     frameAdvance(this: world.steps)                        # once a frame, after the readers
+import Math
+import Vec3
+open ecs/Entity
+open ecs/Event
+open app3d/GroundTouch
+open app3d/MechWalker
+
+enum StepFoot { left, right }
+
+# A foot came down
+type StepEvent {
+  entityId: EntityId
+  # Where, on the ground
+  position: Vec3
+  foot: StepFoot
+  # How hard: how fast the walker went (m/s) and what it weighs (kg); a step sound grows with
+  # both (a run is louder than a walk, a machine's tread heavier than a person's)
+  speed: Float
+  weight: Float
+  # What it landed on, as the app's ground answered
+  ground: GroundKind
+}
+
+# One StepEvent per touch, as answered (its GroundAnswer's ground), for a walker of `weight` kg
+func sendStepEvents(
+  touches: view List(GroundTouch)
+  weight: view Float
+  events: mod EventQueue(StepEvent)
+) {
+  loop let touch: view GroundTouch in touches {
+    var foot: StepFoot = StepFoot.right
+    if touch.left {
+      foot = StepFoot.left
+    }
+    eventSend(
+      this: events
+      value: StepEvent {
+        entityId: touch.entityId
+        position: touch.point
+        foot: foot
+        speed: touch.speed
+        weight: weight
+        ground: touch.answer.ground
+      }
+    )
+  }
+}
+
+func mechTouch(
+  entityId: view EntityId
+  foot: view MechFoot
+  drive: view MechDrive
+  left: view Bool
+) ret GroundTouch {
+  let forward: Vec3 = mechForward(drive: drive)
+  ret GroundTouch {
+    entityId: entityId
+    point: foot.at
+    directionX: forward.x
+    directionY: forward.y
+    speed: Math.abs(value: drive.speed)
+    distance: 0.0
+    answer: createGroundAnswer()
+    left: left
+  }
+}
+
+# The mech's feet that came down in its last mechGaitStep, as touches for the app to answer
+# (into `touches`, emptied first)
+func mechStepTouches(
+  entityId: view EntityId
+  gait: view MechGait
+  drive: view MechDrive
+  touches: mod List(GroundTouch)
+) {
+  touches.clear()
+  if gait.leftLanded {
+    touches.add(value: mechTouch(
+      entityId: entityId
+      foot: gait.left
+      drive: drive
+      left: true
+    ))
+  }
+  if gait.rightLanded {
+    touches.add(value: mechTouch(
+      entityId: entityId
+      foot: gait.right
+      drive: drive
+      left: false
+    ))
+  }
+}
