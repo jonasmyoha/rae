@@ -18,6 +18,16 @@ const parameterEqGain: Int = 3
 
 const parameterEqQuality: Int = 4
 
+# Parameter event kinds of a compressor and a reverb: set at once (a compressor's gain reduction
+# follows its attack and release; a reverb's feedback and damping change its tail, not a sample)
+const parameterCompressorThreshold: Int = 5
+
+const parameterCompressorRatio: Int = 6
+
+const parameterReverbRoomSize: Int = 7
+
+const parameterReverbDamping: Int = 8
+
 # 20 / ln(10): decibels from a natural logarithm, and its inverse
 const decibelsPerNeper: Float = 8.685889638
 
@@ -357,6 +367,54 @@ func applyEqParameter(
     quality: quality
   )
   setFilterAt(plan: plan, stateAt: stateAt, state: state)
+}
+
+# A compressor's threshold (dB) or ratio
+func applyCompressorParameter(
+  plan: view RenderPlan
+  stateAt: view Int
+  kind: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var compressors: Buffer(CompressorState) = plan.compressors
+    var state: CompressorState = rae_ext_rae_buf_get(buf: compressors, index: stateAt)
+    if kind is parameterCompressorThreshold {
+      state.thresholdDecibels = value
+    } else if kind is parameterCompressorRatio {
+      state.ratio = max(a: 1.0, b: value)
+    }
+    rae_ext_rae_buf_set(buf: compressors, index: stateAt, value: state)
+  }
+}
+
+# A reverb's room size or damping (0..1, Freeverb's setters)
+func applyReverbParameter(
+  plan: view RenderPlan
+  stateAt: view Int
+  kind: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var reverbs: Buffer(ReverbState) = plan.reverbs
+    var state: ReverbState = rae_ext_rae_buf_get(buf: reverbs, index: stateAt)
+    let share: Float = min(a: 1.0, b: max(a: 0.0, b: value))
+    if kind is parameterReverbRoomSize {
+      state.feedback = share * 0.28 + 0.7
+    } else if kind is parameterReverbDamping {
+      state.damp1 = share * 0.4
+      state.damp2 = 1.0 - state.damp1
+    }
+    rae_ext_rae_buf_set(buf: reverbs, index: stateAt, value: state)
+  }
+}
+
+func isCompressorParameter(kind: view Int) ret Bool realtime {
+  ret kind is parameterCompressorThreshold or kind is parameterCompressorRatio
+}
+
+func isReverbParameter(kind: view Int) ret Bool realtime {
+  ret kind is parameterReverbRoomSize or kind is parameterReverbDamping
 }
 
 func isEqParameter(kind: view Int) ret Bool realtime {

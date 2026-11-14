@@ -16,6 +16,8 @@ import Math
 open audio/AudioGraph
 open audio/AudioSynth
 open audio/AudioVoice
+open audio/BusEffectGraph
+open audio/GraphRender
 open audio/GraphCompile
 open audio/GraphNodes
 open audio/GraphTeam
@@ -55,6 +57,10 @@ enum AudioCommandKind {
   allNotesOff
   # the synth's waveform and envelope (`synthSound`)
   setSynthSound
+  # a node of the bus plan (audio/BusEffects): `voiceId` its key; a gain node's level `value`
+  # (ramped over 5 ms), or parameter `startFrame` set to `value` (audio/GraphRender)
+  setBusNodeGain
+  setBusNodeParameter
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -123,6 +129,8 @@ type AudioMixer {
   # API is a fixed small graph): bus b's voices -> a duck node (its fader and
   # the in-mix duck, entity b) -> the sum -> the output
   busPlan: RenderPlan
+  # the music and effects buses have the effect stages (audio/BusEffectGraph)
+  busEffects: Bool = false
   # bus b's left samples at [b * maxFrames ...], right likewise
   busLeft: Buffer(Float)
   busRight: Buffer(Float)
@@ -165,6 +173,7 @@ func createAudioMixer(
   feedback: view SpscRing(AudioFeedback)
   reclaim: view SpscRing(Int)
   clockStamps: view SpscRing(ClockStamp)
+  busEffects: view Bool
 ) ret AudioMixer {
   var voices: List(AudioVoice) = List.create(AudioVoice, cap: audioMaxVoices)
   voices.addDefaults(count: audioMaxVoices)
@@ -173,7 +182,7 @@ func createAudioMixer(
     events.add(value: noEvent())
   }
   let busPlan: RenderPlan = compileGraph(
-    graph: busGraph(forTeam: false)
+    graph: busGraph(forTeam: false, withEffects: busEffects)
     sampleRate: sampleRate
     maxFrames: maxFrames
   ).plan
@@ -183,6 +192,7 @@ func createAudioMixer(
     smoothingFrames: sampleRate * 5 / 1000
     voices: voices
     busPlan: busPlan
+    busEffects: busEffects
     busLeft: createSampleBuffer(count: audioBusCount * maxFrames)
     busRight: createSampleBuffer(count: audioBusCount * maxFrames)
     duckOn: false
@@ -206,14 +216,18 @@ func createAudioMixer(
 
 # The buses as a graph: each bus's voices into its fader (the duck node),
 # the four faders summed into the output
-func busGraph(forTeam: view Bool) ret AudioGraph {
+func busGraph(forTeam: view Bool, withEffects: view Bool) ret AudioGraph {
   var graph: AudioGraph = createAudioGraph()
   graph.forTeam = forTeam
   let sum: Int = graph.addNode(node: sumNode())
   loop var bus: Int = 0, bus < audioBusCount, ++bus {
     let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: bus))
     let fader: Int = graph.addNode(node: identified(node: duckNode(), entityId: bus))
-    graph.connect(from: source, to: fader)
+    var beforeFader: Int = source
+    if withEffects and busHasEffects(bus: bus) {
+      beforeFader = graph.addBusEffects(from: source, bus: bus)
+    }
+    graph.connect(from: beforeFader, to: fader)
     graph.connect(from: fader, to: sum)
   }
   let out: Int = graph.addNode(node: outputNode())
@@ -227,7 +241,7 @@ func busGraph(forTeam: view Bool) ret AudioGraph {
 func useMixerTeam(mixer: mod AudioMixer, team: view GraphTeam) {
   freeRenderPlan(plan: mixer.busPlan)
   mixer.busPlan = compileGraph(
-    graph: busGraph(forTeam: true)
+    graph: busGraph(forTeam: true, withEffects: mixer.busEffects)
     sampleRate: mixer.sampleRate
     maxFrames: mixer.maxFrames
   ).plan
@@ -427,6 +441,22 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   }
   if command.kind is AudioCommandKind.allNotesOff {
     synthAllNotesOff(synth: mixer.synth)
+    ret
+  }
+  if command.kind is AudioCommandKind.setBusNodeGain or command.kind is AudioCommandKind.setBusNodeParameter {
+    var parameter: Int = 0
+    if command.kind is AudioCommandKind.setBusNodeParameter {
+      parameter = command.startFrame
+    }
+    applyPlanParameter(
+      plan: mixer.busPlan
+      event: GraphParameterEvent {
+        key: command.voiceId
+        kind: parameter
+        value: command.value
+        sampleTime: 0
+      }
+    )
     ret
   }
   if command.kind is AudioCommandKind.setSynthSound {

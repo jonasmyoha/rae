@@ -1,0 +1,109 @@
+# audio/BusEffectGraph — the effects the engine's music and effects buses can have
+# (audio/BusEffects, docs/audio-design.md §10.7): an EQ band, a compressor and a reverb, one
+# stage each, between a bus's voices and its fader. A stage is the effect beside a dry path:
+#
+#     in -> dry gain ----------------> sum -> next stage
+#     in -> effect -> wet gain ------^
+#
+# Off, the dry gain is 1 and the wet 0, and the stage gives its input unchanged, to the bit; on,
+# the gains move (5 ms ramps), so turning an effect on or off crossfades and never clicks. The
+# gains, the EQ's settings, the compressor's threshold and ratio and the reverb's room and
+# damping are parameters with their own keys, set while playing.
+open audio/AudioGraph
+open audio/EffectStates
+
+enum BusEffectStage { eq, compressor, reverb }
+
+# Which roles a stage's nodes have in its keys
+const busEffectDryRole: Int = 0
+
+const busEffectNodeRole: Int = 1
+
+const busEffectWetRole: Int = 2
+
+# The buses with effect stages (when the engine was asked for them): music and effects
+func busHasEffects(bus: view Int) ret Bool {
+  ret bus is 0 or bus is 1
+}
+
+func stageIndex(stage: view BusEffectStage) ret Int {
+  if stage is BusEffectStage.eq {
+    ret 0
+  }
+  if stage is BusEffectStage.compressor {
+    ret 1
+  }
+  ret 2
+}
+
+# A stage node's entity key: apart from the buses' faders (keys 0..3)
+func busEffectKey(bus: view Int, stage: view BusEffectStage, role: view Int) ret Int {
+  ret 100 + bus * 16 + stageIndex(stage: stage) * 4 + role
+}
+
+func busEffectNode(stage: view BusEffectStage) ret GraphNode {
+  if stage is BusEffectStage.eq {
+    ret eqNode(
+      filter: FilterShape.peak
+      frequency: 1000.0
+      gainDecibels: 0.0
+      quality: 1.0
+    )
+  }
+  var settings: EffectSettings = defaultEffectSettings()
+  if stage is BusEffectStage.compressor {
+    settings.thresholdDecibels = -24.0
+    settings.ratio = 4.0
+    ret compressorNode(settings: settings, makeupDecibels: 0.0)
+  }
+  # the reverb's own dry path is off: the stage's dry gain carries it
+  settings.wet = 1.0
+  settings.dry = 0.0
+  ret reverbNode(settings: settings)
+}
+
+# One stage after node `from`; its sum node
+func addBusEffectStage(
+  graph: mod AudioGraph
+  from: view Int
+  bus: view Int
+  stage: view BusEffectStage
+) ret Int {
+  let dry: Int = graph.addNode(
+    node: identified(
+      node: gainNode(decibels: 0.0)
+      entityId: busEffectKey(bus: bus, stage: stage, role: busEffectDryRole)
+    )
+  )
+  let effect: Int = graph.addNode(
+    node: identified(
+      node: busEffectNode(stage: stage)
+      entityId: busEffectKey(bus: bus, stage: stage, role: busEffectNodeRole)
+    )
+  )
+  # -1000 dB: exactly silent in single precision
+  let wet: Int = graph.addNode(
+    node: identified(
+      node: gainNode(decibels: -1000.0)
+      entityId: busEffectKey(bus: bus, stage: stage, role: busEffectWetRole)
+    )
+  )
+  let sum: Int = graph.addNode(node: sumNode())
+  graph.connect(from: from, to: dry)
+  graph.connect(from: from, to: effect)
+  graph.connect(from: effect, to: wet)
+  graph.connect(from: dry, to: sum)
+  graph.connect(from: wet, to: sum)
+  ret sum
+}
+
+# The three stages after node `from` (a bus's voices); the last one's sum
+func addBusEffects(graph: mod AudioGraph, from: view Int, bus: view Int) ret Int {
+  let afterEq: Int = graph.addBusEffectStage(from: from, bus: bus, stage: BusEffectStage.eq)
+  let afterCompressor: Int = graph.addBusEffectStage(
+    from: afterEq
+    bus: bus
+    stage: BusEffectStage.compressor
+  )
+  ret graph.addBusEffectStage(from: afterCompressor, bus: bus, stage: BusEffectStage.reverb)
+}

@@ -63,6 +63,8 @@ type AudioSettings {
   session: AudioSessionKind
   # input channels to record (audio/AudioInput), 0 for none: a duplex device
   inputChannels: Int
+  # an EQ, a compressor and a reverb on the music and effects buses (audio/BusEffects)
+  busEffects: Bool = false
 }
 
 func defaultAudioSettings() ret AudioSettings {
@@ -226,6 +228,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     feedback: feedback
     reclaim: reclaim
     clockStamps: clockStamps
+    busEffects: settings.busEffects
   )
   var renderTask: Task(Int) = spawn audioIdle()
   let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
@@ -265,6 +268,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         feedback: feedback
         reclaim: reclaim
         clockStamps: clockStamps
+        busEffects: settings.busEffects
       )
       commands: commands
       input: input
@@ -303,6 +307,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         feedback: feedback
         reclaim: reclaim
         clockStamps: clockStamps
+        busEffects: settings.busEffects
       )
       renderTask = spawn thread audioRenderThread(
         mixer: threadMixer

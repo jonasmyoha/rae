@@ -1,0 +1,172 @@
+# audio/BusEffects — an EQ band, a compressor and a reverb on the engine's music and effects buses
+# (docs/audio-design.md §10.7), for a program that starts its engine with
+# `settings.busEffects = true` (the stages are audio/BusEffectGraph's). The program keeps a
+# BusEffects per bus and hands it over whenever it changes; nothing is rebuilt while playing:
+#
+#     var music: BusEffects = {}
+#     music.reverbOn = true
+#     music.reverbWet = 0.4
+#     audio.applyBusEffects(bus: AudioBusKind.music, effects: music)
+#
+# Turning an effect on or off crossfades its stage over 5 ms (no click). The EQ's settings move
+# over 5 ms too; a compressor's threshold and ratio and a reverb's room size and damping are set
+# at once (the compressor's gain reduction follows its attack and release, the reverb's tail
+# changes, not a sample). Off, a stage gives its input unchanged, to the bit.
+open audio/Audio
+open audio/AudioMixer
+open audio/BusEffectGraph
+open audio/GraphEffects
+
+type BusEffects {
+  # one peaking band: its center, its gain and its Q
+  eqOn: Bool = false
+  eqFrequency: Float = 1000.0
+  eqGainDecibels: Float = 6.0
+  eqQuality: Float = 1.0
+  # above the threshold the level grows 1 / ratio as fast
+  compressorOn: Bool = false
+  thresholdDecibels: Float = -24.0
+  ratio: Float = 4.0
+  # Freeverb: room size and damping 0..1, and how much of it is added (0..1, beside the dry)
+  reverbOn: Bool = false
+  roomSize: Float = 0.6
+  damping: Float = 0.4
+  reverbWet: Float = 0.3
+}
+
+func sendBusNode(
+  this: view AudioEngine
+  kind: view AudioCommandKind
+  key: view Int
+  parameter: view Int
+  value: view Float
+) {
+  var command: AudioCommand = emptyCommand(kind: kind)
+  command.voiceId = key
+  command.startFrame = parameter
+  command.value = value
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# A stage's dry and wet levels
+func sendStageMix(
+  this: view AudioEngine
+  bus: view Int
+  stage: view BusEffectStage
+  dry: view Float
+  wet: view Float
+) {
+  this.sendBusNode(
+    kind: AudioCommandKind.setBusNodeGain
+    key: busEffectKey(bus: bus, stage: stage, role: busEffectDryRole)
+    parameter: 0
+    value: dry
+  )
+  this.sendBusNode(
+    kind: AudioCommandKind.setBusNodeGain
+    key: busEffectKey(bus: bus, stage: stage, role: busEffectWetRole)
+    parameter: 0
+    value: wet
+  )
+}
+
+func sendStageParameter(
+  this: view AudioEngine
+  bus: view Int
+  stage: view BusEffectStage
+  parameter: view Int
+  value: view Float
+) {
+  this.sendBusNode(
+    kind: AudioCommandKind.setBusNodeParameter
+    key: busEffectKey(bus: bus, stage: stage, role: busEffectNodeRole)
+    parameter: parameter
+    value: value
+  )
+}
+
+# The bus's effects as `effects` says (only the music and effects buses have them, and only in
+# an engine started with settings.busEffects)
+func applyBusEffects(this: view AudioEngine, bus: view AudioBusKind, effects: view BusEffects) {
+  let index: Int = busIndex(bus: bus)
+  if not busHasEffects(bus: index) {
+    ret
+  }
+  var eqDry: Float = 1.0
+  var eqWet: Float = 0.0
+  if effects.eqOn {
+    eqDry = 0.0
+    eqWet = 1.0
+  }
+  this.sendStageMix(
+    bus: index
+    stage: BusEffectStage.eq
+    dry: eqDry
+    wet: eqWet
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.eq
+    parameter: parameterEqFrequency
+    value: effects.eqFrequency
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.eq
+    parameter: parameterEqGain
+    value: effects.eqGainDecibels
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.eq
+    parameter: parameterEqQuality
+    value: effects.eqQuality
+  )
+  var compressorDry: Float = 1.0
+  var compressorWet: Float = 0.0
+  if effects.compressorOn {
+    compressorDry = 0.0
+    compressorWet = 1.0
+  }
+  this.sendStageMix(
+    bus: index
+    stage: BusEffectStage.compressor
+    dry: compressorDry
+    wet: compressorWet
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.compressor
+    parameter: parameterCompressorThreshold
+    value: effects.thresholdDecibels
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.compressor
+    parameter: parameterCompressorRatio
+    value: effects.ratio
+  )
+  # a reverb is added beside the dry sound: its dry path stays
+  var reverbWet: Float = 0.0
+  if effects.reverbOn {
+    reverbWet = effects.reverbWet
+  }
+  this.sendStageMix(
+    bus: index
+    stage: BusEffectStage.reverb
+    dry: 1.0
+    wet: reverbWet
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.reverb
+    parameter: parameterReverbRoomSize
+    value: effects.roomSize
+  )
+  this.sendStageParameter(
+    bus: index
+    stage: BusEffectStage.reverb
+    parameter: parameterReverbDamping
+    value: effects.damping
+  )
+}

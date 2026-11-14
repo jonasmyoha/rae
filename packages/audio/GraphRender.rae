@@ -333,7 +333,14 @@ func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) r
   if not this.hasPlan {
     ret
   }
-  let plan: RenderPlan = this.current
+  applyPlanParameter(plan: this.current, event: event)
+}
+
+# Set the parameter of every node of `plan` with the event's entity key: a gain's level (ramped
+# over 5 ms), a pan, an EQ band's frequency, gain or Q (ramped), a compressor's threshold or
+# ratio, a reverb's room size or damping, a custom node's parameter (also the engine's own bus
+# plan uses it, audio/AudioMixer)
+func applyPlanParameter(plan: view RenderPlan, event: view GraphParameterEvent) realtime {
   loop var node: Int = 0, node < plan.nodeCount, ++node {
     if intAt(buffer: plan.entityIds, index: node) is not event.key {
       continue
@@ -356,6 +363,20 @@ func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) r
         )
       } else if kind is NodeKind.eq and isEqParameter(kind: event.kind) {
         applyEqParameter(
+          plan: plan
+          stateAt: stateAt
+          kind: event.kind
+          value: event.value
+        )
+      } else if kind is NodeKind.compressor and isCompressorParameter(kind: event.kind) {
+        applyCompressorParameter(
+          plan: plan
+          stateAt: stateAt
+          kind: event.kind
+          value: event.value
+        )
+      } else if kind is NodeKind.reverb and isReverbParameter(kind: event.kind) {
+        applyReverbParameter(
           plan: plan
           stateAt: stateAt
           kind: event.kind

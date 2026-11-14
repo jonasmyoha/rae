@@ -1021,6 +1021,39 @@ plays them (a self-made sound per ground, a stomp under the mech).
 `audio/v0.14.0`, with the placed sounds of 0.13.0 and the game sounds of 0.14.0) and Rae
 0.3.124 (`rae: { version: "0.3.124" }`, for `app3d/StepEvents`).
 
+### 10.7 Effects on the engine's buses
+
+A program that starts its engine with `settings.busEffects = true` gets three stages on the
+music and effects buses, between the bus's voices and its fader (`audio/BusEffectGraph`): one
+peaking EQ band, a compressor and a Freeverb reverb (the nodes of §5.3). Each stage is the
+effect beside a dry path, both through gain nodes and summed:
+
+    in -> dry gain ----------------> sum -> next stage
+    in -> effect -> wet gain ------^
+
+The program keeps a `BusEffects` per bus (each effect on or off and its main settings: the
+band's frequency, gain and Q; the compressor's threshold and ratio; the reverb's room size,
+damping and how much of it is added) and hands it over with `applyBusEffects(bus:, effects:)`
+whenever it changes. Nothing is rebuilt while playing: on and off move the stage's gains (a 5 ms
+crossfade, so no click); the EQ's settings are its ramped parameter events; the compressor's
+threshold and ratio and the reverb's room size and damping are new parameter kinds
+(`parameterCompressorThreshold` .. `parameterReverbDamping`, audio/GraphEffects), set at once
+(the gain reduction follows its attack and release; the reverb's tail changes, not a sample).
+The mixer applies them with the ECS renderer's own `applyPlanParameter` (audio/GraphRender),
+from two commands (`setBusNodeGain`, `setBusNodeParameter`) on its ring, so they also land on
+their sample. Off, a stage's dry gain is exactly 1 and its wet gain exactly 0, so the bus sounds
+as without effects, to the bit; the stages cost their processing even when off, which is why
+they are asked for.
+
+**Landed (2026-11-14, `packages/audio` 0.16.0):** fixture 1456 plays three tones on the music
+bus beside an engine without effects: all off gives its samples bit for bit; the EQ at +12 dB,
+Q 2 lifts 1 kHz by 12.0 dB and the 200 Hz and 4 kHz tones by 0.2-0.3 dB, switching it on steps
+no further than the tones do, its gain moved to -12 dB while playing turns the tone down, and
+switched off it gives the dry samples again after its crossfade; the compressor (-30 dB, 8:1)
+turns the loop down by more than 6 dB; the reverb leaves a tail where the dry engine is silent.
+The audio playground's Effects column uses it, and measures each effect on and off on the
+stream.
+
 ---
 
 ## 11. What lands first
