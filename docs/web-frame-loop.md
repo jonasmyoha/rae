@@ -224,5 +224,15 @@ A worker thread of a threaded build (`RAE_WASM_THREADS`) blocks as natively.
 `checks/webSleep` (run by `compiler/tools/wasm_webgpu_smoke.sh` in headless
 Chrome) holds it: a WebSocket to a port nothing listens on, which only the
 page can close, is closed after a 300 ms sleep on main, and three frames that
-sleep 5 ms hold and the loop goes on. The compiler does not yet warn about a
-sleep a mainLoop body can reach; that check is queued.
+sleep 5 ms hold and the loop goes on.
+
+**The compiler warns about it (0.3.119).** In a browser build (`--target
+wasm`, or the check-only `--target-os web`), a `mainLoop` whose body can reach
+`sleep` or `Time.waitUntil` gets a warning at the `mainLoop`, naming the call
+path ("in the browser this mainLoop body can reach a sleep (pace ->
+waitALittle -> sleep) ..."). The body's calls are walked into a node of the
+may-wait graph of their own (compiler/src/may_wait_block.c); a `spawn` there
+is no edge, so a sleep in a spawned task, which suspends between frames,
+gives no warning. Cases 1443 (warned) and 1444 (a spawned sleeping task, not
+warned). A check-only browser build runs the backend's discovery for it, its
+output thrown away.

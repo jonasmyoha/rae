@@ -45,4 +45,10 @@ bool may_wait_decl_may_wait(struct WaitGraph* graph, const AstDecl* decl);
  * resumable twin (c_twin.c) */
 bool may_wait_twin_candidate(struct WaitGraph* graph, const AstDecl* decl);
 
+/* A browser build (lib/Target's os is web): warn at each mainLoop of `main`
+ * whose body can reach a sleep, naming the call path (may_wait_block.c,
+ * docs/web-frame-loop.md §7). Adds a node to `graph` for the body: call it
+ * after every other question that walks all nodes has been asked. */
+void may_wait_check_main_loop_sleeps(struct WaitGraph* graph, const AstModule* module);
+
 #endif

@@ -1,5 +1,6 @@
 /* The may-wait graph's types, shared by may_wait.c (the walk and the waits),
- * may_wait_report.c (--report-waits) and realtime_check.c (the realtime and
+ * may_wait_walk.c (the walk over bodies), may_wait_block.c (a mainLoop body's
+ * sleeps), may_wait_report.c (--report-waits) and realtime_check.c (the realtime and
  * noAlloc checks, docs/realtime-language-design.md §2-3). Internal to the
  * compiler: nothing outside these files includes it. */
 #ifndef RAE_WAIT_GRAPH_H
@@ -108,7 +109,23 @@ typedef struct WaitGraph {
 } WaitGraph;
 
 
-/* Shared helpers (may_wait.c) */
+/* The nodes (may_wait.c): `decl`'s node (a specialization's by its key),
+ * made when `create`; -1 when there is none */
+int wait_graph_node(WaitGraph* graph, const AstDecl* decl, const char* key, const AstTypeRef* concrete_args,
+                    bool create);
+void wait_graph_add_callee(WaitNode* node, int callee);
+DeclSlot* wait_graph_decl_slot(WaitGraph* graph, const AstDecl* decl, bool create);
+
+/* The walk (may_wait_walk.c): every node not walked yet; the primitive an
+ * extern is, by its C symbol */
+void wait_graph_walk_all(WaitGraph* graph);
+WaitKind wait_extern_kind(const AstFuncDecl* func);
+void wait_graph_specialization_key(const AstTypeRef* args, char* out, size_t cap);
+/* A node of its own for one block's calls (a mainLoop body), outside the
+ * decl table; its index */
+int wait_graph_walk_block(WaitGraph* graph, const AstDecl* in_func, const AstBlock* block);
+
+/* Shared helpers (may_wait.c, wait_graph_is_stdlib in may_wait_walk.c) */
 bool wait_graph_is_stdlib(const WaitGraph* graph, const AstDecl* decl);
 void wait_graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule* merged);
 void wait_graph_release(WaitGraph* graph);

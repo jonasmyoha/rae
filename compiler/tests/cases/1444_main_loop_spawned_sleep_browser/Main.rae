@@ -1,0 +1,36 @@
+# A sleep in a spawned task is fine in a mainLoop's browser build: the task
+# suspends there and the frames run it on (docs/lightweight-spawn-design.md
+# §16), so the body that only spawns it and asks whether it is done gets no
+# warning (docs/web-frame-loop.md §7)
+type Waiter {
+  sleeper: Task(Int)
+  frames: Int
+}
+
+func sleeper(rounds: copy Int) ret Int {
+  var done: Int = 0
+  loop done < rounds {
+    sleep(ms: 20)
+    done = done + 1
+  }
+  ret done
+}
+
+func step(waiter: mod Waiter) ret Bool {
+  waiter.frames = waiter.frames + 1
+  if waiter.sleeper.isDone() {
+    let rounds: Int = waiter.sleeper.get()
+    log("{rounds} rounds")
+    ret false
+  }
+  ret true
+}
+
+func main() {
+  var waiter: Waiter = { sleeper: spawn sleeper(rounds: 2), frames: 0 }
+  mainLoop waiter {
+    if not step(waiter: waiter) {
+      break
+    }
+  }
+}

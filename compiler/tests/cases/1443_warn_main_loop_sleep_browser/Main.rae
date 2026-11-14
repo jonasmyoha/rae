@@ -1,0 +1,26 @@
+# In a browser build a mainLoop body that can reach a sleep is warned about
+# at the mainLoop, with the call path (docs/web-frame-loop.md §7): a frame
+# cannot let the page run, so the runtime holds such a sleep. Here the frame
+# reaches it through two functions.
+type Pacer {
+  frames: Int
+}
+
+func waitALittle() {
+  sleep(ms: 5)
+}
+
+func pace(pacer: mod Pacer) ret Bool {
+  waitALittle()
+  pacer.frames = pacer.frames + 1
+  ret pacer.frames < 3
+}
+
+func main() {
+  var pacer: Pacer = { frames: 0 }
+  mainLoop pacer {
+    if not pace(pacer: pacer) {
+      break
+    }
+  }
+}

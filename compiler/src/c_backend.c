@@ -3991,6 +3991,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   realtime_check(ctx, module, ctx->wait_graph);
   /* ... and which may-wait functions get a resumable twin (c_twin.c) */
   c_twins_plan(ctx, module);
+  /* In a browser build, a sleep a mainLoop body can reach holds the page */
+  may_wait_check_main_loop_sleeps(ctx->wait_graph, module);
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
   // `rae_drop_struct_<T>_alias` (skip String fields) in a single
