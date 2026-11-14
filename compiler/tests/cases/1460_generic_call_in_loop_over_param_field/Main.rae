@@ -1,0 +1,53 @@
+# A collection loop over a parameter's field, whose body calls a generic function on the loop
+# variable (`loop let holder: Holder in owner.holders { holder.flag.store(...) }`). The loop's
+# binding is a `let` with a type and no value; the C backend's discovery pass did not know it
+# as a local, so the generic call was found only while the body was emitted, and its
+# specialization was defined after its first use with no prototype ahead of it (the C did not
+# compile). Over a `view` and a `mod` parameter, with two different generic calls.
+open Atomic
+
+type Holder {
+  flag: Atomic(Bool)
+  count: Atomic(Int)
+}
+
+type Owner {
+  holders: List(Holder)
+}
+
+func setAll(owner: view Owner) {
+  loop let holder: Holder in owner.holders {
+    holder.flag.store(value: true)
+  }
+}
+
+func countAll(owner: mod Owner) ret Int {
+  var total: Int = 0
+  loop let holder: Holder in owner.holders {
+    let before: Int = holder.count.fetchAddRelaxed(amount: 2)
+    total = total + holder.count.loadRelaxed()
+  }
+  ret total
+}
+
+func main() {
+  var owner: Owner = { holders: {} }
+  owner.holders.add(
+    value: Holder { flag: createAtomic(Bool, value: false), count: createAtomic(Int, value: 1) }
+  )
+  owner.holders.add(
+    value: Holder { flag: createAtomic(Bool, value: false), count: createAtomic(Int, value: 10) }
+  )
+  setAll(owner: owner)
+  let total: Int = countAll(owner: owner)
+  var flags: Int = 0
+  loop var i: Int = 0, i < owner.holders.length, ++i {
+    let holder: Holder = owner.holders.copyAtDefault(index: i)
+    if holder.flag.load() {
+      flags = flags + 1
+    }
+    freeAtomic(this: holder.flag)
+    freeAtomic(this: holder.count)
+  }
+  log("flags set {flags} of 2, counts summed {total}")
+}

@@ -132,11 +132,10 @@ func createPerfHub(settings: view PerfSettings) ret PerfHub {
 }
 
 func freePerfHub(hub: view PerfHub) {
-  loop var i: Int = 0, i < hub.rings.length(), ++i {
-    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
-    freeSpscRing(this: ring.events)
-    freeAtomic(this: ring.on)
-    freeAtomic(this: ring.dropped)
+  loop let ring: PerfRing in hub.rings {
+    ring.events.freeSpscRing()
+    ring.on.freeAtomic()
+    ring.dropped.freeAtomic()
   }
 }
 
@@ -172,9 +171,7 @@ func perfThreadRing(hub: mod PerfHub, name: view String) ret PerfRing {
 # Recording on or off for every ring (a write while off is one load and a return)
 func perfSetRecording(hub: mod PerfHub, on: view Bool) {
   hub.recording = on
-  # an index loop: a generic call on a `loop let` variable is not instantiated (queued bug)
-  loop var i: Int = 0, i < hub.rings.length(), ++i {
-    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
+  loop let ring: PerfRing in hub.rings {
     ring.on.store(value: on)
   }
 }
@@ -314,8 +311,7 @@ func perfFrameRecord(hub: view PerfHub, frame: view Int) ret opt PerfFrameRecord
 # Every ring's dropped events so far
 func perfDropped(hub: view PerfHub) ret Int {
   var total: Int = 0
-  loop var i: Int = 0, i < hub.rings.length(), ++i {
-    let ring: PerfRing = hub.rings.copyAtDefault(index: i)
+  loop let ring: PerfRing in hub.rings {
     total = total + ring.dropped.load()
   }
   ret total

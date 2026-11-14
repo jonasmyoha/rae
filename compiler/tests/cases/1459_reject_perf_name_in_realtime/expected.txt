@@ -1,12 +1,12 @@
 ../lib/core/Core.rae:149:1: `render` is realtime, but this allocates, locks and waits: it calls `rae_ext_rae_buf_alloc`, C not marked realtime.
-    render (Main.rae:6) -> perfName (lib/perf/Perf.rae:144) -> add (lib/core/List.rae:43) -> grow (lib/core/List.rae:22) -> rae_ext_rae_buf_alloc (lib/core/Core.rae:149)
+    render (Main.rae:6) -> perfName (lib/perf/Perf.rae:143) -> add (lib/core/List.rae:43) -> grow (lib/core/List.rae:22) -> rae_ext_rae_buf_alloc (lib/core/Core.rae:149)
   Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
   Real-time code may not lock: use a SpscRing or an Atomic instead of a Channel or a mutex.
   Real-time code may not wait: post a Signal instead of waiting, and never join a task here.
    149 | func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) unsafe extern ret Buffer(Any)
        | ^~~~
 ../lib/core/List.rae:149:6: `render` is realtime, but this frees: a local that owns heap, freed at the end of its scope.
-    render (Main.rae:6) -> perfName (lib/perf/Perf.rae:144) -> copyAtDefault (lib/core/List.rae:148)
+    render (Main.rae:6) -> perfName (lib/perf/Perf.rae:143) -> copyAtDefault (lib/core/List.rae:148)
   Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
    149 |   if let value: T = copyAt(this, index: index) {
        |      ^~~~

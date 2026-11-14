@@ -36,6 +36,19 @@ static void register_owned_argument_drop(CFuncContext* ctx, const AstExpr* value
     if (drop_fd) register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
 }
 
+// Whether a type names `any` anywhere (a field-reflection loop's binding,
+// `loop let table: view ComponentTable(any) in fields(world)`): such a loop is
+// expanded per concrete type later (reflect_instantiate_body), so its binding
+// is not a local of a real type here.
+static bool type_mentions_any(const AstTypeRef* type) {
+    for (const AstTypeRef* t = type; t; t = t->next) {
+        for (const AstIdentifierPart* part = t->parts; part; part = part->next)
+            if (str_eq_cstr(part->text, "any")) return true;
+        if (type_mentions_any(t->generic_args)) return true;
+    }
+    return false;
+}
+
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return;
     // Normalize the new generic-call syntax so the spec-registration
@@ -590,6 +603,23 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
     for (const AstStmt* s = stmt; s; s = s->next) {
         switch (s->kind) {
             case AST_STMT_LET:
+                /* A collection loop's binding (`loop let x: T in list`) is a
+                 * `let` with its type and no value (the list is the loop's
+                 * condition). Its name still has to be known as a local of
+                 * type T, or a generic called on it in the body (`x.flag.store`)
+                 * is not discovered here: the call then registers the
+                 * specialization while the body is emitted, which defines it
+                 * after its first use with no prototype ahead of it. */
+                if (!s->as.let_stmt.value && s->as.let_stmt.type && ctx->local_count < 256 &&
+                    !type_mentions_any(s->as.let_stmt.type)) {
+                    const AstTypeRef* type = s->as.let_stmt.type;
+                    if (type->generic_args && ctx->generic_params && ctx->generic_args)
+                        register_generic_type(ctx->compiler_ctx,
+                            substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
+                    ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
+                    const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+                    ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
+                }
                 if (s->as.let_stmt.value) {
                     const AstTypeRef* type = s->as.let_stmt.type ? s->as.let_stmt.type : infer_expr_type_ref(ctx, s->as.let_stmt.value);
                     if (type) { ctx->expected_type = *type; ctx->has_expected_type = true; }
