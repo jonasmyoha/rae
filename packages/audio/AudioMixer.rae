@@ -537,7 +537,15 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
             voice.stopping = true
             rampTo(ramp: voice.gain, target: 0.0, frames: fadeFrames)
           } else if command.kind is AudioCommandKind.setVoiceGain {
-            rampTo(ramp: voice.gain, target: command.value, frames: changeFrames)
+            # `frameCount` as for a bus: more than 0 a straight ramp over that many frames, less
+            # than 0 at once, 0 the spread `other` asks (at least the 5 ms smoothing)
+            var gainFrames: Int = changeFrames
+            if command.frameCount > 0 {
+              gainFrames = command.frameCount
+            } else if command.frameCount < 0 {
+              gainFrames = 0
+            }
+            rampTo(ramp: voice.gain, target: command.value, frames: gainFrames)
           } else if command.kind is AudioCommandKind.setVoicePan {
             rampTo(ramp: voice.pan, target: command.value, frames: changeFrames)
           } else if command.kind is AudioCommandKind.setVoiceRate {

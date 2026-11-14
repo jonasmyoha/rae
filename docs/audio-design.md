@@ -495,6 +495,15 @@ thread; nodes are prepared before they process.
   plus one block, so it is never late.
 - The **block-size test** (§12) holds this: the same events rendered with block
   sizes 1, 17, 64, 512 and a varying size give the same samples.
+- **A voice's gain ramp of a chosen length** (2026-11-14, `packages/audio` 0.17.0, asked for
+  a timeline clip's fades): `rampVoiceGainAt(voiceId:, gainDecibels:, frames:, atSample:)` and
+  `rampVoiceLinearGainAt` move a voice's linear gain in a straight line over `frames` frames from
+  `atSample`, as `rampBusGainAt` does for a bus (`frames` 0 the 5 ms smoothing, less than 0 at
+  once). Frame k of a ramp is `start + (target - start) * k / frames` exactly: every ramp of the
+  mixer (gain, pan, rate) is worked out from its frame count, not summed step by step. A fade-in
+  plays the voice at `silenceDecibels` (exactly 0) from `atSample` and ramps it from the same
+  sample. Fixture 1457: a fade-in's first, middle and last frames and a fade-out's, exact, the
+  same in blocks of 1, 17, 512 and 256, with `RAE_REALTIME_CHECK=1`.
 
 ### 6.3 Musical time
 

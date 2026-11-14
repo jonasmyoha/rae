@@ -9,15 +9,27 @@ const audioMaxVoices: Int = 64
 
 # A value that moves linearly to its target over a number of frames, so a
 # change never clicks.
+# A value that moves in a straight line from `start` to `target` over `length` frames: frame k
+# of the move has start + (target - start) * k / length exactly (worked out from k, not summed
+# step by step, so a long fade lands on each frame's value to the bit)
 type AudioRamp {
   current: Float
   target: Float
   step: Float
   framesLeft: Int
+  start: Float = 0.0
+  length: Int = 0
 }
 
 func steadyRamp(value: view Float) ret AudioRamp {
-  ret AudioRamp { current: value, target: value, step: 0.0, framesLeft: 0 }
+  ret AudioRamp {
+    current: value
+    target: value
+    step: 0.0
+    framesLeft: 0
+    start: value
+    length: 0
+  }
 }
 
 func rampTo(ramp: mod AudioRamp, target: view Float, frames: view Int) {
@@ -29,6 +41,8 @@ func rampTo(ramp: mod AudioRamp, target: view Float, frames: view Int) {
   }
   ramp.step = (target - ramp.current) / (frames as Float)
   ramp.framesLeft = frames
+  ramp.start = ramp.current
+  ramp.length = frames
 }
 
 func rampAdvance(ramp: mod AudioRamp) {
@@ -37,7 +51,8 @@ func rampAdvance(ramp: mod AudioRamp) {
     if ramp.framesLeft is 0 {
       ramp.current = ramp.target
     } else {
-      ramp.current = ramp.current + ramp.step
+      let done: Int = ramp.length - ramp.framesLeft
+      ramp.current = ramp.start + (ramp.target - ramp.start) * (done as Float) / (ramp.length as Float)
     }
   }
 }
