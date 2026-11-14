@@ -3,6 +3,7 @@
 # scratch buffers (two channels of maxFrames samples per buffer) and its state
 # in its kind's table, and is `realtime`.
 import Math
+open perf/Perf
 open audio/AudioGraph
 open audio/GraphEffects
 
@@ -389,8 +390,72 @@ func processOutput(
   }
 }
 
-# `sourceOffset`: where in the sources pool this piece of the block starts
+# `sourceOffset`: where in the sources pool this piece of the block starts. While the event
+# recorder's table that named the plan's nodes is installed (audio/AudioCapture), the node is a
+# zone named after it on this thread's lane (the audio thread's, or a render helper's)
 func processNode(
+  plan: view RenderPlan
+  node: view Int
+  sources: view GraphSources
+  sourceOffset: view Int
+  frames: view Int
+) realtime {
+  let nameId: Int = planPerfName(plan: plan, node: node)
+  if nameId >= 0 {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.zoneBegin
+      nameId: nameId
+      value: frames
+      extra: node
+    )
+  }
+  processNodeWork(
+    plan: plan
+    node: node
+    sources: sources
+    sourceOffset: sourceOffset
+    frames: frames
+  )
+  if nameId >= 0 {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.zoneEnd
+      nameId: nameId
+      value: 0
+      extra: node
+    )
+  }
+}
+
+# The recorder's name of node `node` (the render thread, from a setPerfNodeName command): its id
+# and the table's generation it belongs to
+func setPlanPerfName(
+  plan: view RenderPlan
+  node: view Int
+  nameId: view Int
+  generation: view Int
+) realtime {
+  if node < 0 or node >= plan.nodeCount {
+    ret
+  }
+  unsafe {
+    var ids: Buffer(Int) = plan.perfIds
+    rae_ext_rae_buf_set(buf: ids, index: node, value: nameId)
+    rae_ext_rae_buf_set(buf: ids, index: plan.nodeCount, value: generation)
+  }
+}
+
+# Node `node`'s name id in the installed recorder, or -1 (no names, or names of another table)
+func planPerfName(plan: view RenderPlan, node: view Int) realtime ret Int {
+  unsafe {
+    let generation: Int = rae_ext_rae_buf_get(buf: plan.perfIds, index: plan.nodeCount)
+    if generation is 0 or generation is not perfRuntimeGeneration() {
+      ret -1
+    }
+    ret rae_ext_rae_buf_get(buf: plan.perfIds, index: node)
+  }
+}
+
+func processNodeWork(
   plan: view RenderPlan
   node: view Int
   sources: view GraphSources

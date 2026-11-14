@@ -61,6 +61,9 @@ enum AudioCommandKind {
   # (ramped over 5 ms), or parameter `startFrame` set to `value` (audio/GraphRender)
   setBusNodeGain
   setBusNodeParameter
+  # the event recorder's name of the bus plan's node `voiceId`: `startFrame` the name id,
+  # `frameCount` the recorder table's generation it belongs to (audio/AudioCapture)
+  setPerfNodeName
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -458,6 +461,15 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
         value: command.value
         sampleTime: 0
       }
+    )
+    ret
+  }
+  if command.kind is AudioCommandKind.setPerfNodeName {
+    setPlanPerfName(
+      plan: mixer.busPlan
+      node: command.voiceId
+      nameId: command.startFrame
+      generation: command.frameCount
     )
     ret
   }

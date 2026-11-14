@@ -188,6 +188,10 @@ type RenderPlan {
   inputs: Buffer(Int)
   # each node's index in the graph, to find it again (setGainTarget, meters)
   graphIndex: Buffer(Int)
+  # the event recorder's name id of each node (-1: none), then the recorder table's generation
+  # they belong to (0: none); the render thread writes them (setPerfNodeName commands) and
+  # processNode reads them (lib/perf, audio/AudioCapture)
+  perfIds: Buffer(Int)
   # each node's index in the previous plan whose state it continues, or -1
   carryFrom: Buffer(Int)
   # each node's entity (-1 for none), read when the next plan is compiled
@@ -462,6 +466,7 @@ func emptyRenderPlan() ret RenderPlan {
       inputCount: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       inputs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       graphIndex: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      perfIds: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       carryFrom: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       entityIds: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
       scratch: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
@@ -529,6 +534,11 @@ func prepareRenderPlan(
   let carry: Buffer(Int) = intBuffer(count: count)
   let entityIds: Buffer(Int) = intBuffer(count: count)
   var plan: RenderPlan = emptyRenderPlan()
+  plan.perfIds = intBuffer(count: count + 1)
+  loop var node: Int = 0, node < count, ++node {
+    setIntAt(buffer: plan.perfIds, index: node, value: -1)
+  }
+  setIntAt(buffer: plan.perfIds, index: count, value: 0)
   unsafe {
     # the empty plan's zero-size buffers are null: nothing to free
     plan.kinds = rae_ext_rae_buf_alloc(size: max(a: 1, b: count), elemSize: sizeof(NodeKind))
@@ -812,6 +822,7 @@ func freeRenderPlan(plan: view RenderPlan) {
     rae_ext_rae_buf_free(buf: plan.inputCount)
     rae_ext_rae_buf_free(buf: plan.inputs)
     rae_ext_rae_buf_free(buf: plan.graphIndex)
+    rae_ext_rae_buf_free(buf: plan.perfIds)
     rae_ext_rae_buf_free(buf: plan.carryFrom)
     rae_ext_rae_buf_free(buf: plan.entityIds)
     rae_ext_rae_buf_free(buf: plan.scratch)

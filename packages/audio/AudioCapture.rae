@@ -12,13 +12,19 @@
 #     the blocks queued ahead in stage A's ring;
 #   - the input and output latency in frames;
 #   - the audio clock's drift against nowNs, in parts per million (its measured rate against the
-#     nominal one).
+#     nominal one);
+#   - each node of the buses' render plan as a zone on the thread that renders it ("duck 3",
+#     "reverb 7", ...): the first call of a capture names the nodes in it and sends the ids to
+#     the render thread as setPerfNodeName commands, and processNode writes the zones.
 # Outside a capture it only lets the stamps go.
 import Profile
 open audio/Audio
 open audio/AudioClock
 open audio/AudioMixer
 open audio/RenderTimes
+open audio/AudioGraph
+open audio/GraphCompile
+open perf/Perf
 
 const audioRenderLane: String = "audio render"
 
@@ -28,6 +34,7 @@ func recordAudioCapture(this: mod AudioEngine, profiler: mod Profiler) {
   if not Profile.capturing(profiler: profiler) {
     ret
   }
+  this.sendPerfNodeNames()
   let period: Int = max(a: 1, b: this.renderPeriodNanoseconds())
   loop let stamp: ClockStamp in stamps {
     Profile.laneSpan(
@@ -81,4 +88,89 @@ func clockDriftPpm(this: view AudioEngine) ret Int {
   }
   let nominal: Float64 = nominalNsPerFrame(sampleRate: this.sampleRate)
   ret ((this.clock.nsPerFrame / nominal - 1.0) * 1000000.0) as Int
+}
+
+# The bus plan's nodes named in the installed recorder, sent to the render thread once per table:
+# the same graph compiled here gives the nodes' order, each named by its kind and its index in
+# the graph
+func sendPerfNodeNames(this: mod AudioEngine) {
+  let generation: Int = perfRuntimeGeneration()
+  if generation is 0 or generation is this.perfNamesGeneration {
+    ret
+  }
+  this.perfNamesGeneration = generation
+  let plan: RenderPlan = compileGraph(
+    graph: busGraph(forTeam: this.renderTeam.helperCount > 0, withEffects: this.mixer.busEffects)
+    sampleRate: this.sampleRate
+    maxFrames: this.periodFrames
+  ).plan
+  loop var node: Int = 0, node < plan.nodeCount, ++node {
+    var kind: NodeKind = NodeKind.output
+    var graphIndex: Int = 0
+    unsafe {
+      kind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      graphIndex = rae_ext_rae_buf_get(buf: plan.graphIndex, index: node)
+    }
+    let nameId: Int = perfRuntimeName(name: "{nodeKindName(kind: kind)} {graphIndex}")
+    var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setPerfNodeName)
+    command.voiceId = node
+    command.startFrame = nameId
+    command.frameCount = generation
+    let unusedSent: Bool = this.sendCommand(command: command)
+  }
+  freeRenderPlan(plan: plan)
+}
+
+func nodeKindName(kind: view NodeKind) ret String {
+  match kind {
+    case NodeKind.voices {
+      ret "voices"
+    }
+    case NodeKind.stream {
+      ret "stream"
+    }
+    case NodeKind.input {
+      ret "input"
+    }
+    case NodeKind.gain {
+      ret "gain"
+    }
+    case NodeKind.pan {
+      ret "pan"
+    }
+    case NodeKind.sum {
+      ret "sum"
+    }
+    case NodeKind.send {
+      ret "send"
+    }
+    case NodeKind.delay {
+      ret "delay"
+    }
+    case NodeKind.meter {
+      ret "meter"
+    }
+    case NodeKind.limiter {
+      ret "limiter"
+    }
+    case NodeKind.output {
+      ret "output"
+    }
+    case NodeKind.duck {
+      ret "duck"
+    }
+    case NodeKind.eq {
+      ret "eq"
+    }
+    case NodeKind.compressor {
+      ret "compressor"
+    }
+    case NodeKind.reverb {
+      ret "reverb"
+    }
+    case NodeKind.custom {
+      ret "custom"
+    }
+  }
+  ret "node"
 }
