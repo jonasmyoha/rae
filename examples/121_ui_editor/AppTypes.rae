@@ -8,6 +8,7 @@ open Gpu2dCanvas
 open ui/DebugOverlay
 open ui/WindowGeometry
 open ui/UiSystems
+import Profile
 
 # Which font files are loaded into gpuUi right now ("" = the fallback atlas),
 # so a reload only spends an atlas slot when the document's fonts change.
@@ -95,4 +96,7 @@ type App {
   builtinScenes: List(BuiltinScene)
   motionTokens: MotionTokenSystem
   headless: Bool
+  # The frame profiler (lib/Profile): a RAE_PROFILE capture of the frame's update, render and
+  # wait, and the 2D canvas's GPU time (docs/profiling.md)
+  profiler: Profiler
 }

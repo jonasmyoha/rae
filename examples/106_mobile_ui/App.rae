@@ -40,6 +40,8 @@ open ui/Theme
 open ui/Transform
 open ui/animationSystem/AnimationSystem
 open Gpu2dCanvas
+open Gpu2dCanvasTiming
+import Profile
 
 # The interactive lifecycle, as one `mainLoop` (Main.rae): `AppRun` is its
 # state and `runAppFrame` one frame. `app` (AppTypes.rae) carries the setup
@@ -111,7 +113,13 @@ func runAppFrame(run: mod AppRun) ret Bool {
     run.world = startWorld(app: run.app, session: run.session)
     run.frame = createWorldFrame(world: run.world, uiSystems: run.app.uiSystems)
   }
+  let unusedWritten: Bool = Profile.tick(profiler: run.app.profiler)
+  publishCanvas2dTimingCounters(
+    timing: run.app.textureRegistry.canvas.gpuTiming
+    profiler: run.app.profiler
+  )
   var tick: FrameTick = createFrameTick(session: run.session)
+  Profile.zoneBegin(profiler: run.app.profiler, name: "wait")
   frameWaitSystem(
     app: run.app
     session: run.session
@@ -120,7 +128,9 @@ func runAppFrame(run: mod AppRun) ret Bool {
     frame: run.frame
     tick: tick
   )
+  Profile.zoneEnd(profiler: run.app.profiler, name: "wait")
   if run.session.running {
+    Profile.zoneBegin(profiler: run.app.profiler, name: "input")
     frameInputSystem(
       app: run.app
       session: run.session
@@ -128,6 +138,8 @@ func runAppFrame(run: mod AppRun) ret Bool {
       frame: run.frame
       tick: tick
     )
+    Profile.zoneEnd(profiler: run.app.profiler, name: "input")
+    Profile.zoneBegin(profiler: run.app.profiler, name: "update")
     frameUpdateSystem(
       app: run.app
       session: run.session
@@ -136,6 +148,8 @@ func runAppFrame(run: mod AppRun) ret Bool {
       frame: run.frame
       tick: tick
     )
+    Profile.zoneEnd(profiler: run.app.profiler, name: "update")
+    Profile.zoneBegin(profiler: run.app.profiler, name: "render")
     frameRenderSystem(
       app: run.app
       session: run.session
@@ -143,6 +157,7 @@ func runAppFrame(run: mod AppRun) ret Bool {
       frame: run.frame
       tick: tick
     )
+    Profile.zoneEnd(profiler: run.app.profiler, name: "render")
     # Frame end (MusicSystems.rae): the components this app's systems own
     # reach their tables, the rest is reported, and the entities a screen
     # switch unmounted are cleared and recycled.
@@ -153,6 +168,7 @@ func runAppFrame(run: mod AppRun) ret Bool {
     )
     ret true
   }
+  let unusedStopped: Bool = Profile.profileStop(profiler: run.app.profiler)
   finishApp(app: run.app)
   ret false
 }

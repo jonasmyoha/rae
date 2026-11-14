@@ -1,6 +1,7 @@
 # createApp — the setup half: window, fonts, the document's theme, ONE UiWorld
 # under the #996 `report` policy with two layers (document / chrome), the
 # document mounted, the chrome mounted, textures resolved.
+import Profile
 import Gpu2d
 import SdfText
 import String
@@ -413,6 +414,8 @@ func createApp() ret App {
   watchRememberMtimes(watch: watch, paths: document.watchedPaths)
 
   var schedule: Schedule = createUiPipeline(world: world)
+  var profiler: Profiler = Profile.createProfiler()
+  Profile.maybeAutoStart(profiler: profiler)
   unsafe {
     ret App {
       gpuUi: own gpuUi
@@ -442,6 +445,7 @@ func createApp() ret App {
       builtinScenes: own builtinScenes
       motionTokens: createMotionTokenSystem()
       headless: headless
+      profiler: own profiler
       windowGeometry: own windowGeometry
       debugOverlay: createDebugOverlay(
         button: not headless

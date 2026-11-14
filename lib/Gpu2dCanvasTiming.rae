@@ -14,8 +14,13 @@
 #
 # It answers what the CPU's frame time cannot: whether a slow frame is the GPU drawing, or the
 # frame waiting for a drawable (docs/ui-animation-design.md section 10).
+#
+# Under a profiler capture (RAE_PROFILE, lib/Profile) the timing runs too, without the log lines,
+# and publishCanvas2dTimingCounters puts each new sample into the capture's GPU lane: gpu.2d frame
+# (us) and, on Apple, gpu.2d longest command buffer (us, the longest of each second).
 import Math
 import Sys
+import Profile
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/GpuResources
@@ -32,6 +37,8 @@ func nativeMetalTimingTaken(index: copy Int) unsafe extern("rae_gpu_metal_timing
 
 type Canvas2dTiming {
   enabled: Bool = false
+  # The "[gpu2d]" lines are written (RAE_GPU2D_TIMING; a profile capture alone writes none)
+  logLines: Bool = false
   # Time the pass by marks around it (RAE_GPU2D_TIMING=marks) instead of its own timestamps
   byMarks: Bool = false
   made: Bool = false
@@ -50,19 +57,27 @@ type Canvas2dTiming {
   lastUs: Int = -1
   # The command buffers' GPU time is counted (Apple)
   commandBuffers: Bool = false
+  # The longest command buffer of the last second (us, Apple), and how many seconds were taken
+  longestCommandBufferUs: Int = -1
+  commandBufferSeconds: Int = 0
+  # The samples and seconds already put into a profiler capture
+  publishedSamples: Int = 0
+  publishedSeconds: Int = 0
 }
 
 func createCanvas2dTiming() ret Canvas2dTiming {
   unsafe {
     ret Canvas2dTiming {
-      enabled: Sys.getEnv(name: "RAE_GPU2D_TIMING").length() > 0
+      enabled: Sys.getEnv(name: "RAE_GPU2D_TIMING").length() > 0 or Sys.getEnv(name: "RAE_PROFILE").length() > 0
+      logLines: Sys.getEnv(name: "RAE_GPU2D_TIMING").length() > 0
       byMarks: Sys.getEnv(name: "RAE_GPU2D_TIMING") is "marks"
     }
   }
 }
 
 func canvas2dTimingSummary(timing: mod Canvas2dTiming) {
-  if timing.recent.length is 0 {
+  if timing.recent.length is 0 or not timing.logLines {
+    timing.recent.clear()
     ret
   }
   var sorted: List(Int) = List.create(Int, cap: timing.recent.length)
@@ -86,7 +101,7 @@ func canvas2dTimingSummary(timing: mod Canvas2dTiming) {
 
 # Apple: the GPU's own time for every Metal command buffer of the last second, which on an iPhone is
 # the reliable number (a pass's timestamps read 0 there, and a mark does not wait for tile work)
-func canvas2dCommandBufferSummary(timing: view Canvas2dTiming) {
+func canvas2dCommandBufferSummary(timing: mod Canvas2dTiming) {
   if timing.commandBuffers is false {
     ret
   }
@@ -94,6 +109,10 @@ func canvas2dCommandBufferSummary(timing: view Canvas2dTiming) {
     nativeMetalTimingTake()
     let buffers: Int = nativeMetalTimingTaken(index: 0)
     if buffers > 0 {
+      timing.longestCommandBufferUs = nativeMetalTimingTaken(index: 2) / 1000
+      timing.commandBufferSeconds = timing.commandBufferSeconds + 1
+    }
+    if buffers > 0 and timing.logLines {
       log(
         "[gpu2d] last second: {buffers} Metal command buffers, GPU us total {nativeMetalTimingTaken(
           index: 1
@@ -159,7 +178,9 @@ func canvas2dTimingFrameBegin(
         timing.lastUs = us
         timing.samples = timing.samples + 1
         timing.recent.add(value: us)
-        log("[gpu2d] frame {us} us")
+        if timing.logLines {
+          log("[gpu2d] frame {us} us")
+        }
       }
     }
     if nowNs() >= timing.reportAtNs {
@@ -260,4 +281,25 @@ func canvas2dTimingShutdown(timing: mod Canvas2dTiming, resources: mod GpuResour
     retirePipeline(resources: resources, id: pipeline)
   }
   timing.markPipeline = none
+}
+
+# The samples that landed since the last call into a profiler capture's GPU lane: gpu.2d frame
+# (us) and, on Apple, gpu.2d longest command buffer (us). Call once a frame; nothing while the
+# profiler is not capturing.
+func publishCanvas2dTimingCounters(timing: mod Canvas2dTiming, profiler: mod Profiler) {
+  if not Profile.capturing(profiler: profiler) {
+    ret
+  }
+  if timing.samples is not timing.publishedSamples and timing.lastUs >= 0 {
+    Profile.counter(profiler: profiler, name: "gpu.2d frame", value: timing.lastUs)
+  }
+  timing.publishedSamples = timing.samples
+  if timing.commandBufferSeconds is not timing.publishedSeconds {
+    Profile.counter(
+      profiler: profiler
+      name: "gpu.2d longest command buffer"
+      value: timing.longestCommandBufferUs
+    )
+  }
+  timing.publishedSeconds = timing.commandBufferSeconds
 }

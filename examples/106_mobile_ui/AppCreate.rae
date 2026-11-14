@@ -189,6 +189,8 @@ func createApp() ret App {
   let loopDebugEnabled: Bool = loopDebugIsEnabled()
   var loopDebugFrame: Int = 0
 
+  var profiler: Profiler = Profile.createProfiler()
+  Profile.maybeAutoStart(profiler: profiler)
   # The App carries a TextureRegistry whose canvas holds a raw Ptr (the gpu2d
   # recording encoder, GpuLifetime), so constructing it is an unsafe operation.
   unsafe {
@@ -211,6 +213,7 @@ func createApp() ret App {
       loopDebugFrame: loopDebugFrame
       actionTable: createActionTable()
       commands: createEventQueue(AppCommand)
+      profiler: own profiler
     }
   }
 }

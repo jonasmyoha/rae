@@ -23,6 +23,7 @@ open ui/LogOverlay
 #   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import FileWatch
+import Profile
 import SdfText
 import sys/Spotify
 import ui/renderSystem/RenderSystem
@@ -71,4 +72,7 @@ type App {
   # command systems drain (actionSystem/ActionSystems).
   actionTable: ActionTable
   commands: EventQueue(AppCommand)
+  # The frame profiler (lib/Profile): a RAE_PROFILE capture of the frame's phases and the
+  # 2D canvas's GPU time (docs/profiling.md)
+  profiler: Profiler
 }

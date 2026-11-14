@@ -40,8 +40,14 @@ frames it measures.
   `tools/profile-desktop.sh`, `tools/ios/profile-ios.sh` and `tools/profile-summary.py`
   read the same thing (143's summary measured before and after: the same median frame,
   the CPU time within noise).
-- Not yet on the hub: the 2D canvas's timing (`lib/Gpu2dCanvasTiming`), whose apps own no
-  profiler.
+- The 2D canvas's GPU time (`lib/Gpu2dCanvasTiming`, Rae 0.3.130): under `RAE_PROFILE` the
+  canvas times its frame pass without the `[gpu2d]` log lines (those stay
+  `RAE_GPU2D_TIMING`'s), and `publishCanvas2dTimingCounters` puts each new sample into the
+  GPU process as `gpu.2d frame` (us) and, on Apple, `gpu.2d longest command buffer` (us, the
+  longest of each second). 106 and 121 now own a `Profiler` on their App
+  (`Profile.maybeAutoStart` at creation), with zones `wait`, `input`, `update`, `render`
+  (106) and `update`, `render`, `wait` (121); a capture still running when the window
+  closes is written then.
 
 ## Capturing on desktop
 

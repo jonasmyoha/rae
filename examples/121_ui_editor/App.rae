@@ -34,6 +34,8 @@ open ui/DebugOverlay
 open ui/WindowGeometry
 open ecs/Event
 open ui/UiSystems
+open Gpu2dCanvasTiming
+import Profile
 open ui/animationSystem/AnimationTracks
 
 func toggleChrome(chromeSystem: view ChromeSystem, world: mod UiWorld) {
@@ -436,6 +438,9 @@ func runApp(app: mod App) ret Int {
   var effectTime: Float = 0.0
 
   loop not Gpu2d.pollClose() {
+    let unusedWritten: Bool = Profile.tick(profiler: app.profiler)
+    publishCanvas2dTimingCounters(timing: app.canvas.gpuTiming, profiler: app.profiler)
+    Profile.zoneBegin(profiler: app.profiler, name: "update")
     let resized: Bool = Gpu2d.windowResized()
     var refit: Bool = viewportUpdate(
       viewportSystem: app.viewportSystem
@@ -699,7 +704,9 @@ func runApp(app: mod App) ret Int {
     # tables, then released.
     sweepEditorEntitiesOf(app: app)
     let needsRender: Bool = hadEvents or changed or inputChanged or renderedOnce is false
+    Profile.zoneEnd(profiler: app.profiler, name: "update")
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
+      Profile.zoneBegin(profiler: app.profiler, name: "render")
       Gpu2d.beginFrame(
         canvas: app.canvas
         r: 0.04
@@ -720,6 +727,7 @@ func runApp(app: mod App) ret Int {
         didRealWork: true
       )
       Gpu2d.endFrame(canvas: app.canvas)
+      Profile.zoneEnd(profiler: app.profiler, name: "render")
       # The first frame counts only once it reached the screen: right after
       # the window opens the surface can still report Occluded for a frame or
       # two (a benign startup transient), and a frame that was rendered but
@@ -734,6 +742,7 @@ func runApp(app: mod App) ret Int {
       # whatever animates; a visible idle one blocks until an event — a file
       # change is one (watchSystem) — or until a settling window move is due
       # to be written.
+      Profile.zoneBegin(profiler: app.profiler, name: "wait")
       Gpu2d.waitEvents(timeoutSeconds: nextWaitTimeoutSeconds(
         visible: Gpu2d.renderableNow()
         animating: animating
@@ -745,8 +754,10 @@ func runApp(app: mod App) ret Int {
           now: now
         )
       ))
+      Profile.zoneEnd(profiler: app.profiler, name: "wait")
     }
   }
+  let unusedStopped: Bool = Profile.profileStop(profiler: app.profiler)
   if Gpu2d.headlessRequested() is false {
     flushWindowGeometry(windowGeometry: app.windowGeometry)
   }
