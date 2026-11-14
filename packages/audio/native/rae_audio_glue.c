@@ -54,6 +54,39 @@ __attribute__((weak)) void rae_audio_render(void* state, float* output, int64_t 
   (void)state; (void)output; (void)frames; (void)channels;
 }
 
+/* A program's own node kinds (audio/CustomNodes, docs/audio-design.md §13
+ * D5): the program defines these five in Rae with `cExport`; a program that
+ * adds no node kind gets these weak, empty ones (no state, no latency, and a
+ * custom node of it is silent). */
+__attribute__((weak)) int64_t rae_audio_node_state_size(int64_t kind, float* settings, int64_t setting_count,
+                                                         int64_t sample_rate) {
+  (void)kind; (void)settings; (void)setting_count; (void)sample_rate;
+  return 0;
+}
+
+__attribute__((weak)) void rae_audio_node_prepare(int64_t kind, float* state, int64_t state_size, float* settings,
+                                                  int64_t setting_count, int64_t sample_rate) {
+  (void)kind; (void)state; (void)state_size; (void)settings; (void)setting_count; (void)sample_rate;
+}
+
+__attribute__((weak)) void rae_audio_node_process(int64_t kind, float* state, int64_t state_size, float* scratch,
+                                                  int64_t input_base, int64_t output_base, int64_t channel_stride,
+                                                  int64_t frames, float* events, int64_t event_count) {
+  (void)kind; (void)state; (void)state_size; (void)input_base; (void)events; (void)event_count;
+  memset(scratch + output_base, 0, (size_t)frames * sizeof(float));
+  memset(scratch + output_base + channel_stride, 0, (size_t)frames * sizeof(float));
+}
+
+__attribute__((weak)) void rae_audio_node_reset(int64_t kind, float* state, int64_t state_size) {
+  (void)kind; (void)state; (void)state_size;
+}
+
+__attribute__((weak)) int64_t rae_audio_node_latency(int64_t kind, float* settings, int64_t setting_count,
+                                                      int64_t sample_rate) {
+  (void)kind; (void)settings; (void)setting_count; (void)sample_rate;
+  return 0;
+}
+
 /* audio/AudioDevice's `realtime cExport("rae_audio_capture")`: a duplex
  * device's input of this period, before it renders (weak, as above) */
 __attribute__((weak)) void rae_audio_capture(void* state, float* input, int64_t frames, int64_t channels) {

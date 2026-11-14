@@ -230,4 +230,16 @@ int64_t rae_audio_aac_decode(int64_t converter, uint8_t* packet, int64_t size, f
 void rae_audio_aac_reset(int64_t converter);
 void rae_audio_aac_close(int64_t converter);
 
+/* A program's own node kinds (audio/CustomNodes, docs/audio-design.md §13 D5):
+ * a program that adds node kinds defines these in Rae with `cExport`; the glue
+ * has weak, empty defaults */
+int64_t rae_audio_node_state_size(int64_t kind, float* settings, int64_t setting_count, int64_t sample_rate);
+void rae_audio_node_prepare(int64_t kind, float* state, int64_t state_size, float* settings, int64_t setting_count,
+                            int64_t sample_rate);
+void rae_audio_node_process(int64_t kind, float* state, int64_t state_size, float* scratch, int64_t input_base,
+                            int64_t output_base, int64_t channel_stride, int64_t frames, float* events,
+                            int64_t event_count);
+void rae_audio_node_reset(int64_t kind, float* state, int64_t state_size);
+int64_t rae_audio_node_latency(int64_t kind, float* settings, int64_t setting_count, int64_t sample_rate);
+
 #endif

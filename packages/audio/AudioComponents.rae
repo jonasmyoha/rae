@@ -73,6 +73,9 @@ type AudioInsert {
   reportsLatency: Bool
   # an EQ band's, a compressor's or a reverb's settings (audio/EffectStates)
   effect: EffectSettings
+  # a program's own kind (audio/CustomNodes): its number and settings
+  customKind: Int
+  customSettings: List(Float)
 }
 
 type AudioInserts {
@@ -118,6 +121,8 @@ func gainInsert(decibels: view Float) ret AudioInsert {
     ceilingDecibels: 0.0
     reportsLatency: false
     effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
   }
 }
 
@@ -129,6 +134,8 @@ func delayInsert(frames: view Int, reportsLatency: view Bool) ret AudioInsert {
     ceilingDecibels: 0.0
     reportsLatency: reportsLatency
     effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
   }
 }
 
@@ -140,6 +147,8 @@ func limiterInsert(ceilingDecibels: view Float) ret AudioInsert {
     ceilingDecibels: ceilingDecibels
     reportsLatency: false
     effect: defaultEffectSettings()
+    customKind: 0
+    customSettings: {}
   }
 }
 
@@ -171,6 +180,15 @@ func reverbInsert(settings: view EffectSettings) ret AudioInsert {
   var insert: AudioInsert = gainInsert(decibels: 0.0)
   insert.kind = NodeKind.reverb
   insert.effect = settings
+  ret insert
+}
+
+# A node of the program's own kind `kind` (audio/CustomNodes)
+func customInsert(kind: view Int, settings: view List(Float)) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: 0.0)
+  insert.kind = NodeKind.custom
+  insert.customKind = kind
+  insert.customSettings = settings
   ret insert
 }
 

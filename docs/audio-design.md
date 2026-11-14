@@ -397,9 +397,9 @@ are faster is unmeasured; queued).
 
 Rae has no function values and no interfaces, so the plan runs nodes with a
 `match` on the node kind over typed state tables (one dense table per kind, ECS
-style). How a program adds its **own** node kind without editing `packages/audio` is
-open (§13 D5): a generic engine over one program node type, a WASM node (the Rae
-plugin ABI), or a function value once stage B exists.
+style). A program adds its **own** node kinds without editing `packages/audio`
+through five link-time calls it defines in Rae with `cExport` (§13 D5, decided
+2026-11-14; `audio/CustomNodes`, `packages/audio` 0.12.17).
 
 ### 5.4 Parameters
 
@@ -818,7 +818,8 @@ behavior are unchanged (fixtures 1401-1417).
 A node kind is a state struct plus its `prepare` / `process` / `reset`
 functions (§5.3), written over `AudioBlock` views. It is ordinary Rae, so it is
 tested offline like any function. How a program's own kind joins the engine is
-§13 D5.
+§13 D5: its five `cExport` calls, over the state, the scratch and the events
+the engine hands it (`audio/CustomNodes`'s `CustomBlock`).
 
 ---
 
@@ -1257,8 +1258,48 @@ small Rae programs.
   and `noAlloc` keywords (`realtime-language-design.md` §3). The run-time check
   comes first.
 - **D4 — `Atomic(T)`.** Built first, as queue step `[realtime 1/6]`.
-- **D5 — a program's own node kinds** (§5.3): generic engine over one program
-  type, WASM nodes, or wait for D2.
+- **D5 — a program's own node kinds** (§5.3). **Decided 2026-11-14: link-time
+  calls the program defines in Rae with `cExport`** (`audio/CustomNodes`,
+  `packages/audio` 0.12.17). A graph node of kind `custom` carries the
+  program's own kind number and settings (a `List(Float)`); the engine calls
+  five C symbols for it, which the program defines as Rae functions marked
+  `cExport` and which the package's C glue has weak, empty defaults of (so a
+  program that adds no kind defines nothing), the same mechanism as the
+  engine's own stage-B render (D2):
+  - `rae_audio_node_state_size` and `rae_audio_node_prepare` (main thread,
+    when a plan is prepared; may allocate): how many Floats of state the node
+    needs, and filling them. The engine owns the state: it allocates it with
+    the plan, frees it with the plan, carries it over a plan swap to the node
+    of the same entity, kind and size, and never allocates on the audio
+    thread;
+  - `rae_audio_node_process` (audio thread, `realtime`): one block, its input
+    and output in the plan's scratch, and the block's events, time-sorted with
+    their sample offsets (a parameter event of kind
+    `customParameterBase + n`; the renderer cuts its block at each event's
+    sample, so today their offsets are 0);
+  - `rae_audio_node_reset` (audio thread): forget what it was playing
+    (`resetGraph`);
+  - `rae_audio_node_latency` (main thread, when the graph compiles): the
+    frames it delays its signal, which the delay compensation lines the other
+    paths up with.
+
+  The program's process function dispatches on its own kind numbers with a
+  `match`, and another package's node kinds join the same way: the program's
+  five functions call that package's (an explicit list of what the program
+  uses). Why this and not the others: Rae has no function values (and does not
+  want them); a generic engine over one program type would make every program
+  that adds a kind instantiate the whole renderer over it and could not hold
+  two packages' kinds; a WASM node is a plugin format, which belongs with the
+  other plugin hosts (CLAP, VST3, AUv3) in the media editor and can be built
+  on these five calls. The cost: one program defines the five calls once, so
+  two packages that each define them would clash at link time; a package
+  therefore exports ordinary functions and leaves the five to the program.
+  Fixture 1446: a gain with a reported latency written as such a kind
+  null-tests against the built-in gain with a latent delay, its latency is
+  reported (32 frames) and compensated against a parallel plain path, a
+  parameter event lands on its sample at blocks of 1, 17 and 512, and
+  `resetGraph` clears it; with `RAE_REALTIME_CHECK=1`. An ECS mix takes one as
+  an insert (`customInsert`).
 - **D6 — where it lives. Decided 2026-11-11: a package in this repository,
   `packages/audio`** (and video likewise, `packages/video`), with a `native`
   block like `packages/sql`. A program opts in by declaring it in its

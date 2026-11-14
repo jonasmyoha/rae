@@ -20,6 +20,8 @@
 #     main
 import Math
 open audio/AudioGraph
+open audio/CustomNodes
+open audio/GraphEffects
 open audio/GraphNodes
 open collections/SpscRing
 
@@ -166,6 +168,13 @@ func carryState(from: view RenderPlan, to: view RenderPlan) realtime {
         let before: LimiterState = rae_ext_rae_buf_get(buf: from.limiters, index: oldAt)
         state.gain = before.gain
         rae_ext_rae_buf_set(buf: limiters, index: newAt, value: state)
+      } else if kind is NodeKind.custom {
+        carryCustomState(
+          from: from
+          oldAt: oldAt
+          to: to
+          newAt: newAt
+        )
       } else if kind is NodeKind.eq or kind is NodeKind.compressor or kind is NodeKind.reverb {
         carryEffectState(
           kind: kind
@@ -252,6 +261,7 @@ func renderGraph(
             frames: piece
           )
         }
+        clearCustomEvents(plan: this.current)
         loop var i: Int = 0, i < piece, ++i {
           rae_ext_rae_buf_set(
             buf: leftTarget
@@ -320,6 +330,13 @@ func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) r
         state.target = event.value
         state.step = (state.target - state.current) / (state.rampFrames as Float)
         rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+      } else if kind is NodeKind.custom and event.kind >= customParameterBase {
+        addCustomEvent(
+          plan: plan
+          node: node
+          parameter: event.kind - customParameterBase
+          value: event.value
+        )
       } else if kind is NodeKind.eq and isEqParameter(kind: event.kind) {
         applyEqParameter(
           plan: plan
@@ -434,5 +451,9 @@ func resetGraph(this: view GraphRenderer) realtime {
       state.writeIndex = 0
       rae_ext_rae_buf_set(buf: delays, index: i, value: state)
     }
+  }
+  resetEffects(plan: plan)
+  loop var i: Int = 0, i < plan.customCount, ++i {
+    resetCustom(plan: plan, stateAt: i)
   }
 }
