@@ -1030,6 +1030,11 @@ int64_t rae_ext_nowMs(void);
 int64_t rae_ext_nowNs(void) RAE_NONBLOCKING;
 void rae_ext_rae_sleep(int64_t ms);
 int64_t rae_ext_Time_sleepNs(int64_t ns);  /* one nanosleep (lib/Time.rae waitUntil) */
+#if defined(__EMSCRIPTEN__)
+/* +1 / -1 around code where a sleep may not yield to the page (a mainLoop
+ * frame, a task's body): it spins there instead (runtime_system_log.c) */
+void rae_web_sleep_hold(int delta);
+#endif
 int64_t rae_ext_Time_localOffsetSeconds(int64_t epochSeconds);  /* the local zone's UTC offset (lib/Time.rae) */
 
 /* lib/Math.rae's scalar functions over `Float`, which is f32 (see

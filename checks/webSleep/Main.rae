@@ -1,0 +1,52 @@
+# A sleep in the browser lets the page run (compiler/runtime/runtime_system_log.c,
+# docs/web-frame-loop.md): main opens a WebSocket to a port nothing listens
+# on, which only the page's event loop can close, and sleeps 300 ms. Then
+# the socket must be closed: the page ran during the sleep. (Before, the
+# sleep spun, and the socket was still connecting after it.) Then a frame of
+# a mainLoop sleeps 5 ms, where a sleep cannot let the page run: it holds
+# the frame instead (with one console warning) and the loop goes on. Logs
+# "SLEEP OK" or "SLEEP FAIL: ..."; compiler/tools/wasm_webgpu_smoke.sh runs
+# it in headless Chrome. Natively there is no browser socket: it says so and
+# passes.
+open webSocket/WebSocketBrowser
+
+type FrameSleeps {
+  frames: Int
+  startedNs: Int
+}
+
+# One frame: it sleeps 5 ms; false after three frames
+func sleepingFrame(check: mod FrameSleeps) ret Bool {
+  sleep(ms: 5)
+  check.frames = check.frames + 1
+  if check.frames < 3 {
+    ret true
+  }
+  let heldMs: Int = (nowNs() - check.startedNs) / 1000000
+  log("SLEEP OK: the page ran during a 300 ms sleep; 3 frames slept 5 ms each ({heldMs} ms)")
+  ret false
+}
+
+func main() {
+  let socket: Int = browserWebSocketOpenUrl(url: "ws://127.0.0.1:1/")
+  if socket < 0 {
+    log("SLEEP OK: no browser here (natively a sleep blocks the thread); nothing to test")
+    ret
+  }
+  let before: Int = browserWebSocketState(handle: socket)
+  sleep(ms: 300)
+  let after: Int = browserWebSocketState(handle: socket)
+  browserWebSocketClose(handle: socket)
+  if before is not browserWebSocketConnecting or after is not browserWebSocketClosed {
+    log(
+      "SLEEP FAIL: the socket was {before} before the sleep and {after} after it (0 connecting, 2 closed): the page did not run while main slept"
+    )
+    ret
+  }
+  var check: FrameSleeps = { frames: 0, startedNs: nowNs() }
+  mainLoop check {
+    if sleepingFrame(check: check) is false {
+      break
+    }
+  }
+}

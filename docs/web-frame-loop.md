@@ -197,3 +197,32 @@ The `mainLoop` build is the same C as the `setup`/`frame` one it replaced
 average 5.5), where every build takes more fixed steps a frame: `mainLoop`
 25.8-28.0 ms of frame work, `setup`/`frame` 26.2 ms, the Asyncify loop
 34.9 ms.
+
+## 7. `sleep` in the browser (2026-11-14)
+
+Emscripten's `usleep` spins, so `sleep(ms:)` (and `Time.waitUntil`'s
+`sleepNs`) used to hold the page: no event, timer, socket callback or
+AudioWorklet message ran until it ended (found when `checks/audioSine` slept
+2.3 s and its AudioWorklet never loaded). Now, on `main`'s own stack, a sleep
+yields through Asyncify (`emscripten_sleep`, runtime_system_log.c): the
+page runs meanwhile and the program goes on after it, as natively.
+
+Two places cannot yield, and there a sleep holds the page as before, with
+one console warning ("[rae] sleep in a mainLoop frame (or a task) cannot let
+the page run ..."):
+
+- **a `mainLoop` frame**: a frame callback has no stack Asyncify can return
+  to the browser through (§6). The generated trampoline marks the frame
+  (`rae_web_sleep_hold`). A frame that must wait returns and goes on in a
+  later frame.
+- **a task's body run without a resumable twin**: it is reached through an
+  indirect call, which a mainLoop build does not instrument. A task that has
+  a twin (lightweight-spawn-design.md §16) never gets here: its sleep
+  suspends on the scheduler's timers and the frames run it on.
+
+A worker thread of a threaded build (`RAE_WASM_THREADS`) blocks as natively.
+`checks/webSleep` (run by `compiler/tools/wasm_webgpu_smoke.sh` in headless
+Chrome) holds it: a WebSocket to a port nothing listens on, which only the
+page can close, is closed after a 300 ms sleep on main, and three frames that
+sleep 5 ms hold and the loop goes on. The compiler does not yet warn about a
+sleep a mainLoop body can reach; that check is queued.

@@ -1891,8 +1891,11 @@ static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(thunk, "#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n");
     /* Each frame first runs the tasks that can go on (lib/core/Scheduler.rae,
      * docs/lightweight-spawn-design.md §16): tasks interleave with frames */
-    fprintf(thunk, "void __rae_main_loop_tick%d(void* arg) {\n  %s* __rae_state_box = (%s*)arg;\n  rae_sched_frame();\n", id, type_buf, type_buf);
-    fprintf(thunk, "  if (!__rae_main_loop_body%d(__rae_state_box)) {\n    emscripten_cancel_main_loop();\n", id);
+    /* A sleep in the frame cannot yield to the page: held (it spins, with
+     * one warning; runtime_system_log.c rae_web_sleep_hold) */
+    fprintf(thunk, "void __rae_main_loop_tick%d(void* arg) {\n  %s* __rae_state_box = (%s*)arg;\n  rae_web_sleep_hold(1);\n  rae_sched_frame();\n", id, type_buf, type_buf);
+    fprintf(thunk, "  rae_Bool __rae_going = __rae_main_loop_body%d(__rae_state_box);\n  rae_web_sleep_hold(-1);\n", id);
+    fprintf(thunk, "  if (!__rae_going) {\n    emscripten_cancel_main_loop();\n");
     emit_drop_for_value(ctx, thunk, value_type, "(*__rae_state_box)", true);
     fprintf(thunk, "    free(__rae_state_box);\n  }\n}\n");
     fprintf(thunk, "void __rae_main_loop_start%d(%s value) {\n  %s* __rae_state_box = (%s*)malloc(sizeof(%s));\n",
