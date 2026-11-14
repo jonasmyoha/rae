@@ -1,0 +1,153 @@
+# A voice's gain ramp of a chosen length (audio/AudioSchedule rampVoiceGainAt, docs/audio-design.md
+# §10.5), rendered offline with RAE_REALTIME_CHECK=1 (config.env). The voice is a stereo sound
+# of 1.0 on a bus at 0 dB, so each output sample is the gain itself.
+# 1. A fade-in: the voice starts at silence at sample 1000 and ramps to full over 4800 frames
+#    from that same sample. Frame k of the ramp is k / 4800 exactly: the first (0), one in the
+#    middle (0.5), the last (1.0), and the frames on either side.
+# 2. A fade-out to 0.25 over 960 frames from sample 10600: its first, middle (0.625) and last.
+# 3. The same samples in blocks of 1, 17 and 512 frames as in blocks of 256.
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/Sound
+
+const rate: Int = 48000
+
+const fadeInStart: Int = 1000
+
+const fadeInFrames: Int = 4800
+
+const fadeOutStart: Int = 10600
+
+const fadeOutFrames: Int = 960
+
+const total: Int = 12000
+
+func ones() ret SoundData {
+  let samples: Buffer(Float) = createSampleBuffer(count: rate * 2)
+  loop var i: Int = 0, i < rate * 2, ++i {
+    setSampleAt(samples: samples, index: i, value: 1.0)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: rate
+    channels: 2
+    sampleRate: rate
+    error: ""
+  }
+}
+
+# The scene rendered in blocks of `blockFrames`
+func render(blockFrames: view Int) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 512)
+  audio.setBusGain(bus: AudioBusKind.effects, gainDecibels: 0.0)
+  let sound: Sound = audio.addSound(data: ones())
+  let voiceId: VoiceId = audio.playFromAt(
+    sound: sound
+    bus: AudioBusKind.effects
+    gainDecibels: silenceDecibels
+    pan: 0.0
+    looping: true
+    startFrame: 0
+    atSample: fadeInStart
+  )
+  audio.rampVoiceLinearGainAt(
+    voiceId: voiceId
+    gain: 1.0
+    frames: fadeInFrames
+    atSample: fadeInStart
+  )
+  audio.rampVoiceGainAt(
+    voiceId: voiceId
+    gainDecibels: -12.0411998
+    frames: fadeOutFrames
+    atSample: fadeOutStart
+  )
+  let samples: List(Float) = audio.renderOfflineInBlocks(frames: total, blockFrames: blockFrames)
+  let blocks: Int = audio.stopAudio()
+  ret samples
+}
+
+func at(samples: view List(Float), frame: view Int) ret Float {
+  ret samples.copyAtFallback(index: frame * 2, fallback: -1.0)
+}
+
+# The ramp's value at its frame k, as the engine is to give it
+func ramped(
+  start: view Float
+  target: view Float
+  k: view Int
+  length: view Int
+) ret Float {
+  ret start + (target - start) * (k as Float) / (length as Float)
+}
+
+func exactly(samples: view List(Float), frame: view Int, expected: view Float) ret Bool {
+  ret at(samples: samples, frame: frame) is expected
+}
+
+func main() {
+  let samples: List(Float) = render(blockFrames: 256)
+  let fadeIn: Bool = exactly(samples: samples, frame: fadeInStart - 1, expected: 0.0) and exactly(
+    samples: samples
+    frame: fadeInStart
+    expected: 0.0
+  ) and exactly(
+    samples: samples
+    frame: fadeInStart + 1
+    expected: ramped(
+      start: 0.0
+      target: 1.0
+      k: 1
+      length: fadeInFrames
+    )
+  ) and exactly(samples: samples, frame: fadeInStart + fadeInFrames / 2, expected: 0.5) and exactly(
+    samples: samples
+    frame: fadeInStart + fadeInFrames - 1
+    expected: ramped(
+      start: 0.0
+      target: 1.0
+      k: fadeInFrames - 1
+      length: fadeInFrames
+    )
+  ) and exactly(samples: samples, frame: fadeInStart + fadeInFrames, expected: 1.0)
+  log(
+    "fade-in: before {at(samples: samples, frame: fadeInStart - 1)}, first {at(
+      samples: samples
+      frame: fadeInStart
+    )}, middle {at(samples: samples, frame: fadeInStart + fadeInFrames / 2)}, last {at(
+      samples: samples
+      frame: fadeInStart + fadeInFrames
+    )}; every checked frame exact: {fadeIn}"
+  )
+  let quarter: Float = decibelsToGain(decibels: -12.0411998)
+  let fadeOut: Bool = exactly(samples: samples, frame: fadeOutStart, expected: 1.0) and exactly(
+    samples: samples
+    frame: fadeOutStart + fadeOutFrames / 2
+    expected: ramped(
+      start: 1.0
+      target: quarter
+      k: fadeOutFrames / 2
+      length: fadeOutFrames
+    )
+  ) and exactly(samples: samples, frame: fadeOutStart + fadeOutFrames, expected: quarter)
+  log(
+    "fade-out to -12 dB: first {at(samples: samples, frame: fadeOutStart)}, middle {at(
+      samples: samples
+      frame: fadeOutStart + fadeOutFrames / 2
+    )}; every checked frame exact: {fadeOut}"
+  )
+  loop let blockFrames: Int in List(Int) { 1, 17, 512 } {
+    let other: List(Float) = render(blockFrames: blockFrames)
+    var same: Bool = other.length is samples.length
+    loop var i: Int = 0, i < samples.length, ++i {
+      if other.copyAtFallback(index: i, fallback: -1.0) is not samples.copyAtFallback(
+        index: i
+        fallback: -2.0
+      ) {
+        same = false
+      }
+    }
+    log("in blocks of {blockFrames}: the same samples {same}")
+  }
+}
