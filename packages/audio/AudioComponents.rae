@@ -11,6 +11,7 @@
 #     world.audio.gains.componentSet(entityId: drums, data: AudioGain { decibels: -6.0 })
 #     world.audio.outputs.componentSet(entityId: drums, data: AudioOutput { busEntityId: drumBus })
 open audio/AudioGraph
+open audio/EffectStates
 open ecs/ComponentTable
 open ecs/Entity
 
@@ -61,13 +62,17 @@ type AudioSend {
   preFader: Bool
 }
 
-# An effect on a track or bus, before its fader (built-in kinds for now)
+# An effect on a track or bus, before its fader (built-in kinds for now): a
+# gain, a delay, a limiter, an EQ band, a compressor or a reverb
 type AudioInsert {
   kind: NodeKind
+  # a gain's, an EQ band's gain, a compressor's makeup
   decibels: Float
   delayFrames: Int
   ceilingDecibels: Float
   reportsLatency: Bool
+  # an EQ band's, a compressor's or a reverb's settings (audio/EffectStates)
+  effect: EffectSettings
 }
 
 type AudioInserts {
@@ -112,6 +117,7 @@ func gainInsert(decibels: view Float) ret AudioInsert {
     delayFrames: 0
     ceilingDecibels: 0.0
     reportsLatency: false
+    effect: defaultEffectSettings()
   }
 }
 
@@ -122,6 +128,7 @@ func delayInsert(frames: view Int, reportsLatency: view Bool) ret AudioInsert {
     delayFrames: frames
     ceilingDecibels: 0.0
     reportsLatency: reportsLatency
+    effect: defaultEffectSettings()
   }
 }
 
@@ -132,7 +139,39 @@ func limiterInsert(ceilingDecibels: view Float) ret AudioInsert {
     delayFrames: 0
     ceilingDecibels: ceilingDecibels
     reportsLatency: false
+    effect: defaultEffectSettings()
   }
+}
+
+# An EQ band (audio/EffectStates' FilterShape) at `frequency` Hz
+func eqInsert(
+  filter: view FilterShape
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: gainDecibels)
+  insert.kind = NodeKind.eq
+  insert.effect.filter = filter
+  insert.effect.frequency = frequency
+  insert.effect.quality = quality
+  ret insert
+}
+
+# A compressor (its level measured on its own input)
+func compressorInsert(settings: view EffectSettings, makeupDecibels: view Float) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: makeupDecibels)
+  insert.kind = NodeKind.compressor
+  insert.effect = settings
+  ret insert
+}
+
+# Freeverb (roomSize, damping, wet, dry, width of the settings)
+func reverbInsert(settings: view EffectSettings) ret AudioInsert {
+  var insert: AudioInsert = gainInsert(decibels: 0.0)
+  insert.kind = NodeKind.reverb
+  insert.effect = settings
+  ret insert
 }
 
 # ---- events -------------------------------------------------------------------

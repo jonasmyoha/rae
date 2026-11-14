@@ -27,7 +27,9 @@ const graphPlanSlots: Int = 8
 
 # A parameter change at a sample time (audio/parameterSystem): `key` is the
 # node's entity key in the plan, `kind` 0 a gain or send's linear target
-# (reached over its 5 ms ramp), 1 a pan position (-1 .. 1, at once)
+# (reached over its 5 ms ramp), 1 a pan position (-1 .. 1, at once), 2 / 3 / 4
+# an EQ band's frequency (Hz), gain (dB) or Q (each moved over 5 ms,
+# audio/GraphEffects)
 type GraphParameterEvent {
   key: Int
   kind: Int
@@ -164,6 +166,14 @@ func carryState(from: view RenderPlan, to: view RenderPlan) realtime {
         let before: LimiterState = rae_ext_rae_buf_get(buf: from.limiters, index: oldAt)
         state.gain = before.gain
         rae_ext_rae_buf_set(buf: limiters, index: newAt, value: state)
+      } else if kind is NodeKind.eq or kind is NodeKind.compressor or kind is NodeKind.reverb {
+        carryEffectState(
+          kind: kind
+          from: from
+          oldAt: oldAt
+          to: to
+          newAt: newAt
+        )
       } else if kind is NodeKind.delay {
         var newDelays: Buffer(DelayState) = to.delays
         var oldDelays: Buffer(DelayState) = from.delays
@@ -310,6 +320,13 @@ func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) r
         state.target = event.value
         state.step = (state.target - state.current) / (state.rampFrames as Float)
         rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+      } else if kind is NodeKind.eq and isEqParameter(kind: event.kind) {
+        applyEqParameter(
+          plan: plan
+          stateAt: stateAt
+          kind: event.kind
+          value: event.value
+        )
       } else if event.kind is 1 and kind is NodeKind.pan {
         var pans: Buffer(PanState) = plan.pans
         let angle: Float = (min(a: 1.0, b: max(a: -1.0, b: event.value)) + 1.0) * 0.7853981633974483

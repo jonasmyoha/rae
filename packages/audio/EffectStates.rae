@@ -1,0 +1,409 @@
+# audio/EffectStates — the settings and running states of the graph's effect
+# nodes (docs/audio-design.md §5.3): an EQ band (a biquad from Robert
+# Bristow-Johnson's Audio EQ Cookbook), a compressor (feed-forward, a soft
+# knee, attack and release, a sidechain input) and a reverb (Jezar's public
+# domain Freeverb: eight lowpass-feedback combs and four allpasses a channel).
+# The states live in the RenderPlan's tables (audio/AudioGraph); they are made
+# when a plan is prepared, the only allocation, and processed by
+# audio/GraphEffects on the audio thread.
+import Math
+open audio/Sound
+
+enum FilterShape {
+  peak
+  lowShelf
+  highShelf
+  lowPass
+  highPass
+}
+
+# An effect node's settings (a node of another kind ignores them). The gain
+# of an EQ band and a compressor's makeup are the node's `decibels`.
+type EffectSettings {
+  filter: FilterShape
+  # hertz: an EQ band's center or corner
+  frequency: Float
+  # an EQ band's Q (the cookbook's Q, for the shelves too)
+  quality: Float
+  thresholdDecibels: Float
+  ratio: Float
+  # the soft knee's width in decibels (0: a hard knee)
+  kneeDecibels: Float
+  attackSeconds: Float
+  releaseSeconds: Float
+  # Freeverb's controls, 0..1
+  roomSize: Float
+  damping: Float
+  wet: Float
+  dry: Float
+  width: Float
+}
+
+func defaultEffectSettings() ret EffectSettings {
+  ret EffectSettings {
+    filter: FilterShape.peak
+    frequency: 1000.0
+    quality: 0.7071
+    thresholdDecibels: -20.0
+    ratio: 4.0
+    kneeDecibels: 6.0
+    attackSeconds: 0.01
+    releaseSeconds: 0.1
+    roomSize: 0.5
+    damping: 0.5
+    wet: 0.3333333
+    dry: 0.0
+    width: 1.0
+  }
+}
+
+# ---- an EQ band ----------------------------------------------------------------
+type FilterState {
+  shape: FilterShape
+  sampleRate: Float
+  # the parameters it runs with now, where they are going, and their steps:
+  # a change moves them over 5 ms, the coefficients following every 16 frames
+  frequency: Float
+  gainDecibels: Float
+  quality: Float
+  targetFrequency: Float
+  targetGain: Float
+  targetQuality: Float
+  stepFrequency: Float
+  stepGain: Float
+  stepQuality: Float
+  rampLeft: Int
+  rampFrames: Int
+  # normalized by a0
+  b0: Float
+  b1: Float
+  b2: Float
+  a1: Float
+  a2: Float
+  # the transposed direct form II's two state values a channel
+  z1Left: Float
+  z2Left: Float
+  z1Right: Float
+  z2Right: Float
+}
+
+func createFilterState(
+  settings: view EffectSettings
+  gainDecibels: view Float
+  sampleRate: view Int
+) ret FilterState {
+  var state: FilterState = {
+    shape: settings.filter
+    sampleRate: sampleRate as Float
+    frequency: settings.frequency
+    gainDecibels: gainDecibels
+    quality: settings.quality
+    targetFrequency: settings.frequency
+    targetGain: gainDecibels
+    targetQuality: settings.quality
+    stepFrequency: 0.0
+    stepGain: 0.0
+    stepQuality: 0.0
+    rampLeft: 0
+    rampFrames: max(a: 1, b: sampleRate * 5 / 1000)
+    b0: 1.0
+    b1: 0.0
+    b2: 0.0
+    a1: 0.0
+    a2: 0.0
+    z1Left: 0.0
+    z2Left: 0.0
+    z1Right: 0.0
+    z2Right: 0.0
+  }
+  filterCoefficients(state: state)
+  ret state
+}
+
+# The cookbook's coefficients for the state's current parameters
+func filterCoefficients(state: mod FilterState) realtime {
+  let nyquistSafe: Float = Math.min(
+    a: Math.max(a: state.frequency, b: 1.0)
+    b: state.sampleRate * 0.49
+  )
+  let omega: Float = 6.2831855 * nyquistSafe / state.sampleRate
+  let cosine: Float = Math.cos(x: omega)
+  let alpha: Float = Math.sin(x: omega) / (2.0 * Math.max(a: state.quality, b: 0.0001))
+  let amplitude: Float = Math.pow(base: 10.0, exp: state.gainDecibels / 40.0)
+  let root: Float = Math.sqrt(x: amplitude)
+  var b0: Float = 1.0
+  var b1: Float = 0.0
+  var b2: Float = 0.0
+  var a0: Float = 1.0
+  var a1: Float = 0.0
+  var a2: Float = 0.0
+  match state.shape {
+    case FilterShape.peak {
+      b0 = 1.0 + alpha * amplitude
+      b1 = -2.0 * cosine
+      b2 = 1.0 - alpha * amplitude
+      a0 = 1.0 + alpha / amplitude
+      a1 = -2.0 * cosine
+      a2 = 1.0 - alpha / amplitude
+    }
+    case FilterShape.lowShelf {
+      b0 = amplitude * (amplitude + 1.0 - (amplitude - 1.0) * cosine + 2.0 * root * alpha)
+      b1 = 2.0 * amplitude * (amplitude - 1.0 - (amplitude + 1.0) * cosine)
+      b2 = amplitude * (amplitude + 1.0 - (amplitude - 1.0) * cosine - 2.0 * root * alpha)
+      a0 = amplitude + 1.0 + (amplitude - 1.0) * cosine + 2.0 * root * alpha
+      a1 = -2.0 * (amplitude - 1.0 + (amplitude + 1.0) * cosine)
+      a2 = amplitude + 1.0 + (amplitude - 1.0) * cosine - 2.0 * root * alpha
+    }
+    case FilterShape.highShelf {
+      b0 = amplitude * (amplitude + 1.0 + (amplitude - 1.0) * cosine + 2.0 * root * alpha)
+      b1 = -2.0 * amplitude * (amplitude - 1.0 + (amplitude + 1.0) * cosine)
+      b2 = amplitude * (amplitude + 1.0 + (amplitude - 1.0) * cosine - 2.0 * root * alpha)
+      a0 = amplitude + 1.0 - (amplitude - 1.0) * cosine + 2.0 * root * alpha
+      a1 = 2.0 * (amplitude - 1.0 - (amplitude + 1.0) * cosine)
+      a2 = amplitude + 1.0 - (amplitude - 1.0) * cosine - 2.0 * root * alpha
+    }
+    case FilterShape.lowPass {
+      b0 = (1.0 - cosine) / 2.0
+      b1 = 1.0 - cosine
+      b2 = (1.0 - cosine) / 2.0
+      a0 = 1.0 + alpha
+      a1 = -2.0 * cosine
+      a2 = 1.0 - alpha
+    }
+    case FilterShape.highPass {
+      b0 = (1.0 + cosine) / 2.0
+      b1 = -(1.0 + cosine)
+      b2 = (1.0 + cosine) / 2.0
+      a0 = 1.0 + alpha
+      a1 = -2.0 * cosine
+      a2 = 1.0 - alpha
+    }
+  }
+  state.b0 = b0 / a0
+  state.b1 = b1 / a0
+  state.b2 = b2 / a0
+  state.a1 = a1 / a0
+  state.a2 = a2 / a0
+}
+
+# Move the band's parameters to new targets over its 5 ms
+func retargetFilter(
+  state: mod FilterState
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) realtime {
+  state.targetFrequency = frequency
+  state.targetGain = gainDecibels
+  state.targetQuality = quality
+  let frames: Float = state.rampFrames as Float
+  state.stepFrequency = (frequency - state.frequency) / frames
+  state.stepGain = (gainDecibels - state.gainDecibels) / frames
+  state.stepQuality = (quality - state.quality) / frames
+  state.rampLeft = state.rampFrames
+}
+
+# ---- a compressor ---------------------------------------------------------------
+type CompressorState {
+  thresholdDecibels: Float
+  ratio: Float
+  kneeDecibels: Float
+  makeupDecibels: Float
+  # one-pole coefficients of the gain reduction's smoothing (exp(-1 / (t fs)))
+  attack: Float
+  release: Float
+  # the smoothed gain reduction in decibels (0 or more)
+  reductionDecibels: Float
+}
+
+func timeCoefficient(seconds: view Float, sampleRate: view Int) ret Float {
+  if seconds <= 0.0 {
+    ret 0.0
+  }
+  ret Math.exp(x: -1.0 / (seconds * (sampleRate as Float)))
+}
+
+func createCompressorState(
+  settings: view EffectSettings
+  makeupDecibels: view Float
+  sampleRate: view Int
+) ret CompressorState {
+  ret CompressorState {
+    thresholdDecibels: settings.thresholdDecibels
+    ratio: Math.max(a: settings.ratio, b: 1.0)
+    kneeDecibels: Math.max(a: settings.kneeDecibels, b: 0.0)
+    makeupDecibels: makeupDecibels
+    attack: timeCoefficient(seconds: settings.attackSeconds, sampleRate: sampleRate)
+    release: timeCoefficient(seconds: settings.releaseSeconds, sampleRate: sampleRate)
+    reductionDecibels: 0.0
+  }
+}
+
+# The static curve (Giannoulis, Massberg and Reiss 2012): the output level in
+# decibels for an input level in decibels, with a soft knee of `knee` dB
+func compressorCurve(
+  inputDecibels: view Float
+  thresholdDecibels: view Float
+  ratio: view Float
+  kneeDecibels: view Float
+) ret Float realtime {
+  let over: Float = inputDecibels - thresholdDecibels
+  if 2.0 * over < -kneeDecibels {
+    ret inputDecibels
+  }
+  if kneeDecibels > 0.0 and 2.0 * Math.abs(value: over) <= kneeDecibels {
+    let into: Float = over + kneeDecibels / 2.0
+    ret inputDecibels + (1.0 / ratio - 1.0) * into * into / (2.0 * kneeDecibels)
+  }
+  ret thresholdDecibels + over / ratio
+}
+
+# ---- Freeverb --------------------------------------------------------------------
+# Jezar's tunings at 44.1 kHz (the right channel's are 23 samples longer),
+# scaled to the sample rate
+const reverbCombs: Int = 8
+
+const reverbAllpasses: Int = 4
+
+const reverbStereoSpread: Int = 23
+
+type ReverbState {
+  # every line, one after another: the left combs, the right combs, the left
+  # allpasses, the right allpasses
+  lines: Buffer(Float)
+  # 24 lines' starts in `lines`, lengths and positions
+  starts: Buffer(Int)
+  lengths: Buffer(Int)
+  positions: Buffer(Int)
+  # the 16 combs' lowpass memories
+  stores: Buffer(Float)
+  lineCount: Int
+  # Freeverb's derived values: feedback (its roomsize1), damp1, damp2, wet1,
+  # wet2, dry and the input gain
+  feedback: Float
+  damp1: Float
+  damp2: Float
+  wet1: Float
+  wet2: Float
+  dry: Float
+  inputGain: Float
+}
+
+func reverbCombTuning(index: view Int) ret Int {
+  let tunings: List(Int) = {
+    1116
+    1188
+    1277
+    1356
+    1422
+    1491
+    1557
+    1617
+  }
+  ret tunings.copyAtFallback(index: index, fallback: 1116)
+}
+
+func reverbAllpassTuning(index: view Int) ret Int {
+  let tunings: List(Int) = { 556, 441, 341, 225 }
+  ret tunings.copyAtFallback(index: index, fallback: 556)
+}
+
+func scaledLength(tuning: view Int, sampleRate: view Int) ret Int {
+  ret Math.max(a: 1, b: (tuning * sampleRate + 22050) / 44100)
+}
+
+# Freeverb's setters: room 0..1 -> feedback 0.7..0.98, damping 0..1 -> 0..0.4,
+# wet 0..1 -> 0..3, dry 0..1 -> 0..2
+func setReverbControls(state: mod ReverbState, settings: view EffectSettings) {
+  let wet: Float = settings.wet * 3.0
+  state.feedback = settings.roomSize * 0.28 + 0.7
+  state.damp1 = settings.damping * 0.4
+  state.damp2 = 1.0 - state.damp1
+  state.wet1 = wet * (settings.width / 2.0 + 0.5)
+  state.wet2 = wet * ((1.0 - settings.width) / 2.0)
+  state.dry = settings.dry * 2.0
+  state.inputGain = 0.015
+}
+
+func createReverbState(settings: view EffectSettings, sampleRate: view Int) ret ReverbState {
+  let lineCount: Int = 2 * (reverbCombs + reverbAllpasses)
+  var starts: List(Int) = {}
+  var lengths: List(Int) = {}
+  var total: Int = 0
+  loop var line: Int = 0, line < lineCount, ++line {
+    # 0..7 left combs, 8..15 right combs, 16..19 left allpasses, 20..23 right
+    var tuning: Int = 0
+    if line < 2 * reverbCombs {
+      tuning = reverbCombTuning(index: line % reverbCombs)
+      if line >= reverbCombs {
+        tuning = tuning + reverbStereoSpread
+      }
+    } else {
+      let allpass: Int = line - 2 * reverbCombs
+      tuning = reverbAllpassTuning(index: allpass % reverbAllpasses)
+      if allpass >= reverbAllpasses {
+        tuning = tuning + reverbStereoSpread
+      }
+    }
+    let length: Int = scaledLength(tuning: tuning, sampleRate: sampleRate)
+    starts.add(value: total)
+    lengths.add(value: length)
+    total = total + length
+  }
+  var state: ReverbState = {
+    lines: createSampleBuffer(count: total)
+    starts: intList(values: starts)
+    lengths: intList(values: lengths)
+    positions: zeroInts(count: lineCount)
+    stores: createSampleBuffer(count: 2 * reverbCombs)
+    lineCount: lineCount
+    feedback: 0.0
+    damp1: 0.0
+    damp2: 0.0
+    wet1: 0.0
+    wet2: 0.0
+    dry: 0.0
+    inputGain: 0.0
+  }
+  setReverbControls(state: state, settings: settings)
+  ret state
+}
+
+func intList(values: view List(Int)) ret Buffer(Int) {
+  let buffer: Buffer(Int) = zeroInts(count: values.length())
+  unsafe {
+    var target: Buffer(Int) = buffer
+    loop var i: Int = 0, i < values.length(), ++i {
+      rae_ext_rae_buf_set(
+        buf: target
+        index: i
+        value: values.copyAtFallback(index: i, fallback: 0)
+      )
+    }
+  }
+  ret buffer
+}
+
+func zeroInts(count: view Int) ret Buffer(Int) {
+  unsafe {
+    let buffer: Buffer(Int) = rae_ext_rae_buf_alloc(
+      size: Math.max(a: 1, b: count)
+      elemSize: sizeof(Int)
+    )
+    var target: Buffer(Int) = buffer
+    loop var i: Int = 0, i < Math.max(a: 1, b: count), ++i {
+      rae_ext_rae_buf_set(buf: target, index: i, value: 0)
+    }
+    ret buffer
+  }
+}
+
+func freeReverbState(state: view ReverbState) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: state.lines)
+    rae_ext_rae_buf_free(buf: state.starts)
+    rae_ext_rae_buf_free(buf: state.lengths)
+    rae_ext_rae_buf_free(buf: state.positions)
+    rae_ext_rae_buf_free(buf: state.stores)
+  }
+}

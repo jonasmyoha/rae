@@ -4,6 +4,7 @@
 # in its kind's table, and is `realtime`.
 import Math
 open audio/AudioGraph
+open audio/GraphEffects
 
 # Where the source adapters read: slot s's left samples at
 # left[s * slotStride + rightOffset * 0 + i], its right ones at
@@ -30,48 +31,6 @@ func pooledSources(pool: view Buffer(Float), maxFrames: view Int) ret GraphSourc
     activity: pool
     hasActivity: false
   }
-}
-
-# ---- sample access ------------------------------------------------------------
-func scratchAt(
-  plan: view RenderPlan
-  buffer: view Int
-  channel: view Int
-  frame: view Int
-) ret Float realtime {
-  unsafe {
-    ret rae_ext_rae_buf_get(
-      buf: plan.scratch
-      index: (buffer * 2 + channel) * plan.maxFrames + frame
-    )
-  }
-}
-
-func setScratchAt(
-  plan: view RenderPlan
-  buffer: view Int
-  channel: view Int
-  frame: view Int
-  value: view Float
-) realtime {
-  unsafe {
-    var target: Buffer(Float) = plan.scratch
-    rae_ext_rae_buf_set(
-      buf: target
-      index: (buffer * 2 + channel) * plan.maxFrames + frame
-      value: value
-    )
-  }
-}
-
-func intAt(buffer: view Buffer(Int), index: view Int) ret Int realtime {
-  unsafe {
-    ret rae_ext_rae_buf_get(buf: buffer, index: index)
-  }
-}
-
-func firstInputOf(plan: view RenderPlan, node: view Int) ret Int realtime {
-  ret intAt(buffer: plan.inputs, index: intAt(buffer: plan.inputStart, index: node))
 }
 
 # ---- the node kinds' process functions ----------------------------------------
@@ -532,6 +491,30 @@ func processNode(
     }
     case NodeKind.output {
       processOutput(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.eq {
+      processEq(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.compressor {
+      processCompressor(
+        plan: plan
+        node: node
+        out: out
+        frames: frames
+      )
+    }
+    case NodeKind.reverb {
+      processReverb(
         plan: plan
         node: node
         out: out
