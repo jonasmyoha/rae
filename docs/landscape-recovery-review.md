@@ -68,7 +68,7 @@ performance improvement. Do not copy this candidate unchanged to other species.
 ## Reference comparison
 
 The private image presentation is at
-`/Users/jonas/Documents/my_own_stuff/peli_ideoita/environmentReferenceStudy/recoveryReview/index.html`.
+`recoveryReview/index.html` in the private reference study (now the looks-development repository).
 It contains front/side/under-crown views for all three versions and the actual
 T04/T05/T07/T10 crops alongside them. Private source images remain outside git.
 

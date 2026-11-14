@@ -303,7 +303,7 @@ shadows, bloom and the UI.
 **Images saved on the phone** (iPhone 15 Pro, headless screenshot,
 `RAE_GPU2D_SCREENSHOT` into the app's Documents) show the same scene in both,
 without the water in forward. Kept outside the repository:
-`~/Pictures/rae/forward-rae-4/walker-{forward,deferred}-iphone.png` (forward-rae-4's
+`forward-rae-4/walker-{forward,deferred}-iphone.png` (forward-rae-4's
 114 mode) and `walker-forward-126-{iphone,mac}.png` (126).
 
 **Measured on the iPhone 15 Pro.** Landscape, `RAE_FRAME_TIMING=1`, dynamic

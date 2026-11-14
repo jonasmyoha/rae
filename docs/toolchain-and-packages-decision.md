@@ -369,7 +369,7 @@ needs Xcode 16 or older, because `tools/ios` at 0.1.91 targets iOS 13.
 
 This was the plan:
 
-Then the migration, one project at a time: the new SUMU; game proto1, then delete `~/personal/rae/rae-pinned`
+Then the migration, one project at a time: the new SUMU; game proto1, then delete the `rae-pinned` worktree
 and its `make rae-pin`; game proto2; game proto3, starting from `v0.1.91`. Each `scripts/rae-env.sh` shrinks
 to what is truly the project's own, or goes. Each project's `.env` line that sets `RAE_ROOT` must go in
 the same step, or it keeps overriding the pin without anyone noticing.
