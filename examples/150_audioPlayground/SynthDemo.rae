@@ -1,0 +1,53 @@
+# The state of the Synth section: the synth's sound as the panel set it, the notes held now (by
+# the mouse, by each finger, by a MIDI keyboard), the platform's MIDI with the sources connected
+# so far, and the tempo map and transport the metronome is scheduled on.
+open audio/AudioSynth
+open audio/MidiPorts
+open audio/MusicalTime
+open ecs/Entity
+
+# The keyboard's notes: C4 (MIDI 60) to C5
+const keyboardLowNote: Int = 60
+
+const keyboardKeys: Int = 13
+
+type SynthDemo {
+  sound: SynthSound
+  # the waveforms the waveform button steps through, and which it shows
+  waveformIndex: Int = 0
+  # the notes held by the on-screen keyboard this frame (MIDI numbers), and by MIDI
+  keyboardHeld: List(Int)
+  midiHeld: List(Int)
+  # the keys as entities, C4 first (found once, after the scene is mounted)
+  keyEntityIds: List(EntityId)
+  midi: MidiPorts
+  midiConnected: List(Int)
+  # when the sources are looked at next (s, the window's clock)
+  nextMidiScanSeconds: Float64 = 0.0
+  midiStatus: String = "MIDI: looking for keyboards"
+  midiLast: String = ""
+  tempo: TempoMap
+  transport: Transport
+  patternsPlayed: Int = 0
+  keyNotesPlayed: Int = 0
+  # the most keyboard notes held at once (for the demo's summary)
+  keyboardHeldMost: Int = 0
+  midiNotesPlayed: Int = 0
+}
+
+func createSynthDemo(sampleRate: view Int) ret SynthDemo {
+  ret SynthDemo {
+    sound: SynthSound {}
+    keyboardHeld: {}
+    midiHeld: {}
+    keyEntityIds: {}
+    midi: openMidi(name: "Rae audio playground")
+    midiConnected: {}
+    tempo: createTempoMap(sampleRate: sampleRate)
+    transport: createTransport()
+  }
+}
+
+func endSynthDemo(demo: view SynthDemo) {
+  closeMidi(this: demo.midi)
+}

@@ -40,6 +40,19 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   weight and the ground. `StepsSection`'s step sound system is the game's own code: it plays
   the sound of that ground, louder at speed, and a heavy stomp under the 12 t mech, each a
   little varied. The walker kit has no sound code.
+- **Synth and MIDI** (the third column): the package's own synth (`audio/AudioSynth`).
+  - The **keyboard**, C4 to C5, plays with the mouse (drag across the keys to slide from note
+    to note) and with several fingers at once on a touch screen.
+  - **Waveform** steps through soft (a sine and its octave, the synth's own tone), sine,
+    triangle, square and saw; the four sliders set the envelope (attack, decay, sustain,
+    release). The notes sounding take a change at once.
+  - **Metronome** plays two bars of 4/4 at the tempo slider's speed: a click on every beat, the
+    first of each bar an octave up and louder. Its notes are scheduled at exact samples
+    (`playNoteAt`), their times from a TempoMap and a Transport (`audio/MusicalTime`); it is a
+    technical signal, not music.
+  - **MIDI**: every connected MIDI keyboard or controller plays the synth. The line under it
+    names them, or says none is connected; one plugged in later is found within two seconds.
+    The last note received is shown, and its key lights up.
 - **Status:** the device the engine plays on, its sample rate and period, the latency the device
   and the engine add, the frames of silence played because samples were late (underruns), and
   how many sounds played and ended.
@@ -50,7 +63,8 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   shared one in `lib/assets/walker/`.
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
-  `GameSection`, `PlacedSection`, `StepsSection` with its state in `StepsDemo`, `StatusSection`), run once a frame from `Main.rae`.
+  `GameSection`, `PlacedSection`, `StepsSection` with its state in `StepsDemo`, `SynthSection` with its state in
+  `SynthDemo`, `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -63,7 +77,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 |---|---|
 | `RAE_SDL_HEADLESS_MS=N` | a headless run of N ms; the engine renders offline (no device) |
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
-| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
+| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
 

@@ -11,6 +11,7 @@ open audio/AudioSpatial
 open audio/Sound
 open audio/VoiceControls
 open StepsDemo
+open SynthDemo
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Transform
@@ -61,6 +62,8 @@ type Playground {
   shotsAtOnceMost: Int = 0
   # a walker and a mech crossing a strip of grounds, and the steps their events play
   stepsDemo: StepsDemo
+  # the synth's keyboard, sound, metronome and MIDI
+  synthDemo: SynthDemo
   engineRate: Float = 1.0
 }
 
@@ -114,6 +117,7 @@ func createPlayground() ret Playground {
     shot: shot
     random: createRandom(seed: 150)
     stepsDemo: stepsDemo
+    synthDemo: createSynthDemo(sampleRate: audio.sampleRate)
   }
 }
 
@@ -140,5 +144,6 @@ func shareToDecibels(share: view Float) ret Float {
 }
 
 func endPlayground(playground: mod Playground) ret Int {
+  endSynthDemo(demo: playground.synthDemo)
   ret playground.audio.stopAudio()
 }

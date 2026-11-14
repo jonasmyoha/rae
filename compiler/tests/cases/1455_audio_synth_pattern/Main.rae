@@ -1,0 +1,123 @@
+# A pattern on the synth at exact samples (audio/AudioSynth, audio/AudioSchedule playNoteAt,
+# audio/MusicalTime), rendered offline with RAE_REALTIME_CHECK=1 (config.env).
+# A metronome: two bars of 4/4 at 150 bpm, a click on every beat (a 50 ms note), an accent on
+# each bar's first (an octave up, louder), on the triangle wave with a 10 ms release.
+# 1. Every note starts on its sample: the sample before it is silent, its own is not.
+# 2. The accents are louder than the other beats.
+# 3. A note's release ends in time: 100 frames after its release it still sounds, 500 after
+#    it is silent.
+# 4. setSynthSound changes the waveform: the same note on the square wave is a different signal.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/AudioSynth
+open audio/MusicalTime
+
+const rate: Int = 48000
+
+const clickFrames: Int = 2400
+
+func leftAt(samples: view List(Float), frame: view Int) ret Float {
+  ret samples.copyAtFallback(index: frame * 2, fallback: 99.0)
+}
+
+func peakOf(samples: view List(Float), from: view Int, to: view Int) ret Float {
+  var peak: Float = 0.0
+  loop var frame: Int = from, frame < to, ++frame {
+    peak = Math.max(a: peak, b: Math.abs(value: leftAt(samples: samples, frame: frame)))
+  }
+  ret peak
+}
+
+func main() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  audio.setSynthSound(sound: SynthSound {
+    waveform: SynthWaveform.triangle
+    attackSeconds: 0.001
+    decaySeconds: 0.05
+    sustain: 0.5
+    releaseSeconds: 0.01
+  })
+  var tempo: TempoMap = createTempoMap(sampleRate: rate)
+  tempo.setTempo(tick: 0, microsecondsPerQuarter: microsecondsPerQuarterOf(beatsPerMinute: 150.0))
+  var transport: Transport = createTransport()
+  transport.transportPlay(tempo: tempo, fromTick: 0, atSample: 4800)
+  var starts: List(Int) = {}
+  loop var beat: Int = 0, beat < 8, ++beat {
+    let tick: Int = tempo.tickOfBar(bar: beat / 4 + 1, beat: beat % 4 + 1)
+    let at: Int = transport.transportSampleOfTick(tempo: tempo, tick: tick)
+    var note: Int = 72
+    var velocity: Float = 0.6
+    if beat % 4 is 0 {
+      note = 84
+      velocity = 1.0
+    }
+    audio.playNoteAt(
+      note: note
+      velocity: velocity
+      bus: AudioBusKind.effects
+      atSample: at
+    )
+    audio.releaseNoteAt(note: note, atSample: at + clickFrames)
+    starts.add(value: at)
+  }
+  let total: Int = starts.copyAtDefault(index: 7) + 19200
+  let rendered: List(Float) = audio.renderOffline(frames: total)
+  # 1. on their samples (19200 frames a beat at 150 bpm)
+  var onTime: Int = 0
+  var line: String = ""
+  loop let at: Int in starts {
+    line = "{line} {at}"
+    if leftAt(samples: rendered, frame: at - 1) is 0.0 and leftAt(samples: rendered, frame: at) is not 0.0 {
+      onTime = onTime + 1
+    }
+  }
+  log("the beats at samples{line}")
+  log("notes starting on their sample: {onTime} of 8")
+  # 2. the accents
+  let accent: Float = peakOf(
+    samples: rendered
+    from: starts.copyAtDefault(index: 0)
+    to: starts.copyAtDefault(index: 0) + clickFrames
+  )
+  let beat: Float = peakOf(
+    samples: rendered
+    from: starts.copyAtDefault(index: 1)
+    to: starts.copyAtDefault(index: 1) + clickFrames
+  )
+  let secondAccent: Float = peakOf(
+    samples: rendered
+    from: starts.copyAtDefault(index: 4)
+    to: starts.copyAtDefault(index: 4) + clickFrames
+  )
+  log("accents louder: {accent > beat * 1.4 and secondAccent > beat * 1.4}")
+  # 3. the release (10 ms, 480 frames, from the sustain level)
+  let released: Int = starts.copyAtDefault(index: 1) + clickFrames
+  log(
+    "after the release: still sounding at 100 frames {peakOf(
+      samples: rendered
+      from: released + 90
+      to: released + 110
+    ) > 0.0}, silent at 500 {peakOf(samples: rendered, from: released + 500, to: released + 4000) is 0.0}"
+  )
+  # 4. the same note on the square wave
+  audio.setSynthSound(sound: SynthSound { waveform: SynthWaveform.square, decaySeconds: 0.01 })
+  let at: Int = audio.nextSafeSampleTime() + 100
+  audio.playNoteAt(
+    note: 72
+    velocity: 0.6
+    bus: AudioBusKind.effects
+    atSample: at
+  )
+  let square: List(Float) = audio.renderOffline(frames: 4000)
+  var flat: Int = 0
+  loop var frame: Int = 1200, frame < 3000, ++frame {
+    let now: Float = leftAt(samples: square, frame: frame)
+    if now is leftAt(samples: square, frame: frame - 1) and now is not 0.0 {
+      flat = flat + 1
+    }
+  }
+  log("the square wave holds its level between its edges: {flat > 1000}")
+  let blocks: Int = audio.stopAudio()
+}

@@ -1,0 +1,493 @@
+# The Synth section: the package's own synth (audio/AudioSynth) played from an on-screen
+# keyboard, a MIDI keyboard and a metronome.
+#
+# - The keyboard is thirteen keys, C4 to C5. Every frame each pointer on it, the mouse and each
+#   finger (Gpu2d's touches), is hit-tested against the keys; a note starts when a key is first
+#   held and is released when nothing holds it any more, so a drag slides from key to key and
+#   several fingers play a chord.
+# - The waveform button and the envelope sliders set the synth's sound (setSynthSound).
+# - The metronome plays two bars of 4/4 at the tempo slider's speed, each beat a short note and
+#   the first of each bar an octave up and louder: a technical click, not music. Its notes are
+#   scheduled at exact samples (playNoteAt), their times from a TempoMap and a Transport
+#   (audio/MusicalTime).
+# - MIDI: every connected source (audio/MidiPorts) plays the synth through playMidi; the status
+#   names them, or says none is connected. A source plugged in later is found within two
+#   seconds.
+import Gpu2d
+import Gpu2dSimulatedInput
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/AudioSynth
+open audio/Midi
+open audio/MidiPorts
+open audio/MusicalTime
+open ecs/Entity
+open ui/Ecs
+open ui/InputKind
+open ui/UiSystems
+open ui/UiValues
+open ui/inputSystem/InputSystem
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ecs/ComponentTable
+open app3d/UiShell
+open Playground
+open SynthDemo
+
+# A metronome click lasts 60 ms; the first one starts 100 ms after the press
+const clickSeconds: Float = 0.06
+
+const metronomeLeadSeconds: Float = 0.1
+
+func setSynthDefaults(values: mod UiValues) {
+  let unusedAttack: Bool = setUiValue(values: values, key: "synth.attack", value: 5.0)
+  let unusedDecay: Bool = setUiValue(values: values, key: "synth.decay", value: 150.0)
+  let unusedSustain: Bool = setUiValue(values: values, key: "synth.sustain", value: 0.6)
+  let unusedRelease: Bool = setUiValue(values: values, key: "synth.release", value: 250.0)
+  let unusedTempo: Bool = setUiValue(values: values, key: "synth.tempo", value: 120.0)
+}
+
+func waveformAt(index: view Int) ret SynthWaveform {
+  if index is 1 {
+    ret SynthWaveform.sine
+  }
+  if index is 2 {
+    ret SynthWaveform.triangle
+  }
+  if index is 3 {
+    ret SynthWaveform.square
+  }
+  if index is 4 {
+    ret SynthWaveform.saw
+  }
+  ret SynthWaveform.soft
+}
+
+# The synth's sound from the waveform button and the envelope sliders
+func applySynthSound(playground: mod Playground, values: view UiValues) {
+  playground.synthDemo.sound = SynthSound {
+    waveform: waveformAt(index: playground.synthDemo.waveformIndex)
+    attackSeconds: uiValue(values: values, key: "synth.attack", fallback: 5.0) / 1000.0
+    decaySeconds: uiValue(values: values, key: "synth.decay", fallback: 150.0) / 1000.0
+    sustain: uiValue(values: values, key: "synth.sustain", fallback: 0.6)
+    releaseSeconds: uiValue(values: values, key: "synth.release", fallback: 250.0) / 1000.0
+  }
+  playground.audio.setSynthSound(sound: playground.synthDemo.sound)
+}
+
+# Two bars of 4/4 at `beatsPerMinute`, scheduled at their exact samples
+func playMetronome(playground: mod Playground, beatsPerMinute: view Float) {
+  let demo: mod SynthDemo = playground.synthDemo
+  demo.tempo.setTempo(
+    tick: 0
+    microsecondsPerQuarter: microsecondsPerQuarterOf(beatsPerMinute: beatsPerMinute as Float64)
+  )
+  let sampleRate: Int = playground.audio.sampleRate
+  let start: Int = playground.audio.nextSafeSampleTime() + ((metronomeLeadSeconds * (sampleRate as Float)).toInt())
+  demo.transport.transportPlay(tempo: demo.tempo, fromTick: 0, atSample: start)
+  let clickFrames: Int = (clickSeconds * (sampleRate as Float)).toInt()
+  loop var beat: Int = 0, beat < 8, ++beat {
+    let tick: Int = demo.tempo.tickOfBar(bar: beat / 4 + 1, beat: beat % 4 + 1)
+    let at: Int = demo.transport.transportSampleOfTick(tempo: demo.tempo, tick: tick)
+    var note: Int = keyboardLowNote + 12
+    var velocity: Float = 0.6
+    if beat % 4 is 0 {
+      note = keyboardLowNote + 24
+      velocity = 1.0
+    }
+    playground.audio.playNoteAt(
+      note: note
+      velocity: velocity
+      bus: AudioBusKind.effects
+      atSample: at
+    )
+    playground.audio.releaseNoteAt(note: note, atSample: at + clickFrames)
+  }
+  demo.patternsPlayed = demo.patternsPlayed + 1
+}
+
+# The keys' entities, found once the scene is up
+func findKeys(demo: mod SynthDemo, world: view UiWorld) {
+  if demo.keyEntityIds.length > 0 {
+    ret
+  }
+  loop var key: Int = 0, key < keyboardKeys, ++key {
+    demo.keyEntityIds.add(value: nodeEntityFor(world: world, nodeId: "Key{key}"))
+  }
+}
+
+# The note of the key at (`x`, `y`) for a pointer of `kind`, or -1
+func keyNoteAt(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+  x: view Float
+  y: view Float
+  kind: view InputKind
+) ret Int {
+  let hit: EntityId = uiHitTestFor(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    kind: kind
+    touchTargetSize: input.touchTargetSize
+  )
+  loop var key: Int = 0, key < demo.keyEntityIds.length, ++key {
+    if demo.keyEntityIds.copyAtDefault(index: key) is hit {
+      ret keyboardLowNote + key
+    }
+  }
+  ret -1
+}
+
+func holds(notes: view List(Int), note: view Int) ret Bool {
+  loop let held: Int in notes {
+    if held is note {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The notes the mouse and the fingers hold on the keyboard now
+func keyboardNotes(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+) ret List(Int) {
+  var notes: List(Int) = {}
+  if input.pointer.down and input.pointer.kind is not InputKind.touch {
+    let note: Int = keyNoteAt(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      input: input
+      x: input.pointer.x
+      y: input.pointer.y
+      kind: input.pointer.kind
+    )
+    if note >= 0 {
+      notes.add(value: note)
+    }
+  }
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    let note: Int = keyNoteAt(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      input: input
+      x: Gpu2d.touchX(index: i)
+      y: Gpu2d.touchY(index: i)
+      kind: InputKind.touch
+    )
+    if note >= 0 and not holds(notes: notes, note: note) {
+      notes.add(value: note)
+    }
+  }
+  ret notes
+}
+
+# Each key painted held or not (held by the keyboard or by MIDI)
+func paintKeys(demo: view SynthDemo, world: mod UiWorld) {
+  loop var key: Int = 0, key < keyboardKeys, ++key {
+    let note: Int = keyboardLowNote + key
+    var slot: String = "keyWhite"
+    let semitone: Int = key % 12
+    if semitone is 1 or semitone is 3 or semitone is 6 or semitone is 8 or semitone is 10 {
+      slot = "keyBlack"
+    }
+    if holds(notes: demo.keyboardHeld, note: note) or holds(notes: demo.midiHeld, note: note) {
+      slot = "keyHeld"
+    }
+    setNodeFillSlot(world: world, nodeId: "Key{key}", slot: slot)
+  }
+}
+
+# The keyboard's notes this frame against the last: new ones start, gone ones are released
+func playKeyboard(
+  playground: mod Playground
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+) ret Bool {
+  let now: List(Int) = keyboardNotes(
+    demo: playground.synthDemo
+    world: world
+    uiSystems: uiSystems
+    input: input
+  )
+  let at: Int = playground.audio.nextSafeSampleTime()
+  var changed: Bool = false
+  loop let note: Int in now {
+    if not holds(notes: playground.synthDemo.keyboardHeld, note: note) {
+      playground.audio.playNoteAt(
+        note: note
+        velocity: 0.8
+        bus: AudioBusKind.effects
+        atSample: at
+      )
+      playground.synthDemo.keyNotesPlayed = playground.synthDemo.keyNotesPlayed + 1
+      changed = true
+    }
+  }
+  loop let note: Int in playground.synthDemo.keyboardHeld {
+    if not holds(notes: now, note: note) {
+      playground.audio.releaseNoteAt(note: note, atSample: at)
+      changed = true
+    }
+  }
+  playground.synthDemo.keyboardHeld = now
+  playground.synthDemo.keyboardHeldMost = Math.max(
+    a: playground.synthDemo.keyboardHeldMost
+    b: now.length
+  )
+  ret changed
+}
+
+# Connect the MIDI sources not yet connected, and say which there are
+func scanMidi(demo: mod SynthDemo) {
+  var names: String = ""
+  let sources: List(MidiEndpoint) = midiSources()
+  # forget the sources that are gone (unplugged), so a new one with their id connects again
+  var still: List(Int) = {}
+  loop let connected: Int in demo.midiConnected {
+    loop let source: MidiEndpoint in sources {
+      if source.id is connected {
+        still.add(value: connected)
+      }
+    }
+  }
+  demo.midiConnected = still
+  loop let source: MidiEndpoint in sources {
+    if not holds(notes: demo.midiConnected, note: source.id) {
+      if demo.midi.connectMidiSource(source: source.id) {
+        demo.midiConnected.add(value: source.id)
+      }
+    }
+    if names.length() > 0 {
+      names = "{names}, "
+    }
+    names = "{names}{source.name}"
+  }
+  if demo.midi.client is 0 {
+    demo.midiStatus = "MIDI: not available on this platform"
+  } else if names.length() is 0 {
+    demo.midiStatus = "MIDI: no keyboard connected (one plugged in is found in 2 s)"
+  } else {
+    demo.midiStatus = "MIDI: playing from {names}"
+  }
+}
+
+func midiNoteName(message: view MidiMessage) ret String {
+  if message.kind is MidiKind.noteOn and message.data2 > 0 {
+    ret "note on {message.data1} (velocity {message.data2})"
+  }
+  ret "note off {message.data1}"
+}
+
+# This frame's MIDI messages onto the synth; true when a note started or ended
+func playMidiInput(playground: mod Playground) ret Bool {
+  var changed: Bool = false
+  loop let message: MidiMessage in playground.synthDemo.midi.pollMidi() {
+    let played: Bool = playground.audio.playMidi(message: message, bus: AudioBusKind.effects)
+    let isNote: Bool = message.kind is MidiKind.noteOn or message.kind is MidiKind.noteOff
+    if played and isNote {
+      let note: Int = message.data1
+      if message.kind is MidiKind.noteOn and message.data2 > 0 {
+        if not holds(notes: playground.synthDemo.midiHeld, note: note) {
+          playground.synthDemo.midiHeld.add(value: note)
+        }
+        playground.synthDemo.midiNotesPlayed = playground.synthDemo.midiNotesPlayed + 1
+      } else {
+        var left: List(Int) = {}
+        loop let held: Int in playground.synthDemo.midiHeld {
+          if held is not note {
+            left.add(value: held)
+          }
+        }
+        playground.synthDemo.midiHeld = left
+      }
+      playground.synthDemo.midiLast = "Last: {midiNoteName(message: message)}, channel {message.channel + 1}"
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# The section's keyboard, settings, metronome and MIDI this frame; true when what it shows
+# changed
+func synthSection(
+  playground: mod Playground
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+  values: view UiValues
+) ret Bool {
+  findKeys(demo: playground.synthDemo, world: world)
+  var changed: Bool = false
+  if uiActionFired(world: world, actionId: "synth.wave") {
+    playground.synthDemo.waveformIndex = (playground.synthDemo.waveformIndex + 1) % 5
+    applySynthSound(playground: playground, values: values)
+    let waveform: SynthWaveform = playground.synthDemo.sound.waveform
+    setNodeText(world: world, nodeId: "SynthWaveLabel", value: "Waveform: {waveform}")
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "synth.envelope") {
+    applySynthSound(playground: playground, values: values)
+  }
+  if uiActionFired(world: world, actionId: "synth.pattern") {
+    playMetronome(
+      playground: playground
+      beatsPerMinute: uiValue(values: values, key: "synth.tempo", fallback: 120.0)
+    )
+    changed = true
+  }
+  let keys: Bool = playKeyboard(
+    playground: playground
+    world: world
+    uiSystems: uiSystems
+    input: input
+  )
+  let midi: Bool = playMidiInput(playground: playground)
+  if keys or midi {
+    paintKeys(demo: playground.synthDemo, world: world)
+    changed = true
+  }
+  # the MIDI sources every two seconds, on the clock (an idle window draws few frames)
+  let now: Float64 = Gpu2d.nowSeconds()
+  if now >= playground.synthDemo.nextMidiScanSeconds {
+    playground.synthDemo.nextMidiScanSeconds = now + 2.0
+    scanMidi(demo: playground.synthDemo)
+    setNodeText(world: world, nodeId: "MidiStatus", value: playground.synthDemo.midiStatus)
+    changed = true
+  }
+  if midi {
+    setNodeText(world: world, nodeId: "MidiLast", value: playground.synthDemo.midiLast)
+  }
+  ret changed
+}
+
+# Where a key's middle is, as shares of the window (0..1, of the UI root, which is the window in
+# the UI's units), for a simulated finger
+func keyShareX(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  key: view Int
+) ret Float {
+  let entityId: EntityId = demo.keyEntityIds.copyAtDefault(index: key)
+  if not componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    ret 0.0
+  }
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret (rect.x + rect.w * 0.5) / Math.max(a: 1.0, b: nodeRectW(world: world, nodeId: "UiRoot"))
+}
+
+func keyShareY(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  key: view Int
+) ret Float {
+  let entityId: EntityId = demo.keyEntityIds.copyAtDefault(index: key)
+  if not componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    ret 0.0
+  }
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret (rect.y + rect.h * 0.5) / Math.max(a: 1.0, b: nodeRectH(world: world, nodeId: "UiRoot"))
+}
+
+func fingerOnKey(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  kind: view Int
+  finger: view Int
+  key: view Int
+) {
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: kind
+    id: finger
+    x: keyShareX(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      key: key
+    )
+    y: keyShareY(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      key: key
+    )
+  )
+}
+
+# Fingers 1, 2, 3 ... each on its key of `keys`
+func fingersOnKeys(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  kind: view Int
+  keys: view List(Int)
+) {
+  loop var finger: Int = 0, finger < keys.length, ++finger {
+    fingerOnKey(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      kind: kind
+      finger: finger + 1
+      key: keys.copyAtDefault(index: finger)
+    )
+  }
+}
+
+# The demo's fingers (RAE_AUDIO_PLAYGROUND_DEMO=1): three come down on three keys at once, the
+# first slides to another key, then all lift; the touches are SDL's own events, as a touch
+# screen sends
+func synthDemoStep(
+  demo: view SynthDemo
+  world: view UiWorld
+  uiSystems: view UiSystems
+  frame: view Int
+) {
+  if frame is 140 {
+    fingersOnKeys(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      kind: simulatedTouchDown
+      keys: List(Int) { 0, 5, 12 }
+    )
+  }
+  if frame is 150 {
+    fingersOnKeys(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      kind: simulatedTouchMotion
+      keys: List(Int) { 2 }
+    )
+  }
+  if frame is 170 {
+    fingersOnKeys(
+      demo: demo
+      world: world
+      uiSystems: uiSystems
+      kind: simulatedTouchUp
+      keys: List(Int) { 2, 5, 12 }
+    )
+  }
+}
