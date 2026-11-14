@@ -185,6 +185,7 @@ func runFrameLayoutTransform(
     index: uiSystemWidgetStyle
   ) {
     buttonStyleUpdate(world: world)
+    systemDone(schedule: schedule, index: uiSystemWidgetStyle)
   }
   if uiShouldRun(
     schedule: schedule
@@ -193,6 +194,7 @@ func runFrameLayoutTransform(
     index: uiSystemSafeArea
   ) {
     applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
+    systemDone(schedule: schedule, index: uiSystemSafeArea)
   }
   # #978: bottom-anchored overlays follow the layout extent and the safe
   # inset; layer tags resolve for anything mounted since last frame.
@@ -205,6 +207,7 @@ func runFrameLayoutTransform(
     index: uiSystemLayout
   ) {
     layoutSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemLayout)
   }
   if uiShouldRun(
     schedule: schedule
@@ -213,6 +216,7 @@ func runFrameLayoutTransform(
     index: uiSystemFit
   ) {
     fitSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemFit)
   }
   animationRun(world: world, uiSystems: uiSystems)
   if uiShouldRun(
@@ -222,6 +226,7 @@ func runFrameLayoutTransform(
     index: uiSystemTransform
   ) {
     transformSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemTransform)
   }
   # Measured centering (#219): cache glyph bounds once per change so
   # the render pass reads them instead of remeasuring every frame.
@@ -233,6 +238,7 @@ func runFrameLayoutTransform(
     index: uiSystemVisualBounds
   ) {
     visualBoundsSystem(world: world, uiSystems: uiSystems, res: gpuUi)
+    systemDone(schedule: schedule, index: uiSystemVisualBounds)
   }
 }
 

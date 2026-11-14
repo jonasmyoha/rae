@@ -176,6 +176,19 @@ the path that allocates (fixture 1459).
 system that runs, and a mark per system it skipped (nothing it reads changed). So 106 and the
 walkers show where a frame goes by system, with no code in the app.
 
+Done in Rae 0.3.133 (perf step 4). A schedule has no hub, so it records through the runtime
+table (§4.3): `perfRuntimeGeneration` says whether a table is installed, `perfRuntimeName`
+registers a name in the installed hub from the thread that installed it (the hub's names live in
+a box the runtime holds while the table is installed), and `perfRuntimeNamedEvent` writes on the
+calling thread's lane. Each decision (`shouldRun`, `shouldRunDeclared`, `uiShouldRun`) opens a
+zone named after the system when it runs, or writes a mark "<name> (skipped)"; the entry caches
+its two name ids per table. Rae has no function references, so the schedule cannot wrap the
+system's call: the runner calls `systemDone(schedule:, index:)` after it (`runScheduledUiSystems`
+and 106's runners do), and otherwise the next decision closes the zone. The walkers have no
+schedule: their update's systems (climate, ui, camera, physics, knockdown, marks, snow,
+characters, terrain, forest) are `Profile` zones in `app3d/WalkerAppUpdate`, so 143 needs no code
+either. Case 1464 checks a three-system schedule.
+
 ### 4.3 Threads, tasks and parallel work
 
 | source | what is recorded | where |

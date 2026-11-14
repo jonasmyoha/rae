@@ -35,6 +35,10 @@ frames it measures.
   (docs/perf-tools-design.md §4.3). `capturedNames` leaves these names out. A `spawn thread`
   has a lane named by its function, and a thread C made one named at `rae_thread_attach_named`
   ("attached thread" for plain `rae_thread_attach`), up to 8 such threads (0.3.132).
+- Systems (perf step 4, Rae 0.3.133): a `lib/ecs` Schedule records each system that runs as a
+  zone named after it, and each one skipped because nothing it reads changed as a mark
+  `<name> (skipped)`; a runner closes the zone with `systemDone`. 106 shows its UI systems and
+  observers this way, and the walkers (143) show their update's systems as zones.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

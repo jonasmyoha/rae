@@ -440,12 +440,15 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
   netApplyRemote(netSeam: app.netSeam, netPlayers: app.world.netPlayers)
+  Profile.zoneBegin(profiler: app.profiler, name: "climate")
   updateWalkerClimate(app: app)
+  Profile.zoneEnd(profiler: app.profiler, name: "climate")
   # the far trees follow the season (baked again when it moved)
   let unusedBaked: Bool = updateSeasonImpostors(
     forest: app.terrainSystem.forest
     renderer: app.renderSystem.renderer
   )
+  Profile.zoneBegin(profiler: app.profiler, name: "ui")
   let uiTick: UiTick = uiUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
@@ -460,9 +463,11 @@ func updateWalkerApp(app: mod WalkerApp) {
     deltaTime: deltaTime
     now: now
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "ui")
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
 
+  Profile.zoneBegin(profiler: app.profiler, name: "camera")
   let camTick: CameraTick = cameraUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
@@ -474,6 +479,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     physicsSystem: app.physicsSystem
     deltaTime: deltaTime
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "camera")
   let joyActive: Bool = camTick.joyActive
   let studyMoved: Bool = stepCameraStudy(
     study: app.cameraStudy
@@ -610,6 +616,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Fixed-timestep physics (#553, lib/box3d/ecs): the movers, then the bodies,
   # at 60 Hz from the frame time, decoupled from render; it writes every
   # character's controller and every cube's Transform3D.
+  Profile.zoneBegin(profiler: app.profiler, name: "physics")
   let physicsSteps: Int = stepPhysicsFrame(
     physicsSystem: app.physicsSystem
     transforms: app.world.transforms
@@ -617,6 +624,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     bushes: bushSpots(propKinds: app.world.propKinds, transforms: app.world.transforms)
     frameTime: deltaTime
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "physics")
   let after: view ThirdPersonController = controllerOf(
     controllers: app.world.controllers
     entityId: controlledEntityId
@@ -640,6 +648,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   )
   # Whoever a bump knocked over falls as a ragdoll; whoever is down gets up
   # where they landed (app3d/WalkerKnockdown)
+  Profile.zoneBegin(profiler: app.profiler, name: "knockdown")
   walkerKnockdownUpdate(
     physicsSystem: app.physicsSystem
     world: app.world
@@ -648,7 +657,9 @@ func updateWalkerApp(app: mod WalkerApp) {
     wantsUp: intent.moveX is not 0.0 or intent.moveY is not 0.0 or intent.jump
     deltaTime: deltaTime
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "knockdown")
   # Every character on its feet leaves a print each stride (app3d/WalkerMarks)
+  Profile.zoneBegin(profiler: app.profiler, name: "marks")
   walkerMarksUpdate(
     walkerMarks: app.walkerMarks
     physicsSystem: app.physicsSystem
@@ -659,9 +670,11 @@ func updateWalkerApp(app: mod WalkerApp) {
     deltaTime: deltaTime
     palette: app.terrainSystem.groundPalette
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "marks")
   # Deep snow (app3d/SnowField): the mesh round the camera's focus, the feet
   # that came down pressed into it, every character's feet on the pressed
   # snow and its walk slowed
+  Profile.zoneBegin(profiler: app.profiler, name: "snow")
   updateSnowField(
     field: app.terrainSystem.snowField
     renderer: app.renderSystem.renderer
@@ -669,6 +682,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     focus: app.cameraSystem.camera.target
     touches: app.walkerMarks.footprints.touches
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "snow")
   setSnowFieldFrame(
     cache: app.renderSystem.renderer.passes.gbuffer
     field: app.terrainSystem.snowField
@@ -681,11 +695,13 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Every character's model follows its controller whenever the physics moved
   # it (one can be pushed or fall while the player drives another), and its
   # clip plays slowed in the air
+  Profile.zoneBegin(profiler: app.profiler, name: "characters")
   updateWalkerCharacters(
     world: app.world
     characterSystem: app.characterSystem
     physicsSystem: app.physicsSystem
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "characters")
   if characterMoved {
     app.persist.stateDirty = true
   }
@@ -753,6 +769,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   # the game), so the editor camera sees ground under the trees wherever it
   # goes; the rocks and bushes, which have bodies, and the physics below stay
   # with the walker
+  Profile.zoneBegin(profiler: app.profiler, name: "terrain")
   let terrainWrapped: Bool = updateInfiniteTerrain(
     terrainSystem: app.terrainSystem
     renderer: app.renderSystem.renderer
@@ -761,6 +778,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     groundFocus: app.cameraSystem.camera.target
     propFocus: followPos
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "terrain")
   # The reused rock entities moved: give them their new bodies
   if terrainWrapped {
     let rockCount: Int = placeRockBodies(
@@ -770,12 +788,14 @@ func updateWalkerApp(app: mod WalkerApp) {
     )
   }
   # The forest's trees in tiles round the camera's focus and the walker (app3d/PropTiles)
+  Profile.zoneBegin(profiler: app.profiler, name: "forest")
   let forestChanged: Bool = streamWalkerForest(
     terrainSystem: app.terrainSystem
     allocator: app.world.allocator
     focus: app.cameraSystem.camera.target
     walker: followPos
   )
+  Profile.zoneEnd(profiler: app.profiler, name: "forest")
   # The wide forest is far bigger than one physics ground: it follows the
   # walker, and the trunk pool stands on the trees nearest it
   if app.settings.land is WalkerLand.forest {

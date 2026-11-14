@@ -75,6 +75,7 @@ func createWorldFrame(world: mod UiWorld, uiSystems: mod UiSystems) ret WorldFra
     index: uiSystemLayout
   ) {
     layoutSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemLayout)
   }
   # Art-direction pass (#212 S6): Aspect + ScaleToFit run between layout and
   # transform. Change-gated, so an idle frame with an unchanged layout
@@ -86,6 +87,7 @@ func createWorldFrame(world: mod UiWorld, uiSystems: mod UiSystems) ret WorldFra
     index: uiSystemFit
   ) {
     fitSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemFit)
   }
   if uiShouldRun(
     schedule: schedule
@@ -94,6 +96,7 @@ func createWorldFrame(world: mod UiWorld, uiSystems: mod UiSystems) ret WorldFra
     index: uiSystemTransform
   ) {
     transformSystem(world: world, uiSystems: uiSystems)
+    systemDone(schedule: schedule, index: uiSystemTransform)
   }
   # The scroll-target entity for this world — the active page's ScrollRoot:
   # scroll handlers mutate its RuntimeOffset + ScrollState in place every

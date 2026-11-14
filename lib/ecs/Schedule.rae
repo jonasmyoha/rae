@@ -24,9 +24,23 @@
 # #939 adds the DECLARED form: addDeclaredSystem records each system's read /
 # write table ids and shouldRunDeclared computes the read generation from that
 # declaration by reflection, so the runner no longer supplies it.
+#
+# The event recorder (lib/perf, docs/perf-tools-design.md §4.2): while a hub has
+# its runtime table installed (a Profile capture does), each decision is
+# recorded on the calling thread's lane: a system that runs opens a zone named
+# after it, which the runner closes with systemDone after calling it (or the
+# schedule's next decision does), and a system skipped because nothing it reads
+# changed is a mark "<name> (skipped)". With nothing installed a decision costs
+# one call that reads the table's generation.
+#
+#   if shouldRun(schedule, layoutIdx, layoutReadGen) {
+#     layoutSystem(uiSystems: uiSystems, world)
+#     systemDone(schedule: schedule, index: layoutIdx)
+#   }
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/World
+open perf/Perf
 
 type ScheduleEntry {
   name: String
@@ -47,10 +61,17 @@ type ScheduleEntry {
   lastGeneration: Int
   # Live entity count at the last run (declared path only); -1 = never run.
   lastEntityCount: Int
+  # the recorder's table these name ids belong to (perfRuntimeGeneration), and the ids of the
+  # system's name and of "<name> (skipped)"; -1 = none yet
+  perfGeneration: Int = -1
+  perfRunId: Int = -1
+  perfSkipId: Int = -1
 }
 
 type Schedule {
   entries: List(ScheduleEntry)
+  # the entry whose zone is open in the recorder (-1: none)
+  openIndex: Int = -1
 }
 
 func createSchedule() ret Schedule {
@@ -114,12 +135,78 @@ func scheduleName(schedule: view Schedule, index: view Int) ret String {
 # value — when it differs from the last run (a read table mutated, or the first
 # run); false to skip when nothing it reads has changed.
 func shouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
+  let runs: Bool = scheduleJudge(schedule: schedule, index: index, readGeneration: readGeneration)
+  scheduleRecordDecision(schedule: schedule, index: index, runs: runs)
+  ret runs
+}
+
+func scheduleJudge(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
   let slot: mod ScheduleEntry = schedule.entries.modAt(index: index)
   if slot.lastGeneration is readGeneration {
     ret false
   }
   slot.lastGeneration = readGeneration
   ret true
+}
+
+# ---- the event recorder (lib/perf) ------------------------------------------
+
+# A decision into the recorder: the zone of a system that runs opens, a skipped one is a mark.
+# Closes the zone still open from the last decision first.
+func scheduleRecordDecision(schedule: mod Schedule, index: view Int, runs: view Bool) {
+  closeOpenSystem(schedule: schedule)
+  let generation: Int = perfRuntimeGeneration()
+  if generation is 0 {
+    ret
+  }
+  let slot: mod ScheduleEntry = schedule.entries.modAt(index: index)
+  if slot.perfGeneration is not generation {
+    slot.perfGeneration = generation
+    slot.perfRunId = perfRuntimeName(name: slot.name)
+    slot.perfSkipId = perfRuntimeName(name: "{slot.name} (skipped)")
+  }
+  if runs {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.zoneBegin
+      nameId: slot.perfRunId
+      value: 0
+      extra: index
+    )
+    schedule.openIndex = index
+  } else {
+    perfRuntimeNamedEvent(
+      kind: PerfKind.mark
+      nameId: slot.perfSkipId
+      value: 0
+      extra: index
+    )
+  }
+}
+
+# The system of entry `index` has run: its zone in the recorder closes. The runner calls it right
+# after the system (Rae has no function references, so the schedule cannot wrap the call).
+func systemDone(schedule: mod Schedule, index: view Int) {
+  if schedule.openIndex is index {
+    closeOpenSystem(schedule: schedule)
+  }
+}
+
+func closeOpenSystem(schedule: mod Schedule) {
+  if schedule.openIndex < 0 {
+    ret
+  }
+  let index: Int = schedule.openIndex
+  schedule.openIndex = -1
+  if let slot: view ScheduleEntry = schedule.entries.viewAt(index: index) {
+    if slot.perfGeneration is perfRuntimeGeneration() {
+      perfRuntimeNamedEvent(
+        kind: PerfKind.zoneEnd
+        nameId: slot.perfRunId
+        value: 0
+        extra: index
+      )
+    }
+  }
 }
 
 # ---- #939: declared read sets, resolved and evaluated by reflection ----------
@@ -223,14 +310,30 @@ func shouldRunDeclaredPlus(
     index: index
   ) + extraGeneration
   let alive: Int = worldAliveCount(W, world: world)
+  let runs: Bool = scheduleJudgeDeclared(
+    schedule: schedule
+    index: index
+    readGeneration: readGen
+    alive: alive
+  )
+  scheduleRecordDecision(schedule: schedule, index: index, runs: runs)
+  ret runs
+}
+
+func scheduleJudgeDeclared(
+  schedule: mod Schedule
+  index: view Int
+  readGeneration: view Int
+  alive: view Int
+) ret Bool {
   let slot: mod ScheduleEntry = schedule.entries.modAt(index: index)
   if slot.skipWhenClean is false {
     ret true
   }
-  if slot.lastGeneration is readGen and slot.lastEntityCount is alive {
+  if slot.lastGeneration is readGeneration and slot.lastEntityCount is alive {
     ret false
   }
-  slot.lastGeneration = readGen
+  slot.lastGeneration = readGeneration
   slot.lastEntityCount = alive
   ret true
 }

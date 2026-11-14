@@ -1,0 +1,104 @@
+# lib/ecs's Schedule in the event recorder (docs/perf-tools-design.md §4.2): while a hub has its
+# runtime table installed, a system that runs is a zone named after it (closed by systemDone, or
+# by the schedule's next decision) and a system skipped because nothing it reads changed is a
+# mark "<name> (skipped)". Without a table nothing is recorded.
+open ecs/Schedule
+open perf/Perf
+
+func work(rounds: copy Int) ret Int {
+  var value: Int = 1
+  loop var i: Int = 0, i < rounds, ++i {
+    value = (value * 31 + i) % 1000003
+  }
+  ret value
+}
+
+# One frame: `moved` is the generation `move` reads; collide and draw read nothing that changes
+func runFrame(schedule: mod Schedule, moved: view Int) ret Int {
+  var done: Int = 0
+  if shouldRun(schedule: schedule, index: 0, readGeneration: moved) {
+    done = done + work(rounds: 10000)
+    systemDone(schedule: schedule, index: 0)
+  }
+  if shouldRun(schedule: schedule, index: 1, readGeneration: 7) {
+    done = done + work(rounds: 10000)
+    systemDone(schedule: schedule, index: 1)
+  }
+  # draw's runner forgets systemDone: the next decision (or none) closes it
+  if shouldRun(schedule: schedule, index: 2, readGeneration: 7) {
+    done = done + work(rounds: 10000)
+  }
+  ret done
+}
+
+func countOf(hub: view PerfHub, kind: view PerfKind, name: view String) ret Int {
+  var count: Int = 0
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if event.kind is kind and hub.perfNameText(nameId: event.nameId as Int) is name {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() ret Int {
+  var schedule: Schedule = createSchedule()
+  let unusedMove: Int = schedule.addSystem(name: "move")
+  let unusedCollide: Int = schedule.addSystem(name: "collide")
+  let unusedDraw: Int = schedule.addSystem(name: "draw")
+  # not recording yet: nothing to see, and the judgment is the same
+  let before: Int = runFrame(schedule: schedule, moved: 1)
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 600, windowEvents: 1000, ringEvents: 1000 }
+  )
+  let mainRing: PerfRing = hub.perfThreadRing(name: "main")
+  hub.perfInstallRuntime(mainRing: mainRing)
+  # frame 2: move's input changed; collide and draw skip
+  let second: Int = runFrame(schedule: schedule, moved: 2)
+  # frame 3: move changed again
+  let third: Int = runFrame(schedule: schedule, moved: 3)
+  hub.perfFrame()
+  log("ran before: {before > 0}, then {second > 0} and {third > 0}")
+  log(
+    "move: {countOf(hub: hub, kind: PerfKind.zoneBegin, name: "move")} zones, {countOf(
+      hub: hub
+      kind: PerfKind.zoneEnd
+      name: "move"
+    )} closed"
+  )
+  log(
+    "collide skipped: {countOf(hub: hub, kind: PerfKind.mark, name: "collide (skipped)")}, draw skipped: {countOf(
+      hub: hub
+      kind: PerfKind.mark
+      name: "draw (skipped)"
+    )}, zones of them: {countOf(hub: hub, kind: PerfKind.zoneBegin, name: "collide") + countOf(
+      hub: hub
+      kind: PerfKind.zoneBegin
+      name: "draw"
+    )}"
+  )
+  # a new world's schedule runs everything once: draw's zone is closed by the next decision
+  var fresh: Schedule = createSchedule()
+  let unusedA: Int = fresh.addSystem(name: "draw")
+  let unusedB: Int = fresh.addSystem(name: "move")
+  if shouldRun(schedule: fresh, index: 0, readGeneration: 1) {
+    let unusedDrawn: Int = work(rounds: 1000)
+  }
+  if shouldRun(schedule: fresh, index: 1, readGeneration: 1) {
+    systemDone(schedule: fresh, index: 1)
+  }
+  hub.perfFrame()
+  log(
+    "draw: {countOf(hub: hub, kind: PerfKind.zoneBegin, name: "draw")} zone, {countOf(
+      hub: hub
+      kind: PerfKind.zoneEnd
+      name: "draw"
+    )} closed"
+  )
+  hub.freePerfHub()
+  # recording no more: the decisions still judge
+  let after: Int = runFrame(schedule: schedule, moved: 4)
+  log("after: {after > 0}, names kept: {hub.perfNameCount() > 11}")
+  ret 0
+}

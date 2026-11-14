@@ -208,7 +208,10 @@ void rae_thread_attach(void);
 void rae_thread_attach_named(const char* name);
 
 /* The event recorder's runtime table (runtime_perf_hooks.c, lib/perf/Perf perfInstallRuntime) */
-void rae_perf_install(void* rings, void* names);
+void rae_perf_install(void* rings, void* names, void* name_box);
+int64_t rae_perf_generation(void);
+void* rae_perf_name_box(void);
+void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra);
 void rae_perf_uninstall(void* rings);
 int64_t rae_perf_slot_count(void);
 int64_t rae_perf_worker_count(void);
@@ -606,6 +609,7 @@ void rae_ext_rae_log_write(rae_String text, rae_Bool newline);
 rae_String rae_ext_rae_str_from_cstr(const void* s);
 /* The event recorder: the name of the thread that claimed named slot `index` (runtime_perf_hooks.c) */
 rae_String rae_perf_thread_name(int64_t index);
+rae_Bool rae_perf_name_box_ready(void);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 // Free `s.data` only when `s.is_owned`. Safe to call on borrowed

@@ -125,6 +125,8 @@ type PerfHub {
 type PerfRuntimeTable {
   rings: Buffer(PerfRing)
   names: Buffer(Int)
+  # the hub's names while the table is installed (boxedNames)
+  nameBox: Buffer(List(String))
   # the hub's ring of each named thread's slot (a `spawn thread`, an attached thread), and
   # whether its lane has the thread's name yet
   threadRings: List(Int)
@@ -167,18 +169,44 @@ func freePerfHub(hub: mod PerfHub) {
 
 # A name's id (the same id for the same name); on the main thread, at setup
 func perfName(hub: mod PerfHub, name: view String) ret PerfName {
-  loop var i: Int = 0, i < hub.names.length(), ++i {
-    if hub.names.copyAtDefault(index: i) is name {
-      ret PerfName { id: i }
+  if let table: view PerfRuntimeTable = hub.runtime {
+    ret PerfName { id: perfNameIdIn(names: boxedNames(box: table.nameBox), name: name) }
+  }
+  ret PerfName { id: perfNameIdIn(names: hub.names, name: name) }
+}
+
+func perfNameIdIn(names: mod List(String), name: view String) ret Int {
+  loop var i: Int = 0, i < names.length(), ++i {
+    if names.copyAtDefault(index: i) is name {
+      ret i
     }
   }
-  hub.names.add(value: name)
-  ret PerfName { id: hub.names.length() - 1 }
+  names.add(value: name)
+  ret names.length() - 1
 }
 
 # The name of an id ("" for none)
 func perfNameText(hub: view PerfHub, nameId: view Int) ret String {
+  if let table: view PerfRuntimeTable = hub.runtime {
+    ret boxedNames(box: table.nameBox).copyAtDefault(index: nameId)
+  }
   ret hub.names.copyAtDefault(index: nameId)
+}
+
+# How many names the hub has
+func perfNameCount(hub: view PerfHub) ret Int {
+  if let table: view PerfRuntimeTable = hub.runtime {
+    ret boxedNames(box: table.nameBox).length()
+  }
+  ret hub.names.length()
+}
+
+# The names while a runtime table is installed: in a box whose address the runtime holds, so code
+# on the main thread with no hub can add one (perfRuntimeName)
+func boxedNames(box: view Buffer(List(String))) ret mod List(String) {
+  unsafe {
+    ret mod rae_ext_rae_buf_get(buf: box, index: 0)
+  }
 }
 
 # A ring for the thread called `name`; on the main thread, at setup, then handed to the thread
@@ -386,7 +414,21 @@ func perfRuntimeCodeName(code: view Int) ret String {
 func nativePerfInstall(
   rings: Buffer(PerfRing)
   names: Buffer(Int)
+  nameBox: Buffer(List(String))
 ) unsafe extern("rae_perf_install")
+
+func nativePerfGeneration() unsafe extern("rae_perf_generation") ret Int
+
+func nativePerfNameBox() unsafe extern("rae_perf_name_box") ret Buffer(List(String))
+
+func nativePerfNameBoxReady() unsafe extern("rae_perf_name_box_ready") ret Bool
+
+func nativePerfNamedEvent(
+  kind: Int
+  nameId: Int
+  value: Int
+  extra: Int
+) unsafe extern("rae_perf_named_event")
 
 func nativePerfUninstall(rings: Buffer(PerfRing)) unsafe extern("rae_perf_uninstall")
 
@@ -437,13 +479,24 @@ func perfInstallRuntime(hub: mod PerfHub, mainRing: view PerfRing) {
       let name: PerfName = hub.perfName(name: perfRuntimeCodeName(code: code))
       rae_ext_rae_buf_set(buf: names, index: code, value: name.id)
     }
+    # the names move into a box the runtime holds while the table is installed
+    var boxed: List(String) = {}
+    loop let name: String in hub.names {
+      boxed.add(value: name)
+    }
+    var nameBox: Buffer(List(String)) = rae_ext_rae_buf_alloc(
+      size: 1
+      elemSize: sizeof(List(String))
+    )
+    rae_ext_rae_buf_set(buf: nameBox, index: 0, value: own boxed)
     hub.runtime = PerfRuntimeTable {
       rings: rings
       names: names
+      nameBox: nameBox
       threadRings: threadRings
       threadNamed: threadNamed
     }
-    nativePerfInstall(rings: rings, names: names)
+    nativePerfInstall(rings: rings, names: names, nameBox: nameBox)
   }
 }
 
@@ -466,14 +519,50 @@ func perfNameThreadLanes(hub: mod PerfHub) {
 
 # The runtime records into this hub no more (its rings stay until freePerfHub)
 func perfUninstallRuntime(hub: mod PerfHub) {
+  var names: List(String) = {}
   if let table: view PerfRuntimeTable = hub.runtime {
     unsafe {
       nativePerfUninstall(rings: table.rings)
       rae_ext_rae_buf_free(buf: table.rings)
       rae_ext_rae_buf_free(buf: table.names)
+      # the names back from the box (this local owns them, so the box's list is freed with it)
+      let boxed: List(String) = rae_ext_rae_buf_get(buf: table.nameBox, index: 0)
+      loop let name: String in boxed {
+        names.add(value: name)
+      }
+      rae_ext_rae_buf_free(buf: table.nameBox)
     }
   }
+  if hub.runtime is not none {
+    hub.names = names
+  }
   hub.runtime = none
+}
+
+# A kind as the runtime's code (perfKindOfCode's inverse)
+func perfKindCode(kind: view PerfKind) ret Int {
+  if kind is PerfKind.zoneBegin {
+    ret 0
+  }
+  if kind is PerfKind.zoneEnd {
+    ret 1
+  }
+  if kind is PerfKind.counter {
+    ret 2
+  }
+  if kind is PerfKind.mark {
+    ret 3
+  }
+  if kind is PerfKind.waitBegin {
+    ret 4
+  }
+  if kind is PerfKind.waitEnd {
+    ret 5
+  }
+  if kind is PerfKind.gpuSpan {
+    ret 6
+  }
+  ret 7
 }
 
 func perfKindOfCode(kind: view Int) realtime ret PerfKind {
@@ -517,11 +606,57 @@ func perfRuntimeWrite(
     if ring.events.capacity is 0 {
       ret
     }
-    let nameId: Int = rae_ext_rae_buf_get(buf: names, index: code)
+    # a code below 0 carries a name id itself (rae_perf_named_event)
+    var nameId: Int = -1 - code
+    if code >= 0 {
+      nameId = rae_ext_rae_buf_get(buf: names, index: code)
+    }
     perfWrite(
       ring: ring
       kind: perfKindOfCode(kind: kind)
       name: PerfName { id: nameId }
+      value: value
+      extra: extra
+    )
+  }
+}
+
+# ---- events from code that has no hub (lib/ecs's schedule) ---------------------------------------
+
+# The installed table's generation, 0 when none is installed: a cached name id (perfRuntimeName) is
+# good while this has not moved
+func perfRuntimeGeneration() ret Int {
+  unsafe {
+    ret nativePerfGeneration()
+  }
+}
+
+# A name's id in the installed hub, from code with no hub; -1 when nothing records or this is not
+# the thread that installed it (registering a name allocates)
+func perfRuntimeName(name: view String) ret Int {
+  unsafe {
+    if not nativePerfNameBoxReady() {
+      ret -1
+    }
+    ret perfNameIdIn(names: boxedNames(box: nativePerfNameBox()), name: name)
+  }
+}
+
+# An event named by a perfRuntimeName id on this thread's lane in the installed hub (nothing when
+# none is installed or this thread has no lane)
+func perfRuntimeNamedEvent(
+  kind: view PerfKind
+  nameId: view Int
+  value: view Int
+  extra: view Int
+) {
+  if nameId < 0 {
+    ret
+  }
+  unsafe {
+    nativePerfNamedEvent(
+      kind: perfKindCode(kind: kind)
+      nameId: nameId
       value: value
       extra: extra
     )

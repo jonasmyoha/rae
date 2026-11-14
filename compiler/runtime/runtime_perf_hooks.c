@@ -50,6 +50,8 @@ enum {
 
 static _Atomic(void*) g_rae_perf_rings = NULL;   /* the hub's Buffer(PerfRing), one per slot */
 static _Atomic(void*) g_rae_perf_names = NULL;   /* its Buffer(Int): event code -> name id */
+static _Atomic(void*) g_rae_perf_name_box = NULL; /* the hub's name list, boxed (main thread only) */
+static _Atomic int64_t g_rae_perf_table_generation = 0; /* bumped at every install and uninstall */
 static _Thread_local int64_t g_rae_perf_slot = -1;
 
 /* The named threads' slots: each table (a generation) hands them out anew */
@@ -102,7 +104,7 @@ static inline void rae_perf_set_worker_slot(int64_t worker) {
 /* Install a hub's table (null: none); the calling thread becomes slot 0. The
  * hub frees its rings only after installing null, on the main thread, between
  * parallel jobs. */
-void rae_perf_install(void* rings, void* names) {
+void rae_perf_install(void* rings, void* names, void* name_box) {
   g_rae_perf_slot = 0;
   g_rae_perf_thread_name = NULL;
   for (int i = 0; i < RAE_PERF_THREAD_SLOTS; i++)
@@ -110,13 +112,42 @@ void rae_perf_install(void* rings, void* names) {
   atomic_store_explicit(&g_rae_perf_threads_claimed, 0, memory_order_relaxed);
   atomic_fetch_add_explicit(&g_rae_perf_generation, 1, memory_order_release);
   atomic_store_explicit(&g_rae_perf_names, names, memory_order_release);
+  atomic_store_explicit(&g_rae_perf_name_box, name_box, memory_order_release);
+  atomic_fetch_add_explicit(&g_rae_perf_table_generation, 1, memory_order_acq_rel);
   atomic_store_explicit(&g_rae_perf_rings, rings, memory_order_release);
 }
 
 /* Remove `rings` if they are the installed table (a later hub's stays) */
 void rae_perf_uninstall(void* rings) {
   void* expected = rings;
-  atomic_compare_exchange_strong(&g_rae_perf_rings, &expected, NULL);
+  if (atomic_compare_exchange_strong(&g_rae_perf_rings, &expected, NULL)) {
+    atomic_store_explicit(&g_rae_perf_name_box, NULL, memory_order_release);
+    atomic_fetch_add_explicit(&g_rae_perf_table_generation, 1, memory_order_acq_rel);
+  }
+}
+
+/* The installed table's generation, 0 when none is installed: code that caches name ids (lib/ecs's
+ * schedule) knows from it when they are stale */
+int64_t rae_perf_generation(void) {
+  if (atomic_load_explicit(&g_rae_perf_rings, memory_order_acquire) == NULL) return 0;
+  return atomic_load_explicit(&g_rae_perf_table_generation, memory_order_acquire);
+}
+
+/* The installed hub's boxed name list, for the thread that installed it only (null elsewhere, or
+ * with no table): registering a name allocates, so only that thread may */
+void* rae_perf_name_box(void) {
+  if (g_rae_perf_slot != 0 || g_rae_perf_thread_name) return NULL;
+  return atomic_load_explicit(&g_rae_perf_name_box, memory_order_acquire);
+}
+
+rae_Bool rae_perf_name_box_ready(void) {
+  return rae_perf_name_box() != NULL;
+}
+
+/* An event named by a name id of the installed hub (rae_perf_name_box), on the calling thread's
+ * lane; the code passed on is -1 - id */
+void rae_perf_named_event(int64_t kind, int64_t name_id, int64_t value, int64_t extra) {
+  rae_perf_event(kind, -1 - name_id, value, extra);
 }
 
 int64_t rae_perf_slot_count(void) {

@@ -98,7 +98,7 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
     let mainRing: PerfRing = profiler.hub.perfThreadRing(name: profMainThreadName)
     # the runtime's work too: the pool's workers on lanes of their own, the waits as spans
     profiler.hub.perfInstallRuntime(mainRing: mainRing)
-    profiler.firstOwnName = profiler.hub.names.length
+    profiler.firstOwnName = profiler.hub.perfNameCount()
     profiler.mainRing = mainRing
     profiler.startNs = nowNs()
     profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
@@ -250,8 +250,8 @@ func profileDiscard(profiler: mod Profiler) {
 # such as "chunk" and "Task.get", left out)
 func capturedNames(profiler: view Profiler) ret List(String) {
   var names: List(String) = {}
-  loop var i: Int = profiler.firstOwnName, i < profiler.hub.names.length, ++i {
-    names.add(value: profiler.hub.names.copyAtDefault(index: i))
+  loop var i: Int = profiler.firstOwnName, i < profiler.hub.perfNameCount(), ++i {
+    names.add(value: profiler.hub.perfNameText(nameId: i))
   }
   ret names
 }
