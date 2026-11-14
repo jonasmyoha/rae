@@ -58,19 +58,21 @@ func requestMicrophone() ret Bool {
 }
 
 # The input's latency in frames, from the platform: macOS, the input device's
-# latency, safety offset and IO buffer (Core Audio); iOS, the route's input
+# latency, safety offset and IO buffer and its stream's latency (Core Audio); iOS, the route's input
 # latency and the device's buffer; elsewhere the buffer
 func inputLatencyFrames(this: view AudioEngine) ret Int {
   if this.device is 0 or this.input.channels is 0 {
     ret 0
   }
+  let coreAudio: Int = coreAudioLatencyFrames(
+    device: this.device
+    input: true
+    sampleRate: this.sampleRate
+  )
+  if coreAudio >= 0 {
+    ret coreAudio
+  }
   unsafe {
-    let deviceLatency: Int = rae_audio_device_core_audio_frames(device: this.device, property: 3)
-    let safetyOffset: Int = rae_audio_device_core_audio_frames(device: this.device, property: 4)
-    let ioBuffer: Int = rae_audio_device_core_audio_frames(device: this.device, property: 5)
-    if deviceLatency >= 0 and safetyOffset >= 0 and ioBuffer >= 0 {
-      ret deviceLatency + safetyOffset + ioBuffer
-    }
     let buffered: Int = rae_audio_device_buffer_frames(device: this.device)
     let routeNs: Int = rae_audio_session_input_latency_ns()
     if routeNs >= 0 {

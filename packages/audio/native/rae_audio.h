@@ -128,6 +128,7 @@ int64_t rae_audio_device_buffer_frames(int64_t device);
 /* The platform audio system in use ("Core Audio", "AAudio", "WASAPI", ...), its length */
 int64_t rae_audio_device_backend_name(int64_t device, uint8_t* into, int64_t capacity);
 int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property);
+int64_t rae_audio_core_audio_stream_latency(int64_t device, int64_t stream);
 /* The device's audio workgroup (Apple os_workgroup), retained; 0 where there
  * is none. Give it back with rae_audio_workgroup_release. */
 int64_t rae_audio_device_workgroup(int64_t device);

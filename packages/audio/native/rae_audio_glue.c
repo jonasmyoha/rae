@@ -218,9 +218,12 @@ int64_t rae_audio_device_buffer_frames(int64_t device) {
   return (int64_t)audio->device.playback.internalPeriodSizeInFrames * (int64_t)audio->device.playback.internalPeriods;
 }
 
-/* macOS: one Core Audio property of the output device in frames (0 its
- * latency, 1 its safety offset, 2 its IO buffer size), read with the
- * AudioObjectGetPropertyData miniaudio loaded; -1 elsewhere or on failure */
+/* One Core Audio property of the device's output (property 0..2: its latency,
+ * safety offset and IO buffer, in its own frames), of its input (3..5, the same
+ * on a duplex device), the first stream of each side (6 output, 7 input: an
+ * AudioStreamID, for rae_audio_core_audio_stream_latency), or each side's
+ * nominal sample rate (8 output, 9 input, in Hz). Platform reason: one
+ * AudioObjectGetPropertyData call; -1 where there is none. */
 int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
 #if defined(MA_APPLE_DESKTOP)
   if (!device) return -1;
@@ -229,23 +232,56 @@ int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
                                       UInt32*, void*);
   GetPropertyData get = (GetPropertyData)audio->context.coreaudio.AudioObjectGetPropertyData;
   if (!get) return -1;
-  AudioObjectPropertySelector selectors[3] = {kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset,
-                                              kAudioDevicePropertyBufferFrameSize};
-  if (property < 0 || property > 5) return -1;
-  /* 3..5: the same of the input device (a duplex device's) */
-  int input = property >= 3;
+  if (property < 0 || property > 9) return -1;
+  int input = (property >= 3 && property <= 5) || property == 7 || property == 9;
   if (input && audio->device.type != ma_device_type_duplex) return -1;
-  AudioObjectPropertyAddress address = {selectors[property % 3],
-                                        input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput,
-                                        kAudioObjectPropertyElementMain};
-  UInt32 value = 0;
-  UInt32 size = sizeof(value);
   AudioObjectID object = (AudioObjectID)(input ? audio->device.coreaudio.deviceObjectIDCapture
                                                : audio->device.coreaudio.deviceObjectIDPlayback);
-  if (get(object, &address, 0, NULL, &size, &value) != 0) return -1;
+  AudioObjectPropertyScope scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput;
+  if (property >= 8) {
+    AudioObjectPropertyAddress address = {kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal,
+                                          kAudioObjectPropertyElementMain};
+    Float64 rate = 0;
+    UInt32 size = sizeof(rate);
+    if (get(object, &address, 0, NULL, &size, &rate) != 0) return -1;
+    return (int64_t)(rate + 0.5);
+  }
+  AudioObjectPropertySelector selectors[3] = {kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset,
+                                              kAudioDevicePropertyBufferFrameSize};
+  AudioObjectPropertySelector selector = property >= 6 ? kAudioDevicePropertyStreams : selectors[property % 3];
+  AudioObjectPropertyAddress address = {selector, scope, kAudioObjectPropertyElementMain};
+  UInt32 value = 0;
+  UInt32 size = sizeof(value);
+  /* the streams' list read with room for one: its first stream */
+  if (get(object, &address, 0, NULL, &size, &value) != 0 || size < sizeof(value)) return -1;
   return (int64_t)value;
 #else
   (void)device; (void)property;
+  return -1;
+#endif
+}
+
+/* A stream's own latency (kAudioStreamPropertyLatency, in its device's frames):
+ * Core Audio counts it on top of the device's latency, safety offset and buffer,
+ * and on a Mac's built-in speakers and microphone it is most of the time a sound
+ * takes (their processing). Platform reason: one AudioObjectGetPropertyData call;
+ * -1 where there is none. */
+int64_t rae_audio_core_audio_stream_latency(int64_t device, int64_t stream) {
+#if defined(MA_APPLE_DESKTOP)
+  if (!device || stream <= 0) return -1;
+  RaeAudioDevice* audio = (RaeAudioDevice*)(intptr_t)device;
+  typedef OSStatus (*GetPropertyData)(AudioObjectID, const AudioObjectPropertyAddress*, UInt32, const void*,
+                                      UInt32*, void*);
+  GetPropertyData get = (GetPropertyData)audio->context.coreaudio.AudioObjectGetPropertyData;
+  if (!get) return -1;
+  AudioObjectPropertyAddress address = {kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal,
+                                        kAudioObjectPropertyElementMain};
+  UInt32 value = 0;
+  UInt32 size = sizeof(value);
+  if (get((AudioObjectID)stream, &address, 0, NULL, &size, &value) != 0) return -1;
+  return (int64_t)value;
+#else
+  (void)device; (void)stream;
   return -1;
 #endif
 }

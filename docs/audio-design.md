@@ -631,6 +631,21 @@ Decision: three sources of decoders behind one API; the resampler is Rae.
   gesture and `getUserMedia`. The engine reports "not allowed" as a state, not a
   crash.
 
+**The round trip on macOS (2026-11-14, `packages/audio` 0.15.2).** A Core Audio side's latency
+is its device's latency, safety offset and IO buffer **and its stream's latency**
+(`kAudioStreamPropertyLatency`), counted in the device's own frames. The engine read only the
+first three, and on a MacBook Pro's built-in speakers and microphone the streams' latency (639
+and 2210 frames at 44.1 kHz: the speakers' and microphone's processing) is most of it: clicks
+played at known samples were heard 67 ms after the reported 725-frame round trip.
+`coreAudioLatencyFrames` (audio/AudioClock) now adds the first stream's latency and converts
+from the device's rate to the engine's when they differ; the round trip there is 3890 frames,
+and the clicks land 7-8 ms after their samples (the air and the rest). `checks/audioInput`'s
+echo test (`RAE_AUDIO_ECHO_TEST=1`) finds each click's onset up to 200 ms after its sample and
+fails beyond 10 ms; before, it looked for the loudest frame within 50 ms, missed the clicks and
+took noise for them. Bluetooth headphones (AirPods Max) report 7680 frames of device latency and
+no stream latency; their microphone does not hear their own output, so the echo test cannot
+run there.
+
 ### 8.2 MIDI
 
 - No library: MIDI is a small protocol, and each platform API is one-call shims.

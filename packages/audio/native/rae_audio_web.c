@@ -305,6 +305,12 @@ int64_t rae_audio_device_core_audio_frames(int64_t device, int64_t property) {
   return -1;
 }
 
+int64_t rae_audio_core_audio_stream_latency(int64_t device, int64_t stream) {
+  (void)device;
+  (void)stream;
+  return -1;
+}
+
 int64_t rae_audio_device_workgroup(int64_t device) {
   (void)device;
   return 0;

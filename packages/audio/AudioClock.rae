@@ -7,7 +7,7 @@
 # the speaker, and back, smoothly, and the device's real rate is measured.
 #
 # The latency is the platform's: on macOS the output device's latency, safety
-# offset and IO buffer (Core Audio); on iOS the route's output latency and the
+# offset, IO buffer and stream latency (Core Audio); on iOS the route's output latency and the
 # device's buffer (AVAudioSession); elsewhere the device's buffer (miniaudio's
 # periods). Each block's host time is read when the render starts, not passed
 # from the platform's own timestamp (miniaudio does not pass it); the loop
@@ -67,19 +67,55 @@ func nominalNsPerFrame(sampleRate: view Int) ret Float64 {
   ret nanoseconds / (max(a: 1, b: sampleRate) as Float64)
 }
 
+# One side of a Core Audio device's latency in the engine's frames (`input`: the input's, of a
+# duplex device): its latency, safety offset and IO buffer, and its first stream's own latency
+# (on a Mac's built-in speakers and microphone the stream's is most of it: 639 and 2210 frames
+# against 651 and 586 for the rest), counted in the device's frames and turned into the
+# engine's rate when the device runs at another; -1 where Core Audio does not say
+func coreAudioLatencyFrames(device: view Int, input: view Bool, sampleRate: view Int) ret Int {
+  var first: Int = 0
+  var streamProperty: Int = 6
+  var rateProperty: Int = 8
+  if input {
+    first = 3
+    streamProperty = 7
+    rateProperty = 9
+  }
+  unsafe {
+    let deviceLatency: Int = rae_audio_device_core_audio_frames(device: device, property: first)
+    let safetyOffset: Int = rae_audio_device_core_audio_frames(device: device, property: first + 1)
+    let ioBuffer: Int = rae_audio_device_core_audio_frames(device: device, property: first + 2)
+    if deviceLatency < 0 or safetyOffset < 0 or ioBuffer < 0 {
+      ret -1
+    }
+    var streamLatency: Int = 0
+    let stream: Int = rae_audio_device_core_audio_frames(device: device, property: streamProperty)
+    if stream > 0 {
+      streamLatency = max(
+        a: 0
+        b: rae_audio_core_audio_stream_latency(device: device, stream: stream)
+      )
+    }
+    let total: Int = deviceLatency + safetyOffset + ioBuffer + streamLatency
+    let deviceRate: Int = rae_audio_device_core_audio_frames(device: device, property: rateProperty)
+    if deviceRate > 0 and deviceRate is not sampleRate {
+      ret (total * sampleRate + deviceRate / 2) / deviceRate
+    }
+    ret total
+  }
+}
+
 # The output's latency in frames, from the platform (see above)
 func deviceOutputLatencyFrames(device: view Int, sampleRate: view Int) ret Int {
   if device is 0 {
     ret 0
   }
+  let coreAudio: Int = coreAudioLatencyFrames(device: device, input: false, sampleRate: sampleRate)
+  if coreAudio >= 0 {
+    ret coreAudio
+  }
   unsafe {
     let buffered: Int = rae_audio_device_buffer_frames(device: device)
-    let deviceLatency: Int = rae_audio_device_core_audio_frames(device: device, property: 0)
-    let safetyOffset: Int = rae_audio_device_core_audio_frames(device: device, property: 1)
-    let ioBuffer: Int = rae_audio_device_core_audio_frames(device: device, property: 2)
-    if deviceLatency >= 0 and safetyOffset >= 0 and ioBuffer >= 0 {
-      ret deviceLatency + safetyOffset + ioBuffer
-    }
     let routeNs: Int = rae_audio_session_output_latency_ns()
     if routeNs >= 0 {
       ret buffered + routeNs * sampleRate / 1000000000
