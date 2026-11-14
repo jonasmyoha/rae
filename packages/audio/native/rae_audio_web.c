@@ -17,6 +17,10 @@
  * the end of the stream flushes. */
 #include <emscripten.h>
 
+#if defined(RAE_AUDIO_WEB_SHARED)
+/* a program with `web: { sharedMemory: true }`: the engine inside the worklet */
+#include "rae_audio_web_shared.c"
+#else
 typedef struct {
   int id;                 /* the device's index on the JavaScript side */
   int64_t sample_rate;
@@ -356,6 +360,7 @@ int64_t rae_audio_device_underrun_frames(int64_t device) {
 int64_t rae_audio_device_callbacks(int64_t device) {
   return device ? ((RaeWebAudioDevice*)(intptr_t)device)->callbacks : 0;
 }
+#endif
 
 /* ---- AAC through WebCodecs' AudioDecoder ---------------------------------- */
 EM_JS(int, rae_web_aac_create, (int sample_rate, int channels), {
