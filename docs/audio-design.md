@@ -425,8 +425,23 @@ a duck by a sidechain; Freeverb equal bit for bit to a reference written once
 by an independent Python implementation of the same structure in float32
 (`make_reference.py`, beside the fixture), and its tail to -60 dB the same
 47366 frames; a plan swap of eq, compressor and reverb that changes nothing.
-Not yet: `lib/Float4` for these (whether four combs or two channels at once
-are faster is unmeasured; queued).
+
+**`lib/Float4` in them (2026-11-14, `packages/audio` 0.12.19).** Measured
+(`benchmarks/audioKernels`, `EffectBench.rae`: the inner loops scalar and with
+Float4, written as `audio/GraphEffects` writes them, 256-frame blocks, best of
+five, this Mac): a 200-band EQ 466 µs a block scalar, 233 µs with the two
+channels in a Float4's lanes; 16 Freeverbs 138 µs scalar, 74 µs with the
+combs four at a time. So both use Float4 now: an EQ band runs its biquad on
+the x and y lanes, and the reverb its eight combs a channel as two Float4s
+(the delayed samples gathered, the lowpass and the feedback in the lanes, the
+lines written back one by one). Each lane does the scalar operations in the
+scalar order (Float4 has no fused multiply-add), and the reverb still sums
+its combs' outputs one by one, comb 0 to 7, so both are bit for bit the
+scalar forms: Freeverb still equals the Python reference exactly (fixture
+1445). Through a graph the package's nodes went from 471 to 251 µs (200 EQ
+bands) and from 145 to 81 µs (16 reverbs) a block. Summing the combs lane
+by lane instead would save a little more and differ in the last bits; it
+was not taken.
 
 Rae has no function values and no interfaces, so the plan runs nodes with a
 `match` on the node kind over typed state tables (one dense table per kind, ECS

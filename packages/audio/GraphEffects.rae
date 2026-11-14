@@ -4,6 +4,7 @@
 # Also their parameter events (an EQ band's frequency, gain and Q, each moved
 # over 5 ms) and what a plan swap carries over (a band's filter memory and
 # parameters, a compressor's gain reduction, a reverb's lines).
+import Float4
 import Math
 open audio/AudioGraph
 open audio/CustomNodes
@@ -54,7 +55,10 @@ func stepFilterRamp(state: mod FilterState) realtime {
   }
 }
 
-# The cookbook biquad in transposed direct form II, each channel
+# The cookbook biquad in transposed direct form II, the two channels in a
+# Float4's x and y lanes (lib/Float4: each lane's operations are the scalar
+# ones, so the result is the scalar form's, bit for bit; measured twice as fast,
+# benchmarks/audioKernels)
 func processEq(
   plan: view RenderPlan
   node: view Int
@@ -64,43 +68,60 @@ func processEq(
   let input: Int = firstInputOf(plan: plan, node: node)
   let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
   var state: FilterState = filterAt(plan: plan, stateAt: stateAt)
+  var b0: Float4 = Float4.splat(value: state.b0)
+  var b1: Float4 = Float4.splat(value: state.b1)
+  var b2: Float4 = Float4.splat(value: state.b2)
+  var a1: Float4 = Float4.splat(value: state.a1)
+  var a2: Float4 = Float4.splat(value: state.a2)
+  var z1: Float4 = { x: state.z1Left, y: state.z1Right, z: 0.0, w: 0.0 }
+  var z2: Float4 = { x: state.z2Left, y: state.z2Right, z: 0.0, w: 0.0 }
   loop var i: Int = 0, i < frames, ++i {
     if state.rampLeft > 0 {
       stepFilterRamp(state: state)
+      b0 = Float4.splat(value: state.b0)
+      b1 = Float4.splat(value: state.b1)
+      b2 = Float4.splat(value: state.b2)
+      a1 = Float4.splat(value: state.a1)
+      a2 = Float4.splat(value: state.a2)
     }
-    let left: Float = scratchAt(
-      plan: plan
-      buffer: input
-      channel: 0
-      frame: i
-    )
-    let right: Float = scratchAt(
-      plan: plan
-      buffer: input
-      channel: 1
-      frame: i
-    )
-    let leftOut: Float = state.b0 * left + state.z1Left
-    state.z1Left = state.b1 * left - state.a1 * leftOut + state.z2Left
-    state.z2Left = state.b2 * left - state.a2 * leftOut
-    let rightOut: Float = state.b0 * right + state.z1Right
-    state.z1Right = state.b1 * right - state.a1 * rightOut + state.z2Right
-    state.z2Right = state.b2 * right - state.a2 * rightOut
+    let x: Float4 = {
+      x: scratchAt(
+        plan: plan
+        buffer: input
+        channel: 0
+        frame: i
+      )
+      y: scratchAt(
+        plan: plan
+        buffer: input
+        channel: 1
+        frame: i
+      )
+      z: 0.0
+      w: 0.0
+    }
+    let y: Float4 = Float4.add(a: Float4.mul(a: b0, b: x), b: z1)
+    z1 = Float4.add(a: Float4.sub(a: Float4.mul(a: b1, b: x), b: Float4.mul(a: a1, b: y)), b: z2)
+    z2 = Float4.sub(a: Float4.mul(a: b2, b: x), b: Float4.mul(a: a2, b: y))
     setScratchAt(
       plan: plan
       buffer: out
       channel: 0
       frame: i
-      value: leftOut
+      value: y.x
     )
     setScratchAt(
       plan: plan
       buffer: out
       channel: 1
       frame: i
-      value: rightOut
+      value: y.y
     )
   }
+  state.z1Left = z1.x
+  state.z1Right = z1.y
+  state.z2Left = z2.x
+  state.z2Right = z2.y
   setFilterAt(plan: plan, stateAt: stateAt, state: state)
 }
 
@@ -176,25 +197,59 @@ func processCompressor(
   }
 }
 
-# One comb of the reverb (line `line`): the delayed sample out, its lowpass
-# memory updated, the input plus the filtered feedback in
-func reverbComb(state: view ReverbState, line: view Int, input: view Float) ret Float realtime {
+# Four combs (lines first .. first + 3) at once: their delayed samples, the
+# lowpass and the feedback in a Float4's lanes (each lane's operations those of
+# reverbComb), the lines read and written one by one; their outputs
+func reverbCombs(state: view ReverbState, first: view Int, input: view Float4) ret Float4 realtime {
   unsafe {
     var lines: Buffer(Float) = state.lines
-    var positions: Buffer(Int) = state.positions
     var stores: Buffer(Float) = state.stores
-    let position: Int = rae_ext_rae_buf_get(buf: positions, index: line)
-    let at: Int = rae_ext_rae_buf_get(buf: state.starts, index: line) + position
-    let output: Float = rae_ext_rae_buf_get(buf: lines, index: at)
-    let store: Float = output * state.damp2 + rae_ext_rae_buf_get(buf: stores, index: line) * state.damp1
-    rae_ext_rae_buf_set(buf: stores, index: line, value: store)
-    rae_ext_rae_buf_set(buf: lines, index: at, value: input + store * state.feedback)
+    let p0: Int = rae_ext_rae_buf_get(buf: state.positions, index: first)
+    let p1: Int = rae_ext_rae_buf_get(buf: state.positions, index: first + 1)
+    let p2: Int = rae_ext_rae_buf_get(buf: state.positions, index: first + 2)
+    let p3: Int = rae_ext_rae_buf_get(buf: state.positions, index: first + 3)
+    let at0: Int = rae_ext_rae_buf_get(buf: state.starts, index: first) + p0
+    let at1: Int = rae_ext_rae_buf_get(buf: state.starts, index: first + 1) + p1
+    let at2: Int = rae_ext_rae_buf_get(buf: state.starts, index: first + 2) + p2
+    let at3: Int = rae_ext_rae_buf_get(buf: state.starts, index: first + 3) + p3
+    let output: Float4 = {
+      x: rae_ext_rae_buf_get(buf: lines, index: at0)
+      y: rae_ext_rae_buf_get(buf: lines, index: at1)
+      z: rae_ext_rae_buf_get(buf: lines, index: at2)
+      w: rae_ext_rae_buf_get(buf: lines, index: at3)
+    }
+    let store: Float4 = Float4.add(
+      a: Float4.mul(a: output, b: Float4.splat(value: state.damp2))
+      b: Float4.mul(
+        a: Float4.nativeLoad(data: stores, index: first)
+        b: Float4.splat(value: state.damp1)
+      )
+    )
+    Float4.nativeStore(data: stores, index: first, value: store)
+    let written: Float4 = Float4.add(
+      a: input
+      b: Float4.mul(a: store, b: Float4.splat(value: state.feedback))
+    )
+    rae_ext_rae_buf_set(buf: lines, index: at0, value: written.x)
+    rae_ext_rae_buf_set(buf: lines, index: at1, value: written.y)
+    rae_ext_rae_buf_set(buf: lines, index: at2, value: written.z)
+    rae_ext_rae_buf_set(buf: lines, index: at3, value: written.w)
+    advanceReverbLine(state: state, line: first, position: p0)
+    advanceReverbLine(state: state, line: first + 1, position: p1)
+    advanceReverbLine(state: state, line: first + 2, position: p2)
+    advanceReverbLine(state: state, line: first + 3, position: p3)
+    ret output
+  }
+}
+
+func advanceReverbLine(state: view ReverbState, line: view Int, position: view Int) realtime {
+  unsafe {
+    var positions: Buffer(Int) = state.positions
     var next: Int = position + 1
     if next >= rae_ext_rae_buf_get(buf: state.lengths, index: line) {
       next = 0
     }
     rae_ext_rae_buf_set(buf: positions, index: line, value: next)
-    ret output
   }
 }
 
@@ -242,12 +297,15 @@ func processReverb(
       frame: i
     )
     let mono: Float = (left + right) * state.inputGain
-    var leftWet: Float = 0.0
-    var rightWet: Float = 0.0
-    loop var comb: Int = 0, comb < reverbCombs, ++comb {
-      leftWet = leftWet + reverbComb(state: state, line: comb, input: mono)
-      rightWet = rightWet + reverbComb(state: state, line: reverbCombs + comb, input: mono)
-    }
+    # the combs four at a time (lib/Float4), their outputs summed in Freeverb's
+    # order, comb 0 to 7, so the reverb is the scalar one's, bit for bit
+    let lanes: Float4 = Float4.splat(value: mono)
+    let leftLow: Float4 = reverbCombs(state: state, first: 0, input: lanes)
+    let leftHigh: Float4 = reverbCombs(state: state, first: 4, input: lanes)
+    let rightLow: Float4 = reverbCombs(state: state, first: reverbCombs, input: lanes)
+    let rightHigh: Float4 = reverbCombs(state: state, first: reverbCombs + 4, input: lanes)
+    var leftWet: Float = 0.0 + leftLow.x + leftLow.y + leftLow.z + leftLow.w + leftHigh.x + leftHigh.y + leftHigh.z + leftHigh.w
+    var rightWet: Float = 0.0 + rightLow.x + rightLow.y + rightLow.z + rightLow.w + rightHigh.x + rightHigh.y + rightHigh.z + rightHigh.w
     loop var allpass: Int = 0, allpass < reverbAllpasses, ++allpass {
       leftWet = reverbAllpass(state: state, line: 2 * reverbCombs + allpass, input: leftWet)
       rightWet = reverbAllpass(
