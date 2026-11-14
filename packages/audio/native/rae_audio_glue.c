@@ -1,11 +1,17 @@
 /* The audio package's C glue (rae_audio.h). Platform reason: opening and
  * running the sound device (miniaudio's device layer over Core Audio, WASAPI,
- * ALSA/PulseAudio/JACK, AAudio, Web Audio), the thread's real-time policy,
+ * ALSA/PulseAudio/JACK, AAudio; in the browser rae_audio_web.c's AudioWorklet), the thread's real-time policy,
  * reading and writing files, and the platform's AAC decoder (AudioToolbox). The one place with more than one call is the device
  * callback, which must be C until Rae functions can be called from C
  * (docs/audio-design.md §4.2 stage A): it copies a period out of the Rae ring
  * and posts the Rae Signal, nothing more. */
 #define MA_NO_ENCODING
+/* The browser's device is ours (rae_audio_web.c): miniaudio's Web Audio
+ * backend would render in a ScriptProcessorNode, or in an AudioWorklet only
+ * with shared memory */
+#if defined(__EMSCRIPTEN__)
+#define MA_NO_DEVICE_IO
+#endif
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE
@@ -54,6 +60,7 @@ __attribute__((weak)) void rae_audio_capture(void* state, float* input, int64_t 
   (void)state; (void)input; (void)frames; (void)channels;
 }
 
+#if !defined(__EMSCRIPTEN__)
 typedef struct {
   ma_context context;
   ma_device device;
@@ -291,6 +298,9 @@ int64_t rae_audio_device_underrun_frames(int64_t device) {
 int64_t rae_audio_device_callbacks(int64_t device) {
   return device ? __atomic_load_n(&((RaeAudioDevice*)(intptr_t)device)->callbacks, __ATOMIC_RELAXED) : 0;
 }
+#else
+#include "rae_audio_web.c"
+#endif
 
 int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count) {
   FILE* file = fopen((const char*)path_z, "wb");
@@ -732,7 +742,7 @@ void rae_audio_aac_reset(int64_t converter) {
 void rae_audio_aac_close(int64_t converter) {
   if (converter && g_rae_aac.dispose) g_rae_aac.dispose((AudioConverterRef)(intptr_t)converter);
 }
-#else
+#elif !defined(__EMSCRIPTEN__)
 int64_t rae_audio_aac_open(int64_t sample_rate, int64_t channels) {
   (void)sample_rate; (void)channels; return 0;
 }

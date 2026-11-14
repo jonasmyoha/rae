@@ -10,6 +10,8 @@
 #       lib/libraeaudio.a   native (macOS: miniaudio loads Core Audio at run time, and the
 #                           glue AudioToolbox and MediaPlayer, so a program links no
 #                           framework for them)
+#       lib/emscripten/libraeaudio.a   the browser (when emcc is found): rae_audio_web.c's
+#                           AudioWorklet output and WebCodecs AAC instead of miniaudio's device
 #     plus include/rae_audio.h, src/ (the sources a device build compiles into an app),
 #     DEVICE_DEFINES (their options) and VERSION.
 set -euo pipefail
@@ -42,6 +44,15 @@ language=""
 if [ "$(uname -s)" = "Darwin" ]; then language="-x objective-c"; fi
 cc $language -O2 -DNDEBUG -I"$HERE" -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_glue.o"
 ar rcs "$INSTALL/lib/libraeaudio.a" "$objs"/*.o
+# The browser's library (when emcc is found): the same glue, with miniaudio's
+# device layer off and rae_audio_web.c's AudioWorklet and WebCodecs instead
+if command -v emcc >/dev/null 2>&1; then
+  mkdir -p "$INSTALL/lib/emscripten"
+  emcc -std=gnu11 -O2 -DNDEBUG -I"$HERE" -c "$HERE/rae_audio_glue.c" -o "$objs/rae_audio_web.o"
+  emar rcs "$INSTALL/lib/emscripten/libraeaudio.a" "$objs/rae_audio_web.o"
+else
+  echo "audio: emcc not found; skipped the browser library"
+fi
 rm -rf "${objs:?}"
 grep -m1 'MA_VERSION_MINOR\|miniaudio - v' "$HERE/miniaudio/miniaudio.h" > "$INSTALL/VERSION" || true
 
