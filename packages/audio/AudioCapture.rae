@@ -1,0 +1,84 @@
+# audio/AudioCapture — the engine in a lib/Profile capture (docs/perf-tools-design.md §4.4). Call
+# recordAudioCapture once a frame on the main thread, after `update`:
+#
+#     audio.update()
+#     audio.recordAudioCapture(profiler: app.profiler)
+#
+# It writes, while the profiler captures:
+#   - each render (one block) as a span "block" on a lane "audio render", from its stamp (when it
+#     started and how long it took, wherever it ran: the device's callback, the stage A thread or
+#     the offline driver), with counters of its time and its share of the period;
+#   - the device's underrun frames (silence played because a render was late) and callbacks, and
+#     the blocks queued ahead in stage A's ring;
+#   - the input and output latency in frames;
+#   - the audio clock's drift against nowNs, in parts per million (its measured rate against the
+#     nominal one).
+# Outside a capture it only lets the stamps go.
+import Profile
+open audio/Audio
+open audio/AudioClock
+open audio/AudioMixer
+open audio/RenderTimes
+
+const audioRenderLane: String = "audio render"
+
+func recordAudioCapture(this: mod AudioEngine, profiler: mod Profiler) {
+  let stamps: List(ClockStamp) = this.clock.recentStamps
+  this.clock.recentStamps = {}
+  if not Profile.capturing(profiler: profiler) {
+    ret
+  }
+  let period: Int = max(a: 1, b: this.renderPeriodNanoseconds())
+  loop let stamp: ClockStamp in stamps {
+    Profile.laneSpan(
+      profiler: profiler
+      lane: audioRenderLane
+      name: "block"
+      beginNs: stamp.hostNs
+      endNs: stamp.hostNs + stamp.renderNs
+    )
+    Profile.counter(profiler: profiler, name: "audio.render us", value: stamp.renderNs / 1000)
+    Profile.counter(
+      profiler: profiler
+      name: "audio.render share %"
+      value: stamp.renderNs * 100 / period
+    )
+  }
+  Profile.counter(profiler: profiler, name: "audio.underrun frames", value: this.underrunFrames())
+  Profile.counter(profiler: profiler, name: "audio.callbacks", value: this.deviceCallbacks())
+  Profile.counter(profiler: profiler, name: "audio.queued blocks", value: this.queuedBlocks())
+  var outputLatency: Int = this.latencyFrames()
+  var inputLatency: Int = 0
+  if not this.offline {
+    outputLatency = outputLatency + deviceOutputLatencyFrames(
+      device: this.device
+      sampleRate: this.sampleRate
+    )
+    inputLatency = max(
+      a: 0
+      b: coreAudioLatencyFrames(device: this.device, input: true, sampleRate: this.sampleRate)
+    )
+  }
+  Profile.counter(profiler: profiler, name: "audio.output latency frames", value: outputLatency)
+  Profile.counter(profiler: profiler, name: "audio.input latency frames", value: inputLatency)
+  Profile.counter(profiler: profiler, name: "audio.clock drift ppm", value: this.clockDriftPpm())
+}
+
+# The blocks rendered ahead and waiting in stage A's ring (none in stage B or offline)
+func queuedBlocks(this: view AudioEngine) ret Int {
+  if this.device is 0 or this.deviceRenders {
+    ret 0
+  }
+  ret this.output.count() / max(a: 1, b: this.periodFrames * this.channels)
+}
+
+# The audio clock against nowNs: how far its measured rate is from the nominal one, in parts per
+# million (positive: the device's samples come slower than nominal, each takes longer); 0 offline
+# and until the clock has locked
+func clockDriftPpm(this: view AudioEngine) ret Int {
+  if this.offline or not this.clock.locked {
+    ret 0
+  }
+  let nominal: Float64 = nominalNsPerFrame(sampleRate: this.sampleRate)
+  ret ((this.clock.nsPerFrame / nominal - 1.0) * 1000000.0) as Int
+}
