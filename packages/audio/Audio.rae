@@ -222,20 +222,28 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
   let butlerClosed: SpscRing(Int) = createSpscRing(Int, capacity: 256)
   let butlerRunning: Atomic(Bool) = createAtomic(Bool, value: true)
   var butlerTask: Task(Int) = spawn audioIdle()
-  if device is not 0 {
-    let threadButler: Butler = createButler(
-      outputRate: sampleRate
-      commands: butlerCommands
-      closed: butlerClosed
-    )
-    butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
+  # the streaming thread; in the browser (one thread) `update` steps the
+  # butler instead
+  when Target.isNative {
+    if device is not 0 {
+      let threadButler: Butler = createButler(
+        outputRate: sampleRate
+        commands: butlerCommands
+        closed: butlerClosed
+      )
+      butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
+    }
   }
   let input: AudioInputShared = createAudioInputShared(
     channels: deviceInputChannels(device: device)
     sampleRate: sampleRate
   )
   var renderStates: List(AudioRenderState) = {}
-  let deviceRenders: Bool = device is not 0 and getEnv(name: "RAE_AUDIO_STAGE") is not "A"
+  # the browser has no stage A (no threads): its device always renders in
+  # its callback (the AudioWorklet's requests, audio/AudioDevice)
+  let deviceRenders: Bool = device is not 0 and (not Target.isNative or getEnv(
+    name: "RAE_AUDIO_STAGE"
+  ) is not "A")
   if deviceRenders {
     renderStates.add(value: {
       mixer: createAudioMixer(
@@ -255,43 +263,45 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
       }
     }
   } else if device is not 0 {
-    let threadMixer: AudioMixer = createAudioMixer(
-      sampleRate: sampleRate
-      maxFrames: periodFrames
-      feedback: feedback
-      reclaim: reclaim
-      clockStamps: clockStamps
-    )
-    renderTask = spawn thread audioRenderThread(
-      mixer: threadMixer
-      commands: commands
-      output: output
-      wake: wake
-      running: running
-      channels: channels
-      periodFrames: periodFrames
-      sampleRate: sampleRate
-    )
-    unsafe {
-      rae_audio_device_attach(
-        device: device
-        slots: output.slots
-        counters: output.counters
-        capacity: output.capacity
-        signal: wake.handle
+    when Target.isNative {
+      let threadMixer: AudioMixer = createAudioMixer(
+        sampleRate: sampleRate
+        maxFrames: periodFrames
+        feedback: feedback
+        reclaim: reclaim
+        clockStamps: clockStamps
       )
-      wake.post()
-    }
-    # let the render thread fill the ring before the device starts reading it
-    # (at most 200 ms), so the first period is not silence
-    var waited: Int = 0
-    loop waited < 200 and output.count() < output.capacity {
-      sleep(ms: 1)
-      waited = waited + 1
-    }
-    unsafe {
-      if rae_audio_device_start(device: device) is 0 {
-        log("[audio] the device did not start")
+      renderTask = spawn thread audioRenderThread(
+        mixer: threadMixer
+        commands: commands
+        output: output
+        wake: wake
+        running: running
+        channels: channels
+        periodFrames: periodFrames
+        sampleRate: sampleRate
+      )
+      unsafe {
+        rae_audio_device_attach(
+          device: device
+          slots: output.slots
+          counters: output.counters
+          capacity: output.capacity
+          signal: wake.handle
+        )
+        wake.post()
+      }
+      # let the render thread fill the ring before the device starts reading it
+      # (at most 200 ms), so the first period is not silence
+      var waited: Int = 0
+      loop waited < 200 and output.count() < output.capacity {
+        sleep(ms: 1)
+        waited = waited + 1
+      }
+      unsafe {
+        if rae_audio_device_start(device: device) is 0 {
+          log("[audio] the device did not start")
+        }
       }
     }
   }
@@ -604,6 +614,12 @@ func update(this: mod AudioEngine) {
   loop this.reclaim.count() > 0 {
     if let soundId: Int = this.reclaim.pop() {
       this.freeSoundSamples(soundId: soundId)
+    }
+  }
+  # the browser has no streaming thread: the butler reads ahead here
+  when not Target.isNative {
+    if this.device is not 0 {
+      butlerStep(butler: this.butler)
     }
   }
   loop this.butlerClosed.count() > 0 {

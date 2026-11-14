@@ -577,7 +577,7 @@ Device backends (through miniaudio) and the host rules (our shims, L2):
 | **Windows** | WASAPI | `IAudioClient3` shared low-latency (down to ~2.7 ms on supporting drivers), exclusive mode; MMCSS "Pro Audio" | `IMMNotificationClient` (default device changed, device removed); media keys and lock screen through `SystemMediaTransportControls` |
 | **Linux** | PipeWire through its PulseAudio and JACK interfaces; ALSA direct; JACK | JACK (or `pipewire-jack`) for pro use; ALSA period size | real-time priority through rtkit; media keys through MPRIS (D-Bus) |
 | **Android** | AAudio (API 27+), OpenSL ES below | AAudio `PERFORMANCE_MODE_LOW_LATENCY`, exclusive sharing mode, MMAP | audio focus, `AudioAttributes` usage, "becoming noisy", `MediaSession` + a foreground service of type `mediaPlayback` |
-| **Web** | Web Audio, the engine inside an AudioWorklet | `latencyHint: "interactive"` | a user gesture before the first sound (autoplay policy); `SharedArrayBuffer` needs COOP/COEP headers; Media Session API for the lock screen |
+| **Web** | Web Audio: an AudioWorklet plays blocks the page renders on the main thread (§11 step 3); the engine inside the worklet needs shared memory, opt-in | `latencyHint: "interactive"` | a user gesture before the first sound (autoplay policy; the device resumes on the first one); shared memory needs COOP/COEP headers; Media Session API for the lock screen |
 
 Native PipeWire, Oboe (C++, Apache-2.0) and ASIO are not needed to start; each
 comes in only if a measurement on real hardware asks for it.
@@ -965,6 +965,57 @@ or now that repository's.
    (`dumpsys audio`), pause / play / next / previous from `cmd media_session
    dispatch` and from `input keyevent KEYCODE_MEDIA_PLAY_PAUSE`, a duck under
    another app's alert, an interruption by another app's music.
+
+   **The web (2026-11-14), `packages/audio` 0.12.14.** The choice, made so
+   that no program's web build changes: **an AudioWorklet fed from the main
+   thread through its MessagePort**, no shared memory. The worklet plays from
+   a small queue of its own (eight periods: 2048 frames at 256 and 48 kHz)
+   and asks the page for blocks as it drains; the page's handler renders each
+   block with the engine's stage-B entry (`rae_audio_render`, the same
+   function the native device callback calls) and posts it, transferred. So
+   the browser build needs no SharedArrayBuffer, no COOP/COEP headers, no
+   wasm workers and no `-sAUDIO_WORKLET`. miniaudio's device layer is off
+   there (`MA_NO_DEVICE_IO`): its Web Audio backend renders in a
+   ScriptProcessorNode, or in a worklet only with shared memory. The device is
+   `native/rae_audio_web.c` (EM_JS), built into the pack's new `linkBrowser`
+   library when emcc is found. A page with no AudioWorklet (plain http on a
+   LAN address is not a secure context) gets a ScriptProcessorNode that
+   renders in its own callback; `?RAE_AUDIO_WEB_OUTPUT=script` forces it, for
+   the check. The browser has no threads, so `audio/Audio` keeps the
+   streaming butler's and stage A's `spawn thread` under `when
+   Target.isNative`: the web always renders in the callback (stage B), and
+   `update` steps the butler. The AudioContext starts suspended until a click
+   or a key (the autoplay policy); the device resumes it on the page's first
+   one.
+
+   **Measured latency** (headless Chrome 157 on a Mac, muted, 48 kHz, 256-frame
+   periods): the worklet's queue 2048 frames (42.7 ms) plus what the context
+   reports (`baseLatency` + `outputLatency`) 1815 frames (37.8 ms), 3863
+   frames, about **80 ms** from a rendered frame to the speaker; the
+   ScriptProcessorNode fallback 2327 frames (512 of its buffer, 48 ms). The
+   native stage B is 395 frames (8 ms) on the same Mac. The shared-memory
+   build (the engine inside the worklet, rendering a 128-frame quantum at a
+   time) is the way below that: queued as its own step, opt-in per program.
+   The clock's measured rate is rougher in the browser (48593 Hz over 429
+   renders), because the page renders blocks in bursts as the worklet asks.
+
+   **A program that plays sound in a browser runs in a `mainLoop`**
+   (docs/web-frame-loop.md): the page renders between frames, and `sleep`
+   in the browser busy-waits, so a program that sleeps holds the page and no
+   block is rendered. `checks/audioSine` now runs its 2.3 s in a mainLoop (a
+   2 ms sleep a turn natively) and passes in headless Chrome: 429 blocks
+   rendered on request, both voices ended, no underrun.
+
+   **AAC in the browser: WebCodecs' AudioDecoder**, behind the same per-packet
+   C calls as Apple's AudioConverter (`rae_audio_aac_*`, configured with the
+   AudioSpecificConfig). A packet is decoded and the call waits (EM_ASYNC_JS,
+   through Asyncify) until the decoder has taken it, then copies what came
+   out; only the end of the stream flushes, because Chrome resets the decoder
+   on a flush and an AAC frame overlaps the one before (a flush per packet
+   gave differences of 0.6). `checks/audioAac` in headless Chrome: both M4A
+   files 22050 frames, no delay, within 1e-5 of afconvert's decodes; seeks;
+   a stream. `compiler/tools/wasm_audio_check.sh` (`make -C compiler
+   wasm-audio-check`, not in the full run) builds and runs both checks.
 4. **Time.** Output host timestamps and the DLL clock; sample-accurate event
    lists in nodes; Transport and TempoMap; the block-size test; the video sync
    hook for the Media API.
