@@ -9,6 +9,7 @@ open audio/Audio
 open audio/AudioInput
 open audio/AudioMixer
 open audio/AudioSession
+open audio/BusEffects
 open audio/AudioSpatial
 open audio/Sound
 open audio/VoiceControls
@@ -69,6 +70,12 @@ type Playground {
   synthDemo: SynthDemo
   # the microphone: its permission, the meter, a take and its playback
   inputDemo: InputDemo
+  # the effects on the music and effects buses (audio/BusEffects), the bus the Effects section
+  # shows (0 music, 1 effects), and its last measurement
+  musicBusEffects: BusEffects = {}
+  effectsBusEffects: BusEffects = {}
+  effectsBus: Int = 0
+  effectsMeasured: List(String) = {}
   engineRate: Float = 1.0
 }
 
@@ -82,6 +89,8 @@ func playgroundWantsOffline() ret Bool {
 func playgroundAudioSettings(withInput: view Bool) ret AudioSettings {
   var settings: AudioSettings = defaultAudioSettings()
   settings.offline = playgroundWantsOffline()
+  # an EQ, a compressor and a reverb on the music and effects buses (EffectsSection)
+  settings.busEffects = true
   if withInput and not settings.offline {
     settings.inputChannels = 1
     settings.session = AudioSessionKind.recording

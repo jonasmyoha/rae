@@ -21,6 +21,7 @@ open audio/AudioInput
 open audio/AudioMixer
 open audio/AudioSchedule
 open audio/AudioSpatial
+open audio/BusEffects
 open audio/Sound
 open audio/VoiceControls
 open ecs/ComponentTable
@@ -69,6 +70,8 @@ func reopenWithInput(playground: mod Playground, values: view UiValues) {
   )
   applyBusVolumes(playground: playground, values: values)
   playground.audio.setSynthSound(sound: playground.synthDemo.sound)
+  playground.audio.applyBusEffects(bus: AudioBusKind.music, effects: playground.musicBusEffects)
+  playground.audio.applyBusEffects(bus: AudioBusKind.effects, effects: playground.effectsBusEffects)
   playground.musicStarted = false
   playground.orbitOn = false
   playground.placement.sources.componentRemove(entityId: playground.orbitEntityId)

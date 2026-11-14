@@ -1,0 +1,333 @@
+# The Effects section (audio/BusEffects): an EQ band, a compressor and a reverb on the music and
+# effects buses, each on or off with its main settings on sliders. The engine is started with
+# them (Playground: settings.busEffects), so nothing is rebuilt while playing: turning one on or
+# off crossfades it in 5 ms and a slider's move is a parameter the audio thread ramps or sets.
+#
+# Measure compares each effect on and off on the music stream by measurement: one second of the
+# stream is rendered offline (its own engine, no device) with every effect off, then with each
+# of the three on alone at the bus's settings, and the section shows how the level changed,
+# overall, at the stream's 300 Hz tone (its first second), at 3 kHz, and between the tones
+# (where only a reverb's tail sounds). Listening to it is a person's check.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open audio/BusEffects
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open MusicSection
+open Playground
+
+func setEffectsDefaults(values: mod UiValues) {
+  let unusedFrequency: Bool = setUiValue(values: values, key: "effects.eqFrequency", value: 300.0)
+  let unusedGain: Bool = setUiValue(values: values, key: "effects.eqGain", value: 9.0)
+  let unusedThreshold: Bool = setUiValue(values: values, key: "effects.threshold", value: -30.0)
+  let unusedWet: Bool = setUiValue(values: values, key: "effects.reverbWet", value: 0.4)
+  let unusedRoom: Bool = setUiValue(values: values, key: "effects.roomSize", value: 0.7)
+}
+
+func selectedBus(playground: view Playground) ret AudioBusKind {
+  if playground.effectsBus is 1 {
+    ret AudioBusKind.effects
+  }
+  ret AudioBusKind.music
+}
+
+func selectedEffects(playground: view Playground) ret BusEffects {
+  if playground.effectsBus is 1 {
+    ret playground.effectsBusEffects
+  }
+  ret playground.musicBusEffects
+}
+
+func storeSelectedEffects(playground: mod Playground, effects: view BusEffects) {
+  if playground.effectsBus is 1 {
+    playground.effectsBusEffects = effects
+  } else {
+    playground.musicBusEffects = effects
+  }
+  playground.audio.applyBusEffects(bus: selectedBus(playground: playground), effects: effects)
+}
+
+# The sliders' settings into the selected bus's effects
+func effectsFromSliders(effects: view BusEffects, values: view UiValues) ret BusEffects {
+  var next: BusEffects = effects
+  next.eqFrequency = uiValue(values: values, key: "effects.eqFrequency", fallback: 300.0)
+  next.eqGainDecibels = uiValue(values: values, key: "effects.eqGain", fallback: 9.0)
+  next.thresholdDecibels = uiValue(values: values, key: "effects.threshold", fallback: -30.0)
+  next.reverbWet = uiValue(values: values, key: "effects.reverbWet", fallback: 0.4)
+  next.roomSize = uiValue(values: values, key: "effects.roomSize", fallback: 0.7)
+  ret next
+}
+
+func onOff(on: view Bool) ret String {
+  if on {
+    ret "on"
+  }
+  ret "off"
+}
+
+func showEffects(playground: view Playground, world: mod UiWorld) {
+  let effects: BusEffects = selectedEffects(playground: playground)
+  var bus: String = "music"
+  if playground.effectsBus is 1 {
+    bus = "effects"
+  }
+  setNodeText(world: world, nodeId: "EffectsBusLabel", value: "Bus: {bus}")
+  setNodeText(world: world, nodeId: "EffectsEqLabel", value: "EQ: {onOff(on: effects.eqOn)}")
+  setNodeText(
+    world: world
+    nodeId: "EffectsCompressorLabel"
+    value: "Compressor: {onOff(on: effects.compressorOn)}"
+  )
+  setNodeText(
+    world: world
+    nodeId: "EffectsReverbLabel"
+    value: "Reverb: {onOff(on: effects.reverbOn)}"
+  )
+}
+
+# ---- the measurement ---------------------------------------------------------
+
+# The level (dB) of the left channel at `frequency` over `samples` (interleaved stereo), from
+# frame `from` for `frames` frames (a Goertzel filter over a Hann window)
+func toneDecibels(
+  samples: view List(Float)
+  frequency: view Float
+  sampleRate: view Int
+  from: view Int
+  frames: view Int
+) ret Float {
+  let coefficient: Float64 = (2.0 * Math.cos(x: 6.2831853 * frequency / (sampleRate as Float))) as Float64
+  var s1: Float64 = 0.0
+  var s2: Float64 = 0.0
+  loop var frame: Int = from, frame < from + frames, ++frame {
+    # a Hann window, so a loud tone does not leak into the reading at another frequency
+    let share: Float = ((frame - from) as Float) / (Math.max(a: 1, b: frames - 1) as Float)
+    let window: Float = 0.5 - 0.5 * Math.cos(x: 6.2831853 * share)
+    let sample: Float64 = (samples.copyAtFallback(index: frame * 2, fallback: 0.0) * window) as Float64
+    let s0: Float64 = sample + coefficient * s1 - s2
+    s2 = s1
+    s1 = s0
+  }
+  let power: Float = (s1 * s1 + s2 * s2 - coefficient * s1 * s2) as Float
+  let amplitude: Float = Math.sqrt(x: Math.max(a: 0.0, b: power)) * 2.0 / (Math.max(a: 1, b: frames) as Float)
+  ret 20.0 * Math.naturalLog(x: Math.max(a: amplitude, b: 0.0000001)) / 2.302585093
+}
+
+func levelDecibels(samples: view List(Float), from: view Int, frames: view Int) ret Float {
+  var sum: Float64 = 0.0
+  loop var frame: Int = from, frame < from + frames, ++frame {
+    let value: Float = samples.copyAtFallback(index: frame * 2, fallback: 0.0)
+    sum = sum + (value * value) as Float64
+  }
+  let rms: Float = Math.sqrt(x: (sum / (Math.max(a: 1, b: frames) as Float64)) as Float)
+  ret 20.0 * Math.naturalLog(x: Math.max(a: rms, b: 0.0000001)) / 2.302585093
+}
+
+# One second of the stream on the music bus, rendered offline with `effects`
+func renderStreamSecond(effects: view BusEffects) ret List(Float) {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = true
+  settings.busEffects = true
+  var audio: AudioEngine = audioStart(settings: settings)
+  audio.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let unusedVoice: VoiceId = audio.playStream(
+    path: "{playgroundAssets}{musicFile}"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  var samples: List(Float) = {}
+  loop var block: Int = 0, block < 20, ++block {
+    audio.update()
+    loop let value: Float in audio.renderOffline(frames: audio.sampleRate / 20) {
+      samples.add(value: value)
+    }
+  }
+  let unusedBlocks: Int = audio.stopAudio()
+  ret samples
+}
+
+func signedTenths(value: view Float) ret String {
+  let rounded: Float = Math.round(x: value * 10.0) / 10.0
+  if rounded >= 0.0 {
+    ret "+{rounded}"
+  }
+  ret "{rounded}"
+}
+
+# How the effect changed the second against the dry one: overall, at 300 Hz, at 3 kHz, and in
+# the gaps between the tones (from 0.2 s, after the first tone, to 0.95 s)
+func measureLine(
+  name: view String
+  dry: view List(Float)
+  wet: view List(Float)
+  sampleRate: view Int
+) ret String {
+  let frames: Int = Math.min(a: dry.length, b: wet.length) / 2
+  let level: Float = levelDecibels(samples: wet, from: 0, frames: frames) - levelDecibels(
+    samples: dry
+    from: 0
+    frames: frames
+  )
+  let toneFrames: Int = sampleRate / 5
+  let atTone: Float = toneDecibels(
+    samples: wet
+    frequency: 300.0
+    sampleRate: sampleRate
+    from: 0
+    frames: toneFrames
+  ) - toneDecibels(
+    samples: dry
+    frequency: 300.0
+    sampleRate: sampleRate
+    from: 0
+    frames: toneFrames
+  )
+  let atHigh: Float = toneDecibels(
+    samples: wet
+    frequency: 3000.0
+    sampleRate: sampleRate
+    from: 0
+    frames: toneFrames
+  ) - toneDecibels(
+    samples: dry
+    frequency: 3000.0
+    sampleRate: sampleRate
+    from: 0
+    frames: toneFrames
+  )
+  let gapFrom: Int = sampleRate / 5
+  let gapFrames: Int = Math.max(a: 1, b: frames * 95 / 100 - gapFrom)
+  let between: Float = levelDecibels(samples: wet, from: gapFrom, frames: gapFrames) - levelDecibels(
+    samples: dry
+    from: gapFrom
+    frames: gapFrames
+  )
+  let overall: String = signedTenths(value: level)
+  let tone: String = signedTenths(value: atTone)
+  let high: String = signedTenths(value: atHigh)
+  let gaps: String = signedTenths(value: between)
+  ret "{name} {overall} dB: 300 Hz {tone}, 3 kHz {high}, gaps {gaps}"
+}
+
+# Each effect on and off on one second of the stream, at the selected bus's settings
+func measureEffects(playground: mod Playground) {
+  let settings: BusEffects = selectedEffects(playground: playground)
+  var off: BusEffects = settings
+  off.eqOn = false
+  off.compressorOn = false
+  off.reverbOn = false
+  let dry: List(Float) = renderStreamSecond(effects: off)
+  let rate: Int = defaultAudioSettings().sampleRate
+  var eq: BusEffects = off
+  eq.eqOn = true
+  var compressor: BusEffects = off
+  compressor.compressorOn = true
+  var reverb: BusEffects = off
+  reverb.reverbOn = true
+  playground.effectsMeasured = {
+    measureLine(
+      name: "EQ"
+      dry: dry
+      wet: renderStreamSecond(effects: eq)
+      sampleRate: rate
+    )
+    measureLine(
+      name: "Compressor"
+      dry: dry
+      wet: renderStreamSecond(effects: compressor)
+      sampleRate: rate
+    )
+    measureLine(
+      name: "Reverb"
+      dry: dry
+      wet: renderStreamSecond(effects: reverb)
+      sampleRate: rate
+    )
+  }
+}
+
+# ---- the section ---------------------------------------------------------------
+
+# The section's buttons and sliders this frame; true when what it shows changed
+func effectsSection(playground: mod Playground, world: mod UiWorld, values: mod UiValues) ret Bool {
+  var changed: Bool = false
+  var effects: BusEffects = selectedEffects(playground: playground)
+  var apply: Bool = false
+  if uiActionFired(world: world, actionId: "effects.bus") {
+    playground.effectsBus = 1 - playground.effectsBus
+    effects = selectedEffects(playground: playground)
+    # the sliders show the bus now selected
+    let unusedFrequency: Bool = setUiValue(
+      values: values
+      key: "effects.eqFrequency"
+      value: effects.eqFrequency
+    )
+    let unusedGain: Bool = setUiValue(
+      values: values
+      key: "effects.eqGain"
+      value: effects.eqGainDecibels
+    )
+    let unusedThreshold: Bool = setUiValue(
+      values: values
+      key: "effects.threshold"
+      value: effects.thresholdDecibels
+    )
+    let unusedWet: Bool = setUiValue(
+      values: values
+      key: "effects.reverbWet"
+      value: effects.reverbWet
+    )
+    let unusedRoom: Bool = setUiValue(
+      values: values
+      key: "effects.roomSize"
+      value: effects.roomSize
+    )
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "effects.eq") {
+    effects.eqOn = not effects.eqOn
+    apply = true
+  }
+  if uiActionFired(world: world, actionId: "effects.compressor") {
+    effects.compressorOn = not effects.compressorOn
+    apply = true
+  }
+  if uiActionFired(world: world, actionId: "effects.reverb") {
+    effects.reverbOn = not effects.reverbOn
+    apply = true
+  }
+  if uiActionFired(world: world, actionId: "effects.setting") {
+    effects = effectsFromSliders(effects: effects, values: values)
+    apply = true
+  }
+  if apply {
+    storeSelectedEffects(playground: playground, effects: effects)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "effects.measure") {
+    measureEffects(playground: playground)
+    changed = true
+  }
+  if changed or playground.frames % 15 is 1 {
+    showEffects(playground: playground, world: world)
+    loop var line: Int = 0, line < 3, ++line {
+      setNodeText(
+        world: world
+        nodeId: "EffectsMeasured{line}"
+        value: playground.effectsMeasured.copyAtDefault(index: line)
+      )
+    }
+  }
+  ret changed
+}
+
+# The settings from the sliders on both buses at the start, every effect off
+func startEffects(playground: mod Playground, values: view UiValues) {
+  playground.musicBusEffects = effectsFromSliders(effects: BusEffects {}, values: values)
+  playground.effectsBusEffects = playground.musicBusEffects
+  playground.audio.applyBusEffects(bus: AudioBusKind.music, effects: playground.musicBusEffects)
+  playground.audio.applyBusEffects(bus: AudioBusKind.effects, effects: playground.effectsBusEffects)
+}

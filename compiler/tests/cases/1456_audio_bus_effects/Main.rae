@@ -1,0 +1,233 @@
+# The effects on the engine's buses (audio/BusEffects, docs/audio-design.md §10.7), rendered
+# offline with RAE_REALTIME_CHECK=1 (config.env). The music bus plays a loop of three tones
+# (200 Hz, 1 kHz, 4 kHz, whole cycles); a second engine without effects renders the same thing,
+# the dry signal. Each tone's level is read with a Goertzel filter.
+# 1. With every effect off the output is the dry engine's, bit for bit.
+# 2. The EQ (+12 dB at 1 kHz, Q 2): the 1 kHz tone is 12 dB louder, the others about the same;
+#    switching it on does not click (no sample steps further than the tones do); its gain moved
+#    to -12 dB while playing turns the tone down; switched off, the output is the dry engine's
+#    again, to the bit, once its 5 ms crossfade is over.
+# 3. The compressor (threshold -30 dB, ratio 8) turns the loop down.
+# 4. The reverb leaves a tail after the voice stops, where the dry engine is silent.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/BusEffects
+open audio/Sound
+
+const rate: Int = 48000
+
+const loopFrames: Int = 4800
+
+func tonesSoundData() ret SoundData {
+  let samples: Buffer(Float) = createSampleBuffer(count: loopFrames)
+  loop var frame: Int = 0, frame < loopFrames, ++frame {
+    let t: Float = (frame as Float) / (rate as Float)
+    let value: Float = 0.2 * (Math.sin(x: 6.2831853 * 200.0 * t) + Math.sin(
+      x: 6.2831853 * 1000.0 * t
+    ) + Math.sin(x: 6.2831853 * 4000.0 * t))
+    setSampleAt(samples: samples, index: frame, value: value)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: loopFrames
+    channels: 1
+    sampleRate: rate
+    error: ""
+  }
+}
+
+func startEngine(withEffects: view Bool) ret AudioEngine {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = true
+  settings.sampleRate = rate
+  settings.channels = 2
+  settings.periodFrames = 256
+  settings.busEffects = withEffects
+  ret audioStart(settings: settings)
+}
+
+# The level (dB) of the left channel at `frequency` over the rendered frames
+func toneDecibels(samples: view List(Float), frequency: view Float) ret Float {
+  let frames: Int = samples.length / 2
+  let coefficient: Float64 = (2.0 * Math.cos(x: 6.2831853 * frequency / (rate as Float))) as Float64
+  var s1: Float64 = 0.0
+  var s2: Float64 = 0.0
+  loop var frame: Int = 0, frame < frames, ++frame {
+    let s0: Float64 = (samples.copyAtFallback(index: frame * 2, fallback: 0.0) as Float64) + coefficient * s1 - s2
+    s2 = s1
+    s1 = s0
+  }
+  let power: Float64 = s1 * s1 + s2 * s2 - coefficient * s1 * s2
+  let amplitude: Float = (Math.sqrt(x: Math.max(a: 0.0, b: power as Float)) * 2.0) / (frames as Float)
+  ret 20.0 * Math.naturalLog(x: Math.max(a: amplitude, b: 0.0000001)) / 2.302585093
+}
+
+func tenths(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func sameSamples(a: view List(Float), b: view List(Float)) ret Bool {
+  if a.length is not b.length {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length, ++i {
+    if a.copyAtFallback(index: i, fallback: 0.0) is not b.copyAtFallback(index: i, fallback: 1.0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func largestStep(samples: view List(Float)) ret Float {
+  var largest: Float = 0.0
+  loop var index: Int = 2, index < samples.length, ++index {
+    let step: Float = Math.abs(
+      value: samples.copyAtFallback(index: index, fallback: 0.0) - samples.copyAtFallback(
+        index: index - 2
+        fallback: 0.0
+      )
+    )
+    largest = Math.max(a: largest, b: step)
+  }
+  ret largest
+}
+
+func rmsDecibels(samples: view List(Float)) ret Float {
+  var sum: Float64 = 0.0
+  loop let value: Float in samples {
+    sum = sum + (value * value) as Float64
+  }
+  let rms: Float = Math.sqrt(x: (sum / (Math.max(a: 1, b: samples.length) as Float64)) as Float)
+  ret 20.0 * Math.naturalLog(x: Math.max(a: rms, b: 0.0000001)) / 2.302585093
+}
+
+# Both engines, the same loop on the music bus; each block of `frames` rendered by both
+type Pair {
+  dry: AudioEngine
+  wet: AudioEngine
+  dryVoice: VoiceId
+  wetVoice: VoiceId
+}
+
+func startPair() ret Pair {
+  var dry: AudioEngine = startEngine(withEffects: false)
+  var wet: AudioEngine = startEngine(withEffects: true)
+  let dryTones: Sound = dry.addSound(data: tonesSoundData())
+  let wetTones: Sound = wet.addSound(data: tonesSoundData())
+  dry.setBusGain(bus: AudioBusKind.music, gainDecibels: 0.0)
+  wet.setBusGain(bus: AudioBusKind.music, gainDecibels: 0.0)
+  let dryVoice: VoiceId = dry.playAt(
+    sound: dryTones
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  let wetVoice: VoiceId = wet.playAt(
+    sound: wetTones
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  ret Pair { dry: own dry, wet: own wet, dryVoice: dryVoice, wetVoice: wetVoice }
+}
+
+func main() {
+  var pair: Pair = startPair()
+  # 1. every effect off: the dry engine's samples
+  let dryStart: List(Float) = pair.dry.renderOffline(frames: 9600)
+  let wetStart: List(Float) = pair.wet.renderOffline(frames: 9600)
+  log("all off: the same samples as without effects: {sameSamples(a: dryStart, b: wetStart)}")
+  # 2. the EQ on: +12 dB at 1 kHz
+  var effects: BusEffects = {}
+  effects.eqOn = true
+  effects.eqFrequency = 1000.0
+  effects.eqGainDecibels = 12.0
+  effects.eqQuality = 2.0
+  pair.wet.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let switching: List(Float) = pair.wet.renderOffline(frames: 2400)
+  let dryBlock: List(Float) = pair.dry.renderOffline(frames: 2400)
+  let dryEq: List(Float) = pair.dry.renderOffline(frames: 9600)
+  let eq: List(Float) = pair.wet.renderOffline(frames: 9600)
+  log(
+    "EQ +12 dB at 1 kHz: 200 Hz {tenths(
+      value: toneDecibels(samples: eq, frequency: 200.0) - toneDecibels(
+        samples: dryEq
+        frequency: 200.0
+      )
+    )} dB, 1 kHz {tenths(
+      value: toneDecibels(samples: eq, frequency: 1000.0) - toneDecibels(
+        samples: dryEq
+        frequency: 1000.0
+      )
+    )} dB, 4 kHz {tenths(
+      value: toneDecibels(samples: eq, frequency: 4000.0) - toneDecibels(
+        samples: dryEq
+        frequency: 4000.0
+      )
+    )} dB"
+  )
+  log(
+    "switching it on: no step further than the tones' own: {largestStep(samples: switching) <= largestStep(
+      samples: eq
+    ) * 1.05}"
+  )
+  # its gain moved to -12 dB while playing
+  effects.eqGainDecibels = -12.0
+  pair.wet.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let moving: List(Float) = pair.wet.renderOffline(frames: 2400)
+  let dryMoving: List(Float) = pair.dry.renderOffline(frames: 2400)
+  let cut: List(Float) = pair.wet.renderOffline(frames: 9600)
+  let dryCut: List(Float) = pair.dry.renderOffline(frames: 9600)
+  log(
+    "its gain moved to -12 dB while playing: 1 kHz {tenths(
+      value: toneDecibels(samples: cut, frequency: 1000.0) - toneDecibels(
+        samples: dryCut
+        frequency: 1000.0
+      )
+    )} dB"
+  )
+  # switched off: the dry samples again after the crossfade (5 ms, 240 frames)
+  effects.eqOn = false
+  pair.wet.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let fade: List(Float) = pair.wet.renderOffline(frames: 480)
+  let dryFade: List(Float) = pair.dry.renderOffline(frames: 480)
+  let off: List(Float) = pair.wet.renderOffline(frames: 9600)
+  let dryOff: List(Float) = pair.dry.renderOffline(frames: 9600)
+  log("EQ switched off: the dry samples again: {sameSamples(a: dryOff, b: off)}")
+  # 3. the compressor
+  effects.compressorOn = true
+  effects.thresholdDecibels = -30.0
+  effects.ratio = 8.0
+  pair.wet.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let settling: List(Float) = pair.wet.renderOffline(frames: 9600)
+  let drySettling: List(Float) = pair.dry.renderOffline(frames: 9600)
+  let compressed: List(Float) = pair.wet.renderOffline(frames: 9600)
+  let dryCompressed: List(Float) = pair.dry.renderOffline(frames: 9600)
+  let lowered: Float = rmsDecibels(samples: dryCompressed) - rmsDecibels(samples: compressed)
+  log("the compressor turns it down by more than 6 dB: {lowered > 6.0}")
+  effects.compressorOn = false
+  # 4. the reverb, then the voice stopped
+  effects.reverbOn = true
+  effects.reverbWet = 0.5
+  pair.wet.applyBusEffects(bus: AudioBusKind.music, effects: effects)
+  let filling: List(Float) = pair.wet.renderOffline(frames: 24000)
+  let dryFilling: List(Float) = pair.dry.renderOffline(frames: 24000)
+  pair.wet.stopVoice(voiceId: pair.wetVoice)
+  pair.dry.stopVoice(voiceId: pair.dryVoice)
+  let ending: List(Float) = pair.wet.renderOffline(frames: 2400)
+  let dryEnding: List(Float) = pair.dry.renderOffline(frames: 2400)
+  let tail: List(Float) = pair.wet.renderOffline(frames: 9600)
+  let dryTail: List(Float) = pair.dry.renderOffline(frames: 9600)
+  log(
+    "after the voice stops: the dry engine is silent {rmsDecibels(samples: dryTail) < -100.0}, the reverb's tail is heard {rmsDecibels(
+      samples: tail
+    ) > -60.0}"
+  )
+  let dryBlocks: Int = pair.dry.stopAudio()
+  let wetBlocks: Int = pair.wet.stopAudio()
+}

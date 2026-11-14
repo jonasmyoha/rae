@@ -71,6 +71,18 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
     measured offset earlier, so the recorded clicks land on the played ones.
   - **Save WAV** writes the take as a 32-bit float WAV in the app's documents (the Mac:
     `~/Documents`; an iPhone: the app's own Documents, seen in the Files app).
+- **Effects on the buses** (the fourth column; `audio/BusEffects`): an EQ band, a compressor
+  and a reverb on the music and the effects bus (**Bus** switches which one the column shows).
+  Each turns on and off with a 5 ms crossfade and its sliders change it while it plays, without
+  a click: the engine is started with the effect stages (`settings.busEffects`), so nothing is
+  rebuilt. Off, a stage passes the sound unchanged, to the bit.
+  - **Measure each on and off** renders one second of the music stream offline (its own
+    engine, no device), with every effect off and with each of the three on alone at the
+    bus's settings, and shows how the level changed: overall, at the stream's 300 Hz tone, at
+    3 kHz, and in the gaps between the tones (where only a reverb's tail sounds). With the
+    defaults: the EQ (+9 dB at 300 Hz) +8.9 dB at the tone and -0.1 dB at 3 kHz; the
+    compressor (-30 dB, 4:1) about -11 dB; the reverb +0 dB at the tone and +9.5 dB in the
+    gaps. Listening to them is a person's check.
 - **Status:** the device the engine plays on, its sample rate and period, the latency the device
   and the engine add, the frames of silence played because samples were late (underruns), and
   how many sounds played and ended.
@@ -82,7 +94,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
   `GameSection`, `PlacedSection`, `StepsSection` with its state in `StepsDemo`, `SynthSection` with its state in
-  `SynthDemo`, `InputSection` with its state in `InputDemo`, `StatusSection`), run once a frame from `Main.rae`.
+  `SynthDemo`, `InputSection` with its state in `InputDemo`, `EffectsSection`, `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -95,7 +107,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 |---|---|
 | `RAE_SDL_HEADLESS_MS=N` | a headless run of N ms; the engine renders offline (no device) |
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
-| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
+| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key, and the effects measured with the reverb then turned on) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
 | `RAE_AUDIO_PLAYGROUND_RECORD=1` | with a device and the microphone allowed: records a take at frame 60, plays it back and saves it, and logs a line `[audioPlayground] input: ...` at the end (the clicks heard and their offset, the saved path) |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
