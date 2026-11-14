@@ -1,0 +1,82 @@
+# presentPageWithRoots: a page scene in the host's folder imports "theme/Theme",
+# which a theme package's folder serves through a mounted scene root
+# (ui/SceneRoots). presentPage, with only the host's root, cannot find the
+# theme (a missingSubScene diagnostic); presentPageWithRoots presents the dialog with
+# 0 diagnostics, as mountSceneWithRoots mounts a screen.
+import String
+open Gpu2dCanvas
+open app3d/UiShell
+open ui/Ecs
+open ui/UiSystems
+open ui/Theme
+open ui/ThemeResolved
+open ui/MaterialIconFont
+open ui/SceneInstance
+open ui/SceneRoots
+open ui/ScenePolicy
+open ui/renderSystem/RenderSystem
+open ecs/Entity
+
+const caseDir: String = "tests/cases/1470_present_page_with_roots/"
+
+func reportPresented(label: view String, world: view UiWorld, host: view EntityId) {
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  diagnostic {diagnostic.kind}")
+  }
+  log(
+    "{label}: presented {isNone(this: host) is false}, diagnostics {world.sceneDiagnostics.length}"
+  )
+}
+
+func main() {
+  let fallbackText: SdfFont = loadMaterialIconFont()
+  let fallbackIcons: SdfFont = loadMaterialIconFont()
+  var resources: Gpu2dUi = {
+    textFont: own fallbackText
+    iconFont: own fallbackIcons
+    theme: createResolvedTheme()
+    activeTheme: lightTheme()
+  }
+  var roots: SceneRoots = createSceneRoots(defaultRoot: "{caseDir}host")
+  mountSceneRoot(roots: roots, prefix: "theme/", folder: "{caseDir}package/scenes")
+  log("theme/Theme -> {sceneRootsFile(roots: roots, sceneId: "theme/Theme")}")
+
+  # One root only: "theme/Theme" is looked for under the host's folder
+  var plainWorld: UiWorld = createUiWorld()
+  var plainSystems: UiSystems = createUiSystems()
+  var plainCanvas: Gpu2dCanvas = createGpu2dCanvas()
+  var plainRegistry: SceneRegistry = createSceneRegistry()
+  let plainHost: EntityId = presentPage(
+    world: plainWorld
+    uiSystems: plainSystems
+    root: "{caseDir}host/"
+    sceneId: "pages/Ask"
+    resources: resources
+    canvas: plainCanvas
+    registry: plainRegistry
+    overrides: List.create(SceneOverride, cap: 0)
+  )
+  reportPresented(label: "presentPage with the host's root", world: plainWorld, host: plainHost)
+
+  # The mounted roots: the theme comes from the package's folder
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var registry: SceneRegistry = createSceneRegistry()
+  var overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  addTextOverride(list: overrides, nodeId: "Message", value: "Remove the task?")
+  let host: EntityId = presentPageWithRoots(
+    world: world
+    uiSystems: uiSystems
+    roots: roots
+    sceneId: "pages/Ask"
+    resources: resources
+    canvas: canvas
+    registry: registry
+    overrides: overrides
+  )
+  reportPresented(label: "presentPageWithRoots", world: world, host: host)
+  loop let id: view String in registry.ids {
+    log("registered {id}")
+  }
+}

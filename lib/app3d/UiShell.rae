@@ -354,6 +354,31 @@ func presentPage(
   overrides: view List(SceneOverride)
 ) ret EntityId {
   let roots: SceneRoots = createSceneRoots(defaultRoot: root)
+  ret presentPageWithRoots(
+    world: world
+    uiSystems: uiSystems
+    roots: roots
+    sceneId: sceneId
+    resources: resources
+    canvas: canvas
+    registry: registry
+    overrides: overrides
+  )
+}
+
+# presentPage for a host with mounted scene roots (ui/SceneRoots), as
+# mountSceneWithRoots is for a screen: a page whose scene imports a mounted
+# package path (a theme package's "theme/Theme") resolves it through `roots`.
+func presentPageWithRoots(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  roots: view SceneRoots
+  sceneId: view String
+  resources: mod Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  registry: mod SceneRegistry
+  overrides: view List(SceneOverride)
+) ret EntityId {
   let pageRoot: EntityId = mountSceneOnPage(
     world: world
     uiSystems: uiSystems

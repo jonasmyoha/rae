@@ -95,6 +95,10 @@ is whole folder names (`apps/notesOld/Main` is not under `apps/notes/`).
 `sceneRootsFile` is the lookup that `import`, `SceneInstance` and ListView row
 scenes all go through; `sceneRootsPackagePath` maps a file back to its
 package path. `mountSceneWithImports(root: ...)` is the same with no mounts.
+A page or a dialog over the screen is presented the same way with
+`presentPageWithRoots(roots: ...)` (lib/app3d/UiShell); `presentPage(root: ...)`
+is it with no mounts. Case 1470 presents a dialog that imports a mounted
+`theme/Theme`.
 The 121 viewer takes mounts as `--scene-mount <prefix>=<folder>` (repeatable)
 or `RAE_UI_EDITOR_MOUNTS="apps/notes/=downloads/notes/;..."`. Case 1295 has two
 roots.
