@@ -5,6 +5,9 @@
 #     ScriptProcessorNode fallback (?RAE_AUDIO_WEB_OUTPUT=script): the blocks
 #     the page rendered on request, both voices ended, no underrun; it prints
 #     the latency the output reports;
+#   - checks/audioSine again with `web: { sharedMemory: true }` in its pack (a
+#     copy): the engine inside the AudioWorklet, the page made cross-origin
+#     isolated by its own service worker (rae-coi.js) under a plain server;
 #   - checks/audioAac through WebCodecs' AudioDecoder: both M4A files equal to
 #     afconvert's decodes within -40 dB, seeks, a stream.
 # Not part of the full suite (it builds the package's browser library and
@@ -81,6 +84,24 @@ printf '%s\n' "$worklet" | grep -q 'Web Audio (AudioWorklet)' || {
 script="$(page_console "$TMP/sine" 'audioSine: (passed|FAILED|no output)' '?RAE_AUDIO_WEB_OUTPUT=script')"
 expect_pass "audioSine on the ScriptProcessorNode" "$script" audioSine
 
+# The shared-memory build: a copy of audioSine whose pack opts in (its
+# relative git dependency made absolute, as the copy lives elsewhere)
+mkdir -p "$TMP/sineSharedProject"
+cp checks/audioSine/Main.rae "$TMP/sineSharedProject/"
+sed -e "s#git: \"../..\"#git: \"$PWD\"#" -e 's#^  defaultTarget: compiled$#  defaultTarget: compiled\
+  web: {\
+    sharedMemory: true\
+  }#' checks/audioSine/App.raepack >"$TMP/sineSharedProject/App.raepack"
+build_page "$TMP/sineSharedProject" "$TMP/sineShared"
+test -s "$TMP/sineShared/rae-coi.js" || { echo "FAIL wasm_audio_check: no rae-coi.js beside the shared page"; exit 1; }
+shared="$(page_console "$TMP/sineShared" 'audioSine: (passed|FAILED|no output)|needs shared memory')"
+expect_pass "audioSine with shared memory" "$shared" audioSine
+printf '%s\n' "$shared" | grep -q 'AudioWorklet, shared memory' || {
+  echo "FAIL wasm_audio_check: the shared build did not render inside the AudioWorklet"
+  printf '%s\n' "$shared" | head -20
+  exit 1
+}
+
 build_page checks/audioAac "$TMP/aac"
 aac="$(page_console "$TMP/aac" 'audioAac: (passed|FAILED|no AAC)')"
 expect_pass "audioAac through WebCodecs" "$aac" audioAac
@@ -90,4 +111,4 @@ if printf '%s\n' "$aac" | grep -q 'no AAC decoder'; then
 fi
 
 latency() { printf '%s\n' "$1" | sed -n 's/.*latency at the end \([0-9]*\) frames.*/\1/p'; }
-echo "PASS wasm_audio_check: audioSine on the AudioWorklet ($(latency "$worklet") frames of output latency) and the ScriptProcessorNode ($(latency "$script")), audioAac through WebCodecs"
+echo "PASS wasm_audio_check: audioSine on the AudioWorklet fed by the page ($(latency "$worklet") frames of output latency), inside the AudioWorklet with shared memory ($(latency "$shared")) and on the ScriptProcessorNode ($(latency "$script")); audioAac through WebCodecs"
