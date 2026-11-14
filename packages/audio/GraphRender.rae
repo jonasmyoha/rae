@@ -1,0 +1,476 @@
+# audio/GraphRender — running a RenderPlan on the audio thread
+# (docs/audio-design.md §5.2, §5.3). A GraphRenderer holds the plan the audio
+# thread runs. The main thread hands it a new plan in one command
+# (submitPlan: the plans ring); at the start of a block the audio thread
+# swaps it in and puts the old one on the reclaim ring, which the main thread
+# drains and frees (takeReclaimedPlans). Every function the audio thread calls
+# here is `realtime`: no allocation, free, lock or wait.
+#
+# Each node kind's process works on the scratch buffers of the plan (two
+# channels of maxFrames samples per buffer) and on its state in its kind's
+# table, dispatched with a `match` on the kind. Sources (the voice set, a
+# stream voice, the input) are filled by the engine into `sources` (two
+# channels of maxFrames samples per slot) before the graph runs.
+#
+#     var renderer: GraphRenderer = createGraphRenderer()
+#     renderer.submitPlan(plan: compiled.plan)                    # main thread
+#     renderer.renderGraph(sources: sources, left: left, right: right, offset: 0, frames: 256)   #
+#     audio
+#     loop let old: RenderPlan in renderer.takeReclaimedPlans() { freeRenderPlan(plan: old) }   #
+#     main
+import Math
+open audio/AudioGraph
+open audio/CustomNodes
+open audio/GraphEffects
+open audio/GraphNodes
+open audio/GraphTeam
+open collections/SpscRing
+
+const graphPlanSlots: Int = 8
+
+# A parameter change at a sample time (audio/parameterSystem): `key` is the
+# node's entity key in the plan, `kind` 0 a gain or send's linear target
+# (reached over its 5 ms ramp), 1 a pan position (-1 .. 1, at once), 2 / 3 / 4
+# an EQ band's frequency (Hz), gain (dB) or Q (each moved over 5 ms,
+# audio/GraphEffects)
+type GraphParameterEvent {
+  key: Int
+  kind: Int
+  value: Float
+  sampleTime: Int
+}
+
+# A meter's peak since the last reading, pushed after each rendered call
+type MeterReading {
+  key: Int
+  peak: Float
+}
+
+type GraphRenderer {
+  plans: SpscRing(RenderPlan)
+  reclaim: SpscRing(RenderPlan)
+  current: RenderPlan
+  hasPlan: Bool
+  # the sample time of the next frame rendered
+  sampleTime: Int
+  events: SpscRing(GraphParameterEvent)
+  # an event taken from the ring whose time has not come
+  pending: GraphParameterEvent
+  hasPending: Bool
+  meters: SpscRing(MeterReading)
+  # the helpers that render a team plan's stages with the rendering thread
+  # (audio/GraphTeam); none by default
+  team: GraphTeam
+}
+
+const graphEventSlots: Int = 1024
+
+const graphMeterSlots: Int = 1024
+
+func createGraphRenderer() ret GraphRenderer {
+  ret GraphRenderer {
+    plans: createSpscRing(RenderPlan, capacity: graphPlanSlots)
+    reclaim: createSpscRing(RenderPlan, capacity: graphPlanSlots)
+    current: emptyRenderPlan()
+    hasPlan: false
+    sampleTime: 0
+    events: createSpscRing(GraphParameterEvent, capacity: graphEventSlots)
+    pending: GraphParameterEvent { key: -1, kind: 0, value: 0.0, sampleTime: 0 }
+    hasPending: false
+    meters: createSpscRing(MeterReading, capacity: graphMeterSlots)
+    team: noGraphTeam()
+  }
+}
+
+# Main thread, before rendering: render team plans (AudioGraph.forTeam) with
+# `team`'s helpers. The caller keeps the team's tasks and stops it
+# (stopGraphTeam) after the last render.
+func setRendererTeam(this: mod GraphRenderer, team: view GraphTeam) {
+  if this.team.helperCount is 0 {
+    freeGraphTeam(team: this.team)
+  }
+  this.team = team
+}
+
+# Main thread: a parameter change at `sampleTime` (false: the ring is full)
+func sendParameter(this: view GraphRenderer, event: view GraphParameterEvent) ret Bool {
+  ret this.events.push(value: event)
+}
+
+# Main thread: the meters' readings since the last call, oldest first
+func takeMeterReadings(this: view GraphRenderer) ret List(MeterReading) {
+  var taken: List(MeterReading) = {}
+  loop this.meters.count() > 0 {
+    if let reading: MeterReading = this.meters.pop() {
+      taken.add(value: reading)
+    }
+  }
+  ret taken
+}
+
+# Main thread: hand a compiled plan to the audio thread (false: the ring is
+# full; keep it and try again after the next takeReclaimedPlans)
+func submitPlan(this: view GraphRenderer, plan: view RenderPlan) ret Bool {
+  ret this.plans.push(value: plan)
+}
+
+# Main thread: the plans the audio thread let go of, to free
+func takeReclaimedPlans(this: view GraphRenderer) ret List(RenderPlan) {
+  var taken: List(RenderPlan) = {}
+  loop this.reclaim.count() > 0 {
+    if let plan: RenderPlan = this.reclaim.pop() {
+      taken.add(value: plan)
+    }
+  }
+  ret taken
+}
+
+# Main thread, at the end: free every plan still held (the renderer is no
+# longer rendering)
+func freeGraphRenderer(this: view GraphRenderer) {
+  loop let plan: RenderPlan in this.takeReclaimedPlans() {
+    freeRenderPlan(plan: plan)
+  }
+  loop this.plans.count() > 0 {
+    if let plan: RenderPlan = this.plans.pop() {
+      freeRenderPlan(plan: plan)
+    }
+  }
+  if this.hasPlan {
+    freeRenderPlan(plan: this.current)
+  }
+  this.plans.freeSpscRing()
+  this.reclaim.freeSpscRing()
+  this.events.freeSpscRing()
+  this.meters.freeSpscRing()
+  # a team with helpers is its owner's to stop
+  if this.team.helperCount is 0 {
+    freeGraphTeam(team: this.team)
+  }
+}
+
+# ---- carrying node state across a plan swap (§5.2) ----------------------------
+
+# The state of each node of `to` that continues a node of `from` (same entity
+# and kind, found by the compiler) is carried over: a gain's current level
+# (it then ramps to its new target), a meter's peaks, a limiter's gain, and a
+# delay line's contents with its position, by exchanging the two plans' line
+# buffers (each plan still owns one, freed with it), so nothing is copied or
+# allocated here
+func carryState(from: view RenderPlan, to: view RenderPlan) realtime {
+  loop var node: Int = 0, node < to.nodeCount, ++node {
+    let old: Int = intAt(buffer: to.carryFrom, index: node)
+    if old < 0 or old >= from.nodeCount {
+      continue
+    }
+    let newAt: Int = intAt(buffer: to.stateIndex, index: node)
+    let oldAt: Int = intAt(buffer: from.stateIndex, index: old)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: to.kinds, index: node)
+      if kind is NodeKind.gain or kind is NodeKind.send {
+        var gains: Buffer(GainState) = to.gains
+        var state: GainState = rae_ext_rae_buf_get(buf: gains, index: newAt)
+        let before: GainState = rae_ext_rae_buf_get(buf: from.gains, index: oldAt)
+        state.current = before.current
+        state.step = (state.target - state.current) / (state.rampFrames as Float)
+        rae_ext_rae_buf_set(buf: gains, index: newAt, value: state)
+      } else if kind is NodeKind.meter {
+        var meters: Buffer(MeterState) = to.meters
+        rae_ext_rae_buf_set(
+          buf: meters
+          index: newAt
+          value: rae_ext_rae_buf_get(buf: from.meters, index: oldAt)
+        )
+      } else if kind is NodeKind.limiter {
+        var limiters: Buffer(LimiterState) = to.limiters
+        var state: LimiterState = rae_ext_rae_buf_get(buf: limiters, index: newAt)
+        let before: LimiterState = rae_ext_rae_buf_get(buf: from.limiters, index: oldAt)
+        state.gain = before.gain
+        rae_ext_rae_buf_set(buf: limiters, index: newAt, value: state)
+      } else if kind is NodeKind.custom {
+        carryCustomState(
+          from: from
+          oldAt: oldAt
+          to: to
+          newAt: newAt
+        )
+      } else if kind is NodeKind.eq or kind is NodeKind.compressor or kind is NodeKind.reverb {
+        carryEffectState(
+          kind: kind
+          from: from
+          oldAt: oldAt
+          to: to
+          newAt: newAt
+        )
+      } else if kind is NodeKind.delay {
+        var newDelays: Buffer(DelayState) = to.delays
+        var oldDelays: Buffer(DelayState) = from.delays
+        var state: DelayState = rae_ext_rae_buf_get(buf: newDelays, index: newAt)
+        var before: DelayState = rae_ext_rae_buf_get(buf: oldDelays, index: oldAt)
+        if state.frames is before.frames {
+          let freshLine: Buffer(Float) = state.line
+          state.line = before.line
+          state.writeIndex = before.writeIndex
+          before.line = freshLine
+          rae_ext_rae_buf_set(buf: newDelays, index: newAt, value: state)
+          rae_ext_rae_buf_set(buf: oldDelays, index: oldAt, value: before)
+        }
+      }
+    }
+  }
+}
+
+# ---- the audio thread's entry points ------------------------------------------
+
+# At a block's start: take a new plan if one came, the old one to the reclaim
+# ring (only when the reclaim ring has room, so nothing is ever freed here)
+func takeNewPlan(this: mod GraphRenderer) realtime {
+  loop this.plans.count() > 0 and this.reclaim.count() < graphPlanSlots {
+    if let plan: RenderPlan = this.plans.pop() {
+      if this.hasPlan {
+        if plan.previousSerial is this.current.serial {
+          carryState(from: this.current, to: plan)
+        }
+        let given: Bool = this.reclaim.push(value: this.current)
+      }
+      this.current = plan
+      this.hasPlan = true
+    }
+  }
+}
+
+# Render `frames` frames into left/right from `offset`, in pieces of at most
+# the plan's maxFrames; silence when there is no plan yet
+func renderGraph(
+  this: mod GraphRenderer
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  this.takeNewPlan()
+  var done: Int = 0
+  loop done < frames {
+    this.applyDueEvents()
+    var piece: Int = frames - done
+    if this.hasPlan and piece > this.current.maxFrames {
+      piece = this.current.maxFrames
+    }
+    # a change waiting for a sample inside this piece cuts it there, so it
+    # lands on its exact sample at any block size
+    if this.hasPending and this.pending.sampleTime < this.sampleTime + piece {
+      piece = this.pending.sampleTime - this.sampleTime
+    }
+    unsafe {
+      var leftTarget: Buffer(Float) = left
+      var rightTarget: Buffer(Float) = right
+      if not this.hasPlan or this.current.nodeCount is 0 {
+        loop var i: Int = 0, i < piece, ++i {
+          rae_ext_rae_buf_set(buf: leftTarget, index: offset + done + i, value: 0.0)
+          rae_ext_rae_buf_set(buf: rightTarget, index: offset + done + i, value: 0.0)
+        }
+      } else {
+        renderPlanNodes(
+          plan: this.current
+          sources: pooledSources(pool: sources, maxFrames: this.current.maxFrames)
+          sourceOffset: done
+          frames: piece
+          team: this.team
+        )
+        clearCustomEvents(plan: this.current)
+        loop var i: Int = 0, i < piece, ++i {
+          rae_ext_rae_buf_set(
+            buf: leftTarget
+            index: offset + done + i
+            value: scratchAt(
+              plan: this.current
+              buffer: this.current.outputBuffer
+              channel: 0
+              frame: i
+            )
+          )
+          rae_ext_rae_buf_set(
+            buf: rightTarget
+            index: offset + done + i
+            value: scratchAt(
+              plan: this.current
+              buffer: this.current.outputBuffer
+              channel: 1
+              frame: i
+            )
+          )
+        }
+      }
+    }
+    done = done + piece
+    this.sampleTime = this.sampleTime + piece
+  }
+  this.pushMeterReadings()
+}
+
+# Apply every parameter change whose sample time has come
+func applyDueEvents(this: mod GraphRenderer) realtime {
+  loop true {
+    if not this.hasPending {
+      if let event: GraphParameterEvent = this.events.pop() {
+        this.pending = event
+        this.hasPending = true
+      } else {
+        ret
+      }
+    }
+    if this.pending.sampleTime > this.sampleTime {
+      ret
+    }
+    this.applyParameter(event: this.pending)
+    this.hasPending = false
+  }
+}
+
+# Find the node with the event's entity key and set it
+func applyParameter(this: view GraphRenderer, event: view GraphParameterEvent) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  let plan: RenderPlan = this.current
+  loop var node: Int = 0, node < plan.nodeCount, ++node {
+    if intAt(buffer: plan.entityIds, index: node) is not event.key {
+      continue
+    }
+    let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      if event.kind is 0 and (kind is NodeKind.gain or kind is NodeKind.send) {
+        var gains: Buffer(GainState) = plan.gains
+        var state: GainState = rae_ext_rae_buf_get(buf: gains, index: stateAt)
+        state.target = event.value
+        state.step = (state.target - state.current) / (state.rampFrames as Float)
+        rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+      } else if kind is NodeKind.custom and event.kind >= customParameterBase {
+        addCustomEvent(
+          plan: plan
+          node: node
+          parameter: event.kind - customParameterBase
+          value: event.value
+        )
+      } else if kind is NodeKind.eq and isEqParameter(kind: event.kind) {
+        applyEqParameter(
+          plan: plan
+          stateAt: stateAt
+          kind: event.kind
+          value: event.value
+        )
+      } else if event.kind is 1 and kind is NodeKind.pan {
+        var pans: Buffer(PanState) = plan.pans
+        let angle: Float = (min(a: 1.0, b: max(a: -1.0, b: event.value)) + 1.0) * 0.7853981633974483
+        rae_ext_rae_buf_set(
+          buf: pans
+          index: stateAt
+          value: PanState { left: cos(x: angle), right: sin(x: angle) }
+        )
+      }
+    }
+  }
+}
+
+# Each meter that stands for an entity: its peak since the last reading, onto
+# the meters ring (dropped when the ring is full), then cleared
+func pushMeterReadings(this: view GraphRenderer) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  let plan: RenderPlan = this.current
+  loop var node: Int = 0, node < plan.nodeCount, ++node {
+    let key: Int = intAt(buffer: plan.entityIds, index: node)
+    if key < 0 {
+      continue
+    }
+    let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+    unsafe {
+      let kind: NodeKind = rae_ext_rae_buf_get(buf: plan.kinds, index: node)
+      if kind is NodeKind.meter {
+        var meters: Buffer(MeterState) = plan.meters
+        let state: MeterState = rae_ext_rae_buf_get(buf: meters, index: stateAt)
+        let pushed: Bool = this.meters.push(
+          value: MeterReading { key: key, peak: max(a: state.peakLeft, b: state.peakRight) }
+        )
+        rae_ext_rae_buf_set(
+          buf: meters
+          index: stateAt
+          value: MeterState { peakLeft: 0.0, peakRight: 0.0 }
+        )
+      }
+    }
+  }
+}
+
+# Audio thread: a gain or send node's new target (by its index in the graph),
+# reached over the 5 ms ramp
+func setGainTarget(this: view GraphRenderer, graphNode: view Int, decibels: view Float) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  loop var node: Int = 0, node < this.current.nodeCount, ++node {
+    if intAt(buffer: this.current.graphIndex, index: node) is graphNode {
+      let stateAt: Int = intAt(buffer: this.current.stateIndex, index: node)
+      unsafe {
+        var gains: Buffer(GainState) = this.current.gains
+        var state: GainState = rae_ext_rae_buf_get(buf: gains, index: stateAt)
+        state.target = pow(base: 10.0, exp: decibels / 20.0)
+        state.step = (state.target - state.current) / (state.rampFrames as Float)
+        rae_ext_rae_buf_set(buf: gains, index: stateAt, value: state)
+      }
+    }
+  }
+}
+
+# A meter node's peaks since it was last read (by its index in the graph);
+# reading clears them. -1 when there is no such meter.
+func takeMeterPeak(this: view GraphRenderer, graphNode: view Int) ret Float realtime {
+  if not this.hasPlan {
+    ret -1.0
+  }
+  loop var node: Int = 0, node < this.current.nodeCount, ++node {
+    if intAt(buffer: this.current.graphIndex, index: node) is graphNode {
+      let stateAt: Int = intAt(buffer: this.current.stateIndex, index: node)
+      unsafe {
+        var meters: Buffer(MeterState) = this.current.meters
+        let state: MeterState = rae_ext_rae_buf_get(buf: meters, index: stateAt)
+        rae_ext_rae_buf_set(
+          buf: meters
+          index: stateAt
+          value: MeterState { peakLeft: 0.0, peakRight: 0.0 }
+        )
+        ret max(a: state.peakLeft, b: state.peakRight)
+      }
+    }
+  }
+  ret -1.0
+}
+
+# Audio thread, after a seek: every node's running state back to silence
+func resetGraph(this: view GraphRenderer) realtime {
+  if not this.hasPlan {
+    ret
+  }
+  let plan: RenderPlan = this.current
+  unsafe {
+    loop var i: Int = 0, i < plan.delayCount, ++i {
+      var delays: Buffer(DelayState) = plan.delays
+      var state: DelayState = rae_ext_rae_buf_get(buf: delays, index: i)
+      rae_ext_rae_buf_zero(
+        buf: state.line
+        start: 0
+        count: 2 * max(a: 1, b: state.frames)
+        elemSize: sizeof(Float)
+      )
+      state.writeIndex = 0
+      rae_ext_rae_buf_set(buf: delays, index: i, value: state)
+    }
+  }
+  resetEffects(plan: plan)
+  loop var i: Int = 0, i < plan.customCount, ++i {
+    resetCustom(plan: plan, stateAt: i)
+  }
+}

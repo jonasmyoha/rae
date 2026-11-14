@@ -1,0 +1,176 @@
+# audio/AudioClock — the engine's clock (docs/audio-design.md §6.1): sample
+# time (an Int count of frames since the engine started, never backward) and
+# host time (the monotonic clock in nanoseconds), tied together by a
+# delay-locked loop. Every render records (its first sample time, the host
+# time then) in a ring; the main thread feeds them to the loop, with the
+# output's latency added, so each sample time maps to the host time it reaches
+# the speaker, and back, smoothly, and the device's real rate is measured.
+#
+# The latency is the platform's: on macOS the output device's latency, safety
+# offset and IO buffer (Core Audio); on iOS the route's output latency and the
+# device's buffer (AVAudioSession); elsewhere the device's buffer (miniaudio's
+# periods). Each block's host time is read when the render starts, not passed
+# from the platform's own timestamp (miniaudio does not pass it); the loop
+# smooths the difference out.
+#
+# Offline there is no device: host time is the sample time at the nominal
+# rate, exactly, starting at 0.
+import Math
+import String
+open audio/AudioGlue
+open audio/AudioMixer
+open collections/SpscRing
+
+type AudioClock {
+  nominalRate: Int
+  offline: Bool
+  # nanoseconds from the start of a render to its first frame reaching the
+  # speaker
+  latencyNs: Int
+  latencyFrames: Int
+  # the loop's state: the host time (ns) at which `baseSample` reaches the
+  # speaker, and nanoseconds per frame (1e9 / the measured rate)
+  locked: Bool
+  baseSample: Int
+  baseHostNs: Float64
+  nsPerFrame: Float64
+  # the loop's bandwidth in Hz: 4 while it locks (200 renders), then 0.05, so
+  # the timestamps' jitter stays out of the rate
+  bandwidthHz: Float64
+  stamps: Int
+  # the first sample of the newest render seen
+  lastRenderSample: Int
+}
+
+func createAudioClock(
+  sampleRate: view Int
+  offline: view Bool
+  latencyFrames: view Int
+) ret AudioClock {
+  ret AudioClock {
+    nominalRate: sampleRate
+    offline: offline
+    latencyNs: latencyFrames * 1000000000 / max(a: 1, b: sampleRate)
+    latencyFrames: latencyFrames
+    locked: offline
+    baseSample: 0
+    baseHostNs: 0.0
+    nsPerFrame: nominalNsPerFrame(sampleRate: sampleRate)
+    bandwidthHz: 4.0
+    stamps: 0
+    lastRenderSample: 0
+  }
+}
+
+func nominalNsPerFrame(sampleRate: view Int) ret Float64 {
+  let nanoseconds: Float64 = 1000000000.0
+  ret nanoseconds / (max(a: 1, b: sampleRate) as Float64)
+}
+
+# The output's latency in frames, from the platform (see above)
+func deviceOutputLatencyFrames(device: view Int, sampleRate: view Int) ret Int {
+  if device is 0 {
+    ret 0
+  }
+  unsafe {
+    let buffered: Int = rae_audio_device_buffer_frames(device: device)
+    let deviceLatency: Int = rae_audio_device_core_audio_frames(device: device, property: 0)
+    let safetyOffset: Int = rae_audio_device_core_audio_frames(device: device, property: 1)
+    let ioBuffer: Int = rae_audio_device_core_audio_frames(device: device, property: 2)
+    if deviceLatency >= 0 and safetyOffset >= 0 and ioBuffer >= 0 {
+      ret deviceLatency + safetyOffset + ioBuffer
+    }
+    let routeNs: Int = rae_audio_session_output_latency_ns()
+    if routeNs >= 0 {
+      ret buffered + routeNs * sampleRate / 1000000000
+    }
+    ret buffered
+  }
+}
+
+# The platform audio system the device runs on ("Core Audio", "AAudio",
+# "WASAPI", "PulseAudio", "Web Audio", ...); "" offline
+func deviceBackendName(device: view Int) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 64)
+  bytes.addDefaults(count: 64)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_device_backend_name(device: device, into: bytes.data, capacity: 64)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# One observation: sample `sampleTime` reaches the speaker at `hostNs`. A
+# second-order loop: the error between the prediction and the observation
+# moves the base by sqrt(2)·w and the rate by w², with w = 2π·bandwidth·dt
+# (Adriaensen, "Using a DLL to filter time", for blocks of any size).
+func clockObserve(this: mod AudioClock, sampleTime: view Int, hostNs: view Int) {
+  this.lastRenderSample = sampleTime
+  if this.offline {
+    ret
+  }
+  this.stamps = this.stamps + 1
+  if not this.locked {
+    this.locked = true
+    this.baseSample = sampleTime
+    this.baseHostNs = hostNs as Float64
+    ret
+  }
+  let frames: Int = sampleTime - this.baseSample
+  if frames <= 0 {
+    ret
+  }
+  if this.stamps > 200 {
+    # locked by now: narrow, so the timestamps' jitter stays out
+    this.bandwidthHz = 0.05
+  }
+  let predicted: Float64 = this.baseHostNs + (frames as Float64) * this.nsPerFrame
+  let error: Float64 = (hostNs as Float64) - predicted
+  let seconds: Float64 = (frames as Float64) / (this.nominalRate as Float64)
+  var omega: Float64 = this.bandwidthHz * seconds * 6.283185307179586
+  if omega > 0.8 {
+    omega = 0.8
+  }
+  this.baseHostNs = predicted + error * omega * 1.4142135623730951
+  this.nsPerFrame = this.nsPerFrame + error * omega * omega / (frames as Float64)
+  this.baseSample = sampleTime
+}
+
+# Take the renders' stamps from the ring (the main thread, in update)
+func clockTakeStamps(this: mod AudioClock, stamps: view SpscRing(ClockStamp)) {
+  loop stamps.count() > 0 {
+    if let stamp: ClockStamp = stamps.pop() {
+      this.clockObserve(sampleTime: stamp.sampleTime, hostNs: stamp.hostNs + this.latencyNs)
+    }
+  }
+}
+
+# The host time (ns) at which sample `sampleTime` reaches the speaker
+func hostTimeOfSample(this: view AudioClock, sampleTime: view Int) ret Int {
+  if this.offline {
+    ret sampleTime * 1000000000 / max(a: 1, b: this.nominalRate)
+  }
+  ret (this.baseHostNs + ((sampleTime - this.baseSample) as Float64) * this.nsPerFrame) as Int
+}
+
+# The sample that reaches the speaker at host time `hostNs` (rounded down)
+func sampleTimeAtHost(this: view AudioClock, hostNs: view Int) ret Int {
+  if this.offline {
+    ret hostNs * this.nominalRate / 1000000000
+  }
+  let frames: Float64 = ((hostNs as Float64) - this.baseHostNs) / this.nsPerFrame
+  var whole: Int = frames as Int
+  if (whole as Float64) > frames {
+    whole = whole - 1
+  }
+  ret this.baseSample + whole
+}
+
+# The device's rate measured against the host clock (the nominal one offline)
+func measuredSampleRate(this: view AudioClock) ret Float64 {
+  if this.offline or this.nsPerFrame <= 0.0 {
+    ret this.nominalRate as Float64
+  }
+  let nanoseconds: Float64 = 1000000000.0
+  ret nanoseconds / this.nsPerFrame
+}

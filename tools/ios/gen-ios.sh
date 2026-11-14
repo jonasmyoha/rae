@@ -194,6 +194,25 @@ if [ -n "$location_usage" ]; then
   extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
 fi
 
+# The Focus status (packages/audio's focusStatus, docs/audio-design.md §9.2):
+# iOS ends an app that asks for it without this purpose string, so it is
+# written when RAE_IOS_FOCUS_USAGE gives the words iOS shows when it asks.
+focus_usage=${RAE_IOS_FOCUS_USAGE:-}
+if [ -n "$focus_usage" ]; then
+  case "$focus_usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $focus_usage" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>NSFocusStatusUsageDescription</key><string>$focus_usage</string>"
+fi
+
+# Sound that goes on in the background (packages/audio's streams with the
+# `music` intent, Now Playing and the lock screen's buttons, docs/audio-design.md
+# §9.1): RAE_IOS_BACKGROUND_AUDIO=1 adds the `audio` background mode. Without
+# it iOS stops the app's sound when it leaves the foreground.
+if [ "${RAE_IOS_BACKGROUND_AUDIO:-}" = "1" ]; then
+  extra_plist="$extra_plist<key>UIBackgroundModes</key><array><string>audio</string></array>"
+fi
+
 # Notifications at a later time (lib/LocalNotification): an app whose C includes the shim
 # links UserNotifications. iOS needs no purpose string for them.
 notification_link=""
@@ -206,7 +225,12 @@ fi
 # apple-app-site-association, so only the host is used here): each becomes an
 # applinks: associated domain in an entitlements file, a capability the team's
 # App ID must allow. RAE_APP_SCHEME registers a custom scheme in Info.plist.
+# RAE_IOS_COMMUNICATION_NOTIFICATIONS=1 adds the Communication Notifications
+# capability (com.apple.developer.usernotifications.communication), which iOS
+# wants before it tells an app whether a Focus is on (packages/audio's
+# focusStatus, docs/audio-design.md §9.2). Both go in one entitlements file.
 entitlements_line=""
+entitlement_keys=""
 if [ -n "${RAE_APP_LINKS:-}" ]; then
   domains=""
   for link in $RAE_APP_LINKS; do
@@ -215,10 +239,16 @@ if [ -n "${RAE_APP_LINKS:-}" ]; then
     esac
     domains="$domains<string>applinks:${link%%/*}</string>"
   done
+  entitlement_keys="$entitlement_keys<key>com.apple.developer.associated-domains</key><array>$domains</array>"
+fi
+if [ "${RAE_IOS_COMMUNICATION_NOTIFICATIONS:-}" = "1" ]; then
+  entitlement_keys="$entitlement_keys<key>com.apple.developer.usernotifications.communication</key><true/>"
+fi
+if [ -n "$entitlement_keys" ]; then
   cat > "$gen/RaeApp.entitlements" <<ENTITLEMENTS
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.developer.associated-domains</key><array>$domains</array></dict></plist>
+<plist version="1.0"><dict>$entitlement_keys</dict></plist>
 ENTITLEMENTS
   entitlements_line="XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS \"$gen/RaeApp.entitlements\""
 fi
@@ -338,9 +368,11 @@ EOF
 fi
 
 # 3. Emit CMakeLists.
+# OBJC as well as C: a package's device sources may be Objective-C (.m), as
+# the audio package's are (miniaudio's iOS code and AVAudioSession).
 cat > "$gen/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.28)
-project(RaeApp C)
+project(RaeApp C OBJC)
 
 set(APP RaeApp)
 set(RAE_IOS_PHONE_ORIENTATIONS "$phone_orientations")

@@ -1,0 +1,36 @@
+# A dropped Task joins (docs/concurrency-model.md §3), and so does every Task
+# a dropped List(Task(T)) or struct holds: when startTwo and startCrew return,
+# all their 200 ms tasks have finished, none runs on after its owner.
+open Atomic
+
+func slowCount(finished: own Atomic(Int)) ret Bool {
+  sleep(ms: 200)
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret true
+}
+
+type Crew {
+  tasks: List(Task(Bool))
+  lead: Task(Bool)
+}
+
+func startTwo(finished: view Atomic(Int)) {
+  var tasks: List(Task(Bool)) = {}
+  tasks.add(value: spawn slowCount(finished: finished))
+  tasks.add(value: spawn slowCount(finished: finished))
+}
+
+func startCrew(finished: view Atomic(Int)) {
+  var tasks: List(Task(Bool)) = {}
+  tasks.add(value: spawn slowCount(finished: finished))
+  let crew: Crew = { tasks: own tasks, lead: spawn slowCount(finished: finished) }
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  startTwo(finished: finished)
+  log("after a List(Task) local: {finished.load()} of 2")
+  startCrew(finished: finished)
+  log("after a struct with a List(Task) and a Task field: {finished.load()} of 4")
+  finished.freeAtomic()
+}

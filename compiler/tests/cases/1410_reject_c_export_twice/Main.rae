@@ -1,0 +1,12 @@
+# Two functions cannot export one C name (docs/realtime-language-design.md §6.1)
+func first(value: view Int) cExport("rae_same") ret Int {
+  ret value
+}
+
+func second(value: view Int) cExport("rae_same") ret Int {
+  ret value + 1
+}
+
+func main() {
+  log("{first(value: 1)} {second(value: 2)}")
+}

@@ -84,7 +84,7 @@ func spawnJoin(count: view Int) {
       batch = batch + 1
     }
     loop var i: Int = 0, i < tasks.length, ++i {
-      if let task: Task(Int) = tasks.copyAt(index: i) {
+      if let task: view Task(Int) = tasks.viewAt(index: i) {
         total = total + task.get()
       }
     }
@@ -120,7 +120,7 @@ func sleeps(count: view Int) {
   let spawnedMs: Float64 = elapsedMs(startNs: start)
   var finished: Int = 0
   loop var i: Int = 0, i < tasks.length, ++i {
-    if let task: Task(Int) = tasks.copyAt(index: i) {
+    if let task: view Task(Int) = tasks.viewAt(index: i) {
       finished = finished + task.get()
     }
   }
@@ -161,7 +161,7 @@ func held(count: view Int) {
   let spawnedNs: Int = nowNs()
   var finished: Int = 0
   loop var i: Int = 0, i < tasks.length, ++i {
-    if let task: Task(Int) = tasks.copyAt(index: i) {
+    if let task: view Task(Int) = tasks.viewAt(index: i) {
       finished = finished + task.get()
     }
   }

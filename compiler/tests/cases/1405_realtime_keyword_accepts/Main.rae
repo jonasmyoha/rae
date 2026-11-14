@@ -1,0 +1,61 @@
+# Functions marked `realtime` and `noAlloc` that keep their rules compile and
+# run (docs/realtime-language-design.md §3). `render` is the entry: it reaches
+# math, a SpscRing, an Atomic, a List it only reads and writes in place, an
+# unmarked helper (checked through `render`) and a marked one (checked as its
+# own root too). An index out of range in List.set is the crash path and does
+# not count (§3.6). `waitForWork` is noAlloc: it may wait on a Signal, as
+# Signal.wait promises not to allocate.
+import Math
+open Atomic
+open Signal
+open collections/SpscRing
+
+func gainOf(decibels: view Float) ret Float {
+  ret pow(base: 10.0, exp: decibels / 20.0)
+}
+
+func mixInto(samples: mod List(Float), index: view Int, value: view Float) realtime {
+  samples.set(index: index, value: samples.copyAtFallback(index: index, fallback: 0.0) + value)
+}
+
+func render(
+  samples: mod List(Float)
+  commands: view SpscRing(Int)
+  rendered: view Atomic(Int)
+) realtime ret Int {
+  var gainDecibels: Float = 0.0
+  if let command: Int = commands.pop() {
+    gainDecibels = command as Float
+  }
+  let gain: Float = gainOf(decibels: gainDecibels)
+  loop var i: Int = 0, i < samples.length(), ++i {
+    mixInto(samples: samples, index: i, value: gain * sin(x: 0.1 * (i as Float)))
+  }
+  rendered.fetchAddRelaxed(amount: 1)
+  ret samples.length()
+}
+
+func waitForWork(signal: view Signal) noAlloc ret Bool {
+  signal.wait()
+  ret signal.tryWait()
+}
+
+func main() {
+  var samples: List(Float) = List.create(Float, cap: 8)
+  samples.addDefaults(count: 8)
+  let commands: SpscRing(Int) = createSpscRing(Int, capacity: 4)
+  let rendered: Atomic(Int) = createAtomic(Int, value: 0)
+  let pushed: Bool = commands.push(value: -6)
+  let frames: Int = render(samples: samples, commands: commands, rendered: rendered)
+  let signal: Signal = createSignal()
+  signal.post()
+  let extra: Bool = waitForWork(signal: signal)
+  log(
+    "rendered {frames} frames, {rendered.load()} block, first sample {floor(
+      x: samples.copyAtFallback(index: 1, fallback: 0.0) * 1000.0
+    )}, extra post {extra}"
+  )
+  freeSpscRing(this: commands)
+  freeAtomic(this: rendered)
+  freeSignal(this: signal)
+}

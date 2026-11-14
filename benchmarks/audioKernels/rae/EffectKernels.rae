@@ -1,0 +1,350 @@
+# The effect nodes' inner loops two ways, scalar and with lib/Float4
+# (docs/audio-design.md §5.3), written as packages/audio's audio/GraphEffects
+# writes them (state in Buffers, a sample read and written through the
+# Buffer each frame), on planes of `frames` samples (left, then right at
+# `stride`). The Float4 forms keep the scalar order of every operation, so
+# both give the same bits (checked by the benchmark).
+import Float4
+import Math
+open audio/Sound
+
+type Band {
+  b0: Float
+  b1: Float
+  b2: Float
+  a1: Float
+  a2: Float
+  z1Left: Float
+  z2Left: Float
+  z1Right: Float
+  z2Right: Float
+}
+
+# A peak band's coefficients (fixed for the benchmark)
+func benchBand(index: view Int) ret Band {
+  let scale: Float = (index % 7) as Float * 0.001
+  ret Band {
+    b0: 1.02 + scale
+    b1: -1.9
+    b2: 0.9
+    a1: -1.9
+    a2: 0.92 + scale
+    z1Left: 0.0
+    z2Left: 0.0
+    z1Right: 0.0
+    z2Right: 0.0
+  }
+}
+
+# One band, scalar: each channel's transposed direct form II
+func bandScalar(
+  band: mod Band
+  input: view Buffer(Float)
+  output: view Buffer(Float)
+  frames: view Int
+  stride: view Int
+) {
+  loop var i: Int = 0, i < frames, ++i {
+    let left: Float = sampleAt(samples: input, index: i)
+    let right: Float = sampleAt(samples: input, index: stride + i)
+    let leftOut: Float = band.b0 * left + band.z1Left
+    band.z1Left = band.b1 * left - band.a1 * leftOut + band.z2Left
+    band.z2Left = band.b2 * left - band.a2 * leftOut
+    let rightOut: Float = band.b0 * right + band.z1Right
+    band.z1Right = band.b1 * right - band.a1 * rightOut + band.z2Right
+    band.z2Right = band.b2 * right - band.a2 * rightOut
+    setSampleAt(samples: output, index: i, value: leftOut)
+    setSampleAt(samples: output, index: stride + i, value: rightOut)
+  }
+}
+
+# One band, the two channels in a Float4's x and y lanes
+func bandFloat4(
+  band: mod Band
+  input: view Buffer(Float)
+  output: view Buffer(Float)
+  frames: view Int
+  stride: view Int
+) {
+  let b0: Float4 = Float4.splat(value: band.b0)
+  let b1: Float4 = Float4.splat(value: band.b1)
+  let b2: Float4 = Float4.splat(value: band.b2)
+  let a1: Float4 = Float4.splat(value: band.a1)
+  let a2: Float4 = Float4.splat(value: band.a2)
+  var z1: Float4 = { x: band.z1Left, y: band.z1Right, z: 0.0, w: 0.0 }
+  var z2: Float4 = { x: band.z2Left, y: band.z2Right, z: 0.0, w: 0.0 }
+  loop var i: Int = 0, i < frames, ++i {
+    let x: Float4 = {
+      x: sampleAt(samples: input, index: i)
+      y: sampleAt(samples: input, index: stride + i)
+      z: 0.0
+      w: 0.0
+    }
+    let y: Float4 = Float4.add(a: Float4.mul(a: b0, b: x), b: z1)
+    z1 = Float4.add(a: Float4.sub(a: Float4.mul(a: b1, b: x), b: Float4.mul(a: a1, b: y)), b: z2)
+    z2 = Float4.sub(a: Float4.mul(a: b2, b: x), b: Float4.mul(a: a2, b: y))
+    setSampleAt(samples: output, index: i, value: y.x)
+    setSampleAt(samples: output, index: stride + i, value: y.y)
+  }
+  band.z1Left = z1.x
+  band.z1Right = z1.y
+  band.z2Left = z2.x
+  band.z2Right = z2.y
+}
+
+# ---- Freeverb ------------------------------------------------------------------------
+type Verb {
+  lines: Buffer(Float)
+  starts: Buffer(Int)
+  lengths: Buffer(Int)
+  positions: Buffer(Int)
+  stores: Buffer(Float)
+  feedback: Float
+  damp1: Float
+  damp2: Float
+  wet1: Float
+  wet2: Float
+  dry: Float
+  inputGain: Float
+}
+
+func intAtBench(buffer: view Buffer(Int), index: view Int) ret Int {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: buffer, index: index)
+  }
+}
+
+func setIntBench(buffer: view Buffer(Int), index: view Int, value: view Int) {
+  unsafe {
+    var target: Buffer(Int) = buffer
+    rae_ext_rae_buf_set(buf: target, index: index, value: value)
+  }
+}
+
+func intBufferBench(count: view Int) ret Buffer(Int) {
+  unsafe {
+    let buffer: Buffer(Int) = rae_ext_rae_buf_alloc(size: count, elemSize: sizeof(Int))
+    loop var i: Int = 0, i < count, ++i {
+      var target: Buffer(Int) = buffer
+      rae_ext_rae_buf_set(buf: target, index: i, value: 0)
+    }
+    ret buffer
+  }
+}
+
+func createVerb() ret Verb {
+  let tunings: List(Int) = {
+    1116
+    1188
+    1277
+    1356
+    1422
+    1491
+    1557
+    1617
+    1139
+    1211
+    1300
+    1379
+    1445
+    1514
+    1580
+    1640
+    556
+    441
+    341
+    225
+    579
+    464
+    364
+    248
+  }
+  let starts: Buffer(Int) = intBufferBench(count: 24)
+  let lengths: Buffer(Int) = intBufferBench(count: 24)
+  var total: Int = 0
+  loop var line: Int = 0, line < 24, ++line {
+    setIntBench(buffer: starts, index: line, value: total)
+    setIntBench(
+      buffer: lengths
+      index: line
+      value: tunings.copyAtFallback(index: line, fallback: 1)
+    )
+    total = total + tunings.copyAtFallback(index: line, fallback: 1)
+  }
+  ret Verb {
+    lines: createSampleBuffer(count: total)
+    starts: starts
+    lengths: lengths
+    positions: intBufferBench(count: 24)
+    stores: createSampleBuffer(count: 16)
+    feedback: 0.84
+    damp1: 0.2
+    damp2: 0.8
+    wet1: 1.0
+    wet2: 0.0
+    dry: 0.0
+    inputGain: 0.015
+  }
+}
+
+func freeVerb(verb: view Verb) {
+  unsafe {
+    rae_ext_rae_buf_free(buf: verb.lines)
+    rae_ext_rae_buf_free(buf: verb.starts)
+    rae_ext_rae_buf_free(buf: verb.lengths)
+    rae_ext_rae_buf_free(buf: verb.positions)
+    rae_ext_rae_buf_free(buf: verb.stores)
+  }
+}
+
+# audio/GraphEffects' comb, as it is
+func combScalar(verb: view Verb, line: view Int, input: view Float) ret Float {
+  let position: Int = intAtBench(buffer: verb.positions, index: line)
+  let at: Int = intAtBench(buffer: verb.starts, index: line) + position
+  let output: Float = sampleAt(samples: verb.lines, index: at)
+  let store: Float = output * verb.damp2 + sampleAt(samples: verb.stores, index: line) * verb.damp1
+  setSampleAt(samples: verb.stores, index: line, value: store)
+  setSampleAt(samples: verb.lines, index: at, value: input + store * verb.feedback)
+  var next: Int = position + 1
+  if next >= intAtBench(buffer: verb.lengths, index: line) {
+    next = 0
+  }
+  setIntBench(buffer: verb.positions, index: line, value: next)
+  ret output
+}
+
+func allpassBench(verb: view Verb, line: view Int, input: view Float) ret Float {
+  let position: Int = intAtBench(buffer: verb.positions, index: line)
+  let at: Int = intAtBench(buffer: verb.starts, index: line) + position
+  let delayed: Float = sampleAt(samples: verb.lines, index: at)
+  let output: Float = -input + delayed
+  setSampleAt(samples: verb.lines, index: at, value: input + delayed * 0.5)
+  var next: Int = position + 1
+  if next >= intAtBench(buffer: verb.lengths, index: line) {
+    next = 0
+  }
+  setIntBench(buffer: verb.positions, index: line, value: next)
+  ret output
+}
+
+# Four combs (lines first .. first + 3) at once: their outputs, the lowpass and
+# the feedback in a Float4's lanes, the lines read and written one by one
+func combsFloat4(verb: view Verb, first: view Int, input: view Float4) ret Float4 {
+  let p0: Int = intAtBench(buffer: verb.positions, index: first)
+  let p1: Int = intAtBench(buffer: verb.positions, index: first + 1)
+  let p2: Int = intAtBench(buffer: verb.positions, index: first + 2)
+  let p3: Int = intAtBench(buffer: verb.positions, index: first + 3)
+  let at0: Int = intAtBench(buffer: verb.starts, index: first) + p0
+  let at1: Int = intAtBench(buffer: verb.starts, index: first + 1) + p1
+  let at2: Int = intAtBench(buffer: verb.starts, index: first + 2) + p2
+  let at3: Int = intAtBench(buffer: verb.starts, index: first + 3) + p3
+  let output: Float4 = {
+    x: sampleAt(samples: verb.lines, index: at0)
+    y: sampleAt(samples: verb.lines, index: at1)
+    z: sampleAt(samples: verb.lines, index: at2)
+    w: sampleAt(samples: verb.lines, index: at3)
+  }
+  var stores: Float4 = Float4.splat(value: 0.0)
+  unsafe {
+    stores = Float4.nativeLoad(data: verb.stores, index: first)
+  }
+  let store: Float4 = Float4.add(
+    a: Float4.mul(a: output, b: Float4.splat(value: verb.damp2))
+    b: Float4.mul(a: stores, b: Float4.splat(value: verb.damp1))
+  )
+  unsafe {
+    Float4.nativeStore(data: verb.stores, index: first, value: store)
+  }
+  let written: Float4 = Float4.add(
+    a: input
+    b: Float4.mul(a: store, b: Float4.splat(value: verb.feedback))
+  )
+  setSampleAt(samples: verb.lines, index: at0, value: written.x)
+  setSampleAt(samples: verb.lines, index: at1, value: written.y)
+  setSampleAt(samples: verb.lines, index: at2, value: written.z)
+  setSampleAt(samples: verb.lines, index: at3, value: written.w)
+  advanceLine(verb: verb, line: first, position: p0)
+  advanceLine(verb: verb, line: first + 1, position: p1)
+  advanceLine(verb: verb, line: first + 2, position: p2)
+  advanceLine(verb: verb, line: first + 3, position: p3)
+  ret output
+}
+
+func advanceLine(verb: view Verb, line: view Int, position: view Int) {
+  var next: Int = position + 1
+  if next >= intAtBench(buffer: verb.lengths, index: line) {
+    next = 0
+  }
+  setIntBench(buffer: verb.positions, index: line, value: next)
+}
+
+func verbScalar(
+  verb: view Verb
+  input: view Buffer(Float)
+  output: view Buffer(Float)
+  frames: view Int
+  stride: view Int
+) {
+  loop var i: Int = 0, i < frames, ++i {
+    let left: Float = sampleAt(samples: input, index: i)
+    let right: Float = sampleAt(samples: input, index: stride + i)
+    let mono: Float = (left + right) * verb.inputGain
+    var leftWet: Float = 0.0
+    var rightWet: Float = 0.0
+    loop var comb: Int = 0, comb < 8, ++comb {
+      leftWet = leftWet + combScalar(verb: verb, line: comb, input: mono)
+      rightWet = rightWet + combScalar(verb: verb, line: 8 + comb, input: mono)
+    }
+    loop var allpass: Int = 0, allpass < 4, ++allpass {
+      leftWet = allpassBench(verb: verb, line: 16 + allpass, input: leftWet)
+      rightWet = allpassBench(verb: verb, line: 20 + allpass, input: rightWet)
+    }
+    setSampleAt(
+      samples: output
+      index: i
+      value: leftWet * verb.wet1 + rightWet * verb.wet2 + left * verb.dry
+    )
+    setSampleAt(
+      samples: output
+      index: stride + i
+      value: rightWet * verb.wet1 + leftWet * verb.wet2 + right * verb.dry
+    )
+  }
+}
+
+# The combs four at a time; their outputs summed in the scalar order (0 to 7),
+# so the result is the scalar one's, bit for bit
+func verbFloat4(
+  verb: view Verb
+  input: view Buffer(Float)
+  output: view Buffer(Float)
+  frames: view Int
+  stride: view Int
+) {
+  loop var i: Int = 0, i < frames, ++i {
+    let left: Float = sampleAt(samples: input, index: i)
+    let right: Float = sampleAt(samples: input, index: stride + i)
+    let mono: Float = (left + right) * verb.inputGain
+    let monoLanes: Float4 = Float4.splat(value: mono)
+    let leftLow: Float4 = combsFloat4(verb: verb, first: 0, input: monoLanes)
+    let leftHigh: Float4 = combsFloat4(verb: verb, first: 4, input: monoLanes)
+    let rightLow: Float4 = combsFloat4(verb: verb, first: 8, input: monoLanes)
+    let rightHigh: Float4 = combsFloat4(verb: verb, first: 12, input: monoLanes)
+    var leftWet: Float = 0.0 + leftLow.x + leftLow.y + leftLow.z + leftLow.w + leftHigh.x + leftHigh.y + leftHigh.z + leftHigh.w
+    var rightWet: Float = 0.0 + rightLow.x + rightLow.y + rightLow.z + rightLow.w + rightHigh.x + rightHigh.y + rightHigh.z + rightHigh.w
+    loop var allpass: Int = 0, allpass < 4, ++allpass {
+      leftWet = allpassBench(verb: verb, line: 16 + allpass, input: leftWet)
+      rightWet = allpassBench(verb: verb, line: 20 + allpass, input: rightWet)
+    }
+    setSampleAt(
+      samples: output
+      index: i
+      value: leftWet * verb.wet1 + rightWet * verb.wet2 + left * verb.dry
+    )
+    setSampleAt(
+      samples: output
+      index: stride + i
+      value: rightWet * verb.wet1 + leftWet * verb.wet2 + right * verb.dry
+    )
+  }
+}

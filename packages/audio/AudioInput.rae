@@ -1,0 +1,182 @@
+# audio/AudioInput — recording from the input (docs/audio-design.md §8.1). A
+# program asks for input channels in its AudioSettings (`inputChannels`), the
+# device opens as duplex (output and the default input in one callback, one
+# sample clock), and the callback hands each period's input to Rae
+# (audio/AudioDevice's captureInput) into a ring. A recording drains the ring
+# on the main thread and knows, to the frame, which output sample its first
+# frame was captured with.
+#
+# Latency correction: a sound played at output sample S reaches the speaker
+# after the output latency, and its echo reaches the recording after the input
+# latency, so it is captured at S + the round trip. finishRecording drops the
+# round trip's frames from the start, so frame i of the result lines up with
+# output sample `alignedStart + i`: a take recorded over a backing track plays
+# back in time with it.
+#
+#     if microphonePermission() is not 3 { let asked: Bool = requestMicrophone() }
+#     var take: AudioRecording = audio.beginRecording()
+#     ... each frame: audio.recordInto(recording: take) ...
+#     let data: SoundData = finishRecording(recording: take)
+open audio/Audio
+open audio/AudioClock
+open audio/AudioDevice
+open audio/AudioGlue
+open audio/Sound
+open collections/SpscRing
+
+type AudioRecording {
+  channels: Int
+  sampleRate: Int
+  samples: List(Float)
+  # the output sample time of samples' first frame; -1 until the first input
+  # arrives
+  startSample: Int
+  # frames from a played sample to its echo in the input (output latency plus
+  # input latency), cut by finishRecording
+  roundTripFrames: Int
+  # samples the input ring dropped since the recording began (it was not
+  # drained for two seconds): the timing after them is off by that much
+  lostSamples: Int
+  droppedAtStart: Int
+}
+
+# The microphone's permission: 0 not asked yet, 1 restricted, 2 denied, 3
+# allowed; -1 where it cannot be asked (no permission there, or not yet
+# supported: Android's comes with its input step)
+func microphonePermission() ret Int {
+  unsafe {
+    ret rae_audio_microphone_permission()
+  }
+}
+
+# Ask the person (the system's prompt, once); read the answer later with
+# microphonePermission. False where it cannot be asked.
+func requestMicrophone() ret Bool {
+  unsafe {
+    ret rae_audio_microphone_request() is 1
+  }
+}
+
+# The input's latency in frames, from the platform: macOS, the input device's
+# latency, safety offset and IO buffer (Core Audio); iOS, the route's input
+# latency and the device's buffer; elsewhere the buffer
+func inputLatencyFrames(this: view AudioEngine) ret Int {
+  if this.device is 0 or this.input.channels is 0 {
+    ret 0
+  }
+  unsafe {
+    let deviceLatency: Int = rae_audio_device_core_audio_frames(device: this.device, property: 3)
+    let safetyOffset: Int = rae_audio_device_core_audio_frames(device: this.device, property: 4)
+    let ioBuffer: Int = rae_audio_device_core_audio_frames(device: this.device, property: 5)
+    if deviceLatency >= 0 and safetyOffset >= 0 and ioBuffer >= 0 {
+      ret deviceLatency + safetyOffset + ioBuffer
+    }
+    let buffered: Int = rae_audio_device_buffer_frames(device: this.device)
+    let routeNs: Int = rae_audio_session_input_latency_ns()
+    if routeNs >= 0 {
+      ret buffered + routeNs * this.sampleRate / 1000000000
+    }
+    ret buffered
+  }
+}
+
+# Begin recording from now: what the ring held before is dropped
+func beginInputRecording(
+  input: view AudioInputShared
+  sampleRate: view Int
+  roundTripFrames: view Int
+) ret AudioRecording {
+  loop input.ring.count() > 0 {
+    let old: opt Float = input.ring.pop()
+  }
+  var recording: AudioRecording = {
+    channels: input.channels
+    sampleRate: sampleRate
+    samples: List.create(Float, cap: sampleRate * max(a: 1, b: input.channels))
+    startSample: -1
+    roundTripFrames: roundTripFrames
+    lostSamples: 0
+    droppedAtStart: input.dropped.load()
+  }
+  recording.startSample = nextInputSample(input: input)
+  ret recording
+}
+
+# The output sample time of the next frame the ring will give: the first
+# capture's, plus every sample taken or dropped since, in frames; -1 before
+# any input
+func nextInputSample(input: view AudioInputShared) ret Int {
+  let start: Int = input.start.load()
+  if start < 0 or input.channels is 0 {
+    ret -1
+  }
+  ret start + (input.ring.popped() + input.dropped.load()) / input.channels
+}
+
+# Take what the input captured since the last call into the recording
+func recordInputInto(input: view AudioInputShared, recording: mod AudioRecording) {
+  if recording.startSample < 0 {
+    recording.startSample = nextInputSample(input: input)
+  }
+  loop input.ring.count() > 0 {
+    if let sample: Float = input.ring.pop() {
+      recording.samples.add(value: sample)
+    }
+  }
+  recording.lostSamples = input.dropped.load() - recording.droppedAtStart
+}
+
+# The recording as a sound, its round trip cut from the start: frame i lines up
+# with output sample alignedStart(recording) + i
+func finishRecording(recording: view AudioRecording) ret SoundData {
+  let channels: Int = max(a: 1, b: recording.channels)
+  let cut: Int = min(
+    a: recording.samples.length() / channels
+    b: max(a: 0, b: recording.roundTripFrames)
+  )
+  let frames: Int = recording.samples.length() / channels - cut
+  let samples: Buffer(Float) = createSampleBuffer(count: max(a: 1, b: frames * channels))
+  loop var i: Int = 0, i < frames * channels, ++i {
+    setSampleAt(
+      samples: samples
+      index: i
+      value: recording.samples.copyAtFallback(index: cut * channels + i, fallback: 0.0)
+    )
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: frames
+    channels: channels
+    sampleRate: recording.sampleRate
+    error: ""
+  }
+}
+
+# The output sample a finished recording's frame 0 lines up with
+func alignedStart(recording: view AudioRecording) ret Int {
+  ret recording.startSample
+}
+
+# ---- on the engine -----------------------------------------------------------
+
+# Whether the device records (it opened with input channels)
+func inputAvailable(this: view AudioEngine) ret Bool {
+  ret this.input.channels > 0
+}
+
+# Output latency plus input latency, in frames
+func roundTripFrames(this: view AudioEngine) ret Int {
+  ret this.clock.latencyFrames + this.inputLatencyFrames()
+}
+
+func beginRecording(this: view AudioEngine) ret AudioRecording {
+  ret beginInputRecording(
+    input: this.input
+    sampleRate: this.sampleRate
+    roundTripFrames: this.roundTripFrames()
+  )
+}
+
+func recordInto(this: view AudioEngine, recording: mod AudioRecording) {
+  recordInputInto(input: this.input, recording: recording)
+}

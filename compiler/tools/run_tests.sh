@@ -93,6 +93,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/tsan-check.sh" ]; then
   if ! bash tools/tsan-check.sh; then TSAN_CHECK_FAILED=1; fi
   echo
 fi
+# The C side of realtime / noAlloc: clang's function effects and
+# RealtimeSanitizer (tools/realtime-sanitize-check.sh), same place.
+REALTIME_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/realtime-sanitize-check.sh" ]; then
+  if ! bash tools/realtime-sanitize-check.sh; then REALTIME_CHECK_FAILED=1; fi
+  echo
+fi
 # Every benchmark program still compiles (tools/benchmarks-compile-check.sh).
 BENCH_CHECK_FAILED=0
 if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/benchmarks-compile-check.sh" ]; then
@@ -681,6 +688,7 @@ if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$COPY_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$REALTIME_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$FLOAT8_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi

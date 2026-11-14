@@ -46,10 +46,25 @@
 
 /* A mutex that exists only where threads do: a WASM build without threads
  * has a single thread and needs no lock (the Channel runtime does the same). */
+/* The real-time check (runtime_realtime.c, docs/realtime-language-design.md
+ * §5.3): a thread marked real-time that reaches one of the guarded entry
+ * points (allocation, free, lock, log) is counted when RAE_REALTIME_CHECK=1.
+ * Unchecked, a guard costs one thread-local load. */
+static _Thread_local int g_rae_realtime_thread;
+static int g_rae_realtime_check;
+static void rae_realtime_violation(const char* entry, const char* detail);
+#define RAE_REALTIME_GUARD(entry, detail) \
+  ((__builtin_expect(g_rae_realtime_thread && g_rae_realtime_check, 0)) \
+     ? rae_realtime_violation((entry), (detail)) : (void)0)
+
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-#define RAE_LOCK(m)   pthread_mutex_lock(m)
+#define RAE_LOCK(m)   (RAE_REALTIME_GUARD("RAE_LOCK", "a runtime mutex"), pthread_mutex_lock(m))
 #define RAE_UNLOCK(m) pthread_mutex_unlock(m)
+/* The bookkeeping inside an allocation (the RAE_MEM_STATS tables, the buffer
+ * records) locks too; the allocation itself is what the check reports. */
+#define RAE_LOCK_UNCHECKED(m) pthread_mutex_lock(m)
 #else
+#define RAE_LOCK_UNCHECKED(m) ((void)(m))
 #define RAE_LOCK(m)   ((void)(m))
 #define RAE_UNLOCK(m) ((void)(m))
 #endif
@@ -66,7 +81,9 @@
 /* Runtime implementation modules. These are included into one translation
  * unit to preserve existing static helper visibility, linker behavior, and
  * emitted-app build mechanics. See docs/runtime-kernel-abi.md. */
+#include "runtime_realtime.c"
 #include "runtime_threads.c"
+#include "runtime_signal.c"
 #include "runtime_sched_io.c"
 #include "runtime_core_memory.c"
 #include "runtime_strings_core.c"

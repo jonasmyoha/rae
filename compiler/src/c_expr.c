@@ -1218,7 +1218,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     fprintf(out, "RaeTask* __t = rae_task_new(");
                     if (is_void) fprintf(out, "0");
                     else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
-                    if (c_spawn_on_pool(ctx, callexpr->decl_link)) {
+                    // `spawn thread`: always its own OS thread (§6.6.1)
+                    if (!expr->as.unary.spawn_thread && c_spawn_on_pool(ctx, callexpr->decl_link)) {
                         // A task on the scheduler's worker pool: Scheduler.rae
                         // queues it (docs/lightweight-spawn-design.md §4.3).
                         // A function with a resumable twin runs as one, so
@@ -1240,6 +1241,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     }
                     break;
                 }
+                if (expr->as.unary.spawn_thread) {
+                    // a `spawn thread` that cannot move to another thread
+                    // must not quietly run in place
+                    diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column,
+                               "`spawn thread` cannot start this call on its own thread: a `mod` argument, a `view` "
+                               "of a String, List or struct, or a generic function would point into this thread's "
+                               "data; pass those as `own` or `copy`");
+                }
                 // Sequential fallback (heap/mod/view-enum args, or an
                 // unresolved callee): run synchronously into a completed task.
                 fprintf(out, "({ RaeTask* __raet = rae_task_new(");
@@ -1259,10 +1268,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_METHOD_CALL: {
         // Built-in Task(T).get(): join (no-op for a sequential task) and
         // read the result buffer, cast back to T.
+        // A `view`/`mod` Task (a viewAt binding, a parameter) is the same
+        // RaeTask*, read as `(*task)`, as isDone/tryGet below unwrap it: a
+        // Task in a List is read with viewAt + get, never copied out
+        const TypeInfo* get_task_type = expr->as.method_call.object->resolved_type;
+        if (get_task_type && get_task_type->kind == TYPE_REF) get_task_type = get_task_type->as.ref.base;
         if (str_eq_cstr(expr->as.method_call.method_name, "get") &&
-            expr->as.method_call.object->resolved_type &&
-            expr->as.method_call.object->resolved_type->kind == TYPE_TASK) {
-            TypeInfo* resT = expr->as.method_call.object->resolved_type->as.task.base;
+            get_task_type && get_task_type->kind == TYPE_TASK) {
+            TypeInfo* resT = get_task_type->as.task.base;
             if (!resT || resT->kind == TYPE_VOID) {
                 fprintf(out, "(rae_task_await(");
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
@@ -2219,7 +2232,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         // the C level, not a pointer — no deref needed.
                         Str rhs_base = get_base_type_name(rhs_tr);
                         bool rhs_is_num_prim = is_scalar_primitive_type(rhs_base);
-                        if (!rhs_is_num_prim) needs_view_deref = true;
+                        // A `view`/`mod Buffer(T)` parameter is the buffer's
+                        // handle itself (`const float* pool`), not a pointer
+                        // to one: it fills a Buffer field as it is.
+                        bool rhs_is_handle = str_eq_cstr(rhs_base, "Buffer");
+                        if (!rhs_is_num_prim && !rhs_is_handle) needs_view_deref = true;
                     }
                 }
                 if (needs_view_deref) fprintf(out, "(*");

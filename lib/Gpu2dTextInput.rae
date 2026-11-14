@@ -7,7 +7,7 @@
 # The characters the user typed since the last event poll, as UTF-8 (#976).
 # Empty on frames with no typing. Backspace / Enter are key edges, not text
 # — read them with Sdl3.isKeyPressed(keyBackspace / keyEnter).
-func nativeTextInput() unsafe extern("rae_ext_Gpu2d_textInput") ret String
+func nativeTextInput() mainThread unsafe extern("rae_ext_Gpu2d_textInput") ret String
 
 func textInput() ret String {
   unsafe {
@@ -21,7 +21,7 @@ func textInput() ret String {
 # window as a text field, and on macOS holding a key opens the press-and-hold
 # accent popover. `textInput()` only delivers text while it is on. Never on
 # under a headless run.
-func nativeSetTextInput(active: Bool) unsafe extern("rae_ext_Gpu2d_setTextInput")
+func nativeSetTextInput(active: Bool) mainThread unsafe extern("rae_ext_Gpu2d_setTextInput")
 
 func setTextInput(active: view Bool) {
   unsafe {
@@ -32,7 +32,7 @@ func setTextInput(active: view Bool) {
 # The on-screen keyboard's height in points while it is shown, 0 when it is
 # not and on a desktop (iOS: UIKit's keyboard frame; SDL reports only that it
 # was shown). A layout reads it to keep a text field above the keyboard.
-func nativeKeyboardHeight() unsafe extern("rae_ext_Gpu2d_keyboardHeight") ret Float
+func nativeKeyboardHeight() mainThread unsafe extern("rae_ext_Gpu2d_keyboardHeight") ret Float
 
 func keyboardHeight() ret Float {
   unsafe {
@@ -43,7 +43,7 @@ func keyboardHeight() ret Float {
 # How long the on-screen keyboard's last move takes, in seconds, as the platform says (iOS: about
 # 0.25), and 0 where it does not say or there is none. A host passes it to lib/ui's
 # layoutKeyboardMoves so the page moves with the keyboard.
-func nativeKeyboardSeconds() unsafe extern("rae_ext_Gpu2d_keyboardSeconds") ret Float
+func nativeKeyboardSeconds() mainThread unsafe extern("rae_ext_Gpu2d_keyboardSeconds") ret Float
 
 func keyboardSeconds() ret Float {
   unsafe {
@@ -56,7 +56,7 @@ func keyboardSeconds() ret Float {
 # setClipboardText answers false: an automated run must not touch the
 # person's clipboard (a test pastes through ui/textFieldSystem's scripted
 # clipboard instead).
-func nativeClipboardText() unsafe extern("rae_ext_Gpu2d_clipboardText") ret String
+func nativeClipboardText() mainThread unsafe extern("rae_ext_Gpu2d_clipboardText") ret String
 
 func clipboardText() ret String {
   unsafe {
@@ -64,7 +64,9 @@ func clipboardText() ret String {
   }
 }
 
-func nativeSetClipboardText(text: String) unsafe extern("rae_ext_Gpu2d_setClipboardText") ret Bool
+func nativeSetClipboardText(
+  text: String
+) mainThread unsafe extern("rae_ext_Gpu2d_setClipboardText") ret Bool
 
 func setClipboardText(text: view String) ret Bool {
   unsafe {
@@ -81,7 +83,7 @@ func nativeShowEditMenu(
   y: Float
   canPaste: Bool
   canCopy: Bool
-) unsafe extern("rae_ext_Gpu2d_showEditMenu")
+) mainThread unsafe extern("rae_ext_Gpu2d_showEditMenu")
 
 func showEditMenu(
   x: view Float
@@ -99,7 +101,7 @@ func showEditMenu(
   }
 }
 
-func nativeEditMenuChoice() unsafe extern("rae_ext_Gpu2d_editMenuChoice") ret Int
+func nativeEditMenuChoice() mainThread unsafe extern("rae_ext_Gpu2d_editMenuChoice") ret Int
 
 func editMenuChoice() ret Int {
   unsafe {

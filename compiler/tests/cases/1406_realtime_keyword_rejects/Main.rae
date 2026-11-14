@@ -1,0 +1,64 @@
+# Each rule of `realtime` / `noAlloc` broken once (docs/realtime-language-design.md
+# §2, §3.5): every error names the marked function, the chain to the site, and
+# the fix.
+open Channel
+
+# C the compiler cannot see into, not marked realtime
+func cleverC(x: Int) unsafe extern("abs") ret Int
+
+func describe(count: view Int) ret String {
+  ret "{count} frames"
+}
+
+# allocates, through a helper: a String interpolation
+func renderText(count: view Int) realtime ret Int {
+  ret describe(count: count).length()
+}
+
+# allocates (and the rest), through List.add's growth into C
+func renderGrowing(samples: mod List(Int)) realtime {
+  samples.add(value: 1)
+}
+
+# frees: an owned List local dies at the end of the function
+func renderScratch() realtime ret Int {
+  var scratch: List(Int) = List.create(Int, cap: 4)
+  ret scratch.length()
+}
+
+# waits: joins a task
+func work(value: own Int) ret Int {
+  ret value + 1
+}
+
+func renderJoin() realtime ret Int {
+  let task: Task(Int) = spawn work(value: 1)
+  ret task.get()
+}
+
+# locks: a Channel's send takes its mutex (in C)
+func renderSend(channel: view Channel(Int)) realtime {
+  channelSend(this: channel, value: 1)
+}
+
+# unmarked C
+func renderC(x: view Int) realtime ret Int {
+  unsafe {
+    ret cleverC(x: x)
+  }
+}
+
+# noAlloc forbids allocating too
+func prepare(count: view Int) noAlloc ret Int {
+  ret "{count}".length()
+}
+
+func main() {
+  var samples: List(Int) = {}
+  renderGrowing(samples: samples)
+  let channel: Channel(Int) = createChannel(Int)
+  renderSend(channel: channel)
+  log(
+    "{renderText(count: 1)} {renderScratch()} {renderJoin()} {renderC(x: -2)} {prepare(count: 3)}"
+  )
+}

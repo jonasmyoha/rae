@@ -1,0 +1,164 @@
+# media/MediaTime — time as an Int count of ticks in a stated timebase
+# (docs/video-design.md §6.1, docs/audio-design.md §6.1). Never a Float: 29.97
+# fps is exactly 30000/1001 and an audio sample is exactly 1/48000 s. A
+# conversion between timebases rounds once, to the nearest tick, a half tick
+# away from zero (FFmpeg's av_rescale_rq with AV_ROUND_NEAR_INF).
+#
+#     let frame: MediaTime = mediaTime(value: 1001, numerator: 1, denominator: 30000)
+#     let samples: MediaTime = frame.rescaled(timebase: sampleTimebase(sampleRate: 48000))
+#     # 1602 samples (1601.6, rounded once)
+#
+# The audio engine's sample time is a MediaTime in 1/sampleRate; a track's
+# time in an MP4 is one in 1/timescale (media/Mp4).
+type Rational {
+  numerator: Int
+  denominator: Int
+}
+
+type MediaTime {
+  value: Int
+  # seconds per tick
+  timebase: Rational
+}
+
+func greatestCommonDivisor(a: view Int, b: view Int) ret Int {
+  var x: Int = a
+  var y: Int = b
+  if x < 0 {
+    x = -x
+  }
+  if y < 0 {
+    y = -y
+  }
+  loop y is not 0 {
+    let rest: Int = x % y
+    x = y
+    y = rest
+  }
+  ret x
+}
+
+# A rational in lowest terms with a positive denominator; 0/1 for a zero
+# denominator
+func rational(numerator: view Int, denominator: view Int) ret Rational {
+  if denominator is 0 {
+    ret Rational { numerator: 0, denominator: 1 }
+  }
+  var top: Int = numerator
+  var bottom: Int = denominator
+  if bottom < 0 {
+    top = -top
+    bottom = -bottom
+  }
+  let divisor: Int = greatestCommonDivisor(a: top, b: bottom)
+  if divisor > 1 {
+    top = top / divisor
+    bottom = bottom / divisor
+  }
+  ret Rational { numerator: top, denominator: bottom }
+}
+
+func mediaTime(value: view Int, numerator: view Int, denominator: view Int) ret MediaTime {
+  ret MediaTime { value: value, timebase: rational(numerator: numerator, denominator: denominator) }
+}
+
+# 1/sampleRate: the timebase of a sample count
+func sampleTimebase(sampleRate: view Int) ret Rational {
+  ret rational(numerator: 1, denominator: sampleRate)
+}
+
+# `frames` samples at `sampleRate`
+func sampleTime(frames: view Int, sampleRate: view Int) ret MediaTime {
+  ret MediaTime { value: frames, timebase: sampleTimebase(sampleRate: sampleRate) }
+}
+
+# value * multiply / divide, rounded once to the nearest, a half away from
+# zero; split so that value * multiply does not overflow first (divide > 0)
+func rescaleRounded(value: view Int, multiply: view Int, divide: view Int) ret Int {
+  if divide <= 0 {
+    ret 0
+  }
+  var negative: Bool = value < 0
+  var magnitude: Int = value
+  if negative {
+    magnitude = -value
+  }
+  var factor: Int = multiply
+  if factor < 0 {
+    factor = -factor
+    negative = not negative
+  }
+  let whole: Int = magnitude / divide
+  let rest: Int = magnitude % divide
+  # rest * factor / divide, rounded: rest < divide, so this is small when the
+  # timebases are
+  let part: Int = (rest * factor * 2 + divide) / (divide * 2)
+  let result: Int = whole * factor + part
+  if negative {
+    ret -result
+  }
+  ret result
+}
+
+# The same time in another timebase, rounded once
+func rescaled(this: view MediaTime, timebase: view Rational) ret MediaTime {
+  # value * (a / b) / (c / d) = value * a * d / (b * c)
+  let multiply: Int = this.timebase.numerator * timebase.denominator
+  let divide: Int = this.timebase.denominator * timebase.numerator
+  ret MediaTime {
+    value: rescaleRounded(value: this.value, multiply: multiply, divide: divide)
+    timebase: timebase
+  }
+}
+
+# The time as a count of `sampleRate` samples (rounded once)
+func toSamples(this: view MediaTime, sampleRate: view Int) ret Int {
+  ret this.rescaled(timebase: sampleTimebase(sampleRate: sampleRate)).value
+}
+
+# For showing and for host clocks only; never compute time in it
+func toSeconds(this: view MediaTime) ret Float64 {
+  if this.timebase.denominator is 0 {
+    ret 0.0
+  }
+  ret (this.value as Float64) * (this.timebase.numerator as Float64) / (this.timebase.denominator as Float64)
+}
+
+# The nearest time in `timebase` to `seconds` (from a host clock, a person's
+# input)
+func timeFromSeconds(seconds: view Float64, timebase: view Rational) ret MediaTime {
+  let ticks: Float64 = seconds * (timebase.denominator as Float64) / (timebase.numerator as Float64)
+  var rounded: Int = (ticks + 0.5) as Int
+  if ticks < 0.0 {
+    rounded = (ticks - 0.5) as Int
+  }
+  ret MediaTime { value: rounded, timebase: timebase }
+}
+
+# -1, 0 or 1, across timebases: compared in their common finer timebase (the
+# least common multiple of the denominators), exact for sample and frame rates
+func compareTimes(a: view MediaTime, b: view MediaTime) ret Int {
+  var first: Int = a.value
+  var second: Int = b.value
+  if a.timebase.numerator is not b.timebase.numerator or a.timebase.denominator is not b.timebase.denominator {
+    let bottom: Int = a.timebase.denominator / greatestCommonDivisor(
+      a: a.timebase.denominator
+      b: b.timebase.denominator
+    ) * b.timebase.denominator
+    let common: Rational = rational(numerator: 1, denominator: bottom)
+    first = a.rescaled(timebase: common).value
+    second = b.rescaled(timebase: common).value
+  }
+  if first < second {
+    ret -1
+  }
+  if first > second {
+    ret 1
+  }
+  ret 0
+}
+
+# a + b in a's timebase (b rounded once into it)
+func addTimes(a: view MediaTime, b: view MediaTime) ret MediaTime {
+  ret MediaTime { value: a.value + b.rescaled(timebase: a.timebase).value, timebase: a.timebase }
+}

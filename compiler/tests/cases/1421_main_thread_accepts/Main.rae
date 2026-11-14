@@ -1,0 +1,41 @@
+# `mainThread` (docs/realtime-language-design.md §4.3): what the main thread
+# calls may reach a main-thread call without any mark between; a worker that
+# does not reach one is fine; a cExport callback marked mainThread may call
+# one. Nothing here is refused.
+func showOnScreen(value: view Int) mainThread {
+  log("shown {value}")
+}
+
+# main-thread code by convention: no mark
+func updateFrame(frame: view Int) {
+  showOnScreen(value: frame)
+}
+
+func sumTo(count: view Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = 1, i <= count, ++i {
+    total = total + i
+  }
+  ret total
+}
+
+# the platform runs it on the main queue, so it says so
+func onMainQueue(code: view Int) mainThread cExport("rae_test_main_thread_on_main_queue") {
+  updateFrame(frame: code)
+}
+
+func mix(gain: view Float) ret Float realtime {
+  ret gain * 0.5
+}
+
+func main() {
+  updateFrame(frame: 1)
+  let task: Task(Int) = spawn sumTo(count: 10)
+  var squares: List(Int) = { 0, 0, 0, 0 }
+  parallelLoop var i: Int = 0, i < 4, ++i {
+    squares.set(index: i, value: i * i)
+  }
+  log(
+    "sum {task.get()}, squares {squares.copyAtFallback(index: 3, fallback: -1)}, mix {mix(gain: 1.0)}"
+  )
+}

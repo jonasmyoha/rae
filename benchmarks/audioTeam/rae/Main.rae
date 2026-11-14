@@ -1,0 +1,159 @@
+# The render graph on several cores (audio/GraphTeam, docs/audio-design.md
+# §5.2 step 4): a 200-track session (each track a source, an EQ band, a
+# compressor, a fader, a pan and a meter, on 8 buses into a master limiter)
+# rendered in blocks of 256 frames at 48 kHz, its plan for a team, with 0, 2
+# and 4 helpers (each raised to real-time for the block's period). Prints the
+# mean time a block takes and its share of the block's 5.33 ms.
+#
+#     ./rae run benchmarks/audioTeam/rae/Main.rae
+import Math
+open Realtime
+open audio/AudioGraph
+open audio/EffectStates
+open audio/GraphCompile
+open audio/GraphRender
+open audio/GraphTeam
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+const blockFrames: Int = 256
+
+const trackCount: Int = 200
+
+const busCount: Int = 8
+
+const blocks: Int = 400
+
+func session() ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  graph.forTeam = true
+  let master: Int = graph.addNode(node: sumNode())
+  let limiter: Int = graph.addNode(node: limiterNode(ceilingDecibels: -1.0, releaseSeconds: 0.05))
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: master, to: limiter)
+  graph.connect(from: limiter, to: out)
+  var buses: List(Int) = {}
+  loop var bus: Int = 0, bus < busCount, ++bus {
+    let sum: Int = graph.addNode(node: sumNode())
+    let fader: Int = graph.addNode(node: gainNode(decibels: -6.0))
+    graph.connect(from: sum, to: fader)
+    graph.connect(from: fader, to: master)
+    buses.add(value: sum)
+  }
+  loop var track: Int = 0, track < trackCount, ++track {
+    let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: track % 4))
+    let eq: Int = graph.addNode(node: eqNode(
+      filter: FilterShape.peak
+      frequency: (200 + 37 * track) as Float
+      gainDecibels: 3.0
+      quality: 1.0
+    ))
+    let compressor: Int = graph.addNode(
+      node: compressorNode(settings: defaultEffectSettings(), makeupDecibels: 1.0)
+    )
+    let fader: Int = graph.addNode(node: gainNode(decibels: -24.0))
+    let pan: Int = graph.addNode(node: panNode(pan: ((track % 9) as Float - 4.0) / 4.0))
+    let meter: Int = graph.addNode(node: meterNode())
+    graph.connect(from: source, to: eq)
+    graph.connect(from: eq, to: compressor)
+    graph.connect(from: compressor, to: fader)
+    graph.connect(from: fader, to: pan)
+    graph.connect(from: pan, to: meter)
+    graph.connect(from: meter, to: buses.copyAtFallback(index: track % busCount, fallback: 0))
+  }
+  ret graph
+}
+
+func renderBlock(
+  renderer: mod GraphRenderer
+  sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+) realtime {
+  renderer.renderGraph(
+    sources: sources
+    left: left
+    right: right
+    offset: 0
+    frames: blockFrames
+  )
+}
+
+# The mean nanoseconds a block takes with `helpers` helpers
+func measure(helpers: view Int) ret Int {
+  let compiled: CompiledPlan = compileGraph(
+    graph: session()
+    sampleRate: sampleRate
+    maxFrames: blockFrames
+  )
+  var renderer: GraphRenderer = createGraphRenderer()
+  var tasks: List(Task(Int)) = {}
+  let periodNanoseconds: Int = blockFrames * 1000000000 / sampleRate
+  if helpers > 0 {
+    renderer.setRendererTeam(team: startGraphTeam(
+      helperCount: helpers
+      workgroup: 0
+      periodNanoseconds: periodNanoseconds
+      tasks: tasks
+    ))
+  }
+  let given: Bool = renderer.submitPlan(plan: compiled.plan)
+  let sources: Buffer(Float) = createSampleBuffer(count: 4 * 2 * blockFrames)
+  loop var i: Int = 0, i < 4 * 2 * blockFrames, ++i {
+    setSampleAt(samples: sources, index: i, value: Math.sin(x: (i as Float) * 0.05) * 0.5)
+  }
+  let left: Buffer(Float) = createSampleBuffer(count: blockFrames)
+  let right: Buffer(Float) = createSampleBuffer(count: blockFrames)
+  # warm up, then time
+  loop var i: Int = 0, i < 20, ++i {
+    renderBlock(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+    )
+  }
+  let started: Int = nowNs()
+  loop var i: Int = 0, i < blocks, ++i {
+    renderBlock(
+      renderer: renderer
+      sources: sources
+      left: left
+      right: right
+    )
+  }
+  let took: Int = nowNs() - started
+  if helpers > 0 {
+    stopGraphTeam(team: renderer.team, tasks: tasks)
+  }
+  renderer.freeGraphRenderer()
+  unsafe {
+    rae_ext_rae_buf_free(buf: sources)
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+  }
+  ret took / blocks
+}
+
+func main() {
+  let period: Int = blockFrames * 1000000000 / sampleRate
+  let limit: Int = graphTeamHelperLimit()
+  log(
+    "audioTeam: {trackCount} tracks on {busCount} buses, blocks of {blockFrames} frames ({period / 1000} us); this machine allows {limit} helpers"
+  )
+  let alone: Int = measure(helpers: 0)
+  log("audioTeam: 0 helpers: {alone / 1000} us a block ({alone * 100 / period}% of it)")
+  let counts: List(Int) = { 2, 4 }
+  loop let helpers: Int in counts {
+    if helpers <= limit {
+      let mean: Int = measure(helpers: helpers)
+      log(
+        "audioTeam: {helpers} helpers: {mean / 1000} us a block ({mean * 100 / period}% of it), {alone * 100 / max(
+          a: 1
+          b: mean
+        )}% of the speed alone"
+      )
+    }
+  }
+}

@@ -8,7 +8,7 @@
 
 
 const char* map_rae_type_to_c(Str type_name) {
-  if (str_eq_cstr(type_name, "Void")) return "void";
+  if (str_eq_cstr(type_name, "Void") || str_eq_cstr(type_name, "void")) return "void";
   if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int")) return "int64_t";
   if (str_eq_cstr(type_name, "Int32")) return "int32_t";
   if (str_eq_cstr(type_name, "Int16")) return "int16_t";

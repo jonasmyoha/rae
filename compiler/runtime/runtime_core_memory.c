@@ -366,7 +366,7 @@ static pthread_once_t g_mem_block_key_once = PTHREAD_ONCE_INIT;
 
 static void rae_mem_block_retire(void* data) {
   RaeMemCounterBlock* block = (RaeMemCounterBlock*)data;
-  RAE_LOCK(&g_mem_blocks_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_blocks_lock);
   for (int k = 0; k < RAE_MC__COUNT; k++) {
     int64_t sum = atomic_load_explicit(&g_mem_retired.value[k], memory_order_relaxed) +
                   atomic_load_explicit(&block->value[k], memory_order_relaxed);
@@ -393,12 +393,18 @@ static RaeMemCounterBlock* rae_mem_block_register(void) {
   pthread_once(&g_mem_block_key_once, rae_mem_block_key_create);
   pthread_setspecific(g_mem_block_key, block);
 #endif
-  RAE_LOCK(&g_mem_blocks_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_blocks_lock);
   block->next = g_mem_blocks;
   g_mem_blocks = block;
   RAE_UNLOCK(&g_mem_blocks_lock);
   t_mem_block = block;
   return block;
+}
+
+/* rae_runtime.h: get a thread C made ready for Rae code */
+void rae_thread_attach(void) {
+  rae_thread_install_altstack();
+  if (!t_mem_block) (void)rae_mem_block_register();
 }
 
 static inline void rae_mem_stat_add(int counter, int64_t amount) {
@@ -412,7 +418,7 @@ static inline void rae_mem_stat_add(int counter, int64_t amount) {
 
 /* Every counter summed over all threads, live and exited. */
 static void rae_mem_counters_read(int64_t* out) {
-  RAE_LOCK(&g_mem_blocks_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_blocks_lock);
   for (int k = 0; k < RAE_MC__COUNT; k++) {
     out[k] = atomic_load_explicit(&g_mem_retired.value[k], memory_order_relaxed);
   }
@@ -426,7 +432,7 @@ static void rae_mem_counters_read(int64_t* out) {
 
 /* One counter summed over all threads. */
 static int64_t rae_mem_counter_read(int counter) {
-  RAE_LOCK(&g_mem_blocks_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_blocks_lock);
   int64_t total = atomic_load_explicit(&g_mem_retired.value[counter], memory_order_relaxed);
   for (RaeMemCounterBlock* block = g_mem_blocks; block; block = block->next) {
     total += atomic_load_explicit(&block->value[counter], memory_order_relaxed);
@@ -576,18 +582,20 @@ static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
   /* Counted BEFORE the opt-in gate: see RAE_MC_ALLOC_TOTAL_N. Every String
    * body allocation in the runtime funnels through here, so this is a
    * complete count of Rae's string heap traffic. */
+  RAE_REALTIME_GUARD("rae_mem_str_tag", site < RAE_SITE__COUNT ? g_rae_site_names[site] : "a String");
   RAE_STAT_ADD(RAE_MC_ALLOC_TOTAL_N, 1);
   if (!g_mem_stats_enabled) return;
   RAE_STAT_ADD(RAE_MC_SITE_ALLOC_N + site, 1);
   RAE_STAT_ADD(RAE_MC_SITE_ALLOC_B + site, rae_mem_block_bytes(ptr, bytes));
-  RAE_LOCK(&g_mem_hash_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_hash_lock);
   rae_mem_hash_insert(ptr, site);
   RAE_UNLOCK(&g_mem_hash_lock);
 }
 
 static inline void rae_mem_str_untag(void* ptr, int64_t bytes_hint) {
+  RAE_REALTIME_GUARD("rae_mem_str_untag", "a String free");
   if (!g_mem_stats_enabled) return;
-  RAE_LOCK(&g_mem_hash_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_hash_lock);
   uint8_t site = rae_mem_hash_remove(ptr);
   RAE_UNLOCK(&g_mem_hash_lock);
   RAE_STAT_ADD(RAE_MC_SITE_FREE_N + site, 1);
@@ -629,7 +637,7 @@ static void rae_mem_stats_print(void) {
   fprintf(stderr, "  [mem:pool              ] register=%lld remove=%lld flush_calls=%lld flush_freed=%lld\n",
     (long long)counts[RAE_MC_POOL_REGISTER_N], (long long)counts[RAE_MC_POOL_REMOVE_N],
     (long long)counts[RAE_MC_POOL_FLUSH_CALLS], (long long)counts[RAE_MC_POOL_FLUSH_FREED]);
-  RAE_LOCK(&g_mem_hash_lock);
+  RAE_LOCK_UNCHECKED(&g_mem_hash_lock);
   int64_t full_drops = g_mem_hash_full_drops;
   RAE_UNLOCK(&g_mem_hash_lock);
   if (full_drops) {
@@ -639,7 +647,10 @@ static void rae_mem_stats_print(void) {
   fflush(stderr);
 }
 
-__attribute__((constructor))
+/* Priority 200: before the default-priority constructors, so the exit
+ * handlers they register (the real-time check's, runtime_realtime.c) run
+ * before this report */
+__attribute__((constructor(200)))
 static void rae_install_mem_stats(void) {
   const char* v = getenv("RAE_MEM_STATS");
   if (v && v[0] && v[0] != '0') {

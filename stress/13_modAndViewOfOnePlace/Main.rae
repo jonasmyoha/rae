@@ -1,0 +1,29 @@
+# Foot gun: one place passed to a call as `mod` and as `view` (or twice as
+# `mod`). The function changes it through one parameter and reads it through
+# the other, which it believes nobody changes.
+#
+# Rae has no rule against it yet, so it compiles and the `view` sees the
+# change. A rule that refuses it (Swift's "exclusive access", Rust's borrow
+# rules) is also what would let the compiler tell C the two do not overlap
+# (`restrict`, docs/realtime-language-design.md §4.6).
+func grow(output: mod List(Int), input: view List(Int)) {
+  let before: Int = input.length()
+  loop var i: Int = 0, i < 100, ++i {
+    output.add(value: i)
+  }
+  log("the view read {before} items, then {input.length()}")
+}
+
+func addBoth(first: mod List(Int), second: mod List(Int)) {
+  first.add(value: 1)
+  second.add(value: 2)
+}
+
+func main() {
+  var numbers: List(Int) = {}
+  numbers.add(value: 7)
+  grow(output: numbers, input: numbers)
+  var pair: List(Int) = {}
+  addBoth(first: pair, second: pair)
+  log("one list as two mods: {pair.length()} items")
+}

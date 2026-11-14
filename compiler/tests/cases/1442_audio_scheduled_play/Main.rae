@@ -1,0 +1,256 @@
+# What a timeline (an editor's, or a game's music) needs from the engine
+# (docs/audio-design.md §6.2, §6.3), offline at 44.1 kHz:
+#
+# 1. playFromAt: a sound started from its frame 1000 plays that frame first.
+# 2. A voice stopped before its first sample is never heard.
+# 3. A note released and started again on one sample keeps sounding, whether
+#    the start was sent early or just before the block that begins on that
+#    sample, in blocks of 1, 17 and 512 (the start used to apply first, and the
+#    release then ended it).
+# 4. rampBusGainAt: the bus's gain in a straight line from its sample, -12 dB
+#    after the given frames.
+# 5. playStreamFromAt: a stream opened half a second before it is heard (its
+#    file read ahead), from its frame 4410, equal to the file from there.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/AudioStreams
+open audio/Decoder
+open audio/Sound
+
+const caseDir: String = "tests/cases/1442_audio_scheduled_play/"
+
+const rate: Int = 44100
+
+# A mono sound whose frame i is (i + 1) / 100000
+func rampSoundData(frames: view Int) ret SoundData {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames)
+  loop var i: Int = 0, i < frames, ++i {
+    setSampleAt(samples: samples, index: i, value: ((i + 1) as Float) / 100000.0)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 1
+    sampleRate: rate
+    error: ""
+  }
+}
+
+func constantSoundData(frames: view Int, value: view Float) ret SoundData {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames)
+  loop var i: Int = 0, i < frames, ++i {
+    setSampleAt(samples: samples, index: i, value: value)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 1
+    sampleRate: rate
+    error: ""
+  }
+}
+
+# The left channel of `frames` frames rendered in blocks of `blockFrames`
+func renderLeft(audio: mod AudioEngine, frames: view Int, blockFrames: view Int) ret List(Float) {
+  var left: List(Float) = {}
+  let rendered: List(Float) = audio.renderOfflineInBlocks(frames: frames, blockFrames: blockFrames)
+  loop var i: Int = 0, i < frames, ++i {
+    left.add(value: rendered.copyAtFallback(index: 2 * i, fallback: 0.0))
+  }
+  ret left
+}
+
+func rampFrom(startFrame: view Int) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  let ramp: Sound = audio.addSound(data: rampSoundData(frames: rate))
+  let voice: VoiceId = audio.playFromAt(
+    sound: ramp
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: startFrame
+    atSample: 3000
+  )
+  let left: List(Float) = renderLeft(audio: audio, frames: 4000, blockFrames: 128)
+  let stopped: Int = audio.stopAudio()
+  ret left
+}
+
+func stoppedBeforeStart() ret Bool {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  let ramp: Sound = audio.addSound(data: rampSoundData(frames: rate))
+  let voice: VoiceId = audio.playAt(
+    sound: ramp
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    atSample: 5000
+  )
+  audio.stopVoiceAt(voiceId: voice, atSample: 4000)
+  let left: List(Float) = renderLeft(audio: audio, frames: 8000, blockFrames: 128)
+  let stopped: Int = audio.stopAudio()
+  loop let sample: Float in left {
+    if sample is not 0.0 {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Note 60 from 0, released and started again at `again`: the start sent
+# with the release (early), or when the render reaches `again` (late)
+func noteAgain(blockFrames: view Int, again: view Int, early: view Bool) ret Int {
+  var audio: AudioEngine = audioStartOffline(
+    sampleRate: rate
+    channels: 2
+    blockFrames: blockFrames
+  )
+  audio.playNoteAt(
+    note: 60
+    velocity: 0.7
+    bus: AudioBusKind.music
+    atSample: 0
+  )
+  audio.releaseNoteAt(note: 60, atSample: again)
+  if early {
+    audio.playNoteAt(
+      note: 60
+      velocity: 0.7
+      bus: AudioBusKind.music
+      atSample: again
+    )
+  }
+  var left: List(Float) = renderLeft(audio: audio, frames: again, blockFrames: blockFrames)
+  if not early {
+    audio.playNoteAt(
+      note: 60
+      velocity: 0.7
+      bus: AudioBusKind.music
+      atSample: again
+    )
+  }
+  let rest: List(Float) = renderLeft(audio: audio, frames: 8000, blockFrames: blockFrames)
+  loop let sample: Float in rest {
+    left.add(value: sample)
+  }
+  if audio.lateCommandCount() is not 0 {
+    log("late commands: {audio.lateCommandCount()}")
+  }
+  let stopped: Int = audio.stopAudio()
+  var hash: Int = 0
+  loop let sample: Float in left {
+    hash = (hash * 31 + floatBits(value: sample)) % 1000000007
+  }
+  ret hash
+}
+
+func near(value: view Float, expected: view Float, tolerance: view Float) ret String {
+  if abs(value: value - expected) <= tolerance {
+    ret "ok"
+  }
+  ret "WRONG ({value}, expected {expected})"
+}
+
+func main() {
+  # 1
+  let fromStart: List(Float) = rampFrom(startFrame: 0)
+  let fromLater: List(Float) = rampFrom(startFrame: 1000)
+  let unit: Float = fromStart.copyAtFallback(index: 3000, fallback: 0.0)
+  log(
+    "1. silent before 3000: {fromLater.copyAtFallback(index: 2999, fallback: 1.0) is 0.0}, frame 1000 first: {near(
+      value: fromLater.copyAtFallback(index: 3000, fallback: 0.0) / unit
+      expected: 1001.0
+      tolerance: 0.05
+    )}"
+  )
+  # 2
+  log("2. stopped before its first sample, never heard: {stoppedBeforeStart()}")
+  # 3
+  let again: Int = 17 * 512
+  let reference: Int = noteAgain(blockFrames: 512, again: again, early: true)
+  var same: Bool = true
+  let sizes: List(Int) = { 1, 17, 512 }
+  loop let blockFrames: Int in sizes {
+    if noteAgain(blockFrames: blockFrames, again: again, early: false) is not reference {
+      same = false
+      log("3. blocks of {blockFrames}: the late start differs")
+    }
+    if noteAgain(blockFrames: blockFrames, again: again, early: true) is not reference {
+      same = false
+      log("3. blocks of {blockFrames}: the early start differs")
+    }
+  }
+  log("3. released and started on one sample, early or late, blocks of 1, 17, 512: same {same}")
+  # 4
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  let held: Sound = audio.addSound(data: constantSoundData(frames: rate, value: 0.5))
+  let voice: VoiceId = audio.playAt(
+    sound: held
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  audio.rampBusGainAt(
+    bus: AudioBusKind.music
+    gainDecibels: -12.0
+    frames: 4410
+    atSample: 1000
+  )
+  let lane: List(Float) = renderLeft(audio: audio, frames: 6000, blockFrames: 128)
+  let stopped: Int = audio.stopAudio()
+  let full: Float = lane.copyAtFallback(index: 0, fallback: 1.0)
+  let low: Float = decibelsToGain(decibels: -12.0)
+  log(
+    "4. unchanged on its first sample: {near(
+      value: lane.copyAtFallback(index: 1000, fallback: 0.0) / full
+      expected: 1.0
+      tolerance: 0.0
+    )}, halfway: {near(
+      value: lane.copyAtFallback(index: 3205, fallback: 0.0) / full
+      expected: (1.0 + low) / 2.0
+      tolerance: 0.001
+    )}, -12 dB at the end: {near(
+      value: lane.copyAtFallback(index: 5410, fallback: 0.0) / full
+      expected: low
+      tolerance: 0.0001
+    )}"
+  )
+  # 5
+  var streaming: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  let stream: VoiceId = streaming.playStreamFromAt(
+    path: "{caseDir}tone.flac"
+    bus: AudioBusKind.music
+    gainDecibels: -6.0
+    skipFrames: 4410
+    atSample: 22050
+  )
+  let streamed: List(Float) = renderLeft(audio: streaming, frames: 33000, blockFrames: 128)
+  let endedStream: Int = streaming.stopAudio()
+  let file: SoundData = readAnySoundFile(path: "{caseDir}tone.flac")
+  var scaleAt: Int = 0
+  loop abs(value: sampleAt(samples: file.samples, index: 2 * (4410 + scaleAt))) < 0.1 {
+    scaleAt = scaleAt + 1
+  }
+  let scale: Float = streamed.copyAtFallback(index: 22050 + scaleAt, fallback: 0.0) / sampleAt(
+    samples: file.samples
+    index: 2 * (4410 + scaleAt)
+  )
+  var worst: Float = 0.0
+  loop var k: Int = 0, k < 10000, ++k {
+    let expected: Float = scale * sampleAt(samples: file.samples, index: 2 * (4410 + k))
+    worst = max(
+      a: worst
+      b: abs(value: streamed.copyAtFallback(index: 22050 + k, fallback: 0.0) - expected)
+    )
+  }
+  freeSoundData(data: file)
+  log(
+    "5. silent before 22050: {streamed.copyAtFallback(index: 22049, fallback: 1.0) is 0.0}, the file from frame 4410 within 0.000001: {worst < 0.000001}"
+  )
+}

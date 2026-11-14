@@ -251,7 +251,7 @@ func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
     if index >= 0 {
       # The copied Task handle is joined by get() and freed when the copy
       # drops; the list slot is then removed without touching it again.
-      if let task: Task(Int) = queue.tasks.copyAt(index: index) {
+      if let task: view Task(Int) = queue.tasks.viewAt(index: index) {
         let workerOk: Int = task.get()
       }
       queue.tasks.removeAt(index: index)
@@ -290,7 +290,7 @@ func artworkFetchStatus(queue: mod ArtworkFetchQueue, outPath: view String) ret 
 func shutdownArtworkFetchQueue(queue: mod ArtworkFetchQueue) {
   var i: Int = 0
   loop i < queue.tasks.length() {
-    if let task: Task(Int) = queue.tasks.copyAt(index: i) {
+    if let task: view Task(Int) = queue.tasks.viewAt(index: i) {
       let workerOk: Int = task.get()
     }
     i = i + 1

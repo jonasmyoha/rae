@@ -1,0 +1,35 @@
+pack WindowCallFromWorker {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "A window-system call from a worker thread"
+  description: "A spawned task asks SDL about the input devices; SDL's window functions and AppKit/UIKit under them run only on the main thread."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "compile-error"
+      diagnostic: "which only the main thread may call"
+    }
+    elsewhere: {
+      python: "runs; tkinter or a GUI binding called from a thread may crash or hang, nothing checks it"
+      javascript: "a Worker has no DOM: a ReferenceError at run time"
+      java: "runs; Swing off the event thread is a data race; Android throws CalledFromWrongThreadException at run time"
+      rust: "compile error for winit's EventLoop (it is not Send); other window handles are not checked"
+      c: "undefined behavior; AppKit may stop the program (Xcode's Main Thread Checker reports it in a debug build)"
+    }
+    fixedBy: "0.3.110: the mainThread mark on externs (realtime-language-design.md §4.3)"
+  }
+}

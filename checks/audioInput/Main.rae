@@ -1,0 +1,134 @@
+# Recording from the input (docs/audio-design.md §8.1) on a real device: the
+# default input through a duplex device (an Apogee Duet, the built-in
+# microphone, ...). It reports the microphone permission, the input's channels,
+# the output and input latencies and their round trip, then records 2 s and
+# checks that every frame arrived (none lost, the frame count right) and
+# reports the level. Nothing is played unless RAE_AUDIO_ECHO_TEST=1: then four
+# quiet clicks are played and found again in the recording, which after the
+# round-trip cut should sit within a few milliseconds of their output sample
+# (the air between speaker and microphone).
+#
+# It never asks for the permission by itself (the system's prompt would wait
+# for a person): RAE_AUDIO_ASK_MICROPHONE=1 asks. Without the permission, or
+# without an input, it says so and passes.
+import Math
+import Sys
+open audio/Audio
+open audio/AudioClock
+open audio/AudioInput
+open audio/AudioMixer
+open audio/Sound
+
+func decibelsOf(level: view Float) ret Float {
+  ret naturalLog(x: max(a: level, b: 0.000001)) / 2.3025851 * 20.0
+}
+
+func click() ret SoundData {
+  let frames: Int = 240
+  let samples: Buffer(Float) = createSampleBuffer(count: frames)
+  loop var i: Int = 0, i < frames, ++i {
+    let fade: Float = ((frames - i) as Float) / (frames as Float)
+    setSampleAt(samples: samples, index: i, value: sin(x: (i as Float) * 0.3) * 0.1 * fade)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 1
+    sampleRate: 48000
+    error: ""
+  }
+}
+
+func main() {
+  var permission: Int = microphonePermission()
+  log("audioInput: the microphone permission {permission} (3 allowed, -1 none here)")
+  if permission is 0 and getEnv(name: "RAE_AUDIO_ASK_MICROPHONE") is "1" {
+    log("audioInput: asking: {requestMicrophone()}")
+    sleep(ms: 5000)
+    permission = microphonePermission()
+  }
+  if permission is not 3 and permission is not -1 {
+    log("audioInput: not allowed to record; nothing to test")
+    ret
+  }
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.inputChannels = 2
+  var audio: AudioEngine = audioStart(settings: settings)
+  if not audio.inputAvailable() {
+    log("audioInput: no input device; nothing to test")
+    let blocks: Int = audio.stopAudio()
+    ret
+  }
+  log(
+    "audioInput: on {deviceBackendName(device: audio.device)}, {audio.sampleRate} Hz, {audio.input.channels} input channels; latency out {audio.clock.latencyFrames}, in {audio.inputLatencyFrames()}, round trip {audio.roundTripFrames()} frames"
+  )
+  let echo: Bool = getEnv(name: "RAE_AUDIO_ECHO_TEST") is "1"
+  var clickTimes: List(Int) = {}
+  sleep(ms: 300)
+  audio.update()
+  var take: AudioRecording = audio.beginRecording()
+  if echo {
+    let sound: Sound = audio.addSound(data: click())
+    let first: Int = audio.nextSafeSampleTime() + 4800
+    loop var i: Int = 0, i < 4, ++i {
+      let at: Int = first + i * 24000
+      clickTimes.add(value: at)
+      let voice: VoiceId = audio.playAt(
+        sound: sound
+        bus: AudioBusKind.effects
+        gainDecibels: 0.0
+        pan: 0.0
+        looping: false
+        atSample: at
+      )
+    }
+  }
+  loop var tick: Int = 0, tick < 100, ++tick {
+    sleep(ms: 20)
+    audio.update()
+    audio.recordInto(recording: take)
+  }
+  let data: SoundData = finishRecording(recording: take)
+  var sum: Float64 = 0.0
+  var peak: Float = 0.0
+  loop var i: Int = 0, i < data.frameCount * data.channels, ++i {
+    let value: Float = sampleAt(samples: data.samples, index: i)
+    sum = sum + (value * value) as Float64
+    peak = max(a: peak, b: abs(value: value))
+  }
+  let rms: Float = sqrt(
+    x: (sum / (max(a: 1, b: data.frameCount * data.channels) as Float64)) as Float
+  )
+  log(
+    "audioInput: recorded {data.frameCount} frames from output sample {alignedStart(recording: take)}, lost {take.lostSamples} samples; level {floor(
+      x: decibelsOf(level: rms) + 0.5
+    )} dBFS, peak {floor(x: decibelsOf(level: peak) + 0.5)} dBFS"
+  )
+  loop let at: Int in clickTimes {
+    # the loudest frame within 50 ms after the click's output sample
+    let from: Int = at - alignedStart(recording: take)
+    var best: Int = -1
+    var bestValue: Float = 0.0
+    loop var frame: Int = max(a: 0, b: from - 480), frame < min(a: data.frameCount, b: from + 2400), ++frame {
+      let value: Float = abs(value: sampleAt(samples: data.samples, index: frame * data.channels))
+      if value > bestValue {
+        bestValue = value
+        best = frame
+      }
+    }
+    log(
+      "audioInput: the click at {at}: loudest {best - from} frames after it (the air and the speaker's own delay)"
+    )
+  }
+  let callbacks: Int = audio.deviceCallbacks()
+  let blocks: Int = audio.stopAudio()
+  freeSoundData(data: data)
+  let expected: Int = audio.sampleRate * 2 - audio.roundTripFrames()
+  # at least a second of callbacks, whatever the period (the Android emulator's
+  # is 4360 frames)
+  if data.frameCount < expected * 9 / 10 or take.lostSamples > 0 or callbacks * audio.periodFrames < audio.sampleRate {
+    log("audioInput: FAILED (expected about {expected} frames)")
+    exit(code: 1)
+  }
+  log("audioInput: passed")
+}

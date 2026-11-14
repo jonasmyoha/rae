@@ -1,0 +1,183 @@
+# MIDI on a real machine (docs/audio-design.md §8.2): CoreMIDI on macOS and
+# iOS. It lists the MIDI sources and destinations there are (keyboards,
+# interfaces, other programs), makes a virtual source and destination of its
+# own, and sends through the system's MIDI server to itself: a note on, a
+# second one by running status, a system exclusive message and a pitch bend
+# to its destination through its output port, and a controller out of its
+# virtual source to its input port. Passes when all five come back whole. The
+# notes are played on the synth with the music bus muted (nothing is heard; a
+# person can unmute it with RAE_AUDIO_MIDI_LISTEN=1, and play a keyboard while
+# RAE_CHECK_SECONDS runs). Where there is no MIDI it says so and passes.
+# Android (MidiManager and AMidi) has no virtual ports for a program: built
+# with RAE_ANDROID_PARTS="midiLoopback" the app has packages/audio's loopback
+# device, and the same five messages go to it and come back through Android's
+# MIDI service; without it the check lists the devices and listens to them.
+import Math
+import String
+import Sys
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/Midi
+open audio/MidiPorts
+
+func describe(message: view MidiMessage) ret String {
+  if message.kind is MidiKind.systemExclusive {
+    ret "systemExclusive of {message.data.length()} bytes"
+  }
+  if message.kind is MidiKind.pitchBend {
+    ret "pitchBend channel {message.channel} {message.bend}"
+  }
+  ret "{message.kind} channel {message.channel} {message.data1} {message.data2}"
+}
+
+# Send, trying again while the device is still opening (Android opens a device
+# a moment after it is asked), for up to two seconds
+func sendWhenOpen(midi: mod MidiPorts, target: view Int, bytes: view List(UInt8)) ret Bool {
+  loop var tries: Int = 0, tries < 200, ++tries {
+    if midi.sendMidi(destination: target, bytes: bytes) {
+      ret true
+    }
+    sleep(ms: 10)
+  }
+  ret false
+}
+
+func main() {
+  var midi: MidiPorts = openMidi(name: "Rae audioMidi")
+  if midi.client is 0 {
+    log("audioMidi: no MIDI here; nothing to test")
+    ret
+  }
+  loop let source: MidiEndpoint in midiSources() {
+    log("audioMidi: source {source.name}")
+  }
+  loop let destination: MidiEndpoint in midiDestinations() {
+    log("audioMidi: destination {destination.name}")
+  }
+  let virtual: Bool = midi.createVirtualMidi(name: "Rae audioMidi")
+  # where to send: our own virtual destination, or (Android, which has no
+  # virtual ports for a program) the loopback device the build added
+  var target: Int = midi.virtualDestination
+  if not virtual {
+    loop let destination: MidiEndpoint in midiDestinations() {
+      if destination.name.contains(sub: "loopback") {
+        target = destination.id
+      }
+    }
+  }
+  let connected: Int = midi.connectAllMidiSources()
+  log(
+    "audioMidi: virtual ports {virtual}, listening to {connected} sources, a target {target is not 0 and target is not -1}"
+  )
+  if not virtual and (target is 0 or target is -1) {
+    log(
+      "audioMidi: no virtual ports and no loopback device here (Android: RAE_ANDROID_PARTS=\"midiLoopback\" adds one); listening to the devices only"
+    )
+    var listened: Int = 0
+    let wanted: String = getEnv(name: "RAE_CHECK_SECONDS")
+    var seconds: Int = 2
+    if wanted is not "" {
+      seconds = wanted.toInt()
+    }
+    loop var tick: Int = 0, tick < seconds * 100, ++tick {
+      sleep(ms: 10)
+      loop let message: MidiMessage in midi.pollMidi() {
+        listened = listened + 1
+        log("audioMidi: received {describe(message: message)}")
+      }
+    }
+    closeMidi(this: midi)
+    log("audioMidi: {listened} messages from devices; passed with nothing to loop back")
+    ret
+  }
+  # Android opens the loopback's sending side a moment later: what is sent
+  # before that is not heard back
+  var waited: Int = 0
+  loop not midi.midiSourcesReady() and waited < 200 {
+    sleep(ms: 10)
+    waited = waited + 1
+  }
+  var audio: AudioEngine = audioStart(settings: defaultAudioSettings())
+  if getEnv(name: "RAE_AUDIO_MIDI_LISTEN") is not "1" {
+    audio.setBusGain(bus: AudioBusKind.music, gainDecibels: -120.0)
+  }
+  let sentNotes: Bool = sendWhenOpen(
+    midi: midi
+    target: target
+    bytes: List(UInt8) {
+      144
+      60
+      100
+      64
+      90
+    }
+  )
+  let sentSystem: Bool = sendWhenOpen(
+    midi: midi
+    target: target
+    bytes: List(UInt8) {
+      240
+      67
+      16
+      1
+      2
+      247
+    }
+  )
+  let sentBend: Bool = sendWhenOpen(
+    midi: midi
+    target: target
+    bytes: midiBytes(
+      kind: MidiKind.pitchBend
+      channel: 2
+      data1: 0
+      data2: 96
+    )
+  )
+  let controller: List(UInt8) = midiBytes(
+    kind: MidiKind.controlChange
+    channel: 5
+    data1: 7
+    data2: 99
+  )
+  var emitted: Bool = false
+  if virtual {
+    emitted = midi.emitMidi(bytes: controller)
+  } else {
+    emitted = sendWhenOpen(midi: midi, target: target, bytes: controller)
+  }
+  log("audioMidi: sent {sentNotes} {sentSystem} {sentBend}, the controller {emitted}")
+  var seconds: Int = 1
+  let asked: String = getEnv(name: "RAE_CHECK_SECONDS")
+  if asked is not "" {
+    seconds = asked.toInt()
+  }
+  var arrived: Int = 0
+  var played: Int = 0
+  loop var tick: Int = 0, tick < seconds * 100, ++tick {
+    sleep(ms: 10)
+    audio.update()
+    loop let message: MidiMessage in midi.pollMidi() {
+      arrived = arrived + 1
+      if audio.playMidi(message: message, bus: AudioBusKind.music) {
+        played = played + 1
+      }
+      log("audioMidi: received {describe(message: message)}")
+    }
+  }
+  let releaseAt: Int = audio.nextSafeSampleTime()
+  audio.releaseAllNotesAt(atSample: releaseAt)
+  sleep(ms: 400)
+  let callbacks: Int = audio.deviceCallbacks()
+  let blocks: Int = audio.stopAudio()
+  closeMidi(this: midi)
+  log(
+    "audioMidi: {arrived} messages arrived, {played} played on the synth, {droppedMidiPackets()} packets dropped"
+  )
+  if arrived < 5 or played < 2 {
+    log("audioMidi: FAILED")
+    exit(code: 1)
+  }
+  log("audioMidi: passed")
+}

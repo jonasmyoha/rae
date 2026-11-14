@@ -1,0 +1,260 @@
+# audio/CustomNodes — a program's own node kinds in the render graph
+# (docs/audio-design.md §5.3, §13 D5). Rae has no function values, so a
+# program does not hand the engine its functions: it DEFINES five C symbols,
+# in Rae, with `cExport`, and the engine calls them for every node of kind
+# `custom` (each with the program's own kind number, which the program
+# dispatches on with a `match`). A program that adds no node kind defines
+# none of them; the package's C glue has an empty default of each (a weak
+# symbol), as for the engine's own stage-B render.
+#
+#     # how many Floats of state a node of `kind` needs (main thread)
+#     func nodeStateSize(kind: copy Int, settings: copy Buffer(Float), settingCount: copy Int,
+#       sampleRate: copy Int) cExport("rae_audio_node_state_size") ret Int
+#     # fill a new node's state (main thread, when a plan is prepared; may allocate)
+#     func nodePrepare(kind: copy Int, state: copy Buffer(Float), stateSize: copy Int,
+#       settings: copy Buffer(Float), settingCount: copy Int, sampleRate: copy Int)
+#       cExport("rae_audio_node_prepare")
+#     # one block (audio thread): read the input, write the output, read the
+#     # block's events (time-sorted, each with its sample offset in the block)
+#     func nodeProcess(kind: copy Int, state: copy Buffer(Float), stateSize: copy Int,
+#       scratch: copy Buffer(Float), inputBase: copy Int, outputBase: copy Int,
+#       channelStride: copy Int, frames: copy Int, events: copy Buffer(Float),
+#       eventCount: copy Int) realtime cExport("rae_audio_node_process")
+#     # forget what it was playing (audio thread: a seek, a stop)
+#     func nodeReset(kind: copy Int, state: copy Buffer(Float), stateSize: copy Int)
+#       realtime cExport("rae_audio_node_reset")
+#     # the frames its processing delays the signal (main thread, at compile):
+#     # the compiler delays the other paths into the same node by as much
+#     func nodeLatency(kind: copy Int, settings: copy Buffer(Float), settingCount: copy Int,
+#       sampleRate: copy Int) cExport("rae_audio_node_latency") ret Int
+#
+# Inside nodeProcess, `customBlock(...)` wraps what it was given, and
+# blockInput / setBlockOutput / blockStateAt / setBlockStateAt / blockEvents
+# read and write it. A node's state is Floats the engine owns: it allocates
+# them when the plan is prepared, frees them with the plan, carries them over
+# a plan swap to the node of the same entity, kind and size, and never
+# allocates on the audio thread. Its parameters are the graph's parameter
+# events (GraphParameterEvent) of kind customParameterBase + n, delivered to
+# the node in the block of their sample time.
+#
+# Another package's node kinds come in the same way: the program's five
+# functions call that package's own (by the kind numbers the program gives
+# them). Hosting compiled plugins (CLAP, VST3, AUv3, Rae plugins as WASM
+# modules) is a media editor's and builds on these five calls.
+import Math
+open audio/Sound
+
+# GraphParameterEvent.kind for a custom node's parameter n: customParameterBase + n
+const customParameterBase: Int = 100
+
+# The most events one custom node receives in one block (a plan holds
+# customEventSlots in all); more in one block are dropped
+const customEventSlots: Int = 64
+
+# A custom node's running state in the RenderPlan's table
+type CustomState {
+  kind: Int
+  state: Buffer(Float)
+  stateSize: Int
+}
+
+# ---- the five calls, as the engine makes them (the program defines them) -------
+func callNodeStateSize(
+  kind: Int
+  settings: Buffer(Float)
+  settingCount: Int
+  sampleRate: Int
+) unsafe extern("rae_audio_node_state_size") ret Int
+
+func callNodePrepare(
+  kind: Int
+  state: Buffer(Float)
+  stateSize: Int
+  settings: Buffer(Float)
+  settingCount: Int
+  sampleRate: Int
+) unsafe extern("rae_audio_node_prepare")
+
+func callNodeProcess(
+  kind: Int
+  state: Buffer(Float)
+  stateSize: Int
+  scratch: Buffer(Float)
+  inputBase: Int
+  outputBase: Int
+  channelStride: Int
+  frames: Int
+  events: Buffer(Float)
+  eventCount: Int
+) realtime unsafe extern("rae_audio_node_process")
+
+func callNodeReset(
+  kind: Int
+  state: Buffer(Float)
+  stateSize: Int
+) realtime unsafe extern("rae_audio_node_reset")
+
+func callNodeLatency(
+  kind: Int
+  settings: Buffer(Float)
+  settingCount: Int
+  sampleRate: Int
+) unsafe extern("rae_audio_node_latency") ret Int
+
+# A node's settings as the Floats the calls take (freed by the caller)
+func settingsBuffer(settings: view List(Float)) ret Buffer(Float) {
+  let buffer: Buffer(Float) = createSampleBuffer(count: max(a: 1, b: settings.length()))
+  loop var i: Int = 0, i < settings.length(), ++i {
+    setSampleAt(samples: buffer, index: i, value: settings.copyAtFallback(index: i, fallback: 0.0))
+  }
+  ret buffer
+}
+
+# The frames a custom node of `kind` with `settings` delays its signal
+func customLatency(kind: view Int, settings: view List(Float), sampleRate: view Int) ret Int {
+  let buffer: Buffer(Float) = settingsBuffer(settings: settings)
+  var frames: Int = 0
+  unsafe {
+    frames = callNodeLatency(
+      kind: kind
+      settings: buffer
+      settingCount: settings.length()
+      sampleRate: sampleRate
+    )
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+  ret max(a: 0, b: frames)
+}
+
+# A custom node's state, sized and prepared by the program (main thread)
+func createCustomState(
+  kind: view Int
+  settings: view List(Float)
+  sampleRate: view Int
+) ret CustomState {
+  let buffer: Buffer(Float) = settingsBuffer(settings: settings)
+  var size: Int = 0
+  unsafe {
+    size = callNodeStateSize(
+      kind: kind
+      settings: buffer
+      settingCount: settings.length()
+      sampleRate: sampleRate
+    )
+  }
+  size = max(a: 0, b: size)
+  let state: Buffer(Float) = createSampleBuffer(count: max(a: 1, b: size))
+  unsafe {
+    callNodePrepare(
+      kind: kind
+      state: state
+      stateSize: size
+      settings: buffer
+      settingCount: settings.length()
+      sampleRate: sampleRate
+    )
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+  ret CustomState { kind: kind, state: state, stateSize: size }
+}
+
+# ---- what a program's nodeProcess reads and writes ---------------------------------
+# One block of one custom node: its state, its input and output in the plan's
+# scratch (channel c, frame i at base + c * maxFrames + i), and its events
+# (offset, parameter, value: three Floats each)
+type CustomBlock {
+  state: Buffer(Float)
+  stateSize: Int
+  scratch: Buffer(Float)
+  inputBase: Int
+  outputBase: Int
+  # the plan's frames per channel in scratch (the output base's distance
+  # from the right channel's): inputBase and outputBase say where each starts
+  channelStride: Int
+  frames: Int
+  events: Buffer(Float)
+  eventCount: Int
+}
+
+type CustomEvent {
+  # the frame in this block it lands on
+  offset: Int
+  # the program's parameter number (the event's kind - customParameterBase)
+  parameter: Int
+  value: Float
+}
+
+# What nodeProcess was given, as one value. The right channel's samples are
+# `channelStride` after the left's.
+func customBlock(
+  state: view Buffer(Float)
+  stateSize: view Int
+  scratch: view Buffer(Float)
+  inputBase: view Int
+  outputBase: view Int
+  channelStride: view Int
+  frames: view Int
+  events: view Buffer(Float)
+  eventCount: view Int
+) ret CustomBlock realtime {
+  ret CustomBlock {
+    state: state
+    stateSize: stateSize
+    scratch: scratch
+    inputBase: inputBase
+    outputBase: outputBase
+    channelStride: channelStride
+    frames: frames
+    events: events
+    eventCount: eventCount
+  }
+}
+
+func blockInput(block: view CustomBlock, channel: view Int, frame: view Int) ret Float realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(
+      buf: block.scratch
+      index: block.inputBase + channel * block.channelStride + frame
+    )
+  }
+}
+
+func setBlockOutput(
+  block: view CustomBlock
+  channel: view Int
+  frame: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var scratch: Buffer(Float) = block.scratch
+    rae_ext_rae_buf_set(
+      buf: scratch
+      index: block.outputBase + channel * block.channelStride + frame
+      value: value
+    )
+  }
+}
+
+func blockStateAt(block: view CustomBlock, index: view Int) ret Float realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: block.state, index: index)
+  }
+}
+
+func setBlockStateAt(block: view CustomBlock, index: view Int, value: view Float) realtime {
+  unsafe {
+    var state: Buffer(Float) = block.state
+    rae_ext_rae_buf_set(buf: state, index: index, value: value)
+  }
+}
+
+# The block's event `index` (0 .. eventCount - 1, in time order)
+func blockEvent(block: view CustomBlock, index: view Int) ret CustomEvent realtime {
+  unsafe {
+    ret CustomEvent {
+      offset: rae_ext_rae_buf_get(buf: block.events, index: 3 * index) as Int
+      parameter: rae_ext_rae_buf_get(buf: block.events, index: 3 * index + 1) as Int
+      value: rae_ext_rae_buf_get(buf: block.events, index: 3 * index + 2)
+    }
+  }
+}

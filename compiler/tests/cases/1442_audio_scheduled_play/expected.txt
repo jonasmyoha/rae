@@ -1,0 +1,10 @@
+[audio] play voice 1 sound 1 bus effects at 3000
+[audio] play voice 1 sound 1 bus effects at 3000
+1. silent before 3000: true, frame 1000 first: ok
+[audio] play voice 1 sound 1 bus effects at 5000
+2. stopped before its first sample, never heard: true
+3. released and started on one sample, early or late, blocks of 1, 17, 512: same true
+[audio] play voice 1 sound 1 bus music at 0
+4. unchanged on its first sample: ok, halfway: ok, -12 dB at the end: ok
+[audio] stream voice 1 tests/cases/1442_audio_scheduled_play/tone.flac bus music
+5. silent before 22050: true, the file from frame 4410 within 0.000001: true

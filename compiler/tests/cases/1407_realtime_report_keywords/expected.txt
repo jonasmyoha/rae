@@ -1,0 +1,20 @@
+tests/cases/1407_realtime_report_keywords/Main.rae:16:7: `label` is noAlloc, but this allocates and frees: a String interpolation (made, and freed after its use).
+    label (Main.rae:15)
+  Real-time code may not allocate: make it before the real-time code runs (in a prepare step), or send a number on a ring instead of text.
+  Real-time code may not free: move the value out (into a ring or a field), or hand it back on a reclaim ring for another thread to free.
+    16 |   ret "{value}".length()
+       |       ^~~~
+realtime report: Main.rae
+  realtime level  Main.rae:6
+      clean
+      trusts: nativeSqrt
+  realtime block  Main.rae:10
+      clean
+      trusts: rae_ext_rae_atomic_fetch_add_relaxed, nativeSin, nativeSqrt
+  noAlloc label  Main.rae:15
+      allocates: label (Main.rae:15)
+      frees: label (Main.rae:15)
+      trusts: rae_str_len
+  realtime fetchAddRelaxed(Int)  lib/Atomic.rae:135
+      clean
+      trusts: rae_ext_rae_atomic_fetch_add_relaxed

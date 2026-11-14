@@ -1,0 +1,130 @@
+# Now Playing's data and the remote commands (docs/audio-design.md §9.1),
+# offline, with RAE_REALTIME_CHECK=1 (config.env). tone.m4a is 1414's: 0.5 s of
+# AAC at 44.1 kHz. The buttons are pressed with injectRemoteCommand, which
+# puts them in the same queue the lock screen's handlers fill, and they reach
+# the program as ECS events through remoteCommandSystem. Whether the platform
+# shows Now Playing (macOS and iOS do, elsewhere not) is not printed, so the
+# output is the same everywhere.
+import Math
+open audio/Audio
+open audio/Decoder
+open audio/Sound
+open audio/AudioMixer
+open audio/AudioStreams
+open audio/NowPlaying
+open audio/remoteCommandSystem/RemoteCommandSystem
+open ecs/Event
+
+const caseDir: String = "tests/cases/1415_audio_now_playing/"
+
+func milliseconds(seconds: view Float64) ret Int {
+  ret (seconds * 1000.0 + 0.5) as Int
+}
+
+func describe(audio: view AudioEngine, song: view VoiceId, label: view String) {
+  let info: NowPlayingInfo = audio.nowPlayingOfStream(
+    voiceId: song
+    title: "Sweep"
+    artist: "Rae"
+    album: ""
+    artworkPath: ""
+  )
+  log(
+    "{label}: {info.title} by {info.artist}, file {audio.streamFileIndex(voiceId: song)}, at {milliseconds(
+      seconds: info.positionSeconds
+    )} ms of {milliseconds(seconds: info.durationSeconds)} ms, playing {info.playing}"
+  )
+}
+
+# One frame: the buttons pressed since the last one, as events, applied
+func frame(audio: mod AudioEngine, song: view VoiceId, events: mod EventQueue(RemoteCommandEvent)) {
+  remoteCommandSystem(events: events)
+  loop var i: Int = 0, i < eventCount(this: events), ++i {
+    let command: RemoteCommandEvent = eventAt(this: events, i: i)
+    let handled: Bool = audio.applyRemoteCommand(voiceId: song, command: command)
+    log(
+      "  button {command.kind} {milliseconds(seconds: command.positionSeconds)} ms: done by the stream {handled}, paused {audio.streamIsPaused(
+        voiceId: song
+      )}"
+    )
+  }
+  frameAdvance(this: events)
+}
+
+func main() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  var events: EventQueue(RemoteCommandEvent) = createEventQueue(RemoteCommandEvent)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let queued: Bool = audio.queueNext(voiceId: song, path: "{caseDir}tone.m4a")
+  let started: List(Float) = audio.renderOffline(frames: 4410)
+  describe(audio: audio, song: song, label: "after 100 ms")
+  injectRemoteCommand(kind: RemoteCommandKind.togglePlayPause, positionSeconds: 0.0)
+  frame(audio: audio, song: song, events: events)
+  let paused: List(Float) = audio.renderOffline(frames: 4410)
+  describe(audio: audio, song: song, label: "paused for 100 ms")
+  injectRemoteCommand(kind: RemoteCommandKind.changePosition, positionSeconds: 0.3)
+  injectRemoteCommand(kind: RemoteCommandKind.nextTrack, positionSeconds: 0.0)
+  injectRemoteCommand(kind: RemoteCommandKind.previousTrack, positionSeconds: 0.0)
+  frame(audio: audio, song: song, events: events)
+  let moved: List(Float) = audio.renderOffline(frames: 4410)
+  describe(audio: audio, song: song, label: "moved while paused")
+  injectRemoteCommand(kind: RemoteCommandKind.play, positionSeconds: 0.0)
+  frame(audio: audio, song: song, events: events)
+  let played: List(Float) = audio.renderOffline(frames: 4410)
+  describe(audio: audio, song: song, label: "played 100 ms more")
+  injectRemoteCommand(kind: RemoteCommandKind.pause, positionSeconds: 0.0)
+  injectRemoteCommand(kind: RemoteCommandKind.play, positionSeconds: 0.0)
+  frame(audio: audio, song: song, events: events)
+  log("no buttons: {takeRemoteCommands().length()} commands")
+  let blocks: Int = audio.stopAudio()
+  var gapless: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  let first: VoiceId = gapless.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let next: Bool = gapless.queueNext(voiceId: first, path: "{caseDir}tone.m4a")
+  let rendered: List(Float) = gapless.renderOffline(frames: 26460)
+  describe(audio: gapless, song: first, label: "600 ms into two files")
+  let gaplessBlocks: Int = gapless.stopAudio()
+  seekKeepsTheQueue()
+}
+
+# A seek keeps the files queued after the one it moves in, and moves within
+# the file heard now
+func seekKeepsTheQueue() {
+  let decoded: SoundData = readAnySoundFile(path: "{caseDir}tone.m4a")
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.m4a"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let queued: Bool = audio.queueNext(voiceId: song, path: "{caseDir}tone.m4a")
+  let early: List(Float) = audio.renderOffline(frames: 4410)
+  let moved: Bool = audio.seek(voiceId: song, seconds: 0.4)
+  let fade: List(Float) = audio.renderOffline(frames: 441)
+  describe(audio: audio, song: song, label: "seek to 400 ms in file 0")
+  let across: List(Float) = audio.renderOffline(frames: 8820)
+  describe(audio: audio, song: song, label: "200 ms later")
+  # a seek while file 1 plays moves in file 1
+  let inSecond: Bool = audio.seek(voiceId: song, seconds: 0.1)
+  let secondFade: List(Float) = audio.renderOffline(frames: 441)
+  describe(audio: audio, song: song, label: "seek to 100 ms in file 1")
+  # the new voice started under the fade, so it is 441 frames on
+  let after: List(Float) = audio.renderOffline(frames: 2205)
+  var worst: Float = 0.0
+  loop var i: Int = 0, i < 2205 * 2, ++i {
+    let expected: Float = sampleAt(samples: decoded.samples, index: (4410 + 441) * 2 + i)
+    worst = max(a: worst, b: abs(value: after.copyAtFallback(index: i, fallback: 9.0) - expected))
+  }
+  log("  the samples of file 1 from 110 ms: {worst is 0.0}")
+  let rest: List(Float) = audio.renderOffline(frames: 22050)
+  log("at the end: still playing {audio.streamIsPlaying(voiceId: song)}")
+  let blocks: Int = audio.stopAudio()
+  freeSoundData(data: decoded)
+}

@@ -1,0 +1,385 @@
+# Realtime — mark a real-time thread, and record how long its calls take
+# (docs/realtime-language-design.md §5.3, §7).
+#
+#     markRealtimeThread()                    # on the real-time thread, before its work
+#     var recorder: RealtimeRecorder = createRealtimeRecorder(name: "audio", periodNanoseconds:
+#     2666667)
+#     loop running {
+#       recorder.callStarted()
+#       renderBlock(...)                       # the real-time work
+#       recorder.callEnded()
+#     }
+#     unmarkRealtimeThread()
+#     recorder.report()                       # prints only with RAE_REALTIME_REPORT=1
+#
+# The check. With RAE_REALTIME_CHECK=1, every allocation, free, lock, log, task
+# start or join that the runtime sees on a marked thread is counted, and at exit
+# the program prints one line per runtime entry point and exits with code 70, so
+# the test that ran it fails. Without the variable a mark costs nothing but one
+# thread-local store, and the runtime's guards one thread-local load. The mark
+# belongs to the thread: mark a thread from its own code, and unmark it before
+# it does ordinary work again. It does not see C that bypasses the runtime (a
+# library's own malloc); RealtimeSanitizer does (§5.2).
+#
+# The recorder. One per real-time loop, owned by the code that runs it (no
+# global table): `callStarted` and `callEnded` read the monotonic clock and add
+# the call's time to a fixed histogram, the maximum and the total. Neither
+# allocates, so both may run on the marked thread. Times are wall-clock time of
+# the call, which is what a deadline cares about: time the thread was
+# preempted counts too. `recordCall` adds a duration measured elsewhere (and
+# lets a test feed known durations). The histogram has four steps per doubling,
+# so a percentile is exact to within 25 %: the report gives the upper edge of
+# its step.
+import Math
+
+func rae_ext_Realtime_markThread(realtime: Bool) realtime unsafe extern
+
+func rae_ext_Realtime_threadIsMarked() realtime unsafe extern ret Bool
+
+func rae_ext_Realtime_reportWanted() unsafe extern ret Bool
+
+# Whether RAE_REALTIME_REPORT asks for the recorders' reports.
+func realtimeReportWanted() ret Bool {
+  unsafe {
+    ret rae_ext_Realtime_reportWanted()
+  }
+}
+
+# Four steps per doubling up to 2^63 ns.
+const realtimeBucketCount: Int = 248
+
+func markRealtimeThread() realtime {
+  unsafe {
+    rae_ext_Realtime_markThread(realtime: true)
+  }
+}
+
+func unmarkRealtimeThread() realtime {
+  unsafe {
+    rae_ext_Realtime_markThread(realtime: false)
+  }
+}
+
+func realtimeThreadIsMarked() ret Bool {
+  unsafe {
+    ret rae_ext_Realtime_threadIsMarked()
+  }
+}
+
+type RealtimeRecorder {
+  name: String
+  # The time the calls must fit in (an audio block's length); 0 for none.
+  periodNanoseconds: Int
+  buckets: List(Int)
+  calls: Int
+  totalNanoseconds: Int
+  maximumNanoseconds: Int
+  startedAt: Int
+}
+
+func createRealtimeRecorder(name: own String, periodNanoseconds: view Int) ret RealtimeRecorder {
+  var buckets: List(Int) = createList(Int, cap: realtimeBucketCount)
+  buckets.addDefaults(count: realtimeBucketCount)
+  ret RealtimeRecorder {
+    name: name
+    periodNanoseconds: periodNanoseconds
+    buckets: buckets
+    calls: 0
+    totalNanoseconds: 0
+    maximumNanoseconds: 0
+    startedAt: 0
+  }
+}
+
+func callStarted(this: mod RealtimeRecorder) realtime {
+  this.startedAt = nowNs()
+}
+
+func callEnded(this: mod RealtimeRecorder) realtime {
+  this.recordCall(nanoseconds: nowNs() - this.startedAt)
+}
+
+func recordCall(this: mod RealtimeRecorder, nanoseconds: view Int) realtime {
+  var duration: Int = nanoseconds
+  if duration < 0 {
+    duration = 0
+  }
+  let bucket: Int = realtimeBucketOf(nanoseconds: duration)
+  this.buckets.set(
+    index: bucket
+    value: this.buckets.copyAtFallback(index: bucket, fallback: 0) + 1
+  )
+  this.calls = this.calls + 1
+  this.totalNanoseconds = this.totalNanoseconds + duration
+  if duration > this.maximumNanoseconds {
+    this.maximumNanoseconds = duration
+  }
+}
+
+# The step a duration falls in: 0-3 ns one step each, then four per doubling.
+func realtimeBucketOf(nanoseconds: view Int) ret Int {
+  if nanoseconds < 4 {
+    ret nanoseconds
+  }
+  let octave: Int = 63 - leadingZeros(x: nanoseconds)
+  ret 4 * (octave - 1) + (nanoseconds shr (octave - 2)) - 4
+}
+
+# The largest duration in a step.
+func realtimeBucketUpperEdge(bucket: view Int) ret Int {
+  if bucket < 4 {
+    ret bucket
+  }
+  let octave: Int = bucket / 4 + 1
+  let step: Int = bucket % 4
+  ret ((5 + step) shl (octave - 2)) - 1
+}
+
+# The upper edge of the step holding the call at `fraction` (perMille / 1000)
+# of all calls, slowest last: 999 gives the 99.9th percentile.
+func percentileNanoseconds(this: view RealtimeRecorder, perMille: view Int) ret Int {
+  if this.calls is 0 {
+    ret 0
+  }
+  let wanted: Int = (this.calls * perMille + 999) / 1000
+  var seen: Int = 0
+  var bucket: Int = 0
+  loop bucket < realtimeBucketCount {
+    seen = seen + this.buckets.copyAtFallback(index: bucket, fallback: 0)
+    if seen >= wanted {
+      ret min(a: realtimeBucketUpperEdge(bucket: bucket), b: this.maximumNanoseconds)
+    }
+    bucket = bucket + 1
+  }
+  ret this.maximumNanoseconds
+}
+
+# "12.3 µs" from nanoseconds, one decimal, rounded down.
+func realtimeMicroseconds(nanoseconds: view Int) ret String {
+  ret "{nanoseconds / 1000}.{nanoseconds % 1000 / 100} µs"
+}
+
+# Print the report when RAE_REALTIME_REPORT=1. Call it off the real-time thread
+# (it builds text), for example when the loop has ended.
+func report(this: view RealtimeRecorder) {
+  if not realtimeReportWanted() {
+    ret
+  }
+  if this.calls is 0 {
+    log("[realtime] {this.name}: no calls")
+    ret
+  }
+  let mean: Int = this.totalNanoseconds / this.calls
+  let slowest: String = realtimeMicroseconds(nanoseconds: this.maximumNanoseconds)
+  let percentile: String = realtimeMicroseconds(
+    nanoseconds: this.percentileNanoseconds(perMille: 999)
+  )
+  log(
+    "[realtime] {this.name}: {this.calls} calls, mean {realtimeMicroseconds(nanoseconds: mean)}, p99.9 <= {percentile}, max {slowest}"
+  )
+  if this.periodNanoseconds > 0 {
+    let share: Int = this.maximumNanoseconds * 1000 / this.periodNanoseconds
+    log(
+      "[realtime] {this.name}: period {realtimeMicroseconds(nanoseconds: this.periodNanoseconds)}, the slowest call used {share / 10}.{share % 10}% of it"
+    )
+  }
+  var bucket: Int = 0
+  loop bucket < realtimeBucketCount {
+    let count: Int = this.buckets.copyAtFallback(index: bucket, fallback: 0)
+    if count > 0 {
+      log(
+        "[realtime] {this.name}: up to {realtimeMicroseconds(
+          nanoseconds: realtimeBucketUpperEdge(bucket: bucket)
+        )}: {count}"
+      )
+    }
+    bucket = bucket + 1
+  }
+}
+
+# ---- real-time priority for a `spawn thread` (docs/realtime-language-design.md
+# §6.6.1) ------------------------------------------------------------------------
+# A thread that must keep a deadline (an audio render loop, a MIDI clock) asks
+# the system to schedule it on time, at its start:
+#
+#     let promotion: RealtimePromotion = promoteToRealtime(
+#       periodNanoseconds: periodNs
+#       computeNanoseconds: periodNs / 2
+#     )
+#     ... the loop ...
+#     demoteFromRealtime(promotion: promotion)
+#
+# Only the thread of a `spawn thread` may do this: the compiler refuses it on
+# the main thread, a pool task, a parallelLoop body or a C callback, where a
+# raised priority would starve everything else that runs there. Per platform:
+# Apple, the Mach time-constraint policy (period, computation, constraint);
+# Windows, MMCSS "Pro Audio"; Linux, SCHED_FIFO (it needs RLIMIT_RTPRIO, the
+# audio group; the rtkit fallback comes with the Linux audio step); Android,
+# the urgent-audio nice value, which is not real-time scheduling (an app
+# cannot get SCHED_FIFO), so `promoted` is false; the browser has no threads.
+type RealtimePromotion {
+  # the thread got real-time scheduling
+  promoted: Bool
+  # Windows: the MMCSS handle to give back; 0 elsewhere
+  handle: Int
+}
+
+# SCHED_FIFO's priority on Linux (JACK and PipeWire use 70-95)
+const realtimeFifoPriority: Int = 70
+
+# Android's THREAD_PRIORITY_URGENT_AUDIO
+const urgentAudioNice: Int = -19
+
+when Target.isApple {
+  func rae_ext_Realtime_timebaseNumerator() unsafe extern ret Int
+
+  func rae_ext_Realtime_timebaseDenominator() unsafe extern ret Int
+
+  func rae_ext_Realtime_setTimeConstraint(
+    periodTicks: Int
+    computationTicks: Int
+    constraintTicks: Int
+  ) unsafe extern ret Int
+
+  func rae_ext_Realtime_setStandardPolicy() unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupTokenSize() unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupJoin(workgroup: Int, token: Buffer(UInt8)) unsafe extern ret Int
+
+  func rae_ext_Realtime_workgroupLeave(workgroup: Int, token: Buffer(UInt8)) unsafe extern
+} else when Target.os is Os.windows {
+  func rae_ext_Realtime_mmcssBegin() unsafe extern ret Int
+
+  func rae_ext_Realtime_mmcssEnd(handle: Int) unsafe extern ret Int
+} else when Target.os is Os.android {
+  func rae_ext_Realtime_setNice(value: Int) unsafe extern ret Int
+} else when Target.isLinuxKernel {
+  func rae_ext_Realtime_setFifo(priority: Int) unsafe extern ret Int
+
+  func rae_ext_Realtime_setOther() unsafe extern ret Int
+}
+
+func notPromoted() ret RealtimePromotion {
+  ret RealtimePromotion { promoted: false, handle: 0 }
+}
+
+# Ask for real-time scheduling of the calling thread: a deadline every
+# `periodNanoseconds`, of which it needs about `computeNanoseconds`
+func promoteToRealtime(
+  periodNanoseconds: view Int
+  computeNanoseconds: view Int
+) ret RealtimePromotion {
+  when Target.isApple {
+    var numerator: Int = 0
+    var denominator: Int = 0
+    unsafe {
+      numerator = rae_ext_Realtime_timebaseNumerator()
+      denominator = rae_ext_Realtime_timebaseDenominator()
+    }
+    if numerator <= 0 or denominator <= 0 {
+      ret notPromoted()
+    }
+    let periodTicks: Int = periodNanoseconds * denominator / numerator
+    let computationTicks: Int = computeNanoseconds * denominator / numerator
+    var took: Int = 0
+    unsafe {
+      took = rae_ext_Realtime_setTimeConstraint(
+        periodTicks: periodTicks
+        computationTicks: computationTicks
+        constraintTicks: periodTicks
+      )
+    }
+    ret RealtimePromotion { promoted: took is 1, handle: 0 }
+  } else when Target.os is Os.windows {
+    var handle: Int = 0
+    unsafe {
+      handle = rae_ext_Realtime_mmcssBegin()
+    }
+    ret RealtimePromotion { promoted: handle is not 0, handle: handle }
+  } else when Target.os is Os.android {
+    unsafe {
+      let took: Int = rae_ext_Realtime_setNice(value: urgentAudioNice)
+    }
+    ret notPromoted()
+  } else when Target.isLinuxKernel {
+    var error: Int = 0
+    unsafe {
+      error = rae_ext_Realtime_setFifo(priority: realtimeFifoPriority)
+    }
+    ret RealtimePromotion { promoted: error is 0, handle: 0 }
+  } else {
+    ret notPromoted()
+  }
+}
+
+# Back to ordinary scheduling, on the same thread, before it ends or does
+# other work
+func demoteFromRealtime(promotion: view RealtimePromotion) {
+  when Target.isApple {
+    if promotion.promoted {
+      unsafe {
+        let took: Int = rae_ext_Realtime_setStandardPolicy()
+      }
+    }
+  } else when Target.os is Os.windows {
+    if promotion.handle is not 0 {
+      unsafe {
+        let took: Int = rae_ext_Realtime_mmcssEnd(handle: promotion.handle)
+      }
+    }
+  } else when Target.os is Os.android {
+    unsafe {
+      let took: Int = rae_ext_Realtime_setNice(value: 0)
+    }
+  } else when Target.isLinuxKernel {
+    if promotion.promoted {
+      unsafe {
+        let error: Int = rae_ext_Realtime_setOther()
+      }
+    }
+  }
+}
+
+# ---- joining an audio device's workgroup (Apple os_workgroup, docs/realtime-
+# language-design.md §6.6) -------------------------------------------------------
+# A thread that renders part of each audio block (a lib/RealtimeTeam helper)
+# joins the device's workgroup (packages/audio: audioWorkgroup), so the system
+# schedules it together with the device's own thread and counts its work in
+# the device's deadline. Join at the thread's start, leave before it ends, on
+# the same thread. Elsewhere (and with workgroup 0) nothing is joined.
+type RealtimeWorkgroupJoin {
+  joined: Bool
+  workgroup: Int
+  # the join token the system fills and reads back when leaving
+  token: List(UInt8)
+}
+
+func joinWorkgroup(workgroup: view Int) ret RealtimeWorkgroupJoin {
+  var token: List(UInt8) = {}
+  when Target.isApple {
+    if workgroup is not 0 {
+      var size: Int = 0
+      unsafe {
+        size = rae_ext_Realtime_workgroupTokenSize()
+      }
+      token.addDefaults(count: size)
+      var error: Int = -1
+      unsafe {
+        error = rae_ext_Realtime_workgroupJoin(workgroup: workgroup, token: token.data)
+      }
+      ret RealtimeWorkgroupJoin { joined: error is 0, workgroup: workgroup, token: own token }
+    }
+  }
+  ret RealtimeWorkgroupJoin { joined: false, workgroup: workgroup, token: own token }
+}
+
+func leaveWorkgroup(join: view RealtimeWorkgroupJoin) {
+  when Target.isApple {
+    if join.joined {
+      unsafe {
+        rae_ext_Realtime_workgroupLeave(workgroup: join.workgroup, token: join.token.data)
+      }
+    }
+  }
+}

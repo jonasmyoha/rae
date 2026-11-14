@@ -125,6 +125,11 @@ let image: Image = task.get()
 - A bare `spawn` evaluates the call on a new task and returns a `Task(T)`.
 - **Dropping a running `Task(T)` joins it** — it does **not** silently detach.
   Leaking a thread should never be the accidental default.
+  The same holds for every `Task` a dropped value holds: each element of a
+  `List(Task(T))`, and a struct's `Task` or `List(Task(T))` field (0.3.113).
+  So a `Task` is a unique handle: copying one, or a value that holds one,
+  from a place is a compile error ("cannot copy 'List(Task(Int))' ... it holds
+  a Task"); `own` moves it. Fixtures 1431, 1432.
 - Explicit detachment is a later, deliberately-conspicuous operation:
   ```rae
   detach spawn telemetryWorker(channel: own channel)

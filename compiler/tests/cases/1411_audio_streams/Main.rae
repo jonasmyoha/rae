@@ -1,0 +1,180 @@
+# Decoders and streams (docs/audio-design.md §7.2, §7.3, §12), offline, with
+# RAE_REALTIME_CHECK=1 (config.env). The four files are one source: a 1 kHz
+# sine at 44.1 kHz, 0.5 s, stereo (left 0.5, right -0.25), written by Python as
+# source.wav and encoded by ffmpeg to tone.flac, tone.mp3 and tone.ogg.
+#
+# 1. Each decoder against source.wav (decoded in Rae): FLAC bit for bit; MP3
+#    and Vorbis, which change the signal, within -30 dB once their start
+#    delay is found.
+# 2. A stream at the file's own rate plays source.wav's samples exactly.
+# 3. Gapless: the second file queued after the first starts at the exact
+#    frame after the first one's last.
+# 4. A seek to 0.25 s plays on from frame 11025.
+# 5. A pause holds the place: silence while paused, then on from where it was.
+# 6. A stream at 48 kHz is converted (the resampler) and keeps its level.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioStreams
+open audio/Decoder
+open audio/Sound
+
+const caseDir: String = "tests/cases/1411_audio_streams/"
+
+func compareDecoded(name: view String, source: view SoundData, exact: view Bool) {
+  let data: SoundData = readAnySoundFile(path: "{caseDir}{name}")
+  var bestLag: Int = -1
+  var bestError: Float = 9.0
+  let compareFrames: Int = 8000
+  loop var lag: Int = 0, lag < 2400, ++lag {
+    var worst: Float = 0.0
+    loop var frame: Int = 2000, frame < 2000 + compareFrames and worst < bestError, ++frame {
+      loop var channel: Int = 0, channel < 2, ++channel {
+        let a: Float = sampleAt(samples: data.samples, index: (frame + lag) * 2 + channel)
+        let b: Float = sampleAt(samples: source.samples, index: frame * 2 + channel)
+        worst = max(a: worst, b: abs(value: a - b))
+      }
+    }
+    if worst < bestError {
+      bestError = worst
+      bestLag = lag
+    }
+  }
+  if exact {
+    log(
+      "{name}: {data.channels} channels, {data.sampleRate} Hz, {data.frameCount} frames, the same samples: {bestError is 0.0 and bestLag is 0}"
+    )
+  } else {
+    log(
+      "{name}: {data.channels} channels, {data.sampleRate} Hz, within -30 dB after its start delay: {bestError < 0.0316}"
+    )
+  }
+  freeSoundData(data: data)
+}
+
+func renderStereo(audio: mod AudioEngine, frames: view Int) ret List(Float) {
+  ret audio.renderOffline(frames: frames)
+}
+
+# The worst difference between rendered frames and the source from `sourceFrame`
+func worstAgainst(
+  rendered: view List(Float)
+  from: view Int
+  source: view SoundData
+  sourceFrame: view Int
+  frames: view Int
+) ret Float {
+  var worst: Float = 0.0
+  loop var frame: Int = 0, frame < frames, ++frame {
+    loop var channel: Int = 0, channel < 2, ++channel {
+      let a: Float = rendered.copyAtFallback(index: (from + frame) * 2 + channel, fallback: 9.0)
+      let b: Float = sampleAt(
+        samples: source.samples
+        index: ((sourceFrame + frame) % source.frameCount) * 2 + channel
+      )
+      worst = max(a: worst, b: abs(value: a - b))
+    }
+  }
+  ret worst
+}
+
+func streamAtFileRate(source: view SoundData) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 512)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.flac"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let queued: Bool = audio.queueNext(voiceId: song, path: "{caseDir}tone.flac")
+  let rendered: List(Float) = audio.renderOffline(frames: 44100 + 2000)
+  log("stream: the samples of the file: {worstAgainst(
+    rendered: rendered
+    from: 0
+    source: source
+    sourceFrame: 0
+    frames: 22050
+  ) is 0.0}")
+  log("gapless: queued {queued}; the second file goes on at frame 22050 exactly: {worstAgainst(
+    rendered: rendered
+    from: 22050
+    source: source
+    sourceFrame: 0
+    frames: 22050
+  ) is 0.0}")
+  log(
+    "after both: silence {rendered.copyAtFallback(index: (44100 + 1000) * 2, fallback: 1.0) is 0.0}, still playing {audio.streamIsPlaying(
+      voiceId: song
+    )}"
+  )
+  let blocks: Int = audio.stopAudio()
+}
+
+func seekAndPause(source: view SoundData) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 44100, channels: 2, blockFrames: 441)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.flac"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  log("duration {audio.durationSeconds(voiceId: song)} s")
+  let first: List(Float) = audio.renderOffline(frames: 4410)
+  log("position after 0.1 s: {audio.positionSeconds(voiceId: song)}")
+  let moved: Bool = audio.seek(voiceId: song, seconds: 0.25)
+  # the old voice fades for 5 ms (220 frames) while the new one starts; the
+  # sine's period divides 441, so this cannot tell 11025 from 11466 (1414 can)
+  let fade: List(Float) = audio.renderOffline(frames: 441)
+  let after: List(Float) = audio.renderOffline(frames: 2205)
+  log("seek: {moved}, plays on from frame 11025: {worstAgainst(
+    rendered: after
+    from: 0
+    source: source
+    sourceFrame: 11025
+    frames: 2205
+  ) is 0.0}")
+  audio.pauseVoice(voiceId: song)
+  let paused: List(Float) = audio.renderOffline(frames: 882)
+  audio.resumeVoice(voiceId: song)
+  let resumed: List(Float) = audio.renderOffline(frames: 882)
+  log("pause: silent {worstAgainst(
+    rendered: paused
+    from: 0
+    source: source
+    sourceFrame: 0
+    frames: 0
+  ) is 0.0 and paused.copyAtFallback(index: 400, fallback: 1.0) is 0.0}, resumes at frame 13230: {worstAgainst(
+    rendered: resumed
+    from: 0
+    source: source
+    sourceFrame: 13230
+    frames: 882
+  ) is 0.0}")
+  log("position: {floor(x: (audio.positionSeconds(voiceId: song) * 1000.0) as Float)} ms")
+  let blocks: Int = audio.stopAudio()
+}
+
+func streamResampled() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: 48000, channels: 2, blockFrames: 256)
+  let song: VoiceId = audio.playStream(
+    path: "{caseDir}tone.ogg"
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: 24000)
+  var peak: Float = 0.0
+  loop var frame: Int = 4000, frame < 20000, ++frame {
+    peak = max(a: peak, b: abs(value: rendered.copyAtFallback(index: frame * 2, fallback: 0.0)))
+  }
+  log("48 kHz from a 44.1 kHz Vorbis file: the left peak {floor(x: peak * 100.0 + 0.5) / 100.0}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func main() {
+  let source: SoundData = readSoundFile(path: "{caseDir}source.wav")
+  compareDecoded(name: "tone.flac", source: source, exact: true)
+  compareDecoded(name: "tone.mp3", source: source, exact: false)
+  compareDecoded(name: "tone.ogg", source: source, exact: false)
+  streamAtFileRate(source: source)
+  seekAndPause(source: source)
+  streamResampled()
+  freeSoundData(data: source)
+}

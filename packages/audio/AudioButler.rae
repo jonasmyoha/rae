@@ -1,0 +1,406 @@
+# audio/AudioButler — the streaming thread (docs/audio-design.md §7.2): it
+# keeps each streamed voice's ring full ahead of the audio thread, decoding
+# (audio/Decoder) and converting the rate (audio/Resampler). It reads the disk
+# and allocates, so it never runs on the audio thread. With a device it is its
+# own thread; offline, audio/Audio runs one step of it before every rendered
+# block, so a test is repeatable.
+#
+# The main thread talks to it through a ring of ButlerCommand (open a stream,
+# queue the next file of a stream, close a stream) and hears back on a ring of
+# stream ids it has closed, after which their rings may be freed. The main
+# thread opens a file only to learn its format; the butler opens its own
+# decoder from the path in the command, so a decoder's Rae state (an AAC
+# file's sample table) never crosses the ring. A stream's
+# ring and flags (StreamShared) are made by the main thread, read by the mixer's
+# stream voice and filled here.
+#
+# Gapless: when a stream's file ends and a next one is queued, the next file's
+# samples follow in the same ring, so its first sample plays right after the
+# last one of the file before (`advanced` counts the files finished).
+import Math
+import String
+open Atomic
+open audio/Decoder
+open audio/Resampler
+open audio/Sound
+open collections/SpscRing
+
+enum ButlerCommandKind { open, queueNext, close }
+
+# What a stream voice and the butler share; plain handles, made and freed by the
+# main thread
+type StreamShared {
+  ring: SpscRing(Float)
+  # the last file's last frame is in the ring
+  finished: Atomic(Bool)
+  # files of the stream that finished (gapless next)
+  advanced: Atomic(Int)
+}
+
+# What the main thread keeps about a streamed voice (audio/AudioStreams)
+type StreamRecord {
+  # the VoiceId the program holds; it stays the same through a seek
+  voiceId: Int
+  # the mixer's voice playing it now (a new one after a seek)
+  mixerVoiceId: Int
+  streamId: Int
+  # every file of the stream, the first and the ones queued after it (a seek
+  # opens the one it moves in again, and queues the rest after it)
+  paths: List(String)
+  shared: StreamShared
+  channels: Int
+  bus: Int
+  gain: Float
+  # the file (an index into `paths`) and the place in it, in seconds, where
+  # the current mixer voice started (a seek starts a new one)
+  startFile: Int
+  startSeconds: Float64
+  # the length of each file of the stream, in seconds; -1 when unknown
+  fileSeconds: List(Float64)
+  # the mixer reported the voice ended / the butler closed the stream
+  voiceEnded: Bool
+  closed: Bool
+  paused: Bool
+}
+
+type ButlerCommand {
+  kind: ButlerCommandKind
+  streamId: Int
+  # the file's path and a 0 (C's form), made by the main thread and freed by
+  # the butler once it opened the file; none for a close
+  path: Buffer(UInt8)
+  # the first frame to play (a seek)
+  startFrame: Int
+  ring: SpscRing(Float)
+  finished: Atomic(Bool)
+  advanced: Atomic(Int)
+}
+
+type ButlerStream {
+  streamId: Int
+  decoder: AudioDecoder
+  # the files queued after this one (gapless), oldest first
+  nextDecoders: List(AudioDecoder)
+  resampler: Resampler
+  ring: SpscRing(Float)
+  finished: Atomic(Bool)
+  advanced: Atomic(Int)
+  done: Bool
+}
+
+type Butler {
+  outputRate: Int
+  commands: SpscRing(ButlerCommand)
+  # stream ids the butler has closed (their decoders closed)
+  closed: SpscRing(Int)
+  streams: List(ButlerStream)
+  chunk: Buffer(Float)
+}
+
+const butlerChunkFrames: Int = 2048
+
+func createButler(
+  outputRate: view Int
+  commands: view SpscRing(ButlerCommand)
+  closed: view SpscRing(Int)
+) ret Butler {
+  ret Butler {
+    outputRate: outputRate
+    commands: commands
+    closed: closed
+    streams: {}
+    chunk: createSampleBuffer(count: butlerChunkFrames * 8)
+  }
+}
+
+func freeButler(butler: mod Butler) {
+  loop var i: Int = 0, i < butler.streams.length(), ++i {
+    if let stream: mod ButlerStream = butler.streams.modAt(index: i) {
+      closeStreamDecoders(stream: stream)
+    }
+  }
+  unsafe {
+    rae_ext_rae_buf_free(buf: butler.chunk)
+  }
+}
+
+func closeStreamDecoders(stream: mod ButlerStream) {
+  closeAudioDecoder(this: stream.decoder)
+  loop let next: AudioDecoder in stream.nextDecoders {
+    closeAudioDecoder(this: next)
+  }
+  stream.nextDecoders.clear()
+  stream.decoder.handle = 0
+}
+
+# The path as C reads it, in a Buffer that can cross the ring
+func pathBufferZ(path: view String) ret Buffer(UInt8) {
+  unsafe {
+    var buffer: Buffer(UInt8) = rae_ext_rae_buf_alloc(size: path.length() + 1, elemSize: 1)
+    loop var i: Int = 0, i < path.length(), ++i {
+      rae_ext_rae_buf_set(buf: buffer, index: i, value: path.byteAt(index: i) as UInt8)
+    }
+    rae_ext_rae_buf_set(buf: buffer, index: path.length(), value: 0)
+    ret buffer
+  }
+}
+
+# The butler's own decoder for a command's file, at its start frame; the path
+# is freed
+func openCommandDecoder(command: view ButlerCommand) ret AudioDecoder {
+  var decoder: AudioDecoder = openAudioDecoderZ(pathZ: command.path)
+  if decoder.handle is not 0 and command.startFrame > 0 {
+    let moved: Bool = decoder.seekDecoder(frame: command.startFrame)
+  }
+  unsafe {
+    rae_ext_rae_buf_free(buf: command.path)
+  }
+  ret decoder
+}
+
+func applyButlerCommand(butler: mod Butler, command: view ButlerCommand) {
+  if command.kind is ButlerCommandKind.open {
+    # a local, not `{}` in the literal: an empty List literal nested in a
+    # struct literal argument is emitted before its createList is declared
+    var nextDecoders: List(AudioDecoder) = List.create(AudioDecoder, cap: 4)
+    let decoder: AudioDecoder = openCommandDecoder(command: command)
+    let opened: Bool = decoder.handle is not 0
+    butler.streams.add(value: {
+      streamId: command.streamId
+      decoder: decoder
+      nextDecoders: nextDecoders
+      resampler: createResampler(
+        channels: max(a: 1, b: decoder.channels)
+        inputRate: max(a: 1, b: decoder.sampleRate)
+        outputRate: butler.outputRate
+        taps: 32
+      )
+      ring: command.ring
+      finished: command.finished
+      advanced: command.advanced
+      done: not opened
+    })
+    if not opened {
+      # the file went away since the main thread opened it: the voice ends
+      command.finished.store(value: true)
+    }
+    ret
+  }
+  loop var i: Int = 0, i < butler.streams.length(), ++i {
+    if let stream: mod ButlerStream = butler.streams.modAt(index: i) {
+      if stream.streamId is command.streamId {
+        if command.kind is ButlerCommandKind.queueNext {
+          let next: AudioDecoder = openCommandDecoder(command: command)
+          if next.handle is not 0 {
+            stream.nextDecoders.add(value: next)
+          }
+          if stream.done {
+            # it had ended already: go on with the next file after all
+            stream.done = false
+            stream.finished.store(value: false)
+          }
+        } else {
+          closeStreamDecoders(stream: stream)
+          stream.done = true
+          stream.streamId = -1
+          let acknowledged: Bool = butler.closed.push(value: command.streamId)
+        }
+      }
+    }
+  }
+}
+
+# Push interleaved samples into a stream's ring (the space was checked)
+func pushSamples(ring: view SpscRing(Float), samples: view List(Float)) {
+  loop let sample: Float in samples {
+    let pushed: Bool = ring.push(value: sample)
+  }
+}
+
+# The channels of the next file queued after this one, 0 when there is none
+func nextChannels(stream: view ButlerStream) ret Int {
+  if let next: view AudioDecoder = stream.nextDecoders.viewAt(index: 0) {
+    ret next.channels
+  }
+  ret 0
+}
+
+# Fill one stream's ring while it has room for a decoded chunk
+func fillStream(chunk: view Buffer(Float), outputRate: view Int, stream: mod ButlerStream) {
+  if stream.done or stream.decoder.handle is 0 {
+    ret
+  }
+  let channels: Int = stream.decoder.channels
+  # a chunk at the worst rate ratio, and the filter's flush
+  let ratio: Int = outputRate / max(a: 1, b: stream.decoder.sampleRate) + 2
+  let room: Int = (butlerChunkFrames * ratio + 128) * channels
+  loop not stream.done and stream.ring.capacity - stream.ring.count() >= room {
+    let got: Int = stream.decoder.readDecodedFrames(into: chunk, frames: butlerChunkFrames)
+    if got > 0 {
+      var input: List(Float) = List.create(Float, cap: got * channels)
+      loop var i: Int = 0, i < got * channels, ++i {
+        input.add(value: sampleAt(samples: chunk, index: i))
+      }
+      pushSamples(ring: stream.ring, samples: stream.resampler.resample(input: input))
+    } else if nextChannels(stream: stream) is channels {
+      # gapless: the next file goes on in the same ring
+      pushSamples(ring: stream.ring, samples: stream.resampler.finish())
+      closeAudioDecoder(this: stream.decoder)
+      if let next: AudioDecoder = stream.nextDecoders.copyAt(index: 0) {
+        stream.decoder = next
+      }
+      stream.nextDecoders.removeAt(index: 0)
+      stream.resampler = createResampler(
+        channels: channels
+        inputRate: stream.decoder.sampleRate
+        outputRate: outputRate
+        taps: 32
+      )
+      stream.advanced.fetchAdd(amount: 1)
+    } else {
+      pushSamples(ring: stream.ring, samples: stream.resampler.finish())
+      stream.done = true
+      stream.advanced.fetchAdd(amount: 1)
+      stream.finished.store(value: true)
+    }
+  }
+}
+
+# One round: take every command, then fill every stream
+func butlerStep(butler: mod Butler) {
+  loop butler.commands.count() > 0 {
+    if let command: ButlerCommand = butler.commands.pop() {
+      applyButlerCommand(butler: butler, command: command)
+    }
+  }
+  # streams closed and acknowledged are dropped from the table
+  var index: Int = butler.streams.length() - 1
+  loop index >= 0 {
+    var closed: Bool = false
+    if let stream: view ButlerStream = butler.streams.viewAt(index: index) {
+      closed = stream.streamId < 0
+    }
+    if closed {
+      butler.streams.removeAt(index: index)
+    }
+    index = index - 1
+  }
+  let chunk: Buffer(Float) = butler.chunk
+  let outputRate: Int = butler.outputRate
+  loop var i: Int = 0, i < butler.streams.length(), ++i {
+    if let stream: mod ButlerStream = butler.streams.modAt(index: i) {
+      fillStream(chunk: chunk, outputRate: outputRate, stream: stream)
+    }
+  }
+}
+
+# The butler's own thread (with a device): a round every 5 ms
+func butlerThread(butler: own Butler, running: own Atomic(Bool)) ret Int {
+  var rounds: Int = 0
+  loop running.load() {
+    butlerStep(butler: butler)
+    rounds = rounds + 1
+    sleep(ms: 5)
+  }
+  butlerStep(butler: butler)
+  freeButler(butler: butler)
+  ret rounds
+}
+
+# "No stream" for a command that plays a sound: handles to nothing, no memory
+func emptyStreamRing() ret SpscRing(Float) {
+  unsafe {
+    ret SpscRing(Float) {
+      slots: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Float))
+      counters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int))
+      capacity: 0
+    }
+  }
+}
+
+func emptyPathBuffer() ret Buffer(UInt8) {
+  unsafe {
+    ret rae_ext_rae_buf_alloc(size: 0, elemSize: 1)
+  }
+}
+
+func emptyAtomicBool() ret Atomic(Bool) {
+  unsafe {
+    ret Atomic(Bool) { cell: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int)) }
+  }
+}
+
+func emptyAtomicIntValue() ret Atomic(Int) {
+  unsafe {
+    ret Atomic(Int) { cell: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(Int)) }
+  }
+}
+
+# The mixer's voice for a VoiceId: a stream's current one (a seek starts a new
+# one), else the VoiceId's own
+func mixerVoiceIdOf(streams: view List(StreamRecord), voiceId: view Int) ret Int {
+  loop let record: StreamRecord in streams {
+    if record.voiceId is voiceId {
+      ret record.mixerVoiceId
+    }
+  }
+  ret voiceId
+}
+
+func closeStream(commands: view SpscRing(ButlerCommand), streamId: view Int) {
+  let command: ButlerCommand = {
+    kind: ButlerCommandKind.close
+    streamId: streamId
+    path: emptyPathBuffer()
+    startFrame: 0
+    ring: emptyStreamRing()
+    finished: emptyAtomicBool()
+    advanced: emptyAtomicIntValue()
+  }
+  let sent: Bool = commands.push(value: command)
+}
+
+# A voice ended: if it was a stream's, the butler closes the stream's decoders
+func streamVoiceEnded(
+  streams: mod List(StreamRecord)
+  commands: view SpscRing(ButlerCommand)
+  mixerVoiceId: view Int
+) {
+  var closeId: Int = -1
+  loop var i: Int = 0, i < streams.length(), ++i {
+    if let record: mod StreamRecord = streams.modAt(index: i) {
+      if record.mixerVoiceId is mixerVoiceId and not record.voiceEnded {
+        record.voiceEnded = true
+        closeId = record.streamId
+      }
+    }
+  }
+  if closeId >= 0 {
+    closeStream(commands: commands, streamId: closeId)
+  }
+}
+
+func freeStreamShared(shared: view StreamShared) {
+  freeSpscRing(this: shared.ring)
+  freeAtomic(this: shared.finished)
+  freeAtomic(this: shared.advanced)
+}
+
+# The butler closed a stream: its ring and flags are freed and the record goes
+# (its voice had ended: a seek or a stop waits for that before it closes)
+func streamClosed(streams: mod List(StreamRecord), streamId: view Int) {
+  var index: Int = streams.length() - 1
+  loop index >= 0 {
+    var matches: Bool = false
+    if let record: view StreamRecord = streams.viewAt(index: index) {
+      if record.streamId is streamId {
+        freeStreamShared(shared: record.shared)
+        matches = true
+      }
+    }
+    if matches {
+      streams.removeAt(index: index)
+    }
+    index = index - 1
+  }
+}

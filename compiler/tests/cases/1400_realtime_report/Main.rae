@@ -1,0 +1,37 @@
+# The time recorder's report (docs/realtime-language-design.md §7). config.env
+# sets RAE_REALTIME_REPORT=1 (and RAE_REALTIME_CHECK=1: recording must not
+# allocate). Known durations go in through recordCall on a marked thread, so
+# the report is the same on every machine: 1000 calls, 989 of them 10 µs, ten
+# of 40 µs and one of 900 µs, against a 2.666 ms audio block.
+open Realtime
+
+func main() {
+  var recorder: RealtimeRecorder = createRealtimeRecorder(name: "audio", periodNanoseconds: 2666666)
+  var quiet: RealtimeRecorder = createRealtimeRecorder(name: "idle", periodNanoseconds: 0)
+  markRealtimeThread()
+  var call: Int = 0
+  loop call < 1000 {
+    var nanoseconds: Int = 10000
+    if call % 100 is 50 {
+      nanoseconds = 40000
+    }
+    if call is 500 {
+      nanoseconds = 900000
+    }
+    recorder.recordCall(nanoseconds: nanoseconds)
+    call = call + 1
+  }
+  unmarkRealtimeThread()
+  let small: Int = realtimeBucketOf(nanoseconds: 3)
+  let firstStep: Int = realtimeBucketOf(nanoseconds: 4)
+  let doubled: Int = realtimeBucketOf(nanoseconds: 8)
+  let microsecond: Int = realtimeBucketOf(nanoseconds: 1000)
+  let edge: Int = realtimeBucketUpperEdge(bucket: microsecond)
+  log("buckets: 3 ns in {small}, 4 ns in {firstStep}, 8 ns in {doubled}, 1000 ns in {microsecond}")
+  log("the step of 1000 ns ends at {edge} ns")
+  let median: Int = recorder.percentileNanoseconds(perMille: 500)
+  let high: Int = recorder.percentileNanoseconds(perMille: 990)
+  log("p50 <= {median} ns, p99 <= {high} ns")
+  recorder.report()
+  quiet.report()
+}

@@ -1,0 +1,13 @@
+# audio/remoteCommandSystem/RemoteCommandSystem — the lock screen's, Control
+# Center's and the media keys' buttons (audio/NowPlaying) sent as ECS events.
+# Run it once per frame, before the systems that react to them (a player that
+# pauses its stream or moves to the next song in its queue).
+open audio/NowPlaying
+open ecs/Event
+
+func remoteCommandSystem(events: mod EventQueue(RemoteCommandEvent)) {
+  let taken: List(RemoteCommandEvent) = takeRemoteCommands()
+  loop let command: RemoteCommandEvent in taken {
+    eventSend(this: events, value: command)
+  }
+}

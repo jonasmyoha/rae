@@ -1,0 +1,278 @@
+# audio/AudioSynth — a small synthesizer inside the mixer (docs/audio-design.md
+# §5.3, §8.2): 32 voices of a soft tone (a sine and its octave), each with an
+# attack / decay / sustain / release envelope. A note starts and stops on its
+# exact sample: noteOn and noteOff are mixer commands with a sample time, so
+# they go through the mixer's event list like every other (audio/AudioSchedule:
+# playNoteAt, releaseNoteAt; audio/MidiPorts' messages through playMidi).
+#
+# It runs on the audio thread and allocates nothing: its voices are a list made
+# once. A note on while all 32 sound takes the quietest releasing voice, else
+# the oldest. A voice renders two frames at a time, their four sines in one
+# Float4.sin (docs/float4-design.md §11: 1.5x faster than Math.sin).
+import Float4
+import Math
+
+const synthVoiceCount: Int = 32
+
+type SynthVoice {
+  active: Bool
+  note: Int
+  # 0..1 from the velocity
+  level: Float
+  # in cycles, and cycles per frame
+  phase: Float64
+  step: Float64
+  envelope: Float
+  # 0 attack, 1 decay, 2 sustain, 3 release
+  stage: Int
+  # when it started, to choose the oldest
+  startedAt: Int
+}
+
+type SynthState {
+  voices: List(SynthVoice)
+  bus: Int
+  sampleRate: Int
+  # per frame: the attack's and decay's rise and fall, the release's fall
+  attackStep: Float
+  decayStep: Float
+  sustain: Float
+  releaseStep: Float
+  # notes started so far (to order voices by age)
+  started: Int
+}
+
+# 5 ms attack, 150 ms decay to 0.6, 250 ms release
+func createSynthState(sampleRate: view Int, bus: view Int) ret SynthState {
+  var voices: List(SynthVoice) = List.create(SynthVoice, cap: synthVoiceCount)
+  voices.addDefaults(count: synthVoiceCount)
+  let rate: Float = max(a: 1, b: sampleRate) as Float
+  ret SynthState {
+    voices: voices
+    bus: bus
+    sampleRate: sampleRate
+    attackStep: 1.0 / (rate * 0.005)
+    decayStep: 0.4 / (rate * 0.15)
+    sustain: 0.6
+    releaseStep: 1.0 / (rate * 0.25)
+    started: 0
+  }
+}
+
+func synthNoteFrequency(note: view Int) ret Float64 {
+  ret (pow(base: 2.0, exp: ((note - 69) as Float) / 12.0) * 440.0) as Float64
+}
+
+# The voice a new note takes: a free one, else the quietest releasing one,
+# else the oldest
+func synthVoiceFor(synth: view SynthState) ret Int realtime {
+  var chosen: Int = 0
+  var best: Float = 9.0
+  var oldest: Int = -1
+  var oldestAt: Int = 0
+  loop var i: Int = 0, i < synthVoiceCount, ++i {
+    if let voice: view SynthVoice = synth.voices.viewAt(index: i) {
+      if not voice.active {
+        ret i
+      }
+      if voice.stage is 3 and voice.envelope < best {
+        best = voice.envelope
+        chosen = i
+      }
+      if oldest < 0 or voice.startedAt < oldestAt {
+        oldest = i
+        oldestAt = voice.startedAt
+      }
+    }
+  }
+  if best < 9.0 {
+    ret chosen
+  }
+  ret max(a: 0, b: oldest)
+}
+
+func synthNoteOn(synth: mod SynthState, note: view Int, velocity: view Float) realtime {
+  let index: Int = synthVoiceFor(synth: synth)
+  synth.started = synth.started + 1
+  let started: Int = synth.started
+  let step: Float64 = synthNoteFrequency(note: note) / (max(a: 1, b: synth.sampleRate) as Float64)
+  if let voice: mod SynthVoice = synth.voices.modAt(index: index) {
+    voice.active = true
+    voice.note = note
+    voice.level = velocity
+    voice.phase = 0.0
+    voice.step = step
+    voice.envelope = 0.0
+    voice.stage = 0
+    voice.startedAt = started
+  }
+}
+
+func synthNoteOff(synth: mod SynthState, note: view Int) realtime {
+  loop var i: Int = 0, i < synthVoiceCount, ++i {
+    if let voice: mod SynthVoice = synth.voices.modAt(index: i) {
+      if voice.active and voice.note is note and voice.stage < 3 {
+        voice.stage = 3
+      }
+    }
+  }
+}
+
+func synthAllNotesOff(synth: mod SynthState) realtime {
+  loop var i: Int = 0, i < synthVoiceCount, ++i {
+    if let voice: mod SynthVoice = synth.voices.modAt(index: i) {
+      if voice.active {
+        voice.stage = 3
+      }
+    }
+  }
+}
+
+# A voice's envelope moved on one frame (at the release's end the voice stops)
+func synthEnvelopeStep(
+  voice: mod SynthVoice
+  attackStep: view Float
+  decayStep: view Float
+  sustain: view Float
+  releaseStep: view Float
+) ret Float realtime {
+  if voice.stage is 0 {
+    voice.envelope = voice.envelope + attackStep
+    if voice.envelope >= 1.0 {
+      voice.envelope = 1.0
+      voice.stage = 1
+    }
+  } else if voice.stage is 1 {
+    voice.envelope = voice.envelope - decayStep
+    if voice.envelope <= sustain {
+      voice.envelope = sustain
+      voice.stage = 2
+    }
+  } else if voice.stage is 3 {
+    voice.envelope = voice.envelope - releaseStep
+    if voice.envelope <= 0.0 {
+      voice.envelope = 0.0
+      voice.active = false
+    }
+  }
+  ret voice.envelope
+}
+
+# The voice's angle now (radians), its phase moved on one frame
+func synthAngleStep(voice: mod SynthVoice) ret Float realtime {
+  let angle: Float = (voice.phase * 6.283185307179586) as Float
+  voice.phase = voice.phase + voice.step
+  if voice.phase >= 1.0 {
+    voice.phase = voice.phase - 1.0
+  }
+  ret angle
+}
+
+# A frame's sample from its tone's two sines (the note and its octave)
+func synthSample(
+  sine: view Float
+  octave: view Float
+  envelope: view Float
+  level: view Float
+) ret Float realtime {
+  ret (sine + octave * 0.3) * envelope * level * 0.25 * 0.7071
+}
+
+# Add `value` to frame `index` of both bus buffers
+func synthAddToBus(
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  index: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var left: Buffer(Float) = busLeft
+    var right: Buffer(Float) = busRight
+    rae_ext_rae_buf_set(
+      buf: left
+      index: index
+      value: rae_ext_rae_buf_get(buf: left, index: index) + value
+    )
+    rae_ext_rae_buf_set(
+      buf: right
+      index: index
+      value: rae_ext_rae_buf_get(buf: right, index: index) + value
+    )
+  }
+}
+
+# Frames [from, from + frames) of every sounding voice, added to the synth's
+# bus in the mixer's bus buffers (mono, in the middle)
+func synthRender(
+  synth: mod SynthState
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  maxFrames: view Int
+  from: view Int
+  frames: view Int
+) realtime {
+  let base: Int = synth.bus * maxFrames
+  let attackStep: Float = synth.attackStep
+  let decayStep: Float = synth.decayStep
+  let sustain: Float = synth.sustain
+  let releaseStep: Float = synth.releaseStep
+  loop var i: Int = 0, i < synthVoiceCount, ++i {
+    if let voice: mod SynthVoice = synth.voices.modAt(index: i) {
+      if voice.active {
+        # two frames at a time: their four sines (each frame's note and
+        # octave) in one Float4.sin, each lane the same as alone
+        var frame: Int = from
+        loop frame < from + frames and voice.active {
+          let envelope: Float = synthEnvelopeStep(
+            voice: voice
+            attackStep: attackStep
+            decayStep: decayStep
+            sustain: sustain
+            releaseStep: releaseStep
+          )
+          let angle: Float = synthAngleStep(voice: voice)
+          let hasNext: Bool = frame + 1 < from + frames and voice.active
+          var nextEnvelope: Float = 0.0
+          var nextAngle: Float = 0.0
+          if hasNext {
+            nextEnvelope = synthEnvelopeStep(
+              voice: voice
+              attackStep: attackStep
+              decayStep: decayStep
+              sustain: sustain
+              releaseStep: releaseStep
+            )
+            nextAngle = synthAngleStep(voice: voice)
+          }
+          let angles: Float4 = { x: angle, y: angle * 2.0, z: nextAngle, w: nextAngle * 2.0 }
+          let sines: Float4 = Float4.sin(value: angles)
+          synthAddToBus(
+            busLeft: busLeft
+            busRight: busRight
+            index: base + frame
+            value: synthSample(
+              sine: sines.x
+              octave: sines.y
+              envelope: envelope
+              level: voice.level
+            )
+          )
+          if hasNext {
+            synthAddToBus(
+              busLeft: busLeft
+              busRight: busRight
+              index: base + frame + 1
+              value: synthSample(
+                sine: sines.z
+                octave: sines.w
+                envelope: nextEnvelope
+                level: voice.level
+              )
+            )
+          }
+          frame = frame + 2
+        }
+      }
+    }
+  }
+}

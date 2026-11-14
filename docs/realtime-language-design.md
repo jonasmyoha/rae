@@ -1,0 +1,1095 @@
+# Real-time code in Rae: what the language needs
+
+Status: **proposal, nothing implemented** (2026-11-11). New syntax needs
+approval (AGENTS.md "Scope boundaries"); §9 lists the decisions. Decided
+2026-11-11: the keywords `realtime` and `noAlloc` (R1, R2), marks on the entry
+function with optional marks on helpers (R3), `cExport("cName")` (R4), and
+Homebrew LLVM for RealtimeSanitizer (R7). Decided and built 2026-11-12:
+`mainThread` (R5, §4.3). Decided 2026-11-13: `spawn thread` (R6, §6.6.1).
+
+`audio-design.md` §2 and §4.3 list the rules every audio engine follows on its
+real-time thread: no allocation, no locks, no system calls that can wait, no
+unbounded work; single-producer single-consumer queues both ways; objects the
+real-time thread lets go of are freed by another thread; denormal numbers
+flushed to zero; the worst case matters, not the average. `video-design.md`
+has the same needs in a softer form (a frame every 16 ms, decode threads, the
+per-frame render). Games want the softest form: "no allocation per frame".
+
+Today these rules are only conventions. This document asks which of them the
+**compiler** can hold, in Rae code and in the C that Rae links, what the
+keywords would be, and what threading features are missing.
+
+---
+
+## 1. What Rae already has to build on
+
+More than expected:
+
+- **A complete call graph.** Rae has no function values and no virtual calls,
+  so the compiler sees every call. Generics are analyzed per specialization.
+  This is what makes a whole-program effect check cheap and exact.
+- **The may-wait analysis** (`compiler/src/may_wait.c`,
+  `lightweight-spawn-design.md` §4.1, §11). A fixed point over that call graph
+  that finds which functions can wait (`Task.get`, sleeps, socket waits, joins,
+  `blocking` externs), with a report (`rae build --report-waits`) that names
+  the chain. A real-time check is the same machinery with more kinds of effect.
+- **The `blocking` modifier on externs** (decided 2026-10-08):
+  `func readFile(path: String) blocking unsafe extern("…") ret String`. It is the
+  precedent for marking a C function's behavior that the compiler cannot see,
+  as a plain keyword in the modifier position.
+- **Parameter modes** (`own` / `copy` / `view` / `mod`) and scope-exit
+  deallocation: the compiler already knows where every heap value is created,
+  deep-copied and freed. That is exactly the "allocates" effect.
+- **`Array(T, cap: N)`**: a value aggregate with a fixed capacity, no heap
+  (`collections.md`). The natural container for real-time state.
+- **`Float4` / `Float8`** for SIMD.
+- **It compiles to C, with clang.** Two clang features check real-time rules in
+  C, and both were tried on this Mac (2026-11-11), §5:
+  - `__attribute__((nonblocking))` and `nonallocating` with
+    `-Wfunction-effects`: a compile-time check. Apple clang 21 has it. It warned
+    on a function marked `nonblocking` whose callee calls `malloc`, and named the
+    chain.
+  - **RealtimeSanitizer** (`-fsanitize=realtime`, LLVM 20+): a run-time check
+    that stops on `malloc`, `free`, `pthread_mutex_lock`, blocking system calls
+    and the like inside a `nonblocking` function, with a stack trace. Homebrew
+    clang 22 runs it on macOS; **Apple's clang does not** ("unsupported option").
+
+---
+
+## 2. The effects to track
+
+| effect | what counts in Rae | what counts in C |
+|---|---|---|
+| **allocates** | creating a heap value: a `List` or `String` literal or interpolation, `List.add` that can grow, a struct literal that owns heap, a **deep copy** (`let x: T = v` and `copy` of anything that owns heap), `opt` of a heap value, a hash map insert, an ECS component add, `log` with interpolation | `malloc`, `calloc`, `realloc`, `new`, `posix_memalign`, … |
+| **frees** | an owned heap value reaching the end of its scope, an assignment that drops the old value, `List.remove` of a heap element | `free`, `delete` |
+| **locks** | `Channel(T)` (mutex-guarded today), any `Shared(T)` if it is ever added | `pthread_mutex_*`, `os_unfair_lock`, `dispatch_sync`, … |
+| **waits** | the may-wait set: `Task.get`, joins, `sleep`, socket waits, `spawn` (creating a thread) | `blocking` externs; `read`, `write`, `poll`, `usleep`, … |
+| **unbounded** | a `loop` whose end the compiler cannot bound | — |
+
+The first four are decidable over the call graph. The fifth is not, in general
+(§4.4).
+
+Allocation in Rae is mostly **visible but quiet**: the line `let state: Mixer =
+mixer` reads like an assignment, but it is a deep copy that allocates if `Mixer`
+holds a `List`. In real-time code that line must become `let state: view Mixer
+= mixer`. The check is what makes this mistake loud, which is the most valuable
+thing it does for Rae specifically.
+
+---
+
+## 3. The keywords
+
+### 3.1 Recommendation: `realtime`, and later `noAlloc`
+
+```rae
+func renderBlock(engine: mod AudioEngineState, block: mod AudioBlock) realtime {
+  ...
+}
+```
+
+- **`realtime`** on a function: it and everything it can reach neither
+  allocate, free, lock nor wait. It is the strict set, for the audio thread, MIDI
+  timing, an audio worker, a control loop.
+- **`noAlloc`** on a function (built together with `realtime`): it and everything it reaches neither allocate nor
+  free. Locks and waits are allowed. For "no garbage per frame" in a game's
+  update or a renderer's per-frame record. `realtime` includes it.
+
+Position: the modifier position after the parameters, where `blocking` already
+sits (`func f(...) realtime ret T`), so the formatter and parser have one place
+for function modifiers.
+
+### 3.2 Names considered and not chosen
+
+- **`audio` / `video`**: these name a domain, not a property. The same rules hold
+  for a MIDI clock, a physics step on a fixed deadline, a robot's control loop
+  or a network tick. A keyword should say what the compiler checks.
+- **`nonblocking`** (clang's word): Rae already has `blocking` for "C that may
+  wait a long time", so `nonblocking` would read as "does not wait", while the
+  check also bans allocation and locks. Confusing next to `blocking`.
+- **`noalloc`**: a short keyword is fine (Rae has `ret`, `mod`, `func`, `opt`;
+  the no-abbreviations rule is for names in code, not keywords), but a keyword
+  of two words is camelCase (`taskScope`, `parallelLoop`, `mainLoop`), so the
+  short form is `noAlloc`. `noAllocation` is the spelled-out alternative; the
+  short one is chosen because a modifier keyword is read on many lines, like
+  `mod` and `ret`, and "alloc" is the word every programmer knows from `malloc`.
+- **`@realtime`, `#[no_alloc]`**: no `@` attributes, by rule.
+- **Separate `noLock`, `noWait`**: no use found that needs one without the
+  other; `realtime` covers the set. Add one only when a real program needs it.
+
+### 3.3 Declared at the root, inferred below
+
+Only the **entry point** of real-time code needs the keyword: the function the
+device callback calls, a node's `process`. Every function it reaches is checked
+without being marked, as the may-wait analysis does. Marking is **also
+required** on a `lib/` function that promises to stay real-time-safe for its
+callers (`AudioBlock.mix`, `SpscRing.push`): otherwise a later change to its
+body breaks callers in other projects without an error in `lib/` itself. Such a
+promise is checked like a root.
+
+### 3.4 Externs (C called from Rae)
+
+An extern is a leaf the compiler cannot see into. Rule: **an extern is not
+real-time-safe unless it says so**:
+
+```rae
+func sinFloat32(x: Float32) realtime unsafe extern("sinf") ret Float32
+func ringPublish(ring: Ptr, index: Int) realtime unsafe extern("rae_ring_publish")
+```
+
+On an extern `realtime` is a promise, like `blocking`; it is checked at run time
+(§5.2), not trusted blindly. `bindgen` can carry the mark over from a C header
+that already declares `[[clang::nonblocking]]`. The runtime's own math, atomic
+and ring shims get the mark in `lib/`.
+
+### 3.5 What an error looks like
+
+```
+Mixer.rae:42:5: error: `renderBlock` is realtime, but this line allocates:
+  a `String` interpolation.
+    renderBlock (Engine.rae:18) -> mixVoice (Mixer.rae:30) -> here
+  Real-time code may not allocate. Format the text outside the audio thread,
+  or send a number back on the feedback ring.
+```
+
+```
+Engine.rae:77:3: error: `renderBlock` is realtime, but `plan` is freed here
+  when it goes out of scope (an own `RenderPlan` holds a List).
+  Push it to the reclaim ring instead: `reclaim.push(value: own plan)`.
+```
+
+```
+Voice.rae:12:3: error: `renderBlock` is realtime, but this is a deep copy of
+  `Sound` (it holds a Buffer). Use `let sound: view Sound = voice.sound`.
+```
+
+Every error names the chain from the root, as `--report-waits` does, and the
+fix. `rae build --report-realtime` prints the whole set: each root, what it
+reaches, and the externs it trusts.
+
+### 3.5a Landed (2026-11-11, compiler 0.3.85)
+
+`realtime` and `noAlloc` parse as modifier words where `blocking` does. The
+may-wait walk (`compiler/src/may_wait.c`) records each function's own effects
+with the first site of each; `compiler/src/realtime_check.c` carries them up
+the call graph to a fixed point and checks every marked function as a root
+(a marked helper is a root too), in the backend right after the graph is
+built. What counts:
+
+- allocates: a String interpolation (it also frees its temporary), a list or
+  collection literal, a deep copy into a `let` from a place, a spawn, and C
+  not marked `realtime` / `noAlloc`;
+- frees: a `let` / `var` whose type owns heap (freed at the end of its scope;
+  a value moved out is still counted, see below), an interpolation, unmarked C;
+- locks and waits: `Task.get`, a task joined at scope end, a spawn, and
+  unmarked C (a Channel's send is C, so it counts).
+
+Method calls that sema leaves to the backend (a generic container's
+`list.add(...)`) are resolved by name as effect-only edges, which the
+may-wait answers do not follow. Errors with the same cause are one message
+(`this allocates, frees, locks and waits: it calls rae_ext_rae_buf_alloc`).
+`lib/core`'s `runtimeWarning` / `indexOutOfRangeWarning` are the crash path
+(§3.6). Marked in `lib/`: the math, clock, `buf_zero` / `buf_prefetch`,
+`rae_str_len`, atomic, signal-post and real-time-mark externs (`realtime`),
+`rae_ext_rae_signal_wait` and `Signal.wait` (`noAlloc`), and the Rae
+functions that promise it (`Atomic`'s operations, `Signal.post` / `tryWait`,
+`SpscRing.push` / `pop` / `count`, the `Realtime` mark and recorder calls).
+Fixtures 1405 (accepted), 1406 (each rule broken), 1407 (the report).
+
+Known gaps, conservative or open: a heap value moved out of a `let` is still
+counted as freed; generic C intrinsics (`rae_ext_rae_buf_get/set/drop_at`)
+are not nodes, so a `drop_at` of a heap element is not seen; assignments of
+heap values (`x = y`) are not counted yet; the error points at the site
+(sometimes in `lib/`), with the chain from the marked function in the
+message.
+
+### 3.6 Cases that are allowed on purpose
+
+- **The crash path.** A failed bounds check or `unreachable` ends the program;
+  the text it builds on the way out is not a real-time violation.
+- **`Ptr` / `Buffer` writes** into memory reserved earlier: no allocation.
+- **`Array(T, cap: N)`** values, `Float4`/`Float8`, numbers, enums, plain
+  structs: stack values.
+- **A `List` read** (`viewAt`, iteration) and a write to an existing element:
+  no growth, no allocation. `add` is not allowed unless the list is a bounded one
+  that cannot grow (§6.3).
+
+---
+
+## 4. Rules beyond the effects
+
+### 4.1 Values that cross between threads
+
+A value that goes into a real-time ring must not own heap, or the real-time side
+would end up freeing it. The compiler already sorts types this way for `spawn`
+(plain values: numbers, enums, POD structs, `Array(T, cap: N)` of them). The
+proposal: the ring type `SpscRing(T)` accepts only such plain `T`, checked when
+the generic is specialized, with an error that says which field owns heap.
+Larger things (a new render plan, a decoded sound) cross as a **handle**: an
+index into a table the main thread owns, plus the reclaim ring for giving it
+back.
+
+**Landed (2026-11-11):** `lib/collections/SpscRing.rae`. `createSpscRing` calls
+the intrinsic `rae_ext_rae_require_plain(T)`, which the C backend checks where
+the specialization binds `T` (`c_call.c`, with `type_heap_part` in
+`ownership.c`) and emits nothing for. The error names the path to the heap:
+"a SpscRing of `Envelope` is not allowed: `Envelope` owns heap (its field
+`Envelope.message`: its field `Message.text`: it is a `String`)". It points at
+the line in `SpscRing.rae`, not at the caller's `createSpscRing`, because the
+check runs per specialization; the type named in it says which call it was.
+Fixture 1397.
+
+### 4.2 Ownership out of real-time code
+
+"Objects the audio thread drops go back to another thread" becomes a compile
+rule: in `realtime` code an `own` heap value can only leave by being moved (into
+a ring, into a field, returned). The free at scope end is the "frees" effect,
+so the error of §3.5 already enforces it.
+
+### 4.3 Threads may only call what their role allows
+
+Two roles beyond `realtime` already exist in practice: platform UI and window
+APIs are main-thread only (`concurrency-model.md` §3), and some iOS calls are
+kept there too. Today that is a comment. A `mainThread` mark on externs would
+let the same analysis reject a `spawn`ed, `parallelLoop` or `realtime` function
+that reaches one. §9 R5. **Decided and built 2026-11-12 (compiler 0.3.110);
+§4.3.6 records what landed.**
+
+#### 4.3.1 Which externs are main-thread only today
+
+Surveyed in `lib/` and `packages/` (2026-11-12). "Main thread" means **the
+thread that runs Rae's `main`**: the process's main thread on macOS, iOS,
+Linux, Windows and the browser. On Android it is SDL's thread, not Java's UI
+thread; the Java glue that needs the UI thread already moves the work itself
+(`RaeAudioSession.requestPermissions` uses `runOnUiThread`), so it can be called
+from any thread and is not marked.
+
+| module | externs | why main-thread only |
+|---|---|---|
+| `lib/Sdl3` | all 17 (window, present, input, file dialog) | SDL's video and event functions; AppKit/UIKit under them |
+| `lib/Gpu2d`, `Gpu2dTextInput`, `Gpu2dWindowIcon`, `Gpu2dSimulatedInput` | the window, pointer, touch, keyboard, text input, clipboard and edit-menu calls (45) | SDL window and event state, read after the event pump |
+| `lib/Display`, `lib/Device` | window scale, panel modes; touch devices, media queries | SDL window / display queries; the browser's DOM |
+| `lib/Haptics` | 4 | UIKit's feedback generators |
+| `lib/Location` | 11 | `CLLocationManager` delivers to the run loop of the thread that made it, which is the main one |
+| `lib/ui/InputKind` | 1 (the pointer's kind) | SDL's mouse and touch state |
+| `packages/audio` | `run_loop_pump` | it runs the CALLING thread's run loop, so off the main thread it does nothing useful |
+
+Not marked, on purpose: the WebGPU bindings (`wgpu-native` is thread-safe, and
+encoding on a worker is a future feature); `EventLoop.wake` (made to be called
+from a worker); `FileNotify`, `Keychain`, `LocalNotification`, `AppLinks` (a
+mutex guards its list), the sockets and the audio device, decoder and file
+calls; `AVAudioSession` configure and activate (Apple advises against the main
+thread, as activation can block); the audio session's and remote commands'
+polls and CoreMIDI's poll (one reader each, but any one thread may be that
+reader); `Battery` and `ReduceMotion` (UIKit / AppKit reads whose threading
+Apple does not state); in `Gpu2d`, the clock, the design resolution, the
+headless flag and the image probe. Each marked row was checked against what
+its C calls; a wrong mark refuses good code, a missing one only leaves
+today's behavior.
+
+#### 4.3.2 The keyword
+
+`mainThread`, in the modifier position, where `realtime` and `blocking` sit:
+
+```rae
+func nativeSetClipboardText(text: view String) mainThread unsafe extern("rae_ext_Gpu2d_setClipboardText")
+func pollRemoteCommands(this: mod NowPlaying) mainThread { ... }
+```
+
+- On an **extern** it is a promise about the C, like `realtime`: "call this
+  only from the main thread".
+- On a **Rae function** it says the same and is checked: a function marked
+  `mainThread` counts as a main-thread call for its callers. Two uses: a `lib/`
+  wrapper that promises it (R3's rule: a lib function keeps its promise
+  visible), and a `cExport` callback the platform runs on the main queue
+  (§6.1), which may then call main-thread externs.
+- Names not chosen: `uiThread` (on Android that is a different thread from
+  Rae's main), `main` (the entry function's name), `mainOnly` (less plain).
+
+#### 4.3.3 What the analysis checks
+
+The same graph and fixed point as `realtime` (`realtime_check.c`): "reaches a
+main-thread call" is one more effect bit, set by a `mainThread` extern or
+function and carried up to every caller. Nothing in between is marked. The
+roots that run **off** the main thread are:
+
+1. the function a `spawn` starts (its call graph node, as the may-wait rule
+   already finds it);
+2. the body of a `parallelLoop` (its calls, as one more root per loop);
+3. a `realtime` function (the audio thread, a MIDI or video callback);
+4. a `cExport` function that is not marked `mainThread` (C calls it from a
+   thread Rae does not know).
+
+A root that reaches the bit is an error, with the chain, as in §3.5:
+
+```
+Gallery.rae:88:25: error: `decodeThumbnail` runs on another thread (spawned at
+  Gallery.rae:88), but it reaches `setClipboardText`, which only the main thread
+  may call.
+    decodeThumbnail (Loader.rae:12) -> copyName (Loader.rae:30) -> setClipboardText (lib/Gpu2dTextInput.rae:41)
+  Send the request to the main loop instead (a Channel or an event the main loop
+  reads) and make the call there.
+```
+
+The error is at the site that moves the work off the main thread: the
+`spawn`, the `parallelLoop`, or the declaration of the `realtime` or `cExport`
+function. A worker that calls a marked function directly gets "`f` may be
+called only on the main thread, but here it runs on a worker thread".
+
+`rae build --report-realtime` lists each off-main function that reaches a main-thread call, with its chain.
+The browser build without threads runs a `spawn` on the main thread, but the
+rule is the same everywhere, so code that passes there also passes natively.
+
+#### 4.3.4 Code that is main-thread by convention
+
+A game's `update`, a UI's systems, the audio engine's `Audio.update` and
+`AudioSession`'s polling are main-thread code by convention: `main` calls them
+from its loop (or `mainLoop`). They need **no mark**: being called from `main`
+is allowed, and the analysis only looks at the four roots above. They become an
+error only on the day someone moves one onto a worker (spawns it, or calls it
+from a `parallelLoop`), which is the mistake the rule exists to catch: today it
+crashes inside AppKit or reads a one-reader queue from two threads. Marking
+them is optional, for a reader (and turns the convention into a checked
+promise: a marked function reached from a worker root is the same error).
+
+#### 4.3.5 Order of building (after a yes)
+
+1. The effect bit and the four roots in `realtime_check.c`; `mainThread` parses
+   and formats in the modifier position (`blocking`'s code path).
+2. A **warn-only** first run (`RAE_MAIN_THREAD_CHECK=warn`), with the marks of
+   4.3.1, over every program in the tree, counting what it would refuse (R8's
+   method), so a wrong mark shows before it is an error.
+3. The error; fixtures for each root and for an allowed `cExport mainThread`
+   callback; a stress case for the bug it prevents.
+
+#### 4.3.6 Landed (2026-11-12, compiler 0.3.110)
+
+- `mainThread` parses in the modifier position (`compiler/src/parser.c`); with
+  `realtime` on the same function it is an error. The formatter keeps it like
+  any modifier word; the VS Code grammar colors it.
+- `compiler/src/may_wait.c` sets one more effect bit, `EFFECT_MAIN_THREAD`, on
+  an extern or function marked `mainThread`, marks a function called in a
+  `parallelLoop` body, and records where each function was first spawned or
+  called so. `compiler/src/realtime_check.c` carries the bit up with the
+  realtime effects and checks the four kinds of off-main function.
+  `RAE_MAIN_THREAD_CHECK=warn` warns instead, `off` skips it.
+- 88 externs marked: `lib/Sdl3` (17), `lib/Gpu2d` (33), `Gpu2dTextInput` (8),
+  `Gpu2dSimulatedInput` (3), `Gpu2dWindowIcon` (1), `Display` (6), `Device`
+  (3), `Haptics` (4), `Location` (11), `ui/InputKind` (1), and
+  `packages/audio`'s `run_loop_pump` (audio 0.12.4).
+- The warn-only count (`compiler/tools/main-thread-count.sh`) over every
+  example, test case and check, 1229 programs: **nothing refused**. No program
+  in the tree reaches a main-thread call from a worker, a real-time function or
+  a C callback today, so the rule is an error from the start.
+- Fixtures 1421 (allowed: main-thread code with no mark, a clean worker and
+  parallelLoop, a `mainThread cExport` callback), 1422 (each of the four
+  refused), 1423 (`realtime` with `mainThread`), 1424 (the report), 1425 (a
+  worker reaching a marked lib extern through unmarked lib functions); stress
+  case 14 (`handles`).
+
+### 4.4 Unbounded work
+
+The compiler cannot prove a `loop` ends in time. What it can do:
+
+- `loop i in 0 ..< count` is bounded by `count` at entry; that is ordinary.
+- A `loop` on a condition in `realtime` code gets a **report line** (not an
+  error) in `--report-realtime`, so a reviewer sees each one.
+- The real check is **measurement**: the runtime records the time of every
+  callback (CPU cycles at entry and exit), keeps the maximum and a histogram,
+  and the test suite fails a scene whose worst block takes more than a set share
+  of its period (§7). "The worst case matters" is a measured number, not a
+  proof.
+
+### 4.5 Floating point on real-time threads
+
+- Denormals: the shim sets flush-to-zero on each real-time thread; no language
+  change.
+- Determinism of offline renders: the C compiler may fuse `a * b + c` into one
+  instruction on ARM64 and not on x86-64, so offline renders differ slightly by
+  machine. The audio and video tests already compare with a tolerance. A build
+  option that turns contraction off (`-ffp-contract=off`) for bit-exact
+  reference renders is cheap to add; it is a flag, not a language feature.
+
+### 4.6 No aliasing, faster loops
+
+A DSP loop over two buffers vectorizes well only when the C compiler knows they
+do not overlap. Rae's modes already say it: a `mod` parameter and a `view`
+parameter of the same call cannot alias (the borrow rules forbid it). Emitting
+C's `restrict` on such `Buffer` pointers would let clang vectorize the loop
+without a run-time overlap check. A code generation change, no syntax; it needs
+the aliasing rule audited first.
+
+**The audit (2026-11-12): the rule does not exist yet, so no `restrict`.**
+Probed against compiler 0.3.102 (`stress/13_modAndViewOfOnePlace`):
+
+- One place may be passed to a call as `mod` and as `view` (the callee grows
+  the list through the `mod`; the `view` reads 1 item, then 101), as two
+  `mod`s, and a field as `mod` with its whole struct as `view`. The borrow
+  rules refuse overlap with a *held* borrow (a `viewAt` binding, a collection
+  loop: stress cases 11 and 12), not between two arguments of one call.
+- `Buffer(T)` is a plain handle: copies of it point at the same memory and
+  nothing tracks them, so two Buffer parameters can never be proved apart.
+- Even for Lists, `restrict` on the parameter (a pointer to the List's header)
+  would not reach the loop that matters: the elements are another object,
+  reached through `data`. The useful form is a `restrict` copy of each data
+  pointer in a counted loop (`c_loop_versioning.c` already makes the
+  check-free copy), sound only once two arguments cannot overlap.
+
+So the order is: first a rule that a `mod` argument may not overlap any other
+argument of the same call (Swift's exclusive access, Rust's borrow rule;
+refused at compile time where the places are known, as a local, a field or a
+whole versus its part), which is a language change (§9 R8); then `restrict` on
+the List data pointers of a counted loop over arguments the rule proves
+apart. Buffers stay out (they are the `unsafe` handle layer), unless a
+program states it with a future, explicit, checked-at-run-time promise.
+
+**Measured (2026-11-12): what the rule would meet.** The code generator has a
+measuring mode, `RAE_EXCLUSIVE_ACCESS=warn` (off by default: it changes
+nothing), that warns at every call passing one place as `mod` together with an
+overlapping `mod` or `view` argument; `compiler/tools/exclusive-access-count.sh`
+runs it over every example, test case and check (1226 programs). A place here
+is a name and a chain of fields (`world`, `world.rows`); a call result, a list
+element or a literal is not a place and is not compared. Each warning is sorted
+by what the `view` side is:
+
+| kind | what | count |
+|---|---|---|
+| copy | the `view` is a number or a `Bool`: the generated C passes it by value (`int64_t a`), so the callee holds a copy from the call; harmless, in C and in Rae's meaning | 38 (lib 23, examples 15) |
+| handle | a `Buffer`, `Ptr`, `Atomic`, ring or `Signal`: a handle, not a place | 0 |
+| place | a real overlap through pointers (a struct, a list, an enum, a String) | 48 warnings, 46 call sites: lib 30, examples 8, tests 10, packages 1 (physicsScenes) |
+
+The 46 place sites, by shape:
+
+- **42: a whole as `mod` and its part as `view`**, almost all of them an id or
+  a setting read out of the struct that is changed: `addBox(world: world,
+  entityId: world.platformId)`, `saveDocumentTo(app: app, path:
+  app.document.path)`, `chance(network: network, percent:
+  network.settings.lossPercent)`, `channelRetarget(channel: track.x, target:
+  track.x.target)`.
+- **2: one place as `mod` and `view`**: `assignString(destination: keep,
+  source: keep)` (fixture 907, on purpose).
+- **4: a whole and its part, both as `mod`**: `uiUpdate(uiSystems:
+  app.inputSystem.uiSystems, inputSystem: app.inputSystem)` (lib/app3d twice),
+  `frameUpdateSystem(app: run.app, uiSystems: run.app.uiSystems)` (106),
+  `switchSystem(world: world, actions: world.uiActions)` (fixture 1354).
+
+**The rule (the scope proposed).** At a call, a `mod` argument may not overlap
+another `mod` or `view` argument: the same place, or a whole and a field
+reached through it. Exempt: a `view` of a number or a `Bool` (a copy); handles
+(`Buffer`, `Ptr`, `Atomic`, rings, `Signal`), whose sharing is the point and
+which `unsafe` code manages; arguments that are not places (call results,
+elements, literals: a list element as `mod` goes through `modAt` and its
+binding, which the held-borrow rules of stress 11 and 12 already cover).
+`unsafe { }` does not lift it (it is about meaning, not memory safety). Two
+ways to meet the 44 mod-and-view sites:
+
+- **A: refuse them all.** Each call is rewritten to read the part into a local
+  first (`let id: EntityId = world.platformId` then `addBox(world: world,
+  entityId: id)`) or to pass narrower parts. 46 edits (lib 30, examples 8,
+  tests 10 with their expectations, the physicsScenes package and a release),
+  and every program from then on.
+- **B: refuse `mod` + `mod` (4 sites), and give an overlapping `view` a copy
+  taken at the call.** The compiler copies the view argument when it overlaps
+  a `mod` one (known at compile time, as above), so the callee sees the value
+  from the call, the way a `view Int` already behaves; no source changes for
+  the 44. The cost is a copy at those calls: small for an id or a setting, a
+  deep copy for a list or a large struct (`run.app.uiSystems` in 106 is
+  `mod` + `mod`, refused, not copied).
+
+Either makes `restrict` on the arguments' list data sound for the loop
+step that follows.
+
+**Decided (2026-11-12): no rule for now (option C).** Passing a whole and
+its part, even both as `mod` (`uiUpdate(uiSystems: app.inputSystem.uiSystems,
+inputSystem: app.inputSystem)`), is a legitimate pattern: a struct's field
+never moves, so both references stay valid, and a write through one is seen
+through the other, as in C, C++, Java, Go and Swift classes. An exclusive-access
+rule (Rust's, Swift's) costs every program a rule to learn for a speed-up not
+measured yet. What stays: the measuring mode (`RAE_EXCLUSIVE_ACCESS=warn`, off
+by default) and `stress/13_modAndViewOfOnePlace`, which records the behavior.
+What comes instead: measure what clang already vectorizes in a real DSP loop
+(it guards a loop over two pointers with a cheap run-time overlap check), and
+only if `restrict` pays, have the compiler prove it per function, from every
+call site in the program (Rae compiles the whole program into one C file),
+adding it only where no call passes overlapping arguments. Nothing is refused;
+the language does not change.
+
+**Measured (2026-11-12): `restrict` would not pay; nothing was emitted.**
+`benchmarks/audioKernels` (`run.sh`, `RAE_BENCH_REMARKS=1` for clang's
+vectorizer remarks) runs audio kernels as Rae writes them against the same
+loops in C, clang -O2 -ffp-contract=off as Rae's release build, Apple M-series,
+best of five after a warm-up:
+
+| kernel | Rae | C | C with `restrict` | vectorized (Rae) |
+|---|---|---|---|---|
+| gain-and-sum of two Lists into a third, 2000 x 4096 floats (`copyAtFallback`, `set`) | 540 us | 539 us | 537 us | yes, 4 wide, 4 interleaved |
+| the same over Buffers (`sampleAt` / `setSampleAt`, the mixer's way) | 538 us | | | yes, 4 x 4 |
+| the resampler's 32-tap interpolated product, 6.1 M outputs | 63.0 ms | 62.3 ms | | yes, 4 x 4 |
+| 64 voices mixed through packages/audio's engine, 2 s at 48 kHz | 52 ms (2.6 % of one core) | | | no: "control flow cannot be substituted for a select" |
+
+- Rae's loops run as fast as hand-written C. The counted-loop versioning
+  (`c_loop_versioning.c`) takes the List bounds checks out of the loop and
+  reads the data pointers once; clang then vectorizes, guarding the loop with
+  one run-time overlap check per call, which costs nothing measurable
+  (537 against 539 us in C).
+- `restrict` changed the C version by 0.4 %, within noise. So the per-function
+  proof was not built: it would add compiler code for no gain on these
+  kernels.
+- The mixer's per-voice loop is not vectorized, and aliasing is not why: each
+  frame branches (the voice's start delay, stream or sound, the end of the
+  sound or a loop's wrap, a fade ending). Making it vectorize means a
+  branch-free inner loop over the stretch of frames where none of those
+  happens; at 2.6 % of one core for 64 voices it is not needed now, and it is
+  a mixer change, not a language one.
+
+---
+
+## 5. Checking the C that Rae links
+
+Rae code is checked by the compiler (§3). The C side has three layers, from
+cheapest to strongest.
+
+### 5.1 Compile-time: clang function effects
+
+Every `realtime` Rae function is emitted with `__attribute__((nonblocking))`
+(and `noAlloc` with `nonallocating`); every extern marked `realtime` gets
+the attribute on its C declaration. The C build of a test runs with
+`-Wfunction-effects -Werror=function-effects` for those files. Then clang checks
+the generated C **and** any C shim or library compiled in the same build that a
+real-time function calls: a shim that calls `malloc` is an error at build time.
+Clang infers the property for functions whose body it sees in the same file, and
+reports a call to a C function it cannot see. This is a second, independent
+check of the Rae analysis too.
+
+Tried here: Apple clang 21.0 with `-Wfunction-effects` printed "function with
+'nonblocking' attribute must not call non-'nonblocking' function 'helper'" and
+the note "cannot be inferred 'nonblocking' because it calls … 'malloc'".
+
+**Landed (2026-11-11):** the backend writes `RAE_NONBLOCKING` after the
+parameters of every `realtime` function's prototype and definition, and
+`RAE_NONALLOCATING` for `noAlloc` (`c_effect_attribute`, c_backend.c); a
+user extern's generated prototype gets it too. `rae_runtime.h` defines them as
+clang's `nonblocking` / `nonallocating` where `__has_attribute` says so (empty
+elsewhere, gcc included) and puts them on the runtime C that `lib/` marks: the
+math functions that are not inline, `rae_ext_nowNs`, the signal post /
+try-wait and the real-time mark (`nonblocking`), the signal wait
+(`nonallocating`). The crash-path helpers (`rae_int_trap`,
+`rae_list_set_out_of_range`) are marked too, with the check turned off in
+their own bodies (`RAE_COLD_PATH_BEGIN/END`, §3.6). The real-time fixtures'
+C compiles with `-Werror=function-effects` with no finding; a `noAlloc`
+function that interpolates is found by clang as well as by Rae (1407).
+
+A C function's own header must carry the attribute for clang to trust it:
+clang reports a redeclaration that adds it ("does not match previous
+declaration"), so the backend cannot add it to a prototype it does not write.
+
+### 5.2 Run-time: RealtimeSanitizer
+
+`rae build --sanitize realtime` (a test mode, like the TSan gate) builds with
+`-fsanitize=realtime`. Every `nonblocking` function (every `realtime` Rae
+function, through §5.1's attribute) is a real-time context; RTSan intercepts
+`malloc`, `free`, locks and blocking system calls made from it, **including
+inside prebuilt C libraries** that have no source in the build, and stops with
+the stack. This is what checks miniaudio's callback path, the decoders if they
+are ever called on the audio thread, and the `realtime` promises on externs.
+
+Tried here: Homebrew clang 22.1 with `-fsanitize=realtime` reported
+"Intercepted call to real-time unsafe function `malloc` in real-time context"
+with the chain `malloc ← helper ← render`. Apple's clang refuses the option, so
+the gate needs the Homebrew LLVM (like `naga`, a test dependency that `make
+setup` installs), or runs on Linux.
+
+**Landed (2026-11-11):** `rae run --sanitize realtime` (and `rae build`
+accepts it) compiles with LLVM's clang (`RAE_RTSAN_CC`, else Homebrew's
+`/opt/homebrew/opt/llvm/bin/clang`; an error naming `brew install llvm` when
+neither is there), adds `-fsanitize=realtime`, and checks the program's own C
+with `-Werror=function-effects` instead of `-w`. The gate
+`compiler/tools/realtime-sanitize-check.sh` (`make -C compiler
+realtime-check`, a pre-suite case of every full run) does both for the
+real-time fixtures, and plants a liar (C promised `realtime` whose body
+calls malloc in another file, invisible to clang) that RealtimeSanitizer must
+catch; it SKIPs the sanitizer part with a message without LLVM. `make setup`
+installs LLVM with Homebrew on a Mac. Its first run caught a real bug: the
+first `markRealtimeThread()` registered the check's exit report with
+`atexit`, which locks; the runtime now registers it at startup.
+
+### 5.3 Rae's own runtime check
+
+The runtime check of `audio-design.md` §4.3 (`RAE_REALTIME_CHECK=1`: a
+thread-local flag set on the audio thread, checked in Rae's allocation, free,
+lock and `log` entry points). It works with any compiler and in release builds,
+and covers the paths RTSan does not see (Rae's own string pool, buffer
+allocator). It is the first step because it needs no language change.
+
+**Landed (2026-11-11):** `lib/Realtime.rae` (`markRealtimeThread`,
+`unmarkRealtimeThread`, `realtimeThreadIsMarked`) over
+`compiler/runtime/runtime_realtime.c`. The mark is a `_Thread_local` flag. The
+guard `RAE_REALTIME_GUARD` sits in `rae_ext_rae_buf_alloc` / `free` /
+`resize`, `rae_mem_str_tag` / `untag` (every String body, named by its site:
+`interp`, `int_to_str`, ...), the `RAE_LOCK` macro, a Channel's lock,
+`rae_ext_rae_log_write`, and the task entry points (`rae_task_new`,
+`rae_task_await`, `rae_task_drop`, `rae_parallel_for`). A hit claims a slot of
+a fixed table with a compare-and-swap, so recording never allocates or locks.
+The first mark arms an exit handler that prints one line per entry point
+(`rae_ext_rae_buf_alloc (a Buffer allocation): 3`) and ends the process with
+code 70; `rae run` reports that as a failed run. The bookkeeping locks of
+`RAE_MEM_STATS` and the buffer records are not counted: the allocation they
+belong to is. Fixtures 1398 (caught), 1399 (a clean real-time loop with the
+ring, atomics, signal and recorder).
+
+| check | sees | when | needs |
+|---|---|---|---|
+| Rae `realtime` analysis | all Rae code | build | the keyword |
+| clang `-Wfunction-effects` | generated C + C compiled with it | build | Apple or LLVM clang |
+| RealtimeSanitizer | everything that runs, prebuilt C included | test run | LLVM clang (not Apple's) |
+| Rae runtime flag | Rae's runtime allocator and locks | any run | nothing |
+
+---
+
+## 6. Threading features that are missing
+
+### 6.1 Calling Rae from C: `cExport` (decided)
+
+The device calls the audio callback; VideoToolbox calls its decode-output
+callback; CoreMIDI calls its read callback; Box3D wants a scheduler callback.
+Rae cannot hand a function to C today (`audio-design.md` §4.2, decision D2). The
+proposal keeps the call graph complete: not function values, but **a named Rae
+function exported under a C name**, which C may call from any thread:
+
+```rae
+func audioRender(engine: Ptr, output: Ptr, frameCount: Int) realtime cExport("rae_audio_render") {
+  ...
+}
+```
+
+- The compiler emits a C function with that exact name and a C-ABI signature
+  (numbers, `Ptr`, `Bool`; no `own` heap parameters, no `String` result).
+- An exported function is a **root** of every analysis: it is treated as callable
+  from an unknown thread, so the `spawn` capture rules apply to what it touches,
+  and `realtime cExport` is checked like any `realtime` root.
+- Why `cExport` and not `export`: Rae already uses `export` for modules (a
+  re-export, `export "path"`, and a bare `export` that joins a file to its
+  folder's main module). The C boundary already has its own words, `extern`
+  (call C) and `cheader`; `cExport` reads as their pair and says which way the
+  call goes. camelCase, as a keyword of two words is.
+
+**Landed (2026-11-11):** `cExport("cName")` parses in the modifier position
+(any order with `realtime`, `noAlloc`); the parser refuses it on an extern, on
+a generic function, with a name that is not a C identifier, and with a
+parameter or result that is not a C value (a number, `Bool`, `Ptr`,
+`Buffer(T)`; never `mod`, `opt`, `String` or a struct). The backend writes,
+after the prototypes, `RAE_EXPORTED <ret> cName(<params>)` (with
+`RAE_NONBLOCKING` when the function is `realtime`) that calls the static Rae
+function, and reports two functions with one C name. `rae format` keeps the
+name. The function is an ordinary node of the may-wait graph, so the
+real-time check covers a `realtime cExport` as a root like any marked
+function. Fixtures 1408 (C calls three exports, one from a thread it starts),
+1409, 1410 (the refusals); 1408 is in the TSan and real-time gates. Not yet:
+the may-wait analysis does not mark an export as "called from an unknown
+thread" (it is never made a resumable twin, which is right for C callers),
+and no package uses it yet.
+
+### 6.2 Foreign threads
+
+A thread made by C (the Core Audio IO thread) enters Rae code with none of
+Rae's per-thread runtime state. Its first use must not allocate, so a shim call
+`attachThread()` runs on that thread when the device starts (before real-time
+work) and sets up what Rae needs. The rule for the compiler: a `cExport`
+function used before `attachThread` is a run-time error in debug builds.
+
+**Landed (2026-11-11):** the runtime call is `rae_thread_attach()`
+(`rae_runtime.h`): it installs the crash handler's alternate stack and
+registers the thread's memory-statistics counters, the two things a Rae
+thread gets when it starts and a C thread would otherwise get lazily, the
+second by allocating on the first Rae call. It is safe to call twice. The
+run-time error for a missing attach is not built: an unattached thread
+still works (it allocates on its first counted allocation), which
+RAE_REALTIME_CHECK reports if that happens in real-time code.
+
+### 6.3 Containers that cannot grow
+
+- `Array(T, cap: N)` exists for small fixed state (filter coefficients, a voice
+  table).
+- A **bounded list** whose capacity is set once on the main thread and whose
+  `tryAdd` answers `false` when full instead of growing: a `lib/collections`
+  type, not a language feature (`BoundedList(T)`). The analysis treats its
+  `tryAdd` as non-allocating because it is marked `realtime` in `lib/`.
+
+### 6.4 Atomics: `Atomic(T)` (needed)
+
+The rings, the "plan swapped" flag and the meters need acquire / release
+atomics. `parallel-stages-design.md` §5 already proposes `Atomic(Int)` and
+`Atomic(Int32)` as library types over C11 `stdatomic`. Needed here:
+`load`, `store`, `exchange`, `compareExchange`, `fetchAdd`, with acquire on
+load and release on store by default and a `relaxed` form for counters only.
+The orders stay few on purpose; sequential consistency is not offered as a
+default because it hides cost. All atomic operations are `realtime`.
+
+**Landed (2026-11-11):** `lib/Atomic.rae`: `Atomic(T)` for `Int`, `Int32` and
+`Bool` with `load`, `loadRelaxed`, `store`, `storeRelaxed`, `exchange`,
+`compareExchange` (answers whether it wrote), `fetchAdd`, `fetchAddRelaxed`,
+`freeAtomic`. The value is one cell of a `Buffer(Int)` that every copy shares
+(so `spawn` shares it and the leak check sees a forgotten free); the shims are
+`static inline` one-instruction functions in `compiler/runtime/runtime_atomics.h`
+over the `__atomic` builtins. `SpscRing` uses the same shims on its two
+counters. Fixture 1395.
+
+### 6.5 Signaling a waiting thread
+
+The audio thread wakes the streaming thread and the render thread of stage A
+(`audio-design.md` §4.2) by posting a semaphore, which is real-time-safe (it
+does not wait). A `Signal` type in `lib/` (post: `realtime`; wait: `blocking`)
+over one-call shims (`dispatch_semaphore` / mach semaphore on Apple, futex on
+Linux, `WaitOnAddress` on Windows).
+
+**Landed (2026-11-11):** `lib/Signal.rae` (`createSignal`, `post`, `wait`,
+`tryWait`, `freeSignal`) over `compiler/runtime/runtime_signal.c`:
+`dispatch_semaphore` on Apple, a POSIX `sem_t` on Linux and Android (glibc and
+bionic build it on a futex, so it is the futex without our own wait loop in
+C), and a plain counter in a browser build without threads. There is no
+Windows branch: the runtime has no Windows target yet, and `WaitOnAddress`
+comes with it. `wait` is a `blocking` extern, so a lightweight task that waits
+gives its worker back meanwhile; a dedicated real-time thread (§6.6) must not
+be such a task. Only the macOS branch has run so far (fixtures 1395, 1396, the
+TSan gate); the POSIX and browser branches are compiled the first time a Linux
+or browser build includes them.
+
+### 6.6 Real-time threads and teams
+
+- **A dedicated thread with real-time priority.** `spawn` of a function that
+  waits on a `Signal` already runs on its own OS thread (the may-wait rule keeps
+  waiting tasks off the pool). A shim then raises its priority
+  (`thread_policy_set` time-constraint on Apple, MMCSS on Windows, rtkit on
+  Linux) and joins the device's audio workgroup on Apple. No language change,
+  but it relies on a rule of the scheduler that is not visible in the code. The
+  explicit form, `spawn thread f(...)`, is decided in §6.6.1 (§9 R6).
+- **Parallel work inside one block** (the DAW's graph on several cores): the
+  worker pool behind `parallelLoop` is not real-time, and its threads are shared
+  with everything else. Needed: a separate **real-time team** of threads, joined
+  to the workgroup, that a `realtime` function can fan work out to and join
+  within the same block, spinning briefly, then waiting on a `Signal`.
+  `parallel-stages-design.md`'s team construct (Option A) is the natural base;
+  this is the last feature needed and the largest.
+
+#### 6.6.1 `spawn thread`, and the priority in `lib/Realtime` (R6)
+
+**Decided 2026-11-13 and built (compiler 0.3.111, audio 0.12.5); "Landed"
+at the end of this section.** First proposed 2026-11-12 as a function
+modifier `dedicatedThread`; the spawn-site form was chosen instead, for the
+reasons below.
+
+What exists today:
+- **Which thread.** `packages/audio` spawns `butlerThread` and (stage A)
+  `audioRenderThread`. Each loops until shutdown and sleeps on a `Signal`
+  between rounds. They get their own OS thread only because the may-wait
+  analysis sees `Signal.wait` (C not marked as pool-safe), so
+  `may_wait_spawn_on_pool` says no. Nothing on the page says "this is a
+  thread". If a later change made the loop poll instead of wait, the same
+  `spawn` would quietly move onto the worker pool, and a loop that never ends
+  would hold one pool worker forever.
+- **What priority.** `audioRenderThread` calls the package's own shim
+  `rae_audio_thread_set_realtime(periodNs:, computeNs:)`
+  (`thread_policy_set` with `THREAD_TIME_CONSTRAINT_POLICY` on Apple, nothing
+  elsewhere). A video decoder or a MIDI clock would need the same shim and
+  would copy it.
+- **Workgroup.** Nothing joins the audio device's workgroup yet; only the
+  real-time team (§6.6, R9) needs it.
+
+The decision, in three parts:
+
+1. **`spawn thread f(...)`: the choice is made where the work starts.**
+
+   ```rae
+   butlerTask = spawn thread butlerThread(butler: threadButler, running: butlerRunning)
+   ```
+
+   - That spawn starts a new OS thread, never a pool task, whatever the body
+     of `f` does now or after a later edit. It returns a `Task(T)` and is
+     joined like any other (its `get`, or the end of the owner's scope).
+   - `thread` is a modifier word after `spawn`, not a reserved word: it is
+     the modifier only when another name follows it (`spawn thread f(...)`);
+     `spawn thread(...)` still calls a function named `thread`.
+   - `f` stays an ordinary function. A test can call it directly and run a
+     few rounds in place, an offline render can use it with no device, and
+     another caller can spawn it as a pool task. The function says what it
+     does; the caller says where it runs.
+   - Why not a mark on the function (`func f(...) dedicatedThread`, the first
+     proposal): Rae's function marks are rules about the body that are checked
+     through everything it calls (`realtime`: it never allocates, locks or
+     waits; `mainThread`: only the main thread may call it), true whoever the
+     caller is. "Its own OS thread" is not such a rule; it is the starter's
+     choice of where to run it, next to the `Task` the starter holds and
+     joins, like the planned `detach spawn` (`concurrency-model.md` §3). With
+     the mark on the spawn, the program's threads are all visible where they
+     start (for the audio package, in `Audio.rae`'s start-up), instead of
+     behind each function's declaration. And the function mark had to forbid
+     direct calls, which blocked reusing the function.
+   - The browser build has no threads: there `spawn thread` is a compile
+     error at that spawn ("the browser build has no threads; this needs its
+     own thread"), which a program avoids with `when Target.isNative`.
+
+2. **The priority is a `lib/Realtime` call**, made at the start of the
+   thread, because the period and the budget are run-time values (the sample
+   rate and the buffer size):
+
+   ```rae
+   let promotion: RealtimePromotion = promoteToRealtime(
+     periodNanoseconds: periodNs
+     computeNanoseconds: periodNs / 2
+   )
+   ...
+   demoteFromRealtime(promotion: promotion)   # at the end
+   ```
+
+   `RealtimePromotion` holds `promoted` (did the thread get real-time
+   scheduling) and, on Windows, the MMCSS handle that `demoteFromRealtime`
+   gives back, so no C keeps that state.
+
+   One C call per platform, behind `when` in `lib/Realtime.rae`:
+
+   | platform | call | notes |
+   |---|---|---|
+   | macOS, iOS | `thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY)` with period, computation, constraint in Mach ticks | what the audio shim does today; it moves here |
+   | Windows | `AvSetMmThreadCharacteristicsW(L"Pro Audio")`, `AvRevertMmThreadCharacteristics` at the end | MMCSS; links `Avrt` |
+   | Linux | `pthread_setschedparam(SCHED_FIFO)`; if that fails (no `RLIMIT_RTPRIO`), rtkit over D-Bus (`org.freedesktop.RealtimeKit1.MakeThreadRealtime`) | the fallback order is Rae; rtkit needs D-Bus, so it waits for the Linux audio step |
+   | Android | `setpriority` to `-19` (`THREAD_PRIORITY_URGENT_AUDIO`) | an app cannot get `SCHED_FIFO`; AAudio's own callback thread already is; returns false |
+   | browser | none | the build has no threads; returns false |
+
+   `promoted` says whether the thread got real-time priority; the caller logs
+   it and carries on. A thread that is not started
+   with `spawn thread` (the main thread, a pool task) may not call it: a pool
+   worker raised to real time would starve every other task. The compiler
+   refuses `promoteToRealtime` reached from anything but a `spawn thread`
+   target (one more case of the off-main roots of §4.3.3).
+
+3. **Joining the device's workgroup** (Apple's `os_workgroup`, macOS 11 and
+   iOS 14) is a `lib/Realtime` call too, `joinWorkgroup(workgroup:)` /
+   `leaveWorkgroup(...)` around the thread's loop, with the workgroup handle
+   from the audio package (`kAudioDevicePropertyIOThreadOSWorkgroup` on macOS,
+   `kAudioOutputUnitProperty_OSWorkgroup` on iOS). It is needed only by the
+   real-time team (R9), so it is built with that task, not here.
+
+How it shows in the analyses:
+- **may-wait** (`may_wait.c`): a `spawn thread` is never a pool task
+  (`may_wait_spawn_on_pool` is not asked for it), and what only such spawns
+  reach gets no resumable twin (`c_twins_plan`): a wait there blocks its own
+  thread, which is what that thread is for. `rae build --report-waits` lists
+  each as "thread (spawn thread)" instead of "thread (it may wait)".
+- **mainThread** (`realtime_check.c off_main_reason`): the target of a
+  `spawn thread` is a spawned function as before; the reason reads "runs on
+  its own thread (spawn thread at ...)".
+- **realtime**: unchanged. The loop is not `realtime` (it waits between
+  rounds); the function it calls per round is, and is checked as a root.
+
+Migration: `packages/audio`'s two loops are spawned with `spawn thread`, and
+`rae_audio_thread_set_realtime` is replaced by `promoteToRealtime` (an audio
+release). None of the other 20 spawns in `lib/`, `packages/` or `examples/`
+is a loop that runs until shutdown (the raytracers' tiles and similar work
+items), so nothing else changes.
+
+Landed (2026-11-13, compiler 0.3.111):
+- `spawn thread` parses (`parser.c`, `spawn_thread` on the spawn), prints
+  (`pretty_expr.c`), always emits `rae_task_start` (`c_expr.c`, `c_lend.c`);
+  a call that cannot move to a thread (a `mod` argument, a `view` of heap
+  data, a generic function) is an error at that spawn instead of running in
+  place; sema refuses it in the browser build.
+- `may_wait.c` marks the target `thread_spawned` (not `spawned`), so it is
+  never asked about the pool and starts no resumable twins; `--report-waits`
+  prints "thread (spawn thread): f  File.rae:N"; the mainThread reason is
+  "runs on its own thread (spawn thread at ...)".
+- `lib/Realtime.rae` `promoteToRealtime` / `demoteFromRealtime` and
+  `RealtimePromotion`, the shims in `runtime_realtime.c` (Apple, Windows,
+  Android, Linux; checked: the Mac runs it, the Android and Linux C compile
+  with the NDK, Windows is type-checked only), `lib/Realtime` in
+  `compiler/tests/checkTargets`. `realtime_check.c` refuses
+  `promoteToRealtime` reached from `main`, a pool spawn, a `parallelLoop`
+  body, a `realtime` function or a `cExport` function (effect bit 5).
+- `packages/audio` 0.12.5: `spawn thread` for the butler and the stage-A
+  render loop, which calls `promoteToRealtime`; its own
+  `rae_audio_thread_set_realtime` is gone. `checks/audioSine` passes in both
+  stages.
+- Fixtures 1426 (32 `spawn thread` tasks that spin until all have started:
+  true; with a plain `spawn` the same program prints false), 1427 (the
+  refused promote: pool, parallelLoop, main), 1428 (the browser), 1429 (the
+  report), 1430 (the mainThread reason).
+
+#### 6.6.2 The real-time team: `lib/RealtimeTeam` (R9, built 2026-11-13)
+
+A library type, no syntax (R9). Rae has no function values and a `spawn` of a
+generic function is not threadable, so the team cannot run the program's work
+itself: it holds the synchronization, and the program writes its helper loop
+(a plain function, started with `spawn thread`) around it:
+
+```rae
+func helperLoop(team: own RealtimeTeam, helper: own Int, workgroup: own Int) ret Int {
+  let promotion: RealtimePromotion = promoteToRealtime(periodNanoseconds: period, computeNanoseconds: period / 4)
+  let join: RealtimeWorkgroupJoin = joinWorkgroup(workgroup: workgroup)
+  var seen: Int = 0
+  loop team.awaitStage(helper: helper, seen: seen) {
+    ... this helper's part of the block ...
+    team.finishPart()
+  }
+  leaveWorkgroup(join: join)
+  demoteFromRealtime(promotion: promotion)
+  ret 0
+}
+
+# the leader, per block, all `realtime`:
+team.beginStage()
+... the leader's own part ...
+team.endStage()          # spins until every helper finished
+```
+
+- A helper with no stage spins `spinRounds` checks, then sleeps on its own
+  `Signal`; the leader posts only to sleeping helpers, so a block where every
+  helper spins makes no system call.
+- The handshake is ONE atomic word per helper (the stage to run, -1
+  sleeping, -2 stop): the leader `exchange`s the new stage in and posts when
+  the old value was -1; a helper sleeps only by `compareExchange` from the
+  stage it ran to -1. The first version had a "sleeping" flag beside a shared
+  stage counter: with Rae's release/acquire atomics each side's store could
+  pass its next load on ARM, and with 8 helpers a wake-up was lost and the
+  leader spun forever. Read-modify-writes on one word are always ordered.
+- The audio device's workgroup: `packages/audio` `audioWorkgroup()` (macOS:
+  the device's `kAudioDevicePropertyIOThreadOSWorkgroup`; iOS: the output
+  unit's `kAudioOutputUnitProperty_OSWorkgroup`, retained, given back with
+  `releaseAudioWorkgroup`), joined per helper with `lib/Realtime`
+  `joinWorkgroup` / `leaveWorkgroup` (`os_workgroup_join`, the token kept in
+  Rae). On this Mac both helpers of a test team joined the built-in output's
+  workgroup.
+
+Measured (`benchmarks/realtimeTeam`, Apple M-series, 8 performance and 2
+efficiency cores, leader and helpers promoted with `promoteToRealtime`, an
+empty stage = `beginStage` + `endStage`, two runs):
+
+| helpers | spinning (stages back to back) median / 99 % / max | asleep (one stage per 2.67 ms) median / 99 % / max |
+|---|---|---|
+| 2 | 0.1-0.6 / 0.8-1.0 / 3-13 µs | 12-14 / 46-49 / 46-50 µs |
+| 4 | 0.7 / 1.7-16 / 45 µs | 20 / 49 / 50 µs |
+| 8 | 33 / 57-66 / 97-99 µs | 49 / 57 / 64 µs |
+
+So a stage whose helpers are still spinning costs under a microsecond, and
+waking sleeping helpers costs 12-49 µs (0.5-2 % of a 2.67 ms block at 128
+frames). With 8 helpers plus the leader, nine spinning threads share 8
+performance cores and even the hot stage costs 33 µs: a team should have at
+most one helper fewer than the machine's performance cores, and a DAW should
+set `spinRounds` so that helpers keep spinning through the gap between
+stages of one block and sleep between blocks. Fixture 1435 (on the TSan
+gate's list).
+
+### 6.7 `Channel(T)` stays off the real-time thread
+
+`Channel` is a mutex-guarded MPSC queue; that is right for ordinary workers. The
+real-time crossings use `SpscRing(T)` (§4.1). No change to `Channel`.
+
+---
+
+## 7. Worst-case time, measured
+
+Real-time rules forbid the slow operations; they cannot make a function fast
+enough. The runtime records, per real-time root:
+
+- the CPU time of every call, as cycles at entry and exit (one register read
+  each), into a fixed histogram (no allocation);
+- the maximum, the 99.9th percentile, and the share of the period used.
+
+`RAE_REALTIME_REPORT=1` prints it at exit; the headless audio tests fail when a
+scene's worst block uses more than a set share (for example 50 %) of its period
+on the test machine. The devtools page can show the live histogram. Video's
+frame path uses the same recorder against a 16.7 ms period.
+
+**Landed (2026-11-11), differing in two points:** the recorder is a Rae value,
+`RealtimeRecorder` in `lib/Realtime.rae`, owned by the loop that runs the
+real-time code (no runtime table of recorders, no global), and it reads
+`nowNs()` (the monotonic clock; on Apple and Linux a user-space read) rather
+than CPU cycles, so a preempted call counts its full wall time, which is what a
+deadline sees. `callStarted` / `callEnded` time a call, `recordCall` adds a
+duration measured elsewhere, and none of them allocates. The histogram has
+four steps per doubling (248 steps up to 2^63 ns), so `percentileNanoseconds`
+answers the upper edge of a step, within 25 %. `report()` prints the calls, the
+mean, p99.9, the maximum, the share of the period the slowest call used and the
+non-empty steps when `RAE_REALTIME_REPORT=1`; the program calls it when the loop
+ends. Failing a test on the period share is left to the audio tests that set
+the period. Fixture 1400.
+
+---
+
+## 8. Order of work
+
+The queue holds these as `[realtime 1/6]` to `[realtime 6/6]`, between the audio
+steps that need them.
+
+1. **`Atomic(T)`** (§6.4) and **`Signal`** (§6.5), with `SpscRing(T)` in `lib/`.
+2. **Runtime flag** (§5.3) and the **time recorder** (§7): no language change;
+   before `audio 1/7`.
+3. **`realtime` and `noAlloc` keywords and analysis** (§3): reuse `may_wait.c`'s graph with an
+   effect set instead of one flag; `--report-realtime`; the errors of §3.5;
+   the plain-value rule for `SpscRing(T)` (§4.1).
+4. **clang attributes** in the generated C and `-Wfunction-effects` in the test
+   build (§5.1); **the RTSan gate** (§5.2) as a pre-suite case like TSan, when the
+   Homebrew LLVM is present.
+5. **`cExport`** and foreign threads (§6.1, §6.2): unlocks rendering inside the
+   device callback (audio stage B), the VideoToolbox and CoreMIDI callbacks, and
+   Box3D's scheduler.
+6. `restrict` emission (§4.6); `mainThread` (§4.3); the real-time team (§6.6).
+
+---
+
+## 9. Decisions needed
+
+- **R1 — the keyword `realtime`** on functions and externs, in the modifier
+  position (§3.1). **Decided 2026-11-11: yes.**
+- **R2 — `noAlloc`** (or the spelled-out `noAllocation`) as the second, weaker
+  keyword, or not yet (§3.1). **Decided 2026-11-11: `noAlloc`, built together
+  with `realtime`.**
+- **R3 — where the marks go. Decided 2026-11-11:** the entry function carries
+  `realtime`; everything it reaches is checked without a mark. A helper MAY
+  carry the mark too, to tell a reader (and a later caller) that it is meant to
+  be real-time; a marked helper is checked as its own root, so the mark can
+  never be wrong. `lib/` and package functions that promise to stay real-time
+  for their callers carry it always (§3.3).
+- **R4 — calling Rae from C. Decided 2026-11-11:** the modifier
+  `cExport("cName")` (§6.1).
+- **R5 — `mainThread`** (§4.3). **Decided and built 2026-11-12:** the
+  modifier `mainThread` on externs and on Rae functions; inferred upward like
+  `realtime`, so nothing between is marked; an error when a `spawn`ed
+  function, a `parallelLoop` body, a `realtime` function or an unmarked
+  `cExport` function reaches one; code that `main` calls (a game's update)
+  needs no mark. 88 externs marked; the warn-only count over the tree found
+  nothing to refuse (§4.3.6).
+- **R6 — an explicit way to start a dedicated thread** instead of relying on
+  the may-wait rule (§6.6). **Decided 2026-11-13 (§6.6.1):** `spawn thread
+  f(...)` at the call (not a mark on the function, which first was proposed
+  as `dedicatedThread`): that spawn is always a new OS thread, and `f` stays
+  an ordinary function others can call or spawn on the pool. Priority as
+  `lib/Realtime` calls (`promoteToRealtime(periodNanoseconds:,
+  computeNanoseconds:)`: Mach time-constraint, MMCSS, SCHED_FIFO then rtkit,
+  Android's urgent-audio priority), allowed only on a `spawn thread`'s
+  thread; the workgroup join comes with R9.
+- **R8 — exclusive access for `mod` arguments** (§4.6). **Decided 2026-11-12:
+  no rule for now**; `restrict` only where the compiler proves it from every
+  call site, and only if a measurement shows it pays. The proposal was: refuse a call that
+  passes one place, or a place and a part of it, as `mod` together with
+  another `mod` or `view` argument. It fixes a foot gun on its own
+  (`stress/13_modAndViewOfOnePlace`) and is what makes `restrict` sound. A
+  language change: it may refuse existing code (lib/ and examples to be
+  measured first).
+- **R9 — the real-time team's base** (§6.6): `parallel-stages-design.md`
+  chose Option C for `parallelLoop` and did not recommend Option A (unchecked
+  atomics and barriers for every program). **Decided 2026-11-13 and built: a
+  library type, `lib/RealtimeTeam`** (§6.6.2): the program's helper loops on
+  `spawn thread`, spinning then sleeping on a `Signal`, one atomic word per
+  helper, the audio workgroup joined through `lib/Realtime`. A stage costs
+  under 1 µs while the helpers spin and 12-49 µs to wake sleeping ones.
+- **R7 — the RTSan gate's compiler. Decided 2026-11-11:** Homebrew LLVM
+  (`brew install llvm`), a test dependency on macOS installed by `make setup`,
+  like `naga`; the gate SKIPs with a message when it is missing.
+
+---
+
+## Sources
+
+- Clang function effect analysis (`nonblocking`, `nonallocating`):
+  https://llvm.googlesource.com/llvm-project/+/5a6cc509215b62e94de3b798ea26944a375ce6cb/clang/docs/FunctionEffectAnalysis.rst
+- RealtimeSanitizer and the `nonblocking` attribute:
+  https://lists.llvm.org/pipermail/llvm-commits/Week-of-Mon-20240729/1416996.html
+- Both tried on this Mac on 2026-11-11 (Apple clang 21.0, Homebrew clang 22.1).

@@ -1,0 +1,250 @@
+# audio/NowPlaying — what the lock screen, Control Center and the media keys
+# show, and their buttons (docs/audio-design.md §9.1): MPNowPlayingInfoCenter
+# and MPRemoteCommandCenter on iOS and macOS, through native/rae_audio_glue.c;
+# elsewhere showing answers false and no command comes.
+#
+#     let enabled: Bool = enableRemoteCommands(nextTrack: true, previousTrack: true,
+#     changePosition: true)
+#     let shown: Bool = showNowPlaying(info: audio.nowPlayingOfStream(voiceId: song,
+#       title: "One", artist: "Someone", album: "", artworkPath: "covers/one.png"))
+#     # each frame (or audio/remoteCommandSystem, as ECS events):
+#     loop let command: RemoteCommandEvent in takeRemoteCommands() {
+#       if not audio.applyRemoteCommand(voiceId: song, command: command) {
+#         ... nextTrack / previousTrack: the program's own queue ...
+#       }
+#       ... show Now Playing again: the position and the rate changed ...
+#     }
+#
+# iOS shows Now Playing for an app whose session plays (the `music` intent)
+# and keeps it playing in the background when the app's Info.plist has the
+# `audio` background mode (tools/ios/gen-ios.sh: RAE_IOS_BACKGROUND_AUDIO=1).
+# The commands' handlers run on the main thread's run loop: an app's loop runs
+# it; a program with no UI loop calls pumpMainRunLoop each frame.
+open audio/Audio
+open audio/AudioGlue
+open audio/AudioStreams
+open audio/Sound
+
+type NowPlayingInfo {
+  title: String
+  artist: String
+  album: String
+  # an image file shown as the cover; "" for none
+  artworkPath: String
+  # -1 when unknown
+  durationSeconds: Float64
+  positionSeconds: Float64
+  playing: Bool
+}
+
+enum RemoteCommandKind {
+  play
+  pause
+  togglePlayPause
+  nextTrack
+  previousTrack
+  # the person moved the position (the lock screen's scrubber)
+  changePosition
+}
+
+type RemoteCommandEvent {
+  kind: RemoteCommandKind
+  # where to go, for changePosition
+  positionSeconds: Float64
+}
+
+# Show what plays; false where there is no Now Playing
+func showNowPlaying(info: view NowPlayingInfo) ret Bool {
+  var title: List(UInt8) = pathBytesZ(path: info.title)
+  var artist: List(UInt8) = pathBytesZ(path: info.artist)
+  var album: List(UInt8) = pathBytesZ(path: info.album)
+  var artworkPath: List(UInt8) = pathBytesZ(path: info.artworkPath)
+  var rate: Float64 = 0.0
+  if info.playing {
+    rate = 1.0
+  }
+  unsafe {
+    ret rae_audio_now_playing_set(
+      titleZ: title.data
+      artistZ: artist.data
+      albumZ: album.data
+      artworkPathZ: artworkPath.data
+      duration: info.durationSeconds
+      position: info.positionSeconds
+      rate: rate
+    ) is 1
+  }
+}
+
+func clearNowPlaying() {
+  unsafe {
+    rae_audio_now_playing_clear()
+  }
+}
+
+# What Now Playing shows, as "title|artist|position|rate" (for checks); ""
+# where there is none
+func nowPlayingDescription() ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 512)
+  bytes.addDefaults(count: 512)
+  var length: Int = 0
+  unsafe {
+    length = rae_audio_now_playing_describe(into: bytes.data, capacity: 512)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# Turn the buttons on: play, pause and play/pause always, the others when
+# asked. Once per program; false where there are no remote commands.
+func enableRemoteCommands(
+  nextTrack: view Bool
+  previousTrack: view Bool
+  changePosition: view Bool
+) ret Bool {
+  var mask: Int = 1 bitor 2 bitor 4
+  if nextTrack {
+    mask = mask bitor 8
+  }
+  if previousTrack {
+    mask = mask bitor 16
+  }
+  if changePosition {
+    mask = mask bitor 32
+  }
+  unsafe {
+    ret rae_audio_remote_enable(mask: mask) is 1
+  }
+}
+
+func remoteCommandKindOf(number: view Int) ret RemoteCommandKind {
+  if number is 1 {
+    ret RemoteCommandKind.play
+  }
+  if number is 2 {
+    ret RemoteCommandKind.pause
+  }
+  if number is 3 {
+    ret RemoteCommandKind.togglePlayPause
+  }
+  if number is 4 {
+    ret RemoteCommandKind.nextTrack
+  }
+  if number is 5 {
+    ret RemoteCommandKind.previousTrack
+  }
+  ret RemoteCommandKind.changePosition
+}
+
+func remoteCommandNumber(kind: view RemoteCommandKind) ret Int {
+  if kind is RemoteCommandKind.play {
+    ret 1
+  }
+  if kind is RemoteCommandKind.pause {
+    ret 2
+  }
+  if kind is RemoteCommandKind.togglePlayPause {
+    ret 3
+  }
+  if kind is RemoteCommandKind.nextTrack {
+    ret 4
+  }
+  if kind is RemoteCommandKind.previousTrack {
+    ret 5
+  }
+  ret 6
+}
+
+# The commands pressed since the last call, oldest first
+func takeRemoteCommands() ret List(RemoteCommandEvent) {
+  var taken: List(RemoteCommandEvent) = {}
+  unsafe {
+    var code: Int = rae_audio_remote_poll()
+    loop code >= 0 {
+      taken.add(
+        value: {
+          kind: remoteCommandKindOf(number: code % 16)
+          positionSeconds: ((code / 16) as Float64) / 1000.0
+        }
+      )
+      code = rae_audio_remote_poll()
+    }
+  }
+  ret taken
+}
+
+# As if the person had pressed a button (tests, and a program's own controls
+# that should act like the lock screen's)
+func injectRemoteCommand(kind: view RemoteCommandKind, positionSeconds: view Float64) {
+  unsafe {
+    rae_audio_remote_inject(
+      kind: remoteCommandNumber(kind: kind)
+      value: (positionSeconds * 1000.0 + 0.5) as Int
+    )
+  }
+}
+
+# Run the main run loop once, without waiting: a program with no UI loop (a
+# command-line player, a check) calls it each frame so the buttons' handlers
+# run
+func pumpMainRunLoop() {
+  unsafe {
+    rae_audio_run_loop_pump()
+  }
+}
+
+# Now Playing for a stream: its current file's length and place, playing or
+# paused, with the program's words for it
+func nowPlayingOfStream(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  title: view String
+  artist: view String
+  album: view String
+  artworkPath: view String
+) ret NowPlayingInfo {
+  ret NowPlayingInfo {
+    title: "{title}"
+    artist: "{artist}"
+    album: "{album}"
+    artworkPath: "{artworkPath}"
+    durationSeconds: this.streamFileDurationSeconds(voiceId: voiceId)
+    positionSeconds: this.streamFilePositionSeconds(voiceId: voiceId)
+    playing: this.streamIsPlaying(voiceId: voiceId) and not this.streamIsPaused(voiceId: voiceId)
+  }
+}
+
+# Do what a button asks of a stream: play, pause, play/pause, a new position
+# (which keeps a paused stream paused; like `seek`, it moves within the
+# stream's first file). False for nextTrack and previousTrack, which are the
+# program's (its own queue of songs).
+func applyRemoteCommand(
+  this: mod AudioEngine
+  voiceId: view VoiceId
+  command: view RemoteCommandEvent
+) ret Bool {
+  let paused: Bool = this.streamIsPaused(voiceId: voiceId)
+  if command.kind is RemoteCommandKind.play {
+    this.resumeVoice(voiceId: voiceId)
+    ret true
+  }
+  if command.kind is RemoteCommandKind.pause {
+    this.pauseVoice(voiceId: voiceId)
+    ret true
+  }
+  if command.kind is RemoteCommandKind.togglePlayPause {
+    if paused {
+      this.resumeVoice(voiceId: voiceId)
+    } else {
+      this.pauseVoice(voiceId: voiceId)
+    }
+    ret true
+  }
+  if command.kind is RemoteCommandKind.changePosition {
+    let moved: Bool = this.seek(voiceId: voiceId, seconds: command.positionSeconds)
+    if paused {
+      this.pauseVoice(voiceId: voiceId)
+    }
+    ret moved
+  }
+  ret false
+}

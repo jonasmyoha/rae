@@ -113,6 +113,24 @@ RAE_F8_INLINE bool rae_m8_any_lane(const void* mask) {
 RAE_F8_INLINE bool rae_m8_all_lanes(const void* mask) {
   return _mm256_movemask_epi8(_mm256_cmpeq_epi32(RAE_M8_LOAD(mask), _mm256_setzero_si256())) == 0;
 }
+/* The bit operations, as runtime_float4.h defines them */
+RAE_F8_INLINE void rae_f8_power_of_two_impl(float* out, const void* n) {
+  __m256 x = RAE_F8_LOAD(n), high = _mm256_set1_ps(127.0f), low = _mm256_set1_ps(-126.0f);
+  __m256 clamped = rae_f8_select_v(RAE_F8_CMP(x, high, _CMP_LE_OQ), x, high);
+  clamped = rae_f8_select_v(RAE_F8_CMP(clamped, low, _CMP_GE_OQ), clamped, low);
+  __m256i whole = _mm256_castps_si256(_mm256_add_ps(clamped, _mm256_set1_ps(12582912.0f)));
+  __m256i biased = _mm256_add_epi32(whole, _mm256_set1_epi32((int)(127u - 0x4B400000u)));
+  RAE_F8_STORE(out, _mm256_castsi256_ps(_mm256_slli_epi32(biased, 23)));
+}
+RAE_F8_INLINE void rae_f8_exponent_of_impl(float* out, const void* a) {
+  __m256i field = _mm256_and_si256(_mm256_srli_epi32(_mm256_castps_si256(RAE_F8_LOAD(a)), 23), _mm256_set1_epi32(255));
+  __m256 shifted = _mm256_castsi256_ps(_mm256_add_epi32(field, _mm256_set1_epi32(0x4B400000)));
+  RAE_F8_STORE(out, _mm256_sub_ps(shifted, _mm256_set1_ps(12583039.0f)));
+}
+RAE_F8_INLINE void rae_f8_significand_of_impl(float* out, const void* a) {
+  __m256i bits = _mm256_and_si256(_mm256_castps_si256(RAE_F8_LOAD(a)), _mm256_set1_epi32((int)0x807FFFFFu));
+  RAE_F8_STORE(out, _mm256_castsi256_ps(_mm256_or_si256(bits, _mm256_set1_epi32(0x3F800000))));
+}
 
 #else /* two Float4 operations on the halves: Float4's lowering, its bits */
 
@@ -173,6 +191,11 @@ RAE_F8_INLINE bool rae_m8_any_lane(const void* mask) {
 }
 RAE_F8_INLINE bool rae_m8_all_lanes(const void* mask) {
   return rae_m4_all_lanes(mask) && rae_m4_all_lanes((const uint32_t*)mask + 4);
+}
+RAE_F8_INLINE void rae_f8_power_of_two_impl(float* out, const void* n) { RAE_F8_HALVES1(rae_f4_power_of_two_impl, out, n); }
+RAE_F8_INLINE void rae_f8_exponent_of_impl(float* out, const void* a) { RAE_F8_HALVES1(rae_f4_exponent_of_impl, out, a); }
+RAE_F8_INLINE void rae_f8_significand_of_impl(float* out, const void* a) {
+  RAE_F8_HALVES1(rae_f4_significand_of_impl, out, a);
 }
 
 #endif
@@ -248,6 +271,9 @@ RAE_F8_INLINE void rae_f8_store_masked(void* data, int64_t index, const void* va
 #define rae_f8_sqrt(a) RAE_F8_RESULT(rae_f8_sqrt_impl((float*)&rae_f8_result__, (a)))
 #define rae_f8_negate(a) RAE_F8_RESULT(rae_f8_negate_impl((float*)&rae_f8_result__, (a)))
 #define rae_f8_abs(a) RAE_F8_RESULT(rae_f8_abs_impl((float*)&rae_f8_result__, (a)))
+#define rae_f8_power_of_two(n) RAE_F8_RESULT(rae_f8_power_of_two_impl((float*)&rae_f8_result__, (n)))
+#define rae_f8_exponent_of(a) RAE_F8_RESULT(rae_f8_exponent_of_impl((float*)&rae_f8_result__, (a)))
+#define rae_f8_significand_of(a) RAE_F8_RESULT(rae_f8_significand_of_impl((float*)&rae_f8_result__, (a)))
 #define rae_f8_min(a, b) RAE_F8_RESULT(rae_f8_min_impl((float*)&rae_f8_result__, (a), (b)))
 #define rae_f8_max(a, b) RAE_F8_RESULT(rae_f8_max_impl((float*)&rae_f8_result__, (a), (b)))
 #define rae_f8_clamp_symmetric(value, limit) \

@@ -1,0 +1,37 @@
+# The run-time real-time check catches what a marked thread must not do
+# (docs/realtime-language-design.md §5.3). config.env sets RAE_REALTIME_CHECK=1.
+#
+# On a spawned thread that marks itself: a List that grows (a Buffer
+# allocation and reallocation), a String interpolation (a String allocation),
+# a log, and the List's free at the end of its scope. The same work before the
+# mark and after the unmark is not counted, nor is the main thread's. At exit
+# the runtime prints one line per entry point and exits with code 70, which
+# fails any test that did not expect it.
+open Realtime
+
+func misbehave(rounds: view Int) {
+  var notes: List(Int) = {}
+  var round: Int = 0
+  loop round < rounds {
+    notes.add(value: round)
+    round = round + 1
+  }
+  let text: String = "rounds {rounds}"
+  log(text)
+}
+
+func audioThread(rounds: own Int) ret Bool {
+  misbehave(rounds: rounds)
+  markRealtimeThread()
+  let marked: Bool = realtimeThreadIsMarked()
+  misbehave(rounds: rounds)
+  unmarkRealtimeThread()
+  misbehave(rounds: rounds)
+  ret marked
+}
+
+func main() {
+  let task: Task(Bool) = spawn audioThread(rounds: 3)
+  let marked: Bool = task.get()
+  log("the worker was marked: {marked}; main is marked: {realtimeThreadIsMarked()}")
+}

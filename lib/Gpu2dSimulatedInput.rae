@@ -18,7 +18,7 @@ func nativeSimulateTouch(
   id: Int
   x: Float
   y: Float
-) unsafe extern("rae_ext_Gpu2d_simulateTouch")
+) mainThread unsafe extern("rae_ext_Gpu2d_simulateTouch")
 
 func simulateTouch(
   kind: copy Int
@@ -45,7 +45,7 @@ func nativeSimulateFingerPointer(
   kind: Int
   x: Float
   y: Float
-) unsafe extern("rae_ext_Gpu2d_simulateFingerPointer")
+) mainThread unsafe extern("rae_ext_Gpu2d_simulateFingerPointer")
 
 func simulateFingerPointer(kind: copy Int, x: copy Float, y: copy Float) {
   unsafe {
@@ -54,7 +54,7 @@ func simulateFingerPointer(kind: copy Int, x: copy Float, y: copy Float) {
 }
 
 # ...and the event a phone's app gets as it goes to the background
-func nativeSimulateEnterBackground() unsafe extern("rae_ext_Gpu2d_simulateEnterBackground")
+func nativeSimulateEnterBackground() mainThread unsafe extern("rae_ext_Gpu2d_simulateEnterBackground")
 
 func simulateEnterBackground() {
   unsafe {

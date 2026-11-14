@@ -11,6 +11,7 @@
  * into `result`; `rae_task_await` joins exactly once and hands back the
  * buffer, which the get() call site casts to T. */
 RaeTask* rae_task_new(size_t result_size) {
+  RAE_REALTIME_GUARD("rae_task_new", "starts a task");
   RaeTask* t = (RaeTask*)malloc(sizeof(RaeTask));
   t->result = result_size ? malloc(result_size) : NULL;
   atomic_init(&t->done, 0);
@@ -114,6 +115,7 @@ void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args) {
 }
 
 void* rae_task_await(RaeTask* t) {
+  RAE_REALTIME_GUARD("rae_task_await", "waits for a task");
   if (!t) return NULL;
   if (!t->joined) {
     if (t->on_pool) {
@@ -134,6 +136,7 @@ void* rae_task_await(RaeTask* t) {
  * not cascade-dropped here — a heap result that was never get()'d leaks its
  * payload; acceptable for now (callers normally get() the result). */
 void rae_task_drop(RaeTask* t) {
+  RAE_REALTIME_GUARD("rae_task_drop", "joins and frees a task");
   if (!t) return;
   if (!t->joined) {
     if (t->on_pool) {
@@ -181,7 +184,7 @@ typedef struct {
 } RaeChannel;
 
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-#define RAE_CHAN_LOCK(c)   pthread_mutex_lock(&(c)->mu)
+#define RAE_CHAN_LOCK(c)   (RAE_REALTIME_GUARD("RAE_CHAN_LOCK", "a Channel's mutex"), pthread_mutex_lock(&(c)->mu))
 #define RAE_CHAN_UNLOCK(c) pthread_mutex_unlock(&(c)->mu)
 #else
 #define RAE_CHAN_LOCK(c)   ((void)0)
@@ -1048,6 +1051,7 @@ int64_t rae_ext_Parallel_workerCount(void) {
 }
 
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
+  RAE_REALTIME_GUARD("rae_parallel_for", "parallelLoop");
   if (end <= start) return;
   if (g_pool_inside) { body(captures, start, end); return; }
   rae_pcheck_on();
