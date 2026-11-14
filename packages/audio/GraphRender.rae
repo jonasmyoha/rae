@@ -23,6 +23,7 @@ open audio/AudioGraph
 open audio/CustomNodes
 open audio/GraphEffects
 open audio/GraphNodes
+open audio/GraphTeam
 open collections/SpscRing
 
 const graphPlanSlots: Int = 8
@@ -57,6 +58,9 @@ type GraphRenderer {
   pending: GraphParameterEvent
   hasPending: Bool
   meters: SpscRing(MeterReading)
+  # the helpers that render a team plan's stages with the rendering thread
+  # (audio/GraphTeam); none by default
+  team: GraphTeam
 }
 
 const graphEventSlots: Int = 1024
@@ -74,7 +78,18 @@ func createGraphRenderer() ret GraphRenderer {
     pending: GraphParameterEvent { key: -1, kind: 0, value: 0.0, sampleTime: 0 }
     hasPending: false
     meters: createSpscRing(MeterReading, capacity: graphMeterSlots)
+    team: noGraphTeam()
   }
+}
+
+# Main thread, before rendering: render team plans (AudioGraph.forTeam) with
+# `team`'s helpers. The caller keeps the team's tasks and stops it
+# (stopGraphTeam) after the last render.
+func setRendererTeam(this: mod GraphRenderer, team: view GraphTeam) {
+  if this.team.helperCount is 0 {
+    freeGraphTeam(team: this.team)
+  }
+  this.team = team
 }
 
 # Main thread: a parameter change at `sampleTime` (false: the ring is full)
@@ -128,6 +143,10 @@ func freeGraphRenderer(this: view GraphRenderer) {
   this.reclaim.freeSpscRing()
   this.events.freeSpscRing()
   this.meters.freeSpscRing()
+  # a team with helpers is its owner's to stop
+  if this.team.helperCount is 0 {
+    freeGraphTeam(team: this.team)
+  }
 }
 
 # ---- carrying node state across a plan swap (§5.2) ----------------------------
@@ -252,15 +271,13 @@ func renderGraph(
           rae_ext_rae_buf_set(buf: rightTarget, index: offset + done + i, value: 0.0)
         }
       } else {
-        loop var node: Int = 0, node < this.current.nodeCount, ++node {
-          processNode(
-            plan: this.current
-            node: node
-            sources: pooledSources(pool: sources, maxFrames: this.current.maxFrames)
-            sourceOffset: done
-            frames: piece
-          )
-        }
+        renderPlanNodes(
+          plan: this.current
+          sources: pooledSources(pool: sources, maxFrames: this.current.maxFrames)
+          sourceOffset: done
+          frames: piece
+          team: this.team
+        )
         clearCustomEvents(plan: this.current)
         loop var i: Int = 0, i < piece, ++i {
           rae_ext_rae_buf_set(

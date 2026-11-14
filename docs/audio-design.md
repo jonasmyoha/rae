@@ -298,7 +298,7 @@ plan**:
    needs tens of buffers, not hundreds;
 3. compute each path's latency and insert delay lines so all paths into a bus
    line up (**plugin delay compensation**);
-4. mark independent branches for the workers (later);
+4. mark independent branches for the workers (landed: stages of chains, below);
 5. call each node's `prepare` (may allocate).
 
 The finished plan is handed over in one command; the audio thread swaps it in at
@@ -343,6 +343,39 @@ fed silence, feeding the nodes it fed, until a later compile drops it.
 Fixture 1437: the compensated sum is exactly 2 x(t - 64); a track added
 mid-echo and the echo's delay removed mid-echo both leave the output equal,
 bit for bit, to never swapping (and without the carry both differ).
+
+**Landed, step 4: parallel workers (2026-11-14, `packages/audio` 0.12.18,
+`audio/GraphTeam`):** a graph with `forTeam` set compiles to a plan in
+**stages of chains**. A node continues its input's chain when it has one
+input and that input has no other reader (a track's source, inserts, fader,
+pan and meter are one chain); any other node starts one (a sum, a node a send
+also reads). A chain's stage is one after the latest stage of the chains it
+reads, so the chains of a stage depend on nothing in it; each chain has two
+scratch buffers of its own, its nodes alternating between them, so chains of
+one stage share no buffer (a plan without `forTeam` keeps the liveness
+buffers: 14 for fixture 1447's session, 54 with chains). The thread that
+renders (the device's callback, stage B) leads a `lib/RealtimeTeam`: for each
+stage of two or more chains it publishes the job, renders chains `c` with
+`c % (helpers + 1) == 0`, and waits for the helpers, which render the rest;
+a one-chain stage it runs alone. The helpers are `spawn thread` loops, raised
+to real-time with the block's period (`promoteToRealtime`) and joined to the
+device's audio workgroup, spinning through a block's stages and sleeping
+between blocks (`startGraphTeam`, at most one fewer than the performance
+cores; `stopGraphTeam` joins them). A node's work does not depend on which
+thread runs it, so the output is the one-thread render's bit for bit.
+`GraphRenderer.setRendererTeam` gives an ECS mix (or any renderer) a team;
+the engine's own bus graph takes one with `RAE_AUDIO_RENDER_HELPERS=<n>`.
+MMCSS for the helpers on Windows comes with that platform's step.
+
+Fixture 1447 (`RAE_REALTIME_CHECK=1`, and in the TSan gate): a 24-track
+session (EQ, compressor, fader, pan, meter a track; two buses, one with a
+reverb; a master limiter), its one-thread plan and its team plan alone, with 2
+and with 4 helpers, the same samples in blocks of 256 and 37.
+`benchmarks/audioTeam` (a 200-track session, 8 buses, blocks of 256 at 48
+kHz, release build on this Mac, 7 helpers allowed): a block takes 1267 µs
+alone (23% of its 5.33 ms), 476 µs with 2 helpers (2.65x as fast) and 313 µs
+with 4 (4.0x). `checks/audioSine` with `RAE_AUDIO_RENDER_HELPERS=2` on the
+Mac's output: 2 helpers with the callback, no underrun.
 
 ### 5.3 Nodes
 

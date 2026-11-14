@@ -425,6 +425,25 @@ func compileWorking(
       free.add(value: buffer)
     }
   }
+  if graph.forTeam {
+    let layout: TeamLayout = teamLayout(graph: graph, order: order)
+    ret CompiledPlan {
+      plan: prepareRenderPlan(
+        graph: graph
+        order: layout.order
+        bufferOf: layout.bufferOf
+        bufferCount: layout.bufferCount
+        sampleRate: sampleRate
+        maxFrames: maxFrames
+        carryFrom: carryFrom
+        previousSerial: previousPlan.serial
+        latencyFrames: latency
+        chainStarts: layout.chainStarts
+        stageStarts: layout.stageStarts
+      )
+      error: ""
+    }
+  }
   ret CompiledPlan {
     plan: prepareRenderPlan(
       graph: graph
@@ -436,7 +455,113 @@ func compileWorking(
       carryFrom: carryFrom
       previousSerial: previousPlan.serial
       latencyFrames: latency
+      chainStarts: {}
+      stageStarts: {}
     )
     error: ""
   }
+}
+
+# ---- the layout for a team (docs/audio-design.md §5.2 step 4) -------------------------
+type TeamLayout {
+  order: List(Int)
+  bufferOf: List(Int)
+  bufferCount: Int
+  chainStarts: List(Int)
+  stageStarts: List(Int)
+}
+
+# The nodes as chains in stages. A node continues its input's chain when it
+# has one input and that input has no other reader (a track's source,
+# inserts, fader, pan and meter are one chain); any other node starts a chain
+# (a sum, a node a send also reads). A chain's stage is one after the latest
+# stage of the chains it reads, so the chains of one stage depend on nothing
+# in it. Each chain has two buffers of its own, its nodes alternating between
+# them (a node's output is read only by the next node of its chain, or by
+# later stages), so chains of one stage share no buffer.
+func teamLayout(graph: view AudioGraph, order: view List(Int)) ret TeamLayout {
+  let count: Int = graph.nodes.length()
+  var inputs: List(Int) = {}
+  var readers: List(Int) = {}
+  var firstInput: List(Int) = {}
+  var chainOf: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    inputs.add(value: 0)
+    readers.add(value: 0)
+    firstInput.add(value: -1)
+    chainOf.add(value: -1)
+  }
+  loop let edge: GraphEdge in graph.edges {
+    inputs.set(index: edge.to, value: inputs.copyAtFallback(index: edge.to, fallback: 0) + 1)
+    readers.set(index: edge.from, value: readers.copyAtFallback(index: edge.from, fallback: 0) + 1)
+    if firstInput.copyAtFallback(index: edge.to, fallback: -1) < 0 {
+      firstInput.set(index: edge.to, value: edge.from)
+    }
+  }
+  var chains: List(List(Int)) = {}
+  var levels: List(Int) = {}
+  loop let node: Int in order {
+    let input: Int = firstInput.copyAtFallback(index: node, fallback: -1)
+    if inputs.copyAtFallback(index: node, fallback: 0) is 1 and readers.copyAtFallback(
+      index: input
+      fallback: 0
+    ) is 1 and chainOf.copyAtFallback(index: input, fallback: -1) >= 0 {
+      let chain: Int = chainOf.copyAtFallback(index: input, fallback: 0)
+      if let members: mod List(Int) = chains.modAt(index: chain) {
+        members.add(value: node)
+      }
+      chainOf.set(index: node, value: chain)
+    } else {
+      var level: Int = 0
+      loop let edge: GraphEdge in graph.edges {
+        if edge.to is node {
+          let from: Int = chainOf.copyAtFallback(index: edge.from, fallback: -1)
+          if from >= 0 {
+            level = max(a: level, b: levels.copyAtFallback(index: from, fallback: 0) + 1)
+          }
+        }
+      }
+      var members: List(Int) = {}
+      members.add(value: node)
+      chains.add(value: members)
+      levels.add(value: level)
+      chainOf.set(index: node, value: chains.length() - 1)
+    }
+  }
+  var stageCount: Int = 0
+  loop let level: Int in levels {
+    stageCount = max(a: stageCount, b: level + 1)
+  }
+  var layout: TeamLayout = {
+    order: {}
+    bufferOf: {}
+    bufferCount: 0
+    chainStarts: {}
+    stageStarts: {}
+  }
+  loop var i: Int = 0, i < count, ++i {
+    layout.bufferOf.add(value: 0)
+  }
+  var placed: Int = 0
+  loop var stage: Int = 0, stage < stageCount, ++stage {
+    layout.stageStarts.add(value: placed)
+    loop var chain: Int = 0, chain < chains.length(), ++chain {
+      if levels.copyAtFallback(index: chain, fallback: 0) is not stage {
+        continue
+      }
+      layout.chainStarts.add(value: layout.order.length())
+      if let members: view List(Int) = chains.viewAt(index: chain) {
+        loop var j: Int = 0, j < members.length(), ++j {
+          let node: Int = members.copyAtFallback(index: j, fallback: 0)
+          layout.order.add(value: node)
+          layout.bufferOf.set(index: node, value: 2 * placed + j % 2)
+        }
+      }
+      placed = placed + 1
+    }
+  }
+  layout.stageStarts.add(value: placed)
+  layout.chainStarts.add(value: layout.order.length())
+  layout.bufferCount = 2 * placed
+  ret layout
 }

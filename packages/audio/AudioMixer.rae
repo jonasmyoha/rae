@@ -17,6 +17,7 @@ open audio/AudioGraph
 open audio/AudioSynth
 open audio/GraphCompile
 open audio/GraphNodes
+open audio/GraphTeam
 open Atomic
 open audio/Sound
 open collections/SpscRing
@@ -197,6 +198,9 @@ type AudioMixer {
   reclaim: SpscRing(Int)
   clockStamps: SpscRing(ClockStamp)
   synth: SynthState
+  # helpers that render the bus graph's stages with the audio thread
+  # (audio/GraphTeam): none unless useMixerTeam was called
+  team: GraphTeam
 }
 
 func createAudioMixer(
@@ -212,17 +216,11 @@ func createAudioMixer(
   loop var i: Int = 0, i < audioMaxEvents, ++i {
     events.add(value: noEvent())
   }
-  var graph: AudioGraph = createAudioGraph()
-  let sum: Int = graph.addNode(node: sumNode())
-  loop var bus: Int = 0, bus < audioBusCount, ++bus {
-    let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: bus))
-    let fader: Int = graph.addNode(node: identified(node: duckNode(), entityId: bus))
-    graph.connect(from: source, to: fader)
-    graph.connect(from: fader, to: sum)
-  }
-  let out: Int = graph.addNode(node: outputNode())
-  graph.connect(from: sum, to: out)
-  let busPlan: RenderPlan = compileGraph(graph: graph, sampleRate: sampleRate, maxFrames: maxFrames).plan
+  let busPlan: RenderPlan = compileGraph(
+    graph: busGraph(forTeam: false)
+    sampleRate: sampleRate
+    maxFrames: maxFrames
+  ).plan
   ret AudioMixer {
     sampleRate: sampleRate
     maxFrames: maxFrames
@@ -246,7 +244,41 @@ func createAudioMixer(
     reclaim: reclaim
     clockStamps: clockStamps
     synth: createSynthState(sampleRate: sampleRate, bus: 0)
+    team: noGraphTeam()
   }
+}
+
+# The buses as a graph: each bus's voices into its fader (the duck node),
+# the four faders summed into the output
+func busGraph(forTeam: view Bool) ret AudioGraph {
+  var graph: AudioGraph = createAudioGraph()
+  graph.forTeam = forTeam
+  let sum: Int = graph.addNode(node: sumNode())
+  loop var bus: Int = 0, bus < audioBusCount, ++bus {
+    let source: Int = graph.addNode(node: sourceNode(kind: NodeKind.voices, slot: bus))
+    let fader: Int = graph.addNode(node: identified(node: duckNode(), entityId: bus))
+    graph.connect(from: source, to: fader)
+    graph.connect(from: fader, to: sum)
+  }
+  let out: Int = graph.addNode(node: outputNode())
+  graph.connect(from: sum, to: out)
+  ret graph
+}
+
+# Main thread, before the mixer renders: render its buses with `team`'s
+# helpers (the plan compiled for a team; the caller stops the team after the
+# last render)
+func useMixerTeam(mixer: mod AudioMixer, team: view GraphTeam) {
+  freeRenderPlan(plan: mixer.busPlan)
+  mixer.busPlan = compileGraph(
+    graph: busGraph(forTeam: true)
+    sampleRate: mixer.sampleRate
+    maxFrames: mixer.maxFrames
+  ).plan
+  if mixer.team.helperCount is 0 {
+    freeGraphTeam(team: mixer.team)
+  }
+  mixer.team = team
 }
 
 func freeAudioMixer(mixer: view AudioMixer) {
@@ -256,6 +288,9 @@ func freeAudioMixer(mixer: view AudioMixer) {
     rae_ext_rae_buf_free(buf: mixer.duckActivity)
   }
   freeRenderPlan(plan: mixer.busPlan)
+  if mixer.team.helperCount is 0 {
+    freeGraphTeam(team: mixer.team)
+  }
 }
 
 # An empty slot of the event list: handles to nothing
@@ -815,11 +850,12 @@ func renderPart(
     activity: activity
     hasActivity: true
   }
-  renderPlanPart(
+  renderPlanNodes(
     plan: mixer.busPlan
     sources: sources
     sourceOffset: from
     frames: frames
+    team: mixer.team
   )
   let plan: RenderPlan = mixer.busPlan
   loop var i: Int = 0, i < frames, ++i {
