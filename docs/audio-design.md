@@ -359,6 +359,42 @@ delay line (also the delay compensation), meter, sampler voice set, stream
 voice, input, resampler, limiter. Then: EQ (biquads), compressor (and the
 sidechain duck of §6.4), reverb, synth voices.
 
+**Landed, EQ, compressor and reverb (2026-11-14, `packages/audio` 0.12.16):**
+three node kinds (`audio/EffectStates` the settings and states,
+`audio/GraphEffects` the audio thread), and the same as ECS inserts
+(`eqInsert`, `compressorInsert`, `reverbInsert`).
+
+- `eq`: a biquad from Robert Bristow-Johnson's Audio EQ Cookbook (peak, low
+  and high shelf, low and high pass), transposed direct form II a channel.
+  Parameter events 2, 3 and 4 move its frequency, gain and Q over 5 ms, the
+  coefficients following every 16 frames; a plan swap carries its memory and
+  moves to the new plan's values the same way.
+- `compressor`: feed-forward and stereo-linked, the static curve with a soft
+  knee of Giannoulis, Massberg and Reiss (2012), the gain reduction smoothed
+  with one-pole attack and release in decibels, makeup gain. A second input is
+  its sidechain (the level is measured there): ducking one bus by another is
+  this node. The simple API's in-mix duck (§6.4) stays its own `duck` node, so
+  its sound and fixtures 1401-1417 do not change.
+- `reverb`: the reverb is not named in this design, so it is **Freeverb**
+  (Jezar at Dreampoint, public domain): eight lowpass-feedback combs and four
+  allpasses a channel, Jezar's tunings at 44.1 kHz scaled to the sample rate,
+  the right channel 23 samples longer, his scaling of room, damping, wet, dry
+  and width. Its lines are allocated when the plan is prepared and carried
+  over a swap by exchanging buffers.
+
+Fixture 1445 (`RAE_REALTIME_CHECK=1`): each EQ shape's magnitude at 60, 250,
+1000, 4000 and 12000 Hz, from a Float64 DFT of its impulse response, within
+0.02 dB of the cookbook's formula in Float64 (the coefficients are Float: a
+300 Hz high pass is 0.011 dB off at 60 Hz, 28 dB down); a gain event with no
+click and on +12 dB after it; the compressor's static curve at seven levels
+within 0.01 dB, its attack time constant 481 frames for 10 ms at 48 kHz (480),
+a duck by a sidechain; Freeverb equal bit for bit to a reference written once
+by an independent Python implementation of the same structure in float32
+(`make_reference.py`, beside the fixture), and its tail to -60 dB the same
+47366 frames; a plan swap of eq, compressor and reverb that changes nothing.
+Not yet: `lib/Float4` for these (whether four combs or two channels at once
+are faster is unmeasured; queued).
+
 Rae has no function values and no interfaces, so the plan runs nodes with a
 `match` on the node kind over typed state tables (one dense table per kind, ECS
 style). How a program adds its **own** node kind without editing `packages/audio` is

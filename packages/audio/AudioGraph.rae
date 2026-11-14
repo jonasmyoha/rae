@@ -30,6 +30,7 @@
 #     let compiled: CompiledPlan = compileGraph(graph: graph, sampleRate: 48000, maxFrames: 512)
 import Math
 import String
+open audio/EffectStates
 open audio/Sound
 
 enum NodeKind {
@@ -58,6 +59,14 @@ enum NodeKind {
   # also scaled by the duck level, which falls while a voice on the duck's
   # source bus sounds (the sources' activity marks) and comes back after
   duck
+  # an EQ band (audio/EffectStates): a cookbook biquad, its frequency, gain
+  # and Q moved over 5 ms by parameter events
+  eq
+  # a compressor: a soft knee, attack and release; a second input, when it has
+  # one, is the sidechain its level is measured on (a duck by another bus)
+  compressor
+  # Freeverb (Jezar's public domain structure)
+  reverb
 }
 
 type GraphNode {
@@ -77,6 +86,8 @@ type GraphNode {
   # a delay that is a node's processing latency (a look-ahead limiter, a
   # plugin), not an echo: the compiler lines up the other paths with it
   reportsLatency: Bool
+  # an eq, compressor or reverb node's settings (audio/EffectStates)
+  effect: EffectSettings
 }
 
 type GraphEdge {
@@ -179,6 +190,10 @@ type RenderPlan {
   limiters: Buffer(LimiterState)
   sources: Buffer(SourceState)
   ducks: Buffer(DuckState)
+  filters: Buffer(FilterState)
+  compressors: Buffer(CompressorState)
+  reverbs: Buffer(ReverbState)
+  reverbCount: Int
 }
 
 type CompiledPlan {
@@ -204,6 +219,7 @@ func plainNode(kind: view NodeKind) ret GraphNode {
     preFader: false
     entityId: -1
     reportsLatency: false
+    effect: defaultEffectSettings()
   }
 }
 
@@ -274,6 +290,39 @@ func duckNode() ret GraphNode {
   ret plainNode(kind: NodeKind.duck)
 }
 
+# An EQ band of shape `filter` at `frequency` Hz, `gainDecibels` (the peak and
+# the shelves) and Q `quality`
+func eqNode(
+  filter: view FilterShape
+  frequency: view Float
+  gainDecibels: view Float
+  quality: view Float
+) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.eq)
+  node.effect.filter = filter
+  node.effect.frequency = frequency
+  node.effect.quality = quality
+  node.decibels = gainDecibels
+  ret node
+}
+
+# A compressor: above `thresholdDecibels` the level grows 1 / `ratio` as fast,
+# with a soft knee `kneeDecibels` wide; the reduction moves with the attack
+# and release times; `makeupDecibels` after it
+func compressorNode(settings: view EffectSettings, makeupDecibels: view Float) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.compressor)
+  node.effect = settings
+  node.decibels = makeupDecibels
+  ret node
+}
+
+# Freeverb with the settings' roomSize, damping, wet, dry and width (0..1)
+func reverbNode(settings: view EffectSettings) ret GraphNode {
+  var node: GraphNode = plainNode(kind: NodeKind.reverb)
+  node.effect = settings
+  ret node
+}
+
 func outputNode() ret GraphNode {
   ret plainNode(kind: NodeKind.output)
 }
@@ -301,9 +350,16 @@ func latencyFrames(node: view GraphNode) ret Int {
   ret 0
 }
 
+# A reverb's tail: four seconds at 48 kHz (Freeverb's largest room falls
+# 60 dB in less)
+const reverbTailFrames: Int = 192000
+
 func tailFrames(node: view GraphNode) ret Int {
   if node.kind is NodeKind.delay {
     ret node.delayFrames
+  }
+  if node.kind is NodeKind.reverb {
+    ret reverbTailFrames
   }
   ret 0
 }
@@ -375,6 +431,10 @@ func emptyRenderPlan() ret RenderPlan {
       limiters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(LimiterState))
       sources: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(SourceState))
       ducks: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(DuckState))
+      filters: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(FilterState))
+      compressors: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(CompressorState))
+      reverbs: rae_ext_rae_buf_alloc(size: 0, elemSize: sizeof(ReverbState))
+      reverbCount: 0
     }
   }
 }
@@ -404,6 +464,9 @@ func prepareRenderPlan(
   let meterCount: Int = countKind(graph: graph, kind: NodeKind.meter)
   let limiterCount: Int = countKind(graph: graph, kind: NodeKind.limiter)
   let duckCount: Int = countKind(graph: graph, kind: NodeKind.duck)
+  let filterCount: Int = countKind(graph: graph, kind: NodeKind.eq)
+  let compressorCount: Int = countKind(graph: graph, kind: NodeKind.compressor)
+  let reverbCount: Int = countKind(graph: graph, kind: NodeKind.reverb)
   let stateIndex: Buffer(Int) = intBuffer(count: count)
   let outputBuffers: Buffer(Int) = intBuffer(count: count)
   let inputStart: Buffer(Int) = intBuffer(count: count)
@@ -435,6 +498,18 @@ func prepareRenderPlan(
       elemSize: sizeof(SourceState)
     )
     plan.ducks = rae_ext_rae_buf_alloc(size: max(a: 1, b: duckCount), elemSize: sizeof(DuckState))
+    plan.filters = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: filterCount)
+      elemSize: sizeof(FilterState)
+    )
+    plan.compressors = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: compressorCount)
+      elemSize: sizeof(CompressorState)
+    )
+    plan.reverbs = rae_ext_rae_buf_alloc(
+      size: max(a: 1, b: reverbCount)
+      elemSize: sizeof(ReverbState)
+    )
   }
   var gainUsed: Int = 0
   var panUsed: Int = 0
@@ -443,6 +518,9 @@ func prepareRenderPlan(
   var limiterUsed: Int = 0
   var sourceUsed: Int = 0
   var duckUsed: Int = 0
+  var filterUsed: Int = 0
+  var compressorUsed: Int = 0
+  var reverbUsed: Int = 0
   var inputUsed: Int = 0
   var outputBuffer: Int = 0
   loop var k: Int = 0, k < count, ++k {
@@ -522,6 +600,38 @@ func prepareRenderPlan(
           }
         )
         duckUsed = duckUsed + 1
+      } else if kind is NodeKind.eq {
+        state = filterUsed
+        rae_ext_rae_buf_set(
+          buf: plan.filters
+          index: filterUsed
+          value: createFilterState(
+            settings: node.effect
+            gainDecibels: node.decibels
+            sampleRate: sampleRate
+          )
+        )
+        filterUsed = filterUsed + 1
+      } else if kind is NodeKind.compressor {
+        state = compressorUsed
+        rae_ext_rae_buf_set(
+          buf: plan.compressors
+          index: compressorUsed
+          value: createCompressorState(
+            settings: node.effect
+            makeupDecibels: node.decibels
+            sampleRate: sampleRate
+          )
+        )
+        compressorUsed = compressorUsed + 1
+      } else if kind is NodeKind.reverb {
+        state = reverbUsed
+        rae_ext_rae_buf_set(
+          buf: plan.reverbs
+          index: reverbUsed
+          value: createReverbState(settings: node.effect, sampleRate: sampleRate)
+        )
+        reverbUsed = reverbUsed + 1
       } else if kind is NodeKind.output {
         outputBuffer = bufferOf.copyAtFallback(index: index, fallback: 0)
       }
@@ -569,6 +679,7 @@ func prepareRenderPlan(
   plan.latencyFrames = latencyFrames
   plan.scratch = createSampleBuffer(count: max(a: 1, b: bufferCount) * 2 * maxFrames)
   plan.delayCount = delayCount
+  plan.reverbCount = reverbCount
   ret plan
 }
 
@@ -594,6 +705,10 @@ func freeRenderPlan(plan: view RenderPlan) {
       let delay: DelayState = rae_ext_rae_buf_get(buf: plan.delays, index: i)
       rae_ext_rae_buf_free(buf: delay.line)
     }
+    loop var i: Int = 0, i < plan.reverbCount, ++i {
+      let reverb: ReverbState = rae_ext_rae_buf_get(buf: plan.reverbs, index: i)
+      freeReverbState(state: reverb)
+    }
     rae_ext_rae_buf_free(buf: plan.kinds)
     rae_ext_rae_buf_free(buf: plan.stateIndex)
     rae_ext_rae_buf_free(buf: plan.outputBuffers)
@@ -611,5 +726,50 @@ func freeRenderPlan(plan: view RenderPlan) {
     rae_ext_rae_buf_free(buf: plan.limiters)
     rae_ext_rae_buf_free(buf: plan.sources)
     rae_ext_rae_buf_free(buf: plan.ducks)
+    rae_ext_rae_buf_free(buf: plan.filters)
+    rae_ext_rae_buf_free(buf: plan.compressors)
+    rae_ext_rae_buf_free(buf: plan.reverbs)
   }
+}
+
+# ---- sample access (the audio thread's node functions) ---------------------------
+func scratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+) ret Float realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(
+      buf: plan.scratch
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+    )
+  }
+}
+
+func setScratchAt(
+  plan: view RenderPlan
+  buffer: view Int
+  channel: view Int
+  frame: view Int
+  value: view Float
+) realtime {
+  unsafe {
+    var target: Buffer(Float) = plan.scratch
+    rae_ext_rae_buf_set(
+      buf: target
+      index: (buffer * 2 + channel) * plan.maxFrames + frame
+      value: value
+    )
+  }
+}
+
+func intAt(buffer: view Buffer(Int), index: view Int) ret Int realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: buffer, index: index)
+  }
+}
+
+func firstInputOf(plan: view RenderPlan, node: view Int) ret Int realtime {
+  ret intAt(buffer: plan.inputs, index: intAt(buffer: plan.inputStart, index: node))
 }

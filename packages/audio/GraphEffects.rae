@@ -1,0 +1,400 @@
+# audio/GraphEffects — the effect nodes on the audio thread (docs/audio-design.md
+# §5.3): an EQ band, a compressor with an optional sidechain input, and a
+# Freeverb reverb, each over its state in the RenderPlan (audio/EffectStates).
+# Also their parameter events (an EQ band's frequency, gain and Q, each moved
+# over 5 ms) and what a plan swap carries over (a band's filter memory and
+# parameters, a compressor's gain reduction, a reverb's lines).
+import Math
+open audio/AudioGraph
+open audio/EffectStates
+
+# Parameter event kinds of an EQ band (GraphParameterEvent.kind; 0 is a
+# fader's gain and 1 a pan)
+const parameterEqFrequency: Int = 2
+
+const parameterEqGain: Int = 3
+
+const parameterEqQuality: Int = 4
+
+# 20 / ln(10): decibels from a natural logarithm, and its inverse
+const decibelsPerNeper: Float = 8.685889638
+
+const nepersPerDecibel: Float = 0.11512925465
+
+func filterAt(plan: view RenderPlan, stateAt: view Int) ret FilterState realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.filters, index: stateAt)
+  }
+}
+
+func setFilterAt(plan: view RenderPlan, stateAt: view Int, state: view FilterState) realtime {
+  unsafe {
+    var filters: Buffer(FilterState) = plan.filters
+    rae_ext_rae_buf_set(buf: filters, index: stateAt, value: state)
+  }
+}
+
+# One step of a band's parameter ramp: the parameters move; the coefficients
+# follow every 16 frames and on the ramp's last frame (then on the target)
+func stepFilterRamp(state: mod FilterState) realtime {
+  state.rampLeft = state.rampLeft - 1
+  if state.rampLeft <= 0 {
+    state.frequency = state.targetFrequency
+    state.gainDecibels = state.targetGain
+    state.quality = state.targetQuality
+    filterCoefficients(state: state)
+    ret
+  }
+  state.frequency = state.frequency + state.stepFrequency
+  state.gainDecibels = state.gainDecibels + state.stepGain
+  state.quality = state.quality + state.stepQuality
+  if state.rampLeft % 16 is 0 {
+    filterCoefficients(state: state)
+  }
+}
+
+# The cookbook biquad in transposed direct form II, each channel
+func processEq(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  var state: FilterState = filterAt(plan: plan, stateAt: stateAt)
+  loop var i: Int = 0, i < frames, ++i {
+    if state.rampLeft > 0 {
+      stepFilterRamp(state: state)
+    }
+    let left: Float = scratchAt(
+      plan: plan
+      buffer: input
+      channel: 0
+      frame: i
+    )
+    let right: Float = scratchAt(
+      plan: plan
+      buffer: input
+      channel: 1
+      frame: i
+    )
+    let leftOut: Float = state.b0 * left + state.z1Left
+    state.z1Left = state.b1 * left - state.a1 * leftOut + state.z2Left
+    state.z2Left = state.b2 * left - state.a2 * leftOut
+    let rightOut: Float = state.b0 * right + state.z1Right
+    state.z1Right = state.b1 * right - state.a1 * rightOut + state.z2Right
+    state.z2Right = state.b2 * right - state.a2 * rightOut
+    setScratchAt(
+      plan: plan
+      buffer: out
+      channel: 0
+      frame: i
+      value: leftOut
+    )
+    setScratchAt(
+      plan: plan
+      buffer: out
+      channel: 1
+      frame: i
+      value: rightOut
+    )
+  }
+  setFilterAt(plan: plan, stateAt: stateAt, state: state)
+}
+
+# Feed-forward, stereo-linked: the level is the louder channel of the
+# sidechain (the node's second input, or its own input when it has one), the
+# static curve gives the reduction it wants, and the reduction moves there
+# with the attack (going up) or the release (coming back) time constant
+func processCompressor(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let start: Int = intAt(buffer: plan.inputStart, index: node)
+  let main: Int = intAt(buffer: plan.inputs, index: start)
+  var side: Int = main
+  if intAt(buffer: plan.inputCount, index: node) > 1 {
+    side = intAt(buffer: plan.inputs, index: start + 1)
+  }
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  var state: CompressorState = compressorAt(plan: plan, stateAt: stateAt)
+  loop var i: Int = 0, i < frames, ++i {
+    let level: Float = max(
+      a: abs(value: scratchAt(
+        plan: plan
+        buffer: side
+        channel: 0
+        frame: i
+      ))
+      b: abs(value: scratchAt(
+        plan: plan
+        buffer: side
+        channel: 1
+        frame: i
+      ))
+    )
+    var inputDecibels: Float = -180.0
+    if level > 0.000000001 {
+      inputDecibels = decibelsPerNeper * naturalLog(x: level)
+    }
+    let wanted: Float = inputDecibels - compressorCurve(
+      inputDecibels: inputDecibels
+      thresholdDecibels: state.thresholdDecibels
+      ratio: state.ratio
+      kneeDecibels: state.kneeDecibels
+    )
+    var coefficient: Float = state.release
+    if wanted > state.reductionDecibels {
+      coefficient = state.attack
+    }
+    state.reductionDecibels = coefficient * state.reductionDecibels + (1.0 - coefficient) * wanted
+    let gain: Float = Math.exp(
+      x: (state.makeupDecibels - state.reductionDecibels) * nepersPerDecibel
+    )
+    loop var channel: Int = 0, channel < 2, ++channel {
+      setScratchAt(
+        plan: plan
+        buffer: out
+        channel: channel
+        frame: i
+        value: scratchAt(
+          plan: plan
+          buffer: main
+          channel: channel
+          frame: i
+        ) * gain
+      )
+    }
+  }
+  unsafe {
+    var compressors: Buffer(CompressorState) = plan.compressors
+    rae_ext_rae_buf_set(buf: compressors, index: stateAt, value: state)
+  }
+}
+
+# One comb of the reverb (line `line`): the delayed sample out, its lowpass
+# memory updated, the input plus the filtered feedback in
+func reverbComb(state: view ReverbState, line: view Int, input: view Float) ret Float realtime {
+  unsafe {
+    var lines: Buffer(Float) = state.lines
+    var positions: Buffer(Int) = state.positions
+    var stores: Buffer(Float) = state.stores
+    let position: Int = rae_ext_rae_buf_get(buf: positions, index: line)
+    let at: Int = rae_ext_rae_buf_get(buf: state.starts, index: line) + position
+    let output: Float = rae_ext_rae_buf_get(buf: lines, index: at)
+    let store: Float = output * state.damp2 + rae_ext_rae_buf_get(buf: stores, index: line) * state.damp1
+    rae_ext_rae_buf_set(buf: stores, index: line, value: store)
+    rae_ext_rae_buf_set(buf: lines, index: at, value: input + store * state.feedback)
+    var next: Int = position + 1
+    if next >= rae_ext_rae_buf_get(buf: state.lengths, index: line) {
+      next = 0
+    }
+    rae_ext_rae_buf_set(buf: positions, index: line, value: next)
+    ret output
+  }
+}
+
+# One allpass of the reverb (feedback 0.5)
+func reverbAllpass(state: view ReverbState, line: view Int, input: view Float) ret Float realtime {
+  unsafe {
+    var lines: Buffer(Float) = state.lines
+    var positions: Buffer(Int) = state.positions
+    let position: Int = rae_ext_rae_buf_get(buf: positions, index: line)
+    let at: Int = rae_ext_rae_buf_get(buf: state.starts, index: line) + position
+    let delayed: Float = rae_ext_rae_buf_get(buf: lines, index: at)
+    let output: Float = -input + delayed
+    rae_ext_rae_buf_set(buf: lines, index: at, value: input + delayed * 0.5)
+    var next: Int = position + 1
+    if next >= rae_ext_rae_buf_get(buf: state.lengths, index: line) {
+      next = 0
+    }
+    rae_ext_rae_buf_set(buf: positions, index: line, value: next)
+    ret output
+  }
+}
+
+# Freeverb: both channels' sum into eight parallel combs a channel, then four
+# allpasses in series, mixed wet (with the width) and dry
+func processReverb(
+  plan: view RenderPlan
+  node: view Int
+  out: view Int
+  frames: view Int
+) realtime {
+  let input: Int = firstInputOf(plan: plan, node: node)
+  let stateAt: Int = intAt(buffer: plan.stateIndex, index: node)
+  let state: ReverbState = reverbAt(plan: plan, stateAt: stateAt)
+  loop var i: Int = 0, i < frames, ++i {
+    let left: Float = scratchAt(
+      plan: plan
+      buffer: input
+      channel: 0
+      frame: i
+    )
+    let right: Float = scratchAt(
+      plan: plan
+      buffer: input
+      channel: 1
+      frame: i
+    )
+    let mono: Float = (left + right) * state.inputGain
+    var leftWet: Float = 0.0
+    var rightWet: Float = 0.0
+    loop var comb: Int = 0, comb < reverbCombs, ++comb {
+      leftWet = leftWet + reverbComb(state: state, line: comb, input: mono)
+      rightWet = rightWet + reverbComb(state: state, line: reverbCombs + comb, input: mono)
+    }
+    loop var allpass: Int = 0, allpass < reverbAllpasses, ++allpass {
+      leftWet = reverbAllpass(state: state, line: 2 * reverbCombs + allpass, input: leftWet)
+      rightWet = reverbAllpass(
+        state: state
+        line: 2 * reverbCombs + reverbAllpasses + allpass
+        input: rightWet
+      )
+    }
+    setScratchAt(
+      plan: plan
+      buffer: out
+      channel: 0
+      frame: i
+      value: leftWet * state.wet1 + rightWet * state.wet2 + left * state.dry
+    )
+    setScratchAt(
+      plan: plan
+      buffer: out
+      channel: 1
+      frame: i
+      value: rightWet * state.wet1 + leftWet * state.wet2 + right * state.dry
+    )
+  }
+}
+
+# ---- parameter events ---------------------------------------------------------------
+# An EQ band's frequency, gain (dB) or Q, moved there over 5 ms
+func applyEqParameter(
+  plan: view RenderPlan
+  stateAt: view Int
+  kind: view Int
+  value: view Float
+) realtime {
+  var state: FilterState = filterAt(plan: plan, stateAt: stateAt)
+  var frequency: Float = state.targetFrequency
+  var gain: Float = state.targetGain
+  var quality: Float = state.targetQuality
+  if kind is parameterEqFrequency {
+    frequency = value
+  } else if kind is parameterEqGain {
+    gain = value
+  } else if kind is parameterEqQuality {
+    quality = value
+  }
+  retargetFilter(
+    state: state
+    frequency: frequency
+    gainDecibels: gain
+    quality: quality
+  )
+  setFilterAt(plan: plan, stateAt: stateAt, state: state)
+}
+
+func isEqParameter(kind: view Int) ret Bool realtime {
+  ret kind is parameterEqFrequency or kind is parameterEqGain or kind is parameterEqQuality
+}
+
+# ---- a plan swap ----------------------------------------------------------------------
+# A band continues with its filter memory and its parameters, and moves to the
+# new plan's over 5 ms; a compressor keeps its gain reduction; a reverb keeps
+# its lines (the two plans exchange line buffers, each still owning one), when
+# they are the same lengths
+func carryEffectState(
+  kind: view NodeKind
+  from: view RenderPlan
+  oldAt: view Int
+  to: view RenderPlan
+  newAt: view Int
+) realtime {
+  unsafe {
+    if kind is NodeKind.eq {
+      let before: FilterState = filterAt(plan: from, stateAt: oldAt)
+      var state: FilterState = filterAt(plan: to, stateAt: newAt)
+      let frequency: Float = state.targetFrequency
+      let gain: Float = state.targetGain
+      let quality: Float = state.targetQuality
+      state.frequency = before.frequency
+      state.gainDecibels = before.gainDecibels
+      state.quality = before.quality
+      state.b0 = before.b0
+      state.b1 = before.b1
+      state.b2 = before.b2
+      state.a1 = before.a1
+      state.a2 = before.a2
+      state.z1Left = before.z1Left
+      state.z2Left = before.z2Left
+      state.z1Right = before.z1Right
+      state.z2Right = before.z2Right
+      retargetFilter(
+        state: state
+        frequency: frequency
+        gainDecibels: gain
+        quality: quality
+      )
+      setFilterAt(plan: to, stateAt: newAt, state: state)
+    } else if kind is NodeKind.compressor {
+      var compressors: Buffer(CompressorState) = to.compressors
+      var state: CompressorState = rae_ext_rae_buf_get(buf: compressors, index: newAt)
+      let before: CompressorState = rae_ext_rae_buf_get(buf: from.compressors, index: oldAt)
+      state.reductionDecibels = before.reductionDecibels
+      rae_ext_rae_buf_set(buf: compressors, index: newAt, value: state)
+    } else if kind is NodeKind.reverb {
+      var newReverbs: Buffer(ReverbState) = to.reverbs
+      var oldReverbs: Buffer(ReverbState) = from.reverbs
+      var state: ReverbState = rae_ext_rae_buf_get(buf: newReverbs, index: newAt)
+      var before: ReverbState = rae_ext_rae_buf_get(buf: oldReverbs, index: oldAt)
+      if reverbSameLines(first: state, second: before) {
+        let lines: Buffer(Float) = state.lines
+        let positions: Buffer(Int) = state.positions
+        let stores: Buffer(Float) = state.stores
+        state.lines = before.lines
+        state.positions = before.positions
+        state.stores = before.stores
+        before.lines = lines
+        before.positions = positions
+        before.stores = stores
+        rae_ext_rae_buf_set(buf: newReverbs, index: newAt, value: state)
+        rae_ext_rae_buf_set(buf: oldReverbs, index: oldAt, value: before)
+      }
+    }
+  }
+}
+
+func reverbSameLines(first: view ReverbState, second: view ReverbState) ret Bool realtime {
+  if first.lineCount is not second.lineCount {
+    ret false
+  }
+  unsafe {
+    loop var line: Int = 0, line < first.lineCount, ++line {
+      if rae_ext_rae_buf_get(buf: first.lengths, index: line) is not rae_ext_rae_buf_get(
+        buf: second.lengths
+        index: line
+      ) {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+func compressorAt(plan: view RenderPlan, stateAt: view Int) ret CompressorState realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.compressors, index: stateAt)
+  }
+}
+
+func reverbAt(plan: view RenderPlan, stateAt: view Int) ret ReverbState realtime {
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: plan.reverbs, index: stateAt)
+  }
+}
