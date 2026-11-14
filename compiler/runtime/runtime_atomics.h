@@ -59,6 +59,8 @@ void rae_ext_rae_signal_free(int64_t signal);
 /* The real-time check and mark (runtime_realtime.c, lib/Realtime.rae). */
 void rae_ext_Realtime_markThread(rae_Bool realtime) RAE_NONBLOCKING;
 rae_Bool rae_ext_Realtime_threadIsMarked(void) RAE_NONBLOCKING;
+/* The real-time check's count so far; -1 when it is off. */
+int64_t rae_ext_Realtime_checkCount(void);
 /* Real-time priority for a `spawn thread` (lib/Realtime promoteToRealtime,
  * runtime_realtime.c): one scheduler call each, per platform */
 #if defined(__APPLE__)

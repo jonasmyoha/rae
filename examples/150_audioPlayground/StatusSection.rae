@@ -1,11 +1,38 @@
 # The Status section: the device the engine plays on, its rate and period, the latency the device
-# and the engine add, the frames of silence played for lack of samples (underruns), and how many
-# sounds were played and have ended. Written a few times a second, and only when a line changed.
+# and the engine add, the frames of silence played for lack of samples (underruns), how many
+# sounds were played and have ended; and how the audio thread keeps up: each render's time
+# (audio/RenderTimes) in a lib/Realtime RealtimeRecorder (its p99.9, its maximum, the share of
+# the period they take) with a graph of the slowest render of each half second, the render
+# helpers in use (RAE_AUDIO_RENDER_HELPERS), the real-time check's count (RAE_REALTIME_CHECK=1),
+# and what Now Playing shows. Written a few times a second, and only when a line changed.
+import Math
+import Realtime
 open audio/Audio
 open audio/AudioClock
+open audio/RenderTimes
 open ui/Ecs
 open app3d/UiShell
 open Playground
+
+# The graph's bars, a half second each (15 s), and its height (a full period)
+const renderHistoryLength: Int = 30
+
+const renderBarHeight: Float = 36.0
+
+func microseconds(nanoseconds: view Int) ret Int {
+  ret (nanoseconds + 500) / 1000
+}
+
+func realtimeCheckText() ret String {
+  let count: Int = Realtime.realtimeCheckCount()
+  if count < 0 {
+    ret "off (RAE_REALTIME_CHECK=1 turns it on)"
+  }
+  if count is 0 {
+    ret "on, clean"
+  }
+  ret "on, {count} calls that may allocate, free, lock or log"
+}
 
 # The status lines as they read now
 func statusLines(playground: view Playground) ret List(String) {
@@ -20,25 +47,109 @@ func statusLines(playground: view Playground) ret List(String) {
     )
   }
   let latencyMs: Float = latencyFrames.toFloat() * 1000.0 / Math.max(a: 1, b: audio.sampleRate).toFloat()
+  let recorder: view Realtime.RealtimeRecorder = playground.renderRecorder
+  let period: Int = Math.max(a: 1, b: recorder.periodNanoseconds)
+  let p999: Int = recorder.percentileNanoseconds(perMille: 999)
+  let share: Int = recorder.maximumNanoseconds * 100 / period
+  var nowPlaying: String = "not shown"
+  if playground.nowPlayingShown {
+    nowPlaying = "shown"
+  }
+  var lastCommand: String = ""
+  if playground.lastRemoteCommand.length() > 0 {
+    lastCommand = ", last {playground.lastRemoteCommand}"
+  }
   ret List(String) {
     "Device: {device}"
     "{audio.sampleRate} Hz, {audio.channels} channels, a period of {audio.periodFrames} frames"
     "Latency: {latencyFrames} frames ({(latencyMs * 10.0 + 0.5).toInt() / 10} ms)"
     "Underruns: {audio.underrunFrames()} frames of silence, {audio.deviceCallbacks()} callbacks"
     "Sounds played: {playground.soundsPlayed}, voices ended: {audio.voicesEnded}"
+    "Render: p99.9 {microseconds(nanoseconds: p999)} us, max {microseconds(
+      nanoseconds: recorder.maximumNanoseconds
+    )} us ({share} % of {microseconds(nanoseconds: period)} us), {recorder.calls} renders"
+    "Helpers: {audio.renderHelperCount()}; real-time check: {realtimeCheckText()}"
+    "Now Playing: {nowPlaying}, {playground.remoteCommands} remote commands{lastCommand}"
   }
 }
 
-# Every 15th frame; true when a line changed
-func statusSection(
-  playground: view Playground
-  world: mod UiWorld
-  shown: mod List(String)
-) ret Bool {
-  if playground.frames % 15 is not 1 {
+# This frame's render times into the recorder and the half-second window
+func recordRenderTimes(playground: mod Playground) {
+  loop let nanoseconds: Int in playground.audio.takeRenderNanoseconds() {
+    playground.renderRecorder.recordCall(nanoseconds: nanoseconds)
+    playground.renderWindowMaximum = Math.max(a: playground.renderWindowMaximum, b: nanoseconds)
+  }
+}
+
+# A half second over: its slowest render into the history; true when it moved
+func closeRenderWindow(playground: mod Playground, now: view Float64) ret Bool {
+  if now - playground.renderWindowStarted < 0.5 {
     ret false
   }
+  playground.renderWindowStarted = now
+  playground.renderHistory.add(value: playground.renderWindowMaximum)
+  if playground.renderHistory.length > renderHistoryLength {
+    var kept: List(Int) = {}
+    loop var i: Int = playground.renderHistory.length - renderHistoryLength, i < playground.renderHistory.length, ++i {
+      kept.add(value: playground.renderHistory.copyAtDefault(index: i))
+    }
+    playground.renderHistory = kept
+  }
+  playground.renderWindowMaximum = 0
+  ret true
+}
+
+# The bars: each the slowest render of its half second, against the slowest of the graph (its
+# top), which the label gives with the period (a render as long as the period misses its
+# deadline)
+func drawRenderHistory(playground: view Playground, world: mod UiWorld) {
+  var top: Int = 1
+  loop let slowest: Int in playground.renderHistory {
+    top = Math.max(a: top, b: slowest)
+  }
+  let missing: Int = renderHistoryLength - playground.renderHistory.length
+  loop var bar: Int = 0, bar < renderHistoryLength, ++bar {
+    var height: Float = 1.0
+    if bar >= missing {
+      let slowest: Int = playground.renderHistory.copyAtDefault(index: bar - missing)
+      height = Math.max(a: 1.0, b: (slowest as Float) / (top as Float) * renderBarHeight)
+    }
+    setNodeRect(
+      world: world
+      nodeId: "RenderBar{bar}"
+      x: 0.0
+      y: 0.0
+      w: 8.0
+      h: height
+    )
+  }
+  let period: Int = playground.renderRecorder.periodNanoseconds
+  setNodeText(
+    world: world
+    nodeId: "RenderGraphLabel"
+    value: "Slowest render each half second: top {microseconds(nanoseconds: top)} us, the period {microseconds(
+      nanoseconds: period
+    )} us"
+  )
+}
+
+# The render times every frame; the lines every 15th frame, and the graph each half second; true
+# when something shown changed
+func statusSection(
+  playground: mod Playground
+  world: mod UiWorld
+  shown: mod List(String)
+  now: view Float64
+) ret Bool {
+  recordRenderTimes(playground: playground)
   var changed: Bool = false
+  if closeRenderWindow(playground: playground, now: now) {
+    drawRenderHistory(playground: playground, world: world)
+    changed = true
+  }
+  if playground.frames % 15 is not 1 {
+    ret changed
+  }
   let lines: List(String) = statusLines(playground: playground)
   loop var i: Int = 0, i < lines.length, ++i {
     let line: String = lines.copyAtDefault(index: i)

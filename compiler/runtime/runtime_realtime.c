@@ -100,6 +100,17 @@ rae_Bool rae_ext_Realtime_threadIsMarked(void) {
   return g_rae_realtime_thread != 0;
 }
 
+/* The real-time check's count so far: the calls a marked thread made that may
+ * allocate, free, lock or log (what the exit report lists), for a program to
+ * show while it runs; -1 when RAE_REALTIME_CHECK is off. The counters are the
+ * runtime's own, beside its allocator's and locks' guards. */
+int64_t rae_ext_Realtime_checkCount(void) {
+  if (!g_rae_realtime_check) return -1;
+  int64_t total = atomic_load(&g_rae_realtime_overflow);
+  for (int i = 0; i < RAE_REALTIME_SLOTS; i++) total += atomic_load(&g_rae_realtime_slots[i].count);
+  return total;
+}
+
 /* Whether RAE_REALTIME_REPORT asks for the time recorders' reports. */
 rae_Bool rae_ext_Realtime_reportWanted(void) {
   const char* value = getenv("RAE_REALTIME_REPORT");

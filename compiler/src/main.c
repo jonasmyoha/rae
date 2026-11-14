@@ -3408,7 +3408,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     "lib/data",
     /* the Material icon atlas every `mat:` icon draws from (ui/MaterialIconFont) */
     "lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.json",
-    "lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.png"
+    "lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.png",
+    /* the walker kit's shared text font (lib/assets/walker: 137, 138, 140, 143, 150 load it;
+     * without it their text does not draw in the browser) */
+    "lib/assets/walker/Roboto-Regular.mtsdf.json",
+    "lib/assets/walker/Roboto-Regular.mtsdf.raw"
   };
   char preload_lib[sizeof(lib_runtime_paths) / sizeof(lib_runtime_paths[0])][PATH_MAX * 2 + 4];
   int preload_lib_count = 0;

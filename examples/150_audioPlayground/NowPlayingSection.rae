@@ -1,0 +1,120 @@
+# Now Playing for the music stream (audio/NowPlaying): the lock screen, Control Center and the
+# media keys show it (iOS and macOS; elsewhere showing answers false), and their buttons come
+# back as remote commands, applied to the stream: play, pause, play-pause, a new position from
+# the scrubber, and next / previous as 10 s on / back (there is one stream). The engine's
+# session is `music`, so iOS keeps the stream playing in the background (with the app's
+# `audio` background mode: RAE_IOS_BACKGROUND_AUDIO=1 when it is built).
+#
+# The commands can be sent from code (injectRemoteCommand) as a person's button would send them:
+# the demo does, and pressing the real buttons is a person's check.
+import Gpu2d
+open audio/Audio
+open audio/AudioClock
+open audio/AudioStreams
+open audio/NowPlaying
+open MusicSection
+open Playground
+
+func commandName(kind: view RemoteCommandKind) ret String {
+  if kind is RemoteCommandKind.play {
+    ret "play"
+  }
+  if kind is RemoteCommandKind.pause {
+    ret "pause"
+  }
+  if kind is RemoteCommandKind.togglePlayPause {
+    ret "play-pause"
+  }
+  if kind is RemoteCommandKind.nextTrack {
+    ret "next (10 s on)"
+  }
+  if kind is RemoteCommandKind.previousTrack {
+    ret "previous (10 s back)"
+  }
+  ret "a new position"
+}
+
+func enableNowPlaying() {
+  let enabled: Bool = enableRemoteCommands(
+    nextTrack: true
+    previousTrack: true
+    changePosition: true
+  )
+}
+
+# What plays, its place and whether it plays, on the lock screen and in Control Center
+func showMusic(playground: mod Playground) {
+  playground.nowPlayingShown = showNowPlaying(info: playground.audio.nowPlayingOfStream(
+    voiceId: playground.musicVoice
+    title: "Position tones"
+    artist: "Rae audio playground"
+    album: "A test signal"
+    artworkPath: ""
+  ))
+}
+
+# This frame's remote commands onto the stream, and Now Playing kept current (every 2 s while
+# the stream plays, and after a command); true when what the section shows changed
+func nowPlayingSection(playground: mod Playground) ret Bool {
+  var changed: Bool = false
+  loop let command: RemoteCommandEvent in takeRemoteCommands() {
+    if playground.musicStarted {
+      if not playground.audio.applyRemoteCommand(voiceId: playground.musicVoice, command: command) {
+        # next and previous: there is one stream, so 10 s on or back
+        var step: Float64 = 10.0
+        if command.kind is RemoteCommandKind.previousTrack {
+          step = -10.0
+        }
+        let position: Float64 = playground.audio.positionSeconds(voiceId: playground.musicVoice)
+        let unusedSought: Bool = playground.audio.seek(
+          voiceId: playground.musicVoice
+          seconds: position + step
+        )
+      }
+      showMusic(playground: playground)
+    }
+    playground.remoteCommands = playground.remoteCommands + 1
+    playground.lastRemoteCommand = commandName(kind: command.kind)
+    changed = true
+  }
+  let newStream: Bool = playground.musicVoice.value is not playground.nowPlayingVoice
+  if playground.musicStarted and (newStream or playground.frames % 120 is 0) {
+    playground.nowPlayingVoice = playground.musicVoice.value
+    showMusic(playground: playground)
+    changed = changed or newStream
+  }
+  ret changed
+}
+
+# The demo's commands, as the lock screen's buttons would send them
+func nowPlayingDemoStep(frame: view Int) {
+  if frame is 200 {
+    injectRemoteCommand(kind: RemoteCommandKind.pause, positionSeconds: 0.0)
+  }
+  if frame is 215 {
+    injectRemoteCommand(kind: RemoteCommandKind.play, positionSeconds: 0.0)
+  }
+  if frame is 230 {
+    injectRemoteCommand(kind: RemoteCommandKind.changePosition, positionSeconds: 5.0)
+  }
+}
+
+# RAE_AUDIO_PLAYGROUND_BACKGROUND=1: the stream started by itself, and every 2 s a line with its
+# place, whether it plays, the silence played for lack of samples, the device's callbacks and
+# whether the window is on screen; so a run whose app is sent to the background (on an iPhone,
+# by opening another app) shows in its log whether the stream went on
+func playingLogStep(playground: mod Playground, frame: view Int, now: view Float64) {
+  if frame is 30 and not playground.musicStarted {
+    startMusic(playground: playground)
+  }
+  if not playground.musicStarted or now < playground.nextPlayingLog {
+    ret
+  }
+  playground.nextPlayingLog = now + 2.0
+  let position: Float64 = playground.audio.positionSeconds(voiceId: playground.musicVoice)
+  let playing: Bool = musicIsPlaying(playground: playground)
+  let tenths: Int = ((position * 10.0) as Float).toInt()
+  log(
+    "[audioPlayground] stream at {tenths / 10}.{tenths % 10} s, playing {playing}, underrun frames {playground.audio.underrunFrames()}, callbacks {playground.audio.deviceCallbacks()}, on screen {Gpu2d.renderableNow()}"
+  )
+}

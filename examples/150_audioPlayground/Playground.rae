@@ -4,12 +4,14 @@
 # later steps add
 # the synth, the microphone, the effects and the real-time view) reads and changes it once a frame.
 import Math
+import Realtime
 import Sys
 open audio/Audio
 open audio/AudioInput
 open audio/AudioMixer
 open audio/AudioSession
 open audio/BusEffects
+open audio/RenderTimes
 open audio/AudioSpatial
 open audio/Sound
 open audio/VoiceControls
@@ -76,6 +78,19 @@ type Playground {
   effectsBusEffects: BusEffects = {}
   effectsBus: Int = 0
   effectsMeasured: List(String) = {}
+  # the render's times (audio/RenderTimes) in a recorder of this thread, and the slowest render
+  # of each half second for the history graph (the last renderHistoryLength of them)
+  renderRecorder: Realtime.RealtimeRecorder
+  renderHistory: List(Int) = {}
+  renderWindowMaximum: Int = 0
+  renderWindowStarted: Float64 = 0.0
+  # Now Playing (audio/NowPlaying): shown for the stream, and the remote commands handled
+  nowPlayingShown: Bool = false
+  nowPlayingVoice: Int = -1
+  # RAE_AUDIO_PLAYGROUND_BACKGROUND=1: when the stream's place is logged next (s)
+  nextPlayingLog: Float64 = 0.0
+  remoteCommands: Int = 0
+  lastRemoteCommand: String = ""
   engineRate: Float = 1.0
 }
 
@@ -91,6 +106,8 @@ func playgroundAudioSettings(withInput: view Bool) ret AudioSettings {
   settings.offline = playgroundWantsOffline()
   # an EQ, a compressor and a reverb on the music and effects buses (EffectsSection)
   settings.busEffects = true
+  # music: Now Playing shows it, and iOS keeps it playing in the background
+  settings.session = AudioSessionKind.music
   if withInput and not settings.offline {
     settings.inputChannels = 1
     settings.session = AudioSessionKind.recording
@@ -147,6 +164,10 @@ func createPlayground() ret Playground {
     random: createRandom(seed: 150)
     stepsDemo: stepsDemo
     synthDemo: createSynthDemo(sampleRate: audio.sampleRate)
+    renderRecorder: Realtime.createRealtimeRecorder(
+      name: "audio render"
+      periodNanoseconds: audio.renderPeriodNanoseconds()
+    )
     inputDemo: createInputDemo(audio: audio)
   }
 }

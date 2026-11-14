@@ -383,3 +383,14 @@ func leaveWorkgroup(join: view RealtimeWorkgroupJoin) {
     }
   }
 }
+
+func rae_ext_Realtime_checkCount() unsafe extern ret Int
+
+# The real-time check's count so far (RAE_REALTIME_CHECK=1): the calls real-time threads made
+# that may allocate, free, lock or log, which fail the run at its exit; -1 when the check is
+# off. A program can show it while it runs.
+func realtimeCheckCount() ret Int {
+  unsafe {
+    ret rae_ext_Realtime_checkCount()
+  }
+}

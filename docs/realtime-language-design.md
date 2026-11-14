@@ -620,6 +620,10 @@ lock and `log` entry points). It works with any compiler and in release builds,
 and covers the paths RTSan does not see (Rae's own string pool, buffer
 allocator). It is the first step because it needs no language change.
 
+**Read while running (2026-11-14, Rae 0.3.126):** `realtimeCheckCount()` (lib/Realtime) gives
+the count so far, the same total the exit report prints, or -1 when the check is off, so a
+program can show it (the audio playground's Status section does).
+
 **Landed (2026-11-11):** `lib/Realtime.rae` (`markRealtimeThread`,
 `unmarkRealtimeThread`, `realtimeThreadIsMarked`) over
 `compiler/runtime/runtime_realtime.c`. The mark is a `_Thread_local` flag. The

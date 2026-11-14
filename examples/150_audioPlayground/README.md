@@ -1,8 +1,10 @@
 # 150 — Audio playground
 
-The audio package (`packages/audio`, docs/audio-design.md) to try by ear. This first part has
-the basics a game or an app uses. Later parts add one section each: the synth and MIDI, the
-microphone, effects on the buses, and the real-time view.
+The audio package (`packages/audio`, docs/audio-design.md) to try by ear, a section for each of
+its parts: sounds and a streamed track, the mix, game sounds, a sound placed in 3D, footsteps
+from step events, the synth and MIDI, the microphone, effects on the buses, Now Playing, and a
+status of the device and of how the audio thread keeps up. It runs on the Mac, on an iPhone
+(also in the background) and in the browser.
 
 Run it from Rae devtools' Examples, or:
 
@@ -85,7 +87,34 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
     gaps. Listening to them is a person's check.
 - **Status:** the device the engine plays on, its sample rate and period, the latency the device
   and the engine add, the frames of silence played because samples were late (underruns), and
-  how many sounds played and ended.
+  how many sounds played and ended. Then how the audio thread keeps up (`audio/RenderTimes`):
+  each render's time in a `RealtimeRecorder` (lib/Realtime), as its p99.9, its maximum and that
+  maximum's share of the period (a render as long as the period misses its deadline), with a
+  graph of the slowest render of each half second (its top value is written above it); the
+  render helpers in use (`RAE_AUDIO_RENDER_HELPERS=n`); and the real-time check
+  (`RAE_REALTIME_CHECK=1`: on and clean, or how many calls it counted that may allocate, free,
+  lock or log). On the Mac the slowest render is about 56 us of a 5.3 ms period; in the browser
+  about 2.4 ms.
+- **Now Playing:** the music stream is shown on the lock screen, in Control Center and to the
+  media keys (iOS and macOS; elsewhere it says it is not shown), and their buttons work on it:
+  play, pause, play-pause, a new position from the scrubber, and next and previous as 10 s on
+  and back. The session is `music`, so on an iPhone the stream keeps playing when the app goes to
+  the background (built with `RAE_IOS_BACKGROUND_AUDIO=1`, which gives it the `audio` background
+  mode). The Status section counts the commands and names the last.
+
+## On each platform
+
+- **Mac:** everything; the microphone once the terminal (or the app) may use it.
+- **iPhone** (`RAE_IOS_TEAM=<team> RAE_IOS_BACKGROUND_AUDIO=1 sh tools/ios/run-ios.sh
+  examples/150_audioPlayground`): everything; the microphone asks the first time Allow is
+  pressed; the stream keeps playing in the background (checked: another app opened on top, the
+  stream went on to its end with no underruns).
+- **Browser** (`rae build --target wasm --project examples/150_audioPlayground --out
+  <folder>/index.html examples/150_audioPlayground/Main.rae`, served over http): the engine runs
+  in an AudioWorklet (the Status says "Web Audio (AudioWorklet)"); MIDI, the microphone and Now
+  Playing say they are not available there. The demo's measurement blocks the page's one thread
+  for most of a second and the output underruns while it does; plain playing does not.
+- **Android:** not tried yet (no phone was connected).
 
 ## How it is built
 
@@ -94,7 +123,8 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
   `GameSection`, `PlacedSection`, `StepsSection` with its state in `StepsDemo`, `SynthSection` with its state in
-  `SynthDemo`, `InputSection` with its state in `InputDemo`, `EffectsSection`, `StatusSection`), run once a frame from `Main.rae`.
+  `SynthDemo`, `InputSection` with its state in `InputDemo`, `EffectsSection`, `NowPlayingSection`,
+  `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -107,9 +137,11 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 |---|---|
 | `RAE_SDL_HEADLESS_MS=N` | a headless run of N ms; the engine renders offline (no device) |
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
-| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key, and the effects measured with the reverb then turned on) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
+| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (the effects measured, then the reverb turned on; Now Playing's pause, play and a new position sent as the lock screen would; two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
 | `RAE_AUDIO_PLAYGROUND_RECORD=1` | with a device and the microphone allowed: records a take at frame 60, plays it back and saves it, and logs a line `[audioPlayground] input: ...` at the end (the clicks heard and their offset, the saved path) |
+| `RAE_AUDIO_PLAYGROUND_BACKGROUND=1` | starts the stream at frame 30 and logs every 2 s its place, whether it plays, the underruns, the device's callbacks and whether the window is on screen (for a background check: open another app on top and read the log) |
+| `RAE_AUDIO_RENDER_HELPERS=n` | n helper threads render the bus graph's stages with the device's callback; the Status section shows them |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
 
 The visual example gate (`RAE_EXAMPLE_FILTER=150_audioPlayground make -C compiler test-examples`)
