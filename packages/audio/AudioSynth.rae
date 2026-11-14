@@ -1,6 +1,8 @@
 # audio/AudioSynth — a small synthesizer inside the mixer (docs/audio-design.md
-# §5.3, §8.2): 32 voices of a soft tone (a sine and its octave), each with an
-# attack / decay / sustain / release envelope. A note starts and stops on its
+# §5.3, §8.2): 32 voices of one waveform (by default a soft tone, a sine and its
+# octave; or a sine, a triangle, a square or a saw), each with an attack /
+# decay / sustain / release envelope; setSynthSound (audio/AudioSchedule) sets
+# both. A note starts and stops on its
 # exact sample: noteOn and noteOff are mixer commands with a sample time, so
 # they go through the mixer's event list like every other (audio/AudioSchedule:
 # playNoteAt, releaseNoteAt; audio/MidiPorts' messages through playMidi).
@@ -29,8 +31,30 @@ type SynthVoice {
   startedAt: Int
 }
 
+# The shape of the synth's tone. Square and saw are band-limited (PolyBLEP), so a
+# high note does not fold back into the audible range.
+enum SynthWaveform {
+  # a sine and its octave, quietly: the synth's own tone
+  soft
+  sine
+  triangle
+  square
+  saw
+}
+
+# What the synth plays: its waveform and envelope (the attack's rise to full,
+# the decay's fall to the sustain level, the release's fall to silence)
+type SynthSound {
+  waveform: SynthWaveform = SynthWaveform.soft
+  attackSeconds: Float = 0.005
+  decaySeconds: Float = 0.15
+  sustain: Float = 0.6
+  releaseSeconds: Float = 0.25
+}
+
 type SynthState {
   voices: List(SynthVoice)
+  waveform: SynthWaveform = SynthWaveform.soft
   bus: Int
   sampleRate: Int
   # per frame: the attack's and decay's rise and fall, the release's fall
@@ -42,21 +66,33 @@ type SynthState {
   started: Int
 }
 
-# 5 ms attack, 150 ms decay to 0.6, 250 ms release
+# The default sound: soft, a 5 ms attack, 150 ms decay to 0.6, 250 ms release
 func createSynthState(sampleRate: view Int, bus: view Int) ret SynthState {
   var voices: List(SynthVoice) = List.create(SynthVoice, cap: synthVoiceCount)
   voices.addDefaults(count: synthVoiceCount)
-  let rate: Float = max(a: 1, b: sampleRate) as Float
-  ret SynthState {
+  var synth: SynthState = {
     voices: voices
     bus: bus
     sampleRate: sampleRate
-    attackStep: 1.0 / (rate * 0.005)
-    decayStep: 0.4 / (rate * 0.15)
-    sustain: 0.6
-    releaseStep: 1.0 / (rate * 0.25)
+    attackStep: 0.0
+    decayStep: 0.0
+    sustain: 0.0
+    releaseStep: 0.0
     started: 0
   }
+  synthApplySound(synth: synth, sound: SynthSound {})
+  ret synth
+}
+
+# Take a new sound: the notes sounding go on with its envelope and waveform
+func synthApplySound(synth: mod SynthState, sound: view SynthSound) realtime {
+  let rate: Float = max(a: 1, b: synth.sampleRate) as Float
+  let sustain: Float = clamp(val: sound.sustain, low: 0.0, high: 1.0)
+  synth.waveform = sound.waveform
+  synth.attackStep = 1.0 / (rate * max(a: 0.0005, b: sound.attackSeconds))
+  synth.decayStep = (1.0 - sustain) / (rate * max(a: 0.0005, b: sound.decaySeconds))
+  synth.sustain = sustain
+  synth.releaseStep = 1.0 / (rate * max(a: 0.0005, b: sound.releaseSeconds))
 }
 
 func synthNoteFrequency(note: view Int) ret Float64 {
@@ -201,6 +237,102 @@ func synthAddToBus(
   }
 }
 
+# PolyBLEP: the step's correction near a jump of the waveform at phase 0, `t`
+# the phase and `step` its change per frame (both in cycles)
+func polyBlep(t: view Float, step: view Float) ret Float realtime {
+  if t < step {
+    let x: Float = t / step
+    ret x + x - x * x - 1.0
+  }
+  if t > 1.0 - step {
+    let x: Float = (t - 1.0) / step
+    ret x * x + x + x + 1.0
+  }
+  ret 0.0
+}
+
+# One frame of a voice of `waveform` (not soft) at its phase, then its phase on
+func synthShapeStep(voice: mod SynthVoice, waveform: view SynthWaveform) ret Float realtime {
+  let t: Float = voice.phase as Float
+  let step: Float = voice.step as Float
+  var value: Float = 0.0
+  if waveform is SynthWaveform.sine {
+    value = sin(x: t * 6.2831853)
+  } else if waveform is SynthWaveform.triangle {
+    value = 1.0 - 4.0 * abs(value: t - 0.5)
+  } else if waveform is SynthWaveform.square {
+    var half: Float = t + 0.5
+    if half >= 1.0 {
+      half = half - 1.0
+    }
+    value = -1.0
+    if t < 0.5 {
+      value = 1.0
+    }
+    value = value + polyBlep(t: t, step: step) - polyBlep(t: half, step: step)
+  } else {
+    value = 2.0 * t - 1.0 - polyBlep(t: t, step: step)
+  }
+  voice.phase = voice.phase + voice.step
+  if voice.phase >= 1.0 {
+    voice.phase = voice.phase - 1.0
+  }
+  ret value
+}
+
+# How loud a shaped waveform is kept: a square or a saw is much louder than the
+# soft tone at the same peak, so each is brought near its level
+func synthShapeLevel(waveform: view SynthWaveform) ret Float realtime {
+  if waveform is SynthWaveform.square {
+    ret 0.09
+  }
+  if waveform is SynthWaveform.saw {
+    ret 0.11
+  }
+  ret 0.16
+}
+
+# A render's copy of the synth's settings (read once, while a voice is held)
+type SynthShape {
+  waveform: SynthWaveform
+  attackStep: Float
+  decayStep: Float
+  sustain: Float
+  releaseStep: Float
+}
+
+# Frames [from, from + frames) of a voice of a shaped waveform (not soft), one
+# frame at a time
+func synthRenderShaped(
+  shape: view SynthShape
+  voice: mod SynthVoice
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  base: view Int
+  from: view Int
+  frames: view Int
+) realtime {
+  let level: Float = synthShapeLevel(waveform: shape.waveform) * voice.level
+  var frame: Int = from
+  loop frame < from + frames and voice.active {
+    let envelope: Float = synthEnvelopeStep(
+      voice: voice
+      attackStep: shape.attackStep
+      decayStep: shape.decayStep
+      sustain: shape.sustain
+      releaseStep: shape.releaseStep
+    )
+    let value: Float = synthShapeStep(voice: voice, waveform: shape.waveform)
+    synthAddToBus(
+      busLeft: busLeft
+      busRight: busRight
+      index: base + frame
+      value: value * envelope * level
+    )
+    frame = frame + 1
+  }
+}
+
 # Frames [from, from + frames) of every sounding voice, added to the synth's
 # bus in the mixer's bus buffers (mono, in the middle)
 func synthRender(
@@ -216,9 +348,27 @@ func synthRender(
   let decayStep: Float = synth.decayStep
   let sustain: Float = synth.sustain
   let releaseStep: Float = synth.releaseStep
+  let soft: Bool = synth.waveform is SynthWaveform.soft
+  let shape: SynthShape = {
+    waveform: synth.waveform
+    attackStep: attackStep
+    decayStep: decayStep
+    sustain: sustain
+    releaseStep: releaseStep
+  }
   loop var i: Int = 0, i < synthVoiceCount, ++i {
     if let voice: mod SynthVoice = synth.voices.modAt(index: i) {
-      if voice.active {
+      if voice.active and not soft {
+        synthRenderShaped(
+          shape: shape
+          voice: voice
+          busLeft: busLeft
+          busRight: busRight
+          base: base
+          from: from
+          frames: frames
+        )
+      } else if voice.active {
         # two frames at a time: their four sines (each frame's note and
         # octave) in one Float4.sin, each lane the same as alone
         var frame: Int = from

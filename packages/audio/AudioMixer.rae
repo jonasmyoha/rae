@@ -53,6 +53,8 @@ enum AudioCommandKind {
   noteOn
   noteOff
   allNotesOff
+  # the synth's waveform and envelope (`synthSound`)
+  setSynthSound
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -93,6 +95,8 @@ type AudioCommand {
   # `stealQuietest` the quietest, of them fades out in 10 ms
   voiceLimit: Int = 0
   stealQuietest: Bool = false
+  # the synth's sound (setSynthSound)
+  synthSound: SynthSound = {}
 }
 
 enum AudioFeedbackKind { voiceEnded }
@@ -423,6 +427,10 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   }
   if command.kind is AudioCommandKind.allNotesOff {
     synthAllNotesOff(synth: mixer.synth)
+    ret
+  }
+  if command.kind is AudioCommandKind.setSynthSound {
+    synthApplySound(synth: mixer.synth, sound: command.synthSound)
     ret
   }
   if command.kind is AudioCommandKind.setBusGain {

@@ -1334,7 +1334,14 @@ or now that repository's.
    - `audio/AudioSynth`: a 32-voice synth inside the mixer (sine and octave,
      attack / decay / sustain / release), its notes mixer commands through the
      event list, so they start on their sample (`playNoteAt`,
-     `releaseNoteAt`, `playMidi`).
+     `releaseNoteAt`, `playMidi`). Since `packages/audio` 0.15.0 (2026-11-14)
+     its sound is set with `setSynthSound(sound: SynthSound { waveform,
+     attackSeconds, decaySeconds, sustain, releaseSeconds })`: the waveform
+     is `soft` (the sine and octave, the default, rendered as before bit for
+     bit), `sine`, `triangle`, `square` or `saw` (square and saw band-limited
+     with PolyBLEP), and the notes sounding take the new sound at once.
+     Fixture 1455 schedules a metronome with MusicalTime and checks every note
+     starts on its sample.
    - Fixture 1417 (the parser, the synth on its sample and in blocks of 1, 17,
      64, 512 and changing sizes, playMidi, a recording's alignment and lost
      samples), clean under RealtimeSanitizer. `checks/audioMidi` (a loopback

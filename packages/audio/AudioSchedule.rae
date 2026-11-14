@@ -15,6 +15,7 @@ open audio/Audio
 open audio/AudioButler
 open audio/AudioClock
 open audio/AudioMixer
+open audio/AudioSynth
 open audio/Midi
 open media/MediaTime
 
@@ -199,6 +200,13 @@ func releaseNoteAt(this: view AudioEngine, note: view Int, atSample: view Int) {
   var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOff)
   command.voiceId = note
   command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# The synth's waveform and envelope from now on (the notes sounding keep going with it)
+func setSynthSound(this: view AudioEngine, sound: view SynthSound) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setSynthSound)
+  command.synthSound = sound
   let sent: Bool = this.sendCommand(command: command)
 }
 
