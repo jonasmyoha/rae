@@ -67,6 +67,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/runtime_cache.c \
        $(SRC_DIR)/type_names.c \
        $(SRC_DIR)/may_wait.c \
+       $(SRC_DIR)/may_wait_walk.c \
+       $(SRC_DIR)/may_wait_block.c \
        $(SRC_DIR)/may_wait_report.c \
        $(SRC_DIR)/realtime_check.c \
        $(SRC_DIR)/when_resolve.c \

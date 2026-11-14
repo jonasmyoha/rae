@@ -2793,6 +2793,15 @@ static bool build_c_backend_output(const char* entry_file,
      * run (every error is reported above); nothing is emitted */
     const char* os = g_target_os ? g_target_os : host_target_os();
     const char* arch = g_target_arch ? g_target_arch : host_target_arch();
+    /* The browser's checks that need the whole program (a sleep a mainLoop
+     * body can reach, docs/web-frame-loop.md §7) run in the backend: its
+     * discovery and the wait graph, the output thrown away */
+    if (g_target_check_only && strcmp(os, "web") == 0 && !c_backend_emit_module(&ctx, &merged, "/dev/null")) {
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      progress_end(false);
+      return false;
+    }
     if (g_print_target) {
       printf("target %s/%s\n", os, arch);
       for (const AstDecl* d = merged.decls; d; d = d->next) {
