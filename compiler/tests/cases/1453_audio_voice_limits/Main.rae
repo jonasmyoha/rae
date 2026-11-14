@@ -1,0 +1,177 @@
+# How many voices play at once (audio/VoiceControls, audio/AudioVoice, docs/audio-design.md
+# §10.5), offline with RAE_REALTIME_CHECK=1 (config.env).
+# 1. A cap of 3 on a sound, the oldest going: five plays 1000 frames apart leave the newest three;
+#    the two oldest fade out in 10 ms (still fading 100 frames after, gone 600 after), and no
+#    other sound is touched.
+# 2. A cap of 2, the quietest going: plays at -20, 0, -10 and -30 dB leave the 0 and -30 dB ones
+#    (each new play fades the quietest of those still playing).
+# 3. The hard limit, audioMaxVoices (64): with all 64 busy, a new voice takes the place of one
+#    already fading out first, then of the quietest; none is dropped, the others play on.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioVoice
+open audio/Sound
+open audio/VoiceControls
+
+const rate: Int = 48000
+
+func startEngine() ret AudioEngine {
+  ret audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+}
+
+func longTone(audio: mod AudioEngine, frequency: view Float) ret Sound {
+  ret audio.addSound(data: sineSoundData(
+    frequency: frequency
+    amplitude: 0.2
+    frameCount: rate
+    channels: 1
+    sampleRate: rate
+  ))
+}
+
+# The voice ids playing now (active and not fading out), and those fading out
+func playingIds(audio: view AudioEngine) ret String {
+  var playing: String = ""
+  var fading: String = ""
+  loop let voice: view AudioVoice in audio.mixer.voices {
+    if voice.active and voice.stopping {
+      fading = "{fading} {voice.voiceId}"
+    } else if voice.active {
+      playing = "{playing} {voice.voiceId}"
+    }
+  }
+  ret "playing [{playing} ], fading [{fading} ]"
+}
+
+func activeCount(audio: view AudioEngine) ret Int {
+  var count: Int = 0
+  loop let voice: view AudioVoice in audio.mixer.voices {
+    if voice.active {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func playOnce(
+  audio: mod AudioEngine
+  sound: view Sound
+  gainDecibels: view Float
+  atSample: view Int
+) {
+  let unusedVoice: VoiceId = audio.playAt(
+    sound: sound
+    bus: AudioBusKind.effects
+    gainDecibels: gainDecibels
+    pan: 0.0
+    looping: false
+    atSample: atSample
+  )
+}
+
+func capOldest() {
+  var audio: AudioEngine = startEngine()
+  let gun: Sound = longTone(audio: audio, frequency: 700.0)
+  let other: Sound = longTone(audio: audio, frequency: 300.0)
+  playOnce(
+    audio: audio
+    sound: other
+    gainDecibels: -6.0
+    atSample: 0
+  )
+  audio.setSoundVoiceLimit(sound: gun, voiceLimit: 3, rule: AudioStealRule.oldest)
+  loop var shot: Int = 0, shot < 5, ++shot {
+    playOnce(
+      audio: audio
+      sound: gun
+      gainDecibels: -6.0
+      atSample: 1000 + shot * 1000
+    )
+  }
+  let until: List(Float) = audio.renderOffline(frames: 5100)
+  log("cap 3, the oldest: 100 frames after the fifth: {playingIds(audio: audio)}")
+  let later: List(Float) = audio.renderOffline(frames: 500)
+  audio.update()
+  let ended: List(VoiceId) = audio.takeEndedVoices()
+  log("600 frames after: {playingIds(audio: audio)}; ended {ended.length}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func capQuietest() {
+  var audio: AudioEngine = startEngine()
+  let step: Sound = longTone(audio: audio, frequency: 900.0)
+  audio.setSoundVoiceLimit(sound: step, voiceLimit: 2, rule: AudioStealRule.quietest)
+  playOnce(
+    audio: audio
+    sound: step
+    gainDecibels: -20.0
+    atSample: 0
+  )
+  playOnce(
+    audio: audio
+    sound: step
+    gainDecibels: 0.0
+    atSample: 1000
+  )
+  playOnce(
+    audio: audio
+    sound: step
+    gainDecibels: -10.0
+    atSample: 2000
+  )
+  playOnce(
+    audio: audio
+    sound: step
+    gainDecibels: -30.0
+    atSample: 3000
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: 4000)
+  log("cap 2, the quietest (voices 1..4 at -20, 0, -10, -30 dB): {playingIds(audio: audio)}")
+  let blocks: Int = audio.stopAudio()
+}
+
+func hardLimit() {
+  var audio: AudioEngine = startEngine()
+  let tone: Sound = longTone(audio: audio, frequency: 400.0)
+  # voices 1..64, each half a decibel quieter than the one before
+  loop var index: Int = 0, index < audioMaxVoices, ++index {
+    playOnce(
+      audio: audio
+      sound: tone
+      gainDecibels: -0.5 * (index as Float)
+      atSample: 0
+    )
+  }
+  let full: List(Float) = audio.renderOffline(frames: 256)
+  # voice 1, the loudest, is fading out when six more come
+  audio.stopVoice(voiceId: VoiceId { value: 1 })
+  loop var more: Int = 0, more < 6, ++more {
+    playOnce(
+      audio: audio
+      sound: tone
+      gainDecibels: 0.0
+      atSample: 0
+    )
+  }
+  let after: List(Float) = audio.renderOffline(frames: 256)
+  audio.update()
+  var endedIds: String = ""
+  loop let voiceId: VoiceId in audio.takeEndedVoices() {
+    endedIds = "{endedIds} {voiceId.value}"
+  }
+  var peak: Float = 0.0
+  loop let value: Float in after {
+    peak = Math.max(a: peak, b: Math.abs(value: value))
+  }
+  log(
+    "hard limit: {activeCount(audio: audio)} voices, taken {audio.mixer.stolenVoices}, dropped {audio.mixer.droppedVoices}; ended:{endedIds}; the mix plays on: {peak > 0.5}"
+  )
+  let blocks: Int = audio.stopAudio()
+}
+
+func main() {
+  capOldest()
+  capQuietest()
+  hardLimit()
+}

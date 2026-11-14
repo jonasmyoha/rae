@@ -96,6 +96,26 @@ def buzz_loop():
     return out
 
 
+def step():
+    # a footstep stand-in: low-passed noise with a 25 ms decay, 0.15 s (played varied, so no
+    # two sound the same)
+    rng = random.Random(151)
+    out, low = [], 0.0
+    for i in range(seconds(0.15)):
+        k = 0.12
+        low += k * (rng.uniform(-1, 1) - low)
+        out.append(2.5 * low * math.exp(-i / (0.025 * RATE)) * min(1.0, i / 20.0))
+    return out
+
+
+def shot():
+    # a gunshot stand-in: white noise with a 50 ms decay, 0.25 s, longer than the 60 ms between
+    # shots of a burst, so a burst needs the voice cap
+    rng = random.Random(152)
+    return [0.8 * rng.uniform(-1, 1) * math.exp(-i / (0.05 * RATE)) * min(1.0, i / 10.0)
+            for i in range(seconds(0.25))]
+
+
 def position_tones():
     # The stream's test signal, 30 s: at the start of every second a 0.15 s tone whose pitch
     # tells the second (300 Hz + 40 Hz per second: 300 Hz at 0 s, 1460 Hz at 29 s), silence
@@ -118,6 +138,8 @@ def main():
     write_wav("whoosh.wav", whoosh())
     write_wav("alert.wav", alert())
     write_wav("buzzLoop.wav", buzz_loop())
+    write_wav("step.wav", step())
+    write_wav("shot.wav", shot())
     chime_wav = write_wav("chime-source.wav", chime())
     subprocess.run(["afconvert", "-f", "m4af", "-d", "aac", "-b", "32000", chime_wav,
                     os.path.join(ASSETS, "chime.m4a")], check=True)

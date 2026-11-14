@@ -1,0 +1,110 @@
+# A voice's playback rate (audio/VoiceControls, docs/audio-design.md §10.5), rendered offline with
+# RAE_REALTIME_CHECK=1 (config.env). The tone is a looping 500 Hz sine of 50 whole cycles; its
+# pitch is measured by counting its upward zero crossings.
+# 1. At rate 2 it plays at 1000 Hz, an octave up; set at once it starts after the 5 ms smoothing.
+# 2. A change spread over 0.1 s is still between the two rates in its middle.
+# 3. At a rate that does not divide the loop (1.37) the seam is seamless: no sample steps
+#    further than the tone at that pitch does.
+# 4. A rate past the range is held to it (100 plays as 8); semitonesToRate(12) is 2.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+open audio/VoiceControls
+
+const rate: Int = 48000
+
+# The pitch of the left channel in frames from..to (interleaved stereo): the cycles between its
+# first and its last upward zero crossing
+func pitchOf(samples: view List(Float), from: view Int, to: view Int) ret Float {
+  var crossings: Int = 0
+  var first: Int = -1
+  var last: Int = -1
+  var previous: Float = samples.copyAtFallback(index: from * 2, fallback: 0.0)
+  loop var frame: Int = from + 1, frame < to, ++frame {
+    let value: Float = samples.copyAtFallback(index: frame * 2, fallback: 0.0)
+    if previous < 0.0 and value >= 0.0 {
+      crossings = crossings + 1
+      if first < 0 {
+        first = frame
+      }
+      last = frame
+    }
+    previous = value
+  }
+  if crossings < 2 {
+    ret 0.0
+  }
+  ret ((crossings - 1) as Float) * (rate as Float) / ((last - first) as Float)
+}
+
+func largestStep(samples: view List(Float)) ret Float {
+  var largest: Float = 0.0
+  loop var index: Int = 2, index < samples.length, ++index {
+    let now: Float = samples.copyAtFallback(index: index, fallback: 0.0)
+    let before: Float = samples.copyAtFallback(index: index - 2, fallback: 0.0)
+    largest = Math.max(a: largest, b: Math.abs(value: now - before))
+  }
+  ret largest
+}
+
+# A pitch to the nearest 10 Hz
+func tens(value: view Float) ret Int {
+  ret Math.round(x: value / 10.0).toInt() * 10
+}
+
+func main() {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 500.0
+    amplitude: 0.5
+    frameCount: 4800
+    channels: 1
+    sampleRate: rate
+  ))
+  let voiceId: VoiceId = audio.playAt(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  let natural: List(Float) = audio.renderOffline(frames: 4800)
+  audio.setVoiceRate(voiceId: voiceId, rate: 2.0, seconds: 0.0)
+  let octave: List(Float) = audio.renderOffline(frames: 4800)
+  log(
+    "own pitch {tens(value: pitchOf(samples: natural, from: 480, to: 4800))} Hz, at rate 2 {tens(
+      value: pitchOf(samples: octave, from: 480, to: 4800)
+    )} Hz"
+  )
+  # 2. back to 1 over 0.1 s: the middle 20 ms is near 1.5 (750 Hz)
+  audio.setVoiceRate(voiceId: voiceId, rate: 1.0, seconds: 0.1)
+  let gliding: List(Float) = audio.renderOffline(frames: 4800)
+  let middle: Float = pitchOf(samples: gliding, from: 1920, to: 2880)
+  let after: List(Float) = audio.renderOffline(frames: 4800)
+  log(
+    "spread over 0.1 s: the middle {tens(value: middle)} Hz, between: {middle > 650.0 and middle < 850.0}; after it {tens(
+      value: pitchOf(samples: after, from: 480, to: 4800)
+    )} Hz"
+  )
+  # 3. the seam at rate 1.37: 2 s of the loop, through its seam many times
+  audio.setVoiceRate(voiceId: voiceId, rate: 1.37, seconds: 0.0)
+  let warmUp: List(Float) = audio.renderOffline(frames: 480)
+  var steps: Float = 0.0
+  loop var part: Int = 0, part < 20, ++part {
+    steps = Math.max(a: steps, b: largestStep(samples: audio.renderOffline(frames: 4800)))
+  }
+  # the centered tone's steepest step: amplitude * cos 45° * 2 pi f / rate
+  let toneStep: Float = 0.5 * 0.70710677 * 6.2831853 * 500.0 * 1.37 / (rate as Float)
+  log("at rate 1.37 the seam is seamless: {steps <= toneStep * 1.02}")
+  # 4. held to the range
+  audio.setVoiceRate(voiceId: voiceId, rate: 100.0, seconds: 0.0)
+  let held: List(Float) = audio.renderOffline(frames: 4800)
+  log(
+    "rate 100 plays at {tens(value: pitchOf(samples: held, from: 480, to: 4800))} Hz; 12 semitones is rate {semitonesToRate(
+      semitones: 12.0
+    )}"
+  )
+  let blocks: Int = audio.stopAudio()
+}

@@ -22,6 +22,13 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   again. Drag the position slider to seek; it follows the stream while you do not hold it.
 - **Mix:** a volume per bus (music, effects, alerts; 100 % is 0 dB, 0 % is silent), and the pan
   of the stream and of every sound started after you move it.
+- **Game sounds:** **Footstep (varied)** plays the same short sound with a little different
+  pitch and level each time (up to 6 % and 3 dB either way), from the app's own random numbers
+  with a fixed seed, so a run plays the same. **Machine gun (cap 3)** fires ten shots 60 ms
+  apart, each 0.25 s long: the shot sound is capped at three voices, so as each new shot starts
+  the oldest fades out in 10 ms, and the rest of the mix is never touched. The slider sets the
+  playback rate of the orbiting buzz below, as a car engine's pitch follows its speed (start
+  the orbit to hear it).
 - **Placed in 3D:** a looping buzz placed in the world (`audio/AudioSpatial`, docs/audio-design.md
   §10.4) goes round you, the listener, who looks ahead. Use headphones: it moves from ear to ear
   as it passes (0° is ahead, 90° on your right). The slider sets its distance: it is full inside
@@ -37,7 +44,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   shared one in `lib/assets/walker/`.
 - `Playground.rae` holds the app's state, with the audio engine as its resource, and loads the
   sounds once. Each section is its own module (`SoundsSection`, `MusicSection`, `MixSection`,
-  `PlacedSection`, `StatusSection`), run once a frame from `Main.rae`.
+  `GameSection`, `PlacedSection`, `StatusSection`), run once a frame from `Main.rae`.
 - The sound files are made by `makeSounds.py`: technical test signals from simple math (tones,
   decays, filtered noise), never composed music, so nothing is under anyone's copyright. The chime
   is turned into AAC with macOS `afconvert`, the stream into MP3 with `lame`. They are mono at
@@ -50,7 +57,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 |---|---|
 | `RAE_SDL_HEADLESS_MS=N` | a headless run of N ms; the engine renders offline (no device) |
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
-| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, the orbit at 6 m and then past its far distance) and logs a summary line at the end; with the offline engine it ends after 120 frames (2 s of audio), so its result does not depend on the machine's speed |
+| `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance) and logs a summary line at the end; with the offline engine it ends after 120 frames (2 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |
 

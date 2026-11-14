@@ -1,0 +1,108 @@
+# The Game sounds section (audio/VoiceControls): a footstep played with a small random spread of
+# rate and gain, so no two sound the same (from the app's own Random, a fixed seed); a machine
+# gun burst of ten shots 60 ms apart, each longer than that, under a cap of three voices, so the
+# oldest shot fades out as a new one starts; and the playback rate of the orbiting buzz, as a
+# car engine's pitch follows its speed.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSpatial
+open audio/AudioVoice
+open audio/VoiceControls
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiValues
+open app3d/UiShell
+open Playground
+
+const burstShots: Int = 10
+
+const shotGapSeconds: Float = 0.06
+
+# 6 % of rate (about a semitone) and 3 dB either way: clearly different, still the same step
+const stepVariation: SoundVariation = { rateSpread: 0.06, gainSpreadDecibels: 3.0 }
+
+func setGameDefaults(values: mod UiValues) {
+  let unusedRate: Bool = setUiValue(values: values, key: "game.rate", value: 1.0)
+}
+
+func playStep(playground: mod Playground) {
+  let unusedVoice: VoiceId = playground.audio.playVaried(
+    sound: playground.step
+    bus: AudioBusKind.effects
+    gainDecibels: -4.0
+    variation: stepVariation
+    random: playground.random
+  )
+  playground.stepsPlayed = playground.stepsPlayed + 1
+}
+
+# Ten shots, each at its own sample, so the gaps are exact whatever the frame rate
+func fireBurst(playground: mod Playground) {
+  let start: Int = playground.audio.nextSafeSampleTime()
+  let gapFrames: Int = (shotGapSeconds * (playground.audio.sampleRate as Float)).toInt()
+  loop var shot: Int = 0, shot < burstShots, ++shot {
+    let unusedVoice: VoiceId = playground.audio.playAt(
+      sound: playground.shot
+      bus: AudioBusKind.effects
+      gainDecibels: -8.0
+      pan: playground.pan
+      looping: false
+      atSample: start + shot * gapFrames
+    )
+  }
+  playground.burstsFired = playground.burstsFired + 1
+}
+
+# The orbiting buzz's rate, moved there over 50 ms
+func applyEngineRate(playground: view Playground) {
+  if let source: AudioSource = playground.placement.sources.componentCopy(
+    entityId: playground.orbitEntityId
+  ) {
+    playground.audio.setVoiceRate(
+      voiceId: source.voiceId
+      rate: playground.engineRate
+      seconds: 0.05
+    )
+  }
+}
+
+func gameReadout(playground: view Playground) ret String {
+  ret "Steps {playground.stepsPlayed}; bursts {playground.burstsFired} ({burstShots} shots, at most 3 at once)"
+}
+
+# With no device the engine's mixer is the app's own: count the shots playing at once
+func countShotsAtOnce(playground: mod Playground) {
+  if not playground.rendersItself {
+    ret
+  }
+  var playing: Int = 0
+  loop let voice: view AudioVoice in playground.audio.mixer.voices {
+    if voice.active and not voice.stopping and voice.soundId is playground.shot.soundId {
+      playing = playing + 1
+    }
+  }
+  playground.shotsAtOnceMost = Math.max(a: playground.shotsAtOnceMost, b: playing)
+}
+
+# The section's buttons and slider this frame; true when what it shows changed
+func gameSection(playground: mod Playground, world: mod UiWorld, values: view UiValues) ret Bool {
+  var changed: Bool = false
+  countShotsAtOnce(playground: playground)
+  if uiActionFired(world: world, actionId: "game.step") {
+    playStep(playground: playground)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "game.burst") {
+    fireBurst(playground: playground)
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "game.rate") {
+    playground.engineRate = uiValue(values: values, key: "game.rate", fallback: 1.0)
+    applyEngineRate(playground: playground)
+  }
+  if changed or playground.frames % 15 is 1 {
+    setNodeText(world: world, nodeId: "GameReadout", value: gameReadout(playground: playground))
+  }
+  ret changed
+}

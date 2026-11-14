@@ -1297,6 +1297,7 @@
    },
    "Children": [
     "MixCard",
+    "GameCard",
     "StatusCard"
    ]
   },
@@ -1347,7 +1348,7 @@
     "h": 20
    },
    "Text": {
-    "text": "The audio package: sounds, a streamed track, the mix, a sound placed in 3D. Later steps add the synth, the microphone, effects and the real-time view.",
+    "text": "The audio package: sounds, a streamed track, the mix, game sounds, a sound placed in 3D. Later steps add the synth, the microphone, effects and the real-time view.",
     "styleId": "muted"
    },
    "Size": {
@@ -1364,7 +1365,7 @@
     "x": 0,
     "y": 0,
     "w": 1000,
-    "h": 720
+    "h": 880
    },
    "Layout": {
     "type": "Vertical",
@@ -1583,6 +1584,286 @@
     "OrbitDistanceLabel",
     "OrbitDistance",
     "OrbitReadout"
+   ]
+  },
+  "GameCardTitle": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 24
+   },
+   "Text": {
+    "text": "Game sounds (pitch, variation, voice limits)",
+    "styleId": "section"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   }
+  },
+  "PlayStepLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 44
+   },
+   "Text": {
+    "text": "Footstep (varied)",
+    "styleId": "button"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fill"
+    }
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "PlayStep": {
+   "bundles": [
+    "pressable"
+   ],
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 110,
+    "h": 44
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surfaceAlt",
+    "radius": "radiusPill"
+   },
+   "OnClick": {
+    "actionId": "game.step",
+    "label": "Play a footstep, its pitch and level a little different each time"
+   },
+   "Children": [
+    "PlayStepLabel"
+   ],
+   "Layout": {
+    "type": "Vertical",
+    "alignCross": "Stretch"
+   }
+  },
+  "PlayBurstLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 44
+   },
+   "Text": {
+    "text": "Machine gun (cap 3)",
+    "styleId": "button"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fill"
+    }
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "PlayBurst": {
+   "bundles": [
+    "pressable"
+   ],
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 110,
+    "h": 44
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surfaceAlt",
+    "radius": "radiusPill"
+   },
+   "OnClick": {
+    "actionId": "game.burst",
+    "label": "Fire ten shots, at most three of them sounding at once"
+   },
+   "Children": [
+    "PlayBurstLabel"
+   ],
+   "Layout": {
+    "type": "Vertical",
+    "alignCross": "Stretch"
+   }
+  },
+  "GameButtons": {
+   "Layout": {
+    "type": "Horizontal",
+    "gap": "spaceS",
+    "alignCross": "Stretch"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Hug"
+    }
+   },
+   "Children": [
+    "PlayStep",
+    "PlayBurst"
+   ]
+  },
+  "EngineRateLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 20
+   },
+   "Text": {
+    "text": "",
+    "styleId": "muted"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "ValueText": {
+    "key": "game.rate",
+    "prefix": "Engine rate of the orbiting buzz ",
+    "suffix": " %",
+    "scale": 100,
+    "decimals": 0
+   }
+  },
+  "EngineRateFill": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 26
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "accent",
+    "radius": "radiusPill"
+   }
+  },
+  "EngineRate": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 400,
+    "h": 26
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surfaceAlt",
+    "radius": "radiusPill"
+   },
+   "ValueSlider": {
+    "key": "game.rate",
+    "min": 0.5,
+    "max": 2.0,
+    "actionId": "game.rate"
+   },
+   "Children": [
+    "EngineRateFill"
+   ]
+  },
+  "GameReadout": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 20
+   },
+   "Text": {
+    "text": "Steps 0; bursts 0",
+    "styleId": "muted"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Fixed"
+    }
+   }
+  },
+  "GameCard": {
+   "Layout": {
+    "type": "Vertical",
+    "gap": "spaceS",
+    "alignCross": "Stretch"
+   },
+   "Size": {
+    "w": {
+     "mode": "Fill"
+    },
+    "h": {
+     "mode": "Hug"
+    }
+   },
+   "Padding": {
+    "l": "spaceM",
+    "t": "spaceM",
+    "r": "spaceM",
+    "b": "spaceM"
+   },
+   "Shape": {
+    "kind": "RoundedRect",
+    "fill": "surface",
+    "radius": "radiusCard"
+   },
+   "Children": [
+    "GameCardTitle",
+    "GameButtons",
+    "EngineRateLabel",
+    "EngineRate",
+    "GameReadout"
    ]
   }
  }

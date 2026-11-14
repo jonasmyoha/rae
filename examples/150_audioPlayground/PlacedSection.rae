@@ -8,6 +8,7 @@ open audio/Audio
 open audio/AudioMixer
 open audio/AudioSpatial
 open audio/spatialSystem/SpatialSystem
+open audio/VoiceControls
 open ecs/ComponentTable
 open ecs/Transform
 open ui/Ecs
@@ -56,13 +57,15 @@ func startOrbit(playground: mod Playground, distance: view Float) {
   source.gainDecibels = -6.0
   source.looping = true
   source.followsTransform = true
-  let unusedVoice: VoiceId = playground.audio.playPlaced(
+  let voiceId: VoiceId = playground.audio.playPlaced(
     placement: playground.placement
     entityId: playground.orbitEntityId
     sound: playground.buzz
     bus: AudioBusKind.effects
     source: source
   )
+  # at the engine rate the Game sounds slider set (at once: the voice has just started)
+  playground.audio.setVoiceRate(voiceId: voiceId, rate: playground.engineRate, seconds: 0.0)
   playground.orbitOn = true
 }
 

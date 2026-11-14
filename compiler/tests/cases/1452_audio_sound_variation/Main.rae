@@ -1,0 +1,156 @@
+# A sound played with a small random spread of rate and gain (audio/VoiceControls,
+# docs/audio-design.md §10.5), offline with RAE_REALTIME_CHECK=1 (config.env).
+# 1. nextVariation: 200 draws with a 3 % rate spread and 1.5 dB gain spread stay inside them,
+#    and reach near both ends; the same seed gives the same draws, another seed others.
+# 2. playVaried: two shots of one sound differ in pitch and level; two engines given the same
+#    seed render the same samples, bit for bit.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+open audio/VoiceControls
+
+const rate: Int = 48000
+
+func spread() ret SoundVariation {
+  ret SoundVariation { rateSpread: 0.03, gainSpreadDecibels: 1.5 }
+}
+
+# 200 draws from `seed`, as one line of their sums (to compare runs) and their ranges
+func draws(seed: view Int) ret List(VariedPlay) {
+  var random: Random = createRandom(seed: seed)
+  var out: List(VariedPlay) = {}
+  loop var i: Int = 0, i < 200, ++i {
+    out.add(value: nextVariation(variation: spread(), gainDecibels: -6.0, random: random))
+  }
+  ret out
+}
+
+func sameDraws(a: view List(VariedPlay), b: view List(VariedPlay)) ret Bool {
+  var same: Bool = a.length is b.length
+  loop var i: Int = 0, i < a.length, ++i {
+    let first: VariedPlay = a.copyAtDefault(index: i)
+    let second: VariedPlay = b.copyAtDefault(index: i)
+    if first.rate is not second.rate or first.gainDecibels is not second.gainDecibels {
+      same = false
+    }
+  }
+  ret same
+}
+
+# Two varied shots of a 1 kHz tone, 100 ms apart, from `seed`
+func twoShots(seed: view Int) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 1000.0
+    amplitude: 0.5
+    frameCount: 2400
+    channels: 1
+    sampleRate: rate
+  ))
+  var random: Random = createRandom(seed: seed)
+  let first: VoiceId = audio.playVaried(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: -6.0
+    variation: spread()
+    random: random
+  )
+  var samples: List(Float) = audio.renderOffline(frames: 4800)
+  let second: VoiceId = audio.playVaried(
+    sound: tone
+    bus: AudioBusKind.effects
+    gainDecibels: -6.0
+    variation: spread()
+    random: random
+  )
+  let rest: List(Float) = audio.renderOffline(frames: 4800)
+  loop let value: Float in rest {
+    samples.add(value: value)
+  }
+  let blocks: Int = audio.stopAudio()
+  ret samples
+}
+
+# The pitch and peak of the left channel in frames from..to
+func pitchOf(samples: view List(Float), from: view Int, to: view Int) ret Float {
+  var crossings: Int = 0
+  var first: Int = -1
+  var last: Int = -1
+  var previous: Float = samples.copyAtFallback(index: from * 2, fallback: 0.0)
+  loop var frame: Int = from + 1, frame < to, ++frame {
+    let value: Float = samples.copyAtFallback(index: frame * 2, fallback: 0.0)
+    if previous < 0.0 and value >= 0.0 {
+      crossings = crossings + 1
+      if first < 0 {
+        first = frame
+      }
+      last = frame
+    }
+    previous = value
+  }
+  if crossings < 2 {
+    ret 0.0
+  }
+  ret ((crossings - 1) as Float) * (rate as Float) / ((last - first) as Float)
+}
+
+func peakOf(samples: view List(Float), from: view Int, to: view Int) ret Float {
+  var peak: Float = 0.0
+  loop var frame: Int = from, frame < to, ++frame {
+    peak = Math.max(
+      a: peak
+      b: Math.abs(value: samples.copyAtFallback(index: frame * 2, fallback: 0.0))
+    )
+  }
+  ret peak
+}
+
+func main() {
+  # 1. the draws
+  let seven: List(VariedPlay) = draws(seed: 7)
+  var lowRate: Float = 2.0
+  var highRate: Float = 0.0
+  var lowGain: Float = 0.0
+  var highGain: Float = -20.0
+  loop let varied: VariedPlay in seven {
+    lowRate = Math.min(a: lowRate, b: varied.rate)
+    highRate = Math.max(a: highRate, b: varied.rate)
+    lowGain = Math.min(a: lowGain, b: varied.gainDecibels)
+    highGain = Math.max(a: highGain, b: varied.gainDecibels)
+  }
+  log(
+    "rates inside 0.97..1.03: {lowRate >= 0.97 and highRate <= 1.03}, reaching near both ends: {lowRate < 0.975 and highRate > 1.025}"
+  )
+  log(
+    "gains inside -7.5..-4.5 dB: {lowGain >= -7.5 and highGain <= -4.5}, reaching near both ends: {lowGain < -7.3 and highGain > -4.7}"
+  )
+  log(
+    "seed 7 twice the same: {sameDraws(a: seven, b: draws(seed: 7))}; seed 8 the same as 7: {sameDraws(
+      a: seven
+      b: draws(seed: 8)
+    )}"
+  )
+  # 2. the shots
+  let shots: List(Float) = twoShots(seed: 7)
+  let again: List(Float) = twoShots(seed: 7)
+  var identical: Bool = shots.length is again.length
+  loop var i: Int = 0, i < shots.length, ++i {
+    if shots.copyAtFallback(index: i, fallback: 0.0) is not again.copyAtFallback(
+      index: i
+      fallback: 1.0
+    ) {
+      identical = false
+    }
+  }
+  let firstPitch: Float = pitchOf(samples: shots, from: 100, to: 2000)
+  let secondPitch: Float = pitchOf(samples: shots, from: 4900, to: 6800)
+  let firstPeak: Float = peakOf(samples: shots, from: 100, to: 2000)
+  let secondPeak: Float = peakOf(samples: shots, from: 4900, to: 6800)
+  log(
+    "two shots differ: in pitch {firstPitch is not secondPitch}, in level {firstPeak is not secondPeak}; each within 3 % of 1 kHz: {Math.abs(
+      value: firstPitch - 1000.0
+    ) <= 31.0 and Math.abs(value: secondPitch - 1000.0) <= 31.0}"
+  )
+  log("the same seed renders the same samples: {identical}")
+}

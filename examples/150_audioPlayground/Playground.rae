@@ -1,12 +1,15 @@
 # The playground's state: the audio engine (a resource of the app, docs/audio-design.md §10.1),
 # the sounds loaded once, the music stream's voice, and the mix settings the panel set. Each panel
-# section (SoundsSection, MusicSection, MixSection, PlacedSection, StatusSection; later steps add
+# section (SoundsSection, MusicSection, MixSection, GameSection, PlacedSection, StatusSection;
+# later steps add
 # the synth, the microphone, the effects and the real-time view) reads and changes it once a frame.
+import Math
 import Sys
 open audio/Audio
 open audio/AudioMixer
 open audio/AudioSpatial
 open audio/Sound
+open audio/VoiceControls
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Transform
@@ -45,6 +48,17 @@ type Playground {
   orbitOn: Bool = false
   # radians round the listener: 0 ahead, a quarter turn on its right
   orbitAngle: Float = 0.0
+  # game sounds (audio/VoiceControls): a footstep played varied from the app's own Random (a
+  # fixed seed, so a run plays the same), a gunshot capped at three voices, and the orbiting
+  # buzz's playback rate (its engine speed)
+  step: Sound
+  shot: Sound
+  random: Random
+  stepsPlayed: Int = 0
+  burstsFired: Int = 0
+  # with no device, the most shot voices playing at once (not fading out), read from the mixer
+  shotsAtOnceMost: Int = 0
+  engineRate: Float = 1.0
 }
 
 # A headless run (the visual gate) has no device to depend on, so it renders offline
@@ -62,6 +76,10 @@ func createPlayground() ret Playground {
   let chime: Sound = audio.loadSound(path: "{playgroundAssets}chime.m4a")
   let alert: Sound = audio.loadSound(path: "{playgroundAssets}alert.wav")
   let buzz: Sound = audio.loadSound(path: "{playgroundAssets}buzzLoop.wav")
+  let step: Sound = audio.loadSound(path: "{playgroundAssets}step.wav")
+  let shot: Sound = audio.loadSound(path: "{playgroundAssets}shot.wav")
+  # a burst fires faster than a shot ends: at most three sound at once, the oldest fading
+  audio.setSoundVoiceLimit(sound: shot, voiceLimit: 3, rule: AudioStealRule.oldest)
   # an alert takes the music down 14 dB while it plays (on the audio thread, §6.4)
   audio.duckWhilePlaying(
     source: AudioBusKind.alerts
@@ -88,6 +106,9 @@ func createPlayground() ret Playground {
     entities: entities
     buzz: buzz
     orbitEntityId: orbitEntityId
+    step: step
+    shot: shot
+    random: createRandom(seed: 150)
   }
 }
 
