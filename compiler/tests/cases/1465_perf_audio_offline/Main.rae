@@ -1,8 +1,10 @@
 # The audio engine and the real-time check in a lib/Profile capture (docs/perf-tools-design.md
 # §4.4). An offline scene renders 10 blocks; audio/AudioCapture writes each as a span "block" on
 # the lane "audio render", with its time, its share of the period, the underruns, latency and the
-# clock's drift as counters; a lib/Realtime recorder fed the render times writes its p99.9,
-# maximum and share. Then this thread marks itself real-time and allocates on purpose: with
+# clock's drift as counters, and each node of the buses' plan is a zone ("sum 0", "duck 3", ...);
+# a lib/Realtime recorder fed the render times writes its p99.9, maximum and share, and its call
+# around the render is a zone. Then this thread marks itself real-time and allocates on purpose:
+# with
 # RAE_REALTIME_CHECK=1 (config.env) the guard's hit is a mark in the trace naming its entry point,
 # as well as a line of the report at exit (which exits with code 70).
 import Sys
@@ -39,7 +41,14 @@ func main() {
     name: "render"
     periodNanoseconds: audio.renderPeriodNanoseconds()
   )
+  # the first call of the capture names the bus plan's nodes and sends their ids to the render
+  # (the offline driver applies them before its first block); the recorder gets its name too, so
+  # its calls are zones
+  audio.recordAudioCapture(profiler: profiler)
+  Profile.realtimeRecorder(profiler: profiler, recorder: recorder)
+  recorder.callStarted()
   let rendered: List(Float) = audio.renderOffline(frames: 4800)
+  recorder.callEnded()
   audio.recordAudioCapture(profiler: profiler)
   loop let nanoseconds: Int in audio.takeRenderNanoseconds() {
     recorder.recordCall(nanoseconds: nanoseconds)
@@ -76,6 +85,10 @@ func main() {
       sub: "\"name\":\"render calls\",\"ph\":\"C\""
     )}"
   )
+  let sums: Int = countOf(trace: trace, piece: "\"name\":\"sum 0\",\"ph\":\"B\"")
+  let ducks: Int = countOf(trace: trace, piece: "\"name\":\"duck ")
+  let recorderZones: Int = countOf(trace: trace, piece: "\"name\":\"render\",\"ph\":\"B\"")
+  log("node zones: sum {sums}, ducks {ducks > 0}; the recorder's call as a zone: {recorderZones}")
   log(
     "rule break in the trace: {trace.contains(
       sub: "\"name\":\"realtime rule break: rae_mem_str_tag\""
