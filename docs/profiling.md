@@ -76,8 +76,8 @@ frames it measures.
   `render.capFps`, `thermal.state` and the grass counters reach the hub through
   `Profile.counter` as before.
 - Unchanged: the `[frames]`, `[draws]` and `[clouds gpu]` log lines, so
-  `tools/profile-desktop.sh`, `tools/ios/profile-ios.sh` and `tools/profile-summary.py`
-  read the same thing (143's summary measured before and after: the same median frame,
+  `tools/profile-desktop.sh`, `tools/ios/profile-ios.sh` and their summary (now
+  `tools/perfReport`, which replaced `profile-summary.py`) read the same thing (143's summary measured before and after: the same median frame,
   the CPU time within noise).
 - The 2D canvas's GPU time (`lib/Gpu2dCanvasTiming`, Rae 0.3.130): under `RAE_PROFILE` the
   canvas times its frame pass without the `[gpu2d]` log lines (those stay

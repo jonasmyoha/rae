@@ -1,0 +1,437 @@
+# The summary of a profile's runs from their logs, one block a place: what tools/profile-summary.py
+# printed (it is now this), for tools/ios/profile-ios.sh and tools/profile-desktop.sh, so a phone's
+# and a desktop's read the same. <folder> holds places.txt ("name|..." lines) and <name>.log; the
+# first lines of each kind are skipped (loading). `first` and `middle` are "[prefix]|text" lines:
+# the first and the middle line of a run that starts with the prefix and holds the text.
+import Math
+import String
+import Sys
+
+# A decimal in millionths, read exactly ("16.25" -> 16250000)
+func micros(text: view String) ret Int {
+  var whole: Int = 0
+  var fraction: Int = 0
+  var places: Int = 0
+  var afterDot: Bool = false
+  loop var i: Int = 0, i < text.length(), ++i {
+    let byte: Int = text.byteAt(index: i) as Int
+    if byte is 46 {
+      afterDot = true
+    } else if byte >= 48 and byte <= 57 {
+      if afterDot {
+        if places < 6 {
+          fraction = fraction * 10 + byte - 48
+          places = places + 1
+        }
+      } else {
+        whole = whole * 10 + byte - 48
+      }
+    }
+  }
+  loop places < 6 {
+    fraction = fraction * 10
+    places = places + 1
+  }
+  ret whole * 1000000 + fraction
+}
+
+# The number written right after `key` in `line` (digits and dots), or ""
+func numberAfter(line: view String, key: view String) ret String {
+  if let at: Int = line.indexOf(sub: key) {
+    var end: Int = at + key.length()
+    loop end < line.length() and ((line.byteAt(index: end) as Int >= 48 and line.byteAt(index: end) as Int <= 57) or line.byteAt(
+      index: end
+    ) as Int is 46) {
+      end = end + 1
+    }
+    ret line.sub(start: at + key.length(), len: end - at - key.length())
+  }
+  ret ""
+}
+
+# The number written right before `key` in `line`, or ""
+func numberBefore(line: view String, key: view String) ret String {
+  if let at: Int = line.indexOf(sub: key) {
+    var start: Int = at
+    loop start > 0 and line.byteAt(index: start - 1) as Int >= 48 and line.byteAt(index: start - 1) as Int <= 57 {
+      start = start - 1
+    }
+    ret line.sub(start: start, len: at - start)
+  }
+  ret ""
+}
+
+# Millionths as Python prints a float: the shortest decimals, at least one ("16.0", "16.25")
+func pythonFloat(value: view Int) ret String {
+  var fraction: String = "{value % 1000000 + 1000000}"
+  fraction = fraction.sub(start: 1, len: 6)
+  loop fraction.length() > 1 and fraction.endsWith(suffix: "0") {
+    fraction = fraction.sub(start: 0, len: fraction.length() - 1)
+  }
+  ret "{value / 1000000}.{fraction}"
+}
+
+# Millionths with `places` decimals, rounded half up
+func fixed(value: view Int, places: view Int) ret String {
+  var unit: Int = 1000000
+  loop var i: Int = 0, i < places, ++i {
+    unit = unit / 10
+  }
+  let rounded: Int = (value + unit / 2) / unit
+  var scale: Int = 1
+  loop var i: Int = 0, i < places, ++i {
+    scale = scale * 10
+  }
+  if places is 0 {
+    ret "{rounded}"
+  }
+  var fraction: String = "{rounded % scale + scale}"
+  ret "{rounded / scale}.{fraction.sub(start: 1, len: places)}"
+}
+
+# The median (millionths) of `values`: the middle one, or the mean of the middle two
+func median(values: view List(Int)) ret Int {
+  if values.length is 0 {
+    ret 0
+  }
+  var sorted: List(Int) = values
+  sorted.sort()
+  let middle: Int = sorted.length / 2
+  if sorted.length % 2 is 1 {
+    ret sorted.copyAtDefault(index: middle)
+  }
+  ret (sorted.copyAtDefault(index: middle - 1) + sorted.copyAtDefault(index: middle)) / 2
+}
+
+# Python's repr of a sorted list of unique strings: ['1.00', '0.50']
+func pythonList(values: view List(String)) ret String {
+  var sorted: List(String) = {}
+  loop let value: view String in values {
+    if not sorted.contains(value: value) {
+      var at: Int = sorted.length
+      loop at > 0 and sorted.copyAtDefault(index: at - 1).compare(other: value) > 0 {
+        at = at - 1
+      }
+      sorted.insert(index: at, value: value)
+    }
+  }
+  var text: String = "["
+  loop var i: Int = 0, i < sorted.length, ++i {
+    if i > 0 {
+      text = "{text}, "
+    }
+    text = "{text}'{sorted.copyAtDefault(index: i)}'"
+  }
+  ret "{text}]"
+}
+
+# The lines of `lines` that start with `prefix` (and hold `holding`), the first `skip` left out
+func linesOf(
+  lines: view List(String)
+  prefix: view String
+  holding: view String
+  skip: view Int
+) ret List(String) {
+  var found: List(String) = {}
+  var seen: Int = 0
+  loop let line: view String in lines {
+    if line.startsWith(prefix: prefix) and (holding.length() is 0 or line.contains(sub: holding)) {
+      if seen >= skip {
+        found.add(value: line)
+      }
+      seen = seen + 1
+    }
+  }
+  ret found
+}
+
+# "[prefix]|text" lines as (prefix, text) pairs
+type SummaryKind {
+  prefix: String
+  text: String
+}
+
+func summaryKinds(spec: view String) ret List(SummaryKind) {
+  var kinds: List(SummaryKind) = {}
+  loop let line: view String in spec.split(sep: "\n") {
+    if let bar: Int = line.indexOf(sub: "|") {
+      kinds.add(
+        value: SummaryKind {
+          prefix: line.sub(start: 0, len: bar)
+          text: line.sub(start: bar + 1, len: line.length() - bar - 1)
+        }
+      )
+    }
+  }
+  ret kinds
+}
+
+func labelOf(prefix: view String) ret String {
+  var label: String = prefix
+  if label.startsWith(prefix: "[") {
+    label = label.sub(start: 1, len: label.length() - 1)
+  }
+  if label.endsWith(suffix: "]") {
+    label = label.sub(start: 0, len: label.length() - 1)
+  }
+  ret label
+}
+
+# What follows the first "] " of a line
+func afterBracket(line: view String) ret String {
+  if let at: Int = line.indexOf(sub: "] ") {
+    ret line.sub(start: at + 2, len: line.length() - at - 2)
+  }
+  ret line
+}
+
+func isDigits(text: view String) ret Bool {
+  if text.length() is 0 {
+    ret false
+  }
+  loop var i: Int = 0, i < text.length(), ++i {
+    let byte: Int = text.byteAt(index: i) as Int
+    if byte < 48 or byte > 57 {
+      ret false
+    }
+  }
+  ret true
+}
+
+# A [draws] line's pass and text: "[draws] shadow cascade 0: ..." -> ("shadow cascade", "...")
+type DrawLine {
+  pass: String
+  text: String
+}
+
+func drawLineOf(line: view String) ret opt DrawLine {
+  if not line.startsWith(prefix: "[draws] ") {
+    ret none
+  }
+  let rest: String = line.sub(start: 8, len: line.length() - 8)
+  if let colon: Int = rest.indexOf(sub: ": ") {
+    var pass: String = rest.sub(start: 0, len: colon)
+    loop var i: Int = 0, i < pass.length(), ++i {
+      let byte: Int = pass.byteAt(index: i) as Int
+      if not ((byte >= 97 and byte <= 122) or byte is 32 or byte is 45 or (byte >= 48 and byte <= 57)) {
+        ret none
+      }
+    }
+    # a trailing " <number>" (a cascade's index) is not the pass's name
+    if let space: Int = pass.lastIndexOf(sub: " ") {
+      let tail: String = pass.sub(start: space + 1, len: pass.length() - space - 1)
+      if isDigits(text: tail) {
+        pass = pass.sub(start: 0, len: space)
+      }
+    }
+    ret DrawLine { pass: pass, text: rest.sub(start: colon + 2, len: rest.length() - colon - 2) }
+  }
+  ret none
+}
+
+# One place's block
+func summarizePlace(
+  name: view String
+  lines: view List(String)
+  firsts: view List(SummaryKind)
+  middles: view List(SummaryKind)
+) {
+  let frames: List(String) = linesOf(
+    lines: lines
+    prefix: "[frames]"
+    holding: ""
+    skip: 3
+  )
+  let gpu: List(String) = linesOf(
+    lines: lines
+    prefix: "[gpu passes] average"
+    holding: ""
+    skip: 3
+  )
+  let timing: List(String) = linesOf(
+    lines: lines
+    prefix: "[frame] "
+    holding: "in flight"
+    skip: 2
+  )
+  if frames.length is 0 {
+    log("{name} no [frames] lines")
+    ret
+  }
+  var medians: List(Int) = {}
+  var p95s: List(Int) = {}
+  var over: Int = 0
+  var count: Int = 0
+  var scales: List(String) = {}
+  var thermals: List(String) = {}
+  loop let line: view String in frames {
+    medians.add(value: micros(text: numberAfter(line: line, key: "median ")))
+    p95s.add(value: micros(text: numberAfter(line: line, key: "p95 ")))
+    over = over + numberBefore(line: line, key: " over").toInt()
+    count = count + numberAfter(line: line, key: "] ").toInt()
+    scales.add(value: numberAfter(line: line, key: "scale "))
+    thermals.add(value: numberAfter(line: line, key: "thermal ").sub(start: 0, len: 1))
+  }
+  log(
+    "## {name}: {count} frames, median {pythonFloat(value: median(values: medians))} ms, p95 {pythonFloat(
+      value: median(values: p95s)
+    )} ms, {over} over budget, scale {pythonList(values: scales)}, thermal {pythonList(
+      values: thermals
+    )}"
+  )
+  if timing.length > 0 {
+    var cpu: List(Int) = {}
+    var acquire: List(Int) = {}
+    var most: Int = 0
+    loop let line: view String in timing {
+      let value: Int = micros(text: numberAfter(line: line, key: "cpu "))
+      cpu.add(value: value)
+      most = Math.max(a: most, b: value)
+      acquire.add(value: micros(text: numberAfter(line: line, key: "acquire ")))
+    }
+    log(
+      "   cpu {fixed(value: median(values: cpu), places: 1)} ms (max {fixed(value: most, places: 1)}), waiting for the drawable {fixed(
+        value: median(values: acquire)
+        places: 1
+      )} ms"
+    )
+  }
+  # the last frame logged, by pass
+  var passes: List(String) = {}
+  var texts: List(String) = {}
+  loop let line: view String in lines {
+    if let draw: DrawLine = drawLineOf(line: line) {
+      var at: Int = -1
+      loop var i: Int = 0, i < passes.length and at < 0, ++i {
+        if passes.copyAtDefault(index: i) is draw.pass {
+          at = i
+        }
+      }
+      if at < 0 {
+        passes.add(value: draw.pass)
+        texts.add(value: draw.text)
+      } else {
+        texts.set(index: at, value: draw.text)
+      }
+    }
+  }
+  loop var i: Int = 0, i < passes.length, ++i {
+    log("   drew, {passes.copyAtDefault(index: i)}: {texts.copyAtDefault(index: i)}")
+  }
+  log(gpuSlots(lines: gpu))
+  loop let kind: view SummaryKind in firsts {
+    let found: List(String) = linesOf(
+      lines: lines
+      prefix: kind.prefix
+      holding: kind.text
+      skip: 0
+    )
+    if found.length > 0 {
+      log(
+        "   {labelOf(prefix: kind.prefix)} at start: {afterBracket(
+          line: found.copyAtDefault(index: 0)
+        )}"
+      )
+    }
+  }
+  loop let kind: view SummaryKind in middles {
+    let found: List(String) = linesOf(
+      lines: lines
+      prefix: kind.prefix
+      holding: kind.text
+      skip: 0
+    )
+    if found.length > 0 {
+      log(
+        "   {labelOf(prefix: kind.prefix)}: {afterBracket(
+          line: found.copyAtDefault(index: found.length / 2)
+        )}"
+      )
+    }
+  }
+}
+
+# The GPU slots' line: each pass's median over the runs (ms), the total last
+func gpuSlots(lines: view List(String)) ret String {
+  var names: List(String) = {}
+  var values: List(List(Int)) = {}
+  loop let line: view String in lines {
+    if let at: Int = line.indexOf(sub: "us: ") {
+      let rest: String = line.sub(start: at + 4, len: line.length() - at - 4)
+      loop let part: view String in rest.split(sep: " | ") {
+        if let space: Int = part.trim().lastIndexOf(sub: " ") {
+          let item: String = part.trim()
+          let name: String = item.sub(start: 0, len: space).trim()
+          let value: Int = item.sub(start: space + 1, len: item.length() - space - 1).toInt()
+          var index: Int = -1
+          loop var i: Int = 0, i < names.length and index < 0, ++i {
+            if names.copyAtDefault(index: i) is name {
+              index = i
+            }
+          }
+          if index < 0 {
+            names.add(value: name)
+            values.add(value: List(Int) {})
+            index = names.length - 1
+          }
+          if let list: mod List(Int) = values.modAt(index: index) {
+            list.add(value: value * 1000)
+          }
+        }
+      }
+    }
+  }
+  var text: String = "   gpu slots, ms (not costs): "
+  var total: Int = 0
+  var first: Bool = true
+  loop var i: Int = 0, i < names.length, ++i {
+    # the values are millionths of a millisecond (microseconds x 1000)
+    let ms: Int = median(values: values.copyAtDefault(index: i))
+    if names.copyAtDefault(index: i) is "total" {
+      total = ms
+    } else {
+      if not first {
+        text = "{text}, "
+      }
+      first = false
+      text = "{text}{names.copyAtDefault(index: i)} {fixed(value: ms, places: 2)}"
+    }
+  }
+  ret "{text}; total {fixed(value: total, places: 2)}"
+}
+
+func summarizeLogs(folder: view String, firstSpec: view String, middleSpec: view String) ret Int {
+  let firsts: List(SummaryKind) = summaryKinds(spec: firstSpec)
+  let middles: List(SummaryKind) = summaryKinds(spec: middleSpec)
+  log(
+    "What to trust (docs/profiling.md): the frame times, the cpu time and the [draws] counts. The gpu"
+  )
+  log(
+    "slots are when timestamps landed, not what a pass costs: work and idle time land in other slots,"
+  )
+  log("so a slot can read 31 ms for a pass whose removal saves 1 ms. To learn a cost, use RAE_AB.")
+  if let places: String = Sys.readFile(path: "{folder}/places.txt") {
+    loop let line: view String in places.split(sep: "\n") {
+      var name: String = line
+      if let bar: Int = line.indexOf(sub: "|") {
+        name = line.sub(start: 0, len: bar)
+      }
+      name = name.trim()
+      if name.length() > 0 {
+        if let text: String = Sys.readFile(path: "{folder}/{name}.log") {
+          summarizePlace(
+            name: name
+            lines: text.split(sep: "\n")
+            firsts: firsts
+            middles: middles
+          )
+        } else {
+          log("{name} no log")
+        }
+      }
+    }
+    ret 0
+  }
+  log("no {folder}/places.txt")
+  ret 1
+}

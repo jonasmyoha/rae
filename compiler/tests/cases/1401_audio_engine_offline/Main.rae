@@ -16,6 +16,8 @@
 #    freed once the audio thread reports it (the leak check at exit sees it).
 import Math
 open audio/Audio
+open audio/RenderTimes
+open perf/PerfBudget
 open audio/AudioMixer
 open audio/Sound
 
@@ -204,7 +206,24 @@ func stopFade() {
   let blocks: Int = audio.stopAudio()
 }
 
+# The scene's blocks against half their period, scaled by this machine (perf/PerfBudget)
+func renderBudget(audio: mod AudioEngine, calibration: view Int) {
+  let budget: PerfBudget = perfAudioBudget(
+    renderNanoseconds: audio.takeRenderNanoseconds()
+    periodNanoseconds: audio.renderPeriodNanoseconds()
+    share: 0.5
+    calibrationNs: calibration
+  )
+  if budget.ok {
+    log("render budget: held")
+  } else {
+    log("render budget: FAILED: {budget.text}")
+  }
+}
+
 func duck() {
+  # this machine's speed now, for the render budget below (lib/perf/PerfBudget)
+  let calibration: Int = perfCalibrationNs()
   var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
   audio.duckWhilePlaying(
     source: AudioBusKind.alerts
@@ -241,6 +260,7 @@ func duck() {
   log(
     "the duck: 100 ms into the alert the music is at {floor(x: decibels + 0.5)} dB; after it, back to full: {back is full}"
   )
+  renderBudget(audio: audio, calibration: calibration)
   let blocks: Int = audio.stopAudio()
 }
 

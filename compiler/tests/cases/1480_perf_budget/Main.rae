@@ -1,0 +1,133 @@
+# perf/PerfBudget: the real-time rules over a run (the guard is on: config.env), an audio scene's
+# blocks against a share of the period scaled by the machine (calibrations given, so the numbers are
+# fixed; the slowest block set aside), a frame-time p95 against a learned baseline and its spread,
+# and the baseline file kept outside the repository (RAE_PERF_BASELINES, a temporary folder here).
+import Sys
+open perf/PerfBudget
+
+func show(label: view String, budget: view PerfBudget) {
+  log("{label}: ok {budget.ok}: {budget.text}")
+}
+
+func main() {
+  show(label: "real-time", budget: perfRealtimeBudget())
+  log("calibration measured: {perfCalibrationNs() > 1000}")
+
+  # 256 frames at 48 kHz: a 5333 us period; half of it allowed on the reference machine
+  let blocks: List(Int) = {
+    400000
+    900000
+    2100000
+    700000
+    9000000
+  }
+  show(
+    label: "audio, the reference machine"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocks
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 2500000
+    )
+  )
+  show(
+    label: "audio, a faster machine"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocks
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 1000000
+    )
+  )
+  show(
+    label: "audio, too slow at a third"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocks
+      periodNanoseconds: 5333333
+      share: 0.33
+      calibrationNs: 2500000
+    )
+  )
+  show(
+    label: "audio, a machine half as fast"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocks
+      periodNanoseconds: 5333333
+      share: 0.33
+      calibrationNs: 5000000
+    )
+  )
+  show(
+    label: "audio, nothing rendered"
+    budget: perfAudioBudget(
+      renderNanoseconds: List(Int) {}
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 2500000
+    )
+  )
+
+  let intervals: List(Int) = {
+    16000000
+    16500000
+    17000000
+    16200000
+    30000000
+    16100000
+    16300000
+    16400000
+    16600000
+    16700000
+    16800000
+    16900000
+    17100000
+    17200000
+    17300000
+    17400000
+    17500000
+    17600000
+    17700000
+    17800000
+  }
+  log("p95 of 20 frames: {perfP95(intervals: intervals) / 1000} us")
+  show(
+    label: "regression, learning"
+    budget: perfFrameRegression(p95Ns: 17000000, history: List(Int) { 16000000 })
+  )
+  let history: List(Int) = { 16000000, 16400000, 15800000, 16200000 }
+  show(
+    label: "regression, within the spread"
+    budget: perfFrameRegression(p95Ns: 16700000, history: history)
+  )
+  show(
+    label: "regression, beyond it"
+    budget: perfFrameRegression(p95Ns: 18500000, history: history)
+  )
+
+  let unusedSet: Bool = Sys.setEnv(
+    name: "RAE_PERF_BASELINES"
+    value: "/tmp/rae_case_1480_baselines/deeper"
+  )
+  let path: String = perfBaselinePath(
+    program: "examples/143_walker/Main.rae"
+    machine: "macos arm64"
+  )
+  log("baseline file: {path}")
+  let unusedGone: Bool = Sys.delete(path: path)
+  var kept: List(Int) = perfReadBaseline(path: path)
+  log("before: {kept.length} runs")
+  loop var run: Int = 0, run < 22, ++run {
+    let unusedAdded: Bool = perfAddToBaseline(
+      path: path
+      history: kept
+      p95Ns: 16000000 + run * 1000
+    )
+    kept = perfReadBaseline(path: path)
+  }
+  log(
+    "after 22 runs: {kept.length} kept, the oldest {kept.copyAtDefault(index: 0)}, the newest {kept.copyAtDefault(
+      index: kept.length - 1
+    )}"
+  )
+  let unusedRemoved: Bool = Sys.delete(path: path)
+}

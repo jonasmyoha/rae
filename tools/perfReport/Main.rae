@@ -1,0 +1,34 @@
+# perfReport — reports from the profile tools (docs/perf-tools-design.md §8.3):
+#
+#   rae run tools/perfReport/Main.rae -- logs <folder> "<first>" "<middle>"
+#       a profile run's summary from its logs (tools/profile-desktop.sh and tools/ios/
+#       profile-ios.sh print it; it replaced tools/profile-summary.py)
+#   rae run tools/perfReport/Main.rae -- capture <capture.raeperf>
+#       a capture's frames, zones, threads, GPU, audio and memory
+#   rae run tools/perfReport/Main.rae -- regress <capture.raeperf>
+#       its frame-time p95 against this machine's baseline for the program (outside the
+#       repository: RAE_PERF_BASELINES, else ~/.rae/perf-baselines); exit 1 on a regression
+import Sys
+open LogSummary
+open CaptureReport
+
+func main() ret Int {
+  let mode: String = Sys.argAt(index: 0)
+  if mode is "logs" and Sys.argCount() >= 2 {
+    ret summarizeLogs(
+      folder: Sys.argAt(index: 1)
+      firstSpec: Sys.argAt(index: 2)
+      middleSpec: Sys.argAt(index: 3)
+    )
+  }
+  if mode is "capture" and Sys.argCount() >= 2 {
+    ret reportCapture(path: Sys.argAt(index: 1))
+  }
+  if mode is "regress" and Sys.argCount() >= 2 {
+    ret regressCapture(path: Sys.argAt(index: 1))
+  }
+  log(
+    "usage: rae run tools/perfReport/Main.rae -- logs <folder> <first> <middle> | capture <file.raeperf> | regress <file.raeperf>"
+  )
+  ret 2
+}

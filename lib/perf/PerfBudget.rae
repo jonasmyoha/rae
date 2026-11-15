@@ -1,0 +1,206 @@
+# perf/PerfBudget — budgets a fixture or a gate checks (docs/perf-tools-design.md §8.3), each an
+# answer with the numbers behind it:
+# - no allocation, lock or log on a real-time thread over a run: lib/Realtime's guard
+#   (RAE_REALTIME_CHECK=1) counted none. Exact.
+# - an audio scene's worst block under a share of its period on the offline driver, scaled by
+#   this machine's speed now: a calibration loop timed first, against the time it takes on the
+#   machine the share was chosen on. A slower or busier machine gets a larger allowance, never a
+#   smaller one. The single slowest block is set aside (an operating-system pause of a thread in a
+#   busy test run is not the scene's cost); the next one is judged.
+# - a frame-time regression: a capture's p95 against the p95s this program had before on this
+#   machine, kept in a file outside the repository (RAE_PERF_BASELINES, else ~/.rae/
+#   perf-baselines), failing only beyond the baseline's own spread. Baselines are learned per
+#   machine and never committed as numbers.
+import Math
+import Realtime
+import String
+import Sys
+
+type PerfBudget {
+  ok: Bool
+  text: String
+}
+
+# ---- real-time rules ----------------------------------------------------------------------------
+
+# None of lib/Realtime's rules broken on a real-time thread so far (needs RAE_REALTIME_CHECK=1)
+func perfRealtimeBudget() ret PerfBudget {
+  let breaks: Int = Realtime.realtimeCheckCount()
+  if breaks < 0 {
+    ret PerfBudget { ok: false, text: "real-time rules not checked: run with RAE_REALTIME_CHECK=1" }
+  }
+  if breaks is 0 {
+    ret PerfBudget { ok: true, text: "no allocation, lock or log on a real-time thread" }
+  }
+  ret PerfBudget { ok: false, text: "{breaks} allocations, locks or logs on a real-time thread" }
+}
+
+# ---- the machine's speed ------------------------------------------------------------------------
+
+# The calibration loop's time on the machine the audio shares were chosen on (an Apple M-series Mac,
+# idle): its best of five, in nanoseconds
+const perfCalibrationReferenceNs: Int = 2500000
+
+# A fixed piece of integer work, timed: the best of five runs (ns). The result is used, so the
+# work is not optimized away.
+func perfCalibrationNs() ret Int {
+  var best: Int = 0
+  # seeded from the clock and kept, so the C compiler can neither fold the loop nor drop it
+  var kept: List(Int) = {}
+  loop var run: Int = 0, run < 5, ++run {
+    let start: Int = nowNs()
+    var value: Int = start % 1000 + run + 1
+    loop var i: Int = 0, i < 1000000, ++i {
+      value = value bitxor (value shr 13)
+      value = (value * 1103515245 + 12345) % 2147483648
+    }
+    let took: Int = nowNs() - start
+    kept.add(value: value)
+    if run is 0 or took < best {
+      best = took
+    }
+  }
+  if kept.copyAtDefault(index: 0) is -1 {
+    log("[perf] calibration {kept.length}")
+  }
+  ret Math.max(a: 1, b: best)
+}
+
+# How much slower this machine is now than the reference one (1 at least)
+func perfMachineScale(calibrationNs: view Int) ret Float {
+  ret Math.max(a: 1.0, b: calibrationNs as Float / perfCalibrationReferenceNs as Float)
+}
+
+# ---- audio --------------------------------------------------------------------------------------
+func perfMicroseconds(nanoseconds: view Int) ret String {
+  ret "{(nanoseconds + 500) / 1000} us"
+}
+
+# The blocks' render times (`renderNanoseconds`, audio/RenderTimes' takeRenderNanoseconds) against
+# `share` of the period, scaled by the machine (perfCalibrationNs, timed before the scene)
+func perfAudioBudget(
+  renderNanoseconds: view List(Int)
+  periodNanoseconds: view Int
+  share: view Float
+  calibrationNs: view Int
+) ret PerfBudget {
+  if renderNanoseconds.length is 0 {
+    ret PerfBudget { ok: false, text: "no blocks were rendered" }
+  }
+  var slowest: Int = 0
+  var next: Int = 0
+  loop let nanoseconds: Int in renderNanoseconds {
+    if nanoseconds > slowest {
+      next = slowest
+      slowest = nanoseconds
+    } else if nanoseconds > next {
+      next = nanoseconds
+    }
+  }
+  if renderNanoseconds.length is 1 {
+    next = slowest
+  }
+  let scale: Float = perfMachineScale(calibrationNs: calibrationNs)
+  let allowed: Int = (periodNanoseconds as Float * share * scale) as Int
+  let tenths: Int = (scale * 10.0 + 0.5).toInt()
+  let numbers: String = "{renderNanoseconds.length} blocks, the worst but one {perfMicroseconds(
+    nanoseconds: next
+  )} (the worst {perfMicroseconds(nanoseconds: slowest)}), allowed {perfMicroseconds(
+    nanoseconds: allowed
+  )}: {(share * 100.0 + 0.5).toInt()} % of the {perfMicroseconds(nanoseconds: periodNanoseconds)} period x {tenths / 10}.{tenths % 10} for this machine"
+  ret PerfBudget { ok: next <= allowed, text: numbers }
+}
+
+# ---- frame-time regressions ---------------------------------------------------------------------
+
+# The p95 (ns) of frame times `intervals`; 0 with none
+func perfP95(intervals: view List(Int)) ret Int {
+  if intervals.length is 0 {
+    ret 0
+  }
+  var sorted: List(Int) = intervals
+  sorted.sort()
+  ret sorted.copyAtDefault(index: Math.min(a: sorted.length - 1, b: (sorted.length - 1) * 95 / 100))
+}
+
+# A capture's p95 against the p95s of the runs before (`history`, ns): a regression only beyond the
+# baseline's mean by three of its standard deviations and at least 5 %. Fewer than three runs
+# before: still learning, no verdict.
+func perfFrameRegression(p95Ns: view Int, history: view List(Int)) ret PerfBudget {
+  if history.length < 3 {
+    ret PerfBudget {
+      ok: true
+      text: "p95 {perfMicroseconds(nanoseconds: p95Ns)}: learning this machine's baseline ({history.length} of 3 runs)"
+    }
+  }
+  var sum: Int = 0
+  loop let value: Int in history {
+    sum = sum + value
+  }
+  let mean: Int = sum / history.length
+  var squares: Float = 0.0
+  loop let value: Int in history {
+    let difference: Float = (value - mean) as Float
+    squares = squares + difference * difference
+  }
+  let spread: Int = Math.sqrt(x: squares / history.length as Float) as Int
+  let margin: Int = Math.max(a: 3 * spread, b: mean / 20)
+  let limit: Int = mean + margin
+  let numbers: String = "p95 {perfMicroseconds(nanoseconds: p95Ns)} against the baseline's {perfMicroseconds(
+    nanoseconds: mean
+  )} (spread {perfMicroseconds(nanoseconds: spread)}, {history.length} runs), limit {perfMicroseconds(
+    nanoseconds: limit
+  )}"
+  if p95Ns > limit {
+    ret PerfBudget { ok: false, text: "regression: {numbers}" }
+  }
+  ret PerfBudget { ok: true, text: numbers }
+}
+
+# Where a program's baseline on this machine is kept: one p95 (ns) a line, the newest last
+func perfBaselinePath(program: view String, machine: view String) ret String {
+  var folder: String = Sys.getEnv(name: "RAE_PERF_BASELINES")
+  if folder.length() is 0 {
+    let home: String = Sys.getEnv(name: "HOME")
+    folder = "{home}/.rae/perf-baselines"
+  }
+  var name: String = ""
+  let key: String = "{program} {machine}"
+  loop var i: Int = 0, i < key.length(), ++i {
+    let byte: Int = key.byteAt(index: i) as Int
+    if (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) {
+      name = "{name}{key.sub(start: i, len: 1)}"
+    } else if not name.endsWith(suffix: "-") {
+      name = "{name}-"
+    }
+  }
+  ret "{folder}/{name}.txt"
+}
+
+# The baseline's p95s, oldest first (none when there is no file)
+func perfReadBaseline(path: view String) ret List(Int) {
+  var history: List(Int) = {}
+  if let text: String = Sys.readFile(path: path) {
+    loop let line: view String in text.split(sep: "\n") {
+      let value: Int = line.trim().toInt()
+      if value > 0 {
+        history.add(value: value)
+      }
+    }
+  }
+  ret history
+}
+
+# The run's p95 added to the baseline, which keeps the newest 20
+func perfAddToBaseline(path: view String, history: view List(Int), p95Ns: view Int) ret Bool {
+  var text: String = ""
+  let first: Int = Math.max(a: 0, b: history.length + 1 - 20)
+  loop var i: Int = first, i < history.length, ++i {
+    text = "{text}{history.copyAtDefault(index: i)}\n"
+  }
+  text = "{text}{p95Ns}\n"
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    let unusedMade: Bool = Sys.makeDir(path: path.sub(start: 0, len: slash))
+  }
+  ret Sys.writeFile(path: path, content: text)
+}

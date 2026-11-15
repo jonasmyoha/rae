@@ -550,6 +550,31 @@ Systems view adds each ECS system's skips (lib/ecs/Schedule's "(skipped)" marks)
     the same machine, failing only beyond the baseline's own spread. A baseline is per machine
     and is never committed as a hard number.
 
+Done in Rae 0.3.152 (step 13): `tools/perfReport` (a Rae program; not a `rae perf` subcommand, so
+the compiler stays as it is). `logs <folder> <first> <middle>` prints the summary
+`profile-summary.py` printed, character for character (the Python script is gone; both profile
+scripts run this, with this checkout's compiler and without a phone's `DEVELOPER_DIR`), `capture
+<file>` a capture's frames, zones, threads, GPU, audio and memory, and `regress <file>` its frame
+p95 against the program's baseline on this machine (exit 1 beyond it). `perf/PerfBudget` holds the
+checks:
+- `perfRealtimeBudget()`: lib/Realtime's guard counted no allocation, lock or log on a real-time
+  thread (`RAE_REALTIME_CHECK=1`);
+- `perfAudioBudget(renderNanoseconds:, periodNanoseconds:, share:, calibrationNs:)`: the blocks'
+  worst but one (the single slowest is set aside: an operating-system pause of a thread in a busy
+  test run is not the scene's) under `share` of the period times this machine's slowness, from
+  `perfCalibrationNs()` (a clock-seeded integer loop, best of five, against its 2.5 ms on the
+  M-series Mac the shares were chosen on; a faster machine is never held tighter);
+- `perfFrameRegression(p95Ns:, history:)`: a regression only past the baseline's mean by three of
+  its standard deviations and at least 5 %; with fewer than three runs it is learning. Baselines
+  live in `RAE_PERF_BASELINES` or `~/.rae/perf-baselines`, one file a program and machine, the
+  newest 20 p95s.
+
+The offline audio fixtures 1401 (the duck scene), 1450 (the spatial scene) and 1456 (the bus
+effects) check their render budget at half the period, the last two also the real-time rules; case
+1480 checks the budgets with fixed numbers. `tools/profile-tools-test.sh` passes (its fake copy
+failure was stale: the phone script tries a failed copy three times, so the fake now fails from the
+Nth copy on, and a copy that fails once is checked to be tried again).
+
 ## 9. Threads and parallelism: what the views answer
 
 - **Is the work parallel?** Per frame, each worker's busy share, and the share of the frame

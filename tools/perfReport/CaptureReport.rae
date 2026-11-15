@@ -1,0 +1,150 @@
+# A capture file's report (lib/perf/PerfCapture, PerfPaths): its frames, the zones that took the
+# most, its threads, the GPU, audio and memory; and the frame-time regression check against this
+# machine's baseline (lib/perf/PerfBudget).
+import Math
+open perf/PerfFile
+open perf/PerfCapture
+open perf/PerfPaths
+open perf/PerfBudget
+
+func ms(nanoseconds: view Int) ret String {
+  let hundredths: Int = (nanoseconds + 5000) / 10000
+  var fraction: String = "{hundredths % 100 + 100}"
+  ret "{hundredths / 100}.{fraction.sub(start: 1, len: 2)}"
+}
+
+func middleOf(values: view List(Int)) ret Int {
+  if values.length is 0 {
+    ret 0
+  }
+  var sorted: List(Int) = values
+  sorted.sort()
+  ret sorted.copyAtDefault(index: sorted.length / 2)
+}
+
+func reportCapture(path: view String) ret Int {
+  if let file: PerfFile = perfReadFile(path: path) {
+    let capture: PerfCapture = perfCaptureOf(file: file)
+    let intervals: List(Int) = perfFrameIntervals(capture: capture)
+    log(
+      "# {file.header.program} on {file.header.machine}, Rae {file.header.raeVersion}: {ms(
+        nanoseconds: capture.endNs - capture.startNs
+      )} ms"
+    )
+    if intervals.length > 0 {
+      var slowest: Int = 0
+      loop let interval: Int in intervals {
+        slowest = Math.max(a: slowest, b: interval)
+      }
+      log(
+        "frames: {intervals.length}, median {ms(nanoseconds: middleOf(values: intervals))} ms, p95 {ms(
+          nanoseconds: perfP95(intervals: intervals)
+        )} ms, slowest {ms(nanoseconds: slowest)} ms"
+      )
+    } else {
+      log("frames: none marked")
+    }
+    let stats: List(PerfZoneStat) = perfZoneStats(capture: capture, lanes: List(Int) {})
+    var order: List(Int) = {}
+    loop var i: Int = 0, i < stats.length, ++i {
+      var at: Int = order.length
+      loop at > 0 and stats.copyAtDefault(index: order.copyAtDefault(index: at - 1)).totalNs < stats.copyAtDefault(
+        index: i
+      ).totalNs {
+        at = at - 1
+      }
+      order.insert(index: at, value: i)
+    }
+    log("zones, the most time first:")
+    loop var i: Int = 0, i < Math.min(a: 12, b: order.length), ++i {
+      let stat: PerfZoneStat = stats.copyAtDefault(index: order.copyAtDefault(index: i))
+      log(
+        "  {stat.name}: {stat.count} times, total {ms(nanoseconds: stat.totalNs)} ms, mean {ms(
+          nanoseconds: stat.meanNs
+        )}, p95 {ms(nanoseconds: stat.p95Ns)}, max {ms(nanoseconds: stat.maxNs)}, spread {ms(
+          nanoseconds: stat.spreadNs
+        )}"
+      )
+    }
+    let whole: Int = Math.max(a: 1, b: capture.endNs - capture.startNs)
+    log("threads:")
+    loop let use: view PerfLaneUse in perfLaneUses(capture: capture) {
+      log(
+        "  {use.name}: busy {use.busyNs * 100 / whole} %, waiting {use.waitNs * 100 / whole} %, {use.spans} spans"
+      )
+    }
+    loop let total: view PerfWaitTotal in perfWaitTotals(capture: capture) {
+      log(
+        "  waits on {perfCaptureLane(capture: capture, lane: total.lane)}: {total.count} {perfCaptureName(
+          capture: capture
+          nameId: total.nameId
+        )}, {ms(nanoseconds: total.totalNs)} ms"
+      )
+    }
+    let cpu: Int = perfMarkCount(capture: capture, name: "bound by the CPU")
+    let gpu: Int = perfMarkCount(capture: capture, name: "bound by the GPU")
+    let drawable: Int = perfMarkCount(capture: capture, name: "bound by the drawable")
+    log("gpu: bound by the CPU {cpu}, the GPU {gpu}, the drawable {drawable} frames")
+    if let share: PerfCounterSeries = perfCounterNamed(
+      capture: capture
+      name: "audio.render share %"
+    ) {
+      var most: Int = 0
+      loop let value: Int in share.values {
+        most = Math.max(a: most, b: value)
+      }
+      log(
+        "audio: {share.values.length} blocks, the render at most {most} % of its period, the median {middleOf(
+          values: share.values
+        )} %"
+      )
+    } else {
+      log("audio: none recorded")
+    }
+    if let rss: PerfCounterSeries = perfCounterNamed(capture: capture, name: "mem.rss kb") {
+      log(
+        "memory: resident {rss.values.copyAtDefault(index: 0) / 1024} MB at the start, {rss.values.copyAtDefault(
+          index: rss.values.length - 1
+        ) / 1024} MB at the end"
+      )
+    }
+    if let allocations: PerfCounterSeries = perfCounterNamed(
+      capture: capture
+      name: "mem.frame allocations"
+    ) {
+      log("allocations a frame: median {middleOf(values: allocations.values)}")
+    }
+    ret 0
+  }
+  log("perfReport: {path} is not a capture file")
+  ret 1
+}
+
+# The capture's frame p95 against this program's baseline on this machine; added to the baseline
+# when it is not a regression. Exit 1 on a regression.
+func regressCapture(path: view String) ret Int {
+  if let file: PerfFile = perfReadFile(path: path) {
+    let capture: PerfCapture = perfCaptureOf(file: file)
+    let intervals: List(Int) = perfFrameIntervals(capture: capture)
+    if intervals.length < 20 {
+      log("perfReport: {intervals.length} frames in {path}: too few for a p95")
+      ret 1
+    }
+    let p95: Int = perfP95(intervals: intervals)
+    let baseline: String = perfBaselinePath(
+      program: file.header.program
+      machine: file.header.machine
+    )
+    let history: List(Int) = perfReadBaseline(path: baseline)
+    let verdict: PerfBudget = perfFrameRegression(p95Ns: p95, history: history)
+    log("{file.header.program} on {file.header.machine}: {verdict.text}")
+    log("baseline: {baseline}")
+    if not verdict.ok {
+      ret 1
+    }
+    let unusedAdded: Bool = perfAddToBaseline(path: baseline, history: history, p95Ns: p95)
+    ret 0
+  }
+  log("perfReport: {path} is not a capture file")
+  ret 1
+}

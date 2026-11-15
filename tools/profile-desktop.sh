@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Profile an app on this machine with one command, one run per place, and print the same
-# summary as a phone's (tools/ios/profile-ios.sh, tools/profile-summary.py), so a comparison
+# summary as a phone's (tools/ios/profile-ios.sh, tools/perfReport), so a comparison
 # can start here. It starts each run fresh and uncapped (RAE_FRESH_START, RAE_PRESENT_MODE=
 # immediate), with Rae's GPU pass and frame timing on, and opens the app's window.
 #
@@ -113,7 +113,9 @@ while IFS='|' read -r name at; do
   fi
 done < "$OUT/places.txt"
 
-python3 "$here/profile-summary.py" "$OUT" "${SUMMARY_FIRST:-}" "${SUMMARY_MIDDLE:-}" | tee "$OUT/summary.txt"
+# The summary: tools/perfReport (a Rae program, built with this checkout's compiler, not RAE_BIN)
+"${RAE_REPORT_BIN:-$root/compiler/bin/rae}" run "$root/tools/perfReport/Main.rae" -- \
+  logs "$OUT" "${SUMMARY_FIRST:-}" "${SUMMARY_MIDDLE:-}" 2>/dev/null | tee "$OUT/summary.txt"
 if [ -n "$stopped" ]; then
   echo "STOPPED: $stopped" | tee -a "$OUT/summary.txt"
   exit 1

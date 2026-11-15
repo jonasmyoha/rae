@@ -168,7 +168,11 @@ while IFS='|' read -r name at; do
   [ -n "$stopped" ] && break
 done < "$OUT/places.txt"
 fi
-python3 "$here/../profile-summary.py" "$OUT" "$SUMMARY_FIRST" "$SUMMARY_MIDDLE" | tee "$OUT/summary.txt"
+# The summary: tools/perfReport (a Rae program, built with this checkout's compiler and the
+# Mac's own tools: DEVELOPER_DIR is the phone's business, not the report's)
+root=$(CDPATH= cd -- "$here/../.." && pwd)
+env -u DEVELOPER_DIR "${RAE_REPORT_BIN:-$root/compiler/bin/rae}" run "$root/tools/perfReport/Main.rae" -- \
+  logs "$OUT" "$SUMMARY_FIRST" "$SUMMARY_MIDDLE" 2>/dev/null | tee "$OUT/summary.txt"
 if [ -n "$stopped" ]; then
   echo "STOPPED: $stopped" | tee -a "$OUT/summary.txt"
   exit 1

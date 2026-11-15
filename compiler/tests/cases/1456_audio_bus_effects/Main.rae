@@ -11,6 +11,8 @@
 # 4. The reverb leaves a tail after the voice stops, where the dry engine is silent.
 import Math
 open audio/Audio
+open audio/RenderTimes
+open perf/PerfBudget
 open audio/AudioMixer
 open audio/BusEffects
 open audio/Sound
@@ -136,7 +138,27 @@ func startPair() ret Pair {
   ret Pair { dry: own dry, wet: own wet, dryVoice: dryVoice, wetVoice: wetVoice }
 }
 
+# The scene's blocks against half their period, scaled by this machine; and the real-time rules
+# (perf/PerfBudget)
+func renderBudget(audio: mod AudioEngine, calibration: view Int) {
+  let budget: PerfBudget = perfAudioBudget(
+    renderNanoseconds: audio.takeRenderNanoseconds()
+    periodNanoseconds: audio.renderPeriodNanoseconds()
+    share: 0.5
+    calibrationNs: calibration
+  )
+  if budget.ok {
+    log("render budget: held")
+  } else {
+    log("render budget: FAILED: {budget.text}")
+  }
+  let rules: PerfBudget = perfRealtimeBudget()
+  log("real-time rules: held {rules.ok}: {rules.text}")
+}
+
 func main() {
+  # this machine's speed now, for the render budget at the end
+  let calibration: Int = perfCalibrationNs()
   var pair: Pair = startPair()
   # 1. every effect off: the dry engine's samples
   let dryStart: List(Float) = pair.dry.renderOffline(frames: 9600)
@@ -228,6 +250,7 @@ func main() {
       samples: tail
     ) > -60.0}"
   )
+  renderBudget(audio: pair.wet, calibration: calibration)
   let dryBlocks: Int = pair.dry.stopAudio()
   let wetBlocks: Int = pair.wet.stopAudio()
 }

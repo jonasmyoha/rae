@@ -55,7 +55,10 @@ case "$*" in
     exit 0 ;;
   *"copy from"*)
     n=$(count copies)
-    [ "$n" = "${FAKE_FAIL_COPY:-0}" ] && exit 1
+    # FAKE_FAIL_COPY: every copy from the Nth on fails (the script tries a copy three times);
+    # FAKE_FAIL_COPY_ONLY: only the Nth fails, so a try again works
+    [ "$n" -ge "${FAKE_FAIL_COPY:-999999}" ] && exit 1
+    [ "$n" = "${FAKE_FAIL_COPY_ONLY:-0}" ] && exit 1
     while [ $# -gt 0 ]; do [ "$1" = "--destination" ] && cp "$FAKE/fixture.log" "$2"; shift; done
     exit 0 ;;
   *"info apps"*|*"info processes"*)
@@ -94,6 +97,10 @@ check "phone: says it stopped" has 'STOPPED: the launch at two failed' "$work/ba
 check "phone: shows the error" has 'ERROR: Locked' "$work/badLaunch.out"
 check "phone: still summarizes the first" has '## one:' "$work/badLaunch.out"
 check "phone: nothing for the others" has 'three no log' "$work/badLaunch.out"
+
+FAKE_FAIL_COPY_ONLY=1 phone retriedCopy 0
+check "phone: a copy that fails once is tried again" equal "$?" 0
+check "phone: says so" has 'the log copied on try 2' "$work/retriedCopy.out"
 
 FAKE_FAIL_COPY=1 phone badCopy 0
 check "phone: a failed copy exits 1" equal "$?" 1
